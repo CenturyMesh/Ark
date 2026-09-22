@@ -5,6 +5,8 @@
 #include "ark/notch.hpp"
 #include "ark/step_export.hpp"
 #include "ark/source_tube.hpp"
+#include "ark/sketch.hpp"
+#include "ark/onboarding.hpp"
 #include <stdexcept>
 #include <set>
 #include <map>
@@ -37,12 +39,12 @@ void editNode(AssemblyNode& n,const V& j){
 }
 V result(V data,bool error=false){V r=V::makeObj(),content=V::makeArr(),item=V::makeObj();item.set("type",V::makeStr("text"));item.set("text",V::makeStr(data.dump()));content.arr.push_back(item);r.set("content",content);r.set("structuredContent",data);r.set("isError",V::makeBool(error));return r;}
 void validated(Document& d){
-    if(d.features.size()>1024||d.params.size()>256||d.sketches.size()>64)throw std::runtime_error("Document capacity exceeded");
+    if(d.features.size()>1024||d.params.size()>256||d.sketches.size()>64||d.planes.size()>128)throw std::runtime_error("Document capacity exceeded");
     std::vector<AssemblyPlacement> placements;std::string error;if(!resolveAssembly(d,placements,error))throw std::runtime_error(error);
     d.recompute();
     if(!d.parameterError.empty())throw std::runtime_error(d.parameterError);
     for(auto& r:d.lastResults)if(!r.ok)throw std::runtime_error("Feature #"+std::to_string(r.id)+": "+r.error);
-    for(auto& sk:d.sketches)if(!std::isfinite(sk.residual)||sk.residual>1e-6)throw std::runtime_error("Sketch did not converge: "+sk.name);
+    for(auto& sk:d.sketches)if(!sk.error.empty()||!std::isfinite(sk.residual)||sk.residual>1e-6)throw std::runtime_error("Sketch '"+sk.name+"': "+sk.error);
 }
 std::set<u64> consumed(const Document& d){std::set<u64> out;for(auto& f:d.features)for(auto x:f.inputs)out.insert(x);return out;}
 Mesh selectedMesh(Document& d,const V& args){
@@ -77,6 +79,7 @@ V AgentSession::info() const {
     V r=V::makeObj();r.set("revision",V::makeNum((double)revision));r.set("units",V::makeStr("mm"));
     r.set("feature_count",V::makeNum(document.features.size()));r.set("recompute_ms",V::makeNum(document.recomputeMs));
     r.set("parameter_error",V::makeStr(document.parameterError));
+    V planes=V::makeArr(),sketches=V::makeArr();for(auto& p:document.planes)planes.arr.push_back(V::makeStr(p.name));for(auto& sk:document.sketches)sketches.arr.push_back(V::makeStr(sk.name));r.set("planes",planes);r.set("sketches",sketches);
     V fs=V::makeArr();auto hidden=consumed(document);
     for(auto& f:document.features){V v=V::makeObj();v.set("id",V::makeNum((double)f.id));v.set("name",V::makeStr(f.name));v.set("type",V::makeStr(featureTypeName(f.type)));v.set("output",V::makeBool(!hidden.count(f.id)));fs.arr.push_back(v);}
     r.set("features",fs);r.set("assembly_nodes",V::makeNum(document.assembly.size()));return r;
@@ -85,7 +88,19 @@ V AgentSession::call(const std::string& tool,const V& args){
     try{
         if(args.t!=V::Obj)throw std::runtime_error("Arguments must be an object");
         if(tool=="doc_info")return result(info());
+        if(tool=="doc_new"){
+            const auto& expected=field(args,"expected_revision");
+            if(expected.t!=V::Num||expected.num!=(double)revision)throw std::runtime_error("Revision conflict; read doc_info and retry");
+            remember();document=Document{};++revision;return result(info());
+        }
+        if(tool=="agent_onboard")return result(agentOnboard(*this,args));
         if(tool=="doc_get"){V r=info(),j;arkjson::parse(documentToJson(document),j);r.set("document",j);return result(r);}
+        if(tool=="plane_inspect"){
+            auto name=str(args,"name");auto frame=resolvePlane(document,name);V r=V::makeObj(),matrix=V::makeArr();for(auto x:frame.m)matrix.arr.push_back(V::makeNum(x));r.set("name",V::makeStr(name));r.set("world_column_major",matrix);return result(r);
+        }
+        if(tool=="sketch_inspect"){
+            auto* sk=document.findSketch(str(args,"name"));if(!sk)throw std::runtime_error("Sketch not found");bool samples=false;if(auto p=args.find("samples")){if(p->t!=V::Bool)throw std::runtime_error("samples must be boolean");samples=p->b;}return result(inspectSketch(document,*sk,samples));
+        }
         if(tool=="eval_expr"){
             bool ok=false;auto v=evalExpr(str(args,"expr"),document.buildEnv(),&ok);
             if(!ok)throw std::runtime_error("Invalid mathematical expression");
@@ -158,6 +173,16 @@ V AgentSession::call(const std::string& tool,const V& args){
             for(auto& c:commands.arr){
                 auto op=str(c,"op");
                 if(op=="param.set")next.setParam(str(c,"name"),expression(field(c,"expr")));
+                else if(op=="plane.set"||op=="plane.remove"){
+                    auto name=str(c,"name");if(name=="XY"||name=="XZ"||name=="YZ"||name.size()>128)throw std::runtime_error("Built-in planes are immutable; custom names must be 1..128 characters");
+                    auto it=std::find_if(next.planes.begin(),next.planes.end(),[&](const DatumPlane& p){return p.name==name;});
+                    if(op=="plane.remove"){if(it==next.planes.end())throw std::runtime_error("Plane not found");next.planes.erase(it);}
+                    else{
+                        if(it==next.planes.end()){next.planes.push_back({name});it=next.planes.end()-1;}
+                        if(c.find("parent"))it->parent=str(c,"parent");
+                        if(auto p=c.find("p")){if(p->t!=V::Obj)throw std::runtime_error("plane p must be object");for(auto& kv:p->obj)it->p[kv.first]=expression(kv.second);}
+                    }
+                }
                 else if(op=="feature.add"){
                     Feature f;auto type=str(c,"type");
                     if(!featureTypeFromName(type,f.type))throw std::runtime_error("Unknown feature type: "+type);
@@ -182,6 +207,15 @@ V AgentSession::call(const std::string& tool,const V& args){
                 else if(op=="sketch.set"){
                     Sketch sk;if(!sketchFromJson(field(c,"sketch").dump(),sk,&error))throw std::runtime_error(error);
                     next.setSketch(str(c,"name"),std::move(sk));
+                }
+                else if(op=="sketch.remove"){if(!next.removeSketch(str(c,"name")))throw std::runtime_error("Sketch not found");}
+                else if(op=="sketch.entity.set"){
+                    auto* sk=next.findSketch(str(c,"name"));if(!sk)throw std::runtime_error("Sketch not found");
+                    const auto& entity=field(c,"entity");auto name=str(entity,"name");V wrapper=V::makeObj(),entities=V::makeArr();entities.arr.push_back(entity);wrapper.set("entities",entities);Sketch single;
+                    if(!sketchFromJson(wrapper.dump(),single,&error))throw std::runtime_error(error);
+                    auto it=std::find_if(sk->sk.ents.begin(),sk->sk.ents.end(),[&](const SketchEnt& e){return e.name==name;});
+                    if(it==sk->sk.ents.end())sk->sk.ents.push_back(std::move(single.ents.front()));else *it=std::move(single.ents.front());
+                    Sketch checked;if(!sketchFromJson(sketchToJson(sk->sk),checked,&error))throw std::runtime_error(error);sk->sk=std::move(checked);
                 }
                 else if(op=="assembly.add"){
                     AssemblyNode n;n.id=next.nextAssemblyId_++;n.name="Component";editNode(n,c);next.assembly.push_back(n);createdNodes.arr.push_back(V::makeNum((double)n.id));
@@ -248,9 +282,13 @@ V AgentSession::call(const std::string& tool,const V& args){
 V AgentSession::tools(){
     struct Def{const char* name;const char* desc;const char* schema;bool read;};
     const Def defs[]={
+        {"agent_onboard","START HERE. Discover current document/revision, supported modeling workflows, expression-driven splines, examples and validation limits. Read-only; choose a topic before modeling.",R"({"type":"object","properties":{"topic":{"type":"string","enum":["overview","sketch","tube","assembly"]}}})",true},
         {"doc_info","Compact document summary with revision and stable feature IDs.",R"({"type":"object"})",true},
+        {"doc_new","Start an empty document only when requested. Clears the active model with undo and a monotonically increasing revision; does not overwrite saved files.",R"({"type":"object","properties":{"expected_revision":{"type":"integer","minimum":0}},"required":["expected_revision"]})",false},
         {"doc_get","Read full parametric document, including expressions and revision.",R"({"type":"object"})",true},
-        {"doc_apply","Atomic batch; evaluate once, roll back on any failure. Operations: param.set{name,expr}, feature.add{type,name,p,inputs,mode}, feature.edit{id,p,name}, feature.remove{id}, sketch.set{name,sketch}, assembly.add{name,parent,feature,p,visible}, assembly.edit{id,parent,feature,p,visible}, assembly.remove{id}. feature=0 is a group; placements are rigid tx/ty/tz/rx/ry/rz. Tube feature accepts p{section:round|rect,od,width,height,wall,tail,chord_tol,sides} plus bends:[{feed,radius,angle,roll}] in mm/degrees. Feature types: notched_tube{p:{width_mm,height_mm,wall_mm,length_mm,hinge_offset_mm},notches:[{station,angle,face:bottom|top|left|right}]}, tube, box{dx,dy,dz}, cylinder{r,h}, sphere{r}, cone{rb,rt,h}, torus{R,r}, extrude{shape,w,d,height,sketch}, revolve{shape,w,d,angle,sketch}, transform{tx,ty,tz,rx,ry,rz}, boolean{mode:0 union/1 cut/2 intersect}, pattern{count,dx,dy,dz}, surface{x,y,z,u0,u1,v0,v1,nu,nv,wrap_u,wrap_v}. Geometry parameters belong in p and accept math expressions. Transforms/patterns take one input, booleans two. Use expected_revision to reject stale writes. Angles in degrees except trig expressions in radians. Surface coordinates use u,v; periodic seams are checked.",R"({"type":"object","properties":{"expected_revision":{"type":"integer","minimum":0},"commands":{"type":"array","minItems":1,"maxItems":128,"items":{"type":"object","properties":{"op":{"type":"string","enum":["param.set","feature.add","feature.edit","feature.remove","sketch.set","assembly.add","assembly.edit","assembly.remove"]}},"required":["op"]}}},"required":["commands"]})",false},
+        {"doc_apply","Atomic batch; evaluate once, roll back on any failure. Operations: param.set{name,expr}, feature.add{type,name,p,inputs,mode}, feature.edit{id,p,name}, feature.remove{id}, plane.set{name,parent,p:{ox,oy,oz,rx,ry,rz}}, plane.remove{name}, sketch.set{name,sketch:{plane,tolerance,entities,constraints}}, sketch.entity.set{name,entity}, sketch.remove{name}, assembly.add{name,parent,feature,p,visible}, assembly.edit{id,parent,feature,p,visible}, assembly.remove{id}. feature=0 is a group; placements are rigid tx/ty/tz/rx/ry/rz. Tube feature accepts p{section:round|rect,od,width,height,wall,tail,chord_tol,sides} plus bends:[{feed,radius,angle,roll}] in mm/degrees. Sketch entities: kind point|line|circle|spline, optional unique name, dof numbers or expression strings (strings are driven), construction. Spline dof is 2..64 XY anchor pairs flattened; closed wraps without repeated first point, tension 0..1. Constraints val/val2 accept expressions. Entity edits replace one named entity. Feature types: sketch_cut{inputs:[base],p:{sketch,depth,offset}}, notched_tube{p:{width_mm,height_mm,wall_mm,length_mm,hinge_offset_mm},notches:[{station,angle,face:bottom|top|left|right}]}, tube, box{dx,dy,dz}, cylinder{r,h}, sphere{r}, cone{rb,rt,h}, torus{R,r}, extrude{shape,w,d,height,sketch}, revolve{shape,w,d,angle,sketch}, transform{tx,ty,tz,rx,ry,rz}, boolean{mode:0 union/1 cut/2 intersect}, pattern{count,dx,dy,dz}, surface{x,y,z,u0,u1,v0,v1,nu,nv,wrap_u,wrap_v}. Geometry parameters belong in p and accept math expressions. Transforms/patterns take one input, booleans two. Use expected_revision to reject stale writes. Angles in degrees except trig expressions in radians. Surface coordinates use u,v; periodic seams are checked.",R"({"type":"object","properties":{"expected_revision":{"type":"integer","minimum":0},"commands":{"type":"array","minItems":1,"maxItems":128,"items":{"type":"object","properties":{"op":{"type":"string","enum":["param.set","feature.add","feature.edit","feature.remove","sketch.set","sketch.entity.set","sketch.remove","plane.set","plane.remove","assembly.add","assembly.edit","assembly.remove"]}},"required":["op"]}}},"required":["commands"]})",false},
+        {"plane_inspect","Read a named construction plane's world transform. Built-ins: XY, XZ (normal -Y), YZ (normal +X). Offsets/XYZ Euler rotations are relative to parent.",R"({"type":"object","properties":{"name":{"type":"string"}},"required":["name"]})",true},
+        {"sketch_inspect","Read resolved sketch coordinates, local constraint rank/remaining DOFs, profile readiness and sampling counts. Optional samples:true includes local/world polylines. Spline chord tolerance bounds curve approximation, not manufacturing accuracy.",R"({"type":"object","properties":{"name":{"type":"string"},"samples":{"type":"boolean"}},"required":["name"]})",true},
         {"doc_undo","Undo the previous committed transaction; revision increases.",R"({"type":"object"})",false},
         {"doc_redo","Redo a transaction after undo.",R"({"type":"object"})",false},
         {"eval_expr","Evaluate finite arithmetic and trigonometry with named parameters; trig uses radians, deg() converts degrees.",R"({"type":"object","properties":{"expr":{"type":"string"}},"required":["expr"]})",true},

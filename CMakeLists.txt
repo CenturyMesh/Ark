@@ -1,13 +1,14 @@
 cmake_minimum_required(VERSION 3.20)
-project(Ark VERSION 0.6.0 LANGUAGES CXX)
+project(Ark VERSION 0.7.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Threads REQUIRED)
 add_library(ark STATIC
   src/core.cpp src/nurbs.cpp src/brep.cpp src/mesh.cpp src/csg.cpp
-  src/model.cpp src/evaluate.cpp src/solver.cpp src/io.cpp src/serialize.cpp
+  src/model.cpp src/evaluate.cpp src/solver.cpp src/sketch.cpp src/prism_cut.cpp src/onboarding.cpp src/live_session.cpp src/assistant.cpp src/io.cpp src/serialize.cpp
   src/source_tube.cpp src/notch.cpp src/notch_preview.cpp src/step_export.cpp src/tube.cpp src/assembly.cpp src/compute.cpp src/api.cpp src/mesh_query.cpp src/mesh_analysis.cpp src/agent.cpp src/kernels_scalar.cpp)
 target_include_directories(ark PUBLIC include)
+target_include_directories(ark SYSTEM PRIVATE third_party)
 target_link_libraries(ark PUBLIC Threads::Threads)
 if(MSVC)
   target_compile_options(ark PRIVATE /W4 /fp:precise)
@@ -22,6 +23,7 @@ foreach(app ark-cli ark-mcp ark-tests ark-agent-tests)
   target_link_libraries(${app} PRIVATE ark)
 endforeach()
 if(WIN32)
+  target_link_libraries(ark PUBLIC advapi32 winhttp)
   add_executable(ark-studio WIN32 src/view/viewer.cpp)
   target_link_libraries(ark-studio PRIVATE ark opengl32 gdi32 user32 shell32 comdlg32 dwmapi)
 endif()
@@ -69,3 +71,28 @@ add_executable(ark-source-tests tests/source_tube_tests.cpp)
 target_link_libraries(ark-source-tests PRIVATE ark)
 add_test(NAME source-tube COMMAND ark-source-tests)
 set_tests_properties(source-tube PROPERTIES TIMEOUT 30)
+
+add_executable(ark-sketch-tests tests/sketch_tests.cpp)
+target_link_libraries(ark-sketch-tests PRIVATE ark)
+add_test(NAME parametric-sketch COMMAND ark-sketch-tests)
+set_tests_properties(parametric-sketch PROPERTIES TIMEOUT 60)
+
+add_executable(ark-live-tests tests/live_session_tests.cpp)
+target_link_libraries(ark-live-tests PRIVATE ark)
+add_test(NAME live-session COMMAND ark-live-tests)
+set_tests_properties(live-session PROPERTIES TIMEOUT 30)
+
+add_executable(ark-assistant-tests tests/assistant_tests.cpp)
+target_link_libraries(ark-assistant-tests PRIVATE ark)
+add_test(NAME assistant-connector COMMAND ark-assistant-tests)
+set_tests_properties(assistant-connector PROPERTIES TIMEOUT 30)
+
+add_executable(ark-csg-tests tests/csg_performance_tests.cpp)
+target_link_libraries(ark-csg-tests PRIVATE ark)
+add_test(NAME csg-budget COMMAND ark-csg-tests)
+set_tests_properties(csg-budget PROPERTIES TIMEOUT 30)
+
+add_executable(ark-prism-tests tests/prism_cut_tests.cpp)
+target_link_libraries(ark-prism-tests PRIVATE ark)
+add_test(NAME prismatic-cut COMMAND ark-prism-tests)
+set_tests_properties(prismatic-cut PROPERTIES TIMEOUT 30)

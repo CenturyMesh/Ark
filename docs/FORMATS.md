@@ -1,4 +1,4 @@
-# ARK file formats, versions 1, 2, 3 and 4
+# ARK file formats, versions 1 through 5
 
 ## `.ark`
 
@@ -54,3 +54,18 @@ See [mechanical operations](MECHANICAL.md) for conventions, validation and examp
 ## Version 4: source-preserving tube package
 
 A `source_tube` feature carries its `source` package: rigid preview meshes, finite hinge geometry, source/flat projection evidence, original opening coordinates and an embedded exact straight STEP payload with SHA-256. No manufacturing authority is implied. The preview and export remain available after the original cache moves; if the original source file is present but changed, export requires a fresh import. Geometry changes go through `import_step`, not generic feature-parameter edits.
+
+
+## Version 5: construction planes and expression-driven sketches
+
+Documents containing planes, sketches or `sketch_cut` use version 5. The reader
+continues to accept versions 1 through 4, including source tube packages. Planes store
+`name`, `parent`, and an expression map `p` (offset and rotation). Sketches add
+`plane` and `tolerance`; each entity can have a unique `name` and `construction`
+flag. Spline entities store `closed`, `tension` and flattened XY interpolation
+anchors in `dof`. String DOFs are parameter expressions; numeric DOFs are solver
+variables. Constraint `val` and `val2` can likewise contain expressions.
+
+Expression text is preserved through save/load, undo and recomputation. Resolved
+coordinates and diagnostic rank are runtime evidence, not a substitute for the
+stored design intent. [Full contracts and examples](PARAMETRIC_SKETCH.md).

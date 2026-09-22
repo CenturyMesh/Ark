@@ -1,4 +1,4 @@
-param([switch]$Rebuild, [string]$Document, [string]$BuildDirectory = "out/source")
+param([switch]$Rebuild, [string]$Document, [string]$BuildDirectory = "out/sketch")
 $ErrorActionPreference = 'Stop'
 $exe = Join-Path (Join-Path $PSScriptRoot $BuildDirectory) 'ark-studio.exe'
 if ($Rebuild -or !(Test-Path -LiteralPath $exe)) { & (Join-Path $PSScriptRoot 'scripts/build.ps1') -Test -BuildDirectory $BuildDirectory }

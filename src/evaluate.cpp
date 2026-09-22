@@ -1,6 +1,9 @@
 ﻿// ARK-Point :: evaluate.cpp â€” feature-history recompute pipeline.
 #include "ark/model.hpp"
 #include "ark/source_tube.hpp"
+#include "ark/sketch.hpp"
+#include "ark/prism_cut.hpp"
+#include "ark/mesh_analysis.hpp"
 #include <chrono>
 #include <exception>
 
@@ -11,86 +14,21 @@ static f64 nowMs() {
     return duration<f64,std::milli>(steady_clock::now().time_since_epoch()).count();
 }
 
-// Sketch -> profile: chain line entities into one closed loop (order- and
-// direction-agnostic); a lone circle becomes a full-circle arc profile.
-static bool profileFromSketch(const Sketch& sk, const Feature& f, const ExprEnv& env,
-                              SketchProfile& prof, std::string& err) {
-    prof.frame = Mat4::translation({f.num(env,"ox"), f.num(env,"oy"), f.num(env,"oz")});
-
-    AABB bb;
-    for(auto&e:sk.ents){
-        if(e.kind==SketchEnt::Circle){
-            bb.grow(Vec3{e.dof[0]-e.dof[2], e.dof[1]-e.dof[2], 0});
-            bb.grow(Vec3{e.dof[0]+e.dof[2], e.dof[1]+e.dof[2], 0});
-        } else if(e.kind==SketchEnt::Line){
-            bb.grow(Vec3{e.dof[0],e.dof[1],0}); bb.grow(Vec3{e.dof[2],e.dof[3],0});
-        }
-    }
-    f64 tol = bb.valid()? 1e-6*tmax(bb.diagonal(),1.0) : 1e-6;
-
-    std::vector<size_t> lines, circs;
-    for(size_t i=0;i<sk.ents.size();++i){
-        if(sk.ents[i].kind==SketchEnt::Line) lines.push_back(i);
-        else if(sk.ents[i].kind==SketchEnt::Circle) circs.push_back(i);
-    }
-
-    if(circs.size()==1 && lines.empty()){
-        auto& c=sk.ents[circs[0]].dof;
-        Vec2 ctr{c[0],c[1]}; f64 r=c[2];
-        if(r<=tol){ err="sketch '"+f.get("sketch")+"': circle radius ~ 0"; return false; }
-        for(int q=0;q<4;++q)
-            prof.segs.push_back({ProfileSeg::Arc,{},{},ctr,r,
-                                 (f64)q*K_HALF_PI,(f64)(q+1)*K_HALF_PI});
-        return true;
-    }
-    if(lines.empty()){ err="sketch has no line/circle geometry"; return false; }
-    if(!circs.empty()){
-        err="sketch mixes lines and circles; inner loops not supported yet";
-        return false;
-    }
-
-    // greedy nearest-endpoint chaining
-    size_t n=lines.size();
-    std::vector<bool> used(n,false);
-    Vec2 cur{}, first{};
-    bool have=false;
-    for(size_t k=0;k<n;++k){
-        i32 best=-1; bool flip=false; f64 bestd=tol;
-        for(size_t i=0;i<n;++i){
-            if(used[i]) continue;
-            auto&d=sk.ents[lines[i]].dof;
-            Vec2 s{d[0],d[1]}, t{d[2],d[3]};
-            if(!have){ best=(i32)i; break; }
-            f64 d1=(cur-s).len(), d2=(cur-t).len();
-            if(d1<bestd){ bestd=d1; best=(i32)i; flip=false; }
-            if(d2<bestd){ bestd=d2; best=(i32)i; flip=true;  }
-        }
-        if(best<0){ err="sketch lines form multiple disjoint loops"; return false; }
-        used[(size_t)best]=true;
-        auto&d=sk.ents[lines[(size_t)best]].dof;
-        Vec2 s{d[0],d[1]}, t{d[2],d[3]};
-        if(flip) std::swap(s,t);
-        if((t-s).len()<=tol) continue;                 // degenerate segment
-        prof.segs.push_back({ProfileSeg::Line,s,t});
-        if(!have){ first=s; have=true; }
-        cur=t;
-    }
-    if(prof.segs.empty()){ err="sketch has no usable profile segments"; return false; }
-    if((first-cur).len()>tol)
-        prof.segs.push_back({ProfileSeg::Line,cur,first});   // explicit closure
-    return true;
-}
-
 static bool makeProfile(const Feature& f, const ExprEnv& env, Document& doc,
                         SketchProfile& prof, std::string& err) {
     std::string sname=f.get("sketch");
     if(!sname.empty()){
         NamedSketch* ns=doc.findSketch(sname);
         if(!ns){ err="sketch '"+sname+"' not found"; return false; }
-        return profileFromSketch(ns->sk,f,env,prof,err);
+        if(!ns->error.empty()){err=ns->error;return false;}
+        try{
+            auto profiles=sketchProfiles(ns->sk,resolvePlane(doc,ns->sk.plane)*Mat4::translation({f.num(env,"ox"),f.num(env,"oy"),f.num(env,"oz")}));
+            if(profiles.size()!=1){err="Extrude/revolve requires one outer loop; use sketch_cut for multiple openings";return false;}
+            prof=std::move(profiles.front());return true;
+        }catch(const std::exception& e){err=e.what();return false;}
     }
 
-    prof.frame = Mat4::identity();
+    prof.frame = resolvePlane(doc,f.get("plane","XY"))*Mat4::translation({f.num(env,"ox"),f.num(env,"oy"),f.num(env,"oz")});
     std::string shape=f.get("shape","rect");
     f64 cx=f.num(env,"cx",0), cy=f.num(env,"cy",0);
     if(shape=="rect"){
@@ -196,8 +134,28 @@ static Body evalFeatureBody(const Feature& f, const ExprEnv& env, Document& doc,
         case FeatureType::Extrude: {
             SketchProfile prof; std::string perr;
             if(!makeProfile(f,env,doc,prof,perr)){ res.ok=false; res.error=perr; return {}; }
-            return extrudeProfile(prof, tmax(f.num(env,"height",8),1e-9),
-                                  f.num(env,"both",0)!=0.0);
+            Body body=extrudeProfile(prof,tmax(f.num(env,"height",8),1e-9),f.num(env,"both",0)!=0.0);
+            auto mesh=body.tessellate(topt);
+            auto audit=analyzeMesh(mesh);
+            if(!audit.closedOriented()||!(audit.signedVolume>0)){res.ok=false;res.error="Extrusion failed closed mesh/positive volume validation; check profile and mesh precision at this placement";return {};}
+            res.tris=mesh.triCount();body.baked=std::make_unique<Mesh>(std::move(mesh));return body;
+        }
+        case FeatureType::SketchCut: {
+            if(f.inputs.size()!=1){res.ok=false;res.error="sketch_cut requires one base feature";return {};}
+            auto base=findInput(f.inputs[0]);auto source=doc.find(f.inputs[0]);
+            if(!base||!source){res.ok=false;res.error="sketch_cut base missing";return {};}
+            if(source->type==FeatureType::SourceTube){res.ok=false;res.error="Imported source tube stays read-only";return {};}
+            auto ns=doc.findSketch(f.get("sketch"));if(!ns){res.ok=false;res.error="Cut sketch not found";return {};}
+            if(!ns->error.empty()){res.ok=false;res.error=ns->error;return {};}
+            auto profiles=sketchProfiles(ns->sk,resolvePlane(doc,ns->sk.plane)*Mat4::translation({0,0,f.num(env,"offset")}));
+            Body prismatic;
+            if(tryPrismaticCut(*base,profiles,f.num(env,"depth",10),prismatic)){res.tris=prismatic.baked->triCount();return prismatic;}
+            Mesh mesh=base->tessellate(topt);
+            for(auto& profile:profiles){auto cutter=extrudeProfile(profile,f.num(env,"depth",10));mesh=meshBoolean(mesh,cutter.tessellate(topt),CsgOp::Subtract);}
+            if(!mesh.triCount()){res.ok=false;res.error="Cut removed the entire body";return {};}
+            auto audit=analyzeMesh(mesh);
+            if(!audit.closedOriented()||!(audit.signedVolume>0)){res.ok=false;res.error="General sketch cut failed closed mesh/positive volume validation; use disjoint through-openings in an extrusion or change the operation";return {};}
+            meshOrientOutward(mesh);mesh.computeNormals();Body body;body.baked=std::make_unique<Mesh>(std::move(mesh));res.tris=body.baked->triCount();return body;
         }
         case FeatureType::Revolve: {
             SketchProfile prof; std::string perr;
@@ -265,9 +223,11 @@ const std::vector<FeatureResult>& Document::recompute() {
     evalBodies.clear();
     refreshParams();
     ExprEnv env=buildEnv();
-    for(auto&ns:sketches){                       // sketches solve before features
-        int iters=0;
-        ns.residual=solveSketch(ns.sk,&iters);
+    try{for(auto& plane:planes)resolvePlane(*this,plane.name);}
+    catch(const std::exception& e){parameterError=e.what();}
+    for(auto& ns:sketches){
+        evaluateSketch(ns,env);
+        try{resolvePlane(*this,ns.sk.plane);}catch(const std::exception& e){ns.error=e.what();ns.residual=INFINITY;}
     }
     std::vector<Body> work;
     for(auto&f:features){
@@ -275,7 +235,7 @@ const std::vector<FeatureResult>& Document::recompute() {
         f64 tf=nowMs();
         fr.error=parameterError;
         for(auto& kv:f.p){
-            if(kv.first=="shape"||kv.first=="section"||kv.first=="sketch"||kv.first=="name"||
+            if(kv.first=="shape"||kv.first=="section"||kv.first=="sketch"||kv.first=="plane"||kv.first=="name"||
                (f.type==FeatureType::ParametricSurface&&(kv.first=="x"||kv.first=="y"||kv.first=="z")))continue;
             bool ok=false; f64 value=evalExpr(kv.second,env,&ok);
             if(!ok || std::fabs(value)>1e8)fr.error="Invalid expression for '"+kv.first+"': "+kv.second;
@@ -287,6 +247,7 @@ const std::vector<FeatureResult>& Document::recompute() {
             case FeatureType::Sphere:positive({"r"});break;
             case FeatureType::Cone:positive({"rb","h"});if(f.num(env,"rt")<0)fr.error="rt cannot be negative";break;
             case FeatureType::Torus:positive({"R","r"});if(f.num(env,"r",2)>=f.num(env,"R",8))fr.error="torus requires R > r";break;
+            case FeatureType::SketchCut:positive({"depth"});break;
             case FeatureType::Extrude:positive({"w","d","r","height"});break;
             case FeatureType::Revolve:positive({"w","d","r","angle"});break;
             case FeatureType::LinearPattern:if(f.num(env,"count",3)<1||f.num(env,"count",3)>256||std::floor(f.num(env,"count",3))!=f.num(env,"count",3))fr.error="count must be an integer in 1..256";break;
@@ -294,7 +255,9 @@ const std::vector<FeatureResult>& Document::recompute() {
             default:break;
         }
         fr.ok=fr.error.empty();
-        Body b=fr.ok?evalFeatureBody(f,env,*this,work,fr,tessOpt):Body{};
+        Body b;
+        try{if(fr.ok)b=evalFeatureBody(f,env,*this,work,fr,tessOpt);}
+        catch(const std::exception& e){fr.ok=false;fr.error=e.what();}
         fr.ms=nowMs()-tf;
         if(fr.ok && b.faces.empty() && !b.baked){
             fr.ok=false; fr.error="feature produced empty body";

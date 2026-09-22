@@ -420,8 +420,7 @@ static Body extrudeOneSide(const SketchProfile& prof, f64 height) {
 Body extrudeProfile(const SketchProfile& prof, f64 height, bool both) {
     if (!both) return extrudeOneSide(prof, height);
     SketchProfile p2 = prof;
-    Vec3 nrm = prof.frame.transformDir(Vec3{0,0,1}).normalized();
-    p2.frame = prof.frame * Mat4::translation(nrm * (-height*0.5));
+    p2.frame = prof.frame * Mat4::translation({0,0,-height*0.5});
     return extrudeOneSide(p2, height);
 }
 
@@ -521,6 +520,11 @@ Body revolveProfile(const SketchProfile& prof, f64 angleDeg) {
 Body transformBody(const Body& b, const Mat4& M) {
     // Bake-first: transform the watertight mesh so CSG inputs stay closed.
     Body r; r.id=b.id; r.dirty=true;
+    Vec3 x=M.transformDir({1,0,0}),y=M.transformDir({0,1,0}),z=M.transformDir({0,0,1});
+    if((b.kind=="extrude"||b.kind=="prism_cut")&&std::abs(x.lensq()-1)<1e-10&&std::abs(y.lensq()-1)<1e-10&&std::abs(z.lensq()-1)<1e-10&&
+       std::abs(x.dot(y))<1e-10&&std::abs(y.dot(z))<1e-10&&std::abs(z.dot(x))<1e-10&&x.cross(y).dot(z)>0){
+        r.kind=b.kind;r.profile=b.profile;r.profile.frame=M*b.profile.frame;r.pd1=b.pd1;r.prismHoles=b.prismHoles;
+    }
     Mesh src=b.tessellate(TessOptions{});
     size_t nv=src.vertCount();
     std::vector<Vec3> tmp(nv), out(nv);

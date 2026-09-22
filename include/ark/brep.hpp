@@ -60,6 +60,7 @@ struct Body {
     std::string kind;                                  // "",box,cylinder,sphere,cone,torus,extrude,revolve
     Vec3 pd1{}, pd2{};                                 // dims / (r,h) / r / (rb,rt,h) / (R,r)
     SketchProfile profile;                             // sweeps
+    std::vector<std::vector<Vec2>> prismHoles;           // sampled through-cut loops in profile coordinates
     f64 sweepDeg = 360;
 
     Mesh buildWatertight() const;

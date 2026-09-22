@@ -1,5 +1,6 @@
 // ARK-Point :: serialize.cpp — document persistence over arkjson.
 #include "ark/serialize.hpp"
+#include "ark/sketch.hpp"
 #include <cstdio>
 #include <fstream>
 #include <set>
@@ -21,39 +22,57 @@ namespace {
 
 Value entToJson(const SketchEnt& e){
     Value v=Value::makeObj();
-    const char* k = e.kind==SketchEnt::Pnt?"point":e.kind==SketchEnt::Line?"line":"circle";
+    const char* k = e.kind==SketchEnt::Pnt?"point":e.kind==SketchEnt::Line?"line":e.kind==SketchEnt::Circle?"circle":"spline";
     v.set("kind",Value::makeStr(k));
     Value d=Value::makeArr();
-    for(f64 x:e.dof) d.arr.push_back(Value::makeNum(x));
+    for(size_t i=0;i<e.dof.size();++i)d.arr.push_back(i<e.expressions.size()&&!e.expressions[i].empty()?Value::makeStr(e.expressions[i]):Value::makeNum(e.dof[i]));
     v.set("dof",std::move(d));
+    if(!e.name.empty())v.set("name",Value::makeStr(e.name));
+    if(e.construction)v.set("construction",Value::makeBool(true));
+    if(e.kind==SketchEnt::Spline){v.set("closed",Value::makeBool(e.closed));v.set("tension",Value::makeNum(e.tension));}
     return v;
 }
 
 bool entFromJson(const Value& v, SketchEnt& e, std::string* err){
+    auto fail=[&](const std::string& m){if(err)*err=m;return false;};
+    if(v.t!=Value::Obj)return fail("Sketch entity must be object");
     std::string k=v.find("kind")?v.find("kind")->asStr("point"):"point";
     if(k=="point") e.kind=SketchEnt::Pnt;
     else if(k=="line") e.kind=SketchEnt::Line;
     else if(k=="circle") e.kind=SketchEnt::Circle;
+    else if(k=="spline") e.kind=SketchEnt::Spline;
     else { if(err)*err="unknown sketch entity kind: "+k; return false; }
     if(auto d=v.find("dof")){
         if(d->t!=Value::Arr){if(err)*err="dof must be array";return false;}
-        for(auto&x:d->arr){if(x.t!=Value::Num||!std::isfinite(x.num)){if(err)*err="dof must be finite numbers";return false;} e.dof.push_back(x.num);}
+        for(auto&x:d->arr){
+            if(x.t==Value::Str&&!x.str.empty()&&x.str.size()<=2048){e.dof.push_back(0);e.expressions.push_back(x.str);}
+            else if(x.t==Value::Num&&std::isfinite(x.num)&&std::abs(x.num)<=1e7){e.dof.push_back(x.num);e.expressions.emplace_back();}
+            else return fail("dof must be finite numbers or nonempty expressions");
+        }
     }
     if(e.dof.empty()){                       // sensible defaults for quick sketches
         if(e.kind==SketchEnt::Pnt) e.dof={0,0};
         else if(e.kind==SketchEnt::Line) e.dof={0,0,10,0};
-        else e.dof={0,0,5};
+        else if(e.kind==SketchEnt::Circle)e.dof={0,0,5};
+        else return fail("Spline requires explicit anchor coordinates");
     }
     const size_t expected=e.kind==SketchEnt::Pnt?2:e.kind==SketchEnt::Line?4:3;
-    if(e.dof.size()!=expected){if(err)*err="wrong entity degrees of freedom";return false;}
+    if(e.kind!=SketchEnt::Spline&&e.dof.size()!=expected)return fail("wrong entity degrees of freedom");
+    if(auto n=v.find("name")){if(n->t!=Value::Str||n->str.empty()||n->str.size()>128)return fail("entity name must be 1..128 characters");e.name=n->str;}
+    for(auto pair:{std::pair{"construction",&e.construction},std::pair{"closed",&e.closed}})if(auto b=v.find(pair.first)){if(b->t!=Value::Bool)return fail("entity flags must be boolean");*pair.second=b->b;}
+    if(auto t=v.find("tension")){if(t->t!=Value::Num||!std::isfinite(t->num)||t->num<0||t->num>1)return fail("Spline tension must be 0..1");e.tension=t->num;}
+    if(e.kind==SketchEnt::Spline&&(e.dof.size()<(e.closed?6u:4u)||e.dof.size()>128||e.dof.size()%2))return fail("Spline requires 2..64 XY anchors; closed requires at least 3");
     return true;
 }
 
 bool validSketch(const Sketch& sk,std::string* err){
     auto fail=[&](const char* e){if(err)*err=e;return false;};
     if(sk.ents.size()>128||sk.cons.size()>256)return fail("sketch capacity exceeded");
+    size_t variables=0;std::set<std::string> names;
+    for(auto& e:sk.ents){if(!e.name.empty()&&!names.insert(e.name).second)return fail("duplicate sketch entity name");variables+=e.dof.size();}
+    if(variables>512)return fail("Sketch exceeds 512 scalar coordinates");
     for(auto& c:sk.cons){
-        auto valid=[&](int e,int slot){return e>=0&&(size_t)e<sk.ents.size()&&slot>=0&&slot<=(sk.ents[e].kind==SketchEnt::Line?1:0);};
+        auto valid=[&](int e,int slot){return e>=0&&(size_t)e<sk.ents.size()&&slot>=0&&slot<(sk.ents[e].kind==SketchEnt::Spline?(int)sk.ents[e].dof.size()/2:sk.ents[e].kind==SketchEnt::Line?2:1);};
         if(!valid(c.a,c.pa))return fail("invalid constraint entity or point slot");
         bool pair=c.type==SketchCon::DistPP||c.type==SketchCon::Coincident||c.type==SketchCon::Parallel||c.type==SketchCon::Perpendicular||c.type==SketchCon::AngleLL;
         if(pair&&!valid(c.b,c.pb))return fail("invalid second constraint entity");
@@ -72,22 +91,28 @@ Value conToJson(const SketchCon& c){
     v.set("b",Value::makeNum(c.b));
     v.set("pa",Value::makeNum(c.pa));
     v.set("pb",Value::makeNum(c.pb));
-    v.set("val",Value::makeNum(c.val));
-    v.set("val2",Value::makeNum(c.val2));
+    v.set("val",c.expression.empty()?Value::makeNum(c.val):Value::makeStr(c.expression));
+    v.set("val2",c.expression2.empty()?Value::makeNum(c.val2):Value::makeStr(c.expression2));
     return v;
 }
 
 bool conFromJson(const Value& v, SketchCon& c, std::string* err){
+    auto fail=[&](const char* m){if(err)*err=m;return false;};
+    if(v.t!=Value::Obj)return fail("Constraint must be object");
     i32 t=0;
     std::string tn=v.find("type")?v.find("type")->asStr():"";
     if(!constraintTypeFromName(tn,t)){ if(err)*err="unknown constraint type: "+tn; return false; }
     c.type=(SketchCon::Type)t;
-    c.a =(i32)(v.find("a") ?v.find("a") ->asNum(-1): -1);
-    c.b =(i32)(v.find("b") ?v.find("b") ->asNum(-1): -1);
-    c.pa=(i32)(v.find("pa")?v.find("pa")->asNum(0) : 0);
-    c.pb=(i32)(v.find("pb")?v.find("pb")->asNum(0) : 0);
-    c.val =v.find("val") ?v.find("val") ->asNum():0;
-    c.val2=v.find("val2")?v.find("val2")->asNum():0;
+    for(auto pair:{std::pair{"a",&c.a},std::pair{"b",&c.b},std::pair{"pa",&c.pa},std::pair{"pb",&c.pb}})if(auto p=v.find(pair.first)){
+        if(p->t!=Value::Num||!std::isfinite(p->num)||p->num< -1||p->num>512||p->num!=std::floor(p->num))return fail("Constraint indexes must be integers");
+        *pair.second=(int)p->num;
+    }
+    for(auto key:{"val","val2"})if(auto p=v.find(key)){
+        auto& expr=std::string(key)=="val"?c.expression:c.expression2;auto& number=std::string(key)=="val"?c.val:c.val2;
+        if(p->t==Value::Str&&!p->str.empty()&&p->str.size()<=2048)expr=p->str;
+        else if(p->t==Value::Num&&std::isfinite(p->num))number=p->num;
+        else return fail("Dimension must be finite number or expression");
+    }
     return true;
 }
 
@@ -98,7 +123,8 @@ std::string documentToJson(const Document& doc){
     Value r=Value::makeObj();
     r.set("format",Value::makeStr("ark"));
     bool sourceTube=false;bool notched=false;bool extended=!doc.assembly.empty()||doc.nextAssemblyId_>1;for(auto& f:doc.features){extended|=f.type==FeatureType::Tube;notched|=f.type==FeatureType::NotchedTube;sourceTube|=f.type==FeatureType::SourceTube;}
-    r.set("version",Value::makeNum(sourceTube?4:notched?3:extended?2:1));
+    bool sketchVersion=!doc.planes.empty()||!doc.sketches.empty();for(auto& f:doc.features)sketchVersion|=f.type==FeatureType::SketchCut;
+    r.set("version",Value::makeNum(sketchVersion?5:sourceTube?4:notched?3:extended?2:1));
     r.set("units",Value::makeStr("mm"));
     r.set("next_feature_id",Value::makeNum((double)doc.nextFeatureId_));
 
@@ -110,10 +136,15 @@ std::string documentToJson(const Document& doc){
         ps.arr.push_back(std::move(v));
     }
     r.set("params",std::move(ps));
+    if(!doc.planes.empty()){
+        Value planes=Value::makeArr();for(auto& plane:doc.planes){Value v=Value::makeObj(),p=Value::makeObj();v.set("name",Value::makeStr(plane.name));v.set("parent",Value::makeStr(plane.parent));
+            std::vector<std::string> keys;for(auto& kv:plane.p)keys.push_back(kv.first);std::sort(keys.begin(),keys.end());for(auto& key:keys)p.set(key,Value::makeStr(plane.p.at(key)));v.set("p",p);planes.arr.push_back(v);
+        }r.set("planes",planes);
+    }
 
     Value sks=Value::makeArr();
     for(auto&ns:doc.sketches){
-        Value v=Value::makeObj();
+        Value v;arkjson::parse(sketchToJson(ns.sk),v);
         v.set("name",Value::makeStr(ns.name));
         Value es=Value::makeArr();   for(auto&e:ns.sk.ents) es.arr.push_back(entToJson(e));
         Value cs=Value::makeArr();   for(auto&c:ns.sk.cons) cs.arr.push_back(conToJson(c));
@@ -158,13 +189,13 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     Value v;
     if(!arkjson::parse(json,v)) return fail("malformed JSON");
     if(v.t!=Value::Obj) return fail("root must be object");
-    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0&&ver->num!=3.0&&ver->num!=4.0)))
+    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0&&ver->num!=3.0&&ver->num!=4.0&&ver->num!=5.0)))
         return fail("unsupported document version");
 
     if(auto format=v.find("format");format && format->asStr()!="ark")return fail("unsupported format");
     if(auto units=v.find("units");units && units->asStr()!="mm")return fail("unsupported units (expected mm)");
     if(!v.find("features"))return fail("missing features array");
-    for(auto key:{"params","sketches","features"})if(auto a=v.find(key);a && a->t!=Value::Arr)return fail(std::string(key)+" must be an array");
+    for(auto key:{"params","sketches","features","planes"})if(auto a=v.find(key);a && a->t!=Value::Arr)return fail(std::string(key)+" must be an array");
     Document nd;   // parse into scratch; commit only on full success
     std::set<std::string> paramNames,sketchNames;
     std::set<u64> featureIds;
@@ -182,21 +213,20 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
             NamedSketch ns;
             ns.name=s.find("name")?s.find("name")->asStr():"";
             if(ns.name.empty() || !sketchNames.insert(ns.name).second) return fail("empty or duplicate sketch name");
-            if(auto es=s.find("entities"))
-                for(auto&e:es->arr){
-                    SketchEnt se;
-                    if(!entFromJson(e,se,err)) return false;
-                    ns.sk.ents.push_back(std::move(se));
-                }
-            if(auto cs=s.find("constraints"))
-                for(auto&c:cs->arr){
-                    SketchCon sc;
-                    if(!conFromJson(c,sc,err)) return false;
-                    ns.sk.cons.push_back(sc);
-                }
-            if(!validSketch(ns.sk,err))return false;
+            if(!sketchFromJson(s.dump(),ns.sk,err))return false;
             nd.sketches.push_back(std::move(ns));
         }
+
+    if(auto planes=v.find("planes")){
+        if(planes->arr.size()>128)return fail("Plane capacity exceeded");
+        std::set<std::string> names{"XY","XZ","YZ"};
+        for(auto& j:planes->arr){DatumPlane plane;
+            auto name=j.find("name");if(!name||name->t!=Value::Str||name->str.empty()||name->str.size()>128||!names.insert(name->str).second)return fail("Invalid or duplicate plane name");plane.name=name->str;
+            if(auto parent=j.find("parent")){if(parent->t!=Value::Str||parent->str.empty())return fail("Plane parent must be a name");plane.parent=parent->str;}
+            if(auto p=j.find("p")){if(p->t!=Value::Obj)return fail("Plane p must be object");for(auto& kv:p->obj){if(kv.second.t!=Value::Str)return fail("Plane values must be expressions");plane.p[kv.first]=kv.second.str;}}
+            nd.planes.push_back(std::move(plane));
+        }
+    }
 
     u64 maxId=0;
     if(auto fs=v.find("features"))
@@ -230,7 +260,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
                 auto points=fv.find("notches");if(!points||points->t!=Value::Arr||points->arr.size()>64)return fail("invalid notch points array");
                 for(auto& point:points->arr){auto station=point.find("station"),angle=point.find("angle"),face=point.find("face");if(!station||!angle||!face||station->t!=Value::Str||angle->t!=Value::Str||face->t!=Value::Str)return fail("invalid notch point fields");nf.notches.push_back({station->str,angle->str,face->str});}
             }
-            if(nf.type==FeatureType::SourceTube){auto version=v.find("version"),data=fv.find("source");if(!version||version->asNum()!=4||!data||data->t!=Value::Obj)return fail("source_tube requires version 4 package");nf.sourceData=*data;}
+            if(nf.type==FeatureType::SourceTube){auto version=v.find("version"),data=fv.find("source");if(!version||version->asNum()<4||!data||data->t!=Value::Obj)return fail("source_tube requires version 4 package");nf.sourceData=*data;}
             maxId=tmax(maxId,nf.id);
             nd.features.push_back(std::move(nf));
         }
@@ -257,6 +287,8 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     nd.refreshParams();
     if(!nd.parameterError.empty())return fail(nd.parameterError);
     std::vector<AssemblyPlacement> placements;std::string assemblyError;if(!resolveAssembly(nd,placements,assemblyError))return fail(assemblyError);
+    try{for(auto& plane:nd.planes)resolvePlane(nd,plane.name);for(auto& sketch:nd.sketches)resolvePlane(nd,sketch.sk.plane);}
+    catch(const std::exception& e){return fail(e.what());}
     doc=std::move(nd);
     return true;
 }
@@ -264,6 +296,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
 // ---------------------------------------------------------------------------
 std::string sketchToJson(const Sketch& sk){
     Value v=Value::makeObj();
+    v.set("plane",Value::makeStr(sk.plane));v.set("tolerance",Value::makeNum(sk.tolerance));
     Value es=Value::makeArr(); for(auto&e:sk.ents) es.arr.push_back(entToJson(e));
     Value cs=Value::makeArr(); for(auto&c:sk.cons) cs.arr.push_back(conToJson(c));
     v.set("entities",std::move(es));
@@ -274,7 +307,11 @@ std::string sketchToJson(const Sketch& sk){
 bool sketchFromJson(const std::string& json, Sketch& sk, std::string* err){
     Value v;
     if(!arkjson::parse(json,v)){ if(err)*err="malformed JSON"; return false; }
+    if(v.t!=Value::Obj){if(err)*err="Sketch must be object";return false;}
     Sketch out;
+    if(auto plane=v.find("plane")){if(plane->t!=Value::Str||plane->str.empty()){if(err)*err="Sketch plane must be a name";return false;}out.plane=plane->str;}
+    if(auto tolerance=v.find("tolerance")){if(tolerance->t!=Value::Num||!std::isfinite(tolerance->num)||tolerance->num<.0001||tolerance->num>5){if(err)*err="Sketch tolerance must be 0.0001..5 mm";return false;}out.tolerance=tolerance->num;}
+    for(auto key:{"entities","constraints"})if(auto list=v.find(key);list&&list->t!=Value::Arr){if(err)*err="Sketch entities/constraints must be arrays";return false;}
     if(auto es=v.find("entities"))
         for(auto&e:es->arr){
             SketchEnt se;

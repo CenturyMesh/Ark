@@ -116,9 +116,9 @@ std::vector<u32> triangulatePolygon(const std::vector<Vec2>& pts) {
     auto side=[](const Vec2&a,const Vec2&b,const Vec2&p){
         return (b.x-a.x)*(p.y-a.y)-(b.y-a.y)*(p.x-a.x);
     };
-    auto strictlyInside=[&](const Vec2&p,const Vec2&a,const Vec2&b,const Vec2&c){
+    auto insideOrOn=[&](const Vec2&p,const Vec2&a,const Vec2&b,const Vec2&c){
         f64 d1=side(a,b,p), d2=side(b,c,p), d3=side(c,a,p);
-        return (d1>1e-14&&d2>1e-14&&d3>1e-14)||(d1<-1e-14&&d2<-1e-14&&d3<-1e-14);
+        return (d1>=-1e-14&&d2>=-1e-14&&d3>=-1e-14)||(d1<=1e-14&&d2<=1e-14&&d3<=1e-14);
     };
 
     size_t guard=(size_t)n*(size_t)n+16;
@@ -132,7 +132,9 @@ std::vector<u32> triangulatePolygon(const std::vector<Vec2>& pts) {
             bool ear=true;
             for(u32 j:idx){
                 if(j==i0||j==i1||j==i2) continue;
-                if(strictlyInside(pts[j],a,b,c)){ ear=false; break; }
+                // A vertex on the proposed diagonal also blocks the ear:
+                // clipping over it can leave a zero-area cap triangle/crack.
+                if(insideOrOn(pts[j],a,b,c)){ ear=false; break; }
             }
             if(ear){
                 out.push_back(i0); out.push_back(i1); out.push_back(i2);
@@ -147,12 +149,7 @@ std::vector<u32> triangulatePolygon(const std::vector<Vec2>& pts) {
         out.push_back(idx[0]); out.push_back(idx[1]); out.push_back(idx[2]);
         return out;
     }
-    // fallback: fan from first remaining vertex
-    out.clear();
-    for(size_t k=1;k+1<idx.size();++k){
-        out.push_back(idx[0]); out.push_back(idx[k]); out.push_back(idx[k+1]);
-    }
-    return out;
+    throw std::runtime_error("Polygon triangulation failed: degenerate or invalid boundary");
 }
 
 void meshOrientOutward(Mesh& m) {    f64 vol=0;

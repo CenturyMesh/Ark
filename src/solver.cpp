@@ -16,13 +16,15 @@ namespace {
 struct Problem {
     const Sketch& sk;
     std::vector<f64> x;
+    std::vector<size_t> free;
     int n=0;
 
     explicit Problem(const Sketch& s):sk(s){
-        for(auto&e:s.ents){ n+=(int)e.dof.size(); }
-        x.resize((size_t)n);
-        size_t k=0;
-        for(auto&e:s.ents) for(f64 d:e.dof) x[k++]=d;
+        for(auto&e:s.ents)for(size_t i=0;i<e.dof.size();++i){
+            if(i>=e.expressions.size()||e.expressions[i].empty())free.push_back(x.size());
+            x.push_back(e.dof[i]);
+        }
+        n=(int)free.size();
     }
 
     void writeBack(Sketch& s) const {
@@ -38,7 +40,8 @@ struct Problem {
                 size_t o=offsetOf(ent);
                 return {x[o],x[o+1]};
             }
-            case SketchEnt::Line: {
+            case SketchEnt::Line:
+            case SketchEnt::Spline: {
                 size_t o=offsetOf(ent);
                 return { x[o+2*slot], x[o+2*slot+1] };
             }
@@ -120,10 +123,7 @@ struct Problem {
                     Vec2 b0=point(c.b,0),b1=point(c.b,1);
                     f64 aa=std::atan2(a1.y-a0.y,a1.x-a0.x);
                     f64 ab=std::atan2(b1.y-b0.y,b1.x-b0.x);
-                    f64 d=aa-ab;
-                    while(d> K_PI) d-=K_2PI;
-                    while(d<-K_PI) d+=K_2PI;
-                    r.push_back(d-c.val);
+                    r.push_back(std::remainder(aa-ab-c.val,K_2PI));
                     break;
                 }
             }
@@ -162,7 +162,7 @@ bool solveDense(std::vector<f64>& A,std::vector<f64>& b,int n){
 
 } // namespace
 
-f64 solveSketch(Sketch& sk, int* itersOut, int maxIters) {
+f64 solveSketch(Sketch& sk, int* itersOut, int maxIters, SketchDiagnostics* diagnostics) {
     Problem P(sk);
     int n=P.n;
 
@@ -175,11 +175,12 @@ f64 solveSketch(Sketch& sk, int* itersOut, int maxIters) {
         size_t m=rOut.size();
         Jcols.assign((size_t)n,{});
         for(int j=0;j<n;++j){
-            f64 h=1e-7*(1.0+std::fabs(P.x[(size_t)j]));
-            f64 old=P.x[(size_t)j];
-            P.x[(size_t)j]=old+h; P.residuals(r); std::vector<f64> rp=r;
-            P.x[(size_t)j]=old-h; P.residuals(r); std::vector<f64>& rm=r;
-            P.x[(size_t)j]=old;
+            size_t slot=P.free[(size_t)j];
+            f64 h=1e-7*(1.0+std::fabs(P.x[slot]));
+            f64 old=P.x[slot];
+            P.x[slot]=old+h; P.residuals(r); std::vector<f64> rp=r;
+            P.x[slot]=old-h; P.residuals(r); std::vector<f64>& rm=r;
+            P.x[slot]=old;
             m=rm.size();
             Jcols[(size_t)j].resize(m);
             for(size_t i=0;i<m;++i)
@@ -197,7 +198,7 @@ f64 solveSketch(Sketch& sk, int* itersOut, int maxIters) {
     f64 c=cost();
     f64 lambda=1e-3;
     int iters=0;
-    for(; iters<maxIters && c>1e-16; ++iters){
+    for(; n>0 && iters<maxIters && c>1e-16 && std::isfinite(c); ++iters){
         std::vector<f64> r0;
         size_t m=buildJ(r0);
 
@@ -226,7 +227,7 @@ f64 solveSketch(Sketch& sk, int* itersOut, int maxIters) {
             dx=g;
             if(!solveDense(Hm,dx,n)) { lambda*=10; continue; }
             std::vector<f64> xn=P.x;
-            for(int j=0;j<n;++j) xn[(size_t)j]-=dx[(size_t)j];
+            for(int j=0;j<n;++j) xn[P.free[(size_t)j]]-=dx[(size_t)j];
             auto old=P.x; P.x=xn;
             f64 c2=cost();
             if(c2<c){
@@ -241,10 +242,26 @@ f64 solveSketch(Sketch& sk, int* itersOut, int maxIters) {
         if(!improved) break;
     }
     P.writeBack(sk);
+    if(diagnostics){
+        diagnostics->variables=n;diagnostics->rank=0;
+        std::vector<f64> finalResidual;size_t m=buildJ(finalResidual);
+        // Local numerical rank, not a proof of global uniqueness. Normalize
+        // constraint rows so angular and length residuals do not set the scale.
+        std::vector<std::vector<double>> rows(m,std::vector<double>((size_t)n));
+        for(size_t i=0;i<m;++i){double scale=0;for(int j=0;j<n;++j)scale=std::max(scale,std::abs(Jcols[(size_t)j][i]));
+            for(int j=0;j<n;++j)rows[i][(size_t)j]=scale>1e-12?Jcols[(size_t)j][i]/scale:0;
+        }
+        size_t rank=0;for(int j=0;j<n&&rank<m;++j){size_t pivot=rank;
+            for(size_t i=rank+1;i<m;++i)if(std::abs(rows[i][(size_t)j])>std::abs(rows[pivot][(size_t)j]))pivot=i;
+            if(std::abs(rows[pivot][(size_t)j])<1e-7)continue;
+            std::swap(rows[rank],rows[pivot]);double p=rows[rank][(size_t)j];
+            for(size_t i=rank+1;i<m;++i){double factor=rows[i][(size_t)j]/p;for(int k=j;k<n;++k)rows[i][(size_t)k]-=factor*rows[rank][(size_t)k];}++rank;
+        }diagnostics->rank=(int)rank;
+    }
     if(itersOut)*itersOut=iters;
     P.residuals(r);
     f64 mx=0;
-    for(f64 v:r) mx=tmax(mx,std::fabs(v));
+    for(f64 v:r){if(!std::isfinite(v))return INFINITY;mx=tmax(mx,std::fabs(v));}
     return mx;
 }
 

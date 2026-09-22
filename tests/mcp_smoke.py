@@ -32,7 +32,7 @@ with tempfile.TemporaryDirectory(prefix='ark-mcp-') as directory:
     replies = [json.loads(line) for line in process.stdout.splitlines()]
     assert len(replies) == len(messages), 'Notifications must not receive replies; invalid JSON must'
     assert replies[0]['result']['protocolVersion'] == '2025-11-25'
-    assert len(replies[1]['result']['tools']) == 22
+    assert len(replies[1]['result']['tools']) == 26
     calls = replies[2:-1]
     for index, reply in enumerate(calls):
         assert reply['result']['isError'] == (index == 2), reply

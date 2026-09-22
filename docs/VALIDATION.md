@@ -50,3 +50,46 @@ The integrated build defaults to `out/bend`. Six native/stdio CTest suites pass.
 ## Version 0.6
 
 The integrated build defaults to `out/source`. Seven CTest suites pass. Optional OCCT tests cover an independently constructed synthetic source, rigid-transform metamorphism, rejection of a hole on a deforming hinge, source import/save/load/export, source drift and read-only geometry. Native source workspace tests verify formed/straight rendering, opening focus, unchanged source data during animation and export. The real source is verified locally; its CAD and derived assets are excluded from Git. Details are in [SOURCE_STEP.md](SOURCE_STEP.md).
+
+
+## Version 0.7 (2026-09-23)
+
+The integrated launcher/build now defaults to `out/sketch`, leaving the existing
+0.6 executable intact. Native MinGW C++20 release build succeeds. **12/12 CTest
+suites pass** (approximately 1.8 seconds locally): kernel, agent, MCP stdio,
+mechanical, notch math, bend workspace, source tube, parametric sketch, live
+session, assistant connector, CSG budget and prismatic cut.
+
+New independent checks cover interpolation error against Barry-Goldman,
+parameter-preserved hole distances and actual through-hole rays, tilted planes,
+cap area and volume, repeated/rotated cuts, concave triangulation, periodic angle
+dimensions, precision-collapse rejection, atomic failures and native persistence.
+The source-specific 80-check run still passes on the user's local tube. Its
+embedded source package is unchanged after adding a datum/sketch and saving then
+reloading as version 5; the private CAD remains excluded from Git.
+
+The final `out/sketch` executable passes native UI, sketch workflow, offline
+assistant and source-tube UI smoke modes. Screenshots at 1600x1000 and 1180x840
+were visually reviewed, including curve anchors, real openings, hard-surface
+shading, graphics checkboxes and absence of the old ribbon. Assembly and bend UI
+regressions also passed during UI integration. These are native dispatch/dialog
+fixtures, not an exhaustive external mouse-automation test.
+
+`tests/studio_live_integration.py` passed against the final Studio/MCP binaries.
+Separate proxy processes onboarded to the open document, changed a dimension,
+verified moved holes and closed topology, saved version 5, undid the edit,
+created/undid a new document, and received an explicit error after Studio exited.
+Only the test's own temporary process and files were controlled.
+
+The Responses connector passes offline protocol tests and actual WinHTTP
+loopback tests for success, rejected redirects, HTTP errors, malformed JSON,
+timeout and cancellation. The in-app fixture additionally proves an assistant
+can create a new document then model within one turn, and that intervening
+operator edits reject stale work. No paid/live provider request was made;
+provider credentials/model access are not verified by these local tests.
+
+General mesh CSG retains its known geometry limitations. The new prismatic
+through-cut path requires independent sampled cap-area, volume and closed-mesh
+checks. General sketch cuts and extrusions reject failed topology or nonpositive
+volume before commit. This does not establish an exact B-rep CAD kernel or
+physical manufacturing qualification. [Detailed sketch evidence](PARAMETRIC_SKETCH.md).

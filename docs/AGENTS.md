@@ -6,7 +6,7 @@ Initialize with protocol `2025-11-25`, `2025-06-18` or `2024-11-05`. Each proces
 
 ## Recommended modeling loop
 
-1. Call `doc_get` once to acquire the current document and revision.
+1. Call `agent_onboard` for capabilities, current document and revision; request the relevant topic. Use `doc_get` only when full model details are needed.
 2. Form a batch of `param.set`, `feature.add`, `feature.edit`, `feature.remove` or `sketch.set` commands.
 3. Call `doc_apply` with `expected_revision`. Any evaluation failure leaves the existing document and revision intact.
 4. Use `mesh_inspect` and `mesh_raycast` for compact evidence. Request `mesh_get` only when full positions/indices are necessary.
@@ -75,3 +75,28 @@ Mesh buffers, reports and BVHs are cached per session revision and selected feat
 ## 0.6 source-preserving import
 
 Use `import_step{path,replace?}` for the bounded planar finite-hinge source domain. `source_inspect{id,progress?}` provides the measured projection/holes without the large payload of `doc_get`. `export_step` now handles `source_tube` as well as designed `notched_tube`. The source geometry is read-only and the imported package is version 4. These additions bring the tool count to 22. See [SOURCE_STEP.md](SOURCE_STEP.md) for validation and failure boundaries.
+
+
+## 0.7 parametric sketches, onboarding and live Studio
+
+`agent_onboard{topic}` is the first tool to call. Topics `overview`, `sketch`,
+`tube` and `assembly` provide compact current-state context, supported operations,
+validation boundaries and relevant examples. The sketch example includes the
+current `expected_revision` and can run on a fresh document.
+`doc_new{expected_revision}` starts an empty document with undo and a monotonic
+revision; it never resets revision to zero or overwrites saved files.
+
+`plane_inspect{name}` and `sketch_inspect{name,samples?}` bring discovery to
+**26 tools**. `doc_apply` adds `plane.set`, `plane.remove`, `sketch.remove`,
+`sketch.entity.set`, and `sketch_cut` features. Construction planes, driven
+coordinate/dimension expressions and interpolating splines are specified in
+[PARAMETRIC_SKETCH.md](PARAMETRIC_SKETCH.md). Inspections do not mutate revision.
+
+A standalone `ark-mcp` still owns its own document. `ark-mcp --connect <endpoint>`
+uses the live Studio bridge; all tool calls then execute on Studio's owning
+thread and share its document, revision and undo history. Disconnect never
+falls back to an unrelated empty session. [Codex configuration](CODEX_CONNECT.md).
+
+The in-app assistant uses a configured Responses-compatible provider and these
+same tools. [Connector contract and testing](ASSISTANT.md). Onboarding and
+geometry operations also work without an API key or an LLM.

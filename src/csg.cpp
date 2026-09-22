@@ -1,15 +1,20 @@
 ﻿// ARK-Point :: csg.cpp — mesh booleans via surface splitting + parity
 // classification.
 //
-// Method: both inputs must be closed oriented triangle meshes (our primitive/
-// sweep builders guarantee this). Every triangle of A is recursively split by
+// Prototype method: both inputs must be closed oriented triangle meshes.
+// Every triangle of A is recursively split by
 // the planes of B (and vice versa); surviving fragments are classified
 // inside/outside the other solid by even-odd ray-cast parity. Boundary is
-// assembled from complementary fragments, giving exact shared seams; a
-// T-junction healing pass closes residual cracks from fp misses.
+// assembled from complementary fragments; a legacy tolerance-based T-junction
+// pass attempts repair. General outputs are NOT guaranteed watertight: callers
+// requiring a closed mesh must validate or reject them. Prefer dedicated
+// prismatic profile cuts for supported through-openings.
 #include "ark/mesh.hpp"
 #include <array>
 #include <cstdlib>
+#include <chrono>
+#include <numeric>
+#include <stdexcept>
 #include <unordered_map>
 
 namespace ark {
@@ -43,6 +48,53 @@ static void polyBounds(const Poly&p,f64*mn,f64*mx){
         mn[k]=tmin(mn[k],c); mx[k]=tmax(mx[k],c);
     }
 }
+
+using Bounds=std::array<f64,6>;
+// Read-only triangle AABB tree. Query results retain source order so broadphase
+// acceleration cannot change the order of cutting planes.
+class PolyIndex {
+    struct Node {Bounds bounds{};size_t begin=0,end=0;int left=-1,right=-1;};
+    std::vector<size_t> order;
+    std::vector<Node> nodes;
+    int build(size_t begin,size_t end) {
+        Node node;node.begin=begin;node.end=end;node.bounds={1e300,1e300,1e300,-1e300,-1e300,-1e300};
+        for(size_t i=begin;i<end;++i)for(int k=0;k<3;++k){node.bounds[k]=tmin(node.bounds[k],bounds[order[i]][k]);node.bounds[k+3]=tmax(node.bounds[k+3],bounds[order[i]][k+3]);}
+        int id=static_cast<int>(nodes.size());nodes.push_back(node);
+        if(end-begin>8) {
+            int axis=0;for(int k=1;k<3;++k)if(node.bounds[k+3]-node.bounds[k]>node.bounds[axis+3]-node.bounds[axis])axis=k;
+            size_t mid=(begin+end)/2;
+            std::nth_element(order.begin()+begin,order.begin()+mid,order.begin()+end,[&](size_t a,size_t b){return bounds[a][axis]+bounds[a][axis+3]<bounds[b][axis]+bounds[b][axis+3];});
+            nodes[id].left=build(begin,mid);nodes[id].right=build(mid,end);
+        }
+        return id;
+    }
+    template<class Predicate>void query(int id,const Predicate& match,std::vector<size_t>& hits)const {
+        const auto& node=nodes[id];if(!match(node.bounds))return;
+        if(node.left<0){for(size_t i=node.begin;i<node.end;++i)if(match(bounds[order[i]]))hits.push_back(order[i]);}
+        else {query(node.left,match,hits);query(node.right,match,hits);}
+    }
+public:
+    std::vector<Bounds> bounds;
+    explicit PolyIndex(const std::vector<Poly>& polys):order(polys.size()),bounds(polys.size()) {
+        for(size_t i=0;i<polys.size();++i)polyBounds(polys[i],bounds[i].data(),bounds[i].data()+3);
+        std::iota(order.begin(),order.end(),0);if(!order.empty())build(0,order.size());
+    }
+    static bool overlaps(const Bounds& a,const Bounds& b,f64 eps){for(int k=0;k<3;++k)if(a[k+3]<b[k]-eps||a[k]>b[k+3]+eps)return false;return true;}
+    std::vector<size_t> overlap(const Poly& p,f64 eps)const {
+        Bounds b;polyBounds(p,b.data(),b.data()+3);std::vector<size_t> hits;
+        if(!nodes.empty())query(0,[&](const Bounds& q){return overlaps(b,q,eps);},hits);
+        std::sort(hits.begin(),hits.end());return hits;
+    }
+};
+
+struct WorkBudget {
+    std::chrono::steady_clock::time_point deadline=std::chrono::steady_clock::now()+std::chrono::seconds(8);
+    size_t ticks=0;
+    void check(size_t size=0) {
+        if(size>1000000||((++ticks&255)==0&&std::chrono::steady_clock::now()>deadline))
+            throw std::runtime_error("Mesh Boolean exceeded bounded work budget; simplify the input or use a dedicated analytic operation");
+    }
+};
 
 struct SplitOut { std::vector<Poly> front,back; };
 
@@ -89,10 +141,12 @@ static void splitPoly(const Poly& p,const Vec3&n,f64 d,SplitOut&o,f64 eps){
 // Split 'src' against every triangle-plane of 'other' (broadphase filtered),
 // producing convex-ish fragments guaranteed not to cross 'other's surface.
 static void splitAgainst(const Poly& src,const std::vector<Poly>& other,
-                         const std::vector<std::array<f64,6>>& bounds,
-                         std::vector<Poly>& out,f64 eps){
+                         const PolyIndex& index,
+                         std::vector<Poly>& out,f64 eps,WorkBudget& budget){
     std::vector<Poly> work{src};
-    for(size_t bi=0;bi<other.size();++bi){
+    for(size_t bi:index.overlap(src,eps)){
+        budget.check(work.size());
+        const auto& bounds=index.bounds;
         f64 bmn[3],bmx[3];
         bmn[0]=bounds[bi][0];bmn[1]=bounds[bi][1];bmn[2]=bounds[bi][2];
         bmx[0]=bounds[bi][3];bmx[1]=bounds[bi][4];bmx[2]=bounds[bi][5];
@@ -102,11 +156,11 @@ static void splitAgainst(const Poly& src,const std::vector<Poly>& other,
             bool overlap=!(wmx[0]<bmn[0]-eps||wmn[0]>bmx[0]+eps||
                            wmx[1]<bmn[1]-eps||wmn[1]>bmx[1]+eps||
                            wmx[2]<bmn[2]-eps||wmn[2]>bmx[2]+eps);
-            if(!overlap){ next.push_back(w); continue; }
+            if(!overlap){ next.push_back(std::move(w)); continue; }
             SplitOut so;
             splitPoly(w,other[bi].n,other[bi].d,so,eps);
-            for(auto&q:so.front) next.push_back(q);
-            for(auto&q:so.back)  next.push_back(q);
+            for(auto&q:so.front) next.push_back(std::move(q));
+            for(auto&q:so.back)  next.push_back(std::move(q));
         }
         work.swap(next);
     }
@@ -115,8 +169,7 @@ static void splitAgainst(const Poly& src,const std::vector<Poly>& other,
 
 // even-odd parity of point vs closed mesh: ray-march along +X using
 // Moller-Trumbore with jittered retries for borderline hits.
-static f64 diag_hint=1.0;
-static bool pointInside(const Vec3& pt,const std::vector<Poly>& solid,f64 eps){
+static bool pointInside(const Vec3& pt,const std::vector<Poly>& solid,f64 eps,WorkBudget& budget){
     Vec3 d{1,0,0};
     static const f64 J[6][2]={{1,0},{-1,0},{0,1},{0,-1},{1,1},{-1,-1}};
     for(int attempt=0;attempt<7;++attempt){
@@ -127,6 +180,7 @@ static bool pointInside(const Vec3& pt,const std::vector<Poly>& solid,f64 eps){
         }
         i64 hits=0; bool bad=false;
         for(auto&t:solid){
+            budget.check();
             const Vec3 &v0=t.v[0],&v1=t.v[1],&v2=t.v[2];
             Vec3 e1=v1-v0,e2=v2-v0;
             Vec3 pv=d.cross(e2);
@@ -180,9 +234,10 @@ static std::vector<Poly> meshToPolys(const Mesh& m){
 }
 
 // heal T-junction micro-cracks --------------------------------------------------
-static void healTJunctions(Mesh& m,f64 eps){
+static void healTJunctions(Mesh& m,f64 eps,WorkBudget& budget){
     auto key=[](u32 a,u32 b){ return ((u64)a<<32)|(u64)b; };
     for(int pass=0;pass<8;++pass){
+        budget.check(m.triCount());
         std::unordered_map<u64,char> dir;
         dir.reserve(m.idx.size()*3);
         for(size_t t=0;t<m.idx.size();t+=3)
@@ -219,6 +274,7 @@ static void healTJunctions(Mesh& m,f64 eps){
                 u32 a=tri[e],b=tri[(e+1)%3];
                 if(dir.count(key(a,b))&&dir.count(key(b,a))) continue; // paired
                 for(u32 p:bverts){
+                    budget.check();
                     if(onSeg(a,b,p)){
                         u32 c=tri[(e+2)%3];
                         if(p!=c){ out.insert(out.end(),{a,p,c}); out.insert(out.end(),{p,b,c}); did=true; }
@@ -236,9 +292,10 @@ static void healTJunctions(Mesh& m,f64 eps){
 } // namespace
 
 Mesh meshBoolean(const Mesh& A, const Mesh& B, CsgOp op) {
+    WorkBudget budget;
+    budget.check(A.triCount());budget.check(B.triCount());
     AABB bb=A.computeBBox(); bb.grow(B.computeBBox());
     const f64 diag=tmax(bb.diagonal(),1e-9);
-    diag_hint=diag;
     const f64 eps=kEpsRel*diag;
 
     Mesh aN=A,bN=B;
@@ -246,11 +303,7 @@ Mesh meshBoolean(const Mesh& A, const Mesh& B, CsgOp op) {
     for(auto&x:bN.pos)x/=diag;
 
     std::vector<Poly> pa=meshToPolys(aN), pb=meshToPolys(bN);
-    std::vector<std::array<f64,6>> ba(pb.size()),bb2(pa.size());
-    for(size_t i=0;i<pb.size();++i){ f64 mn[3],mx[3];polyBounds(pb[i],mn,mx);
-        ba[i]={mn[0],mn[1],mn[2],mx[0],mx[1],mx[2]}; }
-    for(size_t i=0;i<pa.size();++i){ f64 mn[3],mx[3];polyBounds(pa[i],mn,mx);
-        bb2[i]={mn[0],mn[1],mn[2],mx[0],mx[1],mx[2]}; }
+    const PolyIndex indexA(pa),indexB(pb);
 
     // fragment acceptance table ------------------------------------------
     //   union     : A outside B , B outside A
@@ -264,10 +317,10 @@ Mesh meshBoolean(const Mesh& A, const Mesh& B, CsgOp op) {
     { std::vector<Poly> acc;
       for(auto&t:pa){
         std::vector<Poly> fr;
-        splitAgainst(t,pb,ba,fr,eps/diag);
+        budget.check(acc.size());splitAgainst(t,pb,indexB,fr,eps/diag,budget);
         for(auto&q:fr){
             Vec3 c; for(auto&v:q.v)c=c+v; c=c*(1.0/(f64)q.v.size());
-            bool inside=pointInside(c,pb,eps/diag);
+            bool inside=pointInside(c,pb,eps/diag,budget);
             if(inside==aWantIn) acc.push_back(q);
         }
       }
@@ -276,10 +329,10 @@ Mesh meshBoolean(const Mesh& A, const Mesh& B, CsgOp op) {
     { std::vector<Poly> acc;
       for(auto&t:pb){
         std::vector<Poly> fr;
-        splitAgainst(t,pa,bb2,fr,eps/diag);
+        budget.check(acc.size());splitAgainst(t,pa,indexA,fr,eps/diag,budget);
         for(auto&q:fr){
             Vec3 c; for(auto&v:q.v)c=c+v; c=c*(1.0/(f64)q.v.size());
-            bool inside=pointInside(c,pa,eps/diag);
+            bool inside=pointInside(c,pa,eps/diag,budget);
             if(inside==bWantIn){
                 if(flipB){ std::reverse(q.v.begin(),q.v.end()); q.computePlane(); }
                 acc.push_back(q);
@@ -295,7 +348,7 @@ Mesh meshBoolean(const Mesh& A, const Mesh& B, CsgOp op) {
 
     for(auto&x:out.pos)x*=diag;
     out.weld(2e-5*diag);
-    healTJunctions(out,4e-4*diag);
+    healTJunctions(out,4e-4*diag,budget);
     meshOrientOutward(out);
     out.computeNormals();
     return out;

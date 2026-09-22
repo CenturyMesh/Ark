@@ -38,7 +38,7 @@ struct Parameter {
 // ---------------------------------------------------------------------------
 enum class FeatureType : i32 {
     Box, Cylinder, Sphere, Cone, Torus,
-    Extrude, Revolve, Transform, Boolean, LinearPattern, ParametricSurface, Tube, NotchedTube, SourceTube,
+    Extrude, Revolve, Transform, Boolean, LinearPattern, ParametricSurface, Tube, NotchedTube, SourceTube, SketchCut,
 };
 
 struct Feature {
@@ -74,9 +74,13 @@ struct FeatureResult {
 // ---------------------------------------------------------------------------
 // Sketches ----------------------------------------------------------------------
 struct SketchEnt {
-    enum Kind : i32 { Pnt, Line, Circle } kind=Pnt;
+    enum Kind : i32 { Pnt, Line, Circle, Spline } kind=Pnt;
     // dof layout: Pnt -> [x,y]; Line -> [x0,y0,x1,y1]; Circle -> [cx,cy,r]
     std::vector<f64> dof;
+    std::string name;
+    std::vector<std::string> expressions; // empty: solver variable; string: parameter binding
+    bool construction=false, closed=false;
+    f64 tension=0;
 };
 struct SketchCon {
     enum Type : i32 {
@@ -92,11 +96,14 @@ struct SketchCon {
     i32 pa=0,pb=0;      // sub-point index within entity when applicable
     f64 val=0;          // target value (Fixed: x target, Fixed also uses val2 for y)
     f64 val2=0;         // Fixed: y target
+    std::string expression, expression2;
 };
 
 struct Sketch {
     std::vector<SketchEnt> ents;
     std::vector<SketchCon> cons;
+    std::string plane="XY";
+    f64 tolerance=.05;
 
     // helpers to build
     i32 addPoint(f64 x,f64 y){ SketchEnt e; e.kind=SketchEnt::Pnt; e.dof={x,y};
@@ -109,7 +116,8 @@ struct Sketch {
 
 // Solve sketch constraints. Returns max |residual| after convergence and the
 // number of LM iterations used.
-f64 solveSketch(Sketch& sk, int* itersOut=nullptr, int maxIters=200);
+struct SketchDiagnostics { int variables=0, rank=0; };
+f64 solveSketch(Sketch& sk, int* itersOut=nullptr, int maxIters=200, SketchDiagnostics* diagnostics=nullptr);
 
 // ---------------------------------------------------------------------------
 // Feature type <-> stable string names (serialization / MCP / CLI)
@@ -127,6 +135,13 @@ struct NamedSketch {
     std::string name;
     Sketch      sk;
     f64         residual = 0;   // max |residual| after the last solve
+    std::string error;
+    int freeDofs=0, rank=0;
+};
+
+struct DatumPlane {
+    std::string name, parent="XY";
+    std::unordered_map<std::string,std::string> p;
 };
 
 class Document {
@@ -148,6 +163,7 @@ public:
     // sketches ----------------------------------------------------------------
     // Solved once per recompute, before any feature evaluates.
     std::vector<NamedSketch> sketches;
+    std::vector<DatumPlane> planes;
     NamedSketch* findSketch(const std::string& name);
     void setSketch(const std::string& name, Sketch sk);   // create or replace
     bool removeSketch(const std::string& name);
