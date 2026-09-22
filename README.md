@@ -17,7 +17,7 @@ Windows requirements: CMake 3.20+, Ninja and a C++20 compiler on PATH. The inclu
 .\start-studio.ps1 -Document .\examples\harmonic-ring.ark
 ```
 
-The kernel and MCP also build on Linux:
+The kernel and MCP have portable CMake targets for Linux; CI execution is currently blocked by the GitHub account billing limit:
 
 ```sh
 cmake -S . -B out/build -DCMAKE_BUILD_TYPE=Release

@@ -28,3 +28,7 @@ Reproduce:
 ```
 
 On Windows the GUI executable may return control to PowerShell before it exits; use `Start-Process -PassThru` and wait on that process when scripting. The GitHub Actions workflow builds and tests Windows/MSVC and Linux/GCC; consult the repository's workflow run for current CI status.
+
+## GitHub Actions availability
+
+The first [workflow run](https://github.com/CenturyMesh/Ark/actions/runs/35763704970) did not start a runner. GitHub reported failed account payments or a spending limit requiring an increase. The Windows job has no executed steps; Linux was canceled by the matrix after that infrastructure failure. Windows/MSVC and Linux/GCC have therefore not been validated by CI. Local MinGW tests and native rendering above passed independently. No billing settings were changed.
