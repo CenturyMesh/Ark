@@ -159,7 +159,7 @@ static std::string g_status="Ready. Local C++ kernel.",g_path="Harmonic ring.ark
 static bool g_error=false,g_grid=true,g_dragged=false;
 static u64 g_savedRevision=0;
 static int g_treeScroll=0;
-static int viewX=258,viewY=108,viewW=1024,viewH=650;
+static int viewX=258,viewY=140,viewW=1024,viewH=650;
 static HWND g_window=nullptr;
 
 
@@ -170,7 +170,7 @@ static std::vector<Mesh>    g_cpuMeshes;
 static f64 yaw=0.85,pitch=0.46,dist=140,tYaw=yaw,tPitch=pitch,tDist=dist;
 static Vec3 target{30,12,0},tTarget=target;
 static int winW=1600,winH=1000;
-static void layout(){viewW=std::max(winW-558,1);viewH=std::max(winH-286,1);}
+static void layout(){viewW=std::max(winW-558,1);viewH=std::max(winH-318,1);}
 static int selBody=-1,hoverBody=-1;
 static bool wireframe=false, g_pressWasButton=false;
 static double g_fps=0;
@@ -247,10 +247,10 @@ static const char* FS_BG=R"(#version 330 core
 out vec4 o;uniform vec2 res;
 void main(){
  vec2 uv=gl_FragCoord.xy/res;
- vec3 top=vec3(.095,.113,.115),bot=vec3(.037,.048,.053);
+ vec3 top=vec3(.19,.20,.22),bot=vec3(.075,.080,.089);
  vec3 c=mix(bot,top,uv.y);
  vec2 q=uv-.5;c*=1.-dot(q,q)*.55;
- c+=vec3(.02,.07,.06)*exp(-length(q-vec2(-.38,-.3))*2.4)*.4;
+ c+=vec3(.045)*exp(-length(q-vec2(-.25,.25))*2.4);
  o=vec4(c,1.);
 })";
 static const char* VS_SOLID=R"(#version 330 core
@@ -268,12 +268,17 @@ uniform vec3 color,eye; uniform float sel;
 void main(){
  vec3 n=normalize(nrm); vec3 v=normalize(eye-wpos);
  if(dot(n,v)<0.)n=-n;
- vec3 l1=normalize(vec3(-.45,.85,.35)),l2=normalize(vec3(.65,-.2,-.55));
+ // Broad studio softboxes and neutral steel reflections, independent of part IDs.
+ vec3 l1=normalize(vec3(-.45,.85,.65)),l2=normalize(vec3(.75,.25,-.55));
  float d1=max(dot(n,l1),0.),d2=max(dot(n,l2),0.);
- vec3 base=color*(.32+.70*d1)+color*(.20*d2);
- base+=vec3(1.,.98,.92)*pow(max(dot(n,normalize(l1+v)),0.),64.)*.55;
- float fr=pow(1.-max(dot(n,v),0.),3.2);
- base+=mix(vec3(.25,.60,.65),vec3(.66,.85,.70),sel)*fr*(.5+sel*.8);
+ vec3 base=color*(.24+.57*d1+.19*d2);
+ vec3 r=reflect(-v,n);
+ float softbox=pow(max(dot(r,normalize(vec3(-.45,.85,.55))),0.),18.);
+ float strip=pow(max(dot(r,normalize(vec3(.85,.35,-.45))),0.),48.);
+ base+=vec3(.90,.93,.98)*softbox*.36+vec3(.80,.83,.87)*strip*.26;
+ float fr=pow(1.-max(dot(n,v),0.),4.);
+ base+=vec3(.63,.68,.76)*fr*.16;
+ base=mix(base,base+vec3(.045,.055,.075),sel);
  o=vec4(base,1.);
 })";
 static const char* VS_LINE=R"(#version 330 core
@@ -281,7 +286,7 @@ layout(location=0) in vec3 P; uniform mat4 vp; out vec2 gridPos;
 void main(){gl_Position=vp*vec4(P,1.);gridPos=P.xz;})";
 static const char* FS_LINE=R"(#version 330 core
 in vec2 gridPos; out vec4 o;
-void main(){o=vec4(.27,.36,.37,exp(-dot(gridPos,gridPos)*.00012)*.28);})";
+void main(){o=vec4(.40,.42,.46,exp(-dot(gridPos,gridPos)*.00012)*.28);})";
 static const char* VS_SHADOW=R"(#version 330 core
 layout(location=0) in vec2 P; uniform mat4 vp; uniform vec3 ctr; uniform vec2 rad;
 out vec2 uv;
@@ -296,9 +301,35 @@ void main(){ uv=(P+1.)*.5; vec2 w=rc.xy+uv*rc.zw;
  vec2 c=w/vp*2.-1.;c.y=-c.y; gl_Position=vec4(c,0.,1.); })";
 static const char* FS_UI=R"(#version 330 core
 in vec2 uv; out vec4 o;
-uniform vec4 fill,borderCol,rc; uniform float radius,borderW;
+uniform vec4 fill,borderCol,rc; uniform float radius,borderW; uniform int glyph;
+float seg(vec2 p,vec2 a,vec2 b){vec2 d=b-a;return length(p-a-d*clamp(dot(p-a,d)/dot(d,d),0.,1.));}
+float box(vec2 p,vec2 b){vec2 q=abs(p)-b;return length(max(q,0.))+min(max(q.x,q.y),0.);}
+float mark(vec2 p){return min(min(seg(p,vec2(-.72,.65),vec2(0.,-.72)),seg(p,vec2(0.,-.72),vec2(.72,.65))),seg(p,vec2(-.27,.18),vec2(.51,.18)));}
+float symbol(vec2 p,int g){
+ if(g==99)return mark(p)-.065;
+ if(g==1||g==6||g==11||g==27||g==28){
+   float a=abs(box(p,vec2(.53,.46)))-.045;
+   if(g==27||g==28||g==11)a=min(abs(box(p-vec2(.24,-.24),vec2(.38,.34)))-.045,abs(box(p+vec2(.20,.22),vec2(.38,.34)))-.045);
+   else a=min(a,min(seg(p,vec2(-.53,-.46),vec2(-.18,-.75)),min(seg(p,vec2(-.18,-.75),vec2(.72,-.75)),seg(p,vec2(.72,-.75),vec2(.53,-.46))))-.045);
+   if(g==6)a=min(a,seg(p,vec2(0.,.10),vec2(0.,-.75))-.06);
+   return a;
+ }
+ if(g==2)return min(abs(length(p/vec2(.56,.22)-vec2(0.,-1.8))-1.)*.22,max(abs(abs(p.x)-.56),abs(p.y)-.4))-.04;
+ if(g==3||g==5||g==7){float a=abs(length(p)-.64)-.045;if(g==5)a=min(a,abs(length(p)-.30)-.045);else a=min(a,abs(length(p/vec2(.30,.64))-1.)*.25-.035);return a;}
+ if(g==8||g==9||g==10){float a=abs(length(p-vec2(-.24,0.))-.46)-.045;float b=abs(length(p-vec2(.24,0.))-.46)-.045;return min(a,b);}
+ if(g==26)return min(seg(p,vec2(-.53,.60),vec2(-.53,-.10)),min(abs(length(p-vec2(-.10,-.10))-.43)+max(p.x+.1,0.)+max(p.y+.1,0.),seg(p,vec2(-.1,-.53),vec2(.65,-.53))))-.11;
+ if(g==12||g==16){return min(abs(box(p-vec2(0.,.20),vec2(.57,.43)))-.05,min(seg(p,vec2(0.,-.8),vec2(0.,.1)),min(seg(p,vec2(-.25,-.15),vec2(0.,.1)),seg(p,vec2(.25,-.15),vec2(0.,.1))))-.06);}
+ if(g==17)return min(abs(box(p-vec2(0.,.13),vec2(.65,.43)))-.05,seg(p,vec2(-.65,-.3),vec2(-.18,-.64))-.05);
+ if(g==18||g==19){if(g==19)p.x=-p.x;return min(abs(length(p-vec2(.08,.12))-.52)+max(-p.y-.22,0.),min(seg(p,vec2(-.42,-.22),vec2(-.40,-.65)),seg(p,vec2(-.42,-.22),vec2(.0,-.22))))-.05;}
+ if(g==20)return min(abs(box(p,vec2(.62)))-.045,min(abs(p.x),abs(p.y))-.035);
+ if(g==22||g==14){return min(abs(box(p,vec2(.61)))-.035,min(abs(p.x),abs(p.y))-.025);}
+ if(g==25)return min(abs(box(p-vec2(0.,.12),vec2(.4,.48)))-.045,seg(p,vec2(-.60,-.50),vec2(.6,-.50))-.06);
+ if(g==21)return min(min(seg(p,vec2(-.7,-.45),vec2(-.22,0.)),seg(p,vec2(-.22,0.),vec2(-.7,.45))),seg(p,vec2(.08,.45),vec2(.65,.45)))-.06;
+ return min(abs(box(p,vec2(.57)))-.04,seg(p,vec2(-.5,.5),vec2(.5,-.5))-.04);
+}
 float sdR(vec2 p,vec2 b,float r){vec2 d=abs(p)-b+r;return length(max(d,0.))+min(max(d.x,d.y),0.)-r;}
 void main(){
+ if(glyph>0){vec2 p=(uv-.5)*2.;float d=symbol(p,glyph);float a=1.-smoothstep(-.025,.045,d);float lit=.80+.20*(1.-uv.y);o=vec4(fill.rgb*lit,fill.a*a);return;}
  float d=sdR((uv-.5)*rc.zw,rc.zw*.5,radius);
  float aa=fwidth(d)*1.2;
  float inside=1.-smoothstep(-aa,aa,d);
@@ -383,30 +414,78 @@ static void addFeat(FeatureType type, std::initializer_list<std::pair<const char
     for(auto& kv:ps)p.set(kv.first,V::makeStr(kv.second));for(auto x:inputs)in.arr.push_back(V::makeNum((double)x));
     c.set("p",p);c.set("inputs",in);c.set("mode",V::makeNum(mode));applyCommand(c);
 }
-// Small native expression/command editor; the viewport remains the source of feedback.
+// Native modal editors remain clients of the same transactional agent API.
 static HWND g_edit=nullptr,g_dialog=nullptr;static bool g_dialogDone=false,g_dialogAccept=false;
+static int g_dialogSmoke=0;static std::string g_dialogShot;
+static HBRUSH dialogBrush=CreateSolidBrush(RGB(29,31,36)),fieldBrush=CreateSolidBrush(RGB(42,45,52));
 static LRESULT CALLBACK editorProc(HWND h,UINT m,WPARAM w,LPARAM l){
     if(m==WM_COMMAND&&(LOWORD(w)==1||LOWORD(w)==2)){g_dialogAccept=LOWORD(w)==1;g_dialogDone=true;return 0;}
-    if(m==WM_CLOSE){g_dialogDone=true;return 0;}return DefWindowProcA(h,m,w,l);
+    if(m==WM_CLOSE){g_dialogDone=true;return 0;}
+    if(m==WM_TIMER&&w==901){
+        KillTimer(h,901);
+        if(!g_dialogShot.empty()){
+            RECT r{};GetWindowRect(h,&r);int width=r.right-r.left,height=r.bottom-r.top;
+            HDC screen=GetDC(h),dc=CreateCompatibleDC(screen);BITMAPINFO bi{};bi.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);bi.bmiHeader.biWidth=width;bi.bmiHeader.biHeight=-height;bi.bmiHeader.biPlanes=1;bi.bmiHeader.biBitCount=32;
+            void* bits=nullptr;HBITMAP bitmap=CreateDIBSection(dc,&bi,DIB_RGB_COLORS,&bits,nullptr,0);auto old=SelectObject(dc,bitmap);
+            if(PrintWindow(h,dc,0)){Image img;img.w=width;img.h=height;img.px.resize((size_t)width*height*3);for(size_t k=0;k<(size_t)width*height;++k){auto* src=(unsigned char*)bits+4*k;img.px[3*k]=src[2];img.px[3*k+1]=src[1];img.px[3*k+2]=src[0];}writePNG(g_dialogShot.c_str(),img);}
+            SelectObject(dc,old);DeleteObject(bitmap);DeleteDC(dc);ReleaseDC(h,screen);g_dialogShot.clear();
+        }
+        if(g_dialogSmoke==1)SetWindowTextA(g_edit,"32");
+        SendMessage(h,WM_COMMAND,g_dialogSmoke==2?2:1,0);return 0;
+    }
+    if(m==WM_CTLCOLORSTATIC||m==WM_CTLCOLOREDIT){SetTextColor((HDC)w,RGB(223,226,234));SetBkColor((HDC)w,m==WM_CTLCOLOREDIT?RGB(42,45,52):RGB(29,31,36));return (LRESULT)(m==WM_CTLCOLOREDIT?fieldBrush:dialogBrush);}
+    if(m==WM_DRAWITEM){auto* d=(DRAWITEMSTRUCT*)l;bool primary=d->CtlID==1;
+        HBRUSH br=CreateSolidBrush(primary?RGB(193,201,216):RGB(55,59,68));FillRect(d->hDC,&d->rcItem,br);DeleteObject(br);
+        SetBkMode(d->hDC,TRANSPARENT);SetTextColor(d->hDC,primary?RGB(24,27,33):RGB(231,233,239));
+        char text[80];GetWindowTextA(d->hwndItem,text,sizeof text);DrawTextA(d->hDC,text,-1,&d->rcItem,DT_CENTER|DT_VCENTER|DT_SINGLELINE);
+        if(d->itemState&ODS_FOCUS){RECT r=d->rcItem;InflateRect(&r,-3,-3);DrawFocusRect(d->hDC,&r);}return TRUE;
+    }
+    return DefWindowProcA(h,m,w,l);
 }
-static bool editText(const char* title,std::string& value,bool multiline=false){
-    WNDCLASSA wc{};wc.lpfnWndProc=editorProc;wc.hInstance=GetModuleHandle(nullptr);wc.lpszClassName="ARK_EDITOR";wc.hbrBackground=(HBRUSH)(COLOR_WINDOW+1);wc.hCursor=LoadCursor(nullptr,IDC_ARROW);RegisterClassA(&wc);
-    RECT r;GetWindowRect(g_window,&r);int height=multiline?360:165;
-    g_dialog=CreateWindowExA(WS_EX_DLGMODALFRAME,"ARK_EDITOR",title,WS_CAPTION|WS_SYSMENU,r.left+180,r.top+140,760,height,g_window,nullptr,wc.hInstance,nullptr);
-    g_edit=CreateWindowExA(WS_EX_CLIENTEDGE,"EDIT",value.c_str(),WS_CHILD|WS_VISIBLE|WS_TABSTOP|ES_AUTOHSCROLL|(multiline?ES_MULTILINE|ES_AUTOVSCROLL|WS_VSCROLL:0),20,20,700,height-110,g_dialog,(HMENU)3,wc.hInstance,nullptr);
-    HFONT font=CreateFontA(-18,0,0,0,FW_NORMAL,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,"Consolas");SendMessage(g_edit,WM_SETFONT,(WPARAM)font,TRUE);
-    CreateWindowA("BUTTON","Apply",WS_CHILD|WS_VISIBLE|BS_DEFPUSHBUTTON,510,height-75,100,30,g_dialog,(HMENU)1,wc.hInstance,nullptr);
-    CreateWindowA("BUTTON","Cancel",WS_CHILD|WS_VISIBLE,620,height-75,100,30,g_dialog,(HMENU)2,wc.hInstance,nullptr);
-    g_dialogDone=g_dialogAccept=false;EnableWindow(g_window,FALSE);ShowWindow(g_dialog,SW_SHOW);SetFocus(g_edit);SendMessage(g_edit,EM_SETSEL,0,-1);
+struct EditorField { std::string name,value; };
+static bool editFields(const char* title,const char* hint,std::vector<EditorField>& fields,bool multiline=false){
+    WNDCLASSA wc{};wc.lpfnWndProc=editorProc;wc.hInstance=GetModuleHandle(nullptr);wc.lpszClassName="ARK_EDITOR";wc.hbrBackground=dialogBrush;wc.hCursor=LoadCursor(nullptr,IDC_ARROW);RegisterClassA(&wc);
+    RECT r;GetWindowRect(g_window,&r);int width=multiline?840:620,height=multiline?520:190+(int)fields.size()*62;
+    RECT bounds{0,0,width,height};AdjustWindowRectEx(&bounds,WS_CAPTION|WS_SYSMENU,FALSE,WS_EX_DLGMODALFRAME);
+    int ow=bounds.right-bounds.left,oh=bounds.bottom-bounds.top;
+    g_dialog=CreateWindowExA(WS_EX_DLGMODALFRAME,"ARK_EDITOR",title,WS_CAPTION|WS_SYSMENU,r.left+(r.right-r.left-ow)/2,r.top+(r.bottom-r.top-oh)/2,ow,oh,g_window,nullptr,wc.hInstance,nullptr);
+    BOOL dark=TRUE;DwmSetWindowAttribute(g_dialog,20,&dark,sizeof dark);
+    HFONT font=CreateFontA(-17,0,0,0,FW_NORMAL,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,"Segoe UI");
+    HFONT mono=CreateFontA(-17,0,0,0,FW_NORMAL,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,"Consolas");
+    auto control=[&](const char* cls,const char* text,DWORD style,int x,int y,int w,int h,int id,HFONT f){HWND c=CreateWindowExA(0,cls,text,WS_CHILD|WS_VISIBLE|style,x,y,w,h,g_dialog,(HMENU)(INT_PTR)id,wc.hInstance,nullptr);SendMessage(c,WM_SETFONT,(WPARAM)f,TRUE);return c;};
+    control("STATIC",title,0,26,22,width-52,27,0,font);control("STATIC",hint,0,26,58,width-52,44,0,font);
+    std::vector<HWND> edits;
+    for(size_t i=0;i<fields.size();++i){int y=110+(int)i*62;
+        if(!multiline)control("STATIC",fields[i].name.c_str(),0,28,y+7,205,28,0,font);
+        HWND e=control("EDIT",fields[i].value.c_str(),WS_TABSTOP|WS_BORDER|ES_AUTOHSCROLL|(multiline?ES_MULTILINE|ES_AUTOVSCROLL|WS_VSCROLL|ES_WANTRETURN:0),multiline?26:235,y,multiline?width-52:width-263,multiline?height-184:33,3+(int)i,mono);
+        SendMessage(e,EM_SETMARGINS,EC_LEFTMARGIN|EC_RIGHTMARGIN,MAKELPARAM(8,8));edits.push_back(e);
+    }
+    control("STATIC",multiline?"Ctrl+Enter to apply  /  Esc to cancel":"Enter to apply  /  Esc to cancel",0,26,height-52,width-290,34,0,font);
+    control("BUTTON","Cancel",WS_TABSTOP|BS_OWNERDRAW,width-248,height-58,100,34,2,font);
+    control("BUTTON","Apply",WS_TABSTOP|BS_OWNERDRAW,width-132,height-58,106,34,1,font);
+    g_edit=edits.front();g_dialogDone=g_dialogAccept=false;EnableWindow(g_window,FALSE);ShowWindow(g_dialog,SW_SHOW);SetFocus(g_edit);SendMessage(g_edit,EM_SETSEL,0,-1);
+    if(g_dialogSmoke)SetTimer(g_dialog,901,200,nullptr);
     MSG msg;while(!g_dialogDone&&GetMessage(&msg,nullptr,0,0)>0){
         if(msg.message==WM_KEYDOWN&&msg.wParam==VK_ESCAPE){g_dialogDone=true;continue;}
-        if(msg.message==WM_KEYDOWN&&msg.wParam==VK_RETURN&&(!multiline||(GetKeyState(VK_CONTROL)&0x8000))){g_dialogDone=g_dialogAccept=true;continue;}
+        if(msg.message==WM_KEYDOWN&&msg.wParam==VK_RETURN&&(!multiline||GetDlgCtrlID(GetFocus())<=2||(GetKeyState(VK_CONTROL)&0x8000))){g_dialogDone=true;g_dialogAccept=GetDlgCtrlID(GetFocus())!=2;continue;}
         if(!IsDialogMessage(g_dialog,&msg)){TranslateMessage(&msg);DispatchMessage(&msg);}
     }
-    if(g_dialogAccept){int n=GetWindowTextLengthA(g_edit);std::vector<char> b(n+1);GetWindowTextA(g_edit,b.data(),n+1);value=b.data();}
-    EnableWindow(g_window,TRUE);DestroyWindow(g_dialog);DeleteObject(font);SetForegroundWindow(g_window);return g_dialogAccept;
+    if(g_dialogAccept)for(size_t i=0;i<fields.size();++i){int n=GetWindowTextLengthA(edits[i]);std::vector<char> b(n+1);GetWindowTextA(edits[i],b.data(),n+1);fields[i].value=b.data();}
+    EnableWindow(g_window,TRUE);DestroyWindow(g_dialog);DeleteObject(font);DeleteObject(mono);SetForegroundWindow(g_window);return g_dialogAccept;
 }
-static void fileAction(bool save,bool mesh=false){
+static bool editText(const char* title,std::string& value,bool multiline=false){
+    std::vector<EditorField> fields{{"Value",value}};
+    bool ok=editFields(title,multiline?"Edit the program below. Changes are applied atomically through the agent API.":"Update this value, then apply to recompute the document.",fields,multiline);
+    if(ok)value=fields.front().value;return ok;
+}
+static void fileAction(bool save,bool mesh=false);
+static bool confirmDiscard(){
+    if(g_session.revision==g_savedRevision)return true;
+    int answer=MessageBoxA(g_window,"Save changes to this ARK document?","Unsaved document",MB_YESNOCANCEL|MB_ICONQUESTION);
+    if(answer==IDCANCEL)return false;if(answer==IDYES){fileAction(true);return g_session.revision==g_savedRevision;}return true;
+}
+static void fileAction(bool save,bool mesh){
+    if(!save&&!confirmDiscard())return;
     char path[MAX_PATH]{};if(save)std::snprintf(path,sizeof path,"%s",mesh?"ark_export.stl":g_path.c_str());
     OPENFILENAMEA of{};of.lStructSize=sizeof of;of.hwndOwner=g_window;of.lpstrFile=path;of.nMaxFile=MAX_PATH;
     of.lpstrFilter=mesh?"STL mesh\0*.stl\0":"ARK document\0*.ark;*.arkjson\0";of.lpstrDefExt=mesh?"stl":"ark";
@@ -471,10 +550,15 @@ static void uiAction(int id){
             if(selBody>=0&&!g_instanceIds[selBody]&&g_tubeInfo.count(g_bodyIds[selBody])){uiAction(30);break;}
             if(selBody<0||!g_instanceIds[selBody]){g_status="Select an assembly instance to edit its placement.";break;}
             auto source=std::find_if(g_doc.assembly.begin(),g_doc.assembly.end(),[&](const AssemblyNode& n){return n.id==g_instanceIds[selBody];});
-            V p=V::makeObj();for(auto key:{"tx","ty","tz","rx","ry","rz"})p.set(key,V::makeStr(source->p.count(key)?source->p.at(key):"0"));std::string text=p.dump();
-            if(editText("Instance placement / mm and degrees",text,true)){if(arkjson::parse(text,p)){V c=V::makeObj();c.set("op",V::makeStr("assembly.edit"));c.set("id",V::makeNum((double)source->id));c.set("p",p);applyCommand(c);}else{g_error=true;g_status="Invalid placement JSON";}}break;
+            V p=V::makeObj();std::vector<EditorField> fields;
+            for(auto key:{"tx","ty","tz","rx","ry","rz"})fields.push_back({key,source->p.count(key)?source->p.at(key):"0"});
+            u64 nodeId=source->id;
+            if(editFields("Instance placement","Translations tx / ty / tz use mm. Rotations rx / ry / rz use degrees.",fields)){
+                for(auto& field:fields)p.set(field.name,V::makeStr(field.value));V c=V::makeObj();c.set("op",V::makeStr("assembly.edit"));c.set("id",V::makeNum((double)nodeId));c.set("p",p);applyCommand(c);
+            }break;
         }
 
+        case 31:MessageBoxA(g_window,"ARK Geometry Studio\n\nCreate primitives from the ribbon with editable expressions.\nSelect an instance to edit its placement or duplicate it.\nSelect a tube to inspect or edit its bend program.\n\nOrbit: drag  |  Pan: Shift + drag  |  Zoom: wheel\nFit: F  |  Wireframe: W  |  Delete: Del\nOpen: Ctrl+O  |  Save: Ctrl+S  |  Undo / redo: Ctrl+Z / Y\nAgent command: Ctrl+K\n\nThe topology audit reports mesh checks only; it does not certify manufacturing suitability.","About ARK / Workspace guide",MB_OK|MB_ICONINFORMATION);break;
         case 30:{
             if(selBody<0)break;auto* f=g_doc.find(g_bodyIds[selBody]);if(!f||f->type!=FeatureType::Tube)break;
             V edit=V::makeObj(),p=V::makeObj(),bs=V::makeArr();for(auto& kv:f->p)p.set(kv.first,V::makeStr(kv.second));
@@ -484,6 +568,26 @@ static void uiAction(int id){
         }
 
     }
+}
+
+// Ribbon property sheets use expressions; programmatic smoke actions stay deterministic.
+static void interactiveAction(int id){
+    using V=arkjson::Value;std::vector<EditorField> fields;FeatureType type=FeatureType::Box;
+    switch(id){
+        case 1:type=FeatureType::Box;fields={{"dx","24"},{"dy","24"},{"dz","16"}};break;
+        case 2:type=FeatureType::Cylinder;fields={{"r","12"},{"h","28"}};break;
+        case 3:type=FeatureType::Sphere;fields={{"r","14"}};break;
+        case 5:type=FeatureType::Torus;fields={{"R","16"},{"r","5"}};break;
+        case 6:type=FeatureType::Extrude;fields={{"n","6"},{"r","18"},{"height","24"}};break;
+        case 7:type=FeatureType::Revolve;fields={{"w","8"},{"d","18"},{"cx","16"},{"angle","300"}};break;
+        default:uiAction(id);return;
+    }
+    std::string title=std::string("Create ")+featureTypeName(type);
+    if(!editFields(title.c_str(),"Dimensions use mm; angles use degrees. Use expressions or named parameters.",fields))return;
+    V c=V::makeObj(),p=V::makeObj();c.set("op",V::makeStr("feature.add"));c.set("type",V::makeStr(featureTypeName(type)));
+    for(auto& f:fields)p.set(f.name,V::makeStr(f.value));
+    if(type==FeatureType::Extrude)p.set("shape",V::makeStr("polygon"));if(type==FeatureType::Revolve)p.set("shape",V::makeStr("rect"));
+    c.set("p",p);applyCommand(c);if(!g_error)frameScene();
 }
 
 // picking -----------------------------------------------------------------------
@@ -511,7 +615,7 @@ static int pickBody(int mx,int my){
 // ---------------------------------------------------------------------------
 static GLuint pBg,pSolid,pGrid,pShadow,pUI,pText;
 static GLint suVp,suModel,suOutline,suColor,suEye,suSel;
-static GLint uuVp,uuRc,uuRad,uuFill,uuBorder,uuBW;
+static GLint uuVp,uuRc,uuRad,uuFill,uuBorder,uuBW,uuGlyph;
 static GLuint quadVao,gridVao,textVao,textVbo;
 static int gridCount=0;
 static bool g_swap=true;   // headless readback disables the buffer swap
@@ -566,7 +670,7 @@ static void drawFrame(HDC hdc){
         auto&gm=g_meshes[g_instancePart[i]]; if(!gm.count)continue;
         float sel=i==(size_t)selBody?1.f:i==(size_t)hoverBody?.3f:0.f;
         float hue=((i*53)%97)/97.f;
-        glUniform3f(suColor,.48f+.10f*hue,.69f+.05f*hue,.65f+.07f*hue);
+        glUniform3f(suColor,.55f+.07f*hue,.565f+.07f*hue,.59f+.07f*hue);
         glUniform1f(suSel,sel);
         glUniform1f(suOutline,0.f);
         glBindVertexArray(gm.vao);
@@ -591,6 +695,7 @@ static void drawFrame(HDC hdc){
     auto rect=[&](float x,float y,float w,float h,float rad,
                   float fr,float fg,float fb,float fa,
                   float br,float bg2,float bb,float ba,float bw){
+        glUniform1i(uuGlyph,0);
         glUniform4f(uuRc,x,y,w,h);
         glUniform1f(uuRad,rad);
         glUniform4f(uuFill,fr,fg,fb,fa);
@@ -603,32 +708,45 @@ static void drawFrame(HDC hdc){
     HWND hw=WindowFromDC(hdc); ScreenToClient(hw,&mp);
 
     textBegin();g_zones.clear();g_hoverZone=-1;
-    auto panel=[&](float x,float y,float w,float h,float r=0.f){rect(x,y,w,h,r,.065f,.078f,.084f,1,.16f,.19f,.20f,.8f,1);};
-    auto label=[&](const std::string& t,float x,float y,float scale=.75f){textOut(t,x,y,scale,.47f,.55f,.56f);};
+    auto panel=[&](float x,float y,float w,float h,float r=0.f){rect(x,y,w,h,r,.088f,.092f,.102f,1,.21f,.22f,.24f,.65f,1);};
+    auto label=[&](const std::string& t,float x,float y,float scale=.75f){textOut(t,x,y,scale,.55f,.57f,.62f);};
+    auto glyph=[&](int id,float x,float y,float size,float c=.82f){
+        glUniform1i(uuGlyph,id);glUniform4f(uuRc,x,y,size,size);
+        glUniform4f(uuFill,c,c+.01f,c+.025f,1);glBindVertexArray(quadVao);glDrawArrays(GL_TRIANGLES,0,6);
+        glUniform1i(uuGlyph,0);
+    };
     auto button=[&](const char* t,float x,float y,float w,int id,bool accent=false,bool active=false){
         bool hover=mp.x>=x&&mp.x<x+w&&mp.y>=y&&mp.y<y+32;
         if(hover)g_hoverZone=id;
-        rect(x,y,w,32,6,accent?.64f:hover?.16f:active?.14f:.095f,accent?.83f:hover?.21f:active?.24f:.12f,accent?.72f:hover?.22f:active?.22f:.13f,1,.24f,.34f,.32f,hover?1.f:.4f,1);
-        textOut(t,x+(w-textWidth(t,.78f))/2,y+7,.78f,accent?.07f:.79f,accent?.13f:.85f,accent?.12f:.84f);
+        float c=accent?.74f:hover?.21f:active?.22f:.135f;
+        rect(x,y+1,w,32,5,.025,.027,.032,.55,0,0,0,0,0);
+        rect(x,y,w,32,5,c,c+.008f,c+.021f,1,.38f,.40f,.45f,hover?.85f:.42f,1);
+        if(active)rect(x+8,y+28,w-16,2,1,.62,.67,.76,1,0,0,0,0,0);
+        textOut(t,x+(w-textWidth(t,.76f))/2,y+7,.76f,accent?.12f:.86f,accent?.13f:.88f,accent?.15f:.92f);
         g_zones.push_back({x,y,w,32,id});
     };
-    panel(0,0,W,58);panel(0,58,W,50);panel(0,108,258,H-136);panel(W-300,108,300,H-136);
-    rect(20,15,28,28,7,.66,.85,.74,1,0,0,0,0,0);textOut("A",26,17,1.05f,.07,.12,.10);
-    textOut("ARK",60,16,1.23f);label("/",121,20,.9f);label("DESIGN WORKSPACE",141,22,.67f);
+    panel(0,0,W,58);panel(0,58,W,82);panel(0,140,258,H-168);panel(W-300,140,300,H-168);
+    rect(17,12,35,35,8,.16,.17,.19,1,.39,.42,.47,.55,1);glyph(99,21,16,27,.95f);
+    textOut("ARK",64,14,1.25f);label("GEOMETRY STUDIO",64,37,.48f);
     std::string filename=g_path.substr(g_path.find_last_of("/\\")+1);
     if(g_session.revision!=g_savedRevision)filename+=" *";
-    textOut(filename,viewX+24,20,.86f);label("LOCAL",viewX+24+textWidth(filename,.86f)+18,23,.62f);
-    button("Open",W-342,13,70,17);button("Undo",W-262,13,70,18);button("Redo",W-182,13,70,19);button("Save .ark",W-102,13,86,16,true);
-    label("CREATE",20,76,.65f);
-    button("Box",83,67,57,1);button("Cylinder",146,67,80,2);button("Sphere",232,67,70,3);button("Torus",308,67,67,5);
-    rect(389,72,1,22,0,.22,.27,.28,1,0,0,0,0,0);
-    button("Extrude",404,67,77,6);button("Revolve",487,67,77,7);button("Pattern",570,67,77,11);
-    button("Union",663,67,67,8);button("Cut",736,67,54,9);button("Intersect",796,67,85,10);
-    button("Tube",887,67,60,26);button("Assembly",953,67,92,27);
-    button("Export STL",W-122,67,106,12);
-    label("DOCUMENT",20,128,.68f);label("01",220,128,.68f);
-    textOut("Model explorer",20,158,1.05f);label(std::to_string(g_doc.features.size())+" features / "+std::to_string(g_bodyIds.size())+" instances",20,188,.72f);
-    float treeY=228;
+    size_t maxFilename=(size_t)std::max(16.f,(W-720)/9);
+    if(filename.size()>maxFilename)filename=filename.substr(0,maxFilename-3)+"...";
+    textOut(filename,viewX+24,20,.86f);
+    button("Open",W-374,13,70,17);button("Undo",W-294,13,62,18);button("Redo",W-222,13,62,19);button("Save",W-150,13,70,16,true);button("?",W-70,13,48,31);
+    const char* titles[]={"Box","Cylinder","Sphere","Torus","Extrude","Revolve","Pattern","Union","Cut","Intersect","Tube","Assembly","Export"};
+    int ids[]={1,2,3,5,6,7,11,8,9,10,26,27,12};
+    float tileW=std::min(101.f,(W-44)/13.f),tileX=22;
+    for(int k=0;k<13;++k){float x=tileX+k*tileW,w=tileW-7;bool over=mp.x>=x&&mp.x<x+w&&mp.y>=65&&mp.y<131;
+        if(over){g_hoverZone=ids[k];rect(x,65,w,66,6,.19,.20,.22,1,.39,.41,.46,.65,1);}
+        glyph(ids[k],x+(w-34)/2,68,34,k==10?.96f:.83f);
+        textOut(titles[k],x+(w-textWidth(titles[k],.69f))/2,109,.69f,.80,.82,.86);
+        g_zones.push_back({x,65,w,66,ids[k]});
+        if(k==3||k==6||k==9||k==11)rect(x+w+3,77,1,43,0,.25,.26,.29,.6,0,0,0,0,0);
+    }
+    label("DOCUMENT",20,157,.66f);label(std::to_string(g_doc.features.size()),221,157,.66f);
+    textOut("Model explorer",20,185,1.02f);label(std::to_string(g_doc.features.size())+" features / "+std::to_string(g_bodyIds.size())+" instances",20,215,.68f);
+    float treeY=254;
     size_t rows=g_doc.assembly.empty()?g_doc.features.size():g_doc.assembly.size();
     for(size_t i=(size_t)g_treeScroll;i<rows&&treeY<H-385;i++){
         std::string name,subtitle;int body=-1,depth=0;bool group=false;
@@ -641,53 +759,53 @@ static void drawFrame(HDC hdc){
             for(size_t j=0;j<g_instanceIds.size();++j)if(g_instanceIds[j]==node.id)body=(int)j;
         }
         bool selected=body>=0&&selBody==body;
-        if(selected)rect(12,treeY-7,234,53,7,.115,.20,.18,1,.26,.40,.34,.7,1);
-        textOut(group?"+":body>=0?"<>":"-",20+depth*10,treeY+2,.8f,.63,.81,.72);
+        if(selected)rect(12,treeY-7,234,53,7,.175,.19,.22,1,.39,.43,.50,.7,1);
+        textOut(group?"+":body>=0?"<>":"-",20+depth*10,treeY+2,.8f,.75,.79,.86);
         textOut(name.substr(0,22-depth),48+depth*10,treeY,.78f);label(subtitle,48+depth*10,treeY+23,.60f);
         if(body>=0)g_zones.push_back({12,treeY-7,234,53,2000+body});treeY+=62;
     }
     float ly=H-340;rect(20,ly,218,1,0,.17,.21,.22,1,0,0,0,0,0);label("PARAMETERS",20,ly+23,.68f);label("Click to edit",152,ly+23,.65f);
     for(size_t i=0;i<g_doc.params.size()&&i<4;++i){auto& p=g_doc.params[i];float y=ly+58+i*48;
-        textOut(p.name.substr(0,15),22,y+5,.79f);rect(127,y-1,108,31,5,.09,.115,.12,1,.22,.28,.27,.7,1);
-        textOut(p.expr.substr(0,12),139,y+5,.78f,.68,.85,.76);g_zones.push_back({15,y-2,224,34,(int)i+1000});
+        textOut(p.name.substr(0,15),22,y+5,.79f);rect(127,y-1,108,31,5,.12,.13,.15,1,.29,.31,.35,.7,1);
+        textOut(p.expr.substr(0,12),139,y+5,.78f,.83,.85,.89);g_zones.push_back({15,y-2,224,34,(int)i+1000});
     }
-    label("C++ 20   /   PARAMETRIC",20,H-66,.62f);
-    textOut("Perspective",viewX+24,131,.87f);label("Y up  /  mm",viewX+24,155,.67f);
-    button("Fit",W-486,124,55,20);button("Top",W-425,124,49,23);button("Iso",W-370,124,49,24);
-    float rx=W-278;label("INSPECTOR",rx,129,.68f);label("MESH",W-66,129,.65f);
+    label("PARAMETRIC WORKSPACE",20,H-66,.62f);
+    textOut("Perspective",viewX+24,162,.85f);label("SATIN STEEL  /  mm",viewX+24,187,.60f);
+    button("Fit",W-486,157,55,20);button("Top",W-425,157,49,23);button("Iso",W-370,157,49,24);
+    float rx=W-278;label("INSPECTOR",rx,157,.66f);label("MESH",W-66,157,.62f);
     std::string selected="No selection",kind="No body";if(selBody>=0){auto* f=g_doc.find(g_bodyIds[selBody]);if(f){selected=g_instanceNames[selBody];kind=f->type==FeatureType::ParametricSurface?"EXPRESSION SURFACE / MESH":std::string(featureTypeName(f->type))+" / TESSELLATED MESH";if(g_instanceIds[selBody])kind="INSTANCE #"+std::to_string(g_instanceIds[selBody])+" / "+featureTypeName(f->type);}}
-    textOut(selected.substr(0,25),rx,165,1.05f);
-    rect(rx,205,254,28,5,.105,.17,.15,1,0,0,0,0,0);textOut(kind,rx+11,211,.64f,.60,.81,.69);
-    label("GEOMETRY",rx,260,.66f);
+    textOut(selected.substr(0,25),rx,189,1.02f);
+    rect(rx,229,254,28,5,.15,.16,.19,1,0,0,0,0,0);textOut(kind.substr(0,36),rx+11,236,.59f,.76,.79,.85);
+    label("GEOMETRY",rx,283,.66f);
     auto metric=[&](const char* title,const std::string& value,float y){label(title,rx,y,.76f);textOut(value,W-24-textWidth(value,.80f),y,.80f);};
     if(selBody>=0){auto& r=g_reports[g_instancePart[selBody]];
-        metric("Vertices",std::to_string(r.vertices),293);metric("Triangles",std::to_string(r.triangles),326);metric("Components",std::to_string(r.components),359);
+        metric("Vertices",std::to_string(r.vertices),314);metric("Triangles",std::to_string(r.triangles),343);metric("Components",std::to_string(r.components),372);
         char size[100];auto e=r.bounds.extent();std::snprintf(size,sizeof size,"%.1f / %.1f / %.1f",e.x,e.y,e.z);metric("XYZ mm",size,392);
         rect(rx,429,254,1,0,.17,.21,.22,1,0,0,0,0,0);label("TOPOLOGY AUDIT",rx,453,.66f);
         metric("Boundary edges",std::to_string(r.boundaryEdges),486);metric("Non-manifold edges",std::to_string(r.nonManifoldEdges),519);
         metric("Degenerate faces",std::to_string(r.degenerateTriangles),552);
-        textOut(r.closedOriented()?"o  Closed, oriented edges":"o  Open or irregular topology",rx,596,.79f,.64,.85,.73);
-        label("Self-intersections not checked",rx,623,.65f);
+        textOut(r.closedOriented()?"o  Closed, oriented edges":"o  Open or irregular topology",rx,587,.73f,.76,.81,.87);
+        label("Self-intersections not checked",rx,613,.62f);
     }
-    if(H>940 && kind=="EXPRESSION SURFACE / MESH"){rect(rx,673,254,1,0,.17,.21,.22,1,0,0,0,0,0);label("MATHEMATICAL MODEL",rx,697,.66f);
+    if(H>1000 && kind=="EXPRESSION SURFACE / MESH"){rect(rx,673,254,1,0,.17,.21,.22,1,0,0,0,0,0);label("MATHEMATICAL MODEL",rx,697,.66f);
         textOut("x(u,v)   y(u,v)   z(u,v)",rx,730,.85f,.70,.82,.79);label("Trigonometry + named parameters",rx,761,.67f);label("Periodic seams validated",rx,786,.67f);}
     if(selBody>=0&&g_tubeInfo.count(g_bodyIds[selBody])&&H>940){
         auto& report=g_tubeInfo[g_bodyIds[selBody]];char length[80];std::snprintf(length,sizeof length,"%.2f mm",report.find("centerline_length_mm")->num);
         label("TUBE PROGRAM",rx,680,.66f);metric("Developed axis",length,710);metric("Bends",std::to_string(report.find("bends")->arr.size()),743);
-        button("Edit tube program",rx,H-204,252,30);
+        button("Edit tube program",rx,H-214,252,30);
     }
     button("Wireframe",rx,H-120,121,14,false,wireframe);button("Grid",rx+131,H-120,121,22,false,g_grid);
     button(selBody>=0&&!g_instanceIds[selBody]&&g_tubeInfo.count(g_bodyIds[selBody])?"Bend program":"Placement",rx,H-162,121,29);button("Duplicate",rx+131,H-162,121,28);
     button("Delete selected",rx,H-78,252,25);
     float cy=H-178;panel(viewX,cy,(float)viewW,150);
-    label("AGENT CONSOLE",viewX+22,cy+16,.65f);label("LOCAL SESSION / REV "+std::to_string(g_session.revision),viewX+175,cy+16,.65f);
-    textOut("Geometry, expressed.",viewX+22,cy+46,1.05f);
-    label("Batch operations / inspect meshes / replay documents",viewX+22,cy+77,.72f);
+    label("AGENT WORKSPACE",viewX+22,cy+16,.65f);label("REV "+std::to_string(g_session.revision),viewX+200,cy+16,.65f);
+    textOut("Geometry, expressed.",viewX+22,cy+48,viewW<760?.84f:1.05f);
+    label("Model, inspect and replay with the agent API",viewX+22,cy+80,.66f);
     button("Run command   Ctrl+K",viewX+viewW-228,cy+43,205,21,true);
-    rect(viewX+22,cy+109,viewW-44,26,4,.047,.061,.066,1,0,0,0,0,0);
-    textOut(g_status.substr(0,(size_t)std::max((viewW-65)/8,1)),viewX+32,cy+114,.66f,g_error?.95f:.51f,g_error?.58f:.73f,g_error?.48f:.63f);
+    rect(viewX+22,cy+109,viewW-44,26,4,.063,.068,.079,1,0,0,0,0,0);
+    textOut(g_status.substr(0,(size_t)std::max((viewW-65)/8,1)),viewX+32,cy+114,.66f,g_error?.95f:.68f,g_error?.58f:.73f,g_error?.48f:.81f);
     panel(0,H-28,W,28);
-    textOut("o",17,H-22,.65f,.63,.85,.72);label("KERNEL READY",34,H-21,.61f);
+    textOut("o",17,H-22,.65f,.73,.79,.87);label("ENGINE READY",34,H-21,.61f);
     char st[180];std::snprintf(st,sizeof st,"%zu triangles   /   %.2f ms recompute   /   %.0f fps",g_triangleCount,g_doc.recomputeMs,g_fps);
     label(st,viewX+16,H-21,.61f);label("Orbit: drag   Pan: Shift+drag   Zoom: scroll",W-298,H-21,.58f);
 
@@ -758,7 +876,7 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
             if(g_pressWasButton){
                 for(auto&z:g_zones)
                     if((float)p.x>=z.x&&(float)p.x<=z.x+z.w&&
-                       (float)p.y>=z.y&&(float)p.y<=z.y+z.h){ uiAction(z.id); break; }
+                       (float)p.y>=z.y&&(float)p.y<=z.y+z.h){ interactiveAction(z.id); break; }
             } else if(!g_dragged) {
                 int b=pickBody(p.x,p.y);
                 selBody=(b==selBody)?-1:b;
@@ -768,14 +886,10 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
         }
         case WM_KEYDOWN:
             if(GetKeyState(VK_CONTROL)&0x8000){if(wp=='S')uiAction(16);else if(wp=='O')uiAction(17);else if(wp=='Z')uiAction(18);else if(wp=='Y')uiAction(19);else if(wp=='K')uiAction(21);}
-            else if(wp=='F')uiAction(20);else if(wp=='W')uiAction(14);else if(wp==VK_DELETE)uiAction(25);
+            else if(wp=='F')uiAction(20);else if(wp=='W')uiAction(14);else if(wp==VK_DELETE)uiAction(25);else if(wp==VK_F1)uiAction(31);
             return 0;
         case WM_CLOSE:
-            if(g_session.revision!=g_savedRevision){
-                int answer=MessageBoxA(hw,"Save changes to this ARK document?","ARK",MB_YESNOCANCEL|MB_ICONQUESTION);
-                if(answer==IDCANCEL)return 0;
-                if(answer==IDYES){fileAction(true);if(g_session.revision!=g_savedRevision)return 0;}
-            }
+            if(!confirmDiscard())return 0;
             DestroyWindow(hw);return 0;
         case WM_DESTROY: PostQuitMessage(0); return 0;
     }
@@ -789,11 +903,12 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     cpu_detect();
 
     SetProcessDPIAware();
-    bool headless=false,selfTest=false,assemblyTest=false;std::string shotPath="ark_studio.png",loadPath,scriptPath;
+    bool headless=false,selfTest=false,assemblyTest=false,dialogTest=false;std::string shotPath="ark_studio.png",loadPath,scriptPath;
     int sw=1600,sh=1000,argc=0;auto argv=CommandLineToArgvW(GetCommandLineW(),&argc);
     auto utf8=[](const wchar_t* w){int n=WideCharToMultiByte(CP_UTF8,0,w,-1,nullptr,0,nullptr,nullptr);std::string s(n,'\0');WideCharToMultiByte(CP_UTF8,0,w,-1,s.data(),n,nullptr,nullptr);s.pop_back();return s;};
     for(int i=1;i<argc;++i){auto a=utf8(argv[i]);if(a=="--shot"&&i+1<argc){headless=true;shotPath=utf8(argv[++i]);}
         else if(a=="--self-test-ui")selfTest=true;
+        else if(a=="--self-test-dialogs")dialogTest=true;
         else if(a=="--self-test-assembly")assemblyTest=true;
         else if(a=="--size"&&i+2<argc){sw=_wtoi(argv[++i]);sh=_wtoi(argv[++i]);}
         else if(a=="--load"&&i+1<argc)loadPath=utf8(argv[++i]);
@@ -804,10 +919,19 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     WNDCLASSA wc{}; wc.style=CS_OWNDC; wc.hInstance=hi;
     wc.lpfnWndProc=wndProc; wc.lpszClassName="ARKVIEW";
     wc.hCursor=LoadCursor(nullptr,IDC_ARROW);
+    // The same original geometric ARK mark is used in the viewport and taskbar.
+    HDC iconDC=CreateCompatibleDC(nullptr);BITMAPINFO bi{};bi.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);bi.bmiHeader.biWidth=32;bi.bmiHeader.biHeight=-32;bi.bmiHeader.biPlanes=1;bi.bmiHeader.biBitCount=32;
+    void* bits=nullptr;HBITMAP colorIcon=CreateDIBSection(iconDC,&bi,DIB_RGB_COLORS,&bits,nullptr,0);auto oldBitmap=SelectObject(iconDC,colorIcon);
+    RECT iconRect{0,0,32,32};HBRUSH iconBg=CreateSolidBrush(RGB(38,41,48));FillRect(iconDC,&iconRect,iconBg);DeleteObject(iconBg);
+    HPEN iconPen=CreatePen(PS_SOLID,3,RGB(229,234,245));auto oldPen=SelectObject(iconDC,iconPen);
+    MoveToEx(iconDC,6,26,nullptr);LineTo(iconDC,16,5);LineTo(iconDC,26,26);MoveToEx(iconDC,12,19,nullptr);LineTo(iconDC,23,19);
+    SelectObject(iconDC,oldPen);DeleteObject(iconPen);SelectObject(iconDC,oldBitmap);DeleteDC(iconDC);
+    for(int k=0;k<1024;++k)((DWORD*)bits)[k]|=0xff000000;
+    HBITMAP maskIcon=CreateBitmap(32,32,1,1,nullptr);ICONINFO ii{TRUE,0,0,maskIcon,colorIcon};wc.hIcon=CreateIconIndirect(&ii);DeleteObject(maskIcon);DeleteObject(colorIcon);
     RegisterClassA(&wc);
     RECT rc{0,0,winW,winH};
     AdjustWindowRect(&rc,WS_OVERLAPPEDWINDOW,FALSE);
-    HWND hwnd=CreateWindowA("ARKVIEW","ARK 0.3 / Geometry Studio",WS_OVERLAPPEDWINDOW,
+    HWND hwnd=CreateWindowA("ARKVIEW","ARK 0.4 / Geometry Studio",WS_OVERLAPPEDWINDOW,
                             CW_USEDEFAULT,CW_USEDEFAULT,rc.right-rc.left,rc.bottom-rc.top,
                             nullptr,nullptr,hi,nullptr);
     g_window=hwnd;BOOL dark=TRUE;DwmSetWindowAttribute(hwnd,20,&dark,sizeof dark);
@@ -866,6 +990,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     suVp=glGetUniformLocation(pSolid,"vp");      suModel=glGetUniformLocation(pSolid,"model");
     suOutline=glGetUniformLocation(pSolid,"outline"); suColor=glGetUniformLocation(pSolid,"color");
     suEye=glGetUniformLocation(pSolid,"eye");    suSel=glGetUniformLocation(pSolid,"sel");
+    uuGlyph=glGetUniformLocation(pUI,"glyph");
     uuVp=glGetUniformLocation(pUI,"vp");         uuRc=glGetUniformLocation(pUI,"rc");
     uuRad=glGetUniformLocation(pUI,"radius");    uuFill=glGetUniformLocation(pUI,"fill");
     uuBorder=glGetUniformLocation(pUI,"borderCol"); uuBW=glGetUniformLocation(pUI,"borderW");
@@ -914,6 +1039,20 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         uiAction(22);if(g_grid)return 15;uiAction(22);
         uiAction(23);if(tPitch!=1.52)return 16;uiAction(24);
         g_status="UI checks passed: create / undo / redo / delete / wire / grid / views";
+    }
+    if(dialogTest){
+        size_t count=g_doc.features.size();g_dialogSmoke=1;g_dialogShot=shotPath+".properties.png";
+        interactiveAction(1);if(g_error||g_doc.features.size()!=count+1||g_doc.features.back().p.at("dx")!="32")return 40;
+        uiAction(18);if(g_error||g_doc.features.size()!=count)return 41;
+        g_dialogSmoke=2;interactiveAction(1);if(g_doc.features.size()!=count)return 42;
+        std::string command=R"({"tool":"doc_info","arguments":{}})",original=command;
+        g_dialogSmoke=3;g_dialogShot=shotPath+".command.png";
+        if(!editText("Agent command",command,true)||command!=original)return 43;
+        g_dialogSmoke=2;if(editText("Agent command",command,true)||command!=original)return 44;
+        std::vector<EditorField> placement{{"tx","0"},{"ty","0"},{"tz","0"},{"rx","0"},{"ry","0"},{"rz","0"}};
+        g_dialogSmoke=3;g_dialogShot=shotPath+".placement.png";
+        if(!editFields("Instance placement","Translations use mm; rotations use degrees.",placement)||placement.size()!=6)return 45;
+        g_dialogSmoke=0;g_status="Dialog checks passed / create / cancel / undo / command / placement";
     }
     if(assemblyTest){
         if(g_doc.assembly.empty()||g_bodyIds.empty())return 30;

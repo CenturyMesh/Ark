@@ -1,0 +1,11 @@
+{
+  "width_mm": 40,
+  "height_mm": 30,
+  "wall_mm": 2,
+  "length_mm": 600,
+  "hinge_offset_mm": 1,
+  "notches": [
+    {"station_mm": 180, "angle_deg": 60, "hinge_face": "bottom"},
+    {"station_mm": 400, "angle_deg": 90, "hinge_face": "top"}
+  ]
+}

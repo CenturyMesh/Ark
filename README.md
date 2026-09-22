@@ -2,7 +2,7 @@
 
 A C++ geometry workspace designed to be operated by people and agents.
 
-![ARK Studio assemblies](docs/assembly.png)
+![ARK Studio](docs/studio.png)
 
 ARK combines a native Windows/OpenGL editor, a headless geometry library and a local MCP server. All new editor commands and MCP tools use the same `AgentSession` implementation. It is an **early engineering prototype**, with an existing custom kernel extended and corrected here, not yet an industrial CAD replacement.
 
@@ -20,9 +20,9 @@ Windows requirements: CMake 3.20+, Ninja and a C++20 compiler on PATH. The inclu
 The kernel and MCP have portable CMake targets for Linux; CI execution is currently blocked by the GitHub account billing limit:
 
 ```sh
-cmake -S . -B out/next -DCMAKE_BUILD_TYPE=Release
-cmake --build out/next --parallel 4
-ctest --test-dir out/next --output-on-failure
+cmake -S . -B out/fabrication -DCMAKE_BUILD_TYPE=Release
+cmake --build out/fabrication --parallel 4
+ctest --test-dir out/fabrication --output-on-failure
 ```
 
 Targets: `ark` static library, `ark-mcp`, `ark-cli` (legacy demonstration), `ark-tests`, `ark-agent-tests`, and `ark-studio` on Windows. No JavaScript runtime, web server, cloud account or model subscription is required by ARK itself. MinGW executables link their runtime statically.
@@ -38,13 +38,13 @@ Targets: `ark` static library, `ark-mcp`, `ark-cli` (legacy demonstration), `ark
 
 ## Agents
 
-Start `out/next/ark-mcp.exe` as a local MCP stdio server from your MCP client. The interface is model independent: an Astra or other agent host can drive it **if that host can invoke MCP tools**. ARK does not embed a language model or provide a natural-language chat service.
+Start `out/fabrication/ark-mcp.exe` as a local MCP stdio server from your MCP client. The interface is model independent: an Astra or other agent host can drive it **if that host can invoke MCP tools**. ARK does not embed a language model or provide a natural-language chat service.
 
 ```json
 {
   "mcpServers": {
     "ark": {
-      "command": "C:/path/to/Ark/out/next/ark-mcp.exe",
+      "command": "C:/path/to/Ark/out/fabrication/ark-mcp.exe",
       "args": []
     }
   }
@@ -52,6 +52,12 @@ Start `out/next/ark-mcp.exe` as a local MCP stdio server from your MCP client. T
 ```
 
 This is a generic MCP configuration example; the host's configuration format may differ. See [agent protocol](docs/AGENTS.md) for the tool contract and examples. Studio and a separately launched MCP process each own an independent session. Use `.ark` files to hand work between them; live cross-process synchronization is not implemented.
+
+## Neutral desktop UI and notch STEP preview (0.4)
+
+Studio now uses a neutral graphite palette, satin steel shading, a geometric ARK logo and an icon ribbon. Primitive dimensions and placements use native property dialogs; expressions and agent commands have dedicated editors. The kernel stays independent of these presentation controls. The interface remains native Win32/OpenGL. A future WPF presentation host can interoperate with native C++, as described in [Microsoft documentation](https://learn.microsoft.com/en-us/dotnet/desktop/wpf/advanced/wpf-and-win32-interoperation); this release does not migrate the application to WPF.
+
+The new C++ `notch_plan` tool can produce a straight rectangular tube cut plan with a retained hinge wall. An optional OCCT bridge exports and checks the actual STEP solid. See [workflow, example STEP and mathematical evidence](docs/NOTCH_WORKFLOW.md). This is an ideal geometric preview; automatic reconstruction/refolding of the supplied STEP and physical qualification are not yet complete.
 
 ## Assemblies, tube bending and GPU compute (0.3)
 

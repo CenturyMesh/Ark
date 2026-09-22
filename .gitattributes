@@ -10,3 +10,5 @@
 *.S text eol=lf
 *.yml text eol=lf
 *.arkops text eol=lf
+*.step -text -diff
+*.arkcut text eol=lf

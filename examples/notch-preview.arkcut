@@ -1,0 +1,150 @@
+{
+  "format": "ark-cut-plan",
+  "version": 1,
+  "stock": {
+    "width_mm": 40,
+    "height_mm": 30,
+    "wall_mm": 2,
+    "length_mm": 600,
+    "hinge_offset_mm": 1
+  },
+  "notches": [
+    {
+      "station_mm": 180,
+      "angle_deg": 60,
+      "hinge_face": "bottom",
+      "opening_mm": 33.48631561299829,
+      "removed_volume_mm3": 4267.773189849713,
+      "cutter_polygon": [
+        [
+          179.42264973081038,
+          2,
+          -1
+        ],
+        [
+          162.67949192431124,
+          31,
+          -1
+        ],
+        [
+          197.32050807568876,
+          31,
+          -1
+        ],
+        [
+          180.57735026918962,
+          2,
+          -1
+        ]
+      ],
+      "cutter_extrusion": [
+        0,
+        0,
+        42
+      ],
+      "frame_column_major": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1
+      ],
+      "hinge_axis_point": [
+        180,
+        1,
+        0
+      ],
+      "hinge_axis_direction": [
+        0,
+        0,
+        1
+      ]
+    },
+    {
+      "station_mm": 400,
+      "angle_deg": 90,
+      "hinge_face": "top",
+      "opening_mm": 57.99999999999999,
+      "removed_volume_mm3": 7391.999999999999,
+      "cutter_polygon": [
+        [
+          399,
+          28,
+          41
+        ],
+        [
+          370,
+          -1,
+          41.00000000000001
+        ],
+        [
+          430,
+          -1,
+          41.00000000000001
+        ],
+        [
+          401,
+          28,
+          41
+        ]
+      ],
+      "cutter_extrusion": [
+        0,
+        -5.143516556418883e-15,
+        -42
+      ],
+      "frame_column_major": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        -1,
+        1.2246467991473532e-16,
+        0,
+        0,
+        -1.2246467991473532e-16,
+        -1,
+        0,
+        0,
+        30,
+        40,
+        1
+      ],
+      "hinge_axis_point": [
+        400,
+        29,
+        40
+      ],
+      "hinge_axis_direction": [
+        0,
+        -1.2246467991473532e-16,
+        -1
+      ]
+    }
+  ],
+  "model": "ideal_zero_radius_hinge_preview",
+  "manufacturing_authoritative": false,
+  "source_reconstruction_verified": false,
+  "validation": {
+    "cut_face_closure_max_mm": 7.105427357601002e-15,
+    "cut_face_inverse_max_mm": 7.944109290391274e-15,
+    "stock_volume_mm3": 158400,
+    "removed_volume_mm3": 11659.773189849711,
+    "remaining_volume_mm3": 146740.22681015029,
+    "finite_wall_deformation_verified": false,
+    "kerf_compensated": false,
+    "springback_compensated": false
+  }
+}

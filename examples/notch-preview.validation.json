@@ -1,0 +1,18 @@
+{
+  "format": "ark-step-validation",
+  "version": 1,
+  "brep_valid": true,
+  "solids": 1,
+  "stock_volume_mm3": 158400.0,
+  "expected_removed_volume_mm3": 11659.773189849711,
+  "retained_wall_volume_max_error_mm3": 9.094947017729282e-13,
+  "measured_remaining_volume_mm3": 146740.2268101502,
+  "volume_error_mm3": 8.731149137020111e-11,
+  "roundtrip_symmetric_difference_volume_mm3": 0.0,
+  "volume_tolerance_mm3": 0.0001467402268101503,
+  "manufacturing_authoritative": false,
+  "source_reconstruction_verified": false,
+  "finite_wall_deformation_verified": false,
+  "model": "ideal_zero_radius_hinge_preview",
+  "step_sha256": "7fad1e7e6df2c2624b8c99e55cc9f82c995bc33896387d246e8e04b2fb1d74d9"
+}

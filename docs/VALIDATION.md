@@ -36,3 +36,9 @@ The first [workflow run](https://github.com/CenturyMesh/Ark/actions/runs/3576370
 ## Version 0.3
 
 The record above describes the initial 0.2 baseline. For current assembly/tube/CUDA test evidence and timing, see [MECHANICAL.md](MECHANICAL.md). The launcher and build script now default to `out/next`, keeping the running 0.2 binary intact during this upgrade.
+
+## Version 0.4
+
+The integrated build defaults to `out/fabrication`. New C++ notch tests check analytical cut-face closure and its inverse, independent volume integration, side orientations and invalid envelopes. Optional OCCT integration tests validate four retained-wall sides, STEP readback, B-rep validity, retained material and rejection of modified cutters. See [NOTCH_WORKFLOW.md](NOTCH_WORKFLOW.md) for the explicit geometric/physical boundary.
+
+The neutral UI was built and visually checked at 1600x1000 and 1180x840. Native in-app fixtures exercise property, placement and command dialogs plus acceptance/cancellation, creation and undo. The UI and assembly smoke modes returned zero exit codes. External click automation was unavailable because the native computer-use pipe could not connect; these checks do not claim an exhaustive external interaction test.

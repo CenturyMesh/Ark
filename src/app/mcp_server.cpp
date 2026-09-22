@@ -19,7 +19,7 @@ int main(){
                 if(auto p=req.find("params"))if(auto v=p->find("protocolVersion"))
                     if(v->asStr()=="2025-06-18"||v->asStr()=="2024-11-05")protocol=v->str;
                 r.set("protocolVersion",V::makeStr(protocol));caps.set("tools",V::makeObj());r.set("capabilities",caps);
-                info.set("name",V::makeStr("ark"));info.set("version",V::makeStr("0.3.0"));r.set("serverInfo",info);response.set("result",r);
+                info.set("name",V::makeStr("ark"));info.set("version",V::makeStr("0.4.0"));r.set("serverInfo",info);response.set("result",r);
             }else if(method=="ping")response.set("result",V::makeObj());
             else if(method=="tools/list"){V r=V::makeObj();r.set("tools",ark::AgentSession::tools());response.set("result",r);}
             else if(method=="tools/call"){
