@@ -1,0 +1,13 @@
+name: Build and test
+on: [push, pull_request]
+jobs:
+  kernel:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S . -B out/build -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build out/build --config Release --parallel 4
+      - run: ctest --test-dir out/build -C Release --output-on-failure

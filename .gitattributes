@@ -1,0 +1,12 @@
+* text=auto
+*.cpp text eol=lf
+*.hpp text eol=lf
+*.md text eol=lf
+*.ark text eol=lf
+*.arkjson text eol=lf
+*.png binary
+*.bat text eol=crlf
+*.h text eol=lf
+*.S text eol=lf
+*.yml text eol=lf
+*.arkops text eol=lf

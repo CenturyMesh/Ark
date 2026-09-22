@@ -1,0 +1,2 @@
+{"tool": "doc_apply", "arguments": {"commands": [{"op": "param.set", "name": "waves", "expr": "9"}, {"op": "param.set", "name": "amplitude", "expr": "0.3"}]}}
+{"tool": "mesh_inspect", "arguments": {}}

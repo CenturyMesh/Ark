@@ -1,0 +1,17 @@
+/build/
+/out/
+/.toolchain
+/*.png
+/*.stl
+/*.obj
+/smoke_doc.arkjson
+/mcp_test_input.txt
+/.test*
+/ark_session.ark
+/ark_session.arkjson
+/ark_export.*
+*.user
+*.log
+
+*.tmp
+__pycache__/

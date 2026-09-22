@@ -1,0 +1,43 @@
+{
+  "format": "ark",
+  "version": 1,
+  "units": "mm",
+  "next_feature_id": 2,
+  "params": [
+    {
+      "name": "radius",
+      "expr": "32"
+    },
+    {
+      "name": "tube",
+      "expr": "11"
+    },
+    {
+      "name": "waves",
+      "expr": "7"
+    },
+    {
+      "name": "amplitude",
+      "expr": "0.22"
+    }
+  ],
+  "sketches": [],
+  "features": [
+    {
+      "id": 1,
+      "type": "surface",
+      "name": "Harmonic ring",
+      "op": 0,
+      "inputs": [],
+      "p": {
+        "x": "(radius+tube*(1+amplitude*cos(waves*u+3*v))*cos(v))*cos(u)",
+        "y": "tube*(1+amplitude*cos(waves*u+3*v))*sin(v)+15",
+        "z": "(radius+tube*(1+amplitude*cos(waves*u+3*v))*cos(v))*sin(u)",
+        "nu": "160",
+        "nv": "64",
+        "wrap_u": "1",
+        "wrap_v": "1"
+      }
+    }
+  ]
+}
