@@ -1,0 +1,41 @@
+{
+  "format": "ark",
+  "version": 2,
+  "units": "mm",
+  "next_feature_id": 2,
+  "next_assembly_id": 1,
+  "params": [],
+  "sketches": [],
+  "features": [
+    {
+      "id": 1,
+      "type": "tube",
+      "name": "Spatial rectangular tube",
+      "op": 0,
+      "inputs": [],
+      "p": {
+        "section": "rect",
+        "width": "40",
+        "height": "25",
+        "wall": "2",
+        "tail": "180",
+        "chord_tol": "0.05"
+      },
+      "bends": [
+        {
+          "feed": "150",
+          "radius": "80",
+          "angle": "90",
+          "roll": "0"
+        },
+        {
+          "feed": "120",
+          "radius": "100",
+          "angle": "60",
+          "roll": "90"
+        }
+      ]
+    }
+  ],
+  "assembly": []
+}

@@ -1,0 +1,195 @@
+{
+  "format": "ark",
+  "version": 2,
+  "units": "mm",
+  "next_feature_id": 4,
+  "next_assembly_id": 11,
+  "params": [
+    {
+      "name": "span",
+      "expr": "360"
+    },
+    {
+      "name": "rise",
+      "expr": "250"
+    },
+    {
+      "name": "clr",
+      "expr": "70"
+    },
+    {
+      "name": "tube_od",
+      "expr": "32"
+    },
+    {
+      "name": "wall",
+      "expr": "2"
+    },
+    {
+      "name": "leg",
+      "expr": "200"
+    }
+  ],
+  "sketches": [],
+  "features": [
+    {
+      "id": 1,
+      "type": "tube",
+      "name": "Bent side rail",
+      "op": 0,
+      "inputs": [],
+      "p": {
+        "section": "round",
+        "od": "tube_od",
+        "wall": "wall",
+        "tail": "leg",
+        "chord_tol": "0.1",
+        "sides": "64"
+      },
+      "bends": [
+        {
+          "feed": "leg",
+          "radius": "clr",
+          "angle": "90",
+          "roll": "0"
+        },
+        {
+          "feed": "rise",
+          "radius": "clr",
+          "angle": "90",
+          "roll": "0"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "tube",
+      "name": "Cross member",
+      "op": 0,
+      "inputs": [],
+      "p": {
+        "section": "round",
+        "od": "24",
+        "wall": "2",
+        "tail": "span",
+        "sides": "48"
+      },
+      "bends": []
+    },
+    {
+      "id": 3,
+      "type": "box",
+      "name": "Mounting plate",
+      "op": 0,
+      "inputs": [],
+      "p": {
+        "dx": "80",
+        "dy": "12",
+        "dz": "80"
+      }
+    }
+  ],
+  "assembly": [
+    {
+      "id": 1,
+      "name": "Welded support",
+      "feature": 0,
+      "parent": 0,
+      "visible": true,
+      "p": {}
+    },
+    {
+      "id": 2,
+      "name": "Side frames",
+      "feature": 0,
+      "parent": 1,
+      "visible": true,
+      "p": {}
+    },
+    {
+      "id": 3,
+      "name": "Cross members",
+      "feature": 0,
+      "parent": 1,
+      "visible": true,
+      "p": {}
+    },
+    {
+      "id": 4,
+      "name": "Rail / left",
+      "feature": 1,
+      "parent": 2,
+      "visible": true,
+      "p": {}
+    },
+    {
+      "id": 5,
+      "name": "Rail / right",
+      "feature": 1,
+      "parent": 2,
+      "visible": true,
+      "p": {
+        "tz": "span"
+      }
+    },
+    {
+      "id": 6,
+      "name": "Lower brace",
+      "feature": 2,
+      "parent": 3,
+      "visible": true,
+      "p": {
+        "tx": "80",
+        "ry": "-90"
+      }
+    },
+    {
+      "id": 7,
+      "name": "Upper brace",
+      "feature": 2,
+      "parent": 3,
+      "visible": true,
+      "p": {
+        "tx": "80",
+        "ty": "rise+2*clr",
+        "ry": "-90"
+      }
+    },
+    {
+      "id": 8,
+      "name": "Back brace",
+      "feature": 2,
+      "parent": 3,
+      "visible": true,
+      "p": {
+        "tx": "leg+clr",
+        "ty": "clr+rise/2",
+        "ry": "-90"
+      }
+    },
+    {
+      "id": 9,
+      "name": "Foot / left",
+      "feature": 3,
+      "parent": 1,
+      "visible": true,
+      "p": {
+        "tx": "-40",
+        "ty": "-28",
+        "tz": "-40"
+      }
+    },
+    {
+      "id": 10,
+      "name": "Foot / right",
+      "feature": 3,
+      "parent": 1,
+      "visible": true,
+      "p": {
+        "tx": "-40",
+        "ty": "-28",
+        "tz": "span-40"
+      }
+    }
+  ]
+}

@@ -146,8 +146,13 @@ struct Zone { float x,y,w,h; int id; };
 
 static AgentSession g_session;
 static Document& g_doc=g_session.document;
-static std::vector<u64> g_bodyIds;
+static std::vector<u64> g_bodyIds,g_instanceIds;
+static std::vector<std::string> g_instanceNames;
+static std::vector<Mat4> g_instanceWorld;
+static std::vector<size_t> g_instancePart;
+static AABB g_sceneBounds;
 static std::vector<MeshReport> g_reports;
+static std::unordered_map<u64,arkjson::Value> g_tubeInfo;
 static std::vector<MeshBVH> g_bvhs;
 static size_t g_triangleCount=0;
 static std::string g_status="Ready. Local C++ kernel.",g_path="Harmonic ring.ark";
@@ -331,21 +336,32 @@ static void uploadMesh(GPUMesh& gm,const Mesh& m){
 }
 static void rebuildScene(bool evaluate=false){
     if(evaluate)g_doc.recompute();
-    std::set<u64> consumed;for(auto& f:g_doc.features)for(auto id:f.inputs)consumed.insert(id);
-    g_cpuMeshes.clear();g_bodyIds.clear();g_reports.clear();g_bvhs.clear();g_triangleCount=0;
-    // Reuse GPU allocations; inactive slots are retained for subsequent edits.
+    std::vector<AssemblyPlacement> placements;std::string error;
+    if(g_doc.assembly.empty()){
+        std::set<u64> consumed;for(auto& f:g_doc.features)for(auto id:f.inputs)consumed.insert(id);
+        for(auto& b:g_doc.evalBodies)if(!consumed.count(b.id)){auto* f=g_doc.find(b.id);placements.push_back({0,b.id,f?f->name:"Body",Mat4{},true});}
+    }else if(!resolveAssembly(g_doc,placements,error)){g_error=true;g_status=error;}
+    g_cpuMeshes.clear();g_bodyIds.clear();g_instanceIds.clear();g_instanceNames.clear();g_instanceWorld.clear();g_instancePart.clear();
+    g_reports.clear();g_bvhs.clear();g_tubeInfo.clear();g_triangleCount=0;g_sceneBounds=AABB{};
     for(auto& gm:g_meshes)gm.count=0;
-    for(auto& b:g_doc.evalBodies){
-        if(consumed.count(b.id))continue;
-        auto i=g_cpuMeshes.size();g_cpuMeshes.push_back(b.tessellate(g_doc.tessOpt));g_bodyIds.push_back(b.id);
-        g_reports.push_back(analyzeMesh(g_cpuMeshes.back()));g_bvhs.emplace_back(g_cpuMeshes.back());g_triangleCount+=g_cpuMeshes.back().triCount();
-        if(i>=g_meshes.size())g_meshes.emplace_back();uploadMesh(g_meshes[i],g_cpuMeshes.back());
+    std::unordered_map<u64,size_t> parts;
+    for(auto& placement:placements){
+        if(!placement.visible)continue;
+        auto part=parts.find(placement.feature);
+        if(part==parts.end()){
+            auto body=std::find_if(g_doc.evalBodies.begin(),g_doc.evalBodies.end(),[&](const Body& b){return b.id==placement.feature;});if(body==g_doc.evalBodies.end())continue;
+            size_t i=g_cpuMeshes.size();g_cpuMeshes.push_back(body->tessellate(g_doc.tessOpt));
+            if(auto* f=g_doc.find(body->id);f&&f->type==FeatureType::Tube){arkjson::Value a=arkjson::Value::makeObj();a.set("id",arkjson::Value::makeNum((double)body->id));auto r=g_session.call("tube_inspect",a);if(!r.find("isError")->b)g_tubeInfo[body->id]=*r.find("structuredContent");}g_reports.push_back(analyzeMesh(g_cpuMeshes.back()));g_bvhs.emplace_back(g_cpuMeshes.back());
+            if(i>=g_meshes.size())g_meshes.emplace_back();uploadMesh(g_meshes[i],g_cpuMeshes.back());part=parts.emplace(placement.feature,i).first;
+        }
+        auto i=part->second;g_bodyIds.push_back(placement.feature);g_instanceIds.push_back(placement.node);g_instanceNames.push_back(placement.name);g_instanceWorld.push_back(placement.world);g_instancePart.push_back(i);
+        g_sceneBounds.grow(g_reports[i].bounds.transformed(placement.world));g_triangleCount+=g_cpuMeshes[i].triCount();
     }
-    if(selBody<0||selBody>=(int)g_cpuMeshes.size())selBody=g_cpuMeshes.empty()?-1:0;
+    if(selBody<0||selBody>=(int)g_bodyIds.size())selBody=g_bodyIds.empty()?-1:0;
     hoverBody=-1;
 }
 static void frameScene(){
-    AABB b;for(auto& m:g_cpuMeshes)b.grow(m.computeBBox());
+    AABB b=g_sceneBounds;
     if(b.valid()){tTarget=b.center();tDist=std::max(b.diagonal()*1.65,2.);}
 }
 static arkjson::Value runTool(const std::string& tool,const arkjson::Value& args){
@@ -356,7 +372,11 @@ static arkjson::Value runTool(const std::string& tool,const arkjson::Value& args
     return result;
 }
 static void applyCommand(arkjson::Value command){
-    using V=arkjson::Value;V a=V::makeObj(),commands=V::makeArr();commands.arr.push_back(command);a.set("commands",commands);runTool("doc_apply",a);
+    using V=arkjson::Value;V a=V::makeObj(),commands=V::makeArr();commands.arr.push_back(command);
+    if(command.find("op")&&command.find("op")->asStr()=="feature.add"&&!g_doc.assembly.empty()){
+        V instance=V::makeObj();instance.set("op",V::makeStr("assembly.add"));instance.set("feature",V::makeNum((double)g_doc.nextFeatureId_));instance.set("name",V::makeStr(command.find("name")?command.find("name")->asStr():command.find("type")->asStr()));commands.arr.push_back(instance);
+    }
+    a.set("commands",commands);runTool("doc_apply",a);
 }
 static void addFeat(FeatureType type, std::initializer_list<std::pair<const char*,std::string>> ps,std::vector<u64> inputs={},int mode=0){
     using V=arkjson::Value;V c=V::makeObj(),p=V::makeObj(),in=V::makeArr();c.set("op",V::makeStr("feature.add"));c.set("type",V::makeStr(featureTypeName(type)));
@@ -410,6 +430,7 @@ static void uiAction(int id){
         case 6:addFeat(FeatureType::Extrude,{{"shape","polygon"},{"n","6"},{"r","18"},{"height","24"}});break;
         case 7:addFeat(FeatureType::Revolve,{{"shape","rect"},{"w","8"},{"d","18"},{"cx","16"},{"angle","300"}});break;
         case 8:case 9:case 10:
+            if(!g_doc.assembly.empty()){g_error=true;g_status="Edit part geometry before assembly; instance boolean operations are not available.";break;}
             if(g_bodyIds.size()>=2)addFeat(FeatureType::Boolean,{},{g_bodyIds[g_bodyIds.size()-2],g_bodyIds.back()},id-8);
             else {g_status="Create two output bodies before a boolean operation.";g_error=true;}break;
         case 11:if(!g_bodyIds.empty())addFeat(FeatureType::LinearPattern,{{"dx","100"},{"count","3"}},{g_bodyIds.back()});break;
@@ -430,13 +451,44 @@ static void uiAction(int id){
         case 22:g_grid=!g_grid;break;
         case 23:tYaw=0;tPitch=1.52;break;
         case 24:tYaw=.85;tPitch=.65;frameScene();break;
-        case 25:if(selBody>=0&&(size_t)selBody<g_bodyIds.size()){V c=V::makeObj();c.set("op",V::makeStr("feature.remove"));c.set("id",V::makeNum((double)g_bodyIds[selBody]));applyCommand(c);}break;
+        case 25:if(selBody>=0&&(size_t)selBody<g_bodyIds.size()){V c=V::makeObj();c.set("op",V::makeStr(g_instanceIds[selBody]?"assembly.remove":"feature.remove"));c.set("id",V::makeNum((double)(g_instanceIds[selBody]?g_instanceIds[selBody]:g_bodyIds[selBody])));applyCommand(c);}break;
+        case 26:{
+            V c,p,list,b;arkjson::parse(R"({"op":"feature.add","type":"tube","name":"Bent tube","p":{"od":"30","wall":"2","tail":"180"},"bends":[{"feed":"180","radius":"60","angle":"90","roll":"0"}]})",c);applyCommand(c);frameScene();break;
+        }
+        case 27:{
+            if(!g_doc.assembly.empty()){g_status="Assembly active. Duplicate or edit an instance placement.";break;}
+            V a=V::makeObj(),commands=V::makeArr(),group=V::makeObj();group.set("op",V::makeStr("assembly.add"));group.set("name",V::makeStr("Assembly"));commands.arr.push_back(group);u64 root=g_doc.nextAssemblyId_;
+            for(size_t i=0;i<g_bodyIds.size();++i){V c=V::makeObj();c.set("op",V::makeStr("assembly.add"));c.set("parent",V::makeNum((double)root));c.set("feature",V::makeNum((double)g_bodyIds[i]));c.set("name",V::makeStr(g_instanceNames[i]));commands.arr.push_back(c);}
+            a.set("commands",commands);runTool("doc_apply",a);break;
+        }
+        case 28:{
+            if(selBody<0)break;
+            if(g_doc.assembly.empty()){g_status="Create an assembly first.";break;}
+            auto source=std::find_if(g_doc.assembly.begin(),g_doc.assembly.end(),[&](const AssemblyNode& n){return n.id==g_instanceIds[selBody];});if(source==g_doc.assembly.end())break;
+            V c=V::makeObj(),p=V::makeObj();c.set("op",V::makeStr("assembly.add"));c.set("parent",V::makeNum((double)source->parent));c.set("feature",V::makeNum((double)source->feature));c.set("name",V::makeStr(source->name+" copy"));for(auto& kv:source->p)p.set(kv.first,V::makeStr(kv.second));p.set("tz",V::makeStr("("+(source->p.count("tz")?source->p.at("tz"):"0")+")+100"));c.set("p",p);applyCommand(c);frameScene();break;
+        }
+        case 29:{
+            if(selBody>=0&&!g_instanceIds[selBody]&&g_tubeInfo.count(g_bodyIds[selBody])){uiAction(30);break;}
+            if(selBody<0||!g_instanceIds[selBody]){g_status="Select an assembly instance to edit its placement.";break;}
+            auto source=std::find_if(g_doc.assembly.begin(),g_doc.assembly.end(),[&](const AssemblyNode& n){return n.id==g_instanceIds[selBody];});
+            V p=V::makeObj();for(auto key:{"tx","ty","tz","rx","ry","rz"})p.set(key,V::makeStr(source->p.count(key)?source->p.at(key):"0"));std::string text=p.dump();
+            if(editText("Instance placement / mm and degrees",text,true)){if(arkjson::parse(text,p)){V c=V::makeObj();c.set("op",V::makeStr("assembly.edit"));c.set("id",V::makeNum((double)source->id));c.set("p",p);applyCommand(c);}else{g_error=true;g_status="Invalid placement JSON";}}break;
+        }
+
+        case 30:{
+            if(selBody<0)break;auto* f=g_doc.find(g_bodyIds[selBody]);if(!f||f->type!=FeatureType::Tube)break;
+            V edit=V::makeObj(),p=V::makeObj(),bs=V::makeArr();for(auto& kv:f->p)p.set(kv.first,V::makeStr(kv.second));
+            for(auto& b:f->bends){V j=V::makeObj();j.set("feed",V::makeStr(b.feed));j.set("radius",V::makeStr(b.radius));j.set("angle",V::makeStr(b.angle));j.set("roll",V::makeStr(b.roll));bs.arr.push_back(j);}edit.set("p",p);edit.set("bends",bs);
+            std::string value=edit.dump();u64 id=f->id;
+            if(editText("Tube section and bend program / mm and degrees",value,true)){if(!arkjson::parse(value,edit)||edit.t!=V::Obj){g_error=true;g_status="Invalid tube program JSON";break;}edit.set("op",V::makeStr("feature.edit"));edit.set("id",V::makeNum((double)id));applyCommand(edit);}break;
+        }
+
     }
 }
 
 // picking -----------------------------------------------------------------------
 static Vec3 camEye(){
-    AABB all; for(auto&m:g_cpuMeshes)all.grow(m.computeBBox());
+    AABB all=g_sceneBounds;
     Vec3 ctr=target;
     Vec3 dw{std::cos(pitch)*std::sin(yaw),std::sin(pitch),std::cos(pitch)*std::cos(yaw)};
     return ctr+dw*dist;
@@ -448,8 +500,9 @@ static int pickBody(int mx,int my){
     f64 h=std::tan(deg2rad(35)*.5);
     Vec3 rd=(forward+right*(nx*h*viewW/viewH)+up*(ny*h)).normalized();
     int best=-1; f64 bt=1e300;
-    for(size_t bi=0;bi<g_cpuMeshes.size();++bi){
-        auto hit=g_bvhs[bi].raycast(g_cpuMeshes[bi],{eye,rd});
+    for(size_t bi=0;bi<g_bodyIds.size();++bi){
+        size_t part=g_instancePart[bi];Mat4 inv=g_instanceWorld[bi].inverted();
+        auto hit=g_bvhs[part].raycast(g_cpuMeshes[part],{inv.transformPoint(eye),inv.transformDir(rd)});
         if(hit.hit&&hit.distance<bt){bt=hit.distance;best=(int)bi;}
     }
     return best;
@@ -466,7 +519,7 @@ static bool g_swap=true;   // headless readback disables the buffer swap
 static void drawFrame(HDC hdc){
     yaw+=(tYaw-yaw)*.2; pitch+=(tPitch-pitch)*.2; dist+=(tDist-dist)*.18;
     target=target+(tTarget-target)*.2;
-    AABB box; for(auto&m:g_cpuMeshes)box.grow(m.computeBBox());
+    AABB box=g_sceneBounds;
     layout();
 
     glViewport(0,0,winW,winH);
@@ -488,8 +541,8 @@ static void drawFrame(HDC hdc){
     glUseProgram(pShadow);
     glUniformMatrix4fv(glGetUniformLocation(pShadow,"vp"),1,GL_FALSE,vpT);
     glBindVertexArray(quadVao);
-    for(auto&m:g_cpuMeshes){
-        AABB b=m.computeBBox(); if(!b.valid())continue;
+    for(size_t i=0;i<g_bodyIds.size();++i){
+        AABB b=g_reports[g_instancePart[i]].bounds.transformed(g_instanceWorld[i]); if(!b.valid())continue;
         Vec3 e=b.extent(),c=b.center();
         glUniform3f(glGetUniformLocation(pShadow,"ctr"),(float)c.x,(float)b.mn.y-.1f,(float)c.z);
         glUniform2f(glGetUniformLocation(pShadow,"rad"),(float)e.x*.62f+1,(float)e.z*.62f+1);
@@ -508,8 +561,9 @@ static void drawFrame(HDC hdc){
     glUniform3f(suEye,(float)eye.x,(float)eye.y,(float)eye.z);
     static const GLfloat ident[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
     glUniformMatrix4fv(suModel,1,GL_FALSE,ident);
-    for(size_t i=0;i<g_meshes.size();++i){
-        auto&gm=g_meshes[i]; if(!gm.count)continue;
+    for(size_t i=0;i<g_bodyIds.size();++i){
+        GLfloat model[16];for(int k=0;k<16;++k)model[k]=(GLfloat)g_instanceWorld[i].m[k];glUniformMatrix4fv(suModel,1,GL_FALSE,model);
+        auto&gm=g_meshes[g_instancePart[i]]; if(!gm.count)continue;
         float sel=i==(size_t)selBody?1.f:i==(size_t)hoverBody?.3f:0.f;
         float hue=((i*53)%97)/97.f;
         glUniform3f(suColor,.48f+.10f*hue,.69f+.05f*hue,.65f+.07f*hue);
@@ -570,16 +624,26 @@ static void drawFrame(HDC hdc){
     rect(389,72,1,22,0,.22,.27,.28,1,0,0,0,0,0);
     button("Extrude",404,67,77,6);button("Revolve",487,67,77,7);button("Pattern",570,67,77,11);
     button("Union",663,67,67,8);button("Cut",736,67,54,9);button("Intersect",796,67,85,10);
+    button("Tube",887,67,60,26);button("Assembly",953,67,92,27);
     button("Export STL",W-122,67,106,12);
     label("DOCUMENT",20,128,.68f);label("01",220,128,.68f);
-    textOut("Model explorer",20,158,1.05f);label(std::to_string(g_doc.features.size())+" features / "+std::to_string(g_cpuMeshes.size())+" outputs",20,188,.72f);
+    textOut("Model explorer",20,158,1.05f);label(std::to_string(g_doc.features.size())+" features / "+std::to_string(g_bodyIds.size())+" instances",20,188,.72f);
     float treeY=228;
-    for(size_t i=(size_t)g_treeScroll;i<g_doc.features.size()&&treeY<H-385;i++){
-        auto& f=g_doc.features[i];int body=-1;for(size_t j=0;j<g_bodyIds.size();++j)if(g_bodyIds[j]==f.id)body=(int)j;
+    size_t rows=g_doc.assembly.empty()?g_doc.features.size():g_doc.assembly.size();
+    for(size_t i=(size_t)g_treeScroll;i<rows&&treeY<H-385;i++){
+        std::string name,subtitle;int body=-1,depth=0;bool group=false;
+        if(g_doc.assembly.empty()){
+            auto& f=g_doc.features[i];name=f.name;subtitle=std::string(featureTypeName(f.type))+" #"+std::to_string(f.id);
+            for(size_t j=0;j<g_bodyIds.size();++j)if(g_bodyIds[j]==f.id)body=(int)j;
+        }else{
+            auto& node=g_doc.assembly[i];name=node.name;group=node.feature==0;subtitle=group?"Subassembly":"Part #"+std::to_string(node.feature)+" / node "+std::to_string(node.id);
+            u64 parent=node.parent;while(parent&&depth<5){++depth;auto it=std::find_if(g_doc.assembly.begin(),g_doc.assembly.end(),[&](const AssemblyNode& n){return n.id==parent;});if(it==g_doc.assembly.end())break;parent=it->parent;}
+            for(size_t j=0;j<g_instanceIds.size();++j)if(g_instanceIds[j]==node.id)body=(int)j;
+        }
         bool selected=body>=0&&selBody==body;
         if(selected)rect(12,treeY-7,234,53,7,.115,.20,.18,1,.26,.40,.34,.7,1);
-        textOut(body>=0?"<>":"-",24,treeY+2,.9f,.63,.81,.72);
-        textOut(f.name.substr(0,23),54,treeY,.82f);label(std::string(featureTypeName(f.type))+"  #"+std::to_string(f.id),54,treeY+23,.65f);
+        textOut(group?"+":body>=0?"<>":"-",20+depth*10,treeY+2,.8f,.63,.81,.72);
+        textOut(name.substr(0,22-depth),48+depth*10,treeY,.78f);label(subtitle,48+depth*10,treeY+23,.60f);
         if(body>=0)g_zones.push_back({12,treeY-7,234,53,2000+body});treeY+=62;
     }
     float ly=H-340;rect(20,ly,218,1,0,.17,.21,.22,1,0,0,0,0,0);label("PARAMETERS",20,ly+23,.68f);label("Click to edit",152,ly+23,.65f);
@@ -591,12 +655,12 @@ static void drawFrame(HDC hdc){
     textOut("Perspective",viewX+24,131,.87f);label("Y up  /  mm",viewX+24,155,.67f);
     button("Fit",W-486,124,55,20);button("Top",W-425,124,49,23);button("Iso",W-370,124,49,24);
     float rx=W-278;label("INSPECTOR",rx,129,.68f);label("MESH",W-66,129,.65f);
-    std::string selected="No selection",kind="No body";if(selBody>=0){auto* f=g_doc.find(g_bodyIds[selBody]);if(f){selected=f->name;kind=f->type==FeatureType::ParametricSurface?"EXPRESSION SURFACE / MESH":std::string(featureTypeName(f->type))+" / TESSELLATED MESH";}}
+    std::string selected="No selection",kind="No body";if(selBody>=0){auto* f=g_doc.find(g_bodyIds[selBody]);if(f){selected=g_instanceNames[selBody];kind=f->type==FeatureType::ParametricSurface?"EXPRESSION SURFACE / MESH":std::string(featureTypeName(f->type))+" / TESSELLATED MESH";if(g_instanceIds[selBody])kind="INSTANCE #"+std::to_string(g_instanceIds[selBody])+" / "+featureTypeName(f->type);}}
     textOut(selected.substr(0,25),rx,165,1.05f);
     rect(rx,205,254,28,5,.105,.17,.15,1,0,0,0,0,0);textOut(kind,rx+11,211,.64f,.60,.81,.69);
     label("GEOMETRY",rx,260,.66f);
     auto metric=[&](const char* title,const std::string& value,float y){label(title,rx,y,.76f);textOut(value,W-24-textWidth(value,.80f),y,.80f);};
-    if(selBody>=0){auto& r=g_reports[selBody];
+    if(selBody>=0){auto& r=g_reports[g_instancePart[selBody]];
         metric("Vertices",std::to_string(r.vertices),293);metric("Triangles",std::to_string(r.triangles),326);metric("Components",std::to_string(r.components),359);
         char size[100];auto e=r.bounds.extent();std::snprintf(size,sizeof size,"%.1f / %.1f / %.1f",e.x,e.y,e.z);metric("XYZ mm",size,392);
         rect(rx,429,254,1,0,.17,.21,.22,1,0,0,0,0,0);label("TOPOLOGY AUDIT",rx,453,.66f);
@@ -605,9 +669,15 @@ static void drawFrame(HDC hdc){
         textOut(r.closedOriented()?"o  Closed, oriented edges":"o  Open or irregular topology",rx,596,.79f,.64,.85,.73);
         label("Self-intersections not checked",rx,623,.65f);
     }
-    if(H>840 && kind=="EXPRESSION SURFACE / MESH"){rect(rx,673,254,1,0,.17,.21,.22,1,0,0,0,0,0);label("MATHEMATICAL MODEL",rx,697,.66f);
+    if(H>940 && kind=="EXPRESSION SURFACE / MESH"){rect(rx,673,254,1,0,.17,.21,.22,1,0,0,0,0,0);label("MATHEMATICAL MODEL",rx,697,.66f);
         textOut("x(u,v)   y(u,v)   z(u,v)",rx,730,.85f,.70,.82,.79);label("Trigonometry + named parameters",rx,761,.67f);label("Periodic seams validated",rx,786,.67f);}
+    if(selBody>=0&&g_tubeInfo.count(g_bodyIds[selBody])&&H>940){
+        auto& report=g_tubeInfo[g_bodyIds[selBody]];char length[80];std::snprintf(length,sizeof length,"%.2f mm",report.find("centerline_length_mm")->num);
+        label("TUBE PROGRAM",rx,680,.66f);metric("Developed axis",length,710);metric("Bends",std::to_string(report.find("bends")->arr.size()),743);
+        button("Edit tube program",rx,H-204,252,30);
+    }
     button("Wireframe",rx,H-120,121,14,false,wireframe);button("Grid",rx+131,H-120,121,22,false,g_grid);
+    button(selBody>=0&&!g_instanceIds[selBody]&&g_tubeInfo.count(g_bodyIds[selBody])?"Bend program":"Placement",rx,H-162,121,29);button("Duplicate",rx+131,H-162,121,28);
     button("Delete selected",rx,H-78,252,25);
     float cy=H-178;panel(viewX,cy,(float)viewW,150);
     label("AGENT CONSOLE",viewX+22,cy+16,.65f);label("LOCAL SESSION / REV "+std::to_string(g_session.revision),viewX+175,cy+16,.65f);
@@ -649,7 +719,7 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
             layout();return 0;
         case WM_MOUSEWHEEL:
             {POINT p{GET_X_LPARAM(lp),GET_Y_LPARAM(lp)};ScreenToClient(hw,&p);
-            if(p.x<viewX){g_treeScroll=std::max(0,std::min((int)g_doc.features.size()-1,g_treeScroll+(GET_WHEEL_DELTA_WPARAM(wp)>0?-1:1)));return 0;}}
+            if(p.x<viewX){g_treeScroll=std::max(0,std::min((int)(g_doc.assembly.empty()?g_doc.features.size():g_doc.assembly.size())-1,g_treeScroll+(GET_WHEEL_DELTA_WPARAM(wp)>0?-1:1)));return 0;}}
             tDist=clamp(tDist*(GET_WHEEL_DELTA_WPARAM(wp)>0?0.87:1.15),2.,4000.);
             return 0;
         case WM_LBUTTONDOWN:{
@@ -719,11 +789,12 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     cpu_detect();
 
     SetProcessDPIAware();
-    bool headless=false,selfTest=false;std::string shotPath="ark_studio.png",loadPath,scriptPath;
+    bool headless=false,selfTest=false,assemblyTest=false;std::string shotPath="ark_studio.png",loadPath,scriptPath;
     int sw=1600,sh=1000,argc=0;auto argv=CommandLineToArgvW(GetCommandLineW(),&argc);
     auto utf8=[](const wchar_t* w){int n=WideCharToMultiByte(CP_UTF8,0,w,-1,nullptr,0,nullptr,nullptr);std::string s(n,'\0');WideCharToMultiByte(CP_UTF8,0,w,-1,s.data(),n,nullptr,nullptr);s.pop_back();return s;};
     for(int i=1;i<argc;++i){auto a=utf8(argv[i]);if(a=="--shot"&&i+1<argc){headless=true;shotPath=utf8(argv[++i]);}
         else if(a=="--self-test-ui")selfTest=true;
+        else if(a=="--self-test-assembly")assemblyTest=true;
         else if(a=="--size"&&i+2<argc){sw=_wtoi(argv[++i]);sh=_wtoi(argv[++i]);}
         else if(a=="--load"&&i+1<argc)loadPath=utf8(argv[++i]);
         else if(a=="--script"&&i+1<argc)scriptPath=utf8(argv[++i]);}
@@ -736,7 +807,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     RegisterClassA(&wc);
     RECT rc{0,0,winW,winH};
     AdjustWindowRect(&rc,WS_OVERLAPPEDWINDOW,FALSE);
-    HWND hwnd=CreateWindowA("ARKVIEW","ARK / Geometry Studio",WS_OVERLAPPEDWINDOW,
+    HWND hwnd=CreateWindowA("ARKVIEW","ARK 0.3 / Geometry Studio",WS_OVERLAPPEDWINDOW,
                             CW_USEDEFAULT,CW_USEDEFAULT,rc.right-rc.left,rc.bottom-rc.top,
                             nullptr,nullptr,hi,nullptr);
     g_window=hwnd;BOOL dark=TRUE;DwmSetWindowAttribute(hwnd,20,&dark,sizeof dark);
@@ -844,7 +915,19 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         uiAction(23);if(tPitch!=1.52)return 16;uiAction(24);
         g_status="UI checks passed: create / undo / redo / delete / wire / grid / views";
     }
+    if(assemblyTest){
+        if(g_doc.assembly.empty()||g_bodyIds.empty())return 30;
+        size_t parts=g_cpuMeshes.size(),instances=g_bodyIds.size(),features=g_doc.features.size();
+        uiAction(28);if(g_error||g_cpuMeshes.size()!=parts||g_bodyIds.size()!=instances+1||g_doc.features.size()!=features)return 31;
+        selBody=(int)g_bodyIds.size()-1;uiAction(25);if(g_error||g_bodyIds.size()!=instances)return 32;
+        uiAction(18);if(g_error||g_bodyIds.size()!=instances+1)return 33;uiAction(19);if(g_error||g_bodyIds.size()!=instances)return 34;
+        g_status="Assembly checks passed / shared GPU buffers / duplicate / remove / undo / redo";frameScene();
+    }
     target=tTarget;dist=tDist;yaw=tYaw;pitch=tPitch;
+    if(assemblyTest){
+        bool hit=false;for(int y=viewY+40;y<viewY+viewH;y+=30)for(int x=viewX+20;x<viewX+viewW;x+=30)hit|=pickBody(x,y)>=0;
+        if(!hit)return 35;
+    }
 
     if(headless){
         g_swap=false;

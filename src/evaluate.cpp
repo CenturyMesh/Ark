@@ -130,6 +130,10 @@ static Body evalFeatureBody(const Feature& f, const ExprEnv& env, Document& doc,
     };
 
     switch(f.type){
+        case FeatureType::Tube: {
+            auto tube=buildTube(f,env);if(!tube.error.empty()){res.ok=false;res.error=tube.error;return {};}
+            Body body;body.baked=std::make_unique<Mesh>(std::move(tube.mesh));res.tris=body.baked->triCount();return body;
+        }
         case FeatureType::ParametricSurface: {
             int nu=(int)f.num(env,"nu",96), nv=(int)f.num(env,"nv",48);
             if(nu<3||nv<3||nu>256||nv>256){res.ok=false;res.error="surface resolution must be 3..256";return {};}
@@ -261,7 +265,7 @@ const std::vector<FeatureResult>& Document::recompute() {
         f64 tf=nowMs();
         fr.error=parameterError;
         for(auto& kv:f.p){
-            if(kv.first=="shape"||kv.first=="sketch"||kv.first=="name"||
+            if(kv.first=="shape"||kv.first=="section"||kv.first=="sketch"||kv.first=="name"||
                (f.type==FeatureType::ParametricSurface&&(kv.first=="x"||kv.first=="y"||kv.first=="z")))continue;
             bool ok=false; f64 value=evalExpr(kv.second,env,&ok);
             if(!ok || std::fabs(value)>1e8)fr.error="Invalid expression for '"+kv.first+"': "+kv.second;

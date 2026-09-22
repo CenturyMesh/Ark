@@ -2,7 +2,7 @@
 
 A C++ geometry workspace designed to be operated by people and agents.
 
-![ARK Studio](docs/studio.png)
+![ARK Studio assemblies](docs/assembly.png)
 
 ARK combines a native Windows/OpenGL editor, a headless geometry library and a local MCP server. All new editor commands and MCP tools use the same `AgentSession` implementation. It is an **early engineering prototype**, with an existing custom kernel extended and corrected here, not yet an industrial CAD replacement.
 
@@ -20,9 +20,9 @@ Windows requirements: CMake 3.20+, Ninja and a C++20 compiler on PATH. The inclu
 The kernel and MCP have portable CMake targets for Linux; CI execution is currently blocked by the GitHub account billing limit:
 
 ```sh
-cmake -S . -B out/build -DCMAKE_BUILD_TYPE=Release
-cmake --build out/build --parallel 4
-ctest --test-dir out/build --output-on-failure
+cmake -S . -B out/next -DCMAKE_BUILD_TYPE=Release
+cmake --build out/next --parallel 4
+ctest --test-dir out/next --output-on-failure
 ```
 
 Targets: `ark` static library, `ark-mcp`, `ark-cli` (legacy demonstration), `ark-tests`, `ark-agent-tests`, and `ark-studio` on Windows. No JavaScript runtime, web server, cloud account or model subscription is required by ARK itself. MinGW executables link their runtime statically.
@@ -38,13 +38,13 @@ Targets: `ark` static library, `ark-mcp`, `ark-cli` (legacy demonstration), `ark
 
 ## Agents
 
-Start `out/build/ark-mcp.exe` as a local MCP stdio server from your MCP client. The interface is model independent: an Astra or other agent host can drive it **if that host can invoke MCP tools**. ARK does not embed a language model or provide a natural-language chat service.
+Start `out/next/ark-mcp.exe` as a local MCP stdio server from your MCP client. The interface is model independent: an Astra or other agent host can drive it **if that host can invoke MCP tools**. ARK does not embed a language model or provide a natural-language chat service.
 
 ```json
 {
   "mcpServers": {
     "ark": {
-      "command": "C:/path/to/Ark/out/build/ark-mcp.exe",
+      "command": "C:/path/to/Ark/out/next/ark-mcp.exe",
       "args": []
     }
   }
@@ -52,6 +52,17 @@ Start `out/build/ark-mcp.exe` as a local MCP stdio server from your MCP client. 
 ```
 
 This is a generic MCP configuration example; the host's configuration format may differ. See [agent protocol](docs/AGENTS.md) for the tool contract and examples. Studio and a separately launched MCP process each own an independent session. Use `.ark` files to hand work between them; live cross-process synchronization is not implemented.
+
+## Assemblies, tube bending and GPU compute (0.3)
+
+```powershell
+.\start-studio.ps1 -Document examples/welded-support.ark
+.\start-studio.ps1 -Document examples/spatial-tube.ark
+```
+
+Assemblies have shared part definitions, nested groups, independent rigid placements and BOM quantities. Studio shares GPU mesh buffers and local BVHs between instances. Use **Assembly**, **Duplicate** and **Placement** to organize parts. Tube programs support round and rectangular hollow sections, multiple bends and plane rotations. **Tube** creates a bend; **Edit tube program** changes its section and bend sequence.
+
+An optional CUDA backend accelerates large packed position transforms, while analytic geometry and placement calculations stay in f64. It loads the installed NVIDIA driver and NVRTC runtime dynamically; CUDA headers must be available when configuring the build and `CUDA_PATH` must locate NVRTC at runtime. No nvcc build or GPU driver change is required. CPU builds and fallback remain supported. [Scope, measurements and MeshARC assessment](docs/MECHANICAL.md).
 
 ## What is implemented
 
@@ -62,6 +73,9 @@ This is a generic MCP configuration example; the host's configuration format may
 | Complex surfaces | `x(u,v)`, `y(u,v)`, `z(u,v)` with named expressions, indexed tessellation and validated periodic seams |
 | Mesh reasoning | Cached geometry and topology reports, bounds, area, connected components, oriented-edge checks, BVH ray intersection and explicit buffer retrieval |
 | Agent transactions | Batches of up to 128 commands, one geometry recompute, rollback on failure, expected revision, stable feature IDs, 32 undo steps |
+| Assemblies | Shared part definitions, nested groups, rigid instance placement, visibility and BOM quantities |
+| Tube programs | Round/rectangular hollow profiles, planar/spatial bends, geometric developed length and bend tables |
+| Compute | GPU model transforms with shared display buffers; optional CUDA packed transforms and reproducible CPU/GPU benchmark |
 | Files | `.ark` versioned JSON document; `.arkjson` compatibility; `.arkops` line-by-line command replay; STL/OBJ export; PNG snapshots |
 | Studio | Native GPU viewport, selection, model tree, expression editing, mesh inspector, command console, open/save and undo/redo |
 
@@ -69,6 +83,6 @@ See [file formats](docs/FORMATS.md), [assessment and roadmap](docs/ASSESSMENT.md
 
 ## Boundaries
 
-Boolean outputs and expression surfaces are meshes. Closed oriented edges do not establish freedom from self-intersection or a manufacturing-valid solid. The existing B-rep does not yet implement a complete shared edge/vertex topology, robust exact boolean operations or persistent face naming. Primitive tessellation does not consistently honor all `TessOptions`. STL/OBJ import, STEP exchange, fillets, robust remeshing, assemblies and a production constraint solver remain future work.
+Boolean outputs and expression surfaces are meshes. Closed oriented edges do not establish freedom from self-intersection or a manufacturing-valid solid. The existing B-rep does not yet implement a complete shared edge/vertex topology, robust exact boolean operations or persistent face naming. Primitive tessellation does not consistently honor all `TessOptions`. STL/OBJ import, STEP exchange, fillets, robust remeshing, assembly mate solving and a production constraint solver remain future work.
 
 Trace and Stage are possible future adapters. This project currently has no runtime dependency on either.

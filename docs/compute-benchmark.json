@@ -1,0 +1,57 @@
+﻿{
+  "results": [
+    {
+      "available": true,
+      "device": "NVIDIA GeForce RTX 4080 SUPER",
+      "reason": "Ready",
+      "last_backend": "CUDA",
+      "last_ms": 0.4289,
+      "initialization_ms": 153.6939,
+      "auto_threshold_vertices": 1048576,
+      "operation": "packed mesh positions / f64 matrix arithmetic / f32 output",
+      "vertices": 262144,
+      "cpu_median_ms": 0.4867,
+      "gpu_executed": true,
+      "includes_transfer_and_sync": true,
+      "gpu_median_ms": 0.4341,
+      "speedup": 1.1211702372725179,
+      "max_abs_error_mm": 0
+    },
+    {
+      "available": true,
+      "device": "NVIDIA GeForce RTX 4080 SUPER",
+      "reason": "Ready",
+      "last_backend": "CUDA",
+      "last_ms": 1.5779,
+      "initialization_ms": 153.6939,
+      "auto_threshold_vertices": 1048576,
+      "operation": "packed mesh positions / f64 matrix arithmetic / f32 output",
+      "vertices": 1048576,
+      "cpu_median_ms": 1.9613,
+      "gpu_executed": true,
+      "includes_transfer_and_sync": true,
+      "gpu_median_ms": 1.5939,
+      "speedup": 1.230503795721187,
+      "max_abs_error_mm": 0
+    },
+    {
+      "available": true,
+      "device": "NVIDIA GeForce RTX 4080 SUPER",
+      "reason": "Ready",
+      "last_backend": "CUDA",
+      "last_ms": 6.3655,
+      "initialization_ms": 153.6939,
+      "auto_threshold_vertices": 1048576,
+      "operation": "packed mesh positions / f64 matrix arithmetic / f32 output",
+      "vertices": 4000000,
+      "cpu_median_ms": 7.5706,
+      "gpu_executed": true,
+      "includes_transfer_and_sync": true,
+      "gpu_median_ms": 6.2798,
+      "speedup": 1.2055479473868596,
+      "max_abs_error_mm": 0
+    }
+  ],
+  "warmup_excluded": true,
+  "cold_runtime_initialization_reported_separately": true
+}

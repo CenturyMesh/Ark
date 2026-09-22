@@ -1,5 +1,7 @@
 ﻿// ARK-Point :: mesh.cpp â€” adaptive parallel tessellation + mesh utilities.
 #include "ark/mesh.hpp"
+#include "ark/compute.hpp"
+#include <stdexcept>
 #include "ark/nurbs.hpp"
 #include <unordered_map>
 #include <map>
@@ -58,11 +60,9 @@ void Mesh::weld(f64 eps) {
 
 void Mesh::append(const Mesh& o, const Mat4& X) {
     u32 base=(u32)vertCount();
-    size_t nv=o.vertCount();
-    std::vector<Vec3> in(nv), out(nv);
-    for(size_t i=0;i<nv;++i) in[i]={o.pos[i*3],o.pos[i*3+1],o.pos[i*3+2]};
-    transform_points_f32(X, in.data(), out.data(), nv);
-    for(size_t i=0;i<nv;++i) addVertex(out[i]);
+    std::vector<f32> positions;Mat4 identity;
+    if(std::equal(X.m,X.m+16,identity.m))pos.insert(pos.end(),o.pos.begin(),o.pos.end());
+    else {if(!transformPacked(o.pos,positions,X))throw std::runtime_error("Invalid packed mesh positions");pos.insert(pos.end(),positions.begin(),positions.end());}
     for(auto ix:o.idx) idx.push_back(base+ix);
 }
 

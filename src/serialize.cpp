@@ -97,7 +97,8 @@ bool conFromJson(const Value& v, SketchCon& c, std::string* err){
 std::string documentToJson(const Document& doc){
     Value r=Value::makeObj();
     r.set("format",Value::makeStr("ark"));
-    r.set("version",Value::makeNum(1));
+    bool extended=!doc.assembly.empty()||doc.nextAssemblyId_>1;for(auto& f:doc.features)extended|=f.type==FeatureType::Tube;
+    r.set("version",Value::makeNum(extended?2:1));
     r.set("units",Value::makeStr("mm"));
     r.set("next_feature_id",Value::makeNum((double)doc.nextFeatureId_));
 
@@ -137,9 +138,16 @@ std::string documentToJson(const Document& doc){
         std::sort(keys.begin(),keys.end());
         for(auto& key:keys) pv.set(key,Value::makeStr(f.p.at(key)));
         v.set("p",std::move(pv));
+        if(f.type==FeatureType::Tube){Value bends=Value::makeArr();for(auto& b:f.bends){Value j=Value::makeObj();j.set("feed",Value::makeStr(b.feed));j.set("radius",Value::makeStr(b.radius));j.set("angle",Value::makeStr(b.angle));j.set("roll",Value::makeStr(b.roll));bends.arr.push_back(j);}v.set("bends",bends);}
         fs.arr.push_back(std::move(v));
     }
     r.set("features",std::move(fs));
+    if(extended){
+        r.set("next_assembly_id",Value::makeNum((double)doc.nextAssemblyId_));Value nodes=Value::makeArr();
+        for(auto& n:doc.assembly){Value j=Value::makeObj(),p=Value::makeObj();j.set("id",Value::makeNum((double)n.id));j.set("parent",Value::makeNum((double)n.parent));j.set("feature",Value::makeNum((double)n.feature));j.set("name",Value::makeStr(n.name));j.set("visible",Value::makeBool(n.visible));
+            std::vector<std::string> keys;for(auto& kv:n.p)keys.push_back(kv.first);std::sort(keys.begin(),keys.end());for(auto& k:keys)p.set(k,Value::makeStr(n.p.at(k)));j.set("p",p);nodes.arr.push_back(j);}
+        r.set("assembly",nodes);
+    }
     return r.dump();
 }
 
@@ -148,7 +156,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     Value v;
     if(!arkjson::parse(json,v)) return fail("malformed JSON");
     if(v.t!=Value::Obj) return fail("root must be object");
-    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || ver->num!=1.0))
+    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0)))
         return fail("unsupported document version");
 
     if(auto format=v.find("format");format && format->asStr()!="ark")return fail("unsupported format");
@@ -211,6 +219,10 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
             }
             if(auto pv=fv.find("p"); pv&&pv->t==Value::Obj)
                 for(auto&kv:pv->obj) nf.p[kv.first]=kv.second.asStr();
+            if(auto bends=fv.find("bends")){
+                if(bends->t!=Value::Arr||bends->arr.size()>64)return fail("invalid tube bends");
+                for(auto& j:bends->arr){if(j.t!=Value::Obj)return fail("bend must be object");TubeBend b;for(auto pair:std::vector<std::pair<const char*,std::string*>>{{"feed",&b.feed},{"radius",&b.radius},{"angle",&b.angle},{"roll",&b.roll}})if(auto value=j.find(pair.first)){if(value->t!=Value::Str)return fail("tube bend fields must be expressions");*pair.second=value->str;}nf.bends.push_back(b);}
+            }
             maxId=tmax(maxId,nf.id);
             nd.features.push_back(std::move(nf));
         }
@@ -220,9 +232,23 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
         nd.nextFeatureId_=(u64)next->num;
     }
 
+    if(auto nodes=v.find("assembly")){
+        if(nodes->t!=Value::Arr||nodes->arr.size()>4096)return fail("invalid assembly array");
+        auto integer=[&](const Value& j,const char* key,u64& out){auto q=j.find(key);if(!q||q->t!=Value::Num||q->num<0||q->num>9007199254740990.||q->num!=std::floor(q->num))return false;out=(u64)q->num;return true;};
+        u64 maximum=0;for(auto& j:nodes->arr){AssemblyNode n;
+            if(!integer(j,"id",n.id)||!n.id||!integer(j,"parent",n.parent)||!integer(j,"feature",n.feature))return fail("invalid assembly identifiers");
+            n.name=j.find("name")?j.find("name")->asStr():"Component";
+            if(auto visible=j.find("visible")){if(visible->t!=Value::Bool)return fail("visible must be boolean");n.visible=visible->b;}
+            if(auto p=j.find("p")){if(p->t!=Value::Obj)return fail("assembly p must be object");for(auto& kv:p->obj){if(kv.second.t!=Value::Str)return fail("placement fields must be expressions");n.p[kv.first]=kv.second.str;}}
+            maximum=std::max(maximum,n.id);nd.assembly.push_back(n);
+        }
+        nd.nextAssemblyId_=maximum+1;
+        if(v.find("next_assembly_id")){u64 counter;if(!integer(v,"next_assembly_id",counter)||counter<=maximum)return fail("invalid next_assembly_id");nd.nextAssemblyId_=counter;}
+    }
     if(nd.params.size()>256||nd.features.size()>1024||nd.sketches.size()>64)return fail("document capacity exceeded");
     nd.refreshParams();
     if(!nd.parameterError.empty())return fail(nd.parameterError);
+    std::vector<AssemblyPlacement> placements;std::string assemblyError;if(!resolveAssembly(nd,placements,assemblyError))return fail(assemblyError);
     doc=std::move(nd);
     return true;
 }

@@ -32,3 +32,7 @@ On Windows the GUI executable may return control to PowerShell before it exits; 
 ## GitHub Actions availability
 
 The first [workflow run](https://github.com/CenturyMesh/Ark/actions/runs/35763704970) did not start a runner. GitHub reported failed account payments or a spending limit requiring an increase. The Windows job has no executed steps; Linux was canceled by the matrix after that infrastructure failure. Windows/MSVC and Linux/GCC have therefore not been validated by CI. Local MinGW tests and native rendering above passed independently. No billing settings were changed.
+
+## Version 0.3
+
+The record above describes the initial 0.2 baseline. For current assembly/tube/CUDA test evidence and timing, see [MECHANICAL.md](MECHANICAL.md). The launcher and build script now default to `out/next`, keeping the running 0.2 binary intact during this upgrade.

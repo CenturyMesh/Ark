@@ -1,8 +1,10 @@
 #include "ark/agent.hpp"
 #include "ark/mesh_analysis.hpp"
 #include "ark/io.hpp"
+#include "ark/compute.hpp"
 #include <stdexcept>
 #include <set>
+#include <map>
 #include <fstream>
 namespace ark {
 using V=arkjson::Value;
@@ -12,9 +14,24 @@ std::string str(const V& a,const char* k){auto& p=field(a,k);if(p.t!=V::Str||p.s
 u64 id(const V& v){if(v.t!=V::Num||!std::isfinite(v.num)||v.num<1||v.num>9007199254740991.||v.num!=std::floor(v.num))throw std::runtime_error("Expected positive integer id");return (u64)v.num;}
 std::string expression(const V& v){if(v.t==V::Str && v.str.size()<=2048)return v.str;if(v.t==V::Num&&std::isfinite(v.num))return v.dump();throw std::runtime_error("Expected expression string or finite number");}
 void params(Feature& f,const V& p){if(p.t!=V::Obj)throw std::runtime_error("p must be an object");for(auto& kv:p.obj)f.p[kv.first]=expression(kv.second);}
+void bends(Feature& f,const V& list){
+    if(f.type!=FeatureType::Tube||list.t!=V::Arr||list.arr.size()>64)throw std::runtime_error("bends requires a tube and 0..64 bend objects");
+    f.bends.clear();for(auto& j:list.arr){if(j.t!=V::Obj)throw std::runtime_error("bend must be object");TubeBend b;
+        for(auto pair:std::vector<std::pair<const char*,std::string*>>{{"feed",&b.feed},{"radius",&b.radius},{"angle",&b.angle},{"roll",&b.roll}})if(auto p=j.find(pair.first))*pair.second=expression(*p);
+        f.bends.push_back(b);
+    }
+}
+void editNode(AssemblyNode& n,const V& j){
+    if(auto p=j.find("parent"))n.parent=p->t==V::Num&&p->num==0?0:id(*p);
+    if(auto p=j.find("feature"))n.feature=p->t==V::Num&&p->num==0?0:id(*p);
+    if(auto p=j.find("visible")){if(p->t!=V::Bool)throw std::runtime_error("visible must be boolean");n.visible=p->b;}
+    if(j.find("name"))n.name=str(j,"name");
+    if(auto p=j.find("p")){if(p->t!=V::Obj)throw std::runtime_error("p must be object");for(auto& kv:p->obj)n.p[kv.first]=expression(kv.second);}
+}
 V result(V data,bool error=false){V r=V::makeObj(),content=V::makeArr(),item=V::makeObj();item.set("type",V::makeStr("text"));item.set("text",V::makeStr(data.dump()));content.arr.push_back(item);r.set("content",content);r.set("structuredContent",data);r.set("isError",V::makeBool(error));return r;}
 void validated(Document& d){
     if(d.features.size()>1024||d.params.size()>256||d.sketches.size()>64)throw std::runtime_error("Document capacity exceeded");
+    std::vector<AssemblyPlacement> placements;std::string error;if(!resolveAssembly(d,placements,error))throw std::runtime_error(error);
     d.recompute();
     if(!d.parameterError.empty())throw std::runtime_error(d.parameterError);
     for(auto& r:d.lastResults)if(!r.ok)throw std::runtime_error("Feature #"+std::to_string(r.id)+": "+r.error);
@@ -24,8 +41,18 @@ std::set<u64> consumed(const Document& d){std::set<u64> out;for(auto& f:d.featur
 Mesh selectedMesh(Document& d,const V& args){
     Mesh m;
     u64 selected=args.find("id")?id(*args.find("id")):0;
-    auto hidden=consumed(d);
-    for(auto& b:d.evalBodies)if(selected?b.id==selected:!hidden.count(b.id))m.append(b.tessellate(d.tessOpt));
+    auto node=args.find("node");if(node&&selected)throw std::runtime_error("Select id or node, not both");
+    if(!d.assembly.empty()&&!selected){
+        std::vector<AssemblyPlacement> placements;std::string error;if(!resolveAssembly(d,placements,error))throw std::runtime_error(error);
+        std::unordered_map<u64,Mesh> parts;
+        for(auto& p:placements)if(p.visible&&(!node||p.node==id(*node))){
+            auto part=parts.find(p.feature);if(part==parts.end())for(auto& b:d.evalBodies)if(b.id==p.feature){part=parts.emplace(p.feature,b.tessellate(d.tessOpt)).first;break;}
+            if(part!=parts.end())m.append(part->second,p.world);
+        }
+    }else{
+        if(node)throw std::runtime_error("No assembly instance selected");
+        auto hidden=consumed(d);for(auto& b:d.evalBodies)if(selected?b.id==selected:!hidden.count(b.id))m.append(b.tessellate(d.tessOpt));
+    }
     if(!m.triCount())throw std::runtime_error("No mesh for requested selection");
     return m;
 }
@@ -33,6 +60,7 @@ Mesh selectedMesh(Document& d,const V& args){
 AgentSession::Cache& AgentSession::meshCache(const V& args){
     if(cacheRevision_!=revision){cache_.clear();cacheRevision_=revision;}
     u64 key=args.find("id")?id(*args.find("id")):0;
+    if(auto node=args.find("node")){if(key)throw std::runtime_error("Select id or node, not both");key=id(*node)|(u64(1)<<63);}
     auto it=cache_.find(key);if(it!=cache_.end())return it->second;
     Cache c;c.mesh=selectedMesh(document,args);c.report=analyzeMesh(c.mesh);c.bvh=std::make_unique<MeshBVH>(c.mesh);
     return cache_.emplace(key,std::move(c)).first->second;
@@ -44,7 +72,7 @@ V AgentSession::info() const {
     r.set("parameter_error",V::makeStr(document.parameterError));
     V fs=V::makeArr();auto hidden=consumed(document);
     for(auto& f:document.features){V v=V::makeObj();v.set("id",V::makeNum((double)f.id));v.set("name",V::makeStr(f.name));v.set("type",V::makeStr(featureTypeName(f.type)));v.set("output",V::makeBool(!hidden.count(f.id)));fs.arr.push_back(v);}
-    r.set("features",fs);return r;
+    r.set("features",fs);r.set("assembly_nodes",V::makeNum(document.assembly.size()));return r;
 }
 V AgentSession::call(const std::string& tool,const V& args){
     try{
@@ -56,6 +84,28 @@ V AgentSession::call(const std::string& tool,const V& args){
             if(!ok)throw std::runtime_error("Invalid mathematical expression");
             V r=V::makeObj();r.set("value",V::makeNum(v));return result(r);
         }
+        if(tool=="compute_info")return result(computeInfo());
+        if(tool=="compute_benchmark"){
+            size_t count=1048576;if(auto value=args.find("vertices")){if(value->t!=V::Num||value->num<1||value->num>4000000||value->num!=std::floor(value->num))throw std::runtime_error("vertices must be an integer in 1..4000000");count=(size_t)value->num;}
+            return result(benchmarkCompute(count));
+        }
+        if(tool=="assembly_info"){
+            std::vector<AssemblyPlacement> placements;std::string error;if(!resolveAssembly(document,placements,error))throw std::runtime_error(error);
+            V r=info(),nodes=V::makeArr(),bom=V::makeArr();std::map<u64,size_t> quantities;
+            for(auto& p:placements){V j=V::makeObj(),matrix=V::makeArr();j.set("node",V::makeNum((double)p.node));j.set("feature",V::makeNum((double)p.feature));j.set("name",V::makeStr(p.name));j.set("visible",V::makeBool(p.visible));
+                for(auto x:p.world.m)matrix.arr.push_back(V::makeNum(x));
+                j.set("world_column_major",matrix);nodes.arr.push_back(j);++quantities[p.feature];}
+            for(auto& kv:quantities){V j=V::makeObj();j.set("feature",V::makeNum((double)kv.first));j.set("name",V::makeStr(document.find(kv.first)->name));j.set("quantity",V::makeNum(kv.second));bom.arr.push_back(j);}
+            r.set("instances",nodes);r.set("bom",bom);r.set("mates_solved",V::makeBool(false));return result(r);
+        }
+        if(tool=="tube_inspect"){
+            auto* f=document.find(id(field(args,"id")));if(!f||f->type!=FeatureType::Tube)throw std::runtime_error("Tube feature not found");
+            auto tube=buildTube(*f,document.buildEnv());if(!tube.error.empty())throw std::runtime_error(tube.error);
+            V r=V::makeObj(),table=V::makeArr();r.set("centerline_length_mm",V::makeNum(tube.centerlineLength));r.set("section_area_mm2",V::makeNum(tube.sectionArea));r.set("ideal_material_volume_mm3",V::makeNum(tube.centerlineLength*tube.sectionArea));
+            r.set("fabrication_compensated",V::makeBool(false));r.set("self_intersections_checked",V::makeBool(false));r.set("sampled_rings",V::makeNum(tube.frames.size()));
+            for(size_t i=0;i<f->bends.size();++i){auto& b=f->bends[i];V row=V::makeObj();auto env=document.buildEnv();row.set("feed_mm",V::makeNum(evalExpr(b.feed,env)));row.set("clr_mm",V::makeNum(evalExpr(b.radius,env)));row.set("angle_deg",V::makeNum(evalExpr(b.angle,env)));row.set("plane_roll_deg",V::makeNum(evalExpr(b.roll,env)));row.set("station_start_mm",V::makeNum(tube.bendStarts[i]));row.set("station_end_mm",V::makeNum(tube.bendEnds[i]));table.arr.push_back(row);}
+            r.set("bends",table);return result(r);
+        }
         if(tool=="doc_apply"){
             if(auto expected=args.find("expected_revision")){
                 if(expected->t!=V::Num||expected->num!=(double)revision)throw std::runtime_error("Revision conflict; read doc_get and retry");
@@ -64,7 +114,7 @@ V AgentSession::call(const std::string& tool,const V& args){
             if(commands.t!=V::Arr||commands.arr.empty()||commands.arr.size()>128)throw std::runtime_error("commands must contain 1..128 operations");
             Document next;std::string error;
             if(!documentFromJson(documentToJson(document),next,&error))throw std::runtime_error(error);
-            V created=V::makeArr();
+            V created=V::makeArr(),createdNodes=V::makeArr();
             for(auto& c:commands.arr){
                 auto op=str(c,"op");
                 if(op=="param.set")next.setParam(str(c,"name"),expression(field(c,"expr")));
@@ -73,6 +123,7 @@ V AgentSession::call(const std::string& tool,const V& args){
                     if(!featureTypeFromName(type,f.type))throw std::runtime_error("Unknown feature type: "+type);
                     f.name=c.find("name")?str(c,"name"):type;
                     if(auto p=c.find("p"))params(f,*p);
+                    if(auto b=c.find("bends"))bends(f,*b);
                     if(auto in=c.find("inputs")){if(in->t!=V::Arr)throw std::runtime_error("inputs must be an array");for(auto& x:in->arr)f.inputs.push_back(id(x));}
                     if(auto mode=c.find("mode")){if(mode->t!=V::Num||mode->num<0||mode->num>2||mode->num!=std::floor(mode->num))throw std::runtime_error("mode must be 0, 1 or 2");f.opInt=(int)mode->num;}
                     created.arr.push_back(V::makeNum((double)next.addFeature(std::move(f))));
@@ -80,6 +131,7 @@ V AgentSession::call(const std::string& tool,const V& args){
                 else if(op=="feature.edit"){
                     auto* f=next.find(id(field(c,"id")));if(!f)throw std::runtime_error("Feature not found");
                     if(auto p=c.find("p"))params(*f,*p);
+                    if(auto b=c.find("bends"))bends(*f,*b);
                     if(c.find("name"))f->name=str(c,"name");
                 }
                 else if(op=="feature.remove"){if(!next.remove(id(field(c,"id"))))throw std::runtime_error("Feature not found");}
@@ -87,11 +139,19 @@ V AgentSession::call(const std::string& tool,const V& args){
                     Sketch sk;if(!sketchFromJson(field(c,"sketch").dump(),sk,&error))throw std::runtime_error(error);
                     next.setSketch(str(c,"name"),std::move(sk));
                 }
+                else if(op=="assembly.add"){
+                    AssemblyNode n;n.id=next.nextAssemblyId_++;n.name="Component";editNode(n,c);next.assembly.push_back(n);createdNodes.arr.push_back(V::makeNum((double)n.id));
+                }
+                else if(op=="assembly.edit"||op=="assembly.remove"){
+                    u64 key=id(field(c,"id"));auto it=std::find_if(next.assembly.begin(),next.assembly.end(),[&](const AssemblyNode& n){return n.id==key;});
+                    if(it==next.assembly.end())throw std::runtime_error("Assembly node not found");
+                    if(op=="assembly.edit")editNode(*it,c);else next.assembly.erase(it);
+                }
                 else throw std::runtime_error("Unknown operation: "+op);
             }
             validated(next); // one evaluation for the entire batch, commit only on success
             remember();document=std::move(next);++revision;
-            V r=info();r.set("created_ids",created);return result(r);
+            V r=info();r.set("created_ids",created);r.set("created_node_ids",createdNodes);return result(r);
         }
         if(tool=="doc_undo"||tool=="doc_redo"){
             auto& source=tool=="doc_undo"?undo_:redo_;auto& destination=tool=="doc_undo"?redo_:undo_;
@@ -146,19 +206,25 @@ V AgentSession::tools(){
     const Def defs[]={
         {"doc_info","Compact document summary with revision and stable feature IDs.",R"({"type":"object"})",true},
         {"doc_get","Read full parametric document, including expressions and revision.",R"({"type":"object"})",true},
-        {"doc_apply","Atomic batch; evaluate once, roll back on any failure. Operations: param.set{name,expr}, feature.add{type,name,p,inputs,mode}, feature.edit{id,p,name}, feature.remove{id}, sketch.set{name,sketch}. Feature types: box{dx,dy,dz}, cylinder{r,h}, sphere{r}, cone{rb,rt,h}, torus{R,r}, extrude{shape,w,d,height,sketch}, revolve{shape,w,d,angle,sketch}, transform{tx,ty,tz,rx,ry,rz}, boolean{mode:0 union/1 cut/2 intersect}, pattern{count,dx,dy,dz}, surface{x,y,z,u0,u1,v0,v1,nu,nv,wrap_u,wrap_v}. Geometry parameters belong in p and accept math expressions. Transforms/patterns take one input, booleans two. Use expected_revision to reject stale writes. Angles in degrees except trig expressions in radians. Surface coordinates use u,v; periodic seams are checked.",R"({"type":"object","properties":{"expected_revision":{"type":"integer","minimum":0},"commands":{"type":"array","minItems":1,"maxItems":128,"items":{"type":"object","properties":{"op":{"type":"string","enum":["param.set","feature.add","feature.edit","feature.remove","sketch.set"]}},"required":["op"]}}},"required":["commands"]})",false},
+        {"doc_apply","Atomic batch; evaluate once, roll back on any failure. Operations: param.set{name,expr}, feature.add{type,name,p,inputs,mode}, feature.edit{id,p,name}, feature.remove{id}, sketch.set{name,sketch}, assembly.add{name,parent,feature,p,visible}, assembly.edit{id,parent,feature,p,visible}, assembly.remove{id}. feature=0 is a group; placements are rigid tx/ty/tz/rx/ry/rz. Tube feature accepts p{section:round|rect,od,width,height,wall,tail,chord_tol,sides} plus bends:[{feed,radius,angle,roll}] in mm/degrees. Feature types: tube, box{dx,dy,dz}, cylinder{r,h}, sphere{r}, cone{rb,rt,h}, torus{R,r}, extrude{shape,w,d,height,sketch}, revolve{shape,w,d,angle,sketch}, transform{tx,ty,tz,rx,ry,rz}, boolean{mode:0 union/1 cut/2 intersect}, pattern{count,dx,dy,dz}, surface{x,y,z,u0,u1,v0,v1,nu,nv,wrap_u,wrap_v}. Geometry parameters belong in p and accept math expressions. Transforms/patterns take one input, booleans two. Use expected_revision to reject stale writes. Angles in degrees except trig expressions in radians. Surface coordinates use u,v; periodic seams are checked.",R"({"type":"object","properties":{"expected_revision":{"type":"integer","minimum":0},"commands":{"type":"array","minItems":1,"maxItems":128,"items":{"type":"object","properties":{"op":{"type":"string","enum":["param.set","feature.add","feature.edit","feature.remove","sketch.set","assembly.add","assembly.edit","assembly.remove"]}},"required":["op"]}}},"required":["commands"]})",false},
         {"doc_undo","Undo the previous committed transaction; revision increases.",R"({"type":"object"})",false},
         {"doc_redo","Redo a transaction after undo.",R"({"type":"object"})",false},
         {"eval_expr","Evaluate finite arithmetic and trigonometry with named parameters; trig uses radians, deg() converts degrees.",R"({"type":"object","properties":{"expr":{"type":"string"}},"required":["expr"]})",true},
-        {"mesh_inspect","Compact indexed topology audit: bounds, area, edge counts, components and signed volume for closed oriented edges. Does not certify solids or detect self intersections. Omit id to inspect final outputs only.",R"({"type":"object","properties":{"id":{"type":"integer","minimum":1}}})",true},
-        {"mesh_get","Explicitly retrieve mesh positions and triangle indices; potentially large. Prefer mesh_inspect for reasoning.",R"({"type":"object","properties":{"id":{"type":"integer","minimum":1}}})",true},
+        {"mesh_inspect","Compact indexed topology audit: bounds, area, edge counts, components and signed volume for closed oriented edges. Does not certify solids or detect self intersections. Omit id to inspect final outputs only.",R"({"type":"object","properties":{"node":{"type":"integer","minimum":1},"id":{"type":"integer","minimum":1}}})",true},
+        {"mesh_get","Explicitly retrieve mesh positions and triangle indices; potentially large. Prefer mesh_inspect for reasoning.",R"({"type":"object","properties":{"node":{"type":"integer","minimum":1},"id":{"type":"integer","minimum":1}}})",true},
         {"mesh_raycast","Nearest triangle hit using a cached AABB hierarchy. Direction is normalized; distances in mm. Triangle IDs last for this tessellation/revision only.",R"({"type":"object","properties":{"id":{"type":"integer","minimum":1},"origin":{"type":"array","items":{"type":"number"},"minItems":3,"maxItems":3},"direction":{"type":"array","items":{"type":"number"},"minItems":3,"maxItems":3}},"required":["origin","direction"]})",true},
+        {"assembly_info","Hierarchy placements and BOM quantities by shared feature definition. Hidden instances remain in BOM. Rigid transforms, no mate solver.",R"({"type":"object"})",true},
+        {"tube_inspect","Ideal centerline length, section area and bend table. No springback, weld allowance or material compensation.",R"({"type":"object","properties":{"node":{"type":"integer","minimum":1},"id":{"type":"integer","minimum":1}},"required":["id"]})",true},
+        {"compute_info","Actual CUDA availability, selected device, transfer-inclusive last execution and CPU fallback reason.",R"({"type":"object"})",true},
+        {"compute_benchmark","Bounded CPU/CUDA benchmark (default 1M vertices) with transfer, synchronization and numerical parity; initializes GPU runtime.",R"({"type":"object","properties":{"vertices":{"type":"integer","minimum":1,"maximum":4000000}}})",true},
         {"doc_save","Save .ark or legacy .arkjson parametric document as versioned JSON.",R"({"type":"object","properties":{"path":{"type":"string"}},"required":["path"]})",false},
         {"doc_load","Load .ark/.arkjson into this session, validate and commit atomically.",R"({"type":"object","properties":{"path":{"type":"string"}},"required":["path"]})",false},
         {"export_mesh","Export final output bodies or a selected id as STL/OBJ; construction inputs are excluded.",R"({"type":"object","properties":{"path":{"type":"string"},"format":{"type":"string","enum":["stl","obj"]},"id":{"type":"integer","minimum":1}},"required":["path","format"]})",false},
         {"snapshot","Render final output meshes to a 1280x800 PNG for visual feedback.",R"({"type":"object","properties":{"path":{"type":"string"},"id":{"type":"integer","minimum":1}},"required":["path"]})",false}
     };
-    V list=V::makeArr();for(auto& d:defs){V t=V::makeObj(),schema,annotations=V::makeObj();t.set("name",V::makeStr(d.name));t.set("description",V::makeStr(d.desc));arkjson::parse(d.schema,schema);t.set("inputSchema",schema);annotations.set("readOnlyHint",V::makeBool(d.read));t.set("annotations",annotations);list.arr.push_back(t);}return list;
+    V list=V::makeArr();for(auto& d:defs){V t=V::makeObj(),schema,annotations=V::makeObj();t.set("name",V::makeStr(d.name));t.set("description",V::makeStr(d.desc));arkjson::parse(d.schema,schema);if(std::string(d.name)=="mesh_raycast"||std::string(d.name)=="export_mesh"||std::string(d.name)=="snapshot"){
+        V props=schema.find("properties")?*schema.find("properties"):V::makeObj(),node=V::makeObj();node.set("type",V::makeStr("integer"));node.set("minimum",V::makeNum(1));props.set("node",node);schema.set("properties",props);
+    }t.set("inputSchema",schema);annotations.set("readOnlyHint",V::makeBool(d.read));t.set("annotations",annotations);list.arr.push_back(t);}return list;
 }
 Document makeDemoDocument(){
     Document d;d.setParam("radius","32");d.setParam("tube","11");d.setParam("waves","7");d.setParam("amplitude","0.22");

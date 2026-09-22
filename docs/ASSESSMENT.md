@@ -33,3 +33,7 @@ The native document is open, versioned JSON. A binary mesh/cache container can b
 6. **Adapters:** investigate Trace for nesting and Stage for its geometry workflow after the ARK contracts stabilize. No code from those projects was copied or changed here.
 
 SIMD, multithreading and native extensions should follow measured bottlenecks and numerical parity tests. Existing code is retained where usable; broad production-performance or manufacturing-validity claims are not supported by this first version.
+
+## 0.3 follow-up
+
+Rigid hierarchical assemblies, shared-part GPU rendering, ideal hollow-tube bending and an optional CUDA packed-transform backend are now implemented. The corresponding scope, MeshARC inspection and measurements are recorded in [MECHANICAL.md](MECHANICAL.md). The remaining assembly work is mate solving and joint/fabrication operations, rather than basic instances or placement.

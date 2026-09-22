@@ -1,4 +1,4 @@
-# ARK file formats, version 1
+# ARK file formats, versions 1 and 2
 
 ## `.ark`
 
@@ -40,3 +40,9 @@ UTF-8 newline-delimited JSON. Each line is a Studio command envelope containing 
 ## Exchange
 
 STL: binary triangle export. OBJ: text triangle export. PNG: raster visual feedback. Only terminal feature outputs are exported by the agent/Studio interface, unless a feature ID is explicitly selected. These exchange files do not preserve the parametric history.
+
+## Version 2: assemblies and tube programs
+
+Documents using tubes, assembly nodes or an assembly ID allocator are written with `version:2`. Version 1 remains supported for legacy part documents. Version 2 adds `assembly`, `next_assembly_id`, and each tube feature's `bends` array. Assembly node fields are `id`, `parent`, `feature`, `name`, `visible` and expression map `p`. A group uses `feature:0`; a root uses `parent:0`. Bend entries store expression strings for `feed`, `radius`, `angle` and `roll`.
+
+See [mechanical operations](MECHANICAL.md) for conventions, validation and examples. The original 0.2 reader rejects version 2 rather than silently losing assemblies or bend programs.

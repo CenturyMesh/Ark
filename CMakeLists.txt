@@ -1,12 +1,12 @@
 cmake_minimum_required(VERSION 3.20)
-project(Ark VERSION 0.2.0 LANGUAGES CXX)
+project(Ark VERSION 0.3.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Threads REQUIRED)
 add_library(ark STATIC
   src/core.cpp src/nurbs.cpp src/brep.cpp src/mesh.cpp src/csg.cpp
   src/model.cpp src/evaluate.cpp src/solver.cpp src/io.cpp src/serialize.cpp
-  src/api.cpp src/mesh_query.cpp src/mesh_analysis.cpp src/agent.cpp src/kernels_scalar.cpp)
+  src/tube.cpp src/assembly.cpp src/compute.cpp src/api.cpp src/mesh_query.cpp src/mesh_analysis.cpp src/agent.cpp src/kernels_scalar.cpp)
 target_include_directories(ark PUBLIC include)
 target_link_libraries(ark PUBLIC Threads::Threads)
 if(MSVC)
@@ -38,3 +38,17 @@ if(Python3_FOUND)
   add_test(NAME mcp-stdio COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/mcp_smoke.py $<TARGET_FILE:ark-mcp>)
   set_tests_properties(mcp-stdio PROPERTIES TIMEOUT 30)
 endif()
+
+option(ARK_ENABLE_CUDA "Enable optional dynamically loaded CUDA compute on Windows" ON)
+if(WIN32 AND ARK_ENABLE_CUDA)
+  find_path(ARK_CUDA_INCLUDE cuda.h HINTS "$ENV{CUDA_PATH}/include")
+  if(ARK_CUDA_INCLUDE)
+    target_include_directories(ark PRIVATE "${ARK_CUDA_INCLUDE}")
+    target_compile_definitions(ark PRIVATE ARK_CUDA_RUNTIME=1)
+  endif()
+endif()
+
+add_executable(ark-mechanical-tests tests/mechanical_tests.cpp)
+target_link_libraries(ark-mechanical-tests PRIVATE ark)
+add_test(NAME mechanical COMMAND ark-mechanical-tests)
+set_tests_properties(mechanical PROPERTIES TIMEOUT 60)

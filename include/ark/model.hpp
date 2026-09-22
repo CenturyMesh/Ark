@@ -10,6 +10,8 @@
 #pragma once
 #include "ark/core.hpp"
 #include "ark/brep.hpp"
+#include "ark/tube.hpp"
+#include "ark/assembly.hpp"
 #include <unordered_map>
 
 namespace ark {
@@ -35,7 +37,7 @@ struct Parameter {
 // ---------------------------------------------------------------------------
 enum class FeatureType : i32 {
     Box, Cylinder, Sphere, Cone, Torus,
-    Extrude, Revolve, Transform, Boolean, LinearPattern, ParametricSurface,
+    Extrude, Revolve, Transform, Boolean, LinearPattern, ParametricSurface, Tube,
 };
 
 struct Feature {
@@ -44,6 +46,7 @@ struct Feature {
     FeatureType type{};
     std::unordered_map<std::string,std::string> p;   // expression params
     std::vector<u64> inputs;                          // parent feature ids
+    std::vector<TubeBend> bends;
     int opInt = 0;                                    // Boolean: 0 union 1 cut 2 intersect
 
     std::string get(const char* k, const char* dflt="") const {
@@ -169,6 +172,8 @@ public:
         return n;
     }
 
+    std::vector<AssemblyNode> assembly;
+    u64 nextAssemblyId_=1;
     u64 nextFeatureId_=1;
 };
 
