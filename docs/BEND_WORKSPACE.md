@@ -70,4 +70,4 @@ The worker starts without a console, receives a temporary plan file, and runs in
 - Worker integration checks folded inspection leaves the document unchanged, zero-point stock export, Unicode paths and missing-backend failure without document changes.
 - Existing UI/dialog and assembly regression fixtures still pass. These use native in-app action fixtures, not an exhaustive external mouse/keyboard test.
 
-The workflow operates on an explicit laser-tube design. Automatic reconstruction and refolding against the supplied `SKT01.DCB109.STEP` remain separate, uncompleted work described in [NOTCH_WORKFLOW.md](NOTCH_WORKFLOW.md).
+The workflow operates on an explicit laser-tube design. Version 0.6 adds a separate source-preserving finite-hinge route for supported STEP tubes, described in [SOURCE_STEP.md](SOURCE_STEP.md). The ideal notch design and source-derived geometry are distinct feature types.

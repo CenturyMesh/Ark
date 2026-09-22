@@ -71,3 +71,7 @@ Mesh buffers, reports and BVHs are cached per session revision and selected feat
 ## 0.5 integrated workspace
 
 `notched_tube` is now an editable feature with stock expressions and a replaceable `notches` array. `notch_inspect{id,progress?}` reports the plan and optional display transforms. `export_step{id,path}` writes the straight part using the configured OCCT backend and reports its validation. These additions bring the tool count to 20. Animation is read-only and cannot change the exported pose. See [BEND_WORKSPACE.md](BEND_WORKSPACE.md).
+
+## 0.6 source-preserving import
+
+Use `import_step{path,replace?}` for the bounded planar finite-hinge source domain. `source_inspect{id,progress?}` provides the measured projection/holes without the large payload of `doc_get`. `export_step` now handles `source_tube` as well as designed `notched_tube`. The source geometry is read-only and the imported package is version 4. These additions bring the tool count to 22. See [SOURCE_STEP.md](SOURCE_STEP.md) for validation and failure boundaries.

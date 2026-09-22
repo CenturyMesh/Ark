@@ -70,3 +70,7 @@ The automatic source-recognition/refolding chain and physical qualification are 
 ## Integrated Studio workflow (0.5)
 
 The preview is now available as an editable `notched_tube` in Studio, including bend-point dialogs, viewport markers, sequential animation, `.ark` save/load and an **Export straight STEP** button. The original physical/source-reconstruction limits above still apply. See [BEND_WORKSPACE.md](BEND_WORKSPACE.md).
+
+## Source-preserving route (0.6)
+
+A bounded automatic route now imports actual planar finite-hinge STEP tubes and carries their rigid B-rep features, including holes and cutouts, into the straight result. It uses measured finite radii rather than the ideal zero-radius notch example above. Source/refold and STEP readback checks are implemented for this domain; physical process qualification remains open. See [SOURCE_STEP.md](SOURCE_STEP.md).

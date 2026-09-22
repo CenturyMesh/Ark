@@ -1,12 +1,12 @@
 cmake_minimum_required(VERSION 3.20)
-project(Ark VERSION 0.5.0 LANGUAGES CXX)
+project(Ark VERSION 0.6.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Threads REQUIRED)
 add_library(ark STATIC
   src/core.cpp src/nurbs.cpp src/brep.cpp src/mesh.cpp src/csg.cpp
   src/model.cpp src/evaluate.cpp src/solver.cpp src/io.cpp src/serialize.cpp
-  src/notch.cpp src/notch_preview.cpp src/step_export.cpp src/tube.cpp src/assembly.cpp src/compute.cpp src/api.cpp src/mesh_query.cpp src/mesh_analysis.cpp src/agent.cpp src/kernels_scalar.cpp)
+  src/source_tube.cpp src/notch.cpp src/notch_preview.cpp src/step_export.cpp src/tube.cpp src/assembly.cpp src/compute.cpp src/api.cpp src/mesh_query.cpp src/mesh_analysis.cpp src/agent.cpp src/kernels_scalar.cpp)
 target_include_directories(ark PUBLIC include)
 target_link_libraries(ark PUBLIC Threads::Threads)
 if(MSVC)
@@ -64,3 +64,8 @@ add_test(NAME bend-workspace COMMAND ark-bend-tests)
 set_tests_properties(bend-workspace PROPERTIES TIMEOUT 30)
 
 target_compile_definitions(ark PRIVATE ARK_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+
+add_executable(ark-source-tests tests/source_tube_tests.cpp)
+target_link_libraries(ark-source-tests PRIVATE ark)
+add_test(NAME source-tube COMMAND ark-source-tests)
+set_tests_properties(source-tube PROPERTIES TIMEOUT 30)

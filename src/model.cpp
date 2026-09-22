@@ -139,6 +139,7 @@ const char* featureTypeName(FeatureType t){
         case FeatureType::ParametricSurface: return "surface";
         case FeatureType::Tube: return "tube";
         case FeatureType::NotchedTube: return "notched_tube";
+        case FeatureType::SourceTube: return "source_tube";
     }
     return "unknown";
 }
@@ -158,6 +159,7 @@ bool featureTypeFromName(const std::string& s, FeatureType& out){
     else if(s=="surface") out=FeatureType::ParametricSurface;
     else if(s=="tube") out=FeatureType::Tube;
     else if(s=="notched_tube") out=FeatureType::NotchedTube;
+    else if(s=="source_tube") out=FeatureType::SourceTube;
     else return false;
     return true;
 }

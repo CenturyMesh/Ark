@@ -20,9 +20,9 @@ Windows requirements: CMake 3.20+, Ninja and a C++20 compiler on PATH. The inclu
 The kernel and MCP have portable CMake targets for Linux; CI execution is currently blocked by the GitHub account billing limit:
 
 ```sh
-cmake -S . -B out/bend -DCMAKE_BUILD_TYPE=Release
-cmake --build out/bend --parallel 4
-ctest --test-dir out/bend --output-on-failure
+cmake -S . -B out/source -DCMAKE_BUILD_TYPE=Release
+cmake --build out/source --parallel 4
+ctest --test-dir out/source --output-on-failure
 ```
 
 Targets: `ark` static library, `ark-mcp`, `ark-cli` (legacy demonstration), `ark-tests`, `ark-agent-tests`, and `ark-studio` on Windows. No JavaScript runtime, web server, cloud account or model subscription is required by ARK itself. MinGW executables link their runtime statically.
@@ -38,13 +38,13 @@ Targets: `ark` static library, `ark-mcp`, `ark-cli` (legacy demonstration), `ark
 
 ## Agents
 
-Start `out/bend/ark-mcp.exe` as a local MCP stdio server from your MCP client. The interface is model independent: an Astra or other agent host can drive it **if that host can invoke MCP tools**. ARK does not embed a language model or provide a natural-language chat service.
+Start `out/source/ark-mcp.exe` as a local MCP stdio server from your MCP client. The interface is model independent: an Astra or other agent host can drive it **if that host can invoke MCP tools**. ARK does not embed a language model or provide a natural-language chat service.
 
 ```json
 {
   "mcpServers": {
     "ark": {
-      "command": "C:/path/to/Ark/out/bend/ark-mcp.exe",
+      "command": "C:/path/to/Ark/out/source/ark-mcp.exe",
       "args": []
     }
   }
@@ -52,6 +52,12 @@ Start `out/bend/ark-mcp.exe` as a local MCP stdio server from your MCP client. T
 ```
 
 This is a generic MCP configuration example; the host's configuration format may differ. See [agent protocol](docs/AGENTS.md) for the tool contract and examples. Studio and a separately launched MCP process each own an independent session. Use `.ark` files to hand work between them; live cross-process synchronization is not implemented.
+
+## STEP source with its original holes (0.6)
+
+Use **Import STEP** to load a supported planar tube, preserving its actual circular/polygonal openings and cutouts. The source can be viewed formed or straight, animated through its measured finite-radius hinges, and exported as a straight STEP with the original geometry. Clicking an opening focuses the real cut. [Projection method, evidence and supported domain](docs/SOURCE_STEP.md).
+
+The imported source stays read-only; it is not replaced with an approximate empty tube. Geometric source verification is separate from physical manufacturing qualification.
 
 ## Interactive laser tube (0.5)
 

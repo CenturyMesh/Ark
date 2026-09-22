@@ -1,4 +1,4 @@
-# ARK file formats, versions 1, 2 and 3
+# ARK file formats, versions 1, 2, 3 and 4
 
 ## `.ark`
 
@@ -50,3 +50,7 @@ See [mechanical operations](MECHANICAL.md) for conventions, validation and examp
 ## Version 3: editable laser tube
 
 `notched_tube` adds a `notches` array of `{station,angle,face}` expression strings, alongside stock dimensions in the feature's `p` object. Zero points are supported. Saving preserves intent and stock expressions; the animated pose is not serialized. The source document and all exported STEP geometry stay independent of display progress. See [BEND_WORKSPACE.md](BEND_WORKSPACE.md).
+
+## Version 4: source-preserving tube package
+
+A `source_tube` feature carries its `source` package: rigid preview meshes, finite hinge geometry, source/flat projection evidence, original opening coordinates and an embedded exact straight STEP payload with SHA-256. No manufacturing authority is implied. The preview and export remain available after the original cache moves; if the original source file is present but changed, export requires a fresh import. Geometry changes go through `import_step`, not generic feature-parameter edits.

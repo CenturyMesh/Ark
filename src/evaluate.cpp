@@ -1,5 +1,6 @@
 ﻿// ARK-Point :: evaluate.cpp â€” feature-history recompute pipeline.
 #include "ark/model.hpp"
+#include "ark/source_tube.hpp"
 #include <chrono>
 #include <exception>
 
@@ -131,6 +132,10 @@ static Body evalFeatureBody(const Feature& f, const ExprEnv& env, Document& doc,
     };
 
     switch(f.type){
+        case FeatureType::SourceTube: {
+            try{auto preview=buildSourceTubePreview(f.sourceData);Body body;body.baked=std::make_unique<Mesh>(std::move(preview.straight));res.tris=body.baked->triCount();return body;}
+            catch(const std::exception& e){res.ok=false;res.error=e.what();return {};}
+        }
         case FeatureType::NotchedTube: {
             try{auto preview=buildNotchPreview(notchRequestForFeature(f,env));Body body;body.baked=std::make_unique<Mesh>(std::move(preview.straight));res.tris=body.baked->triCount();return body;}
             catch(const std::exception& e){res.ok=false;res.error=e.what();return {};}

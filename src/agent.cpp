@@ -4,6 +4,7 @@
 #include "ark/compute.hpp"
 #include "ark/notch.hpp"
 #include "ark/step_export.hpp"
+#include "ark/source_tube.hpp"
 #include <stdexcept>
 #include <set>
 #include <map>
@@ -90,8 +91,24 @@ V AgentSession::call(const std::string& tool,const V& args){
             if(!ok)throw std::runtime_error("Invalid mathematical expression");
             V r=V::makeObj();r.set("value",V::makeNum(v));return result(r);
         }
+        if(tool=="source_inspect"){
+            auto* feature=document.find(id(field(args,"id")));if(!feature||feature->type!=FeatureType::SourceTube)throw std::runtime_error("Select a source_tube feature");
+            V r=V::makeObj();r.set("report",*feature->sourceData.find("report"));r.set("holes",*feature->sourceData.find("holes"));r.set("read_only_geometry",V::makeBool(true));
+            if(auto p=args.find("progress")){if(p->t!=V::Num||p->num<0||p->num>1)throw std::runtime_error("progress must be in [0,1]");auto preview=buildSourceTubePreview(feature->sourceData);auto poses=sourceFoldTransforms(preview,p->num);V matrices=V::makeArr();for(auto& pose:poses){V m=V::makeArr();for(auto v:pose.m)m.arr.push_back(V::makeNum(v));matrices.arr.push_back(m);}r.set("segment_transforms_column_major",matrices);}
+            return result(r);
+        }
+        if(tool=="import_step"){
+            bool replace=false;if(auto p=args.find("replace")){if(p->t!=V::Bool)throw std::runtime_error("replace must be boolean");replace=p->b;}
+            auto package=importSourceTubeStep(str(args,"path"));buildSourceTubePreview(package);
+            Document next;std::string error;if(!replace&&!documentFromJson(documentToJson(document),next,&error))throw std::runtime_error(error);
+            Feature f;f.type=FeatureType::SourceTube;f.name="Source tube";if(auto p=package.find("source_name"))f.name=p->asStr();f.sourceData=std::move(package);auto id=next.addFeature(std::move(f));validated(next);
+            if(documentToJson(next).size()>4*1024*1024)throw std::runtime_error("Imported document exceeds current 4 MiB persistence limit; use replace:true for a standalone source document");
+            remember();document=std::move(next);++revision;V r=info();r.set("created_id",V::makeNum((double)id));r.set("report",*document.find(id)->sourceData.find("report"));return result(r);
+        }
         if(tool=="export_step"){
-            auto* feature=document.find(id(field(args,"id")));if(!feature||feature->type!=FeatureType::NotchedTube)throw std::runtime_error("Straight STEP export currently requires a notched_tube feature");
+            auto* feature=document.find(id(field(args,"id")));if(!feature)throw std::runtime_error("Feature not found");
+            if(feature->type==FeatureType::SourceTube)return result(exportSourceTubeStep(feature->sourceData,str(args,"path")));
+            if(feature->type!=FeatureType::NotchedTube)throw std::runtime_error("STEP export requires a source_tube or notched_tube feature");
             return result(exportNotchStep(notchRequestForFeature(*feature,document.buildEnv()),str(args,"path")));
         }
         if(tool=="notch_inspect"){
@@ -144,6 +161,7 @@ V AgentSession::call(const std::string& tool,const V& args){
                 else if(op=="feature.add"){
                     Feature f;auto type=str(c,"type");
                     if(!featureTypeFromName(type,f.type))throw std::runtime_error("Unknown feature type: "+type);
+                    if(f.type==FeatureType::SourceTube)throw std::runtime_error("Use import_step to create a verified source tube");
                     f.name=c.find("name")?str(c,"name"):type;
                     if(auto p=c.find("p"))params(f,*p);
                     if(auto b=c.find("bends"))bends(f,*b);
@@ -154,6 +172,7 @@ V AgentSession::call(const std::string& tool,const V& args){
                 }
                 else if(op=="feature.edit"){
                     auto* f=next.find(id(field(c,"id")));if(!f)throw std::runtime_error("Feature not found");
+                    if(f->type==FeatureType::SourceTube&&(c.find("p")||c.find("bends")||c.find("notches")))throw std::runtime_error("Imported source geometry is read-only; reimport changed STEP");
                     if(auto p=c.find("p"))params(*f,*p);
                     if(auto b=c.find("bends"))bends(*f,*b);
                     if(auto n=c.find("notches"))notches(*f,*n);
@@ -240,7 +259,9 @@ V AgentSession::tools(){
         {"mesh_raycast","Nearest triangle hit using a cached AABB hierarchy. Direction is normalized; distances in mm. Triangle IDs last for this tessellation/revision only.",R"({"type":"object","properties":{"id":{"type":"integer","minimum":1},"origin":{"type":"array","items":{"type":"number"},"minItems":3,"maxItems":3},"direction":{"type":"array","items":{"type":"number"},"minItems":3,"maxItems":3}},"required":["origin","direction"]})",true},
         {"assembly_info","Hierarchy placements and BOM quantities by shared feature definition. Hidden instances remain in BOM. Rigid transforms, no mate solver.",R"({"type":"object"})",true},
         {"tube_inspect","Ideal centerline length, section area and bend table. No springback, weld allowance or material compensation.",R"({"type":"object","properties":{"node":{"type":"integer","minimum":1},"id":{"type":"integer","minimum":1}},"required":["id"]})",true},
-        {"export_step","Export a notched_tube in its straight pose to validated STEP using optional OCCT Python worker. Animation never affects the output. Writes STEP, .arkcut and .validation.json. Ideal hinge preview, not production qualification.",R"({"type":"object","properties":{"id":{"type":"integer","minimum":1},"path":{"type":"string"}},"required":["id","path"]})",false},
+        {"source_inspect","Read source projection evidence and exact opening coordinates without large mesh buffers. Optional progress returns finite-hinge display transforms; source geometry stays read-only.",R"({"type":"object","properties":{"id":{"type":"integer","minimum":1},"progress":{"type":"number","minimum":0,"maximum":1}},"required":["id"]})",true},
+        {"import_step","Import and geometrically verify a planar tube STEP with cylindrical retained-wall hinges. Preserves exact hole/cutout B-reps, projects rigid spans, checks refolding and imports native preview. Optional replace:true starts a new document. Fails closed outside supported domain.",R"({"type":"object","properties":{"path":{"type":"string"},"replace":{"type":"boolean"}},"required":["path"]})",false},
+        {"export_step","Export a source_tube or notched_tube in its straight pose to validated STEP using optional OCCT Python worker. Animation never affects the output. Writes STEP, .arkcut and .validation.json. Ideal hinge preview, not production qualification.",R"({"type":"object","properties":{"id":{"type":"integer","minimum":1},"path":{"type":"string"}},"required":["id","path"]})",false},
         {"notch_inspect","Read a notched_tube feature's straight request and ideal cut plan. Optional progress returns sequential display matrices and bounds without document mutation.",R"({"type":"object","properties":{"progress":{"type":"number","minimum":0,"maximum":1},"id":{"type":"integer","minimum":1}},"required":["id"]})",true},
         {"notch_plan","Ideal preview of a straight hollow rectangular tube with V cuts leaving one wall. Requires explicit hinge offset inside that wall. Not a source reconstruction or production-approved laser program. Returns cutter polygons, analytic removed volume and cut-face closure proof; finite-wall strain is not validated.",R"({"type":"object","properties":{"width_mm":{"type":"number"},"height_mm":{"type":"number"},"wall_mm":{"type":"number"},"length_mm":{"type":"number"},"hinge_offset_mm":{"type":"number"},"notches":{"type":"array","items":{"type":"object","properties":{"station_mm":{"type":"number"},"angle_deg":{"type":"number"},"hinge_face":{"type":"string","enum":["bottom","top","left","right"]}},"required":["station_mm","angle_deg","hinge_face"]}}},"required":["width_mm","height_mm","wall_mm","length_mm","hinge_offset_mm","notches"]})",true},
         {"compute_info","Actual CUDA availability, selected device, transfer-inclusive last execution and CPU fallback reason.",R"({"type":"object"})",true},

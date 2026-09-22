@@ -38,7 +38,7 @@ struct Parameter {
 // ---------------------------------------------------------------------------
 enum class FeatureType : i32 {
     Box, Cylinder, Sphere, Cone, Torus,
-    Extrude, Revolve, Transform, Boolean, LinearPattern, ParametricSurface, Tube, NotchedTube,
+    Extrude, Revolve, Transform, Boolean, LinearPattern, ParametricSurface, Tube, NotchedTube, SourceTube,
 };
 
 struct Feature {
@@ -49,6 +49,7 @@ struct Feature {
     std::vector<u64> inputs;                          // parent feature ids
     std::vector<TubeBend> bends;
     std::vector<NotchPoint> notches;
+    arkjson::Value sourceData;
     int opInt = 0;                                    // Boolean: 0 union 1 cut 2 intersect
 
     std::string get(const char* k, const char* dflt="") const {

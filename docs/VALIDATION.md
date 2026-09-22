@@ -46,3 +46,7 @@ The neutral UI was built and visually checked at 1600x1000 and 1180x840. Native 
 ## Version 0.5
 
 The integrated build defaults to `out/bend`. Six native/stdio CTest suites pass. Additional native workspace/export fixtures and a real Windows STEP worker test cover the complete editable-tube workflow, export from the folded pose, Unicode output paths and backend failure. See [BEND_WORKSPACE.md](BEND_WORKSPACE.md) for scope and reproduction details.
+
+## Version 0.6
+
+The integrated build defaults to `out/source`. Seven CTest suites pass. Optional OCCT tests cover an independently constructed synthetic source, rigid-transform metamorphism, rejection of a hole on a deforming hinge, source import/save/load/export, source drift and read-only geometry. Native source workspace tests verify formed/straight rendering, opening focus, unchanged source data during animation and export. The real source is verified locally; its CAD and derived assets are excluded from Git. Details are in [SOURCE_STEP.md](SOURCE_STEP.md).

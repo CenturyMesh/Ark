@@ -18,3 +18,5 @@ __pycache__/
 
 /.ark-local.json
 /.venv-occt/
+
+/projects-local/

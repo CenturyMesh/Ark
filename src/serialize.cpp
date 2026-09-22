@@ -97,8 +97,8 @@ bool conFromJson(const Value& v, SketchCon& c, std::string* err){
 std::string documentToJson(const Document& doc){
     Value r=Value::makeObj();
     r.set("format",Value::makeStr("ark"));
-    bool notched=false;bool extended=!doc.assembly.empty()||doc.nextAssemblyId_>1;for(auto& f:doc.features){extended|=f.type==FeatureType::Tube;notched|=f.type==FeatureType::NotchedTube;}
-    r.set("version",Value::makeNum(notched?3:extended?2:1));
+    bool sourceTube=false;bool notched=false;bool extended=!doc.assembly.empty()||doc.nextAssemblyId_>1;for(auto& f:doc.features){extended|=f.type==FeatureType::Tube;notched|=f.type==FeatureType::NotchedTube;sourceTube|=f.type==FeatureType::SourceTube;}
+    r.set("version",Value::makeNum(sourceTube?4:notched?3:extended?2:1));
     r.set("units",Value::makeStr("mm"));
     r.set("next_feature_id",Value::makeNum((double)doc.nextFeatureId_));
 
@@ -140,6 +140,7 @@ std::string documentToJson(const Document& doc){
         v.set("p",std::move(pv));
         if(f.type==FeatureType::Tube){Value bends=Value::makeArr();for(auto& b:f.bends){Value j=Value::makeObj();j.set("feed",Value::makeStr(b.feed));j.set("radius",Value::makeStr(b.radius));j.set("angle",Value::makeStr(b.angle));j.set("roll",Value::makeStr(b.roll));bends.arr.push_back(j);}v.set("bends",bends);}
         if(f.type==FeatureType::NotchedTube){Value points=Value::makeArr();for(auto& p:f.notches){Value j=Value::makeObj();j.set("station",Value::makeStr(p.station));j.set("angle",Value::makeStr(p.angle));j.set("face",Value::makeStr(p.face));points.arr.push_back(j);}v.set("notches",points);}
+        if(f.type==FeatureType::SourceTube)v.set("source",f.sourceData);
         fs.arr.push_back(std::move(v));
     }
     r.set("features",std::move(fs));
@@ -157,7 +158,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     Value v;
     if(!arkjson::parse(json,v)) return fail("malformed JSON");
     if(v.t!=Value::Obj) return fail("root must be object");
-    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0&&ver->num!=3.0)))
+    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0&&ver->num!=3.0&&ver->num!=4.0)))
         return fail("unsupported document version");
 
     if(auto format=v.find("format");format && format->asStr()!="ark")return fail("unsupported format");
@@ -225,10 +226,11 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
                 for(auto& j:bends->arr){if(j.t!=Value::Obj)return fail("bend must be object");TubeBend b;for(auto pair:std::vector<std::pair<const char*,std::string*>>{{"feed",&b.feed},{"radius",&b.radius},{"angle",&b.angle},{"roll",&b.roll}})if(auto value=j.find(pair.first)){if(value->t!=Value::Str)return fail("tube bend fields must be expressions");*pair.second=value->str;}nf.bends.push_back(b);}
             }
             if(nf.type==FeatureType::NotchedTube){
-                auto version=v.find("version");if(!version||version->asNum()!=3)return fail("notched_tube requires document version 3");
+                auto version=v.find("version");if(!version||version->asNum()<3)return fail("notched_tube requires document version 3");
                 auto points=fv.find("notches");if(!points||points->t!=Value::Arr||points->arr.size()>64)return fail("invalid notch points array");
                 for(auto& point:points->arr){auto station=point.find("station"),angle=point.find("angle"),face=point.find("face");if(!station||!angle||!face||station->t!=Value::Str||angle->t!=Value::Str||face->t!=Value::Str)return fail("invalid notch point fields");nf.notches.push_back({station->str,angle->str,face->str});}
             }
+            if(nf.type==FeatureType::SourceTube){auto version=v.find("version"),data=fv.find("source");if(!version||version->asNum()!=4||!data||data->t!=Value::Obj)return fail("source_tube requires version 4 package");nf.sourceData=*data;}
             maxId=tmax(maxId,nf.id);
             nd.features.push_back(std::move(nf));
         }
