@@ -3,6 +3,7 @@
 #include "ark/io.hpp"
 #include "ark/compute.hpp"
 #include "ark/notch.hpp"
+#include "ark/step_export.hpp"
 #include <stdexcept>
 #include <set>
 #include <map>
@@ -21,6 +22,10 @@ void bends(Feature& f,const V& list){
         for(auto pair:std::vector<std::pair<const char*,std::string*>>{{"feed",&b.feed},{"radius",&b.radius},{"angle",&b.angle},{"roll",&b.roll}})if(auto p=j.find(pair.first))*pair.second=expression(*p);
         f.bends.push_back(b);
     }
+}
+void notches(Feature& f,const V& list){
+    if(f.type!=FeatureType::NotchedTube||list.t!=V::Arr||list.arr.size()>64)throw std::runtime_error("notches requires notched_tube and 0..64 points");
+    f.notches.clear();for(auto& j:list.arr){NotchPoint p;p.station=expression(field(j,"station"));p.angle=expression(field(j,"angle"));p.face=str(j,"face");f.notches.push_back(p);}
 }
 void editNode(AssemblyNode& n,const V& j){
     if(auto p=j.find("parent"))n.parent=p->t==V::Num&&p->num==0?0:id(*p);
@@ -85,6 +90,22 @@ V AgentSession::call(const std::string& tool,const V& args){
             if(!ok)throw std::runtime_error("Invalid mathematical expression");
             V r=V::makeObj();r.set("value",V::makeNum(v));return result(r);
         }
+        if(tool=="export_step"){
+            auto* feature=document.find(id(field(args,"id")));if(!feature||feature->type!=FeatureType::NotchedTube)throw std::runtime_error("Straight STEP export currently requires a notched_tube feature");
+            return result(exportNotchStep(notchRequestForFeature(*feature,document.buildEnv()),str(args,"path")));
+        }
+        if(tool=="notch_inspect"){
+            auto* feature=document.find(id(field(args,"id")));if(!feature||feature->type!=FeatureType::NotchedTube)throw std::runtime_error("Select a notched_tube feature");
+            V r=V::makeObj();auto request=notchRequestForFeature(*feature,document.buildEnv());r.set("request",request);r.set("plan",planNotchedBlank(request));
+            if(auto value=args.find("progress")){
+                if(value->t!=V::Num||value->num<0||value->num>1)throw std::runtime_error("progress must be in [0,1]");
+                auto preview=buildNotchPreview(request);auto transforms=notchFoldTransforms(preview,value->num);V poses=V::makeArr();AABB bounds;
+                for(size_t i=0;i<transforms.size();++i){V matrix=V::makeArr();for(auto x:transforms[i].m)matrix.arr.push_back(V::makeNum(x));poses.arr.push_back(matrix);bounds.grow(preview.segments[i].computeBBox().transformed(transforms[i]));}
+                r.set("segment_transforms_column_major",poses);r.set("progress",*value);r.set("finite_wall_deformation_verified",V::makeBool(false));
+                V box=V::makeArr();for(auto x:{bounds.mn.x,bounds.mn.y,bounds.mn.z,bounds.mx.x,bounds.mx.y,bounds.mx.z})box.arr.push_back(V::makeNum(x));r.set("display_bounds_mm",box);
+            }
+            return result(r);
+        }
         if(tool=="notch_plan")return result(planNotchedBlank(args));
         if(tool=="compute_info")return result(computeInfo());
         if(tool=="compute_benchmark"){
@@ -126,6 +147,7 @@ V AgentSession::call(const std::string& tool,const V& args){
                     f.name=c.find("name")?str(c,"name"):type;
                     if(auto p=c.find("p"))params(f,*p);
                     if(auto b=c.find("bends"))bends(f,*b);
+                    if(auto n=c.find("notches"))notches(f,*n);
                     if(auto in=c.find("inputs")){if(in->t!=V::Arr)throw std::runtime_error("inputs must be an array");for(auto& x:in->arr)f.inputs.push_back(id(x));}
                     if(auto mode=c.find("mode")){if(mode->t!=V::Num||mode->num<0||mode->num>2||mode->num!=std::floor(mode->num))throw std::runtime_error("mode must be 0, 1 or 2");f.opInt=(int)mode->num;}
                     created.arr.push_back(V::makeNum((double)next.addFeature(std::move(f))));
@@ -134,6 +156,7 @@ V AgentSession::call(const std::string& tool,const V& args){
                     auto* f=next.find(id(field(c,"id")));if(!f)throw std::runtime_error("Feature not found");
                     if(auto p=c.find("p"))params(*f,*p);
                     if(auto b=c.find("bends"))bends(*f,*b);
+                    if(auto n=c.find("notches"))notches(*f,*n);
                     if(c.find("name"))f->name=str(c,"name");
                 }
                 else if(op=="feature.remove"){if(!next.remove(id(field(c,"id"))))throw std::runtime_error("Feature not found");}
@@ -208,7 +231,7 @@ V AgentSession::tools(){
     const Def defs[]={
         {"doc_info","Compact document summary with revision and stable feature IDs.",R"({"type":"object"})",true},
         {"doc_get","Read full parametric document, including expressions and revision.",R"({"type":"object"})",true},
-        {"doc_apply","Atomic batch; evaluate once, roll back on any failure. Operations: param.set{name,expr}, feature.add{type,name,p,inputs,mode}, feature.edit{id,p,name}, feature.remove{id}, sketch.set{name,sketch}, assembly.add{name,parent,feature,p,visible}, assembly.edit{id,parent,feature,p,visible}, assembly.remove{id}. feature=0 is a group; placements are rigid tx/ty/tz/rx/ry/rz. Tube feature accepts p{section:round|rect,od,width,height,wall,tail,chord_tol,sides} plus bends:[{feed,radius,angle,roll}] in mm/degrees. Feature types: tube, box{dx,dy,dz}, cylinder{r,h}, sphere{r}, cone{rb,rt,h}, torus{R,r}, extrude{shape,w,d,height,sketch}, revolve{shape,w,d,angle,sketch}, transform{tx,ty,tz,rx,ry,rz}, boolean{mode:0 union/1 cut/2 intersect}, pattern{count,dx,dy,dz}, surface{x,y,z,u0,u1,v0,v1,nu,nv,wrap_u,wrap_v}. Geometry parameters belong in p and accept math expressions. Transforms/patterns take one input, booleans two. Use expected_revision to reject stale writes. Angles in degrees except trig expressions in radians. Surface coordinates use u,v; periodic seams are checked.",R"({"type":"object","properties":{"expected_revision":{"type":"integer","minimum":0},"commands":{"type":"array","minItems":1,"maxItems":128,"items":{"type":"object","properties":{"op":{"type":"string","enum":["param.set","feature.add","feature.edit","feature.remove","sketch.set","assembly.add","assembly.edit","assembly.remove"]}},"required":["op"]}}},"required":["commands"]})",false},
+        {"doc_apply","Atomic batch; evaluate once, roll back on any failure. Operations: param.set{name,expr}, feature.add{type,name,p,inputs,mode}, feature.edit{id,p,name}, feature.remove{id}, sketch.set{name,sketch}, assembly.add{name,parent,feature,p,visible}, assembly.edit{id,parent,feature,p,visible}, assembly.remove{id}. feature=0 is a group; placements are rigid tx/ty/tz/rx/ry/rz. Tube feature accepts p{section:round|rect,od,width,height,wall,tail,chord_tol,sides} plus bends:[{feed,radius,angle,roll}] in mm/degrees. Feature types: notched_tube{p:{width_mm,height_mm,wall_mm,length_mm,hinge_offset_mm},notches:[{station,angle,face:bottom|top|left|right}]}, tube, box{dx,dy,dz}, cylinder{r,h}, sphere{r}, cone{rb,rt,h}, torus{R,r}, extrude{shape,w,d,height,sketch}, revolve{shape,w,d,angle,sketch}, transform{tx,ty,tz,rx,ry,rz}, boolean{mode:0 union/1 cut/2 intersect}, pattern{count,dx,dy,dz}, surface{x,y,z,u0,u1,v0,v1,nu,nv,wrap_u,wrap_v}. Geometry parameters belong in p and accept math expressions. Transforms/patterns take one input, booleans two. Use expected_revision to reject stale writes. Angles in degrees except trig expressions in radians. Surface coordinates use u,v; periodic seams are checked.",R"({"type":"object","properties":{"expected_revision":{"type":"integer","minimum":0},"commands":{"type":"array","minItems":1,"maxItems":128,"items":{"type":"object","properties":{"op":{"type":"string","enum":["param.set","feature.add","feature.edit","feature.remove","sketch.set","assembly.add","assembly.edit","assembly.remove"]}},"required":["op"]}}},"required":["commands"]})",false},
         {"doc_undo","Undo the previous committed transaction; revision increases.",R"({"type":"object"})",false},
         {"doc_redo","Redo a transaction after undo.",R"({"type":"object"})",false},
         {"eval_expr","Evaluate finite arithmetic and trigonometry with named parameters; trig uses radians, deg() converts degrees.",R"({"type":"object","properties":{"expr":{"type":"string"}},"required":["expr"]})",true},
@@ -217,6 +240,8 @@ V AgentSession::tools(){
         {"mesh_raycast","Nearest triangle hit using a cached AABB hierarchy. Direction is normalized; distances in mm. Triangle IDs last for this tessellation/revision only.",R"({"type":"object","properties":{"id":{"type":"integer","minimum":1},"origin":{"type":"array","items":{"type":"number"},"minItems":3,"maxItems":3},"direction":{"type":"array","items":{"type":"number"},"minItems":3,"maxItems":3}},"required":["origin","direction"]})",true},
         {"assembly_info","Hierarchy placements and BOM quantities by shared feature definition. Hidden instances remain in BOM. Rigid transforms, no mate solver.",R"({"type":"object"})",true},
         {"tube_inspect","Ideal centerline length, section area and bend table. No springback, weld allowance or material compensation.",R"({"type":"object","properties":{"node":{"type":"integer","minimum":1},"id":{"type":"integer","minimum":1}},"required":["id"]})",true},
+        {"export_step","Export a notched_tube in its straight pose to validated STEP using optional OCCT Python worker. Animation never affects the output. Writes STEP, .arkcut and .validation.json. Ideal hinge preview, not production qualification.",R"({"type":"object","properties":{"id":{"type":"integer","minimum":1},"path":{"type":"string"}},"required":["id","path"]})",false},
+        {"notch_inspect","Read a notched_tube feature's straight request and ideal cut plan. Optional progress returns sequential display matrices and bounds without document mutation.",R"({"type":"object","properties":{"progress":{"type":"number","minimum":0,"maximum":1},"id":{"type":"integer","minimum":1}},"required":["id"]})",true},
         {"notch_plan","Ideal preview of a straight hollow rectangular tube with V cuts leaving one wall. Requires explicit hinge offset inside that wall. Not a source reconstruction or production-approved laser program. Returns cutter polygons, analytic removed volume and cut-face closure proof; finite-wall strain is not validated.",R"({"type":"object","properties":{"width_mm":{"type":"number"},"height_mm":{"type":"number"},"wall_mm":{"type":"number"},"length_mm":{"type":"number"},"hinge_offset_mm":{"type":"number"},"notches":{"type":"array","items":{"type":"object","properties":{"station_mm":{"type":"number"},"angle_deg":{"type":"number"},"hinge_face":{"type":"string","enum":["bottom","top","left","right"]}},"required":["station_mm","angle_deg","hinge_face"]}}},"required":["width_mm","height_mm","wall_mm","length_mm","hinge_offset_mm","notches"]})",true},
         {"compute_info","Actual CUDA availability, selected device, transfer-inclusive last execution and CPU fallback reason.",R"({"type":"object"})",true},
         {"compute_benchmark","Bounded CPU/CUDA benchmark (default 1M vertices) with transfer, synchronization and numerical parity; initializes GPU runtime.",R"({"type":"object","properties":{"vertices":{"type":"integer","minimum":1,"maximum":4000000}}})",true},

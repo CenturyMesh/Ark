@@ -39,6 +39,7 @@ typedef ptrdiff_t GLsizeiptr;
 #include "ark/io.hpp"
 #include "ark/agent.hpp"
 #include "ark/mesh_analysis.hpp"
+#include "ark/notch.hpp"
 #include <set>
 #include <fstream>
 #include <sstream>
@@ -75,6 +76,8 @@ typedef void (APIENTRY *PFNGLUNIFORMMATRIX4FVPROC)(GLint,GLsizei,GLboolean,const
 typedef void (APIENTRY *PFNGLGENVERTEXARRAYSPROC)(GLsizei,GLuint*);
 typedef void (APIENTRY *PFNGLBINDVERTEXARRAYPROC)(GLuint);
 typedef void (APIENTRY *PFNGLGENBUFFERSPROC)(GLsizei,GLuint*);
+typedef void (APIENTRY *PFNGLDELETEBUFFERSPROC)(GLsizei,const GLuint*);
+typedef void (APIENTRY *PFNGLDELETEVERTEXARRAYSPROC)(GLsizei,const GLuint*);
 typedef void (APIENTRY *PFNGLBINDBUFFERPROC)(GLenum,GLuint);
 typedef void (APIENTRY *PFNGLBUFFERDATAPROC)(GLenum,GLsizeiptr,const void*,GLenum);
 typedef void (APIENTRY *PFNGLENABLEVERTEXATTRIBARRAYPROC)(GLuint);
@@ -104,6 +107,8 @@ typedef void (APIENTRY *PFNGLACTIVETEXTUREPROC)(GLenum);
  X(PFNGLGENVERTEXARRAYSPROC,     glGenVertexArrays) \
  X(PFNGLBINDVERTEXARRAYPROC,     glBindVertexArray) \
  X(PFNGLGENBUFFERSPROC,          glGenBuffers) \
+ X(PFNGLDELETEBUFFERSPROC,       glDeleteBuffers) \
+ X(PFNGLDELETEVERTEXARRAYSPROC,  glDeleteVertexArrays) \
  X(PFNGLBINDBUFFERPROC,          glBindBuffer) \
  X(PFNGLBUFFERDATAPROC,          glBufferData) \
  X(PFNGLENABLEVERTEXATTRIBARRAYPROC, glEnableVertexAttribArray) \
@@ -144,6 +149,10 @@ static GLuint mkProg(const char* vs,const char* fs){
 struct GPUMesh { GLuint vao=0,vbo=0,ibo=0; int count=0; };
 struct Zone { float x,y,w,h; int id; };
 
+struct NotchViewCache { NotchPreview preview; std::vector<GPUMesh> gpu; std::vector<MeshBVH> bvhs; std::vector<AABB> bounds; std::vector<size_t> sourceIndices; };
+static std::unordered_map<u64,NotchViewCache> g_notchViews;
+static double g_foldProgress=0;static bool g_foldPlaying=false,g_foldScrubbing=false;static int g_selectedNotch=0,g_notchScroll=0;
+static size_t g_notchBuildCount=0;
 static AgentSession g_session;
 static Document& g_doc=g_session.document;
 static std::vector<u64> g_bodyIds,g_instanceIds;
@@ -264,9 +273,9 @@ void main(){
 })";
 static const char* FS_SOLID=R"(#version 330 core
 in vec3 nrm,wpos; out vec4 o;
-uniform vec3 color,eye; uniform float sel;
+uniform vec3 color,eye; uniform float sel,hardSurface;
 void main(){
- vec3 n=normalize(nrm); vec3 v=normalize(eye-wpos);
+ vec3 n=hardSurface>0.?normalize(cross(dFdx(wpos),dFdy(wpos))):normalize(nrm); vec3 v=normalize(eye-wpos);
  if(dot(n,v)<0.)n=-n;
  // Broad studio softboxes and neutral steel reflections, independent of part IDs.
  vec3 l1=normalize(vec3(-.45,.85,.65)),l2=normalize(vec3(.75,.25,-.55));
@@ -365,8 +374,19 @@ static void uploadMesh(GPUMesh& gm,const Mesh& m){
     glBindVertexArray(0);
     gm.count=(int)m.triCount();
 }
+static void releaseMesh(GPUMesh& mesh){if(mesh.vbo)glDeleteBuffers(1,&mesh.vbo);if(mesh.ibo)glDeleteBuffers(1,&mesh.ibo);if(mesh.vao)glDeleteVertexArrays(1,&mesh.vao);mesh={};}
+static Feature* selectedNotchedTube(){
+    if(selBody<0||(size_t)selBody>=g_bodyIds.size())return nullptr;
+    auto* f=g_doc.find(g_bodyIds[selBody]);return f&&f->type==FeatureType::NotchedTube?f:nullptr;
+}
+static std::vector<Mat4> displayedNotchTransforms(size_t body){
+    return notchFoldTransforms(g_notchViews.at(g_bodyIds[body]).preview,(int)body==selBody?g_foldProgress:0.);
+}
+static void advanceFold(double seconds){if(g_foldPlaying){g_foldProgress=std::min(1.,g_foldProgress+seconds*.20);if(g_foldProgress>=1.)g_foldPlaying=false;}}
 static void rebuildScene(bool evaluate=false){
     if(evaluate)g_doc.recompute();
+    g_foldPlaying=false;
+    for(auto it=g_notchViews.begin();it!=g_notchViews.end();){auto* f=g_doc.find(it->first);if(!f||f->type!=FeatureType::NotchedTube){for(auto& mesh:it->second.gpu)releaseMesh(mesh);it=g_notchViews.erase(it);}else ++it;}
     std::vector<AssemblyPlacement> placements;std::string error;
     if(g_doc.assembly.empty()){
         std::set<u64> consumed;for(auto& f:g_doc.features)for(auto id:f.inputs)consumed.insert(id);
@@ -383,6 +403,14 @@ static void rebuildScene(bool evaluate=false){
             auto body=std::find_if(g_doc.evalBodies.begin(),g_doc.evalBodies.end(),[&](const Body& b){return b.id==placement.feature;});if(body==g_doc.evalBodies.end())continue;
             size_t i=g_cpuMeshes.size();g_cpuMeshes.push_back(body->tessellate(g_doc.tessOpt));
             if(auto* f=g_doc.find(body->id);f&&f->type==FeatureType::Tube){arkjson::Value a=arkjson::Value::makeObj();a.set("id",arkjson::Value::makeNum((double)body->id));auto r=g_session.call("tube_inspect",a);if(!r.find("isError")->b)g_tubeInfo[body->id]=*r.find("structuredContent");}g_reports.push_back(analyzeMesh(g_cpuMeshes.back()));g_bvhs.emplace_back(g_cpuMeshes.back());
+            if(auto* f=g_doc.find(body->id);f&&f->type==FeatureType::NotchedTube){
+                auto& cache=g_notchViews[f->id];cache.preview=buildNotchPreview(notchRequestForFeature(*f,g_doc.buildEnv()));
+                while(cache.gpu.size()>cache.preview.segments.size()){releaseMesh(cache.gpu.back());cache.gpu.pop_back();}
+                while(cache.gpu.size()<cache.preview.segments.size())cache.gpu.emplace_back();cache.bvhs.clear();cache.bounds.clear();cache.sourceIndices.clear();
+                for(size_t segment=0;segment<cache.preview.segments.size();++segment){uploadMesh(cache.gpu[segment],cache.preview.segments[segment]);cache.bvhs.emplace_back(cache.preview.segments[segment]);cache.bounds.push_back(analyzeMesh(cache.preview.segments[segment]).bounds);}
+                auto env=g_doc.buildEnv();for(double station:cache.preview.stations){size_t source=0;for(size_t k=0;k<f->notches.size();++k)if(std::abs(evalExpr(f->notches[k].station,env)-station)<1e-7){source=k;break;}cache.sourceIndices.push_back(source);}
+                ++g_notchBuildCount;
+            }
             if(i>=g_meshes.size())g_meshes.emplace_back();uploadMesh(g_meshes[i],g_cpuMeshes.back());part=parts.emplace(placement.feature,i).first;
         }
         auto i=part->second;g_bodyIds.push_back(placement.feature);g_instanceIds.push_back(placement.node);g_instanceNames.push_back(placement.name);g_instanceWorld.push_back(placement.world);g_instancePart.push_back(i);
@@ -390,9 +418,15 @@ static void rebuildScene(bool evaluate=false){
     }
     if(selBody<0||selBody>=(int)g_bodyIds.size())selBody=g_bodyIds.empty()?-1:0;
     hoverBody=-1;
+    if(auto* f=selectedNotchedTube())g_selectedNotch=std::max(0,std::min(g_selectedNotch,(int)f->notches.size()-1));
 }
-static void frameScene(){
+static void frameScene(bool animation=false){
     AABB b=g_sceneBounds;
+    if(auto* f=selectedNotchedTube()){
+        auto& cache=g_notchViews.at(f->id);b=AABB{};
+        // A fixed envelope keeps the full rigid-hinge animation inside the view.
+        for(int step=0;step<=(animation?10:0);++step){auto transforms=notchFoldTransforms(cache.preview,animation?step/10.:g_foldProgress);for(size_t i=0;i<transforms.size();++i)b.grow(cache.bounds[i].transformed(g_instanceWorld[selBody]*transforms[i]));}
+    }
     if(b.valid()){tTarget=b.center();tDist=std::max(b.diagonal()*1.65,2.);}
 }
 static arkjson::Value runTool(const std::string& tool,const arkjson::Value& args){
@@ -416,7 +450,7 @@ static void addFeat(FeatureType type, std::initializer_list<std::pair<const char
 }
 // Native modal editors remain clients of the same transactional agent API.
 static HWND g_edit=nullptr,g_dialog=nullptr;static bool g_dialogDone=false,g_dialogAccept=false;
-static int g_dialogSmoke=0;static std::string g_dialogShot;
+static int g_dialogSmoke=0;static std::string g_dialogShot,g_dialogReplacement="32";
 static HBRUSH dialogBrush=CreateSolidBrush(RGB(29,31,36)),fieldBrush=CreateSolidBrush(RGB(42,45,52));
 static LRESULT CALLBACK editorProc(HWND h,UINT m,WPARAM w,LPARAM l){
     if(m==WM_COMMAND&&(LOWORD(w)==1||LOWORD(w)==2)){g_dialogAccept=LOWORD(w)==1;g_dialogDone=true;return 0;}
@@ -430,7 +464,7 @@ static LRESULT CALLBACK editorProc(HWND h,UINT m,WPARAM w,LPARAM l){
             if(PrintWindow(h,dc,0)){Image img;img.w=width;img.h=height;img.px.resize((size_t)width*height*3);for(size_t k=0;k<(size_t)width*height;++k){auto* src=(unsigned char*)bits+4*k;img.px[3*k]=src[2];img.px[3*k+1]=src[1];img.px[3*k+2]=src[0];}writePNG(g_dialogShot.c_str(),img);}
             SelectObject(dc,old);DeleteObject(bitmap);DeleteDC(dc);ReleaseDC(h,screen);g_dialogShot.clear();
         }
-        if(g_dialogSmoke==1)SetWindowTextA(g_edit,"32");
+        if(g_dialogSmoke==1)SetWindowTextA(g_edit,g_dialogReplacement.c_str());
         SendMessage(h,WM_COMMAND,g_dialogSmoke==2?2:1,0);return 0;
     }
     if(m==WM_CTLCOLORSTATIC||m==WM_CTLCOLOREDIT){SetTextColor((HDC)w,RGB(223,226,234));SetBkColor((HDC)w,m==WM_CTLCOLOREDIT?RGB(42,45,52):RGB(29,31,36));return (LRESULT)(m==WM_CTLCOLOREDIT?fieldBrush:dialogBrush);}
@@ -495,12 +529,67 @@ static void fileAction(bool save,bool mesh){
     runTool(mesh?"export_mesh":save?"doc_save":"doc_load",a);
     if(!g_error&&!mesh){g_path=path;g_savedRevision=g_session.revision;if(!save)frameScene();}
 }
+static arkjson::Value notchFeatureEdit(const Feature& f){
+    using V=arkjson::Value;V c=V::makeObj(),p=V::makeObj(),points=V::makeArr();
+    c.set("op",V::makeStr("feature.edit"));c.set("id",V::makeNum((double)f.id));
+    for(auto& entry:f.p)p.set(entry.first,V::makeStr(entry.second));
+    for(auto& n:f.notches){V point=V::makeObj();point.set("station",V::makeStr(n.station));point.set("angle",V::makeStr(n.angle));point.set("face",V::makeStr(n.face));points.arr.push_back(point);}
+    c.set("p",p);c.set("notches",points);return c;
+}
+static void laserStockDialog(bool create){
+    using V=arkjson::Value;auto* f=selectedNotchedTube();if(!create&&!f)return;
+    V c=create?V::makeObj():notchFeatureEdit(*f);
+    const char* keys[]={"width_mm","height_mm","wall_mm","length_mm","hinge_offset_mm"};
+    std::vector<EditorField> fields{{"Width (mm)","40"},{"Height (mm)","30"},{"Wall thickness (mm)","2"},{"Straight length (mm)","600"},{"Hinge offset (mm)","1"}};
+    if(f&&!create)for(size_t i=0;i<fields.size();++i)fields[i].value=f->get(keys[i]);
+    if(!editFields(create?"Create laser tube":"Laser tube stock","Rectangular stock, mm. Hinge offset lies within the retained wall; preview is ideal.",fields))return;
+    V p=V::makeObj();for(size_t i=0;i<fields.size();++i)p.set(keys[i],V::makeStr(fields[i].value));c.set("p",p);
+    if(create){c.set("op",V::makeStr("feature.add"));c.set("type",V::makeStr(featureTypeName(FeatureType::NotchedTube)));c.set("name",V::makeStr("Laser tube"));
+        c.set("notches",V::makeArr());
+    }
+    applyCommand(c);if(!g_error){if(create)selBody=(int)g_bodyIds.size()-1;g_foldProgress=0;g_selectedNotch=0;frameScene();}
+}
+static void notchPointDialog(bool add){
+    using V=arkjson::Value;auto* f=selectedNotchedTube();if(!f)return;V c=notchFeatureEdit(*f);
+    std::vector<EditorField> fields{{"Station (mm)","("+f->get("length_mm")+")*"+(f->notches.empty()?"0.5":"0.75")},{"Angle (degrees)","45"},{"Retained wall","bottom"}};
+    if(!add){if(g_selectedNotch<0||g_selectedNotch>=(int)f->notches.size())return;auto n=f->notches[g_selectedNotch];fields[0].value=n.station;fields[1].value=n.angle;fields[2].value=n.face;}
+    if(!editFields(add?"Add bend point":"Edit bend point","Station is measured along straight stock. Wall: bottom, top, left or right.",fields))return;
+    V point=V::makeObj();point.set("station",V::makeStr(fields[0].value));point.set("angle",V::makeStr(fields[1].value));point.set("face",V::makeStr(fields[2].value));
+    V points=*c.find("notches");if(add)points.arr.push_back(point);else points.arr[g_selectedNotch]=point;c.set("notches",points);
+    applyCommand(c);if(!g_error){if(add)g_selectedNotch=(int)selectedNotchedTube()->notches.size()-1;g_foldProgress=0;frameScene();}
+}
+static void exportStraightStep(const std::string& testPath=""){
+    using V=arkjson::Value;auto* f=selectedNotchedTube();if(!f)return;std::string path=testPath;
+    if(path.empty()){
+        wchar_t file[32768]=L"laser-tube-straight.step";OPENFILENAMEW of{};of.lStructSize=sizeof of;of.hwndOwner=g_window;of.lpstrFile=file;of.nMaxFile=32768;
+        of.lpstrFilter=L"STEP solid\0*.step;*.stp\0";of.lpstrDefExt=L"step";of.lpstrTitle=L"Export straight laser tube / ideal hinge model";
+        of.Flags=OFN_NOCHANGEDIR|OFN_PATHMUSTEXIST|OFN_OVERWRITEPROMPT;if(!GetSaveFileNameW(&of))return;
+        int size=WideCharToMultiByte(CP_UTF8,0,file,-1,nullptr,0,nullptr,nullptr);path.resize(size);WideCharToMultiByte(CP_UTF8,0,file,-1,path.data(),size,nullptr,nullptr);path.pop_back();
+    }
+    V args=V::makeObj();args.set("id",V::makeNum((double)f->id));args.set("path",V::makeStr(path));runTool("export_step",args);
+    if(!g_error)g_status="Straight STEP exported with notches / ideal hinge preview";
+}
 static void uiAction(int id){
     using V=arkjson::Value;
-    if(id>=2000){selBody=id-2000;return;}
+    if(id>=9000){g_selectedNotch=id-9000;return;}
+    if(id>=2000){selBody=id-2000;g_selectedNotch=0;g_notchScroll=0;g_foldPlaying=false;return;}
     if(id>=1000){size_t i=id-1000;if(i>=g_doc.params.size())return;std::string value=g_doc.params[i].expr,name=g_doc.params[i].name;
         if(editText(("Edit parameter: "+name).c_str(),value)){V c=V::makeObj();c.set("op",V::makeStr("param.set"));c.set("name",V::makeStr(name));c.set("expr",V::makeStr(value));applyCommand(c);}return;}
     switch(id){
+        case 40:laserStockDialog(true);break;
+        case 41:laserStockDialog(false);break;
+        case 42:notchPointDialog(true);break;
+        case 43:notchPointDialog(false);break;
+        case 44:if(auto* f=selectedNotchedTube()){
+            if(g_selectedNotch<0||g_selectedNotch>=(int)f->notches.size())break;
+            V c=notchFeatureEdit(*f),points=*c.find("notches");points.arr.erase(points.arr.begin()+g_selectedNotch);c.set("notches",points);applyCommand(c);g_foldProgress=0;frameScene();
+        }break;
+        case 45:g_foldProgress=0;g_foldPlaying=false;frameScene();break;
+        case 46:g_foldProgress=1;g_foldPlaying=false;frameScene();break;
+        case 47:if(selectedNotchedTube()){if(g_foldProgress>=1)g_foldProgress=0;g_foldPlaying=!g_foldPlaying;if(g_foldPlaying)frameScene(true);}break;
+        case 48:g_foldPlaying=false;g_foldProgress=std::max(0.,g_foldProgress-.1);break;
+        case 49:g_foldPlaying=false;g_foldProgress=std::min(1.,g_foldProgress+.1);break;
+        case 51:exportStraightStep();break;
         case 1:addFeat(FeatureType::Box,{{"dx","24"},{"dy","24"},{"dz","16"}});break;
         case 2:addFeat(FeatureType::Cylinder,{{"r","12"},{"h","28"}});break;
         case 3:addFeat(FeatureType::Sphere,{{"r","14"}});break;
@@ -558,7 +647,7 @@ static void uiAction(int id){
             }break;
         }
 
-        case 31:MessageBoxA(g_window,"ARK Geometry Studio\n\nCreate primitives from the ribbon with editable expressions.\nSelect an instance to edit its placement or duplicate it.\nSelect a tube to inspect or edit its bend program.\n\nOrbit: drag  |  Pan: Shift + drag  |  Zoom: wheel\nFit: F  |  Wireframe: W  |  Delete: Del\nOpen: Ctrl+O  |  Save: Ctrl+S  |  Undo / redo: Ctrl+Z / Y\nAgent command: Ctrl+K\n\nThe topology audit reports mesh checks only; it does not certify manufacturing suitability.","About ARK / Workspace guide",MB_OK|MB_ICONINFORMATION);break;
+        case 31:MessageBoxA(g_window,"ARK Geometry Studio\n\nCreate primitives from the ribbon with editable expressions.\nSelect an instance to edit its placement or duplicate it.\nSelect a tube to inspect or edit its bend program.\nLaser tube: stock, bend points, preview and straight STEP.\nNumbered hinge markers select bend points in the viewport.\n\nOrbit: drag  |  Pan: Shift + drag  |  Zoom: wheel\nFit: F  |  Wireframe: W  |  Delete: Del\nOpen: Ctrl+O  |  Save: Ctrl+S  |  Undo / redo: Ctrl+Z / Y\nAgent command: Ctrl+K\n\nThe topology audit reports mesh checks only; it does not certify manufacturing suitability.","About ARK / Workspace guide",MB_OK|MB_ICONINFORMATION);break;
         case 30:{
             if(selBody<0)break;auto* f=g_doc.find(g_bodyIds[selBody]);if(!f||f->type!=FeatureType::Tube)break;
             V edit=V::makeObj(),p=V::makeObj(),bs=V::makeArr();for(auto& kv:f->p)p.set(kv.first,V::makeStr(kv.second));
@@ -605,22 +694,32 @@ static int pickBody(int mx,int my){
     Vec3 rd=(forward+right*(nx*h*viewW/viewH)+up*(ny*h)).normalized();
     int best=-1; f64 bt=1e300;
     for(size_t bi=0;bi<g_bodyIds.size();++bi){
-        size_t part=g_instancePart[bi];Mat4 inv=g_instanceWorld[bi].inverted();
-        auto hit=g_bvhs[part].raycast(g_cpuMeshes[part],{inv.transformPoint(eye),inv.transformDir(rd)});
-        if(hit.hit&&hit.distance<bt){bt=hit.distance;best=(int)bi;}
+        auto cached=g_notchViews.find(g_bodyIds[bi]);
+        if(cached!=g_notchViews.end()&&g_doc.find(g_bodyIds[bi])->type==FeatureType::NotchedTube){
+            auto transforms=displayedNotchTransforms(bi);auto& cache=cached->second;
+            for(size_t segment=0;segment<transforms.size();++segment){auto inv=(g_instanceWorld[bi]*transforms[segment]).inverted();
+                auto hit=cache.bvhs[segment].raycast(cache.preview.segments[segment],{inv.transformPoint(eye),inv.transformDir(rd)});
+                if(hit.hit&&hit.distance<bt){bt=hit.distance;best=(int)bi;}
+            }
+        }else{size_t part=g_instancePart[bi];Mat4 inv=g_instanceWorld[bi].inverted();
+            auto hit=g_bvhs[part].raycast(g_cpuMeshes[part],{inv.transformPoint(eye),inv.transformDir(rd)});
+            if(hit.hit&&hit.distance<bt){bt=hit.distance;best=(int)bi;}
+        }
     }
     return best;
 }
 
 // ---------------------------------------------------------------------------
 static GLuint pBg,pSolid,pGrid,pShadow,pUI,pText;
-static GLint suVp,suModel,suOutline,suColor,suEye,suSel;
+static GLint suVp,suModel,suOutline,suColor,suEye,suSel,suHard;
 static GLint uuVp,uuRc,uuRad,uuFill,uuBorder,uuBW,uuGlyph;
 static GLuint quadVao,gridVao,textVao,textVbo;
 static int gridCount=0;
 static bool g_swap=true;   // headless readback disables the buffer swap
 
 static void drawFrame(HDC hdc){
+    static auto previous=std::chrono::steady_clock::now();auto now=std::chrono::steady_clock::now();
+    advanceFold(std::min(.10,std::chrono::duration<double>(now-previous).count()));previous=now;
     yaw+=(tYaw-yaw)*.2; pitch+=(tPitch-pitch)*.2; dist+=(tDist-dist)*.18;
     target=target+(tTarget-target)*.2;
     AABB box=g_sceneBounds;
@@ -646,7 +745,9 @@ static void drawFrame(HDC hdc){
     glUniformMatrix4fv(glGetUniformLocation(pShadow,"vp"),1,GL_FALSE,vpT);
     glBindVertexArray(quadVao);
     for(size_t i=0;i<g_bodyIds.size();++i){
-        AABB b=g_reports[g_instancePart[i]].bounds.transformed(g_instanceWorld[i]); if(!b.valid())continue;
+        AABB b=g_reports[g_instancePart[i]].bounds.transformed(g_instanceWorld[i]);
+        if(auto* f=g_doc.find(g_bodyIds[i]);f&&f->type==FeatureType::NotchedTube){b=AABB{};auto& cache=g_notchViews.at(f->id);auto matrices=displayedNotchTransforms(i);for(size_t k=0;k<matrices.size();++k)b.grow(cache.bounds[k].transformed(g_instanceWorld[i]*matrices[k]));}
+        if(!b.valid())continue;
         Vec3 e=b.extent(),c=b.center();
         glUniform3f(glGetUniformLocation(pShadow,"ctr"),(float)c.x,(float)b.mn.y-.1f,(float)c.z);
         glUniform2f(glGetUniformLocation(pShadow,"rad"),(float)e.x*.62f+1,(float)e.z*.62f+1);
@@ -666,7 +767,16 @@ static void drawFrame(HDC hdc){
     static const GLfloat ident[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
     glUniformMatrix4fv(suModel,1,GL_FALSE,ident);
     for(size_t i=0;i<g_bodyIds.size();++i){
-        GLfloat model[16];for(int k=0;k<16;++k)model[k]=(GLfloat)g_instanceWorld[i].m[k];glUniformMatrix4fv(suModel,1,GL_FALSE,model);
+        if(auto* f=g_doc.find(g_bodyIds[i]);f&&f->type==FeatureType::NotchedTube){
+            auto& cache=g_notchViews.at(f->id);auto transforms=displayedNotchTransforms(i);
+            glUniform1f(suHard,wireframe?0.f:1.f);glUniform1f(suOutline,0.f);glUniform1f(suSel,(int)i==selBody?1.f:0.f);
+            glPolygonMode(GL_FRONT_AND_BACK,wireframe?GL_LINE:GL_FILL);
+            for(size_t segment=0;segment<transforms.size();++segment){auto world=g_instanceWorld[i]*transforms[segment];GLfloat m[16];for(int k=0;k<16;++k)m[k]=(GLfloat)world.m[k];
+                glUniformMatrix4fv(suModel,1,GL_FALSE,m);float c=.57f+(segment%2)*.025f;glUniform3f(suColor,c,c+.015f,c+.035f);
+                glBindVertexArray(cache.gpu[segment].vao);glDrawElements(GL_TRIANGLES,cache.gpu[segment].count*3,GL_UNSIGNED_INT,nullptr);
+            }continue;
+        }
+        glUniform1f(suHard,0.f);GLfloat model[16];for(int k=0;k<16;++k)model[k]=(GLfloat)g_instanceWorld[i].m[k];glUniformMatrix4fv(suModel,1,GL_FALSE,model);
         auto&gm=g_meshes[g_instancePart[i]]; if(!gm.count)continue;
         float sel=i==(size_t)selBody?1.f:i==(size_t)hoverBody?.3f:0.f;
         float hue=((i*53)%97)/97.f;
@@ -725,6 +835,18 @@ static void drawFrame(HDC hdc){
         textOut(t,x+(w-textWidth(t,.76f))/2,y+7,.76f,accent?.12f:.86f,accent?.13f:.88f,accent?.15f:.92f);
         g_zones.push_back({x,y,w,32,id});
     };
+    if(auto* f=selectedNotchedTube()){
+        auto& cache=g_notchViews.at(f->id);auto matrices=displayedNotchTransforms(selBody);
+        for(size_t k=0;k<cache.preview.hingePoints.size();++k){auto point=(g_instanceWorld[selBody]*matrices[k]).transformPoint(cache.preview.hingePoints[k]);auto clip=vp.transformPoint(point);
+            double cw=vp.m[3]*point.x+vp.m[7]*point.y+vp.m[11]*point.z+vp.m[15];if(cw<=0)continue;
+            float x=viewX+(float)(clip.x/cw+1)*viewW*.5f,y=viewY+(float)(1-clip.y/cw)*viewH*.5f;
+            if(x<viewX+14||x>viewX+viewW-14||y<viewY+70||y>viewY+viewH-14)continue;
+            int source=(int)cache.sourceIndices[k];bool selected=source==g_selectedNotch;
+            rect(x-12,y-12,24,24,12,selected?.78f:.22f,selected?.82f:.25f,selected?.89f:.30f,1,.85,.88,.95,.9,1);
+            std::string number=std::to_string(source+1);textOut(number,x-textWidth(number,.65f)/2,y-8,.65f,selected?.10f:.90f,selected?.12f:.92f,selected?.15f:.96f);
+            g_zones.push_back({x-14,y-14,28,28,9000+source});
+        }
+    }
     panel(0,0,W,58);panel(0,58,W,82);panel(0,140,258,H-168);panel(W-300,140,300,H-168);
     rect(17,12,35,35,8,.16,.17,.19,1,.39,.42,.47,.55,1);glyph(99,21,16,27,.95f);
     textOut("ARK",64,14,1.25f);label("GEOMETRY STUDIO",64,37,.48f);
@@ -734,12 +856,12 @@ static void drawFrame(HDC hdc){
     if(filename.size()>maxFilename)filename=filename.substr(0,maxFilename-3)+"...";
     textOut(filename,viewX+24,20,.86f);
     button("Open",W-374,13,70,17);button("Undo",W-294,13,62,18);button("Redo",W-222,13,62,19);button("Save",W-150,13,70,16,true);button("?",W-70,13,48,31);
-    const char* titles[]={"Box","Cylinder","Sphere","Torus","Extrude","Revolve","Pattern","Union","Cut","Intersect","Tube","Assembly","Export"};
-    int ids[]={1,2,3,5,6,7,11,8,9,10,26,27,12};
-    float tileW=std::min(101.f,(W-44)/13.f),tileX=22;
-    for(int k=0;k<13;++k){float x=tileX+k*tileW,w=tileW-7;bool over=mp.x>=x&&mp.x<x+w&&mp.y>=65&&mp.y<131;
+    const char* titles[]={"Box","Cylinder","Sphere","Torus","Extrude","Revolve","Pattern","Union","Cut","Intersect","Tube","Laser tube","Assembly","Export"};
+    int ids[]={1,2,3,5,6,7,11,8,9,10,26,40,27,12};
+    float tileW=std::min(101.f,(W-44)/14.f),tileX=22;
+    for(int k=0;k<14;++k){float x=tileX+k*tileW,w=tileW-7;bool over=mp.x>=x&&mp.x<x+w&&mp.y>=65&&mp.y<131;
         if(over){g_hoverZone=ids[k];rect(x,65,w,66,6,.19,.20,.22,1,.39,.41,.46,.65,1);}
-        glyph(ids[k],x+(w-34)/2,68,34,k==10?.96f:.83f);
+        glyph(ids[k]==40?26:ids[k],x+(w-34)/2,68,34,k==10?.96f:.83f);
         textOut(titles[k],x+(w-textWidth(titles[k],.69f))/2,109,.69f,.80,.82,.86);
         g_zones.push_back({x,65,w,66,ids[k]});
         if(k==3||k==6||k==9||k==11)rect(x+w+3,77,1,43,0,.25,.26,.29,.6,0,0,0,0,0);
@@ -774,11 +896,13 @@ static void drawFrame(HDC hdc){
     button("Fit",W-486,157,55,20);button("Top",W-425,157,49,23);button("Iso",W-370,157,49,24);
     float rx=W-278;label("INSPECTOR",rx,157,.66f);label("MESH",W-66,157,.62f);
     std::string selected="No selection",kind="No body";if(selBody>=0){auto* f=g_doc.find(g_bodyIds[selBody]);if(f){selected=g_instanceNames[selBody];kind=f->type==FeatureType::ParametricSurface?"EXPRESSION SURFACE / MESH":std::string(featureTypeName(f->type))+" / TESSELLATED MESH";if(g_instanceIds[selBody])kind="INSTANCE #"+std::to_string(g_instanceIds[selBody])+" / "+featureTypeName(f->type);}}
+    if(selectedNotchedTube())kind="LASER TUBE / IDEAL HINGE PREVIEW";
     textOut(selected.substr(0,25),rx,189,1.02f);
     rect(rx,229,254,28,5,.15,.16,.19,1,0,0,0,0,0);textOut(kind.substr(0,36),rx+11,236,.59f,.76,.79,.85);
-    label("GEOMETRY",rx,283,.66f);
+    auto* laser=selectedNotchedTube();
+    if(!laser)label("GEOMETRY",rx,283,.66f);
     auto metric=[&](const char* title,const std::string& value,float y){label(title,rx,y,.76f);textOut(value,W-24-textWidth(value,.80f),y,.80f);};
-    if(selBody>=0){auto& r=g_reports[g_instancePart[selBody]];
+    if(selBody>=0&&!laser){auto& r=g_reports[g_instancePart[selBody]];
         metric("Vertices",std::to_string(r.vertices),314);metric("Triangles",std::to_string(r.triangles),343);metric("Components",std::to_string(r.components),372);
         char size[100];auto e=r.bounds.extent();std::snprintf(size,sizeof size,"%.1f / %.1f / %.1f",e.x,e.y,e.z);metric("XYZ mm",size,392);
         rect(rx,429,254,1,0,.17,.21,.22,1,0,0,0,0,0);label("TOPOLOGY AUDIT",rx,453,.66f);
@@ -794,14 +918,42 @@ static void drawFrame(HDC hdc){
         label("TUBE PROGRAM",rx,680,.66f);metric("Developed axis",length,710);metric("Bends",std::to_string(report.find("bends")->arr.size()),743);
         button("Edit tube program",rx,H-214,252,30);
     }
-    button("Wireframe",rx,H-120,121,14,false,wireframe);button("Grid",rx+131,H-120,121,22,false,g_grid);
-    button(selBody>=0&&!g_instanceIds[selBody]&&g_tubeInfo.count(g_bodyIds[selBody])?"Bend program":"Placement",rx,H-162,121,29);button("Duplicate",rx+131,H-162,121,28);
-    button("Delete selected",rx,H-78,252,25);
+    if(laser){
+        button("Stock",rx,278,121,41);button("Add bend",rx+131,278,121,42,true);
+        label(laser->get("width_mm")+" x "+laser->get("height_mm")+" / wall "+laser->get("wall_mm")+" mm",rx,322,.69f);
+        label("STRAIGHT LENGTH  "+laser->get("length_mm")+" mm",rx,346,.62f);
+        label("BEND POINTS / RETAINED WALL",rx,383,.62f);
+        int visible=std::max(1,(int)(H-654)/45);g_notchScroll=std::max(0,std::min(g_notchScroll,(int)laser->notches.size()-visible));
+        for(int k=g_notchScroll;k<(int)laser->notches.size()&&k<g_notchScroll+visible;++k){auto& n=laser->notches[k];float y=410+(k-g_notchScroll)*45;
+            if(k==g_selectedNotch)rect(rx,y-6,254,41,5,.19,.21,.25,1,.38,.42,.50,.7,1);
+            textOut(std::to_string(k+1)+"   "+n.station.substr(0,14)+" mm",rx+10,y,.71f);
+            label(n.angle+" deg  /  "+n.face,rx+10,y+20,.62f);g_zones.push_back({rx,y-6,254,41,9000+k});
+        }
+        if(laser->notches.empty()){label("Straight stock. Add a bend point",rx+8,420,.67f);label("to define a retained-wall notch.",rx+8,444,.67f);}
+        button("Edit point",rx,H-234,121,43);button("Remove point",rx+131,H-234,121,44);
+        label("Ideal rigid hinges / visual preview",rx,H-184,.64f);label("Wall strain + collisions not certified",rx,H-161,.61f);
+        button("Wireframe",rx,H-120,121,14,false,wireframe);button("Grid",rx+131,H-120,121,22,false,g_grid);
+        button("Export straight STEP",rx,H-78,252,51,true);
+    }else{
+        button("Wireframe",rx,H-120,121,14,false,wireframe);button("Grid",rx+131,H-120,121,22,false,g_grid);
+        button(selBody>=0&&!g_instanceIds[selBody]&&g_tubeInfo.count(g_bodyIds[selBody])?"Bend program":"Placement",rx,H-162,121,29);button("Duplicate",rx+131,H-162,121,28);
+        button("Delete selected",rx,H-78,252,25);
+    }
     float cy=H-178;panel(viewX,cy,(float)viewW,150);
-    label("AGENT WORKSPACE",viewX+22,cy+16,.65f);label("REV "+std::to_string(g_session.revision),viewX+200,cy+16,.65f);
-    textOut("Geometry, expressed.",viewX+22,cy+48,viewW<760?.84f:1.05f);
-    label("Model, inspect and replay with the agent API",viewX+22,cy+80,.66f);
-    button("Run command   Ctrl+K",viewX+viewW-228,cy+43,205,21,true);
+    if(laser){
+        label("IDEAL HINGE PREVIEW",viewX+22,cy+16,.65f);
+        label(std::to_string((int)std::round(g_foldProgress*100))+" %",viewX+220,cy+16,.66f);
+        button("Command",viewX+viewW-120,cy+8,98,21);
+        float x=viewX+22;button("Straight",x,cy+46,88,45,false,g_foldProgress==0);button("Folded",x+98,cy+46,88,46,false,g_foldProgress==1);
+        button(g_foldPlaying?"Pause":"Play",x+196,cy+46,88,47,true);button("-10%",x+294,cy+46,70,48);button("+10%",x+374,cy+46,70,49);
+        float length=viewW-44;rect(x,cy+92,length,5,2,.22,.24,.28,1,0,0,0,0,0);rect(x,cy+92,std::max(3.f,length*(float)g_foldProgress),5,2,.70,.75,.84,1,0,0,0,0,0);
+        rect(x+length*(float)g_foldProgress-5,cy+87,10,15,4,.84,.88,.95,1,0,0,0,0,0);g_zones.push_back({x,cy+82,length,23,50});
+    }else{
+        label("AGENT WORKSPACE",viewX+22,cy+16,.65f);label("REV "+std::to_string(g_session.revision),viewX+200,cy+16,.65f);
+        textOut("Geometry, expressed.",viewX+22,cy+48,viewW<760?.84f:1.05f);
+        label("Model, inspect and replay with the agent API",viewX+22,cy+80,.66f);
+        button("Run command   Ctrl+K",viewX+viewW-228,cy+43,205,21,true);
+    }
     rect(viewX+22,cy+109,viewW-44,26,4,.063,.068,.079,1,0,0,0,0,0);
     textOut(g_status.substr(0,(size_t)std::max((viewW-65)/8,1)),viewX+32,cy+114,.66f,g_error?.95f:.68f,g_error?.58f:.73f,g_error?.48f:.81f);
     panel(0,H-28,W,28);
@@ -837,6 +989,7 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
             layout();return 0;
         case WM_MOUSEWHEEL:
             {POINT p{GET_X_LPARAM(lp),GET_Y_LPARAM(lp)};ScreenToClient(hw,&p);
+            if(p.x>winW-300&&selectedNotchedTube()){g_notchScroll=std::max(0,g_notchScroll+(GET_WHEEL_DELTA_WPARAM(wp)>0?-1:1));return 0;}
             if(p.x<viewX){g_treeScroll=std::max(0,std::min((int)(g_doc.assembly.empty()?g_doc.features.size():g_doc.assembly.size())-1,g_treeScroll+(GET_WHEEL_DELTA_WPARAM(wp)>0?-1:1)));return 0;}}
             tDist=clamp(tDist*(GET_WHEEL_DELTA_WPARAM(wp)>0?0.87:1.15),2.,4000.);
             return 0;
@@ -845,7 +998,7 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
             g_pressWasButton=p.x<viewX||p.x>viewX+viewW||p.y<viewY||p.y>viewY+viewH;
             for(auto&z:g_zones)
                 if((float)p.x>=z.x&&(float)p.x<=z.x+z.w&&(float)p.y>=z.y&&(float)p.y<=z.y+z.h)
-                    { g_pressWasButton=true; break; }
+                    { g_pressWasButton=true;if(z.id==50){g_foldScrubbing=true;g_foldPlaying=false;g_foldProgress=clamp((double)(p.x-z.x)/z.w,0.,1.);} break; }
             g_dragged=false;SetCapture(hw);
             return 0;
         }
@@ -853,6 +1006,7 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
             static int px=0,pyy=0; static bool has=false;
             int x=GET_X_LPARAM(lp),y=GET_Y_LPARAM(lp);
             bool lbtn=wp&MK_LBUTTON,mbtn=wp&MK_MBUTTON,shift=wp&MK_SHIFT;
+            if(g_foldScrubbing&&lbtn)g_foldProgress=clamp((double)(x-viewX-22)/(viewW-44),0.,1.);
             if(has&&(lbtn||mbtn)){
                 int dx=x-px,dy=y-pyy;if(std::abs(dx)+std::abs(dy)>2)g_dragged=true;
                 if((mbtn||(lbtn&&shift))&&!g_pressWasButton){
@@ -876,12 +1030,12 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
             if(g_pressWasButton){
                 for(auto&z:g_zones)
                     if((float)p.x>=z.x&&(float)p.x<=z.x+z.w&&
-                       (float)p.y>=z.y&&(float)p.y<=z.y+z.h){ interactiveAction(z.id); break; }
+                       (float)p.y>=z.y&&(float)p.y<=z.y+z.h){ if(z.id==50){g_foldProgress=clamp((double)(p.x-z.x)/z.w,0.,1.);g_foldPlaying=false;}else interactiveAction(z.id); break; }
             } else if(!g_dragged) {
                 int b=pickBody(p.x,p.y);
-                selBody=(b==selBody)?-1:b;
+                selBody=(b==selBody)?-1:b;g_selectedNotch=0;g_notchScroll=0;
             }
-            g_pressWasButton=false;
+            g_pressWasButton=false;g_foldScrubbing=false;
             return 0;
         }
         case WM_KEYDOWN:
@@ -903,12 +1057,15 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     cpu_detect();
 
     SetProcessDPIAware();
-    bool headless=false,selfTest=false,assemblyTest=false,dialogTest=false;std::string shotPath="ark_studio.png",loadPath,scriptPath;
+    bool headless=false,selfTest=false,assemblyTest=false,dialogTest=false,bendTest=false,bendExportTest=false;double requestedFold=-1;std::string shotPath="ark_studio.png",loadPath,scriptPath;
     int sw=1600,sh=1000,argc=0;auto argv=CommandLineToArgvW(GetCommandLineW(),&argc);
     auto utf8=[](const wchar_t* w){int n=WideCharToMultiByte(CP_UTF8,0,w,-1,nullptr,0,nullptr,nullptr);std::string s(n,'\0');WideCharToMultiByte(CP_UTF8,0,w,-1,s.data(),n,nullptr,nullptr);s.pop_back();return s;};
     for(int i=1;i<argc;++i){auto a=utf8(argv[i]);if(a=="--shot"&&i+1<argc){headless=true;shotPath=utf8(argv[++i]);}
         else if(a=="--self-test-ui")selfTest=true;
         else if(a=="--self-test-dialogs")dialogTest=true;
+        else if(a=="--self-test-bend-workspace")bendTest=true;
+        else if(a=="--self-test-bend-export")bendExportTest=true;
+        else if(a=="--fold-progress"&&i+1<argc)requestedFold=_wtof(argv[++i]);
         else if(a=="--self-test-assembly")assemblyTest=true;
         else if(a=="--size"&&i+2<argc){sw=_wtoi(argv[++i]);sh=_wtoi(argv[++i]);}
         else if(a=="--load"&&i+1<argc)loadPath=utf8(argv[++i]);
@@ -931,7 +1088,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     RegisterClassA(&wc);
     RECT rc{0,0,winW,winH};
     AdjustWindowRect(&rc,WS_OVERLAPPEDWINDOW,FALSE);
-    HWND hwnd=CreateWindowA("ARKVIEW","ARK 0.4 / Geometry Studio",WS_OVERLAPPEDWINDOW,
+    HWND hwnd=CreateWindowA("ARKVIEW","ARK 0.5 / Geometry Studio",WS_OVERLAPPEDWINDOW,
                             CW_USEDEFAULT,CW_USEDEFAULT,rc.right-rc.left,rc.bottom-rc.top,
                             nullptr,nullptr,hi,nullptr);
     g_window=hwnd;BOOL dark=TRUE;DwmSetWindowAttribute(hwnd,20,&dark,sizeof dark);
@@ -988,6 +1145,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     pUI=mkProg(VS_UI,FS_UI);
     pText=mkProg(VS_TEXT,FS_TEXT);
     suVp=glGetUniformLocation(pSolid,"vp");      suModel=glGetUniformLocation(pSolid,"model");
+    suHard=glGetUniformLocation(pSolid,"hardSurface");
     suOutline=glGetUniformLocation(pSolid,"outline"); suColor=glGetUniformLocation(pSolid,"color");
     suEye=glGetUniformLocation(pSolid,"eye");    suSel=glGetUniformLocation(pSolid,"sel");
     uuGlyph=glGetUniformLocation(pUI,"glyph");
@@ -1054,6 +1212,28 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         if(!editFields("Instance placement","Translations use mm; rotations use degrees.",placement)||placement.size()!=6)return 45;
         g_dialogSmoke=0;g_status="Dialog checks passed / create / cancel / undo / command / placement";
     }
+    if(bendTest){
+        using V=arkjson::Value;V a=V::makeObj(),commands=V::makeArr();
+        for(auto& f:g_doc.features){V c=V::makeObj();c.set("op",V::makeStr("feature.remove"));c.set("id",V::makeNum((double)f.id));commands.arr.push_back(c);}a.set("commands",commands);runTool("doc_apply",a);if(g_error)return 60;
+        g_dialogSmoke=3;g_dialogShot=shotPath+".stock.png";uiAction(40);
+        auto* f=selectedNotchedTube();if(g_error||!f||!f->notches.empty())return 61;u64 id=f->id;
+        g_dialogShot=shotPath+".point.png";uiAction(42);f=selectedNotchedTube();if(g_error||!f||f->notches.size()!=1)return 62;
+        g_dialogSmoke=1;g_dialogReplacement="180";uiAction(43);g_dialogReplacement="32";f=selectedNotchedTube();if(g_error||f->notches[0].station!="180")return 63;
+        g_dialogSmoke=3;uiAction(42);f=selectedNotchedTube();if(g_error||f->notches.size()!=2)return 64;
+        uiAction(44);if(g_error||selectedNotchedTube()->notches.size()!=1)return 65;uiAction(18);if(g_error||selectedNotchedTube()->notches.size()!=2)return 66;
+        g_dialogSmoke=0;a=V::makeObj();a.set("path",V::makeStr(shotPath+".ark"));runTool("doc_save",a);if(g_error)return 67;
+        runTool("doc_load",a);if(g_error)return 68;g_path=shotPath+".ark";g_savedRevision=g_session.revision;
+        for(size_t i=0;i<g_bodyIds.size();++i)if(g_bodyIds[i]==id)selBody=(int)i;
+        f=selectedNotchedTube();if(!f||f->notches.size()!=2||f->notches[0].station!="180")return 69;
+        size_t builds=g_notchBuildCount;auto rev=g_session.revision;
+        uiAction(45);auto straight=displayedNotchTransforms(selBody);uiAction(49);if(std::abs(g_foldProgress-.1)>1e-9)return 70;
+        uiAction(48);uiAction(47);advanceFold(2.5);if(std::abs(g_foldProgress-.5)>1e-9||!g_foldPlaying)return 71;
+        uiAction(47);if(g_foldPlaying)return 72;uiAction(46);auto folded=displayedNotchTransforms(selBody);
+        if((straight.back().transformPoint({600,0,0})-folded.back().transformPoint({600,0,0})).len()<1||g_session.revision!=rev||g_notchBuildCount!=builds)return 73;
+        frameScene();g_status="Bend checks passed / stock / add / edit / remove / save / reload / animate";
+    }
+    if(bendExportTest){exportStraightStep(shotPath+".straight.step");if(g_error)return 74;}
+    if(requestedFold>=0){g_foldProgress=clamp(requestedFold,0.,1.);g_foldPlaying=false;frameScene();}
     if(assemblyTest){
         if(g_doc.assembly.empty()||g_bodyIds.empty())return 30;
         size_t parts=g_cpuMeshes.size(),instances=g_bodyIds.size(),features=g_doc.features.size();

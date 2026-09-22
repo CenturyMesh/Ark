@@ -1,4 +1,4 @@
-param([switch]$Test, [string]$BuildDirectory = "out/fabrication")
+param([switch]$Test, [string]$BuildDirectory = "out/bend")
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 Push-Location $root

@@ -66,3 +66,7 @@ Before a source-derived blank may be marked accepted, the implementation must:
 5. Qualify the material/hinge model and cutting process before asserting manufacturing readiness. Kerf, ligament radius, thinning, strain and springback are not determined by the external shape alone.
 
 The automatic source-recognition/refolding chain and physical qualification are still open work. The new preview planner deliberately does not label those gates passed. GPU acceleration is secondary to a correct source contract.
+
+## Integrated Studio workflow (0.5)
+
+The preview is now available as an editable `notched_tube` in Studio, including bend-point dialogs, viewport markers, sequential animation, `.ark` save/load and an **Export straight STEP** button. The original physical/source-reconstruction limits above still apply. See [BEND_WORKSPACE.md](BEND_WORKSPACE.md).

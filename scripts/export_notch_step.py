@@ -51,8 +51,8 @@ def export(plan, destination):
             plan.get('model') != 'ideal_zero_radius_hinge_preview' or
             plan.get('manufacturing_authoritative') is not False):
         raise ValueError('Expected an explicitly non-authoritative ARK preview plan')
-    if not isinstance(plan.get('notches'), list) or not 1 <= len(plan['notches']) <= 64:
-        raise ValueError('Expected 1..64 notches')
+    if not isinstance(plan.get('notches'), list) or not 0 <= len(plan['notches']) <= 64:
+        raise ValueError('Expected 0..64 notches')
     stock = plan['stock']
     width, height, wall, length, hinge = [float(stock[key]) for key in (
         'width_mm', 'height_mm', 'wall_mm', 'length_mm', 'hinge_offset_mm')]
@@ -154,6 +154,7 @@ def export(plan, destination):
                   source_reconstruction_verified=False, finite_wall_deformation_verified=False,
                   model='ideal_zero_radius_hinge_preview')
     temporary.replace(destination)
+    destination.with_suffix('.arkcut').write_text(json.dumps(plan, indent=2)+'\n', encoding='utf-8')
     report['step_sha256'] = hashlib.sha256(destination.read_bytes()).hexdigest()
     destination.with_suffix('.validation.json').write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
     return report

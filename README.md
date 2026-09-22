@@ -2,7 +2,7 @@
 
 A C++ geometry workspace designed to be operated by people and agents.
 
-![ARK Studio](docs/studio.png)
+![ARK Studio](docs/laser-straight.png)
 
 ARK combines a native Windows/OpenGL editor, a headless geometry library and a local MCP server. All new editor commands and MCP tools use the same `AgentSession` implementation. It is an **early engineering prototype**, with an existing custom kernel extended and corrected here, not yet an industrial CAD replacement.
 
@@ -20,9 +20,9 @@ Windows requirements: CMake 3.20+, Ninja and a C++20 compiler on PATH. The inclu
 The kernel and MCP have portable CMake targets for Linux; CI execution is currently blocked by the GitHub account billing limit:
 
 ```sh
-cmake -S . -B out/fabrication -DCMAKE_BUILD_TYPE=Release
-cmake --build out/fabrication --parallel 4
-ctest --test-dir out/fabrication --output-on-failure
+cmake -S . -B out/bend -DCMAKE_BUILD_TYPE=Release
+cmake --build out/bend --parallel 4
+ctest --test-dir out/bend --output-on-failure
 ```
 
 Targets: `ark` static library, `ark-mcp`, `ark-cli` (legacy demonstration), `ark-tests`, `ark-agent-tests`, and `ark-studio` on Windows. No JavaScript runtime, web server, cloud account or model subscription is required by ARK itself. MinGW executables link their runtime statically.
@@ -38,13 +38,13 @@ Targets: `ark` static library, `ark-mcp`, `ark-cli` (legacy demonstration), `ark
 
 ## Agents
 
-Start `out/fabrication/ark-mcp.exe` as a local MCP stdio server from your MCP client. The interface is model independent: an Astra or other agent host can drive it **if that host can invoke MCP tools**. ARK does not embed a language model or provide a natural-language chat service.
+Start `out/bend/ark-mcp.exe` as a local MCP stdio server from your MCP client. The interface is model independent: an Astra or other agent host can drive it **if that host can invoke MCP tools**. ARK does not embed a language model or provide a natural-language chat service.
 
 ```json
 {
   "mcpServers": {
     "ark": {
-      "command": "C:/path/to/Ark/out/fabrication/ark-mcp.exe",
+      "command": "C:/path/to/Ark/out/bend/ark-mcp.exe",
       "args": []
     }
   }
@@ -52,6 +52,14 @@ Start `out/fabrication/ark-mcp.exe` as a local MCP stdio server from your MCP cl
 ```
 
 This is a generic MCP configuration example; the host's configuration format may differ. See [agent protocol](docs/AGENTS.md) for the tool contract and examples. Studio and a separately launched MCP process each own an independent session. Use `.ark` files to hand work between them; live cross-process synchronization is not implemented.
+
+## Interactive laser tube (0.5)
+
+```powershell
+.\start-studio.ps1 -Document examples/laser-tube.ark
+```
+
+Choose **Laser tube**, define stock and **Add bend** points, then use **Play**, **Straight**, **Folded** or the slider to inspect the motion. **Save** keeps the editable design; **Export straight STEP** always writes the straight notched tube, regardless of the animation pose. [Controls, geometry contract and backend setup](docs/BEND_WORKSPACE.md).
 
 ## Neutral desktop UI and notch STEP preview (0.4)
 

@@ -67,3 +67,7 @@ Mesh buffers, reports and BVHs are cached per session revision and selected feat
 ## 0.4 preview operation
 
 `notch_plan` is the 18th tool. It returns a standalone `ark-cut-plan` for an ideal zero-radius retained-wall notch, with cutter geometry and mathematical checks. It does not edit the active document or claim source reconstruction/physical validation. [The STEP bridge](NOTCH_WORKFLOW.md) uses an explicit request file and the C++ MCP process to generate an auditable preview in one command. `step_audit.py` provides an optional read-only OCCT inventory of real STEP sources.
+
+## 0.5 integrated workspace
+
+`notched_tube` is now an editable feature with stock expressions and a replaceable `notches` array. `notch_inspect{id,progress?}` reports the plan and optional display transforms. `export_step{id,path}` writes the straight part using the configured OCCT backend and reports its validation. These additions bring the tool count to 20. Animation is read-only and cannot change the exported pose. See [BEND_WORKSPACE.md](BEND_WORKSPACE.md).

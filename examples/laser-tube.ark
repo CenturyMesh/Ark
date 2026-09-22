@@ -1,0 +1,1 @@
+{"format":"ark","version":3,"units":"mm","next_feature_id":2,"params":[],"sketches":[],"features":[{"id":1,"type":"notched_tube","name":"Laser tube","op":0,"inputs":[],"p":{"height_mm":"30","hinge_offset_mm":"1","length_mm":"600","wall_mm":"2","width_mm":"40"},"notches":[{"station":"180","angle":"60","face":"bottom"},{"station":"400","angle":"90","face":"top"}]}]}

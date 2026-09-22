@@ -42,3 +42,7 @@ The record above describes the initial 0.2 baseline. For current assembly/tube/C
 The integrated build defaults to `out/fabrication`. New C++ notch tests check analytical cut-face closure and its inverse, independent volume integration, side orientations and invalid envelopes. Optional OCCT integration tests validate four retained-wall sides, STEP readback, B-rep validity, retained material and rejection of modified cutters. See [NOTCH_WORKFLOW.md](NOTCH_WORKFLOW.md) for the explicit geometric/physical boundary.
 
 The neutral UI was built and visually checked at 1600x1000 and 1180x840. Native in-app fixtures exercise property, placement and command dialogs plus acceptance/cancellation, creation and undo. The UI and assembly smoke modes returned zero exit codes. External click automation was unavailable because the native computer-use pipe could not connect; these checks do not claim an exhaustive external interaction test.
+
+## Version 0.5
+
+The integrated build defaults to `out/bend`. Six native/stdio CTest suites pass. Additional native workspace/export fixtures and a real Windows STEP worker test cover the complete editable-tube workflow, export from the folded pose, Unicode output paths and backend failure. See [BEND_WORKSPACE.md](BEND_WORKSPACE.md) for scope and reproduction details.

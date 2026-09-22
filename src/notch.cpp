@@ -11,7 +11,7 @@ arkjson::Value planNotchedBlank(const V& request){
     double width=number(request,"width_mm"),height=number(request,"height_mm"),wall=number(request,"wall_mm"),length=number(request,"length_mm"),hinge=number(request,"hinge_offset_mm");
     if(width<=0||height<=0||width>10000||height>10000||wall<=0||2*wall>=std::min(width,height)||length<=0||length>1e6||hinge<0||hinge>wall)
         throw std::runtime_error("Invalid section/length or hinge offset outside retained wall");
-    auto list=request.find("notches");if(!list||list->t!=V::Arr||list->arr.empty()||list->arr.size()>64)throw std::runtime_error("notches must contain 1..64 entries");
+    auto list=request.find("notches");if(!list||list->t!=V::Arr||list->arr.size()>64)throw std::runtime_error("notches must contain 0..64 entries");
     struct Notch {double station,angle,depth,breadth,lo,hi;std::string face;Mat4 frame;};
     std::vector<Notch> specs;
     for(auto& j:list->arr){
