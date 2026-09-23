@@ -43,18 +43,25 @@ The current automatic route supports a chain of planar tube spans connected thro
 - `source_inspect{id,progress?}` returns opening coordinates and the projection report without transmitting large mesh/B-rep buffers. Optional progress returns finite-hinge display transforms.
 - `export_step{id,path}` exports the exact straight source projection and its audit sidecars. Source-file drift or altered stored STEP bytes are rejected.
 
-There are 22 MCP tools. `.ark` version 4 embeds source preview data and a base64 copy of the verified straight STEP, protected by its SHA-256. Older document versions remain readable. The current 4 MiB document limit still applies; large source assemblies are not yet a packaged external-asset format.
+The 0.6 API had 22 MCP tools; the current 0.8 API has 30. `.ark` version 4
+introduced the source package and protected its verified straight STEP payload
+with a SHA-256. Older document versions remain readable. The current 4 MiB
+document limit still applies; large source assemblies are not yet a packaged
+external-asset format.
 
-The optional OCCT worker setup is shared with [BEND_WORKSPACE.md](BEND_WORKSPACE.md). The input limit is 64 MiB and the Windows worker has a 30-second process-tree limit. Derived caches are local and ignored by Git.
+The current source import/export path uses the isolated C++ OCCT 8.0.1 worker
+described in [native build](NATIVE_BUILD.md). The input limit is 64 MiB and
+the Windows worker has a bounded process-tree limit. Derived caches are local
+and ignored by Git. The former Python/OCP worker is superseded.
 
 ## Reproducible verification
 
 ```powershell
 .\scripts\build.ps1 -Test
-# Use a Python with scripts/requirements-occt.txt installed:
-python tests/source_projection_test.py
-python tests/source_step_integration.py out/source/ark-mcp.exe path/to/source.step
-.\out\source\ark-source-tests.exe path/to/saved-source.ark
+ctest --test-dir out/native-release -C Release -R 'native-tube|source-tube|mcp-stdio' --output-on-failure
+# Optional read-only source inventory through the C++ MCP process:
+[System.IO.File]::WriteAllLines((Join-Path (Resolve-Path out).Path 'inspect.request.jsonl'), [string[]]@('{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"step_inspect","arguments":{"path":"C:/path/to/source.step"}}}'), [System.Text.UTF8Encoding]::new($false))
+cmd /c ".\out\native-release\Release\ark-mcp.exe < out\inspect.request.jsonl"
 ```
 
 The independent synthetic fixture uses different stock dimensions, a 70-degree hinge, circular and hexagonal openings, and a partial-cylinder Boolean construction. A rotated/translated regression checks the flat opening coordinates under the same end datum. Reversing the selected endpoint changes the presentation datum, while source/refold checks still use the recorded transforms. A hole through the curved ligament must be rejected instead of disappearing. Native C++ tests also check hinge/rigid interface continuity and verify the displayed source opening coordinates after folding.

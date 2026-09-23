@@ -91,19 +91,27 @@ std::vector<Vec2> sampleSketchEntity(const SketchEnt& e,double tolerance){
         if(n>2044)throw std::runtime_error("Circle exceeds sampling limit; increase tolerance");
         for(int i=0;i<n;++i){double t=K_2PI*i/n;out.push_back(pt(0)+Vec2{r*std::cos(t),r*std::sin(t)});}out.push_back(out.front());return out;
     }
+    auto segments=sketchSplineSegments(e);out.push_back(segments.front()[0]);
+    for(auto& segment:segments)cubicPoints(segment[0],segment[1],segment[2],segment[3],tolerance,out);
+    return out;
+}
+
+std::vector<std::array<Vec2,4>> sketchSplineSegments(const SketchEnt& e){
+    if(e.kind!=SketchEnt::Spline)throw std::runtime_error("Expected spline entity");
+    auto pt=[&](size_t i){return Vec2{e.dof.at(2*i),e.dof.at(2*i+1)};};
     size_t n=e.dof.size()/2;
     if(n<(e.closed?3u:2u)||n>64||e.dof.size()%2||!std::isfinite(e.tension)||e.tension<0||e.tension>1)throw std::runtime_error("Spline requires 2..64 anchors (closed: 3 minimum), tension 0..1");
     for(size_t i=1;i<n;++i)if((pt(i)-pt(i-1)).len()<1e-7)throw std::runtime_error("Consecutive spline anchors coincide");
     if(e.closed&&(pt(0)-pt(n-1)).len()<1e-7)throw std::runtime_error("Closed spline wraps automatically; do not repeat first anchor");
     auto anchor=[&](int i){if(e.closed)return pt((size_t)((i+(int)n)%(int)n));if(i<0)return pt(0)*2-pt(1);if(i>=(int)n)return pt(n-1)*2-pt(n-2);return pt((size_t)i);};
-    out.push_back(pt(0));
+    std::vector<std::array<Vec2,4>> segments;
     for(int i=0;i<(int)n-(e.closed?0:1);++i){
         Vec2 p0=anchor(i-1),p1=anchor(i),p2=anchor(i+1),p3=anchor(i+2);
         double t01=std::sqrt((p1-p0).len()),t12=std::sqrt((p2-p1).len()),t23=std::sqrt((p3-p2).len());
         Vec2 m1=((p2-p1)+((p1-p0)/t01-(p2-p0)/(t01+t12))*t12)*(1-e.tension);
         Vec2 m2=((p2-p1)+((p3-p2)/t23-(p3-p1)/(t12+t23))*t12)*(1-e.tension);
-        cubicPoints(p1,p1+m1/3,p2-m2/3,p2,tolerance,out);
-    }return out;
+        segments.push_back({p1,p1+m1/3,p2-m2/3,p2});
+    }return segments;
 }
 
 std::vector<SketchProfile> sketchProfiles(const Sketch& sketch,const Mat4& frame){

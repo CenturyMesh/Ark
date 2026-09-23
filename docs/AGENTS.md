@@ -66,7 +66,7 @@ Mesh buffers, reports and BVHs are cached per session revision and selected feat
 
 ## 0.4 preview operation
 
-`notch_plan` is the 18th tool. It returns a standalone `ark-cut-plan` for an ideal zero-radius retained-wall notch, with cutter geometry and mathematical checks. It does not edit the active document or claim source reconstruction/physical validation. [The STEP bridge](NOTCH_WORKFLOW.md) uses an explicit request file and the C++ MCP process to generate an auditable preview in one command. `step_audit.py` provides an optional read-only OCCT inventory of real STEP sources.
+`notch_plan` was the 18th tool in 0.4. It returns a standalone `ark-cut-plan` for an ideal zero-radius retained-wall notch, with cutter geometry and mathematical checks. It does not edit the active document or claim source reconstruction/physical validation. The current C++ `step_inspect{path,faces?}` tool provides a read-only OCCT inventory of STEP sources; the former Python audit script has been superseded.
 
 ## 0.5 integrated workspace
 
@@ -100,3 +100,31 @@ falls back to an unrelated empty session. [Codex configuration](CODEX_CONNECT.md
 The in-app assistant uses a configured Responses-compatible provider and these
 same tools. [Connector contract and testing](ASSISTANT.md). Onboarding and
 geometry operations also work without an API key or an LLM.
+
+## 0.8 native OCCT modeling and sheet sources
+
+The current API has **30 tools**. `agent_onboard` adds `surfacing` and `sheet`
+topics to its earlier overview/sketch/tube/assembly topics. `kernel_info{}` reports the native OCCT
+version and capability status. `step_inspect{path,faces?}` inventories an
+original STEP file without editing the document. `native_inspect{id}` returns
+compact native B-rep validation and opening evidence without transmitting
+large mesh or B-rep buffers. `import_sheet_step{path,k_factor,body_index?,
+root_panel?,replace?}` imports a supported source sheet with an explicit
+K factor; a multiple-body file requires a zero-based body index, and equal
+flanges can require root panel 0 or 1.
+
+`doc_apply` supports authored `loft`, `surface_fill`, `bspline_surface`,
+`thicken`, and `sheet_metal` features. Use `native` for loft sketch names,
+NURBS poles/weights, advanced fill profiles, and sheet openings; use `p` for
+editable expressions. Source sheets are read-only. `export_step{id,path,pose?}`
+exports exact native B-reps; sheet pose is `flat` by default or `formed`.
+The Formed/Flat Studio display choice does not edit the document. See
+[surfacing](SURFACING.md), [sheet metal](SHEET_METAL.md), and
+[native Studio controls](NATIVE_STUDIO.md).
+
+The previous custom primitive and mesh features remain available. Native
+surfaces and sheets cannot be passed through approximate mesh transform,
+Boolean, or sketch-cut operations. Use authored parameters, construction
+planes, or assembly instance placements. The native worker and current tests
+are C++; no Python runtime or test gate is required. The Windows native build
+uses OCCT 8.0.1 from [the pinned SDK](NATIVE_BUILD.md).

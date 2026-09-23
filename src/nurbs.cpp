@@ -234,7 +234,7 @@ Vec3 NurbsSurface::eval(f64 u, f64 v) const {
     nurbs_basis(spanU, u, pu, U, Nu.data());
     nurbs_basis(spanV, v, pv, V, Nv.data());
     // homogeneous intermediate
-    Vec4 Sw[pu+1];
+    std::vector<Vec4> Sw((size_t)pu+1);
     for (int i = 0; i <= pu; ++i) {
         Vec4 tmp;
         for (int j = 0; j <= pv; ++j) {

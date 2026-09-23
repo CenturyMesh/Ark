@@ -1,6 +1,6 @@
 # Connect Codex to the open ARK Studio
 
-ARK 0.7 provides a local live-session bridge. Codex calls the existing ARK MCP
+ARK 0.8 provides a local live-session bridge. Codex calls the existing ARK MCP
 tools; Studio executes them on its document thread and refreshes the operator's
 view. It uses the same document and revision as the operator. No model API key,
 cloud relay or network listener is required by this bridge.
@@ -11,7 +11,7 @@ restarting Studio. Configure your MCP client explicitly for that endpoint:
 
 ```toml
 [mcp_servers.ark]
-command = 'C:\path\to\Ark\out\sketch\ark-mcp.exe'
+command = 'C:\path\to\ARK-Point\out\native\Release\ark-mcp.exe'
 args = ['--connect', 'ark-studio-REPLACE-WITH-ACTIVE-ENDPOINT']
 ```
 

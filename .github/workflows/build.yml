@@ -1,13 +1,29 @@
 name: Build and test
 on: [push, pull_request]
+permissions:
+  contents: read
+
 jobs:
-  kernel:
+  portable-core:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - run: cmake -S . -B out/build -DCMAKE_BUILD_TYPE=Release
-      - run: cmake --build out/build --config Release --parallel 4
-      - run: ctest --test-dir out/build -C Release --output-on-failure
+      - run: cmake -S . -B out/core -DARK_WITH_OCCT=OFF -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build out/core --config Release --parallel 2
+      - run: ctest --test-dir out/core -C Release --output-on-failure
+
+  windows-native-occt:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build OCCT 8 native SDK
+        shell: pwsh
+        run: ./scripts/build-occt.ps1 -Jobs 2
+      - name: Build and test ARK with native OCCT
+        shell: pwsh
+        run: ./scripts/build.ps1 -Test -Jobs 2
+      # Live Studio UI checks are opt-in; hosted OpenGL 3.3 availability is not assumed.

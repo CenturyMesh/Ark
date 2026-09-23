@@ -1,0 +1,40 @@
+#pragma once
+#include "ark/json.hpp"
+#include <TopoDS_Shape.hxx>
+#include <TopAbs_ShapeEnum.hxx>
+#include <gp_Trsf.hxx>
+#include <gp_XYZ.hxx>
+#include <filesystem>
+#include <array>
+#include <vector>
+#include <string>
+
+namespace ark::occt {
+using V=arkjson::Value;
+namespace fs=std::filesystem;
+std::string readFile(const fs::path& path);
+void writeFile(const fs::path& path,const std::string& bytes);
+void replaceFile(const fs::path& staged,const fs::path& destination);
+std::string sha256(const std::string& bytes);
+std::string base64Encode(const std::string& bytes);
+std::string base64Decode(const std::string& text);
+TopoDS_Shape readStep(const fs::path& path);
+void writeStep(const TopoDS_Shape& shape,const fs::path& path);
+double properties(const TopoDS_Shape& shape,char kind='v');
+std::vector<TopoDS_Shape> shapes(const TopoDS_Shape& shape,TopAbs_ShapeEnum kind);
+std::array<double,6> bounds(const TopoDS_Shape& shape);
+TopoDS_Shape cut(const TopoDS_Shape& a,const TopoDS_Shape& b);
+TopoDS_Shape common(const TopoDS_Shape& a,const TopoDS_Shape& b);
+TopoDS_Shape fuse(const TopoDS_Shape& a,const TopoDS_Shape& b);
+TopoDS_Shape compound(const std::vector<TopoDS_Shape>& parts);
+TopoDS_Shape transformed(const TopoDS_Shape& shape,const gp_Trsf& transform);
+V meshData(const TopoDS_Shape& shape,double deflection=.025,double angle=.12); // pos/idx
+V vec(const gp_XYZ& xyz);
+V matrix(const gp_Trsf& transform);
+std::string brepData(const TopoDS_Shape& shape); // base64 BRep, no tessellation
+TopoDS_Shape readBrep(const std::string& encoded);
+V shapeResult(const TopoDS_Shape& shape,bool requireSolid);
+V shapeReport(const TopoDS_Shape& shape,bool requireSolid);
+double symmetricDifference(const TopoDS_Shape& a,const TopoDS_Shape& b);
+std::string kernelVersion();
+}

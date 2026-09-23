@@ -2,10 +2,11 @@
 
 **Parametric CAD for people and agents.**
 
-Studio 0.7 uses a compact document bar and floating tool dock instead of a
+Studio 0.8 uses a compact document bar and floating tool dock instead of a
 ribbon. **Commands** (Ctrl+K) opens grouped actions for documents, sketches,
-solids, tubes, assemblies, views and agents. Existing operations remain available
-there; **All tools** opens the same menu. New is also available through Ctrl+N.
+solids, native surfaces, sheet metal, tubes, assemblies, views and agents.
+Existing operations remain available there; **All tools** opens the same menu.
+New is also available through Ctrl+N. [Native surface and sheet controls](NATIVE_STUDIO.md).
 
 ## Model a part
 
@@ -70,15 +71,18 @@ use `--settings-file <path>` to isolate their settings.
 
 The native smoke modes exercise the real command dispatch and dialogs, with
 automatic fixture input. They are not an exhaustive external click test.
+Run them on a Windows machine with an OpenGL 3.3 context. The C++ live Studio
+process test is explicit/opt-in and is not part of the headless CI gate.
 
 ```powershell
-.\out\sketch\ark-studio.exe --self-test-sketch-ui --shot out\sketch-ui.png --size 1180 840
-.\out\sketch\ark-studio.exe --self-test-assistant-ui --shot out\assistant-ui.png --size 1180 840
-python tests\studio_live_integration.py out\sketch\ark-studio.exe out\sketch\ark-mcp.exe
+.\out\native\Release\ark-studio.exe --self-test-sketch-ui --shot out\sketch-ui.png --size 1180 840
+.\out\native\Release\ark-studio.exe --self-test-assistant-ui --shot out\assistant-ui.png --size 1180 840
+.\out\native\Release\ark-studio.exe --self-test-native-ui --shot out\native-ui.png --size 1180 800
+.\out\native\Release\ark-studio-live-tests.exe .\out\native\Release\ark-studio.exe .\out\native\Release\ark-mcp.exe .
 ```
 
 The assistant smoke uses a local injected response fixture and makes no paid API
-call. The live integration test starts its own temporary Studio process and
+call. The C++ live integration test starts its own temporary Studio process and
 independent MCP proxy processes, checks actual parameter/geometry/save/undo/New
 behavior, then verifies that disconnect never falls back to another document.
 It does not control an existing operator window.

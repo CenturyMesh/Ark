@@ -93,3 +93,55 @@ through-cut path requires independent sampled cap-area, volume and closed-mesh
 checks. General sketch cuts and extrusions reject failed topology or nonpositive
 volume before commit. This does not establish an exact B-rep CAD kernel or
 physical manufacturing qualification. [Detailed sketch evidence](PARAMETRIC_SKETCH.md).
+
+## Version 0.8 (2026-09-23)
+
+The final build is `out/native-release/Release`, using MSVC C++20 and the
+verified OCCT 8.0.1 SDK. The existing Studio process was left intact while this
+separate output directory was built. The launcher, build script and VS Code
+CMake preset now select the new output directory.
+
+**17/17 headless CTest cases passed** in the final native build (5.48 seconds
+on this machine). These include the previous core regressions and C++ tests
+for source tube/notches, native surfaces, authored sheets, imported source
+sheets, and native feature history/STEP persistence. The optional portable
+core configuration also passed 12/12 tests locally on Windows; this is not a
+claim of a hosted Linux native OCCT run.
+
+The real SKT01 source was imported, saved to a new native `.ark`, and exported
+through the final MCP/native worker. Process exit was zero. Runtime
+`kernel_info` returned OCCT 8.0.1, C++, and `python_required:false`. The result
+retained 31 outer-wall openings (23 circular, 8 polygonal), two original solids
+including the small attached solid, and flat length 1128.1609031525 mm.
+Independent refold and STEP readback symmetric-difference volumes were both
+zero. The 80-check source preview test also passed on that newly saved project.
+Private input CAD and generated source artifacts remain outside Git.
+
+The native sheet tests verify uniform-panel recognition, opposed bend skins,
+complete contact, circle/polygon openings, inverse mappings, a rotated source,
+explicit selection among multiple bodies, an independently built flat sheet,
+non-midwall K accounting, source/refold material agreement, tampered payloads,
+changed source rejection and rejection of a hole crossing the deforming bend.
+Surfacing tests cover an analytic frustum, open loft, nonplanar fill, a NURBS
+plane, thickening, STEP readback, invalid input and atomic history rejection.
+
+The final executable passed native UI smoke (sheet create, actual Formed/Flat
+geometry change without revision change, STEP export, sheet reimport, NURBS
+editing) and the existing source-tube UI smoke. Loft, curved surface and sheet
+examples were rendered and visually checked. The C++ live Studio/MCP test
+passed edit, hole movement, mesh inspection, save, undo, New and explicit
+failure after disconnect. These UI checks are separate from the headless
+CTest gate; hosted OpenGL availability is not assumed.
+
+All tracked `.py` bridge, audit, benchmark and test programs, and the OCP
+requirements file, were removed after their native replacements passed.
+The two old local bytecode files were removed separately. No Python process
+was used during this migration. Dependency caches under ignored `out/deps`
+contain the unmodified upstream SDK source; its optional developer tools are
+not ARK runtime or test dependencies.
+
+The implementation and supported-domain limits are documented in
+[SHEET_METAL.md](SHEET_METAL.md), [SURFACING.md](SURFACING.md), and the read-only
+[Stage donor assessment](STAGE_NATIVE_ASSESSMENT.md). Native B-rep validity and
+round-trip checks do not certify physical manufacturing. Legacy mesh features
+remain distinct from native exact-shape features.

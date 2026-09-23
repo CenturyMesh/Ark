@@ -1,0 +1,4 @@
+{"tool":"doc_apply","arguments":{"expected_revision":0,"commands":[{"op":"param.set","name":"span","expr":"60"},{"op":"param.set","name":"rise","expr":"8"},{"op":"feature.add","type":"bspline_surface","name":"Native curved patch","p":{"u_degree":3,"v_degree":3},"native":{"poles":[[[0,0,0],[0,"span/3",0],[0,"2*span/3",0],[0,"span",0]],[["span/3",0,0],["span/3","span/3","rise"],["span/3","2*span/3","rise"],["span/3","span",0]],[["2*span/3",0,0],["2*span/3","span/3","rise"],["2*span/3","2*span/3","rise"],["2*span/3","span",0]],[["span",0,0],["span","span/3",0],["span","2*span/3",0],["span","span",0]]]}}]}}
+{"tool":"doc_apply","arguments":{"expected_revision":1,"commands":[{"op":"param.set","name":"skin","expr":"1.5"},{"op":"feature.add","type":"thicken","name":"Native curved shell","inputs":[1],"p":{"thickness":"skin"}}]}}
+{"tool":"native_inspect","arguments":{"id":2}}
+{"tool":"doc_save","arguments":{"path":"examples/native-surface.ark"}}

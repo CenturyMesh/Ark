@@ -1,14 +1,37 @@
-param([switch]$Test, [string]$BuildDirectory = "out/sketch")
+param(
+    [switch]$Test,
+    [switch]$CoreOnly,
+    [string]$BuildDirectory,
+    [ValidateRange(1, 16)][int]$Jobs = 4
+)
+
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
+if (-not $BuildDirectory) { $BuildDirectory = if ($CoreOnly) { 'out/core' } else { 'out/native-release' } }
+if (-not [System.IO.Path]::IsPathRooted($BuildDirectory)) {
+    $BuildDirectory = Join-Path $root $BuildDirectory
+}
+
 Push-Location $root
 try {
-    cmake -S . -B $BuildDirectory -G Ninja -DCMAKE_BUILD_TYPE=Release
-    if ($LASTEXITCODE) { throw 'CMake configuration failed' }
-    cmake --build $BuildDirectory --parallel 4
-    if ($LASTEXITCODE) { throw 'Build failed' }
-    if ($Test) {
-        ctest --test-dir $BuildDirectory --output-on-failure
-        if ($LASTEXITCODE) { throw 'Tests failed' }
+    if ($CoreOnly) {
+        & cmake -S $root -B $BuildDirectory -DARK_WITH_OCCT=OFF -DCMAKE_BUILD_TYPE=Release
+    } else {
+        if ($env:OS -ne 'Windows_NT') { throw 'The default native build requires Windows and Visual Studio 2022; use -CoreOnly for the portable core.' }
+        $occt = Join-Path $root 'out/deps/occt/install-msvc/cmake'
+        if (-not (Test-Path -LiteralPath (Join-Path $occt 'OpenCASCADEConfig.cmake'))) {
+            & (Join-Path $PSScriptRoot 'build-occt.ps1') -Jobs $Jobs
+            if ($LASTEXITCODE -ne 0) { throw 'OCCT SDK build failed' }
+        }
+        & cmake -S $root -B $BuildDirectory -G 'Visual Studio 17 2022' -A x64 "-DOpenCASCADE_DIR=$occt" -DARK_WITH_OCCT=ON
     }
-} finally { Pop-Location }
+    if ($LASTEXITCODE -ne 0) { throw 'CMake configuration failed' }
+    & cmake --build $BuildDirectory --config Release --parallel $Jobs
+    if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
+    if ($Test) {
+        & ctest --test-dir $BuildDirectory -C Release --output-on-failure
+        if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
+    }
+} finally {
+    Pop-Location
+}

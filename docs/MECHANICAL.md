@@ -76,7 +76,12 @@ Measured on the local RTX 4080 SUPER, five warmed repetitions, full host-to-devi
 
 Maximum absolute coordinate difference was 0 mm for the tested arrays. Runtime initialization took approximately 154 ms in the recorded run, excluded from warmed timings and reported separately. The initial cold run was approximately 390 ms. These are modest gains for a transfer-bound operation, not an assertion that the entire CAD became 1.23x faster. Large scene rendering benefits primarily from sharing geometry and leaving instance transforms on the GPU. Boolean, solver, NURBS and topology algorithms have not been ported to CUDA.
 
-Reproduce with `python scripts/benchmark-compute.py out/next/ark-mcp.exe` or the MCP `compute_benchmark` tool. [Raw measurements](compute-benchmark.json) include the actual device, backend and parity result. Configuration discovers CUDA headers under `CUDA_PATH/include`; runtime initialization loads NVRTC from `CUDA_PATH/bin`. The toolkit is optional and not redistributed with this repository.
+Run `powershell -File scripts/benchmark-compute.ps1 out/native-release/Release/ark-mcp.exe`
+or call the MCP `compute_benchmark` tool. The
+[earlier raw measurements](compute-benchmark.json) include the measured device,
+backend and parity result; rerun the command for current hardware. Configuration
+discovers CUDA headers under `CUDA_PATH/include`; runtime initialization loads
+NVRTC from `CUDA_PATH/bin`. CUDA is optional and is not redistributed here.
 
 ## Validation
 

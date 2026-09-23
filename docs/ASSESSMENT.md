@@ -1,6 +1,6 @@
 # Assessment and next engineering stages
 
-Assessment made against the local source on 2026-09-22. The local folder had C++ sources and old generated artifacts but no Git repository; `CenturyMesh/Ark` was empty.
+Historical assessment made against the local source on 2026-09-22. The local folder had C++ sources and old generated artifacts but no Git repository; `CenturyMesh/Ark` was empty. Its proposed work below reflects that date. ARK 0.8 subsequently added a native OCCT 8.0.1 worker, bounded exact surfacing/sheet/STEP routes, and a live Studio/MCP document bridge. See the current [README](../README.md), [surfacing](SURFACING.md), [sheet metal](SHEET_METAL.md), and [validation](VALIDATION.md) before treating an item below as still open.
 
 ## Existing foundation
 

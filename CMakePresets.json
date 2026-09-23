@@ -1,0 +1,24 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "native",
+      "displayName": "ARK native C++ / OCCT 8 / MSVC x64",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/out/native-release",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+      "cacheVariables": {
+        "ARK_WITH_OCCT": "ON",
+        "OpenCASCADE_DIR": "${sourceDir}/out/deps/occt/install-msvc/cmake"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "native-release", "configurePreset": "native", "configuration": "Release", "jobs": 4 }
+  ],
+  "testPresets": [
+    { "name": "native-release", "configurePreset": "native", "configuration": "Release", "output": { "outputOnFailure": true } }
+  ]
+}

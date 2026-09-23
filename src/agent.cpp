@@ -7,10 +7,13 @@
 #include "ark/source_tube.hpp"
 #include "ark/sketch.hpp"
 #include "ark/onboarding.hpp"
+#include "ark/native_backend.hpp"
+#include "ark/native_features.hpp"
 #include <stdexcept>
 #include <set>
 #include <map>
 #include <fstream>
+#include <filesystem>
 namespace ark {
 using V=arkjson::Value;
 namespace {
@@ -18,6 +21,7 @@ const V& field(const V& a,const char* k){auto p=a.find(k);if(!p)throw std::runti
 std::string str(const V& a,const char* k){auto& p=field(a,k);if(p.t!=V::Str||p.str.empty())throw std::runtime_error(std::string("Expected nonempty string: ")+k);return p.str;}
 u64 id(const V& v){if(v.t!=V::Num||!std::isfinite(v.num)||v.num<1||v.num>9007199254740991.||v.num!=std::floor(v.num))throw std::runtime_error("Expected positive integer id");return (u64)v.num;}
 std::string expression(const V& v){if(v.t==V::Str && v.str.size()<=2048)return v.str;if(v.t==V::Num&&std::isfinite(v.num))return v.dump();throw std::runtime_error("Expected expression string or finite number");}
+std::string absolutePath(const std::string& name){auto path=std::filesystem::absolute(std::filesystem::u8path(name));auto utf=path.u8string();return std::string(utf.begin(),utf.end());}
 void params(Feature& f,const V& p){if(p.t!=V::Obj)throw std::runtime_error("p must be an object");for(auto& kv:p.obj)f.p[kv.first]=expression(kv.second);}
 void bends(Feature& f,const V& list){
     if(f.type!=FeatureType::Tube||list.t!=V::Arr||list.arr.size()>64)throw std::runtime_error("bends requires a tube and 0..64 bend objects");
@@ -106,6 +110,25 @@ V AgentSession::call(const std::string& tool,const V& args){
             if(!ok)throw std::runtime_error("Invalid mathematical expression");
             V r=V::makeObj();r.set("value",V::makeNum(v));return result(r);
         }
+        if(tool=="kernel_info")return result(nativeKernelInfo());
+        if(tool=="step_inspect"){
+            V request=V::makeObj();request.set("operation",V::makeStr("step_inspect"));request.set("path",V::makeStr(absolutePath(str(args,"path"))));
+            if(auto p=args.find("faces")){if(p->t!=V::Bool)throw std::runtime_error("faces must be boolean");request.set("faces",*p);}return result(nativeWorkerRequest(request));
+        }
+        if(tool=="native_inspect"){
+            u64 selected=id(field(args,"id"));
+            auto* feature=document.find(selected);
+            if(!feature||!isNativeFeature(feature->type))throw std::runtime_error("Select a native modeling feature");
+            for(const Body& body:document.evalBodies)if(body.id==selected){
+                V r=V::makeObj();r.set("id",V::makeNum((double)selected));
+                if(auto report=body.nativeData.find("report"))r.set("report",*report);
+                if(auto holes=body.nativeData.find("holes"))r.set("holes",*holes);
+                r.set("read_only_geometry",V::makeBool(feature->type==FeatureType::SourceSheet));
+                r.set("has_flat",V::makeBool(body.nativeData.find("flat_brep_base64")!=nullptr));
+                return result(r);
+            }
+            throw std::runtime_error("Native feature has no evaluated body");
+        }
         if(tool=="source_inspect"){
             auto* feature=document.find(id(field(args,"id")));if(!feature||feature->type!=FeatureType::SourceTube)throw std::runtime_error("Select a source_tube feature");
             V r=V::makeObj();r.set("report",*feature->sourceData.find("report"));r.set("holes",*feature->sourceData.find("holes"));r.set("read_only_geometry",V::makeBool(true));
@@ -120,11 +143,38 @@ V AgentSession::call(const std::string& tool,const V& args){
             if(documentToJson(next).size()>4*1024*1024)throw std::runtime_error("Imported document exceeds current 4 MiB persistence limit; use replace:true for a standalone source document");
             remember();document=std::move(next);++revision;V r=info();r.set("created_id",V::makeNum((double)id));r.set("report",*document.find(id)->sourceData.find("report"));return result(r);
         }
+        if(tool=="import_sheet_step"){
+            bool replace=false;if(auto p=args.find("replace")){if(p->t!=V::Bool)throw std::runtime_error("replace must be boolean");replace=p->b;}
+            const V& factor=field(args,"k_factor");
+            if(factor.t!=V::Num||!std::isfinite(factor.num)||factor.num<0||factor.num>1)throw std::runtime_error("k_factor must be in [0,1]");
+            V request=V::makeObj();request.set("operation",V::makeStr("import_sheet"));request.set("source_path",V::makeStr(absolutePath(str(args,"path"))));request.set("k_factor",factor);
+            if(auto body=args.find("body_index")){if(body->t!=V::Num||body->num<0||body->num!=std::floor(body->num))throw std::runtime_error("body_index must be a nonnegative integer");request.set("body_index",*body);}
+            if(auto panel=args.find("root_panel")){if(panel->t!=V::Num||(panel->num!=0&&panel->num!=1))throw std::runtime_error("root_panel must be 0 or 1");request.set("root_panel",*panel);}
+            V package=nativeWorkerRequest(request);
+            (void)nativeResultMesh(package);
+            Document next;std::string error;if(!replace&&!documentFromJson(documentToJson(document),next,&error))throw std::runtime_error(error);
+            Feature feature;feature.type=FeatureType::SourceSheet;feature.name="Source sheet";if(auto name=package.find("source_name"))feature.name=name->asStr();feature.sourceData=std::move(package);u64 created=next.addFeature(std::move(feature));validated(next);
+            if(documentToJson(next).size()>4*1024*1024)throw std::runtime_error("Imported sheet exceeds current 4 MiB document limit");
+            remember();document=std::move(next);++revision;V answer=info();answer.set("created_id",V::makeNum((double)created));if(auto report=document.find(created)->sourceData.find("report"))answer.set("report",*report);return result(answer);
+        }
         if(tool=="export_step"){
             auto* feature=document.find(id(field(args,"id")));if(!feature)throw std::runtime_error("Feature not found");
             if(feature->type==FeatureType::SourceTube)return result(exportSourceTubeStep(feature->sourceData,str(args,"path")));
-            if(feature->type!=FeatureType::NotchedTube)throw std::runtime_error("STEP export requires a source_tube or notched_tube feature");
-            return result(exportNotchStep(notchRequestForFeature(*feature,document.buildEnv()),str(args,"path")));
+            if(feature->type==FeatureType::NotchedTube)return result(exportNotchStep(notchRequestForFeature(*feature,document.buildEnv()),str(args,"path")));
+            if(!isNativeFeature(feature->type))throw std::runtime_error("STEP export requires a native or supported tube feature");
+            const Body* body=nullptr;for(const Body& candidate:document.evalBodies)if(candidate.id==feature->id)body=&candidate;
+            if(!body)throw std::runtime_error("Native feature has no evaluated body");
+            std::string pose="";if(auto value=args.find("pose")){if(value->t!=V::Str||(value->str!="flat"&&value->str!="formed"))throw std::runtime_error("pose must be flat or formed");pose=value->str;}
+            if(feature->type==FeatureType::SourceSheet){
+                V request=V::makeObj();request.set("operation",V::makeStr("export_sheet"));request.set("package",feature->sourceData);
+                request.set("path",V::makeStr(absolutePath(str(args,"path"))));request.set("pose",V::makeStr(pose.empty()?"flat":pose));
+                return result(nativeWorkerRequest(request));
+            }
+            const bool sheet=feature->type==FeatureType::SheetMetal||feature->type==FeatureType::SourceSheet;
+            if(!sheet&&pose=="flat")throw std::runtime_error("Flat pose is only available for sheet features");
+            const char* key=sheet&&pose!="formed"?"flat_brep_base64":"brep_base64";
+            auto payload=body->nativeData.find(key);if(!payload||payload->t!=V::Str)throw std::runtime_error("Selected native pose has no exact STEP B-rep");
+            return result(exportNativeBrep(payload->str,str(args,"path")));
         }
         if(tool=="notch_inspect"){
             auto* feature=document.find(id(field(args,"id")));if(!feature||feature->type!=FeatureType::NotchedTube)throw std::runtime_error("Select a notched_tube feature");
@@ -186,21 +236,24 @@ V AgentSession::call(const std::string& tool,const V& args){
                 else if(op=="feature.add"){
                     Feature f;auto type=str(c,"type");
                     if(!featureTypeFromName(type,f.type))throw std::runtime_error("Unknown feature type: "+type);
-                    if(f.type==FeatureType::SourceTube)throw std::runtime_error("Use import_step to create a verified source tube");
+                    if(f.type==FeatureType::SourceTube||f.type==FeatureType::SourceSheet)throw std::runtime_error("Use the source STEP import tool to create verified source geometry");
                     f.name=c.find("name")?str(c,"name"):type;
                     if(auto p=c.find("p"))params(f,*p);
                     if(auto b=c.find("bends"))bends(f,*b);
                     if(auto n=c.find("notches"))notches(f,*n);
+                    if(auto spec=c.find("native")){if(!isNativeFeature(f.type)||spec->t!=V::Obj)throw std::runtime_error("native must be an object for a native feature");f.nativeSpec=*spec;}
+                    else if(isNativeFeature(f.type))f.nativeSpec=V::makeObj();
                     if(auto in=c.find("inputs")){if(in->t!=V::Arr)throw std::runtime_error("inputs must be an array");for(auto& x:in->arr)f.inputs.push_back(id(x));}
                     if(auto mode=c.find("mode")){if(mode->t!=V::Num||mode->num<0||mode->num>2||mode->num!=std::floor(mode->num))throw std::runtime_error("mode must be 0, 1 or 2");f.opInt=(int)mode->num;}
                     created.arr.push_back(V::makeNum((double)next.addFeature(std::move(f))));
                 }
                 else if(op=="feature.edit"){
                     auto* f=next.find(id(field(c,"id")));if(!f)throw std::runtime_error("Feature not found");
-                    if(f->type==FeatureType::SourceTube&&(c.find("p")||c.find("bends")||c.find("notches")))throw std::runtime_error("Imported source geometry is read-only; reimport changed STEP");
+                    if((f->type==FeatureType::SourceTube||f->type==FeatureType::SourceSheet)&&(c.find("p")||c.find("bends")||c.find("notches")||c.find("native")))throw std::runtime_error("Imported source geometry is read-only; reimport changed STEP");
                     if(auto p=c.find("p"))params(*f,*p);
                     if(auto b=c.find("bends"))bends(*f,*b);
                     if(auto n=c.find("notches"))notches(*f,*n);
+                    if(auto spec=c.find("native")){if(!isNativeFeature(f->type)||spec->t!=V::Obj)throw std::runtime_error("native must be an object for a native feature");f->nativeSpec=*spec;}
                     if(c.find("name"))f->name=str(c,"name");
                 }
                 else if(op=="feature.remove"){if(!next.remove(id(field(c,"id"))))throw std::runtime_error("Feature not found");}
@@ -282,11 +335,11 @@ V AgentSession::call(const std::string& tool,const V& args){
 V AgentSession::tools(){
     struct Def{const char* name;const char* desc;const char* schema;bool read;};
     const Def defs[]={
-        {"agent_onboard","START HERE. Discover current document/revision, supported modeling workflows, expression-driven splines, examples and validation limits. Read-only; choose a topic before modeling.",R"({"type":"object","properties":{"topic":{"type":"string","enum":["overview","sketch","tube","assembly"]}}})",true},
+        {"agent_onboard","START HERE. Discover current document/revision, supported modeling workflows, expression-driven splines, examples and validation limits. Read-only; choose a topic before modeling.",R"({"type":"object","properties":{"topic":{"type":"string","enum":["overview","sketch","tube","assembly","surfacing","sheet"]}}})",true},
         {"doc_info","Compact document summary with revision and stable feature IDs.",R"({"type":"object"})",true},
         {"doc_new","Start an empty document only when requested. Clears the active model with undo and a monotonically increasing revision; does not overwrite saved files.",R"({"type":"object","properties":{"expected_revision":{"type":"integer","minimum":0}},"required":["expected_revision"]})",false},
         {"doc_get","Read full parametric document, including expressions and revision.",R"({"type":"object"})",true},
-        {"doc_apply","Atomic batch; evaluate once, roll back on any failure. Operations: param.set{name,expr}, feature.add{type,name,p,inputs,mode}, feature.edit{id,p,name}, feature.remove{id}, plane.set{name,parent,p:{ox,oy,oz,rx,ry,rz}}, plane.remove{name}, sketch.set{name,sketch:{plane,tolerance,entities,constraints}}, sketch.entity.set{name,entity}, sketch.remove{name}, assembly.add{name,parent,feature,p,visible}, assembly.edit{id,parent,feature,p,visible}, assembly.remove{id}. feature=0 is a group; placements are rigid tx/ty/tz/rx/ry/rz. Tube feature accepts p{section:round|rect,od,width,height,wall,tail,chord_tol,sides} plus bends:[{feed,radius,angle,roll}] in mm/degrees. Sketch entities: kind point|line|circle|spline, optional unique name, dof numbers or expression strings (strings are driven), construction. Spline dof is 2..64 XY anchor pairs flattened; closed wraps without repeated first point, tension 0..1. Constraints val/val2 accept expressions. Entity edits replace one named entity. Feature types: sketch_cut{inputs:[base],p:{sketch,depth,offset}}, notched_tube{p:{width_mm,height_mm,wall_mm,length_mm,hinge_offset_mm},notches:[{station,angle,face:bottom|top|left|right}]}, tube, box{dx,dy,dz}, cylinder{r,h}, sphere{r}, cone{rb,rt,h}, torus{R,r}, extrude{shape,w,d,height,sketch}, revolve{shape,w,d,angle,sketch}, transform{tx,ty,tz,rx,ry,rz}, boolean{mode:0 union/1 cut/2 intersect}, pattern{count,dx,dy,dz}, surface{x,y,z,u0,u1,v0,v1,nu,nv,wrap_u,wrap_v}. Geometry parameters belong in p and accept math expressions. Transforms/patterns take one input, booleans two. Use expected_revision to reject stale writes. Angles in degrees except trig expressions in radians. Surface coordinates use u,v; periodic seams are checked.",R"({"type":"object","properties":{"expected_revision":{"type":"integer","minimum":0},"commands":{"type":"array","minItems":1,"maxItems":128,"items":{"type":"object","properties":{"op":{"type":"string","enum":["param.set","feature.add","feature.edit","feature.remove","sketch.set","sketch.entity.set","sketch.remove","plane.set","plane.remove","assembly.add","assembly.edit","assembly.remove"]}},"required":["op"]}}},"required":["commands"]})",false},
+        {"doc_apply","Atomic batch; evaluate once, roll back on any failure. Operations: param.set{name,expr}, feature.add{type,name,p,native,inputs,mode}, feature.edit{id,p,native,name}, feature.remove{id}, plane.set{name,parent,p:{ox,oy,oz,rx,ry,rz}}, plane.remove{name}, sketch.set{name,sketch:{plane,tolerance,entities,constraints}}, sketch.entity.set{name,entity}, sketch.remove{name}, assembly.add{name,parent,feature,p,visible}, assembly.edit{id,parent,feature,p,visible}, assembly.remove{id}. feature=0 is a group; placements are rigid tx/ty/tz/rx/ry/rz. Tube feature accepts p{section:round|rect,od,width,height,wall,tail,chord_tol,sides} plus bends:[{feed,radius,angle,roll}] in mm/degrees. Sketch entities: kind point|line|circle|spline, optional unique name, dof numbers or expression strings (strings are driven), construction. Spline dof is 2..64 XY anchor pairs flattened; closed wraps without repeated first point, tension 0..1. Constraints val/val2 accept expressions. Entity edits replace one named entity. Native feature types: loft{native:{sections:[sketch names]},p:{solid,ruled,max_degree?}}, surface_fill{p:{sketch} or native:{profile}}, bspline_surface{native:{poles,weights?},p:{u_degree,v_degree}}, thicken{inputs:[native surface],p:{thickness}}, sheet_metal{p:{width,leg_a,leg_b,thickness,inner_radius,angle,k_factor},native:{openings?}}. Feature types: sketch_cut{inputs:[base],p:{sketch,depth,offset}}, notched_tube{p:{width_mm,height_mm,wall_mm,length_mm,hinge_offset_mm},notches:[{station,angle,face:bottom|top|left|right}]}, tube, box{dx,dy,dz}, cylinder{r,h}, sphere{r}, cone{rb,rt,h}, torus{R,r}, extrude{shape,w,d,height,sketch}, revolve{shape,w,d,angle,sketch}, transform{tx,ty,tz,rx,ry,rz}, boolean{mode:0 union/1 cut/2 intersect}, pattern{count,dx,dy,dz}, surface{x,y,z,u0,u1,v0,v1,nu,nv,wrap_u,wrap_v}. Geometry parameters belong in p and accept math expressions. Transforms/patterns take one input, booleans two. Use expected_revision to reject stale writes. Angles in degrees except trig expressions in radians. Surface coordinates use u,v; periodic seams are checked.",R"({"type":"object","properties":{"expected_revision":{"type":"integer","minimum":0},"commands":{"type":"array","minItems":1,"maxItems":128,"items":{"type":"object","properties":{"op":{"type":"string","enum":["param.set","feature.add","feature.edit","feature.remove","sketch.set","sketch.entity.set","sketch.remove","plane.set","plane.remove","assembly.add","assembly.edit","assembly.remove"]}},"required":["op"]}}},"required":["commands"]})",false},
         {"plane_inspect","Read a named construction plane's world transform. Built-ins: XY, XZ (normal -Y), YZ (normal +X). Offsets/XYZ Euler rotations are relative to parent.",R"({"type":"object","properties":{"name":{"type":"string"}},"required":["name"]})",true},
         {"sketch_inspect","Read resolved sketch coordinates, local constraint rank/remaining DOFs, profile readiness and sampling counts. Optional samples:true includes local/world polylines. Spline chord tolerance bounds curve approximation, not manufacturing accuracy.",R"({"type":"object","properties":{"name":{"type":"string"},"samples":{"type":"boolean"}},"required":["name"]})",true},
         {"doc_undo","Undo the previous committed transaction; revision increases.",R"({"type":"object"})",false},
@@ -298,8 +351,12 @@ V AgentSession::tools(){
         {"assembly_info","Hierarchy placements and BOM quantities by shared feature definition. Hidden instances remain in BOM. Rigid transforms, no mate solver.",R"({"type":"object"})",true},
         {"tube_inspect","Ideal centerline length, section area and bend table. No springback, weld allowance or material compensation.",R"({"type":"object","properties":{"node":{"type":"integer","minimum":1},"id":{"type":"integer","minimum":1}},"required":["id"]})",true},
         {"source_inspect","Read source projection evidence and exact opening coordinates without large mesh buffers. Optional progress returns finite-hinge display transforms; source geometry stays read-only.",R"({"type":"object","properties":{"id":{"type":"integer","minimum":1},"progress":{"type":"number","minimum":0,"maximum":1}},"required":["id"]})",true},
+        {"native_inspect","Read native feature validation, opening inventory, and flat availability without transmitting B-rep or mesh buffers.",R"({"type":"object","properties":{"id":{"type":"integer","minimum":1}},"required":["id"]})",true},
+        {"kernel_info","Report the isolated native OCCT modeling backend and version.",R"({"type":"object"})",true},
+        {"step_inspect","Read STEP solids, units, B-rep validity, dimensions, volume and surface types before choosing an explicit body. Optional faces includes source face inventory. Read-only C++ OCCT; no automatic sheet classification.",R"({"type":"object","properties":{"path":{"type":"string"},"faces":{"type":"boolean"}},"required":["path"]})",true},
         {"import_step","Import and geometrically verify a planar tube STEP with cylindrical retained-wall hinges. Preserves exact hole/cutout B-reps, projects rigid spans, checks refolding and imports native preview. Optional replace:true starts a new document. Fails closed outside supported domain.",R"({"type":"object","properties":{"path":{"type":"string"},"replace":{"type":"boolean"}},"required":["path"]})",false},
-        {"export_step","Export a source_tube or notched_tube in its straight pose to validated STEP using optional OCCT Python worker. Animation never affects the output. Writes STEP, .arkcut and .validation.json. Ideal hinge preview, not production qualification.",R"({"type":"object","properties":{"id":{"type":"integer","minimum":1},"path":{"type":"string"}},"required":["id","path"]})",false},
+        {"import_sheet_step","Import a source-owned supported sheet body through the isolated C++ OCCT worker. k_factor is explicit; body_index selects a zero-based solid occurrence and root_panel resolves a panel tie. Source geometry stays read-only.",R"({"type":"object","properties":{"path":{"type":"string"},"k_factor":{"type":"number","minimum":0,"maximum":1},"body_index":{"type":"integer","minimum":0},"root_panel":{"type":"integer","minimum":0,"maximum":1},"replace":{"type":"boolean"}},"required":["path","k_factor"]})",false},
+        {"export_step","Export an exact native B-rep to STEP with readback validation. Sheet features default to the flat pose; pose:formed exports the formed source. Existing tube exports keep their original straight behavior.",R"({"type":"object","properties":{"id":{"type":"integer","minimum":1},"path":{"type":"string"},"pose":{"type":"string","enum":["flat","formed"]}},"required":["id","path"]})",false},
         {"notch_inspect","Read a notched_tube feature's straight request and ideal cut plan. Optional progress returns sequential display matrices and bounds without document mutation.",R"({"type":"object","properties":{"progress":{"type":"number","minimum":0,"maximum":1},"id":{"type":"integer","minimum":1}},"required":["id"]})",true},
         {"notch_plan","Ideal preview of a straight hollow rectangular tube with V cuts leaving one wall. Requires explicit hinge offset inside that wall. Not a source reconstruction or production-approved laser program. Returns cutter polygons, analytic removed volume and cut-face closure proof; finite-wall strain is not validated.",R"({"type":"object","properties":{"width_mm":{"type":"number"},"height_mm":{"type":"number"},"wall_mm":{"type":"number"},"length_mm":{"type":"number"},"hinge_offset_mm":{"type":"number"},"notches":{"type":"array","items":{"type":"object","properties":{"station_mm":{"type":"number"},"angle_deg":{"type":"number"},"hinge_face":{"type":"string","enum":["bottom","top","left","right"]}},"required":["station_mm","angle_deg","hinge_face"]}}},"required":["width_mm","height_mm","wall_mm","length_mm","hinge_offset_mm","notches"]})",true},
         {"compute_info","Actual CUDA availability, selected device, transfer-inclusive last execution and CPU fallback reason.",R"({"type":"object"})",true},

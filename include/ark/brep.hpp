@@ -9,6 +9,7 @@
 #include "ark/core.hpp"
 #include "ark/nurbs.hpp"
 #include "ark/mesh.hpp"
+#include "ark/json.hpp"
 #include <memory>
 
 namespace ark {
@@ -51,6 +52,7 @@ struct SketchProfile {
 struct Body {
     std::vector<Face> faces;                           // exact B-rep faces
     std::unique_ptr<Mesh> baked;                       // CSG result mesh (if any)
+    arkjson::Value nativeData;                          // derived exact OCCT result for this evaluation
     mutable AABB cachedBox;
     u64 id = 0;
     bool dirty = true;

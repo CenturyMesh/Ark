@@ -141,6 +141,12 @@ const char* featureTypeName(FeatureType t){
         case FeatureType::NotchedTube: return "notched_tube";
         case FeatureType::SourceTube: return "source_tube";
         case FeatureType::SketchCut: return "sketch_cut";
+        case FeatureType::Loft: return "loft";
+        case FeatureType::SurfaceFill: return "surface_fill";
+        case FeatureType::BSplineSurface: return "bspline_surface";
+        case FeatureType::Thicken: return "thicken";
+        case FeatureType::SheetMetal: return "sheet_metal";
+        case FeatureType::SourceSheet: return "source_sheet";
     }
     return "unknown";
 }
@@ -162,6 +168,12 @@ bool featureTypeFromName(const std::string& s, FeatureType& out){
     else if(s=="notched_tube") out=FeatureType::NotchedTube;
     else if(s=="source_tube") out=FeatureType::SourceTube;
     else if(s=="sketch_cut") out=FeatureType::SketchCut;
+    else if(s=="loft") out=FeatureType::Loft;
+    else if(s=="surface_fill") out=FeatureType::SurfaceFill;
+    else if(s=="bspline_surface") out=FeatureType::BSplineSurface;
+    else if(s=="thicken") out=FeatureType::Thicken;
+    else if(s=="sheet_metal") out=FeatureType::SheetMetal;
+    else if(s=="source_sheet") out=FeatureType::SourceSheet;
     else return false;
     return true;
 }

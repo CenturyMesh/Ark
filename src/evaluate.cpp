@@ -4,6 +4,7 @@
 #include "ark/sketch.hpp"
 #include "ark/prism_cut.hpp"
 #include "ark/mesh_analysis.hpp"
+#include "ark/native_features.hpp"
 #include <chrono>
 #include <exception>
 
@@ -69,6 +70,17 @@ static Body evalFeatureBody(const Feature& f, const ExprEnv& env, Document& doc,
         return nullptr;
     };
 
+    if(isNativeFeature(f.type)){
+        Body body=evaluateNativeFeature(f,env,doc,work);
+        res.tris=body.baked?body.baked->triCount():0;
+        return body;
+    }
+    if(f.type==FeatureType::Transform||f.type==FeatureType::Boolean||
+       f.type==FeatureType::LinearPattern||f.type==FeatureType::SketchCut){
+        for(u64 input:f.inputs)for(const Body& source:work)if(source.id==input&&source.nativeData.t==arkjson::Value::Obj){
+            res.ok=false;res.error="Exact native B-rep cannot be modified through a display-mesh feature";return {};
+        }
+    }
     switch(f.type){
         case FeatureType::SourceTube: {
             try{auto preview=buildSourceTubePreview(f.sourceData);Body body;body.baked=std::make_unique<Mesh>(std::move(preview.straight));res.tris=body.baked->triCount();return body;}
@@ -144,7 +156,7 @@ static Body evalFeatureBody(const Feature& f, const ExprEnv& env, Document& doc,
             if(f.inputs.size()!=1){res.ok=false;res.error="sketch_cut requires one base feature";return {};}
             auto base=findInput(f.inputs[0]);auto source=doc.find(f.inputs[0]);
             if(!base||!source){res.ok=false;res.error="sketch_cut base missing";return {};}
-            if(source->type==FeatureType::SourceTube){res.ok=false;res.error="Imported source tube stays read-only";return {};}
+            if(source->type==FeatureType::SourceTube||source->type==FeatureType::SourceSheet){res.ok=false;res.error="Imported source geometry stays read-only";return {};}
             auto ns=doc.findSketch(f.get("sketch"));if(!ns){res.ok=false;res.error="Cut sketch not found";return {};}
             if(!ns->error.empty()){res.ok=false;res.error=ns->error;return {};}
             auto profiles=sketchProfiles(ns->sk,resolvePlane(doc,ns->sk.plane)*Mat4::translation({0,0,f.num(env,"offset")}));

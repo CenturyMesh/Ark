@@ -1,4 +1,4 @@
-# ARK file formats, versions 1 through 5
+# ARK file formats, versions 1 through 6
 
 ## `.ark`
 
@@ -32,7 +32,7 @@ Camera, UI layout, undo stack, cached meshes and session revision are not persis
 UTF-8 newline-delimited JSON. Each line is a Studio command envelope containing `tool` and `arguments`; the tool contract is shared with MCP. A failed line aborts replay; previous successful lines remain committed within that process. To make a set of changes atomic, put those changes in **one `doc_apply` batch**.
 
 ```powershell
-.\out\build\ark-studio.exe --load examples/harmonic-ring.ark --script examples/refine.arkops
+.\out\native\Release\ark-studio.exe --load examples/harmonic-ring.ark --script examples/refine.arkops
 ```
 
 `refine.arkops` expects the harmonic-ring document. It edits parameters and can be replayed by any client that parses a line and calls the matching MCP tool. It is not executable C++ or a general scripting language.
@@ -69,3 +69,19 @@ variables. Constraint `val` and `val2` can likewise contain expressions.
 Expression text is preserved through save/load, undo and recomputation. Resolved
 coordinates and diagnostic rank are runtime evidence, not a substitute for the
 stored design intent. [Full contracts and examples](PARAMETRIC_SKETCH.md).
+
+## Version 6: native OCCT features and source sheets
+
+Documents containing `loft`, `surface_fill`, `bspline_surface`, `thicken`,
+`sheet_metal`, or `source_sheet` use version 6. Authored native features store
+their `native` specification alongside expression map `p` and input IDs. A
+source sheet stores a read-only `source` package that includes source identity,
+geometric proof, original openings, and exact formed/flat B-rep payloads. The
+display mesh and native evaluation cache are derived and are not feature
+history edits. The Formed/Flat UI selection does not change the saved geometry.
+
+The reader accepts versions 1 through 6. Older ARK executables reject version
+6 rather than discarding its native data. Save/load re-evaluates authored
+native features with the installed OCCT 8 worker; source packages remain
+portable when the original STEP is absent. If the source STEP still exists
+but its bytes have changed, native source export requires reimport.

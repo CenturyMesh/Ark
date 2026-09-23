@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 //  ARK-Point :: ark-view â€” native Win32 + OpenGL 3.3-core viewport.
 //
 //  Look & feel: dark studio gradient + vignette, procedural matcap shading,
@@ -8,7 +8,9 @@
 //  Headless:  ark-view --shot out.png [width] [height]
 // ============================================================================
 #ifdef _WIN32
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <windowsx.h>
@@ -179,6 +181,7 @@ static std::vector<size_t> g_instancePart;
 static AABB g_sceneBounds;
 static std::vector<MeshReport> g_reports;
 static std::unordered_map<u64,arkjson::Value> g_tubeInfo;
+static std::unordered_map<u64,bool> g_sheetFlatViews; // display choice only; never serialized
 static std::vector<MeshBVH> g_bvhs;
 static size_t g_triangleCount=0;
 static std::string g_status="Ready. Local C++ kernel.",g_path="Harmonic ring.ark";
@@ -411,6 +414,25 @@ static Feature* selectedSourceTube(){
     if(selBody<0||(size_t)selBody>=g_bodyIds.size())return nullptr;
     auto* f=g_doc.find(g_bodyIds[selBody]);return f&&f->type==FeatureType::SourceTube?f:nullptr;
 }
+static Feature* selectedSheet(){
+    if(selBody<0||(size_t)selBody>=g_bodyIds.size())return nullptr;
+    auto* f=g_doc.find(g_bodyIds[selBody]);
+    return f&&(f->type==FeatureType::SheetMetal||f->type==FeatureType::SourceSheet)?f:nullptr;
+}
+static const Body* selectedNativeBody(){
+    if(selBody<0||(size_t)selBody>=g_bodyIds.size())return nullptr;
+    auto id=g_bodyIds[selBody];auto it=std::find_if(g_doc.evalBodies.begin(),g_doc.evalBodies.end(),[&](const Body& body){return body.id==id;});
+    return it==g_doc.evalBodies.end()?nullptr:&*it;
+}
+static Mesh nativePreviewMesh(const arkjson::Value& value){
+    using V=arkjson::Value;auto* pos=value.find("pos"),*idx=value.find("idx");
+    if(!pos||!idx||pos->t!=V::Arr||idx->t!=V::Arr||pos->arr.size()%3||idx->arr.size()%3||pos->arr.empty()||idx->arr.empty()||pos->arr.size()>6000000||idx->arr.size()>6000000)
+        throw std::runtime_error("Invalid native display mesh");
+    Mesh mesh;mesh.pos.reserve(pos->arr.size());mesh.idx.reserve(idx->arr.size());
+    for(auto& item:pos->arr){if(item.t!=V::Num||!std::isfinite(item.num))throw std::runtime_error("Invalid native mesh position");mesh.pos.push_back((float)item.num);}
+    for(auto& item:idx->arr){if(item.t!=V::Num||item.num<0||std::floor(item.num)!=item.num||item.num>=mesh.vertCount())throw std::runtime_error("Invalid native mesh index");mesh.idx.push_back((u32)item.num);}
+    mesh.computeNormals();return mesh;
+}
 static Feature* selectedFoldable(){auto* f=selectedNotchedTube();return f?f:selectedSourceTube();}
 static std::vector<Mat4> displayedSourceTransforms(size_t body){return sourceFoldTransforms(g_sourceViews.at(g_bodyIds[body]).preview,(int)body==selBody?g_foldProgress:0.);}
 static void updateSourceHinges(SourceViewCache& cache,double progress){
@@ -452,7 +474,11 @@ static void rebuildScene(bool evaluate=false){
         auto part=parts.find(placement.feature);
         if(part==parts.end()){
             auto body=std::find_if(g_doc.evalBodies.begin(),g_doc.evalBodies.end(),[&](const Body& b){return b.id==placement.feature;});if(body==g_doc.evalBodies.end())continue;
-            size_t i=g_cpuMeshes.size();g_cpuMeshes.push_back(body->tessellate(g_doc.tessOpt));
+            size_t i=g_cpuMeshes.size();Mesh display=body->tessellate(g_doc.tessOpt);
+            if(auto* f=g_doc.find(body->id);f&&(f->type==FeatureType::SheetMetal||f->type==FeatureType::SourceSheet)&&g_sheetFlatViews[body->id]){
+                if(auto* flat=body->nativeData.find("flat_mesh"))display=nativePreviewMesh(*flat);
+            }
+            g_cpuMeshes.push_back(std::move(display));
             if(auto* f=g_doc.find(body->id);f&&f->type==FeatureType::Tube){arkjson::Value a=arkjson::Value::makeObj();a.set("id",arkjson::Value::makeNum((double)body->id));auto r=g_session.call("tube_inspect",a);if(!r.find("isError")->b)g_tubeInfo[body->id]=*r.find("structuredContent");}g_reports.push_back(analyzeMesh(g_cpuMeshes.back()));g_bvhs.emplace_back(g_cpuMeshes.back());
             if(auto* f=g_doc.find(body->id);f&&f->type==FeatureType::NotchedTube){
                 auto& cache=g_notchViews[f->id];cache.preview=buildNotchPreview(notchRequestForFeature(*f,g_doc.buildEnv()));
@@ -505,7 +531,8 @@ static arkjson::Value runTool(const std::string& tool,const arkjson::Value& args
     auto result=g_session.call(tool,args);g_error=result.find("isError")->b;
     if(g_error)g_status=result.find("structuredContent")->find("error")->asStr();
     else g_status=tool+" completed  /  revision "+std::to_string(g_session.revision);
-    if(!g_error&&(tool=="doc_apply"||tool=="doc_load"||tool=="doc_undo"||tool=="doc_redo"||tool=="import_step"||tool=="doc_new"))rebuildScene();
+    if(!g_error&&(tool=="doc_load"||tool=="doc_new"||tool=="import_step"||tool=="import_sheet_step"))g_sheetFlatViews.clear();
+    if(!g_error&&(tool=="doc_apply"||tool=="doc_load"||tool=="doc_undo"||tool=="doc_redo"||tool=="import_step"||tool=="import_sheet_step"||tool=="doc_new"))rebuildScene();
     if(!g_error&&(tool=="doc_save"||tool=="doc_load")){if(auto* path=args.find("path"))g_path=path->asStr();g_savedRevision=g_session.revision;}
     if(!g_error&&(tool=="doc_load"||tool=="doc_new")){if(!g_ownAssistantTool){++g_documentEpoch;*g_assistantCancel=true;g_conversation=arkjson::Value::makeArr();g_chatLog.clear();if(g_chatHistory)SetWindowTextW(g_chatHistory,L"Document changed. Describe what you want to create.");}if(tool=="doc_new"){g_path="Untitled.ark";g_savedRevision=g_session.revision;g_activeSketch.clear();g_activePlane="XY";}g_foldProgress=selectedSourceTube()?1.:0.;frameScene();}
     return result;
@@ -670,6 +697,106 @@ static void alignSketchCamera(){
 }
 static std::string sketchNames(){std::string names;for(auto& sk:g_doc.sketches)names+=(names.empty()?"":", ")+sk.name;return names.empty()?"Create a sketch first.":"Available: "+names;}
 static double formNumber(const std::string& text){bool ok=false;double n=evalExpr(text,g_doc.buildEnv(),&ok);if(!ok||!std::isfinite(n))throw std::runtime_error("Invalid numeric expression: "+text);return n;}
+static std::string sketchNames();
+static std::string trimField(std::string value){auto first=value.find_first_not_of(" \t\r\n"),last=value.find_last_not_of(" \t\r\n");return first==std::string::npos?std::string():value.substr(first,last-first+1);}
+static void addNativeFeature(FeatureType type,const std::string& name,arkjson::Value p,arkjson::Value native=arkjson::Value::makeObj(),std::vector<u64> inputs={}){
+    using V=arkjson::Value;V command=V::makeObj(),parents=V::makeArr();
+    command.set("op",V::makeStr("feature.add"));command.set("type",V::makeStr(featureTypeName(type)));command.set("name",V::makeStr(name));command.set("p",std::move(p));
+    command.set("native",std::move(native));for(u64 id:inputs)parents.arr.push_back(V::makeNum((double)id));command.set("inputs",std::move(parents));
+    applyCommand(std::move(command));if(!g_error){selBody=(int)g_bodyIds.size()-1;frameScene();}
+}
+static void loftDialog(){
+    using V=arkjson::Value;std::string initial=g_doc.sketches.size()>=2?g_doc.sketches[0].name+"; "+g_doc.sketches[1].name:"Section 1; Section 2";
+    std::vector<EditorField> fields{{"Section sketches",initial},{"Solid","1",true},{"Ruled","0",true}};
+    std::string hint=sketchNames()+"  /  List 2 or more sections in order, separated by semicolons.";
+    if(!editFields("Loft through sketches",hint.c_str(),fields))return;
+    V sections=V::makeArr();std::istringstream names(fields[0].value);std::string name;
+    while(std::getline(names,name,';')){name=trimField(name);if(name.empty())continue;if(!g_doc.findSketch(name))throw std::runtime_error("Unknown loft section: "+name);sections.arr.push_back(V::makeStr(name));}
+    if(sections.arr.size()<2||sections.arr.size()>32)throw std::runtime_error("Loft needs 2 to 32 saved sketches");
+    V native=V::makeObj(),p=V::makeObj();native.set("sections",std::move(sections));p.set("solid",V::makeStr(fields[1].value));p.set("ruled",V::makeStr(fields[2].value));
+    addNativeFeature(FeatureType::Loft,"Loft",std::move(p),std::move(native));
+}
+static void surfaceFillDialog(){
+    using V=arkjson::Value;std::vector<EditorField> fields{{"Closed sketch",g_activeSketch.empty()?"Profile":g_activeSketch}};
+    auto hint=sketchNames();if(!editFields("Fill sketch boundary",hint.c_str(),fields))return;
+    auto name=trimField(fields[0].value);if(!g_doc.findSketch(name))throw std::runtime_error("Choose an existing closed sketch");
+    V p=V::makeObj();p.set("sketch",V::makeStr(name));addNativeFeature(FeatureType::SurfaceFill,"Surface fill",std::move(p));
+}
+static void nurbsSurfaceDialog(){
+    using V=arkjson::Value;
+    std::string specification=R"({
+  "u_degree": 3, "v_degree": 3,
+  "poles": [
+    [[0,0,0], [0,15,0], [0,30,0], [0,45,0]],
+    [[15,0,0], [15,15,8], [15,30,8], [15,45,0]],
+    [[30,0,0], [30,15,8], [30,30,8], [30,45,0]],
+    [[45,0,0], [45,15,0], [45,30,0], [45,45,0]]
+  ]
+})";
+    if(!editText("NURBS surface / pole grid JSON / Ctrl+Enter to apply",specification,true))return;
+    V spec;if(!arkjson::parse(specification,spec)||spec.t!=V::Obj||!spec.find("poles"))throw std::runtime_error("NURBS grid needs JSON poles");
+    V native=V::makeObj(),p=V::makeObj();native.set("poles",*spec.find("poles"));if(auto* weights=spec.find("weights"))native.set("weights",*weights);
+    for(auto key:{"u_degree","v_degree"}){auto* degree=spec.find(key);if(degree&&degree->t!=V::Num&&degree->t!=V::Str)throw std::runtime_error(std::string(key)+" must be a degree");p.set(key,V::makeStr(degree?(degree->t==V::Str?degree->str:degree->dump()):"3"));}
+    addNativeFeature(FeatureType::BSplineSurface,"NURBS surface",std::move(p),std::move(native));
+}
+static void thickenDialog(){
+    using V=arkjson::Value;if(selBody<0){g_status="Select a native open surface to thicken.";return;}
+    auto* source=g_doc.find(g_bodyIds[selBody]);if(!source||(source->type!=FeatureType::SurfaceFill&&source->type!=FeatureType::BSplineSurface&&source->type!=FeatureType::Loft)){
+        g_status="Select a loft, surface fill, or NURBS surface.";return;
+    }
+    std::vector<EditorField> fields{{"Thickness / mm","2"}};
+    if(!editFields("Thicken native surface","Signed thickness is measured from the selected OCCT face or shell.",fields))return;
+    V p=V::makeObj();p.set("thickness",V::makeStr(fields[0].value));addNativeFeature(FeatureType::Thicken,"Thicken",std::move(p),V::makeObj(),{source->id});
+}
+static void sheetMetalDialog(){
+    using V=arkjson::Value;const char* keys[]={"width","leg_a","leg_b","thickness","inner_radius","angle","k_factor"};
+    std::vector<EditorField> fields{{"Width / mm","80"},{"Leg A / mm","100"},{"Leg B / mm","65"},{"Thickness / mm","2"},{"Inner radius / mm","3"},{"Bend angle / degrees","90"},{"K factor","0.42"}};
+    if(!editFields("Sheet metal L bend","All dimensions accept expressions. Flat pose uses the native bend allowance.",fields))return;
+    V p=V::makeObj();for(size_t i=0;i<fields.size();++i)p.set(keys[i],V::makeStr(fields[i].value));
+    addNativeFeature(FeatureType::SheetMetal,"Sheet metal L bend",std::move(p));
+}
+static void importSheetStep(const std::string& testPath=""){
+    using V=arkjson::Value;std::vector<EditorField> fields{{"K factor","0.42"},{"Body index (optional)",""},{"Root panel (optional)",""}};
+    if(!editFields("Import sheet STEP","K factor is explicit. Body index is zero based; root panel is 0 or 1 if ambiguous.",fields))return;
+    double factor=formNumber(fields[0].value);if(factor<0||factor>1)throw std::runtime_error("K factor must lie between 0 and 1");
+    std::string path=testPath;
+    if(path.empty()){
+        wchar_t file[32768]{};OPENFILENAMEW of{};of.lStructSize=sizeof of;of.hwndOwner=g_window;of.lpstrFile=file;of.nMaxFile=32768;
+        of.lpstrFilter=L"STEP sheet geometry\0*.step;*.stp\0";of.lpstrTitle=L"Import sheet STEP";of.Flags=OFN_NOCHANGEDIR|OFN_PATHMUSTEXIST|OFN_FILEMUSTEXIST;if(!GetOpenFileNameW(&of))return;
+        int size=WideCharToMultiByte(CP_UTF8,0,file,-1,nullptr,0,nullptr,nullptr);path.resize(size);WideCharToMultiByte(CP_UTF8,0,file,-1,path.data(),size,nullptr,nullptr);path.pop_back();
+    }
+    V args=V::makeObj();args.set("path",V::makeStr(path));args.set("k_factor",V::makeNum(factor));args.set("replace",V::makeBool(true));
+    for(size_t i=1;i<fields.size();++i){auto value=trimField(fields[i].value);if(value.empty())continue;double number=formNumber(value);if(number<0||std::floor(number)!=number||(i==2&&number>1))throw std::runtime_error(i==1?"Body index must be a nonnegative integer":"Root panel must be 0 or 1");args.set(i==1?"body_index":"root_panel",V::makeNum(number));}
+    if(!confirmDiscard())return;g_error=false;g_status="Importing source sheet STEP...";HDC dc=GetDC(g_window);drawFrame(dc);ReleaseDC(g_window,dc);SetCursor(LoadCursor(nullptr,IDC_WAIT));
+    runTool("import_sheet_step",args);SetCursor(LoadCursor(nullptr,IDC_ARROW));
+    if(!g_error){++g_documentEpoch;*g_assistantCancel=true;g_conversation=V::makeArr();selBody=(int)g_bodyIds.size()-1;g_sheetFlatViews.clear();
+        std::string filename=path.substr(path.find_last_of("/\\")+1);auto dot=filename.find_last_of('.');g_path=filename.substr(0,dot)+".ark";g_savedRevision=g_session.revision-1;frameScene();
+        g_status="Source sheet imported / inspect native geometry and flat pose";}
+}
+static void exportNativeStep(const std::string& testPath=""){
+    using V=arkjson::Value;if(selBody<0){g_status="Select a native body to export.";return;}
+    auto* f=g_doc.find(g_bodyIds[selBody]);if(!f)return;
+    bool sheet=f->type==FeatureType::SheetMetal||f->type==FeatureType::SourceSheet;
+    bool surface=f->type==FeatureType::Loft||f->type==FeatureType::SurfaceFill||f->type==FeatureType::BSplineSurface||f->type==FeatureType::Thicken;
+    if(!sheet&&!surface){g_status="Select a native sheet or surface feature.";return;}
+    std::string pose;if(sheet){std::vector<EditorField> fields{{"Pose: flat or formed","flat"}};
+        if(testPath.empty()&&!editFields("Export native sheet STEP","Flat is the default developed blank. Formed exports the bent B-rep.",fields))return;
+        pose=trimField(fields[0].value);if(pose!="flat"&&pose!="formed")throw std::runtime_error("Pose must be flat or formed");}
+    std::string path=testPath;
+    if(path.empty()){
+        wchar_t file[32768]=L"ark-native.step";OPENFILENAMEW of{};of.lStructSize=sizeof of;of.hwndOwner=g_window;of.lpstrFile=file;of.nMaxFile=32768;
+        of.lpstrFilter=L"STEP geometry\0*.step;*.stp\0";of.lpstrDefExt=L"step";of.lpstrTitle=sheet?L"Export native sheet STEP":L"Export native surface STEP";
+        of.Flags=OFN_NOCHANGEDIR|OFN_PATHMUSTEXIST|OFN_OVERWRITEPROMPT;if(!GetSaveFileNameW(&of))return;
+        int size=WideCharToMultiByte(CP_UTF8,0,file,-1,nullptr,0,nullptr,nullptr);path.resize(size);WideCharToMultiByte(CP_UTF8,0,file,-1,path.data(),size,nullptr,nullptr);path.pop_back();
+    }
+    V args=V::makeObj();args.set("id",V::makeNum((double)f->id));args.set("path",V::makeStr(path));if(sheet)args.set("pose",V::makeStr(pose));runTool("export_step",args);
+    if(!g_error)g_status=sheet?"Native "+pose+" sheet STEP exported":"Native surface STEP exported";
+}
+static void sheetDisplay(bool flat){
+    auto* sheet=selectedSheet();auto* body=selectedNativeBody();if(!sheet||!body)return;
+    if(flat&&!body->nativeData.find("flat_mesh")){g_error=true;g_status="Native flat preview is unavailable for this sheet.";return;}
+    g_sheetFlatViews[sheet->id]=flat;rebuildScene();frameScene();g_error=false;g_status=flat?"Flat sheet display / document unchanged":"Formed sheet display / document unchanged";
+}
 static void planeDialog(){
     using V=arkjson::Value;std::vector<EditorField> fields{{"Plane name","Workplane"},{"Parent plane",g_activePlane},{"Offset X / mm","0"},{"Offset Y / mm","0"},{"Offset Z / mm","0"},{"Rotation X / deg","0"},{"Rotation Y / deg","0"},{"Rotation Z / deg","0"}};
     const char* keys[]={"ox","oy","oz","rx","ry","rz"};
@@ -796,11 +923,13 @@ static void interactiveAction(int id);
 static void commandPalette(){
     HMENU menu=CreatePopupMenu();
     auto group=[&](const char* title,std::initializer_list<std::pair<int,const char*>> items){HMENU sub=CreatePopupMenu();for(auto item:items)AppendMenuA(sub,MF_STRING,item.first,item.second);AppendMenuA(menu,MF_POPUP,(UINT_PTR)sub,title);};
-    group("Document",{{55,"New document"},{17,"Open ARK"},{16,"Save ARK"},{52,"Import source STEP"},{12,"Export STL"},{51,"Export straight tube STEP"}});
+    group("Document",{{55,"New document"},{17,"Open ARK"},{16,"Save ARK"},{52,"Import source STEP"},{12,"Export STL"},{51,"Export straight tube STEP"},{82,"Export native STEP"}});
     group("Sketch & planes",{{60,"Create / edit plane"},{69,"Select plane"},{61,"Rectangle"},{62,"Circle / opening"},{63,"Interpolating spline"},{64,"Edit saved sketch"},{65,"Extrude sketch"},{66,"Cut from sketch"},{67,"Named parameter"},{68,"Toggle sketch overlay"}});
     group("Solids",{{1,"Box"},{2,"Cylinder"},{3,"Sphere"},{4,"Cone"},{5,"Torus"},{6,"Polygon extrusion"},{7,"Revolve"},{11,"Linear pattern"}});
     group("Modify",{{8,"Union"},{9,"Subtract bodies"},{10,"Intersect"},{25,"Delete selection"},{18,"Undo"},{19,"Redo"}});
     group("Tube & assembly",{{26,"Bend-program tube"},{40,"Laser tube"},{27,"Create assembly"},{28,"Duplicate instance"},{29,"Instance placement"},{30,"Edit tube program"}});
+    group("Native surfaces",{{76,"Loft sketches"},{77,"Fill closed sketch"},{78,"NURBS surface"},{79,"Thicken selected surface"}});
+    group("Sheet metal",{{80,"Create L bend"},{81,"Import sheet STEP"},{83,"Show formed"},{84,"Show flat"}});
     group("View & agents",{{20,"Fit document"},{71,"Normal to sketch plane"},{23,"Top view"},{24,"Isometric view"},{14,"Wireframe"},{22,"Grid"},{56,"Graphics settings"},{57,"Assistant connector"},{58,"Codex / live MCP"},{21,"Raw agent command"},{31,"Help"}});
     POINT point;GetCursorPos(&point);int id=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,point.x,point.y,0,g_window,nullptr);DestroyMenu(menu);if(id)interactiveAction(id);
 }
@@ -845,6 +974,9 @@ static void uiAction(int id){
         case 69:{std::string available="XY, XZ, YZ";for(auto& plane:g_doc.planes)available+=", "+plane.name;std::vector<EditorField> fields{{"Plane name",g_activePlane}};if(editFields("Select construction plane",available.c_str(),fields)){resolvePlane(g_doc,fields[0].value);g_activePlane=fields[0].value;g_activeSketch.clear();g_showSketches=true;rebuildSketchOverlay();}}break;
         case 71:alignSketchCamera();break;
         case 74:sendAssistant();break;case 75:*g_assistantCancel=true;break;
+        case 76:loftDialog();break;case 77:surfaceFillDialog();break;case 78:nurbsSurfaceDialog();break;case 79:thickenDialog();break;
+        case 80:sheetMetalDialog();break;case 81:importSheetStep();break;case 82:exportNativeStep();break;
+        case 83:sheetDisplay(false);break;case 84:sheetDisplay(true);break;
         case 1:addFeat(FeatureType::Box,{{"dx","24"},{"dy","24"},{"dz","16"}});break;
         case 2:addFeat(FeatureType::Cylinder,{{"r","12"},{"h","28"}});break;
         case 3:addFeat(FeatureType::Sphere,{{"r","14"}});break;
@@ -902,7 +1034,7 @@ static void uiAction(int id){
             }break;
         }
 
-        case 31:MessageBoxA(g_window,"ARK / Agent-Ready Kernel\nParametric CAD for people and agents.\n\nUse Commands or the tool dock to model with editable expressions.\nSelect an instance to edit its placement or duplicate it.\nSelect a tube to inspect or edit its bend program.\nLaser tube: stock, bend points, preview and straight STEP.\nNumbered hinge markers select bend points in the viewport.\n\nOrbit: drag  |  Pan: Shift + drag  |  Zoom: wheel\nFit: F  |  Wireframe: W  |  Delete: Del\nOpen: Ctrl+O  |  Save: Ctrl+S  |  Undo / redo: Ctrl+Z / Y\nCommands: Ctrl+K  |  New: Ctrl+N\n\nThe topology audit reports mesh checks only; it does not certify manufacturing suitability.","About ARK / Workspace guide",MB_OK|MB_ICONINFORMATION);break;
+        case 31:MessageBoxA(g_window,"ARK 0.8 / Agent-Ready Kernel\nParametric CAD for people and agents.\n\nUse Commands or the tool dock to model with editable expressions.\nNative surfaces: loft, fill, NURBS and thicken. Sheet metal has formed and flat display poses, source STEP import, and exact STEP export.\nSelect an instance to edit its placement or duplicate it.\nSelect a tube to inspect or edit its bend program.\nLaser tube: stock, bend points, preview and straight STEP.\nNumbered hinge markers select bend points in the viewport.\n\nOrbit: drag  |  Pan: Shift + drag  |  Zoom: wheel\nFit: F  |  Wireframe: W  |  Delete: Del\nOpen: Ctrl+O  |  Save: Ctrl+S  |  Undo / redo: Ctrl+Z / Y\nCommands: Ctrl+K  |  New: Ctrl+N\n\nThe native inspector reports OCCT B-rep checks. It does not certify manufacturing suitability.","About ARK / Workspace guide",MB_OK|MB_ICONINFORMATION);break;
         case 30:{
             if(selBody<0)break;auto* f=g_doc.find(g_bodyIds[selBody]);if(!f||f->type!=FeatureType::Tube)break;
             V edit=V::makeObj(),p=V::makeObj(),bs=V::makeArr();for(auto& kv:f->p)p.set(kv.first,V::makeStr(kv.second));
@@ -1169,8 +1301,14 @@ static void drawFrame(HDC hdc){
     label("PARAMETRIC WORKSPACE",20,H-66,.62f);
     textOut("Perspective",viewX+24,96,.85f);label("SATIN STEEL  /  mm",viewX+24,121,.60f);
     button("Fit",W-486,92,55,20);button(g_showSketches?"Plane":"Top",W-425,92,49,g_showSketches?71:23);button("Iso",W-370,92,49,24);
-    float rx=W-278;label("INSPECTOR",rx,101,.66f);label("MESH",W-66,101,.62f);
+    float rx=W-278;label("INSPECTOR",rx,101,.66f);
     std::string selected="No selection",kind="No body";if(selBody>=0){auto* f=g_doc.find(g_bodyIds[selBody]);if(f){selected=g_instanceNames[selBody];kind=f->type==FeatureType::ParametricSurface?"EXPRESSION SURFACE / MESH":std::string(featureTypeName(f->type))+" / TESSELLATED MESH";if(g_instanceIds[selBody])kind="INSTANCE #"+std::to_string(g_instanceIds[selBody])+" / "+featureTypeName(f->type);}}
+    const Body* nativeBody=selectedNativeBody();const auto* nativeReport=nativeBody?nativeBody->nativeData.find("report"):nullptr;
+    if(nativeReport&&nativeReport->t!=arkjson::Value::Obj)nativeReport=nullptr;
+    label(nativeReport?"B-REP":"MESH",W-66,101,.62f);
+    auto* sheet=selectedSheet();
+    if(sheet)kind=sheet->type==FeatureType::SourceSheet?"SOURCE SHEET / NATIVE B-REP":"SHEET METAL / NATIVE B-REP";
+    else if(nativeReport)kind="OCCT NATIVE SURFACE / B-REP";
     auto* activeSketch=g_showSketches?g_doc.findSketch(g_activeSketch):nullptr;
     if(selectedNotchedTube())kind="LASER TUBE / IDEAL HINGE PREVIEW";
     if(selectedSourceTube())kind="STEP SOURCE / FINITE BENDS";
@@ -1178,16 +1316,42 @@ static void drawFrame(HDC hdc){
     textOut(selected.substr(0,25),rx,135,1.02f);
     rect(rx,173,254,28,5,.15,.16,.19,1,0,0,0,0,0);textOut(kind.substr(0,36),rx+11,180,.59f,.76,.79,.85);
     auto* laser=selectedNotchedTube();auto* source=selectedSourceTube();if(activeSketch){laser=nullptr;source=nullptr;}
-    if(!laser&&!source&&!activeSketch)label("GEOMETRY",rx,283,.66f);
+    if(!laser&&!source&&!activeSketch)label(nativeReport?"NATIVE GEOMETRY":"GEOMETRY",rx,283,.66f);
     auto metric=[&](const char* title,const std::string& value,float y){label(title,rx,y,.76f);textOut(value,W-24-textWidth(value,.80f),y,.80f);};
     if(selBody>=0&&!laser&&!source&&!activeSketch){auto& r=g_reports[g_instancePart[selBody]];
-        metric("Vertices",std::to_string(r.vertices),314);metric("Triangles",std::to_string(r.triangles),343);metric("Components",std::to_string(r.components),372);
-        char size[100];auto e=r.bounds.extent();std::snprintf(size,sizeof size,"%.1f / %.1f / %.1f",e.x,e.y,e.z);metric("XYZ mm",size,392);
-        rect(rx,429,254,1,0,.17,.21,.22,1,0,0,0,0,0);label("TOPOLOGY AUDIT",rx,453,.66f);
-        metric("Boundary edges",std::to_string(r.boundaryEdges),486);metric("Non-manifold edges",std::to_string(r.nonManifoldEdges),519);
-        metric("Degenerate faces",std::to_string(r.degenerateTriangles),552);
-        textOut(r.closedOriented()?"o  Closed, oriented edges":"o  Open or irregular topology",rx,587,.73f,.76,.81,.87);
-        label("Self-intersections not checked",rx,613,.62f);
+        if(nativeReport){
+            auto formatted=[](const arkjson::Value* value,const char* suffix){if(!value||value->t!=arkjson::Value::Num)return std::string("n/a");char text[80];std::snprintf(text,sizeof text,"%.3f %s",value->num,suffix);return std::string(text);};
+            auto* kernel=nativeReport->find("kernel"),*version=nativeReport->find("kernel_version"),*valid=nativeReport->find("brep_valid");
+            metric("Kernel",(kernel?kernel->asStr():"OCCT")+std::string(" ")+(version?version->asStr():""),314);
+            metric("B-rep valid",valid&&valid->t==arkjson::Value::Bool?(valid->b?"yes":"no"):"n/a",343);
+            metric(sheet?"Formed area":"Area",formatted(nativeReport->find("area_mm2"),"mm2"),372);
+            metric(sheet?"Formed volume":"Volume",formatted(nativeReport->find("volume_mm3"),"mm3"),405);
+            metric(sheet?"Flat volume":"Faces",formatted(nativeReport->find(sheet?"flat_volume_mm3":"faces"),sheet?"mm3":""),438);
+            rect(rx,472,254,1,0,.17,.21,.22,1,0,0,0,0,0);
+            if(sheet){
+                label(sheet->type==FeatureType::SourceSheet?"SOURCE SHEET / READ ONLY":"DEVELOPED SHEET",rx,492,.66f);
+                auto* holes=nativeBody->nativeData.find("holes");
+                auto* openingCount=nativeReport->find("opening_count");
+                metric("Openings",holes&&holes->t==arkjson::Value::Arr?std::to_string(holes->arr.size()):openingCount&&openingCount->t==arkjson::Value::Num?std::to_string((int)openingCount->num):"n/a",523);
+                if(sheet->type==FeatureType::SourceSheet){
+                    auto* verified=nativeReport->find("source_projection_verified");
+                    metric("Source projection",verified&&verified->t==arkjson::Value::Bool?(verified->b?"verified":"unverified"):"n/a",553);
+                    if(H>940){metric("Refold delta",formatted(nativeReport->find("refold_symmetric_difference_volume_mm3"),"mm3"),584);
+                        metric("Flat length",formatted(nativeReport->find("flat_length_mm"),"mm"),613);
+                        auto* hash=nativeReport->find("source_sha256");if(hash&&hash->t==arkjson::Value::Str)label("SOURCE SHA256  "+hash->str.substr(0,16),rx,646,.58f);}
+                }else{metric("Flat length",formatted(nativeReport->find("flat_length_mm"),"mm"),553);
+                    if(H>940)metric("Bend allowance",formatted(nativeReport->find("bend_allowance_mm"),"mm"),584);}
+                if(H>940)label(g_sheetFlatViews[sheet->id]?"Displaying flat mesh":"Displaying formed mesh",rx,675,.62f);
+            }else label("Exact native shape / tessellated display",rx,492,.61f);
+        }else{
+            metric("Vertices",std::to_string(r.vertices),314);metric("Triangles",std::to_string(r.triangles),343);metric("Components",std::to_string(r.components),372);
+            char size[100];auto e=r.bounds.extent();std::snprintf(size,sizeof size,"%.1f / %.1f / %.1f",e.x,e.y,e.z);metric("XYZ mm",size,392);
+            rect(rx,429,254,1,0,.17,.21,.22,1,0,0,0,0,0);label("TOPOLOGY AUDIT",rx,453,.66f);
+            metric("Boundary edges",std::to_string(r.boundaryEdges),486);metric("Non-manifold edges",std::to_string(r.nonManifoldEdges),519);
+            metric("Degenerate faces",std::to_string(r.degenerateTriangles),552);
+            textOut(r.closedOriented()?"o  Closed, oriented edges":"o  Open or irregular topology",rx,587,.73f,.76,.81,.87);
+            label("Self-intersections not checked",rx,613,.62f);
+        }
     }
     if(H>1000 && kind=="EXPRESSION SURFACE / MESH"){rect(rx,673,254,1,0,.17,.21,.22,1,0,0,0,0,0);label("MATHEMATICAL MODEL",rx,697,.66f);
         textOut("x(u,v)   y(u,v)   z(u,v)",rx,730,.85f,.70,.82,.79);label("Trigonometry + named parameters",rx,761,.67f);label("Periodic seams validated",rx,786,.67f);}
@@ -1202,6 +1366,15 @@ static void drawFrame(HDC hdc){
         metric("Free dimensions",std::to_string(activeSketch->freeDofs),372);metric("Local solver rank",std::to_string(activeSketch->rank),405);std::snprintf(value,sizeof value,"%.3g",activeSketch->residual);metric("Residual",value,438);
         label("Coordinates can reference parameters",rx,489,.61f);label("Curve anchors interpolate the profile",rx,513,.61f);
         button("Edit sketch",rx,H-204,252,64);button("Extrude",rx,H-162,121,65,true);button("Cut",rx+131,H-162,121,66);button("Named parameter",rx,H-120,252,67);button("Hide overlay",rx,H-78,252,68);
+    }else if(sheet){
+        button("Formed",rx,H-210,121,83,false,!g_sheetFlatViews[sheet->id]);button("Flat",rx+131,H-210,121,84,false,g_sheetFlatViews[sheet->id]);
+        button("Export native STEP",rx,H-162,252,82,true);
+        button("Wireframe",rx,H-120,121,14,false,wireframe);button("Grid",rx+131,H-120,121,22,false,g_grid);
+        if(sheet->type==FeatureType::SheetMetal)button("Delete selected",rx,H-78,252,25);
+    }else if(nativeReport&&!laser&&!source){
+        button("Export native STEP",rx,H-162,252,82,true);
+        button("Wireframe",rx,H-120,121,14,false,wireframe);button("Grid",rx+131,H-120,121,22,false,g_grid);
+        button("Delete selected",rx,H-78,252,25);
     }else if(laser){
         button("Stock",rx,278,121,41);button("Add bend",rx+131,278,121,42,true);
         label(laser->get("width_mm")+" x "+laser->get("height_mm")+" / wall "+laser->get("wall_mm")+" mm",rx,322,.69f);
@@ -1372,13 +1545,14 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     cpu_detect();
 
     SetProcessDPIAware();
-    bool headless=false,selfTest=false,assemblyTest=false,dialogTest=false,bendTest=false,bendExportTest=false,sourceTest=false,sketchTest=false,assistantTest=false;unsigned exitAfterMs=0;std::string endpointFile,requestedSketch;int requestedOpening=-1;double requestedFold=-1;std::string shotPath="ark_studio.png",loadPath,scriptPath,importPath;
+    bool headless=false,selfTest=false,assemblyTest=false,dialogTest=false,bendTest=false,bendExportTest=false,sourceTest=false,sketchTest=false,assistantTest=false,nativeUiTest=false;unsigned exitAfterMs=0;std::string endpointFile,requestedSketch;int requestedOpening=-1;double requestedFold=-1;std::string shotPath="ark_studio.png",loadPath,scriptPath,importPath;
     int sw=1600,sh=1000,argc=0;auto argv=CommandLineToArgvW(GetCommandLineW(),&argc);
     auto utf8=[](const wchar_t* w){int n=WideCharToMultiByte(CP_UTF8,0,w,-1,nullptr,0,nullptr,nullptr);std::string s(n,'\0');WideCharToMultiByte(CP_UTF8,0,w,-1,s.data(),n,nullptr,nullptr);s.pop_back();return s;};
     for(int i=1;i<argc;++i){auto a=utf8(argv[i]);if(a=="--shot"&&i+1<argc){headless=true;shotPath=utf8(argv[++i]);}
         else if(a=="--self-test-ui")selfTest=true;
         else if(a=="--self-test-sketch-ui")sketchTest=true;
         else if(a=="--self-test-assistant-ui")assistantTest=true;
+        else if(a=="--self-test-native-ui")nativeUiTest=true;
         else if(a=="--sketch"&&i+1<argc)requestedSketch=utf8(argv[++i]);
         else if(a=="--live-endpoint-file"&&i+1<argc)endpointFile=utf8(argv[++i]);
         else if(a=="--exit-after-ms"&&i+1<argc)exitAfterMs=(unsigned)_wtoi(argv[++i]);
@@ -1412,7 +1586,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     RegisterClassA(&wc);
     RECT rc{0,0,winW,winH};
     AdjustWindowRect(&rc,WS_OVERLAPPEDWINDOW,FALSE);
-    HWND hwnd=CreateWindowA("ARKVIEW","ARK 0.7 / Agent-Ready Kernel",WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,
+    HWND hwnd=CreateWindowA("ARKVIEW","ARK 0.8 / Agent-Ready Kernel",WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,
                             CW_USEDEFAULT,CW_USEDEFAULT,rc.right-rc.left,rc.bottom-rc.top,
                             nullptr,nullptr,hi,nullptr);
     g_window=hwnd;BOOL dark=TRUE;DwmSetWindowAttribute(hwnd,20,&dark,sizeof dark);
@@ -1528,6 +1702,30 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         g_dialogShot=shotPath+".graphics.png";uiAction(56);g_dialogSmoke=0;
         V args=V::makeObj();args.set("path",V::makeStr(shotPath+".ark"));runTool("doc_save",args);runTool("doc_load",args);if(g_error||!g_doc.findSketch("Freeform"))return 110;
         g_activeSketch="Freeform";g_showSketches=true;rebuildSketchOverlay();frameScene();g_status="Sketch UI checks passed / plane / expressions / extrude / cut / parameter / spline / save";
+    }
+    if(nativeUiTest){
+        g_savedRevision=g_session.revision;uiAction(55);if(g_error||!g_doc.features.empty())return 180;
+        g_dialogSmoke=3;uiAction(80);g_dialogSmoke=0;
+        if(g_error||g_doc.features.size()!=1||g_doc.features.back().type!=FeatureType::SheetMetal||!selectedSheet())return 181;
+        auto* native=selectedNativeBody();if(!native||!native->nativeData.find("flat_mesh")||!native->nativeData.find("report"))return 182;
+        auto formedExtent=g_reports[g_instancePart[selBody]].bounds.extent();
+        auto revision=g_session.revision;uiAction(84);
+        if(g_error||!g_sheetFlatViews[g_doc.features.back().id]||g_session.revision!=revision)return 183;
+        auto flatExtent=g_reports[g_instancePart[selBody]].bounds.extent();
+        if(std::abs(flatExtent.x-formedExtent.x)+std::abs(flatExtent.y-formedExtent.y)+std::abs(flatExtent.z-formedExtent.z)<1.)return 191;
+        uiAction(83);if(g_error||g_sheetFlatViews[g_doc.features.back().id]||g_session.revision!=revision)return 184;
+        exportNativeStep(shotPath+".flat.step");
+        if(g_error||!std::filesystem::is_regular_file(shotPath+".flat.step"))return 185;
+        g_savedRevision=g_session.revision;g_dialogSmoke=3;importSheetStep(shotPath+".flat.step");g_dialogSmoke=0;
+        if(g_error||g_doc.features.size()!=1||g_doc.features.back().type!=FeatureType::SourceSheet||!selectedSheet())return 187;
+        auto* imported=selectedNativeBody();auto* sourceReport=imported?imported->nativeData.find("report"):nullptr;
+        if(!sourceReport||!sourceReport->find("source_projection_verified")||!sourceReport->find("source_projection_verified")->b)return 188;
+        revision=g_session.revision;uiAction(84);if(g_error||!g_sheetFlatViews[g_doc.features.back().id]||g_session.revision!=revision)return 189;
+        uiAction(83);if(g_error||g_sheetFlatViews[g_doc.features.back().id]||g_session.revision!=revision)return 190;
+        g_dialogSmoke=3;uiAction(78);g_dialogSmoke=0;
+        if(g_error||g_doc.features.size()!=2||g_doc.features.back().type!=FeatureType::BSplineSurface)return 186;
+        selBody=0;frameScene();
+        g_status="Native UI checks passed / sheet form / import / formed-flat / STEP / NURBS";
     }
     if(assistantTest){
         using V=arkjson::Value;auto previous=g_assistantConfig;g_assistantConfig.endpoint="http://127.0.0.1:1/v1/responses";g_assistantConfig.model="offline-ui-smoke";g_assistantConfig.apiKeyEnv="";

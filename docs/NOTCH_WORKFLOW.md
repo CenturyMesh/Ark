@@ -15,20 +15,29 @@ x_right = s + (y-h) tan(a)
 
 Rotating the left and right rigid halves by `-a` and `+a` about the hinge maps both cut faces to the same plane. The identity is checked numerically, including its inverse. The cut starts at `y=wall`, so the complete nominal wall below it remains present in the straight blank.
 
-The removed volume is independently integrated over two side-wall strips and the opposite wall. The optional OCCT bridge constructs the hollow stock, subtracts the C++-generated cutter prisms, verifies the retained wall by solid intersection, and compares the B-rep volume with the analytical integral. It then writes STEP, reads it back, checks one valid solid and measures the Boolean symmetric-difference volume.
+The removed volume is independently integrated over two side-wall strips and the opposite wall. The current C++ OCCT 8.0.1 worker constructs the hollow stock, subtracts the C++-generated cutter prisms, verifies the retained wall by solid intersection, and compares the B-rep volume with the analytical integral. It then writes STEP, reads it back, checks one valid solid and measures the Boolean symmetric-difference volume.
 
 This proves the implemented cut geometry under an **ideal zero-radius hinge** assumption. It does not prove physical strain, springback, weld fit or manufacturability of a finite-thickness wall. The hinge position is an explicit input, not a calibrated neutral-axis claim. All plans and receipts carry `manufacturing_authoritative:false` and `source_reconstruction_verified:false`. The STEP is an engineering preview, not an approved machine program.
 
 ## Reproduce the preview
 
-Build ARK, then use a Python environment containing the optional [OCCT bindings requirements](../scripts/requirements-occt.txt):
+Build the native C++/OCCT release and send a design and export request through
+one MCP session:
 
 ```powershell
 .\scripts\build.ps1 -Test
-python scripts/export_notch_step.py examples/notch-preview.request.json out/notch-preview.step --engine out/fabrication/ark-mcp.exe
+$requests = @(
+  '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"doc_apply","arguments":{"commands":[{"op":"feature.add","type":"notched_tube","name":"Laser tube","p":{"width_mm":"40","height_mm":"30","wall_mm":"2","length_mm":"600","hinge_offset_mm":"1"},"notches":[{"station":"180","angle":"60","face":"bottom"},{"station":"400","angle":"90","face":"top"}]}]}}}'
+  '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"export_step","arguments":{"id":1,"path":"out/notch-preview-native.step"}}}'
+[System.IO.File]::WriteAllLines((Join-Path (Resolve-Path out).Path 'notch-native.request.jsonl'), [string[]]$requests, [System.Text.UTF8Encoding]::new($false))
+cmd /c ".\out\native\Release\ark-mcp.exe < out\notch-native.request.jsonl"
 ```
 
-This is one command from request to STEP. The native C++ process creates the plan; the small Python adapter calls OCCT's C++ B-rep/STEP APIs. It also writes `.arkcut` intent and `.validation.json` evidence. Native ARK geometry and the UI do not require Python or OCCT. The adapter has been tested with `cadquery-ocp==7.8.1.1.post1`.
+The worker writes the STEP plus `.arkcut` intent and `.validation.json`
+evidence. The previous Python/OCP adapter was part of the 0.4 prototype and
+is no longer required by the active workflow. The checked-in example and
+metrics below are historical evidence from that prototype; reproduce the
+current result with the native command above.
 
 The checked-in [example STEP](../examples/notch-preview.step) is a 600 mm long, 40×30×2 mm nominal rectangular tube with two opposite-side notches, at 60° and 90°. It is a synthetic example and **is not a reconstruction of SKT01.DCB109**. Its receipt records:
 
@@ -43,6 +52,9 @@ The figures are floating-point residuals for this example, not process tolerance
 
 ## Audit of the provided STEP
 
+The figures in this section are from the earlier 0.4 audit. They have not
+been refreshed with the current native 8.0.1 worker.
+
 The screenshot's file was located at `C:/test/SKT01.DCB109.STEP`. It was read without modifying the source. Its SHA-256 is `cca7d098bf4fdede3d041fd61dde33282628262fcecfa5f3153d2979309cecec`.
 
 OCCT reports millimetre source units, a valid B-rep, 125 planar faces and 109 cylindrical faces. It contains two solids: a principal body of approximately 206742.440180 mm³ and a small fragment of approximately 0.000144455 mm³. The fragment was retained in the audit. A cylindrical face count is not a hole count; feature recognition has not yet been proved for this source.
@@ -50,7 +62,8 @@ OCCT reports millimetre source units, a valid B-rep, 125 planar faces and 109 cy
 Reproduce the inventory with:
 
 ```powershell
-python scripts/step_audit.py C:/test/SKT01.DCB109.STEP out/SKT01.audit.json
+[System.IO.File]::WriteAllLines((Join-Path (Resolve-Path out).Path 'inspect.request.jsonl'), [string[]]@('{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"step_inspect","arguments":{"path":"C:/test/SKT01.DCB109.STEP","faces":true}}}'), [System.Text.UTF8Encoding]::new($false))
+cmd /c ".\out\native\Release\ark-mcp.exe < out\inspect.request.jsonl"
 ```
 
 The original CAD is not checked into the repository. Full local audit data and the initial import/export investigation remain under `out/source-assessment`.

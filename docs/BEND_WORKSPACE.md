@@ -46,20 +46,18 @@ Use the existing `doc_apply` batch for creation/editing. `feature.edit` replaces
 
 Documents containing this feature use `.ark` version 3. Readers remain compatible with versions 1 and 2. Version 0.4 and older applications reject the new document version rather than discarding bend points.
 
-## Optional STEP backend
+## Native STEP backend in 0.8
 
-Viewing, modeling and animation are native C++ and do not need OCCT/Python. Exact STEP export uses the existing `scripts/export_notch_step.py` adapter and the pinned optional requirements in `scripts/requirements-occt.txt`.
+Viewing, modeling, animation, and exact STEP export use C++. The isolated
+`ark-occt-worker.exe` is built against the pinned OCCT 8.0.1 SDK by the
+default Windows [build script](NATIVE_BUILD.md). It runs without a console
+under a bounded process tree, captures its validation receipt, and cleans up
+its own temporary files. Paths with spaces and Unicode are accepted. A
+missing or failed worker rejects the export; it never substitutes an STL.
 
-The Windows application searches for the backend in this order:
-
-- `ARK_OCCT_PYTHON`, pointing to a Python executable with those requirements.
-- The ignored project-local `.ark-local.json`, for example `{"occt_python":"C:/PythonWithOCCT/python.exe"}`.
-- `.venv-occt/Scripts/python.exe` in the project.
-- `python.exe` on PATH.
-
-The local installation has been configured using the existing OCCT-capable environment. No Python dependency is copied into the repository. Missing backends return an actionable error rather than substituting an STL export. The script must remain available alongside the source tree; standalone installer packaging is future work.
-
-The worker starts without a console, receives a temporary plan file, and runs inside a Windows Job Object with a 30-second limit. It captures output, returns the validation receipt, and cleans up its own temporary files. It accepts paths with spaces and Unicode. The integrated process bridge is currently Windows-specific; the standalone exporter script remains available elsewhere.
+The prior Python/OCP adapter and environment search are historical and are no
+longer part of the active build or runtime. The interactive tube preview stays
+separate from the straight native STEP B-rep used for export.
 
 ## Verification
 
@@ -67,7 +65,7 @@ The worker starts without a console, receives a temporary plan file, and runs in
 - Tests cover zero points, all retained wall sides, closed segment/straight meshes, analytical volume, identity pose, sequential activation and full cut-face closure.
 - Native workspace fixtures exercise stock and point dialogs, creation/edit/removal, undo, save/reload, play/pause, percentage controls and cached geometry reuse.
 - Native export at 100% folded produced a valid straight STEP with one solid and zero Boolean symmetric-difference volume on readback.
-- Worker integration checks folded inspection leaves the document unchanged, zero-point stock export, Unicode paths and missing-backend failure without document changes.
+- Native worker integration checks folded inspection leaves the document unchanged, zero-point stock export, Unicode paths and backend failure without document changes.
 - Existing UI/dialog and assembly regression fixtures still pass. These use native in-app action fixtures, not an exhaustive external mouse/keyboard test.
 
 The workflow operates on an explicit laser-tube design. Version 0.6 adds a separate source-preserving finite-hinge route for supported STEP tubes, described in [SOURCE_STEP.md](SOURCE_STEP.md). The ideal notch design and source-derived geometry are distinct feature types.
