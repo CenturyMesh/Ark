@@ -1,11 +1,14 @@
 #include "ark/occt_sheet.hpp"
 #include "common.hpp"
+#include "ark/model.hpp"
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
+#include <BRepPrimAPI_MakeRevol.hxx>
+#include <BRepExtrema_DistShapeShape.hxx>
 #include <gp_Ax2.hxx>
 #include <gp_Dir.hxx>
 #include <gp_Pnt.hxx>
@@ -17,6 +20,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <set>
 
 namespace ark::occt {
 namespace {
@@ -156,75 +160,156 @@ V openingRecord(const Opening& o,double legA,double allowance,double thickness,
     return record;
 }
 } // namespace
-
-V modelSheetNative(const V& request){
-    const double width=number(request,"width"),legA=number(request,"leg_a"),legB=number(request,"leg_b"),
-                 thickness=number(request,"thickness"),radius=number(request,"inner_radius"),
-                 degrees=number(request,"angle"),k=number(request,"k_factor");
-    if(!(width>0&&width<=10000&&legA>0&&legA<=1e6&&legB>0&&legB<=1e6&&
-         thickness>0&&thickness<=10000&&radius>0&&degrees>0&&degrees<170&&k>=0&&k<=1))
-        throw std::runtime_error("Unsupported sheet dimensions, angle or declared K factor");
-    const double angle=degrees*pi/180,allowance=angle*(radius+k*thickness),flatLength=legA+allowance+legB;
-    const auto openings=openingsFrom(request,legA,legB,width);
-    const gp_XYZ center(0,radius+thickness,0),radial(std::sin(angle),-std::cos(angle),0),
-                 tangent(std::cos(angle),std::sin(angle),0),childInner=center+radial*radius;
-    TopoDS_Shape root=BRepPrimAPI_MakeBox(gp_Pnt(-legA,0,0),legA,thickness,width).Shape();
-    // This cylindrical Boolean construction is independent of the source STEP
-    // importer's arc-and-line sector construction.
-    const gp_Ax2 axis(gp_Pnt(center),gp_Dir(0,0,1),gp_Dir(0,-1,0));
-    const TopoDS_Shape outer=BRepPrimAPI_MakeCylinder(axis,radius+thickness,width,angle).Shape();
-    const TopoDS_Shape inner=BRepPrimAPI_MakeCylinder(
-        gp_Ax2(gp_Pnt(center+gp_XYZ(0,0,-1)),gp_Dir(0,0,1)),radius,width+2).Shape();
-    const TopoDS_Shape hinge=cut(outer,inner);
-    gp_Trsf childFrame;childFrame.SetValues(tangent.X(),0,radial.X(),childInner.X(),
-                                            tangent.Y(),0,radial.Y(),childInner.Y(),
-                                            0,1,0,0);
-    const TopoDS_Shape child=transformed(BRepPrimAPI_MakeBox(legB,width,thickness).Shape(),childFrame);
-    TopoDS_Shape formed=fuse(fuse(root,hinge),child);
-    TopoDS_Shape flat=BRepPrimAPI_MakeBox(flatLength,thickness,width).Shape();
-    double openingArea=0;V records=V::makeArr();
-    for(const Opening& opening:openings){
-        formed=cut(formed,cutter(opening,true,legA,allowance,thickness,childInner,tangent,radial));
-        flat=cut(flat,cutter(opening,false,legA,allowance,thickness,childInner,tangent,radial));
-        records.arr.push_back(openingRecord(opening,legA,allowance,thickness,childInner,tangent,radial));
-        openingArea+=opening.area;
+namespace {
+struct Panel {
+    std::string id,edge;int parent=-1;double length=0,width=0,offset=0,angle=0,radius=0,k=.5,allowance=0;
+    gp_Trsf flat,formed,refold,attachment;TopoDS_Shape local;
+};
+struct Piece {TopoDS_Shape flat,formed,refold;int panel=-1;bool band=false;};
+double evaluated(const V& value,const ExprEnv& env){
+    bool ok=value.t==V::Num;double n=ok?value.num:value.t==V::Str?evalExpr(value.str,env,&ok):0;
+    if(!ok||!std::isfinite(n)||std::abs(n)>1e7)throw std::runtime_error("Invalid sheet program expression");return n;
+}
+double expr(const V& item,const char* name,const ExprEnv& env){return evaluated(required(item,name),env);}
+double optional(const V& item,const char* name,double fallback,const ExprEnv& env){auto p=item.find(name);return p?evaluated(*p,env):fallback;}
+gp_Trsf translation(double x,double y=0,double z=0){gp_Trsf tr;tr.SetTranslation(gp_Vec(x,y,z));return tr;}
+gp_Trsf rotation(double angle){gp_Trsf tr;tr.SetRotation(gp_Ax1(gp_Pnt(0,0,0),gp_Dir(0,0,1)),angle);return tr;}
+std::string named(const V& item,const char* key){auto n=string(item,key);if(n.empty()||n.size()>128||n.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-")!=std::string::npos)throw std::runtime_error("Sheet identities must use 1..128 letters, digits, dot, underscore or hyphen");return n;}
+gp_Trsf edgeFrame(const Panel& parent,const Panel& panel){
+    gp_Trsf frame;
+    if(panel.edge=="u_max")frame=translation(parent.length,0,panel.offset);
+    else if(panel.edge=="u_min")frame.SetValues(-1,0,0,0,0,1,0,0,0,0,-1,parent.width-panel.offset);
+    else if(panel.edge=="v_max")frame.SetValues(0,0,-1,parent.length-panel.offset,0,1,0,0,1,0,0,parent.width);
+    else if(panel.edge=="v_min")frame.SetValues(0,0,1,panel.offset,0,1,0,0,-1,0,0,0);
+    else throw std::runtime_error("Flange edge must be u_min, u_max, v_min or v_max");
+    return frame;
+}
+V numericOpening(const V& value,const ExprEnv& env,const std::string& key={}){
+    if(value.t==V::Str&&key!="kind"&&key!="id"&&key!="panel")return V::makeNum(evaluated(value,env));
+    if(value.t==V::Arr){V r=V::makeArr();for(auto& x:value.arr)r.arr.push_back(numericOpening(x,env,key));return r;}
+    if(value.t==V::Obj){V r=V::makeObj();for(auto& kv:value.obj)r.set(kv.first,numericOpening(kv.second,env,kv.first));return r;}return value;
+}
+bool boxesMeet(const TopoDS_Shape& a,const TopoDS_Shape& b){auto x=bounds(a),y=bounds(b);for(int i=0;i<3;++i)if(x[i]>y[i+3]+linearTol||y[i]>x[i+3]+linearTol)return false;return true;}
+void validatePieces(const std::vector<Piece>& parts,const std::vector<Panel>& panels,bool flat){
+    for(size_t i=0;i<parts.size();++i)for(size_t j=i+1;j<parts.size();++j){
+        const auto& a=parts[i];const auto& b=parts[j];const auto& sa=flat?a.flat:a.formed;const auto& sb=flat?b.flat:b.formed;
+        if(!boxesMeet(sa,sb))continue;
+        const double overlap=std::abs(properties(common(sa,sb)));
+        const double tol=std::max(1e-7,std::min(properties(sa),properties(sb))*1e-9);
+        if(overlap>tol)throw std::runtime_error(std::string(flat?"Flat layout":"Formed sheet")+" overlaps between "+panels[a.panel].id+" and "+panels[b.panel].id);
+        const Piece* band=a.band?&a:b.band?&b:nullptr;const Piece* panel=a.band?&b:&a;
+        const bool adjacent=band&&!panel->band&&(band->panel==panel->panel||panels[band->panel].parent==panel->panel);
+        if(!adjacent){BRepExtrema_DistShapeShape distance(sa,sb);if(!distance.IsDone())throw std::runtime_error("Sheet clearance check failed");if(distance.Value()<=linearTol)throw std::runtime_error(std::string(flat?"Flat layout":"Formed sheet")+" has unrelieved nonadjacent contact: "+panels[a.panel].id+" / "+panels[b.panel].id);}
     }
-    if(!BRepCheck_Analyzer(formed).IsValid()||shapes(formed,TopAbs_SOLID).size()!=1||
-       !BRepCheck_Analyzer(flat).IsValid()||shapes(flat,TopAbs_SOLID).size()!=1)
-        throw std::runtime_error("Formed and flat sheet must each be one valid connected solid");
-    const double formedVolume=properties(formed),flatVolume=properties(flat),removed=openingArea*thickness;
-    const double expectedFormed=width*thickness*(legA+legB+angle*(radius+thickness/2))-removed;
-    const double expectedFlat=width*thickness*flatLength-removed;
-    const double expectedDelta=angle*width*thickness*thickness*(.5-k);
-    const double measuredDelta=formedVolume-flatVolume;
-    const double volumeTol=std::max(1e-5,std::abs(expectedFormed)*1e-8);
-    if(std::abs(formedVolume-expectedFormed)>volumeTol||
-       std::abs(flatVolume-expectedFlat)>volumeTol||
-       std::abs(measuredDelta-expectedDelta)>volumeTol)
-        throw std::runtime_error("Sheet B-rep volume disagrees with independent bend and opening integrals");
-    V result=shapeResult(formed,true),report=*result.find("report");
-    result.set("flat_mesh",meshData(flat));result.set("flat_brep_base64",V::makeStr(brepData(flat)));
-    result.set("holes",records);
-    report.set("model",V::makeStr("designed_finite_cylindrical_sheet"));
-    report.set("width_mm",V::makeNum(width));report.set("leg_a_mm",V::makeNum(legA));
-    report.set("leg_b_mm",V::makeNum(legB));report.set("thickness_mm",V::makeNum(thickness));
-    report.set("inner_radius_mm",V::makeNum(radius));report.set("angle_deg",V::makeNum(degrees));
-    report.set("k_factor",V::makeNum(k));report.set("bend_allowance_mm",V::makeNum(allowance));
-    report.set("flat_length_mm",V::makeNum(flatLength));report.set("formed_volume_mm3",V::makeNum(formedVolume));
-    report.set("flat_volume_mm3",V::makeNum(flatVolume));
-    report.set("analytic_formed_volume_mm3",V::makeNum(expectedFormed));
-    report.set("analytic_flat_volume_mm3",V::makeNum(expectedFlat));
-    report.set("opening_count",V::makeNum(static_cast<double>(openings.size())));
-    report.set("opening_removed_volume_mm3",V::makeNum(removed));
-    report.set("volume_delta_mm3",V::makeNum(measuredDelta));
-    report.set("expected_volume_delta_mm3",V::makeNum(expectedDelta));
-    report.set("volume_delta_error_mm3",V::makeNum(std::abs(measuredDelta-expectedDelta)));
-    report.set("volume_tolerance_mm3",V::makeNum(volumeTol));
-    report.set("flat_valid",V::makeBool(true));report.set("flat_solids",V::makeNum(1));
-    report.set("geometric_material_conservation",V::makeBool(k==.5));
-    report.set("source_projection_verified",V::makeBool(false));
-    report.set("manufacturing_authoritative",V::makeBool(false));
-    report.set("k_factor_scope",V::makeStr("declared flat-length design input; no material calibration inferred"));
-    result.set("report",report);return result;
+}
+TopoDS_Shape united(const std::vector<Piece>& pieces,int mode){
+    TopoDS_Shape out;for(auto& piece:pieces){const auto& s=mode==0?piece.formed:mode==1?piece.flat:piece.refold;out=out.IsNull()?s:fuse(out,s);}return out;
+}
+}
+
+V modelSheetNative(const V& input){
+    V request=input;const bool legacy=!input.find("base");ExprEnv global;
+    if(auto env=input.find("parameters")){if(env->t!=V::Obj)throw std::runtime_error("Sheet parameters must be object");for(auto& kv:env->obj)global.vars[kv.first]=finiteNumber(kv.second,"parameter");}
+    const double width=expr(input,"width",global),t=expr(input,"thickness",global),defaultK=expr(input,"k_factor",global);
+    if(!(width>0&&width<=10000&&t>0&&t<=10000&&defaultK>=0&&defaultK<=1))throw std::runtime_error("Unsupported sheet width, thickness or declared K factor");
+    double legacyA=0;
+    if(legacy){
+        legacyA=expr(input,"leg_a",global);const double degrees=expr(input,"angle",global);
+        if(degrees<=0||degrees>=170)throw std::runtime_error("Legacy L bend angle must be between 0 and 170 degrees");
+        V base=V::makeObj();base.set("id",V::makeStr("panel_0"));base.set("length",V::makeNum(legacyA));request.set("base",base);
+        V child=V::makeObj();child.set("id",V::makeStr("panel_1"));child.set("parent",V::makeStr("panel_0"));child.set("edge",V::makeStr("u_max"));child.set("length",required(input,"leg_b"));child.set("angle",required(input,"angle"));child.set("inner_radius",required(input,"inner_radius"));
+        V flanges=V::makeArr();flanges.arr.push_back(child);request.set("flanges",flanges);
+    }
+    const auto& base=required(request,"base");Panel root;root.id=named(base,"id");root.length=expr(base,"length",global);root.width=width;root.k=defaultK;
+    if(!(root.length>0&&root.length<=1e6))throw std::runtime_error("Base panel length must be positive and at most 1e6 mm");
+    bool legacyOrigin=legacy;if(auto p=request.find("legacy_origin")){if(p->t!=V::Bool)throw std::runtime_error("legacy_origin must be boolean");legacyOrigin=p->b;}
+    if(legacyOrigin){root.formed=translation(-root.length);root.refold=root.formed;}
+    std::vector<Panel> panels{root};std::set<std::string> ids{root.id},edges;
+    if(auto list=request.find("flanges")){
+        if(list->t!=V::Arr||list->arr.size()>16)throw std::runtime_error("Sheet program accepts at most 16 flanges");
+        for(auto& item:list->arr){
+            Panel p;p.id=named(item,"id");auto parent=named(item,"parent");p.edge=string(item,"edge");
+            if(!ids.insert(p.id).second)throw std::runtime_error("Duplicate sheet panel identity");
+            for(size_t i=0;i<panels.size();++i)if(panels[i].id==parent)p.parent=(int)i;
+            if(p.parent<0)throw std::runtime_error("Flange parent must be an earlier panel");
+            if((p.parent>0&&p.edge=="u_min")||!edges.insert(parent+"/"+p.edge).second)throw std::runtime_error("Panel edge already has a bend attachment");
+            const auto& a=panels[p.parent];ExprEnv env=global;env.vars["parent_length"]=a.length;env.vars["parent_width"]=a.width;env.vars["thickness"]=t;
+            const double span=p.edge=="u_min"||p.edge=="u_max"?a.width:a.length;env.vars["edge_length"]=span;
+            p.length=expr(item,"length",env);p.width=optional(item,"width",span,env);p.offset=optional(item,"offset",0,env);p.radius=expr(item,"inner_radius",env);p.angle=expr(item,"angle",env)*pi/180;p.k=optional(item,"k_factor",defaultK,env);
+            if(!(p.length>0&&p.length<=1e6&&p.width>0&&p.offset>=0&&p.offset+p.width<=span&&p.radius>0&&std::abs(p.angle)>=.001*pi/180&&std::abs(p.angle)<170*pi/180&&p.k>=0&&p.k<=1))throw std::runtime_error("Unsupported flange dimensions, attachment span, radius, angle or K factor");
+            p.allowance=std::abs(p.angle)*(p.radius+p.k*t);p.attachment=edgeFrame(a,p);
+            p.flat=a.flat*p.attachment*translation(p.allowance);
+            const double alpha=std::abs(p.angle),sign=p.angle>0?1.:-1.,mid=p.radius+t/2;
+            const gp_XYZ end(mid*std::sin(alpha),t/2+sign*mid*(1-std::cos(alpha)),0),normal(-sign*std::sin(alpha),std::cos(alpha),0);
+            const auto lower=end-normal*(t/2);auto local=rotation(p.angle);local.SetTranslationPart(gp_Vec(lower));p.formed=a.formed*p.attachment*local;
+            // Refold derives angle from developed band length; its neutral-line
+            // construction is independent of the forward midwall frame above.
+            const double recovered=p.allowance/(p.radius+p.k*t),yn=sign>0?(1-p.k)*t:p.k*t,rn=p.radius+p.k*t;
+            const auto joint=translation(rn*std::sin(recovered),yn+sign*rn*(1-std::cos(recovered)))*rotation(sign*recovered)*translation(-p.allowance,-yn);
+            const auto flatH=a.flat*p.attachment;p.refold=a.refold*flatH*joint*flatH.Inverted();
+            panels.push_back(p);
+        }
+    }
+    std::vector<Piece> pieces;V records=V::makeArr(),panelRecords=V::makeArr(),bendRecords=V::makeArr(),animation=V::makeObj(),animationPanels=V::makeArr();
+    double removed=0,expectedFormed=0,expectedFlat=0,expectedDelta=0,maxFrameError=0;bool conservation=true;
+    std::set<std::string> holeIds;
+    const V* openings=request.find("openings");if(openings&&(openings->t!=V::Arr||openings->arr.size()>128))throw std::runtime_error("Sheet accepts at most 128 openings");
+    std::vector<bool> bound(openings?openings->arr.size():0,false);
+    for(size_t index=0;index<panels.size();++index){
+        auto& p=panels[index];p.local=BRepPrimAPI_MakeBox(p.length,t,p.width).Shape();
+        ExprEnv env=global;env.vars["panel_length"]=p.length;env.vars["panel_width"]=p.width;env.vars["thickness"]=t;
+        std::vector<TopoDS_Shape> cutters;
+        if(openings)for(size_t h=0;h<openings->arr.size();++h){
+            const V& original=openings->arr[h];const V& which=required(original,"panel");
+            const bool matches=which.t==V::Str?which.str==p.id:legacy&&which.t==V::Num&&which.num==(double)index;
+            if(!matches)continue;bound[h]=true;auto item=numericOpening(original,env);item.set("panel",V::makeNum(0));
+            std::string identity=original.find("id")?named(original,"id"):"opening_"+std::to_string(h+1);
+            if(!holeIds.insert(identity).second)throw std::runtime_error("Duplicate opening identity");
+            V single=V::makeArr();single.arr.push_back(item);V wrapper=V::makeObj();wrapper.set("openings",single);
+            const Opening opening=openingsFrom(wrapper,p.length,p.length,p.width).front();
+            const auto tool=cutter(opening,false,0,0,t,{},{},{});
+            for(auto& prior:cutters)if(boxesMeet(prior,tool)){BRepExtrema_DistShapeShape distance(prior,tool);if(!distance.IsDone()||distance.Value()<=linearTol)throw std::runtime_error("Sheet openings overlap or touch");}
+            cutters.push_back(tool);p.local=cut(p.local,tool);removed+=opening.area*t;
+            V row=V::makeObj();row.set("id",V::makeStr(identity));row.set("panel",legacy?V::makeNum((double)index):V::makeStr(p.id));row.set("kind",V::makeStr(opening.kind));row.set("local_center",pairJson(opening.center));row.set("area_mm2",V::makeNum(opening.area));
+            const gp_Pnt center(opening.center.x,t/2,opening.center.y);row.set("formed_center",vec(center.Transformed(p.formed).XYZ()));row.set("flat_center",vec(center.Transformed(p.flat).XYZ()));
+            if(opening.kind=="circle")row.set("radius_mm",V::makeNum(opening.radius));else{V pts=V::makeArr();for(auto pt:opening.points)pts.arr.push_back(pairJson(pt));row.set("points",pts);}records.arr.push_back(row);
+        }
+        const auto refoldFrame=p.refold*p.flat;
+        for(auto point:{gp_Pnt(0,0,0),gp_Pnt(p.length,0,0),gp_Pnt(0,t,0),gp_Pnt(0,0,p.width)})maxFrameError=std::max(maxFrameError,point.Transformed(refoldFrame).Distance(point.Transformed(p.formed)));
+        if(index>0){
+            const auto& parent=panels[p.parent];const double sign=p.angle>0?1.:-1.,alpha=std::abs(p.angle);
+            const gp_Pnt center(0,t/2+sign*(p.radius+t/2),sign>0?0:p.width);const gp_Dir axis(0,0,sign);
+            const auto outer=BRepPrimAPI_MakeCylinder(gp_Ax2(center,axis,gp_Dir(0,-sign,0)),p.radius+t,p.width,alpha).Shape();
+            const auto inner=BRepPrimAPI_MakeCylinder(gp_Ax2(center.Translated(gp_Vec(0,0,-sign)),axis),p.radius,p.width+2).Shape();
+            const auto sector=cut(outer,inner),band=BRepPrimAPI_MakeBox(p.allowance,t,p.width).Shape();
+            // A revolved rectangular wall cross-section independently checks
+            // the sector built by subtracting coaxial cylinders.
+            BRepBuilderAPI_MakePolygon wire;wire.Add(gp_Pnt(0,0,0));wire.Add(gp_Pnt(0,t,0));wire.Add(gp_Pnt(0,t,p.width));wire.Add(gp_Pnt(0,0,p.width));wire.Close();
+            const double measuredBA=properties(band)/(p.width*t),measuredAngle=measuredBA/(p.radius+p.k*t);
+            auto revolved=BRepPrimAPI_MakeRevol(BRepBuilderAPI_MakeFace(wire.Wire()).Face(),gp_Ax1(center,axis),measuredAngle).Shape();
+            const auto flatH=parent.flat*p.attachment,formedH=parent.formed*p.attachment,refoldH=parent.refold*flatH;
+            pieces.push_back({transformed(band,flatH),transformed(sector,formedH),transformed(revolved,refoldH),(int)index,true});
+            expectedFormed+=p.width*t*alpha*(p.radius+t/2);expectedFlat+=p.width*t*p.allowance;expectedDelta+=alpha*p.width*t*t*(.5-p.k);conservation&=p.k==.5;
+            V bend=V::makeObj();bend.set("id",V::makeStr(p.id));bend.set("parent",V::makeStr(parent.id));bend.set("edge",V::makeStr(p.edge));bend.set("angle_deg",V::makeNum(p.angle*180/pi));bend.set("inner_radius_mm",V::makeNum(p.radius));bend.set("k_factor",V::makeNum(p.k));bend.set("bend_allowance_mm",V::makeNum(p.allowance));bend.set("width_mm",V::makeNum(p.width));bend.set("offset_mm",V::makeNum(p.offset));bend.set("flat_attachment",matrix(flatH));bend.set("parent_index",V::makeNum(p.parent));bendRecords.arr.push_back(bend);
+        }
+        pieces.push_back({transformed(p.local,p.flat),transformed(p.local,p.formed),transformed(p.local,refoldFrame),(int)index,false});
+        expectedFormed+=p.length*p.width*t;expectedFlat+=p.length*p.width*t;
+        V row=V::makeObj();row.set("id",V::makeStr(p.id));row.set("length_mm",V::makeNum(p.length));row.set("width_mm",V::makeNum(p.width));row.set("formed_frame",matrix(p.formed));row.set("flat_frame",matrix(p.flat));row.set("refold_pose",matrix(p.refold));panelRecords.arr.push_back(row);
+        V animated=row;animated.set("flat_mesh",meshData(transformed(p.local,p.flat)));animationPanels.arr.push_back(animated);
+    }
+    for(bool b:bound)if(!b)throw std::runtime_error("Opening references a missing panel");
+    if(maxFrameError>linearTol)throw std::runtime_error("Independent neutral-line refold does not recover panel frames");
+    validatePieces(pieces,panels,false);validatePieces(pieces,panels,true);
+    const auto formed=united(pieces,0),flat=united(pieces,1),refold=united(pieces,2);
+    if(!BRepCheck_Analyzer(formed).IsValid()||shapes(formed,TopAbs_SOLID).size()!=1||!BRepCheck_Analyzer(flat).IsValid()||shapes(flat,TopAbs_SOLID).size()!=1||!BRepCheck_Analyzer(refold).IsValid())throw std::runtime_error("Formed, flat and refold sheet must be valid connected solids");
+    expectedFormed-=removed;expectedFlat-=removed;const double formedVolume=properties(formed),flatVolume=properties(flat),delta=formedVolume-flatVolume;
+    const double volumeTol=std::max(1e-5,std::abs(expectedFormed)*1e-8),refoldError=symmetricDifference(formed,refold);
+    if(std::abs(formedVolume-expectedFormed)>volumeTol||std::abs(flatVolume-expectedFlat)>volumeTol||std::abs(delta-expectedDelta)>volumeTol||refoldError>volumeTol)throw std::runtime_error("Sheet geometric integral or independent refold validation failed");
+    V result=shapeResult(formed,true),report=*result.find("report");result.set("flat_mesh",meshData(flat));result.set("flat_brep_base64",V::makeStr(brepData(flat)));result.set("holes",records);result.set("panels",panelRecords);result.set("bends",bendRecords);
+    report.set("model",V::makeStr("authored_panel_flange_tree"));report.set("width_mm",V::makeNum(width));report.set("thickness_mm",V::makeNum(t));report.set("k_factor",V::makeNum(defaultK));report.set("panel_count",V::makeNum((double)panels.size()));report.set("bend_count",V::makeNum((double)panels.size()-1));
+    for(auto kv:{std::pair{"formed_volume_mm3",formedVolume},std::pair{"flat_volume_mm3",flatVolume},std::pair{"analytic_formed_volume_mm3",expectedFormed},std::pair{"analytic_flat_volume_mm3",expectedFlat},std::pair{"volume_delta_mm3",delta},std::pair{"expected_volume_delta_mm3",expectedDelta},std::pair{"volume_delta_error_mm3",std::abs(delta-expectedDelta)},std::pair{"volume_tolerance_mm3",volumeTol},std::pair{"refold_symmetric_difference_mm3",refoldError},std::pair{"refold_frame_error_mm",maxFrameError},std::pair{"opening_removed_volume_mm3",removed}})report.set(kv.first,V::makeNum(kv.second));
+    report.set("opening_count",V::makeNum((double)records.arr.size()));report.set("flat_valid",V::makeBool(true));report.set("flat_solids",V::makeNum(1));report.set("geometric_material_conservation",V::makeBool(conservation));report.set("source_projection_verified",V::makeBool(false));report.set("manufacturing_authoritative",V::makeBool(false));report.set("piece_interference_checked",V::makeBool(true));report.set("bend_trajectory_collision_checked",V::makeBool(false));report.set("k_factor_scope",V::makeStr("declared flat-length design input; no material calibration inferred"));
+    if(legacy){const auto& p=panels[1];report.set("leg_a_mm",V::makeNum(legacyA));report.set("leg_b_mm",V::makeNum(p.length));report.set("inner_radius_mm",V::makeNum(p.radius));report.set("angle_deg",V::makeNum(p.angle*180/pi));report.set("bend_allowance_mm",V::makeNum(p.allowance));report.set("flat_length_mm",V::makeNum(legacyA+p.allowance+p.length));}
+    animation.set("panels",animationPanels);animation.set("bends",bendRecords);animation.set("thickness_mm",V::makeNum(t));animation.set("root_pose",matrix(panels[0].refold));result.set("animation",animation);result.set("report",report);return result;
 }
 } // namespace ark::occt

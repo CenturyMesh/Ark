@@ -39,7 +39,7 @@ struct Parameter {
 enum class FeatureType : i32 {
     Box, Cylinder, Sphere, Cone, Torus,
     Extrude, Revolve, Transform, Boolean, LinearPattern, ParametricSurface, Tube, NotchedTube, SourceTube, SketchCut,
-    Loft, SurfaceFill, BSplineSurface, Thicken, SheetMetal, SourceSheet,
+    Loft, SurfaceFill, BSplineSurface, Thicken, SheetMetal, SourceSheet, NativeSolid,
 };
 
 struct Feature {
@@ -99,6 +99,7 @@ struct SketchCon {
     f64 val=0;          // target value (Fixed: x target, Fixed also uses val2 for y)
     f64 val2=0;         // Fixed: y target
     std::string expression, expression2;
+    std::string id;     // optional stable authoring identity; empty in older sketches
 };
 
 struct Sketch {
@@ -144,6 +145,8 @@ struct NamedSketch {
 struct DatumPlane {
     std::string name, parent="XY";
     std::unordered_map<std::string,std::string> p;
+    arkjson::Value support; // semantic feature reference, never tessellation indices
+    std::string kind="plane"; // plane, axis (local Z), or full coordinate frame
 };
 
 class Document {
@@ -178,7 +181,8 @@ public:
     bool     reorderMove(u64 id, int delta);      // shift position in history
 
     // evaluation --------------------------------------------------------------
-    std::vector<Body> evalBodies;                 // last recompute output
+    mutable std::vector<Body> evalBodies;                 // last recompute output
+    std::vector<Body>* evaluatingBodies=nullptr; // transient earlier history during recompute
     std::vector<FeatureResult> lastResults;
     f64 recomputeMs = 0;
     TessOptions tessOpt{};
@@ -194,6 +198,8 @@ public:
     }
 
     std::vector<AssemblyNode> assembly;
+    std::vector<AssemblyMate> mates;
+    u64 nextMateId_=1;
     u64 nextAssemblyId_=1;
     u64 nextFeatureId_=1;
 };

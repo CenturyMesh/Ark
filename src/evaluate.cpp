@@ -75,11 +75,16 @@ static Body evalFeatureBody(const Feature& f, const ExprEnv& env, Document& doc,
         res.tris=body.baked?body.baked->triCount():0;
         return body;
     }
-    if(f.type==FeatureType::Transform||f.type==FeatureType::Boolean||
-       f.type==FeatureType::LinearPattern||f.type==FeatureType::SketchCut){
-        for(u64 input:f.inputs)for(const Body& source:work)if(source.id==input&&source.nativeData.t==arkjson::Value::Obj){
-            res.ok=false;res.error="Exact native B-rep cannot be modified through a display-mesh feature";return {};
-        }
+    bool exactInput=false;
+    for(u64 input:f.inputs)for(const Body& source:work)
+        if(source.id==input&&source.nativeData.find("brep_base64"))exactInput=true;
+    if(exactInput && (f.type==FeatureType::Transform||f.type==FeatureType::Boolean)){
+        Body body=evaluateExactLegacyOperation(f,env,doc,work);
+        res.tris=body.baked?body.baked->triCount():0;
+        return body;
+    }
+    if(exactInput && (f.type==FeatureType::LinearPattern||f.type==FeatureType::SketchCut)){
+        res.ok=false;res.error="Exact native B-rep needs an exact solid operation";return {};
     }
     switch(f.type){
         case FeatureType::SourceTube: {
@@ -235,19 +240,17 @@ const std::vector<FeatureResult>& Document::recompute() {
     evalBodies.clear();
     refreshParams();
     ExprEnv env=buildEnv();
-    try{for(auto& plane:planes)resolvePlane(*this,plane.name);}
-    catch(const std::exception& e){parameterError=e.what();}
     for(auto& ns:sketches){
         evaluateSketch(ns,env);
-        try{resolvePlane(*this,ns.sk.plane);}catch(const std::exception& e){ns.error=e.what();ns.residual=INFINITY;}
     }
     std::vector<Body> work;
+    evaluatingBodies=&work;
     for(auto&f:features){
         FeatureResult fr; fr.id=f.id;
         f64 tf=nowMs();
         fr.error=parameterError;
         for(auto& kv:f.p){
-            if(kv.first=="shape"||kv.first=="section"||kv.first=="sketch"||kv.first=="plane"||kv.first=="name"||
+            if(kv.first=="shape"||kv.first=="section"||kv.first=="sketch"||kv.first=="plane"||kv.first=="name"||kv.first=="op"||
                (f.type==FeatureType::ParametricSurface&&(kv.first=="x"||kv.first=="y"||kv.first=="z")))continue;
             bool ok=false; f64 value=evalExpr(kv.second,env,&ok);
             if(!ok || std::fabs(value)>1e8)fr.error="Invalid expression for '"+kv.first+"': "+kv.second;
@@ -282,6 +285,12 @@ const std::vector<FeatureResult>& Document::recompute() {
         }
         lastResults.push_back(std::move(fr));
     }
+    try{for(auto& plane:planes)resolvePlane(*this,plane.name);}
+    catch(const std::exception& e){if(parameterError.empty())parameterError=e.what();}
+    for(auto& ns:sketches)if(ns.error.empty()){
+        try{resolvePlane(*this,ns.sk.plane);}catch(const std::exception& e){ns.error=e.what();ns.residual=INFINITY;}
+    }
+    evaluatingBodies=nullptr;
     evalBodies=std::move(work);
     recomputeMs=nowMs()-t0;
     return lastResults;

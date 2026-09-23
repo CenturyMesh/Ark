@@ -96,8 +96,13 @@ Development unfold(const TopoDS_Shape& source,double k,int rootPanel){
     if(bends.empty()){
         double bestArea=0;bool found=false;
         for(auto& item:shapes(source,TopAbs_FACE)){auto face=TopoDS::Face(item);BRepAdaptor_Surface s(face);if(s.GetType()!=GeomAbs_Plane)continue;double area=properties(face,'a');if(area<=bestArea)continue;
-            X inward=s.Plane().Axis().Direction().XYZ();if(face.Orientation()!=TopAbs_REVERSED)inward.Reverse();double thickness=properties(source)/area;
-            auto local=frame(s.Plane().XAxis().Direction().XYZ(),inward);auto box=bounds(transformed(source,local));if(thickness<=tol||thickness>std::min(box[3]-box[0],box[5]-box[2])*.25)continue;
+            X inward=s.Plane().Axis().Direction().XYZ();if(face.Orientation()!=TopAbs_REVERSED)inward.Reverse();
+            auto local=frame(s.Plane().XAxis().Direction().XYZ(),inward);auto box=bounds(transformed(source,local));
+            // A material skin can comprise several coplanar source faces.
+            // Measure the normal extent, then prove the entire source equals
+            // a prism of all lower skin faces; one face's area is not the
+            // complete material area and cannot determine its thickness.
+            double thickness=box[4]-box[1];if(thickness<=tol||thickness>std::min(box[3]-box[0],box[5]-box[2])*.25)continue;
             local=translation(X(-box[0],-box[1],-box[2]))*local;auto flat=transformed(source,local);
             try{d.plateError=uniformPlateProof(flat,thickness);}catch(const std::exception&){continue;}
             found=true;bestArea=area;d.thickness=thickness;d.base=local;d.flat=flat;

@@ -103,7 +103,7 @@ geometry operations also work without an API key or an LLM.
 
 ## 0.8 native OCCT modeling and sheet sources
 
-The current API has **30 tools**. `agent_onboard` adds `surfacing` and `sheet`
+The 0.8 API had **30 tools**. `agent_onboard` added `surfacing` and `sheet`
 topics to its earlier overview/sketch/tube/assembly topics. `kernel_info{}` reports the native OCCT
 version and capability status. `step_inspect{path,faces?}` inventories an
 original STEP file without editing the document. `native_inspect{id}` returns
@@ -128,3 +128,39 @@ Boolean, or sketch-cut operations. Use authored parameters, construction
 planes, or assembly instance placements. The native worker and current tests
 are C++; no Python runtime or test gate is required. The Windows native build
 uses OCCT 8.0.1 from [the pinned SDK](NATIVE_BUILD.md).
+
+## 0.9 exact references, assembly mates and authored sheet graphs
+
+The API currently lists **33 tools**. `reference_inspect{id,reference?,fraction?}`
+discovers producer-authored exact face, edge and axis names and resolves their
+local frames. `sketch_diagnose{name}` or `sketch_diagnose{sketch}` reports
+per-constraint residuals and local rank without changing the document. Use
+these names in supported construction-plane supports and assembly mates;
+triangle and B-rep enumeration indexes are not persistent references.
+
+`doc_apply` accepts `assembly.edit{id,fixed:true}` and
+`mate.add{a,b,type,reference_a,reference_b,value?,fraction_a?,fraction_b?}`,
+`mate.edit{id,...}`, `mate.remove{id}`. The two IDs identify part instances
+under the same group. Every connected mate set needs a fixed part instance.
+Types are `concentric`, `coincident`, `contact`, signed `distance` in mm,
+and `angle` in degrees. Solved instance transforms are derived after feature
+recompute; authored placement and value expressions remain in the document.
+`assembly_info.diagnostics` reports mate residuals, local rank, remaining
+degrees of freedom and unconstrained instances. Invalid or stale references,
+unanchored systems and unsatisfied mates fail the full `doc_apply` batch.
+See [the mate contract](MECHANICAL.md#grounded-mates).
+
+The version-7 `.ark` package retains fixed instance flags, mate definitions,
+native solid programs, supported construction references and sheet authoring
+programs. Older document versions remain readable. `native_solid` performs
+supported exact primitive and Boolean operations through the C++ OCCT worker.
+The newer sheet program keeps a base panel, ordered flange attachments and
+panel-owned openings; its formed/flat B-reps and refold checks remain geometric
+evidence, with bend trajectory collision and material calibration outside
+current validation. `sheet_preview{id,progress}` returns read-only sequential
+flat-to-formed panel transforms at progress 0..1 for display; it does not
+edit the document, change the exact export pose, or certify a bend trajectory.
+
+The 0.7 live Studio connection remains the way an MCP client works on the
+currently open document. A standalone `ark-mcp` process still has its own
+document, and session edits still require the current revision for safe batches.

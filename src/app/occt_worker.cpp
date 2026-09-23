@@ -2,6 +2,7 @@
 #include "ark/occt_source.hpp"
 #include "ark/occt_modeling.hpp"
 #include "ark/occt_sheet.hpp"
+#include "ark/occt_solid.hpp"
 #include <Standard_Failure.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <TopoDS.hxx>
@@ -20,6 +21,8 @@ int runWorker(const fs::path& requestPath,const fs::path& resultPath){
         else if(op=="export_notch")result=exportNotchNative(field("plan"),text("path"));
         else if(op=="model")result=modelSurfaceNative(field("request"));
         else if(op=="model_sheet")result=modelSheetNative(field("request"));
+        else if(op=="model_solid")result=modelSolidNative(field("request"));
+        else if(op=="reference_frame")result=referenceFrameNative(field("request"));
         else if(op=="import_sheet")result=importSheetNative(request);
         else if(op=="export_sheet")result=exportSheetNative(request);
         else if(op=="step_inspect"){

@@ -24,6 +24,7 @@
 
 #include <array>
 #include <cmath>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -188,16 +189,39 @@ V loft(const V& request) {
     maker.SetMaxDegree(degree);
     size_t segments = 0;
     bool closed = false;
+    std::vector<std::pair<std::string,TopoDS_Edge>> firstSectionEdges;
     for (const V& value : profiles.arr) {
         Profile profile = profileOf(value, solid);
         if (!segments) { segments = profile.edges.size(); closed = profile.closed; }
         if (profile.edges.size() != segments || profile.closed != closed)
             throw std::runtime_error("loft profiles have incompatible edge topology");
+        if(firstSectionEdges.empty()){
+            const V& sourceEntities=required(value,"entities");
+            std::set<std::string> names;
+            for(size_t i=0;i<profile.edges.size();++i){
+                const V* supplied=sourceEntities.arr[i].find("name");
+                std::string name=supplied&&supplied->t==V::Str&&!supplied->str.empty()?supplied->str:"entity."+std::to_string(i);
+                if(!names.insert(name).second)throw std::runtime_error("Duplicate loft section entity name");
+                firstSectionEdges.push_back({name,profile.edges[i].edge});
+            }
+        }
         maker.AddWire(profile.wire);
     }
     maker.Build();
     if (!maker.IsDone()) throw std::runtime_error("OCCT loft failed");
-    return shapeResult(maker.Shape(), solid);
+    V result=shapeResult(maker.Shape(), solid),topology=V::makeObj(),rows=V::makeArr();
+    topology.set("brep_sha256",V::makeStr(sha256(base64Decode(required(result,"brep_base64").str))));
+    auto bind=[&](const std::string& name,const TopoDS_Shape& source){
+        V row=V::makeObj(),indices=V::makeArr();int index=-1;
+        if(!source.IsNull()){
+            int n=0;for(auto& candidate:shapes(maker.Shape(),TopAbs_FACE)){if(candidate.IsSame(source)){index=n;break;}++n;}
+        }
+        row.set("name",V::makeStr(name));row.set("kind",V::makeStr("face"));row.set("status",V::makeStr(index<0?"deleted":"bound"));
+        if(index>=0)indices.arr.push_back(V::makeNum(index));row.set("indices",indices);rows.arr.push_back(row);
+    };
+    if(solid){bind("cap.start",maker.FirstShape());bind("cap.end",maker.LastShape());}
+    for(const auto& [name,edge]:firstSectionEdges)bind("side."+name,maker.GeneratedFace(edge));
+    topology.set("references",rows);result.set("topology",topology);return result;
 }
 
 V surfaceFill(const V& request) {

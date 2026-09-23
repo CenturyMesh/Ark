@@ -1,28 +1,76 @@
-# Native sheet metal in ARK 0.8
+# Native sheet metal in ARK 0.9
 
 The sheet engine is C++ using OCCT 8.0.1. Authored sheets and imported sheets
 have separate contracts. Display meshes are derived from their exact B-reps;
 STEP export uses the B-rep, never a reconstruction from triangles.
 
-## Authored sheet
+## Authored sheet: a base and a tree of flanges
 
-Create a `sheet_metal` feature through Studio **Commands > Sheet metal**, or:
+Create a base in **Commands > Sheet metal**, then add flanges and openings from
+forms. Existing L-bend documents remain editable and promote to the same panel
+program when a graph operation is applied. Everything is C++; OCCT 8.0.1 creates
+the formed and developed solids.
+
+An agent can create a complete bracket in one atomic `doc_apply` batch:
 
 ```json
-{"op":"feature.add","type":"sheet_metal","name":"Bracket","p":{"width":"60","leg_a":"80","leg_b":"50","thickness":"2","inner_radius":"5","angle":"90","k_factor":"0.5"},"native":{"openings":[{"panel":0,"kind":"circle","x":"25","y":"20","radius":"4"},{"panel":1,"kind":"polygon","points":[[15,20],[25,20],[25,30],[15,30]]}]}}
+{"commands":[
+  {"op":"sheet.create","name":"Bracket",
+   "p":{"width":60,"thickness":2,"k_factor":0.42},
+   "base":{"id":"base","length":80}},
+  {"op":"sheet.flange.add","id":1,"flange":{
+   "id":"back","parent":"base","edge":"u_max","length":30,
+   "width":"edge_length-10","offset":5,"inner_radius":4,"angle":90}},
+  {"op":"sheet.opening.add","id":1,"opening":{
+   "id":"mount","panel":"back","kind":"circle",
+   "x":"panel_length-10","y":"panel_width/2","radius":3}}
+]}
 ```
 
-Lengths are millimetres. `leg_a` and `leg_b` are straight tangent lengths, not
-overall outside dimensions. `angle` is in degrees and currently must be
-between 0 and 170. The two flanges share a width and thickness. This authored
-feature currently contains one cylindrical bend.
+The ID `1` assumes a fresh document. Use returned `created_ids` and
+`sheet_edits[].entity_id` in subsequent edits. `sheet.base.edit{id,values}`,
+`sheet.flange.edit{id,entity,values}` and `sheet.opening.edit{id,entity,values}`
+change expressions while retaining identities. Removing a flange with dependent
+panels/openings requires explicit `cascade:true` or removing its dependencies in
+the same transaction. Invalid edits preserve the old document and revision.
 
-Opening coordinates lie in each panel's own frame: `x` runs from the first
-panel's free end toward the bend, and from the second panel's bend toward its
-free end; `y` runs across the sheet width. Circle and polygon openings must be
-fully inside one rigid flange, must not overlap, and cannot cross the bend.
-Coordinates and dimensions accept parameter expressions. The generated solid
-and blank each undergo independent analytic-volume checks.
+Each panel has U (length), V (width), and a material normal. Base U is world X,
+normal is world Y, and V is world Z. Flange edges are `u_min`, `u_max`, `v_min`,
+`v_max`. A child's inbound `u_min` is reserved. One flange may occupy each edge;
+`width` and `offset` locate a narrower attachment on that edge, making corner
+clearance explicit. Child U points outward and its V follows the attachment.
+
+Limits: 16 flanges, 128 openings, positive lengths/radii/thickness, K in `[0,1]`,
+and `0.001 <= abs(angle) < 170` degrees. Negative angles bend to the opposite
+side. Parents precede children. No implicit corner reliefs or bend-crossing
+openings are invented. Nonadjacent contact and positive material overlap are
+rejected in both flat and formed poses. This domain covers rectangular panel
+trees, not hems, arbitrary freeform panel boundaries or continuous double curvature.
+
+Circle and polygon openings are exact cuts in a panel's local frame. `x` is U,
+`y` is V. Their local expressions can use `panel_length`, `panel_width` and
+`thickness` as well as document parameters. Flange dimensions can use
+`parent_length`, `parent_width`, `edge_length` and `thickness`. Openings must stay
+inside their panel and away from edges/bends. Exact cutter clearance permits
+non-overlapping shapes whose bounding envelopes overlap.
+
+`native_inspect{id}` returns panel frames, bend allowance, opening identities and
+centres, independent analytic volumes and refold evidence. The engine constructs
+formed bends as differences of cylinders, then independently refolds the flat
+panels around their neutral lines and reconstructs bends by revolving a wall
+section. It checks panel frames and whole-solid symmetric difference, in addition
+to validity, connectivity and exact component interference.
+
+Studio **Flat / Formed / Play** and its slider show the sequential bend preview.
+`sheet_preview{id,progress}` exposes the same panel poses to agents. Preview is
+read-only: STEP export always uses the explicit exact flat or formed B-rep.
+Endpoint interference is checked; the animation does **not** certify the motion
+trajectory or press-tool accessibility.
+
+The original `sheet_metal` parameters `{width,leg_a,leg_b,thickness,inner_radius,
+angle,k_factor}` and numeric opening panels `0/1` still reproduce old documents.
+New graph features store `native:{base,flanges,openings}` and the global width,
+thickness and K factor in `p`. `.ark` version 7 preserves this authored intent.
 
 ## Import an existing STEP sheet
 
@@ -70,7 +118,7 @@ flat and formed volumes are equal at `K=0.5`. For another K, the expected
 geometric volume difference is explicitly checked and reported:
 
 ```text
-formed volume - flat volume = theta * width * t*t * (0.5 - K)
+formed volume - flat volume = sum(abs(theta_i) * width_i * t*t * (0.5 - K_i))
 ```
 
 ARK never labels that difference as conserved material. In particular,
@@ -97,8 +145,8 @@ also checked by the whole-source comparison.
 
 Use `native_inspect{id}` for the compact geometric report and opening
 inventory. Studio offers **Formed** and **Flat** views; switching view does not
-edit parameters or document revision. Sheet animation is not implemented in
-this release; the existing tube animation remains available.
+edit parameters or document revision. Authored panel graphs also have a read-only
+sequential bend preview; imported source sheets keep static formed/flat views.
 
 `export_step{id,path,pose:"flat"|"formed"}` defaults to flat for sheet features.
 It writes the selected B-rep, reads it back and emits a validation sidecar.
@@ -121,3 +169,8 @@ selection, paired material-skin proof, declared allowance, independent
 reconstruction, and honest rejection. It does not embed STAGE's Python pipeline
 or use TRACE nesting output to decide source geometry. No donor checkout was
 modified and no Python runtime or test gate remains in ARK.
+
+The 0.9 multi-flange example is `examples/sheet-flange-tree.ark`, with its
+`.arkops` replay and exact `-flat.step` / `-formed.step` exports. Its regression
+checks signed bends on all four panel edges, exact opening clearance, panel
+identity under edits, neutral-line refold, STEP readback and atomic undo.

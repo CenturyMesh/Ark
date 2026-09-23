@@ -6,7 +6,7 @@
 // failure. Small dense systems solved by Gaussian elimination with partial
 // pivoting. This is the standard approach in production CAD solvers
 // (cf. "A Geometric Constraint Solver" v5, and Siemens/DS literature).
-#include "ark/model.hpp"
+#include "ark/sketch.hpp"
 #include <cmath>
 
 namespace ark {
@@ -160,6 +160,50 @@ bool solveDense(std::vector<f64>& A,std::vector<f64>& b,int n){
     return true;
 }
 
+// The same row ordering is used for each constraint's rank contribution. A
+// second orthogonalization pass limits spurious rank gains from roundoff.
+int appendIndependentRows(const std::vector<std::vector<f64>>& rows,
+                          std::vector<std::vector<f64>>& basis){
+    int gained=0;
+    for(auto row:rows){
+        f64 norm2=0;for(auto x:row)norm2+=x*x;
+        const f64 original=std::sqrt(norm2);
+        if(!std::isfinite(original)||original<1e-12)continue;
+        for(int pass=0;pass<2;++pass)for(const auto& b:basis){
+            f64 dot=0;for(size_t j=0;j<row.size();++j)dot+=row[j]*b[j];
+            for(size_t j=0;j<row.size();++j)row[j]-=dot*b[j];
+        }
+        norm2=0;for(auto x:row)norm2+=x*x;
+        const f64 remaining=std::sqrt(norm2);
+        if(remaining<=original*1e-7)continue;
+        for(auto& x:row)x/=remaining;
+        basis.push_back(std::move(row));++gained;
+    }
+    return gained;
+}
+
+size_t residualCount(SketchCon::Type type){
+    return type==SketchCon::Fixed||type==SketchCon::Coincident?2u:1u;
+}
+
+std::vector<std::vector<f64>> normalizedJacobianRows(Problem& p,const std::vector<f64>& residual){
+    std::vector<std::vector<f64>> rows(residual.size(),std::vector<f64>((size_t)p.n,0));
+    for(int j=0;j<p.n;++j){
+        size_t slot=p.free[(size_t)j];f64 old=p.x[slot],h=1e-7*(1.+std::abs(old));
+        p.x[slot]=old+h;std::vector<f64> plus;p.residuals(plus);
+        p.x[slot]=old-h;std::vector<f64> minus;p.residuals(minus);
+        p.x[slot]=old;
+        if(plus.size()!=residual.size()||minus.size()!=residual.size())throw std::runtime_error("Sketch residual count changed during diagnosis");
+        for(size_t i=0;i<residual.size();++i)rows[i][(size_t)j]=(plus[i]-minus[i])/(2*h);
+    }
+    for(auto& row:rows){
+        f64 scale=0;for(auto v:row)scale=std::max(scale,std::abs(v));
+        if(std::isfinite(scale)&&scale>1e-12)for(auto& v:row)v/=scale;
+        else std::fill(row.begin(),row.end(),0.);
+    }
+    return rows;
+}
+
 } // namespace
 
 f64 solveSketch(Sketch& sk, int* itersOut, int maxIters, SketchDiagnostics* diagnostics) {
@@ -243,26 +287,69 @@ f64 solveSketch(Sketch& sk, int* itersOut, int maxIters, SketchDiagnostics* diag
     }
     P.writeBack(sk);
     if(diagnostics){
-        diagnostics->variables=n;diagnostics->rank=0;
-        std::vector<f64> finalResidual;size_t m=buildJ(finalResidual);
-        // Local numerical rank, not a proof of global uniqueness. Normalize
-        // constraint rows so angular and length residuals do not set the scale.
-        std::vector<std::vector<double>> rows(m,std::vector<double>((size_t)n));
-        for(size_t i=0;i<m;++i){double scale=0;for(int j=0;j<n;++j)scale=std::max(scale,std::abs(Jcols[(size_t)j][i]));
-            for(int j=0;j<n;++j)rows[i][(size_t)j]=scale>1e-12?Jcols[(size_t)j][i]/scale:0;
-        }
-        size_t rank=0;for(int j=0;j<n&&rank<m;++j){size_t pivot=rank;
-            for(size_t i=rank+1;i<m;++i)if(std::abs(rows[i][(size_t)j])>std::abs(rows[pivot][(size_t)j]))pivot=i;
-            if(std::abs(rows[pivot][(size_t)j])<1e-7)continue;
-            std::swap(rows[rank],rows[pivot]);double p=rows[rank][(size_t)j];
-            for(size_t i=rank+1;i<m;++i){double factor=rows[i][(size_t)j]/p;for(int k=j;k<n;++k)rows[i][(size_t)k]-=factor*rows[rank][(size_t)k];}++rank;
-        }diagnostics->rank=(int)rank;
+        diagnostics->variables=n;
+        std::vector<f64> finalResidual;P.residuals(finalResidual);
+        auto rows=normalizedJacobianRows(P,finalResidual);
+        std::vector<std::vector<f64>> basis;
+        diagnostics->rank=appendIndependentRows(rows,basis);
     }
     if(itersOut)*itersOut=iters;
     P.residuals(r);
     f64 mx=0;
     for(f64 v:r){if(!std::isfinite(v))return INFINITY;mx=tmax(mx,std::fabs(v));}
     return mx;
+}
+
+arkjson::Value diagnoseSketch(const Sketch& sketch,double residualTolerance){
+    using V=arkjson::Value;
+    if(!std::isfinite(residualTolerance)||residualTolerance<=0)throw std::runtime_error("Diagnosis residual tolerance must be positive and finite");
+    Problem problem(sketch);std::vector<f64> residual;problem.residuals(residual);
+    const auto rows=normalizedJacobianRows(problem,residual);
+    std::vector<std::vector<f64>> basis;
+    V report=V::makeObj(),items=V::makeArr();
+    size_t offset=0;f64 overall=0;int redundant=0,violated=0;
+    for(size_t ci=0;ci<sketch.cons.size();++ci){
+        const auto& con=sketch.cons[ci];size_t count=residualCount(con.type);
+        if(offset+count>residual.size())throw std::runtime_error("Sketch residual mapping is inconsistent");
+        V item=V::makeObj(),values=V::makeArr();
+        f64 maxResidual=0;bool nonfinite=false;
+        std::vector<std::vector<f64>> group;
+        for(size_t k=0;k<count;++k){
+            f64 value=residual[offset+k];
+            if(std::isfinite(value)){values.arr.push_back(V::makeNum(value));maxResidual=std::max(maxResidual,std::abs(value));}
+            else{values.arr.push_back(V{});nonfinite=true;}
+            group.push_back(rows[offset+k]);
+        }
+        offset+=count;
+        int gain=appendIndependentRows(group,basis);
+        bool bad=nonfinite||maxResidual>residualTolerance;
+        bool duplicate=gain==0;
+        overall=std::max(overall,maxResidual);
+        if(bad)++violated;if(duplicate)++redundant;
+        item.set("index",V::makeNum((double)ci));
+        if(!con.id.empty())item.set("id",V::makeStr(con.id));
+        item.set("type",V::makeStr(constraintTypeName(con.type)));
+        item.set("a",V::makeNum(con.a));item.set("b",V::makeNum(con.b));
+        item.set("residuals",std::move(values));
+        item.set("max_residual",nonfinite?V{}:V::makeNum(maxResidual));
+        item.set("rank_gain",V::makeNum(gain));
+        item.set("locally_redundant",V::makeBool(duplicate));
+        item.set("violated",V::makeBool(bad));
+        item.set("status",V::makeStr(bad?"conflict_candidate":duplicate?"locally_redundant":"satisfied"));
+        items.arr.push_back(std::move(item));
+    }
+    if(offset!=residual.size())throw std::runtime_error("Sketch residual mapping is inconsistent");
+    report.set("variables",V::makeNum(problem.n));
+    report.set("jacobian_rank",V::makeNum((double)basis.size()));
+    report.set("remaining_dofs",V::makeNum(problem.n-(double)basis.size()));
+    report.set("max_residual",V::makeNum(overall));
+    report.set("violated_constraints",V::makeNum(violated));
+    report.set("locally_redundant_constraints",V::makeNum(redundant));
+    report.set("constraint_status",V::makeStr(violated?"conflicting":basis.size()<(size_t)problem.n?"underconstrained":"locally_fully_constrained"));
+    report.set("rank_scope",V::makeStr("local_numeric_jacobian_at_current_coordinates"));
+    report.set("conflict_scope",V::makeStr("violated residuals after attempted solve; not a minimal conflict set"));
+    report.set("constraints",std::move(items));
+    return report;
 }
 
 } // namespace ark

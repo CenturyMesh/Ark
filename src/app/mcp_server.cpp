@@ -23,7 +23,7 @@ int main(int argc,char** argv){
                 if(auto p=req.find("params"))if(auto v=p->find("protocolVersion"))
                     if(v->asStr()=="2025-06-18"||v->asStr()=="2024-11-05")protocol=v->str;
                 r.set("protocolVersion",V::makeStr(protocol));caps.set("tools",V::makeObj());r.set("capabilities",caps);
-                info.set("name",V::makeStr("ark"));info.set("version",V::makeStr("0.8.0"));r.set("serverInfo",info);
+                info.set("name",V::makeStr("ark"));info.set("version",V::makeStr("0.9.0"));r.set("serverInfo",info);
                 r.set("instructions",V::makeStr("Call agent_onboard first to discover ARK capabilities, current document/revision, modeling contracts and validation limits."));
                 response.set("result",r);
             }else if(method=="ping")response.set("result",V::makeObj());

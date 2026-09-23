@@ -126,6 +126,7 @@ bool Parameter::depends(const std::string& var) const {
 // Feature type names -----------------------------------------------------------
 const char* featureTypeName(FeatureType t){
     switch(t){
+        case FeatureType::NativeSolid:   return "native_solid";
         case FeatureType::Box:           return "box";
         case FeatureType::Cylinder:      return "cylinder";
         case FeatureType::Sphere:        return "sphere";
@@ -174,6 +175,7 @@ bool featureTypeFromName(const std::string& s, FeatureType& out){
     else if(s=="thicken") out=FeatureType::Thicken;
     else if(s=="sheet_metal") out=FeatureType::SheetMetal;
     else if(s=="source_sheet") out=FeatureType::SourceSheet;
+    else if(s=="native_solid") out=FeatureType::NativeSolid;
     else return false;
     return true;
 }

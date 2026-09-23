@@ -1,7 +1,5 @@
 #include "ark/sketch.hpp"
 #include <algorithm>
-#include <functional>
-#include <set>
 #include <stdexcept>
 
 namespace ark {
@@ -41,23 +39,6 @@ bool inside(Vec2 p,const std::vector<Vec2>& poly){
     }return result;
 }
 arkjson::Value vectorValue(Vec3 p){auto v=arkjson::Value::makeArr();for(auto n:{p.x,p.y,p.z})v.arr.push_back(arkjson::Value::makeNum(n));return v;}
-}
-
-Mat4 resolvePlane(const Document& doc,const std::string& name){
-    auto env=doc.buildEnv();std::set<std::string> visiting;
-    std::function<Mat4(const std::string&)> resolve=[&](const std::string& key)->Mat4{
-        if(key=="XY")return Mat4::identity();
-        if(key=="XZ")return Mat4::rotX(K_HALF_PI); // local y = world z; normal = -world y
-        if(key=="YZ")return Mat4::rotZ(K_HALF_PI)*Mat4::rotX(K_HALF_PI); // local x=y, y=z
-        if(!visiting.insert(key).second)throw std::runtime_error("Plane dependency cycle: "+key);
-        const DatumPlane* plane=nullptr;for(auto& p:doc.planes)if(p.name==key){plane=&p;break;}
-        if(!plane)throw std::runtime_error("Plane not found: "+key);
-        for(auto& kv:plane->p)if(kv.first!="ox"&&kv.first!="oy"&&kv.first!="oz"&&kv.first!="rx"&&kv.first!="ry"&&kv.first!="rz")throw std::runtime_error("Unknown plane parameter: "+kv.first);
-        auto value=[&](const char* k){auto it=plane->p.find(k);return it==plane->p.end()?0.:expressionValue(it->second,env);};
-        Mat4 frame=resolve(plane->parent)*Mat4::translation({value("ox"),value("oy"),value("oz")})*
-            Mat4::rotZ(deg2rad(value("rz")))*Mat4::rotY(deg2rad(value("ry")))*Mat4::rotX(deg2rad(value("rx")));
-        visiting.erase(key);return frame;
-    };return resolve(name);
 }
 
 void evaluateSketch(NamedSketch& ns,const ExprEnv& env){
@@ -151,6 +132,7 @@ arkjson::Value inspectSketch(const Document& doc,const NamedSketch& ns,bool samp
     r.set("name",V::makeStr(ns.name));r.set("plane",V::makeStr(ns.sk.plane));r.set("tolerance_mm",V::makeNum(ns.sk.tolerance));
     r.set("residual",V::makeNum(ns.residual));r.set("remaining_dofs",V::makeNum(ns.freeDofs));r.set("jacobian_rank",V::makeNum(ns.rank));
     r.set("constraint_status",V::makeStr(ns.error.empty()?(ns.freeDofs?"underconstrained":"locally_fully_constrained"):"failed"));r.set("error",V::makeStr(ns.error));
+    r.set("diagnosis",diagnoseSketch(ns.sk));
     for(auto& e:ns.sk.ents){V item=V::makeObj(),dof=V::makeArr(),world=V::makeArr(),local=V::makeArr();
         item.set("name",V::makeStr(e.name));item.set("kind",V::makeStr(e.kind==SketchEnt::Spline?"spline":e.kind==SketchEnt::Circle?"circle":e.kind==SketchEnt::Line?"line":"point"));
         item.set("construction",V::makeBool(e.construction));for(auto x:e.dof)dof.arr.push_back(V::makeNum(x));item.set("resolved_dof",dof);

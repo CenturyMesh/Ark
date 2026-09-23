@@ -43,7 +43,7 @@ The current automatic route supports a chain of planar tube spans connected thro
 - `source_inspect{id,progress?}` returns opening coordinates and the projection report without transmitting large mesh/B-rep buffers. Optional progress returns finite-hinge display transforms.
 - `export_step{id,path}` exports the exact straight source projection and its audit sidecars. Source-file drift or altered stored STEP bytes are rejected.
 
-The 0.6 API had 22 MCP tools; the current 0.8 API has 30. `.ark` version 4
+The 0.6 API had 22 MCP tools; the 0.8 API had 30, and the current 0.9 API has 33. `.ark` version 4
 introduced the source package and protected its verified straight STEP payload
 with a SHA-256. Older document versions remain readable. The current 4 MiB
 document limit still applies; large source assemblies are not yet a packaged

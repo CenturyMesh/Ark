@@ -1,4 +1,4 @@
-# ARK 0.3: assemblies, tube programs and GPU computation
+# ARK assemblies, tube programs and GPU computation
 
 ![Shared-part assembly](assembly.png)
 
@@ -18,9 +18,39 @@ Commands above illustrate separate operations; send them in the `commands` array
 
 `assembly_info` returns instance placements and a BOM grouped by shared feature ID. Visibility affects rendering/export, but hidden components remain in BOM quantities. `mesh_inspect`, `mesh_get`, `mesh_raycast`, `snapshot` and `export_mesh` accept `node` to select an instance in world coordinates. `id` selects a part definition in local coordinates; the selectors are mutually exclusive. With neither selector, an assembly exports its visible instances. An ordinary part document still exports terminal features.
 
-Studio's **Assembly** button groups existing outputs. **Duplicate** makes another instance; **Placement** edits its transform expressions. New primitives/tubes added through Studio receive an instance when an assembly is active. Instance boolean operations are not implemented; toolbar booleans are refused in assembly mode to prevent accidentally operating on local part geometry.
+### Grounded mates
 
-The viewport stores one CPU mesh, topology report, local BVH and GPU mesh allocation per unique part. Instances use their own GPU model matrices; picking transforms each ray into part coordinates. This avoids retransmitting or rebuilding the same vertex data for every instance. It still issues a draw call per instance; indirect/multidraw rendering and assembly mates are future work.
+Set `fixed:true` on a part instance to keep its authored placement as an anchor. A connected set of mates needs at least one fixed instance. Mates join part instance IDs, not shared feature IDs. Both instances must have the same assembly parent; groups and mates across different parents reject explicitly. Unmated instances keep their authored transforms and appear in `diagnostics.unconstrained_nodes`.
+
+```json
+{"commands":[
+  {"op":"param.set","name":"gap","expr":"25"},
+  {"op":"feature.add","type":"cylinder","name":"Pin","p":{"r":"5","h":"30"}},
+  {"op":"assembly.add","name":"Fixture"},
+  {"op":"assembly.add","name":"Ground pin","parent":1,"feature":1,"fixed":true},
+  {"op":"assembly.add","name":"Moving pin","parent":1,"feature":1,"p":{"tx":"40"}},
+  {"op":"mate.add","a":2,"b":3,"type":"concentric","reference_a":"axis","reference_b":"axis"},
+  {"op":"mate.add","a":2,"b":3,"type":"distance","reference_a":"axis","reference_b":"axis","value":"gap"}
+]}
+```
+
+`mate.add`, `mate.edit{id,...}` and `mate.remove{id}` use `a`, `b`, `type`, `reference_a`, `reference_b`, `value`, and optional `fraction_a`/`fraction_b` in [0,1] for positions along an exact edge. Newly allocated IDs appear in `created_mate_ids`. Mate expressions and original node placement expressions persist; solved world transforms are derived after feature recompute. Editing `gap` or the referenced feature regenerates the placement. If a reference disappears, splits, or becomes ambiguous, the edit fails atomically.
+
+Local frames `origin`, `X`, `Y`, `Z`, and `XY` are always available. Their origin is the part origin; the named axis is the local frame's +Z direction. Other names are producer-authored exact face, edge, or axis references. Use `reference_inspect{id}` to discover names and `reference_inspect{id,reference}` to inspect a frame. The solver uses exact reference frames, not triangle IDs or mesh face order.
+
+| Mate | Geometric condition | Independent conditions at a regular solution |
+| --- | --- | ---: |
+| `concentric` | The two +Z axes lie on the same line; parallel or opposed orientation is allowed. | 4 |
+| `coincident` | Frame origins coincide and +Z axes align. | 5 |
+| `contact` | +Z axes oppose and the signed plane gap along A's +Z is zero. | 3 |
+| `distance` | The signed projection of B origin minus A origin on A's +Z equals `value` mm. | 1 |
+| `angle` | The angle between +Z axes equals `value` degrees in [0,180]. | 1 generally; 2 at 0/180 |
+
+`assembly_info` returns `instances` with column-major world matrices, `bom`, the authored `mates`, and `diagnostics`. Diagnostics include local numerical Jacobian rank, remaining degrees of freedom, maximum position and angle residuals, per-mate residuals, and unconstrained node IDs. A successful underconstrained solve leaves remaining free dimensions visible in these diagnostics; it does not silently ground a part. A missing fixed anchor, invalid IDs or expressions, unsupported hierarchy, or residual above 1e-5 mm / 1e-4 degree rejects the transaction. Mates solve placements; they do not fuse solids or certify collisions, interference, or motion clearance.
+
+Studio's **Assembly** button groups existing outputs. **Duplicate** makes another instance; **Placement** edits its transform expressions. Select an instance to ground it, add a mate, and inspect or edit mates in the right panel. New primitives/tubes added through Studio receive an instance when an assembly is active. Instance boolean operations are not implemented; toolbar booleans are refused in assembly mode to prevent accidentally operating on local part geometry.
+
+The viewport stores one CPU mesh, topology report, local BVH and GPU mesh allocation per unique part. Instances use their solved GPU model matrices; picking transforms each ray into part coordinates. This avoids retransmitting or rebuilding the same vertex data for every instance. It still issues a draw call per instance; indirect/multidraw rendering remains future work.
 
 ## Hollow tubes and bends
 
@@ -92,5 +122,6 @@ NVRTC from `CUDA_PATH/bin`. CUDA is optional and is not redistributed here.
 - Analytic endpoint/tangent and length tests cover signed and rolled bends. Tests cover round/rectangular topology, invalid radii/walls, nested placements, BOM, visibility, rollback, persistence and missing references.
 - Native `--self-test-assembly` verifies instance duplication/removal/undo/redo, shared part allocations and picking, with a rendered screenshot and OpenGL error check.
 - The harmonic model's original UI dispatch smoke still passes after the assembly viewport changes.
+- The `assembly-mates` CTest covers local-frame mate placement, rank/free-DOF diagnosis, inconsistent and unanchored systems, parameter regeneration, save/load, and atomic `doc_apply` failure.
 
 This evidence validates the implemented design operations, not industrial forming or welding suitability. The existing GitHub Actions account billing blocker is documented in [VALIDATION.md](VALIDATION.md); local tests run independently.

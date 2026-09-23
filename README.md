@@ -1,8 +1,8 @@
-# ARK 0.8 — Agent-Ready Kernel
+# ARK 0.9 — Agent-Ready Kernel
 
 **Parametric CAD for people and agents.**
 
-![ARK native sheet metal workspace](docs/studio-0.8.png)
+![ARK 0.9 parametric drone assembly](docs/drone-hull.png)
 
 ARK is a C++ parametric CAD workspace with a Windows Studio editor, a headless
 modeling library, and a local MCP server. Studio and MCP operate on the same
@@ -28,7 +28,7 @@ SDK under ignored `out/deps/occt`; subsequent builds reuse it.
 The native executables are in `out/native-release/Release`. `start-studio.ps1` accepts
 `-BuildDirectory` for another MSVC build tree and stops if its build or tests
 fail. The prior `out/sketch` MinGW binaries are left in place; they are not the
-0.8 native build. [SDK source, license, and paths](docs/NATIVE_BUILD.md).
+current native build. [SDK source, license, and paths](docs/NATIVE_BUILD.md).
 
 The C++ core can be configured without OCCT for portability checks:
 
@@ -50,11 +50,15 @@ assemblies, tubes, native surfaces, and sheet metal. Orbit by dragging, pan
 with Shift+drag, and zoom with the wheel. `F` frames the model. `Ctrl+N`,
 `Ctrl+O`, `Ctrl+S`, `Ctrl+Z`, and `Ctrl+Y` manage the document and history.
 
-Native surface commands create lofts from saved sketch sections, fill closed
-sketches, edit a NURBS pole grid, and thicken an open native surface. The sheet
-form creates a finite-radius L bend with explicit thickness, radius, angle,
-and K factor. **Formed** and **Flat** select display poses without modifying
-the document. Sheet STEP export asks for a pose and defaults to the flat blank.
+Native commands create exact primitives and supported Boolean, hole, fillet,
+chamfer, and rigid transform features. They also loft saved sketch sections,
+fill closed sketches, edit a NURBS pole grid, and thicken an open surface.
+Assembly instances can be grounded and joined by named-reference mates;
+the inspector reports residuals and remaining free dimensions. The sheet
+program stores a base panel, ordered flanges, and panel-owned openings.
+**Formed** and **Flat** select display poses without modifying the document;
+`sheet_preview` returns read-only intermediate display transforms. Sheet STEP
+export asks for a pose and defaults to the flat blank.
 See [Studio controls](docs/NATIVE_STUDIO.md) and [surfacing contracts](docs/SURFACING.md).
 
 Source STEP tools preserve supported original geometry and openings. Tube
@@ -85,8 +89,8 @@ connect the MCP process to Studio's displayed endpoint as described in
 ```
 
 Call `agent_onboard` first for the current revision, supported operations,
-and examples. ARK exposes 30 MCP tools, including `kernel_info`,
-`native_inspect`, `step_inspect`, and `import_sheet_step`. `doc_apply` batches
+and examples. ARK exposes 33 MCP tools, including `kernel_info`,
+`reference_inspect`, `sketch_diagnose`, `sheet_preview`, and `import_sheet_step`. `doc_apply` batches
 edits atomically and rejects stale revisions. The [agent protocol](docs/AGENTS.md)
 describes the command and validation contracts. The in-app assistant uses a
 separately configured Responses-compatible service; modeling, Studio, and MCP
@@ -95,20 +99,19 @@ do not require API credentials.
 ## Geometry boundary
 
 The earlier custom C++ primitive, expression-surface, mesh, and assembly paths
-remain available. OCCT 8.0.1 supplies exact B-reps for the new loft, filling,
-NURBS, thickening, sheet, source import, and STEP operations. A viewport mesh
-is a tessellated preview, not the STEP authority. Native surfaces and sheets
-cannot be silently routed through the legacy approximate transform, Boolean,
-or sketch-cut operations; use parameter changes, construction planes, and
-assembly placement where supported.
+remain available. OCCT 8.0.1 supplies exact B-reps for supported native
+solids, lofting, filling, NURBS, thickening, sheets, source import, and STEP
+operations. A viewport mesh is a tessellated preview, not the STEP authority.
+Native exact bodies use supported native operations and cannot be silently
+routed through legacy approximate mesh operations.
 
 Sheet flat length uses the caller's declared K factor. It does not infer a
 material calibration or certify forming. A non-midwall K factor can produce a
 modeled formed/flat volume difference, reported explicitly. Native B-rep
 validity, source refold checks, and source hashes are geometric evidence, not
 manufacturing qualification. General exact B-rep support for every legacy
-feature, fillets, arbitrary multi-bend sheet unfolding, and a production
-constraint solver are outside this release.
+feature, arbitrary multi-bend sheet unfolding, and manufacturing constraint
+certification are outside this release.
 
 All current production code and test programs are C++; no Python runtime or
 test gate is required. Run `scripts/build.ps1 -Test` for the native CTest set.
@@ -118,3 +121,34 @@ needed by Studio; a headless CTest result does not establish UI rendering.
 See
 [validation](docs/VALIDATION.md), [file formats](docs/FORMATS.md), and the
 [engineering assessment](docs/ASSESSMENT.md).
+
+## Reproducible 0.9 demonstrations
+
+Open the authored drone directly:
+
+```powershell
+.\start-studio.ps1 -Document .\examples\drone-hull.ark
+```
+
+It contains a spline hull, real electronics holes and strap slots, shared motor
+arms, four motors and a lofted/thickened inspection canopy. The canopy is shown
+lifted; this is a modeling demonstration, not a qualified flight design. The
+[replay](examples/drone-hull.arkops) uses the same public agent commands as Studio.
+The [wider open variant](examples/drone-hull-wide-open.ark) changes width and hole
+pitch and hides the canopy so the internal geometry is visible.
+
+[Hull STEP](examples/drone-hull.step) and [canopy STEP](examples/drone-canopy.step)
+are exact local part definitions; they are not a STEP assembly of every instance.
+Their readback differences and test evidence are recorded in
+[verification-0.9.json](docs/verification-0.9.json).
+
+```powershell
+.\start-studio.ps1 -Document .\examples\sheet-flange-tree.ark
+```
+
+The sheet sample has a base, three signed flanges and two panel-owned openings.
+Use **Flat / Formed / Play**, or edit its flange and opening forms. Its exact
+[flat](examples/sheet-flange-tree-flat.step) and
+[formed](examples/sheet-flange-tree-formed.step) STEP files are included.
+
+![Wider hull with the canopy hidden](docs/drone-hull-open.png)

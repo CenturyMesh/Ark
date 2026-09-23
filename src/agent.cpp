@@ -9,6 +9,10 @@
 #include "ark/onboarding.hpp"
 #include "ark/native_backend.hpp"
 #include "ark/native_features.hpp"
+#include "ark/references.hpp"
+#include "ark/assembly_io.hpp"
+#include "ark/sheet_commands.hpp"
+#include "ark/sheet_preview.hpp"
 #include <stdexcept>
 #include <set>
 #include <map>
@@ -38,17 +42,18 @@ void editNode(AssemblyNode& n,const V& j){
     if(auto p=j.find("parent"))n.parent=p->t==V::Num&&p->num==0?0:id(*p);
     if(auto p=j.find("feature"))n.feature=p->t==V::Num&&p->num==0?0:id(*p);
     if(auto p=j.find("visible")){if(p->t!=V::Bool)throw std::runtime_error("visible must be boolean");n.visible=p->b;}
+    if(auto p=j.find("fixed")){if(p->t!=V::Bool)throw std::runtime_error("fixed must be boolean");n.fixed=p->b;}
     if(j.find("name"))n.name=str(j,"name");
     if(auto p=j.find("p")){if(p->t!=V::Obj)throw std::runtime_error("p must be object");for(auto& kv:p->obj)n.p[kv.first]=expression(kv.second);}
 }
 V result(V data,bool error=false){V r=V::makeObj(),content=V::makeArr(),item=V::makeObj();item.set("type",V::makeStr("text"));item.set("text",V::makeStr(data.dump()));content.arr.push_back(item);r.set("content",content);r.set("structuredContent",data);r.set("isError",V::makeBool(error));return r;}
 void validated(Document& d){
     if(d.features.size()>1024||d.params.size()>256||d.sketches.size()>64||d.planes.size()>128)throw std::runtime_error("Document capacity exceeded");
-    std::vector<AssemblyPlacement> placements;std::string error;if(!resolveAssembly(d,placements,error))throw std::runtime_error(error);
     d.recompute();
     if(!d.parameterError.empty())throw std::runtime_error(d.parameterError);
     for(auto& r:d.lastResults)if(!r.ok)throw std::runtime_error("Feature #"+std::to_string(r.id)+": "+r.error);
     for(auto& sk:d.sketches)if(!sk.error.empty()||!std::isfinite(sk.residual)||sk.residual>1e-6)throw std::runtime_error("Sketch '"+sk.name+"': "+sk.error);
+    std::vector<AssemblyPlacement> placements;std::string error;if(!resolveAssembly(d,placements,error))throw std::runtime_error(error);
 }
 std::set<u64> consumed(const Document& d){std::set<u64> out;for(auto& f:d.features)for(auto x:f.inputs)out.insert(x);return out;}
 Mesh selectedMesh(Document& d,const V& args){
@@ -100,7 +105,7 @@ V AgentSession::call(const std::string& tool,const V& args){
         if(tool=="agent_onboard")return result(agentOnboard(*this,args));
         if(tool=="doc_get"){V r=info(),j;arkjson::parse(documentToJson(document),j);r.set("document",j);return result(r);}
         if(tool=="plane_inspect"){
-            auto name=str(args,"name");auto frame=resolvePlane(document,name);V r=V::makeObj(),matrix=V::makeArr();for(auto x:frame.m)matrix.arr.push_back(V::makeNum(x));r.set("name",V::makeStr(name));r.set("world_column_major",matrix);return result(r);
+            auto name=str(args,"name");auto frame=resolvePlane(document,name);V r=V::makeObj(),matrix=V::makeArr(),axes=V::makeObj();for(auto x:frame.m)matrix.arr.push_back(V::makeNum(x));r.set("name",V::makeStr(name));r.set("world_column_major",matrix);r.set("kind",V::makeStr("plane"));for(auto& p:document.planes)if(p.name==name)r.set("kind",V::makeStr(p.kind));for(int i=0;i<3;++i){V direction=V::makeArr();for(int j=0;j<3;++j)direction.arr.push_back(V::makeNum(frame.m[4*i+j]));axes.set(name+"."+std::string(1,"XYZ"[i]),direction);}r.set("named_axes",axes);return result(r);
         }
         if(tool=="sketch_inspect"){
             auto* sk=document.findSketch(str(args,"name"));if(!sk)throw std::runtime_error("Sketch not found");bool samples=false;if(auto p=args.find("samples")){if(p->t!=V::Bool)throw std::runtime_error("samples must be boolean");samples=p->b;}return result(inspectSketch(document,*sk,samples));
@@ -110,7 +115,23 @@ V AgentSession::call(const std::string& tool,const V& args){
             if(!ok)throw std::runtime_error("Invalid mathematical expression");
             V r=V::makeObj();r.set("value",V::makeNum(v));return result(r);
         }
+        if(tool=="sketch_diagnose"){
+            NamedSketch scratch;std::string error;
+            if(auto source=args.find("sketch")){if(!sketchFromJson(source->dump(),scratch.sk,&error))throw std::runtime_error(error);}
+            else{auto sk=document.findSketch(str(args,"name"));if(!sk)throw std::runtime_error("Sketch not found");scratch.sk=sk->sk;}
+            evaluateSketch(scratch,document.buildEnv());auto r=diagnoseSketch(scratch.sk);r.set("error",V::makeStr(scratch.error));r.set("revision",V::makeNum((double)revision));return result(r);
+        }
+        if(tool=="reference_inspect"){
+            const auto feature=id(field(args,"id"));ensureNativeBody(document,feature,document.evalBodies);
+            V r=V::makeObj();for(auto& b:document.evalBodies)if(b.id==feature)if(auto topology=b.nativeData.find("topology"))r.set("topology",*topology);
+            if(args.find("reference")){double fraction=.5;if(auto p=args.find("fraction")){if(p->t!=V::Num)throw std::runtime_error("fraction must be numeric");fraction=p->num;}auto ref=resolveGeometryReference(document,feature,str(args,"reference"),fraction);V matrix=V::makeArr();for(auto x:ref.frame.m)matrix.arr.push_back(V::makeNum(x));r.set("world_column_major",matrix);r.set("kind",V::makeStr(ref.kind));}
+            r.set("id",V::makeNum((double)feature));r.set("revision",V::makeNum((double)revision));return result(r);
+        }
         if(tool=="kernel_info")return result(nativeKernelInfo());
+        if(tool=="sheet_preview"){
+            const auto selected=id(field(args,"id"));const auto& progress=field(args,"progress");if(progress.t!=V::Num)throw std::runtime_error("progress must be numeric");
+            for(auto& body:document.evalBodies)if(body.id==selected){auto preview=buildSheetPreview(body.nativeData,progress.num);V r=V::makeObj(),poses=V::makeArr();for(auto& pose:preview.poses){V m=V::makeArr();for(auto x:pose.m)m.arr.push_back(V::makeNum(x));poses.arr.push_back(m);}r.set("panel_poses",poses);r.set("display_only",V::makeBool(true));r.set("trajectory_collision_checked",V::makeBool(false));r.set("revision",V::makeNum((double)revision));return result(r);}throw std::runtime_error("Authored sheet not found");
+        }
         if(tool=="step_inspect"){
             V request=V::makeObj();request.set("operation",V::makeStr("step_inspect"));request.set("path",V::makeStr(absolutePath(str(args,"path"))));
             if(auto p=args.find("faces")){if(p->t!=V::Bool)throw std::runtime_error("faces must be boolean");request.set("faces",*p);}return result(nativeWorkerRequest(request));
@@ -118,11 +139,13 @@ V AgentSession::call(const std::string& tool,const V& args){
         if(tool=="native_inspect"){
             u64 selected=id(field(args,"id"));
             auto* feature=document.find(selected);
-            if(!feature||!isNativeFeature(feature->type))throw std::runtime_error("Select a native modeling feature");
+            if(!feature)throw std::runtime_error("Select a modeling feature");
+            ensureNativeBody(document,selected,document.evalBodies);
             for(const Body& body:document.evalBodies)if(body.id==selected){
                 V r=V::makeObj();r.set("id",V::makeNum((double)selected));
                 if(auto report=body.nativeData.find("report"))r.set("report",*report);
                 if(auto holes=body.nativeData.find("holes"))r.set("holes",*holes);
+                for(auto key:{"panels","bends","topology"})if(auto data=body.nativeData.find(key))r.set(key,*data);
                 r.set("read_only_geometry",V::makeBool(feature->type==FeatureType::SourceSheet));
                 r.set("has_flat",V::makeBool(body.nativeData.find("flat_brep_base64")!=nullptr));
                 return result(r);
@@ -195,13 +218,13 @@ V AgentSession::call(const std::string& tool,const V& args){
             return result(benchmarkCompute(count));
         }
         if(tool=="assembly_info"){
-            std::vector<AssemblyPlacement> placements;std::string error;if(!resolveAssembly(document,placements,error))throw std::runtime_error(error);
+            std::vector<AssemblyPlacement> placements;std::string error;AssemblyDiagnostics diagnostics;if(!resolveAssembly(document,placements,error,&diagnostics))throw std::runtime_error(error);
             V r=info(),nodes=V::makeArr(),bom=V::makeArr();std::map<u64,size_t> quantities;
             for(auto& p:placements){V j=V::makeObj(),matrix=V::makeArr();j.set("node",V::makeNum((double)p.node));j.set("feature",V::makeNum((double)p.feature));j.set("name",V::makeStr(p.name));j.set("visible",V::makeBool(p.visible));
                 for(auto x:p.world.m)matrix.arr.push_back(V::makeNum(x));
                 j.set("world_column_major",matrix);nodes.arr.push_back(j);++quantities[p.feature];}
             for(auto& kv:quantities){V j=V::makeObj();j.set("feature",V::makeNum((double)kv.first));j.set("name",V::makeStr(document.find(kv.first)->name));j.set("quantity",V::makeNum(kv.second));bom.arr.push_back(j);}
-            r.set("instances",nodes);r.set("bom",bom);r.set("mates_solved",V::makeBool(false));return result(r);
+            r.set("instances",nodes);r.set("bom",bom);r.set("mates_solved",V::makeBool(!document.mates.empty()));r.set("diagnostics",assemblyDiagnosticsJson(diagnostics));V mates=V::makeArr();for(auto& m:document.mates)mates.arr.push_back(mateToJson(m));r.set("mates",mates);return result(r);
         }
         if(tool=="tube_inspect"){
             auto* f=document.find(id(field(args,"id")));if(!f||f->type!=FeatureType::Tube)throw std::runtime_error("Tube feature not found");
@@ -219,10 +242,11 @@ V AgentSession::call(const std::string& tool,const V& args){
             if(commands.t!=V::Arr||commands.arr.empty()||commands.arr.size()>128)throw std::runtime_error("commands must contain 1..128 operations");
             Document next;std::string error;
             if(!documentFromJson(documentToJson(document),next,&error))throw std::runtime_error(error);
-            V created=V::makeArr(),createdNodes=V::makeArr();
+            V created=V::makeArr(),createdNodes=V::makeArr(),createdMates=V::makeArr(),sheetEdits=V::makeArr();
             for(auto& c:commands.arr){
                 auto op=str(c,"op");
                 if(op=="param.set")next.setParam(str(c,"name"),expression(field(c,"expr")));
+                else if(op.rfind("sheet.",0)==0){auto edited=applySheetCommand(next,c);if(op=="sheet.create")created.arr.push_back(*edited.find("feature_id"));sheetEdits.arr.push_back(edited);}
                 else if(op=="plane.set"||op=="plane.remove"){
                     auto name=str(c,"name");if(name=="XY"||name=="XZ"||name=="YZ"||name.size()>128)throw std::runtime_error("Built-in planes are immutable; custom names must be 1..128 characters");
                     auto it=std::find_if(next.planes.begin(),next.planes.end(),[&](const DatumPlane& p){return p.name==name;});
@@ -230,6 +254,8 @@ V AgentSession::call(const std::string& tool,const V& args){
                     else{
                         if(it==next.planes.end()){next.planes.push_back({name});it=next.planes.end()-1;}
                         if(c.find("parent"))it->parent=str(c,"parent");
+                        if(c.find("kind"))it->kind=str(c,"kind");
+                        if(auto support=c.find("support")){if(support->t!=V::Obj&&support->t!=V::Null)throw std::runtime_error("Datum support must be object or null");it->support=*support;}
                         if(auto p=c.find("p")){if(p->t!=V::Obj)throw std::runtime_error("plane p must be object");for(auto& kv:p->obj)it->p[kv.first]=expression(kv.second);}
                     }
                 }
@@ -273,6 +299,12 @@ V AgentSession::call(const std::string& tool,const V& args){
                 else if(op=="assembly.add"){
                     AssemblyNode n;n.id=next.nextAssemblyId_++;n.name="Component";editNode(n,c);next.assembly.push_back(n);createdNodes.arr.push_back(V::makeNum((double)n.id));
                 }
+                else if(op=="mate.add"){
+                    if(next.mates.size()>=256)throw std::runtime_error("Assembly mate capacity exceeded");AssemblyMate m;m.id=next.nextMateId_++;editMate(m,c);next.mates.push_back(m);createdMates.arr.push_back(V::makeNum((double)m.id));
+                }
+                else if(op=="mate.edit"||op=="mate.remove"){
+                    auto key=id(field(c,"id"));auto it=std::find_if(next.mates.begin(),next.mates.end(),[&](const AssemblyMate& m){return m.id==key;});if(it==next.mates.end())throw std::runtime_error("Mate not found");if(op=="mate.edit")editMate(*it,c);else next.mates.erase(it);
+                }
                 else if(op=="assembly.edit"||op=="assembly.remove"){
                     u64 key=id(field(c,"id"));auto it=std::find_if(next.assembly.begin(),next.assembly.end(),[&](const AssemblyNode& n){return n.id==key;});
                     if(it==next.assembly.end())throw std::runtime_error("Assembly node not found");
@@ -282,7 +314,7 @@ V AgentSession::call(const std::string& tool,const V& args){
             }
             validated(next); // one evaluation for the entire batch, commit only on success
             remember();document=std::move(next);++revision;
-            V r=info();r.set("created_ids",created);r.set("created_node_ids",createdNodes);return result(r);
+            V r=info();r.set("created_ids",created);r.set("created_node_ids",createdNodes);r.set("created_mate_ids",createdMates);r.set("sheet_edits",sheetEdits);return result(r);
         }
         if(tool=="doc_undo"||tool=="doc_redo"){
             auto& source=tool=="doc_undo"?undo_:redo_;auto& destination=tool=="doc_undo"?redo_:undo_;
@@ -335,20 +367,23 @@ V AgentSession::call(const std::string& tool,const V& args){
 V AgentSession::tools(){
     struct Def{const char* name;const char* desc;const char* schema;bool read;};
     const Def defs[]={
-        {"agent_onboard","START HERE. Discover current document/revision, supported modeling workflows, expression-driven splines, examples and validation limits. Read-only; choose a topic before modeling.",R"({"type":"object","properties":{"topic":{"type":"string","enum":["overview","sketch","tube","assembly","surfacing","sheet"]}}})",true},
+        {"agent_onboard","START HERE. Discover current document/revision, supported modeling workflows, expression-driven splines, examples and validation limits. Read-only; choose a topic before modeling.",R"({"type":"object","properties":{"topic":{"type":"string","enum":["overview","sketch","tube","assembly","surfacing","sheet","solids"]}}})",true},
         {"doc_info","Compact document summary with revision and stable feature IDs.",R"({"type":"object"})",true},
         {"doc_new","Start an empty document only when requested. Clears the active model with undo and a monotonically increasing revision; does not overwrite saved files.",R"({"type":"object","properties":{"expected_revision":{"type":"integer","minimum":0}},"required":["expected_revision"]})",false},
         {"doc_get","Read full parametric document, including expressions and revision.",R"({"type":"object"})",true},
-        {"doc_apply","Atomic batch; evaluate once, roll back on any failure. Operations: param.set{name,expr}, feature.add{type,name,p,native,inputs,mode}, feature.edit{id,p,native,name}, feature.remove{id}, plane.set{name,parent,p:{ox,oy,oz,rx,ry,rz}}, plane.remove{name}, sketch.set{name,sketch:{plane,tolerance,entities,constraints}}, sketch.entity.set{name,entity}, sketch.remove{name}, assembly.add{name,parent,feature,p,visible}, assembly.edit{id,parent,feature,p,visible}, assembly.remove{id}. feature=0 is a group; placements are rigid tx/ty/tz/rx/ry/rz. Tube feature accepts p{section:round|rect,od,width,height,wall,tail,chord_tol,sides} plus bends:[{feed,radius,angle,roll}] in mm/degrees. Sketch entities: kind point|line|circle|spline, optional unique name, dof numbers or expression strings (strings are driven), construction. Spline dof is 2..64 XY anchor pairs flattened; closed wraps without repeated first point, tension 0..1. Constraints val/val2 accept expressions. Entity edits replace one named entity. Native feature types: loft{native:{sections:[sketch names]},p:{solid,ruled,max_degree?}}, surface_fill{p:{sketch} or native:{profile}}, bspline_surface{native:{poles,weights?},p:{u_degree,v_degree}}, thicken{inputs:[native surface],p:{thickness}}, sheet_metal{p:{width,leg_a,leg_b,thickness,inner_radius,angle,k_factor},native:{openings?}}. Feature types: sketch_cut{inputs:[base],p:{sketch,depth,offset}}, notched_tube{p:{width_mm,height_mm,wall_mm,length_mm,hinge_offset_mm},notches:[{station,angle,face:bottom|top|left|right}]}, tube, box{dx,dy,dz}, cylinder{r,h}, sphere{r}, cone{rb,rt,h}, torus{R,r}, extrude{shape,w,d,height,sketch}, revolve{shape,w,d,angle,sketch}, transform{tx,ty,tz,rx,ry,rz}, boolean{mode:0 union/1 cut/2 intersect}, pattern{count,dx,dy,dz}, surface{x,y,z,u0,u1,v0,v1,nu,nv,wrap_u,wrap_v}. Geometry parameters belong in p and accept math expressions. Transforms/patterns take one input, booleans two. Use expected_revision to reject stale writes. Angles in degrees except trig expressions in radians. Surface coordinates use u,v; periodic seams are checked.",R"({"type":"object","properties":{"expected_revision":{"type":"integer","minimum":0},"commands":{"type":"array","minItems":1,"maxItems":128,"items":{"type":"object","properties":{"op":{"type":"string","enum":["param.set","feature.add","feature.edit","feature.remove","sketch.set","sketch.entity.set","sketch.remove","plane.set","plane.remove","assembly.add","assembly.edit","assembly.remove"]}},"required":["op"]}}},"required":["commands"]})",false},
+        {"doc_apply","Atomic batch; evaluate once, roll back on any failure. Operations: param.set{name,expr}, feature.add{type,name,p,native,inputs,mode}, feature.edit{id,p,native,name}, feature.remove{id}, plane.set{name,parent,p:{ox,oy,oz,rx,ry,rz},support?:{kind:face|midplane|normal_to_curve|tube_path,feature,reference,second_feature?,second_reference?,fraction?,station?}}, plane.remove{name}, sketch.set{name,sketch:{plane,tolerance,entities,constraints}}, sketch.entity.set{name,entity}, sketch.remove{name}, assembly.add{name,parent,feature,p,visible}, assembly.edit{id,parent,feature,p,visible}, assembly.remove{id}. feature=0 is a group; placements are rigid tx/ty/tz/rx/ry/rz. Tube feature accepts p{section:round|rect,od,width,height,wall,tail,chord_tol,sides} plus bends:[{feed,radius,angle,roll}] in mm/degrees. Sketch entities: kind point|line|circle|spline, optional unique name, dof numbers or expression strings (strings are driven), construction. Spline dof is 2..64 XY anchor pairs flattened; closed wraps without repeated first point, tension 0..1. Constraints val/val2 accept expressions. Entity edits replace one named entity. Mates: mate.add{a,b,type,reference_a,reference_b,value}, mate.edit{id,...}, mate.remove{id}; ground instances with assembly.edit{id,fixed:true}. Sheet edits: sheet.create{name,p:{width,thickness,k_factor},base:{id,length}}, sheet.base.edit{id,values}, sheet.flange.add{id,flange:{id?,parent,edge:u_min|u_max|v_min|v_max,length,width?,offset?,inner_radius,angle,k_factor?}}, sheet.opening.add{id,opening:{id?,panel,kind:circle|polygon,x,y,radius,points}}, sheet.flange.edit/sheet.opening.edit{id,entity,values}, sheet.flange.remove/sheet.opening.remove{id,entity,cascade?}. Local expressions: panel_length/panel_width/thickness in openings, parent_length/parent_width/edge_length/thickness in flanges. Native feature types: native_solid{native:{op:box|cylinder|sphere|cone|torus|extrude|union|cut|common|hole|fillet|chamfer|transform,...},inputs,p} exact ops; loft{native:{sections:[sketch names]},p:{solid,ruled,max_degree?}}, surface_fill{p:{sketch} or native:{profile}}, bspline_surface{native:{poles,weights?},p:{u_degree,v_degree}}, thicken{inputs:[native surface],p:{thickness}}, sheet_metal{p:{width,leg_a,leg_b,thickness,inner_radius,angle,k_factor},native:{openings?}}. Feature types: sketch_cut{inputs:[base],p:{sketch,depth,offset}}, notched_tube{p:{width_mm,height_mm,wall_mm,length_mm,hinge_offset_mm},notches:[{station,angle,face:bottom|top|left|right}]}, tube, box{dx,dy,dz}, cylinder{r,h}, sphere{r}, cone{rb,rt,h}, torus{R,r}, extrude{shape,w,d,height,sketch}, revolve{shape,w,d,angle,sketch}, transform{tx,ty,tz,rx,ry,rz}, boolean{mode:0 union/1 cut/2 intersect}, pattern{count,dx,dy,dz}, surface{x,y,z,u0,u1,v0,v1,nu,nv,wrap_u,wrap_v}. Geometry parameters belong in p and accept math expressions. Transforms/patterns take one input, booleans two. Use expected_revision to reject stale writes. Angles in degrees except trig expressions in radians. Surface coordinates use u,v; periodic seams are checked.",R"({"type":"object","properties":{"expected_revision":{"type":"integer","minimum":0},"commands":{"type":"array","minItems":1,"maxItems":128,"items":{"type":"object","properties":{"op":{"type":"string","enum":["param.set","feature.add","feature.edit","feature.remove","sketch.set","sketch.entity.set","sketch.remove","plane.set","plane.remove","assembly.add","assembly.edit","assembly.remove","mate.add","mate.edit","mate.remove","sheet.create","sheet.base.edit","sheet.flange.add","sheet.flange.edit","sheet.flange.remove","sheet.opening.add","sheet.opening.edit","sheet.opening.remove"]}},"required":["op"]}}},"required":["commands"]})",false},
         {"plane_inspect","Read a named construction plane's world transform. Built-ins: XY, XZ (normal -Y), YZ (normal +X). Offsets/XYZ Euler rotations are relative to parent.",R"({"type":"object","properties":{"name":{"type":"string"}},"required":["name"]})",true},
         {"sketch_inspect","Read resolved sketch coordinates, local constraint rank/remaining DOFs, profile readiness and sampling counts. Optional samples:true includes local/world polylines. Spline chord tolerance bounds curve approximation, not manufacturing accuracy.",R"({"type":"object","properties":{"name":{"type":"string"},"samples":{"type":"boolean"}},"required":["name"]})",true},
+        {"sketch_diagnose","Diagnose a named sketch or an uncommitted sketch candidate. Evaluates dimensions, attempts solve, reports each constraint residual and local rank/redundancy even if inconsistent. Does not mutate the document; no minimal conflict-set claim.",R"({"type":"object","properties":{"name":{"type":"string"},"sketch":{"type":"object"}},"oneOf":[{"required":["name"]},{"required":["sketch"]}]})",true},
+        {"reference_inspect","Discover exact producer semantic face/edge/axis names and resolve a selected reference frame. Derived B-rep cache may be materialized from analytic parameters; document/revision unchanged. Split, deleted, ambiguous or stale references fail; numeric topology indices are not persistent IDs.",R"({"type":"object","properties":{"id":{"type":"integer","minimum":1},"reference":{"type":"string"},"fraction":{"type":"number","minimum":0,"maximum":1}},"required":["id"]})",true},
+        {"sheet_preview","Read sequential flat-to-formed panel transforms for an authored sheet at progress 0..1. Display only; exact exports use explicit flat/formed B-reps. No trajectory or press-tool collision certification.",R"({"type":"object","properties":{"id":{"type":"integer","minimum":1},"progress":{"type":"number","minimum":0,"maximum":1}},"required":["id","progress"]})",true},
         {"doc_undo","Undo the previous committed transaction; revision increases.",R"({"type":"object"})",false},
         {"doc_redo","Redo a transaction after undo.",R"({"type":"object"})",false},
         {"eval_expr","Evaluate finite arithmetic and trigonometry with named parameters; trig uses radians, deg() converts degrees.",R"({"type":"object","properties":{"expr":{"type":"string"}},"required":["expr"]})",true},
         {"mesh_inspect","Compact indexed topology audit: bounds, area, edge counts, components and signed volume for closed oriented edges. Does not certify solids or detect self intersections. Omit id to inspect final outputs only.",R"({"type":"object","properties":{"node":{"type":"integer","minimum":1},"id":{"type":"integer","minimum":1}}})",true},
         {"mesh_get","Explicitly retrieve mesh positions and triangle indices; potentially large. Prefer mesh_inspect for reasoning.",R"({"type":"object","properties":{"node":{"type":"integer","minimum":1},"id":{"type":"integer","minimum":1}}})",true},
         {"mesh_raycast","Nearest triangle hit using a cached AABB hierarchy. Direction is normalized; distances in mm. Triangle IDs last for this tessellation/revision only.",R"({"type":"object","properties":{"id":{"type":"integer","minimum":1},"origin":{"type":"array","items":{"type":"number"},"minItems":3,"maxItems":3},"direction":{"type":"array","items":{"type":"number"},"minItems":3,"maxItems":3}},"required":["origin","direction"]})",true},
-        {"assembly_info","Hierarchy placements and BOM quantities by shared feature definition. Hidden instances remain in BOM. Rigid transforms, no mate solver.",R"({"type":"object"})",true},
+        {"assembly_info","Hierarchy placements and BOM quantities by shared feature definition. Hidden instances remain in BOM. Concentric, coincident/contact, signed distance and angle mates, grounded instances, local DOFs and residual diagnosis.",R"({"type":"object"})",true},
         {"tube_inspect","Ideal centerline length, section area and bend table. No springback, weld allowance or material compensation.",R"({"type":"object","properties":{"node":{"type":"integer","minimum":1},"id":{"type":"integer","minimum":1}},"required":["id"]})",true},
         {"source_inspect","Read source projection evidence and exact opening coordinates without large mesh buffers. Optional progress returns finite-hinge display transforms; source geometry stays read-only.",R"({"type":"object","properties":{"id":{"type":"integer","minimum":1},"progress":{"type":"number","minimum":0,"maximum":1}},"required":["id"]})",true},
         {"native_inspect","Read native feature validation, opening inventory, and flat availability without transmitting B-rep or mesh buffers.",R"({"type":"object","properties":{"id":{"type":"integer","minimum":1}},"required":["id"]})",true},
