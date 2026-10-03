@@ -77,7 +77,7 @@ The geometric checks do not cover the entire bend trajectory, springback,
 tool access or calibrated material behavior. The K factor is a declared
 design input. The read-only `sheet_preview{id,progress}` returns sequential
 flat-to-formed display transforms; it does not change authored geometry or
-the exact flat/formed export poses. The current API lists 33 tools.
+the exact flat/formed export poses. The current API lists 34 tools.
 
 ## Verification and release gates
 

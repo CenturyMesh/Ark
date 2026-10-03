@@ -90,6 +90,71 @@ void rejection(){
     auto slicedFace=frameRequest(sliced,"x_max");rejected(slicedFace,true);
     rejected(parse(R"({"op":"box","width":0,"depth":10,"height":5})"));
 }
+void finishingFeatures(){
+    const double pi=std::acos(-1.);
+    auto box=result(parse(R"({"op":"box","width":10,"depth":10,"height":5})"));
+    auto fillet=on("fillet",box);fillet.set("radius",Value::makeNum(0.5));fillet.set("edges",parse(R"(["edge.x.ymin.zmin"])"));
+    const double oneEdge=500-2.5*(1-pi/4);
+    close(volume(result(fillet)),oneEdge,1e-4,"single fillet volume");
+    auto convex=on("fillet",box);convex.set("radius",Value::makeNum(0.5));convex.set("selection",Value::makeStr("convex"));convex.set("min_angle",Value::makeNum(15));
+    const double allEdges=500-4*(10+10+5)*0.25*(1-pi/4)+8*0.125*(2-7*pi/12);
+    close(volume(result(convex)),allEdges,1e-3,"convex fillet volume");
+    auto chamfer=on("chamfer",box);chamfer.set("distance",Value::makeNum(0.5));chamfer.set("edges",parse(R"(["edge.x.ymin.zmin"])"));
+    close(volume(result(chamfer)),500-1.25,1e-4,"single chamfer volume");
+    auto pattern=on("linear_pattern",box);pattern.set("count",Value::makeNum(3));pattern.set("dx",Value::makeNum(20));pattern.set("fuse",Value::makeNum(0));
+    auto copies=result(pattern);
+    close(volume(copies),1500,1e-4,"disjoint linear pattern volume");
+    check(copies.find("report")->find("solids")->num==3,"linear pattern keeps three solids");
+    auto placed=on("transform",box);placed.set("frame",parse(R"([1,0,0,0,0,1,0,0,0,0,1,0,5,5,2,1])"));
+    auto interior=result(placed);auto pair=on("linear_pattern",interior);pair.set("count",Value::makeNum(2));pair.set("dx",Value::makeNum(15));pair.set("fuse",Value::makeNum(0));
+    auto tools=result(pair);auto cover=result(parse(R"({"op":"box","width":40,"depth":20,"height":15})"));
+    auto cut=on("cut",cover);cut.set("tool_brep",*tools.find("brep_base64"));cut.set("tool_topology",*tools.find("topology"));
+    close(volume(result(cut)),12000-1000,1e-3,"compound pattern cuts one solid");
+    auto moved=on("transform",result(parse(R"({"op":"cylinder","radius":1,"height":2})")));
+    moved.set("frame",parse(R"([1,0,0,0,0,1,0,0,0,0,1,0,20,0,0,1])"));
+    auto orbit=result(moved);auto circular=on("circular_pattern",orbit);circular.set("count",Value::makeNum(4));circular.set("step",Value::makeNum(90));circular.set("axis",Value::makeStr("Z"));circular.set("fuse",Value::makeNum(0));
+    auto ring=result(circular);close(volume(ring),8*pi,1e-4,"circular pattern volume");check(ring.find("report")->find("solids")->num==4,"circular pattern count");
+    auto mesh=box.find("mesh");check(mesh&&mesh->find("face_spans")&&mesh->find("face_spans")->arr.size()==6,"box publishes six face spans");
+    auto edgePolylines=mesh->find("edges");check(edgePolylines&&!edgePolylines->arr.empty(),"box publishes edge polylines");
+    int namedEdges=0;bool classified=false;
+    for(const auto& row:box.find("topology")->find("references")->arr){if(row.find("kind")->str!="edge"||row.find("status")->str!="bound")continue;
+        int index=(int)row.find("indices")->arr[0].num;check(index>=0&&index<(int)edgePolylines->arr.size(),"named edge index addresses a polyline");
+        const auto& poly=edgePolylines->arr[(size_t)index];check(poly.arr.size()>=6&&poly.arr.size()%3==0,"edge polyline has points");
+        if(row.find("name")->str=="edge.x.ymin.zmin"){classified=true;auto coord=[&](int point,int axis){return poly.arr[(size_t)(point*3+axis)].num;};int last=(int)poly.arr.size()/3-1;
+            bool forward=std::abs(coord(0,0))<1e-6&&std::abs(coord(0,1))<1e-6&&std::abs(coord(0,2))<1e-6&&std::abs(coord(last,0)-10)<1e-6&&std::abs(coord(last,1))<1e-6&&std::abs(coord(last,2))<1e-6;
+            bool reverse=std::abs(coord(last,0))<1e-6&&std::abs(coord(last,1))<1e-6&&std::abs(coord(last,2))<1e-6&&std::abs(coord(0,0)-10)<1e-6&&std::abs(coord(0,1))<1e-6&&std::abs(coord(0,2))<1e-6;
+            check(forward||reverse,"classified edge follows the box corner");}
+        ++namedEdges;}
+    check(namedEdges==12&&classified,"box publishes twelve named edges");
+    int triangles=0;for(const auto& span:mesh->find("face_spans")->arr)triangles+=(int)span.arr[1].num;
+    check(triangles*3==(int)mesh->find("idx")->arr.size(),"face spans cover the display mesh");
+    auto mirror=on("mirror",box);mirror.set("plane",Value::makeStr("YZ"));mirror.set("fuse",Value::makeNum(0));
+    auto mirrored=result(mirror);close(volume(mirrored),1000,1e-4,"mirror volume");check(mirrored.find("report")->find("solids")->num==2,"mirror keeps both solids");
+    auto faceMirror=on("mirror",box);faceMirror.set("face",Value::makeStr("z_max"));faceMirror.set("fuse",Value::makeNum(0));
+    auto acrossFace=result(faceMirror);close(volume(acrossFace),1000,1e-4,"planar face mirror volume");
+    check(acrossFace.find("report")->find("solids")->num==2,"face mirror keeps both solids");
+    close(acrossFace.find("report")->find("bounds_mm")->arr[5].num,10,1e-4,"face mirror reaches the reflected top");
+    auto offset=on("mirror",box);offset.set("normal",parse("[0,0,1]"));offset.set("origin",parse("[0,0,20]"));offset.set("fuse",Value::makeNum(0));
+    auto raised=result(offset);close(volume(raised),1000,1e-4,"offset plane mirror volume");
+    close(raised.find("report")->find("bounds_mm")->arr[5].num,40,1e-3,"offset mirror reaches z 40");
+    close(raised.find("report")->find("bounds_mm")->arr[2].num,0,1e-4,"offset mirror keeps the seed");
+    auto cube=result(parse(R"({"op":"box","width":10,"depth":10,"height":10})"));
+    auto draft=on("draft",cube);draft.set("angle",Value::makeNum(5));draft.set("direction",Value::makeStr("Z"));draft.set("neutral",Value::makeStr("XY"));draft.set("faces",parse(R"(["x_max"])"));
+    close(volume(result(draft)),1000-500*std::tan(5*pi/180),1e-3,"drafted face volume");
+    auto curved=result(parse(R"({"op":"extrude","depth":2,"profile":{"entities":[
+      {"kind":"bezier","name":"leading","points":[[0,0],[3,-1],[7,-1],[10,0]]},
+      {"kind":"line","name":"right","points":[[10,0],[10,5]]},
+      {"kind":"line","name":"trailing","points":[[10,5],[0,5]]},
+      {"kind":"line","name":"left","points":[[0,5],[0,0]]}
+    ]}})"));
+    auto freeform=on("draft",curved);freeform.set("angle",Value::makeNum(5));freeform.set("direction",Value::makeStr("Z"));freeform.set("neutral",Value::makeStr("XY"));freeform.set("faces",parse(R"(["side.leading"])"));
+    rejected(freeform);
+    auto curvedMirror=on("mirror",curved);curvedMirror.set("face",Value::makeStr("side.leading"));curvedMirror.set("fuse",Value::makeNum(0));
+    rejected(curvedMirror);
+    auto steep=on("fillet",box);steep.set("selection",Value::makeStr("sharp"));steep.set("min_angle",Value::makeNum(179));steep.set("radius",Value::makeNum(0.2));
+    rejected(steep);
+}
+
 void repeatedUnionNamespaces(){
     auto housing=result(parse(R"({"op":"cylinder","radius":11,"height":15})"));
     auto bell=result(parse(R"({"op":"cylinder","radius":13,"height":8})"));
@@ -126,4 +191,4 @@ void repeatedUnionNamespaces(){
     check(ordinal,"direct worker union namespace determinism");
 }
 }
-int main(){try{primitivesAndNames();operations();rejection();repeatedUnionNamespaces();std::cout<<"native solid tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(){try{primitivesAndNames();operations();rejection();finishingFeatures();repeatedUnionNamespaces();std::cout<<"native solid tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

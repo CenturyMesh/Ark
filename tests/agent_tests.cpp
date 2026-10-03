@@ -41,7 +41,8 @@ int main(){
     AgentSession loaded;CHECK(!failed(loaded.call("doc_load",json(R"({"path":".test_roundtrip.ark"})"))));
     CHECK(documentToJson(loaded.document)==documentToJson(s.document));std::remove(".test_roundtrip.ark");
     std::string error;Document invalid;
-    CHECK(!documentFromJson(R"({"version":9,"features":[]})",invalid,&error));
+    CHECK(documentFromJson(R"({"version":9,"features":[]})",invalid,&error));
+    CHECK(!documentFromJson(R"({"version":10,"features":[]})",invalid,&error));
     CHECK(!documentFromJson(R"({"features":[{"id":1,"type":"box"},{"id":1,"type":"sphere"}]})",invalid,&error));
     Sketch sketch;
     CHECK(!sketchFromJson(R"({"entities":[{"kind":"line","dof":[1]}]})",sketch,&error));
@@ -72,6 +73,6 @@ int main(){
     auto rendered=renderSnapshot(cube,320,240,camera),background=renderSnapshot({},320,240,camera);
     size_t foreground=0;for(size_t i=0;i<rendered.px.size();i+=3)if(rendered.px[i]!=background.px[i]||rendered.px[i+1]!=background.px[i+1]||rendered.px[i+2]!=background.px[i+2])++foreground;
     CHECK(foreground>500&&foreground<20000); // Projection must not fill the frame.
-    CHECK(AgentSession::tools().arr.size()==33);
+    CHECK(AgentSession::tools().arr.size()==34);
     std::cout<<checks<<" checks / "<<failures<<" failures\n";return failures?1:0;
 }

@@ -84,7 +84,19 @@ V profileFromSketch(Document& document, const std::string& name) {
         }
         ++entityIndex;
     }
-    if (entities.arr.empty()) throw std::runtime_error("Native sketch has no profile edges");
+    if (entities.arr.empty()) {
+        const SketchEnt* only = nullptr;
+        int points = 0;
+        for (const SketchEnt& source : named->sk.ents) {
+            if (source.construction || source.kind != SketchEnt::Pnt) continue;
+            only = &source;
+            ++points;
+        }
+        if (points != 1 || !only || only->dof.size() < 2)
+            throw std::runtime_error("Native sketch has no profile edges");
+        profile.set("point", point({only->dof[0], only->dof[1]}));
+        return profile;
+    }
     profile.set("entities", std::move(entities));
     return profile;
 }
@@ -96,7 +108,7 @@ V numericNative(const V& value, const ExprEnv& env, const std::string& key = {})
         return value;
     }
     if (value.t == V::Str) {
-        if (key == "kind" || key == "sketch" || key == "name" || key == "op" || key == "reference" || key == "second_reference" || key == "mode" || key == "edges" || key == "plane") return value;
+        if (key == "kind" || key == "sketch" || key == "name" || key == "op" || key == "reference" || key == "second_reference" || key == "mode" || key == "edges" || key == "faces" || key == "face" || key == "plane" || key == "selection" || key == "direction" || key == "axis" || key == "neutral") return value;
         return V::makeNum(expressionValue(value.str, env));
     }
     if (value.t == V::Arr) {
@@ -111,6 +123,34 @@ V numericNative(const V& value, const ExprEnv& env, const std::string& key = {})
         return result;
     }
     return value;
+}
+
+V profileArgument(const Feature& feature, const ExprEnv& env, Document& document, const char* key) {
+    const V& value = required(feature.nativeSpec, key);
+    if (value.t == V::Str) {
+        if (value.str.empty()) throw std::runtime_error(std::string(key) + " sketch name is empty");
+        return profileFromSketch(document, value.str);
+    }
+    if (value.t == V::Obj) return numericNative(value, env);
+    throw std::runtime_error(std::string(key) + " must be a sketch name or a profile object");
+}
+
+bool bitParam(const Feature& feature, const ExprEnv& env, const char* key, double fallback) {
+    const double value = feature.p.count(key) ? param(feature, env, key) : fallback;
+    if (value != 0.0 && value != 1.0) throw std::runtime_error(std::string(key) + " must be 0 or 1");
+    return value == 1.0;
+}
+
+const Body* precedingBody(const std::vector<Body>& preceding, u64 id) {
+    for (const Body& body : preceding) if (body.id == id) return &body;
+    return nullptr;
+}
+
+V brepOf(const Body& body, const char* what) {
+    const V* brep = body.nativeData.find("brep_base64");
+    if (!brep || brep->t != V::Str || brep->str.empty())
+        throw std::runtime_error(std::string(what) + " has no native B-rep");
+    return *brep;
 }
 
 V surfaceRequest(const Feature& feature, const ExprEnv& env, Document& document,
@@ -134,6 +174,14 @@ V surfaceRequest(const Feature& feature, const ExprEnv& env, Document& document,
         request.set("solid", V::makeBool(solid == 1));
         request.set("ruled", V::makeBool(ruled == 1));
         if (feature.p.count("max_degree")) request.set("max_degree", V::makeNum(param(feature, env, "max_degree")));
+        if (feature.p.count("smooth")) request.set("smooth", V::makeBool(bitParam(feature, env, "smooth", 0)));
+        if (feature.p.count("compatible")) request.set("compatible", V::makeBool(bitParam(feature, env, "compatible", 0)));
+        if (feature.p.count("continuity")) {
+            const double continuity = param(feature, env, "continuity");
+            if (continuity != 0 && continuity != 1 && continuity != 2)
+                throw std::runtime_error("Loft continuity must be 0, 1, or 2");
+            request.set("continuity", V::makeNum(continuity));
+        }
     } else if (feature.type == FeatureType::SurfaceFill) {
         request.set("op", V::makeStr("surface_fill"));
         if (const V* profile = feature.nativeSpec.find("profile"))
@@ -156,6 +204,56 @@ V surfaceRequest(const Feature& feature, const ExprEnv& env, Document& document,
         if (brep.t != V::Str) throw std::runtime_error("Thicken input has no native B-rep");
         request.set("input_brep", brep);
         request.set("thickness", V::makeNum(param(feature, env, "thickness")));
+    } else if (feature.type == FeatureType::Sweep) {
+        request.set("op", V::makeStr("sweep"));
+        request.set("section", profileArgument(feature, env, document, "section"));
+        request.set("path", profileArgument(feature, env, document, "path"));
+        request.set("solid", V::makeBool(bitParam(feature, env, "solid", 0)));
+        request.set("correction", V::makeBool(bitParam(feature, env, "correction", 1)));
+        request.set("contact", V::makeBool(bitParam(feature, env, "contact", 0)));
+    } else if (feature.type == FeatureType::ExtrudeSurface || feature.type == FeatureType::RevolveSurface) {
+        const bool revolve = feature.type == FeatureType::RevolveSurface;
+        request.set("op", V::makeStr(revolve ? "revolve_surface" : "extrude_surface"));
+        if (const V* profile = feature.nativeSpec.find("profile")) request.set("profile", numericNative(*profile, env));
+        else request.set("profile", profileFromSketch(document, feature.get("sketch")));
+        request.set("solid", V::makeBool(bitParam(feature, env, "solid", 0)));
+        if (revolve) {
+            const double angle = param(feature, env, "angle");
+            if (!(angle > 0.0 && angle <= 360.0)) throw std::runtime_error("revolve angle must be in (0, 360] degrees");
+            request.set("angle", V::makeNum(angle));
+            std::string axis = "Y";
+            if (const V* authored = feature.nativeSpec.find("axis")) {
+                if (authored->t != V::Str || (authored->str != "X" && authored->str != "Y" && authored->str != "Z"))
+                    throw std::runtime_error("revolve axis must be X, Y or Z");
+                axis = authored->str;
+            }
+            request.set("axis", V::makeStr(axis));
+        } else {
+            const double distance = param(feature, env, "distance");
+            if (std::abs(distance) <= 1.0e-6) throw std::runtime_error("extrude distance must exceed 1e-6 mm");
+            request.set("distance", V::makeNum(distance));
+        }
+    } else if (feature.type == FeatureType::OffsetSurface) {
+        request.set("op", V::makeStr("offset_surface"));
+        if (feature.inputs.size() != 1) throw std::runtime_error("offset_surface requires one native surface input");
+        const Body* source = precedingBody(preceding, feature.inputs.front());
+        if (!source) throw std::runtime_error("offset_surface input missing");
+        request.set("input_brep", brepOf(*source, "offset_surface input"));
+        const double distance = param(feature, env, "distance");
+        if (std::abs(distance) <= 1.0e-6) throw std::runtime_error("offset distance must exceed 1e-6 mm");
+        request.set("distance", V::makeNum(distance));
+    } else if (feature.type == FeatureType::Sew) {
+        request.set("op", V::makeStr("sew"));
+        if (feature.inputs.size() < 2 || feature.inputs.size() > 16)
+            throw std::runtime_error("sew needs 2..16 native surface inputs");
+        V inputs = V::makeArr();
+        for (u64 input : feature.inputs) {
+            const Body* source = precedingBody(preceding, input);
+            if (!source) throw std::runtime_error("sew input missing");
+            inputs.arr.push_back(brepOf(*source, "sew input"));
+        }
+        request.set("inputs", std::move(inputs));
+        request.set("solid", V::makeBool(bitParam(feature, env, "solid", 0)));
     }
     return request;
 }
@@ -285,6 +383,21 @@ V solidFeatureRequest(const Feature& feature, const ExprEnv& env,
     if (op == "pocket" || op == "slot") op = "hole";
     if (op == "rigid_transform") op = "transform";
     model.set("op", V::makeStr(op));
+    if (op == "mirror" && !model.find("face") && !model.find("normal")) {
+        if (const V* plane = model.find("plane")) {
+            if (plane->t != V::Str || plane->str.empty()) throw std::runtime_error("Mirror plane must be a datum name");
+            if (plane->str != "XY" && plane->str != "XZ" && plane->str != "YZ") {
+                const Mat4 placed = resolvePlane(document, plane->str);
+                const double length = std::sqrt(placed.m[8] * placed.m[8] + placed.m[9] * placed.m[9] + placed.m[10] * placed.m[10]);
+                if (length <= 1e-12) throw std::runtime_error("Mirror plane normal is zero");
+                V origin = V::makeArr(), normal = V::makeArr();
+                for (int index : {12, 13, 14}) origin.arr.push_back(V::makeNum(placed.m[index]));
+                for (int index : {8, 9, 10}) normal.arr.push_back(V::makeNum(placed.m[index]));
+                model.set("origin", std::move(origin));
+                model.set("normal", std::move(normal));
+            }
+        }
+    }
     if (op == "transform" && !model.find("frame")) {
         Mat4 matrix = Mat4::translation({feature.num(env,"tx"),feature.num(env,"ty"),feature.num(env,"tz")})
                     * Mat4::rotZ(deg2rad(feature.num(env,"rz")))
@@ -370,10 +483,8 @@ V legacyOperationResult(const Feature& feature, const ExprEnv& env,
 } // namespace
 
 bool isNativeFeature(FeatureType type) {
-    return type == FeatureType::Loft || type == FeatureType::SurfaceFill ||
-           type == FeatureType::BSplineSurface || type == FeatureType::Thicken ||
-           type == FeatureType::SheetMetal || type == FeatureType::SourceSheet ||
-           type == FeatureType::NativeSolid;
+    return isNativeSurfaceFeature(type) || type == FeatureType::SheetMetal ||
+           type == FeatureType::SourceSheet || type == FeatureType::NativeSolid;
 }
 
 Body evaluateNativeFeature(const Feature& feature, const ExprEnv& env,

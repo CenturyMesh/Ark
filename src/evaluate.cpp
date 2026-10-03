@@ -1,5 +1,6 @@
 ﻿// ARK-Point :: evaluate.cpp â€” feature-history recompute pipeline.
 #include "ark/model.hpp"
+#include "ark/mesh_model.hpp"
 #include "ark/source_tube.hpp"
 #include "ark/sketch.hpp"
 #include "ark/prism_cut.hpp"
@@ -205,6 +206,16 @@ static Body evalFeatureBody(const Feature& f, const ExprEnv& env, Document& doc,
             return out;
         }
 
+        case FeatureType::MeshBody:
+        case FeatureType::MeshWeld:
+        case FeatureType::MeshSmooth:
+        case FeatureType::MeshDecimate:
+        case FeatureType::MeshOffset:
+        case FeatureType::MeshFill: {
+            Body body = evaluateMeshFeature(f, env, work, topt);
+            res.tris = body.baked->triCount();
+            return body;
+        }
         case FeatureType::LinearPattern: {
             Body* src = f.inputs.empty()?nullptr:findInput(f.inputs[0]);
             if(!src || (!src->baked && src->faces.empty())){

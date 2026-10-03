@@ -35,10 +35,25 @@ Open the example:
 .\start-studio.ps1 -Document .\examples\freeform-plate.ark
 ```
 
-**Graphics** opens real toggles for the ground grid, wireframe, light background
-and satin highlights. These are display preferences. Extrusions and sketch cuts
-use hard surface normals in the viewport so flat caps do not acquire misleading
-smooth shading. Curve/surface geometry is unchanged by these settings.
+**Graphics** opens toggles for the ground grid, wireframe, light background,
+satin highlights, ambient occlusion, visible edges, and an orthographic camera.
+These are display preferences stored in `%LOCALAPPDATA%\ARK\studio.json`. They
+are not part of the `.ark` document. Extrusions and sketch cuts use hard
+surface normals so flat caps do not acquire misleading smooth shading.
+Curve and surface geometry is unchanged by these settings.
+
+The view toolbar sits on the bottom edge of the 3D view: **Orbit**, **Pan**,
+**Zoom**, **Fit**, **Front**, **Top**, **Right**, **Iso**, **Edges**, **AO**,
+and **Ortho**. Dragging orbits, pans, or zooms according to the active mode.
+Shift+drag and the middle button still pan, and the wheel still zooms. Named
+faces (Front, Back, Top, Bottom, Left, Right) are orthographic. **Iso** returns
+to a perspective view and frames the model. Keys `1` through `7` are front,
+back, top, bottom, right, left, and isometric. The view cube in the upper right
+snaps to the clicked face; dragging it orbits. Ambient occlusion is a
+screen-space pass over the 3D view. If the framebuffer is unavailable, Studio
+keeps the clay shading and skips that pass. Visible edges are the feature
+polylines already used for picking, drawn with depth so hidden edges stay
+hidden.
 
 New/Open retain the unsaved-document guard. Save/Open use native file dialogs.
 Successful operations from a connected agent update the same scene and undo

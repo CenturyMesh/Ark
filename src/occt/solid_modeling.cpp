@@ -12,6 +12,8 @@
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepFilletAPI_MakeChamfer.hxx>
 #include <BRepFilletAPI_MakeFillet.hxx>
+#include <BRepLProp_SLProps.hxx>
+#include <BRepOffsetAPI_DraftAngle.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCone.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
@@ -19,14 +21,18 @@
 #include <BRepPrimAPI_MakeSphere.hxx>
 #include <BRepPrimAPI_MakeTorus.hxx>
 #include <BRep_Tool.hxx>
+#include <GeomAPI_ProjectPointOnSurf.hxx>
 #include <Geom_BezierCurve.hxx>
+#include <Geom_Surface.hxx>
 #include <NCollection_Array1.hxx>
 #include <Standard_Failure.hxx>
 #include <TopExp.hxx>
+#include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Vertex.hxx>
 #include <TopTools_ListOfShape.hxx>
 #include <TopLoc_Location.hxx>
+#include <gp_Ax1.hxx>
 #include <gp_Ax2.hxx>
 #include <gp_Circ.hxx>
 #include <gp_Pln.hxx>
@@ -201,8 +207,133 @@ TopoDS_Shape cutter(const V& spec){
 }
 }
 
+int whole(const V& request, const char* key, int low, int high){
+    double value=scalar(request,key);
+    if(value<low||value>high||std::floor(value)!=value)throw std::runtime_error(std::string(key)+" is outside its integer range");
+    return static_cast<int>(value);
+}
+bool bit(const V& request, const char* key, bool fallback){
+    const V* value=request.find(key);if(!value)return fallback;
+    if(value->t!=V::Num||(value->num!=0&&value->num!=1))throw std::runtime_error(std::string(key)+" must be 0 or 1");
+    return value->num==1;
+}
+gp_Dir axisDir(const std::string& name){
+    if(name=="X")return {1,0,0};if(name=="Y")return {0,1,0};if(name=="Z")return {0,0,1};
+    throw std::runtime_error("Axis must be X, Y, or Z");
+}
+gp_Dir planeNormal(const std::string& name){
+    if(name=="XY")return {0,0,1};if(name=="XZ")return {0,1,0};if(name=="YZ")return {1,0,0};
+    throw std::runtime_error("Plane must be XY, XZ, or YZ");
+}
+void requireOneSolid(const TopoDS_Shape& shape,const char* action){
+    if(shapes(shape,TopAbs_SOLID).size()!=1)throw std::runtime_error(std::string(action)+" needs one solid");
+}
+gp_Dir outwardNormal(const TopoDS_Face& face,const gp_Pnt& probe){
+    Handle(Geom_Surface) surface=BRep_Tool::Surface(face);
+    GeomAPI_ProjectPointOnSurf projection(probe,surface);
+    if(projection.NbPoints()<1)throw std::runtime_error("Edge midpoint missed an adjacent face");
+    double u=0,v=0;projection.LowerDistanceParameters(u,v);
+    BRepLProp_SLProps props(BRepAdaptor_Surface(face),u,v,1,1e-6);
+    if(!props.IsNormalDefined())throw std::runtime_error("Adjacent face has no normal");
+    gp_Dir normal=props.Normal();if(face.Orientation()==TopAbs_REVERSED)normal.Reverse();return normal;
+}
+std::vector<TopoDS_Edge> chosenEdges(const TopoDS_Shape& shape,const V& request,const std::vector<Ref>& refs){
+    if(const V* names=request.find("edges")){
+        if(names->t!=V::Arr||names->arr.empty()||names->arr.size()>64)throw std::runtime_error("Fillet/chamfer needs 1..64 named edges");
+        std::set<std::string> picked;std::vector<TopoDS_Edge> edges;
+        for(const auto& item:names->arr){if(item.t!=V::Str||!picked.insert(item.str).second)throw std::runtime_error("Invalid or repeated edge name");bool found=false;for(const auto& ref:refs)if(ref.name==item.str){if(ref.kind!="edge"||ref.status!="bound")throw std::runtime_error("Selected reference is not a bound edge");edges.push_back(TopoDS::Edge(ref.shape));found=true;break;}if(!found)throw std::runtime_error("Unknown semantic edge name");}
+        return edges;
+    }
+    const std::string selection=request.find("selection")?word(request,"selection"):"";
+    if(selection!="sharp"&&selection!="convex"&&selection!="concave"&&selection!="all")throw std::runtime_error("Fillet/chamfer needs named edges or selection sharp, convex, concave, or all");
+    const double minimum=request.find("min_angle")?scalar(request,"min_angle"):15;
+    if(minimum<0||minimum>=180)throw std::runtime_error("min_angle must be in [0, 180) degrees");
+    TopTools_IndexedDataMapOfShapeListOfShape ancestors;TopExp::MapShapesAndAncestors(shape,TopAbs_EDGE,TopAbs_FACE,ancestors);
+    std::vector<TopoDS_Edge> edges;
+    for(int index=1;index<=ancestors.Extent();++index){
+        TopoDS_Edge edge=TopoDS::Edge(ancestors.FindKey(index));const auto& faces=ancestors.FindFromIndex(index);if(faces.Extent()!=2)continue;
+        BRepAdaptor_Curve curve(edge);double first=curve.FirstParameter(),last=curve.LastParameter();gp_Pnt midpoint;gp_Vec tangent;curve.D1((first+last)*0.5,midpoint,tangent);
+        if(tangent.Magnitude()<=1e-12)continue;if(edge.Orientation()==TopAbs_REVERSED)tangent.Reverse();
+        gp_Dir firstNormal=outwardNormal(TopoDS::Face(faces.First()),midpoint),secondNormal=outwardNormal(TopoDS::Face(faces.Last()),midpoint);
+        double dot=firstNormal.Dot(secondNormal);dot=dot<-1?-1:dot>1?1:dot;double turn=std::acos(dot)*180/std::acos(-1.0);
+        bool convex=gp_Vec(firstNormal).Crossed(gp_Vec(secondNormal)).Dot(tangent)>0;bool take=false;
+        if(selection=="all")take=true;
+        else if(selection=="sharp")take=turn+1e-8>=minimum;
+        else if(selection=="convex")take=convex&&turn+1e-8>=minimum;
+        else take=!convex&&turn+1e-8>=minimum;
+        if(take)edges.push_back(edge);
+    }
+    if(edges.empty())throw std::runtime_error("Edge selection matched no boundary");
+    if(edges.size()>64)throw std::runtime_error("Edge selection matched more than 64 edges");
+    return edges;
+}
+std::vector<TopoDS_Face> draftFaces(const TopoDS_Shape& shape,const V& request,const std::vector<Ref>& refs,const gp_Dir& pull){
+    std::vector<TopoDS_Face> faces;
+    if(const V* names=request.find("faces")){
+        if(names->t!=V::Arr||names->arr.empty()||names->arr.size()>64)throw std::runtime_error("Draft needs 1..64 named faces");
+        std::set<std::string> picked;
+        for(const auto& item:names->arr){if(item.t!=V::Str||!picked.insert(item.str).second)throw std::runtime_error("Invalid or repeated face name");bool found=false;for(const auto& ref:refs)if(ref.name==item.str){if(ref.kind!="face"||ref.status!="bound")throw std::runtime_error("Selected reference is not a bound face");faces.push_back(TopoDS::Face(ref.shape));found=true;break;}if(!found)throw std::runtime_error("Unknown semantic face name");}
+        return faces;
+    }
+    for(const TopoDS_Shape& item:shapes(shape,TopAbs_FACE)){
+        TopoDS_Face face=TopoDS::Face(item);BRepAdaptor_Surface surface(face);
+        if(surface.GetType()!=GeomAbs_Plane&&surface.GetType()!=GeomAbs_Cylinder&&surface.GetType()!=GeomAbs_Cone)continue;
+        gp_Dir axis=surface.GetType()==GeomAbs_Plane?surface.Plane().Axis().Direction():surface.GetType()==GeomAbs_Cylinder?surface.Cylinder().Axis().Direction():surface.Cone().Axis().Direction();
+        if(std::abs(axis.Dot(pull))>0.999)continue;
+        faces.push_back(face);
+    }
+    if(faces.empty()||faces.size()>64)throw std::runtime_error("Draft found no planar, cylindrical, or conical side face");
+    return faces;
+}
+gp_Ax2 mirrorPlane(const V& request,const std::vector<Ref>& refs){
+    if(const V* faceName=request.find("face")){
+        if(faceName->t!=V::Str||faceName->str.empty())throw std::runtime_error("Mirror face must be a semantic name");
+        for(const auto& ref:refs)if(ref.name==faceName->str){
+            if(ref.kind!="face"||ref.status!="bound")throw std::runtime_error("Mirror reference is not a bound face");
+            BRepAdaptor_Surface surface(TopoDS::Face(ref.shape));
+            if(surface.GetType()!=GeomAbs_Plane)throw std::runtime_error("Mirror face must be planar");
+            gp_Pln plane=surface.Plane();return gp_Ax2(plane.Location(),plane.Axis().Direction());
+        }
+        throw std::runtime_error("Unknown semantic face name");
+    }
+    if(const V* normal=request.find("normal")){
+        gp_Pnt directionPoint=point(*normal,"mirror normal");gp_Vec axis(directionPoint.X(),directionPoint.Y(),directionPoint.Z());
+        if(axis.Magnitude()<=1e-12)throw std::runtime_error("Mirror normal is zero");
+        gp_Pnt origin=request.find("origin")?point(*request.find("origin"),"mirror origin"):gp_Pnt(optional(request,"ox",0),optional(request,"oy",0),optional(request,"oz",0));
+        return gp_Ax2(origin,gp_Dir(axis));
+    }
+    std::string plane=request.find("plane")?word(request,"plane"):"XY";
+    return gp_Ax2(gp_Pnt(optional(request,"ox",0),optional(request,"oy",0),optional(request,"oz",0)),planeNormal(plane));
+}
+TopoDS_Shape patterned(const TopoDS_Shape& input,const V& request,const std::string& op,std::vector<Ref>& refs){
+    const bool mirror=op=="mirror";
+    const int count=mirror?2:whole(request,"count",2,64);
+    const bool fuseCopies=bit(request,"fuse",false);
+    auto copyAt=[&](int index){
+        gp_Trsf step;
+        if(mirror)step.SetMirror(mirrorPlane(request,refs));
+        else if(op=="circular_pattern"){std::string axis=request.find("axis")?word(request,"axis"):"Z";double angle=scalar(request,"step");if(!(std::abs(angle)>0&&std::abs(angle)<=360))throw std::runtime_error("Circular pattern step must be in (0, 360] degrees");step.SetRotation(gp_Ax1(gp_Pnt(optional(request,"ox",0),optional(request,"oy",0),optional(request,"oz",0)),axisDir(axis)),index*angle*std::acos(-1.0)/180);}
+        else{double dx=optional(request,"dx",0),dy=optional(request,"dy",0),dz=optional(request,"dz",0);if(dx*dx+dy*dy+dz*dz<=1e-18)throw std::runtime_error("Linear pattern spacing is zero");step.SetTranslation(gp_Vec(dx,dy,dz)*index);}
+        return transformed(input,step);
+    };
+    std::vector<TopoDS_Shape> copies{input};for(int index=1;index<count;++index)copies.push_back(copyAt(index));
+    if(!fuseCopies)return copies.size()==1?copies.front():compound(copies);
+    TopoDS_Shape accumulated=copies.front();
+    for(size_t index=1;index<copies.size();++index){
+        BRepAlgoAPI_Fuse algorithm(accumulated,copies[index]);algorithm.Build();
+        if(!algorithm.IsDone()||algorithm.HasErrors())throw std::runtime_error("Pattern fuse failed; use fuse 0 to keep separate solids");
+        refs=propagated(refs,algorithm.Shape(),algorithm);accumulated=algorithm.Shape();
+    }
+    return accumulated;
+}
+V finishBodies(const TopoDS_Shape& shape,const std::vector<Ref>& refs){
+    auto solids=shapes(shape,TopAbs_SOLID);if(solids.empty()||solids.size()>64)throw std::runtime_error("Pattern needs 1..64 solids");
+    for(const auto& solid:solids)if(!(properties(solid)>0))throw std::runtime_error("Pattern instance has no positive volume");
+    V result=shapeResult(shape,false);result.set("topology",topologyOf(shape,need(result,"brep_base64").str,refs));return result;
+}
+
 V modelSolidNative(const V& request){
-    const std::string op=word(request,"op");std::vector<Ref> refs;TopoDS_Shape result;
+    const std::string op=word(request,"op");std::vector<Ref> refs;TopoDS_Shape result;bool many=false;
     if(op=="box"){
         double x=positive(request,"width"),y=positive(request,"depth"),z=positive(request,"height");BRepPrimAPI_MakeBox box(x,y,z);result=box.Shape();
         add(refs,"x_min","face",box.BackFace());add(refs,"x_max","face",box.FrontFace());add(refs,"y_min","face",box.LeftFace());add(refs,"y_max","face",box.RightFace());add(refs,"z_min","face",box.BottomFace());add(refs,"z_max","face",box.TopFace());boxEdges(result,x,y,z,refs);
@@ -220,7 +351,7 @@ V modelSolidNative(const V& request){
         if(op=="union"||op=="cut"||op=="common"||op=="hole"){
             TopoDS_Shape tool;std::vector<Ref> toolRefs;
             if(op=="hole")tool=cutter(need(request,"cutter"));
-            else{const auto& encodedTool=need(request,"tool_brep");if(encodedTool.t!=V::Str)throw std::runtime_error("Tool must be native B-rep");tool=readBrep(encodedTool.str);shapeReport(tool,true);toolRefs=inputRefs(request,"tool_brep","tool_topology",tool);}
+            else{const auto& encodedTool=need(request,"tool_brep");if(encodedTool.t!=V::Str)throw std::runtime_error("Tool must be native B-rep");tool=readBrep(encodedTool.str);shapeReport(tool,false);if(shapes(tool,TopAbs_SOLID).empty()||!(properties(tool)>0))throw std::runtime_error("Boolean tool needs one or more positive-volume solids");toolRefs=inputRefs(request,"tool_brep","tool_topology",tool);}
             if(op=="union"){BRepAlgoAPI_Fuse algorithm(input,tool);algorithm.Build();if(!algorithm.IsDone()||algorithm.HasErrors())throw std::runtime_error("Native union failed");result=algorithm.Shape();refs=propagated(refs,result,algorithm);auto next=propagated(toolRefs,result,algorithm);
                 std::string nameSpace="tool";
                 const V* supplied=request.find("reference_namespace");if(!supplied)supplied=request.find("tool_namespace");
@@ -231,18 +362,31 @@ V modelSolidNative(const V& request){
             else if(op=="common"){BRepAlgoAPI_Common algorithm(input,tool);algorithm.Build();if(!algorithm.IsDone()||algorithm.HasErrors())throw std::runtime_error("Native common failed");result=algorithm.Shape();refs=propagated(refs,result,algorithm);}
             else{BRepAlgoAPI_Cut algorithm(input,tool);algorithm.Build();if(!algorithm.IsDone()||algorithm.HasErrors())throw std::runtime_error("Native cut failed");result=algorithm.Shape();refs=propagated(refs,result,algorithm);}
         }else if(op=="fillet"||op=="chamfer"){
-            auto& names=need(request,"edges");if(names.t!=V::Arr||names.arr.empty()||names.arr.size()>64)throw std::runtime_error("Fillet/chamfer needs named edges");double size=positive(request,op=="fillet"?"radius":"distance");
-            std::set<std::string> picked;std::vector<TopoDS_Edge> edges;
-            for(auto& item:names.arr){if(item.t!=V::Str||!picked.insert(item.str).second)throw std::runtime_error("Invalid or repeated edge name");bool found=false;for(auto& r:refs)if(r.name==item.str){if(r.kind!="edge"||r.status!="bound")throw std::runtime_error("Selected reference is not a bound edge");edges.push_back(TopoDS::Edge(r.shape));found=true;break;}if(!found)throw std::runtime_error("Unknown semantic edge name");}
-            if(op=="fillet"){BRepFilletAPI_MakeFillet algorithm(input);for(auto& e:edges)algorithm.Add(size,e);algorithm.Build();if(!algorithm.IsDone())throw std::runtime_error("Native fillet failed");result=algorithm.Shape();refs=propagated(refs,result,algorithm);}
-            else{BRepFilletAPI_MakeChamfer algorithm(input);for(auto& e:edges)algorithm.Add(size,e);algorithm.Build();if(!algorithm.IsDone())throw std::runtime_error("Native chamfer failed");result=algorithm.Shape();refs=propagated(refs,result,algorithm);}
+            requireOneSolid(input,"Fillet/chamfer");double size=positive(request,op=="fillet"?"radius":"distance");
+            if(op=="chamfer"&&request.find("distance2")){double second=positive(request,"distance2");if(std::abs(second-size)>1e-12)throw std::runtime_error("Asymmetric chamfer is not supported; use one distance");}
+            auto edges=chosenEdges(input,request,refs);
+            if(op=="fillet"){BRepFilletAPI_MakeFillet algorithm(input);for(auto& edge:edges)algorithm.Add(size,edge);algorithm.Build();if(!algorithm.IsDone())throw std::runtime_error("Native fillet failed");result=algorithm.Shape();refs=propagated(refs,result,algorithm);}
+            else{BRepFilletAPI_MakeChamfer algorithm(input);for(auto& edge:edges)algorithm.Add(size,edge);algorithm.Build();if(!algorithm.IsDone())throw std::runtime_error("Native chamfer failed");result=algorithm.Shape();refs=propagated(refs,result,algorithm);}
+        }else if(op=="draft"){
+            requireOneSolid(input,"Draft");gp_Dir pull=axisDir(request.find("direction")?word(request,"direction"):"Z");
+            double degrees=scalar(request,"angle");if(!(std::abs(degrees)>0&&std::abs(degrees)<89))throw std::runtime_error("Draft angle must be in (-89, 89) degrees excluding 0");
+            std::string neutral=request.find("neutral")?word(request,"neutral"):"XY";gp_Dir normal=planeNormal(neutral);
+            gp_Pln plane(gp_Pnt(normal.XYZ()*optional(request,"neutral_offset",0)),normal);
+            BRepOffsetAPI_DraftAngle algorithm(input);
+            for(const auto& face:draftFaces(input,request,refs,pull)){
+                algorithm.Add(face,pull,degrees*std::acos(-1.0)/180,plane,true);
+                if(!algorithm.AddDone())throw std::runtime_error("Draft rejected a face that is not planar, cylindrical, or conical");
+            }
+            algorithm.Build();if(!algorithm.IsDone())throw std::runtime_error("Native draft failed");result=algorithm.Shape();refs=propagated(refs,result,algorithm);
+        }else if(op=="linear_pattern"||op=="circular_pattern"||op=="mirror"){
+            result=patterned(input,request,op,refs);many=true;
         }else if(op=="transform"){
             auto m=frame(request);auto placement=transform(m);
             for(auto& ref:refs)for(const char* key:{"axis","tangent"})if(const V* previous=ref.seed.find(key)){auto value=point(*previous,"reference direction");gp_Vec vector(value.X(),value.Y(),value.Z());vector.Transform(placement);ref.seed.set(key,vec(vector.XYZ()));}
             BRepBuilderAPI_Transform algorithm(input,placement,true);if(!algorithm.IsDone())throw std::runtime_error("Native rigid transform failed");result=algorithm.Shape();refs=propagated(refs,result,algorithm);
         }else throw std::runtime_error("Unknown native solid operation");
     }
-    return finish(result,refs);
+    return many?finishBodies(result,refs):finish(result,refs);
 }
 
 V referenceFrameNative(const V& request){

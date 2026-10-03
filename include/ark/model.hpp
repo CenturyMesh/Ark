@@ -40,6 +40,8 @@ enum class FeatureType : i32 {
     Box, Cylinder, Sphere, Cone, Torus,
     Extrude, Revolve, Transform, Boolean, LinearPattern, ParametricSurface, Tube, NotchedTube, SourceTube, SketchCut,
     Loft, SurfaceFill, BSplineSurface, Thicken, SheetMetal, SourceSheet, NativeSolid,
+    Sweep, ExtrudeSurface, RevolveSurface, OffsetSurface, Sew,
+    MeshBody, MeshWeld, MeshSmooth, MeshDecimate, MeshOffset, MeshFill,
 };
 
 struct Feature {
@@ -126,6 +128,11 @@ f64 solveSketch(Sketch& sk, int* itersOut=nullptr, int maxIters=200, SketchDiagn
 // Feature type <-> stable string names (serialization / MCP / CLI)
 const char* featureTypeName(FeatureType t);
 bool featureTypeFromName(const std::string& s, FeatureType& out);
+// Exact OCCT surface features, including loft, fill, NURBS, thicken and the
+// later sweep/extrude/revolve/offset/sew operations.
+bool isNativeSurfaceFeature(FeatureType t);
+// Sampled triangle operations. Their results are mesh authority, never a B-rep.
+bool isMeshModelFeature(FeatureType t);
 
 // Sketch constraint type <-> stable string names
 const char* constraintTypeName(i32 t);

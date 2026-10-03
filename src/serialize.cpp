@@ -121,16 +121,48 @@ bool conFromJson(const Value& v, SketchCon& c, std::string* err){
     return true;
 }
 
+bool onePointSketch(const Document& doc, const std::string& name){
+    const NamedSketch* sketch=nullptr;
+    for(const auto& candidate:doc.sketches) if(candidate.name==name) sketch=&candidate;
+    if(!sketch) return false;
+    int points=0, edges=0;
+    for(const auto& entity:sketch->sk.ents){
+        if(entity.construction) continue;
+        if(entity.kind==SketchEnt::Pnt) ++points;
+        else ++edges;
+    }
+    return points==1 && edges==0;
+}
+
+bool generation9Feature(const Document& doc, const Feature& feature){
+    auto enabled=[&](const char* key){auto it=feature.p.find(key);return it!=feature.p.end()&&it->second!="0"&&it->second!="0.0"&&!it->second.empty();};
+    if(feature.type==FeatureType::Loft){
+        if(enabled("smooth")||enabled("compatible")) return true;
+        auto continuity=feature.p.find("continuity");
+        if(continuity!=feature.p.end()&&continuity->second!="1") return true;
+        if(const auto* sections=feature.nativeSpec.find("sections"); sections&&sections->t==Value::Arr)
+            for(const auto& name:sections->arr) if(name.t==Value::Str&&onePointSketch(doc,name.str)) return true;
+    }
+    if(feature.type==FeatureType::NativeSolid){
+        std::string op=feature.get("op");
+        if(op.empty()) if(const auto* authored=feature.nativeSpec.find("op"); authored&&authored->t==Value::Str) op=authored->str;
+        if(op=="draft"||op=="linear_pattern"||op=="circular_pattern"||op=="mirror") return true;
+        if(feature.nativeSpec.find("selection")) return true;
+        if(feature.p.count("distance2")) return true;
+    }
+    return false;
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
 std::string documentToJson(const Document& doc){
     Value r=Value::makeObj();
     r.set("format",Value::makeStr("ark"));
-    bool sourceTube=false;bool notched=false;bool nativeVersion=false;bool extended=!doc.assembly.empty()||doc.nextAssemblyId_>1;for(auto& f:doc.features){extended|=f.type==FeatureType::Tube;notched|=f.type==FeatureType::NotchedTube;sourceTube|=f.type==FeatureType::SourceTube;nativeVersion|=f.type==FeatureType::Loft||f.type==FeatureType::SurfaceFill||f.type==FeatureType::BSplineSurface||f.type==FeatureType::Thicken||f.type==FeatureType::SheetMetal||f.type==FeatureType::SourceSheet||f.type==FeatureType::NativeSolid;}
+    bool sourceTube=false;bool notched=false;bool nativeVersion=false;bool generation8=false;bool generation9=false;bool extended=!doc.assembly.empty()||doc.nextAssemblyId_>1;for(auto& f:doc.features){extended|=f.type==FeatureType::Tube;notched|=f.type==FeatureType::NotchedTube;sourceTube|=f.type==FeatureType::SourceTube;nativeVersion|=f.type==FeatureType::Loft||f.type==FeatureType::SurfaceFill||f.type==FeatureType::BSplineSurface||f.type==FeatureType::Thicken||f.type==FeatureType::SheetMetal||f.type==FeatureType::SourceSheet||f.type==FeatureType::NativeSolid;generation8|=f.type==FeatureType::Sweep||f.type==FeatureType::ExtrudeSurface||f.type==FeatureType::RevolveSurface||f.type==FeatureType::OffsetSurface||f.type==FeatureType::Sew||isMeshModelFeature(f.type);generation9|=generation9Feature(doc,f);}
     bool sketchVersion=!doc.planes.empty()||!doc.sketches.empty();for(auto& f:doc.features)sketchVersion|=f.type==FeatureType::SketchCut;
     bool latest=!doc.mates.empty()||doc.nextMateId_>1;for(auto& p:doc.planes)latest|=p.support.t==Value::Obj||p.kind!="plane";for(auto& f:doc.features)latest|=f.type==FeatureType::NativeSolid||(f.type==FeatureType::SheetMetal&&f.nativeSpec.find("base"));for(auto& n:doc.assembly)latest|=n.fixed;for(auto& sk:doc.sketches)for(auto& c:sk.sk.cons)latest|=!c.id.empty();
-    r.set("version",Value::makeNum(latest?7:nativeVersion?6:sketchVersion?5:sourceTube?4:notched?3:extended?2:1));
+    r.set("version",Value::makeNum(generation9?9:generation8?8:latest?7:nativeVersion?6:sketchVersion?5:sourceTube?4:notched?3:extended?2:1));
     r.set("units",Value::makeStr("mm"));
     r.set("next_feature_id",Value::makeNum((double)doc.nextFeatureId_));
 
@@ -179,8 +211,9 @@ std::string documentToJson(const Document& doc){
         if(f.type==FeatureType::NotchedTube){Value points=Value::makeArr();for(auto& p:f.notches){Value j=Value::makeObj();j.set("station",Value::makeStr(p.station));j.set("angle",Value::makeStr(p.angle));j.set("face",Value::makeStr(p.face));points.arr.push_back(j);}v.set("notches",points);}
         if(f.type==FeatureType::SourceTube)v.set("source",f.sourceData);
         if(f.type==FeatureType::SourceSheet)v.set("source",f.sourceData);
-        if(f.type==FeatureType::Loft||f.type==FeatureType::SurfaceFill||f.type==FeatureType::BSplineSurface||f.type==FeatureType::Thicken||f.type==FeatureType::SheetMetal||f.type==FeatureType::NativeSolid)
+        if(f.type==FeatureType::Loft||f.type==FeatureType::SurfaceFill||f.type==FeatureType::BSplineSurface||f.type==FeatureType::Thicken||f.type==FeatureType::SheetMetal||f.type==FeatureType::NativeSolid||f.type==FeatureType::Sweep||f.type==FeatureType::ExtrudeSurface||f.type==FeatureType::RevolveSurface||f.type==FeatureType::OffsetSurface||f.type==FeatureType::Sew)
             v.set("native",f.nativeSpec.t==Value::Obj?f.nativeSpec:Value::makeObj());
+        if(f.type==FeatureType::MeshBody)v.set("mesh",f.sourceData);
         fs.arr.push_back(std::move(v));
     }
     r.set("features",std::move(fs));
@@ -199,7 +232,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     Value v;
     if(!arkjson::parse(json,v)) return fail("malformed JSON");
     if(v.t!=Value::Obj) return fail("root must be object");
-    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0&&ver->num!=3.0&&ver->num!=4.0&&ver->num!=5.0&&ver->num!=6.0&&ver->num!=7.0)))
+    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0&&ver->num!=3.0&&ver->num!=4.0&&ver->num!=5.0&&ver->num!=6.0&&ver->num!=7.0&&ver->num!=8.0&&ver->num!=9.0)))
         return fail("unsupported document version");
 
     if(auto format=v.find("format");format && format->asStr()!="ark")return fail("unsupported format");
@@ -275,6 +308,10 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
             if(nf.type==FeatureType::SourceTube){auto version=v.find("version"),data=fv.find("source");if(!version||version->asNum()<4||!data||data->t!=Value::Obj)return fail("source_tube requires version 4 package");nf.sourceData=*data;}
             if(nf.type==FeatureType::SourceSheet){auto version=v.find("version"),data=fv.find("source");if(!version||version->asNum()<6||!data||data->t!=Value::Obj)return fail("source_sheet requires version 6 package");nf.sourceData=*data;}
             if(nf.type==FeatureType::Loft||nf.type==FeatureType::SurfaceFill||nf.type==FeatureType::BSplineSurface||nf.type==FeatureType::Thicken||nf.type==FeatureType::SheetMetal||nf.type==FeatureType::NativeSolid){auto version=v.find("version"),spec=fv.find("native");if(!version||version->asNum()<6||!spec||spec->t!=Value::Obj)return fail("native feature requires version 6 native object");nf.nativeSpec=*spec;}
+            if(nf.type==FeatureType::Sweep||nf.type==FeatureType::ExtrudeSurface||nf.type==FeatureType::RevolveSurface||nf.type==FeatureType::OffsetSurface||nf.type==FeatureType::Sew){auto version=v.find("version"),spec=fv.find("native");if(!version||version->asNum()<8||!spec||spec->t!=Value::Obj)return fail("extended surface feature requires version 8 native object");nf.nativeSpec=*spec;}
+            if(isMeshModelFeature(nf.type)){auto version=v.find("version");if(!version||version->asNum()<8)return fail("mesh modeling features require document version 8");}
+            if(generation9Feature(nd,nf)){auto version=v.find("version");if(!version||version->asNum()<9)return fail("draft, pattern, mirror, edge selection, loft smoothing, or a point tip requires document version 9");}
+            if(nf.type==FeatureType::MeshBody){auto mesh=fv.find("mesh");if(!mesh||mesh->t!=Value::Obj)return fail("mesh_body requires a mesh object");nf.sourceData=*mesh;}
             maxId=tmax(maxId,nf.id);
             nd.features.push_back(std::move(nf));
         }

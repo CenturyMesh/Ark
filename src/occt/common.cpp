@@ -21,6 +21,8 @@
 #include <TopExp_Explorer.hxx>
 #include <TopLoc_Location.hxx>
 #include <Poly_Triangulation.hxx>
+#include <BRepAdaptor_Curve.hxx>
+#include <GeomAbs_CurveType.hxx>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
@@ -98,12 +100,18 @@ TopoDS_Shape transformed(const TopoDS_Shape& s,const gp_Trsf& t){BRepBuilderAPI_
 V vec(const gp_XYZ& p){V out=V::makeArr();for(double n:{p.X(),p.Y(),p.Z()})out.arr.push_back(V::makeNum(n));return out;}
 V matrix(const gp_Trsf& t){V out=V::makeArr();for(int c=1;c<=4;++c)for(int r=1;r<=4;++r)out.arr.push_back(V::makeNum(r<=3?t.Value(r,c):(c==4?1:0)));return out;}
 V meshData(const TopoDS_Shape& s,double deflection,double angle){
-    BRepMesh_IncrementalMesh mesher(s,deflection,false,angle,false);mesher.Perform();if(!mesher.IsDone())throw std::runtime_error("Native preview tessellation failed");V pos=V::makeArr(),idx=V::makeArr();
-    for(auto& item:shapes(s,TopAbs_FACE)){auto face=TopoDS::Face(item);TopLoc_Location loc;auto tri=BRep_Tool::Triangulation(face,loc);if(tri.IsNull())throw std::runtime_error("Native face has no triangulation");size_t base=pos.arr.size()/3;
+    BRepMesh_IncrementalMesh mesher(s,deflection,false,angle,false);mesher.Perform();if(!mesher.IsDone())throw std::runtime_error("Native preview tessellation failed");V pos=V::makeArr(),idx=V::makeArr(),spans=V::makeArr(),edges=V::makeArr();
+    for(auto& item:shapes(s,TopAbs_FACE)){auto face=TopoDS::Face(item);TopLoc_Location loc;auto tri=BRep_Tool::Triangulation(face,loc);if(tri.IsNull())throw std::runtime_error("Native face has no triangulation");size_t base=pos.arr.size()/3,start=idx.arr.size()/3;
         for(int i=1;i<=tri->NbNodes();++i){auto p=tri->Node(i).Transformed(loc.Transformation());for(auto v:{p.X(),p.Y(),p.Z()})pos.arr.push_back(V::makeNum(std::round(v*1e8)/1e8));}
         for(int i=1;i<=tri->NbTriangles();++i){int a,b,c;tri->Triangle(i).Get(a,b,c);if(face.Orientation()==TopAbs_REVERSED)std::swap(b,c);for(int v:{a,b,c})idx.arr.push_back(V::makeNum((double)(base+v-1)));}
+        V span=V::makeArr();span.arr.push_back(V::makeNum((double)start));span.arr.push_back(V::makeNum((double)(idx.arr.size()/3-start)));spans.arr.push_back(std::move(span));
         if(pos.arr.size()>6000000||idx.arr.size()>6000000)throw std::runtime_error("Native preview exceeds mesh size limit");
-    }V mesh=V::makeObj();mesh.set("pos",pos);mesh.set("idx",idx);return mesh;
+    }
+    for(auto& item:shapes(s,TopAbs_EDGE)){BRepAdaptor_Curve curve(TopoDS::Edge(item));double a=curve.FirstParameter(),b=curve.LastParameter();int steps=curve.GetType()==GeomAbs_Line?1:12;if(!std::isfinite(a)||!std::isfinite(b)||a==b)steps=1;V poly=V::makeArr();
+        for(int i=0;i<=steps;++i){gp_Pnt p=curve.Value(a+(b-a)*(steps?i/(double)steps:0));for(double v:{p.X(),p.Y(),p.Z()})poly.arr.push_back(V::makeNum(std::round(v*1e8)/1e8));}
+        edges.arr.push_back(std::move(poly));
+    }
+    V mesh=V::makeObj();mesh.set("pos",pos);mesh.set("idx",idx);mesh.set("face_spans",spans);mesh.set("edges",edges);return mesh;
 }
 std::string brepData(const TopoDS_Shape& shape){std::ostringstream stream;BRepTools::Write(shape,stream,false,false,TopTools_FormatVersion_CURRENT);return base64Encode(stream.str());}
 TopoDS_Shape readBrep(const std::string& encoded){std::istringstream stream(base64Decode(encoded));TopoDS_Shape shape;BRep_Builder b;BRepTools::Read(shape,stream,b);if(shape.IsNull()||!BRepCheck_Analyzer(shape).IsValid())throw std::runtime_error("Invalid native B-rep payload");return shape;}

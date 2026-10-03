@@ -5,6 +5,15 @@ Open **Commands** or press **Ctrl+K**. Studio applies the forms to the active
 Undo, redo, save, and live MCP see the resulting features. The viewport shows
 tessellated geometry; native STEP export uses the validated OCCT B-rep.
 
+The 3D view uses a light studio background, clay shading, screen-space ambient
+occlusion, and visible feature edges. The toolbar on the bottom of the view
+selects Orbit, Pan, Zoom, Fit, Front, Top, Right, Isometric, edges, occlusion,
+and orthographic projection. The view cube at the upper right snaps to a face.
+Named face views are orthographic; free orbit and Isometric stay perspective.
+`1`–`7` select front, back, top, bottom, right, left, and isometric. These
+choices, including occlusion and edges, are display preferences. They are not
+written into the document and do not change STEP or the agent protocol.
+
 ## Sketches and construction datums
 
 Create a rectangle, circle, or interpolating spline from **Sketch & planes**.
@@ -49,18 +58,47 @@ local XY position, offset along the datum normal, and cut depth. Its cutter
 travels in local positive Z; set the offset so the cutter starts before the
 material and crosses it. Profile pockets use a saved closed sketch.
 
-**Fillet / chamfer named edges** uses bound semantic edge names shown by
-`reference_inspect` or the selected native solid's form hint. If an earlier
-operation deletes or splits an edge, choose a currently bound reference.
+The inspector filters **Body**, **Face**, **Edge**, and **Curve**. Click a face
+or an edge on the exact solid; the highlight uses its semantic name, not a
+triangle number. Click a visible sketch curve, or the sketch in the explorer,
+to collect that sketch for a loft or a sweep. With **Face** active, a datum in
+the explorer is a mirror plane. At most 64 names are kept. **Fillet / chamfer**
+uses those edge names, or the selection `sharp`, `convex`, `concave`, or `all`
+with a minimum dihedral angle in degrees. At most 64 edges are taken. A loft
+publishes `edge.start.<entity>`, `edge.end.<entity>`, and `rail.<index>` in
+addition to its face names. **Draft faces** takes an angle in degrees, a pull
+direction `X`, `Y`, or `Z`, and a neutral coordinate plane. It accepts planar,
+cylindrical, and conical faces; a freeform face is rejected. **Linear /
+circular pattern** and **Mirror solid** keep separate exact solids unless
+**Fuse** is on. Mirror is also under **Modify**. Its plane is `XY`, `XZ`,
+`YZ`, a named datum, or one selected planar face. A later union, cut, or
+common accepts that compound. If an earlier operation deletes or splits an
+edge, choose a currently bound reference.
 **Rigid transform** places one native input by XYZ translation and XYZ Euler
 angles. Select a native solid for hole, edge treatment, datum, and Boolean
 shortcuts in the inspector. Native solid STEP export uses its exact B-rep.
 
 **Native surfaces** provides Loft sketches, Fill closed sketch, NURBS surface,
-and Thicken selected surface. Loft lists two or more saved sketch names in
-section order, separated by semicolons. Fill uses a saved closed sketch.
-The NURBS editor accepts poles, optional weights, and two degrees. Thicken
-acts on a selected native loft, fill, or NURBS surface.
+Sweep sketches, Extrude sketch surface, Revolve sketch surface, Offset selected
+surface, Sew surfaces, and Thicken selected surface. Loft lists two or more
+saved sketch names in section order, separated by semicolons. A one-point
+sketch is a tip. Smooth and compatible are optional toggles. Fill uses a saved
+closed sketch. The NURBS editor accepts poles, optional weights, and two
+degrees. Sweep asks for a section sketch, a path sketch, and a solid toggle.
+Extrude and revolve use one saved sketch; the revolve axis is `X`, `Y`, or `Z`
+and is stored as `native.axis`, not as an expression. Offset and thicken act
+on the selected open native surface. Thicken accepts a loft, fill, NURBS,
+sweep, extrusion, revolution, or offset. Sew lists 2 to 16 feature IDs
+separated by semicolons.
+
+Select a native surface, mesh feature, or analytic solid and choose **Edit feature**, or double-click its row in the explorer. The form opens on the saved definition and applies `feature.edit`, so that feature and its dependents recompute. **Edit sketch** opens a driving sketch; a loft asks which section. Double-click a sketch row to edit its anchors. The explorer scrolls through features, sketches, and datums. The first six named parameters stay on the explorer and recompute every sketch or feature that uses them. Imported source geometry and imported meshes stay baked snapshots. Sew keeps its input list; the solid choice is editable.
+
+**Mesh** provides Weld, Smooth, Decimate, Offset, Fill planar holes, and
+Import STL/OBJ. These commands add a mesh feature and do not attach a `native`
+object. When the selection is an exact B-rep, the form includes **Sample exact
+B-rep** and requires it to stay on; the result is mesh authority. Import copies
+the STL or OBJ into the document. An optional weld distance merges vertices.
+The file is not linked.
 
 ## Authored sheet metal
 

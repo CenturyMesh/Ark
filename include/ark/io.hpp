@@ -7,6 +7,9 @@ namespace ark {
 
 bool exportSTL(const char* path, const Mesh& m);
 bool exportOBJ(const char* path, const Mesh& m);
+// STL or OBJ, chosen from the file extension. Throws with the reason on failure.
+// Vertices are stored as f32. Faces with more than three corners are fanned.
+Mesh importMeshPath(const std::string& path);
 
 struct Image { int w=0,h=0; std::vector<u8> px; /*RGB8*/ };
 bool writePNG(const char* path, const Image& img);

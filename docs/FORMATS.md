@@ -1,4 +1,4 @@
-# ARK file formats, versions 1 through 6
+# ARK file formats, versions 1 through 9
 
 ## `.ark`
 
@@ -80,8 +80,42 @@ geometric proof, original openings, and exact formed/flat B-rep payloads. The
 display mesh and native evaluation cache are derived and are not feature
 history edits. The Formed/Flat UI selection does not change the saved geometry.
 
-The reader accepts versions 1 through 6. Older ARK executables reject version
-6 rather than discarding its native data. Save/load re-evaluates authored
+The reader accepts versions 1 through 9. Older ARK executables reject a newer
+document rather than discarding its native data. Save/load re-evaluates authored
 native features with the installed OCCT 8 worker; source packages remain
 portable when the original STEP is absent. If the source STEP still exists
 but its bytes have changed, native source export requires reimport.
+
+## Version 7: mates, grounded instances, native solids, and sheet graphs
+
+Documents with assembly mates, a grounded instance, a supported construction
+reference, a `native_solid`, or a sheet-metal feature that stores a `base`
+panel use version 7. Fixed instance flags, mate definitions, and the sheet
+authoring graph are saved with the expressions. Solved transforms and display
+meshes are derived on load.
+
+## Version 8: extended surfaces and sampled meshes
+
+Documents containing `sweep`, `extrude_surface`, `revolve_surface`,
+`offset_surface`, `sew`, or any `mesh_body` / `mesh_weld` / `mesh_smooth` /
+`mesh_decimate` / `mesh_offset` / `mesh_fill` feature use version 8. The five
+exact surfaces store a `native` object, as earlier native features do.
+`mesh_body` stores the authored `mesh` object with `positions` and `indices`;
+the evaluated mesh and its report are not history edits. A mesh operation does
+not store a B-rep. A document that does not use these features keeps its
+previous version. A reader that sees one of these features below version 8
+rejects the file.
+
+## Version 9: draft, patterns, mirror, edge selection, and loft tips
+
+Save chooses the version. A document stays at its previous version until it
+uses one of these authored choices: a `native_solid` operation `draft`,
+`linear_pattern`, `circular_pattern`, or `mirror`; a fillet or chamfer
+`native.selection`; a second chamfer distance; loft `p.smooth` or
+`p.compatible` set to `1`; a loft `p.continuity` other than `1`; or a loft
+section whose sketch is a single point. Mirror `native.plane` may be `XY`,
+`XZ`, `YZ`, or a named datum. Mirror `native.face` names one planar face of
+the seed solid. Viewport selection writes those same names; it does not add
+another document version. Older readers reject that file instead of ignoring
+the new definition. Versions 1 through 8 still load and save at their own
+version. The product version stays 0.9.0.

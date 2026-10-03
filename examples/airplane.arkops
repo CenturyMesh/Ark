@@ -1,0 +1,1232 @@
+{
+    "expected_revision":  0,
+    "commands":  [
+                     {
+                         "op":  "param.set",
+                         "name":  "length",
+                         "expr":  "900"
+                     },
+                     {
+                         "op":  "param.set",
+                         "name":  "wing_span",
+                         "expr":  "1080"
+                     },
+                     {
+                         "op":  "param.set",
+                         "name":  "wing_chord",
+                         "expr":  "210"
+                     },
+                     {
+                         "op":  "param.set",
+                         "name":  "wing_thickness",
+                         "expr":  "0.12"
+                     },
+                     {
+                         "op":  "param.set",
+                         "name":  "tail_span",
+                         "expr":  "400"
+                     },
+                     {
+                         "op":  "param.set",
+                         "name":  "sweep",
+                         "expr":  "0.16"
+                     },
+                     {
+                         "p":  {
+                                   "oz":  "0",
+                                   "ox":  "0",
+                                   "oy":  "0"
+                               },
+                         "parent":  "YZ",
+                         "op":  "plane.set",
+                         "name":  "Fuselage nose"
+                     },
+                     {
+                         "op":  "sketch.set",
+                         "name":  "Fuselage nose",
+                         "sketch":  {
+                                        "plane":  "Fuselage nose",
+                                        "entities":  [
+                                                         {
+                                                             "dof":  [
+                                                                         "0",
+                                                                         "0.003*length+0.007*length",
+                                                                         "0.70*(0.009*length)",
+                                                                         "0.003*length+0.55*(0.007*length)",
+                                                                         "0.009*length",
+                                                                         "0.003*length",
+                                                                         "0.75*(0.009*length)",
+                                                                         "0.003*length-0.62*(0.004*length)",
+                                                                         "0",
+                                                                         "0.003*length-(0.004*length)",
+                                                                         "-0.75*(0.009*length)",
+                                                                         "0.003*length-0.62*(0.004*length)",
+                                                                         "-(0.009*length)",
+                                                                         "0.003*length",
+                                                                         "-0.70*(0.009*length)",
+                                                                         "0.003*length+0.55*(0.007*length)"
+                                                                     ],
+                                                             "tension":  0.2,
+                                                             "name":  "section",
+                                                             "closed":  true,
+                                                             "kind":  "spline"
+                                                         }
+                                                     ],
+                                        "tolerance":  0.05
+                                    }
+                     },
+                     {
+                         "p":  {
+                                   "oz":  "0.20*length",
+                                   "ox":  "0",
+                                   "oy":  "0"
+                               },
+                         "parent":  "YZ",
+                         "op":  "plane.set",
+                         "name":  "Fuselage cockpit"
+                     },
+                     {
+                         "op":  "sketch.set",
+                         "name":  "Fuselage cockpit",
+                         "sketch":  {
+                                        "plane":  "Fuselage cockpit",
+                                        "entities":  [
+                                                         {
+                                                             "dof":  [
+                                                                         "0",
+                                                                         "0.010*length+0.062*length",
+                                                                         "0.70*(0.034*length)",
+                                                                         "0.010*length+0.55*(0.062*length)",
+                                                                         "0.034*length",
+                                                                         "0.010*length",
+                                                                         "0.75*(0.034*length)",
+                                                                         "0.010*length-0.62*(0.024*length)",
+                                                                         "0",
+                                                                         "0.010*length-(0.024*length)",
+                                                                         "-0.75*(0.034*length)",
+                                                                         "0.010*length-0.62*(0.024*length)",
+                                                                         "-(0.034*length)",
+                                                                         "0.010*length",
+                                                                         "-0.70*(0.034*length)",
+                                                                         "0.010*length+0.55*(0.062*length)"
+                                                                     ],
+                                                             "tension":  0.2,
+                                                             "name":  "section",
+                                                             "closed":  true,
+                                                             "kind":  "spline"
+                                                         }
+                                                     ],
+                                        "tolerance":  0.05
+                                    }
+                     },
+                     {
+                         "p":  {
+                                   "oz":  "0.36*length",
+                                   "ox":  "0",
+                                   "oy":  "0"
+                               },
+                         "parent":  "YZ",
+                         "op":  "plane.set",
+                         "name":  "Fuselage cabin"
+                     },
+                     {
+                         "op":  "sketch.set",
+                         "name":  "Fuselage cabin",
+                         "sketch":  {
+                                        "plane":  "Fuselage cabin",
+                                        "entities":  [
+                                                         {
+                                                             "dof":  [
+                                                                         "0",
+                                                                         "0.006*length+0.044*length",
+                                                                         "0.70*(0.046*length)",
+                                                                         "0.006*length+0.55*(0.044*length)",
+                                                                         "0.046*length",
+                                                                         "0.006*length",
+                                                                         "0.75*(0.046*length)",
+                                                                         "0.006*length-0.62*(0.030*length)",
+                                                                         "0",
+                                                                         "0.006*length-(0.030*length)",
+                                                                         "-0.75*(0.046*length)",
+                                                                         "0.006*length-0.62*(0.030*length)",
+                                                                         "-(0.046*length)",
+                                                                         "0.006*length",
+                                                                         "-0.70*(0.046*length)",
+                                                                         "0.006*length+0.55*(0.044*length)"
+                                                                     ],
+                                                             "tension":  0.2,
+                                                             "name":  "section",
+                                                             "closed":  true,
+                                                             "kind":  "spline"
+                                                         }
+                                                     ],
+                                        "tolerance":  0.05
+                                    }
+                     },
+                     {
+                         "p":  {
+                                   "oz":  "0.50*length",
+                                   "ox":  "0",
+                                   "oy":  "0"
+                               },
+                         "parent":  "YZ",
+                         "op":  "plane.set",
+                         "name":  "Fuselage wing"
+                     },
+                     {
+                         "op":  "sketch.set",
+                         "name":  "Fuselage wing",
+                         "sketch":  {
+                                        "plane":  "Fuselage wing",
+                                        "entities":  [
+                                                         {
+                                                             "dof":  [
+                                                                         "0",
+                                                                         "0.003*length+0.034*length",
+                                                                         "0.70*(0.042*length)",
+                                                                         "0.003*length+0.55*(0.034*length)",
+                                                                         "0.042*length",
+                                                                         "0.003*length",
+                                                                         "0.75*(0.042*length)",
+                                                                         "0.003*length-0.62*(0.028*length)",
+                                                                         "0",
+                                                                         "0.003*length-(0.028*length)",
+                                                                         "-0.75*(0.042*length)",
+                                                                         "0.003*length-0.62*(0.028*length)",
+                                                                         "-(0.042*length)",
+                                                                         "0.003*length",
+                                                                         "-0.70*(0.042*length)",
+                                                                         "0.003*length+0.55*(0.034*length)"
+                                                                     ],
+                                                             "tension":  0.2,
+                                                             "name":  "section",
+                                                             "closed":  true,
+                                                             "kind":  "spline"
+                                                         }
+                                                     ],
+                                        "tolerance":  0.05
+                                    }
+                     },
+                     {
+                         "p":  {
+                                   "oz":  "0.68*length",
+                                   "ox":  "0",
+                                   "oy":  "0"
+                               },
+                         "parent":  "YZ",
+                         "op":  "plane.set",
+                         "name":  "Fuselage aft"
+                     },
+                     {
+                         "op":  "sketch.set",
+                         "name":  "Fuselage aft",
+                         "sketch":  {
+                                        "plane":  "Fuselage aft",
+                                        "entities":  [
+                                                         {
+                                                             "dof":  [
+                                                                         "0",
+                                                                         "0.005*length+0.026*length",
+                                                                         "0.70*(0.028*length)",
+                                                                         "0.005*length+0.55*(0.026*length)",
+                                                                         "0.028*length",
+                                                                         "0.005*length",
+                                                                         "0.75*(0.028*length)",
+                                                                         "0.005*length-0.62*(0.018*length)",
+                                                                         "0",
+                                                                         "0.005*length-(0.018*length)",
+                                                                         "-0.75*(0.028*length)",
+                                                                         "0.005*length-0.62*(0.018*length)",
+                                                                         "-(0.028*length)",
+                                                                         "0.005*length",
+                                                                         "-0.70*(0.028*length)",
+                                                                         "0.005*length+0.55*(0.026*length)"
+                                                                     ],
+                                                             "tension":  0.2,
+                                                             "name":  "section",
+                                                             "closed":  true,
+                                                             "kind":  "spline"
+                                                         }
+                                                     ],
+                                        "tolerance":  0.05
+                                    }
+                     },
+                     {
+                         "p":  {
+                                   "oz":  "0.86*length",
+                                   "ox":  "0",
+                                   "oy":  "0"
+                               },
+                         "parent":  "YZ",
+                         "op":  "plane.set",
+                         "name":  "Fuselage tail"
+                     },
+                     {
+                         "op":  "sketch.set",
+                         "name":  "Fuselage tail",
+                         "sketch":  {
+                                        "plane":  "Fuselage tail",
+                                        "entities":  [
+                                                         {
+                                                             "dof":  [
+                                                                         "0",
+                                                                         "0.007*length+0.015*length",
+                                                                         "0.70*(0.013*length)",
+                                                                         "0.007*length+0.55*(0.015*length)",
+                                                                         "0.013*length",
+                                                                         "0.007*length",
+                                                                         "0.75*(0.013*length)",
+                                                                         "0.007*length-0.62*(0.008*length)",
+                                                                         "0",
+                                                                         "0.007*length-(0.008*length)",
+                                                                         "-0.75*(0.013*length)",
+                                                                         "0.007*length-0.62*(0.008*length)",
+                                                                         "-(0.013*length)",
+                                                                         "0.007*length",
+                                                                         "-0.70*(0.013*length)",
+                                                                         "0.007*length+0.55*(0.015*length)"
+                                                                     ],
+                                                             "tension":  0.2,
+                                                             "name":  "section",
+                                                             "closed":  true,
+                                                             "kind":  "spline"
+                                                         }
+                                                     ],
+                                        "tolerance":  0.05
+                                    }
+                     },
+                     {
+                         "p":  {
+                                   "oz":  "length",
+                                   "ox":  "0",
+                                   "oy":  "0"
+                               },
+                         "parent":  "YZ",
+                         "op":  "plane.set",
+                         "name":  "Fuselage tip"
+                     },
+                     {
+                         "op":  "sketch.set",
+                         "name":  "Fuselage tip",
+                         "sketch":  {
+                                        "plane":  "Fuselage tip",
+                                        "entities":  [
+                                                         {
+                                                             "dof":  [
+                                                                         "0",
+                                                                         "0.006*length+0.003*length",
+                                                                         "0.70*(0.0035*length)",
+                                                                         "0.006*length+0.55*(0.003*length)",
+                                                                         "0.0035*length",
+                                                                         "0.006*length",
+                                                                         "0.75*(0.0035*length)",
+                                                                         "0.006*length-0.62*(0.002*length)",
+                                                                         "0",
+                                                                         "0.006*length-(0.002*length)",
+                                                                         "-0.75*(0.0035*length)",
+                                                                         "0.006*length-0.62*(0.002*length)",
+                                                                         "-(0.0035*length)",
+                                                                         "0.006*length",
+                                                                         "-0.70*(0.0035*length)",
+                                                                         "0.006*length+0.55*(0.003*length)"
+                                                                     ],
+                                                             "tension":  0.2,
+                                                             "name":  "section",
+                                                             "closed":  true,
+                                                             "kind":  "spline"
+                                                         }
+                                                     ],
+                                        "tolerance":  0.05
+                                    }
+                     },
+                     {
+                         "p":  {
+                                   "oz":  "wing_span/2",
+                                   "ox":  "0.36*length+sweep*wing_span",
+                                   "oy":  "-0.008*length+0.040*wing_span"
+                               },
+                         "parent":  "XZ",
+                         "op":  "plane.set",
+                         "name":  "Wing tip L"
+                     },
+                     {
+                         "op":  "sketch.set",
+                         "name":  "Wing tip L",
+                         "sketch":  {
+                                        "plane":  "Wing tip L",
+                                        "entities":  [
+                                                         {
+                                                             "dof":  [
+                                                                         "0",
+                                                                         "0.10*(0.85*wing_thickness*(0.38*wing_chord))",
+                                                                         "0.06*(0.38*wing_chord)",
+                                                                         "0.62*(0.85*wing_thickness*(0.38*wing_chord))",
+                                                                         "0.28*(0.38*wing_chord)",
+                                                                         "1.00*(0.85*wing_thickness*(0.38*wing_chord))",
+                                                                         "0.55*(0.38*wing_chord)",
+                                                                         "0.48*(0.85*wing_thickness*(0.38*wing_chord))",
+                                                                         "0.98*(0.38*wing_chord)",
+                                                                         "0.02*(0.85*wing_thickness*(0.38*wing_chord))",
+                                                                         "0.55*(0.38*wing_chord)",
+                                                                         "-0.28*(0.85*wing_thickness*(0.38*wing_chord))",
+                                                                         "0.25*(0.38*wing_chord)",
+                                                                         "-0.55*(0.85*wing_thickness*(0.38*wing_chord))",
+                                                                         "0.05*(0.38*wing_chord)",
+                                                                         "-0.22*(0.85*wing_thickness*(0.38*wing_chord))"
+                                                                     ],
+                                                             "tension":  0.2,
+                                                             "name":  "section",
+                                                             "closed":  true,
+                                                             "kind":  "spline"
+                                                         }
+                                                     ],
+                                        "tolerance":  0.05
+                                    }
+                     },
+                     {
+                         "p":  {
+                                   "oz":  "wing_span/4",
+                                   "ox":  "0.36*length+0.5*sweep*wing_span",
+                                   "oy":  "-0.008*length+0.018*wing_span"
+                               },
+                         "parent":  "XZ",
+                         "op":  "plane.set",
+                         "name":  "Wing mid L"
+                     },
+                     {
+                         "op":  "sketch.set",
+                         "name":  "Wing mid L",
+                         "sketch":  {
+                                        "plane":  "Wing mid L",
+                                        "entities":  [
+                                                         {
+                                                             "dof":  [
+                                                                         "0",
+                                                                         "0.10*(wing_thickness*(0.70*wing_chord))",
+                                                                         "0.06*(0.70*wing_chord)",
+                                                                         "0.62*(wing_thickness*(0.70*wing_chord))",
+                                                                         "0.28*(0.70*wing_chord)",
+                                                                         "1.00*(wing_thickness*(0.70*wing_chord))",
+                                                                         "0.55*(0.70*wing_chord)",
+                                                                         "0.48*(wing_thickness*(0.70*wing_chord))",
+                                                                         "0.98*(0.70*wing_chord)",
+                                                                         "0.02*(wing_thickness*(0.70*wing_chord))",
+                                                                         "0.55*(0.70*wing_chord)",
+                                                                         "-0.28*(wing_thickness*(0.70*wing_chord))",
+                                                                         "0.25*(0.70*wing_chord)",
+                                                                         "-0.55*(wing_thickness*(0.70*wing_chord))",
+                                                                         "0.05*(0.70*wing_chord)",
+                                                                         "-0.22*(wing_thickness*(0.70*wing_chord))"
+                                                                     ],
+                                                             "tension":  0.2,
+                                                             "name":  "section",
+                                                             "closed":  true,
+                                                             "kind":  "spline"
+                                                         }
+                                                     ],
+                                        "tolerance":  0.05
+                                    }
+                     },
+                     {
+                         "p":  {
+                                   "oz":  "0",
+                                   "ox":  "0.36*length",
+                                   "oy":  "-0.008*length"
+                               },
+                         "parent":  "XZ",
+                         "op":  "plane.set",
+                         "name":  "Wing root"
+                     },
+                     {
+                         "op":  "sketch.set",
+                         "name":  "Wing root",
+                         "sketch":  {
+                                        "plane":  "Wing root",
+                                        "entities":  [
+                                                         {
+                                                             "dof":  [
+                                                                         "0",
+                                                                         "0.10*(wing_thickness*wing_chord)",
+                                                                         "0.06*(wing_chord)",
+                                                                         "0.62*(wing_thickness*wing_chord)",
+                                                                         "0.28*(wing_chord)",
+                                                                         "1.00*(wing_thickness*wing_chord)",
+                                                                         "0.55*(wing_chord)",
+                                                                         "0.48*(wing_thickness*wing_chord)",
+                                                                         "0.98*(wing_chord)",
+                                                                         "0.02*(wing_thickness*wing_chord)",
+                                                                         "0.55*(wing_chord)",
+                                                                         "-0.28*(wing_thickness*wing_chord)",
+                                                                         "0.25*(wing_chord)",
+                                                                         "-0.55*(wing_thickness*wing_chord)",
+                                                                         "0.05*(wing_chord)",
+                                                                         "-0.22*(wing_thickness*wing_chord)"
+                                                                     ],
+                                                             "tension":  0.2,
+                                                             "name":  "section",
+                                                             "closed":  true,
+                                                             "kind":  "spline"
+                                                         }
+                                                     ],
+                                        "tolerance":  0.05
+                                    }
+                     },
+                     {
+                         "p":  {
+                                   "oz":  "-wing_span/4",
+                                   "ox":  "0.36*length+0.5*sweep*wing_span",
+                                   "oy":  "-0.008*length+0.018*wing_span"
+                               },
+                         "parent":  "XZ",
+                         "op":  "plane.set",
+                         "name":  "Wing mid R"
+                     },
+                     {
+                         "op":  "sketch.set",
+                         "name":  "Wing mid R",
+                         "sketch":  {
+                                        "plane":  "Wing mid R",
+                                        "entities":  [
+                                                         {
+                                                             "dof":  [
+                                                                         "0",
+                                                                         "0.10*(wing_thickness*(0.70*wing_chord))",
+                                                                         "0.06*(0.70*wing_chord)",
+                                                                         "0.62*(wing_thickness*(0.70*wing_chord))",
+                                                                         "0.28*(0.70*wing_chord)",
+                                                                         "1.00*(wing_thickness*(0.70*wing_chord))",
+                                                                         "0.55*(0.70*wing_chord)",
+                                                                         "0.48*(wing_thickness*(0.70*wing_chord))",
+                                                                         "0.98*(0.70*wing_chord)",
+                                                                         "0.02*(wing_thickness*(0.70*wing_chord))",
+                                                                         "0.55*(0.70*wing_chord)",
+                                                                         "-0.28*(wing_thickness*(0.70*wing_chord))",
+                                                                         "0.25*(0.70*wing_chord)",
+                                                                         "-0.55*(wing_thickness*(0.70*wing_chord))",
+                                                                         "0.05*(0.70*wing_chord)",
+                                                                         "-0.22*(wing_thickness*(0.70*wing_chord))"
+                                                                     ],
+                                                             "tension":  0.2,
+                                                             "name":  "section",
+                                                             "closed":  true,
+                                                             "kind":  "spline"
+                                                         }
+                                                     ],
+                                        "tolerance":  0.05
+                                    }
+                     },
+                     {
+                         "p":  {
+                                   "oz":  "-wing_span/2",
+                                   "ox":  "0.36*length+sweep*wing_span",
+                                   "oy":  "-0.008*length+0.040*wing_span"
+                               },
+                         "parent":  "XZ",
+                         "op":  "plane.set",
+                         "name":  "Wing tip R"
+                     },
+                     {
+                         "op":  "sketch.set",
+                         "name":  "Wing tip R",
+                         "sketch":  {
+                                        "plane":  "Wing tip R",
+                                        "entities":  [
+                                                         {
+                                                             "dof":  [
+                                                                         "0",
+                                                                         "0.10*(0.85*wing_thickness*(0.38*wing_chord))",
+                                                                         "0.06*(0.38*wing_chord)",
+                                                                         "0.62*(0.85*wing_thickness*(0.38*wing_chord))",
+                                                                         "0.28*(0.38*wing_chord)",
+                                                                         "1.00*(0.85*wing_thickness*(0.38*wing_chord))",
+                                                                         "0.55*(0.38*wing_chord)",
+                                                                         "0.48*(0.85*wing_thickness*(0.38*wing_chord))",
+                                                                         "0.98*(0.38*wing_chord)",
+                                                                         "0.02*(0.85*wing_thickness*(0.38*wing_chord))",
+                                                                         "0.55*(0.38*wing_chord)",
+                                                                         "-0.28*(0.85*wing_thickness*(0.38*wing_chord))",
+                                                                         "0.25*(0.38*wing_chord)",
+                                                                         "-0.55*(0.85*wing_thickness*(0.38*wing_chord))",
+                                                                         "0.05*(0.38*wing_chord)",
+                                                                         "-0.22*(0.85*wing_thickness*(0.38*wing_chord))"
+                                                                     ],
+                                                             "tension":  0.2,
+                                                             "name":  "section",
+                                                             "closed":  true,
+                                                             "kind":  "spline"
+                                                         }
+                                                     ],
+                                        "tolerance":  0.05
+                                    }
+                     },
+                     {
+                         "p":  {
+                                   "oz":  "tail_span/2",
+                                   "ox":  "0.80*length+0.06*tail_span",
+                                   "oy":  "0.016*length+0.020*tail_span"
+                               },
+                         "parent":  "XZ",
+                         "op":  "plane.set",
+                         "name":  "Tail tip L"
+                     },
+                     {
+                         "op":  "sketch.set",
+                         "name":  "Tail tip L",
+                         "sketch":  {
+                                        "plane":  "Tail tip L",
+                                        "entities":  [
+                                                         {
+                                                             "dof":  [
+                                                                         "0",
+                                                                         "0.10*(0.10*(0.20*wing_chord))",
+                                                                         "0.06*(0.20*wing_chord)",
+                                                                         "0.62*(0.10*(0.20*wing_chord))",
+                                                                         "0.28*(0.20*wing_chord)",
+                                                                         "1.00*(0.10*(0.20*wing_chord))",
+                                                                         "0.55*(0.20*wing_chord)",
+                                                                         "0.48*(0.10*(0.20*wing_chord))",
+                                                                         "0.98*(0.20*wing_chord)",
+                                                                         "0.02*(0.10*(0.20*wing_chord))",
+                                                                         "0.55*(0.20*wing_chord)",
+                                                                         "-0.28*(0.10*(0.20*wing_chord))",
+                                                                         "0.25*(0.20*wing_chord)",
+                                                                         "-0.55*(0.10*(0.20*wing_chord))",
+                                                                         "0.05*(0.20*wing_chord)",
+                                                                         "-0.22*(0.10*(0.20*wing_chord))"
+                                                                     ],
+                                                             "tension":  0.2,
+                                                             "name":  "section",
+                                                             "closed":  true,
+                                                             "kind":  "spline"
+                                                         }
+                                                     ],
+                                        "tolerance":  0.05
+                                    }
+                     },
+                     {
+                         "p":  {
+                                   "oz":  "0",
+                                   "ox":  "0.80*length",
+                                   "oy":  "0.016*length"
+                               },
+                         "parent":  "XZ",
+                         "op":  "plane.set",
+                         "name":  "Tail root"
+                     },
+                     {
+                         "op":  "sketch.set",
+                         "name":  "Tail root",
+                         "sketch":  {
+                                        "plane":  "Tail root",
+                                        "entities":  [
+                                                         {
+                                                             "dof":  [
+                                                                         "0",
+                                                                         "0.10*(0.10*(0.36*wing_chord))",
+                                                                         "0.06*(0.36*wing_chord)",
+                                                                         "0.62*(0.10*(0.36*wing_chord))",
+                                                                         "0.28*(0.36*wing_chord)",
+                                                                         "1.00*(0.10*(0.36*wing_chord))",
+                                                                         "0.55*(0.36*wing_chord)",
+                                                                         "0.48*(0.10*(0.36*wing_chord))",
+                                                                         "0.98*(0.36*wing_chord)",
+                                                                         "0.02*(0.10*(0.36*wing_chord))",
+                                                                         "0.55*(0.36*wing_chord)",
+                                                                         "-0.28*(0.10*(0.36*wing_chord))",
+                                                                         "0.25*(0.36*wing_chord)",
+                                                                         "-0.55*(0.10*(0.36*wing_chord))",
+                                                                         "0.05*(0.36*wing_chord)",
+                                                                         "-0.22*(0.10*(0.36*wing_chord))"
+                                                                     ],
+                                                             "tension":  0.2,
+                                                             "name":  "section",
+                                                             "closed":  true,
+                                                             "kind":  "spline"
+                                                         }
+                                                     ],
+                                        "tolerance":  0.05
+                                    }
+                     },
+                     {
+                         "p":  {
+                                   "oz":  "-tail_span/2",
+                                   "ox":  "0.80*length+0.06*tail_span",
+                                   "oy":  "0.016*length+0.020*tail_span"
+                               },
+                         "parent":  "XZ",
+                         "op":  "plane.set",
+                         "name":  "Tail tip R"
+                     },
+                     {
+                         "op":  "sketch.set",
+                         "name":  "Tail tip R",
+                         "sketch":  {
+                                        "plane":  "Tail tip R",
+                                        "entities":  [
+                                                         {
+                                                             "dof":  [
+                                                                         "0",
+                                                                         "0.10*(0.10*(0.20*wing_chord))",
+                                                                         "0.06*(0.20*wing_chord)",
+                                                                         "0.62*(0.10*(0.20*wing_chord))",
+                                                                         "0.28*(0.20*wing_chord)",
+                                                                         "1.00*(0.10*(0.20*wing_chord))",
+                                                                         "0.55*(0.20*wing_chord)",
+                                                                         "0.48*(0.10*(0.20*wing_chord))",
+                                                                         "0.98*(0.20*wing_chord)",
+                                                                         "0.02*(0.10*(0.20*wing_chord))",
+                                                                         "0.55*(0.20*wing_chord)",
+                                                                         "-0.28*(0.10*(0.20*wing_chord))",
+                                                                         "0.25*(0.20*wing_chord)",
+                                                                         "-0.55*(0.10*(0.20*wing_chord))",
+                                                                         "0.05*(0.20*wing_chord)",
+                                                                         "-0.22*(0.10*(0.20*wing_chord))"
+                                                                     ],
+                                                             "tension":  0.2,
+                                                             "name":  "section",
+                                                             "closed":  true,
+                                                             "kind":  "spline"
+                                                         }
+                                                     ],
+                                        "tolerance":  0.05
+                                    }
+                     },
+                     {
+                         "p":  {
+                                   "oz":  "0.020*length",
+                                   "ox":  "0.72*length",
+                                   "oy":  "0"
+                               },
+                         "parent":  "XY",
+                         "op":  "plane.set",
+                         "name":  "Fin root"
+                     },
+                     {
+                         "op":  "sketch.set",
+                         "name":  "Fin root",
+                         "sketch":  {
+                                        "plane":  "Fin root",
+                                        "entities":  [
+                                                         {
+                                                             "dof":  [
+                                                                         "0",
+                                                                         "0.12*(0.10*(0.32*wing_chord))",
+                                                                         "0.08*(0.32*wing_chord)",
+                                                                         "0.85*(0.10*(0.32*wing_chord))",
+                                                                         "0.30*(0.32*wing_chord)",
+                                                                         "1.00*(0.10*(0.32*wing_chord))",
+                                                                         "0.62*(0.32*wing_chord)",
+                                                                         "0.40*(0.10*(0.32*wing_chord))",
+                                                                         "0.98*(0.32*wing_chord)",
+                                                                         "0",
+                                                                         "0.62*(0.32*wing_chord)",
+                                                                         "-0.40*(0.10*(0.32*wing_chord))",
+                                                                         "0.30*(0.32*wing_chord)",
+                                                                         "-1.00*(0.10*(0.32*wing_chord))",
+                                                                         "0.08*(0.32*wing_chord)",
+                                                                         "-0.85*(0.10*(0.32*wing_chord))"
+                                                                     ],
+                                                             "tension":  0.2,
+                                                             "name":  "section",
+                                                             "closed":  true,
+                                                             "kind":  "spline"
+                                                         }
+                                                     ],
+                                        "tolerance":  0.05
+                                    }
+                     },
+                     {
+                         "p":  {
+                                   "oz":  "0.10*length",
+                                   "ox":  "0.78*length",
+                                   "oy":  "0"
+                               },
+                         "parent":  "XY",
+                         "op":  "plane.set",
+                         "name":  "Fin mid"
+                     },
+                     {
+                         "op":  "sketch.set",
+                         "name":  "Fin mid",
+                         "sketch":  {
+                                        "plane":  "Fin mid",
+                                        "entities":  [
+                                                         {
+                                                             "dof":  [
+                                                                         "0",
+                                                                         "0.12*(0.10*(0.22*wing_chord))",
+                                                                         "0.08*(0.22*wing_chord)",
+                                                                         "0.85*(0.10*(0.22*wing_chord))",
+                                                                         "0.30*(0.22*wing_chord)",
+                                                                         "1.00*(0.10*(0.22*wing_chord))",
+                                                                         "0.62*(0.22*wing_chord)",
+                                                                         "0.40*(0.10*(0.22*wing_chord))",
+                                                                         "0.98*(0.22*wing_chord)",
+                                                                         "0",
+                                                                         "0.62*(0.22*wing_chord)",
+                                                                         "-0.40*(0.10*(0.22*wing_chord))",
+                                                                         "0.30*(0.22*wing_chord)",
+                                                                         "-1.00*(0.10*(0.22*wing_chord))",
+                                                                         "0.08*(0.22*wing_chord)",
+                                                                         "-0.85*(0.10*(0.22*wing_chord))"
+                                                                     ],
+                                                             "tension":  0.2,
+                                                             "name":  "section",
+                                                             "closed":  true,
+                                                             "kind":  "spline"
+                                                         }
+                                                     ],
+                                        "tolerance":  0.05
+                                    }
+                     },
+                     {
+                         "p":  {
+                                   "oz":  "0.19*length",
+                                   "ox":  "0.86*length",
+                                   "oy":  "0"
+                               },
+                         "parent":  "XY",
+                         "op":  "plane.set",
+                         "name":  "Fin tip"
+                     },
+                     {
+                         "op":  "sketch.set",
+                         "name":  "Fin tip",
+                         "sketch":  {
+                                        "plane":  "Fin tip",
+                                        "entities":  [
+                                                         {
+                                                             "dof":  [
+                                                                         "0",
+                                                                         "0.12*(0.10*(0.11*wing_chord))",
+                                                                         "0.08*(0.11*wing_chord)",
+                                                                         "0.85*(0.10*(0.11*wing_chord))",
+                                                                         "0.30*(0.11*wing_chord)",
+                                                                         "1.00*(0.10*(0.11*wing_chord))",
+                                                                         "0.62*(0.11*wing_chord)",
+                                                                         "0.40*(0.10*(0.11*wing_chord))",
+                                                                         "0.98*(0.11*wing_chord)",
+                                                                         "0",
+                                                                         "0.62*(0.11*wing_chord)",
+                                                                         "-0.40*(0.10*(0.11*wing_chord))",
+                                                                         "0.30*(0.11*wing_chord)",
+                                                                         "-1.00*(0.10*(0.11*wing_chord))",
+                                                                         "0.08*(0.11*wing_chord)",
+                                                                         "-0.85*(0.10*(0.11*wing_chord))"
+                                                                     ],
+                                                             "tension":  0.2,
+                                                             "name":  "section",
+                                                             "closed":  true,
+                                                             "kind":  "spline"
+                                                         }
+                                                     ],
+                                        "tolerance":  0.05
+                                    }
+                     },
+                     {
+                         "op":  "sketch.set",
+                         "name":  "Spinner",
+                         "sketch":  {
+                                        "plane":  "XY",
+                                        "entities":  [
+                                                         {
+                                                             "dof":  [
+                                                                         "-0.055*length",
+                                                                         "0.003*length",
+                                                                         "-0.028*length",
+                                                                         "0.020*length",
+                                                                         "0",
+                                                                         "0.018*length",
+                                                                         "0.028*length",
+                                                                         "0.007*length"
+                                                                     ],
+                                                             "tension":  0.2,
+                                                             "name":  "section",
+                                                             "closed":  false,
+                                                             "kind":  "spline"
+                                                         }
+                                                     ],
+                                        "tolerance":  0.05
+                                    }
+                     },
+                     {
+                         "p":  {
+                                   "oz":  "-0.03*wing_span",
+                                   "ox":  "-0.012*length",
+                                   "oy":  "0"
+                               },
+                         "parent":  "XZ",
+                         "op":  "plane.set",
+                         "name":  "Blade R root"
+                     },
+                     {
+                         "op":  "sketch.set",
+                         "name":  "Blade R root",
+                         "sketch":  {
+                                        "plane":  "Blade R root",
+                                        "entities":  [
+                                                         {
+                                                             "dof":  [
+                                                                         "0",
+                                                                         "0.20*(0.22*(0.14*wing_chord))",
+                                                                         "0.12*(0.14*wing_chord)",
+                                                                         "0.75*(0.22*(0.14*wing_chord))-0.05*(0.14*wing_chord)",
+                                                                         "0.40*(0.14*wing_chord)",
+                                                                         "0.40*(0.22*(0.14*wing_chord))-0.16*(0.14*wing_chord)",
+                                                                         "0.75*(0.14*wing_chord)",
+                                                                         "-0.28*(0.14*wing_chord)",
+                                                                         "0.98*(0.14*wing_chord)",
+                                                                         "-0.40*(0.14*wing_chord)",
+                                                                         "0.60*(0.14*wing_chord)",
+                                                                         "-0.30*(0.22*(0.14*wing_chord))-0.26*(0.14*wing_chord)",
+                                                                         "0.28*(0.14*wing_chord)",
+                                                                         "-0.40*(0.22*(0.14*wing_chord))-0.12*(0.14*wing_chord)",
+                                                                         "0.06*(0.14*wing_chord)",
+                                                                         "-0.15*(0.22*(0.14*wing_chord))"
+                                                                     ],
+                                                             "tension":  0.2,
+                                                             "name":  "section",
+                                                             "closed":  true,
+                                                             "kind":  "spline"
+                                                         }
+                                                     ],
+                                        "tolerance":  0.05
+                                    }
+                     },
+                     {
+                         "p":  {
+                                   "oz":  "-0.08*wing_span",
+                                   "ox":  "-0.012*length",
+                                   "oy":  "0"
+                               },
+                         "parent":  "XZ",
+                         "op":  "plane.set",
+                         "name":  "Blade R mid"
+                     },
+                     {
+                         "op":  "sketch.set",
+                         "name":  "Blade R mid",
+                         "sketch":  {
+                                        "plane":  "Blade R mid",
+                                        "entities":  [
+                                                         {
+                                                             "dof":  [
+                                                                         "0",
+                                                                         "0.20*(0.18*(0.18*wing_chord))",
+                                                                         "0.12*(0.18*wing_chord)",
+                                                                         "0.75*(0.18*(0.18*wing_chord))-0.05*(0.18*wing_chord)",
+                                                                         "0.40*(0.18*wing_chord)",
+                                                                         "0.40*(0.18*(0.18*wing_chord))-0.16*(0.18*wing_chord)",
+                                                                         "0.75*(0.18*wing_chord)",
+                                                                         "-0.28*(0.18*wing_chord)",
+                                                                         "0.98*(0.18*wing_chord)",
+                                                                         "-0.40*(0.18*wing_chord)",
+                                                                         "0.60*(0.18*wing_chord)",
+                                                                         "-0.30*(0.18*(0.18*wing_chord))-0.26*(0.18*wing_chord)",
+                                                                         "0.28*(0.18*wing_chord)",
+                                                                         "-0.40*(0.18*(0.18*wing_chord))-0.12*(0.18*wing_chord)",
+                                                                         "0.06*(0.18*wing_chord)",
+                                                                         "-0.15*(0.18*(0.18*wing_chord))"
+                                                                     ],
+                                                             "tension":  0.2,
+                                                             "name":  "section",
+                                                             "closed":  true,
+                                                             "kind":  "spline"
+                                                         }
+                                                     ],
+                                        "tolerance":  0.05
+                                    }
+                     },
+                     {
+                         "p":  {
+                                   "oz":  "-0.15*wing_span",
+                                   "ox":  "-0.012*length",
+                                   "oy":  "0"
+                               },
+                         "parent":  "XZ",
+                         "op":  "plane.set",
+                         "name":  "Blade R tip"
+                     },
+                     {
+                         "op":  "sketch.set",
+                         "name":  "Blade R tip",
+                         "sketch":  {
+                                        "plane":  "Blade R tip",
+                                        "entities":  [
+                                                         {
+                                                             "dof":  [
+                                                                         "0",
+                                                                         "0.20*(0.16*(0.07*wing_chord))",
+                                                                         "0.12*(0.07*wing_chord)",
+                                                                         "0.75*(0.16*(0.07*wing_chord))-0.05*(0.07*wing_chord)",
+                                                                         "0.40*(0.07*wing_chord)",
+                                                                         "0.40*(0.16*(0.07*wing_chord))-0.16*(0.07*wing_chord)",
+                                                                         "0.75*(0.07*wing_chord)",
+                                                                         "-0.28*(0.07*wing_chord)",
+                                                                         "0.98*(0.07*wing_chord)",
+                                                                         "-0.40*(0.07*wing_chord)",
+                                                                         "0.60*(0.07*wing_chord)",
+                                                                         "-0.30*(0.16*(0.07*wing_chord))-0.26*(0.07*wing_chord)",
+                                                                         "0.28*(0.07*wing_chord)",
+                                                                         "-0.40*(0.16*(0.07*wing_chord))-0.12*(0.07*wing_chord)",
+                                                                         "0.06*(0.07*wing_chord)",
+                                                                         "-0.15*(0.16*(0.07*wing_chord))"
+                                                                     ],
+                                                             "tension":  0.2,
+                                                             "name":  "section",
+                                                             "closed":  true,
+                                                             "kind":  "spline"
+                                                         }
+                                                     ],
+                                        "tolerance":  0.05
+                                    }
+                     },
+                     {
+                         "p":  {
+                                   "oz":  "0.03*wing_span",
+                                   "ox":  "-0.012*length",
+                                   "oy":  "0"
+                               },
+                         "parent":  "XZ",
+                         "op":  "plane.set",
+                         "name":  "Blade L root"
+                     },
+                     {
+                         "op":  "sketch.set",
+                         "name":  "Blade L root",
+                         "sketch":  {
+                                        "plane":  "Blade L root",
+                                        "entities":  [
+                                                         {
+                                                             "dof":  [
+                                                                         "0",
+                                                                         "0.20*(0.22*(0.14*wing_chord))",
+                                                                         "0.12*(0.14*wing_chord)",
+                                                                         "0.75*(0.22*(0.14*wing_chord))-0.05*(0.14*wing_chord)",
+                                                                         "0.40*(0.14*wing_chord)",
+                                                                         "0.40*(0.22*(0.14*wing_chord))-0.16*(0.14*wing_chord)",
+                                                                         "0.75*(0.14*wing_chord)",
+                                                                         "-0.28*(0.14*wing_chord)",
+                                                                         "0.98*(0.14*wing_chord)",
+                                                                         "-0.40*(0.14*wing_chord)",
+                                                                         "0.60*(0.14*wing_chord)",
+                                                                         "-0.30*(0.22*(0.14*wing_chord))-0.26*(0.14*wing_chord)",
+                                                                         "0.28*(0.14*wing_chord)",
+                                                                         "-0.40*(0.22*(0.14*wing_chord))-0.12*(0.14*wing_chord)",
+                                                                         "0.06*(0.14*wing_chord)",
+                                                                         "-0.15*(0.22*(0.14*wing_chord))"
+                                                                     ],
+                                                             "tension":  0.2,
+                                                             "name":  "section",
+                                                             "closed":  true,
+                                                             "kind":  "spline"
+                                                         }
+                                                     ],
+                                        "tolerance":  0.05
+                                    }
+                     },
+                     {
+                         "p":  {
+                                   "oz":  "0.08*wing_span",
+                                   "ox":  "-0.012*length",
+                                   "oy":  "0"
+                               },
+                         "parent":  "XZ",
+                         "op":  "plane.set",
+                         "name":  "Blade L mid"
+                     },
+                     {
+                         "op":  "sketch.set",
+                         "name":  "Blade L mid",
+                         "sketch":  {
+                                        "plane":  "Blade L mid",
+                                        "entities":  [
+                                                         {
+                                                             "dof":  [
+                                                                         "0",
+                                                                         "0.20*(0.18*(0.18*wing_chord))",
+                                                                         "0.12*(0.18*wing_chord)",
+                                                                         "0.75*(0.18*(0.18*wing_chord))-0.05*(0.18*wing_chord)",
+                                                                         "0.40*(0.18*wing_chord)",
+                                                                         "0.40*(0.18*(0.18*wing_chord))-0.16*(0.18*wing_chord)",
+                                                                         "0.75*(0.18*wing_chord)",
+                                                                         "-0.28*(0.18*wing_chord)",
+                                                                         "0.98*(0.18*wing_chord)",
+                                                                         "-0.40*(0.18*wing_chord)",
+                                                                         "0.60*(0.18*wing_chord)",
+                                                                         "-0.30*(0.18*(0.18*wing_chord))-0.26*(0.18*wing_chord)",
+                                                                         "0.28*(0.18*wing_chord)",
+                                                                         "-0.40*(0.18*(0.18*wing_chord))-0.12*(0.18*wing_chord)",
+                                                                         "0.06*(0.18*wing_chord)",
+                                                                         "-0.15*(0.18*(0.18*wing_chord))"
+                                                                     ],
+                                                             "tension":  0.2,
+                                                             "name":  "section",
+                                                             "closed":  true,
+                                                             "kind":  "spline"
+                                                         }
+                                                     ],
+                                        "tolerance":  0.05
+                                    }
+                     },
+                     {
+                         "p":  {
+                                   "oz":  "0.15*wing_span",
+                                   "ox":  "-0.012*length",
+                                   "oy":  "0"
+                               },
+                         "parent":  "XZ",
+                         "op":  "plane.set",
+                         "name":  "Blade L tip"
+                     },
+                     {
+                         "op":  "sketch.set",
+                         "name":  "Blade L tip",
+                         "sketch":  {
+                                        "plane":  "Blade L tip",
+                                        "entities":  [
+                                                         {
+                                                             "dof":  [
+                                                                         "0",
+                                                                         "0.20*(0.16*(0.07*wing_chord))",
+                                                                         "0.12*(0.07*wing_chord)",
+                                                                         "0.75*(0.16*(0.07*wing_chord))-0.05*(0.07*wing_chord)",
+                                                                         "0.40*(0.07*wing_chord)",
+                                                                         "0.40*(0.16*(0.07*wing_chord))-0.16*(0.07*wing_chord)",
+                                                                         "0.75*(0.07*wing_chord)",
+                                                                         "-0.28*(0.07*wing_chord)",
+                                                                         "0.98*(0.07*wing_chord)",
+                                                                         "-0.40*(0.07*wing_chord)",
+                                                                         "0.60*(0.07*wing_chord)",
+                                                                         "-0.30*(0.16*(0.07*wing_chord))-0.26*(0.07*wing_chord)",
+                                                                         "0.28*(0.07*wing_chord)",
+                                                                         "-0.40*(0.16*(0.07*wing_chord))-0.12*(0.07*wing_chord)",
+                                                                         "0.06*(0.07*wing_chord)",
+                                                                         "-0.15*(0.16*(0.07*wing_chord))"
+                                                                     ],
+                                                             "tension":  0.2,
+                                                             "name":  "section",
+                                                             "closed":  true,
+                                                             "kind":  "spline"
+                                                         }
+                                                     ],
+                                        "tolerance":  0.05
+                                    }
+                     },
+                     {
+                         "p":  {
+                                   "ruled":  "0",
+                                   "solid":  "1"
+                               },
+                         "op":  "feature.add",
+                         "name":  "Fuselage",
+                         "native":  {
+                                        "sections":  [
+                                                         "Fuselage nose",
+                                                         "Fuselage cockpit",
+                                                         "Fuselage cabin",
+                                                         "Fuselage wing",
+                                                         "Fuselage aft",
+                                                         "Fuselage tail",
+                                                         "Fuselage tip"
+                                                     ]
+                                    },
+                         "type":  "loft"
+                     },
+                     {
+                         "p":  {
+                                   "ruled":  "0",
+                                   "solid":  "1"
+                               },
+                         "op":  "feature.add",
+                         "name":  "Wing",
+                         "native":  {
+                                        "sections":  [
+                                                         "Wing tip L",
+                                                         "Wing mid L",
+                                                         "Wing root",
+                                                         "Wing mid R",
+                                                         "Wing tip R"
+                                                     ]
+                                    },
+                         "type":  "loft"
+                     },
+                     {
+                         "p":  {
+                                   "ruled":  "0",
+                                   "solid":  "1"
+                               },
+                         "op":  "feature.add",
+                         "name":  "Horizontal tail",
+                         "native":  {
+                                        "sections":  [
+                                                         "Tail tip L",
+                                                         "Tail root",
+                                                         "Tail tip R"
+                                                     ]
+                                    },
+                         "type":  "loft"
+                     },
+                     {
+                         "p":  {
+                                   "ruled":  "0",
+                                   "solid":  "1"
+                               },
+                         "op":  "feature.add",
+                         "name":  "Vertical fin",
+                         "native":  {
+                                        "sections":  [
+                                                         "Fin root",
+                                                         "Fin mid",
+                                                         "Fin tip"
+                                                     ]
+                                    },
+                         "type":  "loft"
+                     },
+                     {
+                         "p":  {
+                                   "solid":  "0",
+                                   "sketch":  "Spinner",
+                                   "angle":  "360"
+                               },
+                         "op":  "feature.add",
+                         "name":  "Spinner",
+                         "native":  {
+                                        "axis":  "X"
+                                    },
+                         "type":  "revolve_surface"
+                     },
+                     {
+                         "p":  {
+                                   "ruled":  "0",
+                                   "solid":  "1"
+                               },
+                         "op":  "feature.add",
+                         "name":  "Propeller R",
+                         "native":  {
+                                        "sections":  [
+                                                         "Blade R root",
+                                                         "Blade R mid",
+                                                         "Blade R tip"
+                                                     ]
+                                    },
+                         "type":  "loft"
+                     },
+                     {
+                         "p":  {
+                                   "ruled":  "0",
+                                   "solid":  "1"
+                               },
+                         "op":  "feature.add",
+                         "name":  "Propeller L",
+                         "native":  {
+                                        "sections":  [
+                                                         "Blade L root",
+                                                         "Blade L mid",
+                                                         "Blade L tip"
+                                                     ]
+                                    },
+                         "type":  "loft"
+                     }
+                 ]
+}

@@ -1,9 +1,15 @@
 // ARK-Point :: io.cpp — mesh export (binary STL/OBJ), minimal PNG writer,
 // and an offscreen software rasterizer used by agents to "see" the model.
 #include "ark/io.hpp"
+#include "ark/mesh_model.hpp"
+#include <algorithm>
+#include <cctype>
 #include <cstdio>
+#include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <cmath>
+#include <sstream>
 
 namespace ark {
 
@@ -46,6 +52,141 @@ bool exportOBJ(const char* path, const Mesh& m) {
         f<<"f "<<a<<"//"<<a<<" "<<b<<"//"<<b<<" "<<c<<"//"<<c<<"\n";
     }
     return true;
+}
+
+namespace {
+std::string lowerExt(const std::string& path) {
+    auto dot = path.find_last_of('.');
+    std::string ext = dot == std::string::npos ? std::string() : path.substr(dot);
+    for (char& c : ext) c = (char)std::tolower((unsigned char)c);
+    return ext;
+}
+void requireMeshLimits(const Mesh& mesh) {
+    if (!mesh.triCount()) throw std::runtime_error("Imported mesh has no triangles");
+    if (mesh.vertCount() > kMeshModelMaxVertices || mesh.triCount() > kMeshModelMaxTriangles)
+        throw std::runtime_error("Imported mesh exceeds 12288 vertices or 4096 triangles");
+    for (float value : mesh.pos)
+        if (!std::isfinite(value) || std::fabs(value) > 1.0e6f)
+            throw std::runtime_error("Imported mesh coordinate is not finite or exceeds 1e6 mm");
+}
+Mesh meshFromTriangles(const std::vector<Vec3>& triangles) {
+    if (triangles.empty() || triangles.size() % 3) throw std::runtime_error("Imported mesh has no triangles");
+    Mesh mesh;
+    mesh.pos.reserve(triangles.size() * 3);
+    mesh.idx.reserve(triangles.size());
+    for (size_t i = 0; i < triangles.size(); ++i) {
+        mesh.addVertex(triangles[i]);
+        mesh.idx.push_back((u32)i);
+    }
+    requireMeshLimits(mesh);
+    mesh.computeNormals();
+    return mesh;
+}
+Mesh readBinaryStl(std::istream& in, std::uintmax_t bytes) {
+    char header[80];
+    in.read(header, 80);
+    u32 count = 0;
+    in.read(reinterpret_cast<char*>(&count), 4);
+    if (!in || bytes != 84ull + 50ull * count) throw std::runtime_error("STL binary length does not match its triangle count");
+    if (count > kMeshModelMaxTriangles) throw std::runtime_error("Imported mesh exceeds 4096 triangles");
+    std::vector<Vec3> triangles;
+    triangles.reserve((size_t)count * 3);
+    for (u32 i = 0; i < count; ++i) {
+        float record[12];
+        in.read(reinterpret_cast<char*>(record), sizeof(record));
+        u16 attribute = 0;
+        in.read(reinterpret_cast<char*>(&attribute), 2);
+        if (!in) throw std::runtime_error("Truncated binary STL");
+        for (int v = 0; v < 3; ++v)
+            triangles.push_back({record[3 + v * 3], record[4 + v * 3], record[5 + v * 3]});
+    }
+    return meshFromTriangles(triangles);
+}
+Mesh readAsciiStl(const std::string& text) {
+    std::vector<Vec3> triangles;
+    std::istringstream in(text);
+    std::string word;
+    while (in >> word) {
+        if (word != "vertex") continue;
+        double x, y, z;
+        if (!(in >> x >> y >> z)) throw std::runtime_error("ASCII STL vertex is incomplete");
+        triangles.push_back({x, y, z});
+    }
+    return meshFromTriangles(triangles);
+}
+int objIndex(int authored, int count) {
+    int index = authored > 0 ? authored - 1 : count + authored;
+    if (index < 0 || index >= count) throw std::runtime_error("OBJ face index is out of range");
+    return index;
+}
+Mesh readObj(const std::string& text) {
+    std::vector<Vec3> vertices;
+    Mesh mesh;
+    std::istringstream in(text);
+    std::string line;
+    while (std::getline(in, line)) {
+        if (line.empty() || line[0] == '#') continue;
+        std::istringstream row(line);
+        std::string kind;
+        row >> kind;
+        if (kind == "v") {
+            double x, y, z;
+            if (!(row >> x >> y >> z)) throw std::runtime_error("OBJ vertex is incomplete");
+            vertices.push_back({x, y, z});
+        } else if (kind == "f") {
+            std::vector<int> face;
+            std::string token;
+            while (row >> token) {
+                auto slash = token.find('/');
+                int authored = std::atoi(slash == std::string::npos ? token.c_str() : token.substr(0, slash).c_str());
+                if (!authored) throw std::runtime_error("OBJ face index is invalid");
+                face.push_back(objIndex(authored, (int)vertices.size()));
+            }
+            if (face.size() < 3) throw std::runtime_error("OBJ face needs at least three vertices");
+            if (face.size() > 64) throw std::runtime_error("OBJ face exceeds 64 corners");
+            for (size_t i = 1; i + 1 < face.size(); ++i) mesh.addTri3((u32)face[0], (u32)face[i], (u32)face[i + 1]);
+        }
+    }
+    mesh.pos.reserve(vertices.size() * 3);
+    for (const Vec3& vertex : vertices) mesh.addVertex(vertex);
+    requireMeshLimits(mesh);
+    mesh.computeNormals();
+    return mesh;
+}
+}
+
+Mesh importMeshPath(const std::string& path) {
+    std::ifstream file(std::filesystem::u8path(path), std::ios::binary);
+    if (!file) throw std::runtime_error("Could not open mesh file");
+    file.seekg(0, std::ios::end);
+    const auto bytes = file.tellg();
+    file.seekg(0);
+    if (bytes < 0 || (std::uintmax_t)bytes > 32ull * 1024ull * 1024ull)
+        throw std::runtime_error("Mesh file exceeds the 32 MiB import limit");
+    const std::string ext = lowerExt(path);
+    if (ext == ".stl") {
+        std::string text((size_t)bytes, '\0');
+        file.read(text.data(), bytes);
+        if (bytes >= 84) {
+            file.clear();
+            file.seekg(0);
+            u32 count = 0;
+            file.seekg(80);
+            file.read(reinterpret_cast<char*>(&count), 4);
+            if (file && (std::uintmax_t)bytes == 84ull + 50ull * count) {
+                file.clear();
+                file.seekg(0);
+                return readBinaryStl(file, (std::uintmax_t)bytes);
+            }
+        }
+        return readAsciiStl(text);
+    }
+    if (ext == ".obj") {
+        std::string text((size_t)bytes, '\0');
+        file.read(text.data(), bytes);
+        return readObj(text);
+    }
+    throw std::runtime_error("Mesh import supports .stl and .obj");
 }
 
 // ---------------------------------------------------------------------------

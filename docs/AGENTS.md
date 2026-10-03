@@ -131,7 +131,7 @@ uses OCCT 8.0.1 from [the pinned SDK](NATIVE_BUILD.md).
 
 ## 0.9 exact references, assembly mates and authored sheet graphs
 
-The API currently lists **33 tools**. `reference_inspect{id,reference?,fraction?}`
+The API currently lists **34 tools**. `reference_inspect{id,reference?,fraction?}`
 discovers producer-authored exact face, edge and axis names and resolves their
 local frames. `sketch_diagnose{name}` or `sketch_diagnose{sketch}` reports
 per-constraint residuals and local rank without changing the document. Use
@@ -164,3 +164,58 @@ edit the document, change the exact export pose, or certify a bend trajectory.
 The 0.7 live Studio connection remains the way an MCP client works on the
 currently open document. A standalone `ark-mcp` process still has its own
 document, and session edits still require the current revision for safe batches.
+
+`import_mesh{path,name?,weld_mm?,expected_revision?}` is the 34th tool. It
+reads `.stl` or `.obj` once and stores a `mesh_body`. `weld_mm` is optional and
+must lie in `(0, 1]`. The file is not linked. Caps are 12288 vertices, 4096
+triangles, coordinates within 1e6 mm, a 32 MiB source file, and the existing
+4 MiB document limit. OBJ faces with more than three corners are fanned from
+the first vertex and are limited to 64 corners. Binary STL is recognized when
+the file length is `84 + 50 * count`; otherwise the text form is read.
+
+`doc_apply` also accepts exact `sweep`, `extrude_surface`, `revolve_surface`,
+`offset_surface`, and `sew`, plus sampled `mesh_body`, `mesh_weld`,
+`mesh_smooth`, `mesh_decimate`, `mesh_offset`, and `mesh_fill`. Exact surface
+arguments and examples are in [surfacing](SURFACING.md). A document that
+contains one of these features is version 8. Save chooses the document
+version. Draft, `linear_pattern`, `circular_pattern`, `mirror`, fillet or
+chamfer `native.selection`, loft smoothing or compatibility, or a one-point
+loft tip makes that save version 9. Mirror accepts `native.plane` as `XY`,
+`XZ`, `YZ`, or a datum name, or `native.face` for one planar face. Selecting
+a face, edge, or curve in Studio stores that semantic name and does not add
+a further version. Older documents stay at their previous version and remain
+readable. The product version stays 0.9.0 and the tool list stays 34.
+
+Mesh features store no B-rep. `mesh_body` keeps the authored
+`mesh:{positions,indices}` object; positions are three numbers per vertex and
+indices are three per triangle, with the same vertex and triangle caps as
+import. Evaluation bakes f32 coordinates and writes a report onto the body.
+`mesh_inspect{id}` attaches that report as `mesh_model` when the feature is a
+mesh operation. `native_inspect` on a mesh feature fails and tells the caller
+to use `mesh_inspect`.
+
+`mesh_weld` takes one input. `p.epsilon` defaults to 1e-4 mm and must be in
+`(0, 1]`. It may run on a non-manifold mesh. A result with no triangles is
+rejected. `mesh_smooth` is a uniform Laplacian: `p.iterations` is an integer
+from 1 to 64, `p.lambda` defaults to 0.5 in `(0, 1]`, and `p.pin_boundary`
+defaults to 1. `mesh_decimate` collapses interior edges to their midpoint using
+quadric error. `p.ratio` is required and lies in `[0.05, 1]`. Boundary edges
+are not collapsed. If the input is closed and oriented, the output stays
+closed; if it is open, the boundary-edge count stays the same. When the ratio
+cannot be met without breaking that rule, the feature still succeeds and
+`target_reached` is false. `mesh_offset` moves vertices along normals by
+`p.distance`, with absolute value in `(1e-9, 1e4]`. A closed oriented input is
+oriented outward first, so a positive distance grows it. The report's
+`offset_model` is `vertex_normal`: corners of a box move by about
+`distance/sqrt(3)` per axis, not by a constant shell. `mesh_fill` closes each
+boundary loop that lies within 1e-4 mm of one plane, using an ear clip of 3 to
+256 vertices. Non-planar loops fail and name the measured deviation;
+`surface_fill` is the exact operation for a curved boundary.
+
+Smooth, decimate, offset, and fill reject non-manifold, inconsistent,
+degenerate, or non-finite input, and they accept at most 12000 triangles.
+Every mesh report sets `mesh_authoritative` true, `exact_geometry` false, and
+`self_intersections_checked` false. `sampled_from_brep` is true only after an
+explicit `p.sample` of 1. Legacy analytic bodies have no B-rep and can enter a
+mesh operation without that flag. Call `agent_onboard{topic:"mesh"}` for the
+current example.

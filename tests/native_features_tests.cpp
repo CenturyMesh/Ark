@@ -1,4 +1,5 @@
 #include "ark/agent.hpp"
+#include "ark/serialize.hpp"
 
 #include <cmath>
 #include <chrono>
@@ -100,6 +101,47 @@ void testNurbsExpressionsAndThicken() {
     check(session.revision == revision, "rejected approximate transform leaves history unchanged");
 }
 
+void testExtendedSurfacesAndMeshConsent() {
+    ark::AgentSession session;
+    const Value created = accepted(session.call("doc_apply", parse(R"({"expected_revision":0,"commands":[
+      {"op":"sketch.set","name":"Section","sketch":{"entities":[{"kind":"circle","dof":[0,0,2]}]}},
+      {"op":"sketch.set","name":"Spine","sketch":{"plane":"XZ","entities":[{"kind":"line","dof":[0,0,0,20]}]}},
+      {"op":"sketch.set","name":"Rail","sketch":{"entities":[{"kind":"line","dof":[0,0,10,0]}]}},
+      {"op":"sketch.set","name":"Generatrix","sketch":{"entities":[{"kind":"line","dof":[5,0,5,10]}]}},
+      {"op":"feature.add","type":"sweep","name":"Swept cylinder","p":{"solid":"1"},"native":{"section":"Section","path":"Spine"}},
+      {"op":"feature.add","type":"extrude_surface","name":"Extruded rail","p":{"sketch":"Rail","distance":"5","solid":"0"}},
+      {"op":"feature.add","type":"revolve_surface","name":"Cylinder wall","p":{"sketch":"Generatrix","angle":"360","solid":"0"},"native":{"axis":"Y"}}
+    ]})")));
+    check(created.find("created_ids") && created.find("created_ids")->arr.size() == 3, "extended surface creation IDs");
+    const double pi = std::acos(-1.0);
+    const Value& sweep = *session.document.evalBodies[0].nativeData.find("report");
+    const Value& extrusion = *session.document.evalBodies[1].nativeData.find("report");
+    const Value& revolution = *session.document.evalBodies[2].nativeData.find("report");
+    check(std::abs(sweep.find("volume_mm3")->num - 80.0 * pi) < 1.0e-2, "history sweep volume");
+    check(std::abs(extrusion.find("area_mm2")->num - 50.0) < 1.0e-3, "history surface extrusion area");
+    check(std::abs(revolution.find("area_mm2")->num - 100.0 * pi) < 1.0e-2, "history surface revolution area");
+
+    const auto base = std::filesystem::temp_directory_path() /
+        ("ark-extended-surface-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    Value save = Value::makeObj();
+    save.set("path", Value::makeStr(base.string() + ".ark"));
+    accepted(session.call("doc_save", save));
+    ark::AgentSession loaded;
+    accepted(loaded.call("doc_load", save));
+    check(loaded.document.features[0].type == ark::FeatureType::Sweep, "sweep persisted");
+    check(loaded.document.features[1].type == ark::FeatureType::ExtrudeSurface, "surface extrusion persisted");
+    check(std::abs(loaded.document.evalBodies[2].nativeData.find("report")->find("area_mm2")->num - 100.0 * pi) < 1.0e-2, "revolution recompute after load");
+    std::filesystem::remove(base.string() + ".ark");
+
+    const auto revision = loaded.revision;
+    const auto count = loaded.document.features.size();
+    const Value sampled = loaded.call("doc_apply", parse(R"({"commands":[{"op":"feature.add","type":"mesh_offset","inputs":[1],"p":{"distance":"1"}}]})"));
+    check(sampled.find("isError") && sampled.find("isError")->b, "mesh offset of an exact surface requires sample");
+    const Value* payload = sampled.find("structuredContent");
+    check(payload && payload->find("error") && payload->find("error")->str.find("sample") != std::string::npos, "sample rejection explains the consent flag");
+    check(loaded.revision == revision && loaded.document.features.size() == count, "refused mesh sampling is atomic");
+}
+
 void testSheetSourceImportAndCustody() {
     const auto directory = std::filesystem::temp_directory_path() /
         ("ark-native-feature-sheet-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
@@ -163,10 +205,75 @@ void testSheetSourceImportAndCustody() {
 }
 } // namespace
 
+void testMirrorPlanes() {
+    ark::AgentSession session;
+    accepted(session.call("doc_apply", parse(R"({"expected_revision":0,"commands":[
+      {"op":"feature.add","type":"native_solid","name":"Stock","p":{"op":"box","width":"10","depth":"10","height":"5"}},
+      {"op":"plane.set","name":"Split","p":{"oz":"20"}},
+      {"op":"feature.add","type":"native_solid","name":"Across datum","inputs":[1],"p":{"op":"mirror","fuse":"0"},"native":{"plane":"Split"}},
+      {"op":"feature.add","type":"native_solid","name":"Across face","inputs":[1],"p":{"op":"mirror","fuse":"0"},"native":{"face":"z_max"}}
+    ]})")));
+    check(session.document.evalBodies.size() == 3, "mirror bodies");
+    const auto& datum = session.document.evalBodies[1].nativeData;
+    const auto& face = session.document.evalBodies[2].nativeData;
+    check(std::abs(datum.find("report")->find("volume_mm3")->num - 1000) < 1e-3, "datum mirror volume");
+    check(datum.find("report")->find("solids")->num == 2, "datum mirror solids");
+    check(std::abs(datum.find("report")->find("bounds_mm")->arr[5].num - 40) < 1e-3, "datum mirror height");
+    check(std::abs(face.find("report")->find("volume_mm3")->num - 1000) < 1e-3, "face mirror volume");
+    check(face.find("report")->find("solids")->num == 2, "face mirror solids");
+    check(std::abs(face.find("report")->find("bounds_mm")->arr[5].num - 10) < 1e-3, "face mirror height");
+    arkjson::Value saved;
+    check(arkjson::parse(ark::documentToJson(session.document), saved), "serialize mirror document");
+    check(saved.find("version")->num == 9, "mirror document is version 9");
+    ark::AgentSession plain;
+    accepted(plain.call("doc_apply", parse(R"({"expected_revision":0,"commands":[
+      {"op":"feature.add","type":"native_solid","name":"Stock","p":{"op":"box","width":"10","depth":"10","height":"5"}}
+    ]})")));
+    arkjson::Value plainSaved;
+    check(arkjson::parse(ark::documentToJson(plain.document), plainSaved), "serialize plain solid");
+    check(plainSaved.find("version")->num == 7, "plain native solid stays version 7");
+}
+
+void testFinishingHistory() {
+    ark::AgentSession session;
+    accepted(session.call("doc_apply", parse(R"({"expected_revision":0,"commands":[
+      {"op":"feature.add","type":"native_solid","name":"Stock","p":{"op":"box","width":"10","depth":"10","height":"5"}},
+      {"op":"feature.add","type":"native_solid","name":"Round convex","inputs":[1],"p":{"op":"fillet","radius":"0.5","min_angle":"15"},"native":{"selection":"convex"}},
+      {"op":"feature.add","type":"native_solid","name":"Copies","inputs":[1],"p":{"op":"linear_pattern","count":"2","dx":"30","fuse":"0"}},
+      {"op":"plane.set","name":"TipPlane","p":{"oz":"10"}},
+      {"op":"sketch.set","name":"BaseSquare","sketch":{"entities":[
+        {"kind":"line","dof":[-5,-5,5,-5]},{"kind":"line","dof":[5,-5,5,5]},
+        {"kind":"line","dof":[5,5,-5,5]},{"kind":"line","dof":[-5,5,-5,-5]}
+      ]}},
+      {"op":"sketch.set","name":"Tip","sketch":{"plane":"TipPlane","entities":[{"kind":"point","dof":[0,0]}]}},
+      {"op":"feature.add","type":"loft","name":"Pyramid","p":{"solid":"1","ruled":"1"},"native":{"sections":["BaseSquare","Tip"]}}
+    ]})")));
+    check(session.document.features.size() == 4, "finishing feature count");
+    const double pi = std::acos(-1.0);
+    const double filleted = 500 - 4 * (10 + 10 + 5) * 0.25 * (1 - pi / 4) + 8 * 0.125 * (2 - 7 * pi / 12);
+    check(std::abs(session.document.evalBodies[1].nativeData.find("report")->find("volume_mm3")->num - filleted) < 1.0e-3, "history convex fillet");
+    check(session.document.evalBodies[2].nativeData.find("report")->find("solids")->num == 2, "history pattern solids");
+    check(std::abs(session.document.evalBodies[3].nativeData.find("report")->find("volume_mm3")->num - 1000.0 / 3.0) < 1.0e-4, "history point-tip loft");
+    arkjson::Value saved;
+    check(arkjson::parse(ark::documentToJson(session.document), saved), "serialize finishing document");
+    check(saved.find("version")->num == 9, "finishing document is version 9");
+    std::string older = ark::documentToJson(session.document);
+    auto at = older.find("\"version\":9");
+    check(at != std::string::npos, "version token");
+    older.replace(at, std::string("\"version\":9").size(), "\"version\":8");
+    ark::Document rejected;
+    std::string error;
+    check(!ark::documentFromJson(older, rejected, &error), "version 8 rejects the new operations");
+    check(error.find("version 9") != std::string::npos, "version rejection names version 9");
+}
+
 int main() {
     try {
         testLoftHistoryAndExport();
+        testMirrorPlanes();
+        testFinishingHistory();
         testNurbsExpressionsAndThicken();
+        testExtendedSurfacesAndMeshConsent();
         testSheetSourceImportAndCustody();
         std::cout << "Native feature history tests passed\n";
         return 0;

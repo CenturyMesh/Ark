@@ -1,9 +1,9 @@
 // ============================================================================
 //  ARK-Point :: ark-view â€” native Win32 + OpenGL 3.3-core viewport.
 //
-//  Look & feel: dark studio gradient + vignette, procedural matcap shading,
-//  rim light, soft ground shadows, distance-faded grid, damped orbit camera,
-//  selection glow outline, GPU-drawn UI (rounded rects, GDI font atlas).
+//  Look & feel: studio gradient, clay shading, screen-space ambient occlusion,
+//  visible feature edges, soft ground shadows, distance-faded grid, damped
+//  orbit camera, orthographic named views, and a GPU-drawn view toolbar.
 //
 //  Headless:  ark-view --shot out.png [width] [height]
 // ============================================================================
@@ -27,7 +27,15 @@ typedef ptrdiff_t GLsizeiptr;
 #define GL_STATIC_DRAW             0x88E4
 #define GL_DYNAMIC_DRAW            0x88E8
 #define GL_TEXTURE0                0x84C0
+#define GL_TEXTURE1                0x84C1
 #define GL_R8                      0x8229
+#define GL_RGBA8                   0x8058
+#define GL_DEPTH_COMPONENT24       0x81A6
+#define GL_FRAMEBUFFER             0x8D40
+#define GL_COLOR_ATTACHMENT0       0x8CE0
+#define GL_DEPTH_ATTACHMENT        0x8D00
+#define GL_FRAMEBUFFER_COMPLETE    0x8CD5
+#define GL_CLAMP_TO_EDGE           0x812F
 #endif
 #ifndef GL_VERSION_2_0_DEFS
 #define GL_COMPILE_STATUS          0x8B81
@@ -38,6 +46,7 @@ typedef ptrdiff_t GLsizeiptr;
 // blend func separate not needed; plain 1.1 blend suffices
 #endif
 #include "ark/model.hpp"
+#include "ark/native_features.hpp"
 #include "ark/io.hpp"
 #include "ark/agent.hpp"
 #include "ark/mesh_analysis.hpp"
@@ -56,6 +65,7 @@ typedef ptrdiff_t GLsizeiptr;
 #include <set>
 #include <fstream>
 #include <sstream>
+#include <algorithm>
 #include <iomanip>
 #include <cstdio>
 #include <cstring>
@@ -97,6 +107,11 @@ typedef void (APIENTRY *PFNGLBUFFERDATAPROC)(GLenum,GLsizeiptr,const void*,GLenu
 typedef void (APIENTRY *PFNGLENABLEVERTEXATTRIBARRAYPROC)(GLuint);
 typedef void (APIENTRY *PFNGLVERTEXATTRIBPOINTERPROC)(GLuint,GLint,GLenum,GLboolean,GLsizei,const void*);
 typedef void (APIENTRY *PFNGLACTIVETEXTUREPROC)(GLenum);
+typedef void (APIENTRY *PFNGLGENFRAMEBUFFERSPROC)(GLsizei,GLuint*);
+typedef void (APIENTRY *PFNGLBINDFRAMEBUFFERPROC)(GLenum,GLuint);
+typedef void (APIENTRY *PFNGLFRAMEBUFFERTEXTURE2DPROC)(GLenum,GLenum,GLenum,GLuint,GLint);
+typedef GLenum (APIENTRY *PFNGLCHECKFRAMEBUFFERSTATUSPROC)(GLenum);
+typedef void (APIENTRY *PFNGLDELETEFRAMEBUFFERSPROC)(GLsizei,const GLuint*);
 
 
 #define GLFUNCS(X) \
@@ -128,6 +143,11 @@ typedef void (APIENTRY *PFNGLACTIVETEXTUREPROC)(GLenum);
  X(PFNGLENABLEVERTEXATTRIBARRAYPROC, glEnableVertexAttribArray) \
  X(PFNGLVERTEXATTRIBPOINTERPROC, glVertexAttribPointer) \
  X(PFNGLACTIVETEXTUREPROC,       glActiveTexture) \
+ X(PFNGLGENFRAMEBUFFERSPROC,     glGenFramebuffers) \
+ X(PFNGLBINDFRAMEBUFFERPROC,     glBindFramebuffer) \
+ X(PFNGLFRAMEBUFFERTEXTURE2DPROC,glFramebufferTexture2D) \
+ X(PFNGLCHECKFRAMEBUFFERSTATUSPROC, glCheckFramebufferStatus) \
+ X(PFNGLDELETEFRAMEBUFFERSPROC,  glDeleteFramebuffers) \
 
 
 #define DECL(T,N) static T N=nullptr;
@@ -139,13 +159,15 @@ typedef HGLRC (WINAPI *WGLCREATECTXATTRIBS)(HDC,HGLRC,const int*);
 static WGLCHOOSEPFARB      wglChoosePixelFormatARB_=nullptr;
 static WGLCREATECTXATTRIBS wglCreateContextAttribsARB_=nullptr;
 
+static bool g_headless=false;
 static GLuint mkShader(GLenum type,const char* src){
     GLuint s=glCreateShader(type);
     glShaderSource(s,1,&src,nullptr);
     glCompileShader(s);
     GLint ok=0; glGetShaderiv(s,GL_COMPILE_STATUS,&ok);
     if(!ok){ char lg[4096]; glGetShaderInfoLog(s,4096,nullptr,lg);
-             MessageBoxA(nullptr,lg,"ARK shader error",MB_OK); }
+             if(g_headless)fprintf(stderr,"ARK shader error: %s\n",lg);
+             else MessageBoxA(nullptr,lg,"ARK shader error",MB_OK); }
     return s;
 }
 static GLuint mkProg(const char* vs,const char* fs){
@@ -155,7 +177,8 @@ static GLuint mkProg(const char* vs,const char* fs){
     glLinkProgram(p);
     GLint ok=0; glGetProgramiv(p,GL_LINK_STATUS,&ok);
     if(!ok){ char lg[4096]; glGetProgramInfoLog(p,4096,nullptr,lg);
-             MessageBoxA(nullptr,lg,"ARK link error",MB_OK); }
+             if(g_headless)fprintf(stderr,"ARK link error: %s\n",lg);
+             else MessageBoxA(nullptr,lg,"ARK link error",MB_OK); }
     return p;
 }
 
@@ -194,10 +217,13 @@ static size_t g_triangleCount=0;
 static std::string g_status="Ready. Local C++ kernel.",g_path="Harmonic ring.ark";
 static bool g_error=false,g_grid=true,g_dragged=false;
 static u64 g_savedRevision=0;
-static int g_treeScroll=0;
+static int g_treeScroll=0;static bool g_eatNextClick=false;
 static int viewX=258,viewY=76,viewW=1024,viewH=650;
 static HWND g_window=nullptr,g_chatInput=nullptr,g_chatHistory=nullptr;
-static bool g_lightBackground=false,g_satin=true,g_showSketches=false,g_showDatumPlanes=false,g_chatBusy=false;
+static bool g_lightBackground=true,g_satin=true,g_showSketches=false,g_showDatumPlanes=false,g_chatBusy=false;
+static bool g_showEdges=true,g_occlusion=true,g_cameraOrtho=false;
+static int g_navMode=0,g_pointerX=0,g_pointerY=0,g_cubeX=0,g_cubeY=0,g_cubeS=108;
+static bool g_cubePress=false;
 static std::string g_activeSketch,g_activePlane="XY";
 static int g_selectedSketchConstraint=-1,g_sketchConstraintPage=0;
 static arkjson::Value g_sketchDiagnosis;
@@ -224,6 +250,30 @@ static int selBody=-1,hoverBody=-1;
 static bool wireframe=false, g_pressWasButton=false;
 static double g_fps=0;
 static int g_hoverZone=-1;
+struct CurveSample { std::string sketch,name; Vec3 a,b; };
+struct SelectionItem { u64 feature=0; std::string kind,name,owner; };
+struct PartPick { std::vector<std::pair<int,int>> faces; std::vector<std::vector<Vec3>> edges; std::vector<std::string> faceNames,edgeNames; };
+static std::vector<CurveSample> g_curveSamples;
+static std::vector<SelectionItem> g_picked;
+static std::vector<PartPick> g_partPicks;
+static std::vector<float> g_selectionLines;
+static int g_pickKind=0;
+static void refreshSelectionLines();
+static std::string pickedSketches();
+static PartPick partPickFrom(const Body& body){
+    PartPick pick;using V=arkjson::Value;const V* mesh=body.nativeData.find("mesh");
+    const V* spans=mesh?mesh->find("face_spans"):nullptr;const V* edges=mesh?mesh->find("edges"):nullptr;
+    if(spans&&spans->t==V::Arr)for(const auto& span:spans->arr){if(span.t!=V::Arr||span.arr.size()!=2||span.arr[0].t!=V::Num||span.arr[1].t!=V::Num)continue;pick.faces.push_back({(int)span.arr[0].num,(int)span.arr[1].num});}
+    pick.faceNames.assign(pick.faces.size(),"");
+    if(edges&&edges->t==V::Arr)for(const auto& edge:edges->arr){std::vector<Vec3> points;if(edge.t==V::Arr&&edge.arr.size()%3==0)for(size_t i=0;i+2<edge.arr.size();i+=3)if(edge.arr[i].t==V::Num&&edge.arr[i+1].t==V::Num&&edge.arr[i+2].t==V::Num)points.push_back({edge.arr[i].num,edge.arr[i+1].num,edge.arr[i+2].num});pick.edges.push_back(std::move(points));}
+    pick.edgeNames.assign(pick.edges.size(),"");
+    const V* topology=body.nativeData.find("topology");const V* refs=topology?topology->find("references"):nullptr;
+    if(refs&&refs->t==V::Arr)for(const auto& row:refs->arr){auto* name=row.find("name"),*kind=row.find("kind"),*status=row.find("status"),*indices=row.find("indices");
+        if(!name||!kind||!status||!indices||status->asStr()!="bound"||indices->t!=V::Arr||indices->arr.size()!=1||indices->arr[0].t!=V::Num)continue;int index=(int)indices->arr[0].num;
+        if(kind->asStr()=="face"&&index>=0&&index<(int)pick.faceNames.size())pick.faceNames[(size_t)index]=name->asStr();
+        if(kind->asStr()=="edge"&&index>=0&&index<(int)pick.edgeNames.size())pick.edgeNames[(size_t)index]=name->asStr();
+    }return pick;
+}
 
 // ---------------------------------------------------------------------------
 // Font atlas -----------------------------------------------------------------------
@@ -300,7 +350,8 @@ void main(){
  vec3 c=mix(bot,top,uv.y);
  vec2 q=uv-.5;c*=1.-dot(q,q)*.55;
  c+=vec3(.045)*exp(-length(q-vec2(-.25,.25))*2.4);
- c=mix(c,vec3(.70,.72,.75)+vec3(.10)*uv.y,lightBackground);o=vec4(c,1.);
+ vec3 hi=vec3(.915,.922,.935),lo=vec3(.78,.795,.815);
+ c=mix(c,mix(lo,hi,smoothstep(0.,1.,uv.y))*(1.-dot(q,q)*.08),lightBackground);o=vec4(c,1.);
 })";
 static const char* VS_SOLID=R"(#version 330 core
 layout(location=0) in vec3 P; layout(location=1) in vec3 N;
@@ -317,32 +368,80 @@ uniform vec3 color,eye; uniform float sel,hardSurface,satin;
 void main(){
  vec3 n=hardSurface>0.?normalize(cross(dFdx(wpos),dFdy(wpos))):normalize(nrm); vec3 v=normalize(eye-wpos);
  if(dot(n,v)<0.)n=-n;
- // Broad studio softboxes and neutral steel reflections, independent of part IDs.
- vec3 l1=normalize(vec3(-.45,.85,.65)),l2=normalize(vec3(.75,.25,-.55));
- float d1=max(dot(n,l1),0.),d2=max(dot(n,l2),0.);
- vec3 base=color*(.24+.57*d1+.19*d2);
+ vec3 key=normalize(vec3(-.32,.94,.22)),fill=normalize(vec3(.72,.18,-.48)),rim=normalize(vec3(.05,.28,-.95));
+ float wrap=max(dot(n,key)*.35+.65,0.);
+ vec3 base=color*(.55+.40*pow(wrap,1.05)+.08*max(dot(n,fill),0.)+.04*max(dot(n,rim),0.));
  vec3 r=reflect(-v,n);
- float softbox=pow(max(dot(r,normalize(vec3(-.45,.85,.55))),0.),18.);
- float strip=pow(max(dot(r,normalize(vec3(.85,.35,-.45))),0.),48.);
- base+=(vec3(.90,.93,.98)*softbox*.36+vec3(.80,.83,.87)*strip*.26)*satin;
- float fr=pow(1.-max(dot(n,v),0.),4.);
- base+=vec3(.63,.68,.76)*fr*.16;
- base=mix(base,base+vec3(.045,.055,.075),sel);
+ float spec=pow(max(dot(r,key),0.),36.);
+ float broad=pow(max(dot(r,normalize(vec3(-.15,.75,.35))),0.),7.);
+ base+=(vec3(.97,.98,1.)*spec*.18+vec3(.90,.92,.95)*broad*.12)*satin;
+ float fr=pow(1.-max(dot(n,v),0.),3.4);
+ base+=vec3(.62,.66,.72)*fr*.10;
+ float cavity=clamp(1.-length(fwidth(n))*2.4,.62,1.);
+ base*=cavity;
+ base=mix(base,min(base+vec3(.10,.055,.015),vec3(1.)),sel);
  o=vec4(base,1.);
 })";
+static const char* VS_GEOM=R"(#version 330 core
+layout(location=0) in vec3 P; layout(location=1) in vec3 N;
+uniform mat4 view,proj,model; out vec3 vpos,vn;
+void main(){vec4 v=view*model*vec4(P,1.); vpos=v.xyz; vn=mat3(view)*mat3(model)*N; gl_Position=proj*v;}
+)";
+static const char* FS_GEOM=R"(#version 330 core
+in vec3 vpos,vn; out vec4 o; uniform float hardSurface;
+void main(){
+ vec3 n=hardSurface>0.?normalize(cross(dFdx(vpos),dFdy(vpos))):normalize(vn);
+ if(dot(n,n)<1e-8)n=vec3(0.,0.,1.); if(dot(n,normalize(-vpos))<0.)n=-n;
+ o=vec4(normalize(n)*.5+.5, clamp(-vpos.z/4000.,0.,1.));
+})";
+static const char* FS_AO=R"(#version 330 core
+out vec4 o; uniform sampler2D gbuf; uniform vec2 res; uniform mat4 proj; uniform vec2 focal; uniform float ortho,radius,bias;
+const vec3 K[16]=vec3[16](
+ vec3(.05,.02,.90),vec3(-.12,.08,.70),vec3(.22,-.05,.55),vec3(-.04,-.18,.80),
+ vec3(.30,.16,.40),vec3(-.28,.22,.35),vec3(.10,-.32,.45),vec3(-.20,-.12,.60),
+ vec3(.42,.02,.25),vec3(-.36,-.24,.30),vec3(.18,.40,.20),vec3(-.08,.36,.28),
+ vec3(.26,-.28,.22),vec3(-.44,.10,.18),vec3(.06,.14,.95),vec3(-.16,-.40,.16));
+void main(){
+ vec2 uv=gl_FragCoord.xy/res; vec4 g=texture(gbuf,uv);
+ if(g.a>0.985){o=vec4(1);return;}
+ vec3 n=normalize(g.rgb*2.-1.); vec2 ndc=uv*2.-1.; float dist=g.a*4000.;
+ vec3 pos=ortho>.5?vec3(ndc.x/focal.x,ndc.y/focal.y,-dist):vec3(ndc.x*dist/focal.x,ndc.y*dist/focal.y,-dist);
+ vec3 t=normalize(cross(n,abs(n.y)<.85?vec3(0,1,0):vec3(1,0,0))); vec3 b=cross(n,t);
+ float ang=fract(sin(dot(gl_FragCoord.xy,vec2(12.9898,78.233)))*43758.5453)*6.2831853; float ca=cos(ang),sa=sin(ang); float occ=0.;
+ for(int i=0;i<16;++i){vec3 k=K[i]; vec3 s=t*(k.x*ca-k.y*sa)+b*(k.x*sa+k.y*ca)+n*abs(k.z); s=pos+normalize(s)*radius*(.18+.82*float(i)/15.);
+  vec4 clip=proj*vec4(s,1.); vec2 suv=clip.xy/max(clip.w,1e-4)*.5+.5; if(suv.x<0.||suv.y<0.||suv.x>1.||suv.y>1.)continue;
+  float sd=texture(gbuf,suv).a*4000.; float range=smoothstep(0.,1.,radius/max(abs(dist-sd),.001)); occ+=step(sd+bias,-s.z)*range;}
+ o=vec4(clamp(1.-occ/14.,.74,1.));
+})";
+static const char* FS_COMPOSE=R"(#version 330 core
+out vec4 o; uniform sampler2D ao,gbuf; uniform vec2 res,origin;
+void main(){
+ vec2 uv=(gl_FragCoord.xy-origin)/res; float d0=texture(gbuf,uv).a; float sum=0.,wsum=0.; vec2 texel=1.6/res;
+ for(int y=-2;y<=2;++y)for(int x=-2;x<=2;++x){vec2 p=uv+vec2(x,y)*texel; float w=smoothstep(.035,0.,abs(texture(gbuf,p).a-d0)); sum+=texture(ao,p).r*w; wsum+=w;}
+ float a=mix(1.,sum/max(wsum,.001),.80); o=vec4(a,a,a,1.);
+})";
+static const char* VS_EDGE=R"(#version 330 core
+layout(location=0) in vec3 P; uniform mat4 vp,model;
+void main(){gl_Position=vp*model*vec4(P,1.); gl_Position.z-=.0008*gl_Position.w;}
+)";
+static const char* FS_EDGE=R"(#version 330 core
+out vec4 o; uniform vec3 color; void main(){o=vec4(color,1.);}
+)";
 static const char* VS_LINE=R"(#version 330 core
 layout(location=0) in vec3 P; uniform mat4 vp; out vec2 gridPos;
 void main(){gl_Position=vp*vec4(P,1.);gridPos=P.xz;})";
 static const char* FS_LINE=R"(#version 330 core
 in vec2 gridPos; out vec4 o;
-void main(){o=vec4(.40,.42,.46,exp(-dot(gridPos,gridPos)*.00012)*.28);})";
+uniform float lightBackground;
+void main(){vec3 col=mix(vec3(.40,.42,.46),vec3(.45,.48,.52),lightBackground); float a=mix(.28,.55,lightBackground); o=vec4(col,exp(-dot(gridPos,gridPos)*.00012)*a);})";
 static const char* VS_SHADOW=R"(#version 330 core
 layout(location=0) in vec2 P; uniform mat4 vp; uniform vec3 ctr; uniform vec2 rad;
 out vec2 uv;
 void main(){uv=P;gl_Position=vp*vec4(ctr+vec3(P.x*rad.x,0,P.y*rad.y),1.);})";
 static const char* FS_SHADOW=R"(#version 330 core
 in vec2 uv; out vec4 o;
-void main(){o=vec4(0.,0.,0.,smoothstep(1.,.1,length(uv))*.42);})";
+uniform float strength;
+void main(){o=vec4(0.,0.,0.,smoothstep(1.,.18,length(uv))*strength);})";
 static const char* VS_UI=R"(#version 330 core
 layout(location=0) in vec2 P;
 uniform vec2 vp; uniform vec4 rc; out vec2 uv;
@@ -415,6 +514,24 @@ static void uploadMesh(GPUMesh& gm,const Mesh& m){
     gm.count=(int)m.triCount();
 }
 static void releaseMesh(GPUMesh& mesh){if(mesh.vbo)glDeleteBuffers(1,&mesh.vbo);if(mesh.ibo)glDeleteBuffers(1,&mesh.ibo);if(mesh.vao)glDeleteVertexArrays(1,&mesh.vao);mesh={};}
+struct GPULines { GLuint vao=0,vbo=0; int verts=0; };
+static std::vector<GPULines> g_edgeLines;
+static void uploadEdges(size_t part){
+    if(part>=g_edgeLines.size())g_edgeLines.resize(part+1);
+    auto& lines=g_edgeLines[part];
+    if(!lines.vao)glGenVertexArrays(1,&lines.vao);
+    if(!lines.vbo)glGenBuffers(1,&lines.vbo);
+    std::vector<float> data;
+    if(part<g_partPicks.size())for(const auto& poly:g_partPicks[part].edges){
+        if(poly.size()<2)continue;
+        for(size_t k=1;k<poly.size();++k){for(const Vec3& p:{poly[k-1],poly[k]}){data.push_back((float)p.x);data.push_back((float)p.y);data.push_back((float)p.z);}}
+        if(data.size()>300000)break;
+    }
+    glBindVertexArray(lines.vao);glBindBuffer(GL_ARRAY_BUFFER,lines.vbo);
+    glBufferData(GL_ARRAY_BUFFER,(GLsizeiptr)(data.size()*sizeof(float)),data.empty()?nullptr:data.data(),GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,12,nullptr);glBindVertexArray(0);
+    lines.verts=(int)(data.size()/3);
+}
 static Feature* selectedNotchedTube(){
     if(selBody<0||(size_t)selBody>=g_bodyIds.size())return nullptr;
     auto* f=g_doc.find(g_bodyIds[selBody]);return f&&f->type==FeatureType::NotchedTube?f:nullptr;
@@ -455,12 +572,12 @@ static std::vector<Mat4> displayedNotchTransforms(size_t body){
 }
 static void advanceFold(double seconds){if(g_foldPlaying){g_foldProgress=std::min(1.,g_foldProgress+seconds*.20);if(g_foldProgress>=1.)g_foldPlaying=false;}}
 static void rebuildSketchOverlay(){
-    g_sketchGpuDirty=true;g_sketchLines.clear();g_sketchPoints.clear();g_constraintHighlightLines.clear();g_datumLines.clear();g_sketchBounds=AABB{};g_sketchDiagnosis=arkjson::Value{};
+    g_sketchGpuDirty=true;g_sketchLines.clear();g_sketchPoints.clear();g_constraintHighlightLines.clear();g_datumLines.clear();g_curveSamples.clear();g_sketchBounds=AABB{};g_sketchDiagnosis=arkjson::Value{};
     auto put=[](std::vector<float>& into,Vec3 p){into.insert(into.end(),{(float)p.x,(float)p.y,(float)p.z});};
     for(auto& named:g_doc.sketches){if(!g_activeSketch.empty()&&named.name!=g_activeSketch)continue;auto frame=resolvePlane(g_doc,named.sk.plane);
         if(named.name==g_activeSketch){g_sketchDiagnosis=diagnoseSketch(named.sk);if(g_selectedSketchConstraint>=(int)named.sk.cons.size())g_selectedSketchConstraint=-1;g_sketchConstraintPage=std::min(g_sketchConstraintPage,(int)((named.sk.cons.size()+3)/4)-1);g_sketchConstraintPage=std::max(g_sketchConstraintPage,0);}
         const SketchCon* selected=(named.name==g_activeSketch&&g_selectedSketchConstraint>=0&&g_selectedSketchConstraint<(int)named.sk.cons.size())?&named.sk.cons[(size_t)g_selectedSketchConstraint]:nullptr;
-        for(size_t ei=0;ei<named.sk.ents.size();++ei){auto& entity=named.sk.ents[ei];auto sampled=sampleSketchEntity(entity,named.sk.tolerance);for(size_t i=1;i<sampled.size();++i){auto a=frame.transformPoint({sampled[i-1].x,sampled[i-1].y,0}),b=frame.transformPoint({sampled[i].x,sampled[i].y,0});put(g_sketchLines,a);put(g_sketchLines,b);g_sketchBounds.grow(a);g_sketchBounds.grow(b);if(selected&&((int)ei==selected->a||(int)ei==selected->b)){put(g_constraintHighlightLines,a);put(g_constraintHighlightLines,b);}}
+        for(size_t ei=0;ei<named.sk.ents.size();++ei){auto& entity=named.sk.ents[ei];std::string entityName=entity.name.empty()?"entity."+std::to_string(ei):entity.name;auto sampled=sampleSketchEntity(entity,named.sk.tolerance);for(size_t i=1;i<sampled.size();++i){auto a=frame.transformPoint({sampled[i-1].x,sampled[i-1].y,0}),b=frame.transformPoint({sampled[i].x,sampled[i].y,0});put(g_sketchLines,a);put(g_sketchLines,b);g_curveSamples.push_back({named.name,entityName,a,b});g_sketchBounds.grow(a);g_sketchBounds.grow(b);if(selected&&((int)ei==selected->a||(int)ei==selected->b)){put(g_constraintHighlightLines,a);put(g_constraintHighlightLines,b);}}
             size_t stride=entity.kind==SketchEnt::Circle?entity.dof.size():2;for(size_t i=0;i+1<entity.dof.size();i+=stride){auto point=frame.transformPoint({entity.dof[i],entity.dof[i+1],0});put(g_sketchPoints,point);g_sketchBounds.grow(point);}
             if(selected)for(auto ref:{std::pair{selected->a,selected->pa},std::pair{selected->b,selected->pb}})if(ref.first==(int)ei){
                 size_t slot=entity.kind==SketchEnt::Line||entity.kind==SketchEnt::Spline?(size_t)std::max(ref.second,0)*2:0;
@@ -480,6 +597,7 @@ static void rebuildSketchOverlay(){
                 line({-20,-20},{20,-20});line({20,-20},{20,20});line({20,20},{-20,20});line({-20,20},{-20,-20});}
         }
     }
+    refreshSelectionLines();
 }
 static void rebuildScene(bool evaluate=false){
     if(evaluate)g_doc.recompute();
@@ -493,7 +611,7 @@ static void rebuildScene(bool evaluate=false){
         for(auto& b:g_doc.evalBodies)if(!consumed.count(b.id)){auto* f=g_doc.find(b.id);placements.push_back({0,b.id,f?f->name:"Body",Mat4{},true});}
     }else if(!resolveAssembly(g_doc,placements,error,&g_assemblyDiagnostics)){g_error=true;g_status=error;}
     if(g_selectedMate>=(int)g_doc.mates.size())g_selectedMate=-1;
-    g_cpuMeshes.clear();g_bodyIds.clear();g_instanceIds.clear();g_instanceNames.clear();g_instanceWorld.clear();g_instancePart.clear();
+    g_cpuMeshes.clear();g_partPicks.clear();g_bodyIds.clear();g_instanceIds.clear();g_instanceNames.clear();g_instanceWorld.clear();g_instancePart.clear();
     g_reports.clear();g_bvhs.clear();g_tubeInfo.clear();g_triangleCount=0;g_sceneBounds=AABB{};
     for(auto& gm:g_meshes)gm.count=0;
     std::unordered_map<u64,size_t> parts;
@@ -502,12 +620,13 @@ static void rebuildScene(bool evaluate=false){
         auto part=parts.find(placement.feature);
         if(part==parts.end()){
             auto body=std::find_if(g_doc.evalBodies.begin(),g_doc.evalBodies.end(),[&](const Body& b){return b.id==placement.feature;});if(body==g_doc.evalBodies.end())continue;
-            size_t i=g_cpuMeshes.size();Mesh display=body->tessellate(g_doc.tessOpt);
+            size_t i=g_cpuMeshes.size();Mesh display=body->tessellate(g_doc.tessOpt);bool nativeMesh=true;
             if(auto* f=g_doc.find(body->id);f&&(f->type==FeatureType::SheetMetal||f->type==FeatureType::SourceSheet)){
                 double progress=g_sheetProgress.count(body->id)?g_sheetProgress[body->id]:g_sheetFlatViews[body->id]?0.:1.;
-                if(progress<=0){if(auto* flat=body->nativeData.find("flat_mesh"))display=nativePreviewMesh(*flat);}
-                else if(progress<1&&f->type==FeatureType::SheetMetal&&body->nativeData.find("animation"))display=buildSheetPreview(body->nativeData,progress).mesh;
+                if(progress<=0){if(auto* flat=body->nativeData.find("flat_mesh")){display=nativePreviewMesh(*flat);nativeMesh=false;}}
+                else if(progress<1&&f->type==FeatureType::SheetMetal&&body->nativeData.find("animation")){display=buildSheetPreview(body->nativeData,progress).mesh;nativeMesh=false;}
             }
+            g_partPicks.push_back(nativeMesh?partPickFrom(*body):PartPick{});
             g_cpuMeshes.push_back(std::move(display));
             if(auto* f=g_doc.find(body->id);f&&f->type==FeatureType::Tube){arkjson::Value a=arkjson::Value::makeObj();a.set("id",arkjson::Value::makeNum((double)body->id));auto r=g_session.call("tube_inspect",a);if(!r.find("isError")->b)g_tubeInfo[body->id]=*r.find("structuredContent");}g_reports.push_back(analyzeMesh(g_cpuMeshes.back()));g_bvhs.emplace_back(g_cpuMeshes.back());
             if(auto* f=g_doc.find(body->id);f&&f->type==FeatureType::NotchedTube){
@@ -528,7 +647,7 @@ static void rebuildScene(bool evaluate=false){
                 for(size_t k=0;k<cache.preview.bends.size();++k){cache.flatHinges.push_back(sourceHingeMesh(cache.preview.bends[k],0));uploadMesh(cache.flatHingeGpu[k],cache.flatHinges.back());cache.flatHingeBvhs.emplace_back(cache.flatHinges.back());cache.hingeBvhs.emplace_back(cache.flatHinges.back());}
                 ++g_sourceBuildCount;
             }
-            if(i>=g_meshes.size())g_meshes.emplace_back();uploadMesh(g_meshes[i],g_cpuMeshes.back());part=parts.emplace(placement.feature,i).first;
+            if(i>=g_meshes.size())g_meshes.emplace_back();uploadMesh(g_meshes[i],g_cpuMeshes.back());uploadEdges(i);part=parts.emplace(placement.feature,i).first;
         }
         auto i=part->second;g_bodyIds.push_back(placement.feature);g_instanceIds.push_back(placement.node);g_instanceNames.push_back(placement.name);g_instanceWorld.push_back(placement.world);g_instancePart.push_back(i);
         g_sceneBounds.grow(g_reports[i].bounds.transformed(placement.world));g_triangleCount+=g_cpuMeshes[i].triCount();
@@ -550,7 +669,7 @@ static void updateSheetDisplay(u64 id){
     else if(progress>=1)mesh=body->tessellate(g_doc.tessOpt);
     else {if(feature->type!=FeatureType::SheetMetal||!body->nativeData.find("animation"))throw std::runtime_error("This sheet has no authored bend animation");mesh=buildSheetPreview(body->nativeData,progress).mesh;}
     std::set<size_t> changed;for(size_t i=0;i<g_bodyIds.size();++i)if(g_bodyIds[i]==id)changed.insert(g_instancePart[i]);
-    for(size_t part:changed){g_cpuMeshes[part]=mesh;uploadMesh(g_meshes[part],g_cpuMeshes[part]);g_reports[part]=analyzeMesh(g_cpuMeshes[part]);g_bvhs[part]=MeshBVH(g_cpuMeshes[part]);}
+    for(size_t part:changed){g_cpuMeshes[part]=mesh;if(part<g_partPicks.size())g_partPicks[part]=progress>=1?partPickFrom(*body):PartPick{};uploadMesh(g_meshes[part],g_cpuMeshes[part]);uploadEdges(part);g_reports[part]=analyzeMesh(g_cpuMeshes[part]);g_bvhs[part]=MeshBVH(g_cpuMeshes[part]);}
     g_sceneBounds=AABB{};g_triangleCount=0;
     for(size_t i=0;i<g_bodyIds.size();++i){size_t part=g_instancePart[i];g_sceneBounds.grow(g_reports[part].bounds.transformed(g_instanceWorld[i]));g_triangleCount+=g_cpuMeshes[part].triCount();}
 }
@@ -588,7 +707,7 @@ static arkjson::Value runTool(const std::string& tool,const arkjson::Value& args
     if(g_error)g_status=result.find("structuredContent")->find("error")->asStr();
     else g_status=tool+" completed  /  revision "+std::to_string(g_session.revision);
     if(!g_error&&(tool=="doc_load"||tool=="doc_new"||tool=="import_step"||tool=="import_sheet_step")){g_sheetFlatViews.clear();g_sheetProgress.clear();g_sheetPlayingId=0;}
-    if(!g_error&&(tool=="doc_apply"||tool=="doc_load"||tool=="doc_undo"||tool=="doc_redo"||tool=="import_step"||tool=="import_sheet_step"||tool=="doc_new"))rebuildScene();
+    if(!g_error&&(tool=="doc_apply"||tool=="doc_load"||tool=="doc_undo"||tool=="doc_redo"||tool=="import_step"||tool=="import_sheet_step"||tool=="import_mesh"||tool=="doc_new"))rebuildScene();
     if(!g_error&&(tool=="doc_save"||tool=="doc_load")){if(auto* path=args.find("path"))g_path=path->asStr();g_savedRevision=g_session.revision;}
     if(!g_error&&(tool=="doc_load"||tool=="doc_new")){if(!g_ownAssistantTool){++g_documentEpoch;*g_assistantCancel=true;g_conversation=arkjson::Value::makeArr();g_chatLog.clear();if(g_chatHistory)SetWindowTextW(g_chatHistory,L"Document changed. Describe what you want to create.");}if(tool=="doc_new"){g_path="Untitled.ark";g_savedRevision=g_session.revision;g_activeSketch.clear();g_activePlane="XY";}g_foldProgress=selectedSourceTube()?1.:0.;frameScene();}
     return result;
@@ -755,32 +874,45 @@ static std::string sketchNames(){std::string names;for(auto& sk:g_doc.sketches)n
 static double formNumber(const std::string& text){bool ok=false;double n=evalExpr(text,g_doc.buildEnv(),&ok);if(!ok||!std::isfinite(n))throw std::runtime_error("Invalid numeric expression: "+text);return n;}
 static std::string sketchNames();
 static std::string trimField(std::string value){auto first=value.find_first_not_of(" \t\r\n"),last=value.find_last_not_of(" \t\r\n");return first==std::string::npos?std::string():value.substr(first,last-first+1);}
-static void addNativeFeature(FeatureType type,const std::string& name,arkjson::Value p,arkjson::Value native=arkjson::Value::makeObj(),std::vector<u64> inputs={}){
-    using V=arkjson::Value;V command=V::makeObj(),parents=V::makeArr();
-    command.set("op",V::makeStr("feature.add"));command.set("type",V::makeStr(featureTypeName(type)));command.set("name",V::makeStr(name));command.set("p",std::move(p));
-    command.set("native",std::move(native));for(u64 id:inputs)parents.arr.push_back(V::makeNum((double)id));command.set("inputs",std::move(parents));
-    applyCommand(std::move(command));if(!g_error){selBody=(int)g_bodyIds.size()-1;frameScene();}
+static std::string joinedSketchList(const arkjson::Value* list){
+    std::string text;if(!list||list->t!=arkjson::Value::Arr)return text;
+    for(auto& item:list->arr){if(item.t!=arkjson::Value::Str||item.str.empty())continue;if(!text.empty())text+="; ";text+=item.str;}return text;
 }
-static void loftDialog(){
-    using V=arkjson::Value;std::string initial=g_doc.sketches.size()>=2?g_doc.sketches[0].name+"; "+g_doc.sketches[1].name:"Section 1; Section 2";
-    std::vector<EditorField> fields{{"Section sketches",initial},{"Solid","1",true},{"Ruled","0",true}};
-    std::string hint=sketchNames()+"  /  List 2 or more sections in order, separated by semicolons.";
-    if(!editFields("Loft through sketches",hint.c_str(),fields))return;
+static std::string joinedFeatureIds(const std::vector<u64>& ids){std::string text;for(u64 id:ids){if(!text.empty())text+="; ";text+=std::to_string(id);}return text;}
+static void commitNativeFeature(FeatureType type,const std::string& name,arkjson::Value p,arkjson::Value native,std::vector<u64> inputs,u64 editId,bool replaceNative){
+    using V=arkjson::Value;V command=V::makeObj();
+    if(editId){command.set("op",V::makeStr("feature.edit"));command.set("id",V::makeNum((double)editId));command.set("p",std::move(p));if(replaceNative)command.set("native",std::move(native));}
+    else{V parents=V::makeArr();command.set("op",V::makeStr("feature.add"));command.set("type",V::makeStr(featureTypeName(type)));command.set("name",V::makeStr(name));command.set("p",std::move(p));command.set("native",std::move(native));for(u64 id:inputs)parents.arr.push_back(V::makeNum((double)id));command.set("inputs",std::move(parents));}
+    applyCommand(std::move(command));if(!g_error){if(!editId)selBody=(int)g_bodyIds.size()-1;frameScene();if(editId)g_status="Feature edited / revision "+std::to_string(g_session.revision);}
+}
+static void addNativeFeature(FeatureType type,const std::string& name,arkjson::Value p,arkjson::Value native=arkjson::Value::makeObj(),std::vector<u64> inputs={}){
+    commitNativeFeature(type,name,std::move(p),std::move(native),std::move(inputs),0,true);
+}
+static void loftDialog(const Feature* editing=nullptr){
+    using V=arkjson::Value;
+    std::string picked=pickedSketches();int pickedCount=picked.empty()?0:1+(int)std::count(picked.begin(),picked.end(),';');
+    std::string initial=editing?joinedSketchList(editing->nativeSpec.find("sections")):(pickedCount>=2?picked:(g_doc.sketches.size()>=2?g_doc.sketches[0].name+"; "+g_doc.sketches[1].name:"Section 1; Section 2"));
+    std::vector<EditorField> fields{{"Section sketches",initial},{"Solid",editing?editing->get("solid","1"):"1",true},{"Ruled",editing?editing->get("ruled","0"):"0",true},{"Smooth",editing?editing->get("smooth","0"):"0",true},{"Compatible sections",editing?editing->get("compatible","0"):"0",true}};
+    std::string hint=sketchNames()+"  /  List 2 or more sections in order. A sketch with one point is a tip. Smooth and compatible are optional.";
+    if(!editFields(editing?"Edit loft":"Loft through sketches",hint.c_str(),fields))return;
     V sections=V::makeArr();std::istringstream names(fields[0].value);std::string name;
     while(std::getline(names,name,';')){name=trimField(name);if(name.empty())continue;if(!g_doc.findSketch(name))throw std::runtime_error("Unknown loft section: "+name);sections.arr.push_back(V::makeStr(name));}
     if(sections.arr.size()<2||sections.arr.size()>32)throw std::runtime_error("Loft needs 2 to 32 saved sketches");
     V native=V::makeObj(),p=V::makeObj();native.set("sections",std::move(sections));p.set("solid",V::makeStr(fields[1].value));p.set("ruled",V::makeStr(fields[2].value));
-    addNativeFeature(FeatureType::Loft,"Loft",std::move(p),std::move(native));
+    if(fields[3].value=="1"||(editing&&editing->p.count("smooth")))p.set("smooth",V::makeStr(fields[3].value=="1"?"1":"0"));
+    if(fields[4].value=="1"||(editing&&editing->p.count("compatible")))p.set("compatible",V::makeStr(fields[4].value=="1"?"1":"0"));
+    commitNativeFeature(FeatureType::Loft,"Loft",std::move(p),std::move(native),{},editing?editing->id:0,true);
 }
-static void surfaceFillDialog(){
-    using V=arkjson::Value;std::vector<EditorField> fields{{"Closed sketch",g_activeSketch.empty()?"Profile":g_activeSketch}};
-    auto hint=sketchNames();if(!editFields("Fill sketch boundary",hint.c_str(),fields))return;
+static void surfaceFillDialog(const Feature* editing=nullptr){
+    using V=arkjson::Value;std::string current=editing?editing->get("sketch","Profile"):(g_activeSketch.empty()?"Profile":g_activeSketch);
+    std::vector<EditorField> fields{{"Closed sketch",current}};
+    auto hint=sketchNames();if(!editFields(editing?"Edit surface fill":"Fill sketch boundary",hint.c_str(),fields))return;
     auto name=trimField(fields[0].value);if(!g_doc.findSketch(name))throw std::runtime_error("Choose an existing closed sketch");
-    V p=V::makeObj();p.set("sketch",V::makeStr(name));addNativeFeature(FeatureType::SurfaceFill,"Surface fill",std::move(p));
+    V p=V::makeObj();p.set("sketch",V::makeStr(name));
+    commitNativeFeature(FeatureType::SurfaceFill,"Surface fill",std::move(p),V::makeObj(),{},editing?editing->id:0,false);
 }
-static void nurbsSurfaceDialog(){
-    using V=arkjson::Value;
-    std::string specification=R"({
+static std::string nurbsSpecification(const Feature* editing){
+    if(!editing)return std::string(R"({
   "u_degree": 3, "v_degree": 3,
   "poles": [
     [[0,0,0], [0,15,0], [0,30,0], [0,45,0]],
@@ -788,21 +920,33 @@ static void nurbsSurfaceDialog(){
     [[30,0,0], [30,15,8], [30,30,8], [30,45,0]],
     [[45,0,0], [45,15,0], [45,30,0], [45,45,0]]
   ]
-})";
-    if(!editText("NURBS surface / pole grid JSON / Ctrl+Enter to apply",specification,true))return;
+})");
+    using V=arkjson::Value;V spec=V::makeObj();
+    if(auto* poles=editing->nativeSpec.find("poles"))spec.set("poles",*poles);
+    if(auto* weights=editing->nativeSpec.find("weights"))spec.set("weights",*weights);
+    spec.set("u_degree",V::makeStr(editing->get("u_degree","3")));spec.set("v_degree",V::makeStr(editing->get("v_degree","3")));
+    return spec.dump();
+}
+static void nurbsSurfaceDialog(const Feature* editing=nullptr){
+    using V=arkjson::Value;std::string specification=nurbsSpecification(editing);
+    if(!editText(editing?"Edit NURBS surface / Ctrl+Enter to apply":"NURBS surface / pole grid JSON / Ctrl+Enter to apply",specification,true))return;
     V spec;if(!arkjson::parse(specification,spec)||spec.t!=V::Obj||!spec.find("poles"))throw std::runtime_error("NURBS grid needs JSON poles");
     V native=V::makeObj(),p=V::makeObj();native.set("poles",*spec.find("poles"));if(auto* weights=spec.find("weights"))native.set("weights",*weights);
     for(auto key:{"u_degree","v_degree"}){auto* degree=spec.find(key);if(degree&&degree->t!=V::Num&&degree->t!=V::Str)throw std::runtime_error(std::string(key)+" must be a degree");p.set(key,V::makeStr(degree?(degree->t==V::Str?degree->str:degree->dump()):"3"));}
-    addNativeFeature(FeatureType::BSplineSurface,"NURBS surface",std::move(p),std::move(native));
+    commitNativeFeature(FeatureType::BSplineSurface,"NURBS surface",std::move(p),std::move(native),{},editing?editing->id:0,true);
 }
-static void thickenDialog(){
-    using V=arkjson::Value;if(selBody<0){g_status="Select a native open surface to thicken.";return;}
-    auto* source=g_doc.find(g_bodyIds[selBody]);if(!source||(source->type!=FeatureType::SurfaceFill&&source->type!=FeatureType::BSplineSurface&&source->type!=FeatureType::Loft)){
-        g_status="Select a loft, surface fill, or NURBS surface.";return;
-    }
-    std::vector<EditorField> fields{{"Thickness / mm","2"}};
-    if(!editFields("Thicken native surface","Signed thickness is measured from the selected OCCT face or shell.",fields))return;
-    V p=V::makeObj();p.set("thickness",V::makeStr(fields[0].value));addNativeFeature(FeatureType::Thicken,"Thicken",std::move(p),V::makeObj(),{source->id});
+static bool thickenSource(FeatureType type){
+    return type==FeatureType::Loft||type==FeatureType::SurfaceFill||type==FeatureType::BSplineSurface||type==FeatureType::Sweep||type==FeatureType::ExtrudeSurface||type==FeatureType::RevolveSurface||type==FeatureType::OffsetSurface;
+}
+static void thickenDialog(const Feature* editing=nullptr){
+    using V=arkjson::Value;const Feature* source=nullptr;
+    if(!editing){if(selBody<0){g_status="Select a native open surface to thicken.";return;}
+        source=g_doc.find(g_bodyIds[selBody]);if(!source||!thickenSource(source->type)){g_status="Select a loft, fill, NURBS, sweep, extrusion, revolution, or offset surface.";return;}}
+    std::vector<EditorField> fields{{"Thickness / mm",editing?editing->get("thickness","2"):"2"}};
+    if(!editFields(editing?"Edit thicken":"Thicken native surface","Signed thickness is measured from the selected OCCT face or shell.",fields))return;
+    V p=V::makeObj();p.set("thickness",V::makeStr(fields[0].value));
+    if(editing)commitNativeFeature(FeatureType::Thicken,"Thicken",std::move(p),V::makeObj(),{},editing->id,false);
+    else addNativeFeature(FeatureType::Thicken,"Thicken",std::move(p),V::makeObj(),{source->id});
 }
 static void sheetMetalDialog(){
     using V=arkjson::Value;const char* keys[]={"width","leg_a","leg_b","thickness","inner_radius","angle","k_factor"};
@@ -919,7 +1063,7 @@ static void exportNativeStep(const std::string& testPath=""){
     using V=arkjson::Value;if(selBody<0){g_status="Select a native body to export.";return;}
     auto* f=g_doc.find(g_bodyIds[selBody]);if(!f)return;
     bool sheet=f->type==FeatureType::SheetMetal||f->type==FeatureType::SourceSheet;
-    bool surface=f->type==FeatureType::Loft||f->type==FeatureType::SurfaceFill||f->type==FeatureType::BSplineSurface||f->type==FeatureType::Thicken||f->type==FeatureType::NativeSolid;
+    bool surface=isNativeSurfaceFeature(f->type)||f->type==FeatureType::NativeSolid;
     if(!sheet&&!surface){g_status="Select a native sheet or surface feature.";return;}
     std::string pose;if(sheet){std::vector<EditorField> fields{{"Pose: flat or formed","flat"}};
         if(testPath.empty()&&!editFields("Export native sheet STEP","Flat is the default developed blank. Formed exports the bent B-rep.",fields))return;
@@ -949,6 +1093,28 @@ static u64 featureIdField(const std::string& value){
     double parsed=formNumber(value);if(parsed<1||parsed>9007199254740990.||std::floor(parsed)!=parsed||!g_doc.find((u64)parsed))throw std::runtime_error("Choose an existing feature ID");return (u64)parsed;
 }
 static std::string selectedFeatureId(){return selBody>=0&&selBody<(int)g_bodyIds.size()?std::to_string(g_bodyIds[(size_t)selBody]):"1";}
+static void refreshSelectionLines(){
+    g_selectionLines.clear();auto put=[&](Vec3 p){g_selectionLines.insert(g_selectionLines.end(),{(float)p.x,(float)p.y,(float)p.z});};
+    for(const auto& item:g_picked){
+        if(item.kind=="edge")for(size_t body=0;body<g_bodyIds.size()&&body<g_instancePart.size();++body)if(g_bodyIds[body]==item.feature){size_t part=g_instancePart[body];if(part>=g_partPicks.size())continue;auto& pick=g_partPicks[part];
+            for(size_t edge=0;edge<pick.edgeNames.size()&&edge<pick.edges.size();++edge)if(pick.edgeNames[edge]==item.name)for(size_t k=1;k<pick.edges[edge].size();++k){put(g_instanceWorld[body].transformPoint(pick.edges[edge][k-1]));put(g_instanceWorld[body].transformPoint(pick.edges[edge][k]));}}
+        else if(item.kind=="curve")for(const auto& sample:g_curveSamples)if(sample.sketch==item.owner&&(item.name.empty()||item.name==item.owner||sample.name==item.name)){put(sample.a);put(sample.b);}
+    }
+    g_sketchGpuDirty=true;
+}
+static void toggleSelection(SelectionItem item){
+    auto same=[&](const SelectionItem& other){return other.kind==item.kind&&other.name==item.name&&other.owner==item.owner&&other.feature==item.feature;};
+    auto found=std::find_if(g_picked.begin(),g_picked.end(),same);
+    if(found!=g_picked.end())g_picked.erase(found);
+    else{if(g_picked.size()>=64){g_status="At most 64 selected references";return;}g_picked.push_back(std::move(item));}
+    refreshSelectionLines();
+    std::string text;for(const auto& picked:g_picked){if(!text.empty())text+=", ";text+=picked.kind+" "+(picked.name.empty()?picked.owner:picked.name);}
+    g_status=text.empty()?"Selection cleared":"Selected "+text;
+}
+static std::string pickedNames(const char* kind){std::string text;for(const auto& item:g_picked)if(item.kind==kind&&!item.name.empty()){if(!text.empty())text+="; ";text+=item.name;}return text;}
+static std::string pickedFeatureId(const char* kind){for(const auto& item:g_picked)if(item.kind==kind&&item.feature)return std::to_string(item.feature);return selectedFeatureId();}
+static std::string pickedSketches(){std::string text;std::set<std::string> seen;for(const auto& item:g_picked)if(item.kind=="curve"&&!item.owner.empty()&&seen.insert(item.owner).second){if(!text.empty())text+="; ";text+=item.owner;}return text;}
+static std::string suggestedMirror(){std::string faces=pickedNames("face"),planes=pickedNames("plane");auto first=[&](const std::string& text){auto mark=text.find(';');return mark==std::string::npos?text:text.substr(0,mark);};if(!faces.empty())return first(faces);if(!planes.empty())return first(planes);return g_activePlane.empty()?"XY":g_activePlane;}
 static std::string nativeReferenceHint(const char* wanted){
     std::string names="Bound "+std::string(wanted)+" references: ";const Body* body=selectedNativeBody();const auto* topology=body?body->nativeData.find("topology"):nullptr;
     const auto* rows=topology?topology->find("references"):nullptr;int shown=0;
@@ -1006,15 +1172,83 @@ static void nativeHoleDialog(){
     else{auto sketch=trimField(fields[6].value);if(!g_doc.findSketch(sketch))throw std::runtime_error("Choose a saved closed sketch");p.set("sketch",V::makeStr(sketch));}
     native.set("cutter",std::move(cutter));p.set("op",V::makeStr("hole"));addNativeFeature(FeatureType::NativeSolid,"Exact "+kind+" cut",std::move(p),std::move(native),{base});
 }
-static void nativeEdgeBlendDialog(){
-    using V=arkjson::Value;std::vector<EditorField> fields{{"Operation: fillet / chamfer","fillet"},{"Base feature ID",selectedFeatureId()},{"Semantic edges (semicolon separated)","edge.x.ymin.zmin"},{"Radius or distance / mm","2"}};
-    auto hint=nativeReferenceHint("edge");if(!editFields("Exact edge treatment",hint.c_str(),fields))return;
-    auto op=trimField(fields[0].value);if(op!="fillet"&&op!="chamfer")throw std::runtime_error("Choose fillet or chamfer");
-    auto base=featureIdField(fields[1].value);V edges=V::makeArr();std::istringstream names(fields[2].value);std::string name;
-    while(std::getline(names,name,';'))if(!(name=trimField(name)).empty())edges.arr.push_back(V::makeStr(name));
-    if(edges.arr.empty())throw std::runtime_error("Enter at least one semantic edge name");
-    V native=V::makeObj(),p=V::makeObj();native.set("edges",std::move(edges));p.set("op",V::makeStr(op));p.set(op=="fillet"?"radius":"distance",V::makeStr(trimField(fields[3].value)));
-    addNativeFeature(FeatureType::NativeSolid,"Exact "+op,std::move(p),std::move(native),{base});
+static std::string nativeText(const Feature* feature,const char* key,const char* fallback="");
+static std::string joinedNativeNames(const Feature* feature,const char* key){
+    std::string text;if(!feature)return text;auto* list=feature->nativeSpec.find(key);if(!list||list->t!=arkjson::Value::Arr)return text;
+    for(auto& item:list->arr){if(item.t!=arkjson::Value::Str||item.str.empty())continue;if(!text.empty())text+="; ";text+=item.str;}return text;
+}
+static void nativeEdgeBlendDialog(const Feature* editing=nullptr){
+    using V=arkjson::Value;
+    std::string op=editing?editing->get("op","fillet"):"fillet";
+    std::string listed=editing?nativeText(editing,"selection"):"";
+    if(listed.empty())listed=editing?joinedNativeNames(editing,"edges"):pickedNames("edge");
+    if(listed.empty())listed="edge.x.ymin.zmin";
+    std::vector<EditorField> fields{{"Operation: fillet / chamfer",op}};
+    if(!editing)fields.push_back({"Base feature ID",pickedFeatureId("edge")});
+    fields.push_back({"Edges, or sharp / convex / concave / all",listed});
+    fields.push_back({"Radius or distance / mm",editing?editing->get(op=="chamfer"?"distance":"radius","2"):"2"});
+    fields.push_back({"Minimum dihedral / deg",editing?editing->get("min_angle","15"):"15"});
+    auto hint=nativeReferenceHint("edge");if(!editFields(editing?"Edit fillet / chamfer":"Exact edge treatment",hint.c_str(),fields))return;
+    op=trimField(fields[0].value);if(op!="fillet"&&op!="chamfer")throw std::runtime_error("Choose fillet or chamfer");
+    auto choice=trimField(fields[editing?1:2].value);
+    V native=V::makeObj(),p=V::makeObj();p.set("op",V::makeStr(op));p.set(op=="fillet"?"radius":"distance",V::makeStr(trimField(fields[editing?2:3].value)));
+    if(choice=="sharp"||choice=="convex"||choice=="concave"||choice=="all"){native.set("selection",V::makeStr(choice));p.set("min_angle",V::makeStr(trimField(fields[editing?3:4].value)));}
+    else{V edges=V::makeArr();std::istringstream names(choice);std::string name;while(std::getline(names,name,';'))if(!(name=trimField(name)).empty())edges.arr.push_back(V::makeStr(name));if(edges.arr.empty())throw std::runtime_error("Enter edge names or a selection");native.set("edges",std::move(edges));}
+    if(editing)commitNativeFeature(FeatureType::NativeSolid,"Exact "+op,std::move(p),std::move(native),{},editing->id,true);
+    else addNativeFeature(FeatureType::NativeSolid,"Exact "+op,std::move(p),std::move(native),{featureIdField(fields[1].value)});
+}
+static void nativeDraftDialog(const Feature* editing=nullptr){
+    using V=arkjson::Value;std::vector<EditorField> fields;
+    if(!editing)fields.push_back({"Base feature ID",pickedFeatureId("face")});
+    fields.push_back({"Angle / deg",editing?editing->get("angle","5"):"5"});
+    fields.push_back({"Pull direction X / Y / Z",editing?nativeText(editing,"direction","Z"):"Z"});
+    fields.push_back({"Neutral plane XY / XZ / YZ",editing?nativeText(editing,"neutral","XY"):"XY"});
+    std::string faces=editing?joinedNativeNames(editing,"faces"):pickedNames("face");if(faces.empty())faces="sides";
+    fields.push_back({"Faces, or sides",faces});
+    if(!editFields(editing?"Edit draft":"Draft exact faces","Planar, cylindrical, and conical faces only. A freeform loft face is rejected.",fields))return;
+    auto direction=trimField(fields[editing?1:2].value),neutral=trimField(fields[editing?2:3].value),faceText=trimField(fields[editing?3:4].value);
+    if(direction!="X"&&direction!="Y"&&direction!="Z")throw std::runtime_error("Draft direction must be X, Y, or Z");
+    if(neutral!="XY"&&neutral!="XZ"&&neutral!="YZ")throw std::runtime_error("Neutral plane must be XY, XZ, or YZ");
+    V native=V::makeObj(),p=V::makeObj();p.set("op",V::makeStr("draft"));p.set("angle",V::makeStr(trimField(fields[editing?0:1].value)));native.set("direction",V::makeStr(direction));native.set("neutral",V::makeStr(neutral));
+    if(faceText!="sides"){V names=V::makeArr();std::istringstream list(faceText);std::string name;while(std::getline(list,name,';'))if(!(name=trimField(name)).empty())names.arr.push_back(V::makeStr(name));if(names.arr.empty())throw std::runtime_error("Name the faces to draft, or choose sides");native.set("faces",std::move(names));}
+    if(editing)commitNativeFeature(FeatureType::NativeSolid,"Draft",std::move(p),std::move(native),{},editing->id,true);
+    else addNativeFeature(FeatureType::NativeSolid,"Draft",std::move(p),std::move(native),{featureIdField(fields[0].value)});
+}
+static void nativePatternDialog(const Feature* editing=nullptr){
+    using V=arkjson::Value;std::string op=editing?editing->get("op","linear_pattern"):"linear_pattern";
+    std::vector<EditorField> fields{{"Pattern: linear / circular",op=="circular_pattern"?"circular":"linear"}};
+    if(!editing)fields.push_back({"Base feature ID",selectedFeatureId()});
+    fields.push_back({"Count",editing?editing->get("count","3"):"3"});
+    fields.push_back({op=="circular_pattern"?"Step / deg":"Spacing X / mm",editing?editing->get(op=="circular_pattern"?"step":"dx","20"):(op=="circular_pattern"?"90":"20")});
+    fields.push_back({"Spacing Y / mm",editing?editing->get("dy","0"):"0"});
+    fields.push_back({"Spacing Z / mm",editing?editing->get("dz","0"):"0"});
+    fields.push_back({"Axis X / Y / Z",editing?nativeText(editing,"axis","Z"):"Z"});
+    fields.push_back({"Fuse into one solid",editing?editing->get("fuse","0"):"0",true});
+    if(!editFields(editing?"Edit pattern":"Exact pattern","fuse 0 keeps separate exact solids. Circular step is degrees about the axis.",fields))return;
+    auto kind=trimField(fields[0].value);if(kind!="linear"&&kind!="circular")throw std::runtime_error("Pattern must be linear or circular");
+    int baseField=editing?0:1;V native=V::makeObj(),p=V::makeObj();
+    p.set("op",V::makeStr(kind=="circular"?"circular_pattern":"linear_pattern"));p.set("count",V::makeStr(trimField(fields[baseField+1].value)));
+    if(kind=="circular"){p.set("step",V::makeStr(trimField(fields[baseField+2].value)));auto axis=trimField(fields[baseField+5].value);if(axis!="X"&&axis!="Y"&&axis!="Z")throw std::runtime_error("Pattern axis must be X, Y, or Z");native.set("axis",V::makeStr(axis));}
+    else{p.set("dx",V::makeStr(trimField(fields[baseField+2].value)));p.set("dy",V::makeStr(trimField(fields[baseField+3].value)));p.set("dz",V::makeStr(trimField(fields[baseField+4].value)));}
+    p.set("fuse",V::makeStr(fields[baseField+6].value=="1"?"1":"0"));
+    if(editing)commitNativeFeature(FeatureType::NativeSolid,"Exact pattern",std::move(p),std::move(native),{},editing->id,kind=="circular");
+    else addNativeFeature(FeatureType::NativeSolid,"Exact pattern",std::move(p),std::move(native),{featureIdField(fields[1].value)});
+}
+static void nativeMirrorDialog(const Feature* editing=nullptr){
+    using V=arkjson::Value;std::vector<EditorField> fields;
+    if(!editing)fields.push_back({"Base feature ID",pickedFeatureId("face")});
+    std::string current=editing?nativeText(editing,"face"):"";if(current.empty())current=editing?nativeText(editing,"plane","XY"):suggestedMirror();
+    fields.push_back({"Plane, datum, or one planar face",current});
+    fields.push_back({"Fuse with the original",editing?editing->get("fuse","0"):"0",true});
+    if(!editFields(editing?"Edit mirror":"Mirror exact solid","Select a planar face or a datum, or enter XY, XZ, YZ. The seed solid is kept. fuse 1 needs one connected solid.",fields))return;
+    auto target=trimField(fields[editing?0:1].value);if(target.find(';')!=std::string::npos)throw std::runtime_error("Mirror uses one plane or one planar face");
+    bool principal=target=="XY"||target=="XZ"||target=="YZ";
+    bool datum=!principal&&std::any_of(g_doc.planes.begin(),g_doc.planes.end(),[&](const DatumPlane& plane){return plane.name==target;});
+    V native=V::makeObj(),p=V::makeObj();p.set("op",V::makeStr("mirror"));p.set("fuse",V::makeStr(fields[editing?1:2].value=="1"?"1":"0"));
+    if(principal||datum)native.set("plane",V::makeStr(target));
+    else{if(target.empty())throw std::runtime_error("Choose XY, XZ, YZ, a datum, or a planar face");native.set("face",V::makeStr(target));}
+    if(editing)commitNativeFeature(FeatureType::NativeSolid,"Mirror",std::move(p),std::move(native),{},editing->id,true);
+    else addNativeFeature(FeatureType::NativeSolid,"Mirror",std::move(p),std::move(native),{featureIdField(fields[0].value)});
 }
 static void nativeTransformDialog(){
     using V=arkjson::Value;std::vector<EditorField> fields{{"Base feature ID",selectedFeatureId()},{"X translation / mm","0"},{"Y translation / mm","0"},{"Z translation / mm","0"},{"X rotation / deg","0"},{"Y rotation / deg","0"},{"Z rotation / deg","0"}};
@@ -1200,20 +1434,21 @@ static void parameterDialog(){std::vector<EditorField> fields{{"Parameter name",
 static std::filesystem::path g_settingsOverride;
 static std::filesystem::path uiSettingsPath(){if(!g_settingsOverride.empty())return g_settingsOverride;auto* base=_wgetenv(L"LOCALAPPDATA");return (base?std::filesystem::path(base):std::filesystem::temp_directory_path())/"ARK"/"studio.json";}
 static void saveUiSettings(){
-    using V=arkjson::Value;V j=V::makeObj();j.set("endpoint",V::makeStr(g_assistantConfig.endpoint));j.set("model",V::makeStr(g_assistantConfig.model));j.set("api_key_env",V::makeStr(g_assistantConfig.apiKeyEnv));j.set("grid",V::makeBool(g_grid));j.set("wireframe",V::makeBool(wireframe));j.set("light_background",V::makeBool(g_lightBackground));j.set("satin",V::makeBool(g_satin));j.set("show_datum_planes",V::makeBool(g_showDatumPlanes));
+    using V=arkjson::Value;V j=V::makeObj();j.set("endpoint",V::makeStr(g_assistantConfig.endpoint));j.set("model",V::makeStr(g_assistantConfig.model));j.set("api_key_env",V::makeStr(g_assistantConfig.apiKeyEnv));j.set("grid",V::makeBool(g_grid));j.set("wireframe",V::makeBool(wireframe));j.set("light_background",V::makeBool(g_lightBackground));j.set("satin",V::makeBool(g_satin));j.set("show_datum_planes",V::makeBool(g_showDatumPlanes));j.set("occlusion",V::makeBool(g_occlusion));j.set("show_edges",V::makeBool(g_showEdges));j.set("orthographic",V::makeBool(g_cameraOrtho));
     auto path=uiSettingsPath();std::filesystem::create_directories(path.parent_path());std::ofstream out(path);out<<j.dump();if(!out)throw std::runtime_error("Could not save Studio settings");
 }
 static void loadUiSettings(){
     try{std::ifstream in(uiSettingsPath());if(!in)return;std::string data((std::istreambuf_iterator<char>(in)),{});arkjson::Value j;if(!arkjson::parse(data,j))return;
         if(auto* v=j.find("endpoint"))g_assistantConfig.endpoint=v->asStr();if(auto* v=j.find("model"))g_assistantConfig.model=v->asStr();if(auto* v=j.find("api_key_env"))g_assistantConfig.apiKeyEnv=v->asStr();
         if(auto* v=j.find("grid"))g_grid=v->b;if(auto* v=j.find("wireframe"))wireframe=v->b;if(auto* v=j.find("light_background"))g_lightBackground=v->b;if(auto* v=j.find("satin"))g_satin=v->b;if(auto* v=j.find("show_datum_planes");v&&v->t==arkjson::Value::Bool)g_showDatumPlanes=v->b;
+        if(auto* v=j.find("occlusion");v&&v->t==arkjson::Value::Bool)g_occlusion=v->b;if(auto* v=j.find("show_edges");v&&v->t==arkjson::Value::Bool)g_showEdges=v->b;if(auto* v=j.find("orthographic");v&&v->t==arkjson::Value::Bool)g_cameraOrtho=v->b;
     }catch(...){g_status="Studio settings unavailable; defaults loaded";}
 }
 static void graphicsDialog(){
-    std::vector<EditorField> fields{{"Show ground grid",g_grid?"1":"0",true},{"Wireframe",wireframe?"1":"0",true},{"Light background",g_lightBackground?"1":"0",true},{"Satin highlights",g_satin?"1":"0",true}};
-    if(!editFields("Graphics settings","Viewport preferences. These do not modify document geometry.",fields))return;
-    bool values[4];for(int i=0;i<4;++i){double n=formNumber(fields[i].value);if(n!=0&&n!=1)throw std::runtime_error("Graphics toggles accept 0 or 1");values[i]=n!=0;}
-    g_grid=values[0];wireframe=values[1];g_lightBackground=values[2];g_satin=values[3];if(!g_dialogSmoke)saveUiSettings();
+    std::vector<EditorField> fields{{"Show ground grid",g_grid?"1":"0",true},{"Wireframe",wireframe?"1":"0",true},{"Light background",g_lightBackground?"1":"0",true},{"Satin highlights",g_satin?"1":"0",true},{"Ambient occlusion",g_occlusion?"1":"0",true},{"Visible edges",g_showEdges?"1":"0",true},{"Orthographic camera",g_cameraOrtho?"1":"0",true}};
+    if(!editFields("Graphics settings","Display preferences only. Occlusion and edges are not stored in the document.",fields))return;
+    bool values[7];for(int i=0;i<7;++i){double n=formNumber(fields[(size_t)i].value);if(n!=0&&n!=1)throw std::runtime_error("Graphics toggles accept 0 or 1");values[i]=n!=0;}
+    g_grid=values[0];wireframe=values[1];g_lightBackground=values[2];g_satin=values[3];g_occlusion=values[4];g_showEdges=values[5];g_cameraOrtho=values[6];if(!g_dialogSmoke)saveUiSettings();
 }
 static void connectorDialog(){
     std::vector<EditorField> fields{{"Responses endpoint",g_assistantConfig.endpoint},{"Model",g_assistantConfig.model},{"API key environment",g_assistantConfig.apiKeyEnv}};
@@ -1281,18 +1516,238 @@ static void newDocument(){
 }
 
 static void interactiveAction(int id);
+static void uiAction(int id);
+static void addMeshFeature(FeatureType type,const std::string& name,arkjson::Value p,std::vector<u64> inputs){
+    using V=arkjson::Value;V command=V::makeObj(),parents=V::makeArr();
+    command.set("op",V::makeStr("feature.add"));command.set("type",V::makeStr(featureTypeName(type)));command.set("name",V::makeStr(name));command.set("p",std::move(p));
+    for(u64 id:inputs)parents.arr.push_back(V::makeNum((double)id));command.set("inputs",std::move(parents));
+    applyCommand(std::move(command));if(!g_error){selBody=(int)g_bodyIds.size()-1;frameScene();}
+}
+static Feature* selectedEditableBody(){
+    if(selBody<0||(size_t)selBody>=g_bodyIds.size()||g_instanceIds[selBody])throw std::runtime_error("Select a part body, not an assembly instance");
+    auto* source=g_doc.find(g_bodyIds[selBody]);if(!source)throw std::runtime_error("Select a part body");return source;
+}
+static void requireMeshSample(const Feature& source,arkjson::Value& p,const std::string& sample){
+    if(!isNativeFeature(source.type))return;
+    if(sample!="1")throw std::runtime_error("Sampling an exact B-rep requires Sample = 1. The result is mesh authority");
+    p.set("sample",arkjson::Value::makeStr("1"));
+}
+static std::string nativeText(const Feature* feature,const char* key,const char* fallback){
+    if(!feature)return fallback?fallback:"";auto* value=feature->nativeSpec.find(key);return value&&value->t==arkjson::Value::Str?value->str:std::string(fallback?fallback:"");
+}
+static std::string defaultSketchName(){return g_activeSketch.empty()?(g_doc.sketches.empty()?std::string():g_doc.sketches.front().name):g_activeSketch;}
+static void sweepDialog(const Feature* editing=nullptr){
+    using V=arkjson::Value;
+    std::string picked=pickedSketches();std::string firstSketch,secondSketch;if(!picked.empty()){auto mark=picked.find(';');firstSketch=trimField(mark==std::string::npos?picked:picked.substr(0,mark));if(mark!=std::string::npos)secondSketch=trimField(picked.substr(mark+1));}
+    std::string section=editing?nativeText(editing,"section"):(!firstSketch.empty()?firstSketch:(g_doc.sketches.empty()?std::string():g_doc.sketches.front().name));
+    std::string path=editing?nativeText(editing,"path"):(!secondSketch.empty()?secondSketch:(g_doc.sketches.size()>1?g_doc.sketches[1].name:section));
+    std::vector<EditorField> fields{{"Section sketch",section},{"Path sketch",path},{"Solid",editing?editing->get("solid","0"):"0",true}};
+    if(!editFields(editing?"Edit sweep":"Sweep section along path",(sketchNames()+"  /  Corrected Frenet. Contact stays off so a centered section is not shifted onto the path.").c_str(),fields))return;
+    auto sectionName=trimField(fields[0].value),pathName=trimField(fields[1].value);
+    if(!g_doc.findSketch(sectionName)||!g_doc.findSketch(pathName))throw std::runtime_error("Sweep needs two existing sketches");
+    V native=V::makeObj(),p=V::makeObj();native.set("section",V::makeStr(sectionName));native.set("path",V::makeStr(pathName));p.set("solid",V::makeStr(fields[2].value));
+    commitNativeFeature(FeatureType::Sweep,"Sweep",std::move(p),std::move(native),{},editing?editing->id:0,true);
+}
+static void extrudeSurfaceDialog(const Feature* editing=nullptr){
+    using V=arkjson::Value;
+    std::vector<EditorField> fields{{"Sketch",editing?editing->get("sketch"):defaultSketchName()},{"Distance / mm",editing?editing->get("distance","10"):"10"},{"Solid",editing?editing->get("solid","0"):"0",true}};
+    if(!editFields(editing?"Edit extruded surface":"Extrude sketch as a surface","Distance follows the sketch plane normal. A solid needs a closed sketch.",fields))return;
+    auto name=trimField(fields[0].value);if(!g_doc.findSketch(name))throw std::runtime_error("Choose an existing sketch");
+    V p=V::makeObj();p.set("sketch",V::makeStr(name));p.set("distance",V::makeStr(trimField(fields[1].value)));p.set("solid",V::makeStr(fields[2].value));
+    commitNativeFeature(FeatureType::ExtrudeSurface,"Extruded surface",std::move(p),V::makeObj(),{},editing?editing->id:0,false);
+}
+static void revolveSurfaceDialog(const Feature* editing=nullptr){
+    using V=arkjson::Value;
+    std::vector<EditorField> fields{{"Sketch",editing?editing->get("sketch"):defaultSketchName()},{"Angle / degrees",editing?editing->get("angle","360"):"360"},{"Axis X Y or Z",editing?nativeText(editing,"axis"):"Y"},{"Solid",editing?editing->get("solid","0"):"0",true}};
+    if(fields[2].value.empty())fields[2].value="Y";
+    if(!editFields(editing?"Edit revolved surface":"Revolve sketch","The axis passes through the sketch-plane origin. Angle is in (0, 360] degrees.",fields))return;
+    auto name=trimField(fields[0].value),axis=trimField(fields[2].value);
+    if(!g_doc.findSketch(name))throw std::runtime_error("Choose an existing sketch");
+    if(axis!="X"&&axis!="Y"&&axis!="Z")throw std::runtime_error("Axis must be X, Y or Z");
+    V native=V::makeObj(),p=V::makeObj();native.set("axis",V::makeStr(axis));
+    p.set("sketch",V::makeStr(name));p.set("angle",V::makeStr(trimField(fields[1].value)));p.set("solid",V::makeStr(fields[3].value));
+    commitNativeFeature(FeatureType::RevolveSurface,"Revolved surface",std::move(p),std::move(native),{},editing?editing->id:0,true);
+}
+static void offsetSurfaceDialog(const Feature* editing=nullptr){
+    using V=arkjson::Value;const Feature* source=nullptr;
+    if(!editing){source=selectedEditableBody();if(!isNativeSurfaceFeature(source->type)||source->type==FeatureType::Thicken)throw std::runtime_error("Select an open native surface. Offset does not accept a solid");}
+    std::vector<EditorField> fields{{"Distance / mm",editing?editing->get("distance","2"):"2"}};
+    if(!editFields(editing?"Edit offset surface":"Offset native surface","Signed distance. Intersection is not checked, and this does not thicken into a solid.",fields))return;
+    V p=V::makeObj();p.set("distance",V::makeStr(trimField(fields[0].value)));
+    if(editing)commitNativeFeature(FeatureType::OffsetSurface,"Offset surface",std::move(p),V::makeObj(),{},editing->id,false);
+    else addNativeFeature(FeatureType::OffsetSurface,"Offset surface",std::move(p),V::makeObj(),{source->id});
+}
+static void sewDialog(const Feature* editing=nullptr){
+    using V=arkjson::Value;
+    if(editing){
+        std::vector<EditorField> fields{{"Solid",editing->get("solid","0"),true}};
+        std::string hint="Inputs stay "+joinedFeatureIds(editing->inputs)+". A solid requires one closed shell. This edit does not change which surfaces are sewn.";
+        if(!editFields("Edit sew",hint.c_str(),fields))return;
+        V p=V::makeObj();p.set("solid",V::makeStr(fields[0].value));
+        commitNativeFeature(FeatureType::Sew,"Sew",std::move(p),V::makeObj(),{},editing->id,false);return;
+    }
+    std::string initial=selectedFeatureId();
+    if(g_bodyIds.size()>=2)initial=std::to_string(g_bodyIds[g_bodyIds.size()-2])+"; "+std::to_string(g_bodyIds.back());
+    std::vector<EditorField> fields{{"Surface feature IDs",initial},{"Solid","0",true}};
+    if(!editFields("Sew native surfaces","List 2 to 16 face or shell IDs, separated by semicolons. A solid requires one closed shell.",fields))return;
+    std::vector<u64> ids;std::istringstream names(fields[0].value);std::string token;
+    while(std::getline(names,token,';')){token=trimField(token);if(token.empty())continue;ids.push_back(featureIdField(token));}
+    if(ids.size()<2||ids.size()>16)throw std::runtime_error("Sew needs 2 to 16 features");
+    V p=V::makeObj();p.set("solid",V::makeStr(fields[1].value));
+    addNativeFeature(FeatureType::Sew,"Sew",std::move(p),V::makeObj(),ids);
+}
+static void commitMeshFeature(FeatureType type,const std::string& name,arkjson::Value p,std::vector<u64> inputs,u64 editId){
+    if(!editId){addMeshFeature(type,name,std::move(p),std::move(inputs));return;}
+    using V=arkjson::Value;V command=V::makeObj();command.set("op",V::makeStr("feature.edit"));command.set("id",V::makeNum((double)editId));command.set("p",std::move(p));
+    applyCommand(std::move(command));if(!g_error){frameScene();g_status="Feature edited / revision "+std::to_string(g_session.revision);}
+}
+static bool offerMeshSample(const Feature* editing,const Feature* source,std::vector<EditorField>& fields){
+    if(editing){if(!editing->p.count("sample"))return false;fields.push_back({"Sample exact B-rep",editing->get("sample","1"),true});return true;}
+    if(source&&isNativeFeature(source->type)){fields.push_back({"Sample exact B-rep","1",true});return true;}return false;
+}
+static void keepMeshSample(arkjson::Value& p,bool offered,const std::string& value){
+    if(!offered)return;if(value!="1")throw std::runtime_error("Sampling an exact B-rep requires Sample = 1. The result is mesh authority");p.set("sample",arkjson::Value::makeStr("1"));
+}
+static void meshWeldDialog(const Feature* editing=nullptr){
+    using V=arkjson::Value;auto* source=editing?editing:selectedEditableBody();
+    std::vector<EditorField> fields{{"Epsilon / mm",editing?editing->get("epsilon","0.0001"):"0.0001"}};
+    bool sample=offerMeshSample(editing,source,fields);
+    if(!editFields(editing?"Edit weld":"Weld mesh vertices","Epsilon is in (0, 1] mm. An exact surface stays exact unless Sample is 1.",fields))return;
+    V p=V::makeObj();p.set("epsilon",V::makeStr(trimField(fields[0].value)));keepMeshSample(p,sample,fields.back().value);
+    commitMeshFeature(FeatureType::MeshWeld,"Welded mesh",std::move(p),{source->id},editing?editing->id:0);
+}
+static void meshSmoothDialog(const Feature* editing=nullptr){
+    using V=arkjson::Value;auto* source=editing?editing:selectedEditableBody();
+    std::vector<EditorField> fields{{"Iterations",editing?editing->get("iterations","4"):"4"},{"Lambda",editing?editing->get("lambda","0.5"):"0.5"},{"Pin boundary",editing?editing->get("pin_boundary","1"):"1",true}};
+    bool sample=offerMeshSample(editing,source,fields);
+    if(!editFields(editing?"Edit smooth":"Smooth mesh","Uniform Laplacian. Iterations are 1..64. Boundary vertices stay fixed while Pin boundary is on.",fields))return;
+    V p=V::makeObj();p.set("iterations",V::makeStr(trimField(fields[0].value)));p.set("lambda",V::makeStr(trimField(fields[1].value)));p.set("pin_boundary",V::makeStr(fields[2].value));keepMeshSample(p,sample,fields.back().value);
+    commitMeshFeature(FeatureType::MeshSmooth,"Smoothed mesh",std::move(p),{source->id},editing?editing->id:0);
+}
+static void meshDecimateDialog(const Feature* editing=nullptr){
+    using V=arkjson::Value;auto* source=editing?editing:selectedEditableBody();
+    std::vector<EditorField> fields{{"Triangle ratio",editing?editing->get("ratio","0.5"):"0.5"}};
+    bool sample=offerMeshSample(editing,source,fields);
+    if(!editFields(editing?"Edit decimate":"Decimate mesh","Ratio is in [0.05, 1]. Boundary loops stay. The result remains mesh authority.",fields))return;
+    V p=V::makeObj();p.set("ratio",V::makeStr(trimField(fields[0].value)));keepMeshSample(p,sample,fields.back().value);
+    commitMeshFeature(FeatureType::MeshDecimate,"Decimated mesh",std::move(p),{source->id},editing?editing->id:0);
+}
+static void meshOffsetDialog(const Feature* editing=nullptr){
+    using V=arkjson::Value;auto* source=editing?editing:selectedEditableBody();
+    std::vector<EditorField> fields{{"Distance / mm",editing?editing->get("distance","1"):"1"}};
+    bool sample=offerMeshSample(editing,source,fields);
+    if(!editFields(editing?"Edit mesh offset":"Offset mesh along normals","Vertex normals. A positive distance grows a closed mesh. This is not an exact shell.",fields))return;
+    V p=V::makeObj();p.set("distance",V::makeStr(trimField(fields[0].value)));keepMeshSample(p,sample,fields.back().value);
+    commitMeshFeature(FeatureType::MeshOffset,"Offset mesh",std::move(p),{source->id},editing?editing->id:0);
+}
+static void meshFillDialog(const Feature* editing=nullptr){
+    using V=arkjson::Value;auto* source=editing?editing:selectedEditableBody();
+    std::vector<EditorField> fields;bool sample=offerMeshSample(editing,source,fields);
+    if(!fields.empty()&&!editFields(editing?"Edit planar fill":"Fill planar mesh holes","Each boundary loop must lie within 1e-4 mm of a plane. Curved boundaries need surface fill.",fields))return;
+    if(fields.empty()){
+        if(editing){g_status="Planar fill has no dimensions. Edit the mesh it fills.";return;}
+        std::vector<EditorField> confirm{{"Fill planar holes of the selection","1",true}};
+        if(!editFields("Fill planar mesh holes","Each boundary loop must lie within 1e-4 mm of a plane. Curved boundaries need surface fill.",confirm))return;
+        if(confirm[0].value!="1")return;
+    }
+    V p=V::makeObj();if(sample)keepMeshSample(p,true,fields[0].value);
+    commitMeshFeature(FeatureType::MeshFill,"Filled mesh",std::move(p),editing?std::vector<u64>{}:std::vector<u64>{source->id},editing?editing->id:0);
+}
+static void importMeshDialog(){
+    using V=arkjson::Value;std::vector<EditorField> fields{{"Name","Imported mesh"},{"Weld mm (blank keeps file vertices)",""}};
+    if(!editFields("Import STL or OBJ","The file is copied into the document and is not linked. Caps are 12288 vertices and 4096 triangles.",fields))return;
+    wchar_t file[32768]=L"mesh.stl";OPENFILENAMEW of{};of.lStructSize=sizeof of;of.hwndOwner=g_window;of.lpstrFile=file;of.nMaxFile=32768;
+    of.lpstrFilter=L"Triangle mesh\0*.stl;*.obj\0";of.lpstrTitle=L"Import STL or OBJ";of.Flags=OFN_NOCHANGEDIR|OFN_PATHMUSTEXIST|OFN_FILEMUSTEXIST;if(!GetOpenFileNameW(&of))return;
+    int size=WideCharToMultiByte(CP_UTF8,0,file,-1,nullptr,0,nullptr,nullptr);std::string path(size,'\0');WideCharToMultiByte(CP_UTF8,0,file,-1,path.data(),size,nullptr,nullptr);path.pop_back();
+    V args=V::makeObj();args.set("path",V::makeStr(path));args.set("name",V::makeStr(trimField(fields[0].value)));
+    auto weld=trimField(fields[1].value);if(!weld.empty())args.set("weld_mm",V::makeNum(formNumber(weld)));
+    runTool("import_mesh",args);if(!g_error){selBody=(int)g_bodyIds.size()-1;frameScene();g_status="Mesh imported / snapshot is mesh authority, not a STEP B-rep";}
+}
+static Feature* selectedPartFeature(){
+    if(selBody<0||(size_t)selBody>=g_bodyIds.size()||g_instanceIds[selBody])return nullptr;
+    return g_doc.find(g_bodyIds[(size_t)selBody]);
+}
+static void rememberSketch(std::vector<std::string>& names,const std::string& name){
+    if(name.empty()||!g_doc.findSketch(name)||std::find(names.begin(),names.end(),name)!=names.end())return;names.push_back(name);
+}
+static std::vector<std::string> drivingSketchNames(const Feature& feature){
+    std::vector<std::string> names;
+    if(auto* sections=feature.nativeSpec.find("sections");sections&&sections->t==arkjson::Value::Arr)
+        for(auto& item:sections->arr)if(item.t==arkjson::Value::Str)rememberSketch(names,item.str);
+    rememberSketch(names,nativeText(&feature,"section"));rememberSketch(names,nativeText(&feature,"path"));rememberSketch(names,feature.get("sketch"));
+    return names;
+}
+static void activateSketch(const std::string& name){
+    auto* sketch=g_doc.findSketch(name);if(!sketch)throw std::runtime_error("Sketch not found: "+name);
+    g_activeSketch=name;g_activePlane=sketch->sk.plane;g_selectedSketchConstraint=-1;g_sketchConstraintPage=0;g_showSketches=true;rebuildSketchOverlay();alignSketchCamera();
+    g_status="Sketch "+name+" / edit an anchor or a named parameter to recompute";
+}
+static void editFeatureParameters(const Feature& feature){
+    using V=arkjson::Value;std::vector<std::string> keys;keys.reserve(feature.p.size());
+    for(auto& entry:feature.p)keys.push_back(entry.first);std::sort(keys.begin(),keys.end());
+    if(keys.empty()){g_status="This feature has no editable parameters.";return;}
+    std::vector<EditorField> fields;fields.reserve(keys.size());
+    for(auto& key:keys){bool toggle=key=="solid"||key=="ruled"||key=="sample"||key=="pin_boundary"||key=="both"||key=="smooth"||key=="compatible"||key=="fuse"||key=="correction"||key=="contact";fields.push_back({key,feature.p.at(key),toggle});}
+    if(!editFields(("Edit "+feature.name).c_str(),"Expressions recompute this feature and everything that depends on it.",fields))return;
+    V p=V::makeObj();for(size_t i=0;i<fields.size();++i)p.set(keys[i],V::makeStr(fields[i].value));
+    V command=V::makeObj();command.set("op",V::makeStr("feature.edit"));command.set("id",V::makeNum((double)feature.id));command.set("p",std::move(p));
+    applyCommand(std::move(command));if(!g_error){frameScene();g_status="Feature edited / revision "+std::to_string(g_session.revision);}
+}
+static void editSelectedFeature(){
+    auto* feature=selectedPartFeature();if(!feature){g_status="Select a part feature in the explorer.";return;}
+    switch(feature->type){
+        case FeatureType::Loft:loftDialog(feature);break;
+        case FeatureType::SurfaceFill:surfaceFillDialog(feature);break;
+        case FeatureType::BSplineSurface:nurbsSurfaceDialog(feature);break;
+        case FeatureType::Thicken:thickenDialog(feature);break;
+        case FeatureType::Sweep:sweepDialog(feature);break;
+        case FeatureType::ExtrudeSurface:extrudeSurfaceDialog(feature);break;
+        case FeatureType::RevolveSurface:revolveSurfaceDialog(feature);break;
+        case FeatureType::OffsetSurface:offsetSurfaceDialog(feature);break;
+        case FeatureType::Sew:sewDialog(feature);break;
+        case FeatureType::MeshWeld:meshWeldDialog(feature);break;
+        case FeatureType::MeshSmooth:meshSmoothDialog(feature);break;
+        case FeatureType::MeshDecimate:meshDecimateDialog(feature);break;
+        case FeatureType::MeshOffset:meshOffsetDialog(feature);break;
+        case FeatureType::MeshFill:meshFillDialog(feature);break;
+        case FeatureType::NativeSolid:{
+            auto op=feature->get("op");
+            if(op=="fillet"||op=="chamfer")nativeEdgeBlendDialog(feature);
+            else if(op=="draft")nativeDraftDialog(feature);
+            else if(op=="linear_pattern"||op=="circular_pattern")nativePatternDialog(feature);
+            else if(op=="mirror")nativeMirrorDialog(feature);
+            else editFeatureParameters(*feature);
+            break;
+        }
+        case FeatureType::SheetMetal:uiAction(127);break;
+        case FeatureType::Tube:uiAction(30);break;
+        case FeatureType::NotchedTube:uiAction(41);break;
+        case FeatureType::SourceTube:case FeatureType::SourceSheet:case FeatureType::MeshBody:
+            g_status="Imported geometry is a baked snapshot. Edit the features built from sketches.";break;
+        default:editFeatureParameters(*feature);break;
+    }
+}
+static void editDrivingSketch(){
+    auto* feature=selectedPartFeature();if(!feature){g_status="Select a feature to open its sketch.";return;}
+    auto names=drivingSketchNames(*feature);if(names.empty()){g_status="This feature has no driving sketch.";return;}
+    std::string choice=names.front();
+    if(names.size()>1){std::string hint;for(auto& name:names)hint+=(hint.empty()?"":", ")+name;std::vector<EditorField> fields{{"Sketch",choice}};
+        if(!editFields("Open driving sketch",hint.c_str(),fields))return;choice=trimField(fields[0].value);}
+    activateSketch(choice);
+}
 static void commandPalette(){
     HMENU menu=CreatePopupMenu();
     auto group=[&](const char* title,std::initializer_list<std::pair<int,const char*>> items){HMENU sub=CreatePopupMenu();for(auto item:items)AppendMenuA(sub,MF_STRING,item.first,item.second);AppendMenuA(menu,MF_POPUP,(UINT_PTR)sub,title);};
     group("Document",{{55,"New document"},{17,"Open ARK"},{16,"Save ARK"},{52,"Import source STEP"},{12,"Export STL"},{51,"Export straight tube STEP"},{82,"Export native STEP"}});
     group("Sketch & planes",{{60,"Create / edit plane"},{113,"Attach plane to feature"},{69,"Select plane"},{72,"Toggle datum frames"},{61,"Rectangle"},{62,"Circle / opening"},{63,"Interpolating spline"},{70,"Edit entity coordinates"},{73,"Add constraint"},{89,"Edit selected constraint"},{90,"Remove selected constraint"},{64,"Edit raw sketch JSON"},{65,"Extrude sketch"},{66,"Cut from sketch"},{67,"Named parameter"},{68,"Toggle sketch overlay"}});
     group("Solids",{{1,"Box"},{2,"Cylinder"},{3,"Sphere"},{4,"Cone"},{5,"Torus"},{6,"Polygon extrusion"},{7,"Revolve"},{11,"Linear pattern"}});
-    group("Exact solids",{{100,"Native primitive"},{101,"Extrude saved sketch"},{102,"Union / cut / common"},{103,"Hole / slot / profile pocket"},{104,"Fillet / chamfer named edges"},{105,"Rigid transform"}});
-    group("Modify",{{8,"Union"},{9,"Subtract bodies"},{10,"Intersect"},{25,"Delete selection"},{18,"Undo"},{19,"Redo"}});
+    group("Exact solids",{{100,"Native primitive"},{101,"Extrude saved sketch"},{102,"Union / cut / common"},{103,"Hole / slot / profile pocket"},{104,"Fillet / chamfer"},{106,"Draft faces"},{107,"Linear / circular pattern"},{108,"Mirror solid"},{105,"Rigid transform"}});
+    group("Modify",{{8,"Union"},{9,"Subtract bodies"},{10,"Intersect"},{108,"Mirror solid"},{25,"Delete selection"},{18,"Undo"},{19,"Redo"}});
     group("Tube & assembly",{{26,"Bend-program tube"},{40,"Laser tube"},{27,"Create assembly"},{28,"Duplicate instance"},{29,"Instance placement"},{93,"Ground / unground instance"},{94,"Add assembly mate"},{95,"Edit selected mate"},{96,"Remove selected mate"},{30,"Edit tube program"}});
-    group("Native surfaces",{{76,"Loft sketches"},{77,"Fill closed sketch"},{78,"NURBS surface"},{79,"Thicken selected surface"}});
+    group("Native surfaces",{{161,"Edit selected feature"},{162,"Edit driving sketch"},{76,"Loft sketches"},{77,"Fill closed sketch"},{78,"NURBS surface"},{150,"Sweep sketches"},{151,"Extrude sketch surface"},{152,"Revolve sketch surface"},{153,"Offset selected surface"},{154,"Sew surfaces"},{79,"Thicken selected surface"}});
+    group("Mesh",{{155,"Weld mesh"},{156,"Smooth mesh"},{157,"Decimate mesh"},{158,"Offset mesh"},{159,"Fill planar holes"},{160,"Import STL/OBJ"}});
     group("Sheet metal",{{120,"Create sheet base"},{127,"Edit sheet base"},{121,"Add flange"},{122,"Edit flange"},{123,"Remove flange"},{124,"Add opening"},{125,"Edit opening"},{126,"Remove opening"},{128,"Play / pause bend preview"},{80,"Create L bend"},{81,"Import sheet STEP"},{83,"Show formed"},{84,"Show flat"}});
-    group("View & agents",{{20,"Fit document"},{71,"Normal to sketch plane"},{23,"Top view"},{24,"Isometric view"},{14,"Wireframe"},{22,"Grid"},{56,"Graphics settings"},{57,"Assistant connector"},{58,"Codex / live MCP"},{21,"Raw agent command"},{31,"Help"}});
+    group("View & agents",{{20,"Fit document"},{71,"Normal to sketch plane"},{180,"Front"},{181,"Back"},{23,"Top"},{184,"Bottom"},{182,"Right"},{183,"Left"},{24,"Isometric"},{175,"Orthographic"},{174,"Visible edges"},{186,"Ambient occlusion"},{176,"Orbit"},{177,"Pan"},{178,"Zoom"},{14,"Wireframe"},{22,"Grid"},{56,"Graphics settings"},{57,"Assistant connector"},{58,"Codex / live MCP"},{21,"Raw agent command"},{31,"Help"}});
     POINT point;GetCursorPos(&point);int id=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,point.x,point.y,0,g_window,nullptr);DestroyMenu(menu);if(id)interactiveAction(id);
 }
 static void focusSourceOpening(int index){
@@ -1306,19 +1761,25 @@ static void focusSourceOpening(int index){
     }
     g_sourceOpening=index;g_foldPlaying=false;g_status="Inspecting original opening "+std::to_string(index+1)+" / F fits the complete part";
 }
+static void setOrbitView(double nyaw,double npitch,bool ortho,const char* name){
+    tYaw=nyaw;tPitch=clamp(npitch,-1.52,1.52);g_cameraOrtho=ortho;
+    if(name)g_status=std::string(name)+(ortho?" view / orthographic":" view / perspective");
+}
 static void uiAction(int id){
     using V=arkjson::Value;
     if(id>=14000&&id<15000){size_t index=(size_t)(id-14000);if(index<g_doc.planes.size()){
-        g_activePlane=g_doc.planes[index].name;g_activeSketch.clear();g_showDatumPlanes=true;rebuildSketchOverlay();alignSketchCamera();tTarget=resolvePlane(g_doc,g_activePlane).transformPoint({});tDist=120;g_status="Datum "+g_activePlane+" / "+g_doc.planes[index].kind;
+        g_activePlane=g_doc.planes[index].name;g_activeSketch.clear();g_showDatumPlanes=true;rebuildSketchOverlay();alignSketchCamera();tTarget=resolvePlane(g_doc,g_activePlane).transformPoint({});tDist=120;
+        if(g_pickKind==1){SelectionItem item;item.kind="plane";item.name=g_activePlane;toggleSelection(item);}
+        else g_status="Datum "+g_activePlane+" / "+g_doc.planes[index].kind;
     }return;}
     if(id==97){g_matePage=std::max(0,g_matePage-1);return;}
     if(id==98){++g_matePage;return;}
     if(id>=13000&&id<14000){int index=id-13000;if(index<(int)g_doc.mates.size())g_selectedMate=index;return;}
     if(id>=12000&&id<13000){int index=id-12000;if(auto* named=editableSketch();named&&index<(int)named->sk.cons.size()){g_selectedSketchConstraint=index;rebuildSketchOverlay();}return;}
-    if(id>=11000&&id<12000){size_t index=id-11000;if(index<g_doc.sketches.size()){g_activeSketch=g_doc.sketches[index].name;g_activePlane=g_doc.sketches[index].sk.plane;g_selectedSketchConstraint=-1;g_sketchConstraintPage=0;g_showSketches=true;rebuildSketchOverlay();alignSketchCamera();}return;}
+    if(id>=11000&&id<12000){size_t index=id-11000;if(index<g_doc.sketches.size()){g_activeSketch=g_doc.sketches[index].name;g_activePlane=g_doc.sketches[index].sk.plane;g_selectedSketchConstraint=-1;g_sketchConstraintPage=0;g_showSketches=true;rebuildSketchOverlay();alignSketchCamera();if(g_pickKind==3){SelectionItem item;item.kind="curve";item.owner=g_activeSketch;item.name=g_activeSketch;toggleSelection(item);}}return;}
     if(id>=10000){focusSourceOpening(id-10000);return;}
     if(id>=9000){g_selectedNotch=id-9000;return;}
-    if(id>=2000){selBody=id-2000;g_selectedNotch=0;g_notchScroll=0;g_sourceScroll=0;g_foldPlaying=false;return;}
+    if(id>=2000){selBody=id-2000;g_activeSketch.clear();g_showSketches=false;rebuildSketchOverlay();g_selectedNotch=0;g_notchScroll=0;g_sourceScroll=0;g_foldPlaying=false;return;}
     if(id>=1000){size_t i=id-1000;if(i>=g_doc.params.size())return;std::string value=g_doc.params[i].expr,name=g_doc.params[i].name;
         if(editText(("Edit parameter: "+name).c_str(),value)){V c=V::makeObj();c.set("op",V::makeStr("param.set"));c.set("name",V::makeStr(name));c.set("expr",V::makeStr(value));applyCommand(c);}return;}
     switch(id){
@@ -1344,12 +1805,30 @@ static void uiAction(int id){
         case 91:g_sketchConstraintPage=std::max(0,g_sketchConstraintPage-1);break;
         case 92:if(auto* named=editableSketch())g_sketchConstraintPage=std::min((int)(named->sk.cons.size()/4),g_sketchConstraintPage+1);break;
         case 100:nativePrimitiveDialog();break;case 101:nativeExtrudeDialog();break;case 102:nativeBooleanDialog();break;
-        case 103:nativeHoleDialog();break;case 104:nativeEdgeBlendDialog();break;case 105:nativeTransformDialog();break;case 113:supportedDatumDialog();break;
+        case 103:nativeHoleDialog();break;case 104:nativeEdgeBlendDialog();break;case 105:nativeTransformDialog();break;case 106:nativeDraftDialog();break;case 107:nativePatternDialog();break;case 108:nativeMirrorDialog();break;case 113:supportedDatumDialog();break;
         case 68:g_showSketches=!g_showSketches;rebuildSketchOverlay();break;
         case 69:{std::string available="XY, XZ, YZ";for(auto& plane:g_doc.planes)available+=", "+plane.name;std::vector<EditorField> fields{{"Plane name",g_activePlane}};if(editFields("Select construction plane",available.c_str(),fields)){resolvePlane(g_doc,fields[0].value);g_activePlane=fields[0].value;g_activeSketch.clear();g_showSketches=true;rebuildSketchOverlay();}}break;
         case 71:alignSketchCamera();break;
         case 74:sendAssistant();break;case 75:*g_assistantCancel=true;break;
         case 76:loftDialog();break;case 77:surfaceFillDialog();break;case 78:nurbsSurfaceDialog();break;case 79:thickenDialog();break;
+        case 150:sweepDialog();break;case 151:extrudeSurfaceDialog();break;case 152:revolveSurfaceDialog();break;case 153:offsetSurfaceDialog();break;case 154:sewDialog();break;
+        case 155:meshWeldDialog();break;case 156:meshSmoothDialog();break;case 157:meshDecimateDialog();break;case 158:meshOffsetDialog();break;case 159:meshFillDialog();break;case 160:importMeshDialog();break;
+        case 161:editSelectedFeature();break;case 162:editDrivingSketch();break;
+        case 170:g_pickKind=0;g_status="Body selection";break;
+        case 171:g_pickKind=1;g_status="Face selection. Click a face, or a datum in the explorer for a mirror plane.";break;
+        case 172:g_pickKind=2;g_status="Edge selection. Fillet and chamfer use these names.";break;
+        case 173:g_pickKind=3;g_showSketches=true;rebuildSketchOverlay();g_status="Curve selection. Loft and sweep use the sketch of each curve.";break;
+        case 174:g_showEdges=!g_showEdges;g_status=g_showEdges?"Visible edges":"Edges hidden";try{saveUiSettings();}catch(...){}break;
+        case 175:g_cameraOrtho=!g_cameraOrtho;g_status=g_cameraOrtho?"Orthographic view":"Perspective view";try{saveUiSettings();}catch(...){}break;
+        case 176:g_navMode=0;g_status="Orbit. Drag in the view, or drag the view cube.";break;
+        case 177:g_navMode=1;g_status="Pan. Drag in the view. Shift+drag also pans.";break;
+        case 178:g_navMode=2;g_status="Zoom. Drag up or down. The wheel always zooms.";break;
+        case 186:g_occlusion=!g_occlusion;g_status=g_occlusion?"Ambient occlusion":"Ambient occlusion off";try{saveUiSettings();}catch(...){}break;
+        case 180:setOrbitView(0,0,true,"Front");break;
+        case 181:setOrbitView(3.141592653589793,0,true,"Back");break;
+        case 182:setOrbitView(1.5707963267948966,0,true,"Right");break;
+        case 183:setOrbitView(-1.5707963267948966,0,true,"Left");break;
+        case 184:setOrbitView(0,-1.52,true,"Bottom");break;
         case 80:sheetMetalDialog();break;case 81:importSheetStep();break;case 82:exportNativeStep();break;
         case 83:sheetDisplay(false);break;case 84:sheetDisplay(true);break;
         case 120:createSheetBaseDialog();break;case 127:editSheetBaseDialog();break;
@@ -1383,8 +1862,8 @@ static void uiAction(int id){
             }break;
         }
         case 22:g_grid=!g_grid;break;
-        case 23:tYaw=0;tPitch=1.52;break;
-        case 24:tYaw=.85;tPitch=.65;frameScene();break;
+        case 23:setOrbitView(0,1.52,true,"Top");break;
+        case 24:setOrbitView(.85,.65,false,"Isometric");frameScene();break;
         case 25:if(selBody>=0&&(size_t)selBody<g_bodyIds.size()){V c=V::makeObj();c.set("op",V::makeStr(g_instanceIds[selBody]?"assembly.remove":"feature.remove"));c.set("id",V::makeNum((double)(g_instanceIds[selBody]?g_instanceIds[selBody]:g_bodyIds[selBody])));applyCommand(c);}break;
         case 26:{
             V c,p,list,b;arkjson::parse(R"({"op":"feature.add","type":"tube","name":"Bent tube","p":{"od":"30","wall":"2","tail":"180"},"bends":[{"feed":"180","radius":"60","angle":"90","roll":"0"}]})",c);applyCommand(c);frameScene();break;
@@ -1465,7 +1944,7 @@ static void uiAction(int id){
             applyCommand(c);if(!g_error)g_selectedMate=-1;break;
         }
 
-        case 31:MessageBoxA(g_window,"ARK 0.9 / Agent-Ready Kernel\nParametric CAD for people and agents.\n\nUse Commands or the tool dock to model with editable expressions.\nNative solids and surfaces use OCCT B-reps. Sheets have formed/flat poses and a read-only bend preview.\nGround an assembly instance, add a mate, and inspect remaining degrees of freedom.\nSketch diagnosis and exact reference inspection are available through the agent tools.\n\nOrbit: drag  |  Pan: Shift + drag  |  Zoom: wheel\nFit: F  |  Wireframe: W  |  Delete: Del\nOpen: Ctrl+O  |  Save: Ctrl+S  |  Undo / redo: Ctrl+Z / Y\nCommands: Ctrl+K  |  New: Ctrl+N\n\nThe native inspector reports OCCT B-rep checks. It does not certify manufacturing suitability.","About ARK / Workspace guide",MB_OK|MB_ICONINFORMATION);break;
+        case 31:MessageBoxA(g_window,"ARK 0.9 / Agent-Ready Kernel\nParametric CAD for people and agents.\n\nUse Commands or the tool dock to model with editable expressions.\nDouble-click a feature to edit its definition, or a sketch to edit its anchors. The inspector also has Edit feature and Edit sketch.\nNative solids and surfaces use OCCT B-reps. Sheets have formed/flat poses and a read-only bend preview.\nGround an assembly instance, add a mate, and inspect remaining degrees of freedom.\nSketch diagnosis and exact reference inspection are available through the agent tools.\n\nThe view toolbar selects Orbit, Pan, Zoom, Fit, Front, Top, Right, and Isometric.\nThe view cube snaps to a face. Dragging it orbits. Named faces are orthographic.\nAmbient occlusion and visible edges are display only and are not saved in the document.\n\nOrbit: drag  |  Pan: Shift + drag  |  Zoom: wheel\nFit: F  |  Wireframe: W  |  Views: 1 front, 3 top, 5 right, 7 isometric\nOpen: Ctrl+O  |  Save: Ctrl+S  |  Undo / redo: Ctrl+Z / Y\nCommands: Ctrl+K  |  New: Ctrl+N\n\nThe native inspector reports OCCT B-rep checks. It does not certify manufacturing suitability.","About ARK / Workspace guide",MB_OK|MB_ICONINFORMATION);break;
         case 30:{
             if(selBody<0)break;auto* f=g_doc.find(g_bodyIds[selBody]);if(!f||f->type!=FeatureType::Tube)break;
             V edit=V::makeObj(),p=V::makeObj(),bs=V::makeArr();for(auto& kv:f->p)p.set(kv.first,V::makeStr(kv.second));
@@ -1501,22 +1980,32 @@ static void interactiveAction(int id){
 
 // picking -----------------------------------------------------------------------
 static Vec3 camEye(){
-    AABB all=g_sceneBounds;
-    Vec3 ctr=target;
     Vec3 dw{std::cos(pitch)*std::sin(yaw),std::sin(pitch),std::cos(pitch)*std::cos(yaw)};
-    return ctr+dw*dist;
+    return target+dw*dist;
 }
-static int pickBody(int mx,int my){
-    if(g_cpuMeshes.empty()||mx<viewX||my<viewY||mx>=viewX+viewW||my>=viewY+viewH)return -1;
-    Vec3 eye=camEye(),forward=(target-eye).normalized(),right=forward.cross({0,1,0}).normalized(),up=right.cross(forward);
-    f64 nx=(f64)(mx-viewX)/viewW*2-1,ny=1-(f64)(my-viewY)/viewH*2;
-    f64 h=std::tan(deg2rad(35)*.5);
-    Vec3 rd=(forward+right*(nx*h*viewW/viewH)+up*(ny*h)).normalized();
-    int best=-1; f64 bt=1e300;
+static Mat4 cameraProjection(){
+    double aspect=(double)viewW/std::max(viewH,1);
+    if(!g_cameraOrtho)return Mat4::perspective(35*K_PI/180,aspect,0.05,4000);
+    double halfH=std::max(2.0,dist*std::tan(35*K_PI/360.0));
+    return Mat4::ortho(-halfH*aspect,halfH*aspect,-halfH,halfH,0.05,4000);
+}
+static Mat4 cameraView(){return Mat4::lookAt(camEye(),target,{0,1,0});}
+static void viewRay(int mx,int my,Vec3& origin,Vec3& direction){
+    Vec3 eye=camEye(),forward=(target-eye).normalized(),right=forward.cross({0,1,0});
+    if(right.lensq()<1e-10)right={1,0,0};right=right.normalized();Vec3 up=right.cross(forward);
+    double nx=(double)(mx-viewX)/std::max(viewW,1)*2-1,ny=1-(double)(my-viewY)/std::max(viewH,1)*2;
+    if(g_cameraOrtho){double halfH=std::max(2.0,dist*std::tan(35*K_PI/360.0));double halfW=halfH*(double)viewW/std::max(viewH,1);origin=eye+right*(nx*halfW)+up*(ny*halfH);direction=forward;}
+    else{double h=std::tan(deg2rad(35)*.5);origin=eye;direction=(forward+right*(nx*h*viewW/std::max(viewH,1))+up*(ny*h)).normalized();}
+}
+struct SurfaceHit { int body=-1; u32 triangle=0; Vec3 local; bool hit=false; };
+static SurfaceHit pickSurface(int mx,int my){
+    SurfaceHit best;if(g_cpuMeshes.empty()||mx<viewX||my<viewY||mx>=viewX+viewW||my>=viewY+viewH)return best;
+    Vec3 eye,rd;viewRay(mx,my,eye,rd);
+    f64 bt=1e300;
     for(size_t bi=0;bi<g_bodyIds.size();++bi){
         if(auto* f=g_doc.find(g_bodyIds[bi]);f&&f->type==FeatureType::SourceTube){
             auto& cache=g_sourceViews.at(f->id);auto matrices=displayedSourceTransforms(bi);double progress=(int)bi==selBody?g_foldProgress:0.;updateSourceHinges(cache,progress);
-            auto cast=[&](const Mesh& mesh,const MeshBVH& bvh,const Mat4& world){auto inv=world.inverted();auto hit=bvh.raycast(mesh,{inv.transformPoint(eye),inv.transformDir(rd)});if(hit.hit&&hit.distance<bt){bt=hit.distance;best=(int)bi;}};
+            auto cast=[&](const Mesh& mesh,const MeshBVH& bvh,const Mat4& world){auto inv=world.inverted();auto hit=bvh.raycast(mesh,{inv.transformPoint(eye),inv.transformDir(rd)});if(hit.hit&&hit.distance<bt){bt=hit.distance;best={((int)bi),hit.triangle,hit.point,true};}};
             for(size_t k=0;k<cache.preview.rigid.size();++k)cast(cache.preview.rigid[k],cache.rigidBvhs[k],g_instanceWorld[bi]*matrices[k]);
             for(size_t k=0;k<cache.preview.bends.size();++k)cast(progress>0?cache.hinges[k]:cache.flatHinges[k],progress>0?cache.hingeBvhs[k]:cache.flatHingeBvhs[k],g_instanceWorld[bi]*matrices[k]);
             continue;
@@ -1526,30 +2015,143 @@ static int pickBody(int mx,int my){
             auto transforms=displayedNotchTransforms(bi);auto& cache=cached->second;
             for(size_t segment=0;segment<transforms.size();++segment){auto inv=(g_instanceWorld[bi]*transforms[segment]).inverted();
                 auto hit=cache.bvhs[segment].raycast(cache.preview.segments[segment],{inv.transformPoint(eye),inv.transformDir(rd)});
-                if(hit.hit&&hit.distance<bt){bt=hit.distance;best=(int)bi;}
+                if(hit.hit&&hit.distance<bt){bt=hit.distance;best={(int)bi,hit.triangle,hit.point,true};}
             }
         }else{size_t part=g_instancePart[bi];Mat4 inv=g_instanceWorld[bi].inverted();
             auto hit=g_bvhs[part].raycast(g_cpuMeshes[part],{inv.transformPoint(eye),inv.transformDir(rd)});
-            if(hit.hit&&hit.distance<bt){bt=hit.distance;best=(int)bi;}
+            if(hit.hit&&hit.distance<bt){bt=hit.distance;best={(int)bi,hit.triangle,hit.point,true};}
         }
     }
     return best;
 }
+static int pickBody(int mx,int my){return pickSurface(mx,my).body;}
+static bool projectScreen(Vec3 p,float& x,float& y){
+    Mat4 vp=cameraProjection()*cameraView();
+    double w=vp.m[3]*p.x+vp.m[7]*p.y+vp.m[11]*p.z+vp.m[15];if(w<=1e-6)return false;Vec3 clip=vp.transformPoint(p);
+    x=viewX+(float)((clip.x/w+1)*viewW*0.5);y=viewY+(float)((1-clip.y/w)*viewH*0.5);return true;
+}
+static void pickReference(int mx,int my){
+    if(g_pickKind==3){float best=8.f;const CurveSample* chosen=nullptr;
+        for(const auto& sample:g_curveSamples){float ax,ay,bx,by;if(!projectScreen(sample.a,ax,ay)||!projectScreen(sample.b,bx,by))continue;float abx=bx-ax,aby=by-ay,len=abx*abx+aby*aby;float t=len<1e-6?0.f:clamp(((mx-ax)*abx+(my-ay)*aby)/len,0.f,1.f);float dx=ax+abx*t-mx,dy=ay+aby*t-my;float distance=std::sqrt(dx*dx+dy*dy);if(distance<best){best=distance;chosen=&sample;}}
+        if(!chosen){g_status="Click a visible sketch curve";return;}
+        SelectionItem item;item.kind="curve";item.owner=chosen->sketch;item.name=chosen->name;toggleSelection(item);return;
+    }
+    SurfaceHit hit=pickSurface(mx,my);if(!hit.hit){g_status=g_pickKind==1?"Click a face":"Click an edge";return;}
+    selBody=hit.body;size_t part=g_instancePart[(size_t)hit.body];if(part>=g_partPicks.size()){g_status="This body has no named faces or edges";return;}
+    const PartPick& pick=g_partPicks[part];
+    if(g_pickKind==1){int face=-1;for(int index=0;index<(int)pick.faces.size();++index)if((int)hit.triangle>=pick.faces[(size_t)index].first&&(int)hit.triangle<pick.faces[(size_t)index].first+pick.faces[(size_t)index].second)face=index;
+        if(face<0||pick.faceNames[(size_t)face].empty()){g_status="This face has no persistent name";return;}
+        SelectionItem item;item.feature=g_bodyIds[(size_t)hit.body];item.kind="face";item.name=pick.faceNames[(size_t)face];toggleSelection(item);return;
+    }
+    Vec3 world=g_instanceWorld[(size_t)hit.body].transformPoint(hit.local);double depth=(world-camEye()).len();
+    double halfH=std::max(2.0,dist*std::tan(35*K_PI/360.0));
+    double limit=std::max(0.4,10.0*2.0*(g_cameraOrtho?halfH:depth*std::tan(deg2rad(35)*0.5))/std::max(viewH,1));
+    int edge=-1;double best=limit;
+    for(int index=0;index<(int)pick.edges.size();++index){const auto& points=pick.edges[(size_t)index];for(size_t k=1;k<points.size();++k){Vec3 a=points[k-1],b=points[k],ab=b-a;double len=ab.lensq();double t=len<1e-18?0:clamp((hit.local-a).dot(ab)/len,0.,1.);double distance=(hit.local-(a+ab*t)).len();if(distance<best){best=distance;edge=index;}}}
+    if(edge<0||pick.edgeNames[(size_t)edge].empty()){g_status="Click closer to a named edge";return;}
+    SelectionItem item;item.feature=g_bodyIds[(size_t)hit.body];item.kind="edge";item.name=pick.edgeNames[(size_t)edge];toggleSelection(item);
+}
 
 // ---------------------------------------------------------------------------
-static GLuint pBg,pSolid,pGrid,pShadow,pUI,pText,pSketch;
+static GLuint pBg,pSolid,pGrid,pShadow,pUI,pText,pSketch,pGeom,pAo,pCompose,pEdge;
 static GLint suVp,suModel,suOutline,suColor,suEye,suSel,suHard;
+static GLint guView,guProj,guModel,guHard,auProj,auFocal,auOrtho,auRadius,auBias,cuOrigin,euVp,euModel;
 static GLint uuVp,uuRc,uuRad,uuFill,uuBorder,uuBW,uuGlyph;
-static GLuint quadVao,gridVao,textVao,textVbo;
-static int gridCount=0;
-static bool g_swap=true;   // headless readback disables the buffer swap
+static GLuint quadVao,gridVao,textVao,textVbo,gFbo=0,gGeomTex=0,gAoTex=0,gDepthTex=0,gCubeVao=0,gCubeVbo=0;
+static int gridCount=0,gOccW=0,gOccH=0;
+static bool g_swap=true,gOccReady=false;   // headless readback disables the buffer swap
+static void drawSurfaces(bool geometry,const Mat4& view,const Mat4& proj,const GLfloat vpT[16],const Vec3& eye){
+    GLint modelLoc=geometry?guModel:suModel,hardLoc=geometry?guHard:suHard;
+    if(geometry){GLfloat vm[16],pm[16];for(int i=0;i<16;++i){vm[i]=(GLfloat)view.m[i];pm[i]=(GLfloat)proj.m[i];}glUseProgram(pGeom);glUniformMatrix4fv(guView,1,GL_FALSE,vm);glUniformMatrix4fv(guProj,1,GL_FALSE,pm);}
+    else{glUseProgram(pSolid);glUniform1f(glGetUniformLocation(pSolid,"satin"),g_satin?1.f:0.f);glUniformMatrix4fv(suVp,1,GL_FALSE,vpT);glUniform3f(suEye,(float)eye.x,(float)eye.y,(float)eye.z);}
+    if(!wireframe){glEnable(GL_POLYGON_OFFSET_FILL);glPolygonOffset(1.f,1.f);}else glDisable(GL_POLYGON_OFFSET_FILL);
+    auto setModel=[&](const Mat4& world){GLfloat m[16];for(int k=0;k<16;++k)m[k]=(GLfloat)world.m[k];glUniformMatrix4fv(modelLoc,1,GL_FALSE,m);};
+    for(size_t i=0;i<g_bodyIds.size();++i){
+        if(auto* f=g_doc.find(g_bodyIds[i]);f&&f->type==FeatureType::SourceTube){
+            auto& cache=g_sourceViews.at(f->id);auto matrices=displayedSourceTransforms(i);double progress=(int)i==selBody?g_foldProgress:0.;updateSourceHinges(cache,progress);
+            glUniform1f(hardLoc,0.f);if(!geometry){glUniform1f(suOutline,0.f);glUniform1f(suSel,(int)i==selBody?1.f:0.f);glUniform3f(suColor,.73f,.745f,.765f);}glPolygonMode(GL_FRONT_AND_BACK,!geometry&&wireframe?GL_LINE:GL_FILL);
+            auto drawPart=[&](const GPUMesh& mesh,const Mat4& world){if(!mesh.count)return;setModel(world);glBindVertexArray(mesh.vao);glDrawElements(GL_TRIANGLES,mesh.count*3,GL_UNSIGNED_INT,nullptr);};
+            for(size_t k=0;k<cache.preview.rigid.size();++k)drawPart(cache.rigidGpu[k],g_instanceWorld[i]*matrices[k]);
+            for(size_t k=0;k<cache.preview.bends.size();++k)drawPart(progress>0?cache.hingeGpu[k]:cache.flatHingeGpu[k],g_instanceWorld[i]*matrices[k]);
+            continue;
+        }
+        if(auto* f=g_doc.find(g_bodyIds[i]);f&&f->type==FeatureType::NotchedTube){
+            auto& cache=g_notchViews.at(f->id);auto transforms=displayedNotchTransforms(i);
+            glUniform1f(hardLoc,wireframe?0.f:1.f);if(!geometry){glUniform1f(suOutline,0.f);glUniform1f(suSel,(int)i==selBody?1.f:0.f);}glPolygonMode(GL_FRONT_AND_BACK,!geometry&&wireframe?GL_LINE:GL_FILL);
+            for(size_t segment=0;segment<transforms.size();++segment){setModel(g_instanceWorld[i]*transforms[segment]);if(!geometry){float c=.70f+(segment%2)*.02f;glUniform3f(suColor,c,c+.015f,c+.03f);}glBindVertexArray(cache.gpu[segment].vao);glDrawElements(GL_TRIANGLES,cache.gpu[segment].count*3,GL_UNSIGNED_INT,nullptr);}
+            continue;
+        }
+        auto* materialFeature=g_doc.find(g_bodyIds[i]);glUniform1f(hardLoc,materialFeature&&(materialFeature->type==FeatureType::Extrude||materialFeature->type==FeatureType::SketchCut)&&!wireframe?1.f:0.f);
+        auto& gm=g_meshes[g_instancePart[i]];if(!gm.count)continue;setModel(g_instanceWorld[i]);
+        if(!geometry){float sel=i==(size_t)selBody?1.f:i==(size_t)hoverBody?.3f:0.f;float hue=((i*17)%7)/7.f;glUniform3f(suColor,.72f+.03f*hue,.735f+.015f*hue,.755f);glUniform1f(suSel,sel);glUniform1f(suOutline,0.f);}
+        glBindVertexArray(gm.vao);glPolygonMode(GL_FRONT_AND_BACK,!geometry&&wireframe?GL_LINE:GL_FILL);glDrawElements(GL_TRIANGLES,gm.count*3,GL_UNSIGNED_INT,nullptr);
+        if(!geometry&&!wireframe&&g_instancePart[i]<g_partPicks.size()){glUniform3f(suColor,.93f,.58f,.26f);glUniform1f(suSel,1.f);glPolygonOffset(-1.f,-1.f);
+            auto& pick=g_partPicks[g_instancePart[i]];
+            for(const auto& item:g_picked)if(item.kind=="face"&&item.feature==g_bodyIds[i])for(size_t face=0;face<pick.faceNames.size()&&face<pick.faces.size();++face)if(pick.faceNames[face]==item.name&&pick.faces[face].second>0)glDrawElements(GL_TRIANGLES,pick.faces[face].second*3,GL_UNSIGNED_INT,(void*)((size_t)pick.faces[face].first*3*sizeof(unsigned)));
+            glPolygonOffset(1.f,1.f);
+        }
+    }
+    glDisable(GL_POLYGON_OFFSET_FILL);glPolygonMode(GL_FRONT_AND_BACK,GL_FILL);
+}
+static bool ensureOcclusionTargets(int w,int h){
+    if(!glGenFramebuffers||!glBindFramebuffer||!glFramebufferTexture2D||!glCheckFramebufferStatus||!glDeleteFramebuffers)return false;
+    if(gOccReady&&gOccW==w&&gOccH==h)return true;
+    if(gFbo){glDeleteFramebuffers(1,&gFbo);gFbo=0;}if(gGeomTex){glDeleteTextures(1,&gGeomTex);gGeomTex=0;}if(gAoTex){glDeleteTextures(1,&gAoTex);gAoTex=0;}if(gDepthTex){glDeleteTextures(1,&gDepthTex);gDepthTex=0;}
+    auto tex=[&](GLuint& id,GLint internal,GLenum format,GLenum type){glGenTextures(1,&id);glBindTexture(GL_TEXTURE_2D,id);glTexImage2D(GL_TEXTURE_2D,0,internal,w,h,0,format,type,nullptr);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);};
+    tex(gGeomTex,GL_RGBA8,GL_RGBA,GL_UNSIGNED_BYTE);tex(gAoTex,GL_RGBA8,GL_RGBA,GL_UNSIGNED_BYTE);tex(gDepthTex,GL_DEPTH_COMPONENT24,GL_DEPTH_COMPONENT,GL_FLOAT);
+    glGenFramebuffers(1,&gFbo);glBindFramebuffer(GL_FRAMEBUFFER,gFbo);glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,gGeomTex,0);glFramebufferTexture2D(GL_FRAMEBUFFER,GL_DEPTH_ATTACHMENT,GL_TEXTURE_2D,gDepthTex,0);
+    gOccReady=glCheckFramebufferStatus(GL_FRAMEBUFFER)==GL_FRAMEBUFFER_COMPLETE;glBindFramebuffer(GL_FRAMEBUFFER,0);gOccW=w;gOccH=h;
+    if(!gOccReady)while(glGetError()!=GL_NO_ERROR){}
+    return gOccReady;
+}
+static void applyOcclusion(const Mat4& view,const Mat4& proj,const GLfloat vpT[16],const Vec3& eye){
+    if(!g_occlusion||wireframe||viewW<2||viewH<2||!ensureOcclusionTargets(viewW,viewH))return;
+    glBindFramebuffer(GL_FRAMEBUFFER,gFbo);glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,gGeomTex,0);
+    glViewport(0,0,viewW,viewH);glDisable(GL_BLEND);glEnable(GL_DEPTH_TEST);glDepthFunc(GL_LEQUAL);glClearColor(0.f,0.f,1.f,1.f);glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+    drawSurfaces(true,view,proj,vpT,eye);
+    glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,gAoTex,0);glDisable(GL_DEPTH_TEST);glUseProgram(pAo);
+    glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,gGeomTex);glUniform1i(glGetUniformLocation(pAo,"gbuf"),0);glUniform2f(glGetUniformLocation(pAo,"res"),(float)viewW,(float)viewH);
+    GLfloat pm[16];for(int i=0;i<16;++i)pm[i]=(GLfloat)proj.m[i];glUniformMatrix4fv(auProj,1,GL_FALSE,pm);glUniform2f(auFocal,(float)proj.m[0],(float)proj.m[5]);glUniform1f(auOrtho,g_cameraOrtho?1.f:0.f);
+    double radius=g_sceneBounds.valid()?clamp(g_sceneBounds.diagonal()*0.045,1.5,12.0):6.0;glUniform1f(auRadius,(float)radius);glUniform1f(auBias,(float)(radius*0.08));
+    glBindVertexArray(quadVao);glDrawArrays(GL_TRIANGLES,0,3);
+    glBindFramebuffer(GL_FRAMEBUFFER,0);glViewport(viewX,winH-viewY-viewH,viewW,viewH);glEnable(GL_BLEND);glBlendFunc(GL_DST_COLOR,GL_ZERO);glUseProgram(pCompose);
+    glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,gAoTex);glActiveTexture(GL_TEXTURE1);glBindTexture(GL_TEXTURE_2D,gGeomTex);
+    glUniform1i(glGetUniformLocation(pCompose,"ao"),0);glUniform1i(glGetUniformLocation(pCompose,"gbuf"),1);glUniform2f(glGetUniformLocation(pCompose,"res"),(float)viewW,(float)viewH);glUniform2f(cuOrigin,(float)viewX,(float)(winH-viewY-viewH));
+    glBindVertexArray(quadVao);glDrawArrays(GL_TRIANGLES,0,3);glActiveTexture(GL_TEXTURE0);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
+}
+static void drawFeatureEdges(const GLfloat vpT[16]){
+    glEnable(GL_DEPTH_TEST);glDepthFunc(GL_LEQUAL);glUseProgram(pEdge);glUniformMatrix4fv(euVp,1,GL_FALSE,vpT);
+    float c=g_lightBackground?.46f:.88f;glUniform3f(glGetUniformLocation(pEdge,"color"),c,c+.01f,c+.02f);
+    for(size_t i=0;i<g_bodyIds.size();++i){size_t part=g_instancePart[i];if(part>=g_edgeLines.size()||g_edgeLines[part].verts<2)continue;GLfloat m[16];for(int k=0;k<16;++k)m[k]=(GLfloat)g_instanceWorld[i].m[k];glUniformMatrix4fv(euModel,1,GL_FALSE,m);glBindVertexArray(g_edgeLines[part].vao);glDrawArrays(GL_LINES,0,g_edgeLines[part].verts);}
+}
+static void cubeCamera(Vec3& eye,Mat4& view,Mat4& proj){
+    Vec3 dw{std::cos(pitch)*std::sin(yaw),std::sin(pitch),std::cos(pitch)*std::cos(yaw)};eye=dw*4.2;view=Mat4::lookAt(eye,{},{0,1,0});proj=Mat4::ortho(-1.9,1.9,-1.9,1.9,0.05,20);
+}
+static int cubeFaceAt(int mx,int my){
+    if(g_cubeS<8||mx<g_cubeX||my<g_cubeY||mx>=g_cubeX+g_cubeS||my>=g_cubeY+g_cubeS)return -1;
+    Vec3 eye;Mat4 view,proj;cubeCamera(eye,view,proj);
+    double nx=((mx-g_cubeX)/(double)g_cubeS)*2-1,ny=(1.-(my-g_cubeY)/(double)g_cubeS)*2-1;
+    Vec3 right{view.m[0],view.m[4],view.m[8]},up{view.m[1],view.m[5],view.m[9]},dir{-view.m[2],-view.m[6],-view.m[10]};
+    Vec3 origin=eye+right*(nx*1.9)+up*(ny*1.9);double tmin=0,tmax=1e9;int face=-1;
+    for(int axis=0;axis<3;++axis){double o=axis==0?origin.x:axis==1?origin.y:origin.z,d=axis==0?dir.x:axis==1?dir.y:dir.z;if(std::abs(d)<1e-8){if(o<-1||o>1)return -1;continue;}double tA=(-1-o)/d,tB=(1-o)/d;int faceA=axis*2+1,faceB=axis*2;if(tA>tB){std::swap(tA,tB);std::swap(faceA,faceB);}if(tA>tmin){tmin=tA;face=faceA;}tmax=std::min(tmax,tB);if(tmin>tmax)return -1;}
+    return tmin>=0?face:-1;
+}
+static void orientViewCube(int mx,int my){static const int faceView[6]={182,183,23,184,180,181};int face=cubeFaceAt(mx,my);if(face>=0)uiAction(faceView[face]);}
+static void paintViewCube(){
+    if(!gCubeVao)return;g_cubeS=104;g_cubeX=viewX+viewW-g_cubeS-18;g_cubeY=viewY+58;
+    glEnable(GL_SCISSOR_TEST);glScissor(g_cubeX,winH-g_cubeY-g_cubeS,g_cubeS,g_cubeS);glViewport(g_cubeX,winH-g_cubeY-g_cubeS,g_cubeS,g_cubeS);glEnable(GL_DEPTH_TEST);glClear(GL_DEPTH_BUFFER_BIT);glDisable(GL_SCISSOR_TEST);
+    Vec3 eye;Mat4 view,proj;cubeCamera(eye,view,proj);Mat4 vp=proj*view;GLfloat vpT[16];for(int i=0;i<16;++i)vpT[i]=(GLfloat)vp.m[i];
+    static const GLfloat ident[16]={1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};static const float colors[6][3]={{.76f,.78f,.72f},{.66f,.68f,.72f},{.42f,.62f,.86f},{.58f,.60f,.64f},{.82f,.83f,.86f},{.62f,.64f,.68f}};
+    glUseProgram(pSolid);glUniform1f(glGetUniformLocation(pSolid,"satin"),1.f);glUniformMatrix4fv(suVp,1,GL_FALSE,vpT);glUniformMatrix4fv(suModel,1,GL_FALSE,ident);glUniform3f(suEye,(float)eye.x,(float)eye.y,(float)eye.z);glUniform1f(suHard,1.f);glUniform1f(suOutline,0.f);glUniform1f(suSel,0.f);
+    glBindVertexArray(gCubeVao);for(int face=0;face<6;++face){glUniform3f(suColor,colors[face][0],colors[face][1],colors[face][2]);glDrawArrays(GL_TRIANGLES,face*6,6);}
+    glDisable(GL_DEPTH_TEST);glViewport(0,0,winW,winH);
+}
 
 static void drawFrame(HDC hdc){
     static auto previous=std::chrono::steady_clock::now();auto now=std::chrono::steady_clock::now();
     double elapsed=std::min(.10,std::chrono::duration<double>(now-previous).count());advanceFold(elapsed);advanceSheet(elapsed);previous=now;
     yaw+=(tYaw-yaw)*.2; pitch+=(tPitch-pitch)*.2; dist+=(tDist-dist)*.18;
     target=target+(tTarget-target)*.2;
-    AABB box=g_sceneBounds;
     layout();
 
     glViewport(0,0,winW,winH);
@@ -1561,8 +2163,7 @@ static void drawFrame(HDC hdc){
     glDrawArrays(GL_TRIANGLES,0,3);
 
     Vec3 eye=camEye();
-    Mat4 vp=Mat4::perspective(35*K_PI/180,(f64)viewW/viewH,0.05,4000)
-           *Mat4::lookAt(eye,target,{0,1,0});
+    Mat4 view=cameraView(),proj=cameraProjection(),vp=proj*view;
     GLfloat vpT[16];for(int i=0;i<16;++i)vpT[i]=(GLfloat)vp.m[i];
 
     glEnable(GL_BLEND);
@@ -1570,6 +2171,7 @@ static void drawFrame(HDC hdc){
 
     glUseProgram(pShadow);
     glUniformMatrix4fv(glGetUniformLocation(pShadow,"vp"),1,GL_FALSE,vpT);
+    glUniform1f(glGetUniformLocation(pShadow,"strength"),g_lightBackground?.18f:.36f);
     glBindVertexArray(quadVao);
     for(size_t i=0;i<g_bodyIds.size();++i){
         AABB b=g_reports[g_instancePart[i]].bounds.transformed(g_instanceWorld[i]);
@@ -1584,61 +2186,24 @@ static void drawFrame(HDC hdc){
 
     glUseProgram(pGrid);
     glUniformMatrix4fv(glGetUniformLocation(pGrid,"vp"),1,GL_FALSE,vpT);
+    glUniform1f(glGetUniformLocation(pGrid,"lightBackground"),g_lightBackground?1.f:0.f);
     glBindVertexArray(gridVao);
     if(g_grid)glDrawArrays(GL_LINES,0,gridCount);
 
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LEQUAL);
-    glUseProgram(pSolid);glUniform1f(glGetUniformLocation(pSolid,"satin"),g_satin?1.f:0.f);
-    glUniformMatrix4fv(suVp,1,GL_FALSE,vpT);
-    glUniform3f(suEye,(float)eye.x,(float)eye.y,(float)eye.z);
-    static const GLfloat ident[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
-    glUniformMatrix4fv(suModel,1,GL_FALSE,ident);
-    for(size_t i=0;i<g_bodyIds.size();++i){
-        if(auto* f=g_doc.find(g_bodyIds[i]);f&&f->type==FeatureType::SourceTube){
-            auto& cache=g_sourceViews.at(f->id);auto matrices=displayedSourceTransforms(i);double progress=(int)i==selBody?g_foldProgress:0.;updateSourceHinges(cache,progress);
-            glUniform1f(suHard,0.f);glUniform1f(suOutline,0.f);glUniform1f(suSel,(int)i==selBody?1.f:0.f);glUniform3f(suColor,.59f,.605f,.63f);glPolygonMode(GL_FRONT_AND_BACK,wireframe?GL_LINE:GL_FILL);
-            auto drawPart=[&](const GPUMesh& mesh,const Mat4& world){GLfloat m[16];for(int k=0;k<16;++k)m[k]=(GLfloat)world.m[k];glUniformMatrix4fv(suModel,1,GL_FALSE,m);glBindVertexArray(mesh.vao);glDrawElements(GL_TRIANGLES,mesh.count*3,GL_UNSIGNED_INT,nullptr);};
-            for(size_t k=0;k<cache.preview.rigid.size();++k)drawPart(cache.rigidGpu[k],g_instanceWorld[i]*matrices[k]);
-            for(size_t k=0;k<cache.preview.bends.size();++k)drawPart(progress>0?cache.hingeGpu[k]:cache.flatHingeGpu[k],g_instanceWorld[i]*matrices[k]);
-            continue;
-        }
-        if(auto* f=g_doc.find(g_bodyIds[i]);f&&f->type==FeatureType::NotchedTube){
-            auto& cache=g_notchViews.at(f->id);auto transforms=displayedNotchTransforms(i);
-            glUniform1f(suHard,wireframe?0.f:1.f);glUniform1f(suOutline,0.f);glUniform1f(suSel,(int)i==selBody?1.f:0.f);
-            glPolygonMode(GL_FRONT_AND_BACK,wireframe?GL_LINE:GL_FILL);
-            for(size_t segment=0;segment<transforms.size();++segment){auto world=g_instanceWorld[i]*transforms[segment];GLfloat m[16];for(int k=0;k<16;++k)m[k]=(GLfloat)world.m[k];
-                glUniformMatrix4fv(suModel,1,GL_FALSE,m);float c=.57f+(segment%2)*.025f;glUniform3f(suColor,c,c+.015f,c+.035f);
-                glBindVertexArray(cache.gpu[segment].vao);glDrawElements(GL_TRIANGLES,cache.gpu[segment].count*3,GL_UNSIGNED_INT,nullptr);
-            }continue;
-        }
-        auto* materialFeature=g_doc.find(g_bodyIds[i]);bool hard=materialFeature&&(materialFeature->type==FeatureType::Extrude||materialFeature->type==FeatureType::SketchCut);glUniform1f(suHard,hard&&!wireframe?1.f:0.f);GLfloat model[16];for(int k=0;k<16;++k)model[k]=(GLfloat)g_instanceWorld[i].m[k];glUniformMatrix4fv(suModel,1,GL_FALSE,model);
-        auto&gm=g_meshes[g_instancePart[i]]; if(!gm.count)continue;
-        float sel=i==(size_t)selBody?1.f:i==(size_t)hoverBody?.3f:0.f;
-        float hue=((i*53)%97)/97.f;
-        glUniform3f(suColor,.55f+.07f*hue,.565f+.07f*hue,.59f+.07f*hue);
-        glUniform1f(suSel,sel);
-        glUniform1f(suOutline,0.f);
-        glBindVertexArray(gm.vao);
-        if(false && sel>0&&!wireframe){
-            glDepthMask(GL_FALSE);
-            glUniform1f(suOutline,(float)(box.diagonal()*0.006+0.02));
-            glDrawElements(GL_TRIANGLES,gm.count*3,GL_UNSIGNED_INT,nullptr);
-            glDepthMask(GL_TRUE);
-            glUniform1f(suOutline,0.f);
-        }
-        glPolygonMode(GL_FRONT_AND_BACK,wireframe?GL_LINE:GL_FILL);
-        glDrawElements(GL_TRIANGLES,gm.count*3,GL_UNSIGNED_INT,nullptr);
-    }
-    glPolygonMode(GL_FRONT_AND_BACK,GL_FILL);
+    drawSurfaces(false,view,proj,vpT,eye);
+    applyOcclusion(view,proj,vpT,eye);
+    if(g_showEdges&&!wireframe)drawFeatureEdges(vpT);
 
-    if((g_showSketches&&!g_sketchLines.empty())||(g_showDatumPlanes&&!g_datumLines.empty())){
+    if((g_showSketches&&!g_sketchLines.empty())||(g_showDatumPlanes&&!g_datumLines.empty())||!g_selectionLines.empty()){
         glDisable(GL_DEPTH_TEST);glUseProgram(pSketch);glUniformMatrix4fv(glGetUniformLocation(pSketch,"vp"),1,GL_FALSE,vpT);glBindVertexArray(sketchVao);glBindBuffer(GL_ARRAY_BUFFER,sketchVbo);
-        if(g_sketchGpuDirty){std::vector<float> buffers=g_sketchLines;buffers.insert(buffers.end(),g_sketchPoints.begin(),g_sketchPoints.end());buffers.insert(buffers.end(),g_constraintHighlightLines.begin(),g_constraintHighlightLines.end());buffers.insert(buffers.end(),g_datumLines.begin(),g_datumLines.end());glBufferData(GL_ARRAY_BUFFER,(GLsizeiptr)(buffers.size()*sizeof(float)),buffers.data(),GL_DYNAMIC_DRAW);g_sketchGpuDirty=false;}
+        if(g_sketchGpuDirty){std::vector<float> buffers=g_sketchLines;buffers.insert(buffers.end(),g_sketchPoints.begin(),g_sketchPoints.end());buffers.insert(buffers.end(),g_constraintHighlightLines.begin(),g_constraintHighlightLines.end());buffers.insert(buffers.end(),g_datumLines.begin(),g_datumLines.end());buffers.insert(buffers.end(),g_selectionLines.begin(),g_selectionLines.end());glBufferData(GL_ARRAY_BUFFER,(GLsizeiptr)(buffers.size()*sizeof(float)),buffers.empty()?nullptr:buffers.data(),GL_DYNAMIC_DRAW);g_sketchGpuDirty=false;}
         if(g_showSketches){glUniform4f(glGetUniformLocation(pSketch,"tint"),.62,.77,.98,.85);glDrawArrays(GL_LINES,0,(GLsizei)g_sketchLines.size()/3);
             if(!g_sketchPoints.empty()){glPointSize(6);glDrawArrays(GL_POINTS,(GLint)g_sketchLines.size()/3,(GLsizei)g_sketchPoints.size()/3);glPointSize(1);}
             glUniform4f(glGetUniformLocation(pSketch,"tint"),1.,.66,.22,1.);glDrawArrays(GL_LINES,(GLint)(g_sketchLines.size()+g_sketchPoints.size())/3,(GLsizei)g_constraintHighlightLines.size()/3);}
         if(g_showDatumPlanes){glUniform4f(glGetUniformLocation(pSketch,"tint"),.55,.77,.68,.48);glDrawArrays(GL_LINES,(GLint)(g_sketchLines.size()+g_sketchPoints.size()+g_constraintHighlightLines.size())/3,(GLsizei)g_datumLines.size()/3);}
+        if(!g_selectionLines.empty()){glLineWidth(2.5f);glUniform4f(glGetUniformLocation(pSketch,"tint"),.97,.62,.28,1.);glDrawArrays(GL_LINES,(GLint)(g_sketchLines.size()+g_sketchPoints.size()+g_constraintHighlightLines.size()+g_datumLines.size())/3,(GLsizei)g_selectionLines.size()/3);glLineWidth(1.f);}
     }
     // ============================ UI =========================================
     glDisable(GL_DEPTH_TEST);
@@ -1705,34 +2270,41 @@ static void drawFrame(HDC hdc){
     label("DOCUMENT",20,101,.66f);label(std::to_string(g_doc.features.size()),221,101,.66f);
     textOut("Model explorer",20,132,1.02f);label(std::to_string(g_doc.features.size())+" features / "+std::to_string(g_bodyIds.size())+" instances",20,162,.68f);
     float treeY=200;
-    size_t rows=g_doc.assembly.empty()?g_doc.features.size():g_doc.assembly.size();
-    for(size_t i=(size_t)g_treeScroll;i<rows&&treeY<H-385;i++){
-        std::string name,subtitle;int body=-1,depth=0;bool group=false;
+    struct ExplorerItem{std::string name,subtitle;int zone=-1;bool selected=false;int depth=0;int kind=0;};
+    std::vector<ExplorerItem> explorer;
+    size_t featureRows=g_doc.assembly.empty()?g_doc.features.size():g_doc.assembly.size();
+    for(size_t i=0;i<featureRows;++i){
+        ExplorerItem row;
         if(g_doc.assembly.empty()){
-            auto& f=g_doc.features[i];name=f.name;subtitle=std::string(featureTypeName(f.type))+" #"+std::to_string(f.id);
-            for(size_t j=0;j<g_bodyIds.size();++j)if(g_bodyIds[j]==f.id)body=(int)j;
+            auto& f=g_doc.features[i];row.name=f.name;row.subtitle=std::string(featureTypeName(f.type))+" #"+std::to_string(f.id);
+            for(size_t j=0;j<g_bodyIds.size();++j)if(g_bodyIds[j]==f.id){row.zone=2000+(int)j;row.selected=selBody==(int)j;}
         }else{
-            auto& node=g_doc.assembly[i];name=node.name;group=node.feature==0;subtitle=group?"Subassembly":"Part #"+std::to_string(node.feature)+" / node "+std::to_string(node.id);
-            u64 parent=node.parent;while(parent&&depth<5){++depth;auto it=std::find_if(g_doc.assembly.begin(),g_doc.assembly.end(),[&](const AssemblyNode& n){return n.id==parent;});if(it==g_doc.assembly.end())break;parent=it->parent;}
-            for(size_t j=0;j<g_instanceIds.size();++j)if(g_instanceIds[j]==node.id)body=(int)j;
+            auto& node=g_doc.assembly[i];bool group=node.feature==0;row.kind=group?3:0;row.name=node.name;row.subtitle=group?"Subassembly":"Part #"+std::to_string(node.feature)+" / node "+std::to_string(node.id);
+            u64 parent=node.parent;while(parent&&row.depth<5){++row.depth;auto it=std::find_if(g_doc.assembly.begin(),g_doc.assembly.end(),[&](const AssemblyNode& n){return n.id==parent;});if(it==g_doc.assembly.end())break;parent=it->parent;}
+            for(size_t j=0;j<g_instanceIds.size();++j)if(g_instanceIds[j]==node.id){row.zone=2000+(int)j;row.selected=selBody==(int)j;}
         }
-        bool selected=body>=0&&selBody==body;
-        if(selected)rect(12,treeY-7,234,53,7,.175,.19,.22,1,.39,.43,.50,.7,1);
-        textOut(group?"+":body>=0?"<>":"-",20+depth*10,treeY+2,.8f,.75,.79,.86);
-        textOut(name.substr(0,22-depth),48+depth*10,treeY,.78f);label(subtitle,48+depth*10,treeY+23,.60f);
-        if(body>=0)g_zones.push_back({12,treeY-7,234,53,2000+body});treeY+=62;
+        explorer.push_back(std::move(row));
     }
-    for(size_t k=0;k<g_doc.sketches.size()&&treeY<H-385;++k){auto& sketch=g_doc.sketches[k];
-        if(sketch.name==g_activeSketch&&g_showSketches)rect(12,treeY-7,234,48,7,.16,.19,.25,1,.34,.40,.52,.8,1);
-        textOut("~",20,treeY,.8f,.67,.76,.92);textOut(sketch.name.substr(0,21),48,treeY,.78f);label("Sketch / "+sketch.sk.plane,48,treeY+22,.60f);g_zones.push_back({12,treeY-7,234,48,11000+(int)k});treeY+=55;
+    for(size_t k=0;k<g_doc.sketches.size();++k){auto& sketch=g_doc.sketches[k];explorer.push_back({sketch.name,"Sketch / "+sketch.sk.plane,11000+(int)k,sketch.name==g_activeSketch&&g_showSketches,0,1});}
+    for(size_t k=0;k<g_doc.planes.size();++k){auto& datum=g_doc.planes[k];explorer.push_back({datum.name,"Datum / "+datum.kind,14000+(int)k,datum.name==g_activePlane&&g_showDatumPlanes,0,2});}
+    if(g_treeScroll>=(int)explorer.size())g_treeScroll=std::max(0,(int)explorer.size()-1);
+    for(size_t i=(size_t)std::max(g_treeScroll,0);i<explorer.size()&&treeY<H-385;++i){
+        auto& row=explorer[i];int h=row.kind==1?48:row.kind==2?42:53;
+        if(row.selected){
+            if(row.kind==1)rect(12,treeY-7,234,(float)h,7,.16,.19,.25,1,.34,.40,.52,.8,1);
+            else if(row.kind==2)rect(12,treeY-7,234,(float)h,7,.14,.20,.18,1,.29,.51,.42,.8,1);
+            else rect(12,treeY-7,234,(float)h,7,.175,.19,.22,1,.39,.43,.50,.7,1);
+        }
+        const char* mark=row.kind==1?"~":row.kind==2||row.kind==3?"+":row.zone>=0?"<>":"-";
+        float cr=row.kind==1?.67f:row.kind==2?.58f:.75f,cg=row.kind==1?.76f:row.kind==2?.80f:.79f,cb=row.kind==1?.92f:row.kind==2?.69f:.86f;
+        textOut(mark,20+row.depth*10,treeY+2,.8f,cr,cg,cb);
+        textOut(row.name.substr(0,(size_t)std::max(8,22-row.depth)),48+row.depth*10,treeY,.78f);
+        label(row.subtitle,48+row.depth*10,treeY+(row.kind==2?19:23),.60f);
+        if(row.zone>=0)g_zones.push_back({12,treeY-7,234,(float)h,row.zone});
+        treeY+=row.kind==1?55:row.kind==2?48:62;
     }
-    for(size_t k=0;k<g_doc.planes.size()&&treeY<H-385;++k){auto& datum=g_doc.planes[k];
-        if(datum.name==g_activePlane&&g_showDatumPlanes)rect(12,treeY-7,234,42,7,.14,.20,.18,1,.29,.51,.42,.8,1);
-        textOut("+",20,treeY,.8f,.58,.80,.69);textOut(datum.name.substr(0,21),48,treeY,.76f);
-        label("Datum / "+datum.kind,48,treeY+19,.58f);g_zones.push_back({12,treeY-7,234,42,14000+(int)k});treeY+=48;
-    }
-    float ly=H-340;rect(20,ly,218,1,0,.17,.21,.22,1,0,0,0,0,0);label("PARAMETERS",20,ly+23,.68f);label("Click to edit",152,ly+23,.65f);
-    for(size_t i=0;i<g_doc.params.size()&&i<4;++i){auto& p=g_doc.params[i];float y=ly+58+i*48;
+    float ly=H-340;rect(20,ly,218,1,0,.17,.21,.22,1,0,0,0,0,0);label("PARAMETERS",20,ly+14,.68f);label("Click to edit",152,ly+14,.65f);
+    for(size_t i=0;i<g_doc.params.size()&&i<6;++i){auto& p=g_doc.params[i];float y=ly+36+i*32;
         textOut(p.name.substr(0,15),22,y+5,.79f);rect(127,y-1,108,31,5,.12,.13,.15,1,.29,.31,.35,.7,1);
         textOut(p.expr.substr(0,12),139,y+5,.78f,.83,.85,.89);g_zones.push_back({15,y-2,224,34,(int)i+1000});
     }
@@ -1753,6 +2325,9 @@ static void drawFrame(HDC hdc){
     if(activeSketch){selected=activeSketch->name;kind="SKETCH / DIMENSION EXPRESSIONS";}
     textOut(selected.substr(0,25),rx,135,1.02f);
     rect(rx,173,254,28,5,.15,.16,.19,1,0,0,0,0,0);textOut(kind.substr(0,36),rx+11,180,.59f,.76,.79,.85);
+    std::string pickText;for(const auto& item:g_picked){if(!pickText.empty())pickText+=", ";pickText+=item.name.empty()?item.owner:item.name;}if(pickText.size()>42)pickText=pickText.substr(0,39)+"...";
+    label(pickText.empty()?"No face, edge, or curve":pickText,rx,210,.58f);
+    button("Body",rx,228,60,170,false,g_pickKind==0);button("Face",rx+64,228,60,171,false,g_pickKind==1);button("Edge",rx+128,228,60,172,false,g_pickKind==2);button("Curve",rx+192,228,62,173,false,g_pickKind==3);
     auto* laser=selectedNotchedTube();auto* source=selectedSourceTube();if(activeSketch){laser=nullptr;source=nullptr;}
     const bool assemblySelected=selBody>=0&&g_instanceIds[selBody]&&!activeSketch;
     if(!laser&&!source&&!activeSketch)label(assemblySelected?"ASSEMBLY CONSTRAINTS":nativeReport?"NATIVE GEOMETRY":"GEOMETRY",rx,283,.66f);
@@ -1880,9 +2455,16 @@ static void drawFrame(HDC hdc){
             button("Wireframe",rx,H-120,121,14,false,wireframe);button("Grid",rx+131,H-120,121,22,false,g_grid);
         }
     }else if(nativeReport&&!laser&&!source){
-        if(auto* selectedFeature=selBody>=0?g_doc.find(g_bodyIds[(size_t)selBody]):nullptr;selectedFeature&&selectedFeature->type==FeatureType::NativeSolid){
+        auto* selectedFeature=selBody>=0?g_doc.find(g_bodyIds[(size_t)selBody]):nullptr;
+        if(selectedFeature&&selectedFeature->type==FeatureType::NativeSolid){
             button("Hole / pocket",rx,H-246,121,103);button("Fillet / edge",rx+131,H-246,121,104);
             button("Datum face",rx,H-204,121,113);button("Exact Boolean",rx+131,H-204,121,102);
+        }
+        if(selectedFeature){
+            bool sketchDrive=!drivingSketchNames(*selectedFeature).empty();
+            float y=selectedFeature->type==FeatureType::NativeSolid?H-286:H-246;
+            button("Edit feature",rx,y,sketchDrive?121.f:252.f,161,true);
+            if(sketchDrive)button("Edit sketch",rx+131,y,121,162);
         }
         button("Export native STEP",rx,H-162,252,82,true);
         button("Wireframe",rx,H-120,121,14,false,wireframe);button("Grid",rx+131,H-120,121,22,false,g_grid);
@@ -1925,6 +2507,11 @@ static void drawFrame(HDC hdc){
         button("Wireframe",rx,H-120,121,14,false,wireframe);button("Grid",rx+131,H-120,121,22,false,g_grid);
         button("Export straight STEP",rx,H-78,252,51,true);
     }else{
+        if(auto* part=selBody>=0&&!g_instanceIds[selBody]?g_doc.find(g_bodyIds[(size_t)selBody]):nullptr){
+            bool sketchDrive=!drivingSketchNames(*part).empty();
+            button("Edit feature",rx,H-204,sketchDrive?121.f:252.f,161,true);
+            if(sketchDrive)button("Edit sketch",rx+131,H-204,121,162);
+        }
         button("Wireframe",rx,H-120,121,14,false,wireframe);button("Grid",rx+131,H-120,121,22,false,g_grid);
         button(selBody>=0&&!g_instanceIds[selBody]&&g_tubeInfo.count(g_bodyIds[selBody])?"Bend program":"Placement",rx,H-162,121,29);button("Duplicate",rx+131,H-162,121,28);
         button("Delete selected",rx,H-78,252,25);
@@ -1952,10 +2539,22 @@ static void drawFrame(HDC hdc){
     button("Codex MCP",viewX+viewW-206,cy+164,184,58);
     textOut(g_status.substr(0,(size_t)std::max((viewW-248)/7,1)),viewX+22,cy+193,.58f,g_error?.94f:.58f,g_error?.57f:.65f,g_error?.48f:.74f);
     if(g_chatInput){MoveWindow(g_chatInput,viewX+30,(int)cy+132,viewW-260,44,TRUE);MoveWindow(g_chatHistory,viewX+22,(int)cy+43,viewW-44,68,TRUE);}
+    g_cubeS=104;g_cubeX=viewX+viewW-g_cubeS-18;g_cubeY=viewY+58;
+    rect((float)g_cubeX-6,(float)g_cubeY-6,(float)g_cubeS+12,(float)g_cubeS+12,10,.16f,.17f,.19f,.55f,.35f,.38f,.42f,.4f,1);
+    paintViewCube();glUseProgram(pUI);glUniform2f(uuVp,W,H);
+    {Vec3 cubeEye;Mat4 cubeView,cubeProj;cubeCamera(cubeEye,cubeView,cubeProj);Mat4 cvp=cubeProj*cubeView;Vec3 toEye=cubeEye.normalized();
+        static const char* faceName[]={"Right","Left","Top","Bottom","Front","Back"};
+        static const Vec3 faceNormal[]={{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+        for(int face=0;face<6;++face){if(faceNormal[face].dot(toEye)<.42)continue;Vec3 p=faceNormal[face]*1.05;double cw=cvp.m[3]*p.x+cvp.m[7]*p.y+cvp.m[11]*p.z+cvp.m[15];if(cw<=1e-5)continue;Vec3 clip=cvp.transformPoint(p);
+            float x=g_cubeX+(float)((clip.x/cw+1)*.5*g_cubeS),y=g_cubeY+(float)((1-clip.y/cw)*.5*g_cubeS);textOut(faceName[face],x-textWidth(faceName[face],.52f)*.5f,y-6,.52f,.10f,.12f,.16f);}
+        g_zones.push_back({(float)g_cubeX,(float)g_cubeY,(float)g_cubeS,(float)g_cubeS,179});}
+    {const char* names[]={"Orbit","Pan","Zoom","Fit","Front","Top","Right","Iso","Edges","AO","Ortho"};int ids[]={176,177,178,20,180,23,182,24,174,186,175};
+        bool on[]={g_navMode==0,g_navMode==1,g_navMode==2,false,std::abs(tYaw)<1e-4&&std::abs(tPitch)<1e-4&&g_cameraOrtho,std::abs(tPitch-1.52)<1e-4,std::abs(tYaw-1.5707963267948966)<1e-3&&std::abs(tPitch)<1e-4,!g_cameraOrtho&&std::abs(tYaw-.85)<1e-3&&std::abs(tPitch-.65)<1e-3,g_showEdges,g_occlusion,g_cameraOrtho};
+        float gap=3.f,bw=std::max(36.f,std::min(62.f,((float)viewW-12.f-10.f*gap)/11.f)),ty=(float)viewY+(float)viewH-40.f;for(int i=0;i<11;++i)button(names[i],(float)viewX+6+i*(bw+gap),ty,bw,ids[i],false,on[i]);}
     panel(0,H-28,W,28);
     textOut("o",17,H-22,.65f,.73,.79,.87);label("ENGINE READY",34,H-21,.61f);
     char st[180];std::snprintf(st,sizeof st,"%zu triangles   /   %.2f ms recompute   /   %.0f fps",g_triangleCount,g_doc.recomputeMs,g_fps);
-    label(st,viewX+16,H-21,.61f);label("Orbit: drag   Pan: Shift+drag   Zoom: scroll",W-298,H-21,.58f);
+    label(st,viewX+16,H-21,.61f);label(g_cameraOrtho?"Ortho  |  wheel zoom":"Perspective  |  wheel zoom",W-250,H-21,.58f);
 
     // flush text
     glUseProgram(pText);
@@ -1995,16 +2594,17 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
             if(p.x>=viewX&&p.x<viewX+viewW&&p.y>=winH-244){g_chatScroll=std::max(0,g_chatScroll+(GET_WHEEL_DELTA_WPARAM(wp)>0?2:-2));return 0;}
             if(p.x>winW-300&&selectedSourceTube()){g_sourceScroll=std::max(0,g_sourceScroll+(GET_WHEEL_DELTA_WPARAM(wp)>0?-1:1));return 0;}
             if(p.x>winW-300&&selectedNotchedTube()){g_notchScroll=std::max(0,g_notchScroll+(GET_WHEEL_DELTA_WPARAM(wp)>0?-1:1));return 0;}
-            if(p.x<viewX){g_treeScroll=std::max(0,std::min((int)(g_doc.assembly.empty()?g_doc.features.size():g_doc.assembly.size())-1,g_treeScroll+(GET_WHEEL_DELTA_WPARAM(wp)>0?-1:1)));return 0;}}
+            if(p.x<viewX){int count=(int)((g_doc.assembly.empty()?g_doc.features.size():g_doc.assembly.size())+g_doc.sketches.size()+g_doc.planes.size());g_treeScroll=std::max(0,std::min(std::max(0,count-1),g_treeScroll+(GET_WHEEL_DELTA_WPARAM(wp)>0?-1:1)));return 0;}}
             tDist=clamp(tDist*(GET_WHEEL_DELTA_WPARAM(wp)>0?0.87:1.15),2.,4000.);
             return 0;
         case WM_LBUTTONDOWN:{
-            POINT p{GET_X_LPARAM(lp),GET_Y_LPARAM(lp)};
+            POINT p{GET_X_LPARAM(lp),GET_Y_LPARAM(lp)};g_pointerX=p.x;g_pointerY=p.y;g_cubePress=false;
             g_pressWasButton=p.x<viewX||p.x>viewX+viewW||p.y<viewY||p.y>viewY+viewH;
             for(auto&z:g_zones)
                 if((float)p.x>=z.x&&(float)p.x<=z.x+z.w&&(float)p.y>=z.y&&(float)p.y<=z.y+z.h)
-                    { g_pressWasButton=true;if(z.id==50){g_foldScrubbing=true;g_foldPlaying=false;g_foldProgress=clamp((double)(p.x-z.x)/z.w,0.,1.);}
-                        else if(z.id==53){g_sheetScrubbing=true;g_sheetPlayingId=0;if(auto* sheet=selectedSheet())try{sheetPreviewSet(sheet->id,(double)(p.x-z.x)/z.w);}catch(const std::exception& error){g_error=true;g_status=error.what();}} break; }
+                    { if(z.id==179){g_cubePress=true;g_pressWasButton=false;}
+                        else{g_pressWasButton=true;if(z.id==50){g_foldScrubbing=true;g_foldPlaying=false;g_foldProgress=clamp((double)(p.x-z.x)/z.w,0.,1.);}
+                        else if(z.id==53){g_sheetScrubbing=true;g_sheetPlayingId=0;if(auto* sheet=selectedSheet())try{sheetPreviewSet(sheet->id,(double)(p.x-z.x)/z.w);}catch(const std::exception& error){g_error=true;g_status=error.what();}}} break; }
             g_dragged=false;SetCapture(hw);
             return 0;
         }
@@ -2016,12 +2616,16 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
             if(g_sheetScrubbing&&lbtn)for(auto& zone:g_zones)if(zone.id==53){if(auto* sheet=selectedSheet())try{sheetPreviewSet(sheet->id,(double)(x-zone.x)/zone.w);}catch(const std::exception& error){g_error=true;g_status=error.what();g_sheetScrubbing=false;}break;}
             if(has&&(lbtn||mbtn)){
                 int dx=x-px,dy=y-pyy;if(std::abs(dx)+std::abs(dy)>2)g_dragged=true;
-                if((mbtn||(lbtn&&shift))&&!g_pressWasButton){
+                bool navigate=!g_pressWasButton&&!g_foldScrubbing&&!g_sheetScrubbing;
+                bool pan=navigate&&(mbtn||(lbtn&&(shift||(g_navMode==1&&!g_cubePress))));
+                bool zoom=navigate&&lbtn&&!mbtn&&!shift&&g_navMode==2&&!g_cubePress;
+                if(pan){
                     f64 s=tDist*0.0016;
                     Vec3 rv{std::cos(yaw),0,-std::sin(yaw)};
                     tTarget=tTarget-rv*((f64)dx*s);
                     tTarget.y+=(f64)dy*s;
-                } else if(lbtn&&!shift&&!g_pressWasButton){
+                } else if(zoom){tDist=clamp(tDist*std::exp((double)dy*0.012),2.,4000.);}
+                else if(navigate&&lbtn&&!shift){
                     tYaw+=dx*0.008;
                     tPitch=clamp(tPitch+dy*0.006,-1.52,1.52);
                 }
@@ -2033,23 +2637,36 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
         }
         case WM_LBUTTONUP:{
             ReleaseCapture();
-            POINT p{GET_X_LPARAM(lp),GET_Y_LPARAM(lp)};
-            if(g_pressWasButton){
+            POINT p{GET_X_LPARAM(lp),GET_Y_LPARAM(lp)};g_pointerX=p.x;g_pointerY=p.y;
+            if(g_cubePress){if(!g_dragged)orientViewCube(p.x,p.y);}
+            else if(g_pressWasButton){
                 for(auto&z:g_zones)
                     if((float)p.x>=z.x&&(float)p.x<=z.x+z.w&&
                        (float)p.y>=z.y&&(float)p.y<=z.y+z.h){ if(z.id==50){g_foldProgress=clamp((double)(p.x-z.x)/z.w,0.,1.);g_foldPlaying=false;}
                            else if(z.id==53){g_sheetPlayingId=0;if(auto* sheet=selectedSheet())try{sheetPreviewSet(sheet->id,(double)(p.x-z.x)/z.w);}catch(const std::exception& error){g_error=true;g_status=error.what();}}
                            else interactiveAction(z.id); break; }
-            } else if(!g_dragged) {
-                int b=pickBody(p.x,p.y);
+            } else if(!g_dragged&&!g_eatNextClick) {
+                if(g_pickKind)pickReference(p.x,p.y);
+                else{int b=pickBody(p.x,p.y);
                 selBody=(b==selBody)?-1:b;g_selectedNotch=0;g_notchScroll=0;
+                if(selBody>=0){g_activeSketch.clear();g_showSketches=false;rebuildSketchOverlay();}}
             }
-            g_pressWasButton=false;g_foldScrubbing=false;g_sheetScrubbing=false;
+            g_eatNextClick=false;g_pressWasButton=false;g_cubePress=false;g_foldScrubbing=false;g_sheetScrubbing=false;
+            return 0;
+        }
+        case WM_LBUTTONDBLCLK:{
+            g_eatNextClick=true;POINT p{GET_X_LPARAM(lp),GET_Y_LPARAM(lp)};
+            for(auto& z:g_zones)if((float)p.x>=z.x&&(float)p.x<=z.x+z.w&&(float)p.y>=z.y&&(float)p.y<=z.y+z.h){
+                if(z.id>=2000&&z.id<9000){selBody=z.id-2000;g_activeSketch.clear();g_showSketches=false;interactiveAction(161);}
+                else if(z.id>=11000&&z.id<12000){interactiveAction(z.id);interactiveAction(70);}
+                break;
+            }
             return 0;
         }
         case WM_KEYDOWN:
             if(GetKeyState(VK_CONTROL)&0x8000){if(wp=='S')uiAction(16);else if(wp=='O')uiAction(17);else if(wp=='Z')uiAction(18);else if(wp=='Y')uiAction(19);else if(wp=='K')interactiveAction(59);else if(wp=='N')interactiveAction(55);}
             else if(wp=='F')uiAction(20);else if(wp=='W')uiAction(14);else if(wp==VK_DELETE)uiAction(25);else if(wp==VK_F1)uiAction(31);
+            else if(wp=='1')uiAction(180);else if(wp=='2')uiAction(181);else if(wp=='3')uiAction(23);else if(wp=='4')uiAction(184);else if(wp=='5')uiAction(182);else if(wp=='6')uiAction(183);else if(wp=='7')uiAction(24);
             return 0;
         case WM_CLOSE:
             if(!confirmDiscard())return 0;
@@ -2066,10 +2683,10 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     cpu_detect();
 
     SetProcessDPIAware();
-    bool headless=false,selfTest=false,assemblyTest=false,dialogTest=false,bendTest=false,bendExportTest=false,sourceTest=false,sketchTest=false,assistantTest=false,nativeUiTest=false;unsigned exitAfterMs=0;std::string endpointFile,requestedSketch;int requestedOpening=-1;double requestedFold=-1;std::string shotPath="ark_studio.png",loadPath,scriptPath,importPath;
+    bool selfTest=false,assemblyTest=false,dialogTest=false,bendTest=false,bendExportTest=false,sourceTest=false,sketchTest=false,assistantTest=false,nativeUiTest=false;unsigned exitAfterMs=0;std::string endpointFile,requestedSketch;int requestedOpening=-1;double requestedFold=-1;std::string shotPath="ark_studio.png",loadPath,scriptPath,importPath;
     int sw=1600,sh=1000,argc=0;auto argv=CommandLineToArgvW(GetCommandLineW(),&argc);
     auto utf8=[](const wchar_t* w){int n=WideCharToMultiByte(CP_UTF8,0,w,-1,nullptr,0,nullptr,nullptr);std::string s(n,'\0');WideCharToMultiByte(CP_UTF8,0,w,-1,s.data(),n,nullptr,nullptr);s.pop_back();return s;};
-    for(int i=1;i<argc;++i){auto a=utf8(argv[i]);if(a=="--shot"&&i+1<argc){headless=true;shotPath=utf8(argv[++i]);}
+    for(int i=1;i<argc;++i){auto a=utf8(argv[i]);if(a=="--shot"&&i+1<argc){g_headless=true;shotPath=utf8(argv[++i]);}
         else if(a=="--self-test-ui")selfTest=true;
         else if(a=="--self-test-sketch-ui")sketchTest=true;
         else if(a=="--self-test-assistant-ui")assistantTest=true;
@@ -2089,7 +2706,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         else if(a=="--size"&&i+2<argc){sw=_wtoi(argv[++i]);sh=_wtoi(argv[++i]);}
         else if(a=="--load"&&i+1<argc)loadPath=utf8(argv[++i]);
         else if(a=="--script"&&i+1<argc)scriptPath=utf8(argv[++i]);}
-    LocalFree(argv);if(!headless||!g_settingsOverride.empty())loadUiSettings();winW=std::max(sw,1180);winH=std::max(sh,800);layout();
+    LocalFree(argv);if(!g_headless||!g_settingsOverride.empty())loadUiSettings();winW=std::max(sw,1180);winH=std::max(sh,800);layout();
 
     // ---- window ----
     WNDCLASSA wc{}; wc.style=CS_OWNDC; wc.hInstance=hi;
@@ -2151,10 +2768,13 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
             wglMakeCurrent(hdc,ctx);
         }
     }
+#define LOAD(T,N) N=(T)(void*)wglGetProcAddress(#N);
+    GLFUNCS(LOAD)
+#undef LOAD
     using SwapInterval=BOOL (WINAPI*)(int);
     auto swapInterval=(SwapInterval)(void*)wglGetProcAddress("wglSwapIntervalEXT");
-    if(swapInterval)swapInterval(headless?0:1);
-    ShowWindow(hwnd,headless?SW_HIDE:SW_SHOW);
+    if(swapInterval)swapInterval(g_headless?0:1);
+    ShowWindow(hwnd,g_headless?SW_HIDE:SW_SHOW);
 
     // ---- resources ----
     pBg=mkProg(VS_BG,FS_BG);
@@ -2164,6 +2784,10 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     pUI=mkProg(VS_UI,FS_UI);
     pText=mkProg(VS_TEXT,FS_TEXT);
     pSketch=mkProg(VS_LINE,"#version 330 core\nout vec4 o;uniform vec4 tint;void main(){o=tint;}");
+    pGeom=mkProg(VS_GEOM,FS_GEOM);pAo=mkProg(VS_BG,FS_AO);pCompose=mkProg(VS_BG,FS_COMPOSE);pEdge=mkProg(VS_EDGE,FS_EDGE);
+    guView=glGetUniformLocation(pGeom,"view");guProj=glGetUniformLocation(pGeom,"proj");guModel=glGetUniformLocation(pGeom,"model");guHard=glGetUniformLocation(pGeom,"hardSurface");
+    auProj=glGetUniformLocation(pAo,"proj");auFocal=glGetUniformLocation(pAo,"focal");auOrtho=glGetUniformLocation(pAo,"ortho");auRadius=glGetUniformLocation(pAo,"radius");auBias=glGetUniformLocation(pAo,"bias");
+    cuOrigin=glGetUniformLocation(pCompose,"origin");euVp=glGetUniformLocation(pEdge,"vp");euModel=glGetUniformLocation(pEdge,"model");
     glGenVertexArrays(1,&sketchVao);glGenBuffers(1,&sketchVbo);glBindVertexArray(sketchVao);glBindBuffer(GL_ARRAY_BUFFER,sketchVbo);glEnableVertexAttribArray(0);glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,12,nullptr);
     suVp=glGetUniformLocation(pSolid,"vp");      suModel=glGetUniformLocation(pSolid,"model");
     suHard=glGetUniformLocation(pSolid,"hardSurface");
@@ -2198,6 +2822,14 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     }
     glGenVertexArrays(1,&textVao);
     glGenBuffers(1,&textVbo);
+    glGenVertexArrays(1,&gCubeVao);glGenBuffers(1,&gCubeVbo);
+    {std::vector<float> cube;float s=.72f;auto push=[&](float x,float y,float z,float nx,float ny,float nz){cube.insert(cube.end(),{x,y,z,nx,ny,nz});};
+        auto quad=[&](float nx,float ny,float nz,float x0,float y0,float z0,float x1,float y1,float z1,float x2,float y2,float z2,float x3,float y3,float z3){push(x0,y0,z0,nx,ny,nz);push(x1,y1,z1,nx,ny,nz);push(x2,y2,z2,nx,ny,nz);push(x0,y0,z0,nx,ny,nz);push(x2,y2,z2,nx,ny,nz);push(x3,y3,z3,nx,ny,nz);};
+        quad(1,0,0, s,-s,-s, s,-s,s, s,s,s, s,s,-s);quad(-1,0,0, -s,-s,s, -s,-s,-s, -s,s,-s, -s,s,s);
+        quad(0,1,0, -s,s,-s, s,s,-s, s,s,s, -s,s,s);quad(0,-1,0, -s,-s,s, s,-s,s, s,-s,-s, -s,-s,-s);
+        quad(0,0,1, -s,-s,s, -s,s,s, s,s,s, s,-s,s);quad(0,0,-1, s,-s,-s, s,s,-s, -s,s,-s, -s,-s,-s);
+        glBindVertexArray(gCubeVao);glBindBuffer(GL_ARRAY_BUFFER,gCubeVbo);glBufferData(GL_ARRAY_BUFFER,(GLsizeiptr)(cube.size()*sizeof(float)),cube.data(),GL_STATIC_DRAW);
+        glEnableVertexAttribArray(0);glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,24,nullptr);glEnableVertexAttribArray(1);glVertexAttribPointer(1,3,GL_FLOAT,GL_FALSE,24,(void*)12);}
 
     seedDocument();
     if(!loadPath.empty()){arkjson::Value a=arkjson::Value::makeObj();a.set("path",arkjson::Value::makeStr(loadPath));runTool("doc_load",a);g_path=loadPath;if(!g_error){g_savedRevision=g_session.revision;g_foldProgress=selectedSourceTube()?1.:0.;}frameScene();}
@@ -2215,6 +2847,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         uiAction(67);if(g_error||g_doc.params.empty())return 102;
         g_dialogOverrides={"Profile","Workplane","0","0","width","60"};g_dialogShot=shotPath+".rectangle.png";uiAction(61);if(g_error||!g_doc.findSketch("Profile"))return 103;
         g_dialogShot=shotPath+".extrude.png";uiAction(65);if(g_error||g_bodyIds.empty())return 104;
+        g_dialogSmoke=3;uiAction(161);if(g_error||g_doc.find(g_bodyIds[(size_t)selBody])->get("height").empty())return 116;
         uiAction(62);if(g_error||!g_doc.findSketch("Holes"))return 105;
         uiAction(66);if(g_error||g_doc.features.size()!=2)return 106;
         g_dialogOverrides={"width","140"};uiAction(67);if(g_error||g_doc.getParam("width")!=140)return 107;
@@ -2254,6 +2887,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         uiAction(83);if(g_error||g_sheetFlatViews[g_doc.features.back().id]||g_session.revision!=revision)return 190;
         g_dialogSmoke=3;uiAction(78);g_dialogSmoke=0;
         if(g_error||g_doc.features.size()!=2||g_doc.features.back().type!=FeatureType::BSplineSurface)return 186;
+        g_dialogSmoke=3;uiAction(161);if(g_error||g_doc.features.back().type!=FeatureType::BSplineSurface)return 199;g_dialogSmoke=0;
         g_dialogSmoke=3;uiAction(100);g_dialogSmoke=0;
         if(g_error||g_doc.features.size()!=3||g_doc.features.back().type!=FeatureType::NativeSolid||!selectedNativeBody())return 192;
         g_dialogSmoke=3;uiAction(113);g_dialogSmoke=0;
@@ -2295,8 +2929,8 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         selBody=(int)g_bodyIds.size()-1;uiAction(25);if(g_error||g_doc.features.size()!=count)return 13;
         uiAction(14);if(!wireframe)return 14;uiAction(14);
         uiAction(22);if(g_grid)return 15;uiAction(22);
-        uiAction(23);if(tPitch!=1.52)return 16;uiAction(24);
-        g_status="UI checks passed: create / undo / redo / delete / wire / grid / views";
+        uiAction(23);if(tPitch!=1.52||!g_cameraOrtho)return 16;uiAction(180);if(tYaw!=0||tPitch!=0||!g_cameraOrtho)return 17;uiAction(24);if(g_cameraOrtho)return 18;
+        g_status="UI checks passed / create undo redo delete wire grid views";
     }
     if(dialogTest){
         size_t count=g_doc.features.size();g_dialogSmoke=1;g_dialogShot=shotPath+".properties.png";
@@ -2364,11 +2998,11 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         if(!hit)return 35;
     }
 
-    if(headless){
+    if(g_headless){
         g_swap=false;
         drawFrame(hdc);
         glFinish();
-        if(glGetError()!=GL_NO_ERROR)return 20;
+        if(GLenum glError=glGetError()){fprintf(stderr,"ARK GL error 0x%X\n",(unsigned)glError);return 20;}
         std::vector<u8> pix((size_t)winW*winH*3);
         glPixelStorei(GL_PACK_ALIGNMENT,1);glReadBuffer(GL_BACK);
         glReadPixels(0,0,winW,winH,GL_RGB,GL_UNSIGNED_BYTE,pix.data());
@@ -2381,8 +3015,8 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         return 0;
     }
 
-    if(!headless||!endpointFile.empty()){startLiveBridge();if(!endpointFile.empty()){std::ofstream endpoint(endpointFile);endpoint<<g_liveBridge.endpoint();}}
-    if(!headless){g_chatInput=CreateWindowExA(0,"EDIT","",WS_CHILD|WS_VISIBLE|WS_TABSTOP|ES_MULTILINE|ES_AUTOVSCROLL|ES_WANTRETURN,viewX+30,winH-112,viewW-260,44,hwnd,(HMENU)499,hi,nullptr);
+    if(!g_headless||!endpointFile.empty()){startLiveBridge();if(!endpointFile.empty()){std::ofstream endpoint(endpointFile);endpoint<<g_liveBridge.endpoint();}}
+    if(!g_headless){g_chatInput=CreateWindowExA(0,"EDIT","",WS_CHILD|WS_VISIBLE|WS_TABSTOP|ES_MULTILINE|ES_AUTOVSCROLL|ES_WANTRETURN,viewX+30,winH-112,viewW-260,44,hwnd,(HMENU)499,hi,nullptr);
         HFONT chatFont=CreateFontA(-16,0,0,0,FW_NORMAL,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,"Segoe UI");SendMessage(g_chatInput,WM_SETFONT,(WPARAM)chatFont,TRUE);SendMessage(g_chatInput,EM_SETLIMITTEXT,12000,0);
         g_chatHistory=CreateWindowExA(0,"EDIT","",WS_CHILD|WS_VISIBLE|WS_VSCROLL|ES_MULTILINE|ES_READONLY|ES_AUTOVSCROLL,viewX+22,winH-201,viewW-44,68,hwnd,(HMENU)498,hi,nullptr);SendMessage(g_chatHistory,WM_SETFONT,(WPARAM)chatFont,TRUE);refreshChatHistory();
     }

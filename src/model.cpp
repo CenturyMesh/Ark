@@ -148,8 +148,28 @@ const char* featureTypeName(FeatureType t){
         case FeatureType::Thicken: return "thicken";
         case FeatureType::SheetMetal: return "sheet_metal";
         case FeatureType::SourceSheet: return "source_sheet";
+        case FeatureType::Sweep: return "sweep";
+        case FeatureType::ExtrudeSurface: return "extrude_surface";
+        case FeatureType::RevolveSurface: return "revolve_surface";
+        case FeatureType::OffsetSurface: return "offset_surface";
+        case FeatureType::Sew: return "sew";
+        case FeatureType::MeshBody: return "mesh_body";
+        case FeatureType::MeshWeld: return "mesh_weld";
+        case FeatureType::MeshSmooth: return "mesh_smooth";
+        case FeatureType::MeshDecimate: return "mesh_decimate";
+        case FeatureType::MeshOffset: return "mesh_offset";
+        case FeatureType::MeshFill: return "mesh_fill";
     }
     return "unknown";
+}
+bool isNativeSurfaceFeature(FeatureType t){
+    return t==FeatureType::Loft || t==FeatureType::SurfaceFill || t==FeatureType::BSplineSurface ||
+           t==FeatureType::Thicken || t==FeatureType::Sweep || t==FeatureType::ExtrudeSurface ||
+           t==FeatureType::RevolveSurface || t==FeatureType::OffsetSurface || t==FeatureType::Sew;
+}
+bool isMeshModelFeature(FeatureType t){
+    return t==FeatureType::MeshBody || t==FeatureType::MeshWeld || t==FeatureType::MeshSmooth ||
+           t==FeatureType::MeshDecimate || t==FeatureType::MeshOffset || t==FeatureType::MeshFill;
 }
 bool featureTypeFromName(const std::string& s, FeatureType& out){
     if(s=="box") out=FeatureType::Box;
@@ -176,6 +196,17 @@ bool featureTypeFromName(const std::string& s, FeatureType& out){
     else if(s=="sheet_metal") out=FeatureType::SheetMetal;
     else if(s=="source_sheet") out=FeatureType::SourceSheet;
     else if(s=="native_solid") out=FeatureType::NativeSolid;
+    else if(s=="sweep") out=FeatureType::Sweep;
+    else if(s=="extrude_surface") out=FeatureType::ExtrudeSurface;
+    else if(s=="revolve_surface") out=FeatureType::RevolveSurface;
+    else if(s=="offset_surface") out=FeatureType::OffsetSurface;
+    else if(s=="sew") out=FeatureType::Sew;
+    else if(s=="mesh_body") out=FeatureType::MeshBody;
+    else if(s=="mesh_weld") out=FeatureType::MeshWeld;
+    else if(s=="mesh_smooth") out=FeatureType::MeshSmooth;
+    else if(s=="mesh_decimate") out=FeatureType::MeshDecimate;
+    else if(s=="mesh_offset") out=FeatureType::MeshOffset;
+    else if(s=="mesh_fill") out=FeatureType::MeshFill;
     else return false;
     return true;
 }

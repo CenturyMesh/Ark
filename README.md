@@ -46,13 +46,22 @@ billing restriction recorded in [validation](docs/VALIDATION.md) persists.
 ## Work in Studio
 
 Use the floating dock or **Commands** (`Ctrl+K`) for sketches, primitives,
-assemblies, tubes, native surfaces, and sheet metal. Orbit by dragging, pan
-with Shift+drag, and zoom with the wheel. `F` frames the model. `Ctrl+N`,
-`Ctrl+O`, `Ctrl+S`, `Ctrl+Z`, and `Ctrl+Y` manage the document and history.
+assemblies, tubes, native surfaces, and sheet metal. The view toolbar and the
+view cube select orbit, pan, zoom, fit, and the orthographic face views; `1`
+through `7` jump to front, back, top, bottom, right, left, and isometric.
+Ambient occlusion and visible edges are display-only. Dragging orbits, Shift+drag
+pans, the wheel zooms, and `F` frames the model. `Ctrl+N`, `Ctrl+O`, `Ctrl+S`,
+`Ctrl+Z`, and `Ctrl+Y` manage the document and history.
 
 Native commands create exact primitives and supported Boolean, hole, fillet,
-chamfer, and rigid transform features. They also loft saved sketch sections,
-fill closed sketches, edit a NURBS pole grid, and thicken an open surface.
+chamfer, draft, linear pattern, circular pattern, mirror, and rigid transform
+features. In Studio, Face, Edge, and Curve select semantic names for those
+features. Mirror uses a principal plane, a datum, or one planar face. They
+also loft saved sketch sections, including a point tip,
+fill closed sketches, sweep a section along a path, extrude or revolve a
+sketch as a surface, offset or sew open surfaces, edit a NURBS pole grid, and
+thicken an open surface. The Mesh commands weld, smooth, decimate, offset, and
+fill planar holes, and they import an STL or OBJ snapshot.
 Assembly instances can be grounded and joined by named-reference mates;
 the inspector reports residuals and remaining free dimensions. The sheet
 program stores a base panel, ordered flanges, and panel-owned openings.
@@ -89,8 +98,8 @@ connect the MCP process to Studio's displayed endpoint as described in
 ```
 
 Call `agent_onboard` first for the current revision, supported operations,
-and examples. ARK exposes 33 MCP tools, including `kernel_info`,
-`reference_inspect`, `sketch_diagnose`, `sheet_preview`, and `import_sheet_step`. `doc_apply` batches
+and examples. ARK exposes 34 MCP tools, including `kernel_info`,
+`reference_inspect`, `sketch_diagnose`, `sheet_preview`, `import_sheet_step`, and `import_mesh`. `doc_apply` batches
 edits atomically and rejects stale revisions. The [agent protocol](docs/AGENTS.md)
 describes the command and validation contracts. The in-app assistant uses a
 separately configured Responses-compatible service; modeling, Studio, and MCP
@@ -100,10 +109,13 @@ do not require API credentials.
 
 The earlier custom C++ primitive, expression-surface, mesh, and assembly paths
 remain available. OCCT 8.0.1 supplies exact B-reps for supported native
-solids, lofting, filling, NURBS, thickening, sheets, source import, and STEP
+solids, lofting, filling, sweeping, surface extrusion and revolution, offset,
+sewing, NURBS, thickening, sheets, source import, and STEP
 operations. A viewport mesh is a tessellated preview, not the STEP authority.
 Native exact bodies use supported native operations and cannot be silently
-routed through legacy approximate mesh operations.
+routed through legacy approximate mesh operations. Sampling one into
+`mesh_weld`, `mesh_smooth`, `mesh_decimate`, `mesh_offset`, or `mesh_fill`
+requires `p.sample` of 1, and that result stays a mesh.
 
 Sheet flat length uses the caller's declared K factor. It does not infer a
 material calibration or certify forming. A non-midwall K factor can produce a
@@ -141,6 +153,25 @@ pitch and hides the canopy so the internal geometry is visible.
 are exact local part definitions; they are not a STEP assembly of every instance.
 Their readback differences and test evidence are recorded in
 [verification-0.9.json](docs/verification-0.9.json).
+
+The same agent commands model a six-axis articulated arm:
+
+```powershell
+.\start-studio.ps1 -Document .\examples\six-axis-robot.ark
+```
+
+![Six-axis robot arm](docs/six-axis-robot.png)
+
+`six-axis-robot.ark` holds 14 shared part definitions and 23 assembly nodes. The
+kinematic chain is nested assembly groups: J1 yaws about +Y, J2/J3/J5 pitch about
++Z, and J4/J6 roll about the local +X link axis. Each joint angle is the `j1`..`j6`
+parameter, so editing one re-poses the whole arm; `upper_len`, `fore_len` and
+`shoulder_h` re-dimension it. The links are hollow round tubes and the castings
+are 360-degree revolves of closed sketch profiles. Replaying
+[the ops file](examples/six-axis-robot.arkops) from an empty document reproduces
+the saved package byte for byte. Assembly groups place instances; they do not
+fuse bodies, check interference or certify joint limits.
+
 
 ```powershell
 .\start-studio.ps1 -Document .\examples\sheet-flange-tree.ark
