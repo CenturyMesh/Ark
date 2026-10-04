@@ -60,9 +60,79 @@ void evaluateSketch(NamedSketch& ns,const ExprEnv& env){
     }catch(const std::exception& ex){ns.error=ex.what();ns.residual=INFINITY;}
 }
 
+namespace {
+void appendArc(Vec2 center,double radius,double a0Deg,double a1Deg,double tolerance,std::vector<Vec2>& out,bool includeStart){
+    if(!(radius>1e-8)||!std::isfinite(radius))throw std::runtime_error("Arc radius must be positive");
+    double sweep=a1Deg-a0Deg;
+    if(!(std::abs(sweep)>1e-9&&std::abs(sweep)<=360.+1e-6))throw std::runtime_error("Arc sweep must be in (0, 360] degrees");
+    double step=std::acos(clamp(1-tolerance/radius,-1.,1.));
+    int n=(int)std::ceil(std::abs(deg2rad(sweep))/std::max(step,1e-12));
+    n=std::max(2,n);
+    if(n>2044)throw std::runtime_error("Arc exceeds sampling limit; increase tolerance");
+    for(int i=includeStart?0:1;i<=n;++i){
+        double t=deg2rad(a0Deg+sweep*i/n);
+        out.push_back(center+Vec2{radius*std::cos(t),radius*std::sin(t)});
+    }
+}
+}
+
+const char* sketchEntityKindName(SketchEnt::Kind kind){
+    switch(kind){
+        case SketchEnt::Pnt: return "point";
+        case SketchEnt::Line: return "line";
+        case SketchEnt::Circle: return "circle";
+        case SketchEnt::Spline: return "spline";
+        case SketchEnt::Arc: return "arc";
+        case SketchEnt::Wire: return "wire";
+    }
+    return "unknown";
+}
+
+int sketchVertexCount(const SketchEnt& entity){
+    if(entity.kind==SketchEnt::Wire) return 1+(int)entity.segments.size();
+    if(entity.kind==SketchEnt::Line) return 2;
+    if(entity.kind==SketchEnt::Spline) return (int)entity.dof.size()/2;
+    return 1;
+}
+
+int sketchVertexDof(const SketchEnt& entity,int vertex){
+    if(entity.kind!=SketchEnt::Wire) return vertex*2;
+    if(vertex<=0) return 0;
+    int index=2;
+    for(int i=0;i<vertex-1&&i<(int)entity.segments.size();++i){
+        auto kind=entity.segments[(size_t)i].kind;
+        index+=kind==SketchEnt::WireSeg::Line?2:kind==SketchEnt::WireSeg::Arc?3:6;
+    }
+    if(vertex-1<(int)entity.segments.size()&&entity.segments[(size_t)(vertex-1)].kind==SketchEnt::WireSeg::Cubic) index+=4;
+    return index;
+}
+
+bool sketchMinorArc(Vec2 start,Vec2 end,double radius,int sweep,Vec2& center,double& a0Deg,double& a1Deg){
+    if((sweep!=1&&sweep!=-1)||!(radius>1e-8)||!std::isfinite(radius)) return false;
+    Vec2 chord=end-start;double length=chord.len();
+    if(length<1e-8||length>radius*2+1e-6) return false;
+    Vec2 left{-chord.y/length,chord.x/length},mid=(start+end)*.5;
+    double half=length*.5,h2=radius*radius-half*half;
+    if(h2<-1e-8) return false;
+    double h=h2<=0?0:std::sqrt(h2);
+    center=mid-left*(h*(double)sweep);
+    auto degrees=[&](Vec2 p){return rad2deg(std::atan2(p.y-center.y,p.x-center.x));};
+    double a0=degrees(start),a1=degrees(end);
+    Vec2 bulge=h<1e-8?mid+left*((double)sweep*radius):center+(mid-center)*(radius/std::max(h,1e-12));
+    double bulgeAngle=degrees(bulge);
+    auto wrap=[&](double d){while(d<=-360)d+=360;while(d>360)d-=360;return d;};
+    auto contains=[&](double delta){double target=wrap(bulgeAngle-a0);if(delta>=0){if(target<0)target+=360;return target>=-1e-4&&target<=delta+1e-4;}if(target>0)target-=360;return target<=1e-4&&target>=delta-1e-4;};
+    double direct=wrap(a1-a0),other=direct>0?direct-360:direct+360;
+    double chosen=std::abs(direct)<=180.+1e-3?direct:other;
+    if(!contains(chosen)) chosen=contains(direct)?direct:other;
+    if(!(std::abs(chosen)>1e-6&&std::abs(chosen)<=180.+1e-3)) return false;
+    a0Deg=a0;a1Deg=a0+chosen;return true;
+}
+
 std::vector<Vec2> sampleSketchEntity(const SketchEnt& e,double tolerance){
     if(!std::isfinite(tolerance)||tolerance<.0001||tolerance>5)throw std::runtime_error("Sketch tolerance must be 0.0001..5 mm");
     auto pt=[&](size_t i){return Vec2{e.dof.at(2*i),e.dof.at(2*i+1)};};
+    auto at=[&](int i){return Vec2{e.dof.at((size_t)i),e.dof.at((size_t)i+1)};};
     if(e.kind==SketchEnt::Pnt)return {pt(0)};
     if(e.kind==SketchEnt::Line){if((pt(1)-pt(0)).len()<1e-8)throw std::runtime_error("Zero-length sketch line");return {pt(0),pt(1)};}
     std::vector<Vec2> out;
@@ -71,6 +141,28 @@ std::vector<Vec2> sampleSketchEntity(const SketchEnt& e,double tolerance){
         double a=std::acos(clamp(1-tolerance/r,-1.,1.));int n=(int)std::ceil(K_PI/std::max(a,1e-12));n=std::max(12,((n+3)/4)*4);
         if(n>2044)throw std::runtime_error("Circle exceeds sampling limit; increase tolerance");
         for(int i=0;i<n;++i){double t=K_2PI*i/n;out.push_back(pt(0)+Vec2{r*std::cos(t),r*std::sin(t)});}out.push_back(out.front());return out;
+    }
+    if(e.kind==SketchEnt::Arc){
+        if(e.dof.size()!=5)throw std::runtime_error("Arc needs center, radius and two angles");
+        appendArc({e.dof[0],e.dof[1]},e.dof[2],e.dof[3],e.dof[4],tolerance,out,true);return out;
+    }
+    if(e.kind==SketchEnt::Wire){
+        if(e.segments.empty()||e.segments.size()>64)throw std::runtime_error("Wire needs 1..64 segments");
+        Vec2 cursor=at(0);out.push_back(cursor);int dof=2;
+        for(const auto& segment:e.segments){
+            if(segment.kind==SketchEnt::WireSeg::Line){
+                Vec2 end=at(dof);if((end-cursor).len()<1e-8)throw std::runtime_error("Zero-length sketch line");
+                out.push_back(end);cursor=end;dof+=2;
+            }else if(segment.kind==SketchEnt::WireSeg::Arc){
+                Vec2 end=at(dof);double radius=e.dof.at((size_t)dof+2);Vec2 center;double a0=0,a1=0;
+                if(!sketchMinorArc(cursor,end,radius,segment.sweep,center,a0,a1))throw std::runtime_error("Wire arc chord does not fit the radius");
+                appendArc(center,radius,a0,a1,tolerance,out,false);cursor=end;dof+=3;
+            }else if(segment.kind==SketchEnt::WireSeg::Cubic){
+                cubicPoints(cursor,at(dof),at(dof+2),at(dof+4),tolerance,out);cursor=at(dof+4);dof+=6;
+            }else throw std::runtime_error("Wire segment kind must be line, arc or cubic");
+        }
+        if((size_t)dof!=e.dof.size())throw std::runtime_error("Wire degrees of freedom do not match segments");
+        return out;
     }
     auto segments=sketchSplineSegments(e);out.push_back(segments.front()[0]);
     for(auto& segment:segments)cubicPoints(segment[0],segment[1],segment[2],segment[3],tolerance,out);
@@ -134,7 +226,7 @@ arkjson::Value inspectSketch(const Document& doc,const NamedSketch& ns,bool samp
     r.set("constraint_status",V::makeStr(ns.error.empty()?(ns.freeDofs?"underconstrained":"locally_fully_constrained"):"failed"));r.set("error",V::makeStr(ns.error));
     r.set("diagnosis",diagnoseSketch(ns.sk));
     for(auto& e:ns.sk.ents){V item=V::makeObj(),dof=V::makeArr(),world=V::makeArr(),local=V::makeArr();
-        item.set("name",V::makeStr(e.name));item.set("kind",V::makeStr(e.kind==SketchEnt::Spline?"spline":e.kind==SketchEnt::Circle?"circle":e.kind==SketchEnt::Line?"line":"point"));
+        item.set("name",V::makeStr(e.name));item.set("kind",V::makeStr(sketchEntityKindName(e.kind)));
         item.set("construction",V::makeBool(e.construction));for(auto x:e.dof)dof.arr.push_back(V::makeNum(x));item.set("resolved_dof",dof);
         auto points=sampleSketchEntity(e,ns.sk.tolerance);item.set("sample_count",V::makeNum(points.size()));
         if(samples){for(auto p:points){local.arr.push_back(vectorValue({p.x,p.y,0}));world.arr.push_back(vectorValue(frame.transformPoint({p.x,p.y,0})));}item.set("local",local);item.set("world",world);}entities.arr.push_back(item);
@@ -142,5 +234,46 @@ arkjson::Value inspectSketch(const Document& doc,const NamedSketch& ns,bool samp
     try{auto profiles=sketchProfiles(ns.sk,frame);r.set("profile_ready",V::makeBool(true));r.set("loops",V::makeNum(profiles.size()));}
     catch(const std::exception& e){r.set("profile_ready",V::makeBool(false));r.set("profile_error",V::makeStr(e.what()));}
     r.set("solid_certified",V::makeBool(false));return r;
+}
+
+arkjson::Value measureSketchEntity(const Document&,const NamedSketch& sketch,const std::string& entity){
+    using V=arkjson::Value;
+    const SketchEnt* found=nullptr;
+    for(const auto& candidate:sketch.sk.ents) if(candidate.name==entity){
+        if(found) throw std::runtime_error("Ambiguous sketch entity");
+        found=&candidate;
+    }
+    if(!found) throw std::runtime_error("Sketch entity not found");
+    const auto samples=sampleSketchEntity(*found,sketch.sk.tolerance);
+    double xmin=1e300,ymin=1e300,xmax=-1e300,ymax=-1e300,length=0;
+    for(const auto& p:samples){xmin=std::min(xmin,p.x);ymin=std::min(ymin,p.y);xmax=std::max(xmax,p.x);ymax=std::max(ymax,p.y);}
+    for(size_t i=1;i<samples.size();++i) length+=(samples[i]-samples[i-1]).len();
+    Vec2 startTangent{},endTangent{};
+    if(found->kind==SketchEnt::Line){
+        Vec2 a{found->dof.at(0),found->dof.at(1)},b{found->dof.at(2),found->dof.at(3)};
+        length=(b-a).len();startTangent=endTangent=(b-a).normalized();
+        xmin=std::min(a.x,b.x);xmax=std::max(a.x,b.x);ymin=std::min(a.y,b.y);ymax=std::max(a.y,b.y);
+    }else if(found->kind==SketchEnt::Circle){
+        double r=found->dof.at(2);Vec2 c{found->dof[0],found->dof[1]};
+        length=K_2PI*r;startTangent=endTangent={0,1};
+        xmin=c.x-r;xmax=c.x+r;ymin=c.y-r;ymax=c.y+r;
+    }else if(found->kind==SketchEnt::Arc){
+        double r=found->dof.at(2),sweep=deg2rad(found->dof[4]-found->dof[3]),sign=sweep>=0?1.:-1.;
+        length=std::abs(sweep)*r;
+        auto tangent=[&](double degrees){double t=deg2rad(degrees);return Vec2{-std::sin(t)*sign,std::cos(t)*sign};};
+        startTangent=tangent(found->dof[3]);endTangent=tangent(found->dof[4]);
+    }else if(found->kind==SketchEnt::Pnt){
+        length=0;xmin=xmax=found->dof.at(0);ymin=ymax=found->dof.at(1);
+    }else if(samples.size()>=2){
+        startTangent=(samples[1]-samples[0]).normalized();
+        endTangent=(samples.back()-samples[samples.size()-2]).normalized();
+    }
+    auto pair=[&](Vec2 p){V a=V::makeArr();a.arr.push_back(V::makeNum(p.x));a.arr.push_back(V::makeNum(p.y));return a;};
+    V result=V::makeObj(),box=V::makeArr();
+    result.set("name",V::makeStr(entity));result.set("kind",V::makeStr(sketchEntityKindName(found->kind)));
+    result.set("length_mm",V::makeNum(length));
+    for(double value:{xmin,ymin,xmax,ymax}) box.arr.push_back(V::makeNum(value));
+    result.set("bbox_mm",box);result.set("start_tangent",pair(startTangent));result.set("end_tangent",pair(endTangent));
+    return result;
 }
 }

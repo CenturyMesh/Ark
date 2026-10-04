@@ -23,42 +23,97 @@ namespace {
 
 Value entToJson(const SketchEnt& e){
     Value v=Value::makeObj();
-    const char* k = e.kind==SketchEnt::Pnt?"point":e.kind==SketchEnt::Line?"line":e.kind==SketchEnt::Circle?"circle":"spline";
-    v.set("kind",Value::makeStr(k));
+    v.set("kind",Value::makeStr(sketchEntityKindName(e.kind)));
     Value d=Value::makeArr();
     for(size_t i=0;i<e.dof.size();++i)d.arr.push_back(i<e.expressions.size()&&!e.expressions[i].empty()?Value::makeStr(e.expressions[i]):Value::makeNum(e.dof[i]));
     v.set("dof",std::move(d));
     if(!e.name.empty())v.set("name",Value::makeStr(e.name));
     if(e.construction)v.set("construction",Value::makeBool(true));
     if(e.kind==SketchEnt::Spline){v.set("closed",Value::makeBool(e.closed));v.set("tension",Value::makeNum(e.tension));}
+    if(e.kind==SketchEnt::Wire){
+        Value segments=Value::makeArr();
+        for(const auto& segment:e.segments){
+            Value item=Value::makeObj();
+            item.set("kind",Value::makeStr(segment.kind==SketchEnt::WireSeg::Line?"line":segment.kind==SketchEnt::WireSeg::Arc?"arc":"cubic"));
+            if(segment.kind==SketchEnt::WireSeg::Arc) item.set("sweep",Value::makeNum(segment.sweep));
+            segments.arr.push_back(std::move(item));
+        }
+        v.set("segments",std::move(segments));
+    }
     return v;
 }
 
 bool entFromJson(const Value& v, SketchEnt& e, std::string* err){
     auto fail=[&](const std::string& m){if(err)*err=m;return false;};
+    auto take=[&](const Value& x){
+        if(x.t==Value::Str&&!x.str.empty()&&x.str.size()<=2048){e.dof.push_back(0);e.expressions.push_back(x.str);return true;}
+        if(x.t==Value::Num&&std::isfinite(x.num)&&std::abs(x.num)<=1e7){e.dof.push_back(x.num);e.expressions.emplace_back();return true;}
+        return fail("dof must be finite numbers or nonempty expressions");
+    };
+    auto takePair=[&](const Value* pair,const char* what){
+        if(!pair||pair->t!=Value::Arr||pair->arr.size()!=2) return fail(std::string(what)+" must be [x,y]");
+        return take(pair->arr[0])&&take(pair->arr[1]);
+    };
     if(v.t!=Value::Obj)return fail("Sketch entity must be object");
     std::string k=v.find("kind")?v.find("kind")->asStr("point"):"point";
     if(k=="point") e.kind=SketchEnt::Pnt;
     else if(k=="line") e.kind=SketchEnt::Line;
     else if(k=="circle") e.kind=SketchEnt::Circle;
     else if(k=="spline") e.kind=SketchEnt::Spline;
+    else if(k=="arc") e.kind=SketchEnt::Arc;
+    else if(k=="wire") e.kind=SketchEnt::Wire;
     else { if(err)*err="unknown sketch entity kind: "+k; return false; }
-    if(auto d=v.find("dof")){
-        if(d->t!=Value::Arr){if(err)*err="dof must be array";return false;}
-        for(auto&x:d->arr){
-            if(x.t==Value::Str&&!x.str.empty()&&x.str.size()<=2048){e.dof.push_back(0);e.expressions.push_back(x.str);}
-            else if(x.t==Value::Num&&std::isfinite(x.num)&&std::abs(x.num)<=1e7){e.dof.push_back(x.num);e.expressions.emplace_back();}
-            else return fail("dof must be finite numbers or nonempty expressions");
+    if(e.kind==SketchEnt::Wire){
+        auto segments=v.find("segments");
+        if(!segments||segments->t!=Value::Arr||segments->arr.empty()||segments->arr.size()>64) return fail("Wire needs 1..64 segments");
+        for(const auto& segment:segments->arr){
+            if(segment.t!=Value::Obj) return fail("Wire segment must be an object");
+            auto kind=segment.find("kind");if(!kind||kind->t!=Value::Str) return fail("Wire segment needs a kind");
+            SketchEnt::WireSeg item;
+            if(kind->str=="line") item.kind=SketchEnt::WireSeg::Line;
+            else if(kind->str=="arc") item.kind=SketchEnt::WireSeg::Arc;
+            else if(kind->str=="cubic") item.kind=SketchEnt::WireSeg::Cubic;
+            else return fail("Wire segment kind must be line, arc or cubic");
+            if(item.kind==SketchEnt::WireSeg::Arc){
+                item.sweep=1;
+                if(auto sweep=segment.find("sweep")){if(sweep->t!=Value::Num||(sweep->num!=1&&sweep->num!=-1)) return fail("Wire arc sweep must be +1 or -1");item.sweep=(int)sweep->num;}
+            }
+            e.segments.push_back(item);
         }
     }
-    if(e.dof.empty()){                       // sensible defaults for quick sketches
+    if(auto d=v.find("dof")){
+        if(d->t!=Value::Arr){if(err)*err="dof must be array";return false;}
+        for(auto&x:d->arr) if(!take(x)) return false;
+    }
+    if(e.kind==SketchEnt::Wire&&e.dof.empty()){
+        if(!takePair(v.find("start"),"Wire start")) return false;
+        for(size_t i=0;i<e.segments.size();++i){
+            const auto& segment=v.find("segments")->arr[i];
+            const auto& item=e.segments[i];
+            if(item.kind==SketchEnt::WireSeg::Line){ if(!takePair(segment.find("to"),"Wire line")) return false; }
+            else if(item.kind==SketchEnt::WireSeg::Arc){
+                if(!takePair(segment.find("to"),"Wire arc")) return false;
+                auto radius=segment.find("radius");if(!radius||!take(*radius)) return fail("Wire arc needs a radius");
+            }else{
+                if(!takePair(segment.find("c1"),"Wire cubic control")||!takePair(segment.find("c2"),"Wire cubic control")||!takePair(segment.find("to"),"Wire cubic")) return false;
+            }
+        }
+    }
+    if(e.dof.empty()){
         if(e.kind==SketchEnt::Pnt) e.dof={0,0};
         else if(e.kind==SketchEnt::Line) e.dof={0,0,10,0};
         else if(e.kind==SketchEnt::Circle)e.dof={0,0,5};
+        else if(e.kind==SketchEnt::Arc) e.dof={0,0,5,0,180};
+        else if(e.kind==SketchEnt::Wire) return fail("Wire requires start and segment endpoints");
         else return fail("Spline requires explicit anchor coordinates");
     }
-    const size_t expected=e.kind==SketchEnt::Pnt?2:e.kind==SketchEnt::Line?4:3;
-    if(e.kind!=SketchEnt::Spline&&e.dof.size()!=expected)return fail("wrong entity degrees of freedom");
+    if(e.kind==SketchEnt::Wire){
+        int expect=2;for(const auto& segment:e.segments) expect+=segment.kind==SketchEnt::WireSeg::Line?2:segment.kind==SketchEnt::WireSeg::Arc?3:6;
+        if((int)e.dof.size()!=expect) return fail("Wire degrees of freedom do not match segments");
+    }else if(e.kind!=SketchEnt::Spline){
+        const size_t expected=e.kind==SketchEnt::Pnt?2:e.kind==SketchEnt::Line?4:e.kind==SketchEnt::Arc?5:3;
+        if(e.dof.size()!=expected)return fail("wrong entity degrees of freedom");
+    }
     if(auto n=v.find("name")){if(n->t!=Value::Str||n->str.empty()||n->str.size()>128)return fail("entity name must be 1..128 characters");e.name=n->str;}
     for(auto pair:{std::pair{"construction",&e.construction},std::pair{"closed",&e.closed}})if(auto b=v.find(pair.first)){if(b->t!=Value::Bool)return fail("entity flags must be boolean");*pair.second=b->b;}
     if(auto t=v.find("tension")){if(t->t!=Value::Num||!std::isfinite(t->num)||t->num<0||t->num>1)return fail("Spline tension must be 0..1");e.tension=t->num;}
@@ -75,14 +130,20 @@ bool validSketch(const Sketch& sk,std::string* err){
     std::set<std::string> constraintIds;
     for(auto& c:sk.cons){
         if(!c.id.empty()&&!constraintIds.insert(c.id).second)return fail("Duplicate sketch constraint id");
-        auto valid=[&](int e,int slot){return e>=0&&(size_t)e<sk.ents.size()&&slot>=0&&slot<(sk.ents[e].kind==SketchEnt::Spline?(int)sk.ents[e].dof.size()/2:sk.ents[e].kind==SketchEnt::Line?2:1);};
+        auto slots=[&](const SketchEnt& entity){return entity.kind==SketchEnt::Spline?(int)entity.dof.size()/2:entity.kind==SketchEnt::Line?2:entity.kind==SketchEnt::Wire?sketchVertexCount(entity):1;};
+        auto valid=[&](int e,int slot){return e>=0&&(size_t)e<sk.ents.size()&&slot>=0&&slot<slots(sk.ents[e]);};
         if(!valid(c.a,c.pa))return fail("invalid constraint entity or point slot");
-        bool pair=c.type==SketchCon::DistPP||c.type==SketchCon::Coincident||c.type==SketchCon::Parallel||c.type==SketchCon::Perpendicular||c.type==SketchCon::AngleLL;
+        bool pair=c.type==SketchCon::DistPP||c.type==SketchCon::Coincident||c.type==SketchCon::Parallel||c.type==SketchCon::Perpendicular||c.type==SketchCon::AngleLL||c.type==SketchCon::Tangent;
         if(pair&&!valid(c.b,c.pb))return fail("invalid second constraint entity");
         bool lines=c.type==SketchCon::Parallel||c.type==SketchCon::Perpendicular||c.type==SketchCon::AngleLL;
         if((lines||c.type==SketchCon::Horizontal||c.type==SketchCon::Vertical)&&sk.ents[c.a].kind!=SketchEnt::Line)return fail("constraint requires line");
         if(lines&&sk.ents[c.b].kind!=SketchEnt::Line)return fail("constraint requires two lines");
-        if(c.type==SketchCon::Radius&&sk.ents[c.a].kind!=SketchEnt::Circle)return fail("radius requires circle");
+        if(c.type==SketchCon::Radius&&sk.ents[c.a].kind!=SketchEnt::Circle&&sk.ents[c.a].kind!=SketchEnt::Arc)return fail("radius requires circle or arc");
+        if(c.type==SketchCon::Tangent){
+            auto round=[&](int index){auto kind=sk.ents[(size_t)index].kind;return kind==SketchEnt::Circle||kind==SketchEnt::Arc;};
+            bool lineA=sk.ents[(size_t)c.a].kind==SketchEnt::Line,lineB=sk.ents[(size_t)c.b].kind==SketchEnt::Line;
+            if(!((lineA&&round(c.b))||(lineB&&round(c.a)))) return fail("tangent requires one line and one circle or arc");
+        }
     }
     return true;
 }
@@ -153,6 +214,49 @@ bool generation9Feature(const Document& doc, const Feature& feature){
     return false;
 }
 
+bool namesAuthoredCurve(const Document& doc,const std::string& name,bool allowPoint){
+    for(const auto& sketch:doc.sketches) if(sketch.name==name) return false;
+    if(allowPoint) for(const auto& plane:doc.planes) if(plane.name==name&&plane.kind=="point") return true;
+    int count=0;bool curve=false;
+    for(const auto& feature:doc.features) if(feature.name==name){++count;curve=isCurveFeature(feature.type);}
+    return count==1&&curve;
+}
+bool namesAuthoredProfile(const Document& doc,const Value& value,bool allowPoint){
+    if(value.t==Value::Str) return namesAuthoredCurve(doc,value.str,allowPoint);
+    if(value.t==Value::Arr) for(const auto& name:value.arr) if(name.t==Value::Str&&namesAuthoredCurve(doc,name.str,allowPoint)) return true;
+    return false;
+}
+bool generation12Document(const Document& doc){
+    for(const auto& plane:doc.planes){
+        if(plane.kind=="point") return true;
+        if(plane.support.t==Value::Obj) if(const auto* kind=plane.support.find("kind"); kind&&kind->t==Value::Str&&(kind->str=="on_curve"||kind->str=="on_face")) return true;
+    }
+    for(const auto& sketch:doc.sketches){
+        for(const auto& entity:sketch.sk.ents) if(entity.kind==SketchEnt::Arc||entity.kind==SketchEnt::Wire) return true;
+        for(const auto& constraint:sketch.sk.cons) if(constraint.type==SketchCon::Tangent) return true;
+    }
+    for(const auto& feature:doc.features){
+        if(isCurveFeature(feature.type)) return true;
+        if(feature.type==FeatureType::Loft&&(namesAuthoredProfile(doc,feature.nativeSpec.find("sections")?*feature.nativeSpec.find("sections"):Value{},true)||namesAuthoredProfile(doc,feature.nativeSpec.find("guides")?*feature.nativeSpec.find("guides"):Value{},false))) return true;
+        if(feature.type==FeatureType::Sweep&&(namesAuthoredProfile(doc,feature.nativeSpec.find("section")?*feature.nativeSpec.find("section"):Value{},false)||namesAuthoredProfile(doc,feature.nativeSpec.find("path")?*feature.nativeSpec.find("path"):Value{},false))) return true;
+    }
+    return false;
+}
+
+bool generation11Document(const Document& doc){
+    for(const auto& feature:doc.features){
+        if(feature.type==FeatureType::Loft){
+            if(const auto* guides=feature.nativeSpec.find("guides"); guides&&guides->t==Value::Arr&&!guides->arr.empty()) return true;
+        }
+        if(feature.type==FeatureType::NativeSolid){
+            std::string op=feature.get("op");
+            if(op.empty()) if(const auto* authored=feature.nativeSpec.find("op"); authored&&authored->t==Value::Str) op=authored->str;
+            if(op=="shell") return true;
+        }
+    }
+    return false;
+}
+
 bool generation10Document(const Document& doc){
     for(const auto& node:doc.assembly) if(node.pattern.active) return true;
     for(const auto& feature:doc.features){
@@ -172,10 +276,12 @@ std::string documentToJson(const Document& doc){
     Value r=Value::makeObj();
     r.set("format",Value::makeStr("ark"));
     bool sourceTube=false;bool notched=false;bool nativeVersion=false;bool generation8=false;bool generation9=false;bool extended=!doc.assembly.empty()||doc.nextAssemblyId_>1;for(auto& f:doc.features){extended|=f.type==FeatureType::Tube;notched|=f.type==FeatureType::NotchedTube;sourceTube|=f.type==FeatureType::SourceTube;nativeVersion|=f.type==FeatureType::Loft||f.type==FeatureType::SurfaceFill||f.type==FeatureType::BSplineSurface||f.type==FeatureType::Thicken||f.type==FeatureType::SheetMetal||f.type==FeatureType::SourceSheet||f.type==FeatureType::NativeSolid;generation8|=f.type==FeatureType::Sweep||f.type==FeatureType::ExtrudeSurface||f.type==FeatureType::RevolveSurface||f.type==FeatureType::OffsetSurface||f.type==FeatureType::Sew||isMeshModelFeature(f.type);generation9|=generation9Feature(doc,f);}
+    bool generation12=generation12Document(doc);
+    bool generation11=generation11Document(doc);
     bool generation10=generation10Document(doc);
     bool sketchVersion=!doc.planes.empty()||!doc.sketches.empty();for(auto& f:doc.features)sketchVersion|=f.type==FeatureType::SketchCut;
     bool latest=!doc.mates.empty()||doc.nextMateId_>1;for(auto& p:doc.planes)latest|=p.support.t==Value::Obj||p.kind!="plane";for(auto& f:doc.features)latest|=f.type==FeatureType::NativeSolid||(f.type==FeatureType::SheetMetal&&f.nativeSpec.find("base"));for(auto& n:doc.assembly)latest|=n.fixed;for(auto& sk:doc.sketches)for(auto& c:sk.sk.cons)latest|=!c.id.empty();
-    r.set("version",Value::makeNum(generation10?10:generation9?9:generation8?8:latest?7:nativeVersion?6:sketchVersion?5:sourceTube?4:notched?3:extended?2:1));
+    r.set("version",Value::makeNum(generation12?12:generation11?11:generation10?10:generation9?9:generation8?8:latest?7:nativeVersion?6:sketchVersion?5:sourceTube?4:notched?3:extended?2:1));
     r.set("units",Value::makeStr("mm"));
     r.set("next_feature_id",Value::makeNum((double)doc.nextFeatureId_));
 
@@ -247,7 +353,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     Value v;
     if(!arkjson::parse(json,v)) return fail("malformed JSON");
     if(v.t!=Value::Obj) return fail("root must be object");
-    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0&&ver->num!=3.0&&ver->num!=4.0&&ver->num!=5.0&&ver->num!=6.0&&ver->num!=7.0&&ver->num!=8.0&&ver->num!=9.0&&ver->num!=10.0)))
+    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0&&ver->num!=3.0&&ver->num!=4.0&&ver->num!=5.0&&ver->num!=6.0&&ver->num!=7.0&&ver->num!=8.0&&ver->num!=9.0&&ver->num!=10.0&&ver->num!=11.0&&ver->num!=12.0)))
         return fail("unsupported document version");
 
     if(auto format=v.find("format");format && format->asStr()!="ark")return fail("unsupported format");
@@ -282,7 +388,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
             auto name=j.find("name");if(!name||name->t!=Value::Str||name->str.empty()||name->str.size()>128||!names.insert(name->str).second)return fail("Invalid or duplicate plane name");plane.name=name->str;
             if(auto parent=j.find("parent")){if(parent->t!=Value::Str||parent->str.empty())return fail("Plane parent must be a name");plane.parent=parent->str;}
             if(auto p=j.find("p")){if(p->t!=Value::Obj)return fail("Plane p must be object");for(auto& kv:p->obj){if(kv.second.t!=Value::Str)return fail("Plane values must be expressions");plane.p[kv.first]=kv.second.str;}}
-            if(auto kind=j.find("kind")){if(kind->t!=Value::Str||(kind->str!="plane"&&kind->str!="axis"&&kind->str!="frame"))return fail("Invalid datum kind");plane.kind=kind->str;}
+            if(auto kind=j.find("kind")){if(kind->t!=Value::Str||(kind->str!="plane"&&kind->str!="axis"&&kind->str!="frame"&&kind->str!="point"))return fail("Invalid datum kind");plane.kind=kind->str;}
             if(auto support=j.find("support")){if(support->t!=Value::Obj)return fail("Datum support must be object");plane.support=*support;}
             nd.planes.push_back(std::move(plane));
         }
@@ -325,6 +431,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
             if(nf.type==FeatureType::Loft||nf.type==FeatureType::SurfaceFill||nf.type==FeatureType::BSplineSurface||nf.type==FeatureType::Thicken||nf.type==FeatureType::SheetMetal||nf.type==FeatureType::NativeSolid){auto version=v.find("version"),spec=fv.find("native");if(!version||version->asNum()<6||!spec||spec->t!=Value::Obj)return fail("native feature requires version 6 native object");nf.nativeSpec=*spec;}
             if(nf.type==FeatureType::Sweep||nf.type==FeatureType::ExtrudeSurface||nf.type==FeatureType::RevolveSurface||nf.type==FeatureType::OffsetSurface||nf.type==FeatureType::Sew){auto version=v.find("version"),spec=fv.find("native");if(!version||version->asNum()<8||!spec||spec->t!=Value::Obj)return fail("extended surface feature requires version 8 native object");nf.nativeSpec=*spec;}
             if(isMeshModelFeature(nf.type)){auto version=v.find("version");if(!version||version->asNum()<8)return fail("mesh modeling features require document version 8");}
+            if(isCurveFeature(nf.type)){auto version=v.find("version"),spec=fv.find("native");if(!version||version->asNum()<12||!spec||spec->t!=Value::Obj)return fail("points, curve segments, or curve features require document version 12");nf.nativeSpec=*spec;}
             if(generation9Feature(nd,nf)){auto version=v.find("version");if(!version||version->asNum()<9)return fail("draft, pattern, mirror, edge selection, loft smoothing, or a point tip requires document version 9");}
             if(nf.type==FeatureType::MeshBody){auto mesh=fv.find("mesh");if(!mesh||mesh->t!=Value::Obj)return fail("mesh_body requires a mesh object");nf.sourceData=*mesh;}
             maxId=tmax(maxId,nf.id);
@@ -366,6 +473,8 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     }
     if(auto key=v.find("next_mate_id")){if(key->t!=Value::Num||key->num<(double)nd.nextMateId_||key->num>9007199254740991.||key->num!=std::floor(key->num))return fail("Invalid next mate id");nd.nextMateId_=(u64)key->num;}
     if(generation10Document(nd)){auto version=v.find("version");if(!version||version->asNum()<10)return fail("placed-instance booleans, unions of more than two exact solids, or instance patterns require document version 10");}
+    if(generation11Document(nd)){auto version=v.find("version");if(!version||version->asNum()<11)return fail("solid shells or loft guide curves require document version 11");}
+    if(generation12Document(nd)){auto version=v.find("version");if(!version||version->asNum()<12)return fail("points, curve segments, or curve features require document version 12");}
     if(nd.params.size()>256||nd.features.size()>1024||nd.sketches.size()>64)return fail("document capacity exceeded");
     nd.refreshParams();
     if(!nd.parameterError.empty())return fail(nd.parameterError);

@@ -159,8 +159,14 @@ const char* featureTypeName(FeatureType t){
         case FeatureType::MeshDecimate: return "mesh_decimate";
         case FeatureType::MeshOffset: return "mesh_offset";
         case FeatureType::MeshFill: return "mesh_fill";
+        case FeatureType::Curve: return "curve";
+        case FeatureType::IntersectionCurve: return "intersection_curve";
+        case FeatureType::Bridge: return "bridge";
     }
     return "unknown";
+}
+bool isCurveFeature(FeatureType t){
+    return t==FeatureType::Curve || t==FeatureType::IntersectionCurve || t==FeatureType::Bridge;
 }
 bool isNativeSurfaceFeature(FeatureType t){
     return t==FeatureType::Loft || t==FeatureType::SurfaceFill || t==FeatureType::BSplineSurface ||
@@ -207,6 +213,9 @@ bool featureTypeFromName(const std::string& s, FeatureType& out){
     else if(s=="mesh_decimate") out=FeatureType::MeshDecimate;
     else if(s=="mesh_offset") out=FeatureType::MeshOffset;
     else if(s=="mesh_fill") out=FeatureType::MeshFill;
+    else if(s=="curve") out=FeatureType::Curve;
+    else if(s=="intersection_curve") out=FeatureType::IntersectionCurve;
+    else if(s=="bridge") out=FeatureType::Bridge;
     else return false;
     return true;
 }
@@ -226,6 +235,7 @@ const char* constraintTypeName(i32 t){
         case SketchCon::Radius:        return "radius";
         case SketchCon::Coincident:    return "coincident";
         case SketchCon::AngleLL:       return "angle";
+        case SketchCon::Tangent:       return "tangent";
     }
     return "unknown";
 }
@@ -241,6 +251,7 @@ bool constraintTypeFromName(const std::string& s, i32& out){
     else if(s=="radius") out=SketchCon::Radius;
     else if(s=="coincident") out=SketchCon::Coincident;
     else if(s=="angle") out=SketchCon::AngleLL;
+    else if(s=="tangent") out=SketchCon::Tangent;
     else return false;
     return true;
 }

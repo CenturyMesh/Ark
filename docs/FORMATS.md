@@ -1,4 +1,4 @@
-# ARK file formats, versions 1 through 10
+# ARK file formats, versions 1 through 12
 
 ## `.ark`
 
@@ -80,7 +80,7 @@ geometric proof, original openings, and exact formed/flat B-rep payloads. The
 display mesh and native evaluation cache are derived and are not feature
 history edits. The Formed/Flat UI selection does not change the saved geometry.
 
-The reader accepts versions 1 through 10. Older ARK executables reject a newer
+The reader accepts versions 1 through 12. Older ARK executables reject a newer
 document rather than discarding its native data. Save/load re-evaluates authored
 native features with the installed OCCT 8 worker; source packages remain
 portable when the original STEP is absent. If the source STEP still exists
@@ -134,3 +134,42 @@ or a multi-solid boolean stay at version 9. A file below version 10 that
 contains this data is rejected and the error names version 10. Versions 1
 through 9 still load and save at their own version. The product version stays
 0.9.0.
+
+## Version 11: solid shells and loft guide curves
+
+Save chooses the version. A document becomes version 11 only when a `loft`
+stores a non-empty `native.guides` array, or a `native_solid` operation is
+`shell`. `shell` keeps signed `p.thickness` and optional `native.faces` naming
+the faces that open. Guide entries are sketch names. An empty `guides` array
+does not select version 11. Merged face aliases, a round-tube exact B-rep,
+clearance, measure, name binding and snapshot copy are derived or request-only
+and do not change the document version. A file below version 11 that contains
+a shell or loft guides is rejected and the error names version 11. Versions 1
+through 10 still load and save at their own version. The product version stays
+0.9.0.
+
+## Version 12: points, sketch arcs and wires, and curve features
+
+Save chooses the version. A document becomes version 12 only when a datum
+kind is `point`, a datum support kind is `on_curve` or `on_face`, a sketch
+entity is an `arc` or a `wire`, a sketch constraint is `tangent`, a feature
+type is `curve`, `intersection_curve` or `bridge`, or a loft section, loft
+guide or sweep section/path names a point datum or a curve feature. Sketch
+names win over datum names, which win over feature names. An empty version
+12 file still loads. A file below version 12 that contains this data is
+rejected and the error says that points, curve segments, or curve features
+require document version 12. Versions 1 through 11 still load and save at
+their own version.
+
+A sketch arc stores `[cx,cy,r,a0_deg,a1_deg]`. A wire stores segment kind and
+sweep plus a flat degree-of-freedom list. A curve stores `native.start` and
+`native.segments` (`line`, `arc` or `nurbs`). The wire B-rep is the authority.
+The 0.3 mm display ribbon is evidence. `intersection_curve` stores one solid
+input and a datum plane name and must produce one wire. `bridge` stores two
+semantic edges. Continuity 1 is a cubic whose end derivative is the unit
+edge tangent times the chord length. Continuity 2 is a quintic with those
+tangents and zero end curvature; it does not copy sampled
+curvature from the source edge and it is not a surface blend. Merged face
+aliases, a round-tube exact B-rep, clearance, measure, name binding and
+snapshot copy still do not change the document version. The product version
+stays 0.9.0.

@@ -45,9 +45,16 @@ struct Problem {
                 size_t o=offsetOf(ent);
                 return { x[o+2*slot], x[o+2*slot+1] };
             }
-            case SketchEnt::Circle: {
+            case SketchEnt::Circle:
+            case SketchEnt::Arc: {
                 size_t o=offsetOf(ent);
                 return {x[o],x[o+1]};
+            }
+            case SketchEnt::Wire: {
+                int index=sketchVertexDof(e,slot);
+                size_t o=offsetOf(ent);
+                if(index<0||o+(size_t)index+1>=x.size()) return {};
+                return {x[o+(size_t)index],x[o+(size_t)index+1]};
             }
         }
         return {};
@@ -124,6 +131,21 @@ struct Problem {
                     f64 aa=std::atan2(a1.y-a0.y,a1.x-a0.x);
                     f64 ab=std::atan2(b1.y-b0.y,b1.x-b0.x);
                     r.push_back(std::remainder(aa-ab-c.val,K_2PI));
+                    break;
+                }
+                case SketchCon::Tangent:{
+                    const auto& ea=sk.ents[(size_t)c.a];
+                    const auto& eb=sk.ents[(size_t)c.b];
+                    const bool aLine=ea.kind==SketchEnt::Line, bLine=eb.kind==SketchEnt::Line;
+                    const bool aRound=ea.kind==SketchEnt::Circle||ea.kind==SketchEnt::Arc;
+                    const bool bRound=eb.kind==SketchEnt::Circle||eb.kind==SketchEnt::Arc;
+                    if(!((aLine&&bRound)||(bLine&&aRound))){ r.push_back(0); break; }
+                    const int line=aLine?c.a:c.b, curve=aLine?c.b:c.a;
+                    Vec2 p0=point(line,0), p1=point(line,1), center=point(curve,0);
+                    Vec2 direction=p1-p0;
+                    f64 span=direction.len();
+                    f64 distance=span<1e-12?(center-p0).len():std::fabs((center-p0).cross(direction))/span;
+                    r.push_back(distance-radius(curve));
                     break;
                 }
             }

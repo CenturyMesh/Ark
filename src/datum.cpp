@@ -59,7 +59,7 @@ Mat4 resolvePlane(const Document& doc,const std::string& name) {
         if(!visiting.insert(key).second)throw std::runtime_error("Cyclic construction datum: "+key);
         const DatumPlane* datum=nullptr;for(auto& p:doc.planes)if(p.name==key)datum=&p;
         if(!datum)throw std::runtime_error("Construction datum not found: "+key);
-        if(datum->kind!="plane"&&datum->kind!="axis"&&datum->kind!="frame")throw std::runtime_error("Datum kind must be plane, axis or frame");
+        if(datum->kind!="plane"&&datum->kind!="axis"&&datum->kind!="frame"&&datum->kind!="point")throw std::runtime_error("Datum kind must be plane, axis, frame or point");
         for(auto& kv:datum->p)if(kv.first!="ox"&&kv.first!="oy"&&kv.first!="oz"&&kv.first!="rx"&&kv.first!="ry"&&kv.first!="rz")throw std::runtime_error("Unknown datum parameter: "+kv.first);
         Mat4 base;
         if(datum->support.t==V::Obj){
@@ -77,6 +77,12 @@ Mat4 resolvePlane(const Document& doc,const std::string& name) {
                     auto mid=p+a*((q-p).dot(a)*.5);base.m[12]=mid.x;base.m[13]=mid.y;base.m[14]=mid.z;
                 } else if(kind=="face") {if(first.kind!="face")throw std::runtime_error("Face datum requires a planar face");}
                 else if(kind=="normal_to_curve") {if(first.kind!="edge"&&first.kind!="axis")throw std::runtime_error("Normal datum requires an edge or axis");}
+                else if(kind=="on_curve") {if(first.kind!="edge"&&first.kind!="axis")throw std::runtime_error("on_curve needs an edge or axis");}
+                else if(kind=="on_face") {
+                    if(first.kind!="face")throw std::runtime_error("on_face needs a face");
+                    double u=0,v=0;if(auto p=s.find("u"))u=scalar(*p,env);if(auto p=s.find("v"))v=scalar(*p,env);
+                    base=base*Mat4::translation({u,v,0});
+                }
                 else throw std::runtime_error("Unsupported construction datum support kind");
             }
         }else base=resolve(datum->parent);

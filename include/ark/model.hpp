@@ -42,6 +42,7 @@ enum class FeatureType : i32 {
     Loft, SurfaceFill, BSplineSurface, Thicken, SheetMetal, SourceSheet, NativeSolid,
     Sweep, ExtrudeSurface, RevolveSurface, OffsetSurface, Sew,
     MeshBody, MeshWeld, MeshSmooth, MeshDecimate, MeshOffset, MeshFill,
+    Curve, IntersectionCurve, Bridge,
 };
 
 struct Feature {
@@ -78,11 +79,17 @@ struct FeatureResult {
 // ---------------------------------------------------------------------------
 // Sketches ----------------------------------------------------------------------
 struct SketchEnt {
-    enum Kind : i32 { Pnt, Line, Circle, Spline } kind=Pnt;
+    enum Kind : i32 { Pnt, Line, Circle, Spline, Arc, Wire } kind=Pnt;
     // dof layout: Pnt -> [x,y]; Line -> [x0,y0,x1,y1]; Circle -> [cx,cy,r]
+    // Arc -> [cx,cy,r,a0deg,a1deg]. Wire flattens start, then each segment.
+    struct WireSeg {
+        enum Kind : i32 { Line, Arc, Cubic } kind=Line;
+        int sweep=1; // +1 bulges left of the directed chord; the arc is the minor arc
+    };
     std::vector<f64> dof;
     std::string name;
     std::vector<std::string> expressions; // empty: solver variable; string: parameter binding
+    std::vector<WireSeg> segments;
     bool construction=false, closed=false;
     f64 tension=0;
 };
@@ -94,7 +101,8 @@ struct SketchCon {
         Parallel, Perpendicular,        // line-line
         Radius,                         // circle radius
         Coincident,                     // point-point same location
-        AngleLL                         // line-line angle (rad)
+        AngleLL,                        // line-line angle (rad)
+        Tangent                         // line tangent to a circle or arc
     } type=Fixed;
     i32 a=-1,b=-1;      // entity indices (b optional)
     i32 pa=0,pb=0;      // sub-point index within entity when applicable
@@ -131,6 +139,8 @@ bool featureTypeFromName(const std::string& s, FeatureType& out);
 // Exact OCCT surface features, including loft, fill, NURBS, thicken and the
 // later sweep/extrude/revolve/offset/sew operations.
 bool isNativeSurfaceFeature(FeatureType t);
+// Exact curve features: authored 3D wire, solid-plane section, and edge bridge.
+bool isCurveFeature(FeatureType t);
 // Sampled triangle operations. Their results are mesh authority, never a B-rep.
 bool isMeshModelFeature(FeatureType t);
 

@@ -44,6 +44,13 @@ Alternatively use numeric entity coordinates and dimensions such as
 `{"type":"radius","a":0,"val":"4"}`. The existing coincidence, distance,
 parallel, perpendicular, horizontal, vertical and angle constraints remain
 available. Sketch angle constraints use radians; `deg(30)` converts 30 degrees.
+An arc uses dof `[cx,cy,r,a0_deg,a1_deg]`. A wire is one entity with `start`
+and `segments` of `line`, minor `arc` (`sweep` +1 or -1) and `cubic`.
+Constraint `tangent` takes one line and one circle or arc. `sketch.patch`
+changes one coordinate. A datum `kind` of `point` stores a location, and
+support kind `on_curve` or `on_face` attaches a datum to an edge or a face.
+Documents that use these save as version 12. The reader still accepts the
+older versions described above.
 
 `sketch_inspect{name}` reports solved coordinates, residual, local numerical
 Jacobian rank, remaining degrees of freedom and profile readiness. The rank is

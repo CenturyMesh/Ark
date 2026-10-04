@@ -23,6 +23,8 @@ int runWorker(const fs::path& requestPath,const fs::path& resultPath){
         else if(op=="model_sheet")result=modelSheetNative(field("request"));
         else if(op=="model_solid")result=modelSolidNative(field("request"));
         else if(op=="reference_frame")result=referenceFrameNative(field("request"));
+        else if(op=="clearance")result=clearanceNative(field("request"));
+        else if(op=="point_distance")result=pointDistanceNative(field("request"));
         else if(op=="import_sheet")result=importSheetNative(request);
         else if(op=="export_sheet")result=exportSheetNative(request);
         else if(op=="step_inspect"){

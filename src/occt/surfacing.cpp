@@ -2,6 +2,7 @@
 #include "common.hpp"
 
 #include <BRepAdaptor_Curve.hxx>
+#include <BRepAdaptor_Surface.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakeSolid.hxx>
@@ -11,6 +12,8 @@
 #include <BRep_Tool.hxx>
 #include <BRepBuilderAPI_Sewing.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
+#include <BRepBuilderAPI_PipeError.hxx>
+#include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepOffsetAPI_MakeFilling.hxx>
 #include <BRepOffsetAPI_MakeOffsetShape.hxx>
 #include <BRepOffsetAPI_MakePipeShell.hxx>
@@ -18,8 +21,14 @@
 #include <BRepOffsetAPI_ThruSections.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <BRepPrimAPI_MakeRevol.hxx>
+#include <GeomAPI_Interpolate.hxx>
+#include <GeomAPI_ProjectPointOnCurve.hxx>
 #include <Geom_BSplineSurface.hxx>
 #include <Geom_BezierCurve.hxx>
+#include <gp_Ax2.hxx>
+#include <gp_Circ.hxx>
+#include <Geom_Circle.hxx>
+#include <Geom_TrimmedCurve.hxx>
 #include <GeomAbs_Shape.hxx>
 #include <NCollection_Array1.hxx>
 #include <NCollection_Array2.hxx>
@@ -39,8 +48,11 @@
 #include <gp_Pnt.hxx>
 #include <gp_Vec.hxx>
 
+#include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
+#include <map>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -140,6 +152,36 @@ EdgeRecord edgeOf(const V& entity, const std::array<double, 16>& frame) {
                           center.Z() + radius * frame[2]);
         return {maker.Edge(), seam, seam};
     }
+    if (kind.str == "arc") {
+        const gp_Pnt center = point(required(entity, "center"), frame);
+        const double radius = number(required(entity, "radius"), "radius");
+        const double a0 = number(required(entity, "a0"), "a0") * (3.14159265358979323846 / 180.0);
+        const double a1 = number(required(entity, "a1"), "a1") * (3.14159265358979323846 / 180.0);
+        if (radius <= kTolerance) throw std::runtime_error("arc radius too small");
+        const double sweep = a1 - a0;
+        if (!(std::abs(sweep) > 1e-12 && std::abs(sweep) <= 6.28318530717958647692 + 1e-8))
+            throw std::runtime_error("Arc sweep must be in (0, 360] degrees");
+        const gp_Dir normal(frame[8], frame[9], frame[10]);
+        const gp_Dir xAxis(frame[0], frame[1], frame[2]);
+        const gp_Circ circle(gp_Ax2(center, normal, xAxis), radius);
+        TopoDS_Edge edge;
+        if (std::abs(std::abs(sweep) - 6.28318530717958647692) < 1e-6) {
+            BRepBuilderAPI_MakeEdge maker(circle);
+            if (!maker.IsDone()) throw std::runtime_error("arc edge construction failed");
+            edge = maker.Edge();
+        } else {
+            const bool reverse = sweep < 0;
+            Handle(Geom_Circle) geometry = new Geom_Circle(circle);
+            Handle(Geom_TrimmedCurve) trimmed = new Geom_TrimmedCurve(geometry, reverse ? a1 : a0, reverse ? a0 : a1);
+            BRepBuilderAPI_MakeEdge maker(trimmed);
+            if (!maker.IsDone()) throw std::runtime_error("arc edge construction failed");
+            edge = maker.Edge();
+            if (reverse) edge.Reverse();
+        }
+        TopoDS_Vertex first, last;
+        TopExp::Vertices(edge, first, last);
+        return {edge, BRep_Tool::Pnt(first), BRep_Tool::Pnt(last)};
+    }
     const V& points = required(entity, "points");
     const size_t count = kind.str == "line" ? 2 : kind.str == "bezier" ? 4 : 0;
     if (!count || points.t != V::Arr || points.arr.size() != count)
@@ -169,6 +211,24 @@ struct Profile {
 };
 
 Profile profileOf(const V& value, bool requireClosed) {
+    if (const V* encoded = value.find("wire_brep")) {
+        if (encoded->t != V::Str || encoded->str.empty()) throw std::runtime_error("wire_brep must be a B-rep");
+        const std::vector<TopoDS_Shape> wires = shapes(readBrep(encoded->str), TopAbs_WIRE);
+        if (wires.size() != 1) throw std::runtime_error("wire_brep must contain one wire");
+        Profile result;
+        result.wire = TopoDS::Wire(wires[0]);
+        for (BRepTools_WireExplorer walk(result.wire); walk.More(); walk.Next()) {
+            TopoDS_Edge edge = walk.Current();
+            TopoDS_Vertex first, last;
+            TopExp::Vertices(edge, first, last);
+            if (first.IsNull() || last.IsNull()) throw std::runtime_error("wire_brep edge has no vertices");
+            result.edges.push_back({edge, BRep_Tool::Pnt(first), BRep_Tool::Pnt(last)});
+        }
+        if (result.edges.empty()) throw std::runtime_error("wire_brep has no edges");
+        result.closed = result.edges.front().first.Distance(result.edges.back().last) <= kTolerance;
+        if (requireClosed && !result.closed) throw std::runtime_error("profile is not explicitly closed");
+        return result;
+    }
     const auto frame = frameOf(value);
     const V& entities = required(value, "entities");
     if (entities.t != V::Arr || entities.arr.empty() || entities.arr.size() > 128)
@@ -217,7 +277,524 @@ TopoDS_Edge edgeByEnds(const TopoDS_Shape& host, const gp_Pnt& start, const gp_P
     return {};
 }
 
+gp_Pnt centroidOf(const Profile& profile) {
+    gp_XYZ sum(0, 0, 0);
+    int count = 0;
+    for (const EdgeRecord& edge : profile.edges) {
+        BRepAdaptor_Curve curve(edge.edge);
+        const double first = curve.FirstParameter(), last = curve.LastParameter();
+        for (int station = 0; station < 8; ++station) {
+            const double t = first + (last - first) * (station + 0.5) / 8.0;
+            sum += curve.Value(t).XYZ();
+            ++count;
+        }
+    }
+    if (!count) throw std::runtime_error("Loft section has no curve to guide");
+    return gp_Pnt(sum / count);
+}
+
+TopoDS_Edge trimRange(const TopoDS_Edge& edge, double u0, double u1) {
+    if (u1 - u0 <= 1e-8) return {};
+    double first = 0, last = 0;
+    Handle(Geom_Curve) curve = BRep_Tool::Curve(edge, first, last);
+    if (curve.IsNull()) throw std::runtime_error("Loft section edge has no curve");
+    Handle(Geom_TrimmedCurve) segment = new Geom_TrimmedCurve(curve, u0, u1);
+    BRepBuilderAPI_MakeEdge maker(segment);
+    if (!maker.IsDone()) throw std::runtime_error("Loft guide split failed");
+    return maker.Edge();
+}
+
+TopoDS_Edge trimCircle(const TopoDS_Edge& edge, double u0, double span) {
+    BRepAdaptor_Curve adaptor(edge);
+    if (adaptor.GetType() != GeomAbs_Circle) throw std::runtime_error("Loft guide split crossed a non-periodic edge");
+    Handle(Geom_Circle) circle = new Geom_Circle(adaptor.Circle());
+    Handle(Geom_TrimmedCurve) segment = new Geom_TrimmedCurve(circle, u0, u0 + span);
+    BRepBuilderAPI_MakeEdge maker(segment);
+    if (!maker.IsDone()) throw std::runtime_error("Loft guide split failed");
+    return maker.Edge();
+}
+
+struct GuideMark { int edge = -1; double param = 0; int guide = -1; gp_Pnt point; };
+
+GuideMark locatePoint(const Profile& profile, const gp_Pnt& point, int guide) {
+    GuideMark best;
+    double bestDist = 1e9;
+    for (int index = 0; index < static_cast<int>(profile.edges.size()); ++index) {
+        double first = 0, last = 0;
+        Handle(Geom_Curve) curve = BRep_Tool::Curve(profile.edges[static_cast<size_t>(index)].edge, first, last);
+        if (curve.IsNull()) continue;
+        GeomAPI_ProjectPointOnCurve projector(point, curve, first, last);
+        if (projector.NbPoints() < 1 || projector.LowerDistance() >= bestDist) continue;
+        bestDist = projector.LowerDistance();
+        best.edge = index;
+        best.param = projector.LowerDistanceParameter();
+        best.point = projector.NearestPoint();
+        best.guide = guide;
+    }
+    if (best.edge < 0 || bestDist > 1e-3) throw std::runtime_error("Loft guide does not meet a section");
+    return best;
+}
+
+std::vector<TopoDS_Edge> walkForward(const Profile& profile, const GuideMark& from, const GuideMark& to, bool wrap) {
+    std::vector<TopoDS_Edge> out;
+    const int count = static_cast<int>(profile.edges.size());
+    auto push = [&](const TopoDS_Edge& edge) { if (!edge.IsNull()) out.push_back(edge); };
+    auto curveOf = [&](const TopoDS_Edge& edge, double& first, double& last) {
+        if (BRep_Tool::Curve(edge, first, last).IsNull()) throw std::runtime_error("Loft section edge has no curve");
+    };
+    if (from.edge == to.edge && !wrap) {
+        push(trimRange(profile.edges[static_cast<size_t>(from.edge)].edge, from.param, to.param));
+    } else if (from.edge == to.edge && wrap) {
+        BRepAdaptor_Curve adaptor(profile.edges[static_cast<size_t>(from.edge)].edge);
+        const double span = (adaptor.LastParameter() - from.param) + (to.param - adaptor.FirstParameter());
+        if (span <= 1e-8) throw std::runtime_error("Loft guide split is empty");
+        push(trimCircle(profile.edges[static_cast<size_t>(from.edge)].edge, from.param, span));
+    } else if (!wrap) {
+        if (from.edge > to.edge) throw std::runtime_error("Loft guide split walked backwards");
+        double first = 0, last = 0;
+        curveOf(profile.edges[static_cast<size_t>(from.edge)].edge, first, last);
+        push(trimRange(profile.edges[static_cast<size_t>(from.edge)].edge, from.param, last));
+        for (int edge = from.edge + 1; edge < to.edge; ++edge) push(profile.edges[static_cast<size_t>(edge)].edge);
+        curveOf(profile.edges[static_cast<size_t>(to.edge)].edge, first, last);
+        push(trimRange(profile.edges[static_cast<size_t>(to.edge)].edge, first, to.param));
+    } else {
+        double first = 0, last = 0;
+        curveOf(profile.edges[static_cast<size_t>(from.edge)].edge, first, last);
+        push(trimRange(profile.edges[static_cast<size_t>(from.edge)].edge, from.param, last));
+        int guard = 0;
+        for (int edge = (from.edge + 1) % count; edge != to.edge; edge = (edge + 1) % count) {
+            if (++guard > count) throw std::runtime_error("Loft guide split left the wire");
+            push(profile.edges[static_cast<size_t>(edge)].edge);
+        }
+        curveOf(profile.edges[static_cast<size_t>(to.edge)].edge, first, last);
+        push(trimRange(profile.edges[static_cast<size_t>(to.edge)].edge, first, to.param));
+    }
+    if (out.empty()) throw std::runtime_error("Loft guide split is empty");
+    return out;
+}
+
+V guidedResult(const TopoDS_Shape& shape, bool solid, const gp_Pnt& start, const gp_Pnt& end) {
+    V result = shapeResult(shape, solid), topology = V::makeObj(), rows = V::makeArr();
+    topology.set("brep_sha256", V::makeStr(sha256(base64Decode(required(result, "brep_base64").str))));
+    auto bind = [&](const std::string& name, const TopoDS_Shape& source) {
+        V row = V::makeObj(), indices = V::makeArr();
+        int index = -1, ordinal = 0;
+        for (const TopoDS_Shape& candidate : shapes(shape, TopAbs_FACE)) {
+            if (candidate.IsSame(source)) { index = ordinal; break; }
+            ++ordinal;
+        }
+        row.set("name", V::makeStr(name));
+        row.set("kind", V::makeStr("face"));
+        row.set("status", V::makeStr(index < 0 ? "deleted" : "bound"));
+        if (index >= 0) indices.arr.push_back(V::makeNum(index));
+        row.set("indices", indices);
+        rows.arr.push_back(std::move(row));
+    };
+    int starts = 0, ends = 0, sides = 0;
+    for (const TopoDS_Shape& item : shapes(shape, TopAbs_FACE)) {
+        TopoDS_Face face = TopoDS::Face(item);
+        BRepAdaptor_Surface surface(face);
+        if (solid && surface.GetType() == GeomAbs_Plane) {
+            gp_XYZ sum(0, 0, 0);
+            int count = 0;
+            for (const TopoDS_Shape& vertex : shapes(face, TopAbs_VERTEX)) {
+                sum += BRep_Tool::Pnt(TopoDS::Vertex(vertex)).XYZ();
+                ++count;
+            }
+            const gp_Pnt mid(count ? sum / count : gp_Pnt());
+            const bool atStart = mid.Distance(start) <= mid.Distance(end);
+            int& slot = atStart ? starts : ends;
+            bind(std::string(atStart ? "cap.start" : "cap.end") + (slot ? "." + std::to_string(slot) : ""), face);
+            ++slot;
+        } else bind("side." + std::to_string(sides++), face);
+    }
+    topology.set("references", rows);
+    result.set("topology", topology);
+    V report = *result.find("report");
+    report.set("operation", V::makeStr("loft"));
+    result.set("report", std::move(report));
+    return result;
+}
+
+V guidedLoft(const V& request) {
+    const V& profiles = required(request, "profiles");
+    if (profiles.t != V::Arr || profiles.arr.size() < 2 || profiles.arr.size() > 32)
+        throw std::runtime_error("loft needs 2..32 profiles");
+    const V* solidValue = request.find("solid");
+    const V* ruledValue = request.find("ruled");
+    if ((solidValue && solidValue->t != V::Bool) || (ruledValue && ruledValue->t != V::Bool))
+        throw std::runtime_error("solid and ruled must be booleans");
+    const bool solid = solidValue && solidValue->b;
+    if (ruledValue && ruledValue->b) throw std::runtime_error("A ruled loft cannot follow guide curves");
+    const V& guideValues = required(request, "guides");
+    if (guideValues.t != V::Arr || guideValues.arr.empty() || guideValues.arr.size() > 8)
+        throw std::runtime_error("Loft guides need 1..8 curves");
+    struct Section { Profile profile; gp_Pnt centroid; };
+    std::vector<Section> sections;
+    for (const V& value : profiles.arr) {
+        if (pointProfile(value)) throw std::runtime_error("A point section cannot be used with guide curves");
+        Section section;
+        section.profile = profileOf(value, solid);
+        section.centroid = centroidOf(section.profile);
+        sections.push_back(std::move(section));
+    }
+    std::vector<Profile> guides;
+    for (const V& value : guideValues.arr) {
+        if (pointProfile(value)) throw std::runtime_error("Loft guide must be an open curve");
+        Profile guide = profileOf(value, false);
+        if (guide.closed) throw std::runtime_error("Loft guide must be an open curve");
+        guides.push_back(std::move(guide));
+    }
+    if (guides.size() == 1) {
+        // A contact sweep keeps the section width, so a guide outside that width never pulls the loft.
+        struct Span { gp_Pnt from; gp_Pnt to; gp_Dir normal; gp_Pnt pierce; TopoDS_Wire wire; double start; double length; };
+        struct Station { double t; TopoDS_Wire wire; bool authored; };
+        std::vector<Span> spans;
+        std::vector<Station> stations;
+        double traveled = 0;
+        for (size_t index = 0; index + 1 < sections.size(); ++index) {
+            const double length = sections[index].centroid.Distance(sections[index + 1].centroid);
+            if (length <= 1e-6) throw std::runtime_error("Loft guide spine needs separated section centroids");
+            BRepExtrema_DistShapeShape dist(guides.front().wire, sections[index].profile.wire);
+            dist.Perform();
+            if (!dist.IsDone() || dist.NbSolution() < 1 || dist.Value() > 1e-3)
+                throw std::runtime_error("Loft guide does not meet a section");
+            const GuideMark pierce = locatePoint(sections[index].profile, dist.PointOnShape2(1), 0);
+            const gp_Dir normal(sections[index].profile.frame[8], sections[index].profile.frame[9], sections[index].profile.frame[10]);
+            if (index == 0) stations.push_back({0, sections[index].profile.wire, true});
+            spans.push_back({sections[index].centroid, sections[index + 1].centroid, normal, pierce.point,
+                             sections[index].profile.wire, traveled, length});
+            traveled += length;
+            stations.push_back({traveled, sections[index + 1].profile.wire, true});
+        }
+        BRepExtrema_DistShapeShape endDist(guides.front().wire, sections.back().profile.wire);
+        endDist.Perform();
+        if (!endDist.IsDone() || endDist.NbSolution() < 1 || endDist.Value() > 1e-3)
+            throw std::runtime_error("Loft guide does not meet a section");
+        auto addSample = [&](const gp_Pnt& sample) {
+            int best = -1;
+            double bestT = 0, bestDist = 1e9;
+            gp_Pnt station;
+            for (size_t index = 0; index < spans.size(); ++index) {
+                const gp_Vec chord(spans[index].from, spans[index].to);
+                const double length2 = chord.SquareMagnitude();
+                const double u = gp_Vec(spans[index].from, sample).Dot(chord) / length2;
+                if (u <= 0.02 || u >= 0.98) continue;
+                const gp_Pnt projected = spans[index].from.Translated(chord * u);
+                const double distance = sample.Distance(projected);
+                if (distance < bestDist) { bestDist = distance; best = static_cast<int>(index); bestT = u; station = projected; }
+            }
+            if (best < 0) return;
+            const Span& span = spans[static_cast<size_t>(best)];
+            const gp_Vec axis(span.normal);
+            gp_Vec base(span.from, span.pierce);
+            base -= axis * base.Dot(axis);
+            gp_Vec offset(station, sample);
+            offset -= axis * offset.Dot(axis);
+            if (base.Magnitude() <= 1e-6 || offset.Magnitude() <= 1e-6)
+                throw std::runtime_error("Loft guide scale is degenerate");
+            const double scale = offset.Magnitude() / base.Magnitude();
+            if (scale < 1e-3 || scale > 100) throw std::runtime_error("Loft guide scale is degenerate");
+            const double angle = std::atan2(base.Crossed(offset).Dot(axis), base.Dot(offset));
+            gp_Trsf scaled, rotated, moved;
+            scaled.SetScale(span.from, scale);
+            rotated.SetRotation(gp_Ax1(span.from, span.normal), angle);
+            moved.SetTranslation(span.from, station);
+            BRepBuilderAPI_Transform transformer(span.wire, moved * rotated * scaled, true);
+            if (!transformer.IsDone() || transformer.Shape().ShapeType() != TopAbs_WIRE)
+                throw std::runtime_error("Loft guide section failed");
+            stations.push_back({span.start + bestT * span.length, TopoDS::Wire(transformer.Shape()), false});
+        };
+        for (const EdgeRecord& edge : guides.front().edges) {
+            BRepAdaptor_Curve curve(edge.edge);
+            const double first = curve.FirstParameter(), last = curve.LastParameter();
+            for (int step = 0; step <= 4; ++step) addSample(curve.Value(first + (last - first) * step / 4.0));
+        }
+        std::sort(stations.begin(), stations.end(), [](const Station& a, const Station& b) { return a.t < b.t; });
+        std::vector<Station> ordered;
+        for (const Station& station : stations) {
+            if (!ordered.empty() && std::abs(station.t - ordered.back().t) <= 0.2) {
+                if (station.authored && !ordered.back().authored) ordered.back() = station;
+                continue;
+            }
+            ordered.push_back(station);
+        }
+        if (ordered.size() < 2) throw std::runtime_error("Loft guide spine failed");
+        BRepOffsetAPI_ThruSections maker(solid, false, tolerance(request));
+        maker.CheckCompatibility(true);
+        for (const Station& station : ordered) maker.AddWire(station.wire);
+        maker.Build();
+        if (!maker.IsDone()) throw std::runtime_error("OCCT guided loft failed");
+        TopoDS_Shape shape = maker.Shape();
+        if (solid && properties(shape) < 0) shape.Reverse();
+        for (const EdgeRecord& edge : guides.front().edges) {
+            for (const gp_Pnt& vertex : {edge.first, edge.last}) {
+                BRepBuilderAPI_MakeVertex probe(vertex);
+                BRepExtrema_DistShapeShape distance(probe.Vertex(), shape);
+                distance.Perform();
+                if (!distance.IsDone() || distance.NbSolution() < 1 || distance.Value() > 0.05)
+                    throw std::runtime_error("Loft guide is not on the surface");
+            }
+        }
+        return guidedResult(shape, solid, sections.front().centroid, sections.back().centroid);
+    }
+    if (guides.size() == 2) {
+        struct Station { double t; TopoDS_Wire wire; bool authored; };
+        std::vector<Station> stations;
+        double traveled = 0;
+        auto crossPlane = [](const Profile& guide, const gp_Pnt& origin, const gp_Dir& normal) {
+            auto side = [&](const BRepAdaptor_Curve& curve, double t) {
+                return gp_Vec(origin, curve.Value(t)).Dot(gp_Vec(normal));
+            };
+            for (const EdgeRecord& edge : guide.edges) {
+                BRepAdaptor_Curve curve(edge.edge);
+                const double first = curve.FirstParameter(), last = curve.LastParameter();
+                double prevT = first, prevS = side(curve, first);
+                if (std::abs(prevS) <= 1e-6) return curve.Value(first);
+                for (int step = 1; step <= 16; ++step) {
+                    const double t = first + (last - first) * step / 16.0;
+                    const double s = side(curve, t);
+                    if (prevS * s <= 0) {
+                        double a = prevT, b = t, sa = prevS;
+                        for (int cut = 0; cut < 24; ++cut) {
+                            const double mid = 0.5 * (a + b);
+                            const double sm = side(curve, mid);
+                            if (sa * sm <= 0) b = mid;
+                            else { a = mid; sa = sm; }
+                        }
+                        return curve.Value(0.5 * (a + b));
+                    }
+                    prevT = t;
+                    prevS = s;
+                }
+            }
+            throw std::runtime_error("Loft guide does not cross a section station");
+        };
+        for (size_t index = 0; index + 1 < sections.size(); ++index) {
+            const gp_Pnt from = sections[index].centroid, to = sections[index + 1].centroid;
+            const double length = from.Distance(to);
+            if (length <= 1e-6) throw std::runtime_error("Loft guide spine needs separated section centroids");
+            const gp_Dir spine(gp_Vec(from, to));
+            const gp_Dir normal(sections[index].profile.frame[8], sections[index].profile.frame[9], sections[index].profile.frame[10]);
+            gp_Pnt pierce[2];
+            for (int guideIndex = 0; guideIndex < 2; ++guideIndex) {
+                BRepExtrema_DistShapeShape dist(guides[static_cast<size_t>(guideIndex)].wire, sections[index].profile.wire);
+                dist.Perform();
+                if (!dist.IsDone() || dist.NbSolution() < 1 || dist.Value() > 1e-3)
+                    throw std::runtime_error("Loft guide does not meet a section");
+                pierce[guideIndex] = locatePoint(sections[index].profile, dist.PointOnShape2(1), guideIndex).point;
+            }
+            if (index == 0) stations.push_back({0, sections[index].profile.wire, true});
+            std::vector<double> cuts;
+            for (const Profile& guide : guides) for (const EdgeRecord& edge : guide.edges) {
+                for (const gp_Pnt& vertex : {edge.first, edge.last}) {
+                    const double u = gp_Vec(from, vertex).Dot(gp_Vec(from, to)) / (length * length);
+                    if (u > 0.02 && u < 0.98) cuts.push_back(u);
+                }
+            }
+            std::sort(cuts.begin(), cuts.end());
+            double previous = -1;
+            for (double u : cuts) {
+                if (previous >= 0 && std::abs(u - previous) * length <= 0.2) continue;
+                previous = u;
+                const gp_Pnt station = from.Translated(gp_Vec(from, to) * u);
+                const gp_Pnt targetA = crossPlane(guides[0], station, spine);
+                const gp_Pnt targetB = crossPlane(guides[1], station, spine);
+                const gp_Vec source(pierce[0], pierce[1]), destination(targetA, targetB);
+                if (source.Magnitude() <= 1e-6 || destination.Magnitude() <= 1e-6)
+                    throw std::runtime_error("Loft guide scale is degenerate");
+                const double scale = destination.Magnitude() / source.Magnitude();
+                if (scale < 1e-3 || scale > 100) throw std::runtime_error("Loft guide scale is degenerate");
+                const double angle = std::atan2(source.Crossed(destination).Dot(gp_Vec(normal)), source.Dot(destination));
+                gp_Trsf scaled, rotated, moved;
+                scaled.SetScale(pierce[0], scale);
+                rotated.SetRotation(gp_Ax1(pierce[0], normal), angle);
+                moved.SetTranslation(pierce[0], targetA);
+                BRepBuilderAPI_Transform transformer(sections[index].profile.wire, moved * rotated * scaled, true);
+                if (!transformer.IsDone() || transformer.Shape().ShapeType() != TopAbs_WIRE)
+                    throw std::runtime_error("Loft guide section failed");
+                stations.push_back({traveled + u * length, TopoDS::Wire(transformer.Shape()), false});
+            }
+            traveled += length;
+            stations.push_back({traveled, sections[index + 1].profile.wire, true});
+        }
+        BRepExtrema_DistShapeShape endDist(guides[0].wire, sections.back().profile.wire);
+        endDist.Perform();
+        BRepExtrema_DistShapeShape endDistB(guides[1].wire, sections.back().profile.wire);
+        endDistB.Perform();
+        if (!endDist.IsDone() || endDist.NbSolution() < 1 || endDist.Value() > 1e-3 ||
+            !endDistB.IsDone() || endDistB.NbSolution() < 1 || endDistB.Value() > 1e-3)
+            throw std::runtime_error("Loft guide does not meet a section");
+        std::sort(stations.begin(), stations.end(), [](const Station& a, const Station& b) { return a.t < b.t; });
+        std::vector<Station> ordered;
+        for (const Station& station : stations) {
+            if (!ordered.empty() && std::abs(station.t - ordered.back().t) <= 0.2) {
+                if (station.authored && !ordered.back().authored) ordered.back() = station;
+                continue;
+            }
+            ordered.push_back(station);
+        }
+        if (ordered.size() < 2) throw std::runtime_error("Loft guide spine failed");
+        BRepOffsetAPI_ThruSections maker(solid, false, tolerance(request));
+        maker.CheckCompatibility(true);
+        for (const Station& station : ordered) maker.AddWire(station.wire);
+        maker.Build();
+        if (!maker.IsDone()) throw std::runtime_error("OCCT guided loft failed");
+        TopoDS_Shape shape = maker.Shape();
+        if (solid && properties(shape) < 0) shape.Reverse();
+        for (const Profile& guide : guides) for (const EdgeRecord& edge : guide.edges) {
+            for (const gp_Pnt& vertex : {edge.first, edge.last}) {
+                BRepBuilderAPI_MakeVertex probe(vertex);
+                BRepExtrema_DistShapeShape distance(probe.Vertex(), shape);
+                distance.Perform();
+                if (!distance.IsDone() || distance.NbSolution() < 1 || distance.Value() > 0.05)
+                    throw std::runtime_error("Loft guide is not on the surface");
+            }
+        }
+        return guidedResult(shape, solid, sections.front().centroid, sections.back().centroid);
+    }
+    struct Station { double t; TopoDS_Wire wire; bool authored; };
+    std::vector<Station> stations;
+    double traveled = 0;
+    auto crossPlane = [](const Profile& guide, const gp_Pnt& origin, const gp_Dir& normal) {
+        auto side = [&](const BRepAdaptor_Curve& curve, double t) {
+            return gp_Vec(origin, curve.Value(t)).Dot(gp_Vec(normal));
+        };
+        for (const EdgeRecord& edge : guide.edges) {
+            BRepAdaptor_Curve curve(edge.edge);
+            const double first = curve.FirstParameter(), last = curve.LastParameter();
+            double prevT = first, prevS = side(curve, first);
+            if (std::abs(prevS) <= 1e-6) return curve.Value(first);
+            for (int step = 1; step <= 16; ++step) {
+                const double t = first + (last - first) * step / 16.0;
+                const double s = side(curve, t);
+                if (prevS * s <= 0) {
+                    double a = prevT, b = t, sa = prevS;
+                    for (int cut = 0; cut < 24; ++cut) {
+                        const double mid = 0.5 * (a + b);
+                        const double sm = side(curve, mid);
+                        if (sa * sm <= 0) b = mid;
+                        else { a = mid; sa = sm; }
+                    }
+                    return curve.Value(0.5 * (a + b));
+                }
+                prevT = t;
+                prevS = s;
+            }
+        }
+        throw std::runtime_error("Loft guide does not cross a section station");
+    };
+    for (size_t index = 0; index + 1 < sections.size(); ++index) {
+        const gp_Pnt from = sections[index].centroid, to = sections[index + 1].centroid;
+        const double length = from.Distance(to);
+        if (length <= 1e-6) throw std::runtime_error("Loft guide spine needs separated section centroids");
+        const gp_Dir spine(gp_Vec(from, to));
+        std::vector<GuideMark> pierces;
+        for (size_t guideIndex = 0; guideIndex < guides.size(); ++guideIndex) {
+            BRepExtrema_DistShapeShape dist(guides[guideIndex].wire, sections[index].profile.wire);
+            dist.Perform();
+            if (!dist.IsDone() || dist.NbSolution() < 1 || dist.Value() > 1e-3)
+                throw std::runtime_error("Loft guide does not meet a section");
+            pierces.push_back(locatePoint(sections[index].profile, dist.PointOnShape2(1), static_cast<int>(guideIndex)));
+        }
+        std::sort(pierces.begin(), pierces.end(), [](const GuideMark& a, const GuideMark& b) {
+            if (a.edge != b.edge) return a.edge < b.edge;
+            return a.param < b.param;
+        });
+        for (size_t mark = 1; mark < pierces.size(); ++mark)
+            if (pierces[mark].edge == pierces[mark - 1].edge && std::abs(pierces[mark].param - pierces[mark - 1].param) <= 1e-6)
+                throw std::runtime_error("Loft guides meet a section at the same point");
+        if (index == 0) stations.push_back({0, sections[index].profile.wire, true});
+        std::vector<double> cuts;
+        for (const Profile& guide : guides) for (const EdgeRecord& edge : guide.edges) {
+            for (const gp_Pnt& vertex : {edge.first, edge.last}) {
+                const double u = gp_Vec(from, vertex).Dot(gp_Vec(from, to)) / (length * length);
+                if (u > 0.02 && u < 0.98) cuts.push_back(u);
+            }
+        }
+        std::sort(cuts.begin(), cuts.end());
+        double previous = -1;
+        for (double u : cuts) {
+            if (previous >= 0 && std::abs(u - previous) * length <= 0.2) continue;
+            previous = u;
+            const gp_Pnt station = from.Translated(gp_Vec(from, to) * u);
+            std::vector<gp_Pnt> targets;
+            for (const Profile& guide : guides) targets.push_back(crossPlane(guide, station, spine));
+            std::vector<gp_Pnt> points;
+            for (size_t mark = 0; mark < pierces.size(); ++mark) {
+                const size_t next = (mark + 1) % pierces.size();
+                const gp_Vec offA(pierces[mark].point, targets[static_cast<size_t>(pierces[mark].guide)]);
+                const gp_Vec offB(pierces[next].point, targets[static_cast<size_t>(pierces[next].guide)]);
+                const auto edges = walkForward(sections[index].profile, pierces[mark], pierces[next], next == 0);
+                std::vector<gp_Pnt> samples;
+                for (const TopoDS_Edge& edge : edges) {
+                    BRepAdaptor_Curve curve(edge);
+                    const double first = curve.FirstParameter(), last = curve.LastParameter();
+                    for (int step = 0; step < 4; ++step) samples.push_back(curve.Value(first + (last - first) * step / 4.0));
+                }
+                for (size_t sample = 0; sample < samples.size(); ++sample) {
+                    const double blend = samples.size() <= 1 ? 0 : static_cast<double>(sample) / static_cast<double>(samples.size());
+                    const gp_Pnt moved = samples[sample].Translated(offA * (1.0 - blend) + offB * blend);
+                    if (points.empty() || points.back().Distance(moved) > 1e-3) points.push_back(moved);
+                }
+            }
+            if (!points.empty() && points.front().Distance(points.back()) <= 1e-3) points.pop_back();
+            if (points.size() < 3) throw std::runtime_error("Loft guide section failed");
+            using PointArray = NCollection_HArray1<gp_Pnt>;
+            Handle(PointArray) poles = new PointArray(1, static_cast<int>(points.size()));
+            for (int pole = 1; pole <= static_cast<int>(points.size()); ++pole) poles->SetValue(pole, points[static_cast<size_t>(pole - 1)]);
+            GeomAPI_Interpolate interpolate(poles, true, 1e-4);
+            interpolate.Perform();
+            if (!interpolate.IsDone()) throw std::runtime_error("Loft guide section failed");
+            BRepBuilderAPI_MakeEdge edge(interpolate.Curve());
+            if (!edge.IsDone()) throw std::runtime_error("Loft guide section failed");
+            BRepBuilderAPI_MakeWire wire(edge.Edge());
+            if (!wire.IsDone()) throw std::runtime_error("Loft guide section failed");
+            stations.push_back({traveled + u * length, wire.Wire(), false});
+        }
+        traveled += length;
+        stations.push_back({traveled, sections[index + 1].profile.wire, true});
+    }
+    for (const Profile& guide : guides) {
+        BRepExtrema_DistShapeShape endDist(guide.wire, sections.back().profile.wire);
+        endDist.Perform();
+        if (!endDist.IsDone() || endDist.NbSolution() < 1 || endDist.Value() > 1e-3)
+            throw std::runtime_error("Loft guide does not meet a section");
+    }
+    std::sort(stations.begin(), stations.end(), [](const Station& a, const Station& b) { return a.t < b.t; });
+    std::vector<Station> ordered;
+    for (const Station& station : stations) {
+        if (!ordered.empty() && std::abs(station.t - ordered.back().t) <= 0.2) {
+            if (station.authored && !ordered.back().authored) ordered.back() = station;
+            continue;
+        }
+        ordered.push_back(station);
+    }
+    if (ordered.size() < 2) throw std::runtime_error("Loft guide spine failed");
+    BRepOffsetAPI_ThruSections maker(solid, false, tolerance(request));
+    maker.CheckCompatibility(true);
+    for (const Station& station : ordered) maker.AddWire(station.wire);
+    maker.Build();
+    if (!maker.IsDone()) throw std::runtime_error("OCCT guided loft failed");
+    TopoDS_Shape shape = maker.Shape();
+    if (solid && properties(shape) < 0) shape.Reverse();
+    for (const Profile& guide : guides) for (const EdgeRecord& edge : guide.edges) {
+        for (const gp_Pnt& vertex : {edge.first, edge.last}) {
+            BRepBuilderAPI_MakeVertex probe(vertex);
+            BRepExtrema_DistShapeShape distance(probe.Vertex(), shape);
+            distance.Perform();
+            if (!distance.IsDone() || distance.NbSolution() < 1 || distance.Value() > 0.05)
+                throw std::runtime_error("Loft guide is not on the surface");
+        }
+    }
+    return guidedResult(shape, solid, sections.front().centroid, sections.back().centroid);
+}
+
 V loft(const V& request) {
+    if (const V* guides = request.find("guides")) {
+        if (guides->t != V::Arr) throw std::runtime_error("Loft guides must be curves");
+        if (!guides->arr.empty()) return guidedLoft(request);
+    }
     const V& profiles = required(request, "profiles");
     if (profiles.t != V::Arr || profiles.arr.size() < 2 || profiles.arr.size() > 32)
         throw std::runtime_error("loft needs 2..32 profiles");
@@ -335,6 +912,51 @@ V loft(const V& request) {
             }
             bind("rail." + std::to_string(ordinal), "edge", found == 1 ? rail : TopoDS_Shape());
         }
+    }
+    const size_t authored = rows.arr.size();
+    std::map<std::string, std::vector<size_t>> groups;
+    std::set<std::string> names;
+    auto stemOf = [](const std::string& name) {
+        const auto dot = name.rfind('.');
+        if (dot == std::string::npos || dot == 0 || dot + 1 == name.size()) return std::string();
+        for (size_t i = dot + 1; i < name.size(); ++i)
+            if (name[i] < '0' || name[i] > '9') return std::string();
+        return name.substr(0, dot);
+    };
+    for (size_t index = 0; index < authored; ++index) {
+        const std::string name = required(rows.arr[index], "name").str;
+        names.insert(name);
+        const std::string stem = stemOf(name);
+        if (!stem.empty()) groups[stem].push_back(index);
+    }
+    for (const auto& [stem, members] : groups) {
+        if (members.size() < 2 || names.count(stem)) continue;
+        std::string kind, surviving;
+        std::set<int> bound;
+        bool sameKind = true;
+        V mergedFrom = V::makeArr();
+        for (size_t index : members) {
+            const V& row = rows.arr[index];
+            const std::string rowKind = required(row, "kind").str;
+            if (kind.empty()) kind = rowKind;
+            else if (kind != rowKind) sameKind = false;
+            mergedFrom.arr.push_back(required(row, "name"));
+            if (required(row, "status").str != "bound") continue;
+            const V& indices = required(row, "indices");
+            if (indices.t != V::Arr || indices.arr.size() != 1 || indices.arr[0].t != V::Num) continue;
+            bound.insert(static_cast<int>(indices.arr[0].num));
+            if (surviving.empty()) surviving = required(row, "name").str;
+        }
+        if (!sameKind || bound.size() != 1 || surviving.empty()) continue;
+        V alias = V::makeObj(), indices = V::makeArr();
+        alias.set("name", V::makeStr(stem));
+        alias.set("kind", V::makeStr(kind));
+        alias.set("status", V::makeStr("merged"));
+        indices.arr.push_back(V::makeNum(*bound.begin()));
+        alias.set("indices", std::move(indices));
+        alias.set("merged_from", std::move(mergedFrom));
+        alias.set("surviving", V::makeStr(surviving));
+        rows.arr.push_back(std::move(alias));
     }
     topology.set("references", rows);
     result.set("topology", topology);
@@ -639,6 +1261,8 @@ V modelSurfaceNative(const V& request) {
         if (operation.str == "sweep") return sweepSurface(request);
         if (operation.str == "offset_surface") return offsetSurface(request);
         if (operation.str == "sew") return sewSurfaces(request);
+        if (operation.str == "curve" || operation.str == "intersection_curve" || operation.str == "bridge")
+            return modelCurveNative(request);
         throw std::runtime_error("unsupported surfacing operation");
     } catch (const Standard_Failure& error) {
         throw std::runtime_error(std::string("OCCT surfacing failure: ") + error.GetMessageString());

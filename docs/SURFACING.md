@@ -1,4 +1,4 @@
-# Native surfacing in ARK 0.8
+# Native surfacing
 
 Studio's **Native surfaces** Commands group and MCP `doc_apply` create OCCT
 8.0.1 B-reps. The feature history stores the authored parameters and `native`
@@ -14,7 +14,31 @@ contains only one point is a tip, and a tip can only be the first or last
 section. `p.smooth` `1` turns on smoothing; `p.continuity` is `0`, `1`, or `2`
 and defaults to `1`. The B-rep keeps face names `cap.start`, `cap.end`, and
 `side.<entity>`, plus edge names `edge.start.<entity>`, `edge.end.<entity>`,
-and `rail.<index>` for a later fillet or chamfer.
+and `rail.<index>` for a later fillet or chamfer. `native.guides` names one to
+eight open sketches. The sections follow those curves, which is the step
+between a section loft and a sweep along one path. A ruled loft cannot take
+guides, and a point tip cannot either. When `p.smooth` fuses several
+`side.<entity>.<index>` faces into one, `reference_inspect` also lists
+`side.<entity>` with status `merged`, the surviving face, and `merged_from`.
+`native.faces`, `native.edges`, and `plane.set` `support.reference` accept
+that alias. The saved document keeps the authored name. A loft with guides
+saves as document version 11.
+
+A sketch section may be an arc or a wire. An arc stores center, radius and
+sweep angles in degrees. A wire is one entity of line, minor-arc and cubic
+segments; each segment becomes a profile edge named `name.N`. A major arc
+stays the five-degree-of-freedom arc. A `curve` feature stores `native.start`
+and `native.segments` of `line`, `arc` or `nurbs`. Its wire B-rep is the
+authority. The viewport shows a 0.3 mm ribbon, which is display evidence.
+`sweep` `native.path` and loft `native.guides` accept that curve feature
+name, and a loft section accepts a point datum. Sketch names win over datum
+names, which win over feature names. `intersection_curve` sections one solid
+with a datum plane and must produce one wire. `bridge` joins two semantic
+edges. Continuity 1 is a cubic whose end derivative is the unit edge
+tangent times the chord length. Continuity 2 is a quintic with the same
+end tangents and zero end curvature; it does not copy the
+source edge's sampled curvature, and it is not a surface blend. These
+choices save document version 12. The product version stays 0.9.0.
 
 ```json
 {"op":"feature.add","type":"loft","name":"Transition","p":{"solid":"1","ruled":"0"},"native":{"sections":["Base","Top"]}}
@@ -32,7 +56,11 @@ with a 4 by 4 JSON grid.
 ```
 
 `thicken` takes one preceding native face or shell ID in `inputs` and a signed
-thickness expression. A zero or invalid result is rejected atomically.
+thickness expression. A zero or invalid result is rejected atomically. A closed
+solid is hollowed with `native_solid` operation `shell`: signed `p.thickness`
+and optional `native.faces` for the faces that open. Negative thickness builds
+the wall inward. The result is one exact solid. A shell saves as document
+version 11.
 
 ```json
 {"op":"feature.add","type":"thicken","inputs":[3],"p":{"thickness":"2"}}
