@@ -153,6 +153,18 @@ bool generation9Feature(const Document& doc, const Feature& feature){
     return false;
 }
 
+bool generation10Document(const Document& doc){
+    for(const auto& node:doc.assembly) if(node.pattern.active) return true;
+    for(const auto& feature:doc.features){
+        if(feature.type!=FeatureType::NativeSolid) continue;
+        if(feature.nativeSpec.find("instances")) return true;
+        std::string op=feature.get("op");
+        if(op.empty()) if(const auto* authored=feature.nativeSpec.find("op"); authored&&authored->t==Value::Str) op=authored->str;
+        if((op=="union"||op=="cut"||op=="common"||op=="boolean_union"||op=="boolean_cut"||op=="boolean_common"||op=="intersect") && feature.inputs.size()>2) return true;
+    }
+    return false;
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -160,9 +172,10 @@ std::string documentToJson(const Document& doc){
     Value r=Value::makeObj();
     r.set("format",Value::makeStr("ark"));
     bool sourceTube=false;bool notched=false;bool nativeVersion=false;bool generation8=false;bool generation9=false;bool extended=!doc.assembly.empty()||doc.nextAssemblyId_>1;for(auto& f:doc.features){extended|=f.type==FeatureType::Tube;notched|=f.type==FeatureType::NotchedTube;sourceTube|=f.type==FeatureType::SourceTube;nativeVersion|=f.type==FeatureType::Loft||f.type==FeatureType::SurfaceFill||f.type==FeatureType::BSplineSurface||f.type==FeatureType::Thicken||f.type==FeatureType::SheetMetal||f.type==FeatureType::SourceSheet||f.type==FeatureType::NativeSolid;generation8|=f.type==FeatureType::Sweep||f.type==FeatureType::ExtrudeSurface||f.type==FeatureType::RevolveSurface||f.type==FeatureType::OffsetSurface||f.type==FeatureType::Sew||isMeshModelFeature(f.type);generation9|=generation9Feature(doc,f);}
+    bool generation10=generation10Document(doc);
     bool sketchVersion=!doc.planes.empty()||!doc.sketches.empty();for(auto& f:doc.features)sketchVersion|=f.type==FeatureType::SketchCut;
     bool latest=!doc.mates.empty()||doc.nextMateId_>1;for(auto& p:doc.planes)latest|=p.support.t==Value::Obj||p.kind!="plane";for(auto& f:doc.features)latest|=f.type==FeatureType::NativeSolid||(f.type==FeatureType::SheetMetal&&f.nativeSpec.find("base"));for(auto& n:doc.assembly)latest|=n.fixed;for(auto& sk:doc.sketches)for(auto& c:sk.sk.cons)latest|=!c.id.empty();
-    r.set("version",Value::makeNum(generation9?9:generation8?8:latest?7:nativeVersion?6:sketchVersion?5:sourceTube?4:notched?3:extended?2:1));
+    r.set("version",Value::makeNum(generation10?10:generation9?9:generation8?8:latest?7:nativeVersion?6:sketchVersion?5:sourceTube?4:notched?3:extended?2:1));
     r.set("units",Value::makeStr("mm"));
     r.set("next_feature_id",Value::makeNum((double)doc.nextFeatureId_));
 
@@ -220,7 +233,9 @@ std::string documentToJson(const Document& doc){
     if(extended){
         r.set("next_assembly_id",Value::makeNum((double)doc.nextAssemblyId_));Value nodes=Value::makeArr();
         for(auto& n:doc.assembly){Value j=Value::makeObj(),p=Value::makeObj();j.set("id",Value::makeNum((double)n.id));j.set("parent",Value::makeNum((double)n.parent));j.set("feature",Value::makeNum((double)n.feature));j.set("name",Value::makeStr(n.name));j.set("visible",Value::makeBool(n.visible));j.set("fixed",Value::makeBool(n.fixed));
-            std::vector<std::string> keys;for(auto& kv:n.p)keys.push_back(kv.first);std::sort(keys.begin(),keys.end());for(auto& k:keys)p.set(k,Value::makeStr(n.p.at(k)));j.set("p",p);nodes.arr.push_back(j);}
+            std::vector<std::string> keys;for(auto& kv:n.p)keys.push_back(kv.first);std::sort(keys.begin(),keys.end());for(auto& k:keys)p.set(k,Value::makeStr(n.p.at(k)));j.set("p",p);
+            if(n.pattern.active){Value pattern=Value::makeObj();pattern.set("type",Value::makeStr(n.pattern.type));pattern.set("count",Value::makeStr(n.pattern.count));if(n.pattern.type=="circular"){pattern.set("step",Value::makeStr(n.pattern.step));pattern.set("axis",Value::makeStr(n.pattern.axis));}else{pattern.set("dx",Value::makeStr(n.pattern.dx));pattern.set("dy",Value::makeStr(n.pattern.dy));pattern.set("dz",Value::makeStr(n.pattern.dz));}j.set("pattern",pattern);}
+            nodes.arr.push_back(j);}
         r.set("assembly",nodes);
     }
     if(!doc.mates.empty()||doc.nextMateId_>1){Value mates=Value::makeArr();for(auto& m:doc.mates)mates.arr.push_back(mateToJson(m));r.set("mates",mates);r.set("next_mate_id",Value::makeNum((double)doc.nextMateId_));}
@@ -232,7 +247,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     Value v;
     if(!arkjson::parse(json,v)) return fail("malformed JSON");
     if(v.t!=Value::Obj) return fail("root must be object");
-    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0&&ver->num!=3.0&&ver->num!=4.0&&ver->num!=5.0&&ver->num!=6.0&&ver->num!=7.0&&ver->num!=8.0&&ver->num!=9.0)))
+    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0&&ver->num!=3.0&&ver->num!=4.0&&ver->num!=5.0&&ver->num!=6.0&&ver->num!=7.0&&ver->num!=8.0&&ver->num!=9.0&&ver->num!=10.0)))
         return fail("unsupported document version");
 
     if(auto format=v.find("format");format && format->asStr()!="ark")return fail("unsupported format");
@@ -330,6 +345,15 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
             if(auto visible=j.find("visible")){if(visible->t!=Value::Bool)return fail("visible must be boolean");n.visible=visible->b;}
             if(auto p=j.find("p")){if(p->t!=Value::Obj)return fail("assembly p must be object");for(auto& kv:p->obj){if(kv.second.t!=Value::Str)return fail("placement fields must be expressions");n.p[kv.first]=kv.second.str;}}
             if(auto fixed=j.find("fixed")){if(fixed->t!=Value::Bool)return fail("fixed must be boolean");n.fixed=fixed->b;}
+            if(auto pattern=j.find("pattern")){
+                if(pattern->t!=Value::Obj)return fail("assembly pattern must be an object");
+                auto text=[&](const char* key,std::string& out,bool required){auto value=pattern->find(key);if(!value){if(required)return false;return true;}if(value->t!=Value::Str||value->str.empty()||value->str.size()>2048)return false;out=value->str;return true;};
+                auto kind=pattern->find("type");if(!kind||kind->t!=Value::Str||(kind->str!="linear"&&kind->str!="circular"))return fail("instance pattern type must be linear or circular");
+                n.pattern.active=true;n.pattern.type=kind->str;
+                if(!text("count",n.pattern.count,true))return fail("instance pattern count must be an expression");
+                if(n.pattern.type=="circular"){if(!text("step",n.pattern.step,true)||!text("axis",n.pattern.axis,true))return fail("circular instance pattern needs step and axis expressions");}
+                else if(!text("dx",n.pattern.dx,false)||!text("dy",n.pattern.dy,false)||!text("dz",n.pattern.dz,false))return fail("linear instance pattern offsets must be expressions");
+            }
             maximum=std::max(maximum,n.id);nd.assembly.push_back(n);
         }
         nd.nextAssemblyId_=maximum+1;
@@ -341,6 +365,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
         catch(const std::exception& e){return fail(e.what());}
     }
     if(auto key=v.find("next_mate_id")){if(key->t!=Value::Num||key->num<(double)nd.nextMateId_||key->num>9007199254740991.||key->num!=std::floor(key->num))return fail("Invalid next mate id");nd.nextMateId_=(u64)key->num;}
+    if(generation10Document(nd)){auto version=v.find("version");if(!version||version->asNum()<10)return fail("placed-instance booleans, unions of more than two exact solids, or instance patterns require document version 10");}
     if(nd.params.size()>256||nd.features.size()>1024||nd.sketches.size()>64)return fail("document capacity exceeded");
     nd.refreshParams();
     if(!nd.parameterError.empty())return fail(nd.parameterError);

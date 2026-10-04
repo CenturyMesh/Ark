@@ -17,6 +17,7 @@
 #include <stdexcept>
 #include <set>
 #include <map>
+#include <cmath>
 #include <fstream>
 #include <filesystem>
 namespace ark {
@@ -39,13 +40,30 @@ void notches(Feature& f,const V& list){
     if(f.type!=FeatureType::NotchedTube||list.t!=V::Arr||list.arr.size()>64)throw std::runtime_error("notches requires notched_tube and 0..64 points");
     f.notches.clear();for(auto& j:list.arr){NotchPoint p;p.station=expression(field(j,"station"));p.angle=expression(field(j,"angle"));p.face=str(j,"face");f.notches.push_back(p);}
 }
-void editNode(AssemblyNode& n,const V& j){
+u64 namedFeature(const Document& d,const std::string& name){u64 found=0;int count=0;for(const auto& feature:d.features)if(feature.name==name){found=feature.id;++count;}if(count!=1)throw std::runtime_error(count?"Ambiguous feature name: "+name:"Feature name not found: "+name);return found;}
+u64 featureRef(const Document& d,const V& value){if(value.t==V::Num)return id(value);if(value.t==V::Str)return namedFeature(d,value.str);throw std::runtime_error("Feature reference must be an id or a unique name");}
+u64 namedNode(const Document& d,const std::string& name){u64 found=0;int count=0;for(const auto& node:d.assembly)if(node.name==name){found=node.id;++count;}if(count!=1)throw std::runtime_error(count?"Ambiguous assembly instance name: "+name:"Assembly instance name not found: "+name);return found;}
+void bindEndpoint(const Document& d,V& mate,const char* key){auto endpoint=mate.find(key);if(!endpoint||endpoint->t!=V::Str)return;mate.set(key,V::makeNum((double)namedNode(d,endpoint->str)));}
+void editNode(AssemblyNode& n,const V& j,const Document& doc){
     if(auto p=j.find("parent"))n.parent=p->t==V::Num&&p->num==0?0:id(*p);
-    if(auto p=j.find("feature"))n.feature=p->t==V::Num&&p->num==0?0:id(*p);
+    if(auto p=j.find("feature")){if(p->t==V::Num&&p->num==0)n.feature=0;else if(p->t==V::Str)n.feature=namedFeature(doc,p->str);else n.feature=id(*p);}
     if(auto p=j.find("visible")){if(p->t!=V::Bool)throw std::runtime_error("visible must be boolean");n.visible=p->b;}
     if(auto p=j.find("fixed")){if(p->t!=V::Bool)throw std::runtime_error("fixed must be boolean");n.fixed=p->b;}
     if(j.find("name"))n.name=str(j,"name");
     if(auto p=j.find("p")){if(p->t!=V::Obj)throw std::runtime_error("p must be object");for(auto& kv:p->obj)n.p[kv.first]=expression(kv.second);}
+    if(auto pattern=j.find("pattern")){
+        if(pattern->t==V::Null)n.pattern={};
+        else if(pattern->t!=V::Obj)throw std::runtime_error("assembly pattern must be an object");
+        else{
+            auto kind=pattern->find("type");if(!kind||kind->t!=V::Str||(kind->str!="linear"&&kind->str!="circular"))throw std::runtime_error("instance pattern type must be linear or circular");
+            n.pattern.active=true;n.pattern.type=kind->str;
+            auto take=[&](const char* key,std::string& dest,const char* fallback){if(auto value=pattern->find(key))dest=expression(*value);else if(fallback)dest=fallback;else throw std::runtime_error(std::string("instance pattern needs ")+key);};
+            take("count",n.pattern.count,nullptr);
+            if(n.pattern.type=="circular"){take("step",n.pattern.step,"90");if(auto axis=pattern->find("axis")){if(axis->t!=V::Str||(axis->str!="X"&&axis->str!="Y"&&axis->str!="Z"))throw std::runtime_error("Circular instance pattern axis must be X, Y or Z");n.pattern.axis=axis->str;}else n.pattern.axis="Z";}
+            else{take("dx",n.pattern.dx,"0");take("dy",n.pattern.dy,"0");take("dz",n.pattern.dz,"0");}
+        }
+    }
+    if(n.pattern.active&&!n.feature)throw std::runtime_error("Instance pattern requires a part");
 }
 V result(V data,bool error=false){V r=V::makeObj(),content=V::makeArr(),item=V::makeObj();item.set("type",V::makeStr("text"));item.set("text",V::makeStr(data.dump()));content.arr.push_back(item);r.set("content",content);r.set("structuredContent",data);r.set("isError",V::makeBool(error));return r;}
 void validated(Document& d){
@@ -74,6 +92,54 @@ Mesh selectedMesh(Document& d,const V& args){
     }
     if(!m.triCount())throw std::runtime_error("No mesh for requested selection");
     return m;
+}
+Vec3 meshPoint(const Mesh& mesh,u32 index){return {mesh.pos[index*3],mesh.pos[index*3+1],mesh.pos[index*3+2]};}
+Vec3 worldPoint(const Mesh& mesh,const Mat4& world,u32 index){return world.transformPoint(meshPoint(mesh,index));}
+bool boxesOverlap(const AABB& a,const AABB& b){return a.valid()&&b.valid()&&a.mn.x<=b.mx.x&&b.mn.x<=a.mx.x&&a.mn.y<=b.mx.y&&b.mn.y<=a.mx.y&&a.mn.z<=b.mx.z&&b.mn.z<=a.mx.z;}
+bool segmentHitsTriangle(Vec3 p,Vec3 q,Vec3 a,Vec3 b,Vec3 c){
+    Vec3 dir=q-p,ab=b-a,ac=c-a,pvec=dir.cross(ac);double det=ab.dot(pvec);if(std::fabs(det)<1e-12)return false;double inv=1.0/det;Vec3 tvec=p-a;double u=tvec.dot(pvec)*inv;if(u<-1e-7||u>1+1e-7)return false;Vec3 qvec=tvec.cross(ab);double v=dir.dot(qvec)*inv;if(v<-1e-7||u+v>1+1e-7)return false;double t=ac.dot(qvec)*inv;return t>1e-5&&t<1.0-1e-5;
+}
+bool rayHitsTriangle(Vec3 origin,Vec3 dir,Vec3 a,Vec3 b,Vec3 c){
+    Vec3 ab=b-a,ac=c-a,pvec=dir.cross(ac);double det=ab.dot(pvec);if(std::fabs(det)<1e-12)return false;double inv=1.0/det;Vec3 tvec=origin-a;double u=tvec.dot(pvec)*inv;if(u<-1e-7||u>1+1e-7)return false;Vec3 qvec=tvec.cross(ab);double v=dir.dot(qvec)*inv;if(v<-1e-7||u+v>1+1e-7)return false;return ac.dot(qvec)*inv>1e-4;
+}
+bool pointNearTriangle(Vec3 p,Vec3 a,Vec3 b,Vec3 c){
+    Vec3 ab=b-a,ac=c-a,n=ab.cross(ac);double area2=n.lensq();if(area2<1e-24)return false;
+    double dist=(p-a).dot(n);if(dist*dist>1e-6*area2)return false;
+    double d00=ab.dot(ab),d01=ab.dot(ac),d11=ac.dot(ac),den=d00*d11-d01*d01;if(std::fabs(den)<1e-18)return false;
+    Vec3 ap=p-a;double d20=ap.dot(ab),d21=ap.dot(ac),v=(d11*d20-d01*d21)/den,w=(d00*d21-d01*d20)/den,u=1-v-w;
+    return u>=-1e-4&&v>=-1e-4&&w>=-1e-4;
+}
+bool insideMesh(const Mesh& mesh,const Mat4& world,Vec3 point){
+    Mat4 inverse=world.inverted();Vec3 origin=inverse.transformPoint(point);
+    for(size_t t=0;t<mesh.idx.size();t+=3)if(pointNearTriangle(origin,meshPoint(mesh,mesh.idx[t]),meshPoint(mesh,mesh.idx[t+1]),meshPoint(mesh,mesh.idx[t+2])))return false;
+    Vec3 dir=inverse.transformDir(Vec3{0.31,0.47,0.82}).normalized();int hits=0;
+    for(size_t t=0;t<mesh.idx.size();t+=3){Vec3 a=meshPoint(mesh,mesh.idx[t]),b=meshPoint(mesh,mesh.idx[t+1]),c=meshPoint(mesh,mesh.idx[t+2]);if(rayHitsTriangle(origin,dir,a,b,c))++hits;}
+    return hits%2==1;
+}
+bool displayMeshesIntersect(const Mesh& a,const Mat4& wa,const Mesh& b,const Mat4& wb){
+    auto centroid=[&](const Mesh& mesh,const Mat4& world){Vec3 sum{};size_t n=mesh.vertCount();if(!n)return sum;for(size_t i=0;i<n;++i)sum=sum+worldPoint(mesh,world,(u32)i);return sum*(1.0/n);};
+    if(insideMesh(b,wb,centroid(a,wa))||insideMesh(a,wa,centroid(b,wb)))return true;
+    auto triCenter=[&](const Mesh& mesh,const Mat4& world,size_t t){return (worldPoint(mesh,world,mesh.idx[t*3])+worldPoint(mesh,world,mesh.idx[t*3+1])+worldPoint(mesh,world,mesh.idx[t*3+2]))*(1.0/3.0);};
+    for(size_t t=0;t<a.triCount();++t)if(insideMesh(b,wb,triCenter(a,wa,t)))return true;
+    for(size_t t=0;t<b.triCount();++t)if(insideMesh(a,wa,triCenter(b,wb,t)))return true;
+    for(size_t ta=0;ta<a.triCount();++ta)for(int edge=0;edge<3;++edge){Vec3 p=worldPoint(a,wa,a.idx[ta*3+edge]),q=worldPoint(a,wa,a.idx[ta*3+(edge+1)%3]);for(size_t tb=0;tb<b.triCount();++tb)if(segmentHitsTriangle(p,q,worldPoint(b,wb,b.idx[tb*3]),worldPoint(b,wb,b.idx[tb*3+1]),worldPoint(b,wb,b.idx[tb*3+2])))return true;}
+    for(size_t tb=0;tb<b.triCount();++tb)for(int edge=0;edge<3;++edge){Vec3 p=worldPoint(b,wb,b.idx[tb*3+edge]),q=worldPoint(b,wb,b.idx[tb*3+(edge+1)%3]);for(size_t ta=0;ta<a.triCount();++ta)if(segmentHitsTriangle(p,q,worldPoint(a,wa,a.idx[ta*3]),worldPoint(a,wa,a.idx[ta*3+1]),worldPoint(a,wa,a.idx[ta*3+2])))return true;}
+    return false;
+}
+V displayInterference(Document& d,const std::vector<AssemblyPlacement>& placements,bool force){
+    V report=V::makeObj(),pairs=V::makeArr();report.set("interference_authority",V::makeStr("display_mesh"));
+    std::vector<const AssemblyPlacement*> visible;for(const auto& placement:placements)if(placement.visible)visible.push_back(&placement);
+    std::unordered_map<u64,Mesh> meshes;auto meshOf=[&](u64 feature)->const Mesh*{auto found=meshes.find(feature);if(found!=meshes.end())return &found->second;for(const auto& body:d.evalBodies)if(body.id==feature)return &meshes.emplace(feature,body.tessellate(d.tessOpt)).first->second;return nullptr;};
+    size_t triangles=0;bool missing=false;for(const auto* placement:visible){const Mesh* mesh=meshOf(placement->feature);if(!mesh){missing=true;break;}triangles+=mesh->triCount();}
+    if(missing||triangles>(force?120000u:8000u)){report.set("interference_checked",V::makeBool(false));report.set("interference",pairs);report.set("interference_note",V::makeStr(missing?"An instance has no display mesh.":"Display-mesh interference was skipped because the visible instances exceed the triangle budget. Pass interference:true to raise it to 120000 triangles."));return report;}
+    report.set("interference_checked",V::makeBool(true));
+    for(size_t i=0;i<visible.size();++i)for(size_t j=i+1;j<visible.size();++j){
+        const auto& a=*visible[i];const auto& b=*visible[j];const Mesh& ma=*meshOf(a.feature);const Mesh& mb=*meshOf(b.feature);
+        AABB ba=ma.computeBBox().transformed(a.world),bb=mb.computeBBox().transformed(b.world);if(!boxesOverlap(ba,bb))continue;
+        bool meshChecked=ma.triCount()*mb.triCount()<=250000;bool hit=meshChecked?displayMeshesIntersect(ma,a.world,mb,b.world):true;if(!hit)continue;
+        V pair=V::makeObj();pair.set("node_a",V::makeNum((double)a.node));pair.set("copy_a",V::makeNum(a.copy));pair.set("node_b",V::makeNum((double)b.node));pair.set("copy_b",V::makeNum(b.copy));pair.set("name_a",V::makeStr(a.name));pair.set("name_b",V::makeStr(b.name));pair.set("method",V::makeStr(meshChecked?"display_mesh":"bounds"));pairs.arr.push_back(pair);
+    }
+    report.set("interference",pairs);return report;
 }
 }
 AgentSession::Cache& AgentSession::meshCache(const V& args){
@@ -237,11 +303,35 @@ V AgentSession::call(const std::string& tool,const V& args){
         if(tool=="assembly_info"){
             std::vector<AssemblyPlacement> placements;std::string error;AssemblyDiagnostics diagnostics;if(!resolveAssembly(document,placements,error,&diagnostics))throw std::runtime_error(error);
             V r=info(),nodes=V::makeArr(),bom=V::makeArr();std::map<u64,size_t> quantities;
-            for(auto& p:placements){V j=V::makeObj(),matrix=V::makeArr();j.set("node",V::makeNum((double)p.node));j.set("feature",V::makeNum((double)p.feature));j.set("name",V::makeStr(p.name));j.set("visible",V::makeBool(p.visible));
+            for(auto& p:placements){V j=V::makeObj(),matrix=V::makeArr();j.set("node",V::makeNum((double)p.node));j.set("feature",V::makeNum((double)p.feature));j.set("name",V::makeStr(p.name));j.set("visible",V::makeBool(p.visible));j.set("copy",V::makeNum(p.copy));
                 for(auto x:p.world.m)matrix.arr.push_back(V::makeNum(x));
                 j.set("world_column_major",matrix);nodes.arr.push_back(j);++quantities[p.feature];}
             for(auto& kv:quantities){V j=V::makeObj();j.set("feature",V::makeNum((double)kv.first));j.set("name",V::makeStr(document.find(kv.first)->name));j.set("quantity",V::makeNum(kv.second));bom.arr.push_back(j);}
-            r.set("instances",nodes);r.set("bom",bom);r.set("mates_solved",V::makeBool(!document.mates.empty()));r.set("diagnostics",assemblyDiagnosticsJson(diagnostics));V mates=V::makeArr();for(auto& m:document.mates)mates.arr.push_back(mateToJson(m));r.set("mates",mates);return result(r);
+            r.set("instances",nodes);r.set("bom",bom);r.set("mates_solved",V::makeBool(!document.mates.empty()));r.set("diagnostics",assemblyDiagnosticsJson(diagnostics));V mates=V::makeArr();for(auto& m:document.mates)mates.arr.push_back(mateToJson(m));r.set("mates",mates);
+            bool forceInterference=false;if(auto flag=args.find("interference")){if(flag->t!=V::Bool)throw std::runtime_error("interference must be boolean");forceInterference=flag->b;}
+            V overlap=displayInterference(document,placements,forceInterference);for(auto& kv:overlap.obj)r.set(kv.first,kv.second);
+            if(auto spec=args.find("candidate")){
+                if(spec->t!=V::Obj)throw std::runtime_error("candidate must be an object");
+                V mateArgs=*spec;bindEndpoint(document,mateArgs,"a");bindEndpoint(document,mateArgs,"b");
+                AssemblyMate candidate;editMate(candidate,mateArgs);
+                u64 candidateId=candidate.id?candidate.id:document.nextMateId_;
+                for(const auto& existing:document.mates)if(existing.id==candidateId)candidateId=document.nextMateId_+document.mates.size()+1;
+                AssemblyDiagnostics probed;std::string probeError;bool satisfied=false;
+                bool solved=probeAssemblyMate(document,candidate,probed,probeError,satisfied);
+                V block=V::makeObj(),frames=V::makeArr();
+                block.set("solved",V::makeBool(solved));block.set("satisfied",V::makeBool(solved&&satisfied));block.set("error",V::makeStr(probeError));
+                double position=0,angle=0;for(const auto& row:probed.mates)if(row.id==candidateId){position=row.positionMm;angle=row.angleDeg;}
+                block.set("position_residual_mm",V::makeNum(position));block.set("angle_residual_deg",V::makeNum(angle));
+                auto vec=[&](Vec3 p){V a=V::makeArr();for(double x:{p.x,p.y,p.z})a.arr.push_back(V::makeNum(x));return a;};
+                for(const auto& frame:probed.frames)if(frame.id==candidateId){
+                    V a=V::makeObj();a.set("instance",V::makeNum((double)candidate.a));a.set("reference",V::makeStr(candidate.reference_a));a.set("origin",vec(frame.originA));a.set("axis",vec(frame.axisA));frames.arr.push_back(a);
+                    V b=V::makeObj();b.set("instance",V::makeNum((double)candidate.b));b.set("reference",V::makeStr(candidate.reference_b));b.set("origin",vec(frame.originB));b.set("axis",vec(frame.axisB));frames.arr.push_back(b);
+                }
+                block.set("frames",frames);
+                block.set("axis_convention",V::makeStr("Analytic cylinder, cone and torus meshes run along +Y. A native_solid cylinder, cone or torus uses local +Z. Promoting an analytic cylinder, cone or torus applies Rx(-90 degrees), so the exact B-rep axis becomes +Z. Mate references Z, origin and XY use the instance frame +Z. Semantic reference axis is the exact B-rep cylinder axis. The analytic mesh axis is not retargeted."));
+                r.set("candidate",block);
+            }
+            return result(r);
         }
         if(tool=="tube_inspect"){
             auto* f=document.find(id(field(args,"id")));if(!f||f->type!=FeatureType::Tube)throw std::runtime_error("Tube feature not found");
@@ -288,7 +378,7 @@ V AgentSession::call(const std::string& tool,const V& args){
                     else if(isNativeFeature(f.type))f.nativeSpec=V::makeObj();
                     if(auto mesh=c.find("mesh")){if(f.type!=FeatureType::MeshBody||mesh->t!=V::Obj)throw std::runtime_error("mesh is only valid as an object on mesh_body");f.sourceData=*mesh;}
                     if(f.type==FeatureType::MeshBody&&f.sourceData.t!=V::Obj)throw std::runtime_error("mesh_body requires mesh:{positions,indices}");
-                    if(auto in=c.find("inputs")){if(in->t!=V::Arr)throw std::runtime_error("inputs must be an array");for(auto& x:in->arr)f.inputs.push_back(id(x));}
+                    if(auto in=c.find("inputs")){if(in->t!=V::Arr)throw std::runtime_error("inputs must be an array");for(auto& x:in->arr)f.inputs.push_back(featureRef(next,x));}
                     if(auto mode=c.find("mode")){if(mode->t!=V::Num||mode->num<0||mode->num>2||mode->num!=std::floor(mode->num))throw std::runtime_error("mode must be 0, 1 or 2");f.opInt=(int)mode->num;}
                     created.arr.push_back(V::makeNum((double)next.addFeature(std::move(f))));
                 }
@@ -317,18 +407,18 @@ V AgentSession::call(const std::string& tool,const V& args){
                     Sketch checked;if(!sketchFromJson(sketchToJson(sk->sk),checked,&error))throw std::runtime_error(error);sk->sk=std::move(checked);
                 }
                 else if(op=="assembly.add"){
-                    AssemblyNode n;n.id=next.nextAssemblyId_++;n.name="Component";editNode(n,c);next.assembly.push_back(n);createdNodes.arr.push_back(V::makeNum((double)n.id));
+                    AssemblyNode n;n.id=next.nextAssemblyId_++;n.name="Component";editNode(n,c,next);next.assembly.push_back(n);createdNodes.arr.push_back(V::makeNum((double)n.id));
                 }
                 else if(op=="mate.add"){
-                    if(next.mates.size()>=256)throw std::runtime_error("Assembly mate capacity exceeded");AssemblyMate m;m.id=next.nextMateId_++;editMate(m,c);next.mates.push_back(m);createdMates.arr.push_back(V::makeNum((double)m.id));
+                    if(next.mates.size()>=256)throw std::runtime_error("Assembly mate capacity exceeded");AssemblyMate m;m.id=next.nextMateId_++;V mateArgs=c;bindEndpoint(next,mateArgs,"a");bindEndpoint(next,mateArgs,"b");editMate(m,mateArgs);next.mates.push_back(m);createdMates.arr.push_back(V::makeNum((double)m.id));
                 }
                 else if(op=="mate.edit"||op=="mate.remove"){
-                    auto key=id(field(c,"id"));auto it=std::find_if(next.mates.begin(),next.mates.end(),[&](const AssemblyMate& m){return m.id==key;});if(it==next.mates.end())throw std::runtime_error("Mate not found");if(op=="mate.edit")editMate(*it,c);else next.mates.erase(it);
+                    auto key=id(field(c,"id"));auto it=std::find_if(next.mates.begin(),next.mates.end(),[&](const AssemblyMate& m){return m.id==key;});if(it==next.mates.end())throw std::runtime_error("Mate not found");if(op=="mate.edit"){V mateArgs=c;bindEndpoint(next,mateArgs,"a");bindEndpoint(next,mateArgs,"b");editMate(*it,mateArgs);}else next.mates.erase(it);
                 }
                 else if(op=="assembly.edit"||op=="assembly.remove"){
                     u64 key=id(field(c,"id"));auto it=std::find_if(next.assembly.begin(),next.assembly.end(),[&](const AssemblyNode& n){return n.id==key;});
                     if(it==next.assembly.end())throw std::runtime_error("Assembly node not found");
-                    if(op=="assembly.edit")editNode(*it,c);else next.assembly.erase(it);
+                    if(op=="assembly.edit")editNode(*it,c,next);else next.assembly.erase(it);
                 }
                 else throw std::runtime_error("Unknown operation: "+op);
             }
@@ -383,10 +473,16 @@ V AgentSession::call(const std::string& tool,const V& args){
             V r=V::makeObj();r.set("path",V::makeStr(path));r.set("triangles",V::makeNum(m.triCount()));return result(r);
         }
         if(tool=="snapshot"){
-            auto path=str(args,"path");Mesh m=selectedMesh(document,args);SnapCam camera;
-            camera.dist=std::max(m.computeBBox().diagonal()*2.,1.);
+            auto path=str(args,"path");std::string view="iso";
+            if(auto requested=args.find("view")){if(requested->t!=V::Str||(requested->str!="iso"&&requested->str!="front"&&requested->str!="right"&&requested->str!="top"))throw std::runtime_error("snapshot view must be iso, front, right or top");view=requested->str;}
+            Mesh m=selectedMesh(document,args);SnapCam camera;
+            if(view=="front"){camera.yaw=0;camera.pitch=0;}
+            else if(view=="right"){camera.yaw=K_PI/2;camera.pitch=0;}
+            else if(view=="top"){camera.yaw=0;camera.pitch=1.52;}
+            AABB box=m.computeBBox();camera.useTarget=true;camera.target=box.valid()?box.center():Vec3{};
+            camera.dist=std::max((box.valid()?box.diagonal():1.)*1.7,1.);
             if(!writePNG(path.c_str(),renderSnapshot(m,1280,800,camera)))throw std::runtime_error("Snapshot failed");
-            V r=V::makeObj();r.set("path",V::makeStr(path));return result(r);
+            V r=V::makeObj();r.set("path",V::makeStr(path));r.set("view",V::makeStr(view));r.set("display_mesh_authoritative",V::makeBool(false));r.set("authority",V::makeStr("display_mesh"));return result(r);
         }
         throw std::runtime_error("Unknown tool: "+tool);
     }catch(const std::exception& e){V r=V::makeObj();r.set("error",V::makeStr(e.what()));r.set("revision",V::makeNum((double)revision));return result(r,true);}
@@ -398,7 +494,7 @@ V AgentSession::tools(){
         {"doc_info","Compact document summary with revision and stable feature IDs.",R"({"type":"object"})",true},
         {"doc_new","Start an empty document only when requested. Clears the active model with undo and a monotonically increasing revision; does not overwrite saved files.",R"({"type":"object","properties":{"expected_revision":{"type":"integer","minimum":0}},"required":["expected_revision"]})",false},
         {"doc_get","Read full parametric document, including expressions and revision.",R"({"type":"object"})",true},
-        {"doc_apply","Atomic batch; evaluate once, roll back on any failure. Operations: param.set{name,expr}, feature.add{type,name,p,native,inputs,mode}, feature.edit{id,p,native,name}, feature.remove{id}, plane.set{name,parent,p:{ox,oy,oz,rx,ry,rz},support?:{kind:face|midplane|normal_to_curve|tube_path,feature,reference,second_feature?,second_reference?,fraction?,station?}}, plane.remove{name}, sketch.set{name,sketch:{plane,tolerance,entities,constraints}}, sketch.entity.set{name,entity}, sketch.remove{name}, assembly.add{name,parent,feature,p,visible}, assembly.edit{id,parent,feature,p,visible}, assembly.remove{id}. feature=0 is a group; placements are rigid tx/ty/tz/rx/ry/rz. Tube feature accepts p{section:round|rect,od,width,height,wall,tail,chord_tol,sides} plus bends:[{feed,radius,angle,roll}] in mm/degrees. Sketch entities: kind point|line|circle|spline, optional unique name, dof numbers or expression strings (strings are driven), construction. Spline dof is 2..64 XY anchor pairs flattened; closed wraps without repeated first point, tension 0..1. Constraints val/val2 accept expressions. Entity edits replace one named entity. Mates: mate.add{a,b,type,reference_a,reference_b,value}, mate.edit{id,...}, mate.remove{id}; ground instances with assembly.edit{id,fixed:true}. Sheet edits: sheet.create{name,p:{width,thickness,k_factor},base:{id,length}}, sheet.base.edit{id,values}, sheet.flange.add{id,flange:{id?,parent,edge:u_min|u_max|v_min|v_max,length,width?,offset?,inner_radius,angle,k_factor?}}, sheet.opening.add{id,opening:{id?,panel,kind:circle|polygon,x,y,radius,points}}, sheet.flange.edit/sheet.opening.edit{id,entity,values}, sheet.flange.remove/sheet.opening.remove{id,entity,cascade?}. Local expressions: panel_length/panel_width/thickness in openings, parent_length/parent_width/edge_length/thickness in flanges. Native feature types: native_solid{native:{op:box|cylinder|sphere|cone|torus|extrude|union|cut|common|hole|fillet|chamfer|draft|linear_pattern|circular_pattern|mirror|transform,...},inputs,p} exact ops. Fillet/chamfer take native.edges or native.selection sharp|convex|concave|all plus p.min_angle. Draft takes p.angle and native.direction/neutral/faces; freeform faces reject. Patterns take p.count and p.dx/dy/dz or p.step plus native.axis; mirror takes native.plane XY|XZ|YZ or a datum name, or native.face naming one planar face. p.fuse defaults to 0. A Boolean tool may be a compound of those solids. loft{native:{sections:[sketch names]},p:{solid,ruled,max_degree?,smooth?,compatible?,continuity?}}. A one-point sketch is a first or last tip. Loft edges are edge.start/end.<entity> and rail.<index>, surface_fill{p:{sketch} or native:{profile}}, bspline_surface{native:{poles,weights?},p:{u_degree,v_degree}}, thicken{inputs:[native surface],p:{thickness}}, sheet_metal{p:{width,leg_a,leg_b,thickness,inner_radius,angle,k_factor},native:{openings?}}. Feature types: sketch_cut{inputs:[base],p:{sketch,depth,offset}}, notched_tube{p:{width_mm,height_mm,wall_mm,length_mm,hinge_offset_mm},notches:[{station,angle,face:bottom|top|left|right}]}, tube, box{dx,dy,dz}, cylinder{r,h}, sphere{r}, cone{rb,rt,h}, torus{R,r}, extrude{shape,w,d,height,sketch}, revolve{shape,w,d,angle,sketch}, transform{tx,ty,tz,rx,ry,rz}, boolean{mode:0 union/1 cut/2 intersect}, pattern{count,dx,dy,dz}, surface{x,y,z,u0,u1,v0,v1,nu,nv,wrap_u,wrap_v}. Geometry parameters belong in p and accept math expressions. Transforms/patterns take one input, booleans two. Use expected_revision to reject stale writes. Angles in degrees except trig expressions in radians. Surface coordinates use u,v; periodic seams are checked. Exact surfaces also include sweep{native:{section,path} sketch names or profiles,p:{solid,correction,contact}}, extrude_surface{p:{sketch,distance,solid} or native.profile}, revolve_surface{p:{sketch,angle,solid},native:{axis:X|Y|Z default Y}}, offset_surface{inputs:[one face or shell],p:{distance}}, and sew{inputs:[2..16 faces or shells],p:{solid}}. Mesh features are sampled authority and never become a B-rep: mesh_body{mesh:{positions,indices}}, mesh_weld{inputs,p:{epsilon}}, mesh_smooth{inputs,p:{iterations,lambda,pin_boundary}}, mesh_decimate{inputs,p:{ratio}}, mesh_offset{inputs,p:{distance}}, mesh_fill{inputs}. An exact B-rep input needs p.sample=1, which opts into the display tessellation. import_mesh reads an STL or OBJ snapshot under the triangle cap.",R"({"type":"object","properties":{"expected_revision":{"type":"integer","minimum":0},"commands":{"type":"array","minItems":1,"maxItems":128,"items":{"type":"object","properties":{"op":{"type":"string","enum":["param.set","feature.add","feature.edit","feature.remove","sketch.set","sketch.entity.set","sketch.remove","plane.set","plane.remove","assembly.add","assembly.edit","assembly.remove","mate.add","mate.edit","mate.remove","sheet.create","sheet.base.edit","sheet.flange.add","sheet.flange.edit","sheet.flange.remove","sheet.opening.add","sheet.opening.edit","sheet.opening.remove"]}},"required":["op"]}}},"required":["commands"]})",false},
+        {"doc_apply","Atomic batch; evaluate once, roll back on any failure. Operations: param.set{name,expr}, feature.add{type,name,p,native,inputs,mode}, feature.edit{id,p,native,name}, feature.remove{id}, plane.set{name,parent,p:{ox,oy,oz,rx,ry,rz},support?:{kind:face|midplane|normal_to_curve|tube_path,feature,reference,second_feature?,second_reference?,fraction?,station?}}, plane.remove{name}, sketch.set{name,sketch:{plane,tolerance,entities,constraints}}, sketch.entity.set{name,entity}, sketch.remove{name}, assembly.add{name,parent,feature,p,visible}, assembly.edit{id,parent,feature,p,visible}, assembly.remove{id}. feature=0 is a group; feature and feature inputs accept a unique name or an id, and the saved document stores the id. placements are rigid tx/ty/tz/rx/ry/rz. assembly pattern is type linear or circular with count and dx/dy/dz or step/axis. It repeats one part, a mate moves that pattern rigidly, and degrees of freedom count the node once. Tube feature accepts p{section:round|rect,od,width,height,wall,tail,chord_tol,sides} plus bends:[{feed,radius,angle,roll}] in mm/degrees. Sketch entities: kind point|line|circle|spline, optional unique name, dof numbers or expression strings (strings are driven), construction. Spline dof is 2..64 XY anchor pairs flattened; closed wraps without repeated first point, tension 0..1. Constraints val/val2 accept expressions. Entity edits replace one named entity. Mates: mate.add{a,b,type,reference_a,reference_b,value}, mate.edit{id,...}, mate.remove{id}. Endpoints a and b accept a unique instance name or an id; the saved mate stores ids. ground instances with assembly.edit{id,fixed:true}. assembly_info candidate probes a mate without saving it. Sheet edits: sheet.create{name,p:{width,thickness,k_factor},base:{id,length}}, sheet.base.edit{id,values}, sheet.flange.add{id,flange:{id?,parent,edge:u_min|u_max|v_min|v_max,length,width?,offset?,inner_radius,angle,k_factor?}}, sheet.opening.add{id,opening:{id?,panel,kind:circle|polygon,x,y,radius,points}}, sheet.flange.edit/sheet.opening.edit{id,entity,values}, sheet.flange.remove/sheet.opening.remove{id,entity,cascade?}. Local expressions: panel_length/panel_width/thickness in openings, parent_length/parent_width/edge_length/thickness in flanges. Native feature types: native_solid{native:{op:box|cylinder|sphere|cone|torus|extrude|union|cut|common|hole|fillet|chamfer|draft|linear_pattern|circular_pattern|mirror|transform,...},inputs,p} exact ops. Fillet/chamfer take native.edges or native.selection sharp|convex|concave|all plus p.min_angle. Draft takes p.angle and native.direction/neutral/faces; freeform faces reject. Patterns take p.count and p.dx/dy/dz or p.step plus native.axis; mirror takes native.plane XY|XZ|YZ or a datum name, or native.face naming one planar face. p.fuse defaults to 0. A Boolean tool may be a compound of those solids. loft{native:{sections:[sketch names]},p:{solid,ruled,max_degree?,smooth?,compatible?,continuity?}}. A one-point sketch is a first or last tip. Loft edges are edge.start/end.<entity> and rail.<index>, surface_fill{p:{sketch} or native:{profile}}, bspline_surface{native:{poles,weights?},p:{u_degree,v_degree}}, thicken{inputs:[native surface],p:{thickness}}, sheet_metal{p:{width,leg_a,leg_b,thickness,inner_radius,angle,k_factor},native:{openings?}}. Feature types: sketch_cut{inputs:[base],p:{sketch,depth,offset}}, notched_tube{p:{width_mm,height_mm,wall_mm,length_mm,hinge_offset_mm},notches:[{station,angle,face:bottom|top|left|right}]}, tube, box{dx,dy,dz}, cylinder{r,h}, sphere{r}, cone{rb,rt,h}, torus{R,r}, extrude{shape,w,d,height,sketch}, revolve{shape,w,d,angle,sketch}, transform{tx,ty,tz,rx,ry,rz}, boolean{mode:0 union/1 cut/2 intersect}, pattern{count,dx,dy,dz}, surface{x,y,z,u0,u1,v0,v1,nu,nv,wrap_u,wrap_v}. Geometry parameters belong in p and accept math expressions. Transforms and solid patterns take one input. native_solid union, cut or common accepts 2..16 feature inputs and/or native.instances of placed parts, including every pattern copy, and returns one exact solid. Two-input booleans keep the previous document version. Instance patterns, native.instances, and unions of more than two exact solids save as document version 10. Use expected_revision to reject stale writes. Angles in degrees except trig expressions in radians. Surface coordinates use u,v; periodic seams are checked. Exact surfaces also include sweep{native:{section,path} sketch names or profiles,p:{solid,correction,contact}}, extrude_surface{p:{sketch,distance,solid} or native.profile}, revolve_surface{p:{sketch,angle,solid},native:{axis:X|Y|Z default Y}}, offset_surface{inputs:[one face or shell],p:{distance}}, and sew{inputs:[2..16 faces or shells],p:{solid}}. Mesh features are sampled authority and never become a B-rep: mesh_body{mesh:{positions,indices}}, mesh_weld{inputs,p:{epsilon}}, mesh_smooth{inputs,p:{iterations,lambda,pin_boundary}}, mesh_decimate{inputs,p:{ratio}}, mesh_offset{inputs,p:{distance}}, mesh_fill{inputs}. An exact B-rep input needs p.sample=1, which opts into the display tessellation. import_mesh reads an STL or OBJ snapshot under the triangle cap.",R"({"type":"object","properties":{"expected_revision":{"type":"integer","minimum":0},"commands":{"type":"array","minItems":1,"maxItems":128,"items":{"type":"object","properties":{"op":{"type":"string","enum":["param.set","feature.add","feature.edit","feature.remove","sketch.set","sketch.entity.set","sketch.remove","plane.set","plane.remove","assembly.add","assembly.edit","assembly.remove","mate.add","mate.edit","mate.remove","sheet.create","sheet.base.edit","sheet.flange.add","sheet.flange.edit","sheet.flange.remove","sheet.opening.add","sheet.opening.edit","sheet.opening.remove"]}},"required":["op"]}}},"required":["commands"]})",false},
         {"plane_inspect","Read a named construction plane's world transform. Built-ins: XY, XZ (normal -Y), YZ (normal +X). Offsets/XYZ Euler rotations are relative to parent.",R"({"type":"object","properties":{"name":{"type":"string"}},"required":["name"]})",true},
         {"sketch_inspect","Read resolved sketch coordinates, local constraint rank/remaining DOFs, profile readiness and sampling counts. Optional samples:true includes local/world polylines. Spline chord tolerance bounds curve approximation, not manufacturing accuracy.",R"({"type":"object","properties":{"name":{"type":"string"},"samples":{"type":"boolean"}},"required":["name"]})",true},
         {"sketch_diagnose","Diagnose a named sketch or an uncommitted sketch candidate. Evaluates dimensions, attempts solve, reports each constraint residual and local rank/redundancy even if inconsistent. Does not mutate the document; no minimal conflict-set claim.",R"({"type":"object","properties":{"name":{"type":"string"},"sketch":{"type":"object"}},"oneOf":[{"required":["name"]},{"required":["sketch"]}]})",true},
@@ -410,7 +506,7 @@ V AgentSession::tools(){
         {"mesh_inspect","Compact indexed topology audit: bounds, area, edge counts, components and signed volume for closed oriented edges. Does not certify solids or detect self intersections. Omit id to inspect final outputs only.",R"({"type":"object","properties":{"node":{"type":"integer","minimum":1},"id":{"type":"integer","minimum":1}}})",true},
         {"mesh_get","Explicitly retrieve mesh positions and triangle indices; potentially large. Prefer mesh_inspect for reasoning.",R"({"type":"object","properties":{"node":{"type":"integer","minimum":1},"id":{"type":"integer","minimum":1}}})",true},
         {"mesh_raycast","Nearest triangle hit using a cached AABB hierarchy. Direction is normalized; distances in mm. Triangle IDs last for this tessellation/revision only.",R"({"type":"object","properties":{"id":{"type":"integer","minimum":1},"origin":{"type":"array","items":{"type":"number"},"minItems":3,"maxItems":3},"direction":{"type":"array","items":{"type":"number"},"minItems":3,"maxItems":3}},"required":["origin","direction"]})",true},
-        {"assembly_info","Hierarchy placements and BOM quantities by shared feature definition. Hidden instances remain in BOM. Concentric, coincident/contact, signed distance and angle mates, grounded instances, local DOFs and residual diagnosis.",R"({"type":"object"})",true},
+        {"assembly_info","Hierarchy placements, pattern copies and BOM quantities by shared feature definition. Each instance includes copy. Hidden instances remain in BOM. A patterned node counts once for degrees of freedom. Optional candidate probes one mate and reports residuals, the two frames and the axis convention without saving it or changing revision. interference compares display meshes: the default budget is 8000 triangles and interference:true raises it to 120000. A skip sets interference_checked false. Overlap is display mesh evidence, not exact clearance or motion. Concentric, coincident/contact, signed distance and angle mates, grounded instances, local DOFs and residual diagnosis.",R"({"type":"object","properties":{"interference":{"type":"boolean"},"candidate":{"type":"object"}}})",true},
         {"tube_inspect","Ideal centerline length, section area and bend table. No springback, weld allowance or material compensation.",R"({"type":"object","properties":{"node":{"type":"integer","minimum":1},"id":{"type":"integer","minimum":1}},"required":["id"]})",true},
         {"source_inspect","Read source projection evidence and exact opening coordinates without large mesh buffers. Optional progress returns finite-hinge display transforms; source geometry stays read-only.",R"({"type":"object","properties":{"id":{"type":"integer","minimum":1},"progress":{"type":"number","minimum":0,"maximum":1}},"required":["id"]})",true},
         {"native_inspect","Read native feature validation, opening inventory, and flat availability without transmitting B-rep or mesh buffers.",R"({"type":"object","properties":{"id":{"type":"integer","minimum":1}},"required":["id"]})",true},
@@ -427,7 +523,7 @@ V AgentSession::tools(){
         {"doc_save","Save .ark or legacy .arkjson parametric document as versioned JSON.",R"({"type":"object","properties":{"path":{"type":"string"}},"required":["path"]})",false},
         {"doc_load","Load .ark/.arkjson into this session, validate and commit atomically.",R"({"type":"object","properties":{"path":{"type":"string"}},"required":["path"]})",false},
         {"export_mesh","Export final output bodies or a selected id as STL/OBJ; construction inputs are excluded.",R"({"type":"object","properties":{"path":{"type":"string"},"format":{"type":"string","enum":["stl","obj"]},"id":{"type":"integer","minimum":1}},"required":["path","format"]})",false},
-        {"snapshot","Render final output meshes to a 1280x800 PNG for visual feedback.",R"({"type":"object","properties":{"path":{"type":"string"},"id":{"type":"integer","minimum":1}},"required":["path"]})",false}
+        {"snapshot","Render final output display meshes to a 1280x800 PNG. view is iso, front, right or top. The image is display evidence, not STEP authority.",R"({"type":"object","properties":{"path":{"type":"string"},"id":{"type":"integer","minimum":1},"view":{"type":"string","enum":["iso","front","right","top"]}},"required":["path"]})",false}
     };
     V list=V::makeArr();for(auto& d:defs){V t=V::makeObj(),schema,annotations=V::makeObj();t.set("name",V::makeStr(d.name));t.set("description",V::makeStr(d.desc));arkjson::parse(d.schema,schema);if(std::string(d.name)=="mesh_raycast"||std::string(d.name)=="export_mesh"||std::string(d.name)=="snapshot"){
         V props=schema.find("properties")?*schema.find("properties"):V::makeObj(),node=V::makeObj();node.set("type",V::makeStr("integer"));node.set("minimum",V::makeNum(1));props.set("node",node);schema.set("properties",props);

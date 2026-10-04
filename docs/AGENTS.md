@@ -27,7 +27,7 @@ Initialize with protocol `2025-11-25`, `2025-06-18` or `2024-11-05`. Each proces
 
 The envelope above is accepted by Studio's command editor and `.arkops` replay. To use MCP, wrap the tool name and arguments in `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"doc_apply","arguments":{...}}}`.
 
-Use `created_ids` returned by a batch as inputs to later features. IDs are monotonically allocated within a document and persisted, including its next-ID counter. Inside a batch, references can target known earlier IDs; symbolic references are not implemented. Features must follow their dependencies in history. Removal of a dependency without also removing/replacing its dependants fails atomically.
+Use `created_ids` returned by a batch as inputs to later features. IDs are monotonically allocated within a document and persisted, including its next-ID counter. Inside a batch, `feature`, feature `inputs`, and mate endpoints `a`/`b` accept a unique name or an id. The saved document stores the numeric id. A missing or ambiguous name fails the batch and rolls it back. Features must follow their dependencies in history. Removal of a dependency without also removing/replacing its dependants fails atomically.
 
 ## Tools
 
@@ -42,7 +42,7 @@ Use `created_ids` returned by a batch as inputs to later features. IDs are monot
 | `mesh_get` | Positions and triangle indices, explicitly requested |
 | `doc_save`, `doc_load` | Native document persistence |
 | `export_mesh` | STL/OBJ of terminal outputs or a selected feature ID |
-| `snapshot` | Software-rendered PNG of terminal outputs or selected ID |
+| `snapshot` | Software-rendered PNG of terminal outputs or selected ID. `view` is `iso`, `front`, `right` or `top`. The image is a display mesh, not STEP authority |
 
 The process has local filesystem permissions of the host. Save/export tools write the supplied paths. File saves replace existing documents; there is no cross-process file locking. MCP sessions are local, not a remote HTTP service.
 
@@ -185,6 +185,10 @@ loft tip makes that save version 9. Mirror accepts `native.plane` as `XY`,
 a face, edge, or curve in Studio stores that semantic name and does not add
 a further version. Older documents stay at their previous version and remain
 readable. The product version stays 0.9.0 and the tool list stays 34.
+
+`assembly.add` and `assembly.edit` accept `pattern` with `type` `linear` or `circular`, an integer `count` from 2 to 32, and `dx`/`dy`/`dz` or `step`/`axis` (`X`, `Y` or `Z`). One node owns the copies. A mate solves that node once and the copies follow. Degrees of freedom count the node once; the BOM counts every copy. `native_solid` `union`, `cut` and `common` accept 2..16 feature inputs and/or `native.instances` naming placed parts, including every pattern copy. Feature inputs stay in part coordinates. Instances are transformed by the solved assembly pose and then booleaned into one exact solid. A tube program has no B-rep and is rejected. Two-input booleans stay at the previous document version. Instance patterns, `native.instances`, or a union of more than two exact solids save as document version 10. `assembly_info` returns `copy` on each instance. Its optional `candidate` probes a mate, including residuals and the two frames, without saving it or changing the revision. `interference` compares display meshes and is not exact clearance or motion; the default triangle budget is 8000 and `interference:true` raises it to 120000.
+
+Analytic cylinder, cone and torus meshes run along +Y. A `native_solid` cylinder, cone or torus uses local +Z. Promoting an analytic cylinder, cone or torus applies Rx(-90 degrees), so the exact B-rep axis becomes +Z. Mate references `Z`, `origin` and `XY` use the instance frame +Z. Semantic reference `axis` is the exact B-rep cylinder axis. The analytic mesh axis is not retargeted. Studio toolbar booleans stay refused while an assembly is active.
 
 Mesh features store no B-rep. `mesh_body` keeps the authored
 `mesh:{positions,indices}` object; positions are three numbers per vertex and

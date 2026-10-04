@@ -480,6 +480,118 @@ V legacyOperationResult(const Feature& feature, const ExprEnv& env,
     }
     return solidWorker(std::move(model));
 }
+
+std::string normalizedSolidOp(const Feature& feature) {
+    std::string op = feature.get("op");
+    if (op.empty()) {
+        if (const V* authored = feature.nativeSpec.find("op"); authored && authored->t == V::Str) op = authored->str;
+    }
+    if (op == "boolean_union") op = "union";
+    if (op == "boolean_cut") op = "cut";
+    if (op == "boolean_common" || op == "intersect") op = "common";
+    return op;
+}
+
+bool spansExactBoolean(const Feature& feature) {
+    return feature.type == FeatureType::NativeSolid &&
+           (feature.nativeSpec.find("instances") || feature.inputs.size() > 2);
+}
+
+struct ExactPiece { std::string brep; V topology; Mat4 frame; bool framed=false; std::string nameSpace; };
+
+V placePiece(const ExactPiece& piece) {
+    if (!piece.framed) {
+        V held = V::makeObj();
+        held.set("brep_base64", V::makeStr(piece.brep));
+        if (piece.topology.t == V::Obj) held.set("topology", piece.topology);
+        return held;
+    }
+    V model = V::makeObj();
+    model.set("op", V::makeStr("transform"));
+    model.set("frame", frameValue(piece.frame));
+    model.set("input_brep", V::makeStr(piece.brep));
+    if (piece.topology.t == V::Obj) model.set("input_topology", piece.topology);
+    return solidWorker(std::move(model));
+}
+
+u64 instanceRef(const Document& document, const V& value) {
+    if (value.t == V::Num) {
+        if (!std::isfinite(value.num) || value.num < 1 || value.num > 9007199254740990. || value.num != std::floor(value.num))
+            throw std::runtime_error("Assembly instance id must be a positive integer");
+        return (u64)value.num;
+    }
+    if (value.t == V::Str) {
+        u64 found = 0; int count = 0;
+        for (const auto& node : document.assembly) if (node.name == value.str) { found = node.id; ++count; }
+        if (count != 1) throw std::runtime_error(count ? "Ambiguous assembly instance name: " + value.str : "Assembly instance name not found: " + value.str);
+        return found;
+    }
+    throw std::runtime_error("Assembly instance reference must be an id or a unique name");
+}
+
+ExactPiece pieceFromBody(const Body& body, u64 featureId) {
+    const V* brep = body.nativeData.find("brep_base64");
+    if (!brep || brep->t != V::Str)
+        throw std::runtime_error("Exact boolean needs a B-rep on feature #" + std::to_string(featureId) + ". Tube programs and display meshes are not exact solids.");
+    ExactPiece piece;
+    piece.brep = brep->str;
+    if (const V* topology = body.nativeData.find("topology")) piece.topology = *topology;
+    piece.nameSpace = "feature." + std::to_string(featureId);
+    return piece;
+}
+
+const Body* preparedBody(Document& document, u64 featureId, std::vector<Body>& preceding) {
+    try { ensureNativeBody(document, featureId, preceding); }
+    catch (const std::exception& error) {
+        throw std::runtime_error("Exact boolean needs a B-rep on feature #" + std::to_string(featureId) + ": " + error.what());
+    }
+    for (const auto& body : preceding) if (body.id == featureId) return &body;
+    throw std::runtime_error("Exact boolean input feature #" + std::to_string(featureId) + " is not evaluated yet");
+}
+
+V combineExactBoolean(const Feature& feature, Document& document, std::vector<Body>& preceding) {
+    const std::string op = normalizedSolidOp(feature);
+    if (op != "union" && op != "cut" && op != "common")
+        throw std::runtime_error("Placed-instance booleans and unions of more than two solids require op union, cut or common");
+    std::vector<ExactPiece> pieces;
+    for (u64 input : feature.inputs) pieces.push_back(pieceFromBody(*preparedBody(document, input, preceding), input));
+    if (const V* instances = feature.nativeSpec.find("instances")) {
+        if (instances->t != V::Arr || instances->arr.empty() || instances->arr.size() > 16)
+            throw std::runtime_error("native.instances needs 1..16 assembly nodes");
+        std::vector<AssemblyPlacement> placements;
+        std::string error;
+        if (!resolveAssembly(document, placements, error)) throw std::runtime_error(error);
+        std::set<u64> seen;
+        for (const V& item : instances->arr) {
+            const u64 node = instanceRef(document, item);
+            if (!seen.insert(node).second) throw std::runtime_error("Repeated assembly instance in native.instances");
+            int found = 0;
+            for (const auto& placement : placements) if (placement.node == node) {
+                ExactPiece piece = pieceFromBody(*preparedBody(document, placement.feature, preceding), placement.feature);
+                piece.framed = true;
+                piece.frame = placement.world;
+                piece.nameSpace = "instance." + std::to_string(placement.node) + "." + std::to_string(placement.copy);
+                pieces.push_back(std::move(piece));
+                ++found;
+            }
+            if (!found) throw std::runtime_error("Assembly instance #" + std::to_string(node) + " is not a placed part");
+        }
+    }
+    if (pieces.size() < 2 || pieces.size() > 16) throw std::runtime_error("Exact boolean needs 2..16 solids");
+    V current = placePiece(pieces.front());
+    for (size_t index = 1; index < pieces.size(); ++index) {
+        V tool = placePiece(pieces[index]);
+        V model = V::makeObj();
+        model.set("op", V::makeStr(op));
+        model.set("input_brep", required(current, "brep_base64"));
+        if (const V* topology = current.find("topology")) model.set("input_topology", *topology);
+        model.set("tool_brep", required(tool, "brep_base64"));
+        if (const V* topology = tool.find("topology")) model.set("tool_topology", *topology);
+        model.set("tool_namespace", V::makeStr(pieces[index].nameSpace));
+        current = solidWorker(std::move(model));
+    }
+    return current;
+}
 } // namespace
 
 bool isNativeFeature(FeatureType type) {
@@ -507,7 +619,8 @@ Body evaluateNativeFeature(const Feature& feature, const ExprEnv& env,
         request.set("request", sheetRequest(feature, env));
         result = nativeWorkerRequest(request);
     } else if (feature.type == FeatureType::NativeSolid) {
-        result = solidWorker(solidFeatureRequest(feature, env, document, preceding));
+        result = spansExactBoolean(feature) ? combineExactBoolean(feature, document, preceding)
+                                             : solidWorker(solidFeatureRequest(feature, env, document, preceding));
     } else result = nativeModelRequest(surfaceRequest(feature, env, document, preceding));
     Body body;
     body.nativeData = std::move(result);

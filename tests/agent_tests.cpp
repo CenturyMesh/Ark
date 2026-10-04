@@ -42,7 +42,8 @@ int main(){
     CHECK(documentToJson(loaded.document)==documentToJson(s.document));std::remove(".test_roundtrip.ark");
     std::string error;Document invalid;
     CHECK(documentFromJson(R"({"version":9,"features":[]})",invalid,&error));
-    CHECK(!documentFromJson(R"({"version":10,"features":[]})",invalid,&error));
+    CHECK(documentFromJson(R"({"version":10,"features":[]})",invalid,&error));
+    CHECK(!documentFromJson(R"({"version":11,"features":[]})",invalid,&error));
     CHECK(!documentFromJson(R"({"features":[{"id":1,"type":"box"},{"id":1,"type":"sphere"}]})",invalid,&error));
     Sketch sketch;
     CHECK(!sketchFromJson(R"({"entities":[{"kind":"line","dof":[1]}]})",sketch,&error));

@@ -1,4 +1,4 @@
-# ARK file formats, versions 1 through 9
+# ARK file formats, versions 1 through 10
 
 ## `.ark`
 
@@ -80,7 +80,7 @@ geometric proof, original openings, and exact formed/flat B-rep payloads. The
 display mesh and native evaluation cache are derived and are not feature
 history edits. The Formed/Flat UI selection does not change the saved geometry.
 
-The reader accepts versions 1 through 9. Older ARK executables reject a newer
+The reader accepts versions 1 through 10. Older ARK executables reject a newer
 document rather than discarding its native data. Save/load re-evaluates authored
 native features with the installed OCCT 8 worker; source packages remain
 portable when the original STEP is absent. If the source STEP still exists
@@ -119,3 +119,18 @@ the seed solid. Viewport selection writes those same names; it does not add
 another document version. Older readers reject that file instead of ignoring
 the new definition. Versions 1 through 8 still load and save at their own
 version. The product version stays 0.9.0.
+
+## Version 10: instance patterns and multi-solid exact booleans
+
+Save chooses the version. A document becomes version 10 only when an assembly
+node has an active `pattern`, a `native_solid` stores `native.instances`, or
+a `native_solid` `union`, `cut` or `common` (including the `boolean_*` and
+`intersect` aliases) has more than two feature inputs. The pattern object
+stores `type`, `count`, and either `dx`/`dy`/`dz` or `step`/`axis`. Copies are
+derived on load and are not stored one by one. Feature and mate name
+references are resolved before save, so the file still stores numeric ids.
+A two-input boolean stays at version 7. Finishing features without a pattern
+or a multi-solid boolean stay at version 9. A file below version 10 that
+contains this data is rejected and the error names version 10. Versions 1
+through 9 still load and save at their own version. The product version stays
+0.9.0.

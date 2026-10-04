@@ -262,17 +262,16 @@ bool writePNG(const char* path,const Image& img){
 // ---------------------------------------------------------------------------
 // Software snapshot renderer ------------------------------------------------------
 static Vec3 shadePixelNormal(Vec3 n, Vec3 viewDir) {
-    // procedural "matcap": two area lights + fresnel rim
     n=n.normalized();
-    Vec3 l1=Vec3{-0.5,0.85,0.4}.normalized();
-    Vec3 l2=Vec3{ 0.7,-0.25,-0.55}.normalized();
-    f64 d1=tmax(n.dot(l1),0.0);
-    f64 d2=tmax(n.dot(l2),0.0);
+    Vec3 key=Vec3{-0.32,0.86,0.42}.normalized();
+    Vec3 fill=Vec3{0.62,0.18,-0.28}.normalized();
+    f64 d1=tmax(n.dot(key),0.0);
+    f64 d2=tmax(n.dot(fill),0.0);
+    f64 wrap=n.dot(key)*0.5+0.5;
     f64 rim=std::pow(1.0-tmax(-n.dot(viewDir),0.0),3.0);
-    Vec3 base{0.62,0.68,0.78};
-    Vec3 hi{1.05,1.02,0.95};
-    Vec3 c = base*(0.28+0.75*d1) + base*(0.22*d2) + Vec3{0.9,0.5,0.35}*rim*0.35;
-    c = c + hi*std::pow(d1,48.0)*0.9;
+    Vec3 clay{0.76,0.73,0.68};
+    Vec3 c = clay*(0.62+0.34*d1) + Vec3{0.70,0.74,0.78}*(0.10+0.08*d2) + Vec3{0.98,0.96,0.92}*rim*0.06;
+    c = c + Vec3{1.0,0.98,0.94}*std::pow(wrap,18.0)*0.05;
     return {clamp(c.x,0.,1.),clamp(c.y,0.,1.),clamp(c.z,0.,1.)};
 }
 
@@ -283,7 +282,7 @@ Image renderSnapshot(const Mesh& m, int W, int H, const SnapCam& cam) {
     // vertical gradient sky
     for(int y=0;y<H;++y){
         f64 t=(f64)y/(f64)tmax(H-1,1);
-        Vec3 top{0.078,0.086,0.106}, bot{0.043,0.047,0.062};
+        Vec3 top{0.93,0.94,0.96}, bot{0.86,0.88,0.91};
         Vec3 c=bot+(top-bot)*(1.0-t);
         for(int x=0;x<W;++x){
             u8* p=&img.px[(size_t)(y*W+x)*3];
@@ -299,7 +298,9 @@ Image renderSnapshot(const Mesh& m, int W, int H, const SnapCam& cam) {
                  std::cos(cam.pitch)*std::cos(cam.yaw) };
     Vec3 eye = ctr + eyeOff*cam.dist;
     Mat4 view=Mat4::lookAt(eye, ctr, Vec3{0,1,0});
-    Mat4 proj=Mat4::perspective(deg2rad(cam.fovDeg),(f64)W/H,0.05,1000);
+    f64 far=std::max(1000.0, cam.dist*8.0);
+    f64 near=0.05; if(near>=far*0.01) near=far*1.0e-4;
+    Mat4 proj=Mat4::perspective(deg2rad(cam.fovDeg),(f64)W/H,near,far);
     Mat4 vp=proj*view;
 
     size_t nv=m.vertCount();
@@ -355,6 +356,21 @@ Image renderSnapshot(const Mesh& m, int W, int H, const SnapCam& cam) {
                     q[0]=(u8)(c.x*255);q[1]=(u8)(c.y*255);q[2]=(u8)(c.z*255);
                 }
             }
+    }
+    for(int y=0;y<H;++y)for(int x=0;x<W;++x){
+        f32 z=depth[(size_t)y*W+x];
+        if(z>1e20f) continue;
+        bool edge=false;
+        for(int oy=-1;oy<=1&&!edge;++oy)for(int ox=-1;ox<=1;++ox){
+            if(!ox&&!oy) continue;
+            int nx=x+ox,ny=y+oy;
+            if(nx<0||ny<0||nx>=W||ny>=H){edge=true;break;}
+            f32 nz=depth[(size_t)ny*W+nx];
+            if(nz>1e20f||std::fabs(nz-z)>0.04f){edge=true;break;}
+        }
+        if(!edge) continue;
+        u8* q=&img.px[(size_t)(y*W+x)*3];
+        q[0]=(u8)(q[0]*0.62);q[1]=(u8)(q[1]*0.62);q[2]=(u8)(q[2]*0.62);
     }
     return img;
 }

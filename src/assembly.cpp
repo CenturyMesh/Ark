@@ -1,5 +1,6 @@
 #include "ark/model.hpp"
 #include "ark/references.hpp"
+#include <cmath>
 #include <set>
 #include <stdexcept>
 #include <unordered_set>
@@ -102,12 +103,12 @@ double squared(const std::vector<double>& v){double n=0;for(double x:v)n+=x*x;re
 }
 
 bool resolveAssembly(const Document& d,std::vector<AssemblyPlacement>& placements,
-                     std::string& error,AssemblyDiagnostics* diagnostics){
+                     std::string& error,AssemblyDiagnostics* diagnostics,bool reportUnsatisfied){
     placements.clear();error.clear();if(diagnostics)*diagnostics={};
     auto fail=[&](const std::string& e){error=e;placements.clear();if(diagnostics)*diagnostics={};return false;};
     if(d.assembly.size()>4096)return fail("Assembly capacity exceeds 4096 nodes");
     std::unordered_map<u64,const AssemblyNode*> byId;
-    std::unordered_map<u64,Mat4> world;
+    std::unordered_map<u64,Mat4> world,rigid,parentFrame;
     std::unordered_map<u64,bool> visibility;
     std::set<u64> features;for(auto& f:d.features)features.insert(f.id);
     for(auto& n:d.assembly){
@@ -127,7 +128,8 @@ bool resolveAssembly(const Document& d,std::vector<AssemblyPlacement>& placement
         auto number=[&](const char* key){auto p=n.p.find(key);if(p==n.p.end())return 0.;bool ok=false;f64 value=evalExpr(p->second,env,&ok);if(!ok||!std::isfinite(value)||std::fabs(value)>1e6)error=std::string("Invalid assembly expression: ")+key;return value;};
         Vec3 t{number("tx"),number("ty"),number("tz")};f64 rx=number("rx"),ry=number("ry"),rz=number("rz");
         if(!error.empty())return false;
-        world[id]=parent*Mat4::translation(t)*Mat4::rotZ(deg2rad(rz))*Mat4::rotY(deg2rad(ry))*Mat4::rotX(deg2rad(rx));
+        rigid[id]=Mat4::translation(t)*Mat4::rotZ(deg2rad(rz))*Mat4::rotY(deg2rad(ry))*Mat4::rotX(deg2rad(rx));
+        parentFrame[id]=parent;world[id]=parent*rigid[id];
         visibility[id]=n.visible&&(!n.parent||visibility[n.parent]);active.erase(id);return true;
     };
     for(auto& n:d.assembly)if(!resolve(n.id,0)){placements.clear();return false;}
@@ -250,12 +252,51 @@ bool resolveAssembly(const Document& d,std::vector<AssemblyPlacement>& placement
         result.maxPositionMm=std::max(result.maxPositionMm,r.positionMm);
         result.maxAngleDeg=std::max(result.maxAngleDeg,r.angleDeg);
         result.mates.push_back(r);
+        result.frames.push_back({mate.mate->id,s.pa,s.za,s.pb,s.zb});
         if(!std::isfinite(r.positionMm)||!std::isfinite(r.angleDeg)||
            r.positionMm>kPositionTolerance||r.angleDeg>kAngleToleranceDeg)
-            return fail("Unsatisfied assembly mate #"+std::to_string(r.id));
+            if(!reportUnsatisfied)return fail("Unsatisfied assembly mate #"+std::to_string(r.id));
     }
-    for(auto& n:d.assembly)if(n.feature)placements.push_back({n.id,n.feature,n.name,world[n.id],visibility[n.id]});
+    auto number=[&](const std::string& text,const char* label){bool ok=false;double value=evalExpr(text,env,&ok);if(!ok||!std::isfinite(value)||std::fabs(value)>1e6)error=std::string("Invalid assembly pattern expression: ")+label;return value;};
+    for(auto& n:d.assembly)if(n.feature){
+        int copies=1;
+        if(n.pattern.active){
+            if(n.pattern.type!="linear"&&n.pattern.type!="circular")return fail("Unsupported instance pattern: "+n.pattern.type);
+            double raw=number(n.pattern.count,"count");if(!error.empty())return fail(error);
+            if(std::fabs(raw-std::round(raw))>1e-6||raw<2||raw>32)return fail("Instance pattern count must be an integer from 2 to 32");
+            copies=(int)std::round(raw);
+            if(n.pattern.type=="linear"){double dx=number(n.pattern.dx,"dx"),dy=number(n.pattern.dy,"dy"),dz=number(n.pattern.dz,"dz");if(!error.empty())return fail(error);if(dx*dx+dy*dy+dz*dz<=1e-18)return fail("Linear instance pattern spacing is zero");}
+            else{double step=number(n.pattern.step,"step");if(!error.empty())return fail(error);if(!(std::fabs(step)>0&&std::fabs(step)<=360))return fail("Circular instance pattern step must be in (0, 360] degrees");if(n.pattern.axis!="X"&&n.pattern.axis!="Y"&&n.pattern.axis!="Z")return fail("Circular instance pattern axis must be X, Y or Z");}
+        }
+        Mat4 authored0=parentFrame[n.id]*rigid[n.id];
+        Mat4 carry=world[n.id]*authored0.inverted();
+        for(int copy=0;copy<copies;++copy){
+            Mat4 step=Mat4::identity();
+            if(copy){
+                if(n.pattern.type=="linear"){double dx=number(n.pattern.dx,"dx"),dy=number(n.pattern.dy,"dy"),dz=number(n.pattern.dz,"dz");step=Mat4::translation({dx*copy,dy*copy,dz*copy});}
+                else{Vec3 axis=n.pattern.axis=="X"?Vec3{1,0,0}:n.pattern.axis=="Y"?Vec3{0,1,0}:Vec3{0,0,1};step=Mat4::axisAngle(axis,deg2rad(number(n.pattern.step,"step")*copy));}
+                if(!error.empty())return fail(error);
+            }
+            placements.push_back({n.id,n.feature,n.name,carry*(parentFrame[n.id]*step*rigid[n.id]),visibility[n.id],copy});
+        }
+    }
     if(diagnostics)*diagnostics=std::move(result);
+    return true;
+}
+
+bool probeAssemblyMate(Document& document,const AssemblyMate& candidate,AssemblyDiagnostics& diagnostics,
+                       std::string& error,bool& satisfied){
+    AssemblyMate extra=candidate;
+    if(!extra.id)extra.id=document.nextMateId_;
+    for(const auto& mate:document.mates)if(mate.id==extra.id)extra.id=document.nextMateId_+document.mates.size()+1;
+    document.mates.push_back(extra);
+    struct Pop{Document& d;~Pop(){d.mates.pop_back();}} pop{document};
+    std::vector<AssemblyPlacement> placements;
+    if(!resolveAssembly(document,placements,error,&diagnostics,true))return false;
+    satisfied=std::isfinite(diagnostics.maxPositionMm)&&std::isfinite(diagnostics.maxAngleDeg)&&
+              diagnostics.maxPositionMm<=kPositionTolerance&&diagnostics.maxAngleDeg<=kAngleToleranceDeg;
+    for(const auto& row:diagnostics.mates)if(row.id==extra.id){
+        satisfied=satisfied&&row.positionMm<=kPositionTolerance&&row.angleDeg<=kAngleToleranceDeg;break;}
     return true;
 }
 }
