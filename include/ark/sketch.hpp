@@ -6,6 +6,10 @@ namespace ark {
 // Named construction references, independent of transient tessellation faces.
 Mat4 resolvePlane(const Document& doc, const std::string& name);
 void evaluateSketch(NamedSketch& sketch, const ExprEnv& env);
+// Fills project entities from bodies that already exist. waiting means the
+// source feature is later in the history. error is a hard failure.
+struct DrivenSketchStatus { std::string error; bool waiting=false; };
+DrivenSketchStatus bakeSketchProjects(Document& document, NamedSketch& sketch);
 // Diagnose a solved (or attempted) sketch without mutating it. Rank and
 // redundancy are local numerical properties of the current coordinates.
 arkjson::Value diagnoseSketch(const Sketch& sketch, double residualTolerance=1e-6);

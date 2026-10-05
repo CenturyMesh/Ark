@@ -45,7 +45,13 @@ int main(){
     CHECK(documentFromJson(R"({"version":10,"features":[]})",invalid,&error));
     CHECK(documentFromJson(R"({"version":11,"features":[]})",invalid,&error));
     CHECK(documentFromJson(R"({"version":12,"features":[]})",invalid,&error));
-    CHECK(!documentFromJson(R"({"version":13,"features":[]})",invalid,&error));
+    CHECK(documentFromJson(R"({"version":13,"features":[]})",invalid,&error));
+    CHECK(!documentFromJson(R"({"version":14,"features":[]})",invalid,&error));
+    CHECK(error.find("unsupported document version")!=std::string::npos);
+    CHECK(!documentFromJson(R"({"version":12,"features":[{"id":1,"type":"box","suppressed":true}]})",invalid,&error));
+    CHECK(error.find("document version 13")!=std::string::npos);
+    CHECK(!documentFromJson(R"({"version":12,"features":[],"sketches":[{"name":"S","entities":[{"kind":"project","name":"Edge","feature":1,"reference":"edge.x.ymin.zmin"}]}]})",invalid,&error));
+    CHECK(error.find("plane canvases, suppressed features, or projected and offset sketch entities require document version 13")!=std::string::npos);
     CHECK(!documentFromJson(R"({"features":[{"id":1,"type":"box"},{"id":1,"type":"sphere"}]})",invalid,&error));
     Sketch sketch;
     CHECK(!sketchFromJson(R"({"entities":[{"kind":"line","dof":[1]}]})",sketch,&error));
@@ -76,6 +82,65 @@ int main(){
     auto rendered=renderSnapshot(cube,320,240,camera),background=renderSnapshot({},320,240,camera);
     size_t foreground=0;for(size_t i=0;i<rendered.px.size();i+=3)if(rendered.px[i]!=background.px[i]||rendered.px[i+1]!=background.px[i+1]||rendered.px[i+2]!=background.px[i+2])++foreground;
     CHECK(foreground>500&&foreground<20000); // Projection must not fill the frame.
+    {
+        AgentSession plane;
+        CHECK(!failed(plane.call("doc_apply",json(R"({"commands":[{"op":"feature.add","type":"box","name":"Base","p":{"dx":10,"dy":10,"dz":10}},{"op":"canvas.set","name":"Photo","path":"missing-photo.png","plane":"XY","width":80,"height":40,"opacity":0.4}]})"))));
+        auto mesh=plane.call("mesh_inspect",json(R"({"id":1})"));
+        CHECK(!failed(mesh)&&std::fabs(std::fabs(mesh.find("structuredContent")->find("signed_volume_mm3")->num)-1000)<1e-6);
+        V saved;CHECK(arkjson::parse(documentToJson(plane.document),saved));
+        CHECK(saved.find("version")->num==13&&saved.find("canvases")&&saved.find("canvases")->arr.size()==1);
+        const auto& canvas=saved.find("canvases")->arr[0];
+        CHECK(canvas.find("path")->str=="missing-photo.png"&&canvas.find("plane")->str=="XY");
+        CHECK(canvas.find("width")->str=="80"&&canvas.find("height")->str=="40"&&std::fabs(canvas.find("opacity")->num-0.4)<1e-9);
+        auto design=plane.call("doc_info",json(R"({"detail":"design"})"));
+        CHECK(!failed(design)&&design.find("structuredContent")->find("canvases")->arr[0].find("name")->str=="Photo");
+    }
+    {
+        AgentSession box;
+        CHECK(!failed(box.call("doc_apply",json(R"({"commands":[{"op":"feature.add","type":"box","name":"Base","p":{"dx":10,"dy":10,"dz":10}}]})"))));
+        CHECK(!failed(box.call("doc_apply",json(R"({"commands":[{"op":"feature.edit","id":"Base","suppressed":true}]})"))));
+        CHECK(box.document.features.size()==1&&box.document.evalBodies.empty()&&box.document.lastResults.size()==1&&box.document.lastResults[0].ok&&box.document.lastResults[0].error.empty());
+        V saved;CHECK(arkjson::parse(documentToJson(box.document),saved));
+        CHECK(saved.find("version")->num==13&&saved.find("features")->arr[0].find("suppressed")&&saved.find("features")->arr[0].find("suppressed")->b);
+        auto design=box.call("doc_info",json(R"({"detail":"design"})"));
+        CHECK(!failed(design)&&design.find("structuredContent")->find("features")->arr[0].find("suppressed")->b);
+        std::string kept=documentToJson(box.document);
+        auto blocked=box.call("doc_apply",json(R"({"commands":[{"op":"feature.add","type":"transform","inputs":["Base"],"p":{"tx":5}}]})"));
+        CHECK(failed(blocked)&&blocked.find("structuredContent")->find("error")->str.find("source feature is suppressed")!=std::string::npos);
+        CHECK(documentToJson(box.document)==kept);
+        CHECK(!failed(box.call("doc_apply",json(R"({"commands":[{"op":"feature.edit","id":"Base","suppressed":false}]})"))));
+        auto restored=box.call("mesh_inspect",json(R"({"id":1})"));
+        CHECK(!failed(restored)&&std::fabs(std::fabs(restored.find("structuredContent")->find("signed_volume_mm3")->num)-1000)<1e-6);
+        CHECK(arkjson::parse(documentToJson(box.document),saved)&&saved.find("version")->num==1);
+    }
+    {
+        AgentSession sketch;
+        CHECK(!failed(sketch.call("doc_apply",json(R"({"commands":[{"op":"sketch.set","name":"S","sketch":{"entities":[{"kind":"line","name":"Profile","dof":[0,0,10,0]},{"kind":"offset","name":"Copy","source":"Profile","distance":2}]}}]})"))));
+        auto copy=sketch.call("sketch_inspect",json(R"({"name":"S","entity":"Copy"})"));
+        CHECK(!failed(copy));
+        const auto* payload=copy.find("structuredContent");
+        CHECK(std::fabs(payload->find("length_mm")->num-10)<1e-6);
+        CHECK(std::fabs(payload->find("bbox_mm")->arr[1].num-2)<1e-6&&std::fabs(payload->find("bbox_mm")->arr[3].num-2)<1e-6);
+        V saved;CHECK(arkjson::parse(documentToJson(sketch.document),saved)&&saved.find("version")->num==13);
+        std::string kept=documentToJson(sketch.document);
+        auto patched=sketch.call("doc_apply",json(R"({"commands":[{"op":"sketch.patch","name":"S","entity":"Copy","anchor":0,"y":"4"}]})"));
+        CHECK(failed(patched)&&patched.find("structuredContent")->find("error")->str.find("Project and offset entities are driven")!=std::string::npos);
+        CHECK(documentToJson(sketch.document)==kept);
+        auto onboard=sketch.call("agent_onboard",json(R"({"topic":"sketch"})"));
+        CHECK(!failed(onboard));
+        auto text=onboard.find("structuredContent")->dump();
+        CHECK(text.find("canvas.set")!=std::string::npos&&text.find("version 13")!=std::string::npos);
+    }
+    {
+        AgentSession square;
+        CHECK(!failed(square.call("doc_apply",json(R"({"commands":[{"op":"sketch.set","name":"S","sketch":{"entities":[{"kind":"wire","name":"Profile","start":[0,0],"segments":[{"kind":"line","to":[10,0]},{"kind":"line","to":[10,10]},{"kind":"line","to":[0,10]},{"kind":"line","to":[0,0]}]},{"kind":"offset","name":"Copy","source":"Profile","distance":2}]}}]})"))));
+        auto copy=square.call("sketch_inspect",json(R"({"name":"S","entity":"Copy"})"));
+        CHECK(!failed(copy));
+        const auto* payload=copy.find("structuredContent");
+        const auto& box=payload->find("bbox_mm")->arr;
+        CHECK(std::fabs(payload->find("length_mm")->num-24)<1e-6);
+        CHECK(std::fabs(box[0].num-2)<1e-6&&std::fabs(box[1].num-2)<1e-6&&std::fabs(box[2].num-8)<1e-6&&std::fabs(box[3].num-8)<1e-6);
+    }
     CHECK(AgentSession::tools().arr.size()==34);
     std::cout<<checks<<" checks / "<<failures<<" failures\n";return failures?1:0;
 }

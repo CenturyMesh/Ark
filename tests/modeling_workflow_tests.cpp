@@ -681,6 +681,48 @@ void testCurvesAndQueries() {
 }
 }
 
+void testDrivenSketch() {
+    ark::AgentSession session;
+    accepted(session.call("doc_apply", parse(R"({"commands":[
+      {"op":"feature.add","type":"native_solid","name":"Cube","p":{"op":"box","width":"10","depth":"10","height":"10"}},
+      {"op":"sketch.set","name":"Trace","sketch":{"plane":"XY","entities":[
+        {"kind":"project","name":"Edge","feature":"Cube","reference":"edge.x.ymin.zmin"},
+        {"kind":"project","name":"Top","feature":"Cube","reference":"z_max"},
+        {"kind":"project","name":"Side","feature":"Cube","reference":"y_max"},
+        {"kind":"offset","name":"Beside","source":"Edge","distance":"2"}
+      ]}}
+    ]})")));
+    check(std::abs(volumeOf(session.document, 1) - 1000.0) < 1.0, "projecting the cube does not change its volume");
+    Value saved;
+    check(arkjson::parse(ark::documentToJson(session.document), saved) && saved.find("version")->num == 13.0, "project and offset save as version 13");
+    auto entity = [&](const char* name) {
+        std::string args = std::string("{\"name\":\"Trace\",\"entity\":\"") + name + "\"}";
+        return accepted(session.call("sketch_inspect", parse(args.c_str())));
+    };
+    Value edge = entity("Edge");
+    const auto& edgeBox = edge.find("bbox_mm")->arr;
+    check(std::abs(edge.find("length_mm")->num - 10.0) < 0.05, "projected edge is 10 mm");
+    check(std::abs(edgeBox[1].num) < 0.05 && std::abs(edgeBox[3].num) < 0.05, "projected edge lies on y=0");
+    Value top = entity("Top");
+    const auto& topBox = top.find("bbox_mm")->arr;
+    check(std::abs(top.find("length_mm")->num - 40.0) < 0.2, "projected top perimeter is 40 mm");
+    check(topBox[2].num - topBox[0].num > 9.5 && topBox[3].num - topBox[1].num > 9.5, "projected top covers the 10 mm face");
+    Value side = entity("Side");
+    const auto& sideBox = side.find("bbox_mm")->arr;
+    check(std::abs(side.find("length_mm")->num - 10.0) < 0.05, "y_max meets the sketch plane in a 10 mm segment");
+    check(std::abs(sideBox[1].num - 10.0) < 0.05 && std::abs(sideBox[3].num - 10.0) < 0.05, "the y_max intersection lies at y=10");
+    Value beside = entity("Beside");
+    const auto& besideBox = beside.find("bbox_mm")->arr;
+    check(std::abs(beside.find("length_mm")->num - 10.0) < 0.05, "the offset of the projected edge stays 10 mm");
+    check(std::abs(std::abs(besideBox[1].num) - 2.0) < 0.05 && std::abs(besideBox[1].num - besideBox[3].num) < 0.05, "the offset stays 2 mm away and horizontal");
+    const auto revision = session.revision;
+    const auto before = ark::documentToJson(session.document);
+    Value blocked = session.call("doc_apply", parse(R"({"commands":[{"op":"feature.edit","id":"Cube","suppressed":true}]})"));
+    check(blocked.find("isError") && blocked.find("isError")->b, "suppressing a projected source fails");
+    check(blocked.find("structuredContent")->find("error")->str.find("Project source is suppressed") != std::string::npos, "the error names the suppressed project source");
+    check(session.revision == revision && ark::documentToJson(session.document) == before, "the failed suppress rolls back");
+}
+
 int main() {
     try {
         testNames();
@@ -697,6 +739,7 @@ int main() {
         testNameEdits();
         testSnapshotCopy();
         testCurvesAndQueries();
+        testDrivenSketch();
         std::cout << "Modeling workflow tests passed\n";
         return 0;
     } catch (const std::exception& error) {

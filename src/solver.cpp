@@ -20,9 +20,12 @@ struct Problem {
     int n=0;
 
     explicit Problem(const Sketch& s):sk(s){
-        for(auto&e:s.ents)for(size_t i=0;i<e.dof.size();++i){
-            if(i>=e.expressions.size()||e.expressions[i].empty())free.push_back(x.size());
-            x.push_back(e.dof[i]);
+        for(auto&e:s.ents){
+            const bool driven=e.kind==SketchEnt::Project||e.kind==SketchEnt::Offset;
+            for(size_t i=0;i<e.dof.size();++i){
+                if(!driven&&(i>=e.expressions.size()||e.expressions[i].empty()))free.push_back(x.size());
+                x.push_back(e.dof[i]);
+            }
         }
         n=(int)free.size();
     }
@@ -50,7 +53,14 @@ struct Problem {
                 size_t o=offsetOf(ent);
                 return {x[o],x[o+1]};
             }
-            case SketchEnt::Wire: {
+            case SketchEnt::Wire:
+            case SketchEnt::Project:
+            case SketchEnt::Offset: {
+                if(e.segments.empty()){
+                    if(e.dof.size()<4) return {};
+                    size_t o=offsetOf(ent);
+                    return {x[o+2*(size_t)slot],x[o+2*(size_t)slot+1]};
+                }
                 int index=sketchVertexDof(e,slot);
                 size_t o=offsetOf(ent);
                 if(index<0||o+(size_t)index+1>=x.size()) return {};

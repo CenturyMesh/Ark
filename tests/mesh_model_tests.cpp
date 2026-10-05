@@ -170,6 +170,35 @@ void testOffsetAndFill() {
     check(native.find("mesh_inspect") != std::string::npos, "native inspection rejects a mesh");
 }
 
+void testPhotoGrid() {
+    ark::AgentSession session;
+    Value mesh = Value::makeObj(), positions = Value::makeArr(), grid = Value::makeObj();
+    for (double value : {0, 0, 0, 10, 0, 0, 0, 4, 0, 10, 4, 1}) positions.arr.push_back(Value::makeNum(value));
+    grid.set("nu", Value::makeNum(2));
+    grid.set("nv", Value::makeNum(2));
+    mesh.set("positions", std::move(positions));
+    mesh.set("grid", std::move(grid));
+    applyMesh(session, "mesh_body", mesh);
+    const Value report = inspect(session, 1);
+    check(report.find("triangles")->num == 2 && report.find("vertices")->num == 4, "a photo grid becomes two triangles");
+    check(report.find("area_mm2")->num > 40.0 && report.find("area_mm2")->num < 41.0, "the grid covers the 10 by 4 mm patch");
+    Value both = Value::makeObj(), again = Value::makeArr(), indices = Value::makeArr(), spec = Value::makeObj();
+    for (double value : {0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0}) again.arr.push_back(Value::makeNum(value));
+    for (double value : {0, 1, 2}) indices.arr.push_back(Value::makeNum(value));
+    spec.set("nu", Value::makeNum(2));
+    spec.set("nv", Value::makeNum(2));
+    both.set("positions", std::move(again));
+    both.set("grid", std::move(spec));
+    both.set("indices", std::move(indices));
+    Value command = Value::makeObj(), args = Value::makeObj(), commands = Value::makeArr();
+    command.set("op", Value::makeStr("feature.add"));
+    command.set("type", Value::makeStr("mesh_body"));
+    command.set("mesh", std::move(both));
+    commands.arr.push_back(std::move(command));
+    args.set("commands", std::move(commands));
+    check(failure(session, "doc_apply", args).find("mutually exclusive") != std::string::npos, "grid and indices cannot be combined");
+}
+
 void testImportRoundtripAndVersion() {
     const auto directory = std::filesystem::temp_directory_path() /
         ("ark-mesh-model-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
@@ -235,6 +264,7 @@ int main() {
         testSmooth();
         testDecimate();
         testOffsetAndFill();
+        testPhotoGrid();
         testImportRoundtripAndVersion();
         std::cout << "Mesh model tests passed\n";
         return 0;

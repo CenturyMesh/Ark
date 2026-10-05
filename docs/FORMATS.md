@@ -173,3 +173,22 @@ curvature from the source edge and it is not a surface blend. Merged face
 aliases, a round-tube exact B-rep, clearance, measure, name binding and
 snapshot copy still do not change the document version. The product version
 stays 0.9.0.
+
+## Version 13: plane canvases, suppressed features, and driven sketch entities
+
+Save chooses the version. A document becomes version 13 only when it has a
+plane canvas, a feature with `suppressed` true, or a sketch entity of kind
+`project` or `offset`. An empty version 13 file still loads. A file below
+version 13 that contains any of those is rejected and the error says that
+plane canvases, suppressed features, or projected and offset sketch entities
+require document version 13. Versions 1 through 12 still load and save at
+their own version. A photo grid on `mesh_body` stays version 8. The product
+version stays 0.9.0.
+
+A canvas stores `name`, `plane`, `path`, `width`, `height` and `opacity`.
+The kernel keeps the path and the rectangle in millimetres. It does not
+decode pixels. Studio draws the image, and a missing file does not fail
+recompute. `suppressed: true` keeps the feature in the history and leaves
+its body out of recomputation. A project stores a feature id and a semantic
+edge or planar face. An offset stores an earlier entity name and a signed
+distance. Positive distance is to the left of the directed curve.

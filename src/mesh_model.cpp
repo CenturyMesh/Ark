@@ -410,11 +410,31 @@ Mesh meshFromPayload(const V& mesh) {
     if (mesh.t != V::Obj) throw std::runtime_error("mesh must be an object");
     const V* positions = mesh.find("positions");
     const V* indices = mesh.find("indices");
-    if (!positions || !indices || positions->t != V::Arr || indices->t != V::Arr)
-        throw std::runtime_error("mesh needs positions and indices arrays");
+    const V* grid = mesh.find("grid");
+    if (indices && grid) throw std::runtime_error("mesh grid and indices are mutually exclusive");
+    if (!positions || positions->t != V::Arr || (!indices && !grid))
+        throw std::runtime_error("mesh needs positions and indices, or positions and grid");
     if (positions->arr.size() % 3 || positions->arr.size() < 9 || positions->arr.size() / 3 > kMeshModelMaxVertices)
         throw std::runtime_error("mesh positions must contain 3..12288 vertices");
-    if (indices->arr.size() % 3 || indices->arr.size() < 3 || indices->arr.size() / 3 > kMeshModelMaxTriangles)
+    std::vector<u32> generated;
+    if (grid) {
+        if (grid->t != V::Obj) throw std::runtime_error("mesh grid must be an object");
+        auto count = [](const V* value) {
+            if (!value || value->t != V::Num || value->num < 2 || value->num > 256 || value->num != std::floor(value->num))
+                throw std::runtime_error("mesh grid nu and nv must be integers from 2 to 256");
+            return (int)value->num;
+        };
+        const int nu = count(grid->find("nu")), nv = count(grid->find("nv"));
+        if ((size_t)nu * (size_t)nv != positions->arr.size() / 3)
+            throw std::runtime_error("mesh grid positions must contain nu*nv vertices");
+        const size_t cells = (size_t)(nu - 1) * (size_t)(nv - 1);
+        if (cells * 2 > kMeshModelMaxTriangles) throw std::runtime_error("mesh grid exceeds 4096 triangles");
+        generated.reserve(cells * 6);
+        for (int y = 0; y < nv - 1; ++y) for (int x = 0; x < nu - 1; ++x) {
+            const u32 i00 = (u32)(y * nu + x), i10 = i00 + 1, i01 = i00 + (u32)nu, i11 = i01 + 1;
+            for (u32 index : {i00, i10, i01, i10, i11, i01}) generated.push_back(index);
+        }
+    } else if (indices->t != V::Arr || indices->arr.size() % 3 || indices->arr.size() < 3 || indices->arr.size() / 3 > kMeshModelMaxTriangles)
         throw std::runtime_error("mesh indices must contain 1..4096 triangles");
     Mesh out;
     out.pos.reserve(positions->arr.size());
@@ -424,17 +444,23 @@ Mesh meshFromPayload(const V& mesh) {
         out.pos.push_back((f32)value.num);
     }
     const u32 vertices = (u32)out.vertCount();
-    for (size_t i = 0; i < indices->arr.size(); i += 3) {
-        u32 tri[3];
-        for (int k = 0; k < 3; ++k) {
-            const V& value = indices->arr[i + (size_t)k];
-            if (value.t != V::Num || value.num < 0 || value.num >= vertices || value.num != std::floor(value.num))
-                throw std::runtime_error("mesh index is out of range");
-            tri[k] = (u32)value.num;
+    auto push = [&](u32 a, u32 b, u32 c) {
+        if (a == b || b == c || a == c) throw std::runtime_error("mesh_body rejects degenerate triangles");
+        out.addTri3(a, b, c);
+    };
+    if (grid) {
+        for (size_t i = 0; i < generated.size(); i += 3) push(generated[i], generated[i + 1], generated[i + 2]);
+    } else {
+        for (size_t i = 0; i < indices->arr.size(); i += 3) {
+            u32 tri[3];
+            for (int k = 0; k < 3; ++k) {
+                const V& value = indices->arr[i + (size_t)k];
+                if (value.t != V::Num || value.num < 0 || value.num >= vertices || value.num != std::floor(value.num))
+                    throw std::runtime_error("mesh index is out of range");
+                tri[k] = (u32)value.num;
+            }
+            push(tri[0], tri[1], tri[2]);
         }
-        if (tri[0] == tri[1] || tri[1] == tri[2] || tri[0] == tri[2])
-            throw std::runtime_error("mesh_body rejects degenerate triangles");
-        out.addTri3(tri[0], tri[1], tri[2]);
     }
     out.computeNormals();
     return out;

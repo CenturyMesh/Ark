@@ -30,7 +30,7 @@ Value entToJson(const SketchEnt& e){
     if(!e.name.empty())v.set("name",Value::makeStr(e.name));
     if(e.construction)v.set("construction",Value::makeBool(true));
     if(e.kind==SketchEnt::Spline){v.set("closed",Value::makeBool(e.closed));v.set("tension",Value::makeNum(e.tension));}
-    if(e.kind==SketchEnt::Wire){
+    if(e.kind==SketchEnt::Wire||((e.kind==SketchEnt::Project||e.kind==SketchEnt::Offset)&&!e.segments.empty())){
         Value segments=Value::makeArr();
         for(const auto& segment:e.segments){
             Value item=Value::makeObj();
@@ -40,6 +40,8 @@ Value entToJson(const SketchEnt& e){
         }
         v.set("segments",std::move(segments));
     }
+    if(e.kind==SketchEnt::Project){v.set("feature",Value::makeNum((double)e.sourceFeature));v.set("reference",Value::makeStr(e.reference));}
+    if(e.kind==SketchEnt::Offset){v.set("source",Value::makeStr(e.sourceName));v.set("distance",Value::makeStr(e.distance));}
     return v;
 }
 
@@ -62,11 +64,15 @@ bool entFromJson(const Value& v, SketchEnt& e, std::string* err){
     else if(k=="spline") e.kind=SketchEnt::Spline;
     else if(k=="arc") e.kind=SketchEnt::Arc;
     else if(k=="wire") e.kind=SketchEnt::Wire;
+    else if(k=="project") e.kind=SketchEnt::Project;
+    else if(k=="offset") e.kind=SketchEnt::Offset;
     else { if(err)*err="unknown sketch entity kind: "+k; return false; }
-    if(e.kind==SketchEnt::Wire){
+    const bool driven=e.kind==SketchEnt::Project||e.kind==SketchEnt::Offset;
+    if(e.kind==SketchEnt::Wire||driven){
         auto segments=v.find("segments");
-        if(!segments||segments->t!=Value::Arr||segments->arr.empty()||segments->arr.size()>64) return fail("Wire needs 1..64 segments");
-        for(const auto& segment:segments->arr){
+        if(e.kind==SketchEnt::Wire){if(!segments||segments->t!=Value::Arr||segments->arr.empty()||segments->arr.size()>64) return fail("Wire needs 1..64 segments");}
+        else if(segments&&(segments->t!=Value::Arr||segments->arr.size()>64)) return fail("Projected or offset geometry exceeds 64 segments");
+        if(segments&&segments->t==Value::Arr)for(const auto& segment:segments->arr){
             if(segment.t!=Value::Obj) return fail("Wire segment must be an object");
             auto kind=segment.find("kind");if(!kind||kind->t!=Value::Str) return fail("Wire segment needs a kind");
             SketchEnt::WireSeg item;
@@ -105,12 +111,12 @@ bool entFromJson(const Value& v, SketchEnt& e, std::string* err){
         else if(e.kind==SketchEnt::Circle)e.dof={0,0,5};
         else if(e.kind==SketchEnt::Arc) e.dof={0,0,5,0,180};
         else if(e.kind==SketchEnt::Wire) return fail("Wire requires start and segment endpoints");
-        else return fail("Spline requires explicit anchor coordinates");
+        else if(!driven) return fail("Spline requires explicit anchor coordinates");
     }
-    if(e.kind==SketchEnt::Wire){
+    if(e.kind==SketchEnt::Wire||(driven&&!e.segments.empty())){
         int expect=2;for(const auto& segment:e.segments) expect+=segment.kind==SketchEnt::WireSeg::Line?2:segment.kind==SketchEnt::WireSeg::Arc?3:6;
-        if((int)e.dof.size()!=expect) return fail("Wire degrees of freedom do not match segments");
-    }else if(e.kind!=SketchEnt::Spline){
+        if((int)e.dof.size()!=expect) return fail(driven?"Projected or offset degrees of freedom do not match segments":"Wire degrees of freedom do not match segments");
+    }else if(!driven&&e.kind!=SketchEnt::Spline){
         const size_t expected=e.kind==SketchEnt::Pnt?2:e.kind==SketchEnt::Line?4:e.kind==SketchEnt::Arc?5:3;
         if(e.dof.size()!=expected)return fail("wrong entity degrees of freedom");
     }
@@ -118,6 +124,24 @@ bool entFromJson(const Value& v, SketchEnt& e, std::string* err){
     for(auto pair:{std::pair{"construction",&e.construction},std::pair{"closed",&e.closed}})if(auto b=v.find(pair.first)){if(b->t!=Value::Bool)return fail("entity flags must be boolean");*pair.second=b->b;}
     if(auto t=v.find("tension")){if(t->t!=Value::Num||!std::isfinite(t->num)||t->num<0||t->num>1)return fail("Spline tension must be 0..1");e.tension=t->num;}
     if(e.kind==SketchEnt::Spline&&(e.dof.size()<(e.closed?6u:4u)||e.dof.size()>128||e.dof.size()%2))return fail("Spline requires 2..64 XY anchors; closed requires at least 3");
+    if(e.kind==SketchEnt::Project){
+        auto feature=v.find("feature");
+        if(!feature||feature->t!=Value::Num||!std::isfinite(feature->num)||feature->num<1||feature->num>9007199254740990.||feature->num!=std::floor(feature->num)) return fail("Project needs a feature id");
+        e.sourceFeature=(u64)feature->num;
+        auto reference=v.find("reference");
+        if(!reference||reference->t!=Value::Str||reference->str.empty()||reference->str.size()>128) return fail("Project needs a reference");
+        e.reference=reference->str;
+    }
+    if(e.kind==SketchEnt::Offset){
+        auto source=v.find("source");if(!source) source=v.find("entity");
+        if(!source||source->t!=Value::Str||source->str.empty()||source->str.size()>128) return fail("Offset needs a source entity");
+        e.sourceName=source->str;
+        auto distance=v.find("distance");
+        if(!distance) return fail("Offset needs a distance");
+        if(distance->t==Value::Str&&!distance->str.empty()&&distance->str.size()<=2048) e.distance=distance->str;
+        else if(distance->t==Value::Num&&std::isfinite(distance->num)) e.distance=distance->dump();
+        else return fail("Offset distance must be a number or expression");
+    }
     return true;
 }
 
@@ -130,7 +154,7 @@ bool validSketch(const Sketch& sk,std::string* err){
     std::set<std::string> constraintIds;
     for(auto& c:sk.cons){
         if(!c.id.empty()&&!constraintIds.insert(c.id).second)return fail("Duplicate sketch constraint id");
-        auto slots=[&](const SketchEnt& entity){return entity.kind==SketchEnt::Spline?(int)entity.dof.size()/2:entity.kind==SketchEnt::Line?2:entity.kind==SketchEnt::Wire?sketchVertexCount(entity):1;};
+        auto slots=[&](const SketchEnt& entity){return entity.kind==SketchEnt::Spline?(int)entity.dof.size()/2:entity.kind==SketchEnt::Line?2:(entity.kind==SketchEnt::Wire||entity.kind==SketchEnt::Project||entity.kind==SketchEnt::Offset)?sketchVertexCount(entity):1;};
         auto valid=[&](int e,int slot){return e>=0&&(size_t)e<sk.ents.size()&&slot>=0&&slot<slots(sk.ents[e]);};
         if(!valid(c.a,c.pa))return fail("invalid constraint entity or point slot");
         bool pair=c.type==SketchCon::DistPP||c.type==SketchCon::Coincident||c.type==SketchCon::Parallel||c.type==SketchCon::Perpendicular||c.type==SketchCon::AngleLL||c.type==SketchCon::Tangent;
@@ -242,6 +266,12 @@ bool generation12Document(const Document& doc){
     }
     return false;
 }
+bool generation13Document(const Document& doc){
+    if(!doc.canvases.empty()) return true;
+    for(const auto& feature:doc.features) if(feature.suppressed) return true;
+    for(const auto& sketch:doc.sketches) for(const auto& entity:sketch.sk.ents) if(entity.kind==SketchEnt::Project||entity.kind==SketchEnt::Offset) return true;
+    return false;
+}
 
 bool generation11Document(const Document& doc){
     for(const auto& feature:doc.features){
@@ -276,12 +306,13 @@ std::string documentToJson(const Document& doc){
     Value r=Value::makeObj();
     r.set("format",Value::makeStr("ark"));
     bool sourceTube=false;bool notched=false;bool nativeVersion=false;bool generation8=false;bool generation9=false;bool extended=!doc.assembly.empty()||doc.nextAssemblyId_>1;for(auto& f:doc.features){extended|=f.type==FeatureType::Tube;notched|=f.type==FeatureType::NotchedTube;sourceTube|=f.type==FeatureType::SourceTube;nativeVersion|=f.type==FeatureType::Loft||f.type==FeatureType::SurfaceFill||f.type==FeatureType::BSplineSurface||f.type==FeatureType::Thicken||f.type==FeatureType::SheetMetal||f.type==FeatureType::SourceSheet||f.type==FeatureType::NativeSolid;generation8|=f.type==FeatureType::Sweep||f.type==FeatureType::ExtrudeSurface||f.type==FeatureType::RevolveSurface||f.type==FeatureType::OffsetSurface||f.type==FeatureType::Sew||isMeshModelFeature(f.type);generation9|=generation9Feature(doc,f);}
+    bool generation13=generation13Document(doc);
     bool generation12=generation12Document(doc);
     bool generation11=generation11Document(doc);
     bool generation10=generation10Document(doc);
     bool sketchVersion=!doc.planes.empty()||!doc.sketches.empty();for(auto& f:doc.features)sketchVersion|=f.type==FeatureType::SketchCut;
     bool latest=!doc.mates.empty()||doc.nextMateId_>1;for(auto& p:doc.planes)latest|=p.support.t==Value::Obj||p.kind!="plane";for(auto& f:doc.features)latest|=f.type==FeatureType::NativeSolid||(f.type==FeatureType::SheetMetal&&f.nativeSpec.find("base"));for(auto& n:doc.assembly)latest|=n.fixed;for(auto& sk:doc.sketches)for(auto& c:sk.sk.cons)latest|=!c.id.empty();
-    r.set("version",Value::makeNum(generation12?12:generation11?11:generation10?10:generation9?9:generation8?8:latest?7:nativeVersion?6:sketchVersion?5:sourceTube?4:notched?3:extended?2:1));
+    r.set("version",Value::makeNum(generation13?13:generation12?12:generation11?11:generation10?10:generation9?9:generation8?8:latest?7:nativeVersion?6:sketchVersion?5:sourceTube?4:notched?3:extended?2:1));
     r.set("units",Value::makeStr("mm"));
     r.set("next_feature_id",Value::makeNum((double)doc.nextFeatureId_));
 
@@ -297,6 +328,16 @@ std::string documentToJson(const Document& doc){
         Value planes=Value::makeArr();for(auto& plane:doc.planes){Value v=Value::makeObj(),p=Value::makeObj();v.set("name",Value::makeStr(plane.name));v.set("parent",Value::makeStr(plane.parent));
             std::vector<std::string> keys;for(auto& kv:plane.p)keys.push_back(kv.first);std::sort(keys.begin(),keys.end());for(auto& key:keys)p.set(key,Value::makeStr(plane.p.at(key)));v.set("p",p);v.set("kind",Value::makeStr(plane.kind));if(plane.support.t==Value::Obj)v.set("support",plane.support);planes.arr.push_back(v);
         }r.set("planes",planes);
+    }
+    if(!doc.canvases.empty()){
+        Value canvases=Value::makeArr();
+        for(auto& canvas:doc.canvases){
+            Value item=Value::makeObj();
+            item.set("name",Value::makeStr(canvas.name));item.set("plane",Value::makeStr(canvas.plane));item.set("path",Value::makeStr(canvas.path));
+            item.set("width",Value::makeStr(canvas.width));item.set("height",Value::makeStr(canvas.height));item.set("opacity",Value::makeNum(canvas.opacity));
+            canvases.arr.push_back(std::move(item));
+        }
+        r.set("canvases",canvases);
     }
 
     Value sks=Value::makeArr();
@@ -318,6 +359,7 @@ std::string documentToJson(const Document& doc){
         v.set("type",Value::makeStr(featureTypeName(f.type)));
         v.set("name",Value::makeStr(f.name));
         v.set("op",Value::makeNum(f.opInt));
+        if(f.suppressed)v.set("suppressed",Value::makeBool(true));
         Value in=Value::makeArr();
         for(u64 id:f.inputs) in.arr.push_back(Value::makeNum((double)id));
         v.set("inputs",std::move(in));
@@ -353,13 +395,13 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     Value v;
     if(!arkjson::parse(json,v)) return fail("malformed JSON");
     if(v.t!=Value::Obj) return fail("root must be object");
-    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0&&ver->num!=3.0&&ver->num!=4.0&&ver->num!=5.0&&ver->num!=6.0&&ver->num!=7.0&&ver->num!=8.0&&ver->num!=9.0&&ver->num!=10.0&&ver->num!=11.0&&ver->num!=12.0)))
+    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0&&ver->num!=3.0&&ver->num!=4.0&&ver->num!=5.0&&ver->num!=6.0&&ver->num!=7.0&&ver->num!=8.0&&ver->num!=9.0&&ver->num!=10.0&&ver->num!=11.0&&ver->num!=12.0&&ver->num!=13.0)))
         return fail("unsupported document version");
 
     if(auto format=v.find("format");format && format->asStr()!="ark")return fail("unsupported format");
     if(auto units=v.find("units");units && units->asStr()!="mm")return fail("unsupported units (expected mm)");
     if(!v.find("features"))return fail("missing features array");
-    for(auto key:{"params","sketches","features","planes"})if(auto a=v.find(key);a && a->t!=Value::Arr)return fail(std::string(key)+" must be an array");
+    for(auto key:{"params","sketches","features","planes","canvases"})if(auto a=v.find(key);a && a->t!=Value::Arr)return fail(std::string(key)+" must be an array");
     Document nd;   // parse into scratch; commit only on full success
     std::set<std::string> paramNames,sketchNames;
     std::set<u64> featureIds;
@@ -393,6 +435,25 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
             nd.planes.push_back(std::move(plane));
         }
     }
+    if(auto canvases=v.find("canvases")){
+        if(canvases->arr.size()>8)return fail("Canvas capacity exceeded");
+        std::set<std::string> names;
+        for(auto& j:canvases->arr){
+            if(j.t!=Value::Obj)return fail("Canvas must be an object");
+            PlaneCanvas canvas;
+            auto name=j.find("name");
+            if(!name||name->t!=Value::Str||name->str.empty()||name->str.size()>128||!names.insert(name->str).second)return fail("Canvas name must be 1..128 characters");
+            canvas.name=name->str;
+            if(auto plane=j.find("plane")){if(plane->t!=Value::Str||plane->str.empty()||plane->str.size()>128)return fail("Canvas plane must be a name");canvas.plane=plane->str;}
+            auto path=j.find("path");
+            if(!path||path->t!=Value::Str||path->str.empty()||path->str.size()>1024)return fail("Canvas path must be 1..1024 characters");
+            canvas.path=path->str;
+            auto takeExpr=[&](const char* key,std::string& out){auto value=j.find(key);if(!value)return fail(std::string("Canvas needs ")+key);if(value->t==Value::Str&&!value->str.empty()&&value->str.size()<=2048){out=value->str;return true;}if(value->t==Value::Num&&std::isfinite(value->num)){out=value->dump();return true;}return fail("Canvas width and height must be expressions");};
+            if(!takeExpr("width",canvas.width)||!takeExpr("height",canvas.height))return false;
+            if(auto opacity=j.find("opacity")){if(opacity->t!=Value::Num||!std::isfinite(opacity->num)||opacity->num<0||opacity->num>1)return fail("Canvas opacity must be 0..1");canvas.opacity=opacity->num;}
+            nd.canvases.push_back(std::move(canvas));
+        }
+    }
 
     u64 maxId=0;
     if(auto fs=v.find("features"))
@@ -406,6 +467,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
             if(!featureTypeFromName(tn,nf.type)) return fail("unknown feature type: "+tn);
             nf.name=fv.find("name")?fv.find("name")->asStr():"";
             nf.opInt=(int)(fv.find("op")?fv.find("op")->asNum():0);
+            if(auto flag=fv.find("suppressed")){if(flag->t!=Value::Bool)return fail("suppressed must be boolean");nf.suppressed=flag->b;}
             if(auto in=fv.find("inputs")){
                 if(in->t!=Value::Arr)return fail("inputs must be an array");
                 for(auto&idv:in->arr){
@@ -475,12 +537,20 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     if(generation10Document(nd)){auto version=v.find("version");if(!version||version->asNum()<10)return fail("placed-instance booleans, unions of more than two exact solids, or instance patterns require document version 10");}
     if(generation11Document(nd)){auto version=v.find("version");if(!version||version->asNum()<11)return fail("solid shells or loft guide curves require document version 11");}
     if(generation12Document(nd)){auto version=v.find("version");if(!version||version->asNum()<12)return fail("points, curve segments, or curve features require document version 12");}
-    if(nd.params.size()>256||nd.features.size()>1024||nd.sketches.size()>64)return fail("document capacity exceeded");
+    if(generation13Document(nd)){auto version=v.find("version");if(!version||version->asNum()<13)return fail("plane canvases, suppressed features, or projected and offset sketch entities require document version 13");}
+    if(nd.params.size()>256||nd.features.size()>1024||nd.sketches.size()>64||nd.canvases.size()>8)return fail("document capacity exceeded");
     nd.refreshParams();
     if(!nd.parameterError.empty())return fail(nd.parameterError);
+    for(auto& canvas:nd.canvases){
+        bool known=canvas.plane=="XY"||canvas.plane=="XZ"||canvas.plane=="YZ";
+        for(auto& plane:nd.planes) if(plane.name==canvas.plane) known=true;
+        if(!known) return fail("Canvas plane was not found");
+        auto lengthOk=[&](const std::string& expr){bool ok=false;double value=evalExpr(expr,nd.buildEnv(),&ok);return ok&&value>0.&&value<=1e6;};
+        if(!lengthOk(canvas.width)||!lengthOk(canvas.height)) return fail("Canvas width and height must be positive millimetres");
+    }
     std::vector<AssemblyPlacement> placements;std::string assemblyError;if(nd.mates.empty()&&!resolveAssembly(nd,placements,assemblyError))return fail(assemblyError);
     bool supported=false;for(auto& p:nd.planes)supported|=p.support.t==Value::Obj;
-    try{if(!supported){for(auto& plane:nd.planes)resolvePlane(nd,plane.name);for(auto& sketch:nd.sketches)resolvePlane(nd,sketch.sk.plane);}}
+    try{if(!supported){for(auto& plane:nd.planes)resolvePlane(nd,plane.name);for(auto& sketch:nd.sketches)resolvePlane(nd,sketch.sk.plane);for(auto& canvas:nd.canvases)resolvePlane(nd,canvas.plane);}}
     catch(const std::exception& e){return fail(e.what());}
     doc=std::move(nd);
     return true;

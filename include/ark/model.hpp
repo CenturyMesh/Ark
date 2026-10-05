@@ -56,6 +56,7 @@ struct Feature {
     arkjson::Value sourceData;
     arkjson::Value nativeSpec; // authored native geometry; evaluated worker output is never serialized
     int opInt = 0;                                    // Boolean: 0 union 1 cut 2 intersect
+    bool suppressed = false;                          // history and parameters stay; recompute skips the body
 
     std::string get(const char* k, const char* dflt="") const {
         auto it=p.find(k); return it==p.end()?dflt:it->second;
@@ -79,9 +80,11 @@ struct FeatureResult {
 // ---------------------------------------------------------------------------
 // Sketches ----------------------------------------------------------------------
 struct SketchEnt {
-    enum Kind : i32 { Pnt, Line, Circle, Spline, Arc, Wire } kind=Pnt;
+    enum Kind : i32 { Pnt, Line, Circle, Spline, Arc, Wire, Project, Offset } kind=Pnt;
     // dof layout: Pnt -> [x,y]; Line -> [x0,y0,x1,y1]; Circle -> [cx,cy,r]
     // Arc -> [cx,cy,r,a0deg,a1deg]. Wire flattens start, then each segment.
+    // Project and offset store the same flattened polyline as a wire of lines.
+    // Their coordinates are driven: the solver does not free them.
     struct WireSeg {
         enum Kind : i32 { Line, Arc, Cubic } kind=Line;
         int sweep=1; // +1 bulges left of the directed chord; the arc is the minor arc
@@ -92,6 +95,10 @@ struct SketchEnt {
     std::vector<WireSeg> segments;
     bool construction=false, closed=false;
     f64 tension=0;
+    u64 sourceFeature=0;          // project: earlier feature id
+    std::string reference;        // project: edge or planar face name
+    std::string sourceName;       // offset: earlier entity in this sketch
+    std::string distance;         // offset: signed millimetres, positive to the left
 };
 struct SketchCon {
     enum Type : i32 {
@@ -166,6 +173,17 @@ struct DatumPlane {
     std::string kind="plane"; // plane, axis (local Z), or full coordinate frame
 };
 
+// Display photo on a datum. The kernel stores the path and the rectangle; it
+// does not decode pixels. Studio draws it. A missing file is not a model error.
+struct PlaneCanvas {
+    std::string name;
+    std::string plane="XY";
+    std::string path;
+    std::string width="100";
+    std::string height="100";
+    double opacity=0.65;
+};
+
 class Document {
 public:
     // parameters ------------------------------------------------------------
@@ -186,6 +204,7 @@ public:
     // Solved once per recompute, before any feature evaluates.
     std::vector<NamedSketch> sketches;
     std::vector<DatumPlane> planes;
+    std::vector<PlaneCanvas> canvases;
     NamedSketch* findSketch(const std::string& name);
     void setSketch(const std::string& name, Sketch sk);   // create or replace
     bool removeSketch(const std::string& name);

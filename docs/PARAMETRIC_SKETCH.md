@@ -52,6 +52,17 @@ support kind `on_curve` or `on_face` attaches a datum to an edge or a face.
 Documents that use these save as version 12. The reader still accepts the
 older versions described above.
 
+A `project` entity drops an edge or a planar face of an earlier feature onto
+the sketch plane. A parallel face becomes its boundary wire. A face that is
+not parallel becomes the single segment where that boundary meets the plane.
+An `offset` entity copies an earlier curve at a signed distance in
+millimetres. Positive distance is to the left of the directed curve, the same
+side as a wire sweep of +1, so a counter-clockwise loop offsets inward.
+Both kinds are driven: the solver does not free their coordinates, and
+`sketch.patch` rejects them. Replace the entity to change the distance.
+These entities, a suppressed feature, and a plane canvas save as document
+version 13.
+
 `sketch_inspect{name}` reports solved coordinates, residual, local numerical
 Jacobian rank, remaining degrees of freedom and profile readiness. The rank is
 a local diagnosis, not proof of global uniqueness. Conflicting constraints

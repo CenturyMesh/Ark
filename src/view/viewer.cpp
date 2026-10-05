@@ -18,6 +18,8 @@
 #include <commdlg.h>
 #include <shellapi.h>
 #include <dwmapi.h>
+#include <objbase.h>
+#include <wincodec.h>
 
 // ---- MinGW gl.h is GL 1.1: declare what we need ourselves ------------------
 #ifndef GL_VERSION_3_0_DEFS
@@ -30,6 +32,8 @@ typedef ptrdiff_t GLsizeiptr;
 #define GL_TEXTURE1                0x84C1
 #define GL_R8                      0x8229
 #define GL_RGBA8                   0x8058
+#define GL_RGBA16F                 0x881A
+#define GL_HALF_FLOAT              0x140B
 #define GL_DEPTH_COMPONENT24       0x81A6
 #define GL_FRAMEBUFFER             0x8D40
 #define GL_COLOR_ATTACHMENT0       0x8CE0
@@ -235,7 +239,9 @@ static constexpr UINT WM_ARK_TOOL=WM_APP+20,WM_ARK_CHAT=WM_APP+21;
 struct UiToolRequest {std::string tool;arkjson::Value args;LiveSessionBridge::Completion complete;std::stop_token stop;std::shared_ptr<std::atomic_bool> cancel;std::shared_ptr<std::atomic<u64>> revision;u64 epoch=0;};
 struct UiChatEvent {std::string text;bool final=false,error=false;arkjson::Value history;u64 epoch=0;};
 static std::deque<std::unique_ptr<UiToolRequest>> g_toolQueue;
-static GLuint sketchVao=0,sketchVbo=0;static bool g_sketchGpuDirty=true;static std::vector<float> g_sketchLines,g_sketchPoints,g_constraintHighlightLines,g_datumLines;static AABB g_sketchBounds;
+static GLuint sketchVao=0,sketchVbo=0,canvasVao=0,canvasVbo=0,g_canvasMissing=0;static bool g_sketchGpuDirty=true;static std::vector<float> g_sketchLines,g_sketchPoints,g_constraintHighlightLines,g_datumLines;static AABB g_sketchBounds;
+struct CanvasTexture { std::string path; unsigned long long stamp=0; bool missing=true; GLuint tex=0; };
+static std::vector<CanvasTexture> g_canvasTextures;
 
 
 static std::vector<Zone>    g_zones;
@@ -377,7 +383,7 @@ void main(){
  base+=(vec3(.97,.98,1.)*spec*.18+vec3(.90,.92,.95)*broad*.12)*satin;
  float fr=pow(1.-max(dot(n,v),0.),3.4);
  base+=vec3(.62,.66,.72)*fr*.10;
- float cavity=clamp(1.-length(fwidth(n))*2.4,.62,1.);
+ float cavity=clamp(1.-length(fwidth(n))*1.15,.90,1.);
  base*=cavity;
  base=mix(base,min(base+vec3(.10,.055,.015),vec3(1.)),sel);
  o=vec4(base,1.);
@@ -408,10 +414,13 @@ void main(){
  vec3 pos=ortho>.5?vec3(ndc.x/focal.x,ndc.y/focal.y,-dist):vec3(ndc.x*dist/focal.x,ndc.y*dist/focal.y,-dist);
  vec3 t=normalize(cross(n,abs(n.y)<.85?vec3(0,1,0):vec3(1,0,0))); vec3 b=cross(n,t);
  float ang=fract(sin(dot(gl_FragCoord.xy,vec2(12.9898,78.233)))*43758.5453)*6.2831853; float ca=cos(ang),sa=sin(ang); float occ=0.;
- for(int i=0;i<16;++i){vec3 k=K[i]; vec3 s=t*(k.x*ca-k.y*sa)+b*(k.x*sa+k.y*ca)+n*abs(k.z); s=pos+normalize(s)*radius*(.18+.82*float(i)/15.);
+ for(int i=0;i<16;++i){vec3 k=K[i]; vec3 hem=t*(k.x*ca-k.y*sa)+b*(k.x*sa+k.y*ca)+n*abs(k.z); vec3 s=pos+normalize(hem)*radius*(.18+.82*float(i)/15.);
   vec4 clip=proj*vec4(s,1.); vec2 suv=clip.xy/max(clip.w,1e-4)*.5+.5; if(suv.x<0.||suv.y<0.||suv.x>1.||suv.y>1.)continue;
-  float sd=texture(gbuf,suv).a*4000.; float range=smoothstep(0.,1.,radius/max(abs(dist-sd),.001)); occ+=step(sd+bias,-s.z)*range;}
- o=vec4(clamp(1.-occ/14.,.74,1.));
+  float raw=texture(gbuf,suv).a; if(raw>0.985)continue; float sd=raw*4000.;
+  float denom=dot(s,n); if(abs(denom)<1e-4)continue; float u=dot(pos,n)/denom; if(u<=0.)continue;
+  float planeDist=-u*s.z; float delta=planeDist-sd; float range=smoothstep(0.,1.,radius/max(abs(dist-sd),.001));
+  occ+=smoothstep(bias,bias+radius*.45,delta)*range;}
+ o=vec4(clamp(1.-occ/10.,.86,1.));
 })";
 static const char* FS_COMPOSE=R"(#version 330 core
 out vec4 o; uniform sampler2D ao,gbuf; uniform vec2 res,origin;
@@ -577,7 +586,7 @@ static void rebuildSketchOverlay(){
     for(auto& named:g_doc.sketches){if(!g_activeSketch.empty()&&named.name!=g_activeSketch)continue;auto frame=resolvePlane(g_doc,named.sk.plane);
         if(named.name==g_activeSketch){g_sketchDiagnosis=diagnoseSketch(named.sk);if(g_selectedSketchConstraint>=(int)named.sk.cons.size())g_selectedSketchConstraint=-1;g_sketchConstraintPage=std::min(g_sketchConstraintPage,(int)((named.sk.cons.size()+3)/4)-1);g_sketchConstraintPage=std::max(g_sketchConstraintPage,0);}
         const SketchCon* selected=(named.name==g_activeSketch&&g_selectedSketchConstraint>=0&&g_selectedSketchConstraint<(int)named.sk.cons.size())?&named.sk.cons[(size_t)g_selectedSketchConstraint]:nullptr;
-        for(size_t ei=0;ei<named.sk.ents.size();++ei){auto& entity=named.sk.ents[ei];std::string entityName=entity.name.empty()?"entity."+std::to_string(ei):entity.name;auto sampled=sampleSketchEntity(entity,named.sk.tolerance);for(size_t i=1;i<sampled.size();++i){auto a=frame.transformPoint({sampled[i-1].x,sampled[i-1].y,0}),b=frame.transformPoint({sampled[i].x,sampled[i].y,0});put(g_sketchLines,a);put(g_sketchLines,b);g_curveSamples.push_back({named.name,entityName,a,b});g_sketchBounds.grow(a);g_sketchBounds.grow(b);if(selected&&((int)ei==selected->a||(int)ei==selected->b)){put(g_constraintHighlightLines,a);put(g_constraintHighlightLines,b);}}
+        for(size_t ei=0;ei<named.sk.ents.size();++ei){auto& entity=named.sk.ents[ei];std::string entityName=entity.name.empty()?"entity."+std::to_string(ei):entity.name;std::vector<Vec2> sampled;try{sampled=sampleSketchEntity(entity,named.sk.tolerance);}catch(const std::exception&){continue;}for(size_t i=1;i<sampled.size();++i){auto a=frame.transformPoint({sampled[i-1].x,sampled[i-1].y,0}),b=frame.transformPoint({sampled[i].x,sampled[i].y,0});put(g_sketchLines,a);put(g_sketchLines,b);g_curveSamples.push_back({named.name,entityName,a,b});g_sketchBounds.grow(a);g_sketchBounds.grow(b);if(selected&&((int)ei==selected->a||(int)ei==selected->b)){put(g_constraintHighlightLines,a);put(g_constraintHighlightLines,b);}}
             size_t stride=entity.kind==SketchEnt::Circle?entity.dof.size():2;for(size_t i=0;i+1<entity.dof.size();i+=stride){auto point=frame.transformPoint({entity.dof[i],entity.dof[i+1],0});put(g_sketchPoints,point);g_sketchBounds.grow(point);}
             if(selected)for(auto ref:{std::pair{selected->a,selected->pa},std::pair{selected->b,selected->pb}})if(ref.first==(int)ei){
                 size_t slot=entity.kind==SketchEnt::Line||entity.kind==SketchEnt::Spline?(size_t)std::max(ref.second,0)*2:0;
@@ -598,6 +607,16 @@ static void rebuildSketchOverlay(){
         }
     }
     refreshSelectionLines();
+}
+static void includeCanvasBounds(){
+    ExprEnv env=g_doc.buildEnv();
+    for(const auto& canvas:g_doc.canvases){
+        bool okWidth=false,okHeight=false;
+        double width=evalExpr(canvas.width,env,&okWidth),height=evalExpr(canvas.height,env,&okHeight);
+        if(!okWidth||!okHeight||!(width>0)||!(height>0))continue;
+        try{Mat4 plane=resolvePlane(g_doc,canvas.plane);for(Vec3 corner: {Vec3{0,0,0},{width,0,0},{width,height,0},{0,height,0}})g_sceneBounds.grow(plane.transformPoint(corner));}
+        catch(...){}
+    }
 }
 static void rebuildScene(bool evaluate=false){
     if(evaluate)g_doc.recompute();
@@ -657,6 +676,7 @@ static void rebuildScene(bool evaluate=false){
     if(!g_activeSketch.empty()&&!g_doc.findSketch(g_activeSketch))g_activeSketch.clear();
     if(g_activePlane!="XY"&&g_activePlane!="XZ"&&g_activePlane!="YZ"&&std::none_of(g_doc.planes.begin(),g_doc.planes.end(),[](auto& p){return p.name==g_activePlane;}))g_activePlane="XY";
     rebuildSketchOverlay();
+    includeCanvasBounds();
     if(auto* f=selectedNotchedTube())g_selectedNotch=std::max(0,std::min(g_selectedNotch,(int)f->notches.size()-1));
 }
 static double sheetDisplayProgress(u64 id){auto it=g_sheetProgress.find(id);return it==g_sheetProgress.end()?(g_sheetFlatViews[id]?0.:1.):it->second;}
@@ -672,6 +692,7 @@ static void updateSheetDisplay(u64 id){
     for(size_t part:changed){g_cpuMeshes[part]=mesh;if(part<g_partPicks.size())g_partPicks[part]=progress>=1?partPickFrom(*body):PartPick{};uploadMesh(g_meshes[part],g_cpuMeshes[part]);uploadEdges(part);g_reports[part]=analyzeMesh(g_cpuMeshes[part]);g_bvhs[part]=MeshBVH(g_cpuMeshes[part]);}
     g_sceneBounds=AABB{};g_triangleCount=0;
     for(size_t i=0;i<g_bodyIds.size();++i){size_t part=g_instancePart[i];g_sceneBounds.grow(g_reports[part].bounds.transformed(g_instanceWorld[i]));g_triangleCount+=g_cpuMeshes[part].triCount();}
+    includeCanvasBounds();
 }
 static void sheetPreviewSet(u64 id,double progress){
     progress=clamp(progress,0.,1.);double before=sheetDisplayProgress(id);bool wasFlat=g_sheetFlatViews[id];
@@ -2053,12 +2074,12 @@ static void pickReference(int mx,int my){
 }
 
 // ---------------------------------------------------------------------------
-static GLuint pBg,pSolid,pGrid,pShadow,pUI,pText,pSketch,pGeom,pAo,pCompose,pEdge;
+static GLuint pBg,pSolid,pGrid,pShadow,pUI,pText,pSketch,pGeom,pAo,pCompose,pEdge,pCanvas;
 static GLint suVp,suModel,suOutline,suColor,suEye,suSel,suHard;
 static GLint guView,guProj,guModel,guHard,auProj,auFocal,auOrtho,auRadius,auBias,cuOrigin,euVp,euModel;
 static GLint uuVp,uuRc,uuRad,uuFill,uuBorder,uuBW,uuGlyph;
 static GLuint quadVao,gridVao,textVao,textVbo,gFbo=0,gGeomTex=0,gAoTex=0,gDepthTex=0,gCubeVao=0,gCubeVbo=0;
-static int gridCount=0,gOccW=0,gOccH=0;
+static int gridCount=0,gOccW=0,gOccH=0,gOccTriedW=-1,gOccTriedH=-1;
 static bool g_swap=true,gOccReady=false;   // headless readback disables the buffer swap
 static void drawSurfaces(bool geometry,const Mat4& view,const Mat4& proj,const GLfloat vpT[16],const Vec3& eye){
     GLint modelLoc=geometry?guModel:suModel,hardLoc=geometry?guHard:suHard;
@@ -2096,11 +2117,12 @@ static void drawSurfaces(bool geometry,const Mat4& view,const Mat4& proj,const G
 static bool ensureOcclusionTargets(int w,int h){
     if(!glGenFramebuffers||!glBindFramebuffer||!glFramebufferTexture2D||!glCheckFramebufferStatus||!glDeleteFramebuffers)return false;
     if(gOccReady&&gOccW==w&&gOccH==h)return true;
+    if(!gOccReady&&gOccTriedW==w&&gOccTriedH==h)return false;
     if(gFbo){glDeleteFramebuffers(1,&gFbo);gFbo=0;}if(gGeomTex){glDeleteTextures(1,&gGeomTex);gGeomTex=0;}if(gAoTex){glDeleteTextures(1,&gAoTex);gAoTex=0;}if(gDepthTex){glDeleteTextures(1,&gDepthTex);gDepthTex=0;}
     auto tex=[&](GLuint& id,GLint internal,GLenum format,GLenum type){glGenTextures(1,&id);glBindTexture(GL_TEXTURE_2D,id);glTexImage2D(GL_TEXTURE_2D,0,internal,w,h,0,format,type,nullptr);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);};
-    tex(gGeomTex,GL_RGBA8,GL_RGBA,GL_UNSIGNED_BYTE);tex(gAoTex,GL_RGBA8,GL_RGBA,GL_UNSIGNED_BYTE);tex(gDepthTex,GL_DEPTH_COMPONENT24,GL_DEPTH_COMPONENT,GL_FLOAT);
+    tex(gGeomTex,GL_RGBA16F,GL_RGBA,GL_HALF_FLOAT);tex(gAoTex,GL_RGBA8,GL_RGBA,GL_UNSIGNED_BYTE);tex(gDepthTex,GL_DEPTH_COMPONENT24,GL_DEPTH_COMPONENT,GL_FLOAT);
     glGenFramebuffers(1,&gFbo);glBindFramebuffer(GL_FRAMEBUFFER,gFbo);glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,gGeomTex,0);glFramebufferTexture2D(GL_FRAMEBUFFER,GL_DEPTH_ATTACHMENT,GL_TEXTURE_2D,gDepthTex,0);
-    gOccReady=glCheckFramebufferStatus(GL_FRAMEBUFFER)==GL_FRAMEBUFFER_COMPLETE;glBindFramebuffer(GL_FRAMEBUFFER,0);gOccW=w;gOccH=h;
+    gOccReady=glCheckFramebufferStatus(GL_FRAMEBUFFER)==GL_FRAMEBUFFER_COMPLETE;glBindFramebuffer(GL_FRAMEBUFFER,0);gOccW=w;gOccH=h;gOccTriedW=w;gOccTriedH=h;
     if(!gOccReady)while(glGetError()!=GL_NO_ERROR){}
     return gOccReady;
 }
@@ -2147,6 +2169,92 @@ static void paintViewCube(){
     glDisable(GL_DEPTH_TEST);glViewport(0,0,winW,winH);
 }
 
+static std::wstring widePath(const std::string& path){
+    if(path.empty())return {};
+    int count=MultiByteToWideChar(CP_UTF8,0,path.data(),(int)path.size(),nullptr,0);
+    if(count<=0)return {};
+    std::wstring wide((size_t)count,L'\0');
+    MultiByteToWideChar(CP_UTF8,0,path.data(),(int)path.size(),wide.data(),count);
+    return wide;
+}
+static unsigned long long fileStamp(const std::wstring& path){
+    WIN32_FILE_ATTRIBUTE_DATA data;
+    if(!GetFileAttributesExW(path.c_str(),GetFileExInfoStandard,&data))return 0;
+    ULARGE_INTEGER stamp;stamp.LowPart=data.ftLastWriteTime.dwLowDateTime;stamp.HighPart=data.ftLastWriteTime.dwHighDateTime;
+    return stamp.QuadPart;
+}
+static bool decodeCanvasFile(const std::wstring& path,std::vector<unsigned char>& rgba,unsigned& width,unsigned& height){
+    static bool started=false;
+    if(!started){HRESULT hr=CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED);if(FAILED(hr)&&hr!=RPC_E_CHANGED_MODE)return false;started=true;}
+    const GUID factoryId={0xcacaf262,0x9370,0x4615,{0xa1,0x3b,0x9f,0x55,0x39,0xda,0x4c,0x0a}};
+    IWICImagingFactory* factory=nullptr;
+    if(FAILED(CoCreateInstance(factoryId,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&factory))))return false;
+    IWICBitmapDecoder* decoder=nullptr;IWICBitmapFrameDecode* frame=nullptr;IWICFormatConverter* converter=nullptr;IWICBitmapScaler* scaler=nullptr;
+    bool ok=false;
+    if(SUCCEEDED(factory->CreateDecoderFromFilename(path.c_str(),nullptr,GENERIC_READ,WICDecodeMetadataCacheOnDemand,&decoder))
+        &&SUCCEEDED(decoder->GetFrame(0,&frame))
+        &&SUCCEEDED(factory->CreateFormatConverter(&converter))
+        &&SUCCEEDED(converter->Initialize(frame,GUID_WICPixelFormat32bppRGBA,WICBitmapDitherTypeNone,nullptr,0.0,WICBitmapPaletteTypeCustom))){
+        IWICBitmapSource* source=converter;UINT srcW=0,srcH=0;converter->GetSize(&srcW,&srcH);
+        if((srcW>2048||srcH>2048)&&SUCCEEDED(factory->CreateBitmapScaler(&scaler))){
+            double scale=std::min(2048.0/std::max(srcW,1u),2048.0/std::max(srcH,1u));
+            UINT dw=std::max(1u,(UINT)std::lround(srcW*scale)),dh=std::max(1u,(UINT)std::lround(srcH*scale));
+            if(SUCCEEDED(scaler->Initialize(converter,dw,dh,WICBitmapInterpolationModeFant)))source=scaler;
+        }
+        UINT w=0,h=0;
+        if(SUCCEEDED(source->GetSize(&w,&h))&&w>0&&h>0&&w<=2048&&h<=2048){
+            rgba.resize((size_t)w*h*4);
+            if(SUCCEEDED(source->CopyPixels(nullptr,w*4,(UINT)rgba.size(),rgba.data()))){
+                std::vector<unsigned char> row((size_t)w*4);
+                for(UINT y=0;y<h/2;++y){auto* a=rgba.data()+(size_t)y*w*4;auto* b=rgba.data()+(size_t)(h-1-y)*w*4;std::copy(a,a+w*4,row.begin());std::copy(b,b+w*4,a);std::copy(row.begin(),row.end(),b);}
+                width=w;height=h;ok=true;
+            }
+        }
+    }
+    if(scaler)scaler->Release();if(converter)converter->Release();if(frame)frame->Release();if(decoder)decoder->Release();factory->Release();
+    return ok;
+}
+static GLuint canvasTexture(const std::string& path){
+    std::wstring wide=widePath(path);unsigned long long stamp=wide.empty()?0:fileStamp(wide);
+    CanvasTexture* cached=nullptr;
+    for(auto& item:g_canvasTextures)if(item.path==path)cached=&item;
+    if(!cached){g_canvasTextures.push_back({path,0,true,0});cached=&g_canvasTextures.back();}
+    if(cached->stamp==stamp&&(cached->tex||cached->missing))return cached->missing?g_canvasMissing:cached->tex;
+    std::vector<unsigned char> rgba;unsigned w=0,h=0;
+    cached->stamp=stamp;cached->missing=true;
+    if(stamp&&decodeCanvasFile(wide,rgba,w,h)){
+        if(!cached->tex)glGenTextures(1,&cached->tex);
+        glBindTexture(GL_TEXTURE_2D,cached->tex);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+        glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,(GLsizei)w,(GLsizei)h,0,GL_RGBA,GL_UNSIGNED_BYTE,rgba.data());
+        cached->missing=false;
+    }
+    return cached->missing?g_canvasMissing:cached->tex;
+}
+static void drawCanvases(const GLfloat* vpT){
+    if(!pCanvas||!canvasVao||g_doc.canvases.empty())return;
+    glEnable(GL_DEPTH_TEST);glDepthMask(GL_TRUE);glEnable(GL_POLYGON_OFFSET_FILL);glPolygonOffset(1.f,1.f);
+    glUseProgram(pCanvas);glUniformMatrix4fv(glGetUniformLocation(pCanvas,"vp"),1,GL_FALSE,vpT);glUniform1i(glGetUniformLocation(pCanvas,"img"),0);
+    glActiveTexture(GL_TEXTURE0);glBindVertexArray(canvasVao);
+    ExprEnv env=g_doc.buildEnv();
+    for(const auto& canvas:g_doc.canvases){
+        bool okWidth=false,okHeight=false;double width=evalExpr(canvas.width,env,&okWidth),height=evalExpr(canvas.height,env,&okHeight);
+        if(!okWidth||!okHeight||!(width>0)||!(height>0))continue;
+        Mat4 model;
+        try{model=resolvePlane(g_doc,canvas.plane)*Mat4::scale(width,height,1);}catch(...){continue;}
+        GLfloat matrix[16];for(int i=0;i<16;++i)matrix[i]=(GLfloat)model.m[i];
+        GLuint tex=canvasTexture(canvas.path);bool live=tex&&tex!=g_canvasMissing;
+        glUniformMatrix4fv(glGetUniformLocation(pCanvas,"model"),1,GL_FALSE,matrix);
+        glUniform1f(glGetUniformLocation(pCanvas,"opacity"),(float)clamp(canvas.opacity,0.,1.));
+        glUniform1f(glGetUniformLocation(pCanvas,"live"),live?1.f:0.f);
+        glBindTexture(GL_TEXTURE_2D,live?tex:g_canvasMissing);
+        glDrawArrays(GL_TRIANGLES,0,6);
+    }
+    glBindTexture(GL_TEXTURE_2D,0);glDisable(GL_POLYGON_OFFSET_FILL);
+}
 static void drawFrame(HDC hdc){
     static auto previous=std::chrono::steady_clock::now();auto now=std::chrono::steady_clock::now();
     double elapsed=std::min(.10,std::chrono::duration<double>(now-previous).count());advanceFold(elapsed);advanceSheet(elapsed);previous=now;
@@ -2192,6 +2300,7 @@ static void drawFrame(HDC hdc){
 
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LEQUAL);
+    drawCanvases(vpT);
     drawSurfaces(false,view,proj,vpT,eye);
     applyOcclusion(view,proj,vpT,eye);
     if(g_showEdges&&!wireframe)drawFeatureEdges(vpT);
@@ -2276,7 +2385,7 @@ static void drawFrame(HDC hdc){
     for(size_t i=0;i<featureRows;++i){
         ExplorerItem row;
         if(g_doc.assembly.empty()){
-            auto& f=g_doc.features[i];row.name=f.name;row.subtitle=std::string(featureTypeName(f.type))+" #"+std::to_string(f.id);
+            auto& f=g_doc.features[i];row.name=f.name;row.subtitle=std::string(featureTypeName(f.type))+" #"+std::to_string(f.id);if(f.suppressed)row.subtitle+=" / suppressed";
             for(size_t j=0;j<g_bodyIds.size();++j)if(g_bodyIds[j]==f.id){row.zone=2000+(int)j;row.selected=selBody==(int)j;}
         }else{
             auto& node=g_doc.assembly[i];bool group=node.feature==0;row.kind=group?3:0;row.name=node.name;row.subtitle=group?"Subassembly":"Part #"+std::to_string(node.feature)+" / node "+std::to_string(node.id);
@@ -2287,6 +2396,7 @@ static void drawFrame(HDC hdc){
     }
     for(size_t k=0;k<g_doc.sketches.size();++k){auto& sketch=g_doc.sketches[k];explorer.push_back({sketch.name,"Sketch / "+sketch.sk.plane,11000+(int)k,sketch.name==g_activeSketch&&g_showSketches,0,1});}
     for(size_t k=0;k<g_doc.planes.size();++k){auto& datum=g_doc.planes[k];explorer.push_back({datum.name,"Datum / "+datum.kind,14000+(int)k,datum.name==g_activePlane&&g_showDatumPlanes,0,2});}
+    for(size_t k=0;k<g_doc.canvases.size();++k){auto& canvas=g_doc.canvases[k];explorer.push_back({canvas.name,"Canvas / "+canvas.plane,-1,false,0,2});}
     if(g_treeScroll>=(int)explorer.size())g_treeScroll=std::max(0,(int)explorer.size()-1);
     for(size_t i=(size_t)std::max(g_treeScroll,0);i<explorer.size()&&treeY<H-385;++i){
         auto& row=explorer[i];int h=row.kind==1?48:row.kind==2?42:53;
@@ -2784,11 +2894,23 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     pUI=mkProg(VS_UI,FS_UI);
     pText=mkProg(VS_TEXT,FS_TEXT);
     pSketch=mkProg(VS_LINE,"#version 330 core\nout vec4 o;uniform vec4 tint;void main(){o=tint;}");
+    pCanvas=mkProg(
+        "#version 330 core\nlayout(location=0) in vec3 P;layout(location=1) in vec2 T;uniform mat4 vp,model;out vec2 vuv;void main(){vuv=T;gl_Position=vp*model*vec4(P,1.);}",
+        "#version 330 core\nin vec2 vuv;uniform sampler2D img;uniform float opacity,live;out vec4 o;void main(){float check=mod(floor(vuv.x*8.)+floor(vuv.y*8.),2.);vec3 paper=mix(vec3(.62,.58,.52),vec3(.78,.74,.68),check);vec4 tex=texture(img,vuv);o=vec4(mix(paper,tex.rgb,live),opacity*mix(.55,tex.a,live));}");
     pGeom=mkProg(VS_GEOM,FS_GEOM);pAo=mkProg(VS_BG,FS_AO);pCompose=mkProg(VS_BG,FS_COMPOSE);pEdge=mkProg(VS_EDGE,FS_EDGE);
     guView=glGetUniformLocation(pGeom,"view");guProj=glGetUniformLocation(pGeom,"proj");guModel=glGetUniformLocation(pGeom,"model");guHard=glGetUniformLocation(pGeom,"hardSurface");
     auProj=glGetUniformLocation(pAo,"proj");auFocal=glGetUniformLocation(pAo,"focal");auOrtho=glGetUniformLocation(pAo,"ortho");auRadius=glGetUniformLocation(pAo,"radius");auBias=glGetUniformLocation(pAo,"bias");
     cuOrigin=glGetUniformLocation(pCompose,"origin");euVp=glGetUniformLocation(pEdge,"vp");euModel=glGetUniformLocation(pEdge,"model");
     glGenVertexArrays(1,&sketchVao);glGenBuffers(1,&sketchVbo);glBindVertexArray(sketchVao);glBindBuffer(GL_ARRAY_BUFFER,sketchVbo);glEnableVertexAttribArray(0);glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,12,nullptr);
+    glGenVertexArrays(1,&canvasVao);glGenBuffers(1,&canvasVbo);glBindVertexArray(canvasVao);glBindBuffer(GL_ARRAY_BUFFER,canvasVbo);
+    const float canvasQuad[]={0,0,0,0,0, 1,0,0,1,0, 1,1,0,1,1, 0,0,0,0,0, 1,1,0,1,1, 0,1,0,0,1};
+    glBufferData(GL_ARRAY_BUFFER,sizeof canvasQuad,canvasQuad,GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,20,nullptr);
+    glEnableVertexAttribArray(1);glVertexAttribPointer(1,2,GL_FLOAT,GL_FALSE,20,(void*)12);
+    glGenTextures(1,&g_canvasMissing);glBindTexture(GL_TEXTURE_2D,g_canvasMissing);
+    const unsigned char missingPx[]={180,170,155,255, 210,200,185,255, 210,200,185,255, 180,170,155,255};
+    glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,2,2,0,GL_RGBA,GL_UNSIGNED_BYTE,missingPx);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
     suVp=glGetUniformLocation(pSolid,"vp");      suModel=glGetUniformLocation(pSolid,"model");
     suHard=glGetUniformLocation(pSolid,"hardSurface");
     suOutline=glGetUniformLocation(pSolid,"outline"); suColor=glGetUniformLocation(pSolid,"color");

@@ -245,6 +245,22 @@ static Body evalFeatureBody(const Feature& f, const ExprEnv& env, Document& doc,
     return {};
 }
 
+static void refreshDrivenSketches(Document& document, bool require){
+    ExprEnv env=document.buildEnv();
+    for(auto& sketch:document.sketches){
+        bool projects=false;
+        for(const auto& entity:sketch.sk.ents) if(entity.kind==SketchEnt::Project) projects=true;
+        if(!projects) continue;
+        DrivenSketchStatus status=bakeSketchProjects(document,sketch);
+        if(!status.error.empty()){sketch.error=status.error;sketch.residual=INFINITY;continue;}
+        if(status.waiting){
+            if(require){sketch.error="Project source is not evaluated yet";sketch.residual=INFINITY;}
+            continue;
+        }
+        evaluateSketch(sketch,env);
+    }
+}
+
 const std::vector<FeatureResult>& Document::recompute() {
     f64 t0=nowMs();
     lastResults.clear();
@@ -259,6 +275,12 @@ const std::vector<FeatureResult>& Document::recompute() {
     for(auto&f:features){
         FeatureResult fr; fr.id=f.id;
         f64 tf=nowMs();
+        if(f.suppressed){
+            fr.ok=true;fr.ms=nowMs()-tf;lastResults.push_back(fr);refreshDrivenSketches(*this,false);continue;
+        }
+        bool blocked=false;
+        for(u64 input:f.inputs){if(const Feature* source=find(input);source&&source->suppressed){fr.ok=false;fr.error="source feature is suppressed";blocked=true;break;}}
+        if(blocked){fr.ms=nowMs()-tf;lastResults.push_back(std::move(fr));refreshDrivenSketches(*this,false);continue;}
         fr.error=parameterError;
         for(auto& kv:f.p){
             if(kv.first=="shape"||kv.first=="section"||kv.first=="sketch"||kv.first=="plane"||kv.first=="name"||kv.first=="op"||
@@ -295,6 +317,17 @@ const std::vector<FeatureResult>& Document::recompute() {
             b=Body{};
         }
         lastResults.push_back(std::move(fr));
+        refreshDrivenSketches(*this,false);
+    }
+    refreshDrivenSketches(*this,true);
+    ExprEnv canvasEnv=buildEnv();
+    for(const auto& canvas:canvases){
+        bool known=canvas.plane=="XY"||canvas.plane=="XZ"||canvas.plane=="YZ";
+        for(const auto& plane:planes) if(plane.name==canvas.plane) known=true;
+        if(!known){if(parameterError.empty())parameterError="Canvas plane was not found";continue;}
+        try{resolvePlane(*this,canvas.plane);}catch(const std::exception& e){if(parameterError.empty())parameterError=e.what();}
+        auto lengthOk=[&](const std::string& expr){bool ok=false;double value=evalExpr(expr,canvasEnv,&ok);return ok&&value>0.&&value<=1e6;};
+        if(!lengthOk(canvas.width)||!lengthOk(canvas.height)){if(parameterError.empty())parameterError="Canvas width and height must be positive millimetres";}
     }
     try{for(auto& plane:planes)resolvePlane(*this,plane.name);}
     catch(const std::exception& e){if(parameterError.empty())parameterError=e.what();}

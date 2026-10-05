@@ -1,5 +1,7 @@
 #include "ark/sketch.hpp"
+#include "ark/references.hpp"
 #include <algorithm>
+#include <cmath>
 #include <stdexcept>
 
 namespace ark {
@@ -39,6 +41,124 @@ bool inside(Vec2 p,const std::vector<Vec2>& poly){
     }return result;
 }
 arkjson::Value vectorValue(Vec3 p){auto v=arkjson::Value::makeArr();for(auto n:{p.x,p.y,p.z})v.arr.push_back(arkjson::Value::makeNum(n));return v;}
+bool drivenKind(SketchEnt::Kind kind){return kind==SketchEnt::Project||kind==SketchEnt::Offset;}
+void assignPolyline(SketchEnt& entity,const std::vector<Vec2>& points){
+    std::vector<Vec2> unique;unique.reserve(points.size());
+    for(const auto& point:points){if(!std::isfinite(point.x)||!std::isfinite(point.y)||std::abs(point.x)>1e7||std::abs(point.y)>1e7)throw std::runtime_error("Sketch coordinate outside finite bounds");if(!unique.empty()&&(point-unique.back()).len()<1e-8)continue;unique.push_back(point);}
+    if(unique.size()<2)throw std::runtime_error("Projected or offset geometry is degenerate");
+    if(unique.size()>65)throw std::runtime_error("Projected or offset geometry exceeds 64 segments");
+    entity.segments.clear();entity.dof.clear();entity.expressions.clear();
+    entity.dof.push_back(unique.front().x);entity.dof.push_back(unique.front().y);
+    for(size_t i=1;i<unique.size();++i){SketchEnt::WireSeg segment;segment.kind=SketchEnt::WireSeg::Line;entity.segments.push_back(segment);entity.dof.push_back(unique[i].x);entity.dof.push_back(unique[i].y);}
+}
+std::vector<Vec2> offsetPolyline(const std::vector<Vec2>& source,double distance){
+    if(source.size()<2||!std::isfinite(distance)||std::abs(distance)<1e-9||std::abs(distance)>1e6)throw std::runtime_error("Offset distance must be a nonzero finite length");
+    bool closed=(source.front()-source.back()).len()<1e-6&&source.size()>=4;
+    std::vector<Vec2> points=source;if(closed)points.pop_back();
+    const int count=(int)points.size();if(count<2)throw std::runtime_error("Offset source is degenerate");
+    auto left=[](Vec2 direction){double length=direction.len();if(length<1e-8)throw std::runtime_error("Offset source is degenerate");return Vec2{-direction.y/length,direction.x/length};};
+    auto at=[&](int index){if(closed){int wrapped=(index%count+count)%count;return points[(size_t)wrapped];}return points[(size_t)std::clamp(index,0,count-1)];};
+    std::vector<Vec2> moved((size_t)count);
+    for(int i=0;i<count;++i){
+        if(!closed&&(i==0||i==count-1)){Vec2 normal=i==0?left(points[1]-points[0]):left(points[(size_t)count-1]-points[(size_t)count-2]);moved[(size_t)i]=points[(size_t)i]+normal*distance;continue;}
+        Vec2 previous=left(points[(size_t)i]-at(i-1)),next=left(at(i+1)-points[(size_t)i]),miter=previous+next;
+        double denom=miter.dot(previous);
+        if(miter.len()<1e-8||std::abs(denom)<0.25)moved[(size_t)i]=points[(size_t)i]+previous*distance;
+        else moved[(size_t)i]=points[(size_t)i]+miter*(distance/denom);
+    }
+    if(closed)moved.push_back(moved.front());
+    return moved;
+}
+void bakeSketchOffsets(Sketch& sketch,const ExprEnv& env){
+    for(size_t index=0;index<sketch.ents.size();++index){
+        SketchEnt& entity=sketch.ents[index];if(entity.kind!=SketchEnt::Offset)continue;
+        const SketchEnt* source=nullptr;size_t sourceIndex=0;
+        for(size_t i=0;i<sketch.ents.size();++i)if(sketch.ents[i].name==entity.sourceName){if(source)throw std::runtime_error("Ambiguous offset source");source=&sketch.ents[i];sourceIndex=i;}
+        if(!source)throw std::runtime_error("Offset source was not found");
+        if(sourceIndex>=index)throw std::runtime_error("Offset source must be an earlier entity");
+        if(drivenKind(source->kind)&&source->dof.empty())continue;
+        if(source->kind==SketchEnt::Pnt)throw std::runtime_error("Offset source must be a curve");
+        double distance=expressionValue(entity.distance,env);
+        assignPolyline(entity,offsetPolyline(sampleSketchEntity(*source,sketch.tolerance),distance));
+    }
+}
+Vec3 referenceOrigin(Document& document,u64 feature,const std::string& name,double fraction){
+    return resolveGeometryReference(document,feature,name,fraction).frame.transformPoint({});
+}
+Vec2 onSketch(const Mat4& inverse,Vec3 world){Vec3 local=inverse.transformPoint(world);return {local.x,local.y};}
+const Body* evaluatedBody(const Document& document,u64 feature){
+    const auto& bodies=document.evaluatingBodies?*document.evaluatingBodies:document.evalBodies;
+    for(const auto& body:bodies)if(body.id==feature)return &body;
+    return nullptr;
+}
+const arkjson::Value* topologyRow(const Body& body,const std::string& name){
+    const auto* topology=body.nativeData.find("topology");if(!topology)return nullptr;
+    const auto* rows=topology->find("references");if(!rows||rows->t!=arkjson::Value::Arr)return nullptr;
+    for(const auto& row:rows->arr)if(const auto* label=row.find("name");label&&label->t==arkjson::Value::Str&&label->str==name)return &row;
+    return nullptr;
+}
+void projectEdge(Document& document,NamedSketch& sketch,SketchEnt& entity,const Mat4& inverse){
+    std::vector<Vec3> world;
+    for(double fraction:{0.,.25,.5,.75,1.})world.push_back(referenceOrigin(document,entity.sourceFeature,entity.reference,fraction));
+    Vec3 chord=world.back()-world.front();double length2=chord.lensq();bool straight=true;
+    for(size_t i=1;i+1<world.size();++i){double t=length2>0?clamp((world[i]-world.front()).dot(chord)/length2,0.,1.):0.;if((world[i]-(world.front()+chord*t)).len()>0.05)straight=false;}
+    std::vector<Vec2> flat;if(straight)flat={onSketch(inverse,world.front()),onSketch(inverse,world.back())};
+    else for(const auto& point:world)flat.push_back(onSketch(inverse,point));
+    assignPolyline(entity,flat);
+}
+void projectFace(Document& document,NamedSketch& sketch,SketchEnt& entity,const Mat4& plane,const Mat4& inverse){
+    GeometryReference face=resolveGeometryReference(document,entity.sourceFeature,entity.reference,.5);
+    if(face.kind!="face")throw std::runtime_error("Project an edge or a planar face");
+    const Body* body=evaluatedBody(document,entity.sourceFeature);if(!body)throw std::runtime_error("Project source is not evaluated yet");
+    const arkjson::Value* row=topologyRow(*body,entity.reference);
+    if(!row||!row->find("descriptor")||!row->find("descriptor")->find("normal"))throw std::runtime_error("Project a planar face or an edge");
+    Vec3 origin=face.frame.transformPoint({}),normal=face.frame.transformDir({0,0,1});
+    Vec3 sketchOrigin=plane.transformPoint({}),sketchNormal=plane.transformDir({0,0,1});
+    const bool parallel=std::abs(normal.dot(sketchNormal))>0.99;
+    struct Segment{Vec3 a,b;};
+    std::vector<Segment> boundary;
+    const auto* topology=body->nativeData.find("topology");const auto* rows=topology?topology->find("references"):nullptr;
+    if(!rows||rows->t!=arkjson::Value::Arr)throw std::runtime_error("Project source has no exact boundary");
+    for(const auto& item:rows->arr){
+        const auto* kind=item.find("kind");const auto* status=item.find("status");const auto* name=item.find("name");
+        if(!kind||kind->str!="edge"||!status||(status->str!="bound"&&status->str!="merged")||!name)continue;
+        if(boundary.size()>=64)break;
+        try{
+            Vec3 a=referenceOrigin(document,entity.sourceFeature,name->str,0),b=referenceOrigin(document,entity.sourceFeature,name->str,1);
+            if(std::abs((a-origin).dot(normal))<=0.05&&std::abs((b-origin).dot(normal))<=0.05)boundary.push_back({a,b});
+        }catch(const std::exception&){}
+    }
+    if(boundary.empty())throw std::runtime_error("Projected face has no boundary");
+    if(parallel){
+        struct Flat{Vec2 a,b;bool used=false;};
+        std::vector<Flat> edges;for(const auto& segment:boundary){Vec2 a=onSketch(inverse,segment.a),b=onSketch(inverse,segment.b);if((a-b).len()>=1e-6)edges.push_back({a,b,false});}
+        if(edges.empty())throw std::runtime_error("Projected face is degenerate");
+        std::vector<Vec2> chain{edges[0].a,edges[0].b};edges[0].used=true;Vec2 cursor=edges[0].b;
+        for(size_t step=1;step<edges.size();++step){
+            int found=-1;Vec2 next{};
+            for(size_t i=0;i<edges.size();++i)if(!edges[i].used){
+                if((cursor-edges[i].a).len()<=0.05){found=(int)i;next=edges[i].b;break;}
+                if((cursor-edges[i].b).len()<=0.05){found=(int)i;next=edges[i].a;break;}
+            }
+            if(found<0)break;
+            edges[(size_t)found].used=true;chain.push_back(next);cursor=next;
+        }
+        for(const auto& edge:edges)if(!edge.used)throw std::runtime_error("Projected face has more than one wire");
+        if((chain.front()-chain.back()).len()>0.05)throw std::runtime_error("Projected face boundary did not close");
+        if((chain.front()-chain.back()).len()>1e-8)chain.push_back(chain.front());
+        assignPolyline(entity,chain);return;
+    }
+    std::vector<Vec3> hits;
+    auto side=[&](Vec3 point){return (point-sketchOrigin).dot(sketchNormal);};
+    auto add=[&](Vec3 point){for(const auto& old:hits)if((old-point).len()<=0.05)return;hits.push_back(point);};
+    for(const auto& segment:boundary){
+        double a=side(segment.a),b=side(segment.b);
+        if(std::abs(a)<=0.05&&std::abs(b)<=0.05){add(segment.a);add(segment.b);continue;}
+        if(a*b<0||std::abs(a)<=0.05||std::abs(b)<=0.05){if(std::abs(a-b)<1e-12)continue;double t=std::clamp(a/(a-b),0.,1.);add(segment.a+(segment.b-segment.a)*t);}
+    }
+    if(hits.size()!=2)throw std::runtime_error(hits.size()<2?"Face does not meet the sketch plane":"Projected face intersection is not one segment");
+    assignPolyline(entity,{onSketch(inverse,hits[0]),onSketch(inverse,hits[1])});
+}
 }
 
 void evaluateSketch(NamedSketch& ns,const ExprEnv& env){
@@ -50,14 +170,51 @@ void evaluateSketch(NamedSketch& ns,const ExprEnv& env){
             if(!c.expression2.empty())c.val2=expressionValue(c.expression2,env);
             if((c.type==SketchCon::Radius&&c.val<=0)||(c.type==SketchCon::DistPP&&c.val<0))throw std::runtime_error("Invalid dimension target");
         }
+        bakeSketchOffsets(ns.sk,env);
         SketchDiagnostics diagnostics;ns.residual=solveSketch(ns.sk,nullptr,200,&diagnostics);
+        bakeSketchOffsets(ns.sk,env);
         ns.rank=diagnostics.rank;ns.freeDofs=diagnostics.variables-diagnostics.rank;
         if(!std::isfinite(ns.residual)||ns.residual>1e-6)throw std::runtime_error("Conflicting constraints or solver failed to converge");
         for(auto& e:ns.sk.ents){
             for(auto x:e.dof)if(!std::isfinite(x)||std::abs(x)>1e7)throw std::runtime_error("Sketch coordinate outside finite bounds");
+            if(drivenKind(e.kind)&&e.dof.empty())continue;
             sampleSketchEntity(e,ns.sk.tolerance); // validate even unconsumed sketches
         }
     }catch(const std::exception& ex){ns.error=ex.what();ns.residual=INFINITY;}
+}
+
+DrivenSketchStatus bakeSketchProjects(Document& document,NamedSketch& sketch){
+    DrivenSketchStatus status;
+    bool projects=false;for(const auto& entity:sketch.sk.ents)projects|=entity.kind==SketchEnt::Project;
+    if(!projects)return status;
+    Mat4 plane=Mat4::identity(),inverse=Mat4::identity();
+    try{plane=resolvePlane(document,sketch.sk.plane);inverse=plane.inverted();}
+    catch(const std::exception& error){status.error=error.what();return status;}
+    for(auto& entity:sketch.sk.ents){
+        if(entity.kind!=SketchEnt::Project)continue;
+        const Feature* feature=document.find(entity.sourceFeature);
+        if(!feature){status.error="Project source was not found";return status;}
+        if(feature->suppressed){status.error="Project source is suppressed";return status;}
+        if(!evaluatedBody(document,feature->id)){
+            bool attempted=false;for(const auto& result:document.lastResults)if(result.id==feature->id)attempted=true;
+            if(attempted){status.error="Project source is not evaluated yet";return status;}
+            status.waiting=true;continue;
+        }
+        try{
+            const Body* body=evaluatedBody(document,feature->id);
+            const arkjson::Value* row=body?topologyRow(*body,entity.reference):nullptr;
+            const auto* kind=row?row->find("kind"):nullptr;
+            if(kind&&kind->str=="face")projectFace(document,sketch,entity,plane,inverse);
+            else if(kind&&kind->str=="edge")projectEdge(document,sketch,entity,inverse);
+            else{
+                GeometryReference reference=resolveGeometryReference(document,feature->id,entity.reference,.5);
+                if(reference.kind=="face")projectFace(document,sketch,entity,plane,inverse);
+                else if(reference.kind=="edge")projectEdge(document,sketch,entity,inverse);
+                else throw std::runtime_error("Project an edge or a planar face");
+            }
+        }catch(const std::exception& error){status.error=error.what();return status;}
+    }
+    return status;
 }
 
 namespace {
@@ -84,11 +241,14 @@ const char* sketchEntityKindName(SketchEnt::Kind kind){
         case SketchEnt::Spline: return "spline";
         case SketchEnt::Arc: return "arc";
         case SketchEnt::Wire: return "wire";
+        case SketchEnt::Project: return "project";
+        case SketchEnt::Offset: return "offset";
     }
     return "unknown";
 }
 
 int sketchVertexCount(const SketchEnt& entity){
+    if(entity.kind==SketchEnt::Project||entity.kind==SketchEnt::Offset) return entity.segments.empty()?0:1+(int)entity.segments.size();
     if(entity.kind==SketchEnt::Wire) return 1+(int)entity.segments.size();
     if(entity.kind==SketchEnt::Line) return 2;
     if(entity.kind==SketchEnt::Spline) return (int)entity.dof.size()/2;
@@ -96,7 +256,7 @@ int sketchVertexCount(const SketchEnt& entity){
 }
 
 int sketchVertexDof(const SketchEnt& entity,int vertex){
-    if(entity.kind!=SketchEnt::Wire) return vertex*2;
+    if(entity.kind!=SketchEnt::Wire&&entity.kind!=SketchEnt::Project&&entity.kind!=SketchEnt::Offset) return vertex*2;
     if(vertex<=0) return 0;
     int index=2;
     for(int i=0;i<vertex-1&&i<(int)entity.segments.size();++i){
@@ -146,7 +306,9 @@ std::vector<Vec2> sampleSketchEntity(const SketchEnt& e,double tolerance){
         if(e.dof.size()!=5)throw std::runtime_error("Arc needs center, radius and two angles");
         appendArc({e.dof[0],e.dof[1]},e.dof[2],e.dof[3],e.dof[4],tolerance,out,true);return out;
     }
-    if(e.kind==SketchEnt::Wire){
+    if(e.kind==SketchEnt::Wire||e.kind==SketchEnt::Project||e.kind==SketchEnt::Offset){
+        if((e.kind==SketchEnt::Project||e.kind==SketchEnt::Offset)&&(e.dof.empty()||e.segments.empty()))
+            throw std::runtime_error(e.kind==SketchEnt::Project?"Project source is not evaluated yet":"Offset source is not resolved");
         if(e.segments.empty()||e.segments.size()>64)throw std::runtime_error("Wire needs 1..64 segments");
         Vec2 cursor=at(0);out.push_back(cursor);int dof=2;
         for(const auto& segment:e.segments){
