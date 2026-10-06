@@ -13,7 +13,16 @@ DrivenSketchStatus bakeSketchProjects(Document& document, NamedSketch& sketch);
 // Diagnose a solved (or attempted) sketch without mutating it. Rank and
 // redundancy are local numerical properties of the current coordinates.
 arkjson::Value diagnoseSketch(const Sketch& sketch, double residualTolerance=1e-6);
-std::vector<Vec2> sampleSketchEntity(const SketchEnt& entity, double tolerance);
+struct SketchCurve {
+    enum Kind { Line, Arc } kind=Line;
+    Vec2 a{}, b{}, center{};
+    double radius=0, a0=0, a1=0;
+    int corner=-1;
+};
+// Sharp corners stay in the wire. This is the trimmed presentation shared by
+// the display sample and the exact profile.
+std::vector<SketchCurve> sketchPresentedCurves(const Sketch& sketch, const SketchEnt& entity);
+std::vector<Vec2> sampleSketchEntity(const SketchEnt& entity, double tolerance, const Sketch* owner=nullptr);
 std::vector<std::array<Vec2,4>> sketchSplineSegments(const SketchEnt& entity);
 const char* sketchEntityKindName(SketchEnt::Kind kind);
 // dof index of a wire vertex x coordinate. Vertex 0 is the start.

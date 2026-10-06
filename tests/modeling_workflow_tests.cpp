@@ -191,16 +191,16 @@ void testExactBooleans() {
     check(std::abs(volumeOf(triple.document, 4) - 2200) < 1e-2, "three cubes union to 2200 mm3");
     check(bodyData(triple.document, 4)->find("report")->find("solids")->num == 1, "the union is one solid");
 
-    ark::AgentSession tube;
-    const Value rejected = tube.call("doc_apply", parse(R"({"commands":[
+    ark::AgentSession mesh;
+    const Value rejected = mesh.call("doc_apply", parse(R"({"commands":[
       {"op":"feature.add","type":"native_solid","name":"A","p":{"op":"box","width":"10","depth":"10","height":"10"}},
       {"op":"feature.add","type":"native_solid","name":"B","inputs":["A"],"p":{"op":"transform","tx":"6"}},
-      {"op":"feature.add","type":"tube","name":"Arm","p":{"section":"rect","width":12,"height":8,"wall":1.6,"tail":40}},
+      {"op":"feature.add","type":"mesh_body","name":"Arm","mesh":{"positions":[0,0,0,12,0,0,0,8,0],"indices":[0,1,2]}},
       {"op":"feature.add","type":"native_solid","name":"Joined","inputs":["A","B","Arm"],"p":{"op":"union"}}
     ]})"));
-    check(rejected.find("isError") && rejected.find("isError")->b, "a rectangular tube cannot enter an exact boolean");
-    check(rejected.find("structuredContent")->find("error")->str.find("B-rep") != std::string::npos, "rectangular tube rejection names the missing B-rep");
-    check(tube.revision == 0 && tube.document.features.empty(), "rectangular tube boolean rolls the batch back");
+    check(rejected.find("isError") && rejected.find("isError")->b, "a display mesh cannot enter an exact boolean");
+    check(rejected.find("structuredContent")->find("error")->str.find("B-rep") != std::string::npos, "display mesh rejection names the missing B-rep");
+    check(mesh.revision == 0 && mesh.document.features.empty(), "display mesh boolean rolls the batch back");
 
     ark::AgentSession instances;
     accepted(instances.call("doc_apply", parse(R"({"commands":[
@@ -403,7 +403,7 @@ void testClearanceAndMeasure() {
 
     ark::AgentSession missing;
     accepted(missing.call("doc_apply", parse(R"({"commands":[
-      {"op":"feature.add","type":"tube","name":"Arm","p":{"section":"rect","width":12,"height":8,"wall":1.6,"tail":40}},
+      {"op":"feature.add","type":"mesh_body","name":"Arm","mesh":{"positions":[0,0,0,12,0,0,0,8,0],"indices":[0,1,2]}},
       {"op":"feature.add","type":"native_solid","name":"Cube","p":{"op":"box","width":"10","depth":"10","height":"10"}},
       {"op":"assembly.add","name":"Arm","feature":"Arm","fixed":true},
       {"op":"assembly.add","name":"Cube","feature":"Cube","fixed":true,"p":{"tx":"30"}}
@@ -723,6 +723,79 @@ void testDrivenSketch() {
     check(session.revision == revision && ark::documentToJson(session.document) == before, "the failed suppress rolls back");
 }
 
+void testRectangularTube() {
+    ark::AgentSession session;
+    accepted(session.call("doc_apply", parse(R"({"commands":[
+      {"op":"feature.add","type":"tube","name":"Arm","p":{"section":"rect","width":20,"height":10,"wall":1,"tail":40}},
+      {"op":"feature.add","type":"native_solid","name":"Hub","p":{"op":"box","width":"10","depth":"10","height":"10"}},
+      {"op":"feature.add","type":"native_solid","name":"Joined","inputs":["Arm","Hub"],"p":{"op":"union"}}
+    ]})")));
+    Value saved;
+    check(arkjson::parse(ark::documentToJson(session.document), saved), "serialize rectangular-tube union");
+    check(saved.find("version")->num == 7, "rectangular-tube union of two inputs stays version 7");
+    check(std::abs(volumeOf(session.document, 1) - 2240.0) < 1.0, "straight rectangular tube volume is 2240 mm3");
+    const auto& bounds = bodyData(session.document, 1)->find("report")->find("bounds_mm")->arr;
+    check(bounds[0].num > -0.05 && bounds[3].num > 39.9 && bounds[3].num < 40.05, "rectangular tube runs from x 0 to length");
+    check(bounds[1].num > -10.05 && bounds[4].num < 10.05 && bounds[4].num > 9.9, "width lies along Y");
+    check(bounds[2].num > -5.05 && bounds[5].num < 5.05 && bounds[5].num > 4.9, "height lies along Z");
+    Value axis = accepted(session.call("reference_inspect", parse(R"({"id":1,"reference":"axis"})")));
+    check(axis.find("world_column_major")->arr[8].num > 0.99, "rectangular tube axis starts along +X");
+    check(bodyData(session.document, 3)->find("report")->find("solids")->num == 1, "rectangular tube union is one solid");
+}
+
+void testMass() {
+    ark::AgentSession session;
+    accepted(session.call("doc_apply", parse(R"({"commands":[
+      {"op":"feature.add","type":"box","name":"Cube","p":{"dx":"10","dy":"10","dz":"10","density":"2.7"}}
+    ]})")));
+    Value saved;
+    check(arkjson::parse(ark::documentToJson(session.document), saved) && saved.find("version")->num == 1, "density does not change the document version");
+    Value inspected = accepted(session.call("native_inspect", parse(R"({"id":1})")));
+    check(std::abs(inspected.find("mass_g")->num - 2.7) < 1e-6, "a 10 mm cube at 2.7 g/cm3 weighs 2.7 g");
+    const auto& center = inspected.find("center_mm")->arr;
+    check(std::abs(center[0].num - 5) < 1e-6 && std::abs(center[1].num - 5) < 1e-6 && std::abs(center[2].num - 5) < 1e-6, "box centroid is the center");
+    ark::AgentSession plainSession;
+    accepted(plainSession.call("doc_apply", parse(R"({"commands":[
+      {"op":"feature.add","type":"box","name":"Plain","p":{"dx":"10","dy":"10","dz":"10"}}
+    ]})")));
+    inspected = accepted(plainSession.call("native_inspect", parse(R"({"id":1})")));
+    check(!inspected.find("mass_g") && !inspected.find("center_mm"), "mass stays absent without density");
+
+    ark::AgentSession row;
+    accepted(row.call("doc_apply", parse(R"({"commands":[
+      {"op":"feature.add","type":"box","name":"Cube","p":{"dx":"10","dy":"10","dz":"10","density":"1"}},
+      {"op":"assembly.add","name":"Row","feature":"Cube","pattern":{"type":"linear","count":"2","dx":"10"}}
+    ]})")));
+    Value info = accepted(row.call("assembly_info", Value::makeObj()));
+    check(info.find("mass_checked") && info.find("mass_checked")->b, "uniform density reports a checked mass");
+    check(std::abs(info.find("mass_g")->num - 2.0) < 1e-4, "two 10 mm cubes at 1 g/cm3 weigh 2 g");
+    check(std::abs(info.find("center_mm")->arr[0].num - 10.0) < 1e-4, "the pattern center is the mass-weighted centroid");
+    accepted(row.call("doc_apply", parse(R"({"commands":[
+      {"op":"feature.add","type":"box","name":"Bare","p":{"dx":"10","dy":"10","dz":"10"}},
+      {"op":"assembly.add","name":"Bare","feature":"Bare","fixed":true,"p":{"ty":"30"}}
+    ]})")));
+    info = accepted(row.call("assembly_info", Value::makeObj()));
+    check(info.find("mass_checked") && !info.find("mass_checked")->b, "a missing density is not a partial mass");
+    check(info.find("mass_reason")->str.find("has no density") != std::string::npos, "the omission names the part");
+    check(!info.find("mass_g"), "a partial assembly does not invent a mass");
+}
+
+void testSketchFilletSolid() {
+    ark::AgentSession session;
+    accepted(session.call("doc_apply", parse(R"({"commands":[
+      {"op":"sketch.set","name":"Plate","sketch":{"tolerance":0.01,"entities":[{"kind":"wire","name":"Outline","start":[0,0],"segments":[{"kind":"line","to":[10,0]},{"kind":"line","to":[10,10]},{"kind":"line","to":[0,10]},{"kind":"line","to":[0,0]}]}]}},
+      {"op":"sketch.fillet","name":"Plate","entity":"Outline","corner":0,"radius":"2"},
+      {"op":"sketch.fillet","name":"Plate","entity":"Outline","corner":1,"radius":"2"},
+      {"op":"sketch.fillet","name":"Plate","entity":"Outline","corner":2,"radius":"2"},
+      {"op":"sketch.fillet","name":"Plate","entity":"Outline","corner":3,"radius":"2"},
+      {"op":"feature.add","type":"native_solid","name":"Plate","p":{"op":"extrude","sketch":"Plate","depth":"1"}}
+    ]})")));
+    const double area = 100.0 - 16.0 * (1.0 - 3.141592653589793 / 4.0);
+    check(std::abs(volumeOf(session.document, 1) - area) < 0.2, "filleted plate volume matches the trimmed square");
+    const auto& bounds = bodyData(session.document, 1)->find("report")->find("bounds_mm")->arr;
+    check(bounds[3].num > 9.9 && bounds[3].num < 10.05 && bounds[4].num > 9.9 && bounds[4].num < 10.05, "fillets leave the square bounds");
+}
+
 int main() {
     try {
         testNames();
@@ -733,8 +806,11 @@ int main() {
         testSnapshotAndContract();
         testMergedFaces();
         testRoundTube();
+        testRectangularTube();
         testShell();
         testClearanceAndMeasure();
+        testMass();
+        testSketchFilletSolid();
         testGuides();
         testNameEdits();
         testSnapshotCopy();

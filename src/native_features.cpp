@@ -94,7 +94,31 @@ V profileFromSketch(Document& document, const std::string& name) {
             arc.set("name", V::makeStr(source.name.empty() ? "entity." + std::to_string(entityIndex) : source.name));
             entities.arr.push_back(std::move(arc));
         } else if (source.kind == SketchEnt::Wire) {
-            if (source.dof.size() < 2) throw std::runtime_error("Wire requires start and segment endpoints");
+            bool trimmed = false;
+            for (const auto& corner : named->sk.corners)
+                if (corner.entity == source.name && !source.name.empty()) trimmed = true;
+            if (trimmed) {
+                const std::string base = source.name.empty() ? "entity." + std::to_string(entityIndex) : source.name;
+                int curveIndex = 0;
+                for (const auto& curve : sketchPresentedCurves(named->sk, source)) {
+                    if (curve.kind == SketchCurve::Arc) {
+                        V arc = V::makeObj();
+                        arc.set("kind", V::makeStr("arc"));
+                        arc.set("center", point(curve.center));
+                        arc.set("radius", V::makeNum(curve.radius));
+                        arc.set("a0", V::makeNum(curve.a0));
+                        arc.set("a1", V::makeNum(curve.a1));
+                        arc.set("name", V::makeStr(base + ".corner." + std::to_string(curve.corner)));
+                        entities.arr.push_back(std::move(arc));
+                    } else {
+                        V item = edge("line", {curve.a, curve.b});
+                        item.set("name", V::makeStr(curve.corner >= 0 ? base + ".corner." + std::to_string(curve.corner) : base + "." + std::to_string(curveIndex)));
+                        entities.arr.push_back(std::move(item));
+                    }
+                    ++curveIndex;
+                }
+            } else if (source.dof.size() < 2) throw std::runtime_error("Wire requires start and segment endpoints");
+            else {
             Vec2 cursor{source.dof[0], source.dof[1]};
             auto xy = [&](int index) { return Vec2{source.dof.at(static_cast<size_t>(index)), source.dof.at(static_cast<size_t>(index + 1))}; };
             for (int i = 0; i < static_cast<int>(source.segments.size()); ++i) {
@@ -129,6 +153,7 @@ V profileFromSketch(Document& document, const std::string& name) {
                     entities.arr.push_back(std::move(item));
                     cursor = end;
                 } else throw std::runtime_error("Wire segment kind must be line, arc or cubic");
+            }
             }
         }
         ++entityIndex;
@@ -523,7 +548,7 @@ V solidFeatureRequest(const Feature& feature, const ExprEnv& env,
     V model = numericNative(feature.nativeSpec, env);
     if (model.t != V::Obj) model = V::makeObj();
     for (const auto& [key, expression] : feature.p) {
-        if (key == "op" || key == "sketch" || key == "plane") continue;
+        if (key == "op" || key == "sketch" || key == "plane" || key == "density") continue;
         model.set(key, V::makeNum(expressionValue(expression, env)));
     }
     std::string op = feature.get("op", "");
@@ -689,7 +714,7 @@ u64 instanceRef(const Document& document, const V& value) {
 ExactPiece pieceFromBody(const Body& body, u64 featureId) {
     const V* brep = body.nativeData.find("brep_base64");
     if (!brep || brep->t != V::Str)
-        throw std::runtime_error("Exact boolean needs a B-rep on feature #" + std::to_string(featureId) + ". Rectangular tubes and display meshes are not exact solids.");
+        throw std::runtime_error("Exact boolean needs a B-rep on feature #" + std::to_string(featureId) + ". Display meshes are not exact solids.");
     ExactPiece piece;
     piece.brep = brep->str;
     if (const V* topology = body.nativeData.find("topology")) piece.topology = *topology;
@@ -790,6 +815,46 @@ V roundTubeSolid(const Feature& feature, const ExprEnv& env) {
     model.set("segments", std::move(segments));
     return solidWorker(std::move(model));
 }
+
+V rectTubeSolid(const Feature& feature, const ExprEnv& env) {
+    const TubeResult preview = buildTube(feature, env);
+    if (!preview.error.empty()) throw std::runtime_error(preview.error);
+    auto number = [&](const std::string& text) { return expressionValue(text, env); };
+    auto paramOr = [&](const char* key, double fallback) {
+        const auto found = feature.p.find(key);
+        return found == feature.p.end() ? fallback : number(found->second);
+    };
+    V model = V::makeObj(), segments = V::makeArr();
+    model.set("op", V::makeStr("rect_tube"));
+    model.set("width", V::makeNum(paramOr("width", 40)));
+    model.set("height", V::makeNum(paramOr("height", 30)));
+    model.set("wall", V::makeNum(paramOr("wall", 2)));
+    for (const TubeBend& bend : feature.bends) {
+        const double feed = number(bend.feed);
+        if (feed > 1e-9) {
+            V line = V::makeObj();
+            line.set("kind", V::makeStr("line"));
+            line.set("length", V::makeNum(feed));
+            segments.arr.push_back(std::move(line));
+        }
+        V arc = V::makeObj();
+        arc.set("kind", V::makeStr("arc"));
+        arc.set("radius", V::makeNum(number(bend.radius)));
+        arc.set("angle", V::makeNum(number(bend.angle)));
+        arc.set("roll", V::makeNum(number(bend.roll)));
+        segments.arr.push_back(std::move(arc));
+    }
+    const double tail = paramOr("tail", 100);
+    if (tail > 1e-9) {
+        V line = V::makeObj();
+        line.set("kind", V::makeStr("line"));
+        line.set("length", V::makeNum(tail));
+        segments.arr.push_back(std::move(line));
+    }
+    if (segments.arr.empty()) throw std::runtime_error("Tube must have positive developed length");
+    model.set("segments", std::move(segments));
+    return solidWorker(std::move(model));
+}
 } // namespace
 
 bool isNativeFeature(FeatureType type) {
@@ -835,7 +900,7 @@ void ensureNativeBody(Document& document, u64 featureId, std::vector<Body>& bodi
     if (!feature) throw std::runtime_error("Analytic reference feature is absent");
     const ExprEnv env = document.buildEnv();
     if (feature->type == FeatureType::Tube) {
-        body->nativeData = roundTubeSolid(*feature, env);
+        body->nativeData = feature->get("section", "round") == "rect" ? rectTubeSolid(*feature, env) : roundTubeSolid(*feature, env);
         return;
     }
     if (feature->type == FeatureType::Transform || feature->type == FeatureType::Boolean) {

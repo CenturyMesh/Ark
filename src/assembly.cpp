@@ -1,8 +1,11 @@
 #include "ark/model.hpp"
 #include "ark/references.hpp"
+#include <algorithm>
 #include <cmath>
+#include <functional>
 #include <set>
 #include <stdexcept>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace ark {
@@ -142,7 +145,6 @@ bool resolveAssembly(const Document& d,std::vector<AssemblyPlacement>& placement
         auto a=byId.find(mate.a),b=byId.find(mate.b);
         if(a==byId.end()||b==byId.end()||mate.a==mate.b)return fail("Mate references invalid assembly instance IDs");
         if(!a->second->feature||!b->second->feature)return fail("Mates require part instances, not groups");
-        if(a->second->parent!=b->second->parent)return fail("Mates across different assembly parents are unsupported");
         if(mate.type!="concentric"&&mate.type!="coincident"&&mate.type!="contact"&&mate.type!="distance"&&mate.type!="angle")return fail("Unsupported assembly mate type: "+mate.type);
         if(!std::isfinite(mate.fraction_a)||!std::isfinite(mate.fraction_b)||
            mate.fraction_a<0||mate.fraction_a>1||mate.fraction_b<0||mate.fraction_b>1)return fail("Invalid mate reference fraction");
@@ -157,27 +159,67 @@ bool resolveAssembly(const Document& d,std::vector<AssemblyPlacement>& placement
         if(!finiteFrame(prepared.a)||!finiteFrame(prepared.b))return fail("Mate reference is not a finite rigid frame");
         mates.push_back(prepared);mated.insert(mate.a);mated.insert(mate.b);
     }
-    std::vector<u64> moving;
-    for(const auto& n:d.assembly)if(n.feature&&mated.count(n.id)&&!n.fixed)moving.push_back(n.id);
+    std::unordered_map<u64,std::vector<u64>> children;
+    for(const auto& n:d.assembly)if(n.parent)children[n.parent].push_back(n.id);
+    std::function<bool(u64)> groupAnchored=[&](u64 id)->bool{
+        if(byId.at(id)->fixed)return true;
+        auto found=children.find(id);if(found==children.end())return false;
+        for(u64 child:found->second)if(groupAnchored(child))return true;
+        return false;
+    };
+    std::unordered_map<u64,bool> crossOnly;
+    for(u64 id:mated)crossOnly[id]=true;
+    std::unordered_set<u64> crossGroups;
+    for(const auto& prepared:mates){
+        const auto* left=byId.at(prepared.mate->a);const auto* right=byId.at(prepared.mate->b);
+        if(left->parent==right->parent){crossOnly[prepared.mate->a]=false;crossOnly[prepared.mate->b]=false;}
+        else{if(left->parent)crossGroups.insert(left->parent);if(right->parent)crossGroups.insert(right->parent);}
+    }
+    struct Mover{u64 id;bool group;int depth;};
+    std::vector<Mover> moving;
+    for(const auto& n:d.assembly){
+        if(!n.feature||!mated.count(n.id)||n.fixed)continue;
+        if(crossOnly[n.id]&&n.parent)continue;
+        moving.push_back({n.id,false,0});
+    }
+    std::function<int(u64)> depthOf=[&](u64 id)->int{u64 parent=byId.at(id)->parent;return parent?depthOf(parent)+1:0;};
+    for(u64 group:crossGroups)if(!groupAnchored(group))moving.push_back({group,true,depthOf(group)});
+    std::stable_sort(moving.begin(),moving.end(),[](const Mover& a,const Mover& b){
+        if(a.group!=b.group)return !a.group;
+        return a.depth>b.depth;
+    });
     if(moving.size()>64)return fail("Assembly mate solve exceeds 64 moving instances");
     // Every connected mate component must have an explicit fixed instance.
+    // A cross-parent component is also anchored when a parent group contains a fixed descendant.
     std::unordered_set<u64> seen;
     for(u64 id:mated){
-        if(seen.count(id))continue;std::vector<u64> queue{id};seen.insert(id);bool anchored=false;
+        if(seen.count(id))continue;std::vector<u64> queue{id};seen.insert(id);bool anchored=false,cross=false;
         for(size_t k=0;k<queue.size();++k){u64 at=queue[k];anchored|=byId.at(at)->fixed;
             for(const auto& mate:d.mates){u64 next=mate.a==at?mate.b:(mate.b==at?mate.a:0);
-                if(next&&seen.insert(next).second)queue.push_back(next);}}
+                if(!next)continue;
+                if(byId.at(mate.a)->parent!=byId.at(mate.b)->parent)cross=true;
+                if(seen.insert(next).second)queue.push_back(next);}}
+        if(cross)for(u64 at:queue)if(u64 parent=byId.at(at)->parent)anchored|=groupAnchored(parent);
         if(!anchored)return fail("Mate component has no fixed anchor (node #"+std::to_string(id)+")");
     }
     const auto authored=world;
     const int columns=(int)moving.size()*6;
+    auto rigidDelta=[&](const Mat4& base,const std::vector<double>& x,size_t k){
+        Vec3 dt{x[6*k],x[6*k+1],x[6*k+2]};Vec3 rv{x[6*k+3],x[6*k+4],x[6*k+5]};
+        const Vec3 o=origin(base);const double angle=rv.len();
+        Mat4 rotation=angle>1e-14?Mat4::axisAngle(rv/angle,angle):Mat4::identity();
+        return Mat4::translation(o+dt)*rotation*Mat4::translation(-o);
+    };
+    auto partDescendants=[&](u64 group){std::vector<u64> parts,stack;
+        auto found=children.find(group);if(found!=children.end())stack=found->second;
+        for(size_t i=0;i<stack.size();++i){u64 id=stack[i];if(byId.at(id)->feature)parts.push_back(id);
+            auto next=children.find(id);if(next!=children.end())stack.insert(stack.end(),next->second.begin(),next->second.end());}
+        return parts;};
     auto posed=[&](const std::vector<double>& x){auto placed=authored;
-        for(size_t k=0;k<moving.size();++k){const Mat4& base=authored.at(moving[k]);
-            Vec3 dt{x[6*k],x[6*k+1],x[6*k+2]};Vec3 rv{x[6*k+3],x[6*k+4],x[6*k+5]};
-            const Vec3 o=origin(base);const double angle=rv.len();
-            Mat4 rotation=angle>1e-14?Mat4::axisAngle(rv/angle,angle):Mat4::identity();
-            placed[moving[k]]=Mat4::translation(o+dt)*rotation*Mat4::translation(-o)*base;
-        }return placed;};
+        for(size_t k=0;k<moving.size();++k)if(!moving[k].group)placed[moving[k].id]=rigidDelta(authored.at(moving[k].id),x,k)*authored.at(moving[k].id);
+        for(size_t k=0;k<moving.size();++k)if(moving[k].group){Mat4 delta=rigidDelta(authored.at(moving[k].id),x,k);
+            for(u64 part:partDescendants(moving[k].id))placed[part]=delta*placed[part];}
+        return placed;};
     auto evaluate=[&](const std::vector<double>& x){auto posedWorld=posed(x);std::vector<double> r;
         for(const auto& mate:mates)residual(mate,posedWorld,r);return r;};
     auto jacobian=[&](const std::vector<double>& x,int rows){std::vector<double> j((size_t)rows*columns,0);
@@ -197,7 +239,9 @@ bool resolveAssembly(const Document& d,std::vector<AssemblyPlacement>& placement
                 (mate.mate->type=="angle"&&mate.target<1e-10);
             if(!((needOpposed&&s.dot>0.95)||(needAligned&&s.dot<-.95)))continue;
             const u64 movable=byId.at(mate.mate->b)->fixed?mate.mate->a:mate.mate->b;
-            auto at=std::find(moving.begin(),moving.end(),movable);
+            auto at=std::find_if(moving.begin(),moving.end(),[&](const Mover& mover){return !mover.group&&mover.id==movable;});
+            if(at==moving.end()){u64 parent=byId.at(movable)->parent;
+                if(parent)at=std::find_if(moving.begin(),moving.end(),[&](const Mover& mover){return mover.group&&mover.id==parent;});}
             if(at==moving.end())continue;
             const Mat4 reference=authored.at(mate.mate->a)*mate.a;
             Vec3 direction=reference.transformDir({1,0,0}).normalized();
@@ -206,6 +250,8 @@ bool resolveAssembly(const Document& d,std::vector<AssemblyPlacement>& placement
             trial[offset+5]=direction.z*K_PI;
             if(squared(evaluate(trial))<squared(evaluate(x)))x=std::move(trial);
         }
+        for(int phase=0;phase<2;++phase){
+        const bool lockRotation=phase==0;
         double damping=1e-3;
         for(int iteration=0;iteration<100;++iteration){
             const auto r=evaluate(x);const double cost=squared(r);
@@ -221,6 +267,7 @@ bool resolveAssembly(const Document& d,std::vector<AssemblyPlacement>& placement
                 for(int c=0;c<columns;++c)regularized[(size_t)c*columns+c]+=damping*(1+h[(size_t)c*columns+c]);
                 std::vector<double> step,rhs=g;for(double& v:rhs)v=-v;
                 if(!solveLinear(regularized,rhs,step,columns))return fail("Assembly mate linear solve failed");
+                if(lockRotation)for(size_t k=0;k<moving.size();++k){step[6*k+3]=0;step[6*k+4]=0;step[6*k+5]=0;}
                 auto candidate=x;for(int c=0;c<columns;++c)candidate[c]+=step[c];
                 const double nextCost=squared(evaluate(candidate));
                 if(std::isfinite(nextCost)&&nextCost<cost){x=std::move(candidate);damping=std::max(1e-12,damping*0.25);improved=true;break;}
@@ -228,12 +275,16 @@ bool resolveAssembly(const Document& d,std::vector<AssemblyPlacement>& placement
             }
             if(!improved)break;
         }
+        }
         world=posed(x);
     }
     AssemblyDiagnostics result;
     if(columns){const auto r=evaluate(x);result.rank=matrixRank(jacobian(x,(int)r.size()),(int)r.size(),columns);}
     result.freeDofs=columns-result.rank;
-    for(const auto& n:d.assembly)if(n.feature&&!n.fixed&&!mated.count(n.id)){
+    auto carried=[&](u64 id){u64 parent=byId.at(id)->parent;while(parent){
+        for(const auto& mover:moving)if(mover.group&&mover.id==parent)return true;
+        parent=byId.at(parent)->parent;}return false;};
+    for(const auto& n:d.assembly)if(n.feature&&!n.fixed&&!mated.count(n.id)&&!carried(n.id)){
         result.unconstrainedNodes.push_back(n.id);result.freeDofs+=6;}
     for(const auto& mate:mates){const auto s=state(mate,world);const Vec3 d=s.pb-s.pa;
         AssemblyMateResidual r;r.id=mate.mate->id;r.type=mate.mate->type;

@@ -43,8 +43,11 @@ operation has an exact B-rep.
 2. Ground at least one part instance in each connected mate set with
    `assembly.edit{id,fixed:true}`.
 3. Add `concentric`, `coincident`, `contact`, signed `distance` or
-   `angle` mates between direct sibling part instances. The local
-   `origin/X/Y/Z/XY` frames and exact semantic references are available.
+   `angle` mates between part instances, including instances under different
+   groups. A mate across groups moves each immediate parent and its
+   descendants as one rigid body. A same-parent mate still moves only the
+   part. The local `origin/X/Y/Z/XY` frames and exact semantic references
+   are available.
 4. Read `assembly_info` for derived world matrices, BOM quantities and
    diagnostics. Remaining DOFs and unconstrained instances are reported,
    while the original transform and mate expressions stay editable.
@@ -57,8 +60,9 @@ selected instances. The detailed geometric contract and tolerances are in
 [MECHANICAL.md](MECHANICAL.md#grounded-mates).
 Each mate endpoint selects one local frame. The numerical rank is local to
 the solved placement and does not prove a globally unique assembly pose.
-Cross-parent mate graphs and moving subassembly groups are outside this
-iteration's solver domain.
+A mate across groups moves the immediate parent of each endpoint, with its
+descendants, as one rigid body. The solve reports the placed pose and the
+remaining degrees of freedom.
 
 ## Author a sheet as a panel graph
 

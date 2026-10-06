@@ -10,4 +10,6 @@ arkjson::Value referenceFrameNative(const arkjson::Value& request);
 arkjson::Value clearanceNative(const arkjson::Value& request);
 // Signed distance from a point to an exact solid. Negative means the point is inside.
 arkjson::Value pointDistanceNative(const arkjson::Value& request);
+// Volume centroid of one exact solid, in the solid's local millimetre frame.
+arkjson::Value solidCentroidNative(const arkjson::Value& request);
 }

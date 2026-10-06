@@ -119,9 +119,20 @@ struct SketchCon {
     std::string id;     // optional stable authoring identity; empty in older sketches
 };
 
+// A fillet or chamfer trims one wire corner. The sharp wire stays the solver
+// authority; size is reapplied when the sketch evaluates.
+struct SketchCorner {
+    std::string entity;
+    int corner=0;
+    bool chamfer=false;
+    std::string size;
+    double solved=0;
+};
+
 struct Sketch {
     std::vector<SketchEnt> ents;
     std::vector<SketchCon> cons;
+    std::vector<SketchCorner> corners;
     std::string plane="XY";
     f64 tolerance=.05;
 

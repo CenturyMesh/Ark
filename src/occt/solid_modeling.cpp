@@ -4,6 +4,7 @@
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_Common.hxx>
+#include <BRepGProp.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
@@ -33,6 +34,7 @@
 #include <GeomAbs_JoinType.hxx>
 #include <Geom_BezierCurve.hxx>
 #include <Geom_Surface.hxx>
+#include <GProp_GProps.hxx>
 #include <Geom_TrimmedCurve.hxx>
 #include <NCollection_Array1.hxx>
 #include <Standard_Failure.hxx>
@@ -98,7 +100,9 @@ V descriptor(const Ref& ref,double fraction=.5){
         if(curve.GetType()==GeomAbs_Circle)d.set("radius",V::makeNum(curve.Circle().Radius()));return d;
     }
     BRepAdaptor_Surface surface(TopoDS::Face(ref.shape));
-    if(surface.GetType()==GeomAbs_Plane){auto pl=surface.Plane();gp_Dir n=pl.Axis().Direction();if(ref.shape.Orientation()==TopAbs_REVERSED)n.Reverse();d.set("origin",xyz(pl.Location()));d.set("normal",direction(n));d.set("x_axis",direction(pl.XAxis().Direction()));return d;}
+    if(surface.GetType()==GeomAbs_Plane){
+        if(ref.kind=="axis")if(const V* prior=ref.seed.find("axis")){d.set("axis",*prior);if(const V* origin=ref.seed.find("origin"))d.set("origin",*origin);else d.set("origin",xyz(surface.Plane().Location()));return d;}
+        auto pl=surface.Plane();gp_Dir n=pl.Axis().Direction();if(ref.shape.Orientation()==TopAbs_REVERSED)n.Reverse();d.set("origin",xyz(pl.Location()));d.set("normal",direction(n));d.set("x_axis",direction(pl.XAxis().Direction()));return d;}
     if(surface.GetType()==GeomAbs_Cylinder){auto cy=surface.Cylinder();gp_Dir axis=cy.Axis().Direction();if(const V* prior=ref.seed.find("axis")){auto old=point(*prior,"prior axis");if(gp_Vec(axis).Dot(gp_Vec(old.X(),old.Y(),old.Z()))<0)axis.Reverse();}d.set("origin",xyz(cy.Location()));d.set("axis",direction(axis));d.set("radius",V::makeNum(cy.Radius()));return d;}
     if(surface.GetType()==GeomAbs_Cone){auto co=surface.Cone();d.set("origin",xyz(co.Location()));d.set("axis",direction(co.Axis().Direction()));return d;}
     if(surface.GetType()==GeomAbs_Sphere){auto sp=surface.Sphere();d.set("origin",xyz(sp.Location()));d.set("radius",V::makeNum(sp.Radius()));return d;}
@@ -168,7 +172,13 @@ std::pair<TopoDS_Face,std::vector<std::pair<std::string,TopoDS_Edge>>> profileFa
             auto xy=[](const V& v){if(v.t!=V::Arr||v.arr.size()!=2||v.arr[0].t!=V::Num||v.arr[1].t!=V::Num||!std::isfinite(v.arr[0].num)||!std::isfinite(v.arr[1].num))throw std::runtime_error("Profile point needs finite xy");return gp_Pnt(v.arr[0].num,v.arr[1].num,0);};
             if(kind=="line")edge=BRepBuilderAPI_MakeEdge(xy(pts.arr[0]),xy(pts.arr[1])).Edge();
             else{NCollection_Array1<gp_Pnt> poles(1,4);for(int i=0;i<4;++i)poles.SetValue(i+1,xy(pts.arr[static_cast<size_t>(i)]));edge=BRepBuilderAPI_MakeEdge(new Geom_BezierCurve(poles)).Edge();}
-        }else throw std::runtime_error("Solid profile supports line, Bezier, and circle entities");
+        }else if(kind=="arc"){
+            auto& c=need(e,"center");if(c.t!=V::Arr||c.arr.size()!=2||c.arr[0].t!=V::Num||c.arr[1].t!=V::Num)throw std::runtime_error("Arc center needs xy");
+            const double radius=positive(e,"radius"),degrees=std::acos(-1.0)/180.0,u0=scalar(e,"a0")*degrees,u1=scalar(e,"a1")*degrees;
+            gp_Circ circ(gp_Ax2(gp_Pnt(c.arr[0].num,c.arr[1].num,0),gp_Dir(0,0,1)),radius);
+            if(u1+1e-12>=u0){BRepBuilderAPI_MakeEdge maker(circ,u0,u1);if(!maker.IsDone())throw std::runtime_error("Profile arc failed");edge=maker.Edge();}
+            else{BRepBuilderAPI_MakeEdge maker(circ,u1,u0);if(!maker.IsDone())throw std::runtime_error("Profile arc failed");edge=maker.Edge();edge.Reverse();}
+        }else throw std::runtime_error("Solid profile supports line, Bezier, circle, and arc entities");
         stage="profile wire edge";wire.Add(edge);if(wire.Edge().IsNull())throw std::runtime_error("Profile edge did not join authored wire");std::string name=e.find("name")?word(e,"name"):"side."+std::to_string(index);edges.push_back({name,wire.Edge()});++index;
     }
     if(!wire.IsDone())throw std::runtime_error("Profile wire does not close");stage="profile planar face";BRepBuilderAPI_MakeFace maker(wire.Wire(),true);if(!maker.IsDone())throw std::runtime_error("Profile is not a planar face");
@@ -292,6 +302,73 @@ TopoDS_Shape roundTube(const V& request,std::vector<Ref>& refs){
             int& slot=face.outer?bendOuter:bendInner;name=std::string(face.outer?"side.bend":"side.bend.inner")+(slot? "."+std::to_string(slot):"");++slot;
             add(refs,name,"face",face.face);
         }
+    }
+    return solid;
+}
+
+TopoDS_Shape rectTube(const V& request,std::vector<Ref>& refs){
+    const double width=positive(request,"width"),height=positive(request,"height"),wall=positive(request,"wall");
+    if(!(width>2*wall&&height>2*wall))throw std::runtime_error("Rectangular tube wall leaves no opening");
+    const double envelope=std::hypot(width,height)*0.5,pi=std::acos(-1.0);
+    const V& segments=need(request,"segments");
+    if(segments.t!=V::Arr||segments.arr.empty()||segments.arr.size()>128)throw std::runtime_error("Rectangular tube needs 1..128 centerline segments");
+    gp_Pnt point(0,0,0);gp_Dir tangent(1,0,0),normal(0,1,0),binormal(0,0,1),bendNormal=normal;
+    const gp_Pnt startPoint=point;const gp_Dir startTangent=tangent,startNormal=normal;
+    BRepBuilderAPI_MakeWire centerline;
+    auto addLine=[&](double length){if(length<=1e-9)return;gp_Pnt next=point.Translated(gp_Vec(tangent)*length);BRepBuilderAPI_MakeEdge edge(point,next);if(!edge.IsDone())throw std::runtime_error("Rectangular tube straight span failed");centerline.Add(edge.Edge());if(!centerline.IsDone())throw std::runtime_error("Rectangular tube centerline is not connected");point=next;};
+    for(const auto& segment:segments.arr){
+        const std::string kind=word(segment,"kind");
+        if(kind=="line")addLine(positive(segment,"length"));
+        else if(kind=="arc"){
+            const double radius=positive(segment,"radius"),signedAngle=scalar(segment,"angle"),roll=optional(segment,"roll",0);
+            if(radius<=envelope||std::abs(signedAngle)<.001||std::abs(signedAngle)>180)throw std::runtime_error("Rectangular tube bend needs a CLR beyond the tube and an angle in [-180,180] excluding zero");
+            gp_Trsf rolled;rolled.SetRotation(gp_Ax1(point,tangent),roll*pi/180.0);bendNormal=gp_Dir(gp_Vec(bendNormal).Transformed(rolled));
+            const gp_Dir inward=signedAngle<0?bendNormal.Reversed():bendNormal;
+            const gp_Dir axis=tangent.Crossed(inward);const gp_Pnt center=point.Translated(gp_Vec(inward)*radius);
+            const gp_Dir radial(gp_Vec(point,center).Reversed());
+            const double angle=std::abs(signedAngle)*pi/180.0;
+            BRepBuilderAPI_MakeEdge edge(gp_Circ(gp_Ax2(center,axis,radial),radius),0,angle);
+            if(!edge.IsDone())throw std::runtime_error("Rectangular tube bend failed");
+            centerline.Add(edge.Edge());if(!centerline.IsDone())throw std::runtime_error("Rectangular tube centerline is not connected");
+            gp_Trsf swing;swing.SetRotation(gp_Ax1(center,axis),angle);
+            point.Transform(swing);tangent=gp_Dir(gp_Vec(tangent).Transformed(swing));normal=gp_Dir(gp_Vec(normal).Transformed(swing));binormal=tangent.Crossed(normal);bendNormal=gp_Dir(gp_Vec(bendNormal).Transformed(swing));
+        }else throw std::runtime_error("Rectangular tube segment must be line or arc");
+    }
+    if(!centerline.IsDone())throw std::runtime_error("Rectangular tube centerline is empty");
+    auto sectionWire=[&](double sectionWidth,double sectionHeight){
+        const double halfWidth=sectionWidth*0.5,halfHeight=sectionHeight*0.5;
+        const gp_Vec alongNormal(startNormal),alongBinormal(startTangent.Crossed(startNormal));
+        auto corner=[&](double u,double v){return startPoint.Translated(alongNormal*u+alongBinormal*v);};
+        const gp_Pnt corners[4]={corner(-halfWidth,-halfHeight),corner(halfWidth,-halfHeight),corner(halfWidth,halfHeight),corner(-halfWidth,halfHeight)};
+        BRepBuilderAPI_MakeWire wire;
+        for(int i=0;i<4;++i){BRepBuilderAPI_MakeEdge edge(corners[i],corners[(i+1)%4]);if(!edge.IsDone())throw std::runtime_error("Rectangular tube section failed");wire.Add(edge.Edge());if(!wire.IsDone())throw std::runtime_error("Rectangular tube section failed");}
+        return wire.Wire();
+    };
+    auto pipeSolid=[&](double sectionWidth,double sectionHeight){
+        BRepOffsetAPI_MakePipeShell pipe(centerline.Wire());
+        pipe.SetMode(false);pipe.SetTolerance(1e-6,1e-6,1e-4);pipe.Add(sectionWire(sectionWidth,sectionHeight),false,true);pipe.Build();
+        if(!pipe.IsDone()||!pipe.MakeSolid())throw std::runtime_error("Rectangular tube sweep failed");
+        TopoDS_Shape solid=pipe.Shape();if(properties(solid)<0)solid.Reverse();return solid;
+    };
+    BRepAlgoAPI_Cut hollow(pipeSolid(width,height),pipeSolid(width-2*wall,height-2*wall));hollow.Build();
+    if(!hollow.IsDone()||hollow.HasErrors())throw std::runtime_error("Rectangular tube hollow cut failed");
+    TopoDS_Shape solid=hollow.Shape();if(properties(solid)<0)solid.Reverse();
+    if(shapes(solid,TopAbs_SOLID).size()!=1||!(properties(solid)>0))throw std::runtime_error("Rectangular tube must be one positive solid");
+    const gp_Pnt endPoint=point;const gp_Dir endTangent=tangent;
+    int startCaps=0,endCaps=0,sides=0;bool axisBound=false;TopoDS_Face firstPlane;
+    auto nearer=[&](const TopoDS_Face& face){gp_XYZ sum(0,0,0);int count=0;for(const TopoDS_Shape& vertex:shapes(face,TopAbs_VERTEX)){sum+=BRep_Tool::Pnt(TopoDS::Vertex(vertex)).XYZ();++count;}gp_Pnt mid(count?sum/count:gp_Pnt());return mid.Distance(startPoint)<=mid.Distance(endPoint);};
+    for(const TopoDS_Shape& item:shapes(solid,TopAbs_FACE)){
+        TopoDS_Face face=TopoDS::Face(item);BRepAdaptor_Surface surface(face);
+        if(surface.GetType()!=GeomAbs_Plane){add(refs,"side."+std::to_string(sides++),"face",face);continue;}
+        if(firstPlane.IsNull())firstPlane=face;
+        gp_Dir faceNormal=surface.Plane().Axis().Direction();if(face.Orientation()==TopAbs_REVERSED)faceNormal.Reverse();
+        if(std::abs(faceNormal.Dot(startTangent))>0.9||std::abs(faceNormal.Dot(endTangent))>0.9){
+            const bool start=nearer(face);int& slot=start?startCaps:endCaps;add(refs,std::string(start?"cap.start":"cap.end")+(slot?"."+std::to_string(slot):""),"face",face);++slot;
+        }else add(refs,"side."+std::to_string(sides++),"face",face);
+    }
+    if(!firstPlane.IsNull()&&!axisBound){
+        Ref axis;axis.name="axis";axis.kind="axis";axis.status="bound";axis.shape=firstPlane;axis.seed=V::makeObj();
+        axis.seed.set("axis",direction(startTangent));axis.seed.set("origin",xyz(startPoint));refs.push_back(std::move(axis));axisBound=true;
     }
     return solid;
 }
@@ -435,6 +512,7 @@ V modelSolidNative(const V& request){
     }else if(op=="torus"){
         double major=positive(request,"major_radius"),minor=positive(request,"minor_radius");if(major<=minor)throw std::runtime_error("Torus major radius must exceed minor radius");result=BRepPrimAPI_MakeTorus(major,minor).Shape();for(auto& f:shapes(result,TopAbs_FACE))add(refs,"surface","face",f);
     }else if(op=="round_tube")result=roundTube(request,refs);
+    else if(op=="rect_tube")result=rectTube(request,refs);
     else if(op=="extrude")result=makeExtrusion(request,refs);
     else {
         const auto& encoded=need(request,"input_brep");if(encoded.t!=V::Str)throw std::runtime_error("Input must be a native B-rep");TopoDS_Shape input=readBrep(encoded.str);shapeReport(input,true);refs=inputRefs(request,"input_brep","input_topology",input);
@@ -598,6 +676,20 @@ V pointDistanceNative(const V& request){
     V result=V::makeObj();
     result.set("distance_mm",V::makeNum(gap));
     result.set("face",V::makeStr(face));
+    return result;
+}
+V solidCentroidNative(const V& request){
+    const V& encoded=need(request,"brep");
+    if(encoded.t!=V::Str)throw std::runtime_error("Centroid input is not a B-rep");
+    TopoDS_Shape shape=readBrep(encoded.str);
+    if(shapes(shape,TopAbs_SOLID).size()!=1)throw std::runtime_error("Centroid needs one solid");
+    GProp_GProps props;BRepGProp::VolumeProperties(shape,props);
+    if(!(props.Mass()>0))throw std::runtime_error("Centroid needs positive volume");
+    const gp_Pnt center=props.CentreOfMass();
+    V result=V::makeObj(),pointValue=V::makeArr();
+    result.set("volume_mm3",V::makeNum(props.Mass()));
+    for(double value:{center.X(),center.Y(),center.Z()})pointValue.arr.push_back(V::makeNum(value));
+    result.set("center_mm",pointValue);
     return result;
 }
 }

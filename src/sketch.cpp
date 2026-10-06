@@ -5,6 +5,7 @@
 #include <stdexcept>
 
 namespace ark {
+void resolveSketchCorners(Sketch& sketch,const ExprEnv& env);
 namespace {
 double expressionValue(const std::string& expression,const ExprEnv& env){
     bool ok=false;double value=evalExpr(expression,env,&ok);
@@ -79,7 +80,7 @@ void bakeSketchOffsets(Sketch& sketch,const ExprEnv& env){
         if(drivenKind(source->kind)&&source->dof.empty())continue;
         if(source->kind==SketchEnt::Pnt)throw std::runtime_error("Offset source must be a curve");
         double distance=expressionValue(entity.distance,env);
-        assignPolyline(entity,offsetPolyline(sampleSketchEntity(*source,sketch.tolerance),distance));
+        assignPolyline(entity,offsetPolyline(sampleSketchEntity(*source,sketch.tolerance,&sketch),distance));
     }
 }
 Vec3 referenceOrigin(Document& document,u64 feature,const std::string& name,double fraction){
@@ -170,15 +171,17 @@ void evaluateSketch(NamedSketch& ns,const ExprEnv& env){
             if(!c.expression2.empty())c.val2=expressionValue(c.expression2,env);
             if((c.type==SketchCon::Radius&&c.val<=0)||(c.type==SketchCon::DistPP&&c.val<0))throw std::runtime_error("Invalid dimension target");
         }
+        resolveSketchCorners(ns.sk,env);
         bakeSketchOffsets(ns.sk,env);
         SketchDiagnostics diagnostics;ns.residual=solveSketch(ns.sk,nullptr,200,&diagnostics);
         bakeSketchOffsets(ns.sk,env);
+        resolveSketchCorners(ns.sk,env);
         ns.rank=diagnostics.rank;ns.freeDofs=diagnostics.variables-diagnostics.rank;
         if(!std::isfinite(ns.residual)||ns.residual>1e-6)throw std::runtime_error("Conflicting constraints or solver failed to converge");
         for(auto& e:ns.sk.ents){
             for(auto x:e.dof)if(!std::isfinite(x)||std::abs(x)>1e7)throw std::runtime_error("Sketch coordinate outside finite bounds");
             if(drivenKind(e.kind)&&e.dof.empty())continue;
-            sampleSketchEntity(e,ns.sk.tolerance); // validate even unconsumed sketches
+            sampleSketchEntity(e,ns.sk.tolerance,&ns.sk); // validate even unconsumed sketches
         }
     }catch(const std::exception& ex){ns.error=ex.what();ns.residual=INFINITY;}
 }
@@ -289,7 +292,113 @@ bool sketchMinorArc(Vec2 start,Vec2 end,double radius,int sweep,Vec2& center,dou
     a0Deg=a0;a1Deg=a0+chosen;return true;
 }
 
-std::vector<Vec2> sampleSketchEntity(const SketchEnt& e,double tolerance){
+std::vector<SketchCurve> sketchPresentedCurves(const Sketch& sketch,const SketchEnt& entity){
+    std::vector<SketchCurve> curves;
+    bool used=false;
+    for(const auto& corner:sketch.corners)if(corner.entity==entity.name&&!entity.name.empty())used=true;
+    if(!used||(entity.kind!=SketchEnt::Wire&&entity.kind!=SketchEnt::Project&&entity.kind!=SketchEnt::Offset))return curves;
+    if(entity.segments.empty()||entity.dof.size()<4)throw std::runtime_error("Fillet corner is not between two edges");
+    std::vector<Vec2> points;
+    std::vector<SketchEnt::WireSeg::Kind> kinds;
+    auto at=[&](int index){return Vec2{entity.dof.at((size_t)index),entity.dof.at((size_t)index+1)};};
+    Vec2 cursor=at(0);int dof=2;points.push_back(cursor);
+    for(const auto& segment:entity.segments){
+        if(segment.kind==SketchEnt::WireSeg::Line){cursor=at(dof);dof+=2;}
+        else if(segment.kind==SketchEnt::WireSeg::Arc){cursor=at(dof);dof+=3;}
+        else if(segment.kind==SketchEnt::WireSeg::Cubic){cursor=at(dof+4);dof+=6;}
+        else throw std::runtime_error("Wire segment kind must be line, arc or cubic");
+        points.push_back(cursor);kinds.push_back(segment.kind);
+    }
+    const bool repeated=points.size()>=4&&(points.front()-points.back()).len()<1e-6;
+    const int unique=repeated?(int)points.size()-1:(int)points.size();
+    const bool closed=repeated;
+    if(unique<2)throw std::runtime_error("Fillet corner is not between two edges");
+    struct Cut{bool on=false;bool chamfer=false;double t=0;Vec2 incoming,outgoing,center;double radius=0,a0=0,a1=0;};
+    std::vector<Cut> cuts((size_t)unique);
+    for(const auto& corner:sketch.corners){
+        if(corner.entity!=entity.name)continue;
+        const char* unfit=corner.chamfer?"Chamfer distance does not fit the corner":"Fillet radius does not fit the corner";
+        if(corner.corner<0||corner.corner>=unique)throw std::runtime_error("Fillet corner is not between two edges");
+        if(!closed&&(corner.corner==0||corner.corner==unique-1))throw std::runtime_error("Fillet corner is not between two edges");
+        const int previous=closed?(corner.corner+unique-1)%unique:corner.corner-1;
+        const int next=corner.corner;
+        if(previous<0||next>=(int)kinds.size()||kinds[(size_t)previous]!=SketchEnt::WireSeg::Line||kinds[(size_t)next]!=SketchEnt::WireSeg::Line)
+            throw std::runtime_error("Fillet needs two straight edges");
+        const Vec2 vertex=points[(size_t)corner.corner];
+        const Vec2 before=points[(size_t)previous];
+        const Vec2 after=points[(size_t)(corner.corner+1)];
+        Vec2 towardPrevious=before-vertex,towardNext=after-vertex;
+        const double previousLength=towardPrevious.len(),nextLength=towardNext.len();
+        if(previousLength<1e-8||nextLength<1e-8)throw std::runtime_error(unfit);
+        towardPrevious=towardPrevious*(1/previousLength);towardNext=towardNext*(1/nextLength);
+        const double alpha=std::acos(clamp(towardPrevious.dot(towardNext),-1.,1.));
+        const Vec2 bisector=towardPrevious+towardNext;
+        if(bisector.len()<1e-6||alpha<1e-4||K_PI-alpha<1e-4)throw std::runtime_error(unfit);
+        const double size=corner.solved;
+        const double trim=corner.chamfer?size:size/std::tan(alpha*0.5);
+        if(!(trim>1e-9)||trim>=previousLength-1e-8||trim>=nextLength-1e-8)throw std::runtime_error(unfit);
+        Cut cut;cut.on=true;cut.chamfer=corner.chamfer;cut.t=trim;
+        cut.incoming=vertex+towardPrevious*trim;cut.outgoing=vertex+towardNext*trim;
+        if(!corner.chamfer){
+            const Vec2 center=vertex+bisector.normalized()*(size/std::sin(alpha*0.5));
+            auto degrees=[&](Vec2 p){return rad2deg(std::atan2(p.y-center.y,p.x-center.x));};
+            const double a0=degrees(cut.incoming),a1=degrees(cut.outgoing);
+            auto wrap=[&](double d){while(d<=-180)d+=360;while(d>180)d-=360;return d;};
+            const double sweep=wrap(a1-a0);
+            if(!(std::abs(sweep)>1e-4&&std::abs(sweep)<=180.+1e-3))throw std::runtime_error(unfit);
+            cut.center=center;cut.radius=size;cut.a0=a0;cut.a1=a0+sweep;
+        }
+        cuts[(size_t)corner.corner]=cut;
+    }
+    const int edges=(int)kinds.size();
+    for(int edge=0;edge<edges;++edge){
+        if(kinds[(size_t)edge]!=SketchEnt::WireSeg::Line)continue;
+        const double length=(points[(size_t)edge+1]-points[(size_t)edge]).len();
+        const double startTrim=cuts[(size_t)edge].on?cuts[(size_t)edge].t:0;
+        const int endCorner=closed&&edge==edges-1?0:(edge+1<unique?edge+1:-1);
+        const double endTrim=endCorner>=0&&cuts[(size_t)endCorner].on?cuts[(size_t)endCorner].t:0;
+        if(startTrim+endTrim>0&&startTrim+endTrim>=length-1e-8){
+            const bool chamfer=(cuts[(size_t)edge].on&&cuts[(size_t)edge].chamfer)||(endCorner>=0&&cuts[(size_t)endCorner].on&&cuts[(size_t)endCorner].chamfer);
+            throw std::runtime_error(chamfer?"Chamfer distance does not fit the corner":"Fillet radius does not fit the corner");
+        }
+    }
+    auto emitLine=[&](Vec2 a,Vec2 b){if((b-a).len()<1e-8)return;SketchCurve curve;curve.kind=SketchCurve::Line;curve.a=a;curve.b=b;curves.push_back(curve);};
+    for(int edge=0;edge<edges;++edge){
+        const int endCorner=closed&&edge==edges-1?0:(edge+1<unique?edge+1:-1);
+        const Vec2 from=cuts[(size_t)edge].on?cuts[(size_t)edge].outgoing:points[(size_t)edge];
+        const Vec2 to=endCorner>=0&&cuts[(size_t)endCorner].on?cuts[(size_t)endCorner].incoming:points[(size_t)edge+1];
+        emitLine(from,to);
+        if(endCorner>=0&&cuts[(size_t)endCorner].on){
+            const Cut& cut=cuts[(size_t)endCorner];
+            if(cut.chamfer){SketchCurve line;line.kind=SketchCurve::Line;line.a=cut.incoming;line.b=cut.outgoing;line.corner=endCorner;curves.push_back(line);}
+            else{SketchCurve arc;arc.kind=SketchCurve::Arc;arc.a=cut.incoming;arc.b=cut.outgoing;arc.center=cut.center;arc.radius=cut.radius;arc.a0=cut.a0;arc.a1=cut.a1;arc.corner=endCorner;curves.push_back(arc);}
+        }
+    }
+    if(curves.empty())throw std::runtime_error("Fillet corner is not between two edges");
+    return curves;
+}
+
+void resolveSketchCorners(Sketch& sketch,const ExprEnv& env){
+    if(sketch.corners.size()>64)throw std::runtime_error("Sketch corner capacity exceeded");
+    for(auto& corner:sketch.corners){
+        const SketchEnt* found=nullptr;
+        for(const auto& entity:sketch.ents)if(entity.name==corner.entity){
+            if(found)throw std::runtime_error("Ambiguous sketch entity");
+            found=&entity;
+        }
+        if(!found)throw std::runtime_error("Sketch entity not found");
+        if(found->kind!=SketchEnt::Wire)throw std::runtime_error("Fillet a wire corner");
+        const double size=expressionValue(corner.size,env);
+        if(!(size>0)||!std::isfinite(size)||size>1e6)throw std::runtime_error(corner.chamfer?"Chamfer distance must be a positive length":"Fillet radius must be a positive length");
+        corner.solved=size;
+    }
+    for(const auto& entity:sketch.ents){
+        bool used=false;for(const auto& corner:sketch.corners)if(corner.entity==entity.name)used=true;
+        if(used)(void)sketchPresentedCurves(sketch,entity);
+    }
+}
+
+std::vector<Vec2> sampleSketchEntity(const SketchEnt& e,double tolerance,const Sketch* owner){
     if(!std::isfinite(tolerance)||tolerance<.0001||tolerance>5)throw std::runtime_error("Sketch tolerance must be 0.0001..5 mm");
     auto pt=[&](size_t i){return Vec2{e.dof.at(2*i),e.dof.at(2*i+1)};};
     auto at=[&](int i){return Vec2{e.dof.at((size_t)i),e.dof.at((size_t)i+1)};};
@@ -307,6 +416,20 @@ std::vector<Vec2> sampleSketchEntity(const SketchEnt& e,double tolerance){
         appendArc({e.dof[0],e.dof[1]},e.dof[2],e.dof[3],e.dof[4],tolerance,out,true);return out;
     }
     if(e.kind==SketchEnt::Wire||e.kind==SketchEnt::Project||e.kind==SketchEnt::Offset){
+        if(owner){
+            bool trimmed=false;
+            for(const auto& corner:owner->corners)if(corner.entity==e.name&&!e.name.empty())trimmed=true;
+            if(trimmed){
+                const auto presented=sketchPresentedCurves(*owner,e);
+                std::vector<Vec2> trimmedSamples;
+                for(const auto& curve:presented){
+                    if(trimmedSamples.empty())trimmedSamples.push_back(curve.a);
+                    if(curve.kind==SketchCurve::Line){if((curve.b-trimmedSamples.back()).len()>1e-9)trimmedSamples.push_back(curve.b);}
+                    else appendArc(curve.center,curve.radius,curve.a0,curve.a1,tolerance,trimmedSamples,false);
+                }
+                return trimmedSamples;
+            }
+        }
         if((e.kind==SketchEnt::Project||e.kind==SketchEnt::Offset)&&(e.dof.empty()||e.segments.empty()))
             throw std::runtime_error(e.kind==SketchEnt::Project?"Project source is not evaluated yet":"Offset source is not resolved");
         if(e.segments.empty()||e.segments.size()>64)throw std::runtime_error("Wire needs 1..64 segments");
@@ -351,7 +474,7 @@ std::vector<std::array<Vec2,4>> sketchSplineSegments(const SketchEnt& e){
 
 std::vector<SketchProfile> sketchProfiles(const Sketch& sketch,const Mat4& frame){
     std::vector<std::vector<Vec2>> curves,loops;size_t samples=0;
-    for(auto& e:sketch.ents)if(!e.construction&&e.kind!=SketchEnt::Pnt){auto p=sampleSketchEntity(e,sketch.tolerance);samples+=p.size();if(samples>4096)throw std::runtime_error("Sketch exceeds 4096 profile samples");curves.push_back(std::move(p));}
+    for(auto& e:sketch.ents)if(!e.construction&&e.kind!=SketchEnt::Pnt){auto p=sampleSketchEntity(e,sketch.tolerance,&sketch);samples+=p.size();if(samples>4096)throw std::runtime_error("Sketch exceeds 4096 profile samples");curves.push_back(std::move(p));}
     if(curves.empty())throw std::runtime_error("Sketch has no profile geometry");
     std::vector<bool> used(curves.size(),false);
     for(size_t seed=0;seed<curves.size();++seed){
@@ -390,7 +513,7 @@ arkjson::Value inspectSketch(const Document& doc,const NamedSketch& ns,bool samp
     for(auto& e:ns.sk.ents){V item=V::makeObj(),dof=V::makeArr(),world=V::makeArr(),local=V::makeArr();
         item.set("name",V::makeStr(e.name));item.set("kind",V::makeStr(sketchEntityKindName(e.kind)));
         item.set("construction",V::makeBool(e.construction));for(auto x:e.dof)dof.arr.push_back(V::makeNum(x));item.set("resolved_dof",dof);
-        auto points=sampleSketchEntity(e,ns.sk.tolerance);item.set("sample_count",V::makeNum(points.size()));
+        auto points=sampleSketchEntity(e,ns.sk.tolerance,&ns.sk);item.set("sample_count",V::makeNum(points.size()));
         if(samples){for(auto p:points){local.arr.push_back(vectorValue({p.x,p.y,0}));world.arr.push_back(vectorValue(frame.transformPoint({p.x,p.y,0})));}item.set("local",local);item.set("world",world);}entities.arr.push_back(item);
     }r.set("entities",entities);
     try{auto profiles=sketchProfiles(ns.sk,frame);r.set("profile_ready",V::makeBool(true));r.set("loops",V::makeNum(profiles.size()));}
@@ -406,7 +529,7 @@ arkjson::Value measureSketchEntity(const Document&,const NamedSketch& sketch,con
         found=&candidate;
     }
     if(!found) throw std::runtime_error("Sketch entity not found");
-    const auto samples=sampleSketchEntity(*found,sketch.sk.tolerance);
+    const auto samples=sampleSketchEntity(*found,sketch.sk.tolerance,&sketch.sk);
     double xmin=1e300,ymin=1e300,xmax=-1e300,ymax=-1e300,length=0;
     for(const auto& p:samples){xmin=std::min(xmin,p.x);ymin=std::min(ymin,p.y);xmax=std::max(xmax,p.x);ymax=std::max(ymax,p.y);}
     for(size_t i=1;i<samples.size();++i) length+=(samples[i]-samples[i-1]).len();

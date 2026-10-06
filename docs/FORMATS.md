@@ -192,3 +192,22 @@ recompute. `suppressed: true` keeps the feature in the history and leaves
 its body out of recomputation. A project stores a feature id and a semantic
 edge or planar face. An offset stores an earlier entity name and a signed
 distance. Positive distance is to the left of the directed curve.
+
+## Version 14: sketch fillets, sketch chamfers, and mates across groups
+
+Save chooses the version. A document becomes version 14 only when a sketch
+stores a fillet or chamfer corner, or a mate joins part instances whose
+immediate parents differ. An empty version 14 file still loads. A file below
+version 14 that contains either of those is rejected and the error says that
+sketch fillets, sketch chamfers, or mates across assembly groups require
+document version 14. `p.density` and a rectangular-tube exact B-rep do not
+change the version. Versions 1 through 13 still load and save at their own
+version. The product version stays 0.9.0.
+
+A corner record stores `entity`, `corner`, `kind` (`fillet` or `chamfer`) and
+`size`. `size` is the radius or the chamfer distance, kept as an expression.
+The sharp wire stays the authority. At most 64 corners are stored, and the
+same entity and corner index cannot appear twice. A rectangular tube exact
+solid is a hollow sweep of a rectangular section. The centerline starts along
++X, width lies along the section normal, and height lies along the binormal.
+The display mesh remains the tessellation of that centerline.

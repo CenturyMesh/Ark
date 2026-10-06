@@ -145,6 +145,26 @@ bool entFromJson(const Value& v, SketchEnt& e, std::string* err){
     return true;
 }
 
+bool cornerFromJson(const Value& v,SketchCorner& corner,std::string* err){
+    auto fail=[&](const char* message){if(err)*err=message;return false;};
+    if(v.t!=Value::Obj)return fail("Sketch corner must be an object");
+    auto entity=v.find("entity");
+    if(!entity||entity->t!=Value::Str||entity->str.empty()||entity->str.size()>128)return fail("Sketch entity not found");
+    corner.entity=entity->str;
+    auto index=v.find("corner");
+    if(!index||index->t!=Value::Num||!std::isfinite(index->num)||index->num<0||index->num>4096||index->num!=std::floor(index->num))return fail("Fillet corner is not between two edges");
+    corner.corner=(int)index->num;
+    auto kind=v.find("kind");
+    if(!kind||kind->t!=Value::Str||(kind->str!="fillet"&&kind->str!="chamfer"))return fail("Sketch corner kind must be fillet or chamfer");
+    corner.chamfer=kind->str=="chamfer";
+    auto size=v.find("size");
+    if(!size)return fail(corner.chamfer?"Chamfer distance must be a positive length":"Fillet radius must be a positive length");
+    if(size->t==Value::Str&&!size->str.empty()&&size->str.size()<=2048)corner.size=size->str;
+    else if(size->t==Value::Num&&std::isfinite(size->num))corner.size=size->dump();
+    else return fail(corner.chamfer?"Chamfer distance must be a positive length":"Fillet radius must be a positive length");
+    return true;
+}
+
 bool validSketch(const Sketch& sk,std::string* err){
     auto fail=[&](const char* e){if(err)*err=e;return false;};
     if(sk.ents.size()>128||sk.cons.size()>256)return fail("sketch capacity exceeded");
@@ -168,6 +188,19 @@ bool validSketch(const Sketch& sk,std::string* err){
             bool lineA=sk.ents[(size_t)c.a].kind==SketchEnt::Line,lineB=sk.ents[(size_t)c.b].kind==SketchEnt::Line;
             if(!((lineA&&round(c.b))||(lineB&&round(c.a)))) return fail("tangent requires one line and one circle or arc");
         }
+    }
+    if(sk.corners.size()>64)return fail("Sketch corner capacity exceeded");
+    std::set<std::pair<std::string,int>> cornerIds;
+    for(const auto& corner:sk.corners){
+        if(!cornerIds.insert({corner.entity,corner.corner}).second)return fail("Duplicate sketch corner");
+        const SketchEnt* found=nullptr;
+        for(const auto& entity:sk.ents)if(entity.name==corner.entity){
+            if(found)return fail("Ambiguous sketch entity");
+            found=&entity;
+        }
+        if(!found)return fail("Sketch entity not found");
+        if(found->kind!=SketchEnt::Wire)return fail("Fillet a wire corner");
+        if(corner.size.empty())return fail(corner.chamfer?"Chamfer distance must be a positive length":"Fillet radius must be a positive length");
     }
     return true;
 }
@@ -272,6 +305,18 @@ bool generation13Document(const Document& doc){
     for(const auto& sketch:doc.sketches) for(const auto& entity:sketch.sk.ents) if(entity.kind==SketchEnt::Project||entity.kind==SketchEnt::Offset) return true;
     return false;
 }
+bool generation14Document(const Document& doc){
+    for(const auto& sketch:doc.sketches) if(!sketch.sk.corners.empty()) return true;
+    for(const auto& mate:doc.mates){
+        bool foundA=false,foundB=false;u64 parentA=0,parentB=0;
+        for(const auto& node:doc.assembly){
+            if(node.id==mate.a){foundA=true;parentA=node.parent;}
+            if(node.id==mate.b){foundB=true;parentB=node.parent;}
+        }
+        if(foundA&&foundB&&parentA!=parentB) return true;
+    }
+    return false;
+}
 
 bool generation11Document(const Document& doc){
     for(const auto& feature:doc.features){
@@ -306,13 +351,14 @@ std::string documentToJson(const Document& doc){
     Value r=Value::makeObj();
     r.set("format",Value::makeStr("ark"));
     bool sourceTube=false;bool notched=false;bool nativeVersion=false;bool generation8=false;bool generation9=false;bool extended=!doc.assembly.empty()||doc.nextAssemblyId_>1;for(auto& f:doc.features){extended|=f.type==FeatureType::Tube;notched|=f.type==FeatureType::NotchedTube;sourceTube|=f.type==FeatureType::SourceTube;nativeVersion|=f.type==FeatureType::Loft||f.type==FeatureType::SurfaceFill||f.type==FeatureType::BSplineSurface||f.type==FeatureType::Thicken||f.type==FeatureType::SheetMetal||f.type==FeatureType::SourceSheet||f.type==FeatureType::NativeSolid;generation8|=f.type==FeatureType::Sweep||f.type==FeatureType::ExtrudeSurface||f.type==FeatureType::RevolveSurface||f.type==FeatureType::OffsetSurface||f.type==FeatureType::Sew||isMeshModelFeature(f.type);generation9|=generation9Feature(doc,f);}
+    bool generation14=generation14Document(doc);
     bool generation13=generation13Document(doc);
     bool generation12=generation12Document(doc);
     bool generation11=generation11Document(doc);
     bool generation10=generation10Document(doc);
     bool sketchVersion=!doc.planes.empty()||!doc.sketches.empty();for(auto& f:doc.features)sketchVersion|=f.type==FeatureType::SketchCut;
     bool latest=!doc.mates.empty()||doc.nextMateId_>1;for(auto& p:doc.planes)latest|=p.support.t==Value::Obj||p.kind!="plane";for(auto& f:doc.features)latest|=f.type==FeatureType::NativeSolid||(f.type==FeatureType::SheetMetal&&f.nativeSpec.find("base"));for(auto& n:doc.assembly)latest|=n.fixed;for(auto& sk:doc.sketches)for(auto& c:sk.sk.cons)latest|=!c.id.empty();
-    r.set("version",Value::makeNum(generation13?13:generation12?12:generation11?11:generation10?10:generation9?9:generation8?8:latest?7:nativeVersion?6:sketchVersion?5:sourceTube?4:notched?3:extended?2:1));
+    r.set("version",Value::makeNum(generation14?14:generation13?13:generation12?12:generation11?11:generation10?10:generation9?9:generation8?8:latest?7:nativeVersion?6:sketchVersion?5:sourceTube?4:notched?3:extended?2:1));
     r.set("units",Value::makeStr("mm"));
     r.set("next_feature_id",Value::makeNum((double)doc.nextFeatureId_));
 
@@ -395,7 +441,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     Value v;
     if(!arkjson::parse(json,v)) return fail("malformed JSON");
     if(v.t!=Value::Obj) return fail("root must be object");
-    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0&&ver->num!=3.0&&ver->num!=4.0&&ver->num!=5.0&&ver->num!=6.0&&ver->num!=7.0&&ver->num!=8.0&&ver->num!=9.0&&ver->num!=10.0&&ver->num!=11.0&&ver->num!=12.0&&ver->num!=13.0)))
+    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0&&ver->num!=3.0&&ver->num!=4.0&&ver->num!=5.0&&ver->num!=6.0&&ver->num!=7.0&&ver->num!=8.0&&ver->num!=9.0&&ver->num!=10.0&&ver->num!=11.0&&ver->num!=12.0&&ver->num!=13.0&&ver->num!=14.0)))
         return fail("unsupported document version");
 
     if(auto format=v.find("format");format && format->asStr()!="ark")return fail("unsupported format");
@@ -538,6 +584,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     if(generation11Document(nd)){auto version=v.find("version");if(!version||version->asNum()<11)return fail("solid shells or loft guide curves require document version 11");}
     if(generation12Document(nd)){auto version=v.find("version");if(!version||version->asNum()<12)return fail("points, curve segments, or curve features require document version 12");}
     if(generation13Document(nd)){auto version=v.find("version");if(!version||version->asNum()<13)return fail("plane canvases, suppressed features, or projected and offset sketch entities require document version 13");}
+    if(generation14Document(nd)){auto version=v.find("version");if(!version||version->asNum()<14)return fail("sketch fillets, sketch chamfers, or mates across assembly groups require document version 14");}
     if(nd.params.size()>256||nd.features.size()>1024||nd.sketches.size()>64||nd.canvases.size()>8)return fail("document capacity exceeded");
     nd.refreshParams();
     if(!nd.parameterError.empty())return fail(nd.parameterError);
@@ -564,6 +611,18 @@ std::string sketchToJson(const Sketch& sk){
     Value cs=Value::makeArr(); for(auto&c:sk.cons) cs.arr.push_back(conToJson(c));
     v.set("entities",std::move(es));
     v.set("constraints",std::move(cs));
+    if(!sk.corners.empty()){
+        Value corners=Value::makeArr();
+        for(const auto& corner:sk.corners){
+            Value item=Value::makeObj();
+            item.set("entity",Value::makeStr(corner.entity));
+            item.set("corner",Value::makeNum(corner.corner));
+            item.set("kind",Value::makeStr(corner.chamfer?"chamfer":"fillet"));
+            item.set("size",Value::makeStr(corner.size));
+            corners.arr.push_back(std::move(item));
+        }
+        v.set("corners",std::move(corners));
+    }
     return v.dump();
 }
 
@@ -587,6 +646,15 @@ bool sketchFromJson(const std::string& json, Sketch& sk, std::string* err){
             if(!conFromJson(c,sc,err)) return false;
             out.cons.push_back(sc);
         }
+    if(auto corners=v.find("corners")){
+        if(corners->t!=Value::Arr){if(err)*err="Sketch corners must be an array";return false;}
+        if(corners->arr.size()>64){if(err)*err="Sketch corner capacity exceeded";return false;}
+        for(const auto& item:corners->arr){
+            SketchCorner corner;
+            if(!cornerFromJson(item,corner,err))return false;
+            out.corners.push_back(std::move(corner));
+        }
+    }
     if(!validSketch(out,err))return false;
     sk=std::move(out);
     return true;

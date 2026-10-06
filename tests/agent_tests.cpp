@@ -46,8 +46,13 @@ int main(){
     CHECK(documentFromJson(R"({"version":11,"features":[]})",invalid,&error));
     CHECK(documentFromJson(R"({"version":12,"features":[]})",invalid,&error));
     CHECK(documentFromJson(R"({"version":13,"features":[]})",invalid,&error));
-    CHECK(!documentFromJson(R"({"version":14,"features":[]})",invalid,&error));
+    CHECK(documentFromJson(R"({"version":14,"features":[]})",invalid,&error));
+    CHECK(!documentFromJson(R"({"version":15,"features":[]})",invalid,&error));
     CHECK(error.find("unsupported document version")!=std::string::npos);
+    CHECK(!documentFromJson(R"({"version":13,"features":[],"sketches":[{"name":"Plate","entities":[{"kind":"wire","name":"Outline","dof":[0,0,10,0,10,10,0,10,0,0],"segments":[{"kind":"line"},{"kind":"line"},{"kind":"line"},{"kind":"line"}]}],"corners":[{"entity":"Outline","corner":1,"kind":"fillet","size":"2"}]}]})",invalid,&error));
+    CHECK(error.find("sketch fillets, sketch chamfers, or mates across assembly groups require document version 14")!=std::string::npos);
+    CHECK(!documentFromJson(R"({"version":13,"features":[{"id":1,"type":"box","name":"Cube","op":0,"inputs":[],"p":{"dx":"10","dy":"10","dz":"10"}}],"assembly":[{"id":1,"parent":0,"feature":0,"name":"A"},{"id":2,"parent":0,"feature":0,"name":"B"},{"id":3,"parent":1,"feature":1,"name":"P","fixed":true},{"id":4,"parent":2,"feature":1,"name":"Q"}],"mates":[{"id":1,"a":3,"b":4,"type":"coincident","reference_a":"origin","reference_b":"origin","value":"0"}]})",invalid,&error));
+    CHECK(error.find("document version 14")!=std::string::npos);
     CHECK(!documentFromJson(R"({"version":12,"features":[{"id":1,"type":"box","suppressed":true}]})",invalid,&error));
     CHECK(error.find("document version 13")!=std::string::npos);
     CHECK(!documentFromJson(R"({"version":12,"features":[],"sketches":[{"name":"S","entities":[{"kind":"project","name":"Edge","feature":1,"reference":"edge.x.ymin.zmin"}]}]})",invalid,&error));
@@ -140,6 +145,53 @@ int main(){
         const auto& box=payload->find("bbox_mm")->arr;
         CHECK(std::fabs(payload->find("length_mm")->num-24)<1e-6);
         CHECK(std::fabs(box[0].num-2)<1e-6&&std::fabs(box[1].num-2)<1e-6&&std::fabs(box[2].num-8)<1e-6&&std::fabs(box[3].num-8)<1e-6);
+    }
+    {
+        AgentSession plate;
+        CHECK(!failed(plate.call("doc_apply",json(R"({"commands":[
+            {"op":"param.set","name":"r","expr":"2"},
+            {"op":"sketch.set","name":"Plate","sketch":{"tolerance":0.005,"entities":[{"kind":"wire","name":"Outline","start":[0,0],"segments":[{"kind":"line","to":[10,0]},{"kind":"line","to":[10,10]},{"kind":"line","to":[0,10]},{"kind":"line","to":[0,0]}]}]}},
+            {"op":"sketch.fillet","name":"Plate","entity":"Outline","corner":0,"radius":"r"},
+            {"op":"sketch.fillet","name":"Plate","entity":"Outline","corner":1,"radius":"r"},
+            {"op":"sketch.fillet","name":"Plate","entity":"Outline","corner":2,"radius":"r"},
+            {"op":"sketch.fillet","name":"Plate","entity":"Outline","corner":3,"radius":"r"}
+        ]})"))));
+        auto measured=plate.call("sketch_inspect",json(R"({"name":"Plate","entity":"Outline"})"));
+        CHECK(!failed(measured));
+        const double fillet=40-16+4*3.141592653589793;
+        CHECK(std::fabs(measured.find("structuredContent")->find("length_mm")->num-fillet)<0.05);
+        const auto& box=measured.find("structuredContent")->find("bbox_mm")->arr;
+        CHECK(std::fabs(box[0].num)<0.02&&std::fabs(box[1].num)<0.02&&std::fabs(box[2].num-10)<0.02&&std::fabs(box[3].num-10)<0.02);
+        V saved;CHECK(arkjson::parse(documentToJson(plate.document),saved)&&saved.find("version")->num==14);
+        CHECK(!failed(plate.call("doc_apply",json(R"({"commands":[{"op":"param.set","name":"r","expr":"4"}]})"))));
+        measured=plate.call("sketch_inspect",json(R"({"name":"Plate","entity":"Outline"})"));
+        CHECK(std::fabs(measured.find("structuredContent")->find("length_mm")->num-(40-32+8*3.141592653589793))<0.05);
+        std::string kept=documentToJson(plate.document);
+        auto oversized=plate.call("doc_apply",json(R"({"commands":[{"op":"sketch.fillet","name":"Plate","entity":"Outline","corner":1,"radius":"20"}]})"));
+        CHECK(failed(oversized)&&oversized.find("structuredContent")->find("error")->str.find("Fillet radius does not fit the corner")!=std::string::npos);
+        CHECK(documentToJson(plate.document)==kept);
+    }
+    {
+        AgentSession plate;
+        CHECK(!failed(plate.call("doc_apply",json(R"({"commands":[
+            {"op":"sketch.set","name":"Plate","sketch":{"tolerance":0.005,"entities":[{"kind":"wire","name":"Outline","start":[0,0],"segments":[{"kind":"line","to":[10,0]},{"kind":"line","to":[10,10]},{"kind":"line","to":[0,10]},{"kind":"line","to":[0,0]}]}]}},
+            {"op":"sketch.chamfer","name":"Plate","entity":"Outline","corner":0,"distance":2},
+            {"op":"sketch.chamfer","name":"Plate","entity":"Outline","corner":1,"distance":2},
+            {"op":"sketch.chamfer","name":"Plate","entity":"Outline","corner":2,"distance":2},
+            {"op":"sketch.chamfer","name":"Plate","entity":"Outline","corner":3,"distance":2}
+        ]})"))));
+        auto measured=plate.call("sketch_inspect",json(R"({"name":"Plate","entity":"Outline"})"));
+        CHECK(!failed(measured));
+        CHECK(std::fabs(measured.find("structuredContent")->find("length_mm")->num-(24+8*std::sqrt(2.0)))<0.05);
+        auto open=plate.call("doc_apply",json(R"({"commands":[{"op":"sketch.set","name":"Open","sketch":{"entities":[{"kind":"wire","name":"Path","start":[0,0],"segments":[{"kind":"line","to":[10,0]},{"kind":"line","to":[10,10]}]}]}},{"op":"sketch.fillet","name":"Open","entity":"Path","corner":0,"radius":1}]})"));
+        CHECK(failed(open)&&open.find("structuredContent")->find("error")->str.find("Fillet corner is not between two edges")!=std::string::npos);
+    }
+    {
+        AgentSession dense;
+        CHECK(!failed(dense.call("doc_apply",json(R"({"commands":[{"op":"feature.add","type":"box","name":"Cube","p":{"dx":10,"dy":10,"dz":10,"density":-1}}]})"))));
+        V saved;CHECK(arkjson::parse(documentToJson(dense.document),saved)&&saved.find("version")->num==1);
+        auto inspect=dense.call("native_inspect",json(R"({"id":1})"));
+        CHECK(failed(inspect)&&inspect.find("structuredContent")->find("error")->str.find("Density must be a positive finite number of grams per cubic centimetre")!=std::string::npos);
     }
     CHECK(AgentSession::tools().arr.size()==34);
     std::cout<<checks<<" checks / "<<failures<<" failures\n";return failures?1:0;

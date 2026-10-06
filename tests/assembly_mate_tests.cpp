@@ -92,9 +92,18 @@ int main(){
         CHECK(!resolveAssembly(d,placements,error));CHECK(error.find("invalid assembly instance")!=std::string::npos);
     }
     {
-        auto d=basic();d.assembly.push_back({4,0,0,"Other",{},true});
-        d.assembly[2].parent=4;d.mates.push_back(mate(1,"coincident"));
-        CHECK(!resolveAssembly(d,placements,error));CHECK(error.find("different assembly parents")!=std::string::npos);
+        auto d=basic();
+        d.assembly.push_back({4,0,0,"Arm",{},true});
+        d.assembly[2].parent=4;
+        d.assembly.push_back({5,4,1,"Sibling",{{"tx","10"}},true});
+        d.mates.push_back(mate(1,"coincident"));
+        CHECK(resolveAssembly(d,placements,error,&diag));if(!error.empty())std::cerr<<error<<'\n';
+        CHECK(placed(placements,3).approx({10,0,0},1e-5));
+        CHECK(placed(placements,5).approx({40,-8,-4},1e-5));
+        CHECK(placed(placements,2).approx({10,0,0},1e-9));
+        CHECK(diag.rank==5&&diag.freeDofs==1);
+        arkjson::Value saved;CHECK(arkjson::parse(documentToJson(d),saved));
+        CHECK(saved.find("version")&&saved.find("version")->num==14);
     }
     {
         auto d=basic();d.mates.push_back(mate(1,"distance","Z","Z","invalid_parameter"));

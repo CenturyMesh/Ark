@@ -153,6 +153,25 @@ hard timeout. Its geometric limitations are not repaired by a faster broadphase.
 These are **sampled profile meshes**, not a new
 exact B-rep kernel. General STEP export, fillets and persistent face references
 remain outside this milestone. Existing source-tube STEP export is unchanged.
+A sketch wire can still carry a parametric corner fillet or chamfer. That trim
+is described below and is not a solid-edge fillet.
+
+## Sketch fillets and chamfers
+
+`sketch.fillet` `{name,entity,corner,radius}` and `sketch.chamfer`
+`{name,entity,corner,distance}` trim one corner of a named wire inside
+`doc_apply`. `corner` is the vertex index. On a closed wire the repeated
+closing vertex is not another corner, and corner 0 uses the previous unique
+point. The radius or distance stays an expression. The sharp wire remains the
+solved geometry, so `sketch.patch` moving a vertex rebuilds the trim. A fillet
+is the minor arc on the turning side: the center lies on the angle bisector,
+and each adjacent straight edge shortens by `radius / tan(half-angle)`. A
+chamfer cuts that same length, using the distance in place of the radius.
+The saved record stores `entity`, `corner`, `kind` and `size`. Applying the
+same entity and corner again updates the size and the kind. At most 64 corners
+are stored. A fillet or chamfer saves as document version 14. Solid-edge
+`native.op` fillet and chamfer remain a separate operation. The tool count
+stays 34 and the product version stays 0.9.0.
 
 ## Evidence
 
