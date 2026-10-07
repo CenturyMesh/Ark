@@ -112,10 +112,27 @@ ChatGptIdentity verifyChatGptIdToken(const std::string& jwt,const V& jwks,const 
     require(matches,"OpenAI ID token audience mismatch");require(constantEqual(textOf(payload,"nonce"),nonce),"OpenAI ID token nonce mismatch");identity.subject=textOf(payload,"sub");require(!identity.subject.empty()&&identity.subject.size()<=256,"OpenAI ID token has no subject");identity.clientId=clientId;identity.expiresAt=integerOf(payload,"exp");auto issued=integerOf(payload,"iat");require(identity.expiresAt>nowUnix-5&&issued<=nowUnix+5&&issued<identity.expiresAt,"OpenAI ID token expired or issued in the future");if(payload.find("nbf"))require(integerOf(payload,"nbf")<=nowUnix+5,"OpenAI ID token is not yet valid");if(const V* email=payload.find("email")){require(email->t==V::Str&&email->str.size()<=320,"Invalid OpenAI email claim");identity.email=email->str;}return identity;
 }
 V parseChatGptSse(const std::string& body){
-    require(body.size()<=16*1024*1024,"ChatGPT stream exceeded size limit");V completed;bool seen=false;size_t cursor=0;std::string data;
-    auto dispatch=[&](){if(data.empty())return;V event=parseJson(data,"Invalid ChatGPT stream event");data.clear();const V* kind=event.find("type");if(!kind||kind->t!=V::Str)return;if(kind->str=="response.completed"||kind->str=="response.failed"||kind->str=="response.incomplete"){const V* response=event.find("response");require(response&&response->t==V::Obj,"ChatGPT terminal event has no response");completed=*response;if(!completed.find("status"))completed.set("status",V::makeStr(kind->str.substr(9)));seen=true;}};
+    require(body.size()<=16*1024*1024,"ChatGPT stream exceeded size limit");V completed;bool seen=false;size_t cursor=0,itemBytes=0;std::string data;std::map<unsigned,V> doneItems;
+    auto dispatch=[&](){
+        if(data.empty())return;V event=parseJson(data,"Invalid ChatGPT stream event");data.clear();const V* kind=event.find("type");if(!kind||kind->t!=V::Str)return;
+        if(kind->str=="response.output_item.done"){
+            require(!seen,"ChatGPT output arrived after completion");auto index=integerOf(event,"output_index");const V* item=event.find("item");
+            require(index<128&&item&&item->t==V::Obj,"Invalid ChatGPT completed output item");
+            auto found=doneItems.find((unsigned)index);if(found!=doneItems.end()){require(found->second.dump()==item->dump(),"Conflicting ChatGPT completed output item");return;}
+            itemBytes+=item->dump().size();require(itemBytes<=4*1024*1024,"ChatGPT completed output exceeded size limit");doneItems.emplace((unsigned)index,*item);
+        }else if(kind->str=="response.completed"||kind->str=="response.failed"||kind->str=="response.incomplete"){
+            require(!seen,"Duplicate ChatGPT terminal response event");const V* response=event.find("response");require(response&&response->t==V::Obj,"ChatGPT terminal event has no response");completed=*response;if(!completed.find("status"))completed.set("status",V::makeStr(kind->str.substr(9)));seen=true;
+        }
+    };
     while(cursor<body.size()){size_t end=body.find('\n',cursor);if(end==std::string::npos)end=body.size();std::string_view line(body.data()+cursor,end-cursor);if(!line.empty()&&line.back()=='\r')line.remove_suffix(1);if(line.empty())dispatch();else if(line.rfind("data:",0)==0){std::string_view value=line.substr(5);if(!value.empty()&&value.front()==' ')value.remove_prefix(1);if(value!="[DONE]"){if(!data.empty())data+='\n';data.append(value);require(data.size()<=4*1024*1024,"ChatGPT stream event exceeded size limit");}}cursor=end<body.size()?end+1:end;}
-    dispatch();require(seen,"ChatGPT stream ended before a terminal response event");return completed;
+    dispatch();require(seen,"ChatGPT stream ended before a terminal response event");
+    // Direct-plan streams may omit assembled output from the terminal response.
+    // Only complete output items are replayable: partial deltas must never run tools.
+    const V* output=completed.find("output");
+    if(textOf(completed,"status")=="completed"&&(!output||(output->t==V::Arr&&output->arr.empty()))&&!doneItems.empty()){
+        V assembled=V::makeArr();for(const auto& [index,item]:doneItems){require(index==assembled.arr.size(),"ChatGPT stream has missing completed output items");assembled.arr.push_back(item);}completed.set("output",std::move(assembled));
+    }
+    return completed;
 }
 
 #ifdef _WIN32
@@ -126,8 +143,11 @@ struct HttpResult {DWORD status=0;std::string body,requestId;};
 struct SecretString {std::string value;explicit SecretString(std::string text):value(std::move(text)){}~SecretString(){if(!value.empty())SecureZeroMemory(value.data(),value.size());}};
 struct OAuthError:std::runtime_error {DWORD status;std::string code;OAuthError(DWORD httpStatus,std::string errorCode):std::runtime_error("ChatGPT token endpoint HTTP "+std::to_string(httpStatus)+(errorCode.empty()?"":" ("+errorCode+")")),status(httpStatus),code(std::move(errorCode)){} };
 struct SseWire {
-    std::string line,data,terminal;
-    void dispatch(){if(data.empty())return;V event=parseJson(data,"Invalid ChatGPT stream event");const V* kind=event.find("type");if(kind&&kind->t==V::Str&&(kind->str=="response.completed"||kind->str=="response.failed"||kind->str=="response.incomplete"))terminal="data: "+data+"\n\n";data.clear();}
+    std::string line,data,terminal,done;
+    void dispatch(){if(data.empty())return;V event=parseJson(data,"Invalid ChatGPT stream event");const V* kind=event.find("type");if(kind&&kind->t==V::Str){
+        if(kind->str=="response.output_item.done"){require(done.size()+data.size()+8<=4*1024*1024,"ChatGPT completed output exceeded size limit");done+="data: "+data+"\n\n";}
+        else if(kind->str=="response.completed"||kind->str=="response.failed"||kind->str=="response.incomplete")terminal=std::move(done)+"data: "+data+"\n\n";
+    }data.clear();}
     void feed(const char* bytes,size_t count){for(size_t i=0;i<count&&!terminal.size();++i){char c=bytes[i];if(c=='\n'){if(!line.empty()&&line.back()=='\r')line.pop_back();if(line.empty())dispatch();else if(line.rfind("data:",0)==0){std::string_view value(line.data()+5,line.size()-5);if(!value.empty()&&value.front()==' ')value.remove_prefix(1);if(value!="[DONE]"){if(!data.empty())data+='\n';data.append(value);require(data.size()<=4*1024*1024,"ChatGPT SSE event too large");}}line.clear();}else{line+=c;require(line.size()<=4*1024*1024,"ChatGPT SSE line too large");}}}
 };
 std::int64_t unixNow(){return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();}
@@ -256,9 +276,48 @@ ChatGptAuthStatus chatGptSignOut(const std::atomic_bool* cancel){
     (void)cancel;throw std::runtime_error("Sign in with ChatGPT is currently available on Windows");
 #endif
 }
+std::vector<ChatGptModel> parseChatGptModelCatalog(const V& catalogue){
+    const V* rows=catalogue.find("models");
+    require(rows&&rows->t==V::Arr&&rows->arr.size()<=1024,"Unexpected ChatGPT model list");
+    std::vector<ChatGptModel> models;std::set<std::string> seen;
+    auto safeSlug=[](const std::string& slug){
+        return !slug.empty()&&slug.size()<=128&&std::all_of(slug.begin(),slug.end(),[](unsigned char c){
+            return std::isalnum(c)||c=='_'||c=='-'||c=='.'||c==':';
+        });
+    };
+    for(const V& item:rows->arr){
+        if(item.t!=V::Obj)continue;
+        const V* visibility=item.find("visibility"),*slug=item.find("slug"),*name=item.find("display_name");
+        if(!visibility||visibility->t!=V::Str||visibility->str!="list"||
+           !slug||slug->t!=V::Str||!safeSlug(slug->str)||
+           !name||name->t!=V::Str||name->str.empty()||name->str.size()>256||
+           !seen.insert(slug->str).second)continue;
+        ChatGptModel model;model.slug=slug->str;model.displayName=name->str;
+        auto effort=[](const V& value){
+            if(value.t!=V::Str)return false;
+            const std::string& text=value.str;
+            return text=="none"||text=="minimal"||text=="low"||text=="medium"||
+                   text=="high"||text=="xhigh"||text=="max"||text=="ultra";
+        };
+        if(const V* supported=item.find("supported_reasoning_levels");supported&&supported->t==V::Arr&&supported->arr.size()<=16){
+            std::set<std::string> unique;
+            for(const V& level:supported->arr){
+                if(level.t!=V::Obj)continue;
+                const V* value=level.find("effort");
+                if(value&&effort(*value)&&unique.insert(value->str).second)
+                    model.reasoningEfforts.push_back(value->str);
+            }
+        }
+        if(const V* fallback=item.find("default_reasoning_level");fallback&&effort(*fallback)&&
+           std::find(model.reasoningEfforts.begin(),model.reasoningEfforts.end(),fallback->str)!=model.reasoningEfforts.end())
+            model.defaultReasoningEffort=fallback->str;
+        models.push_back(std::move(model));
+    }
+    return models;
+}
 std::vector<ChatGptModel> chatGptListModels(const std::atomic_bool* cancel){
 #ifdef _WIN32
-    AccountAccess access=accessToken(cancel);SecretString bearer(std::move(access.token));HttpResult response=http("GET",modelsEndpoint,{},bearer.value,{},1024*1024,cancel);V catalogue=jsonResponse(response,"ChatGPT model list unavailable");const V* rows=catalogue.find("models");require(rows&&rows->t==V::Arr&&rows->arr.size()<=1024,"Unexpected ChatGPT model list");std::vector<ChatGptModel> models;std::set<std::string> seen;for(const V& item:rows->arr){if(item.t!=V::Obj)continue;const V* visibility=item.find("visibility"),*slug=item.find("slug"),*name=item.find("display_name");if(!visibility||visibility->t!=V::Str||visibility->str!="list"||!slug||slug->t!=V::Str||slug->str.empty()||slug->str.size()>128||!name||name->t!=V::Str||name->str.empty())continue;if(seen.insert(slug->str).second)models.push_back({slug->str,name->str});}
+    AccountAccess access=accessToken(cancel);SecretString bearer(std::move(access.token));HttpResult response=http("GET",modelsEndpoint,{},bearer.value,{},1024*1024,cancel);V catalogue=jsonResponse(response,"ChatGPT model list unavailable");std::vector<ChatGptModel> models=parseChatGptModelCatalog(catalogue);
     State& global=state();std::lock_guard lock(global.mutex);ensureLoaded(global);require(global.store.activeClientId==access.clientId,"ChatGPT account changed while listing models");global.models=models;global.modelClientId=access.clientId;return models;
 #else
     (void)cancel;throw std::runtime_error("Sign in with ChatGPT is currently available on Windows");
@@ -268,8 +327,10 @@ bool chatGptPlanReady(){ChatGptAuthStatus status=chatGptAuthStatus();return stat
 V chatGptResponses(const V& request,const std::atomic_bool* cancel){
 #ifdef _WIN32
     require(request.t==V::Obj&&request.find("store")&&request.find("store")->t==V::Bool&&!request.find("store")->b&&request.find("stream")&&request.find("stream")->t==V::Bool&&request.find("stream")->b,"ChatGPT plan requires store:false and stream:true");const std::string model=textOf(request,"model");
-    AccountAccess access=accessToken(cancel);bool allowed=false;{State& global=state();std::lock_guard lock(global.mutex);ensureLoaded(global);if(global.modelClientId==access.clientId)for(const auto& item:global.models)allowed|=item.slug==model;}
-    if(!allowed){for(const auto& item:chatGptListModels(cancel))allowed|=item.slug==model;State& global=state();std::lock_guard lock(global.mutex);require(global.store.activeClientId==access.clientId,"ChatGPT account changed before inference");}require(allowed,"Select a model from the signed-in ChatGPT account's model list");
+    AccountAccess access=accessToken(cancel);std::vector<ChatGptModel> available;{State& global=state();std::lock_guard lock(global.mutex);ensureLoaded(global);if(global.modelClientId==access.clientId)available=global.models;}
+    if(std::none_of(available.begin(),available.end(),[&](const ChatGptModel& item){return item.slug==model;})){available=chatGptListModels(cancel);State& global=state();std::lock_guard lock(global.mutex);require(global.store.activeClientId==access.clientId,"ChatGPT account changed before inference");}
+    auto selected=std::find_if(available.begin(),available.end(),[&](const ChatGptModel& item){return item.slug==model;});require(selected!=available.end(),"Select a model from the signed-in ChatGPT account's model list");
+    if(const V* reasoning=request.find("reasoning")){require(reasoning->t==V::Obj,"Invalid ChatGPT reasoning settings");if(const V* effort=reasoning->find("effort"))require(effort->t==V::Str&&std::find(selected->reasoningEfforts.begin(),selected->reasoningEfforts.end(),effort->str)!=selected->reasoningEfforts.end(),"Selected reasoning effort is not advertised for this ChatGPT model; choose Auto or a listed level");}
     SecretString bearer(std::move(access.token));HttpResult response=http("POST",responseEndpoint,request.dump(),bearer.value,"application/json",16*1024*1024,cancel);
     if(response.status!=200){std::string code;V body;if(arkjson::parse(response.body,body)&&body.t==V::Obj){if(const V* error=body.find("error");error&&error->t==V::Obj)if(const V* value=error->find("code");value&&value->t==V::Str)code=value->str;}if(code.size()>128||!std::all_of(code.begin(),code.end(),[](unsigned char c){return (c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='_'||c=='-';}))code.clear();throw std::runtime_error("ChatGPT Responses HTTP "+std::to_string(response.status)+(code.empty()?"":" ("+code+")")+(response.requestId.empty()?"":" request_id="+response.requestId));}
     return parseChatGptSse(response.body);

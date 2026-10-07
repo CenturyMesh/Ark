@@ -51,8 +51,35 @@ int main(int argc,char** argv){
                  <<"account_count="<<status.accounts.size()<<'\n';
         return 0;
     }
+    if(argc==2&&std::string(argv[1])=="--catalog"){
+        try{
+            for(const auto& model:ark::chatGptListModels()){
+                std::cout<<"slug="<<model.slug;
+                for(const auto& level:model.reasoningEfforts)std::cout<<" effort="<<level;
+                if(!model.defaultReasoningEffort.empty())std::cout<<" default_effort="<<model.defaultReasoningEffort;
+                std::cout<<'\n';
+            }
+            return 0;
+        }catch(const std::exception&){std::cerr<<"catalog unavailable\n";return 1;}
+    }
     if(argc!=1)return 2;
     try{
+        auto catalog=ark::parseChatGptModelCatalog(json(R"({"models":[
+          {"visibility":"list","slug":"gpt-test","display_name":"Test","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"xhigh"},{"effort":"max"},{"effort":"ultra"},{"effort":"unknown"},{"effort":"low"}],"default_reasoning_level":"medium"},
+          {"visibility":"hidden","slug":"gpt-hidden","display_name":"Hidden"},
+          {"visibility":"list","slug":"gpt-test","display_name":"Duplicate"}
+        ]})"));
+        check(catalog.size()==1&&catalog[0].slug=="gpt-test"&&
+              catalog[0].reasoningEfforts==std::vector<std::string>({"low","medium","xhigh","max","ultra"})&&
+              catalog[0].defaultReasoningEffort=="medium",
+              "catalog parser keeps only explicit, valid ordered effort levels and default");
+        auto unknown=ark::parseChatGptModelCatalog(json(R"({"models":[
+          {"visibility":"list","slug":"gpt-plain","display_name":"Plain"},
+          {"visibility":"list","slug":"gpt-bad","display_name":"Bad","supported_reasoning_levels":[{"effort":"unknown"}],"default_reasoning_level":"high"}
+        ]})"));
+        check(unknown.size()==2&&unknown[0].reasoningEfforts.empty()&&unknown[0].defaultReasoningEffort.empty()&&
+              unknown[1].reasoningEfforts.empty()&&unknown[1].defaultReasoningEffort.empty(),
+              "missing or inconsistent catalog effort metadata never invents support");
 #ifdef _WIN32
         const std::string state(43,'s'),nonce(43,'n');
         const std::string verifier="dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
@@ -85,7 +112,19 @@ int main(int argc,char** argv){
         const auto directory=std::filesystem::temp_directory_path()/("ark-siwc-test-"+std::to_string(GetCurrentProcessId()));std::filesystem::create_directories(directory);auto path=directory/"siwc-fixture.dpapi";auto utf=path.u8string();check(ark::chatGptDpapiRoundTripForTest(std::string(utf.begin(),utf.end())),"DPAPI fixture round-trips inside isolated temp dir");std::ifstream saved(path,std::ios::binary);const std::string ciphertext((std::istreambuf_iterator<char>(saved)),std::istreambuf_iterator<char>());saved.close();check(ciphertext.find("offline-refresh-token")==std::string::npos,"DPAPI file does not expose token bytes");std::filesystem::remove(path);std::filesystem::remove(directory);
 #endif
         auto completion=ark::parseChatGptSse("data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n");check(completion.find("status")->str=="completed"&&completion.find("usage")->find("total_tokens")->num==2,"SSE consumes completed response and usage");
-        auto billedFailure=ark::parseChatGptSse("data: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"subscription_sharing_usage_limit_exceeded\"},\"usage\":{\"input_tokens\":4,\"output_tokens\":1,\"total_tokens\":5}}}\n\n");check(billedFailure.find("status")->str=="failed"&&billedFailure.find("usage")->find("total_tokens")->num==5,"failed terminal SSE preserves reported usage before assistant rejection");
+        const std::string doneReason="data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"id\":\"rs_fixture\",\"encrypted_content\":\"offline-opaque\"}}\n\n";
+        const std::string doneCall="data: {\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{\"type\":\"function_call\",\"name\":\"doc_info\",\"namespace\":\"ark\",\"call_id\":\"fixture_call\",\"arguments\":\"{}\"}}\n\n";
+        const std::string emptyTerminal="data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":141,\"output_tokens\":13,\"total_tokens\":154}}}\n\n";
+        auto restored=ark::parseChatGptSse(doneReason+doneCall+emptyTerminal);auto& replay=restored.find("output")->arr;
+        check(replay.size()==2&&replay[0].find("encrypted_content")->str=="offline-opaque"&&replay[1].find("call_id")->str=="fixture_call"&&restored.find("usage")->find("total_tokens")->num==154,"empty terminal output reconstructs complete reasoning and tool items in order with usage");
+        check(ark::parseChatGptSse(doneReason+doneCall+doneCall+emptyTerminal).find("output")->arr.size()==2,"identical output completion cannot duplicate a tool");
+        auto conflictingCall=doneCall;conflictingCall.replace(conflictingCall.find("doc_info"),8,"doc_get");
+        check(rejects([&]{ark::parseChatGptSse(doneReason+doneCall+conflictingCall+emptyTerminal);}),"conflicting output completion rejects before tool dispatch");
+        check(rejects([&]{ark::parseChatGptSse(doneCall+emptyTerminal);}),"missing output item rejects instead of silently losing reasoning history");
+        check(rejects([&]{ark::parseChatGptSse(doneReason+doneCall);}),"completed tool item alone never authorizes dispatch before terminal success");
+        auto fullTerminal=json("{\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}");auto fullResponse=*fullTerminal.find("response");fullResponse.set("output",*restored.find("output"));fullTerminal.set("response",fullResponse);
+        check(ark::parseChatGptSse(doneReason+doneCall+"data: "+fullTerminal.dump()+"\n\n").find("output")->arr.size()==2,"assembled terminal output is not appended twice");
+        auto billedFailure=ark::parseChatGptSse(doneReason+doneCall+"data: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"subscription_sharing_usage_limit_exceeded\"},\"usage\":{\"input_tokens\":4,\"output_tokens\":1,\"total_tokens\":5}}}\n\n");check(billedFailure.find("status")->str=="failed"&&billedFailure.find("usage")->find("total_tokens")->num==5&&!billedFailure.find("output"),"failed terminal SSE preserves usage without promoting streamed tool items");
         check(rejects([]{ark::parseChatGptSse("data: {\"type\":\"response.failed\"}\n\n");}),"SSE failed event rejects");
         check(rejects([]{ark::parseChatGptSse("data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n");}),"interrupted SSE rejects");
         V tools=json(R"([{"name":"doc_info","description":"read","inputSchema":{"type":"object"}},{"name":"usage_record","description":"external receipt","inputSchema":{"type":"object"}}])");ark::AssistantConfig config;config.authMode=ark::AssistantAuthMode::ChatGptPlan;config.model="account-model";V history=json(R"([{"role":"user","content":"inspect"}])");V request=ark::assistantRequest(config,history,tools);check(request.find("store")->t==V::Bool&&!request.find("store")->b&&request.find("stream")->b,"ChatGPT plan request is ephemeral streamed Responses");const auto& functions=request.find("tools")->arr;check(functions.size()==1&&functions[0].find("type")->str=="namespace"&&functions[0].find("name")->str=="ark"&&functions[0].find("tools")->arr.size()==1,"ARK tools are namespaced and token receipt tool is hidden from model");

@@ -1,4 +1,6 @@
 #include "ark/assistant.hpp"
+#include "ark/agent.hpp"
+#include "ark/chatgpt_auth.hpp"
 #include <iostream>
 #include <chrono>
 #include <stdexcept>
@@ -34,6 +36,15 @@ int main(int argc,char** argv){try{
     check(request.find("include")->arr[0].str=="reasoning.encrypted_content","request portable reasoning");
     check(request.find("instructions")->str.find("agent_onboard")!=std::string::npos,"onboarding instruction");
     check(request.dump().find("OPENAI_API_KEY")==std::string::npos,"credential configuration excluded from request");
+    check(request.find("reasoning")==nullptr,"provider default reasoning is omitted");
+    auto plan=config;plan.authMode=ark::AssistantAuthMode::ChatGptPlan;plan.model="gpt-6.1-sol";plan.reasoningEffort="low";
+    auto planRequest=ark::assistantRequest(plan,conversation,tools);check(planRequest.find("reasoning")->find("effort")->str=="low","explicit reasoning effort is sent");
+    check(planRequest.find("tools")->arr.size()==1&&planRequest.find("tools")->arr[0].find("type")->str=="namespace","ChatGPT tools are namespaced");
+    plan.reasoningEffort="none";check(ark::assistantRequest(plan,conversation,tools).find("reasoning")->find("effort")->str=="none","plan model-effort support is deferred to account metadata");
+    plan.reasoningEffort="ultra";ark::validateAssistantConfig(plan);check(ark::assistantRequest(plan,conversation,tools).find("reasoning")->find("effort")->str=="ultra","account-advertised plan ultra passes through when explicit");
+    auto apiEffort=config;apiEffort.model="gpt-6.1-sol";apiEffort.reasoningEffort="none";fails([&]{ark::validateAssistantConfig(apiEffort);},"API-key known model rejects unsupported none effort");
+    apiEffort.reasoningEffort="ultra";fails([&]{ark::validateAssistantConfig(apiEffort);},"API-key route rejects nonpublic ultra effort");
+    plan.reasoningEffort="low";
     auto invalid=config;invalid.model="";fails([&]{ark::validateAssistantConfig(invalid);},"model required");
     for(auto url:{"http://example.com/v1/responses","http://localhost.evil/v1/responses","https://user:pass@example.com/api","https:///api","https://example.com/api?key=x","https://example.com/api\r\nInjected:x"}){
         invalid=config;invalid.endpoint=url;fails([&]{ark::validateAssistantConfig(invalid);},"reject invalid endpoint");
@@ -59,6 +70,36 @@ int main(int argc,char** argv){try{
     check(result.usage.reportedResponses==0&&result.usage.missingResponses==2,"missing usage is explicitly unknown");
     check(ark::assistantUsageLabel(result.usage).find("unavailable")!=std::string::npos,"unknown usage label");
     auto runWith=[&](V response){return ark::runAssistant(config,V::makeStr("test"),tools,[&](auto&,auto&){++calls;return V{};},{},nullptr,[&](auto&,auto&,auto*){return response;});};
+    V reasoningOnly=json(R"({"status":"completed","output":[{"type":"reasoning","id":"rs_no_action","summary":[]}],"usage":{"input_tokens":5940,"output_tokens":20,"total_tokens":5960,"output_tokens_details":{"reasoning_tokens":20}}})");
+    ark::AssistantUsage noActionUsage;std::string noActionError;calls=0;
+    try{ark::runAssistant(plan,V::makeStr("Create a model"),tools,[&](auto&,auto&){++calls;return V{};},[&](const auto& event){if(event.kind==ark::AssistantEvent::Usage)noActionUsage=event.usage;},nullptr,[&](auto&,auto&,auto*){return reasoningOnly;});}catch(const std::runtime_error& error){noActionError=error.what();}
+    check(noActionError.find("without a visible reply or ARK tool call")!=std::string::npos&&noActionUsage.totalTokens==5960&&calls==0,"reasoning-only completed response reports billed usage and clear no-action error");
+    int optionalNamespaceCalls=0,planRounds=0;
+    auto optionalNamespace=ark::runAssistant(plan,V::makeStr("Inspect"),tools,[&](auto& name,auto&){check(name=="doc_info","optional namespace preserves tool identity");++optionalNamespaceCalls;return V::makeObj();},{},nullptr,[&](auto&,auto&,auto*){return ++planRounds==1?toolResponse("call_optional","doc_info"):finalResponse();});
+    check(optionalNamespaceCalls==1&&optionalNamespace.text=="Done.","documented optional namespace still dispatches unique advertised ARK tool");
+    int priorCalls=0,priorRounds=0;std::string priorError;
+    try{ark::runAssistant(config,V::makeStr("Edit"),tools,[&](auto&,auto&){++priorCalls;return V::makeObj();},{},nullptr,[&](auto&,auto&,auto*){return ++priorRounds==1?toolResponse("call_prior","doc_info"):reasoningOnly;});}catch(const std::runtime_error& error){priorError=error.what();}
+    check(priorCalls==1&&priorError.find("Earlier ARK tool calls may have changed")!=std::string::npos,"no final visible reply warns about prior tool calls");
+    // Reproduce the direct-plan wire shape: completed output items arrive before
+    // a terminal response whose output array is empty. Carry the recovered tool
+    // call through the real AgentSession and continue with its actual result.
+    ark::AgentSession disposable;V applyTools=json(R"([{"name":"doc_apply","description":"Atomic document edit","inputSchema":{"type":"object"}}])");
+    auto doneEvent=[](int index,V item){V event=V::makeObj();event.set("type",V::makeStr("response.output_item.done"));event.set("output_index",V::makeNum(index));event.set("item",std::move(item));return std::string("data: ")+event.dump()+"\n\n";};
+    auto terminalEvent=[](int in,int out){V usage=V::makeObj(),response=V::makeObj(),event=V::makeObj();usage.set("input_tokens",V::makeNum(in));usage.set("output_tokens",V::makeNum(out));usage.set("total_tokens",V::makeNum(in+out));response.set("status",V::makeStr("completed"));response.set("output",V::makeArr());response.set("usage",usage);event.set("type",V::makeStr("response.completed"));event.set("response",response);return std::string("data: ")+event.dump()+"\n\n";};
+    V doneReason=json(R"({"type":"reasoning","id":"rs_box","summary":[],"encrypted_content":"offline-opaque"})");
+    V boxCall=json(R"({"type":"function_call","namespace":"ark","name":"doc_apply","call_id":"call_box"})");
+    boxCall.set("arguments",V::makeStr(R"({"expected_revision":0,"commands":[{"op":"feature.add","type":"box","name":"Offline box","p":{"dx":10,"dy":12,"dz":8}}]})"));
+    const V firstWire=ark::parseChatGptSse(doneEvent(0,doneReason)+doneEvent(1,boxCall)+terminalEvent(100,10));
+    V finalMessage=json(R"({"type":"message","role":"assistant","content":[{"type":"output_text","text":"Box created."}]})");
+    const V secondWire=ark::parseChatGptSse(doneEvent(0,finalMessage)+terminalEvent(20,5));
+    int wireRounds=0,wireCalls=0;std::vector<ark::AssistantUsage> wireUsage;
+    auto modeled=ark::runAssistant(plan,V::makeStr("Create a box"),applyTools,[&](const std::string& name,const V& args){++wireCalls;check(name=="doc_apply","recovered tool identity");return disposable.call(name,args);},[&](const ark::AssistantEvent& event){if(event.kind==ark::AssistantEvent::Usage)wireUsage.push_back(event.usage);},nullptr,[&](const ark::AssistantConfig&,const V& request,const std::atomic_bool*){
+        if(++wireRounds==1)return firstWire;
+        const auto& history=request.find("input")->arr;check(history.size()==4&&history.back().find("type")->str=="function_call_output","continuation carries recovered call and tool result");
+        V returned;check(arkjson::parse(history.back().find("output")->str,returned)&&!returned.find("isError")->b,"real doc_apply succeeded before continuation");return secondWire;
+    });
+    check(wireCalls==1&&disposable.revision==1&&disposable.document.features.size()==1&&disposable.document.features[0].name=="Offline box","streamed tool item creates exactly one analytic box");
+    check(modeled.text=="Box created."&&wireRounds==2&&modeled.usage.totalTokens==135&&modeled.usage.reportedResponses==2&&wireUsage.size()==2&&wireUsage[0].totalTokens==110&&wireUsage[1].totalTokens==135,"full SSE-to-document chain returns text and counts each provider response once");
     calls=0;fails([&]{runWith(toolResponse("call_a","shell_execute"));},"unknown tool rejected");check(calls==0,"unknown tool not executed");
     auto mixed=toolResponse();V outputs=*mixed.find("output");auto bad=toolResponse("call_bad","shell_execute");outputs.arr.push_back(bad.find("output")->arr.back());mixed.set("output",outputs);
     fails([&]{runWith(mixed);},"whole response validated before dispatch");check(calls==0,"no partial dispatch before invalid tool");

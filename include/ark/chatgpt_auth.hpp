@@ -20,7 +20,11 @@ struct ChatGptAuthStatus {
     std::string message;
     std::vector<ChatGptAccountSummary> accounts;
 };
-struct ChatGptModel {std::string slug,displayName;};
+struct ChatGptModel {
+    std::string slug,displayName;
+    std::vector<std::string> reasoningEfforts; // empty unless explicit in account catalog
+    std::string defaultReasoningEffort;        // empty means service default unknown
+};
 struct ChatGptIdentity {std::string issuer,clientId,subject,email;std::int64_t expiresAt=0;};
 struct ChatGptAuthAttempt {
     std::string hostId,clientId,state,nonce,codeVerifier,codeChallenge,redirectUri,authorizationUrl;
@@ -39,6 +43,8 @@ ChatGptAuthStatus chatGptSelectAccount(const std::string& issuedClientId);
 ChatGptAuthStatus chatGptSignOut(const std::atomic_bool* cancel=nullptr);
 // Fetches account-scoped visible models, preserving the service's ordering.
 std::vector<ChatGptModel> chatGptListModels(const std::atomic_bool* cancel=nullptr);
+// Pure parser for the account-scoped ChatGPT catalog; no network or credentials.
+std::vector<ChatGptModel> parseChatGptModelCatalog(const arkjson::Value& catalogue);
 
 // Used only by the assistant's strict ChatGPT-plan provider path.
 bool chatGptPlanReady();

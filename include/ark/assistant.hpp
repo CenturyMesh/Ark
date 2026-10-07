@@ -12,6 +12,7 @@ struct AssistantConfig {
     AssistantAuthMode authMode=AssistantAuthMode::ApiKey;
     std::string endpoint="https://api.openai.com/v1/responses";
     std::string model; // Explicit user choice; no implicit paid model.
+    std::string reasoningEffort; // Empty: provider default; explicit values are model-dependent.
     std::string apiKeyEnv="OPENAI_API_KEY"; // Empty only for unauthenticated local servers.
     unsigned maxRounds=12;
     unsigned timeoutSeconds=90;

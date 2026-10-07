@@ -1,5 +1,32 @@
 # Validation record
 
+## 2026-10-08: assistant streaming, text input and reasoning effort
+
+The user completed ChatGPT consent. The safe local status check confirmed a
+connected account and plan permission without printing identity or credentials.
+A minimal real Astra tool request reproduced the reported no-action behavior:
+141 input + 13 output tokens, a completed response, and an empty terminal output
+array despite the streamed function item. After retaining completed stream
+items, the same probe returned one `ark.inspect` call with `{}` arguments.
+The two diagnostic requests consumed 308 reported tokens and did not modify
+the CAD document.
+
+The installed native and core-only assistant/auth suites passed 2/2 each,
+including 87 assistant checks. The integrated offline regression reconstructs
+reasoning and a `doc_apply` call from streamed done items, creates one box in a
+disposable AgentSession, sends its tool result back, receives final text and
+counts both usage receipts exactly once. Separate cases reject incomplete
+streams, missing items and duplicate/conflicting completions while preserving
+billed failure usage. API-key Ultra is rejected; ChatGPT-plan effort choices
+are checked against the selected account model's advertised metadata.
+
+Installed assistant and context UI tests exited 0. The duplicate native history
+control was removed; the native Unicode prompt is laid out only when the window
+size changes and its colors match the surrounding field. A foreground-window
+capture confirmed readable native input without the previous overlapping strip.
+The Effort button and persisted choice were also verified in the running app.
+Evidence is under `out/assistant-diagnostics/`.
+
 ## 2026-10-08: contextual editing, browser login and suspension
 
 The default installed native build passed **35/35** CTest cases; the core-only
@@ -29,8 +56,8 @@ Native ChatGPT sign-in tests cover OAuth state/PKCE, runtime-generated RSA/JWKS
 ID-token validation, scope/plan errors, account/model parsing and temporary DPAPI
 storage without reading the user's profile. The explicit safe status diagnostic
 reported `connected=false`, `plan_authorized=false`, `account_count=0` at the
-last live check. Browser launch is implemented; real account consent and paid
-inference are not claimed as validated. See [assistant setup](ASSISTANT.md).
+initial pre-consent check. The later assistant validation above records the
+completed consent and minimal inference check. See [assistant setup](ASSISTANT.md).
 
 Build/test logs, saved pre-upgrade Studio documents and pose reports are under
 `out/suspension-upgrade/`. Showcase screenshots are committed in `docs/`.

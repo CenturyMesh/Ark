@@ -170,6 +170,8 @@ void validateAssistantConfig(const AssistantConfig& config){
     require(config.timeoutSeconds>=1&&config.timeoutSeconds<=300,"Assistant timeout must be between 1 and 300 seconds.");
     require(config.maxResponseBytes>=1024&&config.maxResponseBytes<=16*1024*1024,"Invalid assistant response size limit.");
     require(config.maxConversationBytes>=1024&&config.maxConversationBytes<=32*1024*1024,"Invalid assistant conversation size limit.");
+    if(!config.reasoningEffort.empty())require(config.reasoningEffort=="none"||config.reasoningEffort=="minimal"||config.reasoningEffort=="low"||config.reasoningEffort=="medium"||config.reasoningEffort=="high"||config.reasoningEffort=="xhigh"||config.reasoningEffort=="max"||(config.authMode==AssistantAuthMode::ChatGptPlan&&config.reasoningEffort=="ultra"),"Unknown assistant reasoning effort; use provider default or a supported effort.");
+    if(config.authMode==AssistantAuthMode::ApiKey&&(config.model=="gpt-6.1-sol"||config.model=="gpt-6-astra"))require(config.reasoningEffort!="none"&&config.reasoningEffort!="minimal","Selected model does not support none or minimal reasoning effort.");
     if(config.authMode==AssistantAuthMode::ChatGptPlan)require(config.endpoint=="https://api.openai.com/v1/responses","ChatGPT plan use requires the official Responses endpoint.");
 }
 bool assistantKeyAvailable(const AssistantConfig& config){
@@ -198,6 +200,7 @@ V assistantFunctionTools(const V& tools){
 V assistantRequest(const AssistantConfig& config,const V& conversation,const V& tools){
     validateAssistantConfig(config);require(conversation.t==V::Arr,"Assistant history must be a Responses input array.");
     V request=V::makeObj();request.set("model",V::makeStr(config.model));request.set("store",V::makeBool(false));
+    if(!config.reasoningEffort.empty()){V reasoning=V::makeObj();reasoning.set("effort",V::makeStr(config.reasoningEffort));request.set("reasoning",std::move(reasoning));}
     request.set("parallel_tool_calls",V::makeBool(false));request.set("input",conversation);
     V functions=assistantFunctionTools(tools);
     if(config.authMode==AssistantAuthMode::ChatGptPlan){V namespaced=V::makeObj(),groups=V::makeArr();namespaced.set("type",V::makeStr("namespace"));namespaced.set("name",V::makeStr("ark"));namespaced.set("description",V::makeStr("ARK-Point CAD document modeling and inspection tools"));namespaced.set("tools",std::move(functions));groups.arr.push_back(std::move(namespaced));request.set("tools",std::move(groups));request.set("stream",V::makeBool(true));}
@@ -222,6 +225,7 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
     else {require(input.t==V::Arr&&!input.arr.empty(),"Assistant input must be a prompt or nonempty history array.");result.conversation=input;}
     std::set<std::string> callIds;
     for(auto& item:result.conversation.arr)if(field(item,"type")=="function_call")callIds.insert(field(item,"call_id"));
+    bool earlierToolCalls=false;
     for(unsigned round=0;round<config.maxRounds;++round){
         cancelled(cancel);emit(events,AssistantEvent::Status,"Thinking...");
         V request=assistantRequest(config,result.conversation,tools);
@@ -254,23 +258,30 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
             if(type=="function_call"){
                 auto id=field(item,"call_id");require(!id.empty()&&id.size()<=256&&callIds.insert(id).second,"Missing or repeated assistant tool call ID.");
                 auto name=field(item,"name");require(allowed.count(name)!=0,"Assistant requested a tool outside the advertised ARK allowlist.");
-                if(config.authMode==AssistantAuthMode::ChatGptPlan)require(field(item,"namespace")=="ark","ChatGPT plan requested a tool outside the ARK namespace.");
+                if(config.authMode==AssistantAuthMode::ChatGptPlan)if(const auto* ns=item.find("namespace"))require(ns->t==V::Str&&ns->str=="ark","ChatGPT plan requested a tool outside the ARK namespace.");
                 require(item.find("arguments")&&item.find("arguments")->t==V::Str,"Assistant tool arguments must be JSON text.");
                 calls.push_back(item);
             }
         }
         require(calls.size()<=32,"Too many assistant tool calls in one response.");
+        bool roundHasText=false;
         for(auto& item:output->arr){
             result.conversation.arr.push_back(item);
             if(field(item,"type")=="message"){
                 auto content=item.find("content");if(!content||content->t!=V::Arr)continue;
                 for(auto& part:content->arr){
                     auto type=field(part,"type");auto text=type=="output_text"?field(part,"text"):type=="refusal"?field(part,"refusal"):"";
-                    if(!text.empty()){if(!result.text.empty())result.text+='\n';result.text+=text;emit(events,AssistantEvent::Text,text);}
+                    if(!text.empty()){roundHasText=true;if(!result.text.empty())result.text+='\n';result.text+=text;emit(events,AssistantEvent::Text,text);}
                 }
             }
         }
-        if(calls.empty())return result;
+        if(calls.empty()){
+            if(!roundHasText)throw std::runtime_error(earlierToolCalls?
+                "Assistant completed without a final visible reply. Earlier ARK tool calls may have changed the document; inspect it before retrying.":
+                "Assistant completed without a visible reply or ARK tool call. It did not request a model change; try again or select another available model.");
+            return result;
+        }
+        earlierToolCalls=true;
         for(auto& call:calls){
             cancelled(cancel);auto name=field(call,"name");emit(events,AssistantEvent::ToolStart,name);
             V args,toolResult;

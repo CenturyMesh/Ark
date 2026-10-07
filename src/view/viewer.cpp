@@ -81,6 +81,7 @@ typedef ptrdiff_t GLsizeiptr;
 #include <limits>
 #include <cstdio>
 #include <cstring>
+#include <cwchar>
 #include <cstdlib>
 #include <cctype>
 #include <string>
@@ -244,7 +245,7 @@ static u64 g_savedRevision=0;
 static u64 g_savedUsageSerial=0;
 static int g_treeScroll=0;static bool g_eatNextClick=false;
 static int viewX=258,viewY=76,viewW=1024,viewH=650;
-static HWND g_window=nullptr,g_chatInput=nullptr,g_chatHistory=nullptr;
+static HWND g_window=nullptr,g_chatInput=nullptr;
 static bool g_lightBackground=true,g_satin=true,g_showSketches=false,g_showDatumPlanes=false,g_chatBusy=false;
 static bool g_showEdges=false,g_cameraOrtho=false;
 static int g_occlusionMode=2; // 0 off, 1 contact, 2 ambient, 3 horizon
@@ -296,7 +297,9 @@ static std::vector<Mesh>    g_cpuMeshes;
 static f64 yaw=0.85,pitch=0.46,dist=140,tYaw=yaw,tPitch=pitch,tDist=dist;
 static Vec3 target{30,12,0},tTarget=target;
 static int winW=1600,winH=1000;
-static void layout(){viewW=std::max(winW-558,1);viewH=std::max(winH-320,1);}
+static void layout(){viewW=std::max(winW-558,1);viewH=std::max(winH-320,1);
+    if(g_chatInput)MoveWindow(g_chatInput,viewX+30,winH-112,std::max(viewW-260,1),44,TRUE);
+}
 static int selBody=-1,hoverBody=-1;
 static bool wireframe=false, g_pressWasButton=false;
 static double g_fps=0;
@@ -330,8 +333,8 @@ static PartPick partPickFrom(const Body& body){
 
 // ---------------------------------------------------------------------------
 // Font atlas -----------------------------------------------------------------------
-struct FontAtlas { GLuint tex=0; float x0[128]={},x1[128]={},adv[128]={};
-                   int w=1024,h=64,lineH=18; };
+struct FontAtlas { GLuint tex=0; float x0[256]={},x1[256]={},y0[256]={},y1[256]={},adv[256]={};
+                   int w=1024,h=256,lineH=18; };
 static FontAtlas fa;
 
 static void buildFontAtlas(){
@@ -342,20 +345,22 @@ static void buildFontAtlas(){
     void* bits=nullptr;
     HBITMAP bmp=CreateDIBSection(dc,&bi,DIB_RGB_COLORS,&bits,nullptr,0);
     HGDIOBJ ob=SelectObject(dc,bmp);
-    HFONT fnt=CreateFontA(-18,0,0,0,FW_NORMAL,0,0,0,DEFAULT_CHARSET,
+    HFONT fnt=CreateFontW(-18,0,0,0,FW_NORMAL,0,0,0,DEFAULT_CHARSET,
                           OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,
-                          ANTIALIASED_QUALITY,DEFAULT_PITCH,"Segoe UI");
+                          ANTIALIASED_QUALITY,DEFAULT_PITCH,L"Segoe UI");
     HGDIOBJ of=SelectObject(dc,fnt);
     SetBkMode(dc,TRANSPARENT); SetTextColor(dc,RGB(255,255,255));
     PatBlt(dc,0,0,fa.w,fa.h,BLACKNESS);
-    TEXTMETRICA tm; GetTextMetricsA(dc,&tm);
+    TEXTMETRICW tm; GetTextMetricsW(dc,&tm);
     fa.lineH=tm.tmHeight+2;
-    int x=1;
-    for(int ch=32;ch<127;++ch){
-        char s=(char)ch; SIZE sz; GetTextExtentPoint32A(dc,&s,1,&sz);
-        if(x+sz.cx+2>=fa.w) break;
-        TextOutA(dc,x,4,&s,1);
-        fa.x0[ch]=(float)x; fa.x1[ch]=(float)(x+sz.cx); fa.adv[ch]=(float)sz.cx;
+    int x=1,y=4;
+    for(int ch=32;ch<256;++ch){
+        if(ch>=127&&ch<160)continue;
+        wchar_t s=(wchar_t)ch;SIZE sz;GetTextExtentPoint32W(dc,&s,1,&sz);
+        if(x+sz.cx+2>=fa.w){x=1;y+=fa.lineH+5;}
+        if(y+fa.lineH>=fa.h)break;
+        TextOutW(dc,x,y,&s,1);
+        fa.x0[ch]=(float)x;fa.x1[ch]=(float)(x+sz.cx);fa.y0[ch]=(float)y;fa.y1[ch]=(float)(y+fa.lineH);fa.adv[ch]=(float)sz.cx;
         x+=sz.cx+1;
     }
     GdiFlush();
@@ -373,13 +378,20 @@ static void buildFontAtlas(){
 
 static std::vector<float> g_textVerts;
 static void textBegin(){ g_textVerts.clear(); }
+static unsigned nextTextGlyph(const std::string& s,size_t& offset){
+    unsigned char first=(unsigned char)s[offset++];if(first<128)return first;
+    int following=first>=0xf0&&first<=0xf4?3:first>=0xe0&&first<=0xef?2:first>=0xc2&&first<=0xdf?1:0;
+    unsigned code=following==1?first&31:following==2?first&15:following==3?first&7:'?';
+    for(int i=0;i<following;++i){if(offset>=s.size()||((unsigned char)s[offset]&0xc0)!=0x80)return '?';code=(code<<6)|((unsigned char)s[offset++]&63);}
+    return code;
+}
+static unsigned atlasGlyph(unsigned code){return code>=32&&code<256&&(code<127||code>=160)&&fa.adv[code]>0?code:'?';}
 static void textOut(const std::string& s,float x,float y,float sc=1.f,float red=.87f,float green=.89f,float blue=.88f){
     float cx=x;
-    for(unsigned char c:s){
-        if(c<32||c>126)c=' ';
+    for(size_t offset=0;offset<s.size();){unsigned c=atlasGlyph(nextTextGlyph(s,offset));
         float u0=fa.x0[c]/fa.w,u1=fa.x1[c]/fa.w;
         float wd=(fa.x1[c]-fa.x0[c])*sc,hh=(float)fa.lineH*sc;
-        float v0=4.f/fa.h,v1=(4.f+fa.lineH)/fa.h;
+        float v0=fa.y0[c]/fa.h,v1=fa.y1[c]/fa.h;
         const float q[6][4]={
             {cx,y+hh,u0,v1},{cx+wd,y+hh,u1,v1},{cx+wd,y,u1,v0},
             {cx,y+hh,u0,v1},{cx+wd,y,u1,v0},{cx,y,u0,v0}};
@@ -388,7 +400,7 @@ static void textOut(const std::string& s,float x,float y,float sc=1.f,float red=
     }
 }
 static float textWidth(const std::string& s,float sc=1.f){
-    float w=0; for(unsigned char c:s){if(c<32||c>126)c=' ';w+=fa.adv[c]*sc;} return w;
+    float w=0;for(size_t offset=0;offset<s.size();)w+=fa.adv[atlasGlyph(nextTextGlyph(s,offset))]*sc;return w;
 }
 
 // ---------------------------------------------------------------------------
@@ -1075,7 +1087,7 @@ static arkjson::Value runTool(const std::string& tool,const arkjson::Value& args
     if(!g_error&&!appearanceOnly&&(tool=="doc_apply"||tool=="doc_load"||tool=="doc_undo"||tool=="doc_redo"||tool=="import_step"||tool=="import_sheet_step"||tool=="import_mesh"||tool=="doc_new"))rebuildScene();
     if(!g_error&&(tool=="doc_load"||tool=="doc_new")){
         if(g_ownAssistantTool&&g_currentUsageReceipt)applyUsageReceipt(*g_currentUsageReceipt);
-        if(!g_ownAssistantTool){g_pendingUsageReceipt.reset();g_currentUsageReceipt.reset();g_assistantReceiptId.clear();g_assistantUsageRun={};g_assistantUsageRunCounted=true;++g_documentEpoch;*g_assistantCancel=true;g_conversation=arkjson::Value::makeArr();g_chatLog.clear();if(g_chatHistory)SetWindowTextW(g_chatHistory,L"Document changed. Describe what you want to create.");}
+        if(!g_ownAssistantTool){g_pendingUsageReceipt.reset();g_currentUsageReceipt.reset();g_assistantReceiptId.clear();g_assistantUsageRun={};g_assistantUsageRunCounted=true;++g_documentEpoch;*g_assistantCancel=true;g_conversation=arkjson::Value::makeArr();g_chatLog.clear();g_chatLog.push_back({"Studio","Document changed. Describe what you want to create."});}
         if(tool=="doc_new"){g_path="Untitled.ark";g_savedRevision=g_session.revision;g_savedUsageSerial=0;g_activeSketch.clear();g_activePlane="XY";}
         g_foldProgress=selectedSourceTube()?1.:0.;if(tool=="doc_load")selBody=-1;frameScene();
     }
@@ -1099,7 +1111,7 @@ static void addFeat(FeatureType type, std::initializer_list<std::pair<const char
 static HWND g_edit=nullptr,g_dialog=nullptr;static bool g_dialogDone=false,g_dialogAccept=false;
 static int g_dialogSmoke=0;static std::string g_dialogShot,g_dialogReplacement="32";static std::vector<std::string> g_dialogOverrides;
 static std::deque<std::vector<std::string>> g_dialogOverrideQueue;
-static HBRUSH dialogBrush=CreateSolidBrush(RGB(29,31,36)),fieldBrush=CreateSolidBrush(RGB(42,45,52));
+static HBRUSH dialogBrush=CreateSolidBrush(RGB(29,31,36)),fieldBrush=CreateSolidBrush(RGB(42,45,52)),chatBrush=CreateSolidBrush(RGB(14,17,20));
 static LRESULT CALLBACK editorProc(HWND h,UINT m,WPARAM w,LPARAM l){
     if(m==WM_COMMAND&&(LOWORD(w)==1||LOWORD(w)==2)){g_dialogAccept=LOWORD(w)==1;g_dialogDone=true;return 0;}
     if(m==WM_CLOSE){g_dialogDone=true;return 0;}
@@ -1864,12 +1876,12 @@ static void parameterDialog(){std::vector<EditorField> fields{{"Parameter name",
 static std::filesystem::path g_settingsOverride;
 static std::filesystem::path uiSettingsPath(){if(!g_settingsOverride.empty())return g_settingsOverride;auto* base=_wgetenv(L"LOCALAPPDATA");return (base?std::filesystem::path(base):std::filesystem::temp_directory_path())/"ARK"/"studio.json";}
 static void saveUiSettings(){
-    using V=arkjson::Value;V j=V::makeObj();j.set("endpoint",V::makeStr(g_assistantConfig.endpoint));j.set("model",V::makeStr(g_assistantConfig.model));j.set("api_key_env",V::makeStr(g_assistantConfig.apiKeyEnv));j.set("assistant_auth_mode",V::makeStr(g_assistantConfig.authMode==AssistantAuthMode::ChatGptPlan?"chatgpt_plan":"api_key"));j.set("grid",V::makeBool(g_grid));j.set("wireframe",V::makeBool(wireframe));j.set("light_background",V::makeBool(g_lightBackground));j.set("satin",V::makeBool(g_satin));j.set("show_datum_planes",V::makeBool(g_showDatumPlanes));j.set("occlusion_mode",V::makeNum(g_occlusionMode));j.set("occlusion_strength",V::makeNum(g_occlusionStrength));j.set("occlusion_radius",V::makeNum(g_occlusionRadius));j.set("show_edges",V::makeBool(g_showEdges));j.set("orthographic",V::makeBool(g_cameraOrtho));
+    using V=arkjson::Value;V j=V::makeObj();j.set("endpoint",V::makeStr(g_assistantConfig.endpoint));j.set("model",V::makeStr(g_assistantConfig.model));j.set("reasoning_effort",V::makeStr(g_assistantConfig.reasoningEffort));j.set("api_key_env",V::makeStr(g_assistantConfig.apiKeyEnv));j.set("assistant_auth_mode",V::makeStr(g_assistantConfig.authMode==AssistantAuthMode::ChatGptPlan?"chatgpt_plan":"api_key"));j.set("grid",V::makeBool(g_grid));j.set("wireframe",V::makeBool(wireframe));j.set("light_background",V::makeBool(g_lightBackground));j.set("satin",V::makeBool(g_satin));j.set("show_datum_planes",V::makeBool(g_showDatumPlanes));j.set("occlusion_mode",V::makeNum(g_occlusionMode));j.set("occlusion_strength",V::makeNum(g_occlusionStrength));j.set("occlusion_radius",V::makeNum(g_occlusionRadius));j.set("show_edges",V::makeBool(g_showEdges));j.set("orthographic",V::makeBool(g_cameraOrtho));
     auto path=uiSettingsPath();std::filesystem::create_directories(path.parent_path());std::ofstream out(path);out<<j.dump();if(!out)throw std::runtime_error("Could not save Studio settings");
 }
 static void loadUiSettings(){
     try{std::ifstream in(uiSettingsPath());if(!in)return;std::string data((std::istreambuf_iterator<char>(in)),{});arkjson::Value j;if(!arkjson::parse(data,j))return;
-        if(auto* v=j.find("endpoint"))g_assistantConfig.endpoint=v->asStr();if(auto* v=j.find("model"))g_assistantConfig.model=v->asStr();if(auto* v=j.find("api_key_env"))g_assistantConfig.apiKeyEnv=v->asStr();
+        if(auto* v=j.find("endpoint"))g_assistantConfig.endpoint=v->asStr();if(auto* v=j.find("model"))g_assistantConfig.model=v->asStr();if(auto* v=j.find("reasoning_effort");v&&v->t==arkjson::Value::Str)g_assistantConfig.reasoningEffort=v->str;if(auto* v=j.find("api_key_env"))g_assistantConfig.apiKeyEnv=v->asStr();
         if(auto* v=j.find("assistant_auth_mode");v&&v->t==arkjson::Value::Str)g_assistantConfig.authMode=v->str=="chatgpt_plan"?AssistantAuthMode::ChatGptPlan:AssistantAuthMode::ApiKey;
         if(auto* v=j.find("grid"))g_grid=v->b;if(auto* v=j.find("wireframe"))wireframe=v->b;if(auto* v=j.find("light_background"))g_lightBackground=v->b;if(auto* v=j.find("satin"))g_satin=v->b;if(auto* v=j.find("show_datum_planes");v&&v->t==arkjson::Value::Bool)g_showDatumPlanes=v->b;
         if(auto* v=j.find("occlusion");v&&v->t==arkjson::Value::Bool)g_occlusionMode=v->b?2:0;
@@ -2023,7 +2035,7 @@ static void createSuspensionDialog(){
 static void connectorDialog(){
     std::vector<EditorField> fields{{"Responses endpoint",g_assistantConfig.endpoint},{"Model",g_assistantConfig.model},{"API key environment",g_assistantConfig.apiKeyEnv}};
     if(!editFields("Assistant connector","Use a Responses-compatible API. Enter an environment-variable NAME, never the secret key.",fields))return;
-    auto config=g_assistantConfig;config.authMode=AssistantAuthMode::ApiKey;config.endpoint=fields[0].value;config.model=fields[1].value;config.apiKeyEnv=fields[2].value;validateAssistantConfig(config);g_assistantConfig=config;*g_assistantCancel=true;++g_documentEpoch;g_conversation=arkjson::Value::makeArr();if(!g_dialogSmoke)saveUiSettings();
+    auto config=g_assistantConfig;if(config.authMode!=AssistantAuthMode::ApiKey||config.model!=fields[1].value)config.reasoningEffort.clear();config.authMode=AssistantAuthMode::ApiKey;config.endpoint=fields[0].value;config.model=fields[1].value;config.apiKeyEnv=fields[2].value;validateAssistantConfig(config);g_assistantConfig=config;*g_assistantCancel=true;++g_documentEpoch;g_conversation=arkjson::Value::makeArr();if(!g_dialogSmoke)saveUiSettings();
     g_status=assistantKeyAvailable(config)?"Connector configured; credential present. No request sent.":"Connector configured; credential environment variable is unavailable.";
 }
 static void startAuthJob(AuthJob job,std::string clientId={},bool requestPlanConsent=false){
@@ -2055,10 +2067,38 @@ static void chooseChatGptModel(){
     POINT cursor;GetCursorPos(&cursor);int action=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,cursor.x,cursor.y,0,g_window,nullptr);
     DestroyMenu(menu);PostMessage(g_window,WM_NULL,0,0);
     if(action>=700&&(size_t)(action-700)<shown){const std::string model=g_authModels[(size_t)(action-700)].slug;
-        AssistantConfig config=g_assistantConfig;config.authMode=AssistantAuthMode::ChatGptPlan;config.endpoint="https://api.openai.com/v1/responses";config.model=model;
+        AssistantConfig config=g_assistantConfig;config.authMode=AssistantAuthMode::ChatGptPlan;config.endpoint="https://api.openai.com/v1/responses";config.model=model;config.reasoningEffort.clear();
         validateAssistantConfig(config);g_assistantConfig=std::move(config);*g_assistantCancel=true;++g_documentEpoch;g_conversation=arkjson::Value::makeArr();saveUiSettings();
-        g_status="ChatGPT plan model selected: "+model;
+        g_status="ChatGPT plan model selected: "+model+" / reasoning effort Auto";
     }
+}
+static void chooseReasoningEffort(){
+    if(g_assistantConfig.model.empty()){g_status="Choose an assistant model before setting reasoning effort";return;}
+    static const std::set<std::string> vocabulary{"none","minimal","low","medium","high","xhigh","max","ultra"};
+    std::vector<std::string> advertised;std::string providerDefault;
+    if(g_assistantConfig.authMode==AssistantAuthMode::ChatGptPlan)
+        for(const auto& model:g_authModels)if(model.slug==g_assistantConfig.model){
+            for(const auto& effort:model.reasoningEfforts)if(vocabulary.count(effort))advertised.push_back(effort);
+            if(vocabulary.count(model.defaultReasoningEffort))providerDefault=model.defaultReasoningEffort;
+            break;
+        }
+    HMENU menu=CreatePopupMenu();if(!menu)return;
+    std::string autoLabel="Auto / provider default"+(providerDefault.empty()?std::string{}:" ("+providerDefault+")");
+    AppendMenuA(menu,MF_STRING|(g_assistantConfig.reasoningEffort.empty()?MF_CHECKED:0),1,autoLabel.c_str());
+    for(size_t i=0;i<advertised.size()&&i<16;++i)AppendMenuA(menu,MF_STRING|(g_assistantConfig.reasoningEffort==advertised[i]?MF_CHECKED:0),(UINT_PTR)(2+i),advertised[i].c_str());
+    AppendMenuA(menu,MF_STRING,99,"Custom effort / provider validates...");
+    AppendMenuA(menu,MF_SEPARATOR,0,nullptr);
+    AppendMenuA(menu,MF_STRING|MF_GRAYED,0,advertised.empty()?"No effort list published for this model":"Listed efforts come from this account's model catalog");
+    POINT cursor;GetCursorPos(&cursor);int action=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,cursor.x,cursor.y,0,g_window,nullptr);
+    DestroyMenu(menu);PostMessage(g_window,WM_NULL,0,0);if(!action)return;
+    std::string effort;
+    if(action>=2&&(size_t)(action-2)<std::min<size_t>(advertised.size(),16))effort=advertised[(size_t)(action-2)];
+    else if(action==99){std::vector<EditorField> fields{{"Effort / auto, low, medium, high, xhigh or max",g_assistantConfig.reasoningEffort.empty()?"auto":g_assistantConfig.reasoningEffort}};
+        if(!editFields("Reasoning effort","The provider validates this setting for the selected model. Auto omits the reasoning field.",fields))return;
+        effort=trimField(fields[0].value);std::transform(effort.begin(),effort.end(),effort.begin(),[](unsigned char c){return (char)std::tolower(c);});if(effort=="auto")effort.clear();
+    }
+    AssistantConfig config=g_assistantConfig;config.reasoningEffort=effort;validateAssistantConfig(config);g_assistantConfig=std::move(config);saveUiSettings();
+    g_status="Reasoning effort "+(effort.empty()?std::string("Auto / provider default"):effort+" / provider validates model support")+" for the next assistant request";
 }
 static void showAssistantAccountMenu(){
     HMENU menu=CreatePopupMenu();if(!menu)return;
@@ -2075,18 +2115,19 @@ static void showAssistantAccountMenu(){
             std::string name=saved.email.empty()?saved.clientId:saved.email;AppendMenuA(accounts,MF_STRING|(saved.selected?MF_CHECKED:0),(UINT_PTR)(500+i),name.c_str());}
         AppendMenuA(menu,MF_POPUP,(UINT_PTR)accounts,g_authStatus.connected?"Switch account":"Reconnect saved account");}
     AppendMenuA(menu,MF_SEPARATOR,0,nullptr);
+    std::string effortLabel="Reasoning effort: "+(g_assistantConfig.reasoningEffort.empty()?std::string("Auto"):g_assistantConfig.reasoningEffort);
+    AppendMenuA(menu,MF_STRING|(g_assistantConfig.model.empty()?MF_GRAYED:0),367,effortLabel.c_str());
     AppendMenuA(menu,MF_STRING,357,"API key settings (advanced)");
     if(g_assistantConfig.authMode==AssistantAuthMode::ChatGptPlan)AppendMenuA(menu,MF_STRING,358,"Switch to API key mode");
     POINT cursor;GetCursorPos(&cursor);int action=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,cursor.x,cursor.y,0,g_window,nullptr);
     DestroyMenu(menu);PostMessage(g_window,WM_NULL,0,0);if(action)interactiveAction(action);
 }
 static arkjson::Value cancelledTool(){using V=arkjson::Value;V r=V::makeObj(),e=V::makeObj();e.set("error",V::makeStr("Request cancelled before execution"));r.set("isError",V::makeBool(true));r.set("structuredContent",e);return r;}
-static void refreshChatHistory();
 static void drainUiTools(){
     if(g_dialog)return;
     while(!g_toolQueue.empty()){auto request=std::move(g_toolQueue.front());g_toolQueue.pop_front();
         if(g_closing||request->stop.stop_requested()||(request->cancel&&*request->cancel)){request->complete(cancelledTool());continue;}
-        if(request->revision&&(request->epoch!=g_documentEpoch||*request->revision!=g_session.revision)){auto result=cancelledTool();arkjson::Value error=arkjson::Value::makeObj();g_status="Document changed during assistant turn. Inspect and resend from the current revision.";error.set("error",arkjson::Value::makeStr(g_status));result.set("structuredContent",error);g_chatLog.push_back({"Studio",g_status});refreshChatHistory();request->complete(result);if(request->cancel)*request->cancel=true;continue;}
+        if(request->revision&&(request->epoch!=g_documentEpoch||*request->revision!=g_session.revision)){auto result=cancelledTool();arkjson::Value error=arkjson::Value::makeObj();g_status="Document changed during assistant turn. Inspect and resend from the current revision.";error.set("error",arkjson::Value::makeStr(g_status));result.set("structuredContent",error);g_chatLog.push_back({"Studio",g_status});request->complete(result);if(request->cancel)*request->cancel=true;continue;}
         try{g_ownAssistantTool=(bool)request->revision;auto result=runTool(request->tool,request->args);g_ownAssistantTool=false;if(request->revision)*request->revision=g_session.revision;request->complete(result);}catch(...){g_ownAssistantTool=false;request->complete(cancelledTool());}
     }
 }
@@ -2095,19 +2136,13 @@ static void postTool(std::unique_ptr<UiToolRequest> request){
 }
 static void postChat(UiChatEvent event){auto* pointer=new UiChatEvent(std::move(event));if(g_closing||!PostMessage(g_window,WM_ARK_CHAT,0,(LPARAM)pointer))delete pointer;}
 static void postAuth(UiAuthEvent event){auto* pointer=new UiAuthEvent(std::move(event));if(g_closing||!PostMessage(g_window,WM_ARK_AUTH,0,(LPARAM)pointer))delete pointer;}
-static void refreshChatHistory(){
-    if(!g_chatHistory)return;std::string text;
-    for(auto& entry:g_chatLog)text+=entry.first+": "+entry.second+"\r\n\r\n";
-    if(text.empty())text="Describe a part, request an inspection, or connect Codex to this document.";
-    int size=MultiByteToWideChar(CP_UTF8,0,text.c_str(),-1,nullptr,0);std::wstring wide(size,L'\0');MultiByteToWideChar(CP_UTF8,0,text.c_str(),-1,wide.data(),size);SetWindowTextW(g_chatHistory,wide.c_str());SendMessage(g_chatHistory,EM_SETSEL,-1,-1);SendMessage(g_chatHistory,EM_SCROLLCARET,0,0);
-}
 static void sendAssistant(const std::string& explicitPrompt="",const AssistantTransport& transport={}){
     if(g_chatBusy)return;std::string prompt=explicitPrompt;
     if(prompt.empty()&&g_chatInput){int n=GetWindowTextLengthW(g_chatInput);std::vector<wchar_t> buffer(n+1);GetWindowTextW(g_chatInput,buffer.data(),n+1);int size=WideCharToMultiByte(CP_UTF8,0,buffer.data(),n,nullptr,0,nullptr,nullptr);prompt.resize(size);WideCharToMultiByte(CP_UTF8,0,buffer.data(),n,prompt.data(),size,nullptr,nullptr);}
     if(prompt.find_first_not_of(" \r\n\t")==std::string::npos)return;validateAssistantConfig(g_assistantConfig);
     if(g_assistantWorker.joinable())g_assistantWorker.join();
     using V=arkjson::Value;V input=g_conversation;if(input.t!=V::Arr)input=V::makeArr();V user=V::makeObj();user.set("role",V::makeStr("user"));user.set("content",V::makeStr(prompt));input.arr.push_back(user);
-    g_chatLog.push_back({"You",prompt});refreshChatHistory();g_chatScroll=0;g_chatBusy=true;g_assistantUsageRun={};g_assistantUsageRunCounted=false;g_assistantReceiptId=newUsageReceiptId();g_assistantReceiptModel=g_assistantConfig.model;g_currentUsageReceipt.reset();g_pendingUsageReceipt.reset();g_assistantCancel=std::make_shared<std::atomic_bool>(false);auto cancel=g_assistantCancel;auto config=g_assistantConfig;auto schema=AgentSession::tools();if(g_chatInput)SetWindowTextA(g_chatInput,"");
+    g_chatLog.push_back({"You",prompt});g_chatScroll=0;g_chatBusy=true;g_assistantUsageRun={};g_assistantUsageRunCounted=false;g_assistantReceiptId=newUsageReceiptId();g_assistantReceiptModel=g_assistantConfig.model;g_currentUsageReceipt.reset();g_pendingUsageReceipt.reset();g_assistantCancel=std::make_shared<std::atomic_bool>(false);auto cancel=g_assistantCancel;auto config=g_assistantConfig;auto schema=AgentSession::tools();if(g_chatInput)SetWindowTextW(g_chatInput,L"");
     auto epoch=g_documentEpoch;auto revision=std::make_shared<std::atomic<u64>>(g_session.revision);
     g_assistantWorker=std::thread([config,input,schema,cancel,transport,epoch,revision]{
         try{auto result=runAssistant(config,input,schema,[cancel,epoch,revision](const std::string& name,const V& args){
@@ -2433,11 +2468,12 @@ static void uiAction(int id){
         case 51:exportStraightStep();break;
         case 52:importSourceStep();break;
         case 55:newDocument();break;case 56:graphicsDialog();break;case 57:showAssistantAccountMenu();break;case 58:liveConnectionDialog();break;case 59:commandPalette();break;case 187:materialDialog();break;case 188:physicalProperties();break;case 189:g_physicalVisible=false;break;case 190:physicalProperties(!g_physicalAssembly);break;
-        case 357:connectorDialog();break;case 358:g_assistantConfig.authMode=AssistantAuthMode::ApiKey;g_assistantConfig.model.clear();*g_assistantCancel=true;++g_documentEpoch;g_conversation=V::makeArr();saveUiSettings();g_status="API key mode selected. Configure model in Advanced settings.";break;
+        case 357:connectorDialog();break;case 358:g_assistantConfig.authMode=AssistantAuthMode::ApiKey;g_assistantConfig.model.clear();g_assistantConfig.reasoningEffort.clear();*g_assistantCancel=true;++g_documentEpoch;g_conversation=V::makeArr();saveUiSettings();g_status="API key mode selected. Configure model in Advanced settings.";break;
         case 360:startAuthJob(AuthJob::SignIn);break;case 361:chooseChatGptModel();break;case 362:startAuthJob(AuthJob::SignOut);break;
         case 364:if(g_authStatus.activeClientId.empty())throw std::runtime_error("Choose a saved ChatGPT account first");startAuthJob(AuthJob::SignIn,g_authStatus.activeClientId,true);break;
         case 365:if(g_authStatus.pendingClientId.empty())throw std::runtime_error("No pending ChatGPT registration to retry");startAuthJob(AuthJob::SignIn,g_authStatus.pendingClientId);break;
         case 366:cancelAuthJob();break;
+        case 367:chooseReasoningEffort();break;
         case 300:case 301:case 302:case 303:case 304:g_toolModule=id-300;break;
         case 210:createConstructionFrame();break;case 211:createPcb();break;case 212:createCableRoute();break;case 213:exportModelDialog();break;case 215:createSuspensionDialog();break;
         case 383:if(!selectedSuspension())throw std::runtime_error("Select a suspension to animate");g_suspSpinPlaying=!g_suspSpinPlaying;g_suspTick=0;g_status=g_suspSpinPlaying?"Kinematic corner preview playing / document unchanged":"Kinematic corner preview paused";break;
@@ -3535,24 +3571,31 @@ static void drawFrame(HDC hdc){
         g_assistantConfig.authMode==AssistantAuthMode::ChatGptPlan?"ChatGPT plan / "+g_assistantConfig.model:
         g_authStatus.connected?(g_authStatus.planAuthorized?"ChatGPT signed in / choose model":"ChatGPT identity connected / plan disabled"):
         g_assistantConfig.model.empty()?"Continue with ChatGPT or Advanced API key":"API key / "+g_assistantConfig.model;
-    label(connector.substr(0,43),viewX+132,cy+15,.60f);
+    label(connector.substr(0,32),viewX+132,cy+15,.60f);
+    std::string effortButton="Effort "+(g_assistantConfig.reasoningEffort.empty()?std::string("Auto"):g_assistantConfig.reasoningEffort);
+    button(effortButton.c_str(),viewX+viewW-320,cy+7,105,367,false,!g_assistantConfig.reasoningEffort.empty());
     button(g_authBusy?"Connecting...":g_authStatus.connected?"ChatGPT account":"Continue with ChatGPT",viewX+viewW-206,cy+7,184,57);
-    std::string runTokens="Assistant tokens / run: "+assistantUsageLabel(g_assistantUsageRun);
-    label(runTokens.substr(0,(size_t)std::max(20,(viewW-256)/5)),viewX+132,cy+31,.52f);
+    std::string runTokens="Run: "+assistantUsageLabel(g_assistantUsageRun);
+    label(runTokens.substr(0,(size_t)std::max(20,(viewW-350)/5)),viewX+22,cy+33,.52f);
     std::vector<std::string> chatLines;size_t cols=(size_t)std::max(30,(viewW-55)/7);
-    for(auto& entry:g_chatLog){std::string line=entry.first+": "+entry.second;for(size_t i=0;i<line.size();i+=cols)chatLines.push_back(line.substr(i,cols));}
+    for(auto& entry:g_chatLog){std::string line=entry.first+": "+entry.second;
+        for(char& ch:line)if(ch=='\r'||ch=='\n')ch=' ';
+        for(size_t i=0;i<line.size();){size_t end=std::min(i+cols,line.size());
+            while(end>i&&end<line.size()&&((unsigned char)line[end]&0xc0)==0x80)--end;
+            if(end==i)end=std::min(i+cols,line.size());
+            chatLines.push_back(line.substr(i,end-i));i=end;
+        }}
     if(chatLines.empty())chatLines.push_back("Describe a part, ask for an inspection, or connect Codex to this document.");
     int last=std::max(0,(int)chatLines.size()-g_chatScroll),first=std::max(0,last-3);float chatY=cy+49;
     for(int i=first;i<last;++i){textOut(chatLines[i],viewX+22,chatY,.66f,.73,.77,.84);chatY+=22;}
     rect(viewX+22,cy+124,viewW-244,62,7,.055,.062,.078,1,.30,.35,.43,.8,1);
-    label("Message the agent...  Ctrl+Enter to send",viewX+34,cy+142,.64f);
+    label("MESSAGE  /  Ctrl+Enter to send",viewX+30,cy+108,.55f);
     button(g_chatBusy?"Running":"Send",viewX+viewW-206,cy+124,84,74,true);button("Cancel",viewX+viewW-112,cy+124,90,75);
     button("Codex MCP",viewX+viewW-206,cy+164,184,58);
     AssistantUsage docTokens=g_assistantUsageDocument;
     textOut(g_status.substr(0,(size_t)std::max((viewW-334)/7,1)),viewX+22,cy+193,.58f,g_error?.94f:.58f,g_error?.57f:.65f,g_error?.48f:.74f);
     std::string documentTokens="Document: "+assistantUsageLabel(docTokens);
     label(documentTokens.substr(0,46),viewX+viewW-310,cy+193,.51f);
-    if(g_chatInput){MoveWindow(g_chatInput,viewX+30,(int)cy+132,viewW-260,44,TRUE);MoveWindow(g_chatHistory,viewX+22,(int)cy+43,viewW-44,68,TRUE);}
     float navT=std::clamp(((float)viewW-622.f)/420.f,0.f,1.f);
     g_cubeS=(int)std::lround(110.f+35.f*navT);g_cubeX=viewX+viewW-g_cubeS-17;g_cubeY=viewY+20;
     g_cubeHover=cubeHitAt(mp.x,mp.y);
@@ -3746,7 +3789,7 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
             if(event->epoch==g_documentEpoch){
                 if(event->hasUsage){g_assistantUsageRun=event->usage;recordAssistantUsageSnapshot(event->usage);}
                 if(event->final)g_assistantUsageRunCounted=true;
-                if(!event->text.empty()){g_chatLog.push_back({event->error?"Error":event->final?"ARK":"Action",event->text.substr(0,16000)});if(g_chatLog.size()>200)g_chatLog.erase(g_chatLog.begin());g_chatScroll=0;refreshChatHistory();}
+                if(!event->text.empty()){g_chatLog.push_back({event->error?"Error":event->final?"ARK":"Action",event->text.substr(0,16000)});if(g_chatLog.size()>200)g_chatLog.erase(g_chatLog.begin());g_chatScroll=0;}
             }return 0;
         }
         case WM_ARK_AUTH:{std::unique_ptr<UiAuthEvent> event((UiAuthEvent*)lp);bool cancelRequested=g_authCancelRequested;
@@ -3771,7 +3814,8 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
             else g_status=g_authStatus.message.empty()?"ChatGPT sign-in was not completed":g_authStatus.message;
             return 0;}
         case WM_COMMAND:if(LOWORD(wp)==500){interactiveAction(74);return 0;}break;
-        case WM_CTLCOLORSTATIC:case WM_CTLCOLOREDIT:SetTextColor((HDC)wp,RGB(219,226,238));SetBkColor((HDC)wp,RGB(14,17,23));return (LRESULT)fieldBrush;
+        case WM_CTLCOLOREDIT:if((HWND)lp==g_chatInput){SetTextColor((HDC)wp,RGB(219,226,238));SetBkColor((HDC)wp,RGB(14,17,20));return (LRESULT)chatBrush;}break;
+        case WM_ERASEBKGND:return 1; // OpenGL owns the parent surface; erase only the native EDIT child.
         case WM_GETMINMAXINFO:((MINMAXINFO*)lp)->ptMinTrackSize={1180,840};return 0;
         case WM_SIZE:
             winW=LOWORD(lp)>0?LOWORD(lp):1;
@@ -4430,6 +4474,16 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         uiAction(366);finishFakeAuth(AuthJob::Models,"ChatGPT model loading cancelled");
         if(g_authBusy||g_status.find("model loading cancelled")==std::string::npos||g_authStatus.accounts.size()!=1)return 126;
         g_authStatus=std::move(savedAuthStatus);g_authModels=std::move(savedAuthModels);
+        if(!fa.adv[0xe7]||!fa.adv[0xe3]||!fa.adv[0xf5])return 127; // cedilla and Portuguese vowels are present in the GL chat atlas.
+        g_chatInput=CreateWindowExW(0,L"EDIT",L"",WS_CHILD|ES_MULTILINE,0,0,1,1,g_window,(HMENU)499,hi,nullptr);
+        if(!g_chatInput)return 128;
+        auto chatInputFits=[&]{RECT bounds{};GetWindowRect(g_chatInput,&bounds);POINT topLeft{bounds.left,bounds.top};ScreenToClient(g_window,&topLeft);
+            return topLeft.x==viewX+30&&topLeft.y==winH-112&&bounds.right-bounds.left==std::max(viewW-260,1)&&bounds.bottom-bounds.top==44;};
+        layout();if(!chatInputFits())return 129;
+        const wchar_t* accent=L"Portugu\u00eas: a\u00e7\u00e3o";SetWindowTextW(g_chatInput,accent);wchar_t entered[80]{};GetWindowTextW(g_chatInput,entered,80);
+        if(std::wcscmp(entered,accent)!=0)return 130;
+        int originalWidth=winW,originalHeight=winH;winW=1180;winH=850;layout();if(!chatInputFits())return 131;
+        winW=originalWidth;winH=originalHeight;layout();DestroyWindow(g_chatInput);g_chatInput=nullptr;
         if(g_assistantWorker.joinable())g_assistantWorker.join();g_assistantConfig=previous;g_status="Offline assistant UI checks passed / serialized tools / history / stale-write rejection";
     }
     if(selfTest){
@@ -4527,9 +4581,9 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     }
 
     if(!g_headless||!endpointFile.empty()){startLiveBridge();if(!endpointFile.empty()){std::ofstream endpoint(endpointFile);endpoint<<g_liveBridge.endpoint();}}
-    if(!g_headless){g_chatInput=CreateWindowExA(0,"EDIT","",WS_CHILD|WS_VISIBLE|WS_TABSTOP|ES_MULTILINE|ES_AUTOVSCROLL|ES_WANTRETURN,viewX+30,winH-112,viewW-260,44,hwnd,(HMENU)499,hi,nullptr);
+    if(!g_headless){g_chatInput=CreateWindowExW(0,L"EDIT",L"",WS_CHILD|WS_VISIBLE|WS_TABSTOP|ES_MULTILINE|ES_AUTOVSCROLL|ES_WANTRETURN,viewX+30,winH-112,viewW-260,44,hwnd,(HMENU)499,hi,nullptr);
         HFONT chatFont=CreateFontA(-16,0,0,0,FW_NORMAL,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,"Segoe UI");SendMessage(g_chatInput,WM_SETFONT,(WPARAM)chatFont,TRUE);SendMessage(g_chatInput,EM_SETLIMITTEXT,12000,0);
-        g_chatHistory=CreateWindowExA(0,"EDIT","",WS_CHILD|WS_VISIBLE|WS_VSCROLL|ES_MULTILINE|ES_READONLY|ES_AUTOVSCROLL,viewX+22,winH-201,viewW-44,68,hwnd,(HMENU)498,hi,nullptr);SendMessage(g_chatHistory,WM_SETFONT,(WPARAM)chatFont,TRUE);refreshChatHistory();
+        SendMessage(g_chatInput,EM_SETMARGINS,EC_LEFTMARGIN|EC_RIGHTMARGIN,MAKELPARAM(8,8));
     }
     if(connectChatGpt){if(g_headless)return 267;
         if(g_authStatus.connected&&g_authStatus.planAuthorized)startAuthJob(AuthJob::Models);

@@ -21,6 +21,7 @@ ARK never silently switches billing modes after an authentication or plan error.
 | `authMode` | `ApiKey` by default; `ChatGptPlan` selects the separate browser OAuth route |
 | `endpoint` | `https://api.openai.com/v1/responses` |
 | `model` | Empty; choose a provider-supported model. ChatGPT plan mode uses the selected account's visible model catalog |
+| `reasoningEffort` | Empty means Auto; explicit values are sent as `reasoning.effort` |
 | `apiKeyEnv` | `OPENAI_API_KEY` in API key mode: an environment-variable name, never the key itself |
 | `maxRounds` | 12 HTTP responses per run, configurable from 1 to 32 |
 | `timeoutSeconds` | 90 seconds total per HTTP request, configurable from 1 to 300 |
@@ -109,6 +110,21 @@ and [preview limitations](https://developers.openai.com/siwc/token-sharing-open-
 
 ## Modeling loop and session behavior
 
+Studio's **Effort** button applies to the next request and persists its choice.
+Auto omits the field. In ChatGPT-plan mode the menu reads the selected account's
+`supported_reasoning_levels[].effort` and `default_reasoning_level` metadata;
+the transport checks explicit choices against that model's list before sending.
+Some account models advertise `ultra`; it is offered only on that basis, not as
+a universal API capability. Changing models returns the effort to Auto.
+
+The streaming transport retains completed `response.output_item.done` items,
+including function calls and opaque reasoning continuation, in their output
+order. If the terminal `response.completed` omits assembled output, ARK uses
+those completed items. It never runs a tool from partial argument deltas or
+before successful terminal completion. A terminal response already containing
+output is not appended twice. A response with neither text nor a tool request
+is reported explicitly instead of looking like a successful empty operation.
+
 The assistant is instructed to call `agent_onboard`, inspect the current revision,
 and submit atomic `doc_apply` batches with `expected_revision`. Only names in the
 passed MCP schema array can run. The full response is checked for unsupported
@@ -174,10 +190,12 @@ and DPAPI persistence in an explicitly isolated temporary directory. The
 normal no-argument test never reads the Windows account profile. An explicit
 `ark-chatgpt-auth-tests --status` diagnostic reads only sanitized state and
 prints `available`, `connected`, `plan_authorized`, and `account_count`, with no
-email, client ID, token or browser URL. The last coordinated safe status check
-reported no connected account. No paid inference or completed browser consent
-was verified by these offline tests; eligibility and model access require a
-real user-authorized session.
+email, client ID, token or browser URL. On 2026-10-08 the user completed browser
+consent and the safe diagnostic confirmed a connected account with plan usage.
+Two tiny live protocol probes (154 tokens each) reproduced and verified the
+streamed-tool fix without changing a CAD document. Ordinary automated tests
+remain offline. `--catalog` explicitly fetches only account-scoped public model
+capabilities; it prints no account identity or credential.
 
 Protocol references:
 [Responses function calling](https://developers.openai.com/api/docs/guides/function-calling)
