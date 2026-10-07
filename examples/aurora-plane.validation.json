@@ -1,0 +1,309 @@
+{
+  "design": "AURORA light aircraft concept",
+  "units": "mm",
+  "revision": 5,
+  "geometry": "Exact OCCT B-reps",
+  "feature_count": 13,
+  "placed_parts": 17,
+  "parameters": {
+    "length": 1000,
+    "span": 1400,
+    "dihedral_degrees": 4
+  },
+  "native_reports": [
+    {
+      "id": 1,
+      "name": "Fuselage",
+      "kernel": "OCCT",
+      "kernel_version": "8.0.1",
+      "brep_valid": true,
+      "solids": 1,
+      "faces": 10,
+      "area_mm2": 265080.68324729084,
+      "volume_mm3": 6636346.565881014,
+      "display_mesh_authoritative": false,
+      "self_intersections_checked": false,
+      "manufacturing_authoritative": false,
+      "bounds_mm": [
+        -470.0000001,
+        -60.774484697470136,
+        -72.11858860352739,
+        500.0000001000001,
+        60.774484697470186,
+        70.73624855983417
+      ]
+    },
+    {
+      "id": 2,
+      "name": "Cockpit canopy",
+      "kernel": "OCCT",
+      "kernel_version": "8.0.1",
+      "brep_valid": true,
+      "solids": 1,
+      "faces": 10,
+      "area_mm2": 70480.6059755621,
+      "volume_mm3": 1177779.4828551032,
+      "display_mesh_authoritative": false,
+      "self_intersections_checked": false,
+      "manufacturing_authoritative": false,
+      "bounds_mm": [
+        -300.0000001,
+        -43.284885657568516,
+        24.82618807504832,
+        60.00000010000001,
+        43.284885657568516,
+        105.44732157608266
+      ]
+    },
+    {
+      "id": 3,
+      "name": "Starboard wing",
+      "kernel": "OCCT",
+      "kernel_version": "8.0.1",
+      "brep_valid": true,
+      "solids": 1,
+      "faces": 26,
+      "area_mm2": 295248.21993514046,
+      "volume_mm3": 2428164.4046633802,
+      "display_mesh_authoritative": false,
+      "self_intersections_checked": false,
+      "manufacturing_authoritative": false,
+      "bounds_mm": [
+        -230.0000001,
+        -1.0000000246313213e-07,
+        -40.22692697337111,
+        70.0000001,
+        700.0000001,
+        31.2694063803472
+      ]
+    },
+    {
+      "id": 4,
+      "name": "Symmetric main wings",
+      "kernel": "OCCT",
+      "kernel_version": "8.0.1",
+      "brep_valid": true,
+      "solids": 2,
+      "faces": 52,
+      "area_mm2": 590496.439870281,
+      "volume_mm3": 4856328.8093267605,
+      "display_mesh_authoritative": false,
+      "self_intersections_checked": false,
+      "manufacturing_authoritative": false,
+      "bounds_mm": [
+        -230.0000001,
+        -700.0000001,
+        -40.22692697337111,
+        70.0000001,
+        700.0000001,
+        31.2694063803472
+      ]
+    },
+    {
+      "id": 5,
+      "name": "Starboard stabilizer",
+      "kernel": "OCCT",
+      "kernel_version": "8.0.1",
+      "brep_valid": true,
+      "solids": 1,
+      "faces": 14,
+      "area_mm2": 58446.58916197403,
+      "volume_mm3": 256015.7027311337,
+      "display_mesh_authoritative": false,
+      "self_intersections_checked": false,
+      "manufacturing_authoritative": false,
+      "bounds_mm": [
+        304.9999999,
+        -9.999999831558547e-08,
+        27.508059912927653,
+        462.0000001,
+        255.0000001,
+        47.2166875418566
+      ]
+    },
+    {
+      "id": 6,
+      "name": "Symmetric horizontal stabilizers",
+      "kernel": "OCCT",
+      "kernel_version": "8.0.1",
+      "brep_valid": true,
+      "solids": 2,
+      "faces": 28,
+      "area_mm2": 116893.17832394807,
+      "volume_mm3": 512031.4054622674,
+      "display_mesh_authoritative": false,
+      "self_intersections_checked": false,
+      "manufacturing_authoritative": false,
+      "bounds_mm": [
+        304.9999999,
+        -255.0000001,
+        27.508059912927653,
+        462.0000001,
+        255.0000001,
+        47.2166875418566
+      ]
+    },
+    {
+      "id": 7,
+      "name": "Vertical fin",
+      "kernel": "OCCT",
+      "kernel_version": "8.0.1",
+      "brep_valid": true,
+      "solids": 1,
+      "faces": 26,
+      "area_mm2": 50517.47838482698,
+      "volume_mm3": 252984.2209675431,
+      "display_mesh_authoritative": false,
+      "self_intersections_checked": false,
+      "manufacturing_authoritative": false,
+      "bounds_mm": [
+        284.9999999,
+        -11.420195255028327,
+        33.9999999,
+        486.0000001,
+        11.420195255028327,
+        227.0000001
+      ]
+    },
+    {
+      "id": 8,
+      "name": "Propeller spinner",
+      "kernel": "OCCT",
+      "kernel_version": "8.0.1",
+      "brep_valid": true,
+      "solids": 1,
+      "faces": 3,
+      "area_mm2": 6155.244971011349,
+      "volume_mm3": 38866.261537983,
+      "display_mesh_authoritative": false,
+      "self_intersections_checked": false,
+      "manufacturing_authoritative": false,
+      "bounds_mm": [
+        -510.0000001000036,
+        -22.027435011030402,
+        -22.0274349816047,
+        -469.9999998999869,
+        22.027435014377925,
+        22.027434981604618
+      ]
+    },
+    {
+      "id": 9,
+      "name": "Propeller blade",
+      "kernel": "OCCT",
+      "kernel_version": "8.0.1",
+      "brep_valid": true,
+      "solids": 1,
+      "faces": 10,
+      "area_mm2": 7487.162046817974,
+      "volume_mm3": 12605.086835711965,
+      "display_mesh_authoritative": false,
+      "self_intersections_checked": false,
+      "manufacturing_authoritative": false,
+      "bounds_mm": [
+        -480.0000001,
+        9.99576984033803,
+        -17.088937214134877,
+        -475.9999999,
+        147.0842454883503,
+        12.012028664548103
+      ]
+    },
+    {
+      "id": 10,
+      "name": "Main tire",
+      "kernel": "OCCT",
+      "kernel_version": "8.0.1",
+      "brep_valid": true,
+      "solids": 1,
+      "faces": 1,
+      "area_mm2": 9948.561236298072,
+      "volume_mm3": 44768.525563341325,
+      "display_mesh_authoritative": false,
+      "self_intersections_checked": false,
+      "manufacturing_authoritative": false,
+      "bounds_mm": [
+        -37.0000001,
+        -37.0000001,
+        -9.0000001,
+        37.0000001,
+        37.0000001,
+        9.0000001
+      ]
+    },
+    {
+      "id": 11,
+      "name": "Wheel hub",
+      "kernel": "OCCT",
+      "kernel_version": "8.0.1",
+      "brep_valid": true,
+      "solids": 1,
+      "faces": 3,
+      "area_mm2": 4272.566008882119,
+      "volume_mm3": 17592.91886010284,
+      "display_mesh_authoritative": false,
+      "self_intersections_checked": false,
+      "manufacturing_authoritative": false,
+      "bounds_mm": [
+        -20,
+        -20,
+        0,
+        20,
+        20,
+        14
+      ]
+    },
+    {
+      "id": 12,
+      "name": "Gear strut",
+      "kernel": "OCCT",
+      "kernel_version": "8.0.1",
+      "brep_valid": true,
+      "solids": 1,
+      "faces": 3,
+      "area_mm2": 3518.5837720205686,
+      "volume_mm3": 8403.760348352696,
+      "display_mesh_authoritative": false,
+      "self_intersections_checked": false,
+      "manufacturing_authoritative": false,
+      "bounds_mm": [
+        -5,
+        -5,
+        0,
+        5,
+        5,
+        107
+      ]
+    },
+    {
+      "id": 13,
+      "name": "Nose strut",
+      "kernel": "OCCT",
+      "kernel_version": "8.0.1",
+      "brep_valid": true,
+      "solids": 1,
+      "faces": 3,
+      "area_mm2": 2563.5396053292707,
+      "volume_mm3": 4926.017280828795,
+      "display_mesh_authoritative": false,
+      "self_intersections_checked": false,
+      "manufacturing_authoritative": false,
+      "bounds_mm": [
+        -4,
+        -4,
+        0,
+        4,
+        4,
+        98
+      ]
+    }
+  ],
+  "replay_byte_identical": true,
+  "document_sha256": "566bb765b678fab2b472aeb551c9c45ce98024054f9f23140e080ebbeb41228c",
+  "limitations": [
+    "Concept geometry only; no aerodynamic or structural analysis, flight qualification, or manufacturing certification.",
+    "Cockpit is a solid visual envelope; no cabin interior or mechanisms.",
+    "Assembly parts intentionally overlap at interfaces; no physical joint design."
+  ],
+  "live_revision_after_reload": 6
+}

@@ -1,6 +1,7 @@
 // ARK-Point :: model.cpp — expressions, parameters, document bookkeeping.
 #include "ark/model.hpp"
 #include <cctype>
+#include <cmath>
 
 namespace ark {
 
@@ -162,6 +163,10 @@ const char* featureTypeName(FeatureType t){
         case FeatureType::Curve: return "curve";
         case FeatureType::IntersectionCurve: return "intersection_curve";
         case FeatureType::Bridge: return "bridge";
+        case FeatureType::ConstructionFrame: return "construction_frame";
+        case FeatureType::PCB: return "pcb";
+        case FeatureType::CableRoute: return "cable_route";
+        case FeatureType::Suspension: return "suspension";
     }
     return "unknown";
 }
@@ -216,6 +221,10 @@ bool featureTypeFromName(const std::string& s, FeatureType& out){
     else if(s=="curve") out=FeatureType::Curve;
     else if(s=="intersection_curve") out=FeatureType::IntersectionCurve;
     else if(s=="bridge") out=FeatureType::Bridge;
+    else if(s=="construction_frame") out=FeatureType::ConstructionFrame;
+    else if(s=="pcb") out=FeatureType::PCB;
+    else if(s=="cable_route") out=FeatureType::CableRoute;
+    else if(s=="suspension") out=FeatureType::Suspension;
     else return false;
     return true;
 }
@@ -334,6 +343,51 @@ bool Document::reorderMove(u64 id,int delta) {
         }
     }
     return false;
+}
+
+bool applyAppearancePatch(Appearance& appearance,const arkjson::Value& patch,std::string& error){
+    using V=arkjson::Value;
+    if(patch.t!=V::Obj){error="Appearance must be an object";return false;}
+    for(const auto& field:patch.obj){
+        const auto& key=field.first;const V& value=field.second;
+        auto scalar=[&](double& target,double lo,double hi){if(value.t!=V::Num||!std::isfinite(value.num)||value.num<lo||value.num>hi){error="Invalid appearance "+key;return false;}target=value.num;return true;};
+        if(key=="base_color"){
+            if(value.t!=V::Arr||value.arr.size()!=3){error="base_color needs three RGB values";return false;}
+            double rgb[3];for(int i=0;i<3;++i){const auto& c=value.arr[i];if(c.t!=V::Num||!std::isfinite(c.num)||c.num<0||c.num>1){error="base_color must use sRGB display values 0..1";return false;}rgb[i]=c.num;}
+            appearance.baseColor={rgb[0],rgb[1],rgb[2]};
+        }else if(key=="metallic"){if(!scalar(appearance.metallic,0,1))return false;}
+        else if(key=="roughness"){if(!scalar(appearance.roughness,0,1))return false;}
+        else if(key=="opacity"){if(!scalar(appearance.opacity,0,1))return false;}
+        else if(key=="texture_path"){
+            if(value.t!=V::Str||value.str.size()>1024){error="texture_path must be a string of at most 1024 characters";return false;}
+            appearance.texturePath=value.str;
+        }else if(key=="texture_scale"){
+            if(value.t!=V::Arr||value.arr.size()!=2){error="texture_scale needs two positive values";return false;}
+            for(int i=0;i<2;++i){const V& scale=value.arr[i];if(scale.t!=V::Num||!std::isfinite(scale.num)||scale.num<=0||scale.num>1e6){error="texture_scale must be positive and at most 1e6";return false;}}
+            appearance.textureScaleU=value.arr[0].num;appearance.textureScaleV=value.arr[1].num;
+        }else{error="Unknown appearance property: "+key;return false;}
+    }
+    return true;
+}
+
+arkjson::Value appearanceToJson(const Appearance& appearance){
+    using V=arkjson::Value;V out=V::makeObj(),color=V::makeArr(),scale=V::makeArr();
+    for(double channel:{appearance.baseColor.x,appearance.baseColor.y,appearance.baseColor.z})color.arr.push_back(V::makeNum(channel));
+    scale.arr.push_back(V::makeNum(appearance.textureScaleU));scale.arr.push_back(V::makeNum(appearance.textureScaleV));
+    out.set("base_color",color);out.set("metallic",V::makeNum(appearance.metallic));out.set("roughness",V::makeNum(appearance.roughness));out.set("opacity",V::makeNum(appearance.opacity));out.set("texture_path",V::makeStr(appearance.texturePath));out.set("texture_scale",scale);return out;
+}
+
+bool validateMaterial(const Material& material,std::string& error){
+    if(material.name.empty()||material.name.size()>128){error="Material name must be 1..128 characters";return false;}
+    if(!std::isfinite(material.densityGcm3)||material.densityGcm3<0||material.densityGcm3>100){error="Material density must be 0..100 g/cm3 (zero means unspecified)";return false;}
+    Appearance check;return applyAppearancePatch(check,appearanceToJson(material.appearance),error);
+}
+
+Appearance resolvedAppearance(const Document& document,const Feature& feature){
+    Appearance result;
+    if(!feature.material.empty())for(const Material& material:document.materials)if(material.name==feature.material){result=material.appearance;break;}
+    if(feature.appearance.t==arkjson::Value::Obj){std::string error;applyAppearancePatch(result,feature.appearance,error);}
+    return result;
 }
 
 } // namespace ark

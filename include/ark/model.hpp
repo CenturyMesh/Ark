@@ -43,6 +43,36 @@ enum class FeatureType : i32 {
     Sweep, ExtrudeSurface, RevolveSurface, OffsetSurface, Sew,
     MeshBody, MeshWeld, MeshSmooth, MeshDecimate, MeshOffset, MeshFill,
     Curve, IntersectionCurve, Bridge,
+    ConstructionFrame, PCB, CableRoute, Suspension,
+};
+
+// Appearance describes the display surface. Density is grams per cubic
+// centimetre; zero means the material has no physical density assigned.
+struct Appearance {
+    Vec3 baseColor{0.72,0.75,0.80};
+    double metallic=0, roughness=0.55, opacity=1;
+    std::string texturePath;
+    double textureScaleU=1, textureScaleV=1;
+};
+struct Material {
+    std::string name;
+    double densityGcm3=0;
+    Appearance appearance;
+};
+
+// Usage is a document audit trail of provider-reported token counts. It never
+// estimates tokens for an external agent when that client did not report them.
+struct UsageReceipt {
+    std::string id,source,provenance,model,recordedAtUtc;
+    u64 inputTokens=0,outputTokens=0,totalTokens=0;
+    u64 cachedInputTokens=0,reasoningTokens=0;
+    u64 reportedResponses=0,missingResponses=0;
+};
+struct UsageLedger {
+    std::vector<UsageReceipt> entries;
+    u64 serial=0; // changes for usage metadata, independent of geometry revision
+    bool externalUsageUnknown=true;
+    std::string updatedAtUtc;
 };
 
 struct Feature {
@@ -57,6 +87,8 @@ struct Feature {
     arkjson::Value nativeSpec; // authored native geometry; evaluated worker output is never serialized
     int opInt = 0;                                    // Boolean: 0 union 1 cut 2 intersect
     bool suppressed = false;                          // history and parameters stay; recompute skips the body
+    std::string material;                             // named document material, empty uses default
+    arkjson::Value appearance;                        // validated partial appearance override
 
     std::string get(const char* k, const char* dflt="") const {
         auto it=p.find(k); return it==p.end()?dflt:it->second;
@@ -222,6 +254,8 @@ public:
 
     // features ----------------------------------------------------------------
     std::vector<Feature> features;
+    std::vector<Material> materials;
+    UsageLedger usage;
     u64 addFeature(Feature f);                    // returns id
     Feature* find(u64 id);
     bool     remove(u64 id);
@@ -250,5 +284,11 @@ public:
     u64 nextAssemblyId_=1;
     u64 nextFeatureId_=1;
 };
+
+// Shared validation and resolution for persistence, agents, and renderers.
+bool applyAppearancePatch(Appearance& appearance,const arkjson::Value& patch,std::string& error);
+arkjson::Value appearanceToJson(const Appearance& appearance);
+bool validateMaterial(const Material& material,std::string& error);
+Appearance resolvedAppearance(const Document& document,const Feature& feature);
 
 } // namespace ark

@@ -1,12 +1,15 @@
 #pragma once
 #include "ark/json.hpp"
 #include <atomic>
+#include <cstdint>
 #include <functional>
 #include <string>
 
 namespace ark {
+enum class AssistantAuthMode { ApiKey, ChatGptPlan };
 // Configuration contains an environment-variable NAME, never an API key.
 struct AssistantConfig {
+    AssistantAuthMode authMode=AssistantAuthMode::ApiKey;
     std::string endpoint="https://api.openai.com/v1/responses";
     std::string model; // Explicit user choice; no implicit paid model.
     std::string apiKeyEnv="OPENAI_API_KEY"; // Empty only for unauthenticated local servers.
@@ -15,14 +18,25 @@ struct AssistantConfig {
     std::size_t maxResponseBytes=4*1024*1024;
     std::size_t maxConversationBytes=8*1024*1024;
 };
+// Provider-reported usage only. Missing/invalid usage never becomes zero-cost
+// evidence. Cached/reasoning counts are subsets, not extra tokens to add.
+struct AssistantUsage {
+    std::uint64_t inputTokens=0, outputTokens=0, totalTokens=0;
+    std::uint64_t cachedInputTokens=0, reasoningTokens=0;
+    unsigned reportedResponses=0, missingResponses=0;
+};
+void accumulateAssistantUsage(AssistantUsage& total,const AssistantUsage& delta);
+std::string assistantUsageLabel(const AssistantUsage& usage);
 struct AssistantEvent {
-    enum Kind { Status, Text, ToolStart, ToolEnd } kind=Status;
+    enum Kind { Status, Text, ToolStart, ToolEnd, Usage } kind=Status;
     std::string text; // Tool events contain only tool name; never credentials.
+    AssistantUsage usage; // Usage events: cumulative snapshot for this run.
 };
 struct AssistantResult {
     arkjson::Value conversation=arkjson::Value::makeArr();
     std::string text;
     unsigned rounds=0;
+    AssistantUsage usage;
 };
 using AssistantTool=std::function<arkjson::Value(const std::string&,const arkjson::Value&)>;
 using AssistantEvents=std::function<void(const AssistantEvent&)>;

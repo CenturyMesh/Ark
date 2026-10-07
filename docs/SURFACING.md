@@ -118,6 +118,32 @@ or sketch-cut operations. Edit their authored parameters and construction
 sketches, or place a native part through an assembly instance. The earlier
 parametric `x(u,v)` expression surface remains a separate mesh feature.
 
+## Exact plane splits and copy-only mirrors
+
+`native_solid` operation `split_plane` splits one exact solid by a plane.
+`native.keep` is required: `positive`, `negative`, or `both`. Positive is the
+side pointed to by the plane normal. Select `native.plane` (`XY`, `XZ`, `YZ`
+or a named datum), `native.face` for a discovered planar semantic face, or
+`native.normal` with `native.origin`. Built-in XZ has normal -Y; YZ has +X.
+The plane must actually divide the solid; tangent and outside planes fail.
+Keeping both halves returns a compound, not a fused body.
+
+```json
+{"op":"feature.add","type":"native_solid","name":"Upper half","inputs":["Blank"],"native":{"op":"split_plane","plane":"Cut datum","keep":"positive"}}
+```
+
+`mirror` continues to retain the original by default. Set `p.copy_only` to `1`
+to return only the reflected exact geometry; `copy_only` and `fuse=1` cannot
+be combined. This avoids displaying or assembling the original twice.
+
+```json
+{"op":"feature.add","type":"native_solid","name":"Left part","inputs":["Right part"],"native":{"op":"mirror","plane":"XZ"},"p":{"copy_only":1}}
+```
+
+Both additions use document version 15. References split or deleted by the
+operation remain explicitly unresolved; agents must inspect the resulting
+reference registry before attaching downstream operations.
+
 ## Sampled meshes
 
 `mesh_body`, `mesh_weld`, `mesh_smooth`, `mesh_decimate`, `mesh_offset`, and

@@ -31,4 +31,30 @@ SheetPreview buildSheetPreview(const V& data,double progress){
     for(size_t i=0;i<panels.arr.size();++i){V mesh=V::makeObj();mesh.set("mesh",required(panels.arr[i],"flat_mesh"));result.mesh.append(nativeResultMesh(mesh),result.poses[i]);}
     result.mesh.computeNormals();return result;
 }
+V inspectSheetNativeData(const V& data){
+    const V& source=required(data,"report");
+    const V& model=required(source,"model");
+    if(model.t!=V::Str||model.str!="authored_panel_flange_tree")
+        throw std::runtime_error("Sheet inspection requires an authored panel graph");
+    const V& panels=required(data,"panels"),bends=required(data,"bends"),holes=required(data,"holes");
+    if(panels.t!=V::Arr||bends.t!=V::Arr||holes.t!=V::Arr||panels.arr.size()!=bends.arr.size()+1)
+        throw std::runtime_error("Sheet report has an invalid panel tree");
+    V result=V::makeObj();
+    for(const char* key:{"panel_count","bend_count","opening_count","width_mm","thickness_mm","k_factor",
+                         "flat_bounds_mm","bounds_mm","formed_volume_mm3","flat_volume_mm3",
+                         "refold_symmetric_difference_mm3","refold_frame_error_mm","volume_tolerance_mm3",
+                         "flat_valid","geometric_material_conservation","manufacturing_authoritative",
+                         "bend_trajectory_collision_checked","k_factor_scope"})
+        if(const V* value=source.find(key))result.set(key,*value);
+    if(const V* digest=data.find("flat_brep_sha256"))result.set("flat_brep_sha256",*digest);
+    V panelRows=V::makeArr();for(const V& panel:panels.arr){V row=V::makeObj();
+        for(const char* key:{"id","length_mm","width_mm","flat_frame","formed_frame"})if(const V* value=panel.find(key))row.set(key,*value);
+        panelRows.arr.push_back(std::move(row));}
+    V bendRows=V::makeArr();for(const V& bend:bends.arr){V row=V::makeObj();
+        for(const char* key:{"id","parent","edge","angle_deg","direction","inner_radius_mm","k_factor",
+                             "bend_allowance_mm","width_mm","offset_mm","bend_line_flat_mm"})if(const V* value=bend.find(key))row.set(key,*value);
+        bendRows.arr.push_back(std::move(row));}
+    result.set("panels",std::move(panelRows));result.set("bends",std::move(bendRows));result.set("openings",holes);
+    return result;
+}
 }

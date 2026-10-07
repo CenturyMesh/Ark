@@ -3,7 +3,10 @@
 #include "ark/references.hpp"
 #include "ark/sketch.hpp"
 #include "ark/tube.hpp"
+#include "ark/frame.hpp"
+#include "ark/electronics.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <set>
 #include <stdexcept>
@@ -182,7 +185,7 @@ V numericNative(const V& value, const ExprEnv& env, const std::string& key = {})
         return value;
     }
     if (value.t == V::Str) {
-        if (key == "kind" || key == "sketch" || key == "name" || key == "op" || key == "reference" || key == "second_reference" || key == "mode" || key == "edges" || key == "faces" || key == "face" || key == "plane" || key == "selection" || key == "direction" || key == "axis" || key == "neutral") return value;
+        if (key == "kind" || key == "sketch" || key == "name" || key == "op" || key == "reference" || key == "second_reference" || key == "mode" || key == "edges" || key == "faces" || key == "face" || key == "plane" || key == "keep" || key == "selection" || key == "direction" || key == "axis" || key == "neutral") return value;
         return V::makeNum(expressionValue(value.str, env));
     }
     if (value.t == V::Arr) {
@@ -565,7 +568,9 @@ V solidFeatureRequest(const Feature& feature, const ExprEnv& env,
     model.set("op", V::makeStr(op));
     if (op == "shell" && feature.inputs.size() != 1)
         throw std::runtime_error("Shell needs one solid input");
-    if (op == "mirror" && !model.find("face") && !model.find("normal")) {
+    if (op == "split_plane" && feature.inputs.size() != 1)
+        throw std::runtime_error("Split plane needs one exact solid input");
+    if ((op == "mirror" || op == "split_plane") && !model.find("face") && !model.find("normal")) {
         if (const V* plane = model.find("plane")) {
             if (plane->t != V::Str || plane->str.empty()) throw std::runtime_error("Mirror plane must be a datum name");
             if (plane->str != "XY" && plane->str != "XZ" && plane->str != "YZ") {
@@ -577,6 +582,9 @@ V solidFeatureRequest(const Feature& feature, const ExprEnv& env,
                 for (int index : {8, 9, 10}) normal.arr.push_back(V::makeNum(placed.m[index]));
                 model.set("origin", std::move(origin));
                 model.set("normal", std::move(normal));
+                if (op == "split_plane")
+                    model.obj.erase(std::remove_if(model.obj.begin(), model.obj.end(),
+                        [](const auto& item) { return item.first == "plane"; }), model.obj.end());
             }
         }
     }
@@ -859,12 +867,19 @@ V rectTubeSolid(const Feature& feature, const ExprEnv& env) {
 
 bool isNativeFeature(FeatureType type) {
     return isNativeSurfaceFeature(type) || isCurveFeature(type) || type == FeatureType::SheetMetal ||
-           type == FeatureType::SourceSheet || type == FeatureType::NativeSolid;
+           type == FeatureType::SourceSheet || type == FeatureType::NativeSolid ||
+           type == FeatureType::ConstructionFrame || type == FeatureType::PCB || type == FeatureType::CableRoute;
 }
 
 Body evaluateNativeFeature(const Feature& feature, const ExprEnv& env,
                            Document& document, std::vector<Body>& preceding) {
     V result;
+    if(feature.type==FeatureType::ConstructionFrame)return evaluateFrameFeature(feature,env,document,preceding);
+    if(feature.type==FeatureType::PCB||feature.type==FeatureType::CableRoute){
+        V request=V::makeObj();request.set("operation",V::makeStr("model_electronics"));
+        request.set("request",electronicsRequest(feature,env));result=nativeWorkerRequest(request);
+        Body body;body.nativeData=std::move(result);body.baked=std::make_unique<Mesh>(nativeResultMesh(body.nativeData));return body;
+    }
     if (feature.type == FeatureType::SourceSheet) {
         const V& format = required(feature.sourceData, "format");
         const V& version = required(feature.sourceData, "version");

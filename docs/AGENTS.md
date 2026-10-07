@@ -1,5 +1,38 @@
 # ARK agent protocol
 
+The current API adds `suspension_inspect` for read-only double-wishbone poses.
+Call `agent_onboard{topic:"suspension"}` before authoring its version 18 program.
+It returns joint residuals, wheel attitude and ideal spring force; the feature
+is a kinematic display model, not an exact B-rep or dynamics solver.
+See [suspension](SUSPENSION.md).
+
+The latest sheet/showcase extension has **44 tools**. `sheet_inspect` and
+`export_flat_dxf` inspect/export authored flat sheets; `stock_preview` returns
+nominal straight tube/frame stock; `usage_info` and `usage_record` manage
+persisted drawing token receipts. `sheet.opening.pattern` adds bounded
+expression-driven copies, and sheet openings support circle/slot/window/polygon.
+Usage metadata and slot/window documents use version 17. See
+[KITE showcase and counters](KITE_SHOWCASE.md).
+
+The earlier engineering extension brought the API to 38 tools; the latest additions above bring it to 44. New feature types
+`construction_frame`, `pcb` and `cable_route` use document version 16.
+Call `agent_onboard` with `frames`, `electronics` or `routing` before designing
+them. `frame_inspect` and `electronics_inspect` return compact evaluated
+evidence; `pcb_export` writes fabrication previews. `export_iges` provides
+exact IGES exchange and `export_mesh` accepts `fbx` as well as `obj`/`stl`.
+See [engineering modules](ENGINEERING_MODULES.md), [exchange](EXCHANGE.md),
+and [CPU/GPU execution](COMPUTE_ARCHITECTURE.md).
+
+The current material/rendering extension adds `agent_onboard{topic:"materials"}`,
+persisted materials and appearance, and exact-solid mass/weight/centroid reports.
+Use `material.set{name,density?,appearance?}` and `material.remove{name}` in
+`doc_apply`; assign `material` or `appearance` through `feature.add/edit`.
+Appearance-only batches preserve the geometry cache and report
+`geometry_recomputed:false`. `native_solid` also supports `split_plane` and
+mirror `p.copy_only=1`. These additions use document version 15 without adding
+tools. See [materials and rendering](RENDER_MATERIALS.md) and
+[exact split examples](SURFACING.md#exact-plane-splits-and-copy-only-mirrors).
+
 The C++ MCP host reads one JSON-RPC message per line on stdin and writes protocol responses only to stdout. Tools return both `structuredContent` and its JSON text representation, with `isError` set on failures, following the [MCP tool result specification](https://modelcontextprotocol.io/specification/2025-11-25/server/tools). Transport behavior follows [MCP stdio](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports).
 
 Initialize with protocol `2025-11-25`, `2025-06-18` or `2024-11-05`. Each process owns one document. The API is synchronous; a long operation occupies that session. Applications must not call a single `AgentSession` concurrently.

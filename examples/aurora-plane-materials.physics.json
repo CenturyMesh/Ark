@@ -1,0 +1,723 @@
+﻿{
+    "revision":  2,
+    "units":  "mm",
+    "feature_count":  13,
+    "recompute_ms":  5597.0909000039101,
+    "parameter_error":  "",
+    "planes":  [
+                   "Body station 0",
+                   "Body station 1",
+                   "Body station 2",
+                   "Body station 3",
+                   "Body station 4",
+                   "Body station 5",
+                   "Body station 6",
+                   "Body station 7",
+                   "Cockpit station 0",
+                   "Cockpit station 1",
+                   "Cockpit station 2",
+                   "Cockpit station 3",
+                   "Cockpit station 4",
+                   "Starboard wing station 0",
+                   "Starboard wing station 1",
+                   "Starboard wing station 2",
+                   "Starboard stabilizer station 0",
+                   "Starboard stabilizer station 1",
+                   "Fin station 0",
+                   "Fin station 1",
+                   "Fin station 2",
+                   "Spinner station 0",
+                   "Spinner station 1",
+                   "Spinner station 2",
+                   "Spinner station 3",
+                   "Propeller plane"
+               ],
+    "sketches":  [
+                     "Body section 0",
+                     "Body section 1",
+                     "Body section 2",
+                     "Body section 3",
+                     "Body section 4",
+                     "Body section 5",
+                     "Body section 6",
+                     "Body section 7",
+                     "Cockpit section 0",
+                     "Cockpit section 1",
+                     "Cockpit section 2",
+                     "Cockpit section 3",
+                     "Cockpit section 4",
+                     "Starboard wing section 0",
+                     "Starboard wing section 1",
+                     "Starboard wing section 2",
+                     "Starboard stabilizer section 0",
+                     "Starboard stabilizer section 1",
+                     "Fin section 0",
+                     "Fin section 1",
+                     "Fin section 2",
+                     "Spinner section 0",
+                     "Spinner section 1",
+                     "Spinner section 2",
+                     "Spinner section 3",
+                     "Propeller blade outline"
+                 ],
+    "features":  [
+                     {
+                         "id":  1,
+                         "name":  "Fuselage",
+                         "type":  "loft",
+                         "output":  true
+                     },
+                     {
+                         "id":  2,
+                         "name":  "Cockpit canopy",
+                         "type":  "loft",
+                         "output":  true
+                     },
+                     {
+                         "id":  3,
+                         "name":  "Starboard wing",
+                         "type":  "loft",
+                         "output":  false
+                     },
+                     {
+                         "id":  4,
+                         "name":  "Port wing",
+                         "type":  "native_solid",
+                         "output":  true
+                     },
+                     {
+                         "id":  5,
+                         "name":  "Starboard stabilizer",
+                         "type":  "loft",
+                         "output":  false
+                     },
+                     {
+                         "id":  6,
+                         "name":  "Port stabilizer",
+                         "type":  "native_solid",
+                         "output":  true
+                     },
+                     {
+                         "id":  7,
+                         "name":  "Vertical fin",
+                         "type":  "loft",
+                         "output":  true
+                     },
+                     {
+                         "id":  8,
+                         "name":  "Propeller spinner",
+                         "type":  "loft",
+                         "output":  true
+                     },
+                     {
+                         "id":  9,
+                         "name":  "Propeller blade",
+                         "type":  "native_solid",
+                         "output":  true
+                     },
+                     {
+                         "id":  10,
+                         "name":  "Main tire",
+                         "type":  "native_solid",
+                         "output":  true
+                     },
+                     {
+                         "id":  11,
+                         "name":  "Wheel hub",
+                         "type":  "native_solid",
+                         "output":  true
+                     },
+                     {
+                         "id":  12,
+                         "name":  "Gear strut",
+                         "type":  "native_solid",
+                         "output":  true
+                     },
+                     {
+                         "id":  13,
+                         "name":  "Nose strut",
+                         "type":  "native_solid",
+                         "output":  true
+                     }
+                 ],
+    "assembly_nodes":  20,
+    "material_count":  6,
+    "instances":  [
+                      {
+                          "node":  2,
+                          "feature":  1,
+                          "name":  "Fuselage installed",
+                          "visible":  true,
+                          "copy":  0,
+                          "world_column_major":  [
+                                                     1,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     6.123233995736766E-17,
+                                                     -1,
+                                                     0,
+                                                     0,
+                                                     1,
+                                                     6.123233995736766E-17,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     1
+                                                 ]
+                      },
+                      {
+                          "node":  3,
+                          "feature":  2,
+                          "name":  "Cockpit canopy installed",
+                          "visible":  true,
+                          "copy":  0,
+                          "world_column_major":  [
+                                                     1,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     6.123233995736766E-17,
+                                                     -1,
+                                                     0,
+                                                     0,
+                                                     1,
+                                                     6.123233995736766E-17,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     1
+                                                 ]
+                      },
+                      {
+                          "node":  5,
+                          "feature":  4,
+                          "name":  "Port wing installed",
+                          "visible":  true,
+                          "copy":  0,
+                          "world_column_major":  [
+                                                     1,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     6.123233995736766E-17,
+                                                     -1,
+                                                     0,
+                                                     0,
+                                                     1,
+                                                     6.123233995736766E-17,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     1
+                                                 ]
+                      },
+                      {
+                          "node":  7,
+                          "feature":  6,
+                          "name":  "Port stabilizer installed",
+                          "visible":  true,
+                          "copy":  0,
+                          "world_column_major":  [
+                                                     1,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     6.123233995736766E-17,
+                                                     -1,
+                                                     0,
+                                                     0,
+                                                     1,
+                                                     6.123233995736766E-17,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     1
+                                                 ]
+                      },
+                      {
+                          "node":  8,
+                          "feature":  7,
+                          "name":  "Vertical fin installed",
+                          "visible":  true,
+                          "copy":  0,
+                          "world_column_major":  [
+                                                     1,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     6.123233995736766E-17,
+                                                     -1,
+                                                     0,
+                                                     0,
+                                                     1,
+                                                     6.123233995736766E-17,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     1
+                                                 ]
+                      },
+                      {
+                          "node":  9,
+                          "feature":  8,
+                          "name":  "Propeller spinner installed",
+                          "visible":  true,
+                          "copy":  0,
+                          "world_column_major":  [
+                                                     1,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     6.123233995736766E-17,
+                                                     -1,
+                                                     0,
+                                                     0,
+                                                     1,
+                                                     6.123233995736766E-17,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     1
+                                                 ]
+                      },
+                      {
+                          "node":  10,
+                          "feature":  9,
+                          "name":  "Propeller blade A",
+                          "visible":  true,
+                          "copy":  0,
+                          "world_column_major":  [
+                                                     1,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     0.4226182617406995,
+                                                     -0.90630778703664994,
+                                                     0,
+                                                     0,
+                                                     0.90630778703664994,
+                                                     0.4226182617406995,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     1
+                                                 ]
+                      },
+                      {
+                          "node":  11,
+                          "feature":  9,
+                          "name":  "Propeller blade B",
+                          "visible":  true,
+                          "copy":  0,
+                          "world_column_major":  [
+                                                     1,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     -0.42261826174069933,
+                                                     0.90630778703665005,
+                                                     0,
+                                                     0,
+                                                     -0.90630778703665005,
+                                                     -0.42261826174069933,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     1
+                                                 ]
+                      },
+                      {
+                          "node":  12,
+                          "feature":  10,
+                          "name":  "Starboard main tire",
+                          "visible":  true,
+                          "copy":  0,
+                          "world_column_major":  [
+                                                     1,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     1,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     1,
+                                                     0,
+                                                     -90,
+                                                     -149,
+                                                     -94.000000000000014,
+                                                     1
+                                                 ]
+                      },
+                      {
+                          "node":  13,
+                          "feature":  11,
+                          "name":  "Starboard wheel hub",
+                          "visible":  true,
+                          "copy":  0,
+                          "world_column_major":  [
+                                                     1,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     1,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     1,
+                                                     0,
+                                                     -90,
+                                                     -149,
+                                                     -101.00000000000001,
+                                                     1
+                                                 ]
+                      },
+                      {
+                          "node":  14,
+                          "feature":  12,
+                          "name":  "Starboard gear leg",
+                          "visible":  true,
+                          "copy":  0,
+                          "world_column_major":  [
+                                                     1,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     -0.37460659341591196,
+                                                     -0.92718385456678742,
+                                                     0,
+                                                     0,
+                                                     0.92718385456678742,
+                                                     -0.37460659341591196,
+                                                     0,
+                                                     -90,
+                                                     -143,
+                                                     -94,
+                                                     1
+                                                 ]
+                      },
+                      {
+                          "node":  15,
+                          "feature":  10,
+                          "name":  "Port main tire",
+                          "visible":  true,
+                          "copy":  0,
+                          "world_column_major":  [
+                                                     1,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     1,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     1,
+                                                     0,
+                                                     -90,
+                                                     -149,
+                                                     93.999999999999986,
+                                                     1
+                                                 ]
+                      },
+                      {
+                          "node":  16,
+                          "feature":  11,
+                          "name":  "Port wheel hub",
+                          "visible":  true,
+                          "copy":  0,
+                          "world_column_major":  [
+                                                     1,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     1,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     1,
+                                                     0,
+                                                     -90,
+                                                     -149,
+                                                     86.999999999999986,
+                                                     1
+                                                 ]
+                      },
+                      {
+                          "node":  17,
+                          "feature":  12,
+                          "name":  "Port gear leg",
+                          "visible":  true,
+                          "copy":  0,
+                          "world_column_major":  [
+                                                     1,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     0.37460659341591207,
+                                                     -0.92718385456678742,
+                                                     0,
+                                                     0,
+                                                     0.92718385456678742,
+                                                     0.37460659341591207,
+                                                     0,
+                                                     -90,
+                                                     -143,
+                                                     93.999999999999986,
+                                                     1
+                                                 ]
+                      },
+                      {
+                          "node":  18,
+                          "feature":  10,
+                          "name":  "Nose wheel tire",
+                          "visible":  true,
+                          "copy":  0,
+                          "world_column_major":  [
+                                                     1,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     1,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     1,
+                                                     0,
+                                                     -351,
+                                                     -149,
+                                                     -9.1236186536477812E-15,
+                                                     1
+                                                 ]
+                      },
+                      {
+                          "node":  19,
+                          "feature":  11,
+                          "name":  "Nose wheel hub",
+                          "visible":  true,
+                          "copy":  0,
+                          "world_column_major":  [
+                                                     1,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     1,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     1,
+                                                     0,
+                                                     -351,
+                                                     -149,
+                                                     -7.0000000000000089,
+                                                     1
+                                                 ]
+                      },
+                      {
+                          "node":  20,
+                          "feature":  13,
+                          "name":  "Nose gear leg",
+                          "visible":  true,
+                          "copy":  0,
+                          "world_column_major":  [
+                                                     1,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     6.123233995736766E-17,
+                                                     -1,
+                                                     0,
+                                                     0,
+                                                     1,
+                                                     6.123233995736766E-17,
+                                                     0,
+                                                     -351,
+                                                     -140,
+                                                     -8.572527594031473E-15,
+                                                     1
+                                                 ]
+                      },
+                      {
+                          "node":  21,
+                          "feature":  3,
+                          "name":  "Starboard wing installed",
+                          "visible":  true,
+                          "copy":  0,
+                          "world_column_major":  [
+                                                     1,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     6.123233995736766E-17,
+                                                     -1,
+                                                     0,
+                                                     0,
+                                                     1,
+                                                     6.123233995736766E-17,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     1
+                                                 ]
+                      },
+                      {
+                          "node":  22,
+                          "feature":  5,
+                          "name":  "Starboard stabilizer installed",
+                          "visible":  true,
+                          "copy":  0,
+                          "world_column_major":  [
+                                                     1,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     6.123233995736766E-17,
+                                                     -1,
+                                                     0,
+                                                     0,
+                                                     1,
+                                                     6.123233995736766E-17,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     1
+                                                 ]
+                      }
+                  ],
+    "bom":  [
+                {
+                    "feature":  1,
+                    "name":  "Fuselage",
+                    "quantity":  1
+                },
+                {
+                    "feature":  2,
+                    "name":  "Cockpit canopy",
+                    "quantity":  1
+                },
+                {
+                    "feature":  3,
+                    "name":  "Starboard wing",
+                    "quantity":  1
+                },
+                {
+                    "feature":  4,
+                    "name":  "Port wing",
+                    "quantity":  1
+                },
+                {
+                    "feature":  5,
+                    "name":  "Starboard stabilizer",
+                    "quantity":  1
+                },
+                {
+                    "feature":  6,
+                    "name":  "Port stabilizer",
+                    "quantity":  1
+                },
+                {
+                    "feature":  7,
+                    "name":  "Vertical fin",
+                    "quantity":  1
+                },
+                {
+                    "feature":  8,
+                    "name":  "Propeller spinner",
+                    "quantity":  1
+                },
+                {
+                    "feature":  9,
+                    "name":  "Propeller blade",
+                    "quantity":  2
+                },
+                {
+                    "feature":  10,
+                    "name":  "Main tire",
+                    "quantity":  3
+                },
+                {
+                    "feature":  11,
+                    "name":  "Wheel hub",
+                    "quantity":  3
+                },
+                {
+                    "feature":  12,
+                    "name":  "Gear strut",
+                    "quantity":  2
+                },
+                {
+                    "feature":  13,
+                    "name":  "Nose strut",
+                    "quantity":  1
+                }
+            ],
+    "mates_solved":  false,
+    "diagnostics":  {
+                        "jacobian_rank":  0,
+                        "remaining_dofs":  0,
+                        "max_position_residual_mm":  0,
+                        "max_angle_residual_deg":  0,
+                        "mates":  [
+
+                                  ],
+                        "unconstrained_nodes":  [
+
+                                                ],
+                        "rank_scope":  "local numerical constraint Jacobian"
+                    },
+    "mass_scope":  "visible_placed_parts",
+    "mates":  [
+
+              ],
+    "interference_authority":  "display_mesh",
+    "interference_checked":  false,
+    "interference":  [
+
+                     ],
+    "interference_note":  "Display-mesh interference was skipped because the visible instances exceed the triangle budget. Pass interference:true to raise it to 120000 triangles.",
+    "mass_checked":  true,
+    "mass_g":  2618.1752548757404,
+    "mass_kg":  2.6181752548757404,
+    "gravity_m_s2":  9.8066499999999994,
+    "weight_N":  25.67552836322718,
+    "center_mm":  [
+                      -139.60688169343376,
+                      15.854344961756265,
+                      -4.3388853551091943E-07
+                  ]
+}

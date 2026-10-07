@@ -19,7 +19,8 @@ try {
     } else {
         if ($env:OS -ne 'Windows_NT') { throw 'The default native build requires Windows and Visual Studio 2022; use -CoreOnly for the portable core.' }
         $occt = Join-Path $root 'out/deps/occt/install-msvc/cmake'
-        if (-not (Test-Path -LiteralPath (Join-Path $occt 'OpenCASCADEConfig.cmake'))) {
+        $iges = Join-Path $root 'out/deps/occt/install-msvc/win64/vc14/lib/TKDEIGES.lib'
+        if (-not (Test-Path -LiteralPath (Join-Path $occt 'OpenCASCADEConfig.cmake')) -or -not (Test-Path -LiteralPath $iges)) {
             & (Join-Path $PSScriptRoot 'build-occt.ps1') -Jobs $Jobs
             if ($LASTEXITCODE -ne 0) { throw 'OCCT SDK build failed' }
         }

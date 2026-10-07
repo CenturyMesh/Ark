@@ -44,7 +44,7 @@ $configure = @(
     '-DBUILD_MODULE_Visualization=OFF',
     '-DBUILD_MODULE_DataExchange=OFF',
     '-DBUILD_MODULE_Draw=OFF',
-    '-DBUILD_ADDITIONAL_TOOLKITS=TKDESTEP',
+    '-DBUILD_ADDITIONAL_TOOLKITS=TKDESTEP;TKDEIGES',
     '-DBUILD_LIBRARY_TYPE=Shared',
     '-DBUILD_USE_PCH=ON',
     '-DBUILD_USE_VCPKG=OFF',
@@ -70,5 +70,7 @@ $config = Get-ChildItem -LiteralPath $install -Filter OpenCASCADEConfig.cmake -F
 $stepLib = Get-ChildItem -LiteralPath $install -Filter TKDESTEP.lib -File -Recurse |
     Select-Object -First 1
 if (-not $config -or -not $stepLib) { throw 'Installed OCCT SDK lacks CMake config or STEP library' }
+$igesLib = Get-ChildItem -LiteralPath $install -Filter TKDEIGES.lib -File -Recurse | Select-Object -First 1
+if (-not $igesLib) { throw 'Installed OCCT SDK lacks IGES library' }
 Write-Host "OCCT_DIR=$($config.DirectoryName)"
 Write-Host "STEP_LIBRARY=$($stepLib.FullName)"

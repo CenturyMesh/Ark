@@ -10,6 +10,9 @@
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepGProp.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
+#include <OSD_ThreadPool.hxx>
+#include <thread>
+#include <cstdlib>
 #include <Bnd_Box.hxx>
 #include <GProp_GProps.hxx>
 #include <STEPControl_Reader.hxx>
@@ -22,6 +25,7 @@
 #include <TopLoc_Location.hxx>
 #include <Poly_Triangulation.hxx>
 #include <BRepAdaptor_Curve.hxx>
+#include <GCPnts_QuasiUniformDeflection.hxx>
 #include <GeomAbs_CurveType.hxx>
 #include <fstream>
 #include <sstream>
@@ -99,16 +103,57 @@ TopoDS_Shape compound(const std::vector<TopoDS_Shape>& parts){BRep_Builder b;Top
 TopoDS_Shape transformed(const TopoDS_Shape& s,const gp_Trsf& t){BRepBuilderAPI_Transform op(s,t,true);if(!op.IsDone())throw std::runtime_error("Native shape transform failed");return op.Shape();}
 V vec(const gp_XYZ& p){V out=V::makeArr();for(double n:{p.X(),p.Y(),p.Z()})out.arr.push_back(V::makeNum(n));return out;}
 V matrix(const gp_Trsf& t){V out=V::makeArr();for(int c=1;c<=4;++c)for(int r=1;r<=4;++r)out.arr.push_back(V::makeNum(r<=3?t.Value(r,c):(c==4?1:0)));return out;}
+int nativeThreadBudget(){
+    static const int budget=[](){
+        int threads=std::max(1,std::min(8,(int)std::thread::hardware_concurrency()));
+        if(const char* requested=std::getenv("ARK_NATIVE_THREADS")){
+            char* end=nullptr;long value=std::strtol(requested,&end,10);
+            if(end!=requested&&!*end&&value>=1&&value<=64)threads=(int)value;
+        }
+        const auto& pool=OSD_ThreadPool::DefaultPool(threads);
+        threads=std::min(threads,pool->NbThreads());pool->SetNbDefaultThreadsToLaunch(threads);return threads;
+    }();return budget;
+}
 V meshData(const TopoDS_Shape& s,double deflection,double angle){
-    BRepMesh_IncrementalMesh mesher(s,deflection,false,angle,false);mesher.Perform();if(!mesher.IsDone())throw std::runtime_error("Native preview tessellation failed");V pos=V::makeArr(),idx=V::makeArr(),spans=V::makeArr(),edges=V::makeArr();
+    BRepMesh_IncrementalMesh mesher(s,deflection,false,angle,nativeThreadBudget()>1);if(!mesher.IsDone())throw std::runtime_error("Native preview tessellation failed");V pos=V::makeArr(),idx=V::makeArr(),spans=V::makeArr(),edges=V::makeArr();
     for(auto& item:shapes(s,TopAbs_FACE)){auto face=TopoDS::Face(item);TopLoc_Location loc;auto tri=BRep_Tool::Triangulation(face,loc);if(tri.IsNull())throw std::runtime_error("Native face has no triangulation");size_t base=pos.arr.size()/3,start=idx.arr.size()/3;
         for(int i=1;i<=tri->NbNodes();++i){auto p=tri->Node(i).Transformed(loc.Transformation());for(auto v:{p.X(),p.Y(),p.Z()})pos.arr.push_back(V::makeNum(std::round(v*1e8)/1e8));}
         for(int i=1;i<=tri->NbTriangles();++i){int a,b,c;tri->Triangle(i).Get(a,b,c);if(face.Orientation()==TopAbs_REVERSED)std::swap(b,c);for(int v:{a,b,c})idx.arr.push_back(V::makeNum((double)(base+v-1)));}
         V span=V::makeArr();span.arr.push_back(V::makeNum((double)start));span.arr.push_back(V::makeNum((double)(idx.arr.size()/3-start)));spans.arr.push_back(std::move(span));
         if(pos.arr.size()>6000000||idx.arr.size()>6000000)throw std::runtime_error("Native preview exceeds mesh size limit");
     }
-    for(auto& item:shapes(s,TopAbs_EDGE)){BRepAdaptor_Curve curve(TopoDS::Edge(item));double a=curve.FirstParameter(),b=curve.LastParameter();int steps=curve.GetType()==GeomAbs_Line?1:12;if(!std::isfinite(a)||!std::isfinite(b)||a==b)steps=1;V poly=V::makeArr();
-        for(int i=0;i<=steps;++i){gp_Pnt p=curve.Value(a+(b-a)*(steps?i/(double)steps:0));for(double v:{p.X(),p.Y(),p.Z()})poly.arr.push_back(V::makeNum(std::round(v*1e8)/1e8));}
+    for(auto& item:shapes(s,TopAbs_EDGE)){V poly=V::makeArr();const auto edge=TopoDS::Edge(item);
+        if(BRep_Tool::Degenerated(edge)){edges.arr.push_back(std::move(poly));continue;}
+        BRepAdaptor_Curve curve(edge);const double a=curve.FirstParameter(),b=curve.LastParameter();
+        if(!std::isfinite(a)||!std::isfinite(b))throw std::runtime_error("Native edge preview has an unbounded parameter range");
+        auto append=[&](const gp_Pnt& p){for(double v:{p.X(),p.Y(),p.Z()})poly.arr.push_back(V::makeNum(std::round(v*1e8)/1e8));};
+        if(curve.GetType()==GeomAbs_Line||a==b){append(curve.Value(a));append(curve.Value(b));}
+        else{
+            // Display/picking follows curved B-rep edges at the same deflection
+            // as the surface mesh, rather than a coarse fixed twelve chords.
+            GCPnts_QuasiUniformDeflection sampler(curve,deflection,a,b,GeomAbs_C0);
+            if(!sampler.IsDone()||sampler.NbPoints()<2||sampler.NbPoints()>16384)throw std::runtime_error("Native edge preview tessellation failed or exceeds its bound");
+            // An inflected spline can put both endpoints AND its midpoint on
+            // one chord. Check quarter points too and refine the display
+            // polyline; these sampled checks are not an exact-curve certificate.
+            auto chordDistance=[](const gp_Pnt& p,const gp_Pnt& start,const gp_Pnt& end){
+                const gp_Vec chord(start,end),offset(start,p);const double length2=chord.SquareMagnitude();
+                const double t=length2>1e-24?std::clamp(offset.Dot(chord)/length2,0.0,1.0):0.0;
+                return p.Distance(start.Translated(chord*t));
+            };
+            size_t points=1;append(curve.Value(sampler.Parameter(1)));
+            auto refine=[&](auto&& self,double u,double v,const gp_Pnt& start,const gp_Pnt& end,int depth)->void{
+                const double mid=u+(v-u)*0.5;const auto center=curve.Value(mid);
+                double error=chordDistance(center,start,end);
+                for(double fraction:{0.25,0.75})error=std::max(error,chordDistance(curve.Value(u+(v-u)*fraction),start,end));
+                if(!std::isfinite(error))throw std::runtime_error("Native edge preview has nonfinite samples");
+                if(error>deflection){
+                    if(depth>=24||mid==u||mid==v)throw std::runtime_error("Native edge preview refinement exceeds its bound");
+                    self(self,u,mid,start,center,depth+1);self(self,mid,v,center,end,depth+1);
+                }else{if(++points>16384)throw std::runtime_error("Native edge preview exceeds its point bound");append(end);}
+            };
+            for(int i=2;i<=sampler.NbPoints();++i){const double u=sampler.Parameter(i-1),v=sampler.Parameter(i);refine(refine,u,v,curve.Value(u),curve.Value(v),0);}
+        }
         edges.arr.push_back(std::move(poly));
     }
     V mesh=V::makeObj();mesh.set("pos",pos);mesh.set("idx",idx);mesh.set("face_spans",spans);mesh.set("edges",edges);return mesh;

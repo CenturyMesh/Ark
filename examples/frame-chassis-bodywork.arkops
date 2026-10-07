@@ -1,0 +1,69 @@
+{
+  "tool": "doc_apply",
+  "arguments": {
+    "expected_revision": 0,
+    "commands": [
+      {"op":"param.set","name":"wheelbase","expr":"2400"},
+      {"op":"param.set","name":"track","expr":"1000"},
+      {"op":"param.set","name":"sill_z","expr":"300"},
+      {"op":"material.set","name":"Frame steel","density":7.85,"appearance":{"base_color":[0.22,0.28,0.34],"metallic":0.78,"roughness":0.32}},
+      {"op":"material.set","name":"Body blue","density":1.35,"appearance":{"base_color":[0.08,0.29,0.82],"metallic":0.42,"roughness":0.28}},
+      {"op":"feature.add","type":"construction_frame","name":"Welded chassis concept","material":"Frame steel","native":{
+        "profiles":[
+          {"name":"sill 60x40x3","section":"rect","width":"60","height":"40","wall":"3","material":"Frame steel"},
+          {"name":"cross 50x30x2.5","section":"rect","width":"50","height":"30","wall":"2.5","material":"Frame steel"},
+          {"name":"upper CHS 42x2.5","section":"round","od":"42","wall":"2.5","material":"Frame steel"},
+          {"name":"brace CHS 30x2","section":"round","od":"30","wall":"2","material":"Frame steel"}
+        ],
+        "nodes":[
+          {"name":"FL","xyz":[0,"-track/2","sill_z"]},
+          {"name":"FR","xyz":[0,"track/2","sill_z"]},
+          {"name":"ML","xyz":["wheelbase/2","-track/2","sill_z"]},
+          {"name":"MR","xyz":["wheelbase/2","track/2","sill_z"]},
+          {"name":"RL","xyz":["wheelbase","-track/2","sill_z"]},
+          {"name":"RR","xyz":["wheelbase","track/2","sill_z"]},
+          {"name":"DL","xyz":[500,"-track/2","sill_z+300"]},
+          {"name":"DR","xyz":[500,"track/2","sill_z+300"]},
+          {"name":"DC","xyz":[500,0,"sill_z+300"]},
+          {"name":"UL","xyz":["wheelbase-600","-track/2","sill_z+350"]},
+          {"name":"UR","xyz":["wheelbase-600","track/2","sill_z+350"]}
+        ],
+        "members":[
+          {"name":"left_sill","profile":"sill 60x40x3","start":"FL","end":"RL","normal":[0,0,1]},
+          {"name":"right_sill","profile":"sill 60x40x3","start":"FR","end":"RR","normal":[0,0,1]},
+          {"name":"front_cross","profile":"cross 50x30x2.5","start":"FL","end":"FR","normal":[0,0,1]},
+          {"name":"mid_cross","profile":"cross 50x30x2.5","start":"ML","end":"MR","normal":[0,0,1]},
+          {"name":"rear_cross","profile":"cross 50x30x2.5","start":"RL","end":"RR","normal":[0,0,1]},
+          {"name":"dash_cross","profile":"upper CHS 42x2.5","start":"DL","end":"DR"},
+          {"name":"left_upper","profile":"upper CHS 42x2.5","start":"DL","end":"UL"},
+          {"name":"right_upper","profile":"upper CHS 42x2.5","start":"DR","end":"UR"},
+          {"name":"left_front_upright","profile":"brace CHS 30x2","start":"FL","end":"DL"},
+          {"name":"right_front_upright","profile":"brace CHS 30x2","start":"FR","end":"DR"},
+          {"name":"left_rear_upright","profile":"brace CHS 30x2","start":"RL","end":"UL"},
+          {"name":"right_rear_upright","profile":"brace CHS 30x2","start":"RR","end":"UR"},
+          {"name":"roll_hoop","profile":"upper CHS 42x2.5","start":"ML","end":"MR","direction":[0,0,1],"normal":[0,1,0],
+           "segments":[{"kind":"line","length":650},{"kind":"arc","radius":150,"angle":90},{"kind":"line","length":"track-300"},{"kind":"arc","radius":150,"angle":90},{"kind":"line","length":650}]},
+          {"name":"dash_cope_brace","profile":"brace CHS 30x2","start":"ML","end":"DC"},
+          {"name":"left_rear_diagonal","profile":"brace CHS 30x2","start":"ML","end":"RR"},
+          {"name":"right_rear_diagonal","profile":"brace CHS 30x2","start":"MR","end":"RL"},
+          {"name":"left_roof_tie","profile":"brace CHS 30x2","start":"DL","end":"UR"},
+          {"name":"right_roof_tie","profile":"brace CHS 30x2","start":"DR","end":"UL"}
+        ],
+        "joints":[{"kind":"cope","member":"dash_cope_brace","end":"end","against":"dash_cross"}]
+      }},
+      {"op":"plane.set","name":"Front cross mounting datum","support":{"kind":"face","feature":"Welded chassis concept","reference":"member.front_cross.cap.start"}},
+      {"op":"plane.set","name":"Left body front station","parent":"YZ","p":{"ox":"-track/2-45","oz":"80"}},
+      {"op":"plane.set","name":"Left body rear station","parent":"YZ","p":{"ox":"-track/2-45","oz":"wheelbase-80"}},
+      {"op":"sketch.set","name":"Left body front section","sketch":{"plane":"Left body front station","entities":[{"kind":"line","name":"skin","dof":[0,"sill_z+55",0,"sill_z+310"]}]}},
+      {"op":"sketch.set","name":"Left body rear section","sketch":{"plane":"Left body rear station","entities":[{"kind":"line","name":"skin","dof":[0,"sill_z+55",0,"sill_z+250"]}]}},
+      {"op":"feature.add","type":"loft","name":"Left body skin","p":{"solid":0,"ruled":1},"native":{"sections":["Left body front section","Left body rear section"]}},
+      {"op":"feature.add","type":"thicken","name":"Left blue body panel","material":"Body blue","inputs":[2],"p":{"thickness":2.5}},
+      {"op":"plane.set","name":"Right body front station","parent":"YZ","p":{"ox":"track/2+45","oz":"80"}},
+      {"op":"plane.set","name":"Right body rear station","parent":"YZ","p":{"ox":"track/2+45","oz":"wheelbase-80"}},
+      {"op":"sketch.set","name":"Right body front section","sketch":{"plane":"Right body front station","entities":[{"kind":"line","name":"skin","dof":[0,"sill_z+55",0,"sill_z+310"]}]}},
+      {"op":"sketch.set","name":"Right body rear section","sketch":{"plane":"Right body rear station","entities":[{"kind":"line","name":"skin","dof":[0,"sill_z+55",0,"sill_z+250"]}]}},
+      {"op":"feature.add","type":"loft","name":"Right body skin","p":{"solid":0,"ruled":1},"native":{"sections":["Right body front section","Right body rear section"]}},
+      {"op":"feature.add","type":"thicken","name":"Right blue body panel","material":"Body blue","inputs":[4],"p":{"thickness":2.5}}
+    ]
+  }
+}

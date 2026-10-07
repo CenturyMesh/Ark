@@ -6,6 +6,7 @@
 #include "ark/prism_cut.hpp"
 #include "ark/mesh_analysis.hpp"
 #include "ark/native_features.hpp"
+#include "ark/suspension.hpp"
 #include <chrono>
 #include <exception>
 
@@ -71,6 +72,10 @@ static Body evalFeatureBody(const Feature& f, const ExprEnv& env, Document& doc,
         return nullptr;
     };
 
+    if(f.type==FeatureType::Suspension){
+        if(!f.inputs.empty())throw std::runtime_error("Suspension uses authored hardpoints, not feature inputs");
+        Body body=evaluateSuspensionFeature(f,env);res.tris=body.baked?body.baked->triCount():0;return body;
+    }
     if(isNativeFeature(f.type)){
         Body body=evaluateNativeFeature(f,env,doc,work);
         res.tris=body.baked?body.baked->triCount():0;

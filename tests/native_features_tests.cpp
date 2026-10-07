@@ -267,11 +267,38 @@ void testFinishingHistory() {
     check(error.find("version 9") != std::string::npos, "version rejection names version 9");
 }
 
+void testPlaneSplitAndMirrorCopyHistory() {
+    ark::AgentSession session;
+    accepted(session.call("doc_apply", parse(R"({"expected_revision":0,"commands":[
+      {"op":"feature.add","type":"native_solid","name":"Stock","p":{"op":"box","width":"10","depth":"10","height":"10"}},
+      {"op":"plane.set","name":"Station","p":{"oz":"3"}},
+      {"op":"feature.add","type":"native_solid","name":"Upper","inputs":["Stock"],"p":{"op":"split_plane"},"native":{"plane":"Station","keep":"positive"}},
+      {"op":"feature.add","type":"native_solid","name":"Reflected","inputs":["Stock"],"p":{"op":"mirror","copy_only":"1"},"native":{"normal":[0,0,1],"origin":[0,0,20]}},
+      {"op":"plane.set","name":"Rotated","p":{"oy":"4","rx":"90"}},
+      {"op":"feature.add","type":"native_solid","name":"Side","inputs":["Stock"],"p":{"op":"split_plane"},"native":{"plane":"Rotated","keep":"positive"}}
+    ]})")));
+    const auto& upper=session.document.evalBodies[1].nativeData;
+    const auto& reflected=session.document.evalBodies[2].nativeData;
+    check(std::abs(upper.find("report")->find("volume_mm3")->num-700)<1e-4,"datum split uses authored plane");
+    check(std::abs(reflected.find("report")->find("volume_mm3")->num-1000)<1e-4,"copy-only mirror keeps one volume");
+    check(reflected.find("report")->find("solids")->num==1,"copy-only mirror returns one solid");
+    check(std::abs(session.document.evalBodies[3].nativeData.find("report")->find("volume_mm3")->num-400)<1e-4,"rotated datum split uses its normal");
+    const auto previous=session.revision;
+    auto invalid=session.call("doc_apply",parse(R"({"commands":[{"op":"feature.edit","id":"Upper","native":{"keep":"invalid"}}]})"));
+    check(invalid.find("isError")&&invalid.find("isError")->b&&session.revision==previous,"invalid split rolls back atomically");
+    std::string saved=ark::documentToJson(session.document),error;
+    ark::Document loaded;
+    check(ark::documentFromJson(saved,loaded,&error),"split and mirror document reloads");
+    loaded.recompute();
+    check(loaded.lastResults.back().ok,"reloaded exact operations recompute");
+}
+
 int main() {
     try {
         testLoftHistoryAndExport();
         testMirrorPlanes();
         testFinishingHistory();
+        testPlaneSplitAndMirrorCopyHistory();
         testNurbsExpressionsAndThicken();
         testExtendedSurfacesAndMeshConsent();
         testSheetSourceImportAndCustody();

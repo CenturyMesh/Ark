@@ -7,6 +7,7 @@ namespace ark {
 
 bool exportSTL(const char* path, const Mesh& m);
 bool exportOBJ(const char* path, const Mesh& m);
+bool exportFBX(const char* path, const Mesh& m); // ASCII FBX 7.4, millimetres, triangle mesh
 // STL or OBJ, chosen from the file extension. Throws with the reason on failure.
 // Vertices are stored as f32. Faces with more than three corners are fanned.
 Mesh importMeshPath(const std::string& path);

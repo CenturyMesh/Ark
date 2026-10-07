@@ -2,6 +2,40 @@
 
 **Parametric CAD for people and agents.**
 
+Studio has viewport/tree context menus, reversible **Spotlight** visibility,
+separate navigation and playback rows, and improved face/curved-edge picking.
+[Interaction guide](docs/STUDIO_INTERACTION.md).
+**Continue with ChatGPT** connects eligible subscriptions through the browser;
+API-key setup remains available under Advanced. [Assistant setup](docs/ASSISTANT.md).
+
+The [KITE suspension showcase](examples/kite-17-suspension.ark) adds four
+double-wishbone corners, knuckles, coilovers, steering links and spinning wheels.
+Choose **Frames > Corner** to spotlight and animate a mechanism. The travel,
+rack and wheel controls run a checked kinematic preview with ideal spring force.
+[Suspension contract and limits](docs/SUSPENSION.md).
+
+[KITE 17](examples/kite-17-showcase.ark) is a complete visual showcase of a
+fold-built coupe: tubular subframe, nine sheet definitions, wheels and glazing.
+The **Sheet Metal** ribbon switches the assembly between formed, unfolded and
+animated views, with nominal tube stock on a separate display. Drawing token
+receipts now persist in the `.ark` file. [Showcase guide](docs/KITE_SHOWCASE.md).
+
+The engineering workspace adds a grouped command ribbon, readable orientation
+cube/compass and responsive kernel loading overlay. Construction Frames supports
+round/rectangular bent members, cutlists and supported cope joints; PCB and
+cable routing add checked layouts, netlists and exact obstacle checks.
+[Open the integrated vehicle](examples/vehicle-engineering.ark),
+[read the module contracts](docs/ENGINEERING_MODULES.md),
+[export formats](docs/EXCHANGE.md), or
+[CPU/GPU execution details](docs/COMPUTE_ARCHITECTURE.md).
+
+Studio now supports persistent colors, material properties and image textures,
+metallic/roughness lighting, transparent bodies, and configurable contact,
+ambient and horizon occlusion. The Material and Physics controls expose
+appearance, density, mass, weight and center of mass. The in-app assistant
+shows provider-reported token usage, with unavailable/partial states when the
+provider omits it. See [materials and rendering](docs/RENDER_MATERIALS.md).
+
 ![ARK 0.9 parametric drone assembly](docs/drone-hull.png)
 
 ARK is a C++ parametric CAD workspace with a Windows Studio editor, a headless
@@ -98,7 +132,7 @@ connect the MCP process to Studio's displayed endpoint as described in
 ```
 
 Call `agent_onboard` first for the current revision, supported operations,
-and examples. ARK exposes 34 MCP tools, including `kernel_info`,
+and examples. ARK exposes 44 MCP tools, including `kernel_info`,
 `reference_inspect`, `sketch_diagnose`, `sheet_preview`, `import_sheet_step`, and `import_mesh`. `doc_apply` batches
 edits atomically and rejects stale revisions. The [agent protocol](docs/AGENTS.md)
 describes the command and validation contracts. The in-app assistant uses a

@@ -2,6 +2,7 @@
 #include "ark/serialize.hpp"
 #include "ark/sketch.hpp"
 #include "ark/assembly_io.hpp"
+#include "ark/usage.hpp"
 #include <cstdio>
 #include <fstream>
 #include <set>
@@ -317,6 +318,18 @@ bool generation14Document(const Document& doc){
     }
     return false;
 }
+bool generation15NativeFeature(const Feature& feature){
+    if(feature.type!=FeatureType::NativeSolid)return false;
+    std::string op=feature.get("op");
+    if(op.empty())if(const auto* authored=feature.nativeSpec.find("op");authored&&authored->t==Value::Str)op=authored->str;
+    return op=="split_plane"||(op=="mirror"&&feature.p.count("copy_only")!=0);
+}
+bool generation17SheetOpening(const Feature& feature){
+    if(feature.type!=FeatureType::SheetMetal)return false;
+    const Value* openings=feature.nativeSpec.find("openings");if(!openings||openings->t!=Value::Arr)return false;
+    for(const Value& opening:openings->arr)if(const Value* kind=opening.find("kind");kind&&kind->t==Value::Str&&(kind->str=="slot"||kind->str=="window"))return true;
+    return false;
+}
 
 bool generation11Document(const Document& doc){
     for(const auto& feature:doc.features){
@@ -348,6 +361,7 @@ bool generation10Document(const Document& doc){
 
 // ---------------------------------------------------------------------------
 std::string documentToJson(const Document& doc){
+    std::string usageError;if(!validateUsageLedger(doc.usage,usageError))throw std::runtime_error(usageError);
     Value r=Value::makeObj();
     r.set("format",Value::makeStr("ark"));
     bool sourceTube=false;bool notched=false;bool nativeVersion=false;bool generation8=false;bool generation9=false;bool extended=!doc.assembly.empty()||doc.nextAssemblyId_>1;for(auto& f:doc.features){extended|=f.type==FeatureType::Tube;notched|=f.type==FeatureType::NotchedTube;sourceTube|=f.type==FeatureType::SourceTube;nativeVersion|=f.type==FeatureType::Loft||f.type==FeatureType::SurfaceFill||f.type==FeatureType::BSplineSurface||f.type==FeatureType::Thicken||f.type==FeatureType::SheetMetal||f.type==FeatureType::SourceSheet||f.type==FeatureType::NativeSolid;generation8|=f.type==FeatureType::Sweep||f.type==FeatureType::ExtrudeSurface||f.type==FeatureType::RevolveSurface||f.type==FeatureType::OffsetSurface||f.type==FeatureType::Sew||isMeshModelFeature(f.type);generation9|=generation9Feature(doc,f);}
@@ -358,7 +372,12 @@ std::string documentToJson(const Document& doc){
     bool generation10=generation10Document(doc);
     bool sketchVersion=!doc.planes.empty()||!doc.sketches.empty();for(auto& f:doc.features)sketchVersion|=f.type==FeatureType::SketchCut;
     bool latest=!doc.mates.empty()||doc.nextMateId_>1;for(auto& p:doc.planes)latest|=p.support.t==Value::Obj||p.kind!="plane";for(auto& f:doc.features)latest|=f.type==FeatureType::NativeSolid||(f.type==FeatureType::SheetMetal&&f.nativeSpec.find("base"));for(auto& n:doc.assembly)latest|=n.fixed;for(auto& sk:doc.sketches)for(auto& c:sk.sk.cons)latest|=!c.id.empty();
-    r.set("version",Value::makeNum(generation14?14:generation13?13:generation12?12:generation11?11:generation10?10:generation9?9:generation8?8:latest?7:nativeVersion?6:sketchVersion?5:sourceTube?4:notched?3:extended?2:1));
+    bool generation15=!doc.materials.empty();for(const auto& feature:doc.features)generation15|=!feature.material.empty()||feature.appearance.t==Value::Obj||generation15NativeFeature(feature);
+    bool modules=false;for(const auto& feature:doc.features)modules|=feature.type==FeatureType::ConstructionFrame||feature.type==FeatureType::PCB||feature.type==FeatureType::CableRoute;
+    const bool usagePresent=doc.usage.serial>0||!doc.usage.entries.empty();
+    bool generation17=usagePresent;for(const auto& feature:doc.features)generation17|=generation17SheetOpening(feature);
+    bool suspensionVersion=false;for(const auto& feature:doc.features)suspensionVersion|=feature.type==FeatureType::Suspension;
+    r.set("version",Value::makeNum(suspensionVersion?18:generation17?17:modules?16:generation15?15:generation14?14:generation13?13:generation12?12:generation11?11:generation10?10:generation9?9:generation8?8:latest?7:nativeVersion?6:sketchVersion?5:sourceTube?4:notched?3:extended?2:1));
     r.set("units",Value::makeStr("mm"));
     r.set("next_feature_id",Value::makeNum((double)doc.nextFeatureId_));
 
@@ -370,6 +389,12 @@ std::string documentToJson(const Document& doc){
         ps.arr.push_back(std::move(v));
     }
     r.set("params",std::move(ps));
+    if(usagePresent)r.set("usage",usageLedgerToJson(doc.usage));
+    if(!doc.materials.empty()){
+        Value materials=Value::makeArr();
+        for(const auto& material:doc.materials){Value item=Value::makeObj();item.set("name",Value::makeStr(material.name));item.set("density",Value::makeNum(material.densityGcm3));item.set("appearance",appearanceToJson(material.appearance));materials.arr.push_back(std::move(item));}
+        r.set("materials",std::move(materials));
+    }
     if(!doc.planes.empty()){
         Value planes=Value::makeArr();for(auto& plane:doc.planes){Value v=Value::makeObj(),p=Value::makeObj();v.set("name",Value::makeStr(plane.name));v.set("parent",Value::makeStr(plane.parent));
             std::vector<std::string> keys;for(auto& kv:plane.p)keys.push_back(kv.first);std::sort(keys.begin(),keys.end());for(auto& key:keys)p.set(key,Value::makeStr(plane.p.at(key)));v.set("p",p);v.set("kind",Value::makeStr(plane.kind));if(plane.support.t==Value::Obj)v.set("support",plane.support);planes.arr.push_back(v);
@@ -406,6 +431,8 @@ std::string documentToJson(const Document& doc){
         v.set("name",Value::makeStr(f.name));
         v.set("op",Value::makeNum(f.opInt));
         if(f.suppressed)v.set("suppressed",Value::makeBool(true));
+        if(!f.material.empty())v.set("material",Value::makeStr(f.material));
+        if(f.appearance.t==Value::Obj)v.set("appearance",f.appearance);
         Value in=Value::makeArr();
         for(u64 id:f.inputs) in.arr.push_back(Value::makeNum((double)id));
         v.set("inputs",std::move(in));
@@ -418,7 +445,7 @@ std::string documentToJson(const Document& doc){
         if(f.type==FeatureType::NotchedTube){Value points=Value::makeArr();for(auto& p:f.notches){Value j=Value::makeObj();j.set("station",Value::makeStr(p.station));j.set("angle",Value::makeStr(p.angle));j.set("face",Value::makeStr(p.face));points.arr.push_back(j);}v.set("notches",points);}
         if(f.type==FeatureType::SourceTube)v.set("source",f.sourceData);
         if(f.type==FeatureType::SourceSheet)v.set("source",f.sourceData);
-        if(f.type==FeatureType::Loft||f.type==FeatureType::SurfaceFill||f.type==FeatureType::BSplineSurface||f.type==FeatureType::Thicken||f.type==FeatureType::SheetMetal||f.type==FeatureType::NativeSolid||f.type==FeatureType::Sweep||f.type==FeatureType::ExtrudeSurface||f.type==FeatureType::RevolveSurface||f.type==FeatureType::OffsetSurface||f.type==FeatureType::Sew)
+        if(f.type==FeatureType::Loft||f.type==FeatureType::SurfaceFill||f.type==FeatureType::BSplineSurface||f.type==FeatureType::Thicken||f.type==FeatureType::SheetMetal||f.type==FeatureType::NativeSolid||f.type==FeatureType::Sweep||f.type==FeatureType::ExtrudeSurface||f.type==FeatureType::RevolveSurface||f.type==FeatureType::OffsetSurface||f.type==FeatureType::Sew||f.type==FeatureType::ConstructionFrame||f.type==FeatureType::PCB||f.type==FeatureType::CableRoute||f.type==FeatureType::Suspension)
             v.set("native",f.nativeSpec.t==Value::Obj?f.nativeSpec:Value::makeObj());
         if(f.type==FeatureType::MeshBody)v.set("mesh",f.sourceData);
         fs.arr.push_back(std::move(v));
@@ -441,14 +468,18 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     Value v;
     if(!arkjson::parse(json,v)) return fail("malformed JSON");
     if(v.t!=Value::Obj) return fail("root must be object");
-    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0&&ver->num!=3.0&&ver->num!=4.0&&ver->num!=5.0&&ver->num!=6.0&&ver->num!=7.0&&ver->num!=8.0&&ver->num!=9.0&&ver->num!=10.0&&ver->num!=11.0&&ver->num!=12.0&&ver->num!=13.0&&ver->num!=14.0)))
+    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0&&ver->num!=3.0&&ver->num!=4.0&&ver->num!=5.0&&ver->num!=6.0&&ver->num!=7.0&&ver->num!=8.0&&ver->num!=9.0&&ver->num!=10.0&&ver->num!=11.0&&ver->num!=12.0&&ver->num!=13.0&&ver->num!=14.0&&ver->num!=15.0&&ver->num!=16.0&&ver->num!=17.0&&ver->num!=18.0)))
         return fail("unsupported document version");
 
     if(auto format=v.find("format");format && format->asStr()!="ark")return fail("unsupported format");
     if(auto units=v.find("units");units && units->asStr()!="mm")return fail("unsupported units (expected mm)");
     if(!v.find("features"))return fail("missing features array");
-    for(auto key:{"params","sketches","features","planes","canvases"})if(auto a=v.find(key);a && a->t!=Value::Arr)return fail(std::string(key)+" must be an array");
+    for(auto key:{"params","sketches","features","planes","canvases","materials"})if(auto a=v.find(key);a && a->t!=Value::Arr)return fail(std::string(key)+" must be an array");
     Document nd;   // parse into scratch; commit only on full success
+    if(const Value* usage=v.find("usage")){
+        const Value* version=v.find("version");if(!version||version->num<17)return fail("Usage ledger requires document version 17");
+        if(!usageLedgerFromJson(*usage,nd.usage,err))return false;
+    }
     std::set<std::string> paramNames,sketchNames;
     std::set<u64> featureIds;
     if(auto ps=v.find("params"))
@@ -459,6 +490,19 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
             if(np.name.empty() || !paramNames.insert(np.name).second) return fail("empty or duplicate parameter name");
             nd.params.push_back(std::move(np));
         }
+
+    if(auto materials=v.find("materials")){
+        if(materials->arr.size()>256)return fail("Material capacity exceeded");
+        std::set<std::string> names;
+        for(const auto& item:materials->arr){
+            if(item.t!=Value::Obj)return fail("Material must be an object");
+            Material material;auto name=item.find("name");if(!name||name->t!=Value::Str)return fail("Material needs a name");material.name=name->str;
+            if(!names.insert(material.name).second)return fail("Duplicate material name");
+            if(auto density=item.find("density")){if(density->t!=Value::Num)return fail("Material density must be numeric");material.densityGcm3=density->num;}
+            if(auto appearance=item.find("appearance")){std::string reason;if(!applyAppearancePatch(material.appearance,*appearance,reason))return fail(reason);}
+            std::string reason;if(!validateMaterial(material,reason))return fail(reason);nd.materials.push_back(std::move(material));
+        }
+    }
 
     if(auto sks=v.find("sketches"))
         for(auto&s:sks->arr){
@@ -514,6 +558,8 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
             nf.name=fv.find("name")?fv.find("name")->asStr():"";
             nf.opInt=(int)(fv.find("op")?fv.find("op")->asNum():0);
             if(auto flag=fv.find("suppressed")){if(flag->t!=Value::Bool)return fail("suppressed must be boolean");nf.suppressed=flag->b;}
+            if(auto material=fv.find("material")){if(material->t!=Value::Str||material->str.empty())return fail("Feature material must be a name");nf.material=material->str;}
+            if(auto appearance=fv.find("appearance")){Appearance tested;std::string reason;if(!applyAppearancePatch(tested,*appearance,reason))return fail(reason);nf.appearance=*appearance;}
             if(auto in=fv.find("inputs")){
                 if(in->t!=Value::Arr)return fail("inputs must be an array");
                 for(auto&idv:in->arr){
@@ -537,8 +583,11 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
             if(nf.type==FeatureType::SourceTube){auto version=v.find("version"),data=fv.find("source");if(!version||version->asNum()<4||!data||data->t!=Value::Obj)return fail("source_tube requires version 4 package");nf.sourceData=*data;}
             if(nf.type==FeatureType::SourceSheet){auto version=v.find("version"),data=fv.find("source");if(!version||version->asNum()<6||!data||data->t!=Value::Obj)return fail("source_sheet requires version 6 package");nf.sourceData=*data;}
             if(nf.type==FeatureType::Loft||nf.type==FeatureType::SurfaceFill||nf.type==FeatureType::BSplineSurface||nf.type==FeatureType::Thicken||nf.type==FeatureType::SheetMetal||nf.type==FeatureType::NativeSolid){auto version=v.find("version"),spec=fv.find("native");if(!version||version->asNum()<6||!spec||spec->t!=Value::Obj)return fail("native feature requires version 6 native object");nf.nativeSpec=*spec;}
+            if(generation17SheetOpening(nf)){auto version=v.find("version");if(!version||version->asNum()<17)return fail("authored sheet slots or windows require document version 17");}
             if(nf.type==FeatureType::Sweep||nf.type==FeatureType::ExtrudeSurface||nf.type==FeatureType::RevolveSurface||nf.type==FeatureType::OffsetSurface||nf.type==FeatureType::Sew){auto version=v.find("version"),spec=fv.find("native");if(!version||version->asNum()<8||!spec||spec->t!=Value::Obj)return fail("extended surface feature requires version 8 native object");nf.nativeSpec=*spec;}
             if(isMeshModelFeature(nf.type)){auto version=v.find("version");if(!version||version->asNum()<8)return fail("mesh modeling features require document version 8");}
+            if(nf.type==FeatureType::ConstructionFrame||nf.type==FeatureType::PCB||nf.type==FeatureType::CableRoute){auto version=v.find("version"),spec=fv.find("native");if(!version||version->asNum()<16||!spec||spec->t!=Value::Obj)return fail("Engineering modules require version 16 native object");nf.nativeSpec=*spec;}
+            if(nf.type==FeatureType::Suspension){auto version=v.find("version"),spec=fv.find("native");if(!version||version->asNum()<18||!spec||spec->t!=Value::Obj)return fail("Suspension requires version 18 native program");nf.nativeSpec=*spec;}
             if(isCurveFeature(nf.type)){auto version=v.find("version"),spec=fv.find("native");if(!version||version->asNum()<12||!spec||spec->t!=Value::Obj)return fail("points, curve segments, or curve features require document version 12");nf.nativeSpec=*spec;}
             if(generation9Feature(nd,nf)){auto version=v.find("version");if(!version||version->asNum()<9)return fail("draft, pattern, mirror, edge selection, loft smoothing, or a point tip requires document version 9");}
             if(nf.type==FeatureType::MeshBody){auto mesh=fv.find("mesh");if(!mesh||mesh->t!=Value::Obj)return fail("mesh_body requires a mesh object");nf.sourceData=*mesh;}
@@ -585,7 +634,16 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     if(generation12Document(nd)){auto version=v.find("version");if(!version||version->asNum()<12)return fail("points, curve segments, or curve features require document version 12");}
     if(generation13Document(nd)){auto version=v.find("version");if(!version||version->asNum()<13)return fail("plane canvases, suppressed features, or projected and offset sketch entities require document version 13");}
     if(generation14Document(nd)){auto version=v.find("version");if(!version||version->asNum()<14)return fail("sketch fillets, sketch chamfers, or mates across assembly groups require document version 14");}
-    if(nd.params.size()>256||nd.features.size()>1024||nd.sketches.size()>64||nd.canvases.size()>8)return fail("document capacity exceeded");
+    if(!nd.materials.empty()){auto version=v.find("version");if(!version||version->asNum()<15)return fail("Materials require document version 15");}
+    for(const auto& feature:nd.features){
+        if(generation15NativeFeature(feature)){auto version=v.find("version");if(!version||version->asNum()<15)return fail("split_plane or mirror copy_only requires document version 15");}
+        if(!feature.material.empty()){
+            auto version=v.find("version");if(!version||version->asNum()<15)return fail("Feature appearance requires document version 15");
+            if(std::none_of(nd.materials.begin(),nd.materials.end(),[&](const Material& material){return material.name==feature.material;}))return fail("Feature references a missing material: "+feature.material);
+        }
+        if(feature.appearance.t==Value::Obj){auto version=v.find("version");if(!version||version->asNum()<15)return fail("Feature appearance requires document version 15");}
+    }
+    if(nd.params.size()>256||nd.features.size()>1024||nd.sketches.size()>64||nd.canvases.size()>8||nd.materials.size()>256)return fail("document capacity exceeded");
     nd.refreshParams();
     if(!nd.parameterError.empty())return fail(nd.parameterError);
     for(auto& canvas:nd.canvases){

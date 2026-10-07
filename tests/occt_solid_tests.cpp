@@ -18,6 +18,16 @@ double volume(const Value& solid){return solid.find("report")->find("volume_mm3"
 void rejected(const Value& request,bool reference=false){try{if(reference)(void)occt::referenceFrameNative(request);else (void)result(request);}catch(const std::exception&){return;}throw std::runtime_error("Invalid request was accepted");}
 
 void primitivesAndNames(){
+    auto pickCylinder=result(parse(R"({"op":"cylinder","radius":500,"height":20})"));
+    bool curvedEdge=false;
+    for(const auto& edge:pickCylinder.find("mesh")->find("edges")->arr)if(edge.arr.size()>6){
+        curvedEdge=true;check(edge.arr.size()>39,"curved picking edges are not fixed twelve-chord approximations");
+        for(size_t i=3;i<edge.arr.size();i+=3){
+            const double x=(edge.arr[i-3].num+edge.arr[i].num)/2,y=(edge.arr[i-2].num+edge.arr[i+1].num)/2;
+            check(500-std::hypot(x,y)<0.0251,"circle picking chord follows surface tessellation deflection");
+        }
+    }
+    check(curvedEdge,"cylinder publishes selectable curved edges");
     auto box=result(parse(R"({"op":"box","width":10,"depth":20,"height":5})"));
     close(volume(box),1000,1e-7,"box volume");
     auto top=occt::referenceFrameNative(frameRequest(box,"z_max"));
@@ -190,5 +200,39 @@ void repeatedUnionNamespaces(){
         if(row.find("name")->str=="tool2.axis")ordinal=true;
     check(ordinal,"direct worker union namespace determinism");
 }
+void planeSplitAndMirrorCopy(){
+    auto box=result(parse(R"({"op":"box","width":10,"depth":10,"height":10})"));
+    auto split=on("split_plane",box);
+    split.set("normal",parse("[0,0,7]"));
+    split.set("origin",parse("[0,0,4]"));
+    split.set("keep",Value::makeStr("positive"));
+    auto upper=result(split);
+    close(volume(upper),600,1e-5,"positive plane half volume");
+    close(upper.find("report")->find("bounds_mm")->arr[2].num,4,1e-6,"positive plane lower bound");
+    close(occt::referenceFrameNative(frameRequest(upper,"z_max")).find("frame")->arr[14].num,10,1e-6,"retained top semantic face");
+    split.set("keep",Value::makeStr("negative"));
+    auto lower=result(split);
+    close(volume(lower),400,1e-5,"negative plane half volume");
+    close(lower.find("report")->find("bounds_mm")->arr[5].num,4,1e-6,"negative plane upper bound");
+    split.set("keep",Value::makeStr("both"));
+    auto pair=result(split);
+    close(volume(pair),1000,1e-4,"both plane halves conserve exact volume");
+    check(pair.find("report")->find("solids")->num==2,"both halves remain separate solids");
+    rejected(frameRequest(pair,"x_min"),true);
+    split.set("keep",Value::makeStr("invalid"));rejected(split);
+    split.set("keep",Value::makeStr("positive"));split.set("origin",parse("[0,0,20]"));rejected(split);
+    split.set("origin",parse("[0,0,0]"));rejected(split);
+    split.set("origin",parse("[0,0,4]"));split.set("plane",Value::makeStr("XY"));rejected(split);
+    auto mirror=on("mirror",box);
+    mirror.set("normal",parse("[0,0,1]"));mirror.set("origin",parse("[0,0,20]"));
+    mirror.set("copy_only",Value::makeNum(1));
+    auto copy=result(mirror);
+    close(volume(copy),1000,1e-5,"mirror copy volume");
+    check(copy.find("report")->find("solids")->num==1,"mirror copy omits source solid");
+    close(copy.find("report")->find("bounds_mm")->arr[2].num,30,1e-6,"mirror copy lower bound");
+    close(copy.find("report")->find("bounds_mm")->arr[5].num,40,1e-6,"mirror copy upper bound");
+    close(occt::referenceFrameNative(frameRequest(copy,"z_max")).find("frame")->arr[14].num,30,1e-6,"mirror copy preserves authored face identity");
+    mirror.set("fuse",Value::makeNum(1));rejected(mirror);
 }
-int main(){try{primitivesAndNames();operations();rejection();finishingFeatures();repeatedUnionNamespaces();std::cout<<"native solid tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+}
+int main(){try{primitivesAndNames();operations();rejection();finishingFeatures();repeatedUnionNamespaces();planeSplitAndMirrorCopy();std::cout<<"native solid tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

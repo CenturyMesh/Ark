@@ -1,5 +1,154 @@
 # Validation record
 
+## 2026-10-08: contextual editing, browser login and suspension
+
+The default installed native build passed **35/35** CTest cases; the core-only
+build passed **23/23**. Installed Studio self-tests for context actions,
+suspension motion, sheet showcase, native modeling, sketch and assistant each
+exited 0. Rendering and engineering UI tests also passed in the staging build.
+Context layout checks passed at 1180x850, 1600x1000 and 2923x1100; navigation and
+playback occupy separate rows. Right-click actions cover viewport and tree,
+Spotlight restores previous visibility without changing geometry revision, and
+hidden bodies cannot capture selection.
+
+Native edge display/picking now uses deflection-driven tessellation. Regressions
+check a large circular edge's chord error and an inflected bridge curve's two
+lobes, endpoints and length. Quarter-point refinement prevents a midpoint-on-chord
+S curve from collapsing to a line. These display samples do not certify exact
+geometry; the OCCT B-rep remains authoritative.
+
+The [KITE suspension showcase](../examples/kite-17-suspension.ark) contains four
+double-wishbone corners and 24 frame mounting members. At jounce 30 mm, rack
+8 mm and wheel spin 135 degrees all four solve with link residuals below
+1e-5 mm. Focused tests cover mirrored corners, expression edits, invalid/unreachable
+poses, atomic rollback, persistence and closed nondegenerate display parts at
+nine sample poses. This is kinematics and an ideal spring-force calculation,
+not dynamics, collision, fatigue, strength or fabrication qualification.
+
+Native ChatGPT sign-in tests cover OAuth state/PKCE, runtime-generated RSA/JWKS
+ID-token validation, scope/plan errors, account/model parsing and temporary DPAPI
+storage without reading the user's profile. The explicit safe status diagnostic
+reported `connected=false`, `plan_authorized=false`, `account_count=0` at the
+last live check. Browser launch is implemented; real account consent and paid
+inference are not claimed as validated. See [assistant setup](ASSISTANT.md).
+
+Build/test logs, saved pre-upgrade Studio documents and pose reports are under
+`out/suspension-upgrade/`. Showcase screenshots are committed in `docs/`.
+
+## 2026-10-07: KITE sheet-metal showcase and drawing usage
+
+Native CTest passed **33/33**; core-only passed **21/21**. Studio self-tests for
+sheet showcase, rendering/loading, engineering dialogs, sketches, native
+modeling and the assistant each exited 0, as did the live MCP integration.
+The new sheet UI test exercises exact slot/window creation, repeated openings,
+flat DXF export, global formed/flat switching, stock preview and unchanged
+geometry revision. Preview meshes refuse semantic face/edge selection.
+
+The [KITE 17 coupe](../examples/kite-17-showcase.ark) has 23 definitions and
+79 placed parts, including 9 sheet definitions (24 unique authored bends),
+15 placed sheet parts and a 12-member tube subframe. All 9 sheet definitions
+exported analytic flat DXF and exact flat STEP successfully. At the declared
+K=0.5 each reports geometric material conservation and independent refold
+evidence. The slot/window/pattern tests also reject stale flat digests and
+overlapping openings; no sampled contour fallback is used.
+
+The drawing token ledger tests cover persistence, exact receipt retry
+deduplication, monotone snapshots, invalid data, capacity rejection, geometry
+undo/redo preservation and client-supplied provenance. Studio additionally
+tests that usage arriving during a kernel operation is deferred until the
+worker joins, and that a receipt carried into an assistant-owned document
+load leaves metadata dirty until saved. This external MCP-authored showcase
+has no reported provider usage, so its token badge is N/A.
+
+Evidence and per-part DXF/STEP files are under `out/kite-showcase/`. The
+orientation gizmo, formed car, orthographic blank layout and straight-stock
+views were inspected from native OpenGL captures. These are geometric/showcase
+checks, not crashworthiness, forming-trajectory or fabrication qualification.
+
+## 2026-10-07: engineering workspace and exchange
+
+The next local extension adds version-16 modules and 38 MCP tools. Native
+MSVC/OCCT CTest passed **30/30**; the separate core-only build passed **19/19**.
+The actual Studio engineering-dialog, render/loading, sketch, native and
+assistant UI self-tests each exited 0. Live Studio/MCP edit, mesh, persistence,
+undo, New and disconnect integration also passed.
+
+The integrated [vehicle example](../examples/vehicle-engineering.ark) evaluated
+18 frame members, two lofted/thickened body panels, a controller PCB and a routed
+cable. Frame tests cover round/rectangular bent members, exact cope trimming,
+named semantic datums, save/load, rollback, density changes and world-space
+assembly COM. Electronics tests cover DRC failures/connectivity, fabrication
+preview syntax, exact cable sweep/obstacle checks and transaction rollback.
+
+OBJ and ASCII FBX were read independently by a pinned ufbx build: 47,574
+vertices, 78,534 triangles and normals. FBX unit scale was 0.001 metres. IGES
+was independently read by OCCT with bounds/area checks; STL/STEP regressions
+remain covered. This does not establish appearance, hierarchy or parametric
+history preservation in triangle exports.
+
+Three isolated recomputations of the same vehicle yielded median **1788.28 ms**
+with `ARK_NATIVE_THREADS=1`, and **1295.96 ms** with eight threads (about 1.38x).
+Frame volume (7,449,220.792 mm3) and mass (58,476.423 g) were unchanged in all
+six runs. This is one measured workload, not a universal speedup claim.
+The RTX 4080 SUPER CUDA transform test also executed with zero output error;
+complete transfer-inclusive timings favored CPU in the recorded 2M-vertex run,
+so the adaptive policy selected CPU. GPU display rendering remains active.
+
+Screenshots at [1600 px](vehicle-engineering-studio.png) and a separate 1180 px
+capture were inspected. The loading self-test checks that paint/resize and
+queued tool messages are pumped while one worker has exclusive session access;
+queued tools execute after the operation, without concurrent document mutation.
+
+![Kernel loading feedback](kernel-loading.png)
+
+Evidence is in `out/engineering-upgrade/` (local, ignored): CTest logs, UI
+captures, native/GPU measurements, module reports and exported files.
+`open-document-before-upgrade.ark` preserves the user's previously open
+revision-2 airplane document. The runtime code, modeling modules and export
+implementations are C++; PowerShell orchestrated local validation only.
+
+## 2026-10-07: materials, renderer, physics and agent geometry
+
+MSVC Release / OCCT 8.0.1, based on `main` at
+`a933eb0cffe9190b3cf5c1d653247e7303cd7c35` plus this working-tree change.
+
+| Check | Result |
+| --- | --- |
+| Default `scripts/build.ps1 -Test` | 27/27 CTest suites passed |
+| Separate `ARK_WITH_OCCT=OFF` build | 17/17 suites passed |
+| Native render UI self-test | Exit 0; texture, roughness, four distinct AO modes, transparency and physical-properties card |
+| Native sketch, native modeling and assistant UI tests | Each exit 0 |
+| Live Studio + MCP integration | Passed edit, mesh, save, undo, New and disconnect checks |
+| Material persistence and atomicity | Version 15 round trip, legacy loading, invalid values, missing references and rollback passed |
+| Appearance-only edits | Preserve the exact B-rep cache; `geometry_recomputed:false` |
+| Physical quantities | Exact volume/density, explicit gravity, world COM with rotated parts and pattern copies passed |
+| Agent geometry | Plane-split side/volume/reference tests and copy-only mirror tests passed |
+| Assistant usage | Multi-round totals, cached/reasoning subsets, partial/missing/malformed and incomplete-response cases passed using offline transport |
+
+The assistant UI also verifies that creating a new document during a modeling
+request retains the current run's usage: three injected responses total exactly
+375 tokens in the document counter. This check was rerun after the final UI fix.
+
+The actual OpenGL AURORA capture is
+[aurora-plane-studio.png](aurora-plane-studio.png). The render test compares
+geometry-region pixels, excluding UI labels, and checks that Off, Contact,
+Ambient and Horizon modes differ. It also checks an exact 10 mm cube at
+2.7 g/cm3: 2.7 g, local COM (5,5,5) mm and weight at 9.80665 m/s2.
+Native CAD geometry remains independent of display appearance. No paid LLM
+request, aerodynamic analysis, structural simulation or Fusion parity test was
+performed.
+
+Local build/test logs and UI captures are in `out/studio-upgrade/`; that folder
+is not versioned. The default executables were rebuilt in
+`out/native-release/Release`. The previously open document was preserved as
+`out/studio-upgrade/pre-upgrade-live.ark` before restarting Studio.
+
+Reproduce the rendering check after building:
+
+```powershell
+.\out\native-release\Release\ark-studio.exe --self-test-render-ui --shot out/render-check.png
+```
+
 Local validation on 2026-09-22, Windows, GNU C++ 16.1.0 / MinGW-w64, CMake Release build.
 
 | Check | Result |

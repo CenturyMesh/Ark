@@ -1,4 +1,4 @@
-# ARK file formats, versions 1 through 12
+# ARK file formats, versions 1 through 18
 
 ## `.ark`
 
@@ -80,7 +80,7 @@ geometric proof, original openings, and exact formed/flat B-rep payloads. The
 display mesh and native evaluation cache are derived and are not feature
 history edits. The Formed/Flat UI selection does not change the saved geometry.
 
-The reader accepts versions 1 through 12. Older ARK executables reject a newer
+The current reader accepts versions 1 through 18. Older ARK executables reject a newer
 document rather than discarding its native data. Save/load re-evaluates authored
 native features with the installed OCCT 8 worker; source packages remain
 portable when the original STEP is absent. If the source STEP still exists
@@ -211,3 +211,56 @@ same entity and corner index cannot appear twice. A rectangular tube exact
 solid is a hollow sweep of a rectangular section. The centerline starts along
 +X, width lies along the section normal, and height lies along the binormal.
 The display mesh remains the tessellation of that centerline.
+
+## Version 15: materials and plane splitting
+
+Materials, feature appearance overrides, `native_solid` `split_plane`, and a
+mirror using `p.copy_only` require version 15. Older documents retain their
+previous version when none of these are present.
+
+The document `materials` array stores each material's name, nominal density
+in g/cm3 and appearance. Features optionally store `material` and `appearance`.
+Appearance includes sRGB `base_color`, `metallic`, `roughness`, `opacity`,
+`texture_path`, and `texture_scale`. Image pixels remain external files; moving
+a document does not copy its textures. These display properties do not change
+the B-rep. An explicit feature `p.density` overrides material density.
+
+Plane splits store `native.keep` (`positive`, `negative` or `both`) and their
+plane selector alongside the input feature. Copy-only mirrors store
+`p.copy_only="1"`. Both operations retain editable expressions and exact
+native geometry. See [surfacing](SURFACING.md) and
+[materials and rendering](RENDER_MATERIALS.md).
+
+## Version 16: engineering modules
+
+Features `construction_frame`, `pcb` and `cable_route` preserve their authored
+program in `native`. Numeric fields can retain expression strings. Frame
+programs store named profiles, nodes, members and supported joints; PCB programs
+store their layout/net data and design rules; cable programs store endpoints,
+waypoints, bend parameters and declared obstacles. Evaluated B-reps, display
+meshes and reports are recomputed rather than serialized. A lower-version file
+containing these feature types is rejected.
+
+Plane supports can be authored with a unique producer feature name through
+`doc_apply`; saved supports store its numeric ID. The UI's module tab, loading
+overlay and camera controls do not change file version.
+
+## Version 17: drawing usage receipts and sheet openings
+
+The optional `usage` object stores receipt IDs, sources, provenance, model,
+UTC timestamps and provider-reported counts. Its serial changes independently
+of geometry revision. Geometry undo/redo preserves the current ledger; save/load
+preserves receipts without double counting. External token coverage is always
+explicitly unknown. An empty ledger is omitted from the file.
+
+Authored sheet `slot` and `window` openings also select version 17. A downgraded
+file containing them or a usage ledger is rejected. Circle/polygon patterns
+expand to normal named opening records and do not require a newer version alone.
+
+## Version 18: suspension hardpoints
+
+The `suspension` feature preserves its authored hardpoint, wheel, spring and
+travel-limit expressions in `native`. Its nominal mesh and solved poses are
+recomputed. Interactive motion and Spotlight visibility are display-only and do
+not alter the saved geometry. Older readers reject version 18; current readers
+retain compatibility with versions 1 through 17. See [suspension](SUSPENSION.md).

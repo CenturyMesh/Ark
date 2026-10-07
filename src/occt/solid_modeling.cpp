@@ -22,6 +22,7 @@
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCone.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
+#include <BRepPrimAPI_MakeHalfSpace.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <BRepPrimAPI_MakeSphere.hxx>
 #include <BRepPrimAPI_MakeTorus.hxx>
@@ -59,6 +60,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace ark::occt {
@@ -473,6 +475,21 @@ gp_Ax2 mirrorPlane(const V& request,const std::vector<Ref>& refs){
 }
 TopoDS_Shape patterned(const TopoDS_Shape& input,const V& request,const std::string& op,std::vector<Ref>& refs){
     const bool mirror=op=="mirror";
+    if(mirror&&bit(request,"copy_only",false)){
+        if(bit(request,"fuse",false))throw std::runtime_error("Mirror copy_only cannot fuse with the omitted source");
+        gp_Trsf reflection;reflection.SetMirror(mirrorPlane(request,refs));
+        for(auto& ref:refs)for(const char* key:{"axis","tangent"})
+            if(const V* previous=ref.seed.find(key)){
+                auto value=point(*previous,"reference direction");
+                gp_Vec direction(value.X(),value.Y(),value.Z());
+                direction.Transform(reflection);
+                ref.seed.set(key,vec(direction.XYZ()));
+            }
+        BRepBuilderAPI_Transform algorithm(input,reflection,true);
+        if(!algorithm.IsDone())throw std::runtime_error("Native mirror copy failed");
+        refs=propagated(refs,algorithm.Shape(),algorithm);
+        return algorithm.Shape();
+    }
     const int count=mirror?2:whole(request,"count",2,64);
     const bool fuseCopies=bit(request,"fuse",false);
     auto copyAt=[&](int index){
@@ -491,6 +508,52 @@ TopoDS_Shape patterned(const TopoDS_Shape& input,const V& request,const std::str
         refs=propagated(refs,algorithm.Shape(),algorithm);accumulated=algorithm.Shape();
     }
     return accumulated;
+}
+TopoDS_Shape splitOnPlane(const TopoDS_Shape& input,const V& request,std::vector<Ref>& refs){
+    const std::string keep=word(request,"keep");
+    if(keep!="positive"&&keep!="negative"&&keep!="both")
+        throw std::runtime_error("Split keep must be positive, negative, or both");
+    const int selectors=static_cast<int>(request.find("plane")!=nullptr)
+                       +static_cast<int>(request.find("face")!=nullptr)
+                       +static_cast<int>(request.find("normal")!=nullptr);
+    if(selectors!=1)throw std::runtime_error("Split needs exactly one plane, face, or normal selector");
+    if(request.find("origin")&&!request.find("normal"))
+        throw std::runtime_error("Split origin requires a normal selector");
+    const gp_Ax2 axis=mirrorPlane(request,refs);
+    const gp_Vec normal(axis.Direction());
+    BRepBuilderAPI_MakeFace face{gp_Pln(axis)};
+    if(!face.IsDone())throw std::runtime_error("Split plane face failed");
+    const gp_Pnt origin=axis.Location();
+    auto half=[&](double sign){
+        BRepPrimAPI_MakeHalfSpace space(face.Face(),origin.Translated(normal*sign));
+        BRepAlgoAPI_Common algorithm(input,space.Solid());
+        algorithm.Build();
+        if(!algorithm.IsDone()||algorithm.HasErrors())throw std::runtime_error("Native plane split failed");
+        TopoDS_Shape part=algorithm.Shape();
+        const double volume=properties(part);
+        if(shapes(part,TopAbs_SOLID).empty()||!std::isfinite(volume)||volume<=1e-8)
+            throw std::runtime_error("Split plane does not cross the input solid");
+        return std::pair<TopoDS_Shape,std::vector<Ref>>(part,propagated(refs,part,algorithm));
+    };
+    // Evaluate both halves even when only one is requested, so a tangent or
+    // exterior plane cannot silently pass through as a no-op.
+    auto positive=half(1.0),negative=half(-1.0);
+    const double original=properties(input);
+    const double sum=properties(positive.first)+properties(negative.first);
+    if(std::abs(sum-original)>std::max(1e-5,original*1e-7))
+        throw std::runtime_error("Split halves do not conserve exact volume");
+    if(keep=="positive"){refs=std::move(positive.second);return positive.first;}
+    if(keep=="negative"){refs=std::move(negative.second);return negative.first;}
+    TopoDS_Shape both=compound({positive.first,negative.first});
+    for(size_t i=0;i<refs.size();++i){
+        const auto& a=positive.second[i];const auto& b=negative.second[i];
+        if(a.status=="split"||b.status=="split"||(selectable(a.status)&&selectable(b.status))){
+            refs[i].shape.Nullify();refs[i].status="split";
+        }else if(selectable(a.status))refs[i]=a;
+        else if(selectable(b.status))refs[i]=b;
+        else{refs[i].shape.Nullify();refs[i].status=(a.status=="split"||b.status=="split")?"split":"deleted";}
+    }
+    return both;
 }
 V finishBodies(const TopoDS_Shape& shape,const std::vector<Ref>& refs){
     auto solids=shapes(shape,TopAbs_SOLID);if(solids.empty()||solids.size()>64)throw std::runtime_error("Pattern needs 1..64 solids");
@@ -548,6 +611,8 @@ V modelSolidNative(const V& request){
             algorithm.Build();if(!algorithm.IsDone())throw std::runtime_error("Native draft failed");result=algorithm.Shape();refs=propagated(refs,result,algorithm);
         }else if(op=="linear_pattern"||op=="circular_pattern"||op=="mirror"){
             result=patterned(input,request,op,refs);many=true;
+        }else if(op=="split_plane"){
+            result=splitOnPlane(input,request,refs);many=true;
         }else if(op=="shell"){
             requireOneSolid(input,"Shell");
             double thickness=scalar(request,"thickness");if(!(std::abs(thickness)>1e-6))throw std::runtime_error("Shell thickness must be nonzero");

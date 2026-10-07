@@ -25,6 +25,8 @@ void cpu(const std::vector<f32>& in,std::vector<f32>& out,const Mat4& m){
 struct Compute {
     std::mutex mutex;bool attempted=false,available=false;std::string device,reason="Not initialized",last="CPU";
     double initMs=0,lastMs=0;size_t threshold=1048576;
+    bool calibrated[3]={false,false,false},preferGpu[3]={false,false,false};
+    double autoCpuMs[3]={0,0,0},autoGpuMs[3]={0,0,0};
 #ifdef ARK_CUDA_RUNTIME
     HMODULE driver=nullptr,rtc=nullptr;CUcontext context=nullptr;CUmodule module=nullptr;CUfunction kernel=nullptr;
     CUdeviceptr input=0,output=0,matrix=0;size_t capacity=0;
@@ -112,7 +114,28 @@ bool transformPacked(const std::vector<f32>& source,std::vector<f32>& output,con
     if(mode!=ComputeMode::CPU&&(mode==ComputeMode::GPU||source.size()/3>=c.threshold))c.init();
     auto begin=Clock::now();bool used=false;
 #ifdef ARK_CUDA_RUNTIME
-    if(c.available&&mode!=ComputeMode::CPU&&!source.empty()&&(mode==ComputeMode::GPU||source.size()/3>=c.threshold)){
+    const size_t vertices=source.size()/3;const int bucket=vertices<=2097152?0:vertices<=4194304?1:2;
+    if(c.available&&mode==ComputeMode::Auto&&vertices>=c.threshold&&!c.calibrated[bucket]){
+        // Measure complete transfers on the actual device/size class, not just
+        // kernel time. Keep the CPU result as a parity control and fallback.
+        std::vector<f32> reference,trial;cpu(source,reference,m);
+        bool gpuOkay=c.gpu(source,trial,m);
+        if(gpuOkay){
+            for(size_t i=0;i<trial.size();++i)if(trial[i]!=reference[i]){gpuOkay=false;break;}
+        }
+        if(gpuOkay){
+            std::vector<double> cpuTimes,gpuTimes;
+            for(int sample=0;sample<3;++sample){
+                auto start=Clock::now();cpu(source,reference,m);cpuTimes.push_back(ms(start));
+                start=Clock::now();if(!c.gpu(source,trial,m)){gpuOkay=false;break;}gpuTimes.push_back(ms(start));
+            }
+            if(gpuOkay){std::sort(cpuTimes.begin(),cpuTimes.end());std::sort(gpuTimes.begin(),gpuTimes.end());c.autoCpuMs[bucket]=cpuTimes[1];c.autoGpuMs[bucket]=gpuTimes[1];}
+        }
+        c.calibrated[bucket]=true;c.preferGpu[bucket]=gpuOkay&&c.autoGpuMs[bucket]<c.autoCpuMs[bucket]*.95;
+        used=c.preferGpu[bucket];output=used?std::move(trial):std::move(reference);
+        c.last=used?"CUDA":"CPU";c.lastMs=ms(begin);return true;
+    }
+    if(c.available&&mode!=ComputeMode::CPU&&!source.empty()&&(mode==ComputeMode::GPU||(vertices>=c.threshold&&c.preferGpu[bucket]))){
         used=c.gpu(source,output,m);if(!used){c.available=false;c.reason="CUDA operation failed; CPU fallback enabled";}
     }
 #endif
@@ -124,7 +147,9 @@ arkjson::Value computeInfo(){
     auto& c=state();std::lock_guard<std::mutex> lock(c.mutex);c.init();using V=arkjson::Value;V r=V::makeObj();
     r.set("available",V::makeBool(c.available));r.set("device",V::makeStr(c.device));r.set("reason",V::makeStr(c.reason));
     r.set("last_backend",V::makeStr(c.last));r.set("last_ms",V::makeNum(c.lastMs));r.set("initialization_ms",V::makeNum(c.initMs));
-    r.set("auto_threshold_vertices",V::makeNum(c.threshold));r.set("operation",V::makeStr("packed mesh positions / f64 matrix arithmetic / f32 output"));return r;
+    r.set("auto_threshold_vertices",V::makeNum(c.threshold));r.set("operation",V::makeStr("packed mesh positions / f64 matrix arithmetic / f32 output"));
+    r.set("auto_policy",V::makeStr("Calibrate complete CPU/GPU transfers per size bucket; GPU needs exact parity and at least 5 percent measured benefit"));
+    V profiles=V::makeArr();for(int i=0;i<3;++i){V row=V::makeObj();row.set("bucket",V::makeNum(i));row.set("calibrated",V::makeBool(c.calibrated[i]));if(c.calibrated[i]){row.set("selected",V::makeStr(c.preferGpu[i]?"CUDA":"CPU"));row.set("cpu_median_ms",V::makeNum(c.autoCpuMs[i]));row.set("gpu_median_ms",V::makeNum(c.autoGpuMs[i]));}profiles.arr.push_back(std::move(row));}r.set("auto_profiles",std::move(profiles));return r;
 }
 arkjson::Value benchmarkCompute(size_t count,int repeats){
     using V=arkjson::Value;V r=computeInfo();if(count<1||count>4000000||repeats<1||repeats>20){r.set("error",V::makeStr("Invalid benchmark bounds"));return r;}
@@ -136,7 +161,9 @@ arkjson::Value benchmarkCompute(size_t count,int repeats){
     for(int i=0;i<repeats;++i){auto t=Clock::now();transformPacked(source,reference,matrix,ComputeMode::CPU);cpuTimes.push_back(ms(t));
         if(gpu){t=Clock::now();gpu=transformPacked(source,output,matrix,ComputeMode::GPU);if(gpu)gpuTimes.push_back(ms(t));}}
     std::sort(cpuTimes.begin(),cpuTimes.end());std::sort(gpuTimes.begin(),gpuTimes.end());
-    r=computeInfo();r.set("vertices",V::makeNum(count));r.set("cpu_median_ms",V::makeNum(cpuTimes[cpuTimes.size()/2]));
+    transformPacked(source,output,matrix,ComputeMode::Auto);f64 autoError=0;
+    for(size_t i=0;i<output.size();++i)autoError=std::max(autoError,std::fabs((f64)output[i]-reference[i]));
+    r=computeInfo();r.set("auto_max_abs_error_mm",V::makeNum(autoError));r.set("vertices",V::makeNum(count));r.set("cpu_median_ms",V::makeNum(cpuTimes[cpuTimes.size()/2]));
     r.set("gpu_executed",V::makeBool(gpu));r.set("includes_transfer_and_sync",V::makeBool(true));
     if(gpu){double gpuMs=gpuTimes[gpuTimes.size()/2];r.set("gpu_median_ms",V::makeNum(gpuMs));r.set("speedup",V::makeNum(cpuTimes[cpuTimes.size()/2]/gpuMs));r.set("max_abs_error_mm",V::makeNum(error));}
     return r;

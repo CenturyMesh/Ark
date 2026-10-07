@@ -55,7 +55,9 @@ int main(int argc,char** argv){try{
         check(history->arr[3].find("output")->str==R"({"revision":42})","actual tool result propagated");return finalResponse();
     });
     check(calls==1&&transports==2&&result.rounds==2,"bounded two round loop");check(result.text=="Done.","final text");
-    check(result.conversation.arr.size()==5,"retain complete history");check(events.size()==5,"status/tool/text events");
+    check(result.conversation.arr.size()==5,"retain complete history");check(events.size()==7,"status/tool/text and usage events");
+    check(result.usage.reportedResponses==0&&result.usage.missingResponses==2,"missing usage is explicitly unknown");
+    check(ark::assistantUsageLabel(result.usage).find("unavailable")!=std::string::npos,"unknown usage label");
     auto runWith=[&](V response){return ark::runAssistant(config,V::makeStr("test"),tools,[&](auto&,auto&){++calls;return V{};},{},nullptr,[&](auto&,auto&,auto*){return response;});};
     calls=0;fails([&]{runWith(toolResponse("call_a","shell_execute"));},"unknown tool rejected");check(calls==0,"unknown tool not executed");
     auto mixed=toolResponse();V outputs=*mixed.find("output");auto bad=toolResponse("call_bad","shell_execute");outputs.arr.push_back(bad.find("output")->arr.back());mixed.set("output",outputs);
@@ -90,5 +92,42 @@ int main(int argc,char** argv){try{
     fails([&]{ark::runAssistant(invalid,V::makeStr("test"),tools,{}, {},nullptr,[&](auto&,auto&,auto*){auto huge=finalResponse();huge.set("padding",V::makeStr(std::string(1024,'x')));return huge;});},"response byte bound");
     invalid=config;invalid.maxConversationBytes=1024;
     fails([&]{ark::assistantRequest(invalid,conversation,tools);},"conversation byte bound");
+    // Usage across tool rounds includes reasoning and cache only as subsets.
+    transports=0;std::vector<ark::AssistantUsage> snapshots;
+    auto counted=ark::runAssistant(config,V::makeStr("count"),tools,[](auto&,auto&){return V::makeObj();},
+        [&](const auto& e){if(e.kind==ark::AssistantEvent::Usage)snapshots.push_back(e.usage);},nullptr,
+        [&](auto&,auto&,auto*){
+            V response=++transports==1?toolResponse():finalResponse();
+            response.set("usage",json(transports==1?
+                R"({"input_tokens":100,"output_tokens":40,"total_tokens":140,"input_tokens_details":{"cached_tokens":80},"output_tokens_details":{"reasoning_tokens":30}})":
+                R"({"input_tokens":150,"output_tokens":20,"total_tokens":170,"input_tokens_details":{"cached_tokens":100},"output_tokens_details":{"reasoning_tokens":10}})"));
+            return response;
+        });
+    check(counted.usage.totalTokens==310&&counted.usage.inputTokens==250&&counted.usage.outputTokens==60,"sum provider usage over tool rounds");
+    check(counted.usage.cachedInputTokens==180&&counted.usage.reasoningTokens==40,"cache and reasoning subsets");
+    check(counted.usage.reportedResponses==2&&!counted.usage.missingResponses,"complete usage evidence");
+    check(snapshots.size()==2&&snapshots[0].totalTokens==140&&snapshots[1].totalTokens==310,"usage events are cumulative snapshots");
+    check(ark::assistantUsageLabel(counted.usage).find("partial")==std::string::npos,"complete label");
+    ark::AssistantUsage session;ark::accumulateAssistantUsage(session,counted.usage);
+    ark::accumulateAssistantUsage(session,result.usage);
+    check(session.totalTokens==310&&session.missingResponses==2&&ark::assistantUsageLabel(session).find("partial")!=std::string::npos,"mixed provider support yields partial lower bound");
+    for(auto malformed:{R"({"input_tokens":-1,"output_tokens":2,"total_tokens":1})",
+                        R"({"input_tokens":1.5,"output_tokens":2,"total_tokens":3.5})",
+                        R"({"input_tokens":1,"output_tokens":2,"total_tokens":4})",
+                        R"({"input_tokens":1,"output_tokens":2,"total_tokens":3,"input_tokens_details":{"cached_tokens":5}})",
+                        R"({"input_tokens":1,"output_tokens":2,"total_tokens":3,"output_tokens_details":{"reasoning_tokens":3}})",
+                        R"({"input_tokens":1e30,"output_tokens":2,"total_tokens":1e30})"}){
+        auto response=finalResponse();response.set("usage",json(malformed));auto r=runWith(response);
+        check(r.text=="Done."&&r.usage.missingResponses==1&&!r.usage.reportedResponses&&!r.usage.totalTokens,"malformed usage does not invent tokens or block modeling");
+    }
+    auto zero=finalResponse();zero.set("usage",json(R"({"input_tokens":0,"output_tokens":0,"total_tokens":0})"));
+    check(runWith(zero).usage.reportedResponses==1,"reported zero differs from absent usage");
+    auto incompleteCounted=finalResponse();incompleteCounted.set("status",V::makeStr("incomplete"));
+    incompleteCounted.set("usage",json(R"({"input_tokens":10,"output_tokens":5,"total_tokens":15})"));
+    ark::AssistantUsage partial;
+    fails([&]{ark::runAssistant(config,V::makeStr("count"),tools,{},
+        [&](const auto& e){if(e.kind==ark::AssistantEvent::Usage)partial=e.usage;},nullptr,
+        [&](auto&,auto&,auto*){return incompleteCounted;});},"incomplete response remains rejected");
+    check(partial.totalTokens==15,"usage from incomplete response survives via event");
     std::cout<<checks<<" assistant checks passed\n";return 0;
 }catch(const std::exception& e){std::cerr<<"assistant test failed: "<<e.what()<<'\n';return 1;}}

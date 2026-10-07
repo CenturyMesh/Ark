@@ -3,9 +3,15 @@
 #include "ark/occt_modeling.hpp"
 #include "ark/occt_sheet.hpp"
 #include "ark/occt_solid.hpp"
+#include "ark/occt_frame.hpp"
+#include "ark/occt_electronics.hpp"
 #include <Standard_Failure.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <TopoDS.hxx>
+#include <IGESControl_Controller.hxx>
+#include <IGESControl_Writer.hxx>
+#include <IGESControl_Reader.hxx>
+#include <IFSelect_ReturnStatus.hxx>
 #include <iostream>
 #include <stdexcept>
 using namespace ark::occt;
@@ -22,12 +28,15 @@ int runWorker(const fs::path& requestPath,const fs::path& resultPath){
         else if(op=="model")result=modelSurfaceNative(field("request"));
         else if(op=="model_sheet")result=modelSheetNative(field("request"));
         else if(op=="model_solid")result=modelSolidNative(field("request"));
+        else if(op=="model_frame")result=frameModelNative(field("request"));
+        else if(op=="model_electronics")result=modelElectronicsNative(field("request"));
         else if(op=="reference_frame")result=referenceFrameNative(field("request"));
         else if(op=="clearance")result=clearanceNative(field("request"));
         else if(op=="point_distance")result=pointDistanceNative(field("request"));
         else if(op=="solid_centroid")result=solidCentroidNative(field("request"));
         else if(op=="import_sheet")result=importSheetNative(request);
         else if(op=="export_sheet")result=exportSheetNative(request);
+        else if(op=="export_sheet_flat_dxf")result=exportSheetFlatDxfNative(request);
         else if(op=="step_inspect"){
             auto path=fs::u8path(text("path"));auto bytes=readFile(path);auto digest=sha256(bytes);auto shape=readStep(path);result=shapeReport(shape,false);result.set("source_sha256",V::makeStr(digest));result.set("units",V::makeStr("mm"));V bodies=V::makeArr();
             bool details=false;if(auto p=request.find("faces")){if(p->t!=V::Bool)throw std::runtime_error("faces must be boolean");details=p->b;}
@@ -38,7 +47,26 @@ int runWorker(const fs::path& requestPath,const fs::path& resultPath){
                 }record.set("surface_counts",counts);if(details)record.set("face_inventory",faces);bodies.arr.push_back(record);
             }result.set("bodies",bodies);if(sha256(readFile(path))!=digest)throw std::runtime_error("STEP changed during inspection");
         }
-        else if(op=="kernel_info"){result=V::makeObj();result.set("kernel",V::makeStr("OCCT"));result.set("version",V::makeStr(kernelVersion()));result.set("language",V::makeStr("C++"));result.set("python_required",V::makeBool(false));}
+        else if(op=="kernel_info"){result=V::makeObj();result.set("kernel",V::makeStr("OCCT"));result.set("version",V::makeStr(kernelVersion()));result.set("language",V::makeStr("C++"));result.set("python_required",V::makeBool(false));result.set("native_threads",V::makeNum(nativeThreadBudget()));result.set("parallel_tessellation",V::makeBool(nativeThreadBudget()>1));result.set("exact_geometry_backend",V::makeStr("CPU OCCT"));}
+        else if(op=="export_iges"){
+            auto shape=readBrep(text("brep_base64"));auto path=fs::u8path(text("path")),pending=path;pending+=".pending.igs";
+            if(!path.parent_path().empty())fs::create_directories(path.parent_path());
+            IGESControl_Controller::Init();IGESControl_Writer writer("MM",1);
+            if(!writer.AddShape(shape))throw std::runtime_error("IGES cannot represent this B-rep");
+            writer.ComputeModel();auto bytes=pending.u8string();std::string name(bytes.begin(),bytes.end());
+            if(!writer.Write(name.c_str()))throw std::runtime_error("IGES write failed");
+            IGESControl_Reader reader;
+            if(reader.ReadFile(name.c_str())!=IFSelect_RetDone||!reader.TransferRoots())throw std::runtime_error("IGES readback failed");
+            auto returned=reader.OneShape();result=shapeReport(returned,false);
+            auto before=bounds(shape),after=bounds(returned);double delta=0;
+            for(size_t i=0;i<before.size();++i)delta=std::max(delta,std::abs(before[i]-after[i]));
+            const double areaError=std::abs(properties(shape,'a')-properties(returned,'a'));
+            if(delta>1e-4||areaError>std::max(1e-4,properties(shape,'a')*1e-6))throw std::runtime_error("IGES readback changed surface bounds or area");
+            result.set("iges_roundtrip_bounds_error_mm",V::makeNum(delta));result.set("iges_roundtrip_area_error_mm2",V::makeNum(areaError));
+            result.set("units",V::makeStr("mm"));result.set("authority",V::makeStr("exact_brep_exchange"));
+            result.set("solid_topology_preserved",V::makeBool(shapes(shape,TopAbs_SOLID).size()==shapes(returned,TopAbs_SOLID).size()));
+            result.set("path",V::makeStr(text("path")));replaceFile(pending,path);result.set("iges_sha256",V::makeStr(sha256(readFile(path))));
+        }
         else if(op=="export_brep"){
             auto shape=readBrep(text("brep_base64"));auto path=fs::u8path(text("path")),pending=path;pending+=".pending.step";writeStep(shape,pending);auto returned=readStep(pending);
             bool solid=!shapes(shape,TopAbs_SOLID).empty();double error=solid?symmetricDifference(shape,returned):0,tol=std::max(1e-6,std::abs(properties(shape))*1e-8);

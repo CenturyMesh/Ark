@@ -244,7 +244,7 @@ void testSnapshotAndContract() {
     const Value solids = accepted(session.call("agent_onboard", parse(R"({"topic":"solids"})")));
     check(solids.dump().find("version 10") != std::string::npos, "solids onboarding names version 10");
     check(solids.find("version")->str == "0.9.0", "product version stays 0.9.0");
-    check(ark::AgentSession::tools().arr.size() == 34, "tool count stays 34");
+    check(ark::AgentSession::tools().arr.size() == 44, "engineering module and exchange tools are discoverable");
     for (const auto& tool : ark::AgentSession::tools().arr)
         check(tool.find("inputSchema") && tool.find("inputSchema")->t == Value::Obj, "every tool schema parses");
 }
@@ -639,12 +639,33 @@ void testCurvesAndQueries() {
     ]})")));
     const Value* bridge = bodyData(span.document, 2)->find("report");
     const Value* samples = bodyData(span.document, 2)->find("mesh")->find("edges");
-    check(samples && !samples->arr.empty() && samples->arr[0].arr.size() >= 21, "the bridge edge is sampled");
+    if (!samples || samples->arr.empty()) throw std::runtime_error("the bridge has no sampled edge");
+    if (samples->arr[0].arr.size() < 9 || samples->arr[0].arr.size() % 3)
+        throw std::runtime_error("the bridge sample has " + std::to_string(samples->arr[0].arr.size()/3) + " points");
     double firstHalf = 0;
     const auto& poly = samples->arr[0].arr;
-    const size_t mid = poly.size() / 6;
-    for (size_t i = 1; i <= mid; ++i) firstHalf = std::max(firstHalf, poly[i * 3].num - poly[0].num);
+    const size_t pointCount = poly.size() / 3, mid = pointCount / 2;
+    double secondHalf = 0, sampledLength = 0;
+    for (size_t i = 0; i < pointCount; ++i) {
+        const double x = poly[i * 3].num, y = poly[i * 3 + 1].num, z = poly[i * 3 + 2].num;
+        check(std::isfinite(x) && std::isfinite(y) && std::isfinite(z) &&
+              std::abs(y) < 1e-6 && z >= -1e-6 && z <= 10 + 1e-6,
+              "the bridge edge stays finite on its authored XZ plane");
+        if (i <= mid) firstHalf = std::max(firstHalf, x - poly[0].num);
+        if (i >= mid) secondHalf = std::min(secondHalf, x - poly[0].num);
+        if (i) {
+            const double dx = x - poly[(i - 1) * 3].num;
+            const double dz = z - poly[(i - 1) * 3 + 2].num;
+            sampledLength += std::hypot(dx, dz);
+        }
+    }
+    check(std::abs(poly[0].num) < 1e-6 && std::abs(poly[2].num) < 1e-6 &&
+          std::abs(poly[poly.size() - 3].num) < 1e-6 && std::abs(poly.back().num - 10) < 1e-6,
+          "the bridge samples retain both exact endpoints");
     check(firstHalf > 0.5, "the bridge leaves along +X");
+    check(secondHalf < -0.5, "the bridge arrives from the authored +X tangent");
+    check(sampledLength > 10.1 && sampledLength <= bridge->find("length_mm")->num + 1e-4,
+          "the adaptive edge samples capture the curved bridge without exceeding its exact length");
     check(bridge->find("length_mm")->num > 10.0, "the bridge is longer than the edge gap");
     check(bridge->find("continuity")->num == 1.0 && bridge->find("curvature_matched") && !bridge->find("curvature_matched")->b, "continuity 1 is tangent only");
 

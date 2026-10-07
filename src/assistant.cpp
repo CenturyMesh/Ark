@@ -1,6 +1,8 @@
 #include "ark/assistant.hpp"
+#include "ark/chatgpt_auth.hpp"
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <set>
 #include <stdexcept>
@@ -30,6 +32,33 @@ bool localHttp(const std::string& endpoint){
 }
 V errorResult(const std::string& message){V r=V::makeObj();r.set("isError",V::makeBool(true));r.set("error",V::makeStr(message));return r;}
 
+bool tokenCount(const V& usage,const char* key,std::uint64_t& value){
+    const auto* n=usage.find(key);
+    // JSON stores doubles. Reject values beyond exact integer representation.
+    if(!n||n->t!=V::Num||!std::isfinite(n->num)||n->num<0||
+       n->num>9007199254740991.0||std::floor(n->num)!=n->num)return false;
+    value=static_cast<std::uint64_t>(n->num);return true;
+}
+AssistantUsage responseUsage(const V& response){
+    AssistantUsage u;const V* source=response.find("usage");
+    auto missing=[](){AssistantUsage m;m.missingResponses=1;return m;};
+    if(!source||source->t!=V::Obj||
+       !tokenCount(*source,"input_tokens",u.inputTokens)||
+       !tokenCount(*source,"output_tokens",u.outputTokens)||
+       !tokenCount(*source,"total_tokens",u.totalTokens)||
+       u.totalTokens!=u.inputTokens+u.outputTokens)return missing();
+    if(const auto* details=source->find("input_tokens_details")){
+        if(!details->isNull()&&(details->t!=V::Obj||
+           (details->find("cached_tokens")&&!tokenCount(*details,"cached_tokens",u.cachedInputTokens))))return missing();
+    }
+    if(const auto* details=source->find("output_tokens_details")){
+        if(!details->isNull()&&(details->t!=V::Obj||
+           (details->find("reasoning_tokens")&&!tokenCount(*details,"reasoning_tokens",u.reasoningTokens))))return missing();
+    }
+    if(u.cachedInputTokens>u.inputTokens||u.reasoningTokens>u.outputTokens)return missing();
+    u.reportedResponses=1;return u;
+}
+
 #ifdef _WIN32
 std::wstring wide(const std::string& s){
     int n=MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,s.data(),(int)s.size(),nullptr,0);
@@ -48,6 +77,7 @@ struct Secret {
 };
 V nativeTransport(const AssistantConfig& config,const V& request,const std::atomic_bool* cancel){
     validateAssistantConfig(config);cancelled(cancel);
+    if(config.authMode==AssistantAuthMode::ChatGptPlan)return chatGptResponses(request,cancel);
     auto endpoint=wide(config.endpoint);URL_COMPONENTS url{};url.dwStructSize=sizeof(url);
     url.dwHostNameLength=url.dwUrlPathLength=url.dwExtraInfoLength=url.dwUserNameLength=url.dwPasswordLength=(DWORD)-1;
     require(WinHttpCrackUrl(endpoint.c_str(),(DWORD)endpoint.size(),0,&url)!=FALSE,"Invalid assistant endpoint URL.");
@@ -114,6 +144,18 @@ V nativeTransport(const AssistantConfig&,const V&,const std::atomic_bool*){throw
 #endif
 }
 
+void accumulateAssistantUsage(AssistantUsage& total,const AssistantUsage& delta){
+    total.inputTokens+=delta.inputTokens;total.outputTokens+=delta.outputTokens;
+    total.totalTokens+=delta.totalTokens;total.cachedInputTokens+=delta.cachedInputTokens;
+    total.reasoningTokens+=delta.reasoningTokens;
+    total.reportedResponses+=delta.reportedResponses;total.missingResponses+=delta.missingResponses;
+}
+std::string assistantUsageLabel(const AssistantUsage& usage){
+    if(!usage.reportedResponses)return usage.missingResponses?"Tokens unavailable (provider omitted usage)":"Tokens unavailable (no assistant response)";
+    return std::string(usage.missingResponses?"Tokens >= ":"Tokens ")+std::to_string(usage.totalTokens)+
+        " | in "+std::to_string(usage.inputTokens)+" / out "+std::to_string(usage.outputTokens)+
+        (usage.missingResponses?" | partial":"");
+}
 void validateAssistantConfig(const AssistantConfig& config){
     require(!config.model.empty()&&config.model.size()<=128,"Choose an API model in Assistant settings first.");
     require(std::all_of(config.model.begin(),config.model.end(),[](unsigned char c){return c>=33&&c<127;}),"Invalid assistant model name.");
@@ -128,8 +170,10 @@ void validateAssistantConfig(const AssistantConfig& config){
     require(config.timeoutSeconds>=1&&config.timeoutSeconds<=300,"Assistant timeout must be between 1 and 300 seconds.");
     require(config.maxResponseBytes>=1024&&config.maxResponseBytes<=16*1024*1024,"Invalid assistant response size limit.");
     require(config.maxConversationBytes>=1024&&config.maxConversationBytes<=32*1024*1024,"Invalid assistant conversation size limit.");
+    if(config.authMode==AssistantAuthMode::ChatGptPlan)require(config.endpoint=="https://api.openai.com/v1/responses","ChatGPT plan use requires the official Responses endpoint.");
 }
 bool assistantKeyAvailable(const AssistantConfig& config){
+    if(config.authMode==AssistantAuthMode::ChatGptPlan)return chatGptPlanReady();
     if(config.apiKeyEnv.empty())return localHttp(config.endpoint);
     if(!identifier(config.apiKeyEnv))return false;
     const char* value=std::getenv(config.apiKeyEnv.c_str());return value&&*value;
@@ -139,6 +183,8 @@ V assistantFunctionTools(const V& tools){
     V functions=V::makeArr();std::set<std::string> names;
     for(auto& tool:tools.arr){
         auto name=field(tool,"name");auto schema=tool.find("inputSchema");
+        // Token receipts are host/provider evidence, never model-authored data.
+        if(name=="usage_record")continue;
         require(identifier(name)&&name.size()<=64&&names.insert(name).second,"Invalid or duplicate assistant tool name.");
         require(schema&&schema->t==V::Obj&&field(*schema,"type")=="object","Assistant tool requires an object inputSchema.");
         V fn=V::makeObj();fn.set("type",V::makeStr("function"));fn.set("name",V::makeStr(name));
@@ -152,7 +198,10 @@ V assistantFunctionTools(const V& tools){
 V assistantRequest(const AssistantConfig& config,const V& conversation,const V& tools){
     validateAssistantConfig(config);require(conversation.t==V::Arr,"Assistant history must be a Responses input array.");
     V request=V::makeObj();request.set("model",V::makeStr(config.model));request.set("store",V::makeBool(false));
-    request.set("parallel_tool_calls",V::makeBool(false));request.set("input",conversation);request.set("tools",assistantFunctionTools(tools));
+    request.set("parallel_tool_calls",V::makeBool(false));request.set("input",conversation);
+    V functions=assistantFunctionTools(tools);
+    if(config.authMode==AssistantAuthMode::ChatGptPlan){V namespaced=V::makeObj(),groups=V::makeArr();namespaced.set("type",V::makeStr("namespace"));namespaced.set("name",V::makeStr("ark"));namespaced.set("description",V::makeStr("ARK-Point CAD document modeling and inspection tools"));namespaced.set("tools",std::move(functions));groups.arr.push_back(std::move(namespaced));request.set("tools",std::move(groups));request.set("stream",V::makeBool(true));}
+    else request.set("tools",std::move(functions));
     V include=V::makeArr();include.arr.push_back(V::makeStr("reasoning.encrypted_content"));request.set("include",include);
     request.set("instructions",V::makeStr(
         "You are the modeling assistant inside ARK CAD. Use the provided ARK tools to inspect and edit the active document. "
@@ -177,9 +226,23 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
         cancelled(cancel);emit(events,AssistantEvent::Status,"Thinking...");
         V request=assistantRequest(config,result.conversation,tools);
         V response=transport?transport(config,request,cancel):nativeTransport(config,request,cancel);
-        cancelled(cancel);++result.rounds;
+        ++result.rounds;
         require(response.dump().size()<=config.maxResponseBytes,"Assistant response exceeds configured size limit.");
+        accumulateAssistantUsage(result.usage,responseUsage(response));
+        if(events)events({AssistantEvent::Usage,assistantUsageLabel(result.usage),result.usage});
+        // A returned response can have billed tokens even if it was incomplete,
+        // or cancellation arrived while waiting. Keep evidence before rejecting.
+        cancelled(cancel);
         auto status=field(response,"status");
+        if(config.authMode==AssistantAuthMode::ChatGptPlan&&status=="failed"){
+            std::string code;if(const auto* failure=response.find("error"))if(failure->t==V::Obj)if(const auto* value=failure->find("code"))if(value->t==V::Str&&identifier(value->str))code=value->str;
+            if(code=="subscription_sharing_usage_limit_exceeded")throw std::runtime_error("ARK reached its ChatGPT plan usage limit. Review ChatGPT Settings > Usage and manage this app's limit before retrying.");
+            if(code=="subscription_sharing_usage_unavailable")throw std::runtime_error("ChatGPT plan usage could not be checked. Credentials are preserved; try again later.");
+            if(code=="subscription_sharing_user_not_eligible")throw std::runtime_error("This ChatGPT account or workspace is not eligible for plan usage. Choose another account or API key mode.");
+            if(code=="subscription_sharing_unsupported_capability")throw std::runtime_error("The selected model or ARK tool is unsupported for ChatGPT plan usage. Choose an available model or adjust the request.");
+            if(code=="chatpass_v2_scope_not_authorized"||code=="chatpass_v2_invalid_authorization_context")throw std::runtime_error("ChatGPT plan permission is missing. Reconnect the saved account and enable plan usage.");
+            throw std::runtime_error("ChatGPT response failed. Check account permissions, selected model and usage status.");
+        }
         require(!response.find("error")||response.find("error")->isNull(),"Assistant provider returned an error.");
         require(status=="completed","Assistant response was incomplete or did not report completion; no tools from this response were executed.");
         auto output=response.find("output");require(output&&output->t==V::Arr,"Assistant response has no output array.");
@@ -191,6 +254,7 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
             if(type=="function_call"){
                 auto id=field(item,"call_id");require(!id.empty()&&id.size()<=256&&callIds.insert(id).second,"Missing or repeated assistant tool call ID.");
                 auto name=field(item,"name");require(allowed.count(name)!=0,"Assistant requested a tool outside the advertised ARK allowlist.");
+                if(config.authMode==AssistantAuthMode::ChatGptPlan)require(field(item,"namespace")=="ark","ChatGPT plan requested a tool outside the ARK namespace.");
                 require(item.find("arguments")&&item.find("arguments")->t==V::Str,"Assistant tool arguments must be JSON text.");
                 calls.push_back(item);
             }

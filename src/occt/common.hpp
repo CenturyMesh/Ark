@@ -37,4 +37,5 @@ V shapeResult(const TopoDS_Shape& shape,bool requireSolid);
 V shapeReport(const TopoDS_Shape& shape,bool requireSolid);
 double symmetricDifference(const TopoDS_Shape& a,const TopoDS_Shape& b);
 std::string kernelVersion();
+int nativeThreadBudget(); // ARK_NATIVE_THREADS=1 disables parallel tessellation
 }

@@ -1,5 +1,27 @@
 # Native sheet metal in ARK 0.9
 
+The current authored-sheet extension adds exact `slot` and rotated rectangular
+`window` openings, expression-driven opening patterns, `sheet_inspect`, and
+analytic `export_flat_dxf`. The **SHEET METAL** ribbon exposes authoring and
+global Formed/Flat/Unbend views. See the [KITE car showcase](KITE_SHOWCASE.md).
+
+`sheet.opening.pattern` takes `id`, an `opening` template, integer `count`
+from 2 to 32, and expression offsets `dx`/`dy`. It creates named openings and
+returns their `entity_ids`; overlap still rejects the whole transaction.
+Sheet editing commands accept a numeric feature ID or its unique name.
+
+An exact slot has `kind:"slot", x, y, length, width, angle?`, where length is
+the overall length. A window has `kind:"window", x, y, width, height, angle?`.
+Angles are degrees. Coordinates stay in the owning panel's UV frame.
+
+`sheet_inspect{id}` returns a compact bend table, opening/panel inventory,
+flat bounds and a flat B-rep digest, plus refold evidence. `export_flat_dxf{id,path}`
+sections the validated authored flat solid analytically and writes LINE, ARC
+and CIRCLE contours with separate BEND lines in millimetres. Contour extents
+are checked against the exact blank and stale digests reject. No sampled mesh
+is promoted into a manufacturing contour. DXF remains geometric development
+under the declared K factor, not a material/process qualification.
+
 The sheet engine is C++ using OCCT 8.0.1. Authored sheets and imported sheets
 have separate contracts. Display meshes are derived from their exact B-reps;
 STEP export uses the B-rep, never a reconstruction from triangles.

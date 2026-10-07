@@ -10,6 +10,8 @@
 #include <fstream>
 #include <cmath>
 #include <sstream>
+#include <iomanip>
+#include <locale>
 
 namespace ark {
 
@@ -41,17 +43,52 @@ bool exportSTL(const char* path, const Mesh& m) {
 bool exportOBJ(const char* path, const Mesh& m) {
     std::ofstream f(path);
     if(!f) return false;
-    f<<"# ARK-Point export\n";
+    f.imbue(std::locale::classic());f<<std::setprecision(9);
+    f<<"# ARK-Point export; units millimetres\n";
     for(size_t i=0;i<m.vertCount();++i)
         f<<"v "<<m.pos[i*3]<<" "<<m.pos[i*3+1]<<" "<<m.pos[i*3+2]<<"\n";
-    if(!m.nrm.empty())
+    bool normals=m.nrm.size()==m.pos.size();
+    if(normals)
         for(size_t i=0;i<m.vertCount();++i)
             f<<"vn "<<m.nrm[i*3]<<" "<<m.nrm[i*3+1]<<" "<<m.nrm[i*3+2]<<"\n";
     for(size_t t=0;t<m.idx.size();t+=3){
         u32 a=m.idx[t]+1,b=m.idx[t+1]+1,c=m.idx[t+2]+1;
-        f<<"f "<<a<<"//"<<a<<" "<<b<<"//"<<b<<" "<<c<<"//"<<c<<"\n";
+        if(normals)f<<"f "<<a<<"//"<<a<<" "<<b<<"//"<<b<<" "<<c<<"//"<<c<<"\n";
+        else f<<"f "<<a<<" "<<b<<" "<<c<<"\n";
     }
-    return true;
+    return bool(f);
+}
+
+bool exportFBX(const char* path,const Mesh& mesh){
+    if(mesh.pos.empty()||mesh.pos.size()%3||mesh.idx.empty()||mesh.idx.size()%3)return false;
+    for(float x:mesh.pos)if(!std::isfinite(x))return false;
+    for(u32 i:mesh.idx)if(i>=mesh.vertCount())return false;
+    std::ofstream file(std::filesystem::u8path(path));if(!file)return false;
+    file.imbue(std::locale::classic());file<<std::setprecision(9);
+    file<<"; FBX 7.4.0 project file\n; ARK triangle mesh export, units millimetres\n"
+        "FBXHeaderExtension: {\n FBXHeaderVersion: 1003\n FBXVersion: 7400\n Creator: \"ARK C++\"\n}\n"
+        "GlobalSettings: {\n Version: 1000\n Properties70: {\n"
+        " P: \"UpAxis\", \"int\", \"Integer\", \"\",1\n P: \"UpAxisSign\", \"int\", \"Integer\", \"\",1\n"
+        " P: \"FrontAxis\", \"int\", \"Integer\", \"\",2\n P: \"FrontAxisSign\", \"int\", \"Integer\", \"\",1\n"
+        " P: \"CoordAxis\", \"int\", \"Integer\", \"\",0\n P: \"CoordAxisSign\", \"int\", \"Integer\", \"\",1\n"
+        " P: \"UnitScaleFactor\", \"double\", \"Number\", \"\",0.1\n }\n}\n"
+        "Definitions: {\n Version: 100\n Count: 2\n ObjectType: \"Geometry\" { Count: 1 }\n ObjectType: \"Model\" { Count: 1 }\n}\n"
+        "Objects: {\n Geometry: 1001, \"Geometry::ARK\", \"Mesh\" {\n GeometryVersion: 124\n Vertices: *"<<mesh.pos.size()<<" {\n a: ";
+    for(size_t i=0;i<mesh.pos.size();++i)file<<(i?",":"")<<mesh.pos[i];
+    file<<"\n }\n PolygonVertexIndex: *"<<mesh.idx.size()<<" {\n a: ";
+    for(size_t i=0;i<mesh.idx.size();++i){long long n=mesh.idx[i];if(i%3==2)n=-n-1;file<<(i?",":"")<<n;}
+    file<<"\n }\n";
+    if(mesh.nrm.size()==mesh.pos.size()){
+        file<<" LayerElementNormal: 0 {\n Version: 101\n Name: \"\"\n MappingInformationType: \"ByVertice\"\n ReferenceInformationType: \"Direct\"\n Normals: *"<<mesh.nrm.size()<<" {\n a: ";
+        for(size_t i=0;i<mesh.nrm.size();++i)file<<(i?",":"")<<mesh.nrm[i];
+        file<<"\n }\n }\n Layer: 0 { Version: 100\n LayerElement: { Type: \"LayerElementNormal\"\n TypedIndex: 0 }\n }\n";
+    }
+    file<<" }\n Model: 1002, \"Model::ARK\", \"Mesh\" {\n Version: 232\n Properties70: {\n"
+        " P: \"Lcl Translation\", \"Lcl Translation\", \"\", \"A\",0,0,0\n"
+        " P: \"Lcl Rotation\", \"Lcl Rotation\", \"\", \"A\",0,0,0\n"
+        " P: \"Lcl Scaling\", \"Lcl Scaling\", \"\", \"A\",1,1,1\n }\n Shading: T\n Culling: \"CullingOff\"\n }\n}\n"
+        "Connections: {\n C: \"OO\",1001,1002\n C: \"OO\",1002,0\n}\n";
+    return bool(file);
 }
 
 namespace {
