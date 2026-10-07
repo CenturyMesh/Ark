@@ -269,6 +269,7 @@ static std::vector<ChatGptModel> g_authModels;
 static std::thread g_authWorker;
 static std::shared_ptr<std::atomic_bool> g_authCancel=std::make_shared<std::atomic_bool>(false);
 static bool g_authBusy=false;
+static bool g_authCancelRequested=false;
 static void postAuth(UiAuthEvent event);
 static void interactiveAction(int id);
 static AssistantUsage g_assistantUsageDocument{},g_assistantUsageRun{};
@@ -2028,7 +2029,7 @@ static void connectorDialog(){
 static void startAuthJob(AuthJob job,std::string clientId={},bool requestPlanConsent=false){
     if(g_authBusy){g_status="ChatGPT account operation is already running";return;}
     if(g_authWorker.joinable())g_authWorker.join();
-    g_authCancel=std::make_shared<std::atomic_bool>(false);auto cancel=g_authCancel;g_authBusy=true;
+    g_authCancel=std::make_shared<std::atomic_bool>(false);auto cancel=g_authCancel;g_authBusy=true;g_authCancelRequested=false;
     g_status=job==AuthJob::SignIn?"Continue in the system browser; CAD editing remains available":job==AuthJob::SignOut?"Signing out of ChatGPT...":"Loading ChatGPT model catalog...";
     g_authWorker=std::thread([job,clientId=std::move(clientId),requestPlanConsent,cancel]{
         UiAuthEvent event;event.job=job;
@@ -2038,6 +2039,11 @@ static void startAuthJob(AuthJob job,std::string clientId={},bool requestPlanCon
         catch(const std::exception& error){event.error=error.what();event.status=chatGptAuthStatus();}
         postAuth(std::move(event));
     });
+}
+static void cancelAuthJob(){
+    if(!g_authBusy){g_status="No ChatGPT account operation is running";return;}
+    *g_authCancel=true;g_authCancelRequested=true;
+    g_status="Stopping ChatGPT account operation...";
 }
 static void chooseChatGptModel(){
     if(!g_authStatus.connected||!g_authStatus.planAuthorized){g_status="Continue with ChatGPT and authorize the plan first";return;}
@@ -2056,7 +2062,8 @@ static void chooseChatGptModel(){
 }
 static void showAssistantAccountMenu(){
     HMENU menu=CreatePopupMenu();if(!menu)return;
-    if(g_authBusy)AppendMenuA(menu,MF_STRING|MF_GRAYED,0,"ChatGPT account operation in progress...");
+    if(g_authBusy){AppendMenuA(menu,MF_STRING|MF_GRAYED,0,"ChatGPT account operation in progress...");
+        AppendMenuA(menu,MF_STRING|(g_authCancelRequested?MF_GRAYED:0),366,g_authCancelRequested?"Stopping account operation...":"Cancel account operation");}
     else if(!g_authStatus.connected){AppendMenuA(menu,MF_STRING,360,"Continue with ChatGPT");
         if(!g_authStatus.pendingClientId.empty())AppendMenuA(menu,MF_STRING,365,"Retry existing connection");}
     else{std::string account=g_authStatus.activeEmail.empty()?"ChatGPT connected":"ChatGPT: "+g_authStatus.activeEmail;
@@ -2430,6 +2437,7 @@ static void uiAction(int id){
         case 360:startAuthJob(AuthJob::SignIn);break;case 361:chooseChatGptModel();break;case 362:startAuthJob(AuthJob::SignOut);break;
         case 364:if(g_authStatus.activeClientId.empty())throw std::runtime_error("Choose a saved ChatGPT account first");startAuthJob(AuthJob::SignIn,g_authStatus.activeClientId,true);break;
         case 365:if(g_authStatus.pendingClientId.empty())throw std::runtime_error("No pending ChatGPT registration to retry");startAuthJob(AuthJob::SignIn,g_authStatus.pendingClientId);break;
+        case 366:cancelAuthJob();break;
         case 300:case 301:case 302:case 303:case 304:g_toolModule=id-300;break;
         case 210:createConstructionFrame();break;case 211:createPcb();break;case 212:createCableRoute();break;case 213:exportModelDialog();break;case 215:createSuspensionDialog();break;
         case 383:if(!selectedSuspension())throw std::runtime_error("Select a suspension to animate");g_suspSpinPlaying=!g_suspSpinPlaying;g_suspTick=0;g_status=g_suspSpinPlaying?"Kinematic corner preview playing / document unchanged":"Kinematic corner preview paused";break;
@@ -3741,13 +3749,21 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
                 if(!event->text.empty()){g_chatLog.push_back({event->error?"Error":event->final?"ARK":"Action",event->text.substr(0,16000)});if(g_chatLog.size()>200)g_chatLog.erase(g_chatLog.begin());g_chatScroll=0;refreshChatHistory();}
             }return 0;
         }
-        case WM_ARK_AUTH:{std::unique_ptr<UiAuthEvent> event((UiAuthEvent*)lp);g_authBusy=false;g_authStatus=std::move(event->status);
-            if(event->job==AuthJob::SignOut){g_authModels.clear();if(g_assistantConfig.authMode==AssistantAuthMode::ChatGptPlan){
+        case WM_ARK_AUTH:{std::unique_ptr<UiAuthEvent> event((UiAuthEvent*)lp);bool cancelRequested=g_authCancelRequested;
+            g_authBusy=false;g_authCancelRequested=false;g_authStatus=std::move(event->status);
+            if(event->job==AuthJob::SignOut&&!g_authStatus.connected){g_authModels.clear();if(g_assistantConfig.authMode==AssistantAuthMode::ChatGptPlan){
                 g_assistantConfig.authMode=AssistantAuthMode::ApiKey;g_assistantConfig.model.clear();*g_assistantCancel=true;++g_documentEpoch;g_conversation=arkjson::Value::makeArr();try{saveUiSettings();}catch(...){}}
-            }else if(!event->models.empty())g_authModels=std::move(event->models);
+            }else if(event->job==AuthJob::SignIn){g_authModels=std::move(event->models);}
+            else if(!event->models.empty())g_authModels=std::move(event->models);
             if(!event->error.empty()){const std::string& diagnostic=event->error;
                 bool sensitive=diagnostic.find("https://")!=std::string::npos||diagnostic.find("http://")!=std::string::npos||diagnostic.find("Bearer ")!=std::string::npos||diagnostic.find("eyJ")!=std::string::npos;
-                g_status=sensitive?"ChatGPT account operation failed. Retry from Account.":"ChatGPT: "+diagnostic.substr(0,200);
+                if(event->job==AuthJob::SignIn&&diagnostic=="ChatGPT browser sign-in timed out")
+                    g_status="No ChatGPT browser callback arrived within 3 minutes. Close the old tab, then choose Continue with ChatGPT for a fresh attempt.";
+                else if(cancelRequested&&diagnostic.find("cancel")!=std::string::npos){
+                    if(event->job==AuthJob::SignIn)g_status=g_authStatus.connected?"ChatGPT connected; model loading cancelled. Choose a model from Account.":"ChatGPT sign-in cancelled. Close the old browser tab; choose Continue with ChatGPT for a fresh attempt.";
+                    else if(event->job==AuthJob::Models)g_status="ChatGPT model loading cancelled. Choose a model from Account to retry.";
+                    else g_status=g_authStatus.connected?"ChatGPT sign-out request stopped; account remains connected.":"Signed out locally; check Account for current status.";
+                }else g_status=sensitive?"ChatGPT account operation failed. Retry from Account.":"ChatGPT: "+diagnostic.substr(0,200);
             }
             else if(event->job==AuthJob::SignOut)g_status=g_authStatus.remoteRevocationConfirmed?"Signed out and remote session revoked":"Signed out locally; remote revocation was not confirmed";
             else if(g_authStatus.connected&&g_authStatus.planAuthorized)g_status="ChatGPT plan authorized. Choose a model from Account.";
@@ -4400,6 +4416,20 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         auto gate=std::make_shared<std::atomic_bool>(false);auto staleTransport=[gate,parse](const auto&,const auto&,const auto*){while(!*gate)std::this_thread::sleep_for(std::chrono::milliseconds(1));return parse(R"({"status":"completed","output":[{"type":"function_call","call_id":"stale_ui_test","name":"doc_apply","arguments":"{\"commands\":[{\"op\":\"param.set\",\"name\":\"stale_ui_probe\",\"expr\":\"99\"}]}"}]})");};
         sendAssistant("Offline stale-write test.",staleTransport);V command=parse(R"({"op":"param.set","name":"human_ui_probe","expr":"1"})");applyCommand(command);*gate=true;
         if(!pump()||!g_conversation.arr.empty()||std::any_of(g_doc.params.begin(),g_doc.params.end(),[](auto& p){return p.name=="stale_ui_probe";}))return 121;
+        auto savedAuthStatus=g_authStatus;auto savedAuthModels=g_authModels;u64 authRevision=g_session.revision,authUsageSerial=g_doc.usage.serial;
+        g_authStatus.accounts.push_back({"oaiapp_offline_ui","offline-subject","offline@example.test"});
+        auto finishFakeAuth=[&](AuthJob job,const char* error){auto* event=new UiAuthEvent;event->job=job;event->status=g_authStatus;event->error=error;SendMessage(g_window,WM_ARK_AUTH,0,(LPARAM)event);};
+        g_authBusy=true;g_authCancelRequested=false;g_authCancel=std::make_shared<std::atomic_bool>(false);
+        uiAction(366);if(!*g_authCancel||!g_authBusy||!g_authCancelRequested)return 123;
+        finishFakeAuth(AuthJob::SignIn,"ChatGPT sign-in cancelled");
+        if(g_authBusy||g_authCancelRequested||g_status.find("fresh attempt")==std::string::npos||g_authStatus.accounts.size()!=1||g_session.revision!=authRevision||g_doc.usage.serial!=authUsageSerial)return 124;
+        g_authBusy=true;g_authCancelRequested=false;
+        finishFakeAuth(AuthJob::SignIn,"ChatGPT browser sign-in timed out");
+        if(g_authBusy||g_status.find("callback")==std::string::npos||g_status.find("fresh attempt")==std::string::npos)return 125;
+        g_authBusy=true;g_authCancelRequested=false;g_authCancel=std::make_shared<std::atomic_bool>(false);
+        uiAction(366);finishFakeAuth(AuthJob::Models,"ChatGPT model loading cancelled");
+        if(g_authBusy||g_status.find("model loading cancelled")==std::string::npos||g_authStatus.accounts.size()!=1)return 126;
+        g_authStatus=std::move(savedAuthStatus);g_authModels=std::move(savedAuthModels);
         if(g_assistantWorker.joinable())g_assistantWorker.join();g_assistantConfig=previous;g_status="Offline assistant UI checks passed / serialized tools / history / stale-write rejection";
     }
     if(selfTest){

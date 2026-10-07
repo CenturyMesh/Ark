@@ -49,6 +49,22 @@ the default HTTP transport currently reports an unsupported-platform error.
 
 ### Continue with ChatGPT
 
+If the OpenAI browser page reports an error after consent, sign-in has not
+completed until ARK receives and validates the callback. Keep the request ID
+shown on that page for diagnosis. In Studio, open **Connecting... > Cancel
+account operation**, wait for cancellation, then choose **Continue with ChatGPT**
+to start a fresh attempt. Retrying an old browser tab after the three-minute
+callback timeout cannot complete that expired attempt. Cancellation preserves
+saved accounts and does not switch to API-key billing. A generic browser error
+alone does not establish whether the cause is temporary service availability,
+account policy, or an integration issue.
+
+An ARK-Point entry in ChatGPT Settings confirms the server-side registration,
+not that this computer received tokens. If Studio offers **Retry existing
+connection**, use it to reuse the issued client ID received before a failed
+token exchange. Avoid repeated new registrations when the server-side entry
+already exists; preserve the error request ID for diagnosis.
+
 The operator starts sign-in from Studio's Account menu or launches Studio with
 `--connect-chatgpt`. ARK opens the system browser only after the window has
 loaded; CAD editing remains available while a worker waits for the callback.
