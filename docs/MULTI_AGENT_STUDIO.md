@@ -11,11 +11,33 @@ conversations:
 | Inconsistency review | Independent geometry, assembly, physics and manufacturing checks | Read and send findings |
 
 Each card's **Settings** selects a model and reasoning effort for that role.
-A blank model inherits the explicitly selected Assistant model. A blank effort
-inherits Assistant effort; `auto` requests the provider default. Settings persist
-locally in Studio settings and apply to a new team run. ChatGPT plan models must
-be present in the connected account's loaded catalog. API model support is
-validated by its provider. No implicit paid model is selected.
+In ChatGPT-plan mode these are native drop-down lists populated from the selected
+account's model catalog. Opening settings loads missing catalog data; refreshing
+fetches current choices. The model list preserves provider order and displays
+the model name and slug. The effort list updates with the selected model's
+advertised levels and shows its advertised default when available. No universal
+effort list or model default is assumed.
+
+Inheritance and **Auto** are explicit choices. Auto omits the reasoning field.
+An inherited effort unsupported by a different selected model falls back to
+Auto. Apply persists the role configuration for the next team run; Cancel
+preserves the saved values. Unavailable models or unsupported explicit efforts
+cannot be applied from the account selector. API-key/custom-provider settings
+remain an explicitly advanced manual route rather than pretending the account
+catalog describes a different endpoint.
+
+The catalog is fetched through ARK's existing account connection using
+`GET https://api.openai.com/v1/models`, without an inference call. Account
+changes invalidate cached choices. See the official
+[account-scoped model picker flow](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference).
+
+![Account model and reasoning selectors, offline UI fixture](studio-role-model-settings.png)
+
+Verified on 2026-10-10: the existing ARK account connection returned seven
+visible models and their per-model effort lists/defaults, without inference.
+Native UI tests cover selection, model-dependent effort lists, Apply/Cancel,
+refresh, unavailable models, unsupported inheritance, empty/error responses,
+account changes and Enter/Escape behavior in open drop-downs.
 
 Send a goal with **Start** or Ctrl+Enter. Cards show actual runtime state,
 provider requests, tool activity, role token totals and the latest messages.

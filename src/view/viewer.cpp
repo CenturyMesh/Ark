@@ -305,6 +305,10 @@ enum class AuthJob{SignIn,SignOut,Models};
 struct UiAuthEvent{AuthJob job=AuthJob::Models;ChatGptAuthStatus status;std::vector<ChatGptModel> models;std::string error;};
 static ChatGptAuthStatus g_authStatus;
 static std::vector<ChatGptModel> g_authModels;
+static int g_pendingRoleSettings=-1;static std::string g_pendingRoleAccount;static bool g_roleCatalogReady=false;
+static HWND g_roleModelWindow=nullptr;static constexpr UINT WM_ARK_ROLE_CATALOG=WM_APP+24;
+static AuthJob g_activeAuthJob=AuthJob::Models;
+static void clearPendingRoleSettings(){g_pendingRoleSettings=-1;g_pendingRoleAccount.clear();g_roleCatalogReady=false;}
 static std::thread g_authWorker;
 static std::shared_ptr<std::atomic_bool> g_authCancel=std::make_shared<std::atomic_bool>(false);
 static bool g_authBusy=false;
@@ -2252,12 +2256,14 @@ static void connectorDialog(){
     std::vector<EditorField> fields{{"Responses endpoint",g_assistantConfig.endpoint},{"Model",g_assistantConfig.model},{"API key environment",g_assistantConfig.apiKeyEnv}};
     if(!editFields("Assistant connector","Use a Responses-compatible API. Enter an environment-variable NAME, never the secret key.",fields))return;
     auto config=g_assistantConfig;if(config.authMode!=AssistantAuthMode::ApiKey||config.model!=fields[1].value)config.reasoningEffort.clear();config.authMode=AssistantAuthMode::ApiKey;config.endpoint=fields[0].value;config.model=fields[1].value;config.apiKeyEnv=fields[2].value;validateAssistantConfig(config);g_assistantConfig=config;*g_assistantCancel=true;++g_documentEpoch;g_conversation=arkjson::Value::makeArr();if(!g_dialogSmoke)saveUiSettings();
+    clearPendingRoleSettings();
     g_status=assistantKeyAvailable(config)?"Connector configured; credential present. No request sent.":"Connector configured; credential environment variable is unavailable.";
 }
 static void startAuthJob(AuthJob job,std::string clientId={},bool requestPlanConsent=false){
+    if(job==AuthJob::SignOut)clearPendingRoleSettings();
     if(g_authBusy){g_status="ChatGPT account operation is already running";return;}
     if(g_authWorker.joinable())g_authWorker.join();
-    g_authCancel=std::make_shared<std::atomic_bool>(false);auto cancel=g_authCancel;g_authBusy=true;g_authCancelRequested=false;
+    g_authCancel=std::make_shared<std::atomic_bool>(false);auto cancel=g_authCancel;g_authBusy=true;g_authCancelRequested=false;g_activeAuthJob=job;
     g_status=job==AuthJob::SignIn?"Continue in the system browser; CAD editing remains available":job==AuthJob::SignOut?"Signing out of ChatGPT...":"Loading ChatGPT model catalog...";
     g_authWorker=std::thread([job,clientId=std::move(clientId),requestPlanConsent,cancel]{
         UiAuthEvent event;event.job=job;
@@ -2352,7 +2358,15 @@ static void postTool(std::unique_ptr<UiToolRequest> request){
 }
 static void postChat(UiChatEvent event){auto* pointer=new UiChatEvent(std::move(event));if(g_closing||!PostMessage(g_window,WM_ARK_CHAT,0,(LPARAM)pointer))delete pointer;}
 static void postAuth(UiAuthEvent event){auto* pointer=new UiAuthEvent(std::move(event));if(g_closing||!PostMessage(g_window,WM_ARK_AUTH,0,(LPARAM)pointer))delete pointer;}
-static AssistantConfig teamRoleConfig(size_t index){auto config=g_assistantConfig;if(!g_teamModels[index].empty())config.model=g_teamModels[index];if(!g_teamEfforts[index].empty())config.reasoningEffort=g_teamEfforts[index]=="auto"?"":g_teamEfforts[index];return config;}
+static AssistantConfig teamRoleConfigValues(const std::string& model,const std::string& effort){
+    auto config=g_assistantConfig;if(!model.empty())config.model=model;
+    if(!effort.empty())config.reasoningEffort=effort=="auto"?"":effort;
+    else if(!config.reasoningEffort.empty()){
+        if(config.authMode==AssistantAuthMode::ChatGptPlan){auto selected=std::find_if(g_authModels.begin(),g_authModels.end(),[&](const auto& choice){return choice.slug==config.model;});if(selected==g_authModels.end()||std::find(selected->reasoningEfforts.begin(),selected->reasoningEfforts.end(),config.reasoningEffort)==selected->reasoningEfforts.end())config.reasoningEffort.clear();}
+        else if(!model.empty()&&model!=g_assistantConfig.model)config.reasoningEffort.clear();
+    }return config;
+}
+static AssistantConfig teamRoleConfig(size_t index){return teamRoleConfigValues(g_teamModels[index],g_teamEfforts[index]);}
 static std::string assistantPrompt(const std::string& explicitPrompt={}){
     if(!explicitPrompt.empty())return explicitPrompt;if(!g_chatInput)return {};
     int n=GetWindowTextLengthW(g_chatInput);std::vector<wchar_t> buffer(n+1);GetWindowTextW(g_chatInput,buffer.data(),n+1);
@@ -2377,13 +2391,72 @@ static void pollTeam(bool force=false){
         receipt.inputTokens=usage.inputTokens;receipt.outputTokens=usage.outputTokens;receipt.totalTokens=usage.totalTokens;receipt.cachedInputTokens=usage.cachedInputTokens;receipt.reasoningTokens=usage.reasoningTokens;receipt.reportedResponses=usage.reportedResponses;receipt.missingResponses=usage.missingResponses;g_teamReceipts[i]=receipt;applyUsageReceipt(receipt);
     }
 }
+struct RoleModelEditor {size_t role=0;HWND model=nullptr,effort=nullptr,status=nullptr;std::vector<std::string> models,efforts;std::string account;};
+static std::string g_roleSmokeModel,g_roleSmokeEffort;static bool g_roleSmokeCheck=false,g_roleSmokePassed=false;
+static bool g_roleSmokeInitialDisabled=false,g_roleSmokeKeyboardPassed=false,g_roleSmokeRefresh=false,g_roleSmokeRefreshPassed=false;static constexpr UINT WM_ARK_ROLE_SMOKE=WM_APP+25;
+static std::string roleComboValue(HWND combo,const std::vector<std::string>& choices){auto selected=SendMessage(combo,CB_GETCURSEL,0,0);return selected>=0&&(size_t)selected<choices.size()?choices[(size_t)selected]:std::string{};}
+static void refillRoleEfforts(RoleModelEditor& editor,const std::string& preferred){
+    auto model=roleComboValue(editor.model,editor.models);auto config=teamRoleConfigValues(model,"");std::string inherited=config.reasoningEffort.empty()?"Auto":config.reasoningEffort;
+    SendMessage(editor.effort,CB_RESETCONTENT,0,0);editor.efforts={"","auto"};std::string inheritLabel="Inherit Assistant effort ("+inherited+")";SendMessageA(editor.effort,CB_ADDSTRING,0,(LPARAM)inheritLabel.c_str());
+    auto metadata=std::find_if(g_authModels.begin(),g_authModels.end(),[&](const auto& choice){return choice.slug==config.model;});std::string defaultLabel="Auto / provider default";if(metadata!=g_authModels.end()&&!metadata->defaultReasoningEffort.empty())defaultLabel+=" ("+metadata->defaultReasoningEffort+")";SendMessageA(editor.effort,CB_ADDSTRING,0,(LPARAM)defaultLabel.c_str());
+    if(metadata!=g_authModels.end())for(const auto& effort:metadata->reasoningEfforts)if(std::find(editor.efforts.begin(),editor.efforts.end(),effort)==editor.efforts.end()){editor.efforts.push_back(effort);SendMessageA(editor.effort,CB_ADDSTRING,0,(LPARAM)effort.c_str());}
+    auto found=std::find(editor.efforts.begin(),editor.efforts.end(),preferred);SendMessage(editor.effort,CB_SETCURSEL,found==editor.efforts.end()?1:(WPARAM)(found-editor.efforts.begin()),0);
+    SetWindowTextA(editor.status,metadata==g_authModels.end()?"The inherited model is unavailable. Choose a model from this account's catalog.":"Reasoning choices and provider default come from this selected model's account catalog.");
+    EnableWindow(editor.effort,metadata!=g_authModels.end());EnableWindow(GetDlgItem(g_roleModelWindow,1),metadata!=g_authModels.end());
+}
+static void refillRoleModels(RoleModelEditor& editor,const std::string& preferred,const std::string& effort){
+    SendMessage(editor.model,CB_RESETCONTENT,0,0);editor.models={""};std::string inheritLabel="Inherit Assistant model ("+(g_assistantConfig.model.empty()?std::string("not selected"):g_assistantConfig.model)+")";SendMessageA(editor.model,CB_ADDSTRING,0,(LPARAM)inheritLabel.c_str());
+    for(const auto& model:g_authModels){editor.models.push_back(model.slug);std::string label=(model.displayName.empty()?model.slug:model.displayName+" / "+model.slug);SendMessageA(editor.model,CB_ADDSTRING,0,(LPARAM)label.c_str());}
+    bool unavailable=!preferred.empty()&&std::find(editor.models.begin(),editor.models.end(),preferred)==editor.models.end();if(unavailable){editor.models.push_back(preferred);std::string label="[Unavailable] "+preferred;SendMessageA(editor.model,CB_ADDSTRING,0,(LPARAM)label.c_str());}
+    auto selected=std::find(editor.models.begin(),editor.models.end(),preferred);SendMessage(editor.model,CB_SETCURSEL,selected==editor.models.end()?0:(WPARAM)(selected-editor.models.begin()),0);refillRoleEfforts(editor,effort);
+    if(unavailable)SetWindowTextA(editor.status,"The saved model is unavailable. Apply is disabled until you choose a listed model or a valid inheritance.");
+}
+static bool requestRoleCatalog(size_t index){
+    if(g_authBusy&&g_activeAuthJob!=AuthJob::Models){g_status="Finish the current account operation before refreshing role models.";return false;}
+    g_pendingRoleSettings=(int)index;g_pendingRoleAccount=g_authStatus.activeClientId;g_roleCatalogReady=false;
+    if(!g_authBusy)startAuthJob(AuthJob::Models);return true;
+}
+static LRESULT CALLBACK roleModelProc(HWND hwnd,UINT message,WPARAM wp,LPARAM lp){
+    auto* editor=(RoleModelEditor*)GetWindowLongPtr(hwnd,GWLP_USERDATA);
+    if(editor&&message==WM_ARK_ROLE_SMOKE&&g_roleSmokeCheck){bool closed=!SendMessage(GetFocus(),CB_GETDROPPEDSTATE,0,0)&&!g_dialogDone;if(wp==1){g_roleSmokeKeyboardPassed=closed;SetFocus(editor->effort);SendMessage(editor->effort,CB_SHOWDROPDOWN,TRUE,0);PostMessage(editor->effort,WM_KEYDOWN,VK_RETURN,0);PostMessage(hwnd,WM_ARK_ROLE_SMOKE,2,0);}else{g_roleSmokeKeyboardPassed=g_roleSmokeKeyboardPassed&&closed;SetFocus(editor->model);return editorProc(hwnd,WM_TIMER,901,0);}return 0;}
+    if(editor&&message==WM_COMMAND&&LOWORD(wp)==101&&HIWORD(wp)==CBN_SELCHANGE){auto prior=roleComboValue(editor->effort,editor->efforts);refillRoleEfforts(*editor,prior);return 0;}
+    if(editor&&message==WM_COMMAND&&LOWORD(wp)==103){if(!requestRoleCatalog(editor->role)){SetWindowTextA(editor->status,g_status.c_str());return 0;}SetWindowTextA(editor->status,"Refreshing the selected account's models...");EnableWindow(editor->model,FALSE);EnableWindow(editor->effort,FALSE);EnableWindow(GetDlgItem(hwnd,1),FALSE);EnableWindow(GetDlgItem(hwnd,103),FALSE);return 0;}
+    if(editor&&message==WM_ARK_ROLE_CATALOG){auto model=roleComboValue(editor->model,editor->models),effort=roleComboValue(editor->effort,editor->efforts);refillRoleModels(*editor,model,effort);EnableWindow(editor->model,TRUE);EnableWindow(GetDlgItem(hwnd,103),TRUE);if(g_authModels.empty())SetWindowTextA(editor->status,g_status.c_str());clearPendingRoleSettings();return 0;}
+    if(editor&&message==WM_COMMAND&&LOWORD(wp)==1){if(g_authBusy||!IsWindowEnabled(GetDlgItem(hwnd,1)))return 0;auto model=roleComboValue(editor->model,editor->models),effort=roleComboValue(editor->effort,editor->efforts);try{auto config=teamRoleConfigValues(model,effort);validateAssistantConfig(config);auto metadata=std::find_if(g_authModels.begin(),g_authModels.end(),[&](const auto& candidate){return candidate.slug==config.model;});if(editor->account!=g_authStatus.activeClientId||metadata==g_authModels.end())throw std::runtime_error("Choose a model available in this account's catalog.");if(!config.reasoningEffort.empty()&&std::find(metadata->reasoningEfforts.begin(),metadata->reasoningEfforts.end(),config.reasoningEffort)==metadata->reasoningEfforts.end())throw std::runtime_error("Choose an effort advertised for the selected model.");}catch(const std::exception& error){SetWindowTextA(editor->status,error.what());return 0;}clearPendingRoleSettings();}
+    if(message==WM_CLOSE||(message==WM_COMMAND&&LOWORD(wp)==2)){g_pendingRoleSettings=-1;g_roleCatalogReady=false;}
+    if(editor&&message==WM_TIMER&&wp==901&&g_roleSmokeCheck){
+        KillTimer(hwnd,901);g_roleSmokeInitialDisabled=!IsWindowEnabled(GetDlgItem(hwnd,1));
+        if(g_roleSmokeRefresh){auto savedModel=g_teamModels[editor->role],savedEffort=g_teamEfforts[editor->role];g_authBusy=true;g_activeAuthJob=AuthJob::SignOut;SendMessage(hwnd,WM_COMMAND,103,0);bool rejected=IsWindowEnabled(editor->model)&&IsWindowEnabled(GetDlgItem(hwnd,1));g_activeAuthJob=AuthJob::Models;SendMessage(hwnd,WM_COMMAND,103,0);bool blocked=!IsWindowEnabled(editor->model)&&!IsWindowEnabled(GetDlgItem(hwnd,1));auto* event=new UiAuthEvent;event->job=AuthJob::Models;event->status=g_authStatus;event->models=g_authModels;SendMessage(g_window,WM_ARK_AUTH,0,(LPARAM)event);g_roleSmokeRefreshPassed=rejected&&blocked&&IsWindowEnabled(editor->model)&&IsWindowEnabled(GetDlgItem(hwnd,1))&&g_teamModels[editor->role]==savedModel&&g_teamEfforts[editor->role]==savedEffort;}
+        auto picked=std::find(editor->models.begin(),editor->models.end(),g_roleSmokeModel);if(picked!=editor->models.end()){SendMessage(editor->model,CB_SETCURSEL,(WPARAM)(picked-editor->models.begin()),0);SendMessage(hwnd,WM_COMMAND,MAKEWPARAM(101,CBN_SELCHANGE),(LPARAM)editor->model);}
+        auto effort=std::find(editor->efforts.begin(),editor->efforts.end(),g_roleSmokeEffort);if(effort!=editor->efforts.end())SendMessage(editor->effort,CB_SETCURSEL,(WPARAM)(effort-editor->efforts.begin()),0);
+        char modelClass[32]{},effortClass[32]{};GetClassNameA(editor->model,modelClass,32);GetClassNameA(editor->effort,effortClass,32);auto metadata=std::find_if(g_authModels.begin(),g_authModels.end(),[&](const auto& choice){return choice.slug==g_roleSmokeModel;});
+        g_roleSmokePassed=picked!=editor->models.end()&&effort!=editor->efforts.end()&&std::strcmp(modelClass,"ComboBox")==0&&std::strcmp(effortClass,"ComboBox")==0&&metadata!=g_authModels.end()&&editor->efforts.size()==metadata->reasoningEfforts.size()+2;
+        SetFocus(editor->model);SendMessage(editor->model,CB_SHOWDROPDOWN,TRUE,0);PostMessage(editor->model,WM_KEYDOWN,VK_ESCAPE,0);PostMessage(hwnd,WM_ARK_ROLE_SMOKE,1,0);return 0;
+    }
+    return editorProc(hwnd,message,wp,lp);
+}
+static bool editRoleModel(size_t index,std::string& model,std::string& effort){
+    WNDCLASSA cls{};cls.lpfnWndProc=roleModelProc;cls.hInstance=GetModuleHandle(nullptr);cls.lpszClassName="ARK_ROLE_MODELS";cls.hbrBackground=dialogBrush;cls.hCursor=LoadCursor(nullptr,IDC_ARROW);RegisterClassA(&cls);
+    RECT parent;GetWindowRect(g_window,&parent);int width=780,height=350;RECT outer{0,0,width,height};AdjustWindowRectEx(&outer,WS_CAPTION|WS_SYSMENU,FALSE,WS_EX_DLGMODALFRAME);int ow=outer.right-outer.left,oh=outer.bottom-outer.top;
+    g_dialog=CreateWindowExA(WS_EX_DLGMODALFRAME,cls.lpszClassName,g_teamRoleLabels[index],WS_CAPTION|WS_SYSMENU,parent.left+(parent.right-parent.left-ow)/2,parent.top+(parent.bottom-parent.top-oh)/2,ow,oh,g_window,nullptr,cls.hInstance,nullptr);if(!g_dialog)throw std::runtime_error("Could not open role model settings.");g_roleModelWindow=g_dialog;
+    BOOL dark=TRUE;DwmSetWindowAttribute(g_dialog,20,&dark,sizeof dark);HFONT font=CreateFontA(-17,0,0,0,FW_NORMAL,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,"Segoe UI");
+    auto control=[&](const char* type,const char* text,DWORD style,int x,int y,int w,int h,int id){HWND result=CreateWindowExA(0,type,text,WS_CHILD|WS_VISIBLE|style,x,y,w,h,g_dialog,(HMENU)(INT_PTR)id,cls.hInstance,nullptr);SendMessage(result,WM_SETFONT,(WPARAM)font,TRUE);return result;};
+    control("STATIC",g_teamRoleLabels[index],0,26,22,728,27,0);control("STATIC","Choose from the connected account's OpenAI catalog. Changes apply together to the next team run.",0,26,60,728,44,0);
+    control("STATIC","Model",0,26,119,150,28,0);control("STATIC","Reasoning effort",0,26,181,150,28,0);RoleModelEditor editor;editor.role=index;editor.account=g_authStatus.activeClientId;
+    editor.model=control("COMBOBOX","",WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL,185,113,569,240,101);editor.effort=control("COMBOBOX","",WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL,185,175,569,240,102);editor.status=control("STATIC","",0,26,229,728,44,104);SetWindowLongPtr(g_dialog,GWLP_USERDATA,(LONG_PTR)&editor);refillRoleModels(editor,model,effort);
+    control("BUTTON","Refresh models",WS_TABSTOP|BS_OWNERDRAW,26,292,180,34,103);control("BUTTON","Cancel",WS_TABSTOP|BS_OWNERDRAW,532,292,100,34,2);control("BUTTON","Apply",WS_TABSTOP|BS_OWNERDRAW,648,292,106,34,1);refillRoleEfforts(editor,effort);
+    g_edit=editor.model;g_dialogDone=g_dialogAccept=false;EnableWindow(g_window,FALSE);ShowWindow(g_dialog,SW_SHOW);SetFocus(editor.model);if(g_dialogSmoke)SetTimer(g_dialog,901,200,nullptr);
+    MSG msg;while(!g_dialogDone&&GetMessage(&msg,nullptr,0,0)>0){if(msg.message==WM_KEYDOWN&&(msg.wParam==VK_ESCAPE||msg.wParam==VK_RETURN)){if(SendMessage(GetFocus(),CB_GETDROPPEDSTATE,0,0)){TranslateMessage(&msg);DispatchMessage(&msg);}else SendMessage(g_dialog,WM_COMMAND,msg.wParam==VK_ESCAPE?2:GetDlgCtrlID(GetFocus())==2?2:GetDlgCtrlID(GetFocus())==103?103:1,0);continue;}if(!IsDialogMessage(g_dialog,&msg)){TranslateMessage(&msg);DispatchMessage(&msg);}}
+    if(g_dialogAccept){model=roleComboValue(editor.model,editor.models);effort=roleComboValue(editor.effort,editor.efforts);}g_pendingRoleSettings=-1;g_roleCatalogReady=false;EnableWindow(g_window,TRUE);DestroyWindow(g_dialog);g_dialog=g_roleModelWindow=nullptr;DeleteObject(font);if(!g_headless)SetForegroundWindow(g_window);return g_dialogAccept;
+}
 static void teamRoleDialog(size_t index){
     if(g_teamStarted&&g_agentTeam.snapshot().running){g_status="Finish or cancel the team before changing role settings. Changes apply to a new team run.";return;}
-    std::vector<EditorField> fields{{"Model",g_teamModels[index]},{"Reasoning effort",g_teamEfforts[index]}};
-    if(!editFields(g_teamRoleLabels[index],"Blank model/effort inherit Assistant. 'auto' selects provider default. Shared endpoint/account; provider validates support.",fields))return;
-    auto model=trimField(fields[0].value),effort=trimField(fields[1].value);auto config=g_assistantConfig;if(!model.empty())config.model=model;if(!effort.empty())config.reasoningEffort=effort=="auto"?"":effort;validateAssistantConfig(config);
-    if(g_teamStarted){cancelTeam();g_teamStarted=false;resetTeamView();}g_teamModels[index]=model;g_teamEfforts[index]=effort;saveUiSettings();g_status="Role settings saved for the next team run.";
+    std::string model=g_teamModels[index],effort=g_teamEfforts[index];
+    if(g_assistantConfig.authMode==AssistantAuthMode::ChatGptPlan){if(!g_authStatus.connected||!g_authStatus.planAuthorized){g_status="Connect and authorize ChatGPT from Account before choosing role models.";return;}if(g_authBusy||g_authModels.empty()){requestRoleCatalog(index);return;}if(!editRoleModel(index,model,effort))return;}
+    else{std::vector<EditorField> fields{{"Model (manual)",model},{"Effort (manual)",effort}};if(!editFields("Advanced role connector","API-key/custom endpoints: advanced manual settings. Blank inherits Assistant; auto uses the provider default.",fields))return;model=trimField(fields[0].value);effort=trimField(fields[1].value);validateAssistantConfig(teamRoleConfigValues(model,effort));}
+    if(g_teamStarted){cancelTeam();g_teamStarted=false;resetTeamView();}g_teamModels[index]=model;g_teamEfforts[index]=effort;if(!g_dialogSmoke)saveUiSettings();g_status="Role model and reasoning saved together for the next team run.";
 }
+static void openPendingRoleSettings(){if(g_pendingRoleSettings<0||!g_roleCatalogReady||g_dialog||g_busy)return;int role=g_pendingRoleSettings;g_pendingRoleSettings=-1;g_roleCatalogReady=false;if(g_pendingRoleAccount==g_authStatus.activeClientId&&g_assistantConfig.authMode==AssistantAuthMode::ChatGptPlan&&!g_authModels.empty())teamRoleDialog((size_t)role);}
 static void chooseTeamTarget(){
     HMENU menu=CreatePopupMenu();AppendMenuA(menu,MF_STRING|(g_teamTarget.empty()?MF_CHECKED:0),1,"Entire team");for(int i=0;i<3;++i)AppendMenuA(menu,MF_STRING|(g_teamTarget==g_teamRoleIds[i]?MF_CHECKED:0),i+2,g_teamRoleLabels[i]);
     POINT cursor;GetCursorPos(&cursor);int action=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,cursor.x,cursor.y,0,g_window,nullptr);DestroyMenu(menu);if(action>=1&&action<=4)g_teamTarget=action==1?"":g_teamRoleIds[action-2];
@@ -2826,7 +2899,7 @@ static void uiAction(int id){
     if(id>=10000){focusSourceOpening(id-10000);return;}
     if(id>=9000){g_selectedNotch=id-9000;return;}
     if(id>=500&&id<532){size_t index=(size_t)(id-500);if(index>=g_authStatus.accounts.size()||g_authBusy)return;
-        std::string clientId=g_authStatus.accounts[index].clientId;g_authStatus=chatGptSelectAccount(clientId);g_authModels.clear();
+        std::string clientId=g_authStatus.accounts[index].clientId;g_authStatus=chatGptSelectAccount(clientId);g_authModels.clear();clearPendingRoleSettings();
         g_assistantConfig.authMode=AssistantAuthMode::ApiKey;g_assistantConfig.model.clear();*g_assistantCancel=true;++g_documentEpoch;g_conversation=V::makeArr();saveUiSettings();
         if(g_authStatus.connected&&g_authStatus.planAuthorized)startAuthJob(AuthJob::Models);else startAuthJob(AuthJob::SignIn,clientId);return;}
     if(id>=2000){g_selectedExplorerEntity.reset();g_explorerFeature=0;selBody=id-2000;g_activeSketch.clear();g_showSketches=false;rebuildSketchOverlay();g_selectedNotch=0;g_notchScroll=0;g_sourceScroll=0;g_foldPlaying=false;return;}
@@ -4385,10 +4458,9 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
         }
         case WM_ARK_AUTH:{std::unique_ptr<UiAuthEvent> event((UiAuthEvent*)lp);bool cancelRequested=g_authCancelRequested;
             g_authBusy=false;g_authCancelRequested=false;g_authStatus=std::move(event->status);
-            if(event->job==AuthJob::SignOut&&!g_authStatus.connected){g_authModels.clear();if(g_assistantConfig.authMode==AssistantAuthMode::ChatGptPlan){
+            if(event->job==AuthJob::SignOut&&!g_authStatus.connected){g_authModels.clear();clearPendingRoleSettings();if(g_assistantConfig.authMode==AssistantAuthMode::ChatGptPlan){
                 g_assistantConfig.authMode=AssistantAuthMode::ApiKey;g_assistantConfig.model.clear();*g_assistantCancel=true;++g_documentEpoch;g_conversation=arkjson::Value::makeArr();try{saveUiSettings();}catch(...){}}
-            }else if(event->job==AuthJob::SignIn){g_authModels=std::move(event->models);}
-            else if(!event->models.empty())g_authModels=std::move(event->models);
+            }else if(event->job==AuthJob::SignIn||event->job==AuthJob::Models){g_authModels=std::move(event->models);}
             if(!event->error.empty()){const std::string& diagnostic=event->error;
                 bool sensitive=diagnostic.find("https://")!=std::string::npos||diagnostic.find("http://")!=std::string::npos||diagnostic.find("Bearer ")!=std::string::npos||diagnostic.find("eyJ")!=std::string::npos;
                 if(event->job==AuthJob::SignIn&&diagnostic=="ChatGPT browser sign-in timed out")
@@ -4403,6 +4475,12 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
             else if(g_authStatus.connected&&g_authStatus.planAuthorized)g_status="ChatGPT plan authorized. Choose a model from Account.";
             else if(g_authStatus.connected)g_status="ChatGPT identity connected. Enable plan usage from Account if desired.";
             else g_status=g_authStatus.message.empty()?"ChatGPT sign-in was not completed":g_authStatus.message;
+            if(event->job==AuthJob::Models){if(event->error.empty()&&!cancelRequested)g_status=g_authModels.empty()?"The selected account returned no available models. Refresh from Account to retry.":"Account model catalog updated: "+std::to_string(g_authModels.size())+" available models.";
+                if(g_pendingRoleSettings>=0){bool owner=g_pendingRoleAccount==g_authStatus.activeClientId&&g_assistantConfig.authMode==AssistantAuthMode::ChatGptPlan;
+                    if(g_roleModelWindow&&owner){SendMessage(g_roleModelWindow,WM_ARK_ROLE_CATALOG,0,0);}
+                    else if(g_roleModelWindow&&!owner){SendMessage(g_roleModelWindow,WM_CLOSE,0,0);clearPendingRoleSettings();}
+                    else if(owner&&event->error.empty()&&!cancelRequested&&!g_authModels.empty())g_roleCatalogReady=true;else clearPendingRoleSettings();
+                }}
             return 0;}
         case WM_COMMAND:if(LOWORD(wp)==500){interactiveAction(74);return 0;}if(LOWORD(wp)==497&&HIWORD(wp)==EN_CHANGE){int length=GetWindowTextLengthA(g_toolSearch);std::string filter((size_t)length+1,' ');GetWindowTextA(g_toolSearch,filter.data(),length+1);filter.resize((size_t)length);g_toolFilter=std::move(filter);g_toolScroll=0;return 0;}break;
         case WM_CTLCOLOREDIT:if((HWND)lp==g_chatInput||(HWND)lp==g_commandSearch||(HWND)lp==g_toolSearch){SetTextColor((HDC)wp,RGB(219,226,238));SetBkColor((HDC)wp,RGB(14,17,20));return (LRESULT)chatBrush;}break;
@@ -5187,6 +5265,22 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         if(!beforeInstances)for(u64 feature:previousOutputs)if(std::none_of(g_doc.assembly.begin(),g_doc.assembly.end(),[&](const auto& node){return node.feature==feature;}))return assistantFailure(333);
         size_t afterFirstInsert=g_doc.features.size(),afterFirstInstances=g_doc.assembly.size();g_dialogSmoke=3;insertLibraryComponent(testComponentId);g_dialogSmoke=0;if(g_error||g_doc.features.size()!=afterFirstInsert||g_doc.assembly.size()!=afterFirstInstances+1)return assistantFailure(334);
         g_toolModule=1;g_toolCategory=-1;g_toolScroll=0;g_teamMode=previousTeamMode;g_libraryRoot=previousLibraryRoot;g_libraryText=previousLibraryText;layout();
+        auto roleAuth=g_authStatus;auto roleCatalog=g_authModels;auto roleModels=g_teamModels,roleEfforts=g_teamEfforts;
+        g_authStatus.connected=g_authStatus.planAuthorized=true;g_authStatus.activeClientId="offline-role-account";g_authModels={{"catalog-a","Offline catalog A",{"low","high"},"low"},{"catalog-b","Offline catalog B",{"medium","xhigh"},"medium"}};auto catalogFixture=g_authModels;
+        g_assistantConfig.authMode=AssistantAuthMode::ChatGptPlan;g_assistantConfig.endpoint="https://api.openai.com/v1/responses";g_assistantConfig.model="catalog-a";g_assistantConfig.reasoningEffort="high";g_teamModels[0]="catalog-a";g_teamEfforts[0]="high";g_roleSmokeCheck=true;
+        auto exerciseRole=[&](const std::string& model,const std::string& effort,int smoke){g_roleSmokeModel=model;g_roleSmokeEffort=effort;g_roleSmokePassed=g_roleSmokeKeyboardPassed=false;g_dialogSmoke=smoke;teamRoleDialog(0);g_dialogSmoke=0;return g_roleSmokePassed&&g_roleSmokeKeyboardPassed;};
+        g_roleSmokeRefresh=true;g_dialogShot=shotPath+".role-model-settings.png";if(!exerciseRole("catalog-b","xhigh",3)||!g_roleSmokeRefreshPassed||g_teamModels[0]!="catalog-b"||g_teamEfforts[0]!="xhigh")return assistantFailure(337);g_roleSmokeRefresh=false;
+        if(!exerciseRole("catalog-a","low",2)||g_teamModels[0]!="catalog-b"||g_teamEfforts[0]!="xhigh")return assistantFailure(338);
+        if(!exerciseRole("catalog-b","",3)||!g_teamEfforts[0].empty()||!teamRoleConfig(0).reasoningEffort.empty())return assistantFailure(339);
+        g_assistantConfig.reasoningEffort="ultra";g_teamModels[0].clear();g_teamEfforts[0].clear();if(!teamRoleConfig(0).reasoningEffort.empty())return assistantFailure(340);
+        g_teamModels[0]="removed-model";g_teamEfforts[0]="high";if(!exerciseRole("catalog-a","low",2)||!g_roleSmokeInitialDisabled||g_teamModels[0]!="removed-model"||g_teamEfforts[0]!="high")return assistantFailure(341);
+        auto finishCatalog=[&](std::vector<ChatGptModel> models,const std::string& error={},bool otherAccount=false){auto* event=new UiAuthEvent;event->job=AuthJob::Models;event->status=g_authStatus;if(otherAccount)event->status.activeClientId="different-offline-account";event->models=std::move(models);event->error=error;SendMessage(g_window,WM_ARK_AUTH,0,(LPARAM)event);};
+        g_authModels.clear();g_authBusy=true;g_activeAuthJob=AuthJob::Models;teamRoleDialog(1);if(g_pendingRoleSettings!=1||g_roleCatalogReady)return assistantFailure(342);finishCatalog(catalogFixture);if(!g_roleCatalogReady)return assistantFailure(343);g_roleSmokeModel="catalog-a";g_roleSmokeEffort="low";g_dialogSmoke=3;openPendingRoleSettings();g_dialogSmoke=0;if(g_pendingRoleSettings>=0||g_teamModels[1]!="catalog-a"||g_teamEfforts[1]!="low")return assistantFailure(344);
+        g_pendingRoleSettings=2;g_pendingRoleAccount=g_authStatus.activeClientId;g_authBusy=true;finishCatalog({},"Offline model fetch failed");if(!g_authModels.empty()||g_pendingRoleSettings>=0||g_roleCatalogReady)return assistantFailure(345);
+        g_authModels=catalogFixture;g_pendingRoleSettings=2;g_pendingRoleAccount=g_authStatus.activeClientId;g_authBusy=true;finishCatalog({});if(!g_authModels.empty()||g_pendingRoleSettings>=0||g_roleCatalogReady)return assistantFailure(346);
+        g_pendingRoleSettings=2;g_pendingRoleAccount=g_authStatus.activeClientId;g_authBusy=true;g_authCancelRequested=true;finishCatalog(catalogFixture);if(g_pendingRoleSettings>=0||g_roleCatalogReady)return assistantFailure(347);
+        g_pendingRoleSettings=2;g_pendingRoleAccount=g_authStatus.activeClientId;g_authBusy=true;finishCatalog(catalogFixture,"",true);if(g_pendingRoleSettings>=0||g_roleCatalogReady)return assistantFailure(348);
+        clearPendingRoleSettings();g_roleSmokeCheck=g_roleSmokeRefresh=false;g_authStatus=roleAuth;g_authModels=roleCatalog;g_teamModels=roleModels;g_teamEfforts=roleEfforts;
         if(g_assistantWorker.joinable())g_assistantWorker.join();g_assistantConfig=previous;g_status="Offline assistant UI checks passed / serialized tools / history / stale-write rejection";
     }
     if(selfTest){
@@ -5302,7 +5396,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
             if(msg.hwnd==g_chatInput&&msg.message==WM_KEYDOWN&&msg.wParam==VK_RETURN&&(GetKeyState(VK_CONTROL)&0x8000)){interactiveAction(74);continue;}
             TranslateMessage(&msg); DispatchMessageA(&msg);
         }
-        drainUiTools();pollTeam();
+        drainUiTools();pollTeam();openPendingRoleSettings();
         if(exitAfterMs&&std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-lifeStart).count()>=exitAfterMs){stopIntegrations();DestroyWindow(hwnd);return 0;}
         drawFrame(hdc);
         ++frames;
