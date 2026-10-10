@@ -14,6 +14,7 @@ int semanticFaceIndexNative(const arkjson::Value& request);
 // Exact separation and overlap evidence; negative legacy values are estimates.
 arkjson::Value clearanceNative(const arkjson::Value& request);
 arkjson::Value geometryQueryNative(const arkjson::Value& request);
+arkjson::Value geometryReferenceShapeNative(const arkjson::Value& request);
 // Signed distance from a point to an exact solid. Negative means the point is inside.
 arkjson::Value pointDistanceNative(const arkjson::Value& request);
 // Volume centroid of one exact solid, in the solid's local millimetre frame.

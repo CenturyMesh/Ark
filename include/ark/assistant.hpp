@@ -30,16 +30,27 @@ struct AssistantUsage {
 };
 void accumulateAssistantUsage(AssistantUsage& total,const AssistantUsage& delta);
 std::string assistantUsageLabel(const AssistantUsage& usage);
+// Measured local wall time and serialized request bytes, separate from provider
+// token receipts. Tool time includes the host's queue/serialization wait.
+struct AssistantPerformance {
+    std::uint64_t providerRequests=0,providerMilliseconds=0,toolCalls=0,toolMilliseconds=0;
+    std::uint64_t requestBytes=0,inputBytes=0,toolSchemaBytes=0,maxRequestBytes=0;
+    std::uint64_t lastProviderMilliseconds=0,lastToolMilliseconds=0;
+    std::uint64_t lastRequestBytes=0,lastInputBytes=0,lastToolSchemaBytes=0;
+};
+void accumulateAssistantPerformance(AssistantPerformance& total,const AssistantPerformance& delta);
 struct AssistantEvent {
     enum Kind { Status, Text, ToolStart, ToolEnd, Usage } kind=Status;
     std::string text; // Tool events contain only tool name; never credentials.
     AssistantUsage usage; // Usage events: cumulative snapshot for this run.
+    AssistantPerformance performance; // Usage/ToolEnd: cumulative measured snapshot for this run.
 };
 struct AssistantResult {
     arkjson::Value conversation=arkjson::Value::makeArr();
     std::string text;
     unsigned rounds=0;
     AssistantUsage usage;
+    AssistantPerformance performance;
 };
 // A bounded turn yielded after real tool receipts. Hosts may continue the
 // retained, protocol-complete history; this is not a request to replay writes.

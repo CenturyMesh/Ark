@@ -318,6 +318,10 @@ const std::vector<FeatureResult>& Document::recompute() {
     arkjson::Value authored;if(!arkjson::parse(documentToJson(*this),authored))throw std::runtime_error("Cannot serialize evaluation dependencies");
     std::string context;
     for(const char* key:{"sketches","planes","materials"})if(auto value=authored.find(key))context+=value->dump();
+    bool instanceProjection=false;
+    for(const auto& sketch:sketches)for(const auto& entity:sketch.sk.ents)instanceProjection|=entity.kind==SketchEnt::Project&&entity.sourceInstance!=0;
+    for(const auto& feature:features)instanceProjection|=feature.type==FeatureType::Curve&&feature.nativeSpec.find("source_instance")!=nullptr;
+    if(instanceProjection)for(const char* key:{"assembly","mates"})if(auto value=authored.find(key))context+=value->dump();
     if(!sketches.empty()||!planes.empty())if(auto value=authored.find("params"))context+=value->dump();
     std::unordered_map<u64,EvaluationCacheEntry> nextCache;
     std::unordered_map<u64,std::string> keys;
@@ -331,11 +335,15 @@ const std::vector<FeatureResult>& Document::recompute() {
     if(parameterError.empty())try{validateNativeComponentCustody(*this);}catch(const std::exception& error){parameterError=error.what();}
     ExprEnv env=buildEnv();
     for(auto& ns:sketches){
+        for(auto& entity:ns.sk.ents)if(entity.kind==SketchEnt::Project){entity.projectionBrep.clear();entity.projectionSamples.clear();entity.projectionLength=0;entity.dof.clear();entity.expressions.clear();entity.segments.clear();}
         evaluateSketch(ns,env);
     }
     std::vector<Body> work;
     evaluatingBodies=&work;
     struct EvaluationScope {Document& doc;~EvaluationScope(){doc.evaluatingBodies=nullptr;}} evaluationScope{*this};
+    // Sketch-only associations can resolve before the first feature. Feature-backed
+    // sources remain waiting until their producer crosses the publication boundary.
+    refreshDrivenSketches(*this,false);
     std::vector<bool> explicitInputs;for(const auto& f:features)explicitInputs.push_back(explicitDependencies(f));
     const unsigned cores=std::max(1u,std::thread::hardware_concurrency());
     const unsigned cpuBudget=std::min(cores,threadSetting("ARK_CPU_THREADS",std::min(cores,32u),64));

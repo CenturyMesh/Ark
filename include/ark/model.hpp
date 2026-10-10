@@ -118,7 +118,8 @@ struct SketchEnt {
     enum Kind : i32 { Pnt, Line, Circle, Spline, Arc, Wire, Project, Offset } kind=Pnt;
     // dof layout: Pnt -> [x,y]; Line -> [x0,y0,x1,y1]; Circle -> [cx,cy,r]
     // Arc -> [cx,cy,r,a0deg,a1deg]. Wire flattens start, then each segment.
-    // Project and offset store the same flattened polyline as a wire of lines.
+    // Project owns an associative exact derived B-rep; its display samples are
+    // separate from the two driven endpoint handles. Offset is a sampled wire.
     // Their coordinates are driven: the solver does not free them.
     struct WireSeg {
         enum Kind : i32 { Line, Arc, Cubic } kind=Line;
@@ -132,6 +133,14 @@ struct SketchEnt {
     f64 tension=0;
     u64 sourceFeature=0;          // project: earlier feature id
     std::string reference;        // project: edge or planar face name
+    std::string projectionMode="legacy"; // normal: orthographic boundary; legacy: cross-face section
+    std::string sourceSketch,sourceEntity;
+    u64 sourceInstance=0;
+    int sourceCopy=0;
+    // Derived exact projection. Never persisted or accepted from DTOs.
+    std::string projectionBrep;
+    std::vector<Vec2> projectionSamples;
+    f64 projectionLength=0;
     std::string sourceName;       // offset: earlier entity in this sketch
     std::string distance;         // offset: signed millimetres, positive to the left
 };

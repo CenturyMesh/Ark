@@ -97,6 +97,10 @@ V curveResult(const TopoDS_Shape& wire) {
     report.set("display_mesh_authoritative", V::makeBool(false));
     result.set("report", report);
     result.set("mesh", ribbonMesh(wire));
+    V topology=V::makeObj(),references=V::makeArr();topology.set("brep_sha256",V::makeStr(sha256(base64Decode(result.find("brep_base64")->str))));
+    const auto edges=shapes(wire,TopAbs_EDGE);
+    for(size_t i=0;i<edges.size();++i){V row=V::makeObj(),indices=V::makeArr();row.set("name",V::makeStr("edge."+std::to_string(i)));row.set("kind",V::makeStr("edge"));row.set("status",V::makeStr("bound"));indices.arr.push_back(V::makeNum(i));row.set("indices",indices);references.arr.push_back(row);}
+    topology.set("references",references);result.set("topology",topology);
     return result;
 }
 
@@ -249,6 +253,7 @@ V bridgeCurve(const V& request) {
 V modelCurveNative(const V& request) {
     const std::string op = need(request, "op").t == V::Str ? need(request, "op").str : "";
     if (op == "curve") return authoredCurve(request);
+    if (op == "curve_brep") return curveResult(readBrep(need(request,"wire_brep").str));
     if (op == "intersection_curve") return intersectionCurve(request);
     if (op == "bridge") return bridgeCurve(request);
     throw std::runtime_error("Unsupported curve operation");

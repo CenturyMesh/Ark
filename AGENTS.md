@@ -57,6 +57,12 @@ ferramentas CAD continua em [docs/AGENTS.md](docs/AGENTS.md).
   contornar falhas com tolerâncias maiores, descarte de sólidos ou rebase silencioso.
 - Manter Focused como predefinição e Parallel como opção. Não introduzir budgets
   de turns/tokens nos agentes sem nova instrução do utilizador.
+- Em pedidos abertos de design, criar primeiro um conceito coerente e editável.
+  Carregar onboarding especializado quando necessário; não impor catálogo, DFM
+  ou cálculos de fabrico antes de existir uma necessidade concreta. Respeitar
+  desde o início os requisitos e processos explicitamente pedidos pelo utilizador.
+  A fase de conceito não dispensa validade geométrica, referências corretas ou
+  distinção entre hipóteses, evidência medida e qualificação de fabrico.
 - Preservar desenhos e sessões do utilizador. Não incluir os seus `.ark` locais
   em commits, benchmarks públicos, instaladores ou pacotes OTA sem instrução explícita.
 

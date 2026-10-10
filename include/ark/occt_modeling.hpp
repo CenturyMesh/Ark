@@ -9,5 +9,7 @@ namespace ark::occt {
 arkjson::Value modelSurfaceNative(const arkjson::Value& request);
 // Exact wires: authored segments, a planar section, or a bridge between two frames.
 arkjson::Value modelCurveNative(const arkjson::Value& request);
+arkjson::Value projectReferenceNative(const arkjson::Value& request);
+arkjson::Value profileCurveNative(const arkjson::Value& profile);
 
 } // namespace ark::occt

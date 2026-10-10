@@ -14,7 +14,8 @@ or publication of the private source repository.
 
 The reusable component library adds nine `library_*` tools, bringing discovery
 to **66 document/library/history tools**. Call `agent_onboard{topic:"components"}` for
-typed metadata and reuse rules. Search the local catalog first, acquire and
+typed metadata and reuse rules when real standard/purchased components are required.
+For that task, search the local catalog first, acquire and
 validate original STEP bytes, keep declared metadata separate from native
 geometry evidence, then insert using `expected_revision`. See
 [library architecture and acquisition](COMPONENT_LIBRARY_ARCHITECTURE.md).
@@ -34,8 +35,11 @@ and [Studio team controls](MULTI_AGENT_STUDIO.md).
 
 The team adds `team_send`, `team_context`, `team_propose`, `team_proposal` and
 `team_apply_step` to its connector schema, not standalone MCP discovery.
-Construction steps are atomic, default to at most eight commands and create at
-most one feature or placement. Explicit observed `expected_revision` is
+Construction steps are atomic and default to at most eight commands, with up to
+eight created features/placements within that command bound and the role scope.
+Related operations can form one coherent batch; one provider round per feature
+is not required. Cached previews can commit only through a retained same-role
+receipt whose commands/checks and baseline passed the same scope/count validation. Explicit observed `expected_revision` is
 required; proposals cannot be silently rebased. Real queued/start/end events
 include step/role IDs and measured revision receipts. Bounded sketch commands
 may be shown as uncommitted drafts; they are not evaluated CAD authority or
@@ -58,8 +62,11 @@ Mechanical motion uses persistent chain, gear, shaft, rack/pinion and harmonic
 cam coupling mates plus read-only `assembly_motion`. Call
 `agent_onboard{topic:"motion"}` and see [mechanical motion](MECHANICAL_MOTION.md).
 
-For mechanical design, call `agent_onboard{topic:"manufacturing"}` before
-authoring. Declare each component's fabrication route and inspect
+For requested manufacturing readiness, declared production processes or fabrication
+claims, call `agent_onboard{topic:"manufacturing"}` before authoring those operations.
+For an open-ended concept, establish form and interfaces first; unknown production
+choices can remain explicitly unspecified. Respect user constraints from the start.
+When specifying manufacture, declare each component's fabrication route and inspect
 `doc_info{detail:"design"}` for operations, dependencies, sketch consumers and
 the originating sheet/frame behind rigid placements. See
 [manufacturing intent and discovery](MANUFACTURING_INTENT.md).

@@ -25,6 +25,8 @@
 #include <TopLoc_Location.hxx>
 #include <Poly_Triangulation.hxx>
 #include <BRepAdaptor_Curve.hxx>
+#include <BRepAdaptor_Surface.hxx>
+#include <BRepAdaptor_Curve2d.hxx>
 #include <GCPnts_QuasiUniformDeflection.hxx>
 #include <GeomAbs_CurveType.hxx>
 #include <fstream>
@@ -92,7 +94,46 @@ void writeStep(const TopoDS_Shape& shape,const fs::path& path){
     if(!path.parent_path().empty())fs::create_directories(path.parent_path());auto u8=path.u8string();std::string name(u8.begin(),u8.end());STEPControl_Writer writer;
     if(writer.Transfer(shape,STEPControl_AsIs)!=IFSelect_RetDone||writer.Write(name.c_str())!=IFSelect_RetDone)throw std::runtime_error("STEP write failed");
 }
-double properties(const TopoDS_Shape& shape,char kind){GProp_GProps props;if(shape.IsNull())return 0;if(kind=='a')BRepGProp::SurfaceProperties(shape,props);else if(kind=='l')BRepGProp::LinearProperties(shape,props);else BRepGProp::VolumeProperties(shape,props);return props.Mass();}
+namespace {
+enum class VolumeMethod { AnalyticGauss, PolynomialTrimGauss, RationalSurfaceKronrod };
+VolumeMethod volumeMethod(const TopoDS_Shape& shape){
+    bool rational=false,polynomialTrim=false,freeformSurface=false;
+    for(const auto& item:shapes(shape,TopAbs_EDGE)){
+        if(BRep_Tool::Degenerated(TopoDS::Edge(item)))continue;
+        BRepAdaptor_Curve curve(TopoDS::Edge(item));
+        if(curve.GetType()==GeomAbs_BSplineCurve||curve.GetType()==GeomAbs_BezierCurve){polynomialTrim=true;rational|=curve.IsRational();}
+    }
+    for(const auto& item:shapes(shape,TopAbs_FACE)){
+        auto face=TopoDS::Face(item);BRepAdaptor_Surface surface(face);
+        freeformSurface|=surface.GetType()==GeomAbs_BSplineSurface||surface.GetType()==GeomAbs_BezierSurface;
+        for(const auto& edge:shapes(face,TopAbs_EDGE)){
+            if(BRep_Tool::Degenerated(TopoDS::Edge(edge)))continue;
+            BRepAdaptor_Curve2d curve(TopoDS::Edge(edge),face);
+            if(curve.GetType()==GeomAbs_BSplineCurve||curve.GetType()==GeomAbs_BezierCurve){polynomialTrim=true;rational|=curve.IsRational();}
+        }
+    }
+    if(rational||freeformSurface)return VolumeMethod::RationalSurfaceKronrod;
+    return polynomialTrim?VolumeMethod::PolynomialTrimGauss:VolumeMethod::AnalyticGauss;
+}
+}
+const char* volumeIntegrationMethod(const TopoDS_Shape& shape){
+    switch(volumeMethod(shape)){case VolumeMethod::AnalyticGauss:return "analytic_gauss";case VolumeMethod::PolynomialTrimGauss:return "adaptive_gauss_polynomial_trim";default:return "gauss_kronrod_rational_or_freeform";}
+}
+void volumeProperties(const TopoDS_Shape& shape,GProp_GProps& props,bool moments){
+    double error=0;
+    switch(volumeMethod(shape)){
+        // Exact analytic surfaces and trims retain the original bounded Gauss rule.
+        // GK moment refinement around their zero terms can take seconds per tube.
+        case VolumeMethod::AnalyticGauss:BRepGProp::VolumeProperties(shape,props,false,false,false);break;
+        // Polynomial trimming of analytic surfaces needs adaptive integration,
+        // but not the expensive rational/freeform moment algorithm.
+        case VolumeMethod::PolynomialTrimGauss:error=BRepGProp::VolumeProperties(shape,props,1e-12,false,false);break;
+        case VolumeMethod::RationalSurfaceKronrod:error=BRepGProp::VolumePropertiesGK(shape,props,1e-10,false,true,moments,moments,false);break;
+    }
+    if(error<0||!std::isfinite(error))throw std::runtime_error("Exact volume integration failed");
+}
+
+double properties(const TopoDS_Shape& shape,char kind){GProp_GProps props;if(shape.IsNull())return 0;if(kind=='a')BRepGProp::SurfaceProperties(shape,props);else if(kind=='l')BRepGProp::LinearProperties(shape,props);else volumeProperties(shape,props,false);return props.Mass();}
 std::vector<TopoDS_Shape> shapes(const TopoDS_Shape& shape,TopAbs_ShapeEnum kind){std::vector<TopoDS_Shape> out;for(TopExp_Explorer ex(shape,kind);ex.More();ex.Next())out.push_back(ex.Current());return out;}
 std::array<double,6> bounds(const TopoDS_Shape& shape){Bnd_Box box;BRepBndLib::AddOptimal(shape,box,false,false);if(box.IsVoid())throw std::runtime_error("Empty native shape bounds");std::array<double,6> b;box.Get(b[0],b[1],b[2],b[3],b[4],b[5]);return b;}
 template<class Op>TopoDS_Shape booleanOp(const TopoDS_Shape& a,const TopoDS_Shape& b){Op op(a,b);op.Build();if(!op.IsDone()||op.HasErrors())throw std::runtime_error("Native Boolean operation failed");return op.Shape();}

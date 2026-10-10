@@ -1,12 +1,17 @@
-# ARK 001A — Agent-Ready Kernel
+# ARK 002B — Agent-Ready Kernel
 
 **Parametric CAD for people and agents.**
 
-Public iteration **001A** uses runtime **0.9.2**. The three digits are globally
-sequential; A?G identifies the roadmap phase, not the month. See the mandatory
+Public iteration **002B** uses runtime **0.9.3**. The three digits are globally
+sequential; A–G identifies the roadmap phase, not the month. See the mandatory
 [development rules](AGENTS.md), the [35-milestone roadmap](docs/ROADMAP.md), and
-the [open-source / ?200 perpetual license analysis](docs/COMMERCIAL_STRATEGY.md).
+the [open-source / €200 perpetual license analysis](docs/COMMERCIAL_STRATEGY.md).
 `release.json` is the single source of release identity.
+
+002B restores concept-first agent workflows, coherent atomic batches and scoped
+preview commits, with measured Provider/tools activity. Sketch adds linked exact
+2D projection and spatial Include 3D curves. Frame editing also works through an
+assembly instance. [Diagnosis and recovery](docs/AGENT_RUNTIME_RECOVERY.md).
 
 Every ribbon exposes **All tools**, a searchable category gallery backed by the
 same commands as the palette. **Library** searches and inserts reusable STEP

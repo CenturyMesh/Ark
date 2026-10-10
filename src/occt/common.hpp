@@ -8,6 +8,7 @@
 #include <array>
 #include <vector>
 #include <string>
+class GProp_GProps;
 
 namespace ark::occt {
 using V=arkjson::Value;
@@ -21,6 +22,8 @@ std::string base64Decode(const std::string& text);
 TopoDS_Shape readStep(const fs::path& path);
 void writeStep(const TopoDS_Shape& shape,const fs::path& path);
 double properties(const TopoDS_Shape& shape,char kind='v');
+void volumeProperties(const TopoDS_Shape& shape,GProp_GProps& properties,bool moments=true);
+const char* volumeIntegrationMethod(const TopoDS_Shape& shape);
 std::vector<TopoDS_Shape> shapes(const TopoDS_Shape& shape,TopAbs_ShapeEnum kind);
 std::array<double,6> bounds(const TopoDS_Shape& shape);
 TopoDS_Shape cut(const TopoDS_Shape& a,const TopoDS_Shape& b);

@@ -7,6 +7,7 @@
 #include <condition_variable>
 #include <iostream>
 #include <mutex>
+#include <set>
 #include <stdexcept>
 #include <thread>
 #include <vector>
@@ -80,6 +81,7 @@ static void interruptedBatchHistory(){
     team.start(config,"Apply two batches",ark::AgentSession::tools(),[&](auto& name,auto& args){++executed;auto result=session.call(name,args);team.cancel();return result;});complete(team);
     auto history=team.snapshot(true).roles[0].conversation;int calls=0,outputs=0;for(const auto& item:history.arr){auto type=item.find("type");if(type&&type->str=="function_call")++calls;if(type&&type->str=="function_call_output")++outputs;}
     check(executed==1&&session.revision==1&&calls==2&&outputs==2,"mid-batch cancellation preserves protocol-complete history and suppresses second mutation");
+    check(team.snapshot().roles[0].performance.providerRequests==1&&team.snapshot().roles[0].performance.toolCalls==1,"cancellation after a completed executor retains its measured provider and tool activity");
     check(history.dump().find("Execution may have completed")!=std::string::npos,"interrupted output records unknown execution instead of invented failure");
     auto continued=ark::runAssistant(config.roles[0].assistant,history,ark::AgentSession::tools(),{}, {},nullptr,[](auto&,const V& request,auto*){
         const auto& input=request.find("input")->arr;for(const auto& item:input)if(item.find("type")&&item.find("type")->str=="function_call"){auto id=item.find("call_id")->str;bool answered=false;for(const auto& result:input)if(result.find("type")&&result.find("type")->str=="function_call_output"&&result.find("call_id")->str==id)answered=true;if(!answered)throw std::runtime_error("unanswered continuation call");}return done("Inspect before continuing");});
@@ -109,7 +111,7 @@ static void conversationMemoryBound(){
     config.roles[0].transport=[](auto&,auto&,auto*){return done(std::string(12000,'z'));};team.start(config,"Keep conversation bounded",tools,{});complete(team);auto snapshot=team.snapshot(true);check(snapshot.roles[0].state==ark::AgentTeamState::Failed&&snapshot.usage.totalTokens==12&&snapshot.roles[0].conversation.dump().size()<=8192,"oversized completed provider output fails before history retention while preserving billed usage");
 }
 static void incrementalStepsAndScopes(){
-    ark::AgentTeam team;ark::AgentTeamConfig config;config.roles={role("designer",true)};config.roles[0].discipline=ark::AgentTeamDiscipline::PartDesigner;int rounds=0;std::atomic_bool attributed=true;ark::AgentSession session;
+    ark::AgentTeam team;ark::AgentTeamConfig config;config.maxFeaturesPerStep=config.maxPlacementsPerStep=1;config.roles={role("designer",true)};config.roles[0].discipline=ark::AgentTeamDiscipline::PartDesigner;int rounds=0;std::atomic_bool attributed=true;ark::AgentSession session;
     config.roles[0].transport=[&](auto&,auto&,auto*){switch(++rounds){
         case 1:return call("skeleton","team_apply_step",R"({"expected_revision":0,"commands":[{"op":"sketch.set","name":"Live","sketch":{"plane":"XY","entities":[{"kind":"line","name":"a","dof":[0,0,10,0]}],"constraints":[]}}]})");
         case 2:return call("entity","team_apply_step",R"({"expected_revision":1,"commands":[{"op":"sketch.entity.set","name":"Live","entity":{"kind":"line","name":"b","dof":[0,0,0,10]}}]})");
@@ -245,4 +247,94 @@ static void parallelProgressStillReportsCompletion(){
     auto completed=team.snapshot();int reports=0;for(const auto& event:completed.events)if(event.kind==ark::AgentTeamEvent::Message&&event.roleId=="engineer"&&event.text.find("Teammate designer -> engineer")!=std::string::npos)++reports;
     check(reports==2&&completed.roles[0].turns==earlier.roles[0].turns+1,"parallel completion wakes the lead even when an earlier message already reported progress");
 }
-int main(){try{focusedSequentialAssignments();leadEngineerAuthorsPartsAndAssembly();parallelProgressStillReportsCompletion();sharedFailureEvidence();unlimitedEightRoleAssignments();configChecks();concurrencyAndRevision();steeringAndPause();collaboration();cancellationAndFailures();interruptedBatchHistory();limitsAndMutationSchemas();conversationMemoryBound();incrementalStepsAndScopes();frameDisciplineScope();proposalsAndPhysicsRole();concurrentQueuedDrafts();yieldedAndInterruptedContinuation();std::cout<<"Agent team checks passed: "<<checks<<"\n";return 0;}catch(const std::exception& error){std::cerr<<"Agent team checks failed: "<<error.what()<<"\n";return 1;}}
+static void coherentBatchBenchmark(){
+    const auto commands=json(R"([
+        {"op":"feature.add","type":"cylinder","name":"Cylinder","p":{"r":3,"h":12}},
+        {"op":"assembly.add","name":"Cylinder instance","feature":"Cylinder"},
+        {"op":"feature.add","type":"sphere","name":"Sphere","p":{"r":4}},
+        {"op":"assembly.add","name":"Sphere instance","feature":"Sphere","p":{"tx":20}},
+        {"op":"feature.add","type":"cone","name":"Cone","p":{"rb":4,"rt":2,"h":10}},
+        {"op":"assembly.add","name":"Cone instance","feature":"Cone","p":{"tx":40}},
+        {"op":"feature.add","type":"torus","name":"Torus","p":{"R":8,"r":2}},
+        {"op":"assembly.add","name":"Torus instance","feature":"Torus","p":{"tx":60}}
+    ])");
+    struct Measurement{ark::AgentTeamSnapshot snapshot;ark::Document document;unsigned revisions=0;};
+    auto run=[&](bool singleFeature,bool focused){ark::AgentTeam team;ark::AgentTeamConfig config;config.focusedWorkflow=focused;
+        if(singleFeature)config.maxFeaturesPerStep=config.maxPlacementsPerStep=1;
+        config.roles={role("engineer",true)};config.roles[0].discipline=ark::AgentTeamDiscipline::Orchestrator;config.roles[0].assistant.onboardingPack=ark::agentOnboardingPack({"overview"});
+        int round=0;ark::AgentSession session;
+        config.roles[0].transport=[&](auto&,auto&,auto*){if(++round>(singleFeature?4:1))return done("The four curved display fixtures and placements are committed.");V args=V::makeObj(),batch=V::makeArr();args.set("expected_revision",V::makeNum(round-1));
+            if(singleFeature){batch.arr.push_back(commands.arr[(round-1)*2]);batch.arr.push_back(commands.arr[(round-1)*2+1]);}else batch=commands;args.set("commands",batch);return call("coherent_"+std::to_string(round),"team_apply_step",args.dump());};
+        team.start(config,"Construct these four explicit fixture parts and placements coherently",ark::AgentSession::tools(),[&](auto& name,auto& args){return session.call(name,args);});complete(team);
+        auto snapshot=team.snapshot();check(snapshot.roles[0].state==ark::AgentTeamState::Idle&&session.document.features.size()==4&&session.document.assembly.size()==4,"coherent multi-feature construction reaches actual geometry and all four placements");
+        check(snapshot.roles[0].performance.providerRequests==(singleFeature?5:2)&&snapshot.roles[0].performance.toolCalls==(singleFeature?4:1)&&snapshot.performance.requestBytes==snapshot.roles[0].performance.requestBytes,"role and team metrics count measured calls/bytes once across actual execution");
+        return Measurement{snapshot,session.document,static_cast<unsigned>(session.revision)};
+    };
+    const auto earlier=run(true,true),focused=run(false,true),parallel=run(false,false);
+    check(earlier.revisions==4&&focused.revisions==1&&parallel.revisions==1&&focused.snapshot.roles[0].stepsApplied==1,"one coherent eight-command transaction replaces four forced feature transactions in both team modes");
+    for(std::size_t i=0;i<4;++i)check(earlier.document.features[i].type==focused.document.features[i].type&&earlier.document.features[i].p==focused.document.features[i].p&&earlier.document.assembly[i].feature==focused.document.assembly[i].feature&&earlier.document.assembly[i].p==focused.document.assembly[i].p,"batching preserves authored geometry parameters and physical placements");
+    check(focused.snapshot.performance.requestBytes<earlier.snapshot.performance.requestBytes&&parallel.snapshot.performance.providerRequests==focused.snapshot.performance.providerRequests,"fewer tool round trips lower transmitted bytes without restricting Parallel authoring");
+    V report=V::makeObj();report.set("legacy_provider_requests",V::makeNum(earlier.snapshot.performance.providerRequests));report.set("batch_provider_requests",V::makeNum(focused.snapshot.performance.providerRequests));report.set("legacy_commits",V::makeNum(earlier.revisions));report.set("batch_commits",V::makeNum(focused.revisions));report.set("legacy_request_bytes",V::makeNum(earlier.snapshot.performance.requestBytes));report.set("batch_request_bytes",V::makeNum(focused.snapshot.performance.requestBytes));report.set("parallel_request_bytes",V::makeNum(parallel.snapshot.performance.requestBytes));std::cout<<"AGENT_BATCH_BENCHMARK "<<report.dump()<<'\n';
+    ark::AgentTeam team;ark::AgentTeamConfig config;config.roles={role("engineer",true)};config.roles[0].discipline=ark::AgentTeamDiscipline::Orchestrator;ark::AgentSession session;int rounds=0;
+    config.roles[0].transport=[&](auto&,auto&,auto*){if(++rounds==1)return call("atomic_negative","team_apply_step",R"({"expected_revision":0,"commands":[{"op":"feature.add","type":"sphere","name":"Uncommitted part","p":{"r":4}},{"op":"feature.add","type":"torus","name":"Broken dependent part","p":{"R":"unknown_dimension","r":2}}]})");return done("The rejected batch leaves no partial part.");};
+    team.start(config,"Reject an invalid coherent batch",ark::AgentSession::tools(),[&](auto& name,auto& args){return session.call(name,args);});complete(team);check(session.revision==0&&session.document.features.empty()&&team.snapshot().roles[0].stepsApplied==0,"larger batches retain evaluation rollback and never publish a valid prefix of rejected geometry");
+}
+static void restoredDocumentAndCanvasTools(){
+    ark::AgentTeam team;ark::AgentTeamConfig config;config.focusedWorkflow=true;config.roles={role("engineer",true),role("reviewer")};config.roles[0].discipline=ark::AgentTeamDiscipline::Orchestrator;config.roles[1].discipline=ark::AgentTeamDiscipline::PhysicsReviewer;
+    int round=0,rejected=0;std::vector<std::string> executed;ark::AgentSession session;bool allAdvertised=false;
+    config.roles[0].transport=[&](auto&,const V& request,auto*){if(++round==1){std::set<std::string> names;for(const auto& tool:request.find("tools")->arr)names.insert(tool.find("name")->str);allAdvertised=names.count("doc_new")&&names.count("doc_undo")&&names.count("doc_redo")&&names.count("import_mesh")&&names.count("import_step")&&names.count("import_sheet_step");
+            return call("canvas_part","doc_apply",R"({"expected_revision":0,"commands":[{"op":"canvas.set","name":"Concept reference","path":"isolated-test-reference.png","plane":"XY","width":120,"height":80},{"op":"feature.add","type":"sphere","name":"Editable concept","p":{"r":4},"manufacturing":{"route":"unspecified"}}]})");}
+        switch(round){
+            case 2:return call("lead_undo","doc_undo",R"({"expected_revision":1})");
+            case 3:return call("lead_redo","doc_redo",R"({"expected_revision":2})");
+            case 4:return call("lead_new","doc_new",R"({"expected_revision":3})");
+            case 5:return call("undo_requested_new","doc_undo",R"({"expected_revision":4})");
+            case 6:return call("missing_mesh","import_mesh",R"({"expected_revision":5,"path":"ARK_TEST_MISSING_SOURCE_4B39E294.obj"})");
+            case 7:return call("missing_step","import_step",R"({"expected_revision":5,"path":"ARK_TEST_MISSING_SOURCE_4B39E294.step"})");
+            case 8:return call("missing_sheet","import_sheet_step",R"({"expected_revision":5,"path":"ARK_TEST_MISSING_SOURCE_4B39E294.step","k_factor":0.5})");
+            case 9:return call("stale_undo","doc_undo",R"({"expected_revision":4})");
+            default:return done("Requested concept edit/history operations completed; the explicitly missing test imports rejected.");}};
+    config.roles[1].transport=[](auto&,auto&,auto*){return done("Independent review waits for a requested checkpoint.");};
+    team.start(config,"Exercise the concept reference, undo/redo/new and explicitly missing test-source imports; no fabrication claim",ark::AgentSession::tools(),[&](auto& name,auto& args){executed.push_back(name);auto result=session.call(name,args);if(result.find("isError")->b)++rejected;return result;});complete(team);auto snapshot=team.snapshot(true);
+    check(allAdvertised&&executed.size()==9&&rejected==4,"lead engineer can reach public history/import tools and receives actual source/revision errors rather than a role denial");
+    check(session.revision==5&&session.document.features.size()==1&&session.document.canvases.size()==1&&snapshot.roles[0].stepsApplied==5,"restored undo/redo/new/canvas operations preserve real history and reject stale or missing-source mutations atomically");
+    const auto lead=snapshot.roles[0].conversation.dump(),review=snapshot.roles[1].conversation.dump();
+    check(lead.find("first create a coherent whole editable design")!=std::string::npos&&lead.find("explicitly unspecified")!=std::string::npos&&review.find("do not impose fabrication routes")!=std::string::npos&&snapshot.roles[1].turns==0,"concept-first lead and targeted reviewer instructions do not manufacture a premature fabrication checkpoint");
+    config.roles={role("designer",true)};config.roles[0].discipline=ark::AgentTeamDiscipline::PartDesigner;round=0;ark::AgentSession designer;
+    config.roles[0].transport=[&](auto&,auto&,auto*){if(++round==1)return call("designer_reference","doc_apply",R"({"expected_revision":0,"commands":[{"op":"canvas.set","name":"Assigned reference","path":"isolated-test-reference.png","plane":"XY","width":80,"height":50}]})");return done("Assigned reference created.");};
+    team.start(config,"Author the assigned reference canvas only",ark::AgentSession::tools(),[&](auto& name,auto& args){return designer.call(name,args);});complete(team);check(designer.revision==1&&designer.document.canvases.size()==1,"part designer retains canvas authoring without acquiring document-wide history/import authority");
+}
+static void ownedPreparedCandidates(){
+    ark::AgentTeam team;ark::AgentTeamConfig config;config.focusedWorkflow=true;config.roles={role("engineer",true)};config.roles[0].discipline=ark::AgentTeamDiscipline::Orchestrator;
+    ark::AgentSession session;int round=0,executors=0,preparedCommits=0;std::string candidate;
+    config.roles[0].transport=[&](auto&,const V& request,auto*){switch(++round){
+        case 1:return call("inspect_candidate","doc_info","{}");
+        case 2:return call("prepare_candidate","doc_preview",R"({"expected_revision":0,"commands":[{"op":"param.set","name":"radius","expr":4},{"op":"feature.add","type":"sphere","name":"Cached concept","p":{"r":"radius"}},{"op":"assembly.add","name":"Cached placement","feature":"Cached concept"}],"checks":[{"query":{"tool":"eval_expr","args":{"expr":"radius"},"path":"value"},"op":"eq","value":4,"tolerance":0.000000001}]})");
+        case 3:{V response;arkjson::parse(request.find("input")->arr.back().find("output")->str,response);candidate=response.find("structuredContent")->find("candidate_id")->str;check(session.revision==0&&session.document.features.empty(),"successful team preview has not committed document geometry");return call("no_rebase_candidate","team_apply_step","{\"expected_revision\":1,\"candidate_id\":\""+candidate+"\"}");}
+        case 4:return call("commit_candidate","doc_apply","{\"expected_revision\":0,\"candidate_id\":\""+candidate+"\"}");
+        case 5:return call("no_replay_candidate","team_apply_step","{\"expected_revision\":1,\"candidate_id\":\""+candidate+"\"}");
+        case 6:return call("failed_candidate","doc_preview",R"({"expected_revision":1,"commands":[{"op":"param.set","name":"radius","expr":5}],"checks":[{"query":{"tool":"eval_expr","args":{"expr":"radius"},"path":"value"},"op":"eq","value":999}]})");
+        case 7:return call("unknown_candidate","doc_apply",R"({"expected_revision":1,"candidate_id":"not-a-measured-preview"})");
+        default:return done("The owned measured candidate committed without a second geometry evaluation.");}};
+    team.start(config,"Preview and commit a coherent concept at the observed revision",ark::AgentSession::tools(),[&](auto& name,auto& args){++executors;auto result=session.call(name,args);const auto* data=result.find("structuredContent");if(data&&data->find("applied_prepared")&&data->find("applied_prepared")->b){++preparedCommits;check(!data->find("geometry_recomputed")->b&&data->find("features_evaluated")->num==0,"cached team commit reuses the actual evaluated candidate");}return result;});complete(team);auto snapshot=team.snapshot();
+    check(executors==4&&preparedCommits==1&&session.revision==1&&session.document.features.size()==1&&session.document.assembly.size()==1&&session.document.getParam("radius")==4,"owned cached commit retains original checked commands, while rebase/replay/unknown candidates never reach executor");
+    check(snapshot.roles[0].stepsApplied==1,"only actual cached publication increments construction count");
+    bool attributed=false;for(const auto& event:snapshot.events)if(event.kind==ark::AgentTeamEvent::ConstructionEnd&&!event.toolError)attributed=event.operations.size()==3&&event.featureNames.size()==1&&event.featureNames[0]=="Cached concept";
+    check(attributed,"cached construction events expose the actual previously inspected recipe instead of hidden operations");
+    config.roles={role("engineer",true),role("designer",true)};config.roles[0].discipline=ark::AgentTeamDiscipline::Orchestrator;config.roles[1].discipline=ark::AgentTeamDiscipline::PartDesigner;
+    ark::AgentSession isolated;round=0;int designerRound=0,sharedExecutors=0;std::string otherCandidate,ownCandidate;bool borrowedRejected=false,scopeRejected=false,filtered=false;
+    config.roles[0].transport=[&](auto&,const V& request,auto*){switch(++round){
+        case 1:return call("lead_preview","doc_preview",R"({"expected_revision":0,"commands":[{"op":"feature.add","type":"sphere","name":"Lead preview","p":{"r":4}},{"op":"assembly.add","name":"Lead instance","feature":"Lead preview"}]})");
+        case 2:{V response;arkjson::parse(request.find("input")->arr.back().find("output")->str,response);otherCandidate=response.find("structuredContent")->find("candidate_id")->str;return call("assign_designer","team_send",R"({"to":"designer","message":"Work only on your own component and report actual evidence."})");}
+        default:return done("Specific component assigned.");}};
+    config.roles[1].transport=[&](auto&,const V& request,auto*){switch(++designerRound){
+        case 1:{for(const auto& tool:request.find("tools")->arr)if(tool.find("name")->str=="doc_apply"){const auto choices=tool.find("parameters")->find("properties")->find("commands")->find("items")->find("properties")->find("op")->find("enum")->dump();filtered=choices.find("assembly.add")==std::string::npos&&choices.find("canvas.set")!=std::string::npos;}return call("borrowed_candidate","doc_apply","{\"expected_revision\":0,\"candidate_id\":\""+otherCandidate+"\"}");}
+        case 2:borrowedRejected=request.find("input")->arr.back().find("output")->str.find("owned by this role")!=std::string::npos;return call("wrong_scope_preview","doc_preview",R"({"expected_revision":0,"commands":[{"op":"feature.add","type":"sphere","name":"Wrong scope","p":{"r":4}},{"op":"assembly.add","name":"Foreign placement","feature":"Wrong scope"}]})");
+        case 3:scopeRejected=request.find("input")->arr.back().find("output")->str.find("different team discipline")!=std::string::npos;return call("own_preview","doc_preview",R"({"expected_revision":0,"commands":[{"op":"feature.add","type":"cylinder","name":"Designer concept","p":{"r":2,"h":5}}]})");
+        case 4:{V response;arkjson::parse(request.find("input")->arr.back().find("output")->str,response);ownCandidate=response.find("structuredContent")->find("candidate_id")->str;return call("own_commit","team_apply_step","{\"expected_revision\":0,\"candidate_id\":\""+ownCandidate+"\"}");}
+        default:return done("Own component committed.");}};
+    team.start(config,"Preserve designer ownership and measured preview scope",ark::AgentSession::tools(),[&](auto& name,auto& args){++sharedExecutors;return isolated.call(name,args);});complete(team);auto roles=team.snapshot(true);
+    check(filtered&&borrowedRejected&&scopeRejected&&sharedExecutors==3&&isolated.revision==1&&isolated.document.features.size()==1&&isolated.document.features[0].name=="Designer concept"&&isolated.document.assembly.empty(),"role-filtered schema and runtime reject borrowed or foreign-operation candidates while allowing an owned designer cache commit");
+    check(roles.roles[1].conversation.dump().find("new features and 8 placements")==std::string::npos,"generic designer workflow no longer advertises forbidden assembly placements");
+}
+int main(){try{ownedPreparedCandidates();restoredDocumentAndCanvasTools();coherentBatchBenchmark();focusedSequentialAssignments();leadEngineerAuthorsPartsAndAssembly();parallelProgressStillReportsCompletion();sharedFailureEvidence();unlimitedEightRoleAssignments();configChecks();concurrencyAndRevision();steeringAndPause();collaboration();cancellationAndFailures();interruptedBatchHistory();limitsAndMutationSchemas();conversationMemoryBound();incrementalStepsAndScopes();frameDisciplineScope();proposalsAndPhysicsRole();concurrentQueuedDrafts();yieldedAndInterruptedContinuation();std::cout<<"Agent team checks passed: "<<checks<<"\n";return 0;}catch(const std::exception& error){std::cerr<<"Agent team checks failed: "<<error.what()<<"\n";return 1;}}

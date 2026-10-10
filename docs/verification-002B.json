@@ -1,0 +1,284 @@
+{
+  "iteration": {
+    "sequence": 2,
+    "phase": "B",
+    "code": "002B",
+    "version": "0.9.3",
+    "milestones": [
+      "B.02",
+      "B.03",
+      "C.02",
+      "D.02",
+      "D.04"
+    ]
+  },
+  "date": "2026-10-10",
+  "base_commit": "43c71d95c69d0d78a23dfc3a137981cb30d8c36d",
+  "native_ctest": {
+    "passed": 55,
+    "failed": 0,
+    "seconds": 86.94,
+    "log": "out\\ark-002B-final-native-tests.log"
+  },
+  "core_ctest": {
+    "passed": 38,
+    "failed": 0,
+    "seconds": 21.28,
+    "log": "out\\ark-002B-final-core-tests.log"
+  },
+  "ui_tests": [
+    {
+      "test": "navigation-ui",
+      "exit": 0,
+      "seconds": 0.6,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-002B-verified-navigation-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "assistant-ui",
+      "exit": 0,
+      "seconds": 15.27,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-002B-verified-assistant-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "native-ui",
+      "exit": 0,
+      "seconds": 3.74,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-002B-verified-native-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "context-ui",
+      "exit": 0,
+      "seconds": 1.86,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-002B-verified-context-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "render-ui",
+      "exit": 0,
+      "seconds": 2.29,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-002B-verified-render-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "sketch-ui",
+      "exit": 0,
+      "seconds": 4.17,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-002B-verified-sketch-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "sheet-showcase-ui",
+      "exit": 0,
+      "seconds": 3.21,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-002B-verified-sheet-showcase-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "suspension-ui",
+      "exit": 0,
+      "seconds": 0.78,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-002B-verified-suspension-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "motion-ui",
+      "exit": 0,
+      "seconds": 22.12,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-002B-verified-motion-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "engineering-ui",
+      "exit": 0,
+      "seconds": 1.38,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-002B-verified-engineering-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "dialogs",
+      "exit": 0,
+      "seconds": 1.72,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-002B-verified-dialogs.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "ui",
+      "exit": 0,
+      "seconds": 0.59,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-002B-verified-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "projection-ui",
+      "exit": 0,
+      "seconds": 2.57,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-002B-verified-projection-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "frame-tools-ui",
+      "exit": 0,
+      "seconds": 2.42,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-002B-verified-frame-tools-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    }
+  ],
+  "exact_projection_checks": 118,
+  "native_volume_integration_checks": 16,
+  "agent_runtime": {
+    "schema": "ark.agent-runtime-diagnosis.v1",
+    "iteration": "002B",
+    "recorded_utc": "2026-10-10T18:42:51.0625710Z",
+    "evidence": "Offline injected transports with real AgentSession executions",
+    "live_provider_calls": 0,
+    "reference_policies_reconstructed_against_current_contracts": true,
+    "source_chronology": [
+      {
+        "date": "2026-10-10 12:14:48 +0100",
+        "introduced": "Mechanical manufacturing/route/material before-detail instruction",
+        "commit": "d73ad18"
+      },
+      {
+        "date": "2026-10-10 12:53:43 +0100",
+        "introduced": "Mandatory standard component library lookup instruction",
+        "commit": "85612c1"
+      },
+      {
+        "date": "2026-10-10 15:56:52 +0100",
+        "introduced": "One-feature/placement construction caps and skeleton/entity-by-entity guidance",
+        "commit": "f77168e"
+      },
+      {
+        "date": "2026-10-10 16:33:56 +0100",
+        "introduced": "Static prebaked guides, live document removed, preloaded lead5/designer9/Single3 topics",
+        "commit": "ed0a51d"
+      },
+      {
+        "introduced": "Lead preloaded eleven domain topics and focused workflow",
+        "commit": "5e7153f"
+      }
+    ],
+    "corrected": [
+      "Intent-sensitive concept first; user constraints and production claims retain validation",
+      "Coherent eight-command batches with up to eight features/placements",
+      "Lead public New/Undo/Redo/import and writer canvas permissions",
+      "Role-filtered command schemas and role-appropriate startup/workflow",
+      "Owned successful doc_preview candidate commit without repeated geometry evaluation",
+      "Only byte-identical MCP text duplicates removed from assistant receipts",
+      "Measured provider/tool wall time and request/input/schema bytes"
+    ],
+    "cached_candidate_tests": [
+      "Actual applied_prepared:true, geometry_recomputed:false, features_evaluated:0",
+      "Original checks retained and failed preview does not commit",
+      "Wrong baseline, replay, unknown and other-role candidates rejected",
+      "Foreign designer assembly preview rejected before executor",
+      "Construction events identify actual retained recipe"
+    ],
+    "request_payload": {
+      "tools": 65,
+      "tool_schema_bytes": 44778,
+      "full_pack_bytes": 47491,
+      "core_pack_bytes": 5232,
+      "initial_request_full_pack": 97206,
+      "initial_request_core_pack": 54051,
+      "receipt_bytes_full": 17882,
+      "receipt_bytes_compact": 8785,
+      "next_request_full_receipt": 73150,
+      "next_request_compact_receipt": 63419
+    },
+    "coherent_batch": {
+      "legacy_provider_requests": 5,
+      "batch_provider_requests": 2,
+      "legacy_commits": 4,
+      "batch_commits": 1,
+      "legacy_request_bytes": 322826,
+      "batch_request_bytes": 126106,
+      "parallel_request_bytes": 125454
+    },
+    "verification": {
+      "ctest_passed": 2,
+      "agent_team_checks": 216,
+      "diff_check": "passed",
+      "assistant_checks": 103
+    },
+    "boundaries": [
+      "No live provider latency comparison or model-quality evaluation",
+      "Four dispatch geometry fixtures are sampled display shapes, not exact manufacturing qualification",
+      "Provider timing includes transport; tool timing includes host queue",
+      "Snapshot connector returns path/metadata and does not supply viewport pixels to the model",
+      "All 65 model-visible tools retained; usage_record remains host-only",
+      "No saved model/effort preferences, user drawings, turn/token budgets or commits changed"
+    ]
+  },
+  "visual_review": [
+    "projection circle preview and Apply/Cancel",
+    "spatial NURBS preview",
+    "frame shared-definition/local-coordinate dialog",
+    "navigation cube and arrows/letters"
+  ],
+  "package": {
+    "url": "https://github.com/CenturyMesh/Ark-Releases/releases/download/v0.9.3/ark-windows-x64-0.9.3.zip",
+    "name": "ark-windows-x64-0.9.3.zip",
+    "sha256": "b39bf33afea55c6ff250445c7df65d61e15d53af5afd403b2ff20c18166907aa",
+    "size": 30011426
+  },
+  "runtime_hashes": [
+    {
+      "file": "ark-studio.exe",
+      "sha256": "b7cc09aa77b634d0e3c7a08fb34ab97eb9e432ae7b33ada0252bc673b4222e5c"
+    },
+    {
+      "file": "ark-cli.exe",
+      "sha256": "1ed946b2aba75c95e6fd54d46d2d0b5673b5afaaccd66bb2c96e7f1534fa7235"
+    },
+    {
+      "file": "ark-mcp.exe",
+      "sha256": "439e9677cdc1da4bdb61b46d26b5e1ff0588379f8ccda932c139d7503aff3ee0"
+    },
+    {
+      "file": "ark-occt-worker.exe",
+      "sha256": "8fda582ad5b0581332b162d0b777518f20a0999efe2343fe9036c940b1362aac"
+    }
+  ],
+  "native_self_update_activation": {
+    "code": "002B",
+    "title": "ARK 002B",
+    "pid": 72180,
+    "version": "0.9.3",
+    "current": "0.9.3",
+    "previous": "0.9.2",
+    "pending": "",
+    "activating": "",
+    "prior_pid": 65664,
+    "prior_window_preserved": true,
+    "responding": true
+  },
+  "preserved_drawings": [
+    {
+      "file": "examples/Bike_exemple.ark",
+      "sha256": "d66a46d23f6c7315aa37383a407e8255a876724196003030dd038fb4873fff56"
+    },
+    {
+      "file": "examples/bike2.ark",
+      "sha256": "c982a5688a83d0573912836b7f6fb5f24580ffcad3bbd548f6fda11f4895c3da"
+    },
+    {
+      "file": "examples/drone_attempt.ark",
+      "sha256": "50d84326de34918dc0c2dffecc7839563906aee676eeeb2a98e5a113480783b9"
+    }
+  ],
+  "limits": [
+    "Offline replay measures overhead, not paid provider latency, euro savings or design quality",
+    "Include3D is associative spatial geometry, not a general 3D constraint solver",
+    "Trim/Weld ribbon applies to ConstructionFrame definitions, not arbitrary generic solids",
+    "Snapshot currently returns path/metadata rather than pixels to internal models",
+    "New projection selectors require document v28; derived B-rep/display samples are not persisted",
+    "Online update endpoint and hosted CI not verified; no public release uploaded"
+  ],
+  "paid_provider_calls_for_tests": false,
+  "live_OTA_channel_configured": false,
+  "hosted_CI_checked": false
+}

@@ -41,6 +41,7 @@ int runWorker(const fs::path& requestPath,const fs::path& resultPath){
         else if(op=="point_distance")result=pointDistanceNative(field("request"));
         else if(op=="solid_centroid")result=solidCentroidNative(field("request"));
         else if(op=="geometry_query")result=geometryQueryNative(field("request"));
+        else if(op=="project_reference")result=projectReferenceNative(field("request"));
         else if(op=="import_sheet")result=importSheetNative(request);
         else if(op=="export_sheet")result=exportSheetNative(request);
         else if(op=="export_sheet_flat_dxf")result=exportSheetFlatDxfNative(request);

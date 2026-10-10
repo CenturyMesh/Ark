@@ -239,6 +239,18 @@ Profile profileOf(const V& value, bool requireClosed) {
         throw std::runtime_error("profile needs 1..128 entities");
     Profile result;
     for (const V& entity : entities.arr) {
+        if(required(entity,"kind").str=="brep"){
+            const auto& encoded=required(entity,"brep_base64");if(encoded.t!=V::Str)throw std::runtime_error("Projected profile B-rep must be text");
+            auto wires=shapes(readBrep(encoded.str),TopAbs_WIRE);if(wires.size()!=1)throw std::runtime_error("Projected entity must contain exactly one wire");
+            gp_Trsf placement;placement.SetValues(frame[0],frame[4],frame[8],frame[12],frame[1],frame[5],frame[9],frame[13],frame[2],frame[6],frame[10],frame[14]);
+            auto wire=TopoDS::Wire(transformed(wires[0],placement));
+            for(BRepTools_WireExplorer walk(wire);walk.More();walk.Next()){
+                TopoDS_Vertex first,last;TopExp::Vertices(walk.Current(),first,last,true);if(first.IsNull()||last.IsNull())throw std::runtime_error("Projected edge has no endpoints");
+                EdgeRecord edge{walk.Current(),BRep_Tool::Pnt(first),BRep_Tool::Pnt(last)};
+                if(!result.edges.empty()&&result.edges.back().last.Distance(edge.first)>kTolerance)throw std::runtime_error("Projected profile edges are not connected");result.edges.push_back(edge);
+            }
+            continue;
+        }
         EdgeRecord edge = edgeOf(entity, frame);
         if (!result.edges.empty() && result.edges.back().last.Distance(edge.first) > kTolerance)
             throw std::runtime_error("profile entities are not connected in supplied order");
@@ -1281,6 +1293,9 @@ V thicken(const V& request) {
 }
 } // namespace
 
+V profileCurveNative(const V& profile){
+    auto resolved=profileOf(profile,false);V request=V::makeObj();request.set("op",V::makeStr("curve_brep"));request.set("wire_brep",V::makeStr(brepData(resolved.wire)));return modelCurveNative(request);
+}
 V modelSurfaceNative(const V& request) {
     try {
         const V& operation = required(request, "op");

@@ -52,8 +52,8 @@ V edge(const char* kind, std::initializer_list<Vec2> coordinates) {
     return item;
 }
 
-V profileFromSketch(Document& document, const std::string& name) {
-    NamedSketch* named = document.findSketch(name);
+V profileFromSketch(Document& document, const std::string& name,const NamedSketch* supplied=nullptr) {
+    const NamedSketch* named = supplied?supplied:document.findSketch(name);
     if (!named || !named->error.empty())
         throw std::runtime_error("Native profile sketch is missing or invalid: " + name);
     V profile = V::makeObj(), frame = V::makeArr(), entities = V::makeArr();
@@ -67,7 +67,10 @@ V profileFromSketch(Document& document, const std::string& name) {
             return Vec2{source.dof[static_cast<size_t>(2 * index)],
                         source.dof[static_cast<size_t>(2 * index + 1)]};
         };
-        if (source.kind == SketchEnt::Line) {
+        if(source.kind==SketchEnt::Project){
+            if(source.projectionBrep.empty())throw std::runtime_error("Exact projected sketch entity is not evaluated");
+            V item=V::makeObj();item.set("kind",V::makeStr("brep"));item.set("brep_base64",V::makeStr(source.projectionBrep));item.set("name",V::makeStr(source.name.empty()?"entity."+std::to_string(entityIndex):source.name));entities.arr.push_back(item);
+        } else if (source.kind == SketchEnt::Line) {
             if (source.dof.size() != 4) throw std::runtime_error("Native line needs two endpoints");
             V item = edge("line", {anchor(0), anchor(1)});
             item.set("name", V::makeStr(source.name.empty() ? "entity." + std::to_string(entityIndex) : source.name));
@@ -271,6 +274,25 @@ V profileArgument(const Feature& feature, const ExprEnv& env, Document& document
     }
     if (value.t == V::Obj) return numericNative(value, env);
     throw std::runtime_error(std::string(key) + " must be a sketch name or a profile object");
+}
+
+V spatialProjectionResult(const Feature& feature,Document& document){
+            if(const V* operation=feature.nativeSpec.find("op");operation&&operation->str=="project"){
+                const V* mode=feature.nativeSpec.find("mode");if(!mode||mode->t!=V::Str||mode->str!="3d")throw std::runtime_error("Spatial included geometry requires mode 3d");
+                if(const V* source=feature.nativeSpec.find("source_sketch")){
+                    const V& entity=required(feature.nativeSpec,"source_entity");
+                    if(source->t!=V::Str||entity.t!=V::Str||!feature.inputs.empty()||feature.nativeSpec.find("reference")||feature.nativeSpec.find("source_instance")||feature.nativeSpec.find("source_copy"))throw std::runtime_error("Choose one sketch/entity source or one native feature/reference");
+                    return projectSketchGeometry(document,source->str,entity.str);
+                }
+                if(feature.inputs.size()!=1)throw std::runtime_error("3D included geometry requires one earlier source feature input");
+                const V& reference=required(feature.nativeSpec,"reference");if(reference.t!=V::Str||reference.str.empty())throw std::runtime_error("Projection reference must be a producer name");
+                u64 instance=0;int copy=0;
+                if(auto value=feature.nativeSpec.find("source_instance")){if(value->t!=V::Num||value->num<1||value->num>9007199254740990.||value->num!=std::floor(value->num))throw std::runtime_error("Invalid projection source_instance");instance=(u64)value->num;}
+                if(auto value=feature.nativeSpec.find("source_copy")){if(!instance||value->t!=V::Num||value->num<0||value->num>31||value->num!=std::floor(value->num))throw std::runtime_error("Invalid projection source_copy");copy=(int)value->num;}
+                V result=projectGeometry(document,feature.inputs.front(),reference.str,"",instance,copy);
+                return result;
+            }
+    throw std::runtime_error("Spatial projection definition missing");
 }
 
 V surfaceRequest(const Feature& feature, const ExprEnv& env, Document& document,
@@ -928,6 +950,14 @@ void validateNativeComponentCustody(const Document& document){
     }
 }
 
+arkjson::Value sketchEntityNativeProfile(Document& document,const std::string& name,const std::string& entity){
+    auto source=document.findSketch(name);if(!source||!source->error.empty())throw std::runtime_error("Projection source sketch is missing or invalid: "+name);
+    const SketchEnt* found=nullptr;for(const auto& item:source->sk.ents)if(item.name==entity){if(found)throw std::runtime_error("Ambiguous projection source entity");found=&item;}
+    if(!found||found->kind==SketchEnt::Pnt||found->kind==SketchEnt::Offset)throw std::runtime_error("Projection source must be a named exact line, circle, arc, spline or wire");
+    if(found->kind==SketchEnt::Project&&found->projectionBrep.empty())throw std::runtime_error("Projection source sketch entity is not evaluated yet");
+    NamedSketch selected=*source;selected.sk.ents={*found};selected.sk.ents.front().construction=false;return profileFromSketch(document,name,&selected);
+}
+
 Body evaluateNativeFeature(const Feature& feature, const ExprEnv& env,
                            Document& document, std::vector<Body>& preceding) {
     V result;
@@ -956,7 +986,8 @@ Body evaluateNativeFeature(const Feature& feature, const ExprEnv& env,
     } else if (feature.type == FeatureType::NativeSolid) {
         result = spansExactBoolean(feature) ? combineExactBoolean(feature, document, preceding)
                                              : solidWorker(solidFeatureRequest(feature, env, document, preceding));
-    } else result = nativeModelRequest(surfaceRequest(feature, env, document, preceding));
+    } else if(feature.type==FeatureType::Curve&&feature.nativeSpec.find("op")&&feature.nativeSpec.find("op")->str=="project") result=spatialProjectionResult(feature,document);
+    else result = nativeModelRequest(surfaceRequest(feature, env, document, preceding));
     Body body;
     body.nativeData = std::move(result);
     body.baked = std::make_unique<Mesh>(nativeResultMesh(body.nativeData));

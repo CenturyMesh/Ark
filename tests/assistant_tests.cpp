@@ -1,6 +1,8 @@
 #include "ark/assistant.hpp"
 #include "ark/agent.hpp"
+#include "ark/onboarding.hpp"
 #include "ark/chatgpt_auth.hpp"
+#include <algorithm>
 #include <iostream>
 #include <chrono>
 #include <stdexcept>
@@ -17,6 +19,36 @@ static V toolResponse(const char* id="call_1",const char* name="doc_info",const 
     V output=*response.find("output");output.arr.push_back(call);response.set("output",output);return response;
 }
 static V finalResponse(){return json(R"({"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Done."}]}]})");}
+static void payloadAndPerformanceChecks(){
+    ark::AgentSession session;ark::AssistantConfig config;config.model="offline-payload";config.reasoningEffort="high";
+    config.onboardingPack=ark::agentOnboardingPack({"overview"});auto tools=ark::AgentSession::tools();
+    const auto fullPack=ark::agentOnboardingPack({"overview","manufacturing","components","sketch","solids","surfacing","sheet","frames","materials","assembly","motion"});
+    const auto receipt=session.call("agent_onboard",json(R"({"topic":"surfacing"})"));
+    int rounds=0;std::uint64_t beforeRequest=0,afterRequest=0,beforeInitial=0,afterInitial=0,compactReceiptBytes=0;std::vector<ark::AssistantPerformance> measured;
+    auto run=ark::runAssistant(config,V::makeStr("Create a curved enclosure from the functional design intent"),tools,[&](auto&,auto&){std::this_thread::sleep_for(std::chrono::milliseconds(3));return receipt;},
+        [&](const auto& event){if(event.kind==ark::AssistantEvent::Usage||event.kind==ark::AssistantEvent::ToolEnd)measured.push_back(event.performance);},nullptr,
+        [&](auto&,const V& request,auto*){std::this_thread::sleep_for(std::chrono::milliseconds(8));
+            if(++rounds==1){afterInitial=request.dump().size();auto legacy=*request.find("input");legacy.arr.front().set("content",V::makeStr("ARK_PREBAKED_GUIDE_V1\n"+fullPack));beforeInitial=ark::assistantRequest(config,legacy,tools).dump().size();return toolResponse("guide_curves","agent_onboard",R"({"topic":"surfacing"})");}
+            const auto& history=request.find("input")->arr;V compact;check(arkjson::parse(history.back().find("output")->str,compact),"compact actual MCP receipt is valid JSON");
+            check(!compact.find("content")&&compact.find("structuredContent")->dump()==receipt.find("structuredContent")->dump()&&!compact.find("isError")->b,"only duplicated MCP text is removed and the exact structured receipt survives");
+            auto legacy=*request.find("input");legacy.arr.back().set("output",V::makeStr(receipt.dump()));beforeRequest=ark::assistantRequest(config,legacy,tools).dump().size();afterRequest=request.dump().size();compactReceiptBytes=compact.dump().size();return finalResponse();});
+    check(beforeRequest>afterRequest&&receipt.dump().size()>compactReceiptBytes,"removing a duplicated MCP receipt reduces the actual next request without discarding evidence");
+    check(beforeInitial>afterInitial&&fullPack.size()>config.onboardingPack.size(),"a lazily loaded core guide lowers initial context while all tool schemas remain advertised");
+    check(run.performance.providerRequests==2&&run.performance.toolCalls==1&&run.performance.providerMilliseconds>=8&&run.performance.toolMilliseconds>=1,"provider and tool timings are measured independently from real callback boundaries");
+    check(run.performance.requestBytes==afterInitial+afterRequest&&run.performance.lastRequestBytes==afterRequest&&run.performance.maxRequestBytes==std::max(afterInitial,afterRequest),"request byte totals and peak count the exact serialized requests once");
+    check(measured.size()==3&&measured[0].providerRequests==1&&measured[1].toolCalls==1&&measured[2].providerRequests==2&&measured[2].toolCalls==1,"existing Usage and ToolEnd events carry cumulative measured performance without extra requests");
+    V report=V::makeObj();report.set("tools",V::makeNum(ark::assistantFunctionTools(tools).arr.size()));report.set("tool_schema_bytes",V::makeNum(run.performance.lastToolSchemaBytes));report.set("full_pack_bytes",V::makeNum(fullPack.size()));report.set("core_pack_bytes",V::makeNum(config.onboardingPack.size()));report.set("initial_request_full_pack",V::makeNum(beforeInitial));report.set("initial_request_core_pack",V::makeNum(afterInitial));report.set("receipt_bytes_full",V::makeNum(receipt.dump().size()));report.set("receipt_bytes_compact",V::makeNum(compactReceiptBytes));report.set("next_request_full_receipt",V::makeNum(beforeRequest));report.set("next_request_compact_receipt",V::makeNum(afterRequest));std::cout<<"ASSISTANT_PAYLOAD_BENCHMARK "<<report.dump()<<'\n';
+    // Images, annotations and distinct text are not duplicate evidence.
+    auto preserve=[&](V original){int calls=0;ark::runAssistant(config,V::makeStr("Preserve tool evidence"),tools,[&](auto&,auto&){return original;},{},nullptr,[&](auto&,const V& request,auto*){if(++calls==1)return toolResponse("evidence","doc_info");V retained;arkjson::parse(request.find("input")->arr.back().find("output")->str,retained);check(retained.dump()==original.dump(),"nonduplicate MCP content and metadata stay complete");return finalResponse();});};
+    auto distinct=receipt;auto content=*receipt.find("content");content.arr[0].set("text",V::makeStr("Additional measured evidence"));distinct.set("content",content);preserve(distinct);
+    auto annotated=receipt;content=*receipt.find("content");content.arr[0].set("annotations",json(R"({"audience":["assistant"]})"));annotated.set("content",content);preserve(annotated);
+    auto visual=receipt;content=*receipt.find("content");content.arr.push_back(json(R"({"type":"image","mimeType":"image/png","data":"offline-preserved-image"})"));visual.set("content",content);preserve(visual);
+    const auto failure=session.call("doc_apply",json(R"({"commands":[{"op":"feature.edit","id":"Missing part","p":{"dx":20}}]})"));rounds=0;
+    ark::runAssistant(config,V::makeStr("Retain atomic rejection evidence"),tools,[&](auto&,auto&){return failure;},{},nullptr,[&](auto&,const V& request,auto*){if(++rounds==1)return toolResponse("rejection","doc_apply",R"({"commands":[]})");V retained;arkjson::parse(request.find("input")->arr.back().find("output")->str,retained);check(retained.find("isError")->b&&retained.find("structuredContent")->dump()==failure.find("structuredContent")->dump(),"compaction preserves complete actual rejection diagnostics");return finalResponse();});
+    ark::AssistantPerformance interrupted;bool caught=false;
+    try{ark::runAssistant(config,V::makeStr("Measure interrupted request"),tools,{},[&](const auto& event){if(event.kind==ark::AssistantEvent::Usage)interrupted=event.performance;},nullptr,[](auto&,auto&,auto*)->V{std::this_thread::sleep_for(std::chrono::milliseconds(3));throw std::runtime_error("offline interrupted transport");});}catch(const ark::AssistantTransportError&){caught=true;}
+    check(caught&&interrupted.providerRequests==1&&interrupted.providerMilliseconds>=1&&interrupted.requestBytes>0&&interrupted.toolCalls==0,"failed provider requests retain measured latency and bytes without inventing token usage");
+}
 int main(int argc,char** argv){try{
     ark::AssistantConfig config;config.model="test-model";
     V tools=json(R"([{"name":"doc_info","description":"Read document","inputSchema":{"type":"object"}}])");
@@ -35,6 +67,11 @@ int main(int argc,char** argv){try{
     check(!request.find("store")->b,"no stored response");check(!request.find("parallel_tool_calls")->b,"serial tools");
     check(request.find("include")->arr[0].str=="reasoning.encrypted_content","request portable reasoning");
     check(request.find("instructions")->str.find("agent_onboard")!=std::string::npos,"onboarding instruction");
+    const auto policy=request.find("instructions")->str;
+    check(policy.find("For an open-ended design brief")!=std::string::npos&&policy.find("coherent editable concept")!=std::string::npos&&policy.find("explicitly unspecified")!=std::string::npos,"open design starts with editable concept geometry instead of mandatory fabrication decisions");
+    check(policy.find("Manufacturing and component-library checks are conditional")!=std::string::npos&&policy.find("When the user asks for fabrication readiness")!=std::string::npos&&policy.find("User-specified dimensions, materials, process and functional constraints apply from the beginning")!=std::string::npos,"concept freedom preserves explicit production requests and user constraints");
+    check(policy.find("do not force catalogue searches, load calculations or production-route decisions before creating the concept")!=std::string::npos&&policy.find("native fillet/chamfer")!=std::string::npos&&policy.find("Static guides contain no live document state")!=std::string::npos,"concept planning permits curved authoring while retaining revision and evidence authority");
+    check(policy.find("not viewport image pixels")!=std::string::npos&&policy.find("from its path alone")!=std::string::npos,"snapshot metadata is not misrepresented as a model seeing viewport pixels");
     check(request.dump().find("OPENAI_API_KEY")==std::string::npos,"credential configuration excluded from request");
     check(request.find("reasoning")==nullptr,"provider default reasoning is omitted");
     auto plan=config;plan.authMode=ark::AssistantAuthMode::ChatGptPlan;plan.model="gpt-6.1-sol";plan.reasoningEffort="low";
@@ -170,5 +207,5 @@ int main(int argc,char** argv){try{
         [&](const auto& e){if(e.kind==ark::AssistantEvent::Usage)partial=e.usage;},nullptr,
         [&](auto&,auto&,auto*){return incompleteCounted;});},"incomplete response remains rejected");
     check(partial.totalTokens==15,"usage from incomplete response survives via event");
-    std::cout<<checks<<" assistant checks passed\n";return 0;
+    payloadAndPerformanceChecks();std::cout<<checks<<" assistant checks passed\n";return 0;
 }catch(const std::exception& e){std::cerr<<"assistant test failed: "<<e.what()<<'\n';return 1;}}

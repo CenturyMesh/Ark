@@ -36,12 +36,12 @@ Value entToJson(const SketchEnt& e){
     Value v=Value::makeObj();
     v.set("kind",Value::makeStr(sketchEntityKindName(e.kind)));
     Value d=Value::makeArr();
-    for(size_t i=0;i<e.dof.size();++i)d.arr.push_back(i<e.expressions.size()&&!e.expressions[i].empty()?Value::makeStr(e.expressions[i]):Value::makeNum(e.dof[i]));
+    if(e.kind!=SketchEnt::Project)for(size_t i=0;i<e.dof.size();++i)d.arr.push_back(i<e.expressions.size()&&!e.expressions[i].empty()?Value::makeStr(e.expressions[i]):Value::makeNum(e.dof[i]));
     v.set("dof",std::move(d));
     if(!e.name.empty())v.set("name",Value::makeStr(e.name));
     if(e.construction)v.set("construction",Value::makeBool(true));
     if(e.kind==SketchEnt::Spline){v.set("closed",Value::makeBool(e.closed));v.set("tension",Value::makeNum(e.tension));}
-    if(e.kind==SketchEnt::Wire||((e.kind==SketchEnt::Project||e.kind==SketchEnt::Offset)&&!e.segments.empty())){
+    if(e.kind==SketchEnt::Wire||(e.kind==SketchEnt::Offset&&!e.segments.empty())){
         Value segments=Value::makeArr();
         for(const auto& segment:e.segments){
             Value item=Value::makeObj();
@@ -51,7 +51,7 @@ Value entToJson(const SketchEnt& e){
         }
         v.set("segments",std::move(segments));
     }
-    if(e.kind==SketchEnt::Project){v.set("feature",Value::makeNum((double)e.sourceFeature));v.set("reference",Value::makeStr(e.reference));}
+    if(e.kind==SketchEnt::Project){if(e.sourceSketch.empty()){v.set("feature",Value::makeNum((double)e.sourceFeature));v.set("reference",Value::makeStr(e.reference));}else{v.set("source_sketch",Value::makeStr(e.sourceSketch));v.set("source_entity",Value::makeStr(e.sourceEntity));}if(e.projectionMode!="legacy")v.set("mode",Value::makeStr(e.projectionMode));if(e.sourceInstance){v.set("source_instance",Value::makeNum(e.sourceInstance));v.set("source_copy",Value::makeNum(e.sourceCopy));}}
     if(e.kind==SketchEnt::Offset){v.set("source",Value::makeStr(e.sourceName));v.set("distance",Value::makeStr(e.distance));}
     return v;
 }
@@ -136,12 +136,21 @@ bool entFromJson(const Value& v, SketchEnt& e, std::string* err){
     if(auto t=v.find("tension")){if(t->t!=Value::Num||!std::isfinite(t->num)||t->num<0||t->num>1)return fail("Spline tension must be 0..1");e.tension=t->num;}
     if(e.kind==SketchEnt::Spline&&(e.dof.size()<(e.closed?6u:4u)||e.dof.size()>128||e.dof.size()%2))return fail("Spline requires 2..64 XY anchors; closed requires at least 3");
     if(e.kind==SketchEnt::Project){
+        if(auto sketch=v.find("source_sketch")){
+            auto entity=v.find("source_entity");if(sketch->t!=Value::Str||sketch->str.empty()||sketch->str.size()>128||!entity||entity->t!=Value::Str||entity->str.empty()||entity->str.size()>128||v.find("feature")||v.find("reference")||v.find("source_instance")||v.find("source_copy"))return fail("Choose one named sketch/entity source or one feature/reference source");
+            e.sourceSketch=sketch->str;e.sourceEntity=entity->str;e.projectionMode="normal";
+        }else{
         auto feature=v.find("feature");
         if(!feature||feature->t!=Value::Num||!std::isfinite(feature->num)||feature->num<1||feature->num>9007199254740990.||feature->num!=std::floor(feature->num)) return fail("Project needs a feature id");
         e.sourceFeature=(u64)feature->num;
         auto reference=v.find("reference");
         if(!reference||reference->t!=Value::Str||reference->str.empty()||reference->str.size()>128) return fail("Project needs a reference");
         e.reference=reference->str;
+        if(v.find("source_entity"))return fail("Projection source_entity requires source_sketch");
+        }
+        if(auto mode=v.find("mode")){if(mode->t!=Value::Str||mode->str!="normal")return fail("2D projection mode must be normal");e.projectionMode=mode->str;}
+        if(auto instance=v.find("source_instance")){if(instance->t!=Value::Num||instance->num<1||instance->num>9007199254740990.||instance->num!=std::floor(instance->num))return fail("Projection source_instance must be a positive node id");e.sourceInstance=(u64)instance->num;}
+        if(auto copy=v.find("source_copy")){if(!e.sourceInstance||copy->t!=Value::Num||copy->num<0||copy->num>31||copy->num!=std::floor(copy->num))return fail("Projection source_copy needs an instance and integer 0..31");e.sourceCopy=(int)copy->num;}
     }
     if(e.kind==SketchEnt::Offset){
         auto source=v.find("source");if(!source) source=v.find("entity");
@@ -396,6 +405,10 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
     bool fabricationVersion=false;for(const auto& feature:doc.features){if(feature.type==FeatureType::SheetMetal)fabricationVersion|=feature.nativeSpec.find("jog")!=nullptr||feature.nativeSpec.find("sketch_bend")!=nullptr;if(feature.type==FeatureType::ConstructionFrame){if(auto welds=feature.nativeSpec.find("welds"))fabricationVersion|=welds->t==Value::Arr&&!welds->arr.empty();if(auto joints=feature.nativeSpec.find("joints"))for(const auto& joint:joints->arr)if(auto kind=joint.find("kind"))fabricationVersion|=kind->str=="trim_extend"||kind->str=="trim_plane";}}
     bool surfaceEditVersion=false;for(const auto& feature:doc.features)surfaceEditVersion|=feature.type==FeatureType::SurfaceEdit;
     r.set("version",Value::makeNum(surfaceEditVersion?26:fabricationVersion?25:componentVersion?24:processVersion?23:mechanicalVersion?22:sheetVersion?21:physicsVersion?20:patternVersion?19:suspensionVersion?18:generation17?17:modules?16:generation15?15:generation14?14:generation13?13:generation12?12:generation11?11:generation10?10:generation9?9:generation8?8:latest?7:nativeVersion?6:sketchVersion?5:sourceTube?4:notched?3:extended?2:1));
+    bool projectionVersion=false;
+    for(const auto& sketch:doc.sketches)for(const auto& entity:sketch.sk.ents)if(entity.kind==SketchEnt::Project&&(entity.projectionMode!="legacy"||entity.sourceInstance||!entity.sourceSketch.empty()))projectionVersion=true;
+    for(const auto& feature:doc.features)if(feature.type==FeatureType::Curve)if(auto op=feature.nativeSpec.find("op");op&&op->str=="project")projectionVersion=true;
+    if(projectionVersion)r.set("version",Value::makeNum(28));
     r.set("units",Value::makeStr("mm"));
     r.set("next_feature_id",Value::makeNum((double)doc.nextFeatureId_));
 
@@ -491,7 +504,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     Value v;
     if(!arkjson::parse(json,v)) return fail("malformed JSON");
     if(v.t!=Value::Obj) return fail("root must be object");
-    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0&&ver->num!=3.0&&ver->num!=4.0&&ver->num!=5.0&&ver->num!=6.0&&ver->num!=7.0&&ver->num!=8.0&&ver->num!=9.0&&ver->num!=10.0&&ver->num!=11.0&&ver->num!=12.0&&ver->num!=13.0&&ver->num!=14.0&&ver->num!=15.0&&ver->num!=16.0&&ver->num!=17.0&&ver->num!=18.0&&ver->num!=19.0&&ver->num!=20.0&&ver->num!=21.0&&ver->num!=22.0&&ver->num!=23.0&&ver->num!=24.0&&ver->num!=25.0&&ver->num!=26.0&&ver->num!=27.0)))
+    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0&&ver->num!=3.0&&ver->num!=4.0&&ver->num!=5.0&&ver->num!=6.0&&ver->num!=7.0&&ver->num!=8.0&&ver->num!=9.0&&ver->num!=10.0&&ver->num!=11.0&&ver->num!=12.0&&ver->num!=13.0&&ver->num!=14.0&&ver->num!=15.0&&ver->num!=16.0&&ver->num!=17.0&&ver->num!=18.0&&ver->num!=19.0&&ver->num!=20.0&&ver->num!=21.0&&ver->num!=22.0&&ver->num!=23.0&&ver->num!=24.0&&ver->num!=25.0&&ver->num!=26.0&&ver->num!=27.0&&ver->num!=28.0)))
         return fail("unsupported document version");
     Value history;std::string historyError;if(!iterationExpand(v,history,historyError))return fail(historyError);
 
@@ -668,6 +681,10 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     if(generation11Document(nd)){auto version=v.find("version");if(!version||version->asNum()<11)return fail("solid shells or loft guide curves require document version 11");}
     if(generation12Document(nd)){auto version=v.find("version");if(!version||version->asNum()<12)return fail("points, curve segments, or curve features require document version 12");}
     if(generation13Document(nd)){auto version=v.find("version");if(!version||version->asNum()<13)return fail("plane canvases, suppressed features, or projected and offset sketch entities require document version 13");}
+    bool projectionVersion=false;
+    for(const auto& sketch:nd.sketches)for(const auto& entity:sketch.sk.ents)if(entity.kind==SketchEnt::Project&&(entity.projectionMode!="legacy"||entity.sourceInstance||!entity.sourceSketch.empty()))projectionVersion=true;
+    for(const auto& feature:nd.features)if(feature.type==FeatureType::Curve)if(auto op=feature.nativeSpec.find("op");op&&op->str=="project")projectionVersion=true;
+    if(projectionVersion){auto version=v.find("version");if(!version||version->asNum()<28)return fail("Exact normal projection and spatial included geometry require document version 28");}
     if(generation14Document(nd)){auto version=v.find("version");if(!version||version->asNum()<14)return fail("sketch fillets, sketch chamfers, or mates across assembly groups require document version 14");}
     if(!nd.materials.empty()){auto version=v.find("version");if(!version||version->asNum()<15)return fail("Materials require document version 15");}
     for(const auto& feature:nd.features){

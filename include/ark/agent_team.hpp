@@ -21,7 +21,7 @@ struct AgentTeamConfig {
     bool focusedWorkflow=false; // One conversation at a time; the lead starts and delegates specific tasks.
     std::size_t maxEvents=2048, maxMailboxBytes=64*1024;
     std::size_t maxEventTextBytes=4096, maxEventBytes=1024*1024;
-    unsigned maxCommandsPerStep=8,maxFeaturesPerStep=1,maxPlacementsPerStep=1,maxProposals=64;
+    unsigned maxCommandsPerStep=8,maxFeaturesPerStep=8,maxPlacementsPerStep=8,maxProposals=64;
     std::size_t maxDraftSketchBytes=16*1024;
 };
 enum class AgentTeamState { Queued, Working, Idle, Failed, Cancelled, AwaitingContinuation, Interrupted };
@@ -32,6 +32,7 @@ struct AgentTeamEvent {
     std::uint64_t sequence=0, elapsedMs=0;
     std::string roleId, text, tool;
     AssistantUsage usage; // Role lifetime snapshot, never a model estimate.
+    AssistantPerformance performance;
     bool toolError=false; // ToolEnd: actual executor/permission result.
     std::string stepId,proposalId;
     std::vector<std::string> operations,sketchNames,featureNames;
@@ -51,6 +52,7 @@ struct AgentTeamRoleSnapshot {
     bool needsInspection=false;
     AgentTeamDiscipline discipline=AgentTeamDiscipline::General;
     AssistantUsage usage;
+    AssistantPerformance performance;
     arkjson::Value conversation=arkjson::Value::makeArr();
 };
 struct AgentTeamProposalSnapshot {
@@ -64,6 +66,7 @@ struct AgentTeamSnapshot {
     std::vector<AgentTeamRoleSnapshot> roles;
     std::vector<AgentTeamEvent> events;
     AssistantUsage usage;
+    AssistantPerformance performance;
     std::vector<AgentTeamProposalSnapshot> proposals;
 };
 using AgentTeamEvents=std::function<void(const AgentTeamEvent&)>;

@@ -85,7 +85,7 @@ the shared executor. Team writes must supply the model's observed
 `expected_revision`; stale or missing revisions reject without automatic
 rebasing. The single Assistant and team cannot run simultaneously.
 
-Each atomic construction step creates at most one feature or placement, with at
+Each atomic construction step can create related features/placements, with at
 most eight commands. Queued and executing steps identify their actual role and
 step ID. Studio renders bounded `sketch.set`, `sketch.entity.set` and
 `sketch.patch` intent as dashed, uncommitted drafts from captured sketch/plane
@@ -103,6 +103,11 @@ receipts after a provider interruption; successful current `doc_info` is
 required before a new write. Incomplete provider responses execute no tools.
 Response/context/memory bounds and provider limits remain separate from turn
 budgets; cancel and revision/atomicity protections remain active.
+
+In 002B, writers start with the compact overview; the reviewer also receives
+physics. Detailed topics load on demand. Open-ended briefs start with a coherent
+concept; fabrication/catalogue checks are conditional on the requested task and
+claims. User dimensions, material and process requirements still apply immediately.
 
 Static source-owned onboarding is prepared locally once per role's topic set,
 then inserted once at the beginning of its retained conversation. It contains
@@ -267,3 +272,8 @@ geometry if the intended result is one body. A rejected output ID may not exist
 in the committed document. Agents retain the choice of design correction;
 no geometry is discarded, no tolerance is widened and no extra editing gate
 is introduced. Diagnostics guide iteration rather than certifying the design.
+
+Measured Provider/tools times and request bytes are available in Activity. These
+are local wall-time/serialization measurements, not token or price estimates.
+Provider time includes network/server waits; tools include the UI queue. Parallel
+role times can overlap. See [runtime recovery](AGENT_RUNTIME_RECOVERY.md).

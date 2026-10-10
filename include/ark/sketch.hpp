@@ -10,6 +10,12 @@ void evaluateSketch(NamedSketch& sketch, const ExprEnv& env);
 // source feature is later in the history. error is a hard failure.
 struct DrivenSketchStatus { std::string error; bool waiting=false; };
 DrivenSketchStatus bakeSketchProjects(Document& document, NamedSketch& sketch);
+// Empty plane includes source XYZ unchanged. Result has exact B-rep plus world display polylines.
+arkjson::Value projectGeometry(Document& document, u64 feature, const std::string& reference,
+    const std::string& plane="", u64 sourceInstance=0, int sourceCopy=0,
+    const std::string& mode="normal", double displayTolerance=.025);
+arkjson::Value projectSketchGeometry(Document& document,const std::string& sourceSketch,
+    const std::string& sourceEntity,const std::string& plane="",const std::string& mode="normal",double displayTolerance=.025);
 // Diagnose a solved (or attempted) sketch without mutating it. Rank and
 // redundancy are local numerical properties of the current coordinates.
 arkjson::Value diagnoseSketch(const Sketch& sketch, double residualTolerance=1e-6);

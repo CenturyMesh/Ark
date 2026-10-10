@@ -5,6 +5,7 @@
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_Section.hxx>
 #include <BRepTools.hxx>
+#include <BRepTools_WireExplorer.hxx>
 #include <BRepLProp_CLProps.hxx>
 #include <GCPnts_AbscissaPoint.hxx>
 #include <GProp_PrincipalProps.hxx>
@@ -165,7 +166,8 @@ void boxEdges(const TopoDS_Shape& solid,double x,double y,double z,std::vector<R
 }
 void axialFaces(const TopoDS_Shape& solid,std::vector<Ref>& refs,bool cylinder){
     for(auto& item:shapes(solid,TopAbs_FACE)){BRepAdaptor_Surface s(TopoDS::Face(item));if(s.GetType()==GeomAbs_Plane){
-            const auto p=s.Plane().Location();add(refs,std::abs(p.Z())<1e-8?"cap.start":"cap.end","face",item);
+            const auto p=s.Plane().Location();const std::string cap=std::abs(p.Z())<1e-8?"cap.start":"cap.end";add(refs,cap,"face",item);
+            const auto boundary=shapes(item,TopAbs_EDGE);if(boundary.size()==1)add(refs,cap+".rim","edge",boundary.front());
         }else if(s.GetType()==GeomAbs_Cylinder||s.GetType()==GeomAbs_Cone){add(refs,"side","face",item);if(cylinder)add(refs,"axis","axis",item);}
     }
 }
@@ -175,6 +177,13 @@ std::pair<TopoDS_Face,std::vector<std::pair<std::string,TopoDS_Edge>>> profileFa
     auto m=frame(profile);auto& entities=need(profile,"entities");if(entities.t!=V::Arr||entities.arr.empty()||entities.arr.size()>256)throw std::runtime_error("Profile needs 1..256 entities");
     BRepBuilderAPI_MakeWire wire;std::vector<std::pair<std::string,TopoDS_Edge>> edges;size_t index=0;
     for(auto& e:entities.arr){std::string kind=word(e,"kind");TopoDS_Edge edge;
+        if(kind=="brep"){
+            auto imported=readBrep(word(e,"brep_base64"));auto wires=shapes(imported,TopAbs_WIRE);if(wires.size()!=1)throw std::runtime_error("Projected profile must contain one exact wire");
+            int part=0;for(BRepTools_WireExplorer walk(TopoDS::Wire(wires[0]));walk.More();walk.Next()){
+                wire.Add(walk.Current());if(!wire.IsDone())throw std::runtime_error("Projected profile edge did not join authored wire");edges.push_back({word(e,"name")+"."+std::to_string(part++),wire.Edge()});
+            }
+            ++index;continue;
+        }
         if(kind=="circle"){
             auto& c=need(e,"center");if(c.t!=V::Arr||c.arr.size()!=2||c.arr[0].t!=V::Num||c.arr[1].t!=V::Num)throw std::runtime_error("Circle center needs xy");
             double r=positive(e,"radius");edge=BRepBuilderAPI_MakeEdge(gp_Circ(gp_Ax2(gp_Pnt(c.arr[0].num,c.arr[1].num,0),gp_Dir(0,0,1)),r)).Edge();
@@ -842,7 +851,7 @@ V solidCentroidNative(const V& request){
     if(encoded.t!=V::Str)throw std::runtime_error("Centroid input is not a B-rep");
     TopoDS_Shape shape=readBrep(encoded.str);
     if(shapes(shape,TopAbs_SOLID).size()!=1)throw std::runtime_error("Centroid needs one solid");
-    GProp_GProps props;BRepGProp::VolumeProperties(shape,props);
+    GProp_GProps props;volumeProperties(shape,props);
     if(!(props.Mass()>0))throw std::runtime_error("Centroid needs positive volume");
     const gp_Pnt center=props.CentreOfMass();
     V result=V::makeObj(),pointValue=V::makeArr();
@@ -851,7 +860,18 @@ V solidCentroidNative(const V& request){
     result.set("center_mm",pointValue);
     return result;
 }
+V geometryReferenceShapeNative(const V& request){
+    auto shape=readBrep(word(request,"input_brep"));
+    const auto refs=inputRefs(request,"input_brep","input_topology",shape);
+    const std::string name=word(request,"reference");const Ref* selected=nullptr;
+    for(const auto& ref:refs)if(ref.name==name){if(selected)throw std::runtime_error("Ambiguous projection reference");selected=&ref;}
+    if(!selected||!selectable(selected->status)||selected->shape.IsNull())throw std::runtime_error("Missing, split or deleted projection reference: "+name);
+    if(selected->kind!="edge"&&selected->kind!="face")throw std::runtime_error("Project an exact edge or planar face");
+    if(selected->kind=="face"&&BRepAdaptor_Surface(TopoDS::Face(selected->shape)).GetType()!=GeomAbs_Plane)throw std::runtime_error("Face projection requires a planar face; choose a named edge for curved faces");
+    V result=V::makeObj();result.set("kind",V::makeStr(selected->kind));result.set("brep_base64",V::makeStr(brepData(selected->shape)));return result;
+}
 V geometryQueryNative(const V& request){
+    // Semantic queries are read-only against the digest-bound registry.
     const auto shape=readBrep(word(request,"brep"));
     const auto refs=inputRefs(request,"brep","topology",shape);
     auto select=[&](const std::string& name)->const Ref&{
@@ -927,7 +947,7 @@ V geometryQueryNative(const V& request){
             if(area.Mass()>0)out.set("area_center_mm",xyz(area.CentreOfMass()));
             V box=V::makeArr();for(double n:bounds(selected))box.arr.push_back(V::makeNum(n));out.set("bounds_mm",box);
             if(!shapes(selected,TopAbs_SOLID).empty()){
-                GProp_GProps props;BRepGProp::VolumeProperties(selected,props);out.set("volume_mm3",V::makeNum(props.Mass()));out.set("center_mm",xyz(props.CentreOfMass()));
+                GProp_GProps props;volumeProperties(selected,props);out.set("volume_mm3",V::makeNum(props.Mass()));out.set("center_mm",xyz(props.CentreOfMass()));
                 V inertia=V::makeArr();auto tensor=props.MatrixOfInertia();for(int i=1;i<=3;++i)for(int j=1;j<=3;++j)inertia.arr.push_back(V::makeNum(tensor.Value(i,j)));out.set("volume_inertia_mm5_row_major",inertia);
                 auto principal=props.PrincipalProperties();double x,y,z;principal.Moments(x,y,z);V moments=V::makeArr();for(double n:{x,y,z})moments.arr.push_back(V::makeNum(n));out.set("principal_moments_mm5",moments);
                 V axes=V::makeArr();axes.arr.push_back(vec(principal.FirstAxisOfInertia().XYZ()));axes.arr.push_back(vec(principal.SecondAxisOfInertia().XYZ()));axes.arr.push_back(vec(principal.ThirdAxisOfInertia().XYZ()));out.set("principal_axes",axes);out.set("principal_axes_unique",V::makeBool(!principal.HasSymmetryAxis()));

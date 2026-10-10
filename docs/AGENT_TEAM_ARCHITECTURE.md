@@ -45,13 +45,21 @@ executed by delivery, and only a measured successful revision receipt marks a
 proposal applied. A conflicting proposal needs fresh inspection and a new
 baseline, rather than automatic revision substitution.
 
-Each construction step defaults to eight commands, one created feature and one
-placement. Dependencies and required checks remain one atomic transaction; the
-host never breaks a batch into invalid geometry. A valid initial sketch can be
-followed by separate `sketch.entity.set`/`sketch.patch` operations when those
-states are independently valid. A sketch consumed by a feature must preserve
-that feature's valid inputs. The designer must keep a dependent change together
-when those conditions require it.
+Each construction step defaults to eight commands and up to eight created features
+or placements within that command bound and the role's permissions. Coherent
+sketch/feature/placement changes evaluate once in an atomic batch. Independent
+sketch increments remain available when useful, but are not compulsory.
+
+The engineer can use the public document new/undo/redo/import operations with
+observed revision and task authorization. Part designers cannot place assemblies
+or replace documents; the reviewer remains read-only. Role-specific schemas and
+instructions match the actual operation permissions, including canvas authoring.
+
+Successful cached previews bind their actual commands/checks, role and observed
+baseline. Candidate commits validate that retained recipe and pass the original
+candidate ID to the host, preserving its no-recompute path. Unknown, foreign,
+stale, mixed or replayed candidates reject; successful mutations clear team
+candidate receipts. This does not silently rebase a preview.
 
 ConstructionQueued, ConstructionStart and ConstructionEnd events carry actual
 role/step IDs, requested operation/target names and observed revision receipts.
