@@ -1,6 +1,6 @@
 # ARK — matriz de roadmap A–G
 
-**Data da auditoria:** 10 de outubro de 2026. **Iteração local:** `004B`.
+**Data da auditoria:** 11 de outubro de 2026. **Iteração local:** `005B`.
 O baseline entregue é `0.9.1`, commit `5e7153f`; não foi rebatizado retroativamente.
 `001A` inicia a convenção pública, com versão técnica `0.9.2` para distribuição.
 `002B` acrescenta recuperação do runtime, projeção exata e ferramentas de frame;
@@ -10,6 +10,8 @@ gates completos mesmo quando uma parte já foi verificada.
 ver [escopo e evidência](iterations/003D.md).
 `004B` acrescenta inspeção transparente, grelha adaptativa, manipulação de juntas
 e conectores de agentes; ver [escopo e evidência](iterations/004B.md).
+`005B` acrescenta receitas de arcos, scrollbar, ajustes tubulares, consultas
+seletivas e conclusão explícita; ver [auditoria](COMPLEX_MODELING_AUDIT_005B.md).
 
 **Visão:** um ambiente CAD onde uma pessoa ou uma equipa de agentes consegue
 transformar uma intenção num produto editável, verificável e preparado para
@@ -90,9 +92,9 @@ O documento ROADMAP_09 é um registo histórico; esta matriz passa a orientar o 
 
 | ID | Milestone | Estado inicial | Aceitação e dependências |
 |---|---|---|---|
-| B.01 | Navegação e edição legíveis | Parcial; transparência/grelha em `004B` | Cubo persistente, setas/letras sem fundo, orbit livre, seleção/Spotlight, atalhos e DPI; controlos sem cortes nas resoluções suportadas |
-| B.02 | Sketch e feature tree de uso diário | Parcial; projeção associativa em `002B` | Diagnóstico acionável, edição de constraints, reordenação quando válida, suppress/rollback e dependências visíveis; rejeições sem dano ao documento |
-| B.03 | Sólidos e superfícies avançados | Parcial; inclusão espacial exata em `002B` | Loft/sweep/guias, continuidade medida, patches/trim/thicken e reparação explícita em corpus difícil; não mascarar falhas com meshes |
+| B.01 | Navegação e edição legíveis | Parcial; scrollbar/controlos de sketch em `005B` | Cubo persistente, setas/letras sem fundo, orbit livre, seleção/Spotlight, atalhos e DPI; controlos sem cortes nas resoluções suportadas |
+| B.02 | Sketch e feature tree de uso diário | Parcial; arcos paramétricos em `005B` | Diagnóstico acionável, edição de constraints, reordenação quando válida, suppress/rollback e dependências visíveis; rejeições sem dano ao documento |
+| B.03 | Sólidos e superfícies avançados | Parcial; curvas/ajustes paramétricos em `005B` | Loft/sweep/guias, continuidade medida, patches/trim/thicken e reparação explícita em corpus difícil; não mascarar falhas com meshes |
 | B.04 | Assemblies grandes e configuráveis | Parcial; manipulação de juntas em `004B` | Subassemblies, instâncias reutilizadas, configurações, referências externas e carregamento seletivo; atualizar 1 definição sem duplicar as N ocorrências |
 | B.05 | Desenhos técnicos e intercâmbio | Planeado | Vistas associativas, cortes, cotas/tolerâncias, BOM e exportações com readback; medir perda de informação em STEP/IGES/DXF e no formato nativo |
 
@@ -101,7 +103,7 @@ O documento ROADMAP_09 é um registo histórico; esta matriz passa a orientar o 
 | ID | Milestone | Estado inicial | Aceitação e dependências |
 |---|---|---|---|
 | C.01 | Chapa industrial com STAGE | Parcial local; integração planeada | STEP exato + inputs explícitos → publicação canónica ou rejeição; corpus acordado, refold/flat e material rastreáveis; depende de E.01/E.02 |
-| C.02 | Weldments completos | Parcial; edição via instâncias corrigida em `002B` | Trim/extend multi-membro, juntas, preparação, cordões e cutlists coerentes; desenhos e comprimentos derivados do resultado exato |
+| C.02 | Weldments completos | Parcial; ajustes de Tube em `005B` | Trim/extend multi-membro, juntas, preparação, cordões e cutlists coerentes; desenhos e comprimentos derivados do resultado exato |
 | C.03 | DFM por processo | Parcial | Regras versionadas para laser/dobra/FDM/CNC/solda, hipóteses e evidência por peça; recomendações separadas de certificação |
 | C.04 | Verificação estrutural e movimento | Parcial analítico; FEA planeado | Load cases e unidades, comparação com soluções analíticas, convergência de malha e solver externo auditado; contacto/fadiga só após validação própria |
 | C.05 | Pilotos físicos de referência | Planeado | Fabricar uma caixa de chapa, uma estrutura soldada e um pequeno assembly; medir desvios, montagem, custo e tempo; fechar o ciclo com revisões do design |
@@ -111,9 +113,9 @@ O documento ROADMAP_09 é um registo histórico; esta matriz passa a orientar o 
 | ID | Milestone | Estado inicial | Aceitação e dependências |
 |---|---|---|---|
 | D.01 | Benchmark de qualidade/tempo/custo | Planeado; prioridade imediata | Pelo menos 30 briefs versionados, três repetições por configuração inicial e avaliação humana cega; medir custo por design aceite, não só tokens por turno |
-| D.02 | Engenheiro responsável e equipa adaptativa | Parcial; recuperação em `003D`, conectores em `004B` | Comparar Single, Focused e Parallel; especialistas só com missão útil; paralelismo escolhido por benefício medido; sem budgets impostos por defeito |
+| D.02 | Engenheiro responsável e equipa adaptativa | Parcial; consultas seletivas e conclusão em `005B` | Comparar Single, Focused e Parallel; especialistas só com missão útil; paralelismo escolhido por benefício medido; sem budgets impostos por defeito |
 | D.03 | Espaços de trabalho por peça | Planeado | Agentes editam branches isolados com ownership e datums; integração transacional identifica conflitos geométricos e de revisão sem rebase silencioso |
-| D.04 | Feedback multimodal e autocorreção | Parcial; previews e métricas em `002B`; pixels pendentes | Mesmo diagnóstico chega ao autor/reviewer; previews ligados à revisão; ciclos de erro repetido detetados; correção preserva intenção e referências |
+| D.04 | Feedback multimodal e autocorreção | Parcial; relatórios explícitos em `005B`; pixels pendentes | Mesmo diagnóstico chega ao autor/reviewer; previews ligados à revisão; ciclos de erro repetido detetados; correção preserva intenção e referências |
 | D.05 | Alternativas de conceito e conhecimento reutilizável | Parcial no onboarding | Comparar alternativas por requisitos, massa, custo/processo e preferência humana; biblioteca de exemplos validados; nunca chamar a uma proposta uma peça criada |
 
 ### E — Ecossistema industrial

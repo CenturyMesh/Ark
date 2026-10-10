@@ -9,11 +9,77 @@
 
 namespace ark {
 void resolveSketchCorners(Sketch& sketch,const ExprEnv& env);
+Vec3 AuthoredArc::point(double fraction) const {
+    const double angle=sweep*fraction;
+    return center+(xAxis*std::cos(angle)+normal.cross(xAxis)*std::sin(angle))*radius;
+}
+Vec3 AuthoredArc::tangent(double fraction) const {
+    const double angle=sweep*fraction;
+    return (xAxis*(-std::sin(angle))+normal.cross(xAxis)*std::cos(angle))*(sweep<0?-1.:1.);
+}
+namespace {
+void finiteArcPoint(Vec3 point){
+    for(double value:{point.x,point.y,point.z})if(!std::isfinite(value)||std::abs(value)>1e7)throw std::runtime_error("Arc input outside finite supported bounds");
+}
+double positiveArcAngle(Vec3 xAxis,Vec3 yAxis,Vec3 radial){
+    double angle=std::atan2(yAxis.dot(radial),xAxis.dot(radial));
+    if(angle<=0)angle+=2*K_PI;
+    return angle;
+}
+}
+AuthoredArc arcThroughThreePoints(Vec3 start,Vec3 through,Vec3 end){
+    finiteArcPoint(start);finiteArcPoint(through);finiteArcPoint(end);
+    const Vec3 a=through-start,b=end-start,n=a.cross(b);
+    const double la=a.len(),lb=b.len(),lc=(end-through).len(),ln=n.len();
+    if(std::min({la,lb,lc})<=1e-8)throw std::runtime_error("Three-point arc needs three distinct points");
+    if(ln<=1e-10*la*lb)throw std::runtime_error("Three-point arc points are collinear or numerically degenerate");
+    AuthoredArc arc;arc.center=start+(b.cross(n)*a.lensq()+n.cross(a)*b.lensq())/(2*n.lensq());
+    finiteArcPoint(arc.center);arc.radius=(start-arc.center).len();arc.normal=n/ln;arc.xAxis=(start-arc.center)/arc.radius;
+    arc.sweep=positiveArcAngle(arc.xAxis,arc.normal.cross(arc.xAxis),end-arc.center);
+    const double middle=positiveArcAngle(arc.xAxis,arc.normal.cross(arc.xAxis),through-arc.center);
+    if(!(arc.radius>1e-8&&arc.sweep>1e-10&&arc.sweep<2*K_PI-1e-10&&middle<arc.sweep))throw std::runtime_error("Three-point arc construction is degenerate");
+    return arc;
+}
+AuthoredArc arcFromStartTangent(Vec3 start,Vec3 end,Vec3 tangent){
+    finiteArcPoint(start);finiteArcPoint(end);finiteArcPoint(tangent);
+    const Vec3 chord=end-start;const double length=chord.len(),tangentLength=tangent.len();
+    if(length<=1e-8)throw std::runtime_error("Tangent arc endpoints coincide");
+    if(tangentLength<=1e-12)throw std::runtime_error("Tangent arc start direction is zero");
+    tangent=tangent/tangentLength;
+    const Vec3 perpendicular=chord-tangent*chord.dot(tangent);const double span=perpendicular.len();
+    if(span<=1e-10*length)throw std::runtime_error("Tangent arc endpoint is on the tangent line; use an explicit line");
+    AuthoredArc arc;arc.radius=chord.lensq()/(2*span);arc.center=start+perpendicular*(arc.radius/span);
+    finiteArcPoint(arc.center);arc.xAxis=(start-arc.center)/arc.radius;arc.normal=arc.xAxis.cross(tangent).normalized();
+    arc.sweep=positiveArcAngle(arc.xAxis,arc.normal.cross(arc.xAxis),end-arc.center);
+    if(!(arc.radius>1e-8&&arc.sweep>1e-10&&arc.sweep<2*K_PI-1e-10))throw std::runtime_error("Tangent arc construction is degenerate");
+    return arc;
+}
+bool validateSketchArcRecipe(const arkjson::Value& recipe,std::string& error){
+    using V=arkjson::Value;auto fail=[&](const char* text){error=text;return false;};
+    if(recipe.t!=V::Obj)return fail("Arc recipe must be an object");
+    const auto type=recipe.find("type");if(!type||type->t!=V::Str||(type->str!="three_point"&&type->str!="tangent"))return fail("Arc recipe type must be three_point or tangent");
+    for(const auto& field:recipe.obj)if(field.first!="type"&&field.first!="start"&&field.first!="end"&&field.first!=(type->str=="three_point"?"through":"tangent"))return fail("Unknown arc recipe field");
+    for(const char* key:{"start","end",type->str=="three_point"?"through":"tangent"}){
+        auto coordinates=recipe.find(key);if(!coordinates||coordinates->t!=V::Arr||coordinates->arr.size()!=2)return fail("Arc recipe coordinates must be [x,y]");
+        for(const auto& coordinate:coordinates->arr)if(!((coordinate.t==V::Num&&std::isfinite(coordinate.num)&&std::abs(coordinate.num)<=1e7)||(coordinate.t==V::Str&&!coordinate.str.empty()&&coordinate.str.size()<=2048)))return fail("Arc recipe coordinates must be finite numbers or nonempty expressions");
+    }
+    return true;
+}
 namespace {
 double expressionValue(const std::string& expression,const ExprEnv& env){
     bool ok=false;double value=evalExpr(expression,env,&ok);
     if(!ok||!std::isfinite(value)||std::abs(value)>1e7)throw std::runtime_error("Invalid sketch/plane expression: "+expression);
     return value;
+}
+void evaluateArcRecipe(SketchEnt& entity,const ExprEnv& env){
+    if(entity.arcRecipe.t!=arkjson::Value::Obj)return;
+    std::string error;if(entity.kind!=SketchEnt::Arc||!validateSketchArcRecipe(entity.arcRecipe,error))throw std::runtime_error(error.empty()?"Only an arc accepts a construction recipe":error);
+    auto point=[&](const char* key){const auto& values=entity.arcRecipe.find(key)->arr;auto value=[&](size_t i){return values[i].t==arkjson::Value::Str?expressionValue(values[i].str,env):values[i].num;};return Vec3{value(0),value(1),0};};
+    const Vec3 start=point("start"),end=point("end");
+    const auto arc=entity.arcRecipe.find("type")->str=="three_point"?arcThroughThreePoints(start,point("through"),end):arcFromStartTangent(start,end,point("tangent"));
+    const double a0=rad2deg(std::atan2(start.y-arc.center.y,start.x-arc.center.x));
+    entity.dof={arc.center.x,arc.center.y,arc.radius,a0,a0+rad2deg(arc.sweep)*(arc.normal.z<0?-1.:1.)};
+    entity.expressions.clear();
 }
 double distanceToSegment(Vec2 p,Vec2 a,Vec2 b){
     auto d=b-a;double t=d.lensq()>0?clamp((p-a).dot(d)/d.lensq(),0.,1.):0.;
@@ -125,7 +191,7 @@ arkjson::Value projectSketchGeometry(Document& document,const std::string& sourc
 void evaluateSketch(NamedSketch& ns,const ExprEnv& env){
     ns.error.clear();ns.residual=0;
     try{
-        for(auto& e:ns.sk.ents)for(size_t i=0;i<e.expressions.size();++i)if(!e.expressions[i].empty())e.dof[i]=expressionValue(e.expressions[i],env);
+        for(auto& e:ns.sk.ents){for(size_t i=0;i<e.expressions.size();++i)if(!e.expressions[i].empty())e.dof[i]=expressionValue(e.expressions[i],env);evaluateArcRecipe(e,env);}
         for(auto& c:ns.sk.cons){
             if(!c.expression.empty())c.val=expressionValue(c.expression,env);
             if(!c.expression2.empty())c.val2=expressionValue(c.expression2,env);
@@ -482,6 +548,7 @@ arkjson::Value inspectSketch(const Document& doc,const NamedSketch& ns,bool samp
     for(auto& e:ns.sk.ents){V item=V::makeObj(),dof=V::makeArr(),world=V::makeArr(),local=V::makeArr();
         item.set("name",V::makeStr(e.name));item.set("kind",V::makeStr(sketchEntityKindName(e.kind)));
         item.set("construction",V::makeBool(e.construction));for(auto x:e.dof)dof.arr.push_back(V::makeNum(x));item.set("resolved_dof",dof);
+        if(e.arcRecipe.t==V::Obj){item.set("recipe",e.arcRecipe);item.set("geometry_authority",V::makeStr("analytic_arc"));item.set("driven",V::makeBool(true));item.set("editable",V::makeBool(true));}
         if(e.kind==SketchEnt::Project){item.set("geometry_authority",V::makeStr(e.projectionBrep.empty()?"unresolved":"exact_brep"));item.set("associative",V::makeBool(true));item.set("editable",V::makeBool(false));item.set("feature",V::makeNum(e.sourceFeature));item.set("reference",V::makeStr(e.reference));}
         auto points=sampleSketchEntity(e,ns.sk.tolerance,&ns.sk);item.set("sample_count",V::makeNum(points.size()));
         if(samples){for(auto p:points){local.arr.push_back(vectorValue({p.x,p.y,0}));world.arr.push_back(vectorValue(frame.transformPoint({p.x,p.y,0})));}item.set("local",local);item.set("world",world);}entities.arr.push_back(item);
@@ -526,6 +593,7 @@ arkjson::Value measureSketchEntity(const Document&,const NamedSketch& sketch,con
     auto pair=[&](Vec2 p){V a=V::makeArr();a.arr.push_back(V::makeNum(p.x));a.arr.push_back(V::makeNum(p.y));return a;};
     V result=V::makeObj(),box=V::makeArr();
     result.set("name",V::makeStr(entity));result.set("kind",V::makeStr(sketchEntityKindName(found->kind)));
+    if(found->arcRecipe.t==V::Obj)result.set("recipe",found->arcRecipe);
     result.set("length_mm",V::makeNum(length));
     if(found->kind==SketchEnt::Project&&!found->projectionBrep.empty()){result.set("length_mm",V::makeNum(found->projectionLength));result.set("length_authority",V::makeStr("exact_brep"));result.set("bbox_authority",V::makeStr("display_samples"));}
     for(double value:{xmin,ymin,xmax,ymax}) box.arr.push_back(V::makeNum(value));

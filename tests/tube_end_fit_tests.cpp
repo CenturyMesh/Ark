@@ -1,0 +1,69 @@
+#include "ark/agent.hpp"
+#include <cmath>
+#include <iostream>
+#include <stdexcept>
+
+using namespace ark;using V=arkjson::Value;
+namespace {
+void check(bool value,const char* message){if(!value)throw std::runtime_error(message);}
+V json(const std::string& text){V value;check(arkjson::parse(text,value),"test JSON parses");return value;}
+V call(AgentSession& session,const char* tool,const std::string& arguments="{}"){const auto response=session.call(tool,json(arguments));if(response.find("isError")->b)throw std::runtime_error(response.find("structuredContent")->dump());return *response.find("structuredContent");}
+void near(double actual,double expected,double tolerance,const char* message){check(std::abs(actual-expected)<=tolerance,message);}
+V evidence(AgentSession& s,u64 id){V args=V::makeObj();args.set("id",V::makeNum((double)id));auto response=s.call("native_inspect",args);check(!response.find("isError")->b,"end-fit inspect succeeds");return *response.find("structuredContent")->find("report")->find("end_fit");}
+void base(AgentSession& s){call(s,"doc_apply",R"({"expected_revision":0,"commands":[
+ {"op":"param.set","name":"host_length","expr":200},
+ {"op":"feature.add","type":"tube","name":"Host stock","p":{"section":"rect","width":60,"height":40,"wall":3,"tail":"host_length"}},
+ {"op":"feature.add","type":"native_solid","name":"Host","inputs":["Host stock"],"native":{"op":"transform"},"p":{"tx":0,"ty":0,"tz":0}},
+ {"op":"feature.add","type":"tube","name":"Brace stock","p":{"section":"rect","width":20,"height":16,"wall":2,"tail":100}},
+ {"op":"feature.add","type":"native_solid","name":"Brace","inputs":["Brace stock"],"native":{"op":"transform"},"p":{"ry":-90,"tx":100,"ty":9,"tz":0}}
+ ]})");}
+void envelope(){
+ AgentSession s;base(s);const auto original=documentToJson(s.document);call(s,"doc_apply",R"({"expected_revision":1,"commands":[{"op":"feature.add","type":"native_solid","name":"Fitted","inputs":["Brace","Host"],"native":{"op":"tube_end_fit","mode":"envelope","end":"start"},"p":{"max_extension":0}}]})");const auto proof=evidence(s,5);near(proof.find("source_volume_mm3")->num,128*100,1e-6,"original rectangular Tube stock volume");near(proof.find("result_volume_mm3")->num,128*80,1e-6,"off-axis rectangular terminal fit is flush with host envelope");near(proof.find("overlap_volume_mm3")->num,0,1e-8,"end-fit leaves no exact member material overlap");near(proof.find("separation_mm")->num,0,1e-6,"trimmed member contacts retained host");check(proof.find("terminal_ownership_checked")->b,"terminal stock ownership proved");
+ V saved=json(documentToJson(s.document));check(saved.find("version")->num==30,"end fit uses conditional document30");Document loaded;std::string error;check(documentFromJson(saved.dump(),loaded,&error),"end fit roundtrips");loaded.recompute();for(const auto& r:loaded.lastResults)check(r.ok,"roundtrip exact geometry valid");saved.set("version",V::makeNum(29));check(!documentFromJson(saved.dump(),loaded,&error),"legacy document cannot smuggle new end-fit contract");
+ const auto before=documentToJson(s.document);const auto revision=s.revision;for(const char* bad:{
+ R"({"expected_revision":1,"commands":[{"op":"feature.remove","id":1}]})",
+ R"({"commands":[{"op":"feature.edit","id":5,"native":{"op":"tube_end_fit","mode":"envelope","end":"start"},"p":{"max_extension":1}}]})",
+ R"({"commands":[{"op":"feature.edit","id":5,"native":{"op":"tube_end_fit","mode":"envelope","end":"end"}}]})",
+ R"({"commands":[{"op":"feature.edit","id":5,"native":{"op":"tube_end_fit","mode":"envelope","end":"start","unknown":1}}]})"
+ }){auto r=s.call("doc_apply",json(bad));check(r.find("isError")->b&&s.revision==revision&&documentToJson(s.document)==before,"bad endpoint, bound, contract or revision rejects atomically");}
+ call(s,"doc_apply",R"({"expected_revision":2,"commands":[{"op":"param.set","name":"host_length","expr":220}]})");near(evidence(s,5).find("result_volume_mm3")->num,128*80,1e-6,"source and host remain associative after parameter change");
+}
+void planeGap(){
+ AgentSession s;base(s);call(s,"doc_apply",R"({"expected_revision":1,"commands":[{"op":"feature.edit","id":4,"p":{"tz":30,"ry":-90}}]})");
+ // Discover the actual semantic face with +Z normal, without face-index guesses.
+ const auto host=call(s,"native_inspect",R"({"id":2})");std::string face;double highest=-1e100;for(const auto& ref:host.find("topology")->find("references")->arr){auto d=ref.find("descriptor");auto n=d?d->find("normal"):nullptr;auto origin=d?d->find("origin"):nullptr;if(ref.find("kind")->str=="face"&&n&&origin&&n->arr[2].num>.999&&origin->arr[2].num>highest){face=ref.find("name")->str;highest=origin->arr[2].num;}}check(!face.empty(),"discover finite outer host top face");
+ auto fit=json(R"({"expected_revision":2,"commands":[{"op":"feature.add","type":"native_solid","name":"Gap fitted","inputs":[4,2],"native":{"op":"tube_end_fit","mode":"plane","end":"start"},"p":{"max_extension":10}}]})");auto commands=*fit.find("commands"),native=*commands.arr[0].find("native");native.set("reference",V::makeStr(face));commands.arr[0].set("native",native);fit.set("commands",commands);auto response=s.call("doc_apply",fit);if(response.find("isError")->b)throw std::runtime_error("Explicit finite-face gap fit: "+response.find("structuredContent")->dump());auto proof=evidence(s,5);near(proof.find("axis_length_change_mm")->num,10,1e-8,"actual measured gap controls endpoint extension");near(proof.find("generated_extension_mm")->num,10,1e-8,"extension equals explicit stock bound");near(proof.find("result_volume_mm3")->num,128*110,1e-5,"extension retains exact rectangular material");check(proof.find("cap_coverage_checked")->b,"entire finite cap support proved");call(s,"reference_inspect",R"({"id":5,"reference":"fit.start"})");
+ const auto before=documentToJson(s.document);const auto rev=s.revision;auto edit=json(R"({"commands":[{"op":"feature.edit","id":5,"p":{"max_extension":9}}]})");check(s.call("doc_apply",edit).find("isError")->b&&s.revision==rev&&documentToJson(s.document)==before,"insufficient extension rejects with prior geometry intact");
+ call(s,"doc_apply",R"({"commands":[{"op":"feature.remove","id":5},{"op":"feature.edit","id":4,"p":{"ty":100}}]})");fit.set("expected_revision",V::makeNum((double)s.revision));const auto offsetBefore=documentToJson(s.document);check(s.call("doc_apply",fit).find("isError")->b&&documentToJson(s.document)==offsetBefore,"plane extension outside finite host face rejects");
+}
+void bentTerminal(){
+ AgentSession s;call(s,"doc_apply",R"({"commands":[
+ {"op":"feature.add","type":"tube","name":"Curved stock","p":{"section":"rect","width":20,"height":16,"wall":2,"tail":50},"bends":[{"feed":50,"radius":100,"angle":45,"roll":0}]},
+ {"op":"feature.add","type":"tube","name":"Host stock","p":{"section":"rect","width":60,"height":40,"wall":3,"tail":200}},
+ {"op":"feature.add","type":"native_solid","name":"Host","inputs":[2],"native":{"op":"transform"},"p":{"rz":90,"tx":0,"ty":-100}},
+ {"op":"feature.add","type":"native_solid","name":"Curved fit","inputs":[1,3],"native":{"op":"tube_end_fit","mode":"envelope","end":"start"},"p":{"max_extension":0}}
+ ]})");auto proof=evidence(s,4);check(proof.find("result_volume_mm3")->num<proof.find("source_volume_mm3")->num,"curved Tube keeps bends with real terminal trim");check(s.document.features[0].type==FeatureType::Tube&&s.document.features[0].bends.size()==1,"source Tube authoring retained");
+ const auto before=documentToJson(s.document);check(s.call("doc_apply",json(R"({"commands":[{"op":"feature.edit","id":3,"p":{"tx":100}}]})")).find("isError")->b&&documentToJson(s.document)==before,"host crossing a bend/interior rejects atomically");
+}
+void metadata(){
+ AgentSession s;base(s);call(s,"doc_apply",R"({"commands":[{"op":"material.set","name":"Declared","density":7.85,"appearance":{"base_color":[0.1,0.2,0.3]}},{"op":"material.set","name":"Override","density":8},{"op":"feature.edit","id":4,"material":"Declared","appearance":{"roughness":0.8}}]})");
+ call(s,"doc_apply",R"({"commands":[{"op":"feature.add","type":"native_solid","name":"Inherited fit","inputs":[4,2],"native":{"op":"tube_end_fit","mode":"envelope","end":"start"},"p":{"max_extension":0}},{"op":"feature.add","type":"native_solid","name":"Explicit fit","inputs":[4,2],"native":{"op":"tube_end_fit","mode":"envelope","end":"start"},"p":{"max_extension":0},"material":"Override","appearance":{"opacity":0.5}}]})");
+ check(s.document.find(5)->material=="Declared"&&s.document.find(5)->appearance.dump()==s.document.find(4)->appearance.dump(),"typed end fit inherits source declared material and appearance when omitted");
+ check(s.document.find(6)->material=="Override"&&s.document.find(6)->appearance.find("opacity")->num==0.5&&!s.document.find(6)->appearance.find("roughness"),"explicit material and appearance override inherited defaults");
+ const auto mass=call(s,"native_inspect",R"({"id":5})");check(mass.find("mass_checked")->b,"inherited declared density keeps exact end-fit mass inspectable");near(mass.find("mass_g")->num,128*80*7.85/1000,1e-6,"inherited mass uses actual trimmed volume");
+}
+void partialCap(){
+ AgentSession s;base(s);call(s,"doc_apply",R"({"commands":[{"op":"feature.edit","id":3,"p":{"width":80}},{"op":"feature.edit","id":4,"p":{"ty":0}},{"op":"feature.add","type":"native_solid","name":"Partial cope","inputs":[4,2],"native":{"op":"tube_end_fit","mode":"envelope","end":"start"},"p":{"max_extension":0}}]})");const auto proof=evidence(s,5);check(proof.find("remaining_original_cap_area_mm2")->num>0&&!proof.find("original_cap_fully_removed")->b&&!proof.find("full_terminal_coverage_checked")->b,"overwide coped Tube reports its retained original cap instead of claiming a complete flush joint");near(proof.find("overlap_volume_mm3")->num,0,1e-8,"partial cope still removes exact host overlap");
+}
+void partialPlaneTrim(){
+ AgentSession s;base(s);call(s,"doc_apply",R"({"expected_revision":1,"commands":[{"op":"feature.edit","id":3,"p":{"width":80}},{"op":"feature.edit","id":4,"p":{"ty":0}}]})");
+ const auto host=call(s,"native_inspect",R"({"id":2})");std::string face;double highest=-1e100;for(const auto& ref:host.find("topology")->find("references")->arr){const auto* d=ref.find("descriptor");const auto* n=d?d->find("normal"):nullptr;const auto* o=d?d->find("origin"):nullptr;if(ref.find("kind")->str=="face"&&n&&o&&n->arr[2].num>.999&&o->arr[2].num>highest){face=ref.find("name")->str;highest=o->arr[2].num;}}check(!face.empty(),"discover actual finite outer support face");
+ auto fit=json(R"({"expected_revision":2,"commands":[{"op":"feature.add","type":"native_solid","name":"Wide planar fit","inputs":[4,2],"native":{"op":"tube_end_fit","mode":"plane","end":"start"},"p":{"max_extension":0}}]})");auto commands=*fit.find("commands"),native=*commands.arr[0].find("native");native.set("reference",V::makeStr(face));commands.arr[0].set("native",native);fit.set("commands",commands);
+ const auto before=documentToJson(s.document);const auto revision=s.revision;auto rejected=s.call("doc_apply",fit);check(rejected.find("isError")->b&&s.revision==revision&&documentToJson(s.document)==before,"plane retains atomic rejection for a partially seated wide cap");check(rejected.find("structuredContent")->dump().find("finite host face")!=std::string::npos,"strict plane rejection is specifically finite cap coverage");
+ native.set("mode",V::makeStr("plane_trim"));commands.arr[0].set("native",native);fit.set("commands",commands);auto accepted=s.call("doc_apply",fit);if(accepted.find("isError")->b)throw std::runtime_error("Partial supporting-plane trim: "+accepted.find("structuredContent")->dump());const auto proof=evidence(s,5);
+ near(proof.find("cap_area_mm2")->num,368,1e-6,"wide rectangular terminal cap exact area");near(proof.find("covered_cap_area_mm2")->num,240,1e-6,"finite host face covers measured material area");near(proof.find("uncovered_cap_area_mm2")->num,128,1e-6,"partial seating exposes its exact uncovered material area");check(proof.find("cap_coverage_checked")->b&&!proof.find("full_seat_checked")->b,"partial cap is measured without claiming full seating");near(proof.find("result_volume_mm3")->num,368*80,1e-5,"supporting-plane trim removes whole original terminal beyond the support plane");near(proof.find("remaining_original_cap_area_mm2")->num,0,1e-8,"original partial end cap is completely trimmed");check(proof.find("original_cap_fully_removed")->b&&proof.find("terminal_ownership_checked")->b,"trim preserves terminal ownership with full original cap removal");near(proof.find("overlap_volume_mm3")->num,0,1e-8,"partial planar trim retains zero material overlap");near(proof.find("separation_mm")->num,0,1e-6,"partial planar cap retains actual host contact");check(!proof.find("weld_strength_checked")->b,"plane_trim makes no weld qualification claim");call(s,"reference_inspect",R"({"id":5,"reference":"fit.start"})");
+ Document loaded;std::string error;check(documentFromJson(documentToJson(s.document),loaded,&error),"plane_trim persists as an explicit linked mode");loaded.recompute();for(const auto& result:loaded.lastResults)check(result.ok,"plane_trim reload evaluates exact geometry");
+ const auto finalBefore=documentToJson(s.document);const auto finalRevision=s.revision;check(s.call("doc_apply",json(R"({"commands":[{"op":"feature.edit","id":4,"p":{"ty":100}}]})")).find("isError")->b&&s.revision==finalRevision&&documentToJson(s.document)==finalBefore,"plane_trim still rejects a trim without actual finite-host contact atomically");
+}
+}
+int main(){try{envelope();planeGap();bentTerminal();metadata();partialCap();partialPlaneTrim();std::cout<<"tube end fit tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

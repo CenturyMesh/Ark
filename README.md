@@ -1,12 +1,16 @@
-# ARK 004B — Agent-Ready Kernel
+# ARK 005B — Agent-Ready Kernel
 
 **Parametric CAD for people and agents.**
 
-Public iteration **004B** uses runtime **0.9.5**. The three digits are globally
+Public iteration **005B** uses runtime **0.9.6**. The three digits are globally
 sequential; A–G identifies the roadmap phase, not the month. See the mandatory
 [development rules](AGENTS.md), the [35-milestone roadmap](docs/ROADMAP.md), and
 the [open-source / €200 perpetual license analysis](docs/COMMERCIAL_STRATEGY.md).
 `release.json` is the single source of release identity.
+
+005B adds exact three-point/tangent arcs in 2D and spatial curves, a feature-tree
+scrollbar, linked tube-end cuts, selective design inspection, and explicit
+task/goal completion reporting. [Complex modelling audit](docs/COMPLEX_MODELING_AUDIT_005B.md).
 
 004B adds direct transparency controls, an adaptive grid and joint-aware assembly
 manipulation with persistent poses. Agents can inspect, preview and apply the same

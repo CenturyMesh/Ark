@@ -33,8 +33,11 @@ calculation and inspection tools and sends measured revision proposals. Stable
 role IDs preserve existing saved settings. See [team architecture](AGENT_TEAM_ARCHITECTURE.md)
 and [Studio team controls](MULTI_AGENT_STUDIO.md).
 
-The team adds `team_send`, `team_context`, `team_propose`, `team_proposal` and
-`team_apply_step` to its connector schema, not standalone MCP discovery.
+The team adds `team_send`, `team_context`, `team_propose`, `team_proposal`,
+`team_apply_step`, `team_report_task` and lead-only `team_finish_goal` to its
+connector schema, not standalone MCP discovery. Report completed/needs_input/
+in_progress explicitly with output IDs, evidence and limits. Idle is not a goal
+completion report; pending work and unresolved failures prevent completion.
 Construction steps are atomic and default to at most eight commands, with up to
 eight created features/placements within that command bound and the role scope.
 Related operations can form one coherent batch; one provider round per feature

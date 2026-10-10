@@ -47,6 +47,7 @@ struct AgentTeamEvent {
 struct AgentTeamRoleSnapshot {
     std::string id,label,model,reasoningEffort,status,text,error;
     AgentTeamState state=AgentTeamState::Idle;
+    std::string taskState="unassigned",taskSummary;
     bool canWrite=false;
     unsigned turns=0;
     std::uint64_t stepsApplied=0;
@@ -61,7 +62,13 @@ struct AgentTeamProposalSnapshot {
     std::uint64_t expectedRevision=0;
     std::vector<std::string> operations;
 };
+enum class AgentGoalState { InProgress, Completed, NeedsInput, Interrupted };
+const char* agentGoalStateName(AgentGoalState state) noexcept;
 struct AgentTeamSnapshot {
+    AgentGoalState goalState=AgentGoalState::InProgress;
+    std::string goalSummary;
+    bool goalDeclared=false;
+    unsigned outstandingTasks=0, unresolvedErrors=0;
     bool running=false, paused=false, cancelled=false;
     std::uint64_t droppedEvents=0;
     std::vector<AgentTeamRoleSnapshot> roles;

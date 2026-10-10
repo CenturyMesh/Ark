@@ -80,6 +80,29 @@ void testManufacturingDiscovery(){
     auto committed=accepted(rejected.call("doc_apply",*validPreview.find("apply")));
     check(committed.find("applied_prepared")->b&&rejected.document.features[0].manufacturingRoute=="purchased","prepared commit retains validated intent without re-evaluation");
 }
+void testSelectedDesignReads(){
+    AgentSession session;session.document.setParam("width","25");Sketch sketch;sketch.addCircle(0,0,3);sketch.ents[0].name="rim";session.document.setSketch("Profile",sketch);session.document.setSketch("Unrelated",sketch);
+    Material used;used.name="Grey";session.document.materials.push_back(used);Material unused;unused.name="Unused";session.document.materials.push_back(unused);
+    for(int index=0;index<154;++index){Feature feature;feature.name="Part "+std::to_string(index);feature.type=index?FeatureType::Box:FeatureType::Extrude;if(!index){feature.p={{"sketch","Profile"},{"height","2"}};feature.material="Grey";}session.document.addFeature(feature);}
+    AssemblyNode node;node.id=1;node.name="Placed";node.feature=session.document.features[0].id;session.document.assembly.push_back(node);session.document.recompute();
+    const auto revision=session.revision;const auto before=documentToJson(session.document);const auto full=call(session,"doc_info",R"({"detail":"design"})");
+    check(!full.find("partial")&&full.find("features")->arr.size()==154,"Default design inventory keeps complete legacy shape");
+    const auto selected=call(session,"doc_info",R"({"detail":"design","ids":["Part 0",154]})");
+    check(selected.find("partial")->b&&selected.find("scope")->str=="selected_features"&&selected.find("units")->str=="mm"&&selected.find("parameter_error"),"Selected inventory declares scope and units/error");
+    check(selected.find("features")->arr.size()==2&&!selected.find("parameters")&&!selected.find("sketches"),"IDs default to feature rows only");
+    check(selected.find("features")->arr[0].dump()==full.find("features")->arr[0].dump()&&selected.find("features")->arr[1].dump()==full.find("features")->arr[153].dump(),"Selected rows equal full inventory rows exactly");
+    check(selected.find("total_counts")->find("features")->num==154&&selected.find("total_counts")->find("sketches")->num==2,"Partial report retains actual global totals");
+    auto related=call(session,"doc_info",R"({"detail":"design","ids":[1],"sections":["features","sketches","parameters","assembly","materials"]})");
+    check(related.find("sketches")->arr.size()==1&&related.find("sketches")->arr[0].dump()==full.find("sketches")->arr[0].dump(),"Selected sketch section retains exact direct source row");
+    check(related.find("assembly")->arr.size()==1&&related.find("materials")->arr.size()==1&&related.find("parameters")->dump()==full.find("parameters")->dump(),"Associated placements/materials and document-wide parameters remain explicit");
+    check(related.find("section_scopes")->find("parameters")->str=="document","Parameter section states its document-wide scope");
+    auto section=call(session,"doc_info",R"({"detail":"design","sections":["sketches"]})");check(section.find("sketches")->dump()==full.find("sketches")->dump()&&!section.find("features"),"Section-only selection preserves entire chosen section");
+    for(const char* args:{R"({"detail":"design","ids":[9999]})",R"({"detail":"design","ids":["Unknown"]})",R"({"detail":"design","ids":[1,1]})",R"({"detail":"design","ids":[]})",R"({"detail":"design","sections":["checks"]})",R"({"detail":"summary","ids":[1]})"})check(session.call("doc_info",parse(args)).find("isError")->b,"Invalid/unknown selection rejects instead of dropping data");
+    session.document.features[1].name="Duplicate";session.document.features[2].name="Duplicate";check(session.call("doc_info",parse(R"({"detail":"design","ids":["Duplicate"]})")).find("isError")->b,"Ambiguous selected name rejects");session.document.features[1].name="Part 1";session.document.features[2].name="Part 2";
+    check(session.revision==revision&&documentToJson(session.document)==before,"Selected reads never mutate document or revision");
+    check(selected.dump().size()*10<full.dump().size(),"Representative selected read materially reduces response bytes");
+    std::cout<<"design_inventory_features=154 full_bytes="<<full.dump().size()<<" selected_two_bytes="<<selected.dump().size()<<"\n";
+}
 #ifdef ARK_AGENT_NATIVE_TESTS
 void testSheetPlacementIntent(){
     AgentSession s;
@@ -117,7 +140,7 @@ void testNative(){AgentSession s;auto started=std::chrono::steady_clock::now();
     auto elapsed=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();std::cout<<"native workflow elapsed_ms="<<elapsed<<" solve_evaluations="<<solve.find("evaluations")->num<<"\n";std::cout<<"worker_statistics="<<nativeKernelInfo().dump()<<"\n";
 }
 #endif
-int main(){try{testMath();testTransactions();testDerivatives();testPlacementFrames();testManufacturingDiscovery();
+int main(){try{testMath();testTransactions();testDerivatives();testPlacementFrames();testManufacturingDiscovery();testSelectedDesignReads();
 #ifdef ARK_AGENT_NATIVE_TESTS
 testNative();
 testCurvedQueries();testSheetPlacementIntent();

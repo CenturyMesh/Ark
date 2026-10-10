@@ -1,5 +1,21 @@
 # Agent teams and module boundaries
 
+## Explicit completion — 005B
+
+`Idle` and a finished provider turn are execution states, not evidence that the
+assignment or user goal is complete. `team_report_task{state,summary}` records
+the role's explicit report (`completed`, `needs_input`, `in_progress`). The lead
+uses `team_finish_goal{state,summary}` for the entire goal after integration and
+checks. Completing rejects pending jobs/mail, active peers, unreported assignments
+and unresolved tool/worker failures. Summaries are agent declarations; actual
+tool receipts remain authoritative and no manufacturing certification is implied.
+
+`team_send.kind` distinguishes `assignment`, `message` and `report`. For older
+clients, an omitted kind on lead-to-specialist messages still means assignment.
+New user steering and accepted mutations reopen the goal. There is no new limit
+on agent turns or tokens. Single mode labels a finished response separately and
+asks the user to review its result, without inventing a completed task state.
+
 ARK keeps engineering geometry in C++ and OCCT. Agent teams are a separate C++
 orchestration module (`agent_team.hpp` / `agent_team.cpp`) over the existing
 assistant connector. Manufacturing process inspection is another module over

@@ -38,6 +38,18 @@ int sketchVertexDof(const SketchEnt& entity, int vertex);
 int sketchVertexCount(const SketchEnt& entity);
 // Minor arc through two points. a1Deg-a0Deg is the signed sweep in degrees.
 bool sketchMinorArc(Vec2 start, Vec2 end, double radius, int sweep, Vec2& center, double& a0Deg, double& a1Deg);
+// Exact analytic arc recipes shared by planar sketches and spatial native
+// curves. Sweep follows the start tangent, including arcs greater than pi.
+struct AuthoredArc {
+    Vec3 center{}, normal{}, xAxis{};
+    double radius=0, sweep=0;
+    Vec3 point(double fraction) const;
+    Vec3 tangent(double fraction) const;
+};
+AuthoredArc arcThroughThreePoints(Vec3 start, Vec3 through, Vec3 end);
+AuthoredArc arcFromStartTangent(Vec3 start, Vec3 end, Vec3 tangent);
+// Checks the bounded typed DTO; expressions are evaluated by evaluateSketch.
+bool validateSketchArcRecipe(const arkjson::Value& recipe, std::string& error);
 arkjson::Value measureSketchEntity(const Document& doc, const NamedSketch& sketch, const std::string& entity);
 // Explicitly closed, simple, non-touching loops. No automatic closing/healing.
 std::vector<SketchProfile> sketchProfiles(const Sketch& sketch, const Mat4& frame);

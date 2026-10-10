@@ -36,8 +36,8 @@ Value entToJson(const SketchEnt& e){
     Value v=Value::makeObj();
     v.set("kind",Value::makeStr(sketchEntityKindName(e.kind)));
     Value d=Value::makeArr();
-    if(e.kind!=SketchEnt::Project)for(size_t i=0;i<e.dof.size();++i)d.arr.push_back(i<e.expressions.size()&&!e.expressions[i].empty()?Value::makeStr(e.expressions[i]):Value::makeNum(e.dof[i]));
-    v.set("dof",std::move(d));
+    if(e.kind!=SketchEnt::Project&&e.arcRecipe.t!=Value::Obj)for(size_t i=0;i<e.dof.size();++i)d.arr.push_back(i<e.expressions.size()&&!e.expressions[i].empty()?Value::makeStr(e.expressions[i]):Value::makeNum(e.dof[i]));
+    if(e.arcRecipe.t==Value::Obj)v.set("recipe",e.arcRecipe);else v.set("dof",std::move(d));
     if(!e.name.empty())v.set("name",Value::makeStr(e.name));
     if(e.construction)v.set("construction",Value::makeBool(true));
     if(e.kind==SketchEnt::Spline){v.set("closed",Value::makeBool(e.closed));v.set("tension",Value::makeNum(e.tension));}
@@ -78,6 +78,12 @@ bool entFromJson(const Value& v, SketchEnt& e, std::string* err){
     else if(k=="project") e.kind=SketchEnt::Project;
     else if(k=="offset") e.kind=SketchEnt::Offset;
     else { if(err)*err="unknown sketch entity kind: "+k; return false; }
+    if(auto recipe=v.find("recipe")){
+        std::string reason;if(e.kind!=SketchEnt::Arc)return fail("Only an arc accepts a construction recipe");
+        if(!validateSketchArcRecipe(*recipe,reason))return fail(reason);
+        if(auto dof=v.find("dof");dof&&(dof->t!=Value::Arr||!dof->arr.empty()))return fail("Arc recipe and center/angle dof are exclusive");
+        e.arcRecipe=*recipe;
+    }
     const bool driven=e.kind==SketchEnt::Project||e.kind==SketchEnt::Offset;
     if(e.kind==SketchEnt::Wire||driven){
         auto segments=v.find("segments");
@@ -376,6 +382,13 @@ bool generation10Document(const Document& doc){
     return false;
 }
 
+bool arcRecipeDocument(const Document& doc){
+    for(const auto& sketch:doc.sketches)for(const auto& entity:sketch.sk.ents)if(entity.arcRecipe.t==Value::Obj)return true;
+    for(const auto& feature:doc.features)if(feature.type==FeatureType::NativeSolid&&featureOperation(feature)=="tube_end_fit")return true;
+    for(const auto& feature:doc.features)if(feature.type==FeatureType::Curve)if(auto segments=feature.nativeSpec.find("segments"))for(const auto& segment:segments->arr)if(auto kind=segment.find("kind");kind&&kind->str=="arc")if(segment.find("mode")||segment.find("major"))return true;
+    return false;
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -410,6 +423,7 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
     for(const auto& feature:doc.features)if(feature.type==FeatureType::Curve)if(auto op=feature.nativeSpec.find("op");op&&op->str=="project")projectionVersion=true;
     if(projectionVersion)r.set("version",Value::makeNum(28));
     for(const auto& mate:doc.mates)if(mate.type=="rigid"||mate.type=="revolute")r.set("version",Value::makeNum(29));
+    if(arcRecipeDocument(doc))r.set("version",Value::makeNum(30));
     r.set("units",Value::makeStr("mm"));
     r.set("next_feature_id",Value::makeNum((double)doc.nextFeatureId_));
 
@@ -505,7 +519,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     Value v;
     if(!arkjson::parse(json,v)) return fail("malformed JSON");
     if(v.t!=Value::Obj) return fail("root must be object");
-    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0&&ver->num!=3.0&&ver->num!=4.0&&ver->num!=5.0&&ver->num!=6.0&&ver->num!=7.0&&ver->num!=8.0&&ver->num!=9.0&&ver->num!=10.0&&ver->num!=11.0&&ver->num!=12.0&&ver->num!=13.0&&ver->num!=14.0&&ver->num!=15.0&&ver->num!=16.0&&ver->num!=17.0&&ver->num!=18.0&&ver->num!=19.0&&ver->num!=20.0&&ver->num!=21.0&&ver->num!=22.0&&ver->num!=23.0&&ver->num!=24.0&&ver->num!=25.0&&ver->num!=26.0&&ver->num!=27.0&&ver->num!=28.0&&ver->num!=29.0)))
+    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0&&ver->num!=3.0&&ver->num!=4.0&&ver->num!=5.0&&ver->num!=6.0&&ver->num!=7.0&&ver->num!=8.0&&ver->num!=9.0&&ver->num!=10.0&&ver->num!=11.0&&ver->num!=12.0&&ver->num!=13.0&&ver->num!=14.0&&ver->num!=15.0&&ver->num!=16.0&&ver->num!=17.0&&ver->num!=18.0&&ver->num!=19.0&&ver->num!=20.0&&ver->num!=21.0&&ver->num!=22.0&&ver->num!=23.0&&ver->num!=24.0&&ver->num!=25.0&&ver->num!=26.0&&ver->num!=27.0&&ver->num!=28.0&&ver->num!=29.0&&ver->num!=30.0)))
         return fail("unsupported document version");
     Value history;std::string historyError;if(!iterationExpand(v,history,historyError))return fail(historyError);
 
@@ -713,6 +727,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     for(const auto& feature:nd.features){bool fabrication=false;if(feature.type==FeatureType::SheetMetal)fabrication=feature.nativeSpec.find("jog")||feature.nativeSpec.find("sketch_bend");if(feature.type==FeatureType::ConstructionFrame){if(auto welds=feature.nativeSpec.find("welds"))fabrication|=welds->t==Value::Arr&&!welds->arr.empty();if(auto joints=feature.nativeSpec.find("joints"))for(const auto& joint:joints->arr)if(auto kind=joint.find("kind"))fabrication|=kind->str=="trim_extend"||kind->str=="trim_plane";}if(fabrication&&(!v.find("version")||v.find("version")->num<25))return fail("Frame endpoint/weld or sheet jog/sketch-bend programs require document version 25");}
     std::string manufacturingError;if(!validateManufacturingRoutes(nd,manufacturingError))return fail(manufacturingError);
     if(history.t!=Value::Null){if(!iterationValidate(nd,history,historyError))return fail(historyError);nd.iterationHistory=std::move(history);}
+    if(arcRecipeDocument(nd)){const auto* version=v.find("version");if(!version||version->num<30)return fail("Arc recipes and linked tube end fits require document version 30");}
     doc=std::move(nd);
     return true;
 }

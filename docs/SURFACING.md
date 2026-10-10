@@ -190,3 +190,51 @@ the input and the result has no B-rep. `import_mesh` copies an STL or OBJ file
 into a `mesh_body` and does not keep a live link to the file. Lengths are
 millimetres. The operation limits, report fields, and the `mesh` onboarding
 topic are in [the agent protocol](AGENTS.md).
+
+## Spatial arc recipes — 005B / B.03
+
+An authored `curve` feature carries an ordered exact spatial wire. The initial
+point and every coordinate accept parameter expressions. Three-point arcs
+specify a point on the intended interval:
+
+```json
+{"op":"feature.add","type":"curve","name":"Raised spine","native":{"start":[2,"radius",0],"segments":[{"kind":"arc","mode":"three_point","through":[2,0,"radius"],"to":[2,"-radius",0]}]}}
+```
+
+`mode:"tangent"` constructs a circle from the segment start, its endpoint and
+an oriented start tangent. When omitted after an earlier segment, the tangent
+comes from that exact edge's end derivative. The first segment requires an
+explicit tangent; an explicitly supplied tangent on a later segment must
+continue the previous edge's direction.
+
+```json
+{"op":"feature.add","type":"curve","name":"Tangent spine","native":{"start":[0,0,0],"segments":[{"kind":"line","to":[10,0,0]},{"kind":"arc","mode":"tangent","to":[20,10,0]},{"kind":"arc","mode":"tangent","to":[10,20,10]}]}}
+```
+
+Use `tangent:[tx,ty,tz]` when authoring a first tangent arc. Both recipes can
+produce arcs greater than 180 degrees. An optional `normal:[nx,ny,nz]` verifies
+the authored plane; inconsistent normals, repeated/collinear points, a zero
+tangent and an endpoint on its tangent line reject. In recipe modes the normal
+is an unoriented plane witness: either parallel sign is accepted, while the
+ordered points/start tangent select traversal. Inputs do not silently
+project onto another plane or substitute a polyline.
+
+Existing `kind:"arc"` radius segments use `to`, `radius`, `normal` and
+`sweep:1|-1`; `sweep` selects left/right of the directed chord. Optional
+`major:true` selects the interval greater than 180 degrees, with the same
+side convention. A 180-degree arc has one semicircle on each side. Recipe
+`mode` cannot be combined with radius/sweep/major fields. New modes/major
+semantics require document version 30; their original expressions persist.
+
+These features remain exact OCCT circular edges, suitable for `native.path`
+in a sweep or for loft guides. `geometry_query` with `action:"continuity"`
+measures exact joins via semantic `edge.0`, `edge.1` references. Viewport ribbons
+and samples are presentation. This is an expression-driven spatial curve
+program, not a general spatial geometric constraint solver, surface blend,
+or manufacturing qualification.
+
+The native `ark-sketch-arc-tests` configuration checks three-point and radius
+major-arc lengths, inherited spatial G1 tangency, coplanarity/reversal rejects,
+parameter changes and cold persistence replay. Its sweep check compares the
+exact solid's volume against the independent circular-spine area-times-length
+formula. Current pass/fail evidence is recorded with the iteration release.

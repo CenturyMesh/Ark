@@ -4,6 +4,7 @@
 #include <condition_variable>
 #include <deque>
 #include <mutex>
+#include <map>
 #include <set>
 #include <stdexcept>
 #include <thread>
@@ -46,7 +47,9 @@ V teamTools(V tools,unsigned maxCommands){
         V required=schema.find("required")?*schema.find("required"):V::makeArr();if(required.t!=V::Arr)required=V::makeArr();if(!std::any_of(required.arr.begin(),required.arr.end(),[](const auto& value){return value.asStr()=="expected_revision";}))required.arr.push_back(V::makeStr("expected_revision"));schema.set("required",required);tool.set("inputSchema",schema);
     }
     auto add=[&](const char* name,const char* desc,const char* schema){V tool=V::makeObj(),parsed,annotations=V::makeObj();arkjson::parse(schema,parsed);tool.set("name",V::makeStr(name));tool.set("description",V::makeStr(desc));tool.set("inputSchema",parsed);annotations.set("readOnlyHint",V::makeBool(true));tool.set("annotations",annotations);tools.arr.push_back(tool);};
-    add("team_send","Send a concise proposal, question or measured evidence to a teammate by role id. Include expected_revision in a proposed document edit; only a role with write permission may apply it. A message schedules the recipient, bounded by team turn/message limits.",R"({"type":"object","properties":{"to":{"type":"string"},"message":{"type":"string"}},"required":["to","message"]})");
+    add("team_send","Send a concise proposal, question or measured evidence to a teammate by role id. Include expected_revision in a proposed document edit; only a role with write permission may apply it. Set kind:assignment for new work, message for FYI, report for evidence/outcome. Missing kind keeps legacy lead-to-specialist assignment semantics. A message schedules the recipient; use only useful coordination, no acknowledgement loops.",R"({"type":"object","properties":{"to":{"type":"string"},"message":{"type":"string"},"kind":{"type":"string","enum":["assignment","message","report"]}},"required":["to","message"]})");
+    add("team_report_task","Report the assignment state with actual IDs/evidence and limits. Idle/provider turn completion is not task completion. This declaration does not certify geometry or manufacture.",R"({"type":"object","properties":{"state":{"type":"string","enum":["completed","needs_input","in_progress"]},"summary":{"type":"string"}},"required":["state","summary"]})");
+    add("team_finish_goal","Lead-only goal outcome and evidence/limits. Completed rejects outstanding tasks, active/queued peers, pending mail and tool/worker errors. Finish the turn afterward. This is an explicit declaration, not certification.",R"({"type":"object","properties":{"state":{"type":"string","enum":["completed","needs_input","in_progress"]},"summary":{"type":"string"}},"required":["state","summary"]})");
     add("team_context","Read real teammate states, latest visible output, permissions and provider token accounting. These are collaboration updates, not manufacturing certification.",R"({"type":"object","properties":{}})");
     add("team_propose","Store a revision-bound edit proposal for a teammate. Requires actual inspected revision and reason/evidence; never applies geometry or certifies physics. Recipient must inspect and choose whether to apply. Commands stay atomic and bounded.",R"({"type":"object","properties":{"to":{"type":"string"},"expected_revision":{"type":"integer","minimum":0},"commands":{"type":"array","minItems":1,"items":{"type":"object"}},"checks":{"type":"array"},"reason":{"type":"string"},"evidence":{"type":"string"}},"required":["to","expected_revision","commands","reason"]})");
     add("team_proposal","Read one stored proposal's actual commands, checks, author, recipient and observed revision. It remains a proposal until a measured commit receipt exists.",R"({"type":"object","properties":{"id":{"type":"string"}},"required":["id"]})");
@@ -61,12 +64,14 @@ const char* agentTeamDisciplineName(AgentTeamDiscipline value) noexcept{switch(v
 const char* agentTeamStateName(AgentTeamState state) noexcept{
     switch(state){case AgentTeamState::Queued:return "Queued";case AgentTeamState::Working:return "Working";case AgentTeamState::Idle:return "Idle";case AgentTeamState::Failed:return "Failed";case AgentTeamState::Cancelled:return "Cancelled";case AgentTeamState::AwaitingContinuation:return "Awaiting continuation";case AgentTeamState::Interrupted:return "Interrupted";}return "Unknown";
 }
+const char* agentGoalStateName(AgentGoalState state) noexcept{switch(state){case AgentGoalState::InProgress:return "In progress";case AgentGoalState::Completed:return "Completed";case AgentGoalState::NeedsInput:return "Needs input";case AgentGoalState::Interrupted:return "Interrupted";}return "Unknown";}
 struct AgentTeam::Impl {
     struct Role {
         AgentTeamRole config;
         V tools=V::makeArr();
         AgentTeamRoleSnapshot view;
         V lastToolFailure;
+        std::map<std::string,V> unresolvedToolFailures;
         std::string turnText;
         std::deque<std::string> pending,context;
         std::size_t pendingBytes=0,contextBytes=0;
@@ -79,6 +84,9 @@ struct AgentTeam::Impl {
     std::timed_mutex toolsMutex;
     std::atomic_bool cancelled{true};
     bool started=false,paused=false;
+    AgentGoalState goalState=AgentGoalState::InProgress;
+    std::string goalSummary;
+    bool goalDeclared=false;
     unsigned active=0;
     AgentTeamConfig config;
     std::vector<Role> roles;
@@ -132,7 +140,7 @@ struct AgentTeam::Impl {
         if(cancelled)throw std::runtime_error("Team cancelled; previously applied document changes remain.");
     }
     void queue(std::size_t index){auto& role=roles[index];if(role.active||role.queued)return;role.queued=true;role.view.state=AgentTeamState::Queued;role.view.status="Queued";jobs.push_back(index);}
-    bool deliver(const std::string& sender,const std::string& target,const std::string& text,bool user){
+    bool deliver(const std::string& sender,const std::string& target,const std::string& text,bool user,bool assignment=true){
         if(!hasText(text))return false;
         std::vector<std::string> accepted;
         {std::lock_guard lock(mutex);if(!started||cancelled)return false;
@@ -143,7 +151,9 @@ struct AgentTeam::Impl {
                 if(!user&&role.view.id==sender)continue;
                 if(config.maxTurnsPerRole&&role.turnsInWindow>=config.maxTurnsPerRole&&!role.active)continue;
                 if(content.size()>config.maxMailboxBytes||role.pendingBytes+content.size()>config.maxMailboxBytes)continue;
-                role.pending.push_back(content);role.pendingBytes+=content.size();if(user)++role.steeringVersion;queue(i);accepted.push_back(role.view.id);
+                role.pending.push_back(content);role.pendingBytes+=content.size();if(user)++role.steeringVersion;
+                if(user||(assignment&&sender==leadRoleId(config.roles))){role.view.taskState="in_progress";role.view.taskSummary.clear();}
+                goalState=AgentGoalState::InProgress;goalDeclared=false;goalSummary.clear();queue(i);accepted.push_back(role.view.id);
                 if(!user&&role.view.id==leadRoleId(config.roles))for(auto& source:roles)if(source.view.id==sender&&source.active)source.reportedToCoordinator=true;
             }
         }
@@ -166,9 +176,9 @@ struct AgentTeam::Impl {
     }
     V context(){
         std::lock_guard lock(mutex);V result=V::makeObj(),list=V::makeArr();
-        for(const auto& role:roles){V item=V::makeObj();item.set("id",V::makeStr(role.view.id));item.set("state",V::makeStr(agentTeamStateName(role.view.state)));item.set("discipline",V::makeStr(agentTeamDisciplineName(role.view.discipline)));item.set("status",V::makeStr(role.view.status));item.set("can_write",V::makeBool(role.view.canWrite));std::string latest;boundedAppend(latest,role.view.text,2048);item.set("latest_output",V::makeStr(latest));item.set("steps_applied",V::makeNum((double)role.view.stepsApplied));item.set("token_evidence",V::makeStr(assistantUsageLabel(role.view.usage)));if(!role.lastToolFailure.isNull())item.set("last_tool_failure",role.lastToolFailure);list.arr.push_back(item);}
+        for(const auto& role:roles){V item=V::makeObj();item.set("id",V::makeStr(role.view.id));item.set("state",V::makeStr(agentTeamStateName(role.view.state)));item.set("discipline",V::makeStr(agentTeamDisciplineName(role.view.discipline)));item.set("status",V::makeStr(role.view.status));item.set("can_write",V::makeBool(role.view.canWrite));std::string latest;boundedAppend(latest,role.view.text,2048);item.set("latest_output",V::makeStr(latest));item.set("task_state",V::makeStr(role.view.taskState));item.set("task_summary",V::makeStr(role.view.taskSummary));item.set("pending_messages",V::makeNum((double)role.pending.size()));item.set("steps_applied",V::makeNum((double)role.view.stepsApplied));item.set("token_evidence",V::makeStr(assistantUsageLabel(role.view.usage)));if(!role.lastToolFailure.isNull())item.set("last_tool_failure",role.lastToolFailure);list.arr.push_back(item);}
         V board=V::makeArr();for(const auto& proposal:proposals){V item=V::makeObj();item.set("id",V::makeStr(proposal.view.id));item.set("from",V::makeStr(proposal.view.fromId));item.set("to",V::makeStr(proposal.view.toId));item.set("expected_revision",V::makeNum((double)proposal.view.expectedRevision));item.set("reason",V::makeStr(proposal.view.reason));item.set("state",V::makeStr(proposal.view.state));board.arr.push_back(item);}
-        result.set("roles",list);result.set("proposals",board);result.set("paused",V::makeBool(paused));result.set("manufacturing_qualified",V::makeBool(false));return result;
+        result.set("goal_state",V::makeStr(agentGoalStateName(goalState)));result.set("goal_summary",V::makeStr(goalSummary));result.set("goal_declared",V::makeBool(goalDeclared));result.set("roles",list);result.set("proposals",board);result.set("paused",V::makeBool(paused));result.set("manufacturing_qualified",V::makeBool(false));return result;
     }
     V propose(std::size_t index,const V& args){
         auto target=field(args,"to"),reason=field(args,"reason");if(target.empty()||!hasText(reason)||!revision(args))return errorResult("Proposal requires a writer recipient, inspected expected_revision and a concrete reason.");
@@ -188,14 +198,38 @@ struct AgentTeam::Impl {
         }
         if(event.operations.empty())event.operations.push_back(name);event.draft=!event.draftSketchCommands.arr.empty();event.text="Requested atomic step "+event.stepId;for(auto& op:event.operations)event.text+=" / "+op;if(!event.sketchNames.empty())event.text+=" / sketch "+event.sketchNames.front();{std::lock_guard lock(mutex);roles[index].view.status=event.text;}return event;
     }
+    V report(std::size_t index,const V& args,bool goal){
+        const auto state=field(args,"state"),summary=field(args,"summary");
+        if((state!="completed"&&state!="needs_input"&&state!="in_progress")||!hasText(summary)||summary.size()>config.maxEventTextBytes)return errorResult("Provide a valid state and a concise nonempty summary with actual evidence and limits.");
+        std::string eventText;
+        {std::lock_guard lock(mutex);auto& role=roles[index];
+            if(role.steeringVersion!=role.requestVersion)return errorResult("New user input is pending. Consume it before declaring completion.");
+            if(goal&&role.view.id!=leadRoleId(config.roles))return errorResult("Only the lead can report the entire user goal. Report your task to the lead.");
+            if(state=="completed"){
+                for(std::size_t i=0;i<roles.size();++i){const auto& peer=roles[i];
+                    if((goal||i==index)&&(!peer.unresolvedToolFailures.empty()||!peer.view.error.empty()||peer.view.needsInspection))return errorResult("Unresolved tool or worker errors remain. Inspect and resolve the failed operation before declaring completion.");
+                    if((goal||i==index)&&(!peer.pending.empty()||peer.queued||(i!=index&&peer.active)))return errorResult("Pending messages or active/queued teammate work remain. Finish integration before declaring completion.");
+                    if(goal&&i!=index&&(peer.view.taskState=="in_progress"||peer.view.taskState=="needs_input"))return errorResult("A teammate assignment has not been explicitly reported completed.");
+                }
+            }
+            role.view.taskState=state;role.view.taskSummary=summary;
+            if(goal){goalState=state=="completed"?AgentGoalState::Completed:state=="needs_input"?AgentGoalState::NeedsInput:AgentGoalState::InProgress;goalSummary=summary;goalDeclared=true;}
+            eventText=std::string(goal?"Goal ":"Task ")+state+" / explicit "+role.view.id+" report: "+summary;
+        }
+        AgentTeamEvent event;event.kind=AgentTeamEvent::Message;event.roleId=roles[index].view.id;event.text=eventText;emit(event);
+        V result=V::makeObj();result.set("reported",V::makeBool(true));result.set("state",V::makeStr(state));result.set("evidence_kind",V::makeStr("explicit_role_report; actual tool receipts remain authoritative; not independent certification"));return result;
+    }
     V call(std::size_t index,const std::string& name,const V& args){
         checkpoint(index);V result;
+        if(documentMutation(name)){std::lock_guard lock(mutex);roles[index].view.taskState="in_progress";roles[index].view.taskSummary.clear();goalState=AgentGoalState::InProgress;goalDeclared=false;goalSummary.clear();}
         if(name.rfind("team_",0)!=0||name=="team_apply_step"){std::lock_guard lock(mutex);roles[index].reportedToCoordinator=false;}
         if(name=="team_send"){
             const auto* to=args.find("to");const auto* text=args.find("message");
-            bool sent=to&&to->t==V::Str&&!to->str.empty()&&text&&text->t==V::Str&&deliver(roles[index].config.id,to->str,text->str,false);
+            const auto kind=field(args,"kind");const bool validKind=kind.empty()||kind=="assignment"||kind=="message"||kind=="report";
+            bool sent=validKind&&to&&to->t==V::Str&&!to->str.empty()&&text&&text->t==V::Str&&deliver(roles[index].config.id,to->str,text->str,false,field(args,"kind").empty()||field(args,"kind")=="assignment");
             result=sent?V::makeObj():errorResult("Message rejected: invalid recipient, empty message, cancellation or team budget.");if(sent){result.set("delivered",V::makeBool(true));if(config.focusedWorkflow)result.set("scheduling",V::makeStr("The recipient runs after the current turn ends. Finish this turn after the handoff; do not poll or wait for a queued teammate."));}
-        }else if(name=="team_context")result=context();
+        }else if(name=="team_report_task"||name=="team_finish_goal")result=report(index,args,name=="team_finish_goal");
+        else if(name=="team_context")result=context();
         else if(name=="team_propose")result=propose(index,args);
         else if(name=="team_proposal"){std::lock_guard lock(mutex);auto id=field(args,"id");auto found=std::find_if(proposals.begin(),proposals.end(),[&](const auto& proposal){return proposal.view.id==id;});result=found==proposals.end()?errorResult("Unknown team proposal id."):found->data;}
         else {
@@ -249,11 +283,15 @@ struct AgentTeam::Impl {
         if(event.toolError){
             const auto& detail=payload(result);V compact=V::makeObj();compact.set("tool",V::makeStr(name));
             for(const char* key:{"error_code","error","stage","operation","command_index","feature_id","observed_solid_count","revision","document_unchanged","recovery"})if(auto value=detail.find(key)){if(value->dump().size()<=2048)compact.set(key,*value);else if(value->t==V::Str)compact.set(key,V::makeStr(clipped(value->str,1800)));}
-            {std::lock_guard lock(mutex);roles[index].lastToolFailure=compact;}
+            {std::lock_guard lock(mutex);if(name.rfind("team_",0)!=0||name=="team_apply_step"){roles[index].lastToolFailure=compact;roles[index].unresolvedToolFailures[name]=compact;}}
             event.text=clipped(field(detail,"error_code")+": "+field(detail,"error"),config.maxEventTextBytes);
             if(event.text==": ")event.text="Tool rejected the request; inspect its retained response.";
             share(index,"Tool failure diagnostic (data): "+compact.dump()+" Inspect the cause before another proposal; choose a correction from design intent, not an identical blind retry.");
-        }else event.text="Tool returned result";
+        }else {event.text="Tool returned result";
+            std::lock_guard lock(mutex);auto& role=roles[index];const auto failed=field(role.lastToolFailure,"tool");
+            std::uint64_t measuredRevision=0;const bool resolved=!documentMutation(name)||receiptRevision(payload(result),measuredRevision);
+            if(resolved){role.unresolvedToolFailures.erase(name);if(name=="doc_apply"||name=="team_apply_step"){role.unresolvedToolFailures.erase("doc_apply");role.unresolvedToolFailures.erase("team_apply_step");}if(failed==name||((failed=="doc_apply"||failed=="team_apply_step")&&(name=="doc_apply"||name=="team_apply_step")))role.lastToolFailure=V{};}
+        }
         emit(event);
         return result;
     }
@@ -287,7 +325,7 @@ struct AgentTeam::Impl {
                     [&](const auto& event){assistantEvent(index,baseline,performanceBaseline,event);},&cancelled,roleConfig.transport,[&]{return inbox(index);},
                     [&](const V& history){std::lock_guard lock(mutex);roles[index].view.conversation=history;},AssistantRetryHooks{[&]{checkpoint(index);},{},{}});
                 {std::lock_guard lock(mutex);roles[index].view.conversation=std::move(result.conversation);roles[index].view.usage=baseline;accumulateAssistantUsage(roles[index].view.usage,result.usage);roles[index].view.performance=performanceBaseline;accumulateAssistantPerformance(roles[index].view.performance,result.performance);roles[index].view.state=cancelled?AgentTeamState::Cancelled:AgentTeamState::Idle;}
-                status(index,cancelled?"Cancelled":"Turn completed");
+                status(index,cancelled?"Cancelled":"Turn finished / task status requires explicit report");
             }catch(const AssistantRoundLimit&){
                 {std::lock_guard lock(mutex);auto& view=roles[index].view;view.state=AgentTeamState::AwaitingContinuation;view.error.clear();view.status="Step request budget reached; committed work retained";view.needsInspection=true;closeInterruptedCalls(view.conversation);view.conversation.arr.push_back(message("developer","This bounded turn reached its provider-round budget after retaining real tool receipts. Continue the existing task from this history; do not replay committed writes. First inspect current doc_info detail design, then choose the next small valid step. Completion has not been claimed."));}
                 AgentTeamEvent event;event.kind=AgentTeamEvent::Yield;event.roleId=roles[index].config.id;event.text="Provider-round budget reached; resume from retained receipts and current geometry";emit(event);
@@ -336,7 +374,7 @@ void AgentTeam::start(const AgentTeamConfig& config,const std::string& prompt,co
     for(const auto& role:config.roles){require(identifier(role.id)&&role.id!="all"&&ids.insert(role.id).second,"Team role ids must be unique identifiers; all is reserved for explicit user broadcasts.");require(role.label.size()<=256&&role.instructions.size()<=16384,"Team role description exceeds its limit.");require(role.discipline!=AgentTeamDiscipline::PhysicsReviewer||!role.canWrite,"Physics reviewer must remain read-only.");validateAssistantConfig(role.assistant);}
     assistantFunctionTools(mcpTools);V tools=teamTools(mcpTools,config.maxCommandsPerStep);assistantFunctionTools(tools);
     impl_->stop();
-    {std::lock_guard lock(impl_->mutex);impl_->config=config;impl_->tools=std::move(tools);impl_->executor=executor;impl_->observer=observer;impl_->roles.clear();impl_->events.clear();impl_->proposals.clear();impl_->prepared.clear();impl_->preparedBytes=impl_->preparedByteLimit=0;impl_->proposalSerial=impl_->stepSerial=0;impl_->jobs.clear();impl_->readOnly.clear();impl_->eventBytes=0;impl_->sequence=impl_->dropped=0;impl_->active=0;impl_->paused=false;impl_->began=std::chrono::steady_clock::now();impl_->cancelled=false;impl_->started=true;
+    {std::lock_guard lock(impl_->mutex);impl_->config=config;impl_->tools=std::move(tools);impl_->executor=executor;impl_->observer=observer;impl_->roles.clear();impl_->events.clear();impl_->proposals.clear();impl_->prepared.clear();impl_->preparedBytes=impl_->preparedByteLimit=0;impl_->proposalSerial=impl_->stepSerial=0;impl_->jobs.clear();impl_->readOnly.clear();impl_->eventBytes=0;impl_->sequence=impl_->dropped=0;impl_->active=0;impl_->paused=false;impl_->goalState=AgentGoalState::InProgress;impl_->goalSummary.clear();impl_->goalDeclared=false;impl_->began=std::chrono::steady_clock::now();impl_->cancelled=false;impl_->started=true;
         for(const auto& tool:impl_->tools.arr)if(const auto* annotations=tool.find("annotations"))if(const auto* hint=annotations->find("readOnlyHint"))if(hint->t==V::Bool&&hint->b)impl_->readOnly.insert(field(tool,"name"));
         std::string roster;for(const auto& role:config.roles){if(!roster.empty())roster+=", ";roster+=role.id+" ("+(role.canWrite?"writable":"read-only")+")";}
         V operationList=V::makeArr();for(const auto& tool:impl_->tools.arr)if(field(tool,"name")=="doc_apply")if(auto schema=tool.find("inputSchema"))if(auto props=schema->find("properties"))if(auto commands=props->find("commands"))if(auto items=commands->find("items"))if(auto fields=items->find("properties"))if(auto op=fields->find("op"))if(auto choices=op->find("enum"))operationList=*choices;
@@ -352,7 +390,7 @@ void AgentTeam::start(const AgentTeamConfig& config,const std::string& prompt,co
             if(roleConfig.canWrite){const bool placements=roleConfig.discipline==AgentTeamDiscipline::Orchestrator||roleConfig.discipline==AgentTeamDiscipline::General;
                 workflow="Author coherent atomic batches with team_apply_step or doc_apply, up to "+std::to_string(config.maxCommandsPerStep)+" commands and "+std::to_string(config.maxFeaturesPerStep)+" new features"+(placements?" and "+std::to_string(config.maxPlacementsPerStep)+" placements":"")+" per batch. Create related profiles, datums and curved features"+(placements?std::string(" and placements"):std::string{})+" together when their complete intent is known; each batch evaluates once. Do not add a separate provider round for every sketch entity or feature merely to animate construction. Use valid independently useful checkpoints, keeping dependent changes and checks atomic. Use native loft, sweep, revolve and curved sketches/surfaces when the design calls for them; primitives are not the only design vocabulary. A successful doc_preview candidate owned by your role may be committed at its observed revision without reevaluating geometry; other-role, unknown and stale candidate IDs reject. ";
             }else workflow="Inspect and review existing geometry without writing. Use read-only previews when a concrete proposal needs measured evidence; an edit proposal must retain its explicit commands/checks and current revision for the responsible writer. ";
-            workflow+="There is no authoritative partial OCCT result inside a kernel operation. Use team_propose for concrete revision-bound requested changes and evidence. ";
+            workflow+="Use team_send kind:assignment for work, message for FYI, report for outcomes; avoid acknowledgement loops. Idle/provider turn completion never proves task/goal completion. Use team_report_task with actual IDs/evidence/limits; the lead calls team_finish_goal after integration/checks, or needs_input with remaining blockers. Reports do not certify geometry/manufacture. There is no authoritative partial OCCT result inside a kernel operation. Use team_propose for concrete revision-bound requested changes and evidence. ";
             if(config.focusedWorkflow)workflow+="This is a focused sequential team: only one role runs at a time. A team_send assignment is queued until your current turn finishes. After handing off work, finish your turn; do not poll team_context or wait for a queued teammate. Use team_send only for a specific needed assignment, question or final report, not acknowledgements of acknowledgements. ";
             if(roleConfig.discipline==AgentTeamDiscipline::Orchestrator){workflow+="You are the lead engineer and can author parts, sketches, datums, dimensions, materials and manufacturing geometry as well as assembly/mate operations and reusable component placement. Make coherent engineering and design decisions from the user goal and measured native evidence. ";
                 workflow+="For a concept brief, first create a coherent whole editable design and establish proportions and functional interfaces; manufacturing choices can remain explicitly unspecified until the user requests them or an operation requires them. Respect the user's dimensions, material and process constraints from the start. Do not substitute manufacturing reviews or catalogue searches for creating the concept. Document-wide new/undo/redo/import operations are available to you, but replacement or source-file loading must be authorized by the user's task. ";
@@ -363,7 +401,7 @@ void AgentTeam::start(const AgentTeamConfig& config,const std::string& prompt,co
             role.view.conversation.arr.push_back(message("developer",workflow));
             role.view.conversation.arr.push_back(message("user","Overall user task (shared context, not an assignment to duplicate the entire model): "+prompt));
             bool startNow=config.focusedWorkflow?roleConfig.id==leadRoleId(config.roles):!config.orchestratedStart||roleConfig.discipline==AgentTeamDiscipline::Orchestrator;
-            if(startNow){role.pending.push_back(!roleConfig.canWrite?"Inspect the current design for the requested read-only review; report measured evidence and propose changes to the responsible writer.":config.focusedWorkflow?"Start the user's design as the lead engineer. Inspect current document evidence and author the next coherent design step; delegate a specific task only when useful.":"Start your assigned authoring role. Coordinate distinct part tasks with team_send when useful; inspect team_context for progress.");role.pendingBytes=role.pending.back().size();}
+            if(startNow){role.view.taskState="in_progress";role.pending.push_back(!roleConfig.canWrite?"Inspect the current design for the requested read-only review; report measured evidence and propose changes to the responsible writer.":config.focusedWorkflow?"Start the user's design as the lead engineer. Inspect current document evidence and author the next coherent design step; delegate a specific task only when useful.":"Start your assigned authoring role. Coordinate distinct part tasks with team_send when useful; inspect team_context for progress.");role.pendingBytes=role.pending.back().size();}
             else role.view.status="Waiting for a specific assignment";
             impl_->roles.push_back(std::move(role));if(startNow)impl_->queue(impl_->roles.size()-1);
         }
@@ -380,9 +418,13 @@ void AgentTeam::cancel() noexcept{impl_->cancel();}
 void AgentTeam::waitIdle(){std::unique_lock lock(impl_->mutex);impl_->idle.wait(lock,[&]{return impl_->jobs.empty()&&impl_->active==0;});}
 bool AgentTeam::waitIdleFor(std::chrono::milliseconds timeout){std::unique_lock lock(impl_->mutex);return impl_->idle.wait_for(lock,timeout,[&]{return impl_->jobs.empty()&&impl_->active==0;});}
 AgentTeamSnapshot AgentTeam::snapshot(bool includeConversations,std::uint64_t sinceEvent) const{
-    std::lock_guard lock(impl_->mutex);AgentTeamSnapshot result;result.running=impl_->active!=0||!impl_->jobs.empty();result.paused=impl_->paused;result.cancelled=impl_->cancelled;result.droppedEvents=impl_->dropped;
+    std::lock_guard lock(impl_->mutex);AgentTeamSnapshot result;result.running=impl_->active!=0||!impl_->jobs.empty();result.paused=impl_->paused;result.cancelled=impl_->cancelled;result.droppedEvents=impl_->dropped;result.goalState=impl_->goalState;result.goalSummary=impl_->goalSummary;result.goalDeclared=impl_->goalDeclared;
+    for(const auto& role:impl_->roles){if(role.view.taskState=="in_progress"||role.view.taskState=="needs_input")++result.outstandingTasks;result.unresolvedErrors+=(unsigned)role.unresolvedToolFailures.size();if(!role.view.error.empty()||role.view.needsInspection)++result.unresolvedErrors;}
+    if(result.cancelled||result.unresolvedErrors){result.goalState=AgentGoalState::Interrupted;result.goalDeclared=false;}
+    else if(!result.running&&!result.goalDeclared)result.goalState=AgentGoalState::NeedsInput;
+    else if(result.running&&result.goalState==AgentGoalState::Completed&&std::any_of(impl_->roles.begin(),impl_->roles.end(),[&](const auto& role){return !role.pending.empty()||role.queued;}))result.goalState=AgentGoalState::InProgress;
     for(const auto& role:impl_->roles){const auto& source=role.view;AgentTeamRoleSnapshot view;
-        view.id=source.id;view.label=source.label;view.model=source.model;view.reasoningEffort=source.reasoningEffort;view.status=source.status;view.text=source.text;view.error=source.error;view.state=source.state;view.canWrite=source.canWrite;view.turns=source.turns;view.usage=source.usage;view.performance=source.performance;view.stepsApplied=source.stepsApplied;view.needsInspection=source.needsInspection;view.discipline=source.discipline;
+        view.taskState=source.taskState;view.taskSummary=source.taskSummary;view.id=source.id;view.label=source.label;view.model=source.model;view.reasoningEffort=source.reasoningEffort;view.status=source.status;view.text=source.text;view.error=source.error;view.state=source.state;view.canWrite=source.canWrite;view.turns=source.turns;view.usage=source.usage;view.performance=source.performance;view.stepsApplied=source.stepsApplied;view.needsInspection=source.needsInspection;view.discipline=source.discipline;
         if(includeConversations)view.conversation=source.conversation;result.roles.push_back(std::move(view));accumulateAssistantUsage(result.usage,source.usage);accumulateAssistantPerformance(result.performance,source.performance);
     }
     for(const auto& proposal:impl_->proposals)result.proposals.push_back(proposal.view);

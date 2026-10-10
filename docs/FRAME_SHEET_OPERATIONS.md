@@ -40,6 +40,61 @@ cross-section properties are separate from physical mass inertia in g*mm2.
 The fiber reported for bending about local y is the section's half-height in z;
 the fiber for bending about local z is its half-width in y.
 
+## End fits on existing authored tubes
+
+`tube_end_fit` adds a linked exact solid operation to existing `tube` features,
+their rigid placements, or earlier end fits. It preserves the original Tube
+authoring program; it does not convert generic solids into a construction frame.
+The Studio **Tube end fit** action creates the same operation:
+
+```json
+{"op":"feature.add","type":"native_solid","name":"Brace fitted",
+ "inputs":["Brace placed","Host placed"],
+ "native":{"op":"tube_end_fit","end":"start","mode":"envelope"},
+ "p":{"max_extension":0}}
+```
+
+The result inherits its immediate source's declared material and authored
+appearance when those fields are omitted. Explicit caller values override
+each default independently; no manufacturing process or density is invented.
+
+`mode:"envelope"` removes the exact filled outer stock of a straight authored
+round or rectangular Tube host. The hollow region is filled in the cutting
+tool, and the physical host remains independent. It trims existing stock only:
+`max_extension` must be explicitly zero. A curved source is supported when the
+selected end has a straight terminal segment. Removed material must belong
+entirely to that terminal segment; interior crossings and cuts into bends reject.
+
+`mode:"plane"` additionally requires `native.reference` naming a bound planar
+face on the second input. Discover its semantic name with `reference_inspect`
+or `native_inspect`; enumeration indices are not references. The operation
+trims or extends the terminal straight segment, with `p.max_extension` as an
+explicit nonnegative expression. The entire material cap must be supported by
+the finite selected face. Parallel axes, insufficient extension, uncovered caps
+and cuts outside the terminal segment reject. Extension of a previously trimmed
+tube rejects because rebuilding its original stock would lose the earlier cut.
+
+`mode:"plane_trim"` uses the same linked planar face, terminal ownership and
+extension contract as `plane`, but permits a cap wider than the finite host
+face. It trims the whole endpoint flush with the face's supporting plane.
+This is explicit CAD construction intent: actual contact and zero material
+overlap remain mandatory. `cap_coverage_checked` means the cap coverage was
+measured; `covered_cap_area_mm2`, `uncovered_cap_area_mm2` and
+`full_seat_checked` report whether the finite face supports the whole cap.
+Partial coverage does not qualify sealing, weld continuity or fabrication.
+Use `plane` when complete finite-face seating is a required design condition.
+
+`native_inspect.report.end_fit` records source/result volumes, stock extension,
+exact separation and overlap, terminal ownership, and planar cap coverage.
+All modes also measure the retained area on the original selected cap;
+an overwide tube may retain an exposed portion. Exact contact and zero overlap
+prove coping, without proving complete seating, closure or a continuous weld.
+Planar results expose `fit.start` or `fit.end`; deleted original cap references
+remain deleted. Every result must be one valid positive solid, contact the
+physical host, and have no positive-volume material overlap. The new operation
+uses document version 30; application iteration codes do not change document
+versions. This is end-fit evidence, without weld or manufacturing qualification.
+
 ## Explicit weld geometry
 
 ```json

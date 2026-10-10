@@ -188,7 +188,7 @@ V numericNative(const V& value, const ExprEnv& env, const std::string& key = {})
         return value;
     }
     if (value.t == V::Str) {
-        if (key == "kind" || key == "sketch" || key == "name" || key == "op" || key == "reference" || key == "second_reference" || key == "mode" || key == "edges" || key == "faces" || key == "face" || key == "plane" || key == "keep" || key == "selection" || key == "direction" || key == "axis" || key == "neutral") return value;
+        if (key == "kind" || key == "sketch" || key == "name" || key == "op" || key == "reference" || key == "second_reference" || key == "mode" || key == "end" || key == "edges" || key == "faces" || key == "face" || key == "plane" || key == "keep" || key == "selection" || key == "direction" || key == "axis" || key == "neutral") return value;
         return V::makeNum(expressionValue(value.str, env));
     }
     if (value.t == V::Arr) {
@@ -597,6 +597,31 @@ V exactPrimitive(const Feature& feature, const ExprEnv& env, Document& document,
     return result;
 }
 
+V tubeAuthority(const Document& document,u64 selected,const ExprEnv& env,bool allowFits){
+    const Feature* source=document.find(selected);Mat4 placed=Mat4::identity();unsigned depth=0;
+    while(source&&source->type!=FeatureType::Tube){
+        if(++depth>64||source->inputs.empty())throw std::runtime_error("Tube end fit requires authored Tube lineage");
+        const auto op=featureOperation(*source);
+        if(allowFits&&op=="tube_end_fit"){source=document.find(source->inputs[0]);continue;}
+        if(source->inputs.size()!=1||(source->type!=FeatureType::Transform&&!(source->type==FeatureType::NativeSolid&&(op=="transform"||op=="rigid_transform"))))
+            throw std::runtime_error("Tube end fit supports authored Tube and rigid placements only");
+        Mat4 local;
+        if(const auto* authored=source->nativeSpec.find("frame")){
+            const auto numeric=numericNative(*authored,env);if(numeric.t!=V::Arr||numeric.arr.size()!=16)throw std::runtime_error("Tube placement frame needs 16 numbers");
+            for(size_t i=0;i<16;++i){if(numeric.arr[i].t!=V::Num)throw std::runtime_error("Tube placement frame must be numeric");local.m[i]=numeric.arr[i].num;}
+        }else local=Mat4::translation({source->num(env,"tx"),source->num(env,"ty"),source->num(env,"tz")})*Mat4::rotZ(deg2rad(source->num(env,"rz")))*Mat4::rotY(deg2rad(source->num(env,"ry")))*Mat4::rotX(deg2rad(source->num(env,"rx")));
+        placed=placed*local;source=document.find(source->inputs[0]);
+    }
+    if(!source)throw std::runtime_error("Tube end fit source missing");
+    V program=V::makeObj(),segments=V::makeArr(),authority=V::makeObj();const bool rect=source->get("section","round")=="rect";
+    auto dimension=[&](const char* key,double fallback){return source->p.count(key)?param(*source,env,key):fallback;};
+    program.set("op",V::makeStr(rect?"rect_tube":"round_tube"));program.set("wall",V::makeNum(dimension("wall",2)));
+    if(rect){program.set("width",V::makeNum(dimension("width",40)));program.set("height",V::makeNum(dimension("height",30)));}else program.set("od",V::makeNum(dimension("od",30)));
+    for(const auto& bend:source->bends){const double feed=expressionValue(bend.feed,env);if(feed>1e-9){V line=V::makeObj();line.set("kind",V::makeStr("line"));line.set("length",V::makeNum(feed));segments.arr.push_back(line);}V arc=V::makeObj();arc.set("kind",V::makeStr("arc"));for(const auto& item:std::vector<std::pair<const char*,std::string>>{{"radius",bend.radius},{"angle",bend.angle},{"roll",bend.roll}})arc.set(item.first,V::makeNum(expressionValue(item.second,env)));segments.arr.push_back(arc);}
+    const double tail=dimension("tail",100);if(tail>1e-9){V line=V::makeObj();line.set("kind",V::makeStr("line"));line.set("length",V::makeNum(tail));segments.arr.push_back(line);}
+    program.set("segments",segments);authority.set("program",program);authority.set("frame",frameValue(placed));authority.set("origin_id",V::makeNum((double)source->id));return authority;
+}
+
 V solidFeatureRequest(const Feature& feature, const ExprEnv& env,
                      Document& document, std::vector<Body>& preceding) {
     if(featureOperation(feature)=="imported_brep"){
@@ -621,6 +646,15 @@ V solidFeatureRequest(const Feature& feature, const ExprEnv& env,
     if (op == "pocket" || op == "slot") op = "hole";
     if (op == "rigid_transform") op = "transform";
     model.set("op", V::makeStr(op));
+    if(op=="tube_end_fit"){
+        if(feature.inputs.size()!=2||feature.inputs[0]==feature.inputs[1])throw std::runtime_error("Tube end fit needs distinct source and host inputs");
+        const std::set<std::string> allowed{"op","end","mode","reference"};for(const auto& item:feature.nativeSpec.obj)if(!allowed.count(item.first))throw std::runtime_error("Unsupported tube end fit field: "+item.first);
+        for(const auto& item:feature.p)if(item.first!="max_extension"&&item.first!="density")throw std::runtime_error("Unsupported tube end fit parameter: "+item.first);
+        if(!feature.p.count("max_extension"))throw std::runtime_error("Tube end fit needs explicit max_extension");
+        const auto* fitMode=model.find("mode");if(!fitMode||fitMode->t!=V::Str||(fitMode->str!="envelope"&&fitMode->str!="plane"&&fitMode->str!="plane_trim"))throw std::runtime_error("Tube end fit mode must be envelope, plane or plane_trim");
+        model.set("tube_authority",tubeAuthority(document,feature.inputs[0],env,true));
+        if(const auto* mode=model.find("mode");mode&&mode->t==V::Str&&mode->str=="envelope")model.set("host_authority",tubeAuthority(document,feature.inputs[1],env,false));
+    }
     if ((op == "curve_pattern" || op == "hole_pattern") && feature.inputs.size() != 2)
         throw std::runtime_error("Curve pattern needs target and path feature inputs");
     if (op == "shell" && feature.inputs.size() != 1)

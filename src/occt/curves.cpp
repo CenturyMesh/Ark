@@ -1,6 +1,8 @@
 #include "ark/occt_modeling.hpp"
+#include "ark/sketch.hpp"
 #include "common.hpp"
 
+#include <BRepAdaptor_Curve.hxx>
 #include <BRepAlgoAPI_Section.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
@@ -109,23 +111,58 @@ void addEdge(BRepBuilderAPI_MakeWire& wire, const TopoDS_Edge& edge) {
     if (!wire.IsDone()) throw std::runtime_error("Curve segments are not connected");
 }
 
-TopoDS_Edge arcEdge(const gp_Pnt& start, const gp_Pnt& end, double radius, const gp_Dir& normal, int sweep) {
+TopoDS_Edge arcEdge(const gp_Pnt& start, const gp_Pnt& end, double radius, const gp_Dir& normal, int sweep, bool major=false) {
     if (!(radius > 1e-8) || sweep != 1 && sweep != -1) throw std::runtime_error("Arc needs a positive radius and sweep +1 or -1");
     gp_Vec chord(start, end);
     const double length = chord.Magnitude();
     if (length < 1e-8 || length > radius * 2 + 1e-6) throw std::runtime_error("Arc chord must fit the radius");
-    gp_Vec projected = gp_Vec(normal) - chord.Normalized() * gp_Vec(normal).Dot(chord.Normalized());
-    if (projected.Magnitude() < 1e-8) throw std::runtime_error("Arc normal is parallel to the chord");
-    const gp_Dir plane(projected);
+    if (std::abs(gp_Vec(normal).Dot(chord.Normalized())) > 1e-10) throw std::runtime_error("Arc endpoints are not coplanar with the authored normal");
+    const gp_Dir plane(normal);
     const gp_Dir left(plane.Crossed(chord.Normalized()));
     const double half = length * 0.5;
     const double offset = std::sqrt(std::max(0.0, radius * radius - half * half));
-    const gp_Pnt center = gp_Pnt((start.XYZ() + end.XYZ()) * 0.5).Translated(gp_Vec(left) * (-offset * sweep));
+    const gp_Pnt center = gp_Pnt((start.XYZ() + end.XYZ()) * 0.5).Translated(gp_Vec(left) * ((major?offset:-offset) * sweep));
     const gp_Pnt bulge = center.Translated(gp_Vec(left) * (radius * sweep));
     GC_MakeArcOfCircle maker(start, bulge, end);
     if (!maker.IsDone()) throw std::runtime_error("Arc construction failed");
     BRepBuilderAPI_MakeEdge edge(maker.Value());
     if (!edge.IsDone()) throw std::runtime_error("Arc edge construction failed");
+    return edge.Edge();
+}
+
+Vec3 vector3(const gp_Pnt& point){return {point.X(),point.Y(),point.Z()};}
+gp_Pnt point3(Vec3 point){return {point.x,point.y,point.z};}
+gp_Vec endTangent(const TopoDS_Edge& edge){
+    BRepAdaptor_Curve curve(edge);gp_Pnt point;gp_Vec tangent;
+    const bool reversed=edge.Orientation()==TopAbs_REVERSED;
+    curve.D1(reversed?curve.FirstParameter():curve.LastParameter(),point,tangent);
+    if(reversed)tangent.Reverse();
+    if(tangent.Magnitude()<=1e-12)throw std::runtime_error("Previous segment has no nonzero end tangent");
+    tangent.Normalize();return tangent;
+}
+TopoDS_Edge recipeArcEdge(const gp_Pnt& start,const gp_Pnt& end,const V& segment,const gp_Vec* previous){
+    const V& mode=need(segment,"mode");if(mode.t!=V::Str||(mode.str!="three_point"&&mode.str!="tangent"))throw std::runtime_error("Arc mode must be three_point or tangent");
+    if(segment.find("radius")||segment.find("sweep")||segment.find("major"))throw std::runtime_error("Arc recipe mode is exclusive with radius/sweep/major");
+    AuthoredArc arc;
+    if(mode.str=="three_point"){
+        if(segment.find("tangent"))throw std::runtime_error("Three-point arc cannot also specify tangent");
+        arc=arcThroughThreePoints(vector3(start),vector3(xyz(need(segment,"through"),"through")),vector3(end));
+    }else{
+        if(segment.find("through"))throw std::runtime_error("Tangent arc cannot also specify through");
+        gp_Vec tangent;
+        if(auto explicitTangent=segment.find("tangent"))tangent=gp_Vec(direction(*explicitTangent,"tangent"));
+        else if(previous)tangent=*previous;
+        else throw std::runtime_error("First tangent arc requires an authored start tangent");
+        if(previous&&gp_Dir(tangent).Dot(gp_Dir(*previous))<1-1e-10)throw std::runtime_error("Tangent arc start direction does not continue the previous segment");
+        arc=arcFromStartTangent(vector3(start),vector3(end),{tangent.X(),tangent.Y(),tangent.Z()});
+    }
+    if(auto authoredNormal=segment.find("normal")){
+        const auto normal=direction(*authoredNormal,"normal");
+        if(gp_Vec(normal).Crossed(gp_Vec(arc.normal.x,arc.normal.y,arc.normal.z)).Magnitude()>1e-10)throw std::runtime_error("Arc recipe points and tangent are not coplanar with the authored normal");
+    }
+    GC_MakeArcOfCircle maker(start,point3(arc.point(.5)),end);
+    if(!maker.IsDone())throw std::runtime_error("Exact arc recipe construction failed");
+    BRepBuilderAPI_MakeEdge edge(maker.Value());if(!edge.IsDone())throw std::runtime_error("Exact arc recipe edge failed");
     return edge.Edge();
 }
 
@@ -164,6 +201,7 @@ V authoredCurve(const V& request) {
     if (segments.t != V::Arr || segments.arr.empty() || segments.arr.size() > 64)
         throw std::runtime_error("Curve needs 1..64 segments");
     BRepBuilderAPI_MakeWire wire;
+    TopoDS_Edge previousEdge;bool havePrevious=false;
     for (const V& segment : segments.arr) {
         const std::string kind = need(segment, "kind").t == V::Str ? need(segment, "kind").str : "";
         TopoDS_Edge edge;
@@ -176,15 +214,26 @@ V authoredCurve(const V& request) {
             cursor = end;
         } else if (kind == "arc") {
             gp_Pnt end = xyz(need(segment, "to"), "to");
-            const gp_Dir normal = segment.find("normal") ? direction(need(segment, "normal"), "normal") : gp_Dir(0, 0, 1);
-            const int sweep = segment.find("sweep") ? (int)num(need(segment, "sweep"), "sweep") : 1;
-            edge = arcEdge(cursor, end, num(need(segment, "radius"), "radius"), normal, sweep);
+            if(auto mode=segment.find("mode")){
+                gp_Vec previousTangent;const gp_Vec* previous=nullptr;
+                if(mode->t==V::Str&&mode->str=="tangent"&&havePrevious){previousTangent=endTangent(previousEdge);previous=&previousTangent;}
+                edge=recipeArcEdge(cursor,end,segment,previous);
+            }
+            else{
+                const gp_Dir normal = segment.find("normal") ? direction(need(segment, "normal"), "normal") : gp_Dir(0, 0, 1);
+                const double sweepValue=segment.find("sweep")?num(need(segment,"sweep"),"sweep"):1;
+                if(sweepValue!=1&&sweepValue!=-1)throw std::runtime_error("Arc sweep must be exactly +1 or -1");
+                bool major=false;if(auto value=segment.find("major")){if(value->t!=V::Bool)throw std::runtime_error("Arc major must be boolean");major=value->b;}
+                if(segment.find("through")||segment.find("tangent"))throw std::runtime_error("Arc through/tangent requires an explicit recipe mode");
+                edge = arcEdge(cursor, end, num(need(segment, "radius"), "radius"), normal, (int)sweepValue,major);
+            }
             cursor = end;
         } else if (kind == "nurbs") {
             edge = nurbsEdge(segment, cursor);
             cursor = xyz(segment.find("poles")->arr.back(), "pole");
         } else throw std::runtime_error("Curve segment kind must be line, arc or nurbs");
         addEdge(wire, edge);
+        previousEdge=edge;havePrevious=true;
     }
     return curveResult(wire.Wire());
 }

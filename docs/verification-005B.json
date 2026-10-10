@@ -1,0 +1,234 @@
+{
+  "iteration": {
+    "sequence": 5,
+    "phase": "B",
+    "code": "005B",
+    "version": "0.9.6",
+    "milestones": [
+      "B.01",
+      "B.02",
+      "B.03",
+      "C.02",
+      "D.02",
+      "D.04"
+    ]
+  },
+  "date": "2026-10-11",
+  "base_commit": "a93e2756e9bcb117c9b7e7c5b7a58aa387c94aee",
+  "native_ctest": {
+    "passed": 59,
+    "failed": 0,
+    "seconds": 22.49,
+    "log": "out\\ark-005B-delivery-native-tests.log"
+  },
+  "core_ctest": {
+    "passed": 41,
+    "failed": 0,
+    "seconds": 10.65,
+    "log": "out\\ark-005B-delivery-core-tests.log"
+  },
+  "ui_tests": [
+    {
+      "test": "tree-ui",
+      "exit": 0,
+      "seconds": 0.61,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-005B-final-tree-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "arc-ui",
+      "exit": 0,
+      "seconds": 2.18,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-005B-final-arc-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "completion-ui",
+      "exit": 0,
+      "seconds": 0.65,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-005B-final-completion-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "frame-tools-ui",
+      "exit": 0,
+      "seconds": 2.68,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-005B-final-frame-tools-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "assistant-ui",
+      "exit": 0,
+      "seconds": 16.09,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-005B-final-assistant-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "sketch-ui",
+      "exit": 0,
+      "seconds": 4.06,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-005B-final-sketch-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "navigation-ui",
+      "exit": 0,
+      "seconds": 0.59,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-005B-final-navigation-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "context-ui",
+      "exit": 0,
+      "seconds": 1.88,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-005B-final-context-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "dialogs",
+      "exit": 0,
+      "seconds": 1.71,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-005B-final-dialogs.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "render-ui",
+      "exit": 0,
+      "seconds": 2.44,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-005B-final-render-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    }
+  ],
+  "final_changed_ui_retests": [
+    {
+      "test": "frame-tools-ui",
+      "exit": 0,
+      "seconds": 2.88,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-005B-delivery-frame-tools-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "dialogs",
+      "exit": 0,
+      "seconds": 1.74,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-005B-delivery-dialogs.png (1600x1000)\r\n",
+      "stderr": ""
+    }
+  ],
+  "query_payload_benchmark": {
+    "source_sha256": "e0ab6cbaa81291ca36e5f05b3025d4440b095b05d7546bef2c88f75582492e77",
+    "features": 154,
+    "queried_ids": [
+      3,
+      8
+    ],
+    "full_design_cpp_json_bytes": 117916,
+    "selected_features_cpp_json_bytes": 1650,
+    "selected_all_sections_cpp_json_bytes": 3475,
+    "reduction_percent": 98.6,
+    "exact_feature_rows_preserved": true,
+    "revision_unchanged": true,
+    "original_unchanged": true,
+    "scope": "serialized tool payload only; no model quality, latency or paid token/cost inference"
+  },
+  "geometry_copy": {
+    "source": "examples/bike3.ark",
+    "source_sha256": "e0ab6cbaa81291ca36e5f05b3025d4440b095b05d7546bef2c88f75582492e77",
+    "original_preserved": true,
+    "target": "out/bike3-flush-005B.ark",
+    "sha256": "e5ee327ff367cdd822428a98cf9dd521249d616e54f907e94b581340ee8c90f6",
+    "linked_end_operations": 10,
+    "plane_trim": 6,
+    "envelope_cope": 4,
+    "original_selected_caps_completely_removed": 10,
+    "all_ten_zero_overlap_and_contact": true,
+    "save_load_readback_passed": true,
+    "preserved_tube_sources": 24,
+    "preserved_assembly_nodes": 103,
+    "mates_preserved": true,
+    "explicit_pose_correction": {
+      "feature": 124,
+      "axis": "X",
+      "from_mm": 422,
+      "to_mm": 420,
+      "delta_mm": -2
+    },
+    "finite_planar_seating": "partial areas reported; not full-seat or weld qualification",
+    "detailed_local_receipt": "out/bike3-audit-005B/flush-receipt.json",
+    "user_drawing_in_git_or_package": false
+  },
+  "visual_review": [
+    "tree top/bottom and reachable last row",
+    "real arc endpoints and scalar dialogs2D/3D",
+    "explicitgoal completed/unreported/needsinput/interrupted",
+    "Single response finished/review result",
+    "tubeendfit typed form",
+    "before/after tube joins and final bicycle copy"
+  ],
+  "completion_contract": [
+    "Idle and finished response do not declare goal complete",
+    "explicit role and lead reports",
+    "pending assignments/mail/jobs/errors block completed",
+    "new steering or mutation reopensgoal",
+    "no new token/turn budget"
+  ],
+  "memory_test": {
+    "base_request_bytes": 8361,
+    "derived_fixture_limit": 9385,
+    "largest_request_bytes": 8721,
+    "production_limit_changed": false
+  },
+  "package": {
+    "url": "https://github.com/CenturyMesh/Ark-Releases/releases/download/v0.9.6/ark-windows-x64-0.9.6.zip",
+    "name": "ark-windows-x64-0.9.6.zip",
+    "sha256": "2594c429ffab9fd3f2a39f3564786f976ba57696ccbf43cf92754b8cc153d543",
+    "size": 30255863
+  },
+  "runtime_hashes": [
+    {
+      "file": "ark-studio.exe",
+      "sha256": "fce47e1ee079549c7008b96a4a20ce8692b6fca81d01a1cce3e66cd449999fb3"
+    },
+    {
+      "file": "ark-cli.exe",
+      "sha256": "1d7f6992e01b40ac3725acfefcd1d2234a7dcf2da787c0368dcb459c3636e865"
+    },
+    {
+      "file": "ark-mcp.exe",
+      "sha256": "8ca23c27d6f56c7aa2fc8da7c3322502bfbf994cd852ffc052d9d648825f7b03"
+    },
+    {
+      "file": "ark-occt-worker.exe",
+      "sha256": "8b18d32bd539c9f6ecc16dafc112cd5ef91399b781cbd182b3be87fe37b703b0"
+    }
+  ],
+  "activation": {
+    "pid": 18908,
+    "title": "ARK 005B",
+    "live_doc_info": true,
+    "feature_count": 164,
+    "assembly_nodes": 103,
+    "parameter_error": "",
+    "revision": 1,
+    "document": "out/bike3-flush-005B.ark",
+    "old_pid_preserved": 5008,
+    "mutations": 0
+  },
+  "install_state": {
+    "current": "0.9.6",
+    "pending": "",
+    "schema": 1,
+    "activating": "",
+    "previous": "0.9.5"
+  },
+  "paid_provider_calls": 0,
+  "hosted_CI_checked": false,
+  "online_release_published": false,
+  "limits": [
+    "Documentv30 required only fornew recipes/endfit; general3Dconstraintsolver notimplemented",
+    "98.6% improvement is selectedserializedtoolpayload, not billed tokens/cost ormodelquality",
+    "plane_trim geometricflush can have partial finite seating; no weld/load qualification",
+    "Internal snapshotconnector stillmetadata/path only",
+    "Original drawings remainlocal and uncommitted"
+  ]
+}

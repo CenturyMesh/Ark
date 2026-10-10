@@ -1,5 +1,11 @@
 # ARK team workflow
 
+The goal banner in 005B distinguishes **in progress**, **needs input**,
+**interrupted**, an **idle team without a completion report**, and **completed by
+explicit agent report**. The completion summary stays visible. A card's finished
+turn alone does not complete the goal; outstanding tasks and errors prevent that
+declaration. See the [completion protocol](AGENT_TEAM_ARCHITECTURE.md).
+
 Open **Assistant** in ARK and choose **Team**. The team shares the open
 document and the selected Assistant account/endpoint. **Focused** is the default:
 three roles with one conversation running at a time. The engineer starts and

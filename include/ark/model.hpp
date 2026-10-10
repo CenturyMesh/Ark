@@ -129,6 +129,9 @@ struct SketchEnt {
     std::string name;
     std::vector<std::string> expressions; // empty: solver variable; string: parameter binding
     std::vector<WireSeg> segments;
+    // Authored arc construction recipe. The evaluated center/radius/angles in
+    // dof are derived and never replace these source coordinates/expressions.
+    arkjson::Value arcRecipe;
     bool construction=false, closed=false;
     f64 tension=0;
     u64 sourceFeature=0;          // project: earlier feature id

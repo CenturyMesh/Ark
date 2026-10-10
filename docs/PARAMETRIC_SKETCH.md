@@ -199,3 +199,61 @@ and tolerances. `ark-csg-tests` checks analytic Boolean volumes and rays for
 supported contained boxes plus work-limit rejection. Original-versus-optimized
 organic probes kept identical geometry hashes; those probes also exposed the
 legacy topology defects which motivated the dedicated prismatic path.
+
+## Authored arc recipes — 005B / B.02
+
+An `arc` can retain three source points instead of requiring the caller to
+calculate its center, radius and angular interval:
+
+```json
+{"op":"sketch.entity.set","name":"Profile","entity":{"kind":"arc","name":"crown","recipe":{"type":"three_point","start":[0,0],"through":["width/2","rise"],"end":["width",0]}}}
+```
+
+The resolved arc passes through `start`, `through` and `end` in that order.
+The through point selects the actual interval, including a clockwise interval
+or an arc greater than 180 degrees. These are analytic circles; samples only
+display the evaluated arc. Native extrusion, projection and surfacing consume
+the existing analytic arc profile.
+
+The tangent recipe takes two endpoints and an oriented start direction:
+
+```json
+{"op":"sketch.entity.set","name":"Profile","entity":{"kind":"arc","name":"transition","recipe":{"type":"tangent","start":[0,0],"end":[20,10],"tangent":[1,0]}}}
+```
+
+All recipe scalars accept finite numbers or parameter expressions. Numeric
+recipe coordinates are authored values, and the derived center/radius/angles
+are excluded from free solver coordinates. Parameters recompute the arc;
+`sketch.entity.set` edits its compact source recipe. `sketch.patch` rejects
+resolved coordinates of a recipe arc. A recipe and nonempty `dof` are exclusive;
+the existing center/angle `dof:[cx,cy,r,a0_deg,a1_deg]` contract remains available.
+
+`sketch_inspect{name,entity}` returns the source `recipe`, analytic length and
+end tangents. Full inspection returns the recipe beside `resolved_dof`.
+Persistence stores source inputs, not the cached center/angles, and requires
+document version 30 only when the new semantics are used. Changing the
+application iteration alone does not change document version.
+
+Repeated or collinear three-point inputs, a zero tangent, or an endpoint on
+its start tangent line fail atomically. The latter needs an explicit line;
+there is no automatic substitution. A tangent recipe constructs a particular
+arc from authored inputs. The existing planar `tangent` solver constraint
+continues to constrain a line against a circle/arc's supporting circle; it
+does not by itself join their endpoints.
+
+`ark-sketch-arc-tests` covers source expressions, clockwise/major intervals,
+parameter edits, source inspection, serialization/history/undo and rejection
+without mutation. Its native configuration also checks analytic profile
+extrusion and spatial arc sweep volumes. Test execution evidence belongs to
+the iteration verification receipt; this capability does not qualify a design
+for manufacture.
+
+For an existing large design, inspect selected features with
+`doc_info{detail:"design",ids:["Body"],sections:["features","sketches"]}`.
+IDs select features; sketches, assembly and materials select their direct
+associations. Explicitly requested parameters remain document-wide. The
+response marks `partial`, `scope`, `section_scopes` and `total_counts`, while
+keeping each returned row identical to the full inventory. Unknown or
+ambiguous IDs and unknown sections reject. Omitting selectors retains the
+full inventory contract. Smaller response bytes alone are not evidence of
+lower design cost or higher design quality (D.01 remains a separate benchmark).

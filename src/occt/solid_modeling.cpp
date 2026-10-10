@@ -1,4 +1,5 @@
 #include "ark/occt_solid.hpp"
+#include "ark/occt_frame.hpp"
 #include "common.hpp"
 
 #include <BRepAdaptor_Curve.hxx>
@@ -581,6 +582,7 @@ V finishBodies(const TopoDS_Shape& shape,const std::vector<Ref>& refs){
 
 V modelSolidNative(const V& request){
     const std::string op=word(request,"op");std::vector<Ref> refs;TopoDS_Shape result;bool many=false;
+    if(op=="tube_end_fit")return tubeEndFitNative(request);
     if(op=="imported_brep"){
         const V& package=need(request,"package");componentCustodyNative(package);
         const std::string sourceBytes=base64Decode(word(package,"source_step_base64"));
