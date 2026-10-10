@@ -43,7 +43,7 @@ V inspectSheetNativeData(const V& data){
     if(panels.t!=V::Arr||bends.t!=V::Arr||holes.t!=V::Arr||panels.arr.size()!=bends.arr.size()+1)
         throw std::runtime_error("Sheet report has an invalid panel tree");
     V result=V::makeObj();
-    for(const char* key:{"panel_count","bend_count","hem_count","stamp_count","opening_count","width_mm","thickness_mm","k_factor",
+    for(const char* key:{"forming_ops","jog_count","sketch_bend_count","panel_count","bend_count","hem_count","stamp_count","opening_count","width_mm","thickness_mm","k_factor",
                          "flat_bounds_mm","bounds_mm","formed_volume_mm3","flat_volume_mm3",
                          "refold_symmetric_difference_mm3","refold_frame_error_mm","volume_tolerance_mm3",
                          "flat_valid","flat_pattern_qualified","flat_pattern_scope","forming_strain_checked","rigid_panel_refold_verified","rigid_panel_pose_symmetric_difference_mm3","stamp_analytic_volume_delta_mm3","geometric_material_conservation","manufacturing_authoritative",

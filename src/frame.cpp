@@ -2,6 +2,7 @@
 #include "ark/native_backend.hpp"
 
 #include <cmath>
+#include <algorithm>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -120,11 +121,33 @@ Body evaluateFrameFeature(const Feature& feature,const ExprEnv& env,
         members.arr.push_back(std::move(out));
     }
     request.set("profiles",std::move(profiles));request.set("nodes",std::move(nodes));request.set("members",std::move(members));
-    if(const V* joints=program.find("joints"))request.set("joints",*joints);
+    if(const V* joints=program.find("joints")){
+        if(joints->t!=V::Arr||joints->arr.size()>64)throw std::runtime_error("Frame joints need 0..64 entries");V evaluated=V::makeArr();
+        for(const auto& joint:joints->arr){const auto kind=name(joint,"kind");std::set<std::string> allowed{"kind","member","end"};if(kind=="cope"||kind=="trim_extend")allowed.insert("against");if(kind=="trim_extend")allowed.insert("max_extension");if(kind=="trim_plane"){allowed.insert("origin");allowed.insert("normal");}for(const auto& item:joint.obj)if(!allowed.count(item.first))throw std::runtime_error("Unsupported frame joint field: "+item.first);V row=joint;for(const char* key:{"max_extension"})if(const auto* value=joint.find(key))row.set(key,V::makeNum(finiteExpression(*value,env,std::string("joint.")+key)));for(const char* key:{"origin","normal"})if(const auto* value=joint.find(key))row.set(key,vector3(*value,env,std::string("joint.")+key));evaluated.arr.push_back(row);}request.set("joints",evaluated);
+    }
+    if(const V* welds=program.find("welds")){
+        if(welds->t!=V::Arr||welds->arr.size()>64)throw std::runtime_error("Frame welds need 0..64 entries");V evaluated=V::makeArr();std::set<std::string> ids;
+        for(const auto& weld:welds->arr){const std::set<std::string> allowed{"id","member_a","member_b","path","normal","leg_a","leg_b","material","density_g_cm3"};for(const auto& item:weld.obj)if(!allowed.count(item.first))throw std::runtime_error("Unsupported frame weld field: "+item.first);V row=V::makeObj();for(const char* key:{"id","member_a","member_b"})row.set(key,V::makeStr(name(weld,key)));if(!ids.insert(name(weld,"id")).second)throw std::runtime_error("Duplicate frame weld id");const auto& path=field(weld,"path");if(path.t!=V::Arr||path.arr.size()!=2)throw std::runtime_error("Weld path supports exactly two authored endpoints");V points=V::makeArr();for(const auto& point:path.arr)points.arr.push_back(vector3(point,env,"weld.path"));row.set("path",points);row.set("normal",vector3(field(weld,"normal"),env,"weld.normal"));for(const char* key:{"leg_a","leg_b"})row.set(key,number(weld,key,env,"weld"));
+            if(const auto* material=weld.find("material")){if(weld.find("density_g_cm3"))throw std::runtime_error("Weld chooses material or density, not both");bool found=false;for(const auto& candidate:document.materials)if(candidate.name==material->asStr()){row.set("material",*material);if(candidate.densityGcm3>0)row.set("density_g_cm3",V::makeNum(candidate.densityGcm3));found=true;break;}if(!found)throw std::runtime_error("Weld material not found");}else if(const auto* density=weld.find("density_g_cm3"))row.set("density_g_cm3",V::makeNum(finiteExpression(*density,env,"weld.density")));evaluated.arr.push_back(row);
+        }request.set("welds",evaluated);
+    }
     V envelope=V::makeObj();envelope.set("operation",V::makeStr("model_frame"));envelope.set("request",std::move(request));
     Body body;body.nativeData=nativeWorkerRequest(envelope);
     body.baked=std::make_unique<Mesh>(nativeResultMesh(body.nativeData));
     return body;
+}
+
+V applyFrameCommand(Document& document,const V& command){
+    const std::string op=name(command,"op");const auto& selected=field(command,"id");if(selected.t!=V::Num||selected.num<1||selected.num!=std::floor(selected.num))throw std::runtime_error("Frame command needs a feature ID");auto* feature=document.find((u64)selected.num);if(!feature||feature->type!=FeatureType::ConstructionFrame)throw std::runtime_error("Select a construction_frame feature");
+    const bool weld=op.rfind("frame.weld.",0)==0;const char* key=weld?"welds":"joints";V list=feature->nativeSpec.find(key)?*feature->nativeSpec.find(key):V::makeArr();if(list.t!=V::Arr)throw std::runtime_error("Frame entities must be an array");V result=V::makeObj();result.set("feature_id",selected);
+    if(op=="frame.trim_extend"||op=="frame.trim_plane"){
+        V joint=field(command,"joint");if(joint.t!=V::Obj)throw std::runtime_error("Frame joint must be an object");joint.set("kind",V::makeStr(op=="frame.trim_extend"?"trim_extend":"trim_plane"));const auto member=name(joint,"member"),end=name(joint,"end");if(end!="start"&&end!="end")throw std::runtime_error("Frame joint end must be start or end");for(const auto& existing:list.arr)if(name(existing,"member")==member&&name(existing,"end")==end)throw std::runtime_error("Frame member endpoint already has a joint; remove it explicitly first");list.arr.push_back(joint);result.set("entity_id",V::makeStr(member+"."+end));
+    }else if(op=="frame.joint.remove"){
+        const auto member=name(command,"member"),end=name(command,"end");const auto old=list.arr.size();list.arr.erase(std::remove_if(list.arr.begin(),list.arr.end(),[&](const V& row){return name(row,"member")==member&&name(row,"end")==end;}),list.arr.end());if(old==list.arr.size())throw std::runtime_error("Frame endpoint joint not found");result.set("entity_id",V::makeStr(member+"."+end));
+    }else if(weld){
+        const auto action=op.substr(op.find_last_of('.')+1);if(action=="add"){V row=field(command,"weld");const auto id=name(row,"id");for(const auto& old:list.arr)if(name(old,"id")==id)throw std::runtime_error("Duplicate frame weld id");list.arr.push_back(row);result.set("entity_id",V::makeStr(id));}
+        else{const auto id=name(command,"entity");auto found=std::find_if(list.arr.begin(),list.arr.end(),[&](const V& row){return name(row,"id")==id;});if(found==list.arr.end())throw std::runtime_error("Frame weld not found");if(action=="remove")list.arr.erase(found);else if(action=="edit"){const auto& values=field(command,"values");if(values.t!=V::Obj||values.find("id"))throw std::runtime_error("Weld edit values must preserve id");for(const auto& item:values.obj)found->set(item.first,item.second);}else throw std::runtime_error("Unknown frame weld operation");result.set("entity_id",V::makeStr(id));}
+    }else throw std::runtime_error("Unknown frame command");if(list.arr.size()>64)throw std::runtime_error("Frame accepts at most 64 joints/welds");feature->nativeSpec.set(key,list);return result;
 }
 
 } // namespace ark

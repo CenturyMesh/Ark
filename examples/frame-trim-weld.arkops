@@ -1,0 +1,11 @@
+{"tool":"doc_apply","arguments":{"expected_revision":0,"commands":[
+  {"op":"material.set","name":"Declared steel","density":7.85},
+  {"op":"feature.add","type":"construction_frame","name":"Trimmed welded frame","manufacturing":{"route":"frame"},"native":{
+    "profiles":[{"name":"SHS20","section":"rect","width":20,"height":20,"wall":2,"material":"Declared steel"}],
+    "nodes":[{"name":"RailStart","xyz":[0,0,0]},{"name":"RailEnd","xyz":[200,0,0]},{"name":"BraceStart","xyz":[100,0,100]},{"name":"BraceEnd","xyz":[100,0,20]}],
+    "members":[{"name":"rail","profile":"SHS20","start":"RailStart","end":"RailEnd","normal":[0,0,1]},{"name":"brace","profile":"SHS20","start":"BraceStart","end":"BraceEnd","normal":[1,0,0]}]
+  }},
+  {"op":"frame.trim_extend","id":"Trimmed welded frame","joint":{"member":"brace","end":"end","against":"rail","max_extension":25}},
+  {"op":"frame.trim_plane","id":"Trimmed welded frame","joint":{"member":"rail","end":"end","origin":[180,0,0],"normal":[1,0,0]}},
+  {"op":"frame.weld.add","id":"Trimmed welded frame","weld":{"id":"Seam1","member_a":"rail","member_b":"brace","path":[[90,-5,10],[90,5,10]],"normal":[-1,0,0],"leg_a":3,"leg_b":3,"material":"Declared steel"}}
+]}}

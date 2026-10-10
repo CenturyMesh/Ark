@@ -9,6 +9,8 @@ arkjson::Value importComponentNative(const arkjson::Value& request);
 arkjson::Value componentCustodyNative(const arkjson::Value& package);
 // Resolve a semantic topology handle against the exact B-rep that created it.
 arkjson::Value referenceFrameNative(const arkjson::Value& request);
+// Resolve a digest-bound semantic face without requiring an analytic frame.
+int semanticFaceIndexNative(const arkjson::Value& request);
 // Exact separation and overlap evidence; negative legacy values are estimates.
 arkjson::Value clearanceNative(const arkjson::Value& request);
 arkjson::Value geometryQueryNative(const arkjson::Value& request);

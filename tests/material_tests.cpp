@@ -29,7 +29,7 @@ int main(){
         check(close(appearance.baseColor.x,0.25)&&close(appearance.metallic,0.8)&&close(appearance.opacity,0.6),"material and feature appearance merge");
         check(appearance.texturePath=="textures/brushed.png"&&close(appearance.textureScaleV,3),"texture metadata preserved");
 
-        Value package=json(ark::documentToJson(session.document).c_str());
+        Value package=json(ark::documentToJson(session.document,true,false).c_str());
         check(package.find("version")->num==15,"material document version");
         ark::Document loaded;std::string error;
         check(ark::documentFromJson(ark::documentToJson(session.document),loaded,&error),"material round trip");

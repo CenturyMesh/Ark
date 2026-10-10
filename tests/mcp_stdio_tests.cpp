@@ -118,8 +118,8 @@ int main(int argc, char** argv) {
         const std::string png = native_test::readFile(work / "ring.png");
         check(png.size() >= 8 && std::memcmp(png.data(), "\x89PNG\r\n\x1a\n", 8) == 0,
               "Snapshot is not a PNG");
-        const Value saved = parse(native_test::readFile(work / "roundtrip.ark"));
-        check(field(saved, "format").asStr() == "ark", "Saved document format mismatch");
+        const std::string saved = native_test::readFile(work / "roundtrip.ark");
+        check(saved.size() >= 16 && std::memcmp(saved.data(), "SQLite format 3\0", 16) == 0, "Saved document is a binary container");
         std::cout << "MCP stdio: discovery, revision conflict, batch, persistence, STL and PNG passed\n";
         return 0;
     } catch (const std::exception& error) {

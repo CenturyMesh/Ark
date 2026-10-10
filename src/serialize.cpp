@@ -1,11 +1,14 @@
 // ARK-Point :: serialize.cpp — document persistence over arkjson.
 #include "ark/serialize.hpp"
+#include "ark/iteration_history.hpp"
+#include "ark/document_container.hpp"
 #include "ark/manufacturing.hpp"
 #include "ark/native_features.hpp"
 #include "ark/sketch.hpp"
 #include "ark/assembly_io.hpp"
 #include "ark/usage.hpp"
 #include <cstdio>
+#include <cctype>
 #include <fstream>
 #include <set>
 #include <algorithm>
@@ -21,6 +24,11 @@
 namespace ark {
 
 using arkjson::Value;
+
+static void canonicalDocumentKeys(Value& value){
+    if(value.t==Value::Obj){for(auto& item:value.obj)canonicalDocumentKeys(item.second);std::sort(value.obj.begin(),value.obj.end(),[](const auto& a,const auto& b){return a.first<b.first;});}
+    else if(value.t==Value::Arr)for(auto& item:value.arr)canonicalDocumentKeys(item);
+}
 
 namespace {
 
@@ -362,7 +370,7 @@ bool generation10Document(const Document& doc){
 } // namespace
 
 // ---------------------------------------------------------------------------
-std::string documentToJson(const Document& doc){
+std::string documentToJson(const Document& doc,bool includeAudit,bool includeHistory){
     std::string usageError;if(!validateUsageLedger(doc.usage,usageError))throw std::runtime_error(usageError);
     Value r=Value::makeObj();
     r.set("format",Value::makeStr("ark"));
@@ -376,7 +384,7 @@ std::string documentToJson(const Document& doc){
     bool latest=!doc.mates.empty()||doc.nextMateId_>1;for(auto& p:doc.planes)latest|=p.support.t==Value::Obj||p.kind!="plane";for(auto& f:doc.features)latest|=f.type==FeatureType::NativeSolid||(f.type==FeatureType::SheetMetal&&f.nativeSpec.find("base"));for(auto& n:doc.assembly)latest|=n.fixed;for(auto& sk:doc.sketches)for(auto& c:sk.sk.cons)latest|=!c.id.empty();
     bool generation15=!doc.materials.empty();for(const auto& feature:doc.features)generation15|=!feature.material.empty()||feature.appearance.t==Value::Obj||generation15NativeFeature(feature);
     bool modules=false;for(const auto& feature:doc.features)modules|=feature.type==FeatureType::ConstructionFrame||feature.type==FeatureType::PCB||feature.type==FeatureType::CableRoute;
-    const bool usagePresent=doc.usage.serial>0||!doc.usage.entries.empty();
+    const bool usagePresent=includeAudit&&(doc.usage.serial>0||!doc.usage.entries.empty());
     bool generation17=usagePresent;for(const auto& feature:doc.features)generation17|=generation17SheetOpening(feature);
     bool suspensionVersion=false;for(const auto& feature:doc.features)suspensionVersion|=feature.type==FeatureType::Suspension;
     bool patternVersion=false;for(const auto& f:doc.features)if(f.type==FeatureType::NativeSolid){auto op=f.nativeSpec.find("op");patternVersion|=(op&&(op->str=="curve_pattern"||op->str=="hole_pattern"))||f.get("op")=="curve_pattern"||f.get("op")=="hole_pattern";}
@@ -385,7 +393,9 @@ std::string documentToJson(const Document& doc){
     bool mechanicalVersion=false;for(const auto& mate:doc.mates)mechanicalVersion|=isMechanicalMate(mate.type);
     bool processVersion=false;for(const auto& feature:doc.features)processVersion|=feature.manufacturingRoute=="injection_molding"||feature.manufacturingRoute=="additive"||(feature.manufacturingProcess.t==Value::Obj&&!feature.manufacturingProcess.obj.empty());
     bool componentVersion=false;for(const auto& feature:doc.features)componentVersion|=feature.type==FeatureType::NativeSolid&&featureOperation(feature)=="imported_brep";
-    r.set("version",Value::makeNum(componentVersion?24:processVersion?23:mechanicalVersion?22:sheetVersion?21:physicsVersion?20:patternVersion?19:suspensionVersion?18:generation17?17:modules?16:generation15?15:generation14?14:generation13?13:generation12?12:generation11?11:generation10?10:generation9?9:generation8?8:latest?7:nativeVersion?6:sketchVersion?5:sourceTube?4:notched?3:extended?2:1));
+    bool fabricationVersion=false;for(const auto& feature:doc.features){if(feature.type==FeatureType::SheetMetal)fabricationVersion|=feature.nativeSpec.find("jog")!=nullptr||feature.nativeSpec.find("sketch_bend")!=nullptr;if(feature.type==FeatureType::ConstructionFrame){if(auto welds=feature.nativeSpec.find("welds"))fabricationVersion|=welds->t==Value::Arr&&!welds->arr.empty();if(auto joints=feature.nativeSpec.find("joints"))for(const auto& joint:joints->arr)if(auto kind=joint.find("kind"))fabricationVersion|=kind->str=="trim_extend"||kind->str=="trim_plane";}}
+    bool surfaceEditVersion=false;for(const auto& feature:doc.features)surfaceEditVersion|=feature.type==FeatureType::SurfaceEdit;
+    r.set("version",Value::makeNum(surfaceEditVersion?26:fabricationVersion?25:componentVersion?24:processVersion?23:mechanicalVersion?22:sheetVersion?21:physicsVersion?20:patternVersion?19:suspensionVersion?18:generation17?17:modules?16:generation15?15:generation14?14:generation13?13:generation12?12:generation11?11:generation10?10:generation9?9:generation8?8:latest?7:nativeVersion?6:sketchVersion?5:sourceTube?4:notched?3:extended?2:1));
     r.set("units",Value::makeStr("mm"));
     r.set("next_feature_id",Value::makeNum((double)doc.nextFeatureId_));
 
@@ -454,8 +464,9 @@ std::string documentToJson(const Document& doc){
         if(f.type==FeatureType::NotchedTube){Value points=Value::makeArr();for(auto& p:f.notches){Value j=Value::makeObj();j.set("station",Value::makeStr(p.station));j.set("angle",Value::makeStr(p.angle));j.set("face",Value::makeStr(p.face));points.arr.push_back(j);}v.set("notches",points);}
         if(f.type==FeatureType::SourceTube)v.set("source",f.sourceData);
         if(f.type==FeatureType::SourceSheet)v.set("source",f.sourceData);
-        if(f.type==FeatureType::Loft||f.type==FeatureType::SurfaceFill||f.type==FeatureType::BSplineSurface||f.type==FeatureType::Thicken||f.type==FeatureType::SheetMetal||f.type==FeatureType::NativeSolid||f.type==FeatureType::Sweep||f.type==FeatureType::ExtrudeSurface||f.type==FeatureType::RevolveSurface||f.type==FeatureType::OffsetSurface||f.type==FeatureType::Sew||f.type==FeatureType::ConstructionFrame||f.type==FeatureType::PCB||f.type==FeatureType::CableRoute||f.type==FeatureType::Suspension)
+        if(f.type==FeatureType::Loft||f.type==FeatureType::SurfaceFill||f.type==FeatureType::BSplineSurface||f.type==FeatureType::Thicken||f.type==FeatureType::SheetMetal||f.type==FeatureType::NativeSolid||f.type==FeatureType::Sweep||f.type==FeatureType::ExtrudeSurface||f.type==FeatureType::RevolveSurface||f.type==FeatureType::OffsetSurface||f.type==FeatureType::Sew||f.type==FeatureType::SurfaceEdit||f.type==FeatureType::ConstructionFrame||f.type==FeatureType::PCB||f.type==FeatureType::CableRoute||f.type==FeatureType::Suspension)
             v.set("native",f.nativeSpec.t==Value::Obj?f.nativeSpec:Value::makeObj());
+        if(isCurveFeature(f.type))v.set("native",f.nativeSpec.t==Value::Obj?f.nativeSpec:Value::makeObj());
         if(f.type==FeatureType::MeshBody)v.set("mesh",f.sourceData);
         fs.arr.push_back(std::move(v));
     }
@@ -469,16 +480,20 @@ std::string documentToJson(const Document& doc){
         r.set("assembly",nodes);
     }
     if(!doc.mates.empty()||doc.nextMateId_>1){Value mates=Value::makeArr();for(auto& m:doc.mates)mates.arr.push_back(mateToJson(m));r.set("mates",mates);r.set("next_mate_id",Value::makeNum((double)doc.nextMateId_));}
+    if(includeAudit&&includeHistory)iterationPersist(r,doc);
+    canonicalDocumentKeys(r);
     return r.dump();
 }
 
 bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     auto fail=[&](const std::string& m){ if(err)*err=m; return false; };
+    if(json.size()>maxDocumentBytes)return fail("document exceeds 4 MiB");
     Value v;
     if(!arkjson::parse(json,v)) return fail("malformed JSON");
     if(v.t!=Value::Obj) return fail("root must be object");
-    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0&&ver->num!=3.0&&ver->num!=4.0&&ver->num!=5.0&&ver->num!=6.0&&ver->num!=7.0&&ver->num!=8.0&&ver->num!=9.0&&ver->num!=10.0&&ver->num!=11.0&&ver->num!=12.0&&ver->num!=13.0&&ver->num!=14.0&&ver->num!=15.0&&ver->num!=16.0&&ver->num!=17.0&&ver->num!=18.0&&ver->num!=19.0&&ver->num!=20.0&&ver->num!=21.0&&ver->num!=22.0&&ver->num!=23.0&&ver->num!=24.0)))
+    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0&&ver->num!=3.0&&ver->num!=4.0&&ver->num!=5.0&&ver->num!=6.0&&ver->num!=7.0&&ver->num!=8.0&&ver->num!=9.0&&ver->num!=10.0&&ver->num!=11.0&&ver->num!=12.0&&ver->num!=13.0&&ver->num!=14.0&&ver->num!=15.0&&ver->num!=16.0&&ver->num!=17.0&&ver->num!=18.0&&ver->num!=19.0&&ver->num!=20.0&&ver->num!=21.0&&ver->num!=22.0&&ver->num!=23.0&&ver->num!=24.0&&ver->num!=25.0&&ver->num!=26.0&&ver->num!=27.0)))
         return fail("unsupported document version");
+    Value history;std::string historyError;if(!iterationExpand(v,history,historyError))return fail(historyError);
 
     if(auto format=v.find("format");format && format->asStr()!="ark")return fail("unsupported format");
     if(auto units=v.find("units");units && units->asStr()!="mm")return fail("unsupported units (expected mm)");
@@ -602,6 +617,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
             if(nf.type==FeatureType::NativeSolid&&featureOperation(nf)=="imported_brep"){auto version=v.find("version");if(!version||version->asNum()<24)return fail("Source-owned library component requires document version 24");std::string reason;if(!validateImportedComponentDefinition(nf,reason))return fail(reason);}
             if(nf.type==FeatureType::SheetMetal)for(const char* key:{"hems","stamps"})if(auto rows=nf.nativeSpec.find(key)){auto version=v.find("version");if(rows->t!=Value::Arr)return fail("Sheet hems and stamps must be arrays");if(!rows->arr.empty()&&(!version||version->asNum()<21))return fail("Sheet hems and stamps require document version 21");}
             if(generation17SheetOpening(nf)){auto version=v.find("version");if(!version||version->asNum()<17)return fail("authored sheet slots or windows require document version 17");}
+            if(nf.type==FeatureType::SurfaceEdit){auto version=v.find("version"),spec=fv.find("native");if(!version||version->asNum()<26||!spec||spec->t!=Value::Obj)return fail("surface_edit requires version 26 native object");nf.nativeSpec=*spec;}
             if(nf.type==FeatureType::Sweep||nf.type==FeatureType::ExtrudeSurface||nf.type==FeatureType::RevolveSurface||nf.type==FeatureType::OffsetSurface||nf.type==FeatureType::Sew){auto version=v.find("version"),spec=fv.find("native");if(!version||version->asNum()<8||!spec||spec->t!=Value::Obj)return fail("extended surface feature requires version 8 native object");nf.nativeSpec=*spec;}
             if(isMeshModelFeature(nf.type)){auto version=v.find("version");if(!version||version->asNum()<8)return fail("mesh modeling features require document version 8");}
             if(nf.type==FeatureType::ConstructionFrame||nf.type==FeatureType::PCB||nf.type==FeatureType::CableRoute){auto version=v.find("version"),spec=fv.find("native");if(!version||version->asNum()<16||!spec||spec->t!=Value::Obj)return fail("Engineering modules require version 16 native object");nf.nativeSpec=*spec;}
@@ -676,7 +692,9 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     bool supported=false;for(auto& p:nd.planes)supported|=p.support.t==Value::Obj;
     try{if(!supported){for(auto& plane:nd.planes)resolvePlane(nd,plane.name);for(auto& sketch:nd.sketches)resolvePlane(nd,sketch.sk.plane);for(auto& canvas:nd.canvases)resolvePlane(nd,canvas.plane);}}
     catch(const std::exception& e){return fail(e.what());}
+    for(const auto& feature:nd.features){bool fabrication=false;if(feature.type==FeatureType::SheetMetal)fabrication=feature.nativeSpec.find("jog")||feature.nativeSpec.find("sketch_bend");if(feature.type==FeatureType::ConstructionFrame){if(auto welds=feature.nativeSpec.find("welds"))fabrication|=welds->t==Value::Arr&&!welds->arr.empty();if(auto joints=feature.nativeSpec.find("joints"))for(const auto& joint:joints->arr)if(auto kind=joint.find("kind"))fabrication|=kind->str=="trim_extend"||kind->str=="trim_plane";}if(fabrication&&(!v.find("version")||v.find("version")->num<25))return fail("Frame endpoint/weld or sheet jog/sketch-bend programs require document version 25");}
     std::string manufacturingError;if(!validateManufacturingRoutes(nd,manufacturingError))return fail(manufacturingError);
+    if(history.t!=Value::Null){if(!iterationValidate(nd,history,historyError))return fail(historyError);nd.iterationHistory=std::move(history);}
     doc=std::move(nd);
     return true;
 }
@@ -740,11 +758,16 @@ bool sketchFromJson(const std::string& json, Sketch& sk, std::string* err){
 
 bool saveDocument(const Document& doc, const char* path){
     if(!path||!*path) return false;
+    if(doc.iterationHistory.t==Value::Obj){std::string historyError;if(!iterationValidate(doc,doc.iterationHistory,historyError))return false;}
+    std::string j=documentToJson(doc);if(j.size()>maxDocumentBytes)return false;
+    Value persistedRoot;if(!arkjson::parse(j,persistedRoot))return false;
     auto destination=std::filesystem::path(reinterpret_cast<const char8_t*>(path)),temporary=destination;
+    auto extension=destination.extension().string();
+    std::transform(extension.begin(),extension.end(),extension.begin(),[](unsigned char c){return static_cast<char>(std::tolower(c));});
+    if(extension!=".arkjson"&&extension!=".json")return saveDocumentContainer(persistedRoot,path);
     temporary+=".tmp";
     std::ofstream f(temporary,std::ios::binary|std::ios::trunc);
     if(!f) return false;
-    std::string j=documentToJson(doc);
     f.write(j.data(),(std::streamsize)j.size());f.flush();
     if(!f)return false;
     f.close();if(!f)return false;
@@ -759,6 +782,10 @@ bool saveDocument(const Document& doc, const char* path){
 
 bool loadDocument(const char* path, Document& doc, std::string* err){
     if(!path||!*path){ if(err)*err="empty path"; return false; }
+    if(documentContainerFile(path)){
+        Value root;if(!loadDocumentContainer(path,root,err))return false;
+        return documentFromJson(root.dump(),doc,err);
+    }
     std::ifstream f(std::filesystem::path(reinterpret_cast<const char8_t*>(path)),std::ios::binary);
     if(!f){ if(err)*err=std::string("cannot open ")+path; return false; }
     f.seekg(0,std::ios::end);auto length=f.tellg();

@@ -1,0 +1,142 @@
+{
+  "date": "2026-10-10",
+  "source_branch": "main",
+  "base_commit": "0d9cd73efc997f88f95236fb072d2fa5383fed70",
+  "native": {
+    "verified_tests": 49,
+    "full_suite_passed": 48,
+    "full_suite_total": 49,
+    "full_suite_log": "out/live-workspace-release/ctest-final.log",
+    "remaining_test": "manufacturing",
+    "remaining_test_after_comparison_fix": "passed"
+  },
+  "core": {
+    "verified_tests": 34,
+    "full_suite_passed": 33,
+    "full_suite_total": 34,
+    "full_suite_log": "out/core/resume-build-tests.log",
+    "remaining_test": "manufacturing",
+    "remaining_test_after_comparison_fix": "passed",
+    "repair_log": "out/core/ctest-repair-final.log"
+  },
+  "studio": {
+    "assistant": {
+      "exit": 0,
+      "seconds": 14.72
+    },
+    "other_self_tests": [
+      {
+        "test": "ui",
+        "exit": 0,
+        "seconds": 1.02
+      },
+      {
+        "test": "sketch-ui",
+        "exit": 0,
+        "seconds": 4.53
+      },
+      {
+        "test": "native-ui",
+        "exit": 0,
+        "seconds": 3.91
+      },
+      {
+        "test": "render-ui",
+        "exit": 0,
+        "seconds": 2.33
+      },
+      {
+        "test": "engineering-ui",
+        "exit": 0,
+        "seconds": 1.45
+      },
+      {
+        "test": "sheet-showcase-ui",
+        "exit": 0,
+        "seconds": 3.41
+      },
+      {
+        "test": "context-ui",
+        "exit": 0,
+        "seconds": 2.25
+      },
+      {
+        "test": "suspension-ui",
+        "exit": 0,
+        "seconds": 1.0
+      },
+      {
+        "test": "motion-ui",
+        "exit": 0,
+        "seconds": 17.69
+      },
+      {
+        "test": "dialogs",
+        "exit": 0,
+        "seconds": 2.3
+      }
+    ],
+    "original_process_preserved": 46792
+  },
+  "bike": {
+    "test": "bike legacy load / binary save / native reload",
+    "passed": true,
+    "seconds": 24.3,
+    "original_sha256": "d66a46d23f6c7315aa37383a407e8255a876724196003030dd038fb4873fff56",
+    "features": 110,
+    "assembly_nodes": 107,
+    "legacy_bytes": 59875,
+    "binary_bytes": 135168,
+    "original_unchanged": true
+  },
+  "storage_benchmark": {
+    "benchmark": "ARK container v1 storage and codec; median of 7; warm filesystem; no geometry evaluation or journal semantic validation",
+    "json_durability": "existing ofstream flush plus atomic replace",
+    "container_durability": "SQLite synchronous FULL rollback transaction",
+    "results": [
+      {
+        "scenario": "small_parameters",
+        "logical_json_bytes": 130,
+        "container_initial_ms": 45.2605,
+        "container_incremental_ms": 7.8962,
+        "json_save_ms": 0.6261,
+        "container_load_ms": 0.2823,
+        "json_load_ms": 0.0261,
+        "physical_container_bytes": 16384,
+        "incremental_payload_bytes": 30,
+        "incremental_payload_rows": 1,
+        "incremental_changed_slots": 1
+      },
+      {
+        "scenario": "large_shared_source",
+        "logical_json_bytes": 1573035,
+        "container_initial_ms": 60.5449,
+        "container_incremental_ms": 25.9056,
+        "json_save_ms": 4.3169,
+        "container_load_ms": 11.7755,
+        "json_load_ms": 11.9025,
+        "physical_container_bytes": 802816,
+        "incremental_payload_bytes": 30,
+        "incremental_payload_rows": 1,
+        "incremental_changed_slots": 1
+      }
+    ]
+  },
+  "live_pricing": {
+    "passed": true,
+    "api_models": 36,
+    "credit_models": 9,
+    "log": "out/live-workspace-release/pricing-live.log"
+  },
+  "runtime": {
+    "path": "out/native-release/Release",
+    "source": "out/live-workspace-release/Release",
+    "sha256": {
+      "ark-studio.exe": "97d1db33739009cb3bb940b2c1f54ef0966b9fbd3bd2c3c8f5145060ebf62116",
+      "ark-mcp.exe": "e9259927f038e30d603946e70d1c28b148b1e04104b1668d3edeb596911284fa",
+      "ark-cli.exe": "52b33a87a7a0759cd42feaa1a00e96bc4e82b29b92c76993dcafa71102c68673",
+      "ark-occt-worker.exe": "65ee00b7efbecadf78b83f62687fae29bea10b49a63cc76739a796243d3ac954"
+    }
+  },
+  "hosted_ci": "not checked in this validation; local results only"
+}

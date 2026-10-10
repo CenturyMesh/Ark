@@ -3,6 +3,11 @@
 #include "common.hpp"
 
 #include <BRepPrimAPI_MakeCylinder.hxx>
+#include <BRepPrimAPI_MakeBox.hxx>
+#include <BRepPrimAPI_MakePrism.hxx>
+#include <BRepBuilderAPI_MakePolygon.hxx>
+#include <BRepBuilderAPI_MakeFace.hxx>
+#include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepGProp.hxx>
 #include <GProp_GProps.hxx>
 #include <TopAbs_ShapeEnum.hxx>
@@ -87,7 +92,7 @@ struct Profile{
 struct Member{
     std::string name,profile,startNode,endNode;bool bent=false;
     gp_Pnt start,end;gp_Dir startTangent{1,0,0},endTangent{1,0,0},startNormal{0,1,0},endNormal{0,1,0};
-    double developedLength=0;V result;
+    double developedLength=0,authoredLength=0;V result;
 };
 Profile profileOf(const V& row){
     Profile p;p.name=word(row,"name");p.section=word(row,"section");p.wall=positive(row,"wall");
@@ -187,7 +192,30 @@ Member memberOf(const V& row,const std::map<std::string,Profile>& profiles,const
                 throw std::runtime_error("Frame bent member endpoint does not match named node");
         }
     }
-    return m;
+    m.authoredLength=m.developedLength;return m;
+}
+TopoDS_Shape outerEnvelope(const Member& host,const Profile& profile){
+    if(host.bent)throw std::runtime_error("Endpoint trimming requires a straight host envelope");
+    if(profile.section=="round")return BRepPrimAPI_MakeCylinder(gp_Ax2(host.start,host.startTangent),profile.od/2,host.developedLength).Shape();
+    const auto box=BRepPrimAPI_MakeBox(gp_Pnt(0,-profile.width/2,-profile.height/2),host.developedLength,profile.width,profile.height).Shape();return transformed(box,rigid(frame(host.start,host.startTangent,host.startNormal)));
+}
+double envelopeRadius(const Profile& profile){return profile.section=="round"?profile.od/2:std::hypot(profile.width,profile.height)/2;}
+void adjustEndpoint(Member& member,const Member& host,const Profile& own,const V& joint){
+    if(member.bent||host.bent||member.name==host.name)throw std::runtime_error("trim_extend requires two different straight frame members");
+    const double maximum=scalar(joint,"max_extension");if(maximum<0)throw std::runtime_error("max_extension must be a declared nonnegative length");
+    const gp_Vec u(member.startTangent),v(host.startTangent),w(host.start,member.start);const double b=u.Dot(v),d=u.Dot(w),e=v.Dot(w),denominator=1-b*b;
+    if(denominator<1e-8)throw std::runtime_error("trim_extend rejects parallel axes; use an explicit crossing trim plane");
+    const double s=(b*e-d)/denominator,t=(e-b*d)/denominator;const auto target=member.start.Translated(u*s),hostPoint=host.start.Translated(v*t);
+    if(target.Distance(hostPoint)>1e-6)throw std::runtime_error("trim_extend supports intersecting member axes; offset/skew joints need explicit geometry");
+    const double margin=envelopeRadius(own)/std::sqrt(denominator);if(t<=margin+1e-6||t>=host.developedLength-margin-1e-6)throw std::runtime_error("trim_extend target is too close to a host end for the declared member profile");
+    const bool start=word(joint,"end")=="start";const auto original=start?member.start:member.end;const gp_Vec outward=start?-u:u;const double growth=gp_Vec(original,target).Dot(outward);if(growth>maximum+1e-7)throw std::runtime_error("Required frame extension exceeds declared max_extension");
+    if(start)member.start=target;else member.end=target;const gp_Vec chord(member.start,member.end);if(chord.Dot(u)<=1e-6)throw std::runtime_error("trim_extend would remove or reverse the member");member.developedLength=chord.Magnitude();
+}
+void trimEnvelope(Member& member,const Member& host,const Profile& profile){
+    const auto envelope=outerEnvelope(host,profile);V cut=V::makeObj();cut.set("op",V::makeStr("cut"));cut.set("input_brep",required(member.result,"brep_base64"));cut.set("input_topology",required(member.result,"topology"));cut.set("tool_brep",V::makeStr(brepData(envelope)));const double before=required(required(member.result,"report"),"volume_mm3").num;auto outcome=modelSolidNative(cut);const double after=required(required(outcome,"report"),"volume_mm3").num;if(before-after<=1e-8||after<=1e-8||required(required(outcome,"report"),"solids").num!=1)throw std::runtime_error("Endpoint trim must remove stock and leave one positive-volume member; inspect the selected end and host envelope");member.result=outcome;
+}
+void trimPlane(Member& member,const V& joint){
+    if(member.bent)throw std::runtime_error("trim_plane currently supports a straight frame member");const auto origin=point(required(joint,"origin"),"Trim plane origin"),vector=point(required(joint,"normal"),"Trim plane normal");gp_Vec n(vector.X(),vector.Y(),vector.Z());if(n.Magnitude()<1e-9)throw std::runtime_error("Trim plane normal must be nonzero");n.Normalize();const bool start=word(joint,"end")=="start";const double selected=gp_Vec(origin,start?member.start:member.end).Dot(n),retained=gp_Vec(origin,start?member.end:member.start).Dot(n);if(selected*retained>=0||std::abs(selected)<1e-8||std::abs(retained)<1e-8)throw std::runtime_error("trim_plane must cross the member axis between the selected end and retained end");V split=V::makeObj();split.set("op",V::makeStr("split_plane"));split.set("input_brep",required(member.result,"brep_base64"));split.set("input_topology",required(member.result,"topology"));split.set("origin",required(joint,"origin"));split.set("normal",required(joint,"normal"));split.set("keep",V::makeStr(retained>0?"positive":"negative"));member.result=modelSolidNative(split);
 }
 V makeTube(const Member& member,const Profile& profile,const V& authored){
     V request=V::makeObj(),segments=V::makeArr();
@@ -270,27 +298,29 @@ V frameModelNative(const V& request){
     for(const V& row:memberRows.arr){
         Member member=memberOf(row,profiles,nodes);
         if(!memberIndex.emplace(member.name,members.size()).second)throw std::runtime_error("Duplicate frame member name");
-        member.result=makeTube(member,profiles.at(member.profile),row);
         members.push_back(std::move(member));
     }
+    if(const V* authored=request.find("joints")){
+        if(authored->t!=V::Arr||authored->arr.size()>64)throw std::runtime_error("Frame joints need 0..64 entries");std::set<std::pair<std::string,std::string>> applied;
+        for(const auto& joint:authored->arr){const auto kind=word(joint,"kind"),name=word(joint,"member"),end=word(joint,"end");if(kind!="cope"&&kind!="trim_extend"&&kind!="trim_plane")throw std::runtime_error("Frame joint kind must be cope, trim_extend or trim_plane");if(end!="start"&&end!="end")throw std::runtime_error("Frame joint end must be start or end");if(!applied.insert({name,end}).second)throw std::runtime_error("Frame member end has more than one joint");auto target=memberIndex.find(name);if(target==memberIndex.end())throw std::runtime_error("Frame joint names an unknown member");if(kind=="trim_extend"){auto host=memberIndex.find(word(joint,"against"));if(host==memberIndex.end())throw std::runtime_error("Frame trim host not found");adjustEndpoint(members[target->second],members[host->second],profiles.at(members[target->second].profile),joint);}}
+    }
+    for(size_t index=0;index<members.size();++index)members[index].result=makeTube(members[index],profiles.at(members[index].profile),memberRows.arr[index]);
     V joints=V::makeArr();
     if(const V* authored=request.find("joints")){
         if(authored->t!=V::Arr||authored->arr.size()>64)throw std::runtime_error("Frame joints need 0..64 entries");
         std::set<std::pair<std::string,std::string>> applied;
         for(const V& joint:authored->arr){
-            if(word(joint,"kind")!="cope")throw std::runtime_error("Frame joint kind must be cope");
-            const std::string name=word(joint,"member"),end=word(joint,"end"),against=word(joint,"against");
+            const std::string kind=word(joint,"kind"),name=word(joint,"member"),end=word(joint,"end");
             if(end!="start"&&end!="end")throw std::runtime_error("Frame cope end must be start or end");
             if(!applied.insert({name,end}).second)throw std::runtime_error("Frame member end has two authored copes");
-            const auto member=memberIndex.find(name),host=memberIndex.find(against);
-            if(member==memberIndex.end()||host==memberIndex.end())throw std::runtime_error("Frame cope names an unknown member");
-            Member& target=members[member->second];const Member& support=members[host->second];
+            const auto member=memberIndex.find(name);if(member==memberIndex.end())throw std::runtime_error("Frame joint names an unknown member");
+            Member& target=members[member->second];
             const double before=required(required(target.result,"report"),"volume_mm3").num;
-            cope(target,support,profiles.at(target.profile),profiles.at(support.profile),end);
+            std::string against;if(kind=="trim_plane")trimPlane(target,joint);else{against=word(joint,"against");const auto host=memberIndex.find(against);if(host==memberIndex.end())throw std::runtime_error("Frame joint host not found");const auto& support=members[host->second];if(kind=="cope")cope(target,support,profiles.at(target.profile),profiles.at(support.profile),end);else trimEnvelope(target,support,profiles.at(support.profile));}
             const double after=required(required(target.result,"report"),"volume_mm3").num;
-            V evidence=V::makeObj();evidence.set("kind",V::makeStr("cope"));
+            V evidence=V::makeObj();evidence.set("kind",V::makeStr(kind));
             evidence.set("member",V::makeStr(name));evidence.set("end",V::makeStr(end));
-            evidence.set("against",V::makeStr(against));evidence.set("removed_volume_mm3",V::makeNum(before-after));
+            if(!against.empty())evidence.set("against",V::makeStr(against));evidence.set("removed_volume_mm3",V::makeNum(before-after));evidence.set("axis_length_change_mm",V::makeNum(target.developedLength-target.authoredLength));
             evidence.set("exact",V::makeBool(true));joints.arr.push_back(std::move(evidence));
         }
     }
@@ -316,7 +346,9 @@ V frameModelNative(const V& request){
         row.set("wall_mm",V::makeNum(profile.wall));
         if(!member.endNode.empty())row.set("end_node",V::makeStr(member.endNode));
         row.set("bent",V::makeBool(member.bent));row.set("developed_length_mm",V::makeNum(member.developedLength));
+        row.set("authored_length_mm",V::makeNum(member.authoredLength));row.set("length_basis",V::makeStr("generated tube centerline stock before exact end cuts; endpoint frames are design datums"));
         row.set("section_area_mm2",V::makeNum(profile.area));
+        double iy=0,iz=0,cy=0,cz=0;if(profile.section=="round"){const double inner=profile.od-2*profile.wall;iy=iz=std::acos(-1.0)*(std::pow(profile.od,4)-std::pow(inner,4))/64;cy=cz=profile.od/2;}else{const double wi=profile.width-2*profile.wall,hi=profile.height-2*profile.wall;iy=(profile.width*std::pow(profile.height,3)-wi*std::pow(hi,3))/12;iz=(profile.height*std::pow(profile.width,3)-hi*std::pow(wi,3))/12;cy=profile.height/2;cz=profile.width/2;}row.set("second_moment_y_mm4",V::makeNum(iy));row.set("second_moment_z_mm4",V::makeNum(iz));row.set("min_second_moment_mm4",V::makeNum(std::min(iy,iz)));row.set("extreme_fiber_y_mm",V::makeNum(cy));row.set("extreme_fiber_z_mm",V::makeNum(cz));row.set("section_property_basis",V::makeStr("ideal nominal hollow profile; local y=member normal/width,z=tangent cross normal/height; not mass inertia or end-cut section"));
         row.set("nominal_blank_volume_mm3",V::makeNum(profile.area*member.developedLength));
         row.set("exact_volume_mm3",V::makeNum(volume));row.set("center_mm",xyz(center));
         row.set("start",endpoint(member.start,member.startTangent,member.startNormal));
@@ -337,12 +369,24 @@ V frameModelNative(const V& request){
         else{stock.set("width_mm",V::makeNum(profile.width));stock.set("height_mm",V::makeNum(profile.height));}
         stock.set("wall_mm",V::makeNum(profile.wall));stockRows.arr.push_back(std::move(stock));stockY+=spacing;
     }
+    V weldRows=V::makeArr();std::vector<TopoDS_Shape> beadShapes;
+    if(const auto* welds=request.find("welds")){
+        if(welds->t!=V::Arr||welds->arr.size()>64)throw std::runtime_error("Frame welds need 0..64 entries");std::set<std::string> names;
+        for(const auto& weld:welds->arr){const auto id=word(weld,"id"),a=word(weld,"member_a"),b=word(weld,"member_b");if(!names.insert(id).second||a==b||!memberIndex.count(a)||!memberIndex.count(b))throw std::runtime_error("Weld requires a unique id and two distinct existing frame members");const auto& path=required(weld,"path");if(path.t!=V::Arr||path.arr.size()!=2)throw std::runtime_error("Weld supports one straight seam with two endpoints");const auto start=point(path.arr[0],"Weld start"),end=point(path.arr[1],"Weld end"),normal=point(required(weld,"normal"),"Weld normal");const gp_Vec travel(start,end);const double length=travel.Magnitude();if(length<1e-6)throw std::runtime_error("Weld seam must have positive length");const gp_Dir axis(travel);gp_Vec lateral(normal.X(),normal.Y(),normal.Z());lateral-=gp_Vec(axis)*lateral.Dot(gp_Vec(axis));if(lateral.Magnitude()<1e-8)throw std::runtime_error("Weld normal must be nonzero and perpendicular to its seam");lateral.Normalize();const gp_Vec other=gp_Vec(axis).Crossed(lateral);const double legA=positive(weld,"leg_a"),legB=positive(weld,"leg_b");BRepBuilderAPI_MakePolygon triangle;triangle.Add(start);triangle.Add(start.Translated(lateral*legA));triangle.Add(start.Translated(other*legB));triangle.Close();const auto solid=BRepPrimAPI_MakePrism(BRepBuilderAPI_MakeFace(triangle.Wire()).Face(),travel).Shape();const auto checked=shapeReport(solid,true);const double volume=legA*legB*length/2;if(std::abs(properties(solid)-volume)>std::max(1e-6,volume*1e-8))throw std::runtime_error("Weld bead exact volume does not match its declared triangular section");
+            for(const auto& member:{a,b}){const auto part=readBrep(required(members[memberIndex.at(member)].result,"brep_base64").str);BRepExtrema_DistShapeShape distance(solid,part);if(!distance.IsDone()||distance.Value()>1e-6)throw std::runtime_error("Declared weld bead does not touch both selected frame members");if(std::abs(properties(common(solid,part)))>std::max(1e-6,volume*1e-8))throw std::runtime_error("Declared weld bead overlaps member material; penetrating beads are outside this fillet geometry domain");}
+            V row=V::makeObj();row.set("id",V::makeStr(id));row.set("kind",V::makeStr("declared_straight_triangular_fillet"));row.set("member_a",V::makeStr(a));row.set("member_b",V::makeStr(b));row.set("path",path);row.set("length_mm",V::makeNum(length));row.set("leg_a_mm",V::makeNum(legA));row.set("leg_b_mm",V::makeNum(legB));const double throat=legA*legB/std::hypot(legA,legB);row.set("theoretical_throat_mm",V::makeNum(throat));row.set("nominal_throat_area_mm2",V::makeNum(throat*length));row.set("exact_volume_mm3",V::makeNum(volume));row.set("attachment_checked",V::makeBool(true));row.set("attachment_scope",V::makeStr("exact zero distance to both member solids; continuous interface, fusion and penetration not verified"));row.set("weld_strength_checked",V::makeBool(false));row.set("exact",V::makeBool(true));if(const auto* material=weld.find("material"))row.set("material",*material);
+            if(weld.find("density_g_cm3")&&scalar(weld,"density_g_cm3")>0&&scalar(weld,"density_g_cm3")<=100){const double density=scalar(weld,"density_g_cm3"),mass=volume*density/1000;GProp_GProps bead;BRepGProp::VolumeProperties(solid,bead);physicalProperties.Add(bead,density/1000);totalMass+=mass;weightedCenter+=bead.CentreOfMass().XYZ()*mass;row.set("mass_g",V::makeNum(mass));row.set("density_g_cm3",V::makeNum(density));}else{if(weld.find("density_g_cm3")&&(scalar(weld,"density_g_cm3")<0||scalar(weld,"density_g_cm3")>100))throw std::runtime_error("Weld density must be 0..100 g/cm3");massChecked=false;}
+            for(const auto& bead:beadShapes)if(std::abs(properties(common(solid,bead)))>std::max(1e-6,volume*1e-8))throw std::runtime_error("Declared weld beads overlap material; separate bead solids must not double-count filler");
+            beadShapes.push_back(solid);weldRows.arr.push_back(row);shapesForCompound.push_back(solid);
+        }
+    }
     TopoDS_Shape combined=compound(shapesForCompound);
     V result=shapeResult(combined,false);
     result.set("topology",topologyFor(combined,required(result,"brep_base64").str,members,shapesForCompound));
     V report=V::makeObj(),nodeReport=V::makeArr();
     for(const V& node:nodeRows.arr){V item=V::makeObj();item.set("name",required(node,"name"));item.set("point_mm",required(node,"xyz"));nodeReport.arr.push_back(std::move(item));}
     report.set("nodes",std::move(nodeReport));report.set("members",std::move(cutlist));report.set("joints",std::move(joints));
+    report.set("welds",weldRows);report.set("weld_count",V::makeNum(weldRows.arr.size()));report.set("weld_strength_checked",V::makeBool(false));
     V stock=V::makeObj();stock.set("display_only",V::makeBool(true));
     stock.set("bend_trajectory_checked",V::makeBool(false));stock.set("members",std::move(stockRows));
     report.set("stock_preview",std::move(stock));
@@ -352,8 +396,8 @@ V frameModelNative(const V& request){
         report.set("mass_g",V::makeNum(totalMass));
         V inertia=V::makeArr();auto tensor=physicalProperties.MatrixOfInertia();for(int i=1;i<=3;++i)for(int j=1;j<=3;++j)inertia.arr.push_back(V::makeNum(tensor.Value(i,j)));report.set("inertia_g_mm2",inertia);
         report.set("center_mm",vec(weightedCenter/totalMass));
-        report.set("mass_basis",V::makeStr("sum of exact member solids after authored joints; untrimmed overlaps count per member"));
-    }else report.set("mass_reason",V::makeStr("One or more profiles has no positive density"));
+        report.set("mass_basis",V::makeStr("sum of exact member solids after authored joints plus declared exact beads; untrimmed overlaps count per member"));
+    }else report.set("mass_reason",V::makeStr("One or more member profiles or weld beads has no positive density"));
     result.set("frame_report",std::move(report));return result;
 }
 

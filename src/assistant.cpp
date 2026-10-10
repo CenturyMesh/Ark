@@ -246,7 +246,9 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
         }
         if(history)history(result.conversation);
         V request=assistantRequest(config,result.conversation,tools);
-        V response=transport?transport(config,request,cancel):nativeTransport(config,request,cancel);
+        V response;
+        try{response=transport?transport(config,request,cancel):nativeTransport(config,request,cancel);}
+        catch(const std::exception& error){AssistantUsage unknown;unknown.missingResponses=1;accumulateAssistantUsage(result.usage,unknown);if(events)events({AssistantEvent::Usage,assistantUsageLabel(result.usage),result.usage});throw AssistantTransportError(error.what());}
         ++result.rounds;
         require(response.dump().size()<=config.maxResponseBytes,"Assistant response exceeds configured size limit.");
         accumulateAssistantUsage(result.usage,responseUsage(response));
@@ -315,6 +317,6 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
             if(history)history(result.conversation);
         }
     }
-    throw std::runtime_error("Assistant reached its round limit; previously applied changes remain in the document. Inspect the result before continuing.");
+    throw AssistantRoundLimit(config.maxRounds);
 }
 }

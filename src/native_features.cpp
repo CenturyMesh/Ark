@@ -363,6 +363,31 @@ V surfaceRequest(const Feature& feature, const ExprEnv& env, Document& document,
             if (std::abs(distance) <= 1.0e-6) throw std::runtime_error("extrude distance must exceed 1e-6 mm");
             request.set("distance", V::makeNum(distance));
         }
+    } else if (feature.type == FeatureType::SurfaceEdit) {
+        if(feature.inputs.size()!=1)throw std::runtime_error("surface_edit requires one exact native input");
+        const Body* source=precedingBody(preceding,feature.inputs.front());
+        if(!source)throw std::runtime_error("surface_edit input missing");
+        request.set("input_brep",brepOf(*source,"surface_edit input"));
+        const auto& operation=required(feature.nativeSpec,"op");
+        if(operation.t!=V::Str)throw std::runtime_error("surface_edit op must be extract_face or trim_plane");
+        if(operation.str=="extract_face"){
+            request.set("op",V::makeStr("surface_extract_face"));
+            request.set("reference",required(feature.nativeSpec,"face"));
+            request.set("topology",required(source->nativeData,"topology"));
+        }else if(operation.str=="trim_plane"){
+            request.set("op",V::makeStr("surface_trim_plane"));
+            request.set("keep",required(feature.nativeSpec,"keep"));
+            if(const auto* name=feature.nativeSpec.find("plane")){
+                if(name->t!=V::Str||feature.nativeSpec.find("normal")||feature.nativeSpec.find("origin"))throw std::runtime_error("Surface trim needs one plane selector");
+                const auto plane=resolvePlane(document,name->str);V origin=V::makeArr(),normal=V::makeArr();
+                for(int i:{12,13,14})origin.arr.push_back(V::makeNum(plane.m[i]));
+                for(int i:{8,9,10})normal.arr.push_back(V::makeNum(plane.m[i]));
+                request.set("origin",origin);request.set("normal",normal);
+            }else{
+                const auto spec=numericNative(feature.nativeSpec,env);
+                request.set("origin",required(spec,"origin"));request.set("normal",required(spec,"normal"));
+            }
+        }else throw std::runtime_error("surface_edit op must be extract_face or trim_plane");
     } else if (feature.type == FeatureType::OffsetSurface) {
         request.set("op", V::makeStr("offset_surface"));
         if (feature.inputs.size() != 1) throw std::runtime_error("offset_surface requires one native surface input");
@@ -441,7 +466,7 @@ V surfaceRequest(const Feature& feature, const ExprEnv& env, Document& document,
     return request;
 }
 
-V sheetRequest(const Feature& feature, const ExprEnv& env) {
+V sheetRequest(const Feature& feature, const ExprEnv& env,const Document& document) {
     if (feature.nativeSpec.find("base")) {
         V request = feature.nativeSpec;
         for (const char* key : {"width", "thickness", "k_factor"})
@@ -450,6 +475,10 @@ V sheetRequest(const Feature& feature, const ExprEnv& env) {
         for (const auto& [name, value] : env.vars)
             parameters.set(name, V::makeNum(value));
         request.set("parameters", std::move(parameters));
+        if(const auto* bend=feature.nativeSpec.find("sketch_bend")){
+            if(bend->t!=V::Obj)throw std::runtime_error("Sheet sketch_bend must be an object");const auto& sketchName=required(*bend,"sketch"),entityName=required(*bend,"entity");if(sketchName.t!=V::Str||entityName.t!=V::Str)throw std::runtime_error("Sketch bend requires named sketch and line entity");const NamedSketch* sketch=nullptr;for(const auto& candidate:document.sketches)if(candidate.name==sketchName.str)sketch=&candidate;if(!sketch||!sketch->error.empty()||sketch->sk.plane!="XZ")throw std::runtime_error("Sketch bend requires a solved XZ sketch in the sheet's original local blank coordinates");const SketchEnt* line=nullptr;for(const auto& candidate:sketch->sk.ents)if(candidate.name==entityName.str){if(line)throw std::runtime_error("Ambiguous sketch bend line");line=&candidate;}
+            const double width=param(feature,env,"width");if(!line||line->kind!=SketchEnt::Line||line->dof.size()!=4||std::abs(line->dof[0]-line->dof[2])>1e-6||std::abs(std::min(line->dof[1],line->dof[3]))>1e-6||std::abs(std::max(line->dof[1],line->dof[3])-width)>1e-6)throw std::runtime_error("Sketch bend supports one full-width straight line parallel to the blank width; partial, diagonal, curved and multiple lines reject");V resolved=*bend;resolved.set("station",V::makeNum(line->dof[0]));request.set("sketch_bend",resolved);
+        }
         return request;
     }
     V request = V::makeObj();
@@ -922,7 +951,7 @@ Body evaluateNativeFeature(const Feature& feature, const ExprEnv& env,
     else if (feature.type == FeatureType::SheetMetal) {
         V request = V::makeObj();
         request.set("operation", V::makeStr("model_sheet"));
-        request.set("request", sheetRequest(feature, env));
+        request.set("request", sheetRequest(feature, env,document));
         result = nativeWorkerRequest(request);
     } else if (feature.type == FeatureType::NativeSolid) {
         result = spansExactBoolean(feature) ? combineExactBoolean(feature, document, preceding)

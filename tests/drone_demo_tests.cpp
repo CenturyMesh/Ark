@@ -22,10 +22,10 @@ int main(int argc,char** argv){try{
     for(auto& r:session.document.lastResults)check(r.ok,"Drone feature failed");checkOpenings(session.document,50);
     auto first=accepted(session.call("assembly_info",V::makeObj()));check(first.find("diagnostics")->find("remaining_dofs")->num==4,"Only motor axial rotations should remain free");
     auto axis=ark::resolveGeometryReference(session.document,23,"tool.22.axis");check(std::abs(axis.frame.m[10]-1)<1e-10,"Motor shaft semantic axis");
-    const auto saved=ark::documentToJson(session.document);const double before=body(session.document,12).find("report")->find("volume_mm3")->num;
+    const auto saved=ark::documentToJson(session.document,true,false);const double before=body(session.document,12).find("report")->find("volume_mm3")->num;
     accepted(session.call("doc_apply",parse(R"({"commands":[{"op":"param.set","name":"body_width","expr":"90"},{"op":"param.set","name":"mount_pitch","expr":"60"},{"op":"param.set","name":"motor_x","expr":"100"}]})")));
     checkOpenings(session.document,60);check(body(session.document,12).find("report")->find("volume_mm3")->num>before,"Wider hull regenerates actual material");
     auto next=accepted(session.call("assembly_info",V::makeObj()));check(next.find("diagnostics")->find("max_position_residual_mm")->num<1e-5,"Mates survive parameter regeneration");
-    accepted(session.call("doc_undo",V::makeObj()));check(ark::documentToJson(session.document)==saved,"Undo returns exact authored demo intent");
+    accepted(session.call("doc_undo",V::makeObj()));check(ark::documentToJson(session.document,true,false)==saved,"Undo returns exact authored demo intent");
     std::cout<<"Drone replay, exact holes/slots, semantic shaft references, assembly DOFs and dimensional regeneration passed\n";
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

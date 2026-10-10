@@ -223,14 +223,14 @@ void testMirrorPlanes() {
     check(face.find("report")->find("solids")->num == 2, "face mirror solids");
     check(std::abs(face.find("report")->find("bounds_mm")->arr[5].num - 10) < 1e-3, "face mirror height");
     arkjson::Value saved;
-    check(arkjson::parse(ark::documentToJson(session.document), saved), "serialize mirror document");
+    check(arkjson::parse(ark::documentToJson(session.document,true,false), saved), "serialize mirror document");
     check(saved.find("version")->num == 9, "mirror document is version 9");
     ark::AgentSession plain;
     accepted(plain.call("doc_apply", parse(R"({"expected_revision":0,"commands":[
       {"op":"feature.add","type":"native_solid","name":"Stock","p":{"op":"box","width":"10","depth":"10","height":"5"}}
     ]})")));
     arkjson::Value plainSaved;
-    check(arkjson::parse(ark::documentToJson(plain.document), plainSaved), "serialize plain solid");
+    check(arkjson::parse(ark::documentToJson(plain.document,true,false), plainSaved), "serialize plain solid");
     check(plainSaved.find("version")->num == 7, "plain native solid stays version 7");
 }
 
@@ -255,9 +255,9 @@ void testFinishingHistory() {
     check(session.document.evalBodies[2].nativeData.find("report")->find("solids")->num == 2, "history pattern solids");
     check(std::abs(session.document.evalBodies[3].nativeData.find("report")->find("volume_mm3")->num - 1000.0 / 3.0) < 1.0e-4, "history point-tip loft");
     arkjson::Value saved;
-    check(arkjson::parse(ark::documentToJson(session.document), saved), "serialize finishing document");
+    check(arkjson::parse(ark::documentToJson(session.document,true,false), saved), "serialize finishing document");
     check(saved.find("version")->num == 9, "finishing document is version 9");
-    std::string older = ark::documentToJson(session.document);
+    std::string older = ark::documentToJson(session.document,true,false);
     auto at = older.find("\"version\":9");
     check(at != std::string::npos, "version token");
     older.replace(at, std::string("\"version\":9").size(), "\"version\":8");

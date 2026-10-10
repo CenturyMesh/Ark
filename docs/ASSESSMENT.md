@@ -21,7 +21,7 @@ Key problems found and addressed:
 
 The UI remains native C++/Win32/OpenGL. This avoids replacing the existing kernel or adding a second geometry implementation. Agent integration is model independent through MCP. Expression surfaces demonstrate editable freeform geometry today; they are represented as meshes, with analytic/NURBS entities retained in the existing kernel for further development.
 
-The native document is open, versioned JSON. A binary mesh/cache container can be introduced later if profiling identifies serialization as a bottleneck. Agents should reason from parameters, IDs and reports before asking for vertex arrays.
+The native document now uses an owned binary container with incremental writes and persistent iteration history; explicit JSON exports remain available. See [document storage](DOCUMENT_CONTAINER.md). Agents should reason from parameters, IDs and reports before asking for vertex arrays.
 
 ## Work still required for a serious general CAD
 

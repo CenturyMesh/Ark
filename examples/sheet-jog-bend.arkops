@@ -1,0 +1,10 @@
+{"tool":"doc_apply","arguments":{"expected_revision":0,"commands":[
+  {"op":"param.set","name":"fold_station","expr":60},
+  {"op":"sheet.create","name":"Jogged blank","p":{"width":50,"thickness":2,"k_factor":0.5},"base":{"id":"base","length":160}},
+  {"op":"sheet.jog.add","id":"Jogged blank","jog":{"id":"offset","station":40,"height":20,"angle":45,"inner_radius":3}},
+  {"op":"sketch.set","name":"Bend location","sketch":{"plane":"XZ","entities":[{"name":"FoldLine","kind":"line","construction":true,"dof":["fold_station",0,"fold_station",60]}]}},
+  {"op":"sheet.create","name":"Sketch bent blank","p":{"width":60,"thickness":2,"k_factor":0.5},"base":{"id":"base","length":180}},
+  {"op":"sheet.sketch_bend.add","id":"Sketch bent blank","bend":{"id":"fold","sketch":"Bend location","entity":"FoldLine","inner_radius":3,"angle":90}},
+  {"op":"assembly.add","name":"Jog example","feature":"Jogged blank"},
+  {"op":"assembly.add","name":"Sketch bend example","feature":"Sketch bent blank","p":{"tz":90}}
+]}}

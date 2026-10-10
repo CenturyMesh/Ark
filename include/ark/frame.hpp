@@ -9,5 +9,6 @@ namespace ark {
 // profiles, nodes, members, and joints in Feature::nativeSpec.
 Body evaluateFrameFeature(const Feature& feature, const ExprEnv& env,
                           Document& document, std::vector<Body>& preceding);
+arkjson::Value applyFrameCommand(Document& document,const arkjson::Value& command);
 
 } // namespace ark

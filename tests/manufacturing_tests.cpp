@@ -23,7 +23,7 @@ void coreContracts(){
     Document document;const auto printId=document.addFeature(print);const auto moldId=document.addFeature(mold);
     check(validateManufacturingRoutes(document,error),"route and exact authoring validation");
     const auto saved=documentToJson(document);V package;check(arkjson::parse(saved,package)&&package.find("version")->num==23,"process intent saves document version 23");
-    Document restored;check(documentFromJson(saved,restored,&error),"process persistence load");check(restored.features[0].manufacturingProcess.dump()==print.manufacturingProcess.dump()&&restored.features[1].manufacturingRoute=="injection_molding","route and entire plan survive roundtrip");
+    Document restored;check(documentFromJson(saved,restored,&error),"process persistence load");check(documentToJson(restored)==saved&&restored.features[1].manufacturingRoute=="injection_molding","route and entire plan survive roundtrip");
     V selector=V::makeObj();selector.set("id",V::makeNum((double)printId));const auto inspected=inspectManufacturing(document,selector,7);const auto& printRow=component(inspected);
     check(inspected.find("revision")->num==7&&!inspected.find("manufacturing_qualified")->b&&!inspected.find("ready_for_process_review")->b,"missing exact geometry never passes process inspection");
     check(requirement(printRow,"exact_single_solid")->find("status")->str=="blocked","exact authoring type is insufficient without evaluated B-rep");

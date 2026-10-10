@@ -1,21 +1,36 @@
 # ARK agent protocol
 
 The reusable component library adds nine `library_*` tools, bringing discovery
-to **64 document/library tools**. Call `agent_onboard{topic:"components"}` for
+to **66 document/library/history tools**. Call `agent_onboard{topic:"components"}` for
 typed metadata and reuse rules. Search the local catalog first, acquire and
 validate original STEP bytes, keep declared metadata separate from native
 geometry evidence, then insert using `expected_revision`. See
 [library architecture and acquisition](COMPONENT_LIBRARY_ARCHITECTURE.md).
 Inserted exact source components use document version 24.
 
-Studio now supports concurrent engineering, design and review roles with
-per-role model/reasoning configuration, live tool/message events and user
-steering. See [team architecture](AGENT_TEAM_ARCHITECTURE.md) and
-[Studio team controls](MULTI_AGENT_STUDIO.md). The team adds `team_send` and
-`team_context` to its own connector schema; they are not standalone MCP tools.
-Only designated writers may mutate/export, and every team document mutation
-requires the observed `expected_revision`. Existing direct history/load/import
-calls also honor this field when supplied.
+Studio supports concurrent orchestrator, part designer and physics reviewer
+requests, with independent model/reasoning settings and histories. Document
+commits remain serialized. The orchestrator owns assembly/mates; the part
+designer writes parts/sketches/materials; the physics reviewer uses actual
+calculation and inspection tools and sends measured revision proposals. Stable
+role IDs preserve existing saved settings. See [team architecture](AGENT_TEAM_ARCHITECTURE.md)
+and [Studio team controls](MULTI_AGENT_STUDIO.md).
+
+The team adds `team_send`, `team_context`, `team_propose`, `team_proposal` and
+`team_apply_step` to its connector schema, not standalone MCP discovery.
+Construction steps are atomic, default to at most eight commands and create at
+most one feature or placement. Explicit observed `expected_revision` is
+required; proposals cannot be silently rebased. Real queued/start/end events
+include step/role IDs and measured revision receipts. Bounded sketch commands
+may be shown as uncommitted drafts; they are not evaluated CAD authority or
+partial OCCT solids. Native operations publish geometry only after completion.
+
+Provider-round and team-turn windows yield with retained tool receipts.
+Explicit continuation grants a new bounded window and requires successful
+current `doc_info` before another write. An SSE response without its terminal
+event executes no tools from that response; previous commits remain, and its
+unknown token usage is recorded. Existing direct history/load/import calls also
+honor `expected_revision` when supplied.
 
 `manufacturing_inspect{id?}` is the 55th document tool. It distinguishes
 injection molding, FDM additive manufacturing and machining, separating
@@ -32,6 +47,9 @@ authoring. Declare each component's fabrication route and inspect
 `doc_info{detail:"design"}` for operations, dependencies, sketch consumers and
 the originating sheet/frame behind rigid placements. See
 [manufacturing intent and discovery](MANUFACTURING_INTENT.md).
+Frame trim/extend, crossing end planes and declared exact weld beads, plus
+original-blank full-width jog/sketch bends, use document version 25. Call frame
+or sheet onboarding and see [frame and sheet operations](FRAME_SHEET_OPERATIONS.md).
 
 The [engineering update](ENGINEERING_AGENT_V2.md) adds `physics_inspect` and
 `materials_inspect`, required `doc_apply` postconditions and cached
@@ -40,7 +58,7 @@ units and model limits. A prepared apply refreshes Studio display buffers while
 reusing the already evaluated document. Elastic material properties save as
 version 20; ordinary density/appearance documents retain their earlier version.
 
-The current API has **64 tools**. `agent_onboard{topic:"automation"}` introduces
+The current API has **66 tools**. `agent_onboard{topic:"automation"}` introduces
 `geometry_query`, `math_eval`, `query_batch`, `doc_preview`, `placement_plan`,
 `pattern_plan` and `design_solve`. Linked curve and hole patterns save as
 document version 19. See [agent automation](AGENT_AUTOMATION.md) for contracts,
@@ -115,7 +133,8 @@ Use `created_ids` returned by a batch as inputs to later features. IDs are monot
 | --- | --- |
 | `doc_info`, `doc_get` | Compact summary, or `detail:design` for names, values, volumes and bounds without expressions or meshes / full parametric document |
 | `doc_apply` | Atomic modeling batch |
-| `doc_undo`, `doc_redo` | In-memory transaction history; revision increases |
+| `doc_undo`, `doc_redo` | Persistent iteration undo/redo after reopen; revision increases |
+| `history_info`, `iteration_restore` | Bounded iteration metadata and branch-preserving authoring restoration |
 | `eval_expr` | Finite arithmetic and trig evaluation |
 | `mesh_inspect` | Indexed topology, measurements and explicit validation limits |
 | `mesh_raycast` | Nearest triangle hit, normalized direction, distance in mm |
@@ -138,7 +157,7 @@ Reports use indexed connectivity without silently welding/healing. `closed_orien
 
 Documents are limited to 4 MiB on load, 1024 features, 256 parameters and 64 sketches. A sketch accepts 128 entities and 256 constraints. JSON nesting is limited to 64; mathematical expressions to 2048 characters. These are request limits, not a bound on all possible boolean or solver runtime. There is no cancellation or worker isolation yet.
 
-Mesh buffers, reports and BVHs are cached per session revision and selected feature ID. One geometry recompute handles the whole batch. History stores up to 32 serialized document states; evaluated meshes are not duplicated in undo history. The old hand-written SIMD routines are retained as source archaeology but are disabled until ABI/numerical parity and profiling justify them.
+Mesh buffers, reports and BVHs are cached per session revision and selected feature ID. One geometry recompute handles the whole batch. Version-27 documents retain immutable iteration deltas and shared large source strings, with persistent undo/redo. Limits are 512 nodes, 131072 replay operations and the total 4 MiB document cap; excess capacity rejects the mutation atomically. Existing documents acquire only their first observed baseline. Evaluated meshes and usage snapshots are excluded from the journal. See [persistent iterations](ITERATION_HISTORY.md). The old hand-written SIMD routines are retained as source archaeology but are disabled until ABI/numerical parity and profiling justify them.
 
 ## 0.3 additions
 

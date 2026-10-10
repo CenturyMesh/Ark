@@ -5,34 +5,56 @@
 #include <vector>
 
 namespace ark {
+enum class AgentTeamDiscipline { General, Orchestrator, PartDesigner, PhysicsReviewer };
+const char* agentTeamDisciplineName(AgentTeamDiscipline value) noexcept;
 struct AgentTeamRole {
     std::string id, label, instructions;
     AssistantConfig assistant; // Explicit model and effort per role.
     AssistantTransport transport; // Optional offline/local connector per role.
-    bool canWrite=false; // Reviewers/designers can propose via team_send.
+    bool canWrite=false;
+    AgentTeamDiscipline discipline=AgentTeamDiscipline::General;
 };
 struct AgentTeamConfig {
     std::vector<AgentTeamRole> roles;
     unsigned maxWorkers=3, maxTurnsPerRole=8;
     std::size_t maxEvents=2048, maxMailboxBytes=64*1024;
     std::size_t maxEventTextBytes=4096, maxEventBytes=1024*1024;
+    unsigned maxCommandsPerStep=8,maxFeaturesPerStep=1,maxPlacementsPerStep=1,maxProposals=64;
+    std::size_t maxDraftSketchBytes=16*1024;
 };
-enum class AgentTeamState { Queued, Working, Idle, Failed, Cancelled };
+enum class AgentTeamState { Queued, Working, Idle, Failed, Cancelled, AwaitingContinuation, Interrupted };
 const char* agentTeamStateName(AgentTeamState state) noexcept;
 struct AgentTeamEvent {
-    enum Kind { Status, Text, ToolStart, ToolEnd, Usage, Message, Error } kind=Status;
+    enum Kind { Status, Text, ToolStart, ToolEnd, Usage, Message, Error,
+        ConstructionStart, ConstructionEnd, Proposal, Yield, ConstructionQueued } kind=Status;
     std::uint64_t sequence=0, elapsedMs=0;
     std::string roleId, text, tool;
     AssistantUsage usage; // Role lifetime snapshot, never a model estimate.
     bool toolError=false; // ToolEnd: actual executor/permission result.
+    std::string stepId,proposalId;
+    std::vector<std::string> operations,sketchNames,featureNames;
+    std::vector<std::uint64_t> createdIds;
+    std::uint64_t expectedRevision=0,documentRevision=0;
+    bool hasExpectedRevision=false,hasDocumentRevision=false,draft=false;
+    // Actual requested sketch intent only, bounded and uncommitted. UI renders
+    // this distinctly as a draft and never uses it as evaluated CAD authority.
+    arkjson::Value draftSketchCommands=arkjson::Value::makeArr();
 };
 struct AgentTeamRoleSnapshot {
     std::string id,label,model,reasoningEffort,status,text,error;
     AgentTeamState state=AgentTeamState::Idle;
     bool canWrite=false;
     unsigned turns=0;
+    std::uint64_t stepsApplied=0;
+    bool needsInspection=false;
+    AgentTeamDiscipline discipline=AgentTeamDiscipline::General;
     AssistantUsage usage;
     arkjson::Value conversation=arkjson::Value::makeArr();
+};
+struct AgentTeamProposalSnapshot {
+    std::string id,fromId,toId,reason,state;
+    std::uint64_t expectedRevision=0;
+    std::vector<std::string> operations;
 };
 struct AgentTeamSnapshot {
     bool running=false, paused=false, cancelled=false;
@@ -40,6 +62,7 @@ struct AgentTeamSnapshot {
     std::vector<AgentTeamRoleSnapshot> roles;
     std::vector<AgentTeamEvent> events;
     AssistantUsage usage;
+    std::vector<AgentTeamProposalSnapshot> proposals;
 };
 using AgentTeamEvents=std::function<void(const AgentTeamEvent&)>;
 
@@ -65,6 +88,12 @@ public:
     // eligible recipient, cancellation, or a configured message/turn limit.
     bool steer(const std::string& text,const std::string& targetId={});
     bool send(const std::string& fromId,const std::string& toId,const std::string& text);
+    // Resumes yielded/interrupted roles with retained receipts, never replays
+    // old mutations. A successful current doc_info is required before writing.
+    bool resume(const std::string& targetId={});
+    // Valid only during a team worker callback, empty on other threads. Hosts
+    // copy this id onto queued UI/session work for accurate progress attribution.
+    static std::string currentRoleId();
     void pause(bool paused=true);
     void cancel() noexcept;
     // Waits for active/pending turns (including cancellation cleanup), not for

@@ -6,9 +6,12 @@ conversations:
 
 | Role | Responsibility | Document permission |
 | --- | --- | --- |
-| Engineer | CAD implementation and integration | Write using observed revision |
-| Designer | Design alternatives and fabrication proposals | Read and send proposals |
-| Inconsistency review | Independent geometry, assembly, physics and manufacturing checks | Read and send findings |
+| Orchestrator | Assembly placements, mates, integration and decisions | Assembly writes using observed revision |
+| Part designer | Actual parts, sketches, dimensions, materials and fabrication intent | Part/sketch writes using observed revision |
+| Physics reviewer | Actual calculations, geometry checks and measured revision proposals | Read and propose corrections |
+
+Saved role IDs remain `engineer`, `designer` and `reviewer`, so existing model
+and effort settings retain their owners. The runtime enforces each role's scope.
 
 Each card's **Settings** selects a model and reasoning effort for that role.
 In ChatGPT-plan mode these are native drop-down lists populated from the selected
@@ -41,8 +44,10 @@ account changes and Enter/Escape behavior in open drop-downs.
 
 Send a goal with **Start** or Ctrl+Enter. Cards show actual runtime state,
 provider requests, tool activity, role token totals and the latest messages.
-Designer and reviewer communicate proposals to the engineer with `team_send`;
-all roles can inspect `team_context`. The event log includes actual tool starts,
+Roles communicate with `team_send` and inspect `team_context`. The reviewer can
+submit a measured, revision-bound `team_propose` to the appropriate writer;
+that writer inspects `team_proposal` and uses `team_apply_step` at the proposed
+revision. The event log includes actual tool starts,
 finishes, failures and messages. **Idle** means that role's current turn ended;
 it is not evidence that the product is complete or manufacturing qualified.
 
@@ -65,10 +70,28 @@ the shared executor. Team writes must supply the model's observed
 `expected_revision`; stale or missing revisions reject without automatic
 rebasing. The single Assistant and team cannot run simultaneously.
 
+Each atomic construction step creates at most one feature or placement, with at
+most eight commands. Queued and executing steps identify their actual role and
+step ID. Studio renders bounded `sketch.set`, `sketch.entity.set` and
+`sketch.patch` intent as dashed, uncommitted drafts from captured sketch/plane
+context. It never invents partial solids or geometry from private reasoning.
+Unsupported driven/projected drafts or unresolved planes remain absent. On
+success the real evaluated sketch appears with a solid role color; exact bodies
+publish after native evaluation completes. The counter advances only when the
+reported revision actually increases. Rejections clear their draft without
+publishing geometry. Rendering does not read a worker-owned session.
+
+A provider-round or team-turn limit yields the retained conversation and tool
+receipts. **Continue window** grants another bounded window for the selected
+recipient or whole team. A successful current `doc_info` is required before a
+new write, and completed operations are not replayed. An interrupted provider
+response executes no tools from that incomplete response; previous commits
+remain available and its missing usage remains unknown.
+
 Tokens come only from provider-reported usage. Each role has a separate
 `studio_team_<role>` receipt in the document usage ledger; repeated snapshots update
 the same receipt rather than counting it twice. Missing usage remains unknown
-and makes totals a reported lower bound. Counts do not estimate price or cover
+and makes totals a reported lower bound. Counts exclude
 unreported external MCP consumption. Team usage is recorded only while the UI
 owns the document, never while a geometry worker owns the session.
 
@@ -76,6 +99,56 @@ During an active CAD or catalog operation, the existing Studio owner overlay
 keeps rendering while its worker exclusively owns the session. Input waits until
 that operation returns. Team decisions and pause/cancel are cooperative at the
 document, tool and provider boundaries; they do not interrupt executing geometry.
+
+## Local resources and current price equivalents
+
+The title strip displays local system/Studio CPU and RAM, the Studio process's
+busiest GPU engine, and dedicated VRAM across matching adapters. Measurements
+refresh once per second. CPU/RAM scope is explicit; OpenAI compute is remote
+and is not measured here. Missing GPU counters display **N/A**. GPU engine
+percentages are not added together. Studio RAM uses private working set where
+available and labels the shared-page fallback in details.
+
+Drawing token totals aggregate persisted document receipts and current team
+snapshots without counting cumulative snapshots twice. Cost display refreshes
+at one second intervals. Public official pricing is fetched asynchronously at
+startup and when a fresh Assistant conversation/team session starts; **Refresh
+public pricing rates** also requests an update. Click the title strip for fetch
+time, sources, selected model rates and calculation scope.
+
+USD values are current Standard API-equivalent short/long-context scenarios.
+Credits are Standard purchased-credit equivalents. They are not an account bill,
+remaining plan allowance, or actual account consumption. Historical receipts
+use the currently fetched rates. Missing model/rates remain unpriced, rather
+than free. Cache writes, request context, service tier and region are not
+recorded; output already includes reasoning tokens once.
+
+## Surfaces, fabrication and persistent iterations
+
+The separate **Surfaces** ribbon provides exact extrude, revolve, sweep, loft,
+fill, NURBS, semantic face extraction, plane trimming, offset, sewing and
+thickening. Extraction selects one inspected semantic face from its exact
+source. Trimming selects a datum or explicit origin/normal triples and a
+positive/negative retained side. These operations preserve their original
+source in feature history; the supported trim produces one connected open
+face. The **Mesh** gallery keeps explicit B-rep sampling visible in its forms.
+
+**Sheet Metal** includes original-blank jog and linked full-width sketch bend
+forms, with add/edit/remove choices. **Model** frame controls expose endpoint
+trim/extend, crossing-plane trim and declared weld geometry. Their forms submit
+the same atomic, revision-guarded native programs described in
+[frame and sheet operations](FRAME_SHEET_OPERATIONS.md). They do not establish
+forming, weld or structural qualification.
+
+**Manage > Iterations** shows persistent newest-first authoring nodes. Select a
+node to inspect its actor/model routing labels, operation, motivation, UTC,
+parent, restore origin and before/after SHA-256. Actor labels are caller-declared
+provenance, not authenticated identities. **Restore selected** re-evaluates that
+state, creates a new branch and increases the document revision; drawing token
+receipts remain current. Restore uses the revision observed when opening the
+list and rejects a changed document. Finish or cancel active assistant work
+before restoring. History persists in the native drawing after save/load;
+temporary Undo/Redo is separate.
 
 ## Discover every tool
 
@@ -127,7 +200,11 @@ out/native-release/Release/ark-studio.exe --self-test-assistant-ui --shot out/te
 The selftest uses three injectable local transports without provider calls. It
 checks serialized edits, reviewer write rejection, role models/efforts, token
 receipts, dynamic decisions, pause/resume/cancel and distinct toolbar icons.
-It also verifies gallery coverage, native filtering, paging, routed specialist
+It also verifies actual sketch drafts, anchor patches and exact surface commits,
+retained continuation through bounded rounds, branch restore, extraction/trim
+area, jog/sketch-bend forms, large-scene orbit/pan/zoom, missing pricing and
+non-overlapping title controls at 1180, 1440 and 3440 pixels. It verifies
+gallery coverage, native filtering, paging, routed specialist
 dialogs, full API coverage and local STEP library ingest/search/insert/reuse.
 The test uses an isolated library beside its output path. It writes `.team.png`,
 `.sketch-icons.png`, `.tool-gallery.png`, `.tool-search.png` and

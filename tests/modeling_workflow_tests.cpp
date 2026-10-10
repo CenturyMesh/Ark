@@ -99,9 +99,9 @@ void testPatterns() {
     const Value* row = placed(info, "Row", 1);
     check(row && std::abs(row->find("world_column_major")->arr[12].num - 20) < 1e-6, "linear copy translates by dx");
     Value saved;
-    check(arkjson::parse(ark::documentToJson(session.document), saved), "serialize pattern document");
+    check(arkjson::parse(ark::documentToJson(session.document,true,false), saved), "serialize pattern document");
     check(saved.find("version")->num == 10, "instance pattern is version 10");
-    std::string older = ark::documentToJson(session.document);
+    std::string older = ark::documentToJson(session.document,true,false);
     const auto at = older.find("\"version\":10");
     check(at != std::string::npos, "version token");
     older.replace(at, std::string("\"version\":10").size(), "\"version\":9");
@@ -175,7 +175,7 @@ void testExactBooleans() {
       {"op":"feature.add","type":"native_solid","name":"Joined","inputs":["A","B"],"p":{"op":"union"}}
     ]})")));
     Value saved;
-    check(arkjson::parse(ark::documentToJson(pair.document), saved), "serialize two-input union");
+    check(arkjson::parse(ark::documentToJson(pair.document,true,false), saved), "serialize two-input union");
     check(saved.find("version")->num == 7, "two-input union stays version 7");
     check(std::abs(volumeOf(pair.document, 3) - 1600) < 1e-2, "two overlapping cubes union to 1600 mm3");
 
@@ -186,7 +186,7 @@ void testExactBooleans() {
       {"op":"feature.add","type":"native_solid","name":"C","inputs":["A"],"p":{"op":"transform","tx":"12"}},
       {"op":"feature.add","type":"native_solid","name":"Joined","inputs":["A","B","C"],"p":{"op":"union"}}
     ]})")));
-    check(arkjson::parse(ark::documentToJson(triple.document), saved), "serialize three-input union");
+    check(arkjson::parse(ark::documentToJson(triple.document,true,false), saved), "serialize three-input union");
     check(saved.find("version")->num == 10, "three-input union is version 10");
     check(std::abs(volumeOf(triple.document, 4) - 2200) < 1e-2, "three cubes union to 2200 mm3");
     check(bodyData(triple.document, 4)->find("report")->find("solids")->num == 1, "the union is one solid");
@@ -210,7 +210,7 @@ void testExactBooleans() {
       {"op":"feature.add","type":"native_solid","name":"Fused","native":{"op":"union","instances":["A","B"]}},
       {"op":"feature.add","type":"native_solid","name":"Cut","native":{"op":"cut","instances":["A","B"]}}
     ]})")));
-    check(arkjson::parse(ark::documentToJson(instances.document), saved), "serialize instance boolean");
+    check(arkjson::parse(ark::documentToJson(instances.document,true,false), saved), "serialize instance boolean");
     check(saved.find("version")->num == 10, "instance boolean is version 10");
     check(std::abs(volumeOf(instances.document, 2) - 1600) < 1e-2, "instance union is 1600 mm3");
     check(std::abs(volumeOf(instances.document, 3) - 600) < 1e-2, "instance cut is 600 mm3");
@@ -244,7 +244,7 @@ void testSnapshotAndContract() {
     const Value solids = accepted(session.call("agent_onboard", parse(R"({"topic":"solids"})")));
     check(solids.dump().find("version 10") != std::string::npos, "solids onboarding names version 10");
     check(solids.find("version")->str == "0.9.0", "product version stays 0.9.0");
-    check(ark::AgentSession::tools().arr.size() == 64, "engineering module and exchange tools are discoverable");
+    check(ark::AgentSession::tools().arr.size() == 66, "engineering module and exchange tools are discoverable");
     for (const auto& tool : ark::AgentSession::tools().arr)
         check(tool.find("inputSchema") && tool.find("inputSchema")->t == Value::Obj, "every tool schema parses");
 }
@@ -314,7 +314,7 @@ void testRoundTube() {
       {"op":"feature.add","type":"native_solid","name":"Joined","inputs":["Arm","Hub"],"p":{"op":"union"}}
     ]})")));
     Value saved;
-    check(arkjson::parse(ark::documentToJson(session.document), saved), "serialize round-tube union");
+    check(arkjson::parse(ark::documentToJson(session.document,true,false), saved), "serialize round-tube union");
     check(saved.find("version")->num == 7, "round-tube union of two inputs stays version 7");
     Value axis = accepted(session.call("reference_inspect", parse(R"({"id":1,"reference":"axis"})")));
     check(axis.find("world_column_major")->arr[8].num > 0.99, "round tube axis starts along +X");
@@ -353,10 +353,10 @@ void testShell() {
     ]})")));
     check(std::abs(volumeOf(session.document, 2) - 424.0) < 2.0, "open shell of a 10 mm cube is about 424 mm3");
     Value saved;
-    check(arkjson::parse(ark::documentToJson(session.document), saved), "serialize shell");
+    check(arkjson::parse(ark::documentToJson(session.document,true,false), saved), "serialize shell");
     check(saved.find("version")->num == 11, "shell is version 11");
     check(ark::documentToJson(session.document).find("z_max") != std::string::npos, "shell stores the authored face name");
-    std::string older = ark::documentToJson(session.document);
+    std::string older = ark::documentToJson(session.document,true,false);
     const auto at = older.find("\"version\":11");
     check(at != std::string::npos, "shell version token");
     older.replace(at, std::string("\"version\":11").size(), "\"version\":10");
@@ -431,7 +431,7 @@ void testGuides() {
     check(report->find("bounds_mm")->arr[3].num > 16.0, "one guide bows the loft past x=16");
     check(report->find("volume_mm3")->num > 12566.0, "guided loft is larger than the straight cylinder");
     Value saved;
-    check(arkjson::parse(ark::documentToJson(session.document), saved), "serialize guided loft");
+    check(arkjson::parse(ark::documentToJson(session.document,true,false), saved), "serialize guided loft");
     check(saved.find("version")->num == 11, "loft guides are version 11");
     check(saved.find("features")->arr[0].find("native")->find("guides")->arr[0].str == "Bow", "the document stores the guide sketch name");
 
@@ -581,9 +581,9 @@ void testCurvesAndQueries() {
     check(volumeOf(cone.document, 1) > 700.0 && volumeOf(cone.document, 1) < 900.0, "a circle lofted to a point is a cone");
     check(bodyData(cone.document, 1)->find("report")->find("bounds_mm")->arr[5].num > 29.0, "the point tip reaches z=30");
     Value saved;
-    check(arkjson::parse(ark::documentToJson(cone.document), saved), "serialize the point loft");
+    check(arkjson::parse(ark::documentToJson(cone.document,true,false), saved), "serialize the point loft");
     check(saved.find("version")->num == 12, "a point datum saves version 12");
-    std::string older = ark::documentToJson(cone.document);
+    std::string older = ark::documentToJson(cone.document,true,false);
     const auto at = older.find("\"version\":12");
     check(at != std::string::npos, "version 12 token");
     older.replace(at, std::string("\"version\":12").size(), "\"version\":11");
@@ -608,7 +608,7 @@ void testCurvesAndQueries() {
     const Value* nose = bodyData(guided.document, 2)->find("report");
     check(nose->find("bounds_mm")->arr[3].num > 16.0, "a curve guide bows the loft past x=16");
     check(nose->find("volume_mm3")->num > 12566.0, "a curve guide enlarges the loft");
-    check(arkjson::parse(ark::documentToJson(guided.document), saved) && saved.find("version")->num == 12, "a curve guide saves version 12");
+    check(arkjson::parse(ark::documentToJson(guided.document,true,false), saved) && saved.find("version")->num == 12, "a curve guide saves version 12");
 
     ark::AgentSession swept;
     accepted(swept.call("doc_apply", parse(R"({"commands":[
@@ -715,7 +715,7 @@ void testDrivenSketch() {
     ]})")));
     check(std::abs(volumeOf(session.document, 1) - 1000.0) < 1.0, "projecting the cube does not change its volume");
     Value saved;
-    check(arkjson::parse(ark::documentToJson(session.document), saved) && saved.find("version")->num == 13.0, "project and offset save as version 13");
+    check(arkjson::parse(ark::documentToJson(session.document,true,false), saved) && saved.find("version")->num == 13.0, "project and offset save as version 13");
     auto entity = [&](const char* name) {
         std::string args = std::string("{\"name\":\"Trace\",\"entity\":\"") + name + "\"}";
         return accepted(session.call("sketch_inspect", parse(args.c_str())));
@@ -752,7 +752,7 @@ void testRectangularTube() {
       {"op":"feature.add","type":"native_solid","name":"Joined","inputs":["Arm","Hub"],"p":{"op":"union"}}
     ]})")));
     Value saved;
-    check(arkjson::parse(ark::documentToJson(session.document), saved), "serialize rectangular-tube union");
+    check(arkjson::parse(ark::documentToJson(session.document,true,false), saved), "serialize rectangular-tube union");
     check(saved.find("version")->num == 7, "rectangular-tube union of two inputs stays version 7");
     check(std::abs(volumeOf(session.document, 1) - 2240.0) < 1.0, "straight rectangular tube volume is 2240 mm3");
     const auto& bounds = bodyData(session.document, 1)->find("report")->find("bounds_mm")->arr;
@@ -770,7 +770,7 @@ void testMass() {
       {"op":"feature.add","type":"box","name":"Cube","p":{"dx":"10","dy":"10","dz":"10","density":"2.7"}}
     ]})")));
     Value saved;
-    check(arkjson::parse(ark::documentToJson(session.document), saved) && saved.find("version")->num == 1, "density does not change the document version");
+    check(arkjson::parse(ark::documentToJson(session.document,true,false), saved) && saved.find("version")->num == 1, "density does not change the document version");
     Value inspected = accepted(session.call("native_inspect", parse(R"({"id":1})")));
     check(std::abs(inspected.find("mass_g")->num - 2.7) < 1e-6, "a 10 mm cube at 2.7 g/cm3 weighs 2.7 g");
     const auto& center = inspected.find("center_mm")->arr;

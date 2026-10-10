@@ -16,14 +16,17 @@ A straight member references `start` and `end` nodes. A bent member supplies
 `start`, `direction`, optional section `normal`, and a sequence of straight
 lengths and circular bends (`radius`, `angle`, `roll`). Optional `end` verifies
 the resulting endpoint. Both section types produce exact hollow B-reps.
-The supported `cope` joint cuts a round member against the outer envelope of a
-straight round host at its declared endpoint. Other joint domains reject.
+The original `cope` joint cuts a round member against a straight round host.
+Version 25 adds bounded straight-member `trim_extend`, explicit `trim_plane`
+and separate exact triangular weld beads. See
+[frame and sheet operations](FRAME_SHEET_OPERATIONS.md) for commands, evidence
+and unsupported domains.
 
-`frame_inspect{id}` returns member frames, exact cutlist lengths and volumes,
-joint results, and mass/COM when all profiles have density. Profile-density
-edits refresh those results. Untrimmed overlapping members count separately;
-these are nominal geometric quantities, without weld beads, springback,
-stock tolerances or structural/crash analysis.
+`frame_inspect{id}` returns member frames, centerline stock lengths, exact
+volumes, joints and explicit bead reports. Aggregate mass/COM requires density
+for every member profile and bead. Density edits refresh those results.
+Untrimmed overlaps count separately. Declared bead geometry does not establish
+fusion, springback, stock tolerances or structural/crash analysis.
 
 `reference_inspect` exposes `member.<name>.<producer-reference>` names. A
 `plane.set` support can name its producer feature or use its ID; the saved

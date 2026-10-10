@@ -1,5 +1,40 @@
 # Native surfacing
 
+## Solid, surface and mesh workflow
+
+Surfaces are exact OCCT geometry, independent of the mesh toolkit. Studio groups
+their authoring tools separately. Use a sketch or exact face as the source,
+construct/trim/offset the surface, then thicken or sew a closed shell into a
+solid. An explicit sampled mesh operation can convert the display tessellation
+into editable mesh geometry. This last step loses B-rep authority; ARK does not
+claim automatic mesh-to-NURBS reconstruction.
+
+`surface_edit` adds two version-26 operations, each with one exact input:
+
+```json
+{"op":"feature.add","type":"surface_edit","name":"Skin","inputs":["Block"],"native":{"op":"extract_face","face":"z_max"}}
+```
+
+Inspect semantic face names first. Extraction validates their B-rep digest and
+preserves the original trimmed face, including holes. Missing, stale or
+ambiguous references reject. The result publishes the semantic face `surface`.
+
+```json
+{"op":"feature.add","type":"surface_edit","name":"Trimmed skin","inputs":["Skin"],"native":{"op":"trim_plane","origin":[8,0,0],"normal":[1,0,0],"keep":"positive"}}
+```
+
+Alternatively use `native.plane` with a construction-plane name. The trim input
+must be exactly one surface face, and the plane must divide it into one
+connected face on each side. Both sides are checked for valid topology and
+area conservation. Tangent/outside cuts, solids and disconnected patches
+reject; this is not a general arbitrary-curve surface trimming command.
+See [the runnable hybrid example](../examples/surface-hybrid.arkops).
+
+The toolkit does not yet implement general boundary-surface G2 matching,
+untrim/extend of arbitrary faces, mid-surface extraction, flattening of doubly
+curved surfaces or automatic reverse engineering. Existing loft continuity
+settings do not establish continuity to an arbitrary neighboring support face.
+
 Studio's **Native surfaces** Commands group and MCP `doc_apply` create OCCT
 8.0.1 B-reps. The feature history stores the authored parameters and `native`
 specification; the evaluated B-rep, report, and display mesh are derived and

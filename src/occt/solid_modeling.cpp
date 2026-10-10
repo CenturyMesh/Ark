@@ -711,6 +711,16 @@ V importComponentNative(const V& request){
     V model=V::makeObj();model.set("op",V::makeStr("imported_brep"));model.set("package",package);auto result=modelSolidNative(model);result.set("source_sha256",V::makeStr(sourceHash));result.set("body_index",V::makeNum(body));return result;
 }
 
+int semanticFaceIndexNative(const V& request){
+    const auto& encoded=need(request,"input_brep");if(encoded.t!=V::Str)throw std::runtime_error("Reference input is not a B-rep");
+    const auto shape=readBrep(encoded.str);const auto refs=inputRefs(request,"input_brep","topology",shape);const auto name=word(request,"reference");
+    for(const auto& ref:refs)if(ref.name==name){
+        if(!selectable(ref.status))throw std::runtime_error("Reference "+name+" is "+ref.status);
+        if(ref.kind!="face")throw std::runtime_error("Surface extraction requires a semantic face, not an edge or axis");
+        const int index=indexOf(shape,ref.shape,TopAbs_FACE);if(index<0)throw std::runtime_error("Semantic face is not bound to the source");return index;
+    }
+    throw std::runtime_error("Unknown semantic face: "+name);
+}
 V referenceFrameNative(const V& request){
     const auto& encoded=need(request,"input_brep");if(encoded.t!=V::Str)throw std::runtime_error("Reference input is not a B-rep");TopoDS_Shape shape=readBrep(encoded.str);
     auto refs=inputRefs(request,"input_brep","topology",shape);std::string name=word(request,"reference");double fraction=optional(request,"fraction",.5);if(fraction<0||fraction>1)throw std::runtime_error("Reference fraction outside [0,1]");

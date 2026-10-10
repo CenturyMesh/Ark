@@ -1,0 +1,4 @@
+{"tool":"doc_apply","arguments":{"commands":[{"op":"feature.add","name":"Block","type":"native_solid","native":{"op":"box"},"p":{"width":100,"depth":70,"height":20}}]}}
+{"tool":"doc_apply","arguments":{"commands":[{"op":"feature.add","name":"Skin","type":"surface_edit","inputs":["Block"],"native":{"op":"extract_face","face":"z_max"}}]}}
+{"tool":"doc_apply","arguments":{"commands":[{"op":"feature.add","name":"Trimmed skin","type":"surface_edit","inputs":["Skin"],"native":{"op":"trim_plane","origin":[30,0,0],"normal":[1,0,0],"keep":"positive"}}]}}
+{"tool":"doc_apply","arguments":{"commands":[{"op":"feature.add","name":"Thickened panel","type":"thicken","inputs":["Trimmed skin"],"p":{"thickness":3}}]}}

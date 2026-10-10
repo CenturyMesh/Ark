@@ -130,6 +130,30 @@ Optional `axial_test:{material,force_N,area_mm2,length_mm}` calculates uniform
 uniaxial stress, small elastic strain, extension and a yield ratio when declared
 strength is available. It uses the caller's cross-section and excludes buckling.
 
+`beam_test` adds two explicit prismatic elastic cases: `support: "cantilever_tip"`
+or `"simply_supported_center"`, with `material`, `force_N`, `length_mm`,
+`second_moment_mm4` and `extreme_fiber_mm`. It returns maximum moment, bending
+stress, deflection and a declared yield ratio. Optional `buckling` requires
+`minimum_second_moment_mm4`, `area_mm2`, `effective_length_factor` and
+`compression_N`; it reports ideal Euler critical load and slenderness. The
+weak-axis inertia and axial end condition are deliberately independent inputs.
+Euler applicability is not inferred: yielding, imperfections, local buckling,
+fatigue and combined bending/compression interaction remain unverified.
+
+`weld_test:{effective_throat_mm,effective_length_mm,force_N,allowable_stress_Pa?}`
+reports average direct-load stress and, with the caller's allowable stress,
+utilization and required effective throat. It excludes eccentric moments,
+weld-group load distribution, defects, fatigue and process qualification.
+These two analytical cases work even when aggregate mass is unavailable.
+Both return `geometry_linked:false` and `design_qualified:false`. They are
+usable as explicit `doc_preview`/`doc_apply` postconditions; section properties,
+load cases and material provenance remain the caller's responsibility.
+
+The beam coefficients follow the [University of Illinois beam tables](https://courses.grainger.illinois.edu/tam251/fa2017/BeamDeflectionTables.pdf).
+Ideal column limits follow [MIT's buckling lectures](https://ocw.mit.edu/courses/16-001-unified-engineering-materials-and-structures-fall-2021/mit16_001_f21_lec33lec34lec35.pdf).
+Effective throat area is length times throat, as described by [AISC](https://ej.aisc.org/index.php/engj/article/view/628);
+ARK does not supply a code-specific allowable stress or claim code compliance.
+
 The mass-center and inertia conventions follow the
 [NASA mass-distribution overview](https://nescacademy.nasa.gov/video/7f310373e3e64527810f8ae319db74b91d).
 The uniform-gravity center is the mass-weighted component center, consistent

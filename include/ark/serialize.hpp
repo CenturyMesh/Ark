@@ -1,6 +1,7 @@
 // ============================================================================
 //  ARK-Point :: ark/serialize.hpp
-//  Document <-> JSON persistence (.arkjson). Full fidelity: parameters,
+//  Binary .ark persistence and explicit JSON exports (.arkjson/.json).
+//  Full fidelity: parameters,
 //  named sketches (with constraints), feature history with expression
 //  params, inputs, op codes and stable ids. Enables reproducible agent
 //  sessions across MCP / CLI / C-ABI hosts.
@@ -12,11 +13,12 @@
 namespace ark {
 
 // Full-document JSON (params + sketches + features; no evaluation state).
-std::string documentToJson(const Document& doc);
+std::string documentToJson(const Document& doc,bool includeAudit=true,bool includeHistory=true);
 
 // Replace doc contents from JSON. Returns false + err on malformed input.
 bool documentFromJson(const std::string& json, Document& doc, std::string* err=nullptr);
 
+// Binary by default; .arkjson/.json select text export. Loads detect the signature.
 bool saveDocument(const Document& doc, const char* path);
 bool loadDocument(const char* path, Document& doc, std::string* err=nullptr);
 

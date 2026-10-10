@@ -1,4 +1,5 @@
 #include "ark/occt_modeling.hpp"
+#include "ark/occt_solid.hpp"
 #include "common.hpp"
 
 #include <BRepAdaptor_Curve.hxx>
@@ -20,6 +21,9 @@
 #include <BRepOffsetAPI_MakeThickSolid.hxx>
 #include <BRepOffsetAPI_ThruSections.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
+#include <BRepPrimAPI_MakeHalfSpace.hxx>
+#include <BRepAlgoAPI_Common.hxx>
+#include <gp_Pln.hxx>
 #include <BRepPrimAPI_MakeRevol.hxx>
 #include <GeomAPI_Interpolate.hxx>
 #include <GeomAPI_ProjectPointOnCurve.hxx>
@@ -1177,6 +1181,35 @@ V sweepSurface(const V& request) {
     return tag(shapeResult(shape, solid), "sweep");
 }
 
+V surfaceEditResult(const TopoDS_Shape& face,const char* operation){
+    V result=tag(shapeResult(face,false),operation),topology=V::makeObj(),references=V::makeArr(),reference=V::makeObj(),indices=V::makeArr();
+    topology.set("brep_sha256",V::makeStr(sha256(base64Decode(required(result,"brep_base64").str))));
+    reference.set("name",V::makeStr("surface"));reference.set("kind",V::makeStr("face"));reference.set("status",V::makeStr("bound"));indices.arr.push_back(V::makeNum(0));reference.set("indices",indices);references.arr.push_back(reference);topology.set("references",references);result.set("topology",topology);
+    return result;
+}
+V extractSurfaceFace(const V& request){
+    const auto& input=required(request,"input_brep");if(input.t!=V::Str)throw std::runtime_error("Surface extraction needs exact B-rep input");
+    // Reuse the digest-bound semantic resolver; never guess an indexed face.
+    const auto index=(size_t)semanticFaceIndexNative(request);
+    const auto faces=shapes(readBrep(input.str),TopAbs_FACE);
+    if(index>=faces.size())throw std::runtime_error("Surface extraction face is out of range");
+    auto result=surfaceEditResult(faces[index],"surface_extract_face");
+    V report=required(result,"report");report.set("source_face",required(request,"reference"));report.set("source_brep_sha256",V::makeStr(sha256(base64Decode(input.str))));result.set("report",report);return result;
+}
+V trimSurfacePlane(const V& request){
+    const auto& input=required(request,"input_brep");if(input.t!=V::Str)throw std::runtime_error("Surface trim needs exact B-rep input");
+    const auto source=readBrep(input.str);const auto sourceFaces=shapes(source,TopAbs_FACE);
+    if(!shapes(source,TopAbs_SOLID).empty()||sourceFaces.size()!=1)throw std::runtime_error("Surface plane trim requires exactly one surface face; extract a face from a solid first");
+    auto vector=[](const V& value){if(value.t!=V::Arr||value.arr.size()!=3)throw std::runtime_error("Plane vector needs three numbers");return gp_Vec(number(value.arr[0],"plane coordinate"),number(value.arr[1],"plane coordinate"),number(value.arr[2],"plane coordinate"));};
+    const auto originVector=vector(required(request,"origin")),normal=vector(required(request,"normal"));if(normal.Magnitude()<1e-12)throw std::runtime_error("Surface trim normal is zero");
+    const gp_Pnt origin(originVector.X(),originVector.Y(),originVector.Z());const gp_Dir direction(normal);
+    const auto& keep=required(request,"keep");if(keep.t!=V::Str||(keep.str!="positive"&&keep.str!="negative"))throw std::runtime_error("Surface trim keep must be positive or negative");
+    BRepBuilderAPI_MakeFace plane(gp_Pln(origin,direction));if(!plane.IsDone())throw std::runtime_error("Surface trim plane construction failed");
+    auto half=[&](double sign){BRepPrimAPI_MakeHalfSpace region(plane.Face(),origin.Translated(gp_Vec(direction)*sign));BRepAlgoAPI_Common cut(sourceFaces.front(),region.Solid());cut.Build();if(!cut.IsDone()||cut.HasErrors())throw std::runtime_error("Surface plane trim failed");const auto faces=shapes(cut.Shape(),TopAbs_FACE);if(faces.size()!=1||properties(faces.front(),'a')<=1e-8)throw std::runtime_error("Plane must divide the surface into one connected face on each side; tangent/outside or disconnected result rejected");shapeReport(faces.front(),false);return faces.front();};
+    auto positive=half(1),negative=half(-1);const double originalArea=properties(sourceFaces.front(),'a'),retainedArea=properties(keep.str=="positive"?positive:negative,'a');
+    if(std::abs(properties(positive,'a')+properties(negative,'a')-originalArea)>std::max(1e-6,originalArea*1e-8)||originalArea-retainedArea<=1e-8)throw std::runtime_error("Surface trim failed area conservation");
+    auto result=surfaceEditResult(keep.str=="positive"?positive:negative,"surface_trim_plane");V report=required(result,"report");report.set("original_area_mm2",V::makeNum(originalArea));report.set("removed_area_mm2",V::makeNum(originalArea-retainedArea));report.set("area_conservation_checked",V::makeBool(true));result.set("report",report);return result;
+}
 V offsetSurface(const V& request) {
     const V& input = required(request, "input_brep");
     if (input.t != V::Str || input.str.empty()) throw std::runtime_error("input_brep must be base64");
@@ -1260,6 +1293,8 @@ V modelSurfaceNative(const V& request) {
         if (operation.str == "revolve_surface") return revolveSurface(request);
         if (operation.str == "sweep") return sweepSurface(request);
         if (operation.str == "offset_surface") return offsetSurface(request);
+        if (operation.str == "surface_extract_face") return extractSurfaceFace(request);
+        if (operation.str == "surface_trim_plane") return trimSurfacePlane(request);
         if (operation.str == "sew") return sewSurfaces(request);
         if (operation.str == "curve" || operation.str == "intersection_curve" || operation.str == "bridge")
             return modelCurveNative(request);

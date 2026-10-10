@@ -43,6 +43,15 @@ void primitivesAndNames(){
     close(volume(result(parse(R"({"op":"torus","major_radius":5,"minor_radius":1})"))),10*std::acos(-1.)*std::acos(-1.),1e-5,"torus volume");
 }
 
+void disconnectedDiagnostic(){
+    auto base=result(parse(R"({"op":"box","width":10,"depth":10,"height":10})"));
+    auto move=on("transform",base);move.set("frame",parse("[1,0,0,0,0,1,0,0,0,0,1,0,50,0,0,1]"));auto distant=result(move);
+    auto request=on("union",base);request.set("tool_brep",*distant.find("brep_base64"));
+    bool rejectedWithEvidence=false;
+    try{(void)result(request);}catch(const std::exception& e){std::string message=e.what();rejectedWithEvidence=message.find("2 solids")!=std::string::npos&&message.find("assembly instances")!=std::string::npos;}
+    check(rejectedWithEvidence,"disconnected union retains rejection with actionable solid-count evidence");
+}
+
 void operations(){
     auto base=result(parse(R"({"op":"box","width":10,"depth":10,"height":5})"));
     auto hole=on("hole",base);
@@ -235,4 +244,4 @@ void planeSplitAndMirrorCopy(){
     mirror.set("fuse",Value::makeNum(1));rejected(mirror);
 }
 }
-int main(){try{primitivesAndNames();operations();rejection();finishingFeatures();repeatedUnionNamespaces();planeSplitAndMirrorCopy();std::cout<<"native solid tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(){try{primitivesAndNames();disconnectedDiagnostic();operations();rejection();finishingFeatures();repeatedUnionNamespaces();planeSplitAndMirrorCopy();std::cout<<"native solid tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

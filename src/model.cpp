@@ -33,7 +33,7 @@ ManufacturingLineage featureManufacturingLineage(const Document& document,const 
     }
     if(isMeshModelFeature(current->type)||current->type==FeatureType::ParametricSurface)return {"mesh",0,false};
     if(isCurveFeature(current->type))return {"curve",0,false};
-    if(current->type==FeatureType::SurfaceFill||current->type==FeatureType::BSplineSurface||current->type==FeatureType::OffsetSurface||
+    if(current->type==FeatureType::SurfaceFill||current->type==FeatureType::BSplineSurface||current->type==FeatureType::OffsetSurface||current->type==FeatureType::SurfaceEdit||
        (isNativeSurfaceFeature(current->type)&&current->type!=FeatureType::Thicken&&current->num(document.buildEnv(),"solid",1)==0))return {"surface",0,false};
     if(current->type==FeatureType::PCB)return {"electronics",0,false};
     if(current->type==FeatureType::CableRoute)return {"routing",0,false};
@@ -213,6 +213,7 @@ const char* featureTypeName(FeatureType t){
         case FeatureType::RevolveSurface: return "revolve_surface";
         case FeatureType::OffsetSurface: return "offset_surface";
         case FeatureType::Sew: return "sew";
+        case FeatureType::SurfaceEdit: return "surface_edit";
         case FeatureType::MeshBody: return "mesh_body";
         case FeatureType::MeshWeld: return "mesh_weld";
         case FeatureType::MeshSmooth: return "mesh_smooth";
@@ -235,7 +236,7 @@ bool isCurveFeature(FeatureType t){
 bool isNativeSurfaceFeature(FeatureType t){
     return t==FeatureType::Loft || t==FeatureType::SurfaceFill || t==FeatureType::BSplineSurface ||
            t==FeatureType::Thicken || t==FeatureType::Sweep || t==FeatureType::ExtrudeSurface ||
-           t==FeatureType::RevolveSurface || t==FeatureType::OffsetSurface || t==FeatureType::Sew;
+           t==FeatureType::RevolveSurface || t==FeatureType::OffsetSurface || t==FeatureType::Sew || t==FeatureType::SurfaceEdit;
 }
 bool isMeshModelFeature(FeatureType t){
     return t==FeatureType::MeshBody || t==FeatureType::MeshWeld || t==FeatureType::MeshSmooth ||
@@ -271,6 +272,7 @@ bool featureTypeFromName(const std::string& s, FeatureType& out){
     else if(s=="revolve_surface") out=FeatureType::RevolveSurface;
     else if(s=="offset_surface") out=FeatureType::OffsetSurface;
     else if(s=="sew") out=FeatureType::Sew;
+    else if(s=="surface_edit") out=FeatureType::SurfaceEdit;
     else if(s=="mesh_body") out=FeatureType::MeshBody;
     else if(s=="mesh_weld") out=FeatureType::MeshWeld;
     else if(s=="mesh_smooth") out=FeatureType::MeshSmooth;

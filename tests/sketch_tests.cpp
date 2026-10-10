@@ -97,12 +97,12 @@ int main(){try{
     SketchProfile profile;profile.frame=Mat4::rotX(.7)*Mat4::rotY(.4);profile.segs={{ProfileSeg::Line,{0,0},{10,0}},{ProfileSeg::Line,{10,0},{10,10}},{ProfileSeg::Line,{10,10},{0,10}},{ProfileSeg::Line,{0,10},{0,0}}};
     auto symmetric=extrudeProfile(profile,8,true).tessellate({});auto inverse=profile.frame.inverted();double zmin=1e100,zmax=-1e100;
     for(size_t i=0;i<symmetric.pos.size();i+=3){auto p=inverse.transformPoint({symmetric.pos[i],symmetric.pos[i+1],symmetric.pos[i+2]});zmin=std::min(zmin,p.z);zmax=std::max(zmax,p.z);}check(std::abs(zmin+4)<2e-6&&std::abs(zmax-4)<2e-6,"Symmetric extrusion respects rotated plane");
-    auto previous=documentToJson(freeform.document);auto revision=freeform.revision;
+    auto previous=documentToJson(freeform.document,true,false);auto revision=freeform.revision;
     V fresh=V::makeObj();fresh.set("expected_revision",V::makeNum((double)revision));
     check(!freeform.call("doc_new",fresh).find("isError")->b&&freeform.document.features.empty(),"New document clears the active model");
     check(freeform.revision==revision+1,"New document never resets revision");
     check(freeform.call("doc_new",fresh).find("isError")->b,"Stale new-document request rejected");
-    call(freeform,"doc_undo","{}");check(documentToJson(freeform.document)==previous,"New document can be undone without overwriting files");
+    call(freeform,"doc_undo","{}");check(documentToJson(freeform.document,true,false)==previous,"New document can be undone without overwriting files");
     auto revisionBeforeOnboard=freeform.revision;call(freeform,"agent_onboard","{}");check(freeform.revision==revisionBeforeOnboard,"Onboarding is read-only");
     std::cout<<checks<<" parametric sketch checks passed\n";return 0;
 }catch(const std::exception& e){std::cerr<<"After "<<checks<<" checks: "<<e.what()<<'\n';return 1;}}

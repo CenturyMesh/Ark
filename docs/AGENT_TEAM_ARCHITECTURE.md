@@ -28,13 +28,55 @@ remains unknown rather than becoming zero.
 
 ## Collaboration and document authority
 
-Mechanical engineering, design and review have separate role instructions.
-The engineer is the initial document writer. Other roles inspect and send
-findings/proposals to teammates. Explicit write permission is required to
-change that role. The user can steer one role or the whole team and pause or
-cancel subsequent work. Events describe actual requests, tool calls, messages,
-errors and receipts; they do not expose hidden reasoning or invent completion
-percentages.
+The orchestrator writes assembly/mate operations and places reusable components.
+The part designer writes authored parts, sketches, dimensions, materials and
+manufacturing geometry. The physics reviewer remains read-only, uses actual
+physics/math/geometry evidence and records unknown loads, supports and material
+assumptions. Runtime command scopes enforce these responsibilities; saved role
+IDs and per-role model settings remain compatible. General-purpose hosts can
+retain the earlier explicit writer/read-only mode.
+
+`team_propose` stores bounded commands/checks, sender, recipient, reason and an
+inspected `expected_revision`; `team_proposal` reads them. The receiving writer
+decides whether to apply with `team_apply_step`. Proposal commands are not
+executed by delivery, and only a measured successful revision receipt marks a
+proposal applied. A conflicting proposal needs fresh inspection and a new
+baseline, rather than automatic revision substitution.
+
+Each construction step defaults to eight commands, one created feature and one
+placement. Dependencies and required checks remain one atomic transaction; the
+host never breaks a batch into invalid geometry. A valid initial sketch can be
+followed by separate `sketch.entity.set`/`sketch.patch` operations when those
+states are independently valid. A sketch consumed by a feature must preserve
+that feature's valid inputs. The designer must keep a dependent change together
+when those conditions require it.
+
+ConstructionQueued, ConstructionStart and ConstructionEnd events carry actual
+role/step IDs, requested operation/target names and observed revision receipts.
+Queued intentions can coexist while the shared executor performs one operation.
+Bounded requested sketch commands may be rendered distinctly as draft ghosts;
+they are uncommitted intent, not evaluated geometry. End events clear only the
+matching role/step draft. There is no authoritative interior OCCT partial shape
+or interpolated construction progress. Committed features become visible at
+real transaction checkpoints.
+
+The user can steer one role or the whole team and pause or cancel subsequent
+work. Events describe actual requests, tool calls, messages, errors and receipts;
+they do not expose hidden reasoning or invent completion percentages.
+
+## Bounded continuation and provider failures
+
+A provider-round limit yields AwaitingContinuation with all accepted tool
+receipts retained. A transport failure, including missing terminal SSE, becomes
+Interrupted. Partial output from that stream is not accepted or executed; the
+request's usage remains explicitly unknown. Previously committed operations
+are neither rolled back nor replayed.
+
+Explicit resume retains the conversation and lifetime usage/turn totals while
+renewing a bounded turn window. Successful current `doc_info` is required before
+another mutation. This protects a user continuing after an error from repeating
+old edits or applying a proposal to changed geometry. No automatic unlimited
+retry, inference call or paid fallback is introduced.
 
 Manufacturing intent distinguishes sheet fabrication, machining, purchased
 parts, additive manufacturing and injection molding. Inspection identifies

@@ -235,7 +235,7 @@ void testImportRoundtripAndVersion() {
     save.set("path", Value::makeStr(saved.string()));
     accepted(session.call("doc_save", save));
     Value stored;
-    check(arkjson::parse(ark::documentToJson(session.document), stored), "saved mesh document parses");
+    check(arkjson::parse(ark::documentToJson(session.document,true,false), stored), "saved mesh document parses");
     check(stored.find("version")->num == 8, "mesh document is version 8");
     ark::AgentSession loaded;
     accepted(loaded.call("doc_load", save));

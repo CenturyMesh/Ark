@@ -1,8 +1,11 @@
-# ARK file formats, versions 1 through 18
+# ARK file formats, document versions 1 through 27
 
 ## `.ark`
 
-UTF-8 JSON carrying editable design intent, not a triangle dump. `.arkjson` is an accepted legacy extension for the same payload.
+An owned binary container carries editable design intent and persistent iterations.
+See [binary storage and recovery](DOCUMENT_CONTAINER.md) and [iteration history](ITERATION_HISTORY.md).
+The loader detects the signature and still accepts legacy JSON `.ark` files.
+Explicit `.arkjson` and `.json` exports retain the versioned JSON representation, for example:
 
 ```json
 {
@@ -23,9 +26,9 @@ Feature parameters are expression **strings** in saved files. Unknown document v
 
 Named sketches contain `name`, `entities` and `constraints`. Entity kinds are `point` (two DOFs), `line` (four DOFs) and `circle` (three DOFs). Constraint types are discoverable through the source's `constraintTypeName` contract.
 
-Serialization sorts each feature's parameter keys for deterministic diffs. Save writes a sibling temporary file and then replaces the destination. Separate sessions saving the same path are last-writer-wins. Loaded content is parsed into scratch state; the agent API commits only after successful geometry evaluation.
+Serialization sorts object keys for deterministic diffs. Binary saves update changed chunks in a SQLite transaction; initial saves and legacy migrations use a staged sibling replacement. A concurrent write lock causes a save failure; independently opened sessions do not merge edits or detect intervening completed saves. Loaded content is parsed into scratch state; the agent API commits only after successful geometry evaluation.
 
-Camera, UI layout, undo stack, cached meshes and session revision are not persisted. File version and session revision are separate concepts. There is no compressed/binary `.ark` container in this version.
+Camera, UI layout, cached meshes and session revision are not persisted. Iteration nodes, branches and undo/redo targets are persisted in document version 27. The physical container version is independent of the document and session versions.
 
 ## `.arkops`
 

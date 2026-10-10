@@ -1,4 +1,5 @@
 #include "ark/agent.hpp"
+#include "ark/iteration_history.hpp"
 #include <atomic>
 #include <random>
 #include <sstream>
@@ -8,7 +9,7 @@ namespace ark {
 namespace {
 using V=arkjson::Value;
 std::string fingerprint(const Document& doc){
-    std::string value=documentToJson(doc);
+    std::string value=documentToJson(doc,true,false);
     for(double x:{doc.tessOpt.tol,doc.tessOpt.maxEdge,doc.tessOpt.minAngleDeg,(double)doc.tessOpt.maxLevels})value+='|'+V::makeNum(x).dump();
     return value;
 }
@@ -16,11 +17,37 @@ void checkRevision(const V& args,u64 revision){const auto* expected=args.find("e
 size_t candidateBytes(const Document& doc){size_t bytes=documentToJson(doc).size();for(const auto& item:doc.referenceFrameCache){bytes+=item.second.brep.size()+item.second.topology.size();for(const auto& frame:item.second.frames)bytes+=frame.first.size()+frame.second.dump().size()*4;}for(const auto& b:doc.evalBodies){bytes+=2*b.nativeData.dump().size();if(b.baked)bytes+=2*(b.baked->pos.size()+b.baked->nrm.size()+b.baked->idx.size())*sizeof(float);bytes+=b.faces.size()*512;}return bytes;}
 std::string candidateId(){static std::atomic<unsigned long long> next{0};static const auto salt=[](){std::random_device random;return ((unsigned long long)random()<<32)^random();}();std::ostringstream out;out<<std::hex<<salt<<'-'<<++next;return out.str();}
 }
+arkjson::Value AgentSession::call(const std::string& tool,const V& args){
+    V clean=args;if(clean.t==V::Obj)clean.obj.erase(std::remove_if(clean.obj.begin(),clean.obj.end(),[](const auto& field){return field.first=="actor"||field.first=="motivation";}),clean.obj.end());
+    const bool mutating=tool=="doc_apply"||tool=="doc_new"||tool=="doc_load"||tool=="doc_undo"||tool=="doc_redo"||tool=="iteration_restore"||tool=="import_step"||tool=="import_sheet_step"||tool=="import_mesh"||tool=="usage_record"||tool=="library_insert";
+    struct Depth {size_t& value;Depth(size_t& n):value(n){++value;}~Depth(){--value;}} depth(callDepth_);
+    if(!mutating||callDepth_>1||suppressHistory_)return dispatch(tool,clean);
+    Document before=document;const auto oldRevision=revision;const auto oldUndo=undo_,oldRedo=redo_;const auto oldPrepared=prepared_;
+    auto rollback=[&](){document=std::move(before);revision=oldRevision;undo_=oldUndo;redo_=oldRedo;prepared_=oldPrepared;cache_.clear();cacheRevision_=~u64(0);motionRevision_=~u64(0);};
+    auto envelope=[](V value,bool error){V response=V::makeObj(),content=V::makeArr(),item=V::makeObj();item.set("type",V::makeStr("text"));item.set("text",V::makeStr(value.dump()));content.arr.push_back(item);response.set("content",content);response.set("structuredContent",value);response.set("isError",V::makeBool(error));return response;};
+    try{
+        // Validate caller metadata before running geometry or touching usage.
+        (void)iterationActor(args);if(auto reason=args.find("motivation");reason&&(reason->t!=V::Str||reason->str.size()>4096))throw std::runtime_error("motivation must be text of at most 4096 bytes");
+        std::string target;if(tool=="iteration_restore"){if(auto id=args.find("id");id&&id->t==V::Str)target=id->str;}
+        V response=dispatch(tool,clean);if(auto error=response.find("isError");error&&error->b){rollback();return response;}
+        if((tool=="doc_undo"||tool=="doc_redo")&&before.iterationHistory.t==V::Obj)target=iterationUndoTarget(before,tool=="doc_redo");
+        // Opening/New are project boundaries. They never copy another project's
+        // geometry into the loaded/new document's persistent journal.
+        const bool boundary=tool=="doc_new"||tool=="doc_load"||((tool=="doc_undo"||tool=="doc_redo")&&before.iterationHistory.t==V::Null&&document.iterationHistory.t==V::Obj);
+        const bool changed=iterationAuthoring(before).dump()!=iterationAuthoring(document).dump();
+        if(!boundary&&(changed||!target.empty()))iterationAppend(document,before,tool,args,target);
+        if(!boundary&&(changed||!target.empty())&&document.iterationHistory.t==V::Obj){std::string error;if(!iterationValidate(document,document.iterationHistory,error))throw std::runtime_error(error);}
+        const std::string persisted=documentToJson(document);if(persisted.size()>maxDocumentBytes)throw std::runtime_error("Iteration history capacity exceeds the total 4 MiB document limit; edit rejected atomically");
+        V persistedRoot;if(!arkjson::parse(persisted,persistedRoot))throw std::runtime_error("Iteration history nesting capacity exceeds the JSON depth limit of 64; edit rejected atomically");
+        if(document.iterationHistory.t==V::Obj&&!boundary&&(changed||!target.empty())){V receipt=*response.find("structuredContent");receipt.set("iteration_id",*document.iterationHistory.find("head_id"));receipt.set("head_id",*document.iterationHistory.find("head_id"));response=envelope(receipt,false);}
+        return response;
+    }catch(const std::exception& exception){rollback();V error=V::makeObj();error.set("error",V::makeStr(exception.what()));error.set("error_code",V::makeStr(std::string(exception.what()).find("capacity")!=std::string::npos?"HISTORY_CAPACITY_EXCEEDED":"HISTORY_FAILED"));error.set("tool",V::makeStr(tool));error.set("revision",V::makeNum((double)revision));error.set("document_unchanged",V::makeBool(true));return envelope(error,true);}
+}
 arkjson::Value AgentSession::preparePreview(const V& args){
     checkRevision(args,revision);if(args.find("candidate_id"))throw std::runtime_error("Preview requires commands, not another candidate");
     const auto now=std::chrono::steady_clock::now();
     prepared_.erase(std::remove_if(prepared_.begin(),prepared_.end(),[&](const Prepared& p){return p.expires<=now||p.revision!=revision;}),prepared_.end());
-    AgentSession candidate;candidate.document=document;candidate.document.evaluatingBodies=nullptr;candidate.revision=revision;
+    AgentSession candidate;candidate.document=document;candidate.document.iterationHistory=V{};candidate.suppressIterationHistory();candidate.document.evaluatingBodies=nullptr;candidate.revision=revision;
     const auto response=candidate.call("doc_apply",args);V out=V::makeObj();bool valid=!response.find("isError")->b;
     out.set("valid",V::makeBool(valid));out.set("revision",V::makeNum((double)revision));out.set("candidate_result",*response.find("structuredContent"));out.set("apply",args);
     if(!valid)return out;
@@ -40,7 +67,7 @@ arkjson::Value AgentSession::commitPrepared(const V& args){
     auto found=std::find_if(prepared_.begin(),prepared_.end(),[&](const Prepared& p){return p.id==id->str;});
     if(found==prepared_.end())throw std::runtime_error("Prepared candidate missing, evicted or already applied");
     if(found->expires<=std::chrono::steady_clock::now()||found->revision!=revision||found->baseline!=fingerprint(document)){prepared_.erase(found);throw std::runtime_error("Prepared candidate expired or document changed; preview again");}
-    auto next=found->document;V out=found->result;remember();document=std::move(*next);++revision;prepared_.clear();
+    auto next=found->document;V out=found->result;remember();document=*next;++revision;prepared_.clear();
     V evaluation=V::makeObj();for(const char* key:{"recompute_ms","features_evaluated","features_reused","parallel_features","peak_parallel_features"})if(const auto* value=out.find(key))evaluation.set(key,*value);out.set("prepared_evaluation",evaluation);
     out.set("features_evaluated",V::makeNum(0));out.set("features_reused",V::makeNum(document.evalBodies.size()));out.set("parallel_features",V::makeNum(0));out.set("peak_parallel_features",V::makeNum(0));
     out.set("revision",V::makeNum((double)revision));out.set("geometry_recomputed",V::makeBool(false));out.set("applied_prepared",V::makeBool(true));out.set("recompute_ms",V::makeNum(0));return out;

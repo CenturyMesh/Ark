@@ -43,7 +43,7 @@ enum class FeatureType : i32 {
     Sweep, ExtrudeSurface, RevolveSurface, OffsetSurface, Sew,
     MeshBody, MeshWeld, MeshSmooth, MeshDecimate, MeshOffset, MeshFill,
     Curve, IntersectionCurve, Bridge,
-    ConstructionFrame, PCB, CableRoute, Suspension,
+    ConstructionFrame, PCB, CableRoute, Suspension, SurfaceEdit,
 };
 
 // Appearance describes the display surface. Density is grams per cubic
@@ -259,6 +259,7 @@ public:
     std::vector<Feature> features;
     std::vector<Material> materials;
     UsageLedger usage;
+    arkjson::Value iterationHistory; // immutable authoring journal; no evaluated geometry or usage snapshots
     u64 addFeature(Feature f);                    // returns id
     Feature* find(u64 id);
     const Feature* find(u64 id) const;

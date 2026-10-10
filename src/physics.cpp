@@ -20,6 +20,97 @@ Vec3 multiply(const Tensor& a,Vec3 v){return {a[0]*v.x+a[1]*v.y+a[2]*v.z,a[3]*v.
 V accepted(V response){if(need(response,"isError").b)throw std::runtime_error(need(need(response,"structuredContent"),"error").str);return need(response,"structuredContent");}
 u64 featureId(const Document& d,const V& value){u64 id=0;int count=0;for(const auto& f:d.features)if((value.t==V::Str&&f.name==value.str)||(value.t==V::Num&&value.num==(double)f.id)){id=f.id;++count;}if(count!=1)throw std::runtime_error("Physics feature must resolve uniquely");return id;}
 struct Part {double kg=0;Vec3 center;Tensor inertia{};u64 feature=0,node=0;int copy=0;std::string name;};
+void finiteResult(const V& value){
+    if(value.t==V::Num&&!std::isfinite(value.num))throw std::runtime_error("Physics calculation exceeded finite range");
+    for(const auto& item:value.arr)finiteResult(item);
+    for(const auto& item:value.obj)finiteResult(item.second);
+}
+double positive(const V& input,const char* field){
+    double value=number(need(input,field));
+    if(value<=0)throw std::runtime_error(std::string(field)+" must be positive");
+    return value;
+}
+void testFields(const V& input,std::initializer_list<const char*> fields){
+    if(input.t!=V::Obj)throw std::runtime_error("Analytical test must be an object");
+    for(const auto& field:input.obj)if(std::none_of(fields.begin(),fields.end(),[&](const char* known){return field.first==known;}))
+        throw std::runtime_error("Unsupported analytical test field: "+field.first);
+}
+const Material& testMaterial(const Document& document,const V& input){
+    const auto& name=need(input,"material");
+    if(name.t!=V::Str)throw std::runtime_error("Test material must be a name");
+    for(const auto& material:document.materials)if(material.name==name.str)return material;
+    throw std::runtime_error("Test material not found");
+}
+// These are caller-declared analytical load cases, independent of aggregate mass.
+// They intentionally do not infer section properties or supports from a mesh.
+void structuralTests(const Document& document,const V& args,V& result){
+    if(const auto* beam=args.find("beam_test")){
+        testFields(*beam,{"material","support","length_mm","second_moment_mm4","extreme_fiber_mm","force_N","buckling"});
+        const auto& material=testMaterial(document,*beam);
+        const double modulus=positive(material.physical,"young_modulus_Pa")/1e6; // N/mm2
+        const double length=positive(*beam,"length_mm"),inertia=positive(*beam,"second_moment_mm4");
+        const double fiber=positive(*beam,"extreme_fiber_mm"),load=number(need(*beam,"force_N"));
+        const auto& support=need(*beam,"support");
+        if(support.t!=V::Str||(support.str!="cantilever_tip"&&support.str!="simply_supported_center"))
+            throw std::runtime_error("beam_test support must be cantilever_tip or simply_supported_center");
+        const bool cantilever=support.str=="cantilever_tip";
+        const double moment=std::abs(load)*length/(cantilever?1:4);
+        const double stress=moment*fiber/inertia*1e6;
+        V report=V::makeObj();report.set("inputs",*beam);
+        report.set("young_modulus_Pa",V::makeNum(modulus*1e6));
+        report.set("max_moment_Nm",V::makeNum(moment/1000));
+        report.set("max_bending_stress_Pa",V::makeNum(stress));
+        report.set("max_deflection_mm",V::makeNum(std::abs(load)*length*length*length/((cantilever?3:48)*modulus*inertia)));
+        report.set("section_modulus_mm3",V::makeNum(inertia/fiber));
+        report.set("model",V::makeStr("Euler_Bernoulli_prismatic_linear_elastic_point_load"));
+        report.set("geometry_linked",V::makeBool(false));report.set("design_qualified",V::makeBool(false));
+        report.set("limits",V::makeStr("Declared section/support; small deflection; no shear deformation, fatigue, contact, local buckling or frame load redistribution. Yield ratio is not a design safety factor."));
+        if(material.physical.find("yield_strength_Pa")){
+            const double strength=positive(material.physical,"yield_strength_Pa");
+            report.set("yield_ratio",stress>0?V::makeNum(strength/stress):V{});
+            report.set("below_declared_yield",V::makeBool(stress<=strength));
+        }
+        if(const auto* buckling=beam->find("buckling")){
+            testFields(*buckling,{"minimum_second_moment_mm4","effective_length_factor","area_mm2","compression_N"});
+            // The weak-axis inertia and axial support factor are independent of
+            // the transverse beam case and therefore must be supplied explicitly.
+            const double weakInertia=positive(*buckling,"minimum_second_moment_mm4");
+            const double factor=positive(*buckling,"effective_length_factor");
+            const double area=positive(*buckling,"area_mm2");
+            const double compression=number(need(*buckling,"compression_N"));
+            if(compression<0)throw std::runtime_error("compression_N must be nonnegative");
+            const double effectiveLength=factor*length;
+            const double critical=K_PI*K_PI*modulus*weakInertia/(effectiveLength*effectiveLength);
+            V check=V::makeObj();check.set("euler_critical_load_N",V::makeNum(critical));
+            check.set("slenderness",V::makeNum(effectiveLength/std::sqrt(weakInertia/area)));
+            check.set("elastic_critical_stress_Pa",V::makeNum(critical/area*1e6));
+            check.set("load_ratio",compression>0?V::makeNum(critical/compression):V{});
+            check.set("model",V::makeStr("ideal_straight_prismatic_Euler_column_no_imperfections_or_combined_load_interaction"));
+            if(material.physical.find("yield_strength_Pa"))check.set("critical_stress_below_declared_yield",V::makeBool(critical/area*1e6<positive(material.physical,"yield_strength_Pa")));
+            report.set("buckling",std::move(check));
+        }
+        result.set("beam_test",std::move(report));
+    }
+    if(const auto* weld=args.find("weld_test")){
+        testFields(*weld,{"effective_throat_mm","effective_length_mm","force_N","allowable_stress_Pa"});
+        const double throat=positive(*weld,"effective_throat_mm"),length=positive(*weld,"effective_length_mm");
+        const double force=number(need(*weld,"force_N")),area=throat*length;
+        const double stress=std::abs(force)/area*1e6;
+        V report=V::makeObj();report.set("inputs",*weld);
+        report.set("effective_area_mm2",V::makeNum(area));report.set("average_stress_Pa",V::makeNum(stress));
+        report.set("model",V::makeStr("uniform_direct_load_on_declared_effective_throat"));
+        report.set("geometry_linked",V::makeBool(false));report.set("design_qualified",V::makeBool(false));
+        report.set("limits",V::makeStr("No eccentric moment, weld-group load distribution, fatigue, heat-affected zone, defects or code qualification. Allowable stress must be supplied for the actual load direction and process."));
+        if(weld->find("allowable_stress_Pa")){
+            const double allowable=positive(*weld,"allowable_stress_Pa");
+            report.set("utilization",V::makeNum(stress/allowable));
+            report.set("required_effective_throat_mm",V::makeNum(std::abs(force)/(allowable/1e6*length)));
+            report.set("within_declared_allowable",V::makeBool(stress<=allowable));
+        }
+        result.set("weld_test",std::move(report));
+    }
+    finiteResult(result);
+}
 double density(const Document& d,const Feature& feature){
     if(auto p=feature.p.find("density");p!=feature.p.end()){bool ok=false;double value=evalExpr(p->second,d.buildEnv(),&ok);if(!ok||value<=0||value>100)throw std::runtime_error("Invalid density override for "+feature.name);return value;}
     for(const auto& m:d.materials)if(m.name==feature.material&&m.densityGcm3>0)return m.densityGcm3;
@@ -45,6 +136,7 @@ V inspectPhysics(AgentSession& session,const V& args){
     const auto& doc=session.document;const Vec3 gravity=args.find("gravity")?vector(*args.find("gravity")):Vec3{0,0,-9.80665};if(gravity.len()>100)throw std::runtime_error("Gravity magnitude exceeds 100 m/s2");
     const Vec3 reference=args.find("reference_point_mm")?vector(*args.find("reference_point_mm")):Vec3{};
     V result=V::makeObj(),missing=V::makeArr(),rows=V::makeArr();std::vector<Part> parts;std::map<u64,Part> definitions;
+    structuralTests(doc,args,result);
     auto get=[&](u64 id)->Part{auto it=definitions.find(id);if(it==definitions.end())it=definitions.emplace(id,localPart(session,id)).first;return it->second;};
     const bool byFeature=args.find("id")!=nullptr;result.set("scope",V::makeStr(byFeature?"feature_local":doc.assembly.empty()?"unconsumed_features":"visible_assembly_instances"));
     if(byFeature){try{parts.push_back(get(featureId(doc,*args.find("id"))));}catch(const std::exception& e){missing.arr.push_back(V::makeStr(e.what()));}}

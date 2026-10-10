@@ -53,7 +53,7 @@ int main(){
     CHECK(documentFromJson(R"({"version":12,"features":[]})",invalid,&error));
     CHECK(documentFromJson(R"({"version":13,"features":[]})",invalid,&error));
     CHECK(documentFromJson(R"({"version":14,"features":[]})",invalid,&error));
-    CHECK(!documentFromJson(R"({"version":25,"features":[]})",invalid,&error));
+    CHECK(!documentFromJson(R"({"version":28,"features":[]})",invalid,&error));
     CHECK(error.find("unsupported document version")!=std::string::npos);
     CHECK(!documentFromJson(R"({"version":13,"features":[],"sketches":[{"name":"Plate","entities":[{"kind":"wire","name":"Outline","dof":[0,0,10,0,10,10,0,10,0,0],"segments":[{"kind":"line"},{"kind":"line"},{"kind":"line"},{"kind":"line"}]}],"corners":[{"entity":"Outline","corner":1,"kind":"fillet","size":"2"}]}]})",invalid,&error));
     CHECK(error.find("sketch fillets, sketch chamfers, or mates across assembly groups require document version 14")!=std::string::npos);
@@ -98,7 +98,7 @@ int main(){
         CHECK(!failed(plane.call("doc_apply",json(R"({"commands":[{"op":"feature.add","type":"box","name":"Base","p":{"dx":10,"dy":10,"dz":10}},{"op":"canvas.set","name":"Photo","path":"missing-photo.png","plane":"XY","width":80,"height":40,"opacity":0.4}]})"))));
         auto mesh=plane.call("mesh_inspect",json(R"({"id":1})"));
         CHECK(!failed(mesh)&&std::fabs(std::fabs(mesh.find("structuredContent")->find("signed_volume_mm3")->num)-1000)<1e-6);
-        V saved;CHECK(arkjson::parse(documentToJson(plane.document),saved));
+        V saved;CHECK(arkjson::parse(documentToJson(plane.document,true,false),saved));
         CHECK(saved.find("version")->num==13&&saved.find("canvases")&&saved.find("canvases")->arr.size()==1);
         const auto& canvas=saved.find("canvases")->arr[0];
         CHECK(canvas.find("path")->str=="missing-photo.png"&&canvas.find("plane")->str=="XY");
@@ -111,7 +111,7 @@ int main(){
         CHECK(!failed(box.call("doc_apply",json(R"({"commands":[{"op":"feature.add","type":"box","name":"Base","p":{"dx":10,"dy":10,"dz":10}}]})"))));
         CHECK(!failed(box.call("doc_apply",json(R"({"commands":[{"op":"feature.edit","id":"Base","suppressed":true}]})"))));
         CHECK(box.document.features.size()==1&&box.document.evalBodies.empty()&&box.document.lastResults.size()==1&&box.document.lastResults[0].ok&&box.document.lastResults[0].error.empty());
-        V saved;CHECK(arkjson::parse(documentToJson(box.document),saved));
+        V saved;CHECK(arkjson::parse(documentToJson(box.document,true,false),saved));
         CHECK(saved.find("version")->num==13&&saved.find("features")->arr[0].find("suppressed")&&saved.find("features")->arr[0].find("suppressed")->b);
         auto design=box.call("doc_info",json(R"({"detail":"design"})"));
         CHECK(!failed(design)&&design.find("structuredContent")->find("features")->arr[0].find("suppressed")->b);
@@ -122,7 +122,7 @@ int main(){
         CHECK(!failed(box.call("doc_apply",json(R"({"commands":[{"op":"feature.edit","id":"Base","suppressed":false}]})"))));
         auto restored=box.call("mesh_inspect",json(R"({"id":1})"));
         CHECK(!failed(restored)&&std::fabs(std::fabs(restored.find("structuredContent")->find("signed_volume_mm3")->num)-1000)<1e-6);
-        CHECK(arkjson::parse(documentToJson(box.document),saved)&&saved.find("version")->num==1);
+        CHECK(arkjson::parse(documentToJson(box.document,true,false),saved)&&saved.find("version")->num==1);
     }
     {
         AgentSession sketch;
@@ -132,7 +132,7 @@ int main(){
         const auto* payload=copy.find("structuredContent");
         CHECK(std::fabs(payload->find("length_mm")->num-10)<1e-6);
         CHECK(std::fabs(payload->find("bbox_mm")->arr[1].num-2)<1e-6&&std::fabs(payload->find("bbox_mm")->arr[3].num-2)<1e-6);
-        V saved;CHECK(arkjson::parse(documentToJson(sketch.document),saved)&&saved.find("version")->num==13);
+        V saved;CHECK(arkjson::parse(documentToJson(sketch.document,true,false),saved)&&saved.find("version")->num==13);
         std::string kept=documentToJson(sketch.document);
         auto patched=sketch.call("doc_apply",json(R"({"commands":[{"op":"sketch.patch","name":"S","entity":"Copy","anchor":0,"y":"4"}]})"));
         CHECK(failed(patched)&&patched.find("structuredContent")->find("error")->str.find("Project and offset entities are driven")!=std::string::npos);
@@ -168,7 +168,7 @@ int main(){
         CHECK(std::fabs(measured.find("structuredContent")->find("length_mm")->num-fillet)<0.05);
         const auto& box=measured.find("structuredContent")->find("bbox_mm")->arr;
         CHECK(std::fabs(box[0].num)<0.02&&std::fabs(box[1].num)<0.02&&std::fabs(box[2].num-10)<0.02&&std::fabs(box[3].num-10)<0.02);
-        V saved;CHECK(arkjson::parse(documentToJson(plate.document),saved)&&saved.find("version")->num==14);
+        V saved;CHECK(arkjson::parse(documentToJson(plate.document,true,false),saved)&&saved.find("version")->num==14);
         CHECK(!failed(plate.call("doc_apply",json(R"({"commands":[{"op":"param.set","name":"r","expr":"4"}]})"))));
         measured=plate.call("sketch_inspect",json(R"({"name":"Plate","entity":"Outline"})"));
         CHECK(std::fabs(measured.find("structuredContent")->find("length_mm")->num-(40-32+8*3.141592653589793))<0.05);
@@ -195,10 +195,10 @@ int main(){
     {
         AgentSession dense;
         CHECK(!failed(dense.call("doc_apply",json(R"({"commands":[{"op":"feature.add","type":"box","name":"Cube","p":{"dx":10,"dy":10,"dz":10,"density":-1}}]})"))));
-        V saved;CHECK(arkjson::parse(documentToJson(dense.document),saved)&&saved.find("version")->num==1);
+        V saved;CHECK(arkjson::parse(documentToJson(dense.document,true,false),saved)&&saved.find("version")->num==1);
         auto inspect=dense.call("native_inspect",json(R"({"id":1})"));
         CHECK(failed(inspect)&&inspect.find("structuredContent")->find("error")->str.find("Density must be a positive finite number of grams per cubic centimetre")!=std::string::npos);
     }
-    CHECK(AgentSession::tools().arr.size()==64);
+    CHECK(AgentSession::tools().arr.size()==66);
     std::cout<<checks<<" checks / "<<failures<<" failures\n";return failures?1:0;
 }

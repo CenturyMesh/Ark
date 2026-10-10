@@ -15,7 +15,12 @@ public:
     static arkjson::Value tools(bool detailed=false);
     arkjson::Value preparePreview(const arkjson::Value& args);
     arkjson::Value commitPrepared(const arkjson::Value& args);
+    // Scratch geometry probes opt out; only committed document edits are journaled.
+    void suppressIterationHistory(bool value=true){suppressHistory_=value;}
 private:
+    arkjson::Value dispatch(const std::string& tool,const arkjson::Value& args);
+    bool suppressHistory_=false;
+    size_t callDepth_=0;
     struct Prepared {
         std::string id, baseline;
         u64 revision=0;
@@ -26,7 +31,7 @@ private:
     };
     std::vector<Prepared> prepared_;
     std::vector<std::string> undo_,redo_;
-    void remember();
+    void remember(bool projectBoundary=false);
     struct Cache { Mesh mesh; MeshReport report; std::unique_ptr<MeshBVH> bvh; };
     std::unordered_map<u64,Cache> cache_;
     u64 cacheRevision_=~u64(0);

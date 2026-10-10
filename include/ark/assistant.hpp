@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <stdexcept>
 
 namespace ark {
 enum class AssistantAuthMode { ApiKey, ChatGptPlan };
@@ -38,6 +39,15 @@ struct AssistantResult {
     std::string text;
     unsigned rounds=0;
     AssistantUsage usage;
+};
+// A bounded turn yielded after real tool receipts. Hosts may continue the
+// retained, protocol-complete history; this is not a request to replay writes.
+struct AssistantRoundLimit : std::runtime_error {
+    unsigned rounds;
+    explicit AssistantRoundLimit(unsigned value):std::runtime_error("Assistant reached its round limit; previously applied changes remain in the document. Continue from retained receipts after inspecting the current revision."),rounds(value){}
+};
+struct AssistantTransportError : std::runtime_error {
+    explicit AssistantTransportError(const std::string& detail):std::runtime_error(detail){}
 };
 using AssistantTool=std::function<arkjson::Value(const std::string&,const arkjson::Value&)>;
 using AssistantEvents=std::function<void(const AssistantEvent&)>;
