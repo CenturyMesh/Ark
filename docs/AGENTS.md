@@ -1,5 +1,28 @@
 # ARK agent protocol
 
+The reusable component library adds nine `library_*` tools, bringing discovery
+to **64 document/library tools**. Call `agent_onboard{topic:"components"}` for
+typed metadata and reuse rules. Search the local catalog first, acquire and
+validate original STEP bytes, keep declared metadata separate from native
+geometry evidence, then insert using `expected_revision`. See
+[library architecture and acquisition](COMPONENT_LIBRARY_ARCHITECTURE.md).
+Inserted exact source components use document version 24.
+
+Studio now supports concurrent engineering, design and review roles with
+per-role model/reasoning configuration, live tool/message events and user
+steering. See [team architecture](AGENT_TEAM_ARCHITECTURE.md) and
+[Studio team controls](MULTI_AGENT_STUDIO.md). The team adds `team_send` and
+`team_context` to its own connector schema; they are not standalone MCP tools.
+Only designated writers may mutate/export, and every team document mutation
+requires the observed `expected_revision`. Existing direct history/load/import
+calls also honor this field when supplied.
+
+`manufacturing_inspect{id?}` is the 55th document tool. It distinguishes
+injection molding, FDM additive manufacturing and machining, separating
+caller-declared process settings from exact geometry evidence and unresolved
+checks. These process settings use document version 23. Production qualification
+is never inferred from a role's completion or a filled checklist.
+
 Mechanical motion uses persistent chain, gear, shaft, rack/pinion and harmonic
 cam coupling mates plus read-only `assembly_motion`. Call
 `agent_onboard{topic:"motion"}` and see [mechanical motion](MECHANICAL_MOTION.md).
@@ -17,7 +40,7 @@ units and model limits. A prepared apply refreshes Studio display buffers while
 reusing the already evaluated document. Elastic material properties save as
 version 20; ordinary density/appearance documents retain their earlier version.
 
-The current API has **54 tools**. `agent_onboard{topic:"automation"}` introduces
+The current API has **64 tools**. `agent_onboard{topic:"automation"}` introduces
 `geometry_query`, `math_eval`, `query_batch`, `doc_preview`, `placement_plan`,
 `pattern_plan` and `design_solve`. Linked curve and hole patterns save as
 document version 19. See [agent automation](AGENT_AUTOMATION.md) for contracts,

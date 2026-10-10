@@ -548,6 +548,10 @@ V exactPrimitive(const Feature& feature, const ExprEnv& env, Document& document,
 
 V solidFeatureRequest(const Feature& feature, const ExprEnv& env,
                      Document& document, std::vector<Body>& preceding) {
+    if(featureOperation(feature)=="imported_brep"){
+        std::string error;if(!validateImportedComponentDefinition(feature,error))throw std::runtime_error(error);
+        V request=V::makeObj();request.set("op",V::makeStr("imported_brep"));request.set("package",required(feature.nativeSpec,"package"));return request;
+    }
     V model = numericNative(feature.nativeSpec, env);
     if (model.t != V::Obj) model = V::makeObj();
     for (const auto& [key, expression] : feature.p) {
@@ -871,6 +875,28 @@ bool isNativeFeature(FeatureType type) {
     return isNativeSurfaceFeature(type) || isCurveFeature(type) || type == FeatureType::SheetMetal ||
            type == FeatureType::SourceSheet || type == FeatureType::NativeSolid ||
            type == FeatureType::ConstructionFrame || type == FeatureType::PCB || type == FeatureType::CableRoute;
+}
+
+bool validateImportedComponentDefinition(const Feature& feature,std::string& error){
+    const auto* op=feature.nativeSpec.find("op");
+    if(featureOperation(feature)!="imported_brep"&&(!op||op->t!=V::Str||op->str!="imported_brep"))return true;
+    auto fail=[&](const char* message){error=message;return false;};
+    if(feature.type!=FeatureType::NativeSolid||featureOperation(feature)!="imported_brep"||!feature.inputs.empty())return fail("Imported component must be an immutable native_solid without feature inputs");
+    for(const auto& item:feature.p)if(item.first!="density")return fail("Imported component geometry has no editable dimensions; use downstream exact operations or a rigid placement");
+    const auto* package=feature.nativeSpec.find("package");if(!package||package->t!=V::Obj)return fail("Imported component requires a source-owned package");
+    const V* format=package->find("format"),*version=package->find("version"),*body=package->find("body_index"),*count=package->find("source_solid_count");
+    if(!format||format->t!=V::Str||format->str!="ark-source-component"||!version||version->t!=V::Num||version->num!=1)return fail("Unsupported imported component package");
+    if(!body||body->t!=V::Num||!std::isfinite(body->num)||(body->num<0&&body->num!=-2)||body->num!=std::floor(body->num)||!count||count->t!=V::Num||count->num<1||count->num!=std::floor(count->num)||count->num>10000||body->num>=count->num)return fail("Invalid imported component body selection");
+    for(const char* key:{"source_path","source_sha256","source_step_base64","brep_base64","brep_sha256"}){const auto* value=package->find(key);if(!value||value->t!=V::Str||value->str.empty()||value->str.size()>96u*1024u*1024u)return fail("Imported component source/hash/B-rep field missing or oversized");}
+    for(const char* key:{"source_sha256","brep_sha256"}){const auto& value=package->find(key)->str;if(value.size()!=64||value.find_first_not_of("0123456789abcdef")!=std::string::npos)return fail("Imported component needs SHA-256 digests");}
+    if(const auto* component=feature.nativeSpec.find("component_id")){const std::string expected="sha256:"+package->find("source_sha256")->str+":body:"+(body->num==-2?std::string("all"):std::to_string((int)body->num));if(component->t!=V::Str||component->str!=expected)return fail("Imported component identity does not match its original STEP and selected bodies");}
+    return true;
+}
+void validateNativeComponentCustody(const Document& document){
+    for(const auto& feature:document.features)if(!feature.suppressed&&feature.type==FeatureType::NativeSolid&&featureOperation(feature)=="imported_brep"){
+        std::string error;if(!validateImportedComponentDefinition(feature,error))throw std::runtime_error(error);
+        V request=V::makeObj();request.set("operation",V::makeStr("component_custody"));request.set("package",*feature.nativeSpec.find("package"));nativeWorkerRequest(request);
+    }
 }
 
 Body evaluateNativeFeature(const Feature& feature, const ExprEnv& env,

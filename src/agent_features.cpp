@@ -4,6 +4,8 @@
 #include "ark/references.hpp"
 #include "ark/sketch.hpp"
 #include "ark/physics.hpp"
+#include "ark/manufacturing.hpp"
+#include "ark/component_library_tools.hpp"
 #include <chrono>
 #include <set>
 #include <map>
@@ -53,7 +55,7 @@ V math(const V& args){
     }
     r.set("units",V::makeStr(op=="angle"?"deg":op=="normalize"?"dimensionless":op=="dot"||op=="cross"?"caller_coordinates_squared":"caller_coordinates"));return r;
 }
-const std::set<std::string> queryTools{"physics_inspect","materials_inspect","doc_info","eval_expr","plane_inspect","sketch_inspect","sketch_diagnose","reference_inspect","native_inspect","assembly_info","assembly_motion","geometry_query","math_eval","mesh_inspect","frame_inspect","electronics_inspect","sheet_inspect","suspension_inspect","tube_inspect"};
+const std::set<std::string> queryTools{"manufacturing_inspect","physics_inspect","materials_inspect","doc_info","eval_expr","plane_inspect","sketch_inspect","sketch_diagnose","reference_inspect","native_inspect","assembly_info","assembly_motion","geometry_query","math_eval","mesh_inspect","frame_inspect","electronics_inspect","sheet_inspect","suspension_inspect","tube_inspect"};
 V queryValue(AgentSession& s,const V& spec){
     const auto tool=text(spec,"tool");if(!queryTools.count(tool))throw std::runtime_error("Condition requires an allowed read-only query");
     V data=payload(s.call(tool,required(spec,"args")));const std::string path=text(spec,"path");const V* value=&data;size_t start=0;
@@ -152,7 +154,8 @@ V solve(AgentSession& s,const V& args){
 }
 }
 bool callAgentFeature(AgentSession& s,const std::string& tool,const V& args,V& out){
-    if(tool=="physics_inspect")out=inspectPhysics(s,args);
+    if(tool=="manufacturing_inspect")out=inspectManufacturing(s.document,args,s.revision);
+    else if(tool=="physics_inspect")out=inspectPhysics(s,args);
     else if(tool=="materials_inspect")out=inspectMaterials(s.document);
     else if(tool=="geometry_query")out=geometry(s,args);
     else if(tool=="math_eval")out=math(args);
@@ -205,8 +208,10 @@ V evaluatePostconditions(AgentSession& s,const V& checks){
     report.set("passed",V::makeBool(all));report.set("checks",rows);return report;
 }
 void appendAgentFeatureTools(V& tools){
+    appendComponentLibraryTools(tools);
     struct Definition{const char* name;const char* description;const char* schema;};
     const Definition defs[]={
+      {"manufacturing_inspect","Read declared fabrication route/process inputs, current exact B-rep evidence, route-specific design requirements, blockers and unknown checks. id selects a feature by id/name; otherwise declared and output definitions. injection_molding requires wall/draft/pull/parting/undercut/gate/ejection/shrinkage intent; additive supports explicitly planned FDM orientation/nozzle/layers/shells/infill/support/filament; machined requires stock/cutter/access/setup/tolerance. Solid-equivalent filament arithmetic is not slicer consumption. No geometry mutation or manufacturing certification.",R"({"type":"object","properties":{"id":{"type":["integer","string"]}},"additionalProperties":false})"},
       {"physics_inspect","Exact rigid-body mass, uniform-gravity CG, world inertia and instantaneous force/torque/energy balance. id selects one feature; otherwise visible assembly instances or unconsumed solids. Missing density rejects aggregate mass. SI loads and kinematics; positions mm. Optional support polygon checks gravity-only projection, not contact dynamics. axial_test uses declared material modulus and uniform cross-section; no FEA or buckling.",R"({"type":"object","properties":{"id":{"type":["integer","string"]},"gravity":{"type":"array","minItems":3,"maxItems":3,"items":{"type":"number"}},"reference_point_mm":{"type":"array"},"loads":{"type":"array","maxItems":64,"items":{"type":"object"}},"velocity_m_s":{"type":"array"},"angular_velocity_rad_s":{"type":"array"},"acceleration_m_s2":{"type":"array"},"angular_acceleration_rad_s2":{"type":"array"},"support":{"type":"object","properties":{"origin_mm":{"type":"array"},"normal":{"type":"array"},"polygon_mm":{"type":"array"}},"required":["origin_mm","normal","polygon_mm"]},"axial_test":{"type":"object","properties":{"material":{"type":"string"},"force_N":{"type":"number"},"area_mm2":{"type":"number"},"length_mm":{"type":"number"}},"required":["material","force_N","area_mm2","length_mm"]}}})"},
       {"materials_inspect","List document materials, declared density in kg/m3 and g/cm3, SI elastic properties and assigned features. material.set accepts density (g/cm3) OR density_kg_m3, plus optional physical:{young_modulus_Pa,poisson_ratio,yield_strength_Pa,thermal_expansion_per_K}. Zero density means unspecified. Values are caller declarations, not a certified material database.",R"({"type":"object"})"},
       {"geometry_query","Batch 1..128 exact queries on one feature id/name. actions: references (filter kind, surface, oriented normal, unoriented axis, radius_mm, near+within_mm, coaxial_origin, adjacent_to; unique rejects ambiguity), properties (reference?, density_g_cm3?), curve (reference,count?,margin_mm?,fraction?), surface (reference,u?,v?), section (origin,normal), continuity (a,b,fraction_a?,fraction_b?), point_distance(point). Coordinates are feature-local mm; curve fractions use arc length. Results have index and ok; failed queries never invent values.",R"({"type":"object","properties":{"id":{"type":["integer","string"]},"queries":{"type":"array","minItems":1,"maxItems":128,"items":{"type":"object","properties":{"action":{"type":"string","enum":["references","properties","curve","surface","section","continuity","point_distance"]}},"required":["action"]}}},"required":["id","queries"]})"},

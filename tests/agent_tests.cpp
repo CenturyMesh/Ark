@@ -30,6 +30,12 @@ int main(){
     CHECK(failed(s.call("doc_apply",json(R"({"expected_revision":0,"commands":[{"op":"param.set","name":"width","expr":"40"}]})"))));
     CHECK(!failed(s.call("doc_apply",json(R"({"commands":[{"op":"param.set","name":"width","expr":"40"}]})"))));
     CHECK(s.document.getParam("width")==40);
+    for(const auto* mutation:{"doc_undo","doc_redo","doc_load","import_step","import_sheet_step"}){
+        const auto frozen=documentToJson(s.document);const auto frozenRevision=s.revision;
+        auto stale=s.call(mutation,json(R"({"expected_revision":0,"path":"missing.ark"})"));
+        CHECK(failed(stale)&&stale.dump().find("Revision conflict")!=std::string::npos);
+        CHECK(s.revision==frozenRevision&&documentToJson(s.document)==frozen);
+    }
     CHECK(!failed(s.call("doc_undo",V::makeObj()))&&s.document.getParam("width")==20);
     CHECK(!failed(s.call("doc_redo",V::makeObj()))&&s.document.getParam("width")==40);
     CHECK(!failed(s.call("doc_apply",json(R"({"commands":[{"op":"feature.add","type":"transform","inputs":[1],"p":{"tx":10}}]})"))));
@@ -47,7 +53,7 @@ int main(){
     CHECK(documentFromJson(R"({"version":12,"features":[]})",invalid,&error));
     CHECK(documentFromJson(R"({"version":13,"features":[]})",invalid,&error));
     CHECK(documentFromJson(R"({"version":14,"features":[]})",invalid,&error));
-    CHECK(!documentFromJson(R"({"version":23,"features":[]})",invalid,&error));
+    CHECK(!documentFromJson(R"({"version":25,"features":[]})",invalid,&error));
     CHECK(error.find("unsupported document version")!=std::string::npos);
     CHECK(!documentFromJson(R"({"version":13,"features":[],"sketches":[{"name":"Plate","entities":[{"kind":"wire","name":"Outline","dof":[0,0,10,0,10,10,0,10,0,0],"segments":[{"kind":"line"},{"kind":"line"},{"kind":"line"},{"kind":"line"}]}],"corners":[{"entity":"Outline","corner":1,"kind":"fillet","size":"2"}]}]})",invalid,&error));
     CHECK(error.find("sketch fillets, sketch chamfers, or mates across assembly groups require document version 14")!=std::string::npos);
@@ -193,6 +199,6 @@ int main(){
         auto inspect=dense.call("native_inspect",json(R"({"id":1})"));
         CHECK(failed(inspect)&&inspect.find("structuredContent")->find("error")->str.find("Density must be a positive finite number of grams per cubic centimetre")!=std::string::npos);
     }
-    CHECK(AgentSession::tools().arr.size()==54);
+    CHECK(AgentSession::tools().arr.size()==64);
     std::cout<<checks<<" checks / "<<failures<<" failures\n";return failures?1:0;
 }

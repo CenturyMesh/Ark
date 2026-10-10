@@ -1,5 +1,6 @@
 // ARK-Point :: model.cpp — expressions, parameters, document bookkeeping.
 #include "ark/model.hpp"
+#include "ark/manufacturing.hpp"
 #include <cctype>
 #include <cmath>
 
@@ -47,15 +48,16 @@ ManufacturingLineage featureManufacturingLineage(const Document& document,const 
 bool validateManufacturingRoutes(const Document& document,std::string& error){
     for(const auto& feature:document.features){
         const auto& declared=feature.manufacturingRoute;
+        if(!validateManufacturingProcess(feature,error))return false;
         if(declared.empty()||declared=="unspecified"||declared=="purchased")continue;
-        if(declared!="sheet_metal"&&declared!="frame"&&declared!="machined"){
+        if(!isManufacturingRoute(declared)){
             error="Feature #"+std::to_string(feature.id)+": unknown manufacturing route";return false;
         }
         const auto lineage=featureManufacturingLineage(document,feature);
         if((declared=="sheet_metal"&&lineage.geometryRoute!="sheet_metal")||
            (declared=="frame"&&lineage.geometryRoute!="frame")||
-           (declared=="machined"&&lineage.geometryRoute!="solid")){
-            error="Feature #"+std::to_string(feature.id)+": declared manufacturing route '"+declared+"' does not match structured geometry lineage '"+lineage.geometryRoute+"'. Use sheet.create/sheet edits for sheet metal, construction_frame for frames, exact solid operations for machining, or purchased for a supplier envelope.";
+           ((declared=="machined"||declared=="injection_molding"||declared=="additive")&&lineage.geometryRoute!="solid")){
+            error="Feature #"+std::to_string(feature.id)+": declared manufacturing route '"+declared+"' does not match structured geometry lineage '"+lineage.geometryRoute+"'. Use sheet.create/sheet edits for sheet metal, construction_frame for frames, exact solid operations for machining/injection/additive, or purchased for a supplier envelope.";
             return false;
         }
     }

@@ -1,5 +1,17 @@
 # ARK Studio icon atlases
 
+The 2026-10-10 audit added `ark-detail-atlas-v1.png`, generated with built-in
+ImageGen using the first atlas only as a style reference. Its 4 x 4 cells are:
+circle, edit sketch, normal view, sheet base; hem, emboss, hole pattern, drive
+relation; motion, select body, select face, select edge; select curve,
+parameters, import, redo. The complete prompt is in
+`docs/design/ark-detail-atlas.prompt.txt`. The bitmap is preserved unchanged.
+Rectangle/circle, spline/edit, flange/hem, cut/emboss/pattern and mate/motion
+now have distinct symbols. New document, export, graphics, loads, live MCP,
+model tools, tools and More use dedicated code glyphs instead of unrelated
+atlas cells. Same-operation aliases (for example creating/editing an emboss)
+intentionally share a symbol. CMake copies all three atlases.
+
 Generated on 2026-10-09 using the built-in ImageGen tool. These are original
 RGBA raster assets, copied unchanged into this repository. Both actual outputs
 are 1254 x 1254 pixels with transparent corners; the tool selected the output

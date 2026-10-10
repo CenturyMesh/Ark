@@ -90,6 +90,7 @@ struct Feature {
     bool suppressed = false;                          // history and parameters stay; recompute skips the body
     std::string material;                             // named document material, empty uses default
     std::string manufacturingRoute;                   // explicit intent; empty is undeclared
+    arkjson::Value manufacturingProcess;              // bounded caller-declared route-specific process inputs
     arkjson::Value appearance;                        // validated partial appearance override
 
     std::string get(const char* k, const char* dflt="") const {

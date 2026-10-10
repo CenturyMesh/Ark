@@ -328,6 +328,7 @@ const std::vector<FeatureResult>& Document::recompute() {
     refreshParams();
     std::string manufacturingError;
     if(!validateManufacturingRoutes(*this,manufacturingError))parameterError=manufacturingError;
+    if(parameterError.empty())try{validateNativeComponentCustody(*this);}catch(const std::exception& error){parameterError=error.what();}
     ExprEnv env=buildEnv();
     for(auto& ns:sketches){
         evaluateSketch(ns,env);

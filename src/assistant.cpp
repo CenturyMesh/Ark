@@ -210,6 +210,7 @@ V assistantRequest(const AssistantConfig& config,const V& conversation,const V& 
         "You are the modeling assistant inside ARK CAD. Use the provided ARK tools to inspect and edit the active document. "
         "Call agent_onboard first, and request its relevant topic before modeling. Obtain current revision before writes and use expected_revision in doc_apply. "
         "For mechanical parts, onboard manufacturing, choose each component route explicitly with feature manufacturing intent, and use sheet authoring for bent skins, construction_frame for frames and exact solid operations for machining. Purchased parts may use clearly declared envelopes. "
+        "Before recreating standard mechanical or electrical components, onboard components and search the local library by exact known specification. Inspect matching stable IDs, preserve source and license provenance, and reuse library_insert rather than inventing standard geometry. Do not guess missing material, pitch or electrical ratings. "
         "Inspect doc_info detail design operations, dependencies, sketches and sheet_origin before judging a solid's provenance. A native transform of a sheet is a placement; edit its originating sheet to preserve flat-pattern intent. Define functional datums, primary dimensions, material and thickness before adding detail. "
         "Use atomic batches, named parameters and construction planes. Preserve existing work unless the user requests replacement. "
         "Use compact inspections; avoid doc_get on source tubes and mesh_get unless necessary. Geometry is in millimetres. "
@@ -218,18 +219,32 @@ V assistantRequest(const AssistantConfig& config,const V& conversation,const V& 
         "You have no shell or credential tools. Do not ask for secrets in chat. Respond in the user's language."));
     require(request.dump().size()<=config.maxConversationBytes,"Assistant conversation is full; start a new conversation.");return request;
 }
-AssistantResult runAssistant(const AssistantConfig& config,const V& input,const V& tools,const AssistantTool& callTool,const AssistantEvents& events,const std::atomic_bool* cancel,const AssistantTransport& transport){
+AssistantResult runAssistant(const AssistantConfig& config,const V& input,const V& tools,const AssistantTool& callTool,const AssistantEvents& events,const std::atomic_bool* cancel,const AssistantTransport& transport,const AssistantInbox& inbox,const AssistantHistory& history){
     validateAssistantConfig(config);cancelled(cancel);
     auto functions=assistantFunctionTools(tools);std::set<std::string> allowed;
     for(auto& fn:functions.arr)allowed.insert(field(fn,"name"));
     AssistantResult result;
     if(input.t==V::Str){require(!input.str.empty(),"Enter an assistant message first.");V message=V::makeObj();message.set("role",V::makeStr("user"));message.set("content",input);result.conversation.arr.push_back(std::move(message));}
     else {require(input.t==V::Arr&&!input.arr.empty(),"Assistant input must be a prompt or nonempty history array.");result.conversation=input;}
+    std::size_t conversationBytes=result.conversation.dump().size();
+    require(conversationBytes<=config.maxConversationBytes,"Assistant conversation exceeds its configured size limit.");
+    auto appendHistory=[&](V item){auto bytes=item.dump().size()+(result.conversation.arr.empty()?0:1);
+        require(bytes<=config.maxConversationBytes-conversationBytes,"Assistant conversation is full; prior tool calls may have changed the document. Inspect it before starting a new conversation.");
+        conversationBytes+=bytes;result.conversation.arr.push_back(std::move(item));
+    };
     std::set<std::string> callIds;
     for(auto& item:result.conversation.arr)if(field(item,"type")=="function_call")callIds.insert(field(item,"call_id"));
     bool earlierToolCalls=false;
     for(unsigned round=0;round<config.maxRounds;++round){
         cancelled(cancel);emit(events,AssistantEvent::Status,"Thinking...");
+        if(inbox){V messages=inbox();require(messages.isNull()||messages.t==V::Arr,"Assistant inbox must return an input array.");
+            if(messages.t==V::Arr)for(auto& message:messages.arr){
+                auto role=field(message,"role");auto content=message.find("content");
+                require((role=="user"||role=="developer")&&content&&content->t==V::Str,"Assistant inbox messages require user/developer role and text content.");
+                appendHistory(std::move(message));
+            }
+        }
+        if(history)history(result.conversation);
         V request=assistantRequest(config,result.conversation,tools);
         V response=transport?transport(config,request,cancel):nativeTransport(config,request,cancel);
         ++result.rounds;
@@ -268,7 +283,7 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
         require(calls.size()<=32,"Too many assistant tool calls in one response.");
         bool roundHasText=false;
         for(auto& item:output->arr){
-            result.conversation.arr.push_back(item);
+            appendHistory(item);
             if(field(item,"type")=="message"){
                 auto content=item.find("content");if(!content||content->t!=V::Arr)continue;
                 for(auto& part:content->arr){
@@ -277,6 +292,7 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
                 }
             }
         }
+        if(history)history(result.conversation);
         if(calls.empty()){
             if(!roundHasText)throw std::runtime_error(earlierToolCalls?
                 "Assistant completed without a final visible reply. Earlier ARK tool calls may have changed the document; inspect it before retrying.":
@@ -293,7 +309,10 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
             cancelled(cancel);std::string data=toolResult.dump();
             if(data.size()>config.maxResponseBytes)data=errorResult("Tool result exceeded the assistant size limit. Use a compact inspection. The operation may already have completed.").dump();
             V reply=V::makeObj();reply.set("type",V::makeStr("function_call_output"));reply.set("call_id",V::makeStr(field(call,"call_id")));reply.set("output",V::makeStr(data));
-            result.conversation.arr.push_back(std::move(reply));emit(events,AssistantEvent::ToolEnd,name);
+            if(reply.dump().size()+1>config.maxConversationBytes-conversationBytes)
+                reply.set("output",V::makeStr(errorResult("Tool receipt omitted because the conversation size limit was reached. The operation may have completed; inspect the current document and revision using compact tools before another write.").dump()));
+            appendHistory(std::move(reply));emit(events,AssistantEvent::ToolEnd,name);
+            if(history)history(result.conversation);
         }
     }
     throw std::runtime_error("Assistant reached its round limit; previously applied changes remain in the document. Inspect the result before continuing.");

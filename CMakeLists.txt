@@ -1,9 +1,18 @@
 cmake_minimum_required(VERSION 3.20)
-project(Ark VERSION 0.9.0 LANGUAGES CXX)
+project(Ark VERSION 0.9.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Threads REQUIRED)
+add_library(ark-sqlite STATIC third_party/sqlite/sqlite3.c)
+target_include_directories(ark-sqlite PUBLIC third_party/sqlite)
+target_compile_definitions(ark-sqlite PRIVATE SQLITE_ENABLE_FTS5=1 SQLITE_THREADSAFE=1 SQLITE_OMIT_LOAD_EXTENSION=1 SQLITE_DQS=0 SQLITE_DEFAULT_FOREIGN_KEYS=1)
+target_link_libraries(ark-sqlite PUBLIC Threads::Threads)
 add_library(ark STATIC
+  src/agent_team.cpp
+  src/manufacturing.cpp
+  src/component_sources.cpp
+  src/component_library.cpp
+  src/component_library_tools.cpp
   src/agent_transactions.cpp
   src/physics.cpp
   src/core.cpp src/nurbs.cpp src/brep.cpp src/mesh.cpp src/csg.cpp
@@ -11,7 +20,7 @@ add_library(ark STATIC
   src/source_tube.cpp src/notch.cpp src/notch_preview.cpp src/step_export.cpp src/tube.cpp src/assembly.cpp src/assembly_io.cpp src/compute.cpp src/api.cpp src/mesh_query.cpp src/mesh_analysis.cpp src/mesh_model.cpp src/agent.cpp src/agent_features.cpp src/kernels_scalar.cpp)
 target_include_directories(ark PUBLIC include)
 target_include_directories(ark SYSTEM PRIVATE third_party)
-target_link_libraries(ark PUBLIC Threads::Threads)
+target_link_libraries(ark PUBLIC Threads::Threads PRIVATE ark-sqlite)
 if(MSVC)
   target_compile_options(ark PRIVATE /W4 /fp:precise)
 else()
@@ -33,6 +42,7 @@ if(WIN32)
     COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:ark-studio>/assets/ui"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/assets/ui/ark-tool-atlas-v1.png" "$<TARGET_FILE_DIR:ark-studio>/assets/ui/ark-tool-atlas-v1.png"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/assets/ui/ark-wordmark.png" "$<TARGET_FILE_DIR:ark-studio>/assets/ui/ark-wordmark.png"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/assets/ui/ark-detail-atlas-v1.png" "$<TARGET_FILE_DIR:ark-studio>/assets/ui/ark-detail-atlas-v1.png"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/assets/ui/ark-domain-atlas-v1.png" "$<TARGET_FILE_DIR:ark-studio>/assets/ui/ark-domain-atlas-v1.png")
 endif()
 if(MINGW)
@@ -157,6 +167,39 @@ add_executable(ark-assistant-tests tests/assistant_tests.cpp)
 target_link_libraries(ark-assistant-tests PRIVATE ark)
 add_test(NAME assistant-connector COMMAND ark-assistant-tests)
 set_tests_properties(assistant-connector PROPERTIES TIMEOUT 30)
+
+add_executable(ark-agent-team-tests tests/agent_team_tests.cpp)
+target_link_libraries(ark-agent-team-tests PRIVATE ark)
+add_test(NAME agent-team COMMAND ark-agent-team-tests)
+set_tests_properties(agent-team PROPERTIES TIMEOUT 45)
+
+add_executable(ark-component-sources-tests tests/component_sources_tests.cpp)
+target_link_libraries(ark-component-sources-tests PRIVATE ark)
+add_test(NAME component-sources COMMAND ark-component-sources-tests)
+set_tests_properties(component-sources PROPERTIES TIMEOUT 15)
+
+add_executable(ark-component-library-tests tests/component_library_tests.cpp)
+target_link_libraries(ark-component-library-tests PRIVATE ark ark-sqlite)
+add_test(NAME component-library COMMAND ark-component-library-tests)
+set_tests_properties(component-library PROPERTIES TIMEOUT 90)
+
+add_executable(ark-component-library-tools-tests tests/component_library_tools_tests.cpp)
+target_link_libraries(ark-component-library-tools-tests PRIVATE ark)
+add_test(NAME component-library-tools COMMAND ark-component-library-tools-tests)
+set_tests_properties(component-library-tools PROPERTIES TIMEOUT 120)
+if(ARK_WITH_OCCT)
+  target_compile_definitions(ark-component-library-tools-tests PRIVATE ARK_COMPONENT_LIBRARY_NATIVE_TESTS=1)
+  add_dependencies(ark-component-library-tools-tests ark-occt-worker)
+endif()
+
+add_executable(ark-manufacturing-tests tests/manufacturing_tests.cpp)
+target_link_libraries(ark-manufacturing-tests PRIVATE ark)
+add_test(NAME manufacturing COMMAND ark-manufacturing-tests)
+set_tests_properties(manufacturing PROPERTIES TIMEOUT 120)
+if(ARK_WITH_OCCT)
+  target_compile_definitions(ark-manufacturing-tests PRIVATE ARK_MANUFACTURING_NATIVE_TESTS=1)
+  add_dependencies(ark-manufacturing-tests ark-occt-worker)
+endif()
 
 add_executable(ark-material-tests tests/material_tests.cpp)
 target_link_libraries(ark-material-tests PRIVATE ark)

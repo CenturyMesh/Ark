@@ -69,6 +69,8 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <atomic>
+#include <chrono>
 
 namespace ark::occt {
 namespace {
@@ -570,6 +572,29 @@ V finishBodies(const TopoDS_Shape& shape,const std::vector<Ref>& refs){
 
 V modelSolidNative(const V& request){
     const std::string op=word(request,"op");std::vector<Ref> refs;TopoDS_Shape result;bool many=false;
+    if(op=="imported_brep"){
+        const V& package=need(request,"package");componentCustodyNative(package);
+        const std::string sourceBytes=base64Decode(word(package,"source_step_base64"));
+        fs::path source=fs::u8path(word(package,"source_path")),temporary;
+        struct Cleanup {fs::path& path;~Cleanup(){if(!path.empty()){std::error_code error;fs::remove_all(path,error);}}} cleanup{temporary};
+        if(!fs::exists(source)){
+            static std::atomic<unsigned long long> serial{0};const auto stamp=std::chrono::steady_clock::now().time_since_epoch().count();
+            const auto candidate=fs::temp_directory_path()/("ark-component-source-"+std::to_string(stamp)+"-"+std::to_string(++serial));
+            if(!fs::create_directory(candidate))throw std::runtime_error("Cannot create private component source verification directory");temporary=candidate;source=temporary/"source.step";writeFile(source,sourceBytes);
+        }
+        const auto imported=readStep(source);const auto sourceSolids=shapes(imported,TopAbs_SOLID);
+        const int body=(int)scalar(package,"body_index");if(sourceSolids.empty()||sourceSolids.size()!=(size_t)scalar(package,"source_solid_count")||(body!=-2&&(body<0||(size_t)body>=sourceSolids.size())))throw std::runtime_error("Stored component STEP body selection changed");
+        const auto selected=body==-2?compound(sourceSolids):sourceSolids[(size_t)body];for(const auto& solid:shapes(selected,TopAbs_SOLID))shapeReport(solid,true);
+        const auto encoded=word(package,"brep_base64");const auto stored=readBrep(encoded);const auto storedSolids=shapes(stored,TopAbs_SOLID);
+        if(storedSolids.size()!=shapes(selected,TopAbs_SOLID).size())throw std::runtime_error("Stored component solid census does not match original STEP selection");
+        const double volume=properties(selected),tolerance=std::max(1e-6,std::abs(volume)*1e-8);const double difference=symmetricDifference(selected,stored);
+        const auto a=bounds(selected),b=bounds(stored);double boundError=0;for(size_t i=0;i<6;++i)boundError=std::max(boundError,std::abs(a[i]-b[i]));
+        if(difference>tolerance||boundError>1e-6)throw std::runtime_error("Stored component B-rep differs from its original STEP selection");
+        if(sha256(readFile(source))!=word(package,"source_sha256"))throw std::runtime_error("Component source changed during exact validation");
+        V out=shapeResult(stored,body!=-2);std::vector<Ref> sourceRefs;const auto faces=shapes(stored,TopAbs_FACE);
+        for(size_t i=0;i<std::min((size_t)256,faces.size());++i){sourceRefs.push_back({"source.face."+std::to_string(i),"face","bound",faces[i],{}, {}});BRepAdaptor_Surface surface(TopoDS::Face(faces[i]));if(surface.GetType()==GeomAbs_Cylinder||surface.GetType()==GeomAbs_Cone||surface.GetType()==GeomAbs_Torus)sourceRefs.push_back({"source.axis."+std::to_string(i),"axis","bound",faces[i],{}, {}});}
+        out.set("topology",topologyOf(stored,need(out,"brep_base64").str,sourceRefs));V report=*out.find("report");report.set("source_selection_verified",V::makeBool(true));report.set("source_sha256",need(package,"source_sha256"));report.set("body_index",need(package,"body_index"));report.set("source_solid_count",need(package,"source_solid_count"));report.set("source_symmetric_difference_mm3",V::makeNum(difference));report.set("source_bounds_error_mm",V::makeNum(boundError));report.set("standard_recognition_checked",V::makeBool(false));report.set("reference_inventory_complete",V::makeBool(faces.size()<=256));report.set("reference_scope",V::makeStr("source_indexed_faces_and_analytic_axes_first_256_faces"));out.set("report",report);out.set("package",package);return out;
+    }
     if(op=="box"){
         double x=positive(request,"width"),y=positive(request,"depth"),z=positive(request,"height");BRepPrimAPI_MakeBox box(x,y,z);result=box.Shape();
         add(refs,"x_min","face",box.BackFace());add(refs,"x_max","face",box.FrontFace());add(refs,"y_min","face",box.LeftFace());add(refs,"y_max","face",box.RightFace());add(refs,"z_min","face",box.BottomFace());add(refs,"z_max","face",box.TopFace());boxEdges(result,x,y,z,refs);
@@ -664,6 +689,26 @@ V modelSolidNative(const V& request){
         }else throw std::runtime_error("Unknown native solid operation");
     }
     return many?finishBodies(result,refs):finish(result,refs);
+}
+
+V componentCustodyNative(const V& package){
+    if(package.t!=V::Obj||word(package,"format")!="ark-source-component"||scalar(package,"version")!=1)throw std::runtime_error("Unsupported source component package");
+    const auto source=base64Decode(word(package,"source_step_base64"));if(source.empty()||source.size()>64u*1024u*1024u||sha256(source)!=word(package,"source_sha256"))throw std::runtime_error("Stored component source STEP hash mismatch");
+    const auto brep=base64Decode(word(package,"brep_base64"));if(brep.empty()||brep.size()>64u*1024u*1024u||sha256(brep)!=word(package,"brep_sha256"))throw std::runtime_error("Stored component B-rep hash mismatch");
+    const double requested=scalar(package,"body_index"),count=scalar(package,"source_solid_count");if(requested<-2||requested>10000||requested!=std::floor(requested)||count<1||count>10000||count!=std::floor(count)||(requested!=-2&&(requested<0||requested>=count)))throw std::runtime_error("Invalid component source body selection");const int body=(int)requested;
+    const auto path=fs::u8path(word(package,"source_path"));if(fs::exists(path)){if(fs::file_size(path)>64u*1024u*1024u||sha256(readFile(path))!=word(package,"source_sha256"))throw std::runtime_error("Component library source STEP changed; reimport before reuse or export");}
+    V out=V::makeObj();out.set("source_sha256",need(package,"source_sha256"));out.set("brep_sha256",need(package,"brep_sha256"));out.set("source_bytes_checked",V::makeBool(true));out.set("source_file_present",V::makeBool(fs::exists(path)));out.set("manufacturing_qualified",V::makeBool(false));return out;
+}
+
+V importComponentNative(const V& request){
+    const auto path=fs::absolute(fs::u8path(word(request,"path")));if(!fs::is_regular_file(path)||fs::file_size(path)>64u*1024u*1024u)throw std::runtime_error("Component STEP import requires a regular file within 64 MiB");
+    const auto bytes=readFile(path),sourceHash=sha256(bytes);const auto source=readStep(path);const auto solids=shapes(source,TopAbs_SOLID);if(solids.empty()||solids.size()>10000)throw std::runtime_error("Component STEP requires 1..10000 positive-volume solids");
+    int body=-1;if(request.find("body_index")){const double requested=scalar(request,"body_index");if(requested!=std::floor(requested)||requested<-2||requested>10000)throw std::runtime_error("Component body_index is invalid");body=(int)requested;}
+    if(body==-1){if(solids.size()!=1)throw std::runtime_error("Ambiguous multi-solid component STEP; select body_index or explicitly all_bodies");body=0;}
+    if(body!=-2&&(body<0||(size_t)body>=solids.size()))throw std::runtime_error("Component body_index outside source solid census");
+    const auto selected=body==-2?compound(solids):solids[(size_t)body];for(const auto& solid:shapes(selected,TopAbs_SOLID))shapeReport(solid,true);
+    const auto encoded=brepData(selected);V package=V::makeObj();package.set("format",V::makeStr("ark-source-component"));package.set("version",V::makeNum(1));auto pathBytes=path.u8string();package.set("source_path",V::makeStr(std::string(pathBytes.begin(),pathBytes.end())));package.set("source_sha256",V::makeStr(sourceHash));package.set("source_step_base64",V::makeStr(base64Encode(bytes)));package.set("source_solid_count",V::makeNum((double)solids.size()));package.set("body_index",V::makeNum(body));package.set("brep_base64",V::makeStr(encoded));package.set("brep_sha256",V::makeStr(sha256(base64Decode(encoded))));
+    V model=V::makeObj();model.set("op",V::makeStr("imported_brep"));model.set("package",package);auto result=modelSolidNative(model);result.set("source_sha256",V::makeStr(sourceHash));result.set("body_index",V::makeNum(body));return result;
 }
 
 V referenceFrameNative(const V& request){

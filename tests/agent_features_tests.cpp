@@ -13,7 +13,7 @@ V accepted(V r){if(r.find("isError")->b)throw std::runtime_error(r.find("structu
 V call(AgentSession& s,const char* name,const char* json){return accepted(s.call(name,parse(json)));}
 void close(double a,double b,double tol,const char* reason){check(std::abs(a-b)<=tol,reason);}
 void testMath(){AgentSession s;
-    auto tools=AgentSession::tools(),full=AgentSession::tools(true);check(tools.arr.size()==54,"tool discovery");check(tools.dump().size()<full.dump().size(),"compact default discovery");std::cout<<"tool_schema_bytes="<<tools.dump().size()<<" detailed_schema_bytes="<<full.dump().size()<<"\n";
+    auto tools=AgentSession::tools(),full=AgentSession::tools(true);check(tools.arr.size()==64,"tool discovery");check(tools.dump().size()<full.dump().size(),"compact default discovery");std::cout<<"tool_schema_bytes="<<tools.dump().size()<<" detailed_schema_bytes="<<full.dump().size()<<"\n";
     check(call(s,"agent_onboard",R"({"topic":"automation"})").find("command_reference"),"detailed contract remains discoverable");
     close(call(s,"math_eval",R"({"op":"convert","value":2,"from":"in","to":"mm"})").find("value")->num,50.8,1e-12,"inch conversion");
     close(call(s,"math_eval",R"({"op":"angle","a":[1,0,0],"b":[0,1,0]})").find("value")->num,90,1e-12,"vector angle");

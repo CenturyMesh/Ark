@@ -2,12 +2,29 @@
 
 **Parametric CAD for people and agents.**
 
+Every ribbon exposes **All tools**, a searchable category gallery backed by the
+same commands as the palette. **Library** searches and inserts reusable STEP
+components. The native SQLite/FTS5 catalog retains original source hashes,
+declared dimensions, provenance and exact geometry evidence; public KiCad source
+discovery and direct HTTPS acquisition feed the same validation path.
+[Library architecture](docs/COMPONENT_LIBRARY_ARCHITECTURE.md).
+
+Studio's **Assistant > Team** mode runs mechanical engineering, design and
+review conversations concurrently, with live activity cards, independent model
+and reasoning settings, shared proposals, user steering and provider token
+receipts. Document writes remain serialized and revision checked.
+[Team controls](docs/MULTI_AGENT_STUDIO.md) and
+[C++ module architecture](docs/AGENT_TEAM_ARCHITECTURE.md).
+`manufacturing_inspect` separates injection molding, FDM additive manufacturing
+and machining intent from verified geometry and unresolved process checks.
+[Manufacturing contract](docs/MANUFACTURING_INTENT.md).
+
 Studio has viewport/tree context menus, reversible **Spotlight** visibility,
 separate navigation and playback rows, and improved face/curved-edge picking.
 [Interaction guide](docs/STUDIO_INTERACTION.md).
 The engineering update adds verified edit conditions, reusable preview
 candidates, exact rigid-body mass/CG/inertia and load reports, and bounded
-multicore feature evaluation. A Physics ribbon and 32 generated icons accompany
+multicore feature evaluation. A Physics ribbon and 48 generated icons accompany
 the new tools. [Contracts and examples](docs/ENGINEERING_AGENT_V2.md).
 **Continue with ChatGPT** connects eligible subscriptions through the browser;
 API-key setup remains available under Advanced. [Assistant setup](docs/ASSISTANT.md).
@@ -136,7 +153,7 @@ connect the MCP process to Studio's displayed endpoint as described in
 ```
 
 Call `agent_onboard` first for the current revision, supported operations,
-and examples. ARK exposes 53 MCP tools, including the [agent geometry and numerical tools](docs/AGENT_AUTOMATION.md), `kernel_info`,
+and examples. ARK exposes 64 MCP tools, including the [agent geometry and numerical tools](docs/AGENT_AUTOMATION.md), `kernel_info`,
 `reference_inspect`, `sketch_diagnose`, `sheet_preview`, `import_sheet_step`, and `import_mesh`. `doc_apply` batches
 edits atomically and rejects stale revisions. The [agent protocol](docs/AGENTS.md)
 describes the command and validation contracts. The in-app assistant uses a

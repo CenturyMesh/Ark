@@ -41,6 +41,13 @@ struct AssistantResult {
 };
 using AssistantTool=std::function<arkjson::Value(const std::string&,const arkjson::Value&)>;
 using AssistantEvents=std::function<void(const AssistantEvent&)>;
+// Optional host messages consumed before each provider request. Return an array
+// of Responses input messages, or null/empty when there is no new input. The
+// messages become part of the retained conversation, including on continuation.
+using AssistantInbox=std::function<arkjson::Value()>;
+// Successful input/output/tool-history checkpoints, also retained by a host if
+// a later round fails. A checkpoint is conversation evidence, not run success.
+using AssistantHistory=std::function<void(const arkjson::Value&)>;
 // Injectable offline transport. Native transport reads credentials internally,
 // only after validation. Neither requests nor callbacks contain the API key.
 using AssistantTransport=std::function<arkjson::Value(const AssistantConfig&,const arkjson::Value&,const std::atomic_bool*)>;
@@ -56,5 +63,6 @@ arkjson::Value assistantRequest(const AssistantConfig& config,const arkjson::Val
 AssistantResult runAssistant(const AssistantConfig& config,const arkjson::Value& input,
     const arkjson::Value& mcpTools,const AssistantTool& callTool,
     const AssistantEvents& events={},const std::atomic_bool* cancel=nullptr,
-    const AssistantTransport& transport={});
+    const AssistantTransport& transport={},const AssistantInbox& inbox={},
+    const AssistantHistory& history={});
 }

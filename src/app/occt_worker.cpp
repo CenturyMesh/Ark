@@ -32,6 +32,8 @@ int runWorker(const fs::path& requestPath,const fs::path& resultPath){
         else if(op=="model")result=modelSurfaceNative(field("request"));
         else if(op=="model_sheet")result=modelSheetNative(field("request"));
         else if(op=="model_solid")result=modelSolidNative(field("request"));
+        else if(op=="import_component")result=importComponentNative(request);
+        else if(op=="component_custody")result=componentCustodyNative(field("package"));
         else if(op=="model_frame")result=frameModelNative(field("request"));
         else if(op=="model_electronics")result=modelElectronicsNative(field("request"));
         else if(op=="reference_frame")result=referenceFrameNative(field("request"));
@@ -77,7 +79,7 @@ int runWorker(const fs::path& requestPath,const fs::path& resultPath){
             bool solid=!shapes(shape,TopAbs_SOLID).empty();double error=solid?symmetricDifference(shape,returned):0,tol=std::max(1e-6,std::abs(properties(shape))*1e-8);
             auto before=bounds(shape),after=bounds(returned);double boundError=0;for(int i=0;i<6;++i)boundError=std::max(boundError,std::abs(before[i]-after[i]));double areaError=std::abs(properties(shape,'a')-properties(returned,'a'));
             if(error>tol||boundError>1e-6||areaError>std::max(1e-6,properties(shape,'a')*1e-8)||shapes(shape,TopAbs_SOLID).size()!=shapes(returned,TopAbs_SOLID).size())throw std::runtime_error("STEP roundtrip changed native geometry");
-            result=shapeReport(returned,solid);replaceFile(pending,path);result.set("step_roundtrip_difference_mm3",solid?V::makeNum(error):V{});result.set("step_roundtrip_area_error_mm2",V::makeNum(areaError));result.set("step_roundtrip_bounds_error_mm",V::makeNum(boundError));result.set("step_sha256",V::makeStr(sha256(readFile(path))));result.set("path",V::makeStr(text("path")));auto sidecar=path;sidecar.replace_extension(".validation.json");writeFile(sidecar,result.dump());
+            result=shapeReport(returned,false);for(const auto& body:shapes(returned,TopAbs_SOLID))shapeReport(body,true);replaceFile(pending,path);result.set("step_roundtrip_difference_mm3",solid?V::makeNum(error):V{});result.set("step_roundtrip_area_error_mm2",V::makeNum(areaError));result.set("step_roundtrip_bounds_error_mm",V::makeNum(boundError));result.set("step_sha256",V::makeStr(sha256(readFile(path))));result.set("path",V::makeStr(text("path")));auto sidecar=path;sidecar.replace_extension(".validation.json");writeFile(sidecar,result.dump());
         }else throw std::runtime_error("Unknown native worker operation");
         writeFile(resultPath,result.dump());return 0;
     }catch(const Standard_Failure& e){V error=V::makeObj();error.set("error",V::makeStr(e.GetMessageString()?e.GetMessageString():"OCCT failure"));writeFile(resultPath,error.dump());std::cerr<<error.dump()<<'\n';return 1;}
