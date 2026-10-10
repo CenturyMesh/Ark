@@ -1,5 +1,9 @@
 # ARK 0.9 operator and agent workflow
 
+Historical implementation boundary for the original 0.9 iteration. Counts and
+version statements below belong to that snapshot. The active forward roadmap is
+the [A–G matrix](ROADMAP.md), governed by the repository [AGENTS.md](../AGENTS.md).
+
 This page records the implementation boundary for the current native CAD
 iteration. Commands in Studio and MCP operate on the same document through
 `doc_apply`; the live Studio bridge shares the open document and revision.

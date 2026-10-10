@@ -3666,7 +3666,7 @@ static std::array<Vec3,3> compassDirections(){
     Mat4 view=cameraView();return {view.transformDir({1,0,0}),view.transformDir({0,1,0}),view.transformDir({0,0,1})};
 }
 static GLuint g_triadVao=0,g_triadVbo=0;
-static std::array<std::pair<int,int>,5> g_triadRanges{};
+static std::array<std::pair<int,int>,3> g_triadRanges{};
 static RECT g_compassBounds{};
 static void buildNavigationTriad(){
     if(g_triadVao)return;
@@ -3674,16 +3674,7 @@ static void buildNavigationTriad(){
     auto vertex=[&](Vec3 point,Vec3 normal){vertices.insert(vertices.end(),{(float)point.x,(float)point.y,(float)point.z,(float)normal.x,(float)normal.y,(float)normal.z});};
     auto triangle=[&](Vec3 a,Vec3 b,Vec3 c,Vec3 na,Vec3 nb,Vec3 nc){vertex(a,na);vertex(b,nb);vertex(c,nc);};
     auto range=[&](int part,int first){g_triadRanges[part]={first,(int)vertices.size()/6-first};};
-    auto spherePoint=[](double latitude,double longitude){return Vec3{std::cos(latitude)*std::cos(longitude),std::sin(latitude),std::cos(latitude)*std::sin(longitude)};};
     int first=0;
-    for(int latitude=0;latitude<12;++latitude)for(int longitude=0;longitude<24;++longitude){double a=-K_PI/2+K_PI*latitude/12,b=a+K_PI/12,u=2*K_PI*longitude/24,v=u+2*K_PI/24;
-        Vec3 p=spherePoint(a,u),q=spherePoint(a,v),r=spherePoint(b,v),s=spherePoint(b,u);triangle(p*.18,q*.18,r*.18,p,q,r);triangle(p*.18,r*.18,s*.18,p,r,s);}
-    range(0,first);first=(int)vertices.size()/6;
-    // Thin metal orbit rings have real depth, so arrows pass in front and behind them.
-    for(int ring=0;ring<1;++ring)for(int segment=0;segment<64;++segment)for(int tube=0;tube<6;++tube){
-        auto point=[&](int along,int around){double u=2*K_PI*along/64,v=2*K_PI*around/6;Vec3 normal{std::cos(u)*std::cos(v),std::sin(v),std::sin(u)*std::cos(v)};Vec3 p{(.83+.023*std::cos(v))*std::cos(u),.023*std::sin(v),(.83+.023*std::cos(v))*std::sin(u)};if(ring){std::swap(p.x,p.y);std::swap(normal.x,normal.y);}return std::make_pair(p,normal);};
-        auto a=point(segment,tube),b=point(segment+1,tube),c=point(segment+1,tube+1),d=point(segment,tube+1);triangle(a.first,b.first,c.first,a.second,b.second,c.second);triangle(a.first,c.first,d.first,a.second,c.second,d.second);}
-    range(1,first);
     static const Vec3 axes[]={{1,0,0},{0,1,0},{0,0,1}};
     for(int axis=0;axis<3;++axis){first=(int)vertices.size()/6;Vec3 direction=axes[axis],u=axes[(axis+1)%3],v=direction.cross(u);
         for(int segment=0;segment<24;++segment){double a=2*K_PI*segment/24,b=2*K_PI*(segment+1)/24;Vec3 na=u*std::cos(a)+v*std::sin(a),nb=u*std::cos(b)+v*std::sin(b);
@@ -3691,7 +3682,7 @@ static void buildNavigationTriad(){
             triangle(p,q,r,na,nb,nb);triangle(p,r,s,na,nb,na);triangle(direction*(-.24),q,p,-direction,-direction,-direction);
             Vec3 coneA=direction*.76+na*.18,coneB=direction*.76+nb*.18,tip=direction*1.10;
             Vec3 ca=(na*.34+direction*.18).normalized(),cb=(nb*.34+direction*.18).normalized();triangle(coneA,coneB,tip,ca,cb,(ca+cb).normalized());triangle(direction*.76,coneA,coneB,-direction,-direction,-direction);
-        }range(axis+2,first);
+        }range(axis,first);
     }
     glGenVertexArrays(1,&g_triadVao);glGenBuffers(1,&g_triadVbo);glBindVertexArray(g_triadVao);glBindBuffer(GL_ARRAY_BUFFER,g_triadVbo);glBufferData(GL_ARRAY_BUFFER,(GLsizeiptr)(vertices.size()*sizeof(float)),vertices.data(),GL_STATIC_DRAW);
     glEnableVertexAttribArray(0);glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,24,nullptr);glEnableVertexAttribArray(1);glVertexAttribPointer(1,3,GL_FLOAT,GL_FALSE,24,(void*)12);
@@ -3702,8 +3693,8 @@ static void paintNavigationTriad(int x,int y,int size){
     glEnable(GL_SCISSOR_TEST);glScissor(x,winH-y-size,size,size);glViewport(x,winH-y-size,size,size);glEnable(GL_DEPTH_TEST);glDepthMask(GL_TRUE);glClear(GL_DEPTH_BUFFER_BIT);glDisable(GL_SCISSOR_TEST);
     glUseProgram(pSolid);glUniformMatrix4fv(suVp,1,GL_FALSE,matrix);glUniformMatrix4fv(suModel,1,GL_FALSE,identity);glUniform3f(suEye,(float)eye.x,(float)eye.y,(float)eye.z);glUniform1f(suHard,0);glUniform1f(suOutline,0);glUniform1f(suSel,0);
     glUniform1f(glGetUniformLocation(pSolid,"satin"),1);glUniform1f(glGetUniformLocation(pSolid,"opacity"),1);glUniform1f(glGetUniformLocation(pSolid,"hasTexture"),0);glUniform1f(glGetUniformLocation(pSolid,"metallic"),.38f);glUniform1f(glGetUniformLocation(pSolid,"roughness"),.22f);
-    static const float colors[][3]={{.78f,.85f,.94f},{.31f,.43f,.57f},{1.f,.32f,.28f},{.28f,.92f,.51f},{.29f,.62f,1.f}};
-    glBindVertexArray(g_triadVao);for(int part=0;part<5;++part){glUniform3f(suColor,colors[part][0],colors[part][1],colors[part][2]);glDrawArrays(GL_TRIANGLES,g_triadRanges[part].first,g_triadRanges[part].second);}
+    static const float colors[][3]={{1.f,.32f,.28f},{.28f,.92f,.51f},{.29f,.62f,1.f}};
+    glBindVertexArray(g_triadVao);for(int part=0;part<3;++part){glUniform3f(suColor,colors[part][0],colors[part][1],colors[part][2]);glDrawArrays(GL_TRIANGLES,g_triadRanges[part].first,g_triadRanges[part].second);}
     glDisable(GL_DEPTH_TEST);glViewport(0,0,winW,winH);
 }
 static bool navigationUiFits(std::string& detail){
@@ -4526,19 +4517,13 @@ static void drawFrame(HDC hdc){
     }else g_cubeS=0;
     float compassSize=std::max(88.f,std::min(std::clamp(viewH*.17f,112.f,152.f),viewH-72.f)),compassX=(float)viewX+viewW-compassSize-14,compassY=(float)viewY+viewH-compassSize-14;
     g_compassBounds={(LONG)compassX-4,(LONG)compassY-4,(LONG)(compassX+compassSize)+4,(LONG)(compassY+compassSize)+4};
-    rect(compassX+3,compassY+4,compassSize,compassSize,compassSize*.5f,.015f,.025f,.035f,.40f,0,0,0,0,0);
-    rect(compassX,compassY,compassSize,compassSize,compassSize*.5f,.035f,.055f,.078f,.92f,.29f,.43f,.56f,.85f,1.5f);
-    rect(compassX+5,compassY+5,compassSize-10,compassSize-10,(compassSize-10)*.5f,.075f,.11f,.15f,.90f,.11f,.18f,.24f,.95f,1);
-    rect(compassX+13,compassY+8,compassSize-26,compassSize*.42f,compassSize*.21f,.20f,.29f,.37f,.20f,0,0,0,0,0);
     paintNavigationTriad((int)compassX,(int)compassY,(int)compassSize);glUseProgram(pUI);glUniform2f(uuVp,W,H);
     {auto directions=compassDirections();static const char* names[]={"X","Y","Z"};static const float colors[][3]={{1.f,.38f,.35f},{.40f,.91f,.60f},{.34f,.67f,1.f}};static const int views[]={182,23,180};
         std::array<int,3> order={0,1,2};std::sort(order.begin(),order.end(),[&](int a,int b){return directions[a].z>directions[b].z;});
-        float ox=compassX+compassSize*.5f,oy=compassY+compassSize*.5f,badgeRadius=compassSize<100?10.f:12.f,badgeScale=compassSize<100?.67f:.76f;std::array<Zone,3> axisZones{};
-        for(int axis:order){float cx=ox+(float)directions[axis].x*compassSize*.42f,cy=oy-(float)directions[axis].y*compassSize*.42f;bool hover=std::hypot(mp.x-cx,mp.y-cy)<badgeRadius;
-            rect(cx-badgeRadius,cy-badgeRadius,badgeRadius*2,badgeRadius*2,badgeRadius,.02f,.035f,.055f,.92f,colors[axis][0],colors[axis][1],colors[axis][2],hover?1.f:.85f,hover?2.2f:1.5f);
-            rect(cx-badgeRadius+2,cy-badgeRadius+2,badgeRadius*2-4,7,3.5f,colors[axis][0],colors[axis][1],colors[axis][2],hover?.31f:.16f,0,0,0,0,0);
-            textOut(names[axis],cx-textWidth(names[axis],badgeScale)*.5f,cy-fa.lineH*badgeScale*.5f,badgeScale,hover?1.f:colors[axis][0],hover?1.f:colors[axis][1],hover?1.f:colors[axis][2]);
-            axisZones[axis]={cx-badgeRadius,cy-badgeRadius,badgeRadius*2,badgeRadius*2,views[axis]};
+        float ox=compassX+compassSize*.5f,oy=compassY+compassSize*.5f,hitRadius=compassSize<100?10.f:12.f,labelScale=compassSize<100?.67f:.76f;std::array<Zone,3> axisZones{};
+        for(int axis:order){float cx=ox+(float)directions[axis].x*compassSize*.42f,cy=oy-(float)directions[axis].y*compassSize*.42f;bool hover=std::hypot(mp.x-cx,mp.y-cy)<hitRadius;
+            textOut(names[axis],cx-textWidth(names[axis],labelScale)*.5f,cy-fa.lineH*labelScale*.5f,labelScale,hover?1.f:colors[axis][0],hover?1.f:colors[axis][1],hover?1.f:colors[axis][2]);
+            axisZones[axis]={cx-hitRadius,cy-hitRadius,hitRadius*2,hitRadius*2,views[axis]};
         }
         for(auto it=order.rbegin();it!=order.rend();++it)g_zones.push_back(axisZones[*it]);
     }
@@ -4973,7 +4958,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     RegisterClassA(&wc);
     RECT rc{0,0,winW,winH};
     AdjustWindowRect(&rc,WS_OVERLAPPEDWINDOW,FALSE);
-    HWND hwnd=CreateWindowA("ARKVIEW",(std::string("ARK ")+app_version()).c_str(),WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,
+    HWND hwnd=CreateWindowA("ARKVIEW",(std::string("ARK ")+app_iteration_code()).c_str(),WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,
                             CW_USEDEFAULT,CW_USEDEFAULT,rc.right-rc.left,rc.bottom-rc.top,
                             nullptr,nullptr,hi,nullptr);
     if(!hwnd)return 389;

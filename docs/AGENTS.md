@@ -1,5 +1,17 @@
 # ARK agent protocol
 
+## Mandatory roadmap and iteration identity
+
+Follow the repository-wide [AGENTS.md](../AGENTS.md) and [A–G roadmap](ROADMAP.md).
+The public iteration code is three globally sequential digits plus an uppercase
+phase A–G, for example **001A**. The letter is the roadmap phase, **not the month**;
+the counter does not reset when a phase changes. `release.json` is authoritative.
+Keep the numeric runtime version for Windows/OTA and expose `iteration_code`
+alongside it in agent-facing metadata. Identify affected milestone IDs and record
+actual acceptance evidence before claiming them delivered. Roadmap proposals and
+the [commercial strategy](COMMERCIAL_STRATEGY.md) do not authorize a license change
+or publication of the private source repository.
+
 The reusable component library adds nine `library_*` tools, bringing discovery
 to **66 document/library/history tools**. Call `agent_onboard{topic:"components"}` for
 typed metadata and reuse rules. Search the local catalog first, acquire and

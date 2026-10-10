@@ -1,6 +1,7 @@
 #include "ark/agent.hpp"
 #include "ark/mesh_analysis.hpp"
 #include "ark/io.hpp"
+#include "ark/version.hpp"
 #include <iostream>
 #include <cstdio>
 using namespace ark;using V=arkjson::Value;
@@ -22,6 +23,9 @@ int main(){
     CHECK(chain.parameterError.empty()&&chain.getParam("p20")==22);
     chain.setParam("p0","p20");CHECK(!chain.parameterError.empty());
     AgentSession s;
+    auto releaseOnboard=s.call("agent_onboard",V::makeObj());CHECK(!failed(releaseOnboard));
+    auto* releaseIdentity=releaseOnboard.find("structuredContent");CHECK(releaseIdentity);
+    if(releaseIdentity){auto* version=releaseIdentity->find("version"),*code=releaseIdentity->find("iteration_code");CHECK(version&&version->asStr()==ARK_APP_VERSION);CHECK(code&&code->asStr()==ARK_ITERATION_CODE);}
     auto result=s.call("doc_apply",json(R"({"expected_revision":0,"commands":[{"op":"param.set","name":"width","expr":"20"},{"op":"feature.add","type":"box","name":"Base","p":{"dx":"width","dy":30,"dz":10}}]})"));
     CHECK(!failed(result));CHECK(s.revision==1&&s.document.features.size()==1);
     auto before=documentToJson(s.document);

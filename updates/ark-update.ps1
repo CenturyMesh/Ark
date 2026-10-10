@@ -7,6 +7,9 @@ $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'Ark.Update.psm1') -Force
 if (-not $InstallRoot) { $InstallRoot = Get-ArkInstallRoot }
 $version = Get-ArkRuntimeVersion $RuntimeDirectory
+$runtimeMetadata = Read-ArkJson (Join-Path $RuntimeDirectory 'app-version.json') 4KB
+$iterationCode = $runtimeMetadata.PSObject.Properties['iteration_code']
+$displayVersion = if ($iterationCode -and $iterationCode.Value -cmatch '^[0-9]{3}[A-G]$') { [string]$iterationCode.Value } else { $version }
 if ($Action -eq 'Check') { Get-ArkAvailableUpdate $version | ConvertTo-Json -Depth 8; exit 0 }
 if ($Action -eq 'Rollback') { Undo-ArkUpdate $InstallRoot; exit 0 }
 Add-Type -AssemblyName System.Windows.Forms
@@ -20,7 +23,7 @@ $form.FormBorderStyle = 'FixedDialog'
 $form.MaximizeBox = $false
 $form.Font = New-Object Drawing.Font('Segoe UI', 10)
 $heading = New-Object Windows.Forms.Label
-$heading.Text = "ARK $version  |  Windows x64  |  Stable"
+$heading.Text = "ARK $displayVersion  |  Windows x64  |  Stable"
 $heading.Location = New-Object Drawing.Point(24, 24)
 $heading.Size = New-Object Drawing.Size(565, 28)
 $heading.Font = New-Object Drawing.Font('Segoe UI', 12, [Drawing.FontStyle]::Bold)

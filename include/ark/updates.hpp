@@ -4,6 +4,8 @@
 namespace ark {
 // Product version supplied by CMake, independent of document schema versions.
 const char* app_version() noexcept;
+// Human iteration code (global sequence and roadmap phase), separate from semver.
+const char* app_iteration_code() noexcept;
 // At the start of WinMain, redirects an old shortcut to the verified selected runtime.
 // Returns true only after handing off; caller then exits before creating a document.
 bool redirect_to_updated_runtime() noexcept;

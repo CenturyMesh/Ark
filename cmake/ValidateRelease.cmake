@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.20)
+if(NOT DEFINED ARK_RELEASE_FILE)
+  message(FATAL_ERROR "ARK_RELEASE_FILE is required")
+endif()
+include("${CMAKE_CURRENT_LIST_DIR}/ArkRelease.cmake")
+ark_read_release_metadata("${ARK_RELEASE_FILE}")
+message(STATUS "ARK ${ARK_ITERATION_CODE} / runtime ${ARK_RELEASE_VERSION}")

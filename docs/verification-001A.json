@@ -1,0 +1,111 @@
+{
+  "iteration": {
+    "sequence": 1,
+    "phase": "A",
+    "code": "001A",
+    "version": "0.9.2",
+    "milestones": [
+      "A.01",
+      "B.01"
+    ]
+  },
+  "date": "2026-10-10",
+  "base_commit": "5e7153f2421b2e6d86fb0fbcbc515128e9158868",
+  "native_ctest": {
+    "passed": 53,
+    "failed": 0,
+    "log": "out/ark-001A-tests.log"
+  },
+  "release_identity_cases": 26,
+  "ui_tests": [
+    {
+      "test": "navigation-ui",
+      "exit": 0,
+      "seconds": 0.71,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-001A-navigation-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "assistant-ui",
+      "exit": 0,
+      "seconds": 15.78,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-001A-assistant-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "render-ui",
+      "exit": 0,
+      "seconds": 2.37,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-001A-render-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "context-ui",
+      "exit": 0,
+      "seconds": 1.97,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-001A-context-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    }
+  ],
+  "roadmap": {
+    "milestones": 35,
+    "groups": [
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "F",
+      "G"
+    ],
+    "per_group": 5,
+    "existing_vs_planned_separated": true,
+    "other_project_deployments_tested": false
+  },
+  "licensing": {
+    "decision": "Proposal only; no root license adopted or source published",
+    "requested_price": "EUR 200 perpetual",
+    "mapbox_ISC_notice_in_package": true,
+    "complete_IP_and_redistribution_audit": false
+  },
+  "package": {
+    "url": "https://github.com/CenturyMesh/Ark-Releases/releases/download/v0.9.2/ark-windows-x64-0.9.2.zip",
+    "name": "ark-windows-x64-0.9.2.zip",
+    "sha256": "9491ddb706f10e5fab5616e35118820ec7fe5f6c16de67d0096cad1865b14fc0",
+    "size": 29931451
+  },
+  "runtime_hashes": [
+    {
+      "file": "ark-studio.exe",
+      "sha256": "9D272CEBE3402965354C1D5B6B6E0979B3A4A7004BE58281A946A570B57FBB35"
+    },
+    {
+      "file": "ark-mcp.exe",
+      "sha256": "6C452A134147B6FFC8257C7ED3B2DF5FFAF99A36663BB1320B2CB7EF2E8D6AC1"
+    },
+    {
+      "file": "ark-cli.exe",
+      "sha256": "97E2F203377FFD39FA173E3BE84616D43E57550E6418AC9DB0F19EC1388A0423"
+    },
+    {
+      "file": "ark-occt-worker.exe",
+      "sha256": "1A9EB7C5F0541E002FF80400E0481D8B583A70264B402BD9003FCCAAE845051C"
+    }
+  ],
+  "native_self_update_activation": {
+    "code": "001A",
+    "title": "ARK 001A",
+    "id": 65664,
+    "path": "C:\\Users\\bruno\\AppData\\Local\\ARK\\app\\versions\\0.9.2\\ark-studio.exe",
+    "responding": true,
+    "input_idle": true,
+    "current": "0.9.2",
+    "previous": "0.9.1",
+    "pending": "",
+    "activating": "",
+    "prior_window_preserved": true
+  },
+  "live_OTA_channel_configured": false,
+  "paid_provider_calls_for_tests": false,
+  "hosted_CI_checked": false
+}

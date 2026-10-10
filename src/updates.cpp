@@ -15,6 +15,7 @@
 
 namespace ark {
 const char* app_version() noexcept { return ARK_APP_VERSION; }
+const char* app_iteration_code() noexcept { return ARK_ITERATION_CODE; }
 bool redirect_to_updated_runtime() noexcept {
 #ifdef _WIN32
     try {

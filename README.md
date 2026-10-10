@@ -1,6 +1,12 @@
-# ARK 0.9.1 — Agent-Ready Kernel
+# ARK 001A — Agent-Ready Kernel
 
 **Parametric CAD for people and agents.**
+
+Public iteration **001A** uses runtime **0.9.2**. The three digits are globally
+sequential; A?G identifies the roadmap phase, not the month. See the mandatory
+[development rules](AGENTS.md), the [35-milestone roadmap](docs/ROADMAP.md), and
+the [open-source / ?200 perpetual license analysis](docs/COMMERCIAL_STRATEGY.md).
+`release.json` is the single source of release identity.
 
 Every ribbon exposes **All tools**, a searchable category gallery backed by the
 same commands as the palette. **Library** searches and inserts reusable STEP
@@ -18,7 +24,7 @@ Document writes remain serialized and revision checked.
 [C++ module architecture](docs/AGENT_TEAM_ARCHITECTURE.md).
 
 The view cube stays at the upper left of the viewport; shaded Cartesian arrows
-and axis buttons sit at the lower right. **ARK updates** prepares verified packages
+and X/Y/Z letters sit at the lower right, without a background sphere or disc. **ARK updates** prepares verified packages
 for the next launch, with rollback. The future website delivery channel is not
 yet connected. [Self-update preparation](docs/UPDATES.md).
 

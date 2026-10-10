@@ -1,5 +1,6 @@
 #include "native_process.hpp"
 #include "ark/json.hpp"
+#include "ark/version.hpp"
 
 #include <cmath>
 #include <cstring>
@@ -87,6 +88,9 @@ int main(int argc, char** argv) {
         while (std::getline(stream, line)) if (!line.empty()) replies.push_back(parse(line));
         check(replies.size() == messages.size(), "Notifications must have no reply; malformed JSON must have one");
         check(field(field(replies[0], "result"), "protocolVersion").asStr() == "2025-11-25", "Protocol mismatch");
+        const Value& identity = field(field(replies[0], "result"), "serverInfo");
+        check(field(identity, "version").asStr() == ARK_APP_VERSION, "MCP runtime version differs from release metadata");
+        check(field(identity, "iteration_code").asStr() == ARK_ITERATION_CODE, "MCP iteration code differs from release metadata");
 
         const Value& tools = field(field(replies[1], "result"), "tools");
         check(tools.t == Value::Arr, "tools/list did not return an array");

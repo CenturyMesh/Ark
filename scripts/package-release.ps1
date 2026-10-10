@@ -40,6 +40,7 @@ try {
     Copy-Item -LiteralPath (Join-Path $repository 'docs/UPDATES.md') -Destination (Join-Path $staging 'UPDATES.md')
     $licenses = Join-Path $staging 'licenses'
     [IO.Directory]::CreateDirectory($licenses) | Out-Null
+    Copy-Item -LiteralPath (Join-Path $repository 'third_party/mapbox/LICENSE') -Destination (Join-Path $licenses 'mapbox-earcut-ISC.txt')
     foreach ($name in @('LICENSE', 'LICENSE.md', 'LICENSE.txt')) { if (Test-Path -LiteralPath (Join-Path $repository $name)) { Copy-Item -LiteralPath (Join-Path $repository $name) -Destination $licenses } }
     foreach ($file in @('LICENSE_LGPL_21.txt', 'OCCT_LGPL_EXCEPTION.txt')) {
         $hits = @(Get-ChildItem -Path (Join-Path $repository 'out/deps/occt/*') -Directory | ForEach-Object { $candidate=Join-Path $_.FullName $file; if (Test-Path -LiteralPath $candidate) { $candidate } })
