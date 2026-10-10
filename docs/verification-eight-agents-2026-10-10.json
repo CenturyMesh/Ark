@@ -1,0 +1,102 @@
+{
+  "date": "2026-10-10",
+  "base_commit": "3f5a06a22dcde3e119157fbaf37dfe56b39ee9f4",
+  "native_ctest": {
+    "passed": 50,
+    "total": 50,
+    "seconds": 39.45,
+    "log": "out/team-eight-native-tests.log"
+  },
+  "core_ctest": {
+    "passed": 35,
+    "total": 35,
+    "seconds": 20.72,
+    "log": "out/team-eight-core-tests.log"
+  },
+  "studio_self_tests": [
+    {
+      "test": "assistant-ui",
+      "exit": 0,
+      "seconds": 14.41
+    },
+    {
+      "test": "render-ui",
+      "exit": 0,
+      "seconds": 2.25
+    },
+    {
+      "test": "context-ui",
+      "exit": 0,
+      "seconds": 1.72
+    },
+    {
+      "test": "sketch-ui",
+      "exit": 0,
+      "seconds": 4.55
+    },
+    {
+      "test": "native-ui",
+      "exit": 0,
+      "seconds": 3.89
+    },
+    {
+      "test": "engineering-ui",
+      "exit": 0,
+      "seconds": 1.34
+    },
+    {
+      "test": "sheet-showcase-ui",
+      "exit": 0,
+      "seconds": 3.14
+    },
+    {
+      "test": "suspension-ui",
+      "exit": 0,
+      "seconds": 0.75
+    },
+    {
+      "test": "motion-ui",
+      "exit": 0,
+      "seconds": 20.55
+    },
+    {
+      "test": "dialogs",
+      "exit": 0,
+      "seconds": 1.84
+    },
+    {
+      "test": "ui",
+      "exit": 0,
+      "seconds": 0.56
+    }
+  ],
+  "live_pricing": {
+    "api_models": 36,
+    "credit_models": 9,
+    "passed": true
+  },
+  "verified_behaviors": [
+    "Eight simultaneously active injected model transports after orchestrator assignments",
+    "More than 32 provider rounds and more than eight role turns without Continue",
+    "Specialist completion automatically wakes the orchestrator",
+    "Static onboarding inserted once across retained turns, without document snapshots or numeric example revisions",
+    "Full trackball roll, pole crossings, stable orthonormal frames and middle-button input",
+    "Pricing result delivered while geometry worker owns the document",
+    "Eight role cards and Spotlight context menu"
+  ],
+  "limits": [
+    "Offline injected agent transports do not prove live provider design quality",
+    "Shared document writes remain serialized with revision checks",
+    "Cancellation, memory/context bounds and external provider limits remain active",
+    "Provider errors still require explicit recovery; incomplete responses never execute tools",
+    "Provider prompt-cache hits are not guaranteed"
+  ],
+  "installed_runtime": "out/native-release/Release",
+  "runtime_sha256": {
+    "ark-studio.exe": "52aae5e2d38517963aef92eae122396f4298e655964c4a2ab4437089284f14d4",
+    "ark-mcp.exe": "a9b053c585a87bd721d43531e0357c4c2a687ea7063faa93f056a0e514893f54",
+    "ark-cli.exe": "91fd1c338955882f474f5d5d27435f3d110791770ef5271cfa8e8897e501bc8d",
+    "ark-occt-worker.exe": "cf484bc182a95603033d774cdfcd843d15e7d9aea95ccaa82ebf4f194d169d65"
+  },
+  "hosted_ci": "not verified in this local validation"
+}

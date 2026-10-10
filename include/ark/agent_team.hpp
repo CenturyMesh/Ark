@@ -16,7 +16,8 @@ struct AgentTeamRole {
 };
 struct AgentTeamConfig {
     std::vector<AgentTeamRole> roles;
-    unsigned maxWorkers=3, maxTurnsPerRole=8;
+    unsigned maxWorkers=8, maxTurnsPerRole=0; // Zero means no turn budget.
+    bool orchestratedStart=false; // Specialists await explicit assignments.
     std::size_t maxEvents=2048, maxMailboxBytes=64*1024;
     std::size_t maxEventTextBytes=4096, maxEventBytes=1024*1024;
     unsigned maxCommandsPerStep=8,maxFeaturesPerStep=1,maxPlacementsPerStep=1,maxProposals=64;

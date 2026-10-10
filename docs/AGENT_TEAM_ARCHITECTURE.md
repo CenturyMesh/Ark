@@ -29,7 +29,7 @@ remains unknown rather than becoming zero.
 ## Collaboration and document authority
 
 The orchestrator writes assembly/mate operations and places reusable components.
-The part designer writes authored parts, sketches, dimensions, materials and
+Up to six part designers write assigned parts, sketches, dimensions, materials and
 manufacturing geometry. The physics reviewer remains read-only, uses actual
 physics/math/geometry evidence and records unknown loads, supports and material
 assumptions. Runtime command scopes enforce these responsibilities; saved role
@@ -64,19 +64,29 @@ The user can steer one role or the whole team and pause or cancel subsequent
 work. Events describe actual requests, tool calls, messages, errors and receipts;
 they do not expose hidden reasoning or invent completion percentages.
 
-## Bounded continuation and provider failures
+## Continuous work and provider failures
 
-A provider-round limit yields AwaitingContinuation with all accepted tool
-receipts retained. A transport failure, including missing terminal SSE, becomes
-Interrupted. Partial output from that stream is not accepted or executed; the
-request's usage remains explicitly unknown. Previously committed operations
-are neither rolled back nor replayed.
+Studio defaults to eight workers/roles with no round or turn budget (zero in
+`AssistantConfig.maxRounds` and `AgentTeamConfig.maxTurnsPerRole`). A host may
+opt into finite limits for deterministic tests. `orchestratedStart` queues only
+the orchestrator initially; specialists await an explicit assignment. Each
+specialist reports part IDs, evidence and unresolved decisions to the
+orchestrator using `team_send`, which also wakes an idle recipient. The shared
+CAD executor remains serialized and rejects stale revisions. The runtime also
+notifies the orchestrator automatically when a specialist turn finishes or
+fails, so integration does not depend solely on a model remembering to report.
 
-Explicit resume retains the conversation and lifetime usage/turn totals while
-renewing a bounded turn window. Successful current `doc_info` is required before
-another mutation. This protects a user continuing after an error from repeating
-old edits or applying a proposal to changed geometry. No automatic unlimited
-retry, inference call or paid fallback is introduced.
+A transport failure, including missing terminal SSE, becomes Interrupted.
+Partial output from that stream is not accepted or executed; its usage remains
+unknown. Explicit resume retains the conversation and requires successful
+current `doc_info` before another mutation. Cancellation, atomic writes, byte
+bounds and external provider limits remain enforced. No failed transport is
+silently replayed.
+
+Static onboarding packs come from the existing C++ topic definitions, with
+live document state and numeric example revisions removed. They are cached
+locally by topic set and inserted once per retained conversation. This avoids
+requesting the same guide for each part without caching document authority.
 
 Manufacturing intent distinguishes sheet fabrication, machining, purchased
 parts, additive manufacturing and injection molding. Inspection identifies

@@ -8,8 +8,9 @@ geometry evidence, then insert using `expected_revision`. See
 [library architecture and acquisition](COMPONENT_LIBRARY_ARCHITECTURE.md).
 Inserted exact source components use document version 24.
 
-Studio supports concurrent orchestrator, part designer and physics reviewer
-requests, with independent model/reasoning settings and histories. Document
+Studio supports up to eight concurrent agents: an orchestrator, up to six part
+designers and a physics reviewer, with independent model/reasoning settings
+and histories. Document
 commits remain serialized. The orchestrator owns assembly/mates; the part
 designer writes parts/sketches/materials; the physics reviewer uses actual
 calculation and inspection tools and sends measured revision proposals. Stable
@@ -25,7 +26,7 @@ include step/role IDs and measured revision receipts. Bounded sketch commands
 may be shown as uncommitted drafts; they are not evaluated CAD authority or
 partial OCCT solids. Native operations publish geometry only after completion.
 
-Provider-round and team-turn windows yield with retained tool receipts.
+Studio runs without provider-round or team-turn budgets by default. Optional finite host/test windows yield with retained tool receipts.
 Explicit continuation grants a new bounded window and requires successful
 current `doc_info` before another write. An SSE response without its terminal
 event executes no tools from that response; previous commits remain, and its

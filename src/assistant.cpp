@@ -166,7 +166,7 @@ void validateAssistantConfig(const AssistantConfig& config){
     require(!host.empty()&&host.find('@')==std::string::npos,"Assistant endpoint must have a host and no embedded credentials.");
     require(config.apiKeyEnv.empty()||identifier(config.apiKeyEnv),"Invalid API key environment-variable name.");
     require(https||config.apiKeyEnv.empty(),"Local HTTP connectors must use an empty API key variable; credentials require HTTPS.");
-    require(config.maxRounds>=1&&config.maxRounds<=32,"Assistant round limit must be between 1 and 32.");
+    require(config.maxRounds<=32,"Assistant round limit must be zero (unlimited) or 1..32.");
     require(config.timeoutSeconds>=1&&config.timeoutSeconds<=300,"Assistant timeout must be between 1 and 300 seconds.");
     require(config.maxResponseBytes>=1024&&config.maxResponseBytes<=16*1024*1024,"Invalid assistant response size limit.");
     require(config.maxConversationBytes>=1024&&config.maxConversationBytes<=32*1024*1024,"Invalid assistant conversation size limit.");
@@ -208,9 +208,9 @@ V assistantRequest(const AssistantConfig& config,const V& conversation,const V& 
     V include=V::makeArr();include.arr.push_back(V::makeStr("reasoning.encrypted_content"));request.set("include",include);
     request.set("instructions",V::makeStr(
         "You are the modeling assistant inside ARK CAD. Use the provided ARK tools to inspect and edit the active document. "
-        "Call agent_onboard first, and request its relevant topic before modeling. Obtain current revision before writes and use expected_revision in doc_apply. "
-        "For mechanical parts, onboard manufacturing, choose each component route explicitly with feature manufacturing intent, and use sheet authoring for bent skins, construction_frame for frames and exact solid operations for machining. Purchased parts may use clearly declared envelopes. "
-        "Before recreating standard mechanical or electrical components, onboard components and search the local library by exact known specification. Inspect matching stable IDs, preserve source and license provenance, and reuse library_insert rather than inventing standard geometry. Do not guess missing material, pitch or electrical ratings. "
+        "Use the preloaded onboarding pack when present; it is already-read static documentation. Otherwise call agent_onboard for the relevant topic once per conversation, not once per part. Reuse earlier topic results; request a new topic only when needed. Obtain current revision before writes and use expected_revision in doc_apply. "
+        "For mechanical parts, consult the loaded manufacturing guide (request it only if missing), choose each component route explicitly with feature manufacturing intent, and use sheet authoring for bent skins, construction_frame for frames and exact solid operations for machining. Purchased parts may use clearly declared envelopes. "
+        "Before recreating standard mechanical or electrical components, consult the loaded components guide (request it only if missing) and search the local library by exact known specification. Inspect matching stable IDs, preserve source and license provenance, and reuse library_insert rather than inventing standard geometry. Do not guess missing material, pitch or electrical ratings. "
         "Inspect doc_info detail design operations, dependencies, sketches and sheet_origin before judging a solid's provenance. A native transform of a sheet is a placement; edit its originating sheet to preserve flat-pattern intent. Define functional datums, primary dimensions, material and thickness before adding detail. "
         "Use atomic batches, named parameters and construction planes. Preserve existing work unless the user requests replacement. "
         "Use compact inspections; avoid doc_get on source tubes and mesh_get unless necessary. Geometry is in millimetres. "
@@ -226,6 +226,11 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
     AssistantResult result;
     if(input.t==V::Str){require(!input.str.empty(),"Enter an assistant message first.");V message=V::makeObj();message.set("role",V::makeStr("user"));message.set("content",input);result.conversation.arr.push_back(std::move(message));}
     else {require(input.t==V::Arr&&!input.arr.empty(),"Assistant input must be a prompt or nonempty history array.");result.conversation=input;}
+    if(!config.onboardingPack.empty()){
+        const std::string marker="ARK_PREBAKED_GUIDE_V1\n";
+        bool loaded=false;for(const auto& item:result.conversation.arr)if(field(item,"role")=="developer"&&field(item,"content").rfind(marker,0)==0)loaded=true;
+        if(!loaded){V guide=V::makeObj();guide.set("role",V::makeStr("developer"));guide.set("content",V::makeStr(marker+config.onboardingPack));result.conversation.arr.insert(result.conversation.arr.begin(),std::move(guide));}
+    }
     std::size_t conversationBytes=result.conversation.dump().size();
     require(conversationBytes<=config.maxConversationBytes,"Assistant conversation exceeds its configured size limit.");
     auto appendHistory=[&](V item){auto bytes=item.dump().size()+(result.conversation.arr.empty()?0:1);
@@ -235,7 +240,7 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
     std::set<std::string> callIds;
     for(auto& item:result.conversation.arr)if(field(item,"type")=="function_call")callIds.insert(field(item,"call_id"));
     bool earlierToolCalls=false;
-    for(unsigned round=0;round<config.maxRounds;++round){
+    for(unsigned round=0;(!config.maxRounds||round<config.maxRounds);++round){
         cancelled(cancel);emit(events,AssistantEvent::Status,"Thinking...");
         if(inbox){V messages=inbox();require(messages.isNull()||messages.t==V::Arr,"Assistant inbox must return an input array.");
             if(messages.t==V::Arr)for(auto& message:messages.arr){

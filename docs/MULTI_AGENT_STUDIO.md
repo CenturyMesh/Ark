@@ -1,17 +1,24 @@
 # Studio team workflow
 
 Open **Assistant** in Studio and choose **Team**. The team shares the open
-document, the selected Assistant account/endpoint and three independent
-conversations:
+document and the selected Assistant account/endpoint. **Agents** selects three
+to eight roles (eight by default): one orchestrator, one physics reviewer and
+one to six part designers. Each has an independent conversation:
 
 | Role | Responsibility | Document permission |
 | --- | --- | --- |
 | Orchestrator | Assembly placements, mates, integration and decisions | Assembly writes using observed revision |
-| Part designer | Actual parts, sketches, dimensions, materials and fabrication intent | Part/sketch writes using observed revision |
+| Part designers (up to six) | Actual parts, sketches, dimensions, materials and fabrication intent | Part/sketch writes using observed revision |
 | Physics reviewer | Actual calculations, geometry checks and measured revision proposals | Read and propose corrections |
 
 Saved role IDs remain `engineer`, `designer` and `reviewer`, so existing model
-and effort settings retain their owners. The runtime enforces each role's scope.
+and effort settings retain their owners. Additional designers use `designer2`
+through `designer6`. The runtime enforces each role's scope. The orchestrator
+starts first and assigns distinct components with `team_send`. Specialists
+await assignments, report created IDs/datums/evidence and return to idle.
+Their completion messages wake the orchestrator to integrate the assembly.
+Cards use up to two rows with paging on smaller displays; all configured
+agents can run concurrently regardless of the visible page.
 
 Each card's **Settings** selects a model and reasoning effort for that role.
 In ChatGPT-plan mode these are native drop-down lists populated from the selected
@@ -81,12 +88,21 @@ publish after native evaluation completes. The counter advances only when the
 reported revision actually increases. Rejections clear their draft without
 publishing geometry. Rendering does not read a worker-owned session.
 
-A provider-round or team-turn limit yields the retained conversation and tool
-receipts. **Continue window** grants another bounded window for the selected
-recipient or whole team. A successful current `doc_info` is required before a
-new write, and completed operations are not replayed. An interrupted provider
-response executes no tools from that incomplete response; previous commits
-remain available and its missing usage remains unknown.
+Studio has no artificial provider-round or role-turn budget. Agents continue
+until they finish, are paused/cancelled, or encounter an actual error. Hosts can
+still opt into finite windows for tests. **Resume after error** retains tool
+receipts after a provider interruption; successful current `doc_info` is
+required before a new write. Incomplete provider responses execute no tools.
+Response/context/memory bounds and provider limits remain separate from turn
+budgets; cancel and revision/atomicity protections remain active.
+
+Static source-owned onboarding is prepared locally once per role's topic set,
+then inserted once at the beginning of its retained conversation. It contains
+no document snapshot or concrete example revision. Relevant loaded topics are
+reused across parts; only a missing topic needs `agent_onboard`. Every new
+write still requires current document evidence. A stable prefix enables provider
+cache reuse when available, without claiming every request is cached or free.
+See [OpenAI prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching).
 
 Tokens come only from provider-reported usage. Each role has a separate
 `studio_team_<role>` receipt in the document usage ledger; repeated snapshots update
@@ -211,3 +227,16 @@ The test uses an isolated library beside its output path. It writes `.team.png`,
 `.tool-gallery-laptop.png` at 1280 by 720, plus
 `.library-search.png` screenshots beside the main shot. The team screenshot is
 explicitly labeled as an offline test.
+
+## Navigation and pricing completion
+
+Middle-button drag performs free trackball rotation, including roll around the
+view axis and pole crossings. Shift + middle-button drag pans; the wheel zooms.
+Left click selects; explicit Pan/Zoom tools and view-cube dragging remain
+available. Named views reset roll. Rendering, picking, Fit and the cube use the
+same camera basis. The context-menu focus action is named **Spotlight**.
+
+The geometry progress message pump now dispatches pricing and team events
+instead of discarding them. This fixes a completed fetch remaining at
+`rates loading` and preserves live step/usage notifications during kernel work.
+The integration test injects a pricing result during a real worker operation.

@@ -1,5 +1,6 @@
 #include "ark/agent_team.hpp"
 #include "ark/agent.hpp"
+#include "ark/onboarding.hpp"
 #include "ark/chatgpt_auth.hpp"
 #include <atomic>
 #include <chrono>
@@ -154,4 +155,28 @@ static void frameDisciplineScope(){
     team.start(config,"Author frame details",ark::AgentSession::tools(),[&](auto& name,auto&){check(name=="doc_apply","frame commands route to actual transaction executor");V response=V::makeObj();response.set("revision",V::makeNum(++writes));return response;});complete(team);
     check(writes==2&&team.snapshot().roles[0].stepsApplied==2,"part designer can author bounded frame trim and weld steps");
 }
-int main(){try{configChecks();concurrencyAndRevision();steeringAndPause();collaboration();cancellationAndFailures();interruptedBatchHistory();limitsAndMutationSchemas();conversationMemoryBound();incrementalStepsAndScopes();frameDisciplineScope();proposalsAndPhysicsRole();concurrentQueuedDrafts();yieldedAndInterruptedContinuation();std::cout<<"Agent team checks passed: "<<checks<<"\n";return 0;}catch(const std::exception& error){std::cerr<<"Agent team checks failed: "<<error.what()<<"\n";return 1;}}
+static void unlimitedEightRoleAssignments(){
+    ark::AgentTeam team;ark::AgentTeamConfig config;config.orchestratedStart=true;Gate simultaneous;
+    std::atomic_int providerCalls=0,docs=0;std::atomic_bool validPack=true;
+    config.roles.push_back(role("engineer",true));config.roles[0].discipline=ark::AgentTeamDiscipline::Orchestrator;
+    config.roles[0].assistant.onboardingPack=ark::agentOnboardingPack({"overview","assembly"});
+    for(int i=1;i<8;++i){auto specialist=role("part"+std::to_string(i),i!=7);specialist.discipline=i==7?ark::AgentTeamDiscipline::PhysicsReviewer:ark::AgentTeamDiscipline::PartDesigner;config.roles.push_back(specialist);}
+    int orchestratorRound=0;
+    config.roles[0].transport=[&](auto&,const V& request,auto*){
+        ++providerCalls;int markers=0;for(const auto& item:request.find("input")->arr)if(auto text=item.find("content");text&&text->t==V::Str&&text->str.find("ARK_PREBAKED_GUIDE_V1")!=std::string::npos)++markers;if(markers!=1)validPack=false;
+        int n=++orchestratorRound;
+        if(n<=40)return call("inspection_"+std::to_string(n),"doc_info","{}");
+        if(n<=47)return call("assignment_"+std::to_string(n),"team_send","{\"to\":\"part"+std::to_string(n-40)+"\",\"message\":\"Work on your distinct assigned component.\"}");
+        simultaneous.enter();return done("Assignments coordinated");
+    };
+    for(int i=1;i<8;++i)config.roles[i].transport=[&](auto&,auto&,auto*){++providerCalls;simultaneous.enter();return done("Assigned work inspected");};
+    team.start(config,"Build separately assigned parts",ark::AgentSession::tools(),[&](auto&,auto&){++docs;return V::makeObj();});
+    simultaneous.await(8);auto working=team.snapshot();check(working.roles.size()==8&&working.running,"eight configured roles run simultaneously after explicit assignments");
+    for(const auto& r:working.roles)check(r.state==ark::AgentTeamState::Working,"all assigned workers active concurrently");
+    simultaneous.open();complete(team);check(docs==40&&providerCalls>=56&&validPack,"unlimited run exceeds the old round limit and retains one baked guide");
+    check(team.snapshot().roles[0].state==ark::AgentTeamState::Idle,"unlimited completion does not request Continue");
+    auto completedTurns=team.snapshot().roles[0].turns;check(completedTurns>=2,"specialist completion automatically wakes the assembly orchestrator");
+    for(int i=0;i<12;++i){check(team.steer("Inspect the next assembly checkpoint","engineer"),"unlimited role accepts subsequent assignments");complete(team);}check(team.snapshot().roles[0].turns==completedTurns+12&&validPack,"turns continue past the old eight-turn window without duplicating onboarding");
+    auto baked=json(config.roles[0].assistant.onboardingPack);for(const auto& guide:baked.find("topics")->arr)check(!guide.find("document"),"prebaked documentation contains no stale document revision");
+}
+int main(){try{unlimitedEightRoleAssignments();configChecks();concurrencyAndRevision();steeringAndPause();collaboration();cancellationAndFailures();interruptedBatchHistory();limitsAndMutationSchemas();conversationMemoryBound();incrementalStepsAndScopes();frameDisciplineScope();proposalsAndPhysicsRole();concurrentQueuedDrafts();yieldedAndInterruptedContinuation();std::cout<<"Agent team checks passed: "<<checks<<"\n";return 0;}catch(const std::exception& error){std::cerr<<"Agent team checks failed: "<<error.what()<<"\n";return 1;}}

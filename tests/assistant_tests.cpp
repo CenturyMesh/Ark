@@ -54,7 +54,7 @@ int main(int argc,char** argv){try{
         invalid.apiKeyEnv="";ark::validateAssistantConfig(invalid);check(ark::assistantKeyAvailable(invalid),"unauthenticated local connector");
     }
     invalid=config;invalid.apiKeyEnv="ARK_ASSISTANT_TEST_UNSET_5438D71F";check(!ark::assistantKeyAvailable(invalid),"presence-only missing credential check");
-    invalid=config;invalid.maxRounds=0;fails([&]{ark::validateAssistantConfig(invalid);},"round bound");
+    invalid=config;invalid.maxRounds=33;fails([&]{ark::validateAssistantConfig(invalid);},"round bound");
     auto duplicate=tools;duplicate.arr.push_back(tools.arr[0]);fails([&]{ark::assistantFunctionTools(duplicate);},"duplicate tool rejected");
     int transports=0,calls=0;std::vector<ark::AssistantEvent::Kind> events;
     auto result=ark::runAssistant(config,V::makeStr("Inspect"),tools,[&](auto& name,auto& args){++calls;check(name=="doc_info"&&args.t==V::Obj,"tool dispatch");return json(R"({"revision":42})");},[&](const auto& e){events.push_back(e.kind);},nullptr,[&](const auto&,const auto& body,const auto*){

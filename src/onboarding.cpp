@@ -1,6 +1,21 @@
 #include "ark/onboarding.hpp"
 #include <stdexcept>
+#include <algorithm>
+#include <map>
+#include <mutex>
 namespace ark {
+std::string agentOnboardingPack(const std::vector<std::string>& topics){
+    using V=arkjson::Value;
+    static std::mutex mutex;static std::map<std::vector<std::string>,std::string> packs;
+    std::lock_guard lock(mutex);auto found=packs.find(topics);if(found!=packs.end())return found->second;
+    AgentSession empty;V pack=V::makeObj();pack.set("authority",V::makeStr("Static ARK tool documentation from this build, already loaded for this conversation. Reuse it across parts. This is not document state: call doc_info for the current revision before writes. Examples omit expected_revision; supply the observed current value, never zero by assumption. Only request agent_onboard for a topic not covered here."));
+    auto stripRevisions=[](auto&& self,V& value)->void{if(value.t==V::Obj){value.obj.erase(std::remove_if(value.obj.begin(),value.obj.end(),[](const auto& entry){return entry.first=="expected_revision";}),value.obj.end());for(auto& entry:value.obj)self(self,entry.second);}else if(value.t==V::Arr)for(auto& item:value.arr)self(self,item);};
+    V guides=V::makeArr();for(const auto& topic:topics){V args=V::makeObj();args.set("topic",V::makeStr(topic));V guide=agentOnboard(empty,args);
+        guide.obj.erase(std::remove_if(guide.obj.begin(),guide.obj.end(),[&](const auto& entry){return entry.first=="document"||(topic!="overview"&&(entry.first=="product"||entry.first=="name"||entry.first=="tagline"||entry.first=="version"||entry.first=="units"||entry.first=="workflow"||entry.first=="available_topics"||entry.first=="boundaries"||entry.first=="capabilities"||entry.first=="component_reuse"));}),guide.obj.end());
+        stripRevisions(stripRevisions,guide);guides.arr.push_back(std::move(guide));
+    }
+    pack.set("topics",guides);return packs.emplace(topics,pack.dump()).first->second;
+}
 arkjson::Value agentOnboard(const AgentSession& session,const arkjson::Value& args){
     using V=arkjson::Value;std::string topic="overview";
     if(auto p=args.find("topic")){if(p->t!=V::Str)throw std::runtime_error("topic must be a string");topic=p->str;}

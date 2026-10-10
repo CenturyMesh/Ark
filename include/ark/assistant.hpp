@@ -15,7 +15,8 @@ struct AssistantConfig {
     std::string model; // Explicit user choice; no implicit paid model.
     std::string reasoningEffort; // Empty: provider default; explicit values are model-dependent.
     std::string apiKeyEnv="OPENAI_API_KEY"; // Empty only for unauthenticated local servers.
-    unsigned maxRounds=12;
+    unsigned maxRounds=0; // Zero: continue until completion/cancel; optional bounded test/host mode.
+    std::string onboardingPack; // Static source-owned guide, inserted once per conversation.
     unsigned timeoutSeconds=90;
     std::size_t maxResponseBytes=4*1024*1024;
     std::size_t maxConversationBytes=8*1024*1024;
