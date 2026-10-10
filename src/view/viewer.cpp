@@ -4852,21 +4852,20 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     WNDCLASSA wc{}; wc.style=CS_OWNDC; wc.hInstance=hi;
     wc.lpfnWndProc=wndProc; wc.lpszClassName="ARKVIEW";
     wc.hCursor=LoadCursor(nullptr,IDC_ARROW);
-    // The same original geometric ARK mark is used in the viewport and taskbar.
-    HDC iconDC=CreateCompatibleDC(nullptr);BITMAPINFO bi{};bi.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);bi.bmiHeader.biWidth=32;bi.bmiHeader.biHeight=-32;bi.bmiHeader.biPlanes=1;bi.bmiHeader.biBitCount=32;
-    void* bits=nullptr;HBITMAP colorIcon=CreateDIBSection(iconDC,&bi,DIB_RGB_COLORS,&bits,nullptr,0);auto oldBitmap=SelectObject(iconDC,colorIcon);
-    RECT iconRect{0,0,32,32};HBRUSH iconBg=CreateSolidBrush(RGB(38,41,48));FillRect(iconDC,&iconRect,iconBg);DeleteObject(iconBg);
-    HPEN iconPen=CreatePen(PS_SOLID,3,RGB(229,234,245));auto oldPen=SelectObject(iconDC,iconPen);
-    MoveToEx(iconDC,6,26,nullptr);LineTo(iconDC,16,5);LineTo(iconDC,26,26);MoveToEx(iconDC,12,19,nullptr);LineTo(iconDC,23,19);
-    SelectObject(iconDC,oldPen);DeleteObject(iconPen);SelectObject(iconDC,oldBitmap);DeleteDC(iconDC);
-    for(int k=0;k<1024;++k)((DWORD*)bits)[k]|=0xff000000;
-    HBITMAP maskIcon=CreateBitmap(32,32,1,1,nullptr);ICONINFO ii{TRUE,0,0,maskIcon,colorIcon};wc.hIcon=CreateIconIndirect(&ii);DeleteObject(maskIcon);DeleteObject(colorIcon);
+    // Load embedded alpha icons at the shell's large/small metrics.
+    HICON largeIcon=(HICON)LoadImageW(hi,MAKEINTRESOURCEW(101),IMAGE_ICON,GetSystemMetrics(SM_CXICON),GetSystemMetrics(SM_CYICON),LR_SHARED);
+    HICON smallIcon=(HICON)LoadImageW(hi,MAKEINTRESOURCEW(101),IMAGE_ICON,GetSystemMetrics(SM_CXSMICON),GetSystemMetrics(SM_CYSMICON),LR_SHARED);
+    if(!largeIcon||!smallIcon)return 388;
+    wc.hIcon=largeIcon;
     RegisterClassA(&wc);
     RECT rc{0,0,winW,winH};
     AdjustWindowRect(&rc,WS_OVERLAPPEDWINDOW,FALSE);
     HWND hwnd=CreateWindowA("ARKVIEW","ARK 0.9 / Agent-Ready Kernel",WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,
                             CW_USEDEFAULT,CW_USEDEFAULT,rc.right-rc.left,rc.bottom-rc.top,
                             nullptr,nullptr,hi,nullptr);
+    if(!hwnd)return 389;
+    SendMessageW(hwnd,WM_SETICON,ICON_BIG,(LPARAM)largeIcon);
+    SendMessageW(hwnd,WM_SETICON,ICON_SMALL,(LPARAM)smallIcon);
     g_window=hwnd;BOOL dark=TRUE;DwmSetWindowAttribute(hwnd,20,&dark,sizeof dark);
     g_commandSearch=CreateWindowExW(0,L"EDIT",L"",WS_CHILD|WS_TABSTOP|ES_AUTOHSCROLL,winW-510,12,260,31,hwnd,(HMENU)498,hi,nullptr);
     g_toolSearch=CreateWindowExW(0,L"EDIT",L"",WS_CHILD|WS_TABSTOP|ES_AUTOHSCROLL,0,0,1,1,hwnd,(HMENU)497,hi,nullptr);if(!g_toolSearch)return 314;g_toolSearchProc=(WNDPROC)SetWindowLongPtrW(g_toolSearch,GWLP_WNDPROC,(LONG_PTR)toolSearchProc);SendMessage(g_toolSearch,EM_SETLIMITTEXT,160,0);SendMessage(g_toolSearch,EM_SETMARGINS,EC_LEFTMARGIN|EC_RIGHTMARGIN,MAKELPARAM(7,7));

@@ -1,0 +1,11 @@
+Built-in ImageGen, 2026-10-10. Input: assets/ui/ark-wordmark.png.
+Requested transparent_background: true in both calls.
+
+Initial prompt:
+Edit target: the supplied ARK wordmark. Create a Windows application icon asset consisting ONLY of the exact leftmost cyan/ice-blue metallic A-shaped chevron from this wordmark. Remove R and K and all background. Preserve the A's distinctive silhouette: two broad slanting legs, small flat top, triangular open interior, no horizontal crossbar, polished pale-blue bevels and subtle brushed metallic cyan face. Do not redesign the logo, do not add a conventional A crossbar. Center this one isolated mark in a square transparent canvas, with about 7% horizontal transparent margin; preserve its original wide aspect ratio rather than stretching it vertically. No tile, no black or colored background, no outside shadow, no glow, no other letters, no added symbols or text. Genuine transparent alpha both around the mark and inside the triangular opening. Crisp clean edges suitable for 16 through 256 pixel Windows icons.
+
+Final edit prompt (previous generated image as input):
+BACKGROUND REMOVAL ONLY. Precisely cut out the blue metallic chevron logo. Remove ALL black background and ALL blue halo / glow outside its sharp physical edges, also inside its triangular opening. The output MUST have true alpha transparency, not black pixels and not a checkerboard. Preserve only the solid metallic chevron itself unchanged. Transparent square PNG canvas, logo centered with aspect ratio unchanged. No shadows and no glow. Do not add anything.
+
+Actual output: RGBA PNG, 1536 x 1024. The icon packaging script places the alpha
+bounds proportionally into square frames; it preserves source transparency.

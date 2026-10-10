@@ -1,0 +1,4 @@
+#include <windows.h>
+
+// First executable icon: Explorer, shortcuts and Task Manager.
+101 ICON "ark-app.ico"

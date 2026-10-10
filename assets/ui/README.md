@@ -1,5 +1,20 @@
 # ARK Studio icon atlases
 
+## Windows application icon
+
+`ark-app-mark.png` is the transparent blue A/chevron derived from the ARK
+wordmark with built-in ImageGen. `ark-app.ico` packages it at 16, 20, 24, 32,
+40, 48, 64, 128 and 256 pixels, retaining alpha and its aspect ratio. Regenerate
+the ICO with `powershell -File scripts/build-app-icon.ps1`.
+
+Studio embeds resource 101 through `src/view/app_icon.rc` for Explorer,
+shortcuts and Task Manager, and loads large/small window icons from that same
+resource for the taskbar and Alt+Tab. No opaque tile or background is added.
+The source prompt and final transparency instruction are in
+`docs/design/ark-app-icon.prompt.txt`.
+
+## Ribbon atlases
+
 The 2026-10-10 audit added `ark-detail-atlas-v1.png`, generated with built-in
 ImageGen using the first atlas only as a style reference. Its 4 x 4 cells are:
 circle, edit sketch, normal view, sheet base; hem, emboss, hole pattern, drive
