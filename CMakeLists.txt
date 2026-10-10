@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
-project(Ark VERSION 0.9.0 LANGUAGES C CXX)
+project(Ark VERSION 0.9.1 LANGUAGES C CXX)
+configure_file(cmake/version.hpp.in generated/ark/version.hpp @ONLY)
+configure_file(cmake/app-version.json.in app-version.json @ONLY)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Threads REQUIRED)
@@ -8,6 +10,7 @@ target_include_directories(ark-sqlite PUBLIC third_party/sqlite)
 target_compile_definitions(ark-sqlite PRIVATE SQLITE_ENABLE_FTS5=1 SQLITE_THREADSAFE=1 SQLITE_OMIT_LOAD_EXTENSION=1 SQLITE_DQS=0 SQLITE_DEFAULT_FOREIGN_KEYS=1)
 target_link_libraries(ark-sqlite PUBLIC Threads::Threads)
 add_library(ark STATIC
+  src/updates.cpp
   src/document_container.cpp
   src/iteration_history.cpp
   src/pricing.cpp
@@ -21,7 +24,7 @@ add_library(ark STATIC
   src/core.cpp src/nurbs.cpp src/brep.cpp src/mesh.cpp src/csg.cpp
   src/model.cpp src/evaluate.cpp src/native_features.cpp src/frame.cpp src/electronics.cpp src/usage.cpp src/stock_preview.cpp src/suspension.cpp src/chatgpt_auth.cpp src/sheet_commands.cpp src/sheet_preview.cpp src/references.cpp src/datum.cpp src/solver.cpp src/sketch.cpp src/prism_cut.cpp src/onboarding.cpp src/live_session.cpp src/assistant.cpp src/io.cpp src/serialize.cpp
   src/source_tube.cpp src/notch.cpp src/notch_preview.cpp src/step_export.cpp src/tube.cpp src/assembly.cpp src/assembly_io.cpp src/compute.cpp src/api.cpp src/mesh_query.cpp src/mesh_analysis.cpp src/mesh_model.cpp src/agent.cpp src/agent_features.cpp src/kernels_scalar.cpp)
-target_include_directories(ark PUBLIC include)
+target_include_directories(ark PUBLIC include "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_include_directories(ark SYSTEM PRIVATE third_party)
 target_link_libraries(ark PUBLIC Threads::Threads PRIVATE ark-sqlite)
 if(MSVC)
@@ -44,6 +47,9 @@ if(WIN32)
   target_include_directories(ark-studio PRIVATE assets/ui)
   target_link_libraries(ark-studio PRIVATE ark opengl32 gdi32 user32 shell32 comdlg32 dwmapi windowscodecs ole32)
   add_custom_command(TARGET ark-studio POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/updates" "$<TARGET_FILE_DIR:ark-studio>/updates"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_BINARY_DIR}/app-version.json" "$<TARGET_FILE_DIR:ark-studio>/app-version.json")
+  add_custom_command(TARGET ark-studio POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:ark-studio>/assets/ui"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/assets/ui/ark-tool-atlas-v1.png" "$<TARGET_FILE_DIR:ark-studio>/assets/ui/ark-tool-atlas-v1.png"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/assets/ui/ark-wordmark.png" "$<TARGET_FILE_DIR:ark-studio>/assets/ui/ark-wordmark.png"
@@ -54,6 +60,13 @@ if(MINGW)
   target_link_options(ark PUBLIC -static)
 endif()
 enable_testing()
+if(WIN32)
+  find_program(ARK_POWERSHELL NAMES powershell pwsh REQUIRED)
+  add_test(NAME ota-updates COMMAND "${ARK_POWERSHELL}" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${CMAKE_SOURCE_DIR}/tests/updates_tests.ps1")
+  set_tests_properties(ota-updates PROPERTIES TIMEOUT 90)
+  add_test(NAME ota-launch COMMAND "${ARK_POWERSHELL}" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${CMAKE_SOURCE_DIR}/tests/updates_launch_tests.ps1")
+  set_tests_properties(ota-launch PROPERTIES TIMEOUT 30)
+endif()
 add_executable(ark-view-camera-tests tests/view_camera_tests.cpp)
 target_link_libraries(ark-view-camera-tests PRIVATE ark)
 add_test(NAME view-camera COMMAND ark-view-camera-tests)

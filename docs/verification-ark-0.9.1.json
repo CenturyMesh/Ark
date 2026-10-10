@@ -1,0 +1,197 @@
+{
+  "version": "0.9.1",
+  "date": "2026-10-10",
+  "base_commit": "ec183406e290f618b9b0e2048db6e27343128411",
+  "build": "out/live-workspace-release/Release",
+  "native_ctest": {
+    "passed": 52,
+    "failed": 0,
+    "log": "out/ark-091-final-native-tests.log"
+  },
+  "ui": [
+    {
+      "test": "navigation-ui",
+      "exit": 0,
+      "seconds": 0.61,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-091-verified-navigation-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "assistant-ui",
+      "exit": 0,
+      "seconds": 14.92,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-091-verified-assistant-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "native-ui",
+      "exit": 0,
+      "seconds": 3.95,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-091-verified-native-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "context-ui",
+      "exit": 0,
+      "seconds": 1.72,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-091-verified-context-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "render-ui",
+      "exit": 0,
+      "seconds": 2.17,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-091-verified-render-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "sketch-ui",
+      "exit": 0,
+      "seconds": 4.04,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-091-verified-sketch-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "sheet-showcase-ui",
+      "exit": 0,
+      "seconds": 3.14,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-091-verified-sheet-showcase-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "suspension-ui",
+      "exit": 0,
+      "seconds": 0.77,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-091-verified-suspension-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "motion-ui",
+      "exit": 0,
+      "seconds": 24.95,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-091-verified-motion-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "engineering-ui",
+      "exit": 0,
+      "seconds": 1.3,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-091-verified-engineering-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "dialogs",
+      "exit": 0,
+      "seconds": 1.68,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-091-verified-dialogs.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "ui",
+      "exit": 0,
+      "seconds": 0.58,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-091-verified-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    }
+  ],
+  "ota": {
+    "offline_checks": 67,
+    "real_child_launch_checks": 74,
+    "live_channel_configured": false,
+    "published": false,
+    "future_host": "Product website; wire and test trusted transport before live delivery",
+    "covered": [
+      "HTTPS origin and redirect restrictions",
+      "SHA256 and bounded archive extraction",
+      "traversal/collision/link rejection",
+      "side-by-side activation and rollback",
+      "real child startup ACK and failed-start fallback",
+      "Unicode/quotes/backslashes/empty argument preservation",
+      "ACK writer sharing race",
+      "user drawings excluded from runtime"
+    ],
+    "limit": "C++ startup redirect reviewed; actual child tests exercise production PowerShell with isolated WinExe fixtures."
+  },
+  "icon": {
+    "source_unchanged_sha256": "f7104dc1fb3ba713a59e9c6b4b1e5594c814d720f07d6ee49b384b6b851acb5e",
+    "user_approved_vertical_scale": true,
+    "visible_32px_frame": [
+      32,
+      28
+    ],
+    "corner_alpha": 0,
+    "previous_visible_height": 18
+  },
+  "team": {
+    "default": "Focused",
+    "roles": 3,
+    "concurrent_conversations": 1,
+    "parallel_optional_max_roles": 8,
+    "turn_budget": 0,
+    "engineer_can_author_parts_and_assemblies": true,
+    "paid_provider_calls_used_for_validation": false,
+    "limit": "No live design-quality or cost benchmark; measured scheduling and tool permissions only."
+  },
+  "navigation": {
+    "cube": "Always visible, upper left",
+    "triad": "Shaded 3D shafts/cones, metal ring, axis labels and canonical view buttons",
+    "checks": [
+      "six cube faces with roll",
+      "document revision unchanged by navigation",
+      "bounds from 1180x800 to 3840x2160",
+      "no style-menu overlap",
+      "actual font glyph bounds inside cards"
+    ]
+  },
+  "packaging": {
+    "url": "https://github.com/CenturyMesh/Ark-Releases/releases/download/v0.9.1/ark-windows-x64-0.9.1.zip",
+    "name": "ark-windows-x64-0.9.1.zip",
+    "sha256": "9830ff6103dba1ab27ff173742c08a0488a86e992fa69cc0004603034c1f17d2",
+    "size": 29932011
+  },
+  "packaged_native_smoke": {
+    "test": "packaged-native-ui",
+    "exit": 0,
+    "seconds": 4.06,
+    "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-091-package-native.png (1600x1000)\r\n",
+    "stderr": ""
+  },
+  "real_document_preview": {
+    "test": "real-bike-readonly-preview",
+    "exit": 0,
+    "seconds": 3.54,
+    "drawing_unchanged": true,
+    "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-091-bike-preview.png (1800x1100)\r\n",
+    "stderr": ""
+  },
+  "runtime_hashes": [
+    {
+      "file": "ark-studio.exe",
+      "sha256": "79BB6A2F41EA37F3F16B6075495C6DC22A770E47CE3CCCE43EB1C52803AF9202"
+    },
+    {
+      "file": "ark-mcp.exe",
+      "sha256": "8047B0F62FB254DBFB47FE00384610F2A66FA70A9CA6BD293C84B0ABCDD699EE"
+    },
+    {
+      "file": "ark-cli.exe",
+      "sha256": "5D88699CFACA64F53DBFD559E0D501DDFFE4303070E980478D55837C62A746E9"
+    },
+    {
+      "file": "ark-occt-worker.exe",
+      "sha256": "8045DE7693E3C022009AA0E3497D30C2B562496141DB6C07C6E016670535FC6C"
+    }
+  ],
+  "install": {
+    "runtime": "%LOCALAPPDATA%/ARK/app/versions/0.9.1",
+    "desktop_shortcut": "ARK.lnk",
+    "legacy_window_preserved": true,
+    "legacy_native_release_also_updated": true
+  },
+  "preserved_user_drawings": {
+    "examples\\Bike_exemple.ark": "d66a46d23f6c7315aa37383a407e8255a876724196003030dd038fb4873fff56",
+    "examples\\bike2.ark": "c982a5688a83d0573912836b7f6fb5f24580ffcad3bbd548f6fda11f4895c3da",
+    "examples\\drone_attempt.ark": "50d84326de34918dc0c2dffecc7839563906aee676eeeb2a98e5a113480783b9"
+  },
+  "hosted_ci_checked": false
+}

@@ -18,6 +18,7 @@ struct AgentTeamConfig {
     std::vector<AgentTeamRole> roles;
     unsigned maxWorkers=8, maxTurnsPerRole=0; // Zero means no turn budget.
     bool orchestratedStart=false; // Specialists await explicit assignments.
+    bool focusedWorkflow=false; // One conversation at a time; the lead starts and delegates specific tasks.
     std::size_t maxEvents=2048, maxMailboxBytes=64*1024;
     std::size_t maxEventTextBytes=4096, maxEventBytes=1024*1024;
     unsigned maxCommandsPerStep=8,maxFeaturesPerStep=1,maxPlacementsPerStep=1,maxProposals=64;
@@ -84,7 +85,8 @@ public:
     void start(const AgentTeamConfig& config,const std::string& prompt,
         const arkjson::Value& mcpTools,const AssistantTool& executor,
         const AgentTeamEvents& observer={});
-    // Empty target broadcasts; messages reach active roles before their next
+    // Empty target selects the lead in focused mode, broadcasts in parallel
+    // mode. "all" explicitly broadcasts. Messages reach active roles before their next
     // provider request and schedule a new turn for idle roles. False means no
     // eligible recipient, cancellation, or a configured message/turn limit.
     bool steer(const std::string& text,const std::string& targetId={});

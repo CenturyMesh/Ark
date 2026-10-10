@@ -1,0 +1,145 @@
+# ARK Windows updates
+
+ARK 0.9.1 includes in-app Windows x64 self-update preparation: download verification,
+staging, next-launch activation and recovery. It uses an internal per-user launcher;
+the user does not need a separate installer application. **Live delivery is not
+configured or published.** The product's future website can provide the production
+channel after its endpoint and trusted hosts are wired and tested.
+
+The current transport is a prepared GitHub release adapter with a fixed binary-only
+placeholder, `CenturyMesh/Ark-Releases`; it has not been created or published by
+this work. The source repository `CenturyMesh/Ark` remains private. Replacing the
+placeholder with the future website requires changing the trusted transport adapter,
+release packaging and URL tests together; staging and recovery are independent of
+that hosting choice. There is no user-entered feed URL or remote installer command.
+
+## Using updates
+
+Open **ARK updates** from the Tools gallery and choose **Check for updates**.
+The prepared transport reports that the update channel is not configured or
+published until a compatible package is available. **Download update** verifies
+and stages an offered package. Save your document and close ARK normally, then
+reopen ARK. The current session is never
+closed or replaced by a download.
+
+The launcher uses `%LOCALAPPDATA%\ARK\app\versions\<version>`. A small atomic
+`current.json` pointer selects the runtime; a previous runtime remains available.
+Pending updates activate on the next launch. The new application must confirm
+that its window, graphics resources and initial document are ready within 30
+seconds, before loading a user document. If it exits before confirming,
+the launcher restores and starts the previous version. If it remains open without
+confirming, the previous pointer is restored for the following launch; the window
+is left open so that a document cannot be terminated without saving. The timeout
+applies to application initialization; loading a large user document happens after
+the acknowledgement and does not cause a rollback.
+An interrupted activation also restores the previous pointer on the next launch.
+Use **Previous version** for a manual rollback after a confirmed update.
+
+New unsaved drawings start in **Documents\ARK**, outside immutable version folders.
+Settings remain in the existing `%LOCALAPPDATA%\ARK` location. Updates never copy
+or migrate `.ark` drawings from the checkout or change the document format.
+An older `ark-studio.exe` shortcut also redirects to the selected installed runtime
+before opening a document. Its arguments, including Unicode document paths, are
+preserved. Headless and self-test launches remain pinned to their requested build.
+A newer standalone development build is not redirected to an older installation.
+
+## Developer setup and portable launch
+
+After building, run from the repository:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-portable.ps1 -DesktopShortcut
+```
+
+This optional developer command creates a baseline and an **ARK** desktop shortcut.
+Distributed `ARK.cmd`, `start-studio.ps1`, and the first in-app download prepare the
+internal baseline automatically; this script is not a required user installer.
+Administrator rights are unnecessary. For an isolated test, pass `-InstallRoot`.
+The launcher is copied once from trusted local scripts. Updates use its protocol;
+replacing that bootstrap code requires a new portable installation rather than a
+command supplied by a release feed. Version directories are retained; this first
+protocol does not automatically prune old runtimes.
+
+## Preparing release assets
+
+The project version in `CMakeLists.txt` is the source for the generated C++ header,
+Windows version resource and `app-version.json`. Increase it for every release;
+the stable channel accepts numeric `major.minor.patch` versions and never
+automatically installs prereleases, equal versions or downgrades.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -Test
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-release.ps1
+```
+
+The package script includes Studio, CLI, MCP, the native OCCT worker, DLLs,
+UI assets, update scripts, version metadata and the Visual C++ x64 app-local
+runtime from the installed build toolchain. `-MsvcRuntimeDirectory` can name that
+toolchain runtime explicitly. It does not package repository drawings or tests.
+Review third-party redistribution notices and retained licenses before publication.
+The **Prepare Windows release package** workflow builds/tests and uploads artifacts;
+it does not create or publish a GitHub release.
+
+When testing the prepared GitHub adapter, these two reviewed assets belong on a
+public, stable binary-only GitHub release whose tag matches the project version,
+for example `v0.9.1`. No publication is required for the current preparation task;
+the future website can use the same package schema:
+
+- `ark-windows-x64-0.9.1.zip`
+- `ark-update.json`
+
+The manifest format is:
+
+```json
+{
+  "schema": 1,
+  "product": "ARK",
+  "version": "0.9.1",
+  "platform": "windows-x64",
+  "package": {
+    "name": "ark-windows-x64-0.9.1.zip",
+    "url": "https://github.com/CenturyMesh/Ark-Releases/releases/download/v0.9.1/ark-windows-x64-0.9.1.zip",
+    "size": 123456,
+    "sha256": "<64 lowercase hexadecimal characters generated from the archive>"
+  }
+}
+```
+
+The release API, repository and asset names are fixed in code. HTTPS requests
+reject other repositories, plain HTTP, credentials and external redirects; only
+GitHub release asset storage hosts are accepted after a trusted GitHub redirect.
+The API and manifest have 1 MiB and 64 KiB limits. Packages are capped at 512 MiB,
+4096 entries and 2 GiB expanded size; each transfer has bounded timeouts.
+Extraction rejects path traversal, drive/UNC paths, alternate streams, Windows
+reserved names, collisions and links. SHA-256 is checked before extraction and
+local file receipts are rechecked before activation. A manifest cannot choose an
+executable, installation path, command, script argument or alternate feed.
+
+The trust authority is the GitHub repository owner and HTTPS. A checksum detects
+corruption; it is not an independent publisher signature. Authenticode signing and
+an independently pinned signing key are future release hardening work.
+
+## Offline verification
+
+```powershell
+powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File tests/updates_tests.ps1
+ctest --test-dir out/native-release -C Release -R ota-updates --output-on-failure
+ctest --test-dir out/native-release -C Release -R ota-launch --output-on-failure
+```
+
+These checks use temporary fake runtimes and ZIP files: numeric version ordering,
+untrusted URLs, hashes, extraction paths/collisions, missing CAD binaries, unchanged
+drawings, concurrent staging, activation, startup rollback, manual rollback,
+interrupted pointer writes and corruption recovery. They do not contact GitHub or
+launch an application. The real online delivery path still requires a configured
+trusted production host and compatible package, followed by an end-to-end trial
+from an older build.
+
+`updates_launch_tests.ps1` additionally launches a temporary Windows GUI fixture:
+startup acknowledgement, real process failure and fallback, exact Unicode/quoted/
+empty arguments, working directories and environment restoration are checked
+without a network request or changes to the user's installation.
+
+Implementation follows the official
+[GitHub releases API](https://docs.github.com/en/rest/releases/releases#get-the-latest-release)
+and [Windows atomic file replacement](https://learn.microsoft.com/en-us/dotnet/api/system.io.file.replace).

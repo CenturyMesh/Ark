@@ -1,24 +1,30 @@
-# Studio team workflow
+# ARK team workflow
 
-Open **Assistant** in Studio and choose **Team**. The team shares the open
-document and the selected Assistant account/endpoint. **Agents** selects three
-to eight roles (eight by default): one orchestrator, one physics reviewer and
-one to six part designers. Each has an independent conversation:
+Open **Assistant** in ARK and choose **Team**. The team shares the open
+document and the selected Assistant account/endpoint. **Focused** is the default:
+three roles with one conversation running at a time. The engineer starts and
+authors the design, calling on the designer or reviewer for a specific task.
+**Parallel** enables three to eight roles with one to six part designers for
+independent components. Each role has an independent conversation:
 
 | Role | Responsibility | Document permission |
 | --- | --- | --- |
-| Orchestrator | Assembly placements, mates, integration and decisions | Assembly writes using observed revision |
+| Engineer / orchestrator | Part geometry, dimensions, fabrication intent, placements, mates and overall design | Part and assembly writes using observed revision |
 | Part designers (up to six) | Actual parts, sketches, dimensions, materials and fabrication intent | Part/sketch writes using observed revision |
 | Physics reviewer | Actual calculations, geometry checks and measured revision proposals | Read and propose corrections |
 
 Saved role IDs remain `engineer`, `designer` and `reviewer`, so existing model
-and effort settings retain their owners. Additional designers use `designer2`
-through `designer6`. The runtime enforces each role's scope. The orchestrator
-starts first and assigns distinct components with `team_send`. Specialists
-await assignments, report created IDs/datums/evidence and return to idle.
-Their completion messages wake the orchestrator to integrate the assembly.
+and effort settings retain their owners. Additional parallel designers use
+`designer2` through `designer6`. The runtime enforces each role's scope.
+Specialists await assignments, report created IDs/datums/evidence and return
+to idle. In focused mode, sending a task queues its recipient until the current
+turn finishes; the sender ends the turn instead of polling for the queued work.
+An explicit specialist report or an automatic completion notification wakes the
+engineer to integrate the actual results. Focused duplicate completion reports
+are suppressed; parallel completion and all failures still notify the engineer.
 Cards use up to two rows with paging on smaller displays; all configured
-agents can run concurrently regardless of the visible page.
+parallel agents can run concurrently regardless of the visible page. Focused
+mode keeps one conversation active even when several assignments are queued.
 
 Each card's **Settings** selects a model and reasoning effort for that role.
 In ChatGPT-plan mode these are native drop-down lists populated from the selected
@@ -59,9 +65,10 @@ finishes, failures and messages. **Idle** means that role's current turn ended;
 it is not evidence that the product is complete or manufacturing qualified.
 
 While the team is running, enter another decision and choose **Queue**.
-**To: entire team** can target one role instead. An active conversation receives
+The default focused recipient is the engineer. **To: entire team** explicitly
+broadcasts a decision, or choose another role. An active conversation receives
 the decision before its next provider request. An idle recipient starts a new
-turn. Requests have bounded conversation, event, mailbox and turn limits; a
+turn. Requests have bounded conversation, event and mailbox sizes; a
 rejected decision is reported explicitly. Late decisions invalidate writes from
 an already in-flight response until the new input is consumed.
 
@@ -71,7 +78,8 @@ cancellation; already applied document changes remain. Finish or cancel active
 work before changing mode or role settings. Switching to **Single** closes the
 idle team. Changing the open document or connector invalidates the old team.
 
-The runtime executes provider conversations concurrently. Studio marshals every
+Parallel mode executes provider conversations concurrently; focused mode
+serializes complete conversations. Studio marshals every
 CAD call through its existing owning-thread queue, and the runtime serializes
 the shared executor. Team writes must supply the model's observed
 `expected_revision`; stale or missing revisions reject without automatic

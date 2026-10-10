@@ -1,4 +1,4 @@
-# ARK 0.9 — Agent-Ready Kernel
+# ARK 0.9.1 — Agent-Ready Kernel
 
 **Parametric CAD for people and agents.**
 
@@ -9,17 +9,24 @@ declared dimensions, provenance and exact geometry evidence; public KiCad source
 discovery and direct HTTPS acquisition feed the same validation path.
 [Library architecture](docs/COMPONENT_LIBRARY_ARCHITECTURE.md).
 
-Studio's **Assistant > Team** mode runs mechanical engineering, design and
-review conversations concurrently, with live activity cards, independent model
-and reasoning settings, shared proposals, user steering and provider token
-receipts. Document writes remain serialized and revision checked.
+ARK's **Assistant > Team** defaults to **Focused**: the engineer authors the
+design and delegates concrete work to a designer or reviewer, one conversation
+at a time. **Parallel** remains available for up to eight agents. Readable activity
+cards show independent model settings, measured token usage and tool feedback.
+Document writes remain serialized and revision checked.
 [Team controls](docs/MULTI_AGENT_STUDIO.md) and
 [C++ module architecture](docs/AGENT_TEAM_ARCHITECTURE.md).
+
+The view cube stays at the upper left of the viewport; shaded Cartesian arrows
+and axis buttons sit at the lower right. **ARK updates** prepares verified packages
+for the next launch, with rollback. The future website delivery channel is not
+yet connected. [Self-update preparation](docs/UPDATES.md).
+
 `manufacturing_inspect` separates injection molding, FDM additive manufacturing
 and machining intent from verified geometry and unresolved process checks.
 [Manufacturing contract](docs/MANUFACTURING_INTENT.md).
 
-Studio has viewport/tree context menus, reversible **Spotlight** visibility,
+ARK has viewport/tree context menus, reversible **Spotlight** visibility,
 separate navigation and playback rows, and improved face/curved-edge picking.
 [Interaction guide](docs/STUDIO_INTERACTION.md).
 The engineering update adds verified edit conditions, reusable preview

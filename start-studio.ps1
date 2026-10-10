@@ -18,13 +18,22 @@ if ($Document) {
 
 if ($Rebuild -or -not (Test-Path -LiteralPath $exe)) {
     & (Join-Path $root 'scripts/build.ps1') -Test -BuildDirectory $BuildDirectory
-    if ($LASTEXITCODE -ne 0) { throw 'Native build or tests failed; Studio was not launched.' }
+    if ($LASTEXITCODE -ne 0) { throw 'Native build or tests failed; ARK was not launched.' }
 }
-if (-not (Test-Path -LiteralPath $exe)) { throw "Studio executable missing: $exe" }
+if (-not (Test-Path -LiteralPath $exe)) { throw "ARK executable missing: $exe" }
+
+# Stable launcher selects a verified staged update on the next app start.
+$updateLauncher = Join-Path (Split-Path $exe -Parent) 'updates/ark-launch.ps1'
+if (Test-Path -LiteralPath $updateLauncher) {
+    $arguments = @{ RuntimeDirectory = (Split-Path $exe -Parent) }
+    if ($documentPath) { $arguments.Document = $documentPath }
+    & $updateLauncher @arguments
+    return
+}
 
 $launch = @{ FilePath = $exe; WorkingDirectory = $root; WindowStyle = 'Normal' }
 if ($documentPath) {
     $launch.ArgumentList = @('--load', ('"' + $documentPath + '"'))
 }
-# Studio is an interactive window requested by the operator.
+# ARK is an interactive window requested by the operator.
 Start-Process @launch

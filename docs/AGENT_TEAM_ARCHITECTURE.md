@@ -28,9 +28,11 @@ remains unknown rather than becoming zero.
 
 ## Collaboration and document authority
 
-The orchestrator writes assembly/mate operations and places reusable components.
-Up to six part designers write assigned parts, sketches, dimensions, materials and
-manufacturing geometry. The physics reviewer remains read-only, uses actual
+The engineer/orchestrator authors parts, sketches, datums, dimensions, materials
+and manufacturing geometry, as well as assembly/mate operations and reusable
+component placement. Part designers handle specifically assigned components or
+refinements; the engineer retains the overall design and can carry it forward
+directly. The physics reviewer remains read-only, uses actual
 physics/math/geometry evidence and records unknown loads, supports and material
 assumptions. Runtime command scopes enforce these responsibilities; saved role
 IDs and per-role model settings remain compatible. General-purpose hosts can
@@ -74,15 +76,34 @@ and current document evidence before acting on it.
 
 ## Continuous work and provider failures
 
-Studio defaults to eight workers/roles with no round or turn budget (zero in
-`AssistantConfig.maxRounds` and `AgentTeamConfig.maxTurnsPerRole`). A host may
-opt into finite limits for deterministic tests. `orchestratedStart` queues only
-the orchestrator initially; specialists await an explicit assignment. Each
-specialist reports part IDs, evidence and unresolved decisions to the
-orchestrator using `team_send`, which also wakes an idle recipient. The shared
-CAD executor remains serialized and rejects stale revisions. The runtime also
-notifies the orchestrator automatically when a specialist turn finishes or
-fails, so integration does not depend solely on a model remembering to report.
+Studio defaults to a focused team of engineer, designer and reviewer, with no
+round or turn budget (zero in `AssistantConfig.maxRounds` and
+`AgentTeamConfig.maxTurnsPerRole`). `focusedWorkflow` runs one complete role
+conversation at a time, even when a host supplies a larger `maxWorkers`. Only
+the engineer starts. A specific `team_send` assignment queues its recipient;
+the sender finishes its turn so that the recipient can run. The prompt and
+delivery receipt explain this handoff rather than encouraging polling for work
+that has not started. The engineer delegates a concrete component, refinement
+or evidence check when useful, instead of assigning the entire goal to everyone.
+
+Untargeted user steering reaches the engineer in focused mode. Explicit `all`
+broadcasts remain available. Parallel mode retains three to eight roles with up
+to six independent part designers and the configured worker concurrency;
+untargeted steering broadcasts in that mode. `orchestratedStart` can still
+start only the engineer and leave specialists waiting for assignment. Hosts
+retain the existing parallel configuration by default; Studio selects focused
+mode explicitly. Finite limits remain available for deterministic host tests.
+
+Specialists report part IDs, evidence and unresolved decisions using
+`team_send`. In focused mode, the runtime sends a completion notification if a
+specialist did not already report, and always reports a failure. Parallel mode
+always sends completion, since the lead may have consumed an earlier progress
+message while the specialist was still running. Automatic notifications use
+the current turn's text rather than resending earlier turns. Successful read
+receipts stay in their author's history and events; they are not copied into
+every teammate's next request. Focused updates go to the lead, and current
+state and typed rejection evidence remain discoverable through `team_context`.
+The shared CAD executor remains serialized and rejects stale revisions.
 
 A transport failure, including missing terminal SSE, becomes Interrupted.
 Partial output from that stream is not accepted or executed; its usage remains

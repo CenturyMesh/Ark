@@ -1,0 +1,24 @@
+name: Prepare Windows release package
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-package:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build OCCT and ARK, run tests
+        shell: pwsh
+        run: ./scripts/build.ps1 -Test -Jobs 2
+      - name: Prepare portable package and update manifest
+        shell: pwsh
+        run: ./scripts/package-release.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ark-windows-release-assets
+          path: |
+            out/releases/ark-windows-x64-*.zip
+            out/releases/ark-update.json
+          if-no-files-found: error

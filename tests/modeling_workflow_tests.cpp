@@ -1,3 +1,4 @@
+#include "ark/updates.hpp"
 #include "ark/agent.hpp"
 #include "ark/io.hpp"
 #include "ark/serialize.hpp"
@@ -243,7 +244,7 @@ void testSnapshotAndContract() {
     check(assemblyText.find("display mesh") != std::string::npos, "onboarding names the display mesh");
     const Value solids = accepted(session.call("agent_onboard", parse(R"({"topic":"solids"})")));
     check(solids.dump().find("version 10") != std::string::npos, "solids onboarding names version 10");
-    check(solids.find("version")->str == "0.9.0", "product version stays 0.9.0");
+    check(solids.find("version")->str == ark::app_version(), "onboarding reports the built product version");
     check(ark::AgentSession::tools().arr.size() == 66, "engineering module and exchange tools are discoverable");
     for (const auto& tool : ark::AgentSession::tools().arr)
         check(tool.find("inputSchema") && tool.find("inputSchema")->t == Value::Obj, "every tool schema parses");

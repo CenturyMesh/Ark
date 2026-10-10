@@ -1,11 +1,14 @@
-# ARK Studio icon atlases
+# ARK icon atlases
 
 ## Windows application icon
 
 `ark-app-mark.png` is the original transparent blue A/chevron derived from the ARK
-wordmark with built-in ImageGen. Its silhouette and proportions are unchanged.
-`ark-app.ico` uses the full available width (no added one-pixel border), at 16, 20, 24, 32,
-40, 48, 64, 128 and 256 pixels, retaining alpha and its aspect ratio. Regenerate
+wordmark with built-in ImageGen. This source image is unchanged. The shell icon
+uses the user-approved vertical optical scaling, filling 86% of the canvas height.
+`ark-app.ico` uses the full available width (no added border), at 16, 20, 24, 30, 32,
+36, 40, 48, 60, 64, 72, 96, 128 and 256 pixels, retaining alpha and the original artwork.
+The crop excludes near-invisible alpha fringes (alpha <=16). Sizes below 256 use
+native BGRA DIB entries with transparency masks; 256 uses PNG. Regenerate
 the ICO with `powershell -File scripts/build-app-icon.ps1`.
 
 Studio embeds resource 101 through `src/view/app_icon.rc` for Explorer,

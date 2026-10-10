@@ -157,7 +157,7 @@ static void frameDisciplineScope(){
 }
 static void unlimitedEightRoleAssignments(){
     ark::AgentTeam team;ark::AgentTeamConfig config;config.orchestratedStart=true;Gate simultaneous;
-    std::atomic_int providerCalls=0,docs=0;std::atomic_bool validPack=true;
+    std::atomic_int providerCalls=0,docs=0;std::atomic_bool validPack=true,quietReads=true;
     config.roles.push_back(role("engineer",true));config.roles[0].discipline=ark::AgentTeamDiscipline::Orchestrator;
     config.roles[0].assistant.onboardingPack=ark::agentOnboardingPack({"overview","assembly"});
     for(int i=1;i<8;++i){auto specialist=role("part"+std::to_string(i),i!=7);specialist.discipline=i==7?ark::AgentTeamDiscipline::PhysicsReviewer:ark::AgentTeamDiscipline::PartDesigner;config.roles.push_back(specialist);}
@@ -169,11 +169,11 @@ static void unlimitedEightRoleAssignments(){
         if(n<=47)return call("assignment_"+std::to_string(n),"team_send","{\"to\":\"part"+std::to_string(n-40)+"\",\"message\":\"Work on your distinct assigned component.\"}");
         simultaneous.enter();return done("Assignments coordinated");
     };
-    for(int i=1;i<8;++i)config.roles[i].transport=[&](auto&,auto&,auto*){++providerCalls;simultaneous.enter();return done("Assigned work inspected");};
+    for(int i=1;i<8;++i)config.roles[i].transport=[&](auto&,const V& request,auto*){++providerCalls;if(request.find("input")->dump().find("Teammate update from engineer: doc_info")!=std::string::npos)quietReads=false;simultaneous.enter();return done("Assigned work inspected");};
     team.start(config,"Build separately assigned parts",ark::AgentSession::tools(),[&](auto&,auto&){++docs;return V::makeObj();});
     simultaneous.await(8);auto working=team.snapshot();check(working.roles.size()==8&&working.running,"eight configured roles run simultaneously after explicit assignments");
     for(const auto& r:working.roles)check(r.state==ark::AgentTeamState::Working,"all assigned workers active concurrently");
-    simultaneous.open();complete(team);check(docs==40&&providerCalls>=56&&validPack,"unlimited run exceeds the old round limit and retains one baked guide");
+    simultaneous.open();complete(team);check(docs==40&&providerCalls>=56&&validPack,"unlimited run exceeds the old round limit and retains one baked guide");check(quietReads,"forty engineer read receipts are not duplicated into seven specialist histories");
     check(team.snapshot().roles[0].state==ark::AgentTeamState::Idle,"unlimited completion does not request Continue");
     auto completedTurns=team.snapshot().roles[0].turns;check(completedTurns>=2,"specialist completion automatically wakes the assembly orchestrator");
     for(int i=0;i<12;++i){check(team.steer("Inspect the next assembly checkpoint","engineer"),"unlimited role accepts subsequent assignments");complete(team);}check(team.snapshot().roles[0].turns==completedTurns+12&&validPack,"turns continue past the old eight-turn window without duplicating onboarding");
@@ -188,4 +188,61 @@ static void sharedFailureEvidence(){
     team.start(config,"Recover a failed CAD operation",ark::AgentSession::tools(),[&](auto&,auto&){return rejection;},[&](const auto& event){if(event.kind==ark::AgentTeamEvent::ToolEnd&&event.toolError){eventSaw=event.text.find("2 solids")!=std::string::npos;failed=true;}});
     complete(team);check(authorSaw&&peerSaw&&eventSaw,"author, teammate context and UI event receive actionable rejection evidence");check(team.snapshot().roles[0].stepsApplied==0,"failed step never advances accepted construction count");
 }
-int main(){try{sharedFailureEvidence();unlimitedEightRoleAssignments();configChecks();concurrencyAndRevision();steeringAndPause();collaboration();cancellationAndFailures();interruptedBatchHistory();limitsAndMutationSchemas();conversationMemoryBound();incrementalStepsAndScopes();frameDisciplineScope();proposalsAndPhysicsRole();concurrentQueuedDrafts();yieldedAndInterruptedContinuation();std::cout<<"Agent team checks passed: "<<checks<<"\n";return 0;}catch(const std::exception& error){std::cerr<<"Agent team checks failed: "<<error.what()<<"\n";return 1;}}
+static void focusedSequentialAssignments(){
+    ark::AgentTeam team;ark::AgentTeamConfig config;config.focusedWorkflow=true;config.maxWorkers=8;
+    config.roles={role("engineer",true),role("designer",true),role("reviewer")};
+    config.roles[0].discipline=ark::AgentTeamDiscipline::Orchestrator;config.roles[1].discipline=ark::AgentTeamDiscipline::PartDesigner;config.roles[2].discipline=ark::AgentTeamDiscipline::PhysicsReviewer;
+    Gate handoff;std::atomic_int engineerRounds=0,designerRounds=0,reviewerRounds=0,live=0,peak=0;std::atomic_bool truthfulQueue=false;
+    struct Request {std::atomic_int& live;Request(std::atomic_int& count,std::atomic_int& peak):live(count){int now=++live,old=peak;while(now>old&&!peak.compare_exchange_weak(old,now)){};}~Request(){--live;}};
+    config.roles[0].transport=[&](auto&,const V& request,auto*){Request running(live,peak);switch(++engineerRounds){
+        case 1:return call("lead_inspection","doc_info","{}");
+        case 2:return call("specific_component","team_send",R"({"to":"designer","message":"Design the mounting bracket only; retain the main assembly interfaces."})");
+        case 3:truthfulQueue=request.find("input")->dump().find("recipient runs after the current turn ends")!=std::string::npos;handoff.enter();return done("Main design handed off for the bracket.");
+        default:return done("Integrated the reported evidence.");}};
+    config.roles[1].transport=[&](auto&,auto&,auto*){Request running(live,peak);switch(++designerRounds){
+        case 1:return call("specific_review","team_send",R"({"to":"reviewer","message":"Review the bracket load assumptions at revision 0 only."})");
+        case 2:return call("report_bracket","team_send",R"({"to":"engineer","message":"Bracket review queued; no geometry or physical qualification is claimed."})");
+        default:return done("Bracket assignment reported.");}};
+    config.roles[2].transport=[&](auto&,auto&,auto*){Request running(live,peak);++reviewerRounds;return done("Unknown load is the remaining bracket assumption.");};
+    team.start(config,"Design one coherent assembly",ark::AgentSession::tools(),[](auto&,auto&){return json(R"({"revision":0})");});
+    handoff.await(1);auto queued=team.snapshot();check(queued.roles[0].state==ark::AgentTeamState::Working&&queued.roles[1].state==ark::AgentTeamState::Queued&&queued.roles[2].turns==0,"focused start runs only the lead and queues the explicitly assigned designer");
+    check(designerRounds==0&&reviewerRounds==0&&peak==1,"a queued specialist cannot start while the engineer conversation is active even with eight configured workers");handoff.open();complete(team);
+    auto finished=team.snapshot(true);check(peak==1&&designerRounds==3&&reviewerRounds==1&&finished.roles[0].turns==2,"nested assignments drain sequentially and measured completion wakes the engineer once");
+    check(truthfulQueue&&finished.roles[0].conversation.dump().find("do not poll team_context or wait for a queued teammate")!=std::string::npos,"sequential handoff explicitly tells the provider to finish instead of polling unavailable work");
+    check(finished.roles[1].conversation.dump().find("doc_info returned result")==std::string::npos,"successful peer reads do not add automatic receipt chatter");
+    int designerReports=0;for(const auto& event:finished.events)if(event.kind==ark::AgentTeamEvent::Message&&event.roleId=="engineer"&&event.text.find("Teammate designer -> engineer")!=std::string::npos)++designerReports;
+    check(designerReports==1,"explicit specialist report replaces duplicate automatic completion notification");
+    check(team.steer("Change the main design width"),"focused goal update accepted without naming a recipient");complete(team);auto steered=team.snapshot();
+    check(steered.roles[0].turns==finished.roles[0].turns+1&&steered.roles[1].turns==finished.roles[1].turns&&steered.roles[2].turns==finished.roles[2].turns,"default focused steering wakes the engineer without restarting designers or reviewer");
+    check(team.steer("Shared interface decision","all"),"explicit entire-team steering remains available");complete(team);auto broadcast=team.snapshot();
+    check(broadcast.roles[1].turns==steered.roles[1].turns+1&&broadcast.roles[2].turns==steered.roles[2].turns+1&&peak==1,"explicit broadcasts reach all specialists while retaining focused provider concurrency");
+}
+static void leadEngineerAuthorsPartsAndAssembly(){
+    ark::AgentTeam team;ark::AgentTeamConfig config;config.focusedWorkflow=true;config.roles={role("engineer",true)};config.roles[0].discipline=ark::AgentTeamDiscipline::Orchestrator;
+    int rounds=0,rejected=0;ark::AgentSession session;
+    config.roles[0].transport=[&](auto&,auto&,auto*){switch(++rounds){
+        case 1:return call("lead_sketch","team_apply_step",R"({"expected_revision":0,"commands":[{"op":"sketch.set","name":"Profile","sketch":{"plane":"XY","entities":[{"kind":"circle","name":"rim","dof":[0,0,2]}],"constraints":[]}}]})");
+        case 2:return call("lead_part","team_apply_step",R"({"expected_revision":1,"commands":[{"op":"param.set","name":"width","expr":10},{"op":"material.set","name":"Lead material","density":2.7},{"op":"feature.add","type":"box","name":"Lead part","p":{"dx":"width","dy":12,"dz":4},"material":"Lead material"}]})");
+        case 3:return call("lead_anchor","team_apply_step",R"({"expected_revision":2,"commands":[{"op":"assembly.add","name":"Anchor","feature":"Lead part","fixed":true}]})");
+        case 4:return call("lead_follower","team_apply_step",R"({"expected_revision":3,"commands":[{"op":"assembly.add","name":"Follower","feature":"Lead part","p":{"tx":20}}]})");
+        case 5:return call("lead_mate","team_apply_step",R"({"expected_revision":4,"commands":[{"op":"mate.add","a":"Anchor","b":"Follower","type":"coincident"}]})");
+        case 6:return call("invalid_part","team_apply_step",R"({"expected_revision":5,"commands":[{"op":"param.set","name":"rollback","expr":999},{"op":"feature.edit","id":"Missing geometry","p":{"dx":20}}]})");
+        case 7:return call("stale_lead","team_apply_step",R"({"expected_revision":4,"commands":[{"op":"param.set","name":"width","expr":99}]})");
+        default:return done("Part and assembly authored through measured transactions.");}};
+    team.start(config,"Engineer the geometry and assembly",ark::AgentSession::tools(),[&](auto& name,auto& args){auto result=session.call(name,args);if(result.find("isError")->b)++rejected;return result;});complete(team);
+    check(session.revision==5&&session.document.features.size()==1&&session.document.assembly.size()==2&&session.document.mates.size()==1&&session.document.sketches.size()==1&&session.document.materials.size()==1,"lead engineer can actually author sketches, materials, parts, placements and mates");
+    check(rejected==2&&session.document.params.size()==1&&session.document.getParam("width")==10&&team.snapshot().roles[0].stepsApplied==5,"engineer authority retains atomic evaluation rollback and stale-revision rejection");
+}
+static void parallelProgressStillReportsCompletion(){
+    ark::AgentTeam team;ark::AgentTeamConfig config;config.orchestratedStart=true;config.roles={role("engineer",true),role("designer",true)};
+    config.roles[0].discipline=ark::AgentTeamDiscipline::Orchestrator;config.roles[1].discipline=ark::AgentTeamDiscipline::PartDesigner;
+    Gate finishDesigner,progressConsumed;std::atomic_int engineerRounds=0,designerRounds=0;std::atomic_bool sawProgress=false;
+    config.roles[0].transport=[&](auto&,const V& request,auto*){if(request.find("input")->dump().find("Progress only: bracket still in development")!=std::string::npos)sawProgress=true;
+        if(++engineerRounds==1)return call("assign_parallel","team_send",R"({"to":"designer","message":"Develop the bracket independently."})");return done("Progress inspected; waiting for the completed component.");};
+    config.roles[1].transport=[&](auto&,auto&,auto*){if(++designerRounds==1)return call("parallel_progress","team_send",R"({"to":"engineer","message":"Progress only: bracket still in development"})");finishDesigner.enter();return done("Bracket completed after the earlier progress message.");};
+    team.start(config,"Parallel component assignment",V::makeArr(),{},[&](const auto& event){if(event.kind==ark::AgentTeamEvent::Status&&event.roleId=="engineer"&&event.text=="Turn completed"&&sawProgress){std::lock_guard lock(progressConsumed.mutex);++progressConsumed.arrivals;progressConsumed.condition.notify_all();}});
+    finishDesigner.await(1);progressConsumed.await(1);auto earlier=team.snapshot();check(earlier.roles[0].state==ark::AgentTeamState::Idle&&earlier.roles[1].state==ark::AgentTeamState::Working,"parallel lead may consume a progress message while its designer remains active");finishDesigner.open();complete(team);
+    auto completed=team.snapshot();int reports=0;for(const auto& event:completed.events)if(event.kind==ark::AgentTeamEvent::Message&&event.roleId=="engineer"&&event.text.find("Teammate designer -> engineer")!=std::string::npos)++reports;
+    check(reports==2&&completed.roles[0].turns==earlier.roles[0].turns+1,"parallel completion wakes the lead even when an earlier message already reported progress");
+}
+int main(){try{focusedSequentialAssignments();leadEngineerAuthorsPartsAndAssembly();parallelProgressStillReportsCompletion();sharedFailureEvidence();unlimitedEightRoleAssignments();configChecks();concurrencyAndRevision();steeringAndPause();collaboration();cancellationAndFailures();interruptedBatchHistory();limitsAndMutationSchemas();conversationMemoryBound();incrementalStepsAndScopes();frameDisciplineScope();proposalsAndPhysicsRole();concurrentQueuedDrafts();yieldedAndInterruptedContinuation();std::cout<<"Agent team checks passed: "<<checks<<"\n";return 0;}catch(const std::exception& error){std::cerr<<"Agent team checks failed: "<<error.what()<<"\n";return 1;}}

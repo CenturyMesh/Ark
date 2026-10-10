@@ -8,11 +8,14 @@ geometry evidence, then insert using `expected_revision`. See
 [library architecture and acquisition](COMPONENT_LIBRARY_ARCHITECTURE.md).
 Inserted exact source components use document version 24.
 
-Studio supports up to eight concurrent agents: an orchestrator, up to six part
-designers and a physics reviewer, with independent model/reasoning settings
-and histories. Document
-commits remain serialized. The orchestrator owns assembly/mates; the part
-designer writes parts/sketches/materials; the physics reviewer uses actual
+Studio defaults to a focused sequential team: an engineer/orchestrator, a
+designer and a physics reviewer, with independent model/reasoning settings
+and histories. The engineer authors parts/sketches/materials and assembly/mates
+directly, delegating specific components or checks when useful. One conversation
+runs at a time; finish a turn after a handoff so that the queued recipient can
+run. Parallel mode remains available with up to eight concurrent agents,
+including up to six part designers. Document commits remain serialized.
+The part designer writes assigned parts/sketches/materials; the physics reviewer uses actual
 calculation and inspection tools and sends measured revision proposals. Stable
 role IDs preserve existing saved settings. See [team architecture](AGENT_TEAM_ARCHITECTURE.md)
 and [Studio team controls](MULTI_AGENT_STUDIO.md).
