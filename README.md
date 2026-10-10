@@ -1,12 +1,18 @@
-# ARK 003D — Agent-Ready Kernel
+# ARK 004B — Agent-Ready Kernel
 
 **Parametric CAD for people and agents.**
 
-Public iteration **003D** uses runtime **0.9.4**. The three digits are globally
+Public iteration **004B** uses runtime **0.9.5**. The three digits are globally
 sequential; A–G identifies the roadmap phase, not the month. See the mandatory
 [development rules](AGENTS.md), the [35-milestone roadmap](docs/ROADMAP.md), and
 the [open-source / €200 perpetual license analysis](docs/COMMERCIAL_STRATEGY.md).
 `release.json` is the single source of release identity.
+
+004B adds direct transparency controls, an adaptive grid and joint-aware assembly
+manipulation with persistent poses. Agents can inspect, preview and apply the same
+movements. [Assembly manipulation](docs/ASSEMBLY_MANIPULATION.md).
+Provider connectors and external MCP configurations cover Claude, Grok, Ollama
+and OpenCode alongside the existing ChatGPT/Codex routes. [Connectors](docs/AI_CONNECTORS.md).
 
 003D adds bounded automatic recovery from eligible HTTP service failures before
 a model response is accepted. Previously completed CAD operations are retained;

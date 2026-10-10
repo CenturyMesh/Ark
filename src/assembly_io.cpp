@@ -21,7 +21,7 @@ void editMate(AssemblyMate& m,const V& j) {
     }
     if(const auto* motion=j.find("motion")){if(motion->t!=V::Obj)throw std::runtime_error("Mechanical mate motion must be an object");m.motion.clear();for(const auto& item:motion->obj){if(item.second.t==V::Num&&std::isfinite(item.second.num))m.motion[item.first]=item.second.dump();else if(item.second.t==V::Str&&!item.second.str.empty()&&item.second.str.size()<=2048)m.motion[item.first]=item.second.str;else throw std::runtime_error("Mechanical motion field must be finite or an expression");}}
     if(!m.a||!m.b||m.a==m.b)throw std::runtime_error("Mate needs two distinct instances");
-    if(m.type!="concentric"&&m.type!="coincident"&&m.type!="contact"&&m.type!="distance"&&m.type!="angle"&&!isMechanicalMate(m.type))throw std::runtime_error("Unknown mate type");
+    if(m.type!="concentric"&&m.type!="coincident"&&m.type!="revolute"&&m.type!="rigid"&&m.type!="contact"&&m.type!="distance"&&m.type!="angle"&&!isMechanicalMate(m.type))throw std::runtime_error("Unknown mate type");
     if(!isMechanicalMate(m.type)&&!m.motion.empty())throw std::runtime_error("motion fields require a mechanical mate type");
 }
 V assemblyDiagnosticsJson(const AssemblyDiagnostics& d) {

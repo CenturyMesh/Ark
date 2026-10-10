@@ -40,6 +40,21 @@ int main(){
         CHECK(d.assembly[2].p.at("tx")=="-20");
     }
     {
+        auto d=basic();d.assembly[2].p["rz"]="137";d.mates.push_back(mate(1,"revolute"));
+        CHECK(resolveAssembly(d,placements,error,&diag));
+        CHECK(diag.rank==5&&diag.freeDofs==1);
+        CHECK(placed(placements,3).approx({10,0,0},1e-5));
+        for(const auto& row:placements)if(row.node==3)CHECK(row.world.transformDir({1,0,0}).approx({std::cos(deg2rad(137)),std::sin(deg2rad(137)),0},1e-7));
+    }
+    {
+        auto d=basic();d.assembly[2].p["rz"]="180";d.mates.push_back(mate(1,"rigid"));
+        CHECK(resolveAssembly(d,placements,error,&diag));
+        CHECK(diag.rank==6&&diag.freeDofs==0);
+        CHECK(placed(placements,3).approx({10,0,0},1e-5));
+        for(const auto& row:placements)if(row.node==3)CHECK(row.world.transformDir({1,0,0}).approx({1,0,0},1e-7));
+        CHECK(diag.maxPositionMm<1e-5&&diag.maxAngleDeg<1e-4);
+    }
+    {
         auto d=basic();d.mates.push_back(mate(1,"concentric","X","X"));
         d.mates.push_back(mate(2,"distance","X","X","gap"));
         d.setParam("gap","40");

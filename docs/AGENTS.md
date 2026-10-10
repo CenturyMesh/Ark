@@ -61,6 +61,12 @@ is never inferred from a role's completion or a filled checklist.
 Mechanical motion uses persistent chain, gear, shaft, rack/pinion and harmonic
 cam coupling mates plus read-only `assembly_motion`. Call
 `agent_onboard{topic:"motion"}` and see [mechanical motion](MECHANICAL_MOTION.md).
+Direct manipulation uses `assembly_info{drive:{driver,mate?,mode?,delta}}` for a
+read-only joint-aware preview and `assembly.drive` in revision-checked
+`doc_apply` for its persistent pose. Rigid attachments and passive revolute
+joints carry the connected moving side. New rigid/revolute mates require
+document version 29; opacity and drive retain existing appearance/placement
+storage. Call assembly onboarding and see [assembly manipulation](ASSEMBLY_MANIPULATION.md).
 
 For requested manufacturing readiness, declared production processes or fabrication
 claims, call `agent_onboard{topic:"manufacturing"}` before authoring those operations.

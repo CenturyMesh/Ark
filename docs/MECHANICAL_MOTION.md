@@ -5,6 +5,12 @@
 first; ground supports while leaving the rotating or translating part instances
 free. Couplings relate motion coordinates and do not replace static mounts.
 
+For steering or direct dragging, use [joint-aware manipulation](ASSEMBLY_MANIPULATION.md):
+`assembly_info.drive` previews a connected moving side and `assembly.drive`
+commits it with `expected_revision`. A rigid handlebar/fork attachment and a
+passive wheel axle follow steering while retaining current wheel spin. This
+interface is separate from timed transmission inspection below.
+
 ```json
 {"op":"mate.add","a":"Front crank","b":"Rear sprocket","type":"chain",
  "reference_a":"Z","reference_b":"Z",

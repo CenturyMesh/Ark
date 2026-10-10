@@ -19,6 +19,7 @@ add_library(ark STATIC
   src/pricing.cpp
   src/agent_team.cpp
   src/manufacturing.cpp
+  src/assistant_connectors.cpp
   src/component_sources.cpp
   src/component_library.cpp
   src/component_library_tools.cpp
@@ -220,6 +221,11 @@ target_link_libraries(ark-assistant-tests PRIVATE ark)
 add_test(NAME assistant-connector COMMAND ark-assistant-tests)
 set_tests_properties(assistant-connector PROPERTIES TIMEOUT 30)
 
+add_executable(ark-provider-connector-tests tests/provider_connector_tests.cpp)
+target_link_libraries(ark-provider-connector-tests PRIVATE ark)
+add_test(NAME provider-connectors COMMAND ark-provider-connector-tests)
+set_tests_properties(provider-connectors PROPERTIES TIMEOUT 30)
+
 add_executable(ark-agent-team-tests tests/agent_team_tests.cpp)
 target_link_libraries(ark-agent-team-tests PRIVATE ark)
 add_test(NAME agent-team COMMAND ark-agent-team-tests)
@@ -325,6 +331,11 @@ if(ARK_WITH_OCCT)
 endif()
 add_test(NAME assembly-mates COMMAND ark-assembly-mate-tests)
 set_tests_properties(assembly-mates PROPERTIES TIMEOUT 60)
+
+add_executable(ark-assembly-manipulation-tool-tests tests/assembly_manipulation_tools_tests.cpp)
+target_link_libraries(ark-assembly-manipulation-tool-tests PRIVATE ark)
+add_test(NAME assembly-manipulation-tools COMMAND ark-assembly-manipulation-tool-tests)
+set_tests_properties(assembly-manipulation-tools PROPERTIES TIMEOUT 60)
 
 add_executable(ark-mechanical-motion-tests tests/mechanical_motion_tests.cpp)
 target_link_libraries(ark-mechanical-motion-tests PRIVATE ark)

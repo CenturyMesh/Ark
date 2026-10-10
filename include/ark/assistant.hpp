@@ -9,13 +9,17 @@
 
 namespace ark {
 enum class AssistantAuthMode { ApiKey, ChatGptPlan };
+enum class AssistantProtocol { Responses, ChatCompletions, Messages };
 // Configuration contains an environment-variable NAME, never an API key.
 struct AssistantConfig {
     AssistantAuthMode authMode=AssistantAuthMode::ApiKey;
+    AssistantProtocol protocol=AssistantProtocol::Responses;
+    std::string provider="openai"; // Preset identity; not credentials or a model choice.
     std::string endpoint="https://api.openai.com/v1/responses";
     std::string model; // Explicit user choice; no implicit paid model.
     std::string reasoningEffort; // Empty: provider default; explicit values are model-dependent.
     std::string apiKeyEnv="OPENAI_API_KEY"; // Empty only for unauthenticated local servers.
+    unsigned maxOutputTokens=8192; // Required per-response max_tokens for Messages; not a run budget.
     unsigned maxRounds=0; // Zero: continue until completion/cancel; optional bounded test/host mode.
     std::string onboardingPack; // Static source-owned guide, inserted once per conversation.
     unsigned timeoutSeconds=90;

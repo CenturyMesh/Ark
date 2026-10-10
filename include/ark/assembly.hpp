@@ -18,7 +18,7 @@ struct AssemblyNode {
 };
 struct AssemblyMate {
     u64 id=0,a=0,b=0; // Instance IDs, never feature definition IDs.
-    std::string type; // geometric mates or chain, gear, shaft, rack_pinion, cam
+    std::string type; // geometric (including revolute/rigid) or mechanical couplings
     std::string reference_a="origin",reference_b="origin";
     std::string value="0"; // Signed distance in mm or angle in degrees.
     double fraction_a=0.5,fraction_b=0.5; // Along semantic edge references.
@@ -63,4 +63,35 @@ struct AssemblyMotionProgram {
 };
 bool buildAssemblyMotion(const Document&,AssemblyMotionProgram&,std::string& error);
 arkjson::Value inspectAssemblyMotion(const AssemblyMotionProgram&,u64 driver,double speedRpm,double timeSeconds,double angleDegrees=0);
+// A manipulation is an exact rigid motion of one side of a grounded joint.
+// Internal passive joints retain their baseline coordinates. Closed loops,
+// ambiguous drives and coupling boundaries reject rather than approximate.
+struct AssemblyManipulationJoint {
+    u64 mate=0;
+    std::string type,mode; // rotate: degrees; translate: millimetres
+    Vec3 origin,axis; // world baseline pivot and oriented unit axis
+    std::vector<u64> movingNodes;
+};
+struct AssemblyManipulationProgram {
+    std::vector<AssemblyPlacement> baseline;
+    AssemblyDiagnostics diagnostics; // rank/DOFs measured at resolved baseline
+    std::vector<AssemblyManipulationJoint> joints;
+    std::vector<AssemblyMotionRelation> constraints;
+    std::unordered_map<u64,Mat4> parentFrames,authoredWorld;
+    std::unordered_map<u64,u64> rigidCluster;
+    std::vector<u64> fixedNodes,patternNodes;
+};
+struct AssemblyManipulationPreview {
+    std::vector<AssemblyPlacement> placements;
+    AssemblyDiagnostics diagnostics;
+    arkjson::Value commands; // assembly.edit pose recipe; caller must revision-check
+    AssemblyManipulationJoint joint;
+    double delta=0;
+};
+bool buildAssemblyManipulation(const Document&,AssemblyManipulationProgram&,std::string& error);
+bool selectAssemblyManipulationJoint(const AssemblyManipulationProgram&,u64 driver,u64 mate,
+                                    const std::string& mode,AssemblyManipulationJoint&,std::string& error);
+bool previewAssemblyManipulation(const AssemblyManipulationProgram&,u64 driver,u64 mate,
+                                const std::string& mode,double delta,
+                                AssemblyManipulationPreview&,std::string& error);
 }

@@ -1,4 +1,7 @@
-# Connect Codex to the open ARK Studio
+# Connect Codex to the open ARK
+
+For Claude Code/Desktop, OpenCode and provider connections inside ARK, see
+[AI connectors](AI_CONNECTORS.md). The live document bridge below is shared.
 
 ARK 0.8 provides a local live-session bridge. Codex calls the existing ARK MCP
 tools; Studio executes them on its document thread and refreshes the operator's

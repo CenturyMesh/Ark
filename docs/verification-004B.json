@@ -1,0 +1,214 @@
+{
+  "iteration": {
+    "sequence": 4,
+    "phase": "B",
+    "code": "004B",
+    "version": "0.9.5",
+    "milestones": [
+      "B.01",
+      "B.04",
+      "C.04",
+      "D.02",
+      "D.04"
+    ]
+  },
+  "date": "2026-10-10",
+  "base_commit": "67e3001102e925927329cbac9d5a5888034b1f01",
+  "native_ctest": {
+    "passed": 57,
+    "failed": 0,
+    "seconds": 31.78,
+    "log": "out\\ark-004B-native-tests.log"
+  },
+  "core_ctest": {
+    "passed": 40,
+    "failed": 0,
+    "seconds": 8.92,
+    "log": "out\\ark-004B-core-tests.log"
+  },
+  "ui_tests": [
+    {
+      "test": "interaction-ui",
+      "exit": 0,
+      "seconds": 0.96,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-004B-interaction-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "connectors-ui",
+      "exit": 0,
+      "seconds": 2.14,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-004B-connectors-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "assistant-ui",
+      "exit": 0,
+      "seconds": 17.09,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-004B-assistant-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "navigation-ui",
+      "exit": 0,
+      "seconds": 0.57,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-004B-navigation-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "render-ui",
+      "exit": 0,
+      "seconds": 2.38,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-004B-render-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "context-ui",
+      "exit": 0,
+      "seconds": 1.75,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-004B-context-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "dialogs",
+      "exit": 0,
+      "seconds": 1.67,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-004B-dialogs.png (1600x1000)\r\n",
+      "stderr": ""
+    }
+  ],
+  "final_changed_ui_retests": [
+    {
+      "test": "interaction-ui",
+      "exit": 0,
+      "seconds": 1.68,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-004B-final-interaction-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "connectors-ui",
+      "exit": 0,
+      "seconds": 2.18,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-004B-final-connectors-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "dialogs",
+      "exit": 0,
+      "seconds": 1.73,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-004B-final-dialogs.png (1600x1000)\r\n",
+      "stderr": ""
+    }
+  ],
+  "visual_review": [
+    "opaque shell encloses interior; transparency reveals it",
+    "cube preserved beside selection and move controls",
+    "grid5mm and1000mm with million-mm model offset",
+    "steering preview and savedpose",
+    "seven-type native mate dialog",
+    "provider dropdowns and mixed cards"
+  ],
+  "geometry_evidence": [
+    "grounded frame preserved",
+    "fork/handlebar/wheel propagated with passive spin preserved",
+    "signed multi-turn rotation and201 repeat previews without drift",
+    "parent-local persistence, nested groups and reload",
+    "fixed/loop/pattern/constraint failures reject",
+    "revision/atomic rollback/cached preview/undo redo",
+    "appearance retains material/density/geometric data"
+  ],
+  "provider_evidence": [
+    "Responses ChatCompletions Messages offline tool loops",
+    "mixed-provider AgentTeam with separate histories",
+    "full Chat argument validation before first tool",
+    "reasoning custody and stripped wire metadata",
+    "invalid usage remains unknown",
+    "ChatGPT plan external export does not become APIkey route",
+    "no credential content in exported configuration"
+  ],
+  "live_read_only_probes": {
+    "ollama_catalog": {
+      "version": "0.40.2",
+      "models": [
+        "hf.co/unsloth/Qwen3.8-27B-GGUF:UD-Q3_K_XL",
+        "qwen3.8:27b"
+      ],
+      "inference": false
+    },
+    "opencode_zen_catalog": {
+      "count": 87,
+      "url": "https://opencode.ai/zen/v1/models",
+      "inference": false
+    },
+    "opencode_mcp": {
+      "version": "1.18.32",
+      "connected": true,
+      "config_scope": "isolated ignored out directory",
+      "running_ark": "002B",
+      "inference": false
+    },
+    "live_mcp_document_read": {
+      "process_exit": 0,
+      "tool": "doc_info",
+      "live_document_reply": true,
+      "revision": 44,
+      "mutations": 0,
+      "path": "installed002B to live002B",
+      "paid_inference": false
+    }
+  },
+  "package": {
+    "url": "https://github.com/CenturyMesh/Ark-Releases/releases/download/v0.9.5/ark-windows-x64-0.9.5.zip",
+    "name": "ark-windows-x64-0.9.5.zip",
+    "sha256": "f0d00351d22816b34fc4711cf7374007c702a445d16d4bbfc2107992bfd61b39",
+    "size": 30160578
+  },
+  "runtime_hashes": [
+    {
+      "file": "ark-studio.exe",
+      "sha256": "115210c2a08dfe606ec448292779b60c6a358ed5116a467c6ba86881b1aaa1f4"
+    },
+    {
+      "file": "ark-cli.exe",
+      "sha256": "2febb4ccb48292e717872eb97128835c1cd99b435dd11827fcde67165243e1ba"
+    },
+    {
+      "file": "ark-mcp.exe",
+      "sha256": "27b46de0306335e7d0d579ec00ae2d85aec82adcee5830c35efb26ea0a9256fe"
+    },
+    {
+      "file": "ark-occt-worker.exe",
+      "sha256": "f6500eedc78c3c267cafe1b2df2c51d81ca61255991c5cd917c4842eb910bd22"
+    }
+  ],
+  "deployment": {
+    "state": {
+      "current": "0.9.3",
+      "pending": "0.9.5",
+      "schema": 1,
+      "activating": "",
+      "previous": "0.9.2"
+    },
+    "activation": "pending next launch",
+    "preserved_process": 72180,
+    "preserved_title": "ARK 002B",
+    "responding": true,
+    "restarted": false
+  },
+  "live_paid_provider_calls": 0,
+  "local_model_inference_calls": 0,
+  "existing_model_settings_changed": false,
+  "user_drawings_modified_by_delivery": false,
+  "external_global_client_config_modified": false,
+  "hosted_CI_checked": false,
+  "online_release_published": false,
+  "limits": [
+    "Joint manipulation is bounded kinematics, not a general dynamics/contact solver",
+    "New revolute/rigid joints require documentv29; existing drawings do not infer missing mates",
+    "Opacity applies to all instances of the same definition; transparency is sorted raster rendering",
+    "Paid Claude/Grok/Zen inference not tested; protocol fixtures and real readonly catalogs are separate evidence",
+    "OpenCode external integration tested with running002B bridge; Claude client not installed/registered",
+    "Model availability/pricing/free offers are not guaranteed; credentials required by each provider remain user-managed",
+    "004B installed pending; active002B session intentionally preserved"
+  ]
+}

@@ -16,6 +16,18 @@ Use a new material name for an independent variant. Material definitions and
 feature overrides persist in the `.ark` document; image files remain external.
 Relative texture paths resolve beside the open document.
 
+For interiors, the selected-body **Transparency** control toggles a persistent
+feature opacity override; **Opacity** accepts a value from 0 to 1. This affects
+all instances of that feature definition. Use a separate definition when one
+copy needs an independent appearance. Restoring opacity 1 makes it opaque;
+editing the named material instead affects all assigned features. Save and
+undo/redo preserve the change without recomputing the B-rep.
+
+Agents use `feature.edit{id,appearance:{opacity:0.25}}` with the observed
+`expected_revision`. Appearance replaces the feature's override object; preserve
+its other override fields when adjusting opacity. `appearance:null` clears the
+whole override and restores the named material appearance.
+
 **Graphics** controls occlusion mode, strength and radius, background, edge
 display, projection, and construction-plane visibility. **AO** cycles Off,
 Contact, Ambient and Horizon modes. Contact uses a smaller sampling region;

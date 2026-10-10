@@ -67,6 +67,7 @@ typedef ptrdiff_t GLsizeiptr;
 #include "ark/usage.hpp"
 #include "ark/serialize.hpp"
 #include "ark/assistant.hpp"
+#include "ark/assistant_connectors.hpp"
 #include "ark/onboarding.hpp"
 #include "ark/view_camera.hpp"
 #include "ark/agent_team.hpp"
@@ -234,6 +235,9 @@ static std::vector<std::string> g_instanceNames;
 static std::vector<Mat4> g_instanceWorld;
 static AssemblyDiagnostics g_assemblyDiagnostics;
 static AssemblyMotionProgram g_motionProgram;static u64 g_motionRevision=std::numeric_limits<u64>::max(),g_motionDriver=0;
+struct ComponentMove {bool armed=false,dragging=false,active=false;u64 revision=0,epoch=0,driver=0;int x=0,y=0;double delta=0;Vec3 radial;AssemblyManipulationProgram program;AssemblyManipulationJoint joint;std::vector<Mat4> baseline;};
+static ComponentMove g_componentMove;
+static void armComponentMove();static void cancelComponentMove(bool restore=true);static void applyComponentMove();
 static bool g_motionActive=false,g_motionPlaying=false;static double g_motionTime=0,g_motionRpm=60;static std::string g_motionRpmExpression="cadence_rpm";
 static arkjson::Value g_motionReport;
 static int g_selectedMate=-1;
@@ -294,6 +298,8 @@ static bool g_teamMode=false,g_teamStarted=false,g_teamFocusedWorkflow=true;
 static constexpr size_t teamCapacity=8;static unsigned g_teamRoleCount=3,g_teamPage=0;
 static AgentTeam g_agentTeam;static AgentTeamSnapshot g_teamSnapshot;
 static std::array<std::string,8> g_teamModels{},g_teamEfforts{};
+static std::array<std::optional<AssistantConfig>,8> g_teamConnectors{};
+static AssistantConfig teamRoleConfig(size_t index);
 static std::array<std::string,8> g_teamReceiptIds{};
 static std::array<std::optional<UsageReceipt>,8> g_teamReceipts{};
 static std::string g_teamGoal,g_teamTarget;
@@ -697,12 +703,12 @@ static const char* FS_EDGE=R"(#version 330 core
 out vec4 o; uniform vec3 color; void main(){o=vec4(color,1.);}
 )";
 static const char* VS_LINE=R"(#version 330 core
-layout(location=0) in vec3 P; uniform mat4 vp; out vec2 gridPos;
-void main(){gl_Position=vp*vec4(P,1.);gridPos=P.xz;})";
+layout(location=0) in vec3 P; layout(location=1) in float weight; uniform mat4 vp; out vec2 gridPos; out float lineWeight;
+void main(){gl_Position=vp*vec4(P,1.);gridPos=P.xz;lineWeight=weight;})";
 static const char* FS_LINE=R"(#version 330 core
-in vec2 gridPos; out vec4 o;
-uniform float lightBackground;
-void main(){vec3 col=mix(vec3(.40,.42,.46),vec3(.45,.48,.52),lightBackground); float a=mix(.28,.55,lightBackground); o=vec4(col,exp(-dot(gridPos,gridPos)*.00012)*a);})";
+in vec2 gridPos; in float lineWeight; out vec4 o;
+uniform float lightBackground,fadeRadius;
+void main(){vec3 col=mix(vec3(.40,.42,.46),vec3(.45,.48,.52),lightBackground); float a=mix(.30,.55,lightBackground)*lineWeight; vec2 q=gridPos/max(fadeRadius,.0001); o=vec4(col,exp(-dot(q,q)*1.6)*a);})";
 static const char* VS_SHADOW=R"(#version 330 core
 layout(location=0) in vec2 P; uniform mat4 vp; uniform vec3 ctr; uniform vec2 rad;
 out vec2 uv;
@@ -1315,7 +1321,7 @@ static arkjson::Value runTool(const std::string& tool,const arkjson::Value& args
     bool potentiallySlow=tool.rfind("library_",0)==0||tool=="manufacturing_inspect"||tool=="doc_load"||tool=="iteration_restore"||tool=="doc_apply"||tool=="doc_preview"||tool=="design_solve"||tool=="placement_plan"||tool=="pattern_plan"||tool=="query_batch"||tool=="geometry_query"||tool=="physics_inspect"||tool=="native_inspect"||tool=="step_inspect"||tool=="reference_inspect"||tool=="assembly_info"||tool=="kernel_info"||tool=="doc_undo"||tool=="doc_redo"||tool=="import_step"||tool=="import_sheet_step"||tool=="import_mesh"||tool=="export_step"||tool=="export_iges"||tool=="export_mesh"||tool=="export_flat_dxf";
     auto result=potentiallySlow&&g_uiReady&&(!g_headless||g_busyTestMode)?callSessionWithProgress(tool,effectiveArgs):g_session.call(tool,effectiveArgs);g_error=result.find("isError")->b;
     u64 loadedUsageSerial=g_doc.usage.serial;
-    if(!g_error&&mutations.count(tool))clearProjectionPreview();
+    if(!g_error&&mutations.count(tool)){clearProjectionPreview();cancelComponentMove(false);}
     if(g_error)g_status=result.find("structuredContent")->find("error")->asStr();
     else g_status=tool+" completed  /  revision "+std::to_string(g_session.revision);
     if(!g_error&&(tool=="doc_load"||tool=="iteration_restore"||tool=="doc_new"||tool=="import_step"||tool=="import_sheet_step")){g_sheetFlatViews.clear();g_sheetProgress.clear();g_sheetPlayingId=0;}
@@ -1364,7 +1370,7 @@ static LRESULT CALLBACK editorProc(HWND h,UINT m,WPARAM w,LPARAM l){
     if(m==WM_TIMER&&w==901){
         KillTimer(h,901);
         if(g_dialogOverrides.empty()&&!g_dialogOverrideQueue.empty()){g_dialogOverrides=std::move(g_dialogOverrideQueue.front());g_dialogOverrideQueue.pop_front();}
-        for(size_t i=0;i<g_dialogOverrides.size();++i){auto control=GetDlgItem(h,3+(int)i);char kind[32]{};GetClassNameA(control,kind,sizeof kind);if(std::strcmp(kind,"Button")==0)SendMessage(control,BM_SETCHECK,g_dialogOverrides[i]=="1"?BST_CHECKED:BST_UNCHECKED,0);else SetWindowTextA(control,g_dialogOverrides[i].c_str());}g_dialogOverrides.clear();
+        for(size_t i=0;i<g_dialogOverrides.size();++i){auto control=GetDlgItem(h,3+(int)i);char kind[32]{};GetClassNameA(control,kind,sizeof kind);if(std::strcmp(kind,"Button")==0)SendMessage(control,BM_SETCHECK,g_dialogOverrides[i]=="1"?BST_CHECKED:BST_UNCHECKED,0);else if(std::strcmp(kind,"ComboBox")==0){auto index=SendMessageA(control,CB_FINDSTRINGEXACT,-1,(LPARAM)g_dialogOverrides[i].c_str());if(index!=CB_ERR)SendMessage(control,CB_SETCURSEL,index,0);else SetWindowTextA(control,g_dialogOverrides[i].c_str());}else SetWindowTextA(control,g_dialogOverrides[i].c_str());}g_dialogOverrides.clear();
         if(!g_dialogShot.empty()){
             RECT r{};GetWindowRect(h,&r);int width=r.right-r.left,height=r.bottom-r.top;
             HDC screen=GetDC(h),dc=CreateCompatibleDC(screen);BITMAPINFO bi{};bi.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);bi.bmiHeader.biWidth=width;bi.bmiHeader.biHeight=-height;bi.bmiHeader.biPlanes=1;bi.bmiHeader.biBitCount=32;
@@ -1384,7 +1390,7 @@ static LRESULT CALLBACK editorProc(HWND h,UINT m,WPARAM w,LPARAM l){
     }
     return DefWindowProcA(h,m,w,l);
 }
-struct EditorField { std::string name,value;bool toggle=false; };
+struct EditorField { std::string name,value;bool toggle=false;std::vector<std::string> choices;bool editableChoice=false; };
 static bool editFields(const char* title,const char* hint,std::vector<EditorField>& fields,bool multiline=false,const char* confirm="Apply"){
     WNDCLASSA wc{};wc.lpfnWndProc=editorProc;wc.hInstance=GetModuleHandle(nullptr);wc.lpszClassName="ARK_EDITOR";wc.hbrBackground=dialogBrush;wc.hCursor=LoadCursor(nullptr,IDC_ARROW);RegisterClassA(&wc);
     RECT r;GetWindowRect(g_window,&r);int width=multiline?840:620,height=multiline?520:190+(int)fields.size()*62;
@@ -1399,7 +1405,8 @@ static bool editFields(const char* title,const char* hint,std::vector<EditorFiel
     std::vector<HWND> edits;
     for(size_t i=0;i<fields.size();++i){int y=110+(int)i*62;
         if(!multiline)control("STATIC",fields[i].name.c_str(),0,28,y+7,205,28,0,font);
-        HWND e=fields[i].toggle?control("BUTTON","",WS_TABSTOP|BS_AUTOCHECKBOX,235,y,40,33,3+(int)i,font):control("EDIT",fields[i].value.c_str(),WS_TABSTOP|WS_BORDER|ES_AUTOHSCROLL|(multiline?ES_MULTILINE|ES_AUTOVSCROLL|WS_VSCROLL|ES_WANTRETURN:0),multiline?26:235,y,multiline?width-52:width-263,multiline?height-184:33,3+(int)i,mono);
+        HWND e=fields[i].toggle?control("BUTTON","",WS_TABSTOP|BS_AUTOCHECKBOX,235,y,40,33,3+(int)i,font):!fields[i].choices.empty()?control("COMBOBOX","",WS_TABSTOP|WS_VSCROLL|(fields[i].editableChoice?CBS_DROPDOWN:CBS_DROPDOWNLIST),235,y,width-263,240,3+(int)i,font):control("EDIT",fields[i].value.c_str(),WS_TABSTOP|WS_BORDER|ES_AUTOHSCROLL|(multiline?ES_MULTILINE|ES_AUTOVSCROLL|WS_VSCROLL|ES_WANTRETURN:0),multiline?26:235,y,multiline?width-52:width-263,multiline?height-184:33,3+(int)i,mono);
+        if(!fields[i].choices.empty()){for(const auto& choice:fields[i].choices)SendMessageA(e,CB_ADDSTRING,0,(LPARAM)choice.c_str());auto selected=SendMessageA(e,CB_FINDSTRINGEXACT,-1,(LPARAM)fields[i].value.c_str());if(selected!=CB_ERR)SendMessage(e,CB_SETCURSEL,selected,0);else if(fields[i].editableChoice)SetWindowTextA(e,fields[i].value.c_str());}
         if(fields[i].toggle)SendMessage(e,BM_SETCHECK,fields[i].value=="1"?BST_CHECKED:BST_UNCHECKED,0);
         SendMessage(e,EM_SETMARGINS,EC_LEFTMARGIN|EC_RIGHTMARGIN,MAKELPARAM(8,8));edits.push_back(e);
     }
@@ -1409,6 +1416,7 @@ static bool editFields(const char* title,const char* hint,std::vector<EditorFiel
     g_edit=edits.front();g_dialogDone=g_dialogAccept=false;EnableWindow(g_window,FALSE);ShowWindow(g_dialog,SW_SHOW);SetFocus(g_edit);SendMessage(g_edit,EM_SETSEL,0,-1);
     if(g_dialogSmoke)SetTimer(g_dialog,901,200,nullptr);
     MSG msg;while(!g_dialogDone&&GetMessage(&msg,nullptr,0,0)>0){
+        char focusedClass[32]{};GetClassNameA(GetFocus(),focusedClass,sizeof focusedClass);if(std::strcmp(focusedClass,"ComboBox")==0&&SendMessage(GetFocus(),CB_GETDROPPEDSTATE,0,0)&&(msg.message==WM_KEYDOWN&&(msg.wParam==VK_ESCAPE||msg.wParam==VK_RETURN))){SendMessage(GetFocus(),CB_SHOWDROPDOWN,FALSE,0);continue;}
         if(msg.message==WM_KEYDOWN&&msg.wParam==VK_ESCAPE){g_dialogDone=true;continue;}
         if(msg.message==WM_KEYDOWN&&msg.wParam==VK_RETURN&&(!multiline||GetDlgCtrlID(GetFocus())<=2||(GetKeyState(VK_CONTROL)&0x8000))){g_dialogDone=true;g_dialogAccept=GetDlgCtrlID(GetFocus())!=2;continue;}
         if(!IsDialogMessage(g_dialog,&msg)){TranslateMessage(&msg);DispatchMessage(&msg);}
@@ -2158,15 +2166,20 @@ static void sketchFeatureDialog(bool cut){
 static void parameterDialog(){std::vector<EditorField> fields{{"Parameter name","width"},{"Expression","100"}};if(!editFields("Named parameter","Create or update a dimension shared by sketches and features.",fields))return;using V=arkjson::Value;V c=V::makeObj();c.set("op",V::makeStr("param.set"));c.set("name",V::makeStr(fields[0].value));c.set("expr",V::makeStr(fields[1].value));applyCommand(c);}
 static std::filesystem::path g_settingsOverride;
 static std::filesystem::path uiSettingsPath(){if(!g_settingsOverride.empty())return g_settingsOverride;auto* base=_wgetenv(L"LOCALAPPDATA");return (base?std::filesystem::path(base):std::filesystem::temp_directory_path())/"ARK"/"studio.json";}
+static arkjson::Value connectorSettings(const AssistantConfig& config){using V=arkjson::Value;V v=V::makeObj();v.set("provider",V::makeStr(config.provider));v.set("protocol",V::makeStr(assistantProtocolName(config.protocol)));v.set("endpoint",V::makeStr(config.endpoint));v.set("api_key_env",V::makeStr(config.apiKeyEnv));v.set("max_output_tokens",V::makeNum(config.maxOutputTokens));return v;}
+static void readConnectorSettings(const arkjson::Value& v,AssistantConfig& config){using V=arkjson::Value;if(auto* p=v.find("provider");p&&p->t==V::Str)config.provider=p->str;if(auto* p=v.find("protocol");p&&p->t==V::Str)config.protocol=assistantProtocolFromName(p->str);if(auto* p=v.find("endpoint");p&&p->t==V::Str)config.endpoint=p->str;if(auto* p=v.find("api_key_env");p&&p->t==V::Str)config.apiKeyEnv=p->str;if(auto* p=v.find("max_output_tokens")){if(p->t!=V::Num||p->num<1||p->num>131072||std::floor(p->num)!=p->num)throw std::runtime_error("Stored Messages response limit must be an integer from 1 to 131072");config.maxOutputTokens=(unsigned)p->num;}}
 static void saveUiSettings(){
     using V=arkjson::Value;V j=V::makeObj();j.set("endpoint",V::makeStr(g_assistantConfig.endpoint));j.set("model",V::makeStr(g_assistantConfig.model));j.set("reasoning_effort",V::makeStr(g_assistantConfig.reasoningEffort));j.set("api_key_env",V::makeStr(g_assistantConfig.apiKeyEnv));j.set("assistant_auth_mode",V::makeStr(g_assistantConfig.authMode==AssistantAuthMode::ChatGptPlan?"chatgpt_plan":"api_key"));j.set("grid",V::makeBool(g_grid));j.set("wireframe",V::makeBool(wireframe));j.set("light_background",V::makeBool(g_lightBackground));j.set("satin",V::makeBool(g_satin));j.set("show_datum_planes",V::makeBool(g_showDatumPlanes));j.set("occlusion_mode",V::makeNum(g_occlusionMode));j.set("occlusion_strength",V::makeNum(g_occlusionStrength));j.set("occlusion_radius",V::makeNum(g_occlusionRadius));j.set("show_edges",V::makeBool(g_showEdges));j.set("orthographic",V::makeBool(g_cameraOrtho));
     V team=V::makeArr();for(size_t i=0;i<teamCapacity;++i){V role=V::makeObj();role.set("model",V::makeStr(g_teamModels[i]));role.set("reasoning_effort",V::makeStr(g_teamEfforts[i]));team.arr.push_back(std::move(role));}j.set("team_roles",std::move(team));j.set("team_role_count",V::makeNum(g_teamRoleCount));j.set("team_focused_workflow",V::makeBool(g_teamFocusedWorkflow));j.set("team_mode",V::makeBool(g_teamMode));j.set("library_root",V::makeStr(g_libraryRoot));j.set("library_search",V::makeStr(g_libraryText));
+    j.set("connector",connectorSettings(g_assistantConfig));V connectors=V::makeArr();for(size_t i=0;i<teamCapacity;++i)connectors.arr.push_back(g_teamConnectors[i]?connectorSettings(*g_teamConnectors[i]):V{});j.set("team_connectors",connectors);
     auto path=uiSettingsPath();std::filesystem::create_directories(path.parent_path());std::ofstream out(path);out<<j.dump();if(!out)throw std::runtime_error("Could not save ARK settings");
 }
 static void loadUiSettings(){
     try{std::ifstream in(uiSettingsPath());if(!in)return;std::string data((std::istreambuf_iterator<char>(in)),{});arkjson::Value j;if(!arkjson::parse(data,j))return;
         if(auto* v=j.find("endpoint"))g_assistantConfig.endpoint=v->asStr();if(auto* v=j.find("model"))g_assistantConfig.model=v->asStr();if(auto* v=j.find("reasoning_effort");v&&v->t==arkjson::Value::Str)g_assistantConfig.reasoningEffort=v->str;if(auto* v=j.find("api_key_env"))g_assistantConfig.apiKeyEnv=v->asStr();
         if(auto* v=j.find("assistant_auth_mode");v&&v->t==arkjson::Value::Str)g_assistantConfig.authMode=v->str=="chatgpt_plan"?AssistantAuthMode::ChatGptPlan:AssistantAuthMode::ApiKey;
+        if(auto* v=j.find("connector");v&&v->t==arkjson::Value::Obj)readConnectorSettings(*v,g_assistantConfig);
+        if(auto* connectors=j.find("team_connectors");connectors&&connectors->t==arkjson::Value::Arr)for(size_t i=0;i<teamCapacity&&i<connectors->arr.size();++i)if(connectors->arr[i].t==arkjson::Value::Obj){AssistantConfig config;config.authMode=AssistantAuthMode::ApiKey;readConnectorSettings(connectors->arr[i],config);g_teamConnectors[i]=config;}
         if(auto* v=j.find("team_mode");v&&v->t==arkjson::Value::Bool)g_teamMode=v->b;
         if(auto* v=j.find("library_root");v&&v->t==arkjson::Value::Str)g_libraryRoot=v->str;if(auto* v=j.find("library_search");v&&v->t==arkjson::Value::Str)g_libraryText=v->str;
         if(auto* count=j.find("team_role_count");count&&count->t==arkjson::Value::Num&&count->num>=3&&count->num<=8)g_teamRoleCount=(unsigned)count->num;
@@ -2236,6 +2249,22 @@ static void materialDialog(){
     std::string featureName=feature->name;
     V args=V::makeObj();args.set("expected_revision",V::makeNum((double)g_session.revision));args.set("commands",std::move(commands));runTool("doc_apply",args);
     if(!g_error)g_status="Material "+name+" applied to "+featureName;
+}
+// An opacity override belongs to the part definition; physical material data is untouched.
+static void setSelectedOpacity(double opacity){
+    if(selBody<0||(size_t)selBody>=g_bodyIds.size())throw std::runtime_error("Select a part to change its opacity");
+    auto* feature=g_doc.find(g_bodyIds[(size_t)selBody]);if(!feature)throw std::runtime_error("The selected part definition is unavailable");
+    if(!std::isfinite(opacity)||opacity<.05||opacity>1.)throw std::runtime_error("Opacity must be between 5 and 100 percent");
+    using V=arkjson::Value;V appearance=feature->appearance.t==V::Obj?feature->appearance:V::makeObj();appearance.set("opacity",V::makeNum(opacity));
+    V command=V::makeObj();command.set("op",V::makeStr("feature.edit"));command.set("id",V::makeNum((double)feature->id));command.set("appearance",appearance);applyCommand(command);
+    if(!g_error)g_status="Opacity saved for this part definition and every instance / material and density retained";
+}
+static void selectedOpacityDialog(){
+    if(selBody<0||(size_t)selBody>=g_bodyIds.size())throw std::runtime_error("Select a part to change its opacity");
+    auto* feature=g_doc.find(g_bodyIds[(size_t)selBody]);if(!feature)throw std::runtime_error("The selected part definition is unavailable");
+    auto revision=g_session.revision,epoch=g_documentEpoch;u64 id=feature->id;
+    std::vector<EditorField> fields{{"Opacity / percent",std::to_string((int)std::lround(resolvedAppearance(g_doc,*feature).opacity*100))}};
+    if(editFields("Part transparency","Applies to every instance of this part definition. 5-100 percent; 100 restores opaque. Physical material and density are retained.",fields)){if(revision!=g_session.revision||epoch!=g_documentEpoch||selBody<0||(size_t)selBody>=g_bodyIds.size()||g_bodyIds[(size_t)selBody]!=id)throw std::runtime_error("The drawing or selection changed while editing opacity; reopen the part");setSelectedOpacity(formNumber(fields[0].value)/100.);}
 }
 static void physicalProperties(bool assemblyTotal=false){
     if(selBody<0&&g_doc.assembly.empty())throw std::runtime_error("Select a body to inspect physical properties");
@@ -2372,12 +2401,41 @@ static void ingestLibraryStep(const std::string& explicitPath={}){
     if(!editFields("Store STEP component","Copies the STEP and verifies native geometry. Record known origin and license; blank metadata remains unknown. A multi-solid source needs an explicit body or all selection.",fields))return;
     g_libraryRoot=trimField(fields[8].value);auto args=libraryArgs();args.set("path",V::makeStr(path));V metadata=V::makeObj();const char* keys[]={"name","category","provenance","source_url","license","material","standard"};for(size_t i=0;i<7;++i)if(!trimField(fields[i].value).empty())metadata.set(keys[i],V::makeStr(trimField(fields[i].value)));args.set("metadata",metadata);auto body=trimField(fields[7].value);if(body=="all")args.set("all_bodies",V::makeBool(true));else if(body!="auto"){double index=formNumber(body);if(index<0||std::floor(index)!=index)throw std::runtime_error("Body selection must be auto, all or a zero-based integer.");args.set("body_index",V::makeNum(index));}g_libraryLastId.clear();auto result=runTool("library_ingest",args);if(!g_error){if(auto* record=result.find("structuredContent"))g_libraryLastId=libraryText(*record,"id");g_status="STEP component stored in library; open Library to find and reuse it.";if(!g_dialogSmoke)saveUiSettings();}
 }
+static bool editConnector(AssistantConfig& config,bool role,bool& inherit){
+    auto profileShot=g_dialogShot;
+    std::vector<std::string> providers;if(role)providers.push_back("inherit");else providers.push_back("chatgpt-plan");for(const auto& preset:assistantProviderPresets())providers.push_back(preset.id);
+    std::string current=inherit?"inherit":config.authMode==AssistantAuthMode::ChatGptPlan?"chatgpt-plan":config.provider;
+    if(std::find(providers.begin(),providers.end(),current)==providers.end())current="custom";
+    std::vector<EditorField> profile{{"Provider",current,false,providers},{"Refresh model catalog", "0",true}};
+    if(!editFields(role?"Agent card connector":"Assistant connector","Choose a provider. Catalog refresh reads available model IDs without starting inference. Keys remain in environment variables.",profile))return false;
+    auto provider=profile[0].value;inherit=provider=="inherit";if(inherit)return true;if(provider=="chatgpt-plan"){config.authMode=AssistantAuthMode::ChatGptPlan;config.provider="openai";config.protocol=AssistantProtocol::Responses;config.endpoint="https://api.openai.com/v1/responses";return true;}
+    if(provider!=config.provider||config.authMode!=AssistantAuthMode::ApiKey)config=assistantProviderPreset(provider);
+    config.authMode=AssistantAuthMode::ApiKey;std::vector<std::string> models;
+    if(profile[1].value=="1"){
+        auto operation=[config]{auto result=arkjson::Value::makeArr();for(const auto& model:assistantProviderModels(config))result.arr.push_back(arkjson::Value::makeStr(model));return result;};
+        auto result=g_headless?operation():callSessionWithProgress("assistant_model_catalog",arkjson::Value::makeObj(),operation);for(const auto& row:result.arr)models.push_back(row.asStr());
+    }
+    if(!config.model.empty()&&std::find(models.begin(),models.end(),config.model)==models.end())models.insert(models.begin(),config.model);if(models.empty())models.push_back("");
+    std::vector<EditorField> fields{{"Endpoint",config.endpoint},{"Model / choose or type",config.model,false,models,true},{"API key env / blank local",config.apiKeyEnv},{"Protocol",assistantProtocolName(config.protocol),false,{"responses","chat-completions","messages"}}};
+    bool hasMessagesLimit=config.protocol==AssistantProtocol::Messages;if(hasMessagesLimit)fields.push_back({"Messages response limit",std::to_string(config.maxOutputTokens)});
+    fields.push_back({"Reasoning effort / auto",config.reasoningEffort.empty()?"auto":config.reasoningEffort});
+    if(!profileShot.empty()&&g_dialogSmoke)g_dialogShot=profileShot+".endpoint.png";
+    if(!editFields("Provider endpoint and model","Choose an actual model ID. Remote providers need their own API key; Ollama can run locally. Endpoint/protocol must match the selected service.",fields))return false;
+    config.endpoint=trimField(fields[0].value);config.model=trimField(fields[1].value);config.apiKeyEnv=trimField(fields[2].value);config.protocol=assistantProtocolFromName(fields[3].value);auto effort=trimField(fields[hasMessagesLimit?5:4].value);config.reasoningEffort=effort=="auto"?"":effort;if(hasMessagesLimit){double output=formNumber(fields[4].value);if(output<1||output>131072||std::floor(output)!=output)throw std::runtime_error("Messages response limit must be a positive integer up to 131072");config.maxOutputTokens=(unsigned)output;}validateAssistantConfig(config);return true;
+}
 static void connectorDialog(){
-    std::vector<EditorField> fields{{"Responses endpoint",g_assistantConfig.endpoint},{"Model",g_assistantConfig.model},{"API key environment",g_assistantConfig.apiKeyEnv}};
-    if(!editFields("Assistant connector","Use a Responses-compatible API. Enter an environment-variable NAME, never the secret key.",fields))return;
-    auto config=g_assistantConfig;if(config.authMode!=AssistantAuthMode::ApiKey||config.model!=fields[1].value)config.reasoningEffort.clear();config.authMode=AssistantAuthMode::ApiKey;config.endpoint=fields[0].value;config.model=fields[1].value;config.apiKeyEnv=fields[2].value;validateAssistantConfig(config);g_assistantConfig=config;*g_assistantCancel=true;++g_documentEpoch;g_conversation=arkjson::Value::makeArr();if(!g_dialogSmoke)saveUiSettings();
-    clearPendingRoleSettings();
-    g_status=assistantKeyAvailable(config)?"Connector configured; credential present. No request sent.":"Connector configured; credential environment variable is unavailable.";
+    if(g_teamStarted&&g_agentTeam.snapshot().running){g_status="Finish or cancel the active team before changing connectors";return;}
+    auto config=g_assistantConfig;bool inherit=false;if(!editConnector(config,false,inherit))return;
+    g_assistantConfig=config;*g_assistantCancel=true;++g_documentEpoch;g_conversation=arkjson::Value::makeArr();if(!g_dialogSmoke)saveUiSettings();clearPendingRoleSettings();
+    g_status=config.authMode==AssistantAuthMode::ChatGptPlan?"ChatGPT connector selected; choose the connected account model from Account.":"Provider connector saved; no inference started.";
+}
+static void teamConnectorDialog(size_t index){
+    if(index>=teamCapacity)return;if(g_teamStarted&&g_agentTeam.snapshot().running){g_status="Finish or cancel the active team before changing a card connector";return;}
+    auto config=teamRoleConfig(index);bool inherit=!g_teamConnectors[index];
+    if(!editConnector(config,true,inherit))return;
+    if(g_teamStarted){*g_teamCancel=true;g_agentTeam.cancel();g_teamStarted=false;resetTeamView();}
+    if(inherit){if(g_teamConnectors[index]){g_teamModels[index].clear();g_teamEfforts[index].clear();}g_teamConnectors[index].reset();}else{g_teamConnectors[index]=config;g_teamModels[index]=config.model;g_teamEfforts[index]=config.reasoningEffort.empty()?"auto":config.reasoningEffort;}
+    if(!g_dialogSmoke)saveUiSettings();g_status="Agent card connector saved for the next team run; other cards retain their connectors.";
 }
 static void startAuthJob(AuthJob job,std::string clientId={},bool requestPlanConsent=false){
     if(job==AuthJob::SignOut)clearPendingRoleSettings();
@@ -2409,7 +2467,7 @@ static void chooseChatGptModel(){
     POINT cursor;GetCursorPos(&cursor);int action=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,cursor.x,cursor.y,0,g_window,nullptr);
     DestroyMenu(menu);PostMessage(g_window,WM_NULL,0,0);
     if(action>=700&&(size_t)(action-700)<shown){const std::string model=g_authModels[(size_t)(action-700)].slug;
-        AssistantConfig config=g_assistantConfig;config.authMode=AssistantAuthMode::ChatGptPlan;config.endpoint="https://api.openai.com/v1/responses";config.model=model;config.reasoningEffort.clear();
+        AssistantConfig config=g_assistantConfig;config.authMode=AssistantAuthMode::ChatGptPlan;config.provider="openai";config.protocol=AssistantProtocol::Responses;config.endpoint="https://api.openai.com/v1/responses";config.model=model;config.reasoningEffort.clear();
         validateAssistantConfig(config);g_assistantConfig=std::move(config);*g_assistantCancel=true;++g_documentEpoch;g_conversation=arkjson::Value::makeArr();saveUiSettings();
         g_status="ChatGPT plan model selected: "+model+" / reasoning effort Auto";
     }
@@ -2512,7 +2570,10 @@ static AssistantConfig teamRoleConfigValues(const std::string& model,const std::
         else if(!model.empty()&&model!=g_assistantConfig.model)config.reasoningEffort.clear();
     }return config;
 }
-static AssistantConfig teamRoleConfig(size_t index){return teamRoleConfigValues(g_teamModels[index],g_teamEfforts[index]);}
+static AssistantConfig teamRoleConfig(size_t index){
+    if(!g_teamConnectors[index])return teamRoleConfigValues(g_teamModels[index],g_teamEfforts[index]);
+    auto config=*g_teamConnectors[index];config.maxRounds=g_assistantConfig.maxRounds;if(!g_teamModels[index].empty())config.model=g_teamModels[index];config.reasoningEffort=g_teamEfforts[index]=="auto"?"":g_teamEfforts[index];return config;
+}
 static std::string assistantPrompt(const std::string& explicitPrompt={}){
     if(!explicitPrompt.empty())return explicitPrompt;if(!g_chatInput)return {};
     int n=GetWindowTextLengthW(g_chatInput);std::vector<wchar_t> buffer(n+1);GetWindowTextW(g_chatInput,buffer.data(),n+1);
@@ -2598,8 +2659,8 @@ static bool editRoleModel(size_t index,std::string& model,std::string& effort){
 static void teamRoleDialog(size_t index){
     if(g_teamStarted&&g_agentTeam.snapshot().running){g_status="Finish or cancel the team before changing role settings. Changes apply to a new team run.";return;}
     std::string model=g_teamModels[index],effort=g_teamEfforts[index];
-    if(g_assistantConfig.authMode==AssistantAuthMode::ChatGptPlan){if(!g_authStatus.connected||!g_authStatus.planAuthorized){g_status="Connect and authorize ChatGPT from Account before choosing role models.";return;}if(g_authBusy||g_authModels.empty()){requestRoleCatalog(index);return;}if(!editRoleModel(index,model,effort))return;}
-    else{std::vector<EditorField> fields{{"Model (manual)",model},{"Effort (manual)",effort}};if(!editFields("Advanced role connector","API-key/custom endpoints: advanced manual settings. Blank inherits Assistant; auto uses the provider default.",fields))return;model=trimField(fields[0].value);effort=trimField(fields[1].value);validateAssistantConfig(teamRoleConfigValues(model,effort));}
+    if(teamRoleConfig(index).authMode==AssistantAuthMode::ChatGptPlan){if(!g_authStatus.connected||!g_authStatus.planAuthorized){g_status="Connect and authorize ChatGPT from Account before choosing role models.";return;}if(g_authBusy||g_authModels.empty()){requestRoleCatalog(index);return;}if(!editRoleModel(index,model,effort))return;}
+    else{auto config=teamRoleConfig(index);std::vector<EditorField> fields{{"Model (manual)",model.empty()?config.model:model},{"Effort (manual)",effort}};if(!editFields("Advanced role connector","Configure this card model and provider-supported effort. Blank inherits the card connector model; auto uses the provider default.",fields))return;model=trimField(fields[0].value);effort=trimField(fields[1].value);if(!model.empty())config.model=model;config.reasoningEffort=effort=="auto"?"":effort;validateAssistantConfig(config);}
     if(g_teamStarted){cancelTeam();g_teamStarted=false;resetTeamView();}g_teamModels[index]=model;g_teamEfforts[index]=effort;if(!g_dialogSmoke)saveUiSettings();g_status="Role model and reasoning saved together for the next team run.";
 }
 static void openPendingRoleSettings(){if(g_pendingRoleSettings<0||!g_roleCatalogReady||g_dialog||g_busy)return;int role=g_pendingRoleSettings;g_pendingRoleSettings=-1;g_roleCatalogReady=false;if(g_pendingRoleAccount==g_authStatus.activeClientId&&g_assistantConfig.authMode==AssistantAuthMode::ChatGptPlan&&!g_authModels.empty())teamRoleDialog((size_t)role);}
@@ -2668,8 +2729,10 @@ static void stopIntegrations(){
     while(PeekMessage(&msg,g_window,WM_ARK_PRICE,WM_ARK_TEAM,PM_REMOVE)){if(msg.message==WM_ARK_PRICE)delete (PricingCatalog*)msg.lParam;else if(msg.message==WM_ARK_TEAM)delete (UiTeamEvent*)msg.lParam;}
 }
 static void liveConnectionDialog(){
-    std::string text=g_liveBridge.endpoint().empty()?"Live MCP is not running.":("Connect Codex or another MCP client to this exact open document:\r\n\r\nark-mcp --connect \""+g_liveBridge.endpoint()+"\"\r\n\r\nCall agent_onboard first. This local pipe is restricted to the current Windows user.\r\n\r\nThe API assistant connector is configured separately; this endpoint is not an API credential.");
-    editText("Live document / Codex MCP connection",text,true);
+    if(g_liveBridge.endpoint().empty()){std::string text="Live MCP is not running.";editText("Live document connection",text,true);return;}
+    std::vector<EditorField> fields{{"External client","codex",false,{"codex","claude-code","claude-desktop","opencode"}}};if(!editFields("Connect an external agent","Export a configuration for this exact open document. The client uses its own authorized provider account. Copy the result into that client's MCP settings.",fields))return;
+    wchar_t executable[32768]{};GetModuleFileNameW(nullptr,executable,32768);auto file=std::filesystem::path(executable).parent_path()/"ark-mcp.exe";auto utf8=file.u8string();std::string text=assistantExternalMcpConfig(fields[0].value,std::string(utf8.begin(),utf8.end()),g_liveBridge.endpoint(),g_assistantConfig);
+    g_status="External MCP configuration for "+fields[0].value+" / current document / copy with Ctrl+A and Ctrl+C / call agent_onboard first";auto title="Copy "+fields[0].value+" configuration / current document MCP";std::vector<EditorField> output{{"Configuration",text}};editFields(title.c_str(),"Copy the raw configuration with Ctrl+A / Ctrl+C into this client's MCP settings. The endpoint binds this exact open document. Call agent_onboard first.",output,true,"Close");
 }
 static void newDocument(){
     if(!confirmDiscard())return;*g_assistantCancel=true;auto args=arkjson::Value::makeObj();args.set("expected_revision",arkjson::Value::makeNum((double)g_session.revision));runTool("doc_new",args);if(g_error)return;
@@ -3137,6 +3200,7 @@ static void setOrbitView(double nyaw,double npitch,bool ortho,const char* name){
     if(name)g_status=std::string(name)+(ortho?" view / orthographic":" view / perspective");
 }
 static void uiAction(int id){
+    if(id==562){armComponentMove();return;}if(id==563){applyComponentMove();return;}if(id==564){cancelComponentMove();g_status="Component movement cancelled / drawing unchanged";return;}
     if(id==542){renameSketchEntity();return;}
     if(id==536||id==537){projectGeometryDialog(id==537);return;}if(id==538){spatialCurveDialog();return;}if(id==539){applyProjectionPreview();return;}if(id==540){clearProjectionPreview();rebuildDisplayBounds();g_status="Projection preview cancelled / drawing unchanged";return;}
     if(id==541){measuredActivityDetails();return;}
@@ -3163,6 +3227,7 @@ static void uiAction(int id){
         if(!g_headless){auto opened=ShellExecuteW(g_window,L"open",L"https://chatgpt.com/settings/usage",nullptr,nullptr,SW_SHOWNORMAL);if((INT_PTR)opened<=32)throw std::runtime_error("Could not open ChatGPT usage settings. Open https://chatgpt.com/settings/usage in your browser.");}
         g_status="ChatGPT Settings > Usage: enable credits for other apps if desired, save changes, then Resume after error.";return;
     }
+    if(id>=44020&&id<44028){teamConnectorDialog((size_t)(id-44020));return;}
     if(id>=44000&&id<44008){teamRoleDialog((size_t)(id-44000));return;}
     if(id==44011||id==44012){unsigned pages=(g_teamRoleCount+teamCardColumns()*teamCardRows()-1)/(teamCardColumns()*teamCardRows());g_teamPage=(g_teamPage+(id==44012?1:pages-1))%pages;return;}
     if(id==44010){
@@ -3241,6 +3306,8 @@ static void uiAction(int id){
         case 51:exportStraightStep();break;
         case 52:importSourceStep();break;
         case 55:newDocument();break;case 56:graphicsDialog();break;case 57:showAssistantAccountMenu();break;case 58:liveConnectionDialog();break;case 59:commandPalette();break;case 187:materialDialog();break;case 188:physicalProperties();break;case 189:g_physicalVisible=false;break;case 190:physicalProperties(!g_physicalAssembly);break;case 216:physicsSettingsDialog();break;
+        case 560:{if(selBody<0||(size_t)selBody>=g_bodyIds.size())throw std::runtime_error("Select a part for transparency");auto* feature=g_doc.find(g_bodyIds[(size_t)selBody]);setSelectedOpacity(feature&&resolvedAppearance(g_doc,*feature).opacity<.999?1.:.35);break;}
+        case 561:selectedOpacityDialog();break;
         case 357:connectorDialog();break;case 358:g_assistantConfig.authMode=AssistantAuthMode::ApiKey;g_assistantConfig.model.clear();g_assistantConfig.reasoningEffort.clear();*g_assistantCancel=true;++g_documentEpoch;g_conversation=V::makeArr();saveUiSettings();g_status="API key mode selected. Configure model in Advanced settings.";break;
         case 360:startAuthJob(AuthJob::SignIn);break;case 361:chooseChatGptModel();break;case 362:startAuthJob(AuthJob::SignOut);break;
         case 364:if(g_authStatus.activeClientId.empty())throw std::runtime_error("Choose a saved ChatGPT account first");startAuthJob(AuthJob::SignIn,g_authStatus.activeClientId,true);break;
@@ -3385,14 +3452,14 @@ static void uiAction(int id){
                     a=chosen->fixed?selected:other->id;b=chosen->fixed?other->id:selected;
                 }else a=selected;
             }
-            std::vector<EditorField> fields{{"Mate type",current?current->type:"coincident"},
+            std::vector<EditorField> fields{{"Mate type",current?current->type:"coincident",false,{"concentric","coincident","contact","distance","angle","revolute","rigid"}},
                 {"Instance A #",a?std::to_string(a):""},{"Reference A",current?current->reference_a:"origin"},
                 {"Instance B #",b?std::to_string(b):""},{"Reference B",current?current->reference_b:"origin"},
                 {"Value / expression",current?current->value:"0"},
                 {"Reference A fraction",current?std::to_string(current->fraction_a):"0.5"},
                 {"Reference B fraction",current?std::to_string(current->fraction_b):"0.5"}};
             if(!editFields(add?"Add assembly mate":"Edit assembly mate",
-                "Ground one instance first. Types: concentric, coincident, contact, distance, angle. References: origin/X/Y/Z/XY or exact face/axis names.",fields))break;
+                "Ground one instance first. Revolute preserves a hinge rotation; rigid locks attached parts together. References: origin/X/Y/Z/XY or exact face/axis names.",fields))break;
             auto instanceId=[&](size_t index){double value=formNumber(fields[index].value);
                 if(value<1||value>9007199254740990.||std::floor(value)!=value)throw std::runtime_error("Instance ID must be a positive integer");
                 return value;};
@@ -3521,6 +3588,55 @@ static bool projectScreen(Vec3 p,float& x,float& y){
     double w=vp.m[3]*p.x+vp.m[7]*p.y+vp.m[11]*p.z+vp.m[15];if(w<=1e-6)return false;Vec3 clip=vp.transformPoint(p);
     x=viewX+(float)((clip.x/w+1)*viewW*0.5);y=viewY+(float)((1-clip.y/w)*viewH*0.5);return true;
 }
+static void cancelComponentMove(bool restore){
+    bool armed=g_componentMove.armed;
+    if(restore&&g_componentMove.active){if(g_componentMove.revision==g_session.revision&&g_componentMove.epoch==g_documentEpoch&&g_componentMove.baseline.size()==g_instanceWorld.size()){g_instanceWorld=g_componentMove.baseline;rebuildDisplayBounds();refreshSelectionLines();}else rebuildScene();}
+    g_componentMove={};if(!restore)g_componentMove.armed=armed;
+}
+static void prepareComponentMove(int body){
+    if(body<0||(size_t)body>=g_instanceIds.size()||!g_instanceIds[(size_t)body])throw std::runtime_error("Select an assembly component with a supported joint");
+    if(g_instanceCopies[(size_t)body]!=0)throw std::runtime_error("Pattern copies cannot be driven independently; select the original component");
+    if(g_allSheetsFlat||g_stockMode)throw std::runtime_error("Return to the formed assembly before moving a component");
+    if(g_motionActive){g_motionActive=false;g_motionPlaying=false;g_instanceWorld=g_formedInstanceWorld;rebuildDisplayBounds();}
+    ComponentMove next;next.armed=true;next.driver=g_instanceIds[(size_t)body];next.revision=g_session.revision;next.epoch=g_documentEpoch;next.baseline=g_instanceWorld;std::string error;
+    if(!buildAssemblyManipulation(g_doc,next.program,error)||!selectAssemblyManipulationJoint(next.program,next.driver,0,"rotate",next.joint,error))throw std::runtime_error(error);
+    g_componentMove=std::move(next);selBody=body;g_pickKind=0;g_picked.clear();refreshSelectionLines();
+}
+static void armComponentMove(){
+    cancelComponentMove();prepareComponentMove(selBody);g_navMode=0;
+    g_status="Move component: drag a part to rotate its joint; release saves / Esc cancels / middle mouse orbits";
+}
+static bool jointPointerRadial(int x,int y,Vec3& radial){
+    Vec3 eye,ray;viewRay(x,y,eye,ray);const auto& joint=g_componentMove.joint;double denominator=ray.dot(joint.axis);
+    if(std::abs(denominator)<.10)return false;double travel=(joint.origin-eye).dot(joint.axis)/denominator;if(travel<0)return false;
+    Vec3 radius=eye+ray*travel-joint.origin;radius=radius-joint.axis*radius.dot(joint.axis);
+    if(radius.len()<std::max(1e-6,dist*.0005))return false;radial=radius.normalized();return true;
+}
+static void beginComponentDrag(int x,int y){
+    int body=pickBody(x,y);prepareComponentMove(body);g_componentMove.x=x;g_componentMove.y=y;g_componentMove.dragging=true;g_componentMove.active=true;
+    if(!jointPointerRadial(x,y,g_componentMove.radial)){auto hit=pickSurface(x,y);Vec3 point=hit.hit?g_instanceWorld[(size_t)body].transformPoint(hit.local):g_reports[g_instancePart[(size_t)body]].bounds.transformed(g_instanceWorld[(size_t)body]).center();Vec3 radius=point-g_componentMove.joint.origin;radius=radius-g_componentMove.joint.axis*radius.dot(g_componentMove.joint.axis);g_componentMove.radial=radius.normalized();}
+}
+static void moveComponentDrag(int x,int y){
+    auto& move=g_componentMove;if(!move.dragging)return;if(move.revision!=g_session.revision||move.epoch!=g_documentEpoch){cancelComponentMove();throw std::runtime_error("The drawing changed during movement; drag cancelled");}
+    double delta=0;Vec3 radial;
+    if(move.radial.len()>.5&&jointPointerRadial(x,y,radial))delta=std::atan2(move.joint.axis.dot(move.radial.cross(radial)),move.radial.dot(radial))*180./K_PI;
+    else {Vec3 tangent=move.joint.axis.cross(move.radial).normalized();double radius=std::max(dist*.12,g_sceneBounds.valid()?g_sceneBounds.diagonal()*.12:10.);float ax,ay,bx,by;Vec3 point=move.joint.origin+move.radial*radius;
+        if(tangent.len()>.5&&projectScreen(point,ax,ay)&&projectScreen(point+tangent*radius,bx,by)&&std::hypot(bx-ax,by-ay)>4){double sx=bx-ax,sy=by-ay;delta=((x-move.x)*sx+(y-move.y)*sy)/(sx*sx+sy*sy)*180./K_PI;}else delta=(x-move.x)*.35;
+    }
+    // Keep the absolute pointer angle continuous when crossing +/-180 degrees.
+    while(delta-move.delta>180)delta-=360;while(delta-move.delta<-180)delta+=360;
+    AssemblyManipulationPreview preview;std::string error;if(!previewAssemblyManipulation(move.program,move.driver,move.joint.mate,"rotate",delta,preview,error))throw std::runtime_error(error);
+    std::vector<Mat4> worlds=move.baseline;for(size_t i=0;i<g_instanceIds.size();++i){auto found=std::find_if(preview.placements.begin(),preview.placements.end(),[&](const AssemblyPlacement& placement){return placement.node==g_instanceIds[i]&&placement.copy==g_instanceCopies[i];});if(found==preview.placements.end())throw std::runtime_error("Joint preview did not return the selected assembly placement");worlds[i]=found->world;}
+    g_instanceWorld=std::move(worlds);move.delta=delta;g_dragged=std::abs(x-move.x)+std::abs(y-move.y)>2;rebuildDisplayBounds();refreshSelectionLines();char text[180];std::snprintf(text,sizeof text,"Joint %llu / %.1f deg / %zu attached components / release saves / Esc cancels",(unsigned long long)move.joint.mate,delta,move.joint.movingNodes.size());g_status=text;g_error=false;
+}
+static void applyComponentMove(){
+    if(!g_componentMove.active)return;auto move=std::move(g_componentMove);g_componentMove={};g_componentMove.armed=move.armed;
+    g_instanceWorld=move.baseline;rebuildDisplayBounds();refreshSelectionLines();
+    if(move.revision!=g_session.revision||move.epoch!=g_documentEpoch){rebuildScene();throw std::runtime_error("The drawing changed during movement; no placement was saved");}
+    if(std::abs(move.delta)<1e-8){g_status="Move component: drag a part / Esc exits";return;}
+    using V=arkjson::Value;V command=V::makeObj(),commands=V::makeArr(),args=V::makeObj();command.set("op",V::makeStr("assembly.drive"));command.set("driver",V::makeNum((double)move.driver));command.set("mate",V::makeNum((double)move.joint.mate));command.set("mode",V::makeStr("rotate"));command.set("delta",V::makeNum(move.delta));commands.arr.push_back(command);args.set("commands",commands);args.set("expected_revision",V::makeNum((double)move.revision));runTool("doc_apply",args);
+    if(!g_error)g_status="Component movement saved / attached components follow / Undo restores the previous placement";
+}
 static bool pickNamedEdgeScreen(int mx,int my,bool curvesOnly=false){
     struct Candidate{size_t body=0,edge=0;float pixels=0,sx=0,sy=0;Vec3 world;};
     std::vector<Candidate> candidates;Mat4 vp=cameraProjection()*cameraView();
@@ -3585,7 +3701,7 @@ static void drawProjectionPreview(){
 static GLint suVp,suModel,suOutline,suColor,suEye,suSel,suHard;
 static GLint guView,guProj,guModel,guHard,auProj,auFocal,auOrtho,auRadius,auBias,cuOrigin,euVp,euModel;
 static GLint uuVp,uuRc,uuRad,uuFill,uuBorder,uuBW,uuGlyph;
-static GLuint quadVao,gridVao,textVao,textVbo,gFbo=0,gGeomTex=0,gAoTex=0,gDepthTex=0,gCubeVao=0,gCubeVbo=0,gCompassVao=0,gCompassVbo=0;
+static GLuint quadVao,gridVao,gridVbo,textVao,textVbo,gFbo=0,gGeomTex=0,gAoTex=0,gDepthTex=0,gCubeVao=0,gCubeVbo=0,gCompassVao=0,gCompassVbo=0;
 struct CubeTriangle{Vec3 a,b,c,normal;int face=-1;};
 struct CubeHit{bool hit=false;int face=-1;Vec3 normal{};};
 static std::vector<CubeTriangle> g_cubeTriangles;
@@ -3593,6 +3709,28 @@ static CubeHit g_cubeHover;
 static GLuint g_busySnapshotTex=0;
 static int gridCount=0,gOccW=0,gOccH=0,gOccTriedW=-1,gOccTriedH=-1;
 static bool g_swap=true,gOccReady=false;   // headless readback disables the buffer swap
+struct AdaptiveGrid {double spacing=10,radius=200,centerX=0,centerZ=0;int halfLines=20;};static AdaptiveGrid g_adaptiveGrid;
+static double niceGridSpacing(double required){
+    double decade=std::pow(10.,std::floor(std::log10(std::max(required,1e-8))));
+    for(double factor:{1.,2.,5.,10.})if(decade*factor>=required)return decade*factor;
+    return decade*10.;
+}
+static void updateAdaptiveGrid(){
+    double halfH=std::max(2.,dist*std::tan(35*K_PI/360.)),halfW=halfH*viewW/std::max(viewH,1);
+    double unitsPerPixel=2*halfH/std::max(viewH,1),spacing=niceGridSpacing(unitsPerPixel*42.);
+    double radius=std::max(halfH,halfW)*2.8;int halfLines=std::clamp((int)std::ceil(radius/spacing),8,110);
+    Vec3 center=target,eye,ray;viewRay(viewX+viewW/2,viewY+viewH/2,eye,ray);
+    if(std::abs(ray.y)>.08){double travel=-eye.y/ray.y;if(travel>0&&travel<dist*4)center=eye+ray*travel;}
+    double centerX=std::round(center.x/spacing)*spacing,centerZ=std::round(center.z/spacing)*spacing;
+    if(g_adaptiveGrid.spacing==spacing&&g_adaptiveGrid.centerX==centerX&&g_adaptiveGrid.centerZ==centerZ&&g_adaptiveGrid.halfLines==halfLines&&gridCount)return;
+    g_adaptiveGrid={spacing,halfLines*spacing,centerX,centerZ,halfLines};std::vector<float> lines;
+    auto segment=[&](double ax,double az,double bx,double bz,float weight){lines.insert(lines.end(),{(float)ax,0.f,(float)az,weight,(float)bx,0.f,(float)bz,weight});};
+    double span=halfLines*spacing;for(int i=-halfLines;i<=halfLines;++i){double offset=i*spacing;
+        auto weight=[&](double coordinate){double index=std::round(coordinate/spacing);return std::abs(coordinate)<spacing*.1?1.5f:std::fmod(std::abs(index),5.)<.1?1.f:.42f;};
+        segment(-span,offset,span,offset,weight(centerZ+offset));segment(offset,-span,offset,span,weight(centerX+offset));
+    }
+    gridCount=(int)lines.size()/4;glBindVertexArray(gridVao);glBindBuffer(GL_ARRAY_BUFFER,gridVbo);glBufferData(GL_ARRAY_BUFFER,(GLsizeiptr)(lines.size()*sizeof(float)),lines.data(),GL_DYNAMIC_DRAW);
+}
 static GLuint canvasTexture(const std::string& path);
 static GLuint materialTexture(const std::string& path){
     if(path.empty())return 0;
@@ -3648,7 +3786,7 @@ static void drawSurfaces(bool geometry,const Mat4& view,const Mat4& proj,const G
             auto found=g_suspViews.find(f->id);if(found==g_suspViews.end())continue;
             glUniform1f(hardLoc,0.f);glPolygonMode(GL_FRONT_AND_BACK,!geometry&&wireframe?GL_LINE:GL_FILL);
             if(!geometry){glUniform1f(suSel,i==(size_t)selBody?1.f:i==(size_t)hoverBody?.3f:0.f);glUniform1f(suOutline,0.f);
-                glUniform1f(glGetUniformLocation(pSolid,"hasTexture"),0.f);glUniform1f(glGetUniformLocation(pSolid,"opacity"),1.f);}
+                glUniform1f(glGetUniformLocation(pSolid,"hasTexture"),0.f);glUniform1f(glGetUniformLocation(pSolid,"opacity"),(float)resolvedAppearance(g_doc,*f).opacity);}
             auto& cache=found->second;
             for(size_t part=0;part<cache.preview.parts.size()&&part<cache.gpu.size();++part){
                 const auto& item=cache.preview.parts[part];if(!geometry){glUniform3f(suColor,(float)item.color.x,(float)item.color.y,(float)item.color.z);
@@ -3960,8 +4098,9 @@ static void drawFrame(HDC hdc){
         glDrawArrays(GL_TRIANGLES,0,6);
     }
 
-    glUseProgram(pGrid);
-    glUniformMatrix4fv(glGetUniformLocation(pGrid,"vp"),1,GL_FALSE,vpT);
+    updateAdaptiveGrid();glUseProgram(pGrid);
+    Mat4 gridMatrix=vp*Mat4::translation({g_adaptiveGrid.centerX,0,g_adaptiveGrid.centerZ});GLfloat gridTransform[16];for(int i=0;i<16;++i)gridTransform[i]=(GLfloat)gridMatrix.m[i];
+    glUniformMatrix4fv(glGetUniformLocation(pGrid,"vp"),1,GL_FALSE,gridTransform);glUniform1f(glGetUniformLocation(pGrid,"fadeRadius"),(float)g_adaptiveGrid.radius);
     glUniform1f(glGetUniformLocation(pGrid,"lightBackground"),g_lightBackground?1.f:0.f);
     glBindVertexArray(gridVao);
     if(g_grid&&!g_allSheetsFlat&&!g_stockMode)glDrawArrays(GL_LINES,0,gridCount);
@@ -4553,14 +4692,14 @@ static void drawFrame(HDC hdc){
             size_t cardTextStart=g_textVerts.size();
             auto line=[&](const std::string& value,float offset,float scale=.80f){textOut(fitText(value,scale,cardWidth-24),x+12,y+offset,scale,.83f,.91f,.98f);};
             line(g_teamRoleLabels[i],8,.85f);std::string state=role?std::string(agentTeamStateName(role->state))+" / turn "+std::to_string(role->turns):"Ready";line(state+(i==0?" / engineering + CAD":i==2?" / read-only review":" / CAD author"),32);
-            auto config=teamRoleConfig(i);line((config.model.empty()?"Select model":config.model)+" / "+(config.reasoningEffort.empty()?"Auto":config.reasoningEffort),54);
+            auto config=teamRoleConfig(i);line((config.authMode==AssistantAuthMode::ChatGptPlan?"ChatGPT":config.provider)+" / "+(config.model.empty()?"Select model":config.model)+" / "+(config.reasoningEffort.empty()?"Auto":config.reasoningEffort),54);
             line(role?role->status:"Describe the goal to start",76);line(g_teamActivity[i].empty()?(role?role->text:"Tools and messages appear live"):g_teamActivity[i],98);
             rect(x+12,y+122,cardWidth-24,1,0,.23f,.34f,.42f,.65f,0,0,0,0,0);
             std::string tokens=role&&role->usage.reportedResponses?std::string(role->usage.missingResponses?"Tokens >= ":"Tokens ")+std::to_string(role->usage.totalTokens):"Tokens unreported";
-            textOut(fitText(tokens,.76f,cardWidth-110),x+12,y+125,.76f,.77f,.90f,1.f);button("Settings",x+cardWidth-86,y+125,74,44000+(int)i);
+            textOut(fitText(tokens,.76f,cardWidth-192),x+12,y+125,.76f,.77f,.90f,1.f);button("Connector",x+cardWidth-168,y+125,74,44020+(int)i);button("Settings",x+cardWidth-86,y+125,74,44000+(int)i);
             std::string detail=role&&role->usage.reportedResponses?"In "+std::to_string(role->usage.inputTokens)+" / Out "+std::to_string(role->usage.outputTokens)+" / Reason "+std::to_string(role->usage.reasoningTokens):"Input / output: unreported";
             if(role){auto timing=measuredPerformanceLabel(role->performance);if(!timing.empty())detail=timing;}
-            textOut(fitText(detail,.72f,cardWidth-110),x+12,y+148,.72f,.83f,.91f,.98f);
+            textOut(fitText(detail,.72f,cardWidth-192),x+12,y+148,.72f,.83f,.91f,.98f);
             if(g_verifyTeamCardBounds)for(size_t vertex=cardTextStart;vertex+6<g_textVerts.size();vertex+=7){float tx=g_textVerts[vertex],ty=g_textVerts[vertex+1];if(tx<x+8||tx>x+cardWidth-8||ty<y+8||ty>y+teamCardHeight-8){g_teamCardContentFits=false;if(g_teamCardBoundsFailure.empty()){std::ostringstream detail;detail<<"Card "<<i<<" ("<<g_teamRoleIds[i]<<") glyph ("<<tx<<","<<ty<<") exceeds ["<<x+8<<","<<y+8<<".."<<x+cardWidth-8<<","<<y+teamCardHeight-8<<"], atlas line height "<<fa.lineH;g_teamCardBoundsFailure=detail.str();}}}
         }
         label(fitText("GOAL: "+g_teamGoal,.70f,viewW-44),viewX+22,cy+263+teamCardStride*(teamCardRows()-1),.70f);
@@ -4633,6 +4772,18 @@ static void drawFrame(HDC hdc){
         float gap=4.f,bw=58.f,ty=(float)viewY+(float)viewH-44.f;
         rect((float)viewX+10,ty-5,7*bw+6*gap+16,43,9,.07f,.08f,.10f,.76f,.34f,.38f,.44f,.45f,1);
         for(int i=0;i<7;++i)button(names[i],(float)viewX+18+i*(bw+gap),ty,bw,ids[i],false,on[i]);}
+    if(selBody>=0&&(size_t)selBody<g_bodyIds.size()&&!g_toolsOpen){
+        auto* feature=g_doc.find(g_bodyIds[(size_t)selBody]);bool transparent=feature&&resolvedAppearance(g_doc,*feature).opacity<.999;
+        float px=g_showViewCube?(float)g_cubeX+g_cubeS+24:(float)viewX+16,py=(float)viewY+12;rect(px-5,py-5,390,57,7,.055f,.083f,.106f,.92f,.29f,.42f,.52f,.65f,1);
+        button(transparent?"Opaque":"Transparent",px,py,112,560,false,transparent);button("Opacity...",px+120,py,96,561);
+        if(g_instanceIds[(size_t)selBody])button(g_componentMove.armed?"Moving":"Move component",px+224,py,151,562,false,g_componentMove.armed);
+        textOut("Appearance: all instances of this part definition",px+3,py+36,.55f,.64f,.75f,.82f);
+    }
+    if(g_componentMove.armed&&!g_toolsOpen){float px=g_showViewCube?(float)g_cubeX+g_cubeS+24:(float)viewX+16,py=(float)viewY+77;rect(px-5,py-5,390,58,7,.045f,.115f,.135f,.95f,.20f,.70f,.72f,.75f,1);
+        char angle[80];if(g_componentMove.joint.mate)std::snprintf(angle,sizeof angle,"Joint %llu / %.1f deg",(unsigned long long)g_componentMove.joint.mate,g_componentMove.delta);else std::snprintf(angle,sizeof angle,"Ready to drag a joint");textOut(angle,px+4,py+6,.72f,.72f,.96f,.97f);
+        button("Apply",px+224,py,70,563);button("Cancel",px+302,py,73,564);textOut("Drag part / release saves / Esc cancels / middle mouse orbits",px+3,py+37,.52f,.65f,.82f,.86f);
+    }
+    if(g_grid&&!g_allSheetsFlat&&!g_stockMode){char scale[96];std::snprintf(scale,sizeof scale,"Grid %.4g mm / major %.4g mm",g_adaptiveGrid.spacing,g_adaptiveGrid.spacing*5.);float gx=(float)viewX+17,gy=(float)viewY+viewH-78;rect(gx-6,gy-5,textWidth(scale,.65f)+12,24,5,.065f,.09f,.115f,.85f,0,0,0,0,0);textOut(scale,gx,gy,.65f,.68f,.81f,.89f);}
     panel(0,H-32,W,32);
     textOut(g_status.substr(0,(size_t)std::max(28,(winW-430)/7)),20,H-23,.70f,g_error?.96f:.62f,g_error?.56f:.73f,g_error?.40f:.81f);
     textOut("mm",W-164,H-23,.73f,.67f,.76f,.83f);iconButton(22,"Show / hide grid",W-118,H-29,24);iconButton(461,"Navigation controls",W-81,H-29,24);iconButton(460,"Full screen",W-44,H-29,24);
@@ -4743,7 +4894,7 @@ static arkjson::Value callSessionWithProgress(const std::string& tool,const arkj
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
     g_swap=cleanup.previousSwap;g_busy=true;g_busyStarted=std::chrono::steady_clock::now();
-    g_busyLabel=tool=="ui_projection_preview"?"Previewing exact projection":tool=="library_fetch"?"Downloading component":tool=="library_source_search"?"Searching component catalog":tool=="library_ingest"?"Importing component into library":tool=="library_insert"?"Inserting library component":tool.rfind("library_",0)==0?"Inspecting component library":tool=="doc_load"?"Loading document":tool.rfind("import",0)==0?"Importing geometry":tool.rfind("export",0)==0?"Exporting geometry":"Evaluating geometry";
+    g_busyLabel=tool=="assistant_model_catalog"?"Reading provider model catalog":tool=="ui_projection_preview"?"Previewing exact projection":tool=="library_fetch"?"Downloading component":tool=="library_source_search"?"Searching component catalog":tool=="library_ingest"?"Importing component into library":tool=="library_insert"?"Inserting library component":tool.rfind("library_",0)==0?"Inspecting component library":tool=="doc_load"?"Loading document":tool.rfind("import",0)==0?"Importing geometry":tool.rfind("export",0)==0?"Exporting geometry":"Evaluating geometry";
     static StudioSessionExecutor executor;auto response=executor.submit(tool,args,g_busyTestDelayMs,std::move(operation));
     struct JoinRequest {std::future<arkjson::Value>& response;~JoinRequest(){if(response.valid())response.wait();}} join{response};
     unsigned frameBefore=g_busyFrameCount;
@@ -4809,7 +4960,10 @@ static std::vector<ContextEntry> contextEntries(ContextTarget target,int body=-1
         const Feature* feature=g_doc.find(g_bodyIds[(size_t)body]);bool hidden=(size_t)body<g_hiddenBodies.size()&&g_hiddenBodies[(size_t)body];
         bool editable=feature&&feature->type!=FeatureType::SourceTube&&feature->type!=FeatureType::SourceSheet&&feature->type!=FeatureType::MeshBody;
         menu.push_back({0,"Model"});menu.push_back({161,"Edit feature",editable,"Parameters and operation history"});menu.push_back({162,"Edit driving sketch",feature&&!drivingSketchNames(*feature).empty(),"Open the saved profile"});
-        menu.push_back({29,"Edit placement",g_instanceIds[(size_t)body]!=0,"Assembly position and rotation"});menu.push_back({187,"Material and appearance",feature!=nullptr,"Density, color and surface"});
+        menu.push_back({29,"Edit placement",g_instanceIds[(size_t)body]!=0,"Assembly position and rotation"});menu.push_back({562,"Move component",g_instanceIds[(size_t)body]!=0,"Drag along a supported assembly joint"});menu.push_back({187,"Material and appearance",feature!=nullptr,"Density, color and surface"});
+        bool transparent=feature&&resolvedAppearance(g_doc,*feature).opacity<.999;
+        menu.push_back({560,transparent?"Restore opaque":"Make transparent",feature!=nullptr,"All instances of this part definition; material retained"});
+        menu.push_back({561,"Adjust opacity...",feature!=nullptr,"Part definition / 5-100 percent"});
         if(feature&&featureManufacturingLineage(g_doc,*feature).editableSheet){menu.push_back({394,"Add return hem",true,"Open round 180 degree edge return"});menu.push_back({397,"Add circular emboss",true,"Exact constant-thickness form"});}
         if(feature&&feature->type==FeatureType::Suspension)menu.push_back({384,"Spring unit controls",true,"Suspension travel, steering and wheel spin"});
         menu.push_back({0,"Inspect"});menu.push_back({401,"Properties"});menu.push_back({188,"Mass / center of gravity"});menu.push_back({171,"Select named faces",true,"Persistent native surface names"});menu.push_back({172,"Select named edges",true,"Persistent native edge names"});
@@ -4930,15 +5084,17 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
                         else{g_pressWasButton=true;if(z.id==50){g_foldScrubbing=true;g_foldPlaying=false;g_foldProgress=clamp((double)(p.x-z.x)/z.w,0.,1.);}
                         else if(z.id==53){g_sheetScrubbing=true;g_sheetPlayingId=0;if(auto* sheet=selectedSheet())try{sheetPreviewSet(sheet->id,(double)(p.x-z.x)/z.w);}catch(const std::exception& error){g_error=true;g_status=error.what();}}
                         else if(z.id>=380&&z.id<=382){g_suspScrub=z.id-380;g_suspSpinPlaying=false;try{setSuspensionControl(g_suspScrub,(p.x-z.x)/z.w);}catch(const std::exception& error){g_error=true;g_status=error.what();}}} break; }
-            g_dragged=false;if(!g_pressWasButton&&!g_foldScrubbing&&!g_sheetScrubbing&&(g_cubePress||g_navMode!=0))beginCameraDrag(p.x,p.y);SetCapture(hw);
+            g_dragged=false;if(!g_pressWasButton&&!g_cubePress&&g_componentMove.armed){try{beginComponentDrag(p.x,p.y);}catch(const std::exception& error){g_error=true;g_status=error.what();g_pressWasButton=true;}}
+            else if(!g_pressWasButton&&!g_foldScrubbing&&!g_sheetScrubbing&&(g_cubePress||g_navMode!=0))beginCameraDrag(p.x,p.y);SetCapture(hw);
             return 0;
         }
         case WM_MBUTTONDOWN:{POINT p{GET_X_LPARAM(lp),GET_Y_LPARAM(lp)};g_pressWasButton=p.x<viewX||p.x>=viewX+viewW||p.y<viewY||p.y>=viewY+viewH;g_dragged=false;if(!g_pressWasButton)beginCameraDrag(p.x,p.y);SetCapture(hw);return 0;}
         case WM_MBUTTONUP:g_cameraDrag.active=false;ReleaseCapture();return 0;
-        case WM_CAPTURECHANGED:g_cameraDrag.active=false;return 0;
+        case WM_CAPTURECHANGED:g_cameraDrag.active=false;if(g_componentMove.dragging){cancelComponentMove();g_status="Component movement cancelled after pointer capture was lost";}return 0;
         case WM_MOUSEMOVE:{
             int x=GET_X_LPARAM(lp),y=GET_Y_LPARAM(lp);
             bool lbtn=wp&MK_LBUTTON,mbtn=wp&MK_MBUTTON,shift=wp&MK_SHIFT;
+            if(g_componentMove.dragging&&lbtn){try{moveComponentDrag(x,y);}catch(const std::exception& error){cancelComponentMove();g_error=true;g_status=error.what();}return 0;}
             if(g_foldScrubbing&&lbtn)for(auto& zone:g_zones)if(zone.id==50){g_foldProgress=clamp((double)(x-zone.x)/zone.w,0.,1.);break;}
             if(g_sheetScrubbing&&lbtn)for(auto& zone:g_zones)if(zone.id==53){if(auto* sheet=selectedSheet())try{sheetPreviewSet(sheet->id,(double)(x-zone.x)/zone.w);}catch(const std::exception& error){g_error=true;g_status=error.what();g_sheetScrubbing=false;}break;}
             if(g_suspScrub>=0&&lbtn)for(auto& zone:g_zones)if(zone.id==380+g_suspScrub){try{setSuspensionControl(g_suspScrub,(x-zone.x)/zone.w);}catch(const std::exception& error){g_error=true;g_status=error.what();g_suspScrub=-1;}break;}
@@ -4955,6 +5111,7 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
             return 0;
         }
         case WM_LBUTTONUP:{
+            if(g_componentMove.dragging){g_componentMove.dragging=false;try{applyComponentMove();}catch(const std::exception& error){cancelComponentMove();g_error=true;g_status=error.what();}g_pressWasButton=false;ReleaseCapture();return 0;}
             g_cameraDrag.active=false;ReleaseCapture();
             POINT p{GET_X_LPARAM(lp),GET_Y_LPARAM(lp)};g_pointerX=p.x;g_pointerY=p.y;
             if(g_cubePress){if(!g_dragged)orientViewCube(p.x,p.y);}
@@ -4986,7 +5143,7 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
             return 0;
         }
         case WM_KEYDOWN:
-            if(wp==VK_ESCAPE){if(g_toolsOpen){g_toolsOpen=false;layout();return 0;}g_pickKind=0;g_picked.clear();refreshSelectionLines();g_status="Body selection / semantic picks cleared";return 0;}
+            if(wp==VK_ESCAPE){if(g_componentMove.armed||g_componentMove.active){cancelComponentMove();ReleaseCapture();g_status="Component movement cancelled / drawing unchanged";return 0;}if(g_toolsOpen){g_toolsOpen=false;layout();return 0;}g_pickKind=0;g_picked.clear();refreshSelectionLines();g_status="Body selection / semantic picks cleared";return 0;}
             if(GetKeyState(VK_CONTROL)&0x8000){if(wp=='S')uiAction(16);else if(wp=='O')uiAction(17);else if(wp=='Z')uiAction(18);else if(wp=='Y')uiAction(19);else if(wp=='K')interactiveAction(59);else if(wp=='N')interactiveAction(55);}
             else if(wp=='F')uiAction(20);else if(wp=='W')uiAction(14);else if(wp==VK_DELETE)uiAction(25);else if(wp==VK_F1)uiAction(31);
             else if(wp=='1')uiAction(180);else if(wp=='2')uiAction(181);else if(wp=='3')uiAction(23);else if(wp=='4')uiAction(184);else if(wp=='5')uiAction(182);else if(wp=='6')uiAction(183);else if(wp=='7')uiAction(24);
@@ -5007,6 +5164,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     cpu_detect();
 
     SetProcessDPIAware();
+    bool interactionUiTest=false,connectorsUiTest=false;
     bool selfTest=false,assemblyTest=false,dialogTest=false,bendTest=false,bendExportTest=false,sourceTest=false,sketchTest=false,assistantTest=false,nativeUiTest=false,renderUiTest=false,engineeringUiTest=false,sheetShowcaseTest=false,contextUiTest=false,suspensionUiTest=false,connectChatGpt=false,motionUiTest=false,motionPlay=false,navigationUiTest=false,projectionUiTest=false,frameToolsUiTest=false;unsigned exitAfterMs=0;std::string endpointFile,requestedSketch;int requestedOpening=-1;double requestedFold=-1,showcaseProgress=-1;std::string shotPath="ark_studio.png",loadPath,scriptPath,importPath,showcaseView,spotlightName,suspensionFeatureName,motionDriverName,motionSpeed;double requestedMotionTime=0;std::vector<std::string> suspensionValues;
     int sw=1600,sh=1000,argc=0;auto argv=CommandLineToArgvW(GetCommandLineW(),&argc);
     auto utf8=[](const wchar_t* w){int n=WideCharToMultiByte(CP_UTF8,0,w,-1,nullptr,0,nullptr,nullptr);std::string s(n,'\0');WideCharToMultiByte(CP_UTF8,0,w,-1,s.data(),n,nullptr,nullptr);s.pop_back();return s;};
@@ -5016,6 +5174,8 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         else if(a=="--self-test-assistant-ui")assistantTest=true;
         else if(a=="--self-test-native-ui")nativeUiTest=true;
         else if(a=="--self-test-render-ui"){renderUiTest=true;g_headless=true;}
+        else if(a=="--self-test-interaction-ui"){interactionUiTest=true;g_headless=true;}
+        else if(a=="--self-test-connectors-ui"){connectorsUiTest=true;g_headless=true;}
         else if(a=="--self-test-engineering-ui"){engineeringUiTest=true;g_headless=true;}
         else if(a=="--self-test-sheet-showcase-ui"){sheetShowcaseTest=true;g_headless=true;}
         else if(a=="--self-test-context-ui"){contextUiTest=true;g_headless=true;}
@@ -5168,19 +5328,9 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
       glBufferData(GL_ARRAY_BUFFER,sizeof q,q,GL_STATIC_DRAW);
       glEnableVertexAttribArray(0); glVertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,8,nullptr);
     }
-    glGenVertexArrays(1,&gridVao);
-    { GLuint gb; glGenBuffers(1,&gb);
-      std::vector<float> ln;
-      const int N=20,S=10;
-      for(int i=-N;i<=N;++i){
-          ln.insert(ln.end(),{(float)-N*S,0.f,(float)i*S,(float)N*S,0.f,(float)i*S});
-          ln.insert(ln.end(),{(float)i*S,0.f,(float)-N*S,(float)i*S,0.f,(float)N*S});
-      }
-      gridCount=(int)ln.size()/3;
-      glBindVertexArray(gridVao); glBindBuffer(GL_ARRAY_BUFFER,gb);
-      glBufferData(GL_ARRAY_BUFFER,(GLsizeiptr)(ln.size()*sizeof(float)),ln.data(),GL_STATIC_DRAW);
-      glEnableVertexAttribArray(0); glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,12,nullptr);
-    }
+    glGenVertexArrays(1,&gridVao);glGenBuffers(1,&gridVbo);glBindVertexArray(gridVao);glBindBuffer(GL_ARRAY_BUFFER,gridVbo);
+    glEnableVertexAttribArray(0);glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,16,nullptr);
+    glEnableVertexAttribArray(1);glVertexAttribPointer(1,1,GL_FLOAT,GL_FALSE,16,(void*)(3*sizeof(float)));
     glGenVertexArrays(1,&textVao);
     glGenBuffers(1,&textVbo);
     glGenVertexArrays(1,&gCubeVao);glGenBuffers(1,&gCubeVbo);
@@ -5389,6 +5539,55 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         resize(savedW,savedH);g_assistantDockOpen=savedDock;g_teamMode=savedMode;g_teamRoleCount=savedCount;g_compactNavigation=savedCompact;g_pickKind=0;g_verifyTeamCardBounds=false;cameraRoll=savedRoll;uiAction(24);yaw=tYaw;pitch=tPitch;frameScene();target=tTarget;dist=tDist;g_status="Navigation UI checks passed / upper-left cube / shaded RGB triad / six faces / camera roll / unchanged document";
     }
 
+    if(connectorsUiTest){
+        using V=arkjson::Value;auto originalConfig=g_assistantConfig;auto originalConnectors=g_teamConnectors;auto originalModels=g_teamModels,originalEfforts=g_teamEfforts;auto originalSettings=g_settingsOverride;bool originalTeam=g_teamMode,originalDock=g_assistantDockOpen;u64 revision=g_session.revision,epoch=g_documentEpoch;auto schema=g_doc.materials;
+        auto failure=[&](int code,const char* message){std::fprintf(stderr,"Connectors UI %d: %s / %s\n",code,message,g_status.c_str());return code;};
+        auto draw=[&]{g_swap=false;drawFrame(hdc);};
+        auto click=[&](int id){draw();auto z=std::find_if(g_zones.begin(),g_zones.end(),[&](const Zone& zone){return zone.id==id;});if(z==g_zones.end())return false;int x=(int)(z->x+z->w/2),y=(int)(z->y+z->h/2);SendMessage(hwnd,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(x,y));SendMessage(hwnd,WM_LBUTTONUP,0,MAKELPARAM(x,y));return true;};
+        g_teamMode=true;g_assistantDockOpen=true;g_teamStarted=false;g_teamConnectors={};g_teamRoleCount=3;layout();
+        const char* providers[]={"claude","grok","ollama"};const char* models[]={"offline-claude","offline-grok","offline-local"};
+        for(size_t i=0;i<3;++i){auto preset=assistantProviderPreset(providers[i]);std::vector<std::string> values{preset.endpoint,models[i],preset.apiKeyEnv,assistantProtocolName(preset.protocol)};if(preset.protocol==AssistantProtocol::Messages)values.push_back("8192");values.push_back("auto");g_dialogOverrideQueue={{providers[i],"0"},values};g_dialogSmoke=3;g_dialogShot=shotPath+".provider-"+providers[i]+".png";bool clicked=click(44020+(int)i);g_dialogSmoke=0;if(!clicked||g_error||!g_teamConnectors[i]||teamRoleConfig(i).provider!=providers[i]||teamRoleConfig(i).model!=models[i]||teamRoleConfig(i).protocol!=preset.protocol)return failure(500,"Provider card dropdown/configuration dispatch failed");}
+        if(g_assistantConfig.model!=originalConfig.model||g_assistantConfig.endpoint!=originalConfig.endpoint||g_assistantConfig.authMode!=originalConfig.authMode||g_session.revision!=revision||g_documentEpoch!=epoch)return failure(501,"Per-role provider changed global connector, drawing, or epoch");
+        draw();glFinish();{std::vector<u8> pixels((size_t)winW*winH*3);glPixelStorei(GL_PACK_ALIGNMENT,1);glReadBuffer(GL_BACK);glReadPixels(0,0,winW,winH,GL_RGB,GL_UNSIGNED_BYTE,pixels.data());Image image;image.w=winW;image.h=winH;image.px.resize(pixels.size());for(int y=0;y<winH;++y)std::memcpy(image.px.data()+(size_t)y*winW*3,pixels.data()+(size_t)(winH-1-y)*winW*3,(size_t)winW*3);if(!writePNG((shotPath+".provider-mixed-cards.png").c_str(),image))return failure(505,"Mixed provider cards capture failed");}
+        g_settingsOverride=std::filesystem::temp_directory_path()/("ark-connectors-ui-"+std::to_string(GetCurrentProcessId())+".json");saveUiSettings();g_teamConnectors={};g_teamModels={};g_teamEfforts={};loadUiSettings();for(size_t i=0;i<3;++i)if(!g_teamConnectors[i]||teamRoleConfig(i).provider!=providers[i]||teamRoleConfig(i).model!=models[i]||teamRoleConfig(i).maxOutputTokens!=8192)return failure(502,"Per-role provider settings did not persist");std::filesystem::remove(g_settingsOverride);
+        g_dialogOverrideQueue={{"inherit","0"}};g_dialogSmoke=3;bool inherited=click(44020);g_dialogSmoke=0;if(!inherited||g_teamConnectors[0]||!g_teamModels[0].empty()||!g_teamEfforts[0].empty())return failure(503,"Card could not restore inherited connector");
+        auto exported=assistantExternalMcpConfig("opencode","C:/ARK/ark-mcp.exe","ark-ui-test",assistantProviderPreset("ollama"));if(exported.find("ark-mcp.exe")==std::string::npos||exported.find("--connect")==std::string::npos||exported.find("ark-ui-test")==std::string::npos)return failure(504,"External MCP profile lost executable or live document binding");
+        std::ofstream(shotPath+".connectors-test.log")<<"PASS: real card Connector click, native provider/model/protocol controls, distinct Claude/Grok/Ollama routes, inherited global unchanged, serialized/restored per-role routes, reset inheritance, external MCP binding. Offline model IDs; no provider inference or account authentication performed.\n";
+        g_assistantConfig=originalConfig;g_teamConnectors=originalConnectors;g_teamModels=originalModels;g_teamEfforts=originalEfforts;g_settingsOverride=originalSettings;g_teamMode=originalTeam;g_assistantDockOpen=originalDock;g_status="Connector checks passed / mixed cards / persistence / external MCP profiles";layout();
+    }
+    if(interactionUiTest){
+        using V=arkjson::Value;auto parse=[](const char* text){V v;if(!arkjson::parse(text,v))throw std::runtime_error("Invalid interaction fixture");return v;};
+        auto fail=[&](int code,const char* message){std::fprintf(stderr,"Interaction UI %d: %s / %s\n",code,message,g_status.c_str());std::ofstream(shotPath+".interaction-test.log")<<code<<": "<<message<<"\n"<<g_status<<"\n";return code;};
+        auto draw=[&]{target=tTarget;dist=tDist;yaw=tYaw;pitch=tPitch;g_swap=false;drawFrame(hdc);};
+        auto capture=[&](const std::string& suffix){draw();glFinish();std::vector<u8> pixels((size_t)winW*winH*3);glPixelStorei(GL_PACK_ALIGNMENT,1);glReadBuffer(GL_BACK);glReadPixels(0,0,winW,winH,GL_RGB,GL_UNSIGNED_BYTE,pixels.data());Image image;image.w=winW;image.h=winH;image.px.resize(pixels.size());for(int y=0;y<winH;++y)std::memcpy(image.px.data()+(size_t)y*winW*3,pixels.data()+(size_t)(winH-1-y)*winW*3,(size_t)winW*3);return writePNG((shotPath+suffix).c_str(),image);};
+        auto click=[&](int id){draw();auto zone=std::find_if(g_zones.begin(),g_zones.end(),[&](const Zone& z){return z.id==id;});if(zone==g_zones.end())return false;int x=(int)(zone->x+zone->w/2),y=(int)(zone->y+zone->h/2);SendMessage(hwnd,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(x,y));SendMessage(hwnd,WM_LBUTTONUP,0,MAKELPARAM(x,y));return true;};
+        auto fresh=[&]{V args=V::makeObj();args.set("expected_revision",V::makeNum((double)g_session.revision));runTool("doc_new",args);g_assistantDockOpen=false;g_toolModule=1;g_showViewCube=true;g_cameraOrtho=false;g_occlusionMode=0;g_grid=true;g_navMode=0;};
+        auto selectBody=[&](int body){return click(2000+body);};
+        auto navigationClear=[&]{draw();if(!g_showViewCube||g_cubeS<=0||std::none_of(g_zones.begin(),g_zones.end(),[](const Zone& zone){return zone.id==179;}))return false;for(const auto& zone:g_zones)if(zone.id>=560&&zone.id<=564&&zone.x<g_cubeX+g_cubeS&&zone.x+zone.w>g_cubeX&&zone.y<g_cubeY+g_cubeS&&zone.y+zone.h>g_cubeY)return false;return true;};
+        fresh();runTool("doc_apply",parse(R"({"commands":[{"op":"material.set","name":"Steel probe","density":7.85,"appearance":{"base_color":[0.3,0.65,0.85],"metallic":0.2}},{"op":"feature.add","type":"sphere","name":"Outer inspection part","p":{"r":"22"},"material":"Steel probe"},{"op":"feature.add","type":"box","name":"Interior probe","p":{"dx":"10","dy":"10","dz":"10"},"appearance":{"base_color":[1,0.3,0.08]}}]})"));
+        if(g_error||g_bodyIds.size()!=2)return fail(470,"Transparency fixture failed");frameScene();if(!selectBody(0))return fail(471,"Part could not be selected through explorer mouse click");if(!navigationClear())return fail(510,"Selected-part controls hide or overlap the view cube");u64 before=g_session.revision;auto original=g_doc.find(g_bodyIds[0])->appearance;double volume=g_reports[g_instancePart[0]].signedVolume;
+        if(!capture(".inspection-opaque.png")||!click(560)||g_error||g_session.revision!=before+1||std::abs(resolvedAppearance(g_doc,*g_doc.find(g_bodyIds[0])).opacity-.35)>1e-9)return fail(472,"Transparency toggle mouse dispatch failed");
+        if(g_doc.materials[0].densityGcm3!=7.85||g_doc.find(g_bodyIds[0])->material!="Steel probe"||g_reports[g_instancePart[0]].signedVolume!=volume)return fail(473,"Transparency changed physical material or geometry");if(!capture(".inspection-transparent.png"))return fail(474,"Transparent capture failed");
+        g_dialogOverrideQueue={{"55"}};g_dialogSmoke=3;bool adjusted=click(561);g_dialogSmoke=0;if(!adjusted||g_error||std::abs(resolvedAppearance(g_doc,*g_doc.find(g_bodyIds[0])).opacity-.55)>1e-9)return fail(475,"Opacity form mouse dispatch failed");
+        if(!click(560)||g_error||resolvedAppearance(g_doc,*g_doc.find(g_bodyIds[0])).opacity!=1.)return fail(476,"Opaque restore failed");if(!click(18)||g_error||std::abs(resolvedAppearance(g_doc,*g_doc.find(g_bodyIds[0])).opacity-.55)>1e-9)return fail(477,"Opacity undo failed");
+        dist=tDist=80;draw();double smallSpacing=g_adaptiveGrid.spacing;int smallCount=gridCount;if(!capture(".grid-small.png"))return fail(478,"Small grid capture failed");
+        runTool("doc_apply",parse(R"({"commands":[{"op":"feature.edit","id":1,"p":{"r":"2200"}},{"op":"feature.edit","id":2,"p":{"dx":"1900","dy":"1900","dz":"1900"}},{"op":"assembly.add","name":"Large outer","feature":1,"p":{"tx":"1000000","tz":"-750000"}},{"op":"assembly.add","name":"Large interior","feature":2,"p":{"tx":"1000000","tz":"-750000"}}]})"));if(g_error)return fail(479,"Large offset fixture failed");
+        dist=tDist=20000;target=tTarget={1000000,0,-750000};g_cameraOrtho=true;draw();if(g_adaptiveGrid.spacing<=smallSpacing*100||gridCount>884||smallCount>884||std::abs(g_adaptiveGrid.centerX-1000000)>g_adaptiveGrid.radius||std::abs(g_adaptiveGrid.centerZ+750000)>g_adaptiveGrid.radius)return fail(479,"Grid did not adapt to zoom and offset");if(!capture(".grid-meters-offset.png"))return fail(480,"Offset grid capture failed");before=g_session.revision;if(!click(22)||g_grid||g_session.revision!=before||!click(22)||!g_grid)return fail(481,"Grid toggle changed revision or failed");
+        fresh();runTool("doc_apply",parse(R"({"commands":[{"op":"feature.add","type":"box","name":"Frame definition","p":{"dx":"60","dy":"8","dz":"45"}},{"op":"feature.add","type":"box","name":"Fork definition","p":{"dx":"8","dy":"8","dz":"90"}},{"op":"feature.add","type":"box","name":"Bar source","p":{"dx":"110","dy":"8","dz":"8"}},{"op":"feature.add","type":"transform","name":"Handlebar definition","inputs":[3],"p":{"tz":"95"}},{"op":"feature.add","type":"torus","name":"Wheel source","p":{"R":"28","r":"6"}},{"op":"feature.add","type":"transform","name":"Wheel definition","inputs":[5],"p":{"tz":"-55","ry":"90"}},{"op":"assembly.add","name":"Frame","feature":1,"fixed":true},{"op":"assembly.add","name":"Fork","feature":2},{"op":"assembly.add","name":"Handlebar","feature":4},{"op":"assembly.add","name":"Wheel","feature":6}]})"));
+        if(g_error||g_bodyIds.size()!=4)return fail(482,"Steering fixture failed");frameScene();draw();
+        const std::vector<std::vector<std::string>> jointFields{{"revolute","1","Z","2","Z","0","0.5","0.5"},{"rigid","2","origin","3","origin","0","0.5","0.5"},{"revolute","2","X","4","X","0","0.5","0.5"}};
+        for(size_t i=0;i<jointFields.size();++i){g_dialogOverrideQueue={jointFields[i]};g_dialogSmoke=3;if(!i)g_dialogShot=shotPath+".steering-mate-dialog.png";bool added=click(94);g_dialogSmoke=0;if(!added||g_error||g_doc.mates.size()!=i+1||g_doc.mates.back().type!=jointFields[i][0])return fail(512,"Revolute/rigid mate dropdown mouse authoring failed");}
+        int bar=2;for(size_t i=0;i<g_instanceIds.size();++i)if(g_instanceIds[i]==3)bar=(int)i;
+        if(!selectBody(bar)||!click(562)||g_error||!g_componentMove.armed||g_componentMove.joint.movingNodes.size()!=3)return fail(483,"Move component toolbar dispatch or joint selection failed");if(!navigationClear())return fail(511,"Move component controls hide or overlap the view cube");
+        auto pointer=[&](int body,POINT& p){draw();const auto& mesh=g_cpuMeshes[g_instancePart[(size_t)body]];for(size_t t=0;t<mesh.idx.size();t+=3){Vec3 center{};for(int k=0;k<3;++k){size_t v=(size_t)mesh.idx[t+k]*3;center+=Vec3{mesh.pos[v],mesh.pos[v+1],mesh.pos[v+2]};}float x,y;if(!projectScreen(g_instanceWorld[(size_t)body].transformPoint(center/3.),x,y)||x<viewX+20||x>viewX+viewW-20||y<viewY+145||y>viewY+viewH-30||overViewCube(x,y))continue;p={(LONG)x,(LONG)y};if(pickBody(p.x,p.y)==body)return true;}return false;};
+        POINT start;if(!pointer(bar,start))return fail(484,"Handlebar could not be picked in viewport");before=g_session.revision;auto baseline=g_instanceWorld;SendMessage(hwnd,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(start.x,start.y));SendMessage(hwnd,WM_MOUSEMOVE,MK_LBUTTON,MAKELPARAM(start.x+70,start.y+30));
+        auto changed=[&](size_t index){double difference=0;for(int k=0;k<16;++k)difference+=std::abs(g_instanceWorld[index].m[k]-baseline[index].m[k]);return difference>1e-5;};
+        if(g_error||!g_componentMove.active||g_session.revision!=before||changed(0)||!changed(1)||!changed(2)||!changed(3))return fail(485,"Mouse preview did not propagate steering to fork and wheel");if(!capture(".steering-preview.png"))return fail(486,"Steering preview capture failed");
+        SendMessage(hwnd,WM_KEYDOWN,VK_ESCAPE,0);if(g_componentMove.active||g_componentMove.armed||g_session.revision!=before||changed(1)||changed(2)||changed(3))return fail(487,"Esc failed to restore canonical placements");
+        if(!click(562)||!pointer(bar,start))return fail(488,"Second drag could not start");SendMessage(hwnd,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(start.x,start.y));SendMessage(hwnd,WM_MOUSEMOVE,MK_LBUTTON,MAKELPARAM(start.x+70,start.y+30));SendMessage(hwnd,WM_LBUTTONUP,0,MAKELPARAM(start.x+70,start.y+30));if(g_error||g_session.revision!=before+1||!changed(1)||!changed(2)||!changed(3))return fail(489,"Drag release did not commit exact placements");if(!capture(".steering-saved.png")||!click(18)||g_error||changed(1)||changed(2)||changed(3))return fail(490,"Steering undo did not restore all connected parts");
+        cancelComponentMove();if(!selectBody(0)||!click(562)||!g_error||g_componentMove.active)return fail(491,"Grounded component was allowed to move");g_error=false;
+        std::ofstream receipt(shotPath+".interaction-test.log");receipt<<"PASS: real mouse opacity toggle, adjustment, restoration, physical invariance and undo; adaptive 1/2/5 grid, bounded density, meters and large offset, grid toggle; steering preview carries fork+wheel, Esc rollback, release atomic commit, undo, fixed rejection.\n";g_status="Interaction checks passed / transparency / adaptive grid / connected joint drag / cancel / undo";
+    }
     if(projectionUiTest||frameToolsUiTest){
         using V=arkjson::Value;auto parse=[](const char* text){V value;if(!arkjson::parse(text,value))throw std::runtime_error("Invalid UI test fixture");return value;};
         auto failure=[&](int code,const std::string& message){std::ofstream log(shotPath+".geometry-ui-test.log");log<<message<<"\nStatus: "<<g_status<<"\nRevision: "<<g_session.revision<<"\nModule: "<<g_toolModule<<" / pick kind "<<g_pickKind<<" / picks "<<g_picked.size()<<"\nPreview active: "<<g_projectionPreview.active<<" / spatial "<<g_projectionPreview.spatial<<" / vertices "<<g_projectionPreview.lines.size()/3<<" / baseline "<<g_projectionPreview.revision<<" / zmin "<<g_projectionPreview.bounds.mn.z<<"\n";for(const auto& picked:g_picked)log<<"Pick: "<<picked.kind<<" "<<picked.name<<" feature="<<picked.feature<<" instance="<<picked.instance<<" copy="<<picked.copy<<" owner="<<picked.owner<<"\n";std::fprintf(stderr,"Geometry UI selftest %d: %s / %s\n",code,message.c_str(),g_status.c_str());return code;};
