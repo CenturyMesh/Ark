@@ -260,7 +260,7 @@ struct AgentTeam::Impl {
     void assistantEvent(std::size_t index,const AssistantUsage& baseline,const AssistantPerformance& performanceBaseline,const AssistantEvent& input){
         if(input.kind==AssistantEvent::Usage||input.kind==AssistantEvent::ToolEnd){std::lock_guard lock(mutex);roles[index].view.performance=performanceBaseline;accumulateAssistantPerformance(roles[index].view.performance,input.performance);}
         if(input.kind==AssistantEvent::ToolEnd)return; // Actual result is recorded by call().
-        AgentTeamEvent event;event.roleId=roles[index].config.id;event.text=input.text;
+        AgentTeamEvent event;event.roleId=roles[index].config.id;event.text=input.text;event.providerRetry=input.providerRetry;
         {std::lock_guard lock(mutex);auto& view=roles[index].view;
             switch(input.kind){
             case AssistantEvent::Status:event.kind=AgentTeamEvent::Status;view.status=input.text;break;
@@ -285,7 +285,7 @@ struct AgentTeam::Impl {
                 const auto& roleConfig=roles[index].config;
                 auto result=runAssistant(roleConfig.assistant,input,roles[index].tools,[&](const auto& name,const auto& args){return call(index,name,args);},
                     [&](const auto& event){assistantEvent(index,baseline,performanceBaseline,event);},&cancelled,roleConfig.transport,[&]{return inbox(index);},
-                    [&](const V& history){std::lock_guard lock(mutex);roles[index].view.conversation=history;});
+                    [&](const V& history){std::lock_guard lock(mutex);roles[index].view.conversation=history;},AssistantRetryHooks{[&]{checkpoint(index);},{},{}});
                 {std::lock_guard lock(mutex);roles[index].view.conversation=std::move(result.conversation);roles[index].view.usage=baseline;accumulateAssistantUsage(roles[index].view.usage,result.usage);roles[index].view.performance=performanceBaseline;accumulateAssistantPerformance(roles[index].view.performance,result.performance);roles[index].view.state=cancelled?AgentTeamState::Cancelled:AgentTeamState::Idle;}
                 status(index,cancelled?"Cancelled":"Turn completed");
             }catch(const AssistantRoundLimit&){

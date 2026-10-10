@@ -3,6 +3,7 @@
 #include "ark/onboarding.hpp"
 #include "ark/chatgpt_auth.hpp"
 #include <algorithm>
+#include <limits>
 #include <iostream>
 #include <chrono>
 #include <stdexcept>
@@ -48,6 +49,36 @@ static void payloadAndPerformanceChecks(){
     ark::AssistantPerformance interrupted;bool caught=false;
     try{ark::runAssistant(config,V::makeStr("Measure interrupted request"),tools,{},[&](const auto& event){if(event.kind==ark::AssistantEvent::Usage)interrupted=event.performance;},nullptr,[](auto&,auto&,auto*)->V{std::this_thread::sleep_for(std::chrono::milliseconds(3));throw std::runtime_error("offline interrupted transport");});}catch(const ark::AssistantTransportError&){caught=true;}
     check(caught&&interrupted.providerRequests==1&&interrupted.providerMilliseconds>=1&&interrupted.requestBytes>0&&interrupted.toolCalls==0,"failed provider requests retain measured latency and bytes without inventing token usage");
+}
+static void transientHttpRetryChecks(){
+    ark::AssistantConfig config;config.model="offline-retry";auto tools=ark::AgentSession::tools();
+    auto counted=[](V response){response.set("usage",json(R"({"input_tokens":10,"output_tokens":2,"total_tokens":12})"));return response;};
+    std::vector<std::uint64_t> delays;ark::AssistantRetryHooks hooks;hooks.jitterMilliseconds=[](){return 0u;};hooks.wait=[&](auto delay,const auto*){delays.push_back(delay);};
+    int attempts=0,writes=0,checkpoints=0;std::string failedRequest;ark::AgentSession session;std::vector<std::string> retryMessages;V retained;hooks.checkpoint=[&]{++checkpoints;};
+    auto recovered=ark::runAssistant(config,V::makeStr("Commit one parameter, then finish the response"),tools,[&](auto& name,auto& args){++writes;return session.call(name,args);},[&](const auto& event){if(event.providerRetry)retryMessages.push_back(event.text);},nullptr,
+        [&](auto&,const V& request,auto*){switch(++attempts){case 1:return counted(toolResponse("committed_before_503","doc_apply",R"({"expected_revision":0,"commands":[{"op":"param.set","name":"width","expr":10}]})"));case 2:failedRequest=request.dump();throw ark::AssistantHttpError(503,true,2500,"server_is_overloaded");default:check(request.dump()==failedRequest,"retry resends the byte-identical failed request without consuming history/inbox");return counted(finalResponse());}}, {},[&](const V& history){retained=history;},hooks);
+    check(attempts==3&&writes==1&&session.revision==1&&session.document.getParam("width")==10&&recovered.rounds==2,"transient retry never replays previously executed CAD tools or becomes another assistant round");
+    check(delays==std::vector<std::uint64_t>{2500}&&checkpoints==1&&retryMessages.size()==3&&retryMessages.front().find("HTTP 503 / retry 1/3")==0&&retryMessages.back().find("Connection recovered")==0,"server minimum delay, host checkpoint and visible retry/recovery statuses are honored");
+    check(recovered.usage.totalTokens==24&&recovered.usage.reportedResponses==2&&recovered.usage.missingResponses==1&&recovered.performance.providerRequests==3&&recovered.performance.toolCalls==1,"actual transport attempts are counted while failed-attempt usage remains unknown and successful usage is counted once");
+    int callOutputs=0;for(const auto& item:recovered.conversation.arr)if(item.find("type")&&item.find("type")->str=="function_call_output")++callOutputs;check(callOutputs==1,"failed HTTP attempts append no duplicated call receipts");
+    attempts=0;delays.clear();ark::AssistantUsage exhaustedUsage;ark::AssistantPerformance exhaustedPerformance;bool exhausted=false;
+    try{ark::runAssistant(config,V::makeStr("Bound retries"),tools,{},[&](const auto& event){if(event.kind==ark::AssistantEvent::Usage){exhaustedUsage=event.usage;exhaustedPerformance=event.performance;}},nullptr,[&](auto&,auto&,auto*)->V{++attempts;throw ark::AssistantHttpError(503,true);},{},{},hooks);}catch(const ark::AssistantTransportError&){exhausted=true;}
+    check(exhausted&&attempts==4&&delays==std::vector<std::uint64_t>({1000,2000,4000})&&exhaustedUsage.missingResponses==4&&exhaustedPerformance.providerRequests==4,"exactly three exponential retries stop after four failed attempts without a turn/token budget");
+    for(unsigned status:{400u,401u,403u,429u,501u}){attempts=0;delays.clear();fails([&]{ark::runAssistant(config,V::makeStr("Do not retry action-required HTTP"),tools,{}, {},nullptr,[&](auto&,auto&,auto*)->V{++attempts;throw ark::AssistantHttpError(status,true);},{},{},hooks);},"nontransient status stays a terminal transport failure");check(attempts==1&&delays.empty(),"invalid input/auth/quota and unrelated HTTP statuses are not automatically repeated");}
+    for(const char* code:{"insufficient_quota","subscription_sharing_usage_limit_exceeded","route_not_enabled","model_not_found"}){attempts=0;delays.clear();fails([&]{ark::runAssistant(config,V::makeStr("Do not retry quota/configuration"),tools,{}, {},nullptr,[&](auto&,auto&,auto*)->V{++attempts;throw ark::AssistantHttpError(503,true,{},code);},{},{},hooks);},"action-required code overrides transient status");check(attempts==1&&delays.empty(),"quota/configuration never retries even on a misleading 503");}
+    for(unsigned status:{500u,502u,504u}){attempts=0;delays.clear();auto result=ark::runAssistant(config,V::makeStr("Retry an eligible pre-response server failure"),tools,{}, {},nullptr,[&](auto&,auto&,auto*){if(++attempts==1)throw ark::AssistantHttpError(status,true);return counted(finalResponse());},{},{},hooks);check(attempts==2&&result.usage.missingResponses==1,"explicit 500/502/504 pre-response failures recover with one bounded retry");}
+    for(auto delay:{std::uint64_t{30001},std::numeric_limits<std::uint64_t>::max()}){attempts=0;delays.clear();bool deferred=false;try{ark::runAssistant(config,V::makeStr("Respect long server wait"),tools,{}, {},nullptr,[&](auto&,auto&,auto*)->V{++attempts;throw ark::AssistantHttpError(503,true,delay);},{},{},hooks);}catch(const ark::AssistantTransportError& error){deferred=std::string(error.what()).find("deferred")!=std::string::npos;}check(deferred&&attempts==1&&delays.empty(),"a valid Retry-After above the supported maximum is deferred rather than clamped to an early retry");}
+    std::atomic_bool cancelled=false;attempts=0;delays.clear();auto cancelHooks=hooks;cancelHooks.wait=[&](auto delay,const auto*){delays.push_back(delay);cancelled=true;};
+    fails([&]{ark::runAssistant(config,V::makeStr("Cancel recovery"),tools,{}, {},&cancelled,[&](auto&,auto&,auto*)->V{++attempts;throw ark::AssistantHttpError(503,true);},{},{},cancelHooks);},"cancellation interrupts retry backoff");check(attempts==1&&delays.size()==1,"cancelled backoff sends no next provider request");
+    cancelled=false;std::atomic_bool waiting=false;attempts=0;const auto began=std::chrono::steady_clock::now();
+    std::jthread cancelDuringWait([&](std::stop_token stop){while(!waiting&&!stop.stop_requested())std::this_thread::sleep_for(std::chrono::milliseconds(1));if(stop.stop_requested())return;std::this_thread::sleep_for(std::chrono::milliseconds(10));cancelled=true;});
+    fails([&]{ark::runAssistant(config,V::makeStr("Cancel the real short-poll wait"),tools,{},[&](const auto& event){if(event.providerRetry&&event.text.find("HTTP 503 / retry")==0)waiting=true;},&cancelled,[&](auto&,auto&,auto*)->V{++attempts;throw ark::AssistantHttpError(503,true);});},"default retry waiter observes cancellation");
+    check(attempts==1&&std::chrono::steady_clock::now()-began<std::chrono::seconds(1),"default bounded wait cancels promptly without sleeping through its delay");
+    attempts=0;delays.clear();writes=0;V interruptedHistory;ark::AgentSession interrupted;
+    fails([&]{ark::runAssistant(config,V::makeStr("Do not replay an incomplete output stream"),tools,[&](auto& name,auto& args){++writes;return interrupted.call(name,args);},{},nullptr,[&](auto&,auto&,auto*){if(++attempts==1)return counted(toolResponse("before_stream_failure","doc_apply",R"({"expected_revision":0,"commands":[{"op":"param.set","name":"width","expr":10}]})"));throw ark::AssistantTransportError("stream interrupted after output began");},{},[&](const V& history){interruptedHistory=history;},hooks);},"stream failure requires explicit retained-history recovery");
+    check(attempts==2&&writes==1&&interrupted.revision==1&&delays.empty()&&interruptedHistory.dump().find("function_call_output")!=std::string::npos,"incomplete streaming or ambiguous transport failures never auto retry or erase prior tool receipts");
+    attempts=0;delays.clear();fails([&]{ark::runAssistant(config,V::makeStr("No string-matched retries"),tools,{}, {},nullptr,[&](auto&,auto&,auto*)->V{++attempts;throw std::runtime_error("HTTP 503 text alone");},{},{},hooks);},"ordinary errors are not classified by message text");check(attempts==1&&delays.empty(),"only typed pre-output HTTP errors can enter retry recovery");
+    const ark::AssistantHttpError sanitized(503,true,{},"unsafe\ncredential", "unsafe request id", "unsafe\rlabel");check(std::string(sanitized.what()).find("credential")==std::string::npos&&sanitized.errorCode.empty()&&sanitized.requestId.empty(),"HTTP diagnostics contain bounded machine fields and never raw error bodies");
 }
 int main(int argc,char** argv){try{
     ark::AssistantConfig config;config.model="test-model";
@@ -207,5 +238,5 @@ int main(int argc,char** argv){try{
         [&](const auto& e){if(e.kind==ark::AssistantEvent::Usage)partial=e.usage;},nullptr,
         [&](auto&,auto&,auto*){return incompleteCounted;});},"incomplete response remains rejected");
     check(partial.totalTokens==15,"usage from incomplete response survives via event");
-    payloadAndPerformanceChecks();std::cout<<checks<<" assistant checks passed\n";return 0;
+    payloadAndPerformanceChecks();transientHttpRetryChecks();std::cout<<checks<<" assistant checks passed\n";return 0;
 }catch(const std::exception& e){std::cerr<<"assistant test failed: "<<e.what()<<'\n';return 1;}}

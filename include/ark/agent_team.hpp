@@ -33,6 +33,7 @@ struct AgentTeamEvent {
     std::string roleId, text, tool;
     AssistantUsage usage; // Role lifetime snapshot, never a model estimate.
     AssistantPerformance performance;
+    bool providerRetry=false;
     bool toolError=false; // ToolEnd: actual executor/permission result.
     std::string stepId,proposalId;
     std::vector<std::string> operations,sketchNames,featureNames;

@@ -7,6 +7,12 @@
 #include <set>
 #include <stdexcept>
 #include <thread>
+#include <ctime>
+#include <iomanip>
+#include <limits>
+#include <locale>
+#include <random>
+#include <sstream>
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -42,6 +48,13 @@ V compactToolReceipt(V value){
     return value;
 }
 std::uint64_t millisecondsSince(std::chrono::steady_clock::time_point began){return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-began).count());}
+std::string safeHttpField(std::string value,bool spaces=false,bool parameter=false){if(value.size()>128||!std::all_of(value.begin(),value.end(),[&](unsigned char c){return std::isalnum(c)||c=='_'||c=='-'||c=='.'||(spaces&&c==' ')||(parameter&&(c=='['||c==']'));}))return {};return value;}
+bool transientHttp(const AssistantHttpError& error){
+    if(!error.safeToRetry||(error.statusCode!=500&&error.statusCode!=502&&error.statusCode!=503&&error.statusCode!=504))return false;
+    static const std::set<std::string> actionRequired={"authentication_error","invalid_api_key","permission_denied","insufficient_quota","quota_exceeded","organization_spend_limit_exceeded","project_spend_limit_exceeded","organization_usage_limit_exceeded","usage_limit_exceeded","subscription_sharing_usage_limit_exceeded","subscription_sharing_user_not_eligible","subscription_sharing_invalid_user","subscription_sharing_unsupported_capability","subscription_sharing_route_not_supported","subscription_sharing_route_not_enabled","route_not_enabled","model_not_found","invalid_request_error","unsupported_capability","chatpass_v2_scope_not_authorized","chatpass_v2_invalid_authorization_context","misalignment_policy_violation"};
+    return !actionRequired.count(error.errorCode);
+}
+void waitForRetry(std::uint64_t milliseconds,const std::atomic_bool* cancel){const auto end=std::chrono::steady_clock::now()+std::chrono::milliseconds(milliseconds);while(std::chrono::steady_clock::now()<end){cancelled(cancel);const auto left=std::chrono::duration_cast<std::chrono::milliseconds>(end-std::chrono::steady_clock::now());std::this_thread::sleep_for(std::min(left,std::chrono::milliseconds(50)));}cancelled(cancel);}
 
 bool tokenCount(const V& usage,const char* key,std::uint64_t& value){
     const auto* n=usage.find(key);
@@ -143,11 +156,14 @@ V nativeTransport(const AssistantConfig& config,const V& request,const std::atom
     check(WinHttpQueryHeaders(handle,WINHTTP_QUERY_STATUS_CODE|WINHTTP_QUERY_FLAG_NUMBER,WINHTTP_HEADER_NAME_BY_INDEX,&status,&size,WINHTTP_NO_HEADER_INDEX));
     // Never put an arbitrary endpoint's error body (which may echo headers) in
     // the model conversation, UI or logs.
-    if(status<200||status>=300)throw std::runtime_error("Assistant endpoint returned HTTP "+std::to_string(status)+". Check provider configuration, quota and access.");
+    std::optional<std::uint64_t> retryAfter;std::string requestId;
+    if(status<200||status>=300){wchar_t header[256]{};DWORD headerBytes=sizeof(header);if(WinHttpQueryHeaders(handle,WINHTTP_QUERY_CUSTOM,L"Retry-After",header,&headerBytes,WINHTTP_NO_HEADER_INDEX)){std::wstring value(header);retryAfter=assistantRetryAfterMilliseconds(std::string(value.begin(),value.end()));}headerBytes=sizeof(header);if(WinHttpQueryHeaders(handle,WINHTTP_QUERY_CUSTOM,L"x-request-id",header,&headerBytes,WINHTTP_NO_HEADER_INDEX)){std::wstring value(header);requestId=safeHttpField(std::string(value.begin(),value.end()));}}
     std::string response;char buffer[16384];
     for(;;){DWORD read=0;check(WinHttpReadData(handle,buffer,sizeof(buffer),&read));if(!read)break;
-        require(response.size()+read<=config.maxResponseBytes,"Assistant response exceeds configured size limit.");response.append(buffer,read);
+        const auto limit=status<200||status>=300?std::min<std::size_t>(config.maxResponseBytes,64*1024):config.maxResponseBytes;
+        if(response.size()+read>limit){if(status<200||status>=300)break;throw std::runtime_error("Assistant response exceeds configured size limit.");}response.append(buffer,read);
     }
+    if(status<200||status>=300){std::string code;V body;if(arkjson::parse(response,body))if(auto error=body.find("error"))if(error->t==V::Obj){code=field(*error,"code");if(code.empty())code=field(*error,"type");}throw AssistantHttpError(status,true,retryAfter,code,requestId);}
     V parsed;require(arkjson::parse(response,parsed),"Assistant endpoint returned invalid JSON.");return parsed;
 }
 #else
@@ -168,6 +184,22 @@ void accumulateAssistantPerformance(AssistantPerformance& total,const AssistantP
     total.maxRequestBytes=std::max(total.maxRequestBytes,delta.maxRequestBytes);
     if(delta.providerRequests){total.lastProviderMilliseconds=delta.lastProviderMilliseconds;total.lastRequestBytes=delta.lastRequestBytes;total.lastInputBytes=delta.lastInputBytes;total.lastToolSchemaBytes=delta.lastToolSchemaBytes;}
     if(delta.toolCalls)total.lastToolMilliseconds=delta.lastToolMilliseconds;
+}
+AssistantHttpError::AssistantHttpError(unsigned status,bool retryable,std::optional<std::uint64_t> retryAfter,std::string code,std::string id,std::string source,std::string param,std::string category)
+    :std::runtime_error((safeHttpField(source,true).empty()?std::string("Assistant provider"):safeHttpField(source,true))+" HTTP "+std::to_string(status)+(safeHttpField(code).empty()?"":" ("+safeHttpField(code)+")")+(safeHttpField(id).empty()?"":" request_id="+safeHttpField(id))),statusCode(status),safeToRetry(retryable),retryAfterMilliseconds(retryAfter),errorCode(safeHttpField(std::move(code))),requestId(safeHttpField(std::move(id))),label(safeHttpField(std::move(source),true)),errorParam(safeHttpField(std::move(param),false,true)),failureCategory(safeHttpField(std::move(category))){}
+std::optional<std::uint64_t> assistantRetryAfterMilliseconds(const std::string& header,std::int64_t nowUnix){
+    if(header.empty()||header.size()>256||header.find_first_of("\r\n")!=std::string::npos)return {};
+    const auto first=header.find_first_not_of(" \t"),last=header.find_last_not_of(" \t");if(first==std::string::npos)return {};const auto value=header.substr(first,last-first+1);
+    if(std::all_of(value.begin(),value.end(),[](unsigned char c){return c>='0'&&c<='9';})){std::uint64_t seconds=0;for(char digit:value){if(seconds>(std::numeric_limits<std::uint64_t>::max()/1000-(digit-'0'))/10)return std::numeric_limits<std::uint64_t>::max();seconds=seconds*10+(digit-'0');}return seconds*1000;}
+    std::tm parsed{};std::istringstream input(value);input.imbue(std::locale::classic());input>>std::get_time(&parsed,"%a, %d %b %Y %H:%M:%S GMT");if(input.fail()||input.peek()!=std::char_traits<char>::eof()||parsed.tm_sec>59)return {};
+    const auto original=parsed;parsed.tm_isdst=0;
+#ifdef _WIN32
+    const auto when=_mkgmtime(&parsed);
+#else
+    const auto when=timegm(&parsed);
+#endif
+    if(when<0||parsed.tm_year!=original.tm_year||parsed.tm_mon!=original.tm_mon||parsed.tm_mday!=original.tm_mday||parsed.tm_hour!=original.tm_hour||parsed.tm_min!=original.tm_min||parsed.tm_sec!=original.tm_sec)return {};
+    if(nowUnix<0)nowUnix=static_cast<std::int64_t>(std::time(nullptr));if(static_cast<std::int64_t>(when)<=nowUnix)return 0;return static_cast<std::uint64_t>(static_cast<std::int64_t>(when)-nowUnix)*1000;
 }
 std::string assistantUsageLabel(const AssistantUsage& usage){
     if(!usage.reportedResponses)return usage.missingResponses?"Tokens unavailable (provider omitted usage)":"Tokens unavailable (no assistant response)";
@@ -240,7 +272,7 @@ V assistantRequest(const AssistantConfig& config,const V& conversation,const V& 
         "You have no shell or credential tools. Do not ask for secrets in chat. Respond in the user's language."));
     require(request.dump().size()<=config.maxConversationBytes,"Assistant conversation is full; start a new conversation.");return request;
 }
-AssistantResult runAssistant(const AssistantConfig& config,const V& input,const V& tools,const AssistantTool& callTool,const AssistantEvents& events,const std::atomic_bool* cancel,const AssistantTransport& transport,const AssistantInbox& inbox,const AssistantHistory& history){
+AssistantResult runAssistant(const AssistantConfig& config,const V& input,const V& tools,const AssistantTool& callTool,const AssistantEvents& events,const std::atomic_bool* cancel,const AssistantTransport& transport,const AssistantInbox& inbox,const AssistantHistory& history,const AssistantRetryHooks& retryHooks){
     validateAssistantConfig(config);cancelled(cancel);
     auto functions=assistantFunctionTools(tools);std::set<std::string> allowed;
     for(auto& fn:functions.arr)allowed.insert(field(fn,"name"));
@@ -272,16 +304,28 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
             }
         }
         if(history)history(result.conversation);
-        V request=assistantRequest(config,result.conversation,tools);
+        const V request=assistantRequest(config,result.conversation,tools);
         auto& performance=result.performance;
-        ++performance.providerRequests;performance.lastRequestBytes=request.dump().size();performance.lastInputBytes=result.conversation.dump().size();performance.lastToolSchemaBytes=request.find("tools")->dump().size();
-        performance.requestBytes+=performance.lastRequestBytes;performance.inputBytes+=performance.lastInputBytes;performance.toolSchemaBytes+=performance.lastToolSchemaBytes;performance.maxRequestBytes=std::max(performance.maxRequestBytes,performance.lastRequestBytes);
-        const auto providerBegan=std::chrono::steady_clock::now();
-        auto completedProvider=[&]{performance.lastProviderMilliseconds=millisecondsSince(providerBegan);performance.providerMilliseconds+=performance.lastProviderMilliseconds;};
         V response;
-        try{response=transport?transport(config,request,cancel):nativeTransport(config,request,cancel);}
-        catch(const std::exception& error){completedProvider();AssistantUsage unknown;unknown.missingResponses=1;accumulateAssistantUsage(result.usage,unknown);measuredEvent(AssistantEvent::Usage,assistantUsageLabel(result.usage));throw AssistantTransportError(error.what());}
-        completedProvider();
+        constexpr unsigned maxRetries=3;constexpr std::uint64_t maxDelay=30000;
+        auto retryStatus=[&](const std::string& text){if(events){AssistantEvent event;event.kind=AssistantEvent::Status;event.text=text;event.usage=result.usage;event.performance=performance;event.providerRetry=true;events(event);}};
+        for(unsigned attempt=0;;++attempt){
+            cancelled(cancel);if(attempt&&retryHooks.checkpoint)retryHooks.checkpoint();cancelled(cancel);
+            if(attempt)retryStatus("Retry "+std::to_string(attempt)+"/3 / requesting the unchanged response");
+            ++performance.providerRequests;performance.lastRequestBytes=request.dump().size();performance.lastInputBytes=result.conversation.dump().size();performance.lastToolSchemaBytes=request.find("tools")->dump().size();
+            performance.requestBytes+=performance.lastRequestBytes;performance.inputBytes+=performance.lastInputBytes;performance.toolSchemaBytes+=performance.lastToolSchemaBytes;performance.maxRequestBytes=std::max(performance.maxRequestBytes,performance.lastRequestBytes);
+            const auto providerBegan=std::chrono::steady_clock::now();auto completedProvider=[&]{performance.lastProviderMilliseconds=millisecondsSince(providerBegan);performance.providerMilliseconds+=performance.lastProviderMilliseconds;};
+            try{response=transport?transport(config,request,cancel):nativeTransport(config,request,cancel);}
+            catch(const AssistantHttpError& error){completedProvider();AssistantUsage unknown;unknown.missingResponses=1;accumulateAssistantUsage(result.usage,unknown);measuredEvent(AssistantEvent::Usage,assistantUsageLabel(result.usage));cancelled(cancel);
+                if(!transientHttp(error)||attempt>=maxRetries)throw AssistantTransportError(error.what());
+                if(error.retryAfterMilliseconds&&*error.retryAfterMilliseconds>maxDelay){retryStatus("HTTP "+std::to_string(error.statusCode)+" / deferred: server Retry-After exceeds 30s; no early retry");throw AssistantTransportError(std::string(error.what())+"; server Retry-After exceeds the supported 30-second wait. Request deferred; retry later.");}
+                const auto minimum=std::max<std::uint64_t>(1000u<<attempt,error.retryAfterMilliseconds.value_or(0));
+                unsigned jitter=0;if(retryHooks.jitterMilliseconds)jitter=std::min(retryHooks.jitterMilliseconds(),250u);else{static thread_local std::mt19937 random(std::random_device{}());jitter=std::uniform_int_distribution<unsigned>(0,250)(random);}const auto delay=minimum+std::min<std::uint64_t>(jitter,maxDelay-minimum);
+                retryStatus("HTTP "+std::to_string(error.statusCode)+" / retry "+std::to_string(attempt+1)+"/3 in "+std::to_string((delay+999)/1000)+"s; prior CAD work retained");
+                if(retryHooks.wait)retryHooks.wait(delay,cancel);else waitForRetry(delay,cancel);cancelled(cancel);continue;
+            }catch(const std::exception& error){completedProvider();AssistantUsage unknown;unknown.missingResponses=1;accumulateAssistantUsage(result.usage,unknown);measuredEvent(AssistantEvent::Usage,assistantUsageLabel(result.usage));throw AssistantTransportError(error.what());}
+            completedProvider();if(attempt)retryStatus("Connection recovered / continuing with the completed response");break;
+        }
         ++result.rounds;
         require(response.dump().size()<=config.maxResponseBytes,"Assistant response exceeds configured size limit.");
         accumulateAssistantUsage(result.usage,responseUsage(response));

@@ -1,0 +1,133 @@
+{
+  "iteration": {
+    "sequence": 3,
+    "phase": "D",
+    "code": "003D",
+    "version": "0.9.4",
+    "milestones": [
+      "D.02",
+      "D.04"
+    ]
+  },
+  "date": "2026-10-10",
+  "base_commit": "2453974629f58074232e6ab31ecf570b03908de3",
+  "native_focused_ctest": {
+    "passed": 4,
+    "failed": 0,
+    "seconds": 0.89,
+    "tests": [
+      "release-metadata",
+      "assistant-connector",
+      "agent-team",
+      "chatgpt-auth"
+    ],
+    "log": "out\\ark-003D-native-tests.log"
+  },
+  "core_focused_ctest": {
+    "passed": 4,
+    "failed": 0,
+    "seconds": 1.02,
+    "tests": [
+      "release-metadata",
+      "assistant-connector",
+      "agent-team",
+      "chatgpt-auth"
+    ],
+    "log": "out\\ark-003D-core-tests.log"
+  },
+  "checks": {
+    "assistant": 141,
+    "agent_team": 216,
+    "chatgpt_auth": 120,
+    "release_metadata": 26
+  },
+  "ui": {
+    "test": "assistant-ui",
+    "exit": 0,
+    "seconds": 17.17,
+    "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-003D-assistant-ui.png (1600x1000)\r\n",
+    "stderr": ""
+  },
+  "visual_review": [
+    "single-http-retry",
+    "team-http-retry"
+  ],
+  "retry_policy": {
+    "statuses": [
+      500,
+      502,
+      503,
+      504
+    ],
+    "retries": 3,
+    "base_delays_ms": [
+      1000,
+      2000,
+      4000
+    ],
+    "jitter_ms_max": 250,
+    "max_delay_ms": 30000,
+    "long_retry_after": "defer, never retry early",
+    "known_account_and_configuration_errors": "not retried",
+    "incomplete_stream_and_ambiguous_transport": "manual continuation"
+  },
+  "verified_cases": [
+    "same failed request retried byte-identically",
+    "prior CAD commit and tool receipt not replayed",
+    "failed attempts counted, missing usage retained",
+    "server wait honored, oversize wait deferred",
+    "bounded exhaustion",
+    "cancel during real waiter and UI Cancel click",
+    "single and team retry visibility",
+    "HTTP error JSON distinguished from successful SSE"
+  ],
+  "package": {
+    "url": "https://github.com/CenturyMesh/Ark-Releases/releases/download/v0.9.4/ark-windows-x64-0.9.4.zip",
+    "name": "ark-windows-x64-0.9.4.zip",
+    "sha256": "7e00dbf464f08be418dc7369e94ba1c384a2d633fa8dfad941072ac8fae929c0",
+    "size": 30031630
+  },
+  "runtime_hashes": [
+    {
+      "file": "ark-studio.exe",
+      "sha256": "5bd1e2e60b9202d9da5ab4759ed5eca110d94f8c13474a7e183529b5d8575195"
+    },
+    {
+      "file": "ark-cli.exe",
+      "sha256": "225a71f886e04e8f43898ef4fbe8dc32c5c735dc2c37c7187e9029e908a3a9f5"
+    },
+    {
+      "file": "ark-mcp.exe",
+      "sha256": "f4a3262b8b0fc60ceaef911aa8909055001be2c52a0514e09628646b5603ab77"
+    },
+    {
+      "file": "ark-occt-worker.exe",
+      "sha256": "e6b28edbc2cd7098e31238026959163e8629586805d8984cfdda562a6441d494"
+    }
+  ],
+  "deployment": {
+    "state": {
+      "current": "0.9.3",
+      "pending": "0.9.4",
+      "schema": 1,
+      "activating": "",
+      "previous": "0.9.2"
+    },
+    "activation": "pending next launch",
+    "preserved_process": 72180,
+    "preserved_title": "ARK 002B",
+    "responding": true,
+    "restarted": false
+  },
+  "live_provider_calls": 0,
+  "model_settings_changed": false,
+  "user_drawings_modified": false,
+  "hosted_CI_checked": false,
+  "online_release_published": false,
+  "limitations": [
+    "Real provider availability was not tested; user reported Resume worked",
+    "Installed003D not activated, to preserve running002B",
+    "No automatic retry for HTTP429 or partially received successful stream",
+    "No claims about design quality or paid latency/cost"
+  ]
+}

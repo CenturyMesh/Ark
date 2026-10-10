@@ -1,4 +1,5 @@
 #include "ark/chatgpt_auth.hpp"
+#include "ark/assistant.hpp"
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -135,11 +136,62 @@ V parseChatGptSse(const std::string& body){
     return completed;
 }
 
+V parseChatGptResponsesHttp(unsigned status,const std::string& body,
+    const std::string& retryAfter,const std::string& requestId,std::int64_t nowUnix){
+    if(status==200)return parseChatGptSse(body);
+    auto safeField=[](const std::string& value,bool parameter=false){
+        if(value.size()>128||!std::all_of(value.begin(),value.end(),[&](unsigned char c){
+            return (c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||
+                   c=='_'||c=='-'||c=='.'||(parameter&&(c=='['||c==']'));
+        }))return std::string{};
+        return value;
+    };
+    std::string code,param;V parsed;
+    // Error descriptions/detail are diagnostic text, not protocol codes, and
+    // can contain sensitive request material. Never copy them into exceptions.
+    if(body.size()<=65536&&arkjson::parse(body,parsed)&&parsed.t==V::Obj){
+        if(const V* error=parsed.find("error");error&&error->t==V::Obj){
+            if(const V* value=error->find("code");value&&value->t==V::Str)code=safeField(value->str);
+            if(const V* value=error->find("param");value&&value->t==V::Str)param=safeField(value->str,true);
+        }
+    }
+    bool retryable=false;std::string category="http_failure";
+    if(code=="subscription_sharing_usage_limit_exceeded")category="plan_usage_limit";
+    else if(code=="insufficient_quota")category="quota";
+    else if(status==400||status==401||status==403||status==422||
+            code=="subscription_sharing_user_not_eligible"||
+            code=="subscription_sharing_unsupported_capability"||
+            code=="subscription_sharing_route_not_supported"||
+            code=="subscription_sharing_route_not_enabled"||code=="route_not_enabled"||
+            code=="subscription_sharing_invalid_user"||
+            code=="chatpass_v2_scope_not_authorized"||
+            code=="chatpass_v2_invalid_authorization_context"||code=="invalid_api_key"||
+            code=="invalid_client"||code=="model_not_found")category="configuration";
+    else if(status==503&&(code=="subscription_sharing_usage_unavailable"||
+                         code=="subscription_sharing_user_unavailable")){
+        category="transient_plan_service";retryable=true;
+    }else if(status==503&&code=="server_is_overloaded"){
+        category="service_overloaded";retryable=true;
+    }else if(status==429&&(code=="slow_down"||code=="rate_limit_exceeded")){
+        category="rate_limit";retryable=true;
+    }else if(status==503){
+        // Direct admission can mean the route is not enabled/configured. A
+        // bare status or detail string does not prove a transient usage error.
+        // The runtime may try bounded backoff, then surface this distinction;
+        // it must never repair routing by changing credentials or providers.
+        category="unknown_service_unavailable";retryable=true;
+    }else if(status==500||status==502||status==504){
+        category="temporary_http_service";retryable=true;
+    }
+    throw AssistantHttpError(status,retryable,assistantRetryAfterMilliseconds(retryAfter,nowUnix),
+                             code,safeField(requestId),"ChatGPT Responses",param,category);
+}
+
 #ifdef _WIN32
 namespace {
 struct Handle {HINTERNET value=nullptr;explicit Handle(HINTERNET v):value(v){require(v!=nullptr,"ChatGPT HTTP connection failed");}~Handle(){if(value)WinHttpCloseHandle(value);}Handle(const Handle&)=delete;Handle& operator=(const Handle&)=delete;};
 struct Socket {SOCKET value=INVALID_SOCKET;explicit Socket(SOCKET v):value(v){require(v!=INVALID_SOCKET,"ChatGPT loopback socket failed");}~Socket(){if(value!=INVALID_SOCKET)closesocket(value);}Socket(const Socket&)=delete;};
-struct HttpResult {DWORD status=0;std::string body,requestId;};
+struct HttpResult {DWORD status=0;std::string body,requestId,retryAfter;};
 struct SecretString {std::string value;explicit SecretString(std::string text):value(std::move(text)){}~SecretString(){if(!value.empty())SecureZeroMemory(value.data(),value.size());}};
 struct OAuthError:std::runtime_error {DWORD status;std::string code;OAuthError(DWORD httpStatus,std::string errorCode):std::runtime_error("ChatGPT token endpoint HTTP "+std::to_string(httpStatus)+(errorCode.empty()?"":" ("+errorCode+")")),status(httpStatus),code(std::move(errorCode)){} };
 struct SseWire {
@@ -172,8 +224,24 @@ HttpResult http(const std::string& method,const std::string& endpoint,const std:
     require(body.size()<=4*1024*1024,"ChatGPT request too large");check(WinHttpSendRequest(raw,WINHTTP_NO_ADDITIONAL_HEADERS,0,body.empty()?nullptr:(void*)body.data(),(DWORD)body.size(),(DWORD)body.size(),0));check(WinHttpReceiveResponse(raw,nullptr));
     HttpResult result;DWORD size=sizeof(result.status);check(WinHttpQueryHeaders(raw,WINHTTP_QUERY_STATUS_CODE|WINHTTP_QUERY_FLAG_NUMBER,WINHTTP_HEADER_NAME_BY_INDEX,&result.status,&size,WINHTTP_NO_HEADER_INDEX));
     wchar_t requestId[256]{};size=sizeof(requestId);if(WinHttpQueryHeaders(raw,WINHTTP_QUERY_CUSTOM,L"openai-request-id",requestId,&size,WINHTTP_NO_HEADER_INDEX)||((size=sizeof(requestId)),WinHttpQueryHeaders(raw,WINHTTP_QUERY_CUSTOM,L"x-request-id",requestId,&size,WINHTTP_NO_HEADER_INDEX))){std::wstring id(requestId);if(id.size()<=128&&std::all_of(id.begin(),id.end(),[](wchar_t c){return (c>=L'a'&&c<=L'z')||(c>=L'A'&&c<=L'Z')||(c>=L'0'&&c<=L'9')||c==L'_'||c==L'-'||c==L'.';}))result.requestId=utf8(id);}
-    char buffer[16384];size_t consumed=0;SseWire stream;const bool streaming=endpoint==responseEndpoint;
-    for(;;){DWORD read=0;check(WinHttpReadData(raw,buffer,sizeof buffer,&read));if(read==0)break;consumed+=read;require(consumed<=maxBytes,"ChatGPT response too large");if(streaming){stream.feed(buffer,read);if(!stream.terminal.empty()){result.body=std::move(stream.terminal);break;}}else result.body.append(buffer,read);}return result;
+    wchar_t retryAfter[256]{};size=sizeof(retryAfter);if(WinHttpQueryHeaders(raw,WINHTTP_QUERY_CUSTOM,L"Retry-After",retryAfter,&size,WINHTTP_NO_HEADER_INDEX)){
+        const std::wstring value(retryAfter);if(value.size()<=128&&std::all_of(value.begin(),value.end(),[](wchar_t c){return c>=32&&c<=126;}))result.retryAfter=utf8(value);
+    }
+    char buffer[16384];size_t consumed=0;SseWire stream;const bool streaming=endpoint==responseEndpoint&&result.status==200;
+    // HTTP admission failures are JSON (or plain diagnostics), never an SSE
+    // completion. Retain their bounded body so the decoder can inspect codes.
+    const size_t bodyLimit=endpoint==responseEndpoint&&result.status!=200?std::min<size_t>(maxBytes,65536):maxBytes;
+    for(;;){
+        DWORD read=0;check(WinHttpReadData(raw,buffer,sizeof buffer,&read));if(read==0)break;
+        consumed+=read;
+        if(consumed>bodyLimit){
+            if(endpoint==responseEndpoint&&result.status!=200){result.body.clear();break;}
+            throw std::runtime_error("ChatGPT response too large");
+        }
+        if(streaming){stream.feed(buffer,read);if(!stream.terminal.empty()){result.body=std::move(stream.terminal);break;}}
+        else result.body.append(buffer,read);
+    }
+    return result;
 }
 V jsonResponse(const HttpResult& response,const char* reason){require(response.status==200,reason);return parseJson(response.body,reason);}
 struct Discovery {std::string jwksUri,revocationEndpoint;};
@@ -332,8 +400,7 @@ V chatGptResponses(const V& request,const std::atomic_bool* cancel){
     auto selected=std::find_if(available.begin(),available.end(),[&](const ChatGptModel& item){return item.slug==model;});require(selected!=available.end(),"Select a model from the signed-in ChatGPT account's model list");
     if(const V* reasoning=request.find("reasoning")){require(reasoning->t==V::Obj,"Invalid ChatGPT reasoning settings");if(const V* effort=reasoning->find("effort"))require(effort->t==V::Str&&std::find(selected->reasoningEfforts.begin(),selected->reasoningEfforts.end(),effort->str)!=selected->reasoningEfforts.end(),"Selected reasoning effort is not advertised for this ChatGPT model; choose Auto or a listed level");}
     SecretString bearer(std::move(access.token));HttpResult response=http("POST",responseEndpoint,request.dump(),bearer.value,"application/json",16*1024*1024,cancel);
-    if(response.status!=200){std::string code;V body;if(arkjson::parse(response.body,body)&&body.t==V::Obj){if(const V* error=body.find("error");error&&error->t==V::Obj)if(const V* value=error->find("code");value&&value->t==V::Str)code=value->str;}if(code.size()>128||!std::all_of(code.begin(),code.end(),[](unsigned char c){return (c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='_'||c=='-';}))code.clear();throw std::runtime_error("ChatGPT Responses HTTP "+std::to_string(response.status)+(code.empty()?"":" ("+code+")")+(response.requestId.empty()?"":" request_id="+response.requestId));}
-    return parseChatGptSse(response.body);
+    return parseChatGptResponsesHttp(response.status,response.body,response.retryAfter,response.requestId,unixNow());
 #else
     (void)request;(void)cancel;throw std::runtime_error("Sign in with ChatGPT is currently available on Windows");
 #endif

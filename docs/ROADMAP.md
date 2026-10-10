@@ -1,11 +1,13 @@
 # ARK — matriz de roadmap A–G
 
-**Data da auditoria:** 10 de outubro de 2026. **Iteração local:** `002B`.
+**Data da auditoria:** 10 de outubro de 2026. **Iteração local:** `003D`.
 O baseline entregue é `0.9.1`, commit `5e7153f`; não foi rebatizado retroativamente.
 `001A` inicia a convenção pública, com versão técnica `0.9.2` para distribuição.
 `002B` acrescenta recuperação do runtime, projeção exata e ferramentas de frame;
 ver [escopo e evidência](iterations/002B.md). Os milestones abaixo mantêm os seus
 gates completos mesmo quando uma parte já foi verificada.
+`003D` aborda recuperação de falhas HTTP transitórias em D.02/D.04;
+ver [escopo e evidência](iterations/003D.md).
 
 **Visão:** um ambiente CAD onde uma pessoa ou uma equipa de agentes consegue
 transformar uma intenção num produto editável, verificável e preparado para

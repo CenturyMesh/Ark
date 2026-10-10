@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <vector>
 #ifdef _WIN32
@@ -17,7 +18,8 @@
 
 namespace {
 using V=arkjson::Value;
-void check(bool condition,const char* message){if(!condition)throw std::runtime_error(message);}
+unsigned checks=0;
+void check(bool condition,const char* message){++checks;if(!condition)throw std::runtime_error(message);}
 template<class F> bool rejects(F&& action){try{action();return false;}catch(const std::exception&){return true;}}
 V json(const char* text){V value;if(!arkjson::parse(text,value))throw std::runtime_error("Bad auth test JSON");return value;}
 std::string b64(const unsigned char* bytes,size_t count){static const char alphabet[]="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";std::string out;for(size_t i=0;i<count;i+=3){unsigned x=(unsigned)bytes[i]<<16;if(i+1<count)x|=(unsigned)bytes[i+1]<<8;if(i+2<count)x|=bytes[i+2];out+=alphabet[(x>>18)&63];out+=alphabet[(x>>12)&63];if(i+1<count)out+=alphabet[(x>>6)&63];if(i+2<count)out+=alphabet[x&63];}return out;}
@@ -64,6 +66,100 @@ int main(int argc,char** argv){
     }
     if(argc!=1)return 2;
     try{
+        // Exercise the decoder used by the real ChatGPT HTTP path. No token,
+        // account store, DNS, provider call or native transport is involved.
+        const std::int64_t httpNow=784111770;
+        auto httpFailure=[&](unsigned status,const std::string& body,const std::string& after="",
+                             const std::string& id="req_fixture-1"){
+            try{ark::parseChatGptResponsesHttp(status,body,after,id,httpNow);}
+            catch(const ark::AssistantHttpError& failure){return failure;}
+            throw std::runtime_error("Expected typed ChatGPT HTTP failure");
+        };
+        auto unavailableHttp=httpFailure(503,R"({"error":{"code":"subscription_sharing_usage_unavailable","message":"offline-secret-token"}})","7");
+        check(unavailableHttp.statusCode==503&&unavailableHttp.safeToRetry&&
+              unavailableHttp.errorCode=="subscription_sharing_usage_unavailable"&&
+              unavailableHttp.failureCategory=="transient_plan_service"&&
+              unavailableHttp.retryAfterMilliseconds==7000&&unavailableHttp.requestId=="req_fixture-1",
+              "503 temporary plan usage retains exact safe metadata for bounded retry");
+        check(std::string(unavailableHttp.what()).find("offline-secret-token")==std::string::npos,
+              "provider error descriptions never enter the exception message");
+        auto userUnavailable=httpFailure(503,R"({"error":{"code":"subscription_sharing_user_unavailable"}})");
+        check(userUnavailable.safeToRetry&&userUnavailable.failureCategory=="transient_plan_service",
+              "temporary user or workspace availability is distinct from revoked credentials");
+        auto overloaded=httpFailure(503,R"({"error":{"code":"server_is_overloaded","type":"service_unavailable_error"}})",
+                                    "Sun, 06 Nov 1994 08:49:37 GMT");
+        check(overloaded.safeToRetry&&overloaded.failureCategory=="service_overloaded"&&
+              overloaded.retryAfterMilliseconds==7000,"HTTP date Retry-After preserves the minimum wait");
+        auto routing=httpFailure(503,R"({"detail":"Direct routing is not enabled; offline-secret-token"})","9");
+        check(routing.safeToRetry&&routing.failureCategory=="unknown_service_unavailable"&&
+              routing.errorCode.empty()&&routing.retryAfterMilliseconds==9000&&
+              std::string(routing.what()).find("offline-secret-token")==std::string::npos,
+              "bounded admission retry preserves that detail is not a stable usage error code");
+        for(const auto& code:std::vector<std::string>{"subscription_sharing_user_not_eligible",
+                "subscription_sharing_route_not_supported","subscription_sharing_invalid_user",
+                "chatpass_v2_scope_not_authorized","chatpass_v2_invalid_authorization_context"}){
+            V body=V::makeObj(),error=V::makeObj();error.set("code",V::makeStr(code));body.set("error",error);
+            auto rejected=httpFailure(403,body.dump(),"1");
+            check(!rejected.safeToRetry&&rejected.failureCategory=="configuration"&&rejected.errorCode==code,
+                  "permission and routing errors are not repaired by repeating inference");
+        }
+        auto invalidCapability=httpFailure(400,R"({"error":{"code":"subscription_sharing_unsupported_capability","param":"tools[0].type"}})");
+        check(!invalidCapability.safeToRetry&&invalidCapability.errorParam=="tools[0].type",
+              "unsupported capability preserves its sanitized parameter without replaying invalid input");
+        for(unsigned status:{429u,503u}){
+            auto quota=httpFailure(status,R"({"error":{"code":"subscription_sharing_usage_limit_exceeded"}})","1");
+            check(!quota.safeToRetry&&quota.failureCategory=="plan_usage_limit",
+                  "plan usage limit never becomes a transient retry because of its HTTP status");
+        }
+        check(httpFailure(429,R"({"error":{"code":"slow_down"}})").safeToRetry,
+              "explicit slowdown differs from an exhausted ChatGPT plan");
+        check(!httpFailure(429,R"({"error":{"code":"insufficient_quota"}})").safeToRetry,
+              "unspecified or spend quota errors are not retried automatically");
+        check(!httpFailure(503,R"({"error":{"code":"insufficient_quota"}})").safeToRetry&&
+              !httpFailure(503,R"({"error":{"code":"model_not_found"}})").safeToRetry,
+              "known spend quota or configuration errors remain terminal under a misleading 503 status");
+        check(!httpFailure(503,R"({"error":{"code":"subscription_sharing_route_not_enabled"}})").safeToRetry&&
+              !httpFailure(503,R"({"error":{"code":"route_not_enabled"}})").safeToRetry,
+              "explicit disabled routing requires configuration instead of replaying an unsupported route");
+        for(unsigned status:{500u,502u,504u})check(httpFailure(status,"upstream unavailable").safeToRetry,
+              "pre-response infrastructure failure can use bounded retry");
+        auto unsafe=httpFailure(503,R"({"error":{"code":"Bearer offline-secret-token","param":"secret\nvalue","message":"offline-secret-token"}})",
+                                "7\r\nAuthorization: Bearer offline-secret-token","req\r\nsecret");
+        check(unsafe.errorCode.empty()&&unsafe.errorParam.empty()&&unsafe.requestId.empty()&&
+              !unsafe.retryAfterMilliseconds&&unsafe.safeToRetry&&
+              std::string(unsafe.what()).find("offline-secret-token")==std::string::npos,
+              "malformed headers and unsafe fields cannot escape into HTTP error metadata");
+        auto longFields=httpFailure(503,"{\"error\":{\"code\":\""+std::string(129,'x')+"\",\"param\":\""+std::string(129,'x')+"\"}}",
+                                    "",std::string(129,'x'));
+        check(longFields.errorCode.empty()&&longFields.errorParam.empty()&&longFields.requestId.empty(),
+              "structured diagnostics have bounded lengths");
+        for(const std::string& body:{std::string{},std::string("<html>proxy error offline-secret-token</html>"),
+                                    std::string("{bad"),std::string(65537,'x')}){
+            auto unknown=httpFailure(503,body);
+            check(unknown.safeToRetry&&unknown.errorCode.empty()&&
+                  unknown.failureCategory=="unknown_service_unavailable",
+                  "empty, non-JSON, malformed and oversized errors retain HTTP status safely");
+        }
+        check(httpFailure(503,R"({"error":{"code":"server_is_overloaded"}})","0").retryAfterMilliseconds==0,
+              "zero Retry-After is explicit metadata, not a missing header");
+        check(httpFailure(503,R"({"error":{"code":"server_is_overloaded"}})","Sun, 06 Nov 1994 08:49:29 GMT").retryAfterMilliseconds==0,
+              "past HTTP retry date has no remaining delay");
+        auto hugeAfter=httpFailure(503,R"({"error":{"code":"server_is_overloaded"}})","18446744073709551615");
+        check(hugeAfter.retryAfterMilliseconds&&*hugeAfter.retryAfterMilliseconds==std::numeric_limits<std::uint64_t>::max(),
+              "unrepresentable valid wait is preserved as saturation so the runtime defers rather than retries early");
+        for(const std::string& after:{std::string("-1"),std::string("1.5"),std::string("1, 2"),
+                                     std::string("tomorrow"),std::string("Sun, 31 Nov 1994 08:49:37 GMT")})
+            check(!httpFailure(503,R"({"error":{"code":"server_is_overloaded"}})",after).retryAfterMilliseconds,
+                  "invalid retry delays never become an invented server wait");
+        auto acceptedFailure=ark::parseChatGptResponsesHttp(200,
+            "data: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"subscription_sharing_usage_unavailable\"}}}\n\n",
+            "1","req_stream",httpNow);
+        check(acceptedFailure.find("status")->str=="failed","failed terminal SSE remains a consumed response, not replayable HTTP failure");
+        bool interruptedTyped=false,interruptedRejected=false;
+        try{ark::parseChatGptResponsesHttp(200,"data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n","1","req_stream",httpNow);}
+        catch(const ark::AssistantHttpError&){interruptedTyped=true;}
+        catch(const std::exception&){interruptedRejected=true;}
+        check(interruptedRejected&&!interruptedTyped,"interrupted accepted streams are never classified safe to replay");
         auto catalog=ark::parseChatGptModelCatalog(json(R"({"models":[
           {"visibility":"list","slug":"gpt-test","display_name":"Test","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"xhigh"},{"effort":"max"},{"effort":"ultra"},{"effort":"unknown"},{"effort":"low"}],"default_reasoning_level":"medium"},
           {"visibility":"hidden","slug":"gpt-hidden","display_name":"Hidden"},
@@ -141,6 +237,6 @@ int main(int argc,char** argv){
         ark::AssistantTransport unavailable=[](const ark::AssistantConfig&,const V&,const std::atomic_bool*){return json(R"({"status":"failed","output":[],"error":{"code":"subscription_sharing_usage_unavailable"}})");};
         failureMessage.clear();try{ark::runAssistant(config,V::makeStr("inspect"),tools,[&](const std::string&,const V&){++calls;return V::makeObj();},{},nullptr,unavailable);}catch(const std::exception& error){failureMessage=error.what();}
         check(failureMessage.find("try again later")!=std::string::npos&&calls==0,"temporary plan-usage failure preserves credentials and requests later retry");
-        std::cout<<"ChatGPT auth protocol tests passed\n";return 0;
+        std::cout<<"ChatGPT auth protocol tests passed ("<<checks<<" checks)\n";return 0;
     }catch(const std::exception& error){std::cerr<<"FAIL: "<<error.what()<<'\n';return 1;}
 }

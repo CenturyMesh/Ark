@@ -304,11 +304,12 @@ static const char* g_teamRoleIds[]={"engineer","designer","reviewer","designer2"
 static const char* g_teamRoleLabels[]={"ENGINEER / ORCHESTRATOR","PART DESIGNER 1","PHYSICS REVIEWER","PART DESIGNER 2","PART DESIGNER 3","PART DESIGNER 4","PART DESIGNER 5","PART DESIGNER 6"};
 static void resetTeamView(){g_teamSnapshot={};g_teamActivity={};g_teamGoal.clear();g_teamReceipts={};}
 static std::vector<std::pair<std::string,std::string>> g_chatLog;static int g_chatScroll=0;
+static std::string g_assistantStatus;
 static std::thread g_assistantWorker;static std::shared_ptr<std::atomic_bool> g_assistantCancel=std::make_shared<std::atomic_bool>(false);
 static std::atomic_bool g_closing{false};static LiveSessionBridge g_liveBridge;static u64 g_documentEpoch=0;static bool g_ownAssistantTool=false;
 static constexpr UINT WM_ARK_TOOL=WM_APP+20,WM_ARK_CHAT=WM_APP+21,WM_ARK_AUTH=WM_APP+22;
 struct UiToolRequest {std::string tool,roleId;arkjson::Value args;LiveSessionBridge::Completion complete;std::stop_token stop;std::shared_ptr<std::atomic_bool> cancel;std::shared_ptr<std::atomic<u64>> revision;u64 epoch=0;bool teamOwned=false;};
-struct UiChatEvent {std::string text;bool final=false,error=false;arkjson::Value history;u64 epoch=0;AssistantUsage usage{};bool hasUsage=false;AssistantPerformance performance{};bool hasPerformance=false;};
+struct UiChatEvent {std::string text;bool final=false,error=false;arkjson::Value history;u64 epoch=0;AssistantUsage usage{};bool hasUsage=false;AssistantPerformance performance{};bool hasPerformance=false;bool status=false,retry=false;};
 enum class AuthJob{SignIn,SignOut,Models};
 struct UiAuthEvent{AuthJob job=AuthJob::Models;ChatGptAuthStatus status;std::vector<ChatGptModel> models;std::string error;};
 static ChatGptAuthStatus g_authStatus;
@@ -2525,7 +2526,7 @@ static void pollTeam(bool force=false){
     for(const auto& event:g_teamSnapshot.events){if(event.sequence<=g_teamEventSequence)continue;g_teamEventSequence=event.sequence;
         size_t index=teamCapacity;for(size_t i=0;i<teamCapacity;++i)if(event.roleId==g_teamRoleIds[i])index=i;
         if(index<teamCapacity&&event.kind!=AgentTeamEvent::Usage)g_teamActivity[index]=(event.kind==AgentTeamEvent::ToolStart?"Running ":event.kind==AgentTeamEvent::ToolEnd?(event.toolError?"Failed ":"Completed "):"")+(event.tool.empty()?event.text:event.tool+(event.toolError?" / "+event.text:""));
-        if(event.kind==AgentTeamEvent::Usage||event.kind==AgentTeamEvent::Status)continue;
+        if(event.kind==AgentTeamEvent::Usage||(event.kind==AgentTeamEvent::Status&&!event.providerRetry))continue;
         std::string detail=event.kind==AgentTeamEvent::ToolStart?"Tool started: "+event.tool:event.kind==AgentTeamEvent::ToolEnd?(event.toolError?"Tool failed: ":"Tool finished: ")+event.tool+(event.toolError?" / "+event.text:""):event.text;
         if(!detail.empty()){g_chatLog.push_back({event.roleId.empty()?"Team":event.roleId,detail.substr(0,16000)});g_chatScroll=0;}
     }
@@ -2638,14 +2639,14 @@ static void sendAssistant(const std::string& explicitPrompt="",const AssistantTr
     if(g_conversation.arr.empty()&&!transport)refreshPricing();
     if(g_assistantWorker.joinable())g_assistantWorker.join();
     using V=arkjson::Value;V input=g_conversation;if(input.t!=V::Arr)input=V::makeArr();V user=V::makeObj();user.set("role",V::makeStr("user"));user.set("content",V::makeStr(prompt));input.arr.push_back(user);
-    g_chatLog.push_back({"You",prompt});g_chatScroll=0;g_chatBusy=true;g_assistantUsageRun={};g_assistantPerformanceRun={};g_assistantUsageRunCounted=false;g_assistantReceiptId=newUsageReceiptId();g_assistantReceiptModel=g_assistantConfig.model;g_currentUsageReceipt.reset();g_pendingUsageReceipt.reset();g_assistantCancel=std::make_shared<std::atomic_bool>(false);auto cancel=g_assistantCancel;auto config=g_assistantConfig;if(!transport)config.onboardingPack=agentOnboardingPack({"overview"});auto schema=AgentSession::tools();if(g_chatInput)SetWindowTextW(g_chatInput,L"");
+    g_chatLog.push_back({"You",prompt});g_chatScroll=0;g_chatBusy=true;g_assistantStatus="Working...";g_assistantUsageRun={};g_assistantPerformanceRun={};g_assistantUsageRunCounted=false;g_assistantReceiptId=newUsageReceiptId();g_assistantReceiptModel=g_assistantConfig.model;g_currentUsageReceipt.reset();g_pendingUsageReceipt.reset();g_assistantCancel=std::make_shared<std::atomic_bool>(false);auto cancel=g_assistantCancel;auto config=g_assistantConfig;if(!transport)config.onboardingPack=agentOnboardingPack({"overview"});auto schema=AgentSession::tools();if(g_chatInput)SetWindowTextW(g_chatInput,L"");
     auto epoch=g_documentEpoch;auto revision=std::make_shared<std::atomic<u64>>(g_session.revision);
     g_assistantWorker=std::thread([config,input,schema,cancel,transport,epoch,revision]{
         try{auto result=runAssistant(config,input,schema,[cancel,epoch,revision](const std::string& name,const V& args){
             auto promise=std::make_shared<std::promise<V>>();auto future=promise->get_future();auto request=std::make_unique<UiToolRequest>();request->tool=name;request->args=args;request->cancel=cancel;request->epoch=epoch;request->revision=revision;request->complete=[promise](V result){promise->set_value(std::move(result));};postTool(std::move(request));
             while(future.wait_for(std::chrono::milliseconds(20))!=std::future_status::ready)if(*cancel||g_closing)throw std::runtime_error("Assistant cancelled");
             return future.get();
-        },[epoch](const AssistantEvent& event){if(event.kind==AssistantEvent::ToolStart)postChat({"Tool: "+event.text,false,false,{},epoch});else if(event.kind==AssistantEvent::Usage)postChat({"",false,false,{},epoch,event.usage,true,event.performance,true});else if(event.kind==AssistantEvent::ToolEnd)postChat({"",false,false,{},epoch,{},false,event.performance,true});},cancel.get(),transport);
+        },[epoch](const AssistantEvent& event){if(event.kind==AssistantEvent::Status){UiChatEvent progress;progress.text=event.text;progress.epoch=epoch;progress.status=true;progress.retry=event.providerRetry;postChat(std::move(progress));}else if(event.kind==AssistantEvent::ToolStart)postChat({"Tool: "+event.text,false,false,{},epoch});else if(event.kind==AssistantEvent::Usage)postChat({"",false,false,{},epoch,event.usage,true,event.performance,true});else if(event.kind==AssistantEvent::ToolEnd)postChat({"",false,false,{},epoch,{},false,event.performance,true});},cancel.get(),transport);
             if(*cancel)throw std::runtime_error("Assistant cancelled");postChat({result.text,true,false,result.conversation,epoch,result.usage,true,result.performance,true});
         }catch(const std::exception& e){postChat({e.what(),true,true,{},epoch});}
     });
@@ -4522,7 +4523,7 @@ static void drawFrame(HDC hdc){
     if(g_assistantDockOpen){
     panel(viewX,cy,(float)viewW,(float)assistantDockHeight());
     button("Single",viewX+22,cy+7,74,470,false,!g_teamMode);button("Team",viewX+104,cy+7,74,471,false,g_teamMode);
-    std::string connector=g_chatBusy?"Working...":g_authBusy?"ChatGPT sign-in in progress":
+    std::string connector=g_chatBusy?(g_assistantStatus.empty()?"Working...":g_assistantStatus):g_authBusy?"ChatGPT sign-in in progress":
         g_assistantConfig.authMode==AssistantAuthMode::ChatGptPlan?"ChatGPT plan / "+g_assistantConfig.model:
         g_authStatus.connected?(g_authStatus.planAuthorized?"ChatGPT signed in / choose model":"ChatGPT identity connected / plan disabled"):
         g_assistantConfig.model.empty()?"Continue with ChatGPT or Advanced API key":"API key / "+g_assistantConfig.model;
@@ -4868,10 +4869,12 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
         case WM_ARK_CHAT:{std::unique_ptr<UiChatEvent> event((UiChatEvent*)lp);
             if(event->final){g_chatBusy=false;if(event->epoch==g_documentEpoch&&!event->error&&!*g_assistantCancel)g_conversation=event->history;else g_conversation=arkjson::Value::makeArr();}
             if(event->epoch==g_documentEpoch){
+                if(event->status||(!event->final&&!event->text.empty()))g_assistantStatus=event->text;
+                else if(event->final)g_assistantStatus.clear();
                 if(event->hasPerformance)g_assistantPerformanceRun=event->performance;
                 if(event->hasUsage){g_assistantUsageRun=event->usage;recordAssistantUsageSnapshot(event->usage);}
                 if(event->final)g_assistantUsageRunCounted=true;
-                if(!event->text.empty()){g_chatLog.push_back({event->error?"Error":event->final?"ARK":"Action",event->text.substr(0,16000)});if(g_chatLog.size()>200)g_chatLog.erase(g_chatLog.begin());g_chatScroll=0;}
+                if(!event->text.empty()&&(!event->status||event->retry)){g_chatLog.push_back({event->error?"Error":event->final?"ARK":"Action",event->text.substr(0,16000)});if(g_chatLog.size()>200)g_chatLog.erase(g_chatLog.begin());g_chatScroll=0;}
             }return 0;
         }
         case WM_ARK_AUTH:{std::unique_ptr<UiAuthEvent> event((UiAuthEvent*)lp);bool cancelRequested=g_authCancelRequested;
@@ -5821,7 +5824,39 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         g_pendingRoleSettings=2;g_pendingRoleAccount=g_authStatus.activeClientId;g_authBusy=true;g_authCancelRequested=true;finishCatalog(catalogFixture);if(g_pendingRoleSettings>=0||g_roleCatalogReady)return assistantFailure(347);
         g_pendingRoleSettings=2;g_pendingRoleAccount=g_authStatus.activeClientId;g_authBusy=true;finishCatalog(catalogFixture,"",true);if(g_pendingRoleSettings>=0||g_roleCatalogReady)return assistantFailure(348);
         clearPendingRoleSettings();g_roleSmokeCheck=g_roleSmokeRefresh=false;g_authStatus=roleAuth;g_authModels=roleCatalog;g_teamModels=roleModels;g_teamEfforts=roleEfforts;
-        if(g_assistantWorker.joinable())g_assistantWorker.join();g_assistantConfig=previous;g_teamFocusedWorkflow=previousFocusedWorkflow;g_status="Offline assistant UI checks passed / serialized tools / history / stale-write rejection";
+        // Exercise real worker -> Win32 status delivery, not a synthetic card label.
+        // A committed tool before the HTTP rejection must execute only once.
+        g_teamMode=false;g_teamStarted=false;g_chatLog.clear();g_conversation=V::makeArr();
+        g_assistantConfig.endpoint="http://127.0.0.1:1/v1/responses";g_assistantConfig.model="offline-retry-ui";g_assistantConfig.apiKeyEnv="";g_assistantConfig.reasoningEffort.clear();g_assistantConfig.maxRounds=0;g_assistantConfig.authMode=AssistantAuthMode::ApiKey;
+        auto retryPump=[&](const std::function<bool()>& done){auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(8);do{MSG event{};while(PeekMessage(&event,nullptr,0,0,PM_REMOVE)){TranslateMessage(&event);DispatchMessage(&event);}drainUiTools();pollTeam(true);if(done())return true;Sleep(2);}while(std::chrono::steady_clock::now()<deadline);return false;};
+        auto retryLog=[&]{return std::any_of(g_chatLog.begin(),g_chatLog.end(),[](const auto& item){return item.second.find("HTTP 503 / retry")!=std::string::npos;});};
+        auto thinkingLog=[&]{return std::any_of(g_chatLog.begin(),g_chatLog.end(),[](const auto& item){return item.second=="Thinking...";});};
+        auto retryAttempts=std::make_shared<std::atomic_int>(0);auto retryRevision=g_session.revision;
+        AssistantTransport retryTransport=[retryAttempts,retryRevision,parse](const auto&,const V&,const auto*)->V{
+            int attempt=++*retryAttempts;if(attempt==2)throw AssistantHttpError(503,true,100);
+            if(attempt==1){V response=parse(R"({"status":"completed"})"),output=V::makeArr(),call=parse(R"({"type":"function_call","call_id":"ui_retry_commit","name":"doc_apply"})"),args=parse(R"({"commands":[{"op":"param.set","name":"http_retry_once","expr":"31"}]})");args.set("expected_revision",V::makeNum((double)retryRevision));call.set("arguments",V::makeStr(args.dump()));output.arr.push_back(call);response.set("output",output);return response;}
+            return parse(R"({"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Recovered without replaying the committed tool."}]}]})");};
+        sendAssistant("OFFLINE: commit once, then recover a typed pre-output HTTP503.",retryTransport);
+        if(!retryPump([&]{return retryLog();})||!g_chatBusy||g_assistantStatus.find("HTTP 503 / retry")!=0||thinkingLog())return assistantFailure(410);
+        if(!saveProbeShot(shotPath+".single-http-retry.png"))return assistantFailure(411);
+        if(!pump()||*retryAttempts!=3||g_session.revision!=retryRevision+1||g_doc.getParam("http_retry_once")!=31||g_assistantPerformanceRun.toolCalls!=1||g_assistantPerformanceRun.providerRequests!=3||!g_assistantStatus.empty()||thinkingLog())return assistantFailure(412);
+        // Team retries remain Working and cancellable by the actual dock button.
+        g_chatLog.clear();g_teamMode=true;g_teamFocusedWorkflow=true;g_teamRoleCount=3;g_teamModels[0]="offline-retry-ui";g_teamEfforts[0]="auto";g_teamTarget.clear();layout();
+        auto teamRetryAttempts=std::make_shared<std::atomic_int>(0);std::array<AssistantTransport,8> retryTeamTransports;
+        retryTeamTransports[0]=[teamRetryAttempts,parse](const auto&,const V&,const auto*){if(++*teamRetryAttempts==1)throw AssistantHttpError(503,true,100);return parse(R"({"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Team recovered."}]}]})");};
+        retryRevision=g_session.revision;sendTeam("OFFLINE: recover transient HTTP503 without editing.",retryTeamTransports);
+        if(!retryPump([&]{return retryLog();})||g_teamSnapshot.roles.empty()||g_teamSnapshot.roles[0].state!=AgentTeamState::Working||g_teamActivity[0].find("HTTP 503 / retry")!=0||thinkingLog())return assistantFailure(413);
+        if(!saveProbeShot(shotPath+".team-http-retry.png")||!pumpTeam()||*teamRetryAttempts!=2||g_teamSnapshot.roles[0].state!=AgentTeamState::Idle||g_teamSnapshot.roles[0].status.find("retry")!=std::string::npos||g_session.revision!=retryRevision||thinkingLog())return assistantFailure(414);
+        cancelTeam();g_agentTeam.waitIdle();pollTeam(true);g_teamStarted=false;g_chatLog.clear();
+        teamRetryAttempts=std::make_shared<std::atomic_int>(0);
+        retryTeamTransports[0]=[teamRetryAttempts](const auto&,const V&,const auto*)->V{++*teamRetryAttempts;throw AssistantHttpError(503,true,100);};
+        sendTeam("OFFLINE: cancel during HTTP503 recovery wait.",retryTeamTransports);
+        if(!retryPump([&]{return retryLog();}))return assistantFailure(415);
+        drawFrame(hdc);auto cancelZone=std::find_if(g_zones.begin(),g_zones.end(),[](const Zone& zone){return zone.id==75;});if(cancelZone==g_zones.end())return assistantFailure(416);
+        int cancelX=(int)(cancelZone->x+cancelZone->w*.5f),cancelY=(int)(cancelZone->y+cancelZone->h*.5f);auto cancelledAt=std::chrono::steady_clock::now();SendMessage(g_window,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(cancelX,cancelY));SendMessage(g_window,WM_LBUTTONUP,0,MAKELPARAM(cancelX,cancelY));
+        if(!pumpTeam()||!g_teamSnapshot.cancelled||*teamRetryAttempts!=1||g_session.revision!=retryRevision||std::chrono::steady_clock::now()-cancelledAt>std::chrono::seconds(2))return assistantFailure(417);
+        g_agentTeam.waitIdle();g_teamStarted=false;g_teamTarget.clear();g_teamMode=previousTeamMode;g_teamRoleCount=previousTeamCount;g_teamModels=previousModels;g_teamEfforts=previousEfforts;
+        if(g_assistantWorker.joinable())g_assistantWorker.join();g_assistantConfig=previous;g_teamFocusedWorkflow=previousFocusedWorkflow;g_status="Offline assistant UI checks passed / serialized tools / history / stale-write rejection / HTTP retry and cancellation";
     }
     if(selfTest){
         size_t count=g_doc.features.size();uiAction(1);

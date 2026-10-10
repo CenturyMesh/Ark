@@ -1,12 +1,16 @@
-# ARK 002B — Agent-Ready Kernel
+# ARK 003D — Agent-Ready Kernel
 
 **Parametric CAD for people and agents.**
 
-Public iteration **002B** uses runtime **0.9.3**. The three digits are globally
+Public iteration **003D** uses runtime **0.9.4**. The three digits are globally
 sequential; A–G identifies the roadmap phase, not the month. See the mandatory
 [development rules](AGENTS.md), the [35-milestone roadmap](docs/ROADMAP.md), and
 the [open-source / €200 perpetual license analysis](docs/COMMERCIAL_STRATEGY.md).
 `release.json` is the single source of release identity.
+
+003D adds bounded automatic recovery from eligible HTTP service failures before
+a model response is accepted. Previously completed CAD operations are retained;
+the retry status is visible and can be cancelled. [Recovery scope](docs/iterations/003D.md).
 
 002B restores concept-first agent workflows, coherent atomic batches and scoped
 preview commits, with measured Provider/tools activity. Sketch adds linked exact

@@ -61,6 +61,11 @@ ChatGptCallback parseChatGptCallback(const std::string& requestTarget,const Chat
 ChatGptIdentity verifyChatGptIdToken(const std::string& jwt,const arkjson::Value& jwks,
                                      const std::string& issuedClientId,const std::string& nonce,std::int64_t nowUnix);
 arkjson::Value parseChatGptSse(const std::string& sse);
+// The same bounded HTTP decoder used by chatGptResponses, without account or
+// network access. Non-200 responses throw sanitized AssistantHttpError;
+// successful HTTP streams keep their existing terminal-response validation.
+arkjson::Value parseChatGptResponsesHttp(unsigned status,const std::string& body,
+    const std::string& retryAfter,const std::string& requestId,std::int64_t nowUnix);
 // Offline DPAPI fixture seam. The path must resolve inside the OS temp folder;
 // this never reads, replaces or deletes the real ARK account store.
 bool chatGptDpapiRoundTripForTest(const std::string& absoluteTempFile);

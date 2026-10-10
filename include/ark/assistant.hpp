@@ -5,6 +5,7 @@
 #include <functional>
 #include <string>
 #include <stdexcept>
+#include <optional>
 
 namespace ark {
 enum class AssistantAuthMode { ApiKey, ChatGptPlan };
@@ -44,6 +45,7 @@ struct AssistantEvent {
     std::string text; // Tool events contain only tool name; never credentials.
     AssistantUsage usage; // Usage events: cumulative snapshot for this run.
     AssistantPerformance performance; // Usage/ToolEnd: cumulative measured snapshot for this run.
+    bool providerRetry=false; // Status: transient transport recovery, suitable for the visible log.
 };
 struct AssistantResult {
     arkjson::Value conversation=arkjson::Value::makeArr();
@@ -61,6 +63,17 @@ struct AssistantRoundLimit : std::runtime_error {
 struct AssistantTransportError : std::runtime_error {
     explicit AssistantTransportError(const std::string& detail):std::runtime_error(detail){}
 };
+// Typed HTTP rejection before any usable response output. Never use this for
+// incomplete streams, timeouts or failures after output has begun.
+struct AssistantHttpError : std::runtime_error {
+    unsigned statusCode;
+    bool safeToRetry;
+    std::optional<std::uint64_t> retryAfterMilliseconds;
+    std::string errorCode,requestId,label,errorParam,failureCategory;
+    AssistantHttpError(unsigned status,bool retryable,std::optional<std::uint64_t> retryAfter={},
+        std::string code={},std::string id={},std::string source="Assistant provider",std::string param={},std::string category="http_failure");
+};
+std::optional<std::uint64_t> assistantRetryAfterMilliseconds(const std::string& header,std::int64_t nowUnix=-1);
 using AssistantTool=std::function<arkjson::Value(const std::string&,const arkjson::Value&)>;
 using AssistantEvents=std::function<void(const AssistantEvent&)>;
 // Optional host messages consumed before each provider request. Return an array
@@ -73,6 +86,13 @@ using AssistantHistory=std::function<void(const arkjson::Value&)>;
 // Injectable offline transport. Native transport reads credentials internally,
 // only after validation. Neither requests nor callbacks contain the API key.
 using AssistantTransport=std::function<arkjson::Value(const AssistantConfig&,const arkjson::Value&,const std::atomic_bool*)>;
+// Host pause gate plus deterministic offline wait/jitter seams. Runtime policy
+// remains three retries for pre-output HTTP 500/502/503/504; no turn/token budget.
+struct AssistantRetryHooks {
+    std::function<void()> checkpoint;
+    std::function<void(std::uint64_t,const std::atomic_bool*)> wait;
+    std::function<unsigned()> jitterMilliseconds;
+};
 
 void validateAssistantConfig(const AssistantConfig& config);
 bool assistantKeyAvailable(const AssistantConfig& config);
@@ -86,5 +106,5 @@ AssistantResult runAssistant(const AssistantConfig& config,const arkjson::Value&
     const arkjson::Value& mcpTools,const AssistantTool& callTool,
     const AssistantEvents& events={},const std::atomic_bool* cancel=nullptr,
     const AssistantTransport& transport={},const AssistantInbox& inbox={},
-    const AssistantHistory& history={});
+    const AssistantHistory& history={},const AssistantRetryHooks& retryHooks={});
 }
