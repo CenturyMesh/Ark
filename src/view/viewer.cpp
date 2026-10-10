@@ -384,7 +384,7 @@ static void rebuildRoleSketches(){using V=arkjson::Value;if(g_committedRoleSketc
 static u64 g_teamRunSerial=0;
 struct UiTeamEvent {AgentTeamEvent event;u64 epoch=0,runSerial=0;};
 static void receiveTeamEvent(const AgentTeamEvent& event){
-    size_t role=teamCapacity;for(size_t i=0;i<teamCapacity;++i)if(event.roleId==g_teamRoleIds[i])role=i;if(role<teamCapacity){if(event.kind==AgentTeamEvent::Usage)g_teamLiveUsage[role]=event.usage;if(event.kind!=AgentTeamEvent::Usage)g_teamActivity[role]=event.tool.empty()?event.text:event.tool;}
+    size_t role=teamCapacity;for(size_t i=0;i<teamCapacity;++i)if(event.roleId==g_teamRoleIds[i])role=i;if(role<teamCapacity){if(event.kind==AgentTeamEvent::Usage)g_teamLiveUsage[role]=event.usage;if(event.kind!=AgentTeamEvent::Usage)g_teamActivity[role]=event.tool.empty()?event.text:event.tool+(event.toolError?" / "+event.text:"");}
     if(event.kind==AgentTeamEvent::ConstructionQueued||event.kind==AgentTeamEvent::ConstructionStart){auto key=std::make_pair(event.roleId,event.stepId);auto& draft=g_draftViews[key];draft={event.draftSketchCommands,{},event.roleId,event.stepId};buildDraftLines(draft);while(g_draftViews.size()>8)g_draftViews.erase(g_draftViews.begin());g_liveStepLabel=event.roleId+" / "+(event.kind==AgentTeamEvent::ConstructionQueued?"queued draft / ":"applying draft / ")+event.stepId;}
     if(event.kind==AgentTeamEvent::ConstructionEnd){g_draftViews.erase({event.roleId,event.stepId});if(!event.toolError&&event.hasExpectedRevision&&event.hasDocumentRevision&&event.documentRevision>event.expectedRevision){++g_liveCompletedSteps;g_liveStepLabel=event.roleId+" / committed r"+std::to_string(event.documentRevision);}else g_liveStepLabel=event.roleId+" / step rejected or unchanged";}
     updateCostDisplay();
@@ -2488,9 +2488,9 @@ static void pollTeam(bool force=false){
     if(g_teamEpoch!=g_documentEpoch){cancelTeam();g_teamStarted=false;resetTeamView();return;}
     for(const auto& event:g_teamSnapshot.events){if(event.sequence<=g_teamEventSequence)continue;g_teamEventSequence=event.sequence;
         size_t index=teamCapacity;for(size_t i=0;i<teamCapacity;++i)if(event.roleId==g_teamRoleIds[i])index=i;
-        if(index<teamCapacity&&event.kind!=AgentTeamEvent::Usage)g_teamActivity[index]=(event.kind==AgentTeamEvent::ToolStart?"Running ":event.kind==AgentTeamEvent::ToolEnd?(event.toolError?"Failed ":"Completed "):"")+(event.tool.empty()?event.text:event.tool);
+        if(index<teamCapacity&&event.kind!=AgentTeamEvent::Usage)g_teamActivity[index]=(event.kind==AgentTeamEvent::ToolStart?"Running ":event.kind==AgentTeamEvent::ToolEnd?(event.toolError?"Failed ":"Completed "):"")+(event.tool.empty()?event.text:event.tool+(event.toolError?" / "+event.text:""));
         if(event.kind==AgentTeamEvent::Usage||event.kind==AgentTeamEvent::Status)continue;
-        std::string detail=event.kind==AgentTeamEvent::ToolStart?"Tool started: "+event.tool:event.kind==AgentTeamEvent::ToolEnd?(event.toolError?"Tool failed: ":"Tool finished: ")+event.tool:event.text;
+        std::string detail=event.kind==AgentTeamEvent::ToolStart?"Tool started: "+event.tool:event.kind==AgentTeamEvent::ToolEnd?(event.toolError?"Tool failed: ":"Tool finished: ")+event.tool+(event.toolError?" / "+event.text:""):event.text;
         if(!detail.empty()){g_chatLog.push_back({event.roleId.empty()?"Team":event.roleId,detail.substr(0,16000)});g_chatScroll=0;}
     }
     if(g_chatLog.size()>200)g_chatLog.erase(g_chatLog.begin(),g_chatLog.end()-200);
@@ -3170,7 +3170,7 @@ static void uiAction(int id){
         case 173:g_pickKind=3;g_showSketches=true;rebuildSketchOverlay();g_status="Curve selection. Loft and sweep use the sketch of each curve.";break;
         case 174:g_showEdges=!g_showEdges;g_status=g_showEdges?"Visible edges":"Edges hidden";try{saveUiSettings();}catch(...){}break;
         case 175:g_cameraOrtho=!g_cameraOrtho;g_status=g_cameraOrtho?"Orthographic view":"Perspective view";try{saveUiSettings();}catch(...){}break;
-        case 176:g_navMode=0;g_status="Free orbit: hold the middle mouse button. Shift + middle button pans; wheel zooms.";break;
+        case 176:g_navMode=0;g_status="Free orbit follows middle-button drag in all directions. Alt + middle spins; Shift + middle pans; wheel zooms.";break;
         case 177:g_navMode=1;g_status="Pan. Drag in the view. Shift+drag also pans.";break;
         case 178:g_navMode=2;g_status="Zoom. Drag up or down. The wheel always zooms.";break;
         case 186:{g_occlusionMode=(g_occlusionMode+1)%4;static const char* names[]={"Off","Contact","Ambient","Horizon"};g_status=std::string("Occlusion: ")+names[g_occlusionMode];try{saveUiSettings();}catch(...){}break;}
@@ -3297,7 +3297,7 @@ static void uiAction(int id){
             applyCommand(c);if(!g_error)g_selectedMate=-1;break;
         }
 
-        case 31:MessageBoxA(g_window,"ARK 0.9 / Agent-Ready Kernel\nParametric CAD for people and agents.\n\nUse Commands or the tool dock to model with editable expressions.\nDouble-click a feature to edit its definition, or a sketch to edit its anchors. The inspector also has Edit feature and Edit sketch.\nNative solids and surfaces use OCCT B-reps. Sheets have formed/flat poses and a read-only bend preview.\nGround an assembly instance, add a mate, and inspect remaining degrees of freedom.\nSketch diagnosis and exact reference inspection are available through the agent tools.\n\nThe view toolbar selects Orbit, Pan, Zoom, Fit, Front, Top, Right, and Isometric.\nThe view cube snaps to a face. Dragging it orbits. Named faces are orthographic.\nAmbient occlusion and visible edges are display only and are not saved in the document.\n\nOrbit: middle button drag  |  Pan: Shift + middle drag  |  Zoom: wheel\nFit: F  |  Wireframe: W  |  Views: 1 front, 3 top, 5 right, 7 isometric\nOpen: Ctrl+O  |  Save: Ctrl+S  |  Undo / redo: Ctrl+Z / Y\nCommands: Ctrl+K  |  New: Ctrl+N\n\nThe native inspector reports OCCT B-rep checks. It does not certify manufacturing suitability.","About ARK / Workspace guide",MB_OK|MB_ICONINFORMATION);break;
+        case 31:MessageBoxA(g_window,"ARK 0.9 / Agent-Ready Kernel\nParametric CAD for people and agents.\n\nUse Commands or the tool dock to model with editable expressions.\nDouble-click a feature to edit its definition, or a sketch to edit its anchors. The inspector also has Edit feature and Edit sketch.\nNative solids and surfaces use OCCT B-reps. Sheets have formed/flat poses and a read-only bend preview.\nGround an assembly instance, add a mate, and inspect remaining degrees of freedom.\nSketch diagnosis and exact reference inspection are available through the agent tools.\n\nThe view toolbar selects Orbit, Pan, Zoom, Fit, Front, Top, Right, and Isometric.\nThe view cube snaps to a face. Dragging it orbits. Named faces are orthographic.\nAmbient occlusion and visible edges are display only and are not saved in the document.\n\nOrbit: middle drag  |  Roll: Alt + middle drag  |  Pan: Shift + middle  |  Zoom: wheel\nFit: F  |  Wireframe: W  |  Views: 1 front, 3 top, 5 right, 7 isometric\nOpen: Ctrl+O  |  Save: Ctrl+S  |  Undo / redo: Ctrl+Z / Y\nCommands: Ctrl+K  |  New: Ctrl+N\n\nThe native inspector reports OCCT B-rep checks. It does not certify manufacturing suitability.","About ARK / Workspace guide",MB_OK|MB_ICONINFORMATION);break;
         case 30:{
             if(selBody<0)break;auto* f=g_doc.find(g_bodyIds[selBody]);if(!f||f->type!=FeatureType::Tube)break;
             V edit=V::makeObj(),p=V::makeObj(),bs=V::makeArr();for(auto& kv:f->p)p.set(kv.first,V::makeStr(kv.second));
@@ -3355,13 +3355,13 @@ static void beginCameraDrag(int x,int y){
     g_cameraDrag.pivot=g_sceneBounds.valid()?g_sceneBounds.center():g_sketchBounds.valid()?g_sketchBounds.center():target;
     Vec3 outward,right,up;cameraBasis(yaw,pitch,outward,right,up);Vec3 offset=target-g_cameraDrag.pivot;g_cameraDrag.offset={offset.dot(right),offset.dot(up),offset.dot(outward)};
 }
-static void moveCameraDrag(int x,int y,bool pan,bool zoom){
+static void moveCameraDrag(int x,int y,bool pan,bool zoom,bool roll=false){
     if(!g_cameraDrag.active){beginCameraDrag(x,y);return;}int dx=x-g_cameraDrag.x,dy=y-g_cameraDrag.y;g_cameraDrag.x=x;g_cameraDrag.y=y;if(!dx&&!dy)return;
     Vec3 outward,right,up;cameraBasis(tYaw,tPitch,outward,right,up);
     if(pan){double halfH=g_cameraOrtho?std::max(2.,tDist*std::tan(35*K_PI/360.)):tDist*std::tan(35*K_PI/360.);double scale=2*halfH/std::max(viewH,1);tTarget=tTarget-right*(dx*scale)+up*(dy*scale);Vec3 offset=tTarget-g_cameraDrag.pivot;g_cameraDrag.offset={offset.dot(right),offset.dot(up),offset.dot(outward)};}
     else if(zoom)tDist=clamp(tDist*std::exp((double)dy*.008),2.,1e9);
-    else{double radius=std::max(120.,std::min(viewW,viewH)*.5);auto sphere=[&](int px,int py){return trackballPoint((px-viewX-viewW*.5)/radius,(viewY+viewH*.5-py)/radius);};
-        auto frame=orbitTrackball(cameraFrame(tYaw,tPitch,cameraRoll),sphere(x-dx,y-dy),sphere(x,y));cameraAngles(frame,tYaw,tPitch,cameraRoll);
+    else{double radiansPerPixel=2*K_PI/std::max(720,std::min(viewW,viewH));
+        auto frame=orbitCameraPixels(cameraFrame(tYaw,tPitch,cameraRoll),dx,dy,radiansPerPixel,roll);cameraAngles(frame,tYaw,tPitch,cameraRoll);
         outward=frame.outward;right=frame.right;up=frame.up;tTarget=g_cameraDrag.pivot+right*g_cameraDrag.offset.x+up*g_cameraDrag.offset.y+outward*g_cameraDrag.offset.z;}
     // Pointer motion stays one-to-one; Fit and named views retain their damping.
     yaw=tYaw;pitch=tPitch;dist=tDist;target=tTarget;
@@ -4768,11 +4768,11 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
                 bool navigate=!g_pressWasButton&&!g_foldScrubbing&&!g_sheetScrubbing&&(mbtn||g_cubePress||g_navMode!=0);
                 bool pan=navigate&&((mbtn&&shift)||(lbtn&&g_navMode==1&&!g_cubePress));
                 bool zoom=navigate&&lbtn&&!mbtn&&!shift&&g_navMode==2&&!g_cubePress;
-                if(navigate)moveCameraDrag(x,y,pan,zoom);
+                if(navigate)moveCameraDrag(x,y,pan,zoom,mbtn&&(GetKeyState(VK_MENU)&0x8000));
             }
             else g_cameraDrag.active=false;
             size_t tot=0; for(auto&m:g_cpuMeshes)tot+=m.triCount();
-            hoverBody=!lbtn?pickBody(x,y):-1;
+            hoverBody=(!lbtn&&!mbtn)?pickBody(x,y):-1;
             return 0;
         }
         case WM_LBUTTONUP:{
@@ -5521,7 +5521,14 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
          if((cameraFrame(yaw,pitch,cameraRoll).outward-originalFrame.outward).len()>1e-12)return assistantFailure(391);
          SendMessage(g_window,WM_MBUTTONDOWN,MK_MBUTTON,MAKELPARAM(x,y));SendMessage(g_window,WM_MOUSEMOVE,MK_MBUTTON,MAKELPARAM(x+70,y+40));SendMessage(g_window,WM_MBUTTONUP,0,MAKELPARAM(x+70,y+40));
          if((cameraFrame(yaw,pitch,cameraRoll).outward-originalFrame.outward).len()<.01)return assistantFailure(392);
-         yaw=tYaw=originalYaw;pitch=tPitch=originalPitch;cameraRoll=originalRoll;target=tTarget=originalTarget;}
+         {auto moved=cameraFrame(yaw,pitch,cameraRoll);if(originalFrame.outward.dot(moved.right)<=0||-originalFrame.outward.dot(moved.up)<=0)return assistantFailure(398);}
+         for(int axis=0;axis<3;++axis)for(int sign:{-1,1}){
+             yaw=tYaw=originalYaw;pitch=tPitch=originalPitch;cameraRoll=originalRoll;target=tTarget=originalTarget;beginCameraDrag(x,y);
+             int span=std::max(720,std::min(viewW,viewH));
+             for(int n=1;n<=span*2;++n)moveCameraDrag(x+(axis==1?0:sign*n),y+(axis==1?sign*n:0),false,false,axis==2);
+             auto spun=cameraFrame(yaw,pitch,cameraRoll);if((spun.outward-originalFrame.outward).len()>1e-8||(spun.right-originalFrame.right).len()>1e-8)return assistantFailure(399);
+         }
+         g_cameraDrag.active=false;yaw=tYaw=originalYaw;pitch=tPitch=originalPitch;cameraRoll=originalRoll;target=tTarget=originalTarget;}
         // Missing rates stay unavailable and the title strip has disjoint zones.
         auto savedPricing=g_pricing;bool savedPricingReady=g_pricingReady;g_pricing={};g_pricingReady=false;updateCostDisplay(true);if(costSummary().find("N/A")==std::string::npos||g_costEstimate.unpricedTokens!=usageTotals(g_doc).totalTokens)return assistantFailure(361);g_pricing=savedPricing;g_pricingReady=savedPricingReady;updateCostDisplay(true);
         int savedHeaderW=winW,savedHeaderH=winH;for(int width:{1180,1440,3440}){RECT frame{0,0,width,1000};AdjustWindowRect(&frame,WS_OVERLAPPEDWINDOW,FALSE);SetWindowPos(g_window,nullptr,0,0,frame.right-frame.left,frame.bottom-frame.top,SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);winW=width;winH=1000;layout();drawFrame(hdc);auto info=std::find_if(g_zones.begin(),g_zones.end(),[](const Zone& zone){return zone.id==488;}),search=std::find_if(g_zones.begin(),g_zones.end(),[](const Zone& zone){return zone.id==450;});if(info==g_zones.end()||search==g_zones.end()||info->x+info->w>search->x||search->x+search->w>width-232)return assistantFailure(362);if(!saveProbeShot(shotPath+".header-"+std::to_string(width)+".png"))return assistantFailure(363);}RECT originalFrame{0,0,savedHeaderW,savedHeaderH};AdjustWindowRect(&originalFrame,WS_OVERLAPPEDWINDOW,FALSE);SetWindowPos(g_window,nullptr,0,0,originalFrame.right-originalFrame.left,originalFrame.bottom-originalFrame.top,SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);winW=savedHeaderW;winH=savedHeaderH;layout();

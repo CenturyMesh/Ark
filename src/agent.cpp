@@ -1129,6 +1129,20 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
         if(applying){r.set("command_index",V::makeNum(commandIndex));r.set("operation",V::makeStr(commandOp));}
         if(message.rfind("Missing field: ",0)==0)r.set("field",V::makeStr(message.substr(15)));
         if(message.rfind("Feature #",0)==0){const auto end=message.find(':',9);if(end!=std::string::npos){auto digits=message.substr(9,end-9);if(!digits.empty()&&digits.find_first_not_of("0123456789")==std::string::npos)r.set("feature_id",V::makeNum(std::strtod(digits.c_str(),nullptr)));}}
+        if(message.find("Native operation must produce one positive-volume solid;")!=std::string::npos){
+            r.set("error_code",V::makeStr("NATIVE_SINGLE_SOLID_REQUIRED"));
+            const std::string marker="result contains ";auto start=message.find(marker);
+            if(start!=std::string::npos){start+=marker.size();auto end=message.find(" solids",start);if(end!=std::string::npos){auto count=message.substr(start,end-start);if(!count.empty()&&count.find_first_not_of("0123456789")==std::string::npos)r.set("observed_solid_count",V::makeNum(std::strtod(count.c_str(),nullptr)));}}
+            V recovery=V::makeObj(),checks=V::makeArr(),options=V::makeArr();
+            recovery.set("inspect_before_retry",V::makeBool(true));
+            recovery.set("rejected_feature_may_not_exist",V::makeBool(true));
+            checks.arr.push_back(V::makeStr("Read current doc_info detail design; inspect the existing input features, not an uncommitted output ID."));
+            checks.arr.push_back(V::makeStr("Use native_inspect and geometry_query to check input solids, contact/overlap, cutter extent and closed profiles."));
+            options.arr.push_back(V::makeStr("If these are separate physical parts, keep their definitions separate and ask the orchestrator to place assembly instances."));
+            options.arr.push_back(V::makeStr("If the design requires one body, revise the intended contact or cut geometry after inspecting the inputs."));
+            recovery.set("checks",checks);recovery.set("design_options",options);
+            recovery.set("avoid",V::makeStr("Do not repeat the unchanged operation, discard extra solids, widen tolerances or claim the rejected output was committed."));r.set("recovery",recovery);
+        }
         r.set("document_unchanged",V::makeBool(true));return result(r,true);
     }
 }

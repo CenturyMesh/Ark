@@ -293,8 +293,20 @@ void testPlaneSplitAndMirrorCopyHistory() {
     check(loaded.lastResults.back().ok,"reloaded exact operations recompute");
 }
 
+static void testSingleSolidRecovery(){
+    ark::AgentSession session;
+    accepted(session.call("doc_apply",parse(R"({"commands":[{"op":"feature.add","type":"native_solid","name":"Left","native":{"op":"box"},"p":{"width":10,"depth":10,"height":10}},{"op":"feature.add","type":"native_solid","name":"Right","inputs":["Left"],"native":{"op":"transform"},"p":{"tx":30}}]})")));
+    auto before=ark::documentToJson(session.document);auto revision=session.revision;
+    auto response=session.call("doc_apply",parse(R"({"expected_revision":1,"commands":[{"op":"feature.add","type":"native_solid","name":"Disconnected union","inputs":["Left","Right"],"native":{"op":"union"}}]})"));
+    check(response.find("isError")->b,"disconnected union remains rejected");const auto& detail=*response.find("structuredContent");
+    check(detail.find("error_code")->str=="NATIVE_SINGLE_SOLID_REQUIRED"&&detail.find("observed_solid_count")->num==2,"actual kernel solid count reaches the typed diagnostic");
+    check(detail.find("recovery")->find("inspect_before_retry")->b&&detail.find("recovery")->find("design_options")->arr.size()==2,"diagnostic offers inspection and design alternatives without choosing geometry");
+    check(detail.find("document_unchanged")->b&&session.revision==revision&&ark::documentToJson(session.document)==before,"failure guidance cannot commit or alter rejected geometry");
+}
+
 int main() {
     try {
+        testSingleSolidRecovery();
         testLoftHistoryAndExport();
         testMirrorPlanes();
         testFinishingHistory();

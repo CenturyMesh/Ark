@@ -65,6 +65,7 @@ struct AgentTeam::Impl {
         AgentTeamRole config;
         V tools=V::makeArr();
         AgentTeamRoleSnapshot view;
+        V lastToolFailure;
         std::deque<std::string> pending,context;
         std::size_t pendingBytes=0,contextBytes=0;
         bool queued=false,active=false;
@@ -156,7 +157,7 @@ struct AgentTeam::Impl {
     }
     V context(){
         std::lock_guard lock(mutex);V result=V::makeObj(),list=V::makeArr();
-        for(const auto& role:roles){V item=V::makeObj();item.set("id",V::makeStr(role.view.id));item.set("state",V::makeStr(agentTeamStateName(role.view.state)));item.set("discipline",V::makeStr(agentTeamDisciplineName(role.view.discipline)));item.set("status",V::makeStr(role.view.status));item.set("can_write",V::makeBool(role.view.canWrite));std::string latest;boundedAppend(latest,role.view.text,2048);item.set("latest_output",V::makeStr(latest));item.set("steps_applied",V::makeNum((double)role.view.stepsApplied));item.set("token_evidence",V::makeStr(assistantUsageLabel(role.view.usage)));list.arr.push_back(item);}
+        for(const auto& role:roles){V item=V::makeObj();item.set("id",V::makeStr(role.view.id));item.set("state",V::makeStr(agentTeamStateName(role.view.state)));item.set("discipline",V::makeStr(agentTeamDisciplineName(role.view.discipline)));item.set("status",V::makeStr(role.view.status));item.set("can_write",V::makeBool(role.view.canWrite));std::string latest;boundedAppend(latest,role.view.text,2048);item.set("latest_output",V::makeStr(latest));item.set("steps_applied",V::makeNum((double)role.view.stepsApplied));item.set("token_evidence",V::makeStr(assistantUsageLabel(role.view.usage)));if(!role.lastToolFailure.isNull())item.set("last_tool_failure",role.lastToolFailure);list.arr.push_back(item);}
         V board=V::makeArr();for(const auto& proposal:proposals){V item=V::makeObj();item.set("id",V::makeStr(proposal.view.id));item.set("from",V::makeStr(proposal.view.fromId));item.set("to",V::makeStr(proposal.view.toId));item.set("expected_revision",V::makeNum((double)proposal.view.expectedRevision));item.set("reason",V::makeStr(proposal.view.reason));item.set("state",V::makeStr(proposal.view.state));board.arr.push_back(item);}
         result.set("roles",list);result.set("proposals",board);result.set("paused",V::makeBool(paused));result.set("manufacturing_qualified",V::makeBool(false));return result;
     }
@@ -217,7 +218,16 @@ struct AgentTeam::Impl {
                 }
             }
         }
-        AgentTeamEvent event;event.kind=AgentTeamEvent::ToolEnd;event.roleId=roles[index].config.id;event.tool=name;event.toolError=isError(result);event.text=event.toolError?"Tool returned error":"Tool returned result";emit(event);
+        AgentTeamEvent event;event.kind=AgentTeamEvent::ToolEnd;event.roleId=roles[index].config.id;event.tool=name;event.toolError=isError(result);
+        if(event.toolError){
+            const auto& detail=payload(result);V compact=V::makeObj();compact.set("tool",V::makeStr(name));
+            for(const char* key:{"error_code","error","stage","operation","command_index","feature_id","observed_solid_count","revision","document_unchanged","recovery"})if(auto value=detail.find(key)){if(value->dump().size()<=2048)compact.set(key,*value);else if(value->t==V::Str)compact.set(key,V::makeStr(clipped(value->str,1800)));}
+            {std::lock_guard lock(mutex);roles[index].lastToolFailure=compact;}
+            event.text=clipped(field(detail,"error_code")+": "+field(detail,"error"),config.maxEventTextBytes);
+            if(event.text==": ")event.text="Tool rejected the request; inspect its retained response.";
+            share(index,"Tool failure diagnostic (data): "+compact.dump()+" Inspect the cause before another proposal; choose a correction from design intent, not an identical blind retry.");
+        }else event.text="Tool returned result";
+        emit(event);
         if(name.rfind("team_",0)!=0&&!documentMutation(name))share(index,name+(event.toolError?" returned error.":" returned result. Inspect the current revision before a write."));
         return result;
     }

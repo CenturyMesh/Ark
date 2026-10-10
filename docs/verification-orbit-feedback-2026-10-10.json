@@ -1,0 +1,99 @@
+{
+  "date": "2026-10-10",
+  "base_commit": "acfebac50b891c4d61d682af60471b2b7e1f9112",
+  "native_tests": {
+    "passed": 50,
+    "total": 50,
+    "seconds": 54.56,
+    "log": "out/orbit-feedback-native-tests.log"
+  },
+  "core_tests": {
+    "passed": 35,
+    "total": 35,
+    "seconds": 20.79,
+    "log": "out/orbit-feedback-core-tests.log"
+  },
+  "ui_tests": [
+    {
+      "test": "assistant-ui",
+      "exit": 0,
+      "seconds": 14.8
+    },
+    {
+      "test": "native-ui",
+      "exit": 0,
+      "seconds": 3.88
+    },
+    {
+      "test": "context-ui",
+      "exit": 0,
+      "seconds": 1.84
+    },
+    {
+      "test": "render-ui",
+      "exit": 0,
+      "seconds": 2.28
+    },
+    {
+      "test": "sketch-ui",
+      "exit": 0,
+      "seconds": 4.51
+    },
+    {
+      "test": "sheet-showcase-ui",
+      "exit": 0,
+      "seconds": 3.31
+    },
+    {
+      "test": "suspension-ui",
+      "exit": 0,
+      "seconds": 0.8
+    },
+    {
+      "test": "motion-ui",
+      "exit": 0,
+      "seconds": 16.95
+    },
+    {
+      "test": "engineering-ui",
+      "exit": 0,
+      "seconds": 1.44
+    },
+    {
+      "test": "dialogs",
+      "exit": 0,
+      "seconds": 1.81
+    },
+    {
+      "test": "ui",
+      "exit": 0,
+      "seconds": 0.59
+    }
+  ],
+  "camera_checks": [
+    "Projected front geometry follows positive mouse X and Y",
+    "Three complete turns in either direction around each camera axis from three initial poses",
+    "Orientation passes through poles and beyond former virtual-sphere rim",
+    "Diagonal drag/inverse return to original frame",
+    "Studio middle-button input and two continuous turns per signed axis",
+    "Alt + middle drag provides explicit view-axis spin"
+  ],
+  "feedback_checks": [
+    "Real OCCT disconnected union returns observed_solid_count 2 and NATIVE_SINGLE_SOLID_REQUIRED",
+    "Rejected union preserves document and revision",
+    "Author gets full result; teammate context and UI events get actionable diagnostics",
+    "Recovery alternatives remain advisory; geometry contract unchanged"
+  ],
+  "runtime_path": "out/native-release/Release",
+  "runtime_sha256": {
+    "ark-studio.exe": "75a34ae664915f144cc3ee3ceb856d08af589d4f4988ee9c0f64a938823d2716",
+    "ark-mcp.exe": "9997ad66b7d385db1f4d6d5d266a84617256610e83d1fda5133da8fd32af8084",
+    "ark-cli.exe": "73c05232f2db623c9c3be692d3d79bd0b262349751650f629839888044f94f62",
+    "ark-occt-worker.exe": "506777adb5819c18d79202e79a6e33bb7f40de6c7d150518f18273eb6f358c5d"
+  },
+  "limits": [
+    "Agent collaboration tests use injected transports, not a live paid design session",
+    "A historical last_tool_failure is not current geometry authority; inspect the current revision",
+    "Hosted CI was not checked in this local validation"
+  ]
+}

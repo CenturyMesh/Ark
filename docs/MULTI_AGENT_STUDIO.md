@@ -230,8 +230,10 @@ explicitly labeled as an offline test.
 
 ## Navigation and pricing completion
 
-Middle-button drag performs free trackball rotation, including roll around the
-view axis and pole crossings. Shift + middle-button drag pans; the wheel zooms.
+Middle-button drag rotates the visible model in the pointer's direction using
+relative motion. Rotation continues beyond the viewport/old virtual-sphere rim
+and across both poles, with no positive or negative turn limit. **Alt + middle
+drag** spins around the viewing axis; Shift + middle drag pans; the wheel zooms.
 Left click selects; explicit Pan/Zoom tools and view-cube dragging remain
 available. Named views reset roll. Rendering, picking, Fit and the cube use the
 same camera basis. The context-menu focus action is named **Spotlight**.
@@ -240,3 +242,20 @@ The geometry progress message pump now dispatches pricing and team events
 instead of discarding them. This fixes a completed fetch remaining at
 `rates loading` and preserves live step/usage notifications during kernel work.
 The integration test injects a pricing result during a real worker operation.
+
+## Actionable rejected-operation feedback
+
+The author receives the complete structured tool result in its next model
+request. Teammates now also receive a compact rejection diagnostic, and
+`team_context.roles[].last_tool_failure` retains the latest error evidence for
+each role. UI ToolEnd events include the cause instead of only "returned error".
+The revision and `document_unchanged` fields remain the tool's actual receipt;
+an unknown execution outcome is never relabeled as a successful rollback.
+
+The single-solid native contract reports `NATIVE_SINGLE_SOLID_REQUIRED`, the
+observed solid count and advisory `recovery` guidance: inspect existing inputs,
+use separate assembly instances for separate parts, or revise contact/cutter
+geometry if the intended result is one body. A rejected output ID may not exist
+in the committed document. Agents retain the choice of design correction;
+no geometry is discarded, no tolerance is widened and no extra editing gate
+is introduced. Diagnostics guide iteration rather than certifying the design.

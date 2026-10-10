@@ -64,6 +64,14 @@ The user can steer one role or the whole team and pause or cancel subsequent
 work. Events describe actual requests, tool calls, messages, errors and receipts;
 they do not expose hidden reasoning or invent completion percentages.
 
+Failed tools keep their complete response for the author. Team events and
+inboxes carry bounded diagnostic details; `team_context` retains each role's
+latest `last_tool_failure` with available error code, feature, revision,
+unchanged-document receipt and recovery hints. These are advisory evidence,
+not a new permission gate or an automatic repair. An older last failure can
+remain visible after later successful edits; use its recorded revision/tool
+and current document evidence before acting on it.
+
 ## Continuous work and provider failures
 
 Studio defaults to eight workers/roles with no round or turn budget (zero in
