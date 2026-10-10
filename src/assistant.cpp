@@ -264,7 +264,7 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
         auto status=field(response,"status");
         if(config.authMode==AssistantAuthMode::ChatGptPlan&&status=="failed"){
             std::string code;if(const auto* failure=response.find("error"))if(failure->t==V::Obj)if(const auto* value=failure->find("code"))if(value->t==V::Str&&identifier(value->str))code=value->str;
-            if(code=="subscription_sharing_usage_limit_exceeded")throw std::runtime_error("ARK reached its ChatGPT plan usage limit. Review ChatGPT Settings > Usage and manage this app's limit before retrying.");
+            if(code=="subscription_sharing_usage_limit_exceeded")throw std::runtime_error("ChatGPT usage limit reached. Open Manage usage (ChatGPT Settings > Usage): review the plan/app limits and, to use available credits, enable 'Allow other apps to use credits after reaching your usage limit'. ARK's 100% app limit does not enable credits. Save changes, then Resume after error. Your account connection and previous CAD work are preserved.");
             if(code=="subscription_sharing_usage_unavailable")throw std::runtime_error("ChatGPT plan usage could not be checked. Credentials are preserved; try again later.");
             if(code=="subscription_sharing_user_not_eligible")throw std::runtime_error("This ChatGPT account or workspace is not eligible for plan usage. Choose another account or API key mode.");
             if(code=="subscription_sharing_unsupported_capability")throw std::runtime_error("The selected model or ARK tool is unsupported for ChatGPT plan usage. Choose an available model or adjust the request.");

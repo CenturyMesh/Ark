@@ -3044,6 +3044,10 @@ static void uiAction(int id){
     if(id==481||id==482){g_toolScroll=std::max(0,g_toolScroll+(id==481?-8:8));return;}
     if(id==486||id==487){g_toolCategoryScroll=std::max(0,g_toolCategoryScroll+(id==486?-8:8));return;}
     if(id==483){g_toolFilter.clear();g_toolScroll=0;if(g_toolSearch)SetWindowTextW(g_toolSearch,L"");return;}
+    if(id==44013){
+        if(!g_headless){auto opened=ShellExecuteW(g_window,L"open",L"https://chatgpt.com/settings/usage",nullptr,nullptr,SW_SHOWNORMAL);if((INT_PTR)opened<=32)throw std::runtime_error("Could not open ChatGPT usage settings. Open https://chatgpt.com/settings/usage in your browser.");}
+        g_status="ChatGPT Settings > Usage: enable credits for other apps if desired, save changes, then Resume after error.";return;
+    }
     if(id>=44000&&id<44008){teamRoleDialog((size_t)(id-44000));return;}
     if(id==44011||id==44012){unsigned pages=(g_teamRoleCount+teamCardColumns()*teamCardRows()-1)/(teamCardColumns()*teamCardRows());g_teamPage=(g_teamPage+(id==44012?1:pages-1))%pages;return;}
     if(id==44010){
@@ -4356,7 +4360,8 @@ static void drawFrame(HDC hdc){
         g_assistantConfig.authMode==AssistantAuthMode::ChatGptPlan?"ChatGPT plan / "+g_assistantConfig.model:
         g_authStatus.connected?(g_authStatus.planAuthorized?"ChatGPT signed in / choose model":"ChatGPT identity connected / plan disabled"):
         g_assistantConfig.model.empty()?"Continue with ChatGPT or Advanced API key":"API key / "+g_assistantConfig.model;
-    label(connector.substr(0,(size_t)std::max(8,(viewW-540)/6)),viewX+192,cy+15,.60f);
+    label(connector.substr(0,(size_t)std::max(8,(viewW-(g_assistantConfig.authMode==AssistantAuthMode::ChatGptPlan?710:540))/6)),viewX+192,cy+15,.60f);
+    if(g_assistantConfig.authMode==AssistantAuthMode::ChatGptPlan)button("Manage usage",viewX+viewW-484,cy+7,154,44013);
     std::string effortButton="Effort "+(g_assistantConfig.reasoningEffort.empty()?std::string("Auto"):g_assistantConfig.reasoningEffort);
     if(g_teamMode)button(g_teamSnapshot.paused?"Resume":"Pause",viewX+viewW-320,cy+7,105,472,false,g_teamSnapshot.paused);
     else button(effortButton.c_str(),viewX+viewW-320,cy+7,105,367,false,!g_assistantConfig.reasoningEffort.empty());
@@ -4364,9 +4369,9 @@ static void drawFrame(HDC hdc){
     std::string runTokens=g_teamMode?"Team: "+assistantUsageLabel(g_teamSnapshot.usage):"Run: "+assistantUsageLabel(g_assistantUsageRun);
     label(runTokens.substr(0,(size_t)std::max(20,(viewW-350)/5)),viewX+22,cy+33,.52f);
     if(g_teamMode){
-        if(g_teamStarted&&std::any_of(g_teamSnapshot.roles.begin(),g_teamSnapshot.roles.end(),[](const auto& role){return role.state==AgentTeamState::AwaitingContinuation||role.state==AgentTeamState::Interrupted;}))button("Resume after error",viewX+viewW-206,cy+36,184,490);
+        if(g_teamStarted&&std::any_of(g_teamSnapshot.roles.begin(),g_teamSnapshot.roles.end(),[](const auto& role){return role.state==AgentTeamState::AwaitingContinuation||role.state==AgentTeamState::Interrupted||role.state==AgentTeamState::Failed;}))button("Resume after error",viewX+viewW-206,cy+36,184,490);
         std::string live=g_teamStarted?(g_teamSnapshot.cancelled?"CANCELLED":g_teamSnapshot.paused?"PAUSED / requests and tools gated":g_teamSnapshot.running?"LIVE / provider and tool activity":"IDLE / ready for another decision"):"READY / choose role settings and send a goal";
-        if(g_teamStarted&&!g_teamSnapshot.running&&!g_teamSnapshot.cancelled&&std::any_of(g_teamSnapshot.roles.begin(),g_teamSnapshot.roles.end(),[](const auto& role){return role.state==AgentTeamState::AwaitingContinuation||role.state==AgentTeamState::Interrupted;}))live="AWAITING CONTINUATION / previous commits and receipts retained";
+        if(g_teamStarted&&!g_teamSnapshot.running&&!g_teamSnapshot.cancelled&&std::any_of(g_teamSnapshot.roles.begin(),g_teamSnapshot.roles.end(),[](const auto& role){return role.state==AgentTeamState::AwaitingContinuation||role.state==AgentTeamState::Interrupted||role.state==AgentTeamState::Failed;}))live="AWAITING CONTINUATION / previous commits and receipts retained";
         textOut(live.substr(0,(size_t)std::max(10,(viewW-590)/5)),viewX+22,cy+51,.57f,.50f,.81f,.94f);
         int columns=teamCardColumns(),pageSize=columns*teamCardRows();unsigned pages=(g_teamRoleCount+pageSize-1)/pageSize;g_teamPage=std::min(g_teamPage,pages-1);
         button(("Agents: "+std::to_string(g_teamRoleCount)).c_str(),viewX+viewW-500,cy+35,100,44010);
@@ -5545,6 +5550,11 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         g_roleSmokeRefresh=true;g_dialogShot=shotPath+".role-model-settings.png";if(!exerciseRole("catalog-b","xhigh",3)||!g_roleSmokeRefreshPassed||g_teamModels[0]!="catalog-b"||g_teamEfforts[0]!="xhigh")return assistantFailure(337);g_roleSmokeRefresh=false;
         if(!exerciseRole("catalog-a","low",2)||g_teamModels[0]!="catalog-b"||g_teamEfforts[0]!="xhigh")return assistantFailure(338);
         if(!exerciseRole("catalog-b","",3)||!g_teamEfforts[0].empty()||!teamRoleConfig(0).reasoningEffort.empty())return assistantFailure(339);
+        {bool oldTeamMode=g_teamMode,oldTeamStarted=g_teamStarted;auto oldTeamSnapshot=g_teamSnapshot;
+         g_teamMode=true;g_teamStarted=true;g_teamSnapshot={};AgentTeamRoleSnapshot failedRole;failedRole.state=AgentTeamState::Failed;failedRole.status="ChatGPT usage limit reached";failedRole.error=failedRole.status;g_teamSnapshot.roles.push_back(failedRole);layout();drawFrame(hdc);
+         for(int action:{44013,490})if(std::none_of(g_zones.begin(),g_zones.end(),[&](const Zone& z){return z.id==action;}))return assistantFailure(395);
+         if(!saveProbeShot(shotPath+".credit-recovery.png"))return assistantFailure(396);uiAction(44013);if(g_status.find("enable credits")==std::string::npos)return assistantFailure(397);
+         g_teamMode=oldTeamMode;g_teamStarted=oldTeamStarted;g_teamSnapshot=std::move(oldTeamSnapshot);layout();}
         g_assistantConfig.reasoningEffort="ultra";g_teamModels[0].clear();g_teamEfforts[0].clear();if(!teamRoleConfig(0).reasoningEffort.empty())return assistantFailure(340);
         g_teamModels[0]="removed-model";g_teamEfforts[0]="high";if(!exerciseRole("catalog-a","low",2)||!g_roleSmokeInitialDisabled||g_teamModels[0]!="removed-model"||g_teamEfforts[0]!="high")return assistantFailure(341);
         auto finishCatalog=[&](std::vector<ChatGptModel> models,const std::string& error={},bool otherAccount=false){auto* event=new UiAuthEvent;event->job=AuthJob::Models;event->status=g_authStatus;if(otherAccount)event->status.activeClientId="different-offline-account";event->models=std::move(models);event->error=error;SendMessage(g_window,WM_ARK_AUTH,0,(LPARAM)event);};

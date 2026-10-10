@@ -2,8 +2,9 @@
 
 ## Windows application icon
 
-`ark-app-mark.png` is the transparent blue A/chevron derived from the ARK
-wordmark with built-in ImageGen. `ark-app.ico` packages it at 16, 20, 24, 32,
+`ark-app-mark.png` is the original transparent blue A/chevron derived from the ARK
+wordmark with built-in ImageGen. Its silhouette and proportions are unchanged.
+`ark-app.ico` uses the full available width (no added one-pixel border), at 16, 20, 24, 32,
 40, 48, 64, 128 and 256 pixels, retaining alpha and its aspect ratio. Regenerate
 the ICO with `powershell -File scripts/build-app-icon.ps1`.
 

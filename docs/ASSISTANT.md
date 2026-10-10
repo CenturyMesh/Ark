@@ -203,6 +203,29 @@ and [stateless reasoning](https://developers.openai.com/api/docs/guides/reasonin
 
 ## Token usage
 
+### Using purchased ChatGPT credits
+
+ChatGPT-plan requests use the existing authorized account connection for eligible
+plan usage or available ChatGPT credits. Credits do not require an API-key
+fallback. In ChatGPT Settings > Usage, the user must enable **Allow other apps
+to use credits after reaching your usage limit**. This account-wide permission
+for authorized apps is separate from ARK's app percentage limit; selecting 100%
+does not enable credit spending. ARK cannot infer that switch or the available
+balance from `subscription_sharing_usage_limit_exceeded`.
+
+The composer exposes **Manage usage**, linking to
+<https://chatgpt.com/settings/usage>. Usage-limit errors explain the permission
+and retain the current account and committed CAD work. After adjusting settings,
+**Resume after error** is available for Failed as well as Interrupted team roles;
+it resumes retained history and requires current document inspection before
+writes. The application does not change spending permissions, switch accounts,
+or replay failed requests automatically.
+
+Sources: [ChatGPT user controls](https://learn.chatgpt.com/docs/sign-in-with-chatgpt),
+[app UX guidance](https://developers.openai.com/siwc/ui-ux-guidelines).
+
+### Drawing token receipts
+
 The Studio assistant counter sums provider-reported `usage.input_tokens`,
 `output_tokens` and `total_tokens` across all response rounds for a request.
 Cached input and reasoning tokens are retained as subsets; they are not added

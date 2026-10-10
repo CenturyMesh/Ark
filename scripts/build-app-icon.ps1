@@ -27,7 +27,7 @@ public static class ArkIconPackager {
                         g.CompositingMode=CompositingMode.SourceCopy;
                         g.InterpolationMode=InterpolationMode.HighQualityBicubic;
                         g.PixelOffsetMode=PixelOffsetMode.HighQuality;
-                        float scale=(size-2f)/Math.Max(crop.Width,crop.Height);
+                        float scale=(float)size/Math.Max(crop.Width,crop.Height);
                         float width=crop.Width*scale, height=crop.Height*scale;
                         g.DrawImage(mark,new RectangleF((size-width)/2,(size-height)/2,width,height),crop,GraphicsUnit.Pixel);
                     }
