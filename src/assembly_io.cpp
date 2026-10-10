@@ -5,7 +5,7 @@ using V=arkjson::Value;
 V mateToJson(const AssemblyMate& m) {
     V j=V::makeObj();j.set("id",V::makeNum((double)m.id));j.set("a",V::makeNum((double)m.a));j.set("b",V::makeNum((double)m.b));
     j.set("type",V::makeStr(m.type));j.set("reference_a",V::makeStr(m.reference_a));j.set("reference_b",V::makeStr(m.reference_b));
-    j.set("value",V::makeStr(m.value));j.set("fraction_a",V::makeNum(m.fraction_a));j.set("fraction_b",V::makeNum(m.fraction_b));return j;
+    j.set("value",V::makeStr(m.value));j.set("fraction_a",V::makeNum(m.fraction_a));j.set("fraction_b",V::makeNum(m.fraction_b));if(!m.motion.empty()){V fields=V::makeObj();for(const auto& item:m.motion)fields.set(item.first,V::makeStr(item.second));j.set("motion",fields);}return j;
 }
 void editMate(AssemblyMate& m,const V& j) {
     if(j.t!=V::Obj)throw std::runtime_error("Mate must be an object");
@@ -19,8 +19,10 @@ void editMate(AssemblyMate& m,const V& j) {
     for(auto kv:{std::pair{"fraction_a",&m.fraction_a},std::pair{"fraction_b",&m.fraction_b}})if(auto p=j.find(kv.first)){
         if(p->t!=V::Num||!std::isfinite(p->num)||p->num<0||p->num>1)throw std::runtime_error("Mate curve fraction must be in [0,1]");*kv.second=p->num;
     }
+    if(const auto* motion=j.find("motion")){if(motion->t!=V::Obj)throw std::runtime_error("Mechanical mate motion must be an object");m.motion.clear();for(const auto& item:motion->obj){if(item.second.t==V::Num&&std::isfinite(item.second.num))m.motion[item.first]=item.second.dump();else if(item.second.t==V::Str&&!item.second.str.empty()&&item.second.str.size()<=2048)m.motion[item.first]=item.second.str;else throw std::runtime_error("Mechanical motion field must be finite or an expression");}}
     if(!m.a||!m.b||m.a==m.b)throw std::runtime_error("Mate needs two distinct instances");
-    if(m.type!="concentric"&&m.type!="coincident"&&m.type!="contact"&&m.type!="distance"&&m.type!="angle")throw std::runtime_error("Unknown mate type");
+    if(m.type!="concentric"&&m.type!="coincident"&&m.type!="contact"&&m.type!="distance"&&m.type!="angle"&&!isMechanicalMate(m.type))throw std::runtime_error("Unknown mate type");
+    if(!isMechanicalMate(m.type)&&!m.motion.empty())throw std::runtime_error("motion fields require a mechanical mate type");
 }
 V assemblyDiagnosticsJson(const AssemblyDiagnostics& d) {
     V j=V::makeObj(),rows=V::makeArr(),unconstrained=V::makeArr();j.set("jacobian_rank",V::makeNum(d.rank));j.set("remaining_dofs",V::makeNum(d.freeDofs));

@@ -1,0 +1,5 @@
+Built-in image_gen edit, 2026-10-10. Reference: sheet-workspace-concept.png.
+
+Use case: precise-object-edit. Extract ONLY the ARK wordmark visible at the upper left of this reference UI. Preserve its exact distinctive angular typography: light blue A, silver-blue R and K, metallic highlights and sharp cuts, same proportions and letter shapes. Remove Studio and all other content. Output an isolated ARK wordmark on a genuinely transparent background, tightly composed centered with small transparent margins, high resolution. This is an extraction of the approved logo, not a new logo design. No square A symbol, no text other than ARK, no background, no shadow outside the letters.
+
+Final selection: the user explicitly selected the first variant with the open A (without a crossbar). assets/ui/ark-wordmark.png contains that selected variant. A later crossbar exploration was discarded.

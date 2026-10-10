@@ -66,8 +66,10 @@ Limits: 16 flanges, 128 openings, positive lengths/radii/thickness, K in `[0,1]`
 and `0.001 <= abs(angle) < 170` degrees. Negative angles bend to the opposite
 side. Parents precede children. No implicit corner reliefs or bend-crossing
 openings are invented. Nonadjacent contact and positive material overlap are
-rejected in both flat and formed poses. This domain covers rectangular panel
-trees, not hems, arbitrary freeform panel boundaries or continuous double curvature.
+rejected in both flat and formed poses. The flange domain covers rectangular panel trees. Open round hems and bounded
+circular emboss stamping are separate authored operations described below;
+arbitrary freeform panel boundaries and continuous double curvature are outside
+this domain.
 
 Circle and polygon openings are exact cuts in a panel's local frame. `x` is U,
 `y` is V. Their local expressions can use `panel_length`, `panel_width` and
@@ -91,8 +93,82 @@ trajectory or press-tool accessibility.
 
 The original `sheet_metal` parameters `{width,leg_a,leg_b,thickness,inner_radius,
 angle,k_factor}` and numeric opening panels `0/1` still reproduce old documents.
-New graph features store `native:{base,flanges,openings}` and the global width,
+New graph features store `native:{base,flanges,hems?,openings,stamps?}` and the global width,
 thickness and K factor in `p`. `.ark` version 7 preserves this authored intent.
+
+## Open round hems and circular emboss stamping
+
+These are native OCCT authored operations with stable identities, editable
+expressions and atomic rollback. They remain `sheet_metal` features and save
+as document version 21 when a hem or stamp is present. Older sheet documents
+keep their existing version. These bounded operations do not establish support
+for closed/crushed hems, teardrop hems, arbitrary die profiles or deep drawing.
+
+```json
+{"commands":[
+  {"op":"sheet.hem.add","id":"Bracket","hem":{
+    "id":"rim","parent":"back","edge":"u_max","length":12,
+    "inner_radius":3,"direction":1}},
+  {"op":"sheet.stamp.add","id":"Bracket","stamp":{
+    "id":"emboss","panel":"base","kind":"circular_emboss",
+    "x":"panel_length/2","y":"panel_width/2",
+    "radius":12,"top_radius":6,"depth":4}}
+]}
+```
+
+A hem is a terminal return panel joined by a signed **180 degree** annular
+cylindrical bend. `inner_radius` must be positive: the facing skins retain an
+open gap of twice that radius. `direction` defaults to +1 and accepts only
++1 or -1. `length`, optional `width`, `offset` and `k_factor` have the same
+expression/attachment meaning as a flange. The inbound edge and an occupied
+parent edge remain reserved. A hem cannot have child flanges, openings or
+stamps. Up to 16 flanges and 16 hems are accepted; actual material overlap and
+unrelieved nonadjacent contacts reject. Flat allowances use pi*(R+K*t).
+Independent neutral-line refold, exact whole-solid comparison and analytic
+volumes also cover the 180 degree bend. The display trajectory is not certified.
+
+A `circular_emboss` stamp replaces a circular portion of one rigid panel with
+an exact solid of revolution: a conical wall, horizontal circular plateau and
+sharp **mitred** transitions. It is a nominal authored geometry, with no inferred
+die radius. The two conical skins are separated by the declared thickness in
+the normal direction; the planar skins are separated by that thickness as
+well. Mitred corner geometry is explicit. Positive `depth` raises the plateau
+along the panel's material normal; a negative value lowers it.
+
+The midwall outer transition is `radius`; the plateau midwall transition is
+`top_radius`. The replacement footprint has radius `radius+thickness`.
+Require `top_radius>thickness`, `radius>top_radius+2*thickness`, and
+`thickness<abs(depth)<=radius-top_radius`. Coordinates and dimensions accept
+expressions using `panel_length`, `panel_width`, `thickness` and document
+parameters. The whole footprint must lie strictly inside its panel and clear
+all openings and other stamp footprints. Up to 32 stamps are accepted, on the
+base or ordinary flange panels. Exact formed-solid interference remains checked
+against other panels and bends. The revolved section's analytic first moment
+independently checks its OCCT volume.
+
+`sheet.hem.edit` and `sheet.stamp.edit` take `{id,entity,values}`;
+`sheet.hem.remove` and `sheet.stamp.remove` take `{id,entity}`.
+Omitted identities are allocated from the shared persistent entity counter.
+Removing an ordinary flange that owns hems or stamps requires explicit
+`cascade:true` or removal of its dependent entities. Failed geometry edits
+preserve both document and revision; undo restores the authored program.
+
+`sheet_inspect` reports `hem_count`, bend `kind:"open_round_hem"`,
+`stamp_count`, stamp dimensions/centres, wall model and analytic volume delta.
+For a stamped sheet, **`flat_pattern_qualified:false`** means the flat B-rep is
+only a nominal unstamped reference. Strain, blank size, thinning, springback,
+material conservation and tooling accessibility have not been evaluated.
+Flat STEP/IGES and DXF exports reject such a reference; explicit formed STEP
+or IGES remains exact native geometry. The report's
+`refold_symmetric_difference_mm3` is null when stamps are present:
+`rigid_panel_pose_symmetric_difference_mm3` and
+`rigid_panel_refold_verified` attest only rigid panel placement, not unfolding
+of the embossed material. Manufacturing authority remains false.
+
+Stamped `sheet_preview` accepts exact endpoints 0 (nominal flat reference) and
+1 (actual formed geometry including stamping). Intermediate values reject
+because forming strain is not modeled. Sheets without stamps retain the full
+sequential bend/hem display preview.
 
 ## Import an existing STEP sheet
 

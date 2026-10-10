@@ -1,0 +1,1003 @@
+{
+  "tool": "doc_apply",
+  "arguments": {
+    "expected_revision": 0,
+    "commands": [
+      {
+        "op": "param.set",
+        "name": "front_teeth",
+        "expr": "48"
+      },
+      {
+        "op": "param.set",
+        "name": "rear_teeth",
+        "expr": "16"
+      },
+      {
+        "op": "param.set",
+        "name": "cadence_rpm",
+        "expr": "60"
+      },
+      {
+        "op": "param.set",
+        "name": "chain_pitch_mm",
+        "expr": "12.7"
+      },
+      {
+        "op": "param.set",
+        "name": "front_pitch_radius",
+        "expr": "chain_pitch_mm*front_teeth/(2*pi)"
+      },
+      {
+        "op": "param.set",
+        "name": "rear_pitch_radius",
+        "expr": "chain_pitch_mm*rear_teeth/(2*pi)"
+      },
+      {
+        "op": "param.set",
+        "name": "axle_span",
+        "expr": "420"
+      },
+      {
+        "op": "param.set",
+        "name": "rear_height",
+        "expr": "40"
+      },
+      {
+        "op": "param.set",
+        "name": "wheel_radius",
+        "expr": "300"
+      },
+      {
+        "op": "param.set",
+        "name": "chain_distance",
+        "expr": "sqrt(axle_span^2+rear_height^2)"
+      },
+      {
+        "op": "param.set",
+        "name": "chain_phi",
+        "expr": "atan2(rear_height,-axle_span)"
+      },
+      {
+        "op": "param.set",
+        "name": "chain_beta",
+        "expr": "acos((front_pitch_radius-rear_pitch_radius)/chain_distance)"
+      },
+      {
+        "op": "param.set",
+        "name": "chain_upper",
+        "expr": "chain_phi-chain_beta"
+      },
+      {
+        "op": "param.set",
+        "name": "chain_lower",
+        "expr": "chain_phi+chain_beta"
+      },
+      {
+        "op": "param.set",
+        "name": "gear_ratio",
+        "expr": "front_teeth/rear_teeth"
+      },
+      {
+        "op": "param.set",
+        "name": "rear_rpm",
+        "expr": "cadence_rpm*gear_ratio"
+      },
+      {
+        "op": "material.set",
+        "name": "Ocean blue",
+        "appearance": {
+          "base_color": [
+            0.02,
+            0.38,
+            0.68
+          ],
+          "metallic": 0.65,
+          "roughness": 0.33
+        }
+      },
+      {
+        "op": "material.set",
+        "name": "Brushed alloy",
+        "appearance": {
+          "base_color": [
+            0.72,
+            0.76,
+            0.8
+          ],
+          "metallic": 0.85,
+          "roughness": 0.33
+        }
+      },
+      {
+        "op": "material.set",
+        "name": "Warm crank",
+        "appearance": {
+          "base_color": [
+            0.9,
+            0.42,
+            0.1
+          ],
+          "metallic": 0.68,
+          "roughness": 0.33
+        }
+      },
+      {
+        "op": "material.set",
+        "name": "Rubber",
+        "appearance": {
+          "base_color": [
+            0.055,
+            0.06,
+            0.07
+          ],
+          "metallic": 0.08,
+          "roughness": 0.33
+        }
+      },
+      {
+        "op": "material.set",
+        "name": "Chain gold",
+        "appearance": {
+          "base_color": [
+            0.72,
+            0.56,
+            0.19
+          ],
+          "metallic": 0.75,
+          "roughness": 0.33
+        }
+      },
+      {
+        "op": "feature.add",
+        "type": "native_solid",
+        "name": "Front chainring rim",
+        "native": {
+          "op": "cylinder"
+        },
+        "p": {
+          "radius": "front_pitch_radius-2",
+          "height": 6
+        }
+      },
+      {
+        "op": "feature.add",
+        "type": "native_solid",
+        "name": "Front chainring bore",
+        "native": {
+          "op": "cylinder"
+        },
+        "p": {
+          "radius": 8,
+          "height": 6
+        }
+      },
+      {
+        "op": "feature.add",
+        "type": "native_solid",
+        "name": "Front chainring annulus",
+        "native": {
+          "op": "cut"
+        },
+        "inputs": [
+          "Front chainring rim",
+          "Front chainring bore"
+        ]
+      },
+      {
+        "op": "feature.add",
+        "type": "native_solid",
+        "name": "Front chainring tooth blank",
+        "native": {
+          "op": "cylinder"
+        },
+        "p": {
+          "radius": 3,
+          "height": 6
+        }
+      },
+      {
+        "op": "feature.add",
+        "type": "native_solid",
+        "name": "Front chainring tooth seed",
+        "native": {
+          "op": "transform"
+        },
+        "p": {
+          "tx": "front_pitch_radius-2"
+        },
+        "inputs": [
+          "Front chainring tooth blank"
+        ]
+      },
+      {
+        "op": "feature.add",
+        "type": "native_solid",
+        "name": "Front chainring visible teeth",
+        "native": {
+          "op": "circular_pattern",
+          "axis": "Z"
+        },
+        "p": {
+          "count": "front_teeth",
+          "step": "360/front_teeth",
+          "fuse": 0
+        },
+        "inputs": [
+          "Front chainring tooth seed"
+        ]
+      },
+      {
+        "op": "feature.add",
+        "type": "native_solid",
+        "name": "Front chainring toothed rotor",
+        "native": {
+          "op": "union"
+        },
+        "inputs": [
+          "Front chainring annulus",
+          "Front chainring visible teeth"
+        ],
+        "material": "Warm crank"
+      },
+      {
+        "op": "feature.add",
+        "type": "native_solid",
+        "name": "Rear cog rim",
+        "native": {
+          "op": "cylinder"
+        },
+        "p": {
+          "radius": "rear_pitch_radius-2",
+          "height": 6
+        }
+      },
+      {
+        "op": "feature.add",
+        "type": "native_solid",
+        "name": "Rear cog bore",
+        "native": {
+          "op": "cylinder"
+        },
+        "p": {
+          "radius": 8,
+          "height": 6
+        }
+      },
+      {
+        "op": "feature.add",
+        "type": "native_solid",
+        "name": "Rear cog annulus",
+        "native": {
+          "op": "cut"
+        },
+        "inputs": [
+          "Rear cog rim",
+          "Rear cog bore"
+        ]
+      },
+      {
+        "op": "feature.add",
+        "type": "native_solid",
+        "name": "Rear cog tooth blank",
+        "native": {
+          "op": "cylinder"
+        },
+        "p": {
+          "radius": 3,
+          "height": 6
+        }
+      },
+      {
+        "op": "feature.add",
+        "type": "native_solid",
+        "name": "Rear cog tooth seed",
+        "native": {
+          "op": "transform"
+        },
+        "p": {
+          "tx": "rear_pitch_radius-2"
+        },
+        "inputs": [
+          "Rear cog tooth blank"
+        ]
+      },
+      {
+        "op": "feature.add",
+        "type": "native_solid",
+        "name": "Rear cog visible teeth",
+        "native": {
+          "op": "circular_pattern",
+          "axis": "Z"
+        },
+        "p": {
+          "count": "rear_teeth",
+          "step": "360/rear_teeth",
+          "fuse": 0
+        },
+        "inputs": [
+          "Rear cog tooth seed"
+        ]
+      },
+      {
+        "op": "feature.add",
+        "type": "native_solid",
+        "name": "Rear cog toothed rotor",
+        "native": {
+          "op": "union"
+        },
+        "inputs": [
+          "Rear cog annulus",
+          "Rear cog visible teeth"
+        ],
+        "material": "Brushed alloy"
+      },
+      {
+        "op": "feature.add",
+        "type": "native_solid",
+        "name": "Crank arm blank",
+        "native": {
+          "op": "box"
+        },
+        "p": {
+          "width": 18,
+          "depth": 170,
+          "height": 7
+        }
+      },
+      {
+        "op": "feature.add",
+        "type": "native_solid",
+        "name": "Crank arm",
+        "native": {
+          "op": "transform"
+        },
+        "p": {
+          "tx": -9,
+          "ty": -170,
+          "tz": 3
+        },
+        "inputs": [
+          "Crank arm blank"
+        ]
+      },
+      {
+        "op": "feature.add",
+        "type": "native_solid",
+        "name": "Pedal blank",
+        "native": {
+          "op": "box"
+        },
+        "p": {
+          "width": 52,
+          "depth": 22,
+          "height": 18
+        }
+      },
+      {
+        "op": "feature.add",
+        "type": "native_solid",
+        "name": "Pedal",
+        "native": {
+          "op": "transform"
+        },
+        "p": {
+          "tx": -26,
+          "ty": -181,
+          "tz": 5
+        },
+        "inputs": [
+          "Pedal blank"
+        ]
+      },
+      {
+        "op": "feature.add",
+        "type": "native_solid",
+        "name": "Front crank rotor",
+        "native": {
+          "op": "union"
+        },
+        "inputs": [
+          "Front chainring toothed rotor",
+          "Crank arm",
+          "Pedal"
+        ],
+        "material": "Warm crank"
+      },
+      {
+        "op": "feature.add",
+        "type": "native_solid",
+        "name": "Wheel rubber ring",
+        "native": {
+          "op": "torus"
+        },
+        "p": {
+          "major_radius": "wheel_radius",
+          "minor_radius": 17
+        },
+        "material": "Rubber"
+      },
+      {
+        "op": "feature.add",
+        "type": "native_solid",
+        "name": "Wheel rim",
+        "native": {
+          "op": "torus"
+        },
+        "p": {
+          "major_radius": "wheel_radius-20",
+          "minor_radius": 6
+        },
+        "material": "Brushed alloy"
+      },
+      {
+        "op": "feature.add",
+        "type": "native_solid",
+        "name": "Spoke blank",
+        "native": {
+          "op": "box"
+        },
+        "p": {
+          "width": "wheel_radius-20",
+          "depth": 3,
+          "height": 3
+        }
+      },
+      {
+        "op": "feature.add",
+        "type": "native_solid",
+        "name": "Spoke seed",
+        "native": {
+          "op": "transform"
+        },
+        "p": {
+          "ty": -1.5,
+          "tz": -1.5
+        },
+        "inputs": [
+          "Spoke blank"
+        ]
+      },
+      {
+        "op": "feature.add",
+        "type": "native_solid",
+        "name": "16 radial spokes",
+        "native": {
+          "op": "circular_pattern",
+          "axis": "Z"
+        },
+        "p": {
+          "count": 16,
+          "step": 22.5,
+          "fuse": 0
+        },
+        "inputs": [
+          "Spoke seed"
+        ]
+      },
+      {
+        "op": "feature.add",
+        "type": "native_solid",
+        "name": "Wheel hub",
+        "native": {
+          "op": "cylinder"
+        },
+        "p": {
+          "radius": 14,
+          "height": 20
+        }
+      },
+      {
+        "op": "feature.add",
+        "type": "native_solid",
+        "name": "Wheel centred hub",
+        "native": {
+          "op": "transform"
+        },
+        "p": {
+          "tz": -10
+        },
+        "inputs": [
+          "Wheel hub"
+        ]
+      },
+      {
+        "op": "feature.add",
+        "type": "native_solid",
+        "name": "Alloy wheel rotor",
+        "native": {
+          "op": "union"
+        },
+        "inputs": [
+          "Wheel rim",
+          "16 radial spokes",
+          "Wheel centred hub"
+        ],
+        "material": "Brushed alloy"
+      },
+      {
+        "op": "feature.add",
+        "type": "native_solid",
+        "name": "Axle mount",
+        "native": {
+          "op": "cylinder"
+        },
+        "p": {
+          "radius": 7,
+          "height": 80
+        },
+        "material": "Brushed alloy"
+      },
+      {
+        "op": "feature.add",
+        "type": "construction_frame",
+        "name": "Blue bicycle frame",
+        "material": "Ocean blue",
+        "manufacturing": {
+          "route": "frame"
+        },
+        "native": {
+          "profiles": [
+            {
+              "name": "CHS 28x1.6",
+              "section": "round",
+              "od": 28,
+              "wall": 1.6
+            }
+          ],
+          "nodes": [
+            {
+              "name": "BB",
+              "xyz": [
+                0,
+                280,
+                0
+              ]
+            },
+            {
+              "name": "Seat",
+              "xyz": [
+                -120,
+                760,
+                0
+              ]
+            },
+            {
+              "name": "Head",
+              "xyz": [
+                450,
+                740,
+                0
+              ]
+            },
+            {
+              "name": "HeadLow",
+              "xyz": [
+                480,
+                610,
+                0
+              ]
+            },
+            {
+              "name": "Rear",
+              "xyz": [
+                -420,
+                320,
+                0
+              ]
+            },
+            {
+              "name": "Front",
+              "xyz": [
+                650,
+                320,
+                0
+              ]
+            },
+            {
+              "name": "Stem",
+              "xyz": [
+                470,
+                800,
+                0
+              ]
+            },
+            {
+              "name": "HandleLeft",
+              "xyz": [
+                480,
+                835,
+                -180
+              ]
+            },
+            {
+              "name": "HandleRight",
+              "xyz": [
+                480,
+                835,
+                180
+              ]
+            }
+          ],
+          "members": [
+            {
+              "name": "seat_tube",
+              "profile": "CHS 28x1.6",
+              "start": "BB",
+              "end": "Seat"
+            },
+            {
+              "name": "top_tube",
+              "profile": "CHS 28x1.6",
+              "start": "Seat",
+              "end": "Head"
+            },
+            {
+              "name": "head_tube",
+              "profile": "CHS 28x1.6",
+              "start": "Head",
+              "end": "HeadLow"
+            },
+            {
+              "name": "down_tube",
+              "profile": "CHS 28x1.6",
+              "start": "HeadLow",
+              "end": "BB"
+            },
+            {
+              "name": "chain_stay",
+              "profile": "CHS 28x1.6",
+              "start": "BB",
+              "end": "Rear"
+            },
+            {
+              "name": "seat_stay",
+              "profile": "CHS 28x1.6",
+              "start": "Rear",
+              "end": "Seat"
+            },
+            {
+              "name": "fork",
+              "profile": "CHS 28x1.6",
+              "start": "HeadLow",
+              "end": "Front"
+            },
+            {
+              "name": "stem",
+              "profile": "CHS 28x1.6",
+              "start": "Head",
+              "end": "Stem"
+            },
+            {
+              "name": "handle_left",
+              "profile": "CHS 28x1.6",
+              "start": "Stem",
+              "end": "HandleLeft"
+            },
+            {
+              "name": "handle_right",
+              "profile": "CHS 28x1.6",
+              "start": "Stem",
+              "end": "HandleRight"
+            }
+          ]
+        }
+      },
+      {
+        "op": "feature.add",
+        "type": "native_solid",
+        "name": "Saddle blank",
+        "native": {
+          "op": "box"
+        },
+        "p": {
+          "width": 160,
+          "depth": 25,
+          "height": 80
+        },
+        "material": "Rubber"
+      },
+      {
+        "op": "feature.add",
+        "type": "sweep",
+        "name": "Chain pitch envelope",
+        "material": "Chain gold",
+        "p": {
+          "solid": 1,
+          "correction": 1,
+          "contact": 0
+        },
+        "native": {
+          "section": {
+            "frame": [
+              1,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              "front_pitch_radius*cos(chain_upper)",
+              "front_pitch_radius*sin(chain_upper)",
+              0,
+              1
+            ],
+            "entities": [
+              {
+                "kind": "circle",
+                "center": [
+                  0,
+                  0
+                ],
+                "radius": 2
+              }
+            ]
+          },
+          "path": {
+            "entities": [
+              {
+                "kind": "line",
+                "points": [
+                  [
+                    "front_pitch_radius*cos(chain_upper)",
+                    "front_pitch_radius*sin(chain_upper)"
+                  ],
+                  [
+                    "-axle_span+rear_pitch_radius*cos(chain_upper)",
+                    "rear_height+rear_pitch_radius*sin(chain_upper)"
+                  ]
+                ]
+              },
+              {
+                "kind": "arc",
+                "center": [
+                  "-axle_span",
+                  "rear_height"
+                ],
+                "radius": "rear_pitch_radius",
+                "a0": "chain_upper*180/pi",
+                "a1": "chain_lower*180/pi"
+              },
+              {
+                "kind": "line",
+                "points": [
+                  [
+                    "-axle_span+rear_pitch_radius*cos(chain_lower)",
+                    "rear_height+rear_pitch_radius*sin(chain_lower)"
+                  ],
+                  [
+                    "front_pitch_radius*cos(chain_lower)",
+                    "front_pitch_radius*sin(chain_lower)"
+                  ]
+                ]
+              },
+              {
+                "kind": "arc",
+                "center": [
+                  0,
+                  0
+                ],
+                "radius": "front_pitch_radius",
+                "a0": "chain_lower*180/pi",
+                "a1": "(chain_upper+2*pi)*180/pi"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "op": "assembly.add",
+        "name": "Bicycle"
+      },
+      {
+        "op": "assembly.add",
+        "name": "Blue frame",
+        "parent": "Bicycle",
+        "feature": "Blue bicycle frame",
+        "p": {},
+        "fixed": true
+      },
+      {
+        "op": "assembly.add",
+        "name": "Bottom bracket mount",
+        "parent": "Bicycle",
+        "feature": "Axle mount",
+        "p": {
+          "ty": 280,
+          "tz": -40
+        },
+        "fixed": true
+      },
+      {
+        "op": "assembly.add",
+        "name": "Rear axle mount",
+        "parent": "Bicycle",
+        "feature": "Axle mount",
+        "p": {
+          "tx": "-axle_span",
+          "ty": "280+rear_height",
+          "tz": -40
+        },
+        "fixed": true
+      },
+      {
+        "op": "assembly.add",
+        "name": "Front axle mount",
+        "parent": "Bicycle",
+        "feature": "Axle mount",
+        "p": {
+          "tx": 650,
+          "ty": 320,
+          "tz": -40
+        },
+        "fixed": true
+      },
+      {
+        "op": "assembly.add",
+        "name": "Front crank",
+        "parent": "Bicycle",
+        "feature": "Front crank rotor",
+        "p": {
+          "ty": 280,
+          "tz": 40
+        },
+        "fixed": false
+      },
+      {
+        "op": "assembly.add",
+        "name": "Rear sprocket",
+        "parent": "Bicycle",
+        "feature": "Rear cog toothed rotor",
+        "p": {
+          "tx": "-axle_span",
+          "ty": "280+rear_height",
+          "tz": 40
+        },
+        "fixed": false
+      },
+      {
+        "op": "assembly.add",
+        "name": "Rear wheel",
+        "parent": "Bicycle",
+        "feature": "Alloy wheel rotor",
+        "p": {
+          "tx": "-axle_span",
+          "ty": "280+rear_height"
+        },
+        "fixed": false
+      },
+      {
+        "op": "assembly.add",
+        "name": "Front wheel",
+        "parent": "Bicycle",
+        "feature": "Alloy wheel rotor",
+        "p": {
+          "tx": 650,
+          "ty": 320
+        },
+        "fixed": true
+      },
+      {
+        "op": "assembly.add",
+        "name": "Rear tyre",
+        "parent": "Bicycle",
+        "feature": "Wheel rubber ring",
+        "p": {
+          "tx": "-axle_span",
+          "ty": "280+rear_height"
+        },
+        "fixed": true
+      },
+      {
+        "op": "assembly.add",
+        "name": "Front tyre",
+        "parent": "Bicycle",
+        "feature": "Wheel rubber ring",
+        "p": {
+          "tx": 650,
+          "ty": 320
+        },
+        "fixed": true
+      },
+      {
+        "op": "assembly.add",
+        "name": "Chain envelope",
+        "parent": "Bicycle",
+        "feature": "Chain pitch envelope",
+        "p": {
+          "ty": 280,
+          "tz": 43
+        },
+        "fixed": true
+      },
+      {
+        "op": "assembly.add",
+        "name": "Saddle",
+        "parent": "Bicycle",
+        "feature": "Saddle blank",
+        "p": {
+          "tx": -200,
+          "ty": 770,
+          "tz": -40
+        },
+        "fixed": true
+      },
+      {
+        "op": "mate.add",
+        "a": "Bottom bracket mount",
+        "b": "Front crank",
+        "type": "concentric",
+        "reference_a": "Z",
+        "reference_b": "Z"
+      },
+      {
+        "op": "mate.add",
+        "a": "Bottom bracket mount",
+        "b": "Front crank",
+        "type": "distance",
+        "reference_a": "Z",
+        "reference_b": "Z",
+        "value": 80
+      },
+      {
+        "op": "mate.add",
+        "a": "Rear axle mount",
+        "b": "Rear sprocket",
+        "type": "concentric",
+        "reference_a": "Z",
+        "reference_b": "Z"
+      },
+      {
+        "op": "mate.add",
+        "a": "Rear axle mount",
+        "b": "Rear sprocket",
+        "type": "distance",
+        "reference_a": "Z",
+        "reference_b": "Z",
+        "value": 80
+      },
+      {
+        "op": "mate.add",
+        "a": "Rear axle mount",
+        "b": "Rear wheel",
+        "type": "concentric",
+        "reference_a": "Z",
+        "reference_b": "Z"
+      },
+      {
+        "op": "mate.add",
+        "a": "Rear axle mount",
+        "b": "Rear wheel",
+        "type": "distance",
+        "reference_a": "Z",
+        "reference_b": "Z",
+        "value": 40
+      },
+      {
+        "op": "mate.add",
+        "a": "Front crank",
+        "b": "Rear sprocket",
+        "type": "chain",
+        "reference_a": "Z",
+        "reference_b": "Z",
+        "motion": {
+          "teeth_a": "front_teeth",
+          "teeth_b": "rear_teeth"
+        }
+      },
+      {
+        "op": "mate.add",
+        "a": "Rear sprocket",
+        "b": "Rear wheel",
+        "type": "shaft",
+        "reference_a": "Z",
+        "reference_b": "Z"
+      }
+    ]
+  }
+}

@@ -32,6 +32,7 @@ if(WIN32)
   add_custom_command(TARGET ark-studio POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:ark-studio>/assets/ui"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/assets/ui/ark-tool-atlas-v1.png" "$<TARGET_FILE_DIR:ark-studio>/assets/ui/ark-tool-atlas-v1.png"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/assets/ui/ark-wordmark.png" "$<TARGET_FILE_DIR:ark-studio>/assets/ui/ark-wordmark.png"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/assets/ui/ark-domain-atlas-v1.png" "$<TARGET_FILE_DIR:ark-studio>/assets/ui/ark-domain-atlas-v1.png")
 endif()
 if(MINGW)
@@ -223,6 +224,19 @@ if(ARK_WITH_OCCT)
 endif()
 add_test(NAME assembly-mates COMMAND ark-assembly-mate-tests)
 set_tests_properties(assembly-mates PROPERTIES TIMEOUT 60)
+
+add_executable(ark-mechanical-motion-tests tests/mechanical_motion_tests.cpp)
+target_link_libraries(ark-mechanical-motion-tests PRIVATE ark)
+add_test(NAME mechanical-motion COMMAND ark-mechanical-motion-tests)
+set_tests_properties(mechanical-motion PROPERTIES TIMEOUT 60)
+if(ARK_WITH_OCCT)
+  add_executable(ark-bicycle-transmission-tests tests/bicycle_transmission_tests.cpp)
+  target_link_libraries(ark-bicycle-transmission-tests PRIVATE ark-occt ark)
+  target_compile_definitions(ark-bicycle-transmission-tests PRIVATE ARK_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+  add_dependencies(ark-bicycle-transmission-tests ark-occt-worker)
+  add_test(NAME bicycle-transmission COMMAND ark-bicycle-transmission-tests)
+  set_tests_properties(bicycle-transmission PROPERTIES TIMEOUT 120)
+endif()
 
 add_executable(ark-datum-tests tests/datum_tests.cpp)
 target_link_libraries(ark-datum-tests PRIVATE ark)

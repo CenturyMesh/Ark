@@ -1,5 +1,6 @@
 #pragma once
 #include "ark/core.hpp"
+#include "ark/json.hpp"
 #include <unordered_map>
 namespace ark {
 struct AssemblyPattern {
@@ -17,10 +18,11 @@ struct AssemblyNode {
 };
 struct AssemblyMate {
     u64 id=0,a=0,b=0; // Instance IDs, never feature definition IDs.
-    std::string type; // concentric, coincident, contact, distance, angle
+    std::string type; // geometric mates or chain, gear, shaft, rack_pinion, cam
     std::string reference_a="origin",reference_b="origin";
     std::string value="0"; // Signed distance in mm or angle in degrees.
     double fraction_a=0.5,fraction_b=0.5; // Along semantic edge references.
+    std::unordered_map<std::string,std::string> motion; // evaluated expressions, mechanical mates only
 };
 struct AssemblyMateResidual {
     u64 id=0;
@@ -45,4 +47,20 @@ bool resolveAssembly(const Document&,std::vector<AssemblyPlacement>&,std::string
 // Solves a temporary mate and removes it before returning. The document is unchanged.
 bool probeAssemblyMate(Document&,const AssemblyMate& candidate,AssemblyDiagnostics& diagnostics,
                        std::string& error,bool& satisfied);
+bool isMechanicalMate(const std::string& type);
+struct AssemblyMotionRelation {
+    AssemblyMate mate;
+    Mat4 localA,localB;
+    double ratio=1,lift=0,phaseRad=0,target=0,teethA=0,teethB=0;
+    bool translational=false;
+};
+// Build once per document revision, then evaluate repeatedly without copying or
+// recomputing the CAD document. The program owns its evaluated static baseline.
+struct AssemblyMotionProgram {
+    std::vector<AssemblyPlacement> baseline;
+    std::vector<AssemblyMotionRelation> relations,geometricConstraints;
+    std::unordered_map<u64,Mat4> localAxes;
+};
+bool buildAssemblyMotion(const Document&,AssemblyMotionProgram&,std::string& error);
+arkjson::Value inspectAssemblyMotion(const AssemblyMotionProgram&,u64 driver,double speedRpm,double timeSeconds,double angleDegrees=0);
 }

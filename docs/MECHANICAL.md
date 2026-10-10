@@ -1,5 +1,10 @@
 # ARK assemblies, tube programs and GPU computation
 
+Persistent ideal chain, external-gear, shaft, rack/pinion and harmonic-cam
+couplings are described in [mechanical motion](MECHANICAL_MOTION.md).
+`assembly_motion` inspects coupled speeds and instance poses without changing
+the static assembly or revision. See [the bicycle walkthrough](BICYCLE_TRANSMISSION.md).
+
 ![Shared-part assembly](assembly.png)
 
 ## Assemblies

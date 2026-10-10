@@ -30,6 +30,8 @@ private:
     struct Cache { Mesh mesh; MeshReport report; std::unique_ptr<MeshBVH> bvh; };
     std::unordered_map<u64,Cache> cache_;
     u64 cacheRevision_=~u64(0);
+    AssemblyMotionProgram motionProgram_;
+    u64 motionRevision_=~u64(0);
     Cache& meshCache(const arkjson::Value& args);
 };
 Document makeDemoDocument();

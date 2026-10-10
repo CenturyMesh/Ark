@@ -53,7 +53,7 @@ V math(const V& args){
     }
     r.set("units",V::makeStr(op=="angle"?"deg":op=="normalize"?"dimensionless":op=="dot"||op=="cross"?"caller_coordinates_squared":"caller_coordinates"));return r;
 }
-const std::set<std::string> queryTools{"physics_inspect","materials_inspect","doc_info","eval_expr","plane_inspect","sketch_inspect","sketch_diagnose","reference_inspect","native_inspect","assembly_info","geometry_query","math_eval","mesh_inspect","frame_inspect","electronics_inspect","sheet_inspect","suspension_inspect","tube_inspect"};
+const std::set<std::string> queryTools{"physics_inspect","materials_inspect","doc_info","eval_expr","plane_inspect","sketch_inspect","sketch_diagnose","reference_inspect","native_inspect","assembly_info","assembly_motion","geometry_query","math_eval","mesh_inspect","frame_inspect","electronics_inspect","sheet_inspect","suspension_inspect","tube_inspect"};
 V queryValue(AgentSession& s,const V& spec){
     const auto tool=text(spec,"tool");if(!queryTools.count(tool))throw std::runtime_error("Condition requires an allowed read-only query");
     V data=payload(s.call(tool,required(spec,"args")));const std::string path=text(spec,"path");const V* value=&data;size_t start=0;

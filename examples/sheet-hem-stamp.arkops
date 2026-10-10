@@ -1,0 +1,17 @@
+{
+  "tool": "doc_apply",
+  "arguments": {
+    "expected_revision": 0,
+    "commands": [
+      {"op":"param.set","name":"sheet_t","expr":"2"},
+      {"op":"material.set","name":"Satin steel","density":7.85,"appearance":{"base_color":[0.68,0.64,0.56],"metallic":0.65,"roughness":0.38}},
+      {"op":"sheet.create","name":"Hem and emboss bracket","p":{"width":100,"thickness":"sheet_t","k_factor":0.5},"base":{"id":"base","length":160}},
+      {"op":"sheet.flange.add","id":"Hem and emboss bracket","flange":{"id":"back","parent":"base","edge":"u_min","length":55,"inner_radius":4,"angle":90}},
+      {"op":"sheet.hem.add","id":"Hem and emboss bracket","hem":{"id":"safe_return","parent":"back","edge":"u_max","length":12,"inner_radius":3,"direction":1}},
+      {"op":"sheet.stamp.add","id":"Hem and emboss bracket","stamp":{"id":"stiffening_emboss","panel":"base","kind":"circular_emboss","x":85,"y":50,"radius":18,"top_radius":10,"depth":4}},
+      {"op":"sheet.opening.add","id":"Hem and emboss bracket","opening":{"id":"left_mount","panel":"base","kind":"circle","x":25,"y":20,"radius":4}},
+      {"op":"sheet.opening.add","id":"Hem and emboss bracket","opening":{"id":"right_mount","panel":"base","kind":"circle","x":25,"y":80,"radius":4}},
+      {"op":"feature.edit","id":"Hem and emboss bracket","material":"Satin steel","manufacturing":{"route":"sheet_metal"}}
+    ]
+  }
+}

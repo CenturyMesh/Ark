@@ -1,0 +1,8 @@
+{
+  "tool": "assembly_motion",
+  "arguments": {
+    "driver": "Front crank",
+    "speed_rpm": "cadence_rpm",
+    "time_s": 0.125
+  }
+}

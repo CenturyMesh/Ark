@@ -89,6 +89,7 @@ struct Feature {
     int opInt = 0;                                    // Boolean: 0 union 1 cut 2 intersect
     bool suppressed = false;                          // history and parameters stay; recompute skips the body
     std::string material;                             // named document material, empty uses default
+    std::string manufacturingRoute;                   // explicit intent; empty is undeclared
     arkjson::Value appearance;                        // validated partial appearance override
 
     std::string get(const char* k, const char* dflt="") const {
@@ -259,6 +260,7 @@ public:
     UsageLedger usage;
     u64 addFeature(Feature f);                    // returns id
     Feature* find(u64 id);
+    const Feature* find(u64 id) const;
     bool     remove(u64 id);
     bool     reorderMove(u64 id, int delta);      // shift position in history
 
@@ -299,5 +301,15 @@ bool applyAppearancePatch(Appearance& appearance,const arkjson::Value& patch,std
 arkjson::Value appearanceToJson(const Appearance& appearance);
 bool validateMaterial(const Material& material,std::string& error);
 Appearance resolvedAppearance(const Document& document,const Feature& feature);
+
+// Structured geometry ancestry, independent of part labels or appearance.
+struct ManufacturingLineage {
+    std::string geometryRoute="unknown";
+    u64 origin=0; // sheet/frame authoring feature retained through rigid placement
+    bool editableSheet=false;
+};
+std::string featureOperation(const Feature& feature);
+ManufacturingLineage featureManufacturingLineage(const Document& document,const Feature& feature);
+bool validateManufacturingRoutes(const Document& document,std::string& error);
 
 } // namespace ark

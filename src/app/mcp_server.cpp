@@ -24,7 +24,7 @@ int main(int argc,char** argv){
                     if(v->asStr()=="2025-06-18"||v->asStr()=="2024-11-05")protocol=v->str;
                 r.set("protocolVersion",V::makeStr(protocol));caps.set("tools",V::makeObj());r.set("capabilities",caps);
                 info.set("name",V::makeStr("ark"));info.set("version",V::makeStr("0.9.0"));r.set("serverInfo",info);
-                r.set("instructions",V::makeStr("Call agent_onboard first to discover ARK capabilities, current document/revision, modeling contracts and validation limits."));
+                r.set("instructions",V::makeStr("Call agent_onboard first to discover ARK capabilities, current document/revision, modeling contracts and validation limits. Before mechanical authoring, read agent_onboard topic manufacturing and the relevant module topic. Choose each component's manufacturing route explicitly: use sheet.create and sheet operations for fabricated sheet, construction_frame for frame stock, exact native solids for machined parts, and label purchased envelopes. Inspect doc_info detail design for feature roles, sketches and manufacturing origins; a positioned native_solid may originate from a sheet. Verify the module's inspection and export limits before claiming fabrication readiness."));
                 response.set("result",r);
             }else if(method=="ping")response.set("result",V::makeObj());
             else if(method=="tools/list"){V r=V::makeObj();r.set("tools",ark::AgentSession::tools());response.set("result",r);}

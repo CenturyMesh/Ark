@@ -5,6 +5,63 @@
 
 namespace ark {
 
+std::string featureOperation(const Feature& feature){
+    if(feature.type!=FeatureType::NativeSolid)return featureTypeName(feature.type);
+    std::string operation=feature.get("op");
+    if(operation.empty())if(const auto* value=feature.nativeSpec.find("op"))if(value->t==arkjson::Value::Str)operation=value->str;
+    if(operation=="rigid_transform")return "transform";
+    if(operation=="boolean_union")return "union";
+    if(operation=="boolean_cut")return "cut";
+    if(operation=="boolean_common"||operation=="intersect")return "common";
+    if(operation=="pocket"||operation=="slot")return "hole";
+    return operation;
+}
+
+ManufacturingLineage featureManufacturingLineage(const Document& document,const Feature& feature){
+    const Feature* current=&feature;
+    // History is a DAG. Bound traversal also makes read-only inspection safe for
+    // a malformed document that has not passed recomputation yet.
+    for(size_t depth=0;depth<=document.features.size();++depth){
+        if(current->type==FeatureType::SheetMetal)return {"sheet_metal",current->id,true};
+        if(current->type==FeatureType::SourceSheet)return {"sheet_metal",current->id,false};
+        if(current->type==FeatureType::ConstructionFrame)return {"frame",current->id,false};
+        const bool placed=current->type==FeatureType::NativeSolid&&featureOperation(*current)=="transform";
+        if(!placed||current->inputs.size()!=1)break;
+        const Feature* parent=document.find(current->inputs[0]);if(!parent||parent==current)break;
+        current=parent;
+    }
+    if(isMeshModelFeature(current->type)||current->type==FeatureType::ParametricSurface)return {"mesh",0,false};
+    if(isCurveFeature(current->type))return {"curve",0,false};
+    if(current->type==FeatureType::SurfaceFill||current->type==FeatureType::BSplineSurface||current->type==FeatureType::OffsetSurface||
+       (isNativeSurfaceFeature(current->type)&&current->type!=FeatureType::Thicken&&current->num(document.buildEnv(),"solid",1)==0))return {"surface",0,false};
+    if(current->type==FeatureType::PCB)return {"electronics",0,false};
+    if(current->type==FeatureType::CableRoute)return {"routing",0,false};
+    if(current->type==FeatureType::Suspension)return {"kinematic_model",0,false};
+    // A native placement explicitly promotes supported analytic inputs to an
+    // exact B-rep. Unsupported promotion still fails normal recomputation.
+    if(feature.type==FeatureType::NativeSolid&&current!=&feature)return {"solid",0,false};
+    if(current->type==FeatureType::NativeSolid||current->type==FeatureType::Tube||current->type==FeatureType::NotchedTube||current->type==FeatureType::SourceTube||isNativeSurfaceFeature(current->type))return {"solid",0,false};
+    if(current->type==FeatureType::Box||current->type==FeatureType::Cylinder||current->type==FeatureType::Sphere||current->type==FeatureType::Cone||current->type==FeatureType::Torus||current->type==FeatureType::Extrude||current->type==FeatureType::Revolve||current->type==FeatureType::Transform||current->type==FeatureType::Boolean||current->type==FeatureType::LinearPattern||current->type==FeatureType::SketchCut)return {"mesh_solid",0,false};
+    return {};
+}
+bool validateManufacturingRoutes(const Document& document,std::string& error){
+    for(const auto& feature:document.features){
+        const auto& declared=feature.manufacturingRoute;
+        if(declared.empty()||declared=="unspecified"||declared=="purchased")continue;
+        if(declared!="sheet_metal"&&declared!="frame"&&declared!="machined"){
+            error="Feature #"+std::to_string(feature.id)+": unknown manufacturing route";return false;
+        }
+        const auto lineage=featureManufacturingLineage(document,feature);
+        if((declared=="sheet_metal"&&lineage.geometryRoute!="sheet_metal")||
+           (declared=="frame"&&lineage.geometryRoute!="frame")||
+           (declared=="machined"&&lineage.geometryRoute!="solid")){
+            error="Feature #"+std::to_string(feature.id)+": declared manufacturing route '"+declared+"' does not match structured geometry lineage '"+lineage.geometryRoute+"'. Use sheet.create/sheet edits for sheet metal, construction_frame for frames, exact solid operations for machining, or purchased for a supplier envelope.";
+            return false;
+        }
+    }
+    return true;
+}
+
 // ---------------------------------------------------------------------------
 // Expression evaluator ---------------------------------------------------------
 namespace {
@@ -326,6 +383,10 @@ u64 Document::addFeature(Feature f) {
 }
 Feature* Document::find(u64 id) {
     for(auto&f:features) if(f.id==id) return &f;
+    return nullptr;
+}
+const Feature* Document::find(u64 id) const {
+    for(const auto& feature:features)if(feature.id==id)return &feature;
     return nullptr;
 }
 bool Document::remove(u64 id) {

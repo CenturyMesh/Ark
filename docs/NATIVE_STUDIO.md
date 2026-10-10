@@ -1,18 +1,69 @@
 # Native modeling in Studio
 
-Open **Commands** or press **Ctrl+K**. Studio applies the forms to the active
+Use **Search commands** or press **Ctrl+K**. Studio applies the forms to the active
 `.ark` document through the same atomic history used by the agent connection.
 Undo, redo, save, and live MCP see the resulting features. The viewport shows
 tessellated geometry; native STEP export uses the validated OCCT B-rep.
 
-The 3D view uses a light studio background, clay shading, screen-space ambient
-occlusion, and visible feature edges. The toolbar on the bottom of the view
-selects Orbit, Pan, Zoom, Fit, Front, Top, Right, Isometric, edges, occlusion,
-and orthographic projection. The view cube at the upper right snaps to a face.
-Named face views are orthographic; free orbit and Isometric stay perspective.
-`1`–`7` select front, back, top, bottom, right, left, and isometric. These
-choices, including occlusion and edges, are display preferences. They are not
-written into the document and do not change STEP or the agent protocol.
+The top tabs are **Sheet Metal**, **Model**, **Sketch**, **Inspect**, **Tools**,
+and **Manage**. Sheet Metal groups its actions as Create, Modify, Pattern,
+and Output. Model contains exact construction and assembly shortcuts;
+**Model tools** retains native surfaces, frames, suspension, electronics,
+routing, and mesh tools. Tools contains engineering and agent connections.
+Manage contains document, history, parameter, import, and account actions.
+The command search is a native text field: type a term and press Enter to
+open matching commands. Ctrl+K opens the complete grouped command palette.
+
+The left sidebar has **Model**, **Layers**, and **Properties** tabs. Model
+shows a compact nested document tree with feature operations, sketches,
+reference geometry, parameters, and manufacturing views. Its folders and
+sheet feature chevrons expand and collapse. Layers controls per-instance
+visibility and Show all without changing the document revision. Properties
+contains the scrolling inspector. The Assistant opens a separate collapsible
+conversation dock. The camera-oriented Cartesian triad remains at the lower
+right with labeled red X, green Y, and blue Z ends.
+
+Right-click a body, sketch, datum, history feature, or sheet operation for
+its native context menu. Model, Inspect, and View groups use vector icons,
+concise labels, and native keyboard navigation. Sheet nodes reveal their
+flange, return-hem, circular-emboss, and opening entities. Double-click a row
+to edit that stable entity; its context menu also removes it atomically.
+
+The viewport defaults to a dark graphite background and shaded exact display
+meshes. **Shaded** at its upper right selects shaded, edges, wireframe,
+orthographic projection, graphics settings, and named views. Its optional
+view cube can be shown through this menu. The bottom status bar controls the
+grid, optional navigation toolbar, and full screen. Named face views are
+orthographic; free orbit and Isometric remain perspective. Keys 1 to 7 select
+front, back, top, bottom, right, left, and isometric. View choices and display
+preferences do not change STEP or the agent protocol.
+
+## Mechanical relations and motion
+
+Model's Assembly group contains **Mate**, **Relation**, and **Motion**.
+Mate retains the geometric positioning constraints. Relation authors a chain,
+gear, shaft, rack-and-pinion, or harmonic cam relation between instance IDs
+and exact semantic axes. Chain and gear forms accept tooth-count expressions;
+rack forms accept pitch radius and direction; cam forms accept lift and phase.
+Motion chooses a driver instance, speed expression in rpm, and elapsed time.
+The native program is built once per document revision and evaluated per frame.
+Its display transforms preserve the authored geometry and document revision.
+
+The motion panel shows tooth counts, ratio, cadence, rear-wheel rpm, and time.
+**Play / Pause** advances or holds the read-only pose; **Reset** restores the
+formed baseline. For the bicycle example, **Teeth** edits `front_teeth`,
+`rear_teeth`, and `cadence_rpm` together, recomputing native sprocket geometry
+and the motion ratio. Undo restores the previous parameter program. Cadence
+can also be edited through Motion, and individual expressions through the tree.
+This is prescribed kinematics; tooth contact, chain collision, cam contact,
+and dynamics are not qualified by the playback.
+
+For a reproducible pose, use `--motion-driver "Front crank" --motion-rpm 60
+--motion-time 0.125`; `--motion-play` starts live playback. The dedicated
+`--self-test-motion-ui` loads `examples/bicycle-transmission.ark`, checks the
+48/16 ratio at 60 rpm (rear wheel 180 rpm, 135 degrees at 0.125 s), changes
+the rear sprocket to 24 teeth through the native form (120 rpm, 90 degrees),
+verifies undo, and confirms that playback does not change the revision.
 
 ## Sketches and construction datums
 
@@ -120,6 +171,23 @@ The earlier **Create L bend** form remains available. Editing one of those
 authored sheets promotes its two legs to stable base and flange identities.
 An imported source sheet stays read-only.
 
+**Hem** creates an open round 180-degree edge return with a positive inner
+radius, return length, direction +1 or -1, and optional width, offset, and
+K factor. A hem is terminal and cannot own child flanges. **Stamp** creates
+the supported circular emboss with a sharp conical wall, planar plateau,
+and exact constant normal thickness; a negative depth makes a recess.
+A stamped sheet's Flat endpoint is a **nominal flat reference**, not a
+qualified production blank. Intermediate forming strain is not modeled,
+so Unbend / Play is unavailable for stamped sheets and flat STEP/DXF export
+is rejected by the geometry contract.
+
+An exact rigid transform of a sheet retains its original sheet identity.
+Selecting the installed part exposes sheet tools that edit that source
+definition and recompute the placement. **Flat** lays out original previews
+in common part coordinates; **Formed** restores the exact transformed bodies
+and assembly positions without applying a placement twice. These display
+changes do not alter the document revision or authored frames.
+
 **Flat** and **Formed** show the exact validated endpoint meshes. An authored
 sheet also has **Play bends** and a draggable slider. Intermediate frames use
 a display-only neutral-line animation built from the saved panel program;
@@ -140,3 +208,8 @@ For a local UI check, run `ark-studio.exe --shot <temporary-png-path>
 --self-test-native-ui`. These opt-in checks need a Windows OpenGL 3.3 context.
 The native check also writes a flat STEP beside the chosen PNG. The current
 build must contain the Studio UI changes being tested.
+
+`--self-test-context-ui` also checks native menu ownership and labels, exact
+sheet-transform restoration, hem/emboss forms, responsive ribbon bounds,
+Properties scrolling, and Assistant toggling at 1280x800 and 1600x1000. It
+writes context-menu and workspace/dock PNG evidence beside the requested shot.

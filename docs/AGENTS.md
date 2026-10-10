@@ -1,5 +1,15 @@
 # ARK agent protocol
 
+Mechanical motion uses persistent chain, gear, shaft, rack/pinion and harmonic
+cam coupling mates plus read-only `assembly_motion`. Call
+`agent_onboard{topic:"motion"}` and see [mechanical motion](MECHANICAL_MOTION.md).
+
+For mechanical design, call `agent_onboard{topic:"manufacturing"}` before
+authoring. Declare each component's fabrication route and inspect
+`doc_info{detail:"design"}` for operations, dependencies, sketch consumers and
+the originating sheet/frame behind rigid placements. See
+[manufacturing intent and discovery](MANUFACTURING_INTENT.md).
+
 The [engineering update](ENGINEERING_AGENT_V2.md) adds `physics_inspect` and
 `materials_inspect`, required `doc_apply` postconditions and cached
 `doc_preview` candidates. Use `agent_onboard{topic:"physics"}` for physical
@@ -7,7 +17,7 @@ units and model limits. A prepared apply refreshes Studio display buffers while
 reusing the already evaluated document. Elastic material properties save as
 version 20; ordinary density/appearance documents retain their earlier version.
 
-The current API has **53 tools**. `agent_onboard{topic:"automation"}` introduces
+The current API has **54 tools**. `agent_onboard{topic:"automation"}` introduces
 `geometry_query`, `math_eval`, `query_batch`, `doc_preview`, `placement_plan`,
 `pattern_plan` and `design_solve`. Linked curve and hole patterns save as
 document version 19. See [agent automation](AGENT_AUTOMATION.md) for contracts,

@@ -12,6 +12,8 @@ SheetPreview buildSheetPreview(const V& data,double progress){
     if(!std::isfinite(progress)||progress<0||progress>1)throw std::runtime_error("Sheet animation progress must be in [0,1]");
     const auto& program=required(data,"animation"),panels=required(program,"panels"),bends=required(program,"bends");
     if(panels.t!=V::Arr||bends.t!=V::Arr||panels.arr.size()!=bends.arr.size()+1)throw std::runtime_error("Invalid sheet animation tree");
+    const bool stamping=program.find("stamping_present")&&program.find("stamping_present")->b;
+    if(stamping&&progress>0&&progress<1)throw std::runtime_error("Stamped sheet preview supports exact endpoints only; intermediate forming strain is not modeled");
     const double t=num(program,"thickness_mm");SheetPreview result;result.poses.push_back(mat(required(program,"root_pose")));
     // Root's translation interpolates too, preserving exact native flat pose
     // for legacy L documents whose formed origin was at the first bend.
@@ -29,6 +31,7 @@ SheetPreview buildSheetPreview(const V& data,double progress){
         band.addTri(0,2,1);band.addTri(0,3,2);u32 end=4*n;band.addTri(end,end+1,end+2);band.addTri(end,end+2,end+3);band.computeNormals();result.mesh.append(band,result.poses[parent]*h);
     }
     for(size_t i=0;i<panels.arr.size();++i){V mesh=V::makeObj();mesh.set("mesh",required(panels.arr[i],"flat_mesh"));result.mesh.append(nativeResultMesh(mesh),result.poses[i]);}
+    if(stamping){if(progress==1)result.mesh=nativeResultMesh(data);else {V flat=V::makeObj();flat.set("mesh",required(data,"flat_mesh"));result.mesh=nativeResultMesh(flat);}}
     result.mesh.computeNormals();return result;
 }
 V inspectSheetNativeData(const V& data){
@@ -40,20 +43,21 @@ V inspectSheetNativeData(const V& data){
     if(panels.t!=V::Arr||bends.t!=V::Arr||holes.t!=V::Arr||panels.arr.size()!=bends.arr.size()+1)
         throw std::runtime_error("Sheet report has an invalid panel tree");
     V result=V::makeObj();
-    for(const char* key:{"panel_count","bend_count","opening_count","width_mm","thickness_mm","k_factor",
+    for(const char* key:{"panel_count","bend_count","hem_count","stamp_count","opening_count","width_mm","thickness_mm","k_factor",
                          "flat_bounds_mm","bounds_mm","formed_volume_mm3","flat_volume_mm3",
                          "refold_symmetric_difference_mm3","refold_frame_error_mm","volume_tolerance_mm3",
-                         "flat_valid","geometric_material_conservation","manufacturing_authoritative",
+                         "flat_valid","flat_pattern_qualified","flat_pattern_scope","forming_strain_checked","rigid_panel_refold_verified","rigid_panel_pose_symmetric_difference_mm3","stamp_analytic_volume_delta_mm3","geometric_material_conservation","manufacturing_authoritative",
                          "bend_trajectory_collision_checked","k_factor_scope"})
         if(const V* value=source.find(key))result.set(key,*value);
     if(const V* digest=data.find("flat_brep_sha256"))result.set("flat_brep_sha256",*digest);
     V panelRows=V::makeArr();for(const V& panel:panels.arr){V row=V::makeObj();
-        for(const char* key:{"id","length_mm","width_mm","flat_frame","formed_frame"})if(const V* value=panel.find(key))row.set(key,*value);
+        for(const char* key:{"id","kind","length_mm","width_mm","flat_frame","formed_frame"})if(const V* value=panel.find(key))row.set(key,*value);
         panelRows.arr.push_back(std::move(row));}
     V bendRows=V::makeArr();for(const V& bend:bends.arr){V row=V::makeObj();
-        for(const char* key:{"id","parent","edge","angle_deg","direction","inner_radius_mm","k_factor",
-                             "bend_allowance_mm","width_mm","offset_mm","bend_line_flat_mm"})if(const V* value=bend.find(key))row.set(key,*value);
+        for(const char* key:{"id","kind","parent","edge","angle_deg","direction","inner_radius_mm","k_factor",
+                             "bend_allowance_mm","width_mm","offset_mm","bend_line_flat_mm","hem_type","gap_mm"})if(const V* value=bend.find(key))row.set(key,*value);
         bendRows.arr.push_back(std::move(row));}
+    if(const V* stamps=data.find("stamps"))result.set("stamps",*stamps);
     result.set("panels",std::move(panelRows));result.set("bends",std::move(bendRows));result.set("openings",holes);
     return result;
 }

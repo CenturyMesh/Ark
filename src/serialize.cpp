@@ -379,7 +379,9 @@ std::string documentToJson(const Document& doc){
     bool suspensionVersion=false;for(const auto& feature:doc.features)suspensionVersion|=feature.type==FeatureType::Suspension;
     bool patternVersion=false;for(const auto& f:doc.features)if(f.type==FeatureType::NativeSolid){auto op=f.nativeSpec.find("op");patternVersion|=(op&&(op->str=="curve_pattern"||op->str=="hole_pattern"))||f.get("op")=="curve_pattern"||f.get("op")=="hole_pattern";}
     bool physicsVersion=false;for(const auto& m:doc.materials)physicsVersion|=m.physical.t==Value::Obj&&!m.physical.obj.empty();
-    r.set("version",Value::makeNum(physicsVersion?20:patternVersion?19:suspensionVersion?18:generation17?17:modules?16:generation15?15:generation14?14:generation13?13:generation12?12:generation11?11:generation10?10:generation9?9:generation8?8:latest?7:nativeVersion?6:sketchVersion?5:sourceTube?4:notched?3:extended?2:1));
+    bool sheetVersion=false;for(const auto& f:doc.features)sheetVersion|=!f.manufacturingRoute.empty()||(f.type==FeatureType::SheetMetal&&((f.nativeSpec.find("hems")&&!f.nativeSpec.find("hems")->arr.empty())||(f.nativeSpec.find("stamps")&&!f.nativeSpec.find("stamps")->arr.empty())));
+    bool mechanicalVersion=false;for(const auto& mate:doc.mates)mechanicalVersion|=isMechanicalMate(mate.type);
+    r.set("version",Value::makeNum(mechanicalVersion?22:sheetVersion?21:physicsVersion?20:patternVersion?19:suspensionVersion?18:generation17?17:modules?16:generation15?15:generation14?14:generation13?13:generation12?12:generation11?11:generation10?10:generation9?9:generation8?8:latest?7:nativeVersion?6:sketchVersion?5:sourceTube?4:notched?3:extended?2:1));
     r.set("units",Value::makeStr("mm"));
     r.set("next_feature_id",Value::makeNum((double)doc.nextFeatureId_));
 
@@ -431,6 +433,7 @@ std::string documentToJson(const Document& doc){
         v.set("id",Value::makeNum((double)f.id));
         v.set("type",Value::makeStr(featureTypeName(f.type)));
         v.set("name",Value::makeStr(f.name));
+        if(!f.manufacturingRoute.empty()){Value manufacturing=Value::makeObj();manufacturing.set("route",Value::makeStr(f.manufacturingRoute));v.set("manufacturing",manufacturing);}
         v.set("op",Value::makeNum(f.opInt));
         if(f.suppressed)v.set("suppressed",Value::makeBool(true));
         if(!f.material.empty())v.set("material",Value::makeStr(f.material));
@@ -470,7 +473,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     Value v;
     if(!arkjson::parse(json,v)) return fail("malformed JSON");
     if(v.t!=Value::Obj) return fail("root must be object");
-    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0&&ver->num!=3.0&&ver->num!=4.0&&ver->num!=5.0&&ver->num!=6.0&&ver->num!=7.0&&ver->num!=8.0&&ver->num!=9.0&&ver->num!=10.0&&ver->num!=11.0&&ver->num!=12.0&&ver->num!=13.0&&ver->num!=14.0&&ver->num!=15.0&&ver->num!=16.0&&ver->num!=17.0&&ver->num!=18.0&&ver->num!=19.0&&ver->num!=20.0)))
+    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0&&ver->num!=3.0&&ver->num!=4.0&&ver->num!=5.0&&ver->num!=6.0&&ver->num!=7.0&&ver->num!=8.0&&ver->num!=9.0&&ver->num!=10.0&&ver->num!=11.0&&ver->num!=12.0&&ver->num!=13.0&&ver->num!=14.0&&ver->num!=15.0&&ver->num!=16.0&&ver->num!=17.0&&ver->num!=18.0&&ver->num!=19.0&&ver->num!=20.0&&ver->num!=21.0&&ver->num!=22.0)))
         return fail("unsupported document version");
 
     if(auto format=v.find("format");format && format->asStr()!="ark")return fail("unsupported format");
@@ -559,6 +562,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
             std::string tn=fv.find("type")?fv.find("type")->asStr():"";
             if(!featureTypeFromName(tn,nf.type)) return fail("unknown feature type: "+tn);
             nf.name=fv.find("name")?fv.find("name")->asStr():"";
+            if(auto manufacturing=fv.find("manufacturing")){auto route=manufacturing->find("route"),version=v.find("version");if(manufacturing->t!=Value::Obj||!route||route->t!=Value::Str||!version||version->asNum()<21)return fail("Manufacturing route requires version 21 object");if(route->str!="sheet_metal"&&route->str!="machined"&&route->str!="frame"&&route->str!="purchased"&&route->str!="unspecified")return fail("Invalid manufacturing route");nf.manufacturingRoute=route->str;}
             nf.opInt=(int)(fv.find("op")?fv.find("op")->asNum():0);
             if(auto flag=fv.find("suppressed")){if(flag->t!=Value::Bool)return fail("suppressed must be boolean");nf.suppressed=flag->b;}
             if(auto material=fv.find("material")){if(material->t!=Value::Str||material->str.empty())return fail("Feature material must be a name");nf.material=material->str;}
@@ -586,6 +590,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
             if(nf.type==FeatureType::SourceTube){auto version=v.find("version"),data=fv.find("source");if(!version||version->asNum()<4||!data||data->t!=Value::Obj)return fail("source_tube requires version 4 package");nf.sourceData=*data;}
             if(nf.type==FeatureType::SourceSheet){auto version=v.find("version"),data=fv.find("source");if(!version||version->asNum()<6||!data||data->t!=Value::Obj)return fail("source_sheet requires version 6 package");nf.sourceData=*data;}
             if(nf.type==FeatureType::Loft||nf.type==FeatureType::SurfaceFill||nf.type==FeatureType::BSplineSurface||nf.type==FeatureType::Thicken||nf.type==FeatureType::SheetMetal||nf.type==FeatureType::NativeSolid){auto version=v.find("version"),spec=fv.find("native");if(!version||version->asNum()<6||!spec||spec->t!=Value::Obj)return fail("native feature requires version 6 native object");nf.nativeSpec=*spec;}
+            if(nf.type==FeatureType::SheetMetal)for(const char* key:{"hems","stamps"})if(auto rows=nf.nativeSpec.find(key)){auto version=v.find("version");if(rows->t!=Value::Arr)return fail("Sheet hems and stamps must be arrays");if(!rows->arr.empty()&&(!version||version->asNum()<21))return fail("Sheet hems and stamps require document version 21");}
             if(generation17SheetOpening(nf)){auto version=v.find("version");if(!version||version->asNum()<17)return fail("authored sheet slots or windows require document version 17");}
             if(nf.type==FeatureType::Sweep||nf.type==FeatureType::ExtrudeSurface||nf.type==FeatureType::RevolveSurface||nf.type==FeatureType::OffsetSurface||nf.type==FeatureType::Sew){auto version=v.find("version"),spec=fv.find("native");if(!version||version->asNum()<8||!spec||spec->t!=Value::Obj)return fail("extended surface feature requires version 8 native object");nf.nativeSpec=*spec;}
             if(isMeshModelFeature(nf.type)){auto version=v.find("version");if(!version||version->asNum()<8)return fail("mesh modeling features require document version 8");}
@@ -628,7 +633,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     }
     if(auto list=v.find("mates")){
         if(list->t!=Value::Arr||list->arr.size()>256)return fail("Invalid mates array");
-        std::set<u64> seen;try{for(auto& j:list->arr){auto key=j.find("id");if(!key||key->t!=Value::Num||key->num<1||key->num>9007199254740990.||key->num!=std::floor(key->num))return fail("Invalid mate id");AssemblyMate m;m.id=(u64)key->num;if(!seen.insert(m.id).second)return fail("Duplicate mate id");editMate(m,j);nd.nextMateId_=std::max(nd.nextMateId_,m.id+1);nd.mates.push_back(m);}}
+        std::set<u64> seen;try{for(auto& j:list->arr){auto key=j.find("id");if(!key||key->t!=Value::Num||key->num<1||key->num>9007199254740990.||key->num!=std::floor(key->num))return fail("Invalid mate id");AssemblyMate m;m.id=(u64)key->num;if(!seen.insert(m.id).second)return fail("Duplicate mate id");editMate(m,j);if(isMechanicalMate(m.type)){auto version=v.find("version");if(!version||version->asNum()<22)return fail("Mechanical couplings require document version 22");}nd.nextMateId_=std::max(nd.nextMateId_,m.id+1);nd.mates.push_back(m);}}
         catch(const std::exception& e){return fail(e.what());}
     }
     if(auto key=v.find("next_mate_id")){if(key->t!=Value::Num||key->num<(double)nd.nextMateId_||key->num>9007199254740991.||key->num!=std::floor(key->num))return fail("Invalid next mate id");nd.nextMateId_=(u64)key->num;}
@@ -661,6 +666,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     bool supported=false;for(auto& p:nd.planes)supported|=p.support.t==Value::Obj;
     try{if(!supported){for(auto& plane:nd.planes)resolvePlane(nd,plane.name);for(auto& sketch:nd.sketches)resolvePlane(nd,sketch.sk.plane);for(auto& canvas:nd.canvases)resolvePlane(nd,canvas.plane);}}
     catch(const std::exception& e){return fail(e.what());}
+    std::string manufacturingError;if(!validateManufacturingRoutes(nd,manufacturingError))return fail(manufacturingError);
     doc=std::move(nd);
     return true;
 }

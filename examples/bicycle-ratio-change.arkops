@@ -1,0 +1,13 @@
+{
+  "tool": "doc_apply",
+  "arguments": {
+    "expected_revision": 1,
+    "commands": [
+      {
+        "op": "param.set",
+        "name": "rear_teeth",
+        "expr": "24"
+      }
+    ]
+  }
+}

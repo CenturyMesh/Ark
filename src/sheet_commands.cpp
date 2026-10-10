@@ -15,7 +15,7 @@ std::string expression(const V& value){
 }
 std::set<std::string> usedIds(const Feature& feature){
     std::set<std::string> ids{text(required(feature.nativeSpec,"base"),"id")};
-    for(const char* key:{"flanges","openings"})if(const V* rows=feature.nativeSpec.find(key))
+    for(const char* key:{"flanges","hems","openings","stamps"})if(const V* rows=feature.nativeSpec.find(key))
         for(const V& row:rows->arr)if(row.find("id"))ids.insert(text(row,"id"));
     return ids;
 }
@@ -63,11 +63,11 @@ V applySheetCommand(Document& doc,const V& command){
     const auto& key=required(command,"id");if(key.t!=V::Num||key.num<1||key.num>9007199254740990.||key.num!=std::floor(key.num))throw std::runtime_error("Sheet edit needs a feature ID");
     auto f=doc.find((u64)key.num);if(!f||f->type!=FeatureType::SheetMetal)throw std::runtime_error("Select an authored sheet feature");promote(*f);
     if(op=="sheet.base.edit"){V base=required(f->nativeSpec,"base");merge(base,required(command,"values"));result.set("feature_id",key);result.set("entity_id",V::makeStr(text(base,"id")));f->nativeSpec.set("base",base);return result;}
-    const bool flange=op.rfind("sheet.flange.",0)==0,opening=op.rfind("sheet.opening.",0)==0;if(!flange&&!opening)throw std::runtime_error("Unknown sheet edit");
-    const char* listKey=flange?"flanges":"openings";V list=f->nativeSpec.find(listKey)?*f->nativeSpec.find(listKey):V::makeArr();
+    const bool flange=op.rfind("sheet.flange.",0)==0,hem=op.rfind("sheet.hem.",0)==0,stamp=op.rfind("sheet.stamp.",0)==0,opening=op.rfind("sheet.opening.",0)==0;if(!flange&&!hem&&!stamp&&!opening)throw std::runtime_error("Unknown sheet edit");
+    const char* listKey=flange?"flanges":hem?"hems":stamp?"stamps":"openings";V list=f->nativeSpec.find(listKey)?*f->nativeSpec.find(listKey):V::makeArr();
     const auto action=op.substr(op.find_last_of('.')+1);std::string entity;
     if(action=="pattern"){
-        if(flange)throw std::runtime_error("Only sheet openings support a pattern");
+        if(!opening)throw std::runtime_error("Only sheet openings support a pattern");
         const V& count=required(command,"count");
         if(count.t!=V::Num||count.num<2||count.num>32||count.num!=std::floor(count.num))
             throw std::runtime_error("Sheet opening pattern count must be 2..32");
@@ -85,9 +85,9 @@ V applySheetCommand(Document& doc,const V& command){
         f->nativeSpec.set(listKey,list);result.set("feature_id",key);result.set("entity_id",V::makeStr(prefix));result.set("entity_ids",std::move(identities));return result;
     }
     if(action=="add"){
-        V item=required(command,flange?"flange":"opening");if(item.t!=V::Obj)throw std::runtime_error("Sheet entity must be object");
+        V item=required(command,flange?"flange":hem?"hem":stamp?"stamp":"opening");if(item.t!=V::Obj)throw std::runtime_error("Sheet entity must be object");
         if(!item.find("id")){
-            auto used=usedIds(*f);entity=generatedId(*f,flange?"flange_":"opening_",used);item.set("id",V::makeStr(entity));
+            auto used=usedIds(*f);entity=generatedId(*f,flange?"flange_":hem?"hem_":stamp?"stamp_":"opening_",used);item.set("id",V::makeStr(entity));
         }else {entity=text(item,"id");if(usedIds(*f).count(entity))throw std::runtime_error("Duplicate sheet entity identity");}list.arr.push_back(item);
     }else{
         entity=text(command,"entity");auto it=std::find_if(list.arr.begin(),list.arr.end(),[&](const V& row){return row.find("id")&&row.find("id")->asStr()==entity;});if(it==list.arr.end())throw std::runtime_error("Sheet entity not found");
@@ -95,9 +95,9 @@ V applySheetCommand(Document& doc,const V& command){
         else if(action=="remove"){
             if(flange){
                 std::set<std::string> removed{entity};bool changed=true;while(changed){changed=false;for(auto& row:list.arr)if(removed.count(text(row,"parent")))changed|=removed.insert(text(row,"id")).second;}
-                V holes=f->nativeSpec.find("openings")?*f->nativeSpec.find("openings"):V::makeArr();bool dependent=removed.size()>1;for(auto& h:holes.arr)dependent|=removed.count(text(h,"panel"))!=0;
+                V holes=f->nativeSpec.find("openings")?*f->nativeSpec.find("openings"):V::makeArr();bool dependent=removed.size()>1;for(const char* deps:{"hems","stamps"})if(auto rows=f->nativeSpec.find(deps))for(auto& row:rows->arr)dependent|=removed.count(text(row,deps==std::string("hems")?"parent":"panel"))!=0;for(auto& h:holes.arr)dependent|=removed.count(text(h,"panel"))!=0;
                 auto cascade=command.find("cascade");if(cascade&&cascade->t!=V::Bool)throw std::runtime_error("cascade must be boolean");if(dependent&&(!cascade||!cascade->b))throw std::runtime_error("Flange has descendants or openings; remove them explicitly or set cascade:true");
-                list.arr.erase(std::remove_if(list.arr.begin(),list.arr.end(),[&](const V& row){return removed.count(text(row,"id"))!=0;}),list.arr.end());holes.arr.erase(std::remove_if(holes.arr.begin(),holes.arr.end(),[&](const V& row){return removed.count(text(row,"panel"))!=0;}),holes.arr.end());f->nativeSpec.set("openings",holes);
+                list.arr.erase(std::remove_if(list.arr.begin(),list.arr.end(),[&](const V& row){return removed.count(text(row,"id"))!=0;}),list.arr.end());holes.arr.erase(std::remove_if(holes.arr.begin(),holes.arr.end(),[&](const V& row){return removed.count(text(row,"panel"))!=0;}),holes.arr.end());f->nativeSpec.set("openings",holes);for(const char* deps:{"hems","stamps"})if(auto rows=f->nativeSpec.find(deps)){V kept=*rows;kept.arr.erase(std::remove_if(kept.arr.begin(),kept.arr.end(),[&](const V& row){return removed.count(text(row,deps==std::string("hems")?"parent":"panel"))!=0;}),kept.arr.end());f->nativeSpec.set(deps,kept);}
             }else list.arr.erase(it);
         }else throw std::runtime_error("Unknown sheet entity edit");
     }

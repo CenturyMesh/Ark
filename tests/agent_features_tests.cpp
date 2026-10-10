@@ -1,6 +1,7 @@
 #include "ark/agent.hpp"
 #include "ark/sketch.hpp"
 #include "ark/native_backend.hpp"
+#include "ark/io.hpp"
 #include <iostream>
 #include <stdexcept>
 #include <chrono>
@@ -12,7 +13,7 @@ V accepted(V r){if(r.find("isError")->b)throw std::runtime_error(r.find("structu
 V call(AgentSession& s,const char* name,const char* json){return accepted(s.call(name,parse(json)));}
 void close(double a,double b,double tol,const char* reason){check(std::abs(a-b)<=tol,reason);}
 void testMath(){AgentSession s;
-    auto tools=AgentSession::tools(),full=AgentSession::tools(true);check(tools.arr.size()==53,"tool discovery");check(tools.dump().size()<full.dump().size(),"compact default discovery");std::cout<<"tool_schema_bytes="<<tools.dump().size()<<" detailed_schema_bytes="<<full.dump().size()<<"\n";
+    auto tools=AgentSession::tools(),full=AgentSession::tools(true);check(tools.arr.size()==54,"tool discovery");check(tools.dump().size()<full.dump().size(),"compact default discovery");std::cout<<"tool_schema_bytes="<<tools.dump().size()<<" detailed_schema_bytes="<<full.dump().size()<<"\n";
     check(call(s,"agent_onboard",R"({"topic":"automation"})").find("command_reference"),"detailed contract remains discoverable");
     close(call(s,"math_eval",R"({"op":"convert","value":2,"from":"in","to":"mm"})").find("value")->num,50.8,1e-12,"inch conversion");
     close(call(s,"math_eval",R"({"op":"angle","a":[1,0,0],"b":[0,1,0]})").find("value")->num,90,1e-12,"vector angle");
@@ -51,7 +52,43 @@ void testPlacementFrames(){
     std::vector<AssemblyPlacement> placements;std::string error;check(resolveAssembly(s.document,placements,error),"nested placement resolve");for(const auto& p:placements)if(p.name=="Child")for(size_t i=0;i<16;++i)close(p.world.m[i],calculated.find("frame")->arr[i].num,1e-8,"nested local/world conversion");
     auto plane=call(s,"placement_plan",R"({"expected_revision":2,"node":"Child","target":{"plane":"XY"}})");check(plane.find("valid")->b,"datum target placement");
 }
+void testManufacturingDiscovery(){
+    AgentSession s;
+    Feature blank;blank.type=FeatureType::SheetMetal;blank.name="Uninformative name";blank.manufacturingRoute="sheet_metal";const auto origin=s.document.addFeature(blank);
+    Feature placed;placed.type=FeatureType::NativeSolid;placed.name="Just a solid";placed.inputs={origin};placed.nativeSpec=parse(R"({"op":"transform"})");const auto installed=s.document.addFeature(placed);
+    Feature cut;cut.type=FeatureType::NativeSolid;cut.name="Sheet label cannot prove sheet intent";cut.inputs={installed};cut.nativeSpec=parse(R"({"op":"hole"})");s.document.addFeature(cut);
+    const auto lineage=featureManufacturingLineage(s.document,*s.document.find(installed));check(lineage.origin==origin&&lineage.editableSheet,"rigid placement retains authoring lineage");
+    auto design=call(s,"doc_info",R"({"detail":"design"})");const auto& rows=design.find("features")->arr;
+    check(rows[1].find("operation")->str=="transform"&&rows[1].find("inputs")->arr[0].num==origin,"operation and dependency discovery");
+    check(rows[1].find("manufacturing")->find("sheet_origin")->num==origin,"placed sheet is discoverable without name inference");
+    check(!rows[2].find("manufacturing")->find("sheet_origin"),"generic hole terminates editable blank lineage");
+    s.document.features[2].manufacturingRoute="sheet_metal";std::string error;check(!validateManufacturingRoutes(s.document,error),"misdeclared sheet lineage rejects");
+    s.document.features[2].manufacturingRoute="purchased";check(validateManufacturingRoutes(s.document,error),"supplier envelope is explicit intent");
+    Feature sampled;sampled.type=FeatureType::Box;sampled.manufacturingRoute="machined";s.document.addFeature(sampled);check(!validateManufacturingRoutes(s.document,error),"machined route rejects legacy display-only solids");s.document.features.pop_back();
+    Document direct;direct.addFeature(sampled);direct.recompute();check(!direct.parameterError.empty()&&direct.evalBodies.empty(),"direct C++ recompute enforces manufacturing intent before evaluating a legacy solid");
+    direct.features[0].manufacturingRoute="purchased";direct.recompute();check(direct.parameterError.empty()&&!direct.lastResults.empty()&&direct.lastResults[0].ok&&!direct.evalBodies.empty(),"correcting direct C++ intent recovers normal recomputation");
+    placed.p["op"]="rigid_transform";placed.nativeSpec=parse(R"({"op":"box"})");check(featureOperation(placed)=="transform","p.op takes authority and rigid_transform alias matches native evaluator");
+    Document restored;check(documentFromJson(documentToJson(s.document),restored,&error),"manufacturing intent persistence");check(restored.features[0].manufacturingRoute=="sheet_metal"&&restored.features[2].manufacturingRoute=="purchased","routes survive persistence");
+    call(s,"agent_onboard",R"({"topic":"manufacturing"})");
+    AgentSession rejected;const auto revision=rejected.revision;
+    auto invalid=rejected.call("doc_apply",parse(R"({"commands":[{"op":"param.set","name":"uncommitted","expr":20},{"op":"feature.add","type":"box","name":"Generic blank","manufacturing":{"route":"sheet_metal"}}]})"));
+    check(invalid.find("isError")->b&&rejected.revision==revision&&rejected.document.features.empty()&&rejected.document.params.empty(),"route mismatch rolls back entire modeling batch");
+    auto invalidPreview=call(rejected,"doc_preview",R"({"expected_revision":0,"commands":[{"op":"feature.add","type":"box","manufacturing":{"route":"machined"}}]})");
+    check(!invalidPreview.find("valid")->b&&!invalidPreview.find("candidate_id")&&rejected.revision==revision&&rejected.document.features.empty(),"invalid manufacturing route cannot create a cached candidate");
+    auto validPreview=call(rejected,"doc_preview",R"({"expected_revision":0,"commands":[{"op":"feature.add","type":"box","manufacturing":{"route":"purchased"}}]})");
+    check(validPreview.find("valid")->b&&validPreview.find("candidate_cached")->b,"valid explicit supplier envelope can be prepared");
+    auto committed=accepted(rejected.call("doc_apply",*validPreview.find("apply")));
+    check(committed.find("applied_prepared")->b&&rejected.document.features[0].manufacturingRoute=="purchased","prepared commit retains validated intent without re-evaluation");
+}
 #ifdef ARK_AGENT_NATIVE_TESTS
+void testSheetPlacementIntent(){
+    AgentSession s;
+    call(s,"doc_apply",R"({"commands":[{"op":"sheet.create","name":"Blank","p":{"width":30,"thickness":1,"k_factor":0.5},"base":{"id":"panel","length":50}},{"op":"feature.edit","id":"Blank","manufacturing":{"route":"sheet_metal"}},{"op":"feature.add","type":"native_solid","name":"Installed","inputs":["Blank"],"native":{"op":"transform"},"p":{"tx":100,"rz":30},"manufacturing":{"route":"sheet_metal"}}]})");
+    auto report=call(s,"sheet_inspect",R"({"id":"Installed"})");check(report.find("sheet_origin")->num==s.document.features[0].id&&report.find("local_authoring_coordinates")->b,"sheet inspection resolves installed placement to authoring geometry");
+    auto saved=documentToJson(s.document);auto revision=s.revision;
+    auto invalid=s.call("doc_apply",parse(R"({"expected_revision":1,"commands":[{"op":"param.set","name":"bad","expr":99},{"op":"feature.add","type":"native_solid","name":"False sheet","native":{"op":"box"},"p":{"width":10,"depth":10,"height":1},"manufacturing":{"route":"sheet_metal"}}]})"));
+    check(invalid.find("isError")->b&&s.revision==revision&&documentToJson(s.document)==saved,"invalid fabrication declaration preserves evaluated sheet and revision");
+}
 void testCurvedQueries(){
     AgentSession s;call(s,"doc_apply",R"({"commands":[{"op":"sketch.set","name":"Ring","sketch":{"entities":[{"kind":"circle","name":"rim","dof":[0,0,10]}]}},{"op":"feature.add","type":"native_solid","name":"Round","native":{"op":"extrude"},"p":{"sketch":"Ring","depth":2}}]})");
     auto report=call(s,"geometry_query",R"({"id":"Round","queries":[{"action":"curve","reference":"edge.start.rim","count":3},{"action":"continuity","a":"edge.start.rim","b":"edge.start.rim","fraction_a":0,"fraction_b":1},{"action":"references","filter":{"kind":"face","surface":"cylinder","radius_mm":10,"axis":[0,0,1],"coaxial_origin":[0,0,7]},"unique":true}]})");
@@ -80,9 +117,9 @@ void testNative(){AgentSession s;auto started=std::chrono::steady_clock::now();
     auto elapsed=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();std::cout<<"native workflow elapsed_ms="<<elapsed<<" solve_evaluations="<<solve.find("evaluations")->num<<"\n";std::cout<<"worker_statistics="<<nativeKernelInfo().dump()<<"\n";
 }
 #endif
-int main(){try{testMath();testTransactions();testDerivatives();testPlacementFrames();
+int main(){try{testMath();testTransactions();testDerivatives();testPlacementFrames();testManufacturingDiscovery();
 #ifdef ARK_AGENT_NATIVE_TESTS
 testNative();
-testCurvedQueries();
+testCurvedQueries();testSheetPlacementIntent();
 #endif
 std::cout<<"Agent features passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

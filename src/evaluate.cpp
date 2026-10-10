@@ -326,6 +326,8 @@ const std::vector<FeatureResult>& Document::recompute() {
     lastResults.clear();
     evalBodies.clear();
     refreshParams();
+    std::string manufacturingError;
+    if(!validateManufacturingRoutes(*this,manufacturingError))parameterError=manufacturingError;
     ExprEnv env=buildEnv();
     for(auto& ns:sketches){
         evaluateSketch(ns,env);
