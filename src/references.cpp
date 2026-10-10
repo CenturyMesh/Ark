@@ -31,7 +31,16 @@ GeometryReference resolveGeometryReference(const Document& document, u64 feature
     arkjson::Value worker = arkjson::Value::makeObj();
     worker.set("operation", arkjson::Value::makeStr("reference_frame"));
     worker.set("request", std::move(request));
-    auto response = nativeWorkerRequest(worker);
+    const std::string topologyIdentity=topology->dump();
+    const std::string sample=name+":"+arkjson::Value::makeNum(fraction).dump();
+    size_t identityBytes=brep->str.size()+topologyIdentity.size();
+    for(const auto& item:document.referenceFrameCache)if(item.first!=feature)identityBytes+=item.second.brep.size()+item.second.topology.size();
+    if(identityBytes>16u*1024u*1024u||(document.referenceFrameCache.size()>=32&&!document.referenceFrameCache.count(feature)))document.referenceFrameCache.clear();
+    const bool cacheable=brep->str.size()+topologyIdentity.size()<=16u*1024u*1024u;
+    auto& cache=document.referenceFrameCache[feature];
+    if(cache.brep!=brep->str||cache.topology!=topologyIdentity){cache={};if(cacheable){cache.brep=brep->str;cache.topology=topologyIdentity;}}
+    auto existing=cache.frames.find(sample);
+    auto response=existing!=cache.frames.end()?existing->second:nativeWorkerRequest(worker);
     const auto* frame = response.find("frame");
     const auto* kind = response.find("kind");
     if (!frame || frame->t != arkjson::Value::Arr || frame->arr.size() != 16 ||
@@ -49,6 +58,7 @@ GeometryReference resolveGeometryReference(const Document& document, u64 feature
             throw std::runtime_error("Invalid native reference radius");
         result.radius = radius->num;
     }
+    if(cacheable&&existing==cache.frames.end()){if(cache.frames.size()>=64)cache.frames.clear();cache.frames[sample]=response;}
     return result;
 }
 }

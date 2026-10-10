@@ -2,7 +2,7 @@
 //
 // Method: parametrize all sketch DOFs into x; each constraint contributes a
 // scalar residual r_i(x). Solve  min ||r(x)||^2  with damped least squares
-// (Levenberg-Marquardt), numeric central-difference Jacobian, backtracking on
+// (Levenberg-Marquardt), forward-mode differentiated Jacobian, backtracking on
 // failure. Small dense systems solved by Gaussian elimination with partial
 // pivoting. This is the standard approach in production CAD solvers
 // (cf. "A Geometric Constraint Solver" v5, and Siemens/DS literature).
@@ -12,15 +12,28 @@
 namespace ark {
 
 namespace {
+// A directional dual number. Each residual only touches its own entities;
+// derivatives do not perturb geometry or depend on a finite-difference step.
+struct Dual {double v=0,d=0;Dual()=default;Dual(double value,double derivative=0):v(value),d(derivative){}};
+Dual operator+(Dual a,Dual b){return {a.v+b.v,a.d+b.d};}
+Dual operator-(Dual a,Dual b){return {a.v-b.v,a.d-b.d};}
+Dual operator*(Dual a,Dual b){return {a.v*b.v,a.d*b.v+a.v*b.d};}
+Dual operator/(Dual a,Dual b){return {a.v/b.v,(a.d*b.v-a.v*b.d)/(b.v*b.v)};}
+Dual root(Dual a){double v=std::sqrt(a.v);return {v,v>1e-15?a.d/(2*v):0};}
+Dual absolute(Dual a){return {std::abs(a.v),a.v>0?a.d:a.v<0?-a.d:0};}
+Dual angle(Dual y,Dual x){double n=x.v*x.v+y.v*y.v;return {std::atan2(y.v,x.v),n>1e-24?(x.v*y.d-y.v*x.d)/n:0};}
+struct DPoint {Dual x,y;DPoint operator-(DPoint b)const{return {x-b.x,y-b.y};}Dual length()const{return root(x*x+y*y);}Dual cross(DPoint b)const{return x*b.y-y*b.x;}Dual dot(DPoint b)const{return x*b.x+y*b.y;}DPoint divided(Dual n)const{return {x/n,y/n};}};
 
 struct Problem {
     const Sketch& sk;
     std::vector<f64> x;
     std::vector<size_t> free;
     int n=0;
+    std::vector<size_t> offsets;
 
     explicit Problem(const Sketch& s):sk(s){
         for(auto&e:s.ents){
+            offsets.push_back(x.size());
             const bool driven=e.kind==SketchEnt::Project||e.kind==SketchEnt::Offset;
             for(size_t i=0;i<e.dof.size();++i){
                 if(!driven&&(i>=e.expressions.size()||e.expressions[i].empty()))free.push_back(x.size());
@@ -74,9 +87,30 @@ struct Problem {
         return x[o+2];
     }
     size_t offsetOf(int ent) const {
-        size_t o=0;
-        for(int i=0;i<ent;++i) o+=sk.ents[(size_t)i].dof.size();
-        return o;
+        return offsets[(size_t)ent];
+    }
+    std::vector<std::vector<double>> jacobian()const{
+        std::vector<std::vector<double>> columns;
+        for(size_t freeSlot:free){
+            auto value=[&](size_t i){return Dual(x[i],i==freeSlot?1:0);};
+            auto pt=[&](int ent,int slot){const auto& e=sk.ents[(size_t)ent];size_t o=offsetOf(ent);if(e.kind==SketchEnt::Line||e.kind==SketchEnt::Spline)o+=2*(size_t)slot;else if(e.kind==SketchEnt::Wire||e.kind==SketchEnt::Project||e.kind==SketchEnt::Offset)o+=e.segments.empty()?2*(size_t)slot:(size_t)sketchVertexDof(e,slot);return DPoint{value(o),value(o+1)};};
+            auto rad=[&](int ent){return value(offsetOf(ent)+2);};
+            std::vector<double> col;auto push=[&](Dual a){col.push_back(a.d);};
+            for(const auto& c:sk.cons){switch(c.type){
+                case SketchCon::FixedX:push(pt(c.a,c.pa).x-c.val);break;
+                case SketchCon::FixedY:push(pt(c.a,c.pa).y-c.val);break;
+                case SketchCon::Fixed:{auto p=pt(c.a,c.pa);push(p.x-c.val);push(p.y-c.val2);break;}
+                case SketchCon::DistPP:push((pt(c.a,c.pa)-pt(c.b,c.pb)).length()-c.val);break;
+                case SketchCon::Horizontal:push(pt(c.a,0).y-pt(c.a,1).y);break;
+                case SketchCon::Vertical:push(pt(c.a,0).x-pt(c.a,1).x);break;
+                case SketchCon::Parallel:
+                case SketchCon::Perpendicular:{auto a=pt(c.a,1)-pt(c.a,0),b=pt(c.b,1)-pt(c.b,0);auto la=a.length(),lb=b.length();if(la.v<1e-12||lb.v<1e-12){push(0);break;}a=a.divided(la);b=b.divided(lb);push(c.type==SketchCon::Parallel?a.cross(b):a.dot(b));break;}
+                case SketchCon::Radius:push(rad(c.a)-c.val);break;
+                case SketchCon::Coincident:{auto delta=pt(c.a,c.pa)-pt(c.b,c.pb);push(delta.x);push(delta.y);break;}
+                case SketchCon::AngleLL:{auto a=pt(c.a,1)-pt(c.a,0),b=pt(c.b,1)-pt(c.b,0);push(angle(a.y,a.x)-angle(b.y,b.x));break;}
+                case SketchCon::Tangent:{bool aLine=sk.ents[(size_t)c.a].kind==SketchEnt::Line;int line=aLine?c.a:c.b,curve=aLine?c.b:c.a;auto p=pt(line,0),d=pt(line,1)-p,center=pt(curve,0);auto length=d.length();push((length.v<1e-12?(center-p).length():absolute((center-p).cross(d))/length)-rad(curve));break;}
+            }}columns.push_back(std::move(col));
+        }return columns;
     }
 
     // residual vector
@@ -191,6 +225,15 @@ bool solveDense(std::vector<f64>& A,std::vector<f64>& b,int n){
     }
     return true;
 }
+bool solveIndependentBlocks(std::vector<double>& matrix,std::vector<double>& rhs,int n){
+    std::vector<bool> seen((size_t)n,false);
+    for(int seed=0;seed<n;++seed){if(seen[(size_t)seed])continue;std::vector<int> component{seed};seen[(size_t)seed]=true;
+        for(size_t k=0;k<component.size();++k)for(int j=0;j<n;++j)if(!seen[(size_t)j]&&matrix[(size_t)component[k]*n+j]!=0){seen[(size_t)j]=true;component.push_back(j);}
+        int size=(int)component.size();std::vector<double> block((size_t)size*size),b((size_t)size);
+        for(int i=0;i<size;++i){b[(size_t)i]=rhs[(size_t)component[(size_t)i]];for(int j=0;j<size;++j)block[(size_t)i*size+j]=matrix[(size_t)component[(size_t)i]*n+component[(size_t)j]];}
+        if(!solveDense(block,b,size))return false;for(int i=0;i<size;++i)rhs[(size_t)component[(size_t)i]]=b[(size_t)i];
+    }return true;
+}
 
 // The same row ordering is used for each constraint's rank contribution. A
 // second orthogonalization pass limits spurious rank gains from roundoff.
@@ -220,14 +263,8 @@ size_t residualCount(SketchCon::Type type){
 
 std::vector<std::vector<f64>> normalizedJacobianRows(Problem& p,const std::vector<f64>& residual){
     std::vector<std::vector<f64>> rows(residual.size(),std::vector<f64>((size_t)p.n,0));
-    for(int j=0;j<p.n;++j){
-        size_t slot=p.free[(size_t)j];f64 old=p.x[slot],h=1e-7*(1.+std::abs(old));
-        p.x[slot]=old+h;std::vector<f64> plus;p.residuals(plus);
-        p.x[slot]=old-h;std::vector<f64> minus;p.residuals(minus);
-        p.x[slot]=old;
-        if(plus.size()!=residual.size()||minus.size()!=residual.size())throw std::runtime_error("Sketch residual count changed during diagnosis");
-        for(size_t i=0;i<residual.size();++i)rows[i][(size_t)j]=(plus[i]-minus[i])/(2*h);
-    }
+    const auto columns=p.jacobian();
+    for(int j=0;j<p.n;++j)for(size_t i=0;i<residual.size();++i)rows[i][(size_t)j]=columns[(size_t)j][i];
     for(auto& row:rows){
         f64 scale=0;for(auto v:row)scale=std::max(scale,std::abs(v));
         if(std::isfinite(scale)&&scale>1e-12)for(auto& v:row)v/=scale;
@@ -238,6 +275,8 @@ std::vector<std::vector<f64>> normalizedJacobianRows(Problem& p,const std::vecto
 
 } // namespace
 
+SketchLinearization linearizeSketch(const Sketch& sketch){Problem p(sketch);SketchLinearization out;p.residuals(out.residuals);out.freeSlots=p.free;out.jacobianColumns=p.jacobian();return out;}
+
 f64 solveSketch(Sketch& sk, int* itersOut, int maxIters, SketchDiagnostics* diagnostics) {
     Problem P(sk);
     int n=P.n;
@@ -246,22 +285,9 @@ f64 solveSketch(Sketch& sk, int* itersOut, int maxIters, SketchDiagnostics* diag
     static thread_local std::vector<std::vector<f64>> Jcols;
 
     auto buildJ = [&](std::vector<f64>& rOut)->size_t {
-        // central-difference numeric Jacobian, one column per DOF
         P.residuals(rOut);
         size_t m=rOut.size();
-        Jcols.assign((size_t)n,{});
-        for(int j=0;j<n;++j){
-            size_t slot=P.free[(size_t)j];
-            f64 h=1e-7*(1.0+std::fabs(P.x[slot]));
-            f64 old=P.x[slot];
-            P.x[slot]=old+h; P.residuals(r); std::vector<f64> rp=r;
-            P.x[slot]=old-h; P.residuals(r); std::vector<f64>& rm=r;
-            P.x[slot]=old;
-            m=rm.size();
-            Jcols[(size_t)j].resize(m);
-            for(size_t i=0;i<m;++i)
-                Jcols[(size_t)j][i]=(rp[i]-rm[i])/(2*h);
-        }
+        Jcols=P.jacobian();
         return m;
     };
 
@@ -281,16 +307,10 @@ f64 solveSketch(Sketch& sk, int* itersOut, int maxIters, SketchDiagnostics* diag
         // normal equations  H = J^T J ,  g = J^T r
         std::vector<f64> JtJ((size_t)n*n,0.0);
         g.assign((size_t)n,0.0);
-        for(int a2=0;a2<n;++a2)
-            for(int b=a2;b<n;++b){
-                f64 s=0;
-                const auto&ca=Jcols[(size_t)a2]; const auto&cb=Jcols[(size_t)b];
-                for(size_t i=0;i<m;++i) s+=ca[i]*cb[i];
-                JtJ[(size_t)a2*n+b]=JtJ[(size_t)b*n+a2]=s;
-            }
-        for(size_t i=0;i<m;++i)
-            for(int j=0;j<n;++j)
-                g[(size_t)j]+=Jcols[(size_t)j][i]*r0[i];
+        for(size_t i=0;i<m;++i){
+            std::vector<int> active;for(int j=0;j<n;++j)if(Jcols[(size_t)j][i]!=0)active.push_back(j);
+            for(int a:active){g[(size_t)a]+=Jcols[(size_t)a][i]*r0[i];for(int b:active)JtJ[(size_t)a*n+b]+=Jcols[(size_t)a][i]*Jcols[(size_t)b][i];}
+        }
 
         bool improved=false;
         for(int damp=0;damp<8 && !improved;++damp){
@@ -301,7 +321,7 @@ f64 solveSketch(Sketch& sk, int* itersOut, int maxIters, SketchDiagnostics* diag
             for(int j=0;j<n;++j)
                 Hm[(size_t)j*n+j]=Hm[(size_t)j*n+j]*(1.0+lambda)+1e-12*(1.0+c);
             dx=g;
-            if(!solveDense(Hm,dx,n)) { lambda*=10; continue; }
+            if(!solveIndependentBlocks(Hm,dx,n)) { lambda*=10; continue; }
             std::vector<f64> xn=P.x;
             for(int j=0;j<n;++j) xn[P.free[(size_t)j]]-=dx[(size_t)j];
             auto old=P.x; P.x=xn;
@@ -379,6 +399,7 @@ arkjson::Value diagnoseSketch(const Sketch& sketch,double residualTolerance){
     report.set("locally_redundant_constraints",V::makeNum(redundant));
     report.set("constraint_status",V::makeStr(violated?"conflicting":basis.size()<(size_t)problem.n?"underconstrained":"locally_fully_constrained"));
     report.set("rank_scope",V::makeStr("local_numeric_jacobian_at_current_coordinates"));
+    report.set("jacobian_method",V::makeStr("forward_automatic_differentiation"));
     report.set("conflict_scope",V::makeStr("violated residuals after attempted solve; not a minimal conflict set"));
     report.set("constraints",std::move(items));
     return report;

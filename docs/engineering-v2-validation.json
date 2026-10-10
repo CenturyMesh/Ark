@@ -1,0 +1,122 @@
+{
+  "date": "2026-10-10",
+  "branch": "main",
+  "base_commit": "f59ae92aeb7eb5bb4c6521f597bd48b9aabec570",
+  "working_tree_changes": true,
+  "native_ctest": {
+    "passed": 37,
+    "total": 37
+  },
+  "core_ctest": {
+    "passed": 25,
+    "total": 25
+  },
+  "studio_checks": {
+    "render_1600x1000": 0,
+    "render_1180x800": 0,
+    "context": 0,
+    "engineering": 0,
+    "native": 0,
+    "live_mcp_prepared_edit_save_undo_new_disconnect": 0,
+    "suspension_ui": 0
+  },
+  "scenario": "8 independent box-transform-hole branches, 24 features; CPU budget 8, OCCT threads 1, feature lanes 1 versus 4. Each warm metric is a median of three edits.",
+  "runs": [
+    {
+      "serial_ms": 218.388,
+      "parallel_ms": 273.787,
+      "warm_serial_ms": 201.726,
+      "warm_parallel_ms": 89.6236,
+      "peak": 4.0,
+      "evaluated_after_edit": 3.0,
+      "reused": 21.0
+    },
+    {
+      "serial_ms": 327.856,
+      "parallel_ms": 226.47,
+      "warm_serial_ms": 209.465,
+      "warm_parallel_ms": 92.6035,
+      "peak": 4.0,
+      "evaluated_after_edit": 3.0,
+      "reused": 21.0
+    },
+    {
+      "serial_ms": 230.141,
+      "parallel_ms": 277.727,
+      "warm_serial_ms": 210.237,
+      "warm_parallel_ms": 108.884,
+      "peak": 4.0,
+      "evaluated_after_edit": 3.0,
+      "reused": 21.0
+    }
+  ],
+  "llm_tokens_measured": false,
+  "prepared_commit_native_calls": 0,
+  "prepared_commit_and_cached_mate_refresh_native_calls": 0,
+  "unchanged_branches_reused": 21,
+  "changed_branch_evaluated": 3,
+  "notes": [
+    "Cold parallel execution includes additional worker startup and can be slower.",
+    "Measured warm speedup is specific to this workload, not all CAD operations.",
+    "Physics is rigid-body balance with optional uniform axial elasticity; no contact dynamics or FEA."
+  ],
+  "cold_serial_median_ms": 230.141,
+  "cold_parallel_median_ms": 273.787,
+  "warm_serial_median_ms": 209.465,
+  "warm_parallel_median_ms": 92.6035,
+  "warm_speedup": 2.261955541637195,
+  "source_sha256": {
+    "CMakeLists.txt": "296d6e5d7ac4b559aa98c923645ad02dcf90c705fd988582cf6a00e2f50a650c",
+    "include/ark/agent.hpp": "55be396a5fc168b77c949fbf1e5d4f6e2305fb3cde364396de4e0d9b1f54b9e4",
+    "include/ark/agent_features.hpp": "358443306094f1cf02afff2742e45eb1767cac43805cb05e9360cca9d2c7cba8",
+    "include/ark/brep.hpp": "c6b2aac740ba8c3b602063cfc5a3e5babd3a50efc425cafaed7c5dfb9c3898d5",
+    "include/ark/core.hpp": "11bc028f0c79dbfa225833023f67c5ab827f72ecceebd5a46672ef61bace278f",
+    "include/ark/model.hpp": "8cedcaee86f66881c994091665d15f62bb529b5ff00bddb209f425ea31c99e1c",
+    "include/ark/native_backend.hpp": "4469a7318191edd6f5db0dfc8591b54677b0c3925ebe3dc9762eaf76e402261a",
+    "include/ark/occt_solid.hpp": "508ef1c00820b20f17baec1dfc762fedc43ac77ea66378ca9cba6e0f6a769442",
+    "include/ark/physics.hpp": "02d6e7fe77a648d5a9b425f27c2afeed7aca0e7c85c656cda351e8a4333297f6",
+    "include/ark/sketch.hpp": "fbf295ef843b746c768d884035afc9a989db100e53c91dd497a0d091508789b6",
+    "src/agent.cpp": "be9f05ef1e9b0fa3487f6fcdb8630d50b7160239679daaf9e30b72687a953797",
+    "src/agent_features.cpp": "8ac2de64e28f5387b0669ff70ac4e15920b1def612c37d00afaaf6cfe3354c3d",
+    "src/agent_transactions.cpp": "bf31478253e82a5f79fac1bde502a857fdf2e616c2367c170c328077a2d591ac",
+    "src/app/occt_worker.cpp": "d3143a193075b40d9317dc37ae37b46c8c58c4d18390d82f0ca44b3067792eb7",
+    "src/brep.cpp": "d4bb28fbd7b30310aa34a5aed985826e416a481283e554ecddf832bcc58891a5",
+    "src/core.cpp": "01394dab5d8f4742addd24162d42aa3a9f4765e2da95c012954815ba36d9efad",
+    "src/evaluate.cpp": "9872b2316d4be87b441c834596642ed872086cc6e97369a9f95e04586d05b71e",
+    "src/model.cpp": "75765edd2dfb44fae503c7af90e1451060a9ff2662bf9e052ff91948d6c8c790",
+    "src/native_features.cpp": "7d4aad04621158c38ccd7f032890ab96727b5e2f804d0c09c28ef48b5148eff5",
+    "src/occt/frame_modeling.cpp": "3287ed8dd2f77878139d7c0cdd41970095f52847abb295d580c074aa84ad0f3b",
+    "src/occt/solid_modeling.cpp": "8db30dd60b7b3164b729fb4454de2f7de0e17d29dee3e70cfa4b1dc09246e9f8",
+    "src/onboarding.cpp": "8e778a1129614af4437774aed3cf88ee6c93007d5eef7b3d77319d212f2db92c",
+    "src/physics.cpp": "1cf475c46a8a680527c22b8330688fe8f23473d48c0ebfb1caf561734b55bf9a",
+    "src/references.cpp": "36df1c1129f223414596ecbacf0a393ff67b6bae930ec19e5d6104d782c5ffe4",
+    "src/serialize.cpp": "1d4b30b7133b2575be57fbc6bdf68bdc8cc5ad4cc2433b111a58e5d6be60e6e7",
+    "src/solver.cpp": "2e18646515ec28ff5c6f41ea4e01af3b3956da7c6862aae07dd1e850b9ba5f66",
+    "src/step_export.cpp": "d8f0a1f47ff6753b77141a67bbbe5d589bdf8fa337001d176f493fc8c036972f",
+    "src/view/viewer.cpp": "b9637bcea63b47b4671c3bb9851d844f7da6c1e582a0832f458d7af91d17704b",
+    "tests/agent_features_tests.cpp": "4a87ef8e2318bfff2e48cd624d841879cc99e5ebf09ef10fb4608e67627f78d9",
+    "tests/agent_tests.cpp": "5956298502a71cf7ba7331b245b58a7d3aaeb834d9ddfd201c3fadbe2c7a76d4",
+    "tests/engineering_agent_tests.cpp": "b215a3acecfda0435f06448d67da58c1b846eb58d1ac9229665849cf827ec1a4",
+    "tests/modeling_workflow_tests.cpp": "5777cf7eb30dce82511eb8770dcf0e31c77e5980938111541f3824920c04e082",
+    "tests/studio_live_tests.cpp": "fa89b1f0b11428ee3763e395e9ac0b253409bdba780ec963a46f68c8186a4fd4"
+  },
+  "asset_sha256": {
+    "assets\\ui\\ark-domain-atlas-v1.png": "ae2601dfe4cd521cd430fb2ee7a054a0f531ade9cd9af0b9e543282de6eebdb4",
+    "assets\\ui\\ark-tool-atlas-v1.png": "2ac8d1b953f3f1598822432b8e91afcbe1187e9367a265b520f9d68a2133f51c"
+  },
+  "screenshots": [
+    "docs/engineering-v2-ribbon.png",
+    "docs/engineering-v2-physics.png"
+  ],
+  "image_generation": {
+    "mode": "built-in ImageGen",
+    "atlases": 2,
+    "icons": 32,
+    "actual_dimensions": [
+      1254,
+      1254
+    ],
+    "transparent": true,
+    "prompts": "assets/ui/README.md"
+  }
+}

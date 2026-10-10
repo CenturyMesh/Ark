@@ -5,6 +5,10 @@
 Studio has viewport/tree context menus, reversible **Spotlight** visibility,
 separate navigation and playback rows, and improved face/curved-edge picking.
 [Interaction guide](docs/STUDIO_INTERACTION.md).
+The engineering update adds verified edit conditions, reusable preview
+candidates, exact rigid-body mass/CG/inertia and load reports, and bounded
+multicore feature evaluation. A Physics ribbon and 32 generated icons accompany
+the new tools. [Contracts and examples](docs/ENGINEERING_AGENT_V2.md).
 **Continue with ChatGPT** connects eligible subscriptions through the browser;
 API-key setup remains available under Advanced. [Assistant setup](docs/ASSISTANT.md).
 
@@ -132,7 +136,7 @@ connect the MCP process to Studio's displayed endpoint as described in
 ```
 
 Call `agent_onboard` first for the current revision, supported operations,
-and examples. ARK exposes 44 MCP tools, including `kernel_info`,
+and examples. ARK exposes 53 MCP tools, including the [agent geometry and numerical tools](docs/AGENT_AUTOMATION.md), `kernel_info`,
 `reference_inspect`, `sketch_diagnose`, `sheet_preview`, `import_sheet_step`, and `import_mesh`. `doc_apply` batches
 edits atomically and rejects stale revisions. The [agent protocol](docs/AGENTS.md)
 describes the command and validation contracts. The in-app assistant uses a

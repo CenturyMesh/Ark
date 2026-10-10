@@ -58,6 +58,7 @@ struct Material {
     std::string name;
     double densityGcm3=0;
     Appearance appearance;
+    arkjson::Value physical; // Explicit SI elastic properties, optional.
 };
 
 // Usage is a document audit trail of provider-reported token counts. It never
@@ -266,6 +267,14 @@ public:
     std::vector<Body>* evaluatingBodies=nullptr; // transient earlier history during recompute
     std::vector<FeatureResult> lastResults;
     f64 recomputeMs = 0;
+    struct EvaluationCacheEntry { std::string key; std::shared_ptr<const Body> body; u64 generation=0; size_t tris=0; };
+    std::unordered_map<u64,EvaluationCacheEntry> evaluationCache;
+    struct ReferenceFrameCacheEntry {std::string brep,topology;std::unordered_map<std::string,arkjson::Value> frames;};
+    mutable std::unordered_map<u64,ReferenceFrameCacheEntry> referenceFrameCache;
+    u64 evaluationGeneration=0;
+    size_t recomputeReused=0, recomputeEvaluated=0;
+    size_t parallelFeatures=0, peakParallelFeatures=0, dependencyEdges=0;
+    unsigned featureWorkers=1, nativeThreadsPerWorker=1;
     TessOptions tessOpt{};
 
     // Recompute full history. Bodies accumulate: each feature's result body

@@ -1,5 +1,7 @@
 ﻿// ARK-Point :: evaluate.cpp â€” feature-history recompute pipeline.
 #include "ark/model.hpp"
+#include "ark/serialize.hpp"
+#include <cctype>
 #include "ark/mesh_model.hpp"
 #include "ark/source_tube.hpp"
 #include "ark/sketch.hpp"
@@ -7,8 +9,11 @@
 #include "ark/mesh_analysis.hpp"
 #include "ark/native_features.hpp"
 #include "ark/suspension.hpp"
+#include "ark/native_backend.hpp"
 #include <chrono>
 #include <exception>
+#include <future>
+#include <set>
 
 namespace ark {
 
@@ -16,7 +21,47 @@ static f64 nowMs() {
     using namespace std::chrono;
     return duration<f64,std::milli>(steady_clock::now().time_since_epoch()).count();
 }
+// Only audited operations with explicit feature inputs may cross the ordered
+// publication boundary. Sketch/datum/instance consumers retain a serial barrier.
+static bool explicitDependencies(const Feature& f){
+    if(f.suppressed)return false;
+    if(f.type==FeatureType::Box||f.type==FeatureType::Sphere||f.type==FeatureType::Cylinder||f.type==FeatureType::Cone||f.type==FeatureType::Torus||f.type==FeatureType::MeshBody)return f.inputs.empty();
+    if(f.type!=FeatureType::NativeSolid||f.p.count("sketch")||f.p.count("plane")||f.nativeSpec.find("instances"))return false;
+    std::function<bool(const arkjson::Value&)> local=[](const arkjson::Value&){return true;};
+    local=[&](const arkjson::Value& value){for(const auto& pair:value.obj){if(pair.first=="sketch")return false;if(pair.first=="plane"&&(pair.second.t!=arkjson::Value::Str||(pair.second.str!="XY"&&pair.second.str!="XZ"&&pair.second.str!="YZ")))return false;if(!local(pair.second))return false;}for(const auto& item:value.arr)if(!local(item))return false;return true;};
+    if(!local(f.nativeSpec))return false;
+    std::string op=f.get("op");if(op.empty())if(auto value=f.nativeSpec.find("op"))op=value->str;
+    static const std::set<std::string> pure{"box","sphere","cylinder","cone","torus","union","cut","common","hole","fillet","chamfer","transform","linear_pattern","circular_pattern","mirror","shell","draft","split_plane","curve_pattern","hole_pattern"};return pure.count(op)!=0;
+}
+static unsigned threadSetting(const char* name,unsigned fallback,unsigned maximum){if(const char* value=std::getenv(name)){char* end=nullptr;long requested=std::strtol(value,&end,10);if(!end||*end||requested<1||(unsigned long)requested>maximum)throw std::runtime_error(std::string(name)+" has an invalid thread budget");return (unsigned)requested;}return fallback;}
+struct NativeBudgetScope {int previous;explicit NativeBudgetScope(unsigned budget):previous(setNativeThreadBudget((int)budget)){}~NativeBudgetScope(){setNativeThreadBudget(previous);}};
+struct OuterParallelScope {bool previous;explicit OuterParallelScope(bool value):previous(setOuterParallelRegion(value)){}~OuterParallelScope(){setOuterParallelRegion(previous);}};
+static size_t valueMemory(const arkjson::Value& value){size_t bytes=sizeof(value)+value.str.size()+64;for(const auto& child:value.arr)bytes+=valueMemory(child);for(const auto& pair:value.obj)bytes+=sizeof(pair.first)+pair.first.size()+valueMemory(pair.second);return bytes;}
 
+static std::string featureParameterError(const Feature& f,const ExprEnv& env){
+    std::string error;
+        for(auto& kv:f.p){
+            if(kv.first=="shape"||kv.first=="section"||kv.first=="sketch"||kv.first=="plane"||kv.first=="name"||kv.first=="op"||
+               (f.type==FeatureType::ParametricSurface&&(kv.first=="x"||kv.first=="y"||kv.first=="z")))continue;
+            bool ok=false; f64 value=evalExpr(kv.second,env,&ok);
+            if(!ok || std::fabs(value)>1e8)error="Invalid expression for '"+kv.first+"': "+kv.second;
+        }
+        auto positive=[&](std::initializer_list<const char*> keys){for(auto key:keys)if(f.p.count(key)&&f.num(env,key)<=0)error=std::string(key)+" must be positive";};
+        switch(f.type){
+            case FeatureType::Box:positive({"dx","dy","dz"});break;
+            case FeatureType::Cylinder:positive({"r","h"});break;
+            case FeatureType::Sphere:positive({"r"});break;
+            case FeatureType::Cone:positive({"rb","h"});if(f.num(env,"rt")<0)error="rt cannot be negative";break;
+            case FeatureType::Torus:positive({"R","r"});if(f.num(env,"r",2)>=f.num(env,"R",8))error="torus requires R > r";break;
+            case FeatureType::SketchCut:positive({"depth"});break;
+            case FeatureType::Extrude:positive({"w","d","r","height"});break;
+            case FeatureType::Revolve:positive({"w","d","r","angle"});break;
+            case FeatureType::LinearPattern:if(f.num(env,"count",3)<1||f.num(env,"count",3)>256||std::floor(f.num(env,"count",3))!=f.num(env,"count",3))error="count must be an integer in 1..256";break;
+            case FeatureType::ParametricSurface:for(auto key:{"nu","nv"})if(f.p.count(key)&&std::floor(f.num(env,key))!=f.num(env,key))error="surface subdivisions must be integers";break;
+            default:break;
+        }
+    return error;
+}
 static bool makeProfile(const Feature& f, const ExprEnv& env, Document& doc,
                         SketchProfile& prof, std::string& err) {
     std::string sname=f.get("sketch");
@@ -268,6 +313,16 @@ static void refreshDrivenSketches(Document& document, bool require){
 
 const std::vector<FeatureResult>& Document::recompute() {
     f64 t0=nowMs();
+    // Cache custody is process-local and never serialized. Complex features use
+    // a conservative upstream revision; primitives only depend on their inputs.
+    arkjson::Value authored;if(!arkjson::parse(documentToJson(*this),authored))throw std::runtime_error("Cannot serialize evaluation dependencies");
+    std::string context;
+    for(const char* key:{"sketches","planes","materials"})if(auto value=authored.find(key))context+=value->dump();
+    if(!sketches.empty()||!planes.empty())if(auto value=authored.find("params"))context+=value->dump();
+    std::unordered_map<u64,EvaluationCacheEntry> nextCache;
+    std::unordered_map<u64,std::string> keys;
+    std::string upstream;
+    size_t featureIndex=0;recomputeReused=0;recomputeEvaluated=0;
     lastResults.clear();
     evalBodies.clear();
     refreshParams();
@@ -277,7 +332,78 @@ const std::vector<FeatureResult>& Document::recompute() {
     }
     std::vector<Body> work;
     evaluatingBodies=&work;
+    struct EvaluationScope {Document& doc;~EvaluationScope(){doc.evaluatingBodies=nullptr;}} evaluationScope{*this};
+    std::vector<bool> explicitInputs;for(const auto& f:features)explicitInputs.push_back(explicitDependencies(f));
+    const unsigned cores=std::max(1u,std::thread::hardware_concurrency());
+    const unsigned cpuBudget=std::min(cores,threadSetting("ARK_CPU_THREADS",std::min(cores,32u),64));
+    const unsigned requestedWorkers=threadSetting("ARK_FEATURE_THREADS",std::min(cpuBudget,4u),16);
+    const size_t eligible=(size_t)std::count(explicitInputs.begin(),explicitInputs.end(),true);
+    featureWorkers=eligible>=4?std::min(cpuBudget,requestedWorkers):1;
+    nativeThreadsPerWorker=std::min(threadSetting("ARK_NATIVE_THREADS",8,64),std::max(1u,cpuBudget/featureWorkers));
+    NativeBudgetScope ownerBudget(nativeThreadsPerWorker);
+    parallelFeatures=0;peakParallelFeatures=0;dependencyEdges=0;
+    std::unordered_map<u64,size_t> indices;for(size_t i=0;i<features.size();++i)indices[features[i].id]=i;
+    std::vector<std::vector<size_t>> dependencies(features.size());
+    for(size_t i=0;i<features.size();++i){
+        for(u64 input:features[i].inputs){auto found=indices.find(input);if(found==indices.end()||found->second>=i){explicitInputs[i]=false;continue;}dependencies[i].push_back(found->second);}
+        if(!explicitInputs[i]){dependencies[i].clear();for(size_t j=0;j<i;++j)dependencies[i].push_back(j);}
+        dependencyEdges+=dependencies[i].size();
+    }
+    auto keyFor=[&](size_t index){
+        const auto& f=features[index];std::string own=authored.find("features")->arr[index].dump(),key=own+context;
+        for(const auto& param:params){
+            if(param.name.empty())continue;size_t pos=0;bool used=false;
+            while((pos=own.find(param.name,pos))!=std::string::npos){auto ident=[](char c){return std::isalnum((unsigned char)c)||c=='_';};if((pos==0||!ident(own[pos-1]))&&(pos+param.name.size()==own.size()||!ident(own[pos+param.name.size()]))){used=true;break;}pos+=param.name.size();}
+            if(used)key+=param.name+"="+arkjson::Value::makeNum(param.value).dump();
+        }
+        if(!explicitInputs[index]){key+=upstream;for(const char* name:{"assembly","mates"})if(auto value=authored.find(name))key+=value->dump();for(const auto& p:params)key+=p.name+"="+arkjson::Value::makeNum(p.value).dump();}
+        for(u64 input:f.inputs)key+=keys[input];
+        for(double n:{tessOpt.tol,tessOpt.maxEdge,tessOpt.minAngleDeg,(double)tessOpt.maxLevels})key+=':'+arkjson::Value::makeNum(n).dump();return key;
+    };
+    std::vector<std::string> plannedKeys(features.size());std::vector<u64> plannedGenerations(features.size());
+    for(size_t i=0;i<features.size();++i){plannedKeys[i]=keyFor(i);auto old=evaluationCache.find(features[i].id);plannedGenerations[i]=old!=evaluationCache.end()&&old->second.key==plannedKeys[i]?old->second.generation:++evaluationGeneration;if(!features[i].suppressed){keys[features[i].id]=std::to_string(features[i].id)+":"+std::to_string(plannedGenerations[i])+";";upstream+=keys[features[i].id];}}
+    upstream.clear();
+    struct Evaluation {Body body;FeatureResult result;};
+    struct Activity {std::atomic<unsigned> active{0},peak{0};void enter(){unsigned n=++active,old=peak.load();while(n>old&&!peak.compare_exchange_weak(old,n)){};}void leave(){--active;}};
+    auto activity=std::make_shared<Activity>();
+    std::vector<std::future<Evaluation>> jobs(features.size());std::vector<bool> published(features.size(),false);size_t outstanding=0,outstandingBytes=0;std::vector<size_t> jobBytes(features.size(),0);
+    std::vector<std::unique_ptr<Evaluation>> completed(features.size());
+    const size_t contextBytes=valueMemory(authored)+features.size()*sizeof(Feature),payloadBudget=128u*1024u*1024u;
+    struct Drain {std::vector<std::future<Evaluation>>& jobs;~Drain(){for(auto& job:jobs)if(job.valid())job.wait();}} drain{jobs};
+    auto schedule=[&](size_t current){
+        if(featureWorkers<2||!parameterError.empty())return;
+        for(size_t i=current;i<jobs.size();++i)if(jobs[i].valid()&&jobs[i].wait_for(std::chrono::milliseconds(0))==std::future_status::ready){completed[i]=std::make_unique<Evaluation>(jobs[i].get());--outstanding;outstandingBytes-=jobBytes[i];}
+        if(!explicitInputs[current]){for(size_t i=0;i<jobs.size();++i)if(jobs[i].valid()){completed[i]=std::make_unique<Evaluation>(jobs[i].get());--outstanding;outstandingBytes-=jobBytes[i];}return;}
+        auto inputBody=[&](u64 id)->const Body*{
+            for(const auto& b:work)if(b.id==id)return &b;
+            auto found=indices.find(id);if(found==indices.end()||features[found->second].suppressed)return nullptr;size_t index=found->second;
+            if(completed[index])return completed[index]->result.ok?&completed[index]->body:nullptr;
+            auto cached=evaluationCache.find(id);if(cached!=evaluationCache.end()&&cached->second.key==plannedKeys[index])return cached->second.body.get();return nullptr;
+        };
+        for(size_t i=current+1;i<features.size()&&outstanding<featureWorkers-1;++i){
+            if(!explicitInputs[i])break;
+            if(!explicitInputs[i]||jobs[i].valid()||completed[i]||published[i])continue;
+            bool ready=true;for(size_t dependency:dependencies[i])ready&=inputBody(features[dependency].id)!=nullptr;if(!ready)continue;
+            for(u64 id:features[i].inputs){const Body* body=inputBody(id);if(!body){ready=false;break;}if(!body->nativeData.find("brep_base64")){auto source=indices.find(id);if(source==indices.end())ready=false;else{auto type=features[source->second].type;ready&=type==FeatureType::Box||type==FeatureType::Cylinder||type==FeatureType::Sphere||type==FeatureType::Cone||type==FeatureType::Torus;}}}
+            if(!ready)continue;
+            const auto& key=plannedKeys[i];auto cached=evaluationCache.find(features[i].id);if(cached!=evaluationCache.end()&&cached->second.key==key)continue;
+            size_t bytes=contextBytes;for(u64 id:features[i].inputs){const auto* body=inputBody(id);bytes+=sizeof(Body)+body->faces.size()*sizeof(Face)+valueMemory(body->nativeData);if(body->baked)bytes+=(body->baked->pos.size()+body->baked->nrm.size()+body->baked->idx.size())*sizeof(float);}
+            if(bytes>payloadBudget||outstandingBytes>payloadBudget-bytes)continue;
+            // A task owns all mutable evaluation context. Shared cache bodies are
+            // immutable; lazy native promotion changes only these input copies.
+            Document snapshot; snapshot.features=features;snapshot.params=params;snapshot.materials=materials;snapshot.tessOpt=tessOpt;
+            std::vector<Body> inputs;for(u64 id:features[i].inputs)inputs.push_back(*inputBody(id));
+            const Feature feature=features[i];const unsigned nativeBudget=nativeThreadsPerWorker;
+            auto task=std::make_shared<std::packaged_task<Evaluation()>>([snapshot=std::move(snapshot),inputs=std::move(inputs),feature,env,nativeBudget,activity]()mutable{
+                NativeBudgetScope budget(nativeBudget);Evaluation value;value.result.id=feature.id;double started=nowMs();activity->enter();
+                try{value.result.error=featureParameterError(feature,env);value.result.ok=value.result.error.empty();if(value.result.ok){snapshot.evaluatingBodies=&inputs;value.body=evalFeatureBody(feature,env,snapshot,inputs,value.result,snapshot.tessOpt);value.body.id=feature.id;}}catch(const std::exception& e){value.result.ok=false;value.result.error=e.what();}
+                activity->leave();value.result.ms=nowMs()-started;return value;
+            });
+            jobs[i]=task->get_future();ThreadPool::get().submit([task]{(*task)();});++outstanding;++parallelFeatures;jobBytes[i]=bytes;outstandingBytes+=bytes;
+        }
+    };
     for(auto&f:features){
+        const size_t index=featureIndex++;schedule(index);std::string cacheKey=plannedKeys[index];
         FeatureResult fr; fr.id=f.id;
         f64 tf=nowMs();
         if(f.suppressed){
@@ -286,30 +412,10 @@ const std::vector<FeatureResult>& Document::recompute() {
         bool blocked=false;
         for(u64 input:f.inputs){if(const Feature* source=find(input);source&&source->suppressed){fr.ok=false;fr.error="source feature is suppressed";blocked=true;break;}}
         if(blocked){fr.ms=nowMs()-tf;lastResults.push_back(std::move(fr));refreshDrivenSketches(*this,false);continue;}
-        fr.error=parameterError;
-        for(auto& kv:f.p){
-            if(kv.first=="shape"||kv.first=="section"||kv.first=="sketch"||kv.first=="plane"||kv.first=="name"||kv.first=="op"||
-               (f.type==FeatureType::ParametricSurface&&(kv.first=="x"||kv.first=="y"||kv.first=="z")))continue;
-            bool ok=false; f64 value=evalExpr(kv.second,env,&ok);
-            if(!ok || std::fabs(value)>1e8)fr.error="Invalid expression for '"+kv.first+"': "+kv.second;
-        }
-        auto positive=[&](std::initializer_list<const char*> keys){for(auto key:keys)if(f.p.count(key)&&f.num(env,key)<=0)fr.error=std::string(key)+" must be positive";};
-        switch(f.type){
-            case FeatureType::Box:positive({"dx","dy","dz"});break;
-            case FeatureType::Cylinder:positive({"r","h"});break;
-            case FeatureType::Sphere:positive({"r"});break;
-            case FeatureType::Cone:positive({"rb","h"});if(f.num(env,"rt")<0)fr.error="rt cannot be negative";break;
-            case FeatureType::Torus:positive({"R","r"});if(f.num(env,"r",2)>=f.num(env,"R",8))fr.error="torus requires R > r";break;
-            case FeatureType::SketchCut:positive({"depth"});break;
-            case FeatureType::Extrude:positive({"w","d","r","height"});break;
-            case FeatureType::Revolve:positive({"w","d","r","angle"});break;
-            case FeatureType::LinearPattern:if(f.num(env,"count",3)<1||f.num(env,"count",3)>256||std::floor(f.num(env,"count",3))!=f.num(env,"count",3))fr.error="count must be an integer in 1..256";break;
-            case FeatureType::ParametricSurface:for(auto key:{"nu","nv"})if(f.p.count(key)&&std::floor(f.num(env,key))!=f.num(env,key))fr.error="surface subdivisions must be integers";break;
-            default:break;
-        }
+        fr.error=parameterError.empty()?featureParameterError(f,env):parameterError;
         fr.ok=fr.error.empty();
         Body b;
-        try{if(fr.ok)b=evalFeatureBody(f,env,*this,work,fr,tessOpt);}
+        try{if(fr.ok){auto cached=evaluationCache.find(f.id);if(cached!=evaluationCache.end()&&cached->second.key==cacheKey){b=*cached->second.body;fr.tris=cached->second.tris;++recomputeReused;}else if(completed[index]){b=std::move(completed[index]->body);fr=std::move(completed[index]->result);completed[index].reset();++recomputeEvaluated;}else if(jobs[index].valid()){auto value=jobs[index].get();--outstanding;outstandingBytes-=jobBytes[index];b=std::move(value.body);fr=std::move(value.result);++recomputeEvaluated;}else{OuterParallelScope nested(outstanding>0);NativeBudgetScope budget(!explicitInputs[index]&&outstanding==0?std::min(threadSetting("ARK_NATIVE_THREADS",8,64),cpuBudget):nativeThreadsPerWorker);activity->enter();try{b=evalFeatureBody(f,env,*this,work,fr,tessOpt);}catch(...){activity->leave();throw;}activity->leave();++recomputeEvaluated;}}}
         catch(const std::exception& e){fr.ok=false;fr.error=e.what();}
         fr.ms=nowMs()-tf;
         if(fr.ok && b.faces.empty() && !b.baked){
@@ -317,11 +423,14 @@ const std::vector<FeatureResult>& Document::recompute() {
         }
         if(fr.ok){
             b.id=f.id;
+            const u64 generation=plannedGenerations[index];
+            nextCache[f.id]={std::move(cacheKey),std::make_shared<const Body>(b),generation,fr.tris};
+            keys[f.id]=std::to_string(f.id)+":"+std::to_string(generation)+";";upstream+=keys[f.id];
             work.push_back(std::move(b));
         } else {
             b=Body{};
         }
-        lastResults.push_back(std::move(fr));
+        published[index]=true;lastResults.push_back(std::move(fr));
         refreshDrivenSketches(*this,false);
     }
     refreshDrivenSketches(*this,true);
@@ -341,6 +450,9 @@ const std::vector<FeatureResult>& Document::recompute() {
     }
     evaluatingBodies=nullptr;
     evalBodies=std::move(work);
+    for(auto& job:jobs)if(job.valid())job.wait();
+    peakParallelFeatures=activity->peak.load();
+    evaluationCache=std::move(nextCache);
     recomputeMs=nowMs()-t0;
     return lastResults;
 }

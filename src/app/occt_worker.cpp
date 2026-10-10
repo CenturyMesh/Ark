@@ -14,6 +14,10 @@
 #include <IFSelect_ReturnStatus.hxx>
 #include <iostream>
 #include <stdexcept>
+#ifdef _WIN32
+#define NOMINMAX
+#include <windows.h>
+#endif
 using namespace ark::occt;
 int runWorker(const fs::path& requestPath,const fs::path& resultPath){
 
@@ -34,6 +38,7 @@ int runWorker(const fs::path& requestPath,const fs::path& resultPath){
         else if(op=="clearance")result=clearanceNative(field("request"));
         else if(op=="point_distance")result=pointDistanceNative(field("request"));
         else if(op=="solid_centroid")result=solidCentroidNative(field("request"));
+        else if(op=="geometry_query")result=geometryQueryNative(field("request"));
         else if(op=="import_sheet")result=importSheetNative(request);
         else if(op=="export_sheet")result=exportSheetNative(request);
         else if(op=="export_sheet_flat_dxf")result=exportSheetFlatDxfNative(request);
@@ -80,7 +85,21 @@ int runWorker(const fs::path& requestPath,const fs::path& resultPath){
 }
 
 #ifdef _WIN32
-int wmain(int argc,wchar_t** argv){if(argc!=3)return 2;return runWorker(fs::path(argv[1]),fs::path(argv[2]));}
+int wmain(int argc,wchar_t** argv){
+    if(argc!=3)return 2;
+    if(std::wstring(argv[1])==L"--server"){
+        fs::path directory(argv[2]);auto prefix=L"Local\\"+directory.filename().wstring();
+        HANDLE request=OpenEventW(SYNCHRONIZE,FALSE,(prefix+L"-request").c_str());
+        HANDLE done=OpenEventW(EVENT_MODIFY_STATE,FALSE,(prefix+L"-done").c_str());
+        if(!request||!done)return 3;
+        while(WaitForSingleObject(request,30000)==WAIT_OBJECT_0){
+            runWorker(directory/"request.json",directory/"result.json");
+            if(!SetEvent(done))break;
+        }
+        CloseHandle(done);CloseHandle(request);return 0;
+    }
+    return runWorker(fs::path(argv[1]),fs::path(argv[2]));
+}
 #else
 int main(int argc,char** argv){if(argc!=3)return 2;return runWorker(fs::u8path(argv[1]),fs::u8path(argv[2]));}
 #endif

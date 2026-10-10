@@ -1,5 +1,13 @@
 # Selection and context menus
 
+The ribbon includes a Physics workspace for materials, mass/CG, loads and
+assembly properties. Icon tiles keep text labels, unavailable-action states
+and hover descriptions. The same project-owned icon atlases appear in native
+command/context menus. The physical drawer occludes inspector text and hit
+targets beneath it; it reports the coordinate frame of its COM/inertia values.
+World-coordinate load cases are transformed for selected-part inspections.
+See [engineering tools and execution](ENGINEERING_AGENT_V2.md).
+
 Right-click a body in the viewport or its row in Model explorer to open the
 same contextual actions: edit its feature, placement, material/appearance,
 hide/show, fit, or **Spotlight body**. Empty viewport space offers restore,

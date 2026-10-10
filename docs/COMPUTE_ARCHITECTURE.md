@@ -1,5 +1,16 @@
 # CPU, GPU and responsive evaluation
 
+The current [multicore evaluator](ENGINEERING_AGENT_V2.md#multicore-parametric-evaluation)
+executes audited explicit-dependency branches concurrently and publishes in
+feature order. CPU/native budgets, serial barriers, queued-input memory limits
+and warm/cold measurement conventions are documented there.
+
+The [agent automation extension](AGENT_AUTOMATION.md#computation-and-validation)
+adds conservative incremental feature evaluation, a bounded resident Windows
+OCCT worker, and automatically differentiated sketch Jacobians with independent
+solve blocks. The worker remains isolated and the session remains serialized.
+`ARK_NATIVE_ONESHOT=1` is the transport control for comparative measurements.
+
 The parametric feature history remains ordered so references bind to their
 declared producers. Exact B-rep construction and validation run on OCCT CPU
 geometry. Studio transfers exclusive ownership of a long session operation
@@ -30,7 +41,7 @@ data resident when possible, rather than comparing isolated kernel timings.
 [CUDA best practices](https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html)
 also explains why smaller operations may stay faster on the CPU.
 
-For further acceleration, dependency-aware invalidation and repeated resident
+For further acceleration, finer dependency tracking and repeated resident
 GPU pipelines are better candidates than moving arbitrary B-rep operations to
 CUDA. [CUDA Graphs](https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/cuda-graphs.html)
 can amortize repeated launch setup, but are not implemented here: variable CAD

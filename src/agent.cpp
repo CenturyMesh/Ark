@@ -1,4 +1,5 @@
 #include "ark/agent.hpp"
+#include "ark/agent_features.hpp"
 #include "ark/mesh_analysis.hpp"
 #include "ark/mesh_model.hpp"
 #include "ark/io.hpp"
@@ -280,7 +281,7 @@ void attachClearance(Document& d,V& report,const std::vector<AssemblyPlacement>&
     model.set("a_frame",columns(a.placement->world));model.set("b_frame",columns(b.placement->world));
     V request=V::makeObj();request.set("operation",V::makeStr("clearance"));request.set("request",std::move(model));
     V response=nativeWorkerRequest(request);
-    for(const char* key:{"clearance_checked","clearance_mm","clearance_state","clearance_method","face_a","face_b","clearance_authority"})
+    for(const char* key:{"clearance_checked","clearance_mm","clearance_state","clearance_method","face_a","face_b","clearance_authority","separation_mm","overlap_volume_mm3","overlap_checked","penetration_estimate_mm","penetration_depth_checked","clearance_is_estimate","distance_tolerance_mm","overlap_tolerance_mm3"})
         if(const V* value=response.find(key))report.set(key,*value);
 }
 struct MeasureEnd { Mat4 world; std::string reference; bool hasNode=false; bool hasFeature=false; u64 node=0; u64 feature=0; int copy=0; };
@@ -339,7 +340,7 @@ AgentSession::Cache& AgentSession::meshCache(const V& args){
     Cache c;c.mesh=selectedMesh(document,args);c.report=analyzeMesh(c.mesh);c.bvh=std::make_unique<MeshBVH>(c.mesh);
     return cache_.emplace(key,std::move(c)).first->second;
 }
-void AgentSession::remember(){undo_.push_back(documentToJson(document));if(undo_.size()>32)undo_.erase(undo_.begin());redo_.clear();}
+void AgentSession::remember(){prepared_.clear();undo_.push_back(documentToJson(document));if(undo_.size()>32)undo_.erase(undo_.begin());redo_.clear();}
 int patternCopies(const Document& document,const AssemblyNode& node){
     if(!node.pattern.active||(node.pattern.type!="linear"&&node.pattern.type!="circular"))return 1;
     bool ok=false;const double raw=evalExpr(node.pattern.count,document.buildEnv(),&ok);
@@ -444,6 +445,8 @@ Vec3 findAxis(const std::string& name){
 V AgentSession::info() const {
     V r=V::makeObj();r.set("revision",V::makeNum((double)revision));r.set("units",V::makeStr("mm"));
     r.set("feature_count",V::makeNum(document.features.size()));r.set("recompute_ms",V::makeNum(document.recomputeMs));
+    r.set("features_reused",V::makeNum(document.recomputeReused));r.set("features_evaluated",V::makeNum(document.recomputeEvaluated));
+    r.set("feature_workers",V::makeNum(document.featureWorkers));r.set("native_threads_per_worker",V::makeNum(document.nativeThreadsPerWorker));r.set("parallel_features",V::makeNum(document.parallelFeatures));r.set("peak_parallel_features",V::makeNum(document.peakParallelFeatures));r.set("dependency_edges",V::makeNum(document.dependencyEdges));
     r.set("parameter_error",V::makeStr(document.parameterError));
     V planes=V::makeArr(),sketches=V::makeArr();for(auto& p:document.planes)planes.arr.push_back(V::makeStr(p.name));for(auto& sk:document.sketches)sketches.arr.push_back(V::makeStr(sk.name));r.set("planes",planes);r.set("sketches",sketches);
     V fs=V::makeArr();auto hidden=consumed(document);
@@ -451,8 +454,10 @@ V AgentSession::info() const {
     r.set("features",fs);r.set("assembly_nodes",V::makeNum(document.assembly.size()));r.set("material_count",V::makeNum(document.materials.size()));return r;
 }
 V AgentSession::call(const std::string& tool,const V& args){
+    size_t commandIndex=0;std::string commandOp;bool applying=false;
     try{
         if(args.t!=V::Obj)throw std::runtime_error("Arguments must be an object");
+        V extension;if(callAgentFeature(*this,tool,args,extension))return result(extension);
         if(tool=="doc_info"){
             std::string detail="summary";
             if(auto requested=args.find("detail")){if(requested->t!=V::Str||(requested->str!="summary"&&requested->str!="design"))throw std::runtime_error("detail must be summary or design");detail=requested->str;}
@@ -824,6 +829,7 @@ V AgentSession::call(const std::string& tool,const V& args){
             r.set("bends",table);return result(r);
         }
         if(tool=="doc_apply"){
+            if(args.find("candidate_id"))return result(commitPrepared(args));
             if(auto expected=args.find("expected_revision")){
                 if(expected->t!=V::Num||expected->num!=(double)revision)throw std::runtime_error("Revision conflict; read doc_info with detail design and retry");
             }
@@ -834,12 +840,12 @@ V AgentSession::call(const std::string& tool,const V& args){
                 const V* operation=command.find("op");if(!operation||operation->t!=V::Str)return false;
                 const std::string& op=operation->str;
                 if(op!="material.set"&&op!="material.remove"&&op!="feature.edit")return false;
-                if(op=="material.remove"||(op=="material.set"&&command.find("density")))
+                if(op=="material.remove"||(op=="material.set"&&(command.find("density")||command.find("density_kg_m3"))))
                     for(const auto& feature:document.features)if(feature.type==FeatureType::ConstructionFrame)return false;
                 for(const auto& field:command.obj){
                     const std::string& key=field.first;
                     if(key=="op")continue;
-                    if(op=="material.set"&&(key=="name"||key=="density"||key=="appearance"))continue;
+                    if(op=="material.set"&&(key=="name"||key=="density"||key=="density_kg_m3"||key=="physical"||key=="appearance"))continue;
                     if(op=="material.remove"&&key=="name")continue;
                     if(op=="feature.edit"&&(key=="id"||key=="material"||key=="appearance"))continue;
                     return false;
@@ -848,8 +854,12 @@ V AgentSession::call(const std::string& tool,const V& args){
             });
             Document next;std::string error;
             if(!documentFromJson(documentToJson(document),next,&error))throw std::runtime_error(error);
+            next.evaluationCache=document.evaluationCache;
+            next.evaluationGeneration=document.evaluationGeneration;
+            next.referenceFrameCache=document.referenceFrameCache;
             V created=V::makeArr(),createdNodes=V::makeArr(),createdMates=V::makeArr(),sheetEdits=V::makeArr();
             for(auto& c:commands.arr){
+                applying=true;commandIndex=(size_t)(&c-commands.arr.data());commandOp=c.find("op")?c.find("op")->asStr():"";
                 auto op=str(c,"op");
                 if(op=="param.set")next.setParam(str(c,"name"),expression(field(c,"expr")));
                 else if(op.rfind("sheet.",0)==0){V bound=c;if(op!="sheet.create")bound.set("id",V::makeNum((double)featureRef(next,field(c,"id"))));auto edited=applySheetCommand(next,bound);if(op=="sheet.create")created.arr.push_back(*edited.find("feature_id"));sheetEdits.arr.push_back(edited);}
@@ -878,6 +888,8 @@ V AgentSession::call(const std::string& tool,const V& args){
                     }else{
                         if(found==next.materials.end()){if(next.materials.size()>=256)throw std::runtime_error("Material capacity exceeded");next.materials.push_back({});found=next.materials.end()-1;found->name=name;}
                         if(const V* density=c.find("density")){if(density->t!=V::Num||!std::isfinite(density->num)||density->num<0||density->num>100)throw std::runtime_error("Material density must be 0..100 g/cm3");found->densityGcm3=density->num;}
+                        if(const V* density=c.find("density_kg_m3")){if(c.find("density"))throw std::runtime_error("Choose density or density_kg_m3");if(density->t!=V::Num||!std::isfinite(density->num)||density->num<0||density->num>100000)throw std::runtime_error("Material density must be 0..100000 kg/m3");found->densityGcm3=density->num/1000;}
+                        if(const V* physical=c.find("physical"))found->physical=*physical;
                         if(const V* patch=c.find("appearance")){std::string reason;if(!applyAppearancePatch(found->appearance,*patch,reason))throw std::runtime_error(reason);}
                     }
                 }
@@ -967,20 +979,29 @@ V AgentSession::call(const std::string& tool,const V& args){
                 }
                 else throw std::runtime_error("Unknown operation: "+op);
             }
+            applying=false;
+            V conditionReport;
+            if(const V* checks=args.find("checks")){
+                if(appearanceOnly){next.evalBodies=document.evalBodies;next.lastResults=document.lastResults;}
+                else validated(next);
+                AgentSession checking;checking.document=std::move(next);checking.revision=revision;
+                conditionReport=evaluatePostconditions(checking,*checks);next=std::move(checking.document);
+                if(!conditionReport.find("passed")->b){V failure=V::makeObj();failure.set("error",V::makeStr("Required postconditions failed"));failure.set("error_code",V::makeStr("POSTCONDITION_FAILED"));failure.set("stage",V::makeStr("postconditions"));failure.set("revision",V::makeNum((double)revision));failure.set("document_unchanged",V::makeBool(true));failure.set("conditions",conditionReport);return result(failure,true);}
+            }
             if(appearanceOnly){
                 validatedMaterials(next);
                 remember();document.materials=std::move(next.materials);
                 for(size_t i=0;i<document.features.size();++i){document.features[i].material=std::move(next.features[i].material);document.features[i].appearance=std::move(next.features[i].appearance);}
-            }else{validated(next);remember();document=std::move(next);}
+            }else{if(!args.find("checks"))validated(next);remember();document=std::move(next);}
             ++revision;
-            V r=info();r.set("created_ids",created);r.set("created_node_ids",createdNodes);r.set("created_mate_ids",createdMates);r.set("sheet_edits",sheetEdits);r.set("geometry_recomputed",V::makeBool(!appearanceOnly));return result(r);
+            V r=info();r.set("created_ids",created);r.set("created_node_ids",createdNodes);r.set("created_mate_ids",createdMates);r.set("sheet_edits",sheetEdits);r.set("geometry_recomputed",V::makeBool(!appearanceOnly));if(args.find("checks"))r.set("conditions",conditionReport);return result(r);
         }
         if(tool=="doc_undo"||tool=="doc_redo"){
             auto& source=tool=="doc_undo"?undo_:redo_;auto& destination=tool=="doc_undo"?redo_:undo_;
             if(source.empty())throw std::runtime_error("No history available");
             Document next;std::string error;if(!documentFromJson(source.back(),next,&error))throw std::runtime_error(error);
             next.usage=document.usage; // billed provider receipts survive geometry undo/redo
-            validated(next);destination.push_back(documentToJson(document));source.pop_back();document=std::move(next);++revision;return result(info());
+            validated(next);destination.push_back(documentToJson(document));source.pop_back();document=std::move(next);++revision;prepared_.clear();return result(info());
         }
         if(tool=="doc_save"){
             auto path=str(args,"path");if(!saveDocument(document,path.c_str()))throw std::runtime_error("Could not save document");
@@ -989,7 +1010,7 @@ V AgentSession::call(const std::string& tool,const V& args){
         if(tool=="doc_load"){
             Document next;std::string error;
             if(!loadDocument(str(args,"path").c_str(),next,&error))throw std::runtime_error(error);
-            validated(next);remember();document=std::move(next);++revision;return result(info());
+            validated(next);remember();document=std::move(next);++revision;prepared_.clear();return result(info());
         }
         if(tool=="mesh_inspect"){
             V report=meshCache(args).report.json();
@@ -1041,9 +1062,19 @@ V AgentSession::call(const std::string& tool,const V& args){
             return result(r);
         }
         throw std::runtime_error("Unknown tool: "+tool);
-    }catch(const std::exception& e){V r=V::makeObj();r.set("error",V::makeStr(e.what()));r.set("revision",V::makeNum((double)revision));return result(r,true);}
+    }catch(const std::exception& e){
+        V r=V::makeObj();const std::string message=e.what();
+        r.set("error",V::makeStr(message));r.set("revision",V::makeNum((double)revision));r.set("tool",V::makeStr(tool));
+        const bool resource=message.find("budget")!=std::string::npos||message.find("worker limit")!=std::string::npos||message.find("capacity")!=std::string::npos;
+        r.set("error_code",V::makeStr(message.find("Revision conflict")!=std::string::npos?"REVISION_CONFLICT":message.find("Ambiguous")!=std::string::npos?"AMBIGUOUS_REFERENCE":message.find("Prepared candidate")!=std::string::npos?"CANDIDATE_INVALID":resource?"RESOURCE_LIMIT":applying?"INVALID_COMMAND":"EVALUATION_FAILED"));
+        r.set("stage",V::makeStr(args.find("candidate_id")?"prepared_apply":applying?"command":"evaluation"));
+        if(applying){r.set("command_index",V::makeNum(commandIndex));r.set("operation",V::makeStr(commandOp));}
+        if(message.rfind("Missing field: ",0)==0)r.set("field",V::makeStr(message.substr(15)));
+        if(message.rfind("Feature #",0)==0){const auto end=message.find(':',9);if(end!=std::string::npos){auto digits=message.substr(9,end-9);if(!digits.empty()&&digits.find_first_not_of("0123456789")==std::string::npos)r.set("feature_id",V::makeNum(std::strtod(digits.c_str(),nullptr)));}}
+        r.set("document_unchanged",V::makeBool(true));return result(r,true);
+    }
 }
-V AgentSession::tools(){
+V AgentSession::tools(bool detailed){
     struct Def{const char* name;const char* desc;const char* schema;bool read;};
     const Def defs[]={
         {"suspension_inspect","Solve a double-wishbone suspension preview at jounce_mm, rack_mm and wheel_spin_deg, returning hardpoints, link closure residuals, toe/camber, spring stroke and declared-rate force. Read-only kinematics, not dynamic/inertia/contact simulation or native B-rep authority.",R"({"type":"object","properties":{"id":{"type":["integer","string"]},"jounce_mm":{"type":"number"},"rack_mm":{"type":"number"},"wheel_spin_deg":{"type":"number"}},"required":["id"]})",true},
@@ -1056,7 +1087,7 @@ V AgentSession::tools(){
         {"electronics_inspect","Read PCB layers, net connectivity, clearance DRC and BOM, or a cable route's bend radius, exact length and independently checked obstacle clearance. Does not certify electrical or manufacturing performance.",R"({"type":"object","properties":{"id":{"type":["integer","string"]}},"required":["id"]})",true},
         {"pcb_export","Export PCB copper and outline Gerbers, plated/non-plated Excellon drill files and JSON netlist as a fabrication preview. Run electronics_inspect for incomplete nets and DRC scope first.",R"({"type":"object","properties":{"id":{"type":["integer","string"]},"path_prefix":{"type":"string"}},"required":["id","path_prefix"]})",false},
         {"export_iges","Export a selected exact B-rep as IGES in millimetres, with independent readback bounds/area checks and solid-topology status. Default pose formed; flat is available only for sheet features.",R"({"type":"object","properties":{"id":{"type":["integer","string"]},"path":{"type":"string"},"pose":{"type":"string","enum":["flat","formed"]}},"required":["id","path"]})",false},
-        {"agent_onboard","START HERE. Discover current document/revision, supported modeling workflows, expression-driven splines, examples and validation limits. Read-only; choose a topic before modeling.",R"({"type":"object","properties":{"topic":{"type":"string","enum":["overview","sketch","tube","assembly","surfacing","sheet","solids","mesh","materials","frames","electronics","routing","suspension"]}}})",true},
+        {"agent_onboard","START HERE. Discover current document/revision, supported modeling workflows, expression-driven splines, examples and validation limits. Read-only; choose a topic before modeling.",R"({"type":"object","properties":{"topic":{"type":"string","enum":["physics","automation","overview","sketch","tube","assembly","surfacing","sheet","solids","mesh","materials","frames","electronics","routing","suspension"]}}})",true},
         {"doc_info","Compact document summary with revision and stable feature IDs. detail design returns parameter values, feature volume and bounds, sketch entity kinds and assembly copy counts, without expressions, native payloads or meshes.",R"({"type":"object","properties":{"detail":{"type":"string","enum":["summary","design"]}}})",true},
         {"doc_new","Start an empty document only when requested. Clears the active model with undo and a monotonically increasing revision; does not overwrite saved files.",R"({"type":"object","properties":{"expected_revision":{"type":"integer","minimum":0}},"required":["expected_revision"]})",false},
         {"doc_get","Read full parametric document, including expressions and revision.",R"({"type":"object"})",true},
@@ -1072,7 +1103,7 @@ V AgentSession::tools(){
         {"mesh_inspect","Compact indexed topology audit: bounds, area, edge counts, components and signed volume for closed oriented edges. Does not certify solids or detect self intersections. Omit id to inspect final outputs only. node accepts a unique instance name or an id, and copy frames one pattern placement.",R"({"type":"object","properties":{"node":{"anyOf":[{"type":"integer","minimum":1},{"type":"string"}]},"copy":{"type":"integer","minimum":0,"maximum":31},"id":{"type":"integer","minimum":1}}})",true},
         {"mesh_get","Explicitly retrieve mesh positions and triangle indices; potentially large. Prefer mesh_inspect for reasoning. node accepts a unique instance name or an id, and copy frames one pattern placement.",R"({"type":"object","properties":{"node":{"anyOf":[{"type":"integer","minimum":1},{"type":"string"}]},"copy":{"type":"integer","minimum":0,"maximum":31},"id":{"type":"integer","minimum":1}}})",true},
         {"mesh_raycast","Nearest triangle hit using a cached AABB hierarchy. Direction is normalized; distances in mm. Triangle IDs last for this tessellation/revision only.",R"({"type":"object","properties":{"id":{"type":"integer","minimum":1},"origin":{"type":"array","items":{"type":"number"},"minItems":3,"maxItems":3},"direction":{"type":"array","items":{"type":"number"},"minItems":3,"maxItems":3}},"required":["origin","direction"]})",true},
-        {"assembly_info","Hierarchy placements, pattern copies and BOM quantities by shared feature definition. Each instance includes copy. Hidden instances remain in BOM. A patterned node counts once for degrees of freedom. Optional candidate probes one mate and reports residuals, the two frames and the axis convention without saving it or changing revision. interference compares display meshes: the default budget is 8000 triangles and interference:true raises it to 120000. A skip sets interference_checked false. Overlap is display mesh evidence for a cheap screen, not a motion study. clearance:{a,b} is the signed minimum distance in mm between two exact B-reps: positive is a gap, negative is penetration, plus the two faces. a and b take a name, an id, or {node,copy}; copy_a and copy_b also select a pattern copy. A body without a B-rep sets clearance_checked false and clearance_reason. measure:{a,b} is read-only and returns distance_mm, angle_deg and both frames for axis, planar face or origin references. Neither field writes the document or the revision. For visible placed parts with material density or p.density override, exact B-rep volume yields mass_g, mass_kg, center_mm, weight_N, gravity_m_s2, mass_scope and mass_checked. Hidden parts are excluded by the reported scope. A missing or invalid density sets mass_checked false and does not return a partial mass. Concentric, coincident/contact, signed distance and angle mates, grounded instances, local DOFs and residual diagnosis.",R"({"type":"object","properties":{"gravity_m_s2":{"type":"number","minimum":0,"maximum":100},"interference":{"type":"boolean"},"candidate":{"type":"object"},"clearance":{"type":"object"},"measure":{"type":"object"}}})",true},
+        {"assembly_info","Hierarchy placements, pattern copies and BOM quantities by shared feature definition. Each instance includes copy. Hidden instances remain in BOM. A patterned node counts once for degrees of freedom. Optional candidate probes one mate and reports residuals, the two frames and the axis convention without saving it or changing revision. interference compares display meshes: the default budget is 8000 triangles and interference:true raises it to 120000. A skip sets interference_checked false. Overlap is display mesh evidence for a cheap screen, not a motion study. clearance:{a,b} is exact separation and overlap evidence between B-reps. separation_mm is the nonnegative gap; overlap_volume_mm3 reports measured intersection. Legacy clearance_mm negative values are penetration estimates, not minimum translation distances; penetration_depth_checked is false. Both faces and the method are reported. a and b take a name, an id, or {node,copy}; copy_a and copy_b also select a pattern copy. A body without a B-rep sets clearance_checked false and clearance_reason. measure:{a,b} is read-only and returns distance_mm, angle_deg and both frames for axis, planar face or origin references. Neither field writes the document or the revision. For visible placed parts with material density or p.density override, exact B-rep volume yields mass_g, mass_kg, center_mm, weight_N, gravity_m_s2, mass_scope and mass_checked. Hidden parts are excluded by the reported scope. A missing or invalid density sets mass_checked false and does not return a partial mass. Concentric, coincident/contact, signed distance and angle mates, grounded instances, local DOFs and residual diagnosis.",R"({"type":"object","properties":{"gravity_m_s2":{"type":"number","minimum":0,"maximum":100},"interference":{"type":"boolean"},"candidate":{"type":"object"},"clearance":{"type":"object"},"measure":{"type":"object"}}})",true},
         {"tube_inspect","Ideal centerline length, section area and bend table. No springback, weld allowance or material compensation.",R"({"type":"object","properties":{"node":{"type":"integer","minimum":1},"id":{"type":"integer","minimum":1}},"required":["id"]})",true},
         {"source_inspect","Read source projection evidence and exact opening coordinates without large mesh buffers. Optional progress returns finite-hinge display transforms; source geometry stays read-only.",R"({"type":"object","properties":{"id":{"type":"integer","minimum":1},"progress":{"type":"number","minimum":0,"maximum":1}},"required":["id"]})",true},
         {"native_inspect","Read native feature validation, opening inventory, and flat availability without transmitting B-rep or mesh buffers. When a named material density or p.density override is set, exact B-rep volume yields mass_g, mass_kg, weight_N, gravity_m_s2 and the local center_mm. Optional point returns the signed distance in mm, negative inside one solid, and the nearest face name.",R"({"type":"object","properties":{"gravity_m_s2":{"type":"number","minimum":0,"maximum":100},"id":{"type":"integer","minimum":1},"point":{"type":"array","items":{"type":"number"},"minItems":3,"maxItems":3}},"required":["id"]})",true},
@@ -1091,9 +1122,12 @@ V AgentSession::tools(){
         {"export_mesh","Export final output bodies or a selected id as STL/OBJ/ASCII FBX; construction inputs are excluded.",R"({"type":"object","properties":{"path":{"type":"string"},"format":{"type":"string","enum":["stl","obj","fbx"]},"id":{"type":"integer","minimum":1}},"required":["path","format"]})",false},
         {"snapshot","Render final output display meshes to a 1280x800 PNG. view is iso, front, right or top. node accepts a unique instance name or an id, and copy frames one pattern placement. The image is display evidence, not STEP authority.",R"({"type":"object","properties":{"path":{"type":"string"},"id":{"type":"integer","minimum":1},"view":{"type":"string","enum":["iso","front","right","top"]}},"required":["path"]})",false}
     };
-    V list=V::makeArr();for(auto& d:defs){V t=V::makeObj(),schema,annotations=V::makeObj();t.set("name",V::makeStr(d.name));t.set("description",V::makeStr(d.desc));arkjson::parse(d.schema,schema);if(std::string(d.name)=="mesh_raycast"||std::string(d.name)=="export_mesh"||std::string(d.name)=="snapshot"){
+    V list=V::makeArr();for(auto& d:defs){V t=V::makeObj(),schema,annotations=V::makeObj();t.set("name",V::makeStr(d.name));t.set("description",V::makeStr(!detailed&&std::string(d.name)=="doc_apply"?"Atomic batch of 1..128 modeling commands. Pass expected_revision; stale revisions and failed evaluation leave the document unchanged. Discover operation contracts and examples with agent_onboard for your domain; agent_onboard{topic:automation} supplies the full command reference. Supports parameters, materials, features, sketches, datums, assemblies, mates and sheet edits. doc_preview evaluates and caches a candidate; doc_apply{candidate_id,expected_revision} commits without recomputation. Optional checks:[{id?,query:{tool,args,path},op:ge|le|eq|between|true|false,value?,min?,max?,tolerance?,parameters?,diagnose?}] must all pass before commit; failures roll back and return measured residuals. diagnose adds bounded local sensitivity probes. Material density accepts g/cm3 or density_kg_m3, plus physical SI elastic properties. Angles are degrees except trig expressions in radians; lengths mm.":d.desc));arkjson::parse(d.schema,schema);if(std::string(d.name)=="mesh_raycast"||std::string(d.name)=="export_mesh"||std::string(d.name)=="snapshot"){
         V props=schema.find("properties")?*schema.find("properties"):V::makeObj(),node=V::makeObj(),kinds=V::makeArr(),integer=V::makeObj(),text=V::makeObj(),copy=V::makeObj();integer.set("type",V::makeStr("integer"));integer.set("minimum",V::makeNum(1));text.set("type",V::makeStr("string"));kinds.arr.push_back(integer);kinds.arr.push_back(text);node.set("anyOf",kinds);copy.set("type",V::makeStr("integer"));copy.set("minimum",V::makeNum(0));copy.set("maximum",V::makeNum(31));props.set("node",node);props.set("copy",copy);schema.set("properties",props);
-    }t.set("inputSchema",schema);annotations.set("readOnlyHint",V::makeBool(d.read));t.set("annotations",annotations);list.arr.push_back(t);}return list;
+    }if(std::string(d.name)=="doc_apply"){
+        if(detailed)t.set("description",V::makeStr(t.find("description")->str+" Required checks are {query:{tool,args,path},op:ge|le|eq|between|true|false,value?,min?,max?,tolerance?,parameters?,diagnose?}. All must pass before commit. doc_preview returns candidate_id; doc_apply accepts candidate_id plus expected_revision instead of commands and reuses checked geometry. material.set also accepts density_kg_m3 instead of density, and physical SI elastic properties. See agent_onboard physics and automation."));
+        V props=*schema.find("properties"),candidate=V::makeObj(),checks=V::makeObj();candidate.set("type",V::makeStr("string"));props.set("candidate_id",candidate);checks.set("type",V::makeStr("array"));checks.set("minItems",V::makeNum(1));checks.set("maxItems",V::makeNum(32));V item=V::makeObj();item.set("type",V::makeStr("object"));checks.set("items",item);props.set("checks",checks);schema.set("properties",props);schema.obj.erase(std::remove_if(schema.obj.begin(),schema.obj.end(),[](const auto& p){return p.first=="required";}),schema.obj.end());V variants;arkjson::parse(R"([{"required":["commands"]},{"required":["candidate_id","expected_revision"]}])",variants);schema.set("oneOf",variants);
+    }t.set("inputSchema",schema);annotations.set("readOnlyHint",V::makeBool(d.read));t.set("annotations",annotations);list.arr.push_back(t);}appendAgentFeatureTools(list);return list;
 }
 Document makeDemoDocument(){
     Document d;d.setParam("radius","32");d.setParam("tube","11");d.setParam("waves","7");d.setParam("amplitude","0.22");

@@ -6,7 +6,7 @@
 
 namespace ark {
 
-static u64 g_faceIdCounter = 1;
+static std::atomic<u64> g_faceIdCounter{1};
 u64 nextStableFaceId(){ return g_faceIdCounter++; }
 
 // ---------------------------------------------------------------------------

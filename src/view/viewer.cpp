@@ -76,6 +76,8 @@ typedef ptrdiff_t GLsizeiptr;
 #include <set>
 #include <fstream>
 #include <sstream>
+#include <map>
+#include <future>
 #include <algorithm>
 #include <iomanip>
 #include <limits>
@@ -310,6 +312,24 @@ struct PartPick { std::vector<std::pair<int,int>> faces; std::vector<std::vector
 static std::vector<CurveSample> g_curveSamples;
 static std::vector<SelectionItem> g_picked;
 static arkjson::Value g_physicalReport;static std::string g_physicalError;
+static arkjson::Value g_physicalSettings;
+static bool decodeCanvasFile(const std::wstring&,std::vector<unsigned char>&,unsigned&,unsigned&);
+static int atlasIcon(int action){switch(action){
+    case 60:case 113:return 0;case 61:case 62:return 1;case 65:case 101:return 2;case 66:case 103:case 124:return 3;
+    case 76:return 4;case 150:case 151:return 5;case 120:case 121:return 6;case 26:return 7;case 1:case 100:case 27:return 8;case 94:return 9;
+    case 187:return 10;case 188:return 11;case 190:return 8;case 216:return 24;case 16:return 12;case 17:case 81:return 13;case 18:return 14;case 56:return 15;
+    case 63:case 70:return 16;case 78:return 17;case 77:return 18;case 79:return 19;case 211:return 20;case 212:return 21;case 210:return 22;case 215:case 384:return 23;
+    case 73:case 89:return 24;case 108:return 25;case 105:return 26;case 104:return 27;case 321:return 28;case 320:return 29;case 322:return 30;case 326:return 31;default:return -1;
+}}
+static std::filesystem::path toolAtlasPath(int sheet=0){wchar_t path[32768]{};GetModuleFileNameW(nullptr,path,32768);auto directory=std::filesystem::path(path).parent_path();for(int i=0;i<6&&!directory.empty();++i,directory=directory.parent_path()){auto atlas=directory/(sheet?"assets/ui/ark-domain-atlas-v1.png":"assets/ui/ark-tool-atlas-v1.png");if(std::filesystem::is_regular_file(atlas))return atlas;}return {};}
+static void decorateMenu(HMENU menu){
+    static std::map<int,HBITMAP> bitmaps;struct Atlas{std::vector<unsigned char> pixels;unsigned w=0,h=0;};static Atlas atlases[2];
+    for(int i=0;i<GetMenuItemCount(menu);++i){MENUITEMINFOW item{sizeof item};item.fMask=MIIM_ID|MIIM_SUBMENU;GetMenuItemInfoW(menu,(UINT)i,TRUE,&item);if(item.hSubMenu)decorateMenu(item.hSubMenu);int icon=atlasIcon((int)item.wID);if(icon<0)continue;auto& atlas=atlases[icon/16];if(atlas.pixels.empty()){auto path=toolAtlasPath(icon/16);if(path.empty()||!decodeCanvasFile(path.wstring(),atlas.pixels,atlas.w,atlas.h))continue;}const auto& pixels=atlas.pixels;unsigned w=atlas.w,h=atlas.h;int cell=icon%16;
+        HBITMAP bitmap=bitmaps[icon];if(!bitmap){constexpr int size=22;BITMAPINFO info{};info.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);info.bmiHeader.biWidth=size;info.bmiHeader.biHeight=-size;info.bmiHeader.biPlanes=1;info.bmiHeader.biBitCount=32;void* raw=nullptr;bitmap=CreateDIBSection(nullptr,&info,DIB_RGB_COLORS,&raw,nullptr,0);if(!bitmap)continue;auto* output=(unsigned char*)raw;
+            for(int y=0;y<size;++y)for(int x=0;x<size;++x){unsigned sx=(unsigned)((cell%4+(x+.5)/size)*w/4),sy=h-1-(unsigned)((cell/4+(y+.5)/size)*h/4);const auto* source=pixels.data()+((size_t)sy*w+sx)*4;auto* dest=output+(y*size+x)*4;dest[0]=(unsigned char)(source[2]*source[3]/255);dest[1]=(unsigned char)(source[1]*source[3]/255);dest[2]=(unsigned char)(source[0]*source[3]/255);dest[3]=source[3];}bitmaps[icon]=bitmap;
+        }MENUITEMINFOW image{sizeof image};image.fMask=MIIM_BITMAP;image.hbmpItem=bitmap;SetMenuItemInfoW(menu,(UINT)i,TRUE,&image);
+    }
+}
 static u64 g_physicalRevision=0,g_physicalSelection=0;static bool g_physicalVisible=false,g_physicalAssembly=false;
 static std::vector<PartPick> g_partPicks;
 static std::vector<float> g_selectionLines;
@@ -599,6 +619,9 @@ void main(){tc=T;tint=C;vec2 c=P/vp*2.-1.;c.y=-c.y;gl_Position=vec4(c,0.,1.);})"
 static const char* FS_TEXT=R"(#version 330 core
 in vec2 tc; in vec3 tint; out vec4 o; uniform sampler2D txx;
 void main(){o=vec4(tint,texture(txx,tc).r);})";
+static const char* FS_ICON=R"(#version 330 core
+in vec2 uv;out vec4 o;uniform sampler2D atlas;uniform vec2 tile;uniform float opacity;
+void main(){vec2 q=(tile+clamp(uv,vec2(.002),vec2(.998)))*.25;q.y=1.-q.y;vec4 p=texture(atlas,q);o=vec4(p.rgb,p.a*opacity);})";
 
 // ---------------------------------------------------------------------------
 static void uploadMesh(GPUMesh& gm,const Mesh& m){
@@ -1076,7 +1099,7 @@ static void recordAssistantUsageSnapshot(const AssistantUsage& usage){
 }
 static arkjson::Value runTool(const std::string& tool,const arkjson::Value& args){
     flushPendingUsage();
-    bool potentiallySlow=tool=="doc_load"||tool=="doc_apply"||tool=="doc_undo"||tool=="doc_redo"||tool=="import_step"||tool=="import_sheet_step"||tool=="import_mesh"||tool=="export_step"||tool=="export_iges"||tool=="export_mesh"||tool=="export_flat_dxf";
+    bool potentiallySlow=tool=="doc_load"||tool=="doc_apply"||tool=="doc_preview"||tool=="design_solve"||tool=="placement_plan"||tool=="pattern_plan"||tool=="query_batch"||tool=="geometry_query"||tool=="physics_inspect"||tool=="native_inspect"||tool=="step_inspect"||tool=="reference_inspect"||tool=="assembly_info"||tool=="kernel_info"||tool=="doc_undo"||tool=="doc_redo"||tool=="import_step"||tool=="import_sheet_step"||tool=="import_mesh"||tool=="export_step"||tool=="export_iges"||tool=="export_mesh"||tool=="export_flat_dxf";
     auto result=potentiallySlow&&g_uiReady&&(!g_headless||g_busyTestMode)?callSessionWithProgress(tool,args):g_session.call(tool,args);g_error=result.find("isError")->b;
     u64 loadedUsageSerial=g_doc.usage.serial;
     if(g_error)g_status=result.find("structuredContent")->find("error")->asStr();
@@ -1084,6 +1107,7 @@ static arkjson::Value runTool(const std::string& tool,const arkjson::Value& args
     if(!g_error&&(tool=="doc_load"||tool=="doc_new"||tool=="import_step"||tool=="import_sheet_step")){g_sheetFlatViews.clear();g_sheetProgress.clear();g_sheetPlayingId=0;}
     bool appearanceOnly=false;
     if(tool=="doc_apply")if(auto* content=result.find("structuredContent"))if(auto* flag=content->find("geometry_recomputed"))appearanceOnly=flag->t==arkjson::Value::Bool&&!flag->b;
+    if(tool=="doc_apply")if(auto* content=result.find("structuredContent"))if(auto* prepared=content->find("applied_prepared");prepared&&prepared->b)appearanceOnly=false;
     if(!g_error&&!appearanceOnly&&(tool=="doc_apply"||tool=="doc_load"||tool=="doc_undo"||tool=="doc_redo"||tool=="import_step"||tool=="import_sheet_step"||tool=="import_mesh"||tool=="doc_new"))rebuildScene();
     if(!g_error&&(tool=="doc_load"||tool=="doc_new")){
         if(g_ownAssistantTool&&g_currentUsageReceipt)applyUsageReceipt(*g_currentUsageReceipt);
@@ -1925,8 +1949,11 @@ static void materialDialog(){
         {"Density / g per cm3",number(proposedDensity)},{"Base color / R, G, B",rgb},
         {"Metallic / 0-1",number(appearance.metallic)},{"Roughness / 0-1",number(appearance.roughness)},
         {"Opacity / 0-1",number(appearance.opacity)},{"Texture image path",appearance.texturePath},
-        {"Texture repeats U, V",scale}};
-    if(!editFields("Body material","Presets are nominal. Edit every value for the actual grade. Image paths are relative to the ARK document.",fields))return;
+        {"Texture repeats U, V",scale},
+        {"Young modulus / GPa (0 = unknown)",number(existing&&existing->physical.find("young_modulus_Pa")?existing->physical.find("young_modulus_Pa")->num/1e9:0)},
+        {"Poisson ratio",number(existing&&existing->physical.find("poisson_ratio")?existing->physical.find("poisson_ratio")->num:.3)},
+        {"Yield strength / MPa (0 = unknown)",number(existing&&existing->physical.find("yield_strength_Pa")?existing->physical.find("yield_strength_Pa")->num/1e6:0)}};
+    if(!editFields("Body material","Presets are nominal. Use the actual grade. A frame assignment updates every profile. Image paths are relative to the document.",fields))return;
     auto pairValues=[&](const std::string& value,int count){std::string clean=value;std::replace(clean.begin(),clean.end(),',',' ');std::istringstream input(clean);std::vector<double> values;double n;
         while(input>>n)values.push_back(n);if(!input.eof()||(int)values.size()!=count)throw std::runtime_error("Enter comma-separated numeric color or texture scale values");return values;};
     std::string name=trimField(fields[0].value);if(name.empty())throw std::runtime_error("Material name is required");
@@ -1936,8 +1963,10 @@ static void materialDialog(){
     for(double c:color)base.arr.push_back(V::makeNum(c));for(double s:repeats)scaleValue.arr.push_back(V::makeNum(s));
     ap.set("base_color",std::move(base));ap.set("metallic",V::makeNum(metallic));ap.set("roughness",V::makeNum(roughness));ap.set("opacity",V::makeNum(opacity));
     ap.set("texture_path",V::makeStr(trimField(fields[6].value)));ap.set("texture_scale",std::move(scaleValue));
-    material.set("op",V::makeStr("material.set"));material.set("name",V::makeStr(name));material.set("density",V::makeNum(density));material.set("appearance",std::move(ap));commands.arr.push_back(std::move(material));
-    V assign=V::makeObj();assign.set("op",V::makeStr("feature.edit"));assign.set("id",V::makeNum((double)feature->id));assign.set("material",V::makeStr(name));assign.set("appearance",V::makeObj());commands.arr.push_back(std::move(assign));
+    material.set("op",V::makeStr("material.set"));material.set("name",V::makeStr(name));material.set("density",V::makeNum(density));V physical=existing&&existing->physical.t==V::Obj?existing->physical:V::makeObj();physical.obj.erase(std::remove_if(physical.obj.begin(),physical.obj.end(),[](const auto& item){return item.first=="young_modulus_Pa"||item.first=="poisson_ratio"||item.first=="yield_strength_Pa";}),physical.obj.end());double young=formNumber(fields[8].value),poisson=formNumber(fields[9].value),yield=formNumber(fields[10].value);if(young<0||yield<0)throw std::runtime_error("Material stiffness and strength cannot be negative");if(young>0){physical.set("young_modulus_Pa",V::makeNum(young*1e9));physical.set("poisson_ratio",V::makeNum(poisson));}if(yield>0)physical.set("yield_strength_Pa",V::makeNum(yield*1e6));material.set("physical",physical);material.set("appearance",std::move(ap));commands.arr.push_back(std::move(material));
+    V assign=V::makeObj();assign.set("op",V::makeStr("feature.edit"));assign.set("id",V::makeNum((double)feature->id));assign.set("material",V::makeStr(name));assign.set("appearance",V::makeObj());
+    if(feature->type==FeatureType::ConstructionFrame){V native=feature->nativeSpec;if(const auto* profiles=native.find("profiles")){V changed=*profiles;for(auto& profile:changed.arr){profile.obj.erase(std::remove_if(profile.obj.begin(),profile.obj.end(),[](const auto& item){return item.first=="density_g_cm3";}),profile.obj.end());profile.set("material",V::makeStr(name));}native.set("profiles",changed);assign.set("native",native);}}
+    commands.arr.push_back(std::move(assign));
     std::string featureName=feature->name;
     V args=V::makeObj();args.set("expected_revision",V::makeNum((double)g_session.revision));args.set("commands",std::move(commands));runTool("doc_apply",args);
     if(!g_error)g_status="Material "+name+" applied to "+featureName;
@@ -1947,15 +1976,31 @@ static void physicalProperties(bool assemblyTotal=false){
     if(selBody>=0&&(size_t)selBody>=g_bodyIds.size())throw std::runtime_error("Selected body is unavailable");
     using V=arkjson::Value;g_physicalAssembly=assemblyTotal||selBody<0;
     if(g_physicalAssembly&&g_doc.assembly.empty())throw std::runtime_error("No assembly is active");
-    V args=V::makeObj();if(!g_physicalAssembly)args.set("id",V::makeNum((double)g_bodyIds[(size_t)selBody]));
-    V response=g_session.call(g_physicalAssembly?"assembly_info":"native_inspect",args);
+    V args=g_physicalSettings.t==V::Obj?g_physicalSettings:V::makeObj();if(!g_physicalAssembly)args.set("id",V::makeNum((double)g_bodyIds[(size_t)selBody]));
+    if(!g_physicalAssembly){
+        const Mat4 local=g_instanceWorld[(size_t)selBody].inverted();
+        auto convert=[&](const V& value,bool point){if(value.t!=V::Arr||value.arr.size()!=3)throw std::runtime_error("Physical input requires xyz");Vec3 v{value.arr[0].asNum(),value.arr[1].asNum(),value.arr[2].asNum()};v=point?local.transformPoint(v):local.transformDir(v);V out=V::makeArr();for(double n:{v.x,v.y,v.z})out.arr.push_back(V::makeNum(n));return out;};
+        V gravity,origin;arkjson::parse("[0,0,-9.80665]",gravity);arkjson::parse("[0,0,0]",origin);args.set("gravity",convert(args.find("gravity")?*args.find("gravity"):gravity,false));args.set("reference_point_mm",convert(args.find("reference_point_mm")?*args.find("reference_point_mm"):origin,true));
+        for(const char* key:{"velocity_m_s","angular_velocity_rad_s","acceleration_m_s2","angular_acceleration_rad_s2"})if(auto value=args.find(key)){V transformed=convert(*value,false);args.set(key,transformed);}
+        if(auto rows=args.find("loads")){V loads=*rows;for(auto& load:loads.arr){for(const char* key:{"force_N","torque_Nm"})if(auto value=load.find(key)){V transformed=convert(*value,false);load.set(key,transformed);}if(auto value=load.find("point_mm")){V transformed=convert(*value,true);load.set("point_mm",transformed);}}args.set("loads",loads);}
+    }
+    V response=g_uiReady&&!g_headless?callSessionWithProgress("physics_inspect",args):g_session.call("physics_inspect",args);
     g_physicalError.clear();g_physicalReport=V::makeObj();
     if(auto* error=response.find("isError");error&&error->t==V::Bool&&error->b){
         auto* content=response.find("structuredContent");auto* reason=content?content->find("error"):nullptr;
         g_physicalError=reason?reason->asStr():"Physical properties unavailable";
-    }else if(auto* content=response.find("structuredContent"))g_physicalReport=*content;
+    }else if(auto* content=response.find("structuredContent")){g_physicalReport=*content;if(auto reason=content->find("mass_reason"))g_physicalError=reason->asStr();if(auto missing=content->find("missing");missing&&missing->t==V::Arr&&!missing->arr.empty())g_physicalError=missing->arr.front().asStr();}
     g_physicalRevision=g_session.revision;g_physicalSelection=selBody>=0?(g_instanceIds[(size_t)selBody]?g_instanceIds[(size_t)selBody]:g_bodyIds[(size_t)selBody]):0;g_physicalVisible=true;
     g_status=g_physicalError.empty()?"Physical properties inspected at current revision":g_physicalError;
+}
+static void physicsSettingsDialog(){
+    using V=arkjson::Value;
+    auto values=[&](const char* key,const char* fallback){const V* value=g_physicalSettings.find(key);if(!value||value->t!=V::Arr||value->arr.size()!=3)return std::string(fallback);return value->arr[0].dump()+", "+value->arr[1].dump()+", "+value->arr[2].dump();};
+    std::vector<EditorField> fields{{"Gravity / m per s2",values("gravity","0, 0, -9.80665")},{"Moment reference / mm",values("reference_point_mm","0, 0, 0")},{"Velocity / m per s",values("velocity_m_s","0, 0, 0")},{"Angular speed / rad per s",values("angular_velocity_rad_s","0, 0, 0")},{"Applied force / N","0, 0, 0"},{"Force position / mm","0, 0, 0"}};
+    if(!editFields("Rigid-body load case","Vectors and load points use world coordinates. Uniform gravity; instantaneous balance, no deformation or contact simulation.",fields))return;
+    auto parse=[](std::string value){std::replace(value.begin(),value.end(),',',' ');std::istringstream input(value);V vector=V::makeArr();double n;while(input>>n){if(!std::isfinite(n))throw std::runtime_error("Vector must be finite");vector.arr.push_back(V::makeNum(n));}if(!input.eof()||vector.arr.size()!=3)throw std::runtime_error("Enter three vector coordinates");return vector;};
+    V settings=V::makeObj();const char* keys[]={"gravity","reference_point_mm","velocity_m_s","angular_velocity_rad_s"};for(int i=0;i<4;++i)settings.set(keys[i],parse(fields[(size_t)i].value));
+    V loads=V::makeArr(),load=V::makeObj();load.set("force_N",parse(fields[4].value));load.set("point_mm",parse(fields[5].value));loads.arr.push_back(load);settings.set("loads",loads);g_physicalSettings=settings;physicalProperties(g_physicalAssembly);
 }
 static void usageDrawer(){
     UsageTotals totals=usageTotals(g_doc);std::ostringstream report;
@@ -2413,7 +2458,7 @@ static void commandPalette(){
     group("Mesh",{{155,"Weld mesh"},{156,"Smooth mesh"},{157,"Decimate mesh"},{158,"Offset mesh"},{159,"Fill planar holes"},{160,"Import STL/OBJ"}});
     group("Sheet metal",{{120,"Create sheet base"},{127,"Edit sheet base"},{121,"Add flange"},{122,"Edit flange"},{123,"Remove flange"},{124,"Add opening or pattern"},{125,"Edit opening"},{126,"Remove opening"},{327,"Export analytic flat DXF"},{128,"Play / pause bend preview"},{80,"Create L bend"},{81,"Import sheet STEP"},{83,"Show formed"},{84,"Show flat"}});
     group("View & agents",{{20,"Fit document"},{71,"Normal to sketch plane"},{180,"Front"},{181,"Back"},{23,"Top"},{184,"Bottom"},{182,"Right"},{183,"Left"},{24,"Isometric"},{175,"Orthographic"},{174,"Visible edges"},{186,"Cycle ambient occlusion"},{187,"Edit selected body material"},{188,"Inspect mass and center of mass"},{176,"Orbit"},{177,"Pan"},{178,"Zoom"},{14,"Wireframe"},{22,"Grid"},{56,"Graphics settings"},{57,"ChatGPT account"},{357,"API key settings (advanced)"},{58,"Codex / live MCP"},{21,"Raw agent command"},{31,"Help"}});
-    POINT point;GetCursorPos(&point);int id=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,point.x,point.y,0,g_window,nullptr);DestroyMenu(menu);if(id)interactiveAction(id);
+    decorateMenu(menu);POINT point;GetCursorPos(&point);int id=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,point.x,point.y,0,g_window,nullptr);DestroyMenu(menu);if(id)interactiveAction(id);
 }
 static void focusSourceOpening(int index){
     auto* f=selectedSourceTube();if(!f)return;auto& cache=g_sourceViews.at(f->id);if(index<0||index>=(int)cache.preview.holes.arr.size())return;
@@ -2467,14 +2512,14 @@ static void uiAction(int id){
         case 49:g_foldPlaying=false;g_foldProgress=std::min(1.,g_foldProgress+.1);break;
         case 51:exportStraightStep();break;
         case 52:importSourceStep();break;
-        case 55:newDocument();break;case 56:graphicsDialog();break;case 57:showAssistantAccountMenu();break;case 58:liveConnectionDialog();break;case 59:commandPalette();break;case 187:materialDialog();break;case 188:physicalProperties();break;case 189:g_physicalVisible=false;break;case 190:physicalProperties(!g_physicalAssembly);break;
+        case 55:newDocument();break;case 56:graphicsDialog();break;case 57:showAssistantAccountMenu();break;case 58:liveConnectionDialog();break;case 59:commandPalette();break;case 187:materialDialog();break;case 188:physicalProperties();break;case 189:g_physicalVisible=false;break;case 190:physicalProperties(!g_physicalAssembly);break;case 216:physicsSettingsDialog();break;
         case 357:connectorDialog();break;case 358:g_assistantConfig.authMode=AssistantAuthMode::ApiKey;g_assistantConfig.model.clear();g_assistantConfig.reasoningEffort.clear();*g_assistantCancel=true;++g_documentEpoch;g_conversation=V::makeArr();saveUiSettings();g_status="API key mode selected. Configure model in Advanced settings.";break;
         case 360:startAuthJob(AuthJob::SignIn);break;case 361:chooseChatGptModel();break;case 362:startAuthJob(AuthJob::SignOut);break;
         case 364:if(g_authStatus.activeClientId.empty())throw std::runtime_error("Choose a saved ChatGPT account first");startAuthJob(AuthJob::SignIn,g_authStatus.activeClientId,true);break;
         case 365:if(g_authStatus.pendingClientId.empty())throw std::runtime_error("No pending ChatGPT registration to retry");startAuthJob(AuthJob::SignIn,g_authStatus.pendingClientId);break;
         case 366:cancelAuthJob();break;
         case 367:chooseReasoningEffort();break;
-        case 300:case 301:case 302:case 303:case 304:g_toolModule=id-300;break;
+        case 300:case 301:case 302:case 303:case 304:case 305:g_toolModule=id-300;break;
         case 210:createConstructionFrame();break;case 211:createPcb();break;case 212:createCableRoute();break;case 213:exportModelDialog();break;case 215:createSuspensionDialog();break;
         case 383:if(!selectedSuspension())throw std::runtime_error("Select a suspension to animate");g_suspSpinPlaying=!g_suspSpinPlaying;g_suspTick=0;g_status=g_suspSpinPlaying?"Kinematic corner preview playing / document unchanged":"Kinematic corner preview paused";break;
         case 384:{if(!selectedSuspension()){auto found=std::find_if(g_bodyIds.begin(),g_bodyIds.end(),[&](u64 id){auto* feature=g_doc.find(id);return feature&&feature->type==FeatureType::Suspension;});
@@ -2776,7 +2821,7 @@ static void pickReference(int mx,int my){
 }
 
 // ---------------------------------------------------------------------------
-static GLuint pBg,pBusy,pSolid,pCube,pGrid,pShadow,pUI,pText,pSketch,pGeom,pAo,pCompose,pEdge,pCanvas;
+static GLuint pBg,pBusy,pSolid,pCube,pGrid,pShadow,pUI,pText,pSketch,pGeom,pAo,pCompose,pEdge,pCanvas,pIcons;
 static GLint suVp,suModel,suOutline,suColor,suEye,suSel,suHard;
 static GLint guView,guProj,guModel,guHard,auProj,auFocal,auOrtho,auRadius,auBias,cuOrigin,euVp,euModel;
 static GLint uuVp,uuRc,uuRad,uuFill,uuBorder,uuBW,uuGlyph;
@@ -3121,10 +3166,13 @@ static void drawFrame(HDC hdc){
     POINT mp; GetCursorPos(&mp);
     HWND hw=WindowFromDC(hdc); ScreenToClient(hw,&mp);
 
-    textBegin();g_zones.clear();g_hoverZone=-1;
+    textBegin();g_zones.clear();g_hoverZone=-1;std::string ribbonHint;
     auto panel=[&](float x,float y,float w,float h,float r=0.f){rect(x,y,w,h,r,.088f,.092f,.102f,1,.21f,.22f,.24f,.65f,1);};
     auto label=[&](const std::string& t,float x,float y,float scale=.75f){textOut(t,x,y,scale,.55f,.57f,.62f);};
     auto glyph=[&](int id,float x,float y,float size,float c=.82f){
+        int icon=atlasIcon(id);static GLuint atlases[2]{};
+        if(icon>=0){auto& atlas=atlases[icon/16];int cell=icon%16;if(!atlas){auto path=toolAtlasPath(icon/16);if(!path.empty()){auto encoded=path.u8string();atlas=canvasTexture(std::string(encoded.begin(),encoded.end()));if(atlas==g_canvasMissing)atlas=0;}}
+            if(atlas){glUseProgram(pIcons);glUniform2f(glGetUniformLocation(pIcons,"vp"),W,H);glUniform4f(glGetUniformLocation(pIcons,"rc"),x,y,size,size);glUniform2f(glGetUniformLocation(pIcons,"tile"),(float)(cell%4),(float)(cell/4));glUniform1f(glGetUniformLocation(pIcons,"opacity"),std::clamp(c+.15f,0.f,1.f));glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,atlas);glUniform1i(glGetUniformLocation(pIcons,"atlas"),0);glBindVertexArray(quadVao);glDrawArrays(GL_TRIANGLES,0,6);glUseProgram(pUI);return;}}
         glUniform1i(uuGlyph,id);glUniform4f(uuRc,x,y,size,size);
         glUniform4f(uuFill,c,c+.01f,c+.025f,1);glBindVertexArray(quadVao);glDrawArrays(GL_TRIANGLES,0,6);
         glUniform1i(uuGlyph,0);
@@ -3164,13 +3212,15 @@ static void drawFrame(HDC hdc){
     button("Undo",W-438,20,64,18);button("Redo",W-366,20,64,19);button("Save",W-294,20,76,16);button("Export",W-208,20,76,213,true);button("Commands",W-124,20,106,59);
     float ribbonScale=std::clamp(((float)viewW-622.f)/420.f,0.f,1.f);
     const float ribbonX=(float)viewX+12,ribbonY=(float)viewY+12,ribbonW=std::min((float)viewW-(110.f+35.f*ribbonScale)-36.f,704.f);
-    rect(ribbonX,ribbonY,ribbonW,g_toolModule==4?151.f:106.f,12,.067f,.081f,.105f,.97f,.34f,.43f,.56f,.82f,1.2f);
-    const char* moduleNames[]={"CONSTRUCTION","FRAMES","SURFACE","ELECTRONICS","SHEET METAL"};
-    float tabW=(ribbonW-28.f)/5.f;
-    for(int module=0;module<5;++module){float x=ribbonX+9+module*tabW;bool active=g_toolModule==module;
+    rect(ribbonX,ribbonY+3,ribbonW,g_toolModule==4?188.f:139.f,12,.015f,.022f,.035f,.35f,0,0,0,0,0);
+    rect(ribbonX,ribbonY,ribbonW,g_toolModule==4?188.f:139.f,12,.063f,.077f,.098f,.98f,.23f,.32f,.42f,.90f,1);
+    const char* moduleNames[]={"CONSTRUCTION","FRAMES","SURFACE","ELECTRONICS","SHEET METAL","PHYSICS"};
+    const char* shortNames[]={"BUILD","FRAMES","SURFACE","PCB","SHEET","PHYSICS"};
+    float tabW=(ribbonW-28.f)/6.f;
+    for(int module=0;module<6;++module){float x=ribbonX+9+module*tabW;bool active=g_toolModule==module;
         rect(x,ribbonY+8,tabW-5,29,6,active?.20f:.10f,active?.31f:.13f,active?.42f:.17f,1,active?.42f:.22f,active?.67f:.31f,active?.86f:.43f,1,1);
         if(active)rect(x+8,ribbonY+34,tabW-21,2,1,.42,.78,.97,1,0,0,0,0,0);
-        const char* tabTitle=module==4&&tabW<99?"SHEET":moduleNames[module];
+        const char* tabTitle=tabW<104?shortNames[module]:moduleNames[module];
         float textScale=tabW<100?.48f:tabW<126?.53f:.64f;textOut(tabTitle,x+(tabW-5-textWidth(tabTitle,textScale))*.5f,ribbonY+14,textScale,active?.90f:.66f,active?.95f:.75f,active?1.f:.85f);
         g_zones.push_back({x,ribbonY+8,tabW-5,29,300+module});}
     struct RibbonAction{const char* title;int id;};
@@ -3178,14 +3228,21 @@ static void drawFrame(HDC hdc){
     static const RibbonAction frames[]={{"Frame",210},{"Susp.",215},{"Corner",384},{"Tube",26},{"Assembly",27},{"Mate",94}};
     static const RibbonAction surface[]={{"Loft",76},{"Fill",77},{"NURBS",78},{"Sweep",150},{"Thicken",79}};
     static const RibbonAction electronics[]={{"PCB",211},{"Cable",212},{"Material",187},{"Physics",188}};
+    static const RibbonAction physicsActions[]={{"Material",187},{"Mass / CG",188},{"Loads",216},{"Assembly",190}};
     static const RibbonAction sheetActions[]={{"New base",120},{"Flange",121},{"Opening",124},{"Edit",325},{"Import",81}};
     static const RibbonAction poses[]={{"Formed",321},{"Flat",320},{"Unbend",322},{"Pause",323},{"Chassis",324},{"Stock",326}};
-    const RibbonAction* actions=g_toolModule==1?frames:g_toolModule==2?surface:g_toolModule==3?electronics:g_toolModule==4?sheetActions:construction;
-    int actionCount=g_toolModule==3?4:g_toolModule==1?6:5;float actionW=(ribbonW-30.f-(actionCount-1)*6.f)/actionCount;
-    for(int i=0;i<actionCount;++i)button(actions[i].title,ribbonX+15+i*(actionW+6),ribbonY+56,actionW,actions[i].id,i==0);
+    const RibbonAction* actions=g_toolModule==1?frames:g_toolModule==2?surface:g_toolModule==3?electronics:g_toolModule==4?sheetActions:g_toolModule==5?physicsActions:construction;
+    int actionCount=g_toolModule==3||g_toolModule==5?4:g_toolModule==1?6:5;float actionW=(ribbonW-30.f-(actionCount-1)*6.f)/actionCount;
+    for(int i=0;i<actionCount;++i){const auto& action=actions[i];float x=ribbonX+15+i*(actionW+6),y=ribbonY+49;bool hover=mp.x>=x&&mp.x<x+actionW&&mp.y>=y&&mp.y<y+71;bool enabled=action.id==187?selBody>=0:action.id==188||action.id==216?selBody>=0||!g_doc.assembly.empty():action.id==190?!g_doc.assembly.empty():true;
+        if(hover){g_hoverZone=action.id;ribbonHint=!enabled?"Select a part or assembly first":action.id==187?"Assign density, appearance and elastic properties":action.id==188?"Inspect mass, gravity center and inertia":action.id==216?"Set gravity, forces and rigid-body motion":action.id==190?"Inspect the complete visible assembly":std::string(action.title)+"  /  "+moduleNames[g_toolModule];}
+        rect(x,y,actionW,71,7,hover?.14f:.09f,hover?.23f:.12f,hover?.31f:.16f,1,.30f,.47f,.60f,hover?.95f:.28f,1);
+        glyph(action.id,x+(actionW-56)/2,y,56,!enabled?.15f:hover?1.f:.86f);float scale=actionW<75?.55f:.64f;
+        textOut(action.title,x+(actionW-textWidth(action.title,scale))*.5f,y+49,scale,enabled?.87f:.40f,enabled?.94f:.46f,enabled?.98f:.53f);if(enabled)g_zones.push_back({x,y,actionW,71,action.id});
+    }
+    const char* descriptions[]={"SKETCH  /  BUILD","STRUCTURE  /  ASSEMBLE","SURFACE  /  REFINE","LAYOUT  /  ROUTE","FORM  /  FABRICATE","MATERIAL  /  MASS  /  BALANCE"};label(descriptions[g_toolModule],ribbonX+18,ribbonY+125,.44f);
     if(g_toolModule==4){float poseW=(ribbonW-30.f-5*6.f)/6.f;
         for(int i=0;i<6;++i){bool current=i==0?!g_allSheetsFlat&&!g_allSheetsPlaying&&!g_stockMode:i==1?g_allSheetsFlat:i==2?g_allSheetsPlaying:i==4?g_allSheetsFlat&&g_flatShowChassis:i==5?g_stockMode:false;
-            button(poses[i].title,ribbonX+15+i*(poseW+6),ribbonY+101,poseW,poses[i].id,current,current);}}
+            button(poses[i].title,ribbonX+15+i*(poseW+6),ribbonY+147,poseW,poses[i].id,current,current);}}
     label("DOCUMENT",20,101,.66f);label(std::to_string(g_doc.features.size()),221,101,.66f);
     textOut("Model explorer",20,132,1.02f);label(std::to_string(g_doc.features.size())+" features / "+std::to_string(g_bodyIds.size())+" instances",20,162,.68f);
     float treeY=200;
@@ -3232,7 +3289,7 @@ static void drawFrame(HDC hdc){
         textOut(p.expr.substr(0,12),139,y+5,.78f,.83,.85,.89);g_zones.push_back({15,y-2,224,34,(int)i+1000});
     }
     label("PARAMETRIC WORKSPACE",20,H-66,.62f);
-    float captionY=(float)viewY+(g_toolModule==4?182.f:139.f);
+    float captionY=(float)viewY+(g_toolModule==4?213.f:170.f);
     textOut(g_cameraOrtho?"Orthographic":"Perspective",viewX+24,captionY,.85f,g_lightBackground?.22f:.87f,g_lightBackground?.25f:.89f,g_lightBackground?.29f:.93f);
     static const char* aoNames[]={"AO OFF","CONTACT AO","AMBIENT AO","HORIZON AO"};
     std::string viewSubtitle=std::string(aoNames[g_occlusionMode])+"  /  mm";
@@ -3485,17 +3542,22 @@ static void drawFrame(HDC hdc){
     }
     }
     if(g_physicalVisible){
-        float px=W-292,py=H-465;panel(px,py,280,210,8);
+        float px=W-292,py=std::max(280.f,H-545);
+        // Text is batched after panels. Remove covered inspector glyphs and hit
+        // zones so the drawer is visually opaque and cannot click through.
+        std::vector<float> visibleText;visibleText.reserve(g_textVerts.size());
+        for(size_t offset=0;offset+41<g_textVerts.size();offset+=42){float minX=1e9f,minY=1e9f,maxX=-1e9f,maxY=-1e9f;for(int v=0;v<6;++v){float x=g_textVerts[offset+(size_t)v*7],y=g_textVerts[offset+(size_t)v*7+1];minX=std::min(minX,x);maxX=std::max(maxX,x);minY=std::min(minY,y);maxY=std::max(maxY,y);}if(maxX<px||minX>px+280||maxY<py||minY>py+300)visibleText.insert(visibleText.end(),g_textVerts.begin()+offset,g_textVerts.begin()+offset+42);}
+        g_textVerts=std::move(visibleText);g_zones.erase(std::remove_if(g_zones.begin(),g_zones.end(),[&](const auto& zone){return zone.x<px+280&&zone.x+zone.w>px&&zone.y<py+300&&zone.y+zone.h>py;}),g_zones.end());panel(px,py,280,300,8);
         label(g_physicalAssembly?"ASSEMBLY PHYSICAL PROPERTIES":"BODY PHYSICAL PROPERTIES",px+12,py+11,.60f);
         if(!g_doc.assembly.empty()&&selBody>=0)button(g_physicalAssembly?"Part":"Assembly",px+112,py+34,91,190);
-        button("Close",px+215,py+34,53,189);
+        button("Loads",px+12,py+34,70,216);button("Close",px+215,py+34,53,189);
         const auto* mass=g_physicalReport.find("mass_g");const auto* weight=g_physicalReport.find("weight_N");
         const auto* density=g_physicalReport.find("density_g_cm3");const auto* center=g_physicalReport.find("center_mm");
         auto fmt=[](double value,const char* unit){char buffer[96];std::snprintf(buffer,sizeof buffer,"%.4g %s",value,unit);return std::string(buffer);};
         if(mass&&mass->t==arkjson::Value::Num&&weight&&weight->t==arkjson::Value::Num){
             label("Density",px+12,py+76,.62f);textOut(density&&density->t==arkjson::Value::Num?fmt(density->num,"g/cm3"):"mixed materials",px+112,py+76,.62f);
             label("Mass",px+12,py+101,.62f);textOut(mass->num>=1000?fmt(mass->num/1000.,"kg"):fmt(mass->num,"g"),px+112,py+101,.72f);
-            label("Weight",px+12,py+126,.62f);textOut(fmt(weight->num,"N @ 9.80665"),px+112,py+126,.62f);
+            label("Weight",px+12,py+126,.62f);textOut(fmt(weight->num,"N"),px+112,py+126,.62f);
             if(center&&center->t==arkjson::Value::Arr&&center->arr.size()==3){
                 char xyz[112];std::snprintf(xyz,sizeof xyz,"%.2f, %.2f, %.2f mm",center->arr[0].num,center->arr[1].num,center->arr[2].num);
                 label(g_physicalAssembly?"World COM":"Local COM",px+12,py+151,.62f);textOut(xyz,px+12,py+173,.68f);
@@ -3503,15 +3565,20 @@ static void drawFrame(HDC hdc){
                 double cw=vp.m[3]*point.x+vp.m[7]*point.y+vp.m[11]*point.z+vp.m[15];Vec3 clip=vp.transformPoint(point);
                 if(cw>1e-5){float sx=viewX+(float)((clip.x/cw+1.)*.5*viewW),sy=viewY+(float)((1.-clip.y/cw)*.5*viewH);
                     if(sx>viewX+118&&sx<viewX+viewW-12&&sy>viewY+145&&sy<viewY+viewH-45){
-                        rect(sx-13,sy-1,26,2,1,.99,.56,.21,1,0,0,0,0,0);rect(sx-1,sy-13,2,26,1,.99,.56,.21,1,0,0,0,0,0);textOut("COM",sx+14,sy-9,.65f,1.,.68,.32);
+                        rect(sx-12,sy-12,24,24,12,.04,.10,.15,.94,.39,.85,1,1,2);rect(sx-16,sy-1,32,2,1,.48,.88,1,1,0,0,0,0,0);rect(sx-1,sy-16,2,32,1,.48,.88,1,1,0,0,0,0,0);textOut(g_physicalReport.find("center_of_gravity_mm")&&g_physicalReport.find("center_of_gravity_mm")->t==arkjson::Value::Arr?"CG / COM":"COM",sx+19,sy-9,.65f,.32f,.78f,.96f);
                     }
                 }
             }
+            if(const auto* inertia=g_physicalReport.find("inertia_kg_m2");inertia&&inertia->arr.size()==9){
+                rect(px+10,py+203,260,48,6,.055,.075,.095,1,.22,.35,.45,.6,1);label("INERTIA AT COM  /  kg.m2",px+19,py+210,.49f);
+                char principal[120];std::snprintf(principal,sizeof principal,"X %.3g   Y %.3g   Z %.3g",inertia->arr[0].num,inertia->arr[4].num,inertia->arr[8].num);textOut(principal,px+19,py+229,.60f,.67f,.87f,.98f);
+            }
+            if(const auto* energy=g_physicalReport.find("kinetic_energy_J")){label("Kinetic energy",px+12,py+267,.57f);textOut(fmt(energy->num,"J"),px+150,py+267,.62f);}
         }else{
             label("Mass unavailable",px+12,py+78,.72f);
             std::string reason=g_physicalError.empty()?"Assign density to every exact solid":g_physicalError;
-            textOut(reason.substr(0,37),px+12,py+109,.62f,.89f,.67f,.50f);
-            label("Exact B-rep volume required",px+12,py+146,.61f);
+            for(size_t line=0;line<4&&line*37<reason.size();++line)textOut(reason.substr(line*37,37),px+12,py+109+(float)line*18,.62f,.89f,.67f,.50f);
+            label("Exact geometry + declared density",px+12,py+198,.56f);
         }
     }
     if((g_allSheetsFlat||g_stockMode)&&!g_physicalVisible){
@@ -3625,6 +3692,7 @@ static void drawFrame(HDC hdc){
     char st[180];std::snprintf(st,sizeof st,"%zu triangles   /   %.2f ms recompute   /   %.0f fps",g_triangleCount,g_doc.recomputeMs,g_fps);
     label(st,viewX+16,H-21,.61f);label(g_cameraOrtho?"Ortho  |  wheel zoom":"Perspective  |  wheel zoom",W-250,H-21,.58f);
 
+    if(!ribbonHint.empty()){float width=textWidth(ribbonHint,.60f)+22,x=std::clamp((float)mp.x+12.f,10.f,W-width-10.f),y=(float)mp.y+20;rect(x,y,width,29,6,.035,.055,.075,.98,.27,.51,.65,.95,1);textOut(ribbonHint,x+11,y+7,.60f,.87f,.94f,1.f);}
     // flush text
     glUseProgram(pText);
     glUniform2f(glGetUniformLocation(pText,"vp"),W,H);
@@ -3682,6 +3750,16 @@ static void drawBusyFrame(HDC hdc){
     if(g_swap)SwapBuffers(hdc);++g_busyFrameCount;
 }
 
+class StudioSessionExecutor {
+    std::mutex mutex_;std::condition_variable ready_;std::function<void()> pending_;bool stop_=false;std::thread thread_;
+public:
+    StudioSessionExecutor():thread_([this]{for(;;){std::function<void()> job;{std::unique_lock<std::mutex> lock(mutex_);ready_.wait(lock,[&]{return stop_||(bool)pending_;});if(stop_&&!pending_)return;job=std::move(pending_);pending_={};}job();}}){}
+    ~StudioSessionExecutor(){{std::lock_guard<std::mutex> lock(mutex_);stop_=true;}ready_.notify_all();thread_.join();}
+    std::future<arkjson::Value> submit(const std::string& tool,const arkjson::Value& args,unsigned delay){
+        auto task=std::make_shared<std::packaged_task<arkjson::Value()>>([tool,args,delay]{if(delay)std::this_thread::sleep_for(std::chrono::milliseconds(delay));return g_session.call(tool,args);});auto future=task->get_future();
+        {std::lock_guard<std::mutex> lock(mutex_);if(stop_||pending_)throw std::runtime_error("Studio session executor is unavailable");pending_=[task]{(*task)();};}ready_.notify_one();return future;
+    }
+};
 static arkjson::Value callSessionWithProgress(const std::string& tool,const arkjson::Value& args){
     HDC hdc=GetDC(g_window);if(!hdc)throw std::runtime_error("Could not acquire Studio viewport for kernel operation");
     struct BusyCleanup{
@@ -3700,10 +3778,10 @@ static arkjson::Value callSessionWithProgress(const std::string& tool,const arkj
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
     g_swap=cleanup.previousSwap;g_busy=true;g_busyStarted=std::chrono::steady_clock::now();
     g_busyLabel=tool=="doc_load"?"Loading document":tool.rfind("import",0)==0?"Importing geometry":tool.rfind("export",0)==0?"Exporting geometry":"Evaluating geometry";
-    std::atomic_bool completed{false};arkjson::Value response;std::exception_ptr failure;
-    std::jthread worker([&]{try{if(g_busyTestDelayMs)std::this_thread::sleep_for(std::chrono::milliseconds(g_busyTestDelayMs));response=g_session.call(tool,args);}catch(...){failure=std::current_exception();}completed=true;});
+    static StudioSessionExecutor executor;auto response=executor.submit(tool,args,g_busyTestDelayMs);
+    struct JoinRequest {std::future<arkjson::Value>& response;~JoinRequest(){if(response.valid())response.wait();}} join{response};
     unsigned frameBefore=g_busyFrameCount;
-    while(!completed){
+    while(response.wait_for(std::chrono::milliseconds(0))!=std::future_status::ready){
         MSG message{};
         while(PeekMessageA(&message,nullptr,0,0,PM_REMOVE)){
             if(message.message==WM_QUIT||message.message==WM_CLOSE){g_busyClosePending=true;continue;}
@@ -3720,9 +3798,7 @@ static arkjson::Value callSessionWithProgress(const std::string& tool,const arkj
             writePNG(g_busyTestShot.c_str(),image);
         }
     }
-    worker.join();
-    if(failure)std::rethrow_exception(failure);
-    return response;
+    return response.get();
 }
 
 enum class ContextTarget{Empty,Body,Sketch,Datum};
@@ -3771,7 +3847,7 @@ static void showContextMenu(int mx,int my){
         if(!entry.action)AppendMenuA(menu,MF_SEPARATOR,0,nullptr);
         else AppendMenuA(menu,MF_STRING|(entry.enabled?0:MF_GRAYED),(UINT_PTR)entry.action,entry.title);
     }
-    POINT screen{mx,my};ClientToScreen(g_window,&screen);SetForegroundWindow(g_window);
+    decorateMenu(menu);POINT screen{mx,my};ClientToScreen(g_window,&screen);SetForegroundWindow(g_window);
     int action=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,screen.x,screen.y,0,g_window,nullptr);
     DestroyMenu(menu);PostMessage(g_window,WM_NULL,0,0);if(action)interactiveAction(action);
 }
@@ -4034,7 +4110,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     pGrid=mkProg(VS_LINE,FS_LINE);
     pShadow=mkProg(VS_SHADOW,FS_SHADOW);
     pUI=mkProg(VS_UI,FS_UI);
-    pText=mkProg(VS_TEXT,FS_TEXT);
+    pText=mkProg(VS_TEXT,FS_TEXT);pIcons=mkProg(VS_UI,FS_ICON);
     pSketch=mkProg(VS_LINE,"#version 330 core\nout vec4 o;uniform vec4 tint;void main(){o=tint;}");
     pCanvas=mkProg(
         "#version 330 core\nlayout(location=0) in vec3 P;layout(location=1) in vec2 T;uniform mat4 vp,model;out vec2 vuv;void main(){vuv=T;gl_Position=vp*model*vec4(P,1.);}",
@@ -4291,6 +4367,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     }
     if(renderUiTest){
         using V=arkjson::Value;
+        {HMENU probe=CreatePopupMenu();AppendMenuA(probe,MF_STRING,16,"Save");AppendMenuA(probe,MF_STRING,63,"Spline");decorateMenu(probe);for(int i=0;i<2;++i){MENUITEMINFOW item{sizeof item};item.fMask=MIIM_BITMAP;if(!GetMenuItemInfoW(probe,(UINT)i,TRUE,&item)||!item.hbmpItem){DestroyMenu(probe);return 247;}}DestroyMenu(probe);}
         if(g_doc.usage.entries.empty()&&tokenBadgeLabel()!="TOKENS N/A")return 227;
         if(g_bodyIds.empty())return 201;
         selBody=0;g_showDatumPlanes=false;g_showSketches=false;rebuildSketchOverlay();
@@ -4346,7 +4423,11 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
             selBody=(int)std::distance(g_bodyIds.begin(),selected);uiAction(188);
             const auto* mass=g_physicalReport.find("mass_g");const auto* center=g_physicalReport.find("center_mm");const auto* weight=g_physicalReport.find("weight_N");
             if(!g_physicalVisible||!mass||!weight||!center||center->t!=V::Arr||center->arr.size()!=3||std::abs(mass->num-2.7)>1e-5||std::abs(weight->num-2.7*.00980665)>1e-6)return 214;
-            if(!capture(".physics.png"))return 215;
+            g_toolModule=5;if(!capture(".physics.png"))return 215;
+            V plan=V::makeObj(),edits=V::makeArr(),edit=V::makeObj(),previewDimensions=V::makeObj();plan.set("expected_revision",V::makeNum((double)g_session.revision));edit.set("op",V::makeStr("feature.edit"));edit.set("id",V::makeNum((double)g_bodyIds[(size_t)selBody]));previewDimensions.set("width",V::makeNum(20));edit.set("p",previewDimensions);edits.arr.push_back(edit);plan.set("commands",edits);
+            auto preview=runTool("doc_preview",plan);if(g_error||!preview.find("structuredContent")->find("valid")->b)return 248;
+            auto committed=runTool("doc_apply",*preview.find("structuredContent")->find("apply"));if(g_error||!committed.find("structuredContent")->find("applied_prepared")->b)return 249;
+            const auto displayed=g_cpuMeshes[g_instancePart[(size_t)selBody]].computeBBox();if(std::abs(displayed.mx.x-displayed.mn.x-20)>1e-5)return 250;
         }
         {
             bool queuedCompleted=false;auto queued=std::make_unique<UiToolRequest>();queued->tool="doc_info";queued->args=V::makeObj();queued->complete=[&](V){queuedCompleted=true;};

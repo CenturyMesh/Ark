@@ -1,0 +1,87 @@
+{
+  "date": "2026-10-09",
+  "base_commit": "f59ae92aeb7eb5bb4c6521f597bd48b9aabec570",
+  "working_tree_changes": true,
+  "native_ctest": {
+    "passed": 36,
+    "total": 36
+  },
+  "core_ctest": {
+    "passed": 24,
+    "total": 24
+  },
+  "benchmark_scope": "same final implementation; process-per-request versus resident worker; C++ geometry workflow, no LLM",
+  "llm_tokens_measured": false,
+  "runs": {
+    "resident": [
+      {
+        "elapsed_ms": 791.388,
+        "worker_requests": 64,
+        "worker_process_starts": 2,
+        "native_threads": 8
+      },
+      {
+        "elapsed_ms": 750.667,
+        "worker_requests": 64,
+        "worker_process_starts": 2,
+        "native_threads": 8
+      },
+      {
+        "elapsed_ms": 655.258,
+        "worker_requests": 64,
+        "worker_process_starts": 2,
+        "native_threads": 8
+      }
+    ],
+    "one_shot": [
+      {
+        "elapsed_ms": 2508.41,
+        "worker_requests": 64,
+        "worker_process_starts": 64,
+        "native_threads": 8
+      },
+      {
+        "elapsed_ms": 2002.92,
+        "worker_requests": 64,
+        "worker_process_starts": 64,
+        "native_threads": 8
+      },
+      {
+        "elapsed_ms": 2005.63,
+        "worker_requests": 64,
+        "worker_process_starts": 64,
+        "native_threads": 8
+      }
+    ]
+  },
+  "tool_schema_bytes": 28545,
+  "detailed_schema_bytes": 36755,
+  "resident_median_ms": 750.667,
+  "one_shot_median_ms": 2005.63,
+  "transport_speedup": 2.671797215010118,
+  "schema_byte_reduction_percent": 22.33709699360631,
+  "source_sha256": {
+    "CMakeLists.txt": "8e6df8dfad9ca52de292ce27e4fcbd3d22fdb337d1c5b8189b80ae59dae1f8e8",
+    "include/ark/agent.hpp": "256a3f82fd671312feafc091ae954e0c77062bd0203c8004456d4f0d87e8bfb1",
+    "include/ark/agent_features.hpp": "3a9b02a15af5e1e897268004d65d6acea25cbf0d72d251bc161829a737e56fb6",
+    "include/ark/brep.hpp": "c6b2aac740ba8c3b602063cfc5a3e5babd3a50efc425cafaed7c5dfb9c3898d5",
+    "include/ark/model.hpp": "d5802346ef2f822d09655a9c445cd470144f467f58e9a749b5d0874fd13e7819",
+    "include/ark/occt_solid.hpp": "508ef1c00820b20f17baec1dfc762fedc43ac77ea66378ca9cba6e0f6a769442",
+    "include/ark/sketch.hpp": "fbf295ef843b746c768d884035afc9a989db100e53c91dd497a0d091508789b6",
+    "src/agent.cpp": "07cfd0de53cbf8da582afa8e3b91a146452137e5430961607b94125d4a60b3cd",
+    "src/agent_features.cpp": "5843018d96941972d2e72fc5332dafc040f266dda81ea42797663cd312283a2c",
+    "src/app/occt_worker.cpp": "d3143a193075b40d9317dc37ae37b46c8c58c4d18390d82f0ca44b3067792eb7",
+    "src/evaluate.cpp": "2f53af68bf1f0604505552c0cf8f220ac36c17ab60681ca0681300cc49c2b2b6",
+    "src/native_features.cpp": "7d4aad04621158c38ccd7f032890ab96727b5e2f804d0c09c28ef48b5148eff5",
+    "src/occt/solid_modeling.cpp": "8db30dd60b7b3164b729fb4454de2f7de0e17d29dee3e70cfa4b1dc09246e9f8",
+    "src/onboarding.cpp": "a640dd5c818961946c7dcee410e965230240aaf6363b946847d0e96f3fe6f29e",
+    "src/serialize.cpp": "84e56c040d02258d1d2e1e080526a0e33356e801d5012f4e4f7afe7eadea4bd0",
+    "src/solver.cpp": "2e18646515ec28ff5c6f41ea4e01af3b3956da7c6862aae07dd1e850b9ba5f66",
+    "src/step_export.cpp": "846e2e2cbb88dd227e99025028f52ca4e053a8610d7191b12ab3f0991154b078",
+    "tests/agent_features_tests.cpp": "8c6974a487dc5d5505033e6076a2559dde04cb255e814b521c26f8bb9ad7de1d",
+    "tests/agent_tests.cpp": "56e7e3af7562f8b653b6c4758f6cad95d81e8edaa925854eb287573964c803d8",
+    "tests/modeling_workflow_tests.cpp": "d7c635aaa5201a6e25f79d471f72d6223cf07b152813425dfb6b914041105911"
+  },
+  "counter_scope": "Process counters include the final kernel-info probe immediately after the timed region.",
+  "controls": "ARK_NATIVE_ONESHOT=0 versus 1; three sequential fresh test processes per mode; native_threads=8."
+}

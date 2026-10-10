@@ -3,6 +3,13 @@
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
+#include <BRepAlgoAPI_Section.hxx>
+#include <BRepTools.hxx>
+#include <BRepLProp_CLProps.hxx>
+#include <GCPnts_AbscissaPoint.hxx>
+#include <GProp_PrincipalProps.hxx>
+#include <ShapeAnalysis_FreeBounds.hxx>
+#include <TopTools_HSequenceOfShape.hxx>
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepGProp.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
@@ -579,7 +586,31 @@ V modelSolidNative(const V& request){
     else if(op=="extrude")result=makeExtrusion(request,refs);
     else {
         const auto& encoded=need(request,"input_brep");if(encoded.t!=V::Str)throw std::runtime_error("Input must be a native B-rep");TopoDS_Shape input=readBrep(encoded.str);shapeReport(input,true);refs=inputRefs(request,"input_brep","input_topology",input);
-        if(op=="union"||op=="cut"||op=="common"||op=="hole"){
+        if(op=="curve_pattern"||op=="hole_pattern"){
+            V query=V::makeObj(),queries=V::makeArr(),model=V::makeObj();query.set("action",V::makeStr("curve"));query.set("reference",need(request,"reference"));query.set("count",need(request,"count"));query.set("margin_mm",V::makeNum(optional(request,"margin_mm",0)));queries.arr.push_back(query);model.set("brep",need(request,"tool_brep"));model.set("topology",need(request,"tool_topology"));model.set("queries",queries);
+            const double count=scalar(request,"count");if(count<2||count>128||count!=std::floor(count))throw std::runtime_error("Curve pattern count must be 2..128");
+            if(op=="curve_pattern"&&count*refs.size()>512)throw std::runtime_error("Curve pattern exceeds 512 semantic references");
+            V report=geometryQueryNative(model);const V& row=need(report,"results").arr[0];if(!need(row,"ok").b)throw std::runtime_error(word(row,"error"));
+            gp_Vec offset(0,0,0);if(const auto* value=request.find("offset")){auto p=point(*value,"offset");offset=gp_Vec(p.X(),p.Y(),p.Z());}
+            std::vector<TopoDS_Shape> copies;std::vector<Ref> copiedRefs;int ordinal=0;
+            for(const auto& sample:need(row,"samples").arr){
+                auto position=point(need(sample,"point_mm"),"point").Translated(offset);++ordinal;
+                if(op=="hole_pattern"){
+                    auto directionPoint=point(need(request,"normal"),"normal");gp_Dir normal(directionPoint.X(),directionPoint.Y(),directionPoint.Z());
+                    auto hole=BRepPrimAPI_MakeCylinder(gp_Ax2(position,normal),positive(request,"radius"),positive(request,"depth")).Shape();
+                    auto overlap=common(input,hole);if(properties(overlap)<=1e-9)throw std::runtime_error("Pattern hole does not intersect the target solid");copies.push_back(hole);
+                }else{
+                    gp_Trsf place;
+                    if(const V* hint=request.find("x_hint")){
+                        auto tangent=point(need(sample,"tangent"),"tangent"),h=point(*hint,"x_hint");gp_Vec z(tangent.X(),tangent.Y(),tangent.Z()),x(h.X(),h.Y(),h.Z());z.Normalize();x-=z*x.Dot(z);if(x.Magnitude()<1e-10)throw std::runtime_error("Pattern x_hint parallel to curve tangent");x.Normalize();gp_Vec y=z.Crossed(x);place.SetValues(x.X(),y.X(),z.X(),position.X(),x.Y(),y.Y(),z.Y(),position.Y(),x.Z(),y.Z(),z.Z(),position.Z());
+                    }else place.SetTranslation(gp_Vec(position.X(),position.Y(),position.Z()));
+                    BRepBuilderAPI_Transform moved(input,place,true);if(!moved.IsDone())throw std::runtime_error("Curve instance transform failed");copies.push_back(moved.Shape());
+                    for(auto ref:refs){ref.name="copy."+std::to_string(ordinal-1)+"."+ref.name;if(selectable(ref.status)&&!ref.shape.IsNull()){ref.shape=moved.ModifiedShape(ref.shape);ref.seed=V{};}copiedRefs.push_back(ref);}
+                }
+            }
+            if(op=="hole_pattern"){BRepAlgoAPI_Cut algorithm(input,compound(copies));if(!algorithm.IsDone()||algorithm.HasErrors())throw std::runtime_error("Hole pattern cut failed");result=algorithm.Shape();refs=propagated(refs,result,algorithm);}
+            else{result=compound(copies);refs=std::move(copiedRefs);many=true;}
+        }else if(op=="union"||op=="cut"||op=="common"||op=="hole"){
             TopoDS_Shape tool;std::vector<Ref> toolRefs;
             if(op=="hole")tool=cutter(need(request,"cutter"));
             else{const auto& encodedTool=need(request,"tool_brep");if(encodedTool.t!=V::Str)throw std::runtime_error("Tool must be native B-rep");tool=readBrep(encodedTool.str);shapeReport(tool,false);if(shapes(tool,TopAbs_SOLID).empty()||!(properties(tool)>0))throw std::runtime_error("Boolean tool needs one or more positive-volume solids");toolRefs=inputRefs(request,"tool_brep","tool_topology",tool);}
@@ -689,10 +720,10 @@ V clearanceNative(const V& request){
     if(const V* frameB=request.find("b_frame"))holderB.set("frame",*frameB);
     const gp_Trsf placeA=transform(frame(holderA)),placeB=transform(frame(holderB));
     TopoDS_Shape placedA=transformed(shapeA,placeA),placedB=transformed(shapeB,placeB);
-    BRepExtrema_DistShapeShape distance(placedA,placedB);distance.Perform();
+    BRepExtrema_DistShapeShape distance(placedA,placedB);
     if(!distance.IsDone()||distance.NbSolution()<1)throw std::runtime_error("Exact clearance failed");
     const double gap=distance.Value();
-    BRepAlgoAPI_Common overlap(placedA,placedB);overlap.Build();
+    BRepAlgoAPI_Common overlap(placedA,placedB);
     const bool overlapOk=overlap.IsDone()&&!overlap.HasErrors();
     const double overlapVolume=overlapOk?std::abs(properties(overlap.Shape())):0;
     if(gap<=1e-3&&!overlapOk)throw std::runtime_error("Exact clearance could not measure the intersection");
@@ -715,6 +746,14 @@ V clearanceNative(const V& request){
     result.set("face_a",V::makeStr(faceNear(inputRefs(request,"a_brep","a_topology",shapeA),pointA)));
     result.set("face_b",V::makeStr(faceNear(inputRefs(request,"b_brep","b_topology",shapeB),pointB)));
     result.set("clearance_authority",V::makeStr("exact_brep"));
+    result.set("separation_mm",V::makeNum(overlapVolume>volumeTol?0:gap));
+    result.set("overlap_volume_mm3",overlapOk?V::makeNum(overlapVolume):V{});
+    result.set("overlap_checked",V::makeBool(overlapOk));
+    result.set("penetration_estimate_mm",clearance<0?V::makeNum(-clearance):V{});
+    result.set("penetration_depth_checked",V::makeBool(false));
+    result.set("clearance_is_estimate",V::makeBool(clearance<0));
+    result.set("distance_tolerance_mm",V::makeNum(gapTol));
+    result.set("overlap_tolerance_mm3",V::makeNum(volumeTol));
     return result;
 }
 V pointDistanceNative(const V& request){
@@ -727,7 +766,6 @@ V pointDistanceNative(const V& request){
     if(!faces.empty()){BRep_Builder builder;TopoDS_Compound skin;builder.MakeCompound(skin);for(const auto& face:faces)builder.Add(skin,face);boundary=skin;}
     const TopoDS_Shape probe=BRepBuilderAPI_MakeVertex(query).Shape();
     BRepExtrema_DistShapeShape distance(probe,boundary);
-    distance.Perform();
     if(!distance.IsDone()||distance.NbSolution()<1)throw std::runtime_error("Point distance failed");
     double gap=distance.Value();
     // A wire has no interior. Only one solid reports an inside point as negative.
@@ -740,6 +778,7 @@ V pointDistanceNative(const V& request){
     if(request.find("topology")) face=faceNear(inputRefs(request,"brep","topology",shape),distance.PointOnShape2(1));
     V result=V::makeObj();
     result.set("distance_mm",V::makeNum(gap));
+    result.set("nearest_point_mm",xyz(distance.PointOnShape2(1)));
     result.set("face",V::makeStr(face));
     return result;
 }
@@ -756,5 +795,120 @@ V solidCentroidNative(const V& request){
     for(double value:{center.X(),center.Y(),center.Z()})pointValue.arr.push_back(V::makeNum(value));
     result.set("center_mm",pointValue);
     return result;
+}
+V geometryQueryNative(const V& request){
+    const auto shape=readBrep(word(request,"brep"));
+    const auto refs=inputRefs(request,"brep","topology",shape);
+    auto select=[&](const std::string& name)->const Ref&{
+        const Ref* found=nullptr;
+        for(const auto& ref:refs)if(ref.name==name){if(found)throw std::runtime_error("Ambiguous reference");found=&ref;}
+        if(!found||!selectable(found->status)||found->shape.IsNull())throw std::runtime_error("Missing, split or deleted reference: "+name);
+        return *found;
+    };
+    auto curveSample=[&](const Ref& ref,double fraction){
+        if(ref.kind!="edge"||fraction<0||fraction>1)throw std::runtime_error("Curve sample requires edge and fraction 0..1");
+        BRepAdaptor_Curve c(TopoDS::Edge(ref.shape));
+        const double length=GCPnts_AbscissaPoint::Length(c);
+        double u=c.FirstParameter();
+        if(fraction==1)u=c.LastParameter();
+        else if(fraction>0){GCPnts_AbscissaPoint ab(c,length*fraction,u,1e-8);if(!ab.IsDone())throw std::runtime_error("Arc length inversion failed");u=ab.Parameter();}
+        BRepLProp_CLProps prop(c,u,2,1e-9);V row=V::makeObj();
+        row.set("point_mm",xyz(prop.Value()));row.set("parameter",V::makeNum(u));
+        row.set("fraction",V::makeNum(fraction));row.set("length_mm",V::makeNum(length));
+        row.set("tangent_defined",V::makeBool(prop.IsTangentDefined()));
+        if(prop.IsTangentDefined()){gp_Dir tangent;prop.Tangent(tangent);row.set("tangent",direction(tangent));double curvature=prop.Curvature();row.set("curvature_per_mm",V::makeNum(curvature));gp_XYZ curvatureVector(0,0,0);if(curvature>1e-12){gp_Dir normal;prop.Normal(normal);curvatureVector=normal.XYZ()*curvature;}row.set("curvature_vector_per_mm",vec(curvatureVector));}
+        return row;
+    };
+    auto evaluate=[&](const V& q)->V{
+        const std::string action=word(q,"action");V out=V::makeObj();out.set("authority",V::makeStr("exact_brep"));out.set("coordinates",V::makeStr("feature_local"));
+        const std::map<std::string,std::set<std::string>> fields{
+            {"references",{"action","filter","unique"}},{"properties",{"action","reference","density_g_cm3"}},
+            {"curve",{"action","reference","count","margin_mm","fraction"}},{"surface",{"action","reference","u","v"}},
+            {"continuity",{"action","a","b","fraction_a","fraction_b","distance_tolerance_mm","angle_tolerance_deg","curvature_tolerance_per_mm"}},
+            {"section",{"action","origin","normal"}},{"point_distance",{"action","point"}}};
+        if(auto allowed=fields.find(action);allowed!=fields.end())for(const auto& field:q.obj)if(!allowed->second.count(field.first))throw std::runtime_error("Unknown geometry query field: "+field.first);
+        if(action=="references"){
+            V matches=V::makeArr();const V* filter=q.find("filter");
+            if(filter&&filter->t!=V::Obj)throw std::runtime_error("filter must be an object");
+            if(filter&&bool(filter->find("near"))!=bool(filter->find("within_mm")))throw std::runtime_error("Reference proximity requires both near and within_mm");
+            const double tolerance=filter?optional(*filter,"tolerance_mm",1e-6):1e-6;
+            const double angle=filter?optional(*filter,"angle_tolerance_deg",.1):.1;
+            if(tolerance<=0||angle<=0||angle>180)throw std::runtime_error("Invalid reference search tolerance");
+            for(const auto& ref:refs){
+                if(!selectable(ref.status)||ref.shape.IsNull())continue;
+                V d=descriptor(ref);bool match=true;
+                if(filter){
+                    for(const auto& kv:filter->obj)if(kv.first!="kind"&&kv.first!="surface"&&kv.first!="normal"&&kv.first!="axis"&&kv.first!="radius_mm"&&kv.first!="near"&&kv.first!="within_mm"&&kv.first!="adjacent_to"&&kv.first!="tolerance_mm"&&kv.first!="angle_tolerance_deg"&&kv.first!="coaxial_origin")throw std::runtime_error("Unknown reference filter: "+kv.first);
+                    if(filter->find("kind"))match&=word(*filter,"kind")==ref.kind;
+                    if(filter->find("surface")){
+                        if(ref.kind!="face")match=false;
+                        else{BRepAdaptor_Surface s(TopoDS::Face(ref.shape));const char* names[]={"plane","cylinder","cone","sphere","torus","bezier","bspline","revolution","extrusion","offset","other"};int k=(int)s.GetType();match&=word(*filter,"surface")==names[k>=0&&k<10?k:10];}
+                    }
+                    for(const char* key:{"normal","axis"})if(const V* wanted=filter->find(key)){
+                        const V* actual=d.find(key);if(!actual)match=false;
+                        else{gp_Pnt a=point(*actual,key),b=point(*wanted,key);gp_Vec av(a.X(),a.Y(),a.Z()),bv(b.X(),b.Y(),b.Z());if(bv.Magnitude()<1e-12)throw std::runtime_error("Zero search direction");double alignment=av.Normalized().Dot(bv.Normalized());if(std::string(key)=="axis")alignment=std::abs(alignment);match&=alignment>=std::cos(angle*std::acos(-1.)/180.);}
+                    }
+                    if(filter->find("radius_mm")){auto radius=d.find("radius");match&=radius&&std::abs(radius->num-scalar(*filter,"radius_mm"))<=tolerance;}
+                    if(const V* nearby=filter->find("near")){const double limit=positive(*filter,"within_mm");BRepExtrema_DistShapeShape dist(BRepBuilderAPI_MakeVertex(point(*nearby,"near")),ref.shape);if(!dist.IsDone())throw std::runtime_error("Reference proximity failed");match&=dist.Value()<=limit;}
+                    if(const V* origin=filter->find("coaxial_origin")){
+                        const V* axis=d.find("axis");const V* base=d.find("origin");if(!axis||!base)match=false;
+                        else{auto a=point(*axis,"axis");gp_Vec axisV(a.X(),a.Y(),a.Z());match&=gp_Vec(point(*base,"origin"),point(*origin,"coaxial_origin")).Crossed(axisV.Normalized()).Magnitude()<=tolerance;}
+                    }
+                    if(filter->find("adjacent_to")){
+                        const auto& other=select(word(*filter,"adjacent_to"));bool adjacent=false;
+                        for(const auto& edge:shapes(other.shape,TopAbs_EDGE))if(edge.IsSame(ref.shape))adjacent=true;
+                        for(const auto& edge:shapes(ref.shape,TopAbs_EDGE))for(const auto& edge2:shapes(other.shape,TopAbs_EDGE))if(edge.IsSame(edge2))adjacent=true;
+                        match&=adjacent&&!ref.shape.IsSame(other.shape);
+                    }
+                }
+                if(!match)continue;V row=V::makeObj();row.set("reference",V::makeStr(ref.name));row.set("kind",V::makeStr(ref.kind));row.set("status",V::makeStr(ref.status));row.set("descriptor",d);row.set("matched_all_filters",V::makeBool(true));matches.arr.push_back(row);
+            }
+            if(const V* unique=q.find("unique")){if(unique->t!=V::Bool)throw std::runtime_error("unique must be boolean");if(unique->b&&matches.arr.size()!=1)throw std::runtime_error(matches.arr.empty()?"No reference matched":"Ambiguous reference query");}
+            out.set("matches",matches);out.set("count",V::makeNum(matches.arr.size()));
+        }else if(action=="properties"){
+            TopoDS_Shape selected=q.find("reference")?select(word(q,"reference")).shape:shape;
+            GProp_GProps area,length;BRepGProp::SurfaceProperties(selected,area);BRepGProp::LinearProperties(selected,length);
+            out.set("area_mm2",V::makeNum(area.Mass()));out.set("edge_length_sum_mm",V::makeNum(length.Mass()));
+            if(area.Mass()>0)out.set("area_center_mm",xyz(area.CentreOfMass()));
+            V box=V::makeArr();for(double n:bounds(selected))box.arr.push_back(V::makeNum(n));out.set("bounds_mm",box);
+            if(!shapes(selected,TopAbs_SOLID).empty()){
+                GProp_GProps props;BRepGProp::VolumeProperties(selected,props);out.set("volume_mm3",V::makeNum(props.Mass()));out.set("center_mm",xyz(props.CentreOfMass()));
+                V inertia=V::makeArr();auto tensor=props.MatrixOfInertia();for(int i=1;i<=3;++i)for(int j=1;j<=3;++j)inertia.arr.push_back(V::makeNum(tensor.Value(i,j)));out.set("volume_inertia_mm5_row_major",inertia);
+                auto principal=props.PrincipalProperties();double x,y,z;principal.Moments(x,y,z);V moments=V::makeArr();for(double n:{x,y,z})moments.arr.push_back(V::makeNum(n));out.set("principal_moments_mm5",moments);
+                V axes=V::makeArr();axes.arr.push_back(vec(principal.FirstAxisOfInertia().XYZ()));axes.arr.push_back(vec(principal.SecondAxisOfInertia().XYZ()));axes.arr.push_back(vec(principal.ThirdAxisOfInertia().XYZ()));out.set("principal_axes",axes);out.set("principal_axes_unique",V::makeBool(!principal.HasSymmetryAxis()));
+                if(q.find("density_g_cm3")){double density=positive(q,"density_g_cm3");if(density>100)throw std::runtime_error("Density exceeds 100 g/cm3");out.set("mass_g",V::makeNum(props.Mass()*density/1000));for(auto& n:inertia.arr)n.num*=density/1000;out.set("mass_inertia_g_mm2_row_major",inertia);}
+            }
+        }else if(action=="curve"){
+            const auto& ref=select(word(q,"reference"));double count=optional(q,"count",1),margin=optional(q,"margin_mm",0);
+            if(count<1||count>128||count!=std::floor(count)||margin<0)throw std::runtime_error("Curve count must be 1..128; margin nonnegative");
+            if(q.find("fraction")&&(count!=1||margin!=0))throw std::runtime_error("Choose one fraction or count/margin sampling");
+            auto middle=curveSample(ref,.5);const double length=need(middle,"length_mm").num;if(length<=0||2*margin>length)throw std::runtime_error("Curve margins exceed length");
+            V samples=V::makeArr();for(int i=0;i<(int)count;++i){double fraction=q.find("fraction")?scalar(q,"fraction"):(count==1?.5:(margin+(length-2*margin)*i/(count-1))/length);samples.arr.push_back(curveSample(ref,fraction));}
+            out.set("samples",samples);out.set("length_mm",V::makeNum(length));out.set("spacing",V::makeStr("arc_length"));
+        }else if(action=="surface"){
+            const auto& ref=select(word(q,"reference"));if(ref.kind!="face")throw std::runtime_error("Surface query needs a face");
+            auto face=TopoDS::Face(ref.shape);double u0,u1,v0,v1;BRepTools::UVBounds(face,u0,u1,v0,v1);
+            double u=optional(q,"u",(u0+u1)/2),v=optional(q,"v",(v0+v1)/2);BRepClass_FaceClassifier inside(face,gp_Pnt2d(u,v),1e-7);
+            if(inside.State()!=TopAbs_IN&&inside.State()!=TopAbs_ON)throw std::runtime_error("UV point is outside trimmed face");
+            BRepAdaptor_Surface surface(face);BRepLProp_SLProps p(surface,u,v,2,1e-9);out.set("point_mm",xyz(p.Value()));V uv=V::makeArr();for(double n:{u0,u1,v0,v1})uv.arr.push_back(V::makeNum(n));out.set("uv_bounds",uv);
+            out.set("normal_defined",V::makeBool(p.IsNormalDefined()));if(p.IsNormalDefined()){gp_Dir normal=p.Normal();if(face.Orientation()==TopAbs_REVERSED)normal.Reverse();out.set("normal",direction(normal));}
+            out.set("curvature_defined",V::makeBool(p.IsCurvatureDefined()));if(p.IsCurvatureDefined()){double sign=face.Orientation()==TopAbs_REVERSED?-1:1;out.set("mean_curvature_per_mm",V::makeNum(sign*p.MeanCurvature()));out.set("gaussian_curvature_per_mm2",V::makeNum(p.GaussianCurvature()));out.set("max_curvature_per_mm",V::makeNum(sign>0?p.MaxCurvature():-p.MinCurvature()));out.set("min_curvature_per_mm",V::makeNum(sign>0?p.MinCurvature():-p.MaxCurvature()));}
+        }else if(action=="continuity"){
+            auto a=curveSample(select(word(q,"a")),optional(q,"fraction_a",1));auto b=curveSample(select(word(q,"b")),optional(q,"fraction_b",0));double gap=point(need(a,"point_mm"),"a").Distance(point(need(b,"point_mm"),"b"));out.set("gap_mm",V::makeNum(gap));
+            if(!need(a,"tangent_defined").b||!need(b,"tangent_defined").b)throw std::runtime_error("Undefined endpoint tangent");
+            auto ta=point(need(a,"tangent"),"a"),tb=point(need(b,"tangent"),"b");double angle=gp_Vec(ta.X(),ta.Y(),ta.Z()).Angle(gp_Vec(tb.X(),tb.Y(),tb.Z()))*180/std::acos(-1.);out.set("tangent_angle_deg",V::makeNum(angle));out.set("curvature_magnitude_difference_per_mm",V::makeNum(std::abs(need(a,"curvature_per_mm").num-need(b,"curvature_per_mm").num)));
+            const double curvatureError=point(need(a,"curvature_vector_per_mm"),"a").Distance(point(need(b,"curvature_vector_per_mm"),"b"));out.set("curvature_vector_difference_per_mm",V::makeNum(curvatureError));
+            double distanceTol=optional(q,"distance_tolerance_mm",1e-6),angleTol=optional(q,"angle_tolerance_deg",.01),curvatureTol=optional(q,"curvature_tolerance_per_mm",1e-6);if(distanceTol<=0||angleTol<=0||curvatureTol<=0)throw std::runtime_error("Continuity tolerances must be positive");bool g0=gap<=distanceTol,g1=g0&&angle<=angleTol;out.set("g0",V::makeBool(g0));out.set("g1",V::makeBool(g1));out.set("g2",V::makeBool(g1&&curvatureError<=curvatureTol));out.set("g2_checked",V::makeBool(true));out.set("scope",V::makeStr("local_directed_curve_points"));
+        }else if(action=="section"){
+            auto origin=point(need(q,"origin"),"origin"),normal=point(need(q,"normal"),"normal");gp_Pln plane(origin,gp_Dir(normal.X(),normal.Y(),normal.Z()));BRepAlgoAPI_Section section(shape,plane,false);section.Build();if(!section.IsDone())throw std::runtime_error("Section failed");
+            auto edges=new TopTools_HSequenceOfShape;for(const auto& e:shapes(section.Shape(),TopAbs_EDGE))edges->Append(e);occ::handle<TopTools_HSequenceOfShape> wires=new TopTools_HSequenceOfShape;ShapeAnalysis_FreeBounds::ConnectEdgesToWires(edges,1e-7,false,wires);
+            V loops=V::makeArr();for(int i=1;i<=wires->Length();++i){auto wire=TopoDS::Wire(wires->Value(i));GProp_GProps length;BRepGProp::LinearProperties(wire,length);V loop=V::makeObj();loop.set("closed",V::makeBool(wire.Closed()));loop.set("length_mm",V::makeNum(length.Mass()));if(wire.Closed()){BRepBuilderAPI_MakeFace face(plane,wire,true);if(!face.IsDone())throw std::runtime_error("Section face failed");GProp_GProps area;BRepGProp::SurfaceProperties(face.Face(),area);loop.set("enclosed_area_mm2",V::makeNum(std::abs(area.Mass())));loop.set("center_mm",xyz(area.CentreOfMass()));V inertia=V::makeArr();auto tensor=area.MatrixOfInertia();for(int r=1;r<=3;++r)for(int c=1;c<=3;++c)inertia.arr.push_back(V::makeNum(tensor.Value(r,c)));loop.set("area_inertia_mm4_row_major",inertia);}loops.arr.push_back(loop);}out.set("loops",loops);out.set("nested_loops_combined",V::makeBool(false));
+        }else if(action=="point_distance"){
+            V model=request;model.set("point",need(q,"point"));out=pointDistanceNative(model);out.set("authority",V::makeStr("exact_brep"));
+        }else throw std::runtime_error("Unsupported geometry query action: "+action);
+        return out;
+    };
+    const auto& queries=need(request,"queries");if(queries.t!=V::Arr||queries.arr.empty()||queries.arr.size()>128)throw std::runtime_error("Need 1..128 geometry queries");
+    V result=V::makeObj(),rows=V::makeArr();for(size_t i=0;i<queries.arr.size();++i){V row;try{row=evaluate(queries.arr[i]);row.set("ok",V::makeBool(true));}catch(const Standard_Failure& e){row=V::makeObj();row.set("ok",V::makeBool(false));row.set("error",V::makeStr(e.GetMessageString()?e.GetMessageString():"OCCT query failed"));}catch(const std::exception& e){row=V::makeObj();row.set("ok",V::makeBool(false));row.set("error",V::makeStr(e.what()));}row.set("index",V::makeNum(i));rows.arr.push_back(row);}result.set("results",rows);return result;
 }
 }

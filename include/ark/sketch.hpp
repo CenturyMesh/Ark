@@ -13,6 +13,8 @@ DrivenSketchStatus bakeSketchProjects(Document& document, NamedSketch& sketch);
 // Diagnose a solved (or attempted) sketch without mutating it. Rank and
 // redundancy are local numerical properties of the current coordinates.
 arkjson::Value diagnoseSketch(const Sketch& sketch, double residualTolerance=1e-6);
+struct SketchLinearization { std::vector<double> residuals; std::vector<size_t> freeSlots; std::vector<std::vector<double>> jacobianColumns; };
+SketchLinearization linearizeSketch(const Sketch& sketch);
 struct SketchCurve {
     enum Kind { Line, Arc } kind=Line;
     Vec2 a{}, b{}, center{};

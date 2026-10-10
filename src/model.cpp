@@ -380,6 +380,13 @@ arkjson::Value appearanceToJson(const Appearance& appearance){
 bool validateMaterial(const Material& material,std::string& error){
     if(material.name.empty()||material.name.size()>128){error="Material name must be 1..128 characters";return false;}
     if(!std::isfinite(material.densityGcm3)||material.densityGcm3<0||material.densityGcm3>100){error="Material density must be 0..100 g/cm3 (zero means unspecified)";return false;}
+    if(material.physical.t!=arkjson::Value::Null&&material.physical.t!=arkjson::Value::Obj){error="Material physical properties must be an object";return false;}
+    for(const auto& item:material.physical.obj){
+        const auto& key=item.first;const auto& value=item.second;
+        if(value.t!=arkjson::Value::Num||!std::isfinite(value.num)){error="Physical material values must be finite SI numbers";return false;}
+        bool valid=key=="young_modulus_Pa"||key=="yield_strength_Pa"?value.num>0&&value.num<=1e15:key=="poisson_ratio"?value.num>-1&&value.num<.5:key=="thermal_expansion_per_K"?std::abs(value.num)<=.01:false;
+        if(!valid){error="Unsupported or invalid physical material property: "+key;return false;}
+    }
     Appearance check;return applyAppearancePatch(check,appearanceToJson(material.appearance),error);
 }
 

@@ -1,0 +1,222 @@
+#include "ark/agent_features.hpp"
+#include "ark/native_features.hpp"
+#include "ark/native_backend.hpp"
+#include "ark/references.hpp"
+#include "ark/sketch.hpp"
+#include "ark/physics.hpp"
+#include <chrono>
+#include <set>
+#include <map>
+#include <stdexcept>
+
+namespace ark {
+namespace {
+using V=arkjson::Value;
+const V& required(const V& a,const char* key){auto p=a.find(key);if(!p)throw std::runtime_error(std::string("Missing field: ")+key);return *p;}
+std::string text(const V& a,const char* key){const auto& p=required(a,key);if(p.t!=V::Str||p.str.empty())throw std::runtime_error(std::string("Expected text: ")+key);return p.str;}
+double number(const V& a,const char* key,double fallback=0){auto p=a.find(key);if(!p)return fallback;if(p->t!=V::Num||!std::isfinite(p->num)||std::abs(p->num)>1e12)throw std::runtime_error(std::string("Expected finite number: ")+key);return p->num;}
+V arr(Vec3 v){V a=V::makeArr();for(double n:{v.x,v.y,v.z})a.arr.push_back(V::makeNum(n));return a;}
+Vec3 vector(const V& a){if(a.t!=V::Arr||a.arr.size()!=3)throw std::runtime_error("Expected three finite coordinates");for(const auto& n:a.arr)if(n.t!=V::Num||!std::isfinite(n.num)||std::abs(n.num)>1e12)throw std::runtime_error("Invalid vector coordinate");return {a.arr[0].num,a.arr[1].num,a.arr[2].num};}
+Vec3 unit(Vec3 a){if(a.len()<1e-12)throw std::runtime_error("Direction is degenerate");return a.normalized();}
+V matrix(const Mat4& m){V a=V::makeArr();for(double n:m.m)a.arr.push_back(V::makeNum(n));return a;}
+Mat4 frame(const V& a){if(a.t!=V::Arr||a.arr.size()!=16)throw std::runtime_error("Frame needs 16 column-major numbers");Mat4 m;for(size_t i=0;i<16;++i){if(a.arr[i].t!=V::Num||!std::isfinite(a.arr[i].num))throw std::runtime_error("Invalid frame");m.m[i]=a.arr[i].num;}if(std::abs(m.m[3])+std::abs(m.m[7])+std::abs(m.m[11])+std::abs(m.m[15]-1)>1e-8)throw std::runtime_error("Frame must be affine");Vec3 x=m.transformDir({1,0,0}),y=m.transformDir({0,1,0}),z=m.transformDir({0,0,1});if(std::abs(x.len()-1)+std::abs(y.len()-1)+std::abs(z.len()-1)+std::abs(x.dot(y))+std::abs(x.dot(z))+std::abs(y.dot(z))+std::abs(x.cross(y).dot(z)-1)>1e-7)throw std::runtime_error("Frame must be rigid and right handed");return m;}
+Mat4 axes(Vec3 origin,Vec3 z,Vec3 hint){z=unit(z);Vec3 x=unit(hint-z*hint.dot(z)),y=z.cross(x);Mat4 m=Mat4::identity();const double values[]{x.x,x.y,x.z,0,y.x,y.y,y.z,0,z.x,z.y,z.z,0,origin.x,origin.y,origin.z,1};std::copy(std::begin(values),std::end(values),m.m);return m;}
+V payload(const V& r){if(auto e=r.find("isError");e&&e->b){auto p=r.find("structuredContent");throw std::runtime_error(p&&p->find("error")?p->find("error")->str:"Tool failed");}return required(r,"structuredContent");}
+u64 featureId(const Document& d,const V& v){u64 found=0;int count=0;for(const auto& f:d.features)if((v.t==V::Str&&f.name==v.str)||(v.t==V::Num&&v.num==(double)f.id)){found=f.id;++count;}if(count!=1)throw std::runtime_error(count?"Ambiguous feature":"Feature not found");return found;}
+const AssemblyNode& node(const Document& d,const V& v){const AssemblyNode* found=nullptr;for(const auto& n:d.assembly)if((v.t==V::Str&&n.name==v.str)||(v.t==V::Num&&v.num==(double)n.id)){if(found)throw std::runtime_error("Ambiguous instance");found=&n;}if(!found)throw std::runtime_error("Instance not found");return *found;}
+void expected(const AgentSession& s,const V& args){const auto& v=required(args,"expected_revision");if(v.t!=V::Num||v.num!=(double)s.revision)throw std::runtime_error("Revision conflict; read doc_info with detail design and retry");}
+V applyArgs(u64 revision,const V& commands){V a=V::makeObj();a.set("expected_revision",V::makeNum((double)revision));a.set("commands",commands);return a;}
+void copySession(const AgentSession& s,AgentSession& out){out.document=s.document;out.document.evaluatingBodies=nullptr;out.revision=s.revision;}
+V geometry(AgentSession& s,const V& args){
+    u64 id=featureId(s.document,required(args,"id"));ensureNativeBody(s.document,id,s.document.evalBodies);
+    const Body* body=nullptr;for(const auto& b:s.document.evalBodies)if(b.id==id)body=&b;
+    if(!body||!body->nativeData.find("brep_base64"))throw std::runtime_error("Query requires exact B-rep geometry");
+    V request=V::makeObj(),model=V::makeObj();model.set("brep",*body->nativeData.find("brep_base64"));if(auto topology=body->nativeData.find("topology"))model.set("topology",*topology);model.set("queries",required(args,"queries"));request.set("operation",V::makeStr("geometry_query"));request.set("request",model);V out=nativeWorkerRequest(request);out.set("revision",V::makeNum((double)s.revision));out.set("id",V::makeNum((double)id));return out;
+}
+V math(const V& args){
+    V r=V::makeObj();std::string op=text(args,"op");
+    if(op=="convert"){
+        const std::map<std::string,std::pair<int,double>> units{{"mm",{0,1}},{"cm",{0,10}},{"m",{0,1000}},{"in",{0,25.4}},{"deg",{1,K_PI/180}},{"rad",{1,1}},{"g",{2,1}},{"kg",{2,1000}}};
+        auto from=units.find(text(args,"from")),to=units.find(text(args,"to"));if(from==units.end()||to==units.end()||from->second.first!=to->second.first)throw std::runtime_error("Incompatible or unsupported units");required(args,"value");r.set("value",V::makeNum(number(args,"value")*from->second.second/to->second.second));r.set("unit",to==units.end()?V{}:V::makeStr(to->first));return r;
+    }
+    if(op=="frame"){r.set("frame",matrix(axes(vector(required(args,"origin")),vector(required(args,"z")),vector(required(args,"x_hint")))));return r;}
+    Vec3 a=vector(required(args,"a"));
+    if(op=="normalize")r.set("value",arr(unit(a)));
+    else if(op=="norm")r.set("value",V::makeNum(a.len()));
+    else if(op=="transform_point"||op=="transform_direction"){Mat4 from=frame(required(args,"from_frame")),to=frame(required(args,"to_frame"));auto m=to.inverted()*from;r.set("value",arr(op=="transform_point"?m.transformPoint(a):m.transformDir(a)));}
+    else if(op=="project_plane"||op=="line_plane"){
+        Vec3 origin=vector(required(args,"origin")),normal=unit(vector(required(args,"normal")));
+        if(op=="project_plane")r.set("value",arr(a-normal*(a-origin).dot(normal)));
+        else{Vec3 direction=unit(vector(required(args,"direction")));double divisor=direction.dot(normal);if(std::abs(divisor)<1e-12)throw std::runtime_error("Line is parallel to plane; no unique intersection");double distance=(origin-a).dot(normal)/divisor;r.set("value",arr(a+direction*distance));r.set("signed_distance",V::makeNum(distance));}
+    }else{
+        Vec3 b=vector(required(args,"b"));if(op=="add")r.set("value",arr(a+b));else if(op=="subtract")r.set("value",arr(a-b));else if(op=="cross")r.set("value",arr(a.cross(b)));else if(op=="dot")r.set("value",V::makeNum(a.dot(b)));else if(op=="distance")r.set("value",V::makeNum((a-b).len()));else if(op=="angle")r.set("value",V::makeNum(std::acos(std::clamp(unit(a).dot(unit(b)),-1.,1.))*180/K_PI));else throw std::runtime_error("Unknown math operation");
+    }
+    r.set("units",V::makeStr(op=="angle"?"deg":op=="normalize"?"dimensionless":op=="dot"||op=="cross"?"caller_coordinates_squared":"caller_coordinates"));return r;
+}
+const std::set<std::string> queryTools{"physics_inspect","materials_inspect","doc_info","eval_expr","plane_inspect","sketch_inspect","sketch_diagnose","reference_inspect","native_inspect","assembly_info","geometry_query","math_eval","mesh_inspect","frame_inspect","electronics_inspect","sheet_inspect","suspension_inspect","tube_inspect"};
+V queryValue(AgentSession& s,const V& spec){
+    const auto tool=text(spec,"tool");if(!queryTools.count(tool))throw std::runtime_error("Condition requires an allowed read-only query");
+    V data=payload(s.call(tool,required(spec,"args")));const std::string path=text(spec,"path");const V* value=&data;size_t start=0;
+    while(start<path.size()){
+        size_t end=path.find('.',start);std::string key=path.substr(start,end==std::string::npos?end:end-start);
+        if(value->t==V::Arr){if(key.empty()||key.find_first_not_of("0123456789")!=std::string::npos)throw std::runtime_error("Invalid result array index");size_t index=std::stoull(key);if(index>=value->arr.size())throw std::runtime_error("Result index out of range");value=&value->arr[index];}
+        else{value=value->find(key.c_str());if(!value)throw std::runtime_error("Result path not found: "+path);}
+        if(end==std::string::npos)break;start=end+1;
+    }
+    return *value;
+}
+double metric(AgentSession& s,const V& spec){V v=queryValue(s,spec);if(v.t!=V::Num||!std::isfinite(v.num))throw std::runtime_error("Objective must return a finite scalar");return v.num;}
+V preview(AgentSession& s,const V& args){return s.preparePreview(args);}
+Mat4 endpoint(AgentSession& s,const V& end){
+    int selectors=0;for(const char* key:{"node","feature","plane","frame"})selectors+=end.find(key)?1:0;if(selectors!=1)throw std::runtime_error("Endpoint requires exactly one node, feature, plane or frame");
+    if(auto explicitFrame=end.find("frame"))return frame(*explicitFrame);
+    if(end.find("plane"))return resolvePlane(s.document,text(end,"plane"));
+    u64 id=0;Mat4 placement=Mat4::identity();
+    if(auto n=end.find("node")){const auto& selected=node(s.document,*n);id=selected.feature;std::vector<AssemblyPlacement> placements;std::string error;if(!resolveAssembly(s.document,placements,error))throw std::runtime_error(error);bool found=false;double copy=number(end,"copy",0);if(copy!=std::floor(copy)||copy<0||copy>31)throw std::runtime_error("Invalid pattern copy");for(const auto& p:placements)if(p.node==selected.id&&p.copy==(int)copy){placement=p.world;found=true;break;}if(!found)throw std::runtime_error("Placed instance not found");}
+    else id=featureId(s.document,required(end,"feature"));
+    std::string ref=end.find("reference")?text(end,"reference"):"origin";Mat4 local=ref=="origin"?Mat4::identity():resolveGeometryReference(s.document,id,ref,number(end,"fraction",.5)).frame;
+    if(const V* center=end.find("center")){if(center->t!=V::Bool)throw std::runtime_error("center must be boolean");if(center->b){V q=V::makeObj(),qs=V::makeArr(),a=V::makeObj();q.set("action",V::makeStr("properties"));if(ref!="origin")q.set("reference",V::makeStr(ref));qs.arr.push_back(q);a.set("id",V::makeNum((double)id));a.set("queries",qs);V report=geometry(s,a);const V& row=required(report,"results").arr[0];if(!required(row,"ok").b)throw std::runtime_error(text(row,"error"));const V* p=row.find("center_mm");if(!p)p=row.find("area_center_mm");if(!p)throw std::runtime_error("Reference has no area or volume centroid");Vec3 origin=vector(*p);local.m[12]=origin.x;local.m[13]=origin.y;local.m[14]=origin.z;}}
+    return placement*local;
+}
+V placementParameters(const Mat4& m){
+    // Assembly's convention is Rz * Ry * Rx; solve the gimbal-lock case explicitly.
+    double ry=std::asin(std::clamp(-m.m[2],-1.,1.)),rx=0,rz=0;
+    if(std::abs(std::cos(ry))>1e-9){rx=std::atan2(m.m[6],m.m[10]);rz=std::atan2(m.m[1],m.m[0]);}else rz=std::atan2(-m.m[4],m.m[5]);
+    V p=V::makeObj();for(auto kv:std::vector<std::pair<const char*,double>>{{"tx",m.m[12]},{"ty",m.m[13]},{"tz",m.m[14]},{"rx",rx*180/K_PI},{"ry",ry*180/K_PI},{"rz",rz*180/K_PI}})p.set(kv.first,V::makeNum(kv.second));return p;
+}
+V placement(AgentSession& s,const V& args){
+    expected(s,args);const auto& selected=node(s.document,required(args,"node"));if(selected.fixed)throw std::runtime_error("Cannot place a grounded instance");for(const auto& mate:s.document.mates)if(mate.a==selected.id||mate.b==selected.id)throw std::runtime_error("Edit mates for a constrained instance");
+    Mat4 parentWorld=Mat4::identity();
+    if(selected.parent){
+        if(!s.document.mates.empty())throw std::runtime_error("Nested placement with mates must be edited through its constraints");
+        std::vector<const AssemblyNode*> ancestors;u64 id=selected.parent;
+        while(id){if(ancestors.size()>=64)throw std::runtime_error("Assembly parent cycle or depth limit");const auto& parent=node(s.document,V::makeNum((double)id));ancestors.push_back(&parent);id=parent.parent;}
+        const auto env=s.document.buildEnv();
+        for(auto it=ancestors.rbegin();it!=ancestors.rend();++it){auto value=[&](const char* key){auto expr=(*it)->p.find(key);if(expr==(*it)->p.end())return 0.;bool ok=false;double v=evalExpr(expr->second,env,&ok);if(!ok)throw std::runtime_error("Invalid parent placement expression");return v;};parentWorld=parentWorld*Mat4::translation({value("tx"),value("ty"),value("tz")})*Mat4::rotZ(deg2rad(value("rz")))*Mat4::rotY(deg2rad(value("ry")))*Mat4::rotX(deg2rad(value("rx")));}
+    }
+    V source=V::makeObj();source.set("node",V::makeNum((double)selected.id));source.set("reference",args.find("reference")?*args.find("reference"):V::makeStr("origin"));
+    std::string mode=args.find("mode")?text(args,"mode"):"align";
+    V targetSpec=required(args,"target");if(mode=="center"){source.set("center",V::makeBool(true));targetSpec.set("center",V::makeBool(true));}
+    Mat4 from=endpoint(s,source),target=endpoint(s,targetSpec);Vec3 offset=args.find("offset")?vector(*args.find("offset")):Vec3{};Vec3 dest=target.transformPoint(offset);
+    target.m[12]=dest.x;target.m[13]=dest.y;target.m[14]=dest.z;
+    V origin=V::makeObj();origin.set("node",V::makeNum((double)selected.id));Mat4 current=endpoint(s,origin),placed;
+    if(mode=="center"){placed=current;Vec3 delta=dest-Vec3{from.m[12],from.m[13],from.m[14]};placed.m[12]+=delta.x;placed.m[13]+=delta.y;placed.m[14]+=delta.z;}
+    else if(mode=="align")placed=target*from.inverted()*current;
+    else throw std::runtime_error("Placement mode must be center or align");
+    V command=V::makeObj(),commands=V::makeArr();command.set("op",V::makeStr("assembly.edit"));command.set("id",V::makeNum((double)selected.id));command.set("p",placementParameters(parentWorld.inverted()*placed));commands.arr.push_back(command);
+    V out=preview(s,applyArgs(s.revision,commands));out.set("world_frame",matrix(placed));out.set("persistent_relation",V::makeBool(false));return out;
+}
+V pattern(AgentSession& s,const V& args){
+    expected(s,args);double count=number(args,"count",2);if(count<2||count>128||count!=std::floor(count))throw std::runtime_error("Pattern count must be 2..128");
+    std::string mode=args.find("mode")?text(args,"mode"):"instances";
+    if(mode=="solid"||mode=="holes"){
+        V command=V::makeObj(),commands=V::makeArr(),native=V::makeObj(),inputs=V::makeArr();
+        command.set("op",V::makeStr("feature.add"));command.set("type",V::makeStr("native_solid"));command.set("name",required(args,"name"));
+        inputs.arr.push_back(V::makeNum((double)featureId(s.document,required(args,"feature"))));inputs.arr.push_back(V::makeNum((double)featureId(s.document,required(args,"path"))));command.set("inputs",inputs);
+        native.set("op",V::makeStr(mode=="solid"?"curve_pattern":"hole_pattern"));native.set("reference",required(args,"reference"));native.set("count",V::makeNum(count));native.set("margin_mm",V::makeNum(number(args,"margin_mm",0)));
+        for(const char* key:{"offset","x_hint"})if(auto value=args.find(key))native.set(key,*value);
+        if(mode=="holes")for(const char* key:{"normal","radius","depth"})native.set(key,required(args,key));
+        command.set("native",native);commands.arr.push_back(command);V out=preview(s,applyArgs(s.revision,commands));out.set("path_linked",V::makeBool(true));out.set("spacing",V::makeStr("arc_length"));return out;
+    }
+    V query=V::makeObj(),queries=V::makeArr(),queryArgs=V::makeObj();query.set("action",V::makeStr("curve"));query.set("reference",required(args,"reference"));query.set("count",V::makeNum(count));query.set("margin_mm",V::makeNum(number(args,"margin_mm",0)));queries.arr.push_back(query);queryArgs.set("id",required(args,"path"));queryArgs.set("queries",queries);
+    V report=geometry(s,queryArgs);const auto& result=required(report,"results").arr[0];if(!required(result,"ok").b)throw std::runtime_error(text(result,"error"));
+    V commands=V::makeArr();std::string prefix=text(args,"name");if(prefix.size()>96)throw std::runtime_error("Pattern name too long");int index=0;
+    for(const auto& sample:required(result,"samples").arr){
+        Vec3 point=vector(required(sample,"point_mm"));V command=V::makeObj();std::string name=prefix+"_"+std::to_string(++index);
+        if(mode=="instances"){
+            u64 id=featureId(s.document,required(args,"feature"));command.set("op",V::makeStr("assembly.add"));command.set("feature",V::makeNum((double)id));command.set("name",V::makeStr(name));Mat4 placed=Mat4::translation(point);
+            if(const auto* hint=args.find("x_hint")){placed=axes(point,vector(required(sample,"tangent")),vector(*hint));}command.set("p",placementParameters(placed));
+        }else if(mode=="points"){
+            command.set("op",V::makeStr("plane.set"));command.set("kind",V::makeStr("point"));command.set("name",V::makeStr(name));V p=V::makeObj();p.set("ox",V::makeNum(point.x));p.set("oy",V::makeNum(point.y));p.set("oz",V::makeNum(point.z));command.set("p",p);
+        }else throw std::runtime_error("Pattern mode must be instances or points");commands.arr.push_back(command);
+    }
+    V out=preview(s,applyArgs(s.revision,commands));out.set("spacing",V::makeStr("arc_length"));out.set("path_linked",V::makeBool(false));return out;
+}
+V solve(AgentSession& s,const V& args){
+    expected(s,args);std::string parameter=text(args,"parameter");bool found=false;for(const auto& p:s.document.params)found|=p.name==parameter;if(!found)throw std::runtime_error("Parameter not found");
+    const std::string mode=args.find("mode")?text(args,"mode"):"target";if(mode!="target"&&mode!="sensitivity")throw std::runtime_error("Solve mode must be target or sensitivity");if(mode=="target")required(args,"target");
+    const double lower=number(args,"lower"),upper=number(args,"upper"),target=number(args,"target"),tolerance=number(args,"tolerance",1e-6);if(!(lower<upper)||tolerance<=0)throw std::runtime_error("Need ordered bounds and positive objective tolerance");
+    double requestedBudget=number(args,"max_evaluations",32);if(requestedBudget<3||requestedBudget>64||requestedBudget!=std::floor(requestedBudget))throw std::runtime_error("Evaluation budget must be 3..64");int budget=(int)requestedBudget;
+    double seconds=number(args,"max_seconds",30);if(seconds<=0||seconds>120)throw std::runtime_error("Time budget must be 0..120 seconds");auto start=std::chrono::steady_clock::now();V samples=V::makeArr();int evaluations=0;
+    auto commands=[&](double x){V command=V::makeObj(),cs=V::makeArr();command.set("op",V::makeStr("param.set"));command.set("name",V::makeStr(parameter));command.set("expr",V::makeNum(x));cs.arr.push_back(command);return cs;};
+    auto evaluate=[&](double x){if(evaluations>=budget||std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count()>seconds)throw std::runtime_error("Design solve resource budget exhausted");AgentSession candidate;copySession(s,candidate);payload(candidate.call("doc_apply",applyArgs(candidate.revision,commands(x))));double value=metric(candidate,required(args,"objective"));V row=V::makeObj();row.set("parameter",V::makeNum(x));row.set("value",V::makeNum(value));samples.arr.push_back(row);++evaluations;return value-target;};
+    double a=lower,b=upper,fa=evaluate(a),fb=evaluate(b),x=std::abs(fa)<std::abs(fb)?a:b,residual=std::abs(fa)<std::abs(fb)?fa:fb;
+    V out=V::makeObj();
+    if(mode=="sensitivity"){out.set("secant_derivative",V::makeNum((fb-fa)/(upper-lower)));out.set("derivative_scope",V::makeStr("finite_interval_including_any_topology_changes"));}
+    else if(mode=="target"){
+        bool bracket=std::signbit(fa)!=std::signbit(fb);if(std::abs(residual)>tolerance&&!bracket)throw std::runtime_error("Target is not bracketed by bounds");
+        while(std::abs(residual)>tolerance&&evaluations<budget&&std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count()<seconds){x=a+(b-a)/2;residual=evaluate(x);if(std::signbit(residual)==std::signbit(fa)){a=x;fa=residual;}else{b=x;fb=residual;}if(b-a<1e-12*std::max(1.,std::abs(x)))break;}
+        bool converged=std::abs(residual)<=tolerance;out.set("converged",V::makeBool(converged));out.set("residual",V::makeNum(residual));out.set("parameter_value",V::makeNum(x));if(converged)out.set("apply",applyArgs(s.revision,commands(x)));out.set("method",V::makeStr("bounded_bisection"));out.set("continuity_assumed",V::makeBool(true));
+    }else throw std::runtime_error("Solve mode must be target or sensitivity");
+    out.set("samples",samples);out.set("evaluations",V::makeNum(evaluations));out.set("revision",V::makeNum((double)s.revision));return out;
+}
+}
+bool callAgentFeature(AgentSession& s,const std::string& tool,const V& args,V& out){
+    if(tool=="physics_inspect")out=inspectPhysics(s,args);
+    else if(tool=="materials_inspect")out=inspectMaterials(s.document);
+    else if(tool=="geometry_query")out=geometry(s,args);
+    else if(tool=="math_eval")out=math(args);
+    else if(tool=="doc_preview")out=preview(s,args);
+    else if(tool=="placement_plan")out=placement(s,args);
+    else if(tool=="pattern_plan")out=pattern(s,args);
+    else if(tool=="design_solve")out=solve(s,args);
+    else if(tool=="query_batch"){
+        const auto& queries=required(args,"queries");if(queries.t!=V::Arr||queries.arr.empty()||queries.arr.size()>128)throw std::runtime_error("Batch needs 1..128 read-only queries");
+        V rows=V::makeArr();for(const auto& q:queries.arr){std::string name=text(q,"tool");if(!queryTools.count(name))throw std::runtime_error("Batch tool is not allowed: "+name);}
+        for(const auto& q:queries.arr){auto start=std::chrono::steady_clock::now();V row=s.call(text(q,"tool"),required(q,"args"));if(const V* fields=q.find("fields")){if(fields->t!=V::Arr||fields->arr.size()>32)throw std::runtime_error("fields needs up to 32 top-level names");if(!required(row,"isError").b){V compact=V::makeObj();const V& full=required(row,"structuredContent");for(const auto& key:fields->arr){if(key.t!=V::Str)throw std::runtime_error("Field name must be text");const V* value=full.find(key.str.c_str());if(!value)throw std::runtime_error("Requested result field is absent: "+key.str);compact.set(key.str,*value);}row.set("structuredContent",compact);V content=V::makeArr(),item=V::makeObj();item.set("type",V::makeStr("text"));item.set("text",V::makeStr(compact.dump()));content.arr.push_back(item);row.set("content",content);}}row.set("elapsed_ms",V::makeNum(std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count()));rows.arr.push_back(row);}out=V::makeObj();out.set("results",rows);out.set("revision",V::makeNum((double)s.revision));
+    }else return false;
+    return true;
+}
+V evaluatePostconditions(AgentSession& s,const V& checks){
+    if(checks.t!=V::Arr||checks.arr.empty()||checks.arr.size()>32)throw std::runtime_error("checks must contain 1..32 postconditions");
+    V report=V::makeObj(),rows=V::makeArr();bool all=true;std::set<std::string> ids;unsigned diagnosticProbes=0;const auto started=std::chrono::steady_clock::now();
+    for(size_t index=0;index<checks.arr.size();++index){const auto& check=checks.arr[index];V row=V::makeObj();bool passed=false;
+        std::string id=check.find("id")?text(check,"id"):std::to_string(index);if(!ids.insert(id).second)throw std::runtime_error("Duplicate condition id");row.set("id",V::makeStr(id));
+        try{
+            if(std::chrono::duration<double>(std::chrono::steady_clock::now()-started).count()>30)throw std::runtime_error("Postcondition evaluation budget exhausted");
+            const auto& query=required(check,"query");row.set("query",query);V actual=queryValue(s,query);row.set("observed",actual);std::string op=text(check,"op");row.set("op",V::makeStr(op));
+            const double tolerance=number(check,"tolerance",0);if(tolerance<0)throw std::runtime_error("Condition tolerance must be nonnegative");row.set("tolerance",V::makeNum(tolerance));
+            if(op=="true"||op=="false"){if(actual.t!=V::Bool)throw std::runtime_error("Boolean condition requires a checked boolean result");passed=actual.b==(op=="true");}
+            else{
+                if(actual.t!=V::Num||!std::isfinite(actual.num))throw std::runtime_error("Condition measurement is missing or nonnumeric");
+                if(op=="between"){
+                    required(check,"min");required(check,"max");double low=number(check,"min"),high=number(check,"max");if(low>high)throw std::runtime_error("Condition limits reversed");passed=actual.num+tolerance>=low&&actual.num-tolerance<=high;row.set("min",V::makeNum(low));row.set("max",V::makeNum(high));row.set("required_delta",V::makeNum(actual.num<low?low-actual.num:actual.num>high?high-actual.num:0));
+                }else{
+                    required(check,"value");double target=number(check,"value");row.set("target",V::makeNum(target));row.set("required_delta",V::makeNum(target-actual.num));
+                    if(op=="ge")passed=actual.num+tolerance>=target;else if(op=="le")passed=actual.num-tolerance<=target;else if(op=="eq")passed=std::abs(actual.num-target)<=tolerance;else throw std::runtime_error("Condition op must be ge, le, eq, between, true or false");
+                }
+            }
+            if(!passed){row.set("suggested_action",V::makeStr("Adjust the measured quantity by required_delta; inspect query references before changing geometry. No parameter direction is inferred."));V parameters=V::makeArr();
+                if(auto requested=check.find("parameters")){if(requested->t!=V::Arr||requested->arr.size()>16)throw std::runtime_error("Condition parameters needs up to 16 names");for(const auto& name:requested->arr){if(name.t!=V::Str)throw std::runtime_error("Condition parameter must be a name");bool found=false;for(const auto& p:s.document.params)if(p.name==name.str){V parameter=V::makeObj();parameter.set("name",name);parameter.set("value",V::makeNum(p.value));parameter.set("expression",V::makeStr(p.expr));parameters.arr.push_back(parameter);found=true;}if(!found)throw std::runtime_error("Condition parameter not found: "+name.str);}}
+                row.set("adjustment_parameters",parameters);row.set("parameter_influence_verified",V::makeBool(false));
+                if(const auto* diagnose=check.find("diagnose");diagnose&&diagnose->t==V::Bool&&diagnose->b&&actual.t==V::Num){
+                    V sensitivities=V::makeArr();
+                    for(const auto& parameter:parameters.arr){if(diagnosticProbes+2>4||std::chrono::duration<double>(std::chrono::steady_clock::now()-started).count()>5)break;
+                        V sensitivity=V::makeObj();sensitivity.set("parameter",*parameter.find("name"));double value=parameter.find("value")->num,h=1e-4*std::max(1.,std::abs(value));
+                        try{auto sample=[&](double x){++diagnosticProbes;AgentSession scratch;copySession(s,scratch);V command=V::makeObj(),commands=V::makeArr();command.set("op",V::makeStr("param.set"));command.set("name",*parameter.find("name"));command.set("expr",V::makeNum(x));commands.arr.push_back(command);payload(scratch.call("doc_apply",applyArgs(s.revision,commands)));return metric(scratch,query);};double plus=sample(value+h),minus=sample(value-h),derivative=(plus-minus)/(2*h);sensitivity.set("derivative",V::makeNum(derivative));sensitivity.set("step",V::makeNum(h));sensitivity.set("method",V::makeStr("local_central_difference"));sensitivity.set("topology_continuity_certified",V::makeBool(false));if(derivative!=0&&std::isfinite(derivative)&&row.find("required_delta")){double delta=row.find("required_delta")->num/derivative;if(std::isfinite(delta))sensitivity.set("linearized_parameter_delta",V::makeNum(delta));}}
+                        catch(const std::exception& e){sensitivity.set("error",V::makeStr(e.what()));}
+                        sensitivities.arr.push_back(sensitivity);
+                    }row.set("sensitivities",sensitivities);
+                }
+            }
+        }catch(const std::exception& e){passed=false;row.set("error",V::makeStr(e.what()));row.set("suggested_action",V::makeStr("Resolve the missing measurement, density or reference before retrying; unknown evidence does not satisfy a condition."));}
+        row.set("passed",V::makeBool(passed));rows.arr.push_back(row);all&=passed;
+    }
+    report.set("passed",V::makeBool(all));report.set("checks",rows);return report;
+}
+void appendAgentFeatureTools(V& tools){
+    struct Definition{const char* name;const char* description;const char* schema;};
+    const Definition defs[]={
+      {"physics_inspect","Exact rigid-body mass, uniform-gravity CG, world inertia and instantaneous force/torque/energy balance. id selects one feature; otherwise visible assembly instances or unconsumed solids. Missing density rejects aggregate mass. SI loads and kinematics; positions mm. Optional support polygon checks gravity-only projection, not contact dynamics. axial_test uses declared material modulus and uniform cross-section; no FEA or buckling.",R"({"type":"object","properties":{"id":{"type":["integer","string"]},"gravity":{"type":"array","minItems":3,"maxItems":3,"items":{"type":"number"}},"reference_point_mm":{"type":"array"},"loads":{"type":"array","maxItems":64,"items":{"type":"object"}},"velocity_m_s":{"type":"array"},"angular_velocity_rad_s":{"type":"array"},"acceleration_m_s2":{"type":"array"},"angular_acceleration_rad_s2":{"type":"array"},"support":{"type":"object","properties":{"origin_mm":{"type":"array"},"normal":{"type":"array"},"polygon_mm":{"type":"array"}},"required":["origin_mm","normal","polygon_mm"]},"axial_test":{"type":"object","properties":{"material":{"type":"string"},"force_N":{"type":"number"},"area_mm2":{"type":"number"},"length_mm":{"type":"number"}},"required":["material","force_N","area_mm2","length_mm"]}}})"},
+      {"materials_inspect","List document materials, declared density in kg/m3 and g/cm3, SI elastic properties and assigned features. material.set accepts density (g/cm3) OR density_kg_m3, plus optional physical:{young_modulus_Pa,poisson_ratio,yield_strength_Pa,thermal_expansion_per_K}. Zero density means unspecified. Values are caller declarations, not a certified material database.",R"({"type":"object"})"},
+      {"geometry_query","Batch 1..128 exact queries on one feature id/name. actions: references (filter kind, surface, oriented normal, unoriented axis, radius_mm, near+within_mm, coaxial_origin, adjacent_to; unique rejects ambiguity), properties (reference?, density_g_cm3?), curve (reference,count?,margin_mm?,fraction?), surface (reference,u?,v?), section (origin,normal), continuity (a,b,fraction_a?,fraction_b?), point_distance(point). Coordinates are feature-local mm; curve fractions use arc length. Results have index and ok; failed queries never invent values.",R"({"type":"object","properties":{"id":{"type":["integer","string"]},"queries":{"type":"array","minItems":1,"maxItems":128,"items":{"type":"object","properties":{"action":{"type":"string","enum":["references","properties","curve","surface","section","continuity","point_distance"]}},"required":["action"]}}},"required":["id","queries"]})"},
+      {"math_eval","Deterministic vector and rigid-frame math. op add/subtract/dot/cross/distance/angle uses a,b xyz; norm/normalize uses a; frame uses origin,z,x_hint; transform_point/direction uses a,from_frame,to_frame (16 column-major values); project_plane uses a,origin,normal; line_plane also direction. convert uses value,from,to: mm/cm/m/in, deg/rad, g/kg. Incompatible units and degenerate directions reject.",R"({"type":"object","properties":{"op":{"type":"string","enum":["add","subtract","dot","cross","distance","angle","norm","normalize","frame","transform_point","transform_direction","project_plane","line_plane","convert"]},"a":{"type":"array"},"b":{"type":"array"},"origin":{"type":"array"},"normal":{"type":"array"},"direction":{"type":"array"},"z":{"type":"array"},"x_hint":{"type":"array"},"from_frame":{"type":"array"},"to_frame":{"type":"array"},"value":{"type":"number"},"from":{"type":"string"},"to":{"type":"string"}},"required":["op"]})"},
+      {"doc_preview","Evaluate doc_apply commands and optional checks on an isolated candidate; return valid, before/after compact designs and a candidate_id apply payload that reuses evaluated geometry. Candidates expire after 300 seconds and on changed document/revision; at most four/128 MiB. recipe retains expanded commands. Live document, revision and undo remain unchanged.",R"({"type":"object","properties":{"expected_revision":{"type":"integer"},"commands":{"type":"array","minItems":1,"maxItems":128,"items":{"type":"object"}},"checks":{"type":"array","minItems":1,"maxItems":32,"items":{"type":"object"}}},"required":["expected_revision","commands"]})"},
+      {"query_batch","Run 1..128 read-only inspection calls against one revision. Queries are {tool,args,fields?}; fields projects requested top-level response fields. no mutation, export or recursive batch calls. Each result includes elapsed_ms.",R"({"type":"object","properties":{"queries":{"type":"array","minItems":1,"maxItems":128,"items":{"type":"object","properties":{"tool":{"type":"string"},"args":{"type":"object"},"fields":{"type":"array","maxItems":32,"items":{"type":"string"}}},"required":["tool","args"]}}},"required":["queries"]})"},
+      {"placement_plan","Preview a rigid placement of a free instance. node is name/id; reference defaults origin. target is {node|feature,reference?,copy?,fraction?}, {plane:name} or {frame:16-column-major-values}; mode align matches frames, center aligns area/volume centroids by translation. offset xyz uses target coordinates. Refuses grounded/mated instances and nested placements in mated assemblies. Returns doc_apply payload; use mates for persistent relations.",R"({"type":"object","properties":{"expected_revision":{"type":"integer"},"node":{"type":["integer","string"]},"reference":{"type":"string"},"target":{"type":"object"},"mode":{"type":"string","enum":["align","center"]},"offset":{"type":"array"}},"required":["expected_revision","node","target"]})"},
+      {"pattern_plan","Preview equally arc-length spaced instances or point datums along one semantic edge. path is feature id/name; reference is edge name; count 2..128; margin_mm at each end; name is unique prefix. instances requires feature and optional x_hint (local Z follows curve tangent). instances/points are snapshots in path feature coordinates. solid/holes create linked version-19 native features; holes requires feature target, normal,radius,depth and optional offset. solid duplicates the feature with semantic copy.N names. Linked counts/margins/offsets remain editable in native payloads. Returns revision-bound doc_apply commands.",R"({"type":"object","properties":{"expected_revision":{"type":"integer"},"path":{"type":["integer","string"]},"reference":{"type":"string"},"count":{"type":"integer","minimum":2,"maximum":128},"margin_mm":{"type":"number"},"name":{"type":"string"},"mode":{"type":"string","enum":["instances","points","solid","holes"]},"offset":{"type":"array"},"normal":{"type":"array"},"radius":{"type":"number"},"depth":{"type":"number"},"feature":{"type":["integer","string"]},"x_hint":{"type":"array"}},"required":["expected_revision","path","reference","count","name"]})"},
+      {"design_solve","Read-only scalar parameter target solve by bounded bisection; requires a continuous bracket, aborts invalid geometry. parameter,lower,upper,target,tolerance; objective:{tool,args,path} selects a finite scalar using dot paths including array indices. max_evaluations 3..64 (default32), max_seconds <=120 (default30, checked between operations). Returns apply only on convergence. mode sensitivity returns a finite-interval secant. No global optimum or topology continuity certification.",R"({"type":"object","properties":{"expected_revision":{"type":"integer"},"parameter":{"type":"string"},"lower":{"type":"number"},"upper":{"type":"number"},"target":{"type":"number"},"tolerance":{"type":"number","exclusiveMinimum":0},"objective":{"type":"object"},"max_evaluations":{"type":"integer","minimum":3,"maximum":64},"max_seconds":{"type":"number"},"mode":{"type":"string","enum":["target","sensitivity"]}},"required":["expected_revision","parameter","lower","upper","objective"]})"}
+    };
+    for(const auto& d:defs){V tool=V::makeObj(),schema,annotations=V::makeObj(),output=V::makeObj();arkjson::parse(d.schema,schema);tool.set("name",V::makeStr(d.name));tool.set("description",V::makeStr(d.description));tool.set("inputSchema",schema);output.set("type",V::makeStr("object"));tool.set("outputSchema",output);annotations.set("readOnlyHint",V::makeBool(true));tool.set("annotations",annotations);tools.arr.push_back(tool);}
+}
+}

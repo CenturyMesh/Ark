@@ -292,6 +292,7 @@ private:
 
 // parallel_for over [begin,end) split in ~4 chunks per worker
 void parallel_for(i64 begin, i64 end, const std::function<void(i64,i64)>& body);
+bool setOuterParallelRegion(bool active);
 
 // ---------------------------------------------------------------------------
 // Portable packed-array kernels. Historical assembly is not enabled by default.

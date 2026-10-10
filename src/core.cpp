@@ -101,6 +101,9 @@ void transform_points_f32(const Mat4& M, const Vec3* in, Vec3* out, size_t n) {
 
 // ---------------------------------------------------------------------------
 // ThreadPool -------------------------------------------------------------------
+static thread_local bool inCoreWorker=false;
+static thread_local bool outerParallelRegion=false;
+bool setOuterParallelRegion(bool active){bool previous=outerParallelRegion;outerParallelRegion=active;return previous;}
 ThreadPool& ThreadPool::get() {
     static ThreadPool tp;
     return tp;
@@ -108,9 +111,11 @@ ThreadPool& ThreadPool::get() {
 ThreadPool::ThreadPool() {
     unsigned n = std::thread::hardware_concurrency();
     if (!n) n = 4;
+    const unsigned hardware=n;n=std::min(n,32u);if(const auto setting=std::getenv("ARK_CPU_THREADS")){char* end=nullptr;long requested=std::strtol(setting,&end,10);if(end&&!*end&&requested>=1&&requested<=64)n=std::min(hardware,(unsigned)requested);}
     workers_.reserve(n);
     for (unsigned i = 0; i < n; ++i)
         workers_.emplace_back([this]() {
+            inCoreWorker=true;
             for (;;) {
                 std::function<void()> job;
                 {
@@ -141,18 +146,20 @@ void ThreadPool::waitAll() {
 }
 void parallel_for(i64 begin, i64 end, const std::function<void(i64,i64)>& body) {
     if (begin >= end) return;
+    if(inCoreWorker||outerParallelRegion||end-begin<64){body(begin,end);return;}
     i64 total = end - begin;
-    i64 chunk = (total + 7) / 8;
     auto& tp = ThreadPool::get();
-    std::atomic<i64> remaining((i64)((total + chunk - 1)/chunk));
+    const i64 chunks=std::min<i64>((total+63)/64,(i64)tp.workers()*4);
+    const i64 chunk=(total+chunks-1)/chunks;
+    std::atomic<i64> remaining((i64)((total + chunk - 1)/chunk));std::mutex mutex;std::condition_variable done;std::exception_ptr failure;
     for (i64 s = begin; s < end; s += chunk) {
         i64 e = tmin(s + chunk, end);
-        tp.submit([s,e,&body,&remaining]() {
-            body(s, e);
-            --remaining;
+        tp.submit([s,e,&body,&remaining,&mutex,&done,&failure]() {
+            try{body(s,e);}catch(...){std::lock_guard<std::mutex> guard(mutex);if(!failure)failure=std::current_exception();}
+            {std::lock_guard<std::mutex> guard(mutex);--remaining;done.notify_one();}
         });
     }
-    while (remaining.load() > 0) std::this_thread::yield();
+    std::unique_lock<std::mutex> lock(mutex);done.wait(lock,[&]{return remaining.load()==0;});if(failure)std::rethrow_exception(failure);
 }
 
 } // namespace ark

@@ -297,6 +297,7 @@ V frameModelNative(const V& request){
     std::vector<TopoDS_Shape> shapesForCompound;shapesForCompound.reserve(members.size());
     V cutlist=V::makeArr(),stockRows=V::makeArr();double totalLength=0,totalMass=0,stockY=0;bool massChecked=true;
     gp_XYZ weightedCenter(0,0,0);
+    GProp_GProps physicalProperties;
     for(const Member& member:members){
         const Profile& profile=profiles.at(member.profile);
         const TopoDS_Shape solid=readBrep(required(member.result,"brep_base64").str);
@@ -322,6 +323,7 @@ V frameModelNative(const V& request){
         row.set("end",endpoint(member.end,member.endTangent,member.endNormal));
         if(!profile.material.empty())row.set("material",V::makeStr(profile.material));
         if(profile.density>0){const double mass=profile.density*volume/1000;
+            physicalProperties.Add(exactProperties,profile.density/1000.);
             row.set("density_g_cm3",V::makeNum(profile.density));row.set("mass_g",V::makeNum(mass));totalMass+=mass;
             weightedCenter+=center.XYZ()*mass;
         }else massChecked=false;
@@ -348,6 +350,7 @@ V frameModelNative(const V& request){
     report.set("mass_checked",V::makeBool(massChecked));
     if(massChecked){
         report.set("mass_g",V::makeNum(totalMass));
+        V inertia=V::makeArr();auto tensor=physicalProperties.MatrixOfInertia();for(int i=1;i<=3;++i)for(int j=1;j<=3;++j)inertia.arr.push_back(V::makeNum(tensor.Value(i,j)));report.set("inertia_g_mm2",inertia);
         report.set("center_mm",vec(weightedCenter/totalMass));
         report.set("mass_basis",V::makeStr("sum of exact member solids after authored joints; untrimmed overlaps count per member"));
     }else report.set("mass_reason",V::makeStr("One or more profiles has no positive density"));

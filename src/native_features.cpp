@@ -566,6 +566,8 @@ V solidFeatureRequest(const Feature& feature, const ExprEnv& env,
     if (op == "pocket" || op == "slot") op = "hole";
     if (op == "rigid_transform") op = "transform";
     model.set("op", V::makeStr(op));
+    if ((op == "curve_pattern" || op == "hole_pattern") && feature.inputs.size() != 2)
+        throw std::runtime_error("Curve pattern needs target and path feature inputs");
     if (op == "shell" && feature.inputs.size() != 1)
         throw std::runtime_error("Shell needs one solid input");
     if (op == "split_plane" && feature.inputs.size() != 1)

@@ -93,7 +93,12 @@ int main(int argc, char** argv) {
         check(field(before, "feature_count").asNum() == 2, "Sample feature count mismatch");
         Value change = parse(R"({"commands":[{"op":"param.set","name":"width","expr":"144"}]})");
         change.set("expected_revision", field(before, "revision"));
-        const Value changed = tool(mcpExe, root, endpoint, "doc_apply", std::move(change));
+        const Value preview = tool(mcpExe, root, endpoint, "doc_preview", std::move(change));
+        check(field(preview,"valid").b&&field(preview,"candidate_cached").b,"Live preview did not cache a candidate");
+        const Value unchanged=tool(mcpExe,root,endpoint,"doc_info",Value::makeObj());
+        check(field(unchanged,"revision").asNum()==field(before,"revision").asNum(),"Live preview changed the document");
+        const Value changed = tool(mcpExe, root, endpoint, "doc_apply", field(preview,"apply"));
+        check(field(changed,"applied_prepared").b&&!field(changed,"geometry_recomputed").b,"Live commit rebuilt candidate geometry");
         check(field(changed, "revision").asNum() == field(before, "revision").asNum() + 1,
               "Width edit did not increment revision");
         const Value holes = tool(mcpExe, root, endpoint, "sketch_inspect", parse(R"({"name":"openings"})"));
@@ -133,7 +138,7 @@ int main(int argc, char** argv) {
                                                     std::chrono::seconds(8));
         check(parse(after).find("error") != nullptr,
               "Disconnected Studio became an unrelated standalone document");
-        std::cout << "Live Studio + MCP: edit, holes, mesh, save, undo, New, disconnect passed\n";
+        std::cout << "Live Studio + MCP: prepared edit, holes, mesh, save, undo, New, disconnect passed\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "Live Studio test failed: " << error.what() << '\n';

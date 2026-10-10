@@ -377,7 +377,9 @@ std::string documentToJson(const Document& doc){
     const bool usagePresent=doc.usage.serial>0||!doc.usage.entries.empty();
     bool generation17=usagePresent;for(const auto& feature:doc.features)generation17|=generation17SheetOpening(feature);
     bool suspensionVersion=false;for(const auto& feature:doc.features)suspensionVersion|=feature.type==FeatureType::Suspension;
-    r.set("version",Value::makeNum(suspensionVersion?18:generation17?17:modules?16:generation15?15:generation14?14:generation13?13:generation12?12:generation11?11:generation10?10:generation9?9:generation8?8:latest?7:nativeVersion?6:sketchVersion?5:sourceTube?4:notched?3:extended?2:1));
+    bool patternVersion=false;for(const auto& f:doc.features)if(f.type==FeatureType::NativeSolid){auto op=f.nativeSpec.find("op");patternVersion|=(op&&(op->str=="curve_pattern"||op->str=="hole_pattern"))||f.get("op")=="curve_pattern"||f.get("op")=="hole_pattern";}
+    bool physicsVersion=false;for(const auto& m:doc.materials)physicsVersion|=m.physical.t==Value::Obj&&!m.physical.obj.empty();
+    r.set("version",Value::makeNum(physicsVersion?20:patternVersion?19:suspensionVersion?18:generation17?17:modules?16:generation15?15:generation14?14:generation13?13:generation12?12:generation11?11:generation10?10:generation9?9:generation8?8:latest?7:nativeVersion?6:sketchVersion?5:sourceTube?4:notched?3:extended?2:1));
     r.set("units",Value::makeStr("mm"));
     r.set("next_feature_id",Value::makeNum((double)doc.nextFeatureId_));
 
@@ -392,7 +394,7 @@ std::string documentToJson(const Document& doc){
     if(usagePresent)r.set("usage",usageLedgerToJson(doc.usage));
     if(!doc.materials.empty()){
         Value materials=Value::makeArr();
-        for(const auto& material:doc.materials){Value item=Value::makeObj();item.set("name",Value::makeStr(material.name));item.set("density",Value::makeNum(material.densityGcm3));item.set("appearance",appearanceToJson(material.appearance));materials.arr.push_back(std::move(item));}
+        for(const auto& material:doc.materials){Value item=Value::makeObj();item.set("name",Value::makeStr(material.name));item.set("density",Value::makeNum(material.densityGcm3));item.set("appearance",appearanceToJson(material.appearance));if(material.physical.t==Value::Obj&&!material.physical.obj.empty())item.set("physical",material.physical);materials.arr.push_back(std::move(item));}
         r.set("materials",std::move(materials));
     }
     if(!doc.planes.empty()){
@@ -468,7 +470,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     Value v;
     if(!arkjson::parse(json,v)) return fail("malformed JSON");
     if(v.t!=Value::Obj) return fail("root must be object");
-    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0&&ver->num!=3.0&&ver->num!=4.0&&ver->num!=5.0&&ver->num!=6.0&&ver->num!=7.0&&ver->num!=8.0&&ver->num!=9.0&&ver->num!=10.0&&ver->num!=11.0&&ver->num!=12.0&&ver->num!=13.0&&ver->num!=14.0&&ver->num!=15.0&&ver->num!=16.0&&ver->num!=17.0&&ver->num!=18.0)))
+    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0&&ver->num!=3.0&&ver->num!=4.0&&ver->num!=5.0&&ver->num!=6.0&&ver->num!=7.0&&ver->num!=8.0&&ver->num!=9.0&&ver->num!=10.0&&ver->num!=11.0&&ver->num!=12.0&&ver->num!=13.0&&ver->num!=14.0&&ver->num!=15.0&&ver->num!=16.0&&ver->num!=17.0&&ver->num!=18.0&&ver->num!=19.0&&ver->num!=20.0)))
         return fail("unsupported document version");
 
     if(auto format=v.find("format");format && format->asStr()!="ark")return fail("unsupported format");
@@ -498,6 +500,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
             if(item.t!=Value::Obj)return fail("Material must be an object");
             Material material;auto name=item.find("name");if(!name||name->t!=Value::Str)return fail("Material needs a name");material.name=name->str;
             if(!names.insert(material.name).second)return fail("Duplicate material name");
+            if(auto physical=item.find("physical")){auto version=v.find("version");if(!version||version->asNum()<20)return fail("Physical material properties require version 20");material.physical=*physical;}
             if(auto density=item.find("density")){if(density->t!=Value::Num)return fail("Material density must be numeric");material.densityGcm3=density->num;}
             if(auto appearance=item.find("appearance")){std::string reason;if(!applyAppearancePatch(material.appearance,*appearance,reason))return fail(reason);}
             std::string reason;if(!validateMaterial(material,reason))return fail(reason);nd.materials.push_back(std::move(material));
@@ -629,6 +632,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
         catch(const std::exception& e){return fail(e.what());}
     }
     if(auto key=v.find("next_mate_id")){if(key->t!=Value::Num||key->num<(double)nd.nextMateId_||key->num>9007199254740991.||key->num!=std::floor(key->num))return fail("Invalid next mate id");nd.nextMateId_=(u64)key->num;}
+    for(const auto& f:nd.features)if(f.type==FeatureType::NativeSolid){auto op=f.nativeSpec.find("op");if((op&&(op->str=="curve_pattern"||op->str=="hole_pattern"))||f.get("op")=="curve_pattern"||f.get("op")=="hole_pattern"){auto version=v.find("version");if(!version||version->asNum()<19)return fail("Curve patterns require document version 19");}}
     if(generation10Document(nd)){auto version=v.find("version");if(!version||version->asNum()<10)return fail("placed-instance booleans, unions of more than two exact solids, or instance patterns require document version 10");}
     if(generation11Document(nd)){auto version=v.find("version");if(!version||version->asNum()<11)return fail("solid shells or loft guide curves require document version 11");}
     if(generation12Document(nd)){auto version=v.find("version");if(!version||version->asNum()<12)return fail("points, curve segments, or curve features require document version 12");}
