@@ -3,5 +3,8 @@
 namespace ark {
 bool callAgentFeature(AgentSession&,const std::string&,const arkjson::Value&,arkjson::Value&);
 void appendAgentFeatureTools(arkjson::Value&);
+// The advertised shape is shared by apply, preview and team authoring tools.
+// Operation execution and measured postconditions remain the authority.
+arkjson::Value agentPostconditionsSchema();
 arkjson::Value evaluatePostconditions(AgentSession&,const arkjson::Value& checks);
 }

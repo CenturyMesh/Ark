@@ -62,6 +62,13 @@ V chatMessages(const AssistantConfig& config,const V& canonical,const std::strin
 V block(const char* kind,const std::string& value){V out=V::makeObj();out.set("type",V::makeStr(kind));out.set("text",V::makeStr(value));return out;}
 V normalizedMessage(const std::string& value){V out=V::makeObj(),content=V::makeArr();out.set("type",V::makeStr("message"));out.set("role",V::makeStr("assistant"));content.arr.push_back(block("output_text",value));out.set("content",content);return out;}
 V normalizedCall(const std::string& id,const std::string& name,const V& arguments){require(validId(id),"Provider tool call needs a valid ID.");require(!name.empty()&&arguments.t==V::Str,"Provider tool call needs name and JSON text arguments.");V checked;require(arkjson::parse(arguments.str,checked)&&checked.t==V::Obj,"Provider tool arguments must be a complete JSON object.");V out=V::makeObj();out.set("type",V::makeStr("function_call"));out.set("call_id",V::makeStr(id));out.set("name",V::makeStr(name));out.set("arguments",arguments);return out;}
+V providerOutcome(const AssistantConfig& config,const V& source,const V& normalized,const char* normalization){
+    V outcome=V::makeObj();outcome.set("protocol",V::makeStr(assistantProtocolName(config.protocol)));
+    const std::set<std::string> statuses={"completed","incomplete","failed","cancelled","queued","in_progress"};const auto status=text(normalized,"status");outcome.set("response_status",V::makeStr(statuses.count(status)?status:"unknown"));
+    std::string stop;if(config.protocol==AssistantProtocol::ChatCompletions){if(const auto* choices=source.find("choices");choices&&choices->t==V::Arr&&choices->arr.size()==1)stop=text(choices->arr.front(),"finish_reason");}else if(config.protocol==AssistantProtocol::Messages)stop=text(source,"stop_reason");else if(const auto* details=source.find("incomplete_details"))stop=text(*details,"reason");
+    const std::set<std::string> stops={"stop","tool_calls","length","content_filter","function_call","end_turn","tool_use","stop_sequence","max_tokens","pause_turn","refusal","max_output_tokens"};outcome.set("stop_reason",V::makeStr(stop.empty()?"missing":stops.count(stop)?stop:"unknown"));
+    outcome.set("normalization",V::makeStr(normalization));return outcome;
+}
 V normalizedUsage(const V* usage,bool messages){
     if(!usage||usage->t!=V::Obj)return V{};
     V out=V::makeObj();const auto* input=usage->find(messages?"input_tokens":"prompt_tokens"),*output=usage->find(messages?"output_tokens":"completion_tokens");
@@ -125,14 +132,15 @@ V assistantAdaptRequest(const AssistantConfig& config,const V& canonicalRequest)
     for(const auto& function:need(canonicalRequest,"tools").arr){V tool=V::makeObj();tool.set("name",need(function,"name"));tool.set("description",need(function,"description"));tool.set("input_schema",need(function,"parameters"));tools.arr.push_back(tool);}out.set("tools",tools);out.set("system",system);out.set("messages",wire);return out;
 }
 V assistantNormalizeResponse(const AssistantConfig& config,const V& source){
-    if(config.protocol==AssistantProtocol::Responses){V out=source;if(const auto* original=source.find("output");original&&original->t==V::Arr){V output=*original;for(auto& item:output.arr)if(text(item,"type")=="reasoning")tagReplay(item,config);out.set("output",output);}return out;}
+    if(config.protocol==AssistantProtocol::Responses){V out=source;if(const auto* original=source.find("output");original&&original->t==V::Arr){V output=*original;for(auto& item:output.arr)if(text(item,"type")=="reasoning")tagReplay(item,config);out.set("output",output);}out.set("ark_provider_outcome",providerOutcome(config,source,out,"responses_passthrough"));return out;}
     V out=V::makeObj(),output=V::makeArr();out.set("status",V::makeStr("incomplete"));
     out.set("usage",normalizedUsage(source.find("usage"),config.protocol==AssistantProtocol::Messages));
+    auto finishOutcome=[&](const char* reason){out.set("ark_provider_outcome",providerOutcome(config,source,out,reason));return out;};
     // Retain usage evidence on an incomplete/invalid response, but no output is
     // accepted for execution until the entire protocol envelope is complete.
-    if(source.find("error")&&!source.find("error")->isNull()){out.set("error",V::makeObj());return out;}
+    if(source.find("error")&&!source.find("error")->isNull()){out.set("error",V::makeObj());return finishOutcome("provider_error");}
     try{if(config.protocol==AssistantProtocol::ChatCompletions){
-        const auto* choices=source.find("choices");require(choices&&choices->t==V::Arr&&choices->arr.size()==1,"Chat completion must contain exactly one choice.");const auto& choice=choices->arr.front();const auto finish=text(choice,"finish_reason");if(finish!="stop"&&finish!="tool_calls"){out.set("output",output);return out;}
+        const auto* choices=source.find("choices");require(choices&&choices->t==V::Arr&&choices->arr.size()==1,"Chat completion must contain exactly one choice.");const auto& choice=choices->arr.front();const auto finish=text(choice,"finish_reason");if(finish!="stop"&&finish!="tool_calls"){out.set("output",output);return finishOutcome("incomplete_finish");}
         const auto& reply=need(choice,"message");require(reply.t==V::Obj&&text(reply,"role")=="assistant","Chat response must be an assistant message.");
         if(const auto* reasoning=reply.find("reasoning_content");reasoning&&!reasoning->isNull()){require(reasoning->t==V::Str,"Invalid chat reasoning content.");V retained=V::makeObj();retained.set("type",V::makeStr("reasoning"));retained.set("ark_chat_reasoning",*reasoning);tagReplay(retained,config);output.arr.push_back(retained);}
         if(const auto* content=reply.find("content");content&&!content->isNull()){require(content->t==V::Str,"Chat response content must be text or null.");if(!content->str.empty())output.arr.push_back(normalizedMessage(content->str));}
@@ -141,7 +149,7 @@ V assistantNormalizeResponse(const AssistantConfig& config,const V& source){
         if(const auto* calls=reply.find("tool_calls");calls&&!calls->isNull()){require(calls->t==V::Arr&&calls->arr.size()<=32,"Invalid chat tool call array.");for(const auto& call:calls->arr){require(text(call,"type")=="function","Unsupported chat tool call type.");const auto& fn=need(call,"function");auto normalized=normalizedCall(text(call,"id"),text(fn,"name"),need(fn,"arguments"));require(ids.insert(text(normalized,"call_id")).second,"Repeated provider tool call ID.");output.arr.push_back(normalized);++count;}}
         require((finish=="tool_calls")==(count>0),"Chat completion finish reason contradicts its tool calls.");
     }else{
-        const auto stop=text(source,"stop_reason");if(stop!="end_turn"&&stop!="tool_use"&&stop!="stop_sequence"){out.set("output",output);return out;}
+        const auto stop=text(source,"stop_reason");if(stop!="end_turn"&&stop!="tool_use"&&stop!="stop_sequence"){out.set("output",output);return finishOutcome("incomplete_finish");}
         require(text(source,"type")=="message"&&text(source,"role")=="assistant","Messages response must be an assistant message.");const auto& content=need(source,"content");require(content.t==V::Arr,"Messages response content must be an array.");std::set<std::string> ids;std::size_t count=0;
         for(const auto& part:content.arr){const auto kind=text(part,"type");if(kind=="text"){require(need(part,"text").t==V::Str,"Messages text must be a string.");if(!text(part,"text").empty())output.arr.push_back(normalizedMessage(text(part,"text")));}
             else if(kind=="thinking"||kind=="redacted_thinking"){if(kind=="thinking")require(need(part,"thinking").t==V::Str&&need(part,"signature").t==V::Str,"Messages thinking requires a signature.");else require(need(part,"data").t==V::Str,"Invalid redacted thinking.");V retained=V::makeObj(),blocks=V::makeArr();blocks.arr.push_back(part);retained.set("type",V::makeStr("reasoning"));retained.set("ark_messages_content",blocks);tagReplay(retained,config);output.arr.push_back(retained);}
@@ -149,8 +157,8 @@ V assistantNormalizeResponse(const AssistantConfig& config,const V& source){
             else throw std::runtime_error("Unsupported Messages response content block.");}
         require((stop=="tool_use")==(count>0),"Messages stop reason contradicts its tool uses.");
     }
-    out.set("status",V::makeStr("completed"));out.set("output",output);return out;
-    }catch(const std::exception&){out.set("status",V::makeStr("incomplete"));out.set("output",V::makeArr());return out;}
+    out.set("status",V::makeStr("completed"));out.set("output",output);return finishOutcome("terminal_envelope_accepted");
+    }catch(const std::exception&){out.set("status",V::makeStr("incomplete"));out.set("output",V::makeArr());return finishOutcome("invalid_envelope");}
 }
 std::string assistantExternalMcpConfig(const std::string& target,const std::string& executable,const std::string& endpoint,const AssistantConfig& provider){
     const bool absoluteWindows=executable.size()>3&&std::isalpha((unsigned char)executable[0])&&executable[1]==':'&&(executable[2]=='\\'||executable[2]=='/');const bool unc=executable.rfind("\\\\",0)==0;

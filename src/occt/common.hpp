@@ -31,7 +31,9 @@ TopoDS_Shape common(const TopoDS_Shape& a,const TopoDS_Shape& b);
 TopoDS_Shape fuse(const TopoDS_Shape& a,const TopoDS_Shape& b);
 TopoDS_Shape compound(const std::vector<TopoDS_Shape>& parts);
 TopoDS_Shape transformed(const TopoDS_Shape& shape,const gp_Trsf& transform);
-V meshData(const TopoDS_Shape& shape,double deflection=.025,double angle=.12); // pos/idx
+// Full ordered picking edges plus optional edge_visible bools for display only.
+V meshData(const TopoDS_Shape& shape,double deflection=.025,double angle=.12);
+V edgeVisibility(const TopoDS_Shape& shape); // Read-only native topology/regularity classification.
 V vec(const gp_XYZ& xyz);
 V matrix(const gp_Trsf& transform);
 std::string brepData(const TopoDS_Shape& shape); // base64 BRep, no tessellation

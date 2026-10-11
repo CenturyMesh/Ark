@@ -38,6 +38,11 @@ bool localHttp(const std::string& endpoint){
     for(const std::string host:{"localhost:","127.0.0.1:","[::1]:"})if(authority.rfind(host,0)==0){auto port=authority.substr(host.size());return !port.empty()&&port.size()<=5&&std::all_of(port.begin(),port.end(),[](char c){return c>='0'&&c<='9';})&&std::stoi(port)>0&&std::stoi(port)<=65535;}
     return false;
 }
+bool knownHttpCode(const std::string& code){
+    static const std::set<std::string> known={"authentication_error","invalid_api_key","permission_denied","insufficient_quota","quota_exceeded","organization_spend_limit_exceeded","project_spend_limit_exceeded","organization_usage_limit_exceeded","usage_limit_exceeded","model_not_found","invalid_request_error","unsupported_capability","rate_limit_exceeded","server_is_overloaded","overloaded_error","api_error","not_found_error","permission_error","rate_limit_error","context_length_exceeded"};
+    return known.count(code)!=0;
+}
+V httpOutcome(const AssistantConfig& config,const AssistantHttpError& error){V outcome=V::makeObj();outcome.set("protocol",V::makeStr(assistantProtocolName(config.protocol)));outcome.set("response_status",V::makeStr("http_error"));outcome.set("http_status",V::makeNum(error.statusCode));outcome.set("error_code",V::makeStr(knownHttpCode(error.errorCode)?error.errorCode:"unknown"));return outcome;}
 V errorResult(const std::string& message){V r=V::makeObj();r.set("isError",V::makeBool(true));r.set("error",V::makeStr(message));return r;}
 V compactToolReceipt(V value){
     const auto* data=value.find("structuredContent");const auto* content=value.find("content");
@@ -204,8 +209,7 @@ V nativeTransport(const AssistantConfig& config,const V& request,const std::atom
     if(status<200||status>=300){std::string code;V body;if(arkjson::parse(response,body))if(auto error=body.find("error"))if(error->t==V::Obj){code=field(*error,"code");if(code.empty())code=field(*error,"type");}
         // Machine-shaped arbitrary fields can still echo a credential. Admit
         // only enumerated error codes and no request ID from API-key endpoints.
-        static const std::set<std::string> known={"authentication_error","invalid_api_key","permission_denied","insufficient_quota","quota_exceeded","organization_spend_limit_exceeded","project_spend_limit_exceeded","organization_usage_limit_exceeded","usage_limit_exceeded","model_not_found","invalid_request_error","unsupported_capability","rate_limit_exceeded","server_is_overloaded","overloaded_error","api_error","not_found_error","permission_error","rate_limit_error"};
-        if(!known.count(code))code.clear();throw AssistantHttpError(status,true,retryAfter,code,{});}
+        if(!knownHttpCode(code))code.clear();throw AssistantHttpError(status,true,retryAfter,code,{});}
     V parsed;require(arkjson::parse(response,parsed),"Assistant endpoint returned invalid JSON.");return parsed;
 }
 #else
@@ -338,7 +342,7 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
     auto functions=assistantFunctionTools(tools);std::set<std::string> allowed;
     for(auto& fn:functions.arr)allowed.insert(field(fn,"name"));
     AssistantResult result;
-    auto measuredEvent=[&](AssistantEvent::Kind kind,const std::string& text){if(events){AssistantEvent event;event.kind=kind;event.text=text;event.usage=result.usage;event.performance=result.performance;events(event);}};
+    auto measuredEvent=[&](AssistantEvent::Kind kind,const std::string& text,V outcome=V{}){if(events){AssistantEvent event;event.kind=kind;event.text=text;event.usage=result.usage;event.performance=result.performance;event.providerOutcome=std::move(outcome);events(event);}};
     if(input.t==V::Str){require(!input.str.empty(),"Enter an assistant message first.");V message=V::makeObj();message.set("role",V::makeStr("user"));message.set("content",input);result.conversation.arr.push_back(std::move(message));}
     else {require(input.t==V::Arr&&!input.arr.empty(),"Assistant input must be a prompt or nonempty history array.");result.conversation=input;}
     if(!config.onboardingPack.empty()){
@@ -378,21 +382,21 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
             performance.requestBytes+=performance.lastRequestBytes;performance.inputBytes+=performance.lastInputBytes;performance.toolSchemaBytes+=performance.lastToolSchemaBytes;performance.maxRequestBytes=std::max(performance.maxRequestBytes,performance.lastRequestBytes);
             const auto providerBegan=std::chrono::steady_clock::now();auto completedProvider=[&]{performance.lastProviderMilliseconds=millisecondsSince(providerBegan);performance.providerMilliseconds+=performance.lastProviderMilliseconds;};
             try{response=transport?transport(config,request,cancel):nativeTransport(config,request,cancel);}
-            catch(const AssistantHttpError& error){completedProvider();AssistantUsage unknown;unknown.missingResponses=1;accumulateAssistantUsage(result.usage,unknown);measuredEvent(AssistantEvent::Usage,assistantUsageLabel(result.usage));cancelled(cancel);
+            catch(const AssistantHttpError& error){completedProvider();AssistantUsage unknown;unknown.missingResponses=1;accumulateAssistantUsage(result.usage,unknown);measuredEvent(AssistantEvent::Usage,assistantUsageLabel(result.usage),httpOutcome(config,error));cancelled(cancel);
                 if(!transientHttp(error)||attempt>=maxRetries)throw AssistantTransportError(error.what());
                 if(error.retryAfterMilliseconds&&*error.retryAfterMilliseconds>maxDelay){retryStatus("HTTP "+std::to_string(error.statusCode)+" / deferred: server Retry-After exceeds 30s; no early retry");throw AssistantTransportError(std::string(error.what())+"; server Retry-After exceeds the supported 30-second wait. Request deferred; retry later.");}
                 const auto minimum=std::max<std::uint64_t>(1000u<<attempt,error.retryAfterMilliseconds.value_or(0));
                 unsigned jitter=0;if(retryHooks.jitterMilliseconds)jitter=std::min(retryHooks.jitterMilliseconds(),250u);else{static thread_local std::mt19937 random(std::random_device{}());jitter=std::uniform_int_distribution<unsigned>(0,250)(random);}const auto delay=minimum+std::min<std::uint64_t>(jitter,maxDelay-minimum);
                 retryStatus("HTTP "+std::to_string(error.statusCode)+" / retry "+std::to_string(attempt+1)+"/3 in "+std::to_string((delay+999)/1000)+"s; prior CAD work retained");
                 if(retryHooks.wait)retryHooks.wait(delay,cancel);else waitForRetry(delay,cancel);cancelled(cancel);continue;
-            }catch(const std::exception& error){completedProvider();AssistantUsage unknown;unknown.missingResponses=1;accumulateAssistantUsage(result.usage,unknown);measuredEvent(AssistantEvent::Usage,assistantUsageLabel(result.usage));throw AssistantTransportError(error.what());}
+            }catch(const std::exception& error){completedProvider();AssistantUsage unknown;unknown.missingResponses=1;accumulateAssistantUsage(result.usage,unknown);V outcome=V::makeObj();outcome.set("protocol",V::makeStr(assistantProtocolName(config.protocol)));outcome.set("response_status",V::makeStr("transport_error"));measuredEvent(AssistantEvent::Usage,assistantUsageLabel(result.usage),std::move(outcome));throw AssistantTransportError(error.what());}
             completedProvider();if(attempt)retryStatus("Connection recovered / continuing with the completed response");break;
         }
         ++result.rounds;
         require(response.dump().size()<=config.maxResponseBytes,"Assistant response exceeds configured size limit.");
         response=assistantNormalizeResponse(config,response);
         accumulateAssistantUsage(result.usage,responseUsage(response));
-        measuredEvent(AssistantEvent::Usage,assistantUsageLabel(result.usage));
+        measuredEvent(AssistantEvent::Usage,assistantUsageLabel(result.usage),response.find("ark_provider_outcome")?*response.find("ark_provider_outcome"):V{});
         // A returned response can have billed tokens even if it was incomplete,
         // or cancellation arrived while waiting. Keep evidence before rejecting.
         cancelled(cancel);
@@ -407,7 +411,10 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
             throw std::runtime_error("ChatGPT response failed. Check account permissions, selected model and usage status.");
         }
         require(!response.find("error")||response.find("error")->isNull(),"Assistant provider returned an error.");
-        require(status=="completed","Assistant response was incomplete or did not report completion; no tools from this response were executed.");
+        if(status!="completed"){
+            const auto* outcome=response.find("ark_provider_outcome");const std::string detail=outcome?" ("+field(*outcome,"protocol")+", stop_reason="+field(*outcome,"stop_reason")+", "+field(*outcome,"normalization")+")":"";
+            throw std::runtime_error("Assistant response was incomplete or did not report completion"+detail+"; no tools from this response were executed.");
+        }
         auto output=response.find("output");require(output&&output->t==V::Arr,"Assistant response has no output array.");
         std::vector<V> calls;
         // Validate the complete response before executing its first operation.

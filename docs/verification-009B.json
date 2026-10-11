@@ -1,0 +1,466 @@
+{
+  "iteration": {
+    "sequence": 9,
+    "phase": "B",
+    "code": "009B",
+    "version": "0.9.10",
+    "milestones": [
+      "A.01",
+      "A.04",
+      "A.05",
+      "B.01",
+      "D.01",
+      "D.02",
+      "D.04",
+      "F.03"
+    ]
+  },
+  "date": "2026-10-11",
+  "baseline_commit": "dbcb9591d44540ece7c5459a4f22e342aecf40c3",
+  "native_suite": {
+    "passed": 63,
+    "failed": 0,
+    "seconds": 89.54,
+    "log": "out/ark-009B-final-native-tests.log"
+  },
+  "core_suite": {
+    "passed": 43,
+    "failed": 0,
+    "seconds": 23.65,
+    "log": "out/ark-009B-core-tests.log",
+    "scope": "Core/backend changes verified without OCCT; later changes affect only renderer or native display metadata."
+  },
+  "targeted_backend": {
+    "passed": 8,
+    "failed": 0,
+    "seconds": 8.97,
+    "log": "out/ark-009B-targeted-backend-tests.log"
+  },
+  "ui_tests": [
+    {
+      "test": "startup-ui",
+      "exit": 0,
+      "seconds": 3.156
+    },
+    {
+      "test": "studio-render",
+      "exit": 0,
+      "seconds": 1.672
+    },
+    {
+      "test": "render-ui",
+      "exit": 0,
+      "seconds": 2.234
+    },
+    {
+      "test": "navigation-ui",
+      "exit": 0,
+      "seconds": 0.563
+    },
+    {
+      "test": "interaction-ui",
+      "exit": 0,
+      "seconds": 3.39
+    },
+    {
+      "test": "sketch-drawing-ui",
+      "exit": 0,
+      "seconds": 3.0
+    },
+    {
+      "test": "frame-tools-ui",
+      "exit": 0,
+      "seconds": 6.063
+    },
+    {
+      "test": "assistant-ui",
+      "exit": 0,
+      "seconds": 17.797
+    },
+    {
+      "test": "context-ui",
+      "exit": 0,
+      "seconds": 1.921
+    },
+    {
+      "test": "projection-ui",
+      "exit": 0,
+      "seconds": 2.657
+    },
+    {
+      "test": "arc-ui",
+      "exit": 0,
+      "seconds": 2.297
+    },
+    {
+      "test": "tree-ui",
+      "exit": 0,
+      "seconds": 0.578
+    },
+    {
+      "test": "completion-ui",
+      "exit": 0,
+      "seconds": 0.672
+    }
+  ],
+  "ui_receipt": "out/ark-009B-ui-verification.json",
+  "graphics": {
+    "backend": "OpenGL 3.3 GPU fragment path tracing, software BVH, no RT-core acceleration",
+    "gpu": "NVIDIA GeForce RTX 4080 SUPER/PCIe/SSE2",
+    "driver_gl": "4.6.0 NVIDIA 617.14",
+    "synthetic_exact_bodies": 4,
+    "triangles": 10164,
+    "bvh_nodes": 8039,
+    "trace_width": 1264,
+    "trace_height": 750,
+    "max_bounces": 4,
+    "accumulated_samples_before_reset": 33,
+    "completed_frame_p50_ms": 3.3807,
+    "completed_frame_p95_ms": 3.9916,
+    "bvh_build_ms": 4.1837,
+    "gpu_timing_method": "steady_clock full drawFrame followed by glFinish, CPU plus completed GPU, 31 stationary frames",
+    "native_document_unchanged": true,
+    "hidden_edge_occlusion_and_aa": true,
+    "camera_projection_visibility_transform_resets": true,
+    "runtime_system_options_toggle": true,
+    "unsupported_transparency_fallback": true
+  },
+  "startup": "PASS identity=009B version=0.9.10; headless skipped; actual timeout=2953ms <=3000ms; immediate-ready close=0ms; three About tabs and Close; no document/settings load or write.",
+  "shader_cache": [
+    {
+      "phase": "cold",
+      "exit": 0,
+      "seconds": 0.5,
+      "stdout": "shader_cache available=1 hits=0 misses=18 rejected=0 writes=18\r\nshot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-009B-cache-final-cold.png (1600x1000)",
+      "stderr": ""
+    },
+    {
+      "phase": "warm",
+      "exit": 0,
+      "seconds": 0.5,
+      "stdout": "shader_cache available=1 hits=18 misses=0 rejected=0 writes=0\r\nshot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-009B-cache-final-warm.png (1600x1000)",
+      "stderr": ""
+    },
+    {
+      "phase": "corrupt",
+      "exit": 0,
+      "seconds": 0.5,
+      "stdout": "shader_cache available=1 hits=17 misses=0 rejected=1 writes=1\r\nshot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-009B-cache-final-corrupt.png (1600x1000)",
+      "stderr": ""
+    }
+  ],
+  "native_display_metadata": {
+    "classification_brep_bytes_unchanged": true,
+    "mesher_geometry_tolerances_references_unchanged": true,
+    "existing_mesher_serialization_difference": "Six Checked flags changed 1 to 0; pinned TopTools_ShapeSet serializes this at position 3.",
+    "retained_diff": "out/ark-009B-mesher-custody-diff.txt"
+  },
+  "benchmark": {
+    "scope": "One repetition of B01,S02,A01 across Single,Focused,Parallel; complete local pilot, not complete D.01 qualification.",
+    "receipt": "out/verification/009B-comparison-live-q3-16k-none.jsonl",
+    "receipt_sha256": "71873898f29abe19155533a229b75b754f46ce18a22e1d38d7bb7c3427b6a80f",
+    "same_inputs_model_criteria_as_008D": [
+      "case",
+      "case_version",
+      "strategy",
+      "repetition",
+      "provider",
+      "model",
+      "reasoning_effort",
+      "brief",
+      "baseline_commands",
+      "criteria",
+      "deadline_seconds"
+    ],
+    "aggregate": {
+      "type": "benchmark_summary",
+      "strategy_totals": [
+        {
+          "strategy": "Single",
+          "attempt_count": 3,
+          "accepted_count": 1,
+          "failed_attempt_count": 2,
+          "reported_total_tokens": 621606,
+          "reported_responses": 53,
+          "missing_responses": 1,
+          "attempts_without_usage": 0,
+          "provider_ms": 214398,
+          "tool_ms": 199,
+          "request_bytes": 2620850,
+          "median_attempt_ms": 57583,
+          "cost_per_accepted_design": null
+        },
+        {
+          "strategy": "Focused",
+          "attempt_count": 3,
+          "accepted_count": 0,
+          "failed_attempt_count": 3,
+          "reported_total_tokens": 322514,
+          "reported_responses": 22,
+          "missing_responses": 1,
+          "attempts_without_usage": 0,
+          "provider_ms": 126280,
+          "tool_ms": 112,
+          "request_bytes": 1279986,
+          "median_attempt_ms": 40961,
+          "cost_per_accepted_design": null
+        },
+        {
+          "strategy": "Parallel",
+          "attempt_count": 3,
+          "accepted_count": 0,
+          "failed_attempt_count": 3,
+          "reported_total_tokens": 661265,
+          "reported_responses": 45,
+          "missing_responses": 1,
+          "attempts_without_usage": 0,
+          "provider_ms": 304097,
+          "tool_ms": 154,
+          "request_bytes": 3258983,
+          "median_attempt_ms": 113377,
+          "cost_per_accepted_design": null
+        }
+      ],
+      "attempts": null,
+      "attempt_count": 9,
+      "accepted_count": 1,
+      "failed_attempt_count": 8,
+      "live": true,
+      "scope": "Configured provider, synthetic tasks and native postconditions; blind human design evaluation and manufacture remain pending."
+    },
+    "attempt_results": [
+      {
+        "case": "B01",
+        "strategy": "Single",
+        "accepted": true,
+        "elapsed_ms": 48698,
+        "completed": true,
+        "timed_out": false,
+        "initial_revision": 1,
+        "final_revision": 2,
+        "tool_failures": 3,
+        "postconditions_passed": true,
+        "error": ""
+      },
+      {
+        "case": "B01",
+        "strategy": "Focused",
+        "accepted": false,
+        "elapsed_ms": 53538,
+        "completed": false,
+        "timed_out": false,
+        "initial_revision": 1,
+        "final_revision": 2,
+        "tool_failures": 4,
+        "postconditions_passed": true,
+        "error": "engineer: Assistant response was incomplete or did not report completion (chat-completions, stop_reason=length, incomplete_finish); no tools from this response were executed.\n"
+      },
+      {
+        "case": "B01",
+        "strategy": "Parallel",
+        "accepted": false,
+        "elapsed_ms": 53600,
+        "completed": false,
+        "timed_out": false,
+        "initial_revision": 1,
+        "final_revision": 2,
+        "tool_failures": 2,
+        "postconditions_passed": true,
+        "error": "engineer: Assistant response was incomplete or did not report completion (chat-completions, stop_reason=length, incomplete_finish); no tools from this response were executed.\n"
+      },
+      {
+        "case": "S02",
+        "strategy": "Single",
+        "accepted": false,
+        "elapsed_ms": 109541,
+        "completed": false,
+        "timed_out": false,
+        "initial_revision": 0,
+        "final_revision": 6,
+        "tool_failures": 13,
+        "postconditions_passed": false,
+        "error": "Assistant response was incomplete or did not report completion (chat-completions, stop_reason=length, incomplete_finish); no tools from this response were executed."
+      },
+      {
+        "case": "S02",
+        "strategy": "Focused",
+        "accepted": false,
+        "elapsed_ms": 40961,
+        "completed": false,
+        "timed_out": false,
+        "initial_revision": 0,
+        "final_revision": 0,
+        "tool_failures": 2,
+        "postconditions_passed": false,
+        "error": "engineer: Assistant response was incomplete or did not report completion (chat-completions, stop_reason=length, incomplete_finish); no tools from this response were executed.\n"
+      },
+      {
+        "case": "S02",
+        "strategy": "Parallel",
+        "accepted": false,
+        "elapsed_ms": 120051,
+        "completed": false,
+        "timed_out": true,
+        "initial_revision": 0,
+        "final_revision": 2,
+        "tool_failures": 8,
+        "postconditions_passed": false,
+        "error": "engineer: Assistant cancelled; previously applied changes remain in the document.\n"
+      },
+      {
+        "case": "A01",
+        "strategy": "Single",
+        "accepted": false,
+        "elapsed_ms": 57583,
+        "completed": false,
+        "timed_out": false,
+        "initial_revision": 1,
+        "final_revision": 3,
+        "tool_failures": 13,
+        "postconditions_passed": true,
+        "error": "Assistant response was incomplete or did not report completion (chat-completions, stop_reason=length, incomplete_finish); no tools from this response were executed."
+      },
+      {
+        "case": "A01",
+        "strategy": "Focused",
+        "accepted": false,
+        "elapsed_ms": 33017,
+        "completed": false,
+        "timed_out": false,
+        "initial_revision": 1,
+        "final_revision": 2,
+        "tool_failures": 2,
+        "postconditions_passed": true,
+        "error": "engineer: Assistant response was incomplete or did not report completion (chat-completions, stop_reason=length, incomplete_finish); no tools from this response were executed.\n"
+      },
+      {
+        "case": "A01",
+        "strategy": "Parallel",
+        "accepted": false,
+        "elapsed_ms": 113377,
+        "completed": false,
+        "timed_out": false,
+        "initial_revision": 1,
+        "final_revision": 3,
+        "tool_failures": 3,
+        "postconditions_passed": true,
+        "error": "engineer: Assistant response was incomplete or did not report completion (chat-completions, stop_reason=length, incomplete_finish); no tools from this response were executed.\n"
+      }
+    ],
+    "provider_outcome_counts": {
+      "http_error": 2,
+      "length": 7,
+      "stop": 3,
+      "tool_calls": 110,
+      "transport_error": 1
+    }
+  },
+  "package": {
+    "path": "out/releases-009B/ark-windows-x64-0.9.10.zip",
+    "sha256": "a945297f3c930a0ee73b741a6684fb5085ec044fe201434edbe8880bdcf9e07f",
+    "user_ark_documents": 0,
+    "notices": [
+      "licenses/LICENSE_LGPL_21.txt",
+      "licenses/OCCT_LGPL_EXCEPTION.txt",
+      "licenses/THIRD_PARTY_NOTICES.md",
+      "licenses/ark-ui-assets.txt",
+      "licenses/mapbox-earcut-ISC.txt",
+      "licenses/sqlite-provenance.txt",
+      "licenses/sqlite3.h"
+    ],
+    "zip_integrity_verified": true,
+    "bytes": 33050746
+  },
+  "runtime_sha256": {
+    "ark-studio.exe": "91e7b08e92e38ca9685e85f1862c3c60b4d153566fcff709b06eacf19379d5f9",
+    "ark-cli.exe": "84721fd8e33d205573de8a4c708f18e4f03395f68d9ced1656c3fa68f019c8d9",
+    "ark-mcp.exe": "565e9e6c7ded8abaa9c99621a0263d383a373c8ffd9b1b47d1c52371fc05d38a",
+    "ark-occt-worker.exe": "203c4bad42756ed6bf21dc2745eb360c4f3afe58baad42ca1f30fc960174b6a8",
+    "ark-benchmark.exe": "0ab9297cc1a4a638ddabea6e298bac389d7cdc83bf077047bbba46e4cd4d3e6d"
+  },
+  "installation": {
+    "state": {
+      "current": "0.9.10",
+      "pending": "",
+      "schema": 1,
+      "activating": "",
+      "previous": "0.9.9"
+    },
+    "new_runtime_hashes_match": true,
+    "prior_open_runtime_preserved": "008D /0.9.9, PID52008; no forced restart",
+    "optional_benchmark": "Portable ZIP only; not on application installer allowlist",
+    "activation_evidence": {
+      "date": "2026-10-11",
+      "launcher": "ARK/app/launcher/ark-launch.ps1",
+      "acknowledgement_confirmed": true,
+      "state": {
+        "current": "0.9.10",
+        "pending": "",
+        "schema": 1,
+        "activating": "",
+        "previous": "0.9.9"
+      },
+      "new_process": {
+        "title": "ARK 009B",
+        "pid": 28080,
+        "runtime_version": "0.9.10",
+        "started_utc": "2026-10-11T16:39:42.8531328Z"
+      },
+      "preserved_process": {
+        "title": "ARK 008D",
+        "pid": 52008,
+        "runtime_version": "0.9.9",
+        "started_utc": "2026-10-11T15:23:58.5942835Z"
+      },
+      "no_prior_process_terminated": true,
+      "user_document_opened_by_delivery": false
+    },
+    "package_files_verified": 61
+  },
+  "local_drawings_preserved": 6,
+  "limits": [
+    "Software BVH path tracing on GPU; no RT-core/DXR/OptiX backend.",
+    "Four bounces,250000 triangles,1600width/1.2M tracing pixels,4096spp; no denoiser or trace transparency/image textures/canvases.",
+    "Performance is one four-solid synthetic scene on RTX4080SUPER driver617.14, not general assembly qualification.",
+    "D.01 remains Partial; full corpus repetitions and blind human review deferred by user scope.",
+    "ARK own license and source-publication decision remain undecided; dependency audit remains Partial.",
+    "Local tests/package/install evidence does not imply hosted CI or manufacturing qualification."
+  ],
+  "visual_review": [
+    {
+      "path": "out/ark-009B-studio-render.png.studio-edges.png",
+      "sha256": "2021279e0cac063ac539301acae11735c8b379b5ea1e2b29294368e3f6f9af84"
+    },
+    {
+      "path": "out/ark-009B-studio-render.png.path-33spp.png",
+      "sha256": "14c037e5ac213be08b7ec1051db745e8a2f91990d230902a55f69d0fb3e83f7f"
+    },
+    {
+      "path": "out/ark-009B-studio-render.png.system-options.png",
+      "sha256": "102a1180311c5c51d20d16c74ed8124c05455352164c27e8253e4da3325123ea"
+    },
+    {
+      "path": "out/ark-009B-startup-ui.png.splash-animation.png",
+      "sha256": "080ce77db1c2ff07f2020daa92edf2e360cb7f4ee09bf81926393defbed61867"
+    },
+    {
+      "path": "out/ark-009B-startup-ui.png.about-0.png",
+      "sha256": "53b38739f4b551c0fa90d62ed205c4f463e09e4f590d625d2b15f09232b91685"
+    },
+    {
+      "path": "out/ark-009B-startup-ui.png.about-1.png",
+      "sha256": "9d822d61d99cb4ea74d6ec0929ab1b1dc4eb4ed032248c430562e9e2ed74fbd5"
+    }
+  ],
+  "evidence_sha256": {
+    "out/ark-009B-final-build.log": "b0bafb3276a0db5e5db608b4a173741bc0ab42b798af000372c7c955583d895e",
+    "out/ark-009B-caption-build.log": "e6be6c5af1427d071a54ce5602bd123d037b40359bef5d423e64a48bb2144a4d",
+    "out/ark-009B-final-native-tests.log": "fe421eb5a180618a5dbf6705ec75b77c8892c04e9d5716dc51d965f862c2aad9",
+    "out/ark-009B-core-tests.log": "ab25f0a1c1a1c52674bf680a0abc677f597164f77d29342c7d42ef9225ced877",
+    "out/ark-009B-targeted-backend-tests.log": "71edbdb4a774aa6fe543bff21184fc13acf005b557606c9c49adf59924622674",
+    "out/ark-009B-ui-verification.json": "994c39333c453e03a0dd46ad9b30ee58ed63165ec9a648a7af66efa3d394d394",
+    "out/ark-009B-cache-final-verification.json": "7fea51c0bfe8e586a63e0d1e77996b0e328ade74a093df89899e50e9ee5b8571",
+    "out/ark-009B-live-pilot.log": "2a0f104307514a410a42036520fa69bedea9d15ff3897d6b600cca82b4f129f8",
+    "out/releases-009B/ark-update.json": "4a0ae4d75561d7e912798f1c7c4a40c6ad87dceba16c139e2730621b7a45f15c"
+  }
+}

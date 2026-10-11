@@ -1,0 +1,122 @@
+// Display-only studio lighting. These shaders never select or modify CAD geometry.
+// Shared by the raster BRDF and the progressive ray integrator so their materials
+// and exposure have the same meaning. The environment is analytic, not an HDRI.
+static const std::string STUDIO_LIGHTING_GLSL=R"(
+const float PI=3.141592653589793;
+uniform vec3 studioRight,studioUp,studioBack;
+vec3 toStudio(vec3 d){return vec3(dot(d,studioRight),dot(d,studioUp),dot(d,studioBack));}
+vec3 fromStudio(vec3 d){return studioRight*d.x+studioUp*d.y+studioBack*d.z;}
+vec3 srgbToLinear(vec3 c){return mix(c/12.92,pow((c+.055)/1.055,vec3(2.4)),step(vec3(.04045),c));}
+vec3 linearToSrgb(vec3 c){return mix(c*12.92,1.055*pow(max(c,vec3(0.)),vec3(1./2.4))-.055,step(vec3(.0031308),c));}
+vec3 studioEnvironment(vec3 worldDirection,float blur){
+ vec3 d=toStudio(normalize(worldDirection));
+ vec3 c=mix(vec3(.045,.055,.072),vec3(.24,.28,.34),smoothstep(-.35,.9,d.y));
+ // Finite luminous studio panels. Angular width broadens the raster reflection
+ // only; the path integrator evaluates the actual sharp environment (blur=0).
+ vec3 a=normalize(vec3(-.55,.72,.42)),b=normalize(vec3(.78,.30,-.32));
+ vec3 q=normalize(vec3(-.25,.28,-.93)),t=normalize(vec3(.05,.96,-.18));
+ float width=max(.016,blur*blur*.36);
+ float key=exp((dot(d,a)-1.)/(.065+width));
+ float fill=exp((dot(d,b)-1.)/(.032+width));
+ float rim=exp((dot(d,q)-1.)/(.019+width));
+ float roof=exp((dot(d,t)-1.)/(.09+width));
+ // Peak radiance falls with convolution width, keeping a rough metal from
+ // receiving the peak energy of a sharp mirror reflection over a wide lobe.
+ c+=vec3(5.8,5.35,4.8)*key*.065/(.065+width);
+ c+=vec3(2.2,2.7,3.6)*fill*.032/(.032+width);
+ c+=vec3(4.2,4.8,5.6)*rim*.019/(.019+width);
+ c+=vec3(1.6,1.7,1.9)*roof*.09/(.09+width);
+ return c;
+}
+vec3 fresnelSchlick(float vh,vec3 f0){return f0+(1.-f0)*pow(clamp(1.-vh,0.,1.),5.);}
+float distributionGGX(float nh,float r){float a=r*r,a2=a*a,q=nh*nh*(a2-1.)+1.;return a2/max(PI*q*q,1e-12);}
+float smithGGX(float nv,float nl,float r){float a2=pow(r,4.);float gv=nl*sqrt(nv*nv*(1.-a2)+a2);float gl=nv*sqrt(nl*nl*(1.-a2)+a2);return .5/max(gv+gl,1e-5);}
+vec3 evaluateBRDF(vec3 n,vec3 v,vec3 l,vec3 base,float metal,float r){
+ float nv=max(dot(n,v),1e-5),nl=max(dot(n,l),0.);if(nl<=0.)return vec3(0.);
+ vec3 h=normalize(v+l),f=fresnelSchlick(max(dot(v,h),0.),mix(vec3(.04),base,metal));
+ return (1.-f)*(1.-metal)*base/PI+f*distributionGGX(max(dot(n,h),0.),r)*smithGGX(nv,nl,r);
+}
+vec2 environmentBRDF(float nv,float r){
+ // Analytic fit to the split-sum GGX BRDF integral (Epic's EnvBRDFApprox).
+ vec4 c=r*vec4(-1.,-.0275,-.572,.022)+vec4(1.,.0425,1.04,-.04);
+ float a=min(c.x*c.x,exp2(-9.28*nv))*c.x+c.y;return vec2(-1.04,1.04)*a+c.zw;
+}
+vec3 studioTonemap(vec3 c){
+ c=max(c,vec3(0.));float y=dot(c,vec3(.2126,.7152,.0722));
+ float mapped=(y*(2.51*y+.03))/(y*(2.43*y+.59)+.14);
+ // Luminance mapping preserves material hue. Gamut compression handles HDR
+ // chroma without hard clipping bright coloured surfaces to white.
+ c*=mapped/max(y,1e-6);float peak=max(c.r,max(c.g,c.b));
+ if(peak>1.)c=mix(vec3(mapped),c,clamp((1.-mapped)/max(peak-mapped,1e-5),0.,1.));
+ return linearToSrgb(clamp(c,0.,1.));
+}
+)";
+static const std::string FS_STUDIO_SOLID_SOURCE=std::string("#version 330 core\n")+STUDIO_LIGHTING_GLSL+R"(
+in vec3 nrm,wpos,lpos,lnrm;out vec4 o;
+uniform vec3 color,eye;uniform float sel,hardSurface,satin,metallic,roughness,opacity,hasTexture,selectionOverlay,cameraOrtho;
+uniform vec2 textureScale;uniform sampler2D surfaceTexture;
+vec4 triplanar(){
+ vec3 a=pow(abs(normalize(dot(lnrm,lnrm)>1e-8?lnrm:vec3(0.,1.,0.))),vec3(4.));a/=max(a.x+a.y+a.z,1e-5);
+ return texture(surfaceTexture,lpos.xy*textureScale)*a.z+texture(surfaceTexture,lpos.xz*textureScale)*a.y+texture(surfaceTexture,lpos.yz*textureScale)*a.x;
+}
+void main(){
+ if(selectionOverlay>.5){o=vec4(.97,.63,.21,sel*.16);return;}
+ vec3 n=hardSurface>0.?normalize(cross(dFdx(wpos),dFdy(wpos))):normalize(nrm),v=cameraOrtho>.5?studioBack:normalize(eye-wpos);
+ if(dot(n,v)<0.)n=-n;vec4 texel=hasTexture>.5?triplanar():vec4(1.);
+ vec3 base=srgbToLinear(clamp(color*texel.rgb,0.,1.));float m=clamp(metallic,0.,1.),r=clamp(roughness,.055,1.);
+ // Normal variance broadens subpixel highlights instead of letting a sharp
+ // highlight sparkle as a curved surface or small part moves across pixels.
+ float variance=max(dot(dFdx(n),dFdx(n)),dot(dFdy(n),dFdy(n)));r=sqrt(clamp(r*r+min(variance,.18),.003,1.));
+ float nv=max(dot(n,v),.001);vec3 f0=mix(vec3(.04),base,m),f=fresnelSchlick(nv,f0);
+ vec3 c=base*(1.-m)*(1.-f)*studioEnvironment(n,.85)*.85;
+ vec2 ab=environmentBRDF(nv,r);c+=studioEnvironment(reflect(-v,n),r)*(f0*ab.x+ab.y)*mix(.72,1.,satin);
+ vec3 l=fromStudio(normalize(vec3(-.55,.72,.42)));c+=evaluateBRDF(n,v,l,base,m,max(r,.24))*vec3(2.4,2.25,2.05)*max(dot(n,l),0.);
+ l=fromStudio(normalize(vec3(.78,.30,-.32)));c+=evaluateBRDF(n,v,l,base,m,max(r,.28))*vec3(.55,.66,.85)*max(dot(n,l),0.);
+ l=fromStudio(normalize(vec3(-.25,.28,-.93)));c+=evaluateBRDF(n,v,l,base,m,max(r,.20))*vec3(.72,.82,1.)*max(dot(n,l),0.);
+ c=studioTonemap(c);c=mix(c,min(c+vec3(.105,.061,.012),vec3(1.)),sel);
+ o=vec4(c,opacity*texel.a);
+})";
+static const char* FS_SOLID=FS_STUDIO_SOLID_SOURCE.c_str();
+
+// CPU supplies two endpoint positions and six quad corners per segment.
+// Expansion and coverage are in physical viewport pixels, independent of GL
+// line-width support, perspective, zoom and the underlying triangulation.
+static const char* VS_FEATURE_EDGE=R"(#version 330 core
+layout(location=0)in vec3 A;layout(location=1)in vec3 B;layout(location=2)in vec2 corner;
+uniform mat4 vp,model;uniform vec2 viewport;uniform float width;
+noperspective out vec2 local;flat out float segmentLength;
+void main(){
+ vec4 a=vp*model*vec4(A,1.),b=vp*model*vec4(B,1.);
+ // Clip against the near plane before expansion; never divide behind the eye.
+ float da=a.z+a.w,db=b.z+b.w;if(da<0.&&db<0.){gl_Position=vec4(2.,2.,2.,1.);local=vec2(0.);segmentLength=0.;return;}
+ if(da<0.)a=mix(a,b,clamp(da/(da-db),0.,1.));else if(db<0.)b=mix(b,a,clamp(db/(db-da),0.,1.));
+ vec2 pa=a.xy/max(a.w,1e-6)*viewport*.5,pb=b.xy/max(b.w,1e-6)*viewport*.5;
+ vec2 delta=pb-pa;float len=max(length(delta),1e-4);vec2 axis=delta/len,normal=vec2(-axis.y,axis.x);
+ float extent=width*.5+1.25;vec4 p=corner.x<.5?a:b;
+ vec2 offset=normal*corner.y*extent+axis*(corner.x<.5?-extent:extent);
+ p.xy+=offset*2./viewport*p.w;
+ // Two millionths of NDC, rather than the old .0008, cannot pull an edge
+ // through an unrelated wall. The filled depth pass supplies slope offset.
+ p.z-=.000002*p.w;gl_Position=p;
+ local=vec2(corner.x*len+(corner.x<.5?-extent:extent),corner.y*extent);segmentLength=len;
+})";
+static const char* FS_FEATURE_EDGE=R"(#version 330 core
+noperspective in vec2 local;flat in float segmentLength;uniform float width;out vec4 o;
+void main(){vec2 p=vec2(local.x-clamp(local.x,0.,segmentLength),local.y);float d=length(p)-width*.5;
+ float coverage=1.-smoothstep(-.65,.65,d);if(coverage<.005)discard;o=vec4(.008,.010,.012,coverage*.94);})";
+
+static const char* FS_CONTOUR=R"(#version 330 core
+uniform sampler2D gbuf;uniform vec2 res,origin;uniform float depthFar;out vec4 o;
+void main(){
+ vec2 uv=(gl_FragCoord.xy-origin)/res;vec4 g=texture(gbuf,uv);float edge=0.;
+ for(int k=0;k<8;++k){float a=float(k)*.785398163;vec4 q=texture(gbuf,uv+vec2(cos(a),sin(a))/res);
+  bool bg=g.a>.985,qbg=q.a>.985;if(bg!=qbg){edge=max(edge,.68);continue;}if(bg)continue;
+  // Only visible normal/depth discontinuities. Smooth curved faces produce
+  // no tessellation wireframe; depth bounds scale with local view depth.
+  float dz=abs(q.a-g.a)*depthFar,depth=max(g.a*depthFar,.001);
+  float angle=1.-dot(normalize(g.rgb*2.-1.),normalize(q.rgb*2.-1.));
+  float jump=smoothstep(depth*.003+depthFar*.000008,depth*.009+depthFar*.000025,dz);
+  edge=max(edge,max(jump*.75,smoothstep(.14,.32,angle)*.50));
+ }
+ o=vec4(.008,.010,.012,edge);
+})";

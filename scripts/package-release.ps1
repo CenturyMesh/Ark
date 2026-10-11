@@ -1,11 +1,12 @@
 param(
     [string]$RuntimeDirectory = 'out/native-release/Release',
     [string]$OutputDirectory = 'out/releases',
-    [string]$MsvcRuntimeDirectory
+    [string]$MsvcRuntimeDirectory,
+    [string]$OcctSourceDirectory = 'out/deps/occt/cache/OCCT-8_0_1'
 )
 $ErrorActionPreference = 'Stop'
 $repository = Split-Path $PSScriptRoot -Parent
-foreach ($variable in @('RuntimeDirectory', 'OutputDirectory')) {
+foreach ($variable in @('RuntimeDirectory', 'OutputDirectory', 'OcctSourceDirectory')) {
     $value = Get-Variable -Name $variable -ValueOnly
     if (-not [IO.Path]::IsPathRooted($value)) { Set-Variable -Name $variable -Value (Join-Path $repository $value) }
 }
@@ -55,10 +56,17 @@ try {
     $licenses = Join-Path $staging 'licenses'
     [IO.Directory]::CreateDirectory($licenses) | Out-Null
     Copy-Item -LiteralPath (Join-Path $repository 'third_party/mapbox/LICENSE') -Destination (Join-Path $licenses 'mapbox-earcut-ISC.txt')
+    Copy-Item -LiteralPath (Join-Path $repository 'third_party/sqlite/README.md') -Destination (Join-Path $licenses 'sqlite-provenance.txt')
+    Copy-Item -LiteralPath (Join-Path $repository 'third_party/sqlite/sqlite3.h') -Destination (Join-Path $licenses 'sqlite3.h')
+    Copy-Item -LiteralPath (Join-Path $repository 'assets/ui/README.md') -Destination (Join-Path $licenses 'ark-ui-assets.txt')
+    Copy-Item -LiteralPath (Join-Path $repository 'docs/THIRD_PARTY_NOTICES.md') -Destination (Join-Path $licenses 'THIRD_PARTY_NOTICES.md')
     foreach ($name in @('LICENSE', 'LICENSE.md', 'LICENSE.txt')) { if (Test-Path -LiteralPath (Join-Path $repository $name)) { Copy-Item -LiteralPath (Join-Path $repository $name) -Destination $licenses } }
     foreach ($file in @('LICENSE_LGPL_21.txt', 'OCCT_LGPL_EXCEPTION.txt')) {
-        $hits = @(Get-ChildItem -Path (Join-Path $repository 'out/deps/occt/*') -Directory | ForEach-Object { $candidate=Join-Path $_.FullName $file; if (Test-Path -LiteralPath $candidate) { $candidate } })
-        if ($hits.Count) { Copy-Item -LiteralPath $hits[0] -Destination $licenses }
+        $sourceNotice = Join-Path $OcctSourceDirectory $file
+        if (-not (Test-Path -LiteralPath $sourceNotice -PathType Leaf)) {
+            throw "Required OCCT notice is missing: $sourceNotice. Supply the corresponding pinned source directory with -OcctSourceDirectory."
+        }
+        Copy-Item -LiteralPath $sourceNotice -Destination $licenses
     }
     Get-ArkRuntimeVersion $staging | Out-Null
     $name = "ark-windows-x64-$version.zip"

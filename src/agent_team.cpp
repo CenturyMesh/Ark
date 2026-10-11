@@ -40,8 +40,23 @@ std::string clipped(const std::string& text,std::size_t limit){if(text.size()<=l
 void boundedAppend(std::string& target,const std::string& text,std::size_t limit){if(!target.empty())target+='\n';target+=text;
     if(target.size()>limit){const std::string marker="[earlier output truncated] ";auto start=target.size()-(limit-marker.size());while(start<target.size()&&(static_cast<unsigned char>(target[start])&0xc0)==0x80)++start;target=marker+target.substr(start);}
 }
+V compactSchemaAnnotations(V schema){
+    // Helpers inherit every validation rule. Keep the explanatory examples on
+    // doc_apply once instead of repeating them in each coordination schema.
+    if(schema.t!=V::Obj)return schema;
+    schema.obj.erase(std::remove_if(schema.obj.begin(),schema.obj.end(),[](const auto& entry){return entry.first=="description"||entry.first=="examples"||entry.first=="title";}),schema.obj.end());
+    for(const auto* name:{"properties","$defs","definitions"})if(const auto* children=schema.find(name);children&&children->t==V::Obj){V retained=*children;for(auto& entry:retained.obj)entry.second=compactSchemaAnnotations(std::move(entry.second));schema.set(name,std::move(retained));}
+    for(const auto* name:{"items","additionalProperties"})if(const auto* child=schema.find(name);child&&child->t==V::Obj)schema.set(name,compactSchemaAnnotations(*child));
+    for(const auto* name:{"oneOf","anyOf","allOf"})if(const auto* children=schema.find(name);children&&children->t==V::Arr){V retained=*children;for(auto& item:retained.arr)item=compactSchemaAnnotations(std::move(item));schema.set(name,std::move(retained));}
+    return schema;
+}
 V teamTools(V tools,unsigned maxCommands){
     for(const auto& item:tools.arr)require(field(item,"name").rfind("team_",0)!=0,"ARK tool names collide with team coordination tools.");
+    V commandItems,checksSchema;
+    for(const auto& tool:tools.arr)if(field(tool,"name")=="doc_apply"){
+        const auto* schema=tool.find("inputSchema");const auto* props=schema?schema->find("properties"):nullptr;
+        if(props){if(const auto* commands=props->find("commands"))if(const auto* items=commands->find("items"))commandItems=*items;if(const auto* checks=props->find("checks"))checksSchema=*checks;}
+    }
     for(auto& tool:tools.arr)if(documentMutation(field(tool,"name"))){
         V schema=*tool.find("inputSchema"),props=schema.find("properties")?*schema.find("properties"):V::makeObj();V expected=V::makeObj();expected.set("type",V::makeStr("integer"));expected.set("minimum",V::makeNum(0));props.set("expected_revision",expected);schema.set("properties",props);
         V required=schema.find("required")?*schema.find("required"):V::makeArr();if(required.t!=V::Arr)required=V::makeArr();if(!std::any_of(required.arr.begin(),required.arr.end(),[](const auto& value){return value.asStr()=="expected_revision";}))required.arr.push_back(V::makeStr("expected_revision"));schema.set("required",required);tool.set("inputSchema",schema);
@@ -55,7 +70,7 @@ V teamTools(V tools,unsigned maxCommands){
     add("team_proposal","Read one stored proposal's actual commands, checks, author, recipient and observed revision. It remains a proposal until a measured commit receipt exists.",R"({"type":"object","properties":{"id":{"type":"string"}},"required":["id"]})");
     add("team_apply_step","Apply a coherent atomic design/assembly step with observed expected_revision. Supply commands/checks, proposal_id, or candidate_id from this role's successful doc_preview. Cached operations are scope/count checked and cannot be rebased or borrowed from another role. Actual step targets and measured commit receipts are streamed to Studio.",R"({"type":"object","properties":{"expected_revision":{"type":"integer","minimum":0},"commands":{"type":"array","minItems":1,"items":{"type":"object"}},"checks":{"type":"array"},"proposal_id":{"type":"string"},"candidate_id":{"type":"string"}},"required":["expected_revision"]})");
     for(auto& tool:tools.arr){auto name=field(tool,"name");if(name=="team_apply_step"){V annotations=*tool.find("annotations");annotations.set("readOnlyHint",V::makeBool(false));tool.set("annotations",annotations);}
-        if(name=="doc_apply"||name=="team_apply_step"||name=="team_propose"){V schema=*tool.find("inputSchema"),props=schema.find("properties")?*schema.find("properties"):V::makeObj();if(auto source=props.find("commands")){V commands=*source;commands.set("maxItems",V::makeNum(maxCommands));props.set("commands",commands);schema.set("properties",props);tool.set("inputSchema",schema);}}
+        if(name=="doc_apply"||name=="team_apply_step"||name=="team_propose"){V schema=*tool.find("inputSchema"),props=schema.find("properties")?*schema.find("properties"):V::makeObj();if(auto source=props.find("commands")){V commands=*source;commands.set("maxItems",V::makeNum(maxCommands));if(commandItems.t==V::Obj)commands.set("items",name=="doc_apply"?commandItems:compactSchemaAnnotations(commandItems));props.set("commands",commands);}if(checksSchema.t==V::Obj)props.set("checks",name=="doc_apply"?checksSchema:compactSchemaAnnotations(checksSchema));schema.set("properties",props);tool.set("inputSchema",schema);}
     }
     return tools;
 }
@@ -118,7 +133,7 @@ struct AgentTeam::Impl {
         }
         wake.notify_all();idle.notify_all();
     }
-    std::size_t eventSize(const AgentTeamEvent& event) const{std::size_t size=sizeof(AgentTeamEvent)+event.text.size()+event.roleId.size()+event.tool.size()+event.stepId.size()+event.proposalId.size()+event.createdIds.size()*sizeof(std::uint64_t)+event.draftSketchCommands.dump().size();for(const auto& group:{event.operations,event.sketchNames,event.featureNames})for(auto& value:group)size+=value.size();return size;}
+    std::size_t eventSize(const AgentTeamEvent& event) const{std::size_t size=sizeof(AgentTeamEvent)+event.text.size()+event.roleId.size()+event.tool.size()+event.stepId.size()+event.proposalId.size()+event.createdIds.size()*sizeof(std::uint64_t)+event.draftSketchCommands.dump().size()+event.providerOutcome.dump().size();for(const auto& group:{event.operations,event.sketchNames,event.featureNames})for(auto& value:group)size+=value.size();return size;}
     void emit(AgentTeamEvent event){
         AgentTeamEvents callback;
         {std::lock_guard lock(mutex);event.text=clipped(event.text,config.maxEventTextBytes);event.sequence=++sequence;
@@ -320,7 +335,7 @@ struct AgentTeam::Impl {
     void assistantEvent(std::size_t index,const AssistantUsage& baseline,const AssistantPerformance& performanceBaseline,const AssistantEvent& input){
         if(input.kind==AssistantEvent::Usage||input.kind==AssistantEvent::ToolEnd){std::lock_guard lock(mutex);roles[index].view.performance=performanceBaseline;accumulateAssistantPerformance(roles[index].view.performance,input.performance);}
         if(input.kind==AssistantEvent::ToolEnd)return; // Actual result is recorded by call().
-        AgentTeamEvent event;event.roleId=roles[index].config.id;event.text=input.text;event.providerRetry=input.providerRetry;
+        AgentTeamEvent event;event.roleId=roles[index].config.id;event.text=input.text;event.providerRetry=input.providerRetry;event.providerOutcome=input.providerOutcome;
         {std::lock_guard lock(mutex);auto& view=roles[index].view;
             switch(input.kind){
             case AssistantEvent::Status:event.kind=AgentTeamEvent::Status;view.status=input.text;break;

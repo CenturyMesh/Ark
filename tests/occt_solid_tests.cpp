@@ -1,5 +1,17 @@
 #include "ark/occt_solid.hpp"
 #include "../src/occt/common.hpp"
+#include <BRep_Tool.hxx>
+#include <BRepAdaptor_Curve.hxx>
+#include <BRepBuilderAPI_MakeFace.hxx>
+#include <BRepBuilderAPI_MakeEdge.hxx>
+#include <Geom_Surface.hxx>
+#include <Geom_Curve.hxx>
+#include <TopoDS.hxx>
+#include <TopExp.hxx>
+#include <NCollection_IndexedDataMap.hxx>
+#include <NCollection_List.hxx>
+#include <TopTools_ShapeMapHasher.hxx>
+#include <gp_Pln.hxx>
 #include <cmath>
 #include <filesystem>
 #include <iostream>
@@ -41,6 +53,57 @@ void primitivesAndNames(){
     close(volume(result(parse(R"({"op":"sphere","radius":2})"))),32*std::acos(-1.)/3,1e-6,"sphere volume");
     close(volume(result(parse(R"({"op":"cone","radius_bottom":3,"radius_top":1,"height":6})"))),26*std::acos(-1.),1e-6,"cone volume");
     close(volume(result(parse(R"({"op":"torus","major_radius":5,"minor_radius":1})"))),10*std::acos(-1.)*std::acos(-1.),1e-5,"torus volume");
+}
+
+void nativeDisplayEdges(){
+    auto assertAligned=[](const Value& mesh,const TopoDS_Shape& shape){
+        const auto* edges=mesh.find("edges"),*visible=mesh.find("edge_visible");
+        check(edges&&visible&&visible->t==Value::Arr,"native preview has optional display-edge metadata");
+        check(visible->arr.size()==edges->arr.size()&&edges->arr.size()==occt::shapes(shape,TopAbs_EDGE).size(),"display metadata preserves every original edge occurrence and index");
+        for(const auto& flag:visible->arr)check(flag.t==Value::Bool,"display edge mask is typed bool");
+    };
+    auto box=result(parse(R"({"op":"box","width":10,"depth":20,"height":5})"));auto boxShape=occt::readBrep(box.find("brep_base64")->str);const auto& boxMesh=*box.find("mesh");assertAligned(boxMesh,boxShape);
+    for(const auto& flag:boxMesh.find("edge_visible")->arr)check(flag.b,"all sharp box boundaries remain visible");
+    const auto reportBefore=occt::shapeReport(boxShape,true).dump(),original=occt::brepData(boxShape);
+    const auto facesBefore=occt::shapes(boxShape,TopAbs_FACE),edgesBefore=occt::shapes(boxShape,TopAbs_EDGE);
+    std::vector<occ::handle<Geom_Surface>> surfaces;std::vector<occ::handle<Geom_Curve>> curves;std::vector<double> faceTolerances,edgeTolerances,firstParameters,lastParameters;
+    for(const auto& item:facesBefore){const auto face=TopoDS::Face(item);surfaces.push_back(BRep_Tool::Surface(face));faceTolerances.push_back(BRep_Tool::Tolerance(face));}
+    for(const auto& item:edgesBefore){const auto edge=TopoDS::Edge(item);double first,last;curves.push_back(BRep_Tool::Curve(edge,first,last));edgeTolerances.push_back(BRep_Tool::Tolerance(edge));firstParameters.push_back(first);lastParameters.push_back(last);}
+    const auto verticesBefore=occt::shapes(boxShape,TopAbs_VERTEX);std::vector<gp_Pnt> points;std::vector<double> vertexTolerances;for(const auto& item:verticesBefore){const auto vertex=TopoDS::Vertex(item);points.push_back(BRep_Tool::Pnt(vertex));vertexTolerances.push_back(BRep_Tool::Tolerance(vertex));}
+    (void)occt::meshData(boxShape);const auto meshed=occt::brepData(boxShape);
+    if(meshed!=original){const auto artifacts=std::filesystem::temp_directory_path()/"ark-native-display-edges";occt::writeFile(artifacts/"box-before-mesh.brep",occt::base64Decode(original));occt::writeFile(artifacts/"box-after-mesh.brep",occt::base64Decode(meshed));std::cout<<"Existing mesher serialization delta retained in "<<artifacts.string()<<'\n';}
+    check(occt::shapeReport(boxShape,true).dump()==reportBefore,"mesh attachment preserves exact volume, area, bounds and topology report");
+    const auto facesAfter=occt::shapes(boxShape,TopAbs_FACE),edgesAfter=occt::shapes(boxShape,TopAbs_EDGE);check(facesAfter.size()==facesBefore.size()&&edgesAfter.size()==edgesBefore.size(),"meshing preserves face and edge census");
+    for(size_t i=0;i<facesAfter.size();++i){const auto face=TopoDS::Face(facesAfter[i]);check(face.IsSame(facesBefore[i])&&BRep_Tool::Surface(face)==surfaces[i]&&BRep_Tool::Tolerance(face)==faceTolerances[i],"meshing preserves exact face identity, surface and tolerance");}
+    for(size_t i=0;i<edgesAfter.size();++i){const auto edge=TopoDS::Edge(edgesAfter[i]);double first,last;const auto curve=BRep_Tool::Curve(edge,first,last);check(edge.IsSame(edgesBefore[i])&&curve==curves[i]&&BRep_Tool::Tolerance(edge)==edgeTolerances[i]&&first==firstParameters[i]&&last==lastParameters[i],"meshing preserves exact edge identity, curve, range and tolerance");}
+    const auto verticesAfter=occt::shapes(boxShape,TopAbs_VERTEX);check(verticesAfter.size()==verticesBefore.size(),"meshing preserves vertex census");for(size_t i=0;i<verticesAfter.size();++i){const auto vertex=TopoDS::Vertex(verticesAfter[i]);const auto point=BRep_Tool::Pnt(vertex);check(vertex.IsSame(verticesBefore[i])&&point.X()==points[i].X()&&point.Y()==points[i].Y()&&point.Z()==points[i].Z()&&BRep_Tool::Tolerance(vertex)==vertexTolerances[i],"meshing preserves exact vertex identity, coordinates and tolerance");}
+    const auto classificationBaseline=occt::brepData(boxShape);const auto classification=occt::edgeVisibility(boxShape);check(occt::brepData(boxShape)==classificationBaseline,"read-only display classification leaves already-meshed B-rep byte-identical");check(classification.dump()==boxMesh.find("edge_visible")->dump(),"direct read-only classification agrees with worker mesh metadata");
+
+    auto cylinder=result(parse(R"({"op":"cylinder","radius":5,"height":20})"));auto cylinderShape=occt::readBrep(cylinder.find("brep_base64")->str);const auto& cylinderMesh=*cylinder.find("mesh");assertAligned(cylinderMesh,cylinderShape);
+    const auto cylinderEdges=occt::shapes(cylinderShape,TopAbs_EDGE);size_t seams=0,rims=0;
+    for(size_t i=0;i<cylinderEdges.size();++i){BRepAdaptor_Curve curve(TopoDS::Edge(cylinderEdges[i]));bool visible=cylinderMesh.find("edge_visible")->arr[i].b;
+        if(curve.GetType()==GeomAbs_Line){++seams;check(!visible,"cylinder parametric seam is suppressed for rendering");check(!cylinderMesh.find("edges")->arr[i].arr.empty(),"hidden cylinder seam remains available for picking");}
+        else if(curve.GetType()==GeomAbs_Circle){++rims;check(visible,"cylinder sharp circular rims remain visible");}
+        else throw std::runtime_error("unexpected cylinder edge type");
+    }
+    check(seams>0&&rims>0,"cylinder tests both seam suppression and rim retention");
+    for(const auto& ref:cylinder.find("topology")->find("references")->arr)if(ref.find("kind")&&ref.find("kind")->str=="edge")if(const auto* indices=ref.find("indices"))for(const auto& index:indices->arr)check(index.num>=0&&index.num<cylinderEdges.size(),"semantic edge indices still bind into the complete edge list");
+
+    auto sphere=result(parse(R"({"op":"sphere","radius":5})"));auto sphereShape=occt::readBrep(sphere.find("brep_base64")->str);const auto& sphereMesh=*sphere.find("mesh");assertAligned(sphereMesh,sphereShape);size_t sphereSeams=0;
+    const auto sphereEdges=occt::shapes(sphereShape,TopAbs_EDGE);
+    for(size_t i=0;i<sphereEdges.size();++i){const auto edge=TopoDS::Edge(sphereEdges[i]);check(!sphereMesh.find("edge_visible")->arr[i].b,"smooth sphere has no artificial seam or pole display edges");if(!BRep_Tool::Degenerated(edge)){++sphereSeams;check(!sphereMesh.find("edges")->arr[i].arr.empty(),"sphere seam remains pickable");}}
+    check(sphereSeams>0,"sphere test includes a nondegenerate seam");
+
+    auto face=BRepBuilderAPI_MakeFace(gp_Pln(gp_Pnt(0,0,0),gp_Dir(0,0,1)),0,20,0,10).Face();auto surfaceMesh=occt::meshData(face);assertAligned(surfaceMesh,face);for(const auto& flag:surfaceMesh.find("edge_visible")->arr)check(flag.b,"open surface boundaries remain visible");
+    auto wireEdge=BRepBuilderAPI_MakeEdge(gp_Pnt(0,0,0),gp_Pnt(2,3,4)).Edge();auto curveMesh=occt::meshData(wireEdge);assertAligned(curveMesh,wireEdge);check(curveMesh.find("edge_visible")->arr[0].b,"standalone curve remains visible");
+
+    auto roundedRequest=on("fillet",box);roundedRequest.set("radius",Value::makeNum(.5));roundedRequest.set("edges",parse(R"(["edge.x.ymin.zmin"])"));auto rounded=result(roundedRequest);auto roundedShape=occt::readBrep(rounded.find("brep_base64")->str);const auto& roundedMesh=*rounded.find("mesh");assertAligned(roundedMesh,roundedShape);
+    NCollection_IndexedDataMap<TopoDS_Shape,NCollection_List<TopoDS_Shape>,TopTools_ShapeMapHasher> owners;TopExp::MapShapesAndAncestors(roundedShape,TopAbs_EDGE,TopAbs_FACE,owners);const auto roundedEdges=occt::shapes(roundedShape,TopAbs_EDGE);size_t smooth=0;
+    for(size_t i=0;i<roundedEdges.size();++i){const auto edge=TopoDS::Edge(roundedEdges[i]);const auto& faces=owners.FindFromKey(edge);if(faces.Extent()!=2)continue;const auto first=TopoDS::Face(faces.First());const auto second=TopoDS::Face(faces.Last());if(first.IsSame(second))continue;
+        if(BRep_Tool::HasContinuity(edge,first,second)&&BRep_Tool::Continuity(edge,first,second)>=GeomAbs_G1){++smooth;check(!roundedMesh.find("edge_visible")->arr[i].b,"proven tangent fillet face junction is suppressed");}
+        else check(roundedMesh.find("edge_visible")->arr[i].b,"unproven or sharp fillet boundaries remain visible");
+    }
+    check(smooth>0,"fillet test exercises stored native tangent continuity");
 }
 
 void disconnectedDiagnostic(){
@@ -244,4 +307,4 @@ void planeSplitAndMirrorCopy(){
     mirror.set("fuse",Value::makeNum(1));rejected(mirror);
 }
 }
-int main(){try{primitivesAndNames();disconnectedDiagnostic();operations();rejection();finishingFeatures();repeatedUnionNamespaces();planeSplitAndMirrorCopy();std::cout<<"native solid tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(){try{primitivesAndNames();nativeDisplayEdges();disconnectedDiagnostic();operations();rejection();finishingFeatures();repeatedUnionNamespaces();planeSplitAndMirrorCopy();std::cout<<"native solid tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

@@ -13,6 +13,7 @@ const V tools=json(R"([{"name":"doc_info","description":"Inspect current documen
 V finalChat(){return json(R"({"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"Finished with actual evidence."}}],"usage":{"prompt_tokens":20,"completion_tokens":5,"total_tokens":25}})");}
 V multiChat(){return json(R"({"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","content":"Inspect then apply the checked change.","reasoning_content":"Retained local reasoning.","tool_calls":[{"id":"inspect_1","type":"function","function":{"name":"doc_info","arguments":"{}"}},{"id":"write_2","type":"function","function":{"name":"doc_apply","arguments":"{\"expected_revision\":7,\"commands\":[{\"op\":\"param.set\",\"name\":\"width\",\"expr\":30}]}"}}]}}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15,"prompt_tokens_details":{"cached_tokens":3},"completion_tokens_details":{"reasoning_tokens":2}}})");}
 AssistantConfig configured(const std::string& id){auto config=assistantProviderPreset(id);config.model="explicit-offline-model";return config;}
+V messagesCalls();
 void testChat(){
     auto config=configured("ollama");int requests=0,executions=0;V retained;
     auto run=runAssistant(config,V::makeStr("Edit my document"),tools,[&](const std::string& name,const V& args){++executions;if(executions==1)check(name=="doc_info","tools execute in response order");else check(name=="doc_apply"&&args.find("expected_revision")->num==7,"revision survives chat conversion");return json(R"({"isError":false,"structuredContent":{"revision":8}})");},{},nullptr,
@@ -31,8 +32,8 @@ void testChat(){
     auto explicitEffort=config;explicitEffort.reasoningEffort="high";check(assistantRequest(explicitEffort,json(R"([{"role":"user","content":"Inspect"}])"),tools).find("reasoning_effort")->str=="high","chat effort is passed explicitly rather than downgraded");
 }
 void testCompleteBeforeExecution(){auto config=configured("claude-chat");
-    for(int variant=0;variant<6;++variant){int calls=0;AssistantUsage usage;
-        rejects([&]{runAssistant(config,V::makeStr("Check invalid envelope"),tools,[&](auto&,auto&){++calls;return V::makeObj();},[&](const auto& event){if(event.kind==AssistantEvent::Usage)usage=event.usage;},nullptr,[&](auto&,auto&,auto*){
+    for(int variant=0;variant<6;++variant){int calls=0;AssistantUsage usage;V outcome;
+        rejects([&]{runAssistant(config,V::makeStr("Check invalid envelope"),tools,[&](auto&,auto&){++calls;return V::makeObj();},[&](const auto& event){if(event.kind==AssistantEvent::Usage){usage=event.usage;outcome=event.providerOutcome;}},nullptr,[&](auto&,auto&,auto*){
             auto response=multiChat();V choices=*response.find("choices"),entry=choices.arr[0],reply=*entry.find("message"),toolCalls=*reply.find("tool_calls");
             if(variant==0)entry.set("finish_reason",V::makeStr("length"));
             if(variant==1){toolCalls.arr[1].set("id",V::makeStr("inspect_1"));reply.set("tool_calls",toolCalls);}
@@ -42,9 +43,21 @@ void testCompleteBeforeExecution(){auto config=configured("claude-chat");
             if(variant==5){V fn=*toolCalls.arr[1].find("function");fn.set("arguments",V::makeStr("{"));toolCalls.arr[1].set("function",fn);reply.set("tool_calls",toolCalls);}
             entry.set("message",reply);choices.arr[0]=entry;response.set("choices",choices);return response;
         });},"invalid/incomplete chat response rejects");check(calls==0&&usage.totalTokens==15,"entire output checked before first tool while usage remains measured");
+        check(outcome.find("protocol")->str=="chat-completions","categorical provider outcome keeps actual protocol");
+        if(variant==0)check(outcome.find("stop_reason")->str=="length"&&outcome.find("normalization")->str=="incomplete_finish","provider truncation retained distinctly from malformed envelope");
+        else if(variant==2)check(outcome.find("response_status")->str=="completed","completed provider envelope does not bypass host tool allowlist");
+        else check(outcome.find("normalization")->str=="invalid_envelope"&&outcome.find("response_status")->str=="incomplete","invalid envelope classified and no partial calls retained");
     }
     int rounds=0;auto missing=runAssistant(config,V::makeStr("Unknown usage is unknown"),tools,{}, {},nullptr,[&](auto&,auto&,auto*){++rounds;auto response=finalChat();response.set("usage",V{});return response;});check(rounds==1&&missing.usage.reportedResponses==0&&missing.usage.missingResponses==1,"missing usage never becomes a zero-cost receipt");
     auto explicitEffort=config;explicitEffort.reasoningEffort="high";rejects([&]{validateAssistantConfig(explicitEffort);},"Claude compatibility cannot silently ignore effort");
+}
+void testBoundedOutcomes(){
+    auto config=configured("ollama");auto response=multiChat();V choices=*response.find("choices"),entry=choices.arr.front();entry.set("finish_reason",V::makeStr("sk_FAKE_PROVIDER_BODY_SECRET"));choices.arr.front()=entry;response.set("choices",choices);auto rejected=assistantNormalizeResponse(config,response);
+    const auto* outcome=rejected.find("ark_provider_outcome");check(outcome&&outcome->dump().size()<256&&outcome->find("stop_reason")->str=="unknown"&&outcome->dump().find("SECRET")==std::string::npos,"unrecognized provider stop reason never enters categorical diagnostics");check(rejected.find("output")->arr.empty(),"unrecognized terminal marker retains no executable output");
+    V eventOutcome;int calls=0;std::string failure;
+    try{runAssistant(config,V::makeStr("Incomplete receipt"),tools,[&](auto&,auto&){++calls;return V::makeObj();},[&](const auto& event){if(event.kind==AssistantEvent::Usage)eventOutcome=event.providerOutcome;},nullptr,[&](auto&,auto&,auto*){return response;});}catch(const std::exception& error){failure=error.what();}
+    check(calls==0&&eventOutcome.find("stop_reason")->str=="unknown"&&failure.find("SECRET")==std::string::npos&&failure.find("stop_reason=unknown")!=std::string::npos,"runtime failure and usage event report bounded diagnostics without provider-body text");
+    auto native=configured("claude");auto truncated=messagesCalls();truncated.set("stop_reason",V::makeStr("max_tokens"));auto messages=assistantNormalizeResponse(native,truncated);check(messages.find("ark_provider_outcome")->find("stop_reason")->str=="max_tokens"&&messages.find("output")->arr.empty(),"native Messages truncation keeps stop reason without executing tools");
 }
 V messagesCalls(){return json(R"({"type":"message","role":"assistant","stop_reason":"tool_use","content":[{"type":"thinking","thinking":"Signed provider thinking.","signature":"offline_signature"},{"type":"text","text":"Check both tools."},{"type":"tool_use","id":"claude_read","name":"doc_info","input":{}},{"type":"tool_use","id":"claude_write","name":"doc_apply","input":{"expected_revision":7,"commands":[]}}],"usage":{"input_tokens":10,"output_tokens":4,"cache_read_input_tokens":3,"cache_creation_input_tokens":2}})");}
 V messagesFinal(){return json(R"({"type":"message","role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"Done."}],"usage":{"input_tokens":15,"output_tokens":5}})");}
@@ -94,5 +107,5 @@ void testMixedProviderTeam(){AgentTeam team;AgentTeamConfig config;config.maxWor
 int main(int argc,char** argv){try{
     // Explicit opt-in read-only network smoke. Default test stays fully offline.
     if(argc==3&&std::string(argv[1])=="--catalog"){const auto ids=assistantProviderModels(assistantProviderPreset(argv[2]));V models=V::makeArr();for(const auto& id:ids)models.arr.push_back(V::makeStr(id));std::cout<<models.dump()<<'\n';return 0;}
-    testChat();testCompleteBeforeExecution();testMessages();testPresetsCatalogAndExport();testResponsesReplayCustody();testMixedProviderTeam();std::cout<<"Provider connector contracts passed\n";return 0;
+    testChat();testCompleteBeforeExecution();testBoundedOutcomes();testMessages();testPresetsCatalogAndExport();testResponsesReplayCustody();testMixedProviderTeam();std::cout<<"Provider connector contracts passed\n";return 0;
 }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

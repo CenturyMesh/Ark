@@ -34,6 +34,7 @@ struct AgentTeamEvent {
     AssistantUsage usage; // Role lifetime snapshot, never a model estimate.
     AssistantPerformance performance;
     bool providerRetry=false;
+    arkjson::Value providerOutcome; // Bounded categorical envelope/HTTP receipt.
     bool toolError=false; // ToolEnd: actual executor/permission result.
     std::string stepId,proposalId;
     std::vector<std::string> operations,sketchNames,featureNames;

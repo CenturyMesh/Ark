@@ -28,8 +28,8 @@ bool schemaAccepts(const V& schema,const V& value){
     }return true;
 }
 void testDocApplyDiscoveryContract(){
-    V advertised;
-    for(const auto& tool:AgentSession::tools().arr)if(tool.find("name")->str=="doc_apply")advertised=*tool.find("inputSchema");
+    V advertised,previewSchema;
+    for(const auto& tool:AgentSession::tools().arr){if(tool.find("name")->str=="doc_apply")advertised=*tool.find("inputSchema");if(tool.find("name")->str=="doc_preview")previewSchema=*tool.find("inputSchema");}
     CHECK(advertised.t==V::Obj);if(advertised.t!=V::Obj)return;
     const auto& command=*advertised.find("properties")->find("commands")->find("items");const auto& props=*command.find("properties");
     for(const char* key:{"id","p","type","name","inputs","expr","sketch","plane","parent","feature","a","b","value","reference_a","reference_b","driver","mate","mode","delta"})CHECK(props.find(key));
@@ -39,11 +39,24 @@ void testDocApplyDiscoveryContract(){
     CHECK(!schemaAccepts(command,json(R"({"op":"feature.edit","id":{"feature":1},"p":{"dx":10}})")));
     CHECK(!schemaAccepts(command,json(R"({"op":"feature.edit","id":1,"p":[10]})")));
     CHECK(!schemaAccepts(command,json(R"({"op":"feature.add","type":"box","inputs":[{}]})")));
+    CHECK(previewSchema.find("properties")->find("commands")->find("items")->dump()==command.dump());
+    const auto& conditions=*advertised.find("properties")->find("checks");
+    CHECK(previewSchema.find("properties")->find("checks")->dump()==conditions.dump());
+    auto validChecks=json(R"([{"id":"count","query":{"tool":"doc_info","args":{},"path":"feature_count"},"op":"eq","value":1}])");
+    CHECK(schemaAccepts(conditions,validChecks));
+    auto misplacedPath=json(R"([{"id":"count","query":{"tool":"doc_info","args":{}},"path":"feature_count","op":"eq","value":1}])");
+    CHECK(!schemaAccepts(conditions,misplacedPath));
+    CHECK(!schemaAccepts(conditions,json(R"([{"query":{"tool":"doc_info","args":{},"path":"feature_count"},"op":"equals","value":1}])")));
+    CHECK(!schemaAccepts(conditions,json(R"([{"id":1,"query":{"tool":"doc_info","args":{},"path":"feature_count"},"op":"eq","value":1}])")));
+    CHECK(!schemaAccepts(conditions,json(R"([{"query":{"tool":"doc_info","args":{},"path":"feature_count"},"op":"eq"}])")));
+    CHECK(!schemaAccepts(conditions,json(R"([{"query":{"tool":"doc_apply","args":{},"path":"feature_count"},"op":"eq","value":1}])")));
     AgentSession session;
     auto batch=json(R"({"expected_revision":0,"commands":[{"op":"param.set","name":"width","expr":20},{"op":"feature.add","type":"box","name":"Base","p":{"dx":"width","dy":30,"dz":10}},{"op":"feature.edit","id":"Base","p":{"dx":25}},{"op":"sketch.set","name":"Profile","sketch":{"plane":"XY","entities":[{"kind":"circle","name":"Ring","dof":[0,0,10]}]}},{"op":"assembly.add","name":"Placed base","feature":"Base","parent":0,"p":{"tx":10}}]})");
     CHECK(schemaAccepts(advertised,batch));CHECK(!failed(session.call("doc_apply",batch)));CHECK(session.document.features.size()==1&&session.document.features[0].p.at("dx")=="25"&&session.document.assembly.size()==1);
     const auto baseline=documentToJson(session.document);auto missing=session.call("doc_apply",json(R"({"expected_revision":1,"commands":[{"op":"feature.edit","entity":{"feature":1},"p":{"dx":90}}]})"));CHECK(failed(missing)&&missing.dump().find("Missing field: id")!=std::string::npos&&documentToJson(session.document)==baseline);
-    auto preview=session.call("doc_preview",json(R"({"expected_revision":1,"commands":[{"op":"feature.edit","id":1,"p":{"dx":30}}]})"));CHECK(!failed(preview));
+    auto malformed=session.call("doc_apply",json(R"({"expected_revision":1,"commands":[{"op":"param.set","name":"width","exprValue":99}]})"));CHECK(failed(malformed)&&malformed.dump().find("Missing field: expr")!=std::string::npos&&session.revision==1&&documentToJson(session.document)==baseline);
+    auto previewArgs=json(R"({"expected_revision":1,"commands":[{"op":"feature.edit","id":1,"p":{"dx":30}}]})");previewArgs.set("checks",misplacedPath);auto refused=session.call("doc_apply",previewArgs);CHECK(failed(refused)&&documentToJson(session.document)==baseline&&session.revision==1);
+    previewArgs.set("checks",validChecks);CHECK(schemaAccepts(previewSchema,previewArgs));auto preview=session.call("doc_preview",previewArgs);CHECK(!failed(preview));
     if(!failed(preview)){auto apply=*preview.find("structuredContent")->find("apply");CHECK(schemaAccepts(advertised,apply));CHECK(!failed(session.call("doc_apply",apply))&&session.revision==2&&session.document.features[0].p.at("dx")=="30");}
 #ifdef ARK_TEST_WITH_OCCT
     // Execute the advertised native add/edit examples themselves. Merely

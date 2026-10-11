@@ -50,6 +50,9 @@ struct AssistantEvent {
     AssistantUsage usage; // Usage events: cumulative snapshot for this run.
     AssistantPerformance performance; // Usage/ToolEnd: cumulative measured snapshot for this run.
     bool providerRetry=false; // Status: transient transport recovery, suitable for the visible log.
+    // Usage: bounded categorical transport/envelope evidence; no provider body,
+    // model-generated arguments, text, request IDs or credentials.
+    arkjson::Value providerOutcome;
 };
 struct AssistantResult {
     arkjson::Value conversation=arkjson::Value::makeArr();

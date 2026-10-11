@@ -38,6 +38,9 @@ typedef ptrdiff_t GLsizeiptr;
 #define GL_RGBA8                   0x8058
 #define GL_RGBA16F                 0x881A
 #define GL_HALF_FLOAT              0x140B
+#define GL_RGBA32F                 0x8814
+#define GL_TEXTURE_BUFFER          0x8C2A
+#define GL_MAX_TEXTURE_BUFFER_SIZE 0x8C2B
 #define GL_DEPTH_COMPONENT24       0x81A6
 #define GL_FRAMEBUFFER             0x8D40
 #define GL_COLOR_ATTACHMENT0       0x8CE0
@@ -104,6 +107,8 @@ typedef ptrdiff_t GLsizeiptr;
 
 using namespace ark;
 
+#include "startup_about.inl"
+
 // ---------------------------------------------------------------------------
 // Minimal GL loader -------------------------------------------------------------
 typedef GLuint (APIENTRY *PFNGLCREATEPROGRAMPROC)(void);
@@ -139,6 +144,7 @@ typedef void (APIENTRY *PFNGLBINDFRAMEBUFFERPROC)(GLenum,GLuint);
 typedef void (APIENTRY *PFNGLFRAMEBUFFERTEXTURE2DPROC)(GLenum,GLenum,GLenum,GLuint,GLint);
 typedef GLenum (APIENTRY *PFNGLCHECKFRAMEBUFFERSTATUSPROC)(GLenum);
 typedef void (APIENTRY *PFNGLDELETEFRAMEBUFFERSPROC)(GLsizei,const GLuint*);
+typedef void (APIENTRY *PFNGLTEXBUFFERPROC)(GLenum,GLenum,GLuint);
 
 
 #define GLFUNCS(X) \
@@ -175,6 +181,7 @@ typedef void (APIENTRY *PFNGLDELETEFRAMEBUFFERSPROC)(GLsizei,const GLuint*);
  X(PFNGLFRAMEBUFFERTEXTURE2DPROC,glFramebufferTexture2D) \
  X(PFNGLCHECKFRAMEBUFFERSTATUSPROC, glCheckFramebufferStatus) \
  X(PFNGLDELETEFRAMEBUFFERSPROC,  glDeleteFramebuffers) \
+ X(PFNGLTEXBUFFERPROC,           glTexBuffer) \
 
 
 #define DECL(T,N) static T N=nullptr;
@@ -187,30 +194,40 @@ static WGLCHOOSEPFARB      wglChoosePixelFormatARB_=nullptr;
 static WGLCREATECTXATTRIBS wglCreateContextAttribsARB_=nullptr;
 
 static bool g_headless=false;
+#include "shader_cache.inl"
 static GLuint mkShader(GLenum type,const char* src){
     GLuint s=glCreateShader(type);
     glShaderSource(s,1,&src,nullptr);
     glCompileShader(s);
     GLint ok=0; glGetShaderiv(s,GL_COMPILE_STATUS,&ok);
-    if(!ok){ char lg[4096]; glGetShaderInfoLog(s,4096,nullptr,lg);
-             if(g_headless)fprintf(stderr,"ARK shader error: %s\n",lg);
-             else MessageBoxA(nullptr,lg,"ARK shader error",MB_OK); }
+    if(!ok){ char lg[4096]{}; glGetShaderInfoLog(s,4096,nullptr,lg);
+        studio_shader_cache::diagnostic("shader error",lg);
+        if(studio_shader_cache::deleteShader)studio_shader_cache::deleteShader(s);return 0; }
     return s;
 }
 static GLuint mkProg(const char* vs,const char* fs){
+    studio_shader_cache::initialize();
     GLuint p=glCreateProgram();
-    glAttachShader(p,mkShader(GL_VERTEX_SHADER,vs));
-    glAttachShader(p,mkShader(GL_FRAGMENT_SHADER,fs));
+    const auto identity=studio_shader_cache::key(vs,fs);
+    if(studio_shader_cache::load(p,identity))return p;
+    if(studio_shader_cache::available)studio_shader_cache::parameter(p,0x8257,GL_TRUE);
+    const GLuint vertex=mkShader(GL_VERTEX_SHADER,vs),fragment=mkShader(GL_FRAGMENT_SHADER,fs);
+    if(!vertex||!fragment){
+        if(studio_shader_cache::deleteShader){if(vertex)studio_shader_cache::deleteShader(vertex);if(fragment)studio_shader_cache::deleteShader(fragment);}
+        return p; // Unlinked program: the caller can reject the unavailable renderer.
+    }
+    if(vertex)glAttachShader(p,vertex);if(fragment)glAttachShader(p,fragment);
     glLinkProgram(p);
     GLint ok=0; glGetProgramiv(p,GL_LINK_STATUS,&ok);
-    if(!ok){ char lg[4096]; glGetProgramInfoLog(p,4096,nullptr,lg);
-             if(g_headless)fprintf(stderr,"ARK link error: %s\n",lg);
-             else MessageBoxA(nullptr,lg,"ARK link error",MB_OK); }
+    if(studio_shader_cache::deleteShader){if(vertex)studio_shader_cache::deleteShader(vertex);if(fragment)studio_shader_cache::deleteShader(fragment);}
+    if(!ok){ char lg[4096]{}; glGetProgramInfoLog(p,4096,nullptr,lg);studio_shader_cache::diagnostic("link error",lg); }
+    else studio_shader_cache::store(p,identity);
     return p;
 }
 
 // ---------------------------------------------------------------------------
 struct GPUMesh { GLuint vao=0,vbo=0,ibo=0; int count=0; };
+static std::uint64_t g_displayMeshSerial=1;
 struct Zone { float x,y,w,h; int id; };
 
 struct NotchViewCache { NotchPreview preview; std::vector<GPUMesh> gpu; std::vector<MeshBVH> bvhs; std::vector<AABB> bounds; std::vector<size_t> sourceIndices; };
@@ -296,6 +313,7 @@ static bool g_toolsOpen=false;static int g_toolCategory=-1,g_toolScroll=0,g_tool
 static std::string g_libraryRoot,g_libraryText="screw",g_libraryLastId;static arkjson::Value g_libraryMatches=arkjson::Value::makeArr();
 static bool g_lightBackground=false,g_satin=true,g_showSketches=false,g_showDatumPlanes=false,g_chatBusy=false;
 static bool g_showEdges=false,g_cameraOrtho=false;
+static bool g_pathTracing=false; // Optional GPU BVH path integrator, off by default.
 static int g_occlusionMode=2; // 0 off, 1 contact, 2 ambient, 3 horizon
 static float g_occlusionStrength=.72f,g_occlusionRadius=1.f;
 static int g_navMode=0,g_pointerX=0,g_pointerY=0,g_cubeX=0,g_cubeY=0,g_cubeS=210;
@@ -455,7 +473,7 @@ static double g_fps=0;
 static int g_hoverZone=-1;static std::array<Zone,3> g_frameRibbonBounds{};static std::string g_lastRibbonHint;static std::optional<POINT> g_testPointer;
 struct CurveSample { std::string sketch,name; Vec3 a,b; };
 struct SelectionItem { u64 feature=0; std::string kind,name,owner;u64 instance=0;int copy=0; };
-struct PartPick { std::vector<std::pair<int,int>> faces; std::vector<std::vector<Vec3>> edges; std::vector<std::string> faceNames,edgeNames; };
+struct PartPick { std::vector<std::pair<int,int>> faces; std::vector<std::vector<Vec3>> edges; std::vector<std::string> faceNames,edgeNames; std::vector<bool> edgeVisible; };
 static std::vector<CurveSample> g_curveSamples;
 static std::vector<SelectionItem> g_picked;
 struct ProjectionPreview {bool active=false,spatial=false;u64 revision=0,epoch=0;std::string target,plane,source;arkjson::Value commands=arkjson::Value::makeArr();std::vector<float> lines;AABB bounds;};
@@ -502,6 +520,8 @@ static PartPick partPickFrom(const Body& body){
     pick.faceNames.assign(pick.faces.size(),"");
     if(edges&&edges->t==V::Arr)for(const auto& edge:edges->arr){std::vector<Vec3> points;if(edge.t==V::Arr&&edge.arr.size()%3==0)for(size_t i=0;i+2<edge.arr.size();i+=3)if(edge.arr[i].t==V::Num&&edge.arr[i+1].t==V::Num&&edge.arr[i+2].t==V::Num)points.push_back({edge.arr[i].num,edge.arr[i+1].num,edge.arr[i+2].num});pick.edges.push_back(std::move(points));}
     pick.edgeNames.assign(pick.edges.size(),"");
+    pick.edgeVisible.assign(pick.edges.size(),true);
+    if(const V* visible=mesh?mesh->find("edge_visible"):nullptr;visible&&visible->t==V::Arr&&visible->arr.size()==pick.edges.size())for(size_t i=0;i<visible->arr.size();++i)if(visible->arr[i].t==V::Bool)pick.edgeVisible[i]=visible->arr[i].b;
     const V* topology=body.nativeData.find("topology");const V* refs=topology?topology->find("references"):nullptr;
     if(refs&&refs->t==V::Arr)for(const auto& row:refs->arr){auto* name=row.find("name"),*kind=row.find("kind"),*status=row.find("status"),*indices=row.find("indices");
         if(!name||!kind||!status||!indices||status->asStr()!="bound"||indices->t!=V::Arr||indices->arr.size()!=1||indices->arr[0].t!=V::Num)continue;int index=(int)indices->arr[0].num;
@@ -612,64 +632,26 @@ uniform mat4 vp,model; uniform float outline;
 out vec3 nrm,wpos,lpos,lnrm;
 void main(){
  vec3 p=P; if(outline>0.)p+=N*outline;
- vec4 w=model*vec4(p,1.); wpos=w.xyz; nrm=mat3(model)*N; lpos=P;lnrm=N;
+ vec4 w=model*vec4(p,1.); wpos=w.xyz; nrm=transpose(inverse(mat3(model)))*N; lpos=P;lnrm=N;
  gl_Position=vp*w;
 })";
 static const char* FS_BUSY=R"(#version 330 core
 out vec4 o;uniform sampler2D frame;uniform vec2 res;
 void main(){o=texture(frame,gl_FragCoord.xy/res);})";
-static const char* FS_SOLID=R"(#version 330 core
-in vec3 nrm,wpos,lpos,lnrm; out vec4 o;
-uniform vec3 color,eye; uniform float sel,hardSurface,satin,metallic,roughness,opacity,hasTexture;
-uniform vec2 textureScale;uniform sampler2D surfaceTexture;
-const float PI=3.14159265359;
-vec4 triplanar(){
- vec3 a=pow(abs(normalize(dot(lnrm,lnrm)>1e-8?lnrm:vec3(0.,1.,0.))),vec3(4.));a/=max(a.x+a.y+a.z,1e-5);
- vec4 xy=texture(surfaceTexture,lpos.xy*textureScale);
- vec4 xz=texture(surfaceTexture,lpos.xz*textureScale);
- vec4 yz=texture(surfaceTexture,lpos.yz*textureScale);
- return xy*a.z+xz*a.y+yz*a.x;
-}
-vec3 lightBRDF(vec3 n,vec3 v,vec3 l,vec3 radiance,vec3 albedo,float m,float r){
- vec3 h=normalize(v+l);float nl=max(dot(n,l),0.),nv=max(dot(n,v),.001),nh=max(dot(n,h),0.),vh=max(dot(v,h),0.);
- float a=max(r*r,.045);float a2=a*a;float d=a2/(PI*pow(nh*nh*(a2-1.)+1.,2.)+1e-5);
- float k=pow(r+1.,2.)/8.;float g=nv/(nv*(1.-k)+k)*nl/(nl*(1.-k)+k);
- vec3 f0=mix(vec3(.04),albedo,m);vec3 f=f0+(1.-f0)*pow(1.-vh,5.);
- vec3 diffuse=(1.-f)*(1.-m)*albedo/PI;
- return (diffuse+d*g*f/max(4.*nv*max(nl,.001),.001))*radiance*nl;
-}
-void main(){
- vec3 n=hardSurface>0.?normalize(cross(dFdx(wpos),dFdy(wpos))):normalize(nrm); vec3 v=normalize(eye-wpos);
- if(dot(n,v)<0.)n=-n;
- vec4 texel=hasTexture>.5?triplanar():vec4(1.);
- vec3 albedo=pow(clamp(color*texel.rgb,0.,1.),vec3(2.2));
- float m=clamp(metallic,0.,1.),r=clamp(roughness,.06,1.);
- vec3 key=normalize(vec3(-.40,.88,.32)),fill=normalize(vec3(.72,.38,-.49));
- vec3 c=albedo*(.17+.08*max(n.y,0.))*(1.-m*.65);
- c+=lightBRDF(n,v,key,vec3(2.9,2.75,2.55),albedo,m,r);
- c+=lightBRDF(n,v,fill,vec3(.82,.91,1.05),albedo,m,r);
- vec3 f0=mix(vec3(.04),albedo,m);float fres=pow(1.-max(dot(n,v),0.),5.);
- c+=mix(f0,vec3(.8,.86,.94),fres)*(.045+.09*(1.-r))*satin;
- vec3 environment=normalize(vec3(-.12,.91,.32));
- float softbox=pow(max(dot(reflect(-v,n),environment),0.),mix(5.,26.,1.-r));
- c+=mix(vec3(.08,.11,.15),albedo,m)*softbox*(.12+.24*(1.-r))*satin;
- c=c/(c+vec3(1.));c=pow(c,vec3(1./2.2));
- c=mix(c,min(c+vec3(.12,.07,.02),vec3(1.)),sel);
- o=vec4(c,opacity*texel.a);
-})";
+#include "studio_shaders.inl"
 static const char* FS_CUBE=R"(#version 330 core
 in vec3 nrm,wpos,lpos,lnrm;out vec4 o;uniform vec3 color,eye;
 void main(){vec3 n=normalize(nrm),v=normalize(eye-wpos),l=normalize(vec3(-.35,.85,.48));float key=max(dot(n,l),0.),fill=max(dot(n,normalize(vec3(.70,.25,-.55))),0.);float gloss=.10*pow(max(dot(n,normalize(l+v)),0.),28.);o=vec4(color*(.72+.24*key+.12*fill)+vec3(gloss),1.);})";
 static const char* VS_GEOM=R"(#version 330 core
 layout(location=0) in vec3 P; layout(location=1) in vec3 N;
 uniform mat4 view,proj,model; out vec3 vpos,vn;
-void main(){vec4 v=view*model*vec4(P,1.); vpos=v.xyz; vn=mat3(view)*mat3(model)*N; gl_Position=proj*v;}
+void main(){vec4 v=view*model*vec4(P,1.); vpos=v.xyz; vn=mat3(view)*transpose(inverse(mat3(model)))*N; gl_Position=proj*v;}
 )";
 static const char* FS_GEOM=R"(#version 330 core
-in vec3 vpos,vn; out vec4 o; uniform float hardSurface,depthFar;
+in vec3 vpos,vn; out vec4 o; uniform float hardSurface,depthFar,cameraOrtho;
 void main(){
  vec3 n=hardSurface>0.?normalize(cross(dFdx(vpos),dFdy(vpos))):normalize(vn);
- if(dot(n,n)<1e-8)n=vec3(0.,0.,1.); if(dot(n,normalize(-vpos))<0.)n=-n;
+ if(dot(n,n)<1e-8)n=vec3(0.,0.,1.); if(dot(n,cameraOrtho>.5?vec3(0.,0.,1.):normalize(-vpos))<0.)n=-n;
  o=vec4(normalize(n)*.5+.5, clamp(-vpos.z/depthFar,0.,1.));
 })";
 static const char* FS_AO=R"(#version 330 core
@@ -824,6 +806,7 @@ in vec2 uv;out vec4 o;uniform sampler2D image;void main(){o=texture(image,vec2(u
 
 // ---------------------------------------------------------------------------
 static void uploadMesh(GPUMesh& gm,const Mesh& m){
+    ++g_displayMeshSerial;
     if(!gm.vao)glGenVertexArrays(1,&gm.vao);
     if(!gm.vbo)glGenBuffers(1,&gm.vbo);
     if(!gm.ibo)glGenBuffers(1,&gm.ibo);
@@ -851,15 +834,19 @@ static void uploadEdges(size_t part){
     if(!lines.vao)glGenVertexArrays(1,&lines.vao);
     if(!lines.vbo)glGenBuffers(1,&lines.vbo);
     std::vector<float> data;
-    if(part<g_partPicks.size())for(const auto& poly:g_partPicks[part].edges){
-        if(poly.size()<2)continue;
-        for(size_t k=1;k<poly.size();++k){for(const Vec3& p:{poly[k-1],poly[k]}){data.push_back((float)p.x);data.push_back((float)p.y);data.push_back((float)p.z);}}
-        if(data.size()>300000)break;
+    const float corners[6][2]={{0,-1},{1,-1},{1,1},{0,-1},{1,1},{0,1}};
+    if(part<g_partPicks.size())for(size_t edge=0;edge<g_partPicks[part].edges.size();++edge){
+        if(edge<g_partPicks[part].edgeVisible.size()&&!g_partPicks[part].edgeVisible[edge])continue;
+        const auto& poly=g_partPicks[part].edges[edge];if(poly.size()<2)continue;
+        for(size_t k=1;k<poly.size();++k){Vec3 a=poly[k-1],b=poly[k];if((b-a).lensq()<1e-20)continue;
+            for(auto& corner:corners)data.insert(data.end(),{(float)a.x,(float)a.y,(float)a.z,(float)b.x,(float)b.y,(float)b.z,corner[0],corner[1]});}
     }
     glBindVertexArray(lines.vao);glBindBuffer(GL_ARRAY_BUFFER,lines.vbo);
     glBufferData(GL_ARRAY_BUFFER,(GLsizeiptr)(data.size()*sizeof(float)),data.empty()?nullptr:data.data(),GL_STATIC_DRAW);
-    glEnableVertexAttribArray(0);glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,12,nullptr);glBindVertexArray(0);
-    lines.verts=(int)(data.size()/3);
+    glEnableVertexAttribArray(0);glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,32,nullptr);
+    glEnableVertexAttribArray(1);glVertexAttribPointer(1,3,GL_FLOAT,GL_FALSE,32,(void*)12);
+    glEnableVertexAttribArray(2);glVertexAttribPointer(2,2,GL_FLOAT,GL_FALSE,32,(void*)24);glBindVertexArray(0);
+    lines.verts=(int)(data.size()/8);
 }
 static Feature* selectedNotchedTube(){
     if(selBody<0||(size_t)selBody>=g_bodyIds.size())return nullptr;
@@ -2234,7 +2221,7 @@ static std::filesystem::path uiSettingsPath(){if(!g_settingsOverride.empty())ret
 static arkjson::Value connectorSettings(const AssistantConfig& config){using V=arkjson::Value;V v=V::makeObj();v.set("provider",V::makeStr(config.provider));v.set("protocol",V::makeStr(assistantProtocolName(config.protocol)));v.set("endpoint",V::makeStr(config.endpoint));v.set("api_key_env",V::makeStr(config.apiKeyEnv));v.set("max_output_tokens",V::makeNum(config.maxOutputTokens));return v;}
 static void readConnectorSettings(const arkjson::Value& v,AssistantConfig& config){using V=arkjson::Value;if(auto* p=v.find("provider");p&&p->t==V::Str)config.provider=p->str;if(auto* p=v.find("protocol");p&&p->t==V::Str)config.protocol=assistantProtocolFromName(p->str);if(auto* p=v.find("endpoint");p&&p->t==V::Str)config.endpoint=p->str;if(auto* p=v.find("api_key_env");p&&p->t==V::Str)config.apiKeyEnv=p->str;if(auto* p=v.find("max_output_tokens")){if(p->t!=V::Num||p->num<1||p->num>131072||std::floor(p->num)!=p->num)throw std::runtime_error("Stored Messages response limit must be an integer from 1 to 131072");config.maxOutputTokens=(unsigned)p->num;}}
 static void saveUiSettings(){
-    using V=arkjson::Value;V j=V::makeObj();j.set("endpoint",V::makeStr(g_assistantConfig.endpoint));j.set("model",V::makeStr(g_assistantConfig.model));j.set("reasoning_effort",V::makeStr(g_assistantConfig.reasoningEffort));j.set("api_key_env",V::makeStr(g_assistantConfig.apiKeyEnv));j.set("assistant_auth_mode",V::makeStr(g_assistantConfig.authMode==AssistantAuthMode::ChatGptPlan?"chatgpt_plan":"api_key"));j.set("grid",V::makeBool(g_grid));j.set("wireframe",V::makeBool(wireframe));j.set("light_background",V::makeBool(g_lightBackground));j.set("satin",V::makeBool(g_satin));j.set("show_datum_planes",V::makeBool(g_showDatumPlanes));j.set("occlusion_mode",V::makeNum(g_occlusionMode));j.set("occlusion_strength",V::makeNum(g_occlusionStrength));j.set("occlusion_radius",V::makeNum(g_occlusionRadius));j.set("show_edges",V::makeBool(g_showEdges));j.set("orthographic",V::makeBool(g_cameraOrtho));
+    using V=arkjson::Value;V j=V::makeObj();j.set("endpoint",V::makeStr(g_assistantConfig.endpoint));j.set("model",V::makeStr(g_assistantConfig.model));j.set("reasoning_effort",V::makeStr(g_assistantConfig.reasoningEffort));j.set("api_key_env",V::makeStr(g_assistantConfig.apiKeyEnv));j.set("assistant_auth_mode",V::makeStr(g_assistantConfig.authMode==AssistantAuthMode::ChatGptPlan?"chatgpt_plan":"api_key"));j.set("grid",V::makeBool(g_grid));j.set("wireframe",V::makeBool(wireframe));j.set("light_background",V::makeBool(g_lightBackground));j.set("satin",V::makeBool(g_satin));j.set("show_datum_planes",V::makeBool(g_showDatumPlanes));j.set("occlusion_mode",V::makeNum(g_occlusionMode));j.set("occlusion_strength",V::makeNum(g_occlusionStrength));j.set("occlusion_radius",V::makeNum(g_occlusionRadius));j.set("path_tracing",V::makeBool(g_pathTracing));j.set("show_edges",V::makeBool(g_showEdges));j.set("orthographic",V::makeBool(g_cameraOrtho));
     V team=V::makeArr();for(size_t i=0;i<teamCapacity;++i){V role=V::makeObj();role.set("model",V::makeStr(g_teamModels[i]));role.set("reasoning_effort",V::makeStr(g_teamEfforts[i]));team.arr.push_back(std::move(role));}j.set("team_roles",std::move(team));j.set("team_role_count",V::makeNum(g_teamRoleCount));j.set("team_focused_workflow",V::makeBool(g_teamFocusedWorkflow));j.set("team_mode",V::makeBool(g_teamMode));j.set("library_root",V::makeStr(g_libraryRoot));j.set("library_search",V::makeStr(g_libraryText));
     j.set("connector",connectorSettings(g_assistantConfig));V connectors=V::makeArr();for(size_t i=0;i<teamCapacity;++i)connectors.arr.push_back(g_teamConnectors[i]?connectorSettings(*g_teamConnectors[i]):V{});j.set("team_connectors",connectors);
     auto path=uiSettingsPath();std::filesystem::create_directories(path.parent_path());std::ofstream out(path);out<<j.dump();if(!out)throw std::runtime_error("Could not save ARK settings");
@@ -2256,15 +2243,17 @@ static void loadUiSettings(){
         if(auto* v=j.find("occlusion_mode");v&&v->t==arkjson::Value::Num)g_occlusionMode=std::clamp((int)v->num,0,3);
         if(auto* v=j.find("occlusion_strength");v&&v->t==arkjson::Value::Num)g_occlusionStrength=(float)clamp(v->num,0.,1.);
         if(auto* v=j.find("occlusion_radius");v&&v->t==arkjson::Value::Num)g_occlusionRadius=(float)clamp(v->num,.25,4.);
+        if(auto* v=j.find("path_tracing");v&&v->t==arkjson::Value::Bool)g_pathTracing=v->b;
         if(auto* v=j.find("show_edges");v&&v->t==arkjson::Value::Bool)g_showEdges=v->b;if(auto* v=j.find("orthographic");v&&v->t==arkjson::Value::Bool)g_cameraOrtho=v->b;
     }catch(...){g_status="ARK settings unavailable; defaults loaded";}
 }
 static void graphicsDialog(){
-    std::vector<EditorField> fields{{"Show ground grid",g_grid?"1":"0",true},{"Wireframe",wireframe?"1":"0",true},{"Light background",g_lightBackground?"1":"0",true},{"Visible edges",g_showEdges?"1":"0",true},{"Orthographic camera",g_cameraOrtho?"1":"0",true},{"AO mode / 0-3",std::to_string(g_occlusionMode)},{"AO strength / 0-1",std::to_string(g_occlusionStrength)},{"AO radius / 0.25-4",std::to_string(g_occlusionRadius)}};
-    if(!editFields("Graphics settings","AO: 0 off, 1 contact, 2 ambient, 3 horizon. Display preferences stay local to ARK.",fields))return;
+    std::vector<EditorField> fields{{"Show ground grid",g_grid?"1":"0",true},{"Wireframe",wireframe?"1":"0",true},{"Light background",g_lightBackground?"1":"0",true},{"Visible edges",g_showEdges?"1":"0",true},{"Orthographic camera",g_cameraOrtho?"1":"0",true},{"AO mode / 0-3",std::to_string(g_occlusionMode)},{"AO strength / 0-1",std::to_string(g_occlusionStrength)},{"AO radius / 0.25-4",std::to_string(g_occlusionRadius)},{"GPU path tracing (optional)",g_pathTracing?"1":"0",true}};
+    if(!editFields("System options / Graphics","AO: 0 off, 1 contact, 2 ambient, 3 horizon. Path tracing: progressive GPU OpenGL BVH, 4 bounces; opaque untextured scenes. Applies immediately.",fields))return;
     bool values[5];for(int i=0;i<5;++i){double n=formNumber(fields[(size_t)i].value);if(n!=0&&n!=1)throw std::runtime_error("Graphics toggles accept 0 or 1");values[i]=n!=0;}
     double mode=formNumber(fields[5].value),strength=formNumber(fields[6].value),radius=formNumber(fields[7].value);
     if(mode<0||mode>3||std::floor(mode)!=mode||strength<0||strength>1||radius<.25||radius>4)throw std::runtime_error("AO mode is 0..3, strength is 0..1, radius is 0.25..4");
+    double tracing=formNumber(fields[8].value);if(tracing!=0&&tracing!=1)throw std::runtime_error("Path tracing accepts 0 or 1");g_pathTracing=tracing!=0;
     g_grid=values[0];wireframe=values[1];g_lightBackground=values[2];g_showEdges=values[3];g_cameraOrtho=values[4];g_occlusionMode=(int)mode;g_occlusionStrength=(float)strength;g_occlusionRadius=(float)radius;if(!g_dialogSmoke)saveUiSettings();
 }
 static void materialDialog(){
@@ -3640,7 +3629,7 @@ static void uiAction(int id){
             applyCommand(c);if(!g_error)g_selectedMate=-1;break;
         }
 
-        case 31:MessageBoxA(g_window,"ARK 0.9 / Agent-Ready Kernel\nParametric CAD for people and agents.\n\nUse Commands or the tool dock to model with editable expressions.\nDouble-click a feature to edit its definition, or a sketch to edit its anchors. The inspector also has Edit feature and Edit sketch.\nNative solids and surfaces use OCCT B-reps. Sheets have formed/flat poses and a read-only bend preview.\nGround an assembly instance, add a mate, and inspect remaining degrees of freedom.\nSketch diagnosis and exact reference inspection are available through the agent tools.\n\nThe view toolbar selects Orbit, Pan, Zoom, Fit, Front, Top, Right, and Isometric.\nThe view cube snaps to a face. Dragging it orbits. Named faces are orthographic.\nAmbient occlusion and visible edges are display only and are not saved in the document.\n\nOrbit: middle drag  |  Roll: Alt + middle drag  |  Pan: Shift + middle  |  Zoom: wheel\nFit: F  |  Wireframe: W  |  Views: 1 front, 3 top, 5 right, 7 isometric\nOpen: Ctrl+O  |  Save: Ctrl+S  |  Undo / redo: Ctrl+Z / Y\nCommands: Ctrl+K  |  New: Ctrl+N\n\nThe native inspector reports OCCT B-rep checks. It does not certify manufacturing suitability.","About ARK / Workspace guide",MB_OK|MB_ICONINFORMATION);break;
+        case 31:arkstudio::showAbout(g_window);break;
         case 30:{
             if(selBody<0)break;auto* f=g_doc.find(g_bodyIds[selBody]);if(!f||f->type!=FeatureType::Tube)break;
             V edit=V::makeObj(),p=V::makeObj(),bs=V::makeArr();for(auto& kv:f->p)p.set(kv.first,V::makeStr(kv.second));
@@ -3929,7 +3918,7 @@ static void pickReference(int mx,int my){
 }
 
 // ---------------------------------------------------------------------------
-static GLuint pBg,pBusy,pSolid,pCube,pGrid,pShadow,pUI,pText,pSketch,pGeom,pAo,pCompose,pEdge,pCanvas,pIcons,pImage;
+static GLuint pBg,pBusy,pSolid,pCube,pGrid,pShadow,pUI,pText,pSketch,pGeom,pAo,pCompose,pEdge,pCanvas,pIcons,pImage,pFeatureEdge,pContour;
 static GLuint g_drawingVao=0,g_drawingVbo=0;
 static void drawManualSketchPreview(){
     auto& drawing=g_sketchDrawing;if(!drawing.active||drawing.stale)return;
@@ -3995,16 +3984,19 @@ static GLuint materialTexture(const std::string& path){
     auto utf8=file.u8string();GLuint tex=canvasTexture(std::string(utf8.begin(),utf8.end()));
     return tex==g_canvasMissing?0:tex;
 }
-static void drawSurfaces(bool geometry,const Mat4& view,const Mat4& proj,const GLfloat vpT[16],const Vec3& eye,bool transparentOnly=false){
+static void drawSurfaces(bool geometry,const Mat4& view,const Mat4& proj,const GLfloat vpT[16],const Vec3& eye,bool transparentOnly=false,bool selectionOverlay=false){
     GLint modelLoc=geometry?guModel:suModel,hardLoc=geometry?guHard:suHard;
-    if(geometry){GLfloat vm[16],pm[16];for(int i=0;i<16;++i){vm[i]=(GLfloat)view.m[i];pm[i]=(GLfloat)proj.m[i];}glUseProgram(pGeom);glUniformMatrix4fv(guView,1,GL_FALSE,vm);glUniformMatrix4fv(guProj,1,GL_FALSE,pm);glUniform1f(glGetUniformLocation(pGeom,"depthFar"),(float)g_projectionFar);}
-    else{glUseProgram(pSolid);glUniform1f(glGetUniformLocation(pSolid,"satin"),g_satin?1.f:0.f);glUniformMatrix4fv(suVp,1,GL_FALSE,vpT);glUniform3f(suEye,(float)eye.x,(float)eye.y,(float)eye.z);glUniform1i(glGetUniformLocation(pSolid,"surfaceTexture"),2);}
+    if(geometry){GLfloat vm[16],pm[16];for(int i=0;i<16;++i){vm[i]=(GLfloat)view.m[i];pm[i]=(GLfloat)proj.m[i];}glUseProgram(pGeom);glUniformMatrix4fv(guView,1,GL_FALSE,vm);glUniformMatrix4fv(guProj,1,GL_FALSE,pm);glUniform1f(glGetUniformLocation(pGeom,"depthFar"),(float)g_projectionFar);glUniform1f(glGetUniformLocation(pGeom,"cameraOrtho"),g_cameraOrtho?1.f:0.f);}
+    else{glUseProgram(pSolid);glUniform1f(glGetUniformLocation(pSolid,"cameraOrtho"),g_cameraOrtho?1.f:0.f);glUniform1f(glGetUniformLocation(pSolid,"selectionOverlay"),selectionOverlay?1.f:0.f);glUniform1f(glGetUniformLocation(pSolid,"satin"),g_satin?1.f:0.f);glUniformMatrix4fv(suVp,1,GL_FALSE,vpT);glUniform3f(suEye,(float)eye.x,(float)eye.y,(float)eye.z);glUniform1i(glGetUniformLocation(pSolid,"surfaceTexture"),2);
+        auto basis=cameraFrame(yaw,pitch,cameraRoll);auto setBasis=[&](const char* name,Vec3 v){glUniform3f(glGetUniformLocation(pSolid,name),(float)v.x,(float)v.y,(float)v.z);};
+        setBasis("studioRight",basis.right);setBasis("studioUp",basis.up);setBasis("studioBack",basis.outward);}
     if(!wireframe){glEnable(GL_POLYGON_OFFSET_FILL);glPolygonOffset(1.f,1.f);}else glDisable(GL_POLYGON_OFFSET_FILL);
     auto setModel=[&](const Mat4& world){GLfloat m[16];for(int k=0;k<16;++k)m[k]=(GLfloat)world.m[k];glUniformMatrix4fv(modelLoc,1,GL_FALSE,m);};
     std::vector<size_t> order;
     for(size_t i=0;i<g_bodyIds.size();++i){if(!displayInstance(i))continue;
         const Feature* feature=g_doc.find(g_bodyIds[i]);
         bool transparent=feature&&resolvedAppearance(g_doc,*feature).opacity<.999;
+        if(selectionOverlay&&(int)i!=selBody&&(int)i!=hoverBody&&std::none_of(g_picked.begin(),g_picked.end(),[&](const auto& pick){return pick.kind=="face"&&pick.feature==g_bodyIds[i];}))continue;
         if((transparentOnly&&transparent)||(!transparentOnly&&!transparent))order.push_back(i);
     }
     if(transparentOnly)std::stable_sort(order.begin(),order.end(),[&](size_t a,size_t b){
@@ -4065,6 +4057,8 @@ static void drawSurfaces(bool geometry,const Mat4& view,const Mat4& proj,const G
     glDisable(GL_POLYGON_OFFSET_FILL);glPolygonMode(GL_FRONT_AND_BACK,GL_FILL);
     if(!geometry){glActiveTexture(GL_TEXTURE2);glBindTexture(GL_TEXTURE_2D,0);glActiveTexture(GL_TEXTURE0);}
 }
+#include "path_tracing.inl"
+
 static bool ensureOcclusionTargets(int w,int h){
     if(!glGenFramebuffers||!glBindFramebuffer||!glFramebufferTexture2D||!glCheckFramebufferStatus||!glDeleteFramebuffers)return false;
     if(gOccReady&&gOccW==w&&gOccH==h)return true;
@@ -4078,10 +4072,11 @@ static bool ensureOcclusionTargets(int w,int h){
     return gOccReady;
 }
 static void applyOcclusion(const Mat4& view,const Mat4& proj,const GLfloat vpT[16],const Vec3& eye){
-    if(g_occlusionMode==0||wireframe||viewW<2||viewH<2||!ensureOcclusionTargets(viewW,viewH))return;
+    if((g_occlusionMode==0&&!g_showEdges)||wireframe||viewW<2||viewH<2||!ensureOcclusionTargets(viewW,viewH))return;
     glBindFramebuffer(GL_FRAMEBUFFER,gFbo);glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,gGeomTex,0);
     glViewport(0,0,viewW,viewH);glDisable(GL_BLEND);glEnable(GL_DEPTH_TEST);glDepthFunc(GL_LEQUAL);glClearColor(0.f,0.f,1.f,1.f);glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
     drawSurfaces(true,view,proj,vpT,eye);
+    if(g_occlusionMode==0||g_trace.active){glBindFramebuffer(GL_FRAMEBUFFER,0);glViewport(viewX,winH-viewY-viewH,viewW,viewH);glEnable(GL_BLEND);return;}
     glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,gAoTex,0);glDisable(GL_DEPTH_TEST);glUseProgram(pAo);
     glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,gGeomTex);glUniform1i(glGetUniformLocation(pAo,"gbuf"),0);glUniform2f(glGetUniformLocation(pAo,"res"),(float)viewW,(float)viewH);glUniform1f(glGetUniformLocation(pAo,"depthFar"),(float)g_projectionFar);
     GLfloat pm[16];for(int i=0;i<16;++i)pm[i]=(GLfloat)proj.m[i];glUniformMatrix4fv(auProj,1,GL_FALSE,pm);glUniform2f(auFocal,(float)proj.m[0],(float)proj.m[5]);glUniform1f(auOrtho,g_cameraOrtho?1.f:0.f);
@@ -4095,11 +4090,15 @@ static void applyOcclusion(const Mat4& view,const Mat4& proj,const GLfloat vpT[1
     glBindVertexArray(quadVao);glDrawArrays(GL_TRIANGLES,0,3);glActiveTexture(GL_TEXTURE0);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
 }
 static void drawFeatureEdges(const GLfloat vpT[16]){
-    glEnable(GL_DEPTH_TEST);glDepthFunc(GL_LEQUAL);glUseProgram(pEdge);glUniformMatrix4fv(euVp,1,GL_FALSE,vpT);
-    float c=g_lightBackground?.46f:.88f;glUniform3f(glGetUniformLocation(pEdge,"color"),c,c+.01f,c+.02f);
+    glEnable(GL_BLEND);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);glDepthMask(GL_FALSE);
+    if(gOccReady&&gOccW==viewW&&gOccH==viewH){glDisable(GL_DEPTH_TEST);glUseProgram(pContour);glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,gGeomTex);
+        glUniform1i(glGetUniformLocation(pContour,"gbuf"),0);glUniform2f(glGetUniformLocation(pContour,"res"),(float)viewW,(float)viewH);glUniform2f(glGetUniformLocation(pContour,"origin"),(float)viewX,(float)(winH-viewY-viewH));glUniform1f(glGetUniformLocation(pContour,"depthFar"),(float)g_projectionFar);glBindVertexArray(quadVao);glDrawArrays(GL_TRIANGLES,0,3);}
+    glEnable(GL_DEPTH_TEST);glDepthFunc(GL_LEQUAL);glUseProgram(pFeatureEdge);glUniformMatrix4fv(glGetUniformLocation(pFeatureEdge,"vp"),1,GL_FALSE,vpT);
+    glUniform2f(glGetUniformLocation(pFeatureEdge,"viewport"),(float)viewW,(float)viewH);glUniform1f(glGetUniformLocation(pFeatureEdge,"width"),1.22f);
     for(size_t i=0;i<g_bodyIds.size();++i){if(!displayInstance(i))continue;
-        if(auto* feature=g_doc.find(g_bodyIds[i]);feature&&resolvedAppearance(g_doc,*feature).opacity<.999)continue;
-        size_t part=g_instancePart[i];if(part>=g_edgeLines.size()||g_edgeLines[part].verts<2)continue;GLfloat m[16];for(int k=0;k<16;++k)m[k]=(GLfloat)g_instanceWorld[i].m[k];glUniformMatrix4fv(euModel,1,GL_FALSE,m);glBindVertexArray(g_edgeLines[part].vao);glDrawArrays(GL_LINES,0,g_edgeLines[part].verts);}
+        if(auto* feature=g_doc.find(g_bodyIds[i]);feature&&(resolvedAppearance(g_doc,*feature).opacity<.999||feature->type==FeatureType::NotchedTube||feature->type==FeatureType::SourceTube))continue;
+        size_t part=g_instancePart[i];if(part>=g_edgeLines.size()||g_edgeLines[part].verts<6)continue;GLfloat m[16];for(int k=0;k<16;++k)m[k]=(GLfloat)g_instanceWorld[i].m[k];glUniformMatrix4fv(glGetUniformLocation(pFeatureEdge,"model"),1,GL_FALSE,m);glBindVertexArray(g_edgeLines[part].vao);glDrawArrays(GL_TRIANGLES,0,g_edgeLines[part].verts);}
+    glDepthMask(GL_TRUE);
 }
 static void updateNavigationBounds(){
     float expansion=std::clamp(((float)viewW-622.f)/420.f,0.f,1.f);
@@ -4370,6 +4369,8 @@ static void drawFrame(HDC hdc){
     glDepthFunc(GL_LEQUAL);
     drawCanvases(vpT);
     drawSurfaces(false,view,proj,vpT,eye);
+    drawPathTracing(proj,eye);
+    if(g_trace.active){glEnable(GL_DEPTH_TEST);glDepthFunc(GL_LEQUAL);glDepthMask(GL_FALSE);drawSurfaces(false,view,proj,vpT,eye,false,true);glDepthMask(GL_TRUE);}
     applyOcclusion(view,proj,vpT,eye);
     if(g_showEdges&&!wireframe)drawFeatureEdges(vpT);
     glEnable(GL_DEPTH_TEST);glDepthFunc(GL_LEQUAL);glDepthMask(GL_FALSE);glEnable(GL_BLEND);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
@@ -4455,7 +4456,7 @@ static void drawFrame(HDC hdc){
     auto cost=costSummary();float costScale=std::min(.62f,headerWidth/std::max(1.f,textWidth(cost,1.f)));textOut(fitTop(cost,costScale,headerWidth),headerX,36,costScale,.67f,.78f,.89f);g_zones.push_back({headerX,1,headerWidth,49,488});
     float searchX=W-438;rect(searchX,10,200,33,5,.075,.094,.112,1,.29,.38,.46,.8,1);glyph(413,searchX+8,17,18,.65f);textOut("Search commands...",searchX+34,17,.72f,.57f,.66f,.74f);g_zones.push_back({searchX,10,200,33,450});
     auto iconButton=[&](int action,const char* title,float x,float y,float size=28.f){bool hover=mp.x>=x&&mp.x<x+size&&mp.y>=y&&mp.y<y+size;if(hover){rect(x-3,y-3,size+6,size+6,5,.15,.22,.28,1,0,0,0,0,0);ribbonHint=title;}glyph(action,x+3,y+3,size-6,.86f);g_zones.push_back({x-3,y-3,size+6,size+6,action});};
-    iconButton(458,"Document: new, open, save and export",W-229,13);iconButton(18,"Undo",W-192,13);iconButton(19,"Redo",W-155,13);iconButton(400,"Assistant",W-118,13);iconButton(56,"Graphics settings",W-81,13);iconButton(57,"Account",W-44,13);
+    iconButton(458,"Document: new, open, save and export",W-229,13);iconButton(18,"Undo",W-192,13);iconButton(19,"Redo",W-155,13);iconButton(400,"Assistant",W-118,13);iconButton(56,"System options / Graphics",W-81,13);iconButton(57,"Account",W-44,13);
     rect(0,52,W,42,0,.073,.09,.108,1,.23,.29,.35,.5,1);
     const char* tabNames[]={"Sheet Metal","Model","Sketch","Inspect","Tools","Manage","Surfaces"};float tabX=18;
     for(int module:{0,1,6,2,3,4,5}){float width=textWidth(tabNames[module],.82f)+28;bool active=g_toolModule==module;if(active)rect(tabX,56,width,35,3,.12,.17,.20,1,0,0,0,0,0);textOut(tabNames[module],tabX+14,66,.82f,active?.95f:.77f,active?.98f:.84f,active?1.f:.89f);if(active)rect(tabX,90,width,3,0,.13,.77,.91,1,0,0,0,0,0);g_zones.push_back({tabX,54,width,39,300+module});tabX+=width+7;}
@@ -4559,8 +4560,9 @@ static void drawFrame(HDC hdc){
     }
     }
     float captionY=(float)viewY+18,captionX=(float)viewX+(g_showViewCube?g_cubeS+30:20);
-    std::string style=wireframe?"Wireframe":g_showEdges?"Shaded + edges":"Shaded";float styleX=W-158;
+    std::string style=g_pathTracing?(g_trace.active?"Path trace":"Raster"):wireframe?"Wireframe":g_showEdges?"Shaded + edges":"Shaded";float styleX=W-158;
     rect(styleX,(float)viewY+16,140,34,6,.095,.13,.16,.92,.37,.46,.53,.8,1);glyph(1,styleX+9,(float)viewY+23,20,.80f);textOut(style,styleX+36,(float)viewY+24,.78f,.81f,.88f,.93f);glUniform1i(uuGlyph,409);glUniform4f(uuRc,styleX+118,(float)viewY+26,12,12);glUniform4f(uuFill,.67,.76,.84,1);glBindVertexArray(quadVao);glDrawArrays(GL_TRIANGLES,0,6);g_zones.push_back({styleX,(float)viewY+16,140,34,455});
+    if(g_pathTracing){std::string caption=g_trace.active?"GPU path tracing / "+std::to_string(g_trace.samples)+" spp / OpenGL BVH":"Path tracing requested / raster: "+g_trace.reason;caption=fitText(caption,.62f,std::max(0.f,styleX-captionX-14));textOut(caption,captionX,captionY+27,.62f,g_lightBackground?.24f:.76f,g_lightBackground?.30f:.83f,g_lightBackground?.37f:.89f);}
     if(g_allSheetsFlat)textOut("Nominal flat reference / display only",captionX,captionY,.70f,.62f,.77f,.85f);
     else if(g_stockMode)textOut("Nominal straight stock / display only",captionX,captionY,.70f,.62f,.77f,.85f);
     else if(g_allSheetsPlaying)textOut("Bend sequence / display only",captionX,captionY,.70f,.62f,.77f,.85f);
@@ -5494,16 +5496,21 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
 // ---------------------------------------------------------------------------
 static void seedDocument(){g_doc=makeDemoDocument();rebuildScene();frameScene();target=tTarget;dist=tDist;}
 
+#include "studio_render_selftest.inl"
+
 int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     if(redirect_to_updated_runtime())return 0;
     cpu_detect();
 
     SetProcessDPIAware();
+    bool startupUiTest=false;
     bool interactionUiTest=false,connectorsUiTest=false,treeUiTest=false,arcUiTest=false,completionUiTest=false,sketchDrawingUiTest=false;
     bool selfTest=false,assemblyTest=false,dialogTest=false,bendTest=false,bendExportTest=false,sourceTest=false,sketchTest=false,assistantTest=false,nativeUiTest=false,renderUiTest=false,engineeringUiTest=false,sheetShowcaseTest=false,contextUiTest=false,suspensionUiTest=false,connectChatGpt=false,motionUiTest=false,motionPlay=false,navigationUiTest=false,projectionUiTest=false,frameToolsUiTest=false;unsigned exitAfterMs=0;std::string endpointFile,requestedSketch;int requestedOpening=-1;double requestedFold=-1,showcaseProgress=-1;std::string shotPath="ark_studio.png",loadPath,scriptPath,importPath,showcaseView,spotlightName,suspensionFeatureName,motionDriverName,motionSpeed;double requestedMotionTime=0;std::vector<std::string> suspensionValues;
+    int requestedPathSamples=1;bool studioRenderTest=false,requestedPathTracing=false;
     int sw=1600,sh=1000,argc=0;auto argv=CommandLineToArgvW(GetCommandLineW(),&argc);
     auto utf8=[](const wchar_t* w){int n=WideCharToMultiByte(CP_UTF8,0,w,-1,nullptr,0,nullptr,nullptr);std::string s(n,'\0');WideCharToMultiByte(CP_UTF8,0,w,-1,s.data(),n,nullptr,nullptr);s.pop_back();return s;};
     for(int i=1;i<argc;++i){auto a=utf8(argv[i]);if(a=="--shot"&&i+1<argc){g_headless=true;shotPath=utf8(argv[++i]);}
+        else if(a=="--self-test-startup-ui"){startupUiTest=true;g_headless=true;}
         else if(a=="--self-test-ui")selfTest=true;
         else if(a=="--self-test-sketch-ui")sketchTest=true;
         else if(a=="--self-test-sketch-drawing-ui"){sketchDrawingUiTest=true;g_headless=true;}
@@ -5513,6 +5520,9 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         else if(a=="--self-test-assistant-ui")assistantTest=true;
         else if(a=="--self-test-native-ui")nativeUiTest=true;
         else if(a=="--self-test-render-ui"){renderUiTest=true;g_headless=true;}
+        else if(a=="--self-test-studio-render"){studioRenderTest=true;g_headless=true;}
+        else if(a=="--path-trace")requestedPathTracing=true;
+        else if(a=="--path-samples"&&i+1<argc)requestedPathSamples=std::clamp(_wtoi(argv[++i]),1,4096);
         else if(a=="--self-test-interaction-ui"){interactionUiTest=true;g_headless=true;}
         else if(a=="--self-test-connectors-ui"){connectorsUiTest=true;g_headless=true;}
         else if(a=="--self-test-engineering-ui"){engineeringUiTest=true;g_headless=true;}
@@ -5548,7 +5558,10 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         else if(a=="--size"&&i+2<argc){sw=_wtoi(argv[++i]);sh=_wtoi(argv[++i]);}
         else if(a=="--load"&&i+1<argc)loadPath=utf8(argv[++i]);
         else if(a=="--script"&&i+1<argc)scriptPath=utf8(argv[++i]);}
-    LocalFree(argv);if(!g_headless||!g_settingsOverride.empty())loadUiSettings();
+    LocalFree(argv);
+    if(startupUiTest)return arkstudio::startupUiSelfTest(shotPath);
+    arkstudio::StartupSplash startupSplash(g_headless);
+    if(!g_headless||!g_settingsOverride.empty())loadUiSettings();if(requestedPathTracing)g_pathTracing=true;
     if(!g_headless)try{g_authStatus=chatGptAuthStatus();}catch(...){g_status="ChatGPT account status unavailable";}
     winW=std::max(sw,1180);winH=std::max(sh,800);layout();
 
@@ -5620,7 +5633,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     using SwapInterval=BOOL (WINAPI*)(int);
     auto swapInterval=(SwapInterval)(void*)wglGetProcAddress("wglSwapIntervalEXT");
     if(swapInterval)swapInterval(g_headless?0:1);
-    ShowWindow(hwnd,g_headless?SW_HIDE:SW_SHOW);
+    ShowWindow(hwnd,SW_HIDE);
 
     // ---- resources ----
     pBg=mkProg(VS_BG,FS_BG);
@@ -5636,6 +5649,15 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         "#version 330 core\nlayout(location=0) in vec3 P;layout(location=1) in vec2 T;uniform mat4 vp,model;out vec2 vuv;void main(){vuv=T;gl_Position=vp*model*vec4(P,1.);}",
         "#version 330 core\nin vec2 vuv;uniform sampler2D img;uniform float opacity,live;out vec4 o;void main(){float check=mod(floor(vuv.x*8.)+floor(vuv.y*8.),2.);vec3 paper=mix(vec3(.62,.58,.52),vec3(.78,.74,.68),check);vec4 tex=texture(img,vuv);o=vec4(mix(paper,tex.rgb,live),opacity*mix(.55,tex.a,live));}");
     pGeom=mkProg(VS_GEOM,FS_GEOM);pAo=mkProg(VS_BG,FS_AO);pCompose=mkProg(VS_BG,FS_COMPOSE);pEdge=mkProg(VS_EDGE,FS_EDGE);
+    pFeatureEdge=mkProg(VS_FEATURE_EDGE,FS_FEATURE_EDGE);pContour=mkProg(VS_BG,FS_CONTOUR);
+    for(GLuint program:{pBg,pBusy,pSolid,pCube,pGrid,pShadow,pUI,pText,pIcons,pImage,pSketch,pCanvas,pGeom,pAo,pCompose,pEdge,pFeatureEdge,pContour}){
+        GLint linked=0;if(program)glGetProgramiv(program,GL_LINK_STATUS,&linked);
+        if(!linked){
+            startupSplash.finish();
+            if(!g_headless)MessageBoxA(hwnd,"ARK could not initialize the graphics programs. Check the graphics driver; no drawing was loaded or modified.","ARK graphics initialization",MB_OK|MB_ICONERROR);
+            std::fprintf(stderr,"ARK mandatory graphics program failed to link.\n");return 22;
+        }
+    }
     guView=glGetUniformLocation(pGeom,"view");guProj=glGetUniformLocation(pGeom,"proj");guModel=glGetUniformLocation(pGeom,"model");guHard=glGetUniformLocation(pGeom,"hardSurface");
     auProj=glGetUniformLocation(pAo,"proj");auFocal=glGetUniformLocation(pAo,"focal");auOrtho=glGetUniformLocation(pAo,"ortho");auRadius=glGetUniformLocation(pAo,"radius");auBias=glGetUniformLocation(pAo,"bias");
     cuOrigin=glGetUniformLocation(pCompose,"origin");euVp=glGetUniformLocation(pEdge,"vp");euModel=glGetUniformLocation(pEdge,"model");
@@ -5696,7 +5718,9 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         glBindVertexArray(gCompassVao);glBindBuffer(GL_ARRAY_BUFFER,gCompassVbo);glBufferData(GL_ARRAY_BUFFER,sizeof axes,axes,GL_STATIC_DRAW);
         glEnableVertexAttribArray(0);glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,12,nullptr);}
 
-    seedDocument();g_uiReady=true;if(!g_headless)acknowledge_update_startup();refreshPricing();
+    seedDocument();g_uiReady=true;
+    if(!g_headless){ShowWindow(hwnd,SW_SHOW);drawFrame(hdc);startupSplash.finish();acknowledge_update_startup();}
+    refreshPricing();
     if(!loadPath.empty()){arkjson::Value a=arkjson::Value::makeObj();a.set("path",arkjson::Value::makeStr(loadPath));runTool("doc_load",a);g_path=loadPath;if(!g_error){g_savedRevision=g_session.revision;g_foldProgress=selectedSourceTube()?1.:0.;}frameScene();}
     if(!scriptPath.empty()){
         std::ifstream input(scriptPath);std::string line;
@@ -6173,6 +6197,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         if(g_error||!std::filesystem::is_regular_file(shotPath+".engineering.ark"))return 225;
         selBody=-1;g_toolModule=3;frameScene();g_status="Engineering UI checks passed / exact frame / PCB DRC / cable route / save";
     }
+    if(studioRenderTest){int result=studioRenderSelfTest(hdc,shotPath);if(result)return result;}
     if(renderUiTest){
         using V=arkjson::Value;
         {HMENU probe=CreatePopupMenu();AppendMenuA(probe,MF_STRING,16,"Save");AppendMenuA(probe,MF_STRING,63,"Spline");decorateMenu(probe);for(int i=0;i<2;++i){MENUITEMINFOW item{sizeof item};item.fMask=MIIM_BITMAP;if(!GetMenuItemInfoW(probe,(UINT)i,TRUE,&item)||!item.hbmpItem){DestroyMenu(probe);return 247;}}DestroyMenu(probe);}
@@ -6647,8 +6672,9 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
 
     if(g_headless){
         g_swap=false;
-        drawFrame(hdc);
+        for(int sample=0;sample<(g_pathTracing?requestedPathSamples:1);++sample)drawFrame(hdc);
         glFinish();
+        if(g_pathTracing)fprintf(stderr,"ARK path tracing: %s / %d spp / %d triangles / %dx%d / %s\n",g_trace.active?"GPU OpenGL BVH":"raster fallback",g_trace.samples,g_trace.triangleCount,g_trace.width,g_trace.height,g_trace.reason.c_str());
         if(GLenum glError=glGetError()){fprintf(stderr,"ARK GL error 0x%X\n",(unsigned)glError);return 20;}
         std::vector<u8> pix((size_t)winW*winH*3);
         glPixelStorei(GL_PACK_ALIGNMENT,1);glReadBuffer(GL_BACK);
@@ -6658,6 +6684,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
             memcpy(&img.px[(size_t)y*winW*3],&pix[(size_t)(winH-1-y)*winW*3],(size_t)winW*3);
         if(!writePNG(shotPath.c_str(),img))return 21;
         DestroyWindow(hwnd);
+        studio_shader_cache::report();
         printf("shot -> %s (%dx%d)\n",shotPath.c_str(),winW,winH);
         return 0;
     }

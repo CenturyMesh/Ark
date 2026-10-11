@@ -1,12 +1,21 @@
-# ARK 008D — Agent-Ready Kernel
+# ARK 009B — Agent-Ready Kernel
 
 **Parametric CAD for people and agents.**
 
-Public iteration **008D** uses runtime **0.9.9**. The three digits are globally
+Public iteration **009B** uses runtime **0.9.10**. The three digits are globally
 sequential; A–G identifies the roadmap phase, not the month. See the mandatory
 [development rules](AGENTS.md), the [35-milestone roadmap](docs/ROADMAP.md), and
 the [open-source / €200 perpetual license analysis](docs/COMMERCIAL_STRATEGY.md).
 `release.json` is the single source of release identity.
+
+009B adds studio lighting and material shading, antialiased black feature edges,
+optional progressive GPU path tracing in **System options / Graphics**, shader
+binary caching, and a short native startup splash. **About ARK** (`F1`) credits
+MeshSphere and project lead Bruno Santos, describes the C++/OCCT stack and
+retains the undecided status of ARK's own license. Agent checks and team command
+schemas expose their real contracts, with bounded provider outcome diagnostics.
+[Graphics](docs/GRAPHICS.md), [third-party notices](docs/THIRD_PARTY_NOTICES.md),
+[iteration scope and verification](docs/iterations/009B.md).
 
 008D adds interactive sketch snapping and editable viewport dimensions, real
 image evidence for agents, candidate trim review and reproducible failure bundles,

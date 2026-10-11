@@ -146,3 +146,35 @@ não são um preço. Custos continuam desconhecidos, incluindo as respostas sem 
 **D.01 permanece Parcial**: faltam as três repetições do corpus completo e a
 avaliação humana cega. A amostra não isola causalidade da correção de schema,
 nem sustenta ganhos gerais de custo, qualidade ou fabrico.
+
+## Fecho do piloto local de 009B — 11 de outubro de 2026
+
+Piloto encerrado por decisão do utilizador em **9 tentativas: 1 aceite e 8
+falhadas**, sem novas execuções. Casos `B01,S02,A01`, uma repetição por
+Single/Focused/Parallel, modelo `ark-bench-008d-q3-16k`, Q3, contexto 16384,
+esforço `none`, timeout HTTP 90 s e janela do host 120 s. Os briefs, baselines,
+critérios e configuração comparáveis ao piloto 008D de 4/9 foram preservados.
+
+| Estratégia | B01 | S02 | A01 | Aceites | Tokens reportados, incluindo falhas | Respostas sem usage |
+|---|---|---|---|---|---|---|
+| Single | Passou, 48,698 s | Falhou, 109,541 s | Falhou, 57,583 s | 1/3 | 621 606 | 1 |
+| Focused | Falhou, 53,538 s | Falhou, 40,961 s | Falhou, 33,017 s | 0/3 | 322 514 | 1 |
+| Parallel | Falhou, 53,600 s | Timeout, 120,051 s | Falhou, 113,377 s | 0/3 | 661 265 | 1 |
+
+Sete tentativas falhadas terminaram com `stop_reason=length`, comprovado pelos
+recibos do provider; S02 Parallel excedeu a janela do host e foi cancelado.
+Houve também dois erros HTTP 500, em S02 Single e Focused, e um erro de
+transporte em S02 Parallel. Rejeições de ferramentas e alterações já aplicadas
+permanecem registadas. B01 Focused/Parallel e A01 nas três estratégias passaram
+as pós-condições geométricas, mas não tiveram conclusão válida: continuam
+**falhados**. S02 falhou as pós-condições nas três estratégias.
+
+Recibos integrais e agregado:
+`out/verification/009B-comparison-live-q3-16k-none.jsonl`; hashes, resultados
+por tentativa e diagnósticos resumidos em [verification-009B.json](verification-009B.json).
+O histórico 008D de 0/9 e 4/9 permanece preservado. A queda observada para 1/9
+é reportada sem atribuir causalidade a partir desta amostra. Os tokens incluem
+falhas e não representam preço; custos permanecem desconhecidos.
+**D.01 permanece Parcial**: a campanha completa e a avaliação humana cega
+ficaram fora do fecho autorizado. Não há alegação de poupança, melhoria geral
+de design, benefício de paralelismo ou qualificação de fabrico.

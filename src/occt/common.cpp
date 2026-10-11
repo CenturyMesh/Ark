@@ -22,6 +22,10 @@
 #include <TopoDS.hxx>
 #include <TopoDS_Compound.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopExp.hxx>
+#include <NCollection_IndexedDataMap.hxx>
+#include <NCollection_List.hxx>
+#include <TopTools_ShapeMapHasher.hxx>
 #include <TopLoc_Location.hxx>
 #include <Poly_Triangulation.hxx>
 #include <BRepAdaptor_Curve.hxx>
@@ -155,8 +159,34 @@ int nativeThreadBudget(){
         threads=std::min(threads,pool->NbThreads());pool->SetNbDefaultThreadsToLaunch(threads);return threads;
     }();return budget;
 }
+namespace {
+// Rendering metadata only. The full, ordered edge polylines remain authoritative
+// for picking and semantic index bindings. Unknown regularity stays visible.
+bool visibleNativeEdge(const TopoDS_Edge& edge,const NCollection_IndexedDataMap<TopoDS_Shape,NCollection_List<TopoDS_Shape>,TopTools_ShapeMapHasher>& owners){
+    if(BRep_Tool::Degenerated(edge))return false; // Existing empty preview edge.
+    if(!owners.Contains(edge))return true; // Standalone curve/wire.
+    const auto& faces=owners.FindFromKey(edge);
+    if(faces.Extent()!=2)return true; // Free boundaries and non-manifold uses.
+    const auto first=TopoDS::Face(faces.First());const auto second=TopoDS::Face(faces.Last());
+    if(first.IsSame(second)){
+        if(!BRep_Tool::IsClosed(edge,first))return true;
+        // Two p-curves prove a parametric seam, but not necessarily smoothness
+        // for a C0 freeform surface. Analytic periodic surfaces are smooth away
+        // from their already-degenerate poles/apex; other seams need regularity.
+        const auto type=BRepAdaptor_Surface(first).GetType();
+        if(type==GeomAbs_Cylinder||type==GeomAbs_Cone||type==GeomAbs_Sphere||type==GeomAbs_Torus)return false;
+    }
+    return !BRep_Tool::HasContinuity(edge,first,second)||BRep_Tool::Continuity(edge,first,second)<GeomAbs_G1;
+}
+}
+V edgeVisibility(const TopoDS_Shape& shape){
+    V visible=V::makeArr();NCollection_IndexedDataMap<TopoDS_Shape,NCollection_List<TopoDS_Shape>,TopTools_ShapeMapHasher> owners;
+    TopExp::MapShapesAndAncestors(shape,TopAbs_EDGE,TopAbs_FACE,owners);
+    for(const auto& item:shapes(shape,TopAbs_EDGE))visible.arr.push_back(V::makeBool(visibleNativeEdge(TopoDS::Edge(item),owners)));
+    return visible;
+}
 V meshData(const TopoDS_Shape& s,double deflection,double angle){
-    BRepMesh_IncrementalMesh mesher(s,deflection,false,angle,nativeThreadBudget()>1);if(!mesher.IsDone())throw std::runtime_error("Native preview tessellation failed");V pos=V::makeArr(),idx=V::makeArr(),spans=V::makeArr(),edges=V::makeArr();
+    BRepMesh_IncrementalMesh mesher(s,deflection,false,angle,nativeThreadBudget()>1);if(!mesher.IsDone())throw std::runtime_error("Native preview tessellation failed");V pos=V::makeArr(),idx=V::makeArr(),spans=V::makeArr(),edges=V::makeArr(),edgeVisible=edgeVisibility(s);
     for(auto& item:shapes(s,TopAbs_FACE)){auto face=TopoDS::Face(item);TopLoc_Location loc;auto tri=BRep_Tool::Triangulation(face,loc);if(tri.IsNull())throw std::runtime_error("Native face has no triangulation");size_t base=pos.arr.size()/3,start=idx.arr.size()/3;
         for(int i=1;i<=tri->NbNodes();++i){auto p=tri->Node(i).Transformed(loc.Transformation());for(auto v:{p.X(),p.Y(),p.Z()})pos.arr.push_back(V::makeNum(std::round(v*1e8)/1e8));}
         for(int i=1;i<=tri->NbTriangles();++i){int a,b,c;tri->Triangle(i).Get(a,b,c);if(face.Orientation()==TopAbs_REVERSED)std::swap(b,c);for(int v:{a,b,c})idx.arr.push_back(V::makeNum((double)(base+v-1)));}
@@ -197,7 +227,7 @@ V meshData(const TopoDS_Shape& s,double deflection,double angle){
         }
         edges.arr.push_back(std::move(poly));
     }
-    V mesh=V::makeObj();mesh.set("pos",pos);mesh.set("idx",idx);mesh.set("face_spans",spans);mesh.set("edges",edges);return mesh;
+    V mesh=V::makeObj();mesh.set("pos",pos);mesh.set("idx",idx);mesh.set("face_spans",spans);mesh.set("edges",edges);mesh.set("edge_visible",edgeVisible);return mesh;
 }
 std::string brepData(const TopoDS_Shape& shape){std::ostringstream stream;BRepTools::Write(shape,stream,false,false,TopTools_FormatVersion_CURRENT);return base64Encode(stream.str());}
 TopoDS_Shape readBrep(const std::string& encoded){std::istringstream stream(base64Decode(encoded));TopoDS_Shape shape;BRep_Builder b;BRepTools::Read(shape,stream,b);if(shape.IsNull()||!BRepCheck_Analyzer(shape).IsValid())throw std::runtime_error("Invalid native B-rep payload");return shape;}
