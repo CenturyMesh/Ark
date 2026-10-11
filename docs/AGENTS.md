@@ -177,6 +177,12 @@ Use `created_ids` returned by a batch as inputs to later features. IDs are monot
 | `export_mesh` | STL/OBJ of terminal outputs, a selected feature ID, or a unique instance name plus `copy` |
 | `snapshot` | Software-rendered PNG of terminal outputs, a selected ID, or a unique instance name plus `copy`. `view` is `iso`, `front`, `right` or `top`. The image is a display mesh, not STEP authority |
 
+`doc_info` filters `ids` and `sections` require `detail:"design"` or omitted
+`detail` (which infers design). Explicit `detail:"summary"` accepts neither
+filter. Incompatible detail returns `INVALID_ARGUMENT`, stage `arguments`,
+and corrected `recovery.retry_arguments` retaining the exact requested filters.
+This read cannot modify the document; revision conflicts remain distinct.
+
 The process has local filesystem permissions of the host. Save/export tools write the supplied paths. File saves replace existing documents; there is no cross-process file locking. MCP sessions are local, not a remote HTTP service.
 
 ## Numerical contract

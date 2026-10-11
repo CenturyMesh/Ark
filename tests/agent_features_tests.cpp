@@ -98,6 +98,11 @@ void testSelectedDesignReads(){
     check(related.find("section_scopes")->find("parameters")->str=="document","Parameter section states its document-wide scope");
     auto section=call(session,"doc_info",R"({"detail":"design","sections":["sketches"]})");check(section.find("sketches")->dump()==full.find("sketches")->dump()&&!section.find("features"),"Section-only selection preserves entire chosen section");
     for(const char* args:{R"({"detail":"design","ids":[9999]})",R"({"detail":"design","ids":["Unknown"]})",R"({"detail":"design","ids":[1,1]})",R"({"detail":"design","ids":[]})",R"({"detail":"design","sections":["checks"]})",R"({"detail":"summary","ids":[1]})"})check(session.call("doc_info",parse(args)).find("isError")->b,"Invalid/unknown selection rejects instead of dropping data");
+    check(call(session,"doc_info",R"({"ids":["Part 0",154]})").dump()==selected.dump(),"Omitted detail infers the same selected design read");
+    auto incompatible=session.call("doc_info",parse(R"({"detail":"summary","ids":["Part 0",154],"sections":["features","assembly"]})"));
+    const auto& diagnostic=*incompatible.find("structuredContent");check(diagnostic.find("error_code")->str=="INVALID_ARGUMENT"&&diagnostic.find("field")->str=="detail","Filter conflict is an argument error, not geometry evaluation or revision conflict");
+    const auto& retry=*diagnostic.find("recovery")->find("retry_arguments");check(retry.find("ids")->dump()=="[\"Part 0\",154]"&&retry.find("sections")->dump()=="[\"features\",\"assembly\"]"&&retry.find("detail")->str=="design","Recovery retains exact requested targets and sections");
+    check(!session.call("doc_info",retry).find("isError")->b,"Proposed corrected read executes successfully");
     session.document.features[1].name="Duplicate";session.document.features[2].name="Duplicate";check(session.call("doc_info",parse(R"({"detail":"design","ids":["Duplicate"]})")).find("isError")->b,"Ambiguous selected name rejects");session.document.features[1].name="Part 1";session.document.features[2].name="Part 2";
     check(session.revision==revision&&documentToJson(session.document)==before,"Selected reads never mutate document or revision");
     check(selected.dump().size()*10<full.dump().size(),"Representative selected read materially reduces response bytes");

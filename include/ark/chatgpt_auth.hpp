@@ -6,6 +6,8 @@
 #include <vector>
 
 namespace ark {
+inline constexpr std::size_t chatGptRequestByteLimit=4*1024*1024; // Same serialized-body bound in preflight and HTTPS.
+
 
 struct ChatGptAccountSummary {
     std::string clientId,subject,email;

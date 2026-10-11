@@ -24,7 +24,7 @@ struct AssistantConfig {
     std::string onboardingPack; // Static source-owned guide, inserted once per conversation.
     unsigned timeoutSeconds=90;
     std::size_t maxResponseBytes=4*1024*1024;
-    std::size_t maxConversationBytes=8*1024*1024;
+    std::size_t maxConversationBytes=8*1024*1024; // Outgoing request bound; original host evidence is retained separately.
 };
 // Provider-reported usage only. Missing/invalid usage never becomes zero-cost
 // evidence. Cached/reasoning counts are subsets, not extra tokens to add.
@@ -104,7 +104,7 @@ struct AssistantRetryHooks {
 void validateAssistantConfig(const AssistantConfig& config);
 bool assistantKeyAvailable(const AssistantConfig& config);
 arkjson::Value assistantFunctionTools(const arkjson::Value& mcpTools);
-arkjson::Value assistantRequest(const AssistantConfig& config,const arkjson::Value& conversation,const arkjson::Value& mcpTools);
+arkjson::Value assistantRequest(const AssistantConfig& config,const arkjson::Value& conversation,const arkjson::Value& mcpTools,bool* historyProjected=nullptr);
 // input: user prompt string, or complete Responses input array including history.
 // Synchronous: call on a worker. Host serializes tool callback on its UI/session thread.
 // Throws on cancellation, invalid configuration/response, transport or round limit.

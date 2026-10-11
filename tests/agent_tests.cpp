@@ -15,6 +15,7 @@ bool failed(const V& v){return v.find("isError")->b;}
 bool schemaAccepts(const V& schema,const V& value){
     auto typeMatches=[&](const std::string& type){return type=="null"?value.t==V::Null:type=="boolean"?value.t==V::Bool:type=="string"?value.t==V::Str:type=="array"?value.t==V::Arr:type=="object"?value.t==V::Obj:type=="number"?value.t==V::Num:type=="integer"?value.t==V::Num&&value.num==std::floor(value.num):false;};
     if(const auto* type=schema.find("type")){bool match=type->t==V::Str?typeMatches(type->str):false;if(type->t==V::Arr)for(const auto& item:type->arr)match|=typeMatches(item.str);if(!match)return false;}
+    if(const auto* excluded=schema.find("not");excluded&&schemaAccepts(*excluded,value))return false;
     if(const auto* choices=schema.find("oneOf")){int n=0;for(const auto& option:choices->arr)n+=schemaAccepts(option,value);if(n!=1)return false;}
     if(const auto* choices=schema.find("anyOf")){bool match=false;for(const auto& option:choices->arr)match|=schemaAccepts(option,value);if(!match)return false;}
     if(const auto* choices=schema.find("enum")){bool match=false;for(const auto& option:choices->arr)match|=option.dump()==value.dump();if(!match)return false;}
@@ -26,6 +27,20 @@ bool schemaAccepts(const V& schema,const V& value){
         const auto* props=schema.find("properties");const auto* extra=schema.find("additionalProperties");
         for(const auto& item:value.obj){const auto* definition=props?props->find(item.first.c_str()):nullptr;if(definition){if(!schemaAccepts(*definition,item.second))return false;}else if(extra){if(extra->t==V::Bool&&!extra->b)return false;if(extra->t==V::Obj&&!schemaAccepts(*extra,item.second))return false;}}
     }return true;
+}
+void testDocInfoDiscoveryContract(){
+    AgentSession session;
+    for(bool detailed:{false,true})for(const auto& tool:AgentSession::tools(detailed).arr)if(tool.find("name")->str=="doc_info"){
+        const auto& schema=*tool.find("inputSchema");
+        for(const char* input:{R"({})",R"({"detail":"summary"})",R"({"detail":"design"})",R"({"sections":["features"]})",R"({"detail":"design","sections":["assembly"]})"}){
+            const auto args=json(input);CHECK(schemaAccepts(schema,args));CHECK(!failed(session.call("doc_info",args)));
+        }
+        for(const char* input:{R"({"detail":"summary","ids":[1]})",R"({"detail":"summary","sections":["features"]})",R"({"detail":"summary","ids":[1],"sections":["features"]})",R"({"detail":null})",R"({"detail":"unknown"})"}){
+            const auto args=json(input);CHECK(!schemaAccepts(schema,args));const auto answer=session.call("doc_info",args);CHECK(failed(answer));
+            const auto* receipt=answer.find("structuredContent");CHECK(receipt&&receipt->find("error_code")->str=="INVALID_ARGUMENT"&&receipt->find("stage")->str=="arguments"&&receipt->find("document_unchanged")->b);
+        }
+        CHECK(schemaAccepts(schema,json(R"({"ids":[1]})")));CHECK(schemaAccepts(schema,json(R"({"detail":"design","ids":[1]})")));
+    }
 }
 void testDocApplyDiscoveryContract(){
     V advertised,previewSchema;
@@ -89,7 +104,7 @@ int main(){
     cpu_detect();
     testObjectContext();
     benchmarkObjectContext();
-    testDocApplyDiscoveryContract();
+    testDocInfoDiscoveryContract();testDocApplyDiscoveryContract();
     // Detect the old f64/f32 reinterpretation bug on arrays entering the batch path.
     std::vector<Vec3> in(128),out(128);Mat4 m=Mat4::translation({1000000.125,-12.3,8})*Mat4::rotZ(.73);
     for(size_t i=0;i<in.size();++i)in[i]={(double)i/7.,(double)i/11.,(double)i/13.};

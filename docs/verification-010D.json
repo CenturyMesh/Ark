@@ -1,0 +1,122 @@
+{
+  "iteration": {
+    "sequence": 10,
+    "phase": "D",
+    "code": "010D",
+    "version": "0.9.11",
+    "milestones": [
+      "A.01",
+      "D.02",
+      "D.04"
+    ]
+  },
+  "date": "2026-10-11",
+  "baseline_commit": "ed0bdb09553aa782a5cdc91477ae8ff6ca565e34",
+  "milestone_scope": "A.01/D.02/D.04 verified locally; broader milestones remain Partial",
+  "tests": {
+    "passed": 63,
+    "failed": 0,
+    "seconds": 116.27,
+    "live_provider_calls": 0,
+    "ui": [
+      {
+        "test": "startup-ui",
+        "exit": 0,
+        "seconds": 3.234,
+        "stdout": "",
+        "stderr": ""
+      },
+      {
+        "test": "assistant-ui",
+        "exit": 0,
+        "seconds": 17.782,
+        "stdout": "shader_cache available=1 hits=0 misses=0 rejected=0 writes=0\r\nshot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-010D-assistant-ui.png (1600x1000)\r\n",
+        "stderr": ""
+      }
+    ],
+    "first_resume_fixture_failure": "64 KiB fixture cap did not admit the tool envelope; final test uses the unchanged real 4 MiB transport cap."
+  },
+  "context_projection": {
+    "original_history_bytes": 10487651,
+    "chatgpt_request_bytes": 73153,
+    "original_receipts_retained": 5,
+    "three_protocols_verified": true,
+    "task_messages_preserved": true,
+    "fresh_inspection_before_write": true,
+    "replayed_call_id_rejected": true,
+    "irreducible_user_message_rejected_before_transport": true
+  },
+  "team_resume": {
+    "large_receipt_bytes": 3145728,
+    "requests": 8,
+    "writes": 2,
+    "final_revision": 2,
+    "old_commit_preserved": true,
+    "premature_write_blocked": true,
+    "unknown_usage_retained": true
+  },
+  "package": {
+    "path": "out/releases-010D/ark-windows-x64-0.9.11.zip",
+    "sha256": "34581516af3d71f61ec431203a2a1acb0a595818c7e0d12ed232e32298dcecf2",
+    "bytes": 33069429,
+    "user_ark_documents": 0,
+    "installed_matching_files": 61
+  },
+  "runtime_sha256": {
+    "ark-studio.exe": "59f009f4ed211edf8409c11c73b9adf6dd917659c5b679d244355babe44240f9",
+    "ark-cli.exe": "da424e42ca89ad38f86f0d2ec349786c474d2ac08cd6187eb60533787cc6c73d",
+    "ark-mcp.exe": "2bbfb9a3507a8d7db94b3da4e1916ffcc1ca94fcecadaba834cec0e8cfa11e22",
+    "ark-occt-worker.exe": "947231f0441440166c947257ba463297b40c98a92c59a78880765b4ca66799d8",
+    "ark-benchmark.exe": "a0ea2d6ba75960c74bff1561175da7240b7fd57df3458ff32856fd6714326207"
+  },
+  "installation": {
+    "state": {
+      "current": "0.9.10",
+      "pending": "0.9.11",
+      "schema": 1,
+      "activating": "",
+      "previous": "0.9.9"
+    },
+    "activation": "Pending for next stable-launcher start; existing 009B process 28080 preserved.",
+    "prior_runtime_sha256_unchanged": true,
+    "installed_mcp_smoke_passed": true
+  },
+  "drawings": {
+    "baseline_count": 30,
+    "hashes_unchanged": 30,
+    "changed_during_work": 0,
+    "names_and_contents_excluded": true
+  },
+  "pilot_009B": {
+    "attempts": 9,
+    "accepted": 1,
+    "receipt_unchanged": true,
+    "reruns": 0
+  },
+  "evidence_sha256": {
+    "out/ark-010D-final-build.log": "efeff5e2858c34d775a8925844e10c5313625dc0f05659400daa4650fdc2851c",
+    "out/ark-010D-final-tests.log": "004b0c4f88dcfe13d05275e1c758bb448062184346d88349f11c0bf1861a3cac",
+    "out/ark-010D-final-tests.xml": "5a5615fad235a377fb27fab7f0b2e963c63fb76bfea497945f40d79c2c07a822",
+    "out/ark-010D-tests.log": "db812a61a7796743759e981ba26f579eaaa6147c6e3d75b2c402ab8346060db5",
+    "out/ark-010D-ui-verification.json": "fb91a656ac1047a863e6d74d76982abb967816247ab48f0674b98ca8f2667eb2",
+    "out/ark-010D-installed-mcp-smoke.json": "667f0a1a129d3e19e8506fb5c71b219796957eea869c020e2368be97ae5c3200"
+  },
+  "visual_review": [
+    {
+      "path": "out/ark-010D-startup-ui.png.about-0.png",
+      "sha256": "3ea7d409b0468a6528f01758abef623870d8275e944a161e64939d0f121ca12a"
+    },
+    {
+      "path": "out/ark-010D-assistant-ui.png",
+      "sha256": "f2c1c5f31a7aa518a83f7eecc709e9a607f145e31bf7a3cb6262c81d4ab91023"
+    }
+  ],
+  "limits": [
+    "No live inference or user-session replay performed.",
+    "Existing running sessions continue with their loaded runtime; in-memory agent history is not migrated to 010D.",
+    "Projection retains original host history, whose memory usage grows with the session.",
+    "Oversized instructions or schemas still reject before transport if completed tool-history projection cannot fit them.",
+    "The precise contribution of 009B schema changes to the captured live request size is unmeasured.",
+    "Local evidence does not imply hosted CI, online OTA deployment or manufacturing qualification."
+  ]
+}

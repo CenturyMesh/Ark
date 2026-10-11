@@ -1,12 +1,17 @@
-# ARK 009B — Agent-Ready Kernel
+# ARK 010D — Agent-Ready Kernel
 
 **Parametric CAD for people and agents.**
 
-Public iteration **009B** uses runtime **0.9.10**. The three digits are globally
+Public iteration **010D** uses runtime **0.9.11**. The three digits are globally
 sequential; A–G identifies the roadmap phase, not the month. See the mandatory
 [development rules](AGENTS.md), the [35-milestone roadmap](docs/ROADMAP.md), and
 the [open-source / €200 perpetual license analysis](docs/COMMERCIAL_STRATEGY.md).
 `release.json` is the single source of release identity.
+
+010D aligns filtered `doc_info` discovery and argument diagnostics, and projects
+large completed tool histories into bounded provider requests while retaining
+original receipts and requiring current document inspection before writes.
+[Scope and verification](docs/iterations/010D.md).
 
 009B adds studio lighting and material shading, antialiased black feature edges,
 optional progressive GPU path tracing in **System options / Graphics**, shader

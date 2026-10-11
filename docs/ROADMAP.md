@@ -1,7 +1,7 @@
 # ARK — matriz de roadmap A–G
 
-**Data da auditoria:** 11 de outubro de 2026. **Iteração local:** `009B` / `0.9.10`,
-verificada, empacotada e ativada localmente; baseline `008D` / `dbcb959` (`0.9.9`).
+**Data da auditoria:** 11 de outubro de 2026. **Iteração local:** `010D` / `0.9.11`,
+verificada no escopo local e instalada para o próximo arranque; baseline entregue `009B` / `ed0bdb0` (`0.9.10`).
 O baseline histórico `0.9.1`, commit `5e7153f`, não foi rebatizado retroativamente.
 `001A` inicia a convenção pública, com versão técnica `0.9.2` para distribuição.
 `002B` acrescenta recuperação do runtime, projeção exata e ferramentas de frame;
@@ -25,6 +25,8 @@ repetição de três briefs não prova redução de custo ou melhoria de design.
 splash, About e contratos dos agentes. O piloto foi encerrado em 1/9 aceite,
 com todas as oito falhas preservadas e sem repetição; D.01 permanece Parcial.
 Ver [escopo e evidência](iterations/009B.md).
+`010D` corrige o contrato de leitura filtrada e a recuperação de pedidos grandes
+em D.02/D.04, preservando revisões, histórico e recibos; ver [verificação](iterations/010D.md).
 
 **Visão:** um ambiente CAD onde uma pessoa ou uma equipa de agentes consegue
 transformar uma intenção num produto editável, verificável e preparado para
@@ -126,9 +128,9 @@ O documento ROADMAP_09 é um registo histórico; esta matriz passa a orientar o 
 | ID | Milestone | Estado inicial | Aceitação e dependências |
 |---|---|---|---|
 | D.01 | Benchmark de qualidade/tempo/custo | Parcial: harness/corpus de 30 briefs; pilotos `008D` de 0/9 e 4/9, `009B` encerrado em 1/9; uma repetição de três briefs, todas as falhas conservadas; sem evidência de poupança | Pelo menos 30 briefs versionados, três repetições por configuração inicial e avaliação humana cega; medir custo por design aceite, não só tokens por turno |
-| D.02 | Engenheiro responsável e equipa adaptativa | Parcial; contexto/deltas em `006B`, missões com contexto e harness comparativo em `008D` | Comparar Single, Focused e Parallel; especialistas só com missão útil; paralelismo escolhido por benefício medido; sem budgets impostos por defeito |
+| D.02 | Engenheiro responsável e equipa adaptativa | Parcial; contexto/deltas em `006B`, missões/harness em `008D`; contrato de leitura e Resume com pedidos grandes verificados offline na `010D` | Comparar Single, Focused e Parallel; especialistas só com missão útil; paralelismo escolhido por benefício medido; sem budgets impostos por defeito |
 | D.03 | Espaços de trabalho por peça | Planeado | Agentes editam branches isolados com ownership e datums; integração transacional identifica conflitos geométricos e de revisão sem rebase silencioso |
-| D.04 | Feedback multimodal e autocorreção | Parcial; pixels reais entregues ao provider e candidatos/replay verificados localmente em `008D`; interpretação ainda limitada | Mesmo diagnóstico chega ao autor/reviewer; previews ligados à revisão; ciclos de erro repetido detetados; correção preserva intenção e referências |
+| D.04 | Feedback multimodal e autocorreção | Parcial; pixels/candidatos/replay em `008D`; diagnóstico de argumentos e inspeção obrigatória após projeção de histórico verificados offline na `010D`; interpretação ainda limitada | Mesmo diagnóstico chega ao autor/reviewer; previews ligados à revisão; ciclos de erro repetido detetados; correção preserva intenção e referências |
 | D.05 | Alternativas de conceito e conhecimento reutilizável | Parcial no onboarding | Comparar alternativas por requisitos, massa, custo/processo e preferência humana; biblioteca de exemplos validados; nunca chamar a uma proposta uma peça criada |
 
 ### E — Ecossistema industrial
