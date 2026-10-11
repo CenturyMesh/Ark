@@ -1,0 +1,705 @@
+{
+  "iteration": {
+    "sequence": 8,
+    "phase": "D",
+    "code": "008D",
+    "version": "0.9.9",
+    "milestones": [
+      "B.01",
+      "B.02",
+      "B.04",
+      "C.02",
+      "C.04",
+      "D.01",
+      "D.02",
+      "D.04"
+    ]
+  },
+  "date": "2026-10-11",
+  "baseline_commit": "ae659cc0e8be52dca35f84029eac8594f4f6beba",
+  "native_suite": {
+    "passed": 63,
+    "failed": 0,
+    "seconds": 111.69,
+    "log": "out/ark-008D-full-native-tests.log",
+    "scope": "Before final native example assertion correction and CLI output-stream fix; final targeted tests supplement this run."
+  },
+  "core_suite": {
+    "passed": 43,
+    "failed": 0,
+    "seconds": 27.79,
+    "log": "out/ark-008D-full-core-tests.log"
+  },
+  "final_targeted": {
+    "passed": 10,
+    "failed": 0,
+    "seconds": 12.93,
+    "log": "out/ark-008D-final-targeted-tests.log"
+  },
+  "ui_tests": [
+    {
+      "test": "sketch-drawing-ui",
+      "exit": 0,
+      "seconds": 2.8
+    },
+    {
+      "test": "frame-tools-ui",
+      "exit": 0,
+      "seconds": 5.4
+    },
+    {
+      "test": "assistant-ui",
+      "exit": 0,
+      "seconds": 16.65
+    },
+    {
+      "test": "context-ui",
+      "exit": 0,
+      "seconds": 1.77
+    },
+    {
+      "test": "interaction-ui",
+      "exit": 0,
+      "seconds": 3.26
+    },
+    {
+      "test": "navigation-ui",
+      "exit": 0,
+      "seconds": 0.57
+    },
+    {
+      "test": "projection-ui",
+      "exit": 0,
+      "seconds": 2.46
+    },
+    {
+      "test": "arc-ui",
+      "exit": 0,
+      "seconds": 2.13
+    },
+    {
+      "test": "tree-ui",
+      "exit": 0,
+      "seconds": 0.58
+    },
+    {
+      "test": "completion-ui",
+      "exit": 0,
+      "seconds": 0.63
+    }
+  ],
+  "visual_review": [
+    "out/ark-008D-sketch-drawing-ui.png.rectangle-ghost.png",
+    "out/ark-008D-sketch-drawing-ui.png.persisted-dimensions.png",
+    "out/ark-008D-frame-tools-ui.png.tube-end-fit-selected.png",
+    "out/ark-008D-frame-tools-ui.png.tube-end-fit-selected.png.candidate.png"
+  ],
+  "portable_paths": {
+    "build": "passed",
+    "package": "passed",
+    "logs": [
+      "out/ark-008D-benchmark-paths.log",
+      "out/ark-008D-packaged-paths.log"
+    ]
+  },
+  "package": {
+    "path": "out/releases-008D/ark-windows-x64-0.9.9.zip",
+    "sha256": "9f6f2841da5ac06ffd2a86bd8508555d0483d547370c0aa2c38dda6dad7967a3",
+    "user_ark_documents": 0,
+    "synthetic_examples": [
+      "fourbar-suspension.arkops",
+      "pneumatic-cylinder.arkops"
+    ]
+  },
+  "runtime_hashes": {
+    "ark-studio.exe": {
+      "build": "5de249e2dfde2b657c974d65e4c99913344fc383f213812ee0dd3f015605f773",
+      "package": "5de249e2dfde2b657c974d65e4c99913344fc383f213812ee0dd3f015605f773",
+      "installed": "5de249e2dfde2b657c974d65e4c99913344fc383f213812ee0dd3f015605f773",
+      "compatibility": "5de249e2dfde2b657c974d65e4c99913344fc383f213812ee0dd3f015605f773"
+    },
+    "ark-cli.exe": {
+      "build": "350b18fe041242c1fa1812fd94680d4910add4dd1bf05ce45ad189bc6419d2b9",
+      "package": "350b18fe041242c1fa1812fd94680d4910add4dd1bf05ce45ad189bc6419d2b9",
+      "installed": "350b18fe041242c1fa1812fd94680d4910add4dd1bf05ce45ad189bc6419d2b9",
+      "compatibility": "350b18fe041242c1fa1812fd94680d4910add4dd1bf05ce45ad189bc6419d2b9"
+    },
+    "ark-mcp.exe": {
+      "build": "20fbb4b106890e4f7e4c02ee9f2d7c278e88dd4fcfa765929b90f26e1f4476e0",
+      "package": "20fbb4b106890e4f7e4c02ee9f2d7c278e88dd4fcfa765929b90f26e1f4476e0",
+      "installed": "20fbb4b106890e4f7e4c02ee9f2d7c278e88dd4fcfa765929b90f26e1f4476e0",
+      "compatibility": "20fbb4b106890e4f7e4c02ee9f2d7c278e88dd4fcfa765929b90f26e1f4476e0"
+    },
+    "ark-occt-worker.exe": {
+      "build": "d285f7ea066ffcf642b71025b12e835fb91deeeb9513f3d6b24f6636735646fb",
+      "package": "d285f7ea066ffcf642b71025b12e835fb91deeeb9513f3d6b24f6636735646fb",
+      "installed": "d285f7ea066ffcf642b71025b12e835fb91deeeb9513f3d6b24f6636735646fb",
+      "compatibility": "d285f7ea066ffcf642b71025b12e835fb91deeeb9513f3d6b24f6636735646fb"
+    },
+    "ark-benchmark.exe": {
+      "build": "63185ffc8953f79edb129c5f76d65c83c865096fd108d710d80260278ac0e38f",
+      "package": "63185ffc8953f79edb129c5f76d65c83c865096fd108d710d80260278ac0e38f",
+      "compatibility": "63185ffc8953f79edb129c5f76d65c83c865096fd108d710d80260278ac0e38f"
+    }
+  },
+  "standalone_benchmark": "Included and tested in the portable ZIP and compatibility build folder; the app installer allowlist does not install this optional CLI or its test corpus.",
+  "activation": {
+    "state": {
+      "current": "0.9.9",
+      "pending": "",
+      "schema": 1,
+      "activating": "",
+      "previous": "0.9.8"
+    },
+    "observed_title": "ARK 008D",
+    "observed_pid": 52008,
+    "observed_executable": "C:\\Users\\bruno\\AppData\\Local\\ARK\\app\\versions\\0.9.9\\ark-studio.exe",
+    "desktop_shortcut_refreshed": true
+  },
+  "limits": [
+    "Mechanism continuation verified in four-bar, slider-crank and transmission cases, not a universal mechanical/contact solver.",
+    "No manufacturing qualification or general cost/design-quality improvement claim.",
+    "Scoped team assignments supply context, not isolated branches or write-ownership enforcement.",
+    "Sketch source parameter traversal is bounded to implemented feature inputs; specialized native path references may require direct editing.",
+    "Future website OTA transport remains pending; local versioned activation was verified."
+  ],
+  "vision_live": {
+    "completed": true,
+    "seconds": 43.474,
+    "reported_tokens": 12861,
+    "snapshots": 5,
+    "receipt": "out/verification/008D-vision-live-q3-16k-none.jsonl",
+    "prior_timeout_retained": "out/verification/008D-vision-live-q3.jsonl",
+    "recognition": "Some unsupported visual interpretations observed; pixel delivery is not recognition certification."
+  },
+  "benchmark_before": {
+    "receipt": "out/verification/008D-comparison-live-q3-16k-none.jsonl",
+    "receipt_sha256": "c88c5b79ab8b4e48bfc992cac7ab3c3e46e4e5df3b3105c52b952cdd9371ec46",
+    "attempts": 9,
+    "accepted": 0,
+    "strategies": {
+      "Single": {
+        "attempts": 3,
+        "accepted": 0
+      },
+      "Focused": {
+        "attempts": 3,
+        "accepted": 0
+      },
+      "Parallel": {
+        "attempts": 3,
+        "accepted": 0
+      }
+    },
+    "complete": true,
+    "repetitions": 1,
+    "human_blind_review": "pending",
+    "attempt_results": [
+      {
+        "case": "B01",
+        "strategy": "Single",
+        "repetition": 1,
+        "accepted": false,
+        "elapsed_ms": 70793,
+        "timed_out": false,
+        "completed": false,
+        "initial_revision": 1,
+        "final_revision": 1,
+        "postconditions_passed": false,
+        "tool_failures": 5,
+        "executor_tool_failures": 5,
+        "error": "Assistant provider HTTP 500 (api_error)",
+        "role_errors": []
+      },
+      {
+        "case": "B01",
+        "strategy": "Focused",
+        "repetition": 1,
+        "accepted": false,
+        "elapsed_ms": 75958,
+        "timed_out": false,
+        "completed": false,
+        "initial_revision": 1,
+        "final_revision": 1,
+        "postconditions_passed": false,
+        "tool_failures": 8,
+        "executor_tool_failures": 8,
+        "error": "",
+        "role_errors": [
+          {
+            "id": "engineer",
+            "state": "Interrupted",
+            "error": "Assistant provider HTTP 500 (api_error)"
+          }
+        ]
+      },
+      {
+        "case": "B01",
+        "strategy": "Parallel",
+        "repetition": 1,
+        "accepted": false,
+        "elapsed_ms": 66094,
+        "timed_out": false,
+        "completed": false,
+        "initial_revision": 1,
+        "final_revision": 1,
+        "postconditions_passed": false,
+        "tool_failures": 12,
+        "executor_tool_failures": 12,
+        "error": "engineer: Assistant response was incomplete or did not report completion; no tools from this response were executed.\n",
+        "role_errors": [
+          {
+            "id": "engineer",
+            "state": "Failed",
+            "error": "Assistant response was incomplete or did not report completion; no tools from this response were executed."
+          }
+        ]
+      },
+      {
+        "case": "S02",
+        "strategy": "Single",
+        "repetition": 1,
+        "accepted": false,
+        "elapsed_ms": 94047,
+        "timed_out": false,
+        "completed": false,
+        "initial_revision": 0,
+        "final_revision": 0,
+        "postconditions_passed": false,
+        "tool_failures": 9,
+        "executor_tool_failures": 9,
+        "error": "Assistant response was incomplete or did not report completion; no tools from this response were executed.",
+        "role_errors": []
+      },
+      {
+        "case": "S02",
+        "strategy": "Focused",
+        "repetition": 1,
+        "accepted": false,
+        "elapsed_ms": 64591,
+        "timed_out": false,
+        "completed": false,
+        "initial_revision": 0,
+        "final_revision": 0,
+        "postconditions_passed": false,
+        "tool_failures": 2,
+        "executor_tool_failures": 2,
+        "error": "engineer: Assistant response was incomplete or did not report completion; no tools from this response were executed.\n",
+        "role_errors": [
+          {
+            "id": "engineer",
+            "state": "Failed",
+            "error": "Assistant response was incomplete or did not report completion; no tools from this response were executed."
+          }
+        ]
+      },
+      {
+        "case": "S02",
+        "strategy": "Parallel",
+        "repetition": 1,
+        "accepted": false,
+        "elapsed_ms": 120045,
+        "timed_out": true,
+        "completed": false,
+        "initial_revision": 0,
+        "final_revision": 0,
+        "postconditions_passed": false,
+        "tool_failures": 22,
+        "executor_tool_failures": 21,
+        "error": "",
+        "role_errors": [
+          {
+            "id": "engineer",
+            "state": "Cancelled",
+            "error": "Assistant cancelled; previously applied changes remain in the document."
+          }
+        ]
+      },
+      {
+        "case": "A01",
+        "strategy": "Single",
+        "repetition": 1,
+        "accepted": false,
+        "elapsed_ms": 90338,
+        "timed_out": false,
+        "completed": false,
+        "initial_revision": 1,
+        "final_revision": 1,
+        "postconditions_passed": false,
+        "tool_failures": 9,
+        "executor_tool_failures": 9,
+        "error": "Assistant response was incomplete or did not report completion; no tools from this response were executed.",
+        "role_errors": []
+      },
+      {
+        "case": "A01",
+        "strategy": "Focused",
+        "repetition": 1,
+        "accepted": false,
+        "elapsed_ms": 106413,
+        "timed_out": false,
+        "completed": false,
+        "initial_revision": 1,
+        "final_revision": 1,
+        "postconditions_passed": false,
+        "tool_failures": 13,
+        "executor_tool_failures": 13,
+        "error": "engineer: Assistant response was incomplete or did not report completion; no tools from this response were executed.\n",
+        "role_errors": [
+          {
+            "id": "engineer",
+            "state": "Failed",
+            "error": "Assistant response was incomplete or did not report completion; no tools from this response were executed."
+          }
+        ]
+      },
+      {
+        "case": "A01",
+        "strategy": "Parallel",
+        "repetition": 1,
+        "accepted": false,
+        "elapsed_ms": 47234,
+        "timed_out": false,
+        "completed": false,
+        "initial_revision": 1,
+        "final_revision": 1,
+        "postconditions_passed": false,
+        "tool_failures": 4,
+        "executor_tool_failures": 4,
+        "error": "",
+        "role_errors": [
+          {
+            "id": "engineer",
+            "state": "Interrupted",
+            "error": "Assistant provider HTTP 500 (api_error)"
+          }
+        ]
+      }
+    ],
+    "aggregate": {
+      "type": "benchmark_summary",
+      "strategy_totals": [
+        {
+          "strategy": "Single",
+          "attempt_count": 3,
+          "accepted_count": 0,
+          "failed_attempt_count": 3,
+          "reported_total_tokens": 425427,
+          "reported_responses": 35,
+          "missing_responses": 8,
+          "attempts_without_usage": 0,
+          "provider_ms": 242062,
+          "tool_ms": 10,
+          "request_bytes": 2384485,
+          "median_attempt_ms": 90338,
+          "cost_per_accepted_design": null
+        },
+        {
+          "strategy": "Focused",
+          "attempt_count": 3,
+          "accepted_count": 0,
+          "failed_attempt_count": 3,
+          "reported_total_tokens": 493654,
+          "reported_responses": 38,
+          "missing_responses": 6,
+          "attempts_without_usage": 0,
+          "provider_ms": 237098,
+          "tool_ms": 36,
+          "request_bytes": 2634148,
+          "median_attempt_ms": 75958,
+          "cost_per_accepted_design": null
+        },
+        {
+          "strategy": "Parallel",
+          "attempt_count": 3,
+          "accepted_count": 0,
+          "failed_attempt_count": 3,
+          "reported_total_tokens": 618874,
+          "reported_responses": 50,
+          "missing_responses": 6,
+          "attempts_without_usage": 0,
+          "provider_ms": 224969,
+          "tool_ms": 1,
+          "request_bytes": 3358121,
+          "median_attempt_ms": 66094,
+          "cost_per_accepted_design": null
+        }
+      ],
+      "attempts": null,
+      "attempt_count": 9,
+      "accepted_count": 0,
+      "failed_attempt_count": 9,
+      "live": true,
+      "scope": "Configured provider, synthetic tasks and native postconditions; blind human design evaluation and manufacture remain pending."
+    }
+  },
+  "benchmark_after": {
+    "receipt": "out/verification/008D-comparison-live-q3-16k-none-after-schema.jsonl",
+    "receipt_sha256": "7c0ac8019e75f615ce0e176fa0c67ad72e3cdfc10f0d93e0311c97bd5f4749cd",
+    "attempts": 9,
+    "accepted": 4,
+    "strategies": {
+      "Single": {
+        "attempts": 3,
+        "accepted": 2
+      },
+      "Focused": {
+        "attempts": 3,
+        "accepted": 1
+      },
+      "Parallel": {
+        "attempts": 3,
+        "accepted": 1
+      }
+    },
+    "complete": true,
+    "repetitions": 1,
+    "human_blind_review": "pending",
+    "attempt_results": [
+      {
+        "case": "B01",
+        "strategy": "Single",
+        "repetition": 1,
+        "accepted": true,
+        "elapsed_ms": 19111,
+        "timed_out": false,
+        "completed": true,
+        "initial_revision": 1,
+        "final_revision": 2,
+        "postconditions_passed": true,
+        "tool_failures": 0,
+        "executor_tool_failures": 0,
+        "error": "",
+        "role_errors": []
+      },
+      {
+        "case": "B01",
+        "strategy": "Focused",
+        "repetition": 1,
+        "accepted": true,
+        "elapsed_ms": 22762,
+        "timed_out": false,
+        "completed": true,
+        "initial_revision": 1,
+        "final_revision": 2,
+        "postconditions_passed": true,
+        "tool_failures": 1,
+        "executor_tool_failures": 1,
+        "error": "",
+        "role_errors": []
+      },
+      {
+        "case": "B01",
+        "strategy": "Parallel",
+        "repetition": 1,
+        "accepted": false,
+        "elapsed_ms": 119815,
+        "timed_out": false,
+        "completed": false,
+        "initial_revision": 1,
+        "final_revision": 1,
+        "postconditions_passed": false,
+        "tool_failures": 16,
+        "executor_tool_failures": 16,
+        "error": "",
+        "role_errors": [
+          {
+            "id": "engineer",
+            "state": "Interrupted",
+            "error": "Assistant provider HTTP 400 (invalid_request_error)"
+          }
+        ]
+      },
+      {
+        "case": "S02",
+        "strategy": "Single",
+        "repetition": 1,
+        "accepted": false,
+        "elapsed_ms": 87482,
+        "timed_out": false,
+        "completed": false,
+        "initial_revision": 0,
+        "final_revision": 0,
+        "postconditions_passed": false,
+        "tool_failures": 24,
+        "executor_tool_failures": 24,
+        "error": "Assistant response was incomplete or did not report completion; no tools from this response were executed.",
+        "role_errors": []
+      },
+      {
+        "case": "S02",
+        "strategy": "Focused",
+        "repetition": 1,
+        "accepted": false,
+        "elapsed_ms": 58071,
+        "timed_out": false,
+        "completed": false,
+        "initial_revision": 0,
+        "final_revision": 0,
+        "postconditions_passed": false,
+        "tool_failures": 6,
+        "executor_tool_failures": 6,
+        "error": "engineer: Assistant response was incomplete or did not report completion; no tools from this response were executed.\n",
+        "role_errors": [
+          {
+            "id": "engineer",
+            "state": "Failed",
+            "error": "Assistant response was incomplete or did not report completion; no tools from this response were executed."
+          }
+        ]
+      },
+      {
+        "case": "S02",
+        "strategy": "Parallel",
+        "repetition": 1,
+        "accepted": false,
+        "elapsed_ms": 82951,
+        "timed_out": false,
+        "completed": false,
+        "initial_revision": 0,
+        "final_revision": 0,
+        "postconditions_passed": false,
+        "tool_failures": 10,
+        "executor_tool_failures": 10,
+        "error": "engineer: Assistant response was incomplete or did not report completion; no tools from this response were executed.\n",
+        "role_errors": [
+          {
+            "id": "engineer",
+            "state": "Failed",
+            "error": "Assistant response was incomplete or did not report completion; no tools from this response were executed."
+          }
+        ]
+      },
+      {
+        "case": "A01",
+        "strategy": "Single",
+        "repetition": 1,
+        "accepted": true,
+        "elapsed_ms": 22931,
+        "timed_out": false,
+        "completed": true,
+        "initial_revision": 1,
+        "final_revision": 2,
+        "postconditions_passed": true,
+        "tool_failures": 3,
+        "executor_tool_failures": 3,
+        "error": "",
+        "role_errors": []
+      },
+      {
+        "case": "A01",
+        "strategy": "Focused",
+        "repetition": 1,
+        "accepted": false,
+        "elapsed_ms": 94071,
+        "timed_out": false,
+        "completed": false,
+        "initial_revision": 1,
+        "final_revision": 1,
+        "postconditions_passed": false,
+        "tool_failures": 12,
+        "executor_tool_failures": 12,
+        "error": "engineer: Assistant response was incomplete or did not report completion; no tools from this response were executed.\n",
+        "role_errors": [
+          {
+            "id": "engineer",
+            "state": "Failed",
+            "error": "Assistant response was incomplete or did not report completion; no tools from this response were executed."
+          }
+        ]
+      },
+      {
+        "case": "A01",
+        "strategy": "Parallel",
+        "repetition": 1,
+        "accepted": true,
+        "elapsed_ms": 50399,
+        "timed_out": false,
+        "completed": true,
+        "initial_revision": 1,
+        "final_revision": 2,
+        "postconditions_passed": true,
+        "tool_failures": 0,
+        "executor_tool_failures": 0,
+        "error": "",
+        "role_errors": []
+      }
+    ],
+    "aggregate": {
+      "type": "benchmark_summary",
+      "strategy_totals": [
+        {
+          "strategy": "Single",
+          "attempt_count": 3,
+          "accepted_count": 2,
+          "failed_attempt_count": 1,
+          "reported_total_tokens": 481472,
+          "reported_responses": 42,
+          "missing_responses": 0,
+          "attempts_without_usage": 0,
+          "provider_ms": 129418,
+          "tool_ms": 40,
+          "request_bytes": 2195237,
+          "median_attempt_ms": 22931,
+          "cost_per_accepted_design": null
+        },
+        {
+          "strategy": "Focused",
+          "attempt_count": 3,
+          "accepted_count": 1,
+          "failed_attempt_count": 2,
+          "reported_total_tokens": 391386,
+          "reported_responses": 32,
+          "missing_responses": 2,
+          "attempts_without_usage": 0,
+          "provider_ms": 171495,
+          "tool_ms": 64,
+          "request_bytes": 1767557,
+          "median_attempt_ms": 58071,
+          "cost_per_accepted_design": null
+        },
+        {
+          "strategy": "Parallel",
+          "attempt_count": 3,
+          "accepted_count": 1,
+          "failed_attempt_count": 2,
+          "reported_total_tokens": 536739,
+          "reported_responses": 42,
+          "missing_responses": 1,
+          "attempts_without_usage": 0,
+          "provider_ms": 252913,
+          "tool_ms": 176,
+          "request_bytes": 2394492,
+          "median_attempt_ms": 82951,
+          "cost_per_accepted_design": null
+        }
+      ],
+      "attempts": null,
+      "attempt_count": 9,
+      "accepted_count": 4,
+      "failed_attempt_count": 5,
+      "live": true,
+      "scope": "Configured provider, synthetic tasks and native postconditions; blind human design evaluation and manufacture remain pending."
+    }
+  },
+  "benchmark_comparison": {
+    "matched_fields": [
+      "case",
+      "case_version",
+      "strategy",
+      "repetition",
+      "model",
+      "provider",
+      "reasoning_effort",
+      "configured_protocol",
+      "brief",
+      "baseline_commands",
+      "criteria",
+      "deadline_seconds"
+    ],
+    "same_inputs_and_criteria": true,
+    "milestone_D01": "Parcial",
+    "scope": "One repetition of three synthetic briefs; not the complete 30-brief corpus or blind human review. No causal attribution or general cost/design-quality claim.",
+    "team_delegation_observed": false
+  }
+}

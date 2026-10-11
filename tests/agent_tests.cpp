@@ -10,10 +10,73 @@ int failures=0,checks=0;
 V json(const char* s){V v;CHECK(arkjson::parse(s,v));return v;}
 bool failed(const V& v){return v.find("isError")->b;}
 #include "object_context_tests.inl"
+// Contract audit against the advertised JSON-schema subset, not a permissive
+// proxy for backend dispatch. The examples must name advertised typed fields.
+bool schemaAccepts(const V& schema,const V& value){
+    auto typeMatches=[&](const std::string& type){return type=="null"?value.t==V::Null:type=="boolean"?value.t==V::Bool:type=="string"?value.t==V::Str:type=="array"?value.t==V::Arr:type=="object"?value.t==V::Obj:type=="number"?value.t==V::Num:type=="integer"?value.t==V::Num&&value.num==std::floor(value.num):false;};
+    if(const auto* type=schema.find("type")){bool match=type->t==V::Str?typeMatches(type->str):false;if(type->t==V::Arr)for(const auto& item:type->arr)match|=typeMatches(item.str);if(!match)return false;}
+    if(const auto* choices=schema.find("oneOf")){int n=0;for(const auto& option:choices->arr)n+=schemaAccepts(option,value);if(n!=1)return false;}
+    if(const auto* choices=schema.find("anyOf")){bool match=false;for(const auto& option:choices->arr)match|=schemaAccepts(option,value);if(!match)return false;}
+    if(const auto* choices=schema.find("enum")){bool match=false;for(const auto& option:choices->arr)match|=option.dump()==value.dump();if(!match)return false;}
+    if(value.t==V::Num){if(const auto* n=schema.find("minimum");n&&value.num<n->num)return false;if(const auto* n=schema.find("maximum");n&&value.num>n->num)return false;}
+    if(value.t==V::Str){if(const auto* n=schema.find("minLength");n&&value.str.size()<n->num)return false;if(const auto* n=schema.find("maxLength");n&&value.str.size()>n->num)return false;}
+    if(value.t==V::Arr){if(const auto* n=schema.find("minItems");n&&value.arr.size()<n->num)return false;if(const auto* n=schema.find("maxItems");n&&value.arr.size()>n->num)return false;if(const auto* items=schema.find("items"))for(const auto& item:value.arr)if(!schemaAccepts(*items,item))return false;}
+    if(value.t==V::Obj){
+        if(const auto* required=schema.find("required"))for(const auto& key:required->arr)if(!value.find(key.str.c_str()))return false;
+        const auto* props=schema.find("properties");const auto* extra=schema.find("additionalProperties");
+        for(const auto& item:value.obj){const auto* definition=props?props->find(item.first.c_str()):nullptr;if(definition){if(!schemaAccepts(*definition,item.second))return false;}else if(extra){if(extra->t==V::Bool&&!extra->b)return false;if(extra->t==V::Obj&&!schemaAccepts(*extra,item.second))return false;}}
+    }return true;
+}
+void testDocApplyDiscoveryContract(){
+    V advertised;
+    for(const auto& tool:AgentSession::tools().arr)if(tool.find("name")->str=="doc_apply")advertised=*tool.find("inputSchema");
+    CHECK(advertised.t==V::Obj);if(advertised.t!=V::Obj)return;
+    const auto& command=*advertised.find("properties")->find("commands")->find("items");const auto& props=*command.find("properties");
+    for(const char* key:{"id","p","type","name","inputs","expr","sketch","plane","parent","feature","a","b","value","reference_a","reference_b","driver","mate","mode","delta"})CHECK(props.find(key));
+    CHECK(command.find("additionalProperties")&&command.find("additionalProperties")->b);
+    const auto* examples=command.find("examples");CHECK(examples&&examples->arr.size()>=6);
+    if(examples)for(const auto& example:examples->arr){for(const auto& item:example.obj)CHECK(props.find(item.first.c_str()));CHECK(schemaAccepts(command,example));}
+    CHECK(!schemaAccepts(command,json(R"({"op":"feature.edit","id":{"feature":1},"p":{"dx":10}})")));
+    CHECK(!schemaAccepts(command,json(R"({"op":"feature.edit","id":1,"p":[10]})")));
+    CHECK(!schemaAccepts(command,json(R"({"op":"feature.add","type":"box","inputs":[{}]})")));
+    AgentSession session;
+    auto batch=json(R"({"expected_revision":0,"commands":[{"op":"param.set","name":"width","expr":20},{"op":"feature.add","type":"box","name":"Base","p":{"dx":"width","dy":30,"dz":10}},{"op":"feature.edit","id":"Base","p":{"dx":25}},{"op":"sketch.set","name":"Profile","sketch":{"plane":"XY","entities":[{"kind":"circle","name":"Ring","dof":[0,0,10]}]}},{"op":"assembly.add","name":"Placed base","feature":"Base","parent":0,"p":{"tx":10}}]})");
+    CHECK(schemaAccepts(advertised,batch));CHECK(!failed(session.call("doc_apply",batch)));CHECK(session.document.features.size()==1&&session.document.features[0].p.at("dx")=="25"&&session.document.assembly.size()==1);
+    const auto baseline=documentToJson(session.document);auto missing=session.call("doc_apply",json(R"({"expected_revision":1,"commands":[{"op":"feature.edit","entity":{"feature":1},"p":{"dx":90}}]})"));CHECK(failed(missing)&&missing.dump().find("Missing field: id")!=std::string::npos&&documentToJson(session.document)==baseline);
+    auto preview=session.call("doc_preview",json(R"({"expected_revision":1,"commands":[{"op":"feature.edit","id":1,"p":{"dx":30}}]})"));CHECK(!failed(preview));
+    if(!failed(preview)){auto apply=*preview.find("structuredContent")->find("apply");CHECK(schemaAccepts(advertised,apply));CHECK(!failed(session.call("doc_apply",apply))&&session.revision==2&&session.document.features[0].p.at("dx")=="30");}
+#ifdef ARK_TEST_WITH_OCCT
+    // Execute the advertised native add/edit examples themselves. Merely
+    // accepting an unused p.dx key would not prove a native box was edited.
+    V nativeAdd,nativeEdit;
+    if(examples)for(const auto& example:examples->arr){
+        if(example.find("type")&&example.find("type")->str=="native_solid"&&example.find("native")&&example.find("native")->find("op")->str=="box")nativeAdd=example;
+        if(example.find("op")->str=="feature.edit"&&example.find("id")&&example.find("id")->str=="Native block")nativeEdit=example;
+    }
+    CHECK(nativeAdd.t==V::Obj&&nativeEdit.t==V::Obj);
+    if(nativeAdd.t==V::Obj&&nativeEdit.t==V::Obj){
+        const auto& initial=*nativeAdd.find("p");const auto& edited=*nativeEdit.find("p");
+        CHECK(initial.find("width")&&initial.find("depth")&&initial.find("height")&&!initial.find("dx")&&edited.find("height")&&!edited.find("dx"));
+        AgentSession native;V args=V::makeObj(),commands=V::makeArr();commands.arr.push_back(nativeAdd);args.set("commands",commands);args.set("expected_revision",V::makeNum(0));CHECK(schemaAccepts(advertised,args));auto created=native.call("doc_apply",args);CHECK(!failed(created));
+        if(failed(created))return;
+        const auto* createdIds=created.find("structuredContent")->find("created_ids");CHECK(createdIds&&createdIds->t==V::Arr&&createdIds->arr.size()==1);if(!createdIds||createdIds->t!=V::Arr||createdIds->arr.size()!=1)return;
+        V inspect=V::makeObj();inspect.set("id",createdIds->arr.front());auto before=native.call("native_inspect",inspect);CHECK(!failed(before));
+        commands.arr[0]=nativeEdit;args.set("commands",commands);args.set("expected_revision",V::makeNum(1));CHECK(schemaAccepts(advertised,args));auto changed=native.call("doc_apply",args);CHECK(!failed(changed));auto after=native.call("native_inspect",inspect);CHECK(!failed(after));
+        if(!failed(before)&&!failed(after)){
+            const auto* first=before.find("structuredContent")->find("report");const auto* second=after.find("structuredContent")->find("report");CHECK(first&&second&&first->find("volume_mm3")&&second->find("volume_mm3"));
+            if(first&&second&&first->find("volume_mm3")&&second->find("volume_mm3")){
+                const auto initialVolume=initial.find("width")->num*initial.find("depth")->num*initial.find("height")->num;const auto editedVolume=initial.find("width")->num*initial.find("depth")->num*edited.find("height")->num;
+                CHECK(std::fabs(first->find("volume_mm3")->num-initialVolume)<1e-8&&std::fabs(second->find("volume_mm3")->num-editedVolume)<1e-8&&std::fabs(initialVolume-editedVolume)>1);
+            }
+        }
+    }
+#endif
+}
 int main(){
     cpu_detect();
     testObjectContext();
     benchmarkObjectContext();
+    testDocApplyDiscoveryContract();
     // Detect the old f64/f32 reinterpretation bug on arrays entering the batch path.
     std::vector<Vec3> in(128),out(128);Mat4 m=Mat4::translation({1000000.125,-12.3,8})*Mat4::rotZ(.73);
     for(size_t i=0;i<in.size();++i)in[i]={(double)i/7.,(double)i/11.,(double)i/13.};
@@ -208,6 +271,6 @@ int main(){
         auto inspect=dense.call("native_inspect",json(R"({"id":1})"));
         CHECK(failed(inspect)&&inspect.find("structuredContent")->find("error")->str.find("Density must be a positive finite number of grams per cubic centimetre")!=std::string::npos);
     }
-    CHECK(AgentSession::tools().arr.size()==67);
+    CHECK(AgentSession::tools().arr.size()==70);
     std::cout<<checks<<" checks / "<<failures<<" failures\n";return failures?1:0;
 }

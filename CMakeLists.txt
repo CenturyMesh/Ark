@@ -24,6 +24,8 @@ add_library(ark STATIC
   src/component_library.cpp
   src/component_library_tools.cpp
   src/agent_transactions.cpp
+  src/agent_failures.cpp
+  src/agent_benchmark.cpp
   src/physics.cpp
   src/core.cpp src/nurbs.cpp src/brep.cpp src/mesh.cpp src/csg.cpp
   src/model.cpp src/evaluate.cpp src/native_features.cpp src/frame.cpp src/electronics.cpp src/usage.cpp src/stock_preview.cpp src/suspension.cpp src/chatgpt_auth.cpp src/sheet_commands.cpp src/sheet_preview.cpp src/references.cpp src/datum.cpp src/solver.cpp src/sketch.cpp src/prism_cut.cpp src/onboarding.cpp src/live_session.cpp src/assistant.cpp src/io.cpp src/serialize.cpp
@@ -38,6 +40,12 @@ else()
 endif()
 add_executable(ark-cli src/app/cli.cpp)
 add_executable(ark-mcp src/app/mcp_server.cpp)
+add_executable(ark-benchmark src/app/benchmark.cpp)
+target_link_libraries(ark-benchmark PRIVATE ark)
+add_custom_command(TARGET ark-benchmark POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:ark-benchmark>/benchmarks" "$<TARGET_FILE_DIR:ark-benchmark>/examples"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/benchmarks/agent_briefs_v1.json" "${CMAKE_SOURCE_DIR}/benchmarks/offline.json" "${CMAKE_SOURCE_DIR}/benchmarks/ollama-qwen-q3.json" "${CMAKE_SOURCE_DIR}/benchmarks/ollama-qwen-27b.json" "$<TARGET_FILE_DIR:ark-benchmark>/benchmarks"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/examples/pneumatic-cylinder.arkops" "$<TARGET_FILE_DIR:ark-benchmark>/examples")
 add_executable(ark-tests tests/tests.cpp)
 add_executable(ark-agent-tests tests/agent_tests.cpp)
 add_executable(ark-mesh-model-tests tests/mesh_model_tests.cpp)
@@ -101,6 +109,8 @@ set_tests_properties(kernel agent mesh-model PROPERTIES TIMEOUT 60)
 
 option(ARK_WITH_OCCT "Build the isolated C++ OCCT 8 native modeling worker" ON)
 if(ARK_WITH_OCCT)
+  target_compile_definitions(ark-agent-tests PRIVATE ARK_TEST_WITH_OCCT=1)
+  add_dependencies(ark-agent-tests ark-occt-worker)
   find_package(OpenCASCADE REQUIRED)
   add_executable(ark-surface-edit-tests tests/surface_edit_tests.cpp)
   target_link_libraries(ark-surface-edit-tests PRIVATE ark)
@@ -349,12 +359,33 @@ if(ARK_WITH_OCCT)
   add_dependencies(ark-tube-end-fit-tests ark-occt-worker)
   add_test(NAME tube-end-fit COMMAND ark-tube-end-fit-tests)
   set_tests_properties(tube-end-fit PROPERTIES TIMEOUT 120)
+  add_executable(ark-failure-replay-tests tests/failure_replay_tests.cpp)
+  target_link_libraries(ark-failure-replay-tests PRIVATE ark)
+  add_dependencies(ark-failure-replay-tests ark-occt-worker)
+  add_test(NAME failure-replay COMMAND ark-failure-replay-tests)
+  set_tests_properties(failure-replay PROPERTIES TIMEOUT 120)
+  add_executable(ark-agent-benchmark-tests tests/agent_benchmark_tests.cpp)
+  target_link_libraries(ark-agent-benchmark-tests PRIVATE ark)
+  target_compile_definitions(ark-agent-benchmark-tests PRIVATE ARK_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+  add_dependencies(ark-agent-benchmark-tests ark-occt-worker)
+  add_dependencies(ark-benchmark ark-occt-worker)
+  add_test(NAME agent-benchmark COMMAND ark-agent-benchmark-tests)
+  set_tests_properties(agent-benchmark PROPERTIES TIMEOUT 180)
 endif()
 
 add_executable(ark-mechanical-motion-tests tests/mechanical_motion_tests.cpp)
 target_link_libraries(ark-mechanical-motion-tests PRIVATE ark)
 add_test(NAME mechanical-motion COMMAND ark-mechanical-motion-tests)
 set_tests_properties(mechanical-motion PROPERTIES TIMEOUT 60)
+add_executable(ark-assembly-mechanism-tests tests/assembly_mechanism_tests.cpp)
+target_link_libraries(ark-assembly-mechanism-tests PRIVATE ark)
+target_compile_definitions(ark-assembly-mechanism-tests PRIVATE ARK_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+add_test(NAME assembly-mechanisms COMMAND ark-assembly-mechanism-tests)
+set_tests_properties(assembly-mechanisms PROPERTIES TIMEOUT 120)
+if(ARK_WITH_OCCT)
+  add_dependencies(ark-assembly-mechanism-tests ark-occt-worker)
+  target_compile_definitions(ark-assembly-mechanism-tests PRIVATE ARK_MECHANISM_NATIVE_TESTS=1)
+endif()
 add_executable(ark-assembly-joint-limits-tests tests/assembly_joint_limits_tests.cpp)
 target_link_libraries(ark-assembly-joint-limits-tests PRIVATE ark)
 add_test(NAME assembly-joint-limits COMMAND ark-assembly-joint-limits-tests)

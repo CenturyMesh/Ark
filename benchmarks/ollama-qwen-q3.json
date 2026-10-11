@@ -1,0 +1,14 @@
+{
+  "assistant": {
+    "provider": "ollama",
+    "model": "hf.co/unsloth/Qwen3.8-27B-GGUF:UD-Q3_K_XL",
+    "protocol": "chat_completions",
+    "endpoint": "http://127.0.0.1:11434/v1/chat/completions",
+    "api_key_env": "",
+    "reasoning_effort": "",
+    "timeout_seconds": 90
+  },
+  "repetitions": 3,
+  "deadline_seconds": 120,
+  "strategies": ["Single", "Focused", "Parallel"]
+}

@@ -1,0 +1,14 @@
+{
+  "assistant": {
+    "provider": "offline",
+    "model": "deterministic-native-reference-v1",
+    "protocol": "responses",
+    "endpoint": "http://127.0.0.1:11434/v1/responses",
+    "api_key_env": "",
+    "reasoning_effort": "",
+    "timeout_seconds": 60
+  },
+  "repetitions": 3,
+  "deadline_seconds": 120,
+  "strategies": ["Single", "Focused", "Parallel"]
+}

@@ -7,7 +7,7 @@ require their own evidence.
 
 `agent_onboard{topic:"assembly"}` describes joint authoring and direct movement;
 `topic:"motion"` retains transmission couplings. The compact overview dispatches
-these guides only when needed. The API has 67 tools, including read-only
+these guides only when needed. The API has 70 tools, including read-only
 `object_context` for selected components and their neighbouring joints.
 
 Ground the support instance with `assembly.edit{id,fixed:true}`. A `revolute`
@@ -84,11 +84,54 @@ requires it. `doc_preview` can evaluate and cache this command; applying its
 are ordinary parent-local assembly placements. Reload and undo/redo preserve
 them. Select the wheel axle mate explicitly to spin only the wheel.
 
-The solver moves the connected side of the selected joint as a rigid motion,
-retaining internal passive coordinates and rechecking all retained mates.
-Ambiguous joints, closed loops, grounded moving sides, unsupported coupling
-boundaries and unsatisfied constraints reject atomically. There is no independent
-visual pose accepted as model authority.
+For a bridge joint, the solver moves the connected side as one exact rigid
+motion, retaining internal passive coordinates. In **008D**, a grounded closed
+loop or a transmission boundary instead uses constrained continuation from the
+resolved pose: the selected signed coordinate is driven and all retained
+geometric and active mechanical constraints are solved together. Passive links
+can rotate and sliders can travel as required to close the loop. Grounded
+carriers stay exactly at their committed transforms.
+
+The verified domain includes planar four-bar linkages and a slider-crank with
+revolute and prismatic joints, driven from either its crank or slider. A rigid
+link can be one subassembly containing its visible body and explicitly authored
+joint-pin instances; cross-parent mates retain that carrier's rigid pin spacing.
+The pins' local `origin` names are authored attachment datums, not guessed mesh
+points. A grounded carrier can contain a fixed chassis plus its declared pins.
+
+Gear, chain and shaft ratios participate in the same drag preview and commit,
+including reverse input from the driven rotational joint. Rack/pinion converts
+angular radians to signed millimetres through its declared pitch radius and can
+also be driven from its prismatic follower. Ratios act on the **relative movement
+from the current pose**; a gear/chain phase offset is not reapplied on every drag.
+A harmonic cam follower uses the measured grounded revolute input coordinate
+plus its declared phase, so consecutive commits and reload preserve its phase.
+This cam integration requires that explicit grounded input joint.
+
+`drive.solver` distinguishes `rigid_side` and `constrained_continuation`.
+`drive.continuation_steps` reports accepted small steps and
+`drive.coupling_residuals` reports the measured final-step angular/linear
+transmission equations. The geometric diagnostics continue to report every mate;
+their rank and DOFs describe the resolved baseline, with stop inequalities
+excluded. The continuation retains the previous pose as its deterministic local
+branch and checks constraints and limits at every accepted step. A singular
+branch, a passive rotation jump, an impossible coordinate, patterns, ambiguous
+joints or an exhausted bounded numerical domain rejects the whole preview or
+commit. Existing tolerances are unchanged. General spatial mechanisms, contact,
+tooth/chain geometry, collision, force and dynamics are not qualified by these
+planar and ideal transmission tests.
+
+The synthetic [four-bar suspension](../examples/fourbar-suspension.arkops)
+authors four exact component definitions, three moving rigid carriers, a fixed
+chassis and four revolute joints. Replay its envelope in an empty document and
+drag **Lower arm** or **Upper arm**. Its arm stops are -35 to 70 degrees and its
+100 mm upright follows the closed linkage while retaining its pin spacing.
+For an API preview use `driver:"Lower arm",mate:1,mode:"rotate",delta:20`.
+Select the desired grounded arm joint explicitly when dragging the upright,
+which is adjacent to two equally near drive choices. This is an editable concept
+and an ideal kinematic example, without suspension force/contact or manufacturing
+qualification. No new document schema is needed for continuation: persisted
+placements, existing mates and their limits remain the authority.
 
 In **007B**, Studio also starts joint movement by directly dragging a body in
 normal body-selection mode. A click or small pointer motion remains selection;

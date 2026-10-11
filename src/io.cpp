@@ -3,6 +3,7 @@
 #include "ark/io.hpp"
 #include "ark/mesh_model.hpp"
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
@@ -231,11 +232,7 @@ Mesh importMeshPath(const std::string& path) {
 
 static void png_chunk(std::ostream& o,const char* type,const std::vector<u8>& data){
     auto be32=[](u32 v){ std::vector<u8> b{(u8)(v>>24),(u8)(v>>16),(u8)(v>>8),(u8)v}; return b; };
-    static u32 crcTable[256]; static bool crcInit=false;
-    if(!crcInit){
-        for(u32 n=0;n<256;++n){ u32 c=n; for(int k=0;k<8;++k) c=c&1?0xEDB88320u^(c>>1):c>>1; crcTable[n]=c; }
-        crcInit=true;
-    }
+    static const auto crcTable=[]{std::array<u32,256> table{};for(u32 n=0;n<256;++n){u32 c=n;for(int k=0;k<8;++k)c=c&1?0xEDB88320u^(c>>1):c>>1;table[n]=c;}return table;}();
     auto crc32=[&](const u8* d,size_t n_){
         u32 c=0xFFFFFFFFu;
         for(size_t i=0;i<n_;++i) c=crcTable[(c^d[i])&0xFF]^(c>>8);
@@ -251,9 +248,8 @@ static void png_chunk(std::ostream& o,const char* type,const std::vector<u8>& da
     o.write((char*)crcb.data(),4);
 }
 
-bool writePNG(const char* path,const Image& img){
-    std::ofstream f(path,std::ios::binary);
-    if(!f) return false;
+static bool encodePngStream(std::ostream& f,const Image& img){
+    if(img.w<=0||img.h<=0||img.w>8192||img.h>8192||img.px.size()!=(size_t)img.w*img.h*3)return false;
     static const u8 sig[8]={137,80,78,71,13,10,26,10};
     f.write((char*)sig,8);
 
@@ -293,8 +289,10 @@ bool writePNG(const char* path,const Image& img){
     idat.push_back((u8)(ad>>24));idat.push_back((u8)(ad>>16));idat.push_back((u8)(ad>>8));idat.push_back(ad&255);
     png_chunk(f,"IDAT",idat);
     png_chunk(f,"IEND",{});
-    return true;
+    return bool(f);
 }
+std::vector<u8> encodePNG(const Image& img){std::ostringstream stream(std::ios::binary|std::ios::out);if(!encodePngStream(stream,img))throw std::runtime_error("Invalid PNG RGB image");const auto bytes=stream.str();return {bytes.begin(),bytes.end()};}
+bool writePNG(const char* path,const Image& img){std::ofstream stream(std::filesystem::u8path(path),std::ios::binary);return stream&&encodePngStream(stream,img);}
 
 // ---------------------------------------------------------------------------
 // Software snapshot renderer ------------------------------------------------------

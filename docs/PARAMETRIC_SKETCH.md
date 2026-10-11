@@ -257,3 +257,74 @@ keeping each returned row identical to the full inventory. Unknown or
 ambiguous IDs and unknown sections reject. Omitting selectors retains the
 full inventory contract. Smaller response bytes alone are not evidence of
 lower design cost or higher design quality (D.01 remains a separate benchmark).
+# Interactive viewport authoring (008D)
+
+Milestones **B.01**, **B.02**, **D.04**: the Sketch ribbon retains its coordinate
+forms and adds **Draw sketch**. Choose a name, construction plane and line,
+polyline, rectangle, circle or three-point arc. Left clicks author anchors only
+inside this explicit mode; middle-button orbit, Shift+middle pan and the wheel
+remain camera controls. A rectangle is one closed native wire, a circle remains
+analytic, and an arc retains its three authored points.
+
+The cyan outline, translucent region and pulsing anchor are unsaved previews.
+They update from pointer coordinates or actual queued agent sketch commands;
+the pulse is an affordance, not a construction-progress estimate. Agent drafts
+remain dashed and labelled uncommitted. The viewport never publishes a partial
+OCCT solid or invents intermediate provider steps.
+
+Endpoint, line midpoint, circle/arc center, draft-anchor and adaptive grid placement
+use an acquisition radius of 11 screen pixels; horizontal/vertical alignment
+uses 8 pixels. Named line and wire endpoints and circle centers can create the
+native supported coincident constraint when a line is placed; exact horizontal
+and vertical lines can create their corresponding native constraints. Midpoint,
+grid and sampled analytic endpoints are labelled placements: they do not claim
+an unsupported associative midpoint/grid constraint. Expressions driving a
+dimension take precedence over these inferred constraints.
+
+Grid snapping follows the visible grid toggle and its current adaptive spacing;
+the drafting toolbar exposes that toggle. The same spacing is applied in the
+selected sketch plane, with acquisition still measured in pixels.
+
+Click **Dimensions** in the Sketch ribbon, or press **Tab**, to enter a positive length expression
+such as `width/2`. Rectangle width/height, circle radius and line/polyline length
+retain the authored expressions. Three-point arcs remain driven by coordinates;
+
+During interactive drawing, tool choices and the dimension editor stay in the
+ribbon, outside the drawing surface. The compact viewport readout is passive;
+clicking an authored point beneath it cannot switch the active drawing tool.
+their recipe can be edited with Edit curve. A click commits one entity and its
+supported constraints in one revision-checked `sketch.set`. A polyline saves one
+line per successive click and **Enter** ends the chain. **Esc** cancels the
+current unsaved preview; right click removes its last unsaved anchor. Undo/redo
+use the existing document history. A revision/epoch change makes a pending draft
+stale and blocks publication until it is restarted explicitly.
+
+The sketch inspector displays constraints, source entities, expression values
+and conflict/redundancy evidence at ordinary window sizes. **Source parameters**
+edits only named parameters referenced by the selected sketch or feature's
+parameter fields, supported numeric expressions in its native program and
+driving history, including dependencies between named parameters. Semantic
+feature names/references do not become numeric parameter bindings. The dialog labels the source binding and
+submits one atomic parameter batch; it does not infer dimensions from a mesh.
+An object without named bindings asks the user to author those bindings first.
+
+Select a saved line, circle or four-edge closed wire to display its measured
+length, radius or X/Y spans in the viewport. Clicking the label opens the actual
+source parameter, native dimension constraint or authored coordinate editor.
+An unbound axis-aligned rectangle can edit its width/height while retaining its
+starting corner and direction. Spans of other four-edge wires remain labelled
+measurements; ARK does not invent a driving rectangle constraint for them.
+
+`snapshot{view:"viewport",expected_revision?}` returns actual PNG pixels from
+the current Studio viewport, limited to 1024 by 640 pixels. Its `visual_evidence`
+records the captured revision, camera, display state, draft presence and selected
+feature/occurrence/copy/reference. Sidebar and ribbon margins are excluded;
+overlays inside the viewport remain visible. A candidate receipt remains a
+backend candidate snapshot; it is never replaced by the live viewport.
+
+Verification entry point: `ark-studio --self-test-sketch-drawing-ui --shot PATH`.
+The isolated offline fixture dispatches Win32 mouse/keyboard events, saves ghost
+and committed captures, and checks expressions, analytic recipes, constraints,
+Esc, undo/redo, stale rejection, source-parameter recomputation and real PNG image
+content with unchanged document revision. This is local UI evidence, not a
+manufacturing qualification or a provider-quality/cost benchmark.

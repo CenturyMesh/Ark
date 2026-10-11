@@ -25,6 +25,20 @@ $staging = Assert-ArkChildPath $OutputDirectory (Join-Path $OutputDirectory ('pa
 [IO.Directory]::CreateDirectory($staging) | Out-Null
 try {
     foreach ($name in @('ark-studio.exe', 'ark-cli.exe', 'ark-mcp.exe', 'ark-occt-worker.exe', 'app-version.json')) { Copy-Item -LiteralPath (Join-Path $RuntimeDirectory $name) -Destination $staging }
+    if (Test-Path -LiteralPath (Join-Path $RuntimeDirectory 'ark-benchmark.exe')) {
+        Copy-Item -LiteralPath (Join-Path $RuntimeDirectory 'ark-benchmark.exe') -Destination $staging
+        $benchmarkResources = Join-Path $staging 'benchmarks'
+        $syntheticExamples = Join-Path $staging 'examples'
+        [IO.Directory]::CreateDirectory($benchmarkResources) | Out-Null
+        [IO.Directory]::CreateDirectory($syntheticExamples) | Out-Null
+        foreach ($name in @('agent_briefs_v1.json','offline.json','ollama-qwen-q3.json','ollama-qwen-27b.json')) {
+            Copy-Item -LiteralPath (Join-Path $repository "benchmarks/$name") -Destination $benchmarkResources
+        }
+        foreach ($name in @('pneumatic-cylinder.arkops','fourbar-suspension.arkops')) {
+            Copy-Item -LiteralPath (Join-Path $repository "examples/$name") -Destination $syntheticExamples
+        }
+        Copy-Item -LiteralPath (Join-Path $repository 'docs/AGENT_BENCHMARK.md') -Destination (Join-Path $staging 'AGENT_BENCHMARK.md')
+    }
     Get-ChildItem -LiteralPath $RuntimeDirectory -Filter '*.dll' -File | ForEach-Object { Assert-ArkNoReparsePoint $RuntimeDirectory $_.FullName; Copy-Item -LiteralPath $_.FullName -Destination $staging }
     foreach ($name in @('vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll', 'concrt140.dll')) {
         if (-not (Test-Path -LiteralPath (Join-Path $MsvcRuntimeDirectory $name))) { throw "Visual C++ runtime is missing $name." }

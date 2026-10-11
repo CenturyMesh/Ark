@@ -72,11 +72,13 @@ struct AssemblyMotionProgram {
 };
 bool buildAssemblyMotion(const Document&,AssemblyMotionProgram&,std::string& error);
 arkjson::Value inspectAssemblyMotion(const AssemblyMotionProgram&,u64 driver,double speedRpm,double timeSeconds,double angleDegrees=0);
-// A manipulation is an exact rigid motion of one side of a grounded joint.
-// Internal passive joints retain their baseline coordinates. Closed loops,
-// ambiguous drives and coupling boundaries reject rather than approximate.
+// Bridge joints retain passive coordinates through an exact rigid motion.
+// Closed loops and transmissions use constrained continuation from the resolved
+// pose, retaining every constraint and the selected joint coordinate.
 struct AssemblyManipulationJoint {
     u64 mate=0;
+    u64 movingEndpoint=0; // Endpoint used for nearest-joint selection.
+    bool constrained=false;
     std::string type,mode; // rotate: degrees; translate: millimetres
     Vec3 origin,axis; // world baseline pivot and oriented unit axis
     std::vector<u64> movingNodes;
@@ -98,6 +100,8 @@ struct AssemblyManipulationPreview {
     arkjson::Value commands; // assembly.edit pose recipe; caller must revision-check
     AssemblyManipulationJoint joint;
     double delta=0;
+    int continuationSteps=0;
+    arkjson::Value couplings; // Measured incremental relation residuals.
 };
 bool buildAssemblyManipulation(const Document&,AssemblyManipulationProgram&,std::string& error);
 bool selectAssemblyManipulationJoint(const AssemblyManipulationProgram&,u64 driver,u64 mate,

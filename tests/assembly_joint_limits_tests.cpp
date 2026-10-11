@@ -111,7 +111,7 @@ void testValidationAndUnsupportedLoops(){
     auto opposed=session.document;opposed.assembly[1].p["rz"]="180";opposed.assembly[1].p["tx"]="35";opposed.assembly[2].p["tx"]="35";auto p=program(opposed);
     close(pose(p.baseline,2).m[12],35,"full-orientation solve retains authored free axial translation");check(pose(p.baseline,2).transformDir({1,0,0}).approx(pose(p.baseline,1).transformDir({1,0,0}),1e-8),"prismatic corrects a 180-degree twist pole instead of accepting axial spin");
     AssemblyMate loop;loop.id=3;loop.a=3;loop.b=1;loop.type="revolute";session.document.mates.push_back(loop);session.document.nextMateId_=4;
-    rejected(session,driveArgs(session,"Rod","translate",5),"MANIPULATION_NO_GROUNDED_JOINT");
+    rejected(session,driveArgs(session,"Rod","translate",5),"MANIPULATION_CONSTRAINT_VIOLATION");
 }
 #ifdef ARK_JOINT_NATIVE_TESTS
 void testNativeCylinderExample(){

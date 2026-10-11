@@ -14,6 +14,7 @@ Mesh importMeshPath(const std::string& path);
 
 struct Image { int w=0,h=0; std::vector<u8> px; /*RGB8*/ };
 bool writePNG(const char* path, const Image& img);
+std::vector<u8> encodePNG(const Image& img); // Owned RGB pixels; no file read.
 
 struct SnapCam {
     Vec3 target{};

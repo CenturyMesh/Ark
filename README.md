@@ -1,12 +1,18 @@
-# ARK 007B — Agent-Ready Kernel
+# ARK 008D — Agent-Ready Kernel
 
 **Parametric CAD for people and agents.**
 
-Public iteration **007B** uses runtime **0.9.8**. The three digits are globally
+Public iteration **008D** uses runtime **0.9.9**. The three digits are globally
 sequential; A–G identifies the roadmap phase, not the month. See the mandatory
 [development rules](AGENTS.md), the [35-milestone roadmap](docs/ROADMAP.md), and
 the [open-source / €200 perpetual license analysis](docs/COMMERCIAL_STRATEGY.md).
 `release.json` is the single source of release identity.
+
+008D adds interactive sketch snapping and editable viewport dimensions, real
+image evidence for agents, candidate trim review and reproducible failure bundles,
+constrained linkage/transmission dragging, and a 30-brief agent benchmark.
+Typed scoped assignments and corrected command schemas improve the information
+available to agents. [Iteration scope and evidence](docs/iterations/008D.md).
 
 007B adds direct left-button dragging of supported jointed components. A click
 still selects; explicit **Move component** remains available to choose ambiguous

@@ -1,0 +1,35 @@
+{
+  "tool": "doc_apply",
+  "arguments": {
+    "expected_revision": 0,
+    "commands": [
+      {"op":"param.set","name":"arm_length","expr":60},
+      {"op":"param.set","name":"pivot_spacing","expr":100},
+      {"op":"param.set","name":"arm_angle","expr":25},
+      {"op":"feature.add","type":"native_solid","name":"Chassis rail","native":{"op":"box"},"p":{"width":12,"depth":"pivot_spacing+12","height":8},"appearance":{"base_color":[0.33,0.36,0.41],"metallic":0.6}},
+      {"op":"feature.add","type":"native_solid","name":"Arm beam","native":{"op":"box"},"p":{"width":"arm_length","depth":8,"height":8},"appearance":{"base_color":[0.9,0.66,0.3],"metallic":0.5}},
+      {"op":"feature.add","type":"native_solid","name":"Upright beam","native":{"op":"box"},"p":{"width":"pivot_spacing","depth":10,"height":8},"appearance":{"base_color":[0.3,0.64,0.85],"metallic":0.5}},
+      {"op":"feature.add","type":"native_solid","name":"Joint pin","native":{"op":"cylinder"},"p":{"radius":5,"height":12},"appearance":{"base_color":[0.83,0.85,0.87],"metallic":0.8}},
+      {"op":"assembly.add","name":"Ground carrier","feature":0},
+      {"op":"assembly.add","name":"Lower arm carrier","feature":0,"p":{"rz":"arm_angle"}},
+      {"op":"assembly.add","name":"Upright carrier","feature":0,"p":{"tx":"arm_length*cos(arm_angle*pi/180)","ty":"arm_length*sin(arm_angle*pi/180)","rz":90}},
+      {"op":"assembly.add","name":"Upper arm carrier","feature":0,"p":{"ty":"pivot_spacing","rz":"arm_angle"}},
+      {"op":"assembly.add","name":"Chassis","parent":"Ground carrier","feature":"Chassis rail","fixed":true,"p":{"tx":-6,"ty":-6}},
+      {"op":"assembly.add","name":"Lower chassis pin","parent":"Ground carrier","feature":"Joint pin"},
+      {"op":"assembly.add","name":"Upper chassis pin","parent":"Ground carrier","feature":"Joint pin","p":{"ty":"pivot_spacing"}},
+      {"op":"assembly.add","name":"Lower arm","parent":"Lower arm carrier","feature":"Arm beam","p":{"ty":-4}},
+      {"op":"assembly.add","name":"Lower inner pin","parent":"Lower arm carrier","feature":"Joint pin"},
+      {"op":"assembly.add","name":"Lower outer pin","parent":"Lower arm carrier","feature":"Joint pin","p":{"tx":"arm_length"}},
+      {"op":"assembly.add","name":"Upright","parent":"Upright carrier","feature":"Upright beam","p":{"ty":-5}},
+      {"op":"assembly.add","name":"Upright lower pin","parent":"Upright carrier","feature":"Joint pin"},
+      {"op":"assembly.add","name":"Upright upper pin","parent":"Upright carrier","feature":"Joint pin","p":{"tx":"pivot_spacing"}},
+      {"op":"assembly.add","name":"Upper arm","parent":"Upper arm carrier","feature":"Arm beam","p":{"ty":-4}},
+      {"op":"assembly.add","name":"Upper inner pin","parent":"Upper arm carrier","feature":"Joint pin"},
+      {"op":"assembly.add","name":"Upper outer pin","parent":"Upper arm carrier","feature":"Joint pin","p":{"tx":"arm_length"}},
+      {"op":"mate.add","type":"revolute","a":"Lower chassis pin","b":"Lower inner pin","reference_a":"origin","reference_b":"origin","limits":{"min":-35,"max":70}},
+      {"op":"mate.add","type":"revolute","a":"Lower outer pin","b":"Upright lower pin","reference_a":"origin","reference_b":"origin"},
+      {"op":"mate.add","type":"revolute","a":"Upright upper pin","b":"Upper outer pin","reference_a":"origin","reference_b":"origin"},
+      {"op":"mate.add","type":"revolute","a":"Upper chassis pin","b":"Upper inner pin","reference_a":"origin","reference_b":"origin"}
+    ]
+  }
+}

@@ -1,4 +1,5 @@
 #include "ark/assistant_connectors.hpp"
+#include "assistant_vision.hpp"
 #include <algorithm>
 #include <cmath>
 #include <set>
@@ -19,6 +20,15 @@ std::string messageText(const V& content){
     if(content.isNull())return {};
     require(content.t==V::Arr,"Provider adapter supports text messages only.");std::string out;
     for(const auto& block:content.arr){const auto kind=text(block,"type");require(kind=="output_text"||kind=="input_text"||kind=="text"||kind=="refusal","Unsupported non-text history content for this provider.");const auto* value=block.find(kind=="refusal"?"refusal":"text");require(value&&value->t==V::Str,"History text content must be a string.");if(!out.empty())out+='\n';out+=value->str;}return out;
+}
+V chatContent(const V& content){
+    if(content.t!=V::Arr)return V::makeStr(messageText(content));
+    V out=V::makeArr();bool visual=false;
+    for(const auto& part:content.arr){V block=V::makeObj();if(text(part,"type")=="input_image"){
+            const auto image=assistant_vision::dataUrl(need(part,"image_url"));block.set("type",V::makeStr("image_url"));V url=V::makeObj();url.set("url",V::makeStr("data:"+image.first+";base64,"+image.second));url.set("detail",V::makeStr("auto"));block.set("image_url",url);visual=true;
+        }else{V one=V::makeArr();one.arr.push_back(part);block.set("type",V::makeStr("text"));block.set("text",V::makeStr(messageText(one)));}out.arr.push_back(block);
+    }
+    return visual?out:V::makeStr(messageText(content));
 }
 V chatMessages(const AssistantConfig& config,const V& canonical,const std::string& instructions){
     require(canonical.t==V::Arr,"Assistant history must be an input array.");V messages=V::makeArr();messages.arr.push_back(message("system",instructions));
@@ -45,7 +55,7 @@ V chatMessages(const AssistantConfig& config,const V& canonical,const std::strin
         if(role=="assistant"||(type=="message"&&role.empty())){
             require(pending.empty()||current.t==V::Obj,"Assistant message precedes unresolved tool results.");start();const auto value=messageText(need(item,"content"));auto combined=text(current,"content");if(!combined.empty()&&!value.empty())combined+='\n';combined+=value;current.set("content",V::makeStr(combined));continue;
         }
-        require(role=="user"||role=="developer"||role=="system","Unsupported retained history item.");flush();require(pending.empty(),"Retained tool calls need results before another user/system message.");messages.arr.push_back(message(role=="developer"?"system":role,messageText(need(item,"content"))));
+        require(role=="user"||role=="developer"||role=="system","Unsupported retained history item.");flush();require(pending.empty(),"Retained tool calls need results before another user/system message.");V row=message(role=="developer"?"system":role,"");row.set("content",role=="user"?chatContent(need(item,"content")):V::makeStr(messageText(need(item,"content"))));messages.arr.push_back(row);
     }
     flush();require(pending.empty(),"Retained tool call has no result; inspect document before continuing.");return messages;
 }
@@ -89,7 +99,7 @@ V assistantAdaptRequest(const AssistantConfig& config,const V& canonicalRequest)
             if(text(item,"type")=="reasoning"){
                 if(item.find("ark_protocol")){if(!sameReplayRoute(config,item)||text(item,"ark_protocol")!="responses")continue;V wire=item;for(const char* key:{"ark_provider","ark_protocol","ark_endpoint","ark_model","ark_auth_mode"})erase(wire,key);input.arr.push_back(wire);}
                 else if(config.provider=="openai"&&config.endpoint=="https://api.openai.com/v1/responses")input.arr.push_back(item);
-            }else input.arr.push_back(item);
+            }else{if(const auto* content=item.find("content");content&&content->t==V::Arr)for(const auto& part:content->arr)if(text(part,"type")=="input_image")assistant_vision::dataUrl(need(part,"image_url"));input.arr.push_back(item);}
         }out.set("input",input);
         if(config.authMode!=AssistantAuthMode::ChatGptPlan&&config.provider!="openai")erase(out,"include");return out;
     }
@@ -105,7 +115,10 @@ V assistantAdaptRequest(const AssistantConfig& config,const V& canonicalRequest)
     for(const auto& row:messages.arr){const auto role=text(row,"role");if(role=="system"){system.arr.push_back(block("text",text(row,"content")));continue;}V content=V::makeArr();
         if(role=="tool"){V result=V::makeObj();result.set("type",V::makeStr("tool_result"));result.set("tool_use_id",need(row,"tool_call_id"));result.set("content",need(row,"content"));content.arr.push_back(result);append("user",content);continue;}
         if(const auto* reasoning=row.find("ark_messages_reasoning"))for(const auto& part:reasoning->arr)content.arr.push_back(part);
-        if(!text(row,"content").empty())content.arr.push_back(block("text",text(row,"content")));
+        if(const auto* parts=row.find("content");parts&&parts->t==V::Arr){for(const auto& part:parts->arr){if(text(part,"type")=="image_url"){
+                    const auto image=assistant_vision::dataUrl(need(need(part,"image_url"),"url"));V visual=V::makeObj(),source=V::makeObj();visual.set("type",V::makeStr("image"));source.set("type",V::makeStr("base64"));source.set("media_type",V::makeStr(image.first));source.set("data",V::makeStr(image.second));visual.set("source",source);content.arr.push_back(visual);
+                }else content.arr.push_back(block("text",text(part,"text")));}}
+        else if(!text(row,"content").empty())content.arr.push_back(block("text",text(row,"content")));
         if(const auto* calls=row.find("tool_calls"))for(const auto& call:calls->arr){V use=V::makeObj(),args;const auto& fn=need(call,"function");require(arkjson::parse(text(fn,"arguments"),args)&&args.t==V::Obj,"Messages tool arguments must be a complete JSON object.");use.set("type",V::makeStr("tool_use"));use.set("id",need(call,"id"));use.set("name",need(fn,"name"));use.set("input",args);content.arr.push_back(use);}
         require(!content.arr.empty(),"Messages history has an empty content entry.");append(role,content);
     }

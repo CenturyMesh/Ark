@@ -47,7 +47,7 @@ V teamTools(V tools,unsigned maxCommands){
         V required=schema.find("required")?*schema.find("required"):V::makeArr();if(required.t!=V::Arr)required=V::makeArr();if(!std::any_of(required.arr.begin(),required.arr.end(),[](const auto& value){return value.asStr()=="expected_revision";}))required.arr.push_back(V::makeStr("expected_revision"));schema.set("required",required);tool.set("inputSchema",schema);
     }
     auto add=[&](const char* name,const char* desc,const char* schema){V tool=V::makeObj(),parsed,annotations=V::makeObj();arkjson::parse(schema,parsed);tool.set("name",V::makeStr(name));tool.set("description",V::makeStr(desc));tool.set("inputSchema",parsed);annotations.set("readOnlyHint",V::makeBool(true));tool.set("annotations",annotations);tools.arr.push_back(tool);};
-    add("team_send","Send a concise proposal, question or measured evidence to a teammate by role id. Include expected_revision in a proposed document edit; only a role with write permission may apply it. Set kind:assignment for new work, message for FYI, report for evidence/outcome. Missing kind keeps legacy lead-to-specialist assignment semantics. A message schedules the recipient; use only useful coordination, no acknowledgement loops.",R"({"type":"object","properties":{"to":{"type":"string"},"message":{"type":"string"},"kind":{"type":"string","enum":["assignment","message","report"]}},"required":["to","message"]})");
+    add("team_send","Send a concise proposal, question or measured evidence to a teammate by role id. Include expected_revision in a proposed document edit; only a role with write permission may apply it. Set kind:assignment for new work, message for FYI, report for evidence/outcome. Missing kind keeps legacy lead-to-specialist assignment semantics. For a lead-to-writer assignment, optional scope:{ids:[up to eight existing feature IDs/names],expected_revision} attaches measured compact object context at that exact revision, rejecting stale/missing targets. It is task context, not enforced write ownership; recipient must inspect current revision before a write. A message schedules the recipient; use only useful coordination, no acknowledgement loops.",R"({"type":"object","properties":{"to":{"type":"string"},"message":{"type":"string"},"kind":{"type":"string","enum":["assignment","message","report"]},"scope":{"type":"object","properties":{"ids":{"type":"array","minItems":1,"maxItems":8,"items":{"oneOf":[{"type":"integer","minimum":1},{"type":"string","minLength":1,"maxLength":128}]}},"expected_revision":{"type":"integer","minimum":0}},"required":["ids","expected_revision"],"additionalProperties":false}},"required":["to","message"]})");
     add("team_report_task","Report the assignment state with actual IDs/evidence and limits. Idle/provider turn completion is not task completion. This declaration does not certify geometry or manufacture.",R"({"type":"object","properties":{"state":{"type":"string","enum":["completed","needs_input","in_progress"]},"summary":{"type":"string"}},"required":["state","summary"]})");
     add("team_finish_goal","Lead-only goal outcome and evidence/limits. Completed rejects outstanding tasks, active/queued peers, pending mail and tool/worker errors. Finish the turn afterward. This is an explicit declaration, not certification.",R"({"type":"object","properties":{"state":{"type":"string","enum":["completed","needs_input","in_progress"]},"summary":{"type":"string"}},"required":["state","summary"]})");
     add("team_context","Read real teammate states, latest visible output, permissions and provider token accounting. These are collaboration updates, not manufacturing certification.",R"({"type":"object","properties":{}})");
@@ -219,6 +219,23 @@ struct AgentTeam::Impl {
         AgentTeamEvent event;event.kind=AgentTeamEvent::Message;event.roleId=roles[index].view.id;event.text=eventText;emit(event);
         V result=V::makeObj();result.set("reported",V::makeBool(true));result.set("state",V::makeStr(state));result.set("evidence_kind",V::makeStr("explicit_role_report; actual tool receipts remain authoritative; not independent certification"));return result;
     }
+    V assignmentContext(std::size_t index,const std::string& target,const V& scope){
+        const auto* ids=scope.find("ids");
+        if(scope.t!=V::Obj||!revision(scope)||!ids||ids->t!=V::Arr||ids->arr.empty()||ids->arr.size()>8)return errorResult("Assignment scope requires 1..8 existing feature IDs/names and explicit expected_revision.");
+        for(const auto& field:scope.obj)if(field.first!="ids"&&field.first!="expected_revision")return errorResult("Unknown assignment scope field; use ids and expected_revision only.");
+        for(const auto& id:ids->arr)if(!((id.t==V::Str&&!id.str.empty()&&id.str.size()<=128)||(id.t==V::Num&&std::isfinite(id.num)&&id.num>=1&&id.num<=9007199254740991.0&&std::floor(id.num)==id.num)))return errorResult("Invalid assignment feature ID/name.");
+        {std::lock_guard lock(mutex);auto recipient=std::find_if(roles.begin(),roles.end(),[&](const auto& role){return role.view.id==target;});
+            if(roles[index].view.id!=leadRoleId(config.roles)||recipient==roles.end()||recipient->view.id==roles[index].view.id||!recipient->config.canWrite)return errorResult("Scoped context is available only for a lead assignment to another writable role.");
+            if(!readOnly.count("object_context"))return errorResult("Scoped assignments require the host object_context tool.");
+        }
+        if(!executor)return errorResult("The host did not provide a shared ARK executor.");
+        V query=scope;query.set("depth",V::makeNum(0));query.set("limit",V::makeNum(8));
+        std::unique_lock<std::timed_mutex> serial(toolsMutex,std::defer_lock);while(!serial.try_lock_for(std::chrono::milliseconds(20)))checkpoint(index);checkpoint(index);
+        V response;try{response=executor("object_context",query);}catch(...){return errorResult("Assignment context inspection failed; no assignment was delivered.");}
+        if(isError(response))return response;
+        std::uint64_t observed=0;if(!receiptRevision(payload(response),observed)||observed!=(std::uint64_t)scope.find("expected_revision")->num)return errorResult("Assignment context did not attest the requested revision; no assignment was delivered.");
+        V context=V::makeObj();context.set("origin_revision",V::makeNum((double)observed));context.set("requires_reinspection",V::makeBool(true));context.set("ownership_enforced",V::makeBool(false));context.set("context",payload(response));return context;
+    }
     V call(std::size_t index,const std::string& name,const V& args){
         checkpoint(index);V result;
         if(documentMutation(name)){std::lock_guard lock(mutex);roles[index].view.taskState="in_progress";roles[index].view.taskSummary.clear();goalState=AgentGoalState::InProgress;goalDeclared=false;goalSummary.clear();}
@@ -226,8 +243,13 @@ struct AgentTeam::Impl {
         if(name=="team_send"){
             const auto* to=args.find("to");const auto* text=args.find("message");
             const auto kind=field(args,"kind");const bool validKind=kind.empty()||kind=="assignment"||kind=="message"||kind=="report";
-            bool sent=validKind&&to&&to->t==V::Str&&!to->str.empty()&&text&&text->t==V::Str&&deliver(roles[index].config.id,to->str,text->str,false,field(args,"kind").empty()||field(args,"kind")=="assignment");
-            result=sent?V::makeObj():errorResult("Message rejected: invalid recipient, empty message, cancellation or team budget.");if(sent){result.set("delivered",V::makeBool(true));if(config.focusedWorkflow)result.set("scheduling",V::makeStr("The recipient runs after the current turn ends. Finish this turn after the handoff; do not poll or wait for a queued teammate."));}
+            bool valid=validKind&&to&&to->t==V::Str&&!to->str.empty()&&text&&text->t==V::Str&&hasText(text->str);std::string deliveredText=valid?text->str:"";V context;
+            if(const auto* scope=args.find("scope")){
+                if(!valid||kind!="assignment")result=errorResult("Scoped context requires an explicit valid kind:assignment message.");
+                else {context=assignmentContext(index,to->str,*scope);if(isError(context))result=context;else deliveredText+="\nAssignment context (observed revision only; inspect current document before writing; no automatic rebase): "+context.dump();}
+            }
+            bool sent=valid&&!isError(result)&&deliver(roles[index].config.id,to->str,deliveredText,false,kind.empty()||kind=="assignment");
+            if(!isError(result))result=sent?V::makeObj():errorResult("Message rejected: invalid recipient, empty message, cancellation or team mailbox limit.");if(sent){result.set("delivered",V::makeBool(true));if(!context.isNull()){result.set("context_origin_revision",*context.find("origin_revision"));result.set("context_bytes",V::makeNum(context.dump().size()));}if(config.focusedWorkflow)result.set("scheduling",V::makeStr("The recipient runs after the current turn ends. Finish this turn after the handoff; do not poll or wait for a queued teammate."));}
         }else if(name=="team_report_task"||name=="team_finish_goal")result=report(index,args,name=="team_finish_goal");
         else if(name=="team_context")result=context();
         else if(name=="team_propose")result=propose(index,args);

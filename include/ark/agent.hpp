@@ -2,8 +2,11 @@
 #include "ark/serialize.hpp"
 #include "ark/mesh_query.hpp"
 #include "ark/mesh_analysis.hpp"
+#include "ark/failure_record.hpp"
 #include <chrono>
 namespace ark {
+struct Image;
+arkjson::Value snapshotImageResult(const Image&,const arkjson::Value& visualEvidence,const std::string& path={});
 // A session owns its document. UI and MCP call the same command implementation.
 // Calls are serialized by the host; no process-global document state.
 class AgentSession {
@@ -15,11 +18,19 @@ public:
     static arkjson::Value tools(bool detailed=false);
     arkjson::Value preparePreview(const arkjson::Value& args);
     arkjson::Value commitPrepared(const arkjson::Value& args);
+    arkjson::Value snapshotCandidate(const arkjson::Value& args);
+    arkjson::Value failureInfo(const arkjson::Value& args) const;
+    arkjson::Value failureExport(const arkjson::Value& args) const;
+    arkjson::Value failureReplay(const arkjson::Value& args);
+    void suppressFailureCapture(bool value=true){suppressFailures_=value;}
     // Scratch geometry probes opt out; only committed document edits are journaled.
     void suppressIterationHistory(bool value=true){suppressHistory_=value;}
 private:
     arkjson::Value dispatch(const std::string& tool,const arkjson::Value& args);
     bool suppressHistory_=false;
+    bool suppressFailures_=false;
+    std::vector<FailureRecord> failures_;
+    arkjson::Value captureFailure(const std::string&,const arkjson::Value&,const arkjson::Value&,const std::string&,u64,arkjson::Value);
     size_t callDepth_=0;
     struct Prepared {
         std::string id, baseline;

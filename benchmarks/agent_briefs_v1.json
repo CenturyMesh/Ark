@@ -1,0 +1,2676 @@
+{
+  "id": "ark-agents-synthetic-v1",
+  "version": 1,
+  "source": "Synthetic authored tasks only; no user drawings. Reference recipes hidden from live provider.",
+  "milestones": [
+    "D.01",
+    "D.02"
+  ],
+  "cases": [
+    {
+      "id": "B01",
+      "version": 1,
+      "category": "dimension_edit",
+      "brief": "Edit existing native Block width from 10 to 15 mm, preserve depth 20 and height 30. Keep it editable.",
+      "baseline": [
+        {
+          "op": "feature.add",
+          "type": "native_solid",
+          "name": "Block",
+          "native": {
+            "op": "box"
+          },
+          "p": {
+            "width": 10,
+            "depth": 20,
+            "height": 30
+          }
+        }
+      ],
+      "reference": [
+        {
+          "op": "feature.edit",
+          "id": "Block",
+          "p": {
+            "width": 15
+          }
+        }
+      ],
+      "checks": [
+        {
+          "id": "valid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.brep_valid"
+          },
+          "equals": true
+        },
+        {
+          "id": "single_solid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.solids"
+          },
+          "equals": 1
+        },
+        {
+          "id": "volume",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.volume_mm3"
+          },
+          "equals": 9000,
+          "absolute_tolerance": 0.00001
+        },
+        {
+          "id": "bound_3",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.bounds_mm.3"
+          },
+          "equals": 15,
+          "absolute_tolerance": 0.00001
+        }
+      ]
+    },
+    {
+      "id": "B02",
+      "version": 1,
+      "category": "dimension_edit",
+      "brief": "Edit existing Block depth to 25 mm, retaining width 10 and height 30.",
+      "baseline": [
+        {
+          "op": "feature.add",
+          "type": "native_solid",
+          "name": "Block",
+          "native": {
+            "op": "box"
+          },
+          "p": {
+            "width": 10,
+            "depth": 20,
+            "height": 30
+          }
+        }
+      ],
+      "reference": [
+        {
+          "op": "feature.edit",
+          "id": "Block",
+          "p": {
+            "depth": 25
+          }
+        }
+      ],
+      "checks": [
+        {
+          "id": "valid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.brep_valid"
+          },
+          "equals": true
+        },
+        {
+          "id": "single_solid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.solids"
+          },
+          "equals": 1
+        },
+        {
+          "id": "volume",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.volume_mm3"
+          },
+          "equals": 7500,
+          "absolute_tolerance": 0.00001
+        },
+        {
+          "id": "bound_4",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.bounds_mm.4"
+          },
+          "equals": 25,
+          "absolute_tolerance": 0.00001
+        }
+      ]
+    },
+    {
+      "id": "B03",
+      "version": 1,
+      "category": "dimension_edit",
+      "brief": "Change Block height to 40 mm while preserving its 10 by 20 mm section.",
+      "baseline": [
+        {
+          "op": "feature.add",
+          "type": "native_solid",
+          "name": "Block",
+          "native": {
+            "op": "box"
+          },
+          "p": {
+            "width": 10,
+            "depth": 20,
+            "height": 30
+          }
+        }
+      ],
+      "reference": [
+        {
+          "op": "feature.edit",
+          "id": "Block",
+          "p": {
+            "height": 40
+          }
+        }
+      ],
+      "checks": [
+        {
+          "id": "valid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.brep_valid"
+          },
+          "equals": true
+        },
+        {
+          "id": "single_solid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.solids"
+          },
+          "equals": 1
+        },
+        {
+          "id": "volume",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.volume_mm3"
+          },
+          "equals": 8000,
+          "absolute_tolerance": 0.00001
+        },
+        {
+          "id": "bound_5",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.bounds_mm.5"
+          },
+          "equals": 40,
+          "absolute_tolerance": 0.00001
+        }
+      ]
+    },
+    {
+      "id": "B04",
+      "version": 1,
+      "category": "parameter_dependency",
+      "brief": "Change width parameter to 18 mm. Existing Block must remain driven by width and measure 18 by 20 by 30 mm.",
+      "baseline": [
+        {
+          "op": "param.set",
+          "name": "width",
+          "expr": 10
+        },
+        {
+          "op": "feature.add",
+          "type": "native_solid",
+          "name": "Block",
+          "native": {
+            "op": "box"
+          },
+          "p": {
+            "width": "width",
+            "depth": 20,
+            "height": 30
+          }
+        }
+      ],
+      "reference": [
+        {
+          "op": "param.set",
+          "name": "width",
+          "expr": 18
+        }
+      ],
+      "checks": [
+        {
+          "id": "valid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.brep_valid"
+          },
+          "equals": true
+        },
+        {
+          "id": "single_solid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.solids"
+          },
+          "equals": 1
+        },
+        {
+          "id": "volume",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.volume_mm3"
+          },
+          "equals": 10800,
+          "absolute_tolerance": 0.00001
+        },
+        {
+          "id": "parameter",
+          "query": {
+            "tool": "eval_expr",
+            "args": {
+              "expr": "width"
+            },
+            "path": "value"
+          },
+          "equals": 18
+        }
+      ]
+    },
+    {
+      "id": "B05",
+      "version": 1,
+      "category": "dimension_edit",
+      "brief": "Resize Block to width 12 and depth 24 mm, retaining height 30 in one coherent edit.",
+      "baseline": [
+        {
+          "op": "feature.add",
+          "type": "native_solid",
+          "name": "Block",
+          "native": {
+            "op": "box"
+          },
+          "p": {
+            "width": 10,
+            "depth": 20,
+            "height": 30
+          }
+        }
+      ],
+      "reference": [
+        {
+          "op": "feature.edit",
+          "id": "Block",
+          "p": {
+            "width": 12,
+            "depth": 24
+          }
+        }
+      ],
+      "checks": [
+        {
+          "id": "valid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.brep_valid"
+          },
+          "equals": true
+        },
+        {
+          "id": "single_solid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.solids"
+          },
+          "equals": 1
+        },
+        {
+          "id": "volume",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.volume_mm3"
+          },
+          "equals": 8640,
+          "absolute_tolerance": 0.00001
+        },
+        {
+          "id": "bound_3",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.bounds_mm.3"
+          },
+          "equals": 12,
+          "absolute_tolerance": 0.00001
+        },
+        {
+          "id": "bound_4",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.bounds_mm.4"
+          },
+          "equals": 24,
+          "absolute_tolerance": 0.00001
+        }
+      ]
+    },
+    {
+      "id": "B06",
+      "version": 1,
+      "category": "dimension_edit",
+      "brief": "Extend existing native Pin height to 16 mm while keeping radius 3.",
+      "baseline": [
+        {
+          "op": "feature.add",
+          "type": "native_solid",
+          "name": "Pin",
+          "native": {
+            "op": "cylinder"
+          },
+          "p": {
+            "radius": 3,
+            "height": 8
+          }
+        }
+      ],
+      "reference": [
+        {
+          "op": "feature.edit",
+          "id": "Pin",
+          "p": {
+            "height": 16
+          }
+        }
+      ],
+      "checks": [
+        {
+          "id": "valid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.brep_valid"
+          },
+          "equals": true
+        },
+        {
+          "id": "single_solid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.solids"
+          },
+          "equals": 1
+        },
+        {
+          "id": "volume",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.volume_mm3"
+          },
+          "equals": 452.3893421169302,
+          "absolute_tolerance": 0.00001
+        },
+        {
+          "id": "bound_5",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.bounds_mm.5"
+          },
+          "equals": 16,
+          "absolute_tolerance": 0.00001
+        }
+      ]
+    },
+    {
+      "id": "P01",
+      "version": 1,
+      "category": "primitive_authoring",
+      "brief": "Create an editable exact native cylinder Pin radius 4 mm, height 20 mm along local +Z.",
+      "baseline": [],
+      "reference": [
+        {
+          "op": "feature.add",
+          "type": "native_solid",
+          "name": "Pin",
+          "native": {
+            "op": "cylinder"
+          },
+          "p": {
+            "radius": 4,
+            "height": 20
+          }
+        }
+      ],
+      "checks": [
+        {
+          "id": "valid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.brep_valid"
+          },
+          "equals": true
+        },
+        {
+          "id": "single_solid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.solids"
+          },
+          "equals": 1
+        },
+        {
+          "id": "volume",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.volume_mm3"
+          },
+          "equals": 1005.3096491487338,
+          "absolute_tolerance": 0.00001
+        }
+      ]
+    },
+    {
+      "id": "P02",
+      "version": 1,
+      "category": "primitive_authoring",
+      "brief": "Create an exact native sphere Ball of radius 6 mm, centred at origin.",
+      "baseline": [],
+      "reference": [
+        {
+          "op": "feature.add",
+          "type": "native_solid",
+          "name": "Ball",
+          "native": {
+            "op": "sphere"
+          },
+          "p": {
+            "radius": 6
+          }
+        }
+      ],
+      "checks": [
+        {
+          "id": "valid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.brep_valid"
+          },
+          "equals": true
+        },
+        {
+          "id": "single_solid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.solids"
+          },
+          "equals": 1
+        },
+        {
+          "id": "volume",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.volume_mm3"
+          },
+          "equals": 904.7786842338604,
+          "absolute_tolerance": 0.00001
+        }
+      ]
+    },
+    {
+      "id": "P03",
+      "version": 1,
+      "category": "primitive_authoring",
+      "brief": "Create an editable exact conical frustum Taper height 12, bottom radius 5, top radius 2 mm.",
+      "baseline": [],
+      "reference": [
+        {
+          "op": "feature.add",
+          "type": "native_solid",
+          "name": "Taper",
+          "native": {
+            "op": "cone"
+          },
+          "p": {
+            "radius_bottom": 5,
+            "radius_top": 2,
+            "height": 12
+          }
+        }
+      ],
+      "checks": [
+        {
+          "id": "valid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.brep_valid"
+          },
+          "equals": true
+        },
+        {
+          "id": "single_solid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.solids"
+          },
+          "equals": 1
+        },
+        {
+          "id": "volume",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.volume_mm3"
+          },
+          "equals": 490.0884539600077,
+          "absolute_tolerance": 0.00001
+        }
+      ]
+    },
+    {
+      "id": "P04",
+      "version": 1,
+      "category": "primitive_authoring",
+      "brief": "Create an editable exact torus Ring with major radius 10 and minor radius 2 mm.",
+      "baseline": [],
+      "reference": [
+        {
+          "op": "feature.add",
+          "type": "native_solid",
+          "name": "Ring",
+          "native": {
+            "op": "torus"
+          },
+          "p": {
+            "major_radius": 10,
+            "minor_radius": 2
+          }
+        }
+      ],
+      "checks": [
+        {
+          "id": "valid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.brep_valid"
+          },
+          "equals": true
+        },
+        {
+          "id": "single_solid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.solids"
+          },
+          "equals": 1
+        },
+        {
+          "id": "volume",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.volume_mm3"
+          },
+          "equals": 789.5683520871487,
+          "absolute_tolerance": 0.00001
+        }
+      ]
+    },
+    {
+      "id": "P05",
+      "version": 1,
+      "category": "primitive_authoring",
+      "brief": "Create an editable exact native Block, width 25, depth 18, height 6 mm.",
+      "baseline": [],
+      "reference": [
+        {
+          "op": "feature.add",
+          "type": "native_solid",
+          "name": "Block",
+          "native": {
+            "op": "box"
+          },
+          "p": {
+            "width": 25,
+            "depth": 18,
+            "height": 6
+          }
+        }
+      ],
+      "checks": [
+        {
+          "id": "valid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.brep_valid"
+          },
+          "equals": true
+        },
+        {
+          "id": "single_solid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.solids"
+          },
+          "equals": 1
+        },
+        {
+          "id": "volume",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.volume_mm3"
+          },
+          "equals": 2700,
+          "absolute_tolerance": 0.00001
+        }
+      ]
+    },
+    {
+      "id": "P06",
+      "version": 1,
+      "category": "dimension_edit",
+      "brief": "Increase existing Pin radius from 3 to 5 mm, preserving height 8.",
+      "baseline": [
+        {
+          "op": "feature.add",
+          "type": "native_solid",
+          "name": "Pin",
+          "native": {
+            "op": "cylinder"
+          },
+          "p": {
+            "radius": 3,
+            "height": 8
+          }
+        }
+      ],
+      "reference": [
+        {
+          "op": "feature.edit",
+          "id": "Pin",
+          "p": {
+            "radius": 5
+          }
+        }
+      ],
+      "checks": [
+        {
+          "id": "valid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.brep_valid"
+          },
+          "equals": true
+        },
+        {
+          "id": "single_solid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.solids"
+          },
+          "equals": 1
+        },
+        {
+          "id": "volume",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.volume_mm3"
+          },
+          "equals": 628.3185307179587,
+          "absolute_tolerance": 0.00001
+        }
+      ]
+    },
+    {
+      "id": "S01",
+      "version": 1,
+      "category": "sketch_edit",
+      "brief": "Enlarge DiscProfile circle to radius 5 mm while preserving the profile and the existing 4 mm editable extrusion.",
+      "baseline": [
+        {
+          "op": "sketch.set",
+          "name": "DiscProfile",
+          "sketch": {
+            "entities": [
+              {
+                "name": "rim",
+                "kind": "circle",
+                "dof": [
+                  0,
+                  0,
+                  3
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "op": "feature.add",
+          "type": "extrude",
+          "name": "Disc",
+          "p": {
+            "sketch": "DiscProfile",
+            "height": 4
+          }
+        }
+      ],
+      "reference": [
+        {
+          "op": "sketch.patch",
+          "name": "DiscProfile",
+          "entity": "rim",
+          "r": 5
+        }
+      ],
+      "checks": [
+        {
+          "id": "valid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.brep_valid"
+          },
+          "equals": true
+        },
+        {
+          "id": "single_solid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.solids"
+          },
+          "equals": 1
+        },
+        {
+          "id": "volume",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.volume_mm3"
+          },
+          "equals": 314.1592653589793,
+          "absolute_tolerance": 0.00001
+        }
+      ]
+    },
+    {
+      "id": "S02",
+      "version": 1,
+      "category": "sketch_authoring",
+      "brief": "Create a parametric circular profile DiscProfile radius 4 mm driven by parameter radius, then exact extrude Disc height 7 mm.",
+      "baseline": [],
+      "reference": [
+        {
+          "op": "param.set",
+          "name": "radius",
+          "expr": 4
+        },
+        {
+          "op": "sketch.set",
+          "name": "DiscProfile",
+          "sketch": {
+            "entities": [
+              {
+                "name": "rim",
+                "kind": "circle",
+                "dof": [
+                  0,
+                  0,
+                  "radius"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "op": "feature.add",
+          "type": "extrude",
+          "name": "Disc",
+          "p": {
+            "sketch": "DiscProfile",
+            "height": 7
+          }
+        }
+      ],
+      "checks": [
+        {
+          "id": "valid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.brep_valid"
+          },
+          "equals": true
+        },
+        {
+          "id": "single_solid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.solids"
+          },
+          "equals": 1
+        },
+        {
+          "id": "volume",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.volume_mm3"
+          },
+          "equals": 351.85837720205683,
+          "absolute_tolerance": 0.00001
+        },
+        {
+          "id": "parameter",
+          "query": {
+            "tool": "eval_expr",
+            "args": {
+              "expr": "radius"
+            },
+            "path": "value"
+          },
+          "equals": 4
+        }
+      ]
+    },
+    {
+      "id": "S03",
+      "version": 1,
+      "category": "sketch_extrude_edit",
+      "brief": "Increase existing Disc extrusion height to 9 mm, keeping DiscProfile radius 3.",
+      "baseline": [
+        {
+          "op": "sketch.set",
+          "name": "DiscProfile",
+          "sketch": {
+            "entities": [
+              {
+                "name": "rim",
+                "kind": "circle",
+                "dof": [
+                  0,
+                  0,
+                  3
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "op": "feature.add",
+          "type": "extrude",
+          "name": "Disc",
+          "p": {
+            "sketch": "DiscProfile",
+            "height": 4
+          }
+        }
+      ],
+      "reference": [
+        {
+          "op": "feature.edit",
+          "id": "Disc",
+          "p": {
+            "height": 9
+          }
+        }
+      ],
+      "checks": [
+        {
+          "id": "valid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.brep_valid"
+          },
+          "equals": true
+        },
+        {
+          "id": "single_solid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.solids"
+          },
+          "equals": 1
+        },
+        {
+          "id": "volume",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.volume_mm3"
+          },
+          "equals": 254.46900494077323,
+          "absolute_tolerance": 0.00001
+        }
+      ]
+    },
+    {
+      "id": "S04",
+      "version": 1,
+      "category": "loft_authoring",
+      "brief": "Create exact solid ruled loft Taper between XY circle radius 5 and circle radius 2 on plane Top at Z=12. Keep sections editable.",
+      "baseline": [],
+      "reference": [
+        {
+          "op": "sketch.set",
+          "name": "Bottom",
+          "sketch": {
+            "entities": [
+              {
+                "name": "rim",
+                "kind": "circle",
+                "dof": [
+                  0,
+                  0,
+                  5
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "op": "plane.set",
+          "name": "Top",
+          "p": {
+            "oz": 12
+          }
+        },
+        {
+          "op": "sketch.set",
+          "name": "Upper",
+          "sketch": {
+            "plane": "Top",
+            "entities": [
+              {
+                "name": "rim",
+                "kind": "circle",
+                "dof": [
+                  0,
+                  0,
+                  2
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "op": "feature.add",
+          "type": "loft",
+          "name": "Taper",
+          "p": {
+            "solid": 1,
+            "ruled": 1
+          },
+          "native": {
+            "sections": [
+              "Bottom",
+              "Upper"
+            ]
+          }
+        }
+      ],
+      "checks": [
+        {
+          "id": "valid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.brep_valid"
+          },
+          "equals": true
+        },
+        {
+          "id": "single_solid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.solids"
+          },
+          "equals": 1
+        },
+        {
+          "id": "volume",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.volume_mm3"
+          },
+          "equals": 490.0884539600077,
+          "absolute_tolerance": 0.00001
+        }
+      ]
+    },
+    {
+      "id": "S05",
+      "version": 1,
+      "category": "sketch_edit",
+      "brief": "Move DiscProfile centre to X=10, Y=5 mm without changing radius 3 or existing extrusion height 4.",
+      "baseline": [
+        {
+          "op": "sketch.set",
+          "name": "DiscProfile",
+          "sketch": {
+            "entities": [
+              {
+                "name": "rim",
+                "kind": "circle",
+                "dof": [
+                  0,
+                  0,
+                  3
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "op": "feature.add",
+          "type": "extrude",
+          "name": "Disc",
+          "p": {
+            "sketch": "DiscProfile",
+            "height": 4
+          }
+        }
+      ],
+      "reference": [
+        {
+          "op": "sketch.patch",
+          "name": "DiscProfile",
+          "entity": "rim",
+          "anchor": 0,
+          "x": 10
+        },
+        {
+          "op": "sketch.patch",
+          "name": "DiscProfile",
+          "entity": "rim",
+          "anchor": 0,
+          "y": 5
+        }
+      ],
+      "checks": [
+        {
+          "id": "valid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.brep_valid"
+          },
+          "equals": true
+        },
+        {
+          "id": "single_solid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.solids"
+          },
+          "equals": 1
+        },
+        {
+          "id": "volume",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.volume_mm3"
+          },
+          "equals": 113.09733552923255,
+          "absolute_tolerance": 0.00001
+        },
+        {
+          "id": "bound_0",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.bounds_mm.0"
+          },
+          "equals": 7,
+          "absolute_tolerance": 0.00001
+        },
+        {
+          "id": "bound_1",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.bounds_mm.1"
+          },
+          "equals": 2,
+          "absolute_tolerance": 0.00001
+        },
+        {
+          "id": "bound_3",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.bounds_mm.3"
+          },
+          "equals": 13,
+          "absolute_tolerance": 0.00001
+        },
+        {
+          "id": "bound_4",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.bounds_mm.4"
+          },
+          "equals": 8,
+          "absolute_tolerance": 0.00001
+        }
+      ]
+    },
+    {
+      "id": "S06",
+      "version": 1,
+      "category": "datum_edit",
+      "brief": "Move existing plane Stock to Z=8 mm. Retain driven DiscProfile circle radius 3 and exact Disc extrusion height 4.",
+      "baseline": [
+        {
+          "op": "plane.set",
+          "name": "Stock",
+          "p": {
+            "oz": 2
+          }
+        },
+        {
+          "op": "sketch.set",
+          "name": "DiscProfile",
+          "sketch": {
+            "plane": "Stock",
+            "entities": [
+              {
+                "name": "rim",
+                "kind": "circle",
+                "dof": [
+                  0,
+                  0,
+                  3
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "op": "feature.add",
+          "type": "extrude",
+          "name": "Disc",
+          "p": {
+            "sketch": "DiscProfile",
+            "height": 4
+          }
+        }
+      ],
+      "reference": [
+        {
+          "op": "plane.set",
+          "name": "Stock",
+          "p": {
+            "oz": 8
+          }
+        }
+      ],
+      "checks": [
+        {
+          "id": "valid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.brep_valid"
+          },
+          "equals": true
+        },
+        {
+          "id": "single_solid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.solids"
+          },
+          "equals": 1
+        },
+        {
+          "id": "volume",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.volume_mm3"
+          },
+          "equals": 113.09733552923255,
+          "absolute_tolerance": 0.00001
+        },
+        {
+          "id": "bound_2",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.bounds_mm.2"
+          },
+          "equals": 8,
+          "absolute_tolerance": 0.00001
+        },
+        {
+          "id": "bound_5",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.bounds_mm.5"
+          },
+          "equals": 12,
+          "absolute_tolerance": 0.00001
+        }
+      ]
+    },
+    {
+      "id": "A01",
+      "version": 1,
+      "category": "assembly_position",
+      "brief": "Move Free Block instance to X=25 mm, retaining Fixed at origin and unchanged 10 by 20 by 30 Block geometry. Exact gap must be 15 mm.",
+      "baseline": [
+        {
+          "op": "feature.add",
+          "type": "native_solid",
+          "name": "Block",
+          "native": {
+            "op": "box"
+          },
+          "p": {
+            "width": 10,
+            "depth": 20,
+            "height": 30
+          }
+        },
+        {
+          "op": "assembly.add",
+          "name": "Fixed",
+          "feature": "Block",
+          "p": {},
+          "fixed": true
+        },
+        {
+          "op": "assembly.add",
+          "name": "Free",
+          "feature": "Block",
+          "p": {
+            "tx": 15
+          }
+        }
+      ],
+      "reference": [
+        {
+          "op": "assembly.edit",
+          "id": "Free",
+          "p": {
+            "tx": 25
+          }
+        }
+      ],
+      "checks": [
+        {
+          "id": "valid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.brep_valid"
+          },
+          "equals": true
+        },
+        {
+          "id": "single_solid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.solids"
+          },
+          "equals": 1
+        },
+        {
+          "id": "volume",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.volume_mm3"
+          },
+          "equals": 6000,
+          "absolute_tolerance": 0.00001
+        },
+        {
+          "id": "exact_gap",
+          "query": {
+            "tool": "assembly_info",
+            "args": {
+              "clearance": {
+                "a": "Fixed",
+                "b": "Free"
+              }
+            },
+            "path": "separation_mm"
+          },
+          "equals": 15,
+          "absolute_tolerance": 0.00001
+        }
+      ]
+    },
+    {
+      "id": "A02",
+      "version": 1,
+      "category": "assembly_mate",
+      "brief": "Add a grounded concentric axis mate between existing Fixed and Free Pin instances. Fixed remains grounded, both axes become concentric.",
+      "baseline": [
+        {
+          "op": "feature.add",
+          "type": "native_solid",
+          "name": "Pin",
+          "native": {
+            "op": "cylinder"
+          },
+          "p": {
+            "radius": 3,
+            "height": 8
+          }
+        },
+        {
+          "op": "assembly.add",
+          "name": "Fixed",
+          "feature": "Pin",
+          "p": {},
+          "fixed": true
+        },
+        {
+          "op": "assembly.add",
+          "name": "Free",
+          "feature": "Pin",
+          "p": {
+            "tx": 20
+          }
+        }
+      ],
+      "reference": [
+        {
+          "op": "mate.add",
+          "a": "Fixed",
+          "b": "Free",
+          "type": "concentric",
+          "reference_a": "axis",
+          "reference_b": "axis"
+        }
+      ],
+      "checks": [
+        {
+          "id": "valid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.brep_valid"
+          },
+          "equals": true
+        },
+        {
+          "id": "single_solid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.solids"
+          },
+          "equals": 1
+        },
+        {
+          "id": "volume",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.volume_mm3"
+          },
+          "equals": 226.1946710584651,
+          "absolute_tolerance": 0.00001
+        },
+        {
+          "id": "axis_distance",
+          "query": {
+            "tool": "assembly_info",
+            "args": {
+              "measure": {
+                "a": {
+                  "node": "Fixed",
+                  "reference": "axis"
+                },
+                "b": {
+                  "node": "Free",
+                  "reference": "axis"
+                }
+              }
+            },
+            "path": "measure.distance_mm"
+          },
+          "equals": 0,
+          "absolute_tolerance": 0.00001
+        }
+      ]
+    },
+    {
+      "id": "A03",
+      "version": 1,
+      "category": "assembly_pattern",
+      "brief": "Pattern existing Copies Block instance linearly as 3 copies with step 25 mm along X. Keep material density 1 g/cm3 and total visible assembly mass 18 g.",
+      "baseline": [
+        {
+          "op": "feature.add",
+          "type": "native_solid",
+          "name": "Block",
+          "native": {
+            "op": "box"
+          },
+          "p": {
+            "width": 10,
+            "depth": 20,
+            "height": 30,
+            "density": 1
+          }
+        },
+        {
+          "op": "assembly.add",
+          "name": "Copies",
+          "feature": "Block",
+          "p": {}
+        }
+      ],
+      "reference": [
+        {
+          "op": "assembly.edit",
+          "id": "Copies",
+          "pattern": {
+            "type": "linear",
+            "count": 3,
+            "dx": 25
+          }
+        }
+      ],
+      "checks": [
+        {
+          "id": "valid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.brep_valid"
+          },
+          "equals": true
+        },
+        {
+          "id": "single_solid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.solids"
+          },
+          "equals": 1
+        },
+        {
+          "id": "volume",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.volume_mm3"
+          },
+          "equals": 6000,
+          "absolute_tolerance": 0.00001
+        },
+        {
+          "id": "mass",
+          "query": {
+            "tool": "assembly_info",
+            "args": {},
+            "path": "mass_g"
+          },
+          "equals": 18,
+          "absolute_tolerance": 0.00001
+        }
+      ]
+    },
+    {
+      "id": "A04",
+      "version": 1,
+      "category": "material_edit",
+      "brief": "Assign density 2 g/cm3 to native Block and keep both existing assembly instances. Total visible exact mass must be 24 g.",
+      "baseline": [
+        {
+          "op": "feature.add",
+          "type": "native_solid",
+          "name": "Block",
+          "native": {
+            "op": "box"
+          },
+          "p": {
+            "width": 10,
+            "depth": 20,
+            "height": 30
+          }
+        },
+        {
+          "op": "assembly.add",
+          "name": "Fixed",
+          "feature": "Block",
+          "p": {},
+          "fixed": true
+        },
+        {
+          "op": "assembly.add",
+          "name": "Free",
+          "feature": "Block",
+          "p": {
+            "tx": 25
+          }
+        }
+      ],
+      "reference": [
+        {
+          "op": "feature.edit",
+          "id": "Block",
+          "p": {
+            "density": 2
+          }
+        }
+      ],
+      "checks": [
+        {
+          "id": "valid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.brep_valid"
+          },
+          "equals": true
+        },
+        {
+          "id": "single_solid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.solids"
+          },
+          "equals": 1
+        },
+        {
+          "id": "volume",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.volume_mm3"
+          },
+          "equals": 6000,
+          "absolute_tolerance": 0.00001
+        },
+        {
+          "id": "mass",
+          "query": {
+            "tool": "assembly_info",
+            "args": {},
+            "path": "mass_g"
+          },
+          "equals": 24,
+          "absolute_tolerance": 0.00001
+        }
+      ]
+    },
+    {
+      "id": "A05",
+      "version": 1,
+      "category": "assembly_position",
+      "brief": "Move Free instance vertically to Z=40 mm and reset X=0, retaining Fixed Block at origin. Exact gap must be 10 mm.",
+      "baseline": [
+        {
+          "op": "feature.add",
+          "type": "native_solid",
+          "name": "Block",
+          "native": {
+            "op": "box"
+          },
+          "p": {
+            "width": 10,
+            "depth": 20,
+            "height": 30
+          }
+        },
+        {
+          "op": "assembly.add",
+          "name": "Fixed",
+          "feature": "Block",
+          "p": {},
+          "fixed": true
+        },
+        {
+          "op": "assembly.add",
+          "name": "Free",
+          "feature": "Block",
+          "p": {
+            "tx": 25
+          }
+        }
+      ],
+      "reference": [
+        {
+          "op": "assembly.edit",
+          "id": "Free",
+          "p": {
+            "tx": 0,
+            "tz": 40
+          }
+        }
+      ],
+      "checks": [
+        {
+          "id": "valid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.brep_valid"
+          },
+          "equals": true
+        },
+        {
+          "id": "single_solid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.solids"
+          },
+          "equals": 1
+        },
+        {
+          "id": "volume",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.volume_mm3"
+          },
+          "equals": 6000,
+          "absolute_tolerance": 0.00001
+        },
+        {
+          "id": "exact_gap",
+          "query": {
+            "tool": "assembly_info",
+            "args": {
+              "clearance": {
+                "a": "Fixed",
+                "b": "Free"
+              }
+            },
+            "path": "separation_mm"
+          },
+          "equals": 10,
+          "absolute_tolerance": 0.00001
+        }
+      ]
+    },
+    {
+      "id": "A06",
+      "version": 1,
+      "category": "assembly_definition_edit",
+      "brief": "Reduce shared Block height to 20 mm while keeping Fixed at Z=0 and Free at Z=40. Exact gap must become 20 mm.",
+      "baseline": [
+        {
+          "op": "feature.add",
+          "type": "native_solid",
+          "name": "Block",
+          "native": {
+            "op": "box"
+          },
+          "p": {
+            "width": 10,
+            "depth": 20,
+            "height": 30
+          }
+        },
+        {
+          "op": "assembly.add",
+          "name": "Fixed",
+          "feature": "Block",
+          "p": {},
+          "fixed": true
+        },
+        {
+          "op": "assembly.add",
+          "name": "Free",
+          "feature": "Block",
+          "p": {
+            "tz": 40
+          }
+        }
+      ],
+      "reference": [
+        {
+          "op": "feature.edit",
+          "id": "Block",
+          "p": {
+            "height": 20
+          }
+        }
+      ],
+      "checks": [
+        {
+          "id": "valid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.brep_valid"
+          },
+          "equals": true
+        },
+        {
+          "id": "single_solid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.solids"
+          },
+          "equals": 1
+        },
+        {
+          "id": "volume",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.volume_mm3"
+          },
+          "equals": 4000,
+          "absolute_tolerance": 0.00001
+        },
+        {
+          "id": "exact_gap",
+          "query": {
+            "tool": "assembly_info",
+            "args": {
+              "clearance": {
+                "a": "Fixed",
+                "b": "Free"
+              }
+            },
+            "path": "separation_mm"
+          },
+          "equals": 20,
+          "absolute_tolerance": 0.00001
+        }
+      ]
+    },
+    {
+      "id": "N01",
+      "version": 1,
+      "category": "native_transform",
+      "brief": "Create editable native transform Moved from existing Block, translate by X=7 Y=-3 Z=5 mm. Preserve source Block.",
+      "baseline": [
+        {
+          "op": "feature.add",
+          "type": "native_solid",
+          "name": "Block",
+          "native": {
+            "op": "box"
+          },
+          "p": {
+            "width": 10,
+            "depth": 20,
+            "height": 30
+          }
+        }
+      ],
+      "reference": [
+        {
+          "op": "feature.add",
+          "type": "native_solid",
+          "name": "Moved",
+          "native": {
+            "op": "transform"
+          },
+          "p": {
+            "tx": 7,
+            "ty": -3,
+            "tz": 5
+          },
+          "inputs": [
+            "Block"
+          ]
+        }
+      ],
+      "checks": [
+        {
+          "id": "valid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 2
+            },
+            "path": "report.brep_valid"
+          },
+          "equals": true
+        },
+        {
+          "id": "single_solid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 2
+            },
+            "path": "report.solids"
+          },
+          "equals": 1
+        },
+        {
+          "id": "volume",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 2
+            },
+            "path": "report.volume_mm3"
+          },
+          "equals": 6000,
+          "absolute_tolerance": 0.00001
+        },
+        {
+          "id": "bound_0",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 2
+            },
+            "path": "report.bounds_mm.0"
+          },
+          "equals": 7,
+          "absolute_tolerance": 0.00001
+        },
+        {
+          "id": "bound_1",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 2
+            },
+            "path": "report.bounds_mm.1"
+          },
+          "equals": -3,
+          "absolute_tolerance": 0.00001
+        },
+        {
+          "id": "bound_2",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 2
+            },
+            "path": "report.bounds_mm.2"
+          },
+          "equals": 5,
+          "absolute_tolerance": 0.00001
+        },
+        {
+          "id": "bound_3",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 2
+            },
+            "path": "report.bounds_mm.3"
+          },
+          "equals": 17,
+          "absolute_tolerance": 0.00001
+        },
+        {
+          "id": "bound_4",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 2
+            },
+            "path": "report.bounds_mm.4"
+          },
+          "equals": 17,
+          "absolute_tolerance": 0.00001
+        },
+        {
+          "id": "bound_5",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 2
+            },
+            "path": "report.bounds_mm.5"
+          },
+          "equals": 35,
+          "absolute_tolerance": 0.00001
+        }
+      ]
+    },
+    {
+      "id": "N02",
+      "version": 1,
+      "category": "native_union",
+      "brief": "Fuse existing overlapping exact Cubes A (origin) and B (X=5) into one editable exact Solid. Each cube is 10 mm, union volume must be 1500 mm3.",
+      "baseline": [
+        {
+          "op": "feature.add",
+          "type": "native_solid",
+          "name": "A",
+          "native": {
+            "op": "box"
+          },
+          "p": {
+            "width": 10,
+            "depth": 10,
+            "height": 10
+          }
+        },
+        {
+          "op": "feature.add",
+          "type": "native_solid",
+          "name": "B0",
+          "native": {
+            "op": "box"
+          },
+          "p": {
+            "width": 10,
+            "depth": 10,
+            "height": 10
+          }
+        },
+        {
+          "op": "feature.add",
+          "type": "native_solid",
+          "name": "B",
+          "native": {
+            "op": "transform"
+          },
+          "p": {
+            "tx": 5
+          },
+          "inputs": [
+            "B0"
+          ]
+        }
+      ],
+      "reference": [
+        {
+          "op": "feature.add",
+          "type": "native_solid",
+          "name": "Solid",
+          "native": {
+            "op": "union"
+          },
+          "p": {},
+          "inputs": [
+            "A",
+            "B"
+          ]
+        }
+      ],
+      "checks": [
+        {
+          "id": "valid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 4
+            },
+            "path": "report.brep_valid"
+          },
+          "equals": true
+        },
+        {
+          "id": "single_solid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 4
+            },
+            "path": "report.solids"
+          },
+          "equals": 1
+        },
+        {
+          "id": "volume",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 4
+            },
+            "path": "report.volume_mm3"
+          },
+          "equals": 1500,
+          "absolute_tolerance": 0.00001
+        },
+        {
+          "id": "bound_3",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 4
+            },
+            "path": "report.bounds_mm.3"
+          },
+          "equals": 15,
+          "absolute_tolerance": 0.00001
+        }
+      ]
+    },
+    {
+      "id": "N03",
+      "version": 1,
+      "category": "native_boolean_cut",
+      "brief": "Subtract exact overlapping cube B at X=5 from cube A at origin. Both 10 mm cubes. Create editable Result, remaining volume 500 mm3.",
+      "baseline": [
+        {
+          "op": "feature.add",
+          "type": "native_solid",
+          "name": "A",
+          "native": {
+            "op": "box"
+          },
+          "p": {
+            "width": 10,
+            "depth": 10,
+            "height": 10
+          }
+        },
+        {
+          "op": "feature.add",
+          "type": "native_solid",
+          "name": "B0",
+          "native": {
+            "op": "box"
+          },
+          "p": {
+            "width": 10,
+            "depth": 10,
+            "height": 10
+          }
+        },
+        {
+          "op": "feature.add",
+          "type": "native_solid",
+          "name": "B",
+          "native": {
+            "op": "transform"
+          },
+          "p": {
+            "tx": 5
+          },
+          "inputs": [
+            "B0"
+          ]
+        }
+      ],
+      "reference": [
+        {
+          "op": "feature.add",
+          "type": "native_solid",
+          "name": "Result",
+          "native": {
+            "op": "cut"
+          },
+          "p": {},
+          "inputs": [
+            "A",
+            "B"
+          ]
+        }
+      ],
+      "checks": [
+        {
+          "id": "valid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 4
+            },
+            "path": "report.brep_valid"
+          },
+          "equals": true
+        },
+        {
+          "id": "single_solid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 4
+            },
+            "path": "report.solids"
+          },
+          "equals": 1
+        },
+        {
+          "id": "volume",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 4
+            },
+            "path": "report.volume_mm3"
+          },
+          "equals": 500,
+          "absolute_tolerance": 0.00001
+        },
+        {
+          "id": "bound_3",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 4
+            },
+            "path": "report.bounds_mm.3"
+          },
+          "equals": 5,
+          "absolute_tolerance": 0.00001
+        }
+      ]
+    },
+    {
+      "id": "N04",
+      "version": 1,
+      "category": "native_boolean_common",
+      "brief": "Intersect exact cube A at origin and cube B at X=5. Both 10 mm cubes. Create editable Result of volume 500 mm3.",
+      "baseline": [
+        {
+          "op": "feature.add",
+          "type": "native_solid",
+          "name": "A",
+          "native": {
+            "op": "box"
+          },
+          "p": {
+            "width": 10,
+            "depth": 10,
+            "height": 10
+          }
+        },
+        {
+          "op": "feature.add",
+          "type": "native_solid",
+          "name": "B0",
+          "native": {
+            "op": "box"
+          },
+          "p": {
+            "width": 10,
+            "depth": 10,
+            "height": 10
+          }
+        },
+        {
+          "op": "feature.add",
+          "type": "native_solid",
+          "name": "B",
+          "native": {
+            "op": "transform"
+          },
+          "p": {
+            "tx": 5
+          },
+          "inputs": [
+            "B0"
+          ]
+        }
+      ],
+      "reference": [
+        {
+          "op": "feature.add",
+          "type": "native_solid",
+          "name": "Result",
+          "native": {
+            "op": "common"
+          },
+          "p": {},
+          "inputs": [
+            "A",
+            "B"
+          ]
+        }
+      ],
+      "checks": [
+        {
+          "id": "valid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 4
+            },
+            "path": "report.brep_valid"
+          },
+          "equals": true
+        },
+        {
+          "id": "single_solid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 4
+            },
+            "path": "report.solids"
+          },
+          "equals": 1
+        },
+        {
+          "id": "volume",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 4
+            },
+            "path": "report.volume_mm3"
+          },
+          "equals": 500,
+          "absolute_tolerance": 0.00001
+        },
+        {
+          "id": "bound_0",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 4
+            },
+            "path": "report.bounds_mm.0"
+          },
+          "equals": 5,
+          "absolute_tolerance": 0.00001
+        },
+        {
+          "id": "bound_3",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 4
+            },
+            "path": "report.bounds_mm.3"
+          },
+          "equals": 10,
+          "absolute_tolerance": 0.00001
+        }
+      ]
+    },
+    {
+      "id": "N05",
+      "version": 1,
+      "category": "native_through_opening",
+      "brief": "Cut a through cylinder of radius 2 mm centred X=5 Y=5 from the 10 mm cube Block, along Z. Create exact editable Holed result and preserve source features.",
+      "baseline": [
+        {
+          "op": "feature.add",
+          "type": "native_solid",
+          "name": "Block",
+          "native": {
+            "op": "box"
+          },
+          "p": {
+            "width": 10,
+            "depth": 10,
+            "height": 10
+          }
+        },
+        {
+          "op": "feature.add",
+          "type": "native_solid",
+          "name": "Drill0",
+          "native": {
+            "op": "cylinder"
+          },
+          "p": {
+            "radius": 2,
+            "height": 12
+          }
+        },
+        {
+          "op": "feature.add",
+          "type": "native_solid",
+          "name": "Drill",
+          "native": {
+            "op": "transform"
+          },
+          "p": {
+            "tx": 5,
+            "ty": 5,
+            "tz": -1
+          },
+          "inputs": [
+            "Drill0"
+          ]
+        }
+      ],
+      "reference": [
+        {
+          "op": "feature.add",
+          "type": "native_solid",
+          "name": "Holed",
+          "native": {
+            "op": "cut"
+          },
+          "p": {},
+          "inputs": [
+            "Block",
+            "Drill"
+          ]
+        }
+      ],
+      "checks": [
+        {
+          "id": "valid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 4
+            },
+            "path": "report.brep_valid"
+          },
+          "equals": true
+        },
+        {
+          "id": "single_solid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 4
+            },
+            "path": "report.solids"
+          },
+          "equals": 1
+        },
+        {
+          "id": "volume",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 4
+            },
+            "path": "report.volume_mm3"
+          },
+          "equals": 874.3362938564082,
+          "absolute_tolerance": 0.00001
+        }
+      ]
+    },
+    {
+      "id": "N06",
+      "version": 1,
+      "category": "linked_parameter_mass",
+      "brief": "Change size parameter to 12 mm, keeping exact native Cube driven by size in all dimensions and density 1 g/cm3. Volume 1728 mm3 and mass 1.728 g.",
+      "baseline": [
+        {
+          "op": "param.set",
+          "name": "size",
+          "expr": 10
+        },
+        {
+          "op": "feature.add",
+          "type": "native_solid",
+          "name": "Cube",
+          "native": {
+            "op": "box"
+          },
+          "p": {
+            "width": "size",
+            "depth": "size",
+            "height": "size",
+            "density": 1
+          }
+        }
+      ],
+      "reference": [
+        {
+          "op": "param.set",
+          "name": "size",
+          "expr": 12
+        }
+      ],
+      "checks": [
+        {
+          "id": "valid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.brep_valid"
+          },
+          "equals": true
+        },
+        {
+          "id": "single_solid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.solids"
+          },
+          "equals": 1
+        },
+        {
+          "id": "volume",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.volume_mm3"
+          },
+          "equals": 1728,
+          "absolute_tolerance": 0.00001
+        },
+        {
+          "id": "mass",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "mass_g"
+          },
+          "equals": 1.728,
+          "absolute_tolerance": 0.000001
+        }
+      ]
+    }
+  ]
+}

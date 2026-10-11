@@ -4,6 +4,7 @@
 #include <cmath>
 #include <functional>
 #include <limits>
+#include <map>
 #include <set>
 #include <stdexcept>
 #include <unordered_map>
@@ -305,6 +306,17 @@ bool resolveAssembly(const Document& d,std::vector<AssemblyPlacement>& placement
     for(u64 id:mated){
         if(seen.count(id))continue;std::vector<u64> queue{id};seen.insert(id);bool anchored=false,cross=false;
         for(size_t k=0;k<queue.size();++k){u64 at=queue[k];anchored|=byId.at(at)->fixed;
+            // Cross-parent mates use the immediate parent as a rigid carrier.
+            // Its distinct pin instances are therefore physical graph peers;
+            // otherwise every intermediate pin pair in a real linkage would
+            // incorrectly appear to be a separate ungrounded component.
+            const u64 carrier=byId.at(at)->parent;
+            if(carrier&&crossGroups.count(carrier)){
+                std::vector<u64> stack=children[carrier];
+                for(size_t i=0;i<stack.size();++i){const u64 member=stack[i];
+                    if(byId.at(member)->feature&&seen.insert(member).second)queue.push_back(member);
+                    const auto nested=children.find(member);if(nested!=children.end())stack.insert(stack.end(),nested->second.begin(),nested->second.end());}
+            }
             for(const auto& mate:d.mates){if(isMechanicalMate(mate.type))continue;u64 next=mate.a==at?mate.b:(mate.b==at?mate.a:0);
                 if(!next)continue;
                 if(byId.at(mate.a)->parent!=byId.at(mate.b)->parent)cross=true;
@@ -530,8 +542,24 @@ bool buildAssemblyManipulation(const Document& document,AssemblyManipulationProg
             program.constraints.push_back(std::move(constraint));
             if(mate.type=="rigid"){const u64 a=cluster(mate.a),b=cluster(mate.b);if(a!=b)program.rigidCluster[b]=a;}
         }
-        for(auto& item:program.rigidCluster)item.second=cluster(item.first);
         auto descendants=[&](u64 id){std::vector<u64> parts,queue{id};for(size_t i=0;i<queue.size();++i){const auto& node=*nodes.at(queue[i]);if(node.feature)parts.push_back(node.id);const auto found=children.find(node.id);if(found!=children.end())queue.insert(queue.end(),found->second.begin(),found->second.end());}return parts;};
+        // Match the static solver's cross-parent rigid carriers. A link can own
+        // its body and multiple explicitly placed pin instances in one group.
+        std::unordered_map<u64,bool> crossOnly;std::set<u64> crossGroups;
+        for(const auto& constraint:program.constraints)if(!isMechanicalMate(constraint.mate.type)){
+            const auto& m=constraint.mate;
+            for(u64 id:{m.a,m.b})if(!crossOnly.count(id))crossOnly[id]=true;
+            if(nodes.at(m.a)->parent==nodes.at(m.b)->parent)crossOnly[m.a]=crossOnly[m.b]=false;
+            else for(u64 id:{m.a,m.b})if(nodes.at(id)->parent)crossGroups.insert(nodes.at(id)->parent);
+        }
+        for(u64 group:crossGroups){const auto parts=descendants(group);bool anchored=nodes.at(group)->fixed;
+            for(u64 id:parts)anchored|=nodes.at(id)->fixed;
+            if(anchored){for(u64 id:parts)if(std::find(program.fixedNodes.begin(),program.fixedNodes.end(),id)==program.fixedNodes.end())program.fixedNodes.push_back(id);}
+            else{u64 representative=0;for(u64 id:parts){if(crossOnly.count(id)&&!crossOnly.at(id))continue;
+                if(!representative)representative=cluster(id);else program.rigidCluster[cluster(id)]=cluster(representative);}}
+        }
+        for(auto& item:program.rigidCluster)item.second=cluster(item.first);
+        auto fixed=[&](u64 id){return std::find(program.fixedNodes.begin(),program.fixedNodes.end(),id)!=program.fixedNodes.end();};
         for(const auto& candidate:program.constraints){const auto& mate=candidate.mate;
             if(mate.type!="concentric"&&mate.type!="coincident"&&mate.type!="revolute"&&mate.type!="prismatic")continue;
             auto samePair=[&](const AssemblyMate& other){return (other.a==mate.a&&other.b==mate.b)||(other.a==mate.b&&other.b==mate.a);};
@@ -543,29 +571,53 @@ bool buildAssemblyManipulation(const Document& document,AssemblyManipulationProg
                     for(u64 part:parts)anchored|=nodes.at(part)->fixed;
                     if(!anchored)for(u64 part:parts)if(seen.insert(part).second)queue.push_back(part);
                 }
-                for(size_t i=0;i<queue.size();++i)for(const auto& constraint:program.constraints){const auto& edge=constraint.mate;
-                    if(isMechanicalMate(edge.type)||samePair(edge))continue;
-                    const u64 next=edge.a==queue[i]?edge.b:edge.b==queue[i]?edge.a:0;
-                    if(next&&seen.insert(next).second)queue.push_back(next);
+                for(size_t i=0;i<queue.size();++i){
+                    // Every visited rigid carrier contributes all of its pins,
+                    // not only the group at the selected joint. This is the
+                    // physical graph used by the static anchor audit as well.
+                    for(const auto& member:program.rigidCluster)if(member.second==program.rigidCluster.at(queue[i])&&seen.insert(member.first).second)queue.push_back(member.first);
+                    for(const auto& constraint:program.constraints){const auto& edge=constraint.mate;
+                        if(isMechanicalMate(edge.type)||samePair(edge))continue;
+                        const u64 next=edge.a==queue[i]?edge.b:edge.b==queue[i]?edge.a:0;
+                        if(next&&seen.insert(next).second)queue.push_back(next);
+                    }
                 }
                 std::sort(queue.begin(),queue.end());return queue;
             };
             const auto left=side(mate.a),right=side(mate.b);
-            auto anchored=[&](const std::vector<u64>& side){for(u64 id:side)if(nodes.at(id)->fixed)return true;return false;};
+            auto anchored=[&](const std::vector<u64>& side){for(u64 id:side)if(fixed(id))return true;return false;};
             const bool leftFixed=anchored(left),rightFixed=anchored(right);
-            if(leftFixed==rightFixed)continue; // ungrounded graph or grounded closed loop
-            const auto& moving=leftFixed?right:left;
-            if(std::binary_search(moving.begin(),moving.end(),leftFixed?mate.a:mate.b))continue;
-            bool unsupported=false;for(u64 id:moving)unsupported|=nodes.at(id)->pattern.active||nodes.at(id)->fixed;
+            if(!leftFixed&&!rightFixed)continue;
+            bool constrained=leftFixed&&rightFixed;
+            bool moveB=leftFixed;
+            if(constrained){
+                // Grounded loop joints expose a stable world pivot for dragging.
+                // An internal floating joint does not pick a moving side by guess.
+                const bool aFixed=fixed(mate.a),bFixed=fixed(mate.b);
+                if(aFixed==bFixed)continue;moveB=aFixed;
+            }
+            std::vector<u64> moving=moveB?right:left;
+            if(!constrained&&std::binary_search(moving.begin(),moving.end(),moveB?mate.a:mate.b))continue;
             for(const auto& constraint:program.constraints)if(isMechanicalMate(constraint.mate.type)){
                 const bool a=std::binary_search(moving.begin(),moving.end(),constraint.mate.a),b=std::binary_search(moving.begin(),moving.end(),constraint.mate.b);
-                if(a!=b)unsupported=true;
+                if(a!=b)constrained=true;
             }
+            if(constrained){
+                std::vector<u64> component{mate.a,mate.b};std::unordered_set<u64> seen{mate.a,mate.b};
+                for(size_t k=0;k<component.size();++k){const u64 at=component[k];
+                    for(const auto& edge:program.constraints){const u64 next=edge.mate.a==at?edge.mate.b:edge.mate.b==at?edge.mate.a:0;
+                        if(next&&seen.insert(next).second)component.push_back(next);}
+                    for(const auto& item:program.rigidCluster)if(item.second==program.rigidCluster.at(at)&&seen.insert(item.first).second)component.push_back(item.first);
+                }
+                moving.clear();for(u64 id:component)if(!fixed(id))moving.push_back(id);std::sort(moving.begin(),moving.end());
+            }
+            bool unsupported=false;for(u64 id:moving)unsupported|=nodes.at(id)->pattern.active||fixed(id);
             if(unsupported)continue;
-            const Mat4 frame=world.at(leftFixed?mate.a:mate.b)*(leftFixed?candidate.localA:candidate.localB);
+            const Mat4 frame=world.at(moveB?mate.a:mate.b)*(moveB?candidate.localA:candidate.localB);
             AssemblyManipulationJoint joint;joint.mate=mate.id;joint.type=mate.type;joint.mode=mate.type=="prismatic"?"translate":"rotate";
+            joint.constrained=constrained;joint.movingEndpoint=moveB?mate.b:mate.a;
             joint.origin=origin(frame);joint.axis=axis(frame).normalized();joint.movingNodes=moving;
-            joint.coordinateSign=leftFixed?1:-1;joint.limited=candidate.limited;joint.min=candidate.minimum;joint.max=candidate.maximum;
+            joint.coordinateSign=moveB?1:-1;joint.limited=candidate.limited;joint.min=candidate.minimum;joint.max=candidate.maximum;
             const auto prepared=preparedConstraint(candidate);
             if(mate.type=="revolute"||mate.type=="prismatic")joint.position=jointCoordinate(prepared,world);
             program.joints.push_back(joint);
@@ -595,7 +647,7 @@ bool selectAssemblyManipulationJoint(const AssemblyManipulationProgram& program,
         if(candidate.mode!=mode||(mate&&candidate.mate!=mate)||
            !std::binary_search(candidate.movingNodes.begin(),candidate.movingNodes.end(),driver))continue;
         const auto found=std::find_if(program.constraints.begin(),program.constraints.end(),[&](const AssemblyMotionRelation& edge){return edge.mate.id==candidate.mate;});
-        const u64 endpoint=std::binary_search(candidate.movingNodes.begin(),candidate.movingNodes.end(),found->mate.a)?found->mate.a:found->mate.b;
+        const u64 endpoint=candidate.movingEndpoint;
         const auto depth=distance.find(program.rigidCluster.at(endpoint));if(depth==distance.end())continue;
         if(depth->second<best){joint=candidate;best=depth->second;ambiguous=false;}
         else if(depth->second==best){
@@ -603,9 +655,134 @@ bool selectAssemblyManipulationJoint(const AssemblyManipulationProgram& program,
             if(equivalent){if(candidate.mate<joint.mate)joint=candidate;}else ambiguous=true;
         }
     }
-    if(!joint.mate)return fail("MANIPULATION_NO_GROUNDED_JOINT: requires a grounded revolute/prismatic/coincident/concentric joint; loops, patterns and coupling boundaries are unsupported");
+    if(!joint.mate)return fail("MANIPULATION_NO_GROUNDED_JOINT: requires a grounded revolute/prismatic/coincident/concentric joint with individual unpatterned instances");
     if(ambiguous&&!mate){joint={};return fail("MANIPULATION_AMBIGUOUS_JOINT: specify a mate ID for the desired degree of freedom");}
     return true;
+}
+
+namespace {
+double frameRotationIncrement(const Mat4& previous,const Mat4& current,const Mat4& local){
+    const Mat4 a=previous*local,b=current*local;
+    const Vec3 x=a.transformDir({1,0,0}),y=b.transformDir({1,0,0});
+    return std::atan2(axis(a).dot(x.cross(y)),x.dot(y));
+}
+double frameTranslationIncrement(const Mat4& previous,const Mat4& current,const Mat4& local){
+    const Mat4 a=previous*local,b=current*local;
+    return (origin(b)-origin(a)).dot(axis(a));
+}
+double couplingIncrementResidual(const AssemblyMotionRelation& relation,
+        const AssemblyManipulationProgram& program,const std::unordered_map<u64,Mat4>& previous,
+        const std::unordered_map<u64,Mat4>& current){
+    const auto& m=relation.mate;
+    const double a=frameRotationIncrement(previous.at(m.a),current.at(m.a),relation.localA);
+    if(!relation.translational)return frameRotationIncrement(previous.at(m.b),current.at(m.b),relation.localB)-relation.ratio*a;
+    const double b=frameTranslationIncrement(previous.at(m.b),current.at(m.b),relation.localB);
+    if(m.type=="rack_pinion")return b-relation.ratio*a;
+    // A cam phase is relative to the authored grounded rotational coordinate,
+    // not reset to zero by each saved pose. This remains reproducible on reload.
+    for(const auto& joint:program.constraints)if(joint.mate.type=="revolute"&&(joint.mate.a==m.a||joint.mate.b==m.a)){
+        const u64 other=joint.mate.a==m.a?joint.mate.b:joint.mate.a;
+        if(std::find(program.fixedNodes.begin(),program.fixedNodes.end(),other)==program.fixedNodes.end())continue;
+        const Mat4 local=joint.mate.a==m.a?joint.localA:joint.localB;
+        const double alignment=axis(previous.at(m.a)*local).dot(axis(previous.at(m.a)*relation.localA));
+        if(std::fabs(std::fabs(alignment)-1)>1e-8)continue;
+        const double sign=(joint.mate.b==m.a?1:-1)*alignment;
+        const double angle=deg2rad(jointCoordinate(preparedConstraint(joint),previous))*sign;
+        return b-relation.lift*.5*(std::cos(angle+relation.phaseRad)-std::cos(angle+a+relation.phaseRad));
+    }
+    throw std::runtime_error("MANIPULATION_CAM_PHASE_UNRESOLVED: cam drag requires a grounded revolute input coordinate");
+}
+bool constrainedManipulation(const AssemblyManipulationProgram& program,const AssemblyManipulationJoint& joint,
+        double delta,std::unordered_map<u64,Mat4>& world,AssemblyManipulationPreview& preview,std::string& error){
+    auto fail=[&](const std::string& message){error=message;return false;};
+    const auto selected=std::find_if(program.constraints.begin(),program.constraints.end(),[&](const AssemblyMotionRelation& c){return c.mate.id==joint.mate;});
+    AssemblyMotionRelation driven=*selected;
+    driven.mate.type=joint.mode=="rotate"?"revolute":"prismatic";
+    const double start=jointCoordinate(preparedConstraint(driven),world);
+    if(joint.limited){const double target=start+joint.coordinateSign*delta;
+        if(limitError(target,joint.min,joint.max)>limitRoundoff(target,joint.min,joint.max))return fail("MANIPULATION_LIMIT_VIOLATION: requested drive exceeds selected joint limits");}
+    std::vector<std::vector<u64>> clusters;std::map<u64,size_t> clusterIndex;
+    for(u64 node:joint.movingNodes){const u64 id=program.rigidCluster.at(node);
+        const auto [at,inserted]=clusterIndex.emplace(id,clusters.size());if(inserted)clusters.emplace_back();clusters[at->second].push_back(node);}
+    if(clusters.size()>64)return fail("MANIPULATION_RESOURCE_LIMIT: constrained continuation exceeds 64 moving carriers");
+    const int columns=(int)clusters.size()*6;
+    // Ratios reduce the step before an angular follower could cross atan2's cut.
+    std::unordered_map<u64,double> angularScale,linearScale;
+    const u64 drivenCarrier=program.rigidCluster.at(joint.movingEndpoint);
+    if(joint.mode=="rotate")angularScale[drivenCarrier]=1;else linearScale[drivenCarrier]=1;
+    for(size_t pass=0;pass<program.constraints.size();++pass)for(const auto& relation:program.constraints)if(isMechanicalMate(relation.mate.type)){
+        const u64 a=program.rigidCluster.at(relation.mate.a),b=program.rigidCluster.at(relation.mate.b);
+        if(!relation.translational){
+            if(angularScale.count(a)&&!angularScale.count(b))angularScale[b]=std::fabs(relation.ratio)*angularScale.at(a);
+            else if(angularScale.count(b)&&!angularScale.count(a))angularScale[a]=angularScale.at(b)/std::fabs(relation.ratio);
+        }else if(relation.mate.type=="rack_pinion"){
+            if(angularScale.count(a)&&!linearScale.count(b))linearScale[b]=std::fabs(relation.ratio)*deg2rad(angularScale.at(a));
+            else if(linearScale.count(b)&&!angularScale.count(a))angularScale[a]=rad2deg(linearScale.at(b)/std::fabs(relation.ratio));
+        }else if(angularScale.count(a)&&!linearScale.count(b))linearScale[b]=relation.lift*.5*deg2rad(angularScale.at(a));
+    }
+    double scale=1;for(const auto& item:angularScale)scale=std::max(scale,item.second);for(const auto& item:linearScale)scale=std::max(scale,item.second);
+    const double required=std::ceil(std::fabs(delta)*scale/2);
+    if(required>4096)return fail("MANIPULATION_RESOURCE_LIMIT: requested continuation exceeds 4096 steps");
+    const int steps=std::max(1,(int)required);int baselineRank=-1;
+    using V=arkjson::Value;preview.couplings=V::makeArr();
+    for(int stepIndex=1;stepIndex<=steps;++stepIndex){
+        const auto previous=world;const double target=start+joint.coordinateSign*delta*stepIndex/steps;
+        auto posed=[&](const std::vector<double>& x){auto candidate=previous;
+            for(size_t k=0;k<clusters.size();++k){const Vec3 o=origin(previous.at(clusters[k][0]));
+                const Vec3 t{x[6*k],x[6*k+1],x[6*k+2]},r{x[6*k+3],x[6*k+4],x[6*k+5]};const double angle=r.len();
+                const Mat4 change=Mat4::translation(o+t)*(angle>1e-14?Mat4::axisAngle(r/angle,angle):Mat4::identity())*Mat4::translation(-o);
+                for(u64 node:clusters[k])candidate[node]=change*previous.at(node);}
+            return candidate;};
+        auto evaluate=[&](const std::vector<double>& x){const auto candidate=posed(x);std::vector<double> r;
+            for(const auto& constraint:program.constraints){
+                if(isMechanicalMate(constraint.mate.type)){
+                    if(std::binary_search(joint.movingNodes.begin(),joint.movingNodes.end(),constraint.mate.a)||std::binary_search(joint.movingNodes.begin(),joint.movingNodes.end(),constraint.mate.b))
+                        r.push_back(couplingIncrementResidual(constraint,program,previous,candidate)*(constraint.translational?1:kAngularWeight));
+                }else residual(preparedConstraint(constraint),candidate,r);
+            }
+            double difference=jointCoordinate(preparedConstraint(driven),candidate)-target;
+            if(joint.mode=="rotate")difference=deg2rad(std::remainder(difference,360.))*kAngularWeight;
+            r.push_back(difference);return r;};
+        auto jacobian=[&](const std::vector<double>& x,int rows){std::vector<double> j((size_t)rows*columns);
+            for(int c=0;c<columns;++c){const double h=c%6<3?1e-4:1e-6;auto plus=x,minus=x;plus[c]+=h;minus[c]-=h;
+                const auto a=evaluate(plus),b=evaluate(minus);for(int row=0;row<rows;++row)j[(size_t)row*columns+c]=(a[row]-b[row])/(2*h);}return j;};
+        std::vector<double> x(columns);double damping=1e-6;
+        if(baselineRank<0){const auto r=evaluate(x);baselineRank=matrixRank(jacobian(x,(int)r.size()),(int)r.size(),columns);}
+        for(int iteration=0;iteration<80;++iteration){const auto r=evaluate(x);const double cost=squared(r);
+            if(!std::isfinite(cost))return fail("MANIPULATION_NONFINITE_POSE: nonfinite constrained residual");
+            if(cost<1e-28)break;
+            const int rows=(int)r.size();const auto j=jacobian(x,rows);
+            std::vector<double> h((size_t)columns*columns),g(columns);
+            for(int row=0;row<rows;++row)for(int c=0;c<columns;++c){const double v=j[(size_t)row*columns+c];g[c]+=v*r[row];for(int q=0;q<=c;++q)h[(size_t)c*columns+q]+=v*j[(size_t)row*columns+q];}
+            for(int c=0;c<columns;++c)for(int q=0;q<c;++q)h[(size_t)q*columns+c]=h[(size_t)c*columns+q];
+            bool improved=false;
+            for(int trial=0;trial<10;++trial){auto regularized=h;for(int c=0;c<columns;++c)regularized[(size_t)c*columns+c]+=damping*(1+h[(size_t)c*columns+c]);
+                auto rhs=g;for(double& v:rhs)v=-v;std::vector<double> change;if(!solveLinear(regularized,rhs,change,columns))return fail("MANIPULATION_CONSTRAINT_VIOLATION: constrained linear solve failed");
+                auto next=x;for(int c=0;c<columns;++c)next[c]+=change[c];const double nextCost=squared(evaluate(next));
+                if(std::isfinite(nextCost)&&nextCost<cost){x=std::move(next);damping=std::max(1e-14,damping*.2);improved=true;break;}damping=std::min(1e12,damping*10);}
+            if(!improved)break;
+        }
+        const auto r=evaluate(x);
+        if(squared(r)>1e-16)return fail("MANIPULATION_CONSTRAINT_VIOLATION: no continuous solution for requested joint coordinate");
+        if(matrixRank(jacobian(x,(int)r.size()),(int)r.size(),columns)<baselineRank)return fail("MANIPULATION_SINGULAR_POSE: continuation reached a singular constraint branch");
+        for(size_t k=0;k<clusters.size();++k){const Vec3 rotation{x[6*k+3],x[6*k+4],x[6*k+5]};if(rotation.len()>deg2rad(15))return fail("MANIPULATION_BRANCH_DISCONTINUITY: passive carrier jumped more than 15 degrees in one continuation step");}
+        world=posed(x);
+        for(const auto& constraint:program.constraints)if(!isMechanicalMate(constraint.mate.type)){
+            const auto measured=measuredResidual(preparedConstraint(constraint),world);
+            if(!satisfiedLimit(measured))return fail("MANIPULATION_LIMIT_VIOLATION: continuation exceeds mate #"+std::to_string(constraint.mate.id)+" limits");
+            if(!satisfiedResidual(measured))return fail("MANIPULATION_CONSTRAINT_VIOLATION: continuation violates mate #"+std::to_string(constraint.mate.id));
+        }else if(std::binary_search(joint.movingNodes.begin(),joint.movingNodes.end(),constraint.mate.a)||std::binary_search(joint.movingNodes.begin(),joint.movingNodes.end(),constraint.mate.b)){
+            const double measured=couplingIncrementResidual(constraint,program,previous,world);
+            if(!std::isfinite(measured)||std::fabs(measured)>1e-7)return fail("MANIPULATION_COUPLING_RESIDUAL: transmission equation is unsatisfied");
+            const Mat4 a=world.at(constraint.mate.a)*constraint.localA,b=world.at(constraint.mate.b)*constraint.localB;
+            const double dot=axis(a).dot(axis(b));
+            if(constraint.translational?std::fabs(dot)>1e-6:std::fabs(std::fabs(dot)-1)>1e-6)return fail("MANIPULATION_COUPLING_AXIS_VIOLATION: semantic coupling axes changed incompatibly");
+            if(constraint.mate.type=="shaft"){const Vec3 gap=origin(b)-origin(a);if((gap-axis(a)*gap.dot(axis(a))).len()>kPositionTolerance)return fail("MANIPULATION_COUPLING_AXIS_VIOLATION: shaft axes no longer coaxial");}
+            if(stepIndex==steps){V row=V::makeObj();row.set("id",V::makeNum((double)constraint.mate.id));row.set("type",V::makeStr(constraint.mate.type));row.set(constraint.translational?"residual_mm":"residual_rad",V::makeNum(measured));row.set("ratio",V::makeNum(constraint.ratio));preview.couplings.arr.push_back(row);}
+        }
+    }
+    preview.continuationSteps=steps;return true;
+}
 }
 
 bool previewAssemblyManipulation(const AssemblyManipulationProgram& program,u64 driver,u64 mate,
@@ -619,7 +796,7 @@ bool previewAssemblyManipulation(const AssemblyManipulationProgram& program,u64 
         std::unordered_map<u64,Mat4> baselineWorld;for(const auto& placement:program.baseline)if(!placement.copy)baselineWorld[placement.node]=placement.world;
         // Check the requested continuous displacement before reducing a rotation
         // modulo 360. A complete turn cannot tunnel through an authored stop.
-        for(const auto& constraint:program.constraints)if(constraint.limited){
+        for(const auto& constraint:program.constraints)if(constraint.limited&&!joint.constrained){
             const bool movingA=std::binary_search(joint.movingNodes.begin(),joint.movingNodes.end(),constraint.mate.a);
             const bool movingB=std::binary_search(joint.movingNodes.begin(),joint.movingNodes.end(),constraint.mate.b);
             if(movingA==movingB)continue;
@@ -637,11 +814,14 @@ bool previewAssemblyManipulation(const AssemblyManipulationProgram& program,u64 
         const Mat4 change=mode=="rotate"?Mat4::translation(joint.origin)*
             Mat4::axisAngle(joint.axis,deg2rad(std::remainder(delta,360.)))*Mat4::translation(-joint.origin):
             Mat4::translation(joint.axis*delta);
-        std::unordered_map<u64,Mat4> world;
+        std::unordered_map<u64,Mat4> world=baselineWorld;
         preview.placements=program.baseline;
         preview.diagnostics.rank=program.diagnostics.rank;preview.diagnostics.freeDofs=program.diagnostics.freeDofs;
         preview.diagnostics.unconstrainedNodes=program.diagnostics.unconstrainedNodes;
-        for(auto& placement:preview.placements){if(std::binary_search(joint.movingNodes.begin(),joint.movingNodes.end(),placement.node))placement.world=change*placement.world;
+        if(joint.constrained&&!constrainedManipulation(program,joint,delta,world,preview,error))return fail(error);
+        for(auto& placement:preview.placements){
+            if(joint.constrained&&std::binary_search(joint.movingNodes.begin(),joint.movingNodes.end(),placement.node))placement.world=world.at(placement.node);
+            else if(std::binary_search(joint.movingNodes.begin(),joint.movingNodes.end(),placement.node))placement.world=change*placement.world;
             if(!finiteFrame(placement.world))return fail("MANIPULATION_NONFINITE_POSE: preview is not a finite rigid transform");
             if(!placement.copy)world[placement.node]=placement.world;}
         for(u64 id:program.fixedNodes){const auto baseline=std::find_if(program.baseline.begin(),program.baseline.end(),[&](const AssemblyPlacement& row){return row.node==id&&!row.copy;});

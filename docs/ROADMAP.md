@@ -1,7 +1,8 @@
 # ARK — matriz de roadmap A–G
 
-**Data da auditoria:** 11 de outubro de 2026. **Iteração local:** `005B`.
-O baseline entregue é `0.9.1`, commit `5e7153f`; não foi rebatizado retroativamente.
+**Data da auditoria:** 11 de outubro de 2026. **Iteração local:** `008D` / `0.9.9`,
+verificada no escopo documentado e ativada; baseline anterior `007B` / `ae659cc` (`0.9.8`).
+O baseline histórico `0.9.1`, commit `5e7153f`, não foi rebatizado retroativamente.
 `001A` inicia a convenção pública, com versão técnica `0.9.2` para distribuição.
 `002B` acrescenta recuperação do runtime, projeção exata e ferramentas de frame;
 ver [escopo e evidência](iterations/002B.md). Os milestones abaixo mantêm os seus
@@ -12,6 +13,14 @@ ver [escopo e evidência](iterations/003D.md).
 e conectores de agentes; ver [escopo e evidência](iterations/004B.md).
 `005B` acrescenta receitas de arcos, scrollbar, ajustes tubulares, consultas
 seletivas e conclusão explícita; ver [auditoria](COMPLEX_MODELING_AUDIT_005B.md).
+`006B` acrescenta juntas e limites, contexto por objeto e seleção contextual;
+`007B` acrescenta arrasto direto; ver [006B](iterations/006B.md) e
+[007B](iterations/007B.md). `008D` implementa construção visual/edição de
+sketches, pixels reais para agentes, candidatos/replay de rejeições, mecanismos
+fechados e o harness comparativo; ver [escopo e evidência](iterations/008D.md).
+O primeiro piloto real aceitou 0/9 tentativas; após a correção de schema, o
+piloto equivalente terminou com 4/9. Ambos conservam todas as falhas; uma
+repetição de três briefs não prova redução de custo ou melhoria de design.
 
 **Visão:** um ambiente CAD onde uma pessoa ou uma equipa de agentes consegue
 transformar uma intenção num produto editável, verificável e preparado para
@@ -92,10 +101,10 @@ O documento ROADMAP_09 é um registo histórico; esta matriz passa a orientar o 
 
 | ID | Milestone | Estado inicial | Aceitação e dependências |
 |---|---|---|---|
-| B.01 | Navegação e edição legíveis | Parcial; seleção contextual em `006B` e arrasto direto em `007B` | Cubo persistente, setas/letras sem fundo, orbit livre, seleção/Spotlight, atalhos e DPI; controlos sem cortes nas resoluções suportadas |
-| B.02 | Sketch e feature tree de uso diário | Parcial; arcos paramétricos em `005B` | Diagnóstico acionável, edição de constraints, reordenação quando válida, suppress/rollback e dependências visíveis; rejeições sem dano ao documento |
+| B.01 | Navegação e edição legíveis | Parcial; seleção contextual em `006B`, arrasto em `007B` e desenho visual/cotas em `008D` | Cubo persistente, setas/letras sem fundo, orbit livre, seleção/Spotlight, atalhos e DPI; controlos sem cortes nas resoluções suportadas |
+| B.02 | Sketch e feature tree de uso diário | Parcial; arcos em `005B`, snaps/expressões e parâmetros fonte em `008D`, verificados localmente | Diagnóstico acionável, edição de constraints, reordenação quando válida, suppress/rollback e dependências visíveis; rejeições sem dano ao documento |
 | B.03 | Sólidos e superfícies avançados | Parcial; curvas/ajustes paramétricos em `005B` | Loft/sweep/guias, continuidade medida, patches/trim/thicken e reparação explícita em corpus difícil; não mascarar falhas com meshes |
-| B.04 | Assemblies grandes e configuráveis | Parcial; juntas prismáticas e limites em `006B` | Subassemblies, instâncias reutilizadas, configurações, referências externas e carregamento seletivo; atualizar 1 definição sem duplicar as N ocorrências |
+| B.04 | Assemblies grandes e configuráveis | Parcial; juntas/limites em `006B`, continuação de mecanismos fechados no escopo local de `008D` | Subassemblies, instâncias reutilizadas, configurações, referências externas e carregamento seletivo; atualizar 1 definição sem duplicar as N ocorrências |
 | B.05 | Desenhos técnicos e intercâmbio | Planeado | Vistas associativas, cortes, cotas/tolerâncias, BOM e exportações com readback; medir perda de informação em STEP/IGES/DXF e no formato nativo |
 
 ### C — Engenharia e fabrico
@@ -103,19 +112,19 @@ O documento ROADMAP_09 é um registo histórico; esta matriz passa a orientar o 
 | ID | Milestone | Estado inicial | Aceitação e dependências |
 |---|---|---|---|
 | C.01 | Chapa industrial com STAGE | Parcial local; integração planeada | STEP exato + inputs explícitos → publicação canónica ou rejeição; corpus acordado, refold/flat e material rastreáveis; depende de E.01/E.02 |
-| C.02 | Weldments completos | Parcial; ajustes de Tube em `005B`, descoberta/diagnóstico em `006B` | Trim/extend multi-membro, juntas, preparação, cordões e cutlists coerentes; desenhos e comprimentos derivados do resultado exato |
+| C.02 | Weldments completos | Parcial; Tube em `005B`, diagnóstico em `006B`, candidato/âmbito de ocorrências e replay em `008D` | Trim/extend multi-membro, juntas, preparação, cordões e cutlists coerentes; desenhos e comprimentos derivados do resultado exato |
 | C.03 | DFM por processo | Parcial | Regras versionadas para laser/dobra/FDM/CNC/solda, hipóteses e evidência por peça; recomendações separadas de certificação |
-| C.04 | Verificação estrutural e movimento | Parcial analítico; FEA planeado | Load cases e unidades, comparação com soluções analíticas, convergência de malha e solver externo auditado; contacto/fadiga só após validação própria |
+| C.04 | Verificação estrutural e movimento | Parcial analítico; quatro barras/slider-crank e transmissões ideais testados em `008D`; FEA planeado | Load cases e unidades, comparação com soluções analíticas, convergência de malha e solver externo auditado; contacto/fadiga só após validação própria |
 | C.05 | Pilotos físicos de referência | Planeado | Fabricar uma caixa de chapa, uma estrutura soldada e um pequeno assembly; medir desvios, montagem, custo e tempo; fechar o ciclo com revisões do design |
 
 ### D — Agentes de design eficazes
 
 | ID | Milestone | Estado inicial | Aceitação e dependências |
 |---|---|---|---|
-| D.01 | Benchmark de qualidade/tempo/custo | Planeado; prioridade imediata | Pelo menos 30 briefs versionados, três repetições por configuração inicial e avaliação humana cega; medir custo por design aceite, não só tokens por turno |
-| D.02 | Engenheiro responsável e equipa adaptativa | Parcial; contexto por objeto e deltas em `006B` | Comparar Single, Focused e Parallel; especialistas só com missão útil; paralelismo escolhido por benefício medido; sem budgets impostos por defeito |
+| D.01 | Benchmark de qualidade/tempo/custo | Parcial em `008D`: harness/corpus de 30 briefs; pilotos reais 0/9 antes e 4/9 após schema, uma repetição de três briefs; sem evidência de poupança | Pelo menos 30 briefs versionados, três repetições por configuração inicial e avaliação humana cega; medir custo por design aceite, não só tokens por turno |
+| D.02 | Engenheiro responsável e equipa adaptativa | Parcial; contexto/deltas em `006B`, missões com contexto e harness comparativo em `008D` | Comparar Single, Focused e Parallel; especialistas só com missão útil; paralelismo escolhido por benefício medido; sem budgets impostos por defeito |
 | D.03 | Espaços de trabalho por peça | Planeado | Agentes editam branches isolados com ownership e datums; integração transacional identifica conflitos geométricos e de revisão sem rebase silencioso |
-| D.04 | Feedback multimodal e autocorreção | Parcial; seleção explícita e contexto em `006B`; pixels pendentes | Mesmo diagnóstico chega ao autor/reviewer; previews ligados à revisão; ciclos de erro repetido detetados; correção preserva intenção e referências |
+| D.04 | Feedback multimodal e autocorreção | Parcial; pixels reais entregues ao provider e candidatos/replay verificados localmente em `008D`; interpretação ainda limitada | Mesmo diagnóstico chega ao autor/reviewer; previews ligados à revisão; ciclos de erro repetido detetados; correção preserva intenção e referências |
 | D.05 | Alternativas de conceito e conhecimento reutilizável | Parcial no onboarding | Comparar alternativas por requisitos, massa, custo/processo e preferência humana; biblioteca de exemplos validados; nunca chamar a uma proposta uma peça criada |
 
 ### E — Ecossistema industrial
