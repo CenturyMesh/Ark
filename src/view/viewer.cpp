@@ -237,6 +237,8 @@ static AssemblyDiagnostics g_assemblyDiagnostics;
 static AssemblyMotionProgram g_motionProgram;static u64 g_motionRevision=std::numeric_limits<u64>::max(),g_motionDriver=0;
 struct ComponentMove {bool armed=false,dragging=false,active=false;u64 revision=0,epoch=0,driver=0;int x=0,y=0;double delta=0,pointerCoordinate=0,pointerAngle=0;Vec3 radial,dragPlaneNormal,pointerWorld;AssemblyManipulationProgram program;AssemblyManipulationJoint joint;std::vector<Mat4> baseline;};
 static ComponentMove g_componentMove;
+struct ComponentDragIntent {bool pending=false;int x=0,y=0;u64 revision=0,epoch=0;};
+static ComponentDragIntent g_componentDragIntent;
 static void armComponentMove();static void cancelComponentMove(bool restore=true);static void applyComponentMove();
 static bool g_motionActive=false,g_motionPlaying=false;static double g_motionTime=0,g_motionRpm=60;static std::string g_motionRpmExpression="cadence_rpm";
 static arkjson::Value g_motionReport;
@@ -3657,15 +3659,16 @@ static void viewRay(int mx,int my,Vec3& origin,Vec3& direction){
     if(g_cameraOrtho){double halfH=std::max(2.0,dist*std::tan(35*K_PI/360.0));double halfW=halfH*(double)viewW/std::max(viewH,1);origin=eye+right*(nx*halfW)+up*(ny*halfH);direction=forward;}
     else{double h=std::tan(deg2rad(35)*.5);origin=eye;direction=(forward+right*(nx*h*viewW/std::max(viewH,1))+up*(ny*h)).normalized();}
 }
-struct SurfaceHit { int body=-1; u32 triangle=0; Vec3 local; bool hit=false; };
-static SurfaceHit pickSurface(int mx,int my){
+struct SurfaceHit { int body=-1; u32 triangle=0; Vec3 local; bool hit=false;double distance=0; };
+static SurfaceHit pickSurface(int mx,int my,std::vector<SurfaceHit>* hits=nullptr){
     SurfaceHit best;if(g_cpuMeshes.empty()||mx<viewX||my<viewY||mx>=viewX+viewW||my>=viewY+viewH)return best;
     Vec3 eye,rd;viewRay(mx,my,eye,rd);
     f64 bt=1e300;
+    auto record=[&](int body,u32 triangle,Vec3 local,double distance){SurfaceHit found{body,triangle,local,true,distance};if(hits)hits->push_back(found);if(distance<bt){bt=distance;best=found;}};
     for(size_t bi=0;bi<g_bodyIds.size();++bi){if(!displayInstance(bi))continue;
         if(auto* f=g_doc.find(g_bodyIds[bi]);f&&f->type==FeatureType::SourceTube){
             auto& cache=g_sourceViews.at(f->id);auto matrices=displayedSourceTransforms(bi);double progress=(int)bi==selBody?g_foldProgress:0.;updateSourceHinges(cache,progress);
-            auto cast=[&](const Mesh& mesh,const MeshBVH& bvh,const Mat4& world){auto inv=world.inverted();auto hit=bvh.raycast(mesh,{inv.transformPoint(eye),inv.transformDir(rd)});if(hit.hit&&hit.distance<bt){bt=hit.distance;best={((int)bi),hit.triangle,hit.point,true};}};
+            auto cast=[&](const Mesh& mesh,const MeshBVH& bvh,const Mat4& world){auto inv=world.inverted();auto hit=bvh.raycast(mesh,{inv.transformPoint(eye),inv.transformDir(rd)});if(hit.hit)record((int)bi,hit.triangle,hit.point,hit.distance);};
             for(size_t k=0;k<cache.preview.rigid.size();++k)cast(cache.preview.rigid[k],cache.rigidBvhs[k],g_instanceWorld[bi]*matrices[k]);
             for(size_t k=0;k<cache.preview.bends.size();++k)cast(progress>0?cache.hinges[k]:cache.flatHinges[k],progress>0?cache.hingeBvhs[k]:cache.flatHingeBvhs[k],g_instanceWorld[bi]*matrices[k]);
             continue;
@@ -3675,11 +3678,11 @@ static SurfaceHit pickSurface(int mx,int my){
             auto transforms=displayedNotchTransforms(bi);auto& cache=cached->second;
             for(size_t segment=0;segment<transforms.size();++segment){auto inv=(g_instanceWorld[bi]*transforms[segment]).inverted();
                 auto hit=cache.bvhs[segment].raycast(cache.preview.segments[segment],{inv.transformPoint(eye),inv.transformDir(rd)});
-                if(hit.hit&&hit.distance<bt){bt=hit.distance;best={(int)bi,hit.triangle,hit.point,true};}
+                if(hit.hit)record((int)bi,hit.triangle,hit.point,hit.distance);
             }
         }else{size_t part=g_instancePart[bi];Mat4 inv=g_instanceWorld[bi].inverted();
             auto hit=g_bvhs[part].raycast(g_cpuMeshes[part],{inv.transformPoint(eye),inv.transformDir(rd)});
-            if(hit.hit&&hit.distance<bt){bt=hit.distance;best={(int)bi,hit.triangle,hit.point,true};}
+            if(hit.hit)record((int)bi,hit.triangle,hit.point,hit.distance);
         }
     }
     return best;
@@ -3691,17 +3694,18 @@ static bool projectScreen(Vec3 p,float& x,float& y){
     x=viewX+(float)((clip.x/w+1)*viewW*0.5);y=viewY+(float)((1-clip.y/w)*viewH*0.5);return true;
 }
 static void cancelComponentMove(bool restore){
+    g_componentDragIntent={};
     bool armed=g_componentMove.armed;
     if(restore&&g_componentMove.active){if(g_componentMove.revision==g_session.revision&&g_componentMove.epoch==g_documentEpoch&&g_componentMove.baseline.size()==g_instanceWorld.size()){g_instanceWorld=g_componentMove.baseline;rebuildDisplayBounds();refreshSelectionLines();}else rebuildScene();}
     g_componentMove={};if(!restore)g_componentMove.armed=armed;
 }
-static void prepareComponentMove(int body){
+static void prepareComponentMove(int body,bool explicitChoice=true,AssemblyManipulationProgram* prepared=nullptr){
     if(body<0||(size_t)body>=g_instanceIds.size()||!g_instanceIds[(size_t)body])throw std::runtime_error("Select an assembly component with a supported joint");
     if(g_instanceCopies[(size_t)body]!=0)throw std::runtime_error("Pattern copies cannot be driven independently; select the original component");
     if(g_allSheetsFlat||g_stockMode)throw std::runtime_error("Return to the formed assembly before moving a component");
     if(g_motionActive){g_motionActive=false;g_motionPlaying=false;g_instanceWorld=g_formedInstanceWorld;rebuildDisplayBounds();}
     ComponentMove next;next.armed=true;next.driver=g_instanceIds[(size_t)body];next.revision=g_session.revision;next.epoch=g_documentEpoch;next.baseline=g_instanceWorld;std::string error;
-    if(!buildAssemblyManipulation(g_doc,next.program,error))throw std::runtime_error(error);
+    if(prepared)next.program=std::move(*prepared);else if(!buildAssemblyManipulation(g_doc,next.program,error))throw std::runtime_error(error);
     // Compare graph distance across both motion modes before choosing a joint.
     std::unordered_map<u64,int> distance;std::vector<u64> queue{next.program.rigidCluster.at(next.driver)};distance[queue[0]]=0;
     for(size_t i=0;i<queue.size();++i)for(const auto& edge:next.program.constraints){if(isMechanicalMate(edge.mate.type))continue;
@@ -3713,10 +3717,13 @@ static void prepareComponentMove(int body){
         auto relation=std::find_if(next.program.constraints.begin(),next.program.constraints.end(),[&](const AssemblyMotionRelation& edge){return edge.mate.id==candidate.mate;});if(relation==next.program.constraints.end())continue;
         u64 endpoint=std::binary_search(candidate.movingNodes.begin(),candidate.movingNodes.end(),relation->mate.a)?relation->mate.a:relation->mate.b;
         auto depth=distance.find(next.program.rigidCluster.at(endpoint));if(depth==distance.end()||depth->second>nearest)continue;
-        if(depth->second<nearest){nearest=depth->second;candidates.clear();}candidates.push_back(resolved);
+        if(depth->second<nearest){nearest=depth->second;candidates.clear();}
+        auto equivalent=std::find_if(candidates.begin(),candidates.end(),[&](const AssemblyManipulationJoint& item){return item.mode==resolved.mode&&item.movingNodes==resolved.movingNodes&&item.origin.approx(resolved.origin,1e-6)&&item.axis.approx(resolved.axis,1e-8)&&item.limited==resolved.limited&&(!item.limited||(item.min==resolved.min&&item.max==resolved.max&&item.coordinateSign==resolved.coordinateSign&&item.position==resolved.position));});
+        if(equivalent==candidates.end())candidates.push_back(resolved);else if(resolved.mate<equivalent->mate)*equivalent=resolved;
     }
     if(candidates.empty()){selectAssemblyManipulationJoint(next.program,next.driver,0,"translate",next.joint,error);throw std::runtime_error(error);}
     if(candidates.size()==1)next.joint=candidates.front();else{
+        if(!explicitChoice)throw std::runtime_error("This component has more than one joint motion. Use Move component to choose the motion first.");
         std::vector<std::string> choices;for(const auto& joint:candidates)choices.push_back((joint.mode=="translate"?std::string("Translate"):std::string("Rotate"))+" / joint #"+std::to_string(joint.mate));
         std::vector<EditorField> fields{{"Motion / joint",choices.front(),false,choices}};
         if(!editFields("Choose component motion","More than one nearest joint can move this component. Select the intended motion explicitly.",fields))throw std::runtime_error("Component movement cancelled / no motion selected");
@@ -3746,10 +3753,24 @@ static double boundedComponentDelta(const AssemblyManipulationJoint& joint,doubl
     double a=(joint.min-joint.position)/joint.coordinateSign,b=(joint.max-joint.position)/joint.coordinateSign;
     return std::clamp(delta,std::min(a,b),std::max(a,b));
 }
-static void beginComponentDrag(int x,int y){
-    int body=pickBody(x,y);
+static int pickComponentDragBody(int x,int y,AssemblyManipulationProgram& program,SurfaceHit& selectedHit){
+    std::vector<SurfaceHit> hits;selectedHit=pickSurface(x,y,&hits);int nearest=selectedHit.body;if(nearest<0)return nearest;
+    std::string error;if(!buildAssemblyManipulation(g_doc,program,error))throw std::runtime_error(error);
+    std::sort(hits.begin(),hits.end(),[](const SurfaceHit& a,const SurfaceHit& b){if(a.distance!=b.distance)return a.distance<b.distance;if(a.body!=b.body)return a.body<b.body;return a.triangle<b.triangle;});std::set<int> seen;
+    for(const auto& hit:hits){if(!seen.insert(hit.body).second)continue;size_t body=(size_t)hit.body;u64 driver=g_instanceIds[body];bool movable=false;
+        if(driver&&g_instanceCopies[body]==0)for(const auto& candidate:program.joints){AssemblyManipulationJoint joint;std::string rejected;
+            if(selectAssemblyManipulationJoint(program,driver,candidate.mate,candidate.mode,joint,rejected)){movable=true;break;}}
+        if(movable){selectedHit=hit;return hit.body;}
+        auto* feature=g_doc.find(g_bodyIds[body]);bool transparent=feature&&resolvedAppearance(g_doc,*feature).opacity<.999;
+        if(!transparent){selectedHit=hit;return hit.body;} // An opaque immovable surface still occludes parts behind it.
+    }
+    return nearest;
+}
+static void beginComponentDrag(int x,int y,bool direct=false){
+    AssemblyManipulationProgram program;SurfaceHit selectedHit;int body=pickComponentDragBody(x,y,program,selectedHit);
     if(body<0)throw std::runtime_error("Click an assembly component to move it");
-    if(!g_componentMove.armed||g_componentMove.driver!=g_instanceIds[(size_t)body]||g_componentMove.revision!=g_session.revision||g_componentMove.epoch!=g_documentEpoch)prepareComponentMove(body);
+    if(direct||!g_componentMove.armed||g_componentMove.driver!=g_instanceIds[(size_t)body]||g_componentMove.revision!=g_session.revision||g_componentMove.epoch!=g_documentEpoch)prepareComponentMove(body,!direct,&program);
+    g_componentMove.armed=!direct;
     g_componentMove.x=x;g_componentMove.y=y;g_componentMove.delta=0;g_componentMove.pointerAngle=0;
     if(g_componentMove.joint.mode=="translate"){
         Vec3 eye,ray;viewRay(x,y,eye,ray);Vec3 normal=ray-g_componentMove.joint.axis*ray.dot(g_componentMove.joint.axis);
@@ -3758,7 +3779,7 @@ static void beginComponentDrag(int x,int y){
         if(normal.len()<.08||!projectScreen(g_componentMove.joint.origin,ax,ay)||!projectScreen(g_componentMove.joint.origin+g_componentMove.joint.axis*span,bx,by)||std::hypot(bx-ax,by-ay)<4)throw std::runtime_error("Translation axis points into the view. Orbit to see the travel direction before dragging.");
         g_componentMove.dragPlaneNormal=normal.normalized();
         if(!jointPointerCoordinate(x,y,g_componentMove.pointerCoordinate,&g_componentMove.pointerWorld))throw std::runtime_error("The pointer cannot resolve travel along this joint. Orbit and try again.");
-    }else if(!jointPointerRadial(x,y,g_componentMove.radial)){auto hit=pickSurface(x,y);Vec3 point=hit.hit?g_instanceWorld[(size_t)body].transformPoint(hit.local):g_reports[g_instancePart[(size_t)body]].bounds.transformed(g_instanceWorld[(size_t)body]).center();Vec3 radius=point-g_componentMove.joint.origin;radius=radius-g_componentMove.joint.axis*radius.dot(g_componentMove.joint.axis);g_componentMove.radial=radius.normalized();}
+    }else if(!jointPointerRadial(x,y,g_componentMove.radial)){Vec3 point=selectedHit.hit?g_instanceWorld[(size_t)body].transformPoint(selectedHit.local):g_reports[g_instancePart[(size_t)body]].bounds.transformed(g_instanceWorld[(size_t)body]).center();Vec3 radius=point-g_componentMove.joint.origin;radius=radius-g_componentMove.joint.axis*radius.dot(g_componentMove.joint.axis);g_componentMove.radial=radius.normalized();}
     g_componentMove.dragging=true;g_componentMove.active=true;
 }
 static void moveComponentDrag(int x,int y){
@@ -4960,7 +4981,7 @@ static void drawFrame(HDC hdc){
         if(g_instanceIds[(size_t)selBody])button(g_componentMove.armed?"Moving":"Move component",px+224,py,151,562,false,g_componentMove.armed);
         textOut("Appearance: all instances of this part definition",px+3,py+36,.55f,.64f,.75f,.82f);
     }
-    if(g_componentMove.armed&&!g_toolsOpen){float px=g_showViewCube?(float)g_cubeX+g_cubeS+24:(float)viewX+16,py=(float)viewY+77;rect(px-5,py-5,390,58,7,.045f,.115f,.135f,.95f,.20f,.70f,.72f,.75f,1);
+    if((g_componentMove.armed||g_componentMove.active)&&!g_toolsOpen){float px=g_showViewCube?(float)g_cubeX+g_cubeS+24:(float)viewX+16,py=(float)viewY+77;rect(px-5,py-5,390,58,7,.045f,.115f,.135f,.95f,.20f,.70f,.72f,.75f,1);
         char angle[180];const auto& joint=g_componentMove.joint;
         if(joint.mate){const char* unit=joint.mode=="translate"?"mm":"deg";bool absolute=joint.type=="prismatic"||joint.type=="revolute";double position=absolute?joint.position+joint.coordinateSign*g_componentMove.delta:g_componentMove.delta;
             if(joint.limited)std::snprintf(angle,sizeof angle,"Joint %llu / %.1f %s / [%.1f, %.1f]",(unsigned long long)joint.mate,position,unit,joint.min,joint.max);
@@ -5262,7 +5283,7 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
             return 0;
         case WM_RBUTTONUP:showContextMenu(GET_X_LPARAM(lp),GET_Y_LPARAM(lp));return 0;
         case WM_LBUTTONDOWN:{
-            POINT p{GET_X_LPARAM(lp),GET_Y_LPARAM(lp)};g_pointerX=p.x;g_pointerY=p.y;g_cubePress=false;
+            POINT p{GET_X_LPARAM(lp),GET_Y_LPARAM(lp)};g_pointerX=p.x;g_pointerY=p.y;g_cubePress=false;g_componentDragIntent={};
             if(g_sidebarTab==0&&g_treeMaxScroll&&PtInRect(&g_treeTrack,p)){g_pressWasButton=true;g_treeDragging=PtInRect(&g_treeThumb,p);g_treePaging=!g_treeDragging;if(g_treeDragging)g_treeDragOffset=p.y-g_treeThumb.top;else g_treeScroll=std::clamp(g_treeScroll+(p.y<g_treeThumb.top?-g_treeVisibleRows:g_treeVisibleRows),0,g_treeMaxScroll);SetCapture(hw);return 0;}
             g_pressWasButton=p.x<viewX||p.x>viewX+viewW||p.y<viewY||p.y>viewY+viewH;
             for(auto&z:g_zones)
@@ -5272,16 +5293,26 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
                         else if(z.id==53){g_sheetScrubbing=true;g_sheetPlayingId=0;if(auto* sheet=selectedSheet())try{sheetPreviewSet(sheet->id,(double)(p.x-z.x)/z.w);}catch(const std::exception& error){g_error=true;g_status=error.what();}}
                         else if(z.id>=380&&z.id<=382){g_suspScrub=z.id-380;g_suspSpinPlaying=false;try{setSuspensionControl(g_suspScrub,(p.x-z.x)/z.w);}catch(const std::exception& error){g_error=true;g_status=error.what();}}} break; }
             g_dragged=false;if(!g_pressWasButton&&!g_cubePress&&g_componentMove.armed){try{beginComponentDrag(p.x,p.y);}catch(const std::exception& error){g_error=true;g_status=error.what();g_pressWasButton=true;}}
-            else if(!g_pressWasButton&&!g_foldScrubbing&&!g_sheetScrubbing&&(g_cubePress||g_navMode!=0))beginCameraDrag(p.x,p.y);SetCapture(hw);
+            else if(!g_pressWasButton&&!g_foldScrubbing&&!g_sheetScrubbing&&(g_cubePress||g_navMode!=0))beginCameraDrag(p.x,p.y);
+            else if(!g_pressWasButton&&!g_cubePress&&!g_pickKind&&!g_allSheetsFlat&&!g_stockMode&&!(g_showSketches&&!g_activeSketch.empty())&&!(wp&(MK_SHIFT|MK_CONTROL))&&!(GetKeyState(VK_MENU)&0x8000)&&pickBody(p.x,p.y)>=0)g_componentDragIntent={true,p.x,p.y,g_session.revision,g_documentEpoch};
+            SetCapture(hw);
             return 0;
         }
-        case WM_MBUTTONDOWN:{POINT p{GET_X_LPARAM(lp),GET_Y_LPARAM(lp)};g_pressWasButton=p.x<viewX||p.x>=viewX+viewW||p.y<viewY||p.y>=viewY+viewH;g_dragged=false;if(!g_pressWasButton)beginCameraDrag(p.x,p.y);SetCapture(hw);return 0;}
+        case WM_MBUTTONDOWN:{g_componentDragIntent={};if(g_componentMove.dragging)cancelComponentMove();POINT p{GET_X_LPARAM(lp),GET_Y_LPARAM(lp)};g_pressWasButton=p.x<viewX||p.x>=viewX+viewW||p.y<viewY||p.y>=viewY+viewH;g_dragged=false;if(!g_pressWasButton)beginCameraDrag(p.x,p.y);SetCapture(hw);return 0;}
         case WM_MBUTTONUP:g_cameraDrag.active=false;ReleaseCapture();return 0;
-        case WM_CAPTURECHANGED:g_treeDragging=g_treePaging=false;g_cameraDrag.active=false;if(g_componentMove.dragging){cancelComponentMove();g_status="Component movement cancelled after pointer capture was lost";}return 0;
+        case WM_CAPTURECHANGED:g_componentDragIntent={};g_treeDragging=g_treePaging=false;g_cameraDrag.active=false;if(g_componentMove.dragging){cancelComponentMove();g_status="Component movement cancelled after pointer capture was lost";}return 0;
         case WM_MOUSEMOVE:{
             int x=GET_X_LPARAM(lp),y=GET_Y_LPARAM(lp);
             bool lbtn=wp&MK_LBUTTON,mbtn=wp&MK_MBUTTON,shift=wp&MK_SHIFT;
             if(g_treeDragging&&lbtn){moveTreeThumb(y);return 0;}
+            if(g_componentDragIntent.pending&&lbtn){auto intent=g_componentDragIntent;
+                if(wp&(MK_SHIFT|MK_CONTROL)||mbtn||(GetKeyState(VK_MENU)&0x8000))g_componentDragIntent={};
+                else if(std::abs(x-intent.x)>=std::max(4,GetSystemMetrics(SM_CXDRAG))||std::abs(y-intent.y)>=std::max(4,GetSystemMetrics(SM_CYDRAG))){
+                    g_componentDragIntent={};g_dragged=true;
+                    try{if(intent.revision!=g_session.revision||intent.epoch!=g_documentEpoch)throw std::runtime_error("The drawing changed before movement started. Select the component again.");beginComponentDrag(intent.x,intent.y,true);}
+                    catch(const std::exception& error){cancelComponentMove();g_dragged=true;g_error=true;g_status=error.what();return 0;}
+                }
+            }
             if(g_componentMove.dragging&&lbtn){try{moveComponentDrag(x,y);}catch(const std::exception& error){cancelComponentMove();g_error=true;g_status=error.what();}return 0;}
             if(g_foldScrubbing&&lbtn)for(auto& zone:g_zones)if(zone.id==50){g_foldProgress=clamp((double)(x-zone.x)/zone.w,0.,1.);break;}
             if(g_sheetScrubbing&&lbtn)for(auto& zone:g_zones)if(zone.id==53){if(auto* sheet=selectedSheet())try{sheetPreviewSet(sheet->id,(double)(x-zone.x)/zone.w);}catch(const std::exception& error){g_error=true;g_status=error.what();g_sheetScrubbing=false;}break;}
@@ -5299,6 +5330,7 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
             return 0;
         }
         case WM_LBUTTONUP:{
+            g_componentDragIntent={};
             if(g_treeDragging||g_treePaging){if(g_treeDragging)moveTreeThumb(GET_Y_LPARAM(lp));g_treeDragging=g_treePaging=false;g_pressWasButton=false;ReleaseCapture();return 0;}
             if(g_componentMove.dragging){g_componentMove.dragging=false;try{applyComponentMove();}catch(const std::exception& error){cancelComponentMove();g_error=true;g_status=error.what();}g_pressWasButton=false;ReleaseCapture();return 0;}
             g_cameraDrag.active=false;ReleaseCapture();
@@ -5332,7 +5364,7 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
             return 0;
         }
         case WM_KEYDOWN:
-            if(wp==VK_ESCAPE){if(g_componentMove.armed||g_componentMove.active){cancelComponentMove();ReleaseCapture();g_status="Component movement cancelled / drawing unchanged";return 0;}if(g_toolsOpen){g_toolsOpen=false;layout();return 0;}g_pickKind=0;g_picked.clear();refreshSelectionLines();g_status="Body selection / semantic picks cleared";return 0;}
+            if(wp==VK_ESCAPE){if(g_componentDragIntent.pending){g_componentDragIntent={};g_dragged=true;ReleaseCapture();g_status="Component movement cancelled / drawing unchanged";return 0;}if(g_componentMove.armed||g_componentMove.active){cancelComponentMove();ReleaseCapture();g_status="Component movement cancelled / drawing unchanged";return 0;}if(g_toolsOpen){g_toolsOpen=false;layout();return 0;}g_pickKind=0;g_picked.clear();refreshSelectionLines();g_status="Body selection / semantic picks cleared";return 0;}
             if(GetKeyState(VK_CONTROL)&0x8000){if(wp=='S')uiAction(16);else if(wp=='O')uiAction(17);else if(wp=='Z')uiAction(18);else if(wp=='Y')uiAction(19);else if(wp=='K')interactiveAction(59);else if(wp=='N')interactiveAction(55);}
             else if(wp=='F')uiAction(20);else if(wp=='W')uiAction(14);else if(wp==VK_DELETE)uiAction(25);else if(wp==VK_F1)uiAction(31);
             else if(wp=='1')uiAction(180);else if(wp=='2')uiAction(181);else if(wp=='3')uiAction(23);else if(wp=='4')uiAction(184);else if(wp=='5')uiAction(182);else if(wp=='6')uiAction(183);else if(wp=='7')uiAction(24);
@@ -5850,7 +5882,59 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         SendMessage(hwnd,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(start.x,start.y));
         if(!g_error||g_componentMove.dragging||g_componentMove.active||g_session.revision!=before||changed(1)||changed(2)||g_status.find("axis points into the view")==std::string::npos)return fail(639,"End-on view invented slider movement");
         SendMessage(hwnd,WM_LBUTTONUP,0,MAKELPARAM(start.x,start.y));cancelComponentMove();g_error=false;
-        std::ofstream receipt(shotPath+".interaction-test.log");receipt<<"PASS: real mouse opacity toggle, adjustment, restoration, physical invariance and undo; adaptive 1/2/5 grid, bounded density, meters and large offset, grid toggle; steering preview carries fork+wheel, Esc rollback, release atomic commit, undo, fixed rejection; pneumatic rod+rigid follower, persistent min/max expressions and clearing/undo, both travel endpoints, release/undo/Esc, backwards signed clamp, angular interval crossing 180, end-on view rejection.\n";g_status="Interaction checks passed / transparency / adaptive grid / connected joint drag / cancel / undo";
+        // Replay the actual distributed hollow/transparent cylinder and use ordinary mouse gestures.
+        fresh();std::ifstream cylinderFile("examples/pneumatic-cylinder.arkops");std::string cylinderBytes((std::istreambuf_iterator<char>(cylinderFile)),std::istreambuf_iterator<char>());V cylinderEnvelope;
+        if(!arkjson::parse(cylinderBytes,cylinderEnvelope)||!cylinderEnvelope.find("arguments"))return fail(650,"Distributed pneumatic example could not be read");V cylinderArgs=*cylinderEnvelope.find("arguments");cylinderArgs.set("expected_revision",V::makeNum((double)g_session.revision));runTool("doc_apply",cylinderArgs);
+        if(g_error||g_bodyIds.size()!=3||g_doc.mates.size()!=2)return fail(651,"Distributed pneumatic example did not build");
+        int barrel=-1,eye=-1;rod=-1;for(size_t i=0;i<g_instanceIds.size();++i){if(g_instanceIds[i]==1)barrel=(int)i;if(g_instanceIds[i]==2)rod=(int)i;if(g_instanceIds[i]==3)eye=(int)i;}
+        if(barrel<0||rod<0||eye<0||std::abs(resolvedAppearance(g_doc,*g_doc.find(g_bodyIds[(size_t)barrel])).opacity-.35)>1e-9)return fail(652,"Actual transparent barrel/rod/eye identity mismatch");
+        g_lightBackground=true;g_satin=true;g_showEdges=false;wireframe=false;g_pickKind=0;g_showSketches=false;g_showDatumPlanes=false;g_activeSketch.clear();g_sidebarTab=0;cameraRoll=0;uiAction(24);frameScene();draw();
+        if(!selectBody(eye)||g_componentMove.armed||!pointer(eye,start)||!capture(".direct-cylinder-selected-eye.png"))return fail(653,"Selected eye default-view fixture failed");
+        auto motionEnd=[&](POINT at,int body,double mm){Vec3 origin=g_instanceWorld[(size_t)body].transformPoint({0,0,0}),axis=g_instanceWorld[(size_t)body].transformDir({0,0,1});float ax,ay,bx,by;projectScreen(origin,ax,ay);projectScreen(origin+axis*mm,bx,by);return POINT{at.x+(LONG)std::lround(bx-ax),at.y+(LONG)std::lround(by-ay)};};
+        before=g_session.revision;baseline=g_instanceWorld;SendMessage(hwnd,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(start.x,start.y));SendMessage(hwnd,WM_MOUSEMOVE,MK_LBUTTON,MAKELPARAM(start.x+1,start.y+1));
+        if(g_componentMove.active||g_componentMove.armed||!g_componentDragIntent.pending||g_session.revision!=before||changed(rod)||changed(eye))return fail(654,"Ordinary click or tiny pointer motion started component movement");
+        POINT end=motionEnd(start,eye,45);SendMessage(hwnd,WM_MOUSEMOVE,MK_LBUTTON,MAKELPARAM(end.x,end.y));
+        if(g_error||!g_componentMove.dragging||g_componentMove.armed||g_componentMove.driver!=3||g_componentMove.joint.mode!="translate"||g_componentMove.delta<=1||g_componentMove.delta>80||changed(barrel)||!changed(rod)||!changed(eye)||g_session.revision!=before)return fail(655,"Direct eye drag did not preview rod and rigid eye together");
+        if(!capture(".direct-cylinder-eye-preview.png"))return fail(656,"Direct eye preview capture failed");SendMessage(hwnd,WM_LBUTTONUP,0,MAKELPARAM(end.x,end.y));
+        if(g_error||g_componentMove.armed||g_componentMove.active||g_session.revision!=before+1||changed(barrel)||!changed(rod)||!changed(eye)||!capture(".direct-cylinder-eye-saved.png"))return fail(657,"Direct eye release failed to commit one transaction or left Move mode armed");
+        before=g_session.revision;if(!pointer(eye,start))return fail(658,"Saved eye could not be clicked");SendMessage(hwnd,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(start.x,start.y));SendMessage(hwnd,WM_LBUTTONUP,0,MAKELPARAM(start.x,start.y));
+        if(g_session.revision!=before||g_componentMove.armed||g_componentMove.active)return fail(659,"A click after direct drag unexpectedly moved the drawing");
+        if(!click(18)||g_error||changed(rod)||changed(eye))return fail(660,"Actual direct-drag undo did not restore rod and eye");
+        // A simple click still selects the transparent body. Only motion intent sees the rod behind it.
+        draw();POINT through{-1,-1};for(int z=16;z<116&&through.x<0;z+=8){float x,y;Vec3 point=g_instanceWorld[(size_t)rod].transformPoint({0,0,(double)z});if(!projectScreen(point,x,y)||overViewCube(x,y)||y<viewY+145||y>viewY+viewH-30)continue;std::vector<SurfaceHit> hits;auto front=pickSurface((int)x,(int)y,&hits);if(front.body==barrel&&std::any_of(hits.begin(),hits.end(),[&](const SurfaceHit& hit){return hit.body==rod;}))through={(LONG)x,(LONG)y};}
+        if(through.x<0)return fail(661,"Actual rod behind transparent barrel could not be found in the default view");before=g_session.revision;baseline=g_instanceWorld;selBody=-1;
+        SendMessage(hwnd,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(through.x,through.y));SendMessage(hwnd,WM_LBUTTONUP,0,MAKELPARAM(through.x,through.y));
+        if(selBody!=barrel||g_componentMove.armed||g_session.revision!=before)return fail(662,"Transparent barrel lost ordinary click selection");
+        uiAction(171);SendMessage(hwnd,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(through.x,through.y));SendMessage(hwnd,WM_LBUTTONUP,0,MAKELPARAM(through.x,through.y));
+        if(selBody!=barrel||g_componentMove.active||g_session.revision!=before)return fail(663,"Face picking incorrectly passed through the transparent barrel");uiAction(170);
+        end=motionEnd(through,rod,40);SendMessage(hwnd,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(through.x,through.y));SendMessage(hwnd,WM_MOUSEMOVE,MK_LBUTTON,MAKELPARAM(end.x,end.y));
+        if(g_error||!g_componentMove.dragging||g_componentMove.driver!=2||g_componentMove.armed||changed(barrel)||!changed(rod)||!changed(eye)||g_session.revision!=before)return fail(664,"Direct motion through the transparent fixed barrel did not choose the rod");
+        if(!capture(".direct-cylinder-through-barrel-preview.png"))return fail(665,"Through-barrel movement capture failed");SendMessage(hwnd,WM_KEYDOWN,VK_ESCAPE,0);SendMessage(hwnd,WM_LBUTTONUP,0,MAKELPARAM(end.x,end.y));
+        if(g_componentMove.armed||g_componentMove.active||g_session.revision!=before||changed(rod)||changed(eye))return fail(666,"Esc did not restore direct through-barrel movement and normal selection");
+        // Shift/Control retain selection semantics; middle drag still orbits without a write.
+        if(!pointer(eye,start))return fail(667,"Modifier drag eye target could not be picked");end=motionEnd(start,eye,40);
+        for(WPARAM modifier:{(WPARAM)MK_SHIFT,(WPARAM)MK_CONTROL}){SendMessage(hwnd,WM_LBUTTONDOWN,MK_LBUTTON|modifier,MAKELPARAM(start.x,start.y));SendMessage(hwnd,WM_MOUSEMOVE,MK_LBUTTON|modifier,MAKELPARAM(end.x,end.y));SendMessage(hwnd,WM_LBUTTONUP,modifier,MAKELPARAM(end.x,end.y));if(g_componentMove.active||g_componentMove.armed||g_session.revision!=before||changed(rod)||changed(eye))return fail(668,"Modified selection gesture started component movement");}
+        double orbitYaw=tYaw,orbitPitch=tPitch;SendMessage(hwnd,WM_MBUTTONDOWN,MK_MBUTTON,MAKELPARAM(start.x,start.y));SendMessage(hwnd,WM_MOUSEMOVE,MK_MBUTTON,MAKELPARAM(start.x+45,start.y+20));SendMessage(hwnd,WM_MBUTTONUP,0,MAKELPARAM(start.x+45,start.y+20));
+        if((tYaw==orbitYaw&&tPitch==orbitPitch)||g_session.revision!=before||changed(rod)||changed(eye))return fail(669,"Direct dragging interfered with middle-mouse orbit");uiAction(24);frameScene();draw();
+        applyCommand(parse(R"({"op":"feature.edit","id":3,"appearance":{"opacity":1}})"));if(g_error)return fail(670,"Opaque obstruction fixture failed");before=g_session.revision;baseline=g_instanceWorld;
+        if(pickBody(through.x,through.y)!=barrel)return fail(671,"Opaque barrel is not in front of the rod");SendMessage(hwnd,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(through.x,through.y));end=motionEnd(through,rod,40);SendMessage(hwnd,WM_MOUSEMOVE,MK_LBUTTON,MAKELPARAM(end.x,end.y));
+        if(!g_error||g_componentMove.active||g_componentMove.armed||g_session.revision!=before||changed(barrel)||changed(rod)||changed(eye)||g_status.find("grounded")==std::string::npos)return fail(672,"Direct drag moved a hidden part through an opaque grounded body or gave no feedback");SendMessage(hwnd,WM_LBUTTONUP,0,MAKELPARAM(end.x,end.y));g_error=false;
+        // Ambiguous direct motion stays nonmodal; the explicit tool still selects the intended DOF.
+        applyCommand(parse(R"({"op":"mate.edit","id":1,"type":"concentric","limits":null})"));if(g_error||!selectBody(eye)||!pointer(eye,start))return fail(673,"Ambiguous concentric fixture failed");before=g_session.revision;baseline=g_instanceWorld;end=motionEnd(start,eye,35);
+        SendMessage(hwnd,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(start.x,start.y));SendMessage(hwnd,WM_MOUSEMOVE,MK_LBUTTON,MAKELPARAM(end.x,end.y));
+        if(!g_error||g_dialog||g_componentMove.active||g_componentMove.armed||g_session.revision!=before||changed(rod)||changed(eye)||g_status.find("Use Move component")==std::string::npos)return fail(674,"Ambiguous direct drag silently chose a DOF or opened a modal selector");SendMessage(hwnd,WM_LBUTTONUP,0,MAKELPARAM(end.x,end.y));g_error=false;
+        g_dialogOverrideQueue={{"Translate / joint #1"}};g_dialogSmoke=3;g_dialogShot=shotPath+".direct-ambiguity-explicit-dialog.png";bool chosen=click(562);g_dialogSmoke=0;
+        if(!chosen||g_error||!g_componentMove.armed||g_componentMove.joint.mode!="translate"||!pointer(eye,start))return fail(675,"Explicit Move component could not resolve the concentric ambiguity");end=motionEnd(start,eye,30);SendMessage(hwnd,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(start.x,start.y));SendMessage(hwnd,WM_MOUSEMOVE,MK_LBUTTON,MAKELPARAM(end.x,end.y));SendMessage(hwnd,WM_LBUTTONUP,0,MAKELPARAM(end.x,end.y));
+        if(g_error||!g_componentMove.armed||g_session.revision!=before+1||changed(barrel)||!changed(rod)||!changed(eye))return fail(676,"Explicit chosen motion no longer commits or retains its armed mode");cancelComponentMove();if(!click(18)||g_error||changed(rod)||changed(eye))return fail(677,"Explicit ambiguity-resolution undo failed");
+        // Rotation fallback must use the moving body's hit, not a differently transformed transparent cover.
+        fresh();runTool("doc_apply",parse(R"({"commands":[{"op":"feature.add","type":"box","name":"Revolute anchor","p":{"dx":"8","dy":"8","dz":"8"}},{"op":"feature.add","type":"box","name":"Revolute arm","p":{"dx":"20","dy":"10","dz":"50"}},{"op":"feature.add","type":"box","name":"Transparent cover","p":{"dx":"100","dy":"100","dz":"2"},"appearance":{"opacity":0.35}},{"op":"assembly.add","name":"Anchor","feature":1,"fixed":true,"p":{"ry":"90"}},{"op":"assembly.add","name":"Arm","feature":2,"p":{"ry":"90"}},{"op":"assembly.add","name":"Offset cover","feature":3,"fixed":true,"p":{"tx":"-25","ty":"-50","tz":"70","rx":"10","rz":"12"}},{"op":"mate.add","a":1,"b":2,"type":"revolute","reference_a":"Z","reference_b":"Z"}]})"));
+        if(g_error||g_bodyIds.size()!=3)return fail(678,"Transparent offset cover rotation fixture failed");g_cameraOrtho=true;yaw=tYaw=0;pitch=tPitch=0;cameraRoll=0;frameScene();draw();SurfaceHit armHit;POINT covered{-1,-1};
+        for(double z:{20.,30.,40.})for(double y:{2.,5.,8.}){float xscreen,yscreen;Vec3 point=g_instanceWorld[1].transformPoint({10,y,z});if(!projectScreen(point,xscreen,yscreen)||overViewCube(xscreen,yscreen)||yscreen<viewY+145)continue;std::vector<SurfaceHit> hits;auto front=pickSurface((int)xscreen,(int)yscreen,&hits);auto arm=std::find_if(hits.begin(),hits.end(),[](const SurfaceHit& hit){return hit.body==1;});if(front.body==2&&arm!=hits.end()){covered={(LONG)xscreen,(LONG)yscreen};armHit=*arm;}}
+        if(covered.x<0)return fail(679,"Offset transparent cover did not occlude the actual rotating arm");Vec3 expectedRadial=g_instanceWorld[1].transformPoint(armHit.local);Vec3 axis=g_instanceWorld[1].transformDir({0,0,1});expectedRadial=(expectedRadial-axis*expectedRadial.dot(axis)).normalized();before=g_session.revision;baseline=g_instanceWorld;
+        SendMessage(hwnd,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(covered.x,covered.y));SendMessage(hwnd,WM_MOUSEMOVE,MK_LBUTTON,MAKELPARAM(covered.x+45,covered.y+25));
+        if(g_error||!g_componentMove.dragging||g_componentMove.driver!=2||g_componentMove.joint.mode!="rotate"||!g_componentMove.radial.approx(expectedRadial,1e-8)||changed(0)||!changed(1)||changed(2)||g_session.revision!=before)return fail(680,"Rotation fallback used transparent cover coordinates instead of the chosen body's exact hit");
+        if(!capture(".direct-covered-revolute-preview.png"))return fail(681,"Covered revolute preview capture failed");SendMessage(hwnd,WM_KEYDOWN,VK_ESCAPE,0);SendMessage(hwnd,WM_LBUTTONUP,0,MAKELPARAM(covered.x+45,covered.y+25));if(g_componentMove.armed||g_session.revision!=before||changed(1))return fail(682,"Covered direct rotation cancel failed");
+        std::ofstream receipt(shotPath+".interaction-test.log");receipt<<"PASS: real mouse opacity toggle, adjustment, restoration, physical invariance and undo; adaptive 1/2/5 grid, bounded density, meters and large offset, grid toggle; steering preview carries fork+wheel, Esc rollback, release atomic commit, undo, fixed rejection; pneumatic rod+rigid follower, persistent min/max expressions and clearing/undo, both travel endpoints, release/undo/Esc, backwards signed clamp, angular interval crossing 180, end-on view rejection; distributed hollow transparent cylinder direct eye/rod drag, threshold/click/modifiers/MMB, atomic release/undo/Esc, motion-only transparent penetration, opaque blocking, nonmodal ambiguity/explicit choice, chosen-hit revolute fallback.\n";g_status="Interaction checks passed / transparency / adaptive grid / connected joint drag / cancel / undo";
     }
     if(projectionUiTest||frameToolsUiTest){
         using V=arkjson::Value;auto parse=[](const char* text){V value;if(!arkjson::parse(text,value))throw std::runtime_error("Invalid UI test fixture");return value;};

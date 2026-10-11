@@ -1,0 +1,118 @@
+{
+  "iteration": {
+    "sequence": 7,
+    "phase": "B",
+    "code": "007B",
+    "version": "0.9.8",
+    "milestones": [
+      "B.01",
+      "B.04"
+    ]
+  },
+  "date": "2026-10-11",
+  "baseline_commit": "749458774dbc623d8e0d0f05b58b76d09f67f5e4",
+  "targeted_ctest": {
+    "passed": 6,
+    "failed": 0,
+    "seconds": 6.25,
+    "log": "out/ark-007B-tests.log",
+    "tests": [
+      "release-metadata",
+      "ota-updates",
+      "ota-launch",
+      "view-camera",
+      "assembly-manipulation-tools",
+      "assembly-joint-limits"
+    ]
+  },
+  "ui_tests": [
+    {
+      "test": "interaction-ui",
+      "exit": 0,
+      "seconds": 3.44,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-007B-interaction-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "navigation-ui",
+      "exit": 0,
+      "seconds": 0.59,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-007B-navigation-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "context-ui",
+      "exit": 0,
+      "seconds": 1.86,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-007B-context-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "native-ui",
+      "exit": 0,
+      "seconds": 3.77,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-007B-native-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "projection-ui",
+      "exit": 0,
+      "seconds": 2.53,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-007B-projection-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "sketch-ui",
+      "exit": 0,
+      "seconds": 3.98,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-007B-sketch-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "assistant-ui",
+      "exit": 0,
+      "seconds": 17.38,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-007B-assistant-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    }
+  ],
+  "visual_review": [
+    "out/ark-007B-interaction-ui.png.direct-cylinder-eye-preview.png",
+    "out/ark-007B-interaction-ui.png.direct-cylinder-through-barrel-preview.png"
+  ],
+  "live_activation": {
+    "pid": 9564,
+    "title": "ARK 007B",
+    "feature_count": 8,
+    "assembly_nodes": 3,
+    "revision": 1,
+    "joint_position_mm": 0,
+    "min_mm": 0,
+    "max_mm": 80,
+    "old_window_pids_preserved": [
+      10316,
+      47128
+    ],
+    "live_mutations": 0,
+    "demo": "out/pneumatic-cylinder-007B.ark",
+    "demo_source_live_revision": 2,
+    "original_undo_history_remains_in_original_window": true
+  },
+  "package": {
+    "path": "out/releases-007B/ark-windows-x64-0.9.8.zip",
+    "sha256": "930fcafefa73112a4375ef6da4e783793e004369eb3ac5f60f4c79294a993e25",
+    "user_ark_files": false,
+    "published_online": false
+  },
+  "runtime_hashes": {
+    "ark-studio.exe": "4e601f7bf5e76050a80152d7dcb2286e84775553a10c95d223b2e9241863a7c3",
+    "ark-mcp.exe": "e6a645cfba41f9b47ef9a2923687f74e8a75ecb00853ec5bddfdb470b8967cc1",
+    "ark-cli.exe": "2678ef8d30d67916da359da13fb12e1c94504cb311221208252e11585583ff85",
+    "ark-occt-worker.exe": "035dfb6bd1b009ce2c8ab9f3b1b8b392b63b1d171760b8de0cc389a55790f88b"
+  },
+  "limits": [
+    "Direct drag requires a supported unambiguous assembly joint; ambiguous motion uses explicit Move component.",
+    "Opaque surfaces remain occluders; ordinary click/context/face picks still select transparent covers.",
+    "Same kinematic and document-v31 contracts as006B; no new geometry solver or document version."
+  ]
+}

@@ -1,12 +1,17 @@
-# ARK 006B — Agent-Ready Kernel
+# ARK 007B — Agent-Ready Kernel
 
 **Parametric CAD for people and agents.**
 
-Public iteration **006B** uses runtime **0.9.7**. The three digits are globally
+Public iteration **007B** uses runtime **0.9.8**. The three digits are globally
 sequential; A–G identifies the roadmap phase, not the month. See the mandatory
 [development rules](AGENTS.md), the [35-milestone roadmap](docs/ROADMAP.md), and
 the [open-source / €200 perpetual license analysis](docs/COMMERCIAL_STRATEGY.md).
 `release.json` is the single source of release identity.
+
+007B adds direct left-button dragging of supported jointed components. A click
+still selects; explicit **Move component** remains available to choose ambiguous
+motion. Transparent shells stay selectable while allowing motion picking inside.
+[Direct manipulation fix](docs/iterations/007B.md).
 
 006B adds prismatic dragging and persistent linear/angular joint limits,
 **Ask Agent about this object** in the 3D context menu, and selective object

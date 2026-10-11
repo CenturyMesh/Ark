@@ -90,9 +90,26 @@ Ambiguous joints, closed loops, grounded moving sides, unsupported coupling
 boundaries and unsatisfied constraints reject atomically. There is no independent
 visual pose accepted as model authority.
 
-Studio's Move control uses the same C++ preview and commit contracts. Its
-adaptive grid follows view scale, with explicit units; the display grid does not
-rescale geometry. Transparency uses the existing feature appearance contract,
+In **007B**, Studio also starts joint movement by directly dragging a body in
+normal body-selection mode. A click or small pointer motion remains selection;
+movement begins only after the native drag threshold. Release commits one
+revision-protected pose; Esc or lost capture restores the original pose. A direct
+gesture returns to normal selection afterwards. Shift/Control selection gestures,
+face/edge/sketch picking and middle-mouse orbit keep their existing behavior.
+
+A drag can reach a jointed part through a transparent immovable cover, such as
+the grounded barrel in the pneumatic example. An opaque surface still blocks
+motion picking. Ordinary clicks, semantic face picks and context menus continue
+to select the transparent cover itself. Rotation uses the chosen moving body's
+hit coordinates, including when a differently placed cover is in front.
+
+**Move component** remains available. If direct movement has multiple nearest
+joint motions, the gesture leaves the document unchanged and asks you to use
+this control to choose the motion explicitly; it never opens a modal selector
+during a captured direct drag. The explicit mode stays armed until cancelled.
+Both gestures use the same C++ preview and commit contracts. Studio's adaptive
+grid follows view scale, with explicit units; the display grid does not rescale
+geometry. Transparency uses the existing feature appearance contract,
 described in [materials and rendering](RENDER_MATERIALS.md).
 
 The synthetic [pneumatic cylinder](../examples/pneumatic-cylinder.arkops)

@@ -92,7 +92,7 @@ O documento ROADMAP_09 é um registo histórico; esta matriz passa a orientar o 
 
 | ID | Milestone | Estado inicial | Aceitação e dependências |
 |---|---|---|---|
-| B.01 | Navegação e edição legíveis | Parcial; seleção contextual e movimento limitado em `006B` | Cubo persistente, setas/letras sem fundo, orbit livre, seleção/Spotlight, atalhos e DPI; controlos sem cortes nas resoluções suportadas |
+| B.01 | Navegação e edição legíveis | Parcial; seleção contextual em `006B` e arrasto direto em `007B` | Cubo persistente, setas/letras sem fundo, orbit livre, seleção/Spotlight, atalhos e DPI; controlos sem cortes nas resoluções suportadas |
 | B.02 | Sketch e feature tree de uso diário | Parcial; arcos paramétricos em `005B` | Diagnóstico acionável, edição de constraints, reordenação quando válida, suppress/rollback e dependências visíveis; rejeições sem dano ao documento |
 | B.03 | Sólidos e superfícies avançados | Parcial; curvas/ajustes paramétricos em `005B` | Loft/sweep/guias, continuidade medida, patches/trim/thicken e reparação explícita em corpus difícil; não mascarar falhas com meshes |
 | B.04 | Assemblies grandes e configuráveis | Parcial; juntas prismáticas e limites em `006B` | Subassemblies, instâncias reutilizadas, configurações, referências externas e carregamento seletivo; atualizar 1 definição sem duplicar as N ocorrências |
