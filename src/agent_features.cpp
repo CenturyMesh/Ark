@@ -1,4 +1,5 @@
 #include "ark/agent_features.hpp"
+#include "ark/bom.hpp"
 #include "ark/native_features.hpp"
 #include "ark/native_backend.hpp"
 #include "ark/references.hpp"
@@ -55,7 +56,7 @@ V math(const V& args){
     }
     r.set("units",V::makeStr(op=="angle"?"deg":op=="normalize"?"dimensionless":op=="dot"||op=="cross"?"caller_coordinates_squared":"caller_coordinates"));return r;
 }
-const std::set<std::string> queryTools{"manufacturing_inspect","physics_inspect","materials_inspect","doc_info","eval_expr","plane_inspect","sketch_inspect","sketch_diagnose","reference_inspect","native_inspect","assembly_info","assembly_motion","geometry_query","math_eval","mesh_inspect","frame_inspect","electronics_inspect","sheet_inspect","suspension_inspect","tube_inspect"};
+const std::set<std::string> queryTools{"bom_inspect","fastener_recipe","manufacturing_inspect","physics_inspect","materials_inspect","doc_info","eval_expr","plane_inspect","sketch_inspect","sketch_diagnose","reference_inspect","native_inspect","assembly_info","assembly_motion","geometry_query","math_eval","mesh_inspect","frame_inspect","electronics_inspect","sheet_inspect","suspension_inspect","tube_inspect"};
 V queryValue(AgentSession& s,const V& spec){
     const auto tool=text(spec,"tool");if(!queryTools.count(tool))throw std::runtime_error("Condition requires an allowed read-only query");
     V data=payload(s.call(tool,required(spec,"args")));const std::string path=text(spec,"path");const V* value=&data;size_t start=0;
@@ -154,7 +155,10 @@ V solve(AgentSession& s,const V& args){
 }
 }
 bool callAgentFeature(AgentSession& s,const std::string& tool,const V& args,V& out){
-    if(tool=="manufacturing_inspect")out=inspectManufacturing(s.document,args,s.revision);
+    if(tool=="bom_inspect")out=inspectBomPage(s.document,s.revision,args);
+    else if(tool=="bom_export")out=exportBom(s.document,s.revision,args);
+    else if(tool=="fastener_recipe")out=fastenerRecipe(s.document,s.revision,args);
+    else if(tool=="manufacturing_inspect")out=inspectManufacturing(s.document,args,s.revision);
     else if(tool=="physics_inspect")out=inspectPhysics(s,args);
     else if(tool=="materials_inspect")out=inspectMaterials(s.document);
     else if(tool=="geometry_query")out=geometry(s,args);
@@ -218,6 +222,7 @@ V evaluatePostconditions(AgentSession& s,const V& checks){
 }
 void appendAgentFeatureTools(V& tools){
     appendComponentLibraryTools(tools);
+    appendBomTools(tools);
     struct Definition{const char* name;const char* description;const char* schema;};
     const Definition defs[]={
       {"failure_info","List bounded recent local CAD rejection records, or inspect exact failed commands/checks by id. The frozen baseline model is never included in this response. Repeated failures are evidence, not an instruction to retry.",R"({"type":"object","properties":{"id":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":8}},"additionalProperties":false})"},

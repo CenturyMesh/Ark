@@ -92,7 +92,12 @@ units and model limits. A prepared apply refreshes Studio display buffers while
 reusing the already evaluated document. Elastic material properties save as
 version 20; ordinary density/appearance documents retain their earlier version.
 
-The current API has **70 tools**. `agent_onboard{topic:"automation"}` introduces
+The current API has **73 tools**. BOM/fastener onboarding introduces `bom_inspect`,
+`bom_export` and `fastener_recipe`; see [the BOM contract](BOM.md).
+Maintain part metadata on final physical definitions, inspect missing fields
+and actual quantities, and review mounting hardware for detailed assemblies.
+Generic fastener recipes are not supplier catalogue evidence.
+`agent_onboard{topic:"automation"}` introduces
 `geometry_query`, `math_eval`, `query_batch`, `doc_preview`, `placement_plan`,
 `pattern_plan` and `design_solve`. Linked curve and hole patterns save as
 document version 19. See [agent automation](AGENT_AUTOMATION.md) for contracts,

@@ -1,5 +1,6 @@
 // ARK-Point :: serialize.cpp — document persistence over arkjson.
 #include "ark/serialize.hpp"
+#include "ark/bom.hpp"
 #include "ark/iteration_history.hpp"
 #include "ark/document_container.hpp"
 #include "ark/manufacturing.hpp"
@@ -425,6 +426,8 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
     for(const auto& mate:doc.mates)if(mate.type=="rigid"||mate.type=="revolute")r.set("version",Value::makeNum(29));
     if(arcRecipeDocument(doc))r.set("version",Value::makeNum(30));
     for(const auto& mate:doc.mates)if(mate.type=="prismatic"||mate.limits.enabled)r.set("version",Value::makeNum(31));
+    bool bomVersion=!doc.bomDocumentId.empty();for(const auto& feature:doc.features)bomVersion|=feature.part.t==Value::Obj;
+    if(bomVersion){r.set("version",Value::makeNum(32));r.set("bom_document_id",Value::makeStr(doc.bomDocumentId));}
     r.set("units",Value::makeStr("mm"));
     r.set("next_feature_id",Value::makeNum((double)doc.nextFeatureId_));
 
@@ -476,6 +479,7 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
         v.set("id",Value::makeNum((double)f.id));
         v.set("type",Value::makeStr(featureTypeName(f.type)));
         v.set("name",Value::makeStr(f.name));
+        if(f.part.t==Value::Obj)v.set("part",f.part);
         if(!f.manufacturingRoute.empty()){Value manufacturing=Value::makeObj();manufacturing.set("route",Value::makeStr(f.manufacturingRoute));if(f.manufacturingProcess.t==Value::Obj&&!f.manufacturingProcess.obj.empty())manufacturing.set("process",f.manufacturingProcess);v.set("manufacturing",manufacturing);}
         v.set("op",Value::makeNum(f.opInt));
         if(f.suppressed)v.set("suppressed",Value::makeBool(true));
@@ -520,7 +524,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     Value v;
     if(!arkjson::parse(json,v)) return fail("malformed JSON");
     if(v.t!=Value::Obj) return fail("root must be object");
-    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0&&ver->num!=3.0&&ver->num!=4.0&&ver->num!=5.0&&ver->num!=6.0&&ver->num!=7.0&&ver->num!=8.0&&ver->num!=9.0&&ver->num!=10.0&&ver->num!=11.0&&ver->num!=12.0&&ver->num!=13.0&&ver->num!=14.0&&ver->num!=15.0&&ver->num!=16.0&&ver->num!=17.0&&ver->num!=18.0&&ver->num!=19.0&&ver->num!=20.0&&ver->num!=21.0&&ver->num!=22.0&&ver->num!=23.0&&ver->num!=24.0&&ver->num!=25.0&&ver->num!=26.0&&ver->num!=27.0&&ver->num!=28.0&&ver->num!=29.0&&ver->num!=30.0&&ver->num!=31.0)))
+    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0&&ver->num!=3.0&&ver->num!=4.0&&ver->num!=5.0&&ver->num!=6.0&&ver->num!=7.0&&ver->num!=8.0&&ver->num!=9.0&&ver->num!=10.0&&ver->num!=11.0&&ver->num!=12.0&&ver->num!=13.0&&ver->num!=14.0&&ver->num!=15.0&&ver->num!=16.0&&ver->num!=17.0&&ver->num!=18.0&&ver->num!=19.0&&ver->num!=20.0&&ver->num!=21.0&&ver->num!=22.0&&ver->num!=23.0&&ver->num!=24.0&&ver->num!=25.0&&ver->num!=26.0&&ver->num!=27.0&&ver->num!=28.0&&ver->num!=29.0&&ver->num!=30.0&&ver->num!=31.0&&ver->num!=32.0)))
         return fail("unsupported document version");
     Value history;std::string historyError;if(!iterationExpand(v,history,historyError))return fail(historyError);
 
@@ -529,6 +533,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     if(!v.find("features"))return fail("missing features array");
     for(auto key:{"params","sketches","features","planes","canvases","materials"})if(auto a=v.find(key);a && a->t!=Value::Arr)return fail(std::string(key)+" must be an array");
     Document nd;   // parse into scratch; commit only on full success
+    if(const auto* bom=v.find("bom_document_id")){const auto* version=v.find("version");if(!version||version->num<32||bom->t!=Value::Str||!validBomDocumentId(bom->str))return fail("BOM identity requires a valid document version 32 identity");nd.bomDocumentId=bom->str;}
     if(const Value* usage=v.find("usage")){
         const Value* version=v.find("version");if(!version||version->num<17)return fail("Usage ledger requires document version 17");
         if(!usageLedgerFromJson(*usage,nd.usage,err))return false;
@@ -610,6 +615,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
             std::string tn=fv.find("type")?fv.find("type")->asStr():"";
             if(!featureTypeFromName(tn,nf.type)) return fail("unknown feature type: "+tn);
             nf.name=fv.find("name")?fv.find("name")->asStr():"";
+            if(const auto* part=fv.find("part")){if(nd.bomDocumentId.empty())return fail("Part metadata requires persistent BOM identity and version 32");try{nf.part=validatePartMetadata(*part);}catch(const std::exception& error){return fail(error.what());}}
             if(auto manufacturing=fv.find("manufacturing")){
                 auto route=manufacturing->find("route"),version=v.find("version");
                 if(manufacturing->t!=Value::Obj||!route||route->t!=Value::Str||!version||version->asNum()<21)return fail("Manufacturing route requires version 21 object");

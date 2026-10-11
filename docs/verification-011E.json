@@ -1,0 +1,157 @@
+{
+  "iteration": {
+    "sequence": 11,
+    "phase": "E",
+    "code": "011E",
+    "version": "0.9.12",
+    "milestones": [
+      "A.01",
+      "A.03",
+      "B.05",
+      "D.02",
+      "E.01",
+      "E.03"
+    ]
+  },
+  "date": "2026-10-11",
+  "baseline_commit": "84a1c287788bd45360bd26dabbdcd3cb9b26e6fa",
+  "milestones": {
+    "A.01": "Verified locally: generated release identity",
+    "A.03": "Verified locally: persistence and package regression scope",
+    "B.05": "Partial: BOM inspection/export; drawing production remains planned",
+    "D.02": "Partial: tool contracts, guides and instructions; no live model adherence qualification",
+    "E.01": "Partial: local identity and ark.bom.v1; cross-feature/product reconciliation pending",
+    "E.03": "Planned: no MeshWorks adapter or remote import"
+  },
+  "tests": {
+    "passed": 64,
+    "failed": 0,
+    "seconds": 111.33,
+    "log": "out/ark-011E-package-tests.log",
+    "live_provider_calls": 0,
+    "ui": [
+      {
+        "test": "startup-ui",
+        "exit": 0,
+        "seconds": 3.203,
+        "stdout": "",
+        "stderr": ""
+      },
+      {
+        "test": "assistant-ui",
+        "exit": 0,
+        "seconds": 17.515,
+        "stdout": "shader_cache available=1 hits=0 misses=0 rejected=0 writes=0\r\nshot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-011E-assistant-ui.png (1600x1000)\r\n",
+        "stderr": ""
+      }
+    ]
+  },
+  "bom": {
+    "tool_count": 73,
+    "document_version_with_bom": 32,
+    "older_documents_readable": true,
+    "metadata_only_preserves_brep": true,
+    "undo_redo_verified": true,
+    "stale_revision_rejects_export": true,
+    "existing_export_never_replaced": true,
+    "library_source_metadata_and_hashes_retained": true,
+    "default_page_items": 64,
+    "default_page_occurrences": 128,
+    "native_fastener_definitions": 3,
+    "patterned_occurrences": 12,
+    "hidden_occurrences_counted": true,
+    "construction_operands_excluded": true,
+    "part_number_collisions_flagged": true
+  },
+  "example": {
+    "json": "out/011E-bom-example.json",
+    "bytes": 6010,
+    "sha256": "c480b1a5755f60176fe081a0f82cb7bdb0ec5043cc52acb6a2c91e8ac87f502d",
+    "owned_synthetic_geometry": true,
+    "sourced_commercial_part": false,
+    "schema_structural_subset_audit": "passed; no claim of external complete JSON Schema validator"
+  },
+  "schema": {
+    "path": "docs/schemas/ark-bom-v1.schema.json",
+    "sha256": "b626603781698c893407b7e2312edfdb6b25decd1193d27a2ba63aab833d4954"
+  },
+  "package": {
+    "path": "out/releases-011E/ark-windows-x64-0.9.12.zip",
+    "sha256": "9a0661de036d6d1d5a8d79e7eefedf8d97178ecd1659e3446c2912bf716a1b35",
+    "bytes": 33183770,
+    "user_ark_documents": 0,
+    "installed_matching_files": 63,
+    "includes_bom_guide_and_schema": true
+  },
+  "runtime_sha256": {
+    "ark-studio.exe": "0a8046f6e1298d57e02bf9f8dffa1a3258f0e3e072f3d742405446edee6cc0d2",
+    "ark-cli.exe": "e06c0fddee0e95004675f538c003e5c36c566da08074201105c5bea9a2f1be01",
+    "ark-mcp.exe": "f50b35a852e4023435b52d373dfc8e4d45c28ad83c9461679c3dd8f8047e017e",
+    "ark-occt-worker.exe": "62450210ec9f217dbb15c2ba3d18502e809bbdbaadf31f3e03fd99aa8552d601",
+    "ark-benchmark.exe": "e823a93d0a35257e28f9a9b4066f1acaa0aecb1962a58275e708fc66eef8ef09"
+  },
+  "installation": {
+    "state": {
+      "current": "0.9.11",
+      "pending": "0.9.12",
+      "schema": 1,
+      "activating": "",
+      "previous": "0.9.10"
+    },
+    "activation": "Prepared for next stable-launcher start; currently loaded runtimes are not replaced.",
+    "preserved_runtime": "010D / 0.9.11, observed process 59684",
+    "prior_runtime_sha256_unchanged": true,
+    "installed_mcp_smoke": {
+      "initialized": {
+        "protocolVersion": "2025-11-25",
+        "capabilities": {
+          "tools": {}
+        },
+        "serverInfo": {
+          "name": "ark",
+          "version": "0.9.12",
+          "iteration_code": "011E"
+        },
+        "instructions": "Call agent_onboard first to discover ARK capabilities, current document/revision, modeling contracts and validation limits. Before mechanical authoring, read agent_onboard topic manufacturing and the relevant module topic. Choose each component's manufacturing route explicitly: use sheet.create and sheet operations for fabricated sheet, construction_frame for frame stock, exact native solids for machined parts, and label purchased envelopes. Inspect doc_info detail design for feature roles, sketches and manufacturing origins; a positioned native_solid may originate from a sheet. Verify the module's inspection and export limits before claiming fabrication readiness."
+      },
+      "loaded_owned_example": true,
+      "persistent_identity_matches": true,
+      "authoring_sha256_matches": true,
+      "page_items": 2,
+      "page_occurrences": 3,
+      "total_occurrences": 12,
+      "partial": true,
+      "no_user_document_loaded": true
+    }
+  },
+  "drawings": {
+    "baseline_count": 31,
+    "hashes_unchanged": 31,
+    "changed_during_delivery": 0,
+    "names_and_contents_excluded": true
+  },
+  "initial_failures": [
+    "Metadata-only commit initially omitted part metadata and identity; fixed and checked before undo/redo.",
+    "Historical source-library test expected v27; updated for explicit BOM v32 while retaining a separate v24-read test.",
+    "Discovery test expected 70 tools; updated for 73 advertised tools."
+  ],
+  "evidence_sha256": {
+    "out/ark-011E-package-build.log": "1dbc7e130627cd68ad4a5853ce8852468af8d78e142bdaa7710649405ce1c73c",
+    "out/ark-011E-package-tests.log": "b3517342677edb88349e1f3a63dd56d5cac06a0bc6d2072fdbb9fa373ac9639e",
+    "out/ark-011E-package-tests.xml": "94b0ca0b55577233d5eec5493f60525d62eb2b54beaa160ce07812940cecf202",
+    "out/ark-011E-ui-verification.json": "434c93428818bfcc9e542008f2b609c3b9419199b8489f4f64da835329f47eb5",
+    "out/ark-011E-contract-tests.log": "9e1201a60707846d8e8a146e9deb4f1ec0c013bfb677b3d7d6dded76e31d16e5",
+    "out/ark-011E-bom-first.log": "3a28572ba512aa3944feb88735b1bacd63a80f6b37866d64aa60710366083d1d",
+    "out/ark-011E-tests.log": "bbf539ee33716050fc2a6be1e728bd8ecea41603a986b77c8bfb21954b94a52c",
+    "out/ark-011E-example-receipt.json": "5f3b89305b0dc5964e7824fb95af4265ad3be85cd887451c9f65cf36e8cedc62",
+    "out/ark-011E-installed-mcp.json": "32338d8e0f6a8eaf27146d84ad06fb87b1785f757b9ed36bc3ae05c95af35cb6"
+  },
+  "limits": [
+    "No live model pilot, supplier lookup/download or MeshWorks connection was performed.",
+    "Generic fasteners have no modeled threads/drives/tolerances/standard certification; nut is an annular envelope, not a hex nut.",
+    "Metadata completeness does not certify fastening, manufacture, supplier identity or procurement.",
+    "Replacing a feature creates a new part identity; cross-feature identity reconciliation is not implemented.",
+    "Existing sessions keep their loaded runtime and are not migrated.",
+    "Local validation is not hosted CI, online OTA deployment or manufacturing qualification."
+  ]
+}

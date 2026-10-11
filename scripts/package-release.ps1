@@ -53,6 +53,10 @@ try {
     }
     Copy-Item -LiteralPath (Join-Path $repository 'updates/ARK.cmd') -Destination $staging
     Copy-Item -LiteralPath (Join-Path $repository 'docs/UPDATES.md') -Destination (Join-Path $staging 'UPDATES.md')
+    $contracts = Join-Path $staging 'assets/contracts'
+    [IO.Directory]::CreateDirectory($contracts) | Out-Null
+    Copy-Item -LiteralPath (Join-Path $repository 'docs/BOM.md') -Destination (Join-Path $contracts 'BOM.md')
+    Copy-Item -LiteralPath (Join-Path $repository 'docs/schemas/ark-bom-v1.schema.json') -Destination $contracts
     $licenses = Join-Path $staging 'licenses'
     [IO.Directory]::CreateDirectory($licenses) | Out-Null
     Copy-Item -LiteralPath (Join-Path $repository 'third_party/mapbox/LICENSE') -Destination (Join-Path $licenses 'mapbox-earcut-ISC.txt')

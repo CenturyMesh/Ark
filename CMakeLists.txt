@@ -13,6 +13,7 @@ target_include_directories(ark-sqlite PUBLIC third_party/sqlite)
 target_compile_definitions(ark-sqlite PRIVATE SQLITE_ENABLE_FTS5=1 SQLITE_THREADSAFE=1 SQLITE_OMIT_LOAD_EXTENSION=1 SQLITE_DQS=0 SQLITE_DEFAULT_FOREIGN_KEYS=1)
 target_link_libraries(ark-sqlite PUBLIC Threads::Threads)
 add_library(ark STATIC
+  src/bom.cpp
   src/updates.cpp
   src/document_container.cpp
   src/iteration_history.cpp
@@ -256,6 +257,11 @@ target_link_libraries(ark-component-library-tools-tests PRIVATE ark)
 add_test(NAME component-library-tools COMMAND ark-component-library-tools-tests)
 set_tests_properties(component-library-tools PROPERTIES TIMEOUT 120)
 if(ARK_WITH_OCCT)
+  add_executable(ark-bom-tests tests/bom_tests.cpp)
+  target_link_libraries(ark-bom-tests PRIVATE ark)
+  add_dependencies(ark-bom-tests ark-occt-worker)
+  add_test(NAME bom-contract COMMAND ark-bom-tests)
+  set_tests_properties(bom-contract PROPERTIES TIMEOUT 120)
   target_compile_definitions(ark-component-library-tools-tests PRIVATE ARK_COMPONENT_LIBRARY_NATIVE_TESTS=1)
   add_dependencies(ark-component-library-tools-tests ark-occt-worker)
 endif()

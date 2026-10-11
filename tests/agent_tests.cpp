@@ -153,7 +153,8 @@ int main(){
     CHECK(documentFromJson(R"({"version":14,"features":[]})",invalid,&error));
     CHECK(documentFromJson(R"({"version":30,"features":[]})",invalid,&error));
     CHECK(documentFromJson(R"({"version":31,"features":[]})",invalid,&error));
-    CHECK(!documentFromJson(R"({"version":32,"features":[]})",invalid,&error));
+    CHECK(documentFromJson(R"({"version":32,"features":[]})",invalid,&error));
+    CHECK(!documentFromJson(R"({"version":33,"features":[]})",invalid,&error));
     CHECK(error.find("unsupported document version")!=std::string::npos);
     CHECK(!documentFromJson(R"({"version":13,"features":[],"sketches":[{"name":"Plate","entities":[{"kind":"wire","name":"Outline","dof":[0,0,10,0,10,10,0,10,0,0],"segments":[{"kind":"line"},{"kind":"line"},{"kind":"line"},{"kind":"line"}]}],"corners":[{"entity":"Outline","corner":1,"kind":"fillet","size":"2"}]}]})",invalid,&error));
     CHECK(error.find("sketch fillets, sketch chamfers, or mates across assembly groups require document version 14")!=std::string::npos);
@@ -299,6 +300,6 @@ int main(){
         auto inspect=dense.call("native_inspect",json(R"({"id":1})"));
         CHECK(failed(inspect)&&inspect.find("structuredContent")->find("error")->str.find("Density must be a positive finite number of grams per cubic centimetre")!=std::string::npos);
     }
-    CHECK(AgentSession::tools().arr.size()==70);
+    CHECK(AgentSession::tools().arr.size()==73);
     std::cout<<checks<<" checks / "<<failures<<" failures\n";return failures?1:0;
 }

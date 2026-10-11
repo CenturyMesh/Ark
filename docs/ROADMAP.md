@@ -1,7 +1,7 @@
 # ARK — matriz de roadmap A–G
 
-**Data da auditoria:** 11 de outubro de 2026. **Iteração local:** `010D` / `0.9.11`,
-verificada no escopo local e instalada para o próximo arranque; baseline entregue `009B` / `ed0bdb0` (`0.9.10`).
+**Data da auditoria:** 11 de outubro de 2026. **Iteração local:** `011E` / `0.9.12`,
+verificada e instalada para o próximo arranque; baseline `010D` / `84a1c28` (`0.9.11`).
 O baseline histórico `0.9.1`, commit `5e7153f`, não foi rebatizado retroativamente.
 `001A` inicia a convenção pública, com versão técnica `0.9.2` para distribuição.
 `002B` acrescenta recuperação do runtime, projeção exata e ferramentas de frame;
@@ -27,6 +27,9 @@ com todas as oito falhas preservadas e sem repetição; D.01 permanece Parcial.
 Ver [escopo e evidência](iterations/009B.md).
 `010D` corrige o contrato de leitura filtrada e a recuperação de pedidos grandes
 em D.02/D.04, preservando revisões, histórico e recibos; ver [verificação](iterations/010D.md).
+`011E` acrescenta a BOM persistente, inspeção paginada, exportação JSON e
+receitas editáveis de fixações; ver [escopo e evidência](iterations/011E.md).
+O adapter MeshWorks e a aquisição de catálogos mecânicos continuam pendentes.
 
 **Visão:** um ambiente CAD onde uma pessoa ou uma equipa de agentes consegue
 transformar uma intenção num produto editável, verificável e preparado para
@@ -111,7 +114,7 @@ O documento ROADMAP_09 é um registo histórico; esta matriz passa a orientar o 
 | B.02 | Sketch e feature tree de uso diário | Parcial; arcos em `005B`, snaps/expressões e parâmetros fonte em `008D`, verificados localmente | Diagnóstico acionável, edição de constraints, reordenação quando válida, suppress/rollback e dependências visíveis; rejeições sem dano ao documento |
 | B.03 | Sólidos e superfícies avançados | Parcial; curvas/ajustes paramétricos em `005B` | Loft/sweep/guias, continuidade medida, patches/trim/thicken e reparação explícita em corpus difícil; não mascarar falhas com meshes |
 | B.04 | Assemblies grandes e configuráveis | Parcial; juntas/limites em `006B`, continuação de mecanismos fechados no escopo local de `008D` | Subassemblies, instâncias reutilizadas, configurações, referências externas e carregamento seletivo; atualizar 1 definição sem duplicar as N ocorrências |
-| B.05 | Desenhos técnicos e intercâmbio | Planeado | Vistas associativas, cortes, cotas/tolerâncias, BOM e exportações com readback; medir perda de informação em STEP/IGES/DXF e no formato nativo |
+| B.05 | Desenhos técnicos e intercâmbio | Parcial; BOM persistente e exportação JSON verificadas localmente na `011E`; desenhos técnicos planeados | Vistas associativas, cortes, cotas/tolerâncias, BOM e exportações com readback; medir perda de informação em STEP/IGES/DXF e no formato nativo |
 
 ### C — Engenharia e fabrico
 
@@ -137,9 +140,9 @@ O documento ROADMAP_09 é um registo histórico; esta matriz passa a orientar o 
 
 | ID | Milestone | Estado inicial | Aceitação e dependências |
 |---|---|---|---|
-| E.01 | Identidade e contrato comuns | Planeado | IDs de documento/parte/ocorrência/revisão, unidades, source hash, geometry digest, proveniência e idempotência; schemas versionados e testes de compatibilidade |
+| E.01 | Identidade e contrato comuns | Parcial; identidade local e contrato `ark.bom.v1` na `011E`; reconciliação entre produtos planeada | IDs de documento/parte/ocorrência/revisão, unidades, source hash, geometry digest, proveniência e idempotência; schemas versionados e testes de compatibilidade |
 | E.02 | ARK ↔ STAGE | Planeado | Publicar e consumir artefactos por contrato; preservar source, corpo, opções e versão do produtor; apresentar rejeição sem geometria substituta |
-| E.03 | ARK ↔ MeshWorks | Planeado | Adapter `ark` explícito e autorizado; BOM incremental com quantidades e configurações; revisões CAD não apagam procurement/release; não fingir ser SolidWorks |
+| E.03 | ARK ↔ MeshWorks | Planeado; BOM local da `011E` prepara o input, sem adapter ou import remoto | Adapter `ark` explícito e autorizado; BOM incremental com quantidades e configurações; revisões CAD não apagam procurement/release; não fingir ser SolidWorks |
 | E.04 | STAGE/ARK ↔ Trace | Planeado | Contornos canónicos entram por result_id/digest; retornam placements/stock/utilização/package; grain, kerf e unidades explícitos; consumo de stock é ação separada |
 | E.05 | Piloto de digitalização ponta a ponta | Planeado | Design → revisão aprovada → flat → nest → pacote → BOM/custo/produção; testar alteração de peça, revogação, retry, rejeição e remanescente sem efeitos duplicados |
 

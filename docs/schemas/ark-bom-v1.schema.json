@@ -1,0 +1,340 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ark:bom:v1",
+  "title": "ARK BOM v1 complete local export",
+  "description": "Full exported snapshots only. bom_inspect adds pagination fields. Declared metadata and source custody do not imply manufacturing or purchasing qualification.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "const": "ark.bom.v1"
+    },
+    "document_id": {
+      "type": "string",
+      "pattern": "^ark-[0-9a-f]{32}$"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "units": {
+      "const": "mm"
+    },
+    "scope": {
+      "enum": [
+        "terminal_output_definitions",
+        "placed_occurrences_including_hidden"
+      ]
+    },
+    "authoring_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "content_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "part_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "metadata_authority": {
+            "type": "string"
+          },
+          "manufacturing_route": {
+            "type": "string"
+          },
+          "geometry_kind": {
+            "type": "string"
+          },
+          "material": {
+            "type": "string"
+          },
+          "library_component_id": {
+            "type": "string"
+          },
+          "source_license": {
+            "type": "string"
+          },
+          "source_provenance": {
+            "type": "string"
+          },
+          "source_download_url": {
+            "type": "string"
+          },
+          "feature": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "metadata": {
+            "type": "object",
+            "properties": {
+              "part_number": {
+                "type": "string",
+                "maxLength": 2048
+              },
+              "description": {
+                "type": "string",
+                "maxLength": 2048
+              },
+              "part_revision": {
+                "type": "string",
+                "maxLength": 2048
+              },
+              "category": {
+                "type": "string",
+                "maxLength": 2048
+              },
+              "procurement": {
+                "type": "string",
+                "maxLength": 2048
+              },
+              "manufacturer": {
+                "type": "string",
+                "maxLength": 2048
+              },
+              "manufacturer_part_number": {
+                "type": "string",
+                "maxLength": 2048
+              },
+              "supplier": {
+                "type": "string",
+                "maxLength": 2048
+              },
+              "supplier_part_number": {
+                "type": "string",
+                "maxLength": 2048
+              },
+              "source_url": {
+                "type": "string",
+                "maxLength": 2048
+              },
+              "datasheet_url": {
+                "type": "string",
+                "maxLength": 2048
+              },
+              "standard": {
+                "type": "string",
+                "maxLength": 2048
+              },
+              "specification": {
+                "type": "string",
+                "maxLength": 2048
+              },
+              "representation": {
+                "type": "string",
+                "maxLength": 2048
+              },
+              "sourcing_status": {
+                "type": "string",
+                "maxLength": 2048
+              }
+            },
+            "additionalProperties": false
+          },
+          "missing_or_review_required": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "metadata_complete": {
+            "type": "boolean"
+          },
+          "brep_base64_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "source_custody": {
+            "type": "object",
+            "properties": {
+              "source_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "brep_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "body_index": {
+                "type": "integer",
+                "minimum": -2
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "part_id",
+          "feature",
+          "name",
+          "quantity",
+          "unit",
+          "metadata",
+          "metadata_authority",
+          "manufacturing_route",
+          "geometry_kind",
+          "material",
+          "missing_or_review_required",
+          "metadata_complete"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "occurrences": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "part_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "feature": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "node": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "copy": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "parent": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "visible": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "part_id",
+          "name",
+          "feature",
+          "node",
+          "copy",
+          "parent",
+          "visible"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "groups": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "node": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "parent": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "node",
+          "parent",
+          "name"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "unplaced_annotated_definitions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "feature": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature",
+          "reason"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "fastener_quantity": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "fastening_completeness": {
+      "type": "string"
+    },
+    "metadata_complete": {
+      "type": "boolean"
+    },
+    "manufacturing_qualified": {
+      "const": false
+    },
+    "meshworks_adapter": {
+      "const": "not_implemented"
+    },
+    "identity_scope": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "document_id",
+    "revision",
+    "units",
+    "scope",
+    "authoring_sha256",
+    "content_sha256",
+    "items",
+    "occurrences",
+    "groups",
+    "unplaced_annotated_definitions",
+    "issues",
+    "fastener_quantity",
+    "fastening_completeness",
+    "metadata_complete",
+    "manufacturing_qualified",
+    "meshworks_adapter",
+    "identity_scope"
+  ],
+  "additionalProperties": false
+}

@@ -88,6 +88,7 @@ struct Feature {
     arkjson::Value nativeSpec; // authored native geometry; evaluated worker output is never serialized
     int opInt = 0;                                    // Boolean: 0 union 1 cut 2 intersect
     bool suppressed = false;                          // history and parameters stay; recompute skips the body
+    arkjson::Value part;                              // explicit BOM metadata, independent of geometry
     std::string material;                             // named document material, empty uses default
     std::string manufacturingRoute;                   // explicit intent; empty is undeclared
     arkjson::Value manufacturingProcess;              // bounded caller-declared route-specific process inputs
@@ -271,6 +272,7 @@ public:
     std::vector<Feature> features;
     std::vector<Material> materials;
     UsageLedger usage;
+    std::string bomDocumentId; // assigned on explicit BOM authoring; stable across edits/save
     arkjson::Value iterationHistory; // immutable authoring journal; no evaluated geometry or usage snapshots
     u64 addFeature(Feature f);                    // returns id
     Feature* find(u64 id);

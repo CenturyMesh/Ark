@@ -1,12 +1,18 @@
-# ARK 010D — Agent-Ready Kernel
+# ARK 011E — Agent-Ready Kernel
 
 **Parametric CAD for people and agents.**
 
-Public iteration **010D** uses runtime **0.9.11**. The three digits are globally
+Public iteration **011E** uses runtime **0.9.12**. The three digits are globally
 sequential; A–G identifies the roadmap phase, not the month. See the mandatory
 [development rules](AGENTS.md), the [35-milestone roadmap](docs/ROADMAP.md), and
 the [open-source / €200 perpetual license analysis](docs/COMMERCIAL_STRATEGY.md).
 `release.json` is the single source of release identity.
+
+011E adds persistent physical-part BOM metadata, material and source references,
+occurrence quantities and versioned JSON export. Agents can inspect missing
+fields and author explicitly dimensioned simplified fasteners through native
+recipes. The MeshWorks adapter remains planned. [BOM contract](docs/BOM.md) and
+[scope/verification](docs/iterations/011E.md).
 
 010D aligns filtered `doc_info` discovery and argument diagnostics, and projects
 large completed tool histories into bounded provider requests while retaining
