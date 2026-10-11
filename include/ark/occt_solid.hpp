@@ -19,4 +19,5 @@ arkjson::Value geometryReferenceShapeNative(const arkjson::Value& request);
 arkjson::Value pointDistanceNative(const arkjson::Value& request);
 // Volume centroid of one exact solid, in the solid's local millimetre frame.
 arkjson::Value solidCentroidNative(const arkjson::Value& request);
+arkjson::Value measurementPickNative(const arkjson::Value& request);
 }

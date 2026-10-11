@@ -1,7 +1,7 @@
 # ARK — matriz de roadmap A–G
 
-**Data da auditoria:** 11 de outubro de 2026. **Iteração local:** `012D` / `0.9.13`,
-com verificação local; baseline `011E` / `e0a1d81` (`0.9.12`).
+**Data da auditoria:** 11 de outubro de 2026. **Iteração local:** `013B` / `0.9.14`,
+com verificação local; baseline `012D` / `2d9f1ad` (`0.9.13`).
 O baseline histórico `0.9.1`, commit `5e7153f`, não foi rebatizado retroativamente.
 `001A` inicia a convenção pública, com versão técnica `0.9.2` para distribuição.
 `002B` acrescenta recuperação do runtime, projeção exata e ferramentas de frame;
@@ -32,6 +32,8 @@ receitas editáveis de fixações; ver [escopo e evidência](iterations/011E.md)
 `012D` acrescenta registos de ações e avaliações obrigatórias, previews de sketches
 em novos planos, contexto multimodal limitado ao transporte e caches de geometria.
 Ver [escopo e evidência](iterations/012D.md). A.04/B.01/D.02/D.04 permanecem Parcial.
+`013B` acrescenta medição 2D/3D e unidades de apresentação configuráveis;
+ver [escopo e evidência](iterations/013B.md). B.01 permanece Parcial.
 O adapter MeshWorks e a aquisição de catálogos mecânicos continuam pendentes.
 
 **Visão:** um ambiente CAD onde uma pessoa ou uma equipa de agentes consegue
@@ -113,7 +115,7 @@ O documento ROADMAP_09 é um registo histórico; esta matriz passa a orientar o 
 
 | ID | Milestone | Estado inicial | Aceitação e dependências |
 |---|---|---|---|
-| B.01 | Navegação e edição legíveis | Parcial; seleção `006B`, arrasto `007B`, desenho/cotas `008D`; apresentação gráfica e opções de path tracing verificadas no escopo local da `009B` | Cubo persistente, setas/letras sem fundo, orbit livre, seleção/Spotlight, atalhos e DPI; controlos sem cortes nas resoluções suportadas |
+| B.01 | Navegação e edição legíveis | Parcial; seleção `006B`, arrasto `007B`, desenho/cotas `008D`; apresentação gráfica na `009B`; medição 2D/3D e unidades verificadas localmente na `013B` | Cubo persistente, setas/letras sem fundo, orbit livre, seleção/Spotlight, atalhos e DPI; controlos sem cortes nas resoluções suportadas |
 | B.02 | Sketch e feature tree de uso diário | Parcial; arcos em `005B`, snaps/expressões e parâmetros fonte em `008D`, verificados localmente | Diagnóstico acionável, edição de constraints, reordenação quando válida, suppress/rollback e dependências visíveis; rejeições sem dano ao documento |
 | B.03 | Sólidos e superfícies avançados | Parcial; curvas/ajustes paramétricos em `005B` | Loft/sweep/guias, continuidade medida, patches/trim/thicken e reparação explícita em corpus difícil; não mascarar falhas com meshes |
 | B.04 | Assemblies grandes e configuráveis | Parcial; juntas/limites em `006B`, continuação de mecanismos fechados no escopo local de `008D` | Subassemblies, instâncias reutilizadas, configurações, referências externas e carregamento seletivo; atualizar 1 definição sem duplicar as N ocorrências |

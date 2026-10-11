@@ -1,0 +1,102 @@
+{
+  "iteration": {
+    "sequence": 13,
+    "phase": "B",
+    "code": "013B",
+    "version": "0.9.14",
+    "milestones": [
+      "A.01",
+      "A.03",
+      "B.01"
+    ]
+  },
+  "date": "2026-10-11",
+  "baseline_commit": "2d9f1ad85706240d7a8f50fe2146d3d3abacc731",
+  "scope": "A.01/A.03/B.01 local measurement and presentation-unit qualification",
+  "native_tests": {
+    "passed": 66,
+    "failed": 0,
+    "seconds": 91.72,
+    "log": "out/013B-private/tests.log"
+  },
+  "ui": [
+    {
+      "test": "measurement-ui",
+      "exit": 0,
+      "seconds": 1.125
+    },
+    {
+      "test": "startup-ui",
+      "exit": 0,
+      "seconds": 3.125
+    },
+    {
+      "test": "render-ui",
+      "exit": 0,
+      "seconds": 2.407
+    }
+  ],
+  "visual_evidence": [
+    {
+      "path": "out/013B-private/ui-measurement-ui.png.2d.png",
+      "sha256": "842007d9e414982c18e54d4300705d9300f04f90ed170f2788413b943cbd81f0",
+      "inspected": true
+    },
+    {
+      "path": "out/013B-private/ui-measurement-ui.png.3d.png",
+      "sha256": "b61d8535a139173b40f53a5f85f4b8eb0c618a2040d323a6ec7e06c5eb307732",
+      "inspected": true
+    },
+    {
+      "path": "out/013B-private/ui-measurement-ui.png.units.png",
+      "sha256": "e22c13c06a1c9ca141f7dd05f36c30a0dc8ac22323bd239b00f4483db12c8d07",
+      "inspected": true
+    }
+  ],
+  "package": {
+    "entries": 75,
+    "bytes": 33331156,
+    "sha256": "ad00705b73840757469c30792e91523f609877d6794c25721d81289dc5b648e5",
+    "runtime_executables_match": true,
+    "drawings": 0,
+    "notices_and_contracts": true
+  },
+  "installation": {
+    "observed_processes_preserved": true,
+    "observed_live_processes": 1,
+    "state": {
+      "current": "0.9.13",
+      "pending": "0.9.14",
+      "schema": 1,
+      "activating": "",
+      "previous": "0.9.12"
+    },
+    "changed_during_install": 0,
+    "observed_drawings": 37
+  },
+  "installed_runtime": {
+    "name": "ark",
+    "version": "0.9.14",
+    "iteration_code": "013B"
+  },
+  "installed_files_match": 65,
+  "measurement_authority": {
+    "native": "exact B-rep camera-ray intersection, optional visible-vertex acquisition",
+    "mesh_only": "explicit display mesh estimate",
+    "2d": "active plane coordinates and authored sketch/grid acquisition",
+    "entered": "explicit coordinates in selected length unit"
+  },
+  "defaults": {
+    "length": "mm",
+    "mass": "g",
+    "volume": "L",
+    "significant_digits": 6
+  },
+  "persistence": "Studio application preferences; canonical geometry and document schema unchanged",
+  "limits": [
+    "Point-to-point, not whole-face minimum distance or angle measurement.",
+    "Explicit-mm authoring fields and API/export contracts retain canonical units.",
+    "Temporary measurements clear on changed document or display-only geometry preview."
+  ],
+  "live_pilot_new_attempts": 0
+}

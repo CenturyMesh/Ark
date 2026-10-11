@@ -57,6 +57,7 @@ try {
     [IO.Directory]::CreateDirectory($contracts) | Out-Null
     Copy-Item -LiteralPath (Join-Path $repository 'docs/BOM.md') -Destination (Join-Path $contracts 'BOM.md')
     Copy-Item -LiteralPath (Join-Path $repository 'docs/AGENT_ACTIVITY.md') -Destination (Join-Path $contracts 'AGENT_ACTIVITY.md')
+    Copy-Item -LiteralPath (Join-Path $repository 'docs/MEASUREMENT.md') -Destination (Join-Path $contracts 'MEASUREMENT.md')
     Copy-Item -LiteralPath (Join-Path $repository 'docs/schemas/ark-bom-v1.schema.json') -Destination $contracts
     $licenses = Join-Path $staging 'licenses'
     [IO.Directory]::CreateDirectory($licenses) | Out-Null

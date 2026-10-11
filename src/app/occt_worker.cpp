@@ -40,6 +40,7 @@ int runWorker(const fs::path& requestPath,const fs::path& resultPath){
         else if(op=="clearance")result=clearanceNative(field("request"));
         else if(op=="point_distance")result=pointDistanceNative(field("request"));
         else if(op=="solid_centroid")result=solidCentroidNative(field("request"));
+        else if(op=="measurement_pick")result=measurementPickNative(field("request"));
         else if(op=="geometry_query")result=geometryQueryNative(field("request"));
         else if(op=="project_reference")result=projectReferenceNative(field("request"));
         else if(op=="import_sheet")result=importSheetNative(request);
