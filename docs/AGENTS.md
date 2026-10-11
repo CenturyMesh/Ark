@@ -13,7 +13,8 @@ the [commercial strategy](COMMERCIAL_STRATEGY.md) do not authorize a license cha
 or publication of the private source repository.
 
 The reusable component library adds nine `library_*` tools, bringing discovery
-to **66 document/library/history tools**. Call `agent_onboard{topic:"components"}` for
+to 66 document/library/history tools; `object_context` adds the 67th in `006B`.
+Call `agent_onboard{topic:"components"}` for
 typed metadata and reuse rules when real standard/purchased components are required.
 For that task, search the local catalog first, acquire and
 validate original STEP bytes, keep declared metadata separate from native
@@ -90,7 +91,7 @@ units and model limits. A prepared apply refreshes Studio display buffers while
 reusing the already evaluated document. Elastic material properties save as
 version 20; ordinary density/appearance documents retain their earlier version.
 
-The current API has **66 tools**. `agent_onboard{topic:"automation"}` introduces
+The current API has **67 tools**. `agent_onboard{topic:"automation"}` introduces
 `geometry_query`, `math_eval`, `query_batch`, `doc_preview`, `placement_plan`,
 `pattern_plan` and `design_solve`. Linked curve and hole patterns save as
 document version 19. See [agent automation](AGENT_AUTOMATION.md) for contracts,

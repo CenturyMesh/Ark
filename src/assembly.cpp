@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <limits>
 #include <set>
 #include <stdexcept>
 #include <unordered_map>
@@ -67,7 +68,36 @@ struct PreparedMate {
     const AssemblyMate* mate=nullptr;
     Mat4 a,b;
     double target=0;
+    bool limited=false;
+    double minimum=0,maximum=0;
 };
+void evaluateLimits(const AssemblyMate& mate,const ExprEnv& env,bool& limited,double& minimum,double& maximum){
+    limited=mate.limits.enabled;if(!limited)return;
+    if(mate.type!="revolute"&&mate.type!="prismatic")throw std::runtime_error("ASSEMBLY_INVALID_JOINT_LIMITS: limits require revolute or prismatic");
+    auto number=[&](const std::string& expression){bool ok=false;const double value=evalExpr(expression,env,&ok);
+        if(!ok||!std::isfinite(value)||std::fabs(value)>1e6)throw std::runtime_error("ASSEMBLY_INVALID_JOINT_LIMITS: bounds must evaluate within +/-1e6");return value;};
+    minimum=number(mate.limits.min);maximum=number(mate.limits.max);
+    if(minimum>maximum)throw std::runtime_error("ASSEMBLY_INVALID_JOINT_LIMITS: min must not exceed max");
+    if(mate.type=="revolute"&&maximum-minimum>=360)throw std::runtime_error("ASSEMBLY_INVALID_JOINT_LIMITS: revolute interval must span less than 360 degrees; multi-turn limits are unsupported");
+}
+PreparedMate preparedConstraint(const AssemblyMotionRelation& constraint){
+    return {&constraint.mate,constraint.localA,constraint.localB,constraint.target,constraint.limited,constraint.minimum,constraint.maximum};
+}
+double jointCoordinate(const PreparedMate& mate,const std::unordered_map<u64,Mat4>& world){
+    const Mat4 a=world.at(mate.mate->a)*mate.a,b=world.at(mate.mate->b)*mate.b;
+    if(mate.mate->type=="prismatic")return (origin(b)-origin(a)).dot(axis(a));
+    const Vec3 xa=a.transformDir({1,0,0}),xb=b.transformDir({1,0,0});
+    double angle=rad2deg(std::atan2(axis(a).dot(xa.cross(xb)),xa.dot(xb)));
+    // A sub-turn interval identifies one physical angular branch, including
+    // intervals which cross the atan2 +/-180-degree cut. No turn count is inferred.
+    if(mate.limited)angle+=360*std::round(((mate.minimum+mate.maximum)*.5-angle)/360);
+    return angle;
+}
+double limitError(double position,double minimum,double maximum){return std::max({0.,minimum-position,position-maximum});}
+double limitRoundoff(double position,double minimum,double maximum){return 64*std::numeric_limits<double>::epsilon()*
+    std::max({1.,std::fabs(position),std::fabs(minimum),std::fabs(maximum)});}
+bool satisfiedLimit(const AssemblyMateResidual& r){return std::isfinite(r.limitError)&&
+    (!r.limited||(std::isfinite(r.coordinate)&&r.limitError<=limitRoundoff(r.coordinate,r.min,r.max)));}
 struct MateState {Vec3 pa,pb,za,zb;double dot=0;};
 MateState state(const PreparedMate& m,const std::unordered_map<u64,Mat4>& world){
     const Mat4 a=world.at(m.mate->a)*m.a,b=world.at(m.mate->b)*m.b;
@@ -81,9 +111,13 @@ void residual(const PreparedMate& m,const std::unordered_map<u64,Mat4>& world,
     const auto s=state(m,world);
     const Vec3 d=s.pb-s.pa,c=s.za.cross(s.zb);
     const auto& type=m.mate->type;
-    if(type=="concentric"){
+    if(type=="concentric"||type=="prismatic"){
         append(d-s.za*d.dot(s.za),out);
-        append(c*kAngularWeight,out);
+        if(type=="prismatic"){
+            const Mat4 a=world.at(m.mate->a)*m.a,b=world.at(m.mate->b)*m.b;
+            for(const Vec3 direction:{Vec3{1,0,0},Vec3{0,1,0},Vec3{0,0,1}})
+                append((b.transformDir(direction)-a.transformDir(direction))*kAngularWeight,out);
+        }else append(c*kAngularWeight,out);
     }else if(type=="coincident"||type=="revolute"||type=="rigid"){
         append(d,out);
         if(type=="rigid"){
@@ -141,7 +175,14 @@ AssemblyMateResidual measuredResidual(const PreparedMate& mate,const std::unorde
     const auto s=state(mate,world);const Vec3 gap=s.pb-s.pa;
     AssemblyMateResidual r;r.id=mate.mate->id;r.type=mate.mate->type;
     const double theta=rad2deg(std::atan2(s.za.cross(s.zb).len(),s.dot));
-    if(r.type=="concentric"){r.positionMm=(gap-s.za*gap.dot(s.za)).len();r.angleDeg=std::min(theta,180-theta);}
+    if(r.type=="concentric"||r.type=="prismatic"){
+        r.positionMm=(gap-s.za*gap.dot(s.za)).len();r.angleDeg=std::min(theta,180-theta);
+        if(r.type=="prismatic"){
+            const Mat4 a=world.at(mate.mate->a)*mate.a,b=world.at(mate.mate->b)*mate.b;
+            double trace=0;for(const Vec3 direction:{Vec3{1,0,0},Vec3{0,1,0},Vec3{0,0,1}})trace+=a.transformDir(direction).dot(b.transformDir(direction));
+            r.angleDeg=rad2deg(std::acos(clamp((trace-1)*.5,-1.,1.)));
+        }
+    }
     else if(r.type=="coincident"||r.type=="revolute"||r.type=="rigid"){
         r.positionMm=gap.len();r.angleDeg=theta;
         if(r.type=="rigid"){
@@ -153,10 +194,14 @@ AssemblyMateResidual measuredResidual(const PreparedMate& mate,const std::unorde
     }else if(r.type=="contact"){r.positionMm=std::fabs(gap.dot(s.za));r.angleDeg=180-theta;}
     else if(r.type=="distance"){r.valueError=gap.dot(s.za)-mate.target;r.positionMm=std::fabs(r.valueError);}
     else{r.valueError=theta-rad2deg(mate.target);r.angleDeg=std::fabs(r.valueError);}
+    if(r.type=="revolute"||r.type=="prismatic"){
+        r.hasCoordinate=true;r.coordinate=jointCoordinate(mate,world);r.limited=mate.limited;r.min=mate.minimum;r.max=mate.maximum;
+        if(r.limited)r.limitError=limitError(r.coordinate,r.min,r.max);
+    }
     return r;
 }
 bool satisfiedResidual(const AssemblyMateResidual& r){return std::isfinite(r.positionMm)&&std::isfinite(r.angleDeg)&&
-    r.positionMm<=kPositionTolerance&&r.angleDeg<=kAngleToleranceDeg;}
+    r.positionMm<=kPositionTolerance&&r.angleDeg<=kAngleToleranceDeg&&satisfiedLimit(r);}
 Vec3 rotationVector(const Mat4& r){
     const double trace=r.m[0]+r.m[5]+r.m[10];double w,x,y,z;
     if(trace>0){const double s=2*std::sqrt(trace+1);w=s/4;x=(r.m[6]-r.m[9])/s;y=(r.m[8]-r.m[2])/s;z=(r.m[1]-r.m[4])/s;}
@@ -207,17 +252,18 @@ bool resolveAssembly(const Document& d,std::vector<AssemblyPlacement>& placement
         auto a=byId.find(mate.a),b=byId.find(mate.b);
         if(a==byId.end()||b==byId.end()||mate.a==mate.b)return fail("Mate references invalid assembly instance IDs");
         if(!a->second->feature||!b->second->feature)return fail(isMechanicalMate(mate.type)?"MECHANICAL_GROUP_ENDPOINT_UNSUPPORTED: use individual part instances and shaft coupling for attached rotating parts":"Mates require part instances, not groups");
-        if(mate.type!="concentric"&&mate.type!="coincident"&&mate.type!="revolute"&&mate.type!="rigid"&&mate.type!="contact"&&mate.type!="distance"&&mate.type!="angle"&&!isMechanicalMate(mate.type))return fail("Unsupported assembly mate type: "+mate.type);
+        if(mate.type!="concentric"&&mate.type!="coincident"&&mate.type!="revolute"&&mate.type!="prismatic"&&mate.type!="rigid"&&mate.type!="contact"&&mate.type!="distance"&&mate.type!="angle"&&!isMechanicalMate(mate.type))return fail("Unsupported assembly mate type: "+mate.type);
         if(!std::isfinite(mate.fraction_a)||!std::isfinite(mate.fraction_b)||
            mate.fraction_a<0||mate.fraction_a>1||mate.fraction_b<0||mate.fraction_b>1)return fail("Invalid mate reference fraction");
-        if(isMechanicalMate(mate.type))continue;
+        if(isMechanicalMate(mate.type)){if(mate.limits.enabled)return fail("ASSEMBLY_INVALID_JOINT_LIMITS: limits require revolute or prismatic");continue;}
         if(!mate.motion.empty())return fail("Motion fields require a mechanical mate");
         bool ok=false;double target=evalExpr(mate.value,env,&ok);
         if(!ok||!std::isfinite(target)||std::fabs(target)>1e6)return fail("Invalid assembly mate value #"+std::to_string(mate.id));
         if(mate.type=="angle"&&(target<0||target>180))return fail("Mate angle must be between 0 and 180 degrees");
         if(mate.type!="angle"&&mate.type!="distance"&&std::fabs(target)>1e-12)return fail("Only distance and angle mates accept nonzero values");
         PreparedMate prepared;prepared.mate=&mate;prepared.target=mate.type=="angle"?deg2rad(target):target;
-        try{prepared.a=localReference(d,*a->second,mate.reference_a,mate.fraction_a);
+        try{evaluateLimits(mate,env,prepared.limited,prepared.minimum,prepared.maximum);
+            prepared.a=localReference(d,*a->second,mate.reference_a,mate.fraction_a);
             prepared.b=localReference(d,*b->second,mate.reference_b,mate.fraction_b);}
         catch(const std::exception& e){return fail("Mate #"+std::to_string(mate.id)+" reference: "+e.what());}
         if(!finiteFrame(prepared.a)||!finiteFrame(prepared.b))return fail("Mate reference is not a finite rigid frame");
@@ -294,12 +340,14 @@ bool resolveAssembly(const Document& d,std::vector<AssemblyPlacement>& placement
     std::vector<double> x(columns,0);
     if(columns){
         // Seed full-frame attachment including the exact 180-degree twist pole.
-        for(const auto& mate:mates)if(mate.mate->type=="rigid"){
+        for(const auto& mate:mates)if(mate.mate->type=="rigid"||mate.mate->type=="prismatic"){
             const u64 movable=byId.at(mate.mate->b)->fixed?mate.mate->a:mate.mate->b;
             auto at=std::find_if(moving.begin(),moving.end(),[&](const Mover& mover){return !mover.group&&mover.id==movable;});
             if(at==moving.end())continue;
             const bool moveB=movable==mate.mate->b;
-            const Mat4 target=authored.at(moveB?mate.mate->a:mate.mate->b)*(moveB?mate.a:mate.b)*(moveB?mate.b:mate.a).inverted();
+            const double axial=mate.mate->type=="prismatic"?jointCoordinate(mate,authored):0;
+            const Mat4 target=authored.at(moveB?mate.mate->a:mate.mate->b)*(moveB?mate.a:mate.b)*
+                Mat4::translation({0,0,moveB?axial:-axial})*(moveB?mate.b:mate.a).inverted();
             const Vec3 dt=origin(target)-origin(authored.at(movable)),rv=rotationVector(target*authored.at(movable).inverted());
             auto trial=x;const size_t offset=6*(size_t)(at-moving.begin());
             trial[offset]=dt.x;trial[offset+1]=dt.y;trial[offset+2]=dt.z;
@@ -369,7 +417,8 @@ bool resolveAssembly(const Document& d,std::vector<AssemblyPlacement>& placement
         result.mates.push_back(r);
         result.frames.push_back({mate.mate->id,s.pa,s.za,s.pb,s.zb});
         if(!satisfiedResidual(r))
-            if(!reportUnsatisfied)return fail("Unsatisfied assembly mate #"+std::to_string(r.id));
+            if(!reportUnsatisfied)return fail(!satisfiedLimit(r)?
+                "ASSEMBLY_JOINT_LIMIT_VIOLATION: pose exceeds mate #"+std::to_string(r.id)+" limits":"Unsatisfied assembly mate #"+std::to_string(r.id));
     }
     try{validateMechanicalGraph(d);for(const auto& mate:d.mates)if(isMechanicalMate(mate.type))prepareMotionRelation(d,mate,*byId.at(mate.a),*byId.at(mate.b),world.at(mate.a),world.at(mate.b));}catch(const std::exception& e){return fail(e.what());}
     auto number=[&](const std::string& text,const char* label){bool ok=false;double value=evalExpr(text,env,&ok);if(!ok||!std::isfinite(value)||std::fabs(value)>1e6)error=std::string("Invalid assembly pattern expression: ")+label;return value;};
@@ -407,7 +456,7 @@ bool buildAssemblyMotion(const Document& document,AssemblyMotionProgram& program
         auto retainAxis=[&](u64 node,const Mat4& local){auto existing=program.localAxes.find(node);if(existing==program.localAxes.end()){program.localAxes[node]=local;return;}const Mat4 a=world.at(node)*existing->second,b=world.at(node)*local;const auto gap=origin(b)-origin(a);if(axis(a).dot(axis(b))<1-1e-6||(gap-axis(a)*gap.dot(axis(a))).len()>kPositionTolerance)throw std::runtime_error("MECHANICAL_INCONSISTENT_NODE_AXIS: use one oriented semantic axis per moving instance");};
         for(const auto& mate:document.mates){const auto& a=*nodes.at(mate.a);const auto& b=*nodes.at(mate.b);
             if(isMechanicalMate(mate.type)){auto relation=prepareMotionRelation(document,mate,a,b,world.at(mate.a),world.at(mate.b));retainAxis(mate.a,relation.localA);retainAxis(mate.b,relation.localB);program.relations.push_back(std::move(relation));}
-            else{AssemblyMotionRelation constraint;constraint.mate=mate;constraint.localA=localReference(document,a,mate.reference_a,mate.fraction_a);constraint.localB=localReference(document,b,mate.reference_b,mate.fraction_b);bool ok=false;constraint.target=evalExpr(mate.value,document.buildEnv(),&ok);if(!ok)throw std::runtime_error("Invalid geometric mate target");if(mate.type=="angle")constraint.target=deg2rad(constraint.target);program.geometricConstraints.push_back(std::move(constraint));}
+            else{AssemblyMotionRelation constraint;constraint.mate=mate;constraint.localA=localReference(document,a,mate.reference_a,mate.fraction_a);constraint.localB=localReference(document,b,mate.reference_b,mate.fraction_b);bool ok=false;const auto env=document.buildEnv();constraint.target=evalExpr(mate.value,env,&ok);if(!ok)throw std::runtime_error("Invalid geometric mate target");if(mate.type=="angle")constraint.target=deg2rad(constraint.target);evaluateLimits(mate,env,constraint.limited,constraint.minimum,constraint.maximum);program.geometricConstraints.push_back(std::move(constraint));}
         }
         if(program.relations.empty())throw std::runtime_error("MECHANICAL_NO_COUPLINGS: add chain, gear, shaft, rack_pinion or cam mates");
         return true;
@@ -440,7 +489,7 @@ arkjson::Value inspectAssemblyMotion(const AssemblyMotionProgram& program,u64 dr
     for(const auto& item:angle){const Mat4 frame=baseline.at(item.first)*program.localAxes.at(item.first);const Vec3 pivot=origin(frame),direction=axis(frame);world[item.first]=Mat4::translation(pivot)*Mat4::axisAngle(direction,std::remainder(item.second,2*K_PI))*Mat4::translation(pivot*-1)*baseline.at(item.first);}
     for(const auto& item:displacement){const Mat4 frame=baseline.at(item.first)*program.localAxes.at(item.first);world[item.first]=Mat4::translation(axis(frame)*item.second)*baseline.at(item.first);}
     double maxPosition=0,maxAngle=0;
-    for(const auto& constraint:program.geometricConstraints){PreparedMate prepared{&constraint.mate,constraint.localA,constraint.localB,constraint.target};const auto r=measuredResidual(prepared,world);
+    for(const auto& constraint:program.geometricConstraints){const auto prepared=preparedConstraint(constraint);const auto r=measuredResidual(prepared,world);
         maxPosition=std::max(maxPosition,r.positionMm);maxAngle=std::max(maxAngle,r.angleDeg);
         if(!satisfiedResidual(r))throw std::runtime_error("MECHANICAL_STATIC_CONSTRAINT_VIOLATION: motion violates geometric mate #"+std::to_string(constraint.mate.id));
     }
@@ -476,14 +525,15 @@ bool buildAssemblyManipulation(const Document& document,AssemblyManipulationProg
             if(isMechanicalMate(mate.type))constraint=prepareMotionRelation(document,mate,*nodes.at(mate.a),*nodes.at(mate.b),world.at(mate.a),world.at(mate.b));
             else{constraint.mate=mate;constraint.localA=localReference(document,*nodes.at(mate.a),mate.reference_a,mate.fraction_a);
                 constraint.localB=localReference(document,*nodes.at(mate.b),mate.reference_b,mate.fraction_b);
-                bool ok=false;constraint.target=evalExpr(mate.value,env,&ok);if(!ok)throw std::runtime_error("MANIPULATION_INVALID_BASELINE: invalid mate target");if(mate.type=="angle")constraint.target=deg2rad(constraint.target);}
+                bool ok=false;constraint.target=evalExpr(mate.value,env,&ok);if(!ok)throw std::runtime_error("MANIPULATION_INVALID_BASELINE: invalid mate target");if(mate.type=="angle")constraint.target=deg2rad(constraint.target);
+                evaluateLimits(mate,env,constraint.limited,constraint.minimum,constraint.maximum);}
             program.constraints.push_back(std::move(constraint));
             if(mate.type=="rigid"){const u64 a=cluster(mate.a),b=cluster(mate.b);if(a!=b)program.rigidCluster[b]=a;}
         }
         for(auto& item:program.rigidCluster)item.second=cluster(item.first);
         auto descendants=[&](u64 id){std::vector<u64> parts,queue{id};for(size_t i=0;i<queue.size();++i){const auto& node=*nodes.at(queue[i]);if(node.feature)parts.push_back(node.id);const auto found=children.find(node.id);if(found!=children.end())queue.insert(queue.end(),found->second.begin(),found->second.end());}return parts;};
         for(const auto& candidate:program.constraints){const auto& mate=candidate.mate;
-            if(mate.type!="concentric"&&mate.type!="coincident"&&mate.type!="revolute")continue;
+            if(mate.type!="concentric"&&mate.type!="coincident"&&mate.type!="revolute"&&mate.type!="prismatic")continue;
             auto samePair=[&](const AssemblyMate& other){return (other.a==mate.a&&other.b==mate.b)||(other.a==mate.b&&other.b==mate.a);};
             // All constraints between the same endpoints form one joint bundle;
             // their actual residuals still determine whether a drive is allowed.
@@ -513,8 +563,11 @@ bool buildAssemblyManipulation(const Document& document,AssemblyManipulationProg
             }
             if(unsupported)continue;
             const Mat4 frame=world.at(leftFixed?mate.a:mate.b)*(leftFixed?candidate.localA:candidate.localB);
-            AssemblyManipulationJoint joint;joint.mate=mate.id;joint.type=mate.type;joint.mode="rotate";
+            AssemblyManipulationJoint joint;joint.mate=mate.id;joint.type=mate.type;joint.mode=mate.type=="prismatic"?"translate":"rotate";
             joint.origin=origin(frame);joint.axis=axis(frame).normalized();joint.movingNodes=moving;
+            joint.coordinateSign=leftFixed?1:-1;joint.limited=candidate.limited;joint.min=candidate.minimum;joint.max=candidate.maximum;
+            const auto prepared=preparedConstraint(candidate);
+            if(mate.type=="revolute"||mate.type=="prismatic")joint.position=jointCoordinate(prepared,world);
             program.joints.push_back(joint);
             if(mate.type=="concentric"){joint.mode="translate";program.joints.push_back(std::move(joint));}
         }
@@ -550,7 +603,7 @@ bool selectAssemblyManipulationJoint(const AssemblyManipulationProgram& program,
             if(equivalent){if(candidate.mate<joint.mate)joint=candidate;}else ambiguous=true;
         }
     }
-    if(!joint.mate)return fail("MANIPULATION_NO_GROUNDED_JOINT: requires a grounded revolute/coincident/concentric joint; loops, patterns and coupling boundaries are unsupported");
+    if(!joint.mate)return fail("MANIPULATION_NO_GROUNDED_JOINT: requires a grounded revolute/prismatic/coincident/concentric joint; loops, patterns and coupling boundaries are unsupported");
     if(ambiguous&&!mate){joint={};return fail("MANIPULATION_AMBIGUOUS_JOINT: specify a mate ID for the desired degree of freedom");}
     return true;
 }
@@ -563,6 +616,24 @@ bool previewAssemblyManipulation(const AssemblyManipulationProgram& program,u64 
     if(!std::isfinite(delta)||std::fabs(delta)>1e6)return fail("MANIPULATION_INVALID_DELTA: finite displacement within +/-1e6 degrees or millimetres required");
     AssemblyManipulationJoint joint;if(!selectAssemblyManipulationJoint(program,driver,mate,mode,joint,error))return false;
     try{
+        std::unordered_map<u64,Mat4> baselineWorld;for(const auto& placement:program.baseline)if(!placement.copy)baselineWorld[placement.node]=placement.world;
+        // Check the requested continuous displacement before reducing a rotation
+        // modulo 360. A complete turn cannot tunnel through an authored stop.
+        for(const auto& constraint:program.constraints)if(constraint.limited){
+            const bool movingA=std::binary_search(joint.movingNodes.begin(),joint.movingNodes.end(),constraint.mate.a);
+            const bool movingB=std::binary_search(joint.movingNodes.begin(),joint.movingNodes.end(),constraint.mate.b);
+            if(movingA==movingB)continue;
+            const auto prepared=preparedConstraint(constraint);const double start=jointCoordinate(prepared,baselineWorld);
+            const Vec3 direction=axis(baselineWorld.at(constraint.mate.a)*constraint.localA);
+            const double alignment=direction.dot(joint.axis);
+            if((constraint.mate.type=="revolute"&&mode!="rotate")||(constraint.mate.type=="prismatic"&&mode!="translate")||std::fabs(std::fabs(alignment)-1)>1e-8){
+                if(delta!=0)return fail("MANIPULATION_CONSTRAINT_VIOLATION: requested path is incompatible with limited mate #"+std::to_string(constraint.mate.id));
+                continue;
+            }
+            const double end=start+(movingB?1:-1)*alignment*delta;
+            const double roundoff=limitRoundoff(end,constraint.minimum,constraint.maximum);
+            if(limitError(end,constraint.minimum,constraint.maximum)>roundoff)return fail("MANIPULATION_LIMIT_VIOLATION: requested drive exceeds mate #"+std::to_string(constraint.mate.id)+" limits");
+        }
         const Mat4 change=mode=="rotate"?Mat4::translation(joint.origin)*
             Mat4::axisAngle(joint.axis,deg2rad(std::remainder(delta,360.)))*Mat4::translation(-joint.origin):
             Mat4::translation(joint.axis*delta);
@@ -577,7 +648,7 @@ bool previewAssemblyManipulation(const AssemblyManipulationProgram& program,u64 
             for(int i=0;i<16;++i)if(world.at(id).m[i]!=baseline->world.m[i])return fail("MANIPULATION_FIXED_CONFLICT: drive would move a grounded instance");}
         for(const auto& constraint:program.constraints){
             if(isMechanicalMate(constraint.mate.type))continue; // common rigid carriers preserve their relative pose
-            const PreparedMate prepared{&constraint.mate,constraint.localA,constraint.localB,constraint.target};
+            const auto prepared=preparedConstraint(constraint);
             const auto r=measuredResidual(prepared,world);const auto s=state(prepared,world);
             preview.diagnostics.maxPositionMm=std::max(preview.diagnostics.maxPositionMm,r.positionMm);
             preview.diagnostics.maxAngleDeg=std::max(preview.diagnostics.maxAngleDeg,r.angleDeg);
@@ -614,8 +685,7 @@ bool probeAssemblyMate(Document& document,const AssemblyMate& candidate,Assembly
     if(!resolveAssembly(document,placements,error,&diagnostics,true))return false;
     satisfied=std::isfinite(diagnostics.maxPositionMm)&&std::isfinite(diagnostics.maxAngleDeg)&&
               diagnostics.maxPositionMm<=kPositionTolerance&&diagnostics.maxAngleDeg<=kAngleToleranceDeg;
-    for(const auto& row:diagnostics.mates)if(row.id==extra.id){
-        satisfied=satisfied&&row.positionMm<=kPositionTolerance&&row.angleDeg<=kAngleToleranceDeg;break;}
+    for(const auto& row:diagnostics.mates)satisfied=satisfied&&satisfiedResidual(row);
     return true;
 }
 }

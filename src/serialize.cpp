@@ -424,6 +424,7 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
     if(projectionVersion)r.set("version",Value::makeNum(28));
     for(const auto& mate:doc.mates)if(mate.type=="rigid"||mate.type=="revolute")r.set("version",Value::makeNum(29));
     if(arcRecipeDocument(doc))r.set("version",Value::makeNum(30));
+    for(const auto& mate:doc.mates)if(mate.type=="prismatic"||mate.limits.enabled)r.set("version",Value::makeNum(31));
     r.set("units",Value::makeStr("mm"));
     r.set("next_feature_id",Value::makeNum((double)doc.nextFeatureId_));
 
@@ -519,7 +520,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     Value v;
     if(!arkjson::parse(json,v)) return fail("malformed JSON");
     if(v.t!=Value::Obj) return fail("root must be object");
-    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0&&ver->num!=3.0&&ver->num!=4.0&&ver->num!=5.0&&ver->num!=6.0&&ver->num!=7.0&&ver->num!=8.0&&ver->num!=9.0&&ver->num!=10.0&&ver->num!=11.0&&ver->num!=12.0&&ver->num!=13.0&&ver->num!=14.0&&ver->num!=15.0&&ver->num!=16.0&&ver->num!=17.0&&ver->num!=18.0&&ver->num!=19.0&&ver->num!=20.0&&ver->num!=21.0&&ver->num!=22.0&&ver->num!=23.0&&ver->num!=24.0&&ver->num!=25.0&&ver->num!=26.0&&ver->num!=27.0&&ver->num!=28.0&&ver->num!=29.0&&ver->num!=30.0)))
+    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0&&ver->num!=3.0&&ver->num!=4.0&&ver->num!=5.0&&ver->num!=6.0&&ver->num!=7.0&&ver->num!=8.0&&ver->num!=9.0&&ver->num!=10.0&&ver->num!=11.0&&ver->num!=12.0&&ver->num!=13.0&&ver->num!=14.0&&ver->num!=15.0&&ver->num!=16.0&&ver->num!=17.0&&ver->num!=18.0&&ver->num!=19.0&&ver->num!=20.0&&ver->num!=21.0&&ver->num!=22.0&&ver->num!=23.0&&ver->num!=24.0&&ver->num!=25.0&&ver->num!=26.0&&ver->num!=27.0&&ver->num!=28.0&&ver->num!=29.0&&ver->num!=30.0&&ver->num!=31.0)))
         return fail("unsupported document version");
     Value history;std::string historyError;if(!iterationExpand(v,history,historyError))return fail(historyError);
 
@@ -687,7 +688,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     }
     if(auto list=v.find("mates")){
         if(list->t!=Value::Arr||list->arr.size()>256)return fail("Invalid mates array");
-        std::set<u64> seen;try{for(auto& j:list->arr){auto key=j.find("id");if(!key||key->t!=Value::Num||key->num<1||key->num>9007199254740990.||key->num!=std::floor(key->num))return fail("Invalid mate id");AssemblyMate m;m.id=(u64)key->num;if(!seen.insert(m.id).second)return fail("Duplicate mate id");editMate(m,j);if(m.type=="rigid"||m.type=="revolute"){auto version=v.find("version");if(!version||version->asNum()<29)return fail("Rigid and revolute mates require document version 29");}if(isMechanicalMate(m.type)){auto version=v.find("version");if(!version||version->asNum()<22)return fail("Mechanical couplings require document version 22");}nd.nextMateId_=std::max(nd.nextMateId_,m.id+1);nd.mates.push_back(m);}}
+        std::set<u64> seen;try{for(auto& j:list->arr){auto key=j.find("id");if(!key||key->t!=Value::Num||key->num<1||key->num>9007199254740990.||key->num!=std::floor(key->num))return fail("Invalid mate id");AssemblyMate m;m.id=(u64)key->num;if(!seen.insert(m.id).second)return fail("Duplicate mate id");editMate(m,j);if(m.type=="prismatic"||m.limits.enabled){auto version=v.find("version");if(!version||version->asNum()<31)return fail("Prismatic mates and joint limits require document version 31");}if(m.type=="rigid"||m.type=="revolute"){auto version=v.find("version");if(!version||version->asNum()<29)return fail("Rigid and revolute mates require document version 29");}if(isMechanicalMate(m.type)){auto version=v.find("version");if(!version||version->asNum()<22)return fail("Mechanical couplings require document version 22");}nd.nextMateId_=std::max(nd.nextMateId_,m.id+1);nd.mates.push_back(m);}}
         catch(const std::exception& e){return fail(e.what());}
     }
     if(auto key=v.find("next_mate_id")){if(key->t!=Value::Num||key->num<(double)nd.nextMateId_||key->num>9007199254740991.||key->num!=std::floor(key->num))return fail("Invalid next mate id");nd.nextMateId_=(u64)key->num;}

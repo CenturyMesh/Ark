@@ -9,8 +9,11 @@ int failures=0,checks=0;
 #define CHECK(x) do{++checks;if(!(x)){std::cerr<<"FAIL "<<__LINE__<<": "<<#x<<'\n';++failures;}}while(0)
 V json(const char* s){V v;CHECK(arkjson::parse(s,v));return v;}
 bool failed(const V& v){return v.find("isError")->b;}
+#include "object_context_tests.inl"
 int main(){
     cpu_detect();
+    testObjectContext();
+    benchmarkObjectContext();
     // Detect the old f64/f32 reinterpretation bug on arrays entering the batch path.
     std::vector<Vec3> in(128),out(128);Mat4 m=Mat4::translation({1000000.125,-12.3,8})*Mat4::rotZ(.73);
     for(size_t i=0;i<in.size();++i)in[i]={(double)i/7.,(double)i/11.,(double)i/13.};
@@ -58,7 +61,8 @@ int main(){
     CHECK(documentFromJson(R"({"version":13,"features":[]})",invalid,&error));
     CHECK(documentFromJson(R"({"version":14,"features":[]})",invalid,&error));
     CHECK(documentFromJson(R"({"version":30,"features":[]})",invalid,&error));
-    CHECK(!documentFromJson(R"({"version":31,"features":[]})",invalid,&error));
+    CHECK(documentFromJson(R"({"version":31,"features":[]})",invalid,&error));
+    CHECK(!documentFromJson(R"({"version":32,"features":[]})",invalid,&error));
     CHECK(error.find("unsupported document version")!=std::string::npos);
     CHECK(!documentFromJson(R"({"version":13,"features":[],"sketches":[{"name":"Plate","entities":[{"kind":"wire","name":"Outline","dof":[0,0,10,0,10,10,0,10,0,0],"segments":[{"kind":"line"},{"kind":"line"},{"kind":"line"},{"kind":"line"}]}],"corners":[{"entity":"Outline","corner":1,"kind":"fillet","size":"2"}]}]})",invalid,&error));
     CHECK(error.find("sketch fillets, sketch chamfers, or mates across assembly groups require document version 14")!=std::string::npos);
@@ -204,6 +208,6 @@ int main(){
         auto inspect=dense.call("native_inspect",json(R"({"id":1})"));
         CHECK(failed(inspect)&&inspect.find("structuredContent")->find("error")->str.find("Density must be a positive finite number of grams per cubic centimetre")!=std::string::npos);
     }
-    CHECK(AgentSession::tools().arr.size()==66);
+    CHECK(AgentSession::tools().arr.size()==67);
     std::cout<<checks<<" checks / "<<failures<<" failures\n";return failures?1:0;
 }

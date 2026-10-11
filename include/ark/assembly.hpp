@@ -16,18 +16,25 @@ struct AssemblyNode {
     bool fixed=false; // Grounded instance; its authored placement is retained by the mate solver.
     AssemblyPattern pattern;
 };
+struct AssemblyJointLimits {
+    bool enabled=false;
+    std::string min="0",max="0"; // Expressions: degrees for revolute, mm for prismatic.
+};
 struct AssemblyMate {
     u64 id=0,a=0,b=0; // Instance IDs, never feature definition IDs.
-    std::string type; // geometric (including revolute/rigid) or mechanical couplings
+    std::string type; // geometric (including revolute/prismatic/rigid) or mechanical couplings
     std::string reference_a="origin",reference_b="origin";
     std::string value="0"; // Signed distance in mm or angle in degrees.
     double fraction_a=0.5,fraction_b=0.5; // Along semantic edge references.
     std::unordered_map<std::string,std::string> motion; // evaluated expressions, mechanical mates only
+    AssemblyJointLimits limits;
 };
 struct AssemblyMateResidual {
     u64 id=0;
     std::string type;
     double positionMm=0,angleDeg=0,valueError=0;
+    bool hasCoordinate=false,limited=false;
+    double coordinate=0,min=0,max=0,limitError=0;
 };
 struct AssemblyMateFrame {
     u64 id=0;
@@ -53,6 +60,8 @@ struct AssemblyMotionRelation {
     Mat4 localA,localB;
     double ratio=1,lift=0,phaseRad=0,target=0,teethA=0,teethB=0;
     bool translational=false;
+    bool limited=false;
+    double minimum=0,maximum=0;
 };
 // Build once per document revision, then evaluate repeatedly without copying or
 // recomputing the CAD document. The program owns its evaluated static baseline.
@@ -71,6 +80,8 @@ struct AssemblyManipulationJoint {
     std::string type,mode; // rotate: degrees; translate: millimetres
     Vec3 origin,axis; // world baseline pivot and oriented unit axis
     std::vector<u64> movingNodes;
+    bool limited=false;
+    double position=0,min=0,max=0,coordinateSign=1; // B relative to A; delta maps through coordinateSign.
 };
 struct AssemblyManipulationProgram {
     std::vector<AssemblyPlacement> baseline;

@@ -28,7 +28,9 @@ function New-LaunchPayload([string[]]$Arguments, [string]$WorkingDirectory) {
 function Wait-LaunchReceipt([string]$Version, [int]$Count) {
     $watch = [Diagnostics.Stopwatch]::StartNew()
     do {
-        $files = @(Get-ChildItem -LiteralPath $script:receiptDirectory -File | Where-Object { $_.Name.StartsWith("launch-$Version-", [StringComparison]::Ordinal) })
+        # The child publishes atomically from .xml.tmp; only committed receipts
+        # may be read, otherwise enumeration can race the rename.
+        $files = @(Get-ChildItem -LiteralPath $script:receiptDirectory -File | Where-Object { $_.Extension -ceq '.xml' -and $_.Name.StartsWith("launch-$Version-", [StringComparison]::Ordinal) })
         if ($files.Count -ge $Count) {
             $latest = $files | Sort-Object LastWriteTimeUtc,Name | Select-Object -Last 1
             return [xml][IO.File]::ReadAllText($latest.FullName)

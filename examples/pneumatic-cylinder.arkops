@@ -1,0 +1,24 @@
+{
+  "tool": "doc_apply",
+  "arguments": {
+    "expected_revision": 0,
+    "commands": [
+      {"op":"param.set","name":"stroke","expr":80},
+      {"op":"param.set","name":"barrel_length","expr":120},
+      {"op":"param.set","name":"rod_length","expr":"barrel_length+30"},
+      {"op":"feature.add","type":"native_solid","name":"Barrel blank","native":{"op":"cylinder"},"p":{"radius":20,"height":"barrel_length"}},
+      {"op":"feature.add","type":"native_solid","name":"Barrel bore","native":{"op":"cylinder"},"p":{"radius":8,"height":"barrel_length"}},
+      {"op":"feature.add","type":"native_solid","name":"Barrel body","native":{"op":"cut"},"inputs":["Barrel blank","Barrel bore"],"appearance":{"opacity":0.35}},
+      {"op":"feature.add","type":"native_solid","name":"Rod body","native":{"op":"cylinder"},"p":{"radius":6,"height":"rod_length"}},
+      {"op":"feature.add","type":"native_solid","name":"Eye blank","native":{"op":"cylinder"},"p":{"radius":12,"height":12}},
+      {"op":"feature.add","type":"native_solid","name":"Eye bore","native":{"op":"cylinder"},"p":{"radius":6,"height":12}},
+      {"op":"feature.add","type":"native_solid","name":"Eye ring","native":{"op":"cut"},"inputs":["Eye blank","Eye bore"]},
+      {"op":"feature.add","type":"native_solid","name":"Eye body","native":{"op":"transform"},"inputs":["Eye ring"],"p":{"ty":6,"tz":"rod_length+10","rx":90}},
+      {"op":"assembly.add","name":"Barrel","feature":"Barrel body","fixed":true,"p":{"ry":90}},
+      {"op":"assembly.add","name":"Rod","feature":"Rod body","p":{"ry":90}},
+      {"op":"assembly.add","name":"Rod eye","feature":"Eye body","p":{"ry":90}},
+      {"op":"mate.add","a":"Barrel","b":"Rod","type":"prismatic","reference_a":"Z","reference_b":"Z","limits":{"min":0,"max":"stroke"}},
+      {"op":"mate.add","a":"Rod","b":"Rod eye","type":"rigid","reference_a":"origin","reference_b":"origin"}
+    ]
+  }
+}

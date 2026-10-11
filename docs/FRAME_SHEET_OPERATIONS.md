@@ -95,6 +95,30 @@ physical host, and have no positive-volume material overlap. The new operation
 uses document version 30; application iteration codes do not change document
 versions. This is end-fit evidence, without weld or manufacturing qualification.
 
+Before authoring a fit, read `native_inspect.report.tube_end_fit_options` on the
+source and host. `feature_input` identifies the inspected definition while
+`source_tube` identifies the original authored Tube. `endpoints` gives the
+semantic `cap_reference`, current `cap_status`, `straight_terminal`, original
+`authored_terminal_length_mm`, and `candidate` for each end. A deleted or split
+cap cannot be refitted; the opposite end can remain available. The cap descriptor
+is the evaluated exact semantic frame. The length remains an authored stock
+datum, not a measured remaining length after earlier cuts.
+
+`envelope_host_available` requires untrimmed straight Tube lineage; bent or
+already fitted hosts report their reason. `planar_host_references` lists bound
+exact planar face names and descriptors, including generic solids that cannot
+act as Tube sources. Select a face and endpoint explicitly from their geometry
+and the requested design intent. Definition coordinates exclude assembly
+placement. `joint_feasibility_checked:false` means this discovery has not proved
+contact, overlap, terminal ownership, extension or finite-face seating for a
+chosen pair. These checks remain part of the atomic operation.
+
+Native single-solid rejection now identifies the actual operation and operand
+solid counts. A compound construction frame retains one solid per physical
+member and declared weld bead. Passing such a compound to a single-solid
+operation does not authorize dropping members or inventing a fused structure;
+inspect the operation and operands before retrying an endpoint adjustment.
+
 ## Explicit weld geometry
 
 ```json

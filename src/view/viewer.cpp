@@ -235,7 +235,7 @@ static std::vector<std::string> g_instanceNames;
 static std::vector<Mat4> g_instanceWorld;
 static AssemblyDiagnostics g_assemblyDiagnostics;
 static AssemblyMotionProgram g_motionProgram;static u64 g_motionRevision=std::numeric_limits<u64>::max(),g_motionDriver=0;
-struct ComponentMove {bool armed=false,dragging=false,active=false;u64 revision=0,epoch=0,driver=0;int x=0,y=0;double delta=0;Vec3 radial;AssemblyManipulationProgram program;AssemblyManipulationJoint joint;std::vector<Mat4> baseline;};
+struct ComponentMove {bool armed=false,dragging=false,active=false;u64 revision=0,epoch=0,driver=0;int x=0,y=0;double delta=0,pointerCoordinate=0,pointerAngle=0;Vec3 radial,dragPlaneNormal,pointerWorld;AssemblyManipulationProgram program;AssemblyManipulationJoint joint;std::vector<Mat4> baseline;};
 static ComponentMove g_componentMove;
 static void armComponentMove();static void cancelComponentMove(bool restore=true);static void applyComponentMove();
 static bool g_motionActive=false,g_motionPlaying=false;static double g_motionTime=0,g_motionRpm=60;static std::string g_motionRpmExpression="cadence_rpm";
@@ -269,6 +269,10 @@ static bool g_eatNextClick=false;
 static bool g_explorerOpen[4]={true,true,true,true};
 static u64 g_explorerFeature=0;
 static bool g_assistantDockOpen=false;
+struct PendingObjectTarget {u64 feature=0,node=0,epoch=0;int copy=0;std::string label,invalidated;};
+static std::optional<PendingObjectTarget> g_pendingObjectTarget;
+static u64 g_objectDocumentEpoch=0;
+static void askAgentAboutBody(int body);
 static bool g_inspectorOpen=false;
 static int g_sidebarTab=0;
 static bool g_showViewCube=true,g_compactNavigation=false,g_searchEditing=false;
@@ -1322,6 +1326,17 @@ static void recordAssistantUsageSnapshot(const AssistantUsage& usage){
     g_currentUsageReceipt=receipt;
     if(g_busy){g_pendingUsageReceipt=receipt;++g_deferredUsageCount;}else applyUsageReceipt(receipt);
 }
+static void invalidateRemovedObjectTarget(){
+    if(!g_pendingObjectTarget||!g_pendingObjectTarget->invalidated.empty())return;
+    auto& target=*g_pendingObjectTarget;
+    if(target.epoch!=g_objectDocumentEpoch)return; // Replacement drawings reject through their epoch.
+    if(!g_doc.find(target.feature)){target.invalidated="The selected object was deleted. Select it again before sending.";return;}
+    if(!target.node)return;
+    auto node=std::find_if(g_doc.assembly.begin(),g_doc.assembly.end(),[&](const AssemblyNode& item){return item.id==target.node;});
+    if(node==g_doc.assembly.end()||node->feature!=target.feature){target.invalidated="The selected occurrence was removed or replaced. Select it again before sending.";return;}
+    if(target.copy){bool ok=false;double count=node->pattern.active?evalExpr(node->pattern.count,g_doc.buildEnv(),&ok):1;
+        if(!node->pattern.active||!ok||target.copy<0||target.copy>=count)target.invalidated="The selected pattern copy was removed. Select it again before sending.";}
+}
 static arkjson::Value runTool(const std::string& tool,const arkjson::Value& args){
     size_t previousVisibleBodies=g_bodyIds.size();
     flushPendingUsage();
@@ -1341,6 +1356,7 @@ static arkjson::Value runTool(const std::string& tool,const arkjson::Value& args
         if(!previousVisibleBodies&&!g_bodyIds.empty())frameScene();}
     if(!g_error&&(tool=="doc_apply"||tool=="doc_undo"||tool=="doc_redo")){if(tool=="doc_apply"&&!g_activeToolRole.empty())if(auto* commands=args.find("commands"))for(const auto& command:commands->arr){auto* op=command.find("op"),*name=command.find("name");if(op&&name&&op->t==arkjson::Value::Str&&name->t==arkjson::Value::Str&&op->str.rfind("sketch.",0)==0&&op->str!="sketch.remove"&&g_doc.findSketch(name->str))g_committedRoleSketches[name->str].role=g_activeToolRole;}rebuildRoleSketches();}
     if(!g_error&&(tool=="doc_load"||tool=="doc_new"||tool=="iteration_restore")){
+        ++g_objectDocumentEpoch;
         g_draftViews.clear();g_committedRoleSketches.clear();g_liveStepLabel.clear();g_liveCompletedSteps=0;
         g_motionActive=false;g_motionPlaying=false;g_motionRevision=std::numeric_limits<u64>::max();
         g_closedAssemblyGroups.clear();g_collapsedFeatures.clear();
@@ -1351,6 +1367,7 @@ static arkjson::Value runTool(const std::string& tool,const arkjson::Value& args
         if(tool=="doc_new"){g_path="Untitled.ark";g_savedRevision=g_session.revision;g_savedUsageSerial=0;g_activeSketch.clear();g_activePlane="XY";}
         g_foldProgress=selectedSourceTube()?1.:0.;if(tool=="doc_load"||tool=="iteration_restore")selBody=-1;frameScene();
     }
+    if(!g_error&&mutations.count(tool))invalidateRemovedObjectTarget();
     flushPendingUsage();refreshDocumentUsage();
     if(!g_error&&(tool=="doc_save"||tool=="doc_load")){if(auto* path=args.find("path"))g_path=path->asStr();g_savedRevision=g_session.revision;g_savedUsageSerial=tool=="doc_load"?loadedUsageSerial:g_doc.usage.serial;}
     return result;
@@ -1401,7 +1418,8 @@ static LRESULT CALLBACK editorProc(HWND h,UINT m,WPARAM w,LPARAM l){
 struct EditorField { std::string name,value;bool toggle=false;std::vector<std::string> choices;bool editableChoice=false; };
 static bool editFields(const char* title,const char* hint,std::vector<EditorField>& fields,bool multiline=false,const char* confirm="Apply"){
     WNDCLASSA wc{};wc.lpfnWndProc=editorProc;wc.hInstance=GetModuleHandle(nullptr);wc.lpszClassName="ARK_EDITOR";wc.hbrBackground=dialogBrush;wc.hCursor=LoadCursor(nullptr,IDC_ARROW);RegisterClassA(&wc);
-    RECT r;GetWindowRect(g_window,&r);int width=multiline?840:620,height=multiline?520:190+(int)fields.size()*62;
+    bool mateColumns=!multiline&&fields.size()==10&&(std::string(title)=="Add assembly mate"||std::string(title)=="Edit assembly mate");
+    RECT r;GetWindowRect(g_window,&r);int width=multiline?840:mateColumns?980:620,height=multiline?520:190+(int)(mateColumns?5:fields.size())*62;
     RECT bounds{0,0,width,height};AdjustWindowRectEx(&bounds,WS_CAPTION|WS_SYSMENU,FALSE,WS_EX_DLGMODALFRAME);
     int ow=bounds.right-bounds.left,oh=bounds.bottom-bounds.top;
     g_dialog=CreateWindowExA(WS_EX_DLGMODALFRAME,"ARK_EDITOR",title,WS_CAPTION|WS_SYSMENU,r.left+(r.right-r.left-ow)/2,r.top+(r.bottom-r.top-oh)/2,ow,oh,g_window,nullptr,wc.hInstance,nullptr);
@@ -1411,9 +1429,9 @@ static bool editFields(const char* title,const char* hint,std::vector<EditorFiel
     auto control=[&](const char* cls,const char* text,DWORD style,int x,int y,int w,int h,int id,HFONT f){HWND c=CreateWindowExA(0,cls,text,WS_CHILD|WS_VISIBLE|style,x,y,w,h,g_dialog,(HMENU)(INT_PTR)id,wc.hInstance,nullptr);SendMessage(c,WM_SETFONT,(WPARAM)f,TRUE);return c;};
     control("STATIC",title,0,26,22,width-52,27,0,font);control("STATIC",hint,0,26,58,width-52,44,0,font);
     std::vector<HWND> edits;
-    for(size_t i=0;i<fields.size();++i){int y=110+(int)i*62;
-        if(!multiline)control("STATIC",fields[i].name.c_str(),0,28,y+7,205,28,0,font);
-        HWND e=fields[i].toggle?control("BUTTON","",WS_TABSTOP|BS_AUTOCHECKBOX,235,y,40,33,3+(int)i,font):!fields[i].choices.empty()?control("COMBOBOX","",WS_TABSTOP|WS_VSCROLL|(fields[i].editableChoice?CBS_DROPDOWN:CBS_DROPDOWNLIST),235,y,width-263,240,3+(int)i,font):control("EDIT",fields[i].value.c_str(),WS_TABSTOP|WS_BORDER|ES_AUTOHSCROLL|(multiline?ES_MULTILINE|ES_AUTOVSCROLL|WS_VSCROLL|ES_WANTRETURN:0),multiline?26:235,y,multiline?width-52:width-263,multiline?height-184:33,3+(int)i,mono);
+    for(size_t i=0;i<fields.size();++i){int y=110+(int)(mateColumns?i%5:i)*62,x=mateColumns?(int)(i/5)*480:0;
+        if(!multiline)control("STATIC",fields[i].name.c_str(),0,x+28,y+7,205,28,0,font);
+        HWND e=fields[i].toggle?control("BUTTON","",WS_TABSTOP|BS_AUTOCHECKBOX,x+235,y,40,33,3+(int)i,font):!fields[i].choices.empty()?control("COMBOBOX","",WS_TABSTOP|WS_VSCROLL|(fields[i].editableChoice?CBS_DROPDOWN:CBS_DROPDOWNLIST),x+235,y,mateColumns?217:width-263,240,3+(int)i,font):control("EDIT",fields[i].value.c_str(),WS_TABSTOP|WS_BORDER|ES_AUTOHSCROLL|(multiline?ES_MULTILINE|ES_AUTOVSCROLL|WS_VSCROLL|ES_WANTRETURN:0),multiline?26:x+235,y,multiline?width-52:mateColumns?217:width-263,multiline?height-184:33,3+(int)i,mono);
         if(!fields[i].choices.empty()){for(const auto& choice:fields[i].choices)SendMessageA(e,CB_ADDSTRING,0,(LPARAM)choice.c_str());auto selected=SendMessageA(e,CB_FINDSTRINGEXACT,-1,(LPARAM)fields[i].value.c_str());if(selected!=CB_ERR)SendMessage(e,CB_SETCURSEL,selected,0);else if(fields[i].editableChoice)SetWindowTextA(e,fields[i].value.c_str());}
         if(fields[i].toggle)SendMessage(e,BM_SETCHECK,fields[i].value=="1"?BST_CHECKED:BST_UNCHECKED,0);
         SendMessage(e,EM_SETMARGINS,EC_LEFTMARGIN|EC_RIGHTMARGIN,MAKELPARAM(8,8));edits.push_back(e);
@@ -2698,10 +2716,38 @@ static void chooseTeamTarget(){
     HMENU menu=CreatePopupMenu();AppendMenuA(menu,MF_STRING|((g_teamFocusedWorkflow?g_teamTarget=="all":g_teamTarget.empty())?MF_CHECKED:0),1,"Entire team");for(unsigned i=0;i<g_teamRoleCount;++i)AppendMenuA(menu,MF_STRING|(g_teamTarget==g_teamRoleIds[i]?MF_CHECKED:0),i+2,g_teamRoleLabels[i]);
     POINT cursor;GetCursorPos(&cursor);int action=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,cursor.x,cursor.y,0,g_window,nullptr);DestroyMenu(menu);if(action>=1&&action<=(int)g_teamRoleCount+1)g_teamTarget=action==1?(g_teamFocusedWorkflow?"all":""):g_teamRoleIds[action-2];
 }
+// The pending object is an immutable identity, separate from the live selection.
+static bool attachPendingObjectContext(std::string& prompt){
+    if(!g_pendingObjectTarget)return true;
+    using V=arkjson::Value;const auto target=*g_pendingObjectTarget;
+    auto reject=[&](const std::string& reason){g_pendingObjectTarget->invalidated=reason;g_error=true;g_status=reason;g_chatLog.push_back({"ARK",reason});return false;};
+    if(!target.invalidated.empty())return reject(target.invalidated);
+    if(target.epoch!=g_objectDocumentEpoch)return reject("The object belongs to a different drawing. Select it again before sending.");
+    const Feature* feature=g_doc.find(target.feature);
+    if(!feature)return reject("The selected object was deleted. Select another object before sending.");
+    if(target.node){auto node=std::find_if(g_doc.assembly.begin(),g_doc.assembly.end(),[&](const AssemblyNode& item){return item.id==target.node;});
+        if(node==g_doc.assembly.end()||node->feature!=target.feature)return reject("The selected occurrence was removed or replaced. Select it again before sending.");}
+    V args=V::makeObj();args.set("expected_revision",V::makeNum((double)g_session.revision));args.set("depth",V::makeNum(0));
+    if(target.node){args.set("node",V::makeNum((double)target.node));args.set("copy",V::makeNum(target.copy));}
+    else{V ids=V::makeArr();ids.arr.push_back(V::makeNum((double)target.feature));args.set("ids",std::move(ids));}
+    auto result=g_session.call("object_context",args);auto* failed=result.find("isError");auto* context=result.find("structuredContent");
+    if((failed&&failed->b)||!context)return reject("The selected object no longer resolves. Select it again before sending.");
+    prompt+="\n\nSelected object_context (current drawing revision; this exact identity is the user target):\n"+context->dump();return true;
+}
+static void askAgentAboutBody(int body){
+    if(body<0||(size_t)body>=g_bodyIds.size())throw std::runtime_error("Select a body before asking the agent");
+    const Feature* feature=g_doc.find(g_bodyIds[(size_t)body]);if(!feature)throw std::runtime_error("The selected body no longer exists");
+    PendingObjectTarget target;target.feature=feature->id;target.node=g_instanceIds[(size_t)body];target.copy=g_instanceCopies[(size_t)body];target.epoch=g_objectDocumentEpoch;
+    target.label=target.node?g_instanceNames[(size_t)body]+" / node #"+std::to_string(target.node)+" / copy "+std::to_string(target.copy):feature->name+" / feature #"+std::to_string(target.feature);
+    g_pendingObjectTarget=std::move(target);selBody=body;g_pickKind=0;g_picked.clear();refreshSelectionLines();g_explorerFeature=0;g_toolsOpen=false;g_assistantDockOpen=true;layout();
+    if(g_chatInput){if(GetWindowTextLengthW(g_chatInput)==0)SetWindowTextW(g_chatInput,L"What would you like to know about this object?");SetFocus(g_chatInput);SendMessage(g_chatInput,EM_SETSEL,0,-1);}
+    g_error=false;g_status="Object attached. Enter a question, then Send or Queue to ask the agent.";
+}
 static void sendTeam(const std::string& explicitPrompt={},const std::array<AssistantTransport,8>& transports={}){
     if(g_busy&&!g_teamStarted){g_status="Wait for the current document operation before starting a new team.";return;}
     if(g_chatBusy){g_status="Wait for the single Assistant turn to finish.";return;}std::string prompt=assistantPrompt(explicitPrompt);if(prompt.find_first_not_of(" \r\n\t")==std::string::npos)return;
-    pollTeam(true);if(g_teamStarted&&!g_teamSnapshot.cancelled){if(!g_agentTeam.steer(prompt,g_teamTarget)){g_status="Decision could not be queued; check team state and turn limits.";return;}g_chatLog.push_back({"You -> "+(g_teamTarget.empty()?std::string("team"):g_teamTarget),prompt});g_status="Decision queued for the next provider request.";}
+    const std::string visiblePrompt=prompt;if(!attachPendingObjectContext(prompt))return;
+    pollTeam(true);if(g_teamStarted&&!g_teamSnapshot.cancelled){if(!g_agentTeam.steer(prompt,g_teamTarget)){g_status="Decision could not be queued; check team state and turn limits.";return;}g_chatLog.push_back({"You -> "+(g_teamTarget.empty()?std::string("team"):g_teamTarget),visiblePrompt});g_status="Decision queued for the next provider request.";}
     else{
         if(g_teamStarted&&g_teamSnapshot.running){g_status="Team is still stopping.";return;}
         AgentTeamConfig team;team.maxWorkers=g_teamRoleCount;team.focusedWorkflow=g_teamFocusedWorkflow;team.orchestratedStart=g_teamFocusedWorkflow||std::none_of(transports.begin(),transports.end(),[](const auto& t){return (bool)t;});static const char* instructions[]={
@@ -2713,24 +2759,24 @@ static void sendTeam(const std::string& explicitPrompt={},const std::array<Assis
                 if(!transports[i]&&config.authMode==AssistantAuthMode::ChatGptPlan){if(!g_authStatus.connected||!g_authStatus.planAuthorized)throw std::runtime_error("Connect and authorize ChatGPT from Account first.");if(g_authModels.empty())throw std::runtime_error("Load the account model catalog from Account first.");if(std::none_of(g_authModels.begin(),g_authModels.end(),[&](const auto& model){return model.slug==config.model;}))throw std::runtime_error("The selected model is unavailable in this account's catalog.");}
             }catch(const std::exception& error){throw std::runtime_error(std::string(g_teamRoleLabels[i])+": "+error.what());}
             AgentTeamRole role;role.id=g_teamRoleIds[i];role.label=g_teamRoleLabels[i];role.instructions=instructions[i==2?2:i==0?0:1];if(!transports[i])config.onboardingPack=agentOnboardingPack(i==2?std::vector<std::string>{"overview","physics"}:std::vector<std::string>{"overview"});role.assistant=config;role.transport=transports[i];role.canWrite=i!=2;role.discipline=i==0?AgentTeamDiscipline::Orchestrator:i==2?AgentTeamDiscipline::PhysicsReviewer:AgentTeamDiscipline::PartDesigner;team.roles.push_back(std::move(role));}
-        g_teamCancel=std::make_shared<std::atomic_bool>(false);auto cancel=g_teamCancel;auto epoch=g_documentEpoch;auto runSerial=++g_teamRunSerial;g_teamEpoch=epoch;g_teamEventSequence=0;g_teamReceipts={};g_teamActivity={};g_teamLiveUsage={};g_draftViews.clear();g_liveCompletedSteps=0;g_liveStepLabel.clear();captureDraftContext();g_teamGoal=prompt;for(auto& id:g_teamReceiptIds)id=newUsageReceiptId();if(!transports[0]&&!transports[1]&&!transports[2])refreshPricing();
+        g_teamCancel=std::make_shared<std::atomic_bool>(false);auto cancel=g_teamCancel;auto epoch=g_documentEpoch;auto runSerial=++g_teamRunSerial;g_teamEpoch=epoch;g_teamEventSequence=0;g_teamReceipts={};g_teamActivity={};g_teamLiveUsage={};g_draftViews.clear();g_liveCompletedSteps=0;g_liveStepLabel.clear();captureDraftContext();g_teamGoal=visiblePrompt;for(auto& id:g_teamReceiptIds)id=newUsageReceiptId();if(!transports[0]&&!transports[1]&&!transports[2])refreshPricing();
         g_assistantReceiptId.clear();g_currentUsageReceipt.reset();g_pendingUsageReceipt.reset();
         g_agentTeam.start(team,prompt,AgentSession::tools(),[cancel,epoch](const std::string& name,const arkjson::Value& args){
             auto promise=std::make_shared<std::promise<arkjson::Value>>();auto future=promise->get_future();auto request=std::make_unique<UiToolRequest>();request->tool=name;request->roleId=AgentTeam::currentRoleId();request->args=args;request->cancel=cancel;request->epoch=epoch;request->teamOwned=true;request->complete=[promise](arkjson::Value result){promise->set_value(std::move(result));};postTool(std::move(request));
             while(future.wait_for(std::chrono::milliseconds(20))!=std::future_status::ready)if(*cancel||g_closing)throw std::runtime_error("Team cancelled");return future.get();
-        },[epoch,runSerial](const AgentTeamEvent& event){auto* value=new UiTeamEvent{event,epoch,runSerial};if(g_closing||!PostMessage(g_window,WM_ARK_TEAM,0,(LPARAM)value))delete value;});g_teamStarted=true;g_chatLog.push_back({"You -> team",prompt});g_status="Team started; "+std::to_string(g_teamRoleCount)+" agents, assigned parts and coordinated assembly.";
+        },[epoch,runSerial](const AgentTeamEvent& event){auto* value=new UiTeamEvent{event,epoch,runSerial};if(g_closing||!PostMessage(g_window,WM_ARK_TEAM,0,(LPARAM)value))delete value;});g_teamStarted=true;g_chatLog.push_back({"You -> team",visiblePrompt});g_status="Team started; "+std::to_string(g_teamRoleCount)+" agents, assigned parts and coordinated assembly.";
     }
-    g_chatScroll=0;if(g_chatInput)SetWindowTextW(g_chatInput,L"");pollTeam(true);
+    g_pendingObjectTarget.reset();g_chatScroll=0;if(g_chatInput)SetWindowTextW(g_chatInput,L"");pollTeam(true);
 }
 static void sendAssistant(const std::string& explicitPrompt="",const AssistantTransport& transport={}){
     if(g_teamStarted&&g_agentTeam.snapshot().running){g_status="Wait for the team to finish or cancel it before starting Assistant.";return;}
     if(g_chatBusy)return;std::string prompt=explicitPrompt;
     if(prompt.empty()&&g_chatInput){int n=GetWindowTextLengthW(g_chatInput);std::vector<wchar_t> buffer(n+1);GetWindowTextW(g_chatInput,buffer.data(),n+1);int size=WideCharToMultiByte(CP_UTF8,0,buffer.data(),n,nullptr,0,nullptr,nullptr);prompt.resize(size);WideCharToMultiByte(CP_UTF8,0,buffer.data(),n,prompt.data(),size,nullptr,nullptr);}
-    if(prompt.find_first_not_of(" \r\n\t")==std::string::npos)return;validateAssistantConfig(g_assistantConfig);
+    if(prompt.find_first_not_of(" \r\n\t")==std::string::npos)return;const std::string visiblePrompt=prompt;if(!attachPendingObjectContext(prompt))return;validateAssistantConfig(g_assistantConfig);
     if(g_conversation.arr.empty()&&!transport)refreshPricing();
     if(g_assistantWorker.joinable())g_assistantWorker.join();
     using V=arkjson::Value;V input=g_conversation;if(input.t!=V::Arr)input=V::makeArr();V user=V::makeObj();user.set("role",V::makeStr("user"));user.set("content",V::makeStr(prompt));input.arr.push_back(user);
-    g_chatLog.push_back({"You",prompt});g_chatScroll=0;g_chatBusy=true;g_assistantResponseFinished=g_assistantResponseError=false;g_assistantStatus="Working...";g_assistantUsageRun={};g_assistantPerformanceRun={};g_assistantUsageRunCounted=false;g_assistantReceiptId=newUsageReceiptId();g_assistantReceiptModel=g_assistantConfig.model;g_currentUsageReceipt.reset();g_pendingUsageReceipt.reset();g_assistantCancel=std::make_shared<std::atomic_bool>(false);auto cancel=g_assistantCancel;auto config=g_assistantConfig;if(!transport)config.onboardingPack=agentOnboardingPack({"overview"});auto schema=AgentSession::tools();if(g_chatInput)SetWindowTextW(g_chatInput,L"");
+    g_pendingObjectTarget.reset();g_chatLog.push_back({"You",visiblePrompt});g_chatScroll=0;g_chatBusy=true;g_assistantResponseFinished=g_assistantResponseError=false;g_assistantStatus="Working...";g_assistantUsageRun={};g_assistantPerformanceRun={};g_assistantUsageRunCounted=false;g_assistantReceiptId=newUsageReceiptId();g_assistantReceiptModel=g_assistantConfig.model;g_currentUsageReceipt.reset();g_pendingUsageReceipt.reset();g_assistantCancel=std::make_shared<std::atomic_bool>(false);auto cancel=g_assistantCancel;auto config=g_assistantConfig;if(!transport)config.onboardingPack=agentOnboardingPack({"overview"});auto schema=AgentSession::tools();if(g_chatInput)SetWindowTextW(g_chatInput,L"");
     auto epoch=g_documentEpoch;auto revision=std::make_shared<std::atomic<u64>>(g_session.revision);
     g_assistantWorker=std::thread([config,input,schema,cancel,transport,epoch,revision]{
         try{auto result=runAssistant(config,input,schema,[cancel,epoch,revision](const std::string& name,const V& args){
@@ -3248,6 +3294,7 @@ static void setOrbitView(double nyaw,double npitch,bool ortho,const char* name){
     if(name)g_status=std::string(name)+(ortho?" view / orthographic":" view / perspective");
 }
 static void uiAction(int id){
+    if(id==565){askAgentAboutBody(selBody);return;}if(id==566){g_pendingObjectTarget.reset();g_error=false;g_status="Object target removed from the next message";return;}
     if(id==562){armComponentMove();return;}if(id==563){applyComponentMove();return;}if(id==564){cancelComponentMove();g_status="Component movement cancelled / drawing unchanged";return;}
     if(id==542){renameSketchEntity();return;}
     if(id==549){tubeEndFitDialog();return;}
@@ -3502,14 +3549,16 @@ static void uiAction(int id){
                     a=chosen->fixed?selected:other->id;b=chosen->fixed?other->id:selected;
                 }else a=selected;
             }
-            std::vector<EditorField> fields{{"Mate type",current?current->type:"coincident",false,{"concentric","coincident","contact","distance","angle","revolute","rigid"}},
+            std::vector<EditorField> fields{{"Mate type",current?current->type:"coincident",false,{"concentric","coincident","contact","distance","angle","revolute","prismatic","rigid"}},
                 {"Instance A #",a?std::to_string(a):""},{"Reference A",current?current->reference_a:"origin"},
                 {"Instance B #",b?std::to_string(b):""},{"Reference B",current?current->reference_b:"origin"},
                 {"Value / expression",current?current->value:"0"},
                 {"Reference A fraction",current?std::to_string(current->fraction_a):"0.5"},
-                {"Reference B fraction",current?std::to_string(current->fraction_b):"0.5"}};
+                {"Reference B fraction",current?std::to_string(current->fraction_b):"0.5"},
+                {"Min / mm or deg",current&&current->limits.enabled?current->limits.min:""},
+                {"Max / mm or deg",current&&current->limits.enabled?current->limits.max:""}};
             if(!editFields(add?"Add assembly mate":"Edit assembly mate",
-                "Ground one instance first. Revolute preserves a hinge rotation; rigid locks attached parts together. References: origin/X/Y/Z/XY or exact face/axis names.",fields))break;
+                "Ground one instance. Revolute rotates; prismatic slides. Optional min/max expressions persist; clear both to remove limits. References: origin/X/Y/Z or exact names.",fields))break;
             auto instanceId=[&](size_t index){double value=formNumber(fields[index].value);
                 if(value<1||value>9007199254740990.||std::floor(value)!=value)throw std::runtime_error("Instance ID must be a positive integer");
                 return value;};
@@ -3521,6 +3570,9 @@ static void uiAction(int id){
             c.set("value",V::makeStr(trimField(fields[5].value)));
             c.set("fraction_a",V::makeNum(formNumber(fields[6].value)));
             c.set("fraction_b",V::makeNum(formNumber(fields[7].value)));
+            auto minimum=trimField(fields[8].value),maximum=trimField(fields[9].value);
+            if(minimum.empty()!=maximum.empty())throw std::runtime_error("Enter both minimum and maximum, or clear both to remove limits");
+            if(minimum.empty())c.set("limits",V{});else{V limits=V::makeObj();limits.set("min",V::makeStr(minimum));limits.set("max",V::makeStr(maximum));c.set("limits",limits);}
             applyCommand(c);if(!g_error&&add)g_selectedMate=(int)g_doc.mates.size()-1;
             break;
         }
@@ -3649,12 +3701,33 @@ static void prepareComponentMove(int body){
     if(g_allSheetsFlat||g_stockMode)throw std::runtime_error("Return to the formed assembly before moving a component");
     if(g_motionActive){g_motionActive=false;g_motionPlaying=false;g_instanceWorld=g_formedInstanceWorld;rebuildDisplayBounds();}
     ComponentMove next;next.armed=true;next.driver=g_instanceIds[(size_t)body];next.revision=g_session.revision;next.epoch=g_documentEpoch;next.baseline=g_instanceWorld;std::string error;
-    if(!buildAssemblyManipulation(g_doc,next.program,error)||!selectAssemblyManipulationJoint(next.program,next.driver,0,"rotate",next.joint,error))throw std::runtime_error(error);
+    if(!buildAssemblyManipulation(g_doc,next.program,error))throw std::runtime_error(error);
+    // Compare graph distance across both motion modes before choosing a joint.
+    std::unordered_map<u64,int> distance;std::vector<u64> queue{next.program.rigidCluster.at(next.driver)};distance[queue[0]]=0;
+    for(size_t i=0;i<queue.size();++i)for(const auto& edge:next.program.constraints){if(isMechanicalMate(edge.mate.type))continue;
+        u64 a=next.program.rigidCluster.at(edge.mate.a),b=next.program.rigidCluster.at(edge.mate.b),other=a==queue[i]?b:b==queue[i]?a:0;
+        if(other&&!distance.count(other)){distance[other]=distance.at(queue[i])+1;queue.push_back(other);}}
+    int nearest=100000;std::vector<AssemblyManipulationJoint> candidates;
+    for(const auto& candidate:next.program.joints){AssemblyManipulationJoint resolved;std::string rejected;
+        if(!selectAssemblyManipulationJoint(next.program,next.driver,candidate.mate,candidate.mode,resolved,rejected))continue;
+        auto relation=std::find_if(next.program.constraints.begin(),next.program.constraints.end(),[&](const AssemblyMotionRelation& edge){return edge.mate.id==candidate.mate;});if(relation==next.program.constraints.end())continue;
+        u64 endpoint=std::binary_search(candidate.movingNodes.begin(),candidate.movingNodes.end(),relation->mate.a)?relation->mate.a:relation->mate.b;
+        auto depth=distance.find(next.program.rigidCluster.at(endpoint));if(depth==distance.end()||depth->second>nearest)continue;
+        if(depth->second<nearest){nearest=depth->second;candidates.clear();}candidates.push_back(resolved);
+    }
+    if(candidates.empty()){selectAssemblyManipulationJoint(next.program,next.driver,0,"translate",next.joint,error);throw std::runtime_error(error);}
+    if(candidates.size()==1)next.joint=candidates.front();else{
+        std::vector<std::string> choices;for(const auto& joint:candidates)choices.push_back((joint.mode=="translate"?std::string("Translate"):std::string("Rotate"))+" / joint #"+std::to_string(joint.mate));
+        std::vector<EditorField> fields{{"Motion / joint",choices.front(),false,choices}};
+        if(!editFields("Choose component motion","More than one nearest joint can move this component. Select the intended motion explicitly.",fields))throw std::runtime_error("Component movement cancelled / no motion selected");
+        auto selected=std::find(choices.begin(),choices.end(),fields[0].value);if(selected==choices.end())throw std::runtime_error("Select a supported joint");next.joint=candidates[(size_t)std::distance(choices.begin(),selected)];
+        if(next.revision!=g_session.revision||next.epoch!=g_documentEpoch)throw std::runtime_error("The drawing changed while choosing a joint; select the component again");
+    }
     g_componentMove=std::move(next);selBody=body;g_pickKind=0;g_picked.clear();refreshSelectionLines();
 }
 static void armComponentMove(){
     cancelComponentMove();prepareComponentMove(selBody);g_navMode=0;
-    g_status="Move component: drag a part to rotate its joint; release saves / Esc cancels / middle mouse orbits";
+    g_status="Move component: drag along the selected joint; release saves / Esc cancels / middle mouse orbits";
 }
 static bool jointPointerRadial(int x,int y,Vec3& radial){
     Vec3 eye,ray;viewRay(x,y,eye,ray);const auto& joint=g_componentMove.joint;double denominator=ray.dot(joint.axis);
@@ -3662,29 +3735,67 @@ static bool jointPointerRadial(int x,int y,Vec3& radial){
     Vec3 radius=eye+ray*travel-joint.origin;radius=radius-joint.axis*radius.dot(joint.axis);
     if(radius.len()<std::max(1e-6,dist*.0005))return false;radial=radius.normalized();return true;
 }
+static bool jointPointerCoordinate(int x,int y,double& coordinate,Vec3* world=nullptr){
+    Vec3 eye,ray;viewRay(x,y,eye,ray);const auto& move=g_componentMove;
+    double denominator=ray.dot(move.dragPlaneNormal);if(std::abs(denominator)<1e-6)return false;
+    double travel=(move.joint.origin-eye).dot(move.dragPlaneNormal)/denominator;
+    Vec3 intersection=eye+ray*travel;if(world)*world=intersection;coordinate=(intersection-move.joint.origin).dot(move.joint.axis);return std::isfinite(coordinate);
+}
+static double boundedComponentDelta(const AssemblyManipulationJoint& joint,double delta){
+    if(!joint.limited)return delta;
+    double a=(joint.min-joint.position)/joint.coordinateSign,b=(joint.max-joint.position)/joint.coordinateSign;
+    return std::clamp(delta,std::min(a,b),std::max(a,b));
+}
 static void beginComponentDrag(int x,int y){
-    int body=pickBody(x,y);prepareComponentMove(body);g_componentMove.x=x;g_componentMove.y=y;g_componentMove.dragging=true;g_componentMove.active=true;
-    if(!jointPointerRadial(x,y,g_componentMove.radial)){auto hit=pickSurface(x,y);Vec3 point=hit.hit?g_instanceWorld[(size_t)body].transformPoint(hit.local):g_reports[g_instancePart[(size_t)body]].bounds.transformed(g_instanceWorld[(size_t)body]).center();Vec3 radius=point-g_componentMove.joint.origin;radius=radius-g_componentMove.joint.axis*radius.dot(g_componentMove.joint.axis);g_componentMove.radial=radius.normalized();}
+    int body=pickBody(x,y);
+    if(body<0)throw std::runtime_error("Click an assembly component to move it");
+    if(!g_componentMove.armed||g_componentMove.driver!=g_instanceIds[(size_t)body]||g_componentMove.revision!=g_session.revision||g_componentMove.epoch!=g_documentEpoch)prepareComponentMove(body);
+    g_componentMove.x=x;g_componentMove.y=y;g_componentMove.delta=0;g_componentMove.pointerAngle=0;
+    if(g_componentMove.joint.mode=="translate"){
+        Vec3 eye,ray;viewRay(x,y,eye,ray);Vec3 normal=ray-g_componentMove.joint.axis*ray.dot(g_componentMove.joint.axis);
+        // Looking down the joint axis supplies no observable screen displacement.
+        float ax,ay,bx,by;double span=std::max(1.,dist*.1);
+        if(normal.len()<.08||!projectScreen(g_componentMove.joint.origin,ax,ay)||!projectScreen(g_componentMove.joint.origin+g_componentMove.joint.axis*span,bx,by)||std::hypot(bx-ax,by-ay)<4)throw std::runtime_error("Translation axis points into the view. Orbit to see the travel direction before dragging.");
+        g_componentMove.dragPlaneNormal=normal.normalized();
+        if(!jointPointerCoordinate(x,y,g_componentMove.pointerCoordinate,&g_componentMove.pointerWorld))throw std::runtime_error("The pointer cannot resolve travel along this joint. Orbit and try again.");
+    }else if(!jointPointerRadial(x,y,g_componentMove.radial)){auto hit=pickSurface(x,y);Vec3 point=hit.hit?g_instanceWorld[(size_t)body].transformPoint(hit.local):g_reports[g_instancePart[(size_t)body]].bounds.transformed(g_instanceWorld[(size_t)body]).center();Vec3 radius=point-g_componentMove.joint.origin;radius=radius-g_componentMove.joint.axis*radius.dot(g_componentMove.joint.axis);g_componentMove.radial=radius.normalized();}
+    g_componentMove.dragging=true;g_componentMove.active=true;
 }
 static void moveComponentDrag(int x,int y){
     auto& move=g_componentMove;if(!move.dragging)return;if(move.revision!=g_session.revision||move.epoch!=g_documentEpoch){cancelComponentMove();throw std::runtime_error("The drawing changed during movement; drag cancelled");}
     double delta=0;Vec3 radial;
-    if(move.radial.len()>.5&&jointPointerRadial(x,y,radial))delta=std::atan2(move.joint.axis.dot(move.radial.cross(radial)),move.radial.dot(radial))*180./K_PI;
-    else {Vec3 tangent=move.joint.axis.cross(move.radial).normalized();double radius=std::max(dist*.12,g_sceneBounds.valid()?g_sceneBounds.diagonal()*.12:10.);float ax,ay,bx,by;Vec3 point=move.joint.origin+move.radial*radius;
-        if(tangent.len()>.5&&projectScreen(point,ax,ay)&&projectScreen(point+tangent*radius,bx,by)&&std::hypot(bx-ax,by-ay)>4){double sx=bx-ax,sy=by-ay;delta=((x-move.x)*sx+(y-move.y)*sy)/(sx*sx+sy*sy)*180./K_PI;}else delta=(x-move.x)*.35;
+    if(move.joint.mode=="translate"){
+        bool atBound=false;
+        if(move.joint.limited){double a=(move.joint.min-move.joint.position)/move.joint.coordinateSign,b=(move.joint.max-move.joint.position)/move.joint.coordinateSign;
+            float sx,sy,ax,ay,bx,by;double minimum=std::min(a,b),maximum=std::max(a,b);
+            if(projectScreen(move.pointerWorld,sx,sy)&&projectScreen(move.pointerWorld+move.joint.axis*minimum,ax,ay)&&projectScreen(move.pointerWorld+move.joint.axis*maximum,bx,by)){
+                double dx=bx-ax,dy=by-ay,length=dx*dx+dy*dy;
+                if(length>1e-6){double coordinate=((x-ax)*dx+(y-ay)*dy)/length;
+                    if(coordinate<=0){delta=minimum;atBound=true;}else if(coordinate>=1){delta=maximum;atBound=true;}}
+            }
+        }
+        if(!atBound){double coordinate;if(!jointPointerCoordinate(x,y,coordinate))throw std::runtime_error("Travel cannot be resolved in this view; drag cancelled");delta=coordinate-move.pointerCoordinate;}
+    }else{
+        if(move.radial.len()>.5&&jointPointerRadial(x,y,radial))delta=std::atan2(move.joint.axis.dot(move.radial.cross(radial)),move.radial.dot(radial))*180./K_PI;
+        else {Vec3 tangent=move.joint.axis.cross(move.radial).normalized();double radius=std::max(dist*.12,g_sceneBounds.valid()?g_sceneBounds.diagonal()*.12:10.);float ax,ay,bx,by;Vec3 point=move.joint.origin+move.radial*radius;
+            if(tangent.len()>.5&&projectScreen(point,ax,ay)&&projectScreen(point+tangent*radius,bx,by)&&std::hypot(bx-ax,by-ay)>4){double sx=bx-ax,sy=by-ay;delta=((x-move.x)*sx+(y-move.y)*sy)/(sx*sx+sy*sy)*180./K_PI;}else delta=(x-move.x)*.35;
+        }
+        // Unwrap against the observed delta before clamping, including intervals crossing 180.
+        while(delta-move.pointerAngle>180)delta-=360;while(delta-move.pointerAngle<-180)delta+=360;move.pointerAngle=delta;
     }
-    // Keep the absolute pointer angle continuous when crossing +/-180 degrees.
-    while(delta-move.delta>180)delta-=360;while(delta-move.delta<-180)delta+=360;
-    AssemblyManipulationPreview preview;std::string error;if(!previewAssemblyManipulation(move.program,move.driver,move.joint.mate,"rotate",delta,preview,error))throw std::runtime_error(error);
+    delta=boundedComponentDelta(move.joint,delta);
+    AssemblyManipulationPreview preview;std::string error;if(!previewAssemblyManipulation(move.program,move.driver,move.joint.mate,move.joint.mode,delta,preview,error))throw std::runtime_error(error);
     std::vector<Mat4> worlds=move.baseline;for(size_t i=0;i<g_instanceIds.size();++i){auto found=std::find_if(preview.placements.begin(),preview.placements.end(),[&](const AssemblyPlacement& placement){return placement.node==g_instanceIds[i]&&placement.copy==g_instanceCopies[i];});if(found==preview.placements.end())throw std::runtime_error("Joint preview did not return the selected assembly placement");worlds[i]=found->world;}
-    g_instanceWorld=std::move(worlds);move.delta=delta;g_dragged=std::abs(x-move.x)+std::abs(y-move.y)>2;rebuildDisplayBounds();refreshSelectionLines();char text[180];std::snprintf(text,sizeof text,"Joint %llu / %.1f deg / %zu attached components / release saves / Esc cancels",(unsigned long long)move.joint.mate,delta,move.joint.movingNodes.size());g_status=text;g_error=false;
+    g_instanceWorld=std::move(worlds);move.delta=delta;g_dragged=std::abs(x-move.x)+std::abs(y-move.y)>2;rebuildDisplayBounds();refreshSelectionLines();char text[240];
+    bool absolute=move.joint.type=="prismatic"||move.joint.type=="revolute";
+    std::snprintf(text,sizeof text,"Joint %llu / %s %.2f %s / %zu attached components / release saves / Esc cancels",(unsigned long long)move.joint.mate,absolute?"position":"displacement",absolute?move.joint.position+move.joint.coordinateSign*delta:delta,move.joint.mode=="translate"?"mm":"deg",move.joint.movingNodes.size());g_status=text;g_error=false;
 }
 static void applyComponentMove(){
     if(!g_componentMove.active)return;auto move=std::move(g_componentMove);g_componentMove={};g_componentMove.armed=move.armed;
     g_instanceWorld=move.baseline;rebuildDisplayBounds();refreshSelectionLines();
     if(move.revision!=g_session.revision||move.epoch!=g_documentEpoch){rebuildScene();throw std::runtime_error("The drawing changed during movement; no placement was saved");}
     if(std::abs(move.delta)<1e-8){g_status="Move component: drag a part / Esc exits";return;}
-    using V=arkjson::Value;V command=V::makeObj(),commands=V::makeArr(),args=V::makeObj();command.set("op",V::makeStr("assembly.drive"));command.set("driver",V::makeNum((double)move.driver));command.set("mate",V::makeNum((double)move.joint.mate));command.set("mode",V::makeStr("rotate"));command.set("delta",V::makeNum(move.delta));commands.arr.push_back(command);args.set("commands",commands);args.set("expected_revision",V::makeNum((double)move.revision));runTool("doc_apply",args);
+    using V=arkjson::Value;V command=V::makeObj(),commands=V::makeArr(),args=V::makeObj();command.set("op",V::makeStr("assembly.drive"));command.set("driver",V::makeNum((double)move.driver));command.set("mate",V::makeNum((double)move.joint.mate));command.set("mode",V::makeStr(move.joint.mode));command.set("delta",V::makeNum(move.delta));commands.arr.push_back(command);args.set("commands",commands);args.set("expected_revision",V::makeNum((double)move.revision));runTool("doc_apply",args);
     if(!g_error)g_status="Component movement saved / attached components follow / Undo restores the previous placement";
 }
 static bool pickNamedEdgeScreen(int mx,int my,bool curvesOnly=false){
@@ -4782,7 +4893,12 @@ static void drawFrame(HDC hdc){
     for(int i=first;i<last;++i){textOut(fitText(chatLines[i],.66f,viewW-44),viewX+22,chatY,.66f,.73,.77,.84);chatY+=22;}
     float inputY=H-120;
     rect(viewX+22,inputY,viewW-244,62,7,.055,.062,.078,1,.30,.35,.43,.8,1);
-    label(g_teamMode?"GOAL / DECISION  /  Ctrl+Enter to queue":"MESSAGE  /  Ctrl+Enter to send",viewX+30,inputY-16,.55f);
+    if(g_pendingObjectTarget){
+        std::string chip="Object: "+g_pendingObjectTarget->label;
+        if(!g_pendingObjectTarget->invalidated.empty())chip="Object removed or replaced / select again";
+        else if(g_pendingObjectTarget->epoch!=g_objectDocumentEpoch)chip="Object from previous drawing / select again";
+        textOut(fitText(chip,.62f,viewW-338),viewX+30,inputY-20,.62f,.50f,.85f,.96f);button("Clear",viewX+viewW-302,inputY-25,66,566);
+    }else label(g_teamMode?"GOAL / DECISION  /  Ctrl+Enter to queue":"MESSAGE  /  Ctrl+Enter to send",viewX+30,inputY-16,.55f);
     button(g_teamMode?(g_teamStarted&&!g_teamSnapshot.cancelled?"Queue":"Start"):(g_chatBusy?"Running":"Send"),viewX+viewW-206,inputY,84,74,true);button("Cancel",viewX+viewW-112,inputY,90,75);
     if(g_teamMode){std::string target="To: "+(g_teamTarget.empty()?std::string(g_teamFocusedWorkflow?"Engineer":"entire team"):g_teamTarget=="all"?std::string("entire team"):g_teamTarget);button(target.c_str(),viewX+viewW-206,inputY+40,184,473);}
     else button("Codex MCP",viewX+viewW-206,inputY+40,184,58);
@@ -4845,7 +4961,11 @@ static void drawFrame(HDC hdc){
         textOut("Appearance: all instances of this part definition",px+3,py+36,.55f,.64f,.75f,.82f);
     }
     if(g_componentMove.armed&&!g_toolsOpen){float px=g_showViewCube?(float)g_cubeX+g_cubeS+24:(float)viewX+16,py=(float)viewY+77;rect(px-5,py-5,390,58,7,.045f,.115f,.135f,.95f,.20f,.70f,.72f,.75f,1);
-        char angle[80];if(g_componentMove.joint.mate)std::snprintf(angle,sizeof angle,"Joint %llu / %.1f deg",(unsigned long long)g_componentMove.joint.mate,g_componentMove.delta);else std::snprintf(angle,sizeof angle,"Ready to drag a joint");textOut(angle,px+4,py+6,.72f,.72f,.96f,.97f);
+        char angle[180];const auto& joint=g_componentMove.joint;
+        if(joint.mate){const char* unit=joint.mode=="translate"?"mm":"deg";bool absolute=joint.type=="prismatic"||joint.type=="revolute";double position=absolute?joint.position+joint.coordinateSign*g_componentMove.delta:g_componentMove.delta;
+            if(joint.limited)std::snprintf(angle,sizeof angle,"Joint %llu / %.1f %s / [%.1f, %.1f]",(unsigned long long)joint.mate,position,unit,joint.min,joint.max);
+            else std::snprintf(angle,sizeof angle,"Joint %llu / %s %.1f %s",(unsigned long long)joint.mate,absolute?"position":"delta",position,unit);
+        }else std::snprintf(angle,sizeof angle,"Ready to drag a joint");textOut(angle,px+4,py+6,.72f,.72f,.96f,.97f);
         button("Apply",px+224,py,70,563);button("Cancel",px+302,py,73,564);textOut("Drag part / release saves / Esc cancels / middle mouse orbits",px+3,py+37,.52f,.65f,.82f,.86f);
     }
     if(g_grid&&!g_allSheetsFlat&&!g_stockMode){char scale[96];std::snprintf(scale,sizeof scale,"Grid %.4g mm / major %.4g mm",g_adaptiveGrid.spacing,g_adaptiveGrid.spacing*5.);float gx=(float)viewX+17,gy=(float)viewY+viewH-78;rect(gx-6,gy-5,textWidth(scale,.65f)+12,24,5,.065f,.09f,.115f,.85f,0,0,0,0,0);textOut(scale,gx,gy,.65f,.68f,.81f,.89f);}
@@ -5031,6 +5151,7 @@ static std::vector<ContextEntry> contextEntries(ContextTarget target,int body=-1
         menu.push_back({561,"Adjust opacity...",feature!=nullptr,"Part definition / 5-100 percent"});
         if(feature&&featureManufacturingLineage(g_doc,*feature).editableSheet){menu.push_back({394,"Add return hem",true,"Open round 180 degree edge return"});menu.push_back({397,"Add circular emboss",true,"Exact constant-thickness form"});}
         if(feature&&feature->type==FeatureType::Suspension)menu.push_back({384,"Spring unit controls",true,"Suspension travel, steering and wheel spin"});
+        menu.push_back({0,"Agent"});menu.push_back({565,"Ask Agent about this object",feature!=nullptr,"Attach this occurrence to your next explicit message"});
         menu.push_back({0,"Inspect"});menu.push_back({401,"Properties"});menu.push_back({188,"Mass / center of gravity"});menu.push_back({171,"Select named faces",true,"Persistent native surface names"});menu.push_back({172,"Select named edges",true,"Persistent native edge names"});
         menu.push_back({0,"View"});menu.push_back({hidden?341:340,hidden?"Show":"Hide",true,"Display only"});
         menu.push_back({342,"Spotlight",true,"Spotlight the selected instance"});menu.push_back({343,"Exit Spotlight",g_spotlightActive,"Restore the previous display set"});
@@ -5573,6 +5694,44 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
                 if(g_session.revision!=revision)return 298;
             }resize(originalWidth,originalHeight);g_inspectorScroll=0;
         }
+        auto objectCapture=[&](const std::string& suffix){target=tTarget;dist=tDist;yaw=tYaw;pitch=tPitch;g_swap=false;HDC targetDc=GetDC(g_window);drawFrame(targetDc);glFinish();glReadBuffer(GL_BACK);
+            std::vector<u8> pixels((size_t)winW*winH*3);glPixelStorei(GL_PACK_ALIGNMENT,1);glReadPixels(0,0,winW,winH,GL_RGB,GL_UNSIGNED_BYTE,pixels.data());ReleaseDC(g_window,targetDc);Image shot;shot.w=winW;shot.h=winH;shot.px.resize(pixels.size());for(int y=0;y<winH;++y)std::memcpy(shot.px.data()+(size_t)y*winW*3,pixels.data()+(size_t)(winH-1-y)*winW*3,(size_t)winW*3);return writePNG((shotPath+suffix).c_str(),shot);};
+        // Context attachment preserves feature/occurrence identity until an explicit send.
+        auto freshTargetDocument=[&]{V args=V::makeObj();args.set("expected_revision",V::makeNum((double)g_session.revision));runTool("doc_new",args);return !g_error;};
+        auto parseTarget=[](const char* text){V value;arkjson::parse(text,value);return value;};
+        if(!freshTargetDocument())return 645;runTool("doc_apply",parseTarget(R"({"commands":[{"op":"feature.add","type":"box","name":"Target definition","p":{"dx":"20","dy":"15","dz":"10"}},{"op":"assembly.add","name":"Target copies","feature":1,"pattern":{"type":"linear","count":3,"dx":"40"}},{"op":"assembly.add","name":"Other occurrence","feature":1,"p":{"ty":"50"}}]})"));
+        if(g_error||g_bodyIds.size()!=4)return 600;int copyBody=-1,otherBody=-1;
+        for(size_t i=0;i<g_instanceIds.size();++i){if(g_instanceIds[i]==1&&g_instanceCopies[i]==2)copyBody=(int)i;if(g_instanceIds[i]==2)otherBody=(int)i;}
+        if(copyBody<0||otherBody<0||!hasAction(contextEntries(ContextTarget::Body,copyBody),565))return 601;
+        const auto models=g_teamModels,efforts=g_teamEfforts;auto config=g_assistantConfig;u64 targetRevision=g_session.revision;bool wasMode=g_teamMode;g_teamMode=false;
+        selBody=copyBody;interactiveAction(565);
+        if(!g_pendingObjectTarget||g_pendingObjectTarget->node!=1||g_pendingObjectTarget->copy!=2||!g_assistantDockOpen||g_chatBusy||g_teamStarted||g_session.revision!=targetRevision||g_teamModels!=models||g_teamEfforts!=efforts||g_assistantConfig.model!=config.model||g_assistantConfig.reasoningEffort!=config.reasoningEffort)return 602;
+        selBody=otherBody;std::string attached="Inspect the selected occurrence";if(!attachPendingObjectContext(attached)||attached.find("occurrence:1:2")==std::string::npos||attached.find("occurrence:2:0")!=std::string::npos||g_session.revision!=targetRevision)return 603;
+        if(!objectCapture(".object-target-single.png"))return 604;g_teamMode=true;layout();if(!objectCapture(".object-target-team.png"))return 605;
+        applyCommand(parseTarget(R"({"op":"param.set","name":"target_revision_probe","expr":"2"})"));attached="Inspect after an unrelated edit";
+        if(g_error||!attachPendingObjectContext(attached)||attached.find("\"revision\":"+std::to_string(g_session.revision))==std::string::npos||attached.find("occurrence:1:2")==std::string::npos)return 606;
+        interactiveAction(566);attached="Without target";if(g_pendingObjectTarget||!attachPendingObjectContext(attached)||attached!="Without target")return 607;
+        selBody=copyBody;interactiveAction(565);applyCommand(parseTarget(R"({"op":"assembly.edit","id":1,"pattern":{"type":"linear","count":2,"dx":"40"}})"));
+        if(g_error||!g_pendingObjectTarget||g_pendingObjectTarget->invalidated.empty())return 640;
+        uiAction(18);targetRevision=g_session.revision;attached="Copy restored after removal";
+        if(g_error||attachPendingObjectContext(attached)||!g_pendingObjectTarget||g_pendingObjectTarget->invalidated.empty()||g_session.revision!=targetRevision)return 641;g_error=false;
+
+        selBody=copyBody;interactiveAction(565);applyCommand(parseTarget(R"({"op":"assembly.remove","id":1})"));targetRevision=g_session.revision;attached="Deleted occurrence";
+        if(!attachPendingObjectContext(attached)&&g_pendingObjectTarget&&!g_pendingObjectTarget->invalidated.empty()&&g_session.revision==targetRevision)g_error=false;else return 608;
+        selBody=0;interactiveAction(565);if(!freshTargetDocument())return 645;runTool("doc_apply",parseTarget(R"({"commands":[{"op":"feature.add","type":"box","name":"Reused ID","p":{"dx":"10","dy":"10","dz":"10"}}]})"));targetRevision=g_session.revision;attached="Previous drawing";
+        if(attachPendingObjectContext(attached)||!g_pendingObjectTarget||g_pendingObjectTarget->invalidated.empty()||g_session.revision!=targetRevision)return 609;g_error=false;
+        selBody=0;interactiveAction(565);attached="Definition context";if(!attachPendingObjectContext(attached)||attached.find("feature:1")==std::string::npos||attached.find("occurrence:")!=std::string::npos)return 610;
+        applyCommand(parseTarget(R"({"op":"feature.remove","id":1})"));attached="Deleted definition";if(attachPendingObjectContext(attached)||!g_pendingObjectTarget||g_pendingObjectTarget->invalidated.empty())return 611;g_error=false;
+        // Current journals preserve ID counters. Legacy snapshot Undo (still supported)
+        // restores its counters; exercise actual reuse through that existing path.
+        struct HistoryProbeReset {~HistoryProbeReset(){g_session.suppressIterationHistory(false);}} historyProbeReset;
+        if(!freshTargetDocument())return 645;g_session.suppressIterationHistory(true);
+        applyCommand(parseTarget(R"({"op":"feature.add","type":"box","name":"Undo target","p":{"dx":"12","dy":"12","dz":"12"}})"));selBody=0;interactiveAction(565);
+        if(g_error||!g_pendingObjectTarget)return 642;u64 recycledFeature=g_pendingObjectTarget->feature;uiAction(18);
+        if(g_error||!g_pendingObjectTarget||g_pendingObjectTarget->invalidated.empty()||g_doc.find(recycledFeature))return 643;
+        applyCommand(parseTarget(R"({"op":"feature.add","type":"box","name":"Different body at reused ID","p":{"dx":"25","dy":"25","dz":"25"}})"));targetRevision=g_session.revision;attached="Reused ID after Undo";
+        if(g_error||!g_doc.find(recycledFeature)||attachPendingObjectContext(attached)||!g_pendingObjectTarget||g_pendingObjectTarget->invalidated.empty()||g_session.revision!=targetRevision)return 644;g_error=false;g_session.suppressIterationHistory(false);g_teamMode=wasMode;g_assistantDockOpen=false;layout();
+        std::ofstream targetReceipt(shotPath+".object-target-test.log");targetReceipt<<"PASS: right-click Ask Agent action; exact patterned occurrence vs definition; no inference or configuration changes on attachment; selection cannot retarget; fresh revision context; removable chip; deleted occurrence/definition and replacement drawing reject without sending; removal latch rejects restored copy and different body reusing an ID after supported legacy snapshot Undo.\n";
         g_toolModule=0;g_status="UI checks passed / native context graphics / transformed sheet origin / hem and emboss forms / unchanged display revision";
     }
     if(motionUiTest){
@@ -5657,7 +5816,41 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         SendMessage(hwnd,WM_KEYDOWN,VK_ESCAPE,0);if(g_componentMove.active||g_componentMove.armed||g_session.revision!=before||changed(1)||changed(2)||changed(3))return fail(487,"Esc failed to restore canonical placements");
         if(!click(562)||!pointer(bar,start))return fail(488,"Second drag could not start");SendMessage(hwnd,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(start.x,start.y));SendMessage(hwnd,WM_MOUSEMOVE,MK_LBUTTON,MAKELPARAM(start.x+70,start.y+30));SendMessage(hwnd,WM_LBUTTONUP,0,MAKELPARAM(start.x+70,start.y+30));if(g_error||g_session.revision!=before+1||!changed(1)||!changed(2)||!changed(3))return fail(489,"Drag release did not commit exact placements");if(!capture(".steering-saved.png")||!click(18)||g_error||changed(1)||changed(2)||changed(3))return fail(490,"Steering undo did not restore all connected parts");
         cancelComponentMove();if(!selectBody(0)||!click(562)||!g_error||g_componentMove.active)return fail(491,"Grounded component was allowed to move");g_error=false;
-        std::ofstream receipt(shotPath+".interaction-test.log");receipt<<"PASS: real mouse opacity toggle, adjustment, restoration, physical invariance and undo; adaptive 1/2/5 grid, bounded density, meters and large offset, grid toggle; steering preview carries fork+wheel, Esc rollback, release atomic commit, undo, fixed rejection.\n";g_status="Interaction checks passed / transparency / adaptive grid / connected joint drag / cancel / undo";
+        // A pneumatic rod and a rigid follower share exact prismatic travel.
+        fresh();runTool("doc_apply",parse(R"({"commands":[{"op":"param.set","name":"stroke_min","expr":"0"},{"op":"param.set","name":"stroke_max","expr":"80"},{"op":"feature.add","type":"native_solid","name":"Cylinder body","p":{"op":"cylinder","radius":"12","height":"40"}},{"op":"feature.add","type":"native_solid","name":"Piston rod","p":{"op":"cylinder","radius":"4","height":"80"}},{"op":"feature.add","type":"box","name":"Follower source","p":{"dx":"18","dy":"12","dz":"10"}},{"op":"feature.add","type":"transform","name":"Rigid follower","inputs":[3],"p":{"tx":"16","tz":"65"}},{"op":"assembly.add","name":"Cylinder","feature":1,"fixed":true},{"op":"assembly.add","name":"Rod","feature":2,"p":{"tz":"30"}},{"op":"assembly.add","name":"Follower","feature":4,"p":{"tz":"30"}}]})"));
+        if(g_error||g_bodyIds.size()!=3)return fail(620,"Pneumatic slider fixture failed");frameScene();g_cameraOrtho=true;draw();
+        g_dialogOverrideQueue={{"prismatic","1","Z","2","Z","0","0.5","0.5","stroke_min","stroke_max"},{"rigid","2","origin","3","origin","0","0.5","0.5","",""}};g_dialogSmoke=3;g_dialogShot=shotPath+".slider-limits-dialog.png";
+        bool sliderAdded=click(94),followerAdded=click(94);g_dialogSmoke=0;
+        if(!sliderAdded||!followerAdded||g_error||g_doc.mates.size()!=2||!g_doc.mates[0].limits.enabled||g_doc.mates[0].limits.min!="stroke_min"||g_doc.mates[0].limits.max!="stroke_max")return fail(621,"Persistent prismatic limit form failed");
+        int rod=-1;for(size_t i=0;i<g_instanceIds.size();++i)if(g_instanceIds[i]==2)rod=(int)i;
+        if(rod<0||!selectBody(rod)||!click(562)||g_error||g_componentMove.joint.mode!="translate"||g_componentMove.joint.movingNodes.size()!=2||!g_componentMove.joint.limited||std::abs(g_componentMove.joint.position-30)>1e-5)return fail(622,"Slider mode or rigid follower selection failed");
+        before=g_session.revision;baseline=g_instanceWorld;
+        auto startSlider=[&](POINT& at){if(!pointer(rod,at))return false;SendMessage(hwnd,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(at.x,at.y));return g_componentMove.dragging&&!g_error;};
+        auto travelPointer=[&](POINT at,double mm){float ax,ay,bx,by;auto joint=g_componentMove.joint;if(!projectScreen(joint.origin,ax,ay)||!projectScreen(joint.origin+joint.axis*20,bx,by))return POINT{at.x,at.y};return POINT{(LONG)std::lround(at.x+(bx-ax)*mm/20),(LONG)std::lround(at.y+(by-ay)*mm/20)};};
+        if(!startSlider(start))return fail(623,"Rod viewport drag could not start");POINT high=travelPointer(start,200);SendMessage(hwnd,WM_MOUSEMOVE,MK_LBUTTON,MAKELPARAM(high.x,high.y));
+        if(g_error||std::abs(g_componentMove.delta-50)>1e-5||changed(0)||!changed(1)||!changed(2)||g_session.revision!=before)return fail(624,"Mouse upper travel bound failed to clamp rod and follower");
+        if(!capture(".slider-upper-preview.png"))return fail(625,"Slider upper preview capture failed");POINT low=travelPointer(start,-200);SendMessage(hwnd,WM_MOUSEMOVE,MK_LBUTTON,MAKELPARAM(low.x,low.y));
+        if(g_error||std::abs(g_componentMove.delta+30)>1e-5||changed(0)||!changed(1)||!changed(2))return fail(626,"Mouse lower travel bound failed");
+        if(!capture(".slider-lower-preview.png"))return fail(627,"Slider lower preview capture failed");SendMessage(hwnd,WM_KEYDOWN,VK_ESCAPE,0);
+        if(g_componentMove.active||g_componentMove.armed||g_session.revision!=before||changed(0)||changed(1)||changed(2))return fail(628,"Slider Esc did not restore connected parts");
+        if(!click(562)||!startSlider(start))return fail(629,"Slider release probe could not start");high=travelPointer(start,200);SendMessage(hwnd,WM_MOUSEMOVE,MK_LBUTTON,MAKELPARAM(high.x,high.y));SendMessage(hwnd,WM_LBUTTONUP,0,MAKELPARAM(high.x,high.y));
+        if(g_error||g_session.revision!=before+1||changed(0)||!changed(1)||!changed(2)||!capture(".slider-upper-saved.png"))return fail(630,"Slider release did not persist bounded travel");
+        if(!click(18)||g_error||changed(1)||changed(2))return fail(631,"Slider undo did not restore both moving parts");
+        cancelComponentMove();if(!click(562)||!startSlider(start))return fail(632,"Lower slider release probe could not start");low=travelPointer(start,-200);SendMessage(hwnd,WM_MOUSEMOVE,MK_LBUTTON,MAKELPARAM(low.x,low.y));SendMessage(hwnd,WM_LBUTTONUP,0,MAKELPARAM(low.x,low.y));
+        if(g_error||changed(0)||!changed(1)||!changed(2)||!capture(".slider-lower-saved.png")||!click(18)||g_error||changed(1)||changed(2))return fail(633,"Lower slider release or undo failed");
+        // Limit removal uses null through the same persistent editor.
+        cancelComponentMove();g_selectedMate=0;g_dialogOverrideQueue={{"prismatic","1","Z","2","Z","0","0.5","0.5","",""}};g_dialogSmoke=3;uiAction(95);g_dialogSmoke=0;
+        if(g_error||g_doc.mates[0].limits.enabled)return fail(634,"Clearing both bounds did not remove persisted limits");uiAction(18);if(g_error||!g_doc.mates[0].limits.enabled)return fail(635,"Undo did not restore persisted limits");
+        // Signed clamps account for a grounded B; angles crossing 180 remain continuous.
+        AssemblyManipulationJoint clamp;clamp.limited=true;clamp.position=30;clamp.min=0;clamp.max=80;clamp.coordinateSign=-1;
+        if(boundedComponentDelta(clamp,200)!=30||boundedComponentDelta(clamp,-200)!=-50)return fail(636,"Backwards slider coordinate clamp failed");clamp.coordinateSign=1;clamp.position=170;clamp.min=120;clamp.max=240;
+        if(boundedComponentDelta(clamp,100)!=70||boundedComponentDelta(clamp,-100)!=-50)return fail(637,"Bounded angular interval crossing 180 failed");
+        // End-on views cannot resolve axial travel and never substitute screen-X motion.
+        g_cameraOrtho=true;yaw=tYaw=0;pitch=tPitch=0;frameScene();draw();if(!selectBody(rod)||!click(562)||!pointer(rod,start))return fail(638,"End-on slider probe could not select rod");before=g_session.revision;baseline=g_instanceWorld;
+        SendMessage(hwnd,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(start.x,start.y));
+        if(!g_error||g_componentMove.dragging||g_componentMove.active||g_session.revision!=before||changed(1)||changed(2)||g_status.find("axis points into the view")==std::string::npos)return fail(639,"End-on view invented slider movement");
+        SendMessage(hwnd,WM_LBUTTONUP,0,MAKELPARAM(start.x,start.y));cancelComponentMove();g_error=false;
+        std::ofstream receipt(shotPath+".interaction-test.log");receipt<<"PASS: real mouse opacity toggle, adjustment, restoration, physical invariance and undo; adaptive 1/2/5 grid, bounded density, meters and large offset, grid toggle; steering preview carries fork+wheel, Esc rollback, release atomic commit, undo, fixed rejection; pneumatic rod+rigid follower, persistent min/max expressions and clearing/undo, both travel endpoints, release/undo/Esc, backwards signed clamp, angular interval crossing 180, end-on view rejection.\n";g_status="Interaction checks passed / transparency / adaptive grid / connected joint drag / cancel / undo";
     }
     if(projectionUiTest||frameToolsUiTest){
         using V=arkjson::Value;auto parse=[](const char* text){V value;if(!arkjson::parse(text,value))throw std::runtime_error("Invalid UI test fixture");return value;};
@@ -5981,6 +6174,11 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         auto pump=[&]{auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(8);while(g_chatBusy&&std::chrono::steady_clock::now()<deadline){MSG event{};while(PeekMessage(&event,nullptr,0,0,PM_REMOVE)){TranslateMessage(&event);DispatchMessage(&event);}drainUiTools();Sleep(2);}return !g_chatBusy;};
         sendAssistant("Offline integration test: new document, then create a box.",transport);if(!pump()||g_doc.getParam("agent_ui_probe")!=17||g_conversation.arr.empty()||g_doc.features.size()!=1||g_doc.features[0].type!=FeatureType::Box||g_path!="Untitled.ark")return assistantFailure(120);
         if(g_assistantUsageDocument.totalTokens!=375||g_assistantUsageDocument.reportedResponses!=3||!g_assistantUsageRunCounted)return assistantFailure(122);
+        auto targetCalls=std::make_shared<std::atomic_int>(0);auto singleTargetSeen=std::make_shared<std::atomic_bool>(false);u64 objectRevision=g_session.revision;
+        AssistantTransport targetTransport=[parse,targetCalls,singleTargetSeen,objectRevision](const auto&,const V& request,const auto*){++*targetCalls;auto text=request.dump();*singleTargetSeen=text.find("Selected object_context")!=std::string::npos&&text.find("feature:1")!=std::string::npos&&text.find("revision")!=std::string::npos&&text.find(std::to_string(objectRevision))!=std::string::npos;return parse(R"({"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Selected object inspected offline."}]}]})");};
+        selBody=0;interactiveAction(565);if(*targetCalls||g_chatBusy||!g_pendingObjectTarget)return assistantFailure(612);
+        sendAssistant("OFFLINE: inspect this exact object.",targetTransport);if(!pump()||!*singleTargetSeen||*targetCalls!=1||g_pendingObjectTarget||g_session.revision!=objectRevision)return assistantFailure(613);
+
         auto gate=std::make_shared<std::atomic_bool>(false);auto staleTransport=[gate,parse](const auto&,const auto&,const auto*){while(!*gate)std::this_thread::sleep_for(std::chrono::milliseconds(1));return parse(R"({"status":"completed","output":[{"type":"function_call","call_id":"stale_ui_test","name":"doc_apply","arguments":"{\"commands\":[{\"op\":\"param.set\",\"name\":\"stale_ui_probe\",\"expr\":\"99\"}]}"}]})");};
         sendAssistant("Offline stale-write test.",staleTransport);V command=parse(R"({"op":"param.set","name":"human_ui_probe","expr":"1"})");applyCommand(command);*gate=true;
         if(!pump()||!g_conversation.arr.empty()||std::any_of(g_doc.params.begin(),g_doc.params.end(),[](auto& p){return p.name=="stale_ui_probe";}))return assistantFailure(121);
@@ -6010,23 +6208,24 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         winW=originalWidth;winH=originalHeight;layout();DestroyWindow(g_chatInput);g_chatInput=nullptr;
         auto saveProbeShot=[&](const std::string& path){bool swap=g_swap;g_swap=false;drawFrame(hdc);glFinish();std::vector<u8> pixels((size_t)winW*winH*3);glPixelStorei(GL_PACK_ALIGNMENT,1);glReadBuffer(GL_BACK);glReadPixels(0,0,winW,winH,GL_RGB,GL_UNSIGNED_BYTE,pixels.data());Image image;image.w=winW;image.h=winH;image.px.resize(pixels.size());for(int y=0;y<winH;++y)memcpy(&image.px[(size_t)y*winW*3],&pixels[(size_t)(winH-1-y)*winW*3],(size_t)winW*3);g_swap=swap;return writePNG(path.c_str(),image);};
         bool previousFocusedWorkflow=g_teamFocusedWorkflow;g_teamFocusedWorkflow=false;unsigned previousTeamCount=g_teamRoleCount;g_teamRoleCount=3;bool previousTeamMode=g_teamMode;auto previousModels=g_teamModels,previousEfforts=g_teamEfforts;g_teamMode=true;g_assistantDockOpen=true;layout();g_teamModels={"offline-engineer","offline-designer","offline-reviewer"};g_teamEfforts={"low","medium","high"};
-        auto teamGate=std::make_shared<std::atomic_bool>(false);auto decisionSeen=std::make_shared<std::atomic_bool>(false);std::array<std::shared_ptr<std::atomic_int>,3> teamRounds{std::make_shared<std::atomic_int>(0),std::make_shared<std::atomic_int>(0),std::make_shared<std::atomic_int>(0)};std::array<AssistantTransport,8> teamTransports;auto teamRevision=g_session.revision;auto beforeTeamTokens=g_assistantUsageDocument.totalTokens;
-        for(size_t i=0;i<3;++i)teamTransports[i]=[i,teamRounds,teamGate,decisionSeen,teamRevision](const auto&,const V& request,const auto* cancel){
-            while(!*teamGate){if(cancel&&*cancel)throw std::runtime_error("Offline team test cancelled");std::this_thread::sleep_for(std::chrono::milliseconds(1));}int round=++*teamRounds[i];if(request.dump().find("dynamic team decision")!=std::string::npos)*decisionSeen=true;
+        auto teamGate=std::make_shared<std::atomic_bool>(false);auto decisionSeen=std::make_shared<std::atomic_bool>(false);auto teamTargetSeen=std::make_shared<std::atomic_bool>(false),steeringTargetSeen=std::make_shared<std::atomic_bool>(false);std::array<std::shared_ptr<std::atomic_int>,3> teamRounds{std::make_shared<std::atomic_int>(0),std::make_shared<std::atomic_int>(0),std::make_shared<std::atomic_int>(0)};std::array<AssistantTransport,8> teamTransports;auto teamRevision=g_session.revision;auto beforeTeamTokens=g_assistantUsageDocument.totalTokens;
+        for(size_t i=0;i<3;++i)teamTransports[i]=[i,teamRounds,teamGate,decisionSeen,teamTargetSeen,steeringTargetSeen,teamRevision](const auto&,const V& request,const auto* cancel){
+            while(!*teamGate){if(cancel&&*cancel)throw std::runtime_error("Offline team test cancelled");std::this_thread::sleep_for(std::chrono::milliseconds(1));}int round=++*teamRounds[i];if(request.dump().find("dynamic team decision")!=std::string::npos){*decisionSeen=true;if(request.dump().find("feature:1")!=std::string::npos&&request.dump().find("Selected object_context")!=std::string::npos)*steeringTargetSeen=true;}else if(request.dump().find("feature:1")!=std::string::npos&&request.dump().find("Selected object_context")!=std::string::npos)*teamTargetSeen=true;
             V response=V::makeObj(),outputs=V::makeArr();response.set("status",V::makeStr("completed"));V usage=V::makeObj();usage.set("input_tokens",V::makeNum(11));usage.set("output_tokens",V::makeNum(4));usage.set("total_tokens",V::makeNum(15));response.set("usage",usage);
             if(round==1){V call=V::makeObj(),args=V::makeObj();call.set("type",V::makeStr("function_call"));call.set("call_id",V::makeStr("offline_team_"+std::to_string(i)));call.set("name",V::makeStr(i==0?"doc_info":"doc_apply"));
                 if(i!=0){args.set("expected_revision",V::makeNum((double)teamRevision));V commands=V::makeArr(),command=V::makeObj();command.set("op",V::makeStr("param.set"));command.set("name",V::makeStr(i==1?"designer_ui_probe":"reviewer_ui_probe"));command.set("expr",V::makeStr("23"));commands.arr.push_back(command);args.set("commands",commands);}call.set("arguments",V::makeStr(args.dump()));outputs.arr.push_back(call);
             }else{V message=V::makeObj(),content=V::makeArr(),text=V::makeObj();message.set("type",V::makeStr("message"));message.set("role",V::makeStr("assistant"));text.set("type",V::makeStr("output_text"));text.set("text",V::makeStr("Offline deterministic role check completed."));content.arr.push_back(text);message.set("content",content);outputs.arr.push_back(message);}response.set("output",outputs);return response;
         };
-        g_chatLog.clear();sendTeam("OFFLINE TEST: implement one parameter; designer inspects; reviewer write must be denied.",teamTransports);
+        g_chatLog.clear();selBody=0;interactiveAction(565);if(!g_pendingObjectTarget||*teamRounds[0])return assistantFailure(614);sendTeam("OFFLINE TEST: implement one parameter; designer inspects; reviewer write must be denied.",teamTransports);
         auto pumpTeam=[&]{auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(8);do{MSG event{};while(PeekMessage(&event,nullptr,0,0,PM_REMOVE)){TranslateMessage(&event);DispatchMessage(&event);}drainUiTools();pollTeam(true);if(!g_teamSnapshot.running)return true;Sleep(2);}while(std::chrono::steady_clock::now()<deadline);return false;};
         auto workingDeadline=std::chrono::steady_clock::now()+std::chrono::seconds(2);while(std::chrono::steady_clock::now()<workingDeadline){pollTeam(true);if(std::count_if(g_teamSnapshot.roles.begin(),g_teamSnapshot.roles.end(),[](const auto& role){return role.state==AgentTeamState::Working;})==3)break;Sleep(2);}
         if(!saveProbeShot(shotPath+".team.png"))return assistantFailure(302);*teamGate=true;if(!pumpTeam())return assistantFailure(303);
         if(g_doc.getParam("designer_ui_probe")!=23||std::any_of(g_doc.params.begin(),g_doc.params.end(),[](const auto& p){return p.name=="reviewer_ui_probe";}))return assistantFailure(304);
+        if(!*teamTargetSeen||g_pendingObjectTarget)return assistantFailure(615);
         if(g_teamSnapshot.usage.totalTokens!=75||g_assistantUsageDocument.totalTokens!=beforeTeamTokens+75||g_teamSnapshot.roles.size()!=3)return assistantFailure(305);
         for(size_t i=0;i<3;++i)if(g_teamSnapshot.roles[i].model!=g_teamModels[i]||g_teamSnapshot.roles[i].reasoningEffort!=g_teamEfforts[i]||g_teamSnapshot.roles[i].usage.totalTokens!=(i==2?15:30)||!g_teamReceipts[i])return assistantFailure(306);if(g_teamSnapshot.roles[2].state!=AgentTeamState::Failed)return assistantFailure(306);
         auto serialBefore=g_doc.usage.serial;g_busy=true;pollTeam(true);g_busy=false;if(g_doc.usage.serial!=serialBefore)return assistantFailure(307);pollTeam(true);if(g_doc.usage.serial!=serialBefore)return assistantFailure(308);
-        g_teamTarget="engineer";sendTeam("dynamic team decision: keep parameter 23",teamTransports);if(!pumpTeam()||!*decisionSeen||g_teamSnapshot.usage.totalTokens!=90)return assistantFailure(309);
+        g_teamTarget="engineer";selBody=0;interactiveAction(565);sendTeam("dynamic team decision: keep parameter 23",teamTransports);if(!pumpTeam()||!*decisionSeen||!*steeringTargetSeen||g_pendingObjectTarget||g_teamSnapshot.usage.totalTokens!=90)return assistantFailure(309);
         g_agentTeam.pause(true);int designerRounds=*teamRounds[1];g_teamTarget="designer";sendTeam("Review the dynamic team decision",teamTransports);Sleep(25);pollTeam(true);if(!g_teamSnapshot.paused||*teamRounds[1]!=designerRounds)return assistantFailure(310);g_agentTeam.pause(false);if(!pumpTeam()||*teamRounds[1]!=designerRounds+1||g_teamSnapshot.usage.totalTokens!=105)return assistantFailure(311);
         cancelTeam();g_agentTeam.waitIdle();pollTeam(true);if(!g_teamSnapshot.cancelled)return assistantFailure(312);g_teamStarted=false;g_teamTarget.clear();g_teamModels=previousModels;g_teamEfforts=previousEfforts;g_teamMode=false;g_toolModule=2;layout();if(!saveProbeShot(shotPath+".sketch-icons.png"))return assistantFailure(313);
         // A real role conversation yields between atomic sketch/feature steps.

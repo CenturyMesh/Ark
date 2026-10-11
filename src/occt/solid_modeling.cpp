@@ -582,6 +582,7 @@ V finishBodies(const TopoDS_Shape& shape,const std::vector<Ref>& refs){
 
 V modelSolidNative(const V& request){
     const std::string op=word(request,"op");std::vector<Ref> refs;TopoDS_Shape result;bool many=false;
+    try{
     if(op=="tube_end_fit")return tubeEndFitNative(request);
     if(op=="imported_brep"){
         const V& package=need(request,"package");componentCustodyNative(package);
@@ -700,6 +701,17 @@ V modelSolidNative(const V& request){
         }else throw std::runtime_error("Unknown native solid operation");
     }
     return many?finishBodies(result,refs):finish(result,refs);
+    }
+    catch(const std::exception& error){
+        std::string context="Native "+op;
+        if(op=="tube_end_fit")for(const char* key:{"mode","end"})if(const auto* value=request.find(key);value&&value->t==V::Str)context+=" "+std::string(key)+"="+value->str;
+        for(const char* key:{"input_brep","tool_brep"})if(const auto* encoded=request.find(key)){
+            const std::string role=key[0]=='i'?" input":" tool";
+            try{if(encoded->t!=V::Str)throw std::runtime_error("B-rep is not text");const auto operand=readBrep(encoded->str);context+=role+" contains "+std::to_string(shapes(operand,TopAbs_SOLID).size())+" solids";}
+            catch(const std::exception&){context+=role+" B-rep unavailable";}
+        }
+        throw std::runtime_error(context+": "+error.what());
+    }
 }
 
 V componentCustodyNative(const V& package){

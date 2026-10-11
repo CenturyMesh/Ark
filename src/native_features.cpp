@@ -622,6 +622,51 @@ V tubeAuthority(const Document& document,u64 selected,const ExprEnv& env,bool al
     program.set("segments",segments);authority.set("program",program);authority.set("frame",frameValue(placed));authority.set("origin_id",V::makeNum((double)source->id));return authority;
 }
 
+// Derived discovery data only. Eligibility describes retained authoring and
+// semantic cap bindings; a particular source/host join still needs exact checks.
+void appendTubeEndFitOptions(V& result,const Document& document,u64 selected,const ExprEnv& env){
+    auto* storedReport=result.find("report");if(!storedReport)return;
+    V options=V::makeObj(),faces=V::makeArr();
+    options.set("feature_input",V::makeNum((double)selected));
+    options.set("coordinates",V::makeStr("feature definition coordinates; assembly placement is separate"));
+    options.set("joint_feasibility_checked",V::makeBool(false));
+    const auto* topology=result.find("topology");const auto* references=topology?topology->find("references"):nullptr;
+    if(references&&references->t==V::Arr)for(const auto& ref:references->arr){
+        const auto* kind=ref.find("kind"),*status=ref.find("status"),*descriptor=ref.find("descriptor"),*indices=ref.find("indices");
+        if(!kind||kind->str!="face"||!status||(status->str!="bound"&&status->str!="merged")||!descriptor||!descriptor->find("normal")||!descriptor->find("origin")||!indices||indices->arr.size()!=1)continue;
+        V face=V::makeObj();face.set("reference",required(ref,"name"));face.set("descriptor",*descriptor);faces.arr.push_back(std::move(face));
+    }
+    options.set("planar_host_references",faces);
+    try{
+        const auto authority=tubeAuthority(document,selected,env,true);const auto& program=required(authority,"program"),segments=required(program,"segments");
+        options.set("source_lineage_supported",V::makeBool(true));options.set("source_tube",required(authority,"origin_id"));
+        options.set("section",V::makeStr(required(program,"op").str=="rect_tube"?"rect":"round"));
+        options.set("source_frame_column_major",required(authority,"frame"));
+        V endpoints=V::makeArr();for(const char* end:{"start","end"}){
+            const bool start=std::string(end)=="start";const std::string name=std::string("cap.")+end;const V* cap=nullptr;
+            if(references&&references->t==V::Arr)for(const auto& ref:references->arr)if(required(ref,"name").str==name)cap=&ref;
+            const V* terminal=segments.arr.empty()?nullptr:(start?&segments.arr.front():&segments.arr.back());
+            const bool straight=terminal&&required(*terminal,"kind").str=="line";
+            const bool bound=cap&&(required(*cap,"status").str=="bound"||required(*cap,"status").str=="merged")&&required(*cap,"indices").arr.size()==1;
+            V row=V::makeObj();row.set("end",V::makeStr(end));row.set("cap_reference",V::makeStr(name));row.set("cap_status",cap?required(*cap,"status"):V::makeStr("missing"));
+            row.set("straight_terminal",V::makeBool(straight));row.set("candidate",V::makeBool(straight&&bound));
+            if(straight)row.set("authored_terminal_length_mm",required(*terminal,"length"));
+            if(bound)if(const auto* descriptor=cap->find("descriptor"))row.set("cap_descriptor",*descriptor);
+            if(!straight)row.set("reason",V::makeStr("Selected end has no authored straight terminal segment"));
+            else if(!bound)row.set("reason",V::makeStr("Original selected cap is missing, split or deleted; inspect earlier endpoint operations"));
+            endpoints.arr.push_back(std::move(row));
+        }
+        options.set("endpoints",endpoints);
+        bool envelopeHost=false;std::string hostReason;
+        try{const auto host=tubeAuthority(document,selected,env,false);const auto& hostSegments=required(required(host,"program"),"segments");envelopeHost=hostSegments.arr.size()==1&&required(hostSegments.arr.front(),"kind").str=="line";if(!envelopeHost)hostReason="Envelope host must be one straight authored Tube; planar host faces are listed separately";}
+        catch(const std::exception& error){hostReason=error.what();}
+        options.set("envelope_host_available",V::makeBool(envelopeHost));if(!envelopeHost)options.set("envelope_host_reason",V::makeStr(hostReason));
+        options.set("extension_scope",V::makeStr("plane and plane_trim require explicit max_extension; extension revalidates original untrimmed stock"));
+    }catch(const std::exception& error){options.set("source_lineage_supported",V::makeBool(false));options.set("source_reason",V::makeStr(error.what()));options.set("envelope_host_available",V::makeBool(false));}
+    options.set("host_selection",V::makeStr("Choose a source endpoint and a distinct physical host explicitly; envelope uses filled outer straight Tube stock, plane needs full finite-face seating, plane_trim allows measured partial seating"));
+    V report=*storedReport;report.set("tube_end_fit_options",options);result.set("report",report);
+}
+
 V solidFeatureRequest(const Feature& feature, const ExprEnv& env,
                      Document& document, std::vector<Body>& preceding) {
     if(featureOperation(feature)=="imported_brep"){
@@ -1023,6 +1068,7 @@ Body evaluateNativeFeature(const Feature& feature, const ExprEnv& env,
     } else if(feature.type==FeatureType::Curve&&feature.nativeSpec.find("op")&&feature.nativeSpec.find("op")->str=="project") result=spatialProjectionResult(feature,document);
     else result = nativeModelRequest(surfaceRequest(feature, env, document, preceding));
     Body body;
+    if(feature.type==FeatureType::NativeSolid)appendTubeEndFitOptions(result,document,feature.id,env);
     body.nativeData = std::move(result);
     body.baked = std::make_unique<Mesh>(nativeResultMesh(body.nativeData));
     return body;
@@ -1038,17 +1084,20 @@ void ensureNativeBody(Document& document, u64 featureId, std::vector<Body>& bodi
     const ExprEnv env = document.buildEnv();
     if (feature->type == FeatureType::Tube) {
         body->nativeData = feature->get("section", "round") == "rect" ? rectTubeSolid(*feature, env) : roundTubeSolid(*feature, env);
+        appendTubeEndFitOptions(body->nativeData,document,featureId,env);
         return;
     }
     if (feature->type == FeatureType::Transform || feature->type == FeatureType::Boolean) {
         body->nativeData = legacyOperationResult(*feature, env, document, bodies);
     } else body->nativeData = exactPrimitive(*feature, env, document, *body);
+    appendTubeEndFitOptions(body->nativeData,document,featureId,env);
 }
 
 Body evaluateExactLegacyOperation(const Feature& feature, const ExprEnv& env,
                                   Document& document, std::vector<Body>& preceding) {
     Body result;
     result.nativeData = legacyOperationResult(feature, env, document, preceding);
+    appendTubeEndFitOptions(result.nativeData,document,feature.id,env);
     result.baked = std::make_unique<Mesh>(nativeResultMesh(result.nativeData));
     return result;
 }

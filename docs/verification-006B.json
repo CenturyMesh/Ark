@@ -1,0 +1,153 @@
+{
+  "iteration": {
+    "sequence": 6,
+    "phase": "B",
+    "code": "006B",
+    "version": "0.9.7",
+    "milestones": [
+      "B.01",
+      "B.04",
+      "C.02",
+      "D.02",
+      "D.04"
+    ]
+  },
+  "date": "2026-10-11",
+  "baseline_commit": "b405456ec336f989b98652707514095b93a145cc",
+  "native_ctest": {
+    "covered_passed": 60,
+    "remaining_failures": 0,
+    "initial_run": {
+      "passed": 59,
+      "failed": 1,
+      "seconds": 87.11,
+      "log": "out/ark-006B-native-tests.log"
+    },
+    "failure": "ota-launch test reader raced its child publishing .xml.tmp; reader now accepts committed .xml receipts only",
+    "targeted_retest": {
+      "test": "ota-launch",
+      "passed": 1,
+      "failed": 0,
+      "seconds": 3.19,
+      "log": "out/ark-006B-ota-retest.log"
+    }
+  },
+  "core_ctest": {
+    "passed": 42,
+    "failed": 0,
+    "seconds": 20.84,
+    "log": "out/ark-006B-core-tests.log"
+  },
+  "ui_tests": [
+    {
+      "test": "context-ui",
+      "exit": 0,
+      "seconds": 1.83,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-006B-context-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "interaction-ui",
+      "exit": 0,
+      "seconds": 2.56,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-006B-interaction-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "assistant-ui",
+      "exit": 0,
+      "seconds": 16.11,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-006B-assistant-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "dialogs",
+      "exit": 0,
+      "seconds": 1.62,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-006B-dialogs.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "frame-tools-ui",
+      "exit": 0,
+      "seconds": 2.78,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-006B-frame-tools-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    },
+    {
+      "test": "navigation-ui",
+      "exit": 0,
+      "seconds": 0.57,
+      "stdout": "shot -> C:\\Users\\bruno\\Documents\\ARK-Point\\out\\ark-006B-navigation-ui.png (1600x1000)\r\n",
+      "stderr": ""
+    }
+  ],
+  "visual_review": [
+    "out/ark-006B-context-ui.png.object-target-single.png",
+    "out/ark-006B-context-ui.png.object-target-team.png",
+    "out/ark-006B-interaction-ui.png.slider-limits-dialog.png",
+    "out/ark-006B-interaction-ui.png.slider-upper-preview.png",
+    "out/pneumatic-cylinder-006B.png"
+  ],
+  "object_context_benchmark": {
+    "model_features": 191,
+    "selected_feature": 53,
+    "selected_name": "Amortecedor_traseiro_corpo",
+    "selector": {
+      "node": 36,
+      "copy": 0,
+      "expected_revision": 1
+    },
+    "revision_unchanged": true,
+    "file_unchanged": true,
+    "full_design_bytes": 143543,
+    "selected_context_bytes": 2272,
+    "unchanged_context_bytes": 977,
+    "one_hop_context_bytes": 4218,
+    "rpc_ms": {
+      "full_design": 6.584,
+      "selected": 4.897,
+      "unchanged": 4.636,
+      "one_hop": 6.141
+    },
+    "scope": "local exact same saved model, serialized tool text; no provider tokens/cost/quality measurement"
+  },
+  "live_activation": {
+    "pid": 10316,
+    "title": "ARK 006B",
+    "loaded_document": "out/pneumatic-cylinder-006B.ark",
+    "live_doc_info": true,
+    "object_context": true,
+    "feature_count": 8,
+    "assembly_nodes": 3,
+    "revision": 1,
+    "old_window_pid_preserved": 47128,
+    "read_only_calls": 2,
+    "mutations": 0
+  },
+  "package": {
+    "path": "out/releases-006B/ark-windows-x64-0.9.7.zip",
+    "sha256": "570fab7e11eadbf0e074c1adb309913f17e6123926c0f0e9f654c075dc95c28c",
+    "verified_runtime": "out/package-006B-verified",
+    "contains_user_ark_files": false,
+    "published_online": false
+  },
+  "runtime_hashes": {
+    "ark-studio.exe": "ed60334186097e428ff5cc0c993fe8354c1d51c160175d481c77ad579fdf194d",
+    "ark-mcp.exe": "9ca75f6b1079de54cce9212a40821d048ddedf2c03350280fdc97a71832c2f95",
+    "ark-cli.exe": "40eeb7c37d3e56deb709e96ff9d9fc1aee90087497738cf1dc2a4347ccd9ecb4",
+    "ark-occt-worker.exe": "683dbeb55ea77fb89b6ed92cd8103bc62fefc3334b24911eff3a271fb71b9b08"
+  },
+  "document_format": {
+    "new_prismatic_or_limit_semantics": 31,
+    "old_documents_keep_required_version": true
+  },
+  "known_limits": [
+    "Screenshot failing operation not recovered: stored feature193 and current7-solid frame do not prove the rejected request. Diagnostics and tube-end discovery tested; original model unchanged.",
+    "Ideal rigid open-chain manipulation; unsupported loops/coupling boundaries reject; collisions and forces unqualified.",
+    "Bounded revolute intervals span less than360 degrees; no multi-turn coordinate state.",
+    "Internal snapshot paths do not imply model received image pixels.",
+    "Fingerprint/payload benchmarks are local change detection, not provider cost, token billing or design-quality evidence.",
+    "Future OTA channel remains unconfigured; local package and launcher activation verified."
+  ]
+}

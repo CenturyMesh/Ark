@@ -6,6 +6,25 @@ explicit agent report**. The completion summary stays visible. A card's finished
 turn alone does not complete the goal; outstanding tasks and errors prevent that
 declaration. See the [completion protocol](AGENT_TEAM_ARCHITECTURE.md).
 
+In **006B**, right-click a 3D body and choose **Ask Agent about this object**
+to attach its exact feature or assembly occurrence, including the pattern copy,
+to the next question (D.02). This opens the Assistant dock with a removable
+object chip. It does not start inference or change saved model/effort settings.
+Select Single or Team, write the question and explicitly Send/Start/Queue.
+The current revision's compact `object_context` accompanies that message,
+including a decision queued to an existing team. The chat displays the question;
+the structured context remains in the provider conversation.
+
+Changing the viewport selection does not change an attached target. At submit,
+ARK reads the same IDs again from the current drawing. An unrelated document
+edit refreshes their evidence. A deleted/replaced occurrence, deleted definition,
+or different drawing rejects that submit and marks the target invalid with feedback.
+Removal invalidates the pending identity immediately, so Undo/Redo or a new
+object reusing its numeric ID cannot silently replace the original target.
+**Clear** removes it without sending. A definition and a placed pattern copy
+have distinct identities; asking about one copy does not silently select all
+placements of the feature.
+
 Open **Assistant** in ARK and choose **Team**. The team shares the open
 document and the selected Assistant account/endpoint. **Focused** is the default:
 three roles with one conversation running at a time. The engineer starts and
