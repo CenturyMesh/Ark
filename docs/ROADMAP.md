@@ -1,7 +1,7 @@
 # ARK — matriz de roadmap A–G
 
-**Data da auditoria:** 11 de outubro de 2026. **Iteração local:** `011E` / `0.9.12`,
-verificada e instalada para o próximo arranque; baseline `010D` / `84a1c28` (`0.9.11`).
+**Data da auditoria:** 11 de outubro de 2026. **Iteração local:** `012D` / `0.9.13`,
+com verificação local; baseline `011E` / `e0a1d81` (`0.9.12`).
 O baseline histórico `0.9.1`, commit `5e7153f`, não foi rebatizado retroativamente.
 `001A` inicia a convenção pública, com versão técnica `0.9.2` para distribuição.
 `002B` acrescenta recuperação do runtime, projeção exata e ferramentas de frame;
@@ -29,6 +29,9 @@ Ver [escopo e evidência](iterations/009B.md).
 em D.02/D.04, preservando revisões, histórico e recibos; ver [verificação](iterations/010D.md).
 `011E` acrescenta a BOM persistente, inspeção paginada, exportação JSON e
 receitas editáveis de fixações; ver [escopo e evidência](iterations/011E.md).
+`012D` acrescenta registos de ações e avaliações obrigatórias, previews de sketches
+em novos planos, contexto multimodal limitado ao transporte e caches de geometria.
+Ver [escopo e evidência](iterations/012D.md). A.04/B.01/D.02/D.04 permanecem Parcial.
 O adapter MeshWorks e a aquisição de catálogos mecânicos continuam pendentes.
 
 **Visão:** um ambiente CAD onde uma pessoa ou uma equipa de agentes consegue
@@ -103,7 +106,7 @@ O documento ROADMAP_09 é um registo histórico; esta matriz passa a orientar o 
 | A.01 | Identidade `NNNF`, registo de iteração e regras obrigatórias | Verificado no escopo `001A` | `release.json` validado; código consistente na app, MCP, onboarding e pacote; 26 casos de identidade e testes de exposição; ver [registo](iterations/001A.md) |
 | A.02 | Recuperação e proteção de trabalho | Parcial | Crash durante save/modelação/update, disco cheio e ficheiro truncado preservam a última revisão íntegra; autosave recuperável sem substituir o original |
 | A.03 | Corpus de regressão e cadeia de release | Parcial | Casos positivos/negativos públicos ou autorizados, seeds e hashes; suites nativa/UI/persistência/OTA; recibo por artefacto; CI demonstrada |
-| A.04 | Desempenho observável | Parcial | Medir cold/warm open, save incremental, p95 de interação e recompute em três tamanhos de projeto; comparar à mesma baseline e equipamento |
+| A.04 | Desempenho observável | Parcial; regressões locais de cache/metadados na `012D` | Medir cold/warm open, save incremental, p95 de interação e recompute em três tamanhos de projeto; comparar à mesma baseline e equipamento |
 | A.05 | Segurança e dependências | Parcial; avisos de dependências/About e empacotamento obrigatório dos textos OCCT em `009B`; licença própria pendente | SBOM de software, avisos de terceiros, origem dos binários, assinatura e política de vulnerabilidades; sem incluir credenciais/desenhos nos pacotes |
 
 ### B — Autoria CAD competitiva
@@ -131,9 +134,9 @@ O documento ROADMAP_09 é um registo histórico; esta matriz passa a orientar o 
 | ID | Milestone | Estado inicial | Aceitação e dependências |
 |---|---|---|---|
 | D.01 | Benchmark de qualidade/tempo/custo | Parcial: harness/corpus de 30 briefs; pilotos `008D` de 0/9 e 4/9, `009B` encerrado em 1/9; uma repetição de três briefs, todas as falhas conservadas; sem evidência de poupança | Pelo menos 30 briefs versionados, três repetições por configuração inicial e avaliação humana cega; medir custo por design aceite, não só tokens por turno |
-| D.02 | Engenheiro responsável e equipa adaptativa | Parcial; contexto/deltas em `006B`, missões/harness em `008D`; contrato de leitura e Resume com pedidos grandes verificados offline na `010D` | Comparar Single, Focused e Parallel; especialistas só com missão útil; paralelismo escolhido por benefício medido; sem budgets impostos por defeito |
+| D.02 | Engenheiro responsável e equipa adaptativa | Parcial; contexto/deltas em `006B`, missões/harness em `008D`; contrato de leitura e Resume com pedidos grandes verificados offline na `010D`; registo/feedback obrigatório e drafts em novos planos na `012D` | Comparar Single, Focused e Parallel; especialistas só com missão útil; paralelismo escolhido por benefício medido; sem budgets impostos por defeito |
 | D.03 | Espaços de trabalho por peça | Planeado | Agentes editam branches isolados com ownership e datums; integração transacional identifica conflitos geométricos e de revisão sem rebase silencioso |
-| D.04 | Feedback multimodal e autocorreção | Parcial; pixels/candidatos/replay em `008D`; diagnóstico de argumentos e inspeção obrigatória após projeção de histórico verificados offline na `010D`; interpretação ainda limitada | Mesmo diagnóstico chega ao autor/reviewer; previews ligados à revisão; ciclos de erro repetido detetados; correção preserva intenção e referências |
+| D.04 | Feedback multimodal e autocorreção | Parcial; pixels/candidatos/replay em `008D`; diagnóstico de argumentos e inspeção obrigatória após projeção de histórico verificados offline na `010D`; imagens comprimidas/projeção de transporte verificadas offline na `012D`; interpretação ainda limitada | Mesmo diagnóstico chega ao autor/reviewer; previews ligados à revisão; ciclos de erro repetido detetados; correção preserva intenção e referências |
 | D.05 | Alternativas de conceito e conhecimento reutilizável | Parcial no onboarding | Comparar alternativas por requisitos, massa, custo/processo e preferência humana; biblioteca de exemplos validados; nunca chamar a uma proposta uma peça criada |
 
 ### E — Ecossistema industrial

@@ -1,0 +1,116 @@
+{
+  "iteration": {
+    "sequence": 12,
+    "phase": "D",
+    "code": "012D",
+    "version": "0.9.13",
+    "milestones": [
+      "A.01",
+      "A.03",
+      "A.04",
+      "B.01",
+      "D.01",
+      "D.02",
+      "D.04"
+    ]
+  },
+  "date": "2026-10-11",
+  "baseline_commit": "e0a1d8137d7cb6960fe8fdafb769046a619c6262",
+  "status": "Verified in local regression scope; milestone qualification remains partial",
+  "native_tests": {
+    "passed": 65,
+    "failed": 0,
+    "seconds": 108.81,
+    "log": "out/012D-private/final-tests.log"
+  },
+  "final_targeted_tests": {
+    "passed": 3,
+    "failed": 0,
+    "seconds": 4.82,
+    "log": "out/012D-private/final-targeted.log"
+  },
+  "ui": [
+    {
+      "test": "assistant-ui",
+      "exit": 0,
+      "seconds": 17.062
+    },
+    {
+      "test": "startup-ui",
+      "exit": 0,
+      "seconds": 3.203
+    },
+    {
+      "test": "render-ui",
+      "exit": 0,
+      "seconds": 2.359
+    }
+  ],
+  "visual_evidence": [
+    {
+      "path": "out/012D-private/ui-assistant-ui.png.construction-draft.png",
+      "sha256": "d742c474bd0ecf6cf04b70b688d8d50ea76911d30cc05bdb94f61de4670ccf87",
+      "inspected": true
+    },
+    {
+      "path": "out/012D-private/ui-assistant-ui.png.project-activity.png",
+      "sha256": "f46e01644e4a16f5a43628904b8eec385a3545b19db132c464001b94534546ce",
+      "inspected": true
+    },
+    {
+      "path": "out/012D-private/ui-render-ui.png.loading.png",
+      "sha256": "6cb79fadbeebbfae2effe990260394af0144410aa8b8c68633413f5ed313d7c3",
+      "inspected": true
+    }
+  ],
+  "package": {
+    "entries": 74,
+    "bytes": 33304210,
+    "sha256": "77cbd6c0941ed6474d41df75c3f95433023b551935d817bf7b290c21d38ecbd2",
+    "runtime_executables_match": true,
+    "drawings": 0,
+    "notices_and_contracts": true
+  },
+  "installation": {
+    "observed_processes_preserved": true,
+    "observed_live_processes": 1,
+    "state": {
+      "current": "0.9.12",
+      "pending": "0.9.13",
+      "schema": 1,
+      "activating": "",
+      "previous": "0.9.11"
+    },
+    "changed_during_install": 0,
+    "observed_drawings": 34
+  },
+  "installed_smoke": {
+    "matched_installed_files": 64,
+    "standalone_tools": 75,
+    "activity_roundtrip": true,
+    "feedback_immutable_contract_tested_in_suite": true
+  },
+  "runtime_identity": {
+    "name": "ark",
+    "version": "0.9.13",
+    "iteration_code": "012D"
+  },
+  "private_measurements": {
+    "performed": true,
+    "raw_inputs_and_results_not_published": true,
+    "single_vs_team_comparison": false,
+    "cold_load_improvement_demonstrated": false
+  },
+  "live_pilot": {
+    "new_attempts": 0,
+    "closed_009B_attempts": 9,
+    "closed_009B_accepted": 1
+  },
+  "limits": [
+    "Atomic native commits; live overlays begin only when tool steps arrive.",
+    "Cold freeform evaluation and first mass-property queries remain costly.",
+    "Stored audit capacity 4096 with explicit gap accounting; existing document size limit applies.",
+    "Feedback scores are subjective; interrupted work can leave pending ratings.",
+    "No MeshWorks adapter or live model-adherence qualification."
+  ]
+}

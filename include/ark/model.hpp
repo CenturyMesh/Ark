@@ -243,6 +243,7 @@ struct PlaneCanvas {
     double opacity=0.65;
 };
 
+struct AgentActivityLedger;
 class Document {
 public:
     // parameters ------------------------------------------------------------
@@ -272,6 +273,7 @@ public:
     std::vector<Feature> features;
     std::vector<Material> materials;
     UsageLedger usage;
+    std::shared_ptr<AgentActivityLedger> agentActivity; // audit metadata, independent of geometry revision
     std::string bomDocumentId; // assigned on explicit BOM authoring; stable across edits/save
     arkjson::Value iterationHistory; // immutable authoring journal; no evaluated geometry or usage snapshots
     u64 addFeature(Feature f);                    // returns id
@@ -279,6 +281,9 @@ public:
     const Feature* find(u64 id) const;
     bool     remove(u64 id);
     bool     reorderMove(u64 id, int delta);      // shift position in history
+
+    // Copy persistent authoring without duplicating evaluated meshes/B-reps.
+    Document authoringCopy() const;
 
     // evaluation --------------------------------------------------------------
     mutable std::vector<Body> evalBodies;                 // last recompute output
@@ -289,6 +294,7 @@ public:
     std::unordered_map<u64,EvaluationCacheEntry> evaluationCache;
     struct ReferenceFrameCacheEntry {std::string brep,topology;std::unordered_map<std::string,arkjson::Value> frames;};
     mutable std::unordered_map<u64,ReferenceFrameCacheEntry> referenceFrameCache;
+    std::unordered_map<u64,std::pair<std::string,arkjson::Value>> centroidCache; // exact B-rep digest -> producer result; never serialized
     u64 evaluationGeneration=0;
     size_t recomputeReused=0, recomputeEvaluated=0;
     size_t parallelFeatures=0, peakParallelFeatures=0, dependencyEdges=0;
@@ -311,6 +317,10 @@ public:
     u64 nextAssemblyId_=1;
     u64 nextFeatureId_=1;
 };
+
+// Observational, thread-local progress at real feature evaluation/publication boundaries.
+using EvaluationObserver=std::function<void(u64,const std::string&,size_t,size_t,bool,bool)>;
+EvaluationObserver setEvaluationObserver(EvaluationObserver observer);
 
 // Shared validation and resolution for persistence, agents, and renderers.
 bool applyAppearancePatch(Appearance& appearance,const arkjson::Value& patch,std::string& error);

@@ -16,6 +16,9 @@
 #include <set>
 
 namespace ark {
+namespace {thread_local EvaluationObserver evaluationObserver;}
+EvaluationObserver setEvaluationObserver(EvaluationObserver observer){auto previous=std::move(evaluationObserver);evaluationObserver=std::move(observer);return previous;}
+static void evaluationProgress(u64 id,const std::string& name,size_t index,size_t total,bool completed,bool reused){if(evaluationObserver)try{evaluationObserver(id,name,index,total,completed,reused);}catch(...){/* An observer cannot alter geometric acceptance. */}}
 
 static f64 nowMs() {
     using namespace std::chrono;
@@ -315,14 +318,26 @@ const std::vector<FeatureResult>& Document::recompute() {
     f64 t0=nowMs();
     // Cache custody is process-local and never serialized. Complex features use
     // a conservative upstream revision; primitives only depend on their inputs.
-    arkjson::Value authored;if(!arkjson::parse(documentToJson(*this),authored))throw std::runtime_error("Cannot serialize evaluation dependencies");
-    std::string context;
-    for(const char* key:{"sketches","planes","materials"})if(auto value=authored.find(key))context+=value->dump();
-    bool instanceProjection=false;
-    for(const auto& sketch:sketches)for(const auto& entity:sketch.sk.ents)instanceProjection|=entity.kind==SketchEnt::Project&&entity.sourceInstance!=0;
-    for(const auto& feature:features)instanceProjection|=feature.type==FeatureType::Curve&&feature.nativeSpec.find("source_instance")!=nullptr;
-    if(instanceProjection)for(const char* key:{"assembly","mates"})if(auto value=authored.find(key))context+=value->dump();
-    if(!sketches.empty()||!planes.empty())if(auto value=authored.find("params"))context+=value->dump();
+    arkjson::Value authored;if(!arkjson::parse(documentToJson(*this,false,false),authored))throw std::runtime_error("Cannot serialize evaluation dependencies");
+    // Cache only the named authoring context actually reachable from a feature.
+    // Substring matching intentionally over-approximates references (never drops
+    // an ambiguous dependency). Projected/support geometry keeps a full context.
+    bool geometricSupports=false,instanceProjection=false;
+    for(const auto& p:planes)geometricSupports|=p.support.t==arkjson::Value::Obj;
+    for(const auto& sk:sketches)for(const auto& e:sk.sk.ents)if(e.kind==SketchEnt::Project){geometricSupports=true;instanceProjection|=e.sourceInstance!=0;}
+    for(const auto& f:features)instanceProjection|=f.type==FeatureType::Curve&&f.nativeSpec.find("source_instance")!=nullptr;
+    auto scopedContext=[&](const Feature& feature,const std::string& own){
+        std::string context;std::set<std::string> included;bool changed=true;
+        while(changed){changed=false;for(const char* kind:{"sketches","planes"})if(const auto* rows=authored.find(kind))for(const auto& row:rows->arr){
+            const auto* name=row.find("name");if(!name||name->str.empty())continue;const std::string key=std::string(kind)+":"+name->str;const auto quoted=arkjson::Value::makeStr(name->str).dump();const auto reference=quoted.substr(1,quoted.size()-2);
+            if(!included.count(key)&&(geometricSupports||own.find(reference)!=std::string::npos||context.find(reference)!=std::string::npos)){included.insert(key);context+=row.dump();changed=true;}
+        }}
+        // Frame mass/stock reports consume material data; ordinary solid geometry
+        // does not depend on appearance, BOM or unrelated material declarations.
+        if(feature.type==FeatureType::ConstructionFrame)if(const auto* m=authored.find("materials"))context+=m->dump();
+        if(instanceProjection)for(const char* kind:{"assembly","mates"})if(const auto* v=authored.find(kind))context+=v->dump();
+        return context;
+    };
     std::unordered_map<u64,EvaluationCacheEntry> nextCache;
     std::unordered_map<u64,std::string> keys;
     std::string upstream;
@@ -361,13 +376,15 @@ const std::vector<FeatureResult>& Document::recompute() {
         dependencyEdges+=dependencies[i].size();
     }
     auto keyFor=[&](size_t index){
-        const auto& f=features[index];std::string own=authored.find("features")->arr[index].dump(),key=own+context;
+        const auto& f=features[index];auto source=authored.find("features")->arr[index];
+        source.obj.erase(std::remove_if(source.obj.begin(),source.obj.end(),[](const auto& v){return v.first=="appearance"||v.first=="part";}),source.obj.end());
+        std::string own=source.dump(),context=scopedContext(f,own),dependenciesText=own+context,key=dependenciesText;
         for(const auto& param:params){
             if(param.name.empty())continue;size_t pos=0;bool used=false;
-            while((pos=own.find(param.name,pos))!=std::string::npos){auto ident=[](char c){return std::isalnum((unsigned char)c)||c=='_';};if((pos==0||!ident(own[pos-1]))&&(pos+param.name.size()==own.size()||!ident(own[pos+param.name.size()]))){used=true;break;}pos+=param.name.size();}
+            while((pos=dependenciesText.find(param.name,pos))!=std::string::npos){auto ident=[](char c){return std::isalnum((unsigned char)c)||c=='_';};if((pos==0||!ident(dependenciesText[pos-1]))&&(pos+param.name.size()==dependenciesText.size()||!ident(dependenciesText[pos+param.name.size()]))){used=true;break;}pos+=param.name.size();}
             if(used)key+=param.name+"="+arkjson::Value::makeNum(param.value).dump();
         }
-        if(!explicitInputs[index]){key+=upstream;for(const char* name:{"assembly","mates"})if(auto value=authored.find(name))key+=value->dump();for(const auto& p:params)key+=p.name+"="+arkjson::Value::makeNum(p.value).dump();}
+        if(!explicitInputs[index]){key+=upstream;for(const char* name:{"assembly","mates"})if(auto value=authored.find(name))key+=value->dump();if(geometricSupports)for(const auto& p:params)key+=p.name+"="+arkjson::Value::makeNum(p.value).dump();}
         for(u64 input:f.inputs)key+=keys[input];
         for(double n:{tessOpt.tol,tessOpt.maxEdge,tessOpt.minAngleDeg,(double)tessOpt.maxLevels})key+=':'+arkjson::Value::makeNum(n).dump();return key;
     };
@@ -416,6 +433,8 @@ const std::vector<FeatureResult>& Document::recompute() {
     for(auto&f:features){
         const size_t index=featureIndex++;schedule(index);std::string cacheKey=plannedKeys[index];
         FeatureResult fr; fr.id=f.id;
+        const auto previousCache=evaluationCache.find(f.id);const bool cachedFeature=previousCache!=evaluationCache.end()&&previousCache->second.key==cacheKey;
+        evaluationProgress(f.id,f.name,index,features.size(),false,cachedFeature);
         f64 tf=nowMs();
         if(f.suppressed){
             fr.ok=true;fr.ms=nowMs()-tf;lastResults.push_back(fr);refreshDrivenSketches(*this,false);continue;
@@ -435,13 +454,15 @@ const std::vector<FeatureResult>& Document::recompute() {
         if(fr.ok){
             b.id=f.id;
             const u64 generation=plannedGenerations[index];
-            nextCache[f.id]={std::move(cacheKey),std::make_shared<const Body>(b),generation,fr.tris};
+            if(cachedFeature)nextCache[f.id]=previousCache->second;
+            else nextCache[f.id]={std::move(cacheKey),std::make_shared<const Body>(b),generation,fr.tris};
             keys[f.id]=std::to_string(f.id)+":"+std::to_string(generation)+";";upstream+=keys[f.id];
             work.push_back(std::move(b));
         } else {
             b=Body{};
         }
         published[index]=true;lastResults.push_back(std::move(fr));
+        evaluationProgress(f.id,f.name,index,features.size(),true,cachedFeature);
         refreshDrivenSketches(*this,false);
     }
     refreshDrivenSketches(*this,true);

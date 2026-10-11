@@ -63,9 +63,10 @@ V centroidOf(Document& document, u64 feature) {
     const V* brep=nullptr;
     for(const auto& body:document.evalBodies) if(body.id==feature) { brep=body.nativeData.find("brep_base64"); break; }
     if(!brep||brep->t!=V::Str||brep->str.empty()) throw std::runtime_error("Density needs an exact solid");
+    const auto digest=iterationSha256(brep->str);if(const auto cached=document.centroidCache.find(feature);cached!=document.centroidCache.end()&&cached->second.first==digest)return cached->second.second;
     V model=V::makeObj();model.set("brep",*brep);
     V request=V::makeObj();request.set("operation",V::makeStr("solid_centroid"));request.set("request",std::move(model));
-    return nativeWorkerRequest(request);
+    V measured=nativeWorkerRequest(request);if(document.centroidCache.size()>=256)document.centroidCache.erase(document.centroidCache.begin());document.centroidCache[feature]={digest,measured};return measured;
 }
 std::string absolutePath(const std::string& name){auto path=std::filesystem::absolute(std::filesystem::u8path(name));auto utf=path.u8string();return std::string(utf.begin(),utf.end());}
 void params(Feature& f,const V& p){if(p.t!=V::Obj)throw std::runtime_error("p must be an object");for(auto& kv:p.obj)f.p[kv.first]=expression(kv.second);}
@@ -382,6 +383,28 @@ AgentSession::Cache& AgentSession::meshCache(const V& args){
     auto it=cache_.find(key);if(it!=cache_.end())return it->second;
     Cache c;c.mesh=selectedMesh(document,args);c.report=analyzeMesh(c.mesh);c.bvh=std::make_unique<MeshBVH>(c.mesh);
     return cache_.emplace(key,std::move(c)).first->second;
+}
+bool metadataOnlyApply(const Document& document,const V& args){
+    const auto* requested=args.find("commands");if(args.find("candidate_id")||!requested||requested->t!=V::Arr||requested->arr.empty()||requested->arr.size()>128)return false;
+    const auto& commands=*requested;
+    return std::all_of(commands.arr.begin(),commands.arr.end(),[&](const V& command){
+                if(command.t!=V::Obj)return false;
+                const V* operation=command.find("op");if(!operation||operation->t!=V::Str)return false;
+                const std::string& op=operation->str;
+                if(op=="bom.initialize")return command.obj.size()==1;
+                if(op!="material.set"&&op!="material.remove"&&op!="feature.edit")return false;
+                if(op=="material.remove"||(op=="material.set"&&(command.find("density")||command.find("density_kg_m3"))))
+                    for(const auto& feature:document.features)if(feature.type==FeatureType::ConstructionFrame)return false;
+                for(const auto& field:command.obj){
+                    const std::string& key=field.first;
+                    if(key=="op")continue;
+                    if(op=="material.set"&&(key=="name"||key=="density"||key=="density_kg_m3"||key=="physical"||key=="appearance"))continue;
+                    if(op=="material.remove"&&key=="name")continue;
+                    if(op=="feature.edit"&&(key=="id"||key=="material"||key=="appearance"||key=="part"))continue;
+                    return false;
+                }
+                return true;
+    });
 }
 void AgentSession::remember(bool projectBoundary){prepared_.clear();if(projectBoundary||document.iterationHistory.t==V::Null){undo_.push_back(documentToJson(document));if(undo_.size()>32)undo_.erase(undo_.begin());}redo_.clear();}
 int patternCopies(const Document& document,const AssemblyNode& node){
@@ -987,29 +1010,12 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
             if(commands.t!=V::Arr||commands.arr.empty()||commands.arr.size()>128)throw std::runtime_error("commands must contain 1..128 operations");
             for(const auto& command:commands.arr)if(const auto* op=command.find("op");op&&op->asStr()=="assembly.drive"&&!args.find("expected_revision"))throw std::runtime_error("assembly.drive requires expected_revision from the inspected document");
             for(const auto& command:commands.arr)if((command.find("part")||(command.find("op")&&command.find("op")->asStr()=="bom.initialize"))&&!args.find("expected_revision"))throw std::runtime_error("BOM authoring requires expected_revision from current doc_info");
-            const bool appearanceOnly=std::all_of(commands.arr.begin(),commands.arr.end(),[&](const V& command){
-                if(command.t!=V::Obj)return false;
-                const V* operation=command.find("op");if(!operation||operation->t!=V::Str)return false;
-                const std::string& op=operation->str;
-                if(op=="bom.initialize")return command.obj.size()==1;
-                if(op!="material.set"&&op!="material.remove"&&op!="feature.edit")return false;
-                if(op=="material.remove"||(op=="material.set"&&(command.find("density")||command.find("density_kg_m3"))))
-                    for(const auto& feature:document.features)if(feature.type==FeatureType::ConstructionFrame)return false;
-                for(const auto& field:command.obj){
-                    const std::string& key=field.first;
-                    if(key=="op")continue;
-                    if(op=="material.set"&&(key=="name"||key=="density"||key=="density_kg_m3"||key=="physical"||key=="appearance"))continue;
-                    if(op=="material.remove"&&key=="name")continue;
-                    if(op=="feature.edit"&&(key=="id"||key=="material"||key=="appearance"||key=="part"))continue;
-                    return false;
-                }
-                return true;
-            });
+            const bool appearanceOnly=metadataOnlyApply(document,args);
             Document next;std::string error;
-            if(!documentFromJson(documentToJson(document,true,false),next,&error))throw std::runtime_error(error);
-            next.evaluationCache=document.evaluationCache;
-            next.evaluationGeneration=document.evaluationGeneration;
-            next.referenceFrameCache=document.referenceFrameCache;
+            if(appearanceOnly)next=document.authoringCopy();
+            else {if(!documentFromJson(documentToJson(document,true,false),next,&error))throw std::runtime_error(error);
+                next.evaluationCache=document.evaluationCache;next.evaluationGeneration=document.evaluationGeneration;next.referenceFrameCache=document.referenceFrameCache;next.centroidCache=document.centroidCache;}
+
             V created=V::makeArr(),createdNodes=V::makeArr(),createdMates=V::makeArr(),sheetEdits=V::makeArr();
             for(auto& c:commands.arr){
                 applying=true;commandIndex=(size_t)(&c-commands.arr.data());commandOp=c.find("op")?c.find("op")->asStr():"";
@@ -1173,7 +1179,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
             auto& source=tool=="doc_undo"?undo_:redo_;auto& destination=tool=="doc_undo"?redo_:undo_;
             if(source.empty())throw std::runtime_error("No history available");
             Document next;std::string error;if(!documentFromJson(source.back(),next,&error))throw std::runtime_error(error);
-            next.usage=document.usage; // billed provider receipts survive geometry undo/redo
+            next.usage=document.usage;next.agentActivity=document.agentActivity; // billed provider receipts survive geometry undo/redo
             validated(next);destination.push_back(documentToJson(document));source.pop_back();document=std::move(next);++revision;prepared_.clear();return result(info());
         }
         if(tool=="doc_save"){
@@ -1252,9 +1258,11 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
         r.set("error",V::makeStr(message));r.set("revision",V::makeNum((double)revision));r.set("tool",V::makeStr(tool));
         const bool resource=message.find("budget")!=std::string::npos||message.find("worker limit")!=std::string::npos||message.find("capacity")!=std::string::npos;
         r.set("error_code",V::makeStr(message.find("Revision conflict")!=std::string::npos?"REVISION_CONFLICT":message.find("Ambiguous")!=std::string::npos?"AMBIGUOUS_REFERENCE":message.find("Prepared candidate")!=std::string::npos?"CANDIDATE_INVALID":resource?"RESOURCE_LIMIT":applying?"INVALID_COMMAND":"EVALUATION_FAILED"));
+        if(tool=="tool_feedback"||tool=="activity_info"){r.set("error_code",V::makeStr("ACTIVITY_VALIDATION_FAILED"));}
         if(tool=="object_context"&&(message.find("OBJECT_CONTEXT_REFERENCE_MISSING")!=std::string::npos||message.find("name not found")!=std::string::npos))r.set("error_code",V::makeStr("REFERENCE_MISSING"));
         for(const char* prefix:{"MECHANICAL_","ASSEMBLY_","MANIPULATION_"})if(const auto start=message.find(prefix);start!=std::string::npos){const auto end=message.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ_",start);r.set("error_code",V::makeStr(message.substr(start,end==std::string::npos?end:end-start)));break;}
         r.set("stage",V::makeStr(args.find("candidate_id")?"prepared_apply":applying?"command":"evaluation"));
+        if(tool=="tool_feedback"||tool=="activity_info")r.set("stage",V::makeStr("audit_arguments"));
         if(applying){r.set("command_index",V::makeNum(commandIndex));r.set("operation",V::makeStr(commandOp));}
         if(message.rfind("Missing field: ",0)==0)r.set("field",V::makeStr(message.substr(15)));
         if(message.rfind("Feature #",0)==0){const auto end=message.find(':',9);if(end!=std::string::npos){auto digits=message.substr(9,end-9);if(!digits.empty()&&digits.find_first_not_of("0123456789")==std::string::npos)r.set("feature_id",V::makeNum(std::strtod(digits.c_str(),nullptr)));}}

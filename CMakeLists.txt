@@ -13,6 +13,7 @@ target_include_directories(ark-sqlite PUBLIC third_party/sqlite)
 target_compile_definitions(ark-sqlite PRIVATE SQLITE_ENABLE_FTS5=1 SQLITE_THREADSAFE=1 SQLITE_OMIT_LOAD_EXTENSION=1 SQLITE_DQS=0 SQLITE_DEFAULT_FOREIGN_KEYS=1)
 target_link_libraries(ark-sqlite PUBLIC Threads::Threads)
 add_library(ark STATIC
+  src/agent_activity.cpp
   src/bom.cpp
   src/updates.cpp
   src/document_container.cpp
@@ -55,7 +56,7 @@ foreach(app ark-cli ark-mcp ark-tests ark-agent-tests ark-mesh-model-tests)
 endforeach()
 if(WIN32)
   enable_language(RC)
-  target_link_libraries(ark PUBLIC advapi32 winhttp bcrypt crypt32 ws2_32 shell32 ole32)
+  target_link_libraries(ark PUBLIC advapi32 winhttp bcrypt crypt32 ws2_32 shell32 ole32 windowscodecs)
   add_executable(ark-studio WIN32 src/view/viewer.cpp src/view/app_icon.rc)
   target_include_directories(ark-studio PRIVATE assets/ui)
   target_link_libraries(ark-studio PRIVATE ark opengl32 gdi32 user32 shell32 comdlg32 dwmapi windowscodecs ole32)
@@ -257,6 +258,11 @@ target_link_libraries(ark-component-library-tools-tests PRIVATE ark)
 add_test(NAME component-library-tools COMMAND ark-component-library-tools-tests)
 set_tests_properties(component-library-tools PROPERTIES TIMEOUT 120)
 if(ARK_WITH_OCCT)
+  add_executable(ark-reactivity-tests tests/reactivity_activity_tests.cpp)
+  target_link_libraries(ark-reactivity-tests PRIVATE ark)
+  add_dependencies(ark-reactivity-tests ark-occt-worker)
+  add_test(NAME reactivity-activity COMMAND ark-reactivity-tests)
+  set_tests_properties(reactivity-activity PROPERTIES TIMEOUT 120)
   add_executable(ark-bom-tests tests/bom_tests.cpp)
   target_link_libraries(ark-bom-tests PRIVATE ark)
   add_dependencies(ark-bom-tests ark-occt-worker)

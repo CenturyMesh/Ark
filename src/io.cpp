@@ -13,6 +13,13 @@
 #include <sstream>
 #include <iomanip>
 #include <locale>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <wincodec.h>
+#endif
 
 namespace ark {
 
@@ -291,8 +298,9 @@ static bool encodePngStream(std::ostream& f,const Image& img){
     png_chunk(f,"IEND",{});
     return bool(f);
 }
-std::vector<u8> encodePNG(const Image& img){std::ostringstream stream(std::ios::binary|std::ios::out);if(!encodePngStream(stream,img))throw std::runtime_error("Invalid PNG RGB image");const auto bytes=stream.str();return {bytes.begin(),bytes.end()};}
-bool writePNG(const char* path,const Image& img){std::ofstream stream(std::filesystem::u8path(path),std::ios::binary);return stream&&encodePngStream(stream,img);}
+#include "png_wic.inl"
+std::vector<u8> encodePNG(const Image& img){auto compressed=compressedPng(img);if(!compressed.empty())return compressed;std::ostringstream stream(std::ios::binary|std::ios::out);if(!encodePngStream(stream,img))throw std::runtime_error("Invalid PNG RGB image");const auto bytes=stream.str();return {bytes.begin(),bytes.end()};}
+bool writePNG(const char* path,const Image& img){try{const auto bytes=encodePNG(img);std::ofstream stream(std::filesystem::u8path(path),std::ios::binary);stream.write((const char*)bytes.data(),(std::streamsize)bytes.size());return bool(stream);}catch(...){return false;}}
 
 // ---------------------------------------------------------------------------
 // Software snapshot renderer ------------------------------------------------------
@@ -333,9 +341,9 @@ Image renderSnapshot(const Mesh& m, int W, int H, const SnapCam& cam) {
                  std::cos(cam.pitch)*std::cos(cam.yaw) };
     Vec3 eye = ctr + eyeOff*cam.dist;
     Mat4 view=Mat4::lookAt(eye, ctr, Vec3{0,1,0});
-    f64 far=std::max(1000.0, cam.dist*8.0);
-    f64 near=0.05; if(near>=far*0.01) near=far*1.0e-4;
-    Mat4 proj=Mat4::perspective(deg2rad(cam.fovDeg),(f64)W/H,near,far);
+    f64 farPlane=std::max(1000.0, cam.dist*8.0);
+    f64 nearPlane=0.05; if(nearPlane>=farPlane*0.01) nearPlane=farPlane*1.0e-4;
+    Mat4 proj=Mat4::perspective(deg2rad(cam.fovDeg),(f64)W/H,nearPlane,farPlane);
     Mat4 vp=proj*view;
 
     size_t nv=m.vertCount();

@@ -235,16 +235,17 @@ std::string kernelVersion(){return OCC_VERSION_COMPLETE;}
 V shapeReport(const TopoDS_Shape& shape,bool requireSolid){
     if(shape.IsNull()||!BRepCheck_Analyzer(shape).IsValid())throw std::runtime_error("Native result failed B-rep validation");
     auto solids=shapes(shape,TopAbs_SOLID);
-    if(requireSolid&&(solids.size()!=1||properties(shape)<=0)){
+    const double measuredVolume=solids.empty()?0:properties(shape);
+    if(requireSolid&&(solids.size()!=1||measuredVolume<=0)){
         std::ostringstream message;
         message<<"Native operation must produce one positive-volume solid; result contains "<<solids.size()<<" solids";
-        if(!solids.empty())message<<" with total signed volume "<<properties(shape)<<" mm3";
+        if(!solids.empty())message<<" with total signed volume "<<measuredVolume<<" mm3";
         if(solids.size()>1)message<<". A union may contain disconnected parts or a cut may have split its base. Keep separate parts as assembly instances, or revise contact/cutter geometry; inspect inputs before retrying.";
         else if(solids.empty())message<<". The result is empty or has no solid; check overlap, cutter extent and closed profiles.";
         else message<<". Check orientation and degenerate dimensions.";
         throw std::runtime_error(message.str());
     }
-    V report=V::makeObj();report.set("kernel",V::makeStr("OCCT"));report.set("kernel_version",V::makeStr(kernelVersion()));report.set("brep_valid",V::makeBool(true));report.set("solids",V::makeNum(solids.size()));report.set("faces",V::makeNum(shapes(shape,TopAbs_FACE).size()));report.set("area_mm2",V::makeNum(properties(shape,'a')));report.set("volume_mm3",solids.empty()?V{}:V::makeNum(properties(shape)));report.set("display_mesh_authoritative",V::makeBool(false));report.set("self_intersections_checked",V::makeBool(false));report.set("manufacturing_authoritative",V::makeBool(false));
+    V report=V::makeObj();report.set("kernel",V::makeStr("OCCT"));report.set("kernel_version",V::makeStr(kernelVersion()));report.set("brep_valid",V::makeBool(true));report.set("solids",V::makeNum(solids.size()));report.set("faces",V::makeNum(shapes(shape,TopAbs_FACE).size()));report.set("area_mm2",V::makeNum(properties(shape,'a')));report.set("volume_mm3",solids.empty()?V{}:V::makeNum(measuredVolume));report.set("display_mesh_authoritative",V::makeBool(false));report.set("self_intersections_checked",V::makeBool(false));report.set("manufacturing_authoritative",V::makeBool(false));
     V b=V::makeArr();for(auto x:bounds(shape))b.arr.push_back(V::makeNum(x));report.set("bounds_mm",b);return report;
 }
 V shapeResult(const TopoDS_Shape& shape,bool requireSolid){V r=V::makeObj();r.set("report",shapeReport(shape,requireSolid));r.set("brep_base64",V::makeStr(brepData(shape)));r.set("mesh",meshData(shape));return r;}

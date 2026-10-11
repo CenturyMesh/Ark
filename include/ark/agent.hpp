@@ -6,6 +6,7 @@
 #include <chrono>
 namespace ark {
 struct Image;
+bool metadataOnlyApply(const Document&,const arkjson::Value& args);
 arkjson::Value snapshotImageResult(const Image&,const arkjson::Value& visualEvidence,const std::string& path={});
 // A session owns its document. UI and MCP call the same command implementation.
 // Calls are serialized by the host; no process-global document state.
@@ -39,6 +40,7 @@ private:
         arkjson::Value result;
         std::chrono::steady_clock::time_point expires;
         size_t bytes=0;
+        bool metadataOnly=false;
     };
     std::vector<Prepared> prepared_;
     std::vector<std::string> undo_,redo_;

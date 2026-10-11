@@ -1,5 +1,10 @@
 # ARK agent protocol
 
+012D adds `activity_info` and `tool_feedback` (75 standalone tools). Agent
+actions return measured activity IDs; submit utility/difficulty self-ratings
+and action descriptions before completion, including failed attempts. Record
+issues and wished tools/options when relevant. See [project activity](AGENT_ACTIVITY.md).
+
 ## Mandatory roadmap and iteration identity
 
 Follow the repository-wide [AGENTS.md](../AGENTS.md) and [A–G roadmap](ROADMAP.md).

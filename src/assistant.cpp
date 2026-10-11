@@ -332,6 +332,7 @@ V assistantRequest(const AssistantConfig& config,const V& conversation,const V& 
         "Inspect doc_info detail design operations, dependencies, sketches and sheet_origin before editing existing provenance. A native transform of a sheet is a placement; edit its originating sheet to preserve flat-pattern intent. Establish functional proportions and interfaces first; add material/thickness/detail as specified or when required by the operation. "
         "Use coherent atomic batches, named parameters and construction planes. Related sketches, datums, features and placements can be committed together and evaluate once; do not turn every entity or feature into a separate provider round. Preserve existing work unless the user requests replacement. "
         "Choose geometry from the design intent: dimensioned arcs/splines and exact extrude/revolve, loft or sweep for curved forms; surface trim/offset/thicken for skins, and native fillet/chamfer for finishing. Simple primitives are useful starting stock, not a requirement to make every design rectilinear. Read sketch, solids or surfacing onboarding only when those operation details are missing. "
+        "Actual CAD actions are recorded in this project's activity ledger by the host. For each activity_id returned with feedback_required, submit tool_feedback in batches before finishing: utility 1..5, difficulty 1..5, concise action and any issue or wished tool/option. These are subjective ratings, separate from measured timings/outcomes. Rate failed attempts too; do not fabricate scores for unexecuted actions. activity_info lists pending records. "
         "Maintain structured BOM data as you create physical parts: feature.add/edit part with description, internal part_number, category and make/buy/unspecified procurement; retain known source and manufacturer references separately. Never invent missing commercial data. Use bom onboarding for this contract and bom_inspect before declaring a detailed design complete; report missing metadata and hardware. For detailed mechanical assemblies, inspect mounting interfaces and author required fasteners or report unresolved connections. Use the component library for specified sourced parts; fastener_recipe only supplies explicitly dimensioned simplified editable geometry, not a certified purchased component. "
         "Use object_context for an existing-object task: keep the selected feature/occurrence IDs, inspect dependencies and mates, and reuse known_fingerprints to omit unchanged data. A name match is a candidate, not proof of function. Preserve the explicit target when delegating. IDs identify objects; fingerprints only detect changes and never replace expected_revision or semantic references. Use compact inspections; avoid doc_get on source tubes and mesh_get unless necessary. Geometry is in millimetres. "
         "Successful snapshot tools can provide actual image pixels with observed revision, view and selected CAD IDs. Use these images to review proportions, layout and before/after changes; they are display evidence, not B-rep authority or fabrication qualification. Do not claim to have seen a snapshot from its path alone or from metadata whose image pixels have been omitted. Use semantic CAD references and revision-checked tools for edits. "
@@ -343,8 +344,13 @@ V assistantRequest(const AssistantConfig& config,const V& conversation,const V& 
     const auto limit=config.authMode==AssistantAuthMode::ChatGptPlan?std::min(config.maxConversationBytes,chatGptRequestByteLimit):config.maxConversationBytes;
     V request=build(conversation);
     if(request.dump().size()>limit){
-        const V projected=assistant_context::project(conversation,limit);request=build(projected);
+        V projected=assistant_context::project(conversation,limit);request=build(projected);
         if(historyProjected)*historyProjected=true;
+        if(request.dump().size()>limit){
+            const auto envelope=build(V::makeArr()).dump().size();
+            assistant_vision::prune(projected,limit>envelope+1024?limit-envelope-1024:0);
+            request=build(projected);
+        }
         require(request.dump().size()<=limit,"Assistant request still exceeds the byte limit after projecting completed tool history. Original task and receipts are retained; shorten oversized task messages or use smaller tool schemas. Resume cannot resend this oversized request.");
     }
     return request;
@@ -368,10 +374,13 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
     auto appendHistory=[&](V item){result.conversation.arr.push_back(std::move(item));};
     bool projectionAnnounced=false,needsProjectedInspection=false;
     std::set<std::string> writeTools;
-    for(const auto& tool:tools.arr)if(const auto* annotations=tool.find("annotations"))if(const auto* readOnly=annotations->find("readOnlyHint");readOnly&&readOnly->t==V::Bool&&!readOnly->b)writeTools.insert(field(tool,"name"));
+    for(const auto& tool:tools.arr)if(const auto* annotations=tool.find("annotations"))if(const auto* readOnly=annotations->find("readOnlyHint");readOnly&&readOnly->t==V::Bool&&!readOnly->b)if(field(tool,"name")!="tool_feedback")writeTools.insert(field(tool,"name"));
     for(const char* name:{"doc_apply","team_apply_step","doc_new","doc_load","doc_undo","doc_redo","iteration_restore","import_step","import_sheet_step","import_mesh"})writeTools.insert(name);
     std::set<std::string> callIds;
     for(auto& item:result.conversation.arr)if(field(item,"type")=="function_call")callIds.insert(field(item,"call_id"));
+    std::set<std::string> pendingFeedback;std::string feedbackProject;bool feedbackReminderSent=false;
+    auto trackFeedback=[&](const V& value){const auto* data=value.find("structuredContent");if(!data)data=&value;if(const auto* project=data->find("activity_project_id");project&&project->t==V::Str){if(project->str!=feedbackProject||(data->find("activity_boundary")&&data->find("activity_boundary")->b)){pendingFeedback.clear();feedbackReminderSent=false;}feedbackProject=project->str;}if(const auto* id=data->find("activity_id");id&&id->t==V::Str&&data->find("feedback_required")&&data->find("feedback_required")->b)pendingFeedback.insert(id->str);if(const auto* rated=data->find("rated_ids");rated&&rated->t==V::Arr)for(const auto& id:rated->arr){pendingFeedback.erase(id.asStr());feedbackReminderSent=false;}if(const auto* pending=data->find("pending_feedback_ids");pending&&pending->t==V::Arr)for(const auto& id:pending->arr)pendingFeedback.insert(id.asStr());};
+    for(const auto& entry:result.conversation.arr)if(field(entry,"type")=="function_call_output"){V data;if(arkjson::parse(field(entry,"output"),data))trackFeedback(data);}
     bool earlierToolCalls=false;
     for(unsigned round=0;(!config.maxRounds||round<config.maxRounds);++round){
         cancelled(cancel);emit(events,AssistantEvent::Status,"Thinking...");
@@ -451,7 +460,7 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
                 auto content=item.find("content");if(!content||content->t!=V::Arr)continue;
                 for(auto& part:content->arr){
                     auto type=field(part,"type");auto text=type=="output_text"?field(part,"text"):type=="refusal"?field(part,"refusal"):"";
-                    if(!text.empty()){roundHasText=true;if(!result.text.empty())result.text+='\n';result.text+=text;emit(events,AssistantEvent::Text,text);}
+                    if(!text.empty()){roundHasText=true;if(calls.empty()&&!pendingFeedback.empty()&&allowed.count("tool_feedback"))continue;if(!result.text.empty())result.text+='\n';result.text+=text;emit(events,AssistantEvent::Text,text);}
                 }
             }
         }
@@ -460,6 +469,10 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
             if(!roundHasText)throw std::runtime_error(earlierToolCalls?
                 "Assistant completed without a final visible reply. Earlier ARK tool calls may have changed the document; inspect it before retrying.":
                 "Assistant completed without a visible reply or ARK tool call. It did not request a model change; try again or select another available model.");
+            if(!pendingFeedback.empty()&&allowed.count("tool_feedback")){
+                if(feedbackReminderSent)throw std::runtime_error("Required tool feedback was not supplied after the explicit reminder. CAD work and pending project records are retained; resume to provide the missing ratings.");feedbackReminderSent=true;
+                V pending=V::makeArr();for(const auto& id:pendingFeedback)if(pending.arr.size()<64)pending.arr.push_back(V::makeStr(id));V reminder=V::makeObj();reminder.set("role",V::makeStr("developer"));reminder.set("content",V::makeStr("Before finishing, submit tool_feedback for your actual unscored actions: "+pending.dump()+". Rate utility and difficulty 1..5, describe the action, and note issues or wished tools/options. Do not invent successful outcomes. Feedback can be batched with other tool calls."));appendHistory(reminder);if(history)history(result.conversation);emit(events,AssistantEvent::Status,"Recording required tool feedback before completion");continue;
+            }
             return result;
         }
         earlierToolCalls=true;
@@ -472,6 +485,7 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
             else if(needsProjectedInspection&&writeTools.count(name))toolResult=errorResult("Request history was compacted. Read current doc_info successfully before any write; prior commits must not be replayed.");
             else if(!callTool)toolResult=errorResult("The host did not provide an ARK tool executor.");
             else {try{toolResult=callTool(name,args);}catch(const std::exception&){toolResult=errorResult("ARK tool execution failed; inspect the document before retrying.");}}
+            trackFeedback(toolResult);
             if(name=="doc_info"&&needsProjectedInspection){const auto* error=toolResult.find("isError");const auto* data=toolResult.find("structuredContent");if(!data)data=&toolResult;const auto* observed=data->find("revision");if(error&&error->t==V::Bool&&!error->b&&observed&&observed->t==V::Num&&std::isfinite(observed->num)&&observed->num>=0&&observed->num==std::floor(observed->num))needsProjectedInspection=false;}
             ++performance.toolCalls;performance.lastToolMilliseconds=millisecondsSince(toolBegan);performance.toolMilliseconds+=performance.lastToolMilliseconds;measuredEvent(AssistantEvent::ToolEnd,name);
             cancelled(cancel);V observation=visualObservation(name,args,toolResult);if(!observation.isNull())observations.push_back(std::move(observation));std::string data=compactToolReceipt(std::move(toolResult)).dump();

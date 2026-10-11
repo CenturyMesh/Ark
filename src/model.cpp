@@ -462,4 +462,11 @@ Appearance resolvedAppearance(const Document& document,const Feature& feature){
     return result;
 }
 
+Document Document::authoringCopy() const {
+    Document out;out.params=params;out.parameterError=parameterError;out.sketches=sketches;out.planes=planes;out.canvases=canvases;
+    out.features=features;out.materials=materials;out.usage=usage;out.agentActivity=agentActivity;out.bomDocumentId=bomDocumentId;out.iterationHistory=iterationHistory;
+    out.assembly=assembly;out.mates=mates;out.nextMateId_=nextMateId_;out.nextAssemblyId_=nextAssemblyId_;out.nextFeatureId_=nextFeatureId_;out.tessOpt=tessOpt;
+    return out;
+}
+
 } // namespace ark

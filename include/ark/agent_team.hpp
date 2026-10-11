@@ -23,6 +23,7 @@ struct AgentTeamConfig {
     std::size_t maxEventTextBytes=4096, maxEventBytes=1024*1024;
     unsigned maxCommandsPerStep=8,maxFeaturesPerStep=8,maxPlacementsPerStep=8,maxProposals=64;
     std::size_t maxDraftSketchBytes=16*1024;
+    std::function<arkjson::Value(const std::string&,const std::string&,const arkjson::Value&,const arkjson::Value&,double)> recordAction; // Host audit of coordination actions; never mutates CAD.
 };
 enum class AgentTeamState { Queued, Working, Idle, Failed, Cancelled, AwaitingContinuation, Interrupted };
 const char* agentTeamStateName(AgentTeamState state) noexcept;
