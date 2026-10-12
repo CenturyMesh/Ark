@@ -3,11 +3,6 @@
 This work supports **A.03/F.03/F.05**. Runtime `016F / 0.9.17` remains unchanged.
 Windows offers Studio; Linux offers the headless CLI/MCP/native worker.
 
-The Windows CI environment fix was verified in the hosted
-[PR #2 run](https://github.com/CenturyMesh/Ark/actions/runs/38310539114): all four
-platform jobs passed before merge on 2026-10-12. This is separate from local
-validation and from any real-user onboarding or manufacturing acceptance.
-
 - [50-second guided demo](https://github.com/CenturyMesh/Ark/releases/download/v0.9.17/ark-guided-demo-016F.mp4):
   an edited native-capture sequence, with a synthetic parameter edit and its BOM.
   [Reproduction and evidence](demo.md) distinguish it from a live AI recording.

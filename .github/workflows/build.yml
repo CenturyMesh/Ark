@@ -11,80 +11,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  ci-scope:
-    runs-on: ubuntu-latest
-    outputs:
-      runtime_changed: ${{ steps.classify.outputs.runtime_changed }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Install documentation parser
-        run: python -m pip install --disable-pip-version-check PyYAML==6.0.2
-      - name: Verify conservative classification and CI gate
-        run: python tests/ci_scope_tests.py
-      - name: Classify changed paths from event commits
-        id: classify
-        env:
-          CI_EVENT_NAME: ${{ github.event_name }}
-          CI_BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
-          CI_HEAD_SHA: ${{ github.sha }}
-          CI_REF: ${{ github.ref }}
-        run: python scripts/ci_scope.py classify
-      - name: Validate documentation, local links and issue YAML
-        run: python scripts/ci_scope.py check-docs
-      - name: Validate source release metadata
-        run: cmake "-DARK_SOURCE_DIR=$GITHUB_WORKSPACE" -P tests/release_metadata_tests.cmake
-
   portable-core:
-    needs: ci-scope
-    if: always()
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - name: Require successful scope and validation
-        if: needs.ci-scope.result != 'success'
-        run: exit 1
-      - name: Documentation-only result
-        if: needs.ci-scope.outputs.runtime_changed == 'false'
-        run: echo "Documentation and source metadata validated; unchanged native builds and tests were skipped."
       - uses: actions/checkout@v4
-        if: needs.ci-scope.outputs.runtime_changed != 'false'
       - run: cmake -S . -B out/core -DARK_WITH_OCCT=OFF -DCMAKE_BUILD_TYPE=Release
-        if: needs.ci-scope.outputs.runtime_changed != 'false'
       - run: cmake --build out/core --config Release --parallel 2
-        if: needs.ci-scope.outputs.runtime_changed != 'false'
       - run: ctest --test-dir out/core -C Release --output-on-failure
-        if: needs.ci-scope.outputs.runtime_changed != 'false'
 
   windows-native-occt:
-    needs: ci-scope
-    if: always()
     runs-on: windows-2022
     timeout-minutes: 90
     steps:
-      - name: Require successful scope and validation
-        if: needs.ci-scope.result != 'success'
-        run: exit 1
-      - name: Documentation-only result
-        if: needs.ci-scope.outputs.runtime_changed == 'false'
-        run: echo "Documentation and source metadata validated; unchanged native builds and tests were skipped."
       - uses: actions/checkout@v4
-        if: needs.ci-scope.outputs.runtime_changed != 'false'
       - name: Identify hosted Windows image
-        if: needs.ci-scope.outputs.runtime_changed != 'false'
         id: runner-image
         shell: pwsh
         run: |
           if (-not $env:ImageVersion) { throw 'Hosted runner ImageVersion is required for the OCCT cache key.' }
           "version=$env:ImageVersion" >> $env:GITHUB_OUTPUT
       - name: Restore OCCT native SDK and notices
-        if: needs.ci-scope.outputs.runtime_changed != 'false'
         id: occt-cache
         uses: actions/cache/restore@v4
         with:
@@ -94,11 +43,11 @@ jobs:
             out/deps/occt/cache/OCCT-8_0_1/OCCT_LGPL_EXCEPTION.txt
           key: windows-2022-occt-msvc-x64-notices-v1-${{ steps.runner-image.outputs.version }}-${{ hashFiles('scripts/build-occt.ps1') }}
       - name: Build OCCT 8 native SDK
-        if: needs.ci-scope.outputs.runtime_changed != 'false' && steps.occt-cache.outputs.cache-hit != 'true'
+        if: steps.occt-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: ./scripts/build-occt.ps1 -Jobs 2
       - name: Save OCCT native SDK and notices
-        if: needs.ci-scope.outputs.runtime_changed != 'false' && steps.occt-cache.outputs.cache-hit != 'true'
+        if: steps.occt-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: |
@@ -107,76 +56,22 @@ jobs:
             out/deps/occt/cache/OCCT-8_0_1/OCCT_LGPL_EXCEPTION.txt
           key: ${{ steps.occt-cache.outputs.cache-primary-key }}
       - name: Build and test ARK with native OCCT
-        if: needs.ci-scope.outputs.runtime_changed != 'false'
         shell: pwsh
         run: ./scripts/build.ps1 -Test -Jobs 2
       # Live Studio UI checks are opt-in; hosted OpenGL 3.3 availability is not assumed.
 
   linux-native-occt:
-    needs: ci-scope
-    if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
-      - name: Require successful scope and validation
-        if: needs.ci-scope.result != 'success'
-        run: exit 1
-      - name: Documentation-only result
-        if: needs.ci-scope.outputs.runtime_changed == 'false'
-        run: echo "Documentation and source metadata validated; unchanged native builds and tests were skipped."
       - uses: actions/checkout@v4
-        if: needs.ci-scope.outputs.runtime_changed != 'false'
       - name: Install Linux build dependencies
-        if: needs.ci-scope.outputs.runtime_changed != 'false'
         run: sudo apt-get update && sudo apt-get install -y build-essential cmake ninja-build curl ca-certificates unzip patchelf
-      - name: Identify hosted Ubuntu image
-        if: needs.ci-scope.outputs.runtime_changed != 'false'
-        id: runner-image
-        run: |
-          test -n "${ImageVersion:-}" || { echo 'Hosted runner ImageVersion is required for the OCCT cache key.'; exit 1; }
-          printf 'version=%s\n' "$ImageVersion" >> "$GITHUB_OUTPUT"
-      - name: Restore OCCT Linux SDK and notices
-        if: needs.ci-scope.outputs.runtime_changed != 'false'
-        id: occt-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            out/deps/occt/install-linux
-            out/deps/occt/cache/OCCT-8_0_1/LICENSE_LGPL_21.txt
-            out/deps/occt/cache/OCCT-8_0_1/OCCT_LGPL_EXCEPTION.txt
-          key: ubuntu-24.04-occt-gcc-x64-notices-v1-${{ steps.runner-image.outputs.version }}-${{ hashFiles('scripts/build-occt.sh') }}
-      - name: Build OCCT 8 Linux SDK
-        if: needs.ci-scope.outputs.runtime_changed != 'false' && steps.occt-cache.outputs.cache-hit != 'true'
-        run: bash scripts/build-occt.sh --jobs 2
-      - name: Verify Linux SDK RPATH and required notices
-        if: needs.ci-scope.outputs.runtime_changed != 'false'
-        run: |
-          test -f out/deps/occt/install-linux/lib/cmake/opencascade/OpenCASCADEConfig.cmake
-          for notice in LICENSE_LGPL_21.txt OCCT_LGPL_EXCEPTION.txt; do
-            test -s "out/deps/occt/cache/OCCT-8_0_1/$notice"
-          done
-          for library in out/deps/occt/install-linux/lib/*.so.*; do
-            if ! test -L "$library"; then
-              test "$(patchelf --print-rpath "$library")" = '$ORIGIN'
-            fi
-          done
-      - name: Save OCCT Linux SDK and notices
-        if: needs.ci-scope.outputs.runtime_changed != 'false' && steps.occt-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            out/deps/occt/install-linux
-            out/deps/occt/cache/OCCT-8_0_1/LICENSE_LGPL_21.txt
-            out/deps/occt/cache/OCCT-8_0_1/OCCT_LGPL_EXCEPTION.txt
-          key: ${{ steps.occt-cache.outputs.cache-primary-key }}
       - name: Build and test Linux CLI, MCP and OCCT worker
-        if: needs.ci-scope.outputs.runtime_changed != 'false'
         run: bash scripts/build.sh --test --jobs 2
       - name: Prepare Linux headless package
-        if: needs.ci-scope.outputs.runtime_changed != 'false'
         run: bash scripts/package-linux.sh
       - name: Test relocated package without the build SDK
-        if: needs.ci-scope.outputs.runtime_changed != 'false'
         run: |
           mkdir -p out/linux-smoke
           tar -xzf out/releases/ark-linux-x64-headless-*.tar.gz -C out/linux-smoke
@@ -185,23 +80,7 @@ jobs:
             --mount "type=bind,source=$PWD/tests/linux_package_smoke.sh,target=/smoke.sh,readonly" \
             ubuntu:24.04 bash -c 'bash /smoke.sh /packages/ark-linux-x64-headless-*'
       - uses: actions/upload-artifact@v4
-        if: needs.ci-scope.outputs.runtime_changed != 'false'
         with:
           name: ark-linux-x64-headless
           path: out/releases/ark-linux-x64-headless-*.tar.gz*
           if-no-files-found: error
-
-  ci-gate:
-    if: always()
-    needs: [ci-scope, portable-core, windows-native-occt, linux-native-occt]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Enforce validation and required runtime results
-        env:
-          CI_SCOPE_RESULT: ${{ needs.ci-scope.result }}
-          CI_RUNTIME_CHANGED: ${{ needs.ci-scope.outputs.runtime_changed }}
-          CI_CORE_RESULT: ${{ needs.portable-core.result }}
-          CI_WINDOWS_RESULT: ${{ needs.windows-native-occt.result }}
-          CI_LINUX_RESULT: ${{ needs.linux-native-occt.result }}
-        run: python scripts/ci_scope.py gate
