@@ -2,6 +2,14 @@
 
 **Open-source parametric CAD for humans and AI agents, for Windows and Linux.**
 
+[![Preview release](https://img.shields.io/github/v/release/CenturyMesh/Ark?include_prereleases&label=preview&color=2563eb)](https://github.com/CenturyMesh/Ark/releases)
+[![Build and test](https://github.com/CenturyMesh/Ark/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/CenturyMesh/Ark/actions/workflows/build.yml)
+[![License: Apache-2.0](https://img.shields.io/github/license/CenturyMesh/Ark?color=22c55e)](LICENSE)
+[![Windows Studio](https://img.shields.io/badge/Windows-Studio-0078D4)](#windows-studio-and-exact-cad)
+[![Linux headless](https://img.shields.io/badge/Linux-headless-FCC624?logo=linux&logoColor=black)](#linux-native-headless-runtime)
+[![MCP CAD tools](https://img.shields.io/badge/MCP-CAD_tools-8b5cf6)](docs/CONNECTING.md)
+[![GitHub Sponsors](https://img.shields.io/badge/Sponsor-CenturyMesh-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/CenturyMesh)
+
 Powered by C++ and Open CASCADE. Windows includes the graphical Studio; Linux
 currently provides the headless CLI, MCP server and native geometry worker.
 

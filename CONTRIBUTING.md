@@ -18,6 +18,18 @@ threads, and satisfy the checks listed in the [active ruleset](https://github.co
 Force pushes and deletion of `main` are blocked, including automatic maintainer
 bypass. Do not assume a direct push is allowed because an older guide used one.
 
+Documentation-only PRs use a conservative path allowlist. CI checks Markdown
+links, UTF-8, issue YAML and source release metadata, and the four platform jobs
+explicitly report that unchanged native builds/tests were skipped. Runtime,
+workflow, build, test, packaged-contract and unknown paths run the full platform
+matrix. The always-running `ci-gate` rejects missing classification or failed
+validation; a skipped dependency cannot silently make the PR acceptable.
+
+To check documentation locally, install `PyYAML==6.0.2` in your development
+environment, then run `python scripts/ci_scope.py check-docs` and
+`python tests/ci_scope_tests.py`. This parser is a CI/development dependency,
+not part of the ARK runtime package.
+
 Bug reports should include a minimal, shareable reproduction, the runtime version
 and iteration code, platform, expected behavior and actual result. Geometry reports
 need the input and command sequence that produced the rejection or incorrect result.
