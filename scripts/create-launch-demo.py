@@ -57,5 +57,3 @@ review=tool('bom_review',expected_revision=tool('doc_info')['revision'],scope='c
 (OUT/'evidence.json').write_text(json.dumps({'before':before,'after':after,'bom_review':review,'receipts':receipts},indent=2),encoding='utf-8')
 print(json.dumps({'before_bounds_mm':before['report']['bounds_mm'],'after_bounds_mm':after['report']['bounds_mm'],'brep_valid':[before['report']['brep_valid'],after['report']['brep_valid']],'bom_items':len(bom.get('items',[]))}))
 close_process()
-
-
