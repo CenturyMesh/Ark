@@ -1,10 +1,10 @@
-﻿# Sponsorship setup
+# Support ARK
 
-Donations are intended to support ARK development. At the account check recorded
-on 12 October 2026, `CenturyMesh` did not have a published GitHub Sponsors listing.
-No active funding profile or payment URL has been configured by this preparation.
+Support development through [CenturyMesh on GitHub Sponsors](https://github.com/sponsors/CenturyMesh).
+The Sponsors listing was confirmed active on 12 October 2026 after the owner
+completed onboarding. `.github/FUNDING.yml` enables the repository Sponsor button.
 
-## Owner onboarding
+## Maintainer reference: account setup
 
 The account owner must complete the financial and identity steps directly:
 
@@ -23,10 +23,9 @@ See GitHub's official [organization setup guide](https://docs.github.com/en/spon
 and [personal account guide](https://docs.github.com/en/sponsors/receiving-sponsorships-through-github-sponsors/setting-up-github-sponsors-for-your-personal-account).
 The owner must select the appropriate route and provide the actual details.
 
-## Add the repository button after activation
+## Repository button
 
-Only after GitHub confirms the correct `CenturyMesh` listing is published, add
-`.github/FUNDING.yml` with:
+The active `.github/FUNDING.yml` contains:
 
 ```yaml
 github: [CenturyMesh]

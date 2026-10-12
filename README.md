@@ -7,11 +7,11 @@ mechanisms. Work directly in Studio, ask an assistant to build alongside you, or
 connect an external agent through MCP. Human and agent edits use the same modeling
 commands, document history and revision checks.
 
-![An editable drone assembly in ARK Studio](docs/drone-hull.png)
+![Recent drone assembly captured directly from the ARK Studio viewport](docs/showcase-drone.png)
 
 [Get started](#get-started) · [Handbook](docs/HANDBOOK.md) ·
 [Documentation](docs/README.md) · [Roadmap](docs/ROADMAP.md) ·
-[Contributing](CONTRIBUTING.md)
+[Contributing](CONTRIBUTING.md) ? [Sponsor](https://github.com/sponsors/CenturyMesh)
 
 ## What you can build
 
@@ -176,9 +176,9 @@ user documents and dependency notices. The
 [contribution guide](CONTRIBUTING.md) covers setup, branches, tests and review;
 [security policy](SECURITY.md) covers vulnerability reporting.
 
-To support development, see [sponsorship setup](docs/SPONSORSHIP.md).
-The project's GitHub Sponsors profile is not active yet; no donation tier or
-paid support commitment is currently offered.
+Support ARK development through [GitHub Sponsors](https://github.com/sponsors/CenturyMesh).
+See [sponsorship details](docs/SPONSORSHIP.md); sponsorship does not change the
+open-source license or create a paid support commitment.
 
 ARK source is licensed under [Apache-2.0](LICENSE); see [NOTICE](NOTICE).
 Dependencies retain their individual terms; see
