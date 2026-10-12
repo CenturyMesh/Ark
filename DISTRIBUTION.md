@@ -35,6 +35,30 @@ replace an existing release tag.
 
 ## Build locally or through GitHub
 
+For a **personal test using binaries already built in VS Code**, use this command
+from this branch's checkout. It skips rebuilding and all test suites, packages the
+existing runtime, and uploads a preview Release directly through GitHub CLI:
+
+```powershell
+./scripts/publish-test-build.ps1 -Publish
+```
+
+The resulting ZIP contains the executable and its DLLs plus `ARK.cmd` and
+`Install-ARK.cmd`. This path does not use GitHub Actions. GitHub CLI must already
+be installed and signed in (`gh auth login`). To also create and upload a single
+setup EXE, install Inno Setup 6.3+ and add `-Installer`:
+
+```powershell
+./scripts/publish-test-build.ps1 -Installer -Publish
+```
+
+`-RuntimeDirectory` selects another existing build folder. Omit `-Publish` to
+prepare the files locally. The compiled iteration/version are preserved even
+when older than the packaging checkout, and an existing Release is never replaced.
+The Git tag targets the packaging checkout; binary source provenance is not
+attested by this personal test path. Release notes explicitly say that no build
+or test suite was run. No production gate or Actions billing override is needed.
+
 The workflow runs on a push to `codex/windows-distribution`, a `v*` tag, or
 **Actions → Build Windows installer and publish download → Run workflow**.
 Manual runs can disable publication and keep the result as an Actions artifact.
@@ -81,7 +105,7 @@ Dependency instructions: [OCCT build](docs/NATIVE_BUILD.md),
 [third-party notices](docs/THIRD_PARTY_NOTICES.md),
 [versioned launcher](docs/UPDATES.md).
 
-Local verification on 2026-10-12 (Linux, PowerShell 7.5.4): 19 distribution fixture
+Local verification on 2026-10-12 (Linux, PowerShell 7.5.4): 22 distribution fixture
 checks and 26 release identity cases passed; PowerShell and workflow syntax passed.
 The existing Windows-targeted OTA suite reached an adversarial ZIP-size case that
 was not rejected under Linux/.NET; its extraction code is unchanged in this work.

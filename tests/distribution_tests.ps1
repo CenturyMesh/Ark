@@ -14,7 +14,7 @@ function Write-Fixture([string]$Path, [string]$Value = 'fixture') {
 }
 try {
     $fixture = Join-Path $temporary 'repository'
-    foreach ($path in @('scripts/package-release.ps1','scripts/install-portable.ps1','updates/Ark.Update.psm1','updates/ARK.cmd','packaging/Install-ARK.cmd','packaging/GETTING_STARTED.txt')) {
+    foreach ($path in @('scripts/package-release.ps1','scripts/install-portable.ps1','scripts/publish-test-build.ps1','updates/Ark.Update.psm1','updates/ARK.cmd','packaging/Install-ARK.cmd','packaging/GETTING_STARTED.txt')) {
         $target = Join-Path $fixture $path
         [IO.Directory]::CreateDirectory((Split-Path $target -Parent)) | Out-Null
         Copy-Item -LiteralPath (Join-Path $repository $path) -Destination $target
@@ -46,6 +46,11 @@ try {
     & (Join-Path $expanded 'Install-ARK.ps1') -InstallRoot $installRoot
     Assert-ArkInstalledRuntime $installRoot '0.9.15' | Out-Null
     $checks++
+    $testOutput = Join-Path $fixture 'personal test output'
+    & (Join-Path $fixture 'scripts/publish-test-build.ps1') -RuntimeDirectory $runtime -OutputDirectory $testOutput -MsvcRuntimeDirectory $msvc -OcctSourceDirectory (Join-Path $fixture 'occt')
+    Assert-True (Test-Path -LiteralPath (Join-Path $testOutput 'ark-windows-x64-0.9.15.zip')) 'Personal test packaging must reuse the existing runtime.'
+    Assert-True (Test-Path -LiteralPath (Join-Path $testOutput 'SHA256SUMS.txt')) 'Personal test package must have checksums.'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $testOutput 'ark-update.json'))) 'Personal test packaging must not publish an Internet update feed.'
     Write-Output "Distribution fixture: $checks checks passed. Fake binaries; no native execution or installer compilation claimed."
 } finally {
     if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath (Assert-ArkChildPath ([IO.Path]::GetTempPath()) $temporary) -Recurse -Force }

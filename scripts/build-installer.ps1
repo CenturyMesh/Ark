@@ -1,7 +1,8 @@
 param(
     [Parameter(Mandatory=$true)][string]$PackagePath,
     [string]$OutputDirectory = 'out/releases',
-    [string]$InnoCompiler
+    [string]$InnoCompiler,
+    [switch]$UseRuntimeIdentity
 )
 $ErrorActionPreference = 'Stop'
 $repository = Split-Path $PSScriptRoot -Parent
@@ -22,8 +23,12 @@ try {
     Expand-ArkPackage $PackagePath $staging
     $version = Get-ArkRuntimeVersion $staging
     $identity = Read-ArkJson (Join-Path $staging 'app-version.json') 4KB
-    $release = Read-ArkJson (Join-Path $repository 'release.json') 4KB
-    if ($version -cne $release.version -or $identity.iteration_code -cne $release.code) { throw 'Package and source release identities differ. Build the current iteration first.' }
+    if ($UseRuntimeIdentity) {
+        $release = [pscustomobject]@{version=$identity.version; code=$identity.iteration_code; sequence=$identity.sequence; phase=$identity.phase}
+    } else {
+        $release = Read-ArkJson (Join-Path $repository 'release.json') 4KB
+        if ($version -cne $release.version -or $identity.iteration_code -cne $release.code) { throw 'Package and source release identities differ. Build the current iteration first, or use -UseRuntimeIdentity to package an existing personal test build.' }
+    }
     if ($release.code -cnotmatch '^[0-9]{3}[A-G]$' -or $release.code -cne ('{0:D3}{1}' -f [int]$release.sequence, $release.phase)) { throw 'Invalid release iteration code.' }
     foreach ($name in @('Install-ARK.ps1', 'Install-ARK.cmd', 'GETTING_STARTED.txt', 'licenses/LICENSE_LGPL_21.txt', 'licenses/OCCT_LGPL_EXCEPTION.txt')) {
         if (-not (Test-Path -LiteralPath (Join-Path $staging $name) -PathType Leaf)) { throw "Installer payload is missing $name." }
