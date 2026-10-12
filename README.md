@@ -1,6 +1,9 @@
 # ARK — Agent-Ready Kernel
 
-**Parametric CAD for people and agents.**
+**Open-source parametric CAD for humans and AI agents, for Windows and Linux.**
+
+Powered by C++ and Open CASCADE. Windows includes the graphical Studio; Linux
+currently provides the headless CLI, MCP server and native geometry worker.
 
 **Download ready-to-run packages - 016F / 0.9.17:**
 
@@ -21,6 +24,13 @@ commands, document history and revision checks.
 [Get started](#get-started) · [Handbook](docs/HANDBOOK.md) ·
 [Documentation](docs/README.md) · [Roadmap](docs/ROADMAP.md) ·
 [Contributing](CONTRIBUTING.md) | [Sponsor](https://github.com/sponsors/CenturyMesh)
+
+New to ARK? Try the [first-part walkthrough](docs/FIRST_TRY.md) and share a
+[structured experience report](https://github.com/CenturyMesh/Ark/issues/new?template=first_experience.yml).
+
+[**Watch the 50-second guided demo**](https://github.com/CenturyMesh/Ark/releases/download/v0.9.17/ark-guided-demo-016F.mp4)
+— an edited sequence of native captures showing a parameter edit and its BOM,
+with the [source and measured evidence](docs/launch/demo.md).
 
 ## What you can build
 

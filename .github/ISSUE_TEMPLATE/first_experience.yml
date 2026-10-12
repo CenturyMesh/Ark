@@ -1,0 +1,56 @@
+name: First experience
+description: Tell us where your first download, edit or save/reopen succeeded or failed.
+title: "[First experience]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use a synthetic task and share only authorized screenshots or documents.
+        Never attach tokens, account settings or customer files. This form is public.
+  - type: input
+    id: platform
+    attributes:
+      label: Platform and ARK version
+      placeholder: "Windows 11 / 0.9.17 / 016F, or Ubuntu 24.04 headless"
+    validations:
+      required: true
+  - type: textarea
+    id: task
+    attributes:
+      label: What did you try to make or inspect?
+      description: Include whether you used manual Studio controls, an external MCP client or the built-in assistant.
+    validations:
+      required: true
+  - type: dropdown
+    id: outcome
+    attributes:
+      label: How far did you get?
+      options:
+        - Could not download or start
+        - Started, but could not complete the first edit
+        - Created an editable part
+        - Saved and reopened the editable part successfully
+        - Tested a different workflow
+    validations:
+      required: true
+  - type: textarea
+    id: friction
+    attributes:
+      label: First confusing step or blocker
+      description: What did you expect, what happened, and which control or diagnostic was involved? State explicitly if there was no blocker.
+    validations:
+      required: true
+  - type: textarea
+    id: preservation
+    attributes:
+      label: Was your work preserved?
+      description: Did save/reopen retain the geometry, history and metadata? Did any rejected operation alter the previous valid result?
+  - type: input
+    id: elapsed
+    attributes:
+      label: Optional observed time to first useful result
+      description: Include failed attempts. This is feedback, not a controlled performance comparison.
+  - type: textarea
+    id: improvement
+    attributes:
+      label: What one change would help most?

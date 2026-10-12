@@ -131,12 +131,14 @@ Goal: make ARK understandable, installable, updateable and supportable.
 |---|---|---|---|
 | F.01 | Trusted online self-update | Parcial | Local integrity/staging/next-launch/rollback exists. Qualify real transport, signing, stable/preview channels, rollout and rollback from a published older runtime. [Updates](UPDATES.md) |
 | F.02 | Sustainable commercial offering | Planeado | Define any future paid services or Enterprise offering separately from the adopted Apache-2.0 source license; specify actual features, support, taxes and terms, and validate demand. The earlier approximately €200 perpetual model is a historical proposal. |
-| F.03 | Onboarding and initial library | Parcial | English README/handbook and branch/PR contribution guidance are prepared; clean-machine setup and five guided workflows need observed first-valid-part time and abandonment evidence. Fabricable templates need their own qualification. |
+| F.03 | Onboarding and initial library | Parcial | English README/handbook, branch/PR guidance, a [first-part walkthrough](FIRST_TRY.md), structured experience reports and [launch materials](launch/README.md) are available. Clean-machine setup and five guided workflows still need observed first-valid-part time and abandonment evidence. Fabricable templates need their own qualification. |
 | F.04 | Support and operational quality | Parcial | Contribution templates and security guidance support reporting; opt-in redacted crash reports, diagnostic export, migrations, hardware matrix and support policy need operational evidence. |
-| F.05 | Public distribution and user pilot | Em curso | Apache-2.0 publication is authorized, with source/history/dependency checks before visibility change. A reviewed public repository/release, clean-install trial and 10–20 real-user feedback cohort remain distinct gates. |
+| F.05 | Public distribution and user pilot | Parcial | Public Apache-2.0 repository and 016F Windows/Linux-headless prerelease packages are published. Ready-to-run download links, a feedback form, announcement drafts and private aggregate-metrics snapshots support launch. Invitations are deferred at the owner's request; no real-user cohort or adoption improvement is claimed. Clean-install and user-pilot qualification remain separate gates. |
 
-A documented PR workflow does not establish remote branch protection. A license
-and an authorization to publish do not establish that publication has already happened.
+The public repository and prerelease were verified on 2026-10-12. The active
+main-branch ruleset requires PRs, resolved review threads and configured CI checks,
+and blocks deletion/force pushes without automatic bypass. Check the
+[live rules](https://github.com/CenturyMesh/Ark/rules/24953939) for the current check list.
 There is no implemented Enterprise edition implied by this roadmap.
 
 ## G — Advanced platform
