@@ -2,16 +2,25 @@
 
 **Parametric CAD for people and agents.**
 
+**Download ready-to-run packages - 016F / 0.9.17:**
+
+[**Windows x64 - Studio + CLI/MCP (ZIP)**](https://github.com/CenturyMesh/Ark/releases/download/v0.9.17/ark-windows-x64-0.9.17.zip) | [**Linux x64 - headless CLI/MCP (tar.gz)**](https://github.com/CenturyMesh/Ark/releases/download/v0.9.17/ark-linux-x64-headless-0.9.17.tar.gz)
+
+Extract the Windows ZIP and run `ARK.cmd`. For Linux, extract the archive and run
+`bin/ark-mcp`; this package has no graphical Studio. These are prerelease binaries
+for manual evaluation. [Release notes, checksums and OCCT source](https://github.com/CenturyMesh/Ark/releases/tag/v0.9.17).
+No compilation is required to use these downloads.
+
 ARK is a native C++ design workspace for creating editable parts, assemblies and
 mechanisms. Work directly in Studio, ask an assistant to build alongside you, or
 connect an external agent through MCP. Human and agent edits use the same modeling
 commands, document history and revision checks.
 
-![Recent drone assembly captured directly from the ARK Studio viewport](docs/showcase-drone.png)
+![Drone assembly in ARK Studio - screenshot supplied by the project owner](docs/showcase-drone.png)
 
 [Get started](#get-started) · [Handbook](docs/HANDBOOK.md) ·
 [Documentation](docs/README.md) · [Roadmap](docs/ROADMAP.md) ·
-[Contributing](CONTRIBUTING.md) ? [Sponsor](https://github.com/sponsors/CenturyMesh)
+[Contributing](CONTRIBUTING.md) | [Sponsor](https://github.com/sponsors/CenturyMesh)
 
 ## What you can build
 
