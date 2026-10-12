@@ -1,0 +1,103 @@
+{
+  "iteration": {
+    "sequence": 14,
+    "phase": "D",
+    "code": "014D",
+    "version": "0.9.15",
+    "milestones": [
+      "A.01",
+      "A.03",
+      "B.05",
+      "D.02",
+      "E.01"
+    ]
+  },
+  "date": "2026-10-12",
+  "baseline_commit": "3b23a3c9db68731ef2943b7447ac4c1cf7607f07",
+  "scope": "A.01/A.03/B.05/D.02/E.01 local BOM interface and Studio completion gate",
+  "native_tests": {
+    "passed": 67,
+    "failed": 0,
+    "seconds": 105.26,
+    "log": "out/014D-private/tests.log"
+  },
+  "final_targeted_tests": {
+    "passed": 6,
+    "failed": 0,
+    "seconds": 6.58,
+    "log": "out/014D-private/targeted.log"
+  },
+  "ui": [
+    {
+      "test": "bom-ui",
+      "exit": 0,
+      "seconds": 1.641
+    },
+    {
+      "test": "assistant-ui",
+      "exit": 0,
+      "seconds": 16.031
+    },
+    {
+      "test": "startup-ui",
+      "exit": 0,
+      "seconds": 3.125
+    }
+  ],
+  "visual_evidence": {
+    "path": "out/014D-private/ui-bom-ui.png.bom.png",
+    "sha256": "90e4a8aad724fa720410f7f46a711638b2ffad6531362207bc0e6a074d639b08",
+    "inspected": true
+  },
+  "package": {
+    "entries": 75,
+    "bytes": 33372793,
+    "sha256": "7e8f3bf496e7a8ae206e667ace1c26a4cc16729804e4a0c7b31301024699b543",
+    "runtime_executables_match": true,
+    "drawings": 0,
+    "notices_and_contracts": true
+  },
+  "installation": {
+    "observed_processes_preserved": true,
+    "observed_live_processes": 1,
+    "state": {
+      "current": "0.9.14",
+      "pending": "0.9.15",
+      "schema": 1,
+      "activating": "",
+      "previous": "0.9.13"
+    },
+    "changed_during_install": 0,
+    "observed_drawings": 37
+  },
+  "installed_smoke": {
+    "matched_installed_files": 65,
+    "standalone_tools": 76,
+    "activity_roundtrip": true,
+    "bom_review_ledger_roundtrip": true,
+    "feedback_immutable_contract_tested_in_suite": true
+  },
+  "runtime_identity": {
+    "name": "ark",
+    "version": "0.9.15",
+    "iteration_code": "014D"
+  },
+  "completion_contract": {
+    "current_revision_and_authoring_digest": true,
+    "all_item_pages_inspected": true,
+    "part_number_and_description_required": true,
+    "detailed_rejects_incomplete_metadata": true,
+    "concept_discloses_pending_fields": true,
+    "fastening_review": "caller-declared; no automatic completeness certification",
+    "studio_single": "host gate before final visible text",
+    "studio_team": "host gate before completed lead goal report",
+    "external_mcp": "review tool exposed; external client owns its final UI"
+  },
+  "live_pilot_new_attempts": 0,
+  "limits": [
+    "No supplier authenticity verification or manufacturing qualification.",
+    "User-requested scope remains a natural-language instruction; host labels the explicitly reviewed scope.",
+    "No MeshWorks adapter.",
+    "Review authorization is session-local; successful agent review evidence persists with saved activity ledger."
+  ]
+}

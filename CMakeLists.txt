@@ -14,7 +14,7 @@ target_compile_definitions(ark-sqlite PRIVATE SQLITE_ENABLE_FTS5=1 SQLITE_THREAD
 target_link_libraries(ark-sqlite PUBLIC Threads::Threads)
 add_library(ark STATIC
   src/agent_activity.cpp
-  src/bom.cpp
+  src/bom.cpp src/bom_review.cpp
   src/updates.cpp
   src/document_container.cpp
   src/iteration_history.cpp
@@ -59,7 +59,7 @@ if(WIN32)
   target_link_libraries(ark PUBLIC advapi32 winhttp bcrypt crypt32 ws2_32 shell32 ole32 windowscodecs)
   add_executable(ark-studio WIN32 src/view/viewer.cpp src/view/app_icon.rc)
   target_include_directories(ark-studio PRIVATE assets/ui)
-  target_link_libraries(ark-studio PRIVATE ark opengl32 gdi32 user32 shell32 comdlg32 dwmapi windowscodecs ole32)
+  target_link_libraries(ark-studio PRIVATE ark comctl32 opengl32 gdi32 user32 shell32 comdlg32 dwmapi windowscodecs ole32)
   add_custom_command(TARGET ark-studio POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/updates" "$<TARGET_FILE_DIR:ark-studio>/updates"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_BINARY_DIR}/app-version.json" "$<TARGET_FILE_DIR:ark-studio>/app-version.json")
@@ -82,6 +82,10 @@ if(WIN32)
   add_test(NAME ota-launch COMMAND "${ARK_POWERSHELL}" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${CMAKE_SOURCE_DIR}/tests/updates_launch_tests.ps1")
   set_tests_properties(ota-launch PROPERTIES TIMEOUT 30)
 endif()
+add_executable(ark-bom-completion-tests tests/bom_completion_tests.cpp)
+target_link_libraries(ark-bom-completion-tests PRIVATE ark)
+add_test(NAME bom-completion COMMAND ark-bom-completion-tests)
+set_tests_properties(bom-completion PROPERTIES TIMEOUT 30)
 add_executable(ark-view-camera-tests tests/view_camera_tests.cpp)
 target_link_libraries(ark-view-camera-tests PRIVATE ark)
 add_test(NAME view-camera COMMAND ark-view-camera-tests)

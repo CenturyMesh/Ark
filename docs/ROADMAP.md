@@ -1,7 +1,7 @@
 # ARK — matriz de roadmap A–G
 
-**Data da auditoria:** 11 de outubro de 2026. **Iteração local:** `013B` / `0.9.14`,
-com verificação local; baseline `012D` / `2d9f1ad` (`0.9.13`).
+**Data da auditoria:** 12 de outubro de 2026. **Iteração local:** `014D` / `0.9.15`,
+com verificação local; baseline `013B` / `3b23a3c` (`0.9.14`).
 O baseline histórico `0.9.1`, commit `5e7153f`, não foi rebatizado retroativamente.
 `001A` inicia a convenção pública, com versão técnica `0.9.2` para distribuição.
 `002B` acrescenta recuperação do runtime, projeção exata e ferramentas de frame;
@@ -34,6 +34,8 @@ em novos planos, contexto multimodal limitado ao transporte e caches de geometri
 Ver [escopo e evidência](iterations/012D.md). A.04/B.01/D.02/D.04 permanecem Parcial.
 `013B` acrescenta medição 2D/3D e unidades de apresentação configuráveis;
 ver [escopo e evidência](iterations/013B.md). B.01 permanece Parcial.
+`014D` acrescenta o painel BOM e revisão obrigatória antes do fecho em Studio;
+conceitos incompletos ficam identificados. Ver [evidência](iterations/014D.md).
 O adapter MeshWorks e a aquisição de catálogos mecânicos continuam pendentes.
 
 **Visão:** um ambiente CAD onde uma pessoa ou uma equipa de agentes consegue

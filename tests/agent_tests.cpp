@@ -301,6 +301,6 @@ int main(){
         auto inspect=dense.call("native_inspect",json(R"({"id":1})"));
         CHECK(failed(inspect)&&inspect.find("structuredContent")->find("error")->str.find("Density must be a positive finite number of grams per cubic centimetre")!=std::string::npos);
     }
-    CHECK(AgentSession::tools().arr.size()==75);
+    CHECK(AgentSession::tools().arr.size()==76);
     std::cout<<checks<<" checks / "<<failures<<" failures\n";return failures?1:0;
 }

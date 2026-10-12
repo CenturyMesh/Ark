@@ -19,6 +19,7 @@ struct AgentTeamConfig {
     unsigned maxWorkers=8, maxTurnsPerRole=0; // Zero means no turn budget.
     bool orchestratedStart=false; // Specialists await explicit assignments.
     bool focusedWorkflow=false; // One conversation at a time; the lead starts and delegates specific tasks.
+    std::function<arkjson::Value()> completionCheck; // Required host BOM review before lead completion.
     std::size_t maxEvents=2048, maxMailboxBytes=64*1024;
     std::size_t maxEventTextBytes=4096, maxEventBytes=1024*1024;
     unsigned maxCommandsPerStep=8,maxFeaturesPerStep=8,maxPlacementsPerStep=8,maxProposals=64;

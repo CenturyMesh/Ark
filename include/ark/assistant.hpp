@@ -99,6 +99,7 @@ struct AssistantRetryHooks {
     std::function<void()> checkpoint;
     std::function<void(std::uint64_t,const std::atomic_bool*)> wait;
     std::function<unsigned()> jitterMilliseconds;
+    std::function<arkjson::Value()> completionCheck; // Host finalization gate.
 };
 
 void validateAssistantConfig(const AssistantConfig& config);

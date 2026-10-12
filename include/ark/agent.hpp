@@ -4,6 +4,7 @@
 #include "ark/mesh_analysis.hpp"
 #include "ark/failure_record.hpp"
 #include <chrono>
+#include <set>
 namespace ark {
 struct Image;
 bool metadataOnlyApply(const Document&,const arkjson::Value& args);
@@ -16,6 +17,11 @@ public:
     u64 revision=0;
     arkjson::Value call(const std::string& tool,const arkjson::Value& args);
     arkjson::Value info() const;
+    arkjson::Value reviewBom(const arkjson::Value& args);
+    arkjson::Value bomCompletionCheck(bool onlyIfAuthored=false) const;
+    void markBomAuthored(){bomAuthored_=true;}
+    void resetBomReview(){bomAuthored_=false;bomReview_={};bomInspectedHash_.clear();bomInspectedItems_.clear();bomInspectedRevision_=~u64(0);}
+    void observeBomInspection(const arkjson::Value& bom);
     static arkjson::Value tools(bool detailed=false);
     arkjson::Value preparePreview(const arkjson::Value& args);
     arkjson::Value commitPrepared(const arkjson::Value& args);
@@ -27,6 +33,11 @@ public:
     // Scratch geometry probes opt out; only committed document edits are journaled.
     void suppressIterationHistory(bool value=true){suppressHistory_=value;}
 private:
+    bool bomAuthored_=false;
+    arkjson::Value bomReview_;
+    std::string bomInspectedHash_;
+    u64 bomInspectedRevision_=~u64(0);
+    std::set<u64> bomInspectedItems_;
     arkjson::Value dispatch(const std::string& tool,const arkjson::Value& args);
     bool suppressHistory_=false;
     bool suppressFailures_=false;

@@ -16,6 +16,7 @@
 #include <windowsx.h>
 #include <GL/gl.h>
 #include <commdlg.h>
+#include <commctrl.h>
 #include <shellapi.h>
 #include <dwmapi.h>
 #include <psapi.h>
@@ -63,6 +64,7 @@ typedef ptrdiff_t GLsizeiptr;
 #include "ark/io.hpp"
 #include "ark/agent.hpp"
 #include "ark/agent_activity.hpp"
+#include "ark/bom.hpp"
 #include "ark/mesh_analysis.hpp"
 #include "ark/notch.hpp"
 #include "ark/source_tube.hpp"
@@ -506,7 +508,7 @@ static bool decodeCanvasFile(const std::wstring&,std::vector<unsigned char>&,uns
 static int atlasIcon(int action){switch(action){
     case 570:case 584:return 33; // Existing edit-curve pencil.
     case 571:return 0;case 572:return 16;case 573:return 1;case 574:case 575:return 32;
-    case 585:case 586:case 588:case 576:return 24;case 587:return 45;case 577:return 45;case 578:return 14;
+    case 590:return 8;case 585:case 586:case 588:case 576:return 24;case 587:return 45;case 577:return 45;case 578:return 14;
     case 580:case 582:return 11;case 581:return 12;
     case 543:return 0;case 544:case 545:case 546:case 547:case 548:return 32;case 536:case 537:return 30;case 538:return 16;
     case 127:return 35;case 122:case 123:return 6;case 125:case 126:return 3;case 396:return 36;case 399:return 37;
@@ -2623,6 +2625,7 @@ static void drainUiTools(){
         if((request->teamOwned&&request->epoch!=g_documentEpoch)||(request->revision&&(request->epoch!=g_documentEpoch||*request->revision!=g_session.revision))){auto result=cancelledTool();arkjson::Value error=arkjson::Value::makeObj();g_status="Document changed during assistant turn. Inspect and resend from the current revision.";error.set("error",arkjson::Value::makeStr(g_status));result.set("structuredContent",error);g_chatLog.push_back({"ARK",g_status});request->complete(result);if(request->cancel)*request->cancel=true;continue;}
         if(request->teamOwned||request->revision){using V=arkjson::Value;V actor=V::makeObj();actor.set("kind",V::makeStr("agent"));actor.set("id",V::makeStr(request->roleId.empty()?"assistant":request->roleId));std::string model=g_assistantConfig.model;for(size_t i=0;i<teamCapacity;++i)if(request->roleId==g_teamRoleIds[i])model=g_teamModels[i].empty()?g_assistantConfig.model:g_teamModels[i];if(!model.empty())actor.set("model",V::makeStr(model));if(!request->roleId.empty())actor.set("role",V::makeStr(request->roleId));static const std::set<std::string> writes{"doc_apply","doc_new","doc_load","doc_undo","doc_redo","iteration_restore","import_step","import_sheet_step","import_mesh","library_insert"};request->args.set("actor",actor);}
         if(!request->teamOwned&&!request->revision&&!request->args.find("actor")){using V=arkjson::Value;static const std::set<std::string> writes{"doc_apply","doc_new","doc_load","doc_undo","doc_redo","iteration_restore","import_step","import_sheet_step","import_mesh","library_insert"};if(writes.count(request->tool)){V actor=V::makeObj();actor.set("kind",V::makeStr("client"));actor.set("id",V::makeStr("live_mcp"));request->args.set("actor",actor);}}
+        if((request->teamOwned||request->revision)&&request->tool=="__ark_bom_completion"){try{request->complete(g_session.bomCompletionCheck((bool)request->revision));}catch(...){request->complete(cancelledTool());}continue;}
         if(request->teamOwned&&request->tool=="__ark_activity"){
             try{const auto& a=request->args;auto result=recordAgentActivity(g_doc,a.find("tool")->asStr(),*a.find("arguments"),*a.find("actor"),*a.find("result"),g_session.revision,g_session.revision,a.find("elapsed_ms")->asNum());if(g_doc.agentActivity&&!g_doc.agentActivity->entries.empty())g_doc.agentActivity->entries.back().set("timing_scope",arkjson::Value::makeStr("team coordination wall time; revision sampled after action"));request->complete(result);}catch(...){request->complete(cancelledTool());}continue;
         }
@@ -2814,6 +2817,7 @@ static void sendTeam(const std::string& explicitPrompt={},const std::array<Assis
             auto promise=std::make_shared<std::promise<arkjson::Value>>();auto future=promise->get_future();auto request=std::make_unique<UiToolRequest>();request->tool=name;request->roleId=AgentTeam::currentRoleId();request->args=args;request->cancel=cancel;request->epoch=epoch;request->teamOwned=true;request->complete=[promise](arkjson::Value result){promise->set_value(std::move(result));};postTool(std::move(request));
             while(future.wait_for(std::chrono::milliseconds(20))!=std::future_status::ready)if(*cancel||g_closing)throw std::runtime_error("Team cancelled");return future.get();
         };
+        if(std::none_of(transports.begin(),transports.end(),[](const auto& t){return (bool)t;}))team.completionCheck=[teamExecutor]{return teamExecutor("__ark_bom_completion",arkjson::Value::makeObj());};
         team.recordAction=[teamExecutor](const std::string&,const std::string& name,const arkjson::Value& args,const arkjson::Value& result,double elapsed){using V=arkjson::Value;V record=V::makeObj(),summary=V::makeObj(),answer=V::makeObj();record.set("tool",V::makeStr(name));record.set("elapsed_ms",V::makeNum(elapsed));if(const auto* commands=args.find("commands")){V rows=V::makeArr();for(const auto& command:commands->arr){V row=V::makeObj();if(const auto* op=command.find("op"))row.set("op",*op);rows.arr.push_back(row);}summary.set("commands",rows);}record.set("arguments",summary);if(const auto* error=result.find("isError"))answer.set("isError",*error);const auto* payload=result.find("structuredContent");if(!payload)payload=&result;for(const auto* key:{"isError","error","error_code"})if(const auto* value=payload->find(key))answer.set(key,*value);record.set("result",answer);auto receipt=teamExecutor("__ark_activity",record);V returned=result;const auto* data=receipt.find("structuredContent");if(!data)data=&receipt;for(const auto* key:{"activity_id","activity_project_id","activity_boundary","pending_feedback_ids","feedback_required","activity_capture_error"})if(const auto* value=data->find(key))returned.set(key,*value);return returned;};
         g_agentTeam.start(team,prompt,AgentSession::tools(),teamExecutor,[epoch,runSerial](const AgentTeamEvent& event){auto* value=new UiTeamEvent{event,epoch,runSerial};if(g_closing||!PostMessage(g_window,WM_ARK_TEAM,0,(LPARAM)value))delete value;});g_teamStarted=true;g_chatLog.push_back({"You -> team",visiblePrompt});g_status="Team started; "+std::to_string(g_teamRoleCount)+" agents, assigned parts and coordinated assembly.";
     }
@@ -2830,13 +2834,14 @@ static void sendAssistant(const std::string& explicitPrompt="",const AssistantTr
     g_pendingObjectTarget.reset();g_chatLog.push_back({"You",visiblePrompt});g_chatScroll=0;g_chatBusy=true;g_assistantResponseFinished=g_assistantResponseError=false;g_assistantStatus="Working...";g_assistantUsageRun={};g_assistantPerformanceRun={};g_assistantUsageRunCounted=false;g_assistantReceiptId=newUsageReceiptId();g_assistantReceiptModel=g_assistantConfig.model;g_currentUsageReceipt.reset();g_pendingUsageReceipt.reset();g_assistantCancel=std::make_shared<std::atomic_bool>(false);auto cancel=g_assistantCancel;auto config=g_assistantConfig;if(!transport)config.onboardingPack=agentOnboardingPack({"overview"});auto schema=AgentSession::tools();if(g_chatInput)SetWindowTextW(g_chatInput,L"");
     auto epoch=g_documentEpoch;auto revision=std::make_shared<std::atomic<u64>>(g_session.revision);
     g_assistantWorker=std::thread([config,input,schema,cancel,transport,epoch,revision]{
-        try{auto result=runAssistant(config,input,schema,[cancel,epoch,revision](const std::string& name,const V& args){
+        V retainedHistory=input;auto executor=[cancel,epoch,revision](const std::string& name,const V& args){
             auto promise=std::make_shared<std::promise<V>>();auto future=promise->get_future();auto request=std::make_unique<UiToolRequest>();request->tool=name;request->args=args;request->cancel=cancel;request->epoch=epoch;request->revision=revision;request->complete=[promise](V result){promise->set_value(std::move(result));};postTool(std::move(request));
             while(future.wait_for(std::chrono::milliseconds(20))!=std::future_status::ready)if(*cancel||g_closing)throw std::runtime_error("Assistant cancelled");
             return future.get();
-        },[epoch](const AssistantEvent& event){if(event.kind==AssistantEvent::Status){UiChatEvent progress;progress.text=event.text;progress.epoch=epoch;progress.status=true;progress.retry=event.providerRetry;postChat(std::move(progress));}else if(event.kind==AssistantEvent::ToolStart)postChat({"Tool: "+event.text,false,false,{},epoch});else if(event.kind==AssistantEvent::Usage)postChat({"",false,false,{},epoch,event.usage,true,event.performance,true});else if(event.kind==AssistantEvent::ToolEnd)postChat({"",false,false,{},epoch,{},false,event.performance,true});},cancel.get(),feedbackFixtureTransport(transport));
+        };AssistantRetryHooks hooks;if(!transport)hooks.completionCheck=[executor]{return executor("__ark_bom_completion",V::makeObj());};
+        try{auto result=runAssistant(config,input,schema,executor,[epoch](const AssistantEvent& event){if(event.kind==AssistantEvent::Status){UiChatEvent progress;progress.text=event.text;progress.epoch=epoch;progress.status=true;progress.retry=event.providerRetry;postChat(std::move(progress));}else if(event.kind==AssistantEvent::ToolStart)postChat({"Tool: "+event.text,false,false,{},epoch});else if(event.kind==AssistantEvent::Usage)postChat({"",false,false,{},epoch,event.usage,true,event.performance,true});else if(event.kind==AssistantEvent::ToolEnd)postChat({"",false,false,{},epoch,{},false,event.performance,true});},cancel.get(),feedbackFixtureTransport(transport),{},[&](const V& history){retainedHistory=history;},hooks);
             if(*cancel)throw std::runtime_error("Assistant cancelled");postChat({result.text,true,false,result.conversation,epoch,result.usage,true,result.performance,true});
-        }catch(const std::exception& e){postChat({e.what(),true,true,{},epoch});}
+        }catch(const std::exception& e){std::set<std::string> answered;for(const auto& row:retainedHistory.arr)if(row.find("type")&&row.find("type")->asStr()=="function_call_output"&&row.find("call_id"))answered.insert(row.find("call_id")->asStr());std::vector<std::string> missing;for(const auto& row:retainedHistory.arr)if(row.find("type")&&row.find("type")->asStr()=="function_call"&&row.find("call_id")&&!answered.count(row.find("call_id")->asStr()))missing.push_back(row.find("call_id")->asStr());for(const auto& id:missing){V reply=V::makeObj(),error=V::makeObj();error.set("isError",V::makeBool(true));error.set("error",V::makeStr("Interrupted before receipt retention; execution may have completed. Inspect current doc_info and revision before further writes; do not replay prior calls."));reply.set("type",V::makeStr("function_call_output"));reply.set("call_id",V::makeStr(id));reply.set("output",V::makeStr(error.dump()));retainedHistory.arr.push_back(reply);}postChat({e.what(),true,true,retainedHistory,epoch});}
     });
 }
 static void startLiveBridge(){
@@ -3039,6 +3044,7 @@ static HBITMAP candidateReviewBitmap(const std::string& path);
 static bool g_tubeFitReviewCancelTest=false;
 static std::string g_failureExportOverride;
 static std::string readableJson(const arkjson::Value& value){std::string source=value.dump(),result;bool quoted=false,escaped=false;int depth=0;auto newline=[&]{result+='\n';result.append((size_t)std::max(depth,0)*2,' ');};for(char c:source){if(quoted){result+=c;if(escaped)escaped=false;else if(c=='\\')escaped=true;else if(c=='"')quoted=false;}else if(c=='"'){quoted=true;result+=c;}else if(c=='{'||c=='['){result+=c;++depth;newline();}else if(c=='}'||c==']'){--depth;newline();result+=c;}else if(c==','){result+=c;newline();}else if(c==':'){result+=": ";}else result+=c;}return result;}
+#include "bom_panel.inl"
 static void failureOperationDialog(int mode=0){
     using V=arkjson::Value;V arguments=V::makeObj();if(g_lastFailureId.empty()){arguments.set("limit",V::makeNum(1));auto latest=runTool("failure_info",arguments);if(g_error)return;auto* rows=latest.find("structuredContent")->find("records");if(!rows||rows->arr.empty())throw std::runtime_error("No failed operation was retained in this local session");g_lastFailureId=rows->arr.front().find("id")->asStr();}
     arguments=V::makeObj();arguments.set("id",V::makeStr(g_lastFailureId));auto info=runTool("failure_info",arguments);if(g_error)return;auto record=*info.find("structuredContent")->find("record");
@@ -3308,7 +3314,7 @@ static const std::vector<StudioCommandGroup>& studioCommandGroups(){
     group("Native surfaces",{{161,"Edit selected feature"},{162,"Edit driving sketch"},{76,"Loft sketches"},{77,"Fill closed sketch"},{78,"NURBS surface"},{150,"Sweep sketches"},{151,"Extrude sketch surface"},{152,"Revolve sketch surface"},{153,"Offset selected surface"},{154,"Sew surfaces"},{79,"Thicken selected surface"},{491,"Extract exact semantic face"},{492,"Trim exact surface by datum plane"}});
     group("Mesh",{{155,"Weld mesh"},{156,"Smooth mesh"},{157,"Decimate mesh"},{158,"Offset mesh"},{159,"Fill planar holes"},{160,"Import STL/OBJ"}});
     group("Sheet metal",{{120,"Create sheet base"},{127,"Edit sheet base"},{494,"Original-blank jog add/edit/remove"},{495,"Linked sketch bend add/edit/remove"},{121,"Add flange"},{122,"Edit flange"},{123,"Remove flange"},{394,"Add return hem"},{395,"Edit return hem"},{396,"Remove return hem"},{397,"Add circular emboss"},{398,"Edit circular emboss"},{399,"Remove circular emboss"},{124,"Add opening or pattern"},{125,"Edit opening"},{126,"Remove opening"},{327,"Export analytic flat DXF"},{128,"Play / pause bend preview"},{80,"Create L bend"},{81,"Import sheet STEP"},{83,"Show formed"},{84,"Show flat"}});
-    group("View & agents",{{585,"Measure 2D / X and Y"},{586,"Measure 3D / distance and XYZ"},{587,"Units / length, mass and volume"},{20,"Fit document"},{71,"Normal to sketch plane"},{180,"Front"},{181,"Back"},{23,"Top"},{184,"Bottom"},{182,"Right"},{183,"Left"},{24,"Isometric"},{175,"Orthographic"},{174,"Visible edges"},{186,"Cycle ambient occlusion"},{187,"Edit selected body material"},{188,"Inspect mass and center of mass"},{176,"Orbit"},{177,"Pan"},{178,"Zoom"},{14,"Wireframe"},{22,"Grid"},{56,"Graphics settings"},{567,"Project tool activity"},{57,"ChatGPT account"},{357,"Connectors / OpenAI, Claude, Grok..."},{58,"Codex / live MCP"},{21,"Raw agent command"},{31,"Help"},{44015,"ARK updates"}});
+    group("View & agents",{{590,"BOM / bill of materials"},{585,"Measure 2D / X and Y"},{586,"Measure 3D / distance and XYZ"},{587,"Units / length, mass and volume"},{20,"Fit document"},{71,"Normal to sketch plane"},{180,"Front"},{181,"Back"},{23,"Top"},{184,"Bottom"},{182,"Right"},{183,"Left"},{24,"Isometric"},{175,"Orthographic"},{174,"Visible edges"},{186,"Cycle ambient occlusion"},{187,"Edit selected body material"},{188,"Inspect mass and center of mass"},{176,"Orbit"},{177,"Pan"},{178,"Zoom"},{14,"Wireframe"},{22,"Grid"},{56,"Graphics settings"},{567,"Project tool activity"},{57,"ChatGPT account"},{357,"Connectors / OpenAI, Claude, Grok..."},{58,"Codex / live MCP"},{21,"Raw agent command"},{31,"Help"},{44015,"ARK updates"}});
     group("Frames, electronics & routing",{{210,"Construction frame"},{549,"Exact tube end fit"},{496,"Frame endpoint trim/extend"},{497,"Frame crossing-plane trim"},{498,"Frame weld add/edit/remove"},{211,"PCB and mounting"},{212,"Cable route"}});
     group("Physics & loads",{{190,"Assembly mass"},{216,"Loads and physical assumptions"},{189,"Close mass inspector"}});
     group("Motion",{{451,"Mechanical relation"},{452,"Motion driver"},{453,"Play / pause motion"},{454,"Reset motion"},{469,"Transmission teeth and cadence"}});
@@ -3485,7 +3491,7 @@ static void uiAction(int id){
         case 49:g_foldPlaying=false;g_foldProgress=std::min(1.,g_foldProgress+.1);break;
         case 51:exportStraightStep();break;
         case 52:importSourceStep();break;
-        case 585:beginMeasurement(2);break;case 586:beginMeasurement(3);break;case 587:unitsDialog();break;case 588:measurementCoordinates();break;case 589:endMeasurement();break;
+        case 590:showBomPanel();break;case 585:beginMeasurement(2);break;case 586:beginMeasurement(3);break;case 587:unitsDialog();break;case 588:measurementCoordinates();break;case 589:endMeasurement();break;
         case 55:newDocument();break;case 56:graphicsDialog();break;case 57:showAssistantAccountMenu();break;case 58:liveConnectionDialog();break;case 59:commandPalette();break;case 187:materialDialog();break;case 188:physicalProperties();break;case 189:g_physicalVisible=false;break;case 190:physicalProperties(!g_physicalAssembly);break;case 216:physicsSettingsDialog();break;
         case 560:{if(selBody<0||(size_t)selBody>=g_bodyIds.size())throw std::runtime_error("Select a part for transparency");auto* feature=g_doc.find(g_bodyIds[(size_t)selBody]);setSelectedOpacity(feature&&resolvedAppearance(g_doc,*feature).opacity<.999?1.:.35);break;}
         case 561:selectedOpacityDialog();break;
@@ -4516,10 +4522,10 @@ static void drawFrame(HDC hdc){
     else if(g_toolModule==1)groups={{"Create",{{"Primitive",100},{"Extrude",101},{"Loft",76},{"3D curve",538},{"Frame",210},{"Tube",26}}},{"Assembly",{{"Assembly",27},{"Mate",94},{"Relation",451},{"Motion",452},{"Library",484}}},{"Frame edits",{{"Trim / extend",496},{"Trim plane",497},{"Weld",498},{"Tube end fit",549}}},{"More",{{"Model tools",456}}}};
     else if(g_toolModule==2&&g_sketchDrawing.active)groups={{"Draw in view",{{"Line",571},{"Polyline",572},{"Rectangle",573},{"Circle",574},{"Arc 3 pt",575},{"Dimensions",576},{"Grid",579},{"Exit sketch",578}}},{"Coordinate forms",{{"Line form",543},{"Arc form",544},{"Tangent arc",545},{"Rectangle",61},{"Circle",62},{"Spline",63}}},{"Modify",{{"Project 2D",536},{"Include 3D",537},{"Edit curve",70},{"Constraint",73},{"Plane",60},{"Source params",577}}},{"Build",{{"Extrude",65},{"Cut",66}}}};
     else if(g_toolModule==2)groups={{"Interactive",{{"Draw sketch",570}}},{"Draw 2D",{{"Line",543},{"Arc 3 pt",544},{"Tangent arc",545},{"Rectangle",61},{"Circle",62},{"Spline",63}}},{"Draw 3D",{{"Arc 3D",547},{"Tangent 3D",548},{"3D curve",538}}},{"Modify",{{"Project 2D",536},{"Include 3D",537},{"Edit curve",70},{"Constraint",73},{"Plane",60}}},{"Build",{{"Extrude",65},{"Cut",66}}}};
-    else if(g_toolModule==3)groups={{"Measure",{{"Measure 2D",585},{"Measure 3D",586},{"Units",587}}},{"Selection",{{"Body",170},{"Face",171},{"Edge",172},{"Curve",173}}},{"Inspect",{{"Properties",401},{"Mass / CG",188},{"Material",187}}},{"Display",{{"Graphics",56},{"Fit",20}}}};
+    else if(g_toolModule==3)groups={{"Measure",{{"Measure 2D",585},{"Measure 3D",586},{"Units",587}}},{"Selection",{{"Body",170},{"Face",171},{"Edge",172},{"Curve",173}}},{"Inspect",{{"BOM",590},{"Properties",401},{"Mass / CG",188},{"Material",187}}},{"Display",{{"Graphics",56},{"Fit",20}}}};
     else if(g_toolModule==4)groups={{"Engineering",{{"Model tools",456},{"Physics",188},{"Loads",216},{"Electronics",211},{"Routing",212},{"Library",484}}},{"Agents",{{"Assistant",400},{"Live MCP",58},{"Tools",457}}}};
     else if(g_toolModule==6)groups={{"Create",{{"Extrude",151},{"Revolve",152},{"Sweep",150},{"Loft",76},{"Fill",77},{"NURBS",78}}},{"Modify",{{"Extract face",491},{"Trim plane",492},{"Offset",153},{"Sew",154},{"Thicken",79}}}};
-    else groups={{"Document",{{"New",55},{"Open",17},{"Save",16},{"Export",213}}},{"History",{{"Undo",18},{"Redo",19},{"Iterations",493},{"Last failure",580}}},{"Manage",{{"Parameters",67},{"Import",81},{"Account",57},{"More",459}}}};
+    else groups={{"Document",{{"New",55},{"Open",17},{"Save",16},{"Export",213}}},{"History",{{"Undo",18},{"Redo",19},{"Iterations",493},{"Last failure",580}}},{"Manage",{{"BOM",590},{"Parameters",67},{"Import",81},{"Account",57},{"More",459}}}};
     groups.push_back({"Discover",{{"All tools",480}}});
     int count=0;for(const auto& group:groups)count+=(int)group.actions.size();float cardW=std::min(105.f,(W-32-(groups.size()-1)*27)/std::max(count,1));float cursor=18;
     for(size_t groupIndex=0;groupIndex<groups.size();++groupIndex){auto& group=groups[groupIndex];float start=cursor;
@@ -5398,7 +5404,7 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
         case WM_DRAWITEM:{auto* item=(DRAWITEMSTRUCT*)lp;if(item->CtlType==ODT_MENU&&item->itemData){drawContextEntry(item->hDC,item->rcItem,*(ContextEntry*)item->itemData,(item->itemState&ODS_SELECTED)!=0);return TRUE;}break;}
         case WM_ARK_TOOL:g_toolQueue.emplace_back((UiToolRequest*)lp);return 0;
         case WM_ARK_CHAT:{std::unique_ptr<UiChatEvent> event((UiChatEvent*)lp);
-            if(event->final){g_chatBusy=false;if(event->epoch==g_documentEpoch){g_assistantResponseFinished=true;g_assistantResponseError=event->error||*g_assistantCancel;}if(event->epoch==g_documentEpoch&&!event->error&&!*g_assistantCancel)g_conversation=event->history;else g_conversation=arkjson::Value::makeArr();}
+            if(event->final){g_chatBusy=false;if(event->epoch==g_documentEpoch){g_assistantResponseFinished=true;g_assistantResponseError=event->error||*g_assistantCancel;}if(event->epoch==g_documentEpoch&&event->history.t==arkjson::Value::Arr)g_conversation=event->history;else if(event->epoch!=g_documentEpoch)g_conversation=arkjson::Value::makeArr();}
             if(event->epoch==g_documentEpoch){
                 if(event->status||(!event->final&&!event->text.empty()))g_assistantStatus=event->text;
                 else if(event->final)g_assistantStatus.clear();
@@ -5563,7 +5569,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
 
     SetProcessDPIAware();
     bool startupUiTest=false;
-    bool measurementUiTest=false;
+    bool bomUiTest=false;bool measurementUiTest=false;
     bool interactionUiTest=false,connectorsUiTest=false,treeUiTest=false,arcUiTest=false,completionUiTest=false,sketchDrawingUiTest=false;
     bool selfTest=false,assemblyTest=false,dialogTest=false,bendTest=false,bendExportTest=false,sourceTest=false,sketchTest=false,assistantTest=false,nativeUiTest=false,renderUiTest=false,engineeringUiTest=false,sheetShowcaseTest=false,contextUiTest=false,suspensionUiTest=false,connectChatGpt=false,motionUiTest=false,motionPlay=false,navigationUiTest=false,projectionUiTest=false,frameToolsUiTest=false;unsigned exitAfterMs=0;std::string endpointFile,requestedSketch;int requestedOpening=-1;double requestedFold=-1,showcaseProgress=-1;std::string shotPath="ark_studio.png",loadPath,scriptPath,importPath,showcaseView,spotlightName,suspensionFeatureName,motionDriverName,motionSpeed;double requestedMotionTime=0;std::vector<std::string> suspensionValues;
     int requestedPathSamples=1;bool studioRenderTest=false,requestedPathTracing=false;
@@ -5583,6 +5589,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         else if(a=="--self-test-studio-render"){studioRenderTest=true;g_headless=true;}
         else if(a=="--path-trace")requestedPathTracing=true;
         else if(a=="--path-samples"&&i+1<argc)requestedPathSamples=std::clamp(_wtoi(argv[++i]),1,4096);
+        else if(a=="--self-test-bom-ui"){bomUiTest=true;g_headless=true;}
         else if(a=="--self-test-measurement-ui"){measurementUiTest=true;g_headless=true;}
         else if(a=="--self-test-interaction-ui"){interactionUiTest=true;g_headless=true;}
         else if(a=="--self-test-connectors-ui"){connectorsUiTest=true;g_headless=true;}
@@ -6016,6 +6023,9 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         auto exported=assistantExternalMcpConfig("opencode","C:/ARK/ark-mcp.exe","ark-ui-test",assistantProviderPreset("ollama"));if(exported.find("ark-mcp.exe")==std::string::npos||exported.find("--connect")==std::string::npos||exported.find("ark-ui-test")==std::string::npos)return failure(504,"External MCP profile lost executable or live document binding");
         std::ofstream(shotPath+".connectors-test.log")<<"PASS: real card Connector click, native provider/model/protocol controls, distinct Claude/Grok/Ollama routes, inherited global unchanged, serialized/restored per-role routes, reset inheritance, external MCP binding. Offline model IDs; no provider inference or account authentication performed.\n";
         g_assistantConfig=originalConfig;g_teamConnectors=originalConnectors;g_teamModels=originalModels;g_teamEfforts=originalEfforts;g_settingsOverride=originalSettings;g_teamMode=originalTeam;g_assistantDockOpen=originalDock;g_status="Connector checks passed / mixed cards / persistence / external MCP profiles";layout();
+    }
+    if(bomUiTest){
+#include "bom_panel_selftest.inl"
     }
     if(measurementUiTest){
 #include "measurement_selftest.inl"
@@ -6478,7 +6488,8 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
 
         auto gate=std::make_shared<std::atomic_bool>(false);auto staleTransport=[gate,parse](const auto&,const auto&,const auto*){while(!*gate)std::this_thread::sleep_for(std::chrono::milliseconds(1));return parse(R"({"status":"completed","output":[{"type":"function_call","call_id":"stale_ui_test","name":"doc_apply","arguments":"{\"commands\":[{\"op\":\"param.set\",\"name\":\"stale_ui_probe\",\"expr\":\"99\"}]}"}]})");};
         sendAssistant("Offline stale-write test.",staleTransport);V command=parse(R"({"op":"param.set","name":"human_ui_probe","expr":"1"})");applyCommand(command);*gate=true;
-        if(!pump()||!g_conversation.arr.empty()||std::any_of(g_doc.params.begin(),g_doc.params.end(),[](auto& p){return p.name=="stale_ui_probe";}))return assistantFailure(121);
+        if(!pump()||g_conversation.arr.empty()||std::any_of(g_doc.params.begin(),g_doc.params.end(),[](auto& p){return p.name=="stale_ui_probe";}))return assistantFailure(121);
+        try{assistantRequest(g_assistantConfig,g_conversation,AgentSession::tools());}catch(...){return assistantFailure(121);}
         auto savedAuthStatus=g_authStatus;auto savedAuthModels=g_authModels;u64 authRevision=g_session.revision,authUsageSerial=g_doc.usage.serial;
         g_authStatus.accounts.push_back({"oaiapp_offline_ui","offline-subject","offline@example.test"});
         auto finishFakeAuth=[&](AuthJob job,const char* error){auto* event=new UiAuthEvent;event->job=job;event->status=g_authStatus;event->error=error;SendMessage(g_window,WM_ARK_AUTH,0,(LPARAM)event);};

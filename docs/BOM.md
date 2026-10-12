@@ -1,5 +1,12 @@
 # Persistent part metadata and BOM — 011E
 
+In 014D, **Manage → BOM** and **Inspect → BOM** expose the table, metadata and
+sourcing editors, missing fields and local JSON export. `bom_review` adds a
+revision-bound completion check after reading all BOM item pages. Detailed
+scope rejects unresolved metadata; concept scope requires explicit pending
+notes and a fastening review. The host labels incomplete concept completion.
+See [014D](iterations/014D.md) for enforcement boundaries and evidence.
+
 The `.ark` SQLite container retains part metadata, material assignments and
 assembly occurrences. The BOM is derived from those definitions at the current
 revision, so quantities are not a second independently editable list. JSON is

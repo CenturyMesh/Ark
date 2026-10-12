@@ -1,5 +1,14 @@
 # ARK agent protocol
 
+014D adds `bom_review` (76 standalone tools). Before Studio design completion,
+inspect every `bom_inspect` item page at one current revision and submit
+`bom_review{expected_revision,scope,fastening_review,pending_notes?}`.
+Every counted physical definition needs an internal part number and description.
+Detailed scope rejects unresolved metadata. Concept scope must disclose pending
+fields and is labelled as such by the host. Do not downgrade a user-requested
+detailed deliverable or invent sourcing: report needs_input instead.
+Review becomes stale after edits. Open **Manage → BOM** for the table/editor.
+
 012D adds `activity_info` and `tool_feedback` (75 standalone tools). Agent
 actions return measured activity IDs; submit utility/difficulty self-ratings
 and action descriptions before completion, including failed attempts. Record
