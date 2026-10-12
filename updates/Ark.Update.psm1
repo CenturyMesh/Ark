@@ -58,7 +58,7 @@ function Assert-ArkNoReparsePoint([string]$Root, [string]$Path) {
 }
 
 function Read-ArkJson([string]$Path, [long]$MaxBytes = 1MB) {
-    if ((Get-Item -LiteralPath $Path).Length -gt $MaxBytes) { throw 'ARK metadata exceeds the size limit.' }
+    if ((Get-Item -LiteralPath $Path -Force).Length -gt $MaxBytes) { throw 'ARK metadata exceeds the size limit.' }
     return (Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json)
 }
 
@@ -437,3 +437,4 @@ function Undo-ArkUpdate([string]$Root) {
 }
 
 Export-ModuleMember -Function *-Ark*
+

@@ -1,24 +1,88 @@
-name: Prepare Windows release package
+name: Build Windows installer and publish download
 on:
+  push:
+    branches: [codex/windows-distribution]
+    tags: ['v*']
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish a GitHub prerelease after all tests pass
+        type: boolean
+        default: true
 permissions:
   contents: read
+concurrency:
+  group: ark-release-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   windows-package:
     runs-on: windows-2022
-    timeout-minutes: 90
+    timeout-minutes: 120
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
+      - name: Validate release identity
+        shell: pwsh
+        run: |
+          cmake -DARK_RELEASE_FILE=release.json -P cmake/ValidateRelease.cmake
+          if ($LASTEXITCODE -ne 0) { throw 'Release identity validation failed.' }
+          $release = Get-Content release.json -Raw | ConvertFrom-Json
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -cne "v$($release.version)") { throw 'Tag must match release.json runtime version.' }
+      - name: Test packaging and standalone installation with fixtures
+        shell: pwsh
+        run: ./tests/distribution_tests.ps1
       - name: Build OCCT and ARK, run tests
         shell: pwsh
         run: ./scripts/build.ps1 -Test -Jobs 2
-      - name: Prepare portable package and update manifest
+      - name: Prepare portable ZIP and executable installer
         shell: pwsh
-        run: ./scripts/package-release.ps1
+        run: |
+          ./scripts/package-release.ps1 -SkipUpdateManifest
+          $release = Get-Content release.json -Raw | ConvertFrom-Json
+          ./scripts/build-installer.ps1 -PackagePath "out/releases/ark-windows-x64-$($release.version).zip"
+      - name: Test native geometry from the package, install and uninstall
+        shell: pwsh
+        run: |
+          $release = Get-Content release.json -Raw | ConvertFrom-Json
+          ./scripts/test-distribution.ps1 -PackagePath "out/releases/ark-windows-x64-$($release.version).zip" -InstallerPath "out/releases/ARK-$($release.code)-windows-x64-setup.exe"
       - uses: actions/upload-artifact@v4
         with:
           name: ark-windows-release-assets
           path: |
+            out/releases/ARK-*-windows-x64-setup.exe
             out/releases/ark-windows-x64-*.zip
-            out/releases/ark-update.json
+            out/releases/SHA256SUMS.txt
           if-no-files-found: error
+          retention-days: 30
+      - name: Publish versioned prerelease with permanent download assets
+        if: github.event_name == 'push' || inputs.publish
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $release = Get-Content release.json -Raw | ConvertFrom-Json
+          $tag = "v$($release.version)"
+          $existing = gh release list --repo $env:GITHUB_REPOSITORY --limit 100 --json tagName | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'Could not check existing releases.' }
+          if (@($existing | Where-Object tagName -CEQ $tag).Count) { throw 'This release already exists. Advance release.json rather than replace a binary.' }
+          $notes = @"
+          Windows x64 preview of ARK $($release.code), runtime $($release.version).
+
+          Download the setup EXE to install, or extract the complete ZIP and run ARK.cmd.
+          Visual C++, OCCT runtime DLLs, assets and third-party notices are included.
+          Studio needs a graphics driver supporting OpenGL 3.3. AI setup is optional.
+
+          The release passed the native CTest suite and an isolated package test:
+          native box and STEP export, per-user installer, runtime receipts and uninstall.
+          Hosted tests do not qualify the interactive Studio UI on another PC.
+          GitHub access to this private repository is required for downloading.
+          The in-app Internet update feed remains unpublished.
+
+          Milestones: A.05 dependency notices; F.03 installation; F.05 preview distribution.
+          Commit: $env:GITHUB_SHA
+          "@
+          $notes | Set-Content -LiteralPath out/releases/release-notes.md -Encoding utf8
+          gh release create $tag "out/releases/ARK-$($release.code)-windows-x64-setup.exe" "out/releases/ark-windows-x64-$($release.version).zip" out/releases/SHA256SUMS.txt --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "ARK $($release.code) - Windows x64 preview" --notes-file out/releases/release-notes.md --prerelease
+          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed.' }
+

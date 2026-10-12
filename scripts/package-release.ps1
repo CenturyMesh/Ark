@@ -2,7 +2,8 @@ param(
     [string]$RuntimeDirectory = 'out/native-release/Release',
     [string]$OutputDirectory = 'out/releases',
     [string]$MsvcRuntimeDirectory,
-    [string]$OcctSourceDirectory = 'out/deps/occt/cache/OCCT-8_0_1'
+    [string]$OcctSourceDirectory = 'out/deps/occt/cache/OCCT-8_0_1',
+    [switch]$SkipUpdateManifest
 )
 $ErrorActionPreference = 'Stop'
 $repository = Split-Path $PSScriptRoot -Parent
@@ -52,6 +53,9 @@ try {
         Copy-Item -LiteralPath $source -Destination $staging -Recurse
     }
     Copy-Item -LiteralPath (Join-Path $repository 'updates/ARK.cmd') -Destination $staging
+    Copy-Item -LiteralPath (Join-Path $repository 'scripts/install-portable.ps1') -Destination (Join-Path $staging 'Install-ARK.ps1')
+    Copy-Item -LiteralPath (Join-Path $repository 'packaging/Install-ARK.cmd') -Destination $staging
+    Copy-Item -LiteralPath (Join-Path $repository 'packaging/GETTING_STARTED.txt') -Destination $staging
     Copy-Item -LiteralPath (Join-Path $repository 'docs/UPDATES.md') -Destination (Join-Path $staging 'UPDATES.md')
     $contracts = Join-Path $staging 'assets/contracts'
     [IO.Directory]::CreateDirectory($contracts) | Out-Null
@@ -80,8 +84,11 @@ try {
     if (Test-Path -LiteralPath $archive) { throw "Package already exists: $archive. Use a new output directory or a new version." }
     Compress-ArkPackage $staging $archive
     $info = Get-Item -LiteralPath $archive
-    $manifest = @{ schema=1; product='ARK'; version=$version; platform='windows-x64'; package=@{ name=$name; url="https://github.com/CenturyMesh/Ark-Releases/releases/download/v$version/$name"; size=$info.Length; sha256=(Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() } }
-    Assert-ArkManifest $manifest $version
-    Write-ArkAtomicJson (Join-Path $OutputDirectory 'ark-update.json') $manifest
-    Write-Output "Prepared release assets: $archive and $(Join-Path $OutputDirectory 'ark-update.json')"
+    if (-not $SkipUpdateManifest) {
+        $manifest = @{ schema=1; product='ARK'; version=$version; platform='windows-x64'; package=@{ name=$name; url="https://github.com/CenturyMesh/Ark-Releases/releases/download/v$version/$name"; size=$info.Length; sha256=(Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() } }
+        Assert-ArkManifest $manifest $version
+        Write-ArkAtomicJson (Join-Path $OutputDirectory 'ark-update.json') $manifest
+    }
+    Write-Output "Prepared portable package: $archive"
 } finally { if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath (Assert-ArkChildPath $OutputDirectory $staging) -Recurse -Force } }
+

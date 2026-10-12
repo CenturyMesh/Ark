@@ -1,12 +1,18 @@
-# ARK 011E — Agent-Ready Kernel
+# ARK 014F — Agent-Ready Kernel
 
 **Parametric CAD for people and agents.**
 
-Public iteration **011E** uses runtime **0.9.12**. The three digits are globally
+Public iteration **014F** uses runtime **0.9.15**. The three digits are globally
 sequential; A–G identifies the roadmap phase, not the month. See the mandatory
 [development rules](AGENTS.md), the [35-milestone roadmap](docs/ROADMAP.md), and
 the [open-source / €200 perpetual license analysis](docs/COMMERCIAL_STRATEGY.md).
 `release.json` is the single source of release identity.
+
+014F prepares a Windows x64 installer and a portable ZIP for download through
+[GitHub Releases](https://github.com/CenturyMesh/Ark/releases). Publication only
+happens after build, native tests and isolated package/install checks succeed.
+No compiled download is claimed before that workflow completes. Repository
+access is required while Ark is private. [Distribution instructions and limits](DISTRIBUTION.md).
 
 011E adds persistent physical-part BOM metadata, material and source references,
 occurrence quantities and versioned JSON export. Agents can inspect missing
@@ -307,3 +313,4 @@ Use **Flat / Formed / Play**, or edit its flange and opening forms. Its exact
 [formed](examples/sheet-flange-tree-formed.step) STEP files are included.
 
 ![Wider hull with the canopy hidden](docs/drone-hull-open.png)
+
