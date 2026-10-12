@@ -26,7 +26,7 @@ function New-Fixture([string]$Path, [string]$Version) {
     Write-ArkAtomicJson (Join-Path $Path 'app-version.json') @{ schema=1; product='ARK'; version=$Version; platform='windows-x64'; entrypoint='ark-studio.exe' }
 }
 function New-Manifest([string]$Archive, [string]$Version) {
-    [pscustomobject]@{ schema=1; product='ARK'; version=$Version; platform='windows-x64'; package=[pscustomobject]@{ name="ark-windows-x64-$Version.zip"; url="https://github.com/CenturyMesh/Ark-Releases/releases/download/v$Version/ark-windows-x64-$Version.zip"; size=(Get-Item -LiteralPath $Archive).Length; sha256=(Get-FileHash -LiteralPath $Archive -Algorithm SHA256).Hash.ToLowerInvariant() } }
+    [pscustomobject]@{ schema=1; product='ARK'; version=$Version; platform='windows-x64'; package=[pscustomobject]@{ name="ark-windows-x64-$Version.zip"; url="https://github.com/CenturyMesh/Ark/releases/download/v$Version/ark-windows-x64-$Version.zip"; size=(Get-Item -LiteralPath $Archive).Length; sha256=(Get-FileHash -LiteralPath $Archive -Algorithm SHA256).Hash.ToLowerInvariant() } }
 }
 function New-AdversarialZip([string]$Path, [string[]]$Names) {
     $zip = [IO.Compression.ZipFile]::Open($Path, 'Create')
@@ -42,7 +42,19 @@ try {
     foreach ($invalid in @('v1.2.3','01.2.3','1.2','1.2.3-beta','1.2.3;calc','999999999999.0.0')) { Assert-Rejected { ConvertTo-ArkVersion $invalid } "Reject version $invalid" }
     foreach ($invalid in @('../escape','/absolute','C:/absolute','foo\bar','folder/../escape','folder/file:stream','NUL.txt','folder/CON','file.','file ','folder//file')) { Assert-Rejected { Assert-ArkRelativePath $invalid } "Reject path $invalid" }
     Assert-Rejected { Assert-ArkAssetUrl 'https://github.com/Other/Ark/releases/download/v1.2.3/ark-update.json' '1.2.3' 'ark-update.json' } 'Reject other repository'
-    Assert-Rejected { Assert-ArkTransferUrl ([uri]'http://github.com/CenturyMesh/Ark-Releases/releases/download/v1.2.3/a.zip') } 'Reject HTTP'
+    Assert-ArkAssetUrl 'https://github.com/CenturyMesh/Ark/releases/download/v1.2.3/ark-update.json' '1.2.3' 'ark-update.json'
+    $script:passed++
+    Assert-ArkTransferUrl ([uri]'https://api.github.com/repos/CenturyMesh/Ark/releases/latest') $true
+    $script:passed++
+    Assert-ArkTransferUrl ([uri]'https://github.com/CenturyMesh/Ark/releases/download/v1.2.3/ark-windows-x64-1.2.3.zip')
+    $script:passed++
+    Assert-Rejected { Assert-ArkAssetUrl 'https://github.com/CenturyMesh/Ark-Releases/releases/download/v1.2.3/ark-update.json' '1.2.3' 'ark-update.json' } 'Reject retired placeholder asset channel'
+    Assert-Rejected { Assert-ArkTransferUrl ([uri]'https://api.github.com/repos/CenturyMesh/Ark-Releases/releases/latest') $true } 'Reject retired placeholder API'
+    Assert-Rejected { Assert-ArkTransferUrl ([uri]'https://github.com/CenturyMesh/Ark-Releases/releases/download/v1.2.3/a.zip') } 'Reject retired placeholder transfer channel'
+    Assert-Rejected { Assert-ArkTransferUrl ([uri]'https://github.com/CenturyMesh/Ark-Other/releases/download/v1.2.3/a.zip') } 'Reject similarly prefixed repository'
+    Assert-Rejected { Assert-ArkAssetUrl 'https://github.com/CenturyMesh/Ark/releases/download/v1.2.3/ark-update.json?source=other' '1.2.3' 'ark-update.json' } 'Reject non-exact asset URL'
+    Assert-Rejected { Assert-ArkTransferUrl ([uri]'https://api.github.com/repos/CenturyMesh/Ark/releases/latest?other=true') $true } 'Reject non-exact API URL'
+    Assert-Rejected { Assert-ArkTransferUrl ([uri]'http://github.com/CenturyMesh/Ark/releases/download/v1.2.3/a.zip') } 'Reject HTTP'
     Assert-Rejected { Assert-ArkTransferUrl ([uri]'https://evil.example/a.zip') $false $true } 'Reject external redirect'
     Assert-Rejected { Assert-ArkChildPath $temporary (Join-Path $temporary '..\outside') } 'Reject install path escape'
     $launchArguments = @('--load', 'C:\drawings\peça com espaços.ark', 'literal "quote"', 'ends\', '', '--exit-after-ms', '3000')

@@ -13,12 +13,36 @@
         "ARK_WITH_OCCT": "ON",
         "OpenCASCADE_DIR": "${sourceDir}/out/deps/occt/install-msvc/cmake"
       }
+    },
+    {
+      "name": "linux-native",
+      "displayName": "ARK Linux CLI / MCP / OCCT 8 worker",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/linux-native-release",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "ARK_WITH_OCCT": "ON",
+        "OpenCASCADE_DIR": "${sourceDir}/out/deps/occt/install-linux/lib/cmake/opencascade"
+      }
+    },
+    {
+      "name": "linux-core",
+      "displayName": "ARK Linux portable core (without native geometry)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/linux-core-release",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" },
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "ARK_WITH_OCCT": "OFF" }
     }
   ],
   "buildPresets": [
-    { "name": "native-release", "configurePreset": "native", "configuration": "Release", "jobs": 4 }
+    { "name": "native-release", "configurePreset": "native", "configuration": "Release", "jobs": 4 },
+    { "name": "linux-native-release", "configurePreset": "linux-native", "jobs": 4 },
+    { "name": "linux-core-release", "configurePreset": "linux-core", "jobs": 4 }
   ],
   "testPresets": [
-    { "name": "native-release", "configurePreset": "native", "configuration": "Release", "output": { "outputOnFailure": true } }
+    { "name": "native-release", "configurePreset": "native", "configuration": "Release", "output": { "outputOnFailure": true } },
+    { "name": "linux-native-release", "configurePreset": "linux-native", "output": { "outputOnFailure": true } },
+    { "name": "linux-core-release", "configurePreset": "linux-core", "output": { "outputOnFailure": true } }
   ]
 }

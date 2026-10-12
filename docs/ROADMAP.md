@@ -1,254 +1,178 @@
-# ARK — matriz de roadmap A–G
+# ARK roadmap A–G
 
-**Data da auditoria:** 12 de outubro de 2026. **Iteração local:** `015B` / `0.9.16`,
-com verificação local; baseline `014D` / `ebda7ab` (`0.9.15`).
-O baseline histórico `0.9.1`, commit `5e7153f`, não foi rebatizado retroativamente.
-`001A` inicia a convenção pública, com versão técnica `0.9.2` para distribuição.
-`002B` acrescenta recuperação do runtime, projeção exata e ferramentas de frame;
-ver [escopo e evidência](iterations/002B.md). Os milestones abaixo mantêm os seus
-gates completos mesmo quando uma parte já foi verificada.
-`003D` aborda recuperação de falhas HTTP transitórias em D.02/D.04;
-ver [escopo e evidência](iterations/003D.md).
-`004B` acrescenta inspeção transparente, grelha adaptativa, manipulação de juntas
-e conectores de agentes; ver [escopo e evidência](iterations/004B.md).
-`005B` acrescenta receitas de arcos, scrollbar, ajustes tubulares, consultas
-seletivas e conclusão explícita; ver [auditoria](COMPLEX_MODELING_AUDIT_005B.md).
-`006B` acrescenta juntas e limites, contexto por objeto e seleção contextual;
-`007B` acrescenta arrasto direto; ver [006B](iterations/006B.md) e
-[007B](iterations/007B.md). `008D` implementa construção visual/edição de
-sketches, pixels reais para agentes, candidatos/replay de rejeições, mecanismos
-fechados e o harness comparativo; ver [escopo e evidência](iterations/008D.md).
-O primeiro piloto real aceitou 0/9 tentativas; após a correção de schema, o
-piloto equivalente terminou com 4/9. Ambos conservam todas as falhas; uma
-repetição de três briefs não prova redução de custo ou melhoria de design.
-`009B` verifica localmente iluminação/materiais, arestas, path tracing opcional,
-splash, About e contratos dos agentes. O piloto foi encerrado em 1/9 aceite,
-com todas as oito falhas preservadas e sem repetição; D.01 permanece Parcial.
-Ver [escopo e evidência](iterations/009B.md).
-`010D` corrige o contrato de leitura filtrada e a recuperação de pedidos grandes
-em D.02/D.04, preservando revisões, histórico e recibos; ver [verificação](iterations/010D.md).
-`011E` acrescenta a BOM persistente, inspeção paginada, exportação JSON e
-receitas editáveis de fixações; ver [escopo e evidência](iterations/011E.md).
-`012D` acrescenta registos de ações e avaliações obrigatórias, previews de sketches
-em novos planos, contexto multimodal limitado ao transporte e caches de geometria.
-Ver [escopo e evidência](iterations/012D.md). A.04/B.01/D.02/D.04 permanecem Parcial.
-`013B` acrescenta medição 2D/3D e unidades de apresentação configuráveis;
-ver [escopo e evidência](iterations/013B.md). B.01 permanece Parcial.
-`014D` acrescenta o painel BOM e revisão obrigatória antes do fecho em Studio;
-conceitos incompletos ficam identificados. Ver [evidência](iterations/014D.md).
-`015B` redesenha a BOM com pesquisa, filtros, estados e detalhe da peça;
-ver [evidência e prioridades de feedback](iterations/015B.md).
-O adapter MeshWorks e a aquisição de catálogos mecânicos continuam pendentes.
+ARK aims to make an intention into an editable, inspectable design through a
+workspace shared by people and agents. The next features must improve dependable
+CAD authoring before claims of general industrial qualification.
 
-**Visão:** um ambiente CAD onde uma pessoa ou uma equipa de agentes consegue
-transformar uma intenção num produto editável, verificável e preparado para
-industrialização, conservando a ligação entre design, geometria, fabrico e custo.
+The public iteration and numeric runtime are defined in
+[release.json](../release.json). An iteration such as `016F` identifies the globally
+increasing sequence and its principal phase. The letter is a roadmap phase, not a
+month; it does not declare the phase complete. The `.ark` format evolves separately.
 
-O objetivo não é anunciar paridade imediata com SolidWorks, CATIA ou Fusion.
-É construir uma alternativa credível para peças, assemblies e produtos
-fabricáveis, diferenciada pela continuidade ARK → STAGE → Trace → MeshWorks.
+This matrix keeps the 35 stable milestone IDs from the
+[12 October 2026 audit](history/ROADMAP-2026-10-12.md). That archive retains its exact
+historical evidence, failed benchmark attempts, planning horizons and cross-product
+snapshots. The English matrix summarizes the same acceptance boundaries with the
+current source-publication preparation reflected in A.05/F.03/F.05.
 
-## Como ler a matriz
+## Read status and evidence correctly
 
-- A–G são conjuntos estáveis de milestones. Podem avançar em paralelo quando
-  as dependências o permitirem; a letra de uma versão identifica o seu foco principal.
-- IDs como `C.03` identificam trabalho; códigos como `012C` identificam uma iteração.
-  Os três dígitos são globais e sequenciais. O mês não participa no código.
-- **Verificado no escopo** significa que existe evidência para um domínio concreto.
-  **Parcial** significa que existe implementação útil, com critérios ainda em falta.
-  **Planeado** não é uma promessa de funcionalidade entregue.
-- Datas abaixo são horizontes de planeamento a partir da decisão de execução,
-  não prazos contratados. Cada ciclo deve acabar num incremento utilizável e medido.
+The mandatory status vocabulary remains consistent with [AGENTS.md](../AGENTS.md):
 
-## O que o ARK já tem
+| Status | Meaning |
+|---|---|
+| **Planeado** | Planned; acceptance has not been demonstrated |
+| **Em curso** | In progress; implementation or qualification is underway |
+| **Parcial** | Partial; useful implementation exists, with acceptance gates still open |
+| **Verificado no escopo** | Verified for a stated domain, configuration and evidence |
+| **Bloqueado** | Blocked by a named dependency or unresolved condition |
 
-Inventário baseado em código, contratos e recibos locais. Os 52 CTests e 12 testes
-de interface do baseline não certificam todos os modelos nem todo o fabrico.
-Ver [evidência 0.9.1](verification-ark-0.9.1.json).
+A local test, a mock provider, an API call, a deployment and a physically measured
+manufacturing pilot establish different things. Every completion claim needs its
+scope, inputs, commands, result and limitations. A screenshot or an idle agent is
+not a delivery gate. No date or feature below is a contractual delivery promise.
 
-| Área | Já implementado | Limite que permanece |
-|---|---|---|
-| Kernel nativo | C++ e worker OCCT 8; B-reps, operações sólidas, referências semânticas e exportação STEP | Domínios suportados e referências ambíguas podem rejeitar; não é paridade completa com um CAD industrial |
-| Sketch paramétrico | Entidades nomeadas, dimensões/expressões, constraints, diagnóstico de resíduos e DOFs | Robustez e experiência de edição ainda precisam de corpus de utilização real |
-| Sólidos e superfícies | Primitivas, extrude, loft/sweep, booleanos, acabamento e operações de superfícies/NURBS | Não há qualificação de superfícies Class A nem conversão genérica mesh→B-rep garantida |
-| Assembly | Definições/instâncias, grupos, placements, mates, referências, BOM e diagnóstico | Grandes assemblies, referências externas e alterações coordenadas precisam de evolução |
-| Movimento | Cadeia/engrenagens/eixos/rack/cam e suspensão em previews cinemáticos | Não equivale a dinâmica multicorpo validada, contacto real ou FEA |
-| Chapa | Programa de painéis/flanges/aberturas, formado/plano, jog/sketch bend dentro do domínio documentado | Importação e formas complexas continuam limitadas; sem springback/tool-access geral |
-| Estruturas soldadas | Tubos, stock/cutlists, cope, trim/extend e cordões exatos em casos suportados | Não há garantia geral de juntas arbitrárias ou qualificação de soldadura |
-| Engenharia física | Materiais, massa/CG/inércia e cálculos analíticos com hipóteses explícitas | Não existe solver FEA geral ou certificação mecânica do produto |
-| Eletrónica mecânica | Layout PCB, cabos e verificações geométricas de obstáculos | Não substitui ECAD, validação elétrica, EMC ou preparação industrial de PCB |
-| Documento | `.ark` binário, histórico persistente, undo/redo, branches de restauração e revisões | Recuperação operacional, colaboração remota e migrações de longo prazo têm trabalho por fazer |
-| Biblioteca | Catálogo local SQLite/FTS5, aquisição/validação de STEP e proveniência | Catálogos de fornecedores, licenças de conteúdos e gestão de versões ainda são incompletos |
-| Agentes | Focused com engenheiro/designer/reviewer; Parallel até oito; contexto reutilizável e erros estruturados | Não há benchmark que demonstre melhor design ou menor custo em tarefas equivalentes |
-| Acesso aos modelos | Conta ChatGPT elegível e API key; consumo reportado e catálogo de preços | Créditos dependem das permissões da conta; valores ausentes não são custo zero |
-| Automação | MCP local, bridge para documento aberto, inspeção e escrita com revisão observada | Permissões remotas, SDK de extensões e automação industrial ainda não estão completos |
-| Interface | Ribbon, ferramentas pesquisáveis, Spotlight, materiais/rendering, cubo, orbit e cards | Acessibilidade, desenho 2D, grandes projetos e consistência de interação precisam de evolução |
-| Distribuição | Pacote Windows, integridade, staging, próximo arranque e rollback de self-update | Canal online do futuro site ainda não está ligado; publicação e assinatura comercial estão pendentes |
+## Available foundation
 
-Contratos de referência: [CAD nativo](ROADMAP_09.md), [superfícies](SURFACING.md),
-[chapa e frames](FRAME_SHEET_OPERATIONS.md), [engenharia](ENGINEERING_AGENT_V2.md),
-[documento](DOCUMENT_CONTAINER.md), [histórico](ITERATION_HISTORY.md),
-[agentes](AGENT_TEAM_ARCHITECTURE.md) e [updates](UPDATES.md).
-O documento ROADMAP_09 é um registo histórico; esta matriz passa a orientar o futuro.
+ARK currently provides a C++/OCCT exact-geometry path, parametric sketches and
+features, semantic references, assembly instances and mates, supported motion,
+authored sheet/frame domains, materials and analytical physics, persistent document
+history, a local component library, BOM metadata/JSON export, Windows Studio and
+local agent tools. [The handbook](HANDBOOK.md) and [contracts index](README.md)
+explain how to use them.
 
-## Matriz principal
+Useful functionality does not imply complete parity with established CAD systems.
+General FEA, arbitrary multi-bend imported-sheet unfolding, supplier catalog
+coverage, associative technical drawings, remote collaboration and the industrial
+adapters remain unfinished. Windows is the native desktop product. Linux CLI,
+MCP and native OCCT worker are locally verified in 016F; Linux desktop support
+remains unimplemented. Portable-core checks are a separate scope.
 
-| Fase | Resultado pretendido | Ponto de partida | Gate para declarar a fase verificada |
+## A — Trust and foundation
+
+Goal: work for days without lost work, ambiguous identity or unverifiable regressions.
+
+| ID | Milestone | Status | Acceptance still governing the work |
 |---|---|---|---|
-| **A — Confiança e fundação** | Trabalhar durante dias sem perder trabalho ou confundir versões | Persistência, transações, testes e rollback locais | Recuperação testada, identidade inequívoca, regressões reproduzíveis e baseline de desempenho |
-| **B — Autoria CAD competitiva** | Criar e alterar um produto completo com fluidez | Sketches, sólidos, superfícies, assemblies e viewport úteis | Corpus de edição paramétrica, grandes assemblies e documentação técnica utilizável |
-| **C — Engenharia e fabrico** | Ligar decisões de design a geometria e processo verificáveis | Chapa/frames e cálculos dentro de domínios limitados | Peças físicas representativas com contrato, medições, rastreabilidade e limites declarados |
-| **D — Agentes de design eficazes** | Chegar a um bom design com custo e tempo explicáveis | Equipa real, Focused/Parallel e feedback de ferramentas | Comparação reproduzível com resultados válidos, qualidade avaliada e custo por design aceite |
-| **E — Ecossistema industrial** | Um fluxo rastreável entre ARK, STAGE, Trace e MeshWorks | Produtos separados; contratos de integração parcialmente disponíveis | E2E com identidade/revisão/digest preservados, incluindo rejeição, retries e rollback |
-| **F — Produto e negócio** | Vender, instalar, atualizar e suportar ARK de forma sustentável | Aplicação local e self-update preparado | Piloto pago, termos claros, pacote auditado e canal de updates comprovado |
-| **G — Plataforma avançada** | Explorar alternativas e colaborar à escala de um produto complexo | Histórico, automação e superfícies servem de base | Casos avançados medidos, extensões estáveis e colaboração sem perda de autoridade geométrica |
+| A.01 | Iteration identity and release records | Verificado no escopo | Validate `release.json`; expose one consistent identity in application, MCP, onboarding and packages. Preserve global sequence and runtime/document separation. [001A evidence](iterations/001A.md) |
+| A.02 | Recovery and work protection | Parcial | Crash during save/modeling/update, disk-full and truncation tests preserve the last intact revision; recoverable autosave cannot replace the original silently. |
+| A.03 | Regression corpus and release chain | Parcial | Authorized reproducible positives/negatives with seeds/hashes; native, UI, persistence and OTA suites; receipts for distributed artifacts; actual hosted CI execution. |
+| A.04 | Observable performance | Parcial | Measure cold/warm open, incremental save, p95 interaction and recompute at three project sizes against the same machine/baseline. [012D scope](iterations/012D.md) |
+| A.05 | Security, licensing and dependencies | Parcial | Apache-2.0 source license and dependency notices are adopted; source/publication inventory, software SBOM, binary provenance, signing and vulnerability handling need evidence. Never package credentials or user designs. |
 
-## Milestones e critérios de aceitação
+## B — Competitive CAD authoring
 
-### A — Confiança e fundação
+Goal: create and revise a complete product with clear, reliable interactions.
 
-| ID | Milestone | Estado inicial | Aceitação e dependências |
+| ID | Milestone | Status | Acceptance still governing the work |
 |---|---|---|---|
-| A.01 | Identidade `NNNF`, registo de iteração e regras obrigatórias | Verificado no escopo `001A` | `release.json` validado; código consistente na app, MCP, onboarding e pacote; 26 casos de identidade e testes de exposição; ver [registo](iterations/001A.md) |
-| A.02 | Recuperação e proteção de trabalho | Parcial | Crash durante save/modelação/update, disco cheio e ficheiro truncado preservam a última revisão íntegra; autosave recuperável sem substituir o original |
-| A.03 | Corpus de regressão e cadeia de release | Parcial | Casos positivos/negativos públicos ou autorizados, seeds e hashes; suites nativa/UI/persistência/OTA; recibo por artefacto; CI demonstrada |
-| A.04 | Desempenho observável | Parcial; regressões locais de cache/metadados na `012D` | Medir cold/warm open, save incremental, p95 de interação e recompute em três tamanhos de projeto; comparar à mesma baseline e equipamento |
-| A.05 | Segurança e dependências | Parcial; avisos de dependências/About e empacotamento obrigatório dos textos OCCT em `009B`; licença própria pendente | SBOM de software, avisos de terceiros, origem dos binários, assinatura e política de vulnerabilidades; sem incluir credenciais/desenhos nos pacotes |
+| B.01 | Readable navigation and editing | Parcial | Stable cube/axes, free orbit, selection/Spotlight, shortcuts and DPI; no clipped controls at supported resolutions. Measurement and display units have [013B evidence](iterations/013B.md); BOM layout has [015B evidence](iterations/015B.md). |
+| B.02 | Everyday sketches and feature history | Parcial | Actionable constraint diagnostics, valid reorder, suppress/rollback and visible dependencies; rejection leaves the document intact. Arcs/snaps/expressions have scoped 005B/008D evidence. |
+| B.03 | Advanced solids and surfaces | Parcial | Difficult loft/sweep/guide/patch/trim/thicken corpus, measured continuity and explicit repair; no mesh fallback concealing exact failures. |
+| B.04 | Large, configurable assemblies | Parcial | Subassemblies, reused instances, configurations, external references and selective loading; editing one definition updates all occurrences. Supported mechanisms are locally scoped. |
+| B.05 | Technical drawings and exchange | Parcial | Associative views, sections, dimensions/tolerances and BOM; readback measures loss in STEP/IGES/DXF/native exchange. Local BOM/JSON is implemented; associative drawing work remains planned. [BOM contract](BOM.md) |
 
-### B — Autoria CAD competitiva
+## C — Engineering and manufacturing
 
-| ID | Milestone | Estado inicial | Aceitação e dependências |
+Goal: connect design choices to exact geometry and measured process evidence.
+
+| ID | Milestone | Status | Acceptance still governing the work |
 |---|---|---|---|
-| B.01 | Navegação e edição legíveis | Parcial; seleção `006B`, arrasto `007B`, desenho/cotas `008D`; apresentação gráfica na `009B`; medição 2D/3D e unidades verificadas localmente na `013B` | Cubo persistente, setas/letras sem fundo, orbit livre, seleção/Spotlight, atalhos e DPI; controlos sem cortes nas resoluções suportadas |
-| B.02 | Sketch e feature tree de uso diário | Parcial; arcos em `005B`, snaps/expressões e parâmetros fonte em `008D`, verificados localmente | Diagnóstico acionável, edição de constraints, reordenação quando válida, suppress/rollback e dependências visíveis; rejeições sem dano ao documento |
-| B.03 | Sólidos e superfícies avançados | Parcial; curvas/ajustes paramétricos em `005B` | Loft/sweep/guias, continuidade medida, patches/trim/thicken e reparação explícita em corpus difícil; não mascarar falhas com meshes |
-| B.04 | Assemblies grandes e configuráveis | Parcial; juntas/limites em `006B`, continuação de mecanismos fechados no escopo local de `008D` | Subassemblies, instâncias reutilizadas, configurações, referências externas e carregamento seletivo; atualizar 1 definição sem duplicar as N ocorrências |
-| B.05 | Desenhos técnicos e intercâmbio | Parcial; BOM persistente e exportação JSON verificadas localmente na `011E`; desenhos técnicos planeados | Vistas associativas, cortes, cotas/tolerâncias, BOM e exportações com readback; medir perda de informação em STEP/IGES/DXF e no formato nativo |
+| C.01 | Industrial sheet workflows with STAGE | Parcial | Exact STEP plus explicit inputs yields a canonical artifact or typed rejection; agreed corpus, refold/flat and material traceability. Local sheet support exists; integration depends on E.01/E.02. |
+| C.02 | Complete weldments | Parcial | Multi-member trim/extend, joints, preparation, beads and coherent cutlists; drawings and lengths derive from exact results. Scope/candidates/replay have [008D evidence](iterations/008D.md). |
+| C.03 | Process-specific DFM | Parcial | Versioned laser/bend/FDM/CNC/weld rules, assumptions and per-part evidence; recommendations remain distinct from qualification. [Manufacturing intent](MANUFACTURING_INTENT.md) |
+| C.04 | Structural checks and motion | Parcial | Units/load cases, analytical comparisons, mesh convergence and an audited external solver. Supported analytical/kinematic previews exist; FEA, contact and fatigue require separate validation. |
+| C.05 | Physical reference pilots | Planeado | Fabricate a sheet enclosure, welded frame and small assembly; measure deviation, fit, cost and time; feed observations back into design revisions. |
 
-### C — Engenharia e fabrico
+## D — Effective design agents
 
-| ID | Milestone | Estado inicial | Aceitação e dependências |
+Goal: reach valid, useful designs with explainable quality, time and total cost.
+
+| ID | Milestone | Status | Acceptance still governing the work |
 |---|---|---|---|
-| C.01 | Chapa industrial com STAGE | Parcial local; integração planeada | STEP exato + inputs explícitos → publicação canónica ou rejeição; corpus acordado, refold/flat e material rastreáveis; depende de E.01/E.02 |
-| C.02 | Weldments completos | Parcial; Tube em `005B`, diagnóstico em `006B`, candidato/âmbito de ocorrências e replay em `008D` | Trim/extend multi-membro, juntas, preparação, cordões e cutlists coerentes; desenhos e comprimentos derivados do resultado exato |
-| C.03 | DFM por processo | Parcial | Regras versionadas para laser/dobra/FDM/CNC/solda, hipóteses e evidência por peça; recomendações separadas de certificação |
-| C.04 | Verificação estrutural e movimento | Parcial analítico; quatro barras/slider-crank e transmissões ideais testados em `008D`; FEA planeado | Load cases e unidades, comparação com soluções analíticas, convergência de malha e solver externo auditado; contacto/fadiga só após validação própria |
-| C.05 | Pilotos físicos de referência | Planeado | Fabricar uma caixa de chapa, uma estrutura soldada e um pequeno assembly; medir desvios, montagem, custo e tempo; fechar o ciclo com revisões do design |
+| D.01 | Quality/time/cost benchmark | Parcial | At least 30 versioned briefs, three repeats per initial configuration and blind human evaluation; cost per accepted design includes failures and coordination. Harness exists; 008D pilots were 0/9 and 4/9, 009B closed at 1/9. These results prove no savings. |
+| D.02 | Responsible engineer and adaptive team | Parcial | Compare Single/Focused/Parallel; give specialists concrete useful assignments and choose concurrency by measured benefit. No default turn/token budgets. Context, completion and feedback have scoped iteration evidence. |
+| D.03 | Isolated part workspaces | Planeado | Piece-level branches with ownership/datums; transactional integration identifies geometric/revision conflicts without silent rebase. |
+| D.04 | Multimodal feedback and correction | Parcial | Shared author/reviewer diagnostics, revision-bound previews, repeated-error detection and intent-preserving correction. Real images, failure replay and transport projection exist within [008D](iterations/008D.md), [010D](iterations/010D.md) and [012D](iterations/012D.md) scopes. |
+| D.05 | Concept alternatives and reusable knowledge | Parcial | Compare alternatives against requirements, mass, process/cost and human preference using validated examples. A proposal must not be reported as a created part. |
 
-### D — Agentes de design eficazes
+## E — Industrial ecosystem
 
-| ID | Milestone | Estado inicial | Aceitação e dependências |
+Goal: preserve identity and evidence through ARK → STAGE → Trace → MeshWorks.
+
+| ID | Milestone | Status | Acceptance still governing the work |
 |---|---|---|---|
-| D.01 | Benchmark de qualidade/tempo/custo | Parcial: harness/corpus de 30 briefs; pilotos `008D` de 0/9 e 4/9, `009B` encerrado em 1/9; uma repetição de três briefs, todas as falhas conservadas; sem evidência de poupança | Pelo menos 30 briefs versionados, três repetições por configuração inicial e avaliação humana cega; medir custo por design aceite, não só tokens por turno |
-| D.02 | Engenheiro responsável e equipa adaptativa | Parcial; contexto/deltas em `006B`, missões/harness em `008D`; contrato de leitura e Resume com pedidos grandes verificados offline na `010D`; registo/feedback obrigatório e drafts em novos planos na `012D` | Comparar Single, Focused e Parallel; especialistas só com missão útil; paralelismo escolhido por benefício medido; sem budgets impostos por defeito |
-| D.03 | Espaços de trabalho por peça | Planeado | Agentes editam branches isolados com ownership e datums; integração transacional identifica conflitos geométricos e de revisão sem rebase silencioso |
-| D.04 | Feedback multimodal e autocorreção | Parcial; pixels/candidatos/replay em `008D`; diagnóstico de argumentos e inspeção obrigatória após projeção de histórico verificados offline na `010D`; imagens comprimidas/projeção de transporte verificadas offline na `012D`; interpretação ainda limitada | Mesmo diagnóstico chega ao autor/reviewer; previews ligados à revisão; ciclos de erro repetido detetados; correção preserva intenção e referências |
-| D.05 | Alternativas de conceito e conhecimento reutilizável | Parcial no onboarding | Comparar alternativas por requisitos, massa, custo/processo e preferência humana; biblioteca de exemplos validados; nunca chamar a uma proposta uma peça criada |
+| E.01 | Shared identity and contracts | Parcial | Document/part/occurrence/revision IDs, units, source hash, geometry digest, provenance and idempotency; versioned schemas and compatibility tests. Local `ark.bom.v1` exists; cross-product reconciliation is planned. |
+| E.02 | ARK ↔ STAGE | Planeado | Publish/consume by contract; preserve original source, body, options and producer version. Display rejection without substitute geometry. |
+| E.03 | ARK ↔ MeshWorks | Planeado | Explicit authorized ARK adapter; incremental BOM quantities/configurations; CAD revisions preserve procurement/release state. Local BOM prepares input but no remote adapter is implemented. |
+| E.04 | STAGE/ARK ↔ Trace | Planeado | Canonical contours identified by result ID/digest; placements, stock, utilization and package returned with explicit grain/kerf/units. Stock consumption remains a separate action. |
+| E.05 | End-to-end industrial pilot | Planeado | Design → approved revision → flat → nest → package → BOM/cost/production; exercise change, revocation, retry, rejection and remnant custody without duplicate effects. |
 
-### E — Ecossistema industrial
-
-| ID | Milestone | Estado inicial | Aceitação e dependências |
-|---|---|---|---|
-| E.01 | Identidade e contrato comuns | Parcial; identidade local e contrato `ark.bom.v1` na `011E`; reconciliação entre produtos planeada | IDs de documento/parte/ocorrência/revisão, unidades, source hash, geometry digest, proveniência e idempotência; schemas versionados e testes de compatibilidade |
-| E.02 | ARK ↔ STAGE | Planeado | Publicar e consumir artefactos por contrato; preservar source, corpo, opções e versão do produtor; apresentar rejeição sem geometria substituta |
-| E.03 | ARK ↔ MeshWorks | Planeado; BOM local da `011E` prepara o input, sem adapter ou import remoto | Adapter `ark` explícito e autorizado; BOM incremental com quantidades e configurações; revisões CAD não apagam procurement/release; não fingir ser SolidWorks |
-| E.04 | STAGE/ARK ↔ Trace | Planeado | Contornos canónicos entram por result_id/digest; retornam placements/stock/utilização/package; grain, kerf e unidades explícitos; consumo de stock é ação separada |
-| E.05 | Piloto de digitalização ponta a ponta | Planeado | Design → revisão aprovada → flat → nest → pacote → BOM/custo/produção; testar alteração de peça, revogação, retry, rejeição e remanescente sem efeitos duplicados |
-
-### F — Produto e negócio
-
-| ID | Milestone | Estado inicial | Aceitação e dependências |
-|---|---|---|---|
-| F.01 | Self-update pelo futuro site | Parcial | Integridade/staging/rollback já locais; falta transporte real, assinatura, canais stable/preview, rollout gradual e rollback testado com release publicada |
-| F.02 | Licença perpétua de aproximadamente 200 € | Proposta | Definir direitos, IVA, utilizador/dispositivo, offline, atualizações e suporte; validar disposição a pagar com pilotos; ver estratégia comercial |
-| F.03 | Onboarding e biblioteca inicial | Parcial | Instalação limpa, primeiros cinco workflows guiados e templates fabricáveis; medir tempo até primeira peça válida e taxa de abandono |
-| F.04 | Suporte e qualidade operacional | Planeado | Crash reports opt-in sem desenhos, logs redigidos, diagnóstico exportável, migrações e matriz de hardware; política de suporte compatível com preço baixo |
-| F.05 | Piloto comercial e distribuição | Planeado | Coorte inicial de 10–20 utilizadores reais, feedback e incidências tratados; funil de compra/ativação/recuperação claro; não prometer updates/suporte ilimitados sem modelo económico |
-
-### G — Plataforma avançada
-
-| ID | Milestone | Estado inicial | Aceitação e dependências |
-|---|---|---|---|
-| G.01 | SDK e extensões estáveis | Planeado | APIs tipadas, contratos e exemplos; sandbox/permissões; compatibilidade entre duas versões; separar SDK aberto de licença ainda por decidir do produto |
-| G.02 | Colaboração e revisão distribuída | Planeado | Comentários, diffs geométricos e aprovação por revisão; replay determinístico e resolução de conflitos; isolamento de dados entre organizações |
-| G.03 | Exploração paramétrica multiobjetivo | Planeado | Pesquisar variantes por massa, rigidez, custo e fabrico em domínios validados; soluções viáveis antes de ranking; comparação com baseline humana |
-| G.04 | Portabilidade e execução remota | Parcial no core; produto planeado | Qualificar Linux/native OCCT, workers remotos e eventual macOS separadamente; mesmos contratos e resultados com provas por plataforma |
-| G.05 | Produto virtual verificável | Planeado | Assembly, materiais, cargas, movimento, fabrico e custo ligados por revisão; alterações propagam invalidando provas antigas; pilotos mostram valor operacional mensurável |
-
-## Responsabilidades entre os quatro produtos
-
-Fluxo-alvo **a implementar e qualificar**:
+The following is a **target integration flow**, not an implemented adapter claim:
 
 ```mermaid
 flowchart LR
-    ARK[ARK: design e revisoes] -->|STEP exato e inputs| STAGE[STAGE: analise e flat]
-    STAGE -->|publicacao canonica e digest| TRACE[Trace: nesting e stock]
-    ARK -->|BOM e ocorrencias| MW[MeshWorks: processo industrial]
-    TRACE -->|placements, pacote e custo| MW
-    MW -->|requisitos e alteracoes aprovadas| ARK
+    ARK[ARK: editable design and revisions] -->|Exact STEP and explicit inputs| STAGE[STAGE: analysis and development]
+    STAGE -->|Canonical artifact and digest| TRACE[Trace: contours and placement]
+    ARK -->|Design BOM and occurrences| MW[MeshWorks: industrial process]
+    TRACE -->|Placements and package| MW
+    MW -->|Requirements and approved changes| ARK
 ```
 
-| Produto / snapshot inspecionado | Autoridade principal | O que o ARK deve trocar |
-|---|---|---|
-| ARK / `main@5e7153f` | Intenção paramétrica, edição, partes, assemblies, revisões e interação com agentes | `.ark`, STEP exato, BOM de design, requisitos, referências e evidência |
-| STAGE / `Engine RC0326@87d45c1a` | Análise/desenvolvimento source-owned e publicação canónica no domínio qualificado | Source hash, corpo, inputs, artefacto/result_id, geometry digest e rejeições tipadas |
-| Trace Nest / `agent/alpha-prototype@8167152a` | Posicionamento e validação de nesting, stock/remanescentes e pacote de corte | Contornos da publicação original, placements, utilização, custos e identidade de stock |
-| MeshWorks / `main@0d4dcfa5` | BOM empresarial, revisão/release, procurement, CPQ, qualidade e produção | Documento/parte/ocorrência estáveis, quantidades local/total, materiais e estados de revisão |
+Each product retains its own authority. Connecting an API does not transfer another
+product's manufacturing qualification. The historical audit records the specific
+cross-product source snapshots it inspected; those are not current deployment claims.
 
-STAGE é **SOLID TOPOLOGY ANALYSIS & GEOMETRY ENGINE**. A etapa Stage 14 é um
-validador dentro desse trabalho, não outro produto.
+## F — Product and distribution
 
-O adapter CAD de MeshWorks executa atualmente SolidWorks; ARK precisa de adapter
-próprio. Trace permanece alpha, com `optimality_proven:false` e
-`manufacturing_qualified:false`. O estado de STAGE ainda separa publicação/API,
-comparação DXF estrita, corpus, CI e promoção de release. Não herdar um selo
-“pronto para produção” por ligar uma API.
+Goal: make ARK understandable, installable, updateable and supportable.
 
-Evidência cruzada, consultada apenas em leitura, sem testar deployments:
+| ID | Milestone | Status | Acceptance still governing the work |
+|---|---|---|---|
+| F.01 | Trusted online self-update | Parcial | Local integrity/staging/next-launch/rollback exists. Qualify real transport, signing, stable/preview channels, rollout and rollback from a published older runtime. [Updates](UPDATES.md) |
+| F.02 | Sustainable commercial offering | Planeado | Define any future paid services or Enterprise offering separately from the adopted Apache-2.0 source license; specify actual features, support, taxes and terms, and validate demand. The earlier approximately €200 perpetual model is a historical proposal. |
+| F.03 | Onboarding and initial library | Parcial | English README/handbook and branch/PR contribution guidance are prepared; clean-machine setup and five guided workflows need observed first-valid-part time and abandonment evidence. Fabricable templates need their own qualification. |
+| F.04 | Support and operational quality | Parcial | Contribution templates and security guidance support reporting; opt-in redacted crash reports, diagnostic export, migrations, hardware matrix and support policy need operational evidence. |
+| F.05 | Public distribution and user pilot | Em curso | Apache-2.0 publication is authorized, with source/history/dependency checks before visibility change. A reviewed public repository/release, clean-install trial and 10–20 real-user feedback cohort remain distinct gates. |
 
-- [Identidade STAGE](../../Engine/docs/beta/KERNEL_STUDIO.md) e
-  [estado do Engine](../../Engine/docs/beta/ENGINE_STATUS.md).
-- [Payload CAD MeshWorks](../../Meshworks/src/lib/cadIntegrationPayload.ts),
-  [gate do adapter](../../Meshworks/supabase/functions/cad-integration/index.ts) e
-  [maturidade SBOM](../../Meshworks/docs/SBOM_MATURITY_PORT_PLAN.md).
-- [Contrato Trace](../../Trace%20Nest/docs/CANONICAL_INTEGRATION.md) e
-  [adapter canónico](../../Trace%20Nest/src/trace_nest/adapters/canonical.py).
+A documented PR workflow does not establish remote branch protection. A license
+and an authorization to publish do not establish that publication has already happened.
+There is no implemented Enterprise edition implied by this roadmap.
 
-## Ordem de execução recomendada
+## G — Advanced platform
 
-| Horizonte indicativo | Entrega concreta | Milestones prioritários |
-|---|---|---|
-| Agora / primeiras 2–4 semanas | Identidade, UI clara, recuperação medida e benchmark inicial dos agentes | A.01–A.04, B.01, D.01–D.02 |
-| 1–3 meses | Peças e assemblies editáveis de uso diário; primeiro adapter industrial isolado | B.02–B.04, C.02, E.01–E.02, F.03 |
-| 3–6 meses | Piloto físico e fluxo flat/nest/BOM com cliente acompanhado | C.01/C.03/C.05, D.03, E.03–E.05, F.01/F.02/F.05 |
-| 6–12 meses | Produto comercial repetível, desenhos técnicos e engenharia mais profunda | B.05, C.04, D.04–D.05, F.04, G.01 |
-| 12–24+ meses | Plataforma distribuída e exploração multiobjetivo comprovada | G.02–G.05, com os gates anteriores demonstrados |
+Goal: explore alternatives and collaborate at complex-product scale.
 
-Os horizontes assumem uma equipa com responsabilidade contínua de produto,
-engenharia e validação. Aumentar agentes não aumenta automaticamente essa capacidade.
-Se houver capacidade limitada, priorizar uma cadeia vertical completa em vez de
-abrir simultaneamente todos os módulos.
+| ID | Milestone | Status | Acceptance still governing the work |
+|---|---|---|---|
+| G.01 | Stable SDK and extensions | Planeado | Typed APIs/contracts/examples, permissions/sandbox and compatibility across two versions; define any SDK scope explicitly. |
+| G.02 | Distributed collaboration and review | Planeado | Comments, geometric diffs and revision approvals; deterministic replay, conflict resolution and organization data isolation. |
+| G.03 | Multi-objective parametric exploration | Planeado | Search mass/stiffness/cost/manufacturing within validated domains; establish feasibility before ranking and compare with a human baseline. |
+| G.04 | Portability and remote execution | Verificado no escopo | 016F locally verified Ubuntu 24.04 Linux CLI/MCP/OCCT 8.0.1 worker: native CTest 65/65, core-only 42/42, clean-container relocated package with exact-solid/STEP/document readback. Linux Studio, network/authentication transports, OTA, remote workers and macOS remain outside that scope. [Linux build evidence](NATIVE_BUILD.md#local-linux-verification--016f) |
+| G.05 | Verifiable virtual product | Planeado | Assembly/material/load/motion/manufacturing/cost linked by revision; changes invalidate stale evidence; measured pilots show operational value. |
 
-## Scorecard de cada ciclo
+## How to choose the next increment
 
-1. Percentagem de tarefas que acabam num documento válido e editável.
-2. Tempo até primeira geometria útil e até design aceite.
-3. Tokens/custo total por design aceite, incluindo falhas e coordenação.
-4. Avaliação humana de função, forma, editabilidade e intenção de fabrico.
-5. Crash-free sessions, recuperações bem-sucedidas e regressões de p95.
-6. Continuidade de identidade e ausência de efeitos duplicados nas integrações.
-7. Horas de suporte por cliente e margem por licença perpétua.
+Prioritize dependable documents and clear editing, then one complete workflow with
+measured outcomes. Useful next contribution areas include crash recovery, sketch
+editing diagnostics, large-assembly fixtures, typed failure resolution, batch library
+inspection, exact-query profiling and the first isolated industrial contract.
+The [015B follow-up analysis](iterations/015B.md) records concrete investigation leads;
+agent self-reports remain leads until reproduced.
 
-Primeiro benchmark: suporte usinado, caixa de chapa, estrutura soldada, pequeno
-mecanismo e produto livre como bicicleta/drone. Misturar tarefas simples, alterações
-de design e inputs deliberadamente inválidos. Seeds, modelos e esforço devem ficar
-registados. Só comparar custo quando a qualidade e o critério de aceitação forem equivalentes.
+For each cycle, record the percentage of valid editable outcomes, time to useful
+geometry/acceptance, total cost including failures, human assessment, recovery and
+p95 interaction, integration identity, and support effort. Compare only equivalent
+inputs, models, tasks and acceptance criteria. Preserve failed attempts.
 
-## Decisões ainda abertas
+## Decisions and gates still open
 
-- Licença do código próprio e política de contribuições: ver
-  [estratégia comercial](COMMERCIAL_STRATEGY.md). Nada foi tornado público por este roadmap.
-- Alcance dos 200 € perpétuos: versões elegíveis, suporte e IVA precisam de termos finais.
-- Endpoint e assinatura do self-update do futuro site.
-- Corpus e critérios conjuntos de qualificação de ARK/STAGE/Trace/MeshWorks.
-- Capacidade real da equipa antes de converter horizontes em datas de compromisso.
+- Trusted update endpoint, independent signing and a real online upgrade trial.
+- Authorized public regression corpus and shared industrial qualification criteria.
+- Scope, support and economics of any future commercial offering.
+- Capacity and priority before turning planning horizons into dates.
+- Platform-specific native/desktop qualification and large-project acceptance.
+
+[Contribute through an issue and a topic-branch pull request](../CONTRIBUTING.md).
+The [historical commercial strategy](COMMERCIAL_STRATEGY.md) remains background;
+[Apache-2.0](../LICENSE) governs ARK's source, alongside dependency-specific terms.

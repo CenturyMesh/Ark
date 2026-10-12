@@ -1,0 +1,49 @@
+name: Bug report
+description: Report a reproducible modeling, document, agent or Studio problem.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Share only authorized inputs. Redact secrets and make a synthetic reproduction when possible.
+        For vulnerabilities, follow SECURITY.md rather than posting sensitive details here.
+  - type: input
+    id: version
+    attributes:
+      label: Runtime and iteration
+      description: Copy the numeric runtime and iteration code from ARK; include the source commit for a custom build.
+      placeholder: "0.9.x / NNNB / commit"
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, build configuration, hardware/GPU for UI problems, and connector/model for agent problems. Never include tokens.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Give a minimal command sequence or interaction. Include an authorized input or synthetic fixture if needed.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and evidence
+      description: Include the diagnostic, revision, failed operation and redacted logs/captures. Distinguish exact geometry evidence from display evidence.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and recovery
+      description: Does the problem reproduce consistently? Was work preserved? Which checks or attempted fixes ran?

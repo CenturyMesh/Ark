@@ -1,4 +1,8 @@
-# AI connectors — 004B
+# AI connectors
+
+Start with [Connecting](CONNECTING.md) to distinguish the built-in assistant
+from an external MCP client. Provider eligibility remains provider-controlled;
+configuration export is not automatic client installation or authentication.
 
 ARK supports two separate routes: models inside Single/Team, and external agents
 using the local MCP bridge to the open document. Existing ChatGPT settings remain

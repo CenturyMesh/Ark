@@ -47,8 +47,9 @@ try {
     }
     Get-ChildItem -LiteralPath $MsvcRuntimeDirectory -Filter '*.dll' -File | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $staging -Force }
     foreach ($directory in @('assets', 'updates')) {
-        $source = Join-Path $RuntimeDirectory $directory
-        Get-ChildItem -LiteralPath $source -Recurse -Force | ForEach-Object { Assert-ArkNoReparsePoint $RuntimeDirectory $_.FullName }
+        $sourceRoot = if ($directory -eq 'updates') { $repository } else { $RuntimeDirectory }
+        $source = Join-Path $sourceRoot $directory
+        Get-ChildItem -LiteralPath $source -Recurse -Force | ForEach-Object { Assert-ArkNoReparsePoint $sourceRoot $_.FullName }
         Copy-Item -LiteralPath $source -Destination $staging -Recurse
     }
     Copy-Item -LiteralPath (Join-Path $repository 'updates/ARK.cmd') -Destination $staging
@@ -61,6 +62,30 @@ try {
     Copy-Item -LiteralPath (Join-Path $repository 'docs/schemas/ark-bom-v1.schema.json') -Destination $contracts
     $licenses = Join-Path $staging 'licenses'
     [IO.Directory]::CreateDirectory($licenses) | Out-Null
+    Copy-Item -LiteralPath (Join-Path $repository 'LICENSE') -Destination $staging
+    Copy-Item -LiteralPath (Join-Path $repository 'NOTICE') -Destination $staging
+    # The versioned local installer retains licenses/ as a unit. Keep ARK's
+    # own grant and attribution there as well as at the archive root.
+    Copy-Item -LiteralPath (Join-Path $repository 'LICENSE') -Destination (Join-Path $licenses 'ARK-Apache-2.0.txt')
+    Copy-Item -LiteralPath (Join-Path $repository 'NOTICE') -Destination (Join-Path $licenses 'ARK-NOTICE.txt')
+    $packageReadme = @"
+ARK $version for Windows x64
+
+Launch ARK.cmd to open Studio through the verified per-user launcher.
+Save drawings outside immutable application version directories.
+
+Source and release notes: https://github.com/CenturyMesh/Ark
+Handbook: https://github.com/CenturyMesh/Ark/blob/main/docs/HANDBOOK.md
+Agents and accounts: https://github.com/CenturyMesh/Ark/blob/main/docs/CONNECTING.md
+Update details: https://github.com/CenturyMesh/Ark/blob/main/docs/UPDATES.md
+
+ARK source is Apache-2.0; see LICENSE and NOTICE. Dependencies retain their
+individual terms in licenses/. SHA-256 verifies archive integrity; it is not
+an independent publisher signature. This package has no claimed Authenticode
+signature or manufacturing qualification. If marked as a prerelease on GitHub,
+it is for manual evaluation and is excluded from the stable automatic updater.
+"@
+    [IO.File]::WriteAllText((Join-Path $staging 'README.txt'), $packageReadme, (New-Object Text.UTF8Encoding($false)))
     Copy-Item -LiteralPath (Join-Path $repository 'third_party/mapbox/LICENSE') -Destination (Join-Path $licenses 'mapbox-earcut-ISC.txt')
     Copy-Item -LiteralPath (Join-Path $repository 'third_party/sqlite/README.md') -Destination (Join-Path $licenses 'sqlite-provenance.txt')
     Copy-Item -LiteralPath (Join-Path $repository 'third_party/sqlite/sqlite3.h') -Destination (Join-Path $licenses 'sqlite3.h')
@@ -80,7 +105,7 @@ try {
     if (Test-Path -LiteralPath $archive) { throw "Package already exists: $archive. Use a new output directory or a new version." }
     Compress-ArkPackage $staging $archive
     $info = Get-Item -LiteralPath $archive
-    $manifest = @{ schema=1; product='ARK'; version=$version; platform='windows-x64'; package=@{ name=$name; url="https://github.com/CenturyMesh/Ark-Releases/releases/download/v$version/$name"; size=$info.Length; sha256=(Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() } }
+    $manifest = @{ schema=1; product='ARK'; version=$version; platform='windows-x64'; package=@{ name=$name; url="https://github.com/CenturyMesh/Ark/releases/download/v$version/$name"; size=$info.Length; sha256=(Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() } }
     Assert-ArkManifest $manifest $version
     Write-ArkAtomicJson (Join-Path $OutputDirectory 'ark-update.json') $manifest
     Write-Output "Prepared release assets: $archive and $(Join-Path $OutputDirectory 'ark-update.json')"

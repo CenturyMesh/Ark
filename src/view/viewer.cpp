@@ -506,6 +506,7 @@ static void clearProjectionPreview(){g_projectionPreview={};g_projectionGpuDirty
 static arkjson::Value g_physicalReport;static std::string g_physicalError;
 static arkjson::Value g_physicalSettings;
 static bool decodeCanvasFile(const std::wstring&,std::vector<unsigned char>&,unsigned&,unsigned&);
+#include "action_icons.inl"
 static int atlasIcon(int action){switch(action){
     case 570:case 584:return 33; // Existing edit-curve pencil.
     case 571:return 0;case 572:return 16;case 573:return 1;case 574:case 575:return 32;
@@ -524,7 +525,9 @@ static int atlasIcon(int action){switch(action){
 static std::filesystem::path toolAtlasPath(int sheet=0){static const char* paths[]={"assets/ui/ark-tool-atlas-v1.png","assets/ui/ark-domain-atlas-v1.png","assets/ui/ark-detail-atlas-v1.png"};if(sheet<0||sheet>=3)return {};wchar_t path[32768]{};GetModuleFileNameW(nullptr,path,32768);auto directory=std::filesystem::path(path).parent_path();for(int i=0;i<6&&!directory.empty();++i,directory=directory.parent_path()){auto atlas=directory/paths[sheet];if(std::filesystem::is_regular_file(atlas))return atlas;}return {};}
 static void decorateMenu(HMENU menu){
     static std::map<int,HBITMAP> bitmaps;struct Atlas{std::vector<unsigned char> pixels;unsigned w=0,h=0;};static Atlas atlases[3];
-    for(int i=0;i<GetMenuItemCount(menu);++i){MENUITEMINFOW item{sizeof item};item.fMask=MIIM_ID|MIIM_SUBMENU;GetMenuItemInfoW(menu,(UINT)i,TRUE,&item);if(item.hSubMenu)decorateMenu(item.hSubMenu);int icon=atlasIcon((int)item.wID);if(icon<0)continue;auto& atlas=atlases[icon/16];if(atlas.pixels.empty()){auto path=toolAtlasPath(icon/16);if(path.empty()||!decodeCanvasFile(path.wstring(),atlas.pixels,atlas.w,atlas.h))continue;}const auto& pixels=atlas.pixels;unsigned w=atlas.w,h=atlas.h;int cell=icon%16;
+    for(int i=0;i<GetMenuItemCount(menu);++i){MENUITEMINFOW item{sizeof item};item.fMask=MIIM_ID|MIIM_SUBMENU;GetMenuItemInfoW(menu,(UINT)i,TRUE,&item);if(item.hSubMenu)decorateMenu(item.hSubMenu);
+        if(auto bitmap=actionIconMenuBitmap((int)item.wID)){MENUITEMINFOW image{sizeof image};image.fMask=MIIM_BITMAP;image.hbmpItem=bitmap;SetMenuItemInfoW(menu,(UINT)i,TRUE,&image);continue;}
+        int icon=atlasIcon((int)item.wID);if(icon<0)continue;auto& atlas=atlases[icon/16];if(atlas.pixels.empty()){auto path=toolAtlasPath(icon/16);if(path.empty()||!decodeCanvasFile(path.wstring(),atlas.pixels,atlas.w,atlas.h))continue;}const auto& pixels=atlas.pixels;unsigned w=atlas.w,h=atlas.h;int cell=icon%16;
         HBITMAP bitmap=bitmaps[icon];if(!bitmap){constexpr int size=22;BITMAPINFO info{};info.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);info.bmiHeader.biWidth=size;info.bmiHeader.biHeight=-size;info.bmiHeader.biPlanes=1;info.bmiHeader.biBitCount=32;void* raw=nullptr;bitmap=CreateDIBSection(nullptr,&info,DIB_RGB_COLORS,&raw,nullptr,0);if(!bitmap)continue;auto* output=(unsigned char*)raw;
             for(int y=0;y<size;++y)for(int x=0;x<size;++x){unsigned sx=(unsigned)((cell%4+(x+.5)/size)*w/4),sy=h-1-(unsigned)((cell/4+(y+.5)/size)*h/4);const auto* source=pixels.data()+((size_t)sy*w+sx)*4;auto* dest=output+(y*size+x)*4;dest[0]=(unsigned char)(source[2]*source[3]/255);dest[1]=(unsigned char)(source[1]*source[3]/255);dest[2]=(unsigned char)(source[0]*source[3]/255);dest[3]=source[3];}bitmaps[icon]=bitmap;
         }MENUITEMINFOW image{sizeof image};image.fMask=MIIM_BITMAP;image.hbmpItem=bitmap;SetMenuItemInfoW(menu,(UINT)i,TRUE,&image);
@@ -1459,7 +1462,7 @@ static bool editFields(const char* title,const char* hint,std::vector<EditorFiel
     std::vector<HWND> edits;
     for(size_t i=0;i<fields.size();++i){int y=110+previewHeight+(int)(mateColumns?i%5:i)*62,x=mateColumns?(int)(i/5)*480:0;
         if(!multiline)control("STATIC",fields[i].name.c_str(),0,x+28,y+7,205,28,0,font);
-        HWND e=fields[i].toggle?control("BUTTON","",WS_TABSTOP|BS_AUTOCHECKBOX,x+235,y,40,33,3+(int)i,font):!fields[i].choices.empty()?control("COMBOBOX","",WS_TABSTOP|WS_VSCROLL|(fields[i].editableChoice?CBS_DROPDOWN:CBS_DROPDOWNLIST),x+235,y,mateColumns?217:width-263,240,3+(int)i,font):control("EDIT",fields[i].value.c_str(),WS_TABSTOP|WS_BORDER|ES_AUTOHSCROLL|(multiline?ES_MULTILINE|ES_AUTOVSCROLL|WS_VSCROLL|ES_WANTRETURN:0),multiline?26:x+235,y,multiline?width-52:mateColumns?217:width-263,multiline?height-184:33,3+(int)i,mono);
+        HWND e=fields[i].toggle?control("BUTTON","",WS_TABSTOP|BS_AUTOCHECKBOX,x+235,y,40,33,3+(int)i,font):!fields[i].choices.empty()?control("COMBOBOX","",WS_TABSTOP|WS_VSCROLL|(fields[i].editableChoice?CBS_DROPDOWN:CBS_DROPDOWNLIST),x+235,y,mateColumns?217:width-263,240,3+(int)i,font):control("EDIT",fields[i].value.c_str(),WS_TABSTOP|WS_BORDER|((multiline&&readOnly)?0:ES_AUTOHSCROLL)|(multiline?ES_MULTILINE|ES_AUTOVSCROLL|WS_VSCROLL|ES_WANTRETURN:0),multiline?26:x+235,y,multiline?width-52:mateColumns?217:width-263,multiline?height-184:33,3+(int)i,mono);
         if(!fields[i].choices.empty()){for(const auto& choice:fields[i].choices)SendMessageA(e,CB_ADDSTRING,0,(LPARAM)choice.c_str());auto selected=SendMessageA(e,CB_FINDSTRINGEXACT,-1,(LPARAM)fields[i].value.c_str());if(selected!=CB_ERR)SendMessage(e,CB_SETCURSEL,selected,0);else if(fields[i].editableChoice)SetWindowTextA(e,fields[i].value.c_str());}
         if(fields[i].toggle)SendMessage(e,BM_SETCHECK,fields[i].value=="1"?BST_CHECKED:BST_UNCHECKED,0);
         if(readOnly&&!fields[i].toggle&&fields[i].choices.empty())SendMessage(e,EM_SETREADONLY,TRUE,0);
@@ -1472,6 +1475,7 @@ static bool editFields(const char* title,const char* hint,std::vector<EditorFiel
     if(g_dialogSmoke)SetTimer(g_dialog,901,200,nullptr);
     MSG msg;while(!g_dialogDone&&GetMessage(&msg,nullptr,0,0)>0){
         char focusedClass[32]{};GetClassNameA(GetFocus(),focusedClass,sizeof focusedClass);if(std::strcmp(focusedClass,"ComboBox")==0&&SendMessage(GetFocus(),CB_GETDROPPEDSTATE,0,0)&&(msg.message==WM_KEYDOWN&&(msg.wParam==VK_ESCAPE||msg.wParam==VK_RETURN))){SendMessage(GetFocus(),CB_SHOWDROPDOWN,FALSE,0);continue;}
+        if(msg.message==WM_KEYDOWN&&msg.wParam=='A'&&(GetKeyState(VK_CONTROL)&0x8000)&&std::strcmp(focusedClass,"Edit")==0){SendMessage(GetFocus(),EM_SETSEL,0,-1);continue;}
         if(msg.message==WM_KEYDOWN&&msg.wParam==VK_ESCAPE){g_dialogDone=true;continue;}
         if(msg.message==WM_KEYDOWN&&msg.wParam==VK_RETURN&&(!multiline||GetDlgCtrlID(GetFocus())<=2||(GetKeyState(VK_CONTROL)&0x8000))){g_dialogDone=true;g_dialogAccept=GetDlgCtrlID(GetFocus())!=2;continue;}
         if(!IsDialogMessage(g_dialog,&msg)){TranslateMessage(&msg);DispatchMessage(&msg);}
@@ -2504,7 +2508,7 @@ static bool editConnector(AssistantConfig& config,bool role,bool& inherit){
     if(std::find(providers.begin(),providers.end(),current)==providers.end())current="custom";
     std::vector<EditorField> profile{{"Provider",current,false,providers},{"Refresh model catalog", "0",true}};
     if(!editFields(role?"Agent card connector":"Assistant connector","Choose a provider. Catalog refresh reads available model IDs without starting inference. Keys remain in environment variables.",profile))return false;
-    auto provider=profile[0].value;inherit=provider=="inherit";if(inherit)return true;if(provider=="chatgpt-plan"){config.authMode=AssistantAuthMode::ChatGptPlan;config.provider="openai";config.protocol=AssistantProtocol::Responses;config.endpoint="https://api.openai.com/v1/responses";return true;}
+    auto provider=profile[0].value;inherit=provider=="inherit";if(inherit)return true;if(provider=="chatgpt-plan"){if(config.authMode!=AssistantAuthMode::ChatGptPlan){config.model.clear();config.reasoningEffort.clear();}config.authMode=AssistantAuthMode::ChatGptPlan;config.provider="openai";config.protocol=AssistantProtocol::Responses;config.endpoint="https://api.openai.com/v1/responses";return true;}
     if(provider!=config.provider||config.authMode!=AssistantAuthMode::ApiKey)config=assistantProviderPreset(provider);
     config.authMode=AssistantAuthMode::ApiKey;std::vector<std::string> models;
     if(profile[1].value=="1"){
@@ -2615,6 +2619,7 @@ static void showAssistantAccountMenu(){
     AppendMenuA(menu,MF_STRING|(g_assistantConfig.model.empty()?MF_GRAYED:0),367,effortLabel.c_str());
     AppendMenuA(menu,MF_STRING,357,"Connectors / OpenAI, Claude, Grok...");
     if(g_assistantConfig.authMode==AssistantAuthMode::ChatGptPlan)AppendMenuA(menu,MF_STRING,358,"Switch to API key mode");
+    decorateMenu(menu);
     POINT cursor;GetCursorPos(&cursor);int action=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,cursor.x,cursor.y,0,g_window,nullptr);
     DestroyMenu(menu);PostMessage(g_window,WM_NULL,0,0);if(action)interactiveAction(action);
 }
@@ -2861,11 +2866,30 @@ static void stopIntegrations(){
     while(PeekMessage(&msg,g_window,WM_ARK_TOOL,WM_ARK_AUTH,PM_REMOVE)){if(msg.message==WM_ARK_TOOL){std::unique_ptr<UiToolRequest> request((UiToolRequest*)msg.lParam);request->complete(cancelledTool());}else if(msg.message==WM_ARK_CHAT)delete (UiChatEvent*)msg.lParam;else if(msg.message==WM_ARK_AUTH)delete (UiAuthEvent*)msg.lParam;}
     while(PeekMessage(&msg,g_window,WM_ARK_PRICE,WM_ARK_TEAM,PM_REMOVE)){if(msg.message==WM_ARK_PRICE)delete (PricingCatalog*)msg.lParam;else if(msg.message==WM_ARK_TEAM)delete (UiTeamEvent*)msg.lParam;}
 }
+static std::string externalConfigDisplay(const std::string& raw,const std::string& client){
+    std::string formatted=raw;
+    if(client!="codex"){
+        using V=arkjson::Value;V config;if(!arkjson::parse(raw,config))throw std::runtime_error("Invalid exported MCP configuration");formatted.clear();
+        std::function<void(const V&,int)> write=[&](const V& value,int depth){
+            const bool object=value.t==V::Obj,array=value.t==V::Arr;const size_t count=object?value.obj.size():array?value.arr.size():0;
+            if(!object&&!array){formatted+=value.dump();return;}formatted+=object?'{':'[';
+            for(size_t i=0;i<count;++i){formatted+='\n';formatted+=std::string((depth+1)*2,' ');if(object){formatted+=V::makeStr(value.obj[i].first).dump()+": ";write(value.obj[i].second,depth+1);}else write(value.arr[i],depth+1);if(i+1<count)formatted+=',';}
+            if(count){formatted+='\n';formatted+=std::string(depth*2,' ');}formatted+=object?'}':']';
+        };write(config,0);
+        V roundtrip;if(!arkjson::parse(formatted,roundtrip)||roundtrip.dump()!=config.dump())throw std::runtime_error("MCP display formatting changed the configuration");
+    }
+    std::string display;display.reserve(formatted.size()+32);for(size_t i=0;i<formatted.size();++i){if(formatted[i]=='\n'&&(i==0||formatted[i-1]!='\r'))display+='\r';display+=formatted[i];}return display;
+}
 static void liveConnectionDialog(){
     if(g_liveBridge.endpoint().empty()){std::string text="Live MCP is not running.";editText("Live document connection",text,true);return;}
+    auto profileShot=g_dialogShot;
     std::vector<EditorField> fields{{"External client","codex",false,{"codex","claude-code","claude-desktop","opencode"}}};if(!editFields("Connect an external agent","Export a configuration for this exact open document. The client uses its own authorized provider account. Copy the result into that client's MCP settings.",fields))return;
     wchar_t executable[32768]{};GetModuleFileNameW(nullptr,executable,32768);auto file=std::filesystem::path(executable).parent_path()/"ark-mcp.exe";auto utf8=file.u8string();std::string text=assistantExternalMcpConfig(fields[0].value,std::string(utf8.begin(),utf8.end()),g_liveBridge.endpoint(),g_assistantConfig);
-    g_status="External MCP configuration for "+fields[0].value+" / current document / copy with Ctrl+A and Ctrl+C / call agent_onboard first";auto title="Copy "+fields[0].value+" configuration / current document MCP";std::vector<EditorField> output{{"Configuration",text}};editFields(title.c_str(),"Copy the raw configuration with Ctrl+A / Ctrl+C into this client's MCP settings. The endpoint binds this exact open document. Call agent_onboard first.",output,true,"Close");
+    // Native multiline EDIT controls require CRLF. Keep TOML line boundaries
+    // intact in both the visible text and what the user copies into the client.
+    std::string displayText=externalConfigDisplay(text,fields[0].value);
+    g_status="External MCP configuration for "+fields[0].value+" / current document / copy with Ctrl+A and Ctrl+C / call agent_onboard first";auto title="Copy "+fields[0].value+" configuration / current document MCP";std::vector<EditorField> output{{"Configuration",displayText}};if(!profileShot.empty()&&g_dialogSmoke)g_dialogShot=profileShot+".configuration.png";editFields(title.c_str(),"Copy the raw configuration with Ctrl+A / Ctrl+C into this client's MCP settings. The endpoint binds this exact open document. Call agent_onboard first.",output,true,"Close",nullptr,true);
+    if(g_dialogSmoke&&output.front().value!=displayText)throw std::runtime_error("External MCP configuration changed in the copy dialog");
 }
 static void newDocument(){
     if(!confirmDiscard())return;*g_assistantCancel=true;auto args=arkjson::Value::makeObj();args.set("expected_revision",arkjson::Value::makeNum((double)g_session.revision));runTool("doc_new",args);if(g_error)return;
@@ -4469,6 +4493,12 @@ static void drawFrame(HDC hdc){
     auto panel=[&](float x,float y,float w,float h,float r=0.f){rect(x,y,w,h,r,.085f,.105f,.12f,1,.21f,.25f,.28f,.65f,1);};
     auto label=[&](const std::string& t,float x,float y,float scale=.75f){textOut(t,x,y,scale,.55f,.57f,.62f);};
     auto glyph=[&](int id,float x,float y,float size,float c=.82f){
+        if(const auto* vector=actionVectorIcon(id)){
+            glUniform1i(uuGlyph,500);glUniform4f(uuRc,x,y,size,size);glUniform1f(uuBW,std::max(1.5f,size*.06f));
+            glUniform4f(uuFill,c*.75f,c*.91f,std::min(c*1.09f,1.f),1);glBindVertexArray(quadVao);auto lineAB=glGetUniformLocation(pUI,"lineAB");
+            for(const auto& stroke:*vector){glUniform4f(lineAB,stroke.ax*size,stroke.ay*size,stroke.bx*size,stroke.by*size);glDrawArrays(GL_TRIANGLES,0,6);}
+            glUniform1i(uuGlyph,0);return;
+        }
         auto badge=[&]{bool edit=id==127||id==122||id==125||id==395||id==398;bool remove=id==123||id==126||id==396||id==399;if(!edit&&!remove)return;float bs=size*.47f,bx=x+size-bs,by=y+size-bs;rect(bx-1,by-1,bs+2,bs+2,3,.045f,.07f,.09f,1,0,0,0,0,0);glUniform1i(uuGlyph,remove?487:486);glUniform4f(uuRc,bx,by,bs,bs);glUniform4f(uuFill,remove?.96f:.91f,remove?.39f:.79f,remove?.34f:.46f,1);glBindVertexArray(quadVao);glDrawArrays(GL_TRIANGLES,0,6);glUniform1i(uuGlyph,0);};
         int icon=atlasIcon(id);static GLuint atlases[3]{};
         if(icon>=0){auto& atlas=atlases[icon/16];int cell=icon%16;if(!atlas){auto path=toolAtlasPath(icon/16);if(!path.empty()){auto encoded=path.u8string();atlas=canvasTexture(std::string(encoded.begin(),encoded.end()));if(atlas==g_canvasMissing)atlas=0;}}
@@ -4524,9 +4554,9 @@ static void drawFrame(HDC hdc){
     else if(g_toolModule==2&&g_sketchDrawing.active)groups={{"Draw in view",{{"Line",571},{"Polyline",572},{"Rectangle",573},{"Circle",574},{"Arc 3 pt",575},{"Dimensions",576},{"Grid",579},{"Exit sketch",578}}},{"Coordinate forms",{{"Line form",543},{"Arc form",544},{"Tangent arc",545},{"Rectangle",61},{"Circle",62},{"Spline",63}}},{"Modify",{{"Project 2D",536},{"Include 3D",537},{"Edit curve",70},{"Constraint",73},{"Plane",60},{"Source params",577}}},{"Build",{{"Extrude",65},{"Cut",66}}}};
     else if(g_toolModule==2)groups={{"Interactive",{{"Draw sketch",570}}},{"Draw 2D",{{"Line",543},{"Arc 3 pt",544},{"Tangent arc",545},{"Rectangle",61},{"Circle",62},{"Spline",63}}},{"Draw 3D",{{"Arc 3D",547},{"Tangent 3D",548},{"3D curve",538}}},{"Modify",{{"Project 2D",536},{"Include 3D",537},{"Edit curve",70},{"Constraint",73},{"Plane",60}}},{"Build",{{"Extrude",65},{"Cut",66}}}};
     else if(g_toolModule==3)groups={{"Measure",{{"Measure 2D",585},{"Measure 3D",586},{"Units",587}}},{"Selection",{{"Body",170},{"Face",171},{"Edge",172},{"Curve",173}}},{"Inspect",{{"BOM",590},{"Properties",401},{"Mass / CG",188},{"Material",187}}},{"Display",{{"Graphics",56},{"Fit",20}}}};
-    else if(g_toolModule==4)groups={{"Engineering",{{"Model tools",456},{"Physics",188},{"Loads",216},{"Electronics",211},{"Routing",212},{"Library",484}}},{"Agents",{{"Assistant",400},{"Live MCP",58},{"Tools",457}}}};
+    else if(g_toolModule==4)groups={{"Engineering",{{"Model tools",456},{"Physics",188},{"Loads",216},{"Electronics",211},{"Routing",212},{"Library",484}}},{"Agents",{{"Assistant",400},{"Connect",58},{"Providers",357},{"Tools",457}}}};
     else if(g_toolModule==6)groups={{"Create",{{"Extrude",151},{"Revolve",152},{"Sweep",150},{"Loft",76},{"Fill",77},{"NURBS",78}}},{"Modify",{{"Extract face",491},{"Trim plane",492},{"Offset",153},{"Sew",154},{"Thicken",79}}}};
-    else groups={{"Document",{{"New",55},{"Open",17},{"Save",16},{"Export",213}}},{"History",{{"Undo",18},{"Redo",19},{"Iterations",493},{"Last failure",580}}},{"Manage",{{"BOM",590},{"Parameters",67},{"Import",81},{"Account",57},{"More",459}}}};
+    else groups={{"Document",{{"New",55},{"Open",17},{"Save",16},{"Export",213}}},{"History",{{"Undo",18},{"Redo",19},{"Iterations",493},{"Last failure",580}}},{"Manage",{{"BOM",590},{"Parameters",67},{"Import",81},{"Connect",58},{"Account",57},{"More",459}}}};
     groups.push_back({"Discover",{{"All tools",480}}});
     int count=0;for(const auto& group:groups)count+=(int)group.actions.size();float cardW=std::min(105.f,(W-32-(groups.size()-1)*27)/std::max(count,1));float cursor=18;
     for(size_t groupIndex=0;groupIndex<groups.size();++groupIndex){auto& group=groups[groupIndex];float start=cursor;
@@ -5571,7 +5601,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     SetProcessDPIAware();
     bool startupUiTest=false;
     bool bomUiTest=false;bool measurementUiTest=false;
-    bool interactionUiTest=false,connectorsUiTest=false,treeUiTest=false,arcUiTest=false,completionUiTest=false,sketchDrawingUiTest=false;
+    bool interactionUiTest=false,connectorsUiTest=false,actionIconsUiTest=false,treeUiTest=false,arcUiTest=false,completionUiTest=false,sketchDrawingUiTest=false;
     bool selfTest=false,assemblyTest=false,dialogTest=false,bendTest=false,bendExportTest=false,sourceTest=false,sketchTest=false,assistantTest=false,nativeUiTest=false,renderUiTest=false,engineeringUiTest=false,sheetShowcaseTest=false,contextUiTest=false,suspensionUiTest=false,connectChatGpt=false,motionUiTest=false,motionPlay=false,navigationUiTest=false,projectionUiTest=false,frameToolsUiTest=false;unsigned exitAfterMs=0;std::string endpointFile,requestedSketch;int requestedOpening=-1;double requestedFold=-1,showcaseProgress=-1;std::string shotPath="ark_studio.png",loadPath,scriptPath,importPath,showcaseView,spotlightName,suspensionFeatureName,motionDriverName,motionSpeed;double requestedMotionTime=0;std::vector<std::string> suspensionValues;
     int requestedPathSamples=1;bool studioRenderTest=false,requestedPathTracing=false;
     int sw=1600,sh=1000,argc=0;auto argv=CommandLineToArgvW(GetCommandLineW(),&argc);
@@ -5594,6 +5624,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         else if(a=="--self-test-measurement-ui"){measurementUiTest=true;g_headless=true;}
         else if(a=="--self-test-interaction-ui"){interactionUiTest=true;g_headless=true;}
         else if(a=="--self-test-connectors-ui"){connectorsUiTest=true;g_headless=true;}
+        else if(a=="--self-test-action-icons-ui"){actionIconsUiTest=true;g_headless=true;}
         else if(a=="--self-test-engineering-ui"){engineeringUiTest=true;g_headless=true;}
         else if(a=="--self-test-sheet-showcase-ui"){sheetShowcaseTest=true;g_headless=true;}
         else if(a=="--self-test-context-ui"){contextUiTest=true;g_headless=true;}
@@ -6009,6 +6040,9 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         resize(savedW,savedH);g_assistantDockOpen=savedDock;g_teamMode=savedMode;g_teamRoleCount=savedCount;g_compactNavigation=savedCompact;g_pickKind=0;g_verifyTeamCardBounds=false;cameraRoll=savedRoll;uiAction(24);yaw=tYaw;pitch=tPitch;frameScene();target=tTarget;dist=tDist;g_status="Navigation UI checks passed / upper-left cube / shaded RGB triad / six faces / camera roll / unchanged document";
     }
 
+    if(actionIconsUiTest){
+#include "action_icons_selftest.inl"
+    }
     if(connectorsUiTest){
         using V=arkjson::Value;auto originalConfig=g_assistantConfig;auto originalConnectors=g_teamConnectors;auto originalModels=g_teamModels,originalEfforts=g_teamEfforts;auto originalSettings=g_settingsOverride;bool originalTeam=g_teamMode,originalDock=g_assistantDockOpen;u64 revision=g_session.revision,epoch=g_documentEpoch;auto schema=g_doc.materials;
         auto failure=[&](int code,const char* message){std::fprintf(stderr,"Connectors UI %d: %s / %s\n",code,message,g_status.c_str());return code;};
@@ -6021,6 +6055,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         draw();glFinish();{std::vector<u8> pixels((size_t)winW*winH*3);glPixelStorei(GL_PACK_ALIGNMENT,1);glReadBuffer(GL_BACK);glReadPixels(0,0,winW,winH,GL_RGB,GL_UNSIGNED_BYTE,pixels.data());Image image;image.w=winW;image.h=winH;image.px.resize(pixels.size());for(int y=0;y<winH;++y)std::memcpy(image.px.data()+(size_t)y*winW*3,pixels.data()+(size_t)(winH-1-y)*winW*3,(size_t)winW*3);if(!writePNG((shotPath+".provider-mixed-cards.png").c_str(),image))return failure(505,"Mixed provider cards capture failed");}
         g_settingsOverride=std::filesystem::temp_directory_path()/("ark-connectors-ui-"+std::to_string(GetCurrentProcessId())+".json");saveUiSettings();g_teamConnectors={};g_teamModels={};g_teamEfforts={};loadUiSettings();for(size_t i=0;i<3;++i)if(!g_teamConnectors[i]||teamRoleConfig(i).provider!=providers[i]||teamRoleConfig(i).model!=models[i]||teamRoleConfig(i).maxOutputTokens!=8192)return failure(502,"Per-role provider settings did not persist");std::filesystem::remove(g_settingsOverride);
         g_dialogOverrideQueue={{"inherit","0"}};g_dialogSmoke=3;bool inherited=click(44020);g_dialogSmoke=0;if(!inherited||g_teamConnectors[0]||!g_teamModels[0].empty()||!g_teamEfforts[0].empty())return failure(503,"Card could not restore inherited connector");
+        {auto config=assistantProviderPreset("claude");config.model="foreign-offline-model";config.reasoningEffort="foreign-effort";bool inherit=false;g_dialogOverrideQueue={{"chatgpt-plan","0"}};g_dialogSmoke=3;bool selected=editConnector(config,false,inherit);g_dialogSmoke=0;if(!selected||config.authMode!=AssistantAuthMode::ChatGptPlan||!config.model.empty()||!config.reasoningEffort.empty())return failure(506,"ChatGPT plan switch retained a foreign provider model/effort");}
         auto exported=assistantExternalMcpConfig("opencode","C:/ARK/ark-mcp.exe","ark-ui-test",assistantProviderPreset("ollama"));if(exported.find("ark-mcp.exe")==std::string::npos||exported.find("--connect")==std::string::npos||exported.find("ark-ui-test")==std::string::npos)return failure(504,"External MCP profile lost executable or live document binding");
         std::ofstream(shotPath+".connectors-test.log")<<"PASS: real card Connector click, native provider/model/protocol controls, distinct Claude/Grok/Ollama routes, inherited global unchanged, serialized/restored per-role routes, reset inheritance, external MCP binding. Offline model IDs; no provider inference or account authentication performed.\n";
         g_assistantConfig=originalConfig;g_teamConnectors=originalConnectors;g_teamModels=originalModels;g_teamEfforts=originalEfforts;g_settingsOverride=originalSettings;g_teamMode=originalTeam;g_assistantDockOpen=originalDock;g_status="Connector checks passed / mixed cards / persistence / external MCP profiles";layout();

@@ -1,6 +1,6 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:ArkReleaseApi = 'https://api.github.com/repos/CenturyMesh/Ark-Releases/releases/latest'
+$script:ArkReleaseApi = 'https://api.github.com/repos/CenturyMesh/Ark/releases/latest'
 $script:ArkMaxPackageBytes = 512MB
 $script:ArkMaxExpandedBytes = 2GB
 $script:ArkMaxEntries = 4096
@@ -79,8 +79,8 @@ function Enter-ArkUpdateLock([string]$Root) {
 }
 
 function Assert-ArkAssetUrl([string]$Url, [string]$Version, [string]$Name) {
-    $expected = "https://github.com/CenturyMesh/Ark-Releases/releases/download/v$Version/$Name"
-    if ($Url -cne $expected) { throw 'Release asset is outside the trusted CenturyMesh/Ark-Releases channel.' }
+    $expected = "https://github.com/CenturyMesh/Ark/releases/download/v$Version/$Name"
+    if ($Url -cne $expected) { throw 'Release asset is outside the trusted CenturyMesh/Ark channel.' }
 }
 
 function Assert-ArkTransferUrl([uri]$Url, [bool]$Api = $false, [bool]$Redirect = $false) {
@@ -89,7 +89,7 @@ function Assert-ArkTransferUrl([uri]$Url, [bool]$Api = $false, [bool]$Redirect =
         if ($Url.AbsoluteUri -cne $script:ArkReleaseApi) { throw 'Untrusted release API.' }
     } elseif ($Redirect) {
         if ($Url.DnsSafeHost -cne 'release-assets.githubusercontent.com' -and $Url.DnsSafeHost -cne 'objects.githubusercontent.com') { throw 'Untrusted release download redirect.' }
-    } elseif ($Url.DnsSafeHost -cne 'github.com' -or -not $Url.AbsolutePath.StartsWith('/CenturyMesh/Ark-Releases/releases/download/', [StringComparison]::Ordinal)) {
+    } elseif ($Url.DnsSafeHost -cne 'github.com' -or -not $Url.AbsolutePath.StartsWith('/CenturyMesh/Ark/releases/download/', [StringComparison]::Ordinal)) {
         throw 'Untrusted release download.'
     }
 }

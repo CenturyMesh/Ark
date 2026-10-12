@@ -20,3 +20,16 @@ __pycache__/
 /.venv-occt/
 
 /projects-local/
+
+# Local drawings and account data are never release inputs. Existing tracked
+# synthetic examples remain tracked; deliberately review any new fixture.
+*.ark
+*.arkjson
+*.dpapi
+.env
+.env.*
+!.env.example
+auth.json
+studio.json
+*.pem
+*.pfx

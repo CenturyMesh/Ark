@@ -23,8 +23,8 @@ the counter does not reset when a phase changes. `release.json` is authoritative
 Keep the numeric runtime version for Windows/OTA and expose `iteration_code`
 alongside it in agent-facing metadata. Identify affected milestone IDs and record
 actual acceptance evidence before claiming them delivered. Roadmap proposals and
-the [commercial strategy](COMMERCIAL_STRATEGY.md) do not authorize a license change
-or publication of the private source repository.
+the historical [commercial strategy](COMMERCIAL_STRATEGY.md) do not authorize new
+license changes. Apache-2.0 was explicitly adopted on 2026-10-12; see [LICENSE](../LICENSE).
 
 The reusable component library adds nine `library_*` tools, bringing discovery
 to 66 document/library/history tools; `object_context` and the three local failure

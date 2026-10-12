@@ -1,5 +1,12 @@
 # ARK — open source e licença perpétua de 200 €
 
+> **Historical proposal, superseded on 2026-10-12:** the project owner selected
+> Apache-2.0 for ARK and authorized public source publication after verification.
+> See [LICENSE](../LICENSE). The closed-source launch recommendation and the
+> proposed 200 € offer below are retained as historical analysis, not current
+> licensing terms or an active sale. Enterprise products/services remain possible;
+> no Enterprise edition or billing capability is declared delivered by this decision.
+
 **Análise de 10 de outubro de 2026.** O utilizador confirmou **200 € por licença
 perpétua**. Este documento compara opções; não adota uma licença, não define
 termos de venda e não autoriza a publicação do repositório.

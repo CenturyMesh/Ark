@@ -68,9 +68,10 @@ ferramentas CAD continua em [docs/AGENTS.md](docs/AGENTS.md).
 
 ## Licenciamento e distribuição
 
-- [A estratégia comercial](docs/COMMERCIAL_STRATEGY.md) é uma proposta, não uma
-  licença adotada. Não publicar o código, mudar a visibilidade do repositório ou
-  adicionar uma licença ao código próprio por inferência a partir do roadmap.
+- O código próprio e a documentação adotam Apache-2.0 por decisão explícita de
+  2026-10-12; ver [LICENSE](LICENSE) e [NOTICE](NOTICE). A proposta histórica em
+  [estratégia comercial](docs/COMMERCIAL_STRATEGY.md) foi substituída nessa matéria.
+  Não alterar licenças, titularidade ou visibilidade por inferência do roadmap.
 - Preservar os avisos das dependências e validar o conteúdo dos pacotes.
   A licença do ARK não substitui as obrigações de OCCT, Mapbox ou outros terceiros.
 - Updates são feitos pelo ARK, sem exigir outro instalador. O transporte do futuro

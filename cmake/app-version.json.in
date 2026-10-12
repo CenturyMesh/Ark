@@ -1,1 +1,1 @@
-{"schema":1,"product":"ARK","version":"@PROJECT_VERSION@","iteration_code":"@ARK_ITERATION_CODE@","sequence":@ARK_RELEASE_SEQUENCE@,"phase":"@ARK_RELEASE_PHASE@","milestones":@ARK_RELEASE_MILESTONES@,"platform":"windows-x64","entrypoint":"ark-studio.exe"}
+{"schema":1,"product":"ARK","version":"@PROJECT_VERSION@","iteration_code":"@ARK_ITERATION_CODE@","sequence":@ARK_RELEASE_SEQUENCE@,"phase":"@ARK_RELEASE_PHASE@","milestones":@ARK_RELEASE_MILESTONES@,"platform":"@ARK_PACKAGE_PLATFORM@","entrypoint":"@ARK_PACKAGE_ENTRYPOINT@"}

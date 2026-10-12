@@ -1,4 +1,4 @@
-name: Prepare Windows release package
+name: Prepare Windows and Linux release packages
 on:
   workflow_dispatch:
 permissions:
@@ -21,4 +21,28 @@ jobs:
           path: |
             out/releases/ark-windows-x64-*.zip
             out/releases/ark-update.json
+          if-no-files-found: error
+  linux-package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux build dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential cmake ninja-build curl ca-certificates unzip patchelf
+      - name: Build and test Linux CLI, MCP and OCCT worker
+        run: bash scripts/build.sh --test --jobs 2
+      - name: Prepare Linux headless package
+        run: bash scripts/package-linux.sh
+      - name: Test relocated package without the build SDK
+        run: |
+          mkdir -p out/linux-smoke
+          tar -xzf out/releases/ark-linux-x64-headless-*.tar.gz -C out/linux-smoke
+          docker run --rm \
+            --mount "type=bind,source=$PWD/out/linux-smoke,target=/packages,readonly" \
+            --mount "type=bind,source=$PWD/tests/linux_package_smoke.sh,target=/smoke.sh,readonly" \
+            ubuntu:24.04 bash -c 'bash /smoke.sh /packages/ark-linux-x64-headless-*'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ark-linux-release-assets
+          path: out/releases/ark-linux-x64-headless-*.tar.gz*
           if-no-files-found: error
