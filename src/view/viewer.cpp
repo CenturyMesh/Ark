@@ -17,6 +17,7 @@
 #include <GL/gl.h>
 #include <commdlg.h>
 #include <commctrl.h>
+#include <uxtheme.h>
 #include <shellapi.h>
 #include <dwmapi.h>
 #include <psapi.h>

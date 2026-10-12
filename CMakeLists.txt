@@ -59,7 +59,7 @@ if(WIN32)
   target_link_libraries(ark PUBLIC advapi32 winhttp bcrypt crypt32 ws2_32 shell32 ole32 windowscodecs)
   add_executable(ark-studio WIN32 src/view/viewer.cpp src/view/app_icon.rc)
   target_include_directories(ark-studio PRIVATE assets/ui)
-  target_link_libraries(ark-studio PRIVATE ark comctl32 opengl32 gdi32 user32 shell32 comdlg32 dwmapi windowscodecs ole32)
+  target_link_libraries(ark-studio PRIVATE ark comctl32 uxtheme opengl32 gdi32 user32 shell32 comdlg32 dwmapi windowscodecs ole32)
   add_custom_command(TARGET ark-studio POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/updates" "$<TARGET_FILE_DIR:ark-studio>/updates"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_BINARY_DIR}/app-version.json" "$<TARGET_FILE_DIR:ark-studio>/app-version.json")

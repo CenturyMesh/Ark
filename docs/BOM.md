@@ -1,5 +1,10 @@
 # Persistent part metadata and BOM — 011E
 
+In 015B, the BOM workspace adds a dark layout, search, All/Needs review/Buy/Make
+filters, status badges and selected-part details. Sort or filter before editing:
+selection remains bound to the original definition ID. Locate part returns to
+the model; Copy link copies an existing source URL without fetching it.
+
 In 014D, **Manage → BOM** and **Inspect → BOM** expose the table, metadata and
 sourcing editors, missing fields and local JSON export. `bom_review` adds a
 revision-bound completion check after reading all BOM item pages. Detailed
