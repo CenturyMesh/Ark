@@ -14,6 +14,8 @@ current release claim. [release.json](../release.json) owns application identity
 | [Native build](NATIVE_BUILD.md) | You are building with MSVC/OCCT or configuring native desktop checks |
 | [Contributing](../CONTRIBUTING.md) | You are reporting an issue or preparing a branch and pull request |
 | [Sponsorship](SPONSORSHIP.md) | You want to understand funding setup and its current availability |
+| [First try](FIRST_TRY.md) | You want a small editable-part task and a structured way to report friction |
+| [Launch materials](launch/README.md) | You need announcement drafts, first-use feedback and local traffic snapshots |
 | [Roadmap A–G](ROADMAP.md) | You want planned features, current status and acceptance gates |
 | [Development rules](../AGENTS.md) | You are changing release identity, contracts, geometry or distribution |
 | [CAD agent protocol](AGENTS.md) | You are using or extending agent tools |

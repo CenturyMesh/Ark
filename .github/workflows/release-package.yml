@@ -3,13 +3,44 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   windows-package:
     runs-on: windows-2022
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
-      - name: Build OCCT and ARK, run tests
+      - name: Identify hosted Windows image
+        id: runner-image
+        shell: pwsh
+        run: |
+          if (-not $env:ImageVersion) { throw 'Hosted runner ImageVersion is required for the OCCT cache key.' }
+          "version=$env:ImageVersion" >> $env:GITHUB_OUTPUT
+      - name: Restore OCCT native SDK and notices
+        id: occt-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            out/deps/occt/install-msvc
+            out/deps/occt/cache/OCCT-8_0_1/LICENSE_LGPL_21.txt
+            out/deps/occt/cache/OCCT-8_0_1/OCCT_LGPL_EXCEPTION.txt
+          key: windows-2022-occt-msvc-x64-notices-v1-${{ steps.runner-image.outputs.version }}-${{ hashFiles('scripts/build-occt.ps1') }}
+      - name: Build OCCT 8 native SDK
+        if: steps.occt-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: ./scripts/build-occt.ps1 -Jobs 2
+      - name: Save OCCT native SDK and notices
+        if: steps.occt-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            out/deps/occt/install-msvc
+            out/deps/occt/cache/OCCT-8_0_1/LICENSE_LGPL_21.txt
+            out/deps/occt/cache/OCCT-8_0_1/OCCT_LGPL_EXCEPTION.txt
+          key: ${{ steps.occt-cache.outputs.cache-primary-key }}
+      - name: Build ARK and run tests
         shell: pwsh
         run: ./scripts/build.ps1 -Test -Jobs 2
       - name: Prepare portable package and update manifest

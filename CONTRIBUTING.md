@@ -13,6 +13,11 @@ private code or customer designs without authorization.
 
 ## Choose a useful change
 
+`main` is protected. Submit changes through a topic-branch PR, resolve review
+threads, and satisfy the checks listed in the [active ruleset](https://github.com/CenturyMesh/Ark/rules/24953939).
+Force pushes and deletion of `main` are blocked, including automatic maintainer
+bypass. Do not assume a direct push is allowed because an older guide used one.
+
 Bug reports should include a minimal, shareable reproduction, the runtime version
 and iteration code, platform, expected behavior and actual result. Geometry reports
 need the input and command sequence that produced the rejection or incorrect result.

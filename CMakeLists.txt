@@ -91,9 +91,12 @@ enable_testing()
 add_test(NAME release-metadata COMMAND "${CMAKE_COMMAND}" "-DARK_SOURCE_DIR=${CMAKE_SOURCE_DIR}" "-DARK_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}" "-DARK_EXPECTED_PLATFORM=${ARK_PACKAGE_PLATFORM}" "-DARK_EXPECTED_ENTRYPOINT=${ARK_PACKAGE_ENTRYPOINT}" -P "${CMAKE_SOURCE_DIR}/tests/release_metadata_tests.cmake")
 if(WIN32)
   find_program(ARK_POWERSHELL NAMES powershell pwsh REQUIRED)
-  add_test(NAME ota-updates COMMAND "${ARK_POWERSHELL}" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${CMAKE_SOURCE_DIR}/tests/updates_tests.ps1")
+  # CTest is an intermediate process when invoked from pwsh. Do not pass its
+  # PowerShell 7 module paths to Windows PowerShell; let the child construct its
+  # own defaults so Microsoft.PowerShell.Utility (Get-FileHash) can autoload.
+  add_test(NAME ota-updates COMMAND "${CMAKE_COMMAND}" -E env --unset=PSModulePath "${ARK_POWERSHELL}" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${CMAKE_SOURCE_DIR}/tests/updates_tests.ps1")
   set_tests_properties(ota-updates PROPERTIES TIMEOUT 90)
-  add_test(NAME ota-launch COMMAND "${ARK_POWERSHELL}" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${CMAKE_SOURCE_DIR}/tests/updates_launch_tests.ps1")
+  add_test(NAME ota-launch COMMAND "${CMAKE_COMMAND}" -E env --unset=PSModulePath "${ARK_POWERSHELL}" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${CMAKE_SOURCE_DIR}/tests/updates_launch_tests.ps1")
   set_tests_properties(ota-launch PROPERTIES TIMEOUT 30)
 endif()
 add_executable(ark-bom-completion-tests tests/bom_completion_tests.cpp)
