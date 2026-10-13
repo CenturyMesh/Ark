@@ -19,6 +19,11 @@
     "result": "passed",
     "log": "out/021B-native-build.log"
   },
+  "portable_core_build": {
+    "configuration": "Windows x64 MSVC Release with ARK_WITH_OCCT=OFF",
+    "result": "passed",
+    "log": "out/021B-core-final-build.log"
+  },
   "integrated_focused_tests": {
     "command": "ctest --test-dir out/021B-native -C Release --output-on-failure -R '^(associative-drawings|extrusion-bounds|dfm-proposals|agent-team|assistant-connector)$'",
     "passed": 5,
@@ -32,6 +37,13 @@
     "total": 80,
     "seconds": 70.53,
     "log": "out/021B-native-ctest.log"
+  },
+  "integrated_portable_core_ctest": {
+    "command": "ctest --test-dir out/021B-core -C Release --output-on-failure -j4",
+    "passed": 54,
+    "total": 54,
+    "seconds": 18.19,
+    "log": "out/021B-core-ctest.log"
   },
   "integrated_studio": {
     "all_exit_code": 0,
