@@ -90,6 +90,7 @@ if(WIN32)
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/assets/ui/ark-tool-atlas-v1.png" "$<TARGET_FILE_DIR:ark-studio>/assets/ui/ark-tool-atlas-v1.png"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/assets/ui/ark-wordmark.png" "$<TARGET_FILE_DIR:ark-studio>/assets/ui/ark-wordmark.png"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/assets/ui/ark-detail-atlas-v1.png" "$<TARGET_FILE_DIR:ark-studio>/assets/ui/ark-detail-atlas-v1.png"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/assets/ui/ark-authoring-atlas-v1.png" "$<TARGET_FILE_DIR:ark-studio>/assets/ui/ark-authoring-atlas-v1.png"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/assets/ui/ark-domain-atlas-v1.png" "$<TARGET_FILE_DIR:ark-studio>/assets/ui/ark-domain-atlas-v1.png")
 endif()
 if(MINGW AND NOT ARK_WITH_OCCT)

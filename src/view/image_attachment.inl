@@ -44,12 +44,12 @@ static void layoutAssistantImageDimensions(){
     if(visible)for(size_t i=0;i<3;++i)if(!g_assistantImageDimensionEdits[i]){auto edit=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",L"",WS_CHILD|WS_TABSTOP|WS_BORDER|ES_AUTOHSCROLL,0,0,1,1,g_window,(HMENU)(INT_PTR)(735+i),GetModuleHandleW(nullptr),nullptr);if(!edit)throw std::runtime_error("Could not create rough dimension fields.");g_assistantImageDimensionEdits[i]=edit;SendMessage(edit,WM_SETFONT,(WPARAM)GetStockObject(DEFAULT_GUI_FONT),TRUE);SendMessage(edit,EM_SETLIMITTEXT,24,0);SendMessage(edit,EM_SETMARGINS,EC_LEFTMARGIN|EC_RIGHTMARGIN,MAKELPARAM(6,6));if(!g_assistantImageDimensionText[i].empty())SetWindowTextA(edit,g_assistantImageDimensionText[i].c_str());SendMessageW(edit,0x1501,TRUE,(LPARAM)L"Auto");}
     const int width=std::clamp((viewW-360)/3,72,122);for(size_t i=0;i<3;++i)if(auto edit=g_assistantImageDimensionEdits[i]){MoveWindow(edit,viewX+172+(int)i*(width+18),winH-182,width,25,TRUE);ShowWindow(edit,visible?SW_SHOW:SW_HIDE);}
 }
-template<class Rect,class Button>static void drawAssistantImageAttachmentUI(Rect&& rect,Button&& button){
+template<class Rect,class Button,class Glyph>static void drawAssistantImageAttachmentUI(Rect&& rect,Button&& button,Glyph&& glyph){
     layoutAssistantImageDimensions();const float x=(float)viewX+22,y=(float)winH-(g_pendingAssistantImage?252:188),width=(float)viewW-44;
     rect(x,y,width,g_pendingAssistantImage?104.f:40.f,7,.055f,.068f,.082f,1,.20f,.28f,.34f,.8f,1);
-    button("Attach image",x+10,y+8,116,730,false,false);
-    button("Inspire design",x+138,y+8,140,731,false,g_assistantImageMode==AssistantImageMode::InspireDesign);
-    button("Image to CAD",x+282,y+8,134,732,false,g_assistantImageMode==AssistantImageMode::ImageToCAD);
+    button("",x+10,y+8,116,730,false,false);glyph(730,x+17,y+12,24);textOut("Attach image",x+43,y+16,.64f,.86f,.88f,.92f);
+    button("",x+138,y+8,140,731,false,g_assistantImageMode==AssistantImageMode::InspireDesign);glyph(731,x+145,y+12,24);textOut("Inspire design",x+173,y+16,.64f,.86f,.88f,.92f);
+    button("",x+282,y+8,134,732,false,g_assistantImageMode==AssistantImageMode::ImageToCAD);glyph(732,x+289,y+12,24);textOut("Image to CAD",x+318,y+16,.64f,.86f,.88f,.92f);
     if(g_pendingAssistantImage){
         drawAssistantAttachmentThumbnail(*g_pendingAssistantImage,x+10,y+47,48,48);
         std::string caption=g_pendingAssistantImage->name+" / "+std::to_string(g_pendingAssistantImage->width)+" x "+std::to_string(g_pendingAssistantImage->height);
