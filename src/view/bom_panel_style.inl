@@ -15,7 +15,7 @@ static void bomFilterRows(BomPanel& state,u64 keep=0){
 }
 static void bomWorkspaceLayout(BomPanel& state){
     RECT r{};GetClientRect(state.window,&r);int w=r.right,h=r.bottom;state.side=std::max(642,w-334);state.table={24,294,state.side-20,h-62};MoveWindow(state.list,state.table.left,state.table.top,state.table.right-state.table.left,state.table.bottom-state.table.top,TRUE);MoveWindow(state.search,38,211,state.side-72,30,TRUE);MoveWindow(state.header,24,h-34,w-48,22,TRUE);
-    auto move=[&](int id,int x,int y,int width,int height=34){MoveWindow(GetDlgItem(state.window,id),x,y,width,height,TRUE);};move(501,w-282,37,112);move(504,w-158,37,134);move(505,24,h-52,160,20);move(506,w-104,h-52,80,20);
+    auto move=[&](int id,int x,int y,int width,int height=34){MoveWindow(GetDlgItem(state.window,id),x,y,width,height,TRUE);};move(501,w-282,37,112);move(504,w-158,37,134);move(509,196,h-58,140,32);move(505,24,h-52,160,20);move(506,w-104,h-52,80,20);
     const int chipWidths[]={92,142,90,92};int x=24;for(int i=0;i<4;++i){move(521+i,x,254,chipWidths[i],30);x+=chipWidths[i]+8;}
     move(502,state.side+18,h-120,132);move(503,state.side+160,h-120,132);move(508,state.side+18,h-162,132);move(507,state.side+160,h-162,132);
     int tableWidth=state.table.right-state.table.left-GetSystemMetrics(SM_CXVSCROLL)-4;int widths[]={tableWidth-52-120-98-112,52,120,98,112};for(int i=0;i<5;++i)ListView_SetColumnWidth(state.list,i,widths[i]);InvalidateRect(state.window,nullptr,FALSE);

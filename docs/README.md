@@ -9,6 +9,7 @@ current release claim. [release.json](../release.json) owns application identity
 
 | Guide | Read it when |
 |---|---|
+| [018B draft controls](AUTHORING_018B_TESTING.md) | You are testing editable sketches, construction geometry and varying sweeps |
 | [Handbook](HANDBOOK.md) | You want a walkthrough of editing, assemblies, agents, BOM and export |
 | [Connecting agents and accounts](CONNECTING.md) | You need ChatGPT authorization, API configuration or an external MCP connection |
 | [Native build](NATIVE_BUILD.md) | You are building with MSVC/OCCT or configuring native desktop checks |
@@ -38,6 +39,10 @@ current release claim. [release.json](../release.json) owns application identity
 A contract can include historical context. Prefer its current operation descriptions
 and discovery responses over an old version number, tool count or example build path.
 The current native build directory is `out/native-release`.
+
+New authoring contracts: [typed sketch entities](SKETCH_ENTITY_AUTHORING.md),
+[construction datums](CONSTRUCTION_DATUM_AUTHORING.md), [spatial constraints](SPATIAL_SKETCH_CONSTRAINTS.md)
+and [team write windows](AGENT_WRITE_WINDOWS.md).
 
 ## Agents and architecture
 

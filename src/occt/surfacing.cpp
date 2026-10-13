@@ -4,6 +4,8 @@
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
+#include <BRepAlgoAPI_Splitter.hxx>
+#include <BRepClass_FaceClassifier.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakeSolid.hxx>
@@ -27,6 +29,7 @@
 #include <BRepPrimAPI_MakeRevol.hxx>
 #include <GeomAPI_Interpolate.hxx>
 #include <GeomAPI_ProjectPointOnCurve.hxx>
+#include <GCPnts_AbscissaPoint.hxx>
 #include <Geom_BSplineSurface.hxx>
 #include <Geom_BezierCurve.hxx>
 #include <gp_Ax2.hxx>
@@ -183,25 +186,29 @@ EdgeRecord edgeOf(const V& entity, const std::array<double, 16>& frame) {
             if (reverse) edge.Reverse();
         }
         TopoDS_Vertex first, last;
-        TopExp::Vertices(edge, first, last);
+        TopExp::Vertices(edge, first, last, true);
         return {edge, BRep_Tool::Pnt(first), BRep_Tool::Pnt(last)};
     }
     const V& points = required(entity, "points");
-    const size_t count = kind.str == "line" ? 2 : kind.str == "bezier" ? 4 : 0;
-    if (!count || points.t != V::Arr || points.arr.size() != count)
-        throw std::runtime_error("line needs 2 points; bezier needs 4 points");
+    const size_t count = points.t == V::Arr ? points.arr.size() : 0;
+    if ((kind.str=="line"&&count!=2)||(kind.str=="bezier"&&(count<2||count>26))||(kind.str!="line"&&kind.str!="bezier"))
+        throw std::runtime_error("line needs 2 points; bezier needs 2..26 controls");
     std::vector<gp_Pnt> poles;
     for (const auto& item : points.arr) poles.push_back(point(item, frame));
-    if (poles.front().Distance(poles.back()) <= kTolerance)
+    if (kind.str=="line"&&poles.front().Distance(poles.back()) <= kTolerance)
         throw std::runtime_error("zero-length/openly degenerate edge");
     if (kind.str == "line") {
         BRepBuilderAPI_MakeEdge maker(poles[0], poles[1]);
         if (!maker.IsDone()) throw std::runtime_error("line edge construction failed");
         return {maker.Edge(), poles[0], poles[1]};
     }
-    NCollection_Array1<gp_Pnt> controls(1, 4);
-    for (int i = 1; i <= 4; ++i) controls.SetValue(i, poles[static_cast<size_t>(i - 1)]);
-    Handle(Geom_BezierCurve) curve = new Geom_BezierCurve(controls);
+    NCollection_Array1<gp_Pnt> controls(1, (int)count);
+    for (int i = 1; i <= (int)count; ++i) controls.SetValue(i, poles[static_cast<size_t>(i - 1)]);
+    Handle(Geom_BezierCurve) curve;
+    if(const V* weights=entity.find("weights")){
+        if(weights->t!=V::Arr||weights->arr.size()!=count)throw std::runtime_error("Bezier weights must match its controls");
+        NCollection_Array1<double> rationalWeights(1,(int)count);for(int i=1;i<=(int)count;++i){double weight=number(weights->arr[(size_t)i-1],"Bezier weight");if(weight<=0)throw std::runtime_error("Bezier weights must be positive");rationalWeights.SetValue(i,weight);}curve=new Geom_BezierCurve(controls,rationalWeights);
+    }else curve = new Geom_BezierCurve(controls);
     BRepBuilderAPI_MakeEdge maker(curve);
     if (!maker.IsDone()) throw std::runtime_error("Bezier edge construction failed");
     return {maker.Edge(), poles.front(), poles.back()};
@@ -224,7 +231,7 @@ Profile profileOf(const V& value, bool requireClosed) {
         for (BRepTools_WireExplorer walk(result.wire); walk.More(); walk.Next()) {
             TopoDS_Edge edge = walk.Current();
             TopoDS_Vertex first, last;
-            TopExp::Vertices(edge, first, last);
+            TopExp::Vertices(edge, first, last, true);
             if (first.IsNull() || last.IsNull()) throw std::runtime_error("wire_brep edge has no vertices");
             result.edges.push_back({edge, BRep_Tool::Pnt(first), BRep_Tool::Pnt(last)});
         }
@@ -239,6 +246,9 @@ Profile profileOf(const V& value, bool requireClosed) {
         throw std::runtime_error("profile needs 1..128 entities");
     Profile result;
     for (const V& entity : entities.arr) {
+        if(required(entity,"kind").str=="polyline"){
+            const V& points=required(entity,"points");if(points.t!=V::Arr||points.arr.size()<2||points.arr.size()>4096)throw std::runtime_error("Polyline requires 2..4096 points");for(size_t i=1;i<points.arr.size();++i){V segment=V::makeObj(),pair=V::makeArr();pair.arr={points.arr[i-1],points.arr[i]};segment.set("kind",V::makeStr("line"));segment.set("points",pair);EdgeRecord edge=edgeOf(segment,frame);if(!result.edges.empty()&&result.edges.back().last.Distance(edge.first)>kTolerance)throw std::runtime_error("Polyline is not connected to the authored profile");result.edges.push_back(edge);}continue;
+        }
         if(required(entity,"kind").str=="brep"){
             const auto& encoded=required(entity,"brep_base64");if(encoded.t!=V::Str)throw std::runtime_error("Projected profile B-rep must be text");
             auto wires=shapes(readBrep(encoded.str),TopAbs_WIRE);if(wires.size()!=1)throw std::runtime_error("Projected entity must contain exactly one wire");
@@ -1172,12 +1182,22 @@ TopoDS_Wire alignSectionPlane(Profile section, const gp_Dir& tangent) {
 
 V sweepSurface(const V& request) {
     const bool solid = flag(request, "solid", false);
-    const Profile section = profileOf(required(request, "section"), solid);
     const Profile path = profileOf(required(request, "path"), false);
     BRepOffsetAPI_MakePipeShell pipe(path.wire);
     pipe.SetMode(false); // corrected Frenet; straight paths stay parallel to the section plane
     const bool contact = flag(request, "contact", false);
     const bool correction = flag(request, "correction", true);
+    V frames=V::makeArr();
+    if(const V* sections=request.find("sections")){
+        if(sections->t!=V::Arr||sections->arr.size()<2||sections->arr.size()>32)throw std::runtime_error("Varying sweep requires 2..32 stations");std::vector<double> lengths;double total=0;for(const auto& edge:path.edges){BRepAdaptor_Curve curve(edge.edge);double length=GCPnts_AbscissaPoint::Length(curve);if(length<=kTolerance)throw std::runtime_error("Sweep path has a degenerate edge");lengths.push_back(length);total+=length;}
+        double previous=-1;gp_Vec previousTangent,transportedX;bool haveFrame=false;for(const V& station:sections->arr){double fraction=number(required(station,"fraction"),"fraction");if(fraction<0||fraction>1||fraction<=previous)throw std::runtime_error("Sweep station fractions must increase in 0..1");previous=fraction;double distance=fraction*total;size_t edgeIndex=0;while(edgeIndex+1<lengths.size()&&distance>lengths[edgeIndex]){distance-=lengths[edgeIndex];++edgeIndex;}const auto& source=path.edges[edgeIndex].edge;BRepAdaptor_Curve curve(source);bool reverse=source.Orientation()==TopAbs_REVERSED;double origin=reverse?curve.LastParameter():curve.FirstParameter();double parameter=origin;if(distance>kTolerance&&distance<lengths[edgeIndex]-kTolerance){GCPnts_AbscissaPoint solve(curve,reverse?-distance:distance,origin,kTolerance);if(!solve.IsDone())throw std::runtime_error("Exact sweep station cannot be located on its path");parameter=solve.Parameter();}else if(distance>=lengths[edgeIndex]-kTolerance)parameter=reverse?curve.FirstParameter():curve.LastParameter();gp_Pnt point;gp_Vec tangent;curve.D1(parameter,point,tangent);if(reverse)tangent.Reverse();if(tangent.Magnitude()<=1e-12)throw std::runtime_error("Sweep station has zero path tangent");tangent.Normalize();
+            gp_Vec guide(1,0,0);if(const V* authored=station.find("x_axis")){if(authored->t!=V::Arr||authored->arr.size()!=3)throw std::runtime_error("Sweep x_axis requires XYZ");guide=gp_Vec(number(authored->arr[0],"axis"),number(authored->arr[1],"axis"),number(authored->arr[2],"axis"));}else if(haveFrame){guide=transportedX;double cosine=previousTangent.Dot(tangent);gp_Vec rotation=previousTangent.Crossed(tangent);double sine=rotation.Magnitude();if(cosine<-1+1e-10)throw std::runtime_error("Opposite sweep station tangents need an explicit X guide");if(sine>1e-12){rotation/=sine;guide=transportedX*cosine+rotation.Crossed(transportedX)*sine+rotation*(rotation.Dot(transportedX)*(1-cosine));}}else if(std::abs(tangent.X())>.9)guide=gp_Vec(0,1,0);gp_Vec x=guide-tangent*guide.Dot(tangent);if(x.Magnitude()<=1e-10)throw std::runtime_error("Sweep station X guide is parallel to its tangent");x.Normalize();transportedX=x;previousTangent=tangent;haveFrame=true;gp_Vec y=tangent.Crossed(x);double roll=station.find("roll")?number(*station.find("roll"),"roll")*(3.14159265358979323846/180.):0;gp_Vec rolled=x*std::cos(roll)+y*std::sin(roll);x=rolled;y=tangent.Crossed(x);
+            const Profile section=profileOf(required(station,"section"),solid);gp_Trsf sourceFrame;const auto& m=section.frame;sourceFrame.SetValues(m[0],m[4],m[8],m[12],m[1],m[5],m[9],m[13],m[2],m[6],m[10],m[14]);gp_Trsf targetFrame;targetFrame.SetValues(x.X(),y.X(),tangent.X(),point.X(),x.Y(),y.Y(),tangent.Y(),point.Y(),x.Z(),y.Z(),tangent.Z(),point.Z());gp_Trsf placement=targetFrame*sourceFrame.Inverted();TopoDS_Wire positioned=TopoDS::Wire(transformed(section.wire,placement));TopoDS_Vertex location=BRepBuilderAPI_MakeVertex(point).Vertex();pipe.Add(positioned,location,false,false);
+            V frame=V::makeObj(),center=V::makeArr(),normal=V::makeArr();center.arr={V::makeNum(point.X()),V::makeNum(point.Y()),V::makeNum(point.Z())};normal.arr={V::makeNum(tangent.X()),V::makeNum(tangent.Y()),V::makeNum(tangent.Z())};frame.set("fraction",V::makeNum(fraction));frame.set("origin",center);frame.set("normal",normal);frame.set("path_edge",V::makeNum(edgeIndex));frames.arr.push_back(frame);
+        }
+        if(sections->arr.front().find("fraction")->num!=0||sections->arr.back().find("fraction")->num!=1)throw std::runtime_error("Varying sweep must author its start/end sections");
+    }else{
+    const Profile section = profileOf(required(request, "section"), solid);
     // MakePipeShell accepts a wire or a vertex. A solid is the swept shell, capped by MakeSolid.
     // A straight section has no curve plane, so OCCT refuses WithCorrection; the sketch normal is that plane.
     TopoDS_Wire profile = section.wire;
@@ -1185,12 +1205,13 @@ V sweepSurface(const V& request) {
     if (correction && sectionDefinesPlane(section)) occtCorrection = true;
     else if (correction) profile = alignSectionPlane(section, initialTangent(path));
     pipe.Add(profile, contact, occtCorrection);
+    }
     pipe.Build();
     if (!pipe.IsDone()) throw std::runtime_error("OCCT sweep failed");
     if (solid && !pipe.MakeSolid()) throw std::runtime_error("OCCT sweep did not make a solid");
     TopoDS_Shape shape = pipe.Shape();
     if (solid && properties(shape) < 0) shape.Reverse();
-    return tag(shapeResult(shape, solid), "sweep");
+    V result=tag(shapeResult(shape, solid), "sweep");if(!frames.arr.empty()){V report=required(result,"report");report.set("varying_sections",V::makeNum(frames.arr.size()));report.set("dynamic_tangent_frames",frames);report.set("station_authority",V::makeStr("exact_path_arclength_and_derivative"));report.set("display_mesh_authoritative",V::makeBool(false));result.set("report",report);}return result;
 }
 
 V surfaceEditResult(const TopoDS_Shape& face,const char* operation){
@@ -1222,6 +1243,16 @@ V trimSurfacePlane(const V& request){
     if(std::abs(properties(positive,'a')+properties(negative,'a')-originalArea)>std::max(1e-6,originalArea*1e-8)||originalArea-retainedArea<=1e-8)throw std::runtime_error("Surface trim failed area conservation");
     auto result=surfaceEditResult(keep.str=="positive"?positive:negative,"surface_trim_plane");V report=required(result,"report");report.set("original_area_mm2",V::makeNum(originalArea));report.set("removed_area_mm2",V::makeNum(originalArea-retainedArea));report.set("area_conservation_checked",V::makeBool(true));result.set("report",report);return result;
 }
+V trimSurfaceWire(const V& request){
+    const auto source=readBrep(required(request,"input_brep").str),curve=readBrep(required(request,"wire_brep").str);const auto faces=shapes(source,TopAbs_FACE),wires=shapes(curve,TopAbs_WIRE);
+    if(!shapes(source,TopAbs_SOLID).empty()||faces.size()!=1)throw std::runtime_error("Wire trim requires one open surface face; extract a face first");
+    if(wires.size()!=1||!BRep_Tool::IsClosed(wires.front()))throw std::runtime_error("Wire trim requires one explicitly closed exact wire");
+    const auto& xyz=required(request,"keep_point");if(xyz.t!=V::Arr||xyz.arr.size()!=3)throw std::runtime_error("Keep point needs three coordinates");const gp_Pnt point(number(xyz.arr[0],"keep X"),number(xyz.arr[1],"keep Y"),number(xyz.arr[2],"keep Z"));
+    NCollection_List<TopoDS_Shape> arguments,tools;arguments.Append(faces.front());tools.Append(wires.front());BRepAlgoAPI_Splitter split;split.SetArguments(arguments);split.SetTools(tools);split.Build();if(!split.IsDone()||split.HasErrors())throw std::runtime_error("Surface wire trim failed");const auto pieces=shapes(split.Shape(),TopAbs_FACE);if(pieces.size()<2||pieces.size()>64)throw std::runtime_error("Trim wire must divide the surface; project the closed wire onto it first");
+    double total=0;TopoDS_Shape selected;unsigned matches=0;for(const auto& piece:pieces){total+=properties(piece,'a');BRepClass_FaceClassifier classifier(TopoDS::Face(piece),point,1e-6);if(classifier.State()==TopAbs_IN){BRepExtrema_DistShapeShape distance(BRepBuilderAPI_MakeVertex(point).Vertex(),piece);distance.Perform();if(distance.IsDone()&&distance.Value()<=1e-6){selected=piece;++matches;}}}
+    if(matches!=1)throw std::runtime_error("Choose one keep point on the retained region, away from its boundary");const double original=properties(source,'a'),retained=properties(selected,'a');if(std::abs(total-original)>std::max(1e-6,original*1e-8)||retained<=1e-8||original-retained<=1e-8)throw std::runtime_error("Surface trim failed area conservation");return surfaceEditResult(selected,"surface_trim_wire");
+}
+
 V offsetSurface(const V& request) {
     const V& input = required(request, "input_brep");
     if (input.t != V::Str || input.str.empty()) throw std::runtime_error("input_brep must be base64");
@@ -1310,8 +1341,9 @@ V modelSurfaceNative(const V& request) {
         if (operation.str == "offset_surface") return offsetSurface(request);
         if (operation.str == "surface_extract_face") return extractSurfaceFace(request);
         if (operation.str == "surface_trim_plane") return trimSurfacePlane(request);
+        if (operation.str == "surface_trim_wire") return trimSurfaceWire(request);
         if (operation.str == "sew") return sewSurfaces(request);
-        if (operation.str == "curve" || operation.str == "intersection_curve" || operation.str == "bridge")
+        if (operation.str == "curve" || operation.str == "curve_interpolate" || operation.str == "curve_analytic" || operation.str == "surface_spline" || operation.str == "curve_project_surface" || operation.str == "intersection_curve" || operation.str == "bridge")
             return modelCurveNative(request);
         throw std::runtime_error("unsupported surfacing operation");
     } catch (const Standard_Failure& error) {

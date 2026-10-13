@@ -116,7 +116,7 @@ struct FeatureResult {
 // ---------------------------------------------------------------------------
 // Sketches ----------------------------------------------------------------------
 struct SketchEnt {
-    enum Kind : i32 { Pnt, Line, Circle, Spline, Arc, Wire, Project, Offset } kind=Pnt;
+    enum Kind : i32 { Pnt, Line, Circle, Spline, Arc, Wire, Project, Offset, Recipe } kind=Pnt;
     // dof layout: Pnt -> [x,y]; Line -> [x0,y0,x1,y1]; Circle -> [cx,cy,r]
     // Arc -> [cx,cy,r,a0deg,a1deg]. Wire flattens start, then each segment.
     // Project owns an associative exact derived B-rep; its display samples are
@@ -133,6 +133,10 @@ struct SketchEnt {
     // Authored arc construction recipe. The evaluated center/radius/angles in
     // dof are derived and never replace these source coordinates/expressions.
     arkjson::Value arcRecipe;
+    // Typed authored entity recipes retain expressions. The exact native
+    // primitive DTOs and display samples are derived, never persisted.
+    arkjson::Value entityRecipe, recipeGeometry, recipeReport;
+    std::vector<Vec2> recipeSamples;
     bool construction=false, closed=false;
     f64 tension=0;
     u64 sourceFeature=0;          // project: earlier feature id

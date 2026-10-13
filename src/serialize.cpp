@@ -34,12 +34,20 @@ static void canonicalDocumentKeys(Value& value){
 
 namespace {
 
+bool generation34Document(const Document& doc){
+    for(const auto& sketch:doc.sketches)for(const auto& entity:sketch.sk.ents)if(entity.kind==SketchEnt::Recipe)return true;
+    for(const auto& feature:doc.features)if(feature.type==FeatureType::Curve&&feature.nativeSpec.find("tolerance")){const auto* op=feature.nativeSpec.find("op");if(op&&op->asStr()=="equation")return true;}
+    for(const auto& feature:doc.features){if(feature.nativeSpec.find("constraints")||feature.nativeSpec.find("start_ref")||feature.nativeSpec.find("analytic"))return true;if(feature.type==FeatureType::Sweep&&feature.nativeSpec.find("sections"))return true;if(const auto* op=feature.nativeSpec.find("op");op&&op->t==Value::Str&&op->str=="surface_spline")return true;if(const auto* segments=feature.nativeSpec.find("segments"))for(const auto& segment:segments->arr)if(segment.find("to_ref")||segment.find("through_ref")||(segment.find("kind")&&segment.find("kind")->asStr()=="spline"))return true;}
+    for(const auto& datum:doc.planes)if(const auto* kind=datum.support.find("kind");kind&&kind->t==Value::Str&&(kind->str=="offset_plane"||kind->str=="angle_plane"||kind->str=="plane_three_points"||kind->str=="plane_axis_point"||kind->str=="plane_point_normal"||kind->str=="axis_points"||kind->str=="axis_planes"||kind->str=="point"||kind->str=="between_points"))return true;
+    return false;
+}
+
 Value entToJson(const SketchEnt& e){
     Value v=Value::makeObj();
     v.set("kind",Value::makeStr(sketchEntityKindName(e.kind)));
     Value d=Value::makeArr();
-    if(e.kind!=SketchEnt::Project&&e.arcRecipe.t!=Value::Obj)for(size_t i=0;i<e.dof.size();++i)d.arr.push_back(i<e.expressions.size()&&!e.expressions[i].empty()?Value::makeStr(e.expressions[i]):Value::makeNum(e.dof[i]));
-    if(e.arcRecipe.t==Value::Obj)v.set("recipe",e.arcRecipe);else v.set("dof",std::move(d));
+    if(e.kind!=SketchEnt::Project&&e.kind!=SketchEnt::Recipe&&e.arcRecipe.t!=Value::Obj)for(size_t i=0;i<e.dof.size();++i)d.arr.push_back(i<e.expressions.size()&&!e.expressions[i].empty()?Value::makeStr(e.expressions[i]):Value::makeNum(e.dof[i]));
+    if(e.kind==SketchEnt::Recipe)v.set("recipe",e.entityRecipe);else if(e.arcRecipe.t==Value::Obj)v.set("recipe",e.arcRecipe);else v.set("dof",std::move(d));
     if(!e.name.empty())v.set("name",Value::makeStr(e.name));
     if(e.construction)v.set("construction",Value::makeBool(true));
     if(e.kind==SketchEnt::Spline){v.set("closed",Value::makeBool(e.closed));v.set("tension",Value::makeNum(e.tension));}
@@ -79,14 +87,17 @@ bool entFromJson(const Value& v, SketchEnt& e, std::string* err){
     else if(k=="wire") e.kind=SketchEnt::Wire;
     else if(k=="project") e.kind=SketchEnt::Project;
     else if(k=="offset") e.kind=SketchEnt::Offset;
+    else if(k=="recipe") e.kind=SketchEnt::Recipe;
     else { if(err)*err="unknown sketch entity kind: "+k; return false; }
     if(auto recipe=v.find("recipe")){
-        std::string reason;if(e.kind!=SketchEnt::Arc)return fail("Only an arc accepts a construction recipe");
+        std::string reason;if(e.kind==SketchEnt::Recipe){if(!validateSketchEntityRecipe(*recipe,reason))return fail(reason);if(const auto* dof=v.find("dof");dof&&(dof->t!=Value::Arr||!dof->arr.empty()))return fail("Recipe source and resolved dof are exclusive");e.entityRecipe=*recipe;}else {if(e.kind!=SketchEnt::Arc)return fail("Only an arc or typed entity accepts a construction recipe");
         if(!validateSketchArcRecipe(*recipe,reason))return fail(reason);
         if(auto dof=v.find("dof");dof&&(dof->t!=Value::Arr||!dof->arr.empty()))return fail("Arc recipe and center/angle dof are exclusive");
-        e.arcRecipe=*recipe;
+        e.arcRecipe=*recipe;}
     }
+    if(e.kind==SketchEnt::Recipe&&e.entityRecipe.t!=Value::Obj)return fail("Typed sketch entity needs recipe");
     const bool driven=e.kind==SketchEnt::Project||e.kind==SketchEnt::Offset;
+    const bool recipeDriven=e.kind==SketchEnt::Recipe;
     if(e.kind==SketchEnt::Wire||driven){
         auto segments=v.find("segments");
         if(e.kind==SketchEnt::Wire){if(!segments||segments->t!=Value::Arr||segments->arr.empty()||segments->arr.size()>64) return fail("Wire needs 1..64 segments");}
@@ -130,12 +141,12 @@ bool entFromJson(const Value& v, SketchEnt& e, std::string* err){
         else if(e.kind==SketchEnt::Circle)e.dof={0,0,5};
         else if(e.kind==SketchEnt::Arc) e.dof={0,0,5,0,180};
         else if(e.kind==SketchEnt::Wire) return fail("Wire requires start and segment endpoints");
-        else if(!driven) return fail("Spline requires explicit anchor coordinates");
+        else if(!driven&&!recipeDriven) return fail("Spline requires explicit anchor coordinates");
     }
     if(e.kind==SketchEnt::Wire||(driven&&!e.segments.empty())){
         int expect=2;for(const auto& segment:e.segments) expect+=segment.kind==SketchEnt::WireSeg::Line?2:segment.kind==SketchEnt::WireSeg::Arc?3:6;
         if((int)e.dof.size()!=expect) return fail(driven?"Projected or offset degrees of freedom do not match segments":"Wire degrees of freedom do not match segments");
-    }else if(!driven&&e.kind!=SketchEnt::Spline){
+    }else if(!driven&&!recipeDriven&&e.kind!=SketchEnt::Spline){
         const size_t expected=e.kind==SketchEnt::Pnt?2:e.kind==SketchEnt::Line?4:e.kind==SketchEnt::Arc?5:3;
         if(e.dof.size()!=expected)return fail("wrong entity degrees of freedom");
     }
@@ -515,6 +526,7 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
     }
     if(!doc.mates.empty()||doc.nextMateId_>1){Value mates=Value::makeArr();for(auto& m:doc.mates)mates.arr.push_back(mateToJson(m));r.set("mates",mates);r.set("next_mate_id",Value::makeNum((double)doc.nextMateId_));}
     if(includeAudit&&doc.agentActivity){r.set("agent_activity",agentActivityJson(doc.agentActivity));r.set("version",Value::makeNum(33));}
+    if(generation34Document(doc))r.set("version",Value::makeNum(34));
     if(includeAudit&&includeHistory)iterationPersist(r,doc);
     canonicalDocumentKeys(r);
     return r.dump();
@@ -526,7 +538,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     Value v;
     if(!arkjson::parse(json,v)) return fail("malformed JSON");
     if(v.t!=Value::Obj) return fail("root must be object");
-    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0&&ver->num!=3.0&&ver->num!=4.0&&ver->num!=5.0&&ver->num!=6.0&&ver->num!=7.0&&ver->num!=8.0&&ver->num!=9.0&&ver->num!=10.0&&ver->num!=11.0&&ver->num!=12.0&&ver->num!=13.0&&ver->num!=14.0&&ver->num!=15.0&&ver->num!=16.0&&ver->num!=17.0&&ver->num!=18.0&&ver->num!=19.0&&ver->num!=20.0&&ver->num!=21.0&&ver->num!=22.0&&ver->num!=23.0&&ver->num!=24.0&&ver->num!=25.0&&ver->num!=26.0&&ver->num!=27.0&&ver->num!=28.0&&ver->num!=29.0&&ver->num!=30.0&&ver->num!=31.0&&ver->num!=32.0&&ver->num!=33.0)))
+    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0&&ver->num!=3.0&&ver->num!=4.0&&ver->num!=5.0&&ver->num!=6.0&&ver->num!=7.0&&ver->num!=8.0&&ver->num!=9.0&&ver->num!=10.0&&ver->num!=11.0&&ver->num!=12.0&&ver->num!=13.0&&ver->num!=14.0&&ver->num!=15.0&&ver->num!=16.0&&ver->num!=17.0&&ver->num!=18.0&&ver->num!=19.0&&ver->num!=20.0&&ver->num!=21.0&&ver->num!=22.0&&ver->num!=23.0&&ver->num!=24.0&&ver->num!=25.0&&ver->num!=26.0&&ver->num!=27.0&&ver->num!=28.0&&ver->num!=29.0&&ver->num!=30.0&&ver->num!=31.0&&ver->num!=32.0&&ver->num!=33.0&&ver->num!=34.0)))
         return fail("unsupported document version");
     Value history;std::string historyError;if(!iterationExpand(v,history,historyError))return fail(historyError);
 
@@ -738,6 +750,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     std::string manufacturingError;if(!validateManufacturingRoutes(nd,manufacturingError))return fail(manufacturingError);
     if(history.t!=Value::Null){if(!iterationValidate(nd,history,historyError))return fail(historyError);nd.iterationHistory=std::move(history);}
     if(arcRecipeDocument(nd)){const auto* version=v.find("version");if(!version||version->num<30)return fail("Arc recipes and linked tube end fits require document version 30");}
+    if(generation34Document(nd)){const auto* version=v.find("version");if(!version||version->num<34)return fail("Typed sketches, associative datums, spatial constraints and varying sections require document version 34");}
     doc=std::move(nd);
     return true;
 }

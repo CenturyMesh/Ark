@@ -7,7 +7,7 @@ template<class F>void rejects(F fn){bool rejected=false;try{fn();}catch(const st
 int main(int argc,char** argv){try{
     ark::validateComponentHttpsUrl("https://gitlab.com/kicad/libraries/model.step");
     for(auto* url:{"http://example.com/file.step","file:///private.step","https://user:pass@example.com/a.step","https://example.com/a#fragment","https://example.com/a\r\nHeader:x","https:///empty-host","https://example.com\\a.step"})rejects([&]{ark::validateComponentHttpsUrl(url);});
-    auto sources=ark::componentSources();check(sources.find("sources")->arr.size()==3,"catalog registry");check(!sources.find("automatic_standard_recognition")->b,"catalog labels never certify standards");
+    auto sources=ark::componentSources();check(sources.find("sources")->arr.size()==4,"catalog registry");check(!sources.find("automatic_standard_recognition")->b,"catalog labels never certify standards");
     V query=V::makeObj();query.set("source",V::makeStr("traceparts"));rejects([&]{ark::searchComponentSource(query);});
     query=V::makeObj();query.set("path",V::makeStr("../escape"));rejects([&]{ark::searchComponentSource(query);});
     query=V::makeObj();query.set("page",V::makeNum(1.5));rejects([&]{ark::searchComponentSource(query);});

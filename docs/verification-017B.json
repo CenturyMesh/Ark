@@ -1,0 +1,135 @@
+{
+  "iteration": {
+    "sequence": 17,
+    "phase": "B",
+    "code": "017B",
+    "version": "0.9.18",
+    "milestones": [
+      "A.01",
+      "B.01",
+      "B.02",
+      "B.03",
+      "B.05",
+      "D.02",
+      "D.04",
+      "E.01"
+    ]
+  },
+  "date": "2026-10-13",
+  "baseline_commit": "36f07969d6cff783db9d63d1b4530d53b9a06575",
+  "platform": "Windows x64 local LLVM-MinGW UCRT",
+  "compiler": "llvm-mingw-20261006; clang 23.1.3",
+  "native_kernel": "OCCT 8.0.1; pinned source archive SHA-256 7c033d917ee8f040c0512d289dcc5f02c148889d5bac17c3e25639accb44f0da",
+  "native_tests": {
+    "passed": 68,
+    "failed": 0,
+    "seconds": 125,
+    "log": "out/native-tests-final2.log"
+  },
+  "core_tests": {
+    "passed": 45,
+    "failed": 0,
+    "seconds": 36.49,
+    "log": "out/core-tests-final2.log"
+  },
+  "ui": [
+    {
+      "test": "sketch-drawing",
+      "exit": 0,
+      "evidence": "out/evidence/last-sketch-drawing.stderr.log"
+    },
+    {
+      "test": "authoring",
+      "exit": 0,
+      "evidence": "out/evidence/last-authoring.png.authoring-test.log"
+    },
+    {
+      "test": "bom",
+      "exit": 0
+    },
+    {
+      "test": "measurement",
+      "exit": 0
+    },
+    {
+      "test": "projection",
+      "exit": 0
+    },
+    {
+      "test": "action-icons",
+      "exit": 0
+    },
+    {
+      "test": "native",
+      "exit": 0
+    },
+    {
+      "test": "render",
+      "exit": 0
+    }
+  ],
+  "visual_evidence": [
+    {
+      "path": "docs/images/017B/continuous-loop.png",
+      "sha256": "ac3e149679d66e72647085a1caeeb4134842b55cc5a6e35797509de354e89b1b",
+      "inspected": true,
+      "fixture": "synthetic"
+    },
+    {
+      "path": "docs/images/017B/planes-and-face.png",
+      "sha256": "dc5cf47791f684eb80f304c6c6ca8fe00f217a38b24dd4fd7a471781831d27e0",
+      "inspected": true,
+      "fixture": "synthetic"
+    },
+    {
+      "path": "docs/images/017B/bom-export.png",
+      "sha256": "8d45d5f3cf9b2bc15e4ca1959470c57049c9a9b4043567b73d12c0f18596c1e0",
+      "inspected": true,
+      "fixture": "synthetic"
+    }
+  ],
+  "preview": {
+    "path": "out/test-preview/r4",
+    "studio_sha256": "8304c5b58da338c51bb51bbacdcf6b5615ad8735d3f490ead03999a749c5f262",
+    "publishing": "local manual preview; no public release or merge"
+  },
+  "web": {
+    "tools": [
+      "library_source_search",
+      "library_source_page"
+    ],
+    "query": "site:holybro.com Pixhawk 6C",
+    "result": "10 relevant HTTPS candidates; actual Holybro product page read and SKU found",
+    "evidence": "out/live-sourcing-result.json",
+    "authority": "public page and search evidence; no engineering compatibility or supplier availability qualification"
+  },
+  "drone": {
+    "test": "drone-demo",
+    "result": "public offline regression passed",
+    "audit": "docs/iterations/015B.md",
+    "implemented_followups": [
+      "Read-only library batching",
+      "Available-field diagnostics",
+      "Semantic adjacency navigation",
+      "Actual public component page discovery"
+    ],
+    "limits": "Original private drone logs absent. No new live-provider drone build or matched cost/design-quality benchmark."
+  },
+  "rejected_attempts": [
+    "Four discovery-count expectations still used 76; updated to 80 and passed",
+    "Old UI action numbers collided with measurement/BOM; reassigned and real-dialog tests passed",
+    "Recipe arc dimension assumed a numeric dof DTO; now handles recipe-only DTO and radius test passed",
+    "Circular analytic offset extrusion exposed prior arc payload indexing; corrected and cylinder-volume regression passed",
+    "Bing RSS returned irrelevant candidates; replaced with verified public DuckDuckGo HTML search"
+  ],
+  "limits": [
+    "Equation deviation between samples unbounded",
+    "General 3D geometric constraint solver not added; dimensions and coordinates use driving expressions",
+    "Noncircular sketch offsets remain sampled miter segments; mesh offsets remain approximate",
+    "Wire projection requires one result; closed-wire trim requires one open face",
+    "Flat mesh and unsupported geometry export reject atomically",
+    "Windows HTTPS source transport only; no JavaScript or account catalogs",
+    "Linux/MSVC not validated locally",
+    "Human acceptance pending; draft PR must not advance automatically"
+  ]
+}

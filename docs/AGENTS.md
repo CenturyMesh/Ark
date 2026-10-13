@@ -1,5 +1,25 @@
 # ARK agent protocol
 
+018B adds editable viewport sketches, typed sketch entities, associative datums,
+spatial equality constraints and varying-section sweeps. See [018B scope](iterations/018B.md),
+[manual controls](AUTHORING_018B_TESTING.md), [spatial constraints](SPATIAL_SKETCH_CONSTRAINTS.md)
+and [source contracts](SKETCH_ENTITY_AUTHORING.md). Standalone discovery remains 80 tools.
+In-app teams can use [short write reservations](AGENT_WRITE_WINDOWS.md) after reading
+the current revision; reads remain available and stale writes still reject.
+Inspect world datum axes before placement/revolve. Web candidates require a real
+product-page review; unrelated results and empty pages reject explicitly.
+
+
+017B adds continuous sketches, equation curves, surface projection/trim and BOM
+part batch export. Discovery now lists 80 standalone tools. Read
+[017B scope](iterations/017B.md) and [manual controls](AUTHORING_017B_TESTING.md).
+Use `library_source_search{source:"web",query}` then `library_source_page{url}`
+for actual purchased-component evidence; persist real URLs/references in part
+metadata. `reference_navigate` discovers adjacent exact faces/edges;
+`selection_set` applies live Studio selection at the observed revision.
+`bom_export_parts` atomically publishes counted definitions with hashes.
+
+
 014D adds `bom_review` (76 standalone tools). Before Studio design completion,
 inspect every `bom_inspect` item page at one current revision and submit
 `bom_review{expected_revision,scope,fastening_review,pending_notes?}`.

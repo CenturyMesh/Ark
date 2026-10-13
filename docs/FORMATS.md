@@ -1,3 +1,12 @@
+# Current source semantics — format 34
+
+018B accepts legacy formats 1–33 and adds format 34 only when a document uses
+typed sketch recipes, new associative construction recipes, spatial constraints
+or anchors, interpolating spatial splines, surface splines, analytic equations or
+varying sweep sections. These source fields persist; resolved geometry remains
+derived. Older runtimes reject the unsupported format. Application iteration and
+document format are independent. See [018B](iterations/018B.md) for current scope.
+
 # ARK file formats, document versions 1 through 27
 
 ## `.ark`
