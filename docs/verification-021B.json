@@ -36,7 +36,8 @@
     "passed": 80,
     "total": 80,
     "seconds": 70.53,
-    "log": "out/021B-native-ctest.log"
+    "log": "out/021B-native-ctest.log",
+    "source_scope": "Integrated native geometry, DFM and drawing backend before the final Studio-only drawing workspace commit; the final Studio executable was then rebuilt and exercised separately"
   },
   "integrated_portable_core_ctest": {
     "command": "ctest --test-dir out/021B-core -C Release --output-on-failure -j4",
