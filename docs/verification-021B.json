@@ -33,11 +33,39 @@
     "seconds": 70.53,
     "log": "out/021B-native-ctest.log"
   },
+  "integrated_studio": {
+    "all_exit_code": 0,
+    "cases": [
+      {"name": "drawing workspace", "size": [1180, 900]},
+      {"name": "drawing workspace", "size": [1440, 900]},
+      {"name": "direct authoring", "size": [1180, 800]},
+      {"name": "direct authoring", "size": [1440, 900]},
+      {"name": "parametric authoring", "size": [1440, 900]},
+      {"name": "action icons", "size": [1600, 1000]}
+    ],
+    "live_viewport_pipe": {"result": "passed", "pixel_size": [900, 551], "conflicting_camera": "rejected"},
+    "visual_inspection": {
+      "synthetic_capture_paths": [
+        "images/drawings/drawing-workspace-1180.png",
+        "images/drawings/drawing-workspace-1440.png",
+        "images/drawings/drawing-stale.png",
+        "images/drawings/drawing-zoom-1180.png",
+        "images/extrusion/profile-handle.png",
+        "images/extrusion/up-to-face-preview.png"
+      ],
+      "observed": ["Zoomed sheet views and labels remain reachable through pan at 1180 px", "Fit restores page position without changing revision, physical scale or measured dimensions", "Stale sheet omits measurements and directs the user to Refresh source", "Exact extrusion preview and source handle fit the compact viewport"]
+    }
+  },
   "branch_local_receipts": [
     "verification-extrusion-bounds.json",
     "verification-dfm-proposals-2026-10-13.json",
     "verification-snapshot-camera-2026-10-13.json",
     "verification/drawing-workspace-local.json"
+  ],
+  "integration_findings": [
+    "A separate extrusion's source and limit inputs were initially counted as consumed physical bodies; the central input-consumption predicate now retains both in viewport, BOM and mass",
+    "DFM comparison initially treated JSON property order as changed process input; canonical semantic comparison fixed it before acceptance",
+    "A zoomed A4 preview initially clipped view labels without navigation; canvas pan and Fit now restore access while leaving authored measurements unchanged"
   ],
   "agent_activity_audit": {
     "authority": "read-only activity_info from the local Studio document; raw project ledger remains private",
@@ -53,5 +81,6 @@
     "SVG and Studio sheets are display/authoring previews; JSON retains exact derived curves",
     "DFM comparison does not certify cost savings, physical process capability or functional acceptance",
     "Hosted CI, distribution and user pilots are separate gates"
-  ]
+  ],
+  "hosted_ci": "Separate GitHub Actions evidence; this local receipt does not claim a hosted result"
 }
