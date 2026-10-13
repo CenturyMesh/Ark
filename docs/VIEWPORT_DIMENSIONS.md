@@ -6,7 +6,7 @@ remain in the roadmap.
 
 ## Extrude a closed sketch by dragging
 
-Select **Model ? Drag extrude** (also available under Sketch ? Build), choose a
+Select **Model > Drag extrude** (also available under Sketch > Build), choose a
 saved closed sketch, and drag in the view along the cyan normal guide. The exact
 native extrusion is evaluated in an isolated candidate. Releasing saves a valid
 candidate as a `native_solid` extrusion. The profile and sketch plane remain its

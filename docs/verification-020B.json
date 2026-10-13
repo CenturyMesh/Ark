@@ -31,7 +31,7 @@
       {"name": "direct authoring", "size": [1440, 900], "exit_code": 0},
       {"name": "direct authoring", "size": [1180, 800], "exit_code": 0},
       {"name": "parametric authoring", "size": [1440, 900], "exit_code": 0},
-      {"name": "action icons", "sizes": [[1180, 800], [1600, 1000]], "exit_code": 0, "log": "out/020B-ui/icons-final.png.action-icons-test.log"}
+      {"name": "action icons", "sizes": [[1180, 800], [1600, 1000]], "exit_code": 0, "log": "out/020B-ui/icons-final2.png.action-icons-test.log", "menu_actions_include": [687]}
     ],
     "failed_attempts": [
       {
