@@ -1,0 +1,7 @@
+Use case: UI icon asset atlas for ARK Studio, a professional native CAD application. The existing ark-detail-atlas-v1.png was a style reference only; do not copy its subjects. Create a new square bitmap sprite atlas with a genuinely transparent background, exactly four columns and four rows of equal cells. Center each icon within its cell and leave generous transparent padding. No dividers, text, labels, letters or watermark.
+
+Reading order: parametric skeleton; image reference with inspiration spark; image becoming an isometric solid; cube with measurement arrows; extruded prism with highlighted top face and vertical drag arrow; outward pushed block face; pattern of solids linked to one source; helix around an axis; two curved surfaces joined at a seam; two solids with a red collision intersection; exact solid with DFM check gauge; CNC end mill approaching a block; additive nozzle printing layers; sheet bend with laser cut contour; welded joint and torch; improved solid outline with cyan shape arrow.
+
+Match the established clean isometric CAD icon language: cool slate metal, electric cyan edges, restrained depth and clear silhouettes legible at 28 to 36 pixels. Use red only for collision. Keep subjects visually distinct and prevent glow from crossing cell boundaries.
+
+Generated with the built-in ImageGen tool on 2026-10-13. The output is 1254 x 1254 RGBA with transparent corners and was copied unchanged to assets/ui/ark-authoring-atlas-v1.png. SHA-256: 9774f34923f9f1503de6d5e7f4c9828a1f42d4eea1dd2eb3b88f029529910add.

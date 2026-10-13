@@ -68,6 +68,11 @@ false: geometric validation does not certify the fabrication process.
 
 ## Process inspection
 
+Process-specific DFM screens are available in each component's `dfm` block.
+The versioned [DFM contract](DFM.md) covers laser, bend, FDM, CNC and declared
+weld-bead comparisons, explicit caller capability assumptions, and typed
+recommendations. Compatible screens remain separate from process qualification.
+
 `manufacturing_inspect{id:"Part"}` is read-only. Omit `id` to inspect declared and
 output feature definitions, including placed definitions. It reports the current
 revision, `components`, `geometry_mutated:false` and `manufacturing_qualified:false`.

@@ -1,7 +1,7 @@
         const u64 revision=g_session.revision,epoch=g_documentEpoch;
         const int originalW=winW,originalH=winH,originalModule=g_toolModule;const bool originalDock=g_assistantDockOpen;
         auto failure=[&](const std::string& detail){std::ofstream(shotPath+".action-icons-test.log")<<"FAIL: "<<detail<<'\n';std::fprintf(stderr,"Action icons UI: %s\n",detail.c_str());return 521;};
-        const std::vector<int> actions{58,357,585,586,587,590,549,152,153,154};
+        const std::vector<int> actions{58,357,585,586,587,590,549,152,153,154,650,659,687,710,730,731,732,750,755};
         HMENU menu=CreatePopupMenu();for(int action:actions)AppendMenuA(menu,MF_STRING,(UINT_PTR)action,"Action icon");decorateMenu(menu);
         for(size_t i=0;i<actions.size();++i){MENUITEMINFOW item{sizeof item};item.fMask=MIIM_BITMAP;BITMAP bitmap{};
             if(!GetMenuItemInfoW(menu,(UINT)i,TRUE,&item)||!item.hbmpItem||!GetObject(item.hbmpItem,sizeof bitmap,&bitmap)||bitmap.bmWidth!=22||bitmap.bmHeight!=22){DestroyMenu(menu);return failure("A native menu action has no 22px bitmap.");}
@@ -15,6 +15,10 @@
             for(int module:{1,3,4,5,6}){g_toolModule=module;if(!capture(".icons-"+std::to_string(module)+"-"+std::to_string(size.first)+".png"))return failure("Could not capture an affected ribbon.");
                 if(module==4||module==5){for(int id:module==4?std::vector<int>{58,357}:std::vector<int>{58}){auto zone=std::find_if(g_zones.begin(),g_zones.end(),[&](const Zone& zone){return zone.id==id;});if(zone==g_zones.end()||zone->x<0||zone->x+zone->w>winW||zone->w<24)return failure("Connect / Providers ribbon control is missing or clipped.");}}
             }
+            g_assistantDockOpen=true;g_toolModule=4;
+            if(!capture(".icons-image-actions-"+std::to_string(size.first)+".png"))return failure("Could not capture the image-reference controls.");
+            for(int id:{730,731,732}){auto zone=std::find_if(g_zones.begin(),g_zones.end(),[&](const Zone& item){return item.id==id;});if(zone==g_zones.end()||zone->x<viewX||zone->x+zone->w>viewX+viewW)return failure("An image-reference action is missing or clipped.");}
+            g_assistantDockOpen=false;
         }
         g_toolModule=4;startLiveBridge();if(g_liveBridge.endpoint().empty())return failure("Could not start the isolated live-document bridge.");
         for(const char* target:{"codex","claude-code","claude-desktop","opencode"}){drawFrame(hdc);auto zone=std::find_if(g_zones.begin(),g_zones.end(),[](const Zone& zone){return zone.id==58;});if(zone==g_zones.end()){g_liveBridge.stop();return failure("Connect has no hit target.");}
@@ -23,5 +27,5 @@
         }g_liveBridge.stop();
         if(g_session.revision!=revision||g_documentEpoch!=epoch)return failure("Icon/connection export changed the drawing revision or epoch.");
         resize(originalW,originalH);g_toolModule=originalModule;g_assistantDockOpen=originalDock;layout();
-        std::ofstream(shotPath+".action-icons-test.log")<<"PASS: native menu bitmaps/coverage, actual affected ribbons at 1180x800 and 1600x1000, visible Connect/Providers hit targets, real Connect clicks and raw configuration dialogs for Codex/Claude Code/Claude Desktop/OpenCode, unchanged document. No account authentication or provider inference.\n";
+        std::ofstream(shotPath+".action-icons-test.log")<<"PASS: native menu bitmaps/coverage including authoring atlas, actual affected ribbons and image-reference controls at 1180x800 and 1600x1000, visible Connect/Providers hit targets, real Connect clicks and raw configuration dialogs for Codex/Claude Code/Claude Desktop/OpenCode, unchanged document. No account authentication or provider inference.\n";
         g_status="Action icons verified / menus / ribbon / external client export";

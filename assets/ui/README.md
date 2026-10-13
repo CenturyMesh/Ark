@@ -19,6 +19,16 @@ The source prompt and final transparency instruction are in
 
 ## Ribbon atlases
 
+The 2026-10-13 authoring atlas adds distinct bitmap symbols for Skeleton, image
+reference intents, source dimensions, direct extrusion, push/pull, patterns,
+helix and collision feedback. Its four rows also reserve process-specific DFM
+symbols for controls that gain an actual DFM action later. Studio renders the
+active symbols in the ribbon and native menus, and shows image intent symbols
+beside the Assistant image actions. The 1254 x 1254 RGBA source is
+`ark-authoring-atlas-v1.png`; the exact prompt, alpha and hash are recorded in
+`docs/design/ark-authoring-atlas.prompt.txt`. It was generated with built-in
+ImageGen using the detail atlas only as a style reference.
+
 The 2026-10-10 audit added `ark-detail-atlas-v1.png`, generated with built-in
 ImageGen using the first atlas only as a style reference. Its 4 x 4 cells are:
 circle, edit sketch, normal view, sheet base; hem, emboss, hole pattern, drive

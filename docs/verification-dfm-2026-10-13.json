@@ -1,0 +1,91 @@
+{
+  "date": "2026-10-13",
+  "milestones": ["C.03"],
+  "milestone_status": "Parcial",
+  "scope": "Local process-specific DFM module and agent contract verification; distribution identity is assigned by release integration",
+  "baseline_commit": "d7448ef4ec42f38f7bd5081f500abce8c3a99e52",
+  "platform": "Windows x64",
+  "compiler": "MSVC 19.44.35228.0",
+  "native_kernel": "OCCT 8.0.1",
+  "contract": {
+    "tool": "manufacturing_inspect",
+    "output": "components[].dfm",
+    "ruleset_id": "ark.dfm",
+    "ruleset_version": 1,
+    "schema_version": 1,
+    "rule_statuses": ["compatible", "incompatible", "unknown", "not_applicable"],
+    "recommendation_kinds": ["request_input", "change_process_or_design", "obtain_process_evidence"],
+    "automatic_geometry_edit": false,
+    "manufacturing_qualified": false,
+    "document_version_change": false
+  },
+  "tests": {
+    "native_focused": {
+      "command": "ctest --test-dir out/dfm-native -C Release --output-on-failure -R '^(dfm|manufacturing|mcp-stdio)$'",
+      "groups": 3,
+      "passed": 3,
+      "failed": 0,
+      "seconds": 1.11,
+      "evidence": "out/dfm-native-tests-accepted.log"
+    },
+    "core_focused": {
+      "command": "ctest --test-dir out/dfm-core -C Release --output-on-failure -R '^(dfm|manufacturing|mcp-stdio)$'",
+      "groups": 3,
+      "passed": 3,
+      "failed": 0,
+      "seconds": 0.44,
+      "evidence": "out/dfm-core/Testing/Temporary/LastTest.log"
+    },
+    "failed_attempts": [
+      {
+        "scope": "First native manufacturing/dfm focused run",
+        "passed": 1,
+        "failed": 1,
+        "seconds": 1.01,
+        "failure": "DFM.WELD.01 returned unknown instead of the expected incompatible throat comparison"
+      },
+      {
+        "scope": "Diagnostic dfm retry with full failing rule output",
+        "passed": 0,
+        "failed": 1,
+        "seconds": 0.70,
+        "failure": "The rule reported unverified evidence with an empty weld inventory",
+        "correction": "Read beads from the existing producer-owned frame_report; retain the separate exact B-rep report as geometric validity authority"
+      }
+    ]
+  },
+  "observed_cases": [
+    "Finite positive route-specific sheet/frame process inputs persist through existing version 23 storage; invalid and cross-route fields reject atomically",
+    "Missing exact geometry and legacy display geometry cannot provide exact envelope evidence",
+    "Actual OCCT 20x10x5 box: FDM declared 20x10x5 volume compatible; 19x10x5 volume incompatible",
+    "Arbitrary FDM build direction [1,0,1] remains unknown instead of reusing an unoriented envelope",
+    "Actual OCCT stock enclosure and caller cutter/radius comparisons have both compatible and incompatible cases",
+    "Sheet radius update from 1 to 3 mm changes the screen; rigid installed placement retains origin ID 1 and evaluated radius 3 mm",
+    "Stamped nominal blank makes the laser developed-blank rule incompatible",
+    "Actual declared exact 3x3 mm triangular weld bead has theoretical throat 3/sqrt(2) mm: explicit limit 3 incompatible, limit 2 compatible; fusion/strength remain unknown",
+    "No declared beads remains unknown; missing evidence does not prove no welding is needed",
+    "Inspection preserves document serialization, revision and evaluation generation and makes no native worker requests",
+    "Existing agent tool, batch queries and MCP stdio remain available"
+  ],
+  "standalone_mcp_example": {
+    "fixture": "Scratch exact box authored through doc_apply in an isolated in-memory MCP document",
+    "revision": 1,
+    "exact_bounds_mm": [0, 0, 0, 20, 10, 5],
+    "declared_build_volume_mm": [19, 10, 5],
+    "rule": "DFM.FDM.02",
+    "status": "incompatible",
+    "recommendation": "change_process_or_design",
+    "evidence": "out/dfm-agent-example.json",
+    "evidence_sha256": "d059ec0affeeeed3a2fea2d9896d1d72c4f58abe701ca0b2a0c16f8d15ab8d0d",
+    "manufacturing_qualified": false
+  },
+  "remaining_limits": [
+    "Focused local tests only; complete release regression and CI are integration gates",
+    "FDM fit supports only local +Z/-Z with local X/Y aligned to machine X/Y; no supports, bed margin or actual slicer fit",
+    "CNC stock/cutter screens do not establish toolpaths, holder access, clamping or achievable tolerance",
+    "Laser and bend capability limits are caller declarations; no generic material ratio, kerf/small-feature analysis, springback calibration or machine trial",
+    "Weld throat is declared exact bead geometry; no procedure attestation, continuous fusion, strength, distortion or physical inspection",
+    "Injection wall/draft/undercut/flow/tooling analysis remains unknown",
+    "No deployment, production qualification or cost/design improvement claim"
+  ]
+}

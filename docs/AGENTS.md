@@ -1,5 +1,12 @@
 # ARK agent protocol
 
+020B adds source-owned solid dimensions and exact sketch extrusion by viewport
+drag. Read [the authoring contract](VIEWPORT_DIMENSIONS.md): double-click edits
+the authored expression, and agents use `doc_apply` at an observed
+`expected_revision` to add or alter driving dimensions. The DFM v1 rule report
+is available through `manufacturing_inspect` for explicitly declared process
+reviews; see [DFM rule scope](DFM.md). These checks do not qualify production.
+
 019B discovers **83 standalone tools**, including `skeleton_inspect`,
 `skeleton_compile` and `collision_inspect`. Source edits and indexed mesh edits
 require the current `expected_revision`. Inspect the [019B source and feedback
@@ -103,6 +110,11 @@ injection molding, FDM additive manufacturing and machining, separating
 caller-declared process settings from exact geometry evidence and unresolved
 checks. These process settings use document version 23. Production qualification
 is never inferred from a role's completion or a filled checklist.
+
+C.03 adds the versioned [DFM contract](DFM.md) to each component's `dfm` report:
+laser/bend/FDM/CNC/weld screens retain exact producer evidence, caller capabilities
+and explicit assumptions. Read every rule status and typed recommendation;
+`compatible` is a bounded screen, and production qualification remains false.
 
 Mechanical motion uses persistent chain, gear, shaft, rack/pinion and harmonic
 cam coupling mates plus read-only `assembly_motion`. Call

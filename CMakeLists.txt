@@ -38,6 +38,7 @@ add_library(ark STATIC
   src/pricing.cpp
   src/agent_team.cpp
   src/manufacturing.cpp
+  src/dfm.cpp
   src/assistant_connectors.cpp
   src/component_sources.cpp
   src/component_library.cpp
@@ -90,6 +91,7 @@ if(WIN32)
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/assets/ui/ark-tool-atlas-v1.png" "$<TARGET_FILE_DIR:ark-studio>/assets/ui/ark-tool-atlas-v1.png"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/assets/ui/ark-wordmark.png" "$<TARGET_FILE_DIR:ark-studio>/assets/ui/ark-wordmark.png"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/assets/ui/ark-detail-atlas-v1.png" "$<TARGET_FILE_DIR:ark-studio>/assets/ui/ark-detail-atlas-v1.png"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/assets/ui/ark-authoring-atlas-v1.png" "$<TARGET_FILE_DIR:ark-studio>/assets/ui/ark-authoring-atlas-v1.png"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/assets/ui/ark-domain-atlas-v1.png" "$<TARGET_FILE_DIR:ark-studio>/assets/ui/ark-domain-atlas-v1.png")
 endif()
 if(MINGW AND NOT ARK_WITH_OCCT)
@@ -167,6 +169,11 @@ add_test(NAME mesh-model COMMAND ark-mesh-model-tests)
 set_tests_properties(kernel agent mesh-model PROPERTIES TIMEOUT 60)
 
 if(ARK_WITH_OCCT)
+  add_executable(ark-direct-dimension-tests tests/direct_dimension_tests.cpp)
+  target_link_libraries(ark-direct-dimension-tests PRIVATE ark)
+  add_dependencies(ark-direct-dimension-tests ark-occt-worker)
+  add_test(NAME direct-dimensions COMMAND ark-direct-dimension-tests)
+  set_tests_properties(direct-dimensions PROPERTIES TIMEOUT 120)
   target_compile_definitions(ark-authoring-extension-tests PRIVATE ARK_AUTHORING_NATIVE_TESTS=1)
   add_dependencies(ark-authoring-extension-tests ark-occt-worker)
   target_compile_definitions(ark-datum-authoring-tests PRIVATE ARK_DATUM_NATIVE_TESTS=1)
@@ -369,6 +376,15 @@ set_tests_properties(manufacturing PROPERTIES TIMEOUT 120)
 if(ARK_WITH_OCCT)
   target_compile_definitions(ark-manufacturing-tests PRIVATE ARK_MANUFACTURING_NATIVE_TESTS=1)
   add_dependencies(ark-manufacturing-tests ark-occt-worker)
+endif()
+
+add_executable(ark-dfm-tests tests/dfm_tests.cpp)
+target_link_libraries(ark-dfm-tests PRIVATE ark)
+add_test(NAME dfm COMMAND ark-dfm-tests)
+set_tests_properties(dfm PROPERTIES TIMEOUT 120)
+if(ARK_WITH_OCCT)
+  target_compile_definitions(ark-dfm-tests PRIVATE ARK_DFM_NATIVE_TESTS=1 ARK_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+  add_dependencies(ark-dfm-tests ark-occt-worker)
 endif()
 
 add_executable(ark-material-tests tests/material_tests.cpp)
