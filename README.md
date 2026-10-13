@@ -56,7 +56,7 @@ with the [source and measured evidence](docs/launch/demo.md).
 ARK is an engineering prototype with useful, tested domains. Supported geometry
 can reject invalid or ambiguous inputs explicitly. Manufacturing qualification,
 general FEA, arbitrary imported-sheet unfolding, associative technical drawings
-and the STAGE/Trace/MeshWorks adapters remain roadmap work. See each
+and external industrial adapters remain roadmap work. See each
 [module contract](docs/README.md) for its acceptance boundaries.
 
 ## Get started
@@ -210,7 +210,7 @@ open-source license or create a paid support commitment.
 ARK source is licensed under [Apache-2.0](LICENSE); see [NOTICE](NOTICE).
 Dependencies retain their individual terms; see
 [third-party notices](docs/THIRD_PARTY_NOTICES.md).
-The [commercial strategy](docs/COMMERCIAL_STRATEGY.md) is a historical proposal.
+See [licensing and distribution guidance](docs/COMMERCIAL_STRATEGY.md).
 Windows update staging and rollback exist; a trusted online release channel
 still requires deployment and an end-to-end test. [Update contract](docs/UPDATES.md).
 

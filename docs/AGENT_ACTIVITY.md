@@ -31,7 +31,7 @@ geometry, manufacturing, tool quality or model performance.
 
 Documents containing this ledger use schema 33. Older documents remain
 readable; the application version alone does not migrate them. Older ARK
-versions cannot open a newly saved v33 document. There is no MeshWorks
+versions cannot open a newly saved v33 document. There is no external
 adapter or automatic remote publication in this iteration.
 
 Live sketches are uncommitted overlays for received tool steps, including

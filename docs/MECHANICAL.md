@@ -88,17 +88,16 @@ The material section frame is transported through each bend independently of pla
 
 These are ideal design geometries. No springback, ovalization, thinning, tooling access, weld allowance, joint notching or global self-intersection checks are implemented. The example is an assembly of designed members; coincident/intersecting members are not automatically converted into a welded solid. Lengths are geometric baselines, not compensated machine programs.
 
-## MeshARC assessment
+## Bend representation and interchange
 
-Inspected `C:/Users/bruno/Documents/MeshARC`, HEAD `a46d78fc04cdcd2e2df29a8d15c5d59bbe3927c6`, particularly:
+ARK implements ordered feed/CLR/angle/plane inputs and analytic circular
+centerline kinematics in its own types, expression engine, serialization and
+transaction system. Its plane-roll convention applies **before the bend**.
+External bend tables may apply roll after the bend; check and convert that
+convention explicitly before authoring an ARK design.
 
-- `kernel/include/mesharc/tube_model.h`
-- `kernel/src/centreline_builder.cpp`
-- `docs/HANDOFF.md` and `README.md`
-
-The useful reusable concept is its ordered feed/CLR/angle/plane representation and analytic circular centerline kinematics. ARK implements that representation in its own types, expression engine, serialization and transaction system. The plane-roll convention is explicitly **before the bend** in ARK, whereas MeshARC's builder applies its stored rotation **after the bend**. Do not transfer tables without converting this convention.
-
-No MeshARC executable, recognition pipeline, physics calibration, STEP ingestion or claimed manufacturing proof was imported. Its existing uncommitted edits were preserved. This keeps tube design separate from MeshARC's inverse-forming and recognition problems.
+Ideal tube design does not establish inverse-forming, physics calibration or
+manufacturing qualification. Those require independently measured evidence.
 
 ## GPU scope and evidence
 
