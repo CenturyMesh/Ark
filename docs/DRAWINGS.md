@@ -9,6 +9,43 @@ Call `agent_onboard{"topic":"drawings"}` and discover exact producer names with
 `reference_inspect` before authoring. `doc_info` lists drawing names;
 `drawing_inspect{}` lists their source feature IDs and observed bindings.
 
+## Studio workspace
+
+Open **Manage → Drawings**. The native workspace renders a paper sheet from the
+same inspected view curves and semantic dimensions. **New drawing** selects the
+exact source definition, units, scale and paper size; it starts with a Top view.
+**Edit sheet** edits those authored inputs. Changing units converts existing
+declared tolerance deviations to preserve their physical size.
+
+Use **Add view** or select a view and **Edit view** to set its name, direction and
+paper position. Sections open a second form for their explicit source-local cut
+origin. Renaming a view preserves its dimension associations. **Add dimension**
+and **Edit dimension** use dropdowns populated by the current exact producer's
+semantic names. Select the dimension kind, references, paper label position and
+optional lower/upper deviations in the displayed units. Leave both deviations
+blank to remove a tolerance. New dimensions use the existing producer's default
+reference fraction 0.5; existing authored fractions are preserved by the forms.
+
+The list shows measured values only while the source binding is current. Source
+changes show **STALE**, hide obsolete sheet measurements and disable annotation
+editing/export. **Refresh source** explicitly re-resolves the source at the
+observed revision. Forms retain their revision and project identity while open;
+intervening edits reject without a silent rebase. Close the workspace to edit the
+3D model manually; connected agent edits remain visible through its state check.
+**Export** publishes SVG or JSON to a new local file. **Delete sheet** is an
+ordinary undoable document edit. Drawings are saved with the existing document.
+
+The workspace is a presentation client, not a second geometry producer. Its
+paper preview uses native GDI line/text rendering; the retained exact curves and
+semantic measurements remain the API authority. It does not edit the B-rep or
+use an edited SVG to select geometry.
+
+**Zoom +**, **Zoom −** and **Fit** control a separate display zoom from 0.5× to
+4×. They change neither the authored sheet scale nor the revision or measured
+values. Fit shows the paper; zoom clips the paper to the preview viewport for
+closer reading. Drag inside the paper preview to pan the zoomed sheet. Fit resets
+both display zoom and pan without changing document authoring.
+
 ## Authoring and units
 
 Use `drawing.set`, `drawing.refresh` and `drawing.remove` in `doc_apply` at the
@@ -134,3 +171,7 @@ lines, units and declared tolerance labels were visible and legible.
 This evidence is local implementation verification. Full merged regression,
 release packaging, distribution and manufacturing qualification require their
 separate gates; no remote deployment or external adapter was tested here.
+
+The basic Studio workflow additionally has real native control/form tests at
+1180×900 and 1440×900. See [workspace verification](DRAWING_WORKSPACE_TESTING.md)
+for the synthetic captures, commands, tested revision boundaries and limits.

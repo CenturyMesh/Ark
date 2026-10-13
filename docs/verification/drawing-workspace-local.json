@@ -1,0 +1,53 @@
+{
+  "schema": "ark.local-verification.v1",
+  "milestone": "B.05",
+  "milestone_status": "Parcial",
+  "scope": "Native Studio human workflow for one exact solid definition: associative technical drawing sheet, orthographic and section views, semantic dimensions and declared tolerances, stale-source refresh and local SVG/JSON export",
+  "platform": "Windows x64 native Studio and pinned OCCT 8.0.1",
+  "fixture": {
+    "name": "Fixture bracket",
+    "authority": "native_solid exact OCCT box",
+    "initial_dimensions_mm": [50, 30, 12],
+    "explicit_test_model_edit": "width changed from 50 to 65 mm",
+    "drawing_ui_preserves_source_brep": true,
+    "user_documents_included": false
+  },
+  "tests": [
+    {"name": "studio-drawing-workspace-1180", "viewport_px": [1180, 900], "result": "passed", "elapsed_seconds": 4.72},
+    {"name": "studio-drawing-workspace-1440", "viewport_px": [1440, 900], "result": "passed", "elapsed_seconds": 4.70}
+  ],
+  "observed_checks": [
+    "Rendered Manage Drawings card was clicked through native mouse messages",
+    "Native New drawing and enabled Edit sheet forms applied at their observed document revision",
+    "Source definition selection retained its explicit feature ID",
+    "Orthographic and exact section view forms produced a rendered sheet",
+    "Native semantic dimension and tolerance forms created measured values and declared deviations",
+    "SVG and JSON export buttons published new local files",
+    "Explicit source geometry edit exposed stale state and hid obsolete measured values",
+    "Refresh source button restored current geometry and measurements",
+    "Cancelled form preserved the document",
+    "Simulated intervening document edit after form acceptance caused revision rejection without rebase",
+    "Renamed drawing view retained its dimension association",
+    "Zoom plus/minus and Fit changed only display state",
+    "Native canvas mouse down/move/up panned the zoomed sheet without changing revision, authored sheet scale or measured values",
+    "Realized view and label bounds were accessible after pan; Fit reset pan and zoom"
+  ],
+  "captures": [
+    {"path": "docs/images/drawings/drawing-workspace-1180.png", "state": "current, Fit, 1180 px", "visually_inspected": true},
+    {"path": "docs/images/drawings/drawing-workspace-1440.png", "state": "current, Fit, 1440 px", "visually_inspected": true},
+    {"path": "docs/images/drawings/drawing-stale.png", "state": "stale source, 1440 px", "visually_inspected": true},
+    {"path": "docs/images/drawings/drawing-dimension-form.png", "state": "native dimension and tolerance form", "visually_inspected": true},
+    {"path": "docs/images/drawings/drawing-zoom-1180.png", "state": "current, 156.25 percent display zoom after native drag pan", "visually_inspected": true}
+  ],
+  "reproduction": "ctest --test-dir out/native-release -C Release -R '^studio-drawing-workspace-(1180|1440)$' --output-on-failure; requires ARK_TEST_STUDIO_LIVE=ON and an OpenGL 3.3 desktop",
+  "receipt_suffix": ".drawing-workspace-test.log",
+  "limits": [
+    "Evidence is local implementation and native UI verification",
+    "One feature-local exact solid definition; assembly drawing sources remain pending",
+    "GD&T, hatching, arbitrary auxiliary/detail views and interactive paper annotation editing remain pending",
+    "Drawing PDF/DXF exchange and formal drafting qualification remain pending",
+    "Merged regression, packaging, distribution and manufacturing qualification are separate gates"
+  ],
+  "manufacturing_qualified": false,
+  "remote_deployment_tested": false
+}
