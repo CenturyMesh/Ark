@@ -20,12 +20,14 @@ V errorResult(const std::string& text){V v=V::makeObj();v.set("isError",V::makeB
 bool isError(const V& result){auto p=result.find("isError");return p&&p->t==V::Bool&&p->b;}
 bool identifier(const std::string& id){return !id.empty()&&id.size()<=64&&std::all_of(id.begin(),id.end(),[](unsigned char c){return (c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='_'||c=='-';});}
 bool hasText(const std::string& text){return text.find_first_not_of(" \r\n\t")!=std::string::npos;}
+std::string userMessageText(const V& value){const auto* content=value.find("content");if(!content)return {};if(content->t==V::Str)return content->str;std::string text;for(const auto& part:content->arr)if(field(part,"type")=="input_text"){if(!text.empty())text+='\n';text+=field(part,"text");}return text;}
+bool userMessageHasImage(const V& value){const auto* content=value.find("content");return content&&content->t==V::Arr&&std::any_of(content->arr.begin(),content->arr.end(),[](const auto& part){return field(part,"type")=="input_image";});}
 bool documentMutation(const std::string& name){static const std::set<std::string> names={"doc_apply","doc_new","doc_load","doc_undo","doc_redo","import_step","import_sheet_step","import_mesh","library_insert","iteration_restore","team_apply_step"};return names.count(name)!=0;}
 bool revision(const V& args){auto p=args.find("expected_revision");return p&&p->t==V::Num&&std::isfinite(p->num)&&p->num>=0&&p->num<=9007199254740991.0&&std::floor(p->num)==p->num;}
 bool receiptRevision(const V& value,std::uint64_t& result){auto p=value.find("revision");if(p&&p->t==V::Num&&std::isfinite(p->num)&&p->num>=0&&p->num<=9007199254740991.0&&std::floor(p->num)==p->num){result=(std::uint64_t)p->num;return true;}return false;}
 const V& payload(const V& result){auto p=result.find("structuredContent");return p&&p->t==V::Obj?*p:result;}
 bool scopedTool(AgentTeamDiscipline discipline,const std::string& name){if(discipline==AgentTeamDiscipline::General||discipline==AgentTeamDiscipline::Orchestrator)return true;if(!documentMutation(name))return true;return name=="doc_apply"||name=="team_apply_step";}
-bool scopedCommand(AgentTeamDiscipline discipline,const std::string& op){if(discipline==AgentTeamDiscipline::General)return true;if(discipline==AgentTeamDiscipline::PhysicsReviewer)return false;if(discipline==AgentTeamDiscipline::Orchestrator&&(op.rfind("assembly.",0)==0||op.rfind("mate.",0)==0))return true;return op=="bom.initialize"||op.rfind("feature.",0)==0||op.rfind("sketch.",0)==0||op.rfind("canvas.",0)==0||op.rfind("plane.",0)==0||op.rfind("sheet.",0)==0||op.rfind("frame.",0)==0||op.rfind("material.",0)==0||op.rfind("param.",0)==0;}
+bool scopedCommand(AgentTeamDiscipline discipline,const std::string& op){if(discipline==AgentTeamDiscipline::General)return true;if(discipline==AgentTeamDiscipline::PhysicsReviewer)return false;if(discipline==AgentTeamDiscipline::Orchestrator&&(op=="skeleton.set"||op=="skeleton.remove"||op.rfind("assembly.",0)==0||op.rfind("mate.",0)==0))return true;return op=="bom.initialize"||op.rfind("feature.",0)==0||op.rfind("sketch.",0)==0||op.rfind("canvas.",0)==0||op.rfind("plane.",0)==0||op.rfind("sheet.",0)==0||op.rfind("frame.",0)==0||op.rfind("material.",0)==0||op.rfind("param.",0)==0;}
 std::string leadRoleId(const std::vector<AgentTeamRole>& roles){for(const auto& role:roles)if(role.discipline==AgentTeamDiscipline::Orchestrator)return role.id;for(const auto& role:roles)if(role.id=="engineer")return role.id;for(const auto& role:roles)if(role.canWrite)return role.id;return roles.empty()?std::string{}:roles.front().id;}
 std::string commandsError(const V& args,unsigned limit,AgentTeamDiscipline discipline,unsigned maxFeatures=1,unsigned maxPlacements=1){auto commands=args.find("commands");if(!commands){if(discipline!=AgentTeamDiscipline::General)return "Scoped team writes need explicit bounded commands; a cached candidate cannot conceal its operations.";return {};}
     if(commands->t!=V::Arr||commands->arr.empty()||commands->arr.size()>limit)return "Construction step must contain 1.."+std::to_string(limit)+" commands. Keep dependent changes atomic; propose smaller independently valid steps rather than splitting them blindly.";
@@ -91,7 +93,8 @@ struct AgentTeam::Impl {
         std::set<std::string> pendingFeedback;
         std::map<std::string,V> unresolvedToolFailures;
         std::string turnText;
-        std::deque<std::string> pending,context;
+        std::deque<V> pending;
+        std::deque<std::string> context;
         std::size_t pendingBytes=0,contextBytes=0;
         bool queued=false,active=false,reportedToCoordinator=false;
         unsigned turnsInWindow=0;
@@ -163,18 +166,24 @@ struct AgentTeam::Impl {
         if(cancelled)throw std::runtime_error("Team cancelled; previously applied document changes remain.");
     }
     void queue(std::size_t index){auto& role=roles[index];if(role.active||role.queued)return;role.queued=true;role.view.state=AgentTeamState::Queued;role.view.status="Queued";jobs.push_back(index);}
-    bool deliver(const std::string& sender,const std::string& target,const std::string& text,bool user,bool assignment=true){
+    bool deliver(const std::string& sender,const std::string& target,const std::string& text,bool user,bool assignment=true,const V* userPayload=nullptr){
         if(!hasText(text))return false;
         std::vector<std::string> accepted;
         {std::lock_guard lock(mutex);if(!started||cancelled)return false;
             if(!user&&!std::any_of(roles.begin(),roles.end(),[&](const auto& r){return r.view.id==sender;}))return false;
             auto effectiveTarget=user&&target=="all"?std::string{}:user&&target.empty()&&config.focusedWorkflow?leadRoleId(config.roles):target;
             auto content=(user?std::string("User steering: "):"Teammate "+sender+": ")+text;
+            const V incoming=userPayload?*userPayload:message("user",content);const auto incomingBytes=incoming.dump().size();
+            // Check every addressed route before queuing any image. An active
+            // conversation may temporarily have an unpaired tool batch, so
+            // capability validation uses only this new complete user message.
+            if(userPayload){V history=V::makeArr();history.arr.push_back(incoming);for(const auto& role:roles)if(effectiveTarget.empty()||role.view.id==effectiveTarget)assistantRequest(role.config.assistant,history,role.tools);}
             for(std::size_t i=0;i<roles.size();++i){auto& role=roles[i];if(!effectiveTarget.empty()&&role.view.id!=effectiveTarget)continue;
                 if(!user&&role.view.id==sender)continue;
                 if(config.maxTurnsPerRole&&role.turnsInWindow>=config.maxTurnsPerRole&&!role.active)continue;
-                if(content.size()>config.maxMailboxBytes||role.pendingBytes+content.size()>config.maxMailboxBytes)continue;
-                role.pending.push_back(content);role.pendingBytes+=content.size();if(user)++role.steeringVersion;
+                const auto limit=userPayload?role.config.assistant.maxConversationBytes:config.maxMailboxBytes;
+                if(incomingBytes>limit||role.pendingBytes+incomingBytes>limit)continue;
+                role.pending.push_back(incoming);role.pendingBytes+=incomingBytes;if(user)++role.steeringVersion;
                 if(user||(assignment&&sender==leadRoleId(config.roles))){role.view.taskState="in_progress";role.view.taskSummary.clear();}
                 goalState=AgentGoalState::InProgress;goalDeclared=false;goalSummary.clear();queue(i);accepted.push_back(role.view.id);
                 if(!user&&role.view.id==leadRoleId(config.roles))for(auto& source:roles)if(source.view.id==sender&&source.active)source.reportedToCoordinator=true;
@@ -194,7 +203,7 @@ struct AgentTeam::Impl {
     V inbox(std::size_t index){
         checkpoint(index);std::lock_guard lock(mutex);auto& role=roles[index];V messages=V::makeArr();
         for(const auto& item:role.context)messages.arr.push_back(message("user",item));role.context.clear();role.contextBytes=0;
-        for(const auto& item:role.pending)messages.arr.push_back(message("user",item));role.pending.clear();role.pendingBytes=0;
+        for(const auto& item:role.pending)messages.arr.push_back(item);role.pending.clear();role.pendingBytes=0;
         role.requestVersion=role.steeringVersion;return messages;
     }
     // Reservation state shares the team mutex; acquiring it also takes the
@@ -447,6 +456,10 @@ struct AgentTeam::Impl {
 AgentTeam::AgentTeam():impl_(std::make_unique<Impl>()){}
 AgentTeam::~AgentTeam()=default;
 void AgentTeam::start(const AgentTeamConfig& config,const std::string& prompt,const V& mcpTools,const AssistantTool& executor,const AgentTeamEvents& observer){
+    start(config,assistantUserMessage(prompt),mcpTools,executor,observer);
+}
+void AgentTeam::start(const AgentTeamConfig& config,const V& userMessage,const V& mcpTools,const AssistantTool& executor,const AgentTeamEvents& observer){
+    validateAssistantUserMessage(userMessage);const std::string prompt=userMessageText(userMessage);
     require(config.roles.size()>=1&&config.roles.size()<=8,"Team requires 1..8 explicitly configured roles.");
     require(config.maxWorkers>=1&&config.maxWorkers<=8,"Team worker limit must be 1..8.");
     require(config.maxTurnsPerRole<=32,"Team role turn limit must be zero (unlimited) or 1..32.");
@@ -458,6 +471,7 @@ void AgentTeam::start(const AgentTeamConfig& config,const std::string& prompt,co
     std::set<std::string> ids;
     for(const auto& role:config.roles){require(identifier(role.id)&&role.id!="all"&&ids.insert(role.id).second,"Team role ids must be unique identifiers; all is reserved for explicit user broadcasts.");require(role.label.size()<=256&&role.instructions.size()<=16384,"Team role description exceeds its limit.");require(role.discipline!=AgentTeamDiscipline::PhysicsReviewer||!role.canWrite,"Physics reviewer must remain read-only.");validateAssistantConfig(role.assistant);}
     assistantFunctionTools(mcpTools);V tools=teamTools(mcpTools,config.maxCommandsPerStep);assistantFunctionTools(tools);
+    if(userMessageHasImage(userMessage)){V history=V::makeArr();history.arr.push_back(userMessage);for(const auto& role:config.roles)assistantRequest(role.assistant,history,tools);}
     impl_->stop();
     {std::lock_guard lock(impl_->mutex);impl_->config=config;impl_->tools=std::move(tools);impl_->executor=executor;impl_->observer=observer;impl_->roles.clear();impl_->events.clear();impl_->proposals.clear();impl_->writeReservation={};impl_->prepared.clear();impl_->preparedBytes=impl_->preparedByteLimit=0;impl_->proposalSerial=impl_->stepSerial=0;impl_->jobs.clear();impl_->readOnly.clear();impl_->eventBytes=0;impl_->sequence=impl_->dropped=0;impl_->active=0;impl_->paused=false;impl_->goalState=AgentGoalState::InProgress;impl_->goalSummary.clear();impl_->goalDeclared=false;impl_->began=std::chrono::steady_clock::now();impl_->cancelled=false;impl_->started=true;
         for(const auto& tool:impl_->tools.arr)if(const auto* annotations=tool.find("annotations"))if(const auto* hint=annotations->find("readOnlyHint"))if(hint->t==V::Bool&&hint->b)impl_->readOnly.insert(field(tool,"name"));
@@ -485,9 +499,11 @@ void AgentTeam::start(const AgentTeamConfig& config,const std::string& prompt,co
             if(roleConfig.discipline==AgentTeamDiscipline::PhysicsReviewer)workflow+="You own independent read-only review at the requested design checkpoint. For a concept, address the requested layout, proportions, interfaces, continuity and geometric consistency using actual evidence; do not impose fabrication routes, catalogue details or load calculations unrelated to the user goal. For requested physical or manufacturing checks, use actual physics_inspect, math_eval, geometry_query and materials evidence, including beam_test/weld_test only with applicable explicit assumptions. State unknown loads, supports, material properties and validity limits; do not invent FEA or production qualification. Propose concrete corrections to the responsible author, preserving the user's concept and constraints. Report findings to the lead engineer and finish your turn; wait for another concrete assignment.";
             workflow+=" For bought components use library_source_search source web, read matching product pages using library_source_page, then persist genuine source_url, manufacturer/supplier references and evidence-based sourcing_status in part metadata. Report unavailable access or unresolved specifications; never invent URLs. Maintain part BOM metadata while authoring final physical definitions. Before goal completion inspect bom_inspect and submit bom_review for the current revision. Concept reviews must disclose pending fields; detailed reviews reject them. Never downgrade an explicitly requested detailed deliverable: report needs_input for unknown requirements. Inspect bom_inspect: retain quantities/source links, review mounting fasteners and report unresolved metadata or connections. Catalogue provenance cannot be fabricated from a generic fastener recipe. Concept scope may remain explicitly incomplete.";
             role.view.conversation.arr.push_back(message("developer",workflow));
-            role.view.conversation.arr.push_back(message("user","Overall user task (shared context, not an assignment to duplicate the entire model): "+prompt));
+            role.view.conversation.arr.push_back(message("developer","The following user task/image is shared context, not an assignment to duplicate the entire model."));
+            role.view.conversation.arr.push_back(userMessage);
+            if(userMessageHasImage(userMessage))assistantRequest(roleConfig.assistant,role.view.conversation,role.tools);
             bool startNow=config.focusedWorkflow?roleConfig.id==leadRoleId(config.roles):!config.orchestratedStart||roleConfig.discipline==AgentTeamDiscipline::Orchestrator;
-            if(startNow){role.view.taskState="in_progress";role.pending.push_back(!roleConfig.canWrite?"Inspect the current design for the requested read-only review; report measured evidence and propose changes to the responsible writer.":config.focusedWorkflow?"Start the user's design as the lead engineer. Inspect current document evidence and author the next coherent design step; delegate a specific task only when useful.":"Start your assigned authoring role. Coordinate distinct part tasks with team_send when useful; inspect team_context for progress.");role.pendingBytes=role.pending.back().size();}
+            if(startNow){role.view.taskState="in_progress";role.pending.push_back(message("user",!roleConfig.canWrite?"Inspect the current design for the requested read-only review; report measured evidence and propose changes to the responsible writer.":config.focusedWorkflow?"Start the user's design as the lead engineer. Inspect current document evidence and author the next coherent design step; delegate a specific task only when useful.":"Start your assigned authoring role. Coordinate distinct part tasks with team_send when useful; inspect team_context for progress."));role.pendingBytes=role.pending.back().dump().size();}
             else role.view.status="Waiting for a specific assignment";
             impl_->roles.push_back(std::move(role));if(startNow)impl_->queue(impl_->roles.size()-1);
         }
@@ -496,6 +512,7 @@ void AgentTeam::start(const AgentTeamConfig& config,const std::string& prompt,co
     impl_->wake.notify_all();
 }
 bool AgentTeam::steer(const std::string& text,const std::string& targetId){return impl_->deliver("",targetId,text,true);}
+bool AgentTeam::steer(const V& userMessage,const std::string& targetId){validateAssistantUserMessage(userMessage);return impl_->deliver("",targetId,userMessageText(userMessage),true,true,&userMessage);}
 bool AgentTeam::send(const std::string& fromId,const std::string& toId,const std::string& text){return !toId.empty()&&impl_->deliver(fromId,toId,text,false);}
 bool AgentTeam::resume(const std::string& targetId){std::vector<std::string> targets;{std::lock_guard lock(impl_->mutex);for(auto& role:impl_->roles)if((targetId.empty()||targetId==role.view.id)&&!role.active&&(role.view.state==AgentTeamState::AwaitingContinuation||role.view.state==AgentTeamState::Interrupted||role.view.state==AgentTeamState::Failed)){role.turnsInWindow=0;role.view.needsInspection=true;targets.push_back(role.view.id);}}bool accepted=false;for(auto& target:targets)accepted=impl_->deliver("",target,"Continue the remaining task from retained tool receipts. Inspect current doc_info first; do not replay committed changes.",true)||accepted;return accepted;}
 std::string AgentTeam::currentRoleId(){return workerRoleId;}

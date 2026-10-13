@@ -2,6 +2,7 @@
 #include "ark/agent.hpp"
 #include "ark/onboarding.hpp"
 #include "ark/chatgpt_auth.hpp"
+#include "ark/io.hpp"
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -22,6 +23,7 @@ static V done(const std::string& text="Done",bool usage=true){V response=json(R"
 static V call(const std::string& id,const std::string& name,const std::string& args){V response=json(R"({"status":"completed","output":[]})"),item=V::makeObj();item.set("type",V::makeStr("function_call"));item.set("call_id",V::makeStr(id));item.set("name",V::makeStr(name));item.set("arguments",V::makeStr(args));auto output=*response.find("output");output.arr.push_back(item);response.set("output",output);return usageResponse(response);}
 static ark::AgentTeamRole role(const std::string& id,bool writable=false){ark::AgentTeamRole role;role.id=id;role.label=id;role.instructions="Review measured design evidence.";role.assistant.model="offline-"+id;role.assistant.reasoningEffort="low";role.canWrite=writable;return role;}
 static void complete(ark::AgentTeam& team){check(team.waitIdleFor(5s),"bounded team completion");}
+#include "agent_team_image_tests.inl"
 struct Gate {
     std::mutex mutex;std::condition_variable condition;int arrivals=0;bool release=false;
     void enter(){std::unique_lock lock(mutex);++arrivals;condition.notify_all();if(!condition.wait_for(lock,3s,[&]{return release;}))throw std::runtime_error("test gate timeout");}
@@ -373,4 +375,4 @@ static void explicitGoalCompletion(){
 }
 #include "agent_team_context_tests.inl"
 #include "agent_team_write_window_tests.inl"
-int main(){try{cooperativeWriteWindows();cooperativeWriteWindowLifecycle();cooperativeWriteWindowPermissionsAndAudit();oversizedHistoryResume();sharedAuthoringSchemas();explicitGoalCompletion();ownedPreparedCandidates();restoredDocumentAndCanvasTools();coherentBatchBenchmark();focusedSequentialAssignments();leadEngineerAuthorsPartsAndAssembly();parallelProgressStillReportsCompletion();sharedFailureEvidence();unlimitedEightRoleAssignments();configChecks();concurrencyAndRevision();steeringAndPause();collaboration();cancellationAndFailures();interruptedBatchHistory();limitsAndMutationSchemas();conversationMemoryBound();incrementalStepsAndScopes();frameDisciplineScope();proposalsAndPhysicsRole();concurrentQueuedDrafts();yieldedAndInterruptedContinuation();std::cout<<"Agent team checks passed: "<<checks<<"\n";return 0;}catch(const std::exception& error){std::cerr<<"Agent team checks failed: "<<error.what()<<"\n";return 1;}}
+int main(){try{userImageTeamChecks();cooperativeWriteWindows();cooperativeWriteWindowLifecycle();cooperativeWriteWindowPermissionsAndAudit();oversizedHistoryResume();sharedAuthoringSchemas();explicitGoalCompletion();ownedPreparedCandidates();restoredDocumentAndCanvasTools();coherentBatchBenchmark();focusedSequentialAssignments();leadEngineerAuthorsPartsAndAssembly();parallelProgressStillReportsCompletion();sharedFailureEvidence();unlimitedEightRoleAssignments();configChecks();concurrencyAndRevision();steeringAndPause();collaboration();cancellationAndFailures();interruptedBatchHistory();limitsAndMutationSchemas();conversationMemoryBound();incrementalStepsAndScopes();frameDisciplineScope();proposalsAndPhysicsRole();concurrentQueuedDrafts();yieldedAndInterruptedContinuation();std::cout<<"Agent team checks passed: "<<checks<<"\n";return 0;}catch(const std::exception& error){std::cerr<<"Agent team checks failed: "<<error.what()<<"\n";return 1;}}

@@ -11,6 +11,7 @@
 #include "ark/native_features.hpp"
 #include "ark/suspension.hpp"
 #include "ark/native_backend.hpp"
+#include "ark/skeleton.hpp"
 #include <chrono>
 #include <exception>
 #include <future>
@@ -133,12 +134,12 @@ static Body evalFeatureBody(const Feature& f, const ExprEnv& env, Document& doc,
     bool exactInput=false;
     for(u64 input:f.inputs)for(const Body& source:work)
         if(source.id==input&&source.nativeData.find("brep_base64"))exactInput=true;
-    if(exactInput && (f.type==FeatureType::Transform||f.type==FeatureType::Boolean)){
+    if(exactInput && (f.type==FeatureType::Transform||f.type==FeatureType::Boolean||f.type==FeatureType::LinearPattern)){
         Body body=evaluateExactLegacyOperation(f,env,doc,work);
         res.tris=body.baked?body.baked->triCount():0;
         return body;
     }
-    if(exactInput && (f.type==FeatureType::LinearPattern||f.type==FeatureType::SketchCut)){
+    if(exactInput && f.type==FeatureType::SketchCut){
         res.ok=false;res.error="Exact native B-rep needs an exact solid operation";return {};
     }
     switch(f.type){
@@ -265,6 +266,7 @@ static Body evalFeatureBody(const Feature& f, const ExprEnv& env, Document& doc,
         case FeatureType::MeshSmooth:
         case FeatureType::MeshDecimate:
         case FeatureType::MeshOffset:
+        case FeatureType::MeshEdit:
         case FeatureType::MeshFill: {
             Body body = evaluateMeshFeature(f, env, work, topt);
             res.tris = body.baked->triCount();
@@ -385,6 +387,7 @@ struct AuthoringSources {
 
 const std::vector<FeatureResult>& Document::recompute() {
     f64 t0=nowMs();
+    refreshSkeleton(*this);
     // Cache custody is process-local and never serialized. Complex features use
     // a conservative upstream revision; primitives only depend on their inputs.
     arkjson::Value authored;if(!arkjson::parse(documentToJson(*this,false,false),authored))throw std::runtime_error("Cannot serialize evaluation dependencies");

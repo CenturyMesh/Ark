@@ -57,7 +57,7 @@ V math(const V& args){
     }
     r.set("units",V::makeStr(op=="angle"?"deg":op=="normalize"?"dimensionless":op=="dot"||op=="cross"?"caller_coordinates_squared":"caller_coordinates"));return r;
 }
-const std::set<std::string> queryTools{"reference_navigate","library_get","library_search","library_info","library_sources","activity_info","bom_inspect","fastener_recipe","manufacturing_inspect","physics_inspect","materials_inspect","doc_info","eval_expr","plane_inspect","sketch_inspect","sketch_diagnose","reference_inspect","native_inspect","assembly_info","assembly_motion","geometry_query","math_eval","mesh_inspect","frame_inspect","electronics_inspect","sheet_inspect","suspension_inspect","tube_inspect"};
+const std::set<std::string> queryTools{"collision_inspect","skeleton_inspect","skeleton_compile","reference_navigate","library_get","library_search","library_info","library_sources","activity_info","bom_inspect","fastener_recipe","manufacturing_inspect","physics_inspect","materials_inspect","doc_info","eval_expr","plane_inspect","sketch_inspect","sketch_diagnose","reference_inspect","native_inspect","assembly_info","assembly_motion","geometry_query","math_eval","mesh_inspect","frame_inspect","electronics_inspect","sheet_inspect","suspension_inspect","tube_inspect"};
 V queryValue(AgentSession& s,const V& spec){
     const auto tool=text(spec,"tool");if(!queryTools.count(tool))throw std::runtime_error("Condition requires an allowed read-only query");
     V data=payload(s.call(tool,required(spec,"args")));const std::string path=text(spec,"path");const V* value=&data;size_t start=0;
@@ -237,6 +237,33 @@ V evaluatePostconditions(AgentSession& s,const V& checks){
         row.set("passed",V::makeBool(passed));rows.arr.push_back(row);all&=passed;
     }
     report.set("passed",V::makeBool(all));report.set("checks",rows);return report;
+}
+V agentParametricNativeSchema(){
+    V schema;arkjson::parse(R"JSON({"type":"object","properties":{
+      "radius":{"type":["number","string"],"description":"Helix radius in mm, >1e-6."},
+      "pitch":{"type":["number","string"],"description":"Helix positive axial advance per turn in mm, >1e-6."},
+      "turns":{"type":["number","string"],"description":"Helix positive turns, <=100."},
+      "start_angle":{"type":["number","string"],"description":"Helix starting radial angle in degrees."},
+      "origin":{"type":"array","minItems":3,"maxItems":3,"items":{"type":["number","string"]}},
+      "axis":{"type":["string","array"],"description":"Helix XYZ axis; string selectors remain available for other native operations."},
+      "x_axis":{"type":"array","minItems":3,"maxItems":3,"items":{"type":["number","string"]},"description":"Nonzero helix radial guide perpendicular to axis."},
+      "handedness":{"type":["number","string"],"description":"Helix +1 mathematical positive rotation, or -1; axial rise remains positive."},
+      "require_connected":{"type":"boolean","description":"Sew rejects disconnected result components; no arbitrary gap healing."},
+      "controls":{"type":"object","additionalProperties":false,"properties":{
+        "section_alignment":{"type":"array","minItems":2,"maxItems":32,"items":{"type":"object","additionalProperties":false,"properties":{"reverse":{"type":"boolean"},"seam_edge":{"type":["number","string"],"description":"Zero-based first edge of closed section."},"seam_angle":{"type":["number","string"],"description":"Degrees; only one closed analytic circle supports angular seam."}}},"description":"One alignment per loft section; alignment changes directed wire correspondence."},
+        "guide_samples":{"type":["number","string"],"description":"2..129 checkpoints per guide edge; does not prove a global deviation bound."},
+        "max_guide_deviation_mm":{"type":["number","string"],"description":"Reject measured guide-to-result checkpoint error above 1e-6..0.05 mm; never heals geometry."},
+        "require_ordered_contacts":{"type":"boolean","description":"Verify each guide follows section order and cyclic contact order remains coherent."}
+      }}
+    }})JSON",schema);
+    // The existing UV spline source also calls its top-level array controls.
+    // Advertise both source shapes; the operation-specific evaluator validates
+    // the chosen shape and keeps loft-only keys out of a spline request.
+    V properties=*schema.find("properties"),alternatives=V::makeArr(),uv;
+    alternatives.arr.push_back(*properties.find("controls"));
+    arkjson::parse(R"({"type":"array","minItems":2,"maxItems":26,"items":{"type":"array","minItems":2,"maxItems":2,"items":{"type":["number","string"]}},"description":"UV surface_spline Bezier controls; 2..26 [u,v] points."})",uv);
+    alternatives.arr.push_back(uv);V controls=V::makeObj();controls.set("oneOf",alternatives);
+    properties.set("controls",controls);schema.set("properties",properties);return schema;
 }
 void appendAgentFeatureTools(V& tools){
     appendComponentLibraryTools(tools);

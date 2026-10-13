@@ -6,6 +6,10 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <set>
+#include <sstream>
+#include <iomanip>
+#include <map>
 #include <vector>
 
 namespace ark {
@@ -402,9 +406,79 @@ double requiredNumber(const Feature& feature, const ExprEnv& env, const char* ke
     if (!feature.p.count(key)) throw std::runtime_error(std::string("Missing mesh parameter: ") + key);
     return feature.num(env, key);
 }
+
+Mesh directEdit(Mesh mesh, const Feature& feature, const ExprEnv& env) {
+    const MeshReport before=analyzeMesh(mesh);
+    requireFiniteManifold(before,"mesh_edit");
+    if(feature.nativeSpec.t!=V::Obj)throw std::runtime_error("mesh_edit requires a native selection recipe");
+    for(const auto& entry:feature.nativeSpec.obj)
+        if(entry.first!="op"&&entry.first!="vertices"&&entry.first!="triangles"&&entry.first!="source_topology"&&entry.first!="require_closed")
+            throw std::runtime_error("Unknown mesh_edit field: "+entry.first);
+    const V* topology=feature.nativeSpec.find("source_topology");
+    if(!topology||topology->t!=V::Str||topology->str!=meshTopologyFingerprint(mesh))
+        throw std::runtime_error("Mesh selection topology changed; inspect the input mesh and select its current vertices or patch");
+    const auto* op=feature.nativeSpec.find("op");
+    if(!op||op->t!=V::Str||(op->str!="displace"&&op->str!="extrude"))throw std::runtime_error("mesh_edit op must be displace or extrude");
+    bool requireClosed=before.closedOriented();
+    if(const auto* flag=feature.nativeSpec.find("require_closed")){
+        if(flag->t!=V::Bool)throw std::runtime_error("require_closed must be boolean");
+        requireClosed=flag->b||requireClosed;
+    }
+    if(requireClosed&&!before.closedOriented())throw std::runtime_error("mesh_edit closed mode requires closed oriented input; explicitly weld or repair it first");
+    auto displacement=[&](const char* key){
+        bool ok=false;double value=evalExpr(feature.get(key,"0"),env,&ok);
+        if(!ok||!std::isfinite(value)||std::abs(value)>1e6)throw std::runtime_error(std::string("Invalid mesh displacement: ")+key);
+        return value;
+    };
+    const Vec3 delta{displacement("dx"),displacement("dy"),displacement("dz")};
+    if(delta.len()<=1e-8)throw std::runtime_error("Mesh displacement must be nonzero");
+    auto selection=[&](const char* key,size_t limit){
+        const V* values=feature.nativeSpec.find(key);
+        if(!values||values->t!=V::Arr||values->arr.empty()||values->arr.size()>limit)throw std::runtime_error(std::string("mesh_edit needs nonempty ")+key);
+        std::set<u32> selected;
+        for(const auto& value:values->arr){
+            if(value.t!=V::Num||!std::isfinite(value.num)||value.num<0||value.num>=limit||value.num!=std::floor(value.num))throw std::runtime_error("Mesh selection index is out of range");
+            if(!selected.insert((u32)value.num).second)throw std::runtime_error("Duplicate mesh selection index");
+        }
+        return selected;
+    };
+    if(op->str=="displace"){
+        if(feature.nativeSpec.find("triangles"))throw std::runtime_error("Mesh displace selects vertices, not triangles");
+        const auto vertices=selection("vertices",mesh.vertCount());
+        for(u32 vertex:vertices){const Vec3 p=at(mesh,vertex)+delta;if(std::max({std::abs(p.x),std::abs(p.y),std::abs(p.z)})>1e6)throw std::runtime_error("Mesh edit exceeds coordinate limits");mesh.pos[3*vertex]=(f32)p.x;mesh.pos[3*vertex+1]=(f32)p.y;mesh.pos[3*vertex+2]=(f32)p.z;}
+    }else{
+        if(feature.nativeSpec.find("vertices"))throw std::runtime_error("Mesh extrude selects triangles, not vertices");
+        const auto triangles=selection("triangles",mesh.triCount());
+        std::map<std::pair<u32,u32>,std::vector<std::pair<u32,u32>>> edges;
+        std::set<u32> patchVertices;
+        for(u32 triangle:triangles)for(int k=0;k<3;++k){const u32 a=mesh.idx[3*triangle+k],b=mesh.idx[3*triangle+(k+1)%3];patchVertices.insert(a);edges[std::minmax(a,b)].push_back({a,b});}
+        std::vector<std::pair<u32,u32>> boundary;
+        for(const auto& edge:edges){if(edge.second.size()==1)boundary.push_back(edge.second.front());else if(edge.second.size()!=2)throw std::runtime_error("Mesh extrude patch is not edge-manifold");}
+        if(boundary.empty())throw std::runtime_error("Mesh extrude needs a patch with a boundary, not the entire closed mesh");
+        if(mesh.vertCount()+patchVertices.size()>kMeshModelMaxVertices||mesh.triCount()+2*boundary.size()>kOperationTriangles)throw std::runtime_error("Mesh extrusion exceeds geometry capacity");
+        std::unordered_map<u32,u32> moved;
+        for(u32 vertex:patchVertices){const Vec3 point=at(mesh,vertex)+delta;if(std::max({std::abs(point.x),std::abs(point.y),std::abs(point.z)})>1e6)throw std::runtime_error("Mesh extrusion exceeds coordinate limits");moved[vertex]=(u32)mesh.vertCount();mesh.addVertex(point);}
+        const auto original=mesh.idx;mesh.idx.clear();
+        for(u32 t=0;t<original.size()/3;++t){const u32 a=original[3*t],b=original[3*t+1],c=original[3*t+2];if(triangles.count(t))mesh.addTri3(moved.at(a),moved.at(b),moved.at(c));else mesh.addTri3(a,b,c);}
+        for(const auto& edge:boundary){const auto a=edge.first,b=edge.second,aa=moved.at(a),bb=moved.at(b);mesh.addTri3(a,b,bb);mesh.addTri3(a,bb,aa);}
+    }
+    mesh.computeNormals();
+    const auto after=analyzeMesh(mesh);requireFiniteManifold(after,"mesh_edit result");
+    if(requireClosed&&!after.closedOriented())throw std::runtime_error("Mesh edit did not preserve the closed oriented boundary");
+    if(before.closedOriented()&&before.signedVolume*after.signedVolume<=0)throw std::runtime_error("Mesh edit collapsed or reversed the enclosed volume");
+    return mesh;
+}
 }
 
 using V = arkjson::Value;
+
+std::string meshTopologyFingerprint(const Mesh& mesh){
+    u64 hash=14695981039346656037ull;
+    auto add=[&](u64 value){for(int byte=0;byte<8;++byte){hash^=(value>>(8*byte))&255;hash*=1099511628211ull;}};
+    add(mesh.vertCount());add(mesh.triCount());for(u32 index:mesh.idx)add(index);
+    std::ostringstream text;text<<"mesh-index-v1:"<<std::hex<<std::setw(16)<<std::setfill('0')<<hash;
+    return text.str();
+}
 
 Mesh meshFromPayload(const V& mesh) {
     if (mesh.t != V::Obj) throw std::runtime_error("mesh must be an object");
@@ -505,6 +579,8 @@ Body evaluateMeshFeature(const Feature& feature, const ExprEnv& env, const std::
             mesh = offsetAlongNormals(std::move(mesh), requiredNumber(feature, env, "distance"));
         } else if (feature.type == FeatureType::MeshFill) {
             mesh = fillBoundaries(std::move(mesh));
+        } else if (feature.type == FeatureType::MeshEdit) {
+            mesh = directEdit(std::move(mesh),feature,env);
         } else throw std::runtime_error("Unknown mesh feature");
         (void)audit;
     }
@@ -536,6 +612,8 @@ Body evaluateMeshFeature(const Feature& feature, const ExprEnv& env, const std::
         report.set("lambda", number(feature.p.count("lambda") ? feature.num(env, "lambda") : 0.5));
         report.set("pin_boundary", V::makeBool(!feature.p.count("pin_boundary") || feature.num(env, "pin_boundary") != 0.0));
     }
+    report.set("topology_fingerprint",V::makeStr(meshTopologyFingerprint(mesh)));
+    if(feature.type==FeatureType::MeshEdit){report.set("edit_mode",*feature.nativeSpec.find("op"));report.set("source_topology",*feature.nativeSpec.find("source_topology"));report.set("closed_boundary_preserved",V::makeBool(after.closedOriented()));report.set("self_intersections_checked",V::makeBool(false));}
     body.nativeData = std::move(report);
     body.baked = std::make_unique<Mesh>(std::move(mesh));
     return body;

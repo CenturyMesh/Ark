@@ -14,6 +14,16 @@
 #include <string>
 
 namespace ark {
+arkjson::Value inspectNativeCollision(const Body& a,const Mat4& aWorld,const Body& b,const Mat4& bWorld,double tolerance){
+    if(tolerance!=1e-6)throw std::runtime_error("Collision uses fixed 1e-6 mm native contact tolerance");
+    arkjson::Value request=arkjson::Value::makeObj();request.set("op",arkjson::Value::makeStr("collision"));
+    auto body=[&](const Body& source,const Mat4& world,const char* brepKey,const char* transformKey){
+        const auto* encoded=source.nativeData.find("brep_base64");if(!encoded||encoded->t!=arkjson::Value::Str||encoded->str.empty())throw std::runtime_error("Collision requires exact native solid bodies");
+        request.set(brepKey,*encoded);arkjson::Value frame=arkjson::Value::makeArr();for(double value:world.m)frame.arr.push_back(arkjson::Value::makeNum(value));request.set(transformKey,frame);
+    };
+    body(a,aWorld,"a_brep","a_transform");body(b,bWorld,"b_brep","b_transform");
+    request.set("tolerance",arkjson::Value::makeNum(tolerance));return nativeModelRequest(request);
+}
 namespace {
 using V = arkjson::Value;
 
@@ -24,7 +34,7 @@ const V& required(const V& object, const char* key) {
 }
 
 void rejectDerivedSpatialHandles(const Feature& feature){
-    const V* operation=feature.nativeSpec.find("op");if(!operation||operation->t!=V::Str||(operation->str!="surface_spline"&&operation->str!="project_surface"&&operation->str!="project"&&operation->str!="equation"))return;
+    const V* operation=feature.nativeSpec.find("op");if(!operation||operation->t!=V::Str||(operation->str!="surface_spline"&&operation->str!="project_surface"&&operation->str!="project"&&operation->str!="equation"&&operation->str!="helix"))return;
     bool handles=feature.nativeSpec.find("constraints")||feature.nativeSpec.find("start_ref")||feature.nativeSpec.find("to_ref")||feature.nativeSpec.find("through_ref");if(const V* segments=feature.nativeSpec.find("segments");segments&&segments->t==V::Arr)for(const V& segment:segments->arr)handles|=segment.find("to_ref")||segment.find("through_ref");
     if(handles)throw std::runtime_error("Spatial point constraints and datum point anchors require authored line, arc, NURBS or spline segments; derived "+operation->str+" curves do not expose those solver handles");
 }
@@ -349,6 +359,7 @@ V surfaceRequest(const Feature& feature, const ExprEnv& env, Document& document,
             }
             request.set("guides", std::move(curves));
         }
+        if (const V* controls=feature.nativeSpec.find("controls")) request.set("controls",numericNative(*controls,env));
     } else if (feature.type == FeatureType::SurfaceFill) {
         request.set("op", V::makeStr("surface_fill"));
         if (const V* profile = feature.nativeSpec.find("profile"))
@@ -452,9 +463,18 @@ V surfaceRequest(const Feature& feature, const ExprEnv& env, Document& document,
         }
         request.set("inputs", std::move(inputs));
         request.set("solid", V::makeBool(bitParam(feature, env, "solid", 0)));
+        for(const auto& field:feature.nativeSpec.obj)if(field.first!="require_connected")throw std::runtime_error("Unknown sew field: "+field.first);
+        if(const V* connected=feature.nativeSpec.find("require_connected")){if(connected->t!=V::Bool)throw std::runtime_error("Sew require_connected must be boolean");request.set("require_connected",*connected);}
     } else if (isCurveFeature(feature.type)) {
         if (feature.type == FeatureType::Curve) {
             rejectDerivedSpatialHandles(feature);
+            if(const auto* op=feature.nativeSpec.find("op");op&&op->asStr()=="helix"){
+                if(!feature.inputs.empty())throw std::runtime_error("Helix is an authored source and takes no feature inputs");
+                request=numericNative(feature.nativeSpec,env);
+                // axis is numeric XYZ here, never a symbolic solid-axis selector.
+                if(const V* axis=feature.nativeSpec.find("axis"))request.set("axis",numericNative(*axis,env,"vector"));
+                return request;
+            }
             if(const auto* op=feature.nativeSpec.find("op");op&&op->asStr()=="equation")return sampleEquationCurve(feature.nativeSpec,env);
             if(const auto* op=feature.nativeSpec.find("op");op&&op->asStr()=="project_surface"){
                 if(feature.inputs.size()!=2)throw std::runtime_error("Surface projection requires source curve and target surface inputs");const Body* source=precedingBody(preceding,feature.inputs[0]);const Body* target=precedingBody(preceding,feature.inputs[1]);if(!source||!target)throw std::runtime_error("Surface projection inputs missing");request.set("op",V::makeStr("curve_project_surface"));request.set("input_brep",brepOf(*source,"projection curve"));request.set("target_brep",brepOf(*target,"projection surface"));request.set("direction",numericNative(required(feature.nativeSpec,"direction"),env,"vector"));return request;
@@ -1125,6 +1145,24 @@ void ensureNativeBody(Document& document, u64 featureId, std::vector<Body>& bodi
 
 Body evaluateExactLegacyOperation(const Feature& feature, const ExprEnv& env,
                                   Document& document, std::vector<Body>& preceding) {
+    if(feature.type==FeatureType::LinearPattern){
+        if(feature.inputs.size()!=1)throw std::runtime_error("Exact linear pattern requires one native input");
+        const double count=expressionValue(feature.get("count","3"),env);
+        if(count<1||count>64||count!=std::floor(count))
+            throw std::runtime_error("Exact linear pattern count must be an integer in 1..64");
+        // Keep the authored legacy feature and its expression sources intact.
+        // Only this evaluation request uses the native solid operation; a
+        // rejected exact pattern cannot fall back to its display triangles.
+        Feature native=feature;native.type=FeatureType::NativeSolid;
+        native.nativeSpec=V::makeObj();native.p.clear();
+        native.nativeSpec.set("op",V::makeStr(count==1?"transform":"linear_pattern"));
+        if(count==1)native.nativeSpec.set("frame",frameValue(Mat4::identity()));
+        else{
+            native.p={{"count",feature.get("count","3")},{"dx",feature.get("dx","20")},
+                      {"dy",feature.get("dy","0")},{"dz",feature.get("dz","0")}};
+        }
+        return evaluateNativeFeature(native,env,document,preceding);
+    }
     Body result;
     result.nativeData = legacyOperationResult(feature, env, document, preceding);
     appendTubeEndFitOptions(result.nativeData,document,feature.id,env);

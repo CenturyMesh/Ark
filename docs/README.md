@@ -9,6 +9,7 @@ current release claim. [release.json](../release.json) owns application identity
 
 | Guide | Read it when |
 |---|---|
+| [019B draft controls](AUTHORING_019B_TESTING.md) | You are testing image intents, optional dimensions, direct edits, Skeleton code and collision feedback |
 | [018B draft controls](AUTHORING_018B_TESTING.md) | You are testing editable sketches, construction geometry and varying sweeps |
 | [Handbook](HANDBOOK.md) | You want a walkthrough of editing, assemblies, agents, BOM and export |
 | [Connecting agents and accounts](CONNECTING.md) | You need ChatGPT authorization, API configuration or an external MCP connection |
@@ -43,6 +44,12 @@ The current native build directory is `out/native-release`.
 New authoring contracts: [typed sketch entities](SKETCH_ENTITY_AUTHORING.md),
 [construction datums](CONSTRUCTION_DATUM_AUTHORING.md), [spatial constraints](SPATIAL_SKETCH_CONSTRAINTS.md)
 and [team write windows](AGENT_WRITE_WINDOWS.md).
+
+019B adds [image authoring](IMAGE_AUTHORING.md), [native Skeleton code](SKELETON_AUTHORING.md)
+and [indexed mesh edits](MESH_DIRECT_AUTHORING.md), plus
+[helix, surface joining, loft controls and collision evidence](PARAMETRIC_GEOMETRY_019B.md).
+Use the [019B manual test guide](AUTHORING_019B_TESTING.md) for the isolated preview
+and synthetic authoring example.
 
 ## Agents and architecture
 

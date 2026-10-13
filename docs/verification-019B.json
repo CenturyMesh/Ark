@@ -1,0 +1,260 @@
+{
+  "iteration": {
+    "sequence": 19,
+    "phase": "B",
+    "code": "019B",
+    "version": "0.9.20",
+    "milestones": [
+      "A.01",
+      "A.05",
+      "B.01",
+      "B.02",
+      "B.03",
+      "C.04",
+      "D.02",
+      "D.04",
+      "E.01"
+    ]
+  },
+  "date": "2026-10-13",
+  "platform": "Windows x64 local LLVM-MinGW UCRT",
+  "compiler": "llvm-mingw-20261006; clang23.1.3",
+  "native_kernel": "OCCT8.0.1",
+  "baseline_commit": "d7448ef4ec42f38f7bd5081f500abce8c3a99e52",
+  "milestones_status": "A.01 verified within identity scope; A.05/B.01/B.02/B.03/C.04/D.02/D.04/E.01 partial; human acceptance and merge pending",
+  "native_tests": {
+    "full_run": {
+      "passed": 88,
+      "failed": 1,
+      "groups": 89,
+      "seconds": 116.45,
+      "log": "out/native-019b-final-tests.log"
+    },
+    "studio_recheck_after_navigation_fix": {
+      "passed": 14,
+      "failed": 0,
+      "groups": 14,
+      "seconds": 57.76,
+      "log": "out/studio-019b-final-tests.log"
+    },
+    "all_89_groups_accepted": true,
+    "scope": "Full native run accepted75 headless groups and13/14 Studio groups. Navigation layout fix changed Studio only; all14 Studio groups were rerun against the final executable. OCCT worker and headless executables retain the full-run hashes."
+  },
+  "core_tests": {
+    "passed": 51,
+    "failed": 0,
+    "groups": 51,
+    "seconds": 14.54,
+    "log": "out/core-019b-tests-final.log"
+  },
+  "build": {
+    "final_native_log": "out/build-019b-10.log",
+    "final_portable_log": "out/core-019b-build-final-2.log",
+    "portable_studio_final_log": "out/core-019b-studio-final.log",
+    "native_exit": 0,
+    "portable_exit": 0,
+    "portable_studio_final_exit": 0
+  },
+  "visual_evidence": [
+    {
+      "path": "docs/images/019B/image-to-cad.png",
+      "sha256": "a54856f3ecb67dc65ee2c9208101f1c3a6e0237213d7433abc85ccdd5b3c043b",
+      "fixture": "synthetic",
+      "inspected": true,
+      "observed": "Actual native Width/Height/Depth fields:120/blank/34.5 and decoded synthetic thumbnail"
+    },
+    {
+      "path": "docs/images/019B/image-inspire.png",
+      "sha256": "ffca3c2dc89c1f8ce4847dfc1da995efaa87bde12b02a0626be4369d076d0a59",
+      "fixture": "synthetic",
+      "inspected": true,
+      "observed": "Rendered inspiration toggle with hidden rough dimensions"
+    },
+    {
+      "path": "docs/images/019B/skeleton-preview.png",
+      "sha256": "feaccb8777b7d7dd553020979ede1f899ccbcc0d3afe0e56fdcd89d546bb576b",
+      "fixture": "synthetic",
+      "inspected": true,
+      "observed": "Native editor title, source ownership and rendered isolated candidate"
+    },
+    {
+      "path": "docs/images/019B/curved-face-selection.png",
+      "sha256": "fcf0cb6d5f38eee748d870ac1fff585032710568b16b652af347b748f3f8e2ae",
+      "fixture": "synthetic",
+      "inspected": true,
+      "observed": "Named native cylindrical side face selected with visible halo"
+    },
+    {
+      "path": "docs/images/019B/mesh-patch-preview.png",
+      "sha256": "cc55611e9ece6612aa8855a92bc03f9c5110c422f2ef5eb6627829cb5f9061df",
+      "fixture": "synthetic",
+      "inspected": true,
+      "observed": "Indexed cube patch extrusion preview with dynamic15mm dimension"
+    },
+    {
+      "path": "docs/images/019B/driving-sketch-dimensions.png",
+      "sha256": "ed74202f59b8b4103c8d84ee5bc16d5fd2d0acc18545d91f819b3c11a2844714",
+      "fixture": "synthetic",
+      "inspected": true,
+      "observed": "Source rectangle45x25mm dimension control and retained line/circle/arc sources"
+    },
+    {
+      "path": "docs/images/019B/concave-body-glow.png",
+      "sha256": "159d0356b72ba7545f7110f17f0e7a15fea01124cd561860afd4119fca7f9579",
+      "fixture": "synthetic",
+      "inspected": true,
+      "observed": "Synthetic concave surface body halo after retained-depth rendering"
+    },
+    {
+      "path": "docs/images/019B/hidden-body-occlusion.png",
+      "sha256": "d2fa3d51b08e6fa8071c566e12add0a35a2b05e4ab018e7fcbaefad0b049d811",
+      "fixture": "synthetic",
+      "inspected": true,
+      "observed": "Selected rear native body remains occluded by opaque foreground"
+    },
+    {
+      "path": "docs/images/019B/visible-face-glow.png",
+      "sha256": "62ff7af22df636b8ae1b37fe48c9bd583f554d03aebb0cb9ef248b48a1fea5db",
+      "fixture": "synthetic",
+      "inspected": true,
+      "observed": "Visible exactz_max face retains its halo and semantic identity"
+    },
+    {
+      "path": "docs/images/019B/compact-team-layout.png",
+      "sha256": "67690de527893232be2d768bae71631d725ef18d33043055983a36813d1147e0",
+      "fixture": "synthetic",
+      "inspected": true,
+      "observed": "Compact1180x800 team dock retains160px CAD viewport and readable native controls"
+    },
+    {
+      "path": "docs/images/019B/full-team-layout.png",
+      "sha256": "fc271959927ae8bbbe0c609c51ff23b683981314c78de744a671dedbacafe943",
+      "fixture": "synthetic",
+      "inspected": true,
+      "observed": "Taller1600x1000 team cards retain full role/activity detail"
+    },
+    {
+      "path": "docs/images/019B/authoring-example.png",
+      "sha256": "6d1d6d74ff8a938c582ff1fd5e1a58f02d7185fd62513be871157e637a88df3d",
+      "fixture": "examples/authoring-019B.arkops",
+      "inspected": true,
+      "observed": "Native Skeleton copies, helix, aligned loft, indexed cube and retained source sketches"
+    }
+  ],
+  "preview": {
+    "path": "out/test-preview/019B-test2",
+    "studio_sha256": "aa77e818c6410f9d759430496af50e66401a708364ecedfe371b61f09aa17a17",
+    "worker_sha256": "3d0ca7f343a4b92f50ee031720008184b5b50e2df30181e42349bc37a7fd84a1",
+    "metadata": {
+      "schema": 1,
+      "product": "ARK",
+      "version": "0.9.20",
+      "iteration_code": "019B",
+      "sequence": 19,
+      "phase": "B",
+      "milestones": [
+        "A.01",
+        "A.05",
+        "B.01",
+        "B.02",
+        "B.03",
+        "C.04",
+        "D.02",
+        "D.04",
+        "E.01"
+      ],
+      "platform": "windows-x64",
+      "entrypoint": "ark-studio.exe"
+    },
+    "synthetic_script": "examples/authoring-019B.arkops",
+    "script_sha256": "3f9f0286f893ab0a8d8ea095cb9fe1f4eb2a9a687705f1b22de25de1f738bd2e",
+    "scripted_preview_exit": 0,
+    "publication": "Isolated local development test copy. Draft PR only; no merge, release tag, installer or OTA publication."
+  },
+  "dependency_provenance": {
+    "stb_image": {
+      "upstream_commit": "013ac3beddff3dbffafd5177e7972067cd2b5083",
+      "header_sha256": "594c2fe35d49488b4382dbfaec8f98366defca819d916ac95becf3e75f4200b3",
+      "license_sha256": "bebfe904b14301657e4e5d655c811d51fd31b97c455b9cc2d8600d6bac6cff63",
+      "license_and_provenance_present_in_test_copy": true,
+      "packaging": "Windows release and Linux headless packaging scripts include full upstream license/provenance. Linux package execution awaits CI."
+    }
+  },
+  "earlier_failed_attempts": [
+    {
+      "log": "out/build-019b.log",
+      "kind": "compilation",
+      "resolution": "Corrected JSON lookup key types in Skeleton source"
+    },
+    {
+      "log": "out/build-019b-3.log",
+      "kind": "compilation",
+      "resolution": "Corrected test API assumptions and Windows near macro collision"
+    },
+    {
+      "log": "out/focused-019b.log",
+      "kind": "regression",
+      "resolution": "Routed MeshEdit evaluation and updated unsupported document version fixture to36"
+    },
+    {
+      "log": "out/ui-019b-attempt1.log",
+      "kind": "ui",
+      "resolution": "Iteration history now accepts source format35"
+    },
+    {
+      "log": "out/native-019b-attempt1.log",
+      "passed": 79,
+      "failed": 2,
+      "seconds": 83.8,
+      "resolution": "Visible vertex fixture now asserts actual source index; live test uses explicit text interchange file instead of parsing binary .ark as JSON"
+    },
+    {
+      "log": "out/native-019b-focused2.log",
+      "passed": 8,
+      "failed": 2,
+      "seconds": 27.86,
+      "resolution": "Added Skeleton onboarding whitelist/schema topic and real native EDIT field capture with offscreen visible parent"
+    },
+    {
+      "logs": [
+        "out/build-019b-8.log",
+        "out/core-019b-build-final.log"
+      ],
+      "kind": "compilation",
+      "resolution": "Used a custom raw-string delimiter for synthetic harmonic equation fixture"
+    },
+    {
+      "log": "out/native-019b-final-tests.log",
+      "passed": 88,
+      "failed": 1,
+      "seconds": 116.45,
+      "resolution": "Capped the complete team dock to preserve160px CAD viewport and adapted card detail above the image strip; corrected real triad/display-menu overlap without weakening bounds assertions; all Studio groups rerun"
+    },
+    {
+      "kind": "private_preliminary_example",
+      "resolution": "Added native Skeleton pattern bridge preserving B-rep and explicit loft ruled=0; final packaged scripted example passed"
+    }
+  ],
+  "measured_scope": [
+    "Native helix checkpoints, length/rise and analytic sweep volume; sewing connectivity/free boundaries and closed shell conversion",
+    "Real loft section seams/reversal and fixed-tolerance guide contact/deviation rejection",
+    "Native Skeleton count4to5, source reload, identity at1, default pattern and atomic rejection at65",
+    "Indexed cube patch extrusion volume/closure, coordinate-only reassociation, ownership, topology guards and atomic rejection",
+    "Exact collision distance/common volume and concrete definition/occurrence/copy queries; labelled real mesh triangle contact and winding containment",
+    "Source format35 roundtrip, downgrade/forged-owner rejection, full iteration history and current revision guards",
+    "Actual PNG/JPEG decode/thumbnail pixels through WIC and forced portable decoder; optional blank/partial/full dimensions and invalid-input rejection",
+    "Offline actual image bytes in Responses/Chat/Anthropic envelopes and team lead/specialist/steering paths; cancellation before transport",
+    "Real rendered native controls, direct gesture previews/application/cancel, driving source dimensions and semantic curved face picking",
+    "Occluded body/face halo rejection and visible halo pixels outside object fill; navigation across compact tested windows"
+  ],
+  "limits": [
+    "Image to CAD supplies multimodal authoring guidance; no automatic pixel vectorizer, unique photo depth or external reconstruction-quality benchmark",
+    "Direct native push/pull supports positive box/cylinder/cone source faces; arbitrary-face topology editing is outside this scope",
+    "Skeleton is bounded declarative native authoring, not executable C++/assembly or a general programming SDK/global constraint solver",
+    "Guided loft/helix fits report observed checkpoint error without a general between-sample proof or general G2 boundary solver",
+    "Mesh watertightness does not prove absence of self-intersections; triangle contact does not provide mesh common material volume",
+    "Collision inspection is static geometry feedback; contact response dynamics and manufacturing qualification are unverified",
+    "Local builds use LLVM-MinGW on Windows; Linux and MSVC actual builds await PR CI",
+    "External model performance, product integration, deployment and human acceptance remain pending; no automatic merge"
+  ]
+}

@@ -4,6 +4,7 @@
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
+#include <BRepCheck_Analyzer.hxx>
 #include <BRepAlgoAPI_Splitter.hxx>
 #include <BRepClass_FaceClassifier.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
@@ -40,6 +41,8 @@
 #include <NCollection_Array1.hxx>
 #include <NCollection_Array2.hxx>
 #include <NCollection_List.hxx>
+#include <NCollection_IndexedDataMap.hxx>
+#include <TopTools_ShapeMapHasher.hxx>
 #include <Standard_Failure.hxx>
 #include <TopExp.hxx>
 #include <TopoDS.hxx>
@@ -219,6 +222,7 @@ struct Profile {
     std::vector<EdgeRecord> edges;
     std::array<double, 16> frame{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
     bool closed = false;
+    std::vector<size_t> sourceIndices;
 };
 
 Profile profileOf(const V& value, bool requireClosed) {
@@ -238,6 +242,7 @@ Profile profileOf(const V& value, bool requireClosed) {
         if (result.edges.empty()) throw std::runtime_error("wire_brep has no edges");
         result.closed = result.edges.front().first.Distance(result.edges.back().last) <= kTolerance;
         if (requireClosed && !result.closed) throw std::runtime_error("profile is not explicitly closed");
+        for(size_t i=0;i<result.edges.size();++i)result.sourceIndices.push_back(i);
         return result;
     }
     const auto frame = frameOf(value);
@@ -273,7 +278,47 @@ Profile profileOf(const V& value, bool requireClosed) {
     for (const auto& edge : result.edges) maker.Add(edge.edge);
     if (!maker.IsDone()) throw std::runtime_error("profile wire construction failed");
     result.wire = maker.Wire();
+    for(size_t i=0;i<result.edges.size();++i)result.sourceIndices.push_back(i);
     return result;
+}
+
+void validateLoftControls(const V& request){
+    const V* controls=request.find("controls");if(!controls)return;
+    if(controls->t!=V::Obj)throw std::runtime_error("Loft controls must be an object");
+    for(const auto& field:controls->obj)if(field.first!="section_alignment"&&field.first!="guide_samples"&&field.first!="max_guide_deviation_mm"&&field.first!="require_ordered_contacts")throw std::runtime_error("Unknown loft control: "+field.first);
+    if(const V* align=controls->find("section_alignment")){const V& profiles=required(request,"profiles");if(align->t!=V::Arr||align->arr.size()!=profiles.arr.size())throw std::runtime_error("Loft section_alignment must match section count");for(const V& item:align->arr){if(item.t!=V::Obj)throw std::runtime_error("Loft section alignment must be an object");for(const auto& field:item.obj)if(field.first!="reverse"&&field.first!="seam_edge"&&field.first!="seam_angle")throw std::runtime_error("Unknown loft section alignment field: "+field.first);if(const V* reverse=item.find("reverse");reverse&&reverse->t!=V::Bool)throw std::runtime_error("Loft reverse must be boolean");if(const V* seam=item.find("seam_edge"))integer(*seam,"seam_edge",0,127);if(const V* angle=item.find("seam_angle"))number(*angle,"seam_angle");}}
+    if(const V* samples=controls->find("guide_samples"))integer(*samples,"guide_samples",2,129);
+    if(const V* error=controls->find("max_guide_deviation_mm")){double value=number(*error,"max_guide_deviation_mm");if(value<kTolerance||value>.05)throw std::runtime_error("Loft guide deviation limit is restricted to 1e-6..0.05 mm");}
+    if(const V* ordered=controls->find("require_ordered_contacts");ordered&&ordered->t!=V::Bool)throw std::runtime_error("Loft require_ordered_contacts must be boolean");
+    if(!request.find("guides")&&(controls->find("guide_samples")||controls->find("max_guide_deviation_mm")||controls->find("require_ordered_contacts")))throw std::runtime_error("Loft guide controls require authored guides");
+}
+
+Profile alignedSection(const V& request,size_t index,bool closed){
+    const V& value=required(request,"profiles").arr[index];Profile result=profileOf(value,closed);
+    const V* controls=request.find("controls"),*alignment=controls?controls->find("section_alignment"):nullptr;
+    if(!alignment)return result;
+    const V& item=alignment->arr[index];
+    const size_t seam=item.find("seam_edge")?(size_t)integer(*item.find("seam_edge"),"seam_edge",0,127):0;
+    const double angle=item.find("seam_angle")?number(*item.find("seam_angle"),"seam_angle"):0;
+    if(seam>=result.edges.size())throw std::runtime_error("Loft seam_edge is outside section edge count");
+    if(seam&&!result.closed)throw std::runtime_error("Loft seam_edge requires a closed profile");
+    if(angle!=0){
+        if(result.edges.size()!=1||!result.closed)throw std::runtime_error("Loft seam_angle requires one closed analytic circle");
+        const BRepAdaptor_Curve source(result.edges.front().edge);if(source.GetType()!=GeomAbs_Circle)throw std::runtime_error("Loft seam_angle requires one closed analytic circle");
+        gp_Circ circle=source.Circle();gp_Ax2 position=circle.Position();gp_Trsf rotate;rotate.SetRotation(gp_Ax1(circle.Location(),circle.Axis().Direction()),angle*3.14159265358979323846/180.);position.Transform(rotate);circle.SetPosition(position);
+        BRepBuilderAPI_MakeEdge maker(circle);if(!maker.IsDone())throw std::runtime_error("Loft circle seam construction failed");const gp_Pnt first=circle.Location().Translated(gp_Vec(circle.XAxis().Direction())*circle.Radius());result.edges[0]={maker.Edge(),first,first};
+    }
+    if(seam){std::rotate(result.edges.begin(),result.edges.begin()+seam,result.edges.end());std::rotate(result.sourceIndices.begin(),result.sourceIndices.begin()+seam,result.sourceIndices.end());}
+    if(const V* reverse=item.find("reverse");reverse&&reverse->b){std::reverse(result.edges.begin(),result.edges.end());std::reverse(result.sourceIndices.begin(),result.sourceIndices.end());for(EdgeRecord& edge:result.edges){edge.edge.Reverse();std::swap(edge.first,edge.last);}}
+    BRepBuilderAPI_MakeWire wire;for(const EdgeRecord& edge:result.edges){wire.Add(edge.edge);if(!wire.IsDone())throw std::runtime_error("Loft aligned section is not connected");}result.wire=wire.Wire();return result;
+}
+
+bool flag(const V& request,const char* key);
+void configureLoftMaker(BRepOffsetAPI_ThruSections& maker,const V& request,bool guided){
+    const bool compatible=request.find("compatible")?flag(request,"compatible"):guided;
+    maker.CheckCompatibility(compatible);
+    if(const V* degree=request.find("max_degree"))maker.SetMaxDegree(integer(*degree,"max_degree",1,8));
+    if(flag(request,"smooth")){maker.SetSmoothing(true);int continuity=request.find("continuity")?integer(*request.find("continuity"),"continuity",0,2):1;maker.SetContinuity(continuity==0?GeomAbs_C0:continuity==2?GeomAbs_C2:GeomAbs_C1);}
 }
 
 bool flag(const V& request, const char* key) {
@@ -442,6 +487,51 @@ V guidedResult(const TopoDS_Shape& shape, bool solid, const gp_Pnt& start, const
     return result;
 }
 
+double directedMark(const Profile& profile,const GuideMark& mark){
+    double length=0;
+    for(int i=0;i<mark.edge;++i){BRepAdaptor_Curve curve(profile.edges[(size_t)i].edge);length+=GCPnts_AbscissaPoint::Length(curve,1e-8);}
+    const auto& edge=profile.edges[(size_t)mark.edge].edge;BRepAdaptor_Curve curve(edge);
+    const double origin=edge.Orientation()==TopAbs_REVERSED?curve.LastParameter():curve.FirstParameter();
+    if(std::abs(origin-mark.param)>1e-12)length+=GCPnts_AbscissaPoint::Length(curve,std::min(origin,mark.param),std::max(origin,mark.param),1e-8);
+    return length;
+}
+
+V loftEvidence(V result,const V& request){
+    V report=*result.find("report"),sectionRows=V::makeArr();
+    const V& profiles=required(request,"profiles");
+    std::vector<Profile> sections;
+    std::vector<size_t> indices;
+    for(size_t i=0;i<profiles.arr.size();++i){V row=V::makeObj();row.set("section",V::makeNum(i));if(pointProfile(profiles.arr[i])){row.set("point",V::makeBool(true));sectionRows.arr.push_back(row);continue;}Profile section=alignedSection(request,i,false);row.set("edge_count",V::makeNum(section.edges.size()));row.set("closed",V::makeBool(section.closed));row.set("start_mm",vec(section.edges.front().first.XYZ()));row.set("end_mm",vec(section.edges.back().last.XYZ()));sectionRows.arr.push_back(row);sections.push_back(std::move(section));indices.push_back(i);}
+    report.set("section_alignment",sectionRows);
+    report.set("section_alignment_applied",V::makeBool(request.find("controls")&&request.find("controls")->find("section_alignment")));
+    report.set("self_intersections_checked",V::makeBool(false));
+    const V* values=request.find("guides");if(!values||values->arr.empty()){result.set("report",report);return result;}
+    const V* controls=request.find("controls");
+    const int samples=controls&&controls->find("guide_samples")?integer(*controls->find("guide_samples"),"guide_samples",2,129):17;
+    const double maxError=controls&&controls->find("max_guide_deviation_mm")?number(*controls->find("max_guide_deviation_mm"),"max_guide_deviation_mm"):.05;
+    const bool enforce=controls!=nullptr;
+    const bool ordered=controls?(!controls->find("require_ordered_contacts")||flag(*controls,"require_ordered_contacts")):false;
+    const TopoDS_Shape shape=readBrep(required(result,"brep_base64").str);
+    V guideRows=V::makeArr();double maximum=0,maxContact=0;
+    std::vector<std::vector<std::pair<double,size_t>>> orderBySection(sections.size());
+    for(size_t g=0;g<values->arr.size();++g){Profile guide=profileOf(values->arr[g],false);V row=V::makeObj(),contacts=V::makeArr();double error=0,previous=-1;int sense=0;unsigned checks=0;
+        for(size_t s=0;s<sections.size();++s){BRepExtrema_DistShapeShape contact(guide.wire,sections[s].wire);contact.Perform();if(!contact.IsDone()||contact.NbSolution()<1)throw std::runtime_error("Loft guide contact measurement failed");const double gap=contact.Value();maxContact=std::max(maxContact,gap);if(enforce&&gap>kTolerance)throw std::runtime_error("Loft guide "+std::to_string(g)+" misses section "+std::to_string(indices[s])+" by "+std::to_string(gap)+" mm");const GuideMark mark=locatePoint(guide,contact.PointOnShape1(1),(int)g);const double position=directedMark(guide,mark);if(ordered&&s){double delta=position-previous;if(std::abs(delta)<=kTolerance)throw std::runtime_error("Loft guide contacts coincide or repeat a section station");int observedSense=delta>0?1:-1;if(sense&&sense!=observedSense)throw std::runtime_error("Loft guide contacts do not follow section order");sense=observedSense;}previous=position;V item=V::makeObj();item.set("section",V::makeNum(indices[s]));item.set("gap_mm",V::makeNum(gap));item.set("guide_distance_mm",V::makeNum(position));contacts.arr.push_back(item);const GuideMark sectionMark=locatePoint(sections[s],contact.PointOnShape2(1),(int)g);orderBySection[s].push_back({directedMark(sections[s],sectionMark),g});}
+        auto endpointGap=[&](const gp_Pnt& endpoint,const Profile& section){BRepBuilderAPI_MakeVertex vertex(endpoint);BRepExtrema_DistShapeShape distance(vertex.Vertex(),section.wire);distance.Perform();if(!distance.IsDone()||distance.NbSolution()<1)throw std::runtime_error("Loft guide endpoint coherence measurement failed");return distance.Value();};
+        const double direct=std::max(endpointGap(guide.edges.front().first,sections.front()),endpointGap(guide.edges.back().last,sections.back()));
+        const double reversed=std::max(endpointGap(guide.edges.front().first,sections.back()),endpointGap(guide.edges.back().last,sections.front()));
+        const double endpointError=std::min(direct,reversed);
+        if(ordered&&endpointError>kTolerance)throw std::runtime_error("Loft guide endpoints do not coherently meet the first and last sections");
+        for(const EdgeRecord& edge:guide.edges){BRepAdaptor_Curve curve(edge.edge);for(int sample=0;sample<samples;++sample){const gp_Pnt p=curve.Value(curve.FirstParameter()+(curve.LastParameter()-curve.FirstParameter())*sample/(samples-1.));BRepBuilderAPI_MakeVertex vertex(p);BRepExtrema_DistShapeShape distance(vertex.Vertex(),shape);distance.Perform();if(!distance.IsDone()||distance.NbSolution()<1)throw std::runtime_error("Loft guide surface deviation measurement failed");error=std::max(error,distance.Value());++checks;}}
+        if(enforce&&error>maxError)throw std::runtime_error("Loft guide "+std::to_string(g)+" exceeds sampled surface deviation limit: "+std::to_string(error)+" mm > "+std::to_string(maxError));
+        maximum=std::max(maximum,error);row.set("guide",V::makeNum(g));row.set("contacts",contacts);row.set("endpoint_max_gap_mm",V::makeNum(endpointError));row.set("sample_count",V::makeNum(checks));row.set("observed_max_surface_deviation_mm",V::makeNum(error));row.set("contact_order_direction",V::makeNum(sense));guideRows.arr.push_back(row);
+    }
+    if(ordered&&values->arr.size()>1){std::vector<size_t> baseline;for(size_t s=0;s<orderBySection.size();++s){auto& marks=orderBySection[s];std::sort(marks.begin(),marks.end());for(size_t i=1;i<marks.size();++i)if(marks[i].first-marks[i-1].first<=kTolerance)throw std::runtime_error("Loft guides have coincident section contacts");std::vector<size_t> order;for(const auto& mark:marks)order.push_back(mark.second);if(sections[s].closed){auto zero=std::find(order.begin(),order.end(),0);std::rotate(order.begin(),zero,order.end());}if(s==0)baseline=order;else if(order!=baseline)throw std::runtime_error("Loft guide cyclic order changes across sections; explicit section alignment is required");}}
+    report.set("guide_evidence",guideRows);report.set("guide_max_contact_gap_mm",V::makeNum(maxContact));report.set("guide_observed_max_surface_deviation_mm",V::makeNum(maximum));
+    report.set("guide_deviation_limit_mm",V::makeNum(maxError));report.set("guide_deviation_enforced",V::makeBool(enforce));report.set("guide_contact_order_checked",V::makeBool(ordered));
+    report.set("guide_between_samples_bound_verified",V::makeBool(false));report.set("silhouette_bounds_mm",*report.find("bounds_mm"));report.set("silhouette_scope",V::makeStr("exact_axis_aligned_BRep_bounds; no view-dependent contour qualification"));
+    result.set("report",report);return result;
+}
+
 V guidedLoft(const V& request) {
     const V& profiles = required(request, "profiles");
     if (profiles.t != V::Arr || profiles.arr.size() < 2 || profiles.arr.size() > 32)
@@ -457,10 +547,11 @@ V guidedLoft(const V& request) {
         throw std::runtime_error("Loft guides need 1..8 curves");
     struct Section { Profile profile; gp_Pnt centroid; };
     std::vector<Section> sections;
-    for (const V& value : profiles.arr) {
+    for (size_t sectionIndex=0;sectionIndex<profiles.arr.size();++sectionIndex) {
+        const V& value=profiles.arr[sectionIndex];
         if (pointProfile(value)) throw std::runtime_error("A point section cannot be used with guide curves");
         Section section;
-        section.profile = profileOf(value, solid);
+        section.profile = alignedSection(request,sectionIndex,solid);
         section.centroid = centroidOf(section.profile);
         sections.push_back(std::move(section));
     }
@@ -547,7 +638,7 @@ V guidedLoft(const V& request) {
         }
         if (ordered.size() < 2) throw std::runtime_error("Loft guide spine failed");
         BRepOffsetAPI_ThruSections maker(solid, false, tolerance(request));
-        maker.CheckCompatibility(true);
+        configureLoftMaker(maker,request,true);
         for (const Station& station : ordered) maker.AddWire(station.wire);
         maker.Build();
         if (!maker.IsDone()) throw std::runtime_error("OCCT guided loft failed");
@@ -562,7 +653,7 @@ V guidedLoft(const V& request) {
                     throw std::runtime_error("Loft guide is not on the surface");
             }
         }
-        return guidedResult(shape, solid, sections.front().centroid, sections.back().centroid);
+        return loftEvidence(guidedResult(shape, solid, sections.front().centroid, sections.back().centroid),request);
     }
     if (guides.size() == 2) {
         struct Station { double t; TopoDS_Wire wire; bool authored; };
@@ -662,7 +753,7 @@ V guidedLoft(const V& request) {
         }
         if (ordered.size() < 2) throw std::runtime_error("Loft guide spine failed");
         BRepOffsetAPI_ThruSections maker(solid, false, tolerance(request));
-        maker.CheckCompatibility(true);
+        configureLoftMaker(maker,request,true);
         for (const Station& station : ordered) maker.AddWire(station.wire);
         maker.Build();
         if (!maker.IsDone()) throw std::runtime_error("OCCT guided loft failed");
@@ -677,7 +768,7 @@ V guidedLoft(const V& request) {
                     throw std::runtime_error("Loft guide is not on the surface");
             }
         }
-        return guidedResult(shape, solid, sections.front().centroid, sections.back().centroid);
+        return loftEvidence(guidedResult(shape, solid, sections.front().centroid, sections.back().centroid),request);
     }
     struct Station { double t; TopoDS_Wire wire; bool authored; };
     std::vector<Station> stations;
@@ -798,7 +889,7 @@ V guidedLoft(const V& request) {
     }
     if (ordered.size() < 2) throw std::runtime_error("Loft guide spine failed");
     BRepOffsetAPI_ThruSections maker(solid, false, tolerance(request));
-    maker.CheckCompatibility(true);
+    configureLoftMaker(maker,request,true);
     for (const Station& station : ordered) maker.AddWire(station.wire);
     maker.Build();
     if (!maker.IsDone()) throw std::runtime_error("OCCT guided loft failed");
@@ -813,10 +904,11 @@ V guidedLoft(const V& request) {
                 throw std::runtime_error("Loft guide is not on the surface");
         }
     }
-    return guidedResult(shape, solid, sections.front().centroid, sections.back().centroid);
+    return loftEvidence(guidedResult(shape, solid, sections.front().centroid, sections.back().centroid),request);
 }
 
 V loft(const V& request) {
+    validateLoftControls(request);
     if (const V* guides = request.find("guides")) {
         if (guides->t != V::Arr) throw std::runtime_error("Loft guides must be curves");
         if (!guides->arr.empty()) return guidedLoft(request);
@@ -852,12 +944,13 @@ V loft(const V& request) {
     TopoDS_Wire firstWire;
     auto namedEdges = [](const V& value, const Profile& profile) {
         std::vector<std::pair<std::string, EdgeRecord>> named;
-        const V& sourceEntities = required(value, "entities");
+        const V* sourceEntities = value.find("entities");
         std::set<std::string> names;
         for (size_t i = 0; i < profile.edges.size(); ++i) {
-            const V* supplied = sourceEntities.arr[i].find("name");
+            const size_t source=profile.sourceIndices.empty()?i:profile.sourceIndices[i];
+            const V* supplied = sourceEntities&&sourceEntities->t==V::Arr&&source<sourceEntities->arr.size()?sourceEntities->arr[source].find("name"):nullptr;
             std::string name = supplied && supplied->t == V::Str && !supplied->str.empty()
-                ? supplied->str : "entity." + std::to_string(i);
+                ? supplied->str : "entity." + std::to_string(source);
             if (!names.insert(name).second) throw std::runtime_error("Duplicate loft section entity name");
             named.push_back({name, profile.edges[i]});
         }
@@ -866,6 +959,10 @@ V loft(const V& request) {
     for (size_t profileIndex = 0; profileIndex < profiles.arr.size(); ++profileIndex) {
         const V& value = profiles.arr[profileIndex];
         if (pointProfile(value)) {
+            if(const V* controls=request.find("controls"))if(const V* alignment=controls->find("section_alignment")){
+                const V& item=alignment->arr[profileIndex];
+                if((item.find("reverse")&&item.find("reverse")->b)||(item.find("seam_edge")&&number(*item.find("seam_edge"),"seam_edge")!=0)||(item.find("seam_angle")&&number(*item.find("seam_angle"),"seam_angle")!=0))throw std::runtime_error("Point loft sections do not support wire reversal or seam controls");
+            }
             if (profileIndex != 0 && profileIndex + 1 != profiles.arr.size())
                 throw std::runtime_error("a point section can only start or end a loft");
             const gp_Pnt tip = point(required(value, "point"), frameOf(value));
@@ -874,7 +971,7 @@ V loft(const V& request) {
             maker.AddVertex(vertex.Vertex());
             continue;
         }
-        Profile profile = profileOf(value, solid);
+        Profile profile = alignedSection(request,profileIndex,solid);
         if (!sawWire) {
             segments = profile.edges.size();
             closed = profile.closed;
@@ -986,7 +1083,7 @@ V loft(const V& request) {
     }
     topology.set("references", rows);
     result.set("topology", topology);
-    return result;
+    return loftEvidence(result,request);
 }
 
 V surfaceFill(const V& request) {
@@ -1275,8 +1372,12 @@ V sewSurfaces(const V& request) {
         throw std::runtime_error("sew needs 2..16 B-rep inputs");
     const bool solid = flag(request, "solid", false);
     BRepBuilderAPI_Sewing sewing(tolerance(request));
+    sewing.SetMaxTolerance(kTolerance);
+    sewing.SetLocalTolerancesMode(false);
+    std::set<std::string> uniqueInputs;
     for (const V& encoded : inputs.arr) {
         if (encoded.t != V::Str || encoded.str.empty()) throw std::runtime_error("sew input must be base64");
+        if(!uniqueInputs.insert(encoded.str).second)throw std::runtime_error("Sew received a duplicate B-rep input");
         const TopoDS_Shape shape = readBrep(encoded.str);
         if (!shapes(shape, TopAbs_SOLID).empty())
             throw std::runtime_error("sew inputs must be faces or shells, not solids");
@@ -1287,17 +1388,65 @@ V sewSurfaces(const V& request) {
     TopoDS_Shape sewn = sewing.SewedShape();
     if (sewn.IsNull() || shapes(sewn, TopAbs_FACE).empty()) throw std::runtime_error("OCCT sewing produced no faces");
     const int freeEdges = sewing.NbFreeEdges();
+    if(sewing.NbDeletedFaces()!=0||sewing.NbDegeneratedShapes()!=0)
+        throw std::runtime_error("Sew refuses deleted faces or degenerated input shapes");
+    if(sewing.NbMultipleEdges()!=0)throw std::runtime_error("Sew produced a non-manifold multiple edge");
+    const auto faces=shapes(sewn,TopAbs_FACE);
+    std::vector<size_t> parents(faces.size());for(size_t i=0;i<parents.size();++i)parents[i]=i;
+    auto leader=[&](size_t i){while(parents[i]!=i)i=parents[i];return i;};
+    NCollection_IndexedDataMap<TopoDS_Shape,NCollection_List<TopoDS_Shape>,TopTools_ShapeMapHasher> owners;
+    TopExp::MapShapesAndAncestors(sewn,TopAbs_EDGE,TopAbs_FACE,owners);
+    for(int i=1;i<=owners.Extent();++i){size_t first=faces.size();for(NCollection_List<TopoDS_Shape>::Iterator owner(owners.FindFromIndex(i));owner.More();owner.Next())for(size_t face=0;face<faces.size();++face)if(faces[face].IsSame(owner.Value())){if(first==faces.size())first=face;else parents[leader(face)]=leader(first);break;}}
+    std::set<size_t> components;for(size_t i=0;i<faces.size();++i)components.insert(leader(i));
+    if(flag(request,"require_connected")&&components.size()!=1)
+        throw std::runtime_error("Sew requires one connected surface; observed "+std::to_string(components.size())+" components");
+    V boundaries=V::makeArr();double boundaryLength=0;
+    for(int i=1;i<=freeEdges;++i){const TopoDS_Edge& edge=sewing.FreeEdge(i);BRepAdaptor_Curve curve(edge);double length=GCPnts_AbscissaPoint::Length(curve,1e-8);if(!std::isfinite(length)||length<=0)throw std::runtime_error("Sew free-boundary length failed");V row=V::makeObj();row.set("boundary",V::makeNum(i-1));row.set("length_mm",V::makeNum(length));row.set("start_mm",vec(curve.Value(curve.FirstParameter()).XYZ()));row.set("end_mm",vec(curve.Value(curve.LastParameter()).XYZ()));boundaries.arr.push_back(row);boundaryLength+=length;}
     if (solid) {
         if (freeEdges != 0) throw std::runtime_error("sew solid requires no free edges");
         const auto shells = shapes(sewn, TopAbs_SHELL);
         if (shells.size() != 1) throw std::runtime_error("sew solid requires one closed shell");
+        if(components.size()!=1||!BRep_Tool::IsClosed(shells.front()))throw std::runtime_error("Sew solid requires one connected closed shell");
         BRepBuilderAPI_MakeSolid maker(TopoDS::Shell(shells.front()));
         maker.Build();
         if (!maker.IsDone()) throw std::runtime_error("OCCT sew did not make a solid");
         sewn = maker.Solid();
         if (properties(sewn) < 0) sewn.Reverse();
     }
-    return tag(shapeResult(sewn, solid), "sew", "free_edges", V::makeNum(freeEdges));
+    V result=tag(shapeResult(sewn,solid),"sew","free_edges",V::makeNum(freeEdges)),report=*result.find("report");
+    report.set("sewing_tolerance_mm",V::makeNum(kTolerance));report.set("gap_healing",V::makeBool(false));
+    report.set("component_count",V::makeNum(components.size()));report.set("shells",V::makeNum(shapes(sewn,TopAbs_SHELL).size()));
+    report.set("contiguous_edges",V::makeNum(sewing.NbContigousEdges()));report.set("multiple_edges",V::makeNum(sewing.NbMultipleEdges()));
+    report.set("free_boundary_length_mm",V::makeNum(boundaryLength));report.set("free_boundaries_mm",boundaries);
+    report.set("closed",V::makeBool(freeEdges==0));report.set("connected",V::makeBool(components.size()==1));
+    result.set("report",report);return result;
+}
+
+V collisionReport(const V& request){
+    tolerance(request);
+    for(const auto& field:request.obj)if(field.first!="op"&&field.first!="a_brep"&&field.first!="b_brep"&&field.first!="a_transform"&&field.first!="b_transform"&&field.first!="tolerance")throw std::runtime_error("Unknown collision field: "+field.first);
+    auto input=[&](const char* brepKey,const char* transformKey){const V& encoded=required(request,brepKey);if(encoded.t!=V::Str||encoded.str.empty())throw std::runtime_error("Collision B-rep must be nonempty base64");TopoDS_Shape shape=readBrep(encoded.str);shapeReport(shape,true);const auto solids=shapes(shape,TopAbs_SOLID);if(shapes(shape,TopAbs_FACE).size()!=shapes(solids.front(),TopAbs_FACE).size())throw std::runtime_error("Collision refuses stray faces outside the input solid");V profile=V::makeObj();if(const V* frame=request.find(transformKey))profile.set("frame",*frame);const auto m=frameOf(profile);gp_Trsf transform;transform.SetValues(m[0],m[4],m[8],m[12],m[1],m[5],m[9],m[13],m[2],m[6],m[10],m[14]);return transformed(shape,transform);};
+    const TopoDS_Shape a=input("a_brep","a_transform"),b=input("b_brep","b_transform");
+    BRepExtrema_DistShapeShape distance(a,b);distance.Perform();
+    if(!distance.IsDone()||distance.NbSolution()<1||!std::isfinite(distance.Value())||distance.Value()<0)throw std::runtime_error("Exact collision distance failed");
+    const TopoDS_Shape overlap=common(a,b);
+    if(!overlap.IsNull()&&!BRepCheck_Analyzer(overlap).IsValid())throw std::runtime_error("Exact collision common failed B-rep validation");
+    const auto solids=shapes(overlap,TopAbs_SOLID);double volume=0;
+    for(const auto& solid:solids){shapeReport(solid,true);volume+=properties(solid);}
+    if(!std::isfinite(volume)||volume<0)throw std::runtime_error("Exact collision volume is invalid");
+    const bool interference=volume>0,contact=!interference&&distance.Value()<=kTolerance;
+    V result=V::makeObj(),points=V::makeArr();
+    points.arr.push_back(vec(distance.PointOnShape1(1).XYZ()));points.arr.push_back(vec(distance.PointOnShape2(1).XYZ()));
+    result.set("status",V::makeStr(interference?"interference":contact?"touching":"separated"));
+    result.set("min_distance_mm",V::makeNum(distance.Value()));result.set("common_volume_mm3",V::makeNum(volume));
+    result.set("interference",V::makeBool(interference));result.set("touching",V::makeBool(contact));
+    result.set("nearest_points_mm",points);result.set("inner_solution",V::makeBool(distance.InnerSolution()));
+    result.set("contact_tolerance_mm",V::makeNum(kTolerance));result.set("common_solids",V::makeNum(solids.size()));
+    result.set("authority",V::makeStr("exact_native_BRep_distance_and_boolean_common"));
+    result.set("display_mesh_authoritative",V::makeBool(false));result.set("trajectory_checked",V::makeBool(false));
+    result.set("response_dynamics_checked",V::makeBool(false));
+    result.set("a_brep_sha256",V::makeStr(sha256(base64Decode(required(request,"a_brep").str))));
+    result.set("b_brep_sha256",V::makeStr(sha256(base64Decode(required(request,"b_brep").str))));return result;
 }
 
 V thicken(const V& request) {
@@ -1343,7 +1492,8 @@ V modelSurfaceNative(const V& request) {
         if (operation.str == "surface_trim_plane") return trimSurfacePlane(request);
         if (operation.str == "surface_trim_wire") return trimSurfaceWire(request);
         if (operation.str == "sew") return sewSurfaces(request);
-        if (operation.str == "curve" || operation.str == "curve_interpolate" || operation.str == "curve_analytic" || operation.str == "surface_spline" || operation.str == "curve_project_surface" || operation.str == "intersection_curve" || operation.str == "bridge")
+        if (operation.str == "collision") return collisionReport(request);
+        if (operation.str == "helix" || operation.str == "curve" || operation.str == "curve_interpolate" || operation.str == "curve_analytic" || operation.str == "surface_spline" || operation.str == "curve_project_surface" || operation.str == "intersection_curve" || operation.str == "bridge")
             return modelCurveNative(request);
         throw std::runtime_error("unsupported surfacing operation");
     } catch (const Standard_Failure& error) {

@@ -31,7 +31,7 @@ foreach ($folderName in @('assets')) {
 }
 $licensesRoot = Join-Path $previewRoot 'licenses'
 New-Item -ItemType Directory -Path $licensesRoot | Out-Null
-foreach ($noticeFile in @('third_party/mapbox/LICENSE','third_party/sqlite/README.md','docs/THIRD_PARTY_NOTICES.md')) {
+foreach ($noticeFile in @('third_party/mapbox/LICENSE','third_party/sqlite/README.md','third_party/stb/LICENSE','third_party/stb/README.md','docs/THIRD_PARTY_NOTICES.md')) {
     $source = Join-Path $repoRoot $noticeFile
     Copy-Item -LiteralPath $source -Destination (Join-Path $licensesRoot ($noticeFile -replace '/', '_'))
 }

@@ -15,3 +15,6 @@
 *.arkcut text eol=lf
 # Preserve the verified upstream amalgamation, including its comment spacing.
 third_party/sqlite/sqlite3* -text whitespace=-blank-at-eol
+# Preserve the pinned upstream decoder and license byte for byte.
+third_party/stb/stb_image.h -text whitespace=-blank-at-eol
+third_party/stb/LICENSE -text whitespace=-blank-at-eol

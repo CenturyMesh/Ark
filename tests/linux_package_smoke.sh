@@ -32,6 +32,7 @@ grep -q '"step_sha256"' replies.jsonl
 grep -q 'ISO-10303-21' smoke.step
 grep -q '"platform":"linux-x64-headless"' "$package/app-version.json"
 [[ -s $package/licenses/LICENSE_LGPL_21.txt && -s $package/licenses/OCCT_LGPL_EXCEPTION.txt ]]
+[[ -s $package/licenses/stb-image-LICENSE.txt && -s $package/licenses/stb-image-provenance.md ]]
 [[ -s $package/LICENSE && -s $package/NOTICE ]]
 if find "$package" -type f \( -name '*.ark' -o -name '.ark-local.json' \) | grep -q .; then echo 'Package contains local document/settings content.' >&2; exit 1; fi
 printf 'Linux relocated package: MCP identity, OCCT 8.0.1, exact box volume, STEP readback, document save/load and notices passed.\n'

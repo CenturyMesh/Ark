@@ -44,6 +44,7 @@ enum class FeatureType : i32 {
     MeshBody, MeshWeld, MeshSmooth, MeshDecimate, MeshOffset, MeshFill,
     Curve, IntersectionCurve, Bridge,
     ConstructionFrame, PCB, CableRoute, Suspension, SurfaceEdit,
+    MeshEdit,
 };
 
 // Appearance describes the display surface. Density is grams per cubic
@@ -280,6 +281,7 @@ public:
     std::shared_ptr<AgentActivityLedger> agentActivity; // audit metadata, independent of geometry revision
     std::string bomDocumentId; // assigned on explicit BOM authoring; stable across edits/save
     arkjson::Value iterationHistory; // immutable authoring journal; no evaluated geometry or usage snapshots
+    arkjson::Value skeleton; // native declarative source, input overrides and stable ownership manifest
     u64 addFeature(Feature f);                    // returns id
     Feature* find(u64 id);
     const Feature* find(u64 id) const;

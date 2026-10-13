@@ -87,6 +87,8 @@ it is for manual evaluation and is excluded from the stable automatic updater.
 "@
     [IO.File]::WriteAllText((Join-Path $staging 'README.txt'), $packageReadme, (New-Object Text.UTF8Encoding($false)))
     Copy-Item -LiteralPath (Join-Path $repository 'third_party/mapbox/LICENSE') -Destination (Join-Path $licenses 'mapbox-earcut-ISC.txt')
+    Copy-Item -LiteralPath (Join-Path $repository 'third_party/stb/LICENSE') -Destination (Join-Path $licenses 'stb-image-LICENSE.txt')
+    Copy-Item -LiteralPath (Join-Path $repository 'third_party/stb/README.md') -Destination (Join-Path $licenses 'stb-image-provenance.md')
     Copy-Item -LiteralPath (Join-Path $repository 'third_party/sqlite/README.md') -Destination (Join-Path $licenses 'sqlite-provenance.txt')
     Copy-Item -LiteralPath (Join-Path $repository 'third_party/sqlite/sqlite3.h') -Destination (Join-Path $licenses 'sqlite3.h')
     Copy-Item -LiteralPath (Join-Path $repository 'assets/ui/README.md') -Destination (Join-Path $licenses 'ark-ui-assets.txt')
