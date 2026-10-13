@@ -5274,9 +5274,18 @@ static void drawFrame(HDC hdc){
 static arkjson::Value captureViewportSnapshot(const arkjson::Value& args){
     using V=arkjson::Value;
     try{
+        if(args.find("camera"))throw std::runtime_error("Live viewport capture uses the current Studio camera; omit camera or choose snapshot view custom");
         if(g_busy||!g_uiReady)throw std::runtime_error("Current Studio viewport is unavailable while a document operation is applying");
-        const u64 revision=g_session.revision,epoch=g_documentEpoch;if(auto* expected=args.find("expected_revision");expected&&(expected->t!=V::Num||expected->num!=(double)revision))throw std::runtime_error("Viewport snapshot revision conflict; read current doc_info before retrying");bool swap=g_swap;g_swap=false;HDC dc=GetDC(g_window);drawFrame(dc);glFinish();
-        std::vector<u8> pixels((size_t)viewW*viewH*3);glPixelStorei(GL_PACK_ALIGNMENT,1);glReadBuffer(GL_BACK);glReadPixels(viewX,winH-viewY-viewH,viewW,viewH,GL_RGB,GL_UNSIGNED_BYTE,pixels.data());GLenum error=glGetError();ReleaseDC(g_window,dc);g_swap=swap;if(error!=GL_NO_ERROR)throw std::runtime_error("Studio viewport pixel readback failed");if(revision!=g_session.revision||epoch!=g_documentEpoch)throw std::runtime_error("Document changed during viewport capture; inspect current revision and retry");
+        const u64 revision=g_session.revision,epoch=g_documentEpoch;if(auto* expected=args.find("expected_revision");expected&&(expected->t!=V::Num||expected->num!=(double)revision))throw std::runtime_error("Viewport snapshot revision conflict; read current doc_info before retrying");
+        if(viewW<=0||viewH<=0||viewX<0||viewY<0||viewX+viewW>winW||viewY+viewH>winH)throw std::runtime_error("Studio viewport bounds are invalid for pixel readback");
+        struct CaptureScope {HDC dc=nullptr;bool swap=true;~CaptureScope(){if(dc)ReleaseDC(g_window,dc);g_swap=swap;}} scope{GetDC(g_window),g_swap};
+        if(!scope.dc)throw std::runtime_error("Studio viewport device context is unavailable");
+        for(int i=0;i<16;++i)if(glGetError()==GL_NO_ERROR)break;
+        g_swap=false;drawFrame(scope.dc);glFinish();
+        if(GLenum renderError=glGetError();renderError!=GL_NO_ERROR)throw std::runtime_error("Studio viewport render failed (OpenGL "+std::to_string((unsigned)renderError)+")");
+        if(!glBindFramebuffer)throw std::runtime_error("Studio viewport readback requires an OpenGL framebuffer binding");glBindFramebuffer(GL_FRAMEBUFFER,0);
+        std::vector<u8> pixels((size_t)viewW*viewH*3);glPixelStorei(GL_PACK_ALIGNMENT,1);glReadBuffer(GL_BACK);glReadPixels(viewX,winH-viewY-viewH,viewW,viewH,GL_RGB,GL_UNSIGNED_BYTE,pixels.data());
+        if(GLenum readError=glGetError();readError!=GL_NO_ERROR)throw std::runtime_error("Studio viewport pixel readback failed (OpenGL "+std::to_string((unsigned)readError)+")");if(revision!=g_session.revision||epoch!=g_documentEpoch)throw std::runtime_error("Document changed during viewport capture; inspect current revision and retry");
         double scale=std::min({1.,1024./std::max(viewW,1),640./std::max(viewH,1)});Image shot;shot.w=std::max(1,(int)std::floor(viewW*scale));shot.h=std::max(1,(int)std::floor(viewH*scale));shot.px.resize((size_t)shot.w*shot.h*3);
         for(int y=0;y<shot.h;++y)for(int x=0;x<shot.w;++x){int fromX=std::min(viewW-1,(int)(x/scale)),fromY=std::min(viewH-1,(int)(y/scale));size_t source=((size_t)(viewH-1-fromY)*viewW+fromX)*3,destination=((size_t)y*shot.w+x)*3;std::copy_n(pixels.begin()+source,3,shot.px.begin()+destination);}
         V evidence=V::makeObj(),state=V::makeObj(),camera=V::makeObj(),selected=V::makeObj();evidence.set("revision",V::makeNum((double)revision));evidence.set("current_revision",V::makeNum((double)g_session.revision));evidence.set("view",V::makeStr("viewport"));evidence.set("capture_source",V::makeStr("studio_viewport"));evidence.set("width",V::makeNum(shot.w));evidence.set("height",V::makeNum(shot.h));

@@ -336,11 +336,12 @@ Image renderSnapshot(const Mesh& m, int W, int H, const SnapCam& cam) {
     AABB bb=m.computeBBox();
     if(!bb.valid()) return img;
     Vec3 ctr=cam.useTarget?cam.target:bb.center();
-    Vec3 eyeOff{ std::cos(cam.pitch)*std::sin(cam.yaw),
+    Vec3 eyeOff=cam.useDirection?cam.direction:Vec3{
+                 std::cos(cam.pitch)*std::sin(cam.yaw),
                  std::sin(cam.pitch),
                  std::cos(cam.pitch)*std::cos(cam.yaw) };
     Vec3 eye = ctr + eyeOff*cam.dist;
-    Mat4 view=Mat4::lookAt(eye, ctr, Vec3{0,1,0});
+    Mat4 view=Mat4::lookAt(eye, ctr, cam.up);
     f64 farPlane=std::max(1000.0, cam.dist*8.0);
     f64 nearPlane=0.05; if(nearPlane>=farPlane*0.01) nearPlane=farPlane*1.0e-4;
     Mat4 proj=Mat4::perspective(deg2rad(cam.fovDeg),(f64)W/H,nearPlane,farPlane);

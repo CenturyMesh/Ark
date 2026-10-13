@@ -373,6 +373,39 @@ void attachMeasure(Document& document,V& report,const std::vector<AssemblyPlacem
     push(a);push(b);block.set("frames",frames);block.set("axis_convention",V::makeStr(axisConvention()));report.set("measure",block);
 }
 }
+static Vec3 snapshotVector(const V& value,const char* name){
+    if(value.t!=V::Arr||value.arr.size()!=3)throw std::runtime_error(std::string("snapshot camera ")+name+" must contain three finite numbers");
+    Vec3 result;double* coordinates[]={&result.x,&result.y,&result.z};
+    for(size_t i=0;i<3;++i){const auto& number=value.arr[i];if(number.t!=V::Num||!std::isfinite(number.num)||std::abs(number.num)>1e9)throw std::runtime_error(std::string("snapshot camera ")+name+" must contain three finite numbers");*coordinates[i]=number.num;}
+    return result;
+}
+static V snapshotVectorValue(Vec3 value){V result=V::makeArr();for(double coordinate:{value.x,value.y,value.z})result.arr.push_back(V::makeNum(coordinate));return result;}
+static SnapCam configuredSnapshotCamera(const V& args,const AABB& box,std::string& view){
+    SnapCam camera;camera.useTarget=true;camera.target=box.valid()?box.center():Vec3{};camera.dist=std::max((box.valid()?box.diagonal():1.)*1.7,1.);
+    const V* requested=args.find("view"),*custom=args.find("camera");
+    if(requested){if(requested->t!=V::Str)throw std::runtime_error("snapshot view must be iso, front, right, top or custom");view=requested->str;}
+    camera.useDirection=true;
+    if(custom){
+        if(requested&&view!="custom")throw std::runtime_error("snapshot camera requires view custom or an omitted view");
+        view="custom";
+        if(custom->t!=V::Obj)throw std::runtime_error("snapshot camera must be an object");
+        for(const auto& field:custom->obj)if(field.first!="direction"&&field.first!="up"&&field.first!="target_mm"&&field.first!="distance_mm"&&field.first!="fov_deg")throw std::runtime_error("Unknown snapshot camera field: "+field.first);
+        const auto* direction=custom->find("direction"),*up=custom->find("up");
+        if(!direction||!up)throw std::runtime_error("snapshot camera requires direction and up");
+        camera.direction=snapshotVector(*direction,"direction");camera.up=snapshotVector(*up,"up");
+        if(const auto* target=custom->find("target_mm"))camera.target=snapshotVector(*target,"target_mm");
+        if(const auto* distance=custom->find("distance_mm")){if(distance->t!=V::Num||!std::isfinite(distance->num)||distance->num<=0||distance->num>1e9)throw std::runtime_error("snapshot camera distance_mm must be positive and finite");camera.dist=distance->num;}
+        if(const auto* fov=custom->find("fov_deg")){if(fov->t!=V::Num||!std::isfinite(fov->num)||fov->num<5||fov->num>120)throw std::runtime_error("snapshot camera fov_deg must be within 5..120");camera.fovDeg=fov->num;}
+    }else if(view=="iso"){camera.direction={1,-1,0.8};camera.up={0,0,1};}
+    else if(view=="front"){camera.direction={0,-1,0};camera.up={0,0,1};}
+    else if(view=="right"){camera.direction={1,0,0};camera.up={0,0,1};}
+    else if(view=="top"){camera.direction={0,0,1};camera.up={0,1,0};}
+    else throw std::runtime_error("snapshot view must be iso, front, right, top or custom");
+    if(camera.direction.lensq()<1e-20||camera.up.lensq()<1e-20)throw std::runtime_error("snapshot camera direction and up must be nonzero");
+    camera.direction=camera.direction.normalized();camera.up=camera.up.normalized();
+    if(camera.direction.cross(camera.up).lensq()<1e-10)throw std::runtime_error("snapshot camera direction and up cannot be parallel");
+    return camera;
+}
 V snapshotImageResult(const Image& image,const V& visualEvidence,const std::string& path){
     if(visualEvidence.t!=V::Obj)throw std::runtime_error("Snapshot visual evidence metadata must be an object");
     const auto bytes=encodePNG(image);if(bytes.size()>4*1024*1024)throw std::runtime_error("Snapshot exceeds inline image size limit");
@@ -1250,13 +1283,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
             if(args.find("candidate_id"))return snapshotCandidate(args);
             bool inlineImage=true;if(const auto* flag=args.find("inline_image")){if(flag->t!=V::Bool)throw std::runtime_error("inline_image must be boolean");inlineImage=flag->b;}
             if(!inlineImage&&path.empty())throw std::runtime_error("A path is required when inline_image is false");
-            if(auto requested=args.find("view")){if(requested->t!=V::Str||(requested->str!="iso"&&requested->str!="front"&&requested->str!="right"&&requested->str!="top"))throw std::runtime_error("snapshot view must be iso, front, right or top");view=requested->str;}
-            Mesh m=selectedMesh(document,args);SnapCam camera;
-            if(view=="front"){camera.yaw=0;camera.pitch=0;}
-            else if(view=="right"){camera.yaw=K_PI/2;camera.pitch=0;}
-            else if(view=="top"){camera.yaw=0;camera.pitch=1.52;}
-            AABB box=m.computeBBox();camera.useTarget=true;camera.target=box.valid()?box.center():Vec3{};
-            camera.dist=std::max((box.valid()?box.diagonal():1.)*1.7,1.);
+            Mesh m=selectedMesh(document,args);SnapCam camera=configuredSnapshotCamera(args,m.computeBBox(),view);
             const int width=inlineImage?1024:1280,height=inlineImage?640:800;const Image image=renderSnapshot(m,width,height,camera);
             if(!inlineImage&&!path.empty()&&!writePNG(path.c_str(),image))throw std::runtime_error("Snapshot failed");
             MeshSelection sel=meshSelection(document,args);
@@ -1264,7 +1291,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
             if(sel.useNode){r.set("node",V::makeNum((double)sel.node));if(!sel.nodeName.empty())r.set("name",V::makeStr(sel.nodeName));}
             if(sel.copy>=0)r.set("copy",V::makeNum(sel.copy));
             V evidence=V::makeObj();evidence.set("revision",V::makeNum((double)revision));evidence.set("current_revision",V::makeNum((double)revision));evidence.set("view",V::makeStr(view));evidence.set("width",V::makeNum(width));evidence.set("height",V::makeNum(height));evidence.set("authority",V::makeStr("display_mesh"));evidence.set("capture_source",V::makeStr("software_snapshot"));
-            V viewState=V::makeObj(),target=V::makeArr();for(auto coordinate:{camera.target.x,camera.target.y,camera.target.z})target.arr.push_back(V::makeNum(coordinate));viewState.set("target_mm",target);viewState.set("yaw_rad",V::makeNum(camera.yaw));viewState.set("pitch_rad",V::makeNum(camera.pitch));viewState.set("distance_mm",V::makeNum(camera.dist));viewState.set("fov_deg",V::makeNum(camera.fovDeg));evidence.set("view_state",viewState);
+            V viewState=V::makeObj();viewState.set("target_mm",snapshotVectorValue(camera.target));viewState.set("direction_target_to_eye",snapshotVectorValue(camera.direction));viewState.set("up",snapshotVectorValue(camera.up));viewState.set("distance_mm",V::makeNum(camera.dist));viewState.set("fov_deg",V::makeNum(camera.fovDeg));evidence.set("view_state",viewState);
             if(sel.feature)evidence.set("feature_id",V::makeNum((double)sel.feature));if(sel.useNode){evidence.set("occurrence_id",V::makeNum((double)sel.node));if(!sel.nodeName.empty())evidence.set("name",V::makeStr(sel.nodeName));if(sel.copy>=0)evidence.set("copy",V::makeNum(sel.copy));for(const auto& node:document.assembly)if(node.id==sel.node&&node.feature)evidence.set("feature_id",V::makeNum((double)node.feature));}
             for(const char* key:{"label","reference","stage"})if(const auto* value=args.find(key)){if(value->t!=V::Str||value->str.size()>128)throw std::runtime_error("Snapshot label/reference/stage must be a bounded string");evidence.set(key,*value);}
             evidence.set("committed",V::makeBool(true));r.set("revision",V::makeNum((double)revision));r.set("visual_evidence",evidence);V output=result(r);
@@ -1355,7 +1382,7 @@ V AgentSession::tools(bool detailed){
         {"doc_save","Save .ark as an incremental binary container with persistent iterations; .arkjson/.json explicitly export versioned JSON.",R"({"type":"object","properties":{"path":{"type":"string"}},"required":["path"]})",false},
         {"doc_load","Load .ark/.arkjson into this session, validate and commit atomically.",R"({"type":"object","properties":{"path":{"type":"string"}},"required":["path"]})",false},
         {"export_mesh","Export final output bodies or a selected id as STL/OBJ/ASCII FBX; construction inputs are excluded.",R"({"type":"object","properties":{"path":{"type":"string"},"format":{"type":"string","enum":["stl","obj","fbx"]},"id":{"type":"integer","minimum":1}},"required":["path","format"]})",false},
-        {"snapshot","Render selected CAD display meshes with revision, view/camera and feature/occurrence identity. Returns actual inline PNG pixels (1024x640) by default; optional path also writes the same capture. inline_image:false writes a 1280x800 PNG and requires path. view is iso, front, right or top. node accepts a unique instance name or id; copy selects a pattern placement. label/stage identify before/after evidence. Images are display evidence, not B-rep or manufacturing authority.",R"({"type":"object","properties":{"path":{"type":"string"},"id":{"type":"integer","minimum":1},"view":{"type":"string","enum":["iso","front","right","top","viewport"]},"inline_image":{"type":"boolean"},"candidate_id":{"type":"string","description":"Read-only retained prepared candidate; requires expected_revision. Preview pixels are not committed."},"expected_revision":{"type":"integer","minimum":0},"label":{"type":"string","maxLength":128},"stage":{"type":"string","maxLength":128},"reference":{"type":"string","maxLength":128}}})",false}
+        {"snapshot","Render selected CAD display meshes with revision and feature/occurrence identity. Presets iso/front/right/top use Z-up; front views from -Y. For a custom view, camera.direction points from target toward eye, camera.up fixes screen vertical; supply both with view custom or omit view. Returns actual inline PNG pixels (1024x640) by default; inline_image:false writes 1280x800 and requires path. node accepts a unique instance name or id; copy selects a pattern placement. Images are display evidence, not B-rep or manufacturing authority.",R"({"type":"object","properties":{"path":{"type":"string"},"id":{"type":"integer","minimum":1},"node":{"type":["integer","string"]},"copy":{"type":"integer","minimum":0},"view":{"type":"string","enum":["iso","front","right","top","custom","viewport"]},"camera":{"type":"object","properties":{"direction":{"type":"array","minItems":3,"maxItems":3,"items":{"type":"number"}},"up":{"type":"array","minItems":3,"maxItems":3,"items":{"type":"number"}},"target_mm":{"type":"array","minItems":3,"maxItems":3,"items":{"type":"number"}},"distance_mm":{"type":"number","exclusiveMinimum":0},"fov_deg":{"type":"number","minimum":5,"maximum":120}},"required":["direction","up"],"additionalProperties":false},"inline_image":{"type":"boolean"},"candidate_id":{"type":"string","description":"Read-only retained prepared candidate; requires expected_revision. Preview pixels are not committed."},"expected_revision":{"type":"integer","minimum":0},"label":{"type":"string","maxLength":128},"stage":{"type":"string","maxLength":128},"reference":{"type":"string","maxLength":128}}})",false}
     };
     V list=V::makeArr();for(auto& d:defs){V t=V::makeObj(),schema,annotations=V::makeObj();t.set("name",V::makeStr(d.name));t.set("description",V::makeStr(!detailed&&std::string(d.name)=="doc_apply"?"Atomic batch of 1..128 modeling commands. Core forms: param.set{name,expr}; feature.add{type,name,p,inputs?,native?}; feature.edit{id,p?,native?,name?}; feature.remove{id}. Target id is a positive number or unique name; p maps actual authored parameter keys to numbers/expression strings. Read object_context for the target before editing. Native box keys are width/depth/height; legacy box keys are dx/dy/dz. Native box edit example: {op:feature.edit,id:Native block,p:{height:9}}. Pass expected_revision; stale revisions and failed evaluation leave the document unchanged. Discover operation contracts and examples with agent_onboard for your domain; agent_onboard{topic:automation} supplies the full command reference. Supports parameters, materials/transparency, features, sketches, datums, assemblies, mates, mate-aware assembly.drive and sheet edits. Inspect assembly_info.drive before committing a joint movement. doc_preview evaluates and caches a candidate; doc_apply{candidate_id,expected_revision} commits without recomputation. Optional checks:[{id?,query:{tool,args,path},op:ge|le|eq|between|true|false,value?,min?,max?,tolerance?,parameters?,diagnose?}] must all pass before commit; failures roll back and return measured residuals. diagnose adds bounded local sensitivity probes. Material density accepts g/cm3 or density_kg_m3, plus physical SI elastic properties. Angles are degrees except trig expressions in radians; lengths mm.":d.desc));arkjson::parse(d.schema,schema);if(std::string(d.name)=="mesh_raycast"||std::string(d.name)=="export_mesh"||std::string(d.name)=="snapshot"){
         V props=schema.find("properties")?*schema.find("properties"):V::makeObj(),node=V::makeObj(),kinds=V::makeArr(),integer=V::makeObj(),text=V::makeObj(),copy=V::makeObj();integer.set("type",V::makeStr("integer"));integer.set("minimum",V::makeNum(1));text.set("type",V::makeStr("string"));kinds.arr.push_back(integer);kinds.arr.push_back(text);node.set("anyOf",kinds);copy.set("type",V::makeStr("integer"));copy.set("minimum",V::makeNum(0));copy.set("maximum",V::makeNum(31));props.set("node",node);props.set("copy",copy);schema.set("properties",props);

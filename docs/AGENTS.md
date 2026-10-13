@@ -233,7 +233,7 @@ Use `created_ids` returned by a batch as inputs to later features. IDs are monot
 | `mesh_get` | Positions and triangle indices, explicitly requested |
 | `doc_save`, `doc_load` | Native document persistence |
 | `export_mesh` | STL/OBJ of terminal outputs, a selected feature ID, or a unique instance name plus `copy` |
-| `snapshot` | Software-rendered PNG of terminal outputs, a selected ID, or a unique instance name plus `copy`. `view` is `iso`, `front`, `right` or `top`. The image is a display mesh, not STEP authority |
+| `snapshot` | Software-rendered PNG of terminal outputs, a selected ID, or a unique instance name plus `copy`. Z-up `iso`, `front` (-Y), `right` (+X), `top` (+Z), or an explicit [custom camera](SNAPSHOT_CAMERA.md). The image is a display mesh, not STEP authority |
 
 `doc_info` filters `ids` and `sections` require `detail:"design"` or omitted
 `detail` (which infers design). Explicit `detail:"summary"` accepts neither
