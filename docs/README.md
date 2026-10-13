@@ -9,6 +9,10 @@ current release claim. [release.json](../release.json) owns application identity
 
 | Guide | Read it when |
 |---|---|
+| [021B direct extrusion](VIEWPORT_DIMENSIONS.md) | You need a source handle, reverse/symmetric depth or exact up-to-face bound |
+| [021B technical drawings](DRAWINGS.md) | You are authoring a revision-bound sheet with views, sections, dimensions and tolerances |
+| [021B DFM proposals](DFM_PROPOSALS.md) | You need a concrete before/after candidate under the same declared process |
+| [021B snapshot camera](SNAPSHOT_CAMERA.md) | An agent needs a Z-up or explicitly oriented visual check |
 | [020B direct dimensions](VIEWPORT_DIMENSIONS.md) | You are dragging an exact sketch extrusion or editing source dimensions on a solid |
 | [020B agent DFM](DFM.md) | You are screening a declared process and need versioned rule evidence and limitations |
 | [019B authoring controls](AUTHORING_019B_TESTING.md) | You are testing image intents, optional dimensions, direct edits, Skeleton code and collision feedback |

@@ -1,5 +1,12 @@
 # ARK agent protocol
 
+021B discovers **86 standalone tools**. [Direct extrusion](VIEWPORT_DIMENSIONS.md)
+retains exact source/limit bodies, [associative drawings](DRAWINGS.md) bind to a
+source B-rep and revision, and [DFM proposals](DFM_PROPOSALS.md) remain
+revision-bound until explicit acceptance. The [snapshot camera](SNAPSHOT_CAMERA.md)
+uses Z-up presets or an explicit caller direction/up pair. Read the scoped
+contracts before writing; none of these tools alone qualifies manufacture.
+
 B.05 has a partial associative technical drawing scope: exact orthographic HLR
 views, plane-section contours and semantic dimensions/tolerances bound to the
 observed solid and topology. Call `agent_onboard{topic:"drawings"}` and read

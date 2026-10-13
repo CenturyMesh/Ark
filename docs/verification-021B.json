@@ -1,0 +1,57 @@
+{
+  "date": "2026-10-13",
+  "iteration": "021B",
+  "technical_version": "0.9.22",
+  "milestones": ["A.01", "B.01", "B.02", "B.03", "B.05", "C.03", "D.02", "D.04"],
+  "milestone_status": "Parcial",
+  "scope": "Integrated local exact extrusion, associative technical drawing, DFM proposal and agent snapshot contracts",
+  "release_identity": {
+    "source": "release.json",
+    "generated_file": "out/021B-native/app-version.json",
+    "observed": {"sequence": 21, "phase": "B", "code": "021B", "version": "0.9.22"},
+    "document_format": "Version 36 only when authored drawings or extended extrusion sources require it"
+  },
+  "build": {
+    "platform": "Windows x64",
+    "compiler": "MSVC 19.44.35228.0",
+    "native_kernel": "OCCT 8.0.1",
+    "command": "cmake --build out/021B-native --config Release --parallel 4",
+    "result": "passed",
+    "log": "out/021B-native-build.log"
+  },
+  "integrated_focused_tests": {
+    "command": "ctest --test-dir out/021B-native -C Release --output-on-failure -R '^(associative-drawings|extrusion-bounds|dfm-proposals|agent-team|assistant-connector)$'",
+    "passed": 5,
+    "total": 5,
+    "seconds": 6.30,
+    "checks": ["exact source and section drawing", "drawing plus extended extrusion in one version 36 document", "reverse/symmetric/face-bounded extrusion", "same-process DFM candidate and explicit acceptance", "team write/read scopes", "Z-up and custom snapshot camera"]
+  },
+  "integrated_native_ctest": {
+    "command": "ctest --test-dir out/021B-native -C Release --output-on-failure -j4",
+    "passed": 80,
+    "total": 80,
+    "seconds": 70.53,
+    "log": "out/021B-native-ctest.log"
+  },
+  "branch_local_receipts": [
+    "verification-extrusion-bounds.json",
+    "verification-dfm-proposals-2026-10-13.json",
+    "verification-snapshot-camera-2026-10-13.json",
+    "verification/drawing-workspace-local.json"
+  ],
+  "agent_activity_audit": {
+    "authority": "read-only activity_info from the local Studio document; raw project ledger remains private",
+    "observed_actions_initial": 47,
+    "observed_actions_later": 55,
+    "unrecorded_actions": 0,
+    "recurrent_findings": ["three subjective snapshot camera orientation/visibility issues", "one exact native pattern-copy collision query limitation"],
+    "later_failure": "one Studio viewport pixel readback error; isolated readback contract was fixed and tested",
+    "remaining": ["software snapshot material appearance", "exact collision targeting one native pattern copy"]
+  },
+  "limits": [
+    "All milestones remain partial outside their stated local domain",
+    "SVG and Studio sheets are display/authoring previews; JSON retains exact derived curves",
+    "DFM comparison does not certify cost savings, physical process capability or functional acceptance",
+    "Hosted CI, distribution and user pilots are separate gates"
+  ]
+}
