@@ -24,6 +24,7 @@ public:
     void observeBomInspection(const arkjson::Value& bom);
     static arkjson::Value tools(bool detailed=false);
     arkjson::Value preparePreview(const arkjson::Value& args);
+    arkjson::Value proposeManufacturing(const arkjson::Value& args);
     arkjson::Value commitPrepared(const arkjson::Value& args);
     arkjson::Value snapshotCandidate(const arkjson::Value& args);
     arkjson::Value failureInfo(const arkjson::Value& args) const;
@@ -52,6 +53,8 @@ private:
         std::chrono::steady_clock::time_point expires;
         size_t bytes=0;
         bool metadataOnly=false;
+        bool requiresDfmAcceptance=false;
+        arkjson::Value dfmComparison;
     };
     std::vector<Prepared> prepared_;
     std::vector<std::string> undo_,redo_;

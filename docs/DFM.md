@@ -18,6 +18,10 @@ version, process, status, evidence, authority, assumptions and guidance.
 | `unknown` | Required input, exact evidence or implemented analysis is absent. |
 | `not_applicable` | The explicit route/method or evaluated operation census excludes this comparison. |
 
+Editable candidate review is available through [DFM proposals](DFM_PROPOSALS.md):
+`manufacturing_propose` compares an explicit revision-bound edit against the
+same process inputs and requires explicit acceptance before atomic commit.
+
 Recommendations have `rule_id`, `rule_version`, `kind`, `severity`, `guidance`
 and `automatic_edit:false`. Kinds are `request_input`,
 `change_process_or_design` and `obtain_process_evidence`. They propose review

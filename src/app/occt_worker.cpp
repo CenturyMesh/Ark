@@ -5,6 +5,7 @@
 #include "ark/occt_solid.hpp"
 #include "ark/occt_frame.hpp"
 #include "ark/occt_electronics.hpp"
+#include "ark/drawings.hpp"
 #include <Standard_Failure.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <TopoDS.hxx>
@@ -43,6 +44,7 @@ int runWorker(const fs::path& requestPath,const fs::path& resultPath){
         else if(op=="measurement_pick")result=measurementPickNative(field("request"));
         else if(op=="geometry_query")result=geometryQueryNative(field("request"));
         else if(op=="project_reference")result=projectReferenceNative(field("request"));
+        else if(op=="drawing_view")result=drawingViewNative(field("request"));
         else if(op=="import_sheet")result=importSheetNative(request);
         else if(op=="export_sheet")result=exportSheetNative(request);
         else if(op=="export_sheet_flat_dxf")result=exportSheetFlatDxfNative(request);

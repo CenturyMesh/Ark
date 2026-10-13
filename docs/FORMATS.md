@@ -1,4 +1,17 @@
-# Current source semantics — format 35
+# Current source semantics — format 36
+
+021B keeps application identity separate from the `.ark` source format. A file
+selects version 36 only when it contains authored associative technical drawings
+or a native extrusion with reverse/symmetric, exact source-face or `up_to_face`
+control. Drawing source IDs, exact B-rep/topology digests, observed revisions,
+views, dimensions and caller-declared tolerances persist; derived curves and
+display previews do not. Extended extrusion inputs retain their authored
+source/limit references and continue to recompute from exact geometry. A file
+labelled below 36 with either source contract rejects on load. Durable iteration
+history accepts version 36. See [021B](iterations/021B.md), [drawings](DRAWINGS.md)
+and [viewport extrusion](VIEWPORT_DIMENSIONS.md).
+
+## Previous source extension — format 35
 
 019B accepts legacy formats 1–34 and writes format 35 for native Skeleton source,
 indexed `mesh_edit` recipes, indexed vector-coordinate expressions, helix sources,
@@ -24,7 +37,7 @@ varying sweep sections. These source fields persist; resolved geometry remains
 derived. Older runtimes reject the unsupported format. Application iteration and
 document format are independent. See [018B](iterations/018B.md) for that scope.
 
-# ARK file formats, document versions 1 through 35
+# ARK file formats, document versions 1 through 36
 
 ## `.ark`
 
@@ -109,7 +122,7 @@ geometric proof, original openings, and exact formed/flat B-rep payloads. The
 display mesh and native evaluation cache are derived and are not feature
 history edits. The Formed/Flat UI selection does not change the saved geometry.
 
-The current reader accepts versions 1 through 35. Older ARK executables reject a newer
+The current reader accepts versions 1 through 36. Older ARK executables reject a newer
 document rather than discarding its native data. Save/load re-evaluates authored
 native features with the installed OCCT 8 worker; source packages remain
 portable when the original STEP is absent. If the source STEP still exists

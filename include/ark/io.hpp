@@ -19,6 +19,9 @@ std::vector<u8> encodePNG(const Image& img); // Owned RGB pixels; no file read.
 struct SnapCam {
     Vec3 target{};
     bool useTarget=false;
+    // The explicit direction points from the target toward the camera.
+    Vec3 direction{},up{0,1,0};
+    bool useDirection=false;
     f64 dist=40, yaw=45*K_PI/180, pitch=30*K_PI/180;
     f64 fovDeg=35;
 };

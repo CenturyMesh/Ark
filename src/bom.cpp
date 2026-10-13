@@ -68,7 +68,7 @@ V inspectBom(const Document& d,u64 revision){
     std::map<u64,size_t> quantities;std::vector<AssemblyPlacement> placements;std::string error;
     if(!d.assembly.empty())require(resolveAssembly(d,placements,error),error);
     else{
-        std::set<u64> consumed;for(const auto& f:d.features)if(!f.suppressed)for(u64 id:f.inputs)consumed.insert(id);
+        std::set<u64> consumed;for(const auto& f:d.features)if(!f.suppressed&&featureConsumesInputBodies(f))for(u64 id:f.inputs)consumed.insert(id);
         for(const auto& body:d.evalBodies)if(const auto* f=d.find(body.id);f&&!f->suppressed&&!consumed.count(f->id)&&!isCurveFeature(f->type)&&f->type!=FeatureType::Suspension){AssemblyPlacement p;p.feature=f->id;p.name=f->name;p.world=Mat4::identity();p.visible=true;placements.push_back(p);}
     }
     for(const auto& node:d.assembly)if(!node.feature){V group=V::makeObj();group.set("id",V::makeStr(identity(d,"node",node.id)));group.set("node",V::makeNum((double)node.id));group.set("parent",V::makeNum((double)node.parent));group.set("name",V::makeStr(node.name));groups.arr.push_back(group);}

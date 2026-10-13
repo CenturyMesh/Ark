@@ -1,11 +1,33 @@
 # ARK agent protocol
 
+021B discovers **86 standalone tools**. [Direct extrusion](VIEWPORT_DIMENSIONS.md)
+retains exact source/limit bodies, [associative drawings](DRAWINGS.md) bind to a
+source B-rep and revision, and [DFM proposals](DFM_PROPOSALS.md) remain
+revision-bound until explicit acceptance. The [snapshot camera](SNAPSHOT_CAMERA.md)
+uses Z-up presets or an explicit caller direction/up pair. Read the scoped
+contracts before writing; none of these tools alone qualifies manufacture.
+
+B.05 has a partial associative technical drawing scope: exact orthographic HLR
+views, plane-section contours and semantic dimensions/tolerances bound to the
+observed solid and topology. Call `agent_onboard{topic:"drawings"}` and read
+[the drawing contract](DRAWINGS.md). `drawing.set`/`refresh`/`remove` require
+current `expected_revision` in `doc_apply`; stale drawings cannot export.
+JSON retains exact derived curves and SVG is a presentation preview. This does
+not qualify manufacture or complete B.05.
+
 020B adds source-owned solid dimensions and exact sketch extrusion by viewport
 drag. Read [the authoring contract](VIEWPORT_DIMENSIONS.md): double-click edits
 the authored expression, and agents use `doc_apply` at an observed
 `expected_revision` to add or alter driving dimensions. The DFM v1 rule report
 is available through `manufacturing_inspect` for explicitly declared process
 reviews; see [DFM rule scope](DFM.md). These checks do not qualify production.
+
+Actionable DFM candidates use `manufacturing_propose` with an observed revision,
+current rule ID/version and explicit bounded editable commands. Review exact
+before/after evidence and unresolved checks with the user; the retained candidate
+requires `accept_dfm:true` for atomic `doc_apply` or same-role `team_apply_step`.
+See [DFM proposal contract](DFM_PROPOSALS.md). A passing screen does not imply
+functional design acceptance or manufacturing qualification.
 
 019B discovers **83 standalone tools**, including `skeleton_inspect`,
 `skeleton_compile` and `collision_inspect`. Source edits and indexed mesh edits
@@ -233,7 +255,7 @@ Use `created_ids` returned by a batch as inputs to later features. IDs are monot
 | `mesh_get` | Positions and triangle indices, explicitly requested |
 | `doc_save`, `doc_load` | Native document persistence |
 | `export_mesh` | STL/OBJ of terminal outputs, a selected feature ID, or a unique instance name plus `copy` |
-| `snapshot` | Software-rendered PNG of terminal outputs, a selected ID, or a unique instance name plus `copy`. `view` is `iso`, `front`, `right` or `top`. The image is a display mesh, not STEP authority |
+| `snapshot` | Software-rendered PNG of terminal outputs, a selected ID, or a unique instance name plus `copy`. Z-up `iso`, `front` (-Y), `right` (+X), `top` (+Z), or an explicit [custom camera](SNAPSHOT_CAMERA.md). The image is a display mesh, not STEP authority |
 
 `doc_info` filters `ids` and `sections` require `detail:"design"` or omitted
 `detail` (which infers design). Explicit `detail:"summary"` accepts neither

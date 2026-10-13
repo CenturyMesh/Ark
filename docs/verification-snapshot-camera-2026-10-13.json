@@ -1,0 +1,25 @@
+{
+  "date": "2026-10-13",
+  "milestones": ["B.01", "D.04"],
+  "scope": "Local software snapshot orientation and live Studio viewport readback",
+  "reason": "Agent activity audit found repeated Z-up/front-camera requests and one viewport pixel-readback failure; raw project ledger remains private",
+  "tests": [
+    {
+      "command": "ctest --test-dir out/021B-core -C Release --output-on-failure -R '^assistant-connector$'",
+      "passed": 1,
+      "total": 1,
+      "checks": ["front preset equals equivalent explicit camera pixels", "Z-up front/top evidence", "invalid and conflicting camera rejects", "candidate snapshot remains revision-bound", "document unchanged"]
+    },
+    {
+      "command": "isolated ark-studio.exe --live-endpoint-file ... --exit-after-ms 12000; snapshot{view:'viewport'} through the real named pipe",
+      "passed": 1,
+      "total": 1,
+      "observed_size": [900, 551],
+      "checks": ["real viewport pixels and revision evidence", "custom camera with viewport rejects", "isolated Studio process exited"]
+    }
+  ],
+  "failed_attempts": [
+    {"scope": "first isolated viewport check", "failure": "the test executable had been compiled before the final camera guard", "correction": "forced viewer.cpp recompilation, confirmed the guard in the binary, repeated the real pipe call successfully"}
+  ],
+  "limits": ["software snapshot colors remain clay display material", "pixels are not B-rep or manufacturing authority", "native pattern copy collision inspection remains separate"]
+}

@@ -212,7 +212,7 @@ V numericNative(const V& value, const ExprEnv& env, const std::string& key = {})
         return value;
     }
     if (value.t == V::Str) {
-        if (key == "kind" || key == "join" || key == "sketch" || key == "name" || key == "op" || key == "reference" || key == "second_reference" || key == "mode" || key == "end" || key == "edges" || key == "faces" || key == "face" || key == "plane" || key == "keep" || key == "selection" || key == "direction" || key == "axis" || key == "neutral") return value;
+        if (key == "kind" || key == "join" || key == "sketch" || key == "name" || key == "op" || key == "reference" || key == "second_reference" || key == "mode" || key == "end" || key == "edges" || key == "faces" || key == "face" || key == "source_face" || key == "limit_face" || key == "plane" || key == "keep" || key == "selection" || key == "direction" || key == "axis" || key == "neutral") return value;
         return V::makeNum(expressionValue(value.str, env));
     }
     if (value.t == V::Arr) {
@@ -781,8 +781,16 @@ V solidFeatureRequest(const Feature& feature, const ExprEnv& env,
                     * Mat4::rotX(deg2rad(feature.num(env,"rx")));
         model.set("frame", frameValue(matrix));
     }
-    if (op == "extrude" && !model.find("profile"))
-        model.set("profile", profileFromSketch(document, feature.get("sketch")));
+    if (op == "extrude") {
+        const bool sourceFace = model.find("source_face") != nullptr;
+        const std::string mode = model.find("mode") ? required(model,"mode").asStr() : "distance";
+        if (mode != "distance" && mode != "up_to_face") throw std::runtime_error("Extrusion mode must be distance or up_to_face");
+        const size_t expectedInputs = (sourceFace ? 1u : 0u) + (mode == "up_to_face" ? 1u : 0u);
+        if (feature.inputs.size() != expectedInputs) throw std::runtime_error("Extrusion requires its exact source face and/or limit face inputs only");
+        if (sourceFace && (model.find("profile") || !feature.get("sketch").empty())) throw std::runtime_error("Extrusion needs one saved sketch or one exact source face");
+        if (!sourceFace && !model.find("profile")) model.set("profile", profileFromSketch(document, feature.get("sketch")));
+        if (mode == "distance" && model.find("limit_face")) throw std::runtime_error("Distance extrusion cannot retain an inactive limit face");
+    }
     if (op == "hole") {
         if (const V* source = model.find("cutter")) {
             V cutter = *source;

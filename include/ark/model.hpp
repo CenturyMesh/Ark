@@ -282,6 +282,7 @@ public:
     std::string bomDocumentId; // assigned on explicit BOM authoring; stable across edits/save
     arkjson::Value iterationHistory; // immutable authoring journal; no evaluated geometry or usage snapshots
     arkjson::Value skeleton; // native declarative source, input overrides and stable ownership manifest
+    std::vector<arkjson::Value> drawings; // authored associative technical drawings; derived curves are never persisted
     u64 addFeature(Feature f);                    // returns id
     Feature* find(u64 id);
     const Feature* find(u64 id) const;
@@ -341,6 +342,9 @@ struct ManufacturingLineage {
     bool editableSheet=false;
 };
 std::string featureOperation(const Feature& feature);
+// Face extrusion inputs are geometric references for a separate body; their
+// source/limit bodies remain physical outputs until an actual modeling recipe consumes them.
+bool featureConsumesInputBodies(const Feature& feature);
 ManufacturingLineage featureManufacturingLineage(const Document& document,const Feature& feature);
 bool validateManufacturingRoutes(const Document& document,std::string& error);
 
