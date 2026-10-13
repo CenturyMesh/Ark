@@ -129,20 +129,30 @@ std::string digest(const std::string& encoded){return sha256(base64Decode(encode
 std::vector<Ref> inputRefs(const V& request,const char* brepKey,const char* topologyKey,const TopoDS_Shape& shape){
     const V* topology=request.find(topologyKey);if(!topology)return {};
     const auto& encoded=need(request,brepKey);if(encoded.t!=V::Str)throw std::runtime_error("Input B-rep is not text");
-    if(word(*topology,"brep_sha256")!=digest(encoded.str))throw std::runtime_error("Topology registry B-rep digest mismatch");
-    auto& rows=need(*topology,"references");if(rows.t!=V::Arr||rows.arr.size()>512)throw std::runtime_error("Invalid topology registry");
+    const std::string identity=digest(encoded.str);if(word(*topology,"brep_sha256")!=identity)throw std::runtime_error("Topology registry B-rep digest mismatch");
+    auto& rows=need(*topology,"references");if(rows.t!=V::Arr||rows.arr.size()>16384)throw std::runtime_error("Invalid topology registry");
+    size_t semanticCount=0;for(const auto& row:rows.arr){const auto* name=row.find("name");if(!name||name->t!=V::Str)throw std::runtime_error("Invalid topology reference name");if(name->str.find("@ark.")==std::string::npos&&++semanticCount>512)throw std::runtime_error("Semantic topology registry exceeds512 entries");}
     std::set<std::string> names;std::vector<Ref> out;
     for(const auto& row:rows.arr){Ref ref;ref.name=word(row,"name");ref.kind=word(row,"kind");ref.status=word(row,"status");if(!names.insert(ref.name).second)throw std::runtime_error("Duplicate topology reference");
-        if(selectable(ref.status)){auto& indices=need(row,"indices");if(indices.t!=V::Arr||indices.arr.size()!=1||indices.arr[0].t!=V::Num||std::floor(indices.arr[0].num)!=indices.arr[0].num||indices.arr[0].num<0||indices.arr[0].num>1000000)throw std::runtime_error("Ambiguous topology binding");ref.shape=atIndex(shape,refType(ref.kind),static_cast<int>(indices.arr[0].num));if(const V* seed=row.find("descriptor"))ref.seed=*seed;V meta=V::makeObj();if(const V* from=row.find("merged_from"))meta.set("merged_from",*from);if(const V* surviving=row.find("surviving"))meta.set("surviving",*surviving);if(!meta.obj.empty())ref.meta=meta;}
+        if(selectable(ref.status))if(const auto marker=ref.name.find("@ark.");marker!=std::string::npos){
+            const auto start=ref.name.find('.',marker+5);const auto suffix=start==std::string::npos||ref.name.size()<start+66?std::string():ref.name.substr(start+66);
+            const auto* indices=row.find("indices");
+            if(start==std::string::npos||ref.name.substr(marker+5,start-marker-5)!=ref.kind||ref.name.substr(start+1,64)!=identity||suffix.empty()||suffix.size()>7||suffix.find_first_not_of("0123456789")!=std::string::npos||ref.name[start+65]!='.'||!indices||indices->t!=V::Arr||indices->arr.size()!=1||indices->arr[0].t!=V::Num||indices->arr[0].num!=std::stoul(suffix))throw std::runtime_error("Current-B-rep reference provenance mismatch; select the current geometry");
+        }
+        if(selectable(ref.status)){auto& indices=need(row,"indices");if(indices.t!=V::Arr||indices.arr.size()!=1||indices.arr[0].t!=V::Num||std::floor(indices.arr[0].num)!=indices.arr[0].num||indices.arr[0].num<0||indices.arr[0].num>1000000)throw std::runtime_error("Ambiguous topology binding");ref.shape=atIndex(shape,refType(ref.kind),static_cast<int>(indices.arr[0].num));if(const V* seed=row.find("descriptor"))ref.seed=*seed;}
+        V meta=V::makeObj();for(const char* key:{"merged_from","surviving","split_into","reason"})if(const V* value=row.find(key))meta.set(key,*value);if(!meta.obj.empty())ref.meta=std::move(meta);
+        if(ref.name.find("@ark.")!=std::string::npos)ref.seed=V{}; // Current handles derive frames from the bound B-rep, never supplied descriptors.
         out.push_back(ref);
     }return out;
 }
 V topologyOf(const TopoDS_Shape& shape,const std::string& encoded,const std::vector<Ref>& refs){
-    V out=V::makeObj(),rows=V::makeArr();out.set("brep_sha256",V::makeStr(digest(encoded)));
+    const std::string identity=digest(encoded);V out=V::makeObj(),rows=V::makeArr();out.set("brep_sha256",V::makeStr(identity));
     std::set<std::string> names;
     for(const auto& ref:refs){if(!names.insert(ref.name).second)throw std::runtime_error("Duplicate output reference name");V row=V::makeObj();row.set("name",V::makeStr(ref.name));row.set("kind",V::makeStr(ref.kind));V indices=V::makeArr();std::string status=ref.status;
+        const auto marker=ref.name.find("@ark.");const bool generic=marker!=std::string::npos;
+        if(generic){const auto start=ref.name.find('.',marker+5);if(start==std::string::npos||ref.name.substr(start+1,64)!=identity)status="obsolete";}
         if(selectable(status)){int i=indexOf(shape,ref.shape,refType(ref.kind));if(i<0)status="deleted";else indices.arr.push_back(V::makeNum(i));}
-        row.set("status",V::makeStr(status));row.set("indices",indices);if(selectable(status)){V data=descriptor(ref);row.set("frame_available",V::makeBool(data.find("normal")||data.find("axis")||data.find("tangent")));row.set("descriptor",data);if(const V* from=ref.meta.find("merged_from"))row.set("merged_from",*from);if(const V* surviving=ref.meta.find("surviving"))row.set("surviving",*surviving);}rows.arr.push_back(row);
+        row.set("status",V::makeStr(status));row.set("indices",indices);if(selectable(status)){V data=generic?ref.seed:descriptor(ref);row.set("frame_available",V::makeBool(data.find("normal")||data.find("axis")||data.find("tangent")));row.set("descriptor",data);}for(const char* key:{"merged_from","surviving","split_into","reason"})if(const V* value=ref.meta.find(key))row.set(key,*value);rows.arr.push_back(row);
     }out.set("references",rows);return out;
 }
 template<class Operation>std::vector<Ref> propagated(const std::vector<Ref>& refs,const TopoDS_Shape& result,Operation& op){
@@ -156,7 +166,7 @@ template<class Operation>std::vector<Ref> propagated(const std::vector<Ref>& ref
     }return out;
 }
 void add(std::vector<Ref>& refs,const std::string& name,const std::string& kind,const TopoDS_Shape& s){if(s.IsNull())return;for(const auto& existing:refs)if(existing.name==name){if(existing.kind==kind&&existing.shape.IsSame(s))return;throw std::runtime_error("Ambiguous producer reference: "+name);}refs.push_back({name,kind,"bound",s});}
-V finish(const TopoDS_Shape& shape,const std::vector<Ref>& refs){V result=shapeResult(shape,true);result.set("topology",topologyOf(shape,need(result,"brep_base64").str,refs));return result;}
+V finish(const TopoDS_Shape& shape,const std::vector<Ref>& refs){V result=shapeResult(shape,true);result.set("topology",topologyOf(shape,need(result,"brep_base64").str,refs));return completeSelectionReferences(std::move(result));}
 void boxEdges(const TopoDS_Shape& solid,double x,double y,double z,std::vector<Ref>& refs){
     for(auto& item:shapes(solid,TopAbs_EDGE)){TopoDS_Vertex a,b;TopExp::Vertices(TopoDS::Edge(item),a,b);if(a.IsNull()||b.IsNull())continue;
         gp_Pnt p=BRep_Tool::Pnt(a),q=BRep_Tool::Pnt(b);double delta[3]{std::abs(p.X()-q.X()),std::abs(p.Y()-q.Y()),std::abs(p.Z()-q.Z())};
@@ -464,7 +474,7 @@ std::vector<TopoDS_Face> draftFaces(const TopoDS_Shape& shape,const V& request,c
     if(const V* names=request.find("faces")){
         if(names->t!=V::Arr||names->arr.empty()||names->arr.size()>64)throw std::runtime_error("Draft needs 1..64 named faces");
         std::set<std::string> picked;
-        for(const auto& item:names->arr){if(item.t!=V::Str||!picked.insert(item.str).second)throw std::runtime_error("Invalid or repeated face name");bool found=false;for(const auto& ref:refs)if(ref.name==item.str){if(ref.kind!="face"||!selectable(ref.status))throw std::runtime_error("Selected reference is not a bound face");faces.push_back(TopoDS::Face(ref.shape));found=true;break;}if(!found)throw std::runtime_error("Unknown semantic face name");}
+        for(const auto& item:names->arr){if(item.t!=V::Str||!picked.insert(item.str).second)throw std::runtime_error("Invalid or repeated face name");bool found=false;for(const auto& ref:refs)if(ref.name==item.str){if(ref.kind!="face")throw std::runtime_error("Selected reference is not a face");if(!selectable(ref.status))throw std::runtime_error("Reference "+ref.name+" is "+ref.status+"; select a bound face");faces.push_back(TopoDS::Face(ref.shape));found=true;break;}if(!found)throw std::runtime_error("Unknown semantic face name");}
         return faces;
     }
     for(const TopoDS_Shape& item:shapes(shape,TopAbs_FACE)){
@@ -582,7 +592,7 @@ TopoDS_Shape splitOnPlane(const TopoDS_Shape& input,const V& request,std::vector
 V finishBodies(const TopoDS_Shape& shape,const std::vector<Ref>& refs){
     auto solids=shapes(shape,TopAbs_SOLID);if(solids.empty()||solids.size()>64)throw std::runtime_error("Pattern needs 1..64 solids");
     for(const auto& solid:solids)if(!(properties(solid)>0))throw std::runtime_error("Pattern instance has no positive volume");
-    V result=shapeResult(shape,false);result.set("topology",topologyOf(shape,need(result,"brep_base64").str,refs));return result;
+    V result=shapeResult(shape,false);result.set("topology",topologyOf(shape,need(result,"brep_base64").str,refs));return completeSelectionReferences(std::move(result));
 }
 
 V modelSolidNative(const V& request){
@@ -610,7 +620,7 @@ V modelSolidNative(const V& request){
         if(sha256(readFile(source))!=word(package,"source_sha256"))throw std::runtime_error("Component source changed during exact validation");
         V out=shapeResult(stored,body!=-2);std::vector<Ref> sourceRefs;const auto faces=shapes(stored,TopAbs_FACE);
         for(size_t i=0;i<std::min((size_t)256,faces.size());++i){sourceRefs.push_back({"source.face."+std::to_string(i),"face","bound",faces[i],{}, {}});BRepAdaptor_Surface surface(TopoDS::Face(faces[i]));if(surface.GetType()==GeomAbs_Cylinder||surface.GetType()==GeomAbs_Cone||surface.GetType()==GeomAbs_Torus)sourceRefs.push_back({"source.axis."+std::to_string(i),"axis","bound",faces[i],{}, {}});}
-        out.set("topology",topologyOf(stored,need(out,"brep_base64").str,sourceRefs));V report=*out.find("report");report.set("source_selection_verified",V::makeBool(true));report.set("source_sha256",need(package,"source_sha256"));report.set("body_index",need(package,"body_index"));report.set("source_solid_count",need(package,"source_solid_count"));report.set("source_symmetric_difference_mm3",V::makeNum(difference));report.set("source_bounds_error_mm",V::makeNum(boundError));report.set("standard_recognition_checked",V::makeBool(false));report.set("reference_inventory_complete",V::makeBool(faces.size()<=256));report.set("reference_scope",V::makeStr("source_indexed_faces_and_analytic_axes_first_256_faces"));out.set("report",report);out.set("package",package);return out;
+        out.set("topology",topologyOf(stored,need(out,"brep_base64").str,sourceRefs));V report=*out.find("report");report.set("source_selection_verified",V::makeBool(true));report.set("source_sha256",need(package,"source_sha256"));report.set("body_index",need(package,"body_index"));report.set("source_solid_count",need(package,"source_solid_count"));report.set("source_symmetric_difference_mm3",V::makeNum(difference));report.set("source_bounds_error_mm",V::makeNum(boundError));report.set("standard_recognition_checked",V::makeBool(false));report.set("reference_inventory_complete",V::makeBool(faces.size()<=256));report.set("reference_scope",V::makeStr("source_indexed_faces_and_analytic_axes_first_256_faces"));out.set("report",report);out.set("package",package);return completeSelectionReferences(std::move(out));
     }
     if(op=="box"){
         double x=positive(request,"width"),y=positive(request,"depth"),z=positive(request,"height");BRepPrimAPI_MakeBox box(x,y,z);result=box.Shape();

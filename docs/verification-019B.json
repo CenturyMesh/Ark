@@ -24,33 +24,29 @@
   "milestones_status": "A.01 verified within identity scope; A.05/B.01/B.02/B.03/C.04/D.02/D.04/E.01 partial; human acceptance and merge pending",
   "native_tests": {
     "full_run": {
-      "passed": 88,
-      "failed": 1,
-      "groups": 89,
-      "seconds": 116.45,
-      "log": "out/native-019b-final-tests.log"
-    },
-    "studio_recheck_after_navigation_fix": {
-      "passed": 14,
+      "passed": 90,
       "failed": 0,
-      "groups": 14,
-      "seconds": 57.76,
-      "log": "out/studio-019b-final-tests.log"
+      "groups": 90,
+      "seconds": 129.85,
+      "junit": "out/native-019b-selection-junit.xml",
+      "log": "out/native-019b-selection-tests.log"
     },
-    "all_89_groups_accepted": true,
-    "scope": "Full native run accepted75 headless groups and13/14 Studio groups. Navigation layout fix changed Studio only; all14 Studio groups were rerun against the final executable. OCCT worker and headless executables retain the full-run hashes."
+    "all_90_groups_accepted": true,
+    "scope": "Full native suite including 15 Studio groups rerun against the final selection follow-up executable and worker."
   },
   "core_tests": {
     "passed": 51,
     "failed": 0,
     "groups": 51,
-    "seconds": 14.54,
-    "log": "out/core-019b-tests-final.log"
+    "seconds": 19.83,
+    "junit": "out/core-019b-selection-junit.xml",
+    "log": "out/core-019b-selection-tests.log"
   },
   "build": {
-    "final_native_log": "out/build-019b-10.log",
-    "final_portable_log": "out/core-019b-build-final-2.log",
-    "portable_studio_final_log": "out/core-019b-studio-final.log",
+    "final_native_log": "out/build-019b-14.log",
+    "full_native_build_log": "out/build-019b-14.log",
+    "final_portable_log": "out/core-019b-selection-build.log",
+    "portable_studio_final_log": "out/core-019b-selection-studio-build-final.log",
     "native_exit": 0,
     "portable_exit": 0,
     "portable_studio_final_exit": 0
@@ -139,12 +135,96 @@
       "fixture": "examples/authoring-019B.arkops",
       "inspected": true,
       "observed": "Native Skeleton copies, helix, aligned loft, indexed cube and retained source sketches"
+    },
+    {
+      "path": "docs/images/019B/pointer-face-hover.png",
+      "sha256": "2224673b8112d9c8bd1c5922379d4282021639b9232bf9230159b608258db962",
+      "fixture": "synthetic",
+      "inspected": true,
+      "observed": "Persistent face selector and cyan exact z_max hover target"
+    },
+    {
+      "path": "docs/images/019B/pointer-curved-face.png",
+      "sha256": "3eddc3ecb84ff55645583c3bbaccf53ebee705aa40b4ba980a7cd8ba1cfbb49b",
+      "fixture": "synthetic",
+      "inspected": true,
+      "observed": "Direct click selected exact cylindrical face"
+    },
+    {
+      "path": "docs/images/019B/pointer-edge-hover.png",
+      "sha256": "683f93c9b28211ad07251e634cf9de092fc2857b9a5a5cb5745e084722a5c23c",
+      "fixture": "synthetic",
+      "inspected": true,
+      "observed": "Cyan visible curved edge hover in perspective"
+    },
+    {
+      "path": "docs/images/019B/pointer-curved-edge.png",
+      "sha256": "681d2b8dbc1684ae516104301027eda7bac1350655119a61c2378eb5ef2e78ba",
+      "fixture": "synthetic",
+      "inspected": true,
+      "observed": "Direct edge click retains the exact hovered reference"
+    },
+    {
+      "path": "docs/images/019B/pointer-edge-occlusion.png",
+      "sha256": "9a8dff200351571c46b14f3e70004e2229cfc176b53483fd49b3d62c477cb98d",
+      "fixture": "synthetic",
+      "inspected": true,
+      "observed": "Opaque foreground blocks rear-edge hover and picking"
+    },
+    {
+      "path": "docs/images/019B/pointer-mesh-face.png",
+      "sha256": "aae08fb5adc95542486b048b2007e40154c581168f5631d6114defd1ffff3703",
+      "fixture": "synthetic",
+      "inspected": true,
+      "observed": "Indexed cube panel selection contains its two source triangles"
+    },
+    {
+      "path": "docs/images/019B/pointer-mesh-edge.png",
+      "sha256": "5d9f49457b7399e7e9b69f1a93d207e1cb24f03404b47f53a3d8cf3847dec4ce",
+      "fixture": "synthetic",
+      "inspected": true,
+      "observed": "Distinct mesh_edge selection uses guarded source vertex indices"
+    },
+    {
+      "path": "docs/images/019B/pointer-curved-mesh-face.png",
+      "sha256": "833e3aa6f6d1685164fa136023261b10a4ea43adb8431d059a7190c255b8479e",
+      "fixture": "synthetic",
+      "inspected": true,
+      "observed": "Curved sampled mesh selection retains source triangle authority"
+    },
+    {
+      "path": "docs/images/019B/selected-native-edge-occlusion.png",
+      "sha256": "df16cef1bfff7e704c8abbe2b7ed206187352b6b13423a5c0b448bab523bb952",
+      "fixture": "synthetic",
+      "inspected": true,
+      "observed": "Explicitly selected native rear edges remain occluded with the pointer outside the viewport"
+    },
+    {
+      "path": "docs/images/019B/selected-native-edge-visible.png",
+      "sha256": "04f11072b88847744143cecfa494ec6117c63588ed88cb24dabccf05b2a57528",
+      "fixture": "synthetic",
+      "inspected": true,
+      "observed": "Selected native edges retain a 3-pixel orange stroke without hover"
+    },
+    {
+      "path": "docs/images/019B/selected-mesh-edge-occlusion.png",
+      "sha256": "3d0ce6c712af83c179f3be993737ced1f6467aa8ae7ba61a818c21cc4dd5d851",
+      "fixture": "synthetic",
+      "inspected": true,
+      "observed": "Selected source-index mesh edge remains occluded by the foreground body"
+    },
+    {
+      "path": "docs/images/019B/selected-mesh-edge-visible.png",
+      "sha256": "4624ac5cba909fe5ee94dd6d7306b514e1b96c264e520f189756dd8087b129c8",
+      "fixture": "synthetic",
+      "inspected": true,
+      "observed": "Selected indexed mesh edge retains an orange stroke without hover"
     }
   ],
   "preview": {
-    "path": "out/test-preview/019B-test2",
-    "studio_sha256": "aa77e818c6410f9d759430496af50e66401a708364ecedfe371b61f09aa17a17",
-    "worker_sha256": "3d0ca7f343a4b92f50ee031720008184b5b50e2df30181e42349bc37a7fd84a1",
+    "path": "out/test-preview/019B-test3",
+    "studio_sha256": "3b2778ee2226f061ca603c44cb51ebf09544e313cd60610153ae5788a63b3e79",
+    "worker_sha256": "bd3e2a8d2fd77ab224b52a74c2cf6051140cfad87c53ccaac9764740a547c984",
     "metadata": {
       "schema": 1,
       "product": "ARK",
@@ -233,6 +313,25 @@
     {
       "kind": "private_preliminary_example",
       "resolution": "Added native Skeleton pattern bridge preserving B-rep and explicit loft ruled=0; final packaged scripted example passed"
+    },
+    {
+      "kind": "hosted_ci_source_lifetime",
+      "run_id": 38420076202,
+      "head": "64381671af6c04556c4ef86d9c35abbb4595a07f",
+      "resolution": "Skeleton compile owns its source string before replacing document state. Expanded refresh/recompute and JSON/binary/history regression tests pass locally; hosted follow-up pending."
+    },
+    {
+      "kind": "pointer_capacity_fixture",
+      "log": "out/native-019b-selection-focused-tests.log",
+      "resolution": "The explicit indexed-mesh source cap rejected the oversized fixture before pointer picking. Replaced it with a supported generated planar surface exceeding4096 triangles; source geometry capacities remain unchanged."
+    },
+    {
+      "kind": "selection_inventory_contracts",
+      "log": "out/native-019b-selection-tests-attempt1.log",
+      "passed": 88,
+      "groups": 90,
+      "seconds": 126.03,
+      "resolution": "Updated unannotated exact sources to verify digest-scoped nonpersistent handles. Corrected loft edge history binds four distinct authored side faces; aliases must reflect their actual multiplicity and preserve explicit ambiguity rather than falsely merging separate faces."
     }
   ],
   "measured_scope": [
@@ -245,7 +344,10 @@
     "Actual PNG/JPEG decode/thumbnail pixels through WIC and forced portable decoder; optional blank/partial/full dimensions and invalid-input rejection",
     "Offline actual image bytes in Responses/Chat/Anthropic envelopes and team lead/specialist/steering paths; cancellation before transport",
     "Real rendered native controls, direct gesture previews/application/cancel, driving source dimensions and semantic curved face picking",
-    "Occluded body/face halo rejection and visible halo pixels outside object fill; navigation across compact tested windows"
+    "Occluded body/face halo rejection and visible halo pixels outside object fill; navigation across compact tested windows",
+    "Actual model pointer clicks, cyan hover identity agreement, modifier selection, cancellation of authoring/navigation modes, native occurrence aliases, mesh panel/edge/curved-triangle selection, occlusion and explicit capacity rejection",
+    "Native complete selection inventories, current-handle idempotence/restoration, forged descriptor and hash/index rejection, obsolete-source atomic rollback and format35 persistence",
+    "Skeleton aliased refresh/recompute ownership, source/overrides/arrays/pattern identity and JSON/binary/history lifetime regression"
   ],
   "limits": [
     "Image to CAD supplies multimodal authoring guidance; no automatic pixel vectorizer, unique photo depth or external reconstruction-quality benchmark",
@@ -254,7 +356,121 @@
     "Guided loft/helix fits report observed checkpoint error without a general between-sample proof or general G2 boundary solver",
     "Mesh watertightness does not prove absence of self-intersections; triangle contact does not provide mesh common material volume",
     "Collision inspection is static geometry feedback; contact response dynamics and manufacturing qualification are unverified",
-    "Local builds use LLVM-MinGW on Windows; Linux and MSVC actual builds await PR CI",
-    "External model performance, product integration, deployment and human acceptance remain pending; no automatic merge"
-  ]
+    "External model performance, product integration, deployment and human acceptance remain pending; no automatic merge",
+    "Follow-up local builds use LLVM-MinGW on Windows; earlier hosted Linux/MSVC compilation passed but failed Skeleton tests. New hosted checks and relocated Linux package execution remain pending.",
+    "Fallback selection references identify one serialized B-rep and do not provide general associative topological naming. Mesh visual selection remains source-triangle authority."
+  ],
+  "prior_validation": {
+    "native_tests": {
+      "full_run": {
+        "passed": 88,
+        "failed": 1,
+        "groups": 89,
+        "seconds": 116.45,
+        "log": "out/native-019b-final-tests.log"
+      },
+      "studio_recheck_after_navigation_fix": {
+        "passed": 14,
+        "failed": 0,
+        "groups": 14,
+        "seconds": 57.76,
+        "log": "out/studio-019b-final-tests.log"
+      },
+      "all_89_groups_accepted": true,
+      "scope": "Full native run accepted75 headless groups and13/14 Studio groups. Navigation layout fix changed Studio only; all14 Studio groups were rerun against the final executable. OCCT worker and headless executables retain the full-run hashes."
+    },
+    "core_tests": {
+      "passed": 51,
+      "failed": 0,
+      "groups": 51,
+      "seconds": 14.54,
+      "log": "out/core-019b-tests-final.log"
+    },
+    "build": {
+      "final_native_log": "out/build-019b-10.log",
+      "final_portable_log": "out/core-019b-build-final-2.log",
+      "portable_studio_final_log": "out/core-019b-studio-final.log",
+      "native_exit": 0,
+      "portable_exit": 0,
+      "portable_studio_final_exit": 0
+    },
+    "preview": {
+      "path": "out/test-preview/019B-test2",
+      "studio_sha256": "aa77e818c6410f9d759430496af50e66401a708364ecedfe371b61f09aa17a17",
+      "worker_sha256": "3d0ca7f343a4b92f50ee031720008184b5b50e2df30181e42349bc37a7fd84a1",
+      "metadata": {
+        "schema": 1,
+        "product": "ARK",
+        "version": "0.9.20",
+        "iteration_code": "019B",
+        "sequence": 19,
+        "phase": "B",
+        "milestones": [
+          "A.01",
+          "A.05",
+          "B.01",
+          "B.02",
+          "B.03",
+          "C.04",
+          "D.02",
+          "D.04",
+          "E.01"
+        ],
+        "platform": "windows-x64",
+        "entrypoint": "ark-studio.exe"
+      },
+      "synthetic_script": "examples/authoring-019B.arkops",
+      "script_sha256": "3f9f0286f893ab0a8d8ea095cb9fe1f4eb2a9a687705f1b22de25de1f738bd2e",
+      "scripted_preview_exit": 0,
+      "publication": "Isolated local development test copy. Draft PR only; no merge, release tag, installer or OTA publication."
+    }
+  },
+  "selection_followup": {
+    "milestones": [
+      "B.01",
+      "B.02",
+      "B.03",
+      "E.01"
+    ],
+    "status": "Verified within local scope; broad milestones remain partial; human acceptance and merge pending",
+    "pointer_test": "studio-selection-picking-ui",
+    "source_geometry_unchanged_by_selection": true,
+    "stationary_body_cache": "Repeated draws retain topology and silhouette build counters; orbit updates the silhouette only; mesh upload invalidates topology",
+    "fallback_references": "Complete bounded native face/edge coverage with semantic priority and canonical duplicate mappings. Current-B-rep handles include full SHA-256, invalidate on changed B-rep, and derive descriptors from the B-rep.",
+    "mesh_selection": "Distinct mesh_face / mesh_edge visual kinds, source indices and topology guard. Seed-relative coplanar patches reject above4096 triangles.",
+    "hosted_ci_prior_head": {
+      "head": "64381671af6c04556c4ef86d9c35abbb4595a07f",
+      "run_id": 38420076202,
+      "linux_native": {
+        "job_id": 115374769434,
+        "passed": 71,
+        "groups": 73,
+        "failures": [
+          "skeleton-authoring",
+          "native-geometry-019b"
+        ],
+        "build": "passed",
+        "package_checks": "skipped after test failure"
+      },
+      "ubuntu_portable": {
+        "job_id": 115374769221,
+        "failures": [
+          "skeleton-authoring"
+        ]
+      },
+      "windows_native": {
+        "job_id": 115374769785,
+        "failures": [
+          "skeleton-authoring",
+          "native-geometry-019b"
+        ]
+      },
+      "windows_portable": {
+        "job_id": 115374769316,
+        "result": "cancelled by portable matrix fail-fast"
+      },
+      "root_cause": "Internal Skeleton compile retained a reference into the document while replacing its owner. Copying source text before mutation removes that lifetime error; regression covers repeated refresh/recompute, ownership, history and persistence."
+    },
+    "hosted_ci_followup": "Pending the new PR head workflow; local MinGW results are separate from hosted Linux/MSVC evidence."
+  }
 }

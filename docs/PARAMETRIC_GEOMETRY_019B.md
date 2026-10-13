@@ -134,6 +134,32 @@ copies do not constitute a measured physical or manufacturing qualification.
 
 ## Local verification scope
 
+Exact face and edge selection uses the same ordered B-rep topology as the
+display spans and polylines. `face_canonical` and `edge_canonical` map repeated
+uses of the same exact entity to its first display index; existing indices and
+mesh buffers retain their order. Producer semantic names and merged/deleted
+aliases remain intact and take precedence when available. Missing names receive
+`@ark.face.<brep-sha256>.<index>` or `@ark.edge.<brep-sha256>.<index>` handles,
+with `reference_scope: current_brep` and `persistent: false`.
+
+Loft history binds each source edge to the actual edge retained by the assembled
+wire. When numbered members resolve to distinct exact faces or edges, their
+historical stem alias remains present as `split`, with empty `indices`, a reason,
+`merged_from` and `split_into`. Selecting that stem rejects atomically; select an
+individual bound member. A genuine merged alias still binds one exact entity
+and retains its source membership through supported operation history.
+
+These fallback handles bind one complete serialized B-rep identity. Any B-rep
+change, including a dimensional edit, makes an old handle obsolete rather than
+retargeting it to the same integer index. An identical B-rep identity can restore
+its verified index. Descriptors come from the current B-rep, not incoming
+metadata. Generic handles are deliberately less associative than producer
+semantic names. Authored sources containing them require document format 35;
+adding derived picking metadata alone does not advance the document format.
+Inventories reject above 512 semantic rows or 16,384 combined rows, including
+obsolete aliases, instead of publishing partial coverage. Degenerate edges with
+empty display polylines receive no selectable fallback handle.
+
 `tests/native_geometry_019b_tests.cpp` compares helix length/rise and sweep
 volume to analytic values; exercises open loft consumption, fixed-tolerance
 closed/open/disconnected sew and free-boundary lengths; checks real circular
@@ -143,6 +169,10 @@ checks hostile inputs, rigid-frame rejection, editable expression
 recomputation, source persistence and document/revision rollback.
 Native Skeleton tests cover count changes from four to five, source reload,
 identity at one copy, historical pattern defaults and rejection at 65 copies.
+Selection tests cover raw surfaces, sewing, guided and unguided lofts, primitives,
+Boolean walls, native pattern copies and a synthetic STEP import; current-handle
+idempotence, exact-identity restoration, forged descriptors, capacity boundaries,
+source persistence and atomic rejection after an upstream B-rep change.
 
 The iteration verification receipt records executed test results. A syntax
 check or test fixture alone is not integration, deployment, manufacturing or

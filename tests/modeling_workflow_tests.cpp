@@ -6,6 +6,7 @@
 #include <cmath>
 #include <filesystem>
 #include <iostream>
+#include <set>
 #include <stdexcept>
 #include <string>
 
@@ -275,9 +276,10 @@ std::string topologyDump(const Value& topology) {
     return text;
 }
 
-void testMergedFaces() {
+void testLoftFaceHistoryAndSplitAlias() {
     ark::AgentSession session;
-    accepted(session.call("doc_apply", parse(R"({"commands":[
+    auto apply = [&](Value request) {request.set("expected_revision",Value::makeNum(session.revision));return session.call("doc_apply",request);};
+    accepted(apply(parse(R"({"commands":[
       {"op":"sketch.set","name":"Low","sketch":{"entities":[{"name":"skin","kind":"spline","closed":true,"dof":[-24,-14,24,-14,24,14,-24,14]}]}},
       {"op":"plane.set","name":"Upper","p":{"oz":"28"}},
       {"op":"sketch.set","name":"High","sketch":{"plane":"Upper","entities":[{"name":"skin","kind":"spline","closed":true,"dof":[-16,-10,16,-10,16,10,-16,10]}]}},
@@ -287,24 +289,46 @@ void testMergedFaces() {
     const Value* topology = inspected.find("topology");
     check(topology != nullptr, "loft publishes topology");
     const Value* alias = referenceNamed(*topology, "side.skin");
-    if (!alias || alias->find("status")->str != "merged")
-        throw std::runtime_error("side.skin was not merged: " + topologyDump(*topology));
-    check(alias->find("indices")->arr.size() == 1, "merged alias names one face");
-    check(!alias->find("surviving")->str.empty(), "merged alias names the surviving face");
-    check(alias->find("merged_from")->arr.size() >= 2, "merged alias lists the authored faces");
+    if (!alias || alias->find("status")->str != "split")
+        throw std::runtime_error("side.skin must disclose its distinct exact members: " + topologyDump(*topology));
+    check(alias->find("indices")->arr.empty(), "historical stem alias never guesses one of four distinct faces");
+    check(alias->find("reason") && !alias->find("reason")->str.empty(), "split alias explains why an individual member is required");
+    check(alias->find("merged_from")->arr.size() == 4 && alias->find("split_into")->dump() == alias->find("merged_from")->dump(), "historical alias retains its four source members");
+    std::set<int> faces;
+    for (int i=0;i<4;++i) {
+        const auto* member=referenceNamed(*topology,"side.skin."+std::to_string(i));
+        check(member && member->find("kind")->str=="face" && member->find("status")->str=="bound" && member->find("indices")->arr.size()==1,"each authored spline segment names its actual exact loft face");
+        const auto& index=member->find("indices")->arr[0];check(index.t==Value::Num && index.num>=0 && index.num==std::floor(index.num),"loft side reference has a valid topology index");
+        check(faces.insert(static_cast<int>(index.num)).second,"four spline segments retain four distinct exact face identities");
+    }
+    check(bodyData(session.document,1)->find("report")->find("faces")->num==6 && volumeOf(session.document,1)>0,"four-sided loft retains its two caps and valid positive exact volume");
+    const Value aliasMetadata=*alias;
     const auto revision = session.revision;
     const auto saved = ark::documentToJson(session.document);
-    const Value draft = session.call("doc_apply", parse(R"({"commands":[
+    const auto brep=bodyData(session.document,1)->find("brep_base64")->str;
+    const Value draft = apply(parse(R"({"commands":[
       {"op":"feature.add","type":"native_solid","name":"Taper","inputs":["Pod"],"p":{"op":"draft","angle":"3"},"native":{"direction":"Z","neutral":"XY","faces":["side.skin"]}}
     ]})"));
     const std::string draftError = errorOf(draft);
-    check(draftError.find("Unknown semantic") == std::string::npos, "draft accepts the merged face alias");
-    check(draftError.find("Draft rejected") != std::string::npos || draftError.find("no analytic origin") != std::string::npos || !(draft.find("isError") && draft.find("isError")->b), "freeform alias resolves");
-    check(session.revision == revision && ark::documentToJson(session.document) == saved, "rejected draft keeps the authored loft");
-    const Value datum = session.call("doc_apply", parse(R"({"commands":[
+    check(draftError.find("side.skin") != std::string::npos && draftError.find("split") != std::string::npos,"draft explicitly rejects the retained split alias");
+    check(session.revision == revision && ark::documentToJson(session.document) == saved && bodyData(session.document,1)->find("brep_base64")->str==brep, "rejected split draft keeps full authoring, revision and exact geometry");
+    const Value datum = apply(parse(R"({"commands":[
       {"op":"plane.set","name":"Skin","support":{"kind":"face","feature":1,"reference":"side.skin"}}
     ]})"));
-    check(errorOf(datum).find("Unknown semantic") == std::string::npos, "plane support accepts the merged face alias");
+    check(errorOf(datum).find("side.skin")!=std::string::npos && errorOf(datum).find("split")!=std::string::npos,"datum support explicitly rejects the retained split alias");
+    check(session.revision==revision && ark::documentToJson(session.document)==saved && bodyData(session.document,1)->find("brep_base64")->str==brep,"rejected split datum keeps full authoring, revision and exact geometry");
+    const Value individual=apply(parse(R"({"commands":[
+      {"op":"feature.add","type":"native_solid","name":"TaperMember","inputs":["Pod"],"p":{"op":"draft","angle":"3"},"native":{"direction":"Z","neutral":"XY","faces":["side.skin.2"]}}
+    ]})"));
+    check(errorOf(individual).find("Draft rejected")!=std::string::npos || errorOf(individual).find("no analytic origin")!=std::string::npos,"individual exact face resolves before the freeform draft limit rejects");
+    check(session.revision==revision && ark::documentToJson(session.document)==saved,"freeform draft rejection keeps source associativity atomic");
+    const double sourceVolume=volumeOf(session.document,1);
+    accepted(apply(parse(R"({"commands":[{"op":"feature.add","type":"transform","name":"MovedPod","inputs":["Pod"],"p":{"tx":"9"}}]})")));
+    check(std::abs(volumeOf(session.document,2)-sourceVolume)<1e-6,"rigid transform preserves exact loft volume");
+    const auto* movedAlias=referenceNamed(*bodyData(session.document,2)->find("topology"),"side.skin");
+    check(movedAlias!=nullptr,"historical stem alias survives exact history propagation");
+    for(const char* key:{"kind","status","indices","merged_from","split_into","reason"})
+        check(movedAlias->find(key) && movedAlias->find(key)->dump()==aliasMetadata.find(key)->dump(),"unbound historical alias keeps status, source members and reason through exact history propagation");
 }
 
 void testRoundTube() {
@@ -826,7 +850,7 @@ int main() {
         testCandidate();
         testExactBooleans();
         testSnapshotAndContract();
-        testMergedFaces();
+        testLoftFaceHistoryAndSplitAlias();
         testRoundTube();
         testRectangularTube();
         testShell();

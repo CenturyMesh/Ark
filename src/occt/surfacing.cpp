@@ -275,7 +275,13 @@ Profile profileOf(const V& value, bool requireClosed) {
     result.closed = result.edges.front().first.Distance(result.edges.back().last) <= kTolerance;
     if (requireClosed && !result.closed) throw std::runtime_error("profile is not explicitly closed");
     BRepBuilderAPI_MakeWire maker;
-    for (const auto& edge : result.edges) maker.Add(edge.edge);
+    for (auto& edge : result.edges) {
+        maker.Add(edge.edge);
+        if(!maker.IsDone())throw std::runtime_error("profile wire construction failed");
+        // MakeWire can replace an incoming edge to share the wire's vertices.
+        // GeneratedFace must receive that actual wire edge, not its precursor.
+        edge.edge=maker.Edge();
+    }
     if (!maker.IsDone()) throw std::runtime_error("profile wire construction failed");
     result.wire = maker.Wire();
     for(size_t i=0;i<result.edges.size();++i)result.sourceIndices.push_back(i);
@@ -1070,15 +1076,23 @@ V loft(const V& request) {
             bound.insert(static_cast<int>(indices.arr[0].num));
             if (surviving.empty()) surviving = required(row, "name").str;
         }
-        if (!sameKind || bound.size() != 1 || surviving.empty()) continue;
+        if (!sameKind || bound.empty() || surviving.empty()) continue;
         V alias = V::makeObj(), indices = V::makeArr();
         alias.set("name", V::makeStr(stem));
         alias.set("kind", V::makeStr(kind));
-        alias.set("status", V::makeStr("merged"));
-        indices.arr.push_back(V::makeNum(*bound.begin()));
+        alias.set("status", V::makeStr(bound.size() == 1 ? "merged" : "split"));
+        if (bound.size() == 1) {
+            indices.arr.push_back(V::makeNum(*bound.begin()));
+            alias.set("surviving", V::makeStr(surviving));
+        } else {
+            // Older histories could expose this stem as a merged alias after
+            // losing wire-edge identities. Keep its name without binding any
+            // one of the now correctly distinguished exact entities.
+            alias.set("reason", V::makeStr("Authored section members resolve to distinct exact entities; select an individual member"));
+            alias.set("split_into", mergedFrom);
+        }
         alias.set("indices", std::move(indices));
         alias.set("merged_from", std::move(mergedFrom));
-        alias.set("surviving", V::makeStr(surviving));
         rows.arr.push_back(std::move(alias));
     }
     topology.set("references", rows);
@@ -1478,6 +1492,7 @@ V profileCurveNative(const V& profile){
 }
 V modelSurfaceNative(const V& request) {
     try {
+        auto dispatch=[&]() -> V {
         const V& operation = required(request, "op");
         if (operation.t != V::Str) throw std::runtime_error("op must be a string");
         if (operation.str == "loft") return loft(request);
@@ -1496,6 +1511,8 @@ V modelSurfaceNative(const V& request) {
         if (operation.str == "helix" || operation.str == "curve" || operation.str == "curve_interpolate" || operation.str == "curve_analytic" || operation.str == "surface_spline" || operation.str == "curve_project_surface" || operation.str == "intersection_curve" || operation.str == "bridge")
             return modelCurveNative(request);
         throw std::runtime_error("unsupported surfacing operation");
+        };
+        return completeSelectionReferences(dispatch());
     } catch (const Standard_Failure& error) {
         throw std::runtime_error(std::string("OCCT surfacing failure: ") + error.GetMessageString());
     }

@@ -51,7 +51,9 @@ ExprEnv resolvedEnvironment(const Document& d){
     for(size_t pass=0;pass<d.params.size();++pass){bool progress=false;for(const auto& p:d.params)if(!env.vars.count(p.name)){bool ok=false;const auto value=evalExpr(p.expr,env,&ok);if(ok&&std::isfinite(value)){env.vars[p.name]=value;progress=true;}}if(!progress)break;}
     return env;
 }
-void compile(Document& d,const std::string& source,bool resetDefaults){
+void compile(Document& d,std::string source,bool resetDefaults){
+    // Refresh and callers may pass d.skeleton's own source. Keep it alive when
+    // replacing the authoring object after rebuilding its generated outputs.
     validateSkeletonAuthoring(d);
     const auto declarations=parse(source);const V prior=manifestOf(d);V overrides=V::makeObj();if(const auto* old=d.skeleton.find("overrides"))overrides=*old;
     if(resetDefaults){

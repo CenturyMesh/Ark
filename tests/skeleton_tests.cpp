@@ -1,5 +1,6 @@
 #include "ark/agent.hpp"
 #include "ark/collision.hpp"
+#include "ark/iteration_history.hpp"
 #include "ark/skeleton.hpp"
 #include <algorithm>
 #include <cmath>
@@ -18,7 +19,36 @@ V sourceCommand(const std::string& text){V command=V::makeObj(),commands=V::make
 std::string program(){return "input span = 120\ninput copies = 4\nrelation pitch = span / (copies - 1)\narray stations[copies] = [index * pitch, 0, span / 30]\nrelation station = stations[2].x\npattern Ribs from Seed count copies step [pitch, 0, 0]\n";}
 void seed(ark::AgentSession& s){apply(s,json(R"([{"op":"feature.add","type":"mesh_body","name":"Seed","mesh":{"positions":[0,0,0,1,0,0,1,1,0,0,1,0,0,0,1,1,0,1,1,1,1,0,1,1],"indices":[0,2,1,0,3,2,4,5,6,4,6,7,0,1,5,0,5,4,1,2,6,1,6,5,2,3,7,2,7,6,3,0,4,3,4,7]}}])"));}
 void unchangedOnFailure(ark::AgentSession& s,const char* tool,V args){const auto revision=s.revision;const auto before=ark::documentToJson(s.document,false,false);check(failed(s.call(tool,args)),"Expected rejection");check(s.revision==revision&&ark::documentToJson(s.document,false,false)==before,"Rejected request changed document");}
+void sourceLifetimeRegression(){
+    ark::AgentSession session;session.suppressFailureCapture();seed(session);apply(session,sourceCommand(program()));
+    const auto patternId=session.document.features.back().id;
+    apply(session,json(R"([{"op":"param.set","name":"span","expr":"240"},{"op":"param.set","name":"copies","expr":"5"}])"));
+    auto repeat=[&](ark::Document& document,double span,double copies,double station){
+        const auto source=document.skeleton.find("source")->str,authoring=document.skeleton.dump(),history=document.iterationHistory.dump();
+        const auto before=ark::documentToJson(document,false,false);const auto extent=document.evalBodies.back().bbox().mx.x;
+        for(int pass=0;pass<12;++pass){
+            // Exercise both public aliasing and the internal refresh call; neither
+            // may read a destroyed source after replacing document.skeleton.
+            ark::setSkeletonSource(document,document.skeleton.find("source")->str);ark::refreshSkeleton(document);document.recompute();
+            check(document.skeleton.find("source")->str==source&&document.skeleton.dump()==authoring,"Repeated aliased compile preserves source, ownership manifest and overrides");
+            ark::validateSkeletonAuthoring(document);
+            check(document.features.size()==2&&document.features.back().id==patternId&&ark::skeletonOwnsFeature(document,patternId),"Refresh retains generated pattern identity and ownership");
+            check(ark::skeletonOwnsParameter(document,"pitch")&&ark::skeletonOwnsParameter(document,"stations_2_x")&&document.getParam("span")==span&&document.getParam("copies")==copies&&document.getParam("stations_count")==copies&&document.getParam("station")==station,"Refresh preserves input overrides and resolves owned relations and arrays");
+            check(document.evalBodies.back().bbox().mx.x==extent&&ark::documentToJson(document,false,false)==before,"Repeated recomputation preserves authored outputs and evaluated pattern extent");
+            std::string error;check(document.iterationHistory.dump()==history&&ark::iterationValidate(document,document.iterationHistory,error),"Refresh preserves and validates durable history");
+        }
+    };
+    const auto revision=session.revision;repeat(session.document,240,5,120);check(session.revision==revision,"Refresh does not publish a revision");
+    std::string error;ark::AgentSession reopened;
+    check(ark::documentFromJson(ark::documentToJson(session.document),reopened.document,&error),"Repeated-refresh source and history reopen from JSON");reopened.document.recompute();repeat(reopened.document,240,5,120);
+    accepted(reopened.call("doc_undo",V::makeObj()));repeat(reopened.document,120,4,80);
+    accepted(reopened.call("doc_redo",V::makeObj()));repeat(reopened.document,240,5,120);
+    const auto file=std::filesystem::temp_directory_path()/"ark-skeleton-lifetime-019b-test.ark";
+    check(ark::saveDocument(reopened.document,file.string().c_str()),"Repeated-refresh history saves to binary");ark::Document binary;
+    check(ark::loadDocument(file.string().c_str(),binary,&error),"Repeated-refresh history reloads from binary");binary.recompute();repeat(binary,240,5,120);std::filesystem::remove(file);
+}
 void tests(){
+    sourceLifetimeRegression();
     const auto tools=ark::AgentSession::tools();bool nativeSchema=false,topicSchema=false;
     for(const auto& tool:tools.arr)if(tool.find("name")->str=="agent_onboard")for(const auto& topic:tool.find("inputSchema")->find("properties")->find("topic")->find("enum")->arr)if(topic.str=="skeleton")topicSchema=true;
     for(const auto& tool:tools.arr)if(tool.find("name")->str=="doc_apply"){const auto* properties=tool.find("inputSchema")->find("properties")->find("commands")->find("items")->find("properties");const auto* native=properties->find("native");nativeSchema=properties->find("source")&&native&&native->find("properties")&&native->find("properties")->find("controls")&&native->find("properties")->find("source_topology");}

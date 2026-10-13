@@ -2,11 +2,18 @@
 
 019B accepts legacy formats 1–34 and writes format 35 for native Skeleton source,
 indexed `mesh_edit` recipes, indexed vector-coordinate expressions, helix sources,
-extended loft controls and connected surface-sewing policy. Skeleton source,
+extended loft controls, connected surface-sewing policy and authored references
+to current-B-rep fallback face/edge handles. Skeleton source,
 overrides and ownership persist; evaluated geometry and static collision reports
 remain derived. Version gates cover nested sketch/native sources, tube programs,
 datums, assemblies and mate expressions. History also supports version 35.
 Older runtimes reject unsupported semantics. See [019B](iterations/019B.md).
+
+Derived native picking inventories alone do not advance the source format.
+Fallback handles include the complete B-rep SHA-256 and a verified topology
+index; they are scoped to that exact B-rep and are not persistent associative
+names. A changed B-rep makes a retained handle obsolete. See
+[native selection coverage](PARAMETRIC_GEOMETRY_019B.md#local-verification-scope).
 
 ## Previous source extension — format 34
 

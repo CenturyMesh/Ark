@@ -52,6 +52,13 @@ bool indexedSourceValue(const Value& value){
     if(value.t==Value::Arr)for(const auto& item:value.arr)if(indexedSourceValue(item))return true;
     return false;
 }
+bool currentBrepReference(const std::string& text){return text.find("@ark.face.")!=std::string::npos||text.find("@ark.edge.")!=std::string::npos;}
+bool currentBrepSourceValue(const Value& value){
+    if(value.t==Value::Str)return currentBrepReference(value.str);
+    if(value.t==Value::Obj)for(const auto& item:value.obj)if(currentBrepSourceValue(item.second))return true;
+    if(value.t==Value::Arr)for(const auto& item:value.arr)if(currentBrepSourceValue(item))return true;
+    return false;
+}
 bool generation35Document(const Document& doc){
     if(skeletonDocument(doc))return true;
     for(const auto& feature:doc.features){
@@ -59,18 +66,18 @@ bool generation35Document(const Document& doc){
         if(feature.type==FeatureType::Curve)if(const auto* op=feature.nativeSpec.find("op");op&&op->asStr()=="helix")return true;
         if(feature.type==FeatureType::Loft&&feature.nativeSpec.find("controls"))return true;
         if(feature.type==FeatureType::Sew&&feature.nativeSpec.find("require_connected"))return true;
-        if(indexedSourceValue(feature.nativeSpec))return true;
+        if(indexedSourceValue(feature.nativeSpec)||currentBrepSourceValue(feature.nativeSpec))return true;
         for(const auto& bend:feature.bends)for(const auto* expression:{&bend.feed,&bend.radius,&bend.angle,&bend.roll})if(indexedSourceExpression(*expression))return true;
         for(const auto& notch:feature.notches)if(indexedSourceExpression(notch.station)||indexedSourceExpression(notch.angle))return true;
     }
     auto arrayExpression=indexedSourceExpression;
     for(const auto& p:doc.params)if(arrayExpression(p.expr))return true;
-    for(const auto& f:doc.features)for(const auto& p:f.p)if(arrayExpression(p.second))return true;
-    for(const auto& sk:doc.sketches){for(const auto& e:sk.sk.ents){for(const auto& expr:e.expressions)if(arrayExpression(expr))return true;if(indexedSourceValue(e.entityRecipe)||indexedSourceValue(e.arcRecipe))return true;}for(const auto& con:sk.sk.cons)if(arrayExpression(con.expression)||arrayExpression(con.expression2))return true;for(const auto& corner:sk.sk.corners)if(arrayExpression(corner.size))return true;}
-    for(const auto& plane:doc.planes){for(const auto& p:plane.p)if(arrayExpression(p.second))return true;if(indexedSourceValue(plane.support))return true;}
+    for(const auto& f:doc.features)for(const auto& p:f.p)if(arrayExpression(p.second)||currentBrepReference(p.second))return true;
+    for(const auto& sk:doc.sketches){for(const auto& e:sk.sk.ents){for(const auto& expr:e.expressions)if(arrayExpression(expr))return true;if(currentBrepReference(e.reference)||indexedSourceValue(e.entityRecipe)||indexedSourceValue(e.arcRecipe)||currentBrepSourceValue(e.entityRecipe)||currentBrepSourceValue(e.arcRecipe))return true;}for(const auto& con:sk.sk.cons)if(arrayExpression(con.expression)||arrayExpression(con.expression2))return true;for(const auto& corner:sk.sk.corners)if(arrayExpression(corner.size))return true;}
+    for(const auto& plane:doc.planes){for(const auto& p:plane.p)if(arrayExpression(p.second))return true;if(indexedSourceValue(plane.support)||currentBrepSourceValue(plane.support))return true;}
     for(const auto& canvas:doc.canvases)if(arrayExpression(canvas.width)||arrayExpression(canvas.height))return true;
     for(const auto& node:doc.assembly){for(const auto& p:node.p)if(arrayExpression(p.second))return true;if(node.pattern.active)for(const auto* expression:{&node.pattern.count,&node.pattern.dx,&node.pattern.dy,&node.pattern.dz,&node.pattern.step})if(arrayExpression(*expression))return true;}
-    for(const auto& mate:doc.mates){if(arrayExpression(mate.value))return true;for(const auto& p:mate.motion)if(arrayExpression(p.second))return true;if(mate.limits.enabled&&(arrayExpression(mate.limits.min)||arrayExpression(mate.limits.max)))return true;}
+    for(const auto& mate:doc.mates){if(currentBrepSourceValue(mateToJson(mate))||arrayExpression(mate.value))return true;for(const auto& p:mate.motion)if(arrayExpression(p.second))return true;if(mate.limits.enabled&&(arrayExpression(mate.limits.min)||arrayExpression(mate.limits.max)))return true;}
     return false;
 }
 
@@ -803,7 +810,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     if(history.t!=Value::Null){if(!iterationValidate(nd,history,historyError))return fail(historyError);nd.iterationHistory=std::move(history);}
     if(arcRecipeDocument(nd)){const auto* version=v.find("version");if(!version||version->num<30)return fail("Arc recipes and linked tube end fits require document version 30");}
     if(generation34Document(nd)){const auto* version=v.find("version");if(!version||version->num<34)return fail("Typed sketches, associative datums, spatial constraints and varying sections require document version 34");}
-    if(generation35Document(nd)){const auto* version=v.find("version");if(!version||version->num<35)return fail("Skeleton, indexed mesh edits and extended native controls require document version 35");}
+    if(generation35Document(nd)){const auto* version=v.find("version");if(!version||version->num<35)return fail("Skeleton, indexed mesh edits, current-B-rep references and extended native controls require document version 35");}
     try{validateSkeletonAuthoring(nd);}catch(const std::exception& error){return fail(error.what());}
     doc=std::move(nd);
     return true;

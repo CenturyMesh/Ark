@@ -16,7 +16,7 @@ if(authoringUiTest){
     g_picked.clear();V select=parse(R"JSON({"id":5,"reference":"z_max"})JSON");select.set("expected_revision",V::makeNum((double)g_session.revision));const auto revision=g_session.revision;auto selected=runTool("selection_set",select);if(g_error||!selected.find("structuredContent")->find("view_state_applied")->b||g_selectionFaceFill.empty()||g_session.revision!=revision)return fail("Live named face selection lacked fill or changed revision");
     g_showDatumPlanes=true;g_showSketches=true;rebuildSketchOverlay();frameScene();if(g_datumFill.empty()||!capture(".planes-and-face.png"))return fail("Plane / face render capture failed");
     V jump=parse(R"JSON({"id":5,"reference":"z_max","kind":"edge"})JSON");auto neighbors=runTool("reference_navigate",jump);if(g_error)return fail("Adjacency inspection failed");const auto reference=neighbors.find("structuredContent")->find("neighbors")->arr.front().find("reference")->str;
-    if(!action(597,{"edge / "+reference})||g_picked.empty()||g_picked.back().name!=reference||g_selectionLines.empty()||g_session.revision!=revision)return fail("Adjacent edge jump did not retain semantic selection");
+    if(!action(597,{"edge / "+reference})||g_picked.empty()||g_picked.back().name!=reference||g_selectionEdgeLines.empty()||g_session.revision!=revision)return fail("Adjacent edge jump did not retain semantic selection");
     if(!capture(".edge-jump.png"))return fail("Edge highlight capture failed");
     // Exercise the existing IDs so future authoring actions cannot shadow them.
     uiAction(585);if(!measurementActive())return fail("Existing measurement action was shadowed");uiAction(589);
