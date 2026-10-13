@@ -92,6 +92,6 @@
   "limits": [
     "Feedback scores are subjective; geometric and performance reports need separate reproduction.",
     "UI styling and filtering do not change BOM authority or completeness rules.",
-    "Supplier authenticity, manufacturing qualification and MeshWorks integration remain outside this scope."
+    "Supplier authenticity, manufacturing qualification and external integration remain outside this scope."
   ]
 }

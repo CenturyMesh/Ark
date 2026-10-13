@@ -63,8 +63,7 @@
     "other_project_deployments_tested": false
   },
   "licensing": {
-    "decision": "Proposal only; no root license adopted or source published",
-    "requested_price": "EUR 200 perpetual",
+    "decision": "At this historical iteration no root license was adopted or source published",
     "mapbox_ISC_notice_in_package": true,
     "complete_IP_and_redistribution_audit": false
   },

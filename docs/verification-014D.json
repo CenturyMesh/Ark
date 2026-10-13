@@ -97,7 +97,7 @@
   "limits": [
     "No supplier authenticity verification or manufacturing qualification.",
     "User-requested scope remains a natural-language instruction; host labels the explicitly reviewed scope.",
-    "No MeshWorks adapter.",
+    "No external adapter.",
     "Review authorization is session-local; successful agent review evidence persists with saved activity ledger."
   ]
 }

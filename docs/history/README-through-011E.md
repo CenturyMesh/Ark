@@ -1,9 +1,9 @@
 # Historical README snapshot through 011E
 
-This is a preserved historical record. Licensing, release identity and external
-product states reflect the recorded time. See [the current documentation](../README.md)
-and [current roadmap](../ROADMAP.md) for maintained guidance. Relative links were
-adjusted for this archive location; the historical body follows.
+This public historical record retains ARK features and verification boundaries
+through 011E. Internal commercial planning and external-project snapshots are
+omitted. See [the current documentation](../README.md) and
+[current roadmap](../ROADMAP.md) for maintained guidance.
 
 ---
 
@@ -14,13 +14,13 @@ adjusted for this archive location; the historical body follows.
 Public iteration **011E** uses runtime **0.9.12**. The three digits are globally
 sequential; A–G identifies the roadmap phase, not the month. See the mandatory
 [development rules](../../AGENTS.md), the [35-milestone roadmap](../../docs/ROADMAP.md), and
-the [open-source / €200 perpetual license analysis](../../docs/COMMERCIAL_STRATEGY.md).
+the [licensing and distribution guidance](../../docs/COMMERCIAL_STRATEGY.md).
 `release.json` is the single source of release identity.
 
 011E adds persistent physical-part BOM metadata, material and source references,
 occurrence quantities and versioned JSON export. Agents can inspect missing
 fields and author explicitly dimensioned simplified fasteners through native
-recipes. The MeshWorks adapter remains planned. [BOM contract](../../docs/BOM.md) and
+recipes. External adapters remain planned. [BOM contract](../../docs/BOM.md) and
 [scope/verification](../../docs/iterations/011E.md).
 
 010D aligns filtered `doc_info` discovery and argument diagnostics, and projects

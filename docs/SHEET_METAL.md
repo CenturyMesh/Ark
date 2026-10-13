@@ -256,17 +256,16 @@ unavailable, because it contains the verified B-reps and their hashes.
 workflow. The independent C++ source tests cover flat stock, circle and polygon
 openings, a rotated source, explicit multiple-body selection, non-midwall K,
 source/refold agreement, rejected bend holes, changed source and payload hashes,
-and STEP readback. This is the first bounded native domain, not a claim that all
-STAGE-supported sheet families have been ported.
+and STEP readback. This is the first bounded native domain; broader sheet
+families require separate qualification.
 
-## What was reused from STAGE and TRACE
+## Geometry and verification principles
 
-The donor audit is in [STAGE_NATIVE_ASSESSMENT.md](STAGE_NATIVE_ASSESSMENT.md).
-ARK reuses the reasoning contracts: original-source ownership, explicit body
-selection, paired material-skin proof, declared allowance, independent
-reconstruction, and honest rejection. It does not embed STAGE's Python pipeline
-or use TRACE nesting output to decide source geometry. No donor checkout was
-modified and no Python runtime or test gate remains in ARK.
+The historical [native assessment](STAGE_NATIVE_ASSESSMENT.md) records
+original-source ownership, explicit body selection, paired material-skin proof,
+declared allowance, independent reconstruction and explicit rejection.
+Production geometry is derived from the original exact source. ARK's native
+sheet implementation and tests use C++, with no Python runtime or test gate.
 
 The 0.9 multi-flange example is `examples/sheet-flange-tree.ark`, with its
 `.arkops` replay and exact `-flat.step` / `-formed.step` exports. Its regression

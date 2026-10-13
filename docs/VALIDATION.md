@@ -323,7 +323,7 @@ contain the unmodified upstream SDK source; its optional developer tools are
 not ARK runtime or test dependencies.
 
 The implementation and supported-domain limits are documented in
-[SHEET_METAL.md](SHEET_METAL.md), [SURFACING.md](SURFACING.md), and the read-only
-[Stage donor assessment](STAGE_NATIVE_ASSESSMENT.md). Native B-rep validity and
+[SHEET_METAL.md](SHEET_METAL.md), [SURFACING.md](SURFACING.md), and the historical
+[native sheet assessment](STAGE_NATIVE_ASSESSMENT.md). Native B-rep validity and
 round-trip checks do not certify physical manufacturing. Legacy mesh features
 remain distinct from native exact-shape features.

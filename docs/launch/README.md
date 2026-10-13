@@ -8,11 +8,9 @@ Windows offers Studio; Linux offers the headless CLI/MCP/native worker.
   [Reproduction and evidence](demo.md) distinguish it from a live AI recording.
 
 - [Announcement drafts](announcements.md): Portuguese/English LinkedIn copy and
-  a Show HN submission/first-comment draft. The owner has not selected a posting
-  account in this work, so these are prepared texts, not published social posts.
+  a Show HN submission/first-comment draft, available for review before publication.
 - [First-use walkthrough](../FIRST_TRY.md): a voluntary synthetic first-part task
-  and a public, structured feedback form. Private invitations are paused at the
-  owner's request; no contact list or outreach has been created.
+  and a public, structured feedback form.
 - [Repository traffic](https://github.com/CenturyMesh/Ark/graphs/traffic): inspect
   views, clones and top referrers in GitHub's owner-visible interface.
 

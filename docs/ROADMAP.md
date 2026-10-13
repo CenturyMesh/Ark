@@ -10,10 +10,10 @@ increasing sequence and its principal phase. The letter is a roadmap phase, not 
 month; it does not declare the phase complete. The `.ark` format evolves separately.
 
 This matrix keeps the 35 stable milestone IDs from the
-[12 October 2026 audit](history/ROADMAP-2026-10-12.md). That archive retains its exact
-historical evidence, failed benchmark attempts, planning horizons and cross-product
-snapshots. The English matrix summarizes the same acceptance boundaries with the
-current source-publication preparation reflected in A.05/F.03/F.05.
+[12 October 2026 audit](history/ROADMAP-2026-10-12.md). The public archive retains
+technical evidence and failed benchmark attempts. The English matrix summarizes
+the technical acceptance boundaries with current public distribution guidance
+reflected in A.05/F.02/F.03/F.05.
 
 ## Read status and evidence correctly
 
@@ -78,7 +78,7 @@ Goal: connect design choices to exact geometry and measured process evidence.
 
 | ID | Milestone | Status | Acceptance still governing the work |
 |---|---|---|---|
-| C.01 | Industrial sheet workflows with STAGE | Parcial | Exact STEP plus explicit inputs yields a canonical artifact or typed rejection; agreed corpus, refold/flat and material traceability. Local sheet support exists; integration depends on E.01/E.02. |
+| C.01 | Industrial sheet workflows | Parcial | Exact STEP plus explicit inputs yields a canonical artifact or typed rejection; agreed corpus, refold/flat and material traceability. Local sheet support exists; external exchange depends on E.01/E.02. |
 | C.02 | Complete weldments | Parcial | Multi-member trim/extend, joints, preparation, beads and coherent cutlists; drawings and lengths derive from exact results. Scope/candidates/replay have [008D evidence](iterations/008D.md). |
 | C.03 | Process-specific DFM | Parcial | Versioned laser/bend/FDM/CNC/weld rules, assumptions and per-part evidence; recommendations remain distinct from qualification. [Manufacturing intent](MANUFACTURING_INTENT.md) |
 | C.04 | Structural checks and motion | Parcial | Units/load cases, analytical comparisons, mesh convergence and an audited external solver. Supported analytical/kinematic previews exist; FEA, contact and fatigue require separate validation. |
@@ -98,30 +98,18 @@ Goal: reach valid, useful designs with explainable quality, time and total cost.
 
 ## E — Industrial ecosystem
 
-Goal: preserve identity and evidence through ARK → STAGE → Trace → MeshWorks.
+Goal: preserve design identity and evidence through explicit, versioned exchange.
 
 | ID | Milestone | Status | Acceptance still governing the work |
 |---|---|---|---|
-| E.01 | Shared identity and contracts | Parcial | Document/part/occurrence/revision IDs, units, source hash, geometry digest, provenance and idempotency; versioned schemas and compatibility tests. Local `ark.bom.v1` exists; cross-product reconciliation is planned. [017B scoped evidence](iterations/017B.md). [018B editable authoring and coordination](iterations/018B.md). |
-| E.02 | ARK ↔ STAGE | Planeado | Publish/consume by contract; preserve original source, body, options and producer version. Display rejection without substitute geometry. |
-| E.03 | ARK ↔ MeshWorks | Planeado | Explicit authorized ARK adapter; incremental BOM quantities/configurations; CAD revisions preserve procurement/release state. Local BOM prepares input but no remote adapter is implemented. |
-| E.04 | STAGE/ARK ↔ Trace | Planeado | Canonical contours identified by result ID/digest; placements, stock, utilization and package returned with explicit grain/kerf/units. Stock consumption remains a separate action. |
+| E.01 | Shared identity and contracts | Parcial | Document/part/occurrence/revision IDs, units, source hash, geometry digest, provenance and idempotency; versioned schemas and compatibility tests. Local `ark.bom.v1` exists; external reconciliation is planned. [017B scoped evidence](iterations/017B.md). [018B editable authoring and coordination](iterations/018B.md). |
+| E.02 | Geometry and analysis interchange | Planeado | Publish/consume by contract; preserve original source, body, options and producer version. Display rejection without substitute geometry. |
+| E.03 | External BOM interchange | Planeado | Explicit authorized adapter; incremental BOM quantities/configurations and stable revision mapping. Local BOM export exists; remote import needs a published contract and end-to-end verification. |
+| E.04 | Manufacturing contour interchange | Planeado | Canonical contours identified by result ID/digest; placements, stock, utilization and package returned with explicit grain/kerf/units. Stock consumption remains a separate action. |
 | E.05 | End-to-end industrial pilot | Planeado | Design → approved revision → flat → nest → package → BOM/cost/production; exercise change, revocation, retry, rejection and remnant custody without duplicate effects. |
 
-The following is a **target integration flow**, not an implemented adapter claim:
-
-```mermaid
-flowchart LR
-    ARK[ARK: editable design and revisions] -->|Exact STEP and explicit inputs| STAGE[STAGE: analysis and development]
-    STAGE -->|Canonical artifact and digest| TRACE[Trace: contours and placement]
-    ARK -->|Design BOM and occurrences| MW[MeshWorks: industrial process]
-    TRACE -->|Placements and package| MW
-    MW -->|Requirements and approved changes| ARK
-```
-
-Each product retains its own authority. Connecting an API does not transfer another
-product's manufacturing qualification. The historical audit records the specific
-cross-product source snapshots it inspected; those are not current deployment claims.
+External consumers need a published contract and independent verification.
+Connecting an API does not establish manufacturing qualification.
 
 ## F — Product and distribution
 
@@ -130,16 +118,15 @@ Goal: make ARK understandable, installable, updateable and supportable.
 | ID | Milestone | Status | Acceptance still governing the work |
 |---|---|---|---|
 | F.01 | Trusted online self-update | Parcial | Local integrity/staging/next-launch/rollback exists. Qualify real transport, signing, stable/preview channels, rollout and rollback from a published older runtime. [Updates](UPDATES.md) |
-| F.02 | Sustainable commercial offering | Planeado | Define any future paid services or Enterprise offering separately from the adopted Apache-2.0 source license; specify actual features, support, taxes and terms, and validate demand. The earlier approximately €200 perpetual model is a historical proposal. |
+| F.02 | Licensing and distribution guidance | Parcial | Apache-2.0 and attribution are published. Keep source, dependency and package terms discoverable; complete the distribution audit under A.05. [Public guidance](COMMERCIAL_STRATEGY.md) |
 | F.03 | Onboarding and initial library | Parcial | English README/handbook, branch/PR guidance, a [first-part walkthrough](FIRST_TRY.md), structured experience reports and [launch materials](launch/README.md) are available. Clean-machine setup and five guided workflows still need observed first-valid-part time and abandonment evidence. Fabricable templates need their own qualification. |
 | F.04 | Support and operational quality | Parcial | Contribution templates and security guidance support reporting; opt-in redacted crash reports, diagnostic export, migrations, hardware matrix and support policy need operational evidence. |
-| F.05 | Public distribution and user pilot | Parcial | Public Apache-2.0 repository and 016F Windows/Linux-headless prerelease packages are published. Ready-to-run download links, a feedback form, announcement drafts and private aggregate-metrics snapshots support launch. Invitations are deferred at the owner's request; no real-user cohort or adoption improvement is claimed. Clean-install and user-pilot qualification remain separate gates. |
+| F.05 | Public distribution and user pilot | Parcial | Public Apache-2.0 repository and 016F Windows/Linux-headless prerelease packages are published. Download links, feedback forms and launch materials are available. A real-user cohort, clean-install qualification and measured adoption outcomes remain separate gates. |
 
 The public repository and prerelease were verified on 2026-10-12. The active
 main-branch ruleset requires PRs, resolved review threads and configured CI checks,
 and blocks deletion/force pushes without automatic bypass. Check the
 [live rules](https://github.com/CenturyMesh/Ark/rules/24953939) for the current check list.
-There is no implemented Enterprise edition implied by this roadmap.
 
 ## G — Advanced platform
 
@@ -171,10 +158,10 @@ inputs, models, tasks and acceptance criteria. Preserve failed attempts.
 
 - Trusted update endpoint, independent signing and a real online upgrade trial.
 - Authorized public regression corpus and shared industrial qualification criteria.
-- Scope, support and economics of any future commercial offering.
+- Public distribution audit and clear support/reporting guidance.
 - Capacity and priority before turning planning horizons into dates.
 - Platform-specific native/desktop qualification and large-project acceptance.
 
 [Contribute through an issue and a topic-branch pull request](../CONTRIBUTING.md).
-The [historical commercial strategy](COMMERCIAL_STRATEGY.md) remains background;
 [Apache-2.0](../LICENSE) governs ARK's source, alongside dependency-specific terms.
+See [licensing and distribution guidance](COMMERCIAL_STRATEGY.md).

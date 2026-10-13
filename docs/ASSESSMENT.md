@@ -30,10 +30,10 @@ The native document now uses an owned binary container with incremental writes a
 3. **Mathematics:** compile expressions once to reusable bytecode; adaptive error-controlled surface tessellation; expose NURBS editing, lofts and path sweeps; diagnose constrained/underconstrained/overconstrained sketches.
 4. **Execution:** incremental DAG recomputation, typed complete feature schemas, deadlines/cancellation, worker isolation, memory accounting, asynchronous jobs and larger-document benchmarks. Current caches do not make arbitrary complex booleans bounded.
 5. **Product:** live shared document service between agent and Studio, richer parameter/feature editing, Unicode-native file dialogs, materials, assemblies and packaging/signing. Current sessions exchange files explicitly.
-6. **Adapters:** investigate Trace for nesting and Stage for its geometry workflow after the ARK contracts stabilize. No code from those projects was copied or changed here.
+6. **Interoperability:** stabilize ARK geometry and exchange contracts before adding external adapters; publish each adapter's scope and verification separately.
 
 SIMD, multithreading and native extensions should follow measured bottlenecks and numerical parity tests. Existing code is retained where usable; broad production-performance or manufacturing-validity claims are not supported by this first version.
 
 ## 0.3 follow-up
 
-Rigid hierarchical assemblies, shared-part GPU rendering, ideal hollow-tube bending and an optional CUDA packed-transform backend are now implemented. The corresponding scope, MeshARC inspection and measurements are recorded in [MECHANICAL.md](MECHANICAL.md). The remaining assembly work is mate solving and joint/fabrication operations, rather than basic instances or placement.
+Rigid hierarchical assemblies, shared-part GPU rendering, ideal hollow-tube bending and an optional CUDA packed-transform backend are now implemented. The corresponding scope and measurements are recorded in [MECHANICAL.md](MECHANICAL.md). The remaining assembly work is mate solving and joint/fabrication operations, rather than basic instances or placement.

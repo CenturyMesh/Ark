@@ -69,7 +69,7 @@ protocol test or catalog fetch does not establish live inference quality.
 | [Native 0.9 verification](verification-0.9.json) | Earlier native geometry, readback and Studio/MCP evidence |
 | [Complex modeling audit 005B](COMPLEX_MODELING_AUDIT_005B.md) / [006B](COMPLEX_MODELING_AUDIT_006B.md) | Scoped modeling and agent capability audits |
 | [Live workspace delivery](LIVE_WORKSPACE_DELIVERY.md), [workspace motion](WORKSPACE_MOTION_VALIDATION.md), [team/library](TEAM_LIBRARY_VALIDATION.md) | Dated integration evidence |
-| [Assessment](ASSESSMENT.md), [STAGE native assessment](STAGE_NATIVE_ASSESSMENT.md) | Engineering assessment and bounded cross-product findings |
+| [Assessment](ASSESSMENT.md), [native sheet assessment](STAGE_NATIVE_ASSESSMENT.md) | Historical engineering criteria and scoped findings |
 
 Verification files are dated receipts for the named runtime, commands and scope.
 They are not a claim that a different build, all geometry or manufacturing has
@@ -81,8 +81,8 @@ passed. Local checks, hosted CI, deployment and physical qualification are disti
 - [Third-party notices](THIRD_PARTY_NOTICES.md): dependencies retain their own terms.
 - [Windows updates](UPDATES.md): verified staging/rollback; online channel qualification
   remains separate.
-- [Commercial strategy](COMMERCIAL_STRATEGY.md): a historical proposal, not an
-  implemented Enterprise edition or a replacement for the adopted source license.
+- [Licensing and distribution](COMMERCIAL_STRATEGY.md): source terms, dependency
+  notices and distribution boundaries.
 
 ## Historical snapshots
 
@@ -92,6 +92,6 @@ The previous README and Portuguese roadmap audit are retained for provenance:
 - [Roadmap audit of 12 October 2026](history/ROADMAP-2026-10-12.md).
 - [Native 0.9 roadmap](ROADMAP_09.md).
 
-Historical licensing statements and external-checkout snapshots describe their
-recorded time, not current authorization or current state of those other products.
+Historical records retain dated ARK technical evidence. Internal commercial
+planning and external-project snapshots are omitted from the public documents.
 No user drawing or session has been added by this documentation reorganization.

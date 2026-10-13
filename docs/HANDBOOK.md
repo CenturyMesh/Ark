@@ -177,8 +177,8 @@ A source URL or selected supplier is declared metadata. It does not prove stock,
 standards compliance, price or an issued purchase order. **Copy link** copies a
 stored URL; it does not fetch the source.
 
-Export the versioned JSON BOM when needed. The current BOM export is local; a
-MeshWorks adapter is planned. Agent completion review is revision bound: detailed
+Export the versioned JSON BOM when needed. The current BOM export is local;
+external adapters require separate contracts and verification. Agent completion review is revision bound: detailed
 scope rejects unresolved metadata; concept scope discloses pending fields and its
 fastening review. Any subsequent edit can make the review stale. [BOM contract](BOM.md).
 
