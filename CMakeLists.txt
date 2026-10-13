@@ -30,6 +30,7 @@ target_link_libraries(ark-sqlite PUBLIC Threads::Threads)
 add_library(ark STATIC
   src/agent_activity.cpp
   src/skeleton.cpp
+  src/drawings.cpp
   src/collision.cpp src/mesh_collision.cpp
   src/bom.cpp src/bom_review.cpp src/bom_export.cpp src/curve_equation.cpp src/spatial_sketch.cpp src/sketch_entities.cpp src/datum_authoring.cpp
   src/updates.cpp
@@ -59,6 +60,14 @@ else()
   target_compile_options(ark PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -fno-fast-math)
 endif()
 add_executable(ark-cli src/app/cli.cpp)
+add_executable(ark-drawing-tests tests/drawing_tests.cpp)
+target_link_libraries(ark-drawing-tests PRIVATE ark)
+add_test(NAME associative-drawings COMMAND ark-drawing-tests)
+set_tests_properties(associative-drawings PROPERTIES TIMEOUT 120)
+if(ARK_WITH_OCCT)
+  target_compile_definitions(ark-drawing-tests PRIVATE ARK_DRAWING_NATIVE_TESTS=1)
+  add_dependencies(ark-drawing-tests ark-occt-worker)
+endif()
 add_executable(ark-mcp src/app/mcp_server.cpp)
 add_executable(ark-benchmark src/app/benchmark.cpp)
 target_link_libraries(ark-benchmark PRIVATE ark)
@@ -193,7 +202,7 @@ if(ARK_WITH_OCCT)
   if(NOT OpenCASCADE_MAJOR_VERSION EQUAL 8)
     message(FATAL_ERROR "ARK native modeling requires OCCT 8.x; Python/OCP backends are not supported")
   endif()
-  add_library(ark-occt STATIC src/occt/common.cpp src/occt/projection.cpp src/occt/source_tube_native.cpp src/occt/notch_native.cpp src/occt/surfacing.cpp src/occt/solid_modeling.cpp src/occt/measurement.cpp src/occt/sheet_model.cpp src/occt/sheet_source.cpp src/occt/curves.cpp src/occt/frame_modeling.cpp src/occt/electronics_modeling.cpp)
+  add_library(ark-occt STATIC src/occt/common.cpp src/occt/projection.cpp src/occt/drawings.cpp src/occt/source_tube_native.cpp src/occt/notch_native.cpp src/occt/surfacing.cpp src/occt/solid_modeling.cpp src/occt/measurement.cpp src/occt/sheet_model.cpp src/occt/sheet_source.cpp src/occt/curves.cpp src/occt/frame_modeling.cpp src/occt/electronics_modeling.cpp)
   target_include_directories(ark-occt PUBLIC include PRIVATE src/occt)
   target_include_directories(ark-occt SYSTEM PUBLIC ${OpenCASCADE_INCLUDE_DIR})
   target_link_libraries(ark-occt PUBLIC ${OpenCASCADE_LIBRARIES} PRIVATE ark)

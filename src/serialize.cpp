@@ -7,6 +7,7 @@
 #include "ark/manufacturing.hpp"
 #include "ark/native_features.hpp"
 #include "ark/skeleton.hpp"
+#include "ark/drawings.hpp"
 #include "ark/sketch.hpp"
 #include "ark/assembly_io.hpp"
 #include "ark/usage.hpp"
@@ -576,6 +577,7 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
     if(generation34Document(doc))r.set("version",Value::makeNum(34));
     if(skeletonDocument(doc))r.set("skeleton",doc.skeleton);
     if(generation35Document(doc))r.set("version",Value::makeNum(35));
+    if(!doc.drawings.empty()){Value drawings=Value::makeArr();for(const auto& drawing:doc.drawings)drawings.arr.push_back(drawing);r.set("drawings",drawings);r.set("version",Value::makeNum(36));}
     if(includeAudit&&includeHistory)iterationPersist(r,doc);
     canonicalDocumentKeys(r);
     return r.dump();
@@ -587,7 +589,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     Value v;
     if(!arkjson::parse(json,v)) return fail("malformed JSON");
     if(v.t!=Value::Obj) return fail("root must be object");
-    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0&&ver->num!=3.0&&ver->num!=4.0&&ver->num!=5.0&&ver->num!=6.0&&ver->num!=7.0&&ver->num!=8.0&&ver->num!=9.0&&ver->num!=10.0&&ver->num!=11.0&&ver->num!=12.0&&ver->num!=13.0&&ver->num!=14.0&&ver->num!=15.0&&ver->num!=16.0&&ver->num!=17.0&&ver->num!=18.0&&ver->num!=19.0&&ver->num!=20.0&&ver->num!=21.0&&ver->num!=22.0&&ver->num!=23.0&&ver->num!=24.0&&ver->num!=25.0&&ver->num!=26.0&&ver->num!=27.0&&ver->num!=28.0&&ver->num!=29.0&&ver->num!=30.0&&ver->num!=31.0&&ver->num!=32.0&&ver->num!=33.0&&ver->num!=34.0&&ver->num!=35.0)))
+    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0&&ver->num!=3.0&&ver->num!=4.0&&ver->num!=5.0&&ver->num!=6.0&&ver->num!=7.0&&ver->num!=8.0&&ver->num!=9.0&&ver->num!=10.0&&ver->num!=11.0&&ver->num!=12.0&&ver->num!=13.0&&ver->num!=14.0&&ver->num!=15.0&&ver->num!=16.0&&ver->num!=17.0&&ver->num!=18.0&&ver->num!=19.0&&ver->num!=20.0&&ver->num!=21.0&&ver->num!=22.0&&ver->num!=23.0&&ver->num!=24.0&&ver->num!=25.0&&ver->num!=26.0&&ver->num!=27.0&&ver->num!=28.0&&ver->num!=29.0&&ver->num!=30.0&&ver->num!=31.0&&ver->num!=32.0&&ver->num!=33.0&&ver->num!=34.0&&ver->num!=35.0&&ver->num!=36.0)))
         return fail("unsupported document version");
     Value history;std::string historyError;if(!iterationExpand(v,history,historyError))return fail(historyError);
 
@@ -596,6 +598,10 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     if(!v.find("features"))return fail("missing features array");
     for(auto key:{"params","sketches","features","planes","canvases","materials"})if(auto a=v.find(key);a && a->t!=Value::Arr)return fail(std::string(key)+" must be an array");
     Document nd;   // parse into scratch; commit only on full success
+    if(const auto* drawings=v.find("drawings")){
+        const auto* version=v.find("version");if(!version||version->num<36||drawings->t!=Value::Arr||drawings->arr.size()>32)return fail("Technical drawings require document version 36 and at most 32 authored drawings");
+        std::set<std::string> names;try{for(const auto& drawing:drawings->arr){validateDrawing(drawing,true);if(!names.insert(drawing.find("name")->str).second)return fail("Duplicate technical drawing name");nd.drawings.push_back(drawing);}}catch(const std::exception& error){return fail(error.what());}
+    }
     if(const auto* skeleton=v.find("skeleton")){
         const auto* version=v.find("version");if(!version||version->num<35||skeleton->t!=Value::Obj)return fail("Skeleton source requires document version 35");
         const auto* language=skeleton->find("language"),*source=skeleton->find("source"),*overrides=skeleton->find("overrides"),*manifest=skeleton->find("manifest");

@@ -1,5 +1,13 @@
 # ARK agent protocol
 
+B.05 has a partial associative technical drawing scope: exact orthographic HLR
+views, plane-section contours and semantic dimensions/tolerances bound to the
+observed solid and topology. Call `agent_onboard{topic:"drawings"}` and read
+[the drawing contract](DRAWINGS.md). `drawing.set`/`refresh`/`remove` require
+current `expected_revision` in `doc_apply`; stale drawings cannot export.
+JSON retains exact derived curves and SVG is a presentation preview. This does
+not qualify manufacture or complete B.05.
+
 020B adds source-owned solid dimensions and exact sketch extrusion by viewport
 drag. Read [the authoring contract](VIEWPORT_DIMENSIONS.md): double-click edits
 the authored expression, and agents use `doc_apply` at an observed
