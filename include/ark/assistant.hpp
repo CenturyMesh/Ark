@@ -6,10 +6,30 @@
 #include <string>
 #include <stdexcept>
 #include <optional>
+#include <vector>
+#include <array>
 
 namespace ark {
 enum class AssistantAuthMode { ApiKey, ChatGptPlan };
 enum class AssistantProtocol { Responses, ChatCompletions, Messages };
+enum class AssistantImageMode { InspireDesign, ImageToCAD };
+enum class AssistantImageDecoder { Platform, Portable };
+const char* assistantImageModeName(AssistantImageMode mode) noexcept;
+// User-owned bytes only: no path or remotely fetched image enters provider history.
+struct AssistantImageAttachment {
+    std::string name,mimeType,base64;
+    unsigned width=0,height=0,thumbnailWidth=0,thumbnailHeight=0;
+    std::vector<unsigned char> thumbnailRGBA;
+};
+struct AssistantImageDimensions {std::optional<double> width,height,depth;};
+AssistantImageDimensions parseAssistantImageDimensions(const std::array<std::string,3>& fields);
+AssistantImageAttachment assistantImageAttachment(const std::vector<unsigned char>& bytes,const std::string& name,
+    AssistantImageDecoder decoder=AssistantImageDecoder::Platform);
+AssistantImageAttachment loadAssistantImageAttachment(const std::string& path);
+arkjson::Value assistantUserMessage(const std::string& text,
+    const std::optional<AssistantImageAttachment>& image={},AssistantImageMode mode=AssistantImageMode::InspireDesign,
+    const AssistantImageDimensions& dimensions={});
+void validateAssistantUserMessage(const arkjson::Value& message);
 // Configuration contains an environment-variable NAME, never an API key.
 struct AssistantConfig {
     AssistantAuthMode authMode=AssistantAuthMode::ApiKey;
@@ -22,6 +42,7 @@ struct AssistantConfig {
     unsigned maxOutputTokens=8192; // Required per-response max_tokens for Messages; not a run budget.
     unsigned maxRounds=0; // Zero: continue until completion/cancel; optional bounded test/host mode.
     std::string onboardingPack; // Static source-owned guide, inserted once per conversation.
+    bool imageInputSupported=true; // Host capability override; false rejects pixels explicitly.
     unsigned timeoutSeconds=90;
     std::size_t maxResponseBytes=4*1024*1024;
     std::size_t maxConversationBytes=8*1024*1024; // Outgoing request bound; original host evidence is retained separately.

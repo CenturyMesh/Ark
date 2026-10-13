@@ -6,6 +6,7 @@
 #include "ark/document_container.hpp"
 #include "ark/manufacturing.hpp"
 #include "ark/native_features.hpp"
+#include "ark/skeleton.hpp"
 #include "ark/sketch.hpp"
 #include "ark/assembly_io.hpp"
 #include "ark/usage.hpp"
@@ -33,6 +34,52 @@ static void canonicalDocumentKeys(Value& value){
 }
 
 namespace {
+
+bool indexedSourceExpression(const std::string& text){
+    for(size_t i=0;i<text.size();++i)if(text[i]=='['){
+        size_t previous=i;while(previous&&std::isspace((unsigned char)text[previous-1]))--previous;
+        if(!previous||(!std::isalnum((unsigned char)text[previous-1])&&text[previous-1]!='_'))continue;
+        int depth=1;size_t end=i+1;for(;end<text.size()&&depth;++end){if(text[end]=='[')++depth;else if(text[end]==']')--depth;}if(depth)continue;
+        while(end<text.size()&&std::isspace((unsigned char)text[end]))++end;if(end==text.size()||text[end++]!='.')continue;
+        while(end<text.size()&&std::isspace((unsigned char)text[end]))++end;
+        if(end<text.size()&&(text[end]=='x'||text[end]=='y'||text[end]=='z')&&(end+1==text.size()||(!std::isalnum((unsigned char)text[end+1])&&text[end+1]!='_')))return true;
+    }
+    return false;
+}
+bool indexedSourceValue(const Value& value){
+    if(value.t==Value::Str)return indexedSourceExpression(value.str);
+    if(value.t==Value::Obj)for(const auto& item:value.obj)if(indexedSourceValue(item.second))return true;
+    if(value.t==Value::Arr)for(const auto& item:value.arr)if(indexedSourceValue(item))return true;
+    return false;
+}
+bool currentBrepReference(const std::string& text){return text.find("@ark.face.")!=std::string::npos||text.find("@ark.edge.")!=std::string::npos;}
+bool currentBrepSourceValue(const Value& value){
+    if(value.t==Value::Str)return currentBrepReference(value.str);
+    if(value.t==Value::Obj)for(const auto& item:value.obj)if(currentBrepSourceValue(item.second))return true;
+    if(value.t==Value::Arr)for(const auto& item:value.arr)if(currentBrepSourceValue(item))return true;
+    return false;
+}
+bool generation35Document(const Document& doc){
+    if(skeletonDocument(doc))return true;
+    for(const auto& feature:doc.features){
+        if(feature.type==FeatureType::MeshEdit)return true;
+        if(feature.type==FeatureType::Curve)if(const auto* op=feature.nativeSpec.find("op");op&&op->asStr()=="helix")return true;
+        if(feature.type==FeatureType::Loft&&feature.nativeSpec.find("controls"))return true;
+        if(feature.type==FeatureType::Sew&&feature.nativeSpec.find("require_connected"))return true;
+        if(indexedSourceValue(feature.nativeSpec)||currentBrepSourceValue(feature.nativeSpec))return true;
+        for(const auto& bend:feature.bends)for(const auto* expression:{&bend.feed,&bend.radius,&bend.angle,&bend.roll})if(indexedSourceExpression(*expression))return true;
+        for(const auto& notch:feature.notches)if(indexedSourceExpression(notch.station)||indexedSourceExpression(notch.angle))return true;
+    }
+    auto arrayExpression=indexedSourceExpression;
+    for(const auto& p:doc.params)if(arrayExpression(p.expr))return true;
+    for(const auto& f:doc.features)for(const auto& p:f.p)if(arrayExpression(p.second)||currentBrepReference(p.second))return true;
+    for(const auto& sk:doc.sketches){for(const auto& e:sk.sk.ents){for(const auto& expr:e.expressions)if(arrayExpression(expr))return true;if(currentBrepReference(e.reference)||indexedSourceValue(e.entityRecipe)||indexedSourceValue(e.arcRecipe)||currentBrepSourceValue(e.entityRecipe)||currentBrepSourceValue(e.arcRecipe))return true;}for(const auto& con:sk.sk.cons)if(arrayExpression(con.expression)||arrayExpression(con.expression2))return true;for(const auto& corner:sk.sk.corners)if(arrayExpression(corner.size))return true;}
+    for(const auto& plane:doc.planes){for(const auto& p:plane.p)if(arrayExpression(p.second))return true;if(indexedSourceValue(plane.support)||currentBrepSourceValue(plane.support))return true;}
+    for(const auto& canvas:doc.canvases)if(arrayExpression(canvas.width)||arrayExpression(canvas.height))return true;
+    for(const auto& node:doc.assembly){for(const auto& p:node.p)if(arrayExpression(p.second))return true;if(node.pattern.active)for(const auto* expression:{&node.pattern.count,&node.pattern.dx,&node.pattern.dy,&node.pattern.dz,&node.pattern.step})if(arrayExpression(*expression))return true;}
+    for(const auto& mate:doc.mates){if(currentBrepSourceValue(mateToJson(mate))||arrayExpression(mate.value))return true;for(const auto& p:mate.motion)if(arrayExpression(p.second))return true;if(mate.limits.enabled&&(arrayExpression(mate.limits.min)||arrayExpression(mate.limits.max)))return true;}
+    return false;
+}
 
 bool generation34Document(const Document& doc){
     for(const auto& sketch:doc.sketches)for(const auto& entity:sketch.sk.ents)if(entity.kind==SketchEnt::Recipe)return true;
@@ -511,7 +558,7 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
         if(f.type==FeatureType::SourceSheet)v.set("source",f.sourceData);
         if(f.type==FeatureType::Loft||f.type==FeatureType::SurfaceFill||f.type==FeatureType::BSplineSurface||f.type==FeatureType::Thicken||f.type==FeatureType::SheetMetal||f.type==FeatureType::NativeSolid||f.type==FeatureType::Sweep||f.type==FeatureType::ExtrudeSurface||f.type==FeatureType::RevolveSurface||f.type==FeatureType::OffsetSurface||f.type==FeatureType::Sew||f.type==FeatureType::SurfaceEdit||f.type==FeatureType::ConstructionFrame||f.type==FeatureType::PCB||f.type==FeatureType::CableRoute||f.type==FeatureType::Suspension)
             v.set("native",f.nativeSpec.t==Value::Obj?f.nativeSpec:Value::makeObj());
-        if(isCurveFeature(f.type))v.set("native",f.nativeSpec.t==Value::Obj?f.nativeSpec:Value::makeObj());
+        if(isCurveFeature(f.type)||f.type==FeatureType::MeshEdit)v.set("native",f.nativeSpec.t==Value::Obj?f.nativeSpec:Value::makeObj());
         if(f.type==FeatureType::MeshBody)v.set("mesh",f.sourceData);
         fs.arr.push_back(std::move(v));
     }
@@ -527,6 +574,8 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
     if(!doc.mates.empty()||doc.nextMateId_>1){Value mates=Value::makeArr();for(auto& m:doc.mates)mates.arr.push_back(mateToJson(m));r.set("mates",mates);r.set("next_mate_id",Value::makeNum((double)doc.nextMateId_));}
     if(includeAudit&&doc.agentActivity){r.set("agent_activity",agentActivityJson(doc.agentActivity));r.set("version",Value::makeNum(33));}
     if(generation34Document(doc))r.set("version",Value::makeNum(34));
+    if(skeletonDocument(doc))r.set("skeleton",doc.skeleton);
+    if(generation35Document(doc))r.set("version",Value::makeNum(35));
     if(includeAudit&&includeHistory)iterationPersist(r,doc);
     canonicalDocumentKeys(r);
     return r.dump();
@@ -538,7 +587,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     Value v;
     if(!arkjson::parse(json,v)) return fail("malformed JSON");
     if(v.t!=Value::Obj) return fail("root must be object");
-    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0&&ver->num!=3.0&&ver->num!=4.0&&ver->num!=5.0&&ver->num!=6.0&&ver->num!=7.0&&ver->num!=8.0&&ver->num!=9.0&&ver->num!=10.0&&ver->num!=11.0&&ver->num!=12.0&&ver->num!=13.0&&ver->num!=14.0&&ver->num!=15.0&&ver->num!=16.0&&ver->num!=17.0&&ver->num!=18.0&&ver->num!=19.0&&ver->num!=20.0&&ver->num!=21.0&&ver->num!=22.0&&ver->num!=23.0&&ver->num!=24.0&&ver->num!=25.0&&ver->num!=26.0&&ver->num!=27.0&&ver->num!=28.0&&ver->num!=29.0&&ver->num!=30.0&&ver->num!=31.0&&ver->num!=32.0&&ver->num!=33.0&&ver->num!=34.0)))
+    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0&&ver->num!=3.0&&ver->num!=4.0&&ver->num!=5.0&&ver->num!=6.0&&ver->num!=7.0&&ver->num!=8.0&&ver->num!=9.0&&ver->num!=10.0&&ver->num!=11.0&&ver->num!=12.0&&ver->num!=13.0&&ver->num!=14.0&&ver->num!=15.0&&ver->num!=16.0&&ver->num!=17.0&&ver->num!=18.0&&ver->num!=19.0&&ver->num!=20.0&&ver->num!=21.0&&ver->num!=22.0&&ver->num!=23.0&&ver->num!=24.0&&ver->num!=25.0&&ver->num!=26.0&&ver->num!=27.0&&ver->num!=28.0&&ver->num!=29.0&&ver->num!=30.0&&ver->num!=31.0&&ver->num!=32.0&&ver->num!=33.0&&ver->num!=34.0&&ver->num!=35.0)))
         return fail("unsupported document version");
     Value history;std::string historyError;if(!iterationExpand(v,history,historyError))return fail(historyError);
 
@@ -547,6 +596,15 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     if(!v.find("features"))return fail("missing features array");
     for(auto key:{"params","sketches","features","planes","canvases","materials"})if(auto a=v.find(key);a && a->t!=Value::Arr)return fail(std::string(key)+" must be an array");
     Document nd;   // parse into scratch; commit only on full success
+    if(const auto* skeleton=v.find("skeleton")){
+        const auto* version=v.find("version");if(!version||version->num<35||skeleton->t!=Value::Obj)return fail("Skeleton source requires document version 35");
+        const auto* language=skeleton->find("language"),*source=skeleton->find("source"),*overrides=skeleton->find("overrides"),*manifest=skeleton->find("manifest");
+        if(!language||language->t!=Value::Str||language->str!="ark.skeleton.v1"||!source||source->t!=Value::Str||source->str.size()>65536||!overrides||overrides->t!=Value::Obj||!manifest||manifest->t!=Value::Obj)return fail("Invalid skeleton source/ownership object");
+        for(const auto& entry:skeleton->obj)if(entry.first!="language"&&entry.first!="source"&&entry.first!="overrides"&&entry.first!="manifest")return fail("Unknown skeleton field");
+        for(const auto& entry:overrides->obj)if(entry.second.t!=Value::Str||entry.second.str.size()>2048)return fail("Invalid skeleton input override");
+        for(const char* key:{"parameters","arrays","features"}){const auto* rows=manifest->find(key);if(!rows||rows->t!=Value::Arr||rows->arr.size()>2048)return fail("Invalid skeleton ownership rows");for(const auto& row:rows->arr)if(row.t!=Value::Obj||!row.find("name")||row.find("name")->t!=Value::Str)return fail("Invalid skeleton ownership row");}
+        nd.skeleton=*skeleton;
+    }
     if(const auto* bom=v.find("bom_document_id")){const auto* version=v.find("version");if(!version||version->num<32||bom->t!=Value::Str||!validBomDocumentId(bom->str))return fail("BOM identity requires a valid document version 32 identity");nd.bomDocumentId=bom->str;}
     if(const auto* activity=v.find("agent_activity")){const auto* version=v.find("version");if(!version||version->num<33)return fail("Agent activity requires document version 33");try{nd.agentActivity=readAgentActivity(*activity);}catch(const std::exception& error){return fail(error.what());}}
     if(const Value* usage=v.find("usage")){
@@ -675,6 +733,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
             if(isCurveFeature(nf.type)){auto version=v.find("version"),spec=fv.find("native");if(!version||version->asNum()<12||!spec||spec->t!=Value::Obj)return fail("points, curve segments, or curve features require document version 12");nf.nativeSpec=*spec;}
             if(generation9Feature(nd,nf)){auto version=v.find("version");if(!version||version->asNum()<9)return fail("draft, pattern, mirror, edge selection, loft smoothing, or a point tip requires document version 9");}
             if(nf.type==FeatureType::MeshBody){auto mesh=fv.find("mesh");if(!mesh||mesh->t!=Value::Obj)return fail("mesh_body requires a mesh object");nf.sourceData=*mesh;}
+            if(nf.type==FeatureType::MeshEdit){const auto* version=v.find("version"),*spec=fv.find("native");if(!version||version->num<35||!spec||spec->t!=Value::Obj)return fail("mesh_edit requires document version 35 and native selection recipe");nf.nativeSpec=*spec;}
             maxId=tmax(maxId,nf.id);
             nd.features.push_back(std::move(nf));
         }
@@ -751,6 +810,8 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     if(history.t!=Value::Null){if(!iterationValidate(nd,history,historyError))return fail(historyError);nd.iterationHistory=std::move(history);}
     if(arcRecipeDocument(nd)){const auto* version=v.find("version");if(!version||version->num<30)return fail("Arc recipes and linked tube end fits require document version 30");}
     if(generation34Document(nd)){const auto* version=v.find("version");if(!version||version->num<34)return fail("Typed sketches, associative datums, spatial constraints and varying sections require document version 34");}
+    if(generation35Document(nd)){const auto* version=v.find("version");if(!version||version->num<35)return fail("Skeleton, indexed mesh edits, current-B-rep references and extended native controls require document version 35");}
+    try{validateSkeletonAuthoring(nd);}catch(const std::exception& error){return fail(error.what());}
     doc=std::move(nd);
     return true;
 }

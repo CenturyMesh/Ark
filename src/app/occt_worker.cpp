@@ -83,6 +83,7 @@ int runWorker(const fs::path& requestPath,const fs::path& resultPath){
             if(error>tol||boundError>1e-6||areaError>std::max(1e-6,properties(shape,'a')*1e-8)||shapes(shape,TopAbs_SOLID).size()!=shapes(returned,TopAbs_SOLID).size())throw std::runtime_error("STEP roundtrip changed native geometry");
             result=shapeReport(returned,false);for(const auto& body:shapes(returned,TopAbs_SOLID))shapeReport(body,true);replaceFile(pending,path);result.set("step_roundtrip_difference_mm3",solid?V::makeNum(error):V{});result.set("step_roundtrip_area_error_mm2",V::makeNum(areaError));result.set("step_roundtrip_bounds_error_mm",V::makeNum(boundError));result.set("step_sha256",V::makeStr(sha256(readFile(path))));result.set("path",V::makeStr(text("path")));auto sidecar=path;sidecar.replace_extension(".validation.json");writeFile(sidecar,result.dump());
         }else throw std::runtime_error("Unknown native worker operation");
+        result=completeSelectionReferences(std::move(result));
         writeFile(resultPath,result.dump());return 0;
     }catch(const Standard_Failure& e){V error=V::makeObj();error.set("error",V::makeStr(e.GetMessageString()?e.GetMessageString():"OCCT failure"));writeFile(resultPath,error.dump());std::cerr<<error.dump()<<'\n';return 1;}
     catch(const std::exception& e){V error=V::makeObj();error.set("error",V::makeStr(e.what()));writeFile(resultPath,error.dump());std::cerr<<error.dump()<<'\n';return 1;}

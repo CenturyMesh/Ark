@@ -66,6 +66,23 @@ SQLite DLL is required by this build.
 - [Official amalgamation archive](https://www.sqlite.org/2026/sqlite-amalgamation-3540000.zip)
 - Archive SHA3-256: `7b670a62fdfbd672b75fef004cb703c8a3e87d3a5cc7d675b4a08337004a2d93`.
 
+## stb_image 2.30
+
+ARK uses the official Sean Barrett/nothings `stb_image.h` memory decoder for
+portable PNG/JPEG user-image attachments. Windows retains WIC as its normal
+decoder; offline contracts also exercise this portable path. The host disables
+file I/O and unrelated image/HDR formats and bounds input dimensions, decoded
+area and decoder allocations.
+
+The upstream MIT alternative applies to this dependency. The complete unchanged
+upstream dual-license text is retained in `third_party/stb/LICENSE` and packaged
+as `licenses/stb-image-LICENSE.txt`; the header retains its embedded license.
+This dependency's license remains separate from ARK's Apache-2.0 license.
+
+- [Official pinned header](https://github.com/nothings/stb/blob/013ac3beddff3dbffafd5177e7972067cd2b5083/stb_image.h)
+- [Official pinned license](https://github.com/nothings/stb/blob/013ac3beddff3dbffafd5177e7972067cd2b5083/LICENSE)
+- Provenance and exact hashes: `third_party/stb/README.md`.
+
 ## Microsoft Windows and Visual C++ runtime
 
 Windows APIs and system fonts remain subject to their vendor terms. Studio uses

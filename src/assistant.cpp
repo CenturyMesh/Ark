@@ -16,15 +16,22 @@
 #include <locale>
 #include <random>
 #include <sstream>
+#include <filesystem>
+#include <fstream>
+#include <memory>
+#include <cstddef>
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
 #include <windows.h>
 #include <winhttp.h>
+#include <wincodec.h>
 #endif
 
+#include "assistant_image_decoder.inl"
 namespace ark {
+#include "assistant_user_image.inl"
 namespace {
 using V=arkjson::Value;
 std::string field(const V& v,const char* key){const auto* p=v.find(key);return p?p->asStr():"";}
@@ -316,6 +323,7 @@ V assistantFunctionTools(const V& tools){
 V assistantRequest(const AssistantConfig& config,const V& conversation,const V& tools,bool* historyProjected){
     if(historyProjected)*historyProjected=false;
     validateAssistantConfig(config);require(conversation.t==V::Arr,"Assistant history must be a Responses input array.");
+    if(!config.imageInputSupported)for(const auto& message:conversation.arr)require(!assistant_vision::containsImage(message),"This connector explicitly does not support image input. Choose an image-capable connector; ARK will not silently send only the filename or text.");
     auto build=[&](const V& wireHistory){
     V request=V::makeObj();request.set("model",V::makeStr(config.model));request.set("store",V::makeBool(false));
     if(!config.reasoningEffort.empty()){V reasoning=V::makeObj();reasoning.set("effort",V::makeStr(config.reasoningEffort));request.set("reasoning",std::move(reasoning));}
@@ -351,7 +359,7 @@ V assistantRequest(const AssistantConfig& config,const V& conversation,const V& 
             assistant_vision::prune(projected,limit>envelope+1024?limit-envelope-1024:0);
             request=build(projected);
         }
-        require(request.dump().size()<=limit,"Assistant request still exceeds the byte limit after projecting completed tool history. Original task and receipts are retained; shorten oversized task messages or use smaller tool schemas. Resume cannot resend this oversized request.");
+        require(request.dump().size()<=limit,"Assistant request still exceeds the byte limit after projecting completed tool history. Original task, reference image pixels and receipts are retained; resize an oversized image, shorten task messages or use smaller tool schemas. Resume cannot resend this oversized request.");
     }
     return request;
 }
@@ -368,6 +376,7 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
         bool loaded=false;for(const auto& item:result.conversation.arr)if(field(item,"role")=="developer"&&field(item,"content").rfind(marker,0)==0)loaded=true;
         if(!loaded){V guide=V::makeObj();guide.set("role",V::makeStr("developer"));guide.set("content",V::makeStr(marker+config.onboardingPack));result.conversation.arr.insert(result.conversation.arr.begin(),std::move(guide));}
     }
+    for(const auto& item:result.conversation.arr)if(field(item,"role")=="user")validateAssistantUserMessage(item);
     assistant_vision::prune(result.conversation,config.maxConversationBytes);
     // Retained evidence and the outgoing request are separate. Projecting a
     // request must never erase successful original calls/receipts from the host.
@@ -387,7 +396,8 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
         if(inbox){V messages=inbox();require(messages.isNull()||messages.t==V::Arr,"Assistant inbox must return an input array.");
             if(messages.t==V::Arr)for(auto& message:messages.arr){
                 auto role=field(message,"role");auto content=message.find("content");
-                require((role=="user"||role=="developer")&&content&&content->t==V::Str,"Assistant inbox messages require user/developer role and text content.");
+                require((role=="user"||role=="developer")&&content,"Assistant inbox messages require user/developer role and content.");
+                if(role=="user")validateAssistantUserMessage(message);else require(content->t==V::Str,"Developer inbox messages require text content.");
                 appendHistory(std::move(message));
             }
         }

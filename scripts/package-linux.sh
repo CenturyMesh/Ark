@@ -36,6 +36,8 @@ for file in "$package/lib/"*.so*; do
     [[ -L $file ]] || patchelf --set-rpath '$ORIGIN' "$file"
 done
 cp -- "$root/third_party/mapbox/LICENSE" "$package/licenses/mapbox-earcut-ISC.txt"
+cp -- "$root/third_party/stb/LICENSE" "$package/licenses/stb-image-LICENSE.txt"
+cp -- "$root/third_party/stb/README.md" "$package/licenses/stb-image-provenance.md"
 cp -- "$root/third_party/sqlite/README.md" "$package/licenses/sqlite-provenance.txt"
 cp -- "$root/third_party/sqlite/sqlite3.h" "$package/licenses/sqlite3.h"
 cp -- "$root/docs/THIRD_PARTY_NOTICES.md" "$package/licenses/THIRD_PARTY_NOTICES.md"

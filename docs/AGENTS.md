@@ -1,17 +1,24 @@
 # ARK agent protocol
 
-018B adds editable viewport sketches, typed sketch entities, associative datums,
+019B discovers **83 standalone tools**, including `skeleton_inspect`,
+`skeleton_compile` and `collision_inspect`. Source edits and indexed mesh edits
+require the current `expected_revision`. Inspect the [019B source and feedback
+contracts](#019b-source-and-feedback-contracts) and [manual controls](AUTHORING_019B_TESTING.md).
+Image references retain actual pixels, their intent and optional rough dimensions;
+the agent must keep reconstruction assumptions distinct from measured geometry.
+
+018B added editable viewport sketches, typed sketch entities, associative datums,
 spatial equality constraints and varying-section sweeps. See [018B scope](iterations/018B.md),
 [manual controls](AUTHORING_018B_TESTING.md), [spatial constraints](SPATIAL_SKETCH_CONSTRAINTS.md)
-and [source contracts](SKETCH_ENTITY_AUTHORING.md). Standalone discovery remains 80 tools.
+and [source contracts](SKETCH_ENTITY_AUTHORING.md). Its standalone discovery listed 80 tools.
 In-app teams can use [short write reservations](AGENT_WRITE_WINDOWS.md) after reading
 the current revision; reads remain available and stale writes still reject.
 Inspect world datum axes before placement/revolve. Web candidates require a real
 product-page review; unrelated results and empty pages reject explicitly.
 
 
-017B adds continuous sketches, equation curves, surface projection/trim and BOM
-part batch export. Discovery now lists 80 standalone tools. Read
+017B added continuous sketches, equation curves, surface projection/trim and BOM
+part batch export. Its discovery listed 80 standalone tools. Read
 [017B scope](iterations/017B.md) and [manual controls](AUTHORING_017B_TESTING.md).
 Use `library_source_search{source:"web",query}` then `library_source_page{url}`
 for actual purchased-component evidence; persist real URLs/references in part
@@ -411,3 +418,26 @@ Every mesh report sets `mesh_authoritative` true, `exact_geometry` false, and
 explicit `p.sample` of 1. Legacy analytic bodies have no B-rep and can enter a
 mesh operation without that flag. Call `agent_onboard{topic:"mesh"}` for the
 current example.
+
+## 019B source and feedback contracts
+
+Load `agent_onboard{topic:"skeleton"}` for native input/relation/vector-array and
+pattern source. `skeleton_compile` is a read-only syntax/relations preview;
+`skeleton_inspect` exposes ownership and input overrides. Use revision-bound
+`doc_preview` and `doc_apply` with `skeleton.set` / `skeleton.remove` for geometry.
+The responsible team lead owns global source changes. Specialists coordinate
+application through that lead. [Source contract](SKELETON_AUTHORING.md).
+
+`mesh_edit` retains an indexed selection recipe and the observed source topology
+fingerprint, with mandatory `expected_revision`. Explicit sampling remains
+necessary for exact inputs; mesh results keep triangle authority.
+[Selection/closure limits](MESH_DIRECT_AUTHORING.md).
+
+`collision_inspect` measures a pair of definitions or placed occurrences/copies.
+Exact single solids and meshes expose separate authorities, checked properties
+and unknowns. It is a read-only static geometry check, with no response dynamics.
+[Native helix, loft, sewing and collision limits](PARAMETRIC_GEOMETRY_019B.md).
+All three inspection/compile tools are available in read-only query batches and
+postconditions. Image attachments include actual reference pixels, intent and
+optional rough dimensions; use existing editable authoring tools and disclose
+hidden-depth assumptions. [Image transport and authoring](IMAGE_AUTHORING.md).

@@ -34,9 +34,13 @@ inline std::pair<std::string,std::string> dataUrl(const V& value){
 }
 inline std::string kind(const V& value){const auto* type=value.find("type");return type?type->asStr():"";}
 inline bool containsImage(const V& message){const auto* content=message.find("content");return content&&content->t==V::Arr&&std::any_of(content->arr.begin(),content->arr.end(),[](const V& item){return kind(item)=="input_image";});}
+inline bool userReference(const V& message){const auto* content=message.find("content");if(!content||content->t!=V::Arr)return false;for(const auto& part:content->arr)if(kind(part)=="input_text")if(const auto* text=part.find("text");text&&text->t==V::Str&&text->str.rfind("[ARK user image | mode: ",0)==0)return true;return false;}
 inline void omitPixels(V& message){const auto* original=message.find("content");if(!original||original->t!=V::Arr)return;V content=*original;content.arr.erase(std::remove_if(content.arr.begin(),content.arr.end(),[](const V& item){return kind(item)=="input_image";}),content.arr.end());V note=V::makeObj();note.set("type",V::makeStr("input_text"));note.set("text",V::makeStr("Earlier visual evidence metadata retained; image pixels omitted from this request. Request a fresh snapshot to inspect its appearance."));content.arr.push_back(note);message.set("content",content);}
 inline void prune(V& history,std::size_t byteLimit){
-    std::size_t images=0;for(auto it=history.arr.rbegin();it!=history.arr.rend();++it)if(containsImage(*it)&&++images>2)omitPixels(*it);
-    while(history.dump().size()>byteLimit){auto it=std::find_if(history.arr.begin(),history.arr.end(),containsImage);if(it==history.arr.end())break;omitPixels(*it);}
+    // Original user references cannot be re-acquired with snapshot. Keep their
+    // pixels intact; oversized user history rejects instead of inventing vision.
+    const auto snapshot=[](const V& item){return containsImage(item)&&!userReference(item);};
+    std::size_t images=0;for(auto it=history.arr.rbegin();it!=history.arr.rend();++it)if(snapshot(*it)&&++images>2)omitPixels(*it);
+    while(history.dump().size()>byteLimit){auto it=std::find_if(history.arr.begin(),history.arr.end(),snapshot);if(it==history.arr.end())break;omitPixels(*it);}
 }
 }

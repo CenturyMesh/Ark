@@ -24,6 +24,7 @@ static V toolResponse(const char* id="call_1",const char* name="doc_info",const 
 }
 static V finalResponse(){return json(R"({"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Done."}]}]})");}
 #include "assistant_context_tests.inl"
+#include "assistant_image_tests.inl"
 static void visionChecks(){
     const std::string png="iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC";
     auto receipt=json(R"({"isError":false,"structuredContent":{"visual_evidence":{"revision":7,"current_revision":7,"view":"front","feature_id":19,"occurrence_id":23,"copy":1,"reference":"face.front","label":"before"}},"content":[{"type":"image","mimeType":"image/png"}]})");member(receipt,"content").arr[0].set("data",V::makeStr(png));
@@ -291,5 +292,5 @@ int main(int argc,char** argv){try{
         [&](const auto& e){if(e.kind==ark::AssistantEvent::Usage)partial=e.usage;},nullptr,
         [&](auto&,auto&,auto*){return incompleteCounted;});},"incomplete response remains rejected");
     check(partial.totalTokens==15,"usage from incomplete response survives via event");
-    requestContextChecks();payloadAndPerformanceChecks();nestedReceiptChecks();transientHttpRetryChecks();visionChecks();std::cout<<checks<<" assistant checks passed\n";return 0;
+    requestContextChecks();payloadAndPerformanceChecks();nestedReceiptChecks();transientHttpRetryChecks();visionChecks();userImageAuthoringChecks();std::cout<<checks<<" assistant checks passed\n";return 0;
 }catch(const std::exception& e){std::cerr<<"assistant test failed: "<<e.what()<<'\n';return 1;}}

@@ -7,6 +7,7 @@
 #include <Geom_Surface.hxx>
 #include <Geom_Curve.hxx>
 #include <TopoDS.hxx>
+#include <TopoDS_Face.hxx>
 #include <TopExp.hxx>
 #include <NCollection_IndexedDataMap.hxx>
 #include <NCollection_List.hxx>
@@ -15,6 +16,7 @@
 #include <cmath>
 #include <filesystem>
 #include <iostream>
+#include <set>
 #include <stdexcept>
 
 using arkjson::Value;
@@ -28,6 +30,33 @@ Value frameRequest(const Value& solid,const char* name){Value q=Value::makeObj()
 Value on(const char* op,const Value& base){Value q=Value::makeObj();q.set("op",Value::makeStr(op));q.set("input_brep",*base.find("brep_base64"));q.set("input_topology",*base.find("topology"));return q;}
 double volume(const Value& solid){return solid.find("report")->find("volume_mm3")->num;}
 void rejected(const Value& request,bool reference=false){try{if(reference)(void)occt::referenceFrameNative(request);else (void)result(request);}catch(const std::exception&){return;}throw std::runtime_error("Invalid request was accepted");}
+const Value* referenceNamed(const Value& solid,const std::string& name){for(const auto& row:solid.find("topology")->find("references")->arr)if(row.find("name")->str==name)return &row;return nullptr;}
+
+void currentSelectionCoverage(const Value& solid){
+    const auto shape=occt::readBrep(solid.find("brep_base64")->str);
+    const auto& topology=*solid.find("topology");const auto& rows=topology.find("references")->arr;
+    const auto identity=occt::sha256(occt::base64Decode(solid.find("brep_base64")->str));
+    check(topology.find("brep_sha256")->str==identity&&!rows.empty(),"unannotated exact result publishes digest-bound selection coverage");
+    for(const auto& row:rows){
+        const auto kind=row.find("kind")->str;const auto* indices=row.find("indices");
+        check((kind=="face"||kind=="edge")&&row.find("status")->str=="bound"&&indices&&indices->arr.size()==1,"unannotated selection references bind one exact face or edge");
+        const auto& index=indices->arr[0];check(index.t==Value::Num&&index.num>=0&&index.num==std::floor(index.num),"selection index is an exact nonnegative integer");
+        const auto name="@ark."+kind+"."+identity+"."+std::to_string(static_cast<size_t>(index.num));
+        check(row.find("name")->str==name&&row.find("brep_sha256")->str==identity,"unannotated source gains only current-identity handles, never guessed semantic names");
+        check(row.find("reference_scope")->str=="current_brep"&&row.find("persistent")->t==Value::Bool&&!row.find("persistent")->b,"current topology handles disclose non-associative scope");
+    }
+    for(const auto kind:{TopAbs_FACE,TopAbs_EDGE}){
+        const auto entities=occt::shapes(shape,kind);const auto& canonical=solid.find("mesh")->find(kind==TopAbs_FACE?"face_canonical":"edge_canonical")->arr;
+        check(canonical.size()==entities.size(),"selection canonical map preserves original display topology indices");
+        std::set<size_t> bound;for(const auto& row:rows)if(row.find("kind")->str==(kind==TopAbs_FACE?"face":"edge"))bound.insert(static_cast<size_t>(row.find("indices")->arr[0].num));
+        for(size_t i=0;i<entities.size();++i){
+            const auto& index=canonical[i];check(index.t==Value::Num&&index.num>=0&&index.num==std::floor(index.num)&&index.num<=i,"canonical slot names an existing first occurrence");
+            const auto first=static_cast<size_t>(index.num);check(entities[i].IsSame(entities[first]),"canonical aliases retain exact entity identity");
+            if(kind==TopAbs_EDGE&&BRep_Tool::Degenerated(TopoDS::Edge(entities[i])))continue;
+            check(bound.count(first)!=0,"every selectable exact entity has a current bound reference");
+        }
+    }
+}
 
 void primitivesAndNames(){
     auto pickCylinder=result(parse(R"({"op":"cylinder","radius":500,"height":20})"));
@@ -143,7 +172,9 @@ void operations(){
     unannotated.set("input_brep",*base.find("brep_base64"));unannotated.set("tool_brep",*moved.find("brep_base64"));
     auto exactWithoutNames=result(unannotated);
     close(volume(exactWithoutNames),500-56,1e-5,"unannotated exact B-rep cut");
-    check(exactWithoutNames.find("topology")->find("references")->arr.empty(),"unannotated source gained guessed names");
+    currentSelectionCoverage(exactWithoutNames);
+    const auto expectedCut=occt::cut(occt::readBrep(base.find("brep_base64")->str),occt::readBrep(moved.find("brep_base64")->str));
+    close(occt::symmetricDifference(occt::readBrep(exactWithoutNames.find("brep_base64")->str),expectedCut),0,1e-8,"selection metadata preserves exact Boolean geometry");
     auto curved=result(parse(R"({"op":"extrude","depth":2,"profile":{"entities":[
       {"kind":"bezier","name":"leading","points":[[0,0],[3,-1],[7,-1],[10,0]]},
       {"kind":"line","name":"right","points":[[10,0],[10,5]]},
@@ -155,6 +186,29 @@ void operations(){
         if(row.find("name")->str=="side.leading")hasSide=row.find("status")->str=="bound"&&row.find("frame_available")&&!row.find("frame_available")->b;
     check(hasSide,"Bezier side face has exact identity and explicit frame limit");
     check(occt::referenceFrameNative(frameRequest(curved,"edge.start.leading")).find("kind")->str=="edge","sketch entity boundary curve frame");
+}
+
+void genuineMergedFaceAliases(){
+    auto box=result(parse(R"({"op":"box","width":10,"depth":10,"height":5})"));
+    const auto original=*referenceNamed(box,"x_min");auto topology=*box.find("topology"),rows=*topology.find("references");
+    // A producer may give two authored labels to the same exact entity. This
+    // fixture proves real alias identity, independently of loft edge history.
+    for(const char* name:{"side.skin.0","side.skin.1"}){auto member=original;member.set("name",Value::makeStr(name));rows.arr.push_back(member);}
+    auto alias=original;alias.set("name",Value::makeStr("side.skin"));alias.set("status",Value::makeStr("merged"));
+    alias.set("merged_from",parse(R"(["side.skin.0","side.skin.1"])"));alias.set("surviving",Value::makeStr("side.skin.0"));rows.arr.push_back(alias);
+    topology.set("references",rows);box.set("topology",topology);box=occt::completeSelectionReferences(box);
+    const auto source=box.dump();const auto support=occt::referenceFrameNative(frameRequest(box,"side.skin"));
+    close(support.find("frame")->arr[12].num,0,1e-8,"genuine merged alias supplies the actual planar support origin");
+    close(support.find("frame")->arr[8].num,-1,1e-8,"genuine merged alias supplies the actual outward support normal");
+    check(box.dump()==source,"support inspection preserves producer alias authoring");
+    auto draft=on("draft",box);draft.set("angle",Value::makeNum(3));draft.set("direction",Value::makeStr("Z"));draft.set("neutral",Value::makeStr("XY"));draft.set("faces",parse(R"(["side.skin"])"));
+    const auto tapered=result(draft);close(volume(tapered),500-125*std::tan(3*std::acos(-1.)/180),1e-3,"genuine merged face draft has analytic volume");
+    draft.set("faces",parse(R"(["x_min"])"));const auto byOriginal=result(draft);
+    close(occt::symmetricDifference(occt::readBrep(tapered.find("brep_base64")->str),occt::readBrep(byOriginal.find("brep_base64")->str)),0,1e-8,"merged alias and original name select the same exact draft face");
+    const auto* propagated=referenceNamed(tapered,"side.skin");check(propagated&&propagated->find("status")->str=="merged"&&propagated->find("indices")->arr.size()==1,"real merged alias survives exact draft history");
+    check(propagated->find("merged_from")->dump()==alias.find("merged_from")->dump()&&propagated->find("surviving")->str=="side.skin.0","real merged alias preserves source membership");
+    for(const char* name:{"side.skin.0","side.skin.1"}){const auto* member=referenceNamed(tapered,name);check(member&&member->find("status")->str=="bound"&&member->find("indices")->dump()==propagated->find("indices")->dump(),"both authored labels still bind the same exact drafted face");}
+    check(occt::referenceFrameNative(frameRequest(tapered,"side.skin")).find("kind")->str=="face","propagated merged face still supports a rigid datum");
 }
 
 void rejection(){
@@ -307,4 +361,4 @@ void planeSplitAndMirrorCopy(){
     mirror.set("fuse",Value::makeNum(1));rejected(mirror);
 }
 }
-int main(){try{primitivesAndNames();nativeDisplayEdges();disconnectedDiagnostic();operations();rejection();finishingFeatures();repeatedUnionNamespaces();planeSplitAndMirrorCopy();std::cout<<"native solid tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(){try{primitivesAndNames();nativeDisplayEdges();disconnectedDiagnostic();operations();genuineMergedFaceAliases();rejection();finishingFeatures();repeatedUnionNamespaces();planeSplitAndMirrorCopy();std::cout<<"native solid tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

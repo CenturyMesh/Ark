@@ -1,13 +1,30 @@
-# Current source semantics — format 34
+# Current source semantics — format 35
+
+019B accepts legacy formats 1–34 and writes format 35 for native Skeleton source,
+indexed `mesh_edit` recipes, indexed vector-coordinate expressions, helix sources,
+extended loft controls, connected surface-sewing policy and authored references
+to current-B-rep fallback face/edge handles. Skeleton source,
+overrides and ownership persist; evaluated geometry and static collision reports
+remain derived. Version gates cover nested sketch/native sources, tube programs,
+datums, assemblies and mate expressions. History also supports version 35.
+Older runtimes reject unsupported semantics. See [019B](iterations/019B.md).
+
+Derived native picking inventories alone do not advance the source format.
+Fallback handles include the complete B-rep SHA-256 and a verified topology
+index; they are scoped to that exact B-rep and are not persistent associative
+names. A changed B-rep makes a retained handle obsolete. See
+[native selection coverage](PARAMETRIC_GEOMETRY_019B.md#local-verification-scope).
+
+## Previous source extension — format 34
 
 018B accepts legacy formats 1–33 and adds format 34 only when a document uses
 typed sketch recipes, new associative construction recipes, spatial constraints
 or anchors, interpolating spatial splines, surface splines, analytic equations or
 varying sweep sections. These source fields persist; resolved geometry remains
 derived. Older runtimes reject the unsupported format. Application iteration and
-document format are independent. See [018B](iterations/018B.md) for current scope.
+document format are independent. See [018B](iterations/018B.md) for that scope.
 
-# ARK file formats, document versions 1 through 27
+# ARK file formats, document versions 1 through 35
 
 ## `.ark`
 
@@ -92,7 +109,7 @@ geometric proof, original openings, and exact formed/flat B-rep payloads. The
 display mesh and native evaluation cache are derived and are not feature
 history edits. The Formed/Flat UI selection does not change the saved geometry.
 
-The current reader accepts versions 1 through 18. Older ARK executables reject a newer
+The current reader accepts versions 1 through 35. Older ARK executables reject a newer
 document rather than discarding its native data. Save/load re-evaluates authored
 native features with the installed OCCT 8 worker; source packages remain
 portable when the original STEP is absent. If the source STEP still exists

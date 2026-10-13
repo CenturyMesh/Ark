@@ -69,6 +69,7 @@ typedef ptrdiff_t GLsizeiptr;
 #include "ark/agent_activity.hpp"
 #include "ark/bom.hpp"
 #include "ark/mesh_analysis.hpp"
+#include "ark/mesh_model.hpp"
 #include "ark/notch.hpp"
 #include "ark/source_tube.hpp"
 #include "ark/sketch.hpp"
@@ -483,22 +484,28 @@ static constexpr int teamCardHeight=176,teamCardStride=184,teamCardTop=79;
 static bool g_verifyTeamCardBounds=false,g_teamCardContentFits=true;static std::string g_teamCardBoundsFailure;
 static int teamCardColumns(){return std::clamp((viewW-44)/320,2,4);}
 static int teamCardRows(){return winH>=1100&&g_teamRoleCount>(unsigned)teamCardColumns()?2:1;}
-static int assistantDockHeight(){return g_teamMode?std::min(432+(teamCardRows()-1)*teamCardStride,std::max(390,winH-viewY-32-160)):216;}
-static int teamChatRows(){return assistantDockHeight()>=432+(teamCardRows()-1)*teamCardStride?2:0;}
+static void layoutAssistantImageDimensions();
+static void clearPendingAssistantImage();
+static int assistantImageComposerHeight();
+static int assistantDockHeight(){const int images=assistantImageComposerHeight();if(!g_teamMode)return 216+images;return std::max(0,std::min(432+(teamCardRows()-1)*teamCardStride+images,winH-viewY-32-160));}
+static int teamChatRows(){return assistantDockHeight()-assistantImageComposerHeight()>=432+(teamCardRows()-1)*teamCardStride?2:0;}
 static RECT toolGalleryBounds(){return {viewX+12,viewY+10,viewX+12+std::max(300,std::min(1000,viewW-24)),viewY+10+std::max(300,std::min(620,winH-viewY-56))};}
 static void layout(){viewX=std::clamp((int)(winW*.21),280,352);viewW=std::max(winW-viewX,1);viewH=std::max(winH-viewY-32-(g_assistantDockOpen?assistantDockHeight():0),1);g_inspectorOpen=g_sidebarTab==2;
     if(g_chatInput)MoveWindow(g_chatInput,viewX+30,winH-112,std::max(viewW-260,1),44,TRUE);
     if(g_chatInput)ShowWindow(g_chatInput,g_assistantDockOpen&&!g_toolsOpen?SW_SHOW:SW_HIDE);
     if(g_toolSearch){auto bounds=toolGalleryBounds();MoveWindow(g_toolSearch,bounds.left+213,bounds.top+45,std::max((int)(bounds.right-bounds.left)-310,1),30,TRUE);ShowWindow(g_toolSearch,g_toolsOpen?SW_SHOW:SW_HIDE);}
     if(g_commandSearch){MoveWindow(g_commandSearch,winW-438,12,200,31,TRUE);ShowWindow(g_commandSearch,g_searchEditing?SW_SHOW:SW_HIDE);}
+    layoutAssistantImageDimensions();
 }
 static int selBody=-1,hoverBody=-1;
 static bool wireframe=false, g_pressWasButton=false;
 static double g_fps=0;
 static int g_hoverZone=-1;static std::array<Zone,3> g_frameRibbonBounds{};static std::string g_lastRibbonHint;static std::optional<POINT> g_testPointer;
 struct CurveSample { std::string sketch,name; Vec3 a,b; };
-struct SelectionItem { u64 feature=0; std::string kind,name,owner;u64 instance=0;int copy=0; };
-struct PartPick { std::vector<std::pair<int,int>> faces; std::vector<std::vector<Vec3>> edges; std::vector<std::string> faceNames,edgeNames; std::vector<bool> edgeVisible; };
+struct SelectionItem { u64 feature=0; std::string kind,name,owner;u64 instance=0;int copy=0;std::vector<u32> meshTriangles,meshVertices;std::string topology; };
+struct PartPick { std::vector<std::pair<int,int>> faces; std::vector<std::vector<Vec3>> edges; std::vector<std::string> faceNames,edgeNames; std::vector<bool> edgeVisible;std::map<std::string,int> faceReferences,edgeReferences;std::vector<int> faceCanonical,edgeCanonical; };
+static bool faceReferenceMatches(const PartPick& pick,size_t face,const std::string& name){auto found=pick.faceReferences.find(name);return found!=pick.faceReferences.end()?found->second==(int)face||(face<pick.faceCanonical.size()&&found->second==pick.faceCanonical[face]):face<pick.faceNames.size()&&pick.faceNames[face]==name;}
+static bool edgeReferenceMatches(const PartPick& pick,size_t edge,const std::string& name){auto found=pick.edgeReferences.find(name);return found!=pick.edgeReferences.end()?found->second==(int)edge||(edge<pick.edgeCanonical.size()&&found->second==pick.edgeCanonical[edge]):edge<pick.edgeNames.size()&&pick.edgeNames[edge]==name;}
 static std::vector<CurveSample> g_curveSamples;
 static std::vector<SelectionItem> g_picked;
 struct ProjectionPreview {bool active=false,spatial=false;u64 revision=0,epoch=0;std::string target,plane,source;arkjson::Value commands=arkjson::Value::makeArr();std::vector<float> lines;AABB bounds;};
@@ -510,6 +517,7 @@ static arkjson::Value g_physicalSettings;
 static bool decodeCanvasFile(const std::wstring&,std::vector<unsigned char>&,unsigned&,unsigned&);
 #include "action_icons.inl"
 static int atlasIcon(int action){switch(action){
+    case 650:case 652:case 732:return 2;case 651:return 26;case 653:case 654:case 731:return 33;case 655:return 24;case 656:return 40;case 657:case 733:return 14;case 658:return 42;case 659:return 45;case 710:return 16;case 750:return 32;case 752:return 4;case 754:return 22;case 755:return 11;case 730:return 41;
     case 570:case 584:return 33; // Existing edit-curve pencil.
     case 571:return 0;case 572:return 16;case 573:return 1;case 574:case 575:return 32;
     case 590:case 597:return 8;case 585:case 586:case 588:case 592:case 593:case 595:case 576:return 24;case 594:return 45;case 596:return 14;case 591:return 24;case 587:return 45;case 577:return 45;case 578:return 14;
@@ -537,7 +545,7 @@ static void decorateMenu(HMENU menu){
 }
 static u64 g_physicalRevision=0,g_physicalSelection=0;static bool g_physicalVisible=false,g_physicalAssembly=false;
 static std::vector<PartPick> g_partPicks;
-static std::vector<float> g_selectionLines,g_selectionFaceFill;
+static std::vector<float> g_selectionLines,g_selectionEdgeLines,g_selectionFaceFill;
 static int g_pickKind=0;
 static DisplayUnits g_displayUnits;
 static bool measurementActive();static void beginMeasurement(int mode);static void endMeasurement();static void measurementCoordinates();
@@ -552,12 +560,16 @@ static PartPick partPickFrom(const Body& body){
     pick.edgeNames.assign(pick.edges.size(),"");
     pick.edgeVisible.assign(pick.edges.size(),true);
     if(const V* visible=mesh?mesh->find("edge_visible"):nullptr;visible&&visible->t==V::Arr&&visible->arr.size()==pick.edges.size())for(size_t i=0;i<visible->arr.size();++i)if(visible->arr[i].t==V::Bool)pick.edgeVisible[i]=visible->arr[i].b;
+    auto canonical=[&](const char* key,size_t count){std::vector<int> slots(count);const auto* rows=mesh?mesh->find(key):nullptr;for(size_t index=0;index<count;++index){slots[index]=(int)index;if(rows&&rows->t==V::Arr&&index<rows->arr.size()&&rows->arr[index].t==V::Num&&std::isfinite(rows->arr[index].num)&&rows->arr[index].num>=0&&rows->arr[index].num<(double)count&&std::floor(rows->arr[index].num)==rows->arr[index].num){slots[index]=(int)rows->arr[index].num;}}return slots;};pick.faceCanonical=canonical("face_canonical",pick.faces.size());pick.edgeCanonical=canonical("edge_canonical",pick.edges.size());
     const V* topology=body.nativeData.find("topology");const V* refs=topology?topology->find("references"):nullptr;
     if(refs&&refs->t==V::Arr)for(const auto& row:refs->arr){auto* name=row.find("name"),*kind=row.find("kind"),*status=row.find("status"),*indices=row.find("indices");
-        if(!name||!kind||!status||!indices||status->asStr()!="bound"||indices->t!=V::Arr||indices->arr.size()!=1||indices->arr[0].t!=V::Num)continue;int index=(int)indices->arr[0].num;
-        if(kind->asStr()=="face"&&index>=0&&index<(int)pick.faceNames.size())pick.faceNames[(size_t)index]=name->asStr();
-        if(kind->asStr()=="edge"&&index>=0&&index<(int)pick.edgeNames.size())pick.edgeNames[(size_t)index]=name->asStr();
-    }return pick;
+        if(!name||!kind||!status||!indices||(status->asStr()!="bound"&&status->asStr()!="merged")||indices->t!=V::Arr||indices->arr.size()!=1||indices->arr[0].t!=V::Num)continue;int index=(int)indices->arr[0].num;
+        auto preferred=[&](std::string& current){const auto next=name->asStr();if(current.empty()||next.rfind("@ark.",0)!=0)current=next;};
+        if(kind->asStr()=="face"&&index>=0&&index<(int)pick.faceNames.size()){index=pick.faceCanonical[(size_t)index];preferred(pick.faceNames[(size_t)index]);pick.faceReferences[name->asStr()]=index;}
+        if(kind->asStr()=="edge"&&index>=0&&index<(int)pick.edgeNames.size()){index=pick.edgeCanonical[(size_t)index];preferred(pick.edgeNames[(size_t)index]);pick.edgeReferences[name->asStr()]=index;}
+    }
+    for(size_t index=0;index<pick.faceNames.size();++index)pick.faceNames[index]=pick.faceNames[(size_t)pick.faceCanonical[index]];for(size_t index=0;index<pick.edgeNames.size();++index)pick.edgeNames[index]=pick.edgeNames[(size_t)pick.edgeCanonical[index]];
+    return pick;
 }
 
 // ---------------------------------------------------------------------------
@@ -967,6 +979,7 @@ static void includeCanvasBounds(){
     }
 }
 static void rebuildScene(bool evaluate=false){
+    ++g_displayMeshSerial;
     auto previousIds=g_bodyIds,previousNodes=g_instanceIds;auto previousHidden=g_hiddenBodies;
     if(evaluate)g_doc.recompute();
     if(g_allSheetsFlat||g_allSheetsPlaying){g_sheetProgress.clear();g_sheetFlatViews.clear();}
@@ -1880,24 +1893,32 @@ static u64 featureIdField(const std::string& value){
     double parsed=formNumber(value);if(parsed<1||parsed>9007199254740990.||std::floor(parsed)!=parsed||!g_doc.find((u64)parsed))throw std::runtime_error("Choose an existing feature ID");return (u64)parsed;
 }
 static std::string selectedFeatureId(){return selBody>=0&&selBody<(int)g_bodyIds.size()?std::to_string(g_bodyIds[(size_t)selBody]):"1";}
+static void applyUiCommandAtRevision(arkjson::Value command,u64 revision,u64 epoch);
 #include "selection_glow.inl"
 static void refreshSelectionLines(){
-    g_selectionLines.clear();g_selectionFaceFill.clear();g_selectionFaceBoundary.clear();auto put=[&](Vec3 p){g_selectionLines.insert(g_selectionLines.end(),{(float)p.x,(float)p.y,(float)p.z});};
+    ++g_selectionGeometrySerial;
+    g_selectionLines.clear();g_selectionEdgeLines.clear();g_selectionFaceFill.clear();g_selectionFaceBoundary.clear();auto put=[&](Vec3 p){g_selectionLines.insert(g_selectionLines.end(),{(float)p.x,(float)p.y,(float)p.z});};auto putEdge=[&](Vec3 p){g_selectionEdgeLines.insert(g_selectionEdgeLines.end(),{(float)p.x,(float)p.y,(float)p.z});};
     for(const auto& item:g_picked){
         if(item.kind=="curve"){for(const auto& sample:g_curveSamples)if(sample.sketch==item.owner&&(item.name.empty()||item.name==item.owner||sample.name==item.name)){put(sample.a);put(sample.b);}continue;}
-        if(item.kind!="edge"&&item.kind!="face")continue;
+        if(item.kind!="edge"&&item.kind!="face"&&item.kind!="mesh_face"&&item.kind!="mesh_edge")continue;
         for(size_t body=0;body<g_bodyIds.size()&&body<g_instancePart.size();++body){
             if(body<g_hiddenBodies.size()&&g_hiddenBodies[body])continue;
             if(g_bodyIds[body]!=item.feature||(item.instance&&(g_instanceIds[body]!=item.instance||g_instanceCopies[body]!=item.copy)))continue;
             size_t part=g_instancePart[body];if(part>=g_partPicks.size()||part>=g_cpuMeshes.size())continue;const auto& pick=g_partPicks[part];const auto& mesh=g_cpuMeshes[part];
-            if(item.kind=="edge"){for(size_t edge=0;edge<pick.edgeNames.size()&&edge<pick.edges.size();++edge)if(pick.edgeNames[edge]==item.name)for(size_t k=1;k<pick.edges[edge].size();++k){put(g_instanceWorld[body].transformPoint(pick.edges[edge][k-1]));put(g_instanceWorld[body].transformPoint(pick.edges[edge][k]));}}
-            else{for(size_t face=0;face<pick.faceNames.size()&&face<pick.faces.size();++face)if(pick.faceNames[face]==item.name){const auto span=pick.faces[face];appendSelectedFaceBoundary(mesh,span.first,span.second,g_instanceWorld[body]);for(int triangle=std::max(span.first,0);triangle<span.first+span.second;++triangle)for(int corner=0;corner<3;++corner){size_t slot=(size_t)triangle*3+corner;if(slot>=mesh.idx.size())continue;size_t at=(size_t)mesh.idx[slot]*3;if(at+2>=mesh.pos.size())continue;Vec3 point=g_instanceWorld[body].transformPoint({mesh.pos[at],mesh.pos[at+1],mesh.pos[at+2]});g_selectionFaceFill.insert(g_selectionFaceFill.end(),{(float)point.x,(float)point.y,(float)point.z});}}}
+            if(item.kind=="mesh_face"||item.kind=="mesh_edge"){
+                if(item.topology.empty()||meshTopologyFingerprint(mesh)!=item.topology)continue;
+                if(item.kind=="mesh_edge"){if(item.meshVertices.size()!=2)continue;for(u32 vertex:item.meshVertices){size_t at=(size_t)vertex*3;if(at+2<mesh.pos.size())putEdge(g_instanceWorld[body].transformPoint({mesh.pos[at],mesh.pos[at+1],mesh.pos[at+2]}));}}
+                else{appendSelectedMeshPatchBoundary(mesh,item.meshTriangles,g_instanceWorld[body]);for(u32 triangle:item.meshTriangles)for(int corner=0;corner<3;++corner){size_t slot=(size_t)triangle*3+corner;if(slot>=mesh.idx.size())continue;size_t at=(size_t)mesh.idx[slot]*3;if(at+2>=mesh.pos.size())continue;Vec3 point=g_instanceWorld[body].transformPoint({mesh.pos[at],mesh.pos[at+1],mesh.pos[at+2]});g_selectionFaceFill.insert(g_selectionFaceFill.end(),{(float)point.x,(float)point.y,(float)point.z});}}
+                continue;
+            }
+            if(item.kind=="edge"){std::set<int> drawn;for(size_t edge=0;edge<pick.edges.size();++edge)if(edgeReferenceMatches(pick,edge,item.name)&&drawn.insert(edge<pick.edgeCanonical.size()?pick.edgeCanonical[edge]:(int)edge).second)for(size_t k=1;k<pick.edges[edge].size();++k){putEdge(g_instanceWorld[body].transformPoint(pick.edges[edge][k-1]));putEdge(g_instanceWorld[body].transformPoint(pick.edges[edge][k]));}}
+            else{for(size_t face=0;face<pick.faceNames.size()&&face<pick.faces.size();++face)if(faceReferenceMatches(pick,face,item.name)){const auto span=pick.faces[face];appendSelectedFaceBoundary(mesh,span.first,span.second,g_instanceWorld[body]);for(int triangle=std::max(span.first,0);triangle<span.first+span.second;++triangle)for(int corner=0;corner<3;++corner){size_t slot=(size_t)triangle*3+corner;if(slot>=mesh.idx.size())continue;size_t at=(size_t)mesh.idx[slot]*3;if(at+2>=mesh.pos.size())continue;Vec3 point=g_instanceWorld[body].transformPoint({mesh.pos[at],mesh.pos[at+1],mesh.pos[at+2]});g_selectionFaceFill.insert(g_selectionFaceFill.end(),{(float)point.x,(float)point.y,(float)point.z});}}}
         }
     }
     appendDatumSelectionLines();g_sketchGpuDirty=true;
 }
 static void toggleSelection(SelectionItem item){
-    auto same=[&](const SelectionItem& other){return other.kind==item.kind&&other.name==item.name&&other.owner==item.owner&&other.feature==item.feature&&other.instance==item.instance&&other.copy==item.copy;};
+    auto same=[&](const SelectionItem& other){return other.kind==item.kind&&other.name==item.name&&other.owner==item.owner&&other.feature==item.feature&&other.instance==item.instance&&other.copy==item.copy&&other.meshTriangles==item.meshTriangles&&other.meshVertices==item.meshVertices&&other.topology==item.topology;};
     auto found=std::find_if(g_picked.begin(),g_picked.end(),same);
     if(found!=g_picked.end())g_picked.erase(found);
     else{if(g_picked.size()>=64){g_status="At most 64 selected references";return;}g_picked.push_back(std::move(item));}
@@ -1948,6 +1969,9 @@ static void nativeBooleanDialog(){
     auto op=trimField(fields[0].value);if(op!="union"&&op!="cut"&&op!="common")throw std::runtime_error("Boolean operation must be union, cut, or common");
     auto base=featureIdField(fields[1].value),tool=featureIdField(fields[2].value);if(base==tool)throw std::runtime_error("Choose a distinct tool feature");
     V p=V::makeObj();p.set("op",V::makeStr(op));addNativeFeature(FeatureType::NativeSolid,"Exact "+op,std::move(p),V::makeObj(),{base,tool});
+}
+static void namedBooleanDialog(int mode){
+    using V=arkjson::Value;if(!g_doc.assembly.empty())throw std::runtime_error("Use exact part definitions before assembly; placed occurrence Boolean authoring requires explicit instance inputs");if(g_bodyIds.size()<2)throw std::runtime_error("Create two output bodies before combining solids");const u64 revision=g_session.revision,epoch=g_documentEpoch;const char* titles[]={"Fuse bodies","Carve body","Keep overlap"};const char* operations[]={"union","cut","common"};std::string base=selectedFeatureId(),tool;for(auto id:g_bodyIds)if(std::to_string(id)!=base)tool=std::to_string(id);if(tool.empty()){base=std::to_string(g_bodyIds[g_bodyIds.size()-2]);tool=std::to_string(g_bodyIds.back());}std::vector<EditorField> fields{{"Result name",titles[mode]},{"Base feature ID",base},{"Tool feature ID",tool}};if(!editFields(titles[mode],mode==1?"The tool removes material from the base. Both source solids and their parameters stay in history.":"Uses the existing exact solid kernel. Inputs stay as editable source history; invalid geometry rejects atomically.",fields))return;auto first=featureIdField(fields[1].value),second=featureIdField(fields[2].value);if(first==second)throw std::runtime_error("Choose two distinct source bodies");V command=V::makeObj(),p=V::makeObj(),inputs=V::makeArr();command.set("op",V::makeStr("feature.add"));command.set("type",V::makeStr("native_solid"));command.set("name",V::makeStr(fields[0].value));p.set("op",V::makeStr(operations[mode]));command.set("p",p);inputs.arr={V::makeNum((double)first),V::makeNum((double)second)};command.set("inputs",inputs);applyUiCommandAtRevision(command,revision,epoch);if(!g_error){selBody=(int)g_bodyIds.size()-1;frameScene();}
 }
 static void nativeHoleDialog(){
     using V=arkjson::Value;std::vector<EditorField> choose{{"Cutter: circle / slot / profile","circle"}};
@@ -2810,12 +2834,13 @@ static void askAgentAboutBody(int body){
     if(g_chatInput){if(GetWindowTextLengthW(g_chatInput)==0)SetWindowTextW(g_chatInput,L"What would you like to know about this object?");SetFocus(g_chatInput);SendMessage(g_chatInput,EM_SETSEL,0,-1);}
     g_error=false;g_status="Object attached. Enter a question, then Send or Queue to ask the agent.";
 }
+#include "image_attachment.inl"
 #include "studio_feedback_fixture.inl"
 static void sendTeam(const std::string& explicitPrompt={},const std::array<AssistantTransport,8>& transports={}){
     if(g_busy&&!g_teamStarted){g_status="Wait for the current document operation before starting a new team.";return;}
-    if(g_chatBusy){g_status="Wait for the single Assistant turn to finish.";return;}std::string prompt=assistantPrompt(explicitPrompt);if(prompt.find_first_not_of(" \r\n\t")==std::string::npos)return;
-    const std::string visiblePrompt=prompt;if(!attachPendingObjectContext(prompt))return;
-    pollTeam(true);if(g_teamStarted&&!g_teamSnapshot.cancelled){if(!g_agentTeam.steer(prompt,g_teamTarget)){g_status="Decision could not be queued; check team state and turn limits.";return;}g_chatLog.push_back({"You -> "+(g_teamTarget.empty()?std::string("team"):g_teamTarget),visiblePrompt});g_status="Decision queued for the next provider request.";}
+    if(g_chatBusy){g_status="Wait for the single Assistant turn to finish.";return;}std::string prompt=assistantPrompt(explicitPrompt);if(prompt.find_first_not_of(" \r\n\t")==std::string::npos&&(!explicitPrompt.empty()||!g_pendingAssistantImage))return;
+    const std::string visiblePrompt=explicitPrompt.empty()?assistantImageVisiblePrompt(prompt):prompt;if(!attachPendingObjectContext(prompt))return;auto userMessage=explicitPrompt.empty()?pendingAssistantImageMessage(prompt):assistantUserMessage(prompt);
+    pollTeam(true);if(g_teamStarted&&!g_teamSnapshot.cancelled){if(!g_agentTeam.steer(userMessage,g_teamTarget)){g_status="Decision could not be queued; check team state and turn limits.";return;}g_chatLog.push_back({"You -> "+(g_teamTarget.empty()?std::string("team"):g_teamTarget),visiblePrompt});g_status="Decision queued for the next provider request.";}
     else{
         if(g_teamStarted&&g_teamSnapshot.running){g_status="Team is still stopping.";return;}
         AgentTeamConfig team;team.maxWorkers=g_teamRoleCount;team.focusedWorkflow=g_teamFocusedWorkflow;team.orchestratedStart=g_teamFocusedWorkflow||std::none_of(transports.begin(),transports.end(),[](const auto& t){return (bool)t;});static const char* instructions[]={
@@ -2835,18 +2860,19 @@ static void sendTeam(const std::string& explicitPrompt={},const std::array<Assis
         };
         if(std::none_of(transports.begin(),transports.end(),[](const auto& t){return (bool)t;}))team.completionCheck=[teamExecutor]{return teamExecutor("__ark_bom_completion",arkjson::Value::makeObj());};
         team.recordAction=[teamExecutor](const std::string&,const std::string& name,const arkjson::Value& args,const arkjson::Value& result,double elapsed){using V=arkjson::Value;V record=V::makeObj(),summary=V::makeObj(),answer=V::makeObj();record.set("tool",V::makeStr(name));record.set("elapsed_ms",V::makeNum(elapsed));if(const auto* commands=args.find("commands")){V rows=V::makeArr();for(const auto& command:commands->arr){V row=V::makeObj();if(const auto* op=command.find("op"))row.set("op",*op);rows.arr.push_back(row);}summary.set("commands",rows);}record.set("arguments",summary);if(const auto* error=result.find("isError"))answer.set("isError",*error);const auto* payload=result.find("structuredContent");if(!payload)payload=&result;for(const auto* key:{"isError","error","error_code"})if(const auto* value=payload->find(key))answer.set(key,*value);record.set("result",answer);auto receipt=teamExecutor("__ark_activity",record);V returned=result;const auto* data=receipt.find("structuredContent");if(!data)data=&receipt;for(const auto* key:{"activity_id","activity_project_id","activity_boundary","pending_feedback_ids","feedback_required","activity_capture_error"})if(const auto* value=data->find(key))returned.set(key,*value);return returned;};
-        g_agentTeam.start(team,prompt,AgentSession::tools(),teamExecutor,[epoch,runSerial](const AgentTeamEvent& event){auto* value=new UiTeamEvent{event,epoch,runSerial};if(g_closing||!PostMessage(g_window,WM_ARK_TEAM,0,(LPARAM)value))delete value;});g_teamStarted=true;g_chatLog.push_back({"You -> team",visiblePrompt});g_status="Team started; "+std::to_string(g_teamRoleCount)+" agents, assigned parts and coordinated assembly.";
+        g_agentTeam.start(team,userMessage,AgentSession::tools(),teamExecutor,[epoch,runSerial](const AgentTeamEvent& event){auto* value=new UiTeamEvent{event,epoch,runSerial};if(g_closing||!PostMessage(g_window,WM_ARK_TEAM,0,(LPARAM)value))delete value;});g_teamStarted=true;g_chatLog.push_back({"You -> team",visiblePrompt});g_status="Team started; "+std::to_string(g_teamRoleCount)+" agents, assigned parts and coordinated assembly.";
     }
-    g_pendingObjectTarget.reset();g_chatScroll=0;if(g_chatInput)SetWindowTextW(g_chatInput,L"");pollTeam(true);
+    if(explicitPrompt.empty())clearPendingAssistantImage();g_pendingObjectTarget.reset();g_chatScroll=0;if(g_chatInput)SetWindowTextW(g_chatInput,L"");pollTeam(true);
 }
 static void sendAssistant(const std::string& explicitPrompt="",const AssistantTransport& transport={}){
     if(g_teamStarted&&g_agentTeam.snapshot().running){g_status="Wait for the team to finish or cancel it before starting Assistant.";return;}
     if(g_chatBusy)return;std::string prompt=explicitPrompt;
     if(prompt.empty()&&g_chatInput){int n=GetWindowTextLengthW(g_chatInput);std::vector<wchar_t> buffer(n+1);GetWindowTextW(g_chatInput,buffer.data(),n+1);int size=WideCharToMultiByte(CP_UTF8,0,buffer.data(),n,nullptr,0,nullptr,nullptr);prompt.resize(size);WideCharToMultiByte(CP_UTF8,0,buffer.data(),n,prompt.data(),size,nullptr,nullptr);}
-    if(prompt.find_first_not_of(" \r\n\t")==std::string::npos)return;const std::string visiblePrompt=prompt;if(!attachPendingObjectContext(prompt))return;validateAssistantConfig(g_assistantConfig);
+    if(prompt.find_first_not_of(" \r\n\t")==std::string::npos&&(!explicitPrompt.empty()||!g_pendingAssistantImage))return;const std::string visiblePrompt=explicitPrompt.empty()?assistantImageVisiblePrompt(prompt):prompt;if(!attachPendingObjectContext(prompt))return;validateAssistantConfig(g_assistantConfig);
     if(g_conversation.arr.empty()&&!transport)refreshPricing();
     if(g_assistantWorker.joinable())g_assistantWorker.join();
-    using V=arkjson::Value;V input=g_conversation;if(input.t!=V::Arr)input=V::makeArr();V user=V::makeObj();user.set("role",V::makeStr("user"));user.set("content",V::makeStr(prompt));input.arr.push_back(user);
+    using V=arkjson::Value;V input=g_conversation;if(input.t!=V::Arr)input=V::makeArr();V user=explicitPrompt.empty()?pendingAssistantImageMessage(prompt):assistantUserMessage(prompt);input.arr.push_back(user);
+    if(explicitPrompt.empty()&&g_pendingAssistantImage){auto preflight=g_assistantConfig;if(!transport)preflight.onboardingPack=agentOnboardingPack({"overview"});assistantRequest(preflight,input,AgentSession::tools());}
     g_pendingObjectTarget.reset();g_chatLog.push_back({"You",visiblePrompt});g_chatScroll=0;g_chatBusy=true;g_assistantResponseFinished=g_assistantResponseError=false;g_assistantStatus="Working...";g_assistantUsageRun={};g_assistantPerformanceRun={};g_assistantUsageRunCounted=false;g_assistantReceiptId=newUsageReceiptId();g_assistantReceiptModel=g_assistantConfig.model;g_currentUsageReceipt.reset();g_pendingUsageReceipt.reset();g_assistantCancel=std::make_shared<std::atomic_bool>(false);auto cancel=g_assistantCancel;auto config=g_assistantConfig;if(!transport)config.onboardingPack=agentOnboardingPack({"overview"});auto schema=AgentSession::tools();if(g_chatInput)SetWindowTextW(g_chatInput,L"");
     auto epoch=g_documentEpoch;auto revision=std::make_shared<std::atomic<u64>>(g_session.revision);
     g_assistantWorker=std::thread([config,input,schema,cancel,transport,epoch,revision]{
@@ -2859,6 +2885,7 @@ static void sendAssistant(const std::string& explicitPrompt="",const AssistantTr
             if(*cancel)throw std::runtime_error("Assistant cancelled");postChat({result.text,true,false,result.conversation,epoch,result.usage,true,result.performance,true});
         }catch(const std::exception& e){std::set<std::string> answered;for(const auto& row:retainedHistory.arr)if(row.find("type")&&row.find("type")->asStr()=="function_call_output"&&row.find("call_id"))answered.insert(row.find("call_id")->asStr());std::vector<std::string> missing;for(const auto& row:retainedHistory.arr)if(row.find("type")&&row.find("type")->asStr()=="function_call"&&row.find("call_id")&&!answered.count(row.find("call_id")->asStr()))missing.push_back(row.find("call_id")->asStr());for(const auto& id:missing){V reply=V::makeObj(),error=V::makeObj();error.set("isError",V::makeBool(true));error.set("error",V::makeStr("Interrupted before receipt retention; execution may have completed. Inspect current doc_info and revision before further writes; do not replay prior calls."));reply.set("type",V::makeStr("function_call_output"));reply.set("call_id",V::makeStr(id));reply.set("output",V::makeStr(error.dump()));retainedHistory.arr.push_back(reply);}postChat({e.what(),true,true,retainedHistory,epoch});}
     });
+    if(explicitPrompt.empty())clearPendingAssistantImage();
 }
 static void startLiveBridge(){
     if(!g_liveBridge.start([](const std::string& tool,const arkjson::Value& args,LiveSessionBridge::Completion complete,std::stop_token stop){
@@ -3060,22 +3087,25 @@ static void offsetSurfaceDialog(const Feature* editing=nullptr){
 }
 static void sewDialog(const Feature* editing=nullptr){
     using V=arkjson::Value;
+    const u64 revision=g_session.revision,epoch=g_documentEpoch;Feature snapshot;if(editing){snapshot=*editing;editing=&snapshot;}
     if(editing){
-        std::vector<EditorField> fields{{"Solid",editing->get("solid","0"),true}};
+        std::vector<EditorField> fields{{"Solid",editing->get("solid","0"),true},{"Require one connected surface patch","1",true}};
         std::string hint="Inputs stay "+joinedFeatureIds(editing->inputs)+". A solid requires one closed shell. This edit does not change which surfaces are sewn.";
         if(!editFields("Edit sew",hint.c_str(),fields))return;
+        if(revision!=g_session.revision||epoch!=g_documentEpoch)throw std::runtime_error("Drawing changed while editing surface glue; select current surfaces again");
         V p=V::makeObj();p.set("solid",V::makeStr(fields[0].value));
-        commitNativeFeature(FeatureType::Sew,"Sew",std::move(p),V::makeObj(),{},editing->id,false);return;
+        V native=editing->nativeSpec;native.set("require_connected",V::makeBool(fields[1].value=="1"));commitNativeFeature(FeatureType::Sew,"Glue surfaces",std::move(p),std::move(native),{},editing->id,true);return;
     }
     std::string initial=selectedFeatureId();
     if(g_bodyIds.size()>=2)initial=std::to_string(g_bodyIds[g_bodyIds.size()-2])+"; "+std::to_string(g_bodyIds.back());
-    std::vector<EditorField> fields{{"Surface feature IDs",initial},{"Solid","0",true}};
-    if(!editFields("Sew native surfaces","List 2 to 16 face or shell IDs, separated by semicolons. A solid requires one closed shell.",fields))return;
+    std::vector<EditorField> fields{{"Surface feature IDs",initial},{"Solid","0",true},{"Require one connected surface patch","1",true}};
+    if(!editFields("Glue native surfaces","List 2 to 16 face or shell IDs, separated by semicolons. Connected patches are checked; a solid additionally requires one closed shell with no free edges.",fields))return;
+    if(revision!=g_session.revision||epoch!=g_documentEpoch)throw std::runtime_error("Drawing changed while choosing surface glue; select current surfaces again");
     std::vector<u64> ids;std::istringstream names(fields[0].value);std::string token;
     while(std::getline(names,token,';')){token=trimField(token);if(token.empty())continue;ids.push_back(featureIdField(token));}
     if(ids.size()<2||ids.size()>16)throw std::runtime_error("Sew needs 2 to 16 features");
     V p=V::makeObj();p.set("solid",V::makeStr(fields[1].value));
-    addNativeFeature(FeatureType::Sew,"Sew",std::move(p),V::makeObj(),ids);
+    V native=V::makeObj();native.set("require_connected",V::makeBool(fields[2].value=="1"));addNativeFeature(FeatureType::Sew,"Glue surfaces",std::move(p),std::move(native),ids);
 }
 static std::string frameFormText(const arkjson::Value* row,const char* key,const char* fallback){
     const auto* value=row?row->find(key):nullptr;return value?(value->t==arkjson::Value::Str?value->str:value->dump()):std::string(fallback);
@@ -3358,17 +3388,19 @@ static const std::vector<StudioCommandGroup>& studioCommandGroups(){
     group("Document",{{55,"New document"},{17,"Open ARK"},{16,"Save ARK"},{52,"Import source STEP"},{213,"Export STL/OBJ/FBX/STEP/IGES"},{51,"Export straight tube STEP"},{82,"Export native STEP"},{12,"Export mesh snapshot"}});
     group("Sketch entities",{{660,"Corner rectangle"},{661,"Center rectangle"},{662,"Rectangle through three points"},{663,"Parallelogram"},{664,"Straight slot"},{665,"Center slot"},{666,"Arc slot"},{667,"Arc slot through three points"},{668,"Polygon"},{669,"Circle through three perimeter points"},{670,"Ellipse"},{671,"Partial ellipse"},{672,"Parabola"},{673,"Conic"},{674,"Style spline"},{675,"Equation curve 2D"},{676,"Sketch point"},{677,"Centerline"},{678,"Midpoint line"},{679,"Route sketch"},{680,"Belt sketch"},{681,"Text engraving"},{682,"Spline on exact surface"},{683,"Interpolating spline 3D"},{684,"Sweep with varying sections"},{685,"Exact polynomial XYZ"},{686,"Center rectangle through three points"}});
     group("Construction",{{630,"Offset plane"},{631,"Plane at angle"},{632,"Plane through three points"},{633,"Plane through axis and point"},{634,"Plane normal to axis at point"},{635,"Axis through two points"},{636,"Axis at plane intersection"},{637,"Construction point XYZ"},{638,"Linked construction point"},{639,"Frame between two points"},{640,"Select construction datum"},{641,"Toggle selected datum"},{642,"Show all datums"},{643,"Hide all datums"},{644,"Edit selected datum"}});
+    group("Direct authoring",{{650,"Push / pull source face"},{651,"Move body"},{652,"Extrude mesh patch"},{653,"Move mesh vertex"},{654,"Move mesh edge"},{659,"Source dimensions"},{754,"Sample and weld mesh"},{658,"Select adjacent tangent faces"},{750,"Helix curve"},{752,"Loft section and guide controls"},{710,"Skeleton code editor"}});
+    group("Image references",{{730,"Attach image to Assistant"},{731,"Inspire design"},{732,"Image to CAD"},{733,"Remove pending image"}});
     group("Sketch & planes",{{610,"Edit sketch in viewport"},{611,"Exit sketch edit"},{60,"Create / edit plane"},{113,"Attach plane to feature"},{69,"Select plane"},{72,"Toggle datum frames"},{61,"Rectangle"},{62,"Circle / opening"},{543,"Sketch line"},{544,"Arc through three points"},{545,"Arc from start tangent"},{546,"Arc from centre and angles"},{547,"3D arc through three points"},{548,"3D tangent arc"},{63,"Interpolating spline"},{70,"Edit entity coordinates"},{73,"Add constraint"},{89,"Edit selected constraint"},{90,"Remove selected constraint"},{542,"Rename sketch entity"},{536,"Project geometry to 2D sketch"},{537,"Include linked geometry in 3D"},{538,"Create exact spatial curve"},{700,"3D sketch constraints"},{591,"Parametric curve dimension"},{592,"XYZ equation curve"},{593,"Offset saved sketch curve"},{64,"Edit raw sketch JSON"},{65,"Extrude sketch"},{66,"Cut from sketch"},{67,"Named parameter"},{68,"Toggle sketch overlay"}});
     group("Solids",{{1,"Box"},{2,"Cylinder"},{3,"Sphere"},{4,"Cone"},{5,"Torus"},{6,"Polygon extrusion"},{7,"Revolve"},{11,"Linear pattern"}});
     group("Exact solids",{{100,"Native primitive"},{101,"Extrude saved sketch"},{102,"Union / cut / common"},{103,"Hole / slot / profile pocket"},{104,"Fillet / chamfer"},{106,"Draft faces"},{107,"Linear / circular pattern"},{108,"Mirror solid"},{105,"Rigid transform"},{594,"Offset exact solid"}});
-    group("Modify",{{597,"Jump to adjacent face / edge"},{8,"Union"},{9,"Subtract bodies"},{10,"Intersect"},{108,"Mirror solid"},{25,"Delete selection"},{18,"Undo"},{19,"Redo"}});
+    group("Modify",{{597,"Jump to adjacent face / edge"},{8,"Fuse bodies"},{9,"Carve body"},{10,"Keep overlap"},{108,"Mirror solid"},{25,"Delete selection"},{18,"Undo"},{19,"Redo"}});
     group("Tube & assembly",{{215,"Create double-wishbone suspension"},{384,"Spring unit controls"},{383,"Play / pause suspension"},{26,"Bend-program tube"},{40,"Laser tube"},{27,"Create assembly"},{28,"Duplicate instance"},{29,"Instance placement"},{93,"Ground / unground instance"},{94,"Add assembly mate"},{95,"Edit selected mate"},{96,"Remove selected mate"},{30,"Edit tube program"}});
-    group("Native surfaces",{{161,"Edit selected feature"},{162,"Edit driving sketch"},{76,"Loft sketches"},{77,"Fill closed sketch"},{78,"NURBS surface"},{150,"Sweep sketches"},{151,"Extrude sketch surface"},{152,"Revolve sketch surface"},{153,"Offset selected surface"},{154,"Sew surfaces"},{79,"Thicken selected surface"},{491,"Extract exact semantic face"},{492,"Trim exact surface by datum plane"},{595,"Project curve onto surface"},{596,"Trim surface by closed curve"}});
+    group("Native surfaces",{{161,"Edit selected feature"},{162,"Edit driving sketch"},{76,"Loft sketches"},{77,"Fill closed sketch"},{78,"NURBS surface"},{150,"Sweep sketches"},{151,"Extrude sketch surface"},{152,"Revolve sketch surface"},{153,"Offset selected surface"},{154,"Glue surfaces"},{79,"Thicken selected surface"},{491,"Extract exact semantic face"},{492,"Trim exact surface by datum plane"},{595,"Project curve onto surface"},{596,"Trim surface by closed curve"}});
     group("Mesh",{{155,"Weld mesh"},{156,"Smooth mesh"},{157,"Decimate mesh"},{158,"Offset mesh"},{159,"Fill planar holes"},{160,"Import STL/OBJ"}});
     group("Sheet metal",{{120,"Create sheet base"},{127,"Edit sheet base"},{494,"Original-blank jog add/edit/remove"},{495,"Linked sketch bend add/edit/remove"},{121,"Add flange"},{122,"Edit flange"},{123,"Remove flange"},{394,"Add return hem"},{395,"Edit return hem"},{396,"Remove return hem"},{397,"Add circular emboss"},{398,"Edit circular emboss"},{399,"Remove circular emboss"},{124,"Add opening or pattern"},{125,"Edit opening"},{126,"Remove opening"},{327,"Export analytic flat DXF"},{128,"Play / pause bend preview"},{80,"Create L bend"},{81,"Import sheet STEP"},{83,"Show formed"},{84,"Show flat"}});
     group("View & agents",{{590,"BOM / bill of materials"},{585,"Measure 2D / X and Y"},{586,"Measure 3D / distance and XYZ"},{587,"Units / length, mass and volume"},{20,"Fit document"},{71,"Normal to sketch plane"},{180,"Front"},{181,"Back"},{23,"Top"},{184,"Bottom"},{182,"Right"},{183,"Left"},{24,"Isometric"},{175,"Orthographic"},{174,"Visible edges"},{186,"Cycle ambient occlusion"},{187,"Edit selected body material"},{188,"Inspect mass and center of mass"},{176,"Orbit"},{177,"Pan"},{178,"Zoom"},{14,"Wireframe"},{22,"Grid"},{56,"Graphics settings"},{567,"Project tool activity"},{57,"ChatGPT account"},{357,"Connectors / OpenAI, Claude, Grok..."},{58,"Codex / live MCP"},{21,"Raw agent command"},{31,"Help"},{44015,"ARK updates"}});
     group("Frames, electronics & routing",{{210,"Construction frame"},{549,"Exact tube end fit"},{496,"Frame endpoint trim/extend"},{497,"Frame crossing-plane trim"},{498,"Frame weld add/edit/remove"},{211,"PCB and mounting"},{212,"Cable route"}});
-    group("Physics & loads",{{190,"Assembly mass"},{216,"Loads and physical assumptions"},{189,"Close mass inspector"}});
+    group("Physics & loads",{{755,"Collision check"},{190,"Assembly mass"},{216,"Loads and physical assumptions"},{189,"Close mass inspector"}});
     group("Motion",{{451,"Mechanical relation"},{452,"Motion driver"},{453,"Play / pause motion"},{454,"Reset motion"},{469,"Transmission teeth and cadence"}});
     group("Selection & display",{{170,"Select body"},{171,"Select face"},{172,"Select edge"},{173,"Select curve"},{401,"Feature inspector"},{410,"Model explorer"},{411,"Display layers"},{412,"Properties inspector"},{462,"Shaded"},{463,"Shaded with edges"},{464,"Wireframe style"},{465,"Show view cube"},{461,"Navigation controls"},{460,"Full screen"},{191,"Home view"},{340,"Hide selected body"},{341,"Show selected body"},{342,"Spotlight selected body"},{343,"Exit Spotlight"},{344,"Show all bodies"}});
     group("Manufacturing previews",{{320,"Unfold all sheets"},{321,"Refold all sheets"},{322,"Play all sheet bend sequences"},{323,"Pause all sheet bend sequences"},{325,"Edit selected sheet"},{326,"Stock preview"},{468,"Sheet opening pattern"}});
@@ -3407,7 +3439,7 @@ static LRESULT CALLBACK commandSearchProc(HWND hwnd,UINT message,WPARAM wParam,L
 }
 static void moduleCommands(int category){
     HMENU menu=CreatePopupMenu();auto group=[&](const char* title,std::initializer_list<std::pair<int,const char*>> entries){HMENU sub=CreatePopupMenu();for(auto entry:entries)AppendMenuA(sub,MF_STRING,entry.first,entry.second);AppendMenuA(menu,MF_POPUP,(UINT_PTR)sub,title);};
-    if(category==0){group("Solids",{{100,"Primitive"},{101,"Extrude saved sketch"},{102,"Union / cut / common"},{103,"Hole / pocket"},{104,"Fillet / chamfer"},{106,"Draft"},{107,"Pattern"},{108,"Mirror"},{105,"Rigid transform"}});group("Surfaces",{{76,"Loft"},{77,"Fill"},{78,"NURBS"},{150,"Sweep"},{151,"Extrude surface"},{152,"Revolve surface"},{153,"Offset"},{154,"Sew"},{79,"Thicken"}});group("Frames & motion",{{210,"Construction frame"},{26,"Tube"},{215,"Suspension"},{384,"Spring unit controls"},{27,"Assembly"},{94,"Geometric mate"},{451,"Mechanical relation"},{452,"Motion driver"}});group("Electronics",{{211,"PCB"},{212,"Cable route"}});group("Mesh",{{155,"Weld"},{156,"Smooth"},{157,"Decimate"},{158,"Offset"},{159,"Fill planar holes"},{160,"Import STL/OBJ"}});}
+    if(category==0){group("Solids",{{100,"Primitive"},{101,"Extrude saved sketch"},{102,"Union / cut / common"},{103,"Hole / pocket"},{104,"Fillet / chamfer"},{106,"Draft"},{107,"Pattern"},{108,"Mirror"},{105,"Rigid transform"}});group("Surfaces",{{76,"Loft"},{77,"Fill"},{78,"NURBS"},{150,"Sweep"},{151,"Extrude surface"},{152,"Revolve surface"},{153,"Offset"},{154,"Glue surfaces"},{79,"Thicken"}});group("Frames & motion",{{210,"Construction frame"},{26,"Tube"},{215,"Suspension"},{384,"Spring unit controls"},{27,"Assembly"},{94,"Geometric mate"},{451,"Mechanical relation"},{452,"Motion driver"}});group("Electronics",{{211,"PCB"},{212,"Cable route"}});group("Mesh",{{155,"Weld"},{156,"Smooth"},{157,"Decimate"},{158,"Offset"},{159,"Fill planar holes"},{160,"Import STL/OBJ"}});}
     else if(category==1){group("Physics",{{187,"Material and appearance"},{188,"Mass / center of gravity"},{190,"Assembly mass"},{216,"Loads"}});group("View",{{56,"Graphics settings"},{174,"Edges"},{186,"Ambient occlusion"},{175,"Orthographic"},{461,"Navigation controls"}});group("Agents",{{400,"Assistant"},{58,"Live MCP"},{21,"Agent command"},{57,"Account"},{357,"Connectors"}});}
     else if(category==2){group("Document",{{55,"New"},{17,"Open"},{16,"Save"},{213,"Export"},{52,"Import STEP"},{81,"Import sheet STEP"},{160,"Import mesh"}});group("History",{{18,"Undo"},{19,"Redo"}});}
     else if(category==3){group("Display style",{{462,"Shaded"},{463,"Shaded with edges"},{464,"Wireframe"},{175,"Orthographic"},{56,"Graphics settings"},{465,"Show view cube"}});group("Named views",{{180,"Front"},{181,"Back"},{23,"Top"},{184,"Bottom"},{182,"Right"},{183,"Left"},{24,"Isometric"},{20,"Fit"}});}
@@ -3436,8 +3468,19 @@ static void refreshSketchEditing();
 static void sketchDrawingDimensionDialog();
 static void sourceParameterDialog();
 static void editViewportSketchDimension();
+static void activateSelectionMode(int mode);
 #include "datum_authoring.inl"
+#include "skeleton_editor.inl"
+static bool handleDirectAuthoringAction(int id);
+static void helixDialog();
+static void loftControlDialog();
+static void selectTangentFaces();
+static void collisionCheckDialog();
 static void uiAction(int id){
+    if(handleAssistantImageAction(id)||handleDirectAuthoringAction(id))return;
+    if(id==710){openSkeletonEditor();return;}
+    if(id==750){helixDialog();return;}if(id==752){loftControlDialog();return;}if(id==658){selectTangentFaces();return;}
+    if(id==755){collisionCheckDialog();return;}
     if(handleDatumAuthoringAction(id))return;
     if(sketchRecipeAction(id)){refreshSketchEditing();return;}
     if(id==700){spatialConstraintsDialog();return;}
@@ -3592,7 +3635,7 @@ static void uiAction(int id){
         case 68:g_showSketches=!g_showSketches;rebuildSketchOverlay();break;
         case 69:{std::string available="XY, XZ, YZ";for(auto& plane:g_doc.planes)available+=", "+plane.name;std::vector<EditorField> fields{{"Plane name",g_activePlane}};if(editFields("Select construction plane",available.c_str(),fields)){resolvePlane(g_doc,fields[0].value);g_activePlane=fields[0].value;g_activeSketch.clear();g_showSketches=true;rebuildSketchOverlay();}}break;
         case 71:alignSketchCamera();break;
-        case 74:if(g_teamMode)sendTeam();else sendAssistant();break;case 75:if(g_teamMode)cancelTeam();else *g_assistantCancel=true;break;
+        case 74:if(g_teamMode)sendTeam();else sendAssistant();break;case 75:clearPendingAssistantImage();if(g_teamMode)cancelTeam();else *g_assistantCancel=true;break;
         case 470:case 471:if(g_chatBusy||(g_teamStarted&&g_agentTeam.snapshot().running)){g_status="Finish or cancel the active run before switching modes.";break;}if(id==470&&g_teamStarted){cancelTeam();g_teamStarted=false;resetTeamView();}g_teamMode=id==471;g_assistantDockOpen=true;layout();saveUiSettings();break;
         case 472:if(g_teamStarted){pollTeam(true);g_agentTeam.pause(!g_teamSnapshot.paused);pollTeam(true);g_status=g_teamSnapshot.paused?"Team paused at request/tool boundaries; an active request may finish.":"Team resumed.";}break;
         case 473:chooseTeamTarget();break;
@@ -3601,10 +3644,7 @@ static void uiAction(int id){
         case 150:sweepDialog();break;case 151:extrudeSurfaceDialog();break;case 152:revolveSurfaceDialog();break;case 153:offsetSurfaceDialog();break;case 154:sewDialog();break;
         case 155:meshWeldDialog();break;case 156:meshSmoothDialog();break;case 157:meshDecimateDialog();break;case 158:meshOffsetDialog();break;case 159:meshFillDialog();break;case 160:importMeshDialog();break;
         case 161:editSelectedFeature();break;case 162:editDrivingSketch();break;
-        case 170:clearDatumSelection();g_pickKind=0;g_picked.clear();refreshSelectionLines();g_status="Body selection / semantic picks cleared";break;
-        case 171:g_pickKind=1;g_status="Face selection. Click a face, or a datum in the explorer for a mirror plane.";break;
-        case 172:g_pickKind=2;g_status="Edge selection. Fillet and chamfer use these names.";break;
-        case 173:g_pickKind=3;g_showSketches=true;rebuildSketchOverlay();g_status="Curve selection: named sketch entities and exact spatial curve edges. Select one for projection or a sweep path.";break;
+        case 170:case 171:case 172:case 173:activateSelectionMode(id-170);break;
         case 174:g_showEdges=!g_showEdges;g_status=g_showEdges?"Visible edges":"Edges hidden";try{saveUiSettings();}catch(...){}break;
         case 175:g_cameraOrtho=!g_cameraOrtho;g_status=g_cameraOrtho?"Orthographic view":"Perspective view";try{saveUiSettings();}catch(...){}break;
         case 176:g_navMode=0;g_status="Free orbit follows middle-button drag in all directions. Alt + middle spins; Shift + middle pans; wheel zooms.";break;
@@ -3632,9 +3672,7 @@ static void uiAction(int id){
         case 6:addFeat(FeatureType::Extrude,{{"shape","polygon"},{"n","6"},{"r","18"},{"height","24"}});break;
         case 7:addFeat(FeatureType::Revolve,{{"shape","rect"},{"w","8"},{"d","18"},{"cx","16"},{"angle","300"}});break;
         case 8:case 9:case 10:
-            if(!g_doc.assembly.empty()){g_error=true;g_status="Edit part geometry before assembly; instance boolean operations are not available.";break;}
-            if(g_bodyIds.size()>=2)addFeat(FeatureType::Boolean,{},{g_bodyIds[g_bodyIds.size()-2],g_bodyIds.back()},id-8);
-            else {g_status="Create two output bodies before a boolean operation.";g_error=true;}break;
+            namedBooleanDialog(id-8);break;
         case 11:if(!g_bodyIds.empty())addFeat(FeatureType::LinearPattern,{{"dx","100"},{"count","3"}},{g_bodyIds.back()});break;
         case 12:fileAction(true,true);break;
         case 14:wireframe=!wireframe;break;
@@ -3853,6 +3891,8 @@ static GLuint pBg,pBusy,pSolid,pCube,pGrid,pShadow,pUI,pText,pSketch,pGeom,pAo,p
 #include "sketch_edit.inl"
 #include "selection_glow_render.inl"
 #include "curve_dimensions.inl"
+#include "direct_authoring.inl"
+#include "geometry_authoring.inl"
 #include "measurement.inl"
 static void cancelComponentMove(bool restore){
     g_componentDragIntent={};
@@ -3980,60 +4020,8 @@ static void applyComponentMove(){
     using V=arkjson::Value;V command=V::makeObj(),commands=V::makeArr(),args=V::makeObj();command.set("op",V::makeStr("assembly.drive"));command.set("driver",V::makeNum((double)move.driver));command.set("mate",V::makeNum((double)move.joint.mate));command.set("mode",V::makeStr(move.joint.mode));command.set("delta",V::makeNum(move.delta));commands.arr.push_back(command);args.set("commands",commands);args.set("expected_revision",V::makeNum((double)move.revision));runTool("doc_apply",args);
     if(!g_error)g_status="Component movement saved / attached components follow / Undo restores the previous placement";
 }
-static bool pickNamedEdgeScreen(int mx,int my,bool curvesOnly=false){
-    struct Candidate{size_t body=0,edge=0;float pixels=0,sx=0,sy=0;Vec3 world;};
-    std::vector<Candidate> candidates;Mat4 vp=cameraProjection()*cameraView();
-    auto project=[&](Vec3 point,float& x,float& y){double w=vp.m[3]*point.x+vp.m[7]*point.y+vp.m[11]*point.z+vp.m[15];
-        if(w<=1e-6)return false;Vec3 clip=vp.transformPoint(point);x=viewX+(float)((clip.x/w+1.)*.5*viewW);y=viewY+(float)((1.-clip.y/w)*.5*viewH);return true;};
-    constexpr float limitPixels=11.f;
-    for(size_t body=0;body<g_bodyIds.size();++body){if(!displayInstance(body))continue;if(curvesOnly){auto* feature=g_doc.find(g_bodyIds[body]);if(!feature||!isCurveFeature(feature->type))continue;}size_t part=g_instancePart[body];if(part>=g_partPicks.size())continue;
-        const PartPick& pick=g_partPicks[part];
-        for(size_t edge=0;edge<pick.edges.size()&&edge<pick.edgeNames.size();++edge){if(pick.edgeNames[edge].empty())continue;
-            const auto& points=pick.edges[edge];for(size_t segment=1;segment<points.size();++segment){
-                Vec3 a=g_instanceWorld[body].transformPoint(points[segment-1]),b=g_instanceWorld[body].transformPoint(points[segment]);float ax,ay,bx,by;
-                if(!project(a,ax,ay)||!project(b,bx,by))continue;float dx=bx-ax,dy=by-ay,span=dx*dx+dy*dy;
-                float t=span<1e-6f?0.f:std::clamp(((mx-ax)*dx+(my-ay)*dy)/span,0.f,1.f);
-                float sx=ax+t*dx,sy=ay+t*dy,px=sx-mx,py=sy-my,pixels=std::sqrt(px*px+py*py);
-                if(pixels<=limitPixels)candidates.push_back({body,edge,pixels,sx,sy,a+(b-a)*t});
-            }
-        }
-    }
-    std::map<std::pair<size_t,size_t>,Candidate> distinct;for(const auto& candidate:candidates){auto key=std::make_pair(candidate.body,candidate.edge);auto found=distinct.find(key);if(found==distinct.end()||candidate.pixels<found->second.pixels)distinct[key]=candidate;}candidates.clear();for(const auto& entry:distinct)candidates.push_back(entry.second);
-    std::sort(candidates.begin(),candidates.end(),[](const Candidate& a,const Candidate& b){
-        if(a.pixels!=b.pixels)return a.pixels<b.pixels;return a.body!=b.body?a.body<b.body:a.edge<b.edge;
-    });
-    Vec3 eye=camEye();size_t probes=0;
-    for(const Candidate& candidate:candidates){if(++probes>64)break;
-        SurfaceHit blocker=pickSurface((int)std::lround(candidate.sx),(int)std::lround(candidate.sy));
-        if(blocker.hit){Vec3 worldHit=g_instanceWorld[(size_t)blocker.body].transformPoint(blocker.local);
-            double candidateDepth=(candidate.world-eye).len(),hitDepth=(worldHit-eye).len();
-            double mmPerPixel=2.*(g_cameraOrtho?std::max(2.,dist*std::tan(35*K_PI/360.)):candidateDepth*std::tan(35*K_PI/360.))/std::max(viewH,1);
-            if(hitDepth+std::max(.4,mmPerPixel*4.)<candidateDepth)continue;
-        }
-        selBody=(int)candidate.body;SelectionItem item;item.feature=g_bodyIds[candidate.body];item.instance=g_instanceIds[candidate.body];item.copy=g_instanceCopies[candidate.body];item.kind="edge";
-        item.name=g_partPicks[g_instancePart[candidate.body]].edgeNames[candidate.edge];toggleSelection(std::move(item));return true;
-    }
-    return false;
-}
-static void pickReference(int mx,int my){
-    if(g_pickKind==4&&pickDatumScreen(mx,my))return;
-    if(g_pickKind==4){g_status="Click a visible construction datum";return;}
-    g_explorerFeature=0;g_selectedExplorerEntity.reset();
-    if(g_pickKind==3){float best=8.f;const CurveSample* chosen=nullptr;
-        for(const auto& sample:g_curveSamples){float ax,ay,bx,by;if(!projectScreen(sample.a,ax,ay)||!projectScreen(sample.b,bx,by))continue;float abx=bx-ax,aby=by-ay,len=abx*abx+aby*aby;float t=len<1e-6?0.f:clamp(((mx-ax)*abx+(my-ay)*aby)/len,0.f,1.f);float dx=ax+abx*t-mx,dy=ay+aby*t-my;float distance=std::sqrt(dx*dx+dy*dy);if(distance<best){best=distance;chosen=&sample;}}
-        if(!chosen){if(pickNamedEdgeScreen(mx,my,true))return;g_status="Click a visible named sketch entity or exact spatial curve";return;}
-        SelectionItem item;item.kind="curve";item.owner=chosen->sketch;item.name=chosen->name;toggleSelection(item);return;
-    }
-    if(g_allSheetsFlat||g_stockMode){g_status="Preview meshes have no persistent face or edge references. Return to Formed for semantic picking.";return;}
-    if(g_pickKind==2){if(!pickNamedEdgeScreen(mx,my)){auto visible=pickSurface(mx,my);bool unnamed=false;if(visible.hit){size_t part=g_instancePart[(size_t)visible.body];unnamed=part<g_partPicks.size()&&std::none_of(g_partPicks[part].edgeNames.begin(),g_partPicks[part].edgeNames.end(),[](const std::string& name){return !name.empty();});}g_status=unnamed?"This part has no named edge references. Select one of its named planar faces for projection.":"Move closer to a visible named edge (11 px tolerance)";}return;}
-    SurfaceHit hit=pickSurface(mx,my);if(!hit.hit){g_status=g_pickKind==1?"Click a face":"Click an edge";return;}
-    selBody=hit.body;size_t part=g_instancePart[(size_t)hit.body];if(part>=g_partPicks.size()){g_status="This body has no named faces or edges";return;}
-    const PartPick& pick=g_partPicks[part];
-    if(g_pickKind==1){int face=-1;for(int index=0;index<(int)pick.faces.size();++index)if((int)hit.triangle>=pick.faces[(size_t)index].first&&(int)hit.triangle<pick.faces[(size_t)index].first+pick.faces[(size_t)index].second)face=index;
-        if(face<0||pick.faceNames[(size_t)face].empty()){g_status="This face has no persistent name";return;}
-        SelectionItem item;item.feature=g_bodyIds[(size_t)hit.body];item.instance=g_instanceIds[(size_t)hit.body];item.copy=g_instanceCopies[(size_t)hit.body];item.kind="face";item.name=pick.faceNames[(size_t)face];toggleSelection(item);return;
-    }
-}
+#include "selection_picking.inl"
+#include "selection_hover.inl"
 
 // ---------------------------------------------------------------------------
 
@@ -4064,6 +4052,9 @@ static GLint suVp,suModel,suOutline,suColor,suEye,suSel,suHard;
 static GLint guView,guProj,guModel,guHard,auProj,auFocal,auOrtho,auRadius,auBias,cuOrigin,euVp,euModel;
 static GLint uuVp,uuRc,uuRad,uuFill,uuBorder,uuBW,uuGlyph;
 static GLuint quadVao,gridVao,gridVbo,textVao,textVbo,gFbo=0,gGeomTex=0,gAoTex=0,gDepthTex=0,gCubeVao=0,gCubeVbo=0,gCompassVao=0,gCompassVbo=0;
+static void drawAssistantAttachmentThumbnail(const AssistantImageAttachment& attachment,float x,float y,float w,float h){
+    if(attachment.thumbnailRGBA.empty()||!attachment.thumbnailWidth||!attachment.thumbnailHeight)return;static GLuint texture=0;static std::vector<unsigned char> uploaded;static unsigned uploadedW=0,uploadedH=0;if(!texture)glGenTextures(1,&texture);glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,texture);if(uploaded!=attachment.thumbnailRGBA||uploadedW!=attachment.thumbnailWidth||uploadedH!=attachment.thumbnailHeight){glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,(GLsizei)attachment.thumbnailWidth,(GLsizei)attachment.thumbnailHeight,0,GL_RGBA,GL_UNSIGNED_BYTE,attachment.thumbnailRGBA.data());glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);uploaded=attachment.thumbnailRGBA;uploadedW=attachment.thumbnailWidth;uploadedH=attachment.thumbnailHeight;}float scale=std::min(w/attachment.thumbnailWidth,h/attachment.thumbnailHeight),width=attachment.thumbnailWidth*scale,height=attachment.thumbnailHeight*scale;glUseProgram(pImage);glUniform2f(glGetUniformLocation(pImage,"vp"),(float)winW,(float)winH);glUniform4f(glGetUniformLocation(pImage,"rc"),x+(w-width)*.5f,y+(h-height)*.5f,width,height);glUniform1i(glGetUniformLocation(pImage,"image"),0);glBindVertexArray(quadVao);glDrawArrays(GL_TRIANGLES,0,6);glUseProgram(pUI);
+}
 struct CubeTriangle{Vec3 a,b,c,normal;int face=-1;};
 struct CubeHit{bool hit=false;int face=-1;Vec3 normal{};};
 static std::vector<CubeTriangle> g_cubeTriangles;
@@ -4168,7 +4159,7 @@ static void drawSurfaces(bool geometry,const Mat4& view,const Mat4& proj,const G
         glBindVertexArray(gm.vao);glPolygonMode(GL_FRONT_AND_BACK,!geometry&&wireframe?GL_LINE:GL_FILL);glDrawElements(GL_TRIANGLES,gm.count*3,GL_UNSIGNED_INT,nullptr);
         if(!geometry&&!wireframe&&g_instancePart[i]<g_partPicks.size()){glUniform3f(suColor,.93f,.58f,.26f);glUniform1f(suSel,1.f);glPolygonOffset(-1.f,-1.f);
             auto& pick=g_partPicks[g_instancePart[i]];
-            for(const auto& item:g_picked)if(item.kind=="face"&&item.feature==g_bodyIds[i]&&(!item.instance||(item.instance==g_instanceIds[i]&&item.copy==g_instanceCopies[i])))for(size_t face=0;face<pick.faceNames.size()&&face<pick.faces.size();++face)if(pick.faceNames[face]==item.name&&pick.faces[face].second>0)glDrawElements(GL_TRIANGLES,pick.faces[face].second*3,GL_UNSIGNED_INT,(void*)((size_t)pick.faces[face].first*3*sizeof(unsigned)));
+            for(const auto& item:g_picked)if(item.kind=="face"&&item.feature==g_bodyIds[i]&&(!item.instance||(item.instance==g_instanceIds[i]&&item.copy==g_instanceCopies[i])))for(size_t face=0;face<pick.faceNames.size()&&face<pick.faces.size();++face)if(faceReferenceMatches(pick,face,item.name)&&pick.faces[face].second>0)glDrawElements(GL_TRIANGLES,pick.faces[face].second*3,GL_UNSIGNED_INT,(void*)((size_t)pick.faces[face].first*3*sizeof(unsigned)));
             glPolygonOffset(1.f,1.f);
         }
     }
@@ -4510,7 +4501,7 @@ static void drawFrame(HDC hdc){
         if(g_showDatumPlanes){glUniform4f(glGetUniformLocation(pSketch,"tint"),.55,.77,.68,.48);glDrawArrays(GL_LINES,(GLint)(g_sketchLines.size()+g_sketchPoints.size()+g_constraintHighlightLines.size())/3,(GLsizei)g_datumLines.size()/3);}
         if(!g_selectionLines.empty()){glLineWidth(2.5f);glUniform4f(glGetUniformLocation(pSketch,"tint"),.97,.62,.28,1.);glDrawArrays(GL_LINES,(GLint)(g_sketchLines.size()+g_sketchPoints.size()+g_constraintHighlightLines.size()+g_datumLines.size())/3,(GLsizei)g_selectionLines.size()/3);glLineWidth(1.f);}
     }
-    drawSelectedFaceGlow();drawDraftSketches();drawProjectionPreview();drawManualSketchPreview();drawSketchEditPreview();
+    updateSelectionHover(g_pointerX,g_pointerY);drawMeshPointerEdges();drawSelectedFaceGlow();drawSelectedReferenceEdges();drawSelectionHover();drawDraftSketches();drawProjectionPreview();drawManualSketchPreview();drawSketchEditPreview();drawDirectAuthoringPreview();
     // ============================ UI =========================================
     glDisable(GL_DEPTH_TEST);
     glViewport(0,0,winW,winH);
@@ -4590,25 +4581,28 @@ static void drawFrame(HDC hdc){
     rect(0,52,W,42,0,.073,.09,.108,1,.23,.29,.35,.5,1);
     const char* tabNames[]={"Sheet Metal","Model","Sketch","Inspect","Tools","Manage","Surfaces"};float tabX=18;
     for(int module:{0,1,6,2,3,4,5}){float width=textWidth(tabNames[module],.82f)+28;bool active=g_toolModule==module;if(active)rect(tabX,56,width,35,3,.12,.17,.20,1,0,0,0,0,0);textOut(tabNames[module],tabX+14,66,.82f,active?.95f:.77f,active?.98f:.84f,active?1.f:.89f);if(active)rect(tabX,90,width,3,0,.13,.77,.91,1,0,0,0,0,0);g_zones.push_back({tabX,54,width,39,300+module});tabX+=width+7;}
-    float taskX=tabX+12,taskWidth=std::max(1.f,W-taskX-20);std::string activity=!g_activeToolName.empty()?g_activeToolRole+" / "+g_activeToolName:g_teamStarted?(g_teamSnapshot.running?(!g_liveStepLabel.empty()?g_liveStepLabel:"Team active / provider requests"):std::string("Goal: ")+agentGoalStateName(g_teamSnapshot.goalState)+(g_teamSnapshot.goalDeclared?" / explicit lead report":" / completion not reported")):g_assistantResponseFinished?(g_assistantResponseError?"Response interrupted / inspect prior changes":"Response finished / review result"):"Ready / scene orbit";if(!g_draftViews.empty())activity+=" / "+std::to_string(g_draftViews.size())+" uncommitted drafts";
+    float taskX=tabX+12,taskWidth=std::max(1.f,W-taskX-316);std::string activity=!g_activeToolName.empty()?g_activeToolRole+" / "+g_activeToolName:g_teamStarted?(g_teamSnapshot.running?(!g_liveStepLabel.empty()?g_liveStepLabel:"Team active / provider requests"):std::string("Goal: ")+agentGoalStateName(g_teamSnapshot.goalState)+(g_teamSnapshot.goalDeclared?" / explicit lead report":" / completion not reported")):g_assistantResponseFinished?(g_assistantResponseError?"Response interrupted / inspect prior changes":"Response finished / review result"):"Ready / scene orbit";if(!g_draftViews.empty())activity+=" / "+std::to_string(g_draftViews.size())+" uncommitted drafts";
     auto fitHeader=[&](std::string text,float scale){while(!text.empty()&&textWidth(text,scale)>taskWidth)text.pop_back();return text;};textOut(fitHeader(activity,.52f),taskX,58,.52f,.50f,.81f,.94f);textOut(fitHeader(std::to_string(g_liveCompletedSteps)+" committed team steps / drafts are uncommitted",.49f),taskX,75,.49f,.67f,.78f,.89f);
+    {const char* filters[]={"Body","Face","Edge","Curve"};for(int kind=0;kind<4;++kind)button(filters[kind],W-298+kind*70,56,66,170+kind,false,g_pickKind==kind&&!g_directAuthoring.active&&!g_sketchEditing.active&&!g_sketchDrawing.active&&!g_componentMove.armed);}
     rect(0,94,W,124,0,.105,.13,.151,1,.23,.29,.35,.60,1);
     struct RibbonAction{const char* title;int id;};struct RibbonGroup{const char* title;std::vector<RibbonAction> actions;};std::vector<RibbonGroup> groups;
     if(g_toolModule==0)groups={{"Create",{{"Base",120},{"Flange",121},{"Hem",394},{"Stamp",397},{"Opening",124}}},{"Modify",{{"Edit",325},{"Jog",494},{"Sketch bend",495},{"Unfold",320},{"Refold",321}}},{"Pattern",{{"Pattern",468},{"Mirror",108}}},{"Output",{{"Export",213}}}};
-    else if(g_toolModule==1)groups={{"Create",{{"Primitive",100},{"Extrude",101},{"Loft",76},{"3D curve",538},{"Frame",210},{"Tube",26}}},{"Assembly",{{"Assembly",27},{"Mate",94},{"Relation",451},{"Motion",452},{"Library",484}}},{"Frame edits",{{"Trim / extend",496},{"Trim plane",497},{"Weld",498},{"Tube end fit",549}}},{"More",{{"Model tools",456}}}};
+    else if(g_toolModule==1&&g_directAuthoring.active)groups={{"Direct edit",{{"Push / pull",650},{"Move body",651},{"Mesh patch",652},{"Mesh vertex",653},{"Mesh edge",654},{"Value",655},{"Apply",656},{"Cancel",657}}},{"Source",{{"Dimensions",659},{"Sample mesh",754}}},{"Select",{{"Body",170},{"Face",171},{"Tangent patch",658}}},{"Combine",{{"Fuse bodies",8},{"Carve body",9},{"Keep overlap",10}}}};
+    else if(g_toolModule==1)groups={{"Create",{{"Primitive",100},{"Extrude",101},{"Loft",76},{"Helix",750},{"Frame",210},{"Tube",26}}},{"Direct",{{"Push / pull",650},{"Move body",651},{"Mesh patch",652},{"Source dims",659}}},{"Combine",{{"Fuse bodies",8},{"Carve body",9},{"Keep overlap",10}}},{"Assembly",{{"Assembly",27},{"Mate",94},{"Library",484}}},{"Frame edits",{{"Trim / extend",496},{"Trim plane",497},{"Weld",498},{"Tube end fit",549}}},{"More",{{"Model tools",456}}}};
     else if(g_toolModule==2&&g_sketchEditing.active)groups={{"Edit in view",{{"Exit sketch",611},{"Coordinates",70},{"Dimensions",591},{"Source params",577},{"Constraint",73},{"Normal view",71},{"Grid",579}}},{"Sketch",{{"Draw sketch",570},{"Undo",18},{"Redo",19}}}};
     else if(g_toolModule==2&&g_sketchDrawing.active)groups={{"Draw in view",{{"Line",571},{"Polyline",572},{"Rectangle",573},{"Circle",574},{"Arc 3 pt",575},{"Dimensions",576},{"Grid",579},{"Exit sketch",578}}},{"Coordinate forms",{{"Line form",543},{"Arc form",544},{"Tangent arc",545},{"Rectangle",61},{"Circle",62},{"Spline",63}}},{"Modify",{{"Project 2D",536},{"Include 3D",537},{"Edit curve",70},{"Constraint",73},{"Plane",60},{"Source params",577}}},{"Build",{{"Extrude",65},{"Cut",66}}}};
     else if(g_toolModule==2)groups={{"Interactive",{{"Draw sketch",570},{"Edit sketch",610}}},{"Draw 2D",{{"Line",543},{"Arc 3 pt",544},{"Tangent arc",545},{"Rectangle",61},{"Circle",62},{"Spline",63}}},{"Draw 3D",{{"Arc 3D",547},{"Tangent 3D",548},{"3D curve",538}}},{"Modify",{{"Project 2D",536},{"Include 3D",537},{"Edit curve",70},{"Constraint",73},{"Plane",60}}},{"Build",{{"Extrude",65},{"Cut",66}}}};
-    else if(g_toolModule==3)groups={{"Measure",{{"Measure 2D",585},{"Measure 3D",586},{"Units",587}}},{"Selection",{{"Body",170},{"Face",171},{"Edge",172},{"Curve",173}}},{"Inspect",{{"BOM",590},{"Properties",401},{"Mass / CG",188},{"Material",187}}},{"Display",{{"Graphics",56},{"Fit",20}}}};
+    else if(g_toolModule==3)groups={{"Measure",{{"Measure 2D",585},{"Measure 3D",586},{"Units",587}}},{"Selection",{{"Body",170},{"Face",171},{"Tangent faces",658},{"Edge",172},{"Curve",173}}},{"Inspect",{{"Collision",755},{"BOM",590},{"Properties",401},{"Mass / CG",188},{"Material",187}}},{"Display",{{"Graphics",56},{"Fit",20}}}};
     else if(g_toolModule==4)groups={{"Engineering",{{"Model tools",456},{"Physics",188},{"Loads",216},{"Electronics",211},{"Routing",212},{"Library",484}}},{"Agents",{{"Assistant",400},{"Connect",58},{"Providers",357},{"Tools",457}}}};
-    else if(g_toolModule==6)groups={{"Create",{{"Extrude",151},{"Revolve",152},{"Sweep",150},{"Loft",76},{"Fill",77},{"NURBS",78}}},{"Modify",{{"Extract face",491},{"Trim plane",492},{"Offset",153},{"Sew",154},{"Thicken",79}}}};
-    else groups={{"Document",{{"New",55},{"Open",17},{"Save",16},{"Export",213}}},{"History",{{"Undo",18},{"Redo",19},{"Iterations",493},{"Last failure",580}}},{"Manage",{{"BOM",590},{"Parameters",67},{"Import",81},{"Connect",58},{"Account",57},{"More",459}}}};
+    else if(g_toolModule==6)groups={{"Create",{{"Extrude",151},{"Revolve",152},{"Sweep",150},{"Loft",76},{"Fill",77},{"NURBS",78}}},{"Modify",{{"Loft controls",752},{"Extract face",491},{"Trim plane",492},{"Offset",153},{"Glue surfaces",154},{"Thicken",79}}}};
+    else groups={{"Document",{{"New",55},{"Open",17},{"Save",16},{"Export",213}}},{"History",{{"Undo",18},{"Redo",19},{"Iterations",493},{"Last failure",580}}},{"Manage",{{"Skeleton IDE",710},{"BOM",590},{"Parameters",67},{"Import",81},{"Connect",58},{"Account",57},{"More",459}}}};
     groups.push_back({"Discover",{{"All tools",480}}});
     int count=0;for(const auto& group:groups)count+=(int)group.actions.size();float cardW=std::min(105.f,(W-32-(groups.size()-1)*27)/std::max(count,1));float cursor=18;
     for(size_t groupIndex=0;groupIndex<groups.size();++groupIndex){auto& group=groups[groupIndex];float start=cursor;
         for(const auto& action:group.actions){if(action.id>=496&&action.id<=498)g_frameRibbonBounds[action.id-496]={cursor,100,cardW-3,92,action.id};bool hover=mp.x>=cursor&&mp.x<cursor+cardW&&mp.y>=100&&mp.y<194;bool enabled=true;
             if(action.id==187)enabled=selBody>=0;if(action.id==188||action.id==216)enabled=selBody>=0||!g_doc.assembly.empty();if(action.id==451||action.id==452)enabled=!g_doc.assembly.empty();
-            if(action.id==576)enabled=g_sketchDrawing.active&&!g_sketchDrawing.anchors.empty()&&g_sketchDrawing.tool!=4;
+            if(action.id==576)enabled=g_sketchDrawing.active&&!g_sketchDrawing.anchors.empty()&&(g_sketchDrawing.tool!=4||g_sketchDrawing.anchors.size()>=2);
+            if(action.id==655||action.id==656)enabled=g_directAuthoring.active&&g_directAuthoring.feature!=0;
             if(g_sketchDrawing.active&&action.id>=571&&action.id<=575&&g_sketchDrawing.tool==action.id-571)rect(cursor,99,cardW-3,94,5,.055f,.18f,.22f,1,.14f,.64f,.74f,.65f,1);
             if(action.id>=496&&action.id<=498){auto* frame=selectedPartFeature();enabled=frame&&frame->type==FeatureType::ConstructionFrame;}
             if(g_toolModule==0&&action.id==108)enabled=false;
@@ -4698,8 +4692,8 @@ static void drawFrame(HDC hdc){
     if(g_allSheetsFlat)textOut("Nominal flat reference / display only",captionX,captionY,.70f,.62f,.77f,.85f);
     else if(g_stockMode)textOut("Nominal straight stock / display only",captionX,captionY,.70f,.62f,.77f,.85f);
     else if(g_allSheetsPlaying)textOut("Bend sequence / display only",captionX,captionY,.70f,.62f,.77f,.85f);
-    if(g_pickKind){static const char* hints[]={"","FACE / click a visible named surface  |  Esc exits","EDGE / click within 11 px of a visible named edge  |  Esc exits","CURVE / click a sketch curve  |  Esc exits"};
-        std::string hint=fitText(hints[std::clamp(g_pickKind,0,3)],.62f,viewX+viewW-captionX-24);float hintY=captionY+50,width=textWidth(hint,.62f)+18;
+    if(g_pickKind){static const char* hints[]={"","FACE / hover previews / click replaces / Ctrl or Shift adds / Esc exits","EDGE / hover previews / click replaces / Ctrl or Shift adds / Esc exits","CURVE / click a sketch curve  |  Esc exits"};
+        std::string hint=fitText((g_hoverReferenceHint.empty()?std::string{}:g_hoverReferenceHint+" / ")+hints[std::clamp(g_pickKind,0,3)],.62f,viewX+viewW-captionX-24);float hintY=captionY+50,width=textWidth(hint,.62f)+18;
         rect(captionX-1,hintY-4,width,27,6,.09f,.14f,.20f,.87f,.35f,.55f,.76f,.62f,1);
         textOut(hint,captionX+8,hintY,.62f,.79f,.91f,.99f);}
     if(g_projectionPreview.active){float x=captionX,y=(float)viewY+96,width=std::min(540.f,(float)viewW-g_cubeS-200.f);rect(x,y,width,52,8,.025f,.095f,.105f,.94f,.19f,.80f,.73f,.82f,1.2f);std::string title=std::string(g_projectionPreview.spatial?"3D INCLUDE PREVIEW / ":"2D PROJECTION PREVIEW / ")+g_projectionPreview.target;textOut(fitText(title,.70f,width-188),x+12,y+7,.70f,.64f,.98f,.93f);textOut(fitText(g_projectionPreview.source,.58f,width-188),x+12,y+29,.58f,.68f,.86f,.90f);button("Apply",x+width-169,y+10,72,539,true);button("Cancel",x+width-89,y+10,76,540);}
@@ -5088,10 +5082,16 @@ static void drawFrame(HDC hdc){
     if(!g_teamMode){auto timing=measuredPerformanceLabel(g_assistantPerformanceRun);if(!timing.empty())runTokens+=" / "+timing;}
     label(fitText(runTokens,.65f,g_teamMode?viewW-652:viewW-350),viewX+22,cy+33,.65f);
     if(g_teamMode){
+        const float imageTop=H-(assistantImageComposerHeight()>40?252.f:188.f);
+        const float cardRoom=imageTop-cy-teamCardTop-teamCardStride*(teamCardRows()-1)-4;
+        const float cardHeight=cardRoom>=teamCardHeight?teamCardHeight:cardRoom>=148?148.f:std::clamp(cardRoom,84.f,92.f);
+        const bool fullCard=cardHeight>=teamCardHeight,summaryCard=cardHeight>=148;
+        const bool showGoal=cardRoom>=cardHeight+30;
         if(g_teamStarted&&std::any_of(g_teamSnapshot.roles.begin(),g_teamSnapshot.roles.end(),[](const auto& role){return role.state==AgentTeamState::AwaitingContinuation||role.state==AgentTeamState::Interrupted||role.state==AgentTeamState::Failed;}))button("Resume after error",viewX+viewW-206,cy+41,184,490);
         std::string live=g_teamStarted?(g_teamSnapshot.cancelled?"CANCELLED":g_teamSnapshot.paused?"PAUSED / requests and tools gated":g_teamSnapshot.running?"LIVE / provider and tool activity":std::string("Goal: ")+agentGoalStateName(g_teamSnapshot.goalState)+(g_teamSnapshot.goalDeclared?" / lead report":" / completion not reported")):"READY / choose role settings and send a goal";
         if(g_teamStarted&&!g_teamSnapshot.running&&!g_teamSnapshot.cancelled&&std::any_of(g_teamSnapshot.roles.begin(),g_teamSnapshot.roles.end(),[](const auto& role){return role.state==AgentTeamState::AwaitingContinuation||role.state==AgentTeamState::Interrupted||role.state==AgentTeamState::Failed;}))live="AWAITING CONTINUATION / previous commits and receipts retained";
         if(g_teamStarted&&!g_teamSnapshot.goalSummary.empty())live+=" / "+g_teamSnapshot.goalSummary;
+        if(!showGoal&&!g_teamGoal.empty())live="Goal: "+g_teamGoal+" / "+live;
         textOut(fitText(live,.65f,viewW-652),viewX+22,cy+51,.65f,.50f,.81f,.94f);
         int columns=teamCardColumns(),pageSize=columns*teamCardRows();unsigned pages=(g_teamRoleCount+pageSize-1)/pageSize;g_teamPage=std::min(g_teamPage,pages-1);
         button(g_teamFocusedWorkflow?"Focused":"Parallel",viewX+viewW-622,cy+41,114,44014,false,g_teamFocusedWorkflow);
@@ -5101,21 +5101,22 @@ static void drawFrame(HDC hdc){
         g_teamCardContentFits=true;g_teamCardBoundsFailure.clear();
         for(size_t cell=0;cell<(size_t)pageSize;++cell){size_t i=g_teamPage*pageSize+cell;if(i>=g_teamRoleCount)break;float x=viewX+22+(cardWidth+8)*(cell%columns),y=cy+teamCardTop+teamCardStride*(cell/columns);const AgentTeamRoleSnapshot* role=i<g_teamSnapshot.roles.size()?&g_teamSnapshot.roles[i]:nullptr;
             bool working=role&&role->state==AgentTeamState::Working,failed=role&&role->state==AgentTeamState::Failed;float accentR=failed?.92f:i==0?.34f:i==1?.71f:.39f,accentG=failed?.40f:i==0?.75f:i==1?.63f:.83f;
-            rect(x,y,cardWidth,teamCardHeight,8,.058f,.083f,.107f,.97f,accentR,accentG,.91f,working?.96f:.38f,working?2.f:1.f);
+            rect(x,y,cardWidth,cardHeight,8,.058f,.083f,.107f,.97f,accentR,accentG,.91f,working?.96f:.38f,working?2.f:1.f);
             size_t cardTextStart=g_textVerts.size();
             auto line=[&](const std::string& value,float offset,float scale=.80f){textOut(fitText(value,scale,cardWidth-24),x+12,y+offset,scale,.83f,.91f,.98f);};
-            line(g_teamRoleLabels[i],8,.85f);std::string state=role?std::string(agentTeamStateName(role->state))+" / turn "+std::to_string(role->turns):"Ready";line(state+(i==0?" / engineering + CAD":i==2?" / read-only review":" / CAD author"),32);
-            auto config=teamRoleConfig(i);line((config.authMode==AssistantAuthMode::ChatGptPlan?"ChatGPT":config.provider)+" / "+(config.model.empty()?"Select model":config.model)+" / "+(config.reasoningEffort.empty()?"Auto":config.reasoningEffort),54);
-            line(role&&!role->taskSummary.empty()?"Task "+role->taskState+": "+role->taskSummary:role?role->status:"Describe the goal to start",76);line(g_teamActivity[i].empty()?(role?role->text:"Tools and messages appear live"):g_teamActivity[i],98);
-            rect(x+12,y+122,cardWidth-24,1,0,.23f,.34f,.42f,.65f,0,0,0,0,0);
+            line(g_teamRoleLabels[i],8,.85f);std::string state=role?std::string(agentTeamStateName(role->state))+" / turn "+std::to_string(role->turns):"Ready";line(state+(i==0?" / engineering + CAD":i==2?" / read-only review":" / CAD author"),summaryCard?32.f:29.f);
+            auto config=teamRoleConfig(i);if(summaryCard)line((config.authMode==AssistantAuthMode::ChatGptPlan?"ChatGPT":config.provider)+" / "+(config.model.empty()?"Select model":config.model)+" / "+(config.reasoningEffort.empty()?"Auto":config.reasoningEffort),54);
+            if(summaryCard)line(role&&!role->taskSummary.empty()?"Task "+role->taskState+": "+role->taskSummary:role?role->status:"Describe the goal to start",76);if(fullCard)line(g_teamActivity[i].empty()?(role?role->text:"Tools and messages appear live"):g_teamActivity[i],98);
+            const float footer=fullCard?125.f:summaryCard?103.f:50.f;
+            if(summaryCard)rect(x+12,y+footer-3,cardWidth-24,1,0,.23f,.34f,.42f,.65f,0,0,0,0,0);
             std::string tokens=role&&role->usage.reportedResponses?std::string(role->usage.missingResponses?"Tokens >= ":"Tokens ")+std::to_string(role->usage.totalTokens):"Tokens unreported";
-            textOut(fitText(tokens,.76f,cardWidth-192),x+12,y+125,.76f,.77f,.90f,1.f);button("Connector",x+cardWidth-168,y+125,74,44020+(int)i);button("Settings",x+cardWidth-86,y+125,74,44000+(int)i);
+            textOut(fitText(tokens,.76f,cardWidth-192),x+12,y+footer,.76f,.77f,.90f,1.f);button("Connector",x+cardWidth-168,y+footer,74,44020+(int)i);button("Settings",x+cardWidth-86,y+footer,74,44000+(int)i);
             std::string detail=role&&role->usage.reportedResponses?"In "+std::to_string(role->usage.inputTokens)+" / Out "+std::to_string(role->usage.outputTokens)+" / Reason "+std::to_string(role->usage.reasoningTokens):"Input / output: unreported";
             if(role){auto timing=measuredPerformanceLabel(role->performance);if(!timing.empty())detail=timing;}
-            textOut(fitText(detail,.72f,cardWidth-192),x+12,y+148,.72f,.83f,.91f,.98f);
-            if(g_verifyTeamCardBounds)for(size_t vertex=cardTextStart;vertex+6<g_textVerts.size();vertex+=7){float tx=g_textVerts[vertex],ty=g_textVerts[vertex+1];if(tx<x+8||tx>x+cardWidth-8||ty<y+8||ty>y+teamCardHeight-8){g_teamCardContentFits=false;if(g_teamCardBoundsFailure.empty()){std::ostringstream detail;detail<<"Card "<<i<<" ("<<g_teamRoleIds[i]<<") glyph ("<<tx<<","<<ty<<") exceeds ["<<x+8<<","<<y+8<<".."<<x+cardWidth-8<<","<<y+teamCardHeight-8<<"], atlas line height "<<fa.lineH;g_teamCardBoundsFailure=detail.str();}}}
+            if(fullCard)textOut(fitText(detail,.72f,cardWidth-192),x+12,y+148,.72f,.83f,.91f,.98f);
+            if(g_verifyTeamCardBounds)for(size_t vertex=cardTextStart;vertex+6<g_textVerts.size();vertex+=7){float tx=g_textVerts[vertex],ty=g_textVerts[vertex+1];if(tx<x+8||tx>x+cardWidth-8||ty<y+8||ty>y+cardHeight-8){g_teamCardContentFits=false;if(g_teamCardBoundsFailure.empty()){std::ostringstream detail;detail<<"Card "<<i<<" ("<<g_teamRoleIds[i]<<") glyph ("<<tx<<","<<ty<<") exceeds ["<<x+8<<","<<y+8<<".."<<x+cardWidth-8<<","<<y+cardHeight-8<<"], atlas line height "<<fa.lineH;g_teamCardBoundsFailure=detail.str();}}}
         }
-        label(fitText(g_teamStarted&&g_teamSnapshot.goalDeclared?std::string("GOAL ")+agentGoalStateName(g_teamSnapshot.goalState)+" / agent report: "+g_teamSnapshot.goalSummary:"GOAL: "+g_teamGoal,.70f,viewW-44),viewX+22,cy+263+teamCardStride*(teamCardRows()-1),.70f);
+        if(showGoal)label(fitText(g_teamStarted&&g_teamSnapshot.goalDeclared?std::string("GOAL ")+agentGoalStateName(g_teamSnapshot.goalState)+" / agent report: "+g_teamSnapshot.goalSummary:"GOAL: "+g_teamGoal,.70f,viewW-44),viewX+22,cy+teamCardTop+cardHeight+8+teamCardStride*(teamCardRows()-1),.70f);
     }
     std::vector<std::string> chatLines;size_t cols=(size_t)std::max(30,(viewW-55)/7);
     for(auto& entry:g_chatLog){std::string line=entry.first+": "+entry.second;
@@ -5129,6 +5130,7 @@ static void drawFrame(HDC hdc){
     int last=std::max(0,(int)chatLines.size()-g_chatScroll),first=std::max(0,last-(g_teamMode?teamChatRows():3));float chatY=cy+(g_teamMode?285+teamCardStride*(teamCardRows()-1):49);
     for(int i=first;i<last;++i){textOut(fitText(chatLines[i],.66f,viewW-44),viewX+22,chatY,.66f,.73,.77,.84);chatY+=22;}
     float inputY=H-120;
+    drawAssistantImageAttachmentUI(rect,button);
     rect(viewX+22,inputY,viewW-244,62,7,.055,.062,.078,1,.30,.35,.43,.8,1);
     if(g_pendingObjectTarget){
         std::string chip="Object: "+g_pendingObjectTarget->label;
@@ -5241,8 +5243,9 @@ static void drawFrame(HDC hdc){
     }else if(!g_draftViews.empty()){
         float sx=(float)viewX+(g_showViewCube?g_cubeS+30:20),sy=(float)viewY+76;rect(sx,sy,420,50,7,.025f,.07f,.095f,.95f,.16f,.61f,.75f,.7f,1);textOut("AGENT SKETCH DRAFT / uncommitted commands",sx+12,sy+8,.64f,.62f,.92f,.99f);textOut(fitText(g_liveStepLabel,.52f,392),sx+12,sy+30,.52f,.57f,.77f,.86f);
     }
+    if(g_directAuthoring.active){auto& edit=g_directAuthoring;float sx=(float)viewX+(g_showViewCube?g_cubeS+30:20),sy=(float)viewY+66,sw=std::min(620.f,(float)(viewX+viewW)-sx-18);rect(sx,sy,sw,74,8,.025f,.070f,.095f,.96f,.15f,.81f,.77f,.7f,1);textOut(fitText(directModeName(edit.mode),.69f,sw-24),sx+12,sy+8,.69f,.65f,.97f,.90f);std::string value=!directCurrent()?"Stale preview / cancel and select current geometry":!edit.error.empty()?edit.error:edit.feature?drawingNumber(edit.amount)+" mm / Tab expressions / Apply saves / Esc cancels":"Drag a compatible source face or mesh element";textOut(fitText(value,.54f,sw-24),sx+12,sy+32,.54f,.70f,.85f,.92f);if(edit.feature){button("Value",sx+12,sy+50,78,655);button("Apply",sx+100,sy+50,78,656,true);button("Cancel",sx+188,sy+50,78,657);}}
     drawMeasurementOverlay(rect,button);
-    g_viewSketchDimension={};if(!measurementActive()&&!g_sketchDrawing.active&&!g_sketchEditing.active&&g_showSketches){g_viewSketchDimension=selectedSketchDimension();if(g_viewSketchDimension.valid){float px,py;if(projectScreen(g_viewSketchDimension.position,px,py)){auto& dimension=g_viewSketchDimension;float width=std::min(360.f,textWidth(dimension.text,.66f)+24),x=std::clamp(px+18,(float)viewX+8,(float)(viewX+viewW)-width-8),y=std::clamp(py-40,(float)viewY+185,(float)(viewY+viewH)-58);rect(x+2,y+4,width,52,7,0,0,0,.20f,0,0,0,0,0);rect(x,y,width,52,7,.045f,.105f,.135f,.97f,.24f,.57f,.69f,.8f,1);textOut(dimension.text,x+11,y+8,.66f,.71f,.94f,.99f);textOut(dimension.action==577?"Click to edit linked source parameters":dimension.action==89?"Click to edit this native constraint":dimension.action==591?"Click to edit driving dimension":"Click to edit authored coordinates",x+11,y+31,.49f,.59f,.78f,.87f);g_zones.push_back({x,y,width,52,584});}}}
+    g_viewSketchDimension={};if(!measurementActive()&&!g_sketchDrawing.active&&g_showSketches){g_viewSketchDimension=selectedSketchDimension();if(g_viewSketchDimension.valid){float px,py;if(projectScreen(g_viewSketchDimension.position,px,py)){auto& dimension=g_viewSketchDimension;float width=std::min(360.f,textWidth(dimension.text,.66f)+24),x=std::clamp(px+18,(float)viewX+8,(float)(viewX+viewW)-width-8),y=std::clamp(py-40,(float)viewY+185,(float)(viewY+viewH)-58);rect(x+2,y+4,width,52,7,0,0,0,.20f,0,0,0,0,0);rect(x,y,width,52,7,.045f,.105f,.135f,.97f,.24f,.57f,.69f,.8f,1);textOut(dimension.text,x+11,y+8,.66f,.71f,.94f,.99f);textOut(dimension.action==577?"Click to edit linked source parameters":dimension.action==89?"Click to edit this native constraint":dimension.action==591?"Click to edit driving dimension":"Click to edit authored coordinates",x+11,y+31,.49f,.59f,.78f,.87f);g_zones.push_back({x,y,width,52,584});}}}
     if(g_error&&!g_lastFailureId.empty())button("Inspect failed operation",(float)(viewX+viewW)-210,(float)viewY+66,190,580);
     g_lastRibbonHint=ribbonHint;
     if(!ribbonHint.empty()){float width=textWidth(ribbonHint,.60f)+22,x=std::clamp((float)mp.x+12.f,10.f,W-width-10.f),y=(float)mp.y+20;rect(x,y,width,29,6,.035,.055,.075,.98,.27,.51,.65,.95,1);textOut(ribbonHint,x+11,y+7,.60f,.87f,.94f,1.f);}
@@ -5520,7 +5523,8 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
                 }}
             return 0;}
         case WM_COMMAND:if(LOWORD(wp)==500){interactiveAction(74);return 0;}if(LOWORD(wp)==497&&HIWORD(wp)==EN_CHANGE){int length=GetWindowTextLengthA(g_toolSearch);std::string filter((size_t)length+1,' ');GetWindowTextA(g_toolSearch,filter.data(),length+1);filter.resize((size_t)length);g_toolFilter=std::move(filter);g_toolScroll=0;return 0;}break;
-        case WM_CTLCOLOREDIT:if((HWND)lp==g_chatInput||(HWND)lp==g_commandSearch||(HWND)lp==g_toolSearch){SetTextColor((HDC)wp,RGB(219,226,238));SetBkColor((HDC)wp,RGB(14,17,20));return (LRESULT)chatBrush;}break;
+        case WM_DROPFILES:{auto drop=(HDROP)wp;try{if(DragQueryFileW(drop,0xffffffff,nullptr,0)!=1)throw std::runtime_error("Drop one PNG or JPEG image reference at a time");UINT length=DragQueryFileW(drop,0,nullptr,0);std::vector<wchar_t> file((size_t)length+1);DragQueryFileW(drop,0,file.data(),length+1);int size=WideCharToMultiByte(CP_UTF8,0,file.data(),(int)length,nullptr,0,nullptr,nullptr);std::string path((size_t)size,'\0');WideCharToMultiByte(CP_UTF8,0,file.data(),(int)length,path.data(),size,nullptr,nullptr);setPendingAssistantImage(path);}catch(const std::exception& error){g_error=true;g_status=error.what();}DragFinish(drop);return 0;}
+        case WM_CTLCOLOREDIT:if((HWND)lp==g_chatInput||(HWND)lp==g_commandSearch||(HWND)lp==g_toolSearch||isAssistantImageDimensionEdit((HWND)lp)){SetTextColor((HDC)wp,RGB(219,226,238));SetBkColor((HDC)wp,RGB(14,17,20));return (LRESULT)chatBrush;}break;
         case WM_ERASEBKGND:return 1; // OpenGL owns the parent surface; erase only the native EDIT child.
         case WM_GETMINMAXINFO:((MINMAXINFO*)lp)->ptMinTrackSize={1180,840};return 0;
         case WM_SIZE:
@@ -5547,7 +5551,8 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
                         else{g_pressWasButton=true;if(z.id==50){g_foldScrubbing=true;g_foldPlaying=false;g_foldProgress=clamp((double)(p.x-z.x)/z.w,0.,1.);}
                         else if(z.id==53){g_sheetScrubbing=true;g_sheetPlayingId=0;if(auto* sheet=selectedSheet())try{sheetPreviewSet(sheet->id,(double)(p.x-z.x)/z.w);}catch(const std::exception& error){g_error=true;g_status=error.what();}}
                         else if(z.id>=380&&z.id<=382){g_suspScrub=z.id-380;g_suspSpinPlaying=false;try{setSuspensionControl(g_suspScrub,(p.x-z.x)/z.w);}catch(const std::exception& error){g_error=true;g_status=error.what();}}} break; }
-            g_dragged=false;if(!g_pressWasButton&&!g_cubePress&&g_sketchEditing.active){try{beginSketchEditDrag(p.x,p.y);}catch(const std::exception& error){g_error=true;g_status=error.what();}SetCapture(hw);return 0;}
+            g_dragged=false;if(!g_pressWasButton&&!g_cubePress&&g_directAuthoring.active){try{beginDirectAuthoringDrag(p.x,p.y);}catch(const std::exception& error){g_directAuthoring.feature=0;g_directAuthoring.dragging=g_directAuthoring.moved=false;g_directAuthoring.preview={};g_directAuthoring.commands={};g_directAuthoring.error=error.what();g_error=true;g_status=error.what();}SetCapture(hw);return 0;}
+            if(!g_pressWasButton&&!g_cubePress&&g_sketchEditing.active){try{beginSketchEditDrag(p.x,p.y);}catch(const std::exception& error){g_error=true;g_status=error.what();}SetCapture(hw);return 0;}
             if(!g_pressWasButton&&!g_cubePress&&g_sketchDrawing.active){SetCapture(hw);return 0;}
             if(!g_pressWasButton&&!g_cubePress&&g_componentMove.armed){try{beginComponentDrag(p.x,p.y);}catch(const std::exception& error){g_error=true;g_status=error.what();g_pressWasButton=true;}}
             else if(!g_pressWasButton&&!g_foldScrubbing&&!g_sheetScrubbing&&(g_cubePress||g_navMode!=0))beginCameraDrag(p.x,p.y);
@@ -5557,18 +5562,20 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
         }
         case WM_MBUTTONDOWN:{g_componentDragIntent={};if(g_componentMove.dragging)cancelComponentMove();POINT p{GET_X_LPARAM(lp),GET_Y_LPARAM(lp)};g_pressWasButton=p.x<viewX||p.x>=viewX+viewW||p.y<viewY||p.y>=viewY+viewH;g_dragged=false;if(!g_pressWasButton)beginCameraDrag(p.x,p.y);SetCapture(hw);return 0;}
         case WM_MBUTTONUP:g_cameraDrag.active=false;ReleaseCapture();return 0;
-        case WM_CAPTURECHANGED:if(g_sketchEditing.dragging)cancelSketchEditDrag();g_componentDragIntent={};g_treeDragging=g_treePaging=false;g_cameraDrag.active=false;if(g_componentMove.dragging){cancelComponentMove();g_status="Component movement cancelled after pointer capture was lost";}return 0;
+        case WM_CAPTURECHANGED:if(g_directAuthoring.dragging)cancelDirectAuthoring();if(g_sketchEditing.dragging)cancelSketchEditDrag();g_componentDragIntent={};g_treeDragging=g_treePaging=false;g_cameraDrag.active=false;if(g_componentMove.dragging){cancelComponentMove();g_status="Component movement cancelled after pointer capture was lost";}return 0;
         case WM_MOUSEMOVE:{
             int x=GET_X_LPARAM(lp),y=GET_Y_LPARAM(lp);
+            g_pointerX=x;g_pointerY=y;
             bool lbtn=wp&MK_LBUTTON,mbtn=wp&MK_MBUTTON,shift=wp&MK_SHIFT;
             if(g_treeDragging&&lbtn){moveTreeThumb(y);return 0;}
+            if(g_directAuthoring.dragging&&lbtn){moveDirectAuthoringDrag(x,y);g_dragged=g_directAuthoring.moved;return 0;}
             if(g_sketchEditing.dragging&&lbtn){moveSketchEditDrag(x,y);g_dragged=g_sketchEditing.moved;return 0;}
             if(g_sketchDrawing.active&&!mbtn&&!g_cameraDrag.active){moveSketchDrawing(x,y);return 0;}
             if(g_componentDragIntent.pending&&lbtn){auto intent=g_componentDragIntent;
                 if(wp&(MK_SHIFT|MK_CONTROL)||mbtn||(GetKeyState(VK_MENU)&0x8000))g_componentDragIntent={};
                 else if(std::abs(x-intent.x)>=std::max(4,GetSystemMetrics(SM_CXDRAG))||std::abs(y-intent.y)>=std::max(4,GetSystemMetrics(SM_CYDRAG))){
                     g_componentDragIntent={};g_dragged=true;
-                    try{if(intent.revision!=g_session.revision||intent.epoch!=g_documentEpoch)throw std::runtime_error("The drawing changed before movement started. Select the component again.");beginComponentDrag(intent.x,intent.y,true);}
+                    try{if(intent.revision!=g_session.revision||intent.epoch!=g_documentEpoch)throw std::runtime_error("The drawing changed before movement started. Select the component again.");if(g_doc.assembly.empty()){beginDirectAuthoring(1);beginDirectAuthoringDrag(intent.x,intent.y);moveDirectAuthoringDrag(x,y);return 0;}beginComponentDrag(intent.x,intent.y,true);}
                     catch(const std::exception& error){cancelComponentMove();g_dragged=true;g_error=true;g_status=error.what();return 0;}
                 }
             }
@@ -5585,12 +5592,13 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
             }
             else g_cameraDrag.active=false;
             size_t tot=0; for(auto&m:g_cpuMeshes)tot+=m.triCount();
-            hoverBody=(!lbtn&&!mbtn)?pickBody(x,y):-1;
+            hoverBody=(!lbtn&&!mbtn&&!g_pickKind)?pickBody(x,y):-1;
             return 0;
         }
         case WM_LBUTTONUP:{
             g_componentDragIntent={};
             if(g_treeDragging||g_treePaging){if(g_treeDragging)moveTreeThumb(GET_Y_LPARAM(lp));g_treeDragging=g_treePaging=false;g_pressWasButton=false;ReleaseCapture();return 0;}
+            if(g_directAuthoring.dragging){g_directAuthoring.dragging=false;try{if(g_directAuthoring.moved)applyDirectAuthoring();}catch(const std::exception& error){g_error=true;g_status=error.what();}g_pressWasButton=false;ReleaseCapture();return 0;}
             if(g_sketchEditing.dragging){try{finishSketchEditDrag();}catch(const std::exception& error){cancelSketchEditDrag();g_error=true;g_status=error.what();}g_pressWasButton=false;ReleaseCapture();return 0;}
             if(g_componentMove.dragging){g_componentMove.dragging=false;try{applyComponentMove();}catch(const std::exception& error){cancelComponentMove();g_error=true;g_status=error.what();}g_pressWasButton=false;ReleaseCapture();return 0;}
             g_cameraDrag.active=false;ReleaseCapture();
@@ -5607,9 +5615,9 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
                 if(clickMeasurement(p.x,p.y)){}
                 else if(clickSketchDrawing(p.x,p.y)){}
                 else if(g_sketchEditing.active){}
-                else if(g_pickKind)pickReference(p.x,p.y);
+                else if(g_pickKind)pickReference(p.x,p.y,(wp&(MK_CONTROL|MK_SHIFT))!=0);
                 else{int b=pickBody(p.x,p.y);
-                g_explorerFeature=0;selBody=(b==selBody)?-1:b;g_selectedNotch=0;g_notchScroll=0;
+                g_explorerFeature=0;selBody=b;g_picked.clear();refreshSelectionLines();g_selectedNotch=0;g_notchScroll=0;
                 if(selBody>=0){g_activeSketch.clear();g_showSketches=false;rebuildSketchOverlay();}}
             }
             g_eatNextClick=false;g_pressWasButton=false;g_cubePress=false;g_foldScrubbing=false;g_sheetScrubbing=false;g_suspScrub=-1;
@@ -5627,10 +5635,12 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
             return 0;
         }
         case WM_KEYDOWN:
-            if(g_sketchEditing.active){if(wp==VK_ESCAPE){if(g_sketchEditing.dragging)cancelSketchEditDrag();else cancelSketchEditing();ReleaseCapture();return 0;}if(wp==VK_TAB){interactiveAction(70);return 0;}}
+            if(g_directAuthoring.active){if(wp==VK_ESCAPE){cancelDirectAuthoring();ReleaseCapture();return 0;}if(wp==VK_TAB){g_directAuthoring.dragging=false;g_dragged=true;ReleaseCapture();interactiveAction(655);return 0;}if(wp==VK_RETURN){interactiveAction(656);return 0;}}
+            if(g_sketchEditing.active){if(wp==VK_ESCAPE){if(g_sketchEditing.dragging)cancelSketchEditDrag();else cancelSketchEditing();ReleaseCapture();return 0;}if(wp==VK_TAB){interactiveAction(g_viewSketchDimension.valid?584:70);return 0;}}
             if(g_sketchDrawing.active){if(wp==VK_ESCAPE){cancelSketchDrawing();ReleaseCapture();return 0;}if(wp==VK_TAB){interactiveAction(576);return 0;}if(wp==VK_RETURN){g_sketchDrawing.anchors.clear();rebuildDrawingPreview();g_status="Line chain ended / saved segments retained / click first anchor";return 0;}}
             if(wp==VK_ESCAPE){if(measurementActive()){endMeasurement();return 0;}if(g_componentDragIntent.pending){g_componentDragIntent={};g_dragged=true;ReleaseCapture();g_status="Component movement cancelled / drawing unchanged";return 0;}if(g_componentMove.armed||g_componentMove.active){cancelComponentMove();ReleaseCapture();g_status="Component movement cancelled / drawing unchanged";return 0;}if(g_toolsOpen){g_toolsOpen=false;layout();return 0;}g_pickKind=0;g_picked.clear();refreshSelectionLines();g_status="Body selection / semantic picks cleared";return 0;}
             if(GetKeyState(VK_CONTROL)&0x8000){if(wp=='S')uiAction(16);else if(wp=='O')uiAction(17);else if(wp=='Z')uiAction(18);else if(wp=='Y')uiAction(19);else if(wp=='K')interactiveAction(59);else if(wp=='N')interactiveAction(55);}
+            else if(wp==VK_TAB&&g_viewSketchDimension.valid)interactiveAction(584);
             else if(wp=='F')uiAction(20);else if(wp=='W')uiAction(14);else if(wp==VK_DELETE)uiAction(25);else if(wp==VK_F1)uiAction(31);
             else if(wp=='1')uiAction(180);else if(wp=='2')uiAction(181);else if(wp=='3')uiAction(23);else if(wp=='4')uiAction(184);else if(wp=='5')uiAction(182);else if(wp=='6')uiAction(183);else if(wp=='7')uiAction(24);
             return 0;
@@ -5644,6 +5654,7 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
 
 // ---------------------------------------------------------------------------
 static void seedDocument(){g_doc=makeDemoDocument();rebuildScene();frameScene();target=tTarget;dist=tDist;}
+#include "skeleton_editor_selftest.inl"
 
 #include "studio_render_selftest.inl"
 
@@ -5653,8 +5664,9 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
 
     SetProcessDPIAware();
     bool startupUiTest=false;
+    bool directAuthoringUiTest=false,parametricAuthoringUiTest=false,skeletonEditorUiTest=false,imageAttachmentUiTest=false;
     bool bomUiTest=false;bool measurementUiTest=false;bool authoringUiTest=false;
-    bool interactionUiTest=false,connectorsUiTest=false,actionIconsUiTest=false,treeUiTest=false,arcUiTest=false,completionUiTest=false,sketchDrawingUiTest=false,sketchEditUiTest=false,selectionGlowUiTest=false,datumAuthoringUiTest=false,typedSketchUiTest=false;
+    bool selectionPickingUiTest=false;bool interactionUiTest=false,connectorsUiTest=false,actionIconsUiTest=false,treeUiTest=false,arcUiTest=false,completionUiTest=false,sketchDrawingUiTest=false,sketchEditUiTest=false,selectionGlowUiTest=false,datumAuthoringUiTest=false,typedSketchUiTest=false;
     bool selfTest=false,assemblyTest=false,dialogTest=false,bendTest=false,bendExportTest=false,sourceTest=false,sketchTest=false,assistantTest=false,nativeUiTest=false,renderUiTest=false,engineeringUiTest=false,sheetShowcaseTest=false,contextUiTest=false,suspensionUiTest=false,connectChatGpt=false,motionUiTest=false,motionPlay=false,navigationUiTest=false,projectionUiTest=false,frameToolsUiTest=false;unsigned exitAfterMs=0;std::string endpointFile,requestedSketch;int requestedOpening=-1;double requestedFold=-1,showcaseProgress=-1;std::string shotPath="ark_studio.png",loadPath,scriptPath,importPath,showcaseView,spotlightName,suspensionFeatureName,motionDriverName,motionSpeed;double requestedMotionTime=0;std::vector<std::string> suspensionValues;
     int requestedPathSamples=1;bool studioRenderTest=false,requestedPathTracing=false;
     int sw=1600,sh=1000,argc=0;auto argv=CommandLineToArgvW(GetCommandLineW(),&argc);
@@ -5666,6 +5678,11 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         else if(a=="--self-test-typed-sketch-ui"){typedSketchUiTest=true;g_headless=true;}
         else if(a=="--datum-authoring-ui-test"){datumAuthoringUiTest=true;g_headless=true;}
         else if(a=="--self-test-sketch-edit-ui"){sketchEditUiTest=true;g_headless=true;}
+        else if(a=="--self-test-direct-authoring-ui"){directAuthoringUiTest=true;g_headless=true;}
+        else if(a=="--self-test-parametric-authoring-ui"){parametricAuthoringUiTest=true;g_headless=true;}
+        else if(a=="--skeleton-editor-test"){skeletonEditorUiTest=true;g_headless=true;}
+        else if(a=="--self-test-image-attachment-ui"){imageAttachmentUiTest=true;g_headless=true;}
+        else if(a=="--self-test-selection-picking-ui"){selectionPickingUiTest=true;g_headless=true;}
         else if(a=="--self-test-selection-glow-ui"){selectionGlowUiTest=true;g_headless=true;}
         else if(a=="--self-test-sketch-drawing-ui"){sketchDrawingUiTest=true;g_headless=true;}
         else if(a=="--self-test-tree-ui"){treeUiTest=true;g_headless=true;}
@@ -5741,7 +5758,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     if(!hwnd)return 389;
     SendMessageW(hwnd,WM_SETICON,ICON_BIG,(LPARAM)largeIcon);
     SendMessageW(hwnd,WM_SETICON,ICON_SMALL,(LPARAM)smallIcon);
-    g_window=hwnd;BOOL dark=TRUE;DwmSetWindowAttribute(hwnd,20,&dark,sizeof dark);
+    g_window=hwnd;DragAcceptFiles(hwnd,TRUE);BOOL dark=TRUE;DwmSetWindowAttribute(hwnd,20,&dark,sizeof dark);
     g_commandSearch=CreateWindowExW(0,L"EDIT",L"",WS_CHILD|WS_TABSTOP|ES_AUTOHSCROLL,winW-510,12,260,31,hwnd,(HMENU)498,hi,nullptr);
     g_toolSearch=CreateWindowExW(0,L"EDIT",L"",WS_CHILD|WS_TABSTOP|ES_AUTOHSCROLL,0,0,1,1,hwnd,(HMENU)497,hi,nullptr);if(!g_toolSearch)return 314;g_toolSearchProc=(WNDPROC)SetWindowLongPtrW(g_toolSearch,GWLP_WNDPROC,(LONG_PTR)toolSearchProc);SendMessage(g_toolSearch,EM_SETLIMITTEXT,160,0);SendMessage(g_toolSearch,EM_SETMARGINS,EC_LEFTMARGIN|EC_RIGHTMARGIN,MAKELPARAM(7,7));
     if(g_commandSearch){HFONT searchFont=CreateFontW(-15,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Segoe UI");SendMessage(g_commandSearch,WM_SETFONT,(WPARAM)searchFont,TRUE);SendMessage(g_toolSearch,WM_SETFONT,(WPARAM)searchFont,TRUE);SendMessageW(g_toolSearch,0x1501,TRUE,(LPARAM)L"Search tools, operations, evidence...");SendMessage(g_commandSearch,EM_SETMARGINS,EC_LEFTMARGIN|EC_RIGHTMARGIN,MAKELPARAM(10,10));g_commandSearchProc=(WNDPROC)SetWindowLongPtrW(g_commandSearch,GWLP_WNDPROC,(LONG_PTR)commandSearchProc);}
@@ -6019,7 +6036,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
                 bool wasHidden=!g_hiddenBodies.empty()&&g_hiddenBodies[0];uiAction(22000);if(g_hiddenBodies[0]==wasHidden||g_session.revision!=revision)return 304;uiAction(22000);uiAction(410);
                 uiAction(401);g_inspectorScroll=96;if(!screenshot(".properties-"+std::to_string(size.first)+".png"))return 295;
                 for(const auto& zone:g_zones)if(zone.x<viewX&&zone.y>=viewY+42&&zone.y+zone.h>winH-32)return 296;
-                uiAction(401);uiAction(400);if(viewH!=winH-viewY-248||!screenshot(".assistant-"+std::to_string(size.first)+".png"))return 297;uiAction(400);
+                uiAction(401);uiAction(400);if(viewH!=winH-viewY-288||!screenshot(".assistant-"+std::to_string(size.first)+".png"))return 297;uiAction(400);
                 if(g_session.revision!=revision)return 298;
             }resize(originalWidth,originalHeight);g_inspectorScroll=0;
         }
@@ -6464,6 +6481,11 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     }
 #include "sketch_interaction_selftest.inl"
 #include "sketch_edit_selftest.inl"
+#include "direct_authoring_selftest.inl"
+#include "selection_glow_selftest.inl"
+#include "selection_picking_selftest.inl"
+#include "image_attachment_selftest.inl"
+    if(skeletonEditorUiTest){int result=runSkeletonEditorSelfTest(shotPath);if(result)return result;}
 #include "datum_authoring_selftest.inl"
 #include "typed_sketch_selftest.inl"
     if(treeUiTest||arcUiTest||completionUiTest){
@@ -6684,7 +6706,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         const auto& gallery=studioToolEntries();for(int action:{61,62,63,70,73,89,90,100,101,102,104,106,107,108,120,121,122,123,124,125,126,394,395,396,397,398,399,210,211,212,215,216,451,452,469,474,475,476,330,488,489,490,491,492,493,494,495,496,497,498})if(std::none_of(gallery.begin(),gallery.end(),[&](const auto& entry){return entry.action==action;}))return assistantFailure(315);
         if(std::count_if(gallery.begin(),gallery.end(),[](const auto& entry){return entry.action>=41000&&entry.action<42000;})!=(int)studioApiTools().arr.size())return assistantFailure(316);
         uiAction(480);if(!g_toolsOpen)return assistantFailure(317);SetWindowTextW(g_toolSearch,L"RETURN HEM");auto matches=visibleStudioTools();if(matches.empty()||std::none_of(matches.begin(),matches.end(),[&](size_t index){return gallery[index].action==394;}))return assistantFailure(318);
-        if(!saveProbeShot(shotPath+".tool-search.png"))return assistantFailure(319);SetWindowTextW(g_toolSearch,L"");uiAction(40009);if(g_toolCategory!=8)return assistantFailure(320);g_toolScroll=0;if(!saveProbeShot(shotPath+".tool-gallery.png"))return assistantFailure(321);auto filtered=visibleStudioTools();if(filtered.size()!=studioCommandGroups()[8].items.size())return assistantFailure(322);
+        if(!saveProbeShot(shotPath+".tool-search.png"))return assistantFailure(319);SetWindowTextW(g_toolSearch,L"");const auto& commandGroups=studioCommandGroups();auto surfaceCategory=std::find_if(commandGroups.begin(),commandGroups.end(),[](const StudioCommandGroup& group){return std::string(group.title)=="Native surfaces";});if(surfaceCategory==commandGroups.end())return assistantFailure(320);int surfaceCategoryIndex=(int)(surfaceCategory-commandGroups.begin());uiAction(40001+surfaceCategoryIndex);if(g_toolCategory!=surfaceCategoryIndex)return assistantFailure(320);g_toolScroll=0;if(!saveProbeShot(shotPath+".tool-gallery.png"))return assistantFailure(321);auto filtered=visibleStudioTools();if(filtered.size()!=surfaceCategory->items.size())return assistantFailure(322);
         uiAction(482);drawFrame(hdc);if(g_toolScroll<=0)return assistantFailure(323);uiAction(481);drawFrame(hdc);if(g_toolScroll!=0)return assistantFailure(324);
         auto rectangle=std::find_if(gallery.begin(),gallery.end(),[](const auto& entry){return entry.action==61;});size_t sketchCount=g_doc.sketches.size();g_dialogSmoke=3;uiAction(42000+(int)(rectangle-gallery.begin()));g_dialogSmoke=0;if(g_toolsOpen||g_error||g_doc.sketches.size()!=sketchCount+1)return assistantFailure(325);
         auto info=std::find_if(gallery.begin(),gallery.end(),[](const auto& entry){return entry.title=="doc_info";});if(info==gallery.end())return assistantFailure(326);u64 galleryRevision=g_session.revision;g_dialogSmoke=3;uiAction(info->action);g_dialogSmoke=0;if(g_error||g_session.revision!=galleryRevision)return assistantFailure(327);

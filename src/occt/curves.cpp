@@ -20,6 +20,7 @@
 #include <Geom_TrimmedCurve.hxx>
 #include <BRep_Tool.hxx>
 #include <GeomAPI_Interpolate.hxx>
+#include <HelixGeom_BuilderHelix.hxx>
 #include <GCPnts_AbscissaPoint.hxx>
 #include <TColgp_HArray1OfPnt.hxx>
 #include <gp_Ax2.hxx>
@@ -124,6 +125,83 @@ V curveResult(const TopoDS_Shape& wire) {
     const auto edges=shapes(wire,TopAbs_EDGE);
     for(size_t i=0;i<edges.size();++i){V row=V::makeObj(),indices=V::makeArr();row.set("name",V::makeStr("edge."+std::to_string(i)));row.set("kind",V::makeStr("edge"));row.set("status",V::makeStr("bound"));indices.arr.push_back(V::makeNum(i));row.set("indices",indices);references.arr.push_back(row);}
     topology.set("references",references);result.set("topology",topology);
+    return result;
+}
+
+V helixCurve(const V& request) {
+    for (const auto& field : request.obj)
+        if (field.first != "op" && field.first != "radius" && field.first != "pitch" &&
+            field.first != "turns" && field.first != "start_angle" && field.first != "origin" &&
+            field.first != "axis" && field.first != "x_axis" && field.first != "handedness")
+            throw std::runtime_error("Unknown helix field: " + field.first);
+    constexpr double tau = 6.28318530717958647692, fitTolerance = 1e-7;
+    const double radius = num(need(request,"radius"),"helix radius");
+    const double pitch = num(need(request,"pitch"),"helix pitch");
+    const double turns = num(need(request,"turns"),"helix turns");
+    if (radius <= 1e-6 || pitch <= 1e-6 || turns <= 1e-6 || turns > 100 || pitch * turns > 1e7)
+        throw std::runtime_error("Helix requires radius/pitch > 1e-6 mm, turns in (1e-6,100], height <= 1e7 mm");
+    const double hand = request.find("handedness") ? num(*request.find("handedness"),"handedness") : 1;
+    if (hand != 1 && hand != -1) throw std::runtime_error("Helix handedness must be +1 or -1");
+    const double angle = request.find("start_angle") ? num(*request.find("start_angle"),"start_angle") * tau / 360 : 0;
+    const gp_Pnt origin = request.find("origin") ? xyz(*request.find("origin"),"origin") : gp_Pnt(0,0,0);
+    const gp_Dir axis = request.find("axis") ? direction(*request.find("axis"),"axis") : gp_Dir(0,0,1);
+    gp_Vec x = request.find("x_axis") ? gp_Vec(xyz(*request.find("x_axis"),"x_axis").XYZ()) : gp_Vec(1,0,0);
+    if (!request.find("x_axis") && std::abs(axis.X()) > .9) x = gp_Vec(0,1,0);
+    if (x.Magnitude() <= 1e-12 || std::abs(x.Normalized().Dot(gp_Vec(axis))) > 1e-10)
+        throw std::runtime_error("Helix x_axis must be nonzero and perpendicular to axis");
+    x.Normalize();
+    const gp_Vec y = gp_Vec(axis).Crossed(x);
+    const gp_Vec startX = x * std::cos(angle) + y * std::sin(angle);
+    const gp_Vec startY = gp_Vec(axis).Crossed(startX);
+    HelixGeom_BuilderHelix builder;
+    builder.SetPosition(gp_Ax2(origin,axis,gp_Dir(startX)));
+    // OCCT's clockwise flag uses positive local Y when true.
+    builder.SetCurveParameters(0,tau * turns,pitch,radius,0,hand == 1);
+    builder.SetTolerance(fitTolerance);
+    builder.SetApproxParameters(GeomAbs_C2,8,256);
+    builder.Perform();
+    if (builder.ErrorStatus() != 0 || builder.WarningStatus() != 0 || builder.Curves().IsEmpty() ||
+        !std::isfinite(builder.ToleranceReached()) || builder.ToleranceReached() < 0 || builder.ToleranceReached() > fitTolerance)
+        throw std::runtime_error("Native helix approximation failed its fixed 1e-7 mm tolerance");
+    BRepBuilderAPI_MakeWire wire;
+    double observed = 0, traversed = 0;
+    unsigned checkpoints = 0;
+    for (int i = 1; i <= builder.Curves().Length(); ++i) {
+        const auto& curve = builder.Curves()(i);
+        const double span = std::min(tau,tau * turns - traversed);
+        for (int sample = 0; sample <= 64; ++sample) {
+            const double fraction = sample / 64.0, theta = traversed + span * fraction;
+            const gp_Pnt expected = origin.Translated(startX * (radius * std::cos(theta)) +
+                startY * (hand * radius * std::sin(theta)) + gp_Vec(axis) * (pitch * theta / tau));
+            const gp_Pnt actual = curve->Value(curve->FirstParameter() + (curve->LastParameter()-curve->FirstParameter()) * fraction);
+            observed = std::max(observed,actual.Distance(expected));
+            ++checkpoints;
+        }
+        BRepBuilderAPI_MakeEdge edge(curve);
+        if (!edge.IsDone()) throw std::runtime_error("Native helix edge failed");
+        wire.Add(edge.Edge());
+        if (!wire.IsDone()) throw std::runtime_error("Native helix coils are not connected");
+        traversed += span;
+    }
+    if (!std::isfinite(observed) || observed > 1e-6)
+        throw std::runtime_error("Native helix disagrees with its independent analytic checkpoints");
+    V result = curveResult(wire.Wire()), report = *result.find("report");
+    const double analyticLength = turns * std::sqrt(tau*tau*radius*radius + pitch*pitch);
+    report.set("operation",V::makeStr("helix"));
+    report.set("helix_source_authority",V::makeStr("analytic_circular_helix_program"));
+    report.set("helix_representation",V::makeStr("OCCT_native_BSpline_approximation"));
+    report.set("helix_exact_analytic_brep",V::makeBool(false));
+    report.set("helix_requested_tolerance_mm",V::makeNum(fitTolerance));
+    report.set("helix_kernel_tolerance_reached_mm",V::makeNum(builder.ToleranceReached()));
+    report.set("helix_analytic_checkpoints",V::makeNum(checkpoints));
+    report.set("helix_observed_max_error_mm",V::makeNum(observed));
+    report.set("helix_between_checkpoints_bound_verified",V::makeBool(false));
+    report.set("helix_analytic_length_mm",V::makeNum(analyticLength));
+    report.set("helix_length_error_mm",V::makeNum(std::abs(report.find("length_mm")->num-analyticLength)));
+    report.set("helix_radius_mm",V::makeNum(radius));report.set("helix_pitch_mm",V::makeNum(pitch));
+    report.set("helix_turns",V::makeNum(turns));report.set("helix_height_mm",V::makeNum(pitch*turns));
+    report.set("helix_handedness",V::makeNum(hand));
+    result.set("report",report);
     return result;
 }
 
@@ -327,6 +405,7 @@ V bridgeCurve(const V& request) {
 V modelCurveNative(const V& request) {
     const std::string op = need(request, "op").t == V::Str ? need(request, "op").str : "";
     if (op == "curve") return authoredCurve(request);
+    if (op == "helix") return helixCurve(request);
     if(op=="curve_analytic"){
         const std::string kind=need(request,"kind").str;Handle(Geom_Curve) curve;
         if(kind=="polynomial"){const V& poles=need(request,"poles");if(poles.t!=V::Arr||poles.arr.size()<2||poles.arr.size()>26)throw std::runtime_error("Polynomial exact curve needs 2..26 controls");NCollection_Array1<gp_Pnt> points(1,(int)poles.arr.size());for(size_t i=0;i<poles.arr.size();++i)points.SetValue((int)i+1,xyz(poles.arr[i],"polynomial control"));curve=new Geom_BezierCurve(points);

@@ -39,6 +39,9 @@ V matrix(const gp_Trsf& transform);
 std::string brepData(const TopoDS_Shape& shape); // base64 BRep, no tessellation
 TopoDS_Shape readBrep(const std::string& encoded);
 V shapeResult(const TopoDS_Shape& shape,bool requireSolid);
+// Complete current-B-rep picking inventory without changing semantic aliases.
+// Generic names embed the exact B-rep digest and never retarget after a change.
+V completeSelectionReferences(V result);
 V shapeReport(const TopoDS_Shape& shape,bool requireSolid);
 double symmetricDifference(const TopoDS_Shape& a,const TopoDS_Shape& b);
 std::string kernelVersion();

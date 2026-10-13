@@ -102,11 +102,15 @@ public:
     void start(const AgentTeamConfig& config,const std::string& prompt,
         const arkjson::Value& mcpTools,const AssistantTool& executor,
         const AgentTeamEvents& observer={});
+    void start(const AgentTeamConfig& config,const arkjson::Value& userMessage,
+        const arkjson::Value& mcpTools,const AssistantTool& executor,
+        const AgentTeamEvents& observer={});
     // Empty target selects the lead in focused mode, broadcasts in parallel
     // mode. "all" explicitly broadcasts. Messages reach active roles before their next
     // provider request and schedule a new turn for idle roles. False means no
     // eligible recipient, cancellation, or a configured message/turn limit.
     bool steer(const std::string& text,const std::string& targetId={});
+    bool steer(const arkjson::Value& userMessage,const std::string& targetId={});
     bool send(const std::string& fromId,const std::string& toId,const std::string& text);
     // Resumes yielded/interrupted roles with retained receipts, never replays
     // old mutations. A successful current doc_info is required before writing.
