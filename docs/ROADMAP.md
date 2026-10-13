@@ -80,7 +80,7 @@ Goal: connect design choices to exact geometry and measured process evidence.
 |---|---|---|---|
 | C.01 | Industrial sheet workflows | Parcial | Exact STEP plus explicit inputs yields a canonical artifact or typed rejection; agreed corpus, refold/flat and material traceability. Local sheet support exists; external exchange depends on E.01/E.02. |
 | C.02 | Complete weldments | Parcial | Multi-member trim/extend, joints, preparation, beads and coherent cutlists; drawings and lengths derive from exact results. Scope/candidates/replay have [008D evidence](iterations/008D.md). |
-| C.03 | Process-specific DFM | Parcial | Versioned laser/bend/FDM/CNC/weld rules, assumptions and per-part evidence; recommendations remain distinct from qualification. [Manufacturing intent](MANUFACTURING_INTENT.md) |
+| C.03 | Process-specific DFM | Parcial | Agent-accessible ruleset 1 screens laser thickness/blank, evaluated bend radii, FDM envelope/settings, CNC stock/cutter declarations and exact declared weld-bead throats. Evidence, assumptions and typed recommendations remain distinct from qualification. [DFM contract and limits](DFM.md) |
 | C.04 | Structural checks and motion | Parcial | Units/load cases, analytical comparisons, mesh convergence and an audited external solver. Supported analytical/kinematic previews exist; FEA, contact and fatigue require separate validation. [019B static collision evidence](iterations/019B.md); response dynamics remain unqualified. |
 | C.05 | Physical reference pilots | Planeado | Fabricate a sheet enclosure, welded frame and small assembly; measure deviation, fit, cost and time; feed observations back into design revisions. |
 

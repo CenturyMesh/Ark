@@ -104,6 +104,11 @@ caller-declared process settings from exact geometry evidence and unresolved
 checks. These process settings use document version 23. Production qualification
 is never inferred from a role's completion or a filled checklist.
 
+C.03 adds the versioned [DFM contract](DFM.md) to each component's `dfm` report:
+laser/bend/FDM/CNC/weld screens retain exact producer evidence, caller capabilities
+and explicit assumptions. Read every rule status and typed recommendation;
+`compatible` is a bounded screen, and production qualification remains false.
+
 Mechanical motion uses persistent chain, gear, shaft, rack/pinion and harmonic
 cam coupling mates plus read-only `assembly_motion`. Call
 `agent_onboard{topic:"motion"}` and see [mechanical motion](MECHANICAL_MOTION.md).

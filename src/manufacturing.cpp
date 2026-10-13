@@ -1,4 +1,5 @@
 #include "ark/manufacturing.hpp"
+#include "ark/dfm.hpp"
 #include <cmath>
 #include <map>
 #include <set>
@@ -29,10 +30,19 @@ const std::vector<Field> machining{
     {"cutter_diameter_mm",Positive},{"minimum_internal_radius_mm",Positive},
     {"workholding_plan",Text},{"setup_plan",Text}
 };
+const std::vector<Field> sheet{
+    {"cutting_method",Choice,"laser|other"},{"laser_max_thickness_mm",Positive},
+    {"minimum_bend_radius_mm",Positive},{"process_reference",Text}
+};
+const std::vector<Field> frame{
+    {"minimum_weld_throat_mm",Positive},{"welding_procedure",Text},{"process_reference",Text}
+};
 const std::vector<Field>& fields(const std::string& route){
     if(route=="injection_molding")return injection;
     if(route=="additive")return additive;
     if(route=="machined")return machining;
+    if(route=="sheet_metal")return sheet;
+    if(route=="frame")return frame;
     static const std::vector<Field> empty;return empty;
 }
 bool allowed(const std::string& value,const char* choices){
@@ -162,6 +172,8 @@ V inspectComponent(const Document& document,const Feature& feature){
         }else r.requirement("fabrication_route","blocked","Unsupported manufacturing route.");
     }
     if(solid){V e=V::makeObj();e.set("id",V::makeStr("exact_single_solid"));e.set("authority",V::makeStr("evaluated_exact_brep"));e.set("volume_mm3",*geometry.find("volume_mm3"));r.evidence.arr.push_back(e);}
+    const auto dfm=inspectDfm(document,feature);r.row.set("dfm",dfm);
+    for(const auto& rule:dfm.find("rules")->arr){if(rule.find("status")->str=="incompatible")add(r.blockers,rule.find("id")->str);if(rule.find("status")->str=="unknown")add(r.unknowns,rule.find("id")->str);}
     r.row.set("requirements",r.requirements);r.row.set("blockers",r.blockers);r.row.set("unknowns",r.unknowns);r.row.set("evidence",r.evidence);r.row.set("design_policy",r.policy);
     r.row.set("process_parameters_complete",V::makeBool(r.parametersComplete&&r.blockers.arr.empty()));
     r.row.set("ready_for_process_review",V::makeBool(r.blockers.arr.empty()&&r.unknowns.arr.empty()));
@@ -173,7 +185,7 @@ bool validateManufacturingProcess(const Feature& feature,std::string& error){
     const auto& process=feature.manufacturingProcess;if(process.t==V::Null)return true;
     if(process.t!=V::Obj||process.obj.size()>32){error="manufacturing.process must be an object with at most 32 explicit settings";return false;}
     if(process.obj.empty())return true;
-    if(fields(feature.manufacturingRoute).empty()){error="manufacturing.process is supported only for machined, injection_molding and additive routes";return false;}
+    if(fields(feature.manufacturingRoute).empty()){error="manufacturing.process is supported only for sheet_metal, frame, machined, injection_molding and additive routes";return false;}
     std::map<std::string,Field> specs;for(const auto& field:common)specs.emplace(field.name,field);for(const auto& field:fields(feature.manufacturingRoute))specs.emplace(field.name,field);
     for(const auto& item:process.obj){auto spec=specs.find(item.first);if(spec==specs.end()){error="Unsupported manufacturing process setting for "+feature.manufacturingRoute+": "+item.first;return false;}if(!validField(item.second,spec->second)){error="Invalid manufacturing process setting: "+item.first;return false;}}
     return true;

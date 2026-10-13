@@ -38,6 +38,7 @@ add_library(ark STATIC
   src/pricing.cpp
   src/agent_team.cpp
   src/manufacturing.cpp
+  src/dfm.cpp
   src/assistant_connectors.cpp
   src/component_sources.cpp
   src/component_library.cpp
@@ -370,6 +371,15 @@ set_tests_properties(manufacturing PROPERTIES TIMEOUT 120)
 if(ARK_WITH_OCCT)
   target_compile_definitions(ark-manufacturing-tests PRIVATE ARK_MANUFACTURING_NATIVE_TESTS=1)
   add_dependencies(ark-manufacturing-tests ark-occt-worker)
+endif()
+
+add_executable(ark-dfm-tests tests/dfm_tests.cpp)
+target_link_libraries(ark-dfm-tests PRIVATE ark)
+add_test(NAME dfm COMMAND ark-dfm-tests)
+set_tests_properties(dfm PROPERTIES TIMEOUT 120)
+if(ARK_WITH_OCCT)
+  target_compile_definitions(ark-dfm-tests PRIVATE ARK_DFM_NATIVE_TESTS=1 ARK_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+  add_dependencies(ark-dfm-tests ark-occt-worker)
 endif()
 
 add_executable(ark-material-tests tests/material_tests.cpp)
