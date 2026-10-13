@@ -1,16 +1,21 @@
-# Test the 019B draft
+# Test 019B authoring
 
-The PR remains draft until the user tests and explicitly authorizes its merge.
-Run the isolated executable; keep test changes in copies of existing drawings:
+The user authorized completion and merge of PR #6 on 13 October 2026 after the
+required checks pass. This authorization does not establish a human design
+quality benchmark or manufacturing qualification. Prepare an isolated native
+development executable from the repository root; keep test changes in copies
+of existing drawings:
 
 ```powershell
-& 'C:\Sw_templates\Ark-019B\out\test-preview\019B-test3\ark-studio.exe'
+./scripts/build.ps1 -Test
+./scripts/prepare-test-preview.ps1 -BuildDirectory out/native-release -Name 019B-local
+& './out/test-preview/019B-local/ark-studio.exe'
 ```
 
 The synthetic example contains a dynamic Skeleton pattern, a helix and a loft:
 
 ```powershell
-& 'C:\Sw_templates\Ark-019B\out\test-preview\019B-test3\ark-studio.exe' --script 'C:\Sw_templates\Ark-019B\examples\authoring-019B.arkops'
+& './out/test-preview/019B-local/ark-studio.exe' --script './examples/authoring-019B.arkops'
 ```
 
 | Workflow | Check |
