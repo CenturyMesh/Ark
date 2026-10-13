@@ -23,6 +23,7 @@
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepOffsetAPI_MakePipeShell.hxx>
 #include <BRepOffsetAPI_MakeThickSolid.hxx>
+#include <BRepOffsetAPI_MakeOffsetShape.hxx>
 #include <BRepOffset_Mode.hxx>
 #include <BRepFilletAPI_MakeChamfer.hxx>
 #include <BRepFilletAPI_MakeFillet.hxx>
@@ -681,6 +682,12 @@ V modelSolidNative(const V& request){
             result=patterned(input,request,op,refs);many=true;
         }else if(op=="split_plane"){
             result=splitOnPlane(input,request,refs);many=true;
+        }else if(op=="offset"){
+            requireOneSolid(input,"Solid offset");const double distance=scalar(request,"distance");
+            if(std::abs(distance)<=1e-6||std::abs(distance)>1e4)throw std::runtime_error("Solid offset distance must be nonzero and within 10000 mm");
+            const auto join=request.find("join")?word(request,"join"):"intersection";if(join!="intersection"&&join!="arc")throw std::runtime_error("Solid offset join must be intersection or arc");
+            BRepOffsetAPI_MakeOffsetShape algorithm;algorithm.PerformByJoin(input,distance,1e-6,BRepOffset_Skin,false,false,join=="arc"?GeomAbs_Arc:GeomAbs_Intersection,true);
+            if(!algorithm.IsDone()||algorithm.Shape().IsNull())throw std::runtime_error("Solid offset failed");result=algorithm.Shape();requireOneSolid(result,"Offset result");refs=propagated(refs,result,algorithm);
         }else if(op=="shell"){
             requireOneSolid(input,"Shell");
             double thickness=scalar(request,"thickness");if(!(std::abs(thickness)>1e-6))throw std::runtime_error("Shell thickness must be nonzero");
@@ -947,6 +954,7 @@ V geometryQueryNative(const V& request){
                         const auto& other=select(word(*filter,"adjacent_to"));bool adjacent=false;
                         for(const auto& edge:shapes(other.shape,TopAbs_EDGE))if(edge.IsSame(ref.shape))adjacent=true;
                         for(const auto& edge:shapes(ref.shape,TopAbs_EDGE))for(const auto& edge2:shapes(other.shape,TopAbs_EDGE))if(edge.IsSame(edge2))adjacent=true;
+                        if(ref.kind=="edge"&&other.kind=="edge")for(const auto& vertex:shapes(ref.shape,TopAbs_VERTEX))for(const auto& otherVertex:shapes(other.shape,TopAbs_VERTEX))if(vertex.IsSame(otherVertex))adjacent=true;
                         match&=adjacent&&!ref.shape.IsSame(other.shape);
                     }
                 }

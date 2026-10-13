@@ -99,7 +99,7 @@ V profileFromSketch(Document& document, const std::string& name,const NamedSketc
             arc.set("a1", V::makeNum(source.dof[4]));
             arc.set("name", V::makeStr(source.name.empty() ? "entity." + std::to_string(entityIndex) : source.name));
             entities.arr.push_back(std::move(arc));
-        } else if (source.kind == SketchEnt::Wire) {
+        } else if (source.kind == SketchEnt::Wire || source.kind == SketchEnt::Offset) {
             bool trimmed = false;
             for (const auto& corner : named->sk.corners)
                 if (corner.entity == source.name && !source.name.empty()) trimmed = true;
@@ -129,7 +129,11 @@ V profileFromSketch(Document& document, const std::string& name,const NamedSketc
             auto xy = [&](int index) { return Vec2{source.dof.at(static_cast<size_t>(index)), source.dof.at(static_cast<size_t>(index + 1))}; };
             for (int i = 0; i < static_cast<int>(source.segments.size()); ++i) {
                 const auto& segment = source.segments[static_cast<size_t>(i)];
-                const int payload = sketchVertexDof(source, i) + 2;
+                // Payload starts at this segment's endpoint (or first Bezier
+                // control), not two scalars after the previous endpoint: arcs
+                // also carry a radius between consecutive vertices.
+                const int payload = sketchVertexDof(source, i + 1)
+                                  - (segment.kind == SketchEnt::WireSeg::Cubic ? 4 : 0);
                 const std::string edgeName = (source.name.empty() ? "entity." + std::to_string(entityIndex) : source.name) + "." + std::to_string(i);
                 if (segment.kind == SketchEnt::WireSeg::Line) {
                     const Vec2 end = xy(payload);
@@ -188,7 +192,7 @@ V numericNative(const V& value, const ExprEnv& env, const std::string& key = {})
         return value;
     }
     if (value.t == V::Str) {
-        if (key == "kind" || key == "sketch" || key == "name" || key == "op" || key == "reference" || key == "second_reference" || key == "mode" || key == "end" || key == "edges" || key == "faces" || key == "face" || key == "plane" || key == "keep" || key == "selection" || key == "direction" || key == "axis" || key == "neutral") return value;
+        if (key == "kind" || key == "join" || key == "sketch" || key == "name" || key == "op" || key == "reference" || key == "second_reference" || key == "mode" || key == "end" || key == "edges" || key == "faces" || key == "face" || key == "plane" || key == "keep" || key == "selection" || key == "direction" || key == "axis" || key == "neutral") return value;
         return V::makeNum(expressionValue(value.str, env));
     }
     if (value.t == V::Arr) {
@@ -386,7 +390,8 @@ V surfaceRequest(const Feature& feature, const ExprEnv& env, Document& document,
             request.set("distance", V::makeNum(distance));
         }
     } else if (feature.type == FeatureType::SurfaceEdit) {
-        if(feature.inputs.size()!=1)throw std::runtime_error("surface_edit requires one exact native input");
+        const bool trimWire=feature.nativeSpec.find("op")&&feature.nativeSpec.find("op")->asStr()=="trim_wire";
+        if(feature.inputs.size()!=(trimWire?2u:1u))throw std::runtime_error("surface_edit requires a surface and, for trim_wire, one closed curve input");
         const Body* source=precedingBody(preceding,feature.inputs.front());
         if(!source)throw std::runtime_error("surface_edit input missing");
         request.set("input_brep",brepOf(*source,"surface_edit input"));
@@ -409,7 +414,9 @@ V surfaceRequest(const Feature& feature, const ExprEnv& env, Document& document,
                 const auto spec=numericNative(feature.nativeSpec,env);
                 request.set("origin",required(spec,"origin"));request.set("normal",required(spec,"normal"));
             }
-        }else throw std::runtime_error("surface_edit op must be extract_face or trim_plane");
+        }else if(operation.str=="trim_wire"){
+            const Body* curve=precedingBody(preceding,feature.inputs[1]);if(!curve)throw std::runtime_error("Surface trim curve input missing");request.set("op",V::makeStr("surface_trim_wire"));request.set("wire_brep",brepOf(*curve,"trim curve"));request.set("keep_point",numericNative(required(feature.nativeSpec,"keep_point"),env));
+        }else throw std::runtime_error("surface_edit op must be extract_face, trim_plane or trim_wire");
     } else if (feature.type == FeatureType::OffsetSurface) {
         request.set("op", V::makeStr("offset_surface"));
         if (feature.inputs.size() != 1) throw std::runtime_error("offset_surface requires one native surface input");
@@ -433,6 +440,10 @@ V surfaceRequest(const Feature& feature, const ExprEnv& env, Document& document,
         request.set("solid", V::makeBool(bitParam(feature, env, "solid", 0)));
     } else if (isCurveFeature(feature.type)) {
         if (feature.type == FeatureType::Curve) {
+            if(const auto* op=feature.nativeSpec.find("op");op&&op->asStr()=="equation")return sampleEquationCurve(feature.nativeSpec,env);
+            if(const auto* op=feature.nativeSpec.find("op");op&&op->asStr()=="project_surface"){
+                if(feature.inputs.size()!=2)throw std::runtime_error("Surface projection requires source curve and target surface inputs");const Body* source=precedingBody(preceding,feature.inputs[0]);const Body* target=precedingBody(preceding,feature.inputs[1]);if(!source||!target)throw std::runtime_error("Surface projection inputs missing");request.set("op",V::makeStr("curve_project_surface"));request.set("input_brep",brepOf(*source,"projection curve"));request.set("target_brep",brepOf(*target,"projection surface"));request.set("direction",numericNative(required(feature.nativeSpec,"direction"),env,"vector"));return request;
+            }
             request.set("op", V::makeStr("curve"));
             const V spec = numericNative(feature.nativeSpec, env);
             if (const V* start = spec.find("start")) request.set("start", *start);

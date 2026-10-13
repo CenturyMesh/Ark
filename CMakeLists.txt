@@ -3,6 +3,7 @@ include(cmake/ArkRelease.cmake)
 ark_read_release_metadata("${CMAKE_CURRENT_SOURCE_DIR}/release.json")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/release.json")
 project(Ark VERSION "${ARK_RELEASE_VERSION}" LANGUAGES C CXX)
+option(ARK_WITH_OCCT "Build the isolated C++ OCCT 8 native modeling worker" ON)
 configure_file(cmake/version.hpp.in generated/ark/version.hpp @ONLY)
 if(WIN32)
   set(ARK_PACKAGE_PLATFORM "windows-x64")
@@ -28,7 +29,7 @@ target_compile_definitions(ark-sqlite PRIVATE SQLITE_ENABLE_FTS5=1 SQLITE_THREAD
 target_link_libraries(ark-sqlite PUBLIC Threads::Threads)
 add_library(ark STATIC
   src/agent_activity.cpp
-  src/bom.cpp src/bom_review.cpp
+  src/bom.cpp src/bom_review.cpp src/bom_export.cpp src/curve_equation.cpp
   src/updates.cpp
   src/document_container.cpp
   src/iteration_history.cpp
@@ -84,10 +85,14 @@ if(WIN32)
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/assets/ui/ark-detail-atlas-v1.png" "$<TARGET_FILE_DIR:ark-studio>/assets/ui/ark-detail-atlas-v1.png"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/assets/ui/ark-domain-atlas-v1.png" "$<TARGET_FILE_DIR:ark-studio>/assets/ui/ark-domain-atlas-v1.png")
 endif()
-if(MINGW)
+if(MINGW AND NOT ARK_WITH_OCCT)
   target_link_options(ark PUBLIC -static)
 endif()
 enable_testing()
+add_executable(ark-authoring-extension-tests tests/authoring_extensions_tests.cpp)
+target_link_libraries(ark-authoring-extension-tests PRIVATE ark)
+add_test(NAME authoring-extensions COMMAND ark-authoring-extension-tests)
+set_tests_properties(authoring-extensions PROPERTIES TIMEOUT 120)
 add_test(NAME release-metadata COMMAND "${CMAKE_COMMAND}" "-DARK_SOURCE_DIR=${CMAKE_SOURCE_DIR}" "-DARK_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}" "-DARK_EXPECTED_PLATFORM=${ARK_PACKAGE_PLATFORM}" "-DARK_EXPECTED_ENTRYPOINT=${ARK_PACKAGE_ENTRYPOINT}" -P "${CMAKE_SOURCE_DIR}/tests/release_metadata_tests.cmake")
 if(WIN32)
   find_program(ARK_POWERSHELL NAMES powershell pwsh REQUIRED)
@@ -130,8 +135,9 @@ add_test(NAME agent COMMAND ark-agent-tests)
 add_test(NAME mesh-model COMMAND ark-mesh-model-tests)
 set_tests_properties(kernel agent mesh-model PROPERTIES TIMEOUT 60)
 
-option(ARK_WITH_OCCT "Build the isolated C++ OCCT 8 native modeling worker" ON)
 if(ARK_WITH_OCCT)
+  target_compile_definitions(ark-authoring-extension-tests PRIVATE ARK_AUTHORING_NATIVE_TESTS=1)
+  add_dependencies(ark-authoring-extension-tests ark-occt-worker)
   target_compile_definitions(ark-agent-tests PRIVATE ARK_TEST_WITH_OCCT=1)
   add_dependencies(ark-agent-tests ark-occt-worker)
   find_package(OpenCASCADE REQUIRED)
@@ -148,6 +154,16 @@ if(ARK_WITH_OCCT)
   target_include_directories(ark-occt SYSTEM PUBLIC ${OpenCASCADE_INCLUDE_DIR})
   target_link_libraries(ark-occt PUBLIC ${OpenCASCADE_LIBRARIES} PRIVATE ark)
   add_executable(ark-occt-worker src/app/occt_worker.cpp)
+  if(MINGW)
+    target_link_options(ark-occt-worker PRIVATE -municode)
+    # OCCT DLLs and the caller must share the same C++ runtime. A static caller
+    # with dynamic LLVM-MinGW OCCT corrupts allocations across the DLL boundary.
+    get_filename_component(ARK_COMPILER_BIN "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    file(GLOB ARK_MINGW_RUNTIME_DLLS "${ARK_COMPILER_BIN}/libc++.dll" "${ARK_COMPILER_BIN}/libunwind.dll" "${ARK_COMPILER_BIN}/libwinpthread-1.dll")
+    if(ARK_MINGW_RUNTIME_DLLS)
+      add_custom_command(TARGET ark-occt-worker POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different ${ARK_MINGW_RUNTIME_DLLS} $<TARGET_FILE_DIR:ark-occt-worker> COMMAND_EXPAND_LISTS)
+    endif()
+  endif()
   add_dependencies(ark-agent-feature-tests ark-occt-worker)
   target_compile_definitions(ark-agent-feature-tests PRIVATE ARK_AGENT_NATIVE_TESTS=1)
   add_dependencies(ark-engineering-agent-tests ark-occt-worker)

@@ -66,11 +66,11 @@ Goal: create and revise a complete product with clear, reliable interactions.
 
 | ID | Milestone | Status | Acceptance still governing the work |
 |---|---|---|---|
-| B.01 | Readable navigation and editing | Parcial | Stable cube/axes, free orbit, selection/Spotlight, shortcuts and DPI; no clipped controls at supported resolutions. Measurement and display units have [013B evidence](iterations/013B.md); BOM layout has [015B evidence](iterations/015B.md). |
-| B.02 | Everyday sketches and feature history | Parcial | Actionable constraint diagnostics, valid reorder, suppress/rollback and visible dependencies; rejection leaves the document intact. Arcs/snaps/expressions have scoped 005B/008D evidence. |
-| B.03 | Advanced solids and surfaces | Parcial | Difficult loft/sweep/guide/patch/trim/thicken corpus, measured continuity and explicit repair; no mesh fallback concealing exact failures. |
+| B.01 | Readable navigation and editing | Parcial | Stable cube/axes, free orbit, selection/Spotlight, shortcuts and DPI; no clipped controls at supported resolutions. Measurement and display units have [013B evidence](iterations/013B.md); BOM layout has [015B evidence](iterations/015B.md). [017B scoped evidence](iterations/017B.md). |
+| B.02 | Everyday sketches and feature history | Parcial | Actionable constraint diagnostics, valid reorder, suppress/rollback and visible dependencies; rejection leaves the document intact. Arcs/snaps/expressions have scoped 005B/008D evidence. [017B scoped evidence](iterations/017B.md). |
+| B.03 | Advanced solids and surfaces | Parcial | Difficult loft/sweep/guide/patch/trim/thicken corpus, measured continuity and explicit repair; no mesh fallback concealing exact failures. [017B scoped evidence](iterations/017B.md). |
 | B.04 | Large, configurable assemblies | Parcial | Subassemblies, reused instances, configurations, external references and selective loading; editing one definition updates all occurrences. Supported mechanisms are locally scoped. |
-| B.05 | Technical drawings and exchange | Parcial | Associative views, sections, dimensions/tolerances and BOM; readback measures loss in STEP/IGES/DXF/native exchange. Local BOM/JSON is implemented; associative drawing work remains planned. [BOM contract](BOM.md) |
+| B.05 | Technical drawings and exchange | Parcial | Associative views, sections, dimensions/tolerances and BOM; readback measures loss in STEP/IGES/DXF/native exchange. Local BOM/JSON is implemented; associative drawing work remains planned. [BOM contract](BOM.md) [017B scoped evidence](iterations/017B.md). |
 
 ## C — Engineering and manufacturing
 
@@ -91,9 +91,9 @@ Goal: reach valid, useful designs with explainable quality, time and total cost.
 | ID | Milestone | Status | Acceptance still governing the work |
 |---|---|---|---|
 | D.01 | Quality/time/cost benchmark | Parcial | At least 30 versioned briefs, three repeats per initial configuration and blind human evaluation; cost per accepted design includes failures and coordination. Harness exists; 008D pilots were 0/9 and 4/9, 009B closed at 1/9. These results prove no savings. |
-| D.02 | Responsible engineer and adaptive team | Parcial | Compare Single/Focused/Parallel; give specialists concrete useful assignments and choose concurrency by measured benefit. No default turn/token budgets. Context, completion and feedback have scoped iteration evidence. |
+| D.02 | Responsible engineer and adaptive team | Parcial | Compare Single/Focused/Parallel; give specialists concrete useful assignments and choose concurrency by measured benefit. No default turn/token budgets. Context, completion and feedback have scoped iteration evidence. [017B scoped evidence](iterations/017B.md). |
 | D.03 | Isolated part workspaces | Planeado | Piece-level branches with ownership/datums; transactional integration identifies geometric/revision conflicts without silent rebase. |
-| D.04 | Multimodal feedback and correction | Parcial | Shared author/reviewer diagnostics, revision-bound previews, repeated-error detection and intent-preserving correction. Real images, failure replay and transport projection exist within [008D](iterations/008D.md), [010D](iterations/010D.md) and [012D](iterations/012D.md) scopes. |
+| D.04 | Multimodal feedback and correction | Parcial | Shared author/reviewer diagnostics, revision-bound previews, repeated-error detection and intent-preserving correction. Real images, failure replay and transport projection exist within [008D](iterations/008D.md), [010D](iterations/010D.md) and [012D](iterations/012D.md) scopes. [017B scoped evidence](iterations/017B.md). |
 | D.05 | Concept alternatives and reusable knowledge | Parcial | Compare alternatives against requirements, mass, process/cost and human preference using validated examples. A proposal must not be reported as a created part. |
 
 ## E — Industrial ecosystem
@@ -102,7 +102,7 @@ Goal: preserve identity and evidence through ARK → STAGE → Trace → MeshWor
 
 | ID | Milestone | Status | Acceptance still governing the work |
 |---|---|---|---|
-| E.01 | Shared identity and contracts | Parcial | Document/part/occurrence/revision IDs, units, source hash, geometry digest, provenance and idempotency; versioned schemas and compatibility tests. Local `ark.bom.v1` exists; cross-product reconciliation is planned. |
+| E.01 | Shared identity and contracts | Parcial | Document/part/occurrence/revision IDs, units, source hash, geometry digest, provenance and idempotency; versioned schemas and compatibility tests. Local `ark.bom.v1` exists; cross-product reconciliation is planned. [017B scoped evidence](iterations/017B.md). |
 | E.02 | ARK ↔ STAGE | Planeado | Publish/consume by contract; preserve original source, body, options and producer version. Display rejection without substitute geometry. |
 | E.03 | ARK ↔ MeshWorks | Planeado | Explicit authorized ARK adapter; incremental BOM quantities/configurations; CAD revisions preserve procurement/release state. Local BOM prepares input but no remote adapter is implemented. |
 | E.04 | STAGE/ARK ↔ Trace | Planeado | Canonical contours identified by result ID/digest; placements, stock, utilization and package returned with explicit grain/kerf/units. Stock consumption remains a separate action. |

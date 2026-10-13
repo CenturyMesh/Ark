@@ -53,5 +53,10 @@ bool validateSketchArcRecipe(const arkjson::Value& recipe, std::string& error);
 arkjson::Value measureSketchEntity(const Document& doc, const NamedSketch& sketch, const std::string& entity);
 // Explicitly closed, simple, non-touching loops. No automatic closing/healing.
 std::vector<SketchProfile> sketchProfiles(const Sketch& sketch, const Mat4& frame);
+// Display regions only: ignore open/branched components, triangulate closed
+// simple loops with nested holes. Never used as exact modeling authority.
+Mesh sketchRegionMesh(const Sketch& sketch, const Mat4& frame);
+// Retains equation source in the feature; returns bounded interpolation samples.
+arkjson::Value sampleEquationCurve(const arkjson::Value& spec,const ExprEnv& env);
 arkjson::Value inspectSketch(const Document& doc, const NamedSketch& sketch, bool samples=false);
 }

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <mapbox/earcut.hpp>
 
 namespace ark {
 void resolveSketchCorners(Sketch& sketch,const ExprEnv& env);
@@ -149,7 +150,18 @@ void bakeSketchOffsets(Sketch& sketch,const ExprEnv& env){
         if(drivenKind(source->kind)&&source->dof.empty())continue;
         if(source->kind==SketchEnt::Pnt)throw std::runtime_error("Offset source must be a curve");
         double distance=expressionValue(entity.distance,env);
-        assignPolyline(entity,offsetPolyline(sampleSketchEntity(*source,sketch.tolerance,&sketch),distance));
+        if(!std::isfinite(distance)||std::abs(distance)<1e-9||std::abs(distance)>1e6)throw std::runtime_error("Offset distance must be a nonzero finite length");
+        if(source->kind==SketchEnt::Circle||source->kind==SketchEnt::Arc){
+            const bool circle=source->kind==SketchEnt::Circle;const double a0=circle?0:source->dof.at(3),a1=circle?360:source->dof.at(4),sweep=a1-a0;
+            const double radius=source->dof.at(2)-(sweep>0?distance:-distance);if(radius<=1e-8)throw std::runtime_error("Sketch offset collapses the circle/arc radius");
+            const Vec2 center{source->dof[0],source->dof[1]};auto point=[&](double degrees){const double a=deg2rad(degrees);return center+Vec2{radius*std::cos(a),radius*std::sin(a)};};
+            const Vec2 start=point(a0);entity.dof={start.x,start.y};entity.segments.clear();entity.expressions.clear();const int count=(int)std::ceil(std::abs(sweep)/180.);
+            if(count<1||count>2)throw std::runtime_error("Offset arc requires one turn or less");for(int i=1;i<=count;++i){const auto end=circle&&i==count?start:point(a0+sweep*i/count);SketchEnt::WireSeg segment;segment.kind=SketchEnt::WireSeg::Arc;segment.sweep=sweep>0?1:-1;entity.segments.push_back(segment);entity.dof.insert(entity.dof.end(),{end.x,end.y,radius});}
+        }else{
+            auto moved=offsetPolyline(sampleSketchEntity(*source,sketch.tolerance,&sketch),distance);const bool closed=(moved.front()-moved.back()).len()<1e-6;
+            for(size_t i=1;i<moved.size();++i)for(size_t j=i+2;j<moved.size();++j)if(!(closed&&i==1&&j==moved.size()-1)&&intersects(moved[i-1],moved[i],moved[j-1],moved[j]))throw std::runtime_error("Sketch offset self-intersects or collapses; reduce distance");
+            assignPolyline(entity,moved);
+        }
     }
 }
 Vec2 onSketch(const Mat4& inverse,Vec3 world){Vec3 local=inverse.transformPoint(world);return {local.x,local.y};}
@@ -537,6 +549,40 @@ std::vector<SketchProfile> sketchProfiles(const Sketch& sketch,const Mat4& frame
         }loops.push_back(std::move(loop));
     }
     std::vector<SketchProfile> profiles;for(auto& loop:loops){SketchProfile p;p.frame=frame;for(size_t i=0;i<loop.size();++i)p.segs.push_back({ProfileSeg::Line,loop[i],loop[(i+1)%loop.size()]});profiles.push_back(std::move(p));}return profiles;
+}
+
+Mesh sketchRegionMesh(const Sketch& sketch,const Mat4& frame){
+    std::vector<size_t> entities;std::vector<std::vector<Vec2>> samples,loops;size_t count=0;
+    for(size_t i=0;i<sketch.ents.size();++i){const auto& e=sketch.ents[i];if(e.construction||e.kind==SketchEnt::Pnt)continue;
+        try{auto points=sampleSketchEntity(e,sketch.tolerance,&sketch);count+=points.size();if(count>4096)return {};if(points.size()>1){entities.push_back(i);samples.push_back(std::move(points));}}catch(const std::exception&){}
+    }
+    std::vector<bool> used(samples.size());
+    for(size_t seed=0;seed<samples.size();++seed){if(used[seed])continue;std::vector<size_t> component{seed};used[seed]=true;
+        for(size_t at=0;at<component.size();++at)for(size_t i=0;i<samples.size();++i)if(!used[i]){
+            const auto& a=samples[component[at]];const auto& b=samples[i];bool joins=false;
+            for(Vec2 p:{a.front(),a.back()})for(Vec2 q:{b.front(),b.back()})joins|=(p-q).len()<=1e-6;
+            if(joins){used[i]=true;component.push_back(i);}
+        }
+        Sketch subset=sketch;subset.ents.clear();subset.cons.clear();for(size_t i:component)subset.ents.push_back(sketch.ents[entities[i]]);
+        try{for(const auto& profile:sketchProfiles(subset,frame)){std::vector<Vec2> loop;for(const auto& edge:profile.segs)loop.push_back(edge.p0);loops.push_back(std::move(loop));}}catch(const std::exception&){}
+    }
+    // Touching/crossing boundaries have no unambiguous region presentation.
+    std::vector<bool> invalid(loops.size());
+    for(size_t a=0;a<loops.size();++a)for(size_t b=a+1;b<loops.size();++b)
+        for(size_t i=0;i<loops[a].size();++i)for(size_t j=0;j<loops[b].size();++j)
+            if(intersects(loops[a][i],loops[a][(i+1)%loops[a].size()],loops[b][j],loops[b][(j+1)%loops[b].size()]))invalid[a]=invalid[b]=true;
+    std::vector<int> parent(loops.size(),-1),depth(loops.size());
+    auto area=[](const std::vector<Vec2>& loop){double value=0;for(size_t i=0;i<loop.size();++i)value+=loop[i].cross(loop[(i+1)%loop.size()]);return std::abs(value);};
+    for(size_t i=0;i<loops.size();++i)if(!invalid[i]){double smallest=1e300;for(size_t j=0;j<loops.size();++j)if(i!=j&&!invalid[j]&&inside(loops[i].front(),loops[j])&&area(loops[j])<smallest){smallest=area(loops[j]);parent[i]=(int)j;}}
+    for(size_t i=0;i<loops.size();++i)for(int p=parent[i];p>=0;p=parent[(size_t)p])++depth[i];
+    Mesh mesh;
+    for(size_t i=0;i<loops.size();++i)if(!invalid[i]&&depth[i]%2==0){std::vector<std::vector<std::array<double,2>>> polygon;
+        auto ring=[&](size_t at){std::vector<std::array<double,2>> values;for(Vec2 p:loops[at])values.push_back({p.x,p.y});polygon.push_back(std::move(values));};
+        ring(i);for(size_t j=0;j<loops.size();++j)if(!invalid[j]&&parent[j]==(int)i)ring(j);
+        const u32 base=(u32)mesh.vertCount();for(const auto& points:polygon)for(const auto& p:points){Vec3 world=frame.transformPoint({p[0],p[1],0});mesh.pos.insert(mesh.pos.end(),{(float)world.x,(float)world.y,(float)world.z});}
+        for(u32 index:mapbox::earcut<u32>(polygon))mesh.idx.push_back(base+index);
+    }
+    return mesh;
 }
 
 arkjson::Value inspectSketch(const Document& doc,const NamedSketch& ns,bool samples){

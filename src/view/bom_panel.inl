@@ -40,6 +40,16 @@ static void bomExportSnapshot(BomPanel& state){
 
 }
 
+static void bomExportParts(BomPanel& state){
+    using V=arkjson::Value;if(state.revision!=g_session.revision||state.epoch!=g_documentEpoch)throw std::runtime_error("BOM snapshot changed; Refresh before exporting");
+    std::vector<EditorField> fields{{"New output directory",""},{"Formats / JSON array","[\"step\"]"},{"Parts","All",false,{"All","Make","Buy","Selected part"}},{"Sheet pose","formed",false,{"formed","flat"}}};
+    if(!editFields("Export BOM parts","Exports each definition once, with BOM quantities and a file manifest. Choose a new directory; all exports must succeed before publication.",fields))return;
+    if(state.epoch!=g_documentEpoch)throw std::runtime_error("Project changed during export setup");V args=V::makeObj(),formats;if(!arkjson::parse(fields[1].value,formats))throw std::runtime_error("Formats must be a JSON array, e.g. [\"step\",\"stl\"]");
+    args.set("path",V::makeStr(trimField(fields[0].value)));args.set("formats",formats);args.set("pose",V::makeStr(fields[3].value));args.set("expected_revision",V::makeNum((double)state.revision));
+    if(fields[2].value=="Selected part"){const auto* row=bomSelected(state);if(!row)throw std::runtime_error("Select a BOM part first");V ids=V::makeArr();ids.arr.push_back(*row->find("feature"));args.set("features",ids);}else args.set("procurement",V::makeStr(fields[2].value=="Make"?"make":fields[2].value=="Buy"?"buy":"all"));
+    runTool("bom_export_parts",args);if(g_error)throw std::runtime_error(g_status);SetWindowTextW(state.header,L"Parts exported with BOM quantities and SHA256 manifest.");
+}
+
 static void bomCapture(HWND h,const std::string& path){RECT r{};GetWindowRect(h,&r);int width=r.right-r.left,height=r.bottom-r.top;HDC screen=GetDC(h),dc=CreateCompatibleDC(screen);BITMAPINFO info{};info.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);info.bmiHeader.biWidth=width;info.bmiHeader.biHeight=-height;info.bmiHeader.biPlanes=1;info.bmiHeader.biBitCount=32;info.bmiHeader.biCompression=BI_RGB;void* bits=nullptr;auto bitmap=CreateDIBSection(screen,&info,DIB_RGB_COLORS,&bits,nullptr,0);auto old=SelectObject(dc,bitmap);if(PrintWindow(h,dc,0)){Image image;image.w=width;image.h=height;image.px.resize((size_t)width*height*3);for(size_t i=0;i<(size_t)width*height;++i){auto* pixel=(unsigned char*)bits+i*4;image.px[i*3]=pixel[2];image.px[i*3+1]=pixel[1];image.px[i*3+2]=pixel[0];}writePNG(path.c_str(),image);}SelectObject(dc,old);DeleteObject(bitmap);DeleteDC(dc);ReleaseDC(h,screen);}
 
 

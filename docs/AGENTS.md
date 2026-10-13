@@ -1,5 +1,15 @@
 # ARK agent protocol
 
+017B adds continuous sketches, equation curves, surface projection/trim and BOM
+part batch export. Discovery now lists 80 standalone tools. Read
+[017B scope](iterations/017B.md) and [manual controls](AUTHORING_017B_TESTING.md).
+Use `library_source_search{source:"web",query}` then `library_source_page{url}`
+for actual purchased-component evidence; persist real URLs/references in part
+metadata. `reference_navigate` discovers adjacent exact faces/edges;
+`selection_set` applies live Studio selection at the observed revision.
+`bom_export_parts` atomically publishes counted definitions with hashes.
+
+
 014D adds `bom_review` (76 standalone tools). Before Studio design completion,
 inspect every `bom_inspect` item page at one current revision and submit
 `bom_review{expected_revision,scope,fastening_review,pending_notes?}`.

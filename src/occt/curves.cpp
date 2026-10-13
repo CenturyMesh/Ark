@@ -4,12 +4,15 @@
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAlgoAPI_Section.hxx>
+#include <BRepProj_Projection.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepTools_WireExplorer.hxx>
 #include <GC_MakeArcOfCircle.hxx>
 #include <Geom_BSplineCurve.hxx>
 #include <Geom_BezierCurve.hxx>
+#include <GeomAPI_Interpolate.hxx>
+#include <TColgp_HArray1OfPnt.hxx>
 #include <gp_Ax2.hxx>
 #include <gp_Pln.hxx>
 #include <TColgp_Array1OfPnt.hxx>
@@ -208,6 +211,7 @@ V authoredCurve(const V& request) {
         if (kind == "line") {
             gp_Pnt end = xyz(need(segment, "to"), "to");
             if (cursor.Distance(end) < 1e-8) throw std::runtime_error("Curve line is degenerate");
+            if(const auto* dimension=segment.find("length")){const double length=num(*dimension,"line length");if(length<=1e-8)throw std::runtime_error("Spatial line length must be positive");end=cursor.Translated(gp_Vec(cursor,end).Normalized()*length);}
             BRepBuilderAPI_MakeEdge maker(cursor, end);
             if (!maker.IsDone()) throw std::runtime_error("Curve line failed");
             edge = maker.Edge();
@@ -302,6 +306,19 @@ V bridgeCurve(const V& request) {
 V modelCurveNative(const V& request) {
     const std::string op = need(request, "op").t == V::Str ? need(request, "op").str : "";
     if (op == "curve") return authoredCurve(request);
+    if (op == "curve_project_surface") {
+        const auto source=readBrep(need(request,"input_brep").str),target=readBrep(need(request,"target_brep").str);const auto wires=shapes(source,TopAbs_WIRE);
+        if(wires.size()!=1||!shapes(source,TopAbs_FACE).empty())throw std::runtime_error("Surface projection needs one exact source wire");
+        if(shapes(target,TopAbs_FACE).empty())throw std::runtime_error("Surface projection target needs exact faces");
+        BRepProj_Projection projection(wires.front(),target,direction(need(request,"direction"),"projection direction"));if(!projection.IsDone())throw std::runtime_error("Surface projection failed");TopoDS_Wire wire;unsigned count=0;
+        for(projection.Init();projection.More();projection.Next()){wire=projection.Current();++count;}if(count!=1)throw std::runtime_error("Surface projection must produce one connected wire; select a smaller target surface for ambiguous/missing projections");
+        auto result=curveResult(wire);auto report=*result.find("report");report.set("projection_exact",V::makeBool(true));report.set("projection_mode",V::makeStr("directional_surface"));result.set("report",report);return result;
+    }
+    if (op == "curve_interpolate") {
+        const auto& samples=need(request,"points");if(samples.t!=V::Arr||samples.arr.size()<2||samples.arr.size()>512)throw std::runtime_error("Interpolation needs 2..512 XYZ samples");
+        Handle(TColgp_HArray1OfPnt) points=new TColgp_HArray1OfPnt(1,(int)samples.arr.size());for(size_t i=0;i<samples.arr.size();++i)points->SetValue((int)i+1,xyz(samples.arr[i],"sample"));
+        GeomAPI_Interpolate interpolate(points,Standard_False,1e-7);interpolate.Perform();if(!interpolate.IsDone())throw std::runtime_error("XYZ equation interpolation failed");BRepBuilderAPI_MakeEdge edge(interpolate.Curve());if(!edge.IsDone())throw std::runtime_error("Equation edge construction failed");BRepBuilderAPI_MakeWire wire(edge.Edge());if(!wire.IsDone())throw std::runtime_error("Equation wire construction failed");auto result=curveResult(wire.Wire());auto report=*result.find("report");report.set("equation_samples",V::makeNum((double)samples.arr.size()));report.set("equation_between_samples_bound_verified",V::makeBool(false));result.set("report",report);return result;
+    }
     if (op == "curve_brep") return curveResult(readBrep(need(request,"wire_brep").str));
     if (op == "intersection_curve") return intersectionCurve(request);
     if (op == "bridge") return bridgeCurve(request);

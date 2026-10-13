@@ -4,6 +4,8 @@
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
+#include <BRepAlgoAPI_Splitter.hxx>
+#include <BRepClass_FaceClassifier.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakeSolid.hxx>
@@ -1222,6 +1224,16 @@ V trimSurfacePlane(const V& request){
     if(std::abs(properties(positive,'a')+properties(negative,'a')-originalArea)>std::max(1e-6,originalArea*1e-8)||originalArea-retainedArea<=1e-8)throw std::runtime_error("Surface trim failed area conservation");
     auto result=surfaceEditResult(keep.str=="positive"?positive:negative,"surface_trim_plane");V report=required(result,"report");report.set("original_area_mm2",V::makeNum(originalArea));report.set("removed_area_mm2",V::makeNum(originalArea-retainedArea));report.set("area_conservation_checked",V::makeBool(true));result.set("report",report);return result;
 }
+V trimSurfaceWire(const V& request){
+    const auto source=readBrep(required(request,"input_brep").str),curve=readBrep(required(request,"wire_brep").str);const auto faces=shapes(source,TopAbs_FACE),wires=shapes(curve,TopAbs_WIRE);
+    if(!shapes(source,TopAbs_SOLID).empty()||faces.size()!=1)throw std::runtime_error("Wire trim requires one open surface face; extract a face first");
+    if(wires.size()!=1||!BRep_Tool::IsClosed(wires.front()))throw std::runtime_error("Wire trim requires one explicitly closed exact wire");
+    const auto& xyz=required(request,"keep_point");if(xyz.t!=V::Arr||xyz.arr.size()!=3)throw std::runtime_error("Keep point needs three coordinates");const gp_Pnt point(number(xyz.arr[0],"keep X"),number(xyz.arr[1],"keep Y"),number(xyz.arr[2],"keep Z"));
+    NCollection_List<TopoDS_Shape> arguments,tools;arguments.Append(faces.front());tools.Append(wires.front());BRepAlgoAPI_Splitter split;split.SetArguments(arguments);split.SetTools(tools);split.Build();if(!split.IsDone()||split.HasErrors())throw std::runtime_error("Surface wire trim failed");const auto pieces=shapes(split.Shape(),TopAbs_FACE);if(pieces.size()<2||pieces.size()>64)throw std::runtime_error("Trim wire must divide the surface; project the closed wire onto it first");
+    double total=0;TopoDS_Shape selected;unsigned matches=0;for(const auto& piece:pieces){total+=properties(piece,'a');BRepClass_FaceClassifier classifier(TopoDS::Face(piece),point,1e-6);if(classifier.State()==TopAbs_IN){BRepExtrema_DistShapeShape distance(BRepBuilderAPI_MakeVertex(point).Vertex(),piece);distance.Perform();if(distance.IsDone()&&distance.Value()<=1e-6){selected=piece;++matches;}}}
+    if(matches!=1)throw std::runtime_error("Choose one keep point on the retained region, away from its boundary");const double original=properties(source,'a'),retained=properties(selected,'a');if(std::abs(total-original)>std::max(1e-6,original*1e-8)||retained<=1e-8||original-retained<=1e-8)throw std::runtime_error("Surface trim failed area conservation");return surfaceEditResult(selected,"surface_trim_wire");
+}
+
 V offsetSurface(const V& request) {
     const V& input = required(request, "input_brep");
     if (input.t != V::Str || input.str.empty()) throw std::runtime_error("input_brep must be base64");
@@ -1310,8 +1322,9 @@ V modelSurfaceNative(const V& request) {
         if (operation.str == "offset_surface") return offsetSurface(request);
         if (operation.str == "surface_extract_face") return extractSurfaceFace(request);
         if (operation.str == "surface_trim_plane") return trimSurfacePlane(request);
+        if (operation.str == "surface_trim_wire") return trimSurfaceWire(request);
         if (operation.str == "sew") return sewSurfaces(request);
-        if (operation.str == "curve" || operation.str == "intersection_curve" || operation.str == "bridge")
+        if (operation.str == "curve" || operation.str == "curve_interpolate" || operation.str == "curve_project_surface" || operation.str == "intersection_curve" || operation.str == "bridge")
             return modelCurveNative(request);
         throw std::runtime_error("unsupported surfacing operation");
     } catch (const Standard_Failure& error) {
