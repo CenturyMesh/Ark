@@ -116,6 +116,23 @@ static void sharedAuthoringSchemas(){
     };
     team.start(config,"Inspect advertised authoring contracts",ark::AgentSession::tools(),{});complete(team);check(owners==3&&team.snapshot().roles[0].state==ark::AgentTeamState::Idle,"all three team write contracts inspected without provider failure");
 }
+static void drawingTeamScope(){
+    ark::AgentTeam team;ark::AgentTeamConfig config;config.roles={role("designer",true),role("reviewer")};
+    config.roles[0].discipline=ark::AgentTeamDiscipline::PartDesigner;config.roles[1].discipline=ark::AgentTeamDiscipline::PhysicsReviewer;
+    bool designerWrites=false,reviewerRead=false,reviewerNoWrite=false;
+    config.roles[0].transport=[&](const auto&,const V& request,const auto*){
+        for(const auto& tool:request.find("tools")->arr)if(tool.find("name")->str=="team_apply_step"){
+            const auto* choices=tool.find("parameters")->find("properties")->find("commands")->find("items")->find("properties")->find("op")->find("enum");
+            bool set=false,refresh=false,remove=false;for(const auto& operation:choices->arr){set|=operation.str=="drawing.set";refresh|=operation.str=="drawing.refresh";remove|=operation.str=="drawing.remove";}designerWrites=set&&refresh&&remove;
+        }return done("Drawing authoring scope inspected.");
+    };
+    config.roles[1].transport=[&](const auto&,const V& request,const auto*){
+        reviewerNoWrite=true;for(const auto& tool:request.find("tools")->arr){const auto& name=tool.find("name")->str;reviewerRead|=name=="drawing_inspect";if(name=="team_apply_step"||name=="doc_apply")reviewerNoWrite=false;}
+        return done("Read-only drawing inspection scope inspected.");
+    };
+    team.start(config,"Inspect drawing authoring and review scopes",ark::AgentSession::tools(),{});complete(team);
+    check(designerWrites&&reviewerRead&&reviewerNoWrite,"designer can author revision-bound drawings; physics reviewer can inspect but cannot write");
+}
 static void conversationMemoryBound(){
     ark::AgentTeam team;ark::AgentTeamConfig config;config.roles={role("reviewer")};int rounds=0;bool compactReceipt=false;V tools=json(R"([{"name":"doc_info","inputSchema":{"type":"object"},"annotations":{"readOnlyHint":true}}])");
     // The outgoing request cap includes instructions/schemas; exact host history is separate.
@@ -375,4 +392,4 @@ static void explicitGoalCompletion(){
 }
 #include "agent_team_context_tests.inl"
 #include "agent_team_write_window_tests.inl"
-int main(){try{userImageTeamChecks();cooperativeWriteWindows();cooperativeWriteWindowLifecycle();cooperativeWriteWindowPermissionsAndAudit();oversizedHistoryResume();sharedAuthoringSchemas();explicitGoalCompletion();ownedPreparedCandidates();restoredDocumentAndCanvasTools();coherentBatchBenchmark();focusedSequentialAssignments();leadEngineerAuthorsPartsAndAssembly();parallelProgressStillReportsCompletion();sharedFailureEvidence();unlimitedEightRoleAssignments();configChecks();concurrencyAndRevision();steeringAndPause();collaboration();cancellationAndFailures();interruptedBatchHistory();limitsAndMutationSchemas();conversationMemoryBound();incrementalStepsAndScopes();frameDisciplineScope();proposalsAndPhysicsRole();concurrentQueuedDrafts();yieldedAndInterruptedContinuation();std::cout<<"Agent team checks passed: "<<checks<<"\n";return 0;}catch(const std::exception& error){std::cerr<<"Agent team checks failed: "<<error.what()<<"\n";return 1;}}
+int main(){try{userImageTeamChecks();cooperativeWriteWindows();cooperativeWriteWindowLifecycle();cooperativeWriteWindowPermissionsAndAudit();oversizedHistoryResume();sharedAuthoringSchemas();drawingTeamScope();explicitGoalCompletion();ownedPreparedCandidates();restoredDocumentAndCanvasTools();coherentBatchBenchmark();focusedSequentialAssignments();leadEngineerAuthorsPartsAndAssembly();parallelProgressStillReportsCompletion();sharedFailureEvidence();unlimitedEightRoleAssignments();configChecks();concurrencyAndRevision();steeringAndPause();collaboration();cancellationAndFailures();interruptedBatchHistory();limitsAndMutationSchemas();conversationMemoryBound();incrementalStepsAndScopes();frameDisciplineScope();proposalsAndPhysicsRole();concurrentQueuedDrafts();yieldedAndInterruptedContinuation();std::cout<<"Agent team checks passed: "<<checks<<"\n";return 0;}catch(const std::exception& error){std::cerr<<"Agent team checks failed: "<<error.what()<<"\n";return 1;}}
