@@ -106,12 +106,16 @@ arkjson::Value AgentSession::snapshotCandidate(const V& args){
     return response;
 }
 arkjson::Value AgentSession::commitPrepared(const V& args){
-    checkRevision(args,revision);for(const auto& field:args.obj)if(field.first!="expected_revision"&&field.first!="candidate_id")throw std::runtime_error("Prepared apply accepts only candidate_id and expected_revision");
+    checkRevision(args,revision);for(const auto& field:args.obj)if(field.first!="expected_revision"&&field.first!="candidate_id"&&field.first!="accept_dfm")throw std::runtime_error("Prepared apply accepts only candidate_id, expected_revision and explicit accept_dfm for DFM proposals");
     const auto* id=args.find("candidate_id");if(!id||id->t!=V::Str)throw std::runtime_error("candidate_id must be text");
     auto found=std::find_if(prepared_.begin(),prepared_.end(),[&](const Prepared& p){return p.id==id->str;});
     if(found==prepared_.end())throw std::runtime_error("Prepared candidate missing, evicted or already applied");
     if(found->expires<=std::chrono::steady_clock::now()||found->revision!=revision||found->baseline!=fingerprint(document)){prepared_.erase(found);throw std::runtime_error("Prepared candidate expired or document changed; preview again");}
-    auto next=found->document;V out=found->result;const bool metadata=found->metadataOnly;out.set("geometry_changed",V::makeBool(!out.find("geometry_recomputed")||out.find("geometry_recomputed")->b));remember();
+    const auto* acceptance=args.find("accept_dfm");
+    if(found->requiresDfmAcceptance&&(!acceptance||acceptance->t!=V::Bool||!acceptance->b))throw std::runtime_error("DFM_ACCEPTANCE_REQUIRED: review the retained comparison and explicitly pass accept_dfm:true");
+    if(acceptance&&(acceptance->t!=V::Bool||!found->requiresDfmAcceptance))throw std::runtime_error("accept_dfm applies only to a retained manufacturing proposal");
+    auto next=found->document;V out=found->result;if(found->requiresDfmAcceptance){out.set("dfm_comparison",found->dfmComparison);out.set("dfm_accepted",V::makeBool(true));}
+    const bool metadata=found->metadataOnly;out.set("geometry_changed",V::makeBool(!out.find("geometry_recomputed")||out.find("geometry_recomputed")->b));remember();
     if(metadata){document.features=next->features;document.materials=next->materials;document.bomDocumentId=next->bomDocumentId;}
     else{auto activity=document.agentActivity;auto usage=document.usage;document=*next;document.agentActivity=std::move(activity);document.usage=std::move(usage);}
     ++revision;prepared_.clear();

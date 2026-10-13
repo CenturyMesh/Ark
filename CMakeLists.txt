@@ -38,7 +38,7 @@ add_library(ark STATIC
   src/pricing.cpp
   src/agent_team.cpp
   src/manufacturing.cpp
-  src/dfm.cpp
+  src/dfm.cpp src/dfm_proposals.cpp
   src/assistant_connectors.cpp
   src/component_sources.cpp
   src/component_library.cpp
@@ -376,6 +376,15 @@ set_tests_properties(manufacturing PROPERTIES TIMEOUT 120)
 if(ARK_WITH_OCCT)
   target_compile_definitions(ark-manufacturing-tests PRIVATE ARK_MANUFACTURING_NATIVE_TESTS=1)
   add_dependencies(ark-manufacturing-tests ark-occt-worker)
+endif()
+
+add_executable(ark-dfm-proposal-tests tests/dfm_proposal_tests.cpp)
+target_link_libraries(ark-dfm-proposal-tests PRIVATE ark)
+add_test(NAME dfm-proposals COMMAND ark-dfm-proposal-tests)
+set_tests_properties(dfm-proposals PROPERTIES TIMEOUT 120)
+if(ARK_WITH_OCCT)
+  target_compile_definitions(ark-dfm-proposal-tests PRIVATE ARK_DFM_NATIVE_TESTS=1)
+  add_dependencies(ark-dfm-proposal-tests ark-occt-worker)
 endif()
 
 add_executable(ark-dfm-tests tests/dfm_tests.cpp)

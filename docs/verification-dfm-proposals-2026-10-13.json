@@ -1,0 +1,76 @@
+{
+  "date": "2026-10-13",
+  "milestones": [
+    "C.03",
+    "D.02"
+  ],
+  "milestone_status": "Parcial",
+  "scope": "Local exact editable DFM candidate, acceptance and offline team contract verification; release identity belongs to integration",
+  "baseline_commit": "11e34c343a91cf08e6d43d928228b374ebdeb63b",
+  "platform": "Windows x64",
+  "compiler": "MSVC 19.44.35228.0",
+  "native_kernel": "OCCT 8.0.1",
+  "contract": {
+    "tool": "manufacturing_propose",
+    "ruleset": "ark.dfm/1",
+    "bounded_commands": 8,
+    "command_bytes": 65536,
+    "comparison": "same baseline revision and semantic route/process/material declarations; full exact before/after reports and all rule transitions",
+    "acceptance": "doc_apply or same-role team_apply_step with candidate_id, expected_revision, accept_dfm:true",
+    "manufacturing_qualified": false,
+    "cost_improvement_claimed": false,
+    "design_improvement_claimed": false,
+    "document_version_change": false
+  },
+  "tests": {
+    "native_focused": {
+      "command": "ctest --test-dir out/dfm-proposals-native -C Release --output-on-failure -R '^(dfm-proposals|dfm|manufacturing|agent-features|agent-team|mcp-stdio)$'",
+      "groups": 6,
+      "passed": 6,
+      "failed": 0,
+      "seconds": 4.61,
+      "evidence": "out/dfm-proposals-tests.log"
+    },
+    "failed_attempts": [
+      {
+        "scope": "First native compile",
+        "failure": "Attempted mutation through const JSON find result",
+        "correction": "Build mutable arrays before setting the JSON object"
+      },
+      {
+        "scope": "First six-group native test run",
+        "passed": 4,
+        "failed": 2,
+        "failure": "Discovery still expected 83 tools; raw process JSON comparison treated canonical key ordering as a changed input",
+        "correction": "Discovery now expects 84; semantic comparison canonicalizes object keys while retaining array order and values"
+      },
+      {
+        "scope": "Focused two-group retry",
+        "passed": 1,
+        "failed": 1,
+        "failure": "Offline team transport reused the same function call ID across rounds",
+        "correction": "Fixture emits distinct call IDs; actual same-role receipt and explicit acceptance path subsequently passed"
+      }
+    ]
+  },
+  "observed_cases": [
+    "Scratch exact 20x10x5 FDM box against declared 19x10x5 build volume: editable width 18 changes the envelope from incompatible to compatible while preserving exact live geometry/revision until acceptance",
+    "Before/after retain baseline revision, exact bounds, same caller process inputs and unknown slicer/strength evidence",
+    "Shared span parameter resolves FDM target but makes another CNC component's stock screen incompatible; both transitions remain visible",
+    "Sheet flange inner radius 1 to 3 mm resolves caller minimum radius 2 screen through an isolated exact editable candidate",
+    "Missing/false acceptance preserves geometry/revision; explicit true acceptance reuses evaluated geometry, increments one revision and creates one undo entry",
+    "Stale expected_revision, mismatched rule_version, absent/inapplicable/already-compatible recommendation, process relaxation, definition removal, material/density edit, no-op and unrelated parameter proposals reject",
+    "Failed exact geometry and required postconditions provide failure evidence and no retained candidate",
+    "Legacy display geometry cannot supply exact proposal authority",
+    "Cache eviction and changed document fingerprint at unchanged revision reject retained candidates without rebasing",
+    "Offline part-designer team retains the proposal recipe, rejects false acceptance and commits the accepted same-role candidate exactly once",
+    "Existing manufacturing, DFM rules, agent features/team and standalone MCP stdio tests pass"
+  ],
+  "remaining_limits": [
+    "Focused local evidence only; full release regression, hosted CI, packaging and deployment remain integration gates",
+    "Explicit acceptance flag is a host/API action; agents must first obtain the user's acceptance of the concrete edit as instructed by onboarding",
+    "Rule screening cannot establish function, cost savings, global design improvement or production qualification",
+    "No generic capability limits, mesh-based production geometry selection, CAM/slicer evidence or physical machine trials",
+    "Candidates use existing ephemeral five-minute/four-candidate/128 MiB cache limits and are not saved as new .ark schema"
+  ]
+}

@@ -7,6 +7,13 @@ the authored expression, and agents use `doc_apply` at an observed
 is available through `manufacturing_inspect` for explicitly declared process
 reviews; see [DFM rule scope](DFM.md). These checks do not qualify production.
 
+Actionable DFM candidates use `manufacturing_propose` with an observed revision,
+current rule ID/version and explicit bounded editable commands. Review exact
+before/after evidence and unresolved checks with the user; the retained candidate
+requires `accept_dfm:true` for atomic `doc_apply` or same-role `team_apply_step`.
+See [DFM proposal contract](DFM_PROPOSALS.md). A passing screen does not imply
+functional design acceptance or manufacturing qualification.
+
 019B discovers **83 standalone tools**, including `skeleton_inspect`,
 `skeleton_compile` and `collision_inspect`. Source edits and indexed mesh edits
 require the current `expected_revision`. Inspect the [019B source and feedback
