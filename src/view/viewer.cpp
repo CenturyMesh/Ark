@@ -3472,12 +3472,13 @@ static void activateSelectionMode(int mode);
 #include "datum_authoring.inl"
 #include "skeleton_editor.inl"
 static bool handleDirectAuthoringAction(int id);
+static bool handleSolidDimensionAction(int id);
 static void helixDialog();
 static void loftControlDialog();
 static void selectTangentFaces();
 static void collisionCheckDialog();
 static void uiAction(int id){
-    if(handleAssistantImageAction(id)||handleDirectAuthoringAction(id))return;
+    if(handleAssistantImageAction(id)||handleSolidDimensionAction(id)||handleDirectAuthoringAction(id))return;
     if(id==710){openSkeletonEditor();return;}
     if(id==750){helixDialog();return;}if(id==752){loftControlDialog();return;}if(id==658){selectTangentFaces();return;}
     if(id==755){collisionCheckDialog();return;}
@@ -3892,6 +3893,7 @@ static GLuint pBg,pBusy,pSolid,pCube,pGrid,pShadow,pUI,pText,pSketch,pGeom,pAo,p
 #include "selection_glow_render.inl"
 #include "curve_dimensions.inl"
 #include "direct_authoring.inl"
+#include "solid_dimensions.inl"
 #include "geometry_authoring.inl"
 #include "measurement.inl"
 static void cancelComponentMove(bool restore){
@@ -4588,10 +4590,10 @@ static void drawFrame(HDC hdc){
     struct RibbonAction{const char* title;int id;};struct RibbonGroup{const char* title;std::vector<RibbonAction> actions;};std::vector<RibbonGroup> groups;
     if(g_toolModule==0)groups={{"Create",{{"Base",120},{"Flange",121},{"Hem",394},{"Stamp",397},{"Opening",124}}},{"Modify",{{"Edit",325},{"Jog",494},{"Sketch bend",495},{"Unfold",320},{"Refold",321}}},{"Pattern",{{"Pattern",468},{"Mirror",108}}},{"Output",{{"Export",213}}}};
     else if(g_toolModule==1&&g_directAuthoring.active)groups={{"Direct edit",{{"Push / pull",650},{"Move body",651},{"Mesh patch",652},{"Mesh vertex",653},{"Mesh edge",654},{"Value",655},{"Apply",656},{"Cancel",657}}},{"Source",{{"Dimensions",659},{"Sample mesh",754}}},{"Select",{{"Body",170},{"Face",171},{"Tangent patch",658}}},{"Combine",{{"Fuse bodies",8},{"Carve body",9},{"Keep overlap",10}}}};
-    else if(g_toolModule==1)groups={{"Create",{{"Primitive",100},{"Extrude",101},{"Loft",76},{"Helix",750},{"Frame",210},{"Tube",26}}},{"Direct",{{"Push / pull",650},{"Move body",651},{"Mesh patch",652},{"Source dims",659}}},{"Combine",{{"Fuse bodies",8},{"Carve body",9},{"Keep overlap",10}}},{"Assembly",{{"Assembly",27},{"Mate",94},{"Library",484}}},{"Frame edits",{{"Trim / extend",496},{"Trim plane",497},{"Weld",498},{"Tube end fit",549}}},{"More",{{"Model tools",456}}}};
+    else if(g_toolModule==1)groups={{"Create",{{"Primitive",100},{"Extrude",101},{"Drag extrude",660},{"Loft",76},{"Helix",750},{"Frame",210},{"Tube",26}}},{"Direct",{{"Push / pull",650},{"Move body",651},{"Mesh patch",652},{"Source dims",659}}},{"Combine",{{"Fuse bodies",8},{"Carve body",9},{"Keep overlap",10}}},{"Assembly",{{"Assembly",27},{"Mate",94},{"Library",484}}},{"Frame edits",{{"Trim / extend",496},{"Trim plane",497},{"Weld",498},{"Tube end fit",549}}},{"More",{{"Model tools",456}}}};
     else if(g_toolModule==2&&g_sketchEditing.active)groups={{"Edit in view",{{"Exit sketch",611},{"Coordinates",70},{"Dimensions",591},{"Source params",577},{"Constraint",73},{"Normal view",71},{"Grid",579}}},{"Sketch",{{"Draw sketch",570},{"Undo",18},{"Redo",19}}}};
-    else if(g_toolModule==2&&g_sketchDrawing.active)groups={{"Draw in view",{{"Line",571},{"Polyline",572},{"Rectangle",573},{"Circle",574},{"Arc 3 pt",575},{"Dimensions",576},{"Grid",579},{"Exit sketch",578}}},{"Coordinate forms",{{"Line form",543},{"Arc form",544},{"Tangent arc",545},{"Rectangle",61},{"Circle",62},{"Spline",63}}},{"Modify",{{"Project 2D",536},{"Include 3D",537},{"Edit curve",70},{"Constraint",73},{"Plane",60},{"Source params",577}}},{"Build",{{"Extrude",65},{"Cut",66}}}};
-    else if(g_toolModule==2)groups={{"Interactive",{{"Draw sketch",570},{"Edit sketch",610}}},{"Draw 2D",{{"Line",543},{"Arc 3 pt",544},{"Tangent arc",545},{"Rectangle",61},{"Circle",62},{"Spline",63}}},{"Draw 3D",{{"Arc 3D",547},{"Tangent 3D",548},{"3D curve",538}}},{"Modify",{{"Project 2D",536},{"Include 3D",537},{"Edit curve",70},{"Constraint",73},{"Plane",60}}},{"Build",{{"Extrude",65},{"Cut",66}}}};
+    else if(g_toolModule==2&&g_sketchDrawing.active)groups={{"Draw in view",{{"Line",571},{"Polyline",572},{"Rectangle",573},{"Circle",574},{"Arc 3 pt",575},{"Dimensions",576},{"Grid",579},{"Exit sketch",578}}},{"Coordinate forms",{{"Line form",543},{"Arc form",544},{"Tangent arc",545},{"Rectangle",61},{"Circle",62},{"Spline",63}}},{"Modify",{{"Project 2D",536},{"Include 3D",537},{"Edit curve",70},{"Constraint",73},{"Plane",60},{"Source params",577}}},{"Build",{{"Extrude",65},{"Drag extrude",660},{"Cut",66}}}};
+    else if(g_toolModule==2)groups={{"Interactive",{{"Draw sketch",570},{"Edit sketch",610}}},{"Draw 2D",{{"Line",543},{"Arc 3 pt",544},{"Tangent arc",545},{"Rectangle",61},{"Circle",62},{"Spline",63}}},{"Draw 3D",{{"Arc 3D",547},{"Tangent 3D",548},{"3D curve",538}}},{"Modify",{{"Project 2D",536},{"Include 3D",537},{"Edit curve",70},{"Constraint",73},{"Plane",60}}},{"Build",{{"Extrude",65},{"Drag extrude",660},{"Cut",66}}}};
     else if(g_toolModule==3)groups={{"Measure",{{"Measure 2D",585},{"Measure 3D",586},{"Units",587}}},{"Selection",{{"Body",170},{"Face",171},{"Tangent faces",658},{"Edge",172},{"Curve",173}}},{"Inspect",{{"Collision",755},{"BOM",590},{"Properties",401},{"Mass / CG",188},{"Material",187}}},{"Display",{{"Graphics",56},{"Fit",20}}}};
     else if(g_toolModule==4)groups={{"Engineering",{{"Model tools",456},{"Physics",188},{"Loads",216},{"Electronics",211},{"Routing",212},{"Library",484}}},{"Agents",{{"Assistant",400},{"Connect",58},{"Providers",357},{"Tools",457}}}};
     else if(g_toolModule==6)groups={{"Create",{{"Extrude",151},{"Revolve",152},{"Sweep",150},{"Loft",76},{"Fill",77},{"NURBS",78}}},{"Modify",{{"Loft controls",752},{"Extract face",491},{"Trim plane",492},{"Offset",153},{"Glue surfaces",154},{"Thicken",79}}}};
@@ -4602,7 +4604,7 @@ static void drawFrame(HDC hdc){
         for(const auto& action:group.actions){if(action.id>=496&&action.id<=498)g_frameRibbonBounds[action.id-496]={cursor,100,cardW-3,92,action.id};bool hover=mp.x>=cursor&&mp.x<cursor+cardW&&mp.y>=100&&mp.y<194;bool enabled=true;
             if(action.id==187)enabled=selBody>=0;if(action.id==188||action.id==216)enabled=selBody>=0||!g_doc.assembly.empty();if(action.id==451||action.id==452)enabled=!g_doc.assembly.empty();
             if(action.id==576)enabled=g_sketchDrawing.active&&!g_sketchDrawing.anchors.empty()&&(g_sketchDrawing.tool!=4||g_sketchDrawing.anchors.size()>=2);
-            if(action.id==655||action.id==656)enabled=g_directAuthoring.active&&g_directAuthoring.feature!=0;
+            if(action.id==655||action.id==656)enabled=g_directAuthoring.active&&(g_directAuthoring.feature!=0||g_directAuthoring.mode==5);
             if(g_sketchDrawing.active&&action.id>=571&&action.id<=575&&g_sketchDrawing.tool==action.id-571)rect(cursor,99,cardW-3,94,5,.055f,.18f,.22f,1,.14f,.64f,.74f,.65f,1);
             if(action.id>=496&&action.id<=498){auto* frame=selectedPartFeature();enabled=frame&&frame->type==FeatureType::ConstructionFrame;}
             if(g_toolModule==0&&action.id==108)enabled=false;
@@ -5243,9 +5245,10 @@ static void drawFrame(HDC hdc){
     }else if(!g_draftViews.empty()){
         float sx=(float)viewX+(g_showViewCube?g_cubeS+30:20),sy=(float)viewY+76;rect(sx,sy,420,50,7,.025f,.07f,.095f,.95f,.16f,.61f,.75f,.7f,1);textOut("AGENT SKETCH DRAFT / uncommitted commands",sx+12,sy+8,.64f,.62f,.92f,.99f);textOut(fitText(g_liveStepLabel,.52f,392),sx+12,sy+30,.52f,.57f,.77f,.86f);
     }
-    if(g_directAuthoring.active){auto& edit=g_directAuthoring;float sx=(float)viewX+(g_showViewCube?g_cubeS+30:20),sy=(float)viewY+66,sw=std::min(620.f,(float)(viewX+viewW)-sx-18);rect(sx,sy,sw,74,8,.025f,.070f,.095f,.96f,.15f,.81f,.77f,.7f,1);textOut(fitText(directModeName(edit.mode),.69f,sw-24),sx+12,sy+8,.69f,.65f,.97f,.90f);std::string value=!directCurrent()?"Stale preview / cancel and select current geometry":!edit.error.empty()?edit.error:edit.feature?drawingNumber(edit.amount)+" mm / Tab expressions / Apply saves / Esc cancels":"Drag a compatible source face or mesh element";textOut(fitText(value,.54f,sw-24),sx+12,sy+32,.54f,.70f,.85f,.92f);if(edit.feature){button("Value",sx+12,sy+50,78,655);button("Apply",sx+100,sy+50,78,656,true);button("Cancel",sx+188,sy+50,78,657);}}
+    if(g_directAuthoring.active){auto& edit=g_directAuthoring;float sx=(float)viewX+(g_showViewCube?g_cubeS+30:20),sy=(float)viewY+66,sw=std::min(620.f,(float)(viewX+viewW)-sx-18);rect(sx,sy,sw,74,8,.025f,.070f,.095f,.96f,.15f,.81f,.77f,.7f,1);textOut(fitText(directModeName(edit.mode),.69f,sw-24),sx+12,sy+8,.69f,.65f,.97f,.90f);std::string value=!directCurrent()?"Stale preview / cancel and select current geometry":!edit.error.empty()?edit.error:(edit.feature||edit.mode==5)?directDisplayDistance(edit.amount)+" / Tab expressions / Apply saves / Esc cancels":"Drag a compatible source face or mesh element";textOut(fitText(value,.54f,sw-24),sx+12,sy+32,.54f,.70f,.85f,.92f);if(edit.feature||edit.mode==5){button("Value",sx+12,sy+50,78,655);button("Apply",sx+100,sy+50,78,656,true);button("Cancel",sx+188,sy+50,78,657);}}
+    if(!measurementActive()&&!g_directAuthoring.active&&!g_sketchEditing.active&&!g_sketchDrawing.active)drawSolidDimensions(rect,button);
     drawMeasurementOverlay(rect,button);
-    g_viewSketchDimension={};if(!measurementActive()&&!g_sketchDrawing.active&&g_showSketches){g_viewSketchDimension=selectedSketchDimension();if(g_viewSketchDimension.valid){float px,py;if(projectScreen(g_viewSketchDimension.position,px,py)){auto& dimension=g_viewSketchDimension;float width=std::min(360.f,textWidth(dimension.text,.66f)+24),x=std::clamp(px+18,(float)viewX+8,(float)(viewX+viewW)-width-8),y=std::clamp(py-40,(float)viewY+185,(float)(viewY+viewH)-58);rect(x+2,y+4,width,52,7,0,0,0,.20f,0,0,0,0,0);rect(x,y,width,52,7,.045f,.105f,.135f,.97f,.24f,.57f,.69f,.8f,1);textOut(dimension.text,x+11,y+8,.66f,.71f,.94f,.99f);textOut(dimension.action==577?"Click to edit linked source parameters":dimension.action==89?"Click to edit this native constraint":dimension.action==591?"Click to edit driving dimension":"Click to edit authored coordinates",x+11,y+31,.49f,.59f,.78f,.87f);g_zones.push_back({x,y,width,52,584});}}}
+    g_viewSketchDimension={};if(!measurementActive()&&!g_directAuthoring.active&&!g_sketchDrawing.active&&g_showSketches){g_viewSketchDimension=selectedSketchDimension();if(g_viewSketchDimension.valid){float px,py;if(projectScreen(g_viewSketchDimension.position,px,py)){auto& dimension=g_viewSketchDimension;float width=std::min(360.f,textWidth(dimension.text,.66f)+24),x=std::clamp(px+18,(float)viewX+8,(float)(viewX+viewW)-width-8),y=std::clamp(py-40,(float)viewY+185,(float)(viewY+viewH)-58);rect(x+2,y+4,width,52,7,0,0,0,.20f,0,0,0,0,0);rect(x,y,width,52,7,.045f,.105f,.135f,.97f,.24f,.57f,.69f,.8f,1);textOut(dimension.text,x+11,y+8,.66f,.71f,.94f,.99f);textOut(dimension.action==577?"Click to edit linked source parameters":dimension.action==89?"Click to edit this native constraint":dimension.action==591?"Click to edit driving dimension":"Click to edit authored coordinates",x+11,y+31,.49f,.59f,.78f,.87f);g_zones.push_back({x,y,width,52,584});}}}
     if(g_error&&!g_lastFailureId.empty())button("Inspect failed operation",(float)(viewX+viewW)-210,(float)viewY+66,190,580);
     g_lastRibbonHint=ribbonHint;
     if(!ribbonHint.empty()){float width=textWidth(ribbonHint,.60f)+22,x=std::clamp((float)mp.x+12.f,10.f,W-width-10.f),y=(float)mp.y+20;rect(x,y,width,29,6,.035,.055,.075,.98,.27,.51,.65,.95,1);textOut(ribbonHint,x+11,y+7,.60f,.87f,.94f,1.f);}
@@ -5625,16 +5628,20 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
         }
         case WM_LBUTTONDBLCLK:{
             g_eatNextClick=true;POINT p{GET_X_LPARAM(lp),GET_Y_LPARAM(lp)};
+            g_componentDragIntent={};bool inControl=false;
             for(auto& z:g_zones)if((float)p.x>=z.x&&(float)p.x<=z.x+z.w&&(float)p.y>=z.y&&(float)p.y<=z.y+z.h){
-                if(z.id>=2000&&z.id<9000){selBody=z.id-2000;g_activeSketch.clear();g_showSketches=false;interactiveAction(161);}
+                inControl=true;if(z.id>=760&&z.id<768){interactiveAction(z.id);}
+                else if(z.id>=2000&&z.id<9000){selBody=z.id-2000;g_activeSketch.clear();g_showSketches=false;interactiveAction(161);}
                 else if(z.id>=16000&&z.id<17024){interactiveAction(z.id);interactiveAction(161);}
                 else if(z.id>=18000&&z.id<22000){interactiveAction(z.id);if(g_selectedExplorerEntity)interactiveAction(g_selectedExplorerEntity->edit);}
                 else if(z.id>=11000&&z.id<12000){interactiveAction(z.id);interactiveAction(70);}
                 break;
             }
+            if(!inControl&&!g_pickKind&&drawingInView(p.x,p.y)&&!measurementActive()&&!g_sketchDrawing.active&&!g_sketchEditing.active&&!g_directAuthoring.active){int body=pickBody(p.x,p.y);if(body>=0)exposeSolidDimensions(body);}
             return 0;
         }
         case WM_KEYDOWN:
+            if(wp==VK_ESCAPE&&g_solidDimensions.feature&&!g_directAuthoring.active&&!g_sketchEditing.active&&!g_sketchDrawing.active){g_solidDimensions={};return 0;}
             if(g_directAuthoring.active){if(wp==VK_ESCAPE){cancelDirectAuthoring();ReleaseCapture();return 0;}if(wp==VK_TAB){g_directAuthoring.dragging=false;g_dragged=true;ReleaseCapture();interactiveAction(655);return 0;}if(wp==VK_RETURN){interactiveAction(656);return 0;}}
             if(g_sketchEditing.active){if(wp==VK_ESCAPE){if(g_sketchEditing.dragging)cancelSketchEditDrag();else cancelSketchEditing();ReleaseCapture();return 0;}if(wp==VK_TAB){interactiveAction(g_viewSketchDimension.valid?584:70);return 0;}}
             if(g_sketchDrawing.active){if(wp==VK_ESCAPE){cancelSketchDrawing();ReleaseCapture();return 0;}if(wp==VK_TAB){interactiveAction(576);return 0;}if(wp==VK_RETURN){g_sketchDrawing.anchors.clear();rebuildDrawingPreview();g_status="Line chain ended / saved segments retained / click first anchor";return 0;}}

@@ -1,0 +1,96 @@
+{
+  "scope": "Local exact extrusion gestures and authored solid dimensions",
+  "milestones": {
+    "B.01": "Parcial",
+    "B.02": "Parcial"
+  },
+  "verification_status": "Verificado no escopo",
+  "base_commit": "be8ac06",
+  "build": {
+    "configuration": "MSVC Release, native OCCT enabled",
+    "targets": [
+      "ark-studio",
+      "ark-direct-dimension-tests"
+    ],
+    "result": "passed"
+  },
+  "tests": [
+    {
+      "name": "direct-dimensions",
+      "result": "passed",
+      "checks": [
+        "execute onboarding driving dimension create/edit examples at observed revisions",
+        "exact native XZ extrusion volume",
+        "retained source depth expression",
+        "agent radius/depth edits",
+        "exact semantic cap.start anchor and cap.end position",
+        "negative and stale writes leave document/revision unchanged",
+        "source expression and exact geometry persistence"
+      ]
+    },
+    {
+      "name": "studio-direct-authoring-ui",
+      "result": "passed",
+      "size": [
+        1440,
+        900
+      ],
+      "checks": [
+        "rendered Drag extrude action660",
+        "native exact preview volume and native_solid source command",
+        "preview retains document/revision",
+        "release commits authored sketch extrusion",
+        "Tab expression and cap.end push/pull retain source bindings",
+        "double-click reveals source dimensions without mutation",
+        "clickable source row edits",
+        "agent parameter recomputation",
+        "invalid dimension and stale rendered-row receipt reject",
+        "existing primitive and indexed mesh gestures"
+      ]
+    },
+    {
+      "name": "studio-parametric-authoring-ui",
+      "result": "passed",
+      "size": [
+        1440,
+        900
+      ]
+    },
+    {
+      "name": "compact studio-direct-authoring-ui",
+      "result": "passed",
+      "exit_code": 0,
+      "size": [
+        1180,
+        800
+      ]
+    }
+  ],
+  "commands": [
+    "cmake --build out/native-release --config Release --target ark-studio ark-direct-dimension-tests --parallel 3",
+    "ctest --test-dir out/native-release -C Release -R \"^(direct-dimensions|studio-direct-authoring-ui|studio-parametric-authoring-ui)$\" --output-on-failure",
+    "ark-studio --self-test-direct-authoring-ui --shot direct-authoring-compact.png --size 1180 800"
+  ],
+  "visual_inspection": {
+    "result": "passed within inspected scope",
+    "captures": [
+      "images/020B/solid-dimensions.png",
+      "images/020B/solid-dimensions-compact.png",
+      "images/020B/exact-extrude-preview.png",
+      "images/020B/exact-cap-preview.png"
+    ],
+    "observed": [
+      "source rows and footer fit at 1440x900 and1180x800",
+      "preview readout uses three decimal places; command retains full internal value",
+      "driving sketch dimension editor is hidden during an active exact extrusion preview"
+    ]
+  },
+  "authority": "Authored sketch, datum frame, native recipe and exact semantic cap reference; tessellation is preview display only",
+  "limits": [
+    "new native sketch extrusion requires positive depth and a valid closed profile",
+    "source push/pull accepts original extrusion cap.end; downstream Boolean and transformed solids require source-history editing",
+    "placed occurrences require changing the shared part definition",
+    "displayed supported scalar rows are limited by available viewport height; full source editor remains available",
+    "no full release suite, deployment, manufacture or external integration qualification claimed"
+  ]
+}
