@@ -1,5 +1,11 @@
 # Validation record
 
+## 2026-10-13: 018B editable authoring draft
+
+See [018B](iterations/018B.md) and its verification receipt for coordinated native/core
+suites, actual desktop interaction checks, failed attempts and inspected synthetic
+screenshots. Human acceptance remains pending; no merge or public release is authorized.
+
 ## 2026-10-08: assistant streaming, text input and reasoning effort
 
 The user completed ChatGPT consent. The safe local status check confirmed a

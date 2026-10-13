@@ -31,6 +31,8 @@ struct SketchCurve {
 // the display sample and the exact profile.
 std::vector<SketchCurve> sketchPresentedCurves(const Sketch& sketch, const SketchEnt& entity);
 std::vector<Vec2> sampleSketchEntity(const SketchEnt& entity, double tolerance, const Sketch* owner=nullptr);
+// Separate paths preserve disconnected text engraving strokes for display.
+std::vector<std::vector<Vec2>> sampleSketchEntityPaths(const SketchEnt& entity, double tolerance, const Sketch* owner=nullptr);
 std::vector<std::array<Vec2,4>> sketchSplineSegments(const SketchEnt& entity);
 const char* sketchEntityKindName(SketchEnt::Kind kind);
 // dof index of a wire vertex x coordinate. Vertex 0 is the start.
@@ -50,6 +52,10 @@ AuthoredArc arcThroughThreePoints(Vec3 start, Vec3 through, Vec3 end);
 AuthoredArc arcFromStartTangent(Vec3 start, Vec3 end, Vec3 tangent);
 // Checks the bounded typed DTO; expressions are evaluated by evaluateSketch.
 bool validateSketchArcRecipe(const arkjson::Value& recipe, std::string& error);
+bool validateSketchEntityRecipe(const arkjson::Value& recipe, std::string& error);
+void evaluateSketchEntityRecipe(SketchEnt& entity, const ExprEnv& env, double displayTolerance);
+arkjson::Value sketchRecipeDefaults(const std::string& type);
+std::vector<std::string> sketchRecipeTypes();
 arkjson::Value measureSketchEntity(const Document& doc, const NamedSketch& sketch, const std::string& entity);
 // Explicitly closed, simple, non-touching loops. No automatic closing/healing.
 std::vector<SketchProfile> sketchProfiles(const Sketch& sketch, const Mat4& frame);

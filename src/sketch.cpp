@@ -203,7 +203,7 @@ arkjson::Value projectSketchGeometry(Document& document,const std::string& sourc
 void evaluateSketch(NamedSketch& ns,const ExprEnv& env){
     ns.error.clear();ns.residual=0;
     try{
-        for(auto& e:ns.sk.ents){for(size_t i=0;i<e.expressions.size();++i)if(!e.expressions[i].empty())e.dof[i]=expressionValue(e.expressions[i],env);evaluateArcRecipe(e,env);}
+        for(auto& e:ns.sk.ents){for(size_t i=0;i<e.expressions.size();++i)if(!e.expressions[i].empty())e.dof[i]=expressionValue(e.expressions[i],env);evaluateArcRecipe(e,env);if(e.kind==SketchEnt::Recipe)evaluateSketchEntityRecipe(e,env,ns.sk.tolerance);}
         for(auto& c:ns.sk.cons){
             if(!c.expression.empty())c.val=expressionValue(c.expression,env);
             if(!c.expression2.empty())c.val2=expressionValue(c.expression2,env);
@@ -292,11 +292,13 @@ const char* sketchEntityKindName(SketchEnt::Kind kind){
         case SketchEnt::Wire: return "wire";
         case SketchEnt::Project: return "project";
         case SketchEnt::Offset: return "offset";
+        case SketchEnt::Recipe: return "recipe";
     }
     return "unknown";
 }
 
 int sketchVertexCount(const SketchEnt& entity){
+    if(entity.kind==SketchEnt::Recipe)return (int)entity.dof.size()/2;
     if(entity.kind==SketchEnt::Project||entity.kind==SketchEnt::Offset) return entity.segments.empty()?0:1+(int)entity.segments.size();
     if(entity.kind==SketchEnt::Wire) return 1+(int)entity.segments.size();
     if(entity.kind==SketchEnt::Line) return 2;
@@ -447,6 +449,7 @@ void resolveSketchCorners(Sketch& sketch,const ExprEnv& env){
 std::vector<Vec2> sampleSketchEntity(const SketchEnt& e,double tolerance,const Sketch* owner){
     if(!std::isfinite(tolerance)||tolerance<.0001||tolerance>5)throw std::runtime_error("Sketch tolerance must be 0.0001..5 mm");
     if(e.kind==SketchEnt::Project&&!e.projectionBrep.empty())return e.projectionSamples;
+    if(e.kind==SketchEnt::Recipe){if(e.recipeSamples.empty())throw std::runtime_error("Entity recipe is not evaluated");return e.recipeSamples;}
     auto pt=[&](size_t i){return Vec2{e.dof.at(2*i),e.dof.at(2*i+1)};};
     auto at=[&](int i){return Vec2{e.dof.at((size_t)i),e.dof.at((size_t)i+1)};};
     if(e.kind==SketchEnt::Pnt)return {pt(0)};
@@ -517,6 +520,13 @@ std::vector<std::array<Vec2,4>> sketchSplineSegments(const SketchEnt& e){
         Vec2 m2=((p2-p1)+((p3-p2)/t23-(p3-p1)/(t12+t23))*t12)*(1-e.tension);
         segments.push_back({p1,p1+m1/3,p2-m2/3,p2});
     }return segments;
+}
+
+std::vector<std::vector<Vec2>> sampleSketchEntityPaths(const SketchEnt& entity,double tolerance,const Sketch* owner){
+    if(entity.kind==SketchEnt::Recipe&&entity.entityRecipe.find("type")&&entity.entityRecipe.find("type")->str=="text"){
+        std::vector<std::vector<Vec2>> paths;for(size_t i=1;i<entity.recipeSamples.size();i+=2)paths.push_back({entity.recipeSamples[i-1],entity.recipeSamples[i]});return paths;
+    }
+    return {sampleSketchEntity(entity,tolerance,owner)};
 }
 
 std::vector<SketchProfile> sketchProfiles(const Sketch& sketch,const Mat4& frame){
@@ -595,6 +605,7 @@ arkjson::Value inspectSketch(const Document& doc,const NamedSketch& ns,bool samp
         item.set("name",V::makeStr(e.name));item.set("kind",V::makeStr(sketchEntityKindName(e.kind)));
         item.set("construction",V::makeBool(e.construction));for(auto x:e.dof)dof.arr.push_back(V::makeNum(x));item.set("resolved_dof",dof);
         if(e.arcRecipe.t==V::Obj){item.set("recipe",e.arcRecipe);item.set("geometry_authority",V::makeStr("analytic_arc"));item.set("driven",V::makeBool(true));item.set("editable",V::makeBool(true));}
+        if(e.kind==SketchEnt::Recipe){item.set("recipe",e.entityRecipe);item.set("recipe_report",e.recipeReport);item.set("geometry_authority",e.recipeReport.find("geometry_authority")?*e.recipeReport.find("geometry_authority"):V::makeStr("unresolved"));item.set("driven",V::makeBool(true));item.set("editable",V::makeBool(true));}
         if(e.kind==SketchEnt::Project){item.set("geometry_authority",V::makeStr(e.projectionBrep.empty()?"unresolved":"exact_brep"));item.set("associative",V::makeBool(true));item.set("editable",V::makeBool(false));item.set("feature",V::makeNum(e.sourceFeature));item.set("reference",V::makeStr(e.reference));}
         auto points=sampleSketchEntity(e,ns.sk.tolerance,&ns.sk);item.set("sample_count",V::makeNum(points.size()));
         if(samples){for(auto p:points){local.arr.push_back(vectorValue({p.x,p.y,0}));world.arr.push_back(vectorValue(frame.transformPoint({p.x,p.y,0})));}item.set("local",local);item.set("world",world);}entities.arr.push_back(item);

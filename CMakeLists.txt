@@ -29,7 +29,7 @@ target_compile_definitions(ark-sqlite PRIVATE SQLITE_ENABLE_FTS5=1 SQLITE_THREAD
 target_link_libraries(ark-sqlite PUBLIC Threads::Threads)
 add_library(ark STATIC
   src/agent_activity.cpp
-  src/bom.cpp src/bom_review.cpp src/bom_export.cpp src/curve_equation.cpp
+  src/bom.cpp src/bom_review.cpp src/bom_export.cpp src/curve_equation.cpp src/spatial_sketch.cpp src/sketch_entities.cpp src/datum_authoring.cpp
   src/updates.cpp
   src/document_container.cpp
   src/iteration_history.cpp
@@ -92,6 +92,18 @@ enable_testing()
 add_executable(ark-authoring-extension-tests tests/authoring_extensions_tests.cpp)
 target_link_libraries(ark-authoring-extension-tests PRIVATE ark)
 add_test(NAME authoring-extensions COMMAND ark-authoring-extension-tests)
+add_executable(ark-datum-authoring-tests tests/datum_authoring_tests.cpp)
+target_link_libraries(ark-datum-authoring-tests PRIVATE ark)
+add_test(NAME construction-datum-authoring COMMAND ark-datum-authoring-tests)
+set_tests_properties(construction-datum-authoring PROPERTIES TIMEOUT 120)
+add_executable(ark-spatial-sketch-tests tests/spatial_sketch_tests.cpp)
+target_link_libraries(ark-spatial-sketch-tests PRIVATE ark)
+add_test(NAME spatial-sketch COMMAND ark-spatial-sketch-tests)
+set_tests_properties(spatial-sketch PROPERTIES TIMEOUT 120)
+add_executable(ark-sketch-entity-tests tests/sketch_entities_tests.cpp)
+target_link_libraries(ark-sketch-entity-tests PRIVATE ark)
+add_test(NAME sketch-entities COMMAND ark-sketch-entity-tests)
+set_tests_properties(sketch-entities PROPERTIES TIMEOUT 180)
 set_tests_properties(authoring-extensions PROPERTIES TIMEOUT 120)
 add_test(NAME release-metadata COMMAND "${CMAKE_COMMAND}" "-DARK_SOURCE_DIR=${CMAKE_SOURCE_DIR}" "-DARK_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}" "-DARK_EXPECTED_PLATFORM=${ARK_PACKAGE_PLATFORM}" "-DARK_EXPECTED_ENTRYPOINT=${ARK_PACKAGE_ENTRYPOINT}" -P "${CMAKE_SOURCE_DIR}/tests/release_metadata_tests.cmake")
 if(WIN32)
@@ -138,6 +150,12 @@ set_tests_properties(kernel agent mesh-model PROPERTIES TIMEOUT 60)
 if(ARK_WITH_OCCT)
   target_compile_definitions(ark-authoring-extension-tests PRIVATE ARK_AUTHORING_NATIVE_TESTS=1)
   add_dependencies(ark-authoring-extension-tests ark-occt-worker)
+  target_compile_definitions(ark-datum-authoring-tests PRIVATE ARK_DATUM_NATIVE_TESTS=1)
+  add_dependencies(ark-datum-authoring-tests ark-occt-worker)
+  target_compile_definitions(ark-spatial-sketch-tests PRIVATE ARK_SPATIAL_NATIVE_TESTS=1)
+  add_dependencies(ark-spatial-sketch-tests ark-occt-worker)
+  target_compile_definitions(ark-sketch-entity-tests PRIVATE ARK_SKETCH_ENTITIES_NATIVE_TESTS=1)
+  add_dependencies(ark-sketch-entity-tests ark-occt-worker)
   target_compile_definitions(ark-agent-tests PRIVATE ARK_TEST_WITH_OCCT=1)
   add_dependencies(ark-agent-tests ark-occt-worker)
   find_package(OpenCASCADE REQUIRED)

@@ -86,6 +86,9 @@ using AgentTeamEvents=std::function<void(const AgentTeamEvent&)>;
 // executor are serialized; the host still marshals them to its owning UI thread.
 // All document mutations require the MODEL'S expected_revision, checked by that
 // executor; no automatic rebasing/retry. Missing readOnlyHint is treated as write.
+// Optional team_reserve_write/team_release_write protect this team's read-to-
+// commit gap with an owned expiring lease; they never replace expected_revision
+// or clear failures. External/manual writers are outside this cooperative scope.
 // Steering invalidates writes from an already in-flight response until the next
 // provider request consumes it. Already executing geometry is not interrupted.
 // Observer callbacks may run concurrently, outside locks; exceptions are ignored.

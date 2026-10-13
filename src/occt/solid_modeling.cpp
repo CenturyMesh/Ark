@@ -179,6 +179,9 @@ std::pair<TopoDS_Face,std::vector<std::pair<std::string,TopoDS_Edge>>> profileFa
     auto m=frame(profile);auto& entities=need(profile,"entities");if(entities.t!=V::Arr||entities.arr.empty()||entities.arr.size()>256)throw std::runtime_error("Profile needs 1..256 entities");
     BRepBuilderAPI_MakeWire wire;std::vector<std::pair<std::string,TopoDS_Edge>> edges;size_t index=0;
     for(auto& e:entities.arr){std::string kind=word(e,"kind");TopoDS_Edge edge;
+        if(kind=="polyline"){
+            const V& points=need(e,"points");if(points.t!=V::Arr||points.arr.size()<2||points.arr.size()>4096)throw std::runtime_error("Polyline requires 2..4096 points");auto xy=[](const V& point){if(point.t!=V::Arr||point.arr.size()!=2||point.arr[0].t!=V::Num||point.arr[1].t!=V::Num||!std::isfinite(point.arr[0].num)||!std::isfinite(point.arr[1].num))throw std::runtime_error("Polyline points must be finite XY");return gp_Pnt(point.arr[0].num,point.arr[1].num,0);};for(size_t i=1;i<points.arr.size();++i){gp_Pnt a=xy(points.arr[i-1]),b=xy(points.arr[i]);if(a.Distance(b)<=1e-8)throw std::runtime_error("Polyline has coincident consecutive points");BRepBuilderAPI_MakeEdge maker(a,b);if(!maker.IsDone())throw std::runtime_error("Polyline edge failed");wire.Add(maker.Edge());if(!wire.IsDone())throw std::runtime_error("Polyline edge did not join profile");edges.push_back({(e.find("name")?word(e,"name"):"side."+std::to_string(index))+"."+std::to_string(i-1),wire.Edge()});}++index;continue;
+        }
         if(kind=="brep"){
             auto imported=readBrep(word(e,"brep_base64"));auto wires=shapes(imported,TopAbs_WIRE);if(wires.size()!=1)throw std::runtime_error("Projected profile must contain one exact wire");
             int part=0;for(BRepTools_WireExplorer walk(TopoDS::Wire(wires[0]));walk.More();walk.Next()){
@@ -190,10 +193,11 @@ std::pair<TopoDS_Face,std::vector<std::pair<std::string,TopoDS_Edge>>> profileFa
             auto& c=need(e,"center");if(c.t!=V::Arr||c.arr.size()!=2||c.arr[0].t!=V::Num||c.arr[1].t!=V::Num)throw std::runtime_error("Circle center needs xy");
             double r=positive(e,"radius");edge=BRepBuilderAPI_MakeEdge(gp_Circ(gp_Ax2(gp_Pnt(c.arr[0].num,c.arr[1].num,0),gp_Dir(0,0,1)),r)).Edge();
         }else if(kind=="line"||kind=="bezier"){
-            auto& pts=need(e,"points");if(pts.t!=V::Arr||pts.arr.size()!=(kind=="line"?2u:4u))throw std::runtime_error("Line needs two endpoints; Bezier needs four controls");
+            auto& pts=need(e,"points");if(pts.t!=V::Arr||(kind=="line"?pts.arr.size()!=2u:pts.arr.size()<2u||pts.arr.size()>26u))throw std::runtime_error("Line needs two endpoints; Bezier needs 2..26 controls");
             auto xy=[](const V& v){if(v.t!=V::Arr||v.arr.size()!=2||v.arr[0].t!=V::Num||v.arr[1].t!=V::Num||!std::isfinite(v.arr[0].num)||!std::isfinite(v.arr[1].num))throw std::runtime_error("Profile point needs finite xy");return gp_Pnt(v.arr[0].num,v.arr[1].num,0);};
             if(kind=="line")edge=BRepBuilderAPI_MakeEdge(xy(pts.arr[0]),xy(pts.arr[1])).Edge();
-            else{NCollection_Array1<gp_Pnt> poles(1,4);for(int i=0;i<4;++i)poles.SetValue(i+1,xy(pts.arr[static_cast<size_t>(i)]));edge=BRepBuilderAPI_MakeEdge(new Geom_BezierCurve(poles)).Edge();}
+            else{const int count=(int)pts.arr.size();NCollection_Array1<gp_Pnt> poles(1,count);for(int i=0;i<count;++i)poles.SetValue(i+1,xy(pts.arr[static_cast<size_t>(i)]));Handle(Geom_BezierCurve) curve;
+                if(const auto* weights=e.find("weights")){if(weights->t!=V::Arr||weights->arr.size()!=pts.arr.size())throw std::runtime_error("Bezier weights must match controls");NCollection_Array1<double> w(1,count);for(int i=0;i<count;++i){double weight=weights->arr[(size_t)i].asNum();if(weights->arr[(size_t)i].t!=V::Num||!std::isfinite(weight)||weight<=0)throw std::runtime_error("Bezier weights must be finite positive numbers");w.SetValue(i+1,weight);}curve=new Geom_BezierCurve(poles,w);}else curve=new Geom_BezierCurve(poles);BRepBuilderAPI_MakeEdge maker(curve);if(!maker.IsDone())throw std::runtime_error("Exact Bezier profile failed");edge=maker.Edge();}
         }else if(kind=="arc"){
             auto& c=need(e,"center");if(c.t!=V::Arr||c.arr.size()!=2||c.arr[0].t!=V::Num||c.arr[1].t!=V::Num)throw std::runtime_error("Arc center needs xy");
             const double radius=positive(e,"radius"),degrees=std::acos(-1.0)/180.0,u0=scalar(e,"a0")*degrees,u1=scalar(e,"a1")*degrees;
