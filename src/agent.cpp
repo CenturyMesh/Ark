@@ -192,7 +192,7 @@ void validated(Document& d){
     for(auto& sk:d.sketches)if(!sk.error.empty()||!std::isfinite(sk.residual)||sk.residual>1e-6)throw std::runtime_error("Sketch '"+sk.name+"': "+sk.error);
     std::vector<AssemblyPlacement> placements;std::string error;if(!resolveAssembly(d,placements,error))throw std::runtime_error(error);
 }
-std::set<u64> consumed(const Document& d){std::set<u64> out;for(auto& f:d.features)for(auto x:f.inputs)out.insert(x);return out;}
+std::set<u64> consumed(const Document& d){std::set<u64> out;for(auto& f:d.features)if(featureConsumesInputBodies(f))for(auto x:f.inputs)out.insert(x);return out;}
 struct MeshSelection { u64 feature=0; u64 node=0; int copy=-1; std::string nodeName; bool useNode=false; u64 cacheKey=0; };
 MeshSelection meshSelection(const Document& d,const V& args){
     MeshSelection s;

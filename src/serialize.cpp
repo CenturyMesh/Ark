@@ -81,6 +81,12 @@ bool generation35Document(const Document& doc){
     for(const auto& mate:doc.mates){if(currentBrepSourceValue(mateToJson(mate))||arrayExpression(mate.value))return true;for(const auto& p:mate.motion)if(arrayExpression(p.second))return true;if(mate.limits.enabled&&(arrayExpression(mate.limits.min)||arrayExpression(mate.limits.max)))return true;}
     return false;
 }
+bool generation36Document(const Document& doc){
+    for(const auto& feature:doc.features)if(feature.type==FeatureType::NativeSolid&&featureOperation(feature)=="extrude"){
+        if(feature.p.count("direction")||feature.p.count("symmetric")||feature.nativeSpec.find("direction")||feature.nativeSpec.find("symmetric")||feature.nativeSpec.find("source_face")||feature.nativeSpec.find("limit_face"))return true;
+        if(const auto* mode=feature.nativeSpec.find("mode");mode&&mode->asStr()=="up_to_face")return true;
+    }return false;
+}
 
 bool generation34Document(const Document& doc){
     for(const auto& sketch:doc.sketches)for(const auto& entity:sketch.sk.ents)if(entity.kind==SketchEnt::Recipe)return true;
@@ -577,7 +583,8 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
     if(generation34Document(doc))r.set("version",Value::makeNum(34));
     if(skeletonDocument(doc))r.set("skeleton",doc.skeleton);
     if(generation35Document(doc))r.set("version",Value::makeNum(35));
-    if(!doc.drawings.empty()){Value drawings=Value::makeArr();for(const auto& drawing:doc.drawings)drawings.arr.push_back(drawing);r.set("drawings",drawings);r.set("version",Value::makeNum(36));}
+    if(!doc.drawings.empty()){Value drawings=Value::makeArr();for(const auto& drawing:doc.drawings)drawings.arr.push_back(drawing);r.set("drawings",drawings);}
+    if(generation36Document(doc)||!doc.drawings.empty())r.set("version",Value::makeNum(36));
     if(includeAudit&&includeHistory)iterationPersist(r,doc);
     canonicalDocumentKeys(r);
     return r.dump();
@@ -817,6 +824,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     if(arcRecipeDocument(nd)){const auto* version=v.find("version");if(!version||version->num<30)return fail("Arc recipes and linked tube end fits require document version 30");}
     if(generation34Document(nd)){const auto* version=v.find("version");if(!version||version->num<34)return fail("Typed sketches, associative datums, spatial constraints and varying sections require document version 34");}
     if(generation35Document(nd)){const auto* version=v.find("version");if(!version||version->num<35)return fail("Skeleton, indexed mesh edits, current-B-rep references and extended native controls require document version 35");}
+    if(generation36Document(nd)){const auto* version=v.find("version");if(!version||version->num<36)return fail("Reverse, symmetric, face-source and face-bounded extrusion require document version 36");}
     try{validateSkeletonAuthoring(nd);}catch(const std::exception& error){return fail(error.what());}
     doc=std::move(nd);
     return true;

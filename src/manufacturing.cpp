@@ -200,7 +200,7 @@ bool applyManufacturingIntent(Feature& feature,const V& intent,std::string& erro
 }
 V inspectManufacturing(const Document& document,const V& args,u64 revision){
     if(args.t!=V::Obj)throw std::runtime_error("manufacturing_inspect arguments must be an object");for(const auto& item:args.obj)if(item.first!="id")throw std::runtime_error("Unknown manufacturing_inspect argument: "+item.first);
-    V report=V::makeObj(),components=V::makeArr();std::set<u64> consumed,placed;for(const auto& feature:document.features)for(u64 id:feature.inputs)consumed.insert(id);for(const auto& node:document.assembly)if(node.feature)placed.insert(node.feature);
+    V report=V::makeObj(),components=V::makeArr();std::set<u64> consumed,placed;for(const auto& feature:document.features)if(featureConsumesInputBodies(feature))for(u64 id:feature.inputs)consumed.insert(id);for(const auto& node:document.assembly)if(node.feature)placed.insert(node.feature);
     if(const auto* selected=args.find("id")){
         const Feature* match=nullptr;for(const auto& feature:document.features)if((selected->t==V::Str&&selected->str==feature.name)||(selected->t==V::Num&&selected->num==(double)feature.id)){if(match)throw std::runtime_error("Ambiguous manufacturing feature");match=&feature;}
         if(!match)throw std::runtime_error("Manufacturing feature must resolve uniquely by id or name");components.arr.push_back(inspectComponent(document,*match));

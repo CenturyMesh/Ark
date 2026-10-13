@@ -17,6 +17,7 @@ std::string featureOperation(const Feature& feature){
     if(operation=="pocket"||operation=="slot")return "hole";
     return operation;
 }
+bool featureConsumesInputBodies(const Feature& feature){return feature.type!=FeatureType::NativeSolid||featureOperation(feature)!="extrude";}
 
 ManufacturingLineage featureManufacturingLineage(const Document& document,const Feature& feature){
     const Feature* current=&feature;

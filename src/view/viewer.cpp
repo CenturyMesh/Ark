@@ -62,6 +62,7 @@ typedef ptrdiff_t GLsizeiptr;
 #include "ark/datum_authoring.hpp"
 #include "ark/spatial_sketch.hpp"
 #include "ark/native_features.hpp"
+#include "ark/references.hpp"
 #include "ark/native_backend.hpp"
 #include "ark/units.hpp"
 #include "ark/io.hpp"
@@ -991,7 +992,7 @@ static void rebuildScene(bool evaluate=false){
     std::vector<AssemblyPlacement> placements;std::string error;
     g_assemblyDiagnostics={};
     if(g_doc.assembly.empty()){
-        std::set<u64> consumed;for(auto& f:g_doc.features)for(auto id:f.inputs)consumed.insert(id);
+        std::set<u64> consumed;for(auto& f:g_doc.features)if(featureConsumesInputBodies(f))for(auto id:f.inputs)consumed.insert(id);
         for(auto& b:g_doc.evalBodies)if(!consumed.count(b.id)){auto* f=g_doc.find(b.id);placements.push_back({0,b.id,f?f->name:"Body",Mat4{},true});}
     }else if(!resolveAssembly(g_doc,placements,error,&g_assemblyDiagnostics)){g_error=true;g_status=error;}
     if(g_selectedMate>=(int)g_doc.mates.size())g_selectedMate=-1;
@@ -5246,10 +5247,11 @@ static void drawFrame(HDC hdc){
     }else if(!g_draftViews.empty()){
         float sx=(float)viewX+(g_showViewCube?g_cubeS+30:20),sy=(float)viewY+76;rect(sx,sy,420,50,7,.025f,.07f,.095f,.95f,.16f,.61f,.75f,.7f,1);textOut("AGENT SKETCH DRAFT / uncommitted commands",sx+12,sy+8,.64f,.62f,.92f,.99f);textOut(fitText(g_liveStepLabel,.52f,392),sx+12,sy+30,.52f,.57f,.77f,.86f);
     }
-    if(g_directAuthoring.active){auto& edit=g_directAuthoring;float sx=(float)viewX+(g_showViewCube?g_cubeS+30:20),sy=(float)viewY+66,sw=std::min(620.f,(float)(viewX+viewW)-sx-18);rect(sx,sy,sw,74,8,.025f,.070f,.095f,.96f,.15f,.81f,.77f,.7f,1);textOut(fitText(directModeName(edit.mode),.69f,sw-24),sx+12,sy+8,.69f,.65f,.97f,.90f);std::string value=!directCurrent()?"Stale preview / cancel and select current geometry":!edit.error.empty()?edit.error:(edit.feature||edit.mode==5)?directDisplayDistance(edit.amount)+" / Tab expressions / Apply saves / Esc cancels":"Drag a compatible source face or mesh element";textOut(fitText(value,.54f,sw-24),sx+12,sy+32,.54f,.70f,.85f,.92f);if(edit.feature||edit.mode==5){button("Value",sx+12,sy+50,78,655);button("Apply",sx+100,sy+50,78,656,true);button("Cancel",sx+188,sy+50,78,657);}}
+    if(g_directAuthoring.active){auto& edit=g_directAuthoring;float sx=(float)viewX+(g_showViewCube?g_cubeS+30:20),sy=(float)viewY+66,sw=std::min(620.f,(float)(viewX+viewW)-sx-18);rect(sx,sy,sw,edit.mode==5?110.f:74.f,8,.025f,.070f,.095f,.96f,.15f,.81f,.77f,.7f,1);textOut(fitText(directModeName(edit.mode),.69f,sw-24),sx+12,sy+8,.69f,.65f,.97f,.90f);std::string value=!directCurrent()?"Stale preview / cancel and select current geometry":!edit.error.empty()?edit.error:(edit.feature||edit.mode==5)?edit.mode==5?(edit.limitPicking?"Click the exact planar limit face":(edit.limitFeature?"Up to "+edit.limitFace+" / ":edit.symmetric?"Symmetric total depth / ":edit.direction<0?"Reverse / ":"")+directDisplayDistance(edit.amount)+" / Tab depth / Apply saves"):directDisplayDistance(edit.amount)+" / Tab expressions / Apply saves / Esc cancels":"Drag a compatible source face or mesh element";textOut(fitText(value,.54f,sw-24),sx+12,sy+32,.54f,.70f,.85f,.92f);if(edit.feature||edit.mode==5){button("Value",sx+12,sy+50,78,655);button("Apply",sx+100,sy+50,78,656,true);button("Cancel",sx+188,sy+50,78,657);if(edit.mode==5){button("Reverse",sx+12,sy+80,88,689,false,edit.direction<0);button("Symmetric",sx+108,sy+80,100,690,false,edit.symmetric);button("Up to face",sx+216,sy+80,100,691,false,edit.limitPicking||edit.limitFeature);button("Distance",sx+324,sy+80,90,692,false,!edit.limitFeature&&!edit.limitPicking);}}}
+    drawExtrusionHandle(rect,button);
     if(!measurementActive()&&!g_directAuthoring.active&&!g_sketchEditing.active&&!g_sketchDrawing.active)drawSolidDimensions(rect,button);
     drawMeasurementOverlay(rect,button);
-    g_viewSketchDimension={};if(!measurementActive()&&!g_directAuthoring.active&&!g_sketchDrawing.active&&g_showSketches){g_viewSketchDimension=selectedSketchDimension();if(g_viewSketchDimension.valid){float px,py;if(projectScreen(g_viewSketchDimension.position,px,py)){auto& dimension=g_viewSketchDimension;float width=std::min(360.f,textWidth(dimension.text,.66f)+24),x=std::clamp(px+18,(float)viewX+8,(float)(viewX+viewW)-width-8),y=std::clamp(py-40,(float)viewY+185,(float)(viewY+viewH)-58);rect(x+2,y+4,width,52,7,0,0,0,.20f,0,0,0,0,0);rect(x,y,width,52,7,.045f,.105f,.135f,.97f,.24f,.57f,.69f,.8f,1);textOut(dimension.text,x+11,y+8,.66f,.71f,.94f,.99f);textOut(dimension.action==577?"Click to edit linked source parameters":dimension.action==89?"Click to edit this native constraint":dimension.action==591?"Click to edit driving dimension":"Click to edit authored coordinates",x+11,y+31,.49f,.59f,.78f,.87f);g_zones.push_back({x,y,width,52,584});}}}
+    g_viewSketchDimension={};if(!measurementActive()&&!g_directAuthoring.active&&!g_sketchDrawing.active&&g_showSketches){g_viewSketchDimension=selectedSketchDimension();if(g_viewSketchDimension.valid){float px,py;if(projectScreen(g_viewSketchDimension.position,px,py)){auto& dimension=g_viewSketchDimension;float width=std::min(360.f,textWidth(dimension.text,.66f)+24),x=std::clamp(px+18,(float)viewX+8,(float)(viewX+viewW)-width-8),y=std::clamp(py-40,(float)viewY+185,(float)(viewY+viewH)-58);avoidExtrusionHandle(x,y,width,52);rect(x+2,y+4,width,52,7,0,0,0,.20f,0,0,0,0,0);rect(x,y,width,52,7,.045f,.105f,.135f,.97f,.24f,.57f,.69f,.8f,1);textOut(dimension.text,x+11,y+8,.66f,.71f,.94f,.99f);textOut(dimension.action==577?"Click to edit linked source parameters":dimension.action==89?"Click to edit this native constraint":dimension.action==591?"Click to edit driving dimension":"Click to edit authored coordinates",x+11,y+31,.49f,.59f,.78f,.87f);g_zones.push_back({x,y,width,52,584});}}}
     if(g_error&&!g_lastFailureId.empty())button("Inspect failed operation",(float)(viewX+viewW)-210,(float)viewY+66,190,580);
     g_lastRibbonHint=ribbonHint;
     if(!ribbonHint.empty()){float width=textWidth(ribbonHint,.60f)+22,x=std::clamp((float)mp.x+12.f,10.f,W-width-10.f),y=(float)mp.y+20;rect(x,y,width,29,6,.035,.055,.075,.98,.27,.51,.65,.95,1);textOut(ribbonHint,x+11,y+7,.60f,.87f,.94f,1.f);}
@@ -5560,7 +5562,7 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
             g_pressWasButton=p.x<viewX||p.x>viewX+viewW||p.y<viewY||p.y>viewY+viewH;
             for(auto&z:g_zones)
                 if((float)p.x>=z.x&&(float)p.x<=z.x+z.w&&(float)p.y>=z.y&&(float)p.y<=z.y+z.h)
-                    { if(z.id==179){g_cubePress=cubeHitAt(p.x,p.y).hit;g_pressWasButton=false;}
+                    { if(z.id==688){try{if(!g_directAuthoring.active)beginSketchExtrusion(true);g_directAuthoring.handleStart=true;g_pressWasButton=false;}catch(const std::exception& error){g_error=true;g_status=error.what();g_pressWasButton=true;}}else if(z.id==179){g_cubePress=cubeHitAt(p.x,p.y).hit;g_pressWasButton=false;}
                         else{g_pressWasButton=true;if(z.id==50){g_foldScrubbing=true;g_foldPlaying=false;g_foldProgress=clamp((double)(p.x-z.x)/z.w,0.,1.);}
                         else if(z.id==53){g_sheetScrubbing=true;g_sheetPlayingId=0;if(auto* sheet=selectedSheet())try{sheetPreviewSet(sheet->id,(double)(p.x-z.x)/z.w);}catch(const std::exception& error){g_error=true;g_status=error.what();}}
                         else if(z.id>=380&&z.id<=382){g_suspScrub=z.id-380;g_suspSpinPlaying=false;try{setSuspensionControl(g_suspScrub,(p.x-z.x)/z.w);}catch(const std::exception& error){g_error=true;g_status=error.what();}}} break; }

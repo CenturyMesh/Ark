@@ -342,6 +342,9 @@ struct ManufacturingLineage {
     bool editableSheet=false;
 };
 std::string featureOperation(const Feature& feature);
+// Face extrusion inputs are geometric references for a separate body; their
+// source/limit bodies remain physical outputs until an actual modeling recipe consumes them.
+bool featureConsumesInputBodies(const Feature& feature);
 ManufacturingLineage featureManufacturingLineage(const Document& document,const Feature& feature);
 bool validateManufacturingRoutes(const Document& document,std::string& error);
 

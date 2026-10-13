@@ -242,15 +242,48 @@ std::pair<TopoDS_Face,std::vector<std::pair<std::string,TopoDS_Edge>>> profileFa
     }return {TopoDS::Face(move.Shape()),edges};
     } catch(const Standard_Failure& failure) {throw std::runtime_error(std::string("OCCT failed during ")+stage+": "+(failure.GetMessageString()?failure.GetMessageString():""));}
 }
-TopoDS_Shape makeExtrusion(const V& request,std::vector<Ref>& refs){
-    const auto& profile=need(request,"profile");auto [face,edges]=profileFace(profile);auto m=frame(profile);double depth=positive(request,"depth");
-    BRepPrimAPI_MakePrism op(face,gp_Vec(m[8]*depth,m[9]*depth,m[10]*depth));op.Build();if(!op.IsDone())throw std::runtime_error("Native prism failed");
+TopoDS_Face extrusionFace(const V& request,const char* brepKey,const char* topologyKey,const char* referenceKey){
+    const auto source=readBrep(word(request,brepKey));const auto names=inputRefs(request,brepKey,topologyKey,source);const auto name=word(request,referenceKey);
+    for(const auto& ref:names)if(ref.name==name){if(ref.kind!="face"||!selectable(ref.status)||ref.shape.IsNull())throw std::runtime_error("Extrusion face is missing, split, deleted or ambiguous: "+name);return TopoDS::Face(ref.shape);}
+    throw std::runtime_error("Unknown exact extrusion face: "+name);
+}
+TopoDS_Shape makeExtrusion(const V& request,std::vector<Ref>& refs,V* receipt=nullptr){
+    TopoDS_Face face;std::vector<std::pair<std::string,TopoDS_Edge>> edges;gp_Vec normal;
+    const bool fromFace=request.find("source_face")!=nullptr;
+    if(fromFace){
+        face=extrusionFace(request,"input_brep","input_topology","source_face");BRepAdaptor_Surface surface(face);
+        if(surface.GetType()!=GeomAbs_Plane)throw std::runtime_error("Extrusion source must be an exact planar face");
+        normal=gp_Vec(surface.Plane().Axis().Direction());if(face.Orientation()==TopAbs_REVERSED)normal.Reverse();
+        const auto source=readBrep(word(request,"input_brep"));const auto names=inputRefs(request,"input_brep","input_topology",source);
+        for(const auto& edge:shapes(face,TopAbs_EDGE))for(const auto& ref:names)if(ref.kind=="edge"&&selectable(ref.status)&&ref.name.find("@ark.")==std::string::npos&&ref.shape.IsSame(edge)){edges.push_back({ref.name,TopoDS::Edge(edge)});break;}
+    }else{const auto& profile=need(request,"profile");auto source=profileFace(profile);face=source.first;edges=std::move(source.second);auto m=frame(profile);normal=gp_Vec(m[8],m[9],m[10]);}
+    const double direction=optional(request,"direction",1),symmetric=optional(request,"symmetric",0);
+    if(direction!=1&&direction!=-1)throw std::runtime_error("Extrusion direction must be +1 or -1");
+    if(symmetric!=0&&symmetric!=1)throw std::runtime_error("Extrusion symmetric must be 0 or 1");
+    const std::string mode=request.find("mode")?word(request,"mode"):"distance";double depth=0;bool coverage=false;
+    if(mode=="distance")depth=positive(request,"depth");
+    else if(mode=="up_to_face"){
+        if(symmetric)throw std::runtime_error("Up to face and symmetric extrusion cannot be combined");
+        auto target=extrusionFace(request,fromFace?"tool_brep":"input_brep",fromFace?"tool_topology":"input_topology","limit_face");BRepAdaptor_Surface surface(target);
+        if(surface.GetType()!=GeomAbs_Plane)throw std::runtime_error("Up to face requires an exact planar limit face");
+        BRepAdaptor_Surface start(face);if(start.GetType()!=GeomAbs_Plane)throw std::runtime_error("Extrusion source must be planar");
+        if(std::abs(normal.Dot(gp_Vec(surface.Plane().Axis().Direction())))<1-1e-10)throw std::runtime_error("Up to face currently requires a limit parallel to the source profile");
+        depth=gp_Vec(start.Plane().Location(),surface.Plane().Location()).Dot(normal)*direction;
+        if(!std::isfinite(depth)||depth<=0||depth>1e8)throw std::runtime_error("Limit face must be ahead of the profile in the selected direction");
+        gp_Trsf translation;translation.SetTranslation(normal*(depth*direction));auto end=transformed(face,translation);
+        BRepAlgoAPI_Cut uncovered(end,target);uncovered.Build();if(!uncovered.IsDone()||!shapes(uncovered.Shape(),TopAbs_FACE).empty())throw std::runtime_error("Limit face does not cover the complete extrusion cap");
+        coverage=true;
+    }else throw std::runtime_error("Extrusion mode must be distance or up_to_face");
+    const gp_Vec travel=normal*(depth*direction);const double offset=symmetric?-depth*direction*.5:0;
+    if(symmetric){gp_Trsf shift;shift.SetTranslation(normal*offset);BRepBuilderAPI_Transform move(face,shift,true);if(!move.IsDone())throw std::runtime_error("Symmetric source translation failed");face=TopoDS::Face(move.Shape());for(auto& item:edges){auto changed=move.ModifiedShape(item.second);if(changed.IsNull())throw std::runtime_error("Symmetric extrusion lost a source boundary");item.second=TopoDS::Edge(changed);}}
+    BRepPrimAPI_MakePrism op(face,travel);op.Build();if(!op.IsDone())throw std::runtime_error("Native prism failed");
     add(refs,"cap.start","face",op.FirstShape());add(refs,"cap.end","face",op.LastShape());
     for(auto& [name,edge]:edges){auto list=op.Generated(edge);int count=0;TopoDS_Shape generated;for(TopTools_ListIteratorOfListOfShape it(list);it.More();it.Next()){generated=it.Value();++count;}
         if(count==1)add(refs,"side."+name,"face",generated);else refs.push_back({"side."+name,"face",count?"split":"deleted",{}});
         add(refs,"edge.start."+name,"edge",op.FirstShape(edge));
         add(refs,"edge.end."+name,"edge",op.LastShape(edge));
-    }return op.Shape();
+    }if(receipt){receipt->set("mode",V::makeStr(mode));receipt->set("depth_mm",V::makeNum(depth));receipt->set("direction",V::makeNum(direction));receipt->set("symmetric",V::makeBool(symmetric!=0));receipt->set("start_offset_mm",V::makeNum(offset));receipt->set("limit_cap_coverage_checked",V::makeBool(coverage));receipt->set("source",V::makeStr(fromFace?"exact_planar_face":"saved_sketch"));}
+    return op.Shape();
 }
 TopoDS_Shape cutter(const V& spec){
     std::string kind=word(spec,"kind");auto m=frame(spec);gp_Trsf t=transform(m);double depth=positive(spec,"depth");
@@ -596,7 +629,7 @@ V finishBodies(const TopoDS_Shape& shape,const std::vector<Ref>& refs){
 }
 
 V modelSolidNative(const V& request){
-    const std::string op=word(request,"op");std::vector<Ref> refs;TopoDS_Shape result;bool many=false;
+    const std::string op=word(request,"op");std::vector<Ref> refs;TopoDS_Shape result;bool many=false;V extrusionReceipt=V::makeObj();
     try{
     if(op=="tube_end_fit")return tubeEndFitNative(request);
     if(op=="imported_brep"){
@@ -635,7 +668,7 @@ V modelSolidNative(const V& request){
         double major=positive(request,"major_radius"),minor=positive(request,"minor_radius");if(major<=minor)throw std::runtime_error("Torus major radius must exceed minor radius");result=BRepPrimAPI_MakeTorus(major,minor).Shape();for(auto& f:shapes(result,TopAbs_FACE))add(refs,"surface","face",f);
     }else if(op=="round_tube")result=roundTube(request,refs);
     else if(op=="rect_tube")result=rectTube(request,refs);
-    else if(op=="extrude")result=makeExtrusion(request,refs);
+    else if(op=="extrude")result=makeExtrusion(request,refs,&extrusionReceipt);
     else {
         const auto& encoded=need(request,"input_brep");if(encoded.t!=V::Str)throw std::runtime_error("Input must be a native B-rep");TopoDS_Shape input=readBrep(encoded.str);shapeReport(input,true);refs=inputRefs(request,"input_brep","input_topology",input);
         if(op=="curve_pattern"||op=="hole_pattern"){
@@ -721,7 +754,7 @@ V modelSolidNative(const V& request){
             BRepBuilderAPI_Transform algorithm(input,placement,true);if(!algorithm.IsDone())throw std::runtime_error("Native rigid transform failed");result=algorithm.Shape();refs=propagated(refs,result,algorithm);
         }else throw std::runtime_error("Unknown native solid operation");
     }
-    return many?finishBodies(result,refs):finish(result,refs);
+    V output=many?finishBodies(result,refs):finish(result,refs);if(op=="extrude"){V report=need(output,"report");report.set("extrusion",extrusionReceipt);output.set("report",report);}return output;
     }
     catch(const std::exception& error){
         std::string context="Native "+op;
