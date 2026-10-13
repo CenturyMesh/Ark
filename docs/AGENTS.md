@@ -1,5 +1,12 @@
 # ARK agent protocol
 
+020B adds source-owned solid dimensions and exact sketch extrusion by viewport
+drag. Read [the authoring contract](VIEWPORT_DIMENSIONS.md): double-click edits
+the authored expression, and agents use `doc_apply` at an observed
+`expected_revision` to add or alter driving dimensions. The DFM v1 rule report
+is available through `manufacturing_inspect` for explicitly declared process
+reviews; see [DFM rule scope](DFM.md). These checks do not qualify production.
+
 019B discovers **83 standalone tools**, including `skeleton_inspect`,
 `skeleton_compile` and `collision_inspect`. Source edits and indexed mesh edits
 require the current `expected_revision`. Inspect the [019B source and feedback

@@ -9,7 +9,9 @@ current release claim. [release.json](../release.json) owns application identity
 
 | Guide | Read it when |
 |---|---|
-| [019B draft controls](AUTHORING_019B_TESTING.md) | You are testing image intents, optional dimensions, direct edits, Skeleton code and collision feedback |
+| [020B direct dimensions](VIEWPORT_DIMENSIONS.md) | You are dragging an exact sketch extrusion or editing source dimensions on a solid |
+| [020B agent DFM](DFM.md) | You are screening a declared process and need versioned rule evidence and limitations |
+| [019B authoring controls](AUTHORING_019B_TESTING.md) | You are testing image intents, optional dimensions, direct edits, Skeleton code and collision feedback |
 | [018B draft controls](AUTHORING_018B_TESTING.md) | You are testing editable sketches, construction geometry and varying sweeps |
 | [Handbook](HANDBOOK.md) | You want a walkthrough of editing, assemblies, agents, BOM and export |
 | [Connecting agents and accounts](CONNECTING.md) | You need ChatGPT authorization, API configuration or an external MCP connection |

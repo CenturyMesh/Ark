@@ -11,6 +11,9 @@ saved closed sketch, and drag in the view along the cyan normal guide. The exact
 native extrusion is evaluated in an isolated candidate. Releasing saves a valid
 candidate as a `native_solid` extrusion. The profile and sketch plane remain its
 source. **Tab** accepts a depth expression; **Apply** saves it, and **Esc** cancels.
+At compact window widths, the Model ribbon keeps the main Create, Direct and
+Combine actions readable; **Model tools** retains the assembly, frame and other
+advanced commands.
 The current exact sketch-extrusion contract requires a positive depth. A reversed,
 zero, open or otherwise invalid extrusion is rejected with the source retained.
 

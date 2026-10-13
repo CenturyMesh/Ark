@@ -36,7 +36,7 @@
         900
       ],
       "checks": [
-        "rendered Drag extrude action660",
+        "rendered Drag extrude action687; Corner rectangle action660 remains distinct",
         "native exact preview volume and native_solid source command",
         "preview retains document/revision",
         "release commits authored sketch extrusion",
