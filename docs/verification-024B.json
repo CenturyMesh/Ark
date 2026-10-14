@@ -193,6 +193,9 @@
     "draft": true,
     "merge_authorized": false,
     "base_branch": "feature/023B-import-hole-containers",
-    "hosted_ci": "Pending new branch push; previous 023B run was blocked by account payment/spending restrictions, not a test failure."
+    "pull_request": "https://github.com/CenturyMesh/Ark/pull/11",
+    "verified_code_commit": "1490715",
+    "hosted_ci": "GitHub run 38583980919 was rejected before any job steps ran because account payments failed or the spending limit must increase. This is not hosted test evidence. No billing settings were changed.",
+    "hosted_ci_url": "https://github.com/CenturyMesh/Ark/actions/runs/38583980919"
   }
 }
