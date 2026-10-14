@@ -22,6 +22,10 @@ Extract the Windows ZIP and run `ARK.cmd`. For Linux, extract the archive and ru
 for manual evaluation. [Release notes, checksums and OCCT source](https://github.com/CenturyMesh/Ark/releases/tag/v0.9.17).
 No compilation is required to use these downloads.
 
+Optional installer builds and explicit personal packages are documented in
+[distribution instructions](DISTRIBUTION.md). Existing published binaries keep
+their own iteration identity and checksums.
+
 ARK is a native C++ design workspace for creating editable parts, assemblies and
 mechanisms. Work directly in Studio, ask an assistant to build alongside you, or
 connect an external agent through MCP. Human and agent edits use the same modeling
