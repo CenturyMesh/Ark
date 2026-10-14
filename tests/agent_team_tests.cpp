@@ -197,13 +197,13 @@ static void frameDisciplineScope(){
 }
 static void unlimitedEightRoleAssignments(){
     ark::AgentTeam team;ark::AgentTeamConfig config;config.orchestratedStart=true;Gate simultaneous;
-    std::atomic_int providerCalls=0,docs=0;std::atomic_bool validPack=true,quietReads=true;
+    std::atomic_int providerCalls=0,docs=0;std::atomic_bool validPack=true,quietReads=true,leadReceivedCompletion=false;
     config.roles.push_back(role("engineer",true));config.roles[0].discipline=ark::AgentTeamDiscipline::Orchestrator;
     config.roles[0].assistant.onboardingPack=ark::agentOnboardingPack({"overview","assembly"});
     for(int i=1;i<8;++i){auto specialist=role("part"+std::to_string(i),i!=7);specialist.discipline=i==7?ark::AgentTeamDiscipline::PhysicsReviewer:ark::AgentTeamDiscipline::PartDesigner;config.roles.push_back(specialist);}
     int orchestratorRound=0;
     config.roles[0].transport=[&](auto&,const V& request,auto*){
-        ++providerCalls;int markers=0;for(const auto& item:request.find("input")->arr)if(auto text=item.find("content");text&&text->t==V::Str&&text->str.find("ARK_PREBAKED_GUIDE_V1")!=std::string::npos)++markers;if(markers!=1)validPack=false;
+        ++providerCalls;const auto input=request.find("input")->dump();if(input.find("Teammate part")!=std::string::npos&&input.find("Assignment turn ")!=std::string::npos)leadReceivedCompletion=true;int markers=0;for(const auto& item:request.find("input")->arr)if(auto text=item.find("content");text&&text->t==V::Str&&text->str.find("ARK_PREBAKED_GUIDE_V1")!=std::string::npos)++markers;if(markers!=1)validPack=false;
         int n=++orchestratorRound;
         if(n<=40)return call("inspection_"+std::to_string(n),"doc_info","{}");
         if(n<=47)return call("assignment_"+std::to_string(n),"team_send","{\"to\":\"part"+std::to_string(n-40)+"\",\"message\":\"Work on your distinct assigned component.\"}");
@@ -215,9 +215,20 @@ static void unlimitedEightRoleAssignments(){
     for(const auto& r:working.roles)check(r.state==ark::AgentTeamState::Working,"all assigned workers active concurrently");
     simultaneous.open();complete(team);check(docs==40&&providerCalls>=56&&validPack,"unlimited run exceeds the old round limit and retains one baked guide");check(quietReads,"forty engineer read receipts are not duplicated into seven specialist histories");
     check(team.snapshot().roles[0].state==ark::AgentTeamState::Idle,"unlimited completion does not request Continue");
-    auto completedTurns=team.snapshot().roles[0].turns;check(completedTurns>=2,"specialist completion automatically wakes the assembly orchestrator");
+    auto completedTurns=team.snapshot().roles[0].turns;check(leadReceivedCompletion,"assembly orchestrator receives actual specialist completion before its next provider request; Parallel may integrate within the same turn");
     for(int i=0;i<12;++i){check(team.steer("Inspect the next assembly checkpoint","engineer"),"unlimited role accepts subsequent assignments");complete(team);}check(team.snapshot().roles[0].turns==completedTurns+12&&validPack,"turns continue past the old eight-turn window without duplicating onboarding");
     auto baked=json(config.roles[0].assistant.onboardingPack);for(const auto& guide:baked.find("topics")->arr)check(!guide.find("document"),"prebaked documentation contains no stale document revision");
+}
+static void parallelAutomaticCompletionBoundaries(){
+    for(bool leadWorking:{true,false}){
+        ark::AgentTeam team;ark::AgentTeamConfig config;config.orchestratedStart=true;config.focusedWorkflow=false;config.maxWorkers=2;config.roles={role("engineer",true),role("part")};config.roles[0].discipline=ark::AgentTeamDiscipline::Orchestrator;
+        Gate leadBoundary,specialistBoundary,completionDelivered,leadReturned;std::atomic_bool received=false;int leadRequests=0;
+        config.roles[0].transport=[&](auto&,const V& request,auto*){int n=++leadRequests;if(n==1)return call("assign_parallel_part","team_send",R"({"to":"part","message":"Inspect the assigned part and report measured evidence."})");if(request.find("input")->dump().find("Assignment turn ")!=std::string::npos)received=true;if(leadWorking&&n==2)leadBoundary.enter();return done("Lead inspected received completion evidence.");};
+        config.roles[1].transport=[&](auto&,auto&,auto*){specialistBoundary.enter();return done("Assigned part evidence inspected.");};
+        team.start(config,"Coordinate the requested part inspection",V::makeArr(),{},[&](const auto& event){if(event.roleId!="engineer")return;if(event.kind==ark::AgentTeamEvent::Message&&event.text.find("Assignment turn ")!=std::string::npos){std::lock_guard lock(completionDelivered.mutex);++completionDelivered.arrivals;completionDelivered.condition.notify_all();}if(event.kind==ark::AgentTeamEvent::Status&&event.text.find("Turn finished")==0){std::lock_guard lock(leadReturned.mutex);++leadReturned.arrivals;leadReturned.condition.notify_all();}});
+        if(leadWorking){leadBoundary.await(1);specialistBoundary.await(1);specialistBoundary.open();completionDelivered.await(1);leadBoundary.open();}else{specialistBoundary.await(1);leadReturned.await(1);specialistBoundary.open();}
+        complete(team);check(received&&leadRequests>=3,"automatic completion evidence reaches a subsequent lead provider request in either scheduling order");check(team.snapshot().roles[0].turns==(leadWorking?1u:2u),"Parallel coalesces completion in an active turn and starts a new turn after the lead has returned");
+    }
 }
 static void sharedFailureEvidence(){
     ark::AgentTeam team;ark::AgentTeamConfig config;config.roles={role("designer",true),role("reviewer")};
@@ -393,4 +404,4 @@ static void explicitGoalCompletion(){
 #include "agent_team_context_tests.inl"
 #include "agent_team_write_window_tests.inl"
 #include "agent_team_steering_tests.inl"
-int main(){try{staleLeadCannotAssignDownstream();inFlightImageTeamSteering();snapshotsDuringPeerWriteWindow();userImageTeamChecks();cooperativeWriteWindows();cooperativeWriteWindowLifecycle();cooperativeWriteWindowPermissionsAndAudit();oversizedHistoryResume();sharedAuthoringSchemas();drawingTeamScope();explicitGoalCompletion();ownedPreparedCandidates();restoredDocumentAndCanvasTools();coherentBatchBenchmark();focusedSequentialAssignments();leadEngineerAuthorsPartsAndAssembly();parallelProgressStillReportsCompletion();sharedFailureEvidence();unlimitedEightRoleAssignments();configChecks();concurrencyAndRevision();steeringAndPause();collaboration();cancellationAndFailures();interruptedBatchHistory();limitsAndMutationSchemas();conversationMemoryBound();incrementalStepsAndScopes();frameDisciplineScope();proposalsAndPhysicsRole();concurrentQueuedDrafts();yieldedAndInterruptedContinuation();std::cout<<"Agent team checks passed: "<<checks<<"\n";return 0;}catch(const std::exception& error){std::cerr<<"Agent team checks failed: "<<error.what()<<"\n";return 1;}}
+int main(){try{staleLeadCannotAssignDownstream();inFlightImageTeamSteering();snapshotsDuringPeerWriteWindow();userImageTeamChecks();cooperativeWriteWindows();cooperativeWriteWindowLifecycle();cooperativeWriteWindowPermissionsAndAudit();oversizedHistoryResume();sharedAuthoringSchemas();drawingTeamScope();explicitGoalCompletion();ownedPreparedCandidates();restoredDocumentAndCanvasTools();coherentBatchBenchmark();focusedSequentialAssignments();leadEngineerAuthorsPartsAndAssembly();parallelProgressStillReportsCompletion();sharedFailureEvidence();parallelAutomaticCompletionBoundaries();unlimitedEightRoleAssignments();configChecks();concurrencyAndRevision();steeringAndPause();collaboration();cancellationAndFailures();interruptedBatchHistory();limitsAndMutationSchemas();conversationMemoryBound();incrementalStepsAndScopes();frameDisciplineScope();proposalsAndPhysicsRole();concurrentQueuedDrafts();yieldedAndInterruptedContinuation();std::cout<<"Agent team checks passed: "<<checks<<"\n";return 0;}catch(const std::exception& error){std::cerr<<"Agent team checks failed: "<<error.what()<<"\n";return 1;}}
