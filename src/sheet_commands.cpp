@@ -15,7 +15,7 @@ std::string expression(const V& value){
 }
 std::set<std::string> usedIds(const Feature& feature){
     std::set<std::string> ids{text(required(feature.nativeSpec,"base"),"id")};
-    for(const char* key:{"flanges","hems","openings","stamps"})if(const V* rows=feature.nativeSpec.find(key))
+    for(const char* key:{"flanges","hems","openings","stamps","miters","swept_flanges","corners","rips","tabs"})if(const V* rows=feature.nativeSpec.find(key))
         for(const V& row:rows->arr)if(row.find("id"))ids.insert(text(row,"id"));
     return ids;
 }
@@ -69,8 +69,16 @@ V applySheetCommand(Document& doc,const V& command){
         std::set<std::string> allowed{"id","angle","inner_radius","k_factor"};if(jog){allowed.insert("station");allowed.insert("height");}else{allowed.insert("sketch");allowed.insert("entity");}for(const auto& item:program.obj)if(!allowed.count(item.first))throw std::runtime_error("Unsupported sheet forming field: "+item.first);f->nativeSpec.set(programKey,program);result.set("feature_id",key);result.set("entity_id",V::makeStr(text(program,"id")));return result;
     }
     if(op=="sheet.base.edit"){V base=required(f->nativeSpec,"base");merge(base,required(command,"values"));result.set("feature_id",key);result.set("entity_id",V::makeStr(text(base,"id")));f->nativeSpec.set("base",base);return result;}
-    const bool flange=op.rfind("sheet.flange.",0)==0,hem=op.rfind("sheet.hem.",0)==0,stamp=op.rfind("sheet.stamp.",0)==0,opening=op.rfind("sheet.opening.",0)==0;if(!flange&&!hem&&!stamp&&!opening)throw std::runtime_error("Unknown sheet edit");
-    const char* listKey=flange?"flanges":hem?"hems":stamp?"stamps":"openings";V list=f->nativeSpec.find(listKey)?*f->nativeSpec.find(listKey):V::makeArr();
+    if(op=="sheet.bend_table.set"||op=="sheet.bend_table.remove"){
+        if(op=="sheet.bend_table.set"){const V& table=required(command,"table");if(table.t!=V::Obj)throw std::runtime_error("Bend table must be an object");f->nativeSpec.set("bend_table",table);}
+        else f->nativeSpec.obj.erase(std::remove_if(f->nativeSpec.obj.begin(),f->nativeSpec.obj.end(),[](const auto& entry){return entry.first=="bend_table";}),f->nativeSpec.obj.end());
+        result.set("feature_id",key);return result;
+    }
+    const bool flange=op.rfind("sheet.flange.",0)==0,hem=op.rfind("sheet.hem.",0)==0,stamp=op.rfind("sheet.stamp.",0)==0,opening=op.rfind("sheet.opening.",0)==0;
+    const bool miter=op.rfind("sheet.miter.",0)==0,swept=op.rfind("sheet.swept_flange.",0)==0,corner=op.rfind("sheet.corner.",0)==0,rip=op.rfind("sheet.rip.",0)==0,tab=op.rfind("sheet.tab.",0)==0;
+    if(!flange&&!hem&&!stamp&&!opening&&!miter&&!swept&&!corner&&!rip&&!tab)throw std::runtime_error("Unknown sheet edit");
+    const char* singular=flange?"flange":hem?"hem":stamp?"stamp":miter?"miter":swept?"swept_flange":corner?"corner":rip?"rip":tab?"tab":"opening";
+    const char* listKey=flange?"flanges":hem?"hems":stamp?"stamps":miter?"miters":swept?"swept_flanges":corner?"corners":rip?"rips":tab?"tabs":"openings";V list=f->nativeSpec.find(listKey)?*f->nativeSpec.find(listKey):V::makeArr();
     const auto action=op.substr(op.find_last_of('.')+1);std::string entity;
     if(action=="pattern"){
         if(!opening)throw std::runtime_error("Only sheet openings support a pattern");
@@ -91,9 +99,9 @@ V applySheetCommand(Document& doc,const V& command){
         f->nativeSpec.set(listKey,list);result.set("feature_id",key);result.set("entity_id",V::makeStr(prefix));result.set("entity_ids",std::move(identities));return result;
     }
     if(action=="add"){
-        V item=required(command,flange?"flange":hem?"hem":stamp?"stamp":"opening");if(item.t!=V::Obj)throw std::runtime_error("Sheet entity must be object");
+        V item=required(command,singular);if(item.t!=V::Obj)throw std::runtime_error("Sheet entity must be object");
         if(!item.find("id")){
-            auto used=usedIds(*f);entity=generatedId(*f,flange?"flange_":hem?"hem_":stamp?"stamp_":"opening_",used);item.set("id",V::makeStr(entity));
+            auto used=usedIds(*f);const std::string prefix=std::string(singular)+"_";entity=generatedId(*f,prefix.c_str(),used);item.set("id",V::makeStr(entity));
         }else {entity=text(item,"id");if(usedIds(*f).count(entity))throw std::runtime_error("Duplicate sheet entity identity");}list.arr.push_back(item);
     }else{
         entity=text(command,"entity");auto it=std::find_if(list.arr.begin(),list.arr.end(),[&](const V& row){return row.find("id")&&row.find("id")->asStr()==entity;});if(it==list.arr.end())throw std::runtime_error("Sheet entity not found");

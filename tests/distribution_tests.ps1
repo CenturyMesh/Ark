@@ -14,12 +14,12 @@ function Write-Fixture([string]$Path, [string]$Value = 'fixture') {
 }
 try {
     $fixture = Join-Path $temporary 'repository'
-    foreach ($path in @('scripts/package-release.ps1','scripts/install-portable.ps1','scripts/publish-test-build.ps1','updates/Ark.Update.psm1','updates/ARK.cmd','packaging/Install-ARK.cmd','packaging/GETTING_STARTED.txt')) {
+    foreach ($path in @('scripts/package-release.ps1','scripts/install-portable.ps1','scripts/publish-test-build.ps1','updates/Ark.Update.psm1','updates/ARK.cmd','updates/ark-update.ps1','updates/ark-launch.ps1','packaging/Install-ARK.cmd','packaging/GETTING_STARTED.txt')) {
         $target = Join-Path $fixture $path
         [IO.Directory]::CreateDirectory((Split-Path $target -Parent)) | Out-Null
         Copy-Item -LiteralPath (Join-Path $repository $path) -Destination $target
     }
-    foreach ($path in @('docs/UPDATES.md','docs/BOM.md','docs/AGENT_ACTIVITY.md','docs/MEASUREMENT.md','docs/schemas/ark-bom-v1.schema.json','docs/THIRD_PARTY_NOTICES.md','third_party/mapbox/LICENSE','third_party/sqlite/README.md','third_party/sqlite/sqlite3.h','assets/ui/README.md','occt/LICENSE_LGPL_21.txt','occt/OCCT_LGPL_EXCEPTION.txt')) { Write-Fixture (Join-Path $fixture $path) }
+    foreach ($path in @('LICENSE','NOTICE','docs/UPDATES.md','docs/BOM.md','docs/AGENT_ACTIVITY.md','docs/MEASUREMENT.md','docs/schemas/ark-bom-v1.schema.json','docs/THIRD_PARTY_NOTICES.md','third_party/mapbox/LICENSE','third_party/stb/LICENSE','third_party/stb/README.md','third_party/sqlite/README.md','third_party/sqlite/sqlite3.h','assets/ui/README.md','occt/LICENSE_LGPL_21.txt','occt/OCCT_LGPL_EXCEPTION.txt')) { Write-Fixture (Join-Path $fixture $path) }
     $runtime = Join-Path $fixture 'runtime'
     foreach ($name in @('ark-studio.exe','ark-cli.exe','ark-mcp.exe','ark-occt-worker.exe','TKernel.dll','TKBRep.dll','TKDESTEP.dll','assets/ui/ark-wordmark.png','assets/ui/ark-tool-atlas-v1.png','assets/ui/ark-detail-atlas-v1.png','assets/ui/ark-domain-atlas-v1.png','updates/ark-update.ps1','updates/ark-launch.ps1','updates/Ark.Update.psm1')) { Write-Fixture (Join-Path $runtime $name) }
     Copy-Item -LiteralPath (Join-Path $repository 'updates/Ark.Update.psm1') -Destination (Join-Path $runtime 'updates/Ark.Update.psm1') -Force

@@ -16,15 +16,22 @@
 #include <locale>
 #include <random>
 #include <sstream>
+#include <filesystem>
+#include <fstream>
+#include <memory>
+#include <cstddef>
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
 #include <windows.h>
 #include <winhttp.h>
+#include <wincodec.h>
 #endif
 
+#include "assistant_image_decoder.inl"
 namespace ark {
+#include "assistant_user_image.inl"
 namespace {
 using V=arkjson::Value;
 std::string field(const V& v,const char* key){const auto* p=v.find(key);return p?p->asStr():"";}
@@ -316,6 +323,7 @@ V assistantFunctionTools(const V& tools){
 V assistantRequest(const AssistantConfig& config,const V& conversation,const V& tools,bool* historyProjected){
     if(historyProjected)*historyProjected=false;
     validateAssistantConfig(config);require(conversation.t==V::Arr,"Assistant history must be a Responses input array.");
+    if(!config.imageInputSupported)for(const auto& message:conversation.arr)require(!assistant_vision::containsImage(message),"This connector explicitly does not support image input. Choose an image-capable connector; ARK will not silently send only the filename or text.");
     auto build=[&](const V& wireHistory){
     V request=V::makeObj();request.set("model",V::makeStr(config.model));request.set("store",V::makeBool(false));
     if(!config.reasoningEffort.empty()){V reasoning=V::makeObj();reasoning.set("effort",V::makeStr(config.reasoningEffort));request.set("reasoning",std::move(reasoning));}
@@ -328,12 +336,13 @@ V assistantRequest(const AssistantConfig& config,const V& conversation,const V& 
         "You are the modeling assistant inside ARK CAD. Use the provided ARK tools within your assigned role's permissions. Read-only roles inspect the existing design and propose changes rather than authoring it. "
         "Use the compact preloaded capability guide when present. Request agent_onboard for a relevant detailed topic when its operation contract is needed, and reuse the result across parts. Static guides contain no live document state. Obtain one current doc_info inspection before initial writes when only a static guide is available; a live tool receipt supplies the observed revision. Use expected_revision and do not repeat unchanged inspections merely to start another feature. "
         "For an open-ended design brief, start with a coherent editable concept: build the overall form, proportions, interfaces and main components with the CAD tools, then refine details. User-specified dimensions, materials, process and functional constraints apply from the beginning. Unknown fabrication choices may remain explicitly unspecified; label the design as a concept and state assumptions rather than treating it as production-qualified. "
+        "Create or update 2D/manufacturing drawings only when the user explicitly requests drawings for the task. They are optional and must not be generated automatically during design, assembly, BOM completion or manufacturing review. Read-only drawing source discovery does not authorize drawing.set/refresh/remove or exports. "
         "Manufacturing and component-library checks are conditional on the task. When the user asks for fabrication readiness, specifies a production process, or you make a fabricability claim, consult the relevant manufacturing guide, author the correct lineage and verify its actual evidence. When accurate standard or purchased components are required, search the library by the known specification and preserve source/license provenance. For an illustrative concept, clearly declared envelopes may suffice; do not force catalogue searches, load calculations or production-route decisions before creating the concept. Never invent standards, material properties or electrical ratings. "
         "Inspect doc_info detail design operations, dependencies, sketches and sheet_origin before editing existing provenance. A native transform of a sheet is a placement; edit its originating sheet to preserve flat-pattern intent. Establish functional proportions and interfaces first; add material/thickness/detail as specified or when required by the operation. "
         "Use coherent atomic batches, named parameters and construction planes. Related sketches, datums, features and placements can be committed together and evaluate once; do not turn every entity or feature into a separate provider round. Preserve existing work unless the user requests replacement. "
         "Choose geometry from the design intent: dimensioned arcs/splines and exact extrude/revolve, loft or sweep for curved forms; surface trim/offset/thicken for skins, and native fillet/chamfer for finishing. Simple primitives are useful starting stock, not a requirement to make every design rectilinear. Read sketch, solids or surfacing onboarding only when those operation details are missing. "
         "Actual CAD actions are recorded in this project's activity ledger by the host. For each activity_id returned with feedback_required, submit tool_feedback in batches before finishing: utility 1..5, difficulty 1..5, concise action and any issue or wished tool/option. These are subjective ratings, separate from measured timings/outcomes. Rate failed attempts too; do not fabricate scores for unexecuted actions. activity_info lists pending records. "
-        "Maintain structured BOM data as you create physical parts: feature.add/edit part with description, internal part_number, category and make/buy/unspecified procurement; retain known source and manufacturer references separately. Never invent missing commercial data. Use bom onboarding for this contract and bom_inspect before declaring a detailed design complete; report missing metadata and hardware. For detailed mechanical assemblies, inspect mounting interfaces and author required fasteners or report unresolved connections. Use the component library for specified sourced parts; fastener_recipe only supplies explicitly dimensioned simplified editable geometry, not a certified purchased component. "
+        "For bought components, use library_source_search source web with actual manufacturer, part reference and requirements, then library_source_page to read the product page. Record the genuine supplier URL and exact manufacturer/supplier reference in feature part metadata. Search snippets are candidates; only verified matching product pages justify sourcing_status selected. If public access fails or data is missing, disclose it and retain unresolved sourcing. Never invent URLs. Maintain structured BOM data as you create physical parts: feature.add/edit part with description, internal part_number, category and make/buy/unspecified procurement; retain known source and manufacturer references separately. Never invent missing commercial data. Use bom onboarding for this contract, inspect bom_inspect and submit bom_review at the current revision before completing design work. Concept review must disclose unresolved fields; detailed review rejects them. If required data is missing, report needs_input rather than inventing it.  report missing metadata and hardware. For detailed mechanical assemblies, inspect mounting interfaces and author required fasteners or report unresolved connections. Use the component library for specified sourced parts; fastener_recipe only supplies explicitly dimensioned simplified editable geometry, not a certified purchased component. "
         "Use object_context for an existing-object task: keep the selected feature/occurrence IDs, inspect dependencies and mates, and reuse known_fingerprints to omit unchanged data. A name match is a candidate, not proof of function. Preserve the explicit target when delegating. IDs identify objects; fingerprints only detect changes and never replace expected_revision or semantic references. Use compact inspections; avoid doc_get on source tubes and mesh_get unless necessary. Geometry is in millimetres. "
         "Successful snapshot tools can provide actual image pixels with observed revision, view and selected CAD IDs. Use these images to review proportions, layout and before/after changes; they are display evidence, not B-rep authority or fabrication qualification. Do not claim to have seen a snapshot from its path alone or from metadata whose image pixels have been omitted. Use semantic CAD references and revision-checked tools for edits. "
         "Verify changes with tool evidence and explain geometric/manufacturing limitations honestly. Never claim a tool succeeded if it returned an error. "
@@ -351,7 +360,7 @@ V assistantRequest(const AssistantConfig& config,const V& conversation,const V& 
             assistant_vision::prune(projected,limit>envelope+1024?limit-envelope-1024:0);
             request=build(projected);
         }
-        require(request.dump().size()<=limit,"Assistant request still exceeds the byte limit after projecting completed tool history. Original task and receipts are retained; shorten oversized task messages or use smaller tool schemas. Resume cannot resend this oversized request.");
+        require(request.dump().size()<=limit,"Assistant request still exceeds the byte limit after projecting completed tool history. Original task, reference image pixels and receipts are retained; resize an oversized image, shorten task messages or use smaller tool schemas. Resume cannot resend this oversized request.");
     }
     return request;
 }
@@ -368,6 +377,7 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
         bool loaded=false;for(const auto& item:result.conversation.arr)if(field(item,"role")=="developer"&&field(item,"content").rfind(marker,0)==0)loaded=true;
         if(!loaded){V guide=V::makeObj();guide.set("role",V::makeStr("developer"));guide.set("content",V::makeStr(marker+config.onboardingPack));result.conversation.arr.insert(result.conversation.arr.begin(),std::move(guide));}
     }
+    for(const auto& item:result.conversation.arr)if(field(item,"role")=="user")validateAssistantUserMessage(item);
     assistant_vision::prune(result.conversation,config.maxConversationBytes);
     // Retained evidence and the outgoing request are separate. Projecting a
     // request must never erase successful original calls/receipts from the host.
@@ -381,13 +391,14 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
     std::set<std::string> pendingFeedback;std::string feedbackProject;bool feedbackReminderSent=false;
     auto trackFeedback=[&](const V& value){const auto* data=value.find("structuredContent");if(!data)data=&value;if(const auto* project=data->find("activity_project_id");project&&project->t==V::Str){if(project->str!=feedbackProject||(data->find("activity_boundary")&&data->find("activity_boundary")->b)){pendingFeedback.clear();feedbackReminderSent=false;}feedbackProject=project->str;}if(const auto* id=data->find("activity_id");id&&id->t==V::Str&&data->find("feedback_required")&&data->find("feedback_required")->b)pendingFeedback.insert(id->str);if(const auto* rated=data->find("rated_ids");rated&&rated->t==V::Arr)for(const auto& id:rated->arr){pendingFeedback.erase(id.asStr());feedbackReminderSent=false;}if(const auto* pending=data->find("pending_feedback_ids");pending&&pending->t==V::Arr)for(const auto& id:pending->arr)pendingFeedback.insert(id.asStr());};
     for(const auto& entry:result.conversation.arr)if(field(entry,"type")=="function_call_output"){V data;if(arkjson::parse(field(entry,"output"),data))trackFeedback(data);}
-    bool earlierToolCalls=false;
+    bool earlierToolCalls=false;std::string lastCompletionIssue;
     for(unsigned round=0;(!config.maxRounds||round<config.maxRounds);++round){
         cancelled(cancel);emit(events,AssistantEvent::Status,"Thinking...");
         if(inbox){V messages=inbox();require(messages.isNull()||messages.t==V::Arr,"Assistant inbox must return an input array.");
             if(messages.t==V::Arr)for(auto& message:messages.arr){
                 auto role=field(message,"role");auto content=message.find("content");
-                require((role=="user"||role=="developer")&&content&&content->t==V::Str,"Assistant inbox messages require user/developer role and text content.");
+                require((role=="user"||role=="developer")&&content,"Assistant inbox messages require user/developer role and content.");
+                if(role=="user")validateAssistantUserMessage(message);else require(content->t==V::Str,"Developer inbox messages require text content.");
                 appendHistory(std::move(message));
             }
         }
@@ -453,14 +464,14 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
             }
         }
         require(calls.size()<=32,"Too many assistant tool calls in one response.");
-        bool roundHasText=false;
+        bool roundHasText=false;std::string heldFinalText;
         for(auto& item:output->arr){
             appendHistory(item);
             if(field(item,"type")=="message"){
                 auto content=item.find("content");if(!content||content->t!=V::Arr)continue;
                 for(auto& part:content->arr){
                     auto type=field(part,"type");auto text=type=="output_text"?field(part,"text"):type=="refusal"?field(part,"refusal"):"";
-                    if(!text.empty()){roundHasText=true;if(calls.empty()&&!pendingFeedback.empty()&&allowed.count("tool_feedback"))continue;if(!result.text.empty())result.text+='\n';result.text+=text;emit(events,AssistantEvent::Text,text);}
+                    if(!text.empty()){roundHasText=true;if(calls.empty()&&retryHooks.completionCheck){if(!heldFinalText.empty())heldFinalText+='\n';heldFinalText+=text;continue;}if(calls.empty()&&!pendingFeedback.empty()&&allowed.count("tool_feedback"))continue;if(!result.text.empty())result.text+='\n';result.text+=text;emit(events,AssistantEvent::Text,text);}
                 }
             }
         }
@@ -473,6 +484,7 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
                 if(feedbackReminderSent)throw std::runtime_error("Required tool feedback was not supplied after the explicit reminder. CAD work and pending project records are retained; resume to provide the missing ratings.");feedbackReminderSent=true;
                 V pending=V::makeArr();for(const auto& id:pendingFeedback)if(pending.arr.size()<64)pending.arr.push_back(V::makeStr(id));V reminder=V::makeObj();reminder.set("role",V::makeStr("developer"));reminder.set("content",V::makeStr("Before finishing, submit tool_feedback for your actual unscored actions: "+pending.dump()+". Rate utility and difficulty 1..5, describe the action, and note issues or wished tools/options. Do not invent successful outcomes. Feedback can be batched with other tool calls."));appendHistory(reminder);if(history)history(result.conversation);emit(events,AssistantEvent::Status,"Recording required tool feedback before completion");continue;
             }
+            if(retryHooks.completionCheck){auto check=retryHooks.completionCheck();const auto* accepted=check.find("allowed");if(!accepted||accepted->t!=V::Bool)throw std::runtime_error("BOM completion verification unavailable; prior work retained");if(!accepted->b){auto issue=field(check,"error");if(issue.empty())issue="BOM review required";if(issue==lastCompletionIssue)throw std::runtime_error(issue);lastCompletionIssue=issue;V reminder=V::makeObj();reminder.set("role",V::makeStr("developer"));reminder.set("content",V::makeStr(issue));appendHistory(reminder);if(history)history(result.conversation);emit(events,AssistantEvent::Status,"Final reply held: current BOM review required");continue;}auto qualification=field(check,"summary");if(!qualification.empty())heldFinalText+="\n\n"+qualification;if(!heldFinalText.empty()){if(!result.text.empty())result.text+='\n';result.text+=heldFinalText;emit(events,AssistantEvent::Text,heldFinalText);}}
             return result;
         }
         earlierToolCalls=true;

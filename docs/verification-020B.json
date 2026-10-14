@@ -1,0 +1,80 @@
+{
+  "date": "2026-10-13",
+  "iteration": "020B",
+  "technical_version": "0.9.21",
+  "milestones": ["A.01", "B.01", "B.02", "B.03", "C.03", "D.04"],
+  "milestone_status": "Parcial",
+  "scope": "Integrated local Windows x64 source, exact geometry, Studio UI and agent DFM checks",
+  "release_identity": {
+    "source": "release.json",
+    "generated_file": "out/020B-native/app-version.json",
+    "observed": {"sequence": 20, "phase": "B", "code": "020B", "version": "0.9.21"},
+    "document_format_bump": false
+  },
+  "build": {
+    "command": "cmake -S . -B out/020B-native -G 'Visual Studio 17 2022' -A x64 -DOpenCASCADE_DIR=C:/Users/bruno/Documents/ARK-Point/out/deps/occt/install-msvc/cmake -DARK_WITH_OCCT=ON && cmake --build out/020B-native --config Release --parallel 4",
+    "compiler": "MSVC 19.44.35228.0",
+    "native_kernel": "OCCT 8.0.1",
+    "result": "passed",
+    "log": "out/020B-build.log"
+  },
+  "tests": {
+    "native_ctest": {
+      "command": "ctest --test-dir out/020B-native -C Release --output-on-failure -j4",
+      "passed": 77,
+      "total": 77,
+      "seconds": 47.11,
+      "log": "out/020B-ctest.log",
+      "includes": ["direct-dimensions", "dfm", "manufacturing", "release-metadata"]
+    },
+    "studio": [
+      {"name": "direct authoring", "size": [1440, 900], "exit_code": 0},
+      {"name": "direct authoring", "size": [1180, 800], "exit_code": 0},
+      {"name": "parametric authoring", "size": [1440, 900], "exit_code": 0},
+      {"name": "action icons", "sizes": [[1180, 800], [1600, 1000]], "exit_code": 0, "log": "out/020B-ui/icons-final2.png.action-icons-test.log", "menu_actions_include": [687]}
+    ],
+    "failed_attempts": [
+      {
+        "test": "direct authoring at 1180x800",
+        "exit_code": 883,
+        "first_failure": "Mesh patch was absent from a proposed compact Model ribbon",
+        "correction": "Retained Mesh patch in the compact ribbon and reran the real UI test successfully"
+      },
+      {
+        "review": "Integrated command ID audit",
+        "finding": "New Drag extrude action 660 collided with Corner rectangle in sketch entity discovery",
+        "correction": "Assigned 687 to Drag extrude and added a UI assertion that action 660 remains outside direct authoring"
+      }
+    ]
+  },
+  "visual_inspection": {
+    "result": "passed within the inspected scope",
+    "synthetic_captures": [
+      "images/020B/solid-dimensions.png",
+      "images/020B/solid-dimensions-compact.png",
+      "images/020B/exact-extrude-preview.png",
+      "images/020B/exact-cap-preview.png"
+    ],
+    "observed": [
+      "Double-click source dimensions and expressions fit at 1440x900 and 1180x800",
+      "Compact Model ribbon keeps exact extrusion, source dimensions and mesh patch visible with legible labels",
+      "Exact candidate preview shows a three-decimal readout while retaining the authored full-precision expression",
+      "Image-reference buttons and authoring atlas menu bitmaps render without clipping at 1180x800 and 1600x1000"
+    ],
+    "asset": "assets/ui/ark-authoring-atlas-v1.png",
+    "asset_sha256": "9774f34923f9f1503de6d5e7f4c9828a1f42d4eea1dd2eb3b88f029529910add",
+    "image_generation": "built-in ImageGen tool; prompt and provenance in docs/design/ark-authoring-atlas.prompt.txt"
+  },
+  "agent_contract": {
+    "dfm": "manufacturing_inspect.components[].dfm / ark.dfm ruleset 1",
+    "dimension_edits": "doc_apply with observed expected_revision, param.set and source feature/sketch edits",
+    "geometry_mutated_by_dfm": false,
+    "manufacturing_qualified": false,
+    "details": ["verification-dfm-2026-10-13.json", "verification-direct-dimensions.json"]
+  },
+  "limits": [
+    "Local tests do not establish human design quality or cost improvement",
+    "No production, fabrication, external-product integration or clean-machine deployment qualification",
+    "Host CI and distributed artifact checks must be recorded separately from these local results"
+  ]
+}

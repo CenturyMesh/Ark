@@ -1,0 +1,178 @@
+{
+  "iteration": "022B",
+  "runtime": "0.9.23",
+  "date": "2026-10-14",
+  "base_commit": "1c84bc37f6ef359547f0923cea137862925d266d",
+  "verification_status": "Verificado no escopo",
+  "milestones": {
+    "A.01": "Verificado no escopo",
+    "A.03": "Parcial",
+    "A.04": "Parcial",
+    "B.01": "Parcial",
+    "B.02": "Parcial",
+    "B.03": "Parcial",
+    "B.04": "Parcial",
+    "B.05": "Parcial",
+    "C.01": "Parcial",
+    "D.02": "Parcial",
+    "D.04": "Parcial",
+    "E.01": "Parcial"
+  },
+  "build": {
+    "platform": "Windows x64",
+    "compiler": "LLVM-MinGW clang 23.1.3 UCRT",
+    "kernel": "OCCT 8.0.1",
+    "configuration": "Release",
+    "result": "passed"
+  },
+  "tests": {
+    "command": "ctest --test-dir out/native-release --output-on-failure -j 2",
+    "result": "108/108 passed",
+    "core_native": 87,
+    "studio": 21,
+    "wall_seconds": 188.98,
+    "log_sha256": "d50a06aa917b92598bd27694fcc03f7213483ff1d8d29fa87641b2d2342292aa",
+    "actual_discovered_tools": 86
+  },
+  "preview": {
+    "path": "out/test-preview/022B-test1",
+    "identity": {
+      "schema": 1,
+      "product": "ARK",
+      "version": "0.9.23",
+      "iteration_code": "022B",
+      "sequence": 22,
+      "phase": "B",
+      "milestones": [
+        "A.01",
+        "A.03",
+        "A.04",
+        "B.01",
+        "B.02",
+        "B.03",
+        "B.04",
+        "B.05",
+        "C.01",
+        "D.02",
+        "D.04",
+        "E.01"
+      ],
+      "platform": "windows-x64",
+      "entrypoint": "ark-studio.exe"
+    },
+    "files": [
+      {
+        "file": "ark-studio.exe",
+        "sha256": "21e63b35a572638b305febc903c7a75f6d23280fe58ffa9fc85f2cec26ec2c5b"
+      },
+      {
+        "file": "ark-mcp.exe",
+        "sha256": "ca9a4daa0d2434682e49137bd68d048eb5415866b7a76ed85d79f9e5949a9eee"
+      },
+      {
+        "file": "ark-occt-worker.exe",
+        "sha256": "b59221ccf0702907c93f7fcf114d4807ff5544e038df3bbec3aa21b5aaff671b"
+      }
+    ],
+    "native_relocated_smoke_exit": 0,
+    "dependency_notices_checked": true,
+    "user_projects_included": false
+  },
+  "visual_evidence": [
+    {
+      "path": "out/native-release/ui-checks/direct-authoring-ui.png.existing-extrusion-resized.png",
+      "sha256": "d7429258486a14dfef8c6170b4ffc944b6793dfc56d800fdbb1f4ce4d6cece0a",
+      "inspected": true,
+      "authority": "synthetic display evidence only"
+    },
+    {
+      "path": "out/native-release/ui-checks/native-vertex-pull-ui.png.native-vertex-part.png",
+      "sha256": "366d4b1b2692feece2ca397c46017a710fdcd75fb1187822607e2765f43c97fa",
+      "inspected": true,
+      "authority": "synthetic display evidence only"
+    },
+    {
+      "path": "out/native-release/ui-checks/drawing-viewport-ui.png.drawing-viewport-assembly.png",
+      "sha256": "770faed223b9396c694a15519d096aca8796e9e72ccfbf26b9d8ffd60249eec2",
+      "inspected": true,
+      "authority": "synthetic display evidence only"
+    },
+    {
+      "path": "out/evidence-pattern-ui/patterns.png.pattern-closed-chain.png",
+      "sha256": "87e35235137f2701d50910e3e13d71e21732ebd5513bd88d1c01f2a66e884256",
+      "inspected": true,
+      "authority": "synthetic display evidence only"
+    },
+    {
+      "path": "out/evidence-sheet-ui/sheet.png.sheet-closure-formed.png",
+      "sha256": "39d3c89ea34acf017678707ca567d3d9248787b3ebebf78491f939cca337f459",
+      "inspected": true,
+      "authority": "synthetic display evidence only"
+    }
+  ],
+  "gesture_regression": {
+    "result": "passed",
+    "cases": [
+      "existing extrusion identity and single physical output",
+      "reverse/symmetric resize uses authored direction rather than unoriented geometric plane normal",
+      "coalesced pending pointer requests",
+      "pending release followed by new press cannot publish old candidate",
+      "source/revision/epoch guards",
+      "cancel and invalid geometry",
+      "validated receipt apply without recomputation",
+      "Undo/persistence",
+      "activity ledger detached from worker and preserved at commit",
+      "host joins preview worker before executor teardown"
+    ],
+    "handler_timing": {
+      "events": 120,
+      "median_ms": 0.0085,
+      "p95_ms": 0.0113,
+      "coalesced": 118,
+      "native_work_forced_pending": true
+    },
+    "timing_scope": "120 synthetic pointer handlers while the native worker is deliberately held pending; not end-to-frame, project-size p95 or a general speedup claim"
+  },
+  "persistence": {
+    "new_format": 37,
+    "conditional_on": [
+      "specialized component patterns/source/skips",
+      "advanced authored sheet programs/bend table",
+      "native vertex_pull",
+      "extended drawings/templates/sources/isometric/extents"
+    ],
+    "legacy_minimum_versions_retained": true,
+    "container_format_unchanged": true,
+    "atomic_revision_history_undo_checked": true
+  },
+  "agent_policy": {
+    "drawings": "create/edit/refresh/export only on explicit user request",
+    "manual_drawing_controls": true,
+    "passive_source_catalog": true,
+    "focused_default_preserved": true,
+    "new_turn_or_token_budgets": false,
+    "private_activity_payloads_committed": false
+  },
+  "observed_failures_and_corrections": [
+    "Exact guide history parsing initially requested evaluated geometry before authoring could load; authoring-only validation now precedes exact runtime validation.",
+    "Nonzero guide origin revealed a tangent rotation pivot error; seed-relative orientation/position regression now passes.",
+    "Finite sheet closure tests rejected infinite-plane-only gap evidence; both finite terminal panels now form the measured positive gap.",
+    "UI captures exposed overflow during auto/manual drawing scale changes and clipped modal labels; actual forms and captures now fit.",
+    "Astra review identified pending-release/new-drag, shared mutable activity and executor shutdown risks; guarded invalidation, detached capture and explicit join were added.",
+    "Alternate chain-copy attachment/context/design roles/snapshot identity initially used primary seed/dense copy assumptions; actual occurrence consumers and native regressions now pass.",
+    "The unsupported-future-format test originally used version37; after adding actual version37 semantics, it now verifies version38 rejection.",
+    "The preview test intentionally changed an authoring field without revision to test fingerprint rejection; its later history fixture now restores that field before valid commits."
+  ],
+  "limits": [
+    "exact vertex pull: one manifold planar triangle/convex-quad polyhedral shell; affected nonplanar quads explicitly facet; curved/holed/complex faces reject; changed source BRep digest requires explicit re-selection",
+    "sheet scope excludes general curved/lofted unfolding and forming; tab/slot assembly fit and physical manufacturing qualification remain unchecked",
+    "technical drawings lack general GD&T/ISO/ASME qualification and PDF/DXF drawing exchange",
+    "native allowances are per recompute, not a process-wide allowance across concurrent documents",
+    "cancellation invalidates publication but does not interrupt an OCCT call already running",
+    "exact CAD is CPU OCCT; GPU display buffers do not constitute a general parametric GPU kernel"
+  ],
+  "performance_comparison": "PERFORMANCE_AUDIT_022B.md records equivalent synthetic inputs, runtime hashes and scoped observed measurements; no quality/cost/general speedup claim",
+  "hosted_ci": "pending draft PR execution",
+  "user_acceptance": "pending",
+  "merge": "held until user tests and authorizes"
+}

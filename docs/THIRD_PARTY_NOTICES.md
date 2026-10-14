@@ -2,12 +2,11 @@
 
 Created by MeshSphere. Project lead: Bruno Santos.
 
-ARK's own source-code license and publication terms are **undecided**. The
-commercial strategy is a proposal, not an adopted license. This document does
-not grant an open-source license to ARK code or artwork. It records the retained
-dependency notices for milestone **A.05**; the broader commercial distribution
-audit remains **Parcial**. Keeping notices is not evidence that all distribution,
-source availability, modification or asset rights obligations have been closed.
+ARK's original source code and documentation are licensed under **Apache-2.0**,
+adopted by the project owner on 2026-10-12. See [LICENSE](../LICENSE) and
+[NOTICE](../NOTICE). Separately identified third-party material retains its own
+terms. This document records dependency notices for milestone **A.05**; retaining
+notices is not a claim of an independent legal audit or manufacturing certification.
 
 ## Actual technology
 
@@ -29,7 +28,7 @@ ARK makes use of facilities provided by Open CASCADE Technology software.
 OCCT is distributed under GNU LGPL version 2.1 with the Open CASCADE exception
 (version 1.0). The pinned source retains `LICENSE_LGPL_21.txt` and
 `OCCT_LGPL_EXCEPTION.txt`; the package includes both texts without alteration.
-These terms apply to OCCT separately from ARK's undecided own license.
+These terms apply to OCCT separately from ARK's Apache-2.0 license.
 
 - [Official OCCT license](https://occt3d.com/dev/doc/overview/html/occt_public_license.html)
 - [Pinned V8_0_1 source](https://github.com/Open-Cascade-SAS/OCCT/tree/V8_0_1)
@@ -67,6 +66,23 @@ SQLite DLL is required by this build.
 - [Official amalgamation archive](https://www.sqlite.org/2026/sqlite-amalgamation-3540000.zip)
 - Archive SHA3-256: `7b670a62fdfbd672b75fef004cb703c8a3e87d3a5cc7d675b4a08337004a2d93`.
 
+## stb_image 2.30
+
+ARK uses the official Sean Barrett/nothings `stb_image.h` memory decoder for
+portable PNG/JPEG user-image attachments. Windows retains WIC as its normal
+decoder; offline contracts also exercise this portable path. The host disables
+file I/O and unrelated image/HDR formats and bounds input dimensions, decoded
+area and decoder allocations.
+
+The upstream MIT alternative applies to this dependency. The complete unchanged
+upstream dual-license text is retained in `third_party/stb/LICENSE` and packaged
+as `licenses/stb-image-LICENSE.txt`; the header retains its embedded license.
+This dependency's license remains separate from ARK's Apache-2.0 license.
+
+- [Official pinned header](https://github.com/nothings/stb/blob/013ac3beddff3dbffafd5177e7972067cd2b5083/stb_image.h)
+- [Official pinned license](https://github.com/nothings/stb/blob/013ac3beddff3dbffafd5177e7972067cd2b5083/LICENSE)
+- Provenance and exact hashes: `third_party/stb/README.md`.
+
 ## Microsoft Windows and Visual C++ runtime
 
 Windows APIs and system fonts remain subject to their vendor terms. Studio uses
@@ -82,11 +98,15 @@ not a blanket license for other Microsoft files.
 ARK's application mark, wordmark and icon atlases were generated for ARK using
 ImageGen. Asset provenance and prompts are retained in `assets/ui/README.md`
 and `docs/design`; the package includes that provenance as `ark-ui-assets.txt`.
-No new artwork license or third-party rights clearance is asserted here.
+The original generated ARK artwork is included under Apache-2.0 to the extent
+the project can grant rights. This does not grant trademark rights or assert
+exclusive copyright in AI-generated output. No third-party rights clearance
+or endorsement is implied.
 
 Imported customer models, local `.ark` drawings, sessions, settings and private
 component databases are not release content by default. Purchased or downloaded
 component models retain their own source and licensing metadata.
 
-Primary official dependency documents were checked on 2026-10-11. Exact full
+Primary official dependency documents were checked on 2026-10-11; ARK's own
+license decision was updated on 2026-10-12. Exact full
 license texts in the package remain authoritative over these short descriptions.

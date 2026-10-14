@@ -44,6 +44,7 @@ enum class FeatureType : i32 {
     MeshBody, MeshWeld, MeshSmooth, MeshDecimate, MeshOffset, MeshFill,
     Curve, IntersectionCurve, Bridge,
     ConstructionFrame, PCB, CableRoute, Suspension, SurfaceEdit,
+    MeshEdit,
 };
 
 // Appearance describes the display surface. Density is grams per cubic
@@ -116,7 +117,7 @@ struct FeatureResult {
 // ---------------------------------------------------------------------------
 // Sketches ----------------------------------------------------------------------
 struct SketchEnt {
-    enum Kind : i32 { Pnt, Line, Circle, Spline, Arc, Wire, Project, Offset } kind=Pnt;
+    enum Kind : i32 { Pnt, Line, Circle, Spline, Arc, Wire, Project, Offset, Recipe } kind=Pnt;
     // dof layout: Pnt -> [x,y]; Line -> [x0,y0,x1,y1]; Circle -> [cx,cy,r]
     // Arc -> [cx,cy,r,a0deg,a1deg]. Wire flattens start, then each segment.
     // Project owns an associative exact derived B-rep; its display samples are
@@ -133,6 +134,10 @@ struct SketchEnt {
     // Authored arc construction recipe. The evaluated center/radius/angles in
     // dof are derived and never replace these source coordinates/expressions.
     arkjson::Value arcRecipe;
+    // Typed authored entity recipes retain expressions. The exact native
+    // primitive DTOs and display samples are derived, never persisted.
+    arkjson::Value entityRecipe, recipeGeometry, recipeReport;
+    std::vector<Vec2> recipeSamples;
     bool construction=false, closed=false;
     f64 tension=0;
     u64 sourceFeature=0;          // project: earlier feature id
@@ -276,6 +281,8 @@ public:
     std::shared_ptr<AgentActivityLedger> agentActivity; // audit metadata, independent of geometry revision
     std::string bomDocumentId; // assigned on explicit BOM authoring; stable across edits/save
     arkjson::Value iterationHistory; // immutable authoring journal; no evaluated geometry or usage snapshots
+    arkjson::Value skeleton; // native declarative source, input overrides and stable ownership manifest
+    std::vector<arkjson::Value> drawings; // authored associative technical drawings; derived curves are never persisted
     u64 addFeature(Feature f);                    // returns id
     Feature* find(u64 id);
     const Feature* find(u64 id) const;
@@ -335,6 +342,9 @@ struct ManufacturingLineage {
     bool editableSheet=false;
 };
 std::string featureOperation(const Feature& feature);
+// Face extrusion inputs are geometric references for a separate body; their
+// source/limit bodies remain physical outputs until an actual modeling recipe consumes them.
+bool featureConsumesInputBodies(const Feature& feature);
 ManufacturingLineage featureManufacturingLineage(const Document& document,const Feature& feature);
 bool validateManufacturingRoutes(const Document& document,std::string& error);
 

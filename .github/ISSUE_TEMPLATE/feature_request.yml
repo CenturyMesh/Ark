@@ -1,0 +1,35 @@
+name: Feature proposal
+description: Propose a concrete user capability with scope and acceptance criteria.
+title: "[Feature]: "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: User problem
+      description: What task is difficult or impossible today? Include a concrete example.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the outcome and the smallest useful scope. Separate proposed behavior from existing implementation.
+    validations:
+      required: true
+  - type: input
+    id: roadmap
+    attributes:
+      label: Relevant roadmap IDs
+      placeholder: "B.02, D.04, or explain why a new milestone is needed"
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria and evidence
+      description: What inputs, checks and observed outcomes would establish delivery? Identify platform and geometric/manufacturing limits.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives, dependencies and open questions
+      description: Include product ownership or third-party integration needs; avoid assuming an adapter already exists.

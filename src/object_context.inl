@@ -68,19 +68,24 @@ struct ObjectContext {
         std::set<u64> ids,occurrences;std::set<std::string> names;scan(features.at(feature),ids,names,occurrences);
         std::set<std::string> read;while(read.size()!=names.size()){const auto pending=names;for(const auto& name:pending)if(read.insert(name).second)scan(resources.at(name),ids,names,occurrences);}
         for(const auto& input:features.at(feature).find("inputs")->arr)ids.insert((u64)input.num);
-        for(u64 node:occurrences)if(nodes.at(node).find("feature")->num>0)ids.insert((u64)nodes.at(node).find("feature")->num);
+        for(u64 node:occurrences){if(nodes.at(node).find("feature")->num>0)ids.insert((u64)nodes.at(node).find("feature")->num);for(const auto& place:placements)if(place.node==node)ids.insert(place.feature);}
         ids.erase(feature);return ids;
     }
+    const AssemblyPlacement& placement(u64 node,int copy)const{
+        if(!assemblyError.empty())throw std::runtime_error("OBJECT_CONTEXT_REFERENCE_MISSING: assembly placement unavailable: "+assemblyError);
+        for(const auto& place:placements)if(place.node==node&&place.copy==copy)return place;
+        throw std::runtime_error("OBJECT_CONTEXT_REFERENCE_MISSING: occurrence copy not found");
+    }
     V occurrence(u64 node,int copy)const{
+        const auto& place=placement(node,copy);
         V row=V::makeObj();row.set("key",V::makeStr(occurrenceKey(node,copy)));row.set("node",V::makeNum((double)node));row.set("copy",V::makeNum(copy));row.set("authored",nodes.at(node));
-        for(const auto& place:placements)if(place.node==node&&place.copy==copy){V matrix=V::makeArr();for(double value:place.world.m)matrix.arr.push_back(V::makeNum(value));row.set("world_column_major",matrix);row.set("visible",V::makeBool(place.visible));break;}
-        if(!assemblyError.empty())row.set("assembly_error",V::makeStr(assemblyError));return row;
+        row.set("feature",V::makeNum((double)place.feature));V matrix=V::makeArr();for(double value:place.world.m)matrix.arr.push_back(V::makeNum(value));row.set("world_column_major",matrix);row.set("visible",V::makeBool(place.visible));return row;
     }
     V state(u64 feature,u64 selectedNode=0,int copy=0)const{
         V state=V::makeObj(),authors=V::makeObj(),evidence=V::makeObj(),linked=V::makeObj(),assembly=V::makeObj(),mates=V::makeArr();
         std::set<u64> ids{feature},visited,occurrences;std::set<std::string> names,read;
         if(selectedNode)occurrences.insert(selectedNode);
-        else for(const auto& node:document.assembly)if(node.feature==feature)occurrences.insert(node.id);
+        else for(const auto& place:placements)if(place.feature==feature)occurrences.insert(place.node);
         bool changed=true;
         while(changed){changed=false;
             const auto pending=ids;for(u64 current:pending)if(visited.insert(current).second){changed=true;const auto& authored=features.at(current);authors.set(contextKey(current),authored);evidence.set(contextKey(current),measured.at(current));scan(authored,ids,names,occurrences);for(u64 dependency:dependencies(current))ids.insert(dependency);}
@@ -88,7 +93,7 @@ struct ObjectContext {
             // A mate can couple this occurrence to a remotely authored part.
             // Keep its whole connected neighborhood in the change token even
             // when only direct neighbors are exposed in the bounded payload.
-            const auto pendingNodes=occurrences;for(u64 node:pendingNodes){const auto& authored=nodes.at(node);const u64 parent=(u64)authored.find("parent")->num;if(parent&&occurrences.insert(parent).second)changed=true;const u64 definition=(u64)authored.find("feature")->num;if(definition&&ids.insert(definition).second)changed=true;scan(authored,ids,names,occurrences);}
+            const auto pendingNodes=occurrences;for(u64 node:pendingNodes){const auto& authored=nodes.at(node);const u64 parent=(u64)authored.find("parent")->num;if(parent&&occurrences.insert(parent).second)changed=true;const u64 definition=(u64)authored.find("feature")->num;if(definition&&ids.insert(definition).second)changed=true;for(const auto& place:placements)if(place.node==node&&ids.insert(place.feature).second)changed=true;scan(authored,ids,names,occurrences);}
             for(const auto& mate:document.mates)if(occurrences.count(mate.a)||occurrences.count(mate.b)){if(occurrences.insert(mate.a).second)changed=true;if(occurrences.insert(mate.b).second)changed=true;scan(mateToJson(mate),ids,names,occurrences);}
             // scan may discover extra ids/resources after their pass.
             changed=changed||ids.size()!=visited.size()||names.size()!=read.size()||occurrences.size()!=pendingNodes.size();
@@ -116,11 +121,11 @@ struct ObjectContext {
         // by the fingerprint and can be inspected separately.
         for(const auto& name:names)linked.set(name,contextCompact(resources.at(name)));references.set("resources",linked);
         std::set<u64> direct;
-        if(node)direct.insert(node);else for(const auto& occurrence:document.assembly)if(occurrence.feature==feature)direct.insert(occurrence.id);
+        if(node)direct.insert(node);else for(const auto& place:placements)if(place.feature==feature)direct.insert(place.node);
         for(u64 selected:direct){const u64 parent=(u64)nodes.at(selected).find("parent")->num;if(parent)occurrences.insert(parent);for(const auto& mate:document.mates)if(mate.a==selected||mate.b==selected){mates.arr.push_back(contextCompact(mateToJson(mate)));occurrences.insert(mate.a==selected?mate.b:mate.a);}}
         for(u64 adjacent:occurrences){V neighbor=V::makeObj();neighbor.set("node",V::makeNum((double)adjacent));neighbor.set("name",*nodes.at(adjacent).find("name"));neighbor.set("feature",*nodes.at(adjacent).find("feature"));neighbor.set("parent",*nodes.at(adjacent).find("parent"));neighborhood.arr.push_back(neighbor);}
         references.set("assembly_neighbors",contextCompact(neighborhood));references.set("mates",contextCompact(mates));row.set("references",references);
-        V placed=V::makeArr();for(u64 selected:direct){const auto found=std::find_if(document.assembly.begin(),document.assembly.end(),[&](const AssemblyNode& candidate){return candidate.id==selected;});if(node)placed.arr.push_back(occurrence(selected,copy));else for(int index=0;index<patternCopies(document,*found);++index)placed.arr.push_back(occurrence(selected,index));}
+        V placed=V::makeArr();if(node)placed.arr.push_back(occurrence(node,copy));else for(const auto& place:placements)if(place.feature==feature)placed.arr.push_back(occurrence(place.node,place.copy));
         row.set("occurrences",contextCompact(placed));return row;
     }
 };
@@ -134,11 +139,11 @@ V objectContext(const Document& document,u64 revision,const V& args){
     if(args.find("ids")&&(args.find("query")||args.find("type")||args.find("after_id")))throw std::runtime_error("object_context ids cannot be combined with discovery selectors");
     const std::string query=args.find("query")?contextLower(str(args,"query")):"",type=args.find("type")?str(args,"type"):"";
     if(query.size()>128)throw std::runtime_error("object_context query exceeds 128 characters");if(!type.empty()){FeatureType checked;if(!featureTypeFromName(type,checked))throw std::runtime_error("object_context type is unknown");}
-    u64 selectedNode=0;std::set<u64> selection;
-    if(const auto* selected=args.find("node")){selectedNode=nodeRef(document,*selected);const auto found=std::find_if(document.assembly.begin(),document.assembly.end(),[&](const AssemblyNode& node){return node.id==selectedNode;});if(found==document.assembly.end())throw std::runtime_error("OBJECT_CONTEXT_REFERENCE_MISSING: assembly occurrence not found");if(!found->feature)throw std::runtime_error("object_context node must select a part occurrence");if(copy>=patternCopies(document,*found))throw std::runtime_error("OBJECT_CONTEXT_REFERENCE_MISSING: occurrence copy not found");selection.insert(found->feature);}
+    ObjectContext context(document,revision);u64 selectedNode=0;std::set<u64> selection;
+    if(const auto* selected=args.find("node")){selectedNode=nodeRef(document,*selected);const auto found=std::find_if(document.assembly.begin(),document.assembly.end(),[&](const AssemblyNode& node){return node.id==selectedNode;});if(found==document.assembly.end())throw std::runtime_error("OBJECT_CONTEXT_REFERENCE_MISSING: assembly occurrence not found");if(!found->feature)throw std::runtime_error("object_context node must select a part occurrence");const auto& place=context.placement(selectedNode,copy);selection.insert(place.feature);}
     else if(const auto* ids=args.find("ids")){if(ids->t!=V::Arr||ids->arr.empty()||ids->arr.size()>64)throw std::runtime_error("object_context ids requires 1..64 feature references");for(const auto& requested:ids->arr){const u64 feature=featureRef(document,requested);if(!document.find(feature))throw std::runtime_error("OBJECT_CONTEXT_REFERENCE_MISSING: feature not found");if(!selection.insert(feature).second)throw std::runtime_error("object_context ids must be distinct");}if(selection.size()>(size_t)limit)throw std::runtime_error("object_context limit is smaller than the explicit selection");}
     else {const u64 after=args.find("after_id")?id(*args.find("after_id")):0;for(const auto& feature:document.features)if(feature.id>after&&(query.empty()||contextLower(feature.name).find(query)!=std::string::npos)&&(type.empty()||type==featureTypeName(feature.type)))selection.insert(feature.id);}
-    ObjectContext context(document,revision);const std::set<u64> roots=selection;
+    const std::set<u64> roots=selection;
     bool truncated=false;u64 next=0;V rows=V::makeArr(),fingerprints=V::makeObj(),selected=V::makeArr();size_t bytes=0;
     for(u64 feature:roots)selected.arr.push_back(V::makeNum((double)feature));
     if(depth){auto frontier=selection;for(int level=0;level<depth;++level){std::set<u64> nextLevel;for(u64 feature:frontier){for(u64 dependency:context.dependencies(feature))nextLevel.insert(dependency);for(const auto& other:document.features)if(context.dependencies(other.id).count(feature))nextLevel.insert(other.id);}selection.insert(nextLevel.begin(),nextLevel.end());frontier=std::move(nextLevel);}}

@@ -1,0 +1,238 @@
+{
+  "iteration": {
+    "sequence": 16,
+    "phase": "F",
+    "code": "016F",
+    "version": "0.9.17",
+    "milestones": [
+      "A.01",
+      "A.03",
+      "A.05",
+      "B.01",
+      "B.05",
+      "D.02",
+      "F.03",
+      "G.04"
+    ]
+  },
+  "date": "2026-10-12",
+  "baseline_commit": "ae5ec5ccb461b1a610a8f890c4caad72f62eb999",
+  "windows": {
+    "native_tests": {
+      "passed": 67,
+      "failed": 0,
+      "seconds": 96.75,
+      "log": "out/016F-private/windows-tests.log"
+    },
+    "final_updates_identity_tests": {
+      "passed": 3,
+      "failed": 0,
+      "seconds": 6.57
+    },
+    "ui": [
+      {
+        "test": "action-icons-ui",
+        "exit": 0,
+        "seconds": 2.781
+      },
+      {
+        "test": "connectors-ui",
+        "exit": 0,
+        "seconds": 2.5
+      },
+      {
+        "test": "startup-ui",
+        "exit": 0,
+        "seconds": 3.172
+      }
+    ],
+    "bom_ui_before_unrelated_copy_dialog_changes": {
+      "passed": true,
+      "seconds": 2.656
+    },
+    "package": {
+      "entries": 81,
+      "bytes": 33420298,
+      "sha256": "46840f3c2d41e81b3e1dac284fa5f06e573b795cb27e710afe96ce585470f7ac",
+      "runtime_executables_match": true,
+      "drawings": 0,
+      "notices_and_contracts": true
+    },
+    "installation": {
+      "observed_processes_preserved": true,
+      "observed_live_processes": 1,
+      "state": {
+        "current": "0.9.15",
+        "pending": "0.9.17",
+        "schema": 1,
+        "activating": "",
+        "previous": "0.9.14"
+      },
+      "changed_during_install": 0,
+      "observed_drawings": 39
+    },
+    "installed_mcp": {
+      "tools": 76,
+      "version": "0.9.17",
+      "iteration_code": "016F",
+      "activity_roundtrip": true,
+      "bom_review_ledger_roundtrip": true,
+      "matched_files": 68,
+      "own_license_and_notice_retained": true
+    }
+  },
+  "linux": {
+    "core_tests": {
+      "passed": 42,
+      "failed": 0,
+      "seconds": 16.32
+    },
+    "native_tests": {
+      "passed": 65,
+      "failed": 0,
+      "seconds": 89.33
+    },
+    "clean_ubuntu_24_04_relocated_package_smoke": "passed; no SDK; exact box, STEP roundtrip, document save/load, identity and notices",
+    "scope": "x64 headless CLI/MCP/OCCT worker; no Linux Studio GUI or built-in Windows auth/update transport",
+    "required_symbols": [
+      "GLIBC_2.38",
+      "GLIBCXX_3.4.32",
+      "CXXABI_1.3.13"
+    ]
+  },
+  "assets": [
+    {
+      "file": "ark-windows-x64-0.9.17.zip",
+      "bytes": 33420298,
+      "sha256": "46840f3c2d41e81b3e1dac284fa5f06e573b795cb27e710afe96ce585470f7ac"
+    },
+    {
+      "file": "ark-linux-x64-headless-0.9.17.tar.gz",
+      "bytes": 32693215,
+      "sha256": "516cd058676c4aa5b5beb3d6b5f12e13f05dfd9d630c11d300937d3fc299509f"
+    },
+    {
+      "file": "OCCT-V8_0_1-source.zip",
+      "bytes": 64815440,
+      "sha256": "7c033d917ee8f040c0512d289dcc5f02c148889d5bac17c3e25639accb44f0da"
+    },
+    {
+      "file": "ark-update.json",
+      "bytes": 464,
+      "sha256": "551882835749299229bfbf95c784b963764588fadaabc4c9cab0dce33d0a7125"
+    }
+  ],
+  "visual_evidence": [
+    {
+      "path": "out/016F-private/ui-action-icons-ui.png.connect-claude-code.png.configuration.png",
+      "sha256": "38c4a35599dc85a9abecaf74fba6d368123144d0581046be975146eddbedf2b2",
+      "inspected": true
+    },
+    {
+      "path": "out/016F-private/ui-action-icons-ui.png.connect-claude-desktop.png.configuration.png",
+      "sha256": "f5091295222217bf60aa24dd86c384570f3125fdc29c8d5467c38ba2f62c65be",
+      "inspected": true
+    },
+    {
+      "path": "out/016F-private/ui-action-icons-ui.png.connect-codex.png.configuration.png",
+      "sha256": "f76e637cc5c0c4c565111d8241ce81c69e5fbb47596ecb9caf7043c82f93e4c7",
+      "inspected": true
+    },
+    {
+      "path": "out/016F-private/ui-action-icons-ui.png.connect-opencode.png.configuration.png",
+      "sha256": "9873c7cceef3d4c28fcb06486ec087a9cba9b8a1581d146362a1aa86c5f88d4a",
+      "inspected": true
+    },
+    {
+      "path": "out/016F-private/ui-action-icons-ui.png.icons-1-1180.png",
+      "sha256": "617461a7e0c29ca3cfdfd5e36fb06909d60961dd5484909188cd1048f32d165c",
+      "inspected": true
+    },
+    {
+      "path": "out/016F-private/ui-action-icons-ui.png.icons-1-1600.png",
+      "sha256": "ab9ba1c5d3944e19a48a947fa4a6ee5e8489d3959d98c7b4f83c89e7d69da8c2",
+      "inspected": true
+    },
+    {
+      "path": "out/016F-private/ui-action-icons-ui.png.icons-3-1180.png",
+      "sha256": "b7af84784dc5a93e68043b4541a7e581049255185a925986346d3787ddf9582b",
+      "inspected": true
+    },
+    {
+      "path": "out/016F-private/ui-action-icons-ui.png.icons-3-1600.png",
+      "sha256": "66813c1fce22da4bb5f2e6c75ec3761dacd0ebbf59816e503d2b94916841fc19",
+      "inspected": true
+    },
+    {
+      "path": "out/016F-private/ui-action-icons-ui.png.icons-4-1180.png",
+      "sha256": "cad55b399a09b455ab88f2252ebf628e910f2f77597dbed6de6d7b04533864da",
+      "inspected": true
+    },
+    {
+      "path": "out/016F-private/ui-action-icons-ui.png.icons-4-1600.png",
+      "sha256": "5af2217213c1bdef2b9e7a4ab6e6175a49c1eb2a71e1967a086a8a2cfa3478d5",
+      "inspected": true
+    },
+    {
+      "path": "out/016F-private/ui-action-icons-ui.png.icons-5-1180.png",
+      "sha256": "f4c1384cad97e8da8ea620cb326177aedbc76170aba9e298d850b2b7d89c7969",
+      "inspected": true
+    },
+    {
+      "path": "out/016F-private/ui-action-icons-ui.png.icons-5-1600.png",
+      "sha256": "199a7022d644572107f8cfe9ab6572029891d9c457832a41f85a41eb410e6fc7",
+      "inspected": true
+    },
+    {
+      "path": "out/016F-private/ui-action-icons-ui.png.icons-6-1180.png",
+      "sha256": "9b81757cec1c0461d091554dcc2f9a0fc86d719cb1de9d61708f1103d7ca688e",
+      "inspected": true
+    },
+    {
+      "path": "out/016F-private/ui-action-icons-ui.png.icons-6-1600.png",
+      "sha256": "2098ac71ed909e0a885cfcaa2db0bff7b4f30239b7fb4db634b8fe524016c63f",
+      "inspected": true
+    },
+    {
+      "path": "out/016F-private/ui-startup-ui.png.about-0.png",
+      "sha256": "dd252df96d534bbf3be17361e08103dd1071c636ef683d7db9e9b6f81841b2fe",
+      "inspected": true
+    },
+    {
+      "path": "out/016F-private/ui-startup-ui.png.about-1.png",
+      "sha256": "3493226b510cf8c61a95af8ae5553d7b179093aa09c3dfc710ba42c7e7223cd1",
+      "inspected": true
+    },
+    {
+      "path": "out/016F-private/ui-startup-ui.png.about-2.png",
+      "sha256": "d2c1daae3b1749adf31860b5b6c0540d4a520c850021a87e9ac5ade002abd617",
+      "inspected": true
+    },
+    {
+      "path": "out/016F-private/ui-startup-ui.png.splash-animation.png",
+      "sha256": "170b1fb1d8ba9f55b05f765d3f9dd53ca9679b0142169e7cafe8483b1f9573ab",
+      "inspected": true
+    },
+    {
+      "path": "out/016F-private/ui-startup-ui.png.splash-start.png",
+      "sha256": "467fa4acbc5bbf2b44a607d17687c8f5ef8d36dff2c97dcab546187d4e17ba34",
+      "inspected": true
+    }
+  ],
+  "publication_review": {
+    "license": "Apache-2.0 explicitly adopted by owner",
+    "existing_repository_and_history_publication": "explicitly authorized after checks",
+    "history_scanner": "Gitleaks8.30.1,43 baseline commits",
+    "reviewed_false_positives": 9,
+    "identified_credentials": 0,
+    "new_user_drawings_staged": 0,
+    "independent_security_audit": false,
+    "sponsors_listing_active": false
+  },
+  "limits": [
+    "Prerelease excluded from stable automatic updater; no live internet upgrade trial.",
+    "No fresh provider login/inference or external client certification.",
+    "No agent pilot rerun, performance comparison or manufacturing qualification.",
+    "CI workflow definition and local build evidence do not establish completed hosted CI."
+  ]
+}

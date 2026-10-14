@@ -5,11 +5,16 @@ postconditions, reusable preview candidates, physical material properties and
 rigid-body physics. Its contracts supersede the earlier preview/compute details
 below. Measurements at the end of this document describe the earlier snapshot.
 
-The API has 53 tools. `agent_onboard{topic:"automation"}` returns the complete
+022B retains 86 standalone tools. `agent_onboard{topic:"automation"}` returns the complete
 `doc_apply` command reference on demand; initial tool discovery carries a shorter
-description. Existing tools and documents remain supported. Only linked native
-curve/hole patterns require document version 19; older documents retain their
-existing version.
+description. Existing tools and documents remain supported. Linked native
+solid/hole patterns require document version 19. New source-linked component
+patterns/skips require version 37; earlier documents retain their existing
+minimum format. See [component patterns](SPECIALIZED_PATTERNS_022B.md).
+
+Agents create, edit, refresh or export 2D technical/manufacturing drawings only
+when the user explicitly requests that drawing work. Drawing discovery is
+read-only; it is not an automatic completion, BOM or DFM step.
 
 ## Read, evaluate, apply
 
@@ -30,6 +35,14 @@ Errors retain the existing text and revision and add `error_code`, `tool` and
 `operation`. A geometry failure can instead originate in a downstream feature;
 its diagnostic identifies that feature rather than attributing it to an
 unrelated final command.
+
+`fields` selects existing top-level result names. A missing projection rejects
+with the actual available names; read those names and request the supported
+field, or read the complete result once. Native `geometry_query` rows have
+`ok`; wrapped tool results have `isError` and `structuredContent`. Unknown
+measurements do not become zero. For `assembly_info` clearance, inspect
+`clearance_checked`, `clearance_reason` when present, `separation_mm` and
+`overlap_volume_mm3`; a guessed `clearance` field is not a measurement.
 
 ## Exact queries
 
@@ -98,6 +111,14 @@ edge), count, margin_mm, name, and a mode:
 Linked patterns save version 19 and reject stale path names. Count is 2..128;
 solid patterns also obey the 64-solid and 512-reference registry capacities. Inputs, offsets
 and normals share part coordinates. There is no implicit assembly placement.
+
+For persistent component placement, use `assembly.add`/`assembly.edit` with
+`pattern.type` `linear`, `circular`, `pattern_driven`, `sketch_driven`,
+`curve_driven` or `chain`. Source recipes retain expressions, source identities
+and stable skips through history; counts are 2..32. The specialized source
+contract, native guide bounds, actual XYZ handles, closed endpoint rules and
+explicitly unchecked chain contact/motion domains are documented in
+[022B component patterns](SPECIALIZED_PATTERNS_022B.md).
 
 ## Bounded design solving
 

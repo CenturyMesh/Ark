@@ -1,7 +1,14 @@
 name: Build and test
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   portable-core:
@@ -20,10 +27,60 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+      - name: Identify hosted Windows image
+        id: runner-image
+        shell: pwsh
+        run: |
+          if (-not $env:ImageVersion) { throw 'Hosted runner ImageVersion is required for the OCCT cache key.' }
+          "version=$env:ImageVersion" >> $env:GITHUB_OUTPUT
+      - name: Restore OCCT native SDK and notices
+        id: occt-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            out/deps/occt/install-msvc
+            out/deps/occt/cache/OCCT-8_0_1/LICENSE_LGPL_21.txt
+            out/deps/occt/cache/OCCT-8_0_1/OCCT_LGPL_EXCEPTION.txt
+          key: windows-2022-occt-msvc-x64-notices-v1-${{ steps.runner-image.outputs.version }}-${{ hashFiles('scripts/build-occt.ps1') }}
       - name: Build OCCT 8 native SDK
+        if: steps.occt-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: ./scripts/build-occt.ps1 -Jobs 2
+      - name: Save OCCT native SDK and notices
+        if: steps.occt-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            out/deps/occt/install-msvc
+            out/deps/occt/cache/OCCT-8_0_1/LICENSE_LGPL_21.txt
+            out/deps/occt/cache/OCCT-8_0_1/OCCT_LGPL_EXCEPTION.txt
+          key: ${{ steps.occt-cache.outputs.cache-primary-key }}
       - name: Build and test ARK with native OCCT
         shell: pwsh
         run: ./scripts/build.ps1 -Test -Jobs 2
       # Live Studio UI checks are opt-in; hosted OpenGL 3.3 availability is not assumed.
+
+  linux-native-occt:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux build dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential cmake ninja-build curl ca-certificates unzip patchelf
+      - name: Build and test Linux CLI, MCP and OCCT worker
+        run: bash scripts/build.sh --test --jobs 2
+      - name: Prepare Linux headless package
+        run: bash scripts/package-linux.sh
+      - name: Test relocated package without the build SDK
+        run: |
+          mkdir -p out/linux-smoke
+          tar -xzf out/releases/ark-linux-x64-headless-*.tar.gz -C out/linux-smoke
+          docker run --rm \
+            --mount "type=bind,source=$PWD/out/linux-smoke,target=/packages,readonly" \
+            --mount "type=bind,source=$PWD/tests/linux_package_smoke.sh,target=/smoke.sh,readonly" \
+            ubuntu:24.04 bash -c 'bash /smoke.sh /packages/ark-linux-x64-headless-*'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ark-linux-x64-headless
+          path: out/releases/ark-linux-x64-headless-*.tar.gz*
+          if-no-files-found: error

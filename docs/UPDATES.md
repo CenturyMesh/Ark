@@ -1,17 +1,21 @@
 # ARK Windows updates
 
-ARK 0.9.1 includes in-app Windows x64 self-update preparation: download verification,
-staging, next-launch activation and recovery. It uses an internal per-user launcher;
-the user does not need a separate installer application. **Live delivery is not
-configured or published.** The product's future website can provide the production
-channel after its endpoint and trusted hosts are wired and tested.
+ARK supports Windows x64 update verification, staging, next-launch activation and
+recovery through an internal per-user launcher. The trusted GitHub channel is
+`CenturyMesh/Ark`, using its stable releases and exact reviewed asset URLs. A future
+website transport requires its own trusted adapter and tests. There is no
+user-entered feed URL or remote installer command.
 
-The current transport is a prepared GitHub release adapter with a fixed binary-only
-placeholder, `CenturyMesh/Ark-Releases`; it has not been created or published by
-this work. The source repository `CenturyMesh/Ark` remains private. Replacing the
-placeholder with the future website requires changing the trusted transport adapter,
-release packaging and URL tests together; staging and recovery are independent of
-that hosting choice. There is no user-entered feed URL or remote installer command.
+The channel switch is prepared in source. Publication of a repository or release
+alone does not qualify live delivery: an older-to-newer end-to-end update trial is
+still required. A GitHub **prerelease** is available for manual evaluation; the
+stable updater excludes drafts and prereleases and does not offer them automatically.
+
+Older installed runtimes and their retained launchers can still contain the retired
+`CenturyMesh/Ark-Releases` placeholder. They cannot discover the new channel through
+that nonexistent old endpoint. Move to a reviewed new portable installation
+manually, preserving drawings and settings, before relying on future checks against
+`CenturyMesh/Ark`. This source change does not rewrite already installed runtimes.
 
 ## Using updates
 
@@ -62,8 +66,9 @@ protocol does not automatically prune old runtimes.
 
 ## Preparing release assets
 
-The project version in `CMakeLists.txt` is the source for the generated C++ header,
-Windows version resource and `app-version.json`. Increase it for every release;
+`release.json` is the source for the sequence, roadmap phase, public iteration
+code and numeric runtime. CMake validates it and generates the C++ header, Windows
+version resource and `app-version.json`. Advance it for each new distributable;
 the stable channel accepts numeric `major.minor.patch` versions and never
 automatically installs prereleases, equal versions or downgrades.
 
@@ -76,16 +81,19 @@ The package script includes Studio, CLI, MCP, the native OCCT worker, DLLs,
 UI assets, update scripts, version metadata and the Visual C++ x64 app-local
 runtime from the installed build toolchain. `-MsvcRuntimeDirectory` can name that
 toolchain runtime explicitly. It does not package repository drawings or tests.
-Review third-party redistribution notices and retained licenses before publication.
+Update scripts are taken from the reviewed repository source so that a retained
+compiled runtime cannot package the retired channel scripts. The archive includes
+Apache-2.0/NOTICE and third-party notices; its README.txt links to the maintained
+online handbook and connection guide. Review redistribution notices before publication.
 The **Prepare Windows release package** workflow builds/tests and uploads artifacts;
 it does not create or publish a GitHub release.
 
-When testing the prepared GitHub adapter, these two reviewed assets belong on a
-public, stable binary-only GitHub release whose tag matches the project version,
-for example `v0.9.1`. No publication is required for the current preparation task;
-the future website can use the same package schema:
+These two reviewed assets belong on a release in `CenturyMesh/Ark` whose tag
+matches the numeric runtime, for example `v0.9.17`. Mark evaluation releases as
+prereleases; only a published stable release is discoverable through the updater's
+`/releases/latest` endpoint. The future website can use the same package schema:
 
-- `ark-windows-x64-0.9.1.zip`
+- `ark-windows-x64-0.9.17.zip`
 - `ark-update.json`
 
 The manifest format is:
@@ -94,11 +102,11 @@ The manifest format is:
 {
   "schema": 1,
   "product": "ARK",
-  "version": "0.9.1",
+  "version": "0.9.17",
   "platform": "windows-x64",
   "package": {
-    "name": "ark-windows-x64-0.9.1.zip",
-    "url": "https://github.com/CenturyMesh/Ark-Releases/releases/download/v0.9.1/ark-windows-x64-0.9.1.zip",
+    "name": "ark-windows-x64-0.9.17.zip",
+    "url": "https://github.com/CenturyMesh/Ark/releases/download/v0.9.17/ark-windows-x64-0.9.17.zip",
     "size": 123456,
     "sha256": "<64 lowercase hexadecimal characters generated from the archive>"
   }

@@ -1,0 +1,125 @@
+{
+  "scope": "Local source-owned extrusion handle, exact distance/reverse/symmetric and planar face bounds",
+  "milestones": {
+    "B.01": "Parcial",
+    "B.02": "Parcial",
+    "B.03": "Parcial"
+  },
+  "verification_status": "Verificado no escopo",
+  "base_commit": "11e34c343a91cf08e6d43d928228b374ebdeb63b",
+  "build": {
+    "configuration": "MSVC Release, OCCT 8.0.1 native worker",
+    "result": "passed"
+  },
+  "tests": {
+    "native": {
+      "result": "10/10 passed",
+      "names": [
+        "extrusion-bounds",
+        "direct-dimensions",
+        "native-solid",
+        "native-features",
+        "semantic-references",
+        "exact-projection",
+        "iteration-history",
+        "bom-contract",
+        "physics-pricing",
+        "manufacturing"
+      ]
+    },
+    "studio": {
+      "result": "passed",
+      "cases": [
+        {
+          "name": "direct-authoring-ui",
+          "size": [
+            1440,
+            900
+          ]
+        },
+        {
+          "name": "direct-authoring-ui compact",
+          "size": [
+            1180,
+            800
+          ]
+        },
+        {
+          "name": "parametric-authoring-ui",
+          "size": [
+            1440,
+            900
+          ]
+        },
+        {
+          "name": "selection-picking-ui",
+          "size": [
+            1440,
+            900
+          ]
+        },
+        {
+          "name": "selection-glow-ui",
+          "size": [
+            1440,
+            900
+          ]
+        }
+      ]
+    },
+    "checks": [
+      "on-source handle starts a drag from a selected saved profile without source-entry dialog",
+      "positive expression depth, reverse and symmetric total span retain exact source caps/volume",
+      "planar source face extrusion retains inner wires and ordered dependencies",
+      "up-to-face depth follows the exact selected B-rep face on recomputation",
+      "complete cap-minus-limit face Boolean rejects uncovered regions including holes",
+      "source and limit reference inputs retain physical outputs, BOM definitions and aggregate mass",
+      "invalid, zero, wrong-direction, nonparallel, curved-source, deleted and stale source recipes reject atomically",
+      "source programs roundtrip with document version 36; downgraded labels reject",
+      "durable version 36 history reopens and supports source-preserving undo/redo",
+      "existing primitive, mesh, source dimension and selection interactions remain verified"
+    ]
+  },
+  "commands": [
+    "cmake --build out/native-release --config Release --parallel 4 --target ark-studio ark-extrusion-bounds-tests ark-direct-dimension-tests ark-occt-solid-tests ark-native-feature-tests ark-reference-tests ark-projection-tests ark-iteration-history-tests ark-bom-tests ark-physics-pricing-tests ark-manufacturing-tests",
+    "ctest --test-dir out/native-release -C Release --output-on-failure -R \"^(extrusion-bounds|direct-dimensions|native-solid|native-features|semantic-references|exact-projection|iteration-history|bom-contract|physics-pricing|manufacturing)$\"",
+    "ark-studio --self-test-direct-authoring-ui --shot direct-authoring.png --size 1440 900",
+    "ark-studio --self-test-direct-authoring-ui --shot direct-authoring-compact.png --size 1180 800"
+  ],
+  "visual_inspection": {
+    "result": "passed within inspected scope",
+    "captures": [
+      "images/extrusion/profile-handle.png",
+      "images/extrusion/reverse-symmetric-preview.png",
+      "images/extrusion/up-to-face-preview.png",
+      "images/extrusion/up-to-face-saved.png",
+      "images/extrusion/reverse-symmetric-compact.png",
+      "images/extrusion/profile-handle-compact.png"
+    ],
+    "observed": [
+      "on-source handle and depth readout are visible",
+      "reverse/symmetric/up-to-face/distance controls fit at the inspected sizes",
+      "the complete source and limit bodies remain displayed after a face-bound commit",
+      "driving sketch dimension labels avoid the passive extrusion handle"
+    ]
+  },
+  "document_contract": {
+    "version": 36,
+    "conditional_on": [
+      "native_solid/extrude p.direction or p.symmetric",
+      "native direction/symmetric/source_face/limit_face",
+      "native.mode up_to_face"
+    ],
+    "legacy_forward_extrusions_keep_previous_version": true,
+    "history_max_supported_version": 36
+  },
+  "authority": "Saved sketch/datum or exact planar source B-rep face, positive authored expression, explicit direction/symmetry and exact named limit face. Tessellation only locates/displays gestures.",
+  "limits": [
+    "up-to-face currently accepts only a planar parallel limit fully covering the cap; curved, tilted and partially covering limits reject",
+    "symmetric and up-to-face cannot be combined",
+    "placed source/limit faces require editing part definitions",
+    "source-face extrusion creates a separate body, without automatic fuse or collision qualification",
+    "no complete release suite, distribution, deployment, manufacture or external integration qualification claimed"
+  ],
+  "verified_on": "2026-10-13"
+}

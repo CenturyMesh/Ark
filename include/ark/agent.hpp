@@ -4,6 +4,7 @@
 #include "ark/mesh_analysis.hpp"
 #include "ark/failure_record.hpp"
 #include <chrono>
+#include <set>
 namespace ark {
 struct Image;
 bool metadataOnlyApply(const Document&,const arkjson::Value& args);
@@ -11,15 +12,40 @@ arkjson::Value snapshotImageResult(const Image&,const arkjson::Value& visualEvid
 // A session owns its document. UI and MCP call the same command implementation.
 // Calls are serialized by the host; no process-global document state.
 class AgentSession {
+    struct Prepared;
 public:
+    // A worker can hand off the validated receipt, never a bare foreign ID.
+    // Hosts must serialize adoption with live session writes.
+    class PreparedTransfer {
+    public:
+        PreparedTransfer(PreparedTransfer&&) noexcept = default;
+        PreparedTransfer& operator=(PreparedTransfer&&) noexcept = default;
+        PreparedTransfer(const PreparedTransfer&) = delete;
+        PreparedTransfer& operator=(const PreparedTransfer&) = delete;
+        const Document& document() const;
+        const std::string& id() const;
+        const arkjson::Value& result() const;
+    private:
+        friend class AgentSession;
+        explicit PreparedTransfer(std::shared_ptr<Prepared> value):value_(std::move(value)){}
+        std::shared_ptr<Prepared> value_;
+    };
     Document document;
     u64 revision=0;
     arkjson::Value call(const std::string& tool,const arkjson::Value& args);
     arkjson::Value info() const;
+    arkjson::Value reviewBom(const arkjson::Value& args);
+    arkjson::Value bomCompletionCheck(bool onlyIfAuthored=false) const;
+    void markBomAuthored(){bomAuthored_=true;}
+    void resetBomReview(){bomAuthored_=false;bomReview_={};bomInspectedHash_.clear();bomInspectedItems_.clear();bomInspectedRevision_=~u64(0);}
+    void observeBomInspection(const arkjson::Value& bom);
     static arkjson::Value tools(bool detailed=false);
     arkjson::Value preparePreview(const arkjson::Value& args);
+    arkjson::Value proposeManufacturing(const arkjson::Value& args);
     arkjson::Value commitPrepared(const arkjson::Value& args);
     arkjson::Value snapshotCandidate(const arkjson::Value& args);
+    std::unique_ptr<PreparedTransfer> takePreparedCandidate(const std::string& id);
+    void adoptPreparedCandidate(PreparedTransfer&&, u64 expectedRevision);
     arkjson::Value failureInfo(const arkjson::Value& args) const;
     arkjson::Value failureExport(const arkjson::Value& args) const;
     arkjson::Value failureReplay(const arkjson::Value& args);
@@ -27,6 +53,11 @@ public:
     // Scratch geometry probes opt out; only committed document edits are journaled.
     void suppressIterationHistory(bool value=true){suppressHistory_=value;}
 private:
+    bool bomAuthored_=false;
+    arkjson::Value bomReview_;
+    std::string bomInspectedHash_;
+    u64 bomInspectedRevision_=~u64(0);
+    std::set<u64> bomInspectedItems_;
     arkjson::Value dispatch(const std::string& tool,const arkjson::Value& args);
     bool suppressHistory_=false;
     bool suppressFailures_=false;
@@ -41,6 +72,8 @@ private:
         std::chrono::steady_clock::time_point expires;
         size_t bytes=0;
         bool metadataOnly=false;
+        bool requiresDfmAcceptance=false;
+        arkjson::Value dfmComparison;
     };
     std::vector<Prepared> prepared_;
     std::vector<std::string> undo_,redo_;

@@ -111,6 +111,6 @@
     "Cold freeform evaluation and first mass-property queries remain costly.",
     "Stored audit capacity 4096 with explicit gap accounting; existing document size limit applies.",
     "Feedback scores are subjective; interrupted work can leave pending ratings.",
-    "No MeshWorks adapter or live model-adherence qualification."
+    "No external adapter or live model-adherence qualification."
   ]
 }

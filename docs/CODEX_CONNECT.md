@@ -3,7 +3,9 @@
 For Claude Code/Desktop, OpenCode and provider connections inside ARK, see
 [AI connectors](AI_CONNECTORS.md). The live document bridge below is shared.
 
-ARK 0.8 provides a local live-session bridge. Codex calls the existing ARK MCP
+ARK provides a local live-session bridge on Windows. For the account-versus-MCP
+distinction and setup troubleshooting, start with [Connecting](CONNECTING.md).
+Codex calls the existing ARK MCP
 tools; Studio executes them on its document thread and refreshes the operator's
 view. It uses the same document and revision as the operator. No model API key,
 cloud relay or network listener is required by this bridge.

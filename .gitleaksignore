@@ -1,0 +1,10 @@
+# Exact historical false positives reviewed in 016F: C++ comparisons and SQLite API macros, not credentials.
+2d9f1ad85706240d7a8f50fe2146d3d3abacc731:src/agent.cpp:generic-api-key:401
+85612c1f217d5c95d1108b1aa1f54e432ebf78c8:third_party/sqlite/sqlite3ext.h:generic-api-key:429
+85612c1f217d5c95d1108b1aa1f54e432ebf78c8:third_party/sqlite/sqlite3ext.h:generic-api-key:585
+85612c1f217d5c95d1108b1aa1f54e432ebf78c8:third_party/sqlite/sqlite3ext.h:generic-api-key:677
+fd62970ceb108f2a445a0a7761f32519bf3e43a8:src/agent.cpp:generic-api-key:848
+85612c1f217d5c95d1108b1aa1f54e432ebf78c8:third_party/sqlite/sqlite3.c:generic-api-key:143338
+85612c1f217d5c95d1108b1aa1f54e432ebf78c8:third_party/sqlite/sqlite3.c:generic-api-key:143494
+85612c1f217d5c95d1108b1aa1f54e432ebf78c8:third_party/sqlite/sqlite3.c:generic-api-key:143586
+85612c1f217d5c95d1108b1aa1f54e432ebf78c8:third_party/sqlite/sqlite3.c:generic-api-key:260997

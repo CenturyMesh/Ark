@@ -24,6 +24,7 @@
 #include <TopExp_Explorer.hxx>
 #include <TopExp.hxx>
 #include <NCollection_IndexedDataMap.hxx>
+#include <NCollection_IndexedMap.hxx>
 #include <NCollection_List.hxx>
 #include <TopTools_ShapeMapHasher.hxx>
 #include <TopLoc_Location.hxx>
@@ -38,6 +39,7 @@
 #include <stdexcept>
 #include <cstdint>
 #include <algorithm>
+#include <set>
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -148,6 +150,7 @@ TopoDS_Shape compound(const std::vector<TopoDS_Shape>& parts){BRep_Builder b;Top
 TopoDS_Shape transformed(const TopoDS_Shape& s,const gp_Trsf& t){BRepBuilderAPI_Transform op(s,t,true);if(!op.IsDone())throw std::runtime_error("Native shape transform failed");return op.Shape();}
 V vec(const gp_XYZ& p){V out=V::makeArr();for(double n:{p.X(),p.Y(),p.Z()})out.arr.push_back(V::makeNum(n));return out;}
 V matrix(const gp_Trsf& t){V out=V::makeArr();for(int c=1;c<=4;++c)for(int r=1;r<=4;++r)out.arr.push_back(V::makeNum(r<=3?t.Value(r,c):(c==4?1:0)));return out;}
+namespace {int requestThreadBudget=0;}
 int nativeThreadBudget(){
     static const int budget=[](){
         int threads=std::max(1,std::min(8,(int)std::thread::hardware_concurrency()));
@@ -157,7 +160,14 @@ int nativeThreadBudget(){
         }
         const auto& pool=OSD_ThreadPool::DefaultPool(threads);
         threads=std::min(threads,pool->NbThreads());pool->SetNbDefaultThreadsToLaunch(threads);return threads;
-    }();return budget;
+    }();return requestThreadBudget?requestThreadBudget:budget;
+}
+void configureNativeThreadBudget(int threads){
+    if(threads<1||threads>64)throw std::runtime_error("Native request thread budget must be 1..64");
+    (void)nativeThreadBudget();const auto& pool=OSD_ThreadPool::DefaultPool();
+    if(pool->IsInUse())throw std::runtime_error("Cannot change native thread allowance during an active job");
+    if(pool->NbThreads()<threads)pool->Init(threads);
+    pool->SetNbDefaultThreadsToLaunch(threads);requestThreadBudget=threads;
 }
 namespace {
 // Rendering metadata only. The full, ordered edge polylines remain authoritative
@@ -248,6 +258,81 @@ V shapeReport(const TopoDS_Shape& shape,bool requireSolid){
     V report=V::makeObj();report.set("kernel",V::makeStr("OCCT"));report.set("kernel_version",V::makeStr(kernelVersion()));report.set("brep_valid",V::makeBool(true));report.set("solids",V::makeNum(solids.size()));report.set("faces",V::makeNum(shapes(shape,TopAbs_FACE).size()));report.set("area_mm2",V::makeNum(properties(shape,'a')));report.set("volume_mm3",solids.empty()?V{}:V::makeNum(measuredVolume));report.set("display_mesh_authoritative",V::makeBool(false));report.set("self_intersections_checked",V::makeBool(false));report.set("manufacturing_authoritative",V::makeBool(false));
     V b=V::makeArr();for(auto x:bounds(shape))b.arr.push_back(V::makeNum(x));report.set("bounds_mm",b);return report;
 }
-V shapeResult(const TopoDS_Shape& shape,bool requireSolid){V r=V::makeObj();r.set("report",shapeReport(shape,requireSolid));r.set("brep_base64",V::makeStr(brepData(shape)));r.set("mesh",meshData(shape));return r;}
+V completeSelectionReferences(V result){
+    const auto* encoded=result.find("brep_base64");
+    if(!encoded||encoded->t!=V::Str)return result;
+    const std::string identity=sha256(base64Decode(encoded->str));
+    const auto shape=readBrep(encoded->str);
+    const auto faces=shapes(shape,TopAbs_FACE),edges=shapes(shape,TopAbs_EDGE);
+    auto describe=[](const TopoDS_Shape& entity,TopAbs_ShapeEnum kind){V descriptor=V::makeObj();
+        if(kind==TopAbs_FACE){BRepAdaptor_Surface surface(TopoDS::Face(entity));
+            if(surface.GetType()==GeomAbs_Plane){const auto plane=surface.Plane();auto normal=plane.Axis().Direction();if(entity.Orientation()==TopAbs_REVERSED)normal.Reverse();descriptor.set("origin",vec(plane.Location().XYZ()));descriptor.set("normal",vec(normal.XYZ()));descriptor.set("x_axis",vec(plane.XAxis().Direction().XYZ()));}
+            else descriptor.set("surface_type",V::makeStr("non_planar"));
+        }else if(!BRep_Tool::Degenerated(TopoDS::Edge(entity))){BRepAdaptor_Curve curve(TopoDS::Edge(entity));const double u=curve.FirstParameter()+(curve.LastParameter()-curve.FirstParameter())*.5;gp_Pnt p;gp_Vec tangent;curve.D1(u,p,tangent);descriptor.set("origin",vec(p.XYZ()));if(tangent.Magnitude()>1e-12){tangent.Normalize();descriptor.set("tangent",vec(tangent.XYZ()));}}
+        return descriptor;
+    };
+    V topology=result.find("topology")?*result.find("topology"):V::makeObj();
+    if(topology.t!=V::Obj)throw std::runtime_error("Invalid native selection topology");
+    if(const auto* digest=topology.find("brep_sha256");digest&&(digest->t!=V::Str||digest->str!=identity))throw std::runtime_error("Selection topology B-rep digest mismatch");
+    topology.set("brep_sha256",V::makeStr(identity));
+    V rows=topology.find("references")?*topology.find("references"):V::makeArr();
+    if(rows.t!=V::Arr||rows.arr.size()>16384)throw std::runtime_error("Selection reference inventory exceeds16384 entries");
+    std::set<std::string> names;size_t semanticCount=0;
+    for(auto& row:rows.arr){
+        const auto* name=row.find("name");if(!name||name->t!=V::Str||!names.insert(name->str).second)throw std::runtime_error("Invalid or duplicate selection reference");
+        const auto marker=name->str.find("@ark.");
+        if(marker!=std::string::npos){
+            const std::string referenceName=name->str;
+            const auto digestStart=name->str.find('.',marker+5);
+            const auto originalDigest=digestStart==std::string::npos?std::string():name->str.substr(digestStart+1,64);
+            const auto kindName=digestStart==std::string::npos?std::string():referenceName.substr(marker+5,digestStart-marker-5);
+            const auto suffix=digestStart==std::string::npos||referenceName.size()<digestStart+66?std::string():referenceName.substr(digestStart+66);
+            if((kindName!="face"&&kindName!="edge")||originalDigest.size()!=64||originalDigest.find_first_not_of("0123456789abcdef")!=std::string::npos||suffix.empty()||suffix.size()>7||suffix.find_first_not_of("0123456789")!=std::string::npos||referenceName[digestStart+65]!='.')throw std::runtime_error("Invalid reserved current-B-rep reference provenance");
+            const auto* status=row.find("status"),*rowKind=row.find("kind"),*indices=row.find("indices");const size_t index=std::stoul(suffix);
+            if(originalDigest==identity){
+                const auto& entities=kindName=="face"?faces:edges;
+                if(!rowKind||rowKind->asStr()!=kindName||index>=entities.size())throw std::runtime_error("Current-B-rep reference index provenance mismatch");
+                if(status&&(status->asStr()=="bound"||status->asStr()=="merged"))if(!indices||indices->t!=V::Arr||indices->arr.size()!=1||indices->arr[0].t!=V::Num||indices->arr[0].num!=index)throw std::runtime_error("Current-B-rep reference index provenance mismatch");
+                // A previously obsolete handle can bind only if its complete
+                // serialized identity and encoded exact index are restored.
+                V bound=V::makeArr();bound.arr.push_back(V::makeNum(index));row.set("status",V::makeStr("bound"));row.set("indices",bound);
+                const V descriptor=describe(entities[index],kindName=="face"?TopAbs_FACE:TopAbs_EDGE);row.set("descriptor",descriptor);row.set("frame_available",V::makeBool(descriptor.find("normal")||descriptor.find("tangent")));
+                row.obj.erase(std::remove_if(row.obj.begin(),row.obj.end(),[](const auto& item){return item.first=="reason";}),row.obj.end());
+            }
+            row.set("reference_scope",V::makeStr("current_brep"));row.set("persistent",V::makeBool(false));row.set("brep_sha256",V::makeStr(originalDigest));
+            if(originalDigest!=identity){row.set("status",V::makeStr("obsolete"));row.set("indices",V::makeArr());row.set("reason",V::makeStr("B-rep identity changed; select the current geometry"));}
+        }else if(++semanticCount>512)throw std::runtime_error("Semantic topology registry exceeds512 entries");
+    }
+    V mesh=result.find("mesh")?*result.find("mesh"):V{};
+    for(const auto kind:{TopAbs_FACE,TopAbs_EDGE}){
+        const std::string label=kind==TopAbs_FACE?"face":"edge";
+        const auto& entities=kind==TopAbs_FACE?faces:edges;
+        NCollection_IndexedMap<TopoDS_Shape,TopTools_ShapeMapHasher> covered,seen;
+        for(const auto& row:rows.arr){const auto* rowKind=row.find("kind"),*status=row.find("status"),*indices=row.find("indices");
+            if(!rowKind||rowKind->asStr()!=label||!status||(status->asStr()!="bound"&&status->asStr()!="merged"))continue;
+            if(!indices||indices->t!=V::Arr||indices->arr.size()!=1||indices->arr[0].t!=V::Num||indices->arr[0].num<0||indices->arr[0].num!=std::floor(indices->arr[0].num)||indices->arr[0].num>=entities.size())throw std::runtime_error("Invalid bound selection reference index");
+            covered.Add(entities[(size_t)indices->arr[0].num]);
+        }
+        V canonical=V::makeArr();std::vector<size_t> firstIndices;
+        for(size_t index=0;index<entities.size();++index){const auto& entity=entities[index];
+            const bool duplicate=seen.Contains(entity);const auto mapped=seen.Add(entity);
+            if(!duplicate)firstIndices.push_back(index);canonical.arr.push_back(V::makeNum(firstIndices[(size_t)mapped-1]));
+            if(duplicate||covered.Contains(entity))continue;
+            if(kind==TopAbs_EDGE&&BRep_Tool::Degenerated(TopoDS::Edge(entity)))continue;
+            if(rows.arr.size()>=16384)throw std::runtime_error("Selection reference inventory exceeds16384 entries; no partial inventory was published");
+            const auto name="@ark."+label+"."+identity+"."+std::to_string(index);
+            if(!names.insert(name).second)throw std::runtime_error("Reserved current-B-rep reference namespace collision");
+            V row=V::makeObj(),indices=V::makeArr();const V descriptor=describe(entity,kind);indices.arr.push_back(V::makeNum(index));
+            row.set("name",V::makeStr(name));row.set("kind",V::makeStr(label));row.set("status",V::makeStr("bound"));row.set("indices",indices);
+            row.set("display_name",V::makeStr((kind==TopAbs_FACE?"Face ":"Edge ")+std::to_string(index+1)));
+            row.set("reference_scope",V::makeStr("current_brep"));row.set("persistent",V::makeBool(false));row.set("brep_sha256",V::makeStr(identity));
+            row.set("descriptor",descriptor);row.set("frame_available",V::makeBool(descriptor.find("normal")||descriptor.find("tangent")));rows.arr.push_back(row);
+        }
+        if(mesh.t==V::Obj)if(const auto* displayed=mesh.find(kind==TopAbs_FACE?"face_spans":"edges");displayed&&displayed->t==V::Arr&&displayed->arr.size()==entities.size())mesh.set(kind==TopAbs_FACE?"face_canonical":"edge_canonical",canonical);
+    }
+    if(mesh.t==V::Obj)result.set("mesh",mesh);
+    topology.set("references",rows);topology.set("selection_inventory_complete",V::makeBool(true));topology.set("generic_reference_scope",V::makeStr("current_brep_digest"));topology.set("reference_capacity",V::makeNum(16384));result.set("topology",topology);return result;
+}
+V shapeResult(const TopoDS_Shape& shape,bool requireSolid){V r=V::makeObj();r.set("report",shapeReport(shape,requireSolid));r.set("brep_base64",V::makeStr(brepData(shape)));r.set("mesh",meshData(shape));return completeSelectionReferences(std::move(r));}
 double symmetricDifference(const TopoDS_Shape& a,const TopoDS_Shape& b){return std::abs(properties(cut(a,b)))+std::abs(properties(cut(b,a)));}
 }

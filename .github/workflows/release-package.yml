@@ -1,88 +1,141 @@
-name: Build Windows installer and publish download
+name: Prepare Windows and Linux release packages
 on:
-  push:
-    branches: [codex/windows-distribution]
-    tags: ['v*']
   workflow_dispatch:
     inputs:
-      publish:
-        description: Publish a GitHub prerelease after all tests pass
+      installer:
+        description: Build and test the optional Windows installer
         type: boolean
-        default: true
+        default: false
+      publish:
+        description: Publish a prerelease after both platform jobs pass
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
-  group: ark-release-${{ github.ref }}
-  cancel-in-progress: false
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   windows-package:
     runs-on: windows-2022
-    timeout-minutes: 120
-    permissions:
-      contents: write
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
-      - name: Validate release identity
-        shell: pwsh
-        run: |
-          cmake -DARK_RELEASE_FILE=release.json -P cmake/ValidateRelease.cmake
-          if ($LASTEXITCODE -ne 0) { throw 'Release identity validation failed.' }
-          $release = Get-Content release.json -Raw | ConvertFrom-Json
-          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -cne "v$($release.version)") { throw 'Tag must match release.json runtime version.' }
-      - name: Test packaging and standalone installation with fixtures
+      - name: Test distribution fixtures
         shell: pwsh
         run: ./tests/distribution_tests.ps1
-      - name: Build OCCT and ARK, run tests
+      - name: Identify hosted Windows image
+        id: runner-image
+        shell: pwsh
+        run: |
+          if (-not $env:ImageVersion) { throw 'Hosted runner ImageVersion is required for the OCCT cache key.' }
+          "version=$env:ImageVersion" >> $env:GITHUB_OUTPUT
+      - name: Restore OCCT native SDK and notices
+        id: occt-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            out/deps/occt/install-msvc
+            out/deps/occt/cache/OCCT-8_0_1/LICENSE_LGPL_21.txt
+            out/deps/occt/cache/OCCT-8_0_1/OCCT_LGPL_EXCEPTION.txt
+          key: windows-2022-occt-msvc-x64-notices-v1-${{ steps.runner-image.outputs.version }}-${{ hashFiles('scripts/build-occt.ps1') }}
+      - name: Build OCCT 8 native SDK
+        if: steps.occt-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: ./scripts/build-occt.ps1 -Jobs 2
+      - name: Save OCCT native SDK and notices
+        if: steps.occt-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            out/deps/occt/install-msvc
+            out/deps/occt/cache/OCCT-8_0_1/LICENSE_LGPL_21.txt
+            out/deps/occt/cache/OCCT-8_0_1/OCCT_LGPL_EXCEPTION.txt
+          key: ${{ steps.occt-cache.outputs.cache-primary-key }}
+      - name: Build ARK and run tests
         shell: pwsh
         run: ./scripts/build.ps1 -Test -Jobs 2
-      - name: Prepare portable ZIP and executable installer
+      - name: Prepare portable package and update manifest
+        shell: pwsh
+        run: ./scripts/package-release.ps1
+      - name: Install Inno Setup
+        if: inputs.installer
+        run: choco install innosetup --no-progress -y
+      - name: Build and test the optional installer
+        if: inputs.installer
         shell: pwsh
         run: |
-          ./scripts/package-release.ps1 -SkipUpdateManifest
           $release = Get-Content release.json -Raw | ConvertFrom-Json
           ./scripts/build-installer.ps1 -PackagePath "out/releases/ark-windows-x64-$($release.version).zip"
-      - name: Test native geometry from the package, install and uninstall
-        shell: pwsh
-        run: |
-          $release = Get-Content release.json -Raw | ConvertFrom-Json
           ./scripts/test-distribution.ps1 -PackagePath "out/releases/ark-windows-x64-$($release.version).zip" -InstallerPath "out/releases/ARK-$($release.code)-windows-x64-setup.exe"
       - uses: actions/upload-artifact@v4
         with:
           name: ark-windows-release-assets
           path: |
-            out/releases/ARK-*-windows-x64-setup.exe
             out/releases/ark-windows-x64-*.zip
+            out/releases/ark-update.json
+            out/releases/ARK-*-windows-x64-setup.exe
             out/releases/SHA256SUMS.txt
           if-no-files-found: error
-          retention-days: 30
-      - name: Publish versioned prerelease with permanent download assets
-        if: github.event_name == 'push' || inputs.publish
-        shell: pwsh
+
+  publish:
+    if: inputs.publish
+    needs: [windows-package, linux-package]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ark-*-release-assets
+          path: out/releases
+          merge-multiple: true
+      - name: Publish immutable preview artifacts
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $release = Get-Content release.json -Raw | ConvertFrom-Json
-          $tag = "v$($release.version)"
-          $existing = gh release list --repo $env:GITHUB_REPOSITORY --limit 100 --json tagName | ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0) { throw 'Could not check existing releases.' }
-          if (@($existing | Where-Object tagName -CEQ $tag).Count) { throw 'This release already exists. Advance release.json rather than replace a binary.' }
-          $notes = @"
-          Windows x64 preview of ARK $($release.code), runtime $($release.version).
-
-          Download the setup EXE to install, or extract the complete ZIP and run ARK.cmd.
-          Visual C++, OCCT runtime DLLs, assets and third-party notices are included.
-          Studio needs a graphics driver supporting OpenGL 3.3. AI setup is optional.
-
-          The release passed the native CTest suite and an isolated package test:
-          native box and STEP export, per-user installer, runtime receipts and uninstall.
-          Hosted tests do not qualify the interactive Studio UI on another PC.
-          GitHub access to this private repository is required for downloading.
-          The in-app Internet update feed remains unpublished.
-
-          Milestones: A.05 dependency notices; F.03 installation; F.05 preview distribution.
-          Commit: $env:GITHUB_SHA
-          "@
-          $notes | Set-Content -LiteralPath out/releases/release-notes.md -Encoding utf8
-          gh release create $tag "out/releases/ARK-$($release.code)-windows-x64-setup.exe" "out/releases/ark-windows-x64-$($release.version).zip" out/releases/SHA256SUMS.txt --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "ARK $($release.code) - Windows x64 preview" --notes-file out/releases/release-notes.md --prerelease
-          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed.' }
-
+          version=$(jq -r .version release.json)
+          code=$(jq -r .code release.json)
+          tag="v$version"
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName > out/releases/existing.json
+          if jq -e --arg tag "$tag" 'any(.[]; .tagName == $tag)' out/releases/existing.json >/dev/null; then
+            echo "Release already exists; advance release.json instead of replacing binaries." >&2
+            exit 1
+          fi
+          cd out/releases
+          curl --fail --location 'https://github.com/Open-Cascade-SAS/OCCT/archive/refs/tags/V8_0_1.zip' -o OCCT-V8_0_1-source.zip
+          echo '7c033d917ee8f040c0512d289dcc5f02c148889d5bac17c3e25639accb44f0da  OCCT-V8_0_1-source.zip' | sha256sum -c -
+          sha256sum ark-windows-x64-*.zip ark-linux-x64-headless-*.tar.gz > SHA256SUMS.txt
+          sha256sum OCCT-V8_0_1-source.zip >> SHA256SUMS.txt
+          if compgen -G 'ARK-*-windows-x64-setup.exe' >/dev/null; then
+            sha256sum ARK-*-windows-x64-setup.exe >> SHA256SUMS.txt
+          fi
+          printf 'ARK %s / runtime %s preview. Windows and Linux native tests and relocated Linux package checks passed. Optional installer checks ran only when requested. Interactive Studio and manufacturing qualification remain separate gates. Source commit: %s\n' "$code" "$version" "$GITHUB_SHA" > release-notes.txt
+          assets=(ark-windows-x64-*.zip ark-linux-x64-headless-*.tar.gz OCCT-V8_0_1-source.zip SHA256SUMS.txt)
+          if compgen -G 'ARK-*-windows-x64-setup.exe' >/dev/null; then assets+=(ARK-*-windows-x64-setup.exe); fi
+          gh release create "$tag" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "ARK $code / $version preview" --notes-file release-notes.txt --prerelease
+  linux-package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux build dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential cmake ninja-build curl ca-certificates unzip patchelf
+      - name: Build and test Linux CLI, MCP and OCCT worker
+        run: bash scripts/build.sh --test --jobs 2
+      - name: Prepare Linux headless package
+        run: bash scripts/package-linux.sh
+      - name: Test relocated package without the build SDK
+        run: |
+          mkdir -p out/linux-smoke
+          tar -xzf out/releases/ark-linux-x64-headless-*.tar.gz -C out/linux-smoke
+          docker run --rm \
+            --mount "type=bind,source=$PWD/out/linux-smoke,target=/packages,readonly" \
+            --mount "type=bind,source=$PWD/tests/linux_package_smoke.sh,target=/smoke.sh,readonly" \
+            ubuntu:24.04 bash -c 'bash /smoke.sh /packages/ark-linux-x64-headless-*'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ark-linux-release-assets
+          path: out/releases/ark-linux-x64-headless-*.tar.gz*
+          if-no-files-found: error

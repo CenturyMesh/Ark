@@ -1,5 +1,7 @@
 // ARK-Point :: core.cpp — math impl, CPU dispatch, thread pool.
 #include "ark/core.hpp"
+#include <cstdlib>
+#include <exception>
 
 #if defined(_WIN32)
   #define WIN32_LEAN_AND_MEAN

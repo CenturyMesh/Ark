@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <mapbox/earcut.hpp>
 
 namespace ark {
 void resolveSketchCorners(Sketch& sketch,const ExprEnv& env);
@@ -149,7 +150,18 @@ void bakeSketchOffsets(Sketch& sketch,const ExprEnv& env){
         if(drivenKind(source->kind)&&source->dof.empty())continue;
         if(source->kind==SketchEnt::Pnt)throw std::runtime_error("Offset source must be a curve");
         double distance=expressionValue(entity.distance,env);
-        assignPolyline(entity,offsetPolyline(sampleSketchEntity(*source,sketch.tolerance,&sketch),distance));
+        if(!std::isfinite(distance)||std::abs(distance)<1e-9||std::abs(distance)>1e6)throw std::runtime_error("Offset distance must be a nonzero finite length");
+        if(source->kind==SketchEnt::Circle||source->kind==SketchEnt::Arc){
+            const bool circle=source->kind==SketchEnt::Circle;const double a0=circle?0:source->dof.at(3),a1=circle?360:source->dof.at(4),sweep=a1-a0;
+            const double radius=source->dof.at(2)-(sweep>0?distance:-distance);if(radius<=1e-8)throw std::runtime_error("Sketch offset collapses the circle/arc radius");
+            const Vec2 center{source->dof[0],source->dof[1]};auto point=[&](double degrees){const double a=deg2rad(degrees);return center+Vec2{radius*std::cos(a),radius*std::sin(a)};};
+            const Vec2 start=point(a0);entity.dof={start.x,start.y};entity.segments.clear();entity.expressions.clear();const int count=(int)std::ceil(std::abs(sweep)/180.);
+            if(count<1||count>2)throw std::runtime_error("Offset arc requires one turn or less");for(int i=1;i<=count;++i){const auto end=circle&&i==count?start:point(a0+sweep*i/count);SketchEnt::WireSeg segment;segment.kind=SketchEnt::WireSeg::Arc;segment.sweep=sweep>0?1:-1;entity.segments.push_back(segment);entity.dof.insert(entity.dof.end(),{end.x,end.y,radius});}
+        }else{
+            auto moved=offsetPolyline(sampleSketchEntity(*source,sketch.tolerance,&sketch),distance);const bool closed=(moved.front()-moved.back()).len()<1e-6;
+            for(size_t i=1;i<moved.size();++i)for(size_t j=i+2;j<moved.size();++j)if(!(closed&&i==1&&j==moved.size()-1)&&intersects(moved[i-1],moved[i],moved[j-1],moved[j]))throw std::runtime_error("Sketch offset self-intersects or collapses; reduce distance");
+            assignPolyline(entity,moved);
+        }
     }
 }
 Vec2 onSketch(const Mat4& inverse,Vec3 world){Vec3 local=inverse.transformPoint(world);return {local.x,local.y};}
@@ -191,7 +203,7 @@ arkjson::Value projectSketchGeometry(Document& document,const std::string& sourc
 void evaluateSketch(NamedSketch& ns,const ExprEnv& env){
     ns.error.clear();ns.residual=0;
     try{
-        for(auto& e:ns.sk.ents){for(size_t i=0;i<e.expressions.size();++i)if(!e.expressions[i].empty())e.dof[i]=expressionValue(e.expressions[i],env);evaluateArcRecipe(e,env);}
+        for(auto& e:ns.sk.ents){for(size_t i=0;i<e.expressions.size();++i)if(!e.expressions[i].empty())e.dof[i]=expressionValue(e.expressions[i],env);evaluateArcRecipe(e,env);if(e.kind==SketchEnt::Recipe)evaluateSketchEntityRecipe(e,env,ns.sk.tolerance);}
         for(auto& c:ns.sk.cons){
             if(!c.expression.empty())c.val=expressionValue(c.expression,env);
             if(!c.expression2.empty())c.val2=expressionValue(c.expression2,env);
@@ -280,11 +292,13 @@ const char* sketchEntityKindName(SketchEnt::Kind kind){
         case SketchEnt::Wire: return "wire";
         case SketchEnt::Project: return "project";
         case SketchEnt::Offset: return "offset";
+        case SketchEnt::Recipe: return "recipe";
     }
     return "unknown";
 }
 
 int sketchVertexCount(const SketchEnt& entity){
+    if(entity.kind==SketchEnt::Recipe)return (int)entity.dof.size()/2;
     if(entity.kind==SketchEnt::Project||entity.kind==SketchEnt::Offset) return entity.segments.empty()?0:1+(int)entity.segments.size();
     if(entity.kind==SketchEnt::Wire) return 1+(int)entity.segments.size();
     if(entity.kind==SketchEnt::Line) return 2;
@@ -435,6 +449,7 @@ void resolveSketchCorners(Sketch& sketch,const ExprEnv& env){
 std::vector<Vec2> sampleSketchEntity(const SketchEnt& e,double tolerance,const Sketch* owner){
     if(!std::isfinite(tolerance)||tolerance<.0001||tolerance>5)throw std::runtime_error("Sketch tolerance must be 0.0001..5 mm");
     if(e.kind==SketchEnt::Project&&!e.projectionBrep.empty())return e.projectionSamples;
+    if(e.kind==SketchEnt::Recipe){if(e.recipeSamples.empty())throw std::runtime_error("Entity recipe is not evaluated");return e.recipeSamples;}
     auto pt=[&](size_t i){return Vec2{e.dof.at(2*i),e.dof.at(2*i+1)};};
     auto at=[&](int i){return Vec2{e.dof.at((size_t)i),e.dof.at((size_t)i+1)};};
     if(e.kind==SketchEnt::Pnt)return {pt(0)};
@@ -507,6 +522,13 @@ std::vector<std::array<Vec2,4>> sketchSplineSegments(const SketchEnt& e){
     }return segments;
 }
 
+std::vector<std::vector<Vec2>> sampleSketchEntityPaths(const SketchEnt& entity,double tolerance,const Sketch* owner){
+    if(entity.kind==SketchEnt::Recipe&&entity.entityRecipe.find("type")&&entity.entityRecipe.find("type")->str=="text"){
+        std::vector<std::vector<Vec2>> paths;for(size_t i=1;i<entity.recipeSamples.size();i+=2)paths.push_back({entity.recipeSamples[i-1],entity.recipeSamples[i]});return paths;
+    }
+    return {sampleSketchEntity(entity,tolerance,owner)};
+}
+
 std::vector<SketchProfile> sketchProfiles(const Sketch& sketch,const Mat4& frame){
     std::vector<std::vector<Vec2>> curves,loops;size_t samples=0;
     for(auto& e:sketch.ents)if(!e.construction&&e.kind!=SketchEnt::Pnt){auto p=sampleSketchEntity(e,sketch.tolerance,&sketch);samples+=p.size();if(samples>4096)throw std::runtime_error("Sketch exceeds 4096 profile samples");curves.push_back(std::move(p));}
@@ -539,6 +561,40 @@ std::vector<SketchProfile> sketchProfiles(const Sketch& sketch,const Mat4& frame
     std::vector<SketchProfile> profiles;for(auto& loop:loops){SketchProfile p;p.frame=frame;for(size_t i=0;i<loop.size();++i)p.segs.push_back({ProfileSeg::Line,loop[i],loop[(i+1)%loop.size()]});profiles.push_back(std::move(p));}return profiles;
 }
 
+Mesh sketchRegionMesh(const Sketch& sketch,const Mat4& frame){
+    std::vector<size_t> entities;std::vector<std::vector<Vec2>> samples,loops;size_t count=0;
+    for(size_t i=0;i<sketch.ents.size();++i){const auto& e=sketch.ents[i];if(e.construction||e.kind==SketchEnt::Pnt)continue;
+        try{auto points=sampleSketchEntity(e,sketch.tolerance,&sketch);count+=points.size();if(count>4096)return {};if(points.size()>1){entities.push_back(i);samples.push_back(std::move(points));}}catch(const std::exception&){}
+    }
+    std::vector<bool> used(samples.size());
+    for(size_t seed=0;seed<samples.size();++seed){if(used[seed])continue;std::vector<size_t> component{seed};used[seed]=true;
+        for(size_t at=0;at<component.size();++at)for(size_t i=0;i<samples.size();++i)if(!used[i]){
+            const auto& a=samples[component[at]];const auto& b=samples[i];bool joins=false;
+            for(Vec2 p:{a.front(),a.back()})for(Vec2 q:{b.front(),b.back()})joins|=(p-q).len()<=1e-6;
+            if(joins){used[i]=true;component.push_back(i);}
+        }
+        Sketch subset=sketch;subset.ents.clear();subset.cons.clear();for(size_t i:component)subset.ents.push_back(sketch.ents[entities[i]]);
+        try{for(const auto& profile:sketchProfiles(subset,frame)){std::vector<Vec2> loop;for(const auto& edge:profile.segs)loop.push_back(edge.p0);loops.push_back(std::move(loop));}}catch(const std::exception&){}
+    }
+    // Touching/crossing boundaries have no unambiguous region presentation.
+    std::vector<bool> invalid(loops.size());
+    for(size_t a=0;a<loops.size();++a)for(size_t b=a+1;b<loops.size();++b)
+        for(size_t i=0;i<loops[a].size();++i)for(size_t j=0;j<loops[b].size();++j)
+            if(intersects(loops[a][i],loops[a][(i+1)%loops[a].size()],loops[b][j],loops[b][(j+1)%loops[b].size()]))invalid[a]=invalid[b]=true;
+    std::vector<int> parent(loops.size(),-1),depth(loops.size());
+    auto area=[](const std::vector<Vec2>& loop){double value=0;for(size_t i=0;i<loop.size();++i)value+=loop[i].cross(loop[(i+1)%loop.size()]);return std::abs(value);};
+    for(size_t i=0;i<loops.size();++i)if(!invalid[i]){double smallest=1e300;for(size_t j=0;j<loops.size();++j)if(i!=j&&!invalid[j]&&inside(loops[i].front(),loops[j])&&area(loops[j])<smallest){smallest=area(loops[j]);parent[i]=(int)j;}}
+    for(size_t i=0;i<loops.size();++i)for(int p=parent[i];p>=0;p=parent[(size_t)p])++depth[i];
+    Mesh mesh;
+    for(size_t i=0;i<loops.size();++i)if(!invalid[i]&&depth[i]%2==0){std::vector<std::vector<std::array<double,2>>> polygon;
+        auto ring=[&](size_t at){std::vector<std::array<double,2>> values;for(Vec2 p:loops[at])values.push_back({p.x,p.y});polygon.push_back(std::move(values));};
+        ring(i);for(size_t j=0;j<loops.size();++j)if(!invalid[j]&&parent[j]==(int)i)ring(j);
+        const u32 base=(u32)mesh.vertCount();for(const auto& points:polygon)for(const auto& p:points){Vec3 world=frame.transformPoint({p[0],p[1],0});mesh.pos.insert(mesh.pos.end(),{(float)world.x,(float)world.y,(float)world.z});}
+        for(u32 index:mapbox::earcut<u32>(polygon))mesh.idx.push_back(base+index);
+    }
+    return mesh;
+}
+
 arkjson::Value inspectSketch(const Document& doc,const NamedSketch& ns,bool samples){
     using V=arkjson::Value;V r=V::makeObj(),entities=V::makeArr();auto frame=resolvePlane(doc,ns.sk.plane);
     r.set("name",V::makeStr(ns.name));r.set("plane",V::makeStr(ns.sk.plane));r.set("tolerance_mm",V::makeNum(ns.sk.tolerance));
@@ -549,6 +605,7 @@ arkjson::Value inspectSketch(const Document& doc,const NamedSketch& ns,bool samp
         item.set("name",V::makeStr(e.name));item.set("kind",V::makeStr(sketchEntityKindName(e.kind)));
         item.set("construction",V::makeBool(e.construction));for(auto x:e.dof)dof.arr.push_back(V::makeNum(x));item.set("resolved_dof",dof);
         if(e.arcRecipe.t==V::Obj){item.set("recipe",e.arcRecipe);item.set("geometry_authority",V::makeStr("analytic_arc"));item.set("driven",V::makeBool(true));item.set("editable",V::makeBool(true));}
+        if(e.kind==SketchEnt::Recipe){item.set("recipe",e.entityRecipe);item.set("recipe_report",e.recipeReport);item.set("geometry_authority",e.recipeReport.find("geometry_authority")?*e.recipeReport.find("geometry_authority"):V::makeStr("unresolved"));item.set("driven",V::makeBool(true));item.set("editable",V::makeBool(true));}
         if(e.kind==SketchEnt::Project){item.set("geometry_authority",V::makeStr(e.projectionBrep.empty()?"unresolved":"exact_brep"));item.set("associative",V::makeBool(true));item.set("editable",V::makeBool(false));item.set("feature",V::makeNum(e.sourceFeature));item.set("reference",V::makeStr(e.reference));}
         auto points=sampleSketchEntity(e,ns.sk.tolerance,&ns.sk);item.set("sample_count",V::makeNum(points.size()));
         if(samples){for(auto p:points){local.arr.push_back(vectorValue({p.x,p.y,0}));world.arr.push_back(vectorValue(frame.transformPoint({p.x,p.y,0})));}item.set("local",local);item.set("world",world);}entities.arr.push_back(item);

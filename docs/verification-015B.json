@@ -1,0 +1,97 @@
+{
+  "iteration": {
+    "sequence": 15,
+    "phase": "B",
+    "code": "015B",
+    "version": "0.9.16",
+    "milestones": [
+      "A.01",
+      "A.03",
+      "B.01",
+      "B.05",
+      "D.02"
+    ]
+  },
+  "date": "2026-10-12",
+  "baseline_commit": "ebda7abe283e9ef5615296631542f401ba0d3219",
+  "native_tests": {
+    "passed": 67,
+    "failed": 0,
+    "seconds": 91.05,
+    "log": "out/015B-private/tests.log"
+  },
+  "ui": [
+    {
+      "test": "bom-ui",
+      "exit": 0,
+      "seconds": 2.61
+    },
+    {
+      "test": "assistant-ui",
+      "exit": 0,
+      "seconds": 15.625
+    },
+    {
+      "test": "startup-ui",
+      "exit": 0,
+      "seconds": 3.141
+    }
+  ],
+  "visual_evidence": [
+    {
+      "path": "out/015B-private/ui-bom-ui.png.bom.png",
+      "sha256": "cbde4bb77d424cde27f396e70aee0b6c748ced76028705e69952100336bd97ae",
+      "inspected": true
+    },
+    {
+      "path": "out/015B-private/ui-bom-ui.png.bom.png.compact.png",
+      "sha256": "9ddea69c9ee04a9a89ee83a49e50dd92e51e5187ae838a4e287ffc3c467ec4fc",
+      "inspected": true
+    }
+  ],
+  "package": {
+    "entries": 75,
+    "bytes": 33394881,
+    "sha256": "2bcd8a174150f3372ffc13f9e914e437d6935ace7a8425e1f93f02669097c317",
+    "runtime_executables_match": true,
+    "drawings": 0,
+    "notices_and_contracts": true
+  },
+  "installation": {
+    "observed_processes_preserved": true,
+    "observed_live_processes": 1,
+    "state": {
+      "current": "0.9.15",
+      "pending": "0.9.16",
+      "schema": 1,
+      "activating": "",
+      "previous": "0.9.14"
+    },
+    "changed_during_install": 0,
+    "observed_drawings": 37
+  },
+  "installed_smoke": {
+    "matched_installed_files": 65,
+    "standalone_tools": 76,
+    "activity_roundtrip": true,
+    "bom_review_ledger_roundtrip": true,
+    "feedback_immutable_contract_tested_in_suite": true
+  },
+  "runtime_identity": {
+    "name": "ark",
+    "version": "0.9.16",
+    "iteration_code": "015B"
+  },
+  "feedback_audit": {
+    "performed": true,
+    "source": "existing private project ledger; read-only",
+    "raw_data_published": false,
+    "backend_fixes_claimed": false
+  },
+  "live_pilot_new_attempts": 0,
+  "limits": [
+    "Feedback scores are subjective; geometric and performance reports need separate reproduction.",
+    "UI styling and filtering do not change BOM authority or completeness rules.",
+    "Supplier authenticity, manufacturing qualification and external integration remain outside this scope."
+  ]
+}

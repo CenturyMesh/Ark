@@ -5,6 +5,7 @@
 #include "ark/tube.hpp"
 #include "ark/frame.hpp"
 #include "ark/electronics.hpp"
+#include "ark/spatial_sketch.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -13,6 +14,16 @@
 #include <string>
 
 namespace ark {
+arkjson::Value inspectNativeCollision(const Body& a,const Mat4& aWorld,const Body& b,const Mat4& bWorld,double tolerance){
+    if(tolerance!=1e-6)throw std::runtime_error("Collision uses fixed 1e-6 mm native contact tolerance");
+    arkjson::Value request=arkjson::Value::makeObj();request.set("op",arkjson::Value::makeStr("collision"));
+    auto body=[&](const Body& source,const Mat4& world,const char* brepKey,const char* transformKey){
+        const auto* encoded=source.nativeData.find("brep_base64");if(!encoded||encoded->t!=arkjson::Value::Str||encoded->str.empty())throw std::runtime_error("Collision requires exact native solid bodies");
+        request.set(brepKey,*encoded);arkjson::Value frame=arkjson::Value::makeArr();for(double value:world.m)frame.arr.push_back(arkjson::Value::makeNum(value));request.set(transformKey,frame);
+    };
+    body(a,aWorld,"a_brep","a_transform");body(b,bWorld,"b_brep","b_transform");
+    request.set("tolerance",arkjson::Value::makeNum(tolerance));return nativeModelRequest(request);
+}
 namespace {
 using V = arkjson::Value;
 
@@ -20,6 +31,12 @@ const V& required(const V& object, const char* key) {
     const V* found = object.find(key);
     if (!found) throw std::runtime_error(std::string("Missing native ") + key);
     return *found;
+}
+
+void rejectDerivedSpatialHandles(const Feature& feature){
+    const V* operation=feature.nativeSpec.find("op");if(!operation||operation->t!=V::Str||(operation->str!="surface_spline"&&operation->str!="project_surface"&&operation->str!="project"&&operation->str!="equation"&&operation->str!="helix"))return;
+    bool handles=feature.nativeSpec.find("constraints")||feature.nativeSpec.find("start_ref")||feature.nativeSpec.find("to_ref")||feature.nativeSpec.find("through_ref");if(const V* segments=feature.nativeSpec.find("segments");segments&&segments->t==V::Arr)for(const V& segment:segments->arr)handles|=segment.find("to_ref")||segment.find("through_ref");
+    if(handles)throw std::runtime_error("Spatial point constraints and datum point anchors require authored line, arc, NURBS or spline segments; derived "+operation->str+" curves do not expose those solver handles");
 }
 
 double expressionValue(const std::string& text, const ExprEnv& env) {
@@ -67,7 +84,10 @@ V profileFromSketch(Document& document, const std::string& name,const NamedSketc
             return Vec2{source.dof[static_cast<size_t>(2 * index)],
                         source.dof[static_cast<size_t>(2 * index + 1)]};
         };
-        if(source.kind==SketchEnt::Project){
+        if(source.kind==SketchEnt::Recipe){
+            if(source.recipeGeometry.t!=V::Arr)throw std::runtime_error("Entity recipe is not evaluated");
+            size_t primitive=0;for(auto item:source.recipeGeometry.arr){item.set("name",V::makeStr((source.name.empty()?"entity."+std::to_string(entityIndex):source.name)+"."+std::to_string(primitive++)));entities.arr.push_back(std::move(item));}
+        } else if(source.kind==SketchEnt::Project){
             if(source.projectionBrep.empty())throw std::runtime_error("Exact projected sketch entity is not evaluated");
             V item=V::makeObj();item.set("kind",V::makeStr("brep"));item.set("brep_base64",V::makeStr(source.projectionBrep));item.set("name",V::makeStr(source.name.empty()?"entity."+std::to_string(entityIndex):source.name));entities.arr.push_back(item);
         } else if (source.kind == SketchEnt::Line) {
@@ -99,7 +119,7 @@ V profileFromSketch(Document& document, const std::string& name,const NamedSketc
             arc.set("a1", V::makeNum(source.dof[4]));
             arc.set("name", V::makeStr(source.name.empty() ? "entity." + std::to_string(entityIndex) : source.name));
             entities.arr.push_back(std::move(arc));
-        } else if (source.kind == SketchEnt::Wire) {
+        } else if (source.kind == SketchEnt::Wire || source.kind == SketchEnt::Offset) {
             bool trimmed = false;
             for (const auto& corner : named->sk.corners)
                 if (corner.entity == source.name && !source.name.empty()) trimmed = true;
@@ -129,7 +149,11 @@ V profileFromSketch(Document& document, const std::string& name,const NamedSketc
             auto xy = [&](int index) { return Vec2{source.dof.at(static_cast<size_t>(index)), source.dof.at(static_cast<size_t>(index + 1))}; };
             for (int i = 0; i < static_cast<int>(source.segments.size()); ++i) {
                 const auto& segment = source.segments[static_cast<size_t>(i)];
-                const int payload = sketchVertexDof(source, i) + 2;
+                // Payload starts at this segment's endpoint (or first Bezier
+                // control), not two scalars after the previous endpoint: arcs
+                // also carry a radius between consecutive vertices.
+                const int payload = sketchVertexDof(source, i + 1)
+                                  - (segment.kind == SketchEnt::WireSeg::Cubic ? 4 : 0);
                 const std::string edgeName = (source.name.empty() ? "entity." + std::to_string(entityIndex) : source.name) + "." + std::to_string(i);
                 if (segment.kind == SketchEnt::WireSeg::Line) {
                     const Vec2 end = xy(payload);
@@ -188,7 +212,7 @@ V numericNative(const V& value, const ExprEnv& env, const std::string& key = {})
         return value;
     }
     if (value.t == V::Str) {
-        if (key == "kind" || key == "sketch" || key == "name" || key == "op" || key == "reference" || key == "second_reference" || key == "mode" || key == "end" || key == "edges" || key == "faces" || key == "face" || key == "plane" || key == "keep" || key == "selection" || key == "direction" || key == "axis" || key == "neutral") return value;
+        if (key == "source_vertex" || key == "source_topology" || key == "kind" || key == "join" || key == "sketch" || key == "name" || key == "op" || key == "reference" || key == "second_reference" || key == "mode" || key == "end" || key == "edges" || key == "faces" || key == "face" || key == "source_face" || key == "limit_face" || key == "plane" || key == "keep" || key == "selection" || key == "direction" || key == "axis" || key == "neutral") return value;
         return V::makeNum(expressionValue(value.str, env));
     }
     if (value.t == V::Arr) {
@@ -277,6 +301,7 @@ V profileArgument(const Feature& feature, const ExprEnv& env, Document& document
 }
 
 V spatialProjectionResult(const Feature& feature,Document& document){
+            rejectDerivedSpatialHandles(feature);
             if(const V* operation=feature.nativeSpec.find("op");operation&&operation->str=="project"){
                 const V* mode=feature.nativeSpec.find("mode");if(!mode||mode->t!=V::Str||mode->str!="3d")throw std::runtime_error("Spatial included geometry requires mode 3d");
                 if(const V* source=feature.nativeSpec.find("source_sketch")){
@@ -334,6 +359,7 @@ V surfaceRequest(const Feature& feature, const ExprEnv& env, Document& document,
             }
             request.set("guides", std::move(curves));
         }
+        if (const V* controls=feature.nativeSpec.find("controls")) request.set("controls",numericNative(*controls,env));
     } else if (feature.type == FeatureType::SurfaceFill) {
         request.set("op", V::makeStr("surface_fill"));
         if (const V* profile = feature.nativeSpec.find("profile"))
@@ -358,7 +384,10 @@ V surfaceRequest(const Feature& feature, const ExprEnv& env, Document& document,
         request.set("thickness", V::makeNum(param(feature, env, "thickness")));
     } else if (feature.type == FeatureType::Sweep) {
         request.set("op", V::makeStr("sweep"));
-        request.set("section", profileArgument(feature, env, document, preceding, "section"));
+        if(const V* sections=feature.nativeSpec.find("sections")){
+            if(feature.nativeSpec.find("section"))throw std::runtime_error("Sweep chooses either section or varying sections");if(sections->t!=V::Arr||sections->arr.size()<2||sections->arr.size()>32)throw std::runtime_error("Varying sweep needs 2..32 section stations");V resolved=V::makeArr();double previous=-1;
+            for(const V& station:sections->arr){if(station.t!=V::Obj)throw std::runtime_error("Sweep station must be an object");for(auto& field:station.obj)if(field.first!="section"&&field.first!="fraction"&&field.first!="roll"&&field.first!="x_axis")throw std::runtime_error("Unknown sweep station field: "+field.first);const V& fractionValue=required(station,"fraction");double fraction=fractionValue.t==V::Num?fractionValue.num:fractionValue.t==V::Str?expressionValue(fractionValue.str,env):-1;if(!std::isfinite(fraction)||fraction<0||fraction>1||fraction<=previous)throw std::runtime_error("Sweep fractions must increase in 0..1");previous=fraction;V item=V::makeObj();const V& section=required(station,"section");item.set("section",section.t==V::Str?resolveProfileName(document,preceding,section.str,"section"):numericNative(section,env));item.set("fraction",V::makeNum(fraction));if(const V* roll=station.find("roll"))item.set("roll",numericNative(*roll,env));if(const V* axis=station.find("x_axis"))item.set("x_axis",numericNative(*axis,env));resolved.arr.push_back(item);}if(resolved.arr.front().find("fraction")->num!=0||resolved.arr.back().find("fraction")->num!=1)throw std::runtime_error("Varying sweep sections must explicitly include fractions 0 and 1");request.set("sections",resolved);
+        }else request.set("section", profileArgument(feature, env, document, preceding, "section"));
         request.set("path", profileArgument(feature, env, document, preceding, "path"));
         request.set("solid", V::makeBool(bitParam(feature, env, "solid", 0)));
         request.set("correction", V::makeBool(bitParam(feature, env, "correction", 1)));
@@ -386,7 +415,8 @@ V surfaceRequest(const Feature& feature, const ExprEnv& env, Document& document,
             request.set("distance", V::makeNum(distance));
         }
     } else if (feature.type == FeatureType::SurfaceEdit) {
-        if(feature.inputs.size()!=1)throw std::runtime_error("surface_edit requires one exact native input");
+        const bool trimWire=feature.nativeSpec.find("op")&&feature.nativeSpec.find("op")->asStr()=="trim_wire";
+        if(feature.inputs.size()!=(trimWire?2u:1u))throw std::runtime_error("surface_edit requires a surface and, for trim_wire, one closed curve input");
         const Body* source=precedingBody(preceding,feature.inputs.front());
         if(!source)throw std::runtime_error("surface_edit input missing");
         request.set("input_brep",brepOf(*source,"surface_edit input"));
@@ -409,7 +439,9 @@ V surfaceRequest(const Feature& feature, const ExprEnv& env, Document& document,
                 const auto spec=numericNative(feature.nativeSpec,env);
                 request.set("origin",required(spec,"origin"));request.set("normal",required(spec,"normal"));
             }
-        }else throw std::runtime_error("surface_edit op must be extract_face or trim_plane");
+        }else if(operation.str=="trim_wire"){
+            const Body* curve=precedingBody(preceding,feature.inputs[1]);if(!curve)throw std::runtime_error("Surface trim curve input missing");request.set("op",V::makeStr("surface_trim_wire"));request.set("wire_brep",brepOf(*curve,"trim curve"));request.set("keep_point",numericNative(required(feature.nativeSpec,"keep_point"),env));
+        }else throw std::runtime_error("surface_edit op must be extract_face, trim_plane or trim_wire");
     } else if (feature.type == FeatureType::OffsetSurface) {
         request.set("op", V::makeStr("offset_surface"));
         if (feature.inputs.size() != 1) throw std::runtime_error("offset_surface requires one native surface input");
@@ -431,10 +463,28 @@ V surfaceRequest(const Feature& feature, const ExprEnv& env, Document& document,
         }
         request.set("inputs", std::move(inputs));
         request.set("solid", V::makeBool(bitParam(feature, env, "solid", 0)));
+        for(const auto& field:feature.nativeSpec.obj)if(field.first!="require_connected")throw std::runtime_error("Unknown sew field: "+field.first);
+        if(const V* connected=feature.nativeSpec.find("require_connected")){if(connected->t!=V::Bool)throw std::runtime_error("Sew require_connected must be boolean");request.set("require_connected",*connected);}
     } else if (isCurveFeature(feature.type)) {
         if (feature.type == FeatureType::Curve) {
+            rejectDerivedSpatialHandles(feature);
+            if(const auto* op=feature.nativeSpec.find("op");op&&op->asStr()=="helix"){
+                if(!feature.inputs.empty())throw std::runtime_error("Helix is an authored source and takes no feature inputs");
+                request=numericNative(feature.nativeSpec,env);
+                // axis is numeric XYZ here, never a symbolic solid-axis selector.
+                if(const V* axis=feature.nativeSpec.find("axis"))request.set("axis",numericNative(*axis,env,"vector"));
+                return request;
+            }
+            if(const auto* op=feature.nativeSpec.find("op");op&&op->asStr()=="equation")return sampleEquationCurve(feature.nativeSpec,env);
+            if(const auto* op=feature.nativeSpec.find("op");op&&op->asStr()=="project_surface"){
+                if(feature.inputs.size()!=2)throw std::runtime_error("Surface projection requires source curve and target surface inputs");const Body* source=precedingBody(preceding,feature.inputs[0]);const Body* target=precedingBody(preceding,feature.inputs[1]);if(!source||!target)throw std::runtime_error("Surface projection inputs missing");request.set("op",V::makeStr("curve_project_surface"));request.set("input_brep",brepOf(*source,"projection curve"));request.set("target_brep",brepOf(*target,"projection surface"));request.set("direction",numericNative(required(feature.nativeSpec,"direction"),env,"vector"));return request;
+            }
+            if(const auto* op=feature.nativeSpec.find("op");op&&op->asStr()=="surface_spline"){
+                if(feature.inputs.size()!=1)throw std::runtime_error("Surface spline requires one exact surface input");const Body* source=precedingBody(preceding,feature.inputs[0]);if(!source)throw std::runtime_error("Surface spline input missing");request.set("op",V::makeStr("surface_spline"));request.set("input_brep",brepOf(*source,"surface spline"));request.set("controls",numericNative(required(feature.nativeSpec,"controls"),env));if(const V* weights=feature.nativeSpec.find("weights"))request.set("weights",numericNative(*weights,env));if(const V* face=feature.nativeSpec.find("face")){request.set("reference",*face);request.set("topology",required(source->nativeData,"topology"));}return request;
+            }
             request.set("op", V::makeStr("curve"));
-            const V spec = numericNative(feature.nativeSpec, env);
+            V authored=feature.nativeSpec;if(authored.find("constraints")||authored.find("start_ref")||authored.find("segments")&&std::any_of(authored.find("segments")->arr.begin(),authored.find("segments")->arr.end(),[](const V& segment){return segment.find("to_ref")||segment.find("through_ref");})){auto solution=solveSpatialCurve(authored,document);authored=std::move(solution.native);request.set("spatial_constraint_diagnostics",solution.diagnostics);}
+            const V spec = numericNative(authored, env);
             if (const V* start = spec.find("start")) request.set("start", *start);
             request.set("segments", required(spec, "segments"));
         } else if (feature.type == FeatureType::IntersectionCurve) {
@@ -691,6 +741,12 @@ V solidFeatureRequest(const Feature& feature, const ExprEnv& env,
     if (op == "pocket" || op == "slot") op = "hole";
     if (op == "rigid_transform") op = "transform";
     model.set("op", V::makeStr(op));
+    if(op=="vertex_pull"){
+        for(const auto& item:feature.nativeSpec.obj)if(item.first!="op"&&item.first!="source_vertex"&&item.first!="source_topology")throw std::runtime_error("Unknown native vertex-pull field: "+item.first);
+        for(const auto& item:feature.p)if(item.first!="dx"&&item.first!="dy"&&item.first!="dz"&&item.first!="density"&&item.first!="op")throw std::runtime_error("Unknown native vertex-pull parameter: "+item.first);
+        for(const char* key:{"dx","dy","dz"})if(!feature.p.count(key))throw std::runtime_error(std::string("Vertex pull requires explicit ")+key);
+        for(const char* key:{"source_vertex","source_topology"}){const auto& value=required(feature.nativeSpec,key);if(value.t!=V::Str||value.str.empty())throw std::runtime_error(std::string("Vertex pull requires typed ")+key);}
+    }
     if(op=="tube_end_fit"){
         if(feature.inputs.size()!=2||feature.inputs[0]==feature.inputs[1])throw std::runtime_error("Tube end fit needs distinct source and host inputs");
         const std::set<std::string> allowed{"op","end","mode","reference"};for(const auto& item:feature.nativeSpec.obj)if(!allowed.count(item.first))throw std::runtime_error("Unsupported tube end fit field: "+item.first);
@@ -702,6 +758,8 @@ V solidFeatureRequest(const Feature& feature, const ExprEnv& env,
     }
     if ((op == "curve_pattern" || op == "hole_pattern") && feature.inputs.size() != 2)
         throw std::runtime_error("Curve pattern needs target and path feature inputs");
+    if (op == "vertex_pull" && feature.inputs.size() != 1)
+        throw std::runtime_error("Vertex pull requires one exact polyhedral solid input");
     if (op == "shell" && feature.inputs.size() != 1)
         throw std::runtime_error("Shell needs one solid input");
     if (op == "split_plane" && feature.inputs.size() != 1)
@@ -731,8 +789,16 @@ V solidFeatureRequest(const Feature& feature, const ExprEnv& env,
                     * Mat4::rotX(deg2rad(feature.num(env,"rx")));
         model.set("frame", frameValue(matrix));
     }
-    if (op == "extrude" && !model.find("profile"))
-        model.set("profile", profileFromSketch(document, feature.get("sketch")));
+    if (op == "extrude") {
+        const bool sourceFace = model.find("source_face") != nullptr;
+        const std::string mode = model.find("mode") ? required(model,"mode").asStr() : "distance";
+        if (mode != "distance" && mode != "up_to_face") throw std::runtime_error("Extrusion mode must be distance or up_to_face");
+        const size_t expectedInputs = (sourceFace ? 1u : 0u) + (mode == "up_to_face" ? 1u : 0u);
+        if (feature.inputs.size() != expectedInputs) throw std::runtime_error("Extrusion requires its exact source face and/or limit face inputs only");
+        if (sourceFace && (model.find("profile") || !feature.get("sketch").empty())) throw std::runtime_error("Extrusion needs one saved sketch or one exact source face");
+        if (!sourceFace && !model.find("profile")) model.set("profile", profileFromSketch(document, feature.get("sketch")));
+        if (mode == "distance" && model.find("limit_face")) throw std::runtime_error("Distance extrusion cannot retain an inactive limit face");
+    }
     if (op == "hole") {
         if (const V* source = model.find("cutter")) {
             V cutter = *source;
@@ -1095,6 +1161,24 @@ void ensureNativeBody(Document& document, u64 featureId, std::vector<Body>& bodi
 
 Body evaluateExactLegacyOperation(const Feature& feature, const ExprEnv& env,
                                   Document& document, std::vector<Body>& preceding) {
+    if(feature.type==FeatureType::LinearPattern){
+        if(feature.inputs.size()!=1)throw std::runtime_error("Exact linear pattern requires one native input");
+        const double count=expressionValue(feature.get("count","3"),env);
+        if(count<1||count>64||count!=std::floor(count))
+            throw std::runtime_error("Exact linear pattern count must be an integer in 1..64");
+        // Keep the authored legacy feature and its expression sources intact.
+        // Only this evaluation request uses the native solid operation; a
+        // rejected exact pattern cannot fall back to its display triangles.
+        Feature native=feature;native.type=FeatureType::NativeSolid;
+        native.nativeSpec=V::makeObj();native.p.clear();
+        native.nativeSpec.set("op",V::makeStr(count==1?"transform":"linear_pattern"));
+        if(count==1)native.nativeSpec.set("frame",frameValue(Mat4::identity()));
+        else{
+            native.p={{"count",feature.get("count","3")},{"dx",feature.get("dx","20")},
+                      {"dy",feature.get("dy","0")},{"dz",feature.get("dz","0")}};
+        }
+        return evaluateNativeFeature(native,env,document,preceding);
+    }
     Body result;
     result.nativeData = legacyOperationResult(feature, env, document, preceding);
     appendTubeEndFitOptions(result.nativeData,document,feature.id,env);

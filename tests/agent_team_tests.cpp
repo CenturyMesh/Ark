@@ -2,6 +2,7 @@
 #include "ark/agent.hpp"
 #include "ark/onboarding.hpp"
 #include "ark/chatgpt_auth.hpp"
+#include "ark/io.hpp"
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -22,6 +23,7 @@ static V done(const std::string& text="Done",bool usage=true){V response=json(R"
 static V call(const std::string& id,const std::string& name,const std::string& args){V response=json(R"({"status":"completed","output":[]})"),item=V::makeObj();item.set("type",V::makeStr("function_call"));item.set("call_id",V::makeStr(id));item.set("name",V::makeStr(name));item.set("arguments",V::makeStr(args));auto output=*response.find("output");output.arr.push_back(item);response.set("output",output);return usageResponse(response);}
 static ark::AgentTeamRole role(const std::string& id,bool writable=false){ark::AgentTeamRole role;role.id=id;role.label=id;role.instructions="Review measured design evidence.";role.assistant.model="offline-"+id;role.assistant.reasoningEffort="low";role.canWrite=writable;return role;}
 static void complete(ark::AgentTeam& team){check(team.waitIdleFor(5s),"bounded team completion");}
+#include "agent_team_image_tests.inl"
 struct Gate {
     std::mutex mutex;std::condition_variable condition;int arrivals=0;bool release=false;
     void enter(){std::unique_lock lock(mutex);++arrivals;condition.notify_all();if(!condition.wait_for(lock,3s,[&]{return release;}))throw std::runtime_error("test gate timeout");}
@@ -113,6 +115,23 @@ static void sharedAuthoringSchemas(){
         return done("Schema contract inspected; no authoring claimed.");
     };
     team.start(config,"Inspect advertised authoring contracts",ark::AgentSession::tools(),{});complete(team);check(owners==3&&team.snapshot().roles[0].state==ark::AgentTeamState::Idle,"all three team write contracts inspected without provider failure");
+}
+static void drawingTeamScope(){
+    ark::AgentTeam team;ark::AgentTeamConfig config;config.roles={role("designer",true),role("reviewer")};
+    config.roles[0].discipline=ark::AgentTeamDiscipline::PartDesigner;config.roles[1].discipline=ark::AgentTeamDiscipline::PhysicsReviewer;
+    bool designerWrites=false,reviewerRead=false,reviewerNoWrite=false;
+    config.roles[0].transport=[&](const auto&,const V& request,const auto*){
+        for(const auto& tool:request.find("tools")->arr)if(tool.find("name")->str=="team_apply_step"){
+            const auto* choices=tool.find("parameters")->find("properties")->find("commands")->find("items")->find("properties")->find("op")->find("enum");
+            bool set=false,refresh=false,remove=false;for(const auto& operation:choices->arr){set|=operation.str=="drawing.set";refresh|=operation.str=="drawing.refresh";remove|=operation.str=="drawing.remove";}designerWrites=set&&refresh&&remove;
+        }return done("Drawing authoring scope inspected.");
+    };
+    config.roles[1].transport=[&](const auto&,const V& request,const auto*){
+        reviewerNoWrite=true;for(const auto& tool:request.find("tools")->arr){const auto& name=tool.find("name")->str;reviewerRead|=name=="drawing_inspect";if(name=="team_apply_step"||name=="doc_apply")reviewerNoWrite=false;}
+        return done("Read-only drawing inspection scope inspected.");
+    };
+    team.start(config,"Inspect drawing authoring and review scopes",ark::AgentSession::tools(),{});complete(team);
+    check(designerWrites&&reviewerRead&&reviewerNoWrite,"designer can author revision-bound drawings; physics reviewer can inspect but cannot write");
 }
 static void conversationMemoryBound(){
     ark::AgentTeam team;ark::AgentTeamConfig config;config.roles={role("reviewer")};int rounds=0;bool compactReceipt=false;V tools=json(R"([{"name":"doc_info","inputSchema":{"type":"object"},"annotations":{"readOnlyHint":true}}])");
@@ -372,4 +391,5 @@ static void explicitGoalCompletion(){
     team.cancel();complete(team);check(team.snapshot().goalState==ark::AgentGoalState::Interrupted&&!team.snapshot().goalDeclared,"cancellation is interruption even after a prior goal report");
 }
 #include "agent_team_context_tests.inl"
-int main(){try{oversizedHistoryResume();sharedAuthoringSchemas();explicitGoalCompletion();ownedPreparedCandidates();restoredDocumentAndCanvasTools();coherentBatchBenchmark();focusedSequentialAssignments();leadEngineerAuthorsPartsAndAssembly();parallelProgressStillReportsCompletion();sharedFailureEvidence();unlimitedEightRoleAssignments();configChecks();concurrencyAndRevision();steeringAndPause();collaboration();cancellationAndFailures();interruptedBatchHistory();limitsAndMutationSchemas();conversationMemoryBound();incrementalStepsAndScopes();frameDisciplineScope();proposalsAndPhysicsRole();concurrentQueuedDrafts();yieldedAndInterruptedContinuation();std::cout<<"Agent team checks passed: "<<checks<<"\n";return 0;}catch(const std::exception& error){std::cerr<<"Agent team checks failed: "<<error.what()<<"\n";return 1;}}
+#include "agent_team_write_window_tests.inl"
+int main(){try{userImageTeamChecks();cooperativeWriteWindows();cooperativeWriteWindowLifecycle();cooperativeWriteWindowPermissionsAndAudit();oversizedHistoryResume();sharedAuthoringSchemas();drawingTeamScope();explicitGoalCompletion();ownedPreparedCandidates();restoredDocumentAndCanvasTools();coherentBatchBenchmark();focusedSequentialAssignments();leadEngineerAuthorsPartsAndAssembly();parallelProgressStillReportsCompletion();sharedFailureEvidence();unlimitedEightRoleAssignments();configChecks();concurrencyAndRevision();steeringAndPause();collaboration();cancellationAndFailures();interruptedBatchHistory();limitsAndMutationSchemas();conversationMemoryBound();incrementalStepsAndScopes();frameDisciplineScope();proposalsAndPhysicsRole();concurrentQueuedDrafts();yieldedAndInterruptedContinuation();std::cout<<"Agent team checks passed: "<<checks<<"\n";return 0;}catch(const std::exception& error){std::cerr<<"Agent team checks failed: "<<error.what()<<"\n";return 1;}}

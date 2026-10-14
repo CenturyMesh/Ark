@@ -19,6 +19,7 @@ struct AgentTeamConfig {
     unsigned maxWorkers=8, maxTurnsPerRole=0; // Zero means no turn budget.
     bool orchestratedStart=false; // Specialists await explicit assignments.
     bool focusedWorkflow=false; // One conversation at a time; the lead starts and delegates specific tasks.
+    std::function<arkjson::Value()> completionCheck; // Required host BOM review before lead completion.
     std::size_t maxEvents=2048, maxMailboxBytes=64*1024;
     std::size_t maxEventTextBytes=4096, maxEventBytes=1024*1024;
     unsigned maxCommandsPerStep=8,maxFeaturesPerStep=8,maxPlacementsPerStep=8,maxProposals=64;
@@ -85,6 +86,9 @@ using AgentTeamEvents=std::function<void(const AgentTeamEvent&)>;
 // executor are serialized; the host still marshals them to its owning UI thread.
 // All document mutations require the MODEL'S expected_revision, checked by that
 // executor; no automatic rebasing/retry. Missing readOnlyHint is treated as write.
+// Optional team_reserve_write/team_release_write protect this team's read-to-
+// commit gap with an owned expiring lease; they never replace expected_revision
+// or clear failures. External/manual writers are outside this cooperative scope.
 // Steering invalidates writes from an already in-flight response until the next
 // provider request consumes it. Already executing geometry is not interrupted.
 // Observer callbacks may run concurrently, outside locks; exceptions are ignored.
@@ -98,11 +102,15 @@ public:
     void start(const AgentTeamConfig& config,const std::string& prompt,
         const arkjson::Value& mcpTools,const AssistantTool& executor,
         const AgentTeamEvents& observer={});
+    void start(const AgentTeamConfig& config,const arkjson::Value& userMessage,
+        const arkjson::Value& mcpTools,const AssistantTool& executor,
+        const AgentTeamEvents& observer={});
     // Empty target selects the lead in focused mode, broadcasts in parallel
     // mode. "all" explicitly broadcasts. Messages reach active roles before their next
     // provider request and schedule a new turn for idle roles. False means no
     // eligible recipient, cancellation, or a configured message/turn limit.
     bool steer(const std::string& text,const std::string& targetId={});
+    bool steer(const arkjson::Value& userMessage,const std::string& targetId={});
     bool send(const std::string& fromId,const std::string& toId,const std::string& text);
     // Resumes yielded/interrupted roles with retained receipts, never replays
     // old mutations. A successful current doc_info is required before writing.

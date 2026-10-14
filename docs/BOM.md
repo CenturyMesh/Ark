@@ -1,5 +1,17 @@
 # Persistent part metadata and BOM — 011E
 
+In 015B, the BOM workspace adds a dark layout, search, All/Needs review/Buy/Make
+filters, status badges and selected-part details. Sort or filter before editing:
+selection remains bound to the original definition ID. Locate part returns to
+the model; Copy link copies an existing source URL without fetching it.
+
+In 014D, **Manage → BOM** and **Inspect → BOM** expose the table, metadata and
+sourcing editors, missing fields and local JSON export. `bom_review` adds a
+revision-bound completion check after reading all BOM item pages. Detailed
+scope rejects unresolved metadata; concept scope requires explicit pending
+notes and a fastening review. The host labels incomplete concept completion.
+See [014D](iterations/014D.md) for enforcement boundaries and evidence.
+
 The `.ark` SQLite container retains part metadata, material assignments and
 assembly occurrences. The BOM is derived from those definitions at the current
 revision, so quantities are not a second independently editable list. JSON is
@@ -48,7 +60,7 @@ Metadata-only changes preserve native geometry and are part of undo/redo.
 `unresolved`, `candidate` or `selected`; selection requires a source URL and an
 explicit manufacturer/supplier reference. These are caller declarations, not
 proof of stock, supplier identity, standards compliance or a purchasing order.
-Internal part numbers are not manufacturer references or MeshWorks reservations.
+Internal part numbers are distinct from manufacturer references and external allocations.
 
 New BOM identity/metadata requires document version **32**. Documents without
 that data keep their applicable earlier version. Older readers reject v32
@@ -117,7 +129,7 @@ atomically, inspect native validity and reuse the final definition through
 assembly placements. A detailed design still needs interface, clearance and
 fastening review; an open concept may explicitly retain those gaps.
 
-## Export and MeshWorks boundary
+## Export and external integration boundary
 
 `bom_export {"expected_revision":N,"path":".../bom-rN.json"}` writes a new
 local snapshot and reports its SHA-256. Identity must be initialized. Drafts may
@@ -127,7 +139,7 @@ The export contains private design metadata and is never uploaded implicitly.
 The complete-export JSON Schema is [ark-bom-v1.schema.json](schemas/ark-bom-v1.schema.json).
 The Windows package also carries this contract and guide in `assets/contracts`.
 
-The MeshWorks adapter remains unimplemented (`meshworks_adapter` says so).
+The export reports no implemented external adapter.
 Organization authorization, remote identity mapping, incremental import,
 idempotency and preservation of release/procurement work require a separate
 integration contract and end-to-end tests. This local foundation addresses

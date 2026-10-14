@@ -14,5 +14,8 @@ constexpr size_t kMeshModelMaxTriangles = 4096;
 
 Mesh meshFromPayload(const arkjson::Value& mesh);
 arkjson::Value meshToPayload(const Mesh& mesh);
+// Guards indexed selections against upstream topology changes, while allowing
+// the same connectivity to follow dimensional/coordinate changes.
+std::string meshTopologyFingerprint(const Mesh& mesh);
 
 } // namespace ark

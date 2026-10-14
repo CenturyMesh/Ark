@@ -144,7 +144,7 @@ V inspectPhysics(AgentSession& session,const V& args){
         std::vector<AssemblyPlacement> placements;std::string error;if(!resolveAssembly(doc,placements,error))throw std::runtime_error(error);
         for(const auto& placement:placements)if(placement.visible){try{Part p=get(placement.feature);p.node=placement.node;p.copy=placement.copy;p.name=placement.name;p.center=placement.world.transformPoint(p.center);p.inertia=rotate(p.inertia,placement.world);parts.push_back(p);}catch(const std::exception& e){missing.arr.push_back(V::makeStr(placement.name+": "+e.what()));}}
     }else{
-        std::set<u64> consumed;for(const auto& f:doc.features)for(u64 id:f.inputs)consumed.insert(id);
+        std::set<u64> consumed;for(const auto& f:doc.features)if(featureConsumesInputBodies(f))for(u64 id:f.inputs)consumed.insert(id);
         for(const auto& f:doc.features)if(!f.suppressed&&!consumed.count(f.id)){try{parts.push_back(get(f.id));}catch(const std::exception& e){missing.arr.push_back(V::makeStr(e.what()));}}
     }
     result.set("revision",V::makeNum((double)session.revision));result.set("gravity_vector_m_s2",json(gravity));result.set("gravity_m_s2",V::makeNum(gravity.len()));result.set("reference_point_mm",json(reference));result.set("mass_checked",V::makeBool(missing.arr.empty()&&!parts.empty()));result.set("missing",missing);

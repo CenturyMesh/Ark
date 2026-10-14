@@ -17,6 +17,7 @@ std::string featureOperation(const Feature& feature){
     if(operation=="pocket"||operation=="slot")return "hole";
     return operation;
 }
+bool featureConsumesInputBodies(const Feature& feature){return feature.type!=FeatureType::NativeSolid||featureOperation(feature)!="extrude";}
 
 ManufacturingLineage featureManufacturingLineage(const Document& document,const Feature& feature){
     const Feature* current=&feature;
@@ -128,6 +129,11 @@ struct ExprParser {
         std::string id=s.substr(i,j-i);
         i=j;
         ws();
+        if(eat('[')){
+            const f64 index=expr();if(!eat(']')||index<0||index>255||index!=std::floor(index)){ok=false;return 0;}
+            if(!eat('.')){ok=false;return 0;}ws();if(i>=s.size()||(s[i]!='x'&&s[i]!='y'&&s[i]!='z')){ok=false;return 0;}
+            id+="_"+std::to_string((int)index)+"_"+s[i++];ws();
+        }
         if(i<s.size() && s[i]=='('){
             ++i;
             std::vector<f64> args{expr()};
@@ -220,6 +226,7 @@ const char* featureTypeName(FeatureType t){
         case FeatureType::MeshDecimate: return "mesh_decimate";
         case FeatureType::MeshOffset: return "mesh_offset";
         case FeatureType::MeshFill: return "mesh_fill";
+        case FeatureType::MeshEdit: return "mesh_edit";
         case FeatureType::Curve: return "curve";
         case FeatureType::IntersectionCurve: return "intersection_curve";
         case FeatureType::Bridge: return "bridge";
@@ -240,7 +247,7 @@ bool isNativeSurfaceFeature(FeatureType t){
 }
 bool isMeshModelFeature(FeatureType t){
     return t==FeatureType::MeshBody || t==FeatureType::MeshWeld || t==FeatureType::MeshSmooth ||
-           t==FeatureType::MeshDecimate || t==FeatureType::MeshOffset || t==FeatureType::MeshFill;
+           t==FeatureType::MeshDecimate || t==FeatureType::MeshOffset || t==FeatureType::MeshFill || t==FeatureType::MeshEdit;
 }
 bool featureTypeFromName(const std::string& s, FeatureType& out){
     if(s=="box") out=FeatureType::Box;
@@ -279,6 +286,7 @@ bool featureTypeFromName(const std::string& s, FeatureType& out){
     else if(s=="mesh_decimate") out=FeatureType::MeshDecimate;
     else if(s=="mesh_offset") out=FeatureType::MeshOffset;
     else if(s=="mesh_fill") out=FeatureType::MeshFill;
+    else if(s=="mesh_edit") out=FeatureType::MeshEdit;
     else if(s=="curve") out=FeatureType::Curve;
     else if(s=="intersection_curve") out=FeatureType::IntersectionCurve;
     else if(s=="bridge") out=FeatureType::Bridge;
@@ -464,7 +472,8 @@ Appearance resolvedAppearance(const Document& document,const Feature& feature){
 
 Document Document::authoringCopy() const {
     Document out;out.params=params;out.parameterError=parameterError;out.sketches=sketches;out.planes=planes;out.canvases=canvases;
-    out.features=features;out.materials=materials;out.usage=usage;out.agentActivity=agentActivity;out.bomDocumentId=bomDocumentId;out.iterationHistory=iterationHistory;
+    out.features=features;out.materials=materials;out.usage=usage;out.agentActivity=agentActivity;out.bomDocumentId=bomDocumentId;out.iterationHistory=iterationHistory;out.skeleton=skeleton;
+    out.drawings=drawings;
     out.assembly=assembly;out.mates=mates;out.nextMateId_=nextMateId_;out.nextAssemblyId_=nextAssemblyId_;out.nextFeatureId_=nextFeatureId_;out.tessOpt=tessOpt;
     return out;
 }

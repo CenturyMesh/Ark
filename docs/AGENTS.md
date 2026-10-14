@@ -1,5 +1,109 @@
 # ARK agent protocol
 
+022B retains **86 standalone tools** and expands their existing authoring
+contracts. [Component patterns](SPECIALIZED_PATTERNS_022B.md) add linked
+pattern/sketch/curve/chain sources with stable copy slots and expression-driven
+recomputation. [Advanced sheet operations](ADVANCED_SHEETMETAL_022B.md) add
+bounded exact miter/straight-contour/corner/notch/tab and bend-table geometry.
+New source recipes require document **37**; the release identity alone does not
+change a document's format. Keep B.01/B.02/B.04/B.05 and C.01 **Parcial** outside
+their measured local scope.
+
+Agents create, edit, refresh or export 2D technical/manufacturing drawings
+**only when the user explicitly requests that drawing work**. Design completion,
+BOM review, DFM and an available template do not authorize drawing writes.
+Read-only discovery remains available, and human Studio controls remain manual.
+For requested drawing work, call `drawing_inspect{}` first and read `sources[]`.
+Each supported part, group/root assembly or occurrence/copy source exposes an
+editable `suggested_drawing`; unsupported sources name the reason. Review that
+recipe, then `drawing.set` through revision-checked `doc_apply`, inspect the
+current result, explicitly `drawing.refresh` after source changes and
+`drawing_export` only at the current revision. Read [the drawing contract](DRAWINGS.md).
+Source identities, frames and exact curves remain the geometric authority;
+SVG is a presentation export. Tolerances require explicit caller input.
+
+Load `agent_onboard{topic:"assembly"|"automation"|"sheet"|"drawings"}` for the
+corresponding 022B contract. Human Studio controls use the same editable recipes.
+Start open design requests with a coherent editable concept; load specialized
+catalog, DFM or process workflows when required by the user's actual task.
+Honor explicit processes/materials from the start. Focused remains the default
+and Parallel an option, without default turn/token budgets.
+
+For an exact CAD vertex pull, first read `native_inspect{id}.topology.vertices`
+and retain its real `vertex.N` name and `source_topology` B-rep digest. Use
+`native_solid` with `inputs:[source]`,
+`native:{op:"vertex_pull",source_vertex,source_topology}` and source-local
+expression displacement `p:{dx,dy,dz}`. The supported domain is a closed
+planar-triangle/convex-quad polyhedron; affected nonplanar quads are explicitly
+faceted. Curved, holed, complex, stale, intersecting or degenerate cases reject.
+Display mesh indices and image pixels cannot identify these exact vertices.
+
+021B discovers **86 standalone tools**. [Direct extrusion](VIEWPORT_DIMENSIONS.md)
+retains exact source/limit bodies, [associative drawings](DRAWINGS.md) bind to a
+source B-rep and revision, and [DFM proposals](DFM_PROPOSALS.md) remain
+revision-bound until explicit acceptance. The [snapshot camera](SNAPSHOT_CAMERA.md)
+uses Z-up presets or an explicit caller direction/up pair. Read the scoped
+contracts before writing; none of these tools alone qualifies manufacture.
+
+B.05 has a partial associative technical drawing scope: exact orthographic HLR
+and isometric views, plane-section contours/hatches, circular centerlines,
+projected extents and semantic dimensions bound to the observed part or
+explicit assembly occurrence set. Call `agent_onboard{topic:"drawings"}` and read
+[the drawing contract](DRAWINGS.md). `drawing.set`/`refresh`/`remove` require
+current `expected_revision` in `doc_apply`; stale drawings cannot export.
+JSON retains exact derived curves and SVG is a presentation preview. This does
+not qualify manufacture or complete B.05.
+
+020B adds source-owned solid dimensions and exact sketch extrusion by viewport
+drag. Read [the authoring contract](VIEWPORT_DIMENSIONS.md): double-click edits
+the authored expression, and agents use `doc_apply` at an observed
+`expected_revision` to add or alter driving dimensions. The DFM v1 rule report
+is available through `manufacturing_inspect` for explicitly declared process
+reviews; see [DFM rule scope](DFM.md). These checks do not qualify production.
+
+Actionable DFM candidates use `manufacturing_propose` with an observed revision,
+current rule ID/version and explicit bounded editable commands. Review exact
+before/after evidence and unresolved checks with the user; the retained candidate
+requires `accept_dfm:true` for atomic `doc_apply` or same-role `team_apply_step`.
+See [DFM proposal contract](DFM_PROPOSALS.md). A passing screen does not imply
+functional design acceptance or manufacturing qualification.
+
+019B discovers **83 standalone tools**, including `skeleton_inspect`,
+`skeleton_compile` and `collision_inspect`. Source edits and indexed mesh edits
+require the current `expected_revision`. Inspect the [019B source and feedback
+contracts](#019b-source-and-feedback-contracts) and [manual controls](AUTHORING_019B_TESTING.md).
+Image references retain actual pixels, their intent and optional rough dimensions;
+the agent must keep reconstruction assumptions distinct from measured geometry.
+
+018B added editable viewport sketches, typed sketch entities, associative datums,
+spatial equality constraints and varying-section sweeps. See [018B scope](iterations/018B.md),
+[manual controls](AUTHORING_018B_TESTING.md), [spatial constraints](SPATIAL_SKETCH_CONSTRAINTS.md)
+and [source contracts](SKETCH_ENTITY_AUTHORING.md). Its standalone discovery listed 80 tools.
+In-app teams can use [short write reservations](AGENT_WRITE_WINDOWS.md) after reading
+the current revision; reads remain available and stale writes still reject.
+Inspect world datum axes before placement/revolve. Web candidates require a real
+product-page review; unrelated results and empty pages reject explicitly.
+
+
+017B added continuous sketches, equation curves, surface projection/trim and BOM
+part batch export. Its discovery listed 80 standalone tools. Read
+[017B scope](iterations/017B.md) and [manual controls](AUTHORING_017B_TESTING.md).
+Use `library_source_search{source:"web",query}` then `library_source_page{url}`
+for actual purchased-component evidence; persist real URLs/references in part
+metadata. `reference_navigate` discovers adjacent exact faces/edges;
+`selection_set` applies live Studio selection at the observed revision.
+`bom_export_parts` atomically publishes counted definitions with hashes.
+
+
+014D adds `bom_review` (76 standalone tools). Before Studio design completion,
+inspect every `bom_inspect` item page at one current revision and submit
+`bom_review{expected_revision,scope,fastening_review,pending_notes?}`.
+Every counted physical definition needs an internal part number and description.
+Detailed scope rejects unresolved metadata. Concept scope must disclose pending
+fields and is labelled as such by the host. Do not downgrade a user-requested
+detailed deliverable or invent sourcing: report needs_input instead.
+Review becomes stale after edits. Open **Manage → BOM** for the table/editor.
+
 012D adds `activity_info` and `tool_feedback` (75 standalone tools). Agent
 actions return measured activity IDs; submit utility/difficulty self-ratings
 and action descriptions before completion, including failed attempts. Record
@@ -13,9 +117,9 @@ phase A–G, for example **001A**. The letter is the roadmap phase, **not the mo
 the counter does not reset when a phase changes. `release.json` is authoritative.
 Keep the numeric runtime version for Windows/OTA and expose `iteration_code`
 alongside it in agent-facing metadata. Identify affected milestone IDs and record
-actual acceptance evidence before claiming them delivered. Roadmap proposals and
-the [commercial strategy](COMMERCIAL_STRATEGY.md) do not authorize a license change
-or publication of the private source repository.
+actual acceptance evidence before claiming them delivered. Roadmap proposals
+do not authorize license changes. Apache-2.0 was explicitly adopted on 2026-10-12;
+see [LICENSE](../LICENSE).
 
 The reusable component library adds nine `library_*` tools, bringing discovery
 to 66 document/library/history tools; `object_context` and the three local failure
@@ -67,6 +171,11 @@ injection molding, FDM additive manufacturing and machining, separating
 caller-declared process settings from exact geometry evidence and unresolved
 checks. These process settings use document version 23. Production qualification
 is never inferred from a role's completion or a filled checklist.
+
+C.03 adds the versioned [DFM contract](DFM.md) to each component's `dfm` report:
+laser/bend/FDM/CNC/weld screens retain exact producer evidence, caller capabilities
+and explicit assumptions. Read every rule status and typed recommendation;
+`compatible` is a bounded screen, and production qualification remains false.
 
 Mechanical motion uses persistent chain, gear, shaft, rack/pinion and harmonic
 cam coupling mates plus read-only `assembly_motion`. Call
@@ -185,7 +294,7 @@ Use `created_ids` returned by a batch as inputs to later features. IDs are monot
 | `mesh_get` | Positions and triangle indices, explicitly requested |
 | `doc_save`, `doc_load` | Native document persistence |
 | `export_mesh` | STL/OBJ of terminal outputs, a selected feature ID, or a unique instance name plus `copy` |
-| `snapshot` | Software-rendered PNG of terminal outputs, a selected ID, or a unique instance name plus `copy`. `view` is `iso`, `front`, `right` or `top`. The image is a display mesh, not STEP authority |
+| `snapshot` | Software-rendered PNG of terminal outputs, a selected ID, or a unique instance name plus `copy`. Z-up `iso`, `front` (-Y), `right` (+X), `top` (+Z), or an explicit [custom camera](SNAPSHOT_CAMERA.md). The image is a display mesh, not STEP authority |
 
 `doc_info` filters `ids` and `sections` require `detail:"design"` or omitted
 `detail` (which infers design). Explicit `detail:"summary"` accepts neither
@@ -382,3 +491,26 @@ Every mesh report sets `mesh_authoritative` true, `exact_geometry` false, and
 explicit `p.sample` of 1. Legacy analytic bodies have no B-rep and can enter a
 mesh operation without that flag. Call `agent_onboard{topic:"mesh"}` for the
 current example.
+
+## 019B source and feedback contracts
+
+Load `agent_onboard{topic:"skeleton"}` for native input/relation/vector-array and
+pattern source. `skeleton_compile` is a read-only syntax/relations preview;
+`skeleton_inspect` exposes ownership and input overrides. Use revision-bound
+`doc_preview` and `doc_apply` with `skeleton.set` / `skeleton.remove` for geometry.
+The responsible team lead owns global source changes. Specialists coordinate
+application through that lead. [Source contract](SKELETON_AUTHORING.md).
+
+`mesh_edit` retains an indexed selection recipe and the observed source topology
+fingerprint, with mandatory `expected_revision`. Explicit sampling remains
+necessary for exact inputs; mesh results keep triangle authority.
+[Selection/closure limits](MESH_DIRECT_AUTHORING.md).
+
+`collision_inspect` measures a pair of definitions or placed occurrences/copies.
+Exact single solids and meshes expose separate authorities, checked properties
+and unknowns. It is a read-only static geometry check, with no response dynamics.
+[Native helix, loft, sewing and collision limits](PARAMETRIC_GEOMETRY_019B.md).
+All three inspection/compile tools are available in read-only query batches and
+postconditions. Image attachments include actual reference pixels, intent and
+optional rough dimensions; use existing editable authoring tools and disclose
+hidden-depth assumptions. [Image transport and authoring](IMAGE_AUTHORING.md).

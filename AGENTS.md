@@ -13,7 +13,7 @@ ferramentas CAD continua em [docs/AGENTS.md](docs/AGENTS.md).
    não fazer wrap para `001`.
 3. A letra identifica um conjunto de milestones do [roadmap A–G](docs/ROADMAP.md):
    A confiança; B autoria CAD; C engenharia/fabrico; D agentes; E ecossistema;
-   F produto/comercialização; G plataforma avançada. **A letra não representa o mês.**
+   F produto/distribuição; G plataforma avançada. **A letra não representa o mês.**
 4. Exemplos válidos de sequência: `001A`, `002A`, `003D`, `004B`. A fase indica
    o foco da iteração, não declara automaticamente os seus milestones concluídos.
    Dependências e critérios de aceitação determinam a ordem real do trabalho.
@@ -47,10 +47,9 @@ ferramentas CAD continua em [docs/AGENTS.md](docs/AGENTS.md).
 
 ## Fronteiras do produto
 
-- ARK cria e edita o design. STAGE é o produtor de análise/desenvolvimento no
-  domínio que conseguir comprovar. Trace consome contornos e posiciona peças.
-  MeshWorks gere a estrutura e o processo industrial. Não duplicar silenciosamente
-  os seus motores nem anunciar adapters que ainda não existem.
+- ARK cria e edita o design. Integrações externas precisam de contratos
+  explícitos, autoridade geométrica identificada e evidência de ponta a ponta.
+  Não anunciar adapters ou qualificação de outros sistemas sem essa evidência.
 - B-rep, inputs explícitos e contratos do produtor são a autoridade geométrica.
   Meshes, screenshots, IA e DXFs de comparação não escolhem a geometria de produção.
 - Manter `expected_revision`, publicação atómica e rejeições explícitas. Não
@@ -65,12 +64,16 @@ ferramentas CAD continua em [docs/AGENTS.md](docs/AGENTS.md).
   distinção entre hipóteses, evidência medida e qualificação de fabrico.
 - Preservar desenhos e sessões do utilizador. Não incluir os seus `.ark` locais
   em commits, benchmarks públicos, instaladores ou pacotes OTA sem instrução explícita.
+- Manter a documentação pública centrada no ARK e em contratos publicados.
+  Não incluir preços hipotéticos, economia interna, planos comerciais privados,
+  caminhos/branches de outros projetos ou deduções de integrações não publicadas,
+  incluindo nos arquivos históricos e recibos de verificação.
 
 ## Licenciamento e distribuição
 
-- [A estratégia comercial](docs/COMMERCIAL_STRATEGY.md) é uma proposta, não uma
-  licença adotada. Não publicar o código, mudar a visibilidade do repositório ou
-  adicionar uma licença ao código próprio por inferência a partir do roadmap.
+- O código próprio e a documentação adotam Apache-2.0 por decisão explícita de
+  2026-10-12; ver [LICENSE](LICENSE) e [NOTICE](NOTICE).
+  Não alterar licenças, titularidade ou visibilidade por inferência do roadmap.
 - Preservar os avisos das dependências e validar o conteúdo dos pacotes.
   A licença do ARK não substitui as obrigações de OCCT, Mapbox ou outros terceiros.
 - Updates são feitos pelo ARK, sem exigir outro instalador. O transporte do futuro

@@ -77,7 +77,7 @@ public:
 
 static const wchar_t* licenseSummary(){return
     L"ARK / Created by MeshSphere\r\nProject lead: Bruno Santos\r\n\r\n"
-    L"ARK's own source-code license and publication terms have not been adopted. The commercial strategy is a proposal. No open-source license is granted by this About window.\r\n\r\n"
+    L"ARK's original code and documentation are licensed under the Apache License, Version 2.0. Copyright 2026 Bruno Santos and ARK contributors. Full terms and attribution: LICENSE and NOTICE. Separately identified third-party material retains its own terms. The license does not relicense customer designs or grant additional ARK / MeshSphere trademark rights.\r\n\r\n"
     L"Open CASCADE Technology (OCCT) 8.0.1\r\nARK makes use of facilities provided by Open CASCADE Technology for native B-rep modeling, validation and exchange. OCCT is licensed under GNU LGPL 2.1 with the Open CASCADE exception (version 1.0). Full texts: LICENSE_LGPL_21.txt and OCCT_LGPL_EXCEPTION.txt.\r\nhttps://occt3d.com/dev/doc/overview/html/occt_public_license.html\r\n\r\n"
     L"Mapbox earcut.hpp 2.2.4 / ISC\r\nCopyright (c) 2015, Mapbox. Used for sampled polygon triangulation. The full copyright, permission and warranty notice is retained in mapbox-earcut-ISC.txt.\r\nhttps://github.com/mapbox/earcut.hpp/tree/v2.2.4\r\n\r\n"
     L"SQLite 3.54.0 / Public domain\r\nSQLite powers the local component library and search. The upstream source notice and provenance are retained in sqlite-provenance.txt.\r\nhttps://www.sqlite.org/copyright.html\r\n\r\n"

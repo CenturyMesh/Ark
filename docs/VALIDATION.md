@@ -1,5 +1,11 @@
 # Validation record
 
+## 2026-10-13: 018B editable authoring draft
+
+See [018B](iterations/018B.md) and its verification receipt for coordinated native/core
+suites, actual desktop interaction checks, failed attempts and inspected synthetic
+screenshots. Human acceptance remains pending; no merge or public release is authorized.
+
 ## 2026-10-08: assistant streaming, text input and reasoning effort
 
 The user completed ChatGPT consent. The safe local status check confirmed a
@@ -317,7 +323,7 @@ contain the unmodified upstream SDK source; its optional developer tools are
 not ARK runtime or test dependencies.
 
 The implementation and supported-domain limits are documented in
-[SHEET_METAL.md](SHEET_METAL.md), [SURFACING.md](SURFACING.md), and the read-only
-[Stage donor assessment](STAGE_NATIVE_ASSESSMENT.md). Native B-rep validity and
+[SHEET_METAL.md](SHEET_METAL.md), [SURFACING.md](SURFACING.md), and the historical
+[native sheet assessment](STAGE_NATIVE_ASSESSMENT.md). Native B-rep validity and
 round-trip checks do not certify physical manufacturing. Legacy mesh features
 remain distinct from native exact-shape features.

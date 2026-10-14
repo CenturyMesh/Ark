@@ -34,7 +34,7 @@ struct Problem {
     explicit Problem(const Sketch& s):sk(s){
         for(auto&e:s.ents){
             offsets.push_back(x.size());
-            const bool driven=e.kind==SketchEnt::Project||e.kind==SketchEnt::Offset||e.arcRecipe.t==arkjson::Value::Obj;
+            const bool driven=e.kind==SketchEnt::Recipe||e.kind==SketchEnt::Project||e.kind==SketchEnt::Offset||e.arcRecipe.t==arkjson::Value::Obj;
             for(size_t i=0;i<e.dof.size();++i){
                 if(!driven&&(i>=e.expressions.size()||e.expressions[i].empty()))free.push_back(x.size());
                 x.push_back(e.dof[i]);
@@ -52,6 +52,7 @@ struct Problem {
     Vec2 point(int ent,int slot) const {
         const auto& e=sk.ents[(size_t)ent];
         switch(e.kind){
+            case SketchEnt::Recipe:
             case SketchEnt::Pnt: {
                 size_t o=offsetOf(ent);
                 return {x[o],x[o+1]};

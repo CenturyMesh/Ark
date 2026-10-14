@@ -107,7 +107,9 @@ int main(int argc, char** argv) {
         check(field(report, "closed_oriented_edges").b && field(report, "boundary_edges").asNum() == 0,
               "Edited plate mesh is not closed");
 
-        const fs::path savedPath = temp.path() / "from-live-agent.ark";
+        // This assertion inspects explicit JSON authoring. .ark is a binary
+        // SQLite container; binary persistence is covered by container tests.
+        const fs::path savedPath = temp.path() / "from-live-agent.arkjson";
         tool(mcpExe, root, endpoint, "doc_save", pathArgs(savedPath));
         const Value saved = parse(native_test::readFile(savedPath));
         check(field(saved, "version").asNum() >= 5, "Saved document version regressed");

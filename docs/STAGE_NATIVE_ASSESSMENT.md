@@ -1,33 +1,58 @@
-# Stage/TRACE donor assessment for ARK native sheet metal
+# Native sheet geometry assessment for ARK
 
-Read-only audit, 2026-09-23. No donor files were changed and no geometry or Python process was run. This is a design boundary, not an implementation or release claim.
+Historical engineering assessment dated 2026-09-23. This public version retains
+ARK design criteria and test ideas; internal source-checkout inventories are
+omitted. Its proposed implementation scope reflects that date. Current native
+support and limitations are documented in [sheet metal](SHEET_METAL.md),
+[source STEP](SOURCE_STEP.md) and [validation](VALIDATION.md).
 
-## Donor identity and status
+## Geometry and publication criteria
 
-- `C:/Users/bruno/Documents/Engine_RC2_occt` is branch `Stage-RC2` at `b023a2fbe711f7303434ee001225017602a215b0` (2026-09-22). Its working tree contains uncommitted geometry changes and untracked fixtures/probes. The detached `Engine_RC2_final_verified_20260922` checkout is `8f8d16c52d8e06b72b91c09352c6a1a663658b27` and is also dirty. Use committed file versions for any later comparison; neither live tree is a frozen source to copy.
-- The Stage kernel is primarily Python/OCP. `docs/beta/MODULE_MAP.md` describes 488 Python kernel files as of 2026-09-19. There is no simple native C++ sheet module to transplant. The repository does not expose a root `LICENSE`/`COPYING`/`NOTICE` file in the inspected file inventory; establish provenance and reuse rights before copying code, test data, or fixtures.
-- `C:/Users/bruno/Documents/Trace Nest` is `agent/alpha-prototype` with untracked `.tmp/`; the inspected tracked file inventory contains no C++ source/header files. Stage's TRACE bridge is Python/JS (`tools/kernel_demo_trace_api.py`, `tools/stage_public/trace.js`). `docs/beta/KERNEL_TRACE.md` says its layout and whole-nesting DXF remain `ALPHA_PREVIEW_ONLY` / `NON_AUTHORITATIVE_DEBUG_ARTIFACT`. It is not a native geometry donor for ARK's sheet work.
+1. **Import and identity.** Inventory exact solids and units from original STEP;
+   require explicit body selection when multiple solids exist. Preserve the
+   source-byte hash and physical occurrence binding. Face/body ordinals are
+   trace coordinates rather than geometric authority.
+2. **Source-owned recognition.** Prove thickness from opposed material skins;
+   identify panels and physical bends from paired faces, complete contacts,
+   cut walls and topology. Missing or competing ownership must reject.
+3. **Declared allowance.** Separate source geometry from the forming rule.
+   For a simple cylindrical bend, caller-declared K gives neutral radius
+   `r_n = r_i + K*t` and allowance `BA = abs(theta)*r_n`, within proved skin
+   bounds. Other allowance rules need separate typed inputs. The tube midpoint
+   convention in [source STEP](SOURCE_STEP.md) is distinct from a sheet K rule.
+4. **Atomic publication.** Develop a complete source panel/bend/feature graph;
+   validate material ownership, coverage, topology and contours independently.
+   Publish accepted exact geometry or a typed rejection. Reference fitting,
+   fixture-selected geometry and hidden tolerance relaxation cannot repair
+   an unsupported production case.
+5. **Consumer boundary.** Inspecting all source bodies is separate from
+   flattening an explicit body. Viewers and external consumers retain the
+   accepted publication's identity. Display meshes cannot replace its contours.
 
-## Reusable contracts, expressed independently in C++
+## Proposed initial native domain
 
-1. **Import and identity.** Inventory exact solids and units from the original STEP; require an explicit body selection if more than one solid exists. Keep an immutable source-byte hash and occurrence binding. Stable geometric equivalence and exact physical multiplicity are distinct; imported face/body ordinals are trace coordinates, not authority. See Stage `ingest/source_inventory.py`, `ingest/body_selection.py`, `docs/beta/SOURCE_PART_INSPECTION.md`, and tests `test_step_source_inventory.py`, `test_source_sheet_selection.py`.
-2. **Source-owned recognition.** Prove sheet thickness from opposed material skins, then identify source panels and physical bends from complete paired faces, exact contacts, cut walls and source topology. A cylinder alone is not a bend. Missing/competing skin assignments, incomplete bend contacts, foreign faces and material slots must reject. See `recognition/sheet_eligibility.py`, `recognition/thickness_evidence.py`, `recognition/bend_classifier.py`, `graph/producer.py`, tests `test_bend_source_skin.py`, `test_source_bend_contact_chains.py`.
-3. **Declared allowance.** Keep source geometry separate from a caller-declared forming rule. For a simple cylindrical bend, a K rule gives neutral radius `r_n = r_i + K*t` and allowance `BA = abs(theta)*r_n`; the neutral radius must lie within the proved paired skin bounds. Alternative neutral-radius, allowance, and bend-deduction inputs are separate typed rules, not hidden equivalents. See `allowance/model.py`, `allowance/per_bend.py`, tests `test_bend_allowance_contract.py`. ARK's existing source-tube midpoint `L = theta*(r_i+r_o)/2` is a tube-specific geometric convention (`docs/SOURCE_STEP.md`), not a default sheet-metal K rule.
-4. **One publication transaction.** Produce a complete source panel/bend/feature graph, develop it once, assemble non-overlapping source-owned material, perform one contour Boolean, then independently rebind topology, area, source coverage, ownership and provenance. Return either canonical geometry or a typed rejection. Ordinary post-rejection retries, reference fit, contour repair and fixture-selected geometry violate this contract. See Stage `GEOMETRY_KERNEL_ORCHESTRATOR.md`, `unfold/canonical_material.py`, `material/package.py`, `contour/boolean_union.py`, `validation/canonical_execution.py`, `validation/execution_route.py`.
-5. **Consumer boundary.** Inspection of all source bodies is separate from flattening one explicit body. Nesting/costing/viewers consume a bound, immutable accepted publication; collision polygons and display meshes do not replace manufacturing contours. See `docs/beta/SOURCE_PART_INSPECTION.md`, `backend/services/canonical_nesting.py`, and TRACE `docs/ARCHITECTURE.md` (in Trace Nest).
+The initial proposal was a bounded C++/OCCT path: one uniform-thickness solid,
+two planar flange regions and one constant-radius cylindrical bend with paired
+skins, complete tangent contacts and no cuts through deforming material.
+A flat panel was the baseline. Complex or ambiguous cases required named
+rejections until independently supported. This is historical planning;
+consult [sheet metal](SHEET_METAL.md) for the implemented domain.
 
-## Proposed first ARK native domain
+Keep source inventory, thickness/skin proof, bend/contact proof, allowance,
+developed material and independent validation explicit. Native B-reps and
+curves remain authoritative through export; tessellation serves the viewport.
 
-Implement the smallest useful source-owned sheet path in C++ with native OCCT: **one solid, uniform thickness, two planar flange regions and one constant-radius cylindrical bend of straight axial width**, with paired cylindrical skins, complete straight tangent contacts, one acyclic physical connection and no cuts crossing the deforming bend. Imported source coordinates and all rigid-panel openings must be retained exactly. A flat single panel is the baseline case. Ambiguous solids, segmented/ruled/conical bends, hems, junctions, cycles, holes or reliefs through bend material, and incomplete skin/contact ownership should return a named `unsupported`/`ambiguous` rejection until separately proved. This is a proposed initial scope, not a statement that Stage is limited to these shapes.
+## Verification ideas
 
-The native pipeline should yield typed C++ records for source inventory, thickness/skin proof, physical bend and contact proof, caller allowance, rigid transforms plus developed bend material, source material ownership, contour and independent validation. Preserve exact B-rep/curve geometry through export where supported; tessellation can serve the viewport only. The initially supported domain is defined by positive and hostile source proofs, not by any named fixture or external DXF.
+- Positive: flat panel; simple bend with declared K and preserved panel holes;
+  valid STEP readback and measured source/refold agreement.
+- Hostile: ambiguous body, competing skin/face roles, incomplete contact,
+  bend-crossing holes, duplicate occurrence, changed source bytes, invalid
+  allowance, missing ownership, overlapping material or stale publication.
+- Metamorphic: rigid transform, mirror, positive scale under a declared
+  tolerance policy, face/body reorder and supported topology splits preserve
+  intrinsic classification and transformed exact results.
 
-ARK currently routes `import_step`/`export_step` through `src/step_export.cpp` into `scripts/source_tube.py`, while `src/source_tube.cpp` owns its C++ package/preview and `src/agent.cpp` exposes the tools. `docs/SOURCE_STEP.md` describes source/refold comparison and its restricted tube domain. The native sheet path should be a distinct feature/service with C++ OCCT linkage and C++ tests; it must not silently reinterpret `source_tube` or use the Python adapter. Existing Python integration tests, including `tests/source_step_integration.py`, do not meet the requested all-C++ production/test rule for the new work. ARK's current `CMakeLists.txt` has no OCCT C++ dependency yet.
-
-## Verification to port as C++ test ideas
-
-- Positive: flat single panel; one simple bend with declared K, exactly paired skins and preserved panel hole; round-trip STEP B-rep validity and source/refold material comparison within a declared bound.
-- Hostile: two plausible solids without explicit selection, wrong thickness/skin pair, competing face roles, incomplete tangent contact, hole crossing bend material, duplicate physical occurrence or altered source bytes, invalid K/neutral radius, missing source owner, overlapping developed material, invalid contour, stale publication binding.
-- Metamorphic: rigid transform, mirror, positive scale with declared tolerance policy, face/body reordering, and supported same-domain split/merge should retain intrinsic classification and output geometry up to the documented frame/scale transform. See Stage `test_zero_bend_canonical_pipeline.py`, `test_beta_same_domain_metamorphic.py`, `test_step_source_inventory.py`, and `docs/beta/TEST_MATRIX.md`.
-
-All production and test implementation for this path belongs in C++. A temporary Python prototype, if used, must be removed after conversion and cannot be a runtime dependency or test gate. Stage's 295-second process-tree watchdog is a donor execution constraint, not a substitute for ARK's own bounded native worker design. No donor fixture, reference DXF or expected output may select production geometry; compare external references only after an immutable native publication exists.
+Native implementation and tests belong in C++. Runtime bounds and cancellation
+need ARK-specific evidence. External fixtures and reference DXFs can compare
+an immutable accepted result; they cannot choose production geometry.

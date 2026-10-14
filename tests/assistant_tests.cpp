@@ -24,6 +24,7 @@ static V toolResponse(const char* id="call_1",const char* name="doc_info",const 
 }
 static V finalResponse(){return json(R"({"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Done."}]}]})");}
 #include "assistant_context_tests.inl"
+#include "assistant_image_tests.inl"
 static void visionChecks(){
     const std::string png="iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC";
     auto receipt=json(R"({"isError":false,"structuredContent":{"visual_evidence":{"revision":7,"current_revision":7,"view":"front","feature_id":19,"occurrence_id":23,"copy":1,"reference":"face.front","label":"before"}},"content":[{"type":"image","mimeType":"image/png"}]})");member(receipt,"content").arr[0].set("data",V::makeStr(png));
@@ -51,6 +52,16 @@ static void visionChecks(){
     std::atomic_bool cancelled=false;requests=0;fails([&]{ark::runAssistant(config,V::makeStr("Cancel snapshot"),tools,[&](auto&,auto&){cancelled=true;return receipt;},{},&cancelled,[&](auto&,auto&,auto*){++requests;return toolResponse("cancel","snapshot");});},"cancellation after capture stops image delivery");check(requests==1,"cancelled capture sends no image request");
     ark::Image pixel;pixel.w=1;pixel.h=1;pixel.px={255,0,0};const auto encoded=ark::encodePNG(pixel);check(encoded.size()>24&&encoded[0]==137,"PNG memory encoding produces actual image bytes");
     ark::AgentSession session;auto created=session.call("doc_apply",json(R"({"expected_revision":0,"commands":[{"op":"feature.add","type":"box","name":"Vision box","p":{"dx":10,"dy":8,"dz":4}}]})"));check(!created.find("isError")->b,"disposable snapshot geometry created");auto actual=session.call("snapshot",json(R"({"id":1,"view":"right","expected_revision":1,"label":"after"})"));check(!actual.find("isError")->b&&actual.find("content")->arr.size()==2&&actual.find("content")->arr[1].find("data")->str.rfind("iVBOR",0)==0,"public MCP snapshot returns actual inline PNG without requiring path");check(actual.find("structuredContent")->find("visual_evidence")->find("feature_id")->num==1,"snapshot identity records selected stable CAD ID");auto stale=session.call("snapshot",json(R"({"id":1,"expected_revision":0})"));check(stale.find("isError")->b&&stale.find("content")->arr.size()==1,"stale revision rejects before returning any pixels");
+    const std::string cameraBaseline=ark::documentToJson(session.document);
+    auto front=session.call("snapshot",json(R"({"id":1,"view":"front","expected_revision":1})"));
+    auto top=session.call("snapshot",json(R"({"id":1,"view":"top","expected_revision":1})"));
+    auto custom=session.call("snapshot",json(R"({"id":1,"view":"custom","camera":{"direction":[0,-1,0],"up":[0,0,1]},"expected_revision":1})"));
+    auto imageData=[](const V& response){for(const auto& part:response.find("content")->arr)if(part.find("type")&&part.find("type")->str=="image")return part.find("data")->str;return std::string{};};
+    check(!front.find("isError")->b&&!top.find("isError")->b&&!custom.find("isError")->b&&imageData(front)==imageData(custom)&&!imageData(front).empty(),"explicit front camera reproduces the Z-up preset pixels");
+    const auto* frontState=front.find("structuredContent")->find("visual_evidence")->find("view_state"),*topState=top.find("structuredContent")->find("visual_evidence")->find("view_state");
+    check(frontState->find("direction_target_to_eye")->arr[1].num==-1&&frontState->find("up")->arr[2].num==1&&topState->find("direction_target_to_eye")->arr[2].num==1&&topState->find("up")->arr[1].num==1,"snapshot presets report actual Z-up front and top orientation");
+    for(const auto* invalid:{R"({"id":1,"view":"custom","camera":{"direction":[0,-1,0],"up":[0,1,0]},"expected_revision":1})",R"({"id":1,"view":"custom","camera":{"direction":[0,-1,0]},"expected_revision":1})",R"({"id":1,"view":"front","camera":{"direction":[0,-1,0],"up":[0,0,1]},"expected_revision":1})"})check(session.call("snapshot",json(invalid)).find("isError")->b,"invalid or conflicting camera rejects without pixels");
+    check(session.revision==1&&ark::documentToJson(session.document)==cameraBaseline,"camera inspection never changes the drawing");
     auto preview=session.call("doc_preview",json(R"({"expected_revision":1,"commands":[{"op":"feature.edit","id":1,"p":{"dx":20}}]})"));check(!preview.find("isError")->b&&preview.find("structuredContent")->find("candidate_cached")->b,"disposable evaluated preview candidate retained");V capture=json(R"({"id":1,"view":"front","expected_revision":1})");capture.set("candidate_id",*preview.find("structuredContent")->find("candidate_id"));auto previewImage=session.call("snapshot",capture);check(!previewImage.find("isError")->b&&!previewImage.find("structuredContent")->find("visual_evidence")->find("committed")->b&&session.revision==1,"prepared candidate snapshot renders actual uncommitted pixels without changing document");session.call("doc_apply",json(R"({"expected_revision":1,"commands":[{"op":"param.set","name":"changed","expr":1}]})"));capture.set("expected_revision",V::makeNum(2));auto expired=session.call("snapshot",capture);check(expired.find("isError")->b&&expired.find("content")->arr.size()==1,"changed baseline invalidates prepared preview pixels explicitly");
 }
 static void payloadAndPerformanceChecks(){
@@ -291,5 +302,5 @@ int main(int argc,char** argv){try{
         [&](const auto& e){if(e.kind==ark::AssistantEvent::Usage)partial=e.usage;},nullptr,
         [&](auto&,auto&,auto*){return incompleteCounted;});},"incomplete response remains rejected");
     check(partial.totalTokens==15,"usage from incomplete response survives via event");
-    requestContextChecks();payloadAndPerformanceChecks();nestedReceiptChecks();transientHttpRetryChecks();visionChecks();std::cout<<checks<<" assistant checks passed\n";return 0;
+    requestContextChecks();payloadAndPerformanceChecks();nestedReceiptChecks();transientHttpRetryChecks();visionChecks();userImageAuthoringChecks();std::cout<<checks<<" assistant checks passed\n";return 0;
 }catch(const std::exception& e){std::cerr<<"assistant test failed: "<<e.what()<<'\n';return 1;}}

@@ -5,6 +5,7 @@
 #include "ark/occt_solid.hpp"
 #include "ark/occt_frame.hpp"
 #include "ark/occt_electronics.hpp"
+#include "ark/drawings.hpp"
 #include <Standard_Failure.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <TopoDS.hxx>
@@ -23,6 +24,7 @@ int runWorker(const fs::path& requestPath,const fs::path& resultPath){
 
     try{
         V request;if(!arkjson::parse(readFile(requestPath),request)||request.t!=V::Obj)throw std::runtime_error("Invalid native worker request");
+        if(const auto* threads=request.find("native_threads")){if(threads->t!=V::Num||threads->num!=std::floor(threads->num)||threads->num<1||threads->num>64)throw std::runtime_error("Invalid native request thread budget");configureNativeThreadBudget((int)threads->num);}
         auto field=[&](const char* name)->const V&{auto p=request.find(name);if(!p)throw std::runtime_error(std::string("Missing native field: ")+name);return *p;};
         auto text=[&](const char* name){auto& p=field(name);if(p.t!=V::Str||p.str.empty())throw std::runtime_error(std::string("Invalid native string: ")+name);return p.str;};
         auto op=text("operation");V result;
@@ -43,6 +45,7 @@ int runWorker(const fs::path& requestPath,const fs::path& resultPath){
         else if(op=="measurement_pick")result=measurementPickNative(field("request"));
         else if(op=="geometry_query")result=geometryQueryNative(field("request"));
         else if(op=="project_reference")result=projectReferenceNative(field("request"));
+        else if(op=="drawing_view")result=drawingViewNative(field("request"));
         else if(op=="import_sheet")result=importSheetNative(request);
         else if(op=="export_sheet")result=exportSheetNative(request);
         else if(op=="export_sheet_flat_dxf")result=exportSheetFlatDxfNative(request);
@@ -83,6 +86,7 @@ int runWorker(const fs::path& requestPath,const fs::path& resultPath){
             if(error>tol||boundError>1e-6||areaError>std::max(1e-6,properties(shape,'a')*1e-8)||shapes(shape,TopAbs_SOLID).size()!=shapes(returned,TopAbs_SOLID).size())throw std::runtime_error("STEP roundtrip changed native geometry");
             result=shapeReport(returned,false);for(const auto& body:shapes(returned,TopAbs_SOLID))shapeReport(body,true);replaceFile(pending,path);result.set("step_roundtrip_difference_mm3",solid?V::makeNum(error):V{});result.set("step_roundtrip_area_error_mm2",V::makeNum(areaError));result.set("step_roundtrip_bounds_error_mm",V::makeNum(boundError));result.set("step_sha256",V::makeStr(sha256(readFile(path))));result.set("path",V::makeStr(text("path")));auto sidecar=path;sidecar.replace_extension(".validation.json");writeFile(sidecar,result.dump());
         }else throw std::runtime_error("Unknown native worker operation");
+        result=completeSelectionReferences(std::move(result));
         writeFile(resultPath,result.dump());return 0;
     }catch(const Standard_Failure& e){V error=V::makeObj();error.set("error",V::makeStr(e.GetMessageString()?e.GetMessageString():"OCCT failure"));writeFile(resultPath,error.dump());std::cerr<<error.dump()<<'\n';return 1;}
     catch(const std::exception& e){V error=V::makeObj();error.set("error",V::makeStr(e.what()));writeFile(resultPath,error.dump());std::cerr<<error.dump()<<'\n';return 1;}

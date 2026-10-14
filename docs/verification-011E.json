@@ -21,7 +21,7 @@
     "B.05": "Partial: BOM inspection/export; drawing production remains planned",
     "D.02": "Partial: tool contracts, guides and instructions; no live model adherence qualification",
     "E.01": "Partial: local identity and ark.bom.v1; cross-feature/product reconciliation pending",
-    "E.03": "Planned: no MeshWorks adapter or remote import"
+    "E.03": "Planned: no external adapter or remote import"
   },
   "tests": {
     "passed": 64,
@@ -147,7 +147,7 @@
     "out/ark-011E-installed-mcp.json": "32338d8e0f6a8eaf27146d84ad06fb87b1785f757b9ed36bc3ae05c95af35cb6"
   },
   "limits": [
-    "No live model pilot, supplier lookup/download or MeshWorks connection was performed.",
+    "No live model pilot, supplier lookup/download or external connection was performed.",
     "Generic fasteners have no modeled threads/drives/tolerances/standard certification; nut is an annular envelope, not a hex nut.",
     "Metadata completeness does not certify fastening, manufacture, supplier identity or procurement.",
     "Replacing a feature creates a new part identity; cross-feature identity reconciliation is not implemented.",

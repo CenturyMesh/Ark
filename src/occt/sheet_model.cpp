@@ -222,6 +222,7 @@ V openingRecord(const Opening& o,double legA,double allowance,double thickness,
 namespace {
 struct Panel {
     std::string id,edge;int parent=-1;double length=0,width=0,offset=0,angle=0,radius=0,k=.5,allowance=0;
+    double area=0;std::vector<P2> outline;
     bool hem=false;gp_Trsf flat,formed,refold,attachment;TopoDS_Shape local,formedLocal;
 };
 struct Piece {TopoDS_Shape flat,formed,refold;int panel=-1;bool band=false;};
@@ -286,10 +287,12 @@ void validatePieces(const std::vector<Piece>& parts,const std::vector<Panel>& pa
 TopoDS_Shape united(const std::vector<Piece>& pieces,int mode){
     TopoDS_Shape out;for(auto& piece:pieces){const auto& s=mode==0?piece.formed:mode==1?piece.flat:piece.refold;out=out.IsNull()?s:fuse(out,s);}return out;
 }
+#include "sheet_advanced.inl"
 }
 
 V modelSheetNative(const V& input){
     V request=input;const bool legacy=!input.find("base");ExprEnv global;
+    if(legacy)for(auto key:{"miters","swept_flanges","corners","rips","tabs","bend_table"})if(input.find(key))throw std::runtime_error("Advanced sheet recipes require an explicit authored base program");
     if(auto env=input.find("parameters")){if(env->t!=V::Obj)throw std::runtime_error("Sheet parameters must be object");for(auto& kv:env->obj)global.vars[kv.first]=finiteNumber(kv.second,"parameter");}
     const double width=expr(input,"width",global),t=expr(input,"thickness",global),defaultK=expr(input,"k_factor",global);
     if(!(width>0&&width<=10000&&t>0&&t<=10000&&defaultK>=0&&defaultK<=1))throw std::runtime_error("Unsupported sheet width, thickness or declared K factor");
@@ -304,7 +307,7 @@ V modelSheetNative(const V& input){
     V formingOps=V::makeArr();
     if(request.find("jog")||request.find("sketch_bend")){
         if(legacy||(request.find("jog")&&request.find("sketch_bend")))throw std::runtime_error("Sheet jog/sketch bend requires one original rectangular base and one forming program");
-        for(const char* key:{"flanges","hems","stamps","openings"})if(const auto* rows=request.find(key))if(rows->t!=V::Arr||!rows->arr.empty())throw std::runtime_error("Jog/sketch bend currently requires an unperforated rectangular blank without other flanges, hems or stamps");
+        for(const char* key:{"flanges","hems","stamps","openings","miters","swept_flanges","corners","rips","tabs"})if(const auto* rows=request.find(key))if(rows->t!=V::Arr||!rows->arr.empty())throw std::runtime_error("Jog/sketch bend currently requires an unperforated rectangular blank without other forming or edge operations");
         const bool jog=request.find("jog")!=nullptr;const V& operation=required(request,jog?"jog":"sketch_bend");const auto& original=required(request,"base");const std::string rootId=named(original,"id"),id=named(operation,"id");if(id==rootId)throw std::runtime_error("Forming operation id must differ from base id");const double originalLength=expr(original,"length",global),station=expr(operation,"station",global),radius=expr(operation,"inner_radius",global),degrees=expr(operation,"angle",global),k=optional(operation,"k_factor",defaultK,global);const double alpha=std::abs(degrees)*pi/180;
         if(!(station>0&&station<originalLength&&radius>0&&k>=0&&k<=1&&alpha>.001*pi/180&&alpha<170*pi/180))throw std::runtime_error("Unsupported jog/sketch bend station, radius, angle or K-factor");const double allowance=alpha*(radius+k*t);V base=original;base.set("length",V::makeNum(station));request.set("base",base);V flanges=V::makeArr();
         auto flange=[&](const std::string& child,const std::string& parent,double length,double angle){if(length<=1e-6)throw std::runtime_error("Forming operation leaves no positive distal panel/web in the original blank");V row=V::makeObj();row.set("id",V::makeStr(child));row.set("parent",V::makeStr(parent));row.set("edge",V::makeStr("u_max"));row.set("length",V::makeNum(length));row.set("inner_radius",V::makeNum(radius));row.set("angle",V::makeNum(angle));row.set("k_factor",V::makeNum(k));flanges.arr.push_back(row);};
@@ -317,6 +320,7 @@ V modelSheetNative(const V& input){
     if(!(root.length>0&&root.length<=1e6))throw std::runtime_error("Base panel length must be positive and at most 1e6 mm");
     bool legacyOrigin=legacy;if(auto p=request.find("legacy_origin")){if(p->t!=V::Bool)throw std::runtime_error("legacy_origin must be boolean");legacyOrigin=p->b;}
     if(legacyOrigin){root.formed=translation(-root.length);root.refold=root.formed;}
+    const auto advanced=expandAdvancedSheet(request,global,root,t,defaultK);
     if(auto flanges=request.find("flanges")){if(flanges->t!=V::Arr||flanges->arr.size()>16)throw std::runtime_error("Sheet accepts at most 16 flanges");for(const auto& row:flanges->arr)if(row.find("hem"))throw std::runtime_error("Use native.hems for open round hem attachments");}
     if(auto hems=request.find("hems")){
         if(hems->t!=V::Arr||hems->arr.size()>16)throw std::runtime_error("Sheet accepts at most 16 open round hems");
@@ -345,7 +349,9 @@ V modelSheetNative(const V& input){
             const double span=p.edge=="u_min"||p.edge=="u_max"?a.width:a.length;env.vars["edge_length"]=span;
             p.length=expr(item,"length",env);p.width=optional(item,"width",span,env);p.offset=optional(item,"offset",0,env);p.radius=expr(item,"inner_radius",env);p.angle=expr(item,"angle",env)*pi/180;p.k=optional(item,"k_factor",defaultK,env);
             if(!(p.length>0&&p.length<=1e6&&p.width>0&&p.offset>=0&&p.offset+p.width<=span&&p.radius>0&&std::abs(p.angle)>=.001*pi/180&&(p.hem?std::abs(std::abs(p.angle)-pi)<1e-12:std::abs(p.angle)<170*pi/180)&&p.k>=0&&p.k<=1))throw std::runtime_error("Unsupported flange dimensions, attachment span, radius, angle or K factor");
-            p.allowance=std::abs(p.angle)*(p.radius+p.k*t);p.attachment=edgeFrame(a,p);
+            p.allowance=std::abs(p.angle)*(p.radius+p.k*t);
+            applyBendTable(request,item,p,t,global);
+            p.attachment=edgeFrame(a,p);
             p.flat=a.flat*p.attachment*translation(p.allowance);
             const double alpha=std::abs(p.angle),sign=p.angle>0?1.:-1.,mid=p.radius+t/2;
             const gp_XYZ end(mid*std::sin(alpha),t/2+sign*mid*(1-std::cos(alpha)),0),normal(-sign*std::sin(alpha),std::cos(alpha),0);
@@ -358,7 +364,9 @@ V modelSheetNative(const V& input){
             panels.push_back(p);
         }
     }
-    std::vector<Piece> pieces;V stampRecords=V::makeArr();V records=V::makeArr(),panelRecords=V::makeArr(),bendRecords=V::makeArr(),animation=V::makeObj(),animationPanels=V::makeArr();
+    applyMiterOutlines(panels,advanced,t);
+    registerAdvancedIds(request,ids);
+    std::vector<Piece> pieces;V advancedRecords=advanced.records;V stampRecords=V::makeArr();V records=V::makeArr(),panelRecords=V::makeArr(),bendRecords=V::makeArr(),animation=V::makeObj(),animationPanels=V::makeArr();
     double removed=0,expectedFormed=0,expectedFlat=0,expectedDelta=0,maxFrameError=0;bool conservation=true;double stampDelta=0;
     std::set<std::string> holeIds;
     const V* openings=request.find("openings");if(openings&&(openings->t!=V::Arr||openings->arr.size()>128))throw std::runtime_error("Sheet accepts at most 128 openings");
@@ -366,8 +374,10 @@ V modelSheetNative(const V& input){
     std::vector<bool> stampBound(stamps?stamps->arr.size():0,false);
     std::vector<bool> bound(openings?openings->arr.size():0,false);
     for(size_t index=0;index<panels.size();++index){
-        auto& p=panels[index];p.local=BRepPrimAPI_MakeBox(p.length,t,p.width).Shape();
+        auto& p=panels[index];if(p.outline.empty())p.outline={{0,0},{p.length,0},{p.length,p.width},{0,p.width}};
+        p.area=polygonArea(p.outline);p.local=sheetPolygon(p.outline,t);
         ExprEnv env=global;env.vars["panel_length"]=p.length;env.vars["panel_width"]=p.width;env.vars["thickness"]=t;
+        applyAdvancedPanel(request,p,panels,t,env,advancedRecords);
         std::vector<TopoDS_Shape> cutters;
         if(openings)for(size_t h=0;h<openings->arr.size();++h){
             const V& original=openings->arr[h];const V& which=required(original,"panel");
@@ -379,6 +389,7 @@ V modelSheetNative(const V& input){
             const Opening opening=openingsFrom(wrapper,p.length,p.length,p.width).front();
             const auto tool=cutter(opening,false,0,0,t,{},{},{});
             for(auto& prior:cutters)if(boxesMeet(prior,tool)){BRepExtrema_DistShapeShape distance(prior,tool);if(!distance.IsDone()||distance.Value()<=linearTol)throw std::runtime_error("Sheet openings overlap or touch");}
+            if(std::abs(properties(common(p.local,tool))-opening.area*t)>std::max(1e-6,opening.area*t*1e-8))throw std::runtime_error("Opening intersects a shaped panel boundary or prior edge operation");
             cutters.push_back(tool);p.local=cut(p.local,tool);removed+=opening.area*t;
             V row=V::makeObj();row.set("id",V::makeStr(identity));row.set("panel",legacy?V::makeNum((double)index):V::makeStr(p.id));row.set("kind",V::makeStr(opening.kind));row.set("local_center",pairJson(opening.center));row.set("area_mm2",V::makeNum(opening.area));
             const gp_Pnt center(opening.center.x,t/2,opening.center.y);row.set("formed_center",vec(center.Transformed(p.formed).XYZ()));row.set("flat_center",vec(center.Transformed(p.flat).XYZ()));
@@ -431,7 +442,7 @@ V modelSheetNative(const V& input){
             const auto flatH=parent.flat*p.attachment,formedH=parent.formed*p.attachment,refoldH=parent.refold*flatH;
             pieces.push_back({transformed(band,flatH),transformed(sector,formedH),transformed(revolved,refoldH),(int)index,true});
             expectedFormed+=p.width*t*alpha*(p.radius+t/2);expectedFlat+=p.width*t*p.allowance;expectedDelta+=alpha*p.width*t*t*(.5-p.k);conservation&=p.k==.5;
-            V bend=V::makeObj();bend.set("kind",V::makeStr(p.hem?"open_round_hem":"flange"));if(p.hem){bend.set("hem_type",V::makeStr("open_round"));bend.set("gap_mm",V::makeNum(2*p.radius));}bend.set("id",V::makeStr(p.id));bend.set("parent",V::makeStr(parent.id));bend.set("edge",V::makeStr(p.edge));bend.set("angle_deg",V::makeNum(p.angle*180/pi));bend.set("inner_radius_mm",V::makeNum(p.radius));bend.set("k_factor",V::makeNum(p.k));bend.set("bend_allowance_mm",V::makeNum(p.allowance));bend.set("width_mm",V::makeNum(p.width));bend.set("offset_mm",V::makeNum(p.offset));bend.set("flat_attachment",matrix(flatH));bend.set("parent_index",V::makeNum(p.parent));bendRecords.arr.push_back(bend);
+            V bend=V::makeObj();bend.set("kind",V::makeStr(p.hem?"open_round_hem":"flange"));if(p.hem){bend.set("hem_type",V::makeStr("open_round"));bend.set("gap_mm",V::makeNum(2*p.radius));}bend.set("id",V::makeStr(p.id));bend.set("parent",V::makeStr(parent.id));bend.set("edge",V::makeStr(p.edge));bend.set("angle_deg",V::makeNum(p.angle*180/pi));bend.set("inner_radius_mm",V::makeNum(p.radius));bend.set("k_factor",V::makeNum(p.k));bend.set("bend_allowance_mm",V::makeNum(p.allowance));bend.set("bend_allowance_source",V::makeStr(request.find("bend_table")?"authored_exact_bend_table":"authored_k_factor"));bend.set("width_mm",V::makeNum(p.width));bend.set("offset_mm",V::makeNum(p.offset));bend.set("flat_attachment",matrix(flatH));bend.set("parent_index",V::makeNum(p.parent));bendRecords.arr.push_back(bend);
             bend.set("direction",V::makeStr(p.angle>0?"positive":"negative"));
             const auto flatA=gp_Pnt(p.allowance/2,t/2,0).Transformed(flatH);
             const auto flatB=gp_Pnt(p.allowance/2,t/2,p.width).Transformed(flatH);
@@ -439,12 +450,13 @@ V modelSheetNative(const V& input){
             bend.set("bend_line_flat_mm",std::move(bendLine));bendRecords.arr.back()=std::move(bend);
         }
         pieces.push_back({transformed(p.local,p.flat),transformed(p.formedLocal,p.formed),transformed(p.formedLocal,refoldFrame),(int)index,false});
-        expectedFormed+=p.length*p.width*t;expectedFlat+=p.length*p.width*t;
-        V row=V::makeObj();row.set("kind",V::makeStr(p.hem?"hem_return":"panel"));row.set("id",V::makeStr(p.id));row.set("length_mm",V::makeNum(p.length));row.set("width_mm",V::makeNum(p.width));row.set("formed_frame",matrix(p.formed));row.set("flat_frame",matrix(p.flat));row.set("refold_pose",matrix(p.refold));panelRecords.arr.push_back(row);
+        expectedFormed+=p.area*t;expectedFlat+=p.area*t;
+        V row=V::makeObj();row.set("kind",V::makeStr(p.hem?"hem_return":"panel"));row.set("id",V::makeStr(p.id));row.set("length_mm",V::makeNum(p.length));row.set("width_mm",V::makeNum(p.width));row.set("area_mm2",V::makeNum(p.area));V outline=V::makeArr();for(auto point:p.outline)outline.arr.push_back(pairJson(point));row.set("outline",outline);row.set("formed_frame",matrix(p.formed));row.set("flat_frame",matrix(p.flat));row.set("refold_pose",matrix(p.refold));panelRecords.arr.push_back(row);
         V animated=row;animated.set("flat_mesh",meshData(transformed(p.local,p.flat)));animationPanels.arr.push_back(animated);
     }
     for(bool b:stampBound)if(!b)throw std::runtime_error("Stamp references a missing panel");
     for(bool b:bound)if(!b)throw std::runtime_error("Opening references a missing panel");
+    validateAdvancedBindings(request,panels,advancedRecords);
     if(maxFrameError>linearTol)throw std::runtime_error("Independent neutral-line refold does not recover panel frames");
     validatePieces(pieces,panels,false);validatePieces(pieces,panels,true);
     const auto formed=united(pieces,0),flat=united(pieces,1),refold=united(pieces,2);
@@ -457,6 +469,7 @@ V modelSheetNative(const V& input){
     result.set("flat_brep_sha256",V::makeStr(sha256(base64Decode(flatEncoded))));
     result.set("stamps",stampRecords);result.set("holes",records);result.set("panels",panelRecords);result.set("bends",bendRecords);
     report.set("model",V::makeStr("authored_panel_flange_tree"));report.set("width_mm",V::makeNum(width));report.set("thickness_mm",V::makeNum(t));report.set("k_factor",V::makeNum(defaultK));report.set("panel_count",V::makeNum((double)panels.size()));report.set("bend_count",V::makeNum((double)panels.size()-1));
+    report.set("advanced_ops",advancedRecords);report.set("miter_count",V::makeNum(advanced.miters.size()));report.set("swept_flange_count",V::makeNum(advanced.sweptCount));report.set("bend_table_applied",V::makeBool(request.find("bend_table")!=nullptr));
     for(auto kv:{std::pair{"formed_volume_mm3",formedVolume},std::pair{"flat_volume_mm3",flatVolume},std::pair{"analytic_formed_volume_mm3",expectedFormed},std::pair{"analytic_flat_volume_mm3",expectedFlat},std::pair{"volume_delta_mm3",delta},std::pair{"expected_volume_delta_mm3",expectedDelta},std::pair{"volume_delta_error_mm3",std::abs(delta-expectedDelta)},std::pair{"volume_tolerance_mm3",volumeTol},std::pair{"refold_symmetric_difference_mm3",refoldError},std::pair{"refold_frame_error_mm",maxFrameError},std::pair{"opening_removed_volume_mm3",removed}})report.set(kv.first,V::makeNum(kv.second));
     report.set("forming_ops",formingOps);report.set("jog_count",V::makeNum(input.find("jog")?1:0));report.set("sketch_bend_count",V::makeNum(input.find("sketch_bend")?1:0));
     report.set("hem_count",V::makeNum(request.find("hems")?(double)request.find("hems")->arr.size():0));report.set("stamp_count",V::makeNum((double)stampRecords.arr.size()));
