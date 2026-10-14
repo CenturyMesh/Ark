@@ -1,3 +1,4 @@
+#include "ark/design_containers.hpp"
 #include "ark/agent.hpp"
 #include "ark/agent_activity.hpp"
 #include "ark/iteration_history.hpp"
@@ -26,7 +27,7 @@ arkjson::Value AgentSession::call(const std::string& tool,const V& args){
     const auto rejectedRevision=revision;const std::string rejectedBaseline=recording?documentToJson(document):std::string();
     auto finish=[&](V response){if(revision!=activityBefore&&response.find("isError")&&!response.find("isError")->b){if(tool=="doc_load"||tool=="doc_new")resetBomReview();else if(audit)markBomAuthored();}if(recording)response=captureFailure(tool,args,args,rejectedBaseline,rejectedRevision,std::move(response));if(audit)response=recordAgentActivity(document,tool,args,*actor,std::move(response),activityBefore,revision,std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-activityStarted).count());return response;};
     V clean=args;if(clean.t==V::Obj)clean.obj.erase(std::remove_if(clean.obj.begin(),clean.obj.end(),[&](const auto& field){return (field.first=="actor"&&tool!="tool_feedback")||field.first=="motivation";}),clean.obj.end());
-    const bool mutating=tool=="doc_apply"||tool=="doc_new"||tool=="doc_load"||tool=="doc_undo"||tool=="doc_redo"||tool=="iteration_restore"||tool=="import_step"||tool=="import_sheet_step"||tool=="import_mesh"||tool=="usage_record"||tool=="library_insert";
+    const bool mutating=tool=="doc_apply"||tool=="doc_new"||tool=="doc_load"||tool=="doc_undo"||tool=="doc_redo"||tool=="iteration_restore"||tool=="import_step"||tool=="import_sheet_step"||tool=="import_mesh"||tool=="import_cad"||(tool=="design_containers"&&args.find("action")&&args.find("action")->asStr()=="merge"&&!(args.find("preview")&&args.find("preview")->t==V::Bool&&args.find("preview")->b))||tool=="usage_record"||tool=="library_insert";
     struct Depth {size_t& value;Depth(size_t& n):value(n){++value;}~Depth(){--value;}} depth(callDepth_);
     if(!mutating||callDepth_>1||suppressHistory_)return finish(dispatch(tool,clean));
     const auto* preparedId=args.find("candidate_id");
@@ -145,6 +146,7 @@ arkjson::Value AgentSession::commitPrepared(const V& args){
     if(found->requiresDfmAcceptance&&(!acceptance||acceptance->t!=V::Bool||!acceptance->b))throw std::runtime_error("DFM_ACCEPTANCE_REQUIRED: review the retained comparison and explicitly pass accept_dfm:true");
     if(acceptance&&(acceptance->t!=V::Bool||!found->requiresDfmAcceptance))throw std::runtime_error("accept_dfm applies only to a retained manufacturing proposal");
     auto next=found->document;V out=found->result;if(found->requiresDfmAcceptance){out.set("dfm_comparison",found->dfmComparison);out.set("dfm_accepted",V::makeBool(true));}
+    validateDesignContainerTransition(document,*next);
     const bool metadata=found->metadataOnly;out.set("geometry_changed",V::makeBool(!out.find("geometry_recomputed")||out.find("geometry_recomputed")->b));remember();
     if(metadata){document.features=next->features;document.materials=next->materials;document.bomDocumentId=next->bomDocumentId;}
     else{auto activity=document.agentActivity;auto usage=document.usage;document=*next;document.agentActivity=std::move(activity);document.usage=std::move(usage);}

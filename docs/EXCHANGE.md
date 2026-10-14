@@ -1,5 +1,13 @@
 # CAD and mesh exchange
 
+023B adds general exact STEP/STP and IGES/IGS import through `import_cad` and
+Studio file drop. The user chooses **Just import** or **Arkitfy using agents**.
+Source bytes and transferred geometry remain embedded, portable and immutable;
+reconstruction uses separate editable features and measured comparison. Read
+[the import contract](CAD_IMPORT_023B.md) for supported units, mixed geometry,
+bounded package capacity and explicit equivalence limits. Specialized tube
+`import_step` and sheet `import_sheet_step` contracts remain available.
+
 The visible **Export** control offers STL, OBJ, FBX, STEP and IGES.
 
 `export_mesh{format:"obj"|"fbx"|"stl",path,id?,node?,copy?}` exports the visible

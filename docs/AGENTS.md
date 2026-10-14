@@ -1,5 +1,26 @@
 # ARK agent protocol
 
+023B discovers **90 standalone tools**. Use `holes_catalog` and
+`agent_onboard{topic:"holes"}` for functional holes: author a parametric
+`native_solid` / `holes_orchestrator` feature, with named locations and explicit
+source dependencies. Sketch-only holes are for nonfunctional contours. Catalog
+nominals do not establish tolerances or manufacturing qualification. For sheet
+parts whose flat pattern must remain associative, read the sheet-specific
+guidance before choosing the cut operation.
+
+Use `cad_inspect` before `import_cad` for general STEP/IGES references; retain the
+exact embedded source. Arkitfy is an agent reconstruction workflow: create native
+editable features and compare them against the immutable reference. Recognition
+does not establish design intent or universal equivalence. `import_step` retains
+its specialized tube workflow. See [CAD import](CAD_IMPORT_023B.md).
+
+`design_containers` inspects assembly groups, checks out a scoped document with
+read-only dependencies, and proposes or atomically applies a merge. Bind merge
+to the observed parent revision and reviewed child digest; stale source rejects
+without silent rebase. See [containers](DESIGN_CONTAINERS_023B.md) and load
+`agent_onboard{topic:"containers"}`. These new persisted recipes conditionally
+require source format **38**; release identity alone does not change the format.
+
 022B retains **86 standalone tools** and expands their existing authoring
 contracts. [Component patterns](SPECIALIZED_PATTERNS_022B.md) add linked
 pattern/sketch/curve/chain sources with stable copy slots and expression-driven

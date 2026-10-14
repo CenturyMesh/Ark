@@ -1,3 +1,4 @@
+#include "ark/cad_import.hpp"
 #include "ark/native_features.hpp"
 #include "ark/native_backend.hpp"
 #include "ark/references.hpp"
@@ -719,11 +720,21 @@ void appendTubeEndFitOptions(V& result,const Document& document,u64 selected,con
 
 V solidFeatureRequest(const Feature& feature, const ExprEnv& env,
                      Document& document, std::vector<Body>& preceding) {
+    if(featureOperation(feature)=="imported_cad"){
+        std::string error;if(!validateCadPackageAuthoring(feature,error))throw std::runtime_error(error);
+        V request=V::makeObj();request.set("op",V::makeStr("imported_cad"));request.set("package",required(feature.nativeSpec,"package"));return request;
+    }
     if(featureOperation(feature)=="imported_brep"){
         std::string error;if(!validateImportedComponentDefinition(feature,error))throw std::runtime_error(error);
         V request=V::makeObj();request.set("op",V::makeStr("imported_brep"));request.set("package",required(feature.nativeSpec,"package"));return request;
     }
-    V model = numericNative(feature.nativeSpec, env);
+    V model;
+    if(featureOperation(feature)=="holes_orchestrator"){
+        if(feature.inputs.size()!=1)throw std::runtime_error("Holes Orchestrator requires one exact source body");
+        model=feature.nativeSpec;V recipe=required(model,"recipe");
+        if(auto* points=recipe.find("points")){V numeric=*points;if(numeric.t!=V::Arr)throw std::runtime_error("Hole positions must be an array");for(auto& point:numeric.arr)for(const char* key:{"position","direction"})if(const auto* coordinates=point.find(key))point.set(key,numericNative(*coordinates,env,"vector"));recipe.set("points",numeric);}
+        model.set("recipe",recipe);
+    }else model=numericNative(feature.nativeSpec,env);
     if (model.t != V::Obj) model = V::makeObj();
     for (const auto& [key, expression] : feature.p) {
         if (key == "op" || key == "sketch" || key == "plane" || key == "density") continue;
@@ -1089,6 +1100,7 @@ bool validateImportedComponentDefinition(const Feature& feature,std::string& err
     return true;
 }
 void validateNativeComponentCustody(const Document& document){
+    for(const auto& feature:document.features)if(!feature.suppressed&&feature.type==FeatureType::NativeSolid&&featureOperation(feature)=="imported_cad"){std::string error;if(!validateCadPackageAuthoring(feature,error))throw std::runtime_error(error);V request=V::makeObj();request.set("operation",V::makeStr("cad_custody"));request.set("package",*feature.nativeSpec.find("package"));nativeWorkerRequest(request);}
     for(const auto& feature:document.features)if(!feature.suppressed&&feature.type==FeatureType::NativeSolid&&featureOperation(feature)=="imported_brep"){
         std::string error;if(!validateImportedComponentDefinition(feature,error))throw std::runtime_error(error);
         V request=V::makeObj();request.set("operation",V::makeStr("component_custody"));request.set("package",*feature.nativeSpec.find("package"));nativeWorkerRequest(request);

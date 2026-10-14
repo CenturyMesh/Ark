@@ -1,3 +1,4 @@
+#include "ark/holes_orchestrator.hpp"
 #include "ark/occt_solid.hpp"
 #include "ark/occt_frame.hpp"
 #include "common.hpp"
@@ -637,10 +638,12 @@ V finishBodies(const TopoDS_Shape& shape,const std::vector<Ref>& refs){
 }
 
 #include "vertex_pull.inl"
+#include "holes_orchestrator.inl"
 
 V modelSolidNative(const V& request){
     const std::string op=word(request,"op");std::vector<Ref> refs;TopoDS_Shape result;bool many=false;V extrusionReceipt=V::makeObj(),vertexReceipt=V::makeObj();
     try{
+    if(op=="holes_orchestrator")return holesOrchestratorNative(request);
     if(op=="tube_end_fit")return withNativeVertexInventory(tubeEndFitNative(request));
     if(op=="imported_brep"){
         const V& package=need(request,"package");componentCustodyNative(package);

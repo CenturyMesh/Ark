@@ -1,4 +1,22 @@
-# Current source semantics — format 36
+# Current source semantics — format 38
+
+023B selects format 38 only for exact `imported_cad` source packages,
+`holes_orchestrator` recipes or an isolated `design_container_checkout` manifest.
+Embedded original exchange bytes and transferred B-rep hashes preserve import
+custody. Hole parameters, named locations and semantic callouts remain authored
+source. Container baselines, ownership and parent digests persist for guarded
+merge. Loading these recipes under an earlier format explicitly rejects; the
+iteration journal accepts 38. The binary container schema stays at version 1.
+See [023B](iterations/023B.md) and its linked contracts.
+
+## Previous source extension — format 37
+
+022B conditionally uses 37 for exact polyhedral vertex pulls, linked specialized
+component patterns, extended sheet programs and drawing source/template recipes.
+Release identity alone does not advance a document format. See
+[022B](iterations/022B.md).
+
+## Previous source extension — format 36
 
 021B keeps application identity separate from the `.ark` source format. A file
 selects version 36 only when it contains authored associative technical drawings
@@ -37,7 +55,7 @@ varying sweep sections. These source fields persist; resolved geometry remains
 derived. Older runtimes reject the unsupported format. Application iteration and
 document format are independent. See [018B](iterations/018B.md) for that scope.
 
-# ARK file formats, document versions 1 through 36
+# ARK file formats, document versions 1 through 38
 
 ## `.ark`
 

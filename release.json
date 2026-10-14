@@ -1,8 +1,8 @@
 {
-  "sequence": 22,
+  "sequence": 23,
   "phase": "B",
-  "code": "022B",
-  "version": "0.9.23",
+  "code": "023B",
+  "version": "0.9.24",
   "milestones": [
     "A.01",
     "A.03",
@@ -14,6 +14,7 @@
     "B.05",
     "C.01",
     "D.02",
+    "D.03",
     "D.04",
     "E.01"
   ]

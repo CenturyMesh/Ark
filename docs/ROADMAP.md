@@ -50,6 +50,14 @@ remains unimplemented. Portable-core checks are a separate scope.
 
 ## A — Trust and foundation
 
+023B adds bounded exact STEP/IGES reference import and reconstruction evidence
+(B.03/B.05/D.04), parametric functional holes with local published nominal lookup
+(B.02/B.03), and scoped assembly-container checkout/merge (B.04/D.03). Updated
+agent discovery/onboarding addresses D.02; conditional source format 38 and
+revision/hash guards address E.01. [Iteration evidence](iterations/023B.md)
+separates native/UI checks, hosted CI and user acceptance. These scopes do not
+complete the broader milestones or qualify manufacture.
+
 Goal: work for days without lost work, ambiguous identity or unverifiable regressions.
 
 | ID | Milestone | Status | Acceptance still governing the work |
@@ -92,7 +100,7 @@ Goal: reach valid, useful designs with explainable quality, time and total cost.
 |---|---|---|---|
 | D.01 | Quality/time/cost benchmark | Parcial | At least 30 versioned briefs, three repeats per initial configuration and blind human evaluation; cost per accepted design includes failures and coordination. Harness exists; 008D pilots were 0/9 and 4/9, 009B closed at 1/9. These results prove no savings. |
 | D.02 | Responsible engineer and adaptive team | Parcial | Compare Single/Focused/Parallel; give specialists concrete useful assignments and choose concurrency by measured benefit. No default turn/token budgets. Context, completion, feedback and retained DFM proposal handoffs have scoped evidence; general quality/cost benefit remains unproven. [019B scope](iterations/019B.md) [021B proposal scope](iterations/021B.md). [022B contract/onboarding and independent performance audit](iterations/022B.md) preserve Focused defaults and explicit-request-only drawing work. |
-| D.03 | Isolated part workspaces | Planeado | Piece-level branches with ownership/datums; transactional integration identifies geometric/revision conflicts without silent rebase. |
+| D.03 | Isolated part workspaces | Parcial | [023B design containers](DESIGN_CONTAINERS_023B.md) provide assembly-group checkout, explicit editable/read-only closure and atomic merge bound to parent source/revision and reviewed child digest. Conflicting ownership, unsupported cross-boundary references and stale source reject without silent rebase. Large-project scaling and general distributed collaboration remain unqualified. |
 | D.04 | Multimodal feedback and correction | Parcial | Shared author/reviewer diagnostics, revision-bound previews and intent-preserving correction remain the acceptance scope. 021B adds Z-up/custom snapshot cameras and a guarded Studio viewport readback after a local agent-activity audit; material-colored software pixels and native pattern-copy collision targeting remain open. [020B scope](iterations/020B.md) [021B scope](iterations/021B.md). [022B drawing curve origins, actual alternate-copy context/snapshot identities and guarded direct previews](iterations/022B.md). |
 | D.05 | Concept alternatives and reusable knowledge | Parcial | Compare alternatives against requirements, mass, process/cost and human preference using validated examples. A proposal must not be reported as a created part. |
 

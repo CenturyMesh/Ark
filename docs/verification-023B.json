@@ -1,0 +1,153 @@
+{
+    "iteration":  "023B",
+    "runtime":  "0.9.24",
+    "date":  "2026-10-14",
+    "base_commit":  "9d34f9ccd7d9440f1d849b7396b6fbf313ddda5f",
+    "verification_status":  "Verificado no escopo",
+    "milestones":  {
+                       "A.01":  "Verificado no escopo",
+                       "A.03":  "Parcial",
+                       "A.04":  "Parcial",
+                       "B.01":  "Parcial",
+                       "B.02":  "Parcial",
+                       "B.03":  "Parcial",
+                       "B.04":  "Parcial",
+                       "B.05":  "Parcial",
+                       "C.01":  "Parcial",
+                       "D.02":  "Parcial",
+                       "D.03":  "Parcial",
+                       "D.04":  "Parcial",
+                       "E.01":  "Parcial"
+                   },
+    "build":  {
+                  "platform":  "Windows x64",
+                  "compiler":  "LLVM-MinGW clang 23.1.3 UCRT",
+                  "kernel":  "OCCT 8.0.1",
+                  "configuration":  "Release",
+                  "result":  "passed"
+              },
+    "tests":  {
+                  "command":  "ctest --test-dir out/native-release --output-on-failure -j 2",
+                  "result":  "115/115 passed",
+                  "wall_seconds":  198.83,
+                  "log_sha256":  "9a77bcbbfeb513e9c75ca766a8c23b2ed0ae43009a2296fc145a5e6af73c403f",
+                  "discovered_tools":  90,
+                  "subsequent_changes":  "Presentation only: shorten hole help text; CRLF in container review",
+                  "affected_visual_rerun":  "3/3 at 1440x900; all three also passed at 1366x768",
+                  "visual_rerun_wall_seconds":  13.9,
+                  "visual_log_sha256":  "b14f02093aeca2c70294c584b1ff1bbcb40dfbfdb5efcde2bdb06704b110bf08",
+                  "local_catalog_lookup":  {
+                                               "queries":  1000,
+                                               "family":  "metric",
+                                               "size":  "M6",
+                                               "milliseconds":  10.0943,
+                                               "scope":  "In-process synthetic lookup only; no geometry/UI latency or baseline speedup claim"
+                                           }
+              },
+    "preview":  {
+                    "path":  "out/test-preview/023B-test1",
+                    "identity":  {
+                                     "schema":  1,
+                                     "product":  "ARK",
+                                     "version":  "0.9.24",
+                                     "iteration_code":  "023B",
+                                     "sequence":  23,
+                                     "phase":  "B",
+                                     "milestones":  [
+                                                        "A.01",
+                                                        "A.03",
+                                                        "A.04",
+                                                        "B.01",
+                                                        "B.02",
+                                                        "B.03",
+                                                        "B.04",
+                                                        "B.05",
+                                                        "C.01",
+                                                        "D.02",
+                                                        "D.03",
+                                                        "D.04",
+                                                        "E.01"
+                                                    ],
+                                     "platform":  "windows-x64",
+                                     "entrypoint":  "ark-studio.exe"
+                                 },
+                    "files":  [
+                                  {
+                                      "file":  "ark-studio.exe",
+                                      "sha256":  "42f7c645590fdb25c094f7eb62f5629fa96394286dd1547dc8fbfb8a1dc2b6d4"
+                                  },
+                                  {
+                                      "file":  "ark-mcp.exe",
+                                      "sha256":  "cbe27e7b526dbbc05b63ca6debecd500a467b000d54e5f4a9b5722f499d9d568"
+                                  },
+                                  {
+                                      "file":  "ark-cli.exe",
+                                      "sha256":  "c7eee76c81ec9523f734c9f7cae58087c56d44dc786c3356cc0f99426d458695"
+                                  },
+                                  {
+                                      "file":  "ark-occt-worker.exe",
+                                      "sha256":  "7f1421faee229dde249d5716ce2d0f4c1bff804571d68edd1e524d23ae76e4cc"
+                                  }
+                              ],
+                    "native_relocated_smoke_exit":  0,
+                    "dependency_notices_checked":  true,
+                    "user_projects_included":  false
+                },
+    "visual_evidence":  [
+                            {
+                                "path":  "out/native-release/ui-checks/cad-import-ui.png.cad-import-step-choice.png",
+                                "sha256":  "2d203d33f1af300acfd7e39aee7c86f02e848c9f294e11bb6c9d1b266de1d25a",
+                                "inspected":  true,
+                                "authority":  "Synthetic display evidence only"
+                            },
+                            {
+                                "path":  "out/native-release/ui-checks/cad-import-ui.png.cad-import-arkitfy-staged.png",
+                                "sha256":  "48ca60386d2bbbc702d1ab76158abf79873e457128fc52502ce2d6092f492836",
+                                "inspected":  true,
+                                "authority":  "Synthetic display evidence only"
+                            },
+                            {
+                                "path":  "out/ui-023b-1366/holes-orchestrator.png.holes-blind-dimensions.png",
+                                "sha256":  "b4c3fb590b6667f3e7fcf9bf997213fdc640365c2cb917ca4b297d6be821882b",
+                                "inspected":  true,
+                                "authority":  "Synthetic display evidence only"
+                            },
+                            {
+                                "path":  "out/ui-023b-1366/design-container.png.container-merge-review-dialog.png",
+                                "sha256":  "24454526d0030c037463f1140f7e1e0000b489061c0463a167cb1efa5eae7171",
+                                "inspected":  true,
+                                "authority":  "Synthetic display evidence only"
+                            },
+                            {
+                                "path":  "out/ui-023b-1366/design-container.png.container-merged.png",
+                                "sha256":  "e504eea1cadb72683350952295cbea425e6d58c36e259edcf85768c2e426744d",
+                                "inspected":  true,
+                                "authority":  "Synthetic display evidence only"
+                            }
+                        ],
+    "observed_failures_and_corrections":  [
+                                              "Destructive recognition altered imported source: non-destructive booleans and frozen transfer, strict hashes retained.",
+                                              "Census JSON object ordering: compare exact fields/types/values.",
+                                              "Headless Assistant fixture lacked native input; real control exercised and task panel opened.",
+                                              "Three legacy tool-count expectations updated from 86 to 90; initial full suite112/115, final115/115.",
+                                              "Grouped existing occurrences appeared before parents: hierarchy traversal preserves source IDs/order.",
+                                              "Container datum support removal explicitly emits null; unsupported field removals reject.",
+                                              "Capture targeting corrected to actual dimension/review pages; clipped help and Windows line endings corrected.",
+                                              "Initial packaging invocation blocked by PowerShell execution policy; reviewed script rerun under process-only execution policy, package and smoke then passed."
+                                          ],
+    "limits":  [
+                   "No live provider reconstruction quality or arbitrary free-surface equivalence qualification.",
+                   "Thread preparation and semantic callouts; no helical thread flanks or automatic numeric fit tolerances.",
+                   "Manufacturer nominal data does not certify all current DIN/ISO/ASME requirements or physical manufacture.",
+                   "Scoped conservative closure; logical document capacity4MiB and atomic128-command limit remain.",
+                   "Separate Studio launch exists but its process launch is not automated in the UI fixture.",
+                   "No general large-model scaling or distributed collaboration claim."
+               ],
+    "repository":  {
+                       "visibility":  "private",
+                       "license":  "Apache-2.0 retained by explicit user instruction"
+                   },
+    "hosted_ci":  "Pending new draft PR",
+    "user_acceptance":  "pending",
+    "merge":  "not authorized until user tests and approves"
+}

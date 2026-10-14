@@ -20,6 +20,7 @@
 #include <windows.h>
 #endif
 using namespace ark::occt;
+#include "../occt/cad_import.inl"
 int runWorker(const fs::path& requestPath,const fs::path& resultPath){
 
     try{
@@ -33,7 +34,11 @@ int runWorker(const fs::path& requestPath,const fs::path& resultPath){
         else if(op=="export_notch")result=exportNotchNative(field("plan"),text("path"));
         else if(op=="model")result=modelSurfaceNative(field("request"));
         else if(op=="model_sheet")result=modelSheetNative(field("request"));
-        else if(op=="model_solid")result=modelSolidNative(field("request"));
+        else if(op=="model_solid"){const auto& model=field("request");result=model.find("op")&&model.find("op")->asStr()=="imported_cad"?modelImportedCadNative(model):modelSolidNative(model);}
+        else if(op=="inspect_imported_cad")result=inspectImportedCadNative(request);
+        else if(op=="inspect_cad")result=inspectCadNative(request);
+        else if(op=="import_cad")result=importCadNative(request);
+        else if(op=="cad_custody")result=cadCustodyNative(field("package"));
         else if(op=="import_component")result=importComponentNative(request);
         else if(op=="component_custody")result=componentCustodyNative(field("package"));
         else if(op=="model_frame")result=frameModelNative(field("request"));

@@ -9,6 +9,10 @@ current release claim. [release.json](../release.json) owns application identity
 
 | Guide | Read it when |
 |---|---|
+| [023B test guide](AUTHORING_023B_TESTING.md) | You are testing STEP/IGES import, Arkitfy, functional holes or isolated design containers |
+| [023B Holes Orchestrator](HOLES_ORCHESTRATOR_023B.md) | You need parametric holes, thread preparation, dowels or retaining-ring grooves with published nominal sources |
+| [023B CAD import](CAD_IMPORT_023B.md) | You need portable exact STEP/IGES references and measured reconstruction checks |
+| [023B design containers](DESIGN_CONTAINERS_023B.md) | You need scoped editing in another document or ARK instance and guarded integration |
 | [022B test guide](AUTHORING_022B_TESTING.md) | You are testing existing-solid resize, background previews, vertex pulls, patterns, advanced sheet metal and drawings in the viewport |
 | [022B integrated drawings](DRAWING_VIEWPORT_022B.md) | The user has explicitly requested drawings for parts/assemblies, or you want to use the manual sheet controls |
 | [022B component patterns](SPECIALIZED_PATTERNS_022B.md) | You need persistent sketch, curve, inheritance or chain placement recipes |
