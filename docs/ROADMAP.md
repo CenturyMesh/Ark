@@ -108,6 +108,11 @@ Goal: connect design choices to exact geometry and measured process evidence.
 
 Goal: reach valid, useful designs with explainable quality, time and total cost.
 
+026D adds explicit local Ollama discovery and capability-aware single/team model
+selection. [026D evidence](iterations/026D.md) separates metadata declarations,
+offline transport/UI checks and live scratch CAD tool use. Broader D.01/D.02
+remain **Parcial**; primitive success does not establish general design quality.
+
 | ID | Milestone | Status | Acceptance still governing the work |
 |---|---|---|---|
 | D.01 | Quality/time/cost benchmark | Parcial | At least 30 versioned briefs, three repeats per initial configuration and blind human evaluation; cost per accepted design includes failures and coordination. Harness exists; 008D pilots were 0/9 and 4/9, 009B closed at 1/9. These results prove no savings. |

@@ -1,5 +1,6 @@
 #include "ark/assistant_connectors.hpp"
 #include "ark/agent_team.hpp"
+#include "ark/agent.hpp"
 #include <array>
 #include <iostream>
 #include <stdexcept>
@@ -104,8 +105,11 @@ void testMixedProviderTeam(){AgentTeam team;AgentTeamConfig config;config.maxWor
     team.start(config,"Inspect this same drawing",tools,[&](const std::string& name,const V&){check(name=="doc_info","mixed provider team inspection allowlist");++inspections;return json(R"({"isError":false,"structuredContent":{"revision":7}})");});check(team.waitIdleFor(std::chrono::seconds(5)),"mixed team completes bounded offline task");const auto snapshot=team.snapshot(true);check(inspections==3&&snapshot.roles.size()==3,"each provider role inspects exactly once");for(int i=0;i<3;++i)check(requests[i]==2&&snapshot.roles[i].state==AgentTeamState::Idle&&snapshot.roles[i].conversation.dump().find("role_inspect_"+std::to_string(i))!=std::string::npos,"mixed roles keep independent normalized histories and finish successfully");
 }
 }
+#include "local_models_tests.inl"
 int main(int argc,char** argv){try{
+    if(argc==3&&std::string(argv[1])=="--local-agent-smoke"){liveLocalModelSmoke(argv[2]);return 0;}
+    if(argc==3&&std::string(argv[1])=="--local-agent-basic-smoke"){liveLocalModelSmoke(argv[2],true);return 0;}
     // Explicit opt-in read-only network smoke. Default test stays fully offline.
     if(argc==3&&std::string(argv[1])=="--catalog"){const auto ids=assistantProviderModels(assistantProviderPreset(argv[2]));V models=V::makeArr();for(const auto& id:ids)models.arr.push_back(V::makeStr(id));std::cout<<models.dump()<<'\n';return 0;}
-    testChat();testCompleteBeforeExecution();testBoundedOutcomes();testMessages();testPresetsCatalogAndExport();testResponsesReplayCustody();testMixedProviderTeam();std::cout<<"Provider connector contracts passed\n";return 0;
+    testLocalModelCapabilities();testChat();testCompleteBeforeExecution();testBoundedOutcomes();testMessages();testPresetsCatalogAndExport();testResponsesReplayCustody();testMixedProviderTeam();std::cout<<"Provider connector contracts passed\n";return 0;
 }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

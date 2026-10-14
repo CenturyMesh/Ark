@@ -16,6 +16,10 @@ arkjson::Value assistantAdaptRequest(const AssistantConfig&,const arkjson::Value
 arkjson::Value assistantNormalizeResponse(const AssistantConfig&,const arkjson::Value& providerResponse);
 // Read-only GET /models, no inference. Returns actual IDs without choosing one.
 std::vector<std::string> assistantProviderModels(const AssistantConfig&,const AssistantTransport& offlineTransport={});
+// Read-only Ollama /api/show metadata for the chosen installed model; no inference
+// or downloads. Restricted to credential-free loopback, even with an injected transport.
+arkjson::Value assistantLocalModelInfo(const AssistantConfig&,const AssistantTransport& offlineTransport={});
+std::vector<std::string> assistantLocalModels(const AssistantConfig&,const AssistantTransport& offlineTransport={});
 // Pure export: never edits a client's global configuration or reads credentials.
 // targets: codex, claude-code, claude-desktop, opencode.
 std::string assistantExternalMcpConfig(const std::string& target,const std::string& executablePath,

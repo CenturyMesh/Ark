@@ -306,6 +306,30 @@ std::vector<std::string> assistantProviderModels(const AssistantConfig& config,c
     require(!response.find("error")||response.find("error")->isNull(),"Provider rejected model catalog discovery.");const auto* data=response.find("data");require(data&&data->t==V::Arr&&data->arr.size()<=4096,"Provider model catalog must contain a bounded data array.");
     std::vector<std::string> models;std::set<std::string> seen;for(const auto& item:data->arr){const auto* model=item.find("id");require(model&&model->t==V::Str&&!model->str.empty()&&model->str.size()<=128&&std::all_of(model->str.begin(),model->str.end(),[](unsigned char c){return c>=33&&c<127;}),"Provider catalog contains an invalid model ID.");if(seen.insert(model->str).second)models.push_back(model->str);}return models;
 }
+static void validateLocalModelRoute(const AssistantConfig& config){
+    validateAssistantConfig(config);
+    const std::string suffix="/v1/chat/completions";
+    require(config.provider=="ollama"&&config.authMode==AssistantAuthMode::ApiKey&&config.protocol==AssistantProtocol::ChatCompletions&&config.apiKeyEnv.empty()&&localHttp(config.endpoint),"Local model discovery requires a credential-free loopback Ollama connector.");
+    require(config.endpoint.size()>suffix.size()&&config.endpoint.ends_with(suffix),"Ollama endpoint must end in /v1/chat/completions.");
+}
+std::vector<std::string> assistantLocalModels(const AssistantConfig& config,const AssistantTransport& offlineTransport){
+    auto query=config;query.model="local-model-catalog";validateLocalModelRoute(query);return assistantProviderModels(query,offlineTransport);
+}
+V assistantLocalModelInfo(const AssistantConfig& config,const AssistantTransport& offlineTransport){
+    validateLocalModelRoute(config);const std::string suffix="/v1/chat/completions";
+    AssistantConfig query=config;query.endpoint=config.endpoint.substr(0,config.endpoint.size()-suffix.size())+"/api/show";query.timeoutSeconds=15;
+    V request=V::makeObj();request.set("model",V::makeStr(config.model));
+    const auto response=offlineTransport?offlineTransport(query,request,nullptr):nativeTransport(query,request,nullptr);
+    require(response.dump().size()<=query.maxResponseBytes,"Local model metadata exceeds configured size limit.");
+    require(!response.find("error")||response.find("error")->isNull(),"Ollama rejected model inspection. Select an installed model.");
+    const auto* capabilities=response.find("capabilities");require(capabilities&&capabilities->t==V::Arr&&capabilities->arr.size()<=64,"Ollama did not report model capabilities; update Ollama before selecting an agent model.");
+    std::set<std::string> names;for(const auto& item:capabilities->arr){require(item.t==V::Str&&item.str.size()<=128,"Invalid Ollama capability metadata.");names.insert(item.str);}
+    // Cloud aliases must not be presented as local inference merely because the server is local.
+    require(!response.find("remote_model")&&!response.find("remote_host")&&!config.model.ends_with(":cloud"),"This Ollama model routes to a cloud provider. Choose a locally installed model.");
+    V info=V::makeObj();info.set("model",V::makeStr(config.model));for(const char* name:{"tools","vision","thinking","completion"})info.set(name,V::makeBool(names.count(name)!=0));
+    if(auto details=response.find("details");details&&details->t==V::Obj)for(const char* name:{"parameter_size","quantization_level"})if(auto item=details->find(name);item&&item->t==V::Str&&item->str.size()<=128)info.set(name,*item);
+    return info;
+}
 V assistantFunctionTools(const V& tools){
     require(tools.t==V::Arr&&tools.arr.size()<=128,"Assistant tools must be an MCP tool array (maximum 128).");
     V functions=V::makeArr();std::set<std::string> names;

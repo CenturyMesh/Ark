@@ -1,5 +1,10 @@
 # ARK agent protocol
 
+026D exposes installed Ollama models for the Assistant and individual agent cards.
+Local models use the same tool permissions, revision guards and steering protocol.
+Tool/vision capabilities are checked from Ollama metadata; declared support is not
+a measured design-quality claim. See [local model setup](LOCAL_MODELS_026D.md).
+
 025B adds manual viewport visibility controls and a selected-part/container
 drawing shortcut. Opening a drawing view or selecting a source does not authorize
 drawing creation; agents still create manufacturing drawings only when requested.
