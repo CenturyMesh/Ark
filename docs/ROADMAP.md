@@ -167,12 +167,13 @@ Goal: explore alternatives and collaborate at complex-product scale.
 
 ## How to choose the next increment
 
-028D addresses **A.03/D.02/E.01/F.03/F.05 — Em curso**: a native Grok Build ACP
+028D addresses **A.03/F.03 — Verificado no escopo** for native contracts and chat
+controls, with **D.02/E.01/F.05 — Parcial**: a native Grok Build ACP
 connector inside Assistant/Team with role-owned tool execution, and an open chat
 panel on first launch with persisted user choice. [Iteration evidence](iterations/028D.md)
 separates protocol, UI, authenticated inference and public artifact qualification.
 
-027D addresses **A.03/D.02/F.05 — Em curso**: a reproduced Ollama GGUF
+027D addresses **A.03 — Verificado no escopo**, with **D.02/F.05 — Parcial**: a reproduced Ollama GGUF
 tool-schema rejection, regression coverage and refreshed public packages.
 [Iteration evidence](iterations/027D.md) separates transport, native CAD,
 distribution and user acceptance. Broader milestone statuses remain **Parcial**.
