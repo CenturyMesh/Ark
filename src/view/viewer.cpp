@@ -305,6 +305,7 @@ static void moveTreeThumb(int y){const int travel=(g_treeTrack.bottom-g_treeTrac
 static bool g_eatNextClick=false;
 static bool g_explorerOpen[4]={true,true,true,true};
 static u64 g_explorerFeature=0;
+static u64 g_viewportContainer=0;
 static bool g_assistantDockOpen=false;
 struct PendingObjectTarget {u64 feature=0,node=0,epoch=0;int copy=0;std::string label,invalidated;};
 static std::optional<PendingObjectTarget> g_pendingObjectTarget;
@@ -1415,7 +1416,7 @@ static arkjson::Value runTool(const std::string& tool,const arkjson::Value& args
         g_draftViews.clear();g_committedRoleSketches.clear();g_liveStepLabel.clear();g_liveCompletedSteps=0;
         g_motionActive=false;g_motionPlaying=false;g_motionRevision=std::numeric_limits<u64>::max();
         g_closedAssemblyGroups.clear();g_collapsedFeatures.clear();
-        g_explorerFeature=0;g_selectedExplorerEntity.reset();g_treeScroll=0;g_treeSelectedZone=-1;
+        g_explorerFeature=0;g_viewportContainer=0;g_selectedExplorerEntity.reset();g_treeScroll=0;g_treeSelectedZone=-1;
         if(g_ownAssistantTool&&g_currentUsageReceipt)applyUsageReceipt(*g_currentUsageReceipt);
         if(g_ownAssistantTool&&g_teamStarted)for(const auto& receipt:g_teamReceipts)if(receipt)applyUsageReceipt(*receipt);
         if(!g_ownAssistantTool){*g_teamCancel=true;g_agentTeam.cancel();g_teamStarted=false;resetTeamView();g_pendingUsageReceipt.reset();g_currentUsageReceipt.reset();g_assistantReceiptId.clear();g_assistantUsageRun={};g_assistantPerformanceRun={};g_assistantUsageRunCounted=true;++g_documentEpoch;*g_assistantCancel=true;g_conversation=arkjson::Value::makeArr();g_chatLog.clear();g_chatLog.push_back({"ARK","Document changed. Describe what you want to create."});}
@@ -3511,7 +3512,9 @@ static void helixDialog();
 static void loftControlDialog();
 static void selectTangentFaces();
 static void collisionCheckDialog();
+static bool viewportDockAction(int);
 static void uiAction(int id){
+    if(viewportDockAction(id))return;
     if(id==860){cancelDirectAuthoring();cancelSketchEditing();cancelSketchDrawing();cancelComponentMove();beginDrawingViewport();return;}if(drawingViewportCommand(id))return;
     if(specializedPatternAuthoringAction(id))return;
     if(id>=800&&id<=816){switch(id){
@@ -3600,7 +3603,7 @@ static void uiAction(int id){
     if(id==468){sheetOpeningDialog(false,true);return;}
     if(id==469){transmissionParametersDialog();return;}
     if(id>=28000&&id<29024){size_t index=(size_t)(id-28000);if(index<g_treeFoldIds.size()){u64 feature=g_treeFoldIds[index];if(g_collapsedFeatures.count(feature))g_collapsedFeatures.erase(feature);else g_collapsedFeatures.insert(feature);}return;}
-    if(id>=30000&&id<31024){size_t index=(size_t)(id-30000);if(index<g_doc.assembly.size()&&!g_doc.assembly[index].feature){u64 group=g_doc.assembly[index].id;if(g_closedAssemblyGroups.count(group))g_closedAssemblyGroups.erase(group);else g_closedAssemblyGroups.insert(group);}return;}
+    if(id>=30000&&id<31024){size_t index=(size_t)(id-30000);if(index<g_doc.assembly.size()&&!g_doc.assembly[index].feature){u64 group=g_doc.assembly[index].id;clearDatumSelection();g_viewportContainer=group;selBody=-1;g_explorerFeature=0;g_picked.clear();refreshSelectionLines();if(g_closedAssemblyGroups.count(group))g_closedAssemblyGroups.erase(group);else g_closedAssemblyGroups.insert(group);}return;}
     if(id>=18000&&id<22000){clearDatumSelection();size_t index=(size_t)(id-18000);if(index<g_explorerEntities.size()){
         g_selectedExplorerEntity=g_explorerEntities[index];g_explorerFeature=g_selectedExplorerEntity->feature;selBody=-1;for(size_t i=0;i<g_bodyIds.size();++i)if(auto* f=g_doc.find(g_bodyIds[i]);f&&featureManufacturingLineage(g_doc,*f).origin==g_explorerFeature){selBody=(int)i;break;}
         g_activeSketch.clear();g_showSketches=false;g_status="Sheet "+g_selectedExplorerEntity->key+" / "+g_selectedExplorerEntity->id+" / double-click to edit";
@@ -4490,6 +4493,7 @@ static void drawCanvases(const GLfloat* vpT){
     }
     glBindTexture(GL_TEXTURE_2D,0);glDisable(GL_POLYGON_OFFSET_FILL);
 }
+#include "viewport_dock.inl"
 static void drawFrame(HDC hdc){
     processDirectAuthoringPreview();
     static auto previous=std::chrono::steady_clock::now();auto now=std::chrono::steady_clock::now();
@@ -4713,7 +4717,7 @@ static void drawFrame(HDC hdc){
             for(size_t j=0;j<g_bodyIds.size();++j)if(g_bodyIds[j]==f.id){row.zone=2000+(int)j;row.selected|=selBody==(int)j;
                 if(j<g_hiddenBodies.size()&&g_hiddenBodies[j])row.subtitle+=" / hidden";}
         }else{
-            auto& node=g_doc.assembly[i];bool group=node.feature==0;row.kind=group?3:0;row.icon=group?404:405;row.name=node.name;row.zone=group?30000+(int)i:-1;auto* feature=g_doc.find(node.feature);if(feature)row.icon=explorerIcon(*feature);row.subtitle=group?"Subassembly":(feature?explorerOperation(*feature):"Part")+" #"+std::to_string(node.feature);
+            auto& node=g_doc.assembly[i];bool group=node.feature==0;row.kind=group?3:0;row.selected=group&&g_viewportContainer==node.id;row.icon=group?404:405;row.name=node.name;row.zone=group?30000+(int)i:-1;auto* feature=g_doc.find(node.feature);if(feature)row.icon=explorerIcon(*feature);row.subtitle=group?"Subassembly":(feature?explorerOperation(*feature):"Part")+" #"+std::to_string(node.feature);
             u64 parent=node.parent;bool ancestorClosed=false;size_t traversed=0;while(parent&&traversed++<g_doc.assembly.size()){ancestorClosed|=g_closedAssemblyGroups.count(parent)!=0;row.depth=std::min(row.depth+1,5);auto it=std::find_if(g_doc.assembly.begin(),g_doc.assembly.end(),[&](const AssemblyNode& n){return n.id==parent;});if(it==g_doc.assembly.end())break;parent=it->parent;}if(ancestorClosed)continue;
             int copies=0,hiddenCopies=0;for(size_t j=0;j<g_instanceIds.size();++j)if(g_instanceIds[j]==node.id){row.zone=2000+(int)j;row.selected|=selBody==(int)j;++copies;
                 if(j<g_hiddenBodies.size()&&g_hiddenBodies[j])++hiddenCopies;}
@@ -5327,6 +5331,7 @@ static void drawFrame(HDC hdc){
     drawMeasurementOverlay(rect,button);
     g_viewSketchDimension={};if(!measurementActive()&&!g_directAuthoring.active&&!g_sketchDrawing.active&&g_showSketches){g_viewSketchDimension=selectedSketchDimension();if(g_viewSketchDimension.valid){float px,py;if(projectScreen(g_viewSketchDimension.position,px,py)){auto& dimension=g_viewSketchDimension;float width=std::min(360.f,textWidth(dimension.text,.66f)+24),x=std::clamp(px+18,(float)viewX+8,(float)(viewX+viewW)-width-8),y=std::clamp(py-40,(float)viewY+185,(float)(viewY+viewH)-58);avoidExtrusionHandle(x,y,width,52);rect(x+2,y+4,width,52,7,0,0,0,.20f,0,0,0,0,0);rect(x,y,width,52,7,.045f,.105f,.135f,.97f,.24f,.57f,.69f,.8f,1);textOut(dimension.text,x+11,y+8,.66f,.71f,.94f,.99f);textOut(dimension.action==577?"Click to edit linked source parameters":dimension.action==89?"Click to edit this native constraint":dimension.action==591?"Click to edit driving dimension":"Click to edit authored coordinates",x+11,y+31,.49f,.59f,.78f,.87f);g_zones.push_back({x,y,width,52,584});}}}
     if(g_error&&!g_lastFailureId.empty())button("Inspect failed operation",(float)(viewX+viewW)-210,(float)viewY+66,190,580);
+    drawViewportDock(rect,glyph,mp);
     g_lastRibbonHint=ribbonHint;
     if(!ribbonHint.empty()){float width=textWidth(ribbonHint,.60f)+22,x=std::clamp((float)mp.x+12.f,10.f,W-width-10.f),y=(float)mp.y+20;rect(x,y,width,29,6,.035,.055,.075,.98,.27,.51,.65,.95,1);textOut(ribbonHint,x+11,y+7,.60f,.87f,.94f,1.f);}
     if(g_drawingViewport.active){
@@ -5721,7 +5726,7 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
                 else if(g_sketchEditing.active){}
                 else if(g_pickKind)pickReference(p.x,p.y,(wp&(MK_CONTROL|MK_SHIFT))!=0);
                 else{int b=pickBody(p.x,p.y);
-                g_explorerFeature=0;selBody=b;g_picked.clear();refreshSelectionLines();g_selectedNotch=0;g_notchScroll=0;
+                g_viewportContainer=0;g_explorerFeature=0;selBody=b;g_picked.clear();refreshSelectionLines();g_selectedNotch=0;g_notchScroll=0;
                 if(selBody>=0){g_activeSketch.clear();g_showSketches=false;rebuildSketchOverlay();}}
             }
             g_eatNextClick=false;g_pressWasButton=false;g_cubePress=false;g_foldScrubbing=false;g_sheetScrubbing=false;g_suspScrub=-1;
@@ -5775,7 +5780,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     bool startupUiTest=false;bool stampsUiTest=false;bool planesSectionsUiTest=false;
     bool specializedPatternUiTest=false;bool advancedSheetmetalUiTest=false;bool nativeVertexPullUiTest=false;bool cadImportUiTest=false;bool holesOrchestratorUiTest=false;bool designContainerUiTest=false;
     bool directAuthoringUiTest=false,parametricAuthoringUiTest=false,skeletonEditorUiTest=false,imageAttachmentUiTest=false,assistantSteeringUiTest=false;
-    bool bomUiTest=false;bool drawingWorkspaceUiTest=false;bool drawingViewportUiTest=false;bool measurementUiTest=false;bool authoringUiTest=false;
+    bool viewportDockUiTest=false;bool bomUiTest=false;bool drawingWorkspaceUiTest=false;bool drawingViewportUiTest=false;bool measurementUiTest=false;bool authoringUiTest=false;
     bool selectionPickingUiTest=false;bool interactionUiTest=false,connectorsUiTest=false,actionIconsUiTest=false,treeUiTest=false,arcUiTest=false,completionUiTest=false,sketchDrawingUiTest=false,sketchEditUiTest=false,selectionGlowUiTest=false,datumAuthoringUiTest=false,typedSketchUiTest=false;
     bool selfTest=false,assemblyTest=false,dialogTest=false,bendTest=false,bendExportTest=false,sourceTest=false,sketchTest=false,assistantTest=false,nativeUiTest=false,renderUiTest=false,engineeringUiTest=false,sheetShowcaseTest=false,contextUiTest=false,suspensionUiTest=false,connectChatGpt=false,motionUiTest=false,motionPlay=false,navigationUiTest=false,projectionUiTest=false,frameToolsUiTest=false;unsigned exitAfterMs=0;std::string endpointFile,requestedSketch;int requestedOpening=-1;double requestedFold=-1,showcaseProgress=-1;std::string shotPath="ark_studio.png",loadPath,scriptPath,importPath,showcaseView,spotlightName,suspensionFeatureName,motionDriverName,motionSpeed;double requestedMotionTime=0;std::vector<std::string> suspensionValues;
     int requestedPathSamples=1;bool studioRenderTest=false,requestedPathTracing=false;
@@ -5815,6 +5820,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         else if(a=="--path-samples"&&i+1<argc)requestedPathSamples=std::clamp(_wtoi(argv[++i]),1,4096);
         else if(a=="--self-test-authoring-ui"){authoringUiTest=true;g_headless=true;}
         else if(a=="--self-test-bom-ui"){bomUiTest=true;g_headless=true;}
+        else if(a=="--self-test-viewport-dock-ui"){viewportDockUiTest=true;g_headless=true;}
         else if(a=="--self-test-drawing-viewport-ui"){drawingViewportUiTest=true;g_headless=true;}
         else if(a=="--drawing-workspace-test"){drawingWorkspaceUiTest=true;g_headless=true;}
         else if(a=="--self-test-measurement-ui"){measurementUiTest=true;g_headless=true;}
@@ -6263,6 +6269,9 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     }
     if(drawingWorkspaceUiTest){
 #include "drawing_workspace_selftest.inl"
+    }
+    if(viewportDockUiTest){
+#include "viewport_dock_selftest.inl"
     }
     if(drawingViewportUiTest){
 #include "drawing_viewport_selftest.inl"

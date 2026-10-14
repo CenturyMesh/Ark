@@ -5,7 +5,7 @@ static std::string g_selectedDatumName;
 static void viewRay(int,int,Vec3&,Vec3&);
 static bool projectScreen(Vec3,float&,float&);
 
-static void clearDatumSelection(){g_selectedDatumName.clear();}
+static void clearDatumSelection(){g_selectedDatumName.clear();g_viewportContainer=0;}
 static void sanitizeDatumViewState(){
     auto exists=[](const std::string& name){return std::any_of(g_doc.planes.begin(),g_doc.planes.end(),[&](const DatumPlane& d){return d.name==name;});};
     for(auto it=g_hiddenDatumNames.begin();it!=g_hiddenDatumNames.end();)if(!exists(*it))it=g_hiddenDatumNames.erase(it);else ++it;

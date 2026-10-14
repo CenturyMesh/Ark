@@ -1,5 +1,10 @@
 # ARK agent protocol
 
+025B adds manual viewport visibility controls and a selected-part/container
+drawing shortcut. Opening a drawing view or selecting a source does not authorize
+drawing creation; agents still create manufacturing drawings only when requested.
+The 024B authoring tools and source-format contracts below remain unchanged.
+
 024B discovers **92 standalone tools**. Read `agent_onboard{topic:"stamps"}`
 for portable embedded PNG/JPEG, projected **Stamps**, same-body face appearances
 and exact split-line regions. Generate imagery through an actually available

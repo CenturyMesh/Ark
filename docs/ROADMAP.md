@@ -50,6 +50,11 @@ remains unimplemented. Portable-core checks are a separate scope.
 
 ## A — Trust and foundation
 
+025B adds an in-viewport visibility dock and selected-part/container access to
+existing manufacturing sheets (B.01/B.05). Opening that view does not create a
+drawing. [025B evidence](iterations/025B.md) records local interaction and visual
+checks; broader milestones remain **Parcial**.
+
 024B extends B.01/B.02/B.03 with embedded Stamps, exact split-face regions and
 associative plane/line section authoring; D.02/D.03 with live multimodal steering
 and the corrected inline-snapshot coordination contract. Conditional source39
