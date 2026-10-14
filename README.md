@@ -13,13 +13,13 @@
 Powered by C++ and Open CASCADE. Windows includes the graphical Studio; Linux
 currently provides the headless CLI, MCP server and native geometry worker.
 
-**Download ready-to-run packages - 016F / 0.9.17:**
+**Download ready-to-run preview packages - 027D / 0.9.28:**
 
-[**Windows x64 - Studio + CLI/MCP (ZIP)**](https://github.com/CenturyMesh/Ark/releases/download/v0.9.17/ark-windows-x64-0.9.17.zip) | [**Linux x64 - headless CLI/MCP (tar.gz)**](https://github.com/CenturyMesh/Ark/releases/download/v0.9.17/ark-linux-x64-headless-0.9.17.tar.gz)
+[**Windows x64 - Studio + CLI/MCP (ZIP)**](https://github.com/CenturyMesh/Ark/releases/download/v0.9.28/ark-windows-x64-0.9.28.zip) | [**Linux x64 - headless CLI/MCP (tar.gz)**](https://github.com/CenturyMesh/Ark/releases/download/v0.9.28/ark-linux-x64-headless-0.9.28.tar.gz)
 
 Extract the Windows ZIP and run `ARK.cmd`. For Linux, extract the archive and run
 `bin/ark-mcp`; this package has no graphical Studio. These are prerelease binaries
-for manual evaluation. [Release notes, checksums and OCCT source](https://github.com/CenturyMesh/Ark/releases/tag/v0.9.17).
+for manual evaluation. [Release notes, checksums and OCCT source](https://github.com/CenturyMesh/Ark/releases/tag/v0.9.28).
 No compilation is required to use these downloads.
 
 ARK is a native C++ design workspace for creating editable parts, assemblies and
@@ -36,7 +36,7 @@ commands, document history and revision checks.
 New to ARK? Try the [first-part walkthrough](docs/FIRST_TRY.md) and share a
 [structured experience report](https://github.com/CenturyMesh/Ark/issues/new?template=first_experience.yml).
 
-[**Watch the 50-second guided demo**](https://github.com/CenturyMesh/Ark/releases/download/v0.9.17/ark-guided-demo-016F.mp4)
+[**Watch the 50-second guided demo (016F)**](https://github.com/CenturyMesh/Ark/releases/download/v0.9.17/ark-guided-demo-016F.mp4)
 — an edited sequence of native captures showing a parameter edit and its BOM,
 with the [source and measured evidence](docs/launch/demo.md).
 
