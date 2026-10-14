@@ -1,4 +1,5 @@
 #include "ark/assistant.hpp"
+#include "ark/assistant_acp.hpp"
 #include "ark/assistant_connectors.hpp"
 #include "assistant_vision.hpp"
 #include "assistant_context.hpp"
@@ -265,6 +266,8 @@ std::string assistantUsageLabel(const AssistantUsage& usage){
         (usage.missingResponses?" | partial":"");
 }
 void validateAssistantConfig(const AssistantConfig& config){
+    if(config.protocol==AssistantProtocol::Acp){validateAssistantAcpConfig(config);return;}
+    require(config.authMode!=AssistantAuthMode::CliAccount,"CLI account mode requires the Grok Build ACP connector.");
     require(!config.model.empty()&&config.model.size()<=128,"Choose an API model in Assistant settings first.");
     require(std::all_of(config.model.begin(),config.model.end(),[](unsigned char c){return c>=33&&c<127;}),"Invalid assistant model name.");
     require(config.endpoint.size()<=2048&&config.endpoint.find_first_of("\r\n\t #?\\")==std::string::npos,"Invalid assistant endpoint URL; queries and fragments are not supported.");
@@ -287,12 +290,14 @@ void validateAssistantConfig(const AssistantConfig& config){
     if(config.authMode==AssistantAuthMode::ChatGptPlan)require(config.endpoint=="https://api.openai.com/v1/responses"&&config.protocol==AssistantProtocol::Responses&&config.provider=="openai","ChatGPT plan use requires the official OpenAI Responses connector.");
 }
 bool assistantKeyAvailable(const AssistantConfig& config){
+    if(config.protocol==AssistantProtocol::Acp)return assistantAcpAvailable(config);
     if(config.authMode==AssistantAuthMode::ChatGptPlan)return chatGptPlanReady();
     if(config.apiKeyEnv.empty())return localHttp(config.endpoint);
     if(!identifier(config.apiKeyEnv))return false;
     const char* value=std::getenv(config.apiKeyEnv.c_str());return value&&*value;
 }
 std::vector<std::string> assistantProviderModels(const AssistantConfig& config,const AssistantTransport& offlineTransport){
+    if(config.protocol==AssistantProtocol::Acp){require(!offlineTransport,"ACP catalog discovery uses its explicit channel seam, not an HTTP transport.");return assistantAcpModels(config);}
     require(config.authMode==AssistantAuthMode::ApiKey,"ChatGPT plan models use account discovery.");AssistantConfig discovery=config;
     discovery.model="model-catalog-inspection";discovery.reasoningEffort.clear();
     const std::string suffix=config.protocol==AssistantProtocol::Responses?"/responses":config.protocol==AssistantProtocol::Messages?"/messages":"/chat/completions";
@@ -393,6 +398,7 @@ V assistantRequest(const AssistantConfig& config,const V& conversation,const V& 
     return request;
 }
 AssistantResult runAssistant(const AssistantConfig& config,const V& input,const V& tools,const AssistantTool& callTool,const AssistantEvents& events,const std::atomic_bool* cancel,const AssistantTransport& transport,const AssistantInbox& inbox,const AssistantHistory& history,const AssistantRetryHooks& retryHooks){
+    if(config.protocol==AssistantProtocol::Acp){require(!transport,"Grok Build ACP cannot use an HTTP provider transport or cloud fallback.");return runAssistantAcp(config,input,tools,callTool,events,cancel,inbox,history,retryHooks);}
     validateAssistantConfig(config);cancelled(cancel);
     auto functions=assistantFunctionTools(tools);std::set<std::string> allowed;
     for(auto& fn:functions.arr)allowed.insert(field(fn,"name"));

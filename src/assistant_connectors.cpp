@@ -94,13 +94,15 @@ std::vector<AssistantProviderPreset> assistantProviderPresets(){return {
     {"claude","Claude API","https://api.anthropic.com/v1/messages","ANTHROPIC_API_KEY",AssistantProtocol::Messages},
     {"claude-chat","Claude OpenAI compatibility","https://api.anthropic.com/v1/chat/completions","ANTHROPIC_API_KEY",AssistantProtocol::ChatCompletions},
     {"grok","Grok / xAI API","https://api.x.ai/v1/responses","XAI_API_KEY",AssistantProtocol::Responses},
+    {"grok-build","Grok Build / CLI account","grok","",AssistantProtocol::Acp},
     {"ollama","Ollama local","http://127.0.0.1:11434/v1/chat/completions","",AssistantProtocol::ChatCompletions},
     {"opencode","OpenCode Zen","https://opencode.ai/zen/v1/chat/completions","OPENCODE_API_KEY",AssistantProtocol::ChatCompletions},
     {"custom","Custom compatible endpoint","https://api.openai.com/v1/responses","OPENAI_API_KEY",AssistantProtocol::Responses}};}
-AssistantConfig assistantProviderPreset(const std::string& id){for(const auto& preset:assistantProviderPresets())if(preset.id==id){AssistantConfig out;out.provider=preset.id;out.protocol=preset.protocol;out.endpoint=preset.endpoint;out.apiKeyEnv=preset.apiKeyEnv;return out;}throw std::runtime_error("Unknown assistant provider preset.");}
-std::string assistantProtocolName(AssistantProtocol protocol){switch(protocol){case AssistantProtocol::Responses:return "responses";case AssistantProtocol::ChatCompletions:return "chat-completions";case AssistantProtocol::Messages:return "messages";}throw std::runtime_error("Unknown assistant protocol.");}
-AssistantProtocol assistantProtocolFromName(const std::string& name){if(name=="responses")return AssistantProtocol::Responses;if(name=="chat-completions"||name=="chat"||name=="chat_completions")return AssistantProtocol::ChatCompletions;if(name=="messages")return AssistantProtocol::Messages;throw std::runtime_error("Unknown assistant protocol; choose responses, chat-completions or messages.");}
+AssistantConfig assistantProviderPreset(const std::string& id){for(const auto& preset:assistantProviderPresets())if(preset.id==id){AssistantConfig out;out.provider=preset.id;out.protocol=preset.protocol;out.endpoint=preset.endpoint;out.apiKeyEnv=preset.apiKeyEnv;if(id=="grok-build"){out.authMode=AssistantAuthMode::CliAccount;out.imageInputSupported=false;}return out;}throw std::runtime_error("Unknown assistant provider preset.");}
+std::string assistantProtocolName(AssistantProtocol protocol){switch(protocol){case AssistantProtocol::Responses:return "responses";case AssistantProtocol::ChatCompletions:return "chat-completions";case AssistantProtocol::Messages:return "messages";case AssistantProtocol::Acp:return "acp";}throw std::runtime_error("Unknown assistant protocol.");}
+AssistantProtocol assistantProtocolFromName(const std::string& name){if(name=="responses")return AssistantProtocol::Responses;if(name=="chat-completions"||name=="chat"||name=="chat_completions")return AssistantProtocol::ChatCompletions;if(name=="messages")return AssistantProtocol::Messages;if(name=="acp")return AssistantProtocol::Acp;throw std::runtime_error("Unknown assistant protocol; choose responses, chat-completions, messages or acp.");}
 V assistantAdaptRequest(const AssistantConfig& config,const V& canonicalRequest){
+    if(config.protocol==AssistantProtocol::Acp){V out=canonicalRequest;V input=V::makeArr();for(const auto& row:need(out,"input").arr)if(text(row,"type")!="reasoning")input.arr.push_back(row);out.set("input",input);erase(out,"include");return out;}
     if(config.protocol==AssistantProtocol::Responses){V out=canonicalRequest;
         V input=V::makeArr();for(const auto& item:need(out,"input").arr){
             if(text(item,"type")=="reasoning"){

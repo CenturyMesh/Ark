@@ -45,6 +45,7 @@ add_library(ark STATIC
   src/manufacturing.cpp
   src/dfm.cpp src/dfm_proposals.cpp
   src/assistant_connectors.cpp
+  src/assistant_acp.cpp
   src/component_sources.cpp
   src/component_library.cpp
   src/component_library_tools.cpp
@@ -376,6 +377,9 @@ add_test(NAME assistant-connector COMMAND ark-assistant-tests)
 set_tests_properties(assistant-connector PROPERTIES TIMEOUT 30)
 
 add_executable(ark-provider-connector-tests tests/provider_connector_tests.cpp)
+add_executable(ark-assistant-acp-tests tests/assistant_acp_tests.cpp)
+target_link_libraries(ark-assistant-acp-tests PRIVATE ark)
+add_test(NAME assistant-acp COMMAND ark-assistant-acp-tests)
 target_link_libraries(ark-provider-connector-tests PRIVATE ark)
 add_test(NAME provider-connectors COMMAND ark-provider-connector-tests)
 set_tests_properties(provider-connectors PROPERTIES TIMEOUT 30)
