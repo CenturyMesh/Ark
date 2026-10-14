@@ -9,6 +9,10 @@ current release claim. [release.json](../release.json) owns application identity
 
 | Guide | Read it when |
 |---|---|
+| [022B test guide](AUTHORING_022B_TESTING.md) | You are testing existing-solid resize, background previews, vertex pulls, patterns, advanced sheet metal and drawings in the viewport |
+| [022B integrated drawings](DRAWING_VIEWPORT_022B.md) | The user has explicitly requested drawings for parts/assemblies, or you want to use the manual sheet controls |
+| [022B component patterns](SPECIALIZED_PATTERNS_022B.md) | You need persistent sketch, curve, inheritance or chain placement recipes |
+| [022B sheet programs](ADVANCED_SHEETMETAL_022B.md) | You need exact miter, contour, corner, rip, tab/slot or bend-table authoring within its measured domain |
 | [021B direct extrusion](VIEWPORT_DIMENSIONS.md) | You need a source handle, reverse/symmetric depth or exact up-to-face bound |
 | [021B technical drawings](DRAWINGS.md) | You are authoring a revision-bound sheet with views, sections, dimensions and tolerances |
 | [021B DFM proposals](DFM_PROPOSALS.md) | You need a concrete before/after candidate under the same declared process |

@@ -75,6 +75,20 @@ when only one page was inspected. `library_fetch` downloads a direct public
 HTTPS STEP under byte/time limits, then uses the same validation and ingestion
 path as a local file. No browser credentials or account tokens are sent.
 
+Web search results are lexical candidates, not verified product records.
+A marketplace homepage, general landing page, readable title or empty/challenged
+page does not identify the required component. Inspect an actual product page
+with `library_source_page` and match its reference and requested specification
+before setting `sourcing_status:selected`. If candidates are unrelated, refine
+one concrete manufacturer/reference query or read a known product URL; report
+the missing evidence when access or identity remains unresolved. Preserve the
+actual product URL separately from a STEP download URL and its original bytes.
+Do not replace missing supplier evidence with invented catalog entries.
+
+Apply this acquisition workflow when the task requires real standard/purchased
+components. An open design request can begin with an editable concept; a
+catalog search is not a prerequisite for establishing that concept.
+
 KiCad's 3D library uses CC-BY-SA 4.0 with its library exception. Redistributing
 a library collection has attribution/license obligations even though use in an
 electronic design has an exception. Keep the source's credit/license references;

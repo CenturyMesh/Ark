@@ -24,6 +24,7 @@ int runWorker(const fs::path& requestPath,const fs::path& resultPath){
 
     try{
         V request;if(!arkjson::parse(readFile(requestPath),request)||request.t!=V::Obj)throw std::runtime_error("Invalid native worker request");
+        if(const auto* threads=request.find("native_threads")){if(threads->t!=V::Num||threads->num!=std::floor(threads->num)||threads->num<1||threads->num>64)throw std::runtime_error("Invalid native request thread budget");configureNativeThreadBudget((int)threads->num);}
         auto field=[&](const char* name)->const V&{auto p=request.find(name);if(!p)throw std::runtime_error(std::string("Missing native field: ")+name);return *p;};
         auto text=[&](const char* name){auto& p=field(name);if(p.t!=V::Str||p.str.empty())throw std::runtime_error(std::string("Invalid native string: ")+name);return p.str;};
         auto op=text("operation");V result;

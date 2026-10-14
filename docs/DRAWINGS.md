@@ -1,6 +1,17 @@
 # Associative technical drawings (B.05)
 
-This first local scope authors persistent technical drawings linked to one exact
+022B adds [manufacturing sheets inside the shared CAD viewport](DRAWING_VIEWPORT_022B.md),
+exact part/assembly/occurrence source recipes, an editable source catalog,
+original vector templates, source-linked layout, exact section-region hatches,
+centre marks and projected extent measurements. Read that contract for the
+version-37 additions; the legacy feature-only contract below remains supported.
+
+Agents create, edit, refresh or export drawings only when the user explicitly
+requests that drawing work. Inspection and suggested catalog recipes are
+passive reads; drawing creation is never an automatic design-completion,
+BOM/DFM, document-load or viewport-entry step.
+
+The legacy 021B scope authors persistent technical drawings linked to one exact
 solid definition. Orthographic views derive visible/hidden edges and silhouettes
 from OCCT `HLRBRep_Algo`; sections derive the exact solid/plane intersection.
 Meshes and image pixels do not select these curves or their dimensions.
@@ -9,9 +20,9 @@ Call `agent_onboard{"topic":"drawings"}` and discover exact producer names with
 `reference_inspect` before authoring. `doc_info` lists drawing names;
 `drawing_inspect{}` lists their source feature IDs and observed bindings.
 
-## Studio workspace
+## Legacy native paper workspace
 
-Open **Manage → Drawings**. The native workspace renders a paper sheet from the
+The compatibility native paper workspace renders a paper sheet from the
 same inspected view curves and semantic dimensions. **New drawing** selects the
 exact source definition, units, scale and paper size; it starts with a Top view.
 **Edit sheet** edits those authored inputs. Changing units converts existing
@@ -120,7 +131,7 @@ resolves every dimension and updates the binding atomically; any failure leaves
 the document/revision intact. Source deletion never silently binds a different
 definition. Undo/redo and immutable history retain drawing authoring and bindings.
 
-Documents containing drawings use document version **36**. Older documents keep
+Legacy feature-only drawings use document version **36**. Version-37 recipes follow the linked 022B contract. Older documents keep
 their applicable format. Save stores authored view/dimension inputs and binding,
 without derived measurements, projected B-reps or display polylines. Invalid
 associations remain readable for explicit repair. SQLite and JSON persistence
@@ -146,10 +157,10 @@ authority. Both exports disclose their authority and do not mutate revision.
 
 ## Limits and remaining B.05 work
 
-This is a partial B.05 implementation. Assemblies/occurrence drawing sources,
+This legacy scope is a partial B.05 implementation. The linked 022B scope adds assemblies/occurrence drawing sources, section hatches and centre marks, title blocks and original templates. Remaining work includes
 detail/auxiliary views, arbitrary datum directions, clipped sectional views,
-section labels/cutting-plane symbols, hatching, angular dimensions, GD&T,
-ISO/ASME drafting compliance, title-block templates, drawing PDF/DXF/IGES
+section labels/cutting-plane symbols, angular dimensions, GD&T,
+ISO/ASME drafting compliance, drawing PDF/DXF/IGES
 exchange and exchange readback qualification remain outside this scope.
 The existing BOM remains a separate derived contract; it is not a second
 editable quantity list or an embedded drawing table here. Production and

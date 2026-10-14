@@ -433,29 +433,7 @@ bool resolveAssembly(const Document& d,std::vector<AssemblyPlacement>& placement
                 "ASSEMBLY_JOINT_LIMIT_VIOLATION: pose exceeds mate #"+std::to_string(r.id)+" limits":"Unsatisfied assembly mate #"+std::to_string(r.id));
     }
     try{validateMechanicalGraph(d);for(const auto& mate:d.mates)if(isMechanicalMate(mate.type))prepareMotionRelation(d,mate,*byId.at(mate.a),*byId.at(mate.b),world.at(mate.a),world.at(mate.b));}catch(const std::exception& e){return fail(e.what());}
-    auto number=[&](const std::string& text,const char* label){bool ok=false;double value=evalExpr(text,env,&ok);if(!ok||!std::isfinite(value)||std::fabs(value)>1e6)error=std::string("Invalid assembly pattern expression: ")+label;return value;};
-    for(auto& n:d.assembly)if(n.feature){
-        int copies=1;
-        if(n.pattern.active){
-            if(n.pattern.type!="linear"&&n.pattern.type!="circular")return fail("Unsupported instance pattern: "+n.pattern.type);
-            double raw=number(n.pattern.count,"count");if(!error.empty())return fail(error);
-            if(std::fabs(raw-std::round(raw))>1e-6||raw<2||raw>32)return fail("Instance pattern count must be an integer from 2 to 32");
-            copies=(int)std::round(raw);
-            if(n.pattern.type=="linear"){double dx=number(n.pattern.dx,"dx"),dy=number(n.pattern.dy,"dy"),dz=number(n.pattern.dz,"dz");if(!error.empty())return fail(error);if(dx*dx+dy*dy+dz*dz<=1e-18)return fail("Linear instance pattern spacing is zero");}
-            else{double step=number(n.pattern.step,"step");if(!error.empty())return fail(error);if(!(std::fabs(step)>0&&std::fabs(step)<=360))return fail("Circular instance pattern step must be in (0, 360] degrees");if(n.pattern.axis!="X"&&n.pattern.axis!="Y"&&n.pattern.axis!="Z")return fail("Circular instance pattern axis must be X, Y or Z");}
-        }
-        Mat4 authored0=parentFrame[n.id]*rigid[n.id];
-        Mat4 carry=world[n.id]*authored0.inverted();
-        for(int copy=0;copy<copies;++copy){
-            Mat4 step=Mat4::identity();
-            if(copy){
-                if(n.pattern.type=="linear"){double dx=number(n.pattern.dx,"dx"),dy=number(n.pattern.dy,"dy"),dz=number(n.pattern.dz,"dz");step=Mat4::translation({dx*copy,dy*copy,dz*copy});}
-                else{Vec3 axis=n.pattern.axis=="X"?Vec3{1,0,0}:n.pattern.axis=="Y"?Vec3{0,1,0}:Vec3{0,0,1};step=Mat4::axisAngle(axis,deg2rad(number(n.pattern.step,"step")*copy));}
-                if(!error.empty())return fail(error);
-            }
-            placements.push_back({n.id,n.feature,n.name,carry*(parentFrame[n.id]*step*rigid[n.id]),visibility[n.id],copy});
-        }
-    }
+    if(!expandAssemblyPatterns(d,parentFrame,rigid,world,visibility,placements,error,&result.patternReports))return fail(error);
     if(diagnostics)*diagnostics=std::move(result);
     return true;
 }

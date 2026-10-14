@@ -1,5 +1,43 @@
 # ARK agent protocol
 
+022B retains **86 standalone tools** and expands their existing authoring
+contracts. [Component patterns](SPECIALIZED_PATTERNS_022B.md) add linked
+pattern/sketch/curve/chain sources with stable copy slots and expression-driven
+recomputation. [Advanced sheet operations](ADVANCED_SHEETMETAL_022B.md) add
+bounded exact miter/straight-contour/corner/notch/tab and bend-table geometry.
+New source recipes require document **37**; the release identity alone does not
+change a document's format. Keep B.01/B.02/B.04/B.05 and C.01 **Parcial** outside
+their measured local scope.
+
+Agents create, edit, refresh or export 2D technical/manufacturing drawings
+**only when the user explicitly requests that drawing work**. Design completion,
+BOM review, DFM and an available template do not authorize drawing writes.
+Read-only discovery remains available, and human Studio controls remain manual.
+For requested drawing work, call `drawing_inspect{}` first and read `sources[]`.
+Each supported part, group/root assembly or occurrence/copy source exposes an
+editable `suggested_drawing`; unsupported sources name the reason. Review that
+recipe, then `drawing.set` through revision-checked `doc_apply`, inspect the
+current result, explicitly `drawing.refresh` after source changes and
+`drawing_export` only at the current revision. Read [the drawing contract](DRAWINGS.md).
+Source identities, frames and exact curves remain the geometric authority;
+SVG is a presentation export. Tolerances require explicit caller input.
+
+Load `agent_onboard{topic:"assembly"|"automation"|"sheet"|"drawings"}` for the
+corresponding 022B contract. Human Studio controls use the same editable recipes.
+Start open design requests with a coherent editable concept; load specialized
+catalog, DFM or process workflows when required by the user's actual task.
+Honor explicit processes/materials from the start. Focused remains the default
+and Parallel an option, without default turn/token budgets.
+
+For an exact CAD vertex pull, first read `native_inspect{id}.topology.vertices`
+and retain its real `vertex.N` name and `source_topology` B-rep digest. Use
+`native_solid` with `inputs:[source]`,
+`native:{op:"vertex_pull",source_vertex,source_topology}` and source-local
+expression displacement `p:{dx,dy,dz}`. The supported domain is a closed
+planar-triangle/convex-quad polyhedron; affected nonplanar quads are explicitly
+faceted. Curved, holed, complex, stale, intersecting or degenerate cases reject.
+Display mesh indices and image pixels cannot identify these exact vertices.
+
 021B discovers **86 standalone tools**. [Direct extrusion](VIEWPORT_DIMENSIONS.md)
 retains exact source/limit bodies, [associative drawings](DRAWINGS.md) bind to a
 source B-rep and revision, and [DFM proposals](DFM_PROPOSALS.md) remain
@@ -8,8 +46,9 @@ uses Z-up presets or an explicit caller direction/up pair. Read the scoped
 contracts before writing; none of these tools alone qualifies manufacture.
 
 B.05 has a partial associative technical drawing scope: exact orthographic HLR
-views, plane-section contours and semantic dimensions/tolerances bound to the
-observed solid and topology. Call `agent_onboard{topic:"drawings"}` and read
+and isometric views, plane-section contours/hatches, circular centerlines,
+projected extents and semantic dimensions bound to the observed part or
+explicit assembly occurrence set. Call `agent_onboard{topic:"drawings"}` and read
 [the drawing contract](DRAWINGS.md). `drawing.set`/`refresh`/`remove` require
 current `expected_revision` in `doc_apply`; stale drawings cannot export.
 JSON retains exact derived curves and SVG is a presentation preview. This does

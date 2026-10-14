@@ -5,8 +5,10 @@
 namespace ark {
 struct AssemblyPattern {
     bool active=false;
-    std::string type; // linear or circular
+    std::string type; // linear/circular, pattern_driven, sketch_driven, curve_driven, chain
     std::string count,dx="0",dy="0",dz="0",step="90",axis="Z";
+    arkjson::Value source; // Persistent recipe; evaluated points/frames are never stored.
+    std::vector<int> skips; // Stable copy slots; seed 0 cannot be skipped.
 };
 struct AssemblyNode {
     u64 id=0,parent=0,feature=0; // feature=0 is a subassembly/group
@@ -46,9 +48,29 @@ struct AssemblyDiagnostics {
     int rank=0,freeDofs=0;
     double maxPositionMm=0,maxAngleDeg=0;
     std::vector<u64> unconstrainedNodes;
+    arkjson::Value patternReports; // Exact source/placement evidence and explicitly unchecked domains.
 };
 struct AssemblyPlacement {u64 node=0,feature=0;std::string name;Mat4 world;bool visible=true;int copy=0;};
 class Document;
+bool specializedAssemblyPattern(const AssemblyPattern&);
+arkjson::Value assemblyPatternToJson(const AssemblyPattern&);
+void readAssemblyPattern(AssemblyPattern&,const arkjson::Value&);
+// Bind unique source names once at authoring; stored identities are IDs.
+void bindAssemblyPatternSource(const Document&,AssemblyPattern&);
+// Metadata-only slot discovery: no native geometry sampling or assembly solve.
+std::vector<int> assemblyPatternCopySlots(const Document&,const AssemblyNode&);
+// Definition identity for an already validated stable slot (no native sampling).
+u64 assemblyPatternCopyFeature(const Document&,const AssemblyNode&,int copy);
+// Parsing/history validates authoring without requiring unevaluated B-reps.
+// Runtime publication still resolves the exact evaluated placements.
+bool validateAssemblyPatternAuthoring(const Document&,std::string& error);
+// Expand after the mate solve. Failure publishes no partial placements.
+bool expandAssemblyPatterns(const Document&,
+    const std::unordered_map<u64,Mat4>& parentFrames,
+    const std::unordered_map<u64,Mat4>& rigid,
+    const std::unordered_map<u64,Mat4>& solvedWorld,
+    const std::unordered_map<u64,bool>& visibility,
+    std::vector<AssemblyPlacement>&,std::string& error,arkjson::Value* reports=nullptr);
 bool resolveAssembly(const Document&,std::vector<AssemblyPlacement>&,std::string& error,
                      AssemblyDiagnostics* diagnostics=nullptr,bool reportUnsatisfied=false);
 // Solves a temporary mate and removes it before returning. The document is unchanged.

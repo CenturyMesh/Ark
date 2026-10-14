@@ -161,16 +161,8 @@ void editNode(AssemblyNode& n,const V& j,const Document& doc){
     if(j.find("name"))n.name=str(j,"name");
     if(auto p=j.find("p")){if(p->t!=V::Obj)throw std::runtime_error("p must be object");for(auto& kv:p->obj)n.p[kv.first]=expression(kv.second);}
     if(auto pattern=j.find("pattern")){
-        if(pattern->t==V::Null)n.pattern={};
-        else if(pattern->t!=V::Obj)throw std::runtime_error("assembly pattern must be an object");
-        else{
-            auto kind=pattern->find("type");if(!kind||kind->t!=V::Str||(kind->str!="linear"&&kind->str!="circular"))throw std::runtime_error("instance pattern type must be linear or circular");
-            n.pattern.active=true;n.pattern.type=kind->str;
-            auto take=[&](const char* key,std::string& dest,const char* fallback){if(auto value=pattern->find(key))dest=expression(*value);else if(fallback)dest=fallback;else throw std::runtime_error(std::string("instance pattern needs ")+key);};
-            take("count",n.pattern.count,nullptr);
-            if(n.pattern.type=="circular"){take("step",n.pattern.step,"90");if(auto axis=pattern->find("axis")){if(axis->t!=V::Str||(axis->str!="X"&&axis->str!="Y"&&axis->str!="Z"))throw std::runtime_error("Circular instance pattern axis must be X, Y or Z");n.pattern.axis=axis->str;}else n.pattern.axis="Z";}
-            else{take("dx",n.pattern.dx,"0");take("dy",n.pattern.dy,"0");take("dz",n.pattern.dz,"0");}
-        }
+        readAssemblyPattern(n.pattern,*pattern);
+        if(n.pattern.active)bindAssemblyPatternSource(doc,n.pattern);
     }
     if(n.pattern.active&&!n.feature)throw std::runtime_error("Instance pattern requires a part");
 }
@@ -186,6 +178,7 @@ void validatedMaterials(const Document& d){
 void validated(Document& d){
     validatedMaterials(d);
     std::string manufacturingError;if(!validateManufacturingRoutes(d,manufacturingError))throw std::runtime_error(manufacturingError);
+    if(std::any_of(d.assembly.begin(),d.assembly.end(),[](const AssemblyNode& n){return specializedAssemblyPattern(n.pattern);})){std::string patternError;if(!validateAssemblyPatternAuthoring(d,patternError))throw std::runtime_error(patternError);}
     d.recompute();
     if(!d.parameterError.empty())throw std::runtime_error(d.parameterError);
     for(auto& r:d.lastResults)if(!r.ok)throw std::runtime_error("Feature #"+std::to_string(r.id)+": "+r.error);
@@ -212,7 +205,7 @@ MeshSelection meshSelection(const Document& d,const V& args){
     }else if(auto feature=args.find("id")){s.feature=id(*feature);s.cacheKey=s.feature;}
     return s;
 }
-Mesh selectedMesh(Document& d,const V& args){
+Mesh selectedMesh(Document& d,const V& args,std::vector<AssemblyPlacement>* captured=nullptr){
     MeshSelection sel=meshSelection(d,args);
     Mesh m;
     if(!d.assembly.empty()&&!sel.feature){
@@ -223,7 +216,7 @@ Mesh selectedMesh(Document& d,const V& args){
             if(sel.useNode)placed=true;
             if(!p.visible)continue;
             auto part=parts.find(p.feature);if(part==parts.end())for(auto& b:d.evalBodies)if(b.id==p.feature){part=parts.emplace(p.feature,b.tessellate(d.tessOpt)).first;break;}
-            if(part!=parts.end())m.append(part->second,p.world);
+            if(part!=parts.end()){m.append(part->second,p.world);if(captured)captured->push_back(p);}
         }
         if(sel.useNode&&!placed)throw std::runtime_error("Assembly copy is not placed");
     }else{
@@ -448,10 +441,8 @@ bool metadataOnlyApply(const Document& document,const V& args){
 }
 void AgentSession::remember(bool projectBoundary){prepared_.clear();if(projectBoundary||document.iterationHistory.t==V::Null){undo_.push_back(documentToJson(document));if(undo_.size()>32)undo_.erase(undo_.begin());}redo_.clear();}
 int patternCopies(const Document& document,const AssemblyNode& node){
-    if(!node.pattern.active||(node.pattern.type!="linear"&&node.pattern.type!="circular"))return 1;
-    bool ok=false;const double raw=evalExpr(node.pattern.count,document.buildEnv(),&ok);
-    if(!ok||std::fabs(raw-std::round(raw))>1e-6||raw<2||raw>32)return 1;
-    return (int)std::round(raw);
+    if(!node.pattern.active)return 1;
+    try{return (int)assemblyPatternCopySlots(document,node).size();}catch(const std::exception&){return 0;}
 }
 bool profileReady(const Document& document,const NamedSketch& sketch){
     try{sketchProfiles(sketch.sk,resolvePlane(document,sketch.sk.plane));return true;}
@@ -461,6 +452,9 @@ V designView(const Document& document,u64 revision){
     V r=V::makeObj(),parameters=V::makeArr(),features=V::makeArr(),sketches=V::makeArr(),nodes=V::makeArr();
     r.set("revision",V::makeNum((double)revision));
     const ExprEnv env=document.buildEnv();
+    std::unordered_map<u64,std::set<u64>> placedDefinitions;V identityErrors=V::makeArr();
+    for(const auto& node:document.assembly)if(node.feature)try{for(int copy:assemblyPatternCopySlots(document,node))placedDefinitions[assemblyPatternCopyFeature(document,node,copy)].insert(node.id);}catch(const std::exception& error){V issue=V::makeObj();issue.set("node",V::makeNum((double)node.id));issue.set("error",V::makeStr(error.what()));identityErrors.arr.push_back(issue);}
+    r.set("placement_identity_checked",V::makeBool(identityErrors.arr.empty()));if(!identityErrors.arr.empty())r.set("placement_identity_errors",identityErrors);
     for(const auto& parameter:document.params){V item=V::makeObj();item.set("name",V::makeStr(parameter.name));item.set("value",V::makeNum(parameter.value));parameters.arr.push_back(item);}
     for(const auto& feature:document.features){
         const FeatureResult* status=nullptr;const Body* body=nullptr;
@@ -472,7 +466,7 @@ V designView(const Document& document,u64 revision){
         V inputs=V::makeArr(),dependents=V::makeArr(),instances=V::makeArr(),usedSketches=V::makeArr();
         for(u64 input:feature.inputs)inputs.arr.push_back(V::makeNum((double)input));
         for(const auto& child:document.features)if(std::find(child.inputs.begin(),child.inputs.end(),feature.id)!=child.inputs.end())dependents.arr.push_back(V::makeNum((double)child.id));
-        for(const auto& node:document.assembly)if(node.feature==feature.id)instances.arr.push_back(V::makeNum((double)node.id));
+        for(u64 node:placedDefinitions[feature.id])instances.arr.push_back(V::makeNum((double)node));
         auto addSketch=[&](const std::string& name){if(name.empty())return;for(const auto& sketch:document.sketches)if(sketch.name==name){for(const auto& old:usedSketches.arr)if(old.str==name)return;usedSketches.arr.push_back(V::makeStr(name));}};
         addSketch(feature.get("sketch"));
         if(const auto* source=feature.nativeSpec.find("source_sketch");source&&source->t==V::Str)addSketch(source->str);
@@ -1292,7 +1286,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
             if(args.find("candidate_id"))return snapshotCandidate(args);
             bool inlineImage=true;if(const auto* flag=args.find("inline_image")){if(flag->t!=V::Bool)throw std::runtime_error("inline_image must be boolean");inlineImage=flag->b;}
             if(!inlineImage&&path.empty())throw std::runtime_error("A path is required when inline_image is false");
-            Mesh m=selectedMesh(document,args);SnapCam camera=configuredSnapshotCamera(args,m.computeBBox(),view);
+            std::vector<AssemblyPlacement> captured;Mesh m=selectedMesh(document,args,&captured);SnapCam camera=configuredSnapshotCamera(args,m.computeBBox(),view);
             const int width=inlineImage?1024:1280,height=inlineImage?640:800;const Image image=renderSnapshot(m,width,height,camera);
             if(!inlineImage&&!path.empty()&&!writePNG(path.c_str(),image))throw std::runtime_error("Snapshot failed");
             MeshSelection sel=meshSelection(document,args);
@@ -1301,7 +1295,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
             if(sel.copy>=0)r.set("copy",V::makeNum(sel.copy));
             V evidence=V::makeObj();evidence.set("revision",V::makeNum((double)revision));evidence.set("current_revision",V::makeNum((double)revision));evidence.set("view",V::makeStr(view));evidence.set("width",V::makeNum(width));evidence.set("height",V::makeNum(height));evidence.set("authority",V::makeStr("display_mesh"));evidence.set("capture_source",V::makeStr("software_snapshot"));
             V viewState=V::makeObj();viewState.set("target_mm",snapshotVectorValue(camera.target));viewState.set("direction_target_to_eye",snapshotVectorValue(camera.direction));viewState.set("up",snapshotVectorValue(camera.up));viewState.set("distance_mm",V::makeNum(camera.dist));viewState.set("fov_deg",V::makeNum(camera.fovDeg));evidence.set("view_state",viewState);
-            if(sel.feature)evidence.set("feature_id",V::makeNum((double)sel.feature));if(sel.useNode){evidence.set("occurrence_id",V::makeNum((double)sel.node));if(!sel.nodeName.empty())evidence.set("name",V::makeStr(sel.nodeName));if(sel.copy>=0)evidence.set("copy",V::makeNum(sel.copy));for(const auto& node:document.assembly)if(node.id==sel.node&&node.feature)evidence.set("feature_id",V::makeNum((double)node.feature));}
+            if(sel.feature)evidence.set("feature_id",V::makeNum((double)sel.feature));if(sel.useNode){evidence.set("occurrence_id",V::makeNum((double)sel.node));if(!sel.nodeName.empty())evidence.set("name",V::makeStr(sel.nodeName));if(sel.copy>=0)evidence.set("copy",V::makeNum(sel.copy));std::set<u64> definitions;for(const auto& occurrence:captured)definitions.insert(occurrence.feature);if(definitions.size()==1)evidence.set("feature_id",V::makeNum((double)*definitions.begin()));else{V ids=V::makeArr();for(u64 feature:definitions)ids.arr.push_back(V::makeNum((double)feature));evidence.set("feature_ids",ids);}}
             for(const char* key:{"label","reference","stage"})if(const auto* value=args.find(key)){if(value->t!=V::Str||value->str.size()>128)throw std::runtime_error("Snapshot label/reference/stage must be a bounded string");evidence.set(key,*value);}
             evidence.set("committed",V::makeBool(true));r.set("revision",V::makeNum((double)revision));r.set("visual_evidence",evidence);V output=result(r);
             if(inlineImage)return snapshotImageResult(image,evidence,path);
@@ -1369,8 +1363,8 @@ V AgentSession::tools(bool detailed){
         {"doc_redo","Redo a transaction after undo.",R"({"type":"object"})",false},
         {"eval_expr","Evaluate finite arithmetic and trigonometry with named parameters; trig uses radians, deg() converts degrees.",R"({"type":"object","properties":{"expr":{"type":"string"}},"required":["expr"]})",true},
         {"skeleton_inspect","Inspect native Skeleton code, editable inputs, source-owned relations/vector arrays and stable pattern ownership. Read-only; lengths mm.",R"({"type":"object","properties":{"expected_revision":{"type":"integer","minimum":0}},"additionalProperties":false})",true},
-        {"drawing_inspect","List authored technical drawings, or inspect one name with exact orthographic HLR/section curves and semantic dimensions. Changed source B-reps return stale and omit current measurements; missing references/source return invalid. Use explicit revision-checked drawing.refresh before export. Feature-local single exact solid; SVG is display sampling, JSON retains exact derived curves.",R"({"type":"object","properties":{"name":{"type":"string","minLength":1,"maxLength":128},"expected_revision":{"type":"integer","minimum":0}},"additionalProperties":false})",true},
-        {"drawing_export","Atomically publish a new local json or svg technical drawing at expected_revision. Requires a current exact source binding and resolved dimensions. JSON retains derived exact B-rep curves, samples and measurements; SVG is a display preview with dimension/tolerance labels. Existing destinations and stale/invalid drawings reject.",R"({"type":"object","properties":{"name":{"type":"string","minLength":1,"maxLength":128},"expected_revision":{"type":"integer","minimum":0},"path":{"type":"string","minLength":1,"maxLength":4096},"format":{"enum":["json","svg"]}},"required":["name","expected_revision","path","format"],"additionalProperties":false})",false},
+        {"drawing_inspect","List authored technical drawings, or inspect one name with exact orthographic HLR/section curves and semantic dimensions. Changed source B-reps return stale and omit current measurements; missing references/source return invalid. Use explicit revision-checked drawing.refresh before export. Feature definitions, exact occurrence/copy or root/group assemblies. Empty args returns a passive source catalog with editable suggested_drawing recipes; users must request drawings before agents author them. Original templates, tolerances, exact sections and isometric views share Studio CAD viewport. SVG is display sampling, JSON retains exact derived curves.",R"({"type":"object","properties":{"name":{"type":"string","minLength":1,"maxLength":128},"expected_revision":{"type":"integer","minimum":0}},"additionalProperties":false})",true},
+        {"drawing_export","Atomically publish a new local json or svg technical drawing at expected_revision. Requires a current exact source/occurrence binding and resolved dimensions. Only export when the user requests it. JSON retains derived exact B-rep curves, samples and measurements; SVG is a display preview with dimension/tolerance labels. Existing destinations and stale/invalid drawings reject.",R"({"type":"object","properties":{"name":{"type":"string","minLength":1,"maxLength":128},"expected_revision":{"type":"integer","minimum":0},"path":{"type":"string","minLength":1,"maxLength":4096},"format":{"enum":["json","svg"]}},"required":["name","expected_revision","path","format"],"additionalProperties":false})",false},
         {"skeleton_compile","Read-only native declarative Skeleton syntax/relation preview. Declarations: input name = expression; relation name = expression; array name[count] = [x,y,z] using index; pattern name from feature count expression step [x,y,z]. No arbitrary code execution. Use doc_preview/doc_apply skeleton.set for geometry-checked atomic changes.",R"({"type":"object","properties":{"source":{"type":"string","maxLength":65536},"expected_revision":{"type":"integer","minimum":0}},"required":["source"],"additionalProperties":false})",true},
         {"collision_inspect","Read-only collision feedback for two feature definitions or placed assembly occurrences. Exact single solids return contact, distance and intersection volume; triangle meshes return real boundary contacts and bounded containment evidence with explicit unknowns. Not dynamics or manufacturing qualification. mode exact rejects mesh inputs; auto uses existing native authority when both operands have B-reps. a/b are id/name or {id} / {node,copy}. Same operand rejects.",R"({"type":"object","properties":{"a":{"type":["integer","string","object"]},"b":{"type":["integer","string","object"]},"mode":{"type":"string","enum":["auto","exact","mesh"]},"expected_revision":{"type":"integer","minimum":0}},"required":["a","b"],"additionalProperties":false})",true},
         {"mesh_inspect","Compact indexed topology audit: bounds, area, edge counts, components and signed volume for closed oriented edges. Does not certify solids or detect self intersections. Omit id to inspect final outputs only. node accepts a unique instance name or an id, and copy frames one pattern placement.",R"({"type":"object","properties":{"node":{"anyOf":[{"type":"integer","minimum":1},{"type":"string"}]},"copy":{"type":"integer","minimum":0,"maximum":31},"id":{"type":"integer","minimum":1}}})",true},
@@ -1433,6 +1427,10 @@ V AgentSession::tools(bool detailed){
             "radius":{"type":["number","string"]},"distance":{"type":["number","string"]},"width":{"type":["number","string"]},"height":{"type":["number","string"]},"opacity":{"type":"number"},"path":{"type":"string"}
         })",coreFields);for(const auto& entry:coreFields.obj)commandProps.set(entry.first,entry.second);
         commandProps.set("drawing",drawingAuthoringSchema());
+        {V pattern;arkjson::parse(R"({"oneOf":[{"type":"null"},{"type":"object","properties":{"type":{"type":"string","enum":["linear","circular","pattern_driven","sketch_driven","curve_driven","chain"]},"count":{"type":["number","string"],"description":"2..32 for curve/chain; pattern/sketch may infer stable slots."},"dx":{"type":["number","string"]},"dy":{"type":["number","string"]},"dz":{"type":["number","string"]},"step":{"type":["number","string"]},"axis":{"type":"string","enum":["X","Y","Z"]},"skips":{"type":"array","items":{"type":"integer","minimum":1,"maximum":31},"uniqueItems":true,"maxItems":31},"source":{"type":"object","description":"Bound source recipe. Onboard assembly for actual points, guide, inheritance and chain contracts.","properties":{"node":{"type":["integer","string"]},"feature":{"type":["integer","string"]},"sketch":{"type":"string"},"points":{"type":"array","items":{"type":"string"}},"reference":{"type":"string"},"spacing":{"enum":["equal","pitch"]},"pitch":{"type":["number","string"]},"margin":{"type":["number","string"]},"alignment":{"enum":["fixed","tangent"]},"normal":{"type":"array","minItems":3,"maxItems":3,"items":{"type":["number","string"]}},"closed":{"type":"boolean"},"endpoint":{"enum":["exclude","include"]},"max_source_error":{"type":["number","string"]},"alternate_feature":{"type":["integer","string"]},"alternate_node":{"type":["integer","string"]},"alternate_angle":{"type":["number","string"]}},"additionalProperties":false}},"required":["type"],"additionalProperties":false}]})",pattern);commandProps.set("pattern",pattern);}
+        {V operation=*commandProps.find("op"),choices=*operation.find("enum");for(const char* family:{"miter","swept_flange","corner","rip","tab"})for(const char* action:{"add","edit","remove"})choices.arr.push_back(V::makeStr(std::string("sheet.")+family+"."+action));choices.arr.push_back(V::makeStr("sheet.bend_table.set"));choices.arr.push_back(V::makeStr("sheet.bend_table.remove"));operation.set("enum",choices);commandProps.set("op",operation);
+            V object;arkjson::parse(R"({"type":"object","description":"Editable authored sheet operation; agent_onboard sheet supplies exact operation-specific required fields. Unknown geometry fields reject at runtime."})",object);for(const char* field:{"miter","swept_flange","corner","rip","tab","table","base","flange","opening","hem","stamp"})if(std::string(field)=="corner"){V options=V::makeArr();options.arr.push_back(*commandProps.find("corner"));options.arr.push_back(object);V combined=V::makeObj();combined.set("oneOf",options);commandProps.set(field,combined);}else commandProps.set(field,object);
+        }
         V part=V::makeObj(),partChoices=V::makeArr(),empty=V::makeObj();empty.set("type",V::makeStr("null"));partChoices.arr.push_back(partMetadataSchema());partChoices.arr.push_back(empty);part.set("oneOf",partChoices);commandProps.set("part",part);
         if(auto entity=commandProps.find("entity");entity&&entity->find("oneOf")){
             V variants=*entity->find("oneOf");
@@ -1440,7 +1438,7 @@ V AgentSession::tools(bool detailed){
                 V recipe=V::makeObj(),recipeProps=V::makeObj(),type=V::makeObj(),types=V::makeArr();for(const auto& name:sketchRecipeTypes())types.arr.push_back(V::makeStr(name));types.arr.push_back(V::makeStr("three_point"));types.arr.push_back(V::makeStr("tangent"));type.set("type",V::makeStr("string"));type.set("enum",types);recipeProps.set("type",type);recipe.set("type",V::makeStr("object"));recipe.set("properties",recipeProps);recipe.set("additionalProperties",V::makeBool(true));recipe.set("description",V::makeStr("Typed source fields depend on type. agent_onboard sketch provides complete defaults; runtime rejects unknown fields and degeneracy. Edit the source with sketch.entity.set."));properties.set("recipe",recipe);shape.set("properties",properties);variants.arr[1]=shape;V updated=*entity;updated.set("oneOf",variants);commandProps.set("entity",updated);}
         }
         command.set("additionalProperties",V::makeBool(true));
-        {V native=commandProps.find("native")?*commandProps.find("native"):V::makeObj();V extra=agentParametricNativeSchema();V fields=native.find("properties")?*native.find("properties"):V::makeObj();if(const auto* props=extra.find("properties"))for(const auto& p:props->obj)fields.set(p.first,p.second);V index=V::makeObj();index.set("type",V::makeStr("integer"));index.set("minimum",V::makeNum(0));V indices=V::makeObj();indices.set("type",V::makeStr("array"));indices.set("items",index);indices.set("minItems",V::makeNum(1));indices.set("maxItems",V::makeNum(12288));fields.set("vertices",indices);fields.set("triangles",indices);V fingerprint=V::makeObj();fingerprint.set("type",V::makeStr("string"));fields.set("source_topology",fingerprint);native.set("properties",fields);commandProps.set("native",native);}
+        {V native=commandProps.find("native")?*commandProps.find("native"):V::makeObj();V extra=agentParametricNativeSchema();V fields=native.find("properties")?*native.find("properties"):V::makeObj();if(const auto* props=extra.find("properties"))for(const auto& p:props->obj)fields.set(p.first,p.second);V index=V::makeObj();index.set("type",V::makeStr("integer"));index.set("minimum",V::makeNum(0));V indices=V::makeObj();indices.set("type",V::makeStr("array"));indices.set("items",index);indices.set("minItems",V::makeNum(1));indices.set("maxItems",V::makeNum(12288));fields.set("vertices",indices);fields.set("triangles",indices);V fingerprint=V::makeObj();fingerprint.set("type",V::makeStr("string"));fields.set("source_topology",fingerprint);fields.set("source_vertex",fingerprint);native.set("properties",fields);commandProps.set("native",native);}
         V examples;arkjson::parse(R"([{"op":"param.set","name":"width","expr":20},{"op":"feature.add","type":"box","name":"Base","p":{"dx":"width","dy":30,"dz":10}},{"op":"feature.edit","id":"Base","p":{"dx":25}},{"op":"feature.add","type":"native_solid","name":"Native block","native":{"op":"box"},"p":{"width":11,"depth":7,"height":4}},{"op":"feature.edit","id":"Native block","p":{"height":9}},{"op":"sketch.set","name":"Profile","sketch":{"plane":"XY","entities":[{"kind":"circle","name":"Ring","dof":[0,0,10]}]}},{"op":"assembly.add","name":"Placed base","feature":"Base","parent":0,"p":{"tx":10}},{"op":"mate.add","a":"Anchor","b":"Moving","type":"revolute","reference_a":"origin","reference_b":"origin"},{"op":"assembly.drive","driver":"Moving","mode":"rotate","delta":15}])",examples);command.set("examples",examples);
         arkjson::parse(R"({"oneOf":[{"type":"null"},{"type":"object","properties":{"min":{"type":["number","string"]},"max":{"type":["number","string"]}},"required":["min","max"],"additionalProperties":false}]})",limits);commandProps.set("limits",limits);command.set("properties",commandProps);commands.set("items",command);V newProps=*schema.find("properties");newProps.set("commands",commands);schema.set("properties",newProps);
         if(detailed)t.set("description",V::makeStr(t.find("description")->str+" Required checks are {query:{tool,args,path},op:ge|le|eq|between|true|false,value?,min?,max?,tolerance?,parameters?,diagnose?}. All must pass before commit. doc_preview returns candidate_id; doc_apply accepts candidate_id plus expected_revision instead of commands and reuses checked geometry. material.set also accepts density_kg_m3 instead of density, and physical SI elastic properties. See agent_onboard physics and automation."));

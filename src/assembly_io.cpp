@@ -44,6 +44,7 @@ V assemblyDiagnosticsJson(const AssemblyDiagnostics& d) {
     for(auto& m:d.mates){V row=V::makeObj();row.set("id",V::makeNum((double)m.id));row.set("type",V::makeStr(m.type));row.set("position_residual_mm",V::makeNum(m.positionMm));row.set("angle_residual_deg",V::makeNum(m.angleDeg));row.set("value_error",V::makeNum(m.valueError));
         if(m.hasCoordinate){row.set("position",V::makeNum(m.coordinate));row.set("unit",V::makeStr(m.type=="revolute"?"deg":"mm"));}
         if(m.limited){V limits=V::makeObj();limits.set("min",V::makeNum(m.min));limits.set("max",V::makeNum(m.max));row.set("limits",limits);row.set("limit_residual",V::makeNum(m.limitError));}rows.arr.push_back(row);}
+    if(d.patternReports.t==V::Arr)j.set("patterns",d.patternReports);
     for(auto id:d.unconstrainedNodes)unconstrained.arr.push_back(V::makeNum((double)id));j.set("mates",rows);j.set("unconstrained_nodes",unconstrained);j.set("rank_scope",V::makeStr("local numerical geometric equality constraint Jacobian; joint stop inequalities excluded"));return j;
 }
 }

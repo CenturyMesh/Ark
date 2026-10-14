@@ -12,7 +12,24 @@ arkjson::Value snapshotImageResult(const Image&,const arkjson::Value& visualEvid
 // A session owns its document. UI and MCP call the same command implementation.
 // Calls are serialized by the host; no process-global document state.
 class AgentSession {
+    struct Prepared;
 public:
+    // A worker can hand off the validated receipt, never a bare foreign ID.
+    // Hosts must serialize adoption with live session writes.
+    class PreparedTransfer {
+    public:
+        PreparedTransfer(PreparedTransfer&&) noexcept = default;
+        PreparedTransfer& operator=(PreparedTransfer&&) noexcept = default;
+        PreparedTransfer(const PreparedTransfer&) = delete;
+        PreparedTransfer& operator=(const PreparedTransfer&) = delete;
+        const Document& document() const;
+        const std::string& id() const;
+        const arkjson::Value& result() const;
+    private:
+        friend class AgentSession;
+        explicit PreparedTransfer(std::shared_ptr<Prepared> value):value_(std::move(value)){}
+        std::shared_ptr<Prepared> value_;
+    };
     Document document;
     u64 revision=0;
     arkjson::Value call(const std::string& tool,const arkjson::Value& args);
@@ -27,6 +44,8 @@ public:
     arkjson::Value proposeManufacturing(const arkjson::Value& args);
     arkjson::Value commitPrepared(const arkjson::Value& args);
     arkjson::Value snapshotCandidate(const arkjson::Value& args);
+    std::unique_ptr<PreparedTransfer> takePreparedCandidate(const std::string& id);
+    void adoptPreparedCandidate(PreparedTransfer&&, u64 expectedRevision);
     arkjson::Value failureInfo(const arkjson::Value& args) const;
     arkjson::Value failureExport(const arkjson::Value& args) const;
     arkjson::Value failureReplay(const arkjson::Value& args);

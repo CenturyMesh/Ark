@@ -88,6 +88,17 @@ bool generation36Document(const Document& doc){
     }return false;
 }
 
+bool generation37Document(const Document& doc){
+    for(const auto& feature:doc.features)if(feature.type==FeatureType::NativeSolid&&featureOperation(feature)=="vertex_pull")return true;
+    for(const auto& node:doc.assembly)if(node.pattern.active&&(specializedAssemblyPattern(node.pattern)||node.pattern.source.t!=Value::Null||!node.pattern.skips.empty()))return true;
+    for(const auto& feature:doc.features)if(feature.type==FeatureType::SheetMetal){
+        for(const char* key:{"miters","swept_flanges","corners","rips","tabs"})if(const auto* rows=feature.nativeSpec.find(key);rows&&rows->t==Value::Arr&&!rows->arr.empty())return true;
+        if(feature.nativeSpec.find("bend_table"))return true;
+    }
+    for(const auto& drawing:doc.drawings)if(drawingRequiresVersion37(drawing))return true;
+    return false;
+}
+
 bool generation34Document(const Document& doc){
     for(const auto& sketch:doc.sketches)for(const auto& entity:sketch.sk.ents)if(entity.kind==SketchEnt::Recipe)return true;
     for(const auto& feature:doc.features)if(feature.type==FeatureType::Curve&&feature.nativeSpec.find("tolerance")){const auto* op=feature.nativeSpec.find("op");if(op&&op->asStr()=="equation")return true;}
@@ -574,7 +585,7 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
         r.set("next_assembly_id",Value::makeNum((double)doc.nextAssemblyId_));Value nodes=Value::makeArr();
         for(auto& n:doc.assembly){Value j=Value::makeObj(),p=Value::makeObj();j.set("id",Value::makeNum((double)n.id));j.set("parent",Value::makeNum((double)n.parent));j.set("feature",Value::makeNum((double)n.feature));j.set("name",Value::makeStr(n.name));j.set("visible",Value::makeBool(n.visible));j.set("fixed",Value::makeBool(n.fixed));
             std::vector<std::string> keys;for(auto& kv:n.p)keys.push_back(kv.first);std::sort(keys.begin(),keys.end());for(auto& k:keys)p.set(k,Value::makeStr(n.p.at(k)));j.set("p",p);
-            if(n.pattern.active){Value pattern=Value::makeObj();pattern.set("type",Value::makeStr(n.pattern.type));pattern.set("count",Value::makeStr(n.pattern.count));if(n.pattern.type=="circular"){pattern.set("step",Value::makeStr(n.pattern.step));pattern.set("axis",Value::makeStr(n.pattern.axis));}else{pattern.set("dx",Value::makeStr(n.pattern.dx));pattern.set("dy",Value::makeStr(n.pattern.dy));pattern.set("dz",Value::makeStr(n.pattern.dz));}j.set("pattern",pattern);}
+            if(n.pattern.active)j.set("pattern",assemblyPatternToJson(n.pattern));
             nodes.arr.push_back(j);}
         r.set("assembly",nodes);
     }
@@ -585,6 +596,7 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
     if(generation35Document(doc))r.set("version",Value::makeNum(35));
     if(!doc.drawings.empty()){Value drawings=Value::makeArr();for(const auto& drawing:doc.drawings)drawings.arr.push_back(drawing);r.set("drawings",drawings);}
     if(generation36Document(doc)||!doc.drawings.empty())r.set("version",Value::makeNum(36));
+    if(generation37Document(doc))r.set("version",Value::makeNum(37));
     if(includeAudit&&includeHistory)iterationPersist(r,doc);
     canonicalDocumentKeys(r);
     return r.dump();
@@ -596,7 +608,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     Value v;
     if(!arkjson::parse(json,v)) return fail("malformed JSON");
     if(v.t!=Value::Obj) return fail("root must be object");
-    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0&&ver->num!=3.0&&ver->num!=4.0&&ver->num!=5.0&&ver->num!=6.0&&ver->num!=7.0&&ver->num!=8.0&&ver->num!=9.0&&ver->num!=10.0&&ver->num!=11.0&&ver->num!=12.0&&ver->num!=13.0&&ver->num!=14.0&&ver->num!=15.0&&ver->num!=16.0&&ver->num!=17.0&&ver->num!=18.0&&ver->num!=19.0&&ver->num!=20.0&&ver->num!=21.0&&ver->num!=22.0&&ver->num!=23.0&&ver->num!=24.0&&ver->num!=25.0&&ver->num!=26.0&&ver->num!=27.0&&ver->num!=28.0&&ver->num!=29.0&&ver->num!=30.0&&ver->num!=31.0&&ver->num!=32.0&&ver->num!=33.0&&ver->num!=34.0&&ver->num!=35.0&&ver->num!=36.0)))
+    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0&&ver->num!=3.0&&ver->num!=4.0&&ver->num!=5.0&&ver->num!=6.0&&ver->num!=7.0&&ver->num!=8.0&&ver->num!=9.0&&ver->num!=10.0&&ver->num!=11.0&&ver->num!=12.0&&ver->num!=13.0&&ver->num!=14.0&&ver->num!=15.0&&ver->num!=16.0&&ver->num!=17.0&&ver->num!=18.0&&ver->num!=19.0&&ver->num!=20.0&&ver->num!=21.0&&ver->num!=22.0&&ver->num!=23.0&&ver->num!=24.0&&ver->num!=25.0&&ver->num!=26.0&&ver->num!=27.0&&ver->num!=28.0&&ver->num!=29.0&&ver->num!=30.0&&ver->num!=31.0&&ver->num!=32.0&&ver->num!=33.0&&ver->num!=34.0&&ver->num!=35.0&&ver->num!=36.0&&ver->num!=37.0)))
         return fail("unsupported document version");
     Value history;std::string historyError;if(!iterationExpand(v,history,historyError))return fail(historyError);
 
@@ -606,7 +618,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     for(auto key:{"params","sketches","features","planes","canvases","materials"})if(auto a=v.find(key);a && a->t!=Value::Arr)return fail(std::string(key)+" must be an array");
     Document nd;   // parse into scratch; commit only on full success
     if(const auto* drawings=v.find("drawings")){
-        const auto* version=v.find("version");if(!version||version->num<36||drawings->t!=Value::Arr||drawings->arr.size()>32)return fail("Technical drawings require document version 36 and at most 32 authored drawings");
+        const auto* version=v.find("version");if(!version||version->num<36||drawings->t!=Value::Arr||drawings->arr.size()>256)return fail("Technical drawings require document version 36 and at most 256 authored drawings");
         std::set<std::string> names;try{for(const auto& drawing:drawings->arr){validateDrawing(drawing,true);if(!names.insert(drawing.find("name")->str).second)return fail("Duplicate technical drawing name");nd.drawings.push_back(drawing);}}catch(const std::exception& error){return fail(error.what());}
     }
     if(const auto* skeleton=v.find("skeleton")){
@@ -766,13 +778,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
             if(auto p=j.find("p")){if(p->t!=Value::Obj)return fail("assembly p must be object");for(auto& kv:p->obj){if(kv.second.t!=Value::Str)return fail("placement fields must be expressions");n.p[kv.first]=kv.second.str;}}
             if(auto fixed=j.find("fixed")){if(fixed->t!=Value::Bool)return fail("fixed must be boolean");n.fixed=fixed->b;}
             if(auto pattern=j.find("pattern")){
-                if(pattern->t!=Value::Obj)return fail("assembly pattern must be an object");
-                auto text=[&](const char* key,std::string& out,bool required){auto value=pattern->find(key);if(!value){if(required)return false;return true;}if(value->t!=Value::Str||value->str.empty()||value->str.size()>2048)return false;out=value->str;return true;};
-                auto kind=pattern->find("type");if(!kind||kind->t!=Value::Str||(kind->str!="linear"&&kind->str!="circular"))return fail("instance pattern type must be linear or circular");
-                n.pattern.active=true;n.pattern.type=kind->str;
-                if(!text("count",n.pattern.count,true))return fail("instance pattern count must be an expression");
-                if(n.pattern.type=="circular"){if(!text("step",n.pattern.step,true)||!text("axis",n.pattern.axis,true))return fail("circular instance pattern needs step and axis expressions");}
-                else if(!text("dx",n.pattern.dx,false)||!text("dy",n.pattern.dy,false)||!text("dz",n.pattern.dz,false))return fail("linear instance pattern offsets must be expressions");
+                try{readAssemblyPattern(n.pattern,*pattern);}catch(const std::exception& error){return fail(error.what());}
             }
             maximum=std::max(maximum,n.id);nd.assembly.push_back(n);
         }
@@ -814,7 +820,10 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
         auto lengthOk=[&](const std::string& expr){bool ok=false;double value=evalExpr(expr,nd.buildEnv(),&ok);return ok&&value>0.&&value<=1e6;};
         if(!lengthOk(canvas.width)||!lengthOk(canvas.height)) return fail("Canvas width and height must be positive millimetres");
     }
-    std::vector<AssemblyPlacement> placements;std::string assemblyError;if(nd.mates.empty()&&!resolveAssembly(nd,placements,assemblyError))return fail(assemblyError);
+    std::vector<AssemblyPlacement> placements;std::string assemblyError;
+    const bool sourcePatterns=std::any_of(nd.assembly.begin(),nd.assembly.end(),[](const AssemblyNode& n){return specializedAssemblyPattern(n.pattern);});
+    if(sourcePatterns){if(!validateAssemblyPatternAuthoring(nd,assemblyError))return fail(assemblyError);}
+    else if(nd.mates.empty()&&!resolveAssembly(nd,placements,assemblyError))return fail(assemblyError);
     bool supported=false;for(auto& p:nd.planes)supported|=p.support.t==Value::Obj;
     try{if(!supported){for(auto& plane:nd.planes)resolvePlane(nd,plane.name);for(auto& sketch:nd.sketches)resolvePlane(nd,sketch.sk.plane);for(auto& canvas:nd.canvases)resolvePlane(nd,canvas.plane);}}
     catch(const std::exception& e){return fail(e.what());}
@@ -825,6 +834,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     if(generation34Document(nd)){const auto* version=v.find("version");if(!version||version->num<34)return fail("Typed sketches, associative datums, spatial constraints and varying sections require document version 34");}
     if(generation35Document(nd)){const auto* version=v.find("version");if(!version||version->num<35)return fail("Skeleton, indexed mesh edits, current-B-rep references and extended native controls require document version 35");}
     if(generation36Document(nd)){const auto* version=v.find("version");if(!version||version->num<36)return fail("Reverse, symmetric, face-source and face-bounded extrusion require document version 36");}
+    if(generation37Document(nd)){const auto* version=v.find("version");if(!version||version->num<37)return fail("Specialized component patterns, advanced sheet programs and drawing source/template recipes require document version 37");}
     try{validateSkeletonAuthoring(nd);}catch(const std::exception& error){return fail(error.what());}
     doc=std::move(nd);
     return true;
