@@ -41,11 +41,15 @@ explicitly instead of being silently ignored.
 
 ## External agents and the open document
 
-Live MCP exports configuration for Codex, Claude Code, Claude Desktop and OpenCode
+Live MCP exports configuration for Codex, Grok Build, Claude Code, Claude Desktop and OpenCode
 using the executable and endpoint of the selected ARK process. The endpoint changes
 after restart. Export does not overwrite global client settings or read client
 credential stores. Start with `agent_onboard` and `doc_info` to verify the document;
 MCP initialization alone does not prove that the live bridge is connected.
+
+Grok Build uses its CLI-managed account and MCP tools, including when controlled
+by its VS Code GUI. See [Grok Build setup and scope](GROK_BUILD_CONNECT.md).
+This external route does not authenticate the Grok API connector inside ARK.
 
 Claude Code/Desktop can use this stdio MCP configuration directly. OpenCode can
 use the same ARK tools with Claude, Grok, a local Ollama model or another provider

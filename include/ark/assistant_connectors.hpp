@@ -21,7 +21,7 @@ std::vector<std::string> assistantProviderModels(const AssistantConfig&,const As
 arkjson::Value assistantLocalModelInfo(const AssistantConfig&,const AssistantTransport& offlineTransport={});
 std::vector<std::string> assistantLocalModels(const AssistantConfig&,const AssistantTransport& offlineTransport={});
 // Pure export: never edits a client's global configuration or reads credentials.
-// targets: codex, claude-code, claude-desktop, opencode.
+// targets: codex, grok-build, claude-code, claude-desktop, opencode.
 std::string assistantExternalMcpConfig(const std::string& target,const std::string& executablePath,
     const std::string& pipeEndpoint,const AssistantConfig& provider={});
 }

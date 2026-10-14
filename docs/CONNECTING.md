@@ -35,7 +35,8 @@ not this Windows named-pipe Studio bridge.
 
 Codex login and ARK login are separate. Connecting MCP does not transfer your
 Codex credentials into ARK or authenticate the built-in assistant. The same
-principle applies to Claude Code/Desktop and OpenCode configuration exports.
+principle applies to Grok Build, Claude Code/Desktop and OpenCode configuration exports.
+For Grok Build and its VS Code GUI, see [the CLI/MCP setup](GROK_BUILD_CONNECT.md).
 See [the bridge contract](CODEX_CONNECT.md), [provider options](AI_CONNECTORS.md)
 and [official Codex MCP setup](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
 

@@ -2929,7 +2929,7 @@ static void stopIntegrations(){
 }
 static std::string externalConfigDisplay(const std::string& raw,const std::string& client){
     std::string formatted=raw;
-    if(client!="codex"){
+    if(client!="codex"&&client!="grok-build"){
         using V=arkjson::Value;V config;if(!arkjson::parse(raw,config))throw std::runtime_error("Invalid exported MCP configuration");formatted.clear();
         std::function<void(const V&,int)> write=[&](const V& value,int depth){
             const bool object=value.t==V::Obj,array=value.t==V::Arr;const size_t count=object?value.obj.size():array?value.arr.size():0;
@@ -2944,12 +2944,13 @@ static std::string externalConfigDisplay(const std::string& raw,const std::strin
 static void liveConnectionDialog(){
     if(g_liveBridge.endpoint().empty()){std::string text="Live MCP is not running.";editText("Live document connection",text,true);return;}
     auto profileShot=g_dialogShot;
-    std::vector<EditorField> fields{{"External client","codex",false,{"codex","claude-code","claude-desktop","opencode"}}};if(!editFields("Connect an external agent","Export a configuration for this exact open document. The client uses its own authorized provider account. Copy the result into that client's MCP settings.",fields))return;
+    std::vector<EditorField> fields{{"External client","codex",false,{"codex","grok-build","claude-code","claude-desktop","opencode"}}};if(!editFields("Connect an external agent","Export the connection to this open document. The external client keeps its own model account and MCP settings.",fields))return;
     wchar_t executable[32768]{};GetModuleFileNameW(nullptr,executable,32768);auto file=std::filesystem::path(executable).parent_path()/"ark-mcp.exe";auto utf8=file.u8string();std::string text=assistantExternalMcpConfig(fields[0].value,std::string(utf8.begin(),utf8.end()),g_liveBridge.endpoint(),g_assistantConfig);
     // Native multiline EDIT controls require CRLF. Keep TOML line boundaries
     // intact in both the visible text and what the user copies into the client.
     std::string displayText=externalConfigDisplay(text,fields[0].value);
-    g_status="External MCP configuration for "+fields[0].value+" / current document / copy with Ctrl+A and Ctrl+C / call agent_onboard first";auto title="Copy "+fields[0].value+" configuration / current document MCP";std::vector<EditorField> output{{"Configuration",displayText}};if(!profileShot.empty()&&g_dialogSmoke)g_dialogShot=profileShot+".configuration.png";editFields(title.c_str(),"Copy the raw configuration with Ctrl+A / Ctrl+C into this client's MCP settings. The endpoint binds this exact open document. Call agent_onboard first.",output,true,"Close",nullptr,true);
+    const char* hint=fields[0].value=="grok-build"?"Merge into %USERPROFILE%\\.grok\\config.toml (or GROK_HOME/config.toml). Reconnect Grok Build / its VS Code GUI; its CLI keeps the login. Call agent_onboard first.":"Copy the raw configuration with Ctrl+A / Ctrl+C into this client's MCP settings. The endpoint binds this exact open document. Call agent_onboard first.";
+    g_status="External MCP configuration for "+fields[0].value+" / current document / copy with Ctrl+A and Ctrl+C / call agent_onboard first";auto title="Copy "+fields[0].value+" configuration / current document MCP";std::vector<EditorField> output{{"Configuration",displayText}};if(!profileShot.empty()&&g_dialogSmoke)g_dialogShot=profileShot+".configuration.png";editFields(title.c_str(),hint,output,true,"Close",nullptr,true);
     if(g_dialogSmoke&&output.front().value!=displayText)throw std::runtime_error("External MCP configuration changed in the copy dialog");
 }
 static void newDocument(){
@@ -5230,7 +5231,7 @@ static void drawFrame(HDC hdc){
     }else label(g_teamMode?"GOAL / DECISION  /  Ctrl+Enter to queue":"MESSAGE  /  Ctrl+Enter to send",viewX+30,inputY-16,.55f);
     button(g_teamMode?(g_teamStarted&&!g_teamSnapshot.cancelled?"Queue":"Start"):(g_chatBusy?"Queue":"Send"),viewX+viewW-206,inputY,84,74,true);button("Cancel",viewX+viewW-112,inputY,90,75);
     if(g_teamMode){std::string target="To: "+(g_teamTarget.empty()?std::string(g_teamFocusedWorkflow?"Engineer":"entire team"):g_teamTarget=="all"?std::string("entire team"):g_teamTarget);button(target.c_str(),viewX+viewW-206,inputY+40,184,473);}
-    else button("Codex MCP",viewX+viewW-206,inputY+40,184,58);
+    else button("Live MCP",viewX+viewW-206,inputY+40,184,58);
     AssistantUsage docTokens=g_assistantUsageDocument;
     textOut(g_status.substr(0,(size_t)std::max((viewW-334)/7,1)),viewX+22,H-51,.58f,g_error?.94f:.58f,g_error?.57f:.65f,g_error?.48f:.74f);
     std::string documentTokens="Document: "+assistantUsageLabel(docTokens);
@@ -6269,7 +6270,9 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         g_dialogOverrideQueue={{"inherit","0"}};g_dialogSmoke=3;bool inherited=click(44020);g_dialogSmoke=0;if(!inherited||g_teamConnectors[0]||!g_teamModels[0].empty()||!g_teamEfforts[0].empty())return failure(503,"Card could not restore inherited connector");
         {auto config=assistantProviderPreset("claude");config.model="foreign-offline-model";config.reasoningEffort="foreign-effort";bool inherit=false;g_dialogOverrideQueue={{"chatgpt-plan","0"}};g_dialogSmoke=3;bool selected=editConnector(config,false,inherit);g_dialogSmoke=0;if(!selected||config.authMode!=AssistantAuthMode::ChatGptPlan||!config.model.empty()||!config.reasoningEffort.empty())return failure(506,"ChatGPT plan switch retained a foreign provider model/effort");}
         auto exported=assistantExternalMcpConfig("opencode","C:/ARK/ark-mcp.exe","ark-ui-test",assistantProviderPreset("ollama"));if(exported.find("ark-mcp.exe")==std::string::npos||exported.find("--connect")==std::string::npos||exported.find("ark-ui-test")==std::string::npos)return failure(504,"External MCP profile lost executable or live document binding");
-        std::ofstream(shotPath+".connectors-test.log")<<"PASS: real card Connector click, native provider/model/protocol controls, distinct Claude/Grok/Ollama routes, inherited global unchanged, serialized/restored per-role routes, reset inheritance, external MCP binding. Offline model IDs; no provider inference or account authentication performed.\n";
+        {const auto raw=assistantExternalMcpConfig("grok-build","C:/ARK/ark-mcp.exe","ark-ui-test",originalConfig);const auto display=externalConfigDisplay(raw,"grok-build");std::string roundtrip;for(char c:display)if(c!='\r')roundtrip+=c;if(roundtrip!=raw)return failure(507,"Grok Build copy display changed the TOML configuration");}
+        startLiveBridge();if(g_liveBridge.endpoint().empty())return failure(508,"Grok Build UI check could not start its isolated live bridge");g_dialogOverrideQueue={{"grok-build"}};g_dialogSmoke=3;g_dialogShot=shotPath+".grok-build.png";liveConnectionDialog();g_dialogSmoke=0;g_liveBridge.stop();if(g_status.find("External MCP configuration for grok-build")==std::string::npos||g_session.revision!=revision)return failure(508,"Grok Build client selection failed or changed the drawing");
+        std::ofstream(shotPath+".connectors-test.log")<<"PASS: real card Connector click, native provider/model/protocol controls, distinct Claude/Grok/Ollama routes, inherited global unchanged, serialized/restored per-role routes, reset inheritance, external MCP binding, Grok Build native client selection and TOML copy. Offline model IDs; no provider inference or account authentication performed.\n";
         g_localModelDiscoveryTestTransport={};g_assistantConfig=originalConfig;g_teamConnectors=originalConnectors;g_teamModels=originalModels;g_teamEfforts=originalEfforts;g_settingsOverride=originalSettings;g_teamMode=originalTeam;g_assistantDockOpen=originalDock;g_status="Connector checks passed / mixed cards / persistence / external MCP profiles";layout();
     }
 

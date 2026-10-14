@@ -95,6 +95,10 @@ void testPresetsCatalogAndExport(){
     auto invalid=local;invalid.model="explicit";invalid.apiKeyEnv="OPENAI_API_KEY";rejects([&]{validateAssistantConfig(invalid);},"HTTP loopback must not transmit credentials");invalid=local;invalid.model="explicit";invalid.endpoint="http://remote.invalid/v1/chat/completions";rejects([&]{validateAssistantConfig(invalid);},"HTTP remote rejects");
     const std::string exe="C:\\Program Files\\ARK\\ark-mcp.exe",pipe="ark-studio-actual-123";
     const auto codex=assistantExternalMcpConfig("codex",exe,pipe);check(codex.find("[mcp_servers.ark]")!=std::string::npos&&codex.find("--connect")!=std::string::npos&&codex.find(pipe)!=std::string::npos,"Codex export binds actual pipe/executable");
+    const auto grokBuild=assistantExternalMcpConfig("grok-build",exe,pipe,configured("grok"));check(grokBuild==codex+"enabled = true\n","Grok Build exports the documented enabled stdio MCP table, absolute executable and actual pipe only");
+    auto planForGrok=configured("openai");planForGrok.authMode=AssistantAuthMode::ChatGptPlan;check(assistantExternalMcpConfig("grok-build",exe,pipe,planForGrok)==grokBuild,"Grok Build export keeps CLI account ownership independent of Assistant API or plan selection");
+    const std::string quotedExe="C:\\ARK \"quoted\"\\ark-mcp.exe";check(assistantExternalMcpConfig("grok-build",quotedExe,pipe).find(V::makeStr(quotedExe).dump())!=std::string::npos,"Grok Build TOML escapes quoted Windows executable paths");
+    rejects([&]{assistantExternalMcpConfig("grok-build","ark-mcp.exe",pipe);},"Grok Build refuses relative executable paths");rejects([&]{assistantExternalMcpConfig("grok-build",exe,"pipe with spaces");},"Grok Build refuses an invalid active endpoint");rejects([&]{assistantExternalMcpConfig("grok-build","C:/ARK/${OTHER}/ark-mcp.exe",pipe);},"Grok Build refuses command placeholders that the client would expand");
     for(const char* target:{"claude-code","claude-desktop","opencode"}){V exported;check(arkjson::parse(assistantExternalMcpConfig(target,exe,pipe),exported),"client export is valid JSON");const auto key=std::string(target)=="opencode"?"mcp":"mcpServers";check(exported.find(key)->find("ark")&&exported.dump().find(pipe)!=std::string::npos,"external client connects exact active window");}
     auto selected=configured("ollama");V external;check(arkjson::parse(assistantExternalMcpConfig("opencode",exe,pipe,selected),external),"OpenCode local provider JSON");check(external.find("provider")->find("ark-ollama")->find("options")->find("baseURL")->str=="http://127.0.0.1:11434/v1"&&external.find("model")->str=="ark-ollama/explicit-offline-model","external Ollama uses OpenCode MCP plus actual chosen model");
     selected=configured("grok");arkjson::parse(assistantExternalMcpConfig("opencode",exe,pipe,selected),external);check(external.find("provider")->find("ark-grok")->find("options")->find("apiKey")->str=="{env:XAI_API_KEY}"&&external.find("provider")->find("ark-grok")->find("npm")->str=="@ai-sdk/openai","external Grok references env and Responses SDK only");
@@ -122,6 +126,7 @@ void testMixedProviderTeam(){AgentTeam team;AgentTeamConfig config;config.maxWor
 }
 #include "local_models_tests.inl"
 int main(int argc,char** argv){try{
+    if(argc==5&&std::string(argv[1])=="--export-mcp"){std::cout<<assistantExternalMcpConfig(argv[2],argv[3],argv[4]);return 0;}
     if(argc==3&&std::string(argv[1])=="--local-agent-smoke"){liveLocalModelSmoke(argv[2]);return 0;}
     if(argc==3&&std::string(argv[1])=="--local-agent-basic-smoke"){liveLocalModelSmoke(argv[2],true);return 0;}
     // Explicit opt-in read-only network smoke. Default test stays fully offline.

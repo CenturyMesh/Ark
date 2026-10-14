@@ -93,7 +93,7 @@ std::vector<AssistantProviderPreset> assistantProviderPresets(){return {
     {"openai","OpenAI API","https://api.openai.com/v1/responses","OPENAI_API_KEY",AssistantProtocol::Responses},
     {"claude","Claude API","https://api.anthropic.com/v1/messages","ANTHROPIC_API_KEY",AssistantProtocol::Messages},
     {"claude-chat","Claude OpenAI compatibility","https://api.anthropic.com/v1/chat/completions","ANTHROPIC_API_KEY",AssistantProtocol::ChatCompletions},
-    {"grok","Grok / xAI","https://api.x.ai/v1/responses","XAI_API_KEY",AssistantProtocol::Responses},
+    {"grok","Grok / xAI API","https://api.x.ai/v1/responses","XAI_API_KEY",AssistantProtocol::Responses},
     {"ollama","Ollama local","http://127.0.0.1:11434/v1/chat/completions","",AssistantProtocol::ChatCompletions},
     {"opencode","OpenCode Zen","https://opencode.ai/zen/v1/chat/completions","OPENCODE_API_KEY",AssistantProtocol::ChatCompletions},
     {"custom","Custom compatible endpoint","https://api.openai.com/v1/responses","OPENAI_API_KEY",AssistantProtocol::Responses}};}
@@ -173,7 +173,12 @@ std::string assistantExternalMcpConfig(const std::string& target,const std::stri
     require((absoluteWindows||unc||executable.rfind("/",0)==0)&&executable.size()<=4096&&executable.find_first_of("\r\n\t") == std::string::npos,"Export requires the actual absolute MCP executable path.");
     require(!endpoint.empty()&&endpoint.size()<=160&&std::all_of(endpoint.begin(),endpoint.end(),[](unsigned char c){return std::isalnum(c)||c=='_'||c=='-';}),"Export requires the active Studio pipe name.");
     V args=V::makeArr();args.arr.push_back(V::makeStr("--connect"));args.arr.push_back(V::makeStr(endpoint));
-    if(target=="codex")return "[mcp_servers.ark]\ncommand = "+V::makeStr(executable).dump()+"\nargs = "+args.dump()+"\n";
+    if(target=="codex"||target=="grok-build"){
+        // Grok expands ${VAR} in MCP commands even inside a quoted TOML string.
+        // Reject that path rather than exporting a different executable silently.
+        require(target!="grok-build"||executable.find("${")==std::string::npos,"Grok Build expands environment placeholders; the MCP executable path must not contain ${.");
+        return "[mcp_servers.ark]\ncommand = "+V::makeStr(executable).dump()+"\nargs = "+args.dump()+"\n"+(target=="grok-build"?"enabled = true\n":"");
+    }
     V root=V::makeObj(),servers=V::makeObj(),server=V::makeObj();
     if(target=="claude-code"||target=="claude-desktop"){if(target=="claude-code")server.set("type",V::makeStr("stdio"));server.set("command",V::makeStr(executable));server.set("args",args);servers.set("ark",server);root.set("mcpServers",servers);return root.dump();}
     require(target=="opencode","Unknown external MCP client.");V command=V::makeArr();command.arr.push_back(V::makeStr(executable));for(const auto& arg:args.arr)command.arr.push_back(arg);server.set("type",V::makeStr("local"));server.set("command",command);server.set("enabled",V::makeBool(true));servers.set("ark",server);root.set("$schema",V::makeStr("https://opencode.ai/config.json"));root.set("mcp",servers);
