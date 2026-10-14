@@ -147,7 +147,7 @@
                        "visibility":  "private",
                        "license":  "Apache-2.0 retained by explicit user instruction"
                    },
-    "hosted_ci":  "Pending new draft PR",
+    "hosted_ci":  "Blocked before execution: GitHub Actions run73 (38560690377) reported account payments/spending-limit restrictions; no hosted test steps ran. https://github.com/CenturyMesh/Ark/actions/runs/38560690377",
     "user_acceptance":  "pending",
     "merge":  "not authorized until user tests and approves"
 }
