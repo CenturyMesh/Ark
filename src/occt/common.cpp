@@ -150,6 +150,7 @@ TopoDS_Shape compound(const std::vector<TopoDS_Shape>& parts){BRep_Builder b;Top
 TopoDS_Shape transformed(const TopoDS_Shape& s,const gp_Trsf& t){BRepBuilderAPI_Transform op(s,t,true);if(!op.IsDone())throw std::runtime_error("Native shape transform failed");return op.Shape();}
 V vec(const gp_XYZ& p){V out=V::makeArr();for(double n:{p.X(),p.Y(),p.Z()})out.arr.push_back(V::makeNum(n));return out;}
 V matrix(const gp_Trsf& t){V out=V::makeArr();for(int c=1;c<=4;++c)for(int r=1;r<=4;++r)out.arr.push_back(V::makeNum(r<=3?t.Value(r,c):(c==4?1:0)));return out;}
+namespace {int requestThreadBudget=0;}
 int nativeThreadBudget(){
     static const int budget=[](){
         int threads=std::max(1,std::min(8,(int)std::thread::hardware_concurrency()));
@@ -159,7 +160,14 @@ int nativeThreadBudget(){
         }
         const auto& pool=OSD_ThreadPool::DefaultPool(threads);
         threads=std::min(threads,pool->NbThreads());pool->SetNbDefaultThreadsToLaunch(threads);return threads;
-    }();return budget;
+    }();return requestThreadBudget?requestThreadBudget:budget;
+}
+void configureNativeThreadBudget(int threads){
+    if(threads<1||threads>64)throw std::runtime_error("Native request thread budget must be 1..64");
+    (void)nativeThreadBudget();const auto& pool=OSD_ThreadPool::DefaultPool();
+    if(pool->IsInUse())throw std::runtime_error("Cannot change native thread allowance during an active job");
+    if(pool->NbThreads()<threads)pool->Init(threads);
+    pool->SetNbDefaultThreadsToLaunch(threads);requestThreadBudget=threads;
 }
 namespace {
 // Rendering metadata only. The full, ordered edge polylines remain authoritative

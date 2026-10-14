@@ -7,6 +7,8 @@
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
+#include <cstdlib>
+#include <thread>
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -34,6 +36,49 @@ void cacheChecks(){
     const auto current=s.document.evalBodies.front().nativeData.dump();auto result=apply(s,R"([{"op":"feature.edit","id":1,"appearance":{"opacity":0.35}}])");check(!result.find("geometry_recomputed")->b&&s.document.evalBodies.front().nativeData.dump()==current,"opacity changes no evaluated BRep or mesh");
     const auto before=documentToJson(s.document);V invalid=json(R"({"commands":[{"op":"feature.edit","id":1,"appearance":{"opacity":2}}]})");invalid.set("expected_revision",V::makeNum((double)s.revision));check(s.call("doc_apply",invalid).find("isError")->b&&documentToJson(s.document)==before&&s.document.evalBodies.front().nativeData.dump()==current,"invalid metadata rollback preserves authoring and evaluated geometry");
     V preview=json(R"({"detail":"changes","commands":[{"op":"feature.edit","id":1,"appearance":{"opacity":1}}]})");preview.set("expected_revision",V::makeNum((double)s.revision));auto candidate=call(s,"doc_preview",preview);check(candidate.find("candidate_cached")->b,"metadata candidate retained");call(s,"usage_record",json(R"({"id":"audit-between-preview","input_tokens":10,"output_tokens":2,"total_tokens":12,"model":"offline-fixture"})"));auto applied=call(s,"doc_apply",*candidate.find("apply"));check(applied.find("applied_prepared")->b&&!applied.find("geometry_changed")->b,"provider audit update cannot invalidate unchanged CAD candidate or force GPU rebuild");
+}
+struct TestEnvironment {
+    const char* name;std::string previous;
+    TestEnvironment(const char* key,const char* value):name(key),previous(std::getenv(key)?std::getenv(key):"") {set(value);}
+    void set(const char* value){
+#ifdef _WIN32
+        _putenv_s(name,value);
+#else
+        if(*value)setenv(name,value,1);else unsetenv(name);
+#endif
+    }
+    ~TestEnvironment(){set(previous.c_str());}
+};
+void schedulerAccountingChecks(){
+    TestEnvironment cpu("ARK_CPU_THREADS","8"),workers("ARK_FEATURE_THREADS","4"),native("ARK_NATIVE_THREADS","1");
+    Document rejected;
+    for(int i=0;i<4;++i){Feature box;box.type=FeatureType::Box;box.name="Dangling datum "+std::to_string(i);box.p["plane"]="Missing datum";rejected.addFeature(box);}
+    rejected.recompute();
+    check(rejected.featureWorkers==1&&rejected.parallelFeatures==0&&rejected.evalBodies.empty(),"semantic dependency rejection removes false worker eligibility before budgeting");
+    for(const auto& result:rejected.lastResults)check(!result.ok&&result.error.find("datum not found")!=std::string::npos,"missing semantic sources remain explicit failures");
+    for(auto& feature:rejected.features)feature.p.erase("plane");
+    rejected.recompute();
+    check(rejected.evalBodies.size()==4,"dependency correction recovers all independent features");
+    const auto cores=std::max(1u,std::thread::hardware_concurrency());
+    check(rejected.featureWorkers==std::min(cores,4u),"validated independent features retain bounded multicore eligibility");
+    if(cores<2)return;
+    Document timed;
+    for(int i=0;i<4;++i){Feature feature;feature.type=FeatureType::NativeSolid;feature.name="Timing fixture "+std::to_string(i);feature.nativeSpec=json(R"({"op":"box"})");feature.p={{"width","10"},{"depth","20"},{"height","30"}};timed.addFeature(feature);}
+    std::array<std::chrono::steady_clock::time_point,4> publicationStarts{};bool observedWorkerDuration=false;
+    auto previous=setEvaluationObserver([&](u64,const std::string&,size_t index,size_t,bool completed,bool){
+        if(index>=publicationStarts.size())return;
+        if(!completed){publicationStarts[index]=std::chrono::steady_clock::now();if(index==0)std::this_thread::sleep_for(std::chrono::milliseconds(300));}
+        else if(index>0&&!timed.lastResults.empty()){
+            const auto publicationMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-publicationStarts[index]).count();
+            const auto measured=timed.lastResults.back().ms;
+            check(std::isfinite(measured)&&measured>=0,"worker duration is finite and nonnegative");
+            observedWorkerDuration|=measured>publicationMs;
+        }
+    });
+    struct RestoreObserver {EvaluationObserver previous;~RestoreObserver(){setEvaluationObserver(std::move(previous));}} restore{std::move(previous)};
+    timed.recompute();
+    check(timed.parallelFeatures>0&&observedWorkerDuration,"completed worker retains evaluation time instead of only its shorter publication interval");
+    check(timed.evalBodies.size()==4&&std::all_of(timed.lastResults.begin(),timed.lastResults.end(),[](const auto& result){return result.ok;}),"timing observation preserves successful ordered geometry");
 }
 void activityChecks(){
     AgentSession s;V args=json(R"({"expected_revision":0,"commands":[{"op":"feature.add","type":"box","name":"Fixture"}]})");args.set("actor",actor());auto result=call(s,"doc_apply",args);const auto id=result.find("activity_id")->str;check(result.find("feedback_required")->b&&s.document.agentActivity&&s.document.agentActivity->entries.size()==1,"actual agent action gets measured project record and feedback ID");
@@ -69,4 +114,4 @@ void pngChecks(){
     std::cout<<"PNG_LOSSLESS raw_rgb_bytes="<<image.px.size()<<" png_bytes="<<png.size()<<"\n";
 }
 }
-int main(){try{cacheChecks();activityChecks();requiredFeedbackChecks();pngChecks();std::cout<<checks<<" reactivity/activity checks passed\n";return 0;}catch(const std::exception& error){std::cerr<<"Reactivity/activity failed: "<<error.what()<<'\n';return 1;}}
+int main(){try{cacheChecks();schedulerAccountingChecks();activityChecks();requiredFeedbackChecks();pngChecks();std::cout<<checks<<" reactivity/activity checks passed\n";return 0;}catch(const std::exception& error){std::cerr<<"Reactivity/activity failed: "<<error.what()<<'\n';return 1;}}

@@ -435,10 +435,7 @@ const std::vector<FeatureResult>& Document::recompute() {
     const unsigned cores=std::max(1u,std::thread::hardware_concurrency());
     const unsigned cpuBudget=std::min(cores,threadSetting("ARK_CPU_THREADS",std::min(cores,32u),64));
     const unsigned requestedWorkers=threadSetting("ARK_FEATURE_THREADS",std::min(cpuBudget,4u),16);
-    const size_t eligible=(size_t)std::count(explicitInputs.begin(),explicitInputs.end(),true);
-    featureWorkers=eligible>=4?std::min(cpuBudget,requestedWorkers):1;
-    nativeThreadsPerWorker=std::min(threadSetting("ARK_NATIVE_THREADS",8,64),std::max(1u,cpuBudget/featureWorkers));
-    NativeBudgetScope ownerBudget(nativeThreadsPerWorker);
+
     parallelFeatures=0;peakParallelFeatures=0;dependencyEdges=0;
     std::unordered_map<u64,size_t> indices;for(size_t i=0;i<features.size();++i)indices[features[i].id]=i;
     std::vector<std::vector<size_t>> dependencies(features.size());
@@ -453,6 +450,12 @@ const std::vector<FeatureResult>& Document::recompute() {
         if(!explicitInputs[i]){dependencies[i].clear();for(size_t j=0;j<i;++j)dependencies[i].push_back(j);}
         dependencyEdges+=dependencies[i].size();
     }
+    // Semantic source discovery can turn otherwise independent operations into
+    // ordered barriers. Budget only the final audited set, after that discovery.
+    const size_t eligible=(size_t)std::count(explicitInputs.begin(),explicitInputs.end(),true);
+    featureWorkers=eligible>=4?std::min(cpuBudget,requestedWorkers):1;
+    nativeThreadsPerWorker=std::min(threadSetting("ARK_NATIVE_THREADS",8,64),std::max(1u,cpuBudget/featureWorkers));
+    NativeBudgetScope ownerBudget(nativeThreadsPerWorker);
     auto keyFor=[&](size_t index){
         const auto& f=features[index];auto source=authored.find("features")->arr[index];
         source.obj.erase(std::remove_if(source.obj.begin(),source.obj.end(),[](const auto& v){return v.first=="appearance"||v.first=="part";}),source.obj.end());
@@ -522,10 +525,12 @@ const std::vector<FeatureResult>& Document::recompute() {
         if(blocked){fr.ms=nowMs()-tf;lastResults.push_back(std::move(fr));refreshDrivenSketches(*this,false);continue;}
         fr.error=!authoringDependencyErrors[index].empty()?authoringDependencyErrors[index]:parameterError.empty()?featureParameterError(f,env):parameterError;
         fr.ok=fr.error.empty();
-        Body b;
-        try{if(fr.ok){auto cached=evaluationCache.find(f.id);if(cached!=evaluationCache.end()&&cached->second.key==cacheKey){b=*cached->second.body;fr.tris=cached->second.tris;++recomputeReused;}else if(completed[index]){b=std::move(completed[index]->body);fr=std::move(completed[index]->result);completed[index].reset();++recomputeEvaluated;}else if(jobs[index].valid()){auto value=jobs[index].get();--outstanding;outstandingBytes-=jobBytes[index];b=std::move(value.body);fr=std::move(value.result);++recomputeEvaluated;}else{OuterParallelScope nested(outstanding>0);NativeBudgetScope budget(!explicitInputs[index]&&outstanding==0?std::min(threadSetting("ARK_NATIVE_THREADS",8,64),cpuBudget):nativeThreadsPerWorker);activity->enter();try{b=evalFeatureBody(f,env,*this,work,fr,tessOpt);}catch(...){activity->leave();throw;}activity->leave();++recomputeEvaluated;}}}
+        Body b;bool measuredByWorker=false;
+        try{if(fr.ok){auto cached=evaluationCache.find(f.id);if(cached!=evaluationCache.end()&&cached->second.key==cacheKey){b=*cached->second.body;fr.tris=cached->second.tris;++recomputeReused;}else if(completed[index]){b=std::move(completed[index]->body);fr=std::move(completed[index]->result);measuredByWorker=true;completed[index].reset();++recomputeEvaluated;}else if(jobs[index].valid()){auto value=jobs[index].get();--outstanding;outstandingBytes-=jobBytes[index];b=std::move(value.body);fr=std::move(value.result);measuredByWorker=true;++recomputeEvaluated;}else{OuterParallelScope nested(outstanding>0);NativeBudgetScope budget(!explicitInputs[index]&&outstanding==0?std::min(threadSetting("ARK_NATIVE_THREADS",8,64),cpuBudget):nativeThreadsPerWorker);activity->enter();try{b=evalFeatureBody(f,env,*this,work,fr,tessOpt);}catch(...){activity->leave();throw;}activity->leave();++recomputeEvaluated;}}}
         catch(const std::exception& e){fr.ok=false;fr.error=e.what();}
-        fr.ms=nowMs()-tf;
+        // A completed worker retains its actual evaluation duration; publication
+        // wait time alone can be near zero even for an expensive operation.
+        if(!measuredByWorker)fr.ms=nowMs()-tf;
         if(fr.ok && b.faces.empty() && !b.baked){
             fr.ok=false; fr.error="feature produced empty body";
         }

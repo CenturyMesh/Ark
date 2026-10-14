@@ -105,6 +105,36 @@ arkjson::Value AgentSession::snapshotCandidate(const V& args){
     V content=*response.find("content");for(auto& part:content.arr)if(part.find("type")&&part.find("type")->asStr()=="text"){part.set("text",V::makeStr(data.dump()));break;}response.set("content",content);
     return response;
 }
+const Document& AgentSession::PreparedTransfer::document() const{
+    if(!value_||!value_->document)throw std::runtime_error("Prepared transfer already consumed");
+    return *value_->document;
+}
+const std::string& AgentSession::PreparedTransfer::id() const{
+    if(!value_)throw std::runtime_error("Prepared transfer already consumed");return value_->id;
+}
+const V& AgentSession::PreparedTransfer::result() const{
+    if(!value_)throw std::runtime_error("Prepared transfer already consumed");return value_->result;
+}
+std::unique_ptr<AgentSession::PreparedTransfer> AgentSession::takePreparedCandidate(const std::string& id){
+    auto found=std::find_if(prepared_.begin(),prepared_.end(),[&](const Prepared& p){return p.id==id;});
+    if(found==prepared_.end())throw std::runtime_error("Prepared candidate missing, evicted or already applied");
+    if(found->metadataOnly)throw std::runtime_error("Geometry worker transfer requires a complete geometry candidate");
+    if(found->expires<=std::chrono::steady_clock::now()||found->revision!=revision||found->baseline!=fingerprint(document))throw std::runtime_error("Prepared candidate expired or document changed; preview again");
+    auto receipt=std::make_shared<Prepared>(std::move(*found));prepared_.erase(found);
+    return std::unique_ptr<PreparedTransfer>(new PreparedTransfer(std::move(receipt)));
+}
+void AgentSession::adoptPreparedCandidate(PreparedTransfer&& transfer,u64 expectedRevision){
+    if(expectedRevision!=revision)throw std::runtime_error("Revision conflict; drawing retained");
+    if(!transfer.value_)throw std::runtime_error("Prepared transfer already consumed");
+    const auto& receipt=*transfer.value_;
+    if(receipt.expires<=std::chrono::steady_clock::now()||receipt.revision!=revision||receipt.baseline!=fingerprint(document))throw std::runtime_error("Prepared transfer expired or source changed; preview again");
+    constexpr size_t budget=128u*1024u*1024u;
+    if(!receipt.document||receipt.bytes>budget||receipt.metadataOnly)throw std::runtime_error("Prepared transfer has no complete geometry within the candidate budget");
+    if(std::any_of(prepared_.begin(),prepared_.end(),[&](const Prepared& p){return p.id==receipt.id;}))throw std::runtime_error("Prepared transfer already adopted");
+    size_t used=0;for(const auto& p:prepared_)used+=p.bytes;
+    while(!prepared_.empty()&&(prepared_.size()>=4||used+receipt.bytes>budget)){used-=prepared_.front().bytes;prepared_.erase(prepared_.begin());}
+    prepared_.push_back(std::move(*transfer.value_));transfer.value_.reset();
+}
 arkjson::Value AgentSession::commitPrepared(const V& args){
     checkRevision(args,revision);for(const auto& field:args.obj)if(field.first!="expected_revision"&&field.first!="candidate_id"&&field.first!="accept_dfm")throw std::runtime_error("Prepared apply accepts only candidate_id, expected_revision and explicit accept_dfm for DFM proposals");
     const auto* id=args.find("candidate_id");if(!id||id->t!=V::Str)throw std::runtime_error("candidate_id must be text");

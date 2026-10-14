@@ -212,7 +212,7 @@ V numericNative(const V& value, const ExprEnv& env, const std::string& key = {})
         return value;
     }
     if (value.t == V::Str) {
-        if (key == "kind" || key == "join" || key == "sketch" || key == "name" || key == "op" || key == "reference" || key == "second_reference" || key == "mode" || key == "end" || key == "edges" || key == "faces" || key == "face" || key == "source_face" || key == "limit_face" || key == "plane" || key == "keep" || key == "selection" || key == "direction" || key == "axis" || key == "neutral") return value;
+        if (key == "source_vertex" || key == "source_topology" || key == "kind" || key == "join" || key == "sketch" || key == "name" || key == "op" || key == "reference" || key == "second_reference" || key == "mode" || key == "end" || key == "edges" || key == "faces" || key == "face" || key == "source_face" || key == "limit_face" || key == "plane" || key == "keep" || key == "selection" || key == "direction" || key == "axis" || key == "neutral") return value;
         return V::makeNum(expressionValue(value.str, env));
     }
     if (value.t == V::Arr) {
@@ -741,6 +741,12 @@ V solidFeatureRequest(const Feature& feature, const ExprEnv& env,
     if (op == "pocket" || op == "slot") op = "hole";
     if (op == "rigid_transform") op = "transform";
     model.set("op", V::makeStr(op));
+    if(op=="vertex_pull"){
+        for(const auto& item:feature.nativeSpec.obj)if(item.first!="op"&&item.first!="source_vertex"&&item.first!="source_topology")throw std::runtime_error("Unknown native vertex-pull field: "+item.first);
+        for(const auto& item:feature.p)if(item.first!="dx"&&item.first!="dy"&&item.first!="dz"&&item.first!="density"&&item.first!="op")throw std::runtime_error("Unknown native vertex-pull parameter: "+item.first);
+        for(const char* key:{"dx","dy","dz"})if(!feature.p.count(key))throw std::runtime_error(std::string("Vertex pull requires explicit ")+key);
+        for(const char* key:{"source_vertex","source_topology"}){const auto& value=required(feature.nativeSpec,key);if(value.t!=V::Str||value.str.empty())throw std::runtime_error(std::string("Vertex pull requires typed ")+key);}
+    }
     if(op=="tube_end_fit"){
         if(feature.inputs.size()!=2||feature.inputs[0]==feature.inputs[1])throw std::runtime_error("Tube end fit needs distinct source and host inputs");
         const std::set<std::string> allowed{"op","end","mode","reference"};for(const auto& item:feature.nativeSpec.obj)if(!allowed.count(item.first))throw std::runtime_error("Unsupported tube end fit field: "+item.first);
@@ -752,6 +758,8 @@ V solidFeatureRequest(const Feature& feature, const ExprEnv& env,
     }
     if ((op == "curve_pattern" || op == "hole_pattern") && feature.inputs.size() != 2)
         throw std::runtime_error("Curve pattern needs target and path feature inputs");
+    if (op == "vertex_pull" && feature.inputs.size() != 1)
+        throw std::runtime_error("Vertex pull requires one exact polyhedral solid input");
     if (op == "shell" && feature.inputs.size() != 1)
         throw std::runtime_error("Shell needs one solid input");
     if (op == "split_plane" && feature.inputs.size() != 1)

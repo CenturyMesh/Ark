@@ -89,12 +89,10 @@ class ResidentWorker {
     fs::file_time_type executableTime{};
     std::string threadSetting;
     unsigned requests=0;
-    int launchBudget=0;
 public:
-    bool matches(const fs::path& path)const{const char* value=std::getenv("ARK_NATIVE_THREADS");return launchBudget==effectiveNativeBudget()&&requests<256&&threadSetting==(value?value:"")&&executable==path&&executableTime==fs::last_write_time(path)&&process.value&&WaitForSingleObject(process.value,0)==WAIT_TIMEOUT;}
+    bool matches(const fs::path& path)const{const char* value=std::getenv("ARK_NATIVE_THREADS");return requests<256&&threadSetting==(value?value:"")&&executable==path&&executableTime==fs::last_write_time(path)&&process.value&&WaitForSingleObject(process.value,0)==WAIT_TIMEOUT;}
     explicit ResidentWorker(const fs::path& worker):executable(worker),executableTime(fs::last_write_time(worker)){
         const char* value=std::getenv("ARK_NATIVE_THREADS");threadSetting=value?value:"";
-        launchBudget=effectiveNativeBudget();
         const auto prefix=L"Local\\"+temp.directory.filename().wstring();
         requestEvent.value=CreateEventW(nullptr,FALSE,FALSE,(prefix+L"-request").c_str());doneEvent.value=CreateEventW(nullptr,FALSE,FALSE,(prefix+L"-done").c_str());
         SECURITY_ATTRIBUTES security{sizeof security,nullptr,TRUE};
@@ -104,7 +102,9 @@ public:
         JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};limits.BasicLimitInformation.LimitFlags=JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;if(!SetInformationJobObject(job.value,JobObjectExtendedLimitInformation,&limits,sizeof limits))throw std::runtime_error("Cannot bound resident worker");
         STARTUPINFOW startup{};startup.cb=sizeof startup;startup.dwFlags=STARTF_USESTDHANDLES;startup.hStdInput=input.value;startup.hStdOutput=output.value;startup.hStdError=output.value;
         std::wstring command=quote(worker.wstring())+L" --server "+quote(temp.directory.wstring());PROCESS_INFORMATION info{};
-        auto environment=workerEnvironment();if(!CreateProcessW(worker.c_str(),command.data(),nullptr,nullptr,TRUE,CREATE_NO_WINDOW|CREATE_SUSPENDED|CREATE_UNICODE_ENVIRONMENT,environment.empty()?nullptr:environment.data(),worker.parent_path().c_str(),&startup,&info))throw std::runtime_error("Cannot launch resident worker");
+        // The process keeps the host pool capacity. Each serialized request sets
+        // its bounded allowance without replacing the isolated process.
+        std::vector<wchar_t> environment;if(!CreateProcessW(worker.c_str(),command.data(),nullptr,nullptr,TRUE,CREATE_NO_WINDOW|CREATE_SUSPENDED|CREATE_UNICODE_ENVIRONMENT,environment.empty()?nullptr:environment.data(),worker.parent_path().c_str(),&startup,&info))throw std::runtime_error("Cannot launch resident worker");
         process.value=info.hProcess;Handle thread{info.hThread};if(!AssignProcessToJobObject(job.value,process.value)){TerminateProcess(process.value,1);throw std::runtime_error("Cannot assign resident worker watchdog");}ResumeThread(thread.value);
     }
     ~ResidentWorker(){if(job.value&&process.value){TerminateJobObject(job.value,0);WaitForSingleObject(process.value,5000);}}
@@ -112,7 +112,7 @@ public:
         ++requests;
         // Truncate the diagnostic log while idle so resident operation is bounded.
         SetFilePointer(output.value,0,nullptr,FILE_BEGIN);SetEndOfFile(output.value);
-        {std::ofstream file(temp.directory/"request.json",std::ios::binary|std::ios::trunc);file<<request.dump();if(!file)throw std::runtime_error("Cannot write resident request");}
+        {V bounded=request;bounded.set("native_threads",V::makeNum(effectiveNativeBudget()));std::ofstream file(temp.directory/"request.json",std::ios::binary|std::ios::trunc);file<<bounded.dump();if(!file)throw std::runtime_error("Cannot write resident request");}
         std::error_code ec;fs::remove(temp.directory/"result.json",ec);ResetEvent(doneEvent.value);if(!SetEvent(requestEvent.value))throw std::runtime_error("Cannot signal resident worker");
         HANDLE handles[]{doneEvent.value,process.value};DWORD wait=WaitForMultipleObjects(2,handles,FALSE,30000);
         if(wait!=WAIT_OBJECT_0){TerminateJobObject(job.value,1);WaitForSingleObject(process.value,5000);throw std::runtime_error(wait==WAIT_TIMEOUT?"Native OCCT operation exceeded 30-second worker limit":"Resident OCCT worker exited");}
@@ -137,14 +137,15 @@ std::string stepPath(const std::string& value){auto path=fs::absolute(utf8path(v
 }
 V nativeWorkerRequest(const V& request){
     ++nativeRequests;++totalNativeRequests;
+    V bounded=request;bounded.set("native_threads",V::makeNum(effectiveNativeBudget()));
 #ifdef _WIN32
     if(const auto mode=std::getenv("ARK_NATIVE_ONESHOT");!mode||std::string(mode)!="1"){
         static thread_local std::unique_ptr<ResidentWorker> resident;
         auto worker=workerPath();if(!resident||!resident->matches(worker)){resident.reset();resident=std::make_unique<ResidentWorker>(worker);++nativeStarts;++totalNativeStarts;}
-        try{return resident->call(request);}catch(...){resident.reset();throw;}
+        try{return resident->call(bounded);}catch(...){resident.reset();throw;}
     }
 #endif
-    auto worker=workerPath();Temporary temp;{std::ofstream file(temp.directory/"request.json",std::ios::binary);file<<request.dump();if(!file)throw std::runtime_error("Cannot write native request");}
+    auto worker=workerPath();Temporary temp;{std::ofstream file(temp.directory/"request.json",std::ios::binary);file<<bounded.dump();if(!file)throw std::runtime_error("Cannot write native request");}
     ++nativeStarts;++totalNativeStarts;unsigned code=execute(worker,temp);V response;bool parsed=arkjson::parse(read(temp.directory/"result.json"),response)&&response.t==V::Obj;
     if(code||!parsed||response.find("error")){
         std::string error=parsed&&response.find("error")?response.find("error")->asStr():read(temp.directory/"worker.log");if(error.empty())error="Native worker failed (exit "+std::to_string(code)+")";if(error.size()>1200)error=error.substr(error.size()-1200);throw std::runtime_error("OCCT: "+error);

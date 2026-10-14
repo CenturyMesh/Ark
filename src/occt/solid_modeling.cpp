@@ -39,6 +39,13 @@
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
 #include <BRepBuilderAPI_MakeVertex.hxx>
+#include <BRepBuilderAPI_MakePolygon.hxx>
+#include <BRepBuilderAPI_MakeSolid.hxx>
+#include <BRepBuilderAPI_Sewing.hxx>
+#include <BRepBuilderAPI_Copy.hxx>
+#include <BRepCheck_Analyzer.hxx>
+#include <BOPAlgo_ArgumentAnalyzer.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
 #include <BRepClass3d_SolidClassifier.hxx>
 #include <BRepClass_FaceClassifier.hxx>
 #include <GeomAPI_ProjectPointOnSurf.hxx>
@@ -79,6 +86,7 @@ namespace ark::occt {
 namespace {
 using V = arkjson::Value;
 struct Ref { std::string name,kind,status; TopoDS_Shape shape; V seed; V meta; };
+V withNativeVertexInventory(V result);
 bool selectable(const std::string& status){return status=="bound"||status=="merged";}
 const V& need(const V& v,const char* key){auto p=v.find(key);if(!p)throw std::runtime_error(std::string("Missing solid field: ")+key);return *p;}
 std::string word(const V& v,const char* key){auto& p=need(v,key);if(p.t!=V::Str||p.str.empty())throw std::runtime_error(std::string("Invalid solid text: ")+key);return p.str;}
@@ -166,7 +174,7 @@ template<class Operation>std::vector<Ref> propagated(const std::vector<Ref>& ref
     }return out;
 }
 void add(std::vector<Ref>& refs,const std::string& name,const std::string& kind,const TopoDS_Shape& s){if(s.IsNull())return;for(const auto& existing:refs)if(existing.name==name){if(existing.kind==kind&&existing.shape.IsSame(s))return;throw std::runtime_error("Ambiguous producer reference: "+name);}refs.push_back({name,kind,"bound",s});}
-V finish(const TopoDS_Shape& shape,const std::vector<Ref>& refs){V result=shapeResult(shape,true);result.set("topology",topologyOf(shape,need(result,"brep_base64").str,refs));return completeSelectionReferences(std::move(result));}
+V finish(const TopoDS_Shape& shape,const std::vector<Ref>& refs){V result=shapeResult(shape,true);result.set("topology",topologyOf(shape,need(result,"brep_base64").str,refs));return withNativeVertexInventory(completeSelectionReferences(std::move(result)));}
 void boxEdges(const TopoDS_Shape& solid,double x,double y,double z,std::vector<Ref>& refs){
     for(auto& item:shapes(solid,TopAbs_EDGE)){TopoDS_Vertex a,b;TopExp::Vertices(TopoDS::Edge(item),a,b);if(a.IsNull()||b.IsNull())continue;
         gp_Pnt p=BRep_Tool::Pnt(a),q=BRep_Tool::Pnt(b);double delta[3]{std::abs(p.X()-q.X()),std::abs(p.Y()-q.Y()),std::abs(p.Z()-q.Z())};
@@ -625,13 +633,15 @@ TopoDS_Shape splitOnPlane(const TopoDS_Shape& input,const V& request,std::vector
 V finishBodies(const TopoDS_Shape& shape,const std::vector<Ref>& refs){
     auto solids=shapes(shape,TopAbs_SOLID);if(solids.empty()||solids.size()>64)throw std::runtime_error("Pattern needs 1..64 solids");
     for(const auto& solid:solids)if(!(properties(solid)>0))throw std::runtime_error("Pattern instance has no positive volume");
-    V result=shapeResult(shape,false);result.set("topology",topologyOf(shape,need(result,"brep_base64").str,refs));return completeSelectionReferences(std::move(result));
+    V result=shapeResult(shape,false);result.set("topology",topologyOf(shape,need(result,"brep_base64").str,refs));return withNativeVertexInventory(completeSelectionReferences(std::move(result)));
 }
 
+#include "vertex_pull.inl"
+
 V modelSolidNative(const V& request){
-    const std::string op=word(request,"op");std::vector<Ref> refs;TopoDS_Shape result;bool many=false;V extrusionReceipt=V::makeObj();
+    const std::string op=word(request,"op");std::vector<Ref> refs;TopoDS_Shape result;bool many=false;V extrusionReceipt=V::makeObj(),vertexReceipt=V::makeObj();
     try{
-    if(op=="tube_end_fit")return tubeEndFitNative(request);
+    if(op=="tube_end_fit")return withNativeVertexInventory(tubeEndFitNative(request));
     if(op=="imported_brep"){
         const V& package=need(request,"package");componentCustodyNative(package);
         const std::string sourceBytes=base64Decode(word(package,"source_step_base64"));
@@ -653,7 +663,7 @@ V modelSolidNative(const V& request){
         if(sha256(readFile(source))!=word(package,"source_sha256"))throw std::runtime_error("Component source changed during exact validation");
         V out=shapeResult(stored,body!=-2);std::vector<Ref> sourceRefs;const auto faces=shapes(stored,TopAbs_FACE);
         for(size_t i=0;i<std::min((size_t)256,faces.size());++i){sourceRefs.push_back({"source.face."+std::to_string(i),"face","bound",faces[i],{}, {}});BRepAdaptor_Surface surface(TopoDS::Face(faces[i]));if(surface.GetType()==GeomAbs_Cylinder||surface.GetType()==GeomAbs_Cone||surface.GetType()==GeomAbs_Torus)sourceRefs.push_back({"source.axis."+std::to_string(i),"axis","bound",faces[i],{}, {}});}
-        out.set("topology",topologyOf(stored,need(out,"brep_base64").str,sourceRefs));V report=*out.find("report");report.set("source_selection_verified",V::makeBool(true));report.set("source_sha256",need(package,"source_sha256"));report.set("body_index",need(package,"body_index"));report.set("source_solid_count",need(package,"source_solid_count"));report.set("source_symmetric_difference_mm3",V::makeNum(difference));report.set("source_bounds_error_mm",V::makeNum(boundError));report.set("standard_recognition_checked",V::makeBool(false));report.set("reference_inventory_complete",V::makeBool(faces.size()<=256));report.set("reference_scope",V::makeStr("source_indexed_faces_and_analytic_axes_first_256_faces"));out.set("report",report);out.set("package",package);return completeSelectionReferences(std::move(out));
+        out.set("topology",topologyOf(stored,need(out,"brep_base64").str,sourceRefs));V report=*out.find("report");report.set("source_selection_verified",V::makeBool(true));report.set("source_sha256",need(package,"source_sha256"));report.set("body_index",need(package,"body_index"));report.set("source_solid_count",need(package,"source_solid_count"));report.set("source_symmetric_difference_mm3",V::makeNum(difference));report.set("source_bounds_error_mm",V::makeNum(boundError));report.set("standard_recognition_checked",V::makeBool(false));report.set("reference_inventory_complete",V::makeBool(faces.size()<=256));report.set("reference_scope",V::makeStr("source_indexed_faces_and_analytic_axes_first_256_faces"));out.set("report",report);out.set("package",package);return withNativeVertexInventory(completeSelectionReferences(std::move(out)));
     }
     if(op=="box"){
         double x=positive(request,"width"),y=positive(request,"depth"),z=positive(request,"height");BRepPrimAPI_MakeBox box(x,y,z);result=box.Shape();
@@ -671,7 +681,8 @@ V modelSolidNative(const V& request){
     else if(op=="extrude")result=makeExtrusion(request,refs,&extrusionReceipt);
     else {
         const auto& encoded=need(request,"input_brep");if(encoded.t!=V::Str)throw std::runtime_error("Input must be a native B-rep");TopoDS_Shape input=readBrep(encoded.str);shapeReport(input,true);refs=inputRefs(request,"input_brep","input_topology",input);
-        if(op=="curve_pattern"||op=="hole_pattern"){
+        if(op=="vertex_pull")result=pullNativeVertex(input,request,refs,vertexReceipt);
+        else if(op=="curve_pattern"||op=="hole_pattern"){
             V query=V::makeObj(),queries=V::makeArr(),model=V::makeObj();query.set("action",V::makeStr("curve"));query.set("reference",need(request,"reference"));query.set("count",need(request,"count"));query.set("margin_mm",V::makeNum(optional(request,"margin_mm",0)));queries.arr.push_back(query);model.set("brep",need(request,"tool_brep"));model.set("topology",need(request,"tool_topology"));model.set("queries",queries);
             const double count=scalar(request,"count");if(count<2||count>128||count!=std::floor(count))throw std::runtime_error("Curve pattern count must be 2..128");
             if(op=="curve_pattern"&&count*refs.size()>512)throw std::runtime_error("Curve pattern exceeds 512 semantic references");
@@ -754,7 +765,7 @@ V modelSolidNative(const V& request){
             BRepBuilderAPI_Transform algorithm(input,placement,true);if(!algorithm.IsDone())throw std::runtime_error("Native rigid transform failed");result=algorithm.Shape();refs=propagated(refs,result,algorithm);
         }else throw std::runtime_error("Unknown native solid operation");
     }
-    V output=many?finishBodies(result,refs):finish(result,refs);if(op=="extrude"){V report=need(output,"report");report.set("extrusion",extrusionReceipt);output.set("report",report);}return output;
+    V output=many?finishBodies(result,refs):finish(result,refs);if(op=="extrude"){V report=need(output,"report");report.set("extrusion",extrusionReceipt);output.set("report",report);}if(op=="vertex_pull"){V report=need(output,"report");report.set("vertex_pull",vertexReceipt);report.set("self_intersections_checked",V::makeBool(true));output.set("report",report);}return output;
     }
     catch(const std::exception& error){
         std::string context="Native "+op;
