@@ -84,7 +84,8 @@ permission requests, model selection, cancellation and MCP tools. It does not
 return the Responses-style tool-request envelope expected by ARK's
 `runAssistant` provider transport.
 
-028D adds that separate ACP client to Single Assistant and Team cards. Choose
+028D adds that separate ACP client to Windows Single Assistant and Team cards.
+The native CLI transport is currently Windows-only. Choose
 **Grok Build** in the connector control after completing `grok login`. The CLI
 field accepts `grok` at the normal installation location or the official
 executable's full path. A blank model uses the selected model advertised by the
