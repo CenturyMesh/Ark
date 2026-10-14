@@ -15,6 +15,9 @@ bool assistantAcpAvailable(const AssistantConfig&);
 // initialize only: no authenticate/browser, session/new or model inference.
 // Returns negotiated SDK-MCP/image support and the CLI's actual modelState.
 arkjson::Value assistantAcpProbe(const AssistantConfig&);
+// Read-only session bootstrap, policy echo and SDK tool discovery; no prompt,
+// authentication operation or CAD executor is authorized by this probe.
+arkjson::Value assistantAcpSessionProbe(const AssistantConfig&);
 std::vector<std::string> assistantAcpModels(const AssistantConfig&);
 AssistantResult runAssistantAcp(const AssistantConfig&,const arkjson::Value& input,
     const arkjson::Value& tools,const AssistantTool&,const AssistantEvents& events={},
