@@ -106,5 +106,6 @@ unknown. See [028D evidence](iterations/028D.md) for native protocol/UI checks a
 the separate authenticated-authoring gate.
 
 Official CLI/MCP/ACP and GUI-maintainer references checked on 14 October 2026.
-See [the measured development scope](verification-grok-build.json); authenticated
-Grok-driven authoring remains unverified.
+See [the earlier external-MCP development scope](verification-grok-build.json)
+and [028D's native CLI scope and release receipts](iterations/028D.md).
+Discovery alone does not establish authenticated inference or CAD quality.

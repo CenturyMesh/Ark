@@ -146,7 +146,7 @@ Goal: make ARK understandable, installable, updateable and supportable.
 | F.02 | Licensing and distribution guidance | Parcial | Apache-2.0 and attribution are published. Keep source, dependency and package terms discoverable; complete the distribution audit under A.05. [Public guidance](COMMERCIAL_STRATEGY.md) |
 | F.03 | Onboarding and initial library | Parcial | English README/handbook, branch/PR guidance, a [first-part walkthrough](FIRST_TRY.md), structured experience reports and [launch materials](launch/README.md) are available. Clean-machine setup and five guided workflows still need observed first-valid-part time and abandonment evidence. Fabricable templates need their own qualification. |
 | F.04 | Support and operational quality | Parcial | Contribution templates and security guidance support reporting; opt-in redacted crash reports, diagnostic export, migrations, hardware matrix and support policy need operational evidence. |
-| F.05 | Public distribution and user pilot | Parcial | Public Apache-2.0 repository and 016F Windows/Linux-headless prerelease packages are published. Download links, feedback forms and launch materials are available. A real-user cohort, clean-install qualification and measured adoption outcomes remain separate gates. |
+| F.05 | Public distribution and user pilot | Parcial | Public Apache-2.0 repository and Windows/Linux-headless prerelease packages are published. Download links, feedback forms and launch materials are available. A real-user cohort, clean-install qualification and measured adoption outcomes remain separate gates. |
 
 The public repository and prerelease were verified on 2026-10-12. The active
 main-branch ruleset requires PRs, resolved review threads and configured CI checks,

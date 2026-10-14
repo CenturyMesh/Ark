@@ -13,14 +13,17 @@
 Powered by C++ and Open CASCADE. Windows includes the graphical Studio; Linux
 currently provides the headless CLI, MCP server and native geometry worker.
 
-**Download ready-to-run preview packages - 027D / 0.9.28:**
+**Download ready-to-run preview packages - 028D / 0.9.29:**
 
-[**Windows x64 - Studio + CLI/MCP (ZIP)**](https://github.com/CenturyMesh/Ark/releases/download/v0.9.28/ark-windows-x64-0.9.28.zip) | [**Linux x64 - headless CLI/MCP (tar.gz)**](https://github.com/CenturyMesh/Ark/releases/download/v0.9.28/ark-linux-x64-headless-0.9.28.tar.gz)
+[**Windows x64 - Studio + CLI/MCP (ZIP)**](https://github.com/CenturyMesh/Ark/releases/download/v0.9.29/ark-windows-x64-0.9.29.zip) | [**Linux x64 - headless CLI/MCP (tar.gz)**](https://github.com/CenturyMesh/Ark/releases/download/v0.9.29/ark-linux-x64-headless-0.9.29.tar.gz)
 
 Extract the Windows ZIP and run `ARK.cmd`. For Linux, extract the archive and run
 `bin/ark-mcp`; this package has no graphical Studio. These are prerelease binaries
-for manual evaluation. [Release notes, checksums and OCCT source](https://github.com/CenturyMesh/Ark/releases/tag/v0.9.28).
+for manual evaluation. [Release notes, checksums and OCCT source](https://github.com/CenturyMesh/Ark/releases/tag/v0.9.29).
 No compilation is required to use these downloads.
+
+The chat opens on first launch and remembers your visibility choice. Windows
+Assistant and Team cards also offer [Grok Build through its official CLI account](docs/GROK_BUILD_CONNECT.md).
 
 Optional installer builds and explicit personal packages are documented in
 [distribution instructions](DISTRIBUTION.md). Existing published binaries keep
