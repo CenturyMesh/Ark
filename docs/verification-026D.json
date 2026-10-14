@@ -125,6 +125,8 @@
     "draft": true,
     "merged": false,
     "pull_request": "https://github.com/CenturyMesh/Ark/pull/11",
-    "hosted_ci": "Pending this code push. Prior hosted runs were rejected before steps due account payments/spending-limit restrictions."
+    "verified_code_commit": "a06005e",
+    "hosted_ci": "Run 38594605984 was rejected before job steps due account payments/spending-limit restrictions. Local checks and failed live model trials are recorded separately. No billing settings changed.",
+    "hosted_ci_url": "https://github.com/CenturyMesh/Ark/actions/runs/38594605984"
   }
 }
