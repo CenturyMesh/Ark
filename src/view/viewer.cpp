@@ -6602,8 +6602,9 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
             for(int y=0;y<winH;++y)std::memcpy(&image.px[(size_t)y*winW*3],&pixels[(size_t)(winH-1-y)*winW*3],(size_t)winW*3);
             if(!writePNG((shotPath+suffix).c_str(),image))return std::uint64_t{0};
             std::uint64_t digest=1469598103934665603ull;
-            // Hash only the model area: exclude the view labels, left tool rail, view cube and bottom controls.
-            for(int y=viewY+190;y<viewY+viewH-48;++y)for(int x=viewX+128;x<viewX+viewW-276;++x)for(int c=0;c<3;++c){digest^=image.px[((size_t)y*winW+x)*3+c];digest*=1099511628211ull;}
+            // Keep the measured model region visible when the open chat reduces viewport height.
+            const int modelTop=viewY+std::min(190,viewH/4);
+            for(int y=modelTop;y<viewY+viewH-48;++y)for(int x=viewX+128;x<viewX+viewW-276;++x)for(int c=0;c<3;++c){digest^=image.px[((size_t)y*winW+x)*3+c];digest*=1099511628211ull;}
             return digest;
         };
         target=tTarget;dist=tDist;yaw=tYaw;pitch=tPitch;g_occlusionMode=0;
