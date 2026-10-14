@@ -176,7 +176,7 @@ dimension images were inspected: declared 6H, named `BlindDepth`, semantic threa
 depth, blank groove defaults and declared H7 were readable and their controls
 were unclipped. That inspection also found the final word of the long tolerance
 hint clipped; the hint was shortened. The final Studio fixtures then passed
-**3/3 at 1440x900** and **3/3 at 1366x768**. Compact hole captures were visually
+**3/3 at 1440x900** and **3/3 at 1366x800**. Compact hole captures were visually
 inspected: the full tolerance hint, all six blind-hole controls, declared 6H/H7,
 groove defaults, Apply/Cancel buttons and the linked two-hole viewport/tree were
 readable and unclipped. Artifacts are under `out/native-release/ui-checks/`

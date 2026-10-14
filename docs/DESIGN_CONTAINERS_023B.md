@@ -161,10 +161,16 @@ manufacturing, or cost/design improvement.
 Local acceptance recorded on **2026-10-14**, Windows native build:
 `design-containers-023b` passed in **0.13 s**, including explicit datum-support
 clearing and geometry-failure rollback. `studio-design-container-ui` passed in
-**4.43 s** with actual mouse/modal controls, command-review cancellation and
+**4.35 s** on the final report-format check with actual mouse/modal controls,
+command-review cancellation and
 parent-first explorer collapse/expand. The 1440 × 900 checkout, actual command
 review, source ownership, expanded group and collapsed group captures were
 visually inspected: fields and controls were legible, review exposed the real
 recipe and ID map, and the occurrence appeared below its parent group and
-disappeared from the explorer when collapsed. These are synthetic local
+disappeared from the explorer when collapsed. A further compact run requested
+1366 × 768; the application applies its existing 800-pixel minimum height, and
+the resulting **1366 × 800** captures were also inspected. The command review
+retained CRLF indentation and scrolling, the parent/child hierarchy remained
+visible and that actual control fixture passed. Height 768 was not tested by
+those clamped captures. These are synthetic local
 acceptance results for B.04/D.03; those milestones remain partial.

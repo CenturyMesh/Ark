@@ -33,7 +33,7 @@
                   "log_sha256":  "9a77bcbbfeb513e9c75ca766a8c23b2ed0ae43009a2296fc145a5e6af73c403f",
                   "discovered_tools":  90,
                   "subsequent_changes":  "Presentation only: shorten hole help text; CRLF in container review",
-                  "affected_visual_rerun":  "3/3 at 1440x900; all three also passed at 1366x768",
+                  "affected_visual_rerun":  "3/3 at 1440x900; all three also passed at 1366x800",
                   "visual_rerun_wall_seconds":  13.9,
                   "visual_log_sha256":  "b14f02093aeca2c70294c584b1ff1bbcb40dfbfdb5efcde2bdb06704b110bf08",
                   "local_catalog_lookup":  {

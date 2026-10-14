@@ -14,7 +14,7 @@ From the 023B checkout:
 
 For a fresh source build, run `out/native-release/ark-studio.exe` after the native
 build workflow. The local full suite passed 115/115; affected visual controls
-were subsequently rechecked at 1440×900 and 1366×768. These results do not replace
+were subsequently rechecked at 1440×900 and 1366×800. These results do not replace
 manual user acceptance. [The receipt](verification-023B.json) records hashes.
 
 ## STEP/IGES and Arkitfy
