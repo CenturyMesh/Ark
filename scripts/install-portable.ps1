@@ -1,12 +1,15 @@
 param(
-    [string]$RuntimeDirectory = 'out/native-release/Release',
+    [string]$RuntimeDirectory,
     [string]$InstallRoot,
     [switch]$DesktopShortcut
 )
 $ErrorActionPreference = 'Stop'
 $repository = Split-Path $PSScriptRoot -Parent
+if (-not $RuntimeDirectory) {
+    $RuntimeDirectory = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'app-version.json')) { $PSScriptRoot } else { Join-Path $repository 'out/native-release/Release' }
+}
 if (-not [IO.Path]::IsPathRooted($RuntimeDirectory)) { $RuntimeDirectory = Join-Path $repository $RuntimeDirectory }
-Import-Module (Join-Path $repository 'updates/Ark.Update.psm1') -Force
+Import-Module (Join-Path $RuntimeDirectory 'updates/Ark.Update.psm1') -Force
 if (-not $InstallRoot) { $InstallRoot = Get-ArkInstallRoot }
 $lock = Enter-ArkUpdateLock $InstallRoot
 try { Initialize-ArkInstall $RuntimeDirectory $InstallRoot | Out-Null }
@@ -23,3 +26,4 @@ if ($DesktopShortcut) {
     $shortcut.Save()
 }
 Write-Output "ARK portable launcher: $(Join-Path $InstallRoot 'ARK.cmd')"
+

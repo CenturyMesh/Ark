@@ -1,5 +1,59 @@
 # ARK agent protocol
 
+026D exposes installed Ollama models for the Assistant and individual agent cards.
+Local models use the same tool permissions, revision guards and steering protocol.
+Tool/vision capabilities are checked from Ollama metadata; declared support is not
+a measured design-quality claim. See [local model setup](LOCAL_MODELS_026D.md).
+
+025B adds manual viewport visibility controls and a selected-part/container
+drawing shortcut. Opening a drawing view or selecting a source does not authorize
+drawing creation; agents still create manufacturing drawings only when requested.
+The 024B authoring tools and source-format contracts below remain unchanged.
+
+024B discovers **92 standalone tools**. Read `agent_onboard{topic:"stamps"}`
+for portable embedded PNG/JPEG, projected **Stamps**, same-body face appearances
+and exact split-line regions. Generate imagery through an actually available
+client skill/connector, then import its real artifact using `image_asset`;
+image generation inside ARK is not implied by an import tool. Inspect exact
+face names and `brep_sha256` before binding, and retain expected_revision.
+New image/face/split recipes conditionally require source format **39**.
+
+Read `agent_onboard{topic:"planes"}` for `plane_authoring`: create/offset planes,
+move an editable sketch to a named plane, and create exact contour or retained-
+side cuts from planes or saved sketch lines. A line defines an infinite section
+plane, not a finite kerf. Contours currently require one connected wire.
+
+Users can steer active single/team conversations with new text and images.
+Consume new input at the next provider boundary before planning another write;
+old queued writes reject at the actual UI execution boundary. Inline snapshots
+without `path` are document reads even during a peer write reservation; path
+exports retain write guards. `native_inspect{detail:"report"}` provides compact
+measured evidence; full topology remains available when binding references.
+See [024B evidence](iterations/024B.md), [Stamps](STAMPS_024B.md),
+[split lines](SPLIT_LINES_024B.md), [planes and sections](PLANE_SECTIONS_024B.md),
+and [manual testing](AUTHORING_024B_TESTING.md).
+
+023B discovers **90 standalone tools**. Use `holes_catalog` and
+`agent_onboard{topic:"holes"}` for functional holes: author a parametric
+`native_solid` / `holes_orchestrator` feature, with named locations and explicit
+source dependencies. Sketch-only holes are for nonfunctional contours. Catalog
+nominals do not establish tolerances or manufacturing qualification. For sheet
+parts whose flat pattern must remain associative, read the sheet-specific
+guidance before choosing the cut operation.
+
+Use `cad_inspect` before `import_cad` for general STEP/IGES references; retain the
+exact embedded source. Arkitfy is an agent reconstruction workflow: create native
+editable features and compare them against the immutable reference. Recognition
+does not establish design intent or universal equivalence. `import_step` retains
+its specialized tube workflow. See [CAD import](CAD_IMPORT_023B.md).
+
+`design_containers` inspects assembly groups, checks out a scoped document with
+read-only dependencies, and proposes or atomically applies a merge. Bind merge
+to the observed parent revision and reviewed child digest; stale source rejects
+without silent rebase. See [containers](DESIGN_CONTAINERS_023B.md) and load
+`agent_onboard{topic:"containers"}`. These new persisted recipes conditionally
+require source format **38**; release identity alone does not change the format.
+
 022B retains **86 standalone tools** and expands their existing authoring
 contracts. [Component patterns](SPECIALIZED_PATTERNS_022B.md) add linked
 pattern/sketch/curve/chain sources with stable copy slots and expression-driven

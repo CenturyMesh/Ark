@@ -1,5 +1,6 @@
 #include "ark/assistant_connectors.hpp"
 #include "ark/agent_team.hpp"
+#include "ark/agent.hpp"
 #include <array>
 #include <iostream>
 #include <stdexcept>
@@ -19,7 +20,7 @@ void testChat(){
     auto run=runAssistant(config,V::makeStr("Edit my document"),tools,[&](const std::string& name,const V& args){++executions;if(executions==1)check(name=="doc_info","tools execute in response order");else check(name=="doc_apply"&&args.find("expected_revision")->num==7,"revision survives chat conversion");return json(R"({"isError":false,"structuredContent":{"revision":8}})");},{},nullptr,
       [&](const auto&,const V& request,const auto*){
         check(request.find("messages")&&!request.find("input")&&!request.find("include")&&!request.find("instructions"),"chat request uses only its protocol");
-        const auto& functions=request.find("tools")->arr;check(functions[0].find("function")->find("parameters")->dump()==tools.arr[0].find("inputSchema")->dump(),"chat keeps extensible tool schema");
+        const auto& functions=request.find("tools")->arr;auto expectedSchema=*tools.arr[0].find("inputSchema");expectedSchema.set("properties",V::makeObj());check(functions[0].find("function")->find("parameters")->dump()==expectedSchema.dump(),"Ollama makes the empty property map explicit without closing the schema");
         if(++requests==1)return multiChat();
         const auto& messages=request.find("messages")->arr;check(messages.size()==5,"one assistant multi-call message and two tool results");
         const auto& assistant=messages[2];check(assistant.find("tool_calls")->arr.size()==2&&assistant.find("reasoning_content")->str=="Retained local reasoning.","multi-call batch and reasoning replay remain intact");
@@ -30,6 +31,21 @@ void testChat(){
     auto grok=configured("grok");const auto request=assistantRequest(grok,run.conversation,tools);check(request.find("input")&&!request.find("include")&&request.dump().find("ark_chat_reasoning")==std::string::npos&&request.dump().find("write_2")!=std::string::npos,"switching provider retains actual receipts without foreign thinking");
     int replayWrites=0;rejects([&]{runAssistant(config,run.conversation,tools,[&](auto&,auto&){++replayWrites;return V::makeObj();},{},nullptr,[&](auto&,auto&,auto*){return multiChat();});},"old call IDs cannot replay a write");check(replayWrites==0,"replayed response executes no tools");
     auto explicitEffort=config;explicitEffort.reasoningEffort="high";check(assistantRequest(explicitEffort,json(R"([{"role":"user","content":"Inspect"}])"),tools).find("reasoning_effort")->str=="high","chat effort is passed explicitly rather than downgraded");
+}
+void testOllamaEmptyPropertySchemas(){
+    const auto catalog=AgentSession::tools();const auto original=catalog.dump();const auto functions=assistantFunctionTools(catalog);
+    const auto request=assistantRequest(configured("ollama"),json(R"([{"role":"user","content":"Inspect the current document"}])"),catalog);
+    const auto& wire=request.find("tools")->arr;check(wire.size()==functions.arr.size(),"Ollama retains every model-visible function, excluding host-only usage receipts");
+    unsigned adapted=0;
+    for(std::size_t i=0;i<functions.arr.size();++i){
+        const auto& schema=*functions.arr[i].find("parameters");const auto& parameters=*wire[i].find("function")->find("parameters");
+        auto expected=schema;if(schema.find("type")&&schema.find("type")->asStr()=="object"&&!schema.find("properties")){expected.set("properties",V::makeObj());++adapted;}
+        check(parameters.dump()==expected.dump(),"Ollama preserves every declared constraint and property while adapting absent maps");
+        check(parameters.find("properties")&&parameters.find("properties")->t==V::Obj,"every discovered Ollama function has an object property map");
+    }
+    check(adapted>0&&catalog.dump()==original,"actual no-argument tools are covered and canonical MCP discovery is unchanged");
+    auto other=assistantRequest(configured("claude-chat"),json(R"([{"role":"user","content":"Inspect"}])"),tools);
+    check(other.find("tools")->arr[0].find("function")->find("parameters")->dump()==tools.arr[0].find("inputSchema")->dump(),"other provider schemas are unchanged");
 }
 void testCompleteBeforeExecution(){auto config=configured("claude-chat");
     for(int variant=0;variant<6;++variant){int calls=0;AssistantUsage usage;V outcome;
@@ -79,6 +95,10 @@ void testPresetsCatalogAndExport(){
     auto invalid=local;invalid.model="explicit";invalid.apiKeyEnv="OPENAI_API_KEY";rejects([&]{validateAssistantConfig(invalid);},"HTTP loopback must not transmit credentials");invalid=local;invalid.model="explicit";invalid.endpoint="http://remote.invalid/v1/chat/completions";rejects([&]{validateAssistantConfig(invalid);},"HTTP remote rejects");
     const std::string exe="C:\\Program Files\\ARK\\ark-mcp.exe",pipe="ark-studio-actual-123";
     const auto codex=assistantExternalMcpConfig("codex",exe,pipe);check(codex.find("[mcp_servers.ark]")!=std::string::npos&&codex.find("--connect")!=std::string::npos&&codex.find(pipe)!=std::string::npos,"Codex export binds actual pipe/executable");
+    const auto grokBuild=assistantExternalMcpConfig("grok-build",exe,pipe,configured("grok"));check(grokBuild==codex+"enabled = true\n","Grok Build exports the documented enabled stdio MCP table, absolute executable and actual pipe only");
+    auto planForGrok=configured("openai");planForGrok.authMode=AssistantAuthMode::ChatGptPlan;check(assistantExternalMcpConfig("grok-build",exe,pipe,planForGrok)==grokBuild,"Grok Build export keeps CLI account ownership independent of Assistant API or plan selection");
+    const std::string quotedExe="C:\\ARK \"quoted\"\\ark-mcp.exe";check(assistantExternalMcpConfig("grok-build",quotedExe,pipe).find(V::makeStr(quotedExe).dump())!=std::string::npos,"Grok Build TOML escapes quoted Windows executable paths");
+    rejects([&]{assistantExternalMcpConfig("grok-build","ark-mcp.exe",pipe);},"Grok Build refuses relative executable paths");rejects([&]{assistantExternalMcpConfig("grok-build",exe,"pipe with spaces");},"Grok Build refuses an invalid active endpoint");rejects([&]{assistantExternalMcpConfig("grok-build","C:/ARK/${OTHER}/ark-mcp.exe",pipe);},"Grok Build refuses command placeholders that the client would expand");
     for(const char* target:{"claude-code","claude-desktop","opencode"}){V exported;check(arkjson::parse(assistantExternalMcpConfig(target,exe,pipe),exported),"client export is valid JSON");const auto key=std::string(target)=="opencode"?"mcp":"mcpServers";check(exported.find(key)->find("ark")&&exported.dump().find(pipe)!=std::string::npos,"external client connects exact active window");}
     auto selected=configured("ollama");V external;check(arkjson::parse(assistantExternalMcpConfig("opencode",exe,pipe,selected),external),"OpenCode local provider JSON");check(external.find("provider")->find("ark-ollama")->find("options")->find("baseURL")->str=="http://127.0.0.1:11434/v1"&&external.find("model")->str=="ark-ollama/explicit-offline-model","external Ollama uses OpenCode MCP plus actual chosen model");
     selected=configured("grok");arkjson::parse(assistantExternalMcpConfig("opencode",exe,pipe,selected),external);check(external.find("provider")->find("ark-grok")->find("options")->find("apiKey")->str=="{env:XAI_API_KEY}"&&external.find("provider")->find("ark-grok")->find("npm")->str=="@ai-sdk/openai","external Grok references env and Responses SDK only");
@@ -104,8 +124,12 @@ void testMixedProviderTeam(){AgentTeam team;AgentTeamConfig config;config.maxWor
     team.start(config,"Inspect this same drawing",tools,[&](const std::string& name,const V&){check(name=="doc_info","mixed provider team inspection allowlist");++inspections;return json(R"({"isError":false,"structuredContent":{"revision":7}})");});check(team.waitIdleFor(std::chrono::seconds(5)),"mixed team completes bounded offline task");const auto snapshot=team.snapshot(true);check(inspections==3&&snapshot.roles.size()==3,"each provider role inspects exactly once");for(int i=0;i<3;++i)check(requests[i]==2&&snapshot.roles[i].state==AgentTeamState::Idle&&snapshot.roles[i].conversation.dump().find("role_inspect_"+std::to_string(i))!=std::string::npos,"mixed roles keep independent normalized histories and finish successfully");
 }
 }
+#include "local_models_tests.inl"
 int main(int argc,char** argv){try{
+    if(argc==5&&std::string(argv[1])=="--export-mcp"){std::cout<<assistantExternalMcpConfig(argv[2],argv[3],argv[4]);return 0;}
+    if(argc==3&&std::string(argv[1])=="--local-agent-smoke"){liveLocalModelSmoke(argv[2]);return 0;}
+    if(argc==3&&std::string(argv[1])=="--local-agent-basic-smoke"){liveLocalModelSmoke(argv[2],true);return 0;}
     // Explicit opt-in read-only network smoke. Default test stays fully offline.
     if(argc==3&&std::string(argv[1])=="--catalog"){const auto ids=assistantProviderModels(assistantProviderPreset(argv[2]));V models=V::makeArr();for(const auto& id:ids)models.arr.push_back(V::makeStr(id));std::cout<<models.dump()<<'\n';return 0;}
-    testChat();testCompleteBeforeExecution();testBoundedOutcomes();testMessages();testPresetsCatalogAndExport();testResponsesReplayCustody();testMixedProviderTeam();std::cout<<"Provider connector contracts passed\n";return 0;
+    testLocalModelCapabilities();testChat();testOllamaEmptyPropertySchemas();testCompleteBeforeExecution();testBoundedOutcomes();testMessages();testPresetsCatalogAndExport();testResponsesReplayCustody();testMixedProviderTeam();std::cout<<"Provider connector contracts passed\n";return 0;
 }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

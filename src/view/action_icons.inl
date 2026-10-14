@@ -51,6 +51,12 @@ static const ActionIcon* actionVectorIcon(int action){
         for(int id=770;id<=779;++id){auto& icon=result[id];for(float x:{.12f,.43f,.74f})box(icon,x,.30f,.16f,.22f);if(id==771||id==774||id==775)arc(icon,.5f,.5f,.37f,.32f,10,170);else poly(icon,{{.16f,.72f},{.82f,.72f},{.73f,.63f}});if(id==773){line(icon,.18f,.14f,.83f,.14f);line(icon,.18f,.12f,.18f,.20f);}if(id==775)line(icon,.16f,.56f,.83f,.56f);}
         for(int id=800;id<=816;++id){auto& icon=result[id];poly(icon,{{.15f,.80f},{.15f,.55f},{.70f,.55f},{.70f,.18f},{.85f,.18f}});line(icon,.25f,.68f,.81f,.68f);if(id<=802){line(icon,.23f,.53f,.46f,.30f);line(icon,.50f,.30f,.70f,.50f);}else if(id>=806&&id<=808)arc(icon,.35f,.55f,.17f,.17f,180,270);else if(id>=812&&id<=814)box(icon,.33f,.38f,.18f,.17f);else if(id>=815){box(icon,.12f,.12f,.42f,.32f);line(icon,.12f,.28f,.54f,.28f);}}
         for(int id=840;id<=861;++id){auto& icon=result[id];box(icon,.14f,.08f,.72f,.84f);box(icon,.24f,.20f,.25f,.26f);line(icon,.58f,.21f,.76f,.21f);line(icon,.58f,.33f,.76f,.33f);line(icon,.24f,.66f,.76f,.66f);line(icon,.24f,.79f,.76f,.79f);if(id==847)line(icon,.22f,.52f,.75f,.18f);}
+        auto& planes=result[960];poly(planes,{{.10f,.37f},{.52f,.14f},{.90f,.37f},{.48f,.61f},{.10f,.37f}});poly(planes,{{.10f,.54f},{.48f,.78f},{.90f,.54f}});poly(planes,{{.10f,.70f},{.48f,.94f},{.90f,.70f}});
+        auto& sketch=result[961];poly(sketch,{{.17f,.78f},{.30f,.25f},{.72f,.35f},{.85f,.76f}});for(auto p:{std::pair{.17f,.78f},std::pair{.30f,.25f},std::pair{.72f,.35f},std::pair{.85f,.76f}})box(sketch,p.first-.055f,p.second-.055f,.11f,.11f);
+        auto& grid=result[962];for(float t:{.23f,.5f,.77f}){line(grid,.12f,t,.88f,t);line(grid,t,.12f,t,.88f);}
+        auto& edges=result[963];poly(edges,{{.17f,.29f},{.50f,.10f},{.83f,.29f},{.83f,.72f},{.50f,.92f},{.17f,.72f},{.17f,.29f},{.50f,.48f},{.83f,.29f}});line(edges,.50f,.48f,.50f,.92f);
+        auto& dockFit=result[964];for(float x:{.14f,.86f})for(float y:{.14f,.86f}){line(dockFit,x,y,x+(x<.5f?.20f:-.20f),y);line(dockFit,x,y,x,y+(y<.5f?.20f:-.20f));}box(dockFit,.36f,.36f,.28f,.28f);
+        auto& sheet=result[965];box(sheet,.19f,.08f,.62f,.84f);box(sheet,.30f,.22f,.23f,.25f);arc(sheet,.65f,.34f,.07f,.07f,0,360);line(sheet,.30f,.61f,.70f,.61f);line(sheet,.30f,.74f,.70f,.74f);line(sheet,.55f,.74f,.55f,.90f);
         return result;
     }();
     auto found=icons.find(action);return found==icons.end()?nullptr:&found->second;

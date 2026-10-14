@@ -1,6 +1,6 @@
 # Connect Codex to the open ARK
 
-For Claude Code/Desktop, OpenCode and provider connections inside ARK, see
+For Grok Build, Claude Code/Desktop, OpenCode and provider connections inside ARK, see
 [AI connectors](AI_CONNECTORS.md). The live document bridge below is shared.
 
 ARK provides a local live-session bridge on Windows. For the account-versus-MCP

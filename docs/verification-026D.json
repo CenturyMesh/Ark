@@ -1,0 +1,132 @@
+{
+  "iteration": "026D",
+  "runtime": "0.9.27",
+  "date": "2026-10-14",
+  "base_commit": "4d87fc1",
+  "verification_status": "Verificado no escopo for local connector/UI contracts; live 2B CAD completion failed",
+  "milestones": {
+    "A.01": "Verificado no escopo",
+    "A.03": "Parcial",
+    "D.01": "Parcial",
+    "D.02": "Parcial"
+  },
+  "build": {
+    "platform": "Windows x64",
+    "compiler": "LLVM-MinGW clang 23.1.3 UCRT",
+    "kernel": "OCCT 8.0.1",
+    "configuration": "Release",
+    "result": "passed",
+    "log_sha256": "611273eb04c5ba9f34f9ee4614570812512f01656004d93ab4c9ff7fecbc2dfc"
+  },
+  "tests": {
+    "command": "ctest --test-dir out/native-release --output-on-failure -j 2",
+    "result": "129/129 passed",
+    "wall_seconds": 276.98,
+    "log_sha256": "d7f3b14fc942b054711124b97cf5c5408748019d207b2d05b7bbccdfcf420890",
+    "scope": [
+      "Credential-free loopback discovery, selected model metadata and rejection of remote/cloud routes.",
+      "Single and per-card model selection, declared tools/completion requirement, persisted image capability and timeout.",
+      "Global provider switch clears inherited foreign model IDs and preserves explicit card connectors.",
+      "Actual dialogs at 1440x900 and 1366x800, cancelled/unsupported selection leaves active connector unchanged.",
+      "Existing canonical tool histories, mixed-provider teams, steering, revision guards and CAD regression."
+    ],
+    "ui_sizes": [
+      [
+        1440,
+        900
+      ],
+      [
+        1366,
+        800
+      ]
+    ],
+    "earlier_findings": [
+      "Visual inspection found a clipped dialog hint; shortened copy and widened local-model dropdowns before final verification.",
+      "An intermediate relink hit the locked live-test executable. After that process exited, the full build completed successfully; final tests use the rebuilt binary."
+    ],
+    "packaged_smoke": {
+      "result": "passed",
+      "workflow": "Local-model UI fixture using isolated 026D-test1 preview with separate settings",
+      "log_sha256": "42b3622f0e44ca3666127eb5018dbc074be93af2d8e3dc1391633791c47e6f08"
+    }
+  },
+  "live_ollama": {
+    "version": "0.40.3",
+    "inference_models_tested": [
+      "qwen3.5:2b"
+    ],
+    "larger_models_tested": false,
+    "installed_model_catalog_count": 4,
+    "thinking": "none",
+    "tool_loop_proven": [
+      "agent_onboard",
+      "doc_info",
+      "doc_apply rejection with actual receipt"
+    ],
+    "full_catalog": {
+      "result": "failed to complete within eight-response test bound",
+      "log_sha256": "2f333ad7f27eafb7158d43f20e65ccf440dae13a8dd502235c169713bc08893e",
+      "observed_context_allocation": 262144,
+      "observed_tokens": 33293,
+      "truncated": false
+    },
+    "basic_catalog": {
+      "tools": [
+        "agent_onboard",
+        "doc_info",
+        "doc_apply"
+      ],
+      "result": "failed to complete within eight-response test bound",
+      "invalid_write_attempts": 2,
+      "error": "EVALUATION_FAILED: Feature #1: Missing native op",
+      "revision_after_rejected_writes": 0,
+      "document_unchanged": true,
+      "log_sha256": "9e4ab571bf1a3f5b7343aa3effffa1610dfff5ca0298c35941639f6e7b1c03c1"
+    },
+    "scope": "Synthetic scratch document only. Actual provider and tool receipts, not successful autonomous CAD. No user project touched. Test-only bounds do not affect unlimited runtime rounds. These different-catalog runs are not a controlled performance/model comparison."
+  },
+  "screenshots": [
+    {
+      "path": "out/native-release/ui-checks/local-models-ui.png.choose-local.png",
+      "sha256": "cc8c3944846ad393c4d05e633d4bffed7fd9f949cfe74bfaf77f90a52e388335",
+      "inspected": true
+    },
+    {
+      "path": "out/native-release/ui-checks/local-models-ui-compact.png.choose-local.png",
+      "sha256": "cc8c3944846ad393c4d05e633d4bffed7fd9f949cfe74bfaf77f90a52e388335",
+      "inspected": true
+    },
+    {
+      "path": "out/native-release/ui-checks/local-models-ui-compact.png.local-cards.png",
+      "sha256": "225d1ebd6d0c5ff05ba273c08925c41693241afb136ca3343ce95c4d795a5471",
+      "inspected": true
+    }
+  ],
+  "preview": {
+    "directory": "out/test-preview/026D-test1",
+    "studio_sha256": "d9960dd68efcd16f9a43460d7565ca9855c13e3b25cc3e61b81635c4925d3951",
+    "identity": "026D / 0.9.27",
+    "dependency_notices_present": true,
+    "user_projects_included": false,
+    "previous_previews_preserved": true
+  },
+  "source_compatibility": {
+    "source_format_changed": false,
+    "binary_container_version_changed": false
+  },
+  "limits": [
+    "The small local model did not complete native CAD authoring in either live trial. Declared capabilities and a working tool loop do not establish quality.",
+    "Only qwen3.5:2b inference was tested, per user instruction; larger models and image interpretation are unqualified.",
+    "Ollama context allocation remains a server setting; no model files, downloads or server configuration were changed.",
+    "Local Windows desktop evidence; user acceptance and hosted CI are separate gates.",
+    "No general performance, cost, design-quality or manufacturing claim. Drawings remain explicit opt-in."
+  ],
+  "delivery": {
+    "draft": true,
+    "merged": false,
+    "pull_request": "https://github.com/CenturyMesh/Ark/pull/11",
+    "verified_code_commit": "a06005e",
+    "hosted_ci": "Run 38594605984 was rejected before job steps due account payments/spending-limit restrictions. Local checks and failed live model trials are recorded separately. No billing settings changed.",
+    "hosted_ci_url": "https://github.com/CenturyMesh/Ark/actions/runs/38594605984"
+  }
+}

@@ -1,6 +1,15 @@
 name: Prepare Windows and Linux release packages
 on:
   workflow_dispatch:
+    inputs:
+      installer:
+        description: Build and test the optional Windows installer
+        type: boolean
+        default: false
+      publish:
+        description: Publish a prerelease after both platform jobs pass
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -12,6 +21,9 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+      - name: Test distribution fixtures
+        shell: pwsh
+        run: ./tests/distribution_tests.ps1
       - name: Identify hosted Windows image
         id: runner-image
         shell: pwsh
@@ -46,13 +58,63 @@ jobs:
       - name: Prepare portable package and update manifest
         shell: pwsh
         run: ./scripts/package-release.ps1
+      - name: Install Inno Setup
+        if: inputs.installer
+        run: choco install innosetup --no-progress -y
+      - name: Build and test the optional installer
+        if: inputs.installer
+        shell: pwsh
+        run: |
+          $release = Get-Content release.json -Raw | ConvertFrom-Json
+          ./scripts/build-installer.ps1 -PackagePath "out/releases/ark-windows-x64-$($release.version).zip"
+          ./scripts/test-distribution.ps1 -PackagePath "out/releases/ark-windows-x64-$($release.version).zip" -InstallerPath "out/releases/ARK-$($release.code)-windows-x64-setup.exe"
       - uses: actions/upload-artifact@v4
         with:
           name: ark-windows-release-assets
           path: |
             out/releases/ark-windows-x64-*.zip
             out/releases/ark-update.json
+            out/releases/ARK-*-windows-x64-setup.exe
+            out/releases/SHA256SUMS.txt
           if-no-files-found: error
+
+  publish:
+    if: inputs.publish
+    needs: [windows-package, linux-package]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ark-*-release-assets
+          path: out/releases
+          merge-multiple: true
+      - name: Publish immutable preview artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(jq -r .version release.json)
+          code=$(jq -r .code release.json)
+          tag="v$version"
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName > out/releases/existing.json
+          if jq -e --arg tag "$tag" 'any(.[]; .tagName == $tag)' out/releases/existing.json >/dev/null; then
+            echo "Release already exists; advance release.json instead of replacing binaries." >&2
+            exit 1
+          fi
+          cd out/releases
+          curl --fail --location 'https://github.com/Open-Cascade-SAS/OCCT/archive/refs/tags/V8_0_1.zip' -o OCCT-V8_0_1-source.zip
+          echo '7c033d917ee8f040c0512d289dcc5f02c148889d5bac17c3e25639accb44f0da  OCCT-V8_0_1-source.zip' | sha256sum -c -
+          sha256sum ark-windows-x64-*.zip ark-linux-x64-headless-*.tar.gz > SHA256SUMS.txt
+          sha256sum OCCT-V8_0_1-source.zip >> SHA256SUMS.txt
+          if compgen -G 'ARK-*-windows-x64-setup.exe' >/dev/null; then
+            sha256sum ARK-*-windows-x64-setup.exe >> SHA256SUMS.txt
+          fi
+          printf 'ARK %s / runtime %s preview. Windows and Linux native tests and relocated Linux package checks passed. Optional installer checks ran only when requested. Interactive Studio and manufacturing qualification remain separate gates. Source commit: %s\n' "$code" "$version" "$GITHUB_SHA" > release-notes.txt
+          assets=(ark-windows-x64-*.zip ark-linux-x64-headless-*.tar.gz OCCT-V8_0_1-source.zip SHA256SUMS.txt)
+          if compgen -G 'ARK-*-windows-x64-setup.exe' >/dev/null; then assets+=(ARK-*-windows-x64-setup.exe); fi
+          gh release create "$tag" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "ARK $code / $version preview" --notes-file release-notes.txt --prerelease
   linux-package:
     runs-on: ubuntu-24.04
     timeout-minutes: 90

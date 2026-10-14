@@ -53,7 +53,27 @@ struct Appearance {
     Vec3 baseColor{0.72,0.75,0.80};
     double metallic=0, roughness=0.55, opacity=1;
     std::string texturePath;
+    std::string textureAsset; // named embedded PNG/JPEG; portable replacement for texturePath
     double textureScaleU=1, textureScaleV=1;
+};
+struct ImageAsset {
+    std::string name,mimeType,base64,sha256;
+    unsigned width=0,height=0;
+};
+struct FaceAppearance {
+    std::string face,sourceTopology,material;
+    arkjson::Value appearance; // partial display override; density remains body-owned
+};
+// A rectangular planar projector, in target-feature coordinates or datum-local
+// coordinates when feature=0. The origin is the rectangle centre; +V points up.
+struct ProjectedStamp {
+    std::string name,asset,plane="XY",sourceTopology;
+    u64 feature=0;
+    std::vector<std::string> faces;
+    Vec3 origin{},uAxis{1,0,0},vAxis{0,1,0};
+    std::string width="100",height="100";
+    double opacity=1,depth=1;
+    bool frontOnly=true;
 };
 struct Material {
     std::string name;
@@ -94,6 +114,7 @@ struct Feature {
     std::string manufacturingRoute;                   // explicit intent; empty is undeclared
     arkjson::Value manufacturingProcess;              // bounded caller-declared route-specific process inputs
     arkjson::Value appearance;                        // validated partial appearance override
+    std::vector<FaceAppearance> faceAppearances;       // exact digest-bound region display overrides
 
     std::string get(const char* k, const char* dflt="") const {
         auto it=p.find(k); return it==p.end()?dflt:it->second;
@@ -246,6 +267,7 @@ struct PlaneCanvas {
     std::string width="100";
     std::string height="100";
     double opacity=0.65;
+    std::string asset; // optional embedded asset; path remains for legacy documents
 };
 
 struct AgentActivityLedger;
@@ -270,6 +292,8 @@ public:
     std::vector<NamedSketch> sketches;
     std::vector<DatumPlane> planes;
     std::vector<PlaneCanvas> canvases;
+    std::vector<ImageAsset> imageAssets;
+    std::vector<ProjectedStamp> stamps;
     NamedSketch* findSketch(const std::string& name);
     void setSketch(const std::string& name, Sketch sk);   // create or replace
     bool removeSketch(const std::string& name);
@@ -281,6 +305,7 @@ public:
     std::shared_ptr<AgentActivityLedger> agentActivity; // audit metadata, independent of geometry revision
     std::string bomDocumentId; // assigned on explicit BOM authoring; stable across edits/save
     arkjson::Value iterationHistory; // immutable authoring journal; no evaluated geometry or usage snapshots
+    arkjson::Value designContainerCheckout; // scoped workspace ownership and merge baseline; no derived geometry
     arkjson::Value skeleton; // native declarative source, input overrides and stable ownership manifest
     std::vector<arkjson::Value> drawings; // authored associative technical drawings; derived curves are never persisted
     u64 addFeature(Feature f);                    // returns id

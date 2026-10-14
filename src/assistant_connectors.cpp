@@ -93,14 +93,16 @@ std::vector<AssistantProviderPreset> assistantProviderPresets(){return {
     {"openai","OpenAI API","https://api.openai.com/v1/responses","OPENAI_API_KEY",AssistantProtocol::Responses},
     {"claude","Claude API","https://api.anthropic.com/v1/messages","ANTHROPIC_API_KEY",AssistantProtocol::Messages},
     {"claude-chat","Claude OpenAI compatibility","https://api.anthropic.com/v1/chat/completions","ANTHROPIC_API_KEY",AssistantProtocol::ChatCompletions},
-    {"grok","Grok / xAI","https://api.x.ai/v1/responses","XAI_API_KEY",AssistantProtocol::Responses},
+    {"grok","Grok / xAI API","https://api.x.ai/v1/responses","XAI_API_KEY",AssistantProtocol::Responses},
+    {"grok-build","Grok Build / CLI account","grok","",AssistantProtocol::Acp},
     {"ollama","Ollama local","http://127.0.0.1:11434/v1/chat/completions","",AssistantProtocol::ChatCompletions},
     {"opencode","OpenCode Zen","https://opencode.ai/zen/v1/chat/completions","OPENCODE_API_KEY",AssistantProtocol::ChatCompletions},
     {"custom","Custom compatible endpoint","https://api.openai.com/v1/responses","OPENAI_API_KEY",AssistantProtocol::Responses}};}
-AssistantConfig assistantProviderPreset(const std::string& id){for(const auto& preset:assistantProviderPresets())if(preset.id==id){AssistantConfig out;out.provider=preset.id;out.protocol=preset.protocol;out.endpoint=preset.endpoint;out.apiKeyEnv=preset.apiKeyEnv;return out;}throw std::runtime_error("Unknown assistant provider preset.");}
-std::string assistantProtocolName(AssistantProtocol protocol){switch(protocol){case AssistantProtocol::Responses:return "responses";case AssistantProtocol::ChatCompletions:return "chat-completions";case AssistantProtocol::Messages:return "messages";}throw std::runtime_error("Unknown assistant protocol.");}
-AssistantProtocol assistantProtocolFromName(const std::string& name){if(name=="responses")return AssistantProtocol::Responses;if(name=="chat-completions"||name=="chat"||name=="chat_completions")return AssistantProtocol::ChatCompletions;if(name=="messages")return AssistantProtocol::Messages;throw std::runtime_error("Unknown assistant protocol; choose responses, chat-completions or messages.");}
+AssistantConfig assistantProviderPreset(const std::string& id){for(const auto& preset:assistantProviderPresets())if(preset.id==id){AssistantConfig out;out.provider=preset.id;out.protocol=preset.protocol;out.endpoint=preset.endpoint;out.apiKeyEnv=preset.apiKeyEnv;if(id=="grok-build"){out.authMode=AssistantAuthMode::CliAccount;out.imageInputSupported=false;}return out;}throw std::runtime_error("Unknown assistant provider preset.");}
+std::string assistantProtocolName(AssistantProtocol protocol){switch(protocol){case AssistantProtocol::Responses:return "responses";case AssistantProtocol::ChatCompletions:return "chat-completions";case AssistantProtocol::Messages:return "messages";case AssistantProtocol::Acp:return "acp";}throw std::runtime_error("Unknown assistant protocol.");}
+AssistantProtocol assistantProtocolFromName(const std::string& name){if(name=="responses")return AssistantProtocol::Responses;if(name=="chat-completions"||name=="chat"||name=="chat_completions")return AssistantProtocol::ChatCompletions;if(name=="messages")return AssistantProtocol::Messages;if(name=="acp")return AssistantProtocol::Acp;throw std::runtime_error("Unknown assistant protocol; choose responses, chat-completions, messages or acp.");}
 V assistantAdaptRequest(const AssistantConfig& config,const V& canonicalRequest){
+    if(config.protocol==AssistantProtocol::Acp){V out=canonicalRequest;V input=V::makeArr();for(const auto& row:need(out,"input").arr)if(text(row,"type")!="reasoning")input.arr.push_back(row);out.set("input",input);erase(out,"include");return out;}
     if(config.protocol==AssistantProtocol::Responses){V out=canonicalRequest;
         V input=V::makeArr();for(const auto& item:need(out,"input").arr){
             if(text(item,"type")=="reasoning"){
@@ -115,7 +117,15 @@ V assistantAdaptRequest(const AssistantConfig& config,const V& canonicalRequest)
     if(config.protocol==AssistantProtocol::ChatCompletions){
         out.set("messages",messages);out.set("parallel_tool_calls",V::makeBool(false));
         if(!config.reasoningEffort.empty())out.set("reasoning_effort",V::makeStr(config.reasoningEffort));
-        for(const auto& function:need(canonicalRequest,"tools").arr){V tool=V::makeObj(),fn=function;erase(fn,"type");tool.set("type",V::makeStr("function"));tool.set("function",fn);tools.arr.push_back(tool);}out.set("tools",tools);return out;
+        for(const auto& function:need(canonicalRequest,"tools").arr){
+            V tool=V::makeObj(),fn=function;erase(fn,"type");
+            // An object schema may omit properties. Ollama's GGUF tool renderer
+            // requires the explicit map; keep its additionalProperties policy.
+            if(config.provider=="ollama")if(const auto* source=fn.find("parameters");source&&text(*source,"type")=="object"&&!source->find("properties")){
+                V parameters=*source;parameters.set("properties",V::makeObj());fn.set("parameters",std::move(parameters));
+            }
+            tool.set("type",V::makeStr("function"));tool.set("function",fn);tools.arr.push_back(tool);
+        }out.set("tools",tools);return out;
     }
     out.set("max_tokens",V::makeNum(config.maxOutputTokens));V system=V::makeArr(),wire=V::makeArr();
     auto append=[&](const std::string& role,V content){if(!wire.arr.empty()&&text(wire.arr.back(),"role")==role){V merged=*wire.arr.back().find("content");for(auto& part:content.arr)merged.arr.push_back(std::move(part));wire.arr.back().set("content",merged);}else{V row=V::makeObj();row.set("role",V::makeStr(role));row.set("content",content);wire.arr.push_back(row);}};
@@ -165,7 +175,12 @@ std::string assistantExternalMcpConfig(const std::string& target,const std::stri
     require((absoluteWindows||unc||executable.rfind("/",0)==0)&&executable.size()<=4096&&executable.find_first_of("\r\n\t") == std::string::npos,"Export requires the actual absolute MCP executable path.");
     require(!endpoint.empty()&&endpoint.size()<=160&&std::all_of(endpoint.begin(),endpoint.end(),[](unsigned char c){return std::isalnum(c)||c=='_'||c=='-';}),"Export requires the active Studio pipe name.");
     V args=V::makeArr();args.arr.push_back(V::makeStr("--connect"));args.arr.push_back(V::makeStr(endpoint));
-    if(target=="codex")return "[mcp_servers.ark]\ncommand = "+V::makeStr(executable).dump()+"\nargs = "+args.dump()+"\n";
+    if(target=="codex"||target=="grok-build"){
+        // Grok expands ${VAR} in MCP commands even inside a quoted TOML string.
+        // Reject that path rather than exporting a different executable silently.
+        require(target!="grok-build"||executable.find("${")==std::string::npos,"Grok Build expands environment placeholders; the MCP executable path must not contain ${.");
+        return "[mcp_servers.ark]\ncommand = "+V::makeStr(executable).dump()+"\nargs = "+args.dump()+"\n"+(target=="grok-build"?"enabled = true\n":"");
+    }
     V root=V::makeObj(),servers=V::makeObj(),server=V::makeObj();
     if(target=="claude-code"||target=="claude-desktop"){if(target=="claude-code")server.set("type",V::makeStr("stdio"));server.set("command",V::makeStr(executable));server.set("args",args);servers.set("ark",server);root.set("mcpServers",servers);return root.dump();}
     require(target=="opencode","Unknown external MCP client.");V command=V::makeArr();command.arr.push_back(V::makeStr(executable));for(const auto& arg:args.arr)command.arr.push_back(arg);server.set("type",V::makeStr("local"));server.set("command",command);server.set("enabled",V::makeBool(true));servers.set("ark",server);root.set("$schema",V::makeStr("https://opencode.ai/config.json"));root.set("mcp",servers);

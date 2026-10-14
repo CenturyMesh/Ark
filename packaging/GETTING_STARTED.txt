@@ -1,0 +1,18 @@
+ARK for Windows 10/11 x64
+
+Installer: run ARK-<iteration>-windows-x64-setup.exe, then open ARK from the
+Start menu or the optional desktop shortcut. Administrator rights are unnecessary.
+
+Portable ZIP: extract the entire ZIP to a new folder. Double-click ARK.cmd to
+launch, or Install-ARK.cmd to prepare the per-user installation and a shortcut.
+Keep the DLLs, assets and updates folders together with the executables.
+
+No Visual Studio, Python, OCCT SDK or separate Visual C++ installation is needed.
+A graphics driver supporting OpenGL 3.3 is required for Studio.
+
+Documents and settings are kept separately from the application. Close ARK
+normally before installing a newer package; its first launch activates it through
+the existing versioned launcher. The in-app Internet update feed is not published.
+
+Modeling works without an AI account. Configure an AI provider in Assistant to
+use the agent features.

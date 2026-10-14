@@ -1,0 +1,70 @@
+{
+  "iteration": "027D",
+  "runtime": "0.9.28",
+  "date": "2026-10-14",
+  "runtime_source_commit": "d5f36108aed8cf141f06ddf7aebd9d9b0f45a55e",
+  "milestones": {
+    "A.03": "Verificado no escopo",
+    "D.02": "Parcial",
+    "F.05": "Parcial"
+  },
+  "windows_local": {
+    "compiler": "Visual Studio 2022 MSVC",
+    "kernel": "OCCT 8.0.1",
+    "configuration": "Release",
+    "tests": "129/129 passed",
+    "wall_seconds": 219.84,
+    "initial_resource_failure": "Insufficient host disk space caused catalogue/native-write failures. Compiler intermediates were retained on another volume, affected build files were restored and the complete suite was repeated.",
+    "relocated_archive_ui": "passed at 1366x800; captures inspected",
+    "archive_inventory": "84 entries; required runtime/dependency notices present; no user drawings or settings",
+    "studio_sha256": "80ec917968fc73dda7e164d0cc3b3080e5403773108aaff6f6e1c3b78c2eff41"
+  },
+  "hosted": {
+    "run": "https://github.com/CenturyMesh/Ark/actions/runs/38613566546",
+    "source_commit": "d5f36108aed8cf141f06ddf7aebd9d9b0f45a55e",
+    "windows_tests": "95/95 passed",
+    "windows_test_seconds": 222.33,
+    "linux_tests": "93/93 passed",
+    "linux_test_seconds": 213.84,
+    "linux_relocated_package": "passed in clean Ubuntu 24.04 without the build SDK",
+    "result": "success"
+  },
+  "artifacts": [
+    {
+      "name": "ark-windows-x64-0.9.28.zip",
+      "producer": "locally validated Windows native/Studio build",
+      "size": 38078305,
+      "sha256": "fbb5a8d9d305291fd70b99fc856af9bfdbb4ce5761bec1cf6b03b1d8e31251f7"
+    },
+    {
+      "name": "ark-linux-x64-headless-0.9.28.tar.gz",
+      "producer": "successful hosted linux-package job",
+      "size": 36910529,
+      "sha256": "2a6a799b4587edf0afb99f2f260d33cdea9cee2f20ef610d50cfc08e41722b11",
+      "downloaded_inventory": "120 entries; identity and SHA-256 verified; no user drawings/settings"
+    },
+    {
+      "name": "OCCT-V8_0_1-source.zip",
+      "size": 64815440,
+      "sha256": "7c033d917ee8f040c0512d289dcc5f02c148889d5bac17c3e25639accb44f0da"
+    }
+  ],
+  "live_ollama": {
+    "model": "installed Qwen GGUF model",
+    "original_schema_probe": "HTTP 500: properties must be an object",
+    "explicit_property_map_none_effort": "HTTP 200 and a real kernel_info tool call",
+    "high_effort_minimal_probe": "diagnostic timeout; no completed response claimed",
+    "full_catalog_authoring": "HTTP timeout; no completed CAD result",
+    "reduced_catalog_authoring": "inspection/onboarding succeeded; two writes without native.op rejected at revision 0; subsequently timed out",
+    "document_unchanged_on_rejection": true,
+    "autonomous_cad_success": false
+  },
+  "limits": [
+    "Scoped schema/transport/native/packaging qualification; general local-model design quality remains unqualified.",
+    "Earlier disk and local Docker transport failures are distinct from hosted package success.",
+    "No user drawing or raw private session/activity log is included.",
+    "No runtime turn/token budget, cloud fallback, geometry tolerance or document/container format change.",
+    "The separate team recovery issue remains open.",
+    "Prerelease manual evaluation; no manufacturing qualification, independent signature or deployed trusted OTA feed."
+  ]
+}

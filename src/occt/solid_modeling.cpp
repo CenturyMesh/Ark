@@ -1,10 +1,14 @@
+#include "ark/holes_orchestrator.hpp"
 #include "ark/occt_solid.hpp"
 #include "ark/occt_frame.hpp"
+#include "ark/occt_modeling.hpp"
 #include "common.hpp"
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_Section.hxx>
+#include <BRepFeat_SplitShape.hxx>
+#include <BRepProj_Projection.hxx>
 #include <BRepTools.hxx>
 #include <BRepTools_WireExplorer.hxx>
 #include <BRepLProp_CLProps.hxx>
@@ -637,10 +641,13 @@ V finishBodies(const TopoDS_Shape& shape,const std::vector<Ref>& refs){
 }
 
 #include "vertex_pull.inl"
+#include "holes_orchestrator.inl"
+#include "split_line.inl"
 
 V modelSolidNative(const V& request){
-    const std::string op=word(request,"op");std::vector<Ref> refs;TopoDS_Shape result;bool many=false;V extrusionReceipt=V::makeObj(),vertexReceipt=V::makeObj();
+    const std::string op=word(request,"op");std::vector<Ref> refs;TopoDS_Shape result;bool many=false;V extrusionReceipt=V::makeObj(),vertexReceipt=V::makeObj(),splitReceipt=V::makeObj();
     try{
+    if(op=="holes_orchestrator")return holesOrchestratorNative(request);
     if(op=="tube_end_fit")return withNativeVertexInventory(tubeEndFitNative(request));
     if(op=="imported_brep"){
         const V& package=need(request,"package");componentCustodyNative(package);
@@ -682,6 +689,7 @@ V modelSolidNative(const V& request){
     else {
         const auto& encoded=need(request,"input_brep");if(encoded.t!=V::Str)throw std::runtime_error("Input must be a native B-rep");TopoDS_Shape input=readBrep(encoded.str);shapeReport(input,true);refs=inputRefs(request,"input_brep","input_topology",input);
         if(op=="vertex_pull")result=pullNativeVertex(input,request,refs,vertexReceipt);
+        else if(op=="split_line")result=splitNativeFace(input,request,refs,splitReceipt);
         else if(op=="curve_pattern"||op=="hole_pattern"){
             V query=V::makeObj(),queries=V::makeArr(),model=V::makeObj();query.set("action",V::makeStr("curve"));query.set("reference",need(request,"reference"));query.set("count",need(request,"count"));query.set("margin_mm",V::makeNum(optional(request,"margin_mm",0)));queries.arr.push_back(query);model.set("brep",need(request,"tool_brep"));model.set("topology",need(request,"tool_topology"));model.set("queries",queries);
             const double count=scalar(request,"count");if(count<2||count>128||count!=std::floor(count))throw std::runtime_error("Curve pattern count must be 2..128");
@@ -765,7 +773,7 @@ V modelSolidNative(const V& request){
             BRepBuilderAPI_Transform algorithm(input,placement,true);if(!algorithm.IsDone())throw std::runtime_error("Native rigid transform failed");result=algorithm.Shape();refs=propagated(refs,result,algorithm);
         }else throw std::runtime_error("Unknown native solid operation");
     }
-    V output=many?finishBodies(result,refs):finish(result,refs);if(op=="extrude"){V report=need(output,"report");report.set("extrusion",extrusionReceipt);output.set("report",report);}if(op=="vertex_pull"){V report=need(output,"report");report.set("vertex_pull",vertexReceipt);report.set("self_intersections_checked",V::makeBool(true));output.set("report",report);}return output;
+    V output=many?finishBodies(result,refs):finish(result,refs);if(op=="extrude"){V report=need(output,"report");report.set("extrusion",extrusionReceipt);output.set("report",report);}if(op=="vertex_pull"){V report=need(output,"report");report.set("vertex_pull",vertexReceipt);report.set("self_intersections_checked",V::makeBool(true));output.set("report",report);}if(op=="split_line"){V report=need(output,"report");report.set("split_line",splitReceipt);report.set("area_mm2",need(splitReceipt,"result_area_mm2"));output.set("report",report);}return output;
     }
     catch(const std::exception& error){
         std::string context="Native "+op;

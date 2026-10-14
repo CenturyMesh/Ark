@@ -118,6 +118,10 @@ public:
     // Valid only during a team worker callback, empty on other threads. Hosts
     // copy this id onto queued UI/session work for accurate progress attribution.
     static std::string currentRoleId();
+    // The host captures this token before queuing UI work, and rechecks it just
+    // before execution. A response waiting on the UI may become stale meanwhile.
+    std::uint64_t requestVersion(const std::string& roleId) const;
+    bool requestCurrent(const std::string& roleId,std::uint64_t version) const;
     void pause(bool paused=true);
     void cancel() noexcept;
     // Waits for active/pending turns (including cancellation cleanup), not for

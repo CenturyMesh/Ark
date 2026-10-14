@@ -19,6 +19,7 @@
 #include <commctrl.h>
 #include <uxtheme.h>
 #include <shellapi.h>
+#include <shlobj.h>
 #include <dwmapi.h>
 #include <psapi.h>
 #include <pdh.h>
@@ -59,7 +60,11 @@ typedef ptrdiff_t GLsizeiptr;
 // blend func separate not needed; plain 1.1 blend suffices
 #endif
 #include "ark/model.hpp"
+#include "ark/appearance_024b.hpp"
 #include "ark/drawings.hpp"
+#include "ark/cad_import.hpp"
+#include "ark/holes_orchestrator.hpp"
+#include "ark/design_containers.hpp"
 #include "ark/datum_authoring.hpp"
 #include "ark/spatial_sketch.hpp"
 #include "ark/native_features.hpp"
@@ -300,7 +305,8 @@ static void moveTreeThumb(int y){const int travel=(g_treeTrack.bottom-g_treeTrac
 static bool g_eatNextClick=false;
 static bool g_explorerOpen[4]={true,true,true,true};
 static u64 g_explorerFeature=0;
-static bool g_assistantDockOpen=false;
+static u64 g_viewportContainer=0;
+static bool g_assistantDockOpen=true;
 struct PendingObjectTarget {u64 feature=0,node=0,epoch=0;int copy=0;std::string label,invalidated;};
 static std::optional<PendingObjectTarget> g_pendingObjectTarget;
 static u64 g_objectDocumentEpoch=0;
@@ -355,7 +361,9 @@ static std::string g_assistantStatus;static bool g_assistantResponseFinished=fal
 static std::thread g_assistantWorker;static std::shared_ptr<std::atomic_bool> g_assistantCancel=std::make_shared<std::atomic_bool>(false);
 static std::atomic_bool g_closing{false};static LiveSessionBridge g_liveBridge;static u64 g_documentEpoch=0;static bool g_ownAssistantTool=false;
 static constexpr UINT WM_ARK_TOOL=WM_APP+20,WM_ARK_CHAT=WM_APP+21,WM_ARK_AUTH=WM_APP+22;
-struct UiToolRequest {std::string tool,roleId;arkjson::Value args;LiveSessionBridge::Completion complete;std::stop_token stop;std::shared_ptr<std::atomic_bool> cancel;std::shared_ptr<std::atomic<u64>> revision;u64 epoch=0;bool teamOwned=false;};
+struct UiToolRequest {std::string tool,roleId;arkjson::Value args;LiveSessionBridge::Completion complete;std::stop_token stop;std::shared_ptr<std::atomic_bool> cancel;std::shared_ptr<std::atomic<u64>> revision;std::shared_ptr<AssistantSteering> steering;u64 epoch=0,steeringVersion=0;bool teamOwned=false;};
+static bool assistantSteeringToolAllowed(const UiToolRequest& request);
+static arkjson::Value assistantSteeringToolRejection();
 struct UiChatEvent {std::string text;bool final=false,error=false;arkjson::Value history;u64 epoch=0;AssistantUsage usage{};bool hasUsage=false;AssistantPerformance performance{};bool hasPerformance=false;bool status=false,retry=false;};
 enum class AuthJob{SignIn,SignOut,Models};
 struct UiAuthEvent{AuthJob job=AuthJob::Models;ChatGptAuthStatus status;std::vector<ChatGptModel> models;std::string error;};
@@ -1380,41 +1388,42 @@ static void resetDatumViewState();
 static void sanitizeDatumViewState();
 static void clearDatumSelection();
 static arkjson::Value runTool(const std::string& tool,const arkjson::Value& args){
+    const bool containerWrite=tool=="design_containers"&&args.find("action")&&args.find("action")->asStr()=="merge"&&!(args.find("preview")&&args.find("preview")->t==arkjson::Value::Bool&&args.find("preview")->b);
     size_t previousVisibleBodies=g_bodyIds.size();
     flushPendingUsage();
-    auto effectiveArgs=args;static const std::set<std::string> mutations{"doc_apply","doc_new","doc_load","doc_undo","doc_redo","iteration_restore","import_step","import_sheet_step","import_mesh","library_insert"};if(mutations.count(tool)&&!effectiveArgs.find("actor")){using V=arkjson::Value;V actor=V::makeObj();actor.set("kind",V::makeStr("human"));actor.set("id",V::makeStr("studio"));effectiveArgs.set("actor",actor);}
-    bool potentiallySlow=tool.rfind("library_",0)==0||tool=="failure_replay"||tool=="failure_export"||tool=="manufacturing_inspect"||tool=="doc_load"||tool=="iteration_restore"||tool=="doc_apply"||tool=="doc_preview"||tool=="design_solve"||tool=="placement_plan"||tool=="pattern_plan"||tool=="query_batch"||tool=="geometry_query"||tool=="physics_inspect"||tool=="native_inspect"||tool=="step_inspect"||tool=="reference_inspect"||tool=="assembly_info"||tool=="kernel_info"||tool=="doc_undo"||tool=="doc_redo"||tool=="import_step"||tool=="import_sheet_step"||tool=="import_mesh"||tool=="export_step"||tool=="export_iges"||tool=="export_mesh"||tool=="export_flat_dxf"||tool=="bom_export_parts"||tool=="reference_navigate"||tool=="selection_set";
+    auto effectiveArgs=args;static const std::set<std::string> mutations{"doc_apply","doc_new","doc_load","doc_undo","doc_redo","iteration_restore","import_step","import_sheet_step","import_mesh","import_cad","design_containers","image_asset","plane_authoring","library_insert"};const bool documentWrite=mutations.count(tool)&&(tool!="design_containers"||containerWrite)&&(tool!="image_asset"||!args.find("action")||args.find("action")->asStr()!="inspect");if(documentWrite&&!effectiveArgs.find("actor")){using V=arkjson::Value;V actor=V::makeObj();actor.set("kind",V::makeStr("human"));actor.set("id",V::makeStr("studio"));effectiveArgs.set("actor",actor);}
+    bool potentiallySlow=tool=="plane_authoring"||tool=="import_cad"||tool=="cad_inspect"||tool=="design_containers"||tool.rfind("library_",0)==0||tool=="failure_replay"||tool=="failure_export"||tool=="manufacturing_inspect"||tool=="doc_load"||tool=="iteration_restore"||tool=="doc_apply"||tool=="doc_preview"||tool=="design_solve"||tool=="placement_plan"||tool=="pattern_plan"||tool=="query_batch"||tool=="geometry_query"||tool=="physics_inspect"||tool=="native_inspect"||tool=="step_inspect"||tool=="reference_inspect"||tool=="assembly_info"||tool=="kernel_info"||tool=="doc_undo"||tool=="doc_redo"||tool=="import_step"||tool=="import_sheet_step"||tool=="import_mesh"||tool=="export_step"||tool=="export_iges"||tool=="export_mesh"||tool=="export_flat_dxf"||tool=="bom_export_parts"||tool=="reference_navigate"||tool=="selection_set";
     if(tool=="doc_apply"&&!effectiveArgs.find("checks")&&metadataOnlyApply(g_doc,effectiveArgs))potentiallySlow=false;
     bool viewportSnapshot=tool=="snapshot"&&!effectiveArgs.find("candidate_id")&&effectiveArgs.find("view")&&effectiveArgs.find("view")->asStr()=="viewport";
     auto result=viewportSnapshot?captureViewportSnapshot(effectiveArgs):potentiallySlow&&g_uiReady&&(!g_headless||g_busyTestMode)?callSessionWithProgress(tool,effectiveArgs):g_session.call(tool,effectiveArgs);g_error=result.find("isError")->b;
     if(auto* data=result.find("structuredContent"))if(auto* id=data->find("failure_id");id&&id->t==arkjson::Value::Str)g_lastFailureId=id->str;
     u64 loadedUsageSerial=g_doc.usage.serial;
     if(!g_error&&tool=="selection_set"){clearDatumSelection();const auto& selected=*result.find("structuredContent")->find("selection");g_picked.clear();SelectionItem item;item.feature=(u64)selected.find("feature")->num;item.kind=selected.find("kind")->str;item.name=selected.find("reference")->str;item.instance=(u64)selected.find("instance")->num;item.copy=(int)selected.find("copy")->num;g_picked.push_back(item);g_pickKind=item.kind=="face"?1:2;g_explorerFeature=item.feature;selBody=-1;rebuildScene();bool displayed=false;for(size_t i=0;i<g_bodyIds.size();++i)if(g_bodyIds[i]==item.feature&&(!item.instance||(g_instanceIds[i]==item.instance&&g_instanceCopies[i]==item.copy))){selBody=(int)i;displayed=i>=g_hiddenBodies.size()||!g_hiddenBodies[i];break;}refreshSelectionLines();auto data=*result.find("structuredContent");data.set("view_state_applied",arkjson::Value::makeBool(true));data.set("selection_visible",arkjson::Value::makeBool(displayed));if(!displayed)data.set("visibility_note",arkjson::Value::makeStr("Reference selected in history; definition/occurrence is hidden or consumed by a later operation"));result.set("structuredContent",data);auto content=*result.find("content");for(auto& block:content.arr)if(block.find("type")&&block.find("type")->asStr()=="text")block.set("text",arkjson::Value::makeStr(data.dump()));result.set("content",content);}
-    if(!g_error&&mutations.count(tool)){clearProjectionPreview();cancelComponentMove(false);}
+    if(!g_error&&documentWrite){clearProjectionPreview();cancelComponentMove(false);}
     if(g_error)g_status=result.find("structuredContent")->find("error")->asStr();
     else g_status=tool+" completed  /  revision "+std::to_string(g_session.revision);
     if(!g_error&&(tool=="doc_load"||tool=="iteration_restore"||tool=="doc_new"||tool=="import_step"||tool=="import_sheet_step")){g_sheetFlatViews.clear();g_sheetProgress.clear();g_sheetPlayingId=0;}
     bool appearanceOnly=false;
     if(tool=="doc_apply")if(auto* content=result.find("structuredContent"))if(auto* flag=content->find("geometry_recomputed"))appearanceOnly=flag->t==arkjson::Value::Bool&&!flag->b;
     if(tool=="doc_apply")if(auto* content=result.find("structuredContent"))if(auto* prepared=content->find("applied_prepared");prepared&&prepared->b){const auto* changed=content->find("geometry_changed");appearanceOnly=changed&&changed->t==arkjson::Value::Bool&&!changed->b;}
-    if(!g_error&&(tool=="doc_new"||tool=="doc_load"||tool=="iteration_restore"))resetDatumViewState();else if(!g_error&&mutations.count(tool))sanitizeDatumViewState();
-    if(!g_error&&!appearanceOnly&&(tool=="library_insert"||tool=="doc_apply"||tool=="doc_load"||tool=="iteration_restore"||tool=="doc_undo"||tool=="doc_redo"||tool=="import_step"||tool=="import_sheet_step"||tool=="import_mesh"||tool=="doc_new"))rebuildScene();
+    if(!g_error&&(tool=="doc_new"||tool=="doc_load"||tool=="iteration_restore"))resetDatumViewState();else if(!g_error&&documentWrite)sanitizeDatumViewState();
+    if(!g_error&&!appearanceOnly&&(tool=="library_insert"||tool=="doc_apply"||tool=="doc_load"||tool=="iteration_restore"||tool=="doc_undo"||tool=="doc_redo"||tool=="import_step"||tool=="import_sheet_step"||tool=="import_mesh"||tool=="import_cad"||tool=="plane_authoring"||containerWrite||tool=="doc_new"))rebuildScene();
     if(!g_error&&tool=="doc_apply"){if(auto* commands=args.find("commands");commands&&commands->t==arkjson::Value::Arr)for(const auto& command:commands->arr){auto* op=command.find("op"),*name=command.find("name");if(op&&name&&op->t==arkjson::Value::Str&&name->t==arkjson::Value::Str&&op->str.rfind("sketch.",0)==0&&op->str!="sketch.remove"&&g_doc.findSketch(name->str)){g_activeSketch=name->str;g_activePlane=g_doc.findSketch(name->str)->sk.plane;g_showSketches=true;rebuildSketchOverlay();}}
         if(!previousVisibleBodies&&!g_bodyIds.empty())frameScene();}
-    if(!g_error&&(!appearanceOnly)&&(tool=="doc_apply"||tool=="doc_undo"||tool=="doc_redo")){if(tool=="doc_apply"&&!g_activeToolRole.empty())if(auto* commands=args.find("commands"))for(const auto& command:commands->arr){auto* op=command.find("op"),*name=command.find("name");if(op&&name&&op->t==arkjson::Value::Str&&name->t==arkjson::Value::Str&&op->str.rfind("sketch.",0)==0&&op->str!="sketch.remove"&&g_doc.findSketch(name->str))g_committedRoleSketches[name->str].role=g_activeToolRole;}rebuildRoleSketches();}
+    if(!g_error&&(!appearanceOnly)&&(tool=="doc_apply"||tool=="plane_authoring"||tool=="doc_undo"||tool=="doc_redo")){if(tool=="doc_apply"&&!g_activeToolRole.empty())if(auto* commands=args.find("commands"))for(const auto& command:commands->arr){auto* op=command.find("op"),*name=command.find("name");if(op&&name&&op->t==arkjson::Value::Str&&name->t==arkjson::Value::Str&&op->str.rfind("sketch.",0)==0&&op->str!="sketch.remove"&&g_doc.findSketch(name->str))g_committedRoleSketches[name->str].role=g_activeToolRole;}rebuildRoleSketches();}
     if(!g_error&&(tool=="doc_load"||tool=="doc_new"||tool=="iteration_restore")){
         ++g_objectDocumentEpoch;
         g_draftViews.clear();g_committedRoleSketches.clear();g_liveStepLabel.clear();g_liveCompletedSteps=0;
         g_motionActive=false;g_motionPlaying=false;g_motionRevision=std::numeric_limits<u64>::max();
         g_closedAssemblyGroups.clear();g_collapsedFeatures.clear();
-        g_explorerFeature=0;g_selectedExplorerEntity.reset();g_treeScroll=0;g_treeSelectedZone=-1;
+        g_explorerFeature=0;g_viewportContainer=0;g_selectedExplorerEntity.reset();g_treeScroll=0;g_treeSelectedZone=-1;
         if(g_ownAssistantTool&&g_currentUsageReceipt)applyUsageReceipt(*g_currentUsageReceipt);
         if(g_ownAssistantTool&&g_teamStarted)for(const auto& receipt:g_teamReceipts)if(receipt)applyUsageReceipt(*receipt);
         if(!g_ownAssistantTool){*g_teamCancel=true;g_agentTeam.cancel();g_teamStarted=false;resetTeamView();g_pendingUsageReceipt.reset();g_currentUsageReceipt.reset();g_assistantReceiptId.clear();g_assistantUsageRun={};g_assistantPerformanceRun={};g_assistantUsageRunCounted=true;++g_documentEpoch;*g_assistantCancel=true;g_conversation=arkjson::Value::makeArr();g_chatLog.clear();g_chatLog.push_back({"ARK","Document changed. Describe what you want to create."});}
         if(tool=="doc_new"){g_path="Untitled.ark";g_savedRevision=g_session.revision;g_savedUsageSerial=0;g_savedActivitySerial=0;g_activeSketch.clear();g_activePlane="XY";}
         g_foldProgress=selectedSourceTube()?1.:0.;if(tool=="doc_load"||tool=="iteration_restore")selBody=-1;frameScene();
     }
-    if(!g_error&&mutations.count(tool))invalidateRemovedObjectTarget();
+    if(!g_error&&documentWrite)invalidateRemovedObjectTarget();
     flushPendingUsage();refreshDocumentUsage();
     if(!g_error&&(tool=="doc_save"||tool=="doc_load")){if(auto* path=args.find("path"))g_path=path->asStr();g_savedRevision=g_session.revision;g_savedUsageSerial=tool=="doc_load"?loadedUsageSerial:g_doc.usage.serial;g_savedActivitySerial=agentActivitySerial(g_doc);if(effectiveArgs.find("actor")&&effectiveArgs.find("actor")->find("kind")&&effectiveArgs.find("actor")->find("kind")->asStr()=="agent"&&g_savedActivitySerial)--g_savedActivitySerial;}
     return result;
@@ -1481,6 +1490,7 @@ static bool editFields(const char* title,const char* hint,std::vector<EditorFiel
         if(!multiline)control("STATIC",fields[i].name.c_str(),0,x+28,y+7,205,28,0,font);
         HWND e=fields[i].toggle?control("BUTTON","",WS_TABSTOP|BS_AUTOCHECKBOX,x+235,y,40,33,3+(int)i,font):!fields[i].choices.empty()?control("COMBOBOX","",WS_TABSTOP|WS_VSCROLL|(fields[i].editableChoice?CBS_DROPDOWN:CBS_DROPDOWNLIST),x+235,y,mateColumns?217:width-263,240,3+(int)i,font):control("EDIT",fields[i].value.c_str(),WS_TABSTOP|WS_BORDER|((multiline&&readOnly)?0:ES_AUTOHSCROLL)|(multiline?ES_MULTILINE|ES_AUTOVSCROLL|WS_VSCROLL|ES_WANTRETURN:0),multiline?26:x+235,y,multiline?width-52:mateColumns?217:width-263,multiline?height-184:33,3+(int)i,mono);
         if(!fields[i].choices.empty()){for(const auto& choice:fields[i].choices)SendMessageA(e,CB_ADDSTRING,0,(LPARAM)choice.c_str());auto selected=SendMessageA(e,CB_FINDSTRINGEXACT,-1,(LPARAM)fields[i].value.c_str());if(selected!=CB_ERR)SendMessage(e,CB_SETCURSEL,selected,0);else if(fields[i].editableChoice)SetWindowTextA(e,fields[i].value.c_str());}
+        if(!fields[i].choices.empty()&&std::string(title)=="Local models / Ollama"){HDC dc=GetDC(e);auto previousFont=SelectObject(dc,font);int dropped=width-263;for(const auto& choice:fields[i].choices){SIZE measured{};GetTextExtentPoint32A(dc,choice.c_str(),(int)choice.size(),&measured);dropped=std::max(dropped,(int)measured.cx+40);}SelectObject(dc,previousFont);ReleaseDC(e,dc);MONITORINFO monitor{sizeof(MONITORINFO)};GetMonitorInfo(MonitorFromWindow(g_dialog,MONITOR_DEFAULTTONEAREST),&monitor);SendMessage(e,CB_SETDROPPEDWIDTH,std::min(dropped,(int)(monitor.rcWork.right-monitor.rcWork.left)-32),0);}
         if(fields[i].toggle)SendMessage(e,BM_SETCHECK,fields[i].value=="1"?BST_CHECKED:BST_UNCHECKED,0);
         if(readOnly&&!fields[i].toggle&&fields[i].choices.empty())SendMessage(e,EM_SETREADONLY,TRUE,0);
         SendMessage(e,EM_SETMARGINS,EC_LEFTMARGIN|EC_RIGHTMARGIN,MAKELPARAM(8,8));edits.push_back(e);
@@ -2285,22 +2295,25 @@ static void sketchFeatureDialog(bool cut){
 static void parameterDialog(){std::vector<EditorField> fields{{"Parameter name","width"},{"Expression","100"}};if(!editFields("Named parameter","Create or update a dimension shared by sketches and features.",fields))return;using V=arkjson::Value;V c=V::makeObj();c.set("op",V::makeStr("param.set"));c.set("name",V::makeStr(fields[0].value));c.set("expr",V::makeStr(fields[1].value));applyCommand(c);}
 static std::filesystem::path g_settingsOverride;
 static std::filesystem::path uiSettingsPath(){if(!g_settingsOverride.empty())return g_settingsOverride;auto* base=_wgetenv(L"LOCALAPPDATA");return (base?std::filesystem::path(base):std::filesystem::temp_directory_path())/"ARK"/"studio.json";}
-static arkjson::Value connectorSettings(const AssistantConfig& config){using V=arkjson::Value;V v=V::makeObj();v.set("provider",V::makeStr(config.provider));v.set("protocol",V::makeStr(assistantProtocolName(config.protocol)));v.set("endpoint",V::makeStr(config.endpoint));v.set("api_key_env",V::makeStr(config.apiKeyEnv));v.set("max_output_tokens",V::makeNum(config.maxOutputTokens));return v;}
-static void readConnectorSettings(const arkjson::Value& v,AssistantConfig& config){using V=arkjson::Value;if(auto* p=v.find("provider");p&&p->t==V::Str)config.provider=p->str;if(auto* p=v.find("protocol");p&&p->t==V::Str)config.protocol=assistantProtocolFromName(p->str);if(auto* p=v.find("endpoint");p&&p->t==V::Str)config.endpoint=p->str;if(auto* p=v.find("api_key_env");p&&p->t==V::Str)config.apiKeyEnv=p->str;if(auto* p=v.find("max_output_tokens")){if(p->t!=V::Num||p->num<1||p->num>131072||std::floor(p->num)!=p->num)throw std::runtime_error("Stored Messages response limit must be an integer from 1 to 131072");config.maxOutputTokens=(unsigned)p->num;}}
+static const char* connectorAuthName(AssistantAuthMode mode){return mode==AssistantAuthMode::ChatGptPlan?"chatgpt_plan":mode==AssistantAuthMode::CliAccount?"cli-account":"api_key";}
+static AssistantAuthMode connectorAuthMode(const std::string& value){if(value=="chatgpt_plan")return AssistantAuthMode::ChatGptPlan;if(value=="cli-account")return AssistantAuthMode::CliAccount;if(value=="api_key")return AssistantAuthMode::ApiKey;throw std::runtime_error("Unknown stored connector account mode");}
+static arkjson::Value connectorSettings(const AssistantConfig& config){using V=arkjson::Value;V v=V::makeObj();v.set("provider",V::makeStr(config.provider));v.set("auth_mode",V::makeStr(connectorAuthName(config.authMode)));v.set("protocol",V::makeStr(assistantProtocolName(config.protocol)));v.set("endpoint",V::makeStr(config.endpoint));v.set("api_key_env",V::makeStr(config.apiKeyEnv));v.set("max_output_tokens",V::makeNum(config.maxOutputTokens));v.set("image_input_supported",V::makeBool(config.imageInputSupported));v.set("timeout_seconds",V::makeNum(config.timeoutSeconds));return v;}
+static void readConnectorSettings(const arkjson::Value& v,AssistantConfig& config){using V=arkjson::Value;if(auto* p=v.find("auth_mode")){if(p->t!=V::Str)throw std::runtime_error("Invalid stored connector account mode");config.authMode=connectorAuthMode(p->str);}if(auto* p=v.find("image_input_supported")){if(p->t!=V::Bool)throw std::runtime_error("Invalid stored image capability");config.imageInputSupported=p->b;}if(auto* p=v.find("timeout_seconds")){if(p->t!=V::Num||p->num<1||p->num>300||std::floor(p->num)!=p->num)throw std::runtime_error("Invalid stored provider timeout");config.timeoutSeconds=(unsigned)p->num;}if(auto* p=v.find("provider");p&&p->t==V::Str)config.provider=p->str;if(auto* p=v.find("protocol");p&&p->t==V::Str)config.protocol=assistantProtocolFromName(p->str);if(auto* p=v.find("endpoint");p&&p->t==V::Str)config.endpoint=p->str;if(auto* p=v.find("api_key_env");p&&p->t==V::Str)config.apiKeyEnv=p->str;if(auto* p=v.find("max_output_tokens")){if(p->t!=V::Num||p->num<1||p->num>131072||std::floor(p->num)!=p->num)throw std::runtime_error("Stored Messages response limit must be an integer from 1 to 131072");config.maxOutputTokens=(unsigned)p->num;}}
 static void saveUiSettings(){
-    using V=arkjson::Value;V j=V::makeObj();j.set("endpoint",V::makeStr(g_assistantConfig.endpoint));j.set("model",V::makeStr(g_assistantConfig.model));j.set("reasoning_effort",V::makeStr(g_assistantConfig.reasoningEffort));j.set("api_key_env",V::makeStr(g_assistantConfig.apiKeyEnv));j.set("assistant_auth_mode",V::makeStr(g_assistantConfig.authMode==AssistantAuthMode::ChatGptPlan?"chatgpt_plan":"api_key"));j.set("grid",V::makeBool(g_grid));j.set("wireframe",V::makeBool(wireframe));j.set("light_background",V::makeBool(g_lightBackground));j.set("satin",V::makeBool(g_satin));j.set("show_datum_planes",V::makeBool(g_showDatumPlanes));j.set("occlusion_mode",V::makeNum(g_occlusionMode));j.set("occlusion_strength",V::makeNum(g_occlusionStrength));j.set("occlusion_radius",V::makeNum(g_occlusionRadius));j.set("path_tracing",V::makeBool(g_pathTracing));j.set("show_edges",V::makeBool(g_showEdges));j.set("orthographic",V::makeBool(g_cameraOrtho));
+    using V=arkjson::Value;V j=V::makeObj();j.set("endpoint",V::makeStr(g_assistantConfig.endpoint));j.set("model",V::makeStr(g_assistantConfig.model));j.set("reasoning_effort",V::makeStr(g_assistantConfig.reasoningEffort));j.set("api_key_env",V::makeStr(g_assistantConfig.apiKeyEnv));j.set("assistant_auth_mode",V::makeStr(connectorAuthName(g_assistantConfig.authMode)));j.set("grid",V::makeBool(g_grid));j.set("wireframe",V::makeBool(wireframe));j.set("light_background",V::makeBool(g_lightBackground));j.set("satin",V::makeBool(g_satin));j.set("show_datum_planes",V::makeBool(g_showDatumPlanes));j.set("occlusion_mode",V::makeNum(g_occlusionMode));j.set("occlusion_strength",V::makeNum(g_occlusionStrength));j.set("occlusion_radius",V::makeNum(g_occlusionRadius));j.set("path_tracing",V::makeBool(g_pathTracing));j.set("show_edges",V::makeBool(g_showEdges));j.set("orthographic",V::makeBool(g_cameraOrtho));
     V team=V::makeArr();for(size_t i=0;i<teamCapacity;++i){V role=V::makeObj();role.set("model",V::makeStr(g_teamModels[i]));role.set("reasoning_effort",V::makeStr(g_teamEfforts[i]));team.arr.push_back(std::move(role));}j.set("team_roles",std::move(team));j.set("team_role_count",V::makeNum(g_teamRoleCount));j.set("team_focused_workflow",V::makeBool(g_teamFocusedWorkflow));j.set("team_mode",V::makeBool(g_teamMode));j.set("library_root",V::makeStr(g_libraryRoot));j.set("library_search",V::makeStr(g_libraryText));
-    j.set("display_units",g_displayUnits.json());j.set("connector",connectorSettings(g_assistantConfig));V connectors=V::makeArr();for(size_t i=0;i<teamCapacity;++i)connectors.arr.push_back(g_teamConnectors[i]?connectorSettings(*g_teamConnectors[i]):V{});j.set("team_connectors",connectors);
+    j.set("assistant_dock_open",V::makeBool(g_assistantDockOpen));j.set("display_units",g_displayUnits.json());j.set("connector",connectorSettings(g_assistantConfig));V connectors=V::makeArr();for(size_t i=0;i<teamCapacity;++i)connectors.arr.push_back(g_teamConnectors[i]?connectorSettings(*g_teamConnectors[i]):V{});j.set("team_connectors",connectors);
     auto path=uiSettingsPath();std::filesystem::create_directories(path.parent_path());std::ofstream out(path);out<<j.dump();if(!out)throw std::runtime_error("Could not save ARK settings");
 }
 static void loadUiSettings(){
     try{std::ifstream in(uiSettingsPath());if(!in)return;std::string data((std::istreambuf_iterator<char>(in)),{});arkjson::Value j;if(!arkjson::parse(data,j))return;
         if(auto* units=j.find("display_units")){try{g_displayUnits=DisplayUnits::fromJson(*units);}catch(...){g_displayUnits={};}}
         if(auto* v=j.find("endpoint"))g_assistantConfig.endpoint=v->asStr();if(auto* v=j.find("model"))g_assistantConfig.model=v->asStr();if(auto* v=j.find("reasoning_effort");v&&v->t==arkjson::Value::Str)g_assistantConfig.reasoningEffort=v->str;if(auto* v=j.find("api_key_env"))g_assistantConfig.apiKeyEnv=v->asStr();
-        if(auto* v=j.find("assistant_auth_mode");v&&v->t==arkjson::Value::Str)g_assistantConfig.authMode=v->str=="chatgpt_plan"?AssistantAuthMode::ChatGptPlan:AssistantAuthMode::ApiKey;
+        if(auto* v=j.find("assistant_auth_mode");v&&v->t==arkjson::Value::Str)g_assistantConfig.authMode=connectorAuthMode(v->str);
         if(auto* v=j.find("connector");v&&v->t==arkjson::Value::Obj)readConnectorSettings(*v,g_assistantConfig);
         if(auto* connectors=j.find("team_connectors");connectors&&connectors->t==arkjson::Value::Arr)for(size_t i=0;i<teamCapacity&&i<connectors->arr.size();++i)if(connectors->arr[i].t==arkjson::Value::Obj){AssistantConfig config;config.authMode=AssistantAuthMode::ApiKey;readConnectorSettings(connectors->arr[i],config);g_teamConnectors[i]=config;}
         if(auto* v=j.find("team_mode");v&&v->t==arkjson::Value::Bool)g_teamMode=v->b;
+        if(auto* v=j.find("assistant_dock_open")){if(v->t!=arkjson::Value::Bool)throw std::runtime_error("Invalid saved chat visibility");g_assistantDockOpen=v->b;}
         if(auto* v=j.find("library_root");v&&v->t==arkjson::Value::Str)g_libraryRoot=v->str;if(auto* v=j.find("library_search");v&&v->t==arkjson::Value::Str)g_libraryText=v->str;
         if(auto* count=j.find("team_role_count");count&&count->t==arkjson::Value::Num&&count->num>=3&&count->num<=8)g_teamRoleCount=(unsigned)count->num;
         if(auto* focused=j.find("team_focused_workflow");focused&&focused->t==arkjson::Value::Bool)g_teamFocusedWorkflow=focused->b;
@@ -2538,21 +2551,29 @@ static void ingestLibraryStep(const std::string& explicitPath={}){
     if(!editFields("Store STEP component","Copies the STEP and verifies native geometry. Record known origin and license; blank metadata remains unknown. A multi-solid source needs an explicit body or all selection.",fields))return;
     g_libraryRoot=trimField(fields[8].value);auto args=libraryArgs();args.set("path",V::makeStr(path));V metadata=V::makeObj();const char* keys[]={"name","category","provenance","source_url","license","material","standard"};for(size_t i=0;i<7;++i)if(!trimField(fields[i].value).empty())metadata.set(keys[i],V::makeStr(trimField(fields[i].value)));args.set("metadata",metadata);auto body=trimField(fields[7].value);if(body=="all")args.set("all_bodies",V::makeBool(true));else if(body!="auto"){double index=formNumber(body);if(index<0||std::floor(index)!=index)throw std::runtime_error("Body selection must be auto, all or a zero-based integer.");args.set("body_index",V::makeNum(index));}g_libraryLastId.clear();auto result=runTool("library_ingest",args);if(!g_error){if(auto* record=result.find("structuredContent"))g_libraryLastId=libraryText(*record,"id");g_status="STEP component stored in library; open Library to find and reuse it.";if(!g_dialogSmoke)saveUiSettings();}
 }
+#include "local_models.inl"
 static bool editConnector(AssistantConfig& config,bool role,bool& inherit){
     auto profileShot=g_dialogShot;
     std::vector<std::string> providers;if(role)providers.push_back("inherit");else providers.push_back("chatgpt-plan");for(const auto& preset:assistantProviderPresets())providers.push_back(preset.id);
     std::string current=inherit?"inherit":config.authMode==AssistantAuthMode::ChatGptPlan?"chatgpt-plan":config.provider;
     if(std::find(providers.begin(),providers.end(),current)==providers.end())current="custom";
     std::vector<EditorField> profile{{"Provider",current,false,providers},{"Refresh model catalog", "0",true}};
-    if(!editFields(role?"Agent card connector":"Assistant connector","Choose a provider. Catalog refresh reads available model IDs without starting inference. Keys remain in environment variables.",profile))return false;
+    if(!editFields(role?"Agent card connector":"Assistant connector","Grok Build uses its CLI account; API providers use environment credentials. Catalog refresh reads model IDs without inference.",profile))return false;
     auto provider=profile[0].value;inherit=provider=="inherit";if(inherit)return true;if(provider=="chatgpt-plan"){if(config.authMode!=AssistantAuthMode::ChatGptPlan){config.model.clear();config.reasoningEffort.clear();}config.authMode=AssistantAuthMode::ChatGptPlan;config.provider="openai";config.protocol=AssistantProtocol::Responses;config.endpoint="https://api.openai.com/v1/responses";return true;}
-    if(provider!=config.provider||config.authMode!=AssistantAuthMode::ApiKey)config=assistantProviderPreset(provider);
-    config.authMode=AssistantAuthMode::ApiKey;std::vector<std::string> models;
+    const auto expectedAuth=provider=="grok-build"?AssistantAuthMode::CliAccount:AssistantAuthMode::ApiKey;
+    if(provider!=config.provider||config.authMode!=expectedAuth)config=assistantProviderPreset(provider);
+    config.authMode=expectedAuth;if(provider=="ollama")return editLocalModel(config);std::vector<std::string> models;
     if(profile[1].value=="1"){
         auto operation=[config]{auto result=arkjson::Value::makeArr();for(const auto& model:assistantProviderModels(config))result.arr.push_back(arkjson::Value::makeStr(model));return result;};
         auto result=g_headless?operation():callSessionWithProgress("assistant_model_catalog",arkjson::Value::makeObj(),operation);for(const auto& row:result.arr)models.push_back(row.asStr());
     }
     if(!config.model.empty()&&std::find(models.begin(),models.end(),config.model)==models.end())models.insert(models.begin(),config.model);if(models.empty())models.push_back("");
+    if(provider=="grok-build"){
+        std::vector<EditorField> fields{{"Grok CLI / grok or full path",config.endpoint},{"Model / blank: CLI selected model",config.model,false,models,true}};
+        if(!profileShot.empty()&&g_dialogSmoke)g_dialogShot=profileShot+".endpoint.png";
+        if(!editFields("Grok Build account and model","Sign in with grok login first. Blank model uses the CLI selected model when advertised. ARK executes its own permitted tools.",fields))return false;
+        config.endpoint=trimField(fields[0].value);config.model=trimField(fields[1].value);config.apiKeyEnv.clear();config.reasoningEffort.clear();config.imageInputSupported=false;validateAssistantConfig(config);return true;
+    }
     std::vector<EditorField> fields{{"Endpoint",config.endpoint},{"Model / choose or type",config.model,false,models,true},{"API key env / blank local",config.apiKeyEnv},{"Protocol",assistantProtocolName(config.protocol),false,{"responses","chat-completions","messages"}}};
     bool hasMessagesLimit=config.protocol==AssistantProtocol::Messages;if(hasMessagesLimit)fields.push_back({"Messages response limit",std::to_string(config.maxOutputTokens)});
     fields.push_back({"Reasoning effort / auto",config.reasoningEffort.empty()?"auto":config.reasoningEffort});
@@ -2560,11 +2581,14 @@ static bool editConnector(AssistantConfig& config,bool role,bool& inherit){
     if(!editFields("Provider endpoint and model","Choose an actual model ID. Remote providers need their own API key; Ollama can run locally. Endpoint/protocol must match the selected service.",fields))return false;
     config.endpoint=trimField(fields[0].value);config.model=trimField(fields[1].value);config.apiKeyEnv=trimField(fields[2].value);config.protocol=assistantProtocolFromName(fields[3].value);auto effort=trimField(fields[hasMessagesLimit?5:4].value);config.reasoningEffort=effort=="auto"?"":effort;if(hasMessagesLimit){double output=formNumber(fields[4].value);if(output<1||output>131072||std::floor(output)!=output)throw std::runtime_error("Messages response limit must be a positive integer up to 131072");config.maxOutputTokens=(unsigned)output;}validateAssistantConfig(config);return true;
 }
-static void connectorDialog(){
+static void connectorDialog(bool local=false){
     if(g_teamStarted&&g_agentTeam.snapshot().running){g_status="Finish or cancel the active team before changing connectors";return;}
-    auto config=g_assistantConfig;bool inherit=false;if(!editConnector(config,false,inherit))return;
+    auto config=g_assistantConfig;bool inherit=false;if(local?!editLocalModel(config):!editConnector(config,false,inherit))return;
+    const bool routeChanged=config.authMode!=g_assistantConfig.authMode||config.provider!=g_assistantConfig.provider||config.endpoint!=g_assistantConfig.endpoint;
+    if(routeChanged)for(size_t i=0;i<teamCapacity;++i)if(!g_teamConnectors[i]){g_teamModels[i].clear();g_teamEfforts[i].clear();}
+    if(g_teamStarted){*g_teamCancel=true;g_agentTeam.cancel();g_teamStarted=false;resetTeamView();}
     g_assistantConfig=config;*g_assistantCancel=true;++g_documentEpoch;g_conversation=arkjson::Value::makeArr();if(!g_dialogSmoke)saveUiSettings();clearPendingRoleSettings();
-    g_status=config.authMode==AssistantAuthMode::ChatGptPlan?"ChatGPT connector selected; choose the connected account model from Account.":"Provider connector saved; no inference started.";
+    g_status=config.authMode==AssistantAuthMode::ChatGptPlan?"ChatGPT connector selected; choose the connected account model from Account.":config.authMode==AssistantAuthMode::CliAccount?"Grok Build connector saved; the CLI keeps its account and selected model.":config.provider=="ollama"?"Local Ollama / "+config.model+(config.imageInputSupported?" / tools and images":" / tools; text only"):"Provider connector saved; no inference started.";
 }
 static void teamConnectorDialog(size_t index){
     if(index>=teamCapacity)return;if(g_teamStarted&&g_agentTeam.snapshot().running){g_status="Finish or cancel the active team before changing a card connector";return;}
@@ -2610,6 +2634,7 @@ static void chooseChatGptModel(){
     }
 }
 static void chooseReasoningEffort(){
+    if(g_assistantConfig.authMode==AssistantAuthMode::CliAccount){g_status="Grok Build uses its CLI reasoning configuration; no separate effort control is negotiated.";return;}
     if(g_assistantConfig.model.empty()){g_status="Choose an assistant model before setting reasoning effort";return;}
     static const std::set<std::string> vocabulary{"none","minimal","low","medium","high","xhigh","max","ultra"};
     std::vector<std::string> advertised;std::string providerDefault;
@@ -2654,7 +2679,8 @@ static void showAssistantAccountMenu(){
     AppendMenuA(menu,MF_SEPARATOR,0,nullptr);
     std::string effortLabel="Reasoning effort: "+(g_assistantConfig.reasoningEffort.empty()?std::string("Auto"):g_assistantConfig.reasoningEffort);
     AppendMenuA(menu,MF_STRING|(g_assistantConfig.model.empty()?MF_GRAYED:0),367,effortLabel.c_str());
-    AppendMenuA(menu,MF_STRING,357,"Connectors / OpenAI, Claude, Grok...");
+    AppendMenuA(menu,MF_STRING,368,"Local models / Ollama...");
+    AppendMenuA(menu,MF_STRING,357,"Connectors / OpenAI, Claude, Grok, Ollama...");
     if(g_assistantConfig.authMode==AssistantAuthMode::ChatGptPlan)AppendMenuA(menu,MF_STRING,358,"Switch to API key mode");
     decorateMenu(menu);
     POINT cursor;GetCursorPos(&cursor);int action=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,cursor.x,cursor.y,0,g_window,nullptr);
@@ -2666,8 +2692,9 @@ static void drainUiTools(){
     while(!g_toolQueue.empty()){auto request=std::move(g_toolQueue.front());g_toolQueue.pop_front();
         if(g_closing||request->stop.stop_requested()||(request->cancel&&*request->cancel)){request->complete(cancelledTool());continue;}
         if((request->teamOwned&&request->epoch!=g_documentEpoch)||(request->revision&&(request->epoch!=g_documentEpoch||*request->revision!=g_session.revision))){auto result=cancelledTool();arkjson::Value error=arkjson::Value::makeObj();g_status="Document changed during assistant turn. Inspect and resend from the current revision.";error.set("error",arkjson::Value::makeStr(g_status));result.set("structuredContent",error);g_chatLog.push_back({"ARK",g_status});request->complete(result);if(request->cancel)*request->cancel=true;continue;}
-        if(request->teamOwned||request->revision){using V=arkjson::Value;V actor=V::makeObj();actor.set("kind",V::makeStr("agent"));actor.set("id",V::makeStr(request->roleId.empty()?"assistant":request->roleId));std::string model=g_assistantConfig.model;for(size_t i=0;i<teamCapacity;++i)if(request->roleId==g_teamRoleIds[i])model=g_teamModels[i].empty()?g_assistantConfig.model:g_teamModels[i];if(!model.empty())actor.set("model",V::makeStr(model));if(!request->roleId.empty())actor.set("role",V::makeStr(request->roleId));static const std::set<std::string> writes{"doc_apply","doc_new","doc_load","doc_undo","doc_redo","iteration_restore","import_step","import_sheet_step","import_mesh","library_insert"};request->args.set("actor",actor);}
-        if(!request->teamOwned&&!request->revision&&!request->args.find("actor")){using V=arkjson::Value;static const std::set<std::string> writes{"doc_apply","doc_new","doc_load","doc_undo","doc_redo","iteration_restore","import_step","import_sheet_step","import_mesh","library_insert"};if(writes.count(request->tool)){V actor=V::makeObj();actor.set("kind",V::makeStr("client"));actor.set("id",V::makeStr("live_mcp"));request->args.set("actor",actor);}}
+        if(!assistantSteeringToolAllowed(*request)){request->complete(assistantSteeringToolRejection());continue;}
+        if(request->teamOwned||request->revision){using V=arkjson::Value;V actor=V::makeObj();actor.set("kind",V::makeStr("agent"));actor.set("id",V::makeStr(request->roleId.empty()?"assistant":request->roleId));std::string model=g_assistantConfig.model;for(size_t i=0;i<teamCapacity;++i)if(request->roleId==g_teamRoleIds[i])model=g_teamModels[i].empty()?(g_teamConnectors[i]?g_teamConnectors[i]->model:g_assistantConfig.model):g_teamModels[i];if(!model.empty())actor.set("model",V::makeStr(model));if(!request->roleId.empty())actor.set("role",V::makeStr(request->roleId));static const std::set<std::string> writes{"doc_apply","doc_new","doc_load","doc_undo","doc_redo","iteration_restore","import_step","import_sheet_step","import_mesh","import_cad","design_containers","library_insert"};request->args.set("actor",actor);}
+        if(!request->teamOwned&&!request->revision&&!request->args.find("actor")){using V=arkjson::Value;static const std::set<std::string> writes{"doc_apply","doc_new","doc_load","doc_undo","doc_redo","iteration_restore","import_step","import_sheet_step","import_mesh","import_cad","design_containers","library_insert"};if(writes.count(request->tool)){V actor=V::makeObj();actor.set("kind",V::makeStr("client"));actor.set("id",V::makeStr("live_mcp"));request->args.set("actor",actor);}}
         if((request->teamOwned||request->revision)&&request->tool=="__ark_bom_completion"){try{request->complete(g_session.bomCompletionCheck((bool)request->revision));}catch(...){request->complete(cancelledTool());}continue;}
         if(request->teamOwned&&request->tool=="__ark_activity"){
             try{const auto& a=request->args;auto result=recordAgentActivity(g_doc,a.find("tool")->asStr(),*a.find("arguments"),*a.find("actor"),*a.find("result"),g_session.revision,g_session.revision,a.find("elapsed_ms")->asNum());if(g_doc.agentActivity&&!g_doc.agentActivity->entries.empty())g_doc.agentActivity->entries.back().set("timing_scope",arkjson::Value::makeStr("team coordination wall time; revision sampled after action"));request->complete(result);}catch(...){request->complete(cancelledTool());}continue;
@@ -2801,6 +2828,8 @@ static bool editRoleModel(size_t index,std::string& model,std::string& effort){
 static void teamRoleDialog(size_t index){
     if(g_teamStarted&&g_agentTeam.snapshot().running){g_status="Finish or cancel the team before changing role settings. Changes apply to a new team run.";return;}
     std::string model=g_teamModels[index],effort=g_teamEfforts[index];
+    if(teamRoleConfig(index).authMode==AssistantAuthMode::CliAccount){auto config=teamRoleConfig(index);bool inherit=false;if(!editConnector(config,true,inherit))return;if(g_teamStarted){cancelTeam();g_teamStarted=false;resetTeamView();}if(inherit){g_teamConnectors[index].reset();g_teamModels[index].clear();g_teamEfforts[index].clear();}else{g_teamConnectors[index]=config;g_teamModels[index]=config.model;g_teamEfforts[index].clear();}if(!g_dialogSmoke)saveUiSettings();g_status="Grok Build agent connector saved for the next run.";return;}
+    if(teamRoleConfig(index).provider=="ollama"){auto config=teamRoleConfig(index);if(!editLocalModel(config))return;if(g_teamStarted){cancelTeam();g_teamStarted=false;resetTeamView();}g_teamConnectors[index]=config;g_teamModels[index]=config.model;g_teamEfforts[index]=config.reasoningEffort.empty()?"auto":config.reasoningEffort;if(!g_dialogSmoke)saveUiSettings();g_status="Local agent model saved for the next run.";return;}
     if(teamRoleConfig(index).authMode==AssistantAuthMode::ChatGptPlan){if(!g_authStatus.connected||!g_authStatus.planAuthorized){g_status="Connect and authorize ChatGPT from Account before choosing role models.";return;}if(g_authBusy||g_authModels.empty()){requestRoleCatalog(index);return;}if(!editRoleModel(index,model,effort))return;}
     else{auto config=teamRoleConfig(index);std::vector<EditorField> fields{{"Model (manual)",model.empty()?config.model:model},{"Effort (manual)",effort}};if(!editFields("Advanced role connector","Configure this card model and provider-supported effort. Blank inherits the card connector model; auto uses the provider default.",fields))return;model=trimField(fields[0].value);effort=trimField(fields[1].value);if(!model.empty())config.model=model;config.reasoningEffort=effort=="auto"?"":effort;validateAssistantConfig(config);}
     if(g_teamStarted){cancelTeam();g_teamStarted=false;resetTeamView();}g_teamModels[index]=model;g_teamEfforts[index]=effort;if(!g_dialogSmoke)saveUiSettings();g_status="Role model and reasoning saved together for the next team run.";
@@ -2839,6 +2868,7 @@ static void askAgentAboutBody(int body){
     g_error=false;g_status="Object attached. Enter a question, then Send or Queue to ask the agent.";
 }
 #include "image_attachment.inl"
+#include "steer_024b.inl"
 #include "studio_feedback_fixture.inl"
 static void sendTeam(const std::string& explicitPrompt={},const std::array<AssistantTransport,8>& transports={}){
     if(g_busy&&!g_teamStarted){g_status="Wait for the current document operation before starting a new team.";return;}
@@ -2856,10 +2886,10 @@ static void sendTeam(const std::string& explicitPrompt={},const std::array<Assis
                 if(!transports[i]&&config.authMode==AssistantAuthMode::ChatGptPlan){if(!g_authStatus.connected||!g_authStatus.planAuthorized)throw std::runtime_error("Connect and authorize ChatGPT from Account first.");if(g_authModels.empty())throw std::runtime_error("Load the account model catalog from Account first.");if(std::none_of(g_authModels.begin(),g_authModels.end(),[&](const auto& model){return model.slug==config.model;}))throw std::runtime_error("The selected model is unavailable in this account's catalog.");}
             }catch(const std::exception& error){throw std::runtime_error(std::string(g_teamRoleLabels[i])+": "+error.what());}
             AgentTeamRole role;role.id=g_teamRoleIds[i];role.label=g_teamRoleLabels[i];role.instructions=instructions[i==2?2:i==0?0:1];if(!transports[i])config.onboardingPack=agentOnboardingPack(i==2?std::vector<std::string>{"overview","physics"}:std::vector<std::string>{"overview"});role.assistant=config;role.transport=feedbackFixtureTransport(transports[i]);role.canWrite=i!=2;role.discipline=i==0?AgentTeamDiscipline::Orchestrator:i==2?AgentTeamDiscipline::PhysicsReviewer:AgentTeamDiscipline::PartDesigner;team.roles.push_back(std::move(role));}
-        g_teamCancel=std::make_shared<std::atomic_bool>(false);auto cancel=g_teamCancel;auto epoch=g_documentEpoch;auto runSerial=++g_teamRunSerial;g_teamEpoch=epoch;g_teamEventSequence=0;g_teamReceipts={};g_teamActivity={};g_teamLiveUsage={};g_draftViews.clear();g_liveCompletedSteps=0;g_liveStepLabel.clear();captureDraftContext();g_teamGoal=visiblePrompt;for(auto& id:g_teamReceiptIds)id=newUsageReceiptId();if(!transports[0]&&!transports[1]&&!transports[2])refreshPricing();
+        g_teamCancel=std::make_shared<std::atomic_bool>(false);auto cancel=g_teamCancel;auto epoch=g_documentEpoch;auto runSerial=++g_teamRunSerial;g_teamEpoch=epoch;g_teamEventSequence=0;g_teamReceipts={};g_teamActivity={};g_teamLiveUsage={};g_draftViews.clear();g_liveCompletedSteps=0;g_liveStepLabel.clear();captureDraftContext();g_teamGoal=visiblePrompt;for(auto& id:g_teamReceiptIds)id=newUsageReceiptId();if(!transports[0]&&!transports[1]&&!transports[2]&&std::any_of(team.roles.begin(),team.roles.end(),[](const auto& role){return role.assistant.provider!="ollama"&&role.assistant.authMode!=AssistantAuthMode::CliAccount;}))refreshPricing();
         g_assistantReceiptId.clear();g_currentUsageReceipt.reset();g_pendingUsageReceipt.reset();
         auto teamExecutor=[cancel,epoch](const std::string& name,const arkjson::Value& args){
-            auto promise=std::make_shared<std::promise<arkjson::Value>>();auto future=promise->get_future();auto request=std::make_unique<UiToolRequest>();request->tool=name;request->roleId=AgentTeam::currentRoleId();request->args=args;request->cancel=cancel;request->epoch=epoch;request->teamOwned=true;request->complete=[promise](arkjson::Value result){promise->set_value(std::move(result));};postTool(std::move(request));
+            auto promise=std::make_shared<std::promise<arkjson::Value>>();auto future=promise->get_future();auto request=std::make_unique<UiToolRequest>();request->tool=name;request->roleId=AgentTeam::currentRoleId();request->steeringVersion=g_agentTeam.requestVersion(request->roleId);request->args=args;request->cancel=cancel;request->epoch=epoch;request->teamOwned=true;request->complete=[promise](arkjson::Value result){promise->set_value(std::move(result));};postTool(std::move(request));
             while(future.wait_for(std::chrono::milliseconds(20))!=std::future_status::ready)if(*cancel||g_closing)throw std::runtime_error("Team cancelled");return future.get();
         };
         if(std::none_of(transports.begin(),transports.end(),[](const auto& t){return (bool)t;}))team.completionCheck=[teamExecutor]{return teamExecutor("__ark_bom_completion",arkjson::Value::makeObj());};
@@ -2868,28 +2898,30 @@ static void sendTeam(const std::string& explicitPrompt={},const std::array<Assis
     }
     if(explicitPrompt.empty())clearPendingAssistantImage();g_pendingObjectTarget.reset();g_chatScroll=0;if(g_chatInput)SetWindowTextW(g_chatInput,L"");pollTeam(true);
 }
-static void sendAssistant(const std::string& explicitPrompt="",const AssistantTransport& transport={}){
+static void sendAssistant(const std::string& explicitPrompt="",const AssistantTransport& transport={},const arkjson::Value* queuedMessage=nullptr,const std::string& queuedVisible={}){
     if(g_teamStarted&&g_agentTeam.snapshot().running){g_status="Wait for the team to finish or cancel it before starting Assistant.";return;}
-    if(g_chatBusy)return;std::string prompt=explicitPrompt;
+    std::string prompt=explicitPrompt;
     if(prompt.empty()&&g_chatInput){int n=GetWindowTextLengthW(g_chatInput);std::vector<wchar_t> buffer(n+1);GetWindowTextW(g_chatInput,buffer.data(),n+1);int size=WideCharToMultiByte(CP_UTF8,0,buffer.data(),n,nullptr,0,nullptr,nullptr);prompt.resize(size);WideCharToMultiByte(CP_UTF8,0,buffer.data(),n,prompt.data(),size,nullptr,nullptr);}
-    if(prompt.find_first_not_of(" \r\n\t")==std::string::npos&&(!explicitPrompt.empty()||!g_pendingAssistantImage))return;const std::string visiblePrompt=explicitPrompt.empty()?assistantImageVisiblePrompt(prompt):prompt;if(!attachPendingObjectContext(prompt))return;validateAssistantConfig(g_assistantConfig);
-    if(g_conversation.arr.empty()&&!transport)refreshPricing();
+    if(!queuedMessage&&prompt.find_first_not_of(" \r\n\t")==std::string::npos&&(!explicitPrompt.empty()||!g_pendingAssistantImage))return;const std::string visiblePrompt=queuedMessage?queuedVisible:explicitPrompt.empty()?assistantImageVisiblePrompt(prompt):prompt;if(!queuedMessage&&!attachPendingObjectContext(prompt))return;using V=arkjson::Value;V user=queuedMessage?*queuedMessage:explicitPrompt.empty()?pendingAssistantImageMessage(prompt):assistantUserMessage(prompt);
+    if(g_chatBusy){queueActiveAssistantSteering(user,visiblePrompt,explicitPrompt.empty()&&!queuedMessage);return;}validateAssistantConfig(g_assistantConfig);
+    if(g_conversation.arr.empty()&&!transport&&g_assistantConfig.provider!="ollama"&&g_assistantConfig.authMode!=AssistantAuthMode::CliAccount)refreshPricing();
     if(g_assistantWorker.joinable())g_assistantWorker.join();
-    using V=arkjson::Value;V input=g_conversation;if(input.t!=V::Arr)input=V::makeArr();V user=explicitPrompt.empty()?pendingAssistantImageMessage(prompt):assistantUserMessage(prompt);input.arr.push_back(user);
-    if(explicitPrompt.empty()&&g_pendingAssistantImage){auto preflight=g_assistantConfig;if(!transport)preflight.onboardingPack=agentOnboardingPack({"overview"});assistantRequest(preflight,input,AgentSession::tools());}
-    g_pendingObjectTarget.reset();g_chatLog.push_back({"You",visiblePrompt});g_chatScroll=0;g_chatBusy=true;g_assistantResponseFinished=g_assistantResponseError=false;g_assistantStatus="Working...";g_assistantUsageRun={};g_assistantPerformanceRun={};g_assistantUsageRunCounted=false;g_assistantReceiptId=newUsageReceiptId();g_assistantReceiptModel=g_assistantConfig.model;g_currentUsageReceipt.reset();g_pendingUsageReceipt.reset();g_assistantCancel=std::make_shared<std::atomic_bool>(false);auto cancel=g_assistantCancel;auto config=g_assistantConfig;if(!transport)config.onboardingPack=agentOnboardingPack({"overview"});auto schema=AgentSession::tools();if(g_chatInput)SetWindowTextW(g_chatInput,L"");
+    V input=g_conversation;if(input.t!=V::Arr)input=V::makeArr();input.arr.push_back(user);
+    if(queuedMessage||(explicitPrompt.empty()&&g_pendingAssistantImage)){auto preflight=g_assistantConfig;if(!transport)preflight.onboardingPack=agentOnboardingPack({"overview"});assistantRequest(preflight,input,AgentSession::tools());}
+    if(!queuedMessage)g_pendingObjectTarget.reset();if(!queuedMessage)g_chatLog.push_back({"You",visiblePrompt});g_chatScroll=0;g_chatBusy=true;g_assistantResponseFinished=g_assistantResponseError=false;g_assistantStatus="Working...";g_assistantUsageRun={};g_assistantPerformanceRun={};g_assistantUsageRunCounted=false;g_assistantReceiptId=newUsageReceiptId();g_assistantReceiptModel=g_assistantConfig.model;g_currentUsageReceipt.reset();g_pendingUsageReceipt.reset();g_assistantCancel=std::make_shared<std::atomic_bool>(false);auto cancel=g_assistantCancel;auto config=g_assistantConfig;if(!transport)config.onboardingPack=agentOnboardingPack({"overview"});auto schema=AgentSession::tools();if(g_chatInput&&!queuedMessage)SetWindowTextW(g_chatInput,L"");
     auto epoch=g_documentEpoch;auto revision=std::make_shared<std::atomic<u64>>(g_session.revision);
-    g_assistantWorker=std::thread([config,input,schema,cancel,transport,epoch,revision]{
-        V retainedHistory=input;auto executor=[cancel,epoch,revision](const std::string& name,const V& args){
-            auto promise=std::make_shared<std::promise<V>>();auto future=promise->get_future();auto request=std::make_unique<UiToolRequest>();request->tool=name;request->args=args;request->cancel=cancel;request->epoch=epoch;request->revision=revision;request->complete=[promise](V result){promise->set_value(std::move(result));};postTool(std::move(request));
+    auto steering=std::make_shared<AssistantSteering>(config,schema,input);g_assistantSteering=steering;g_assistantSteeringEpoch=epoch;g_assistantSteeringTransport=transport;
+    g_assistantWorker=std::thread([config,input,schema,cancel,transport,epoch,revision,steering]{
+        V retainedHistory=input;auto executor=[cancel,epoch,revision,steering](const std::string& name,const V& args){
+            auto promise=std::make_shared<std::promise<V>>();auto future=promise->get_future();auto request=std::make_unique<UiToolRequest>();request->tool=name;request->args=args;request->cancel=cancel;request->epoch=epoch;request->revision=revision;request->steering=steering;request->steeringVersion=steering->requestVersion();request->complete=[promise](V result){promise->set_value(std::move(result));};postTool(std::move(request));
             while(future.wait_for(std::chrono::milliseconds(20))!=std::future_status::ready)if(*cancel||g_closing)throw std::runtime_error("Assistant cancelled");
             return future.get();
-        };AssistantRetryHooks hooks;if(!transport)hooks.completionCheck=[executor]{return executor("__ark_bom_completion",V::makeObj());};
-        try{auto result=runAssistant(config,input,schema,executor,[epoch](const AssistantEvent& event){if(event.kind==AssistantEvent::Status){UiChatEvent progress;progress.text=event.text;progress.epoch=epoch;progress.status=true;progress.retry=event.providerRetry;postChat(std::move(progress));}else if(event.kind==AssistantEvent::ToolStart)postChat({"Tool: "+event.text,false,false,{},epoch});else if(event.kind==AssistantEvent::Usage)postChat({"",false,false,{},epoch,event.usage,true,event.performance,true});else if(event.kind==AssistantEvent::ToolEnd)postChat({"",false,false,{},epoch,{},false,event.performance,true});},cancel.get(),feedbackFixtureTransport(transport),{},[&](const V& history){retainedHistory=history;},hooks);
+        };AssistantRetryHooks hooks;if(!transport)hooks.completionCheck=[executor]{return executor("__ark_bom_completion",V::makeObj());};hooks.requestCurrent=[steering]{return steering->current(steering->requestVersion());};hooks.acceptCompletion=[steering]{return steering->finish();};
+        try{auto result=runAssistant(config,input,schema,executor,[epoch](const AssistantEvent& event){if(event.kind==AssistantEvent::Status){UiChatEvent progress;progress.text=event.text;progress.epoch=epoch;progress.status=true;progress.retry=event.providerRetry;postChat(std::move(progress));}else if(event.kind==AssistantEvent::ToolStart)postChat({"Tool: "+event.text,false,false,{},epoch});else if(event.kind==AssistantEvent::Usage)postChat({"",false,false,{},epoch,event.usage,true,event.performance,true});else if(event.kind==AssistantEvent::ToolEnd)postChat({"",false,false,{},epoch,{},false,event.performance,true});},cancel.get(),feedbackFixtureTransport(transport),[steering]{return steering->inbox();},[&](const V& history){retainedHistory=history;steering->checkpoint(history);},hooks);
             if(*cancel)throw std::runtime_error("Assistant cancelled");postChat({result.text,true,false,result.conversation,epoch,result.usage,true,result.performance,true});
-        }catch(const std::exception& e){std::set<std::string> answered;for(const auto& row:retainedHistory.arr)if(row.find("type")&&row.find("type")->asStr()=="function_call_output"&&row.find("call_id"))answered.insert(row.find("call_id")->asStr());std::vector<std::string> missing;for(const auto& row:retainedHistory.arr)if(row.find("type")&&row.find("type")->asStr()=="function_call"&&row.find("call_id")&&!answered.count(row.find("call_id")->asStr()))missing.push_back(row.find("call_id")->asStr());for(const auto& id:missing){V reply=V::makeObj(),error=V::makeObj();error.set("isError",V::makeBool(true));error.set("error",V::makeStr("Interrupted before receipt retention; execution may have completed. Inspect current doc_info and revision before further writes; do not replay prior calls."));reply.set("type",V::makeStr("function_call_output"));reply.set("call_id",V::makeStr(id));reply.set("output",V::makeStr(error.dump()));retainedHistory.arr.push_back(reply);}postChat({e.what(),true,true,retainedHistory,epoch});}
+        }catch(const std::exception& e){steering->cancel();std::set<std::string> answered;for(const auto& row:retainedHistory.arr)if(row.find("type")&&row.find("type")->asStr()=="function_call_output"&&row.find("call_id"))answered.insert(row.find("call_id")->asStr());std::vector<std::string> missing;for(const auto& row:retainedHistory.arr)if(row.find("type")&&row.find("type")->asStr()=="function_call"&&row.find("call_id")&&!answered.count(row.find("call_id")->asStr()))missing.push_back(row.find("call_id")->asStr());for(const auto& id:missing){V reply=V::makeObj(),error=V::makeObj();error.set("isError",V::makeBool(true));error.set("error",V::makeStr("Interrupted before receipt retention; execution may have completed. Inspect current doc_info and revision before further writes; do not replay prior calls."));reply.set("type",V::makeStr("function_call_output"));reply.set("call_id",V::makeStr(id));reply.set("output",V::makeStr(error.dump()));retainedHistory.arr.push_back(reply);}for(const auto& pending:steering->pending().arr)retainedHistory.arr.push_back(pending);postChat({e.what(),true,true,retainedHistory,epoch});}
     });
-    if(explicitPrompt.empty())clearPendingAssistantImage();
+    if(explicitPrompt.empty()&&!queuedMessage)clearPendingAssistantImage();
 }
 static void startLiveBridge(){
     if(!g_liveBridge.start([](const std::string& tool,const arkjson::Value& args,LiveSessionBridge::Completion complete,std::stop_token stop){
@@ -2909,7 +2941,7 @@ static void stopIntegrations(){
 }
 static std::string externalConfigDisplay(const std::string& raw,const std::string& client){
     std::string formatted=raw;
-    if(client!="codex"){
+    if(client!="codex"&&client!="grok-build"){
         using V=arkjson::Value;V config;if(!arkjson::parse(raw,config))throw std::runtime_error("Invalid exported MCP configuration");formatted.clear();
         std::function<void(const V&,int)> write=[&](const V& value,int depth){
             const bool object=value.t==V::Obj,array=value.t==V::Arr;const size_t count=object?value.obj.size():array?value.arr.size():0;
@@ -2924,12 +2956,13 @@ static std::string externalConfigDisplay(const std::string& raw,const std::strin
 static void liveConnectionDialog(){
     if(g_liveBridge.endpoint().empty()){std::string text="Live MCP is not running.";editText("Live document connection",text,true);return;}
     auto profileShot=g_dialogShot;
-    std::vector<EditorField> fields{{"External client","codex",false,{"codex","claude-code","claude-desktop","opencode"}}};if(!editFields("Connect an external agent","Export a configuration for this exact open document. The client uses its own authorized provider account. Copy the result into that client's MCP settings.",fields))return;
+    std::vector<EditorField> fields{{"External client","codex",false,{"codex","grok-build","claude-code","claude-desktop","opencode"}}};if(!editFields("Connect an external agent","Export the connection to this open document. The external client keeps its own model account and MCP settings.",fields))return;
     wchar_t executable[32768]{};GetModuleFileNameW(nullptr,executable,32768);auto file=std::filesystem::path(executable).parent_path()/"ark-mcp.exe";auto utf8=file.u8string();std::string text=assistantExternalMcpConfig(fields[0].value,std::string(utf8.begin(),utf8.end()),g_liveBridge.endpoint(),g_assistantConfig);
     // Native multiline EDIT controls require CRLF. Keep TOML line boundaries
     // intact in both the visible text and what the user copies into the client.
     std::string displayText=externalConfigDisplay(text,fields[0].value);
-    g_status="External MCP configuration for "+fields[0].value+" / current document / copy with Ctrl+A and Ctrl+C / call agent_onboard first";auto title="Copy "+fields[0].value+" configuration / current document MCP";std::vector<EditorField> output{{"Configuration",displayText}};if(!profileShot.empty()&&g_dialogSmoke)g_dialogShot=profileShot+".configuration.png";editFields(title.c_str(),"Copy the raw configuration with Ctrl+A / Ctrl+C into this client's MCP settings. The endpoint binds this exact open document. Call agent_onboard first.",output,true,"Close",nullptr,true);
+    const char* hint=fields[0].value=="grok-build"?"Merge into %USERPROFILE%\\.grok\\config.toml (or GROK_HOME/config.toml). Reconnect Grok Build / its VS Code GUI; its CLI keeps the login. Call agent_onboard first.":"Copy the raw configuration with Ctrl+A / Ctrl+C into this client's MCP settings. The endpoint binds this exact open document. Call agent_onboard first.";
+    g_status="External MCP configuration for "+fields[0].value+" / current document / copy with Ctrl+A and Ctrl+C / call agent_onboard first";auto title="Copy "+fields[0].value+" configuration / current document MCP";std::vector<EditorField> output{{"Configuration",displayText}};if(!profileShot.empty()&&g_dialogSmoke)g_dialogShot=profileShot+".configuration.png";editFields(title.c_str(),hint,output,true,"Close",nullptr,true);
     if(g_dialogSmoke&&output.front().value!=displayText)throw std::runtime_error("External MCP configuration changed in the copy dialog");
 }
 static void newDocument(){
@@ -3133,6 +3166,9 @@ static std::string readableJson(const arkjson::Value& value){std::string source=
 #include "drawing_viewport.inl"
 #include "specialized_pattern_authoring.inl"
 #include "advanced_sheetmetal_authoring.inl"
+#include "cad_import_authoring.inl"
+#include "holes_orchestrator_authoring.inl"
+#include "design_container_workspace.inl"
 static void failureOperationDialog(int mode=0){
     using V=arkjson::Value;V arguments=V::makeObj();if(g_lastFailureId.empty()){arguments.set("limit",V::makeNum(1));auto latest=runTool("failure_info",arguments);if(g_error)return;auto* rows=latest.find("structuredContent")->find("records");if(!rows||rows->arr.empty())throw std::runtime_error("No failed operation was retained in this local session");g_lastFailureId=rows->arr.front().find("id")->asStr();}
     arguments=V::makeObj();arguments.set("id",V::makeStr(g_lastFailureId));auto info=runTool("failure_info",arguments);if(g_error)return;auto record=*info.find("structuredContent")->find("record");
@@ -3321,7 +3357,7 @@ static void editSelectedFeature(){
         case FeatureType::MeshFill:meshFillDialog(feature);break;
         case FeatureType::NativeSolid:{
             auto op=feature->get("op");
-            if(featureOperation(*feature)=="offset")offsetSolidDialog(feature);else if(op=="fillet"||op=="chamfer")nativeEdgeBlendDialog(feature);
+            if(featureOperation(*feature)=="holes_orchestrator")holesOrchestratorDialog(feature);else if(featureOperation(*feature)=="offset")offsetSolidDialog(feature);else if(op=="fillet"||op=="chamfer")nativeEdgeBlendDialog(feature);
             else if(op=="draft")nativeDraftDialog(feature);
             else if(op=="linear_pattern"||op=="circular_pattern")nativePatternDialog(feature);
             else if(op=="mirror")nativeMirrorDialog(feature);
@@ -3389,10 +3425,17 @@ static void transmissionParametersDialog(){
     using V=arkjson::Value;std::vector<EditorField> fields;for(const char* key:{"front_teeth","rear_teeth","cadence_rpm"}){auto parameter=std::find_if(g_doc.params.begin(),g_doc.params.end(),[&](const Parameter& value){return value.name==key;});if(parameter==g_doc.params.end())throw std::runtime_error("This transmission has no editable front_teeth, rear_teeth and cadence_rpm parameters");fields.push_back({key,parameter->expr});}
     if(!editFields("Transmission teeth and cadence","Updates the native sprocket geometry and the chain ratio together. Saved parameter expressions remain editable; Undo restores this change.",fields))return;V commands=V::makeArr();for(size_t i=0;i<fields.size();++i){V command=V::makeObj();command.set("op",V::makeStr("param.set"));command.set("name",V::makeStr(fields[i].name));command.set("expr",V::makeStr(trimField(fields[i].value)));commands.arr.push_back(std::move(command));}V args=V::makeObj();args.set("commands",std::move(commands));runTool("doc_apply",args);if(!g_error){g_motionRpmExpression="cadence_rpm";g_motionRevision=std::numeric_limits<u64>::max();updateMotionDisplay();frameScene();}
 }
+#include "stamps_authoring.inl"
+#include "planes_sections_024b.inl"
 struct StudioCommandGroup {const char* title;std::vector<std::pair<int,const char*>> items;};
 static const std::vector<StudioCommandGroup>& studioCommandGroups(){
     static const auto groups=[](){std::vector<StudioCommandGroup> result;
         auto group=[&](const char* title,std::initializer_list<std::pair<int,const char*>> items){result.push_back({title,items});};
+    group("Sketch planes and sections",{{950,"Sketch to plane"},{951,"Offset plane"},{952,"Section from plane"},{953,"Section from sketch line"}});
+    group("Stamps and face regions",{{940,"Stamp on selected face"},{944,"Stamp on sketch plane"},{941,"Face / region appearance"},{942,"Split line"},{943,"Remove stamp"}});
+    group("CAD exchange",{{910,"Import STEP / IGES"},{911,"Arkitfy imported reference"}});
+    group("Holes Orchestrator",{{920,"Holes Orchestrator"},{921,"Edit named hole positions"}});
+    group("Design containers",{{930,"Create design container"},{931,"Inspect design container"},{932,"Check out container"},{933,"Check out and open another ARK"},{934,"Merge edited container"},{935,"Inspect isolated workspace"}});
     group("Document",{{55,"New document"},{17,"Open ARK"},{16,"Save ARK"},{52,"Import source STEP"},{213,"Export STL/OBJ/FBX/STEP/IGES"},{51,"Export straight tube STEP"},{82,"Export native STEP"},{12,"Export mesh snapshot"}});
     group("Sketch entities",{{660,"Corner rectangle"},{661,"Center rectangle"},{662,"Rectangle through three points"},{663,"Parallelogram"},{664,"Straight slot"},{665,"Center slot"},{666,"Arc slot"},{667,"Arc slot through three points"},{668,"Polygon"},{669,"Circle through three perimeter points"},{670,"Ellipse"},{671,"Partial ellipse"},{672,"Parabola"},{673,"Conic"},{674,"Style spline"},{675,"Equation curve 2D"},{676,"Sketch point"},{677,"Centerline"},{678,"Midpoint line"},{679,"Route sketch"},{680,"Belt sketch"},{681,"Text engraving"},{682,"Spline on exact surface"},{683,"Interpolating spline 3D"},{684,"Sweep with varying sections"},{685,"Exact polynomial XYZ"},{686,"Center rectangle through three points"}});
     group("Construction",{{630,"Offset plane"},{631,"Plane at angle"},{632,"Plane through three points"},{633,"Plane through axis and point"},{634,"Plane normal to axis at point"},{635,"Axis through two points"},{636,"Axis at plane intersection"},{637,"Construction point XYZ"},{638,"Linked construction point"},{639,"Frame between two points"},{640,"Select construction datum"},{641,"Toggle selected datum"},{642,"Show all datums"},{643,"Hide all datums"},{644,"Edit selected datum"}});
@@ -3409,7 +3452,7 @@ static const std::vector<StudioCommandGroup>& studioCommandGroups(){
     group("Native surfaces",{{161,"Edit selected feature"},{162,"Edit driving sketch"},{76,"Loft sketches"},{77,"Fill closed sketch"},{78,"NURBS surface"},{150,"Sweep sketches"},{151,"Extrude sketch surface"},{152,"Revolve sketch surface"},{153,"Offset selected surface"},{154,"Glue surfaces"},{79,"Thicken selected surface"},{491,"Extract exact semantic face"},{492,"Trim exact surface by datum plane"},{595,"Project curve onto surface"},{596,"Trim surface by closed curve"}});
     group("Mesh",{{155,"Weld mesh"},{156,"Smooth mesh"},{157,"Decimate mesh"},{158,"Offset mesh"},{159,"Fill planar holes"},{160,"Import STL/OBJ"}});
     group("Sheet metal",{{120,"Create sheet base"},{127,"Edit sheet base"},{494,"Original-blank jog add/edit/remove"},{495,"Linked sketch bend add/edit/remove"},{121,"Add flange"},{122,"Edit flange"},{123,"Remove flange"},{394,"Add return hem"},{395,"Edit return hem"},{396,"Remove return hem"},{397,"Add circular emboss"},{398,"Edit circular emboss"},{399,"Remove circular emboss"},{124,"Add opening or pattern"},{125,"Edit opening"},{126,"Remove opening"},{327,"Export analytic flat DXF"},{128,"Play / pause bend preview"},{80,"Create L bend"},{81,"Import sheet STEP"},{83,"Show formed"},{84,"Show flat"}});
-    group("View & agents",{{860,"Technical drawings / associative sheets"},{590,"BOM / bill of materials"},{585,"Measure 2D / X and Y"},{586,"Measure 3D / distance and XYZ"},{587,"Units / length, mass and volume"},{20,"Fit document"},{71,"Normal to sketch plane"},{180,"Front"},{181,"Back"},{23,"Top"},{184,"Bottom"},{182,"Right"},{183,"Left"},{24,"Isometric"},{175,"Orthographic"},{174,"Visible edges"},{186,"Cycle ambient occlusion"},{187,"Edit selected body material"},{188,"Inspect mass and center of mass"},{176,"Orbit"},{177,"Pan"},{178,"Zoom"},{14,"Wireframe"},{22,"Grid"},{56,"Graphics settings"},{567,"Project tool activity"},{57,"ChatGPT account"},{357,"Connectors / OpenAI, Claude, Grok..."},{58,"Codex / live MCP"},{21,"Raw agent command"},{31,"Help"},{44015,"ARK updates"}});
+    group("View & agents",{{860,"Technical drawings / associative sheets"},{590,"BOM / bill of materials"},{585,"Measure 2D / X and Y"},{586,"Measure 3D / distance and XYZ"},{587,"Units / length, mass and volume"},{20,"Fit document"},{71,"Normal to sketch plane"},{180,"Front"},{181,"Back"},{23,"Top"},{184,"Bottom"},{182,"Right"},{183,"Left"},{24,"Isometric"},{175,"Orthographic"},{174,"Visible edges"},{186,"Cycle ambient occlusion"},{187,"Edit selected body material"},{188,"Inspect mass and center of mass"},{176,"Orbit"},{177,"Pan"},{178,"Zoom"},{14,"Wireframe"},{22,"Grid"},{56,"Graphics settings"},{567,"Project tool activity"},{57,"ChatGPT account"},{357,"Connectors / OpenAI, Claude, Grok, Ollama..."},{368,"Local models / Ollama"},{58,"Codex / live MCP"},{21,"Raw agent command"},{31,"Help"},{44015,"ARK updates"}});
     group("Frames, electronics & routing",{{210,"Construction frame"},{549,"Exact tube end fit"},{496,"Frame endpoint trim/extend"},{497,"Frame crossing-plane trim"},{498,"Frame weld add/edit/remove"},{211,"PCB and mounting"},{212,"Cable route"}});
     group("Physics & loads",{{755,"Collision check"},{190,"Assembly mass"},{216,"Loads and physical assumptions"},{189,"Close mass inspector"}});
     group("Motion",{{451,"Mechanical relation"},{452,"Motion driver"},{453,"Play / pause motion"},{454,"Reset motion"},{469,"Transmission teeth and cadence"}});
@@ -3450,9 +3493,9 @@ static LRESULT CALLBACK commandSearchProc(HWND hwnd,UINT message,WPARAM wParam,L
 }
 static void moduleCommands(int category){
     HMENU menu=CreatePopupMenu();auto group=[&](const char* title,std::initializer_list<std::pair<int,const char*>> entries){HMENU sub=CreatePopupMenu();for(auto entry:entries)AppendMenuA(sub,MF_STRING,entry.first,entry.second);AppendMenuA(menu,MF_POPUP,(UINT_PTR)sub,title);};
-    if(category==0){group("Solids",{{100,"Primitive"},{101,"Extrude saved sketch"},{102,"Union / cut / common"},{103,"Hole / pocket"},{104,"Fillet / chamfer"},{106,"Draft"},{107,"Pattern"},{108,"Mirror"},{105,"Rigid transform"}});group("Surfaces",{{76,"Loft"},{77,"Fill"},{78,"NURBS"},{150,"Sweep"},{151,"Extrude surface"},{152,"Revolve surface"},{153,"Offset"},{154,"Glue surfaces"},{79,"Thicken"}});group("Frames & motion",{{210,"Construction frame"},{26,"Tube"},{215,"Suspension"},{384,"Spring unit controls"},{27,"Assembly"},{94,"Geometric mate"},{451,"Mechanical relation"},{452,"Motion driver"}});group("Electronics",{{211,"PCB"},{212,"Cable route"}});group("Mesh",{{155,"Weld"},{156,"Smooth"},{157,"Decimate"},{158,"Offset"},{159,"Fill planar holes"},{160,"Import STL/OBJ"}});}
-    else if(category==1){group("Physics",{{187,"Material and appearance"},{188,"Mass / center of gravity"},{190,"Assembly mass"},{216,"Loads"}});group("View",{{56,"Graphics settings"},{174,"Edges"},{186,"Ambient occlusion"},{175,"Orthographic"},{461,"Navigation controls"}});group("Agents",{{400,"Assistant"},{58,"Live MCP"},{21,"Agent command"},{57,"Account"},{357,"Connectors"}});}
-    else if(category==2){group("Document",{{55,"New"},{17,"Open"},{16,"Save"},{213,"Export"},{52,"Import STEP"},{81,"Import sheet STEP"},{160,"Import mesh"}});group("History",{{18,"Undo"},{19,"Redo"}});}
+    if(category==0){group("Solids",{{100,"Primitive"},{101,"Extrude saved sketch"},{102,"Union / cut / common"},{920,"Holes Orchestrator"},{103,"Profile / decorative cut"},{104,"Fillet / chamfer"},{106,"Draft"},{107,"Pattern"},{108,"Mirror"},{105,"Rigid transform"}});group("Surfaces",{{76,"Loft"},{77,"Fill"},{78,"NURBS"},{150,"Sweep"},{151,"Extrude surface"},{152,"Revolve surface"},{153,"Offset"},{154,"Glue surfaces"},{79,"Thicken"}});group("Frames & motion",{{210,"Construction frame"},{26,"Tube"},{215,"Suspension"},{384,"Spring unit controls"},{27,"Assembly"},{94,"Geometric mate"},{451,"Mechanical relation"},{452,"Motion driver"}});group("Electronics",{{211,"PCB"},{212,"Cable route"}});group("Mesh",{{155,"Weld"},{156,"Smooth"},{157,"Decimate"},{158,"Offset"},{159,"Fill planar holes"},{160,"Import STL/OBJ"}});}
+    else if(category==1){group("Physics",{{187,"Material and appearance"},{188,"Mass / center of gravity"},{190,"Assembly mass"},{216,"Loads"}});group("View",{{56,"Graphics settings"},{174,"Edges"},{186,"Ambient occlusion"},{175,"Orthographic"},{461,"Navigation controls"}});group("Agents",{{400,"Assistant"},{58,"Live MCP"},{21,"Agent command"},{57,"Account"},{357,"Connectors"},{368,"Local models / Ollama"}});}
+    else if(category==2){group("Document",{{55,"New"},{17,"Open"},{16,"Save"},{213,"Export"},{910,"Import STEP / IGES"},{52,"Import tube STEP"},{81,"Import sheet STEP"},{160,"Import mesh"}});group("History",{{18,"Undo"},{19,"Redo"}});}
     else if(category==3){group("Display style",{{462,"Shaded"},{463,"Shaded with edges"},{464,"Wireframe"},{175,"Orthographic"},{56,"Graphics settings"},{465,"Show view cube"}});group("Named views",{{180,"Front"},{181,"Back"},{23,"Top"},{184,"Bottom"},{182,"Right"},{183,"Left"},{24,"Isometric"},{20,"Fit"}});}
     decorateMenu(menu);POINT point;GetCursorPos(&point);int action=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,point.x,point.y,0,g_window,nullptr);DestroyMenu(menu);if(action)interactiveAction(action);
 }
@@ -3489,7 +3532,9 @@ static void helixDialog();
 static void loftControlDialog();
 static void selectTangentFaces();
 static void collisionCheckDialog();
+static bool viewportDockAction(int);
 static void uiAction(int id){
+    if(viewportDockAction(id))return;
     if(id==860){cancelDirectAuthoring();cancelSketchEditing();cancelSketchDrawing();cancelComponentMove();beginDrawingViewport();return;}if(drawingViewportCommand(id))return;
     if(specializedPatternAuthoringAction(id))return;
     if(id>=800&&id<=816){switch(id){
@@ -3505,6 +3550,8 @@ static void uiAction(int id){
         case 814:removeAdvancedSheetDialog("tabs","sheet.tab","Remove tab and slot");break;
         case 815:advancedSheetBendTableDialog();break;case 816:removeAdvancedSheetBendTable();break;
     }return;}
+    if(id>=950&&id<=953){planeAuthoringDialog024(id);return;}
+    if(id==940||id==944){stampDialog024(id==944);return;}if(id==941){faceAppearanceDialog024();return;}if(id==942){splitLineDialog024();return;}if(id==943){removeStampDialog024();return;}
     if(handleAssistantImageAction(id)||handleSolidDimensionAction(id)||handleDirectAuthoringAction(id))return;
     if(id==710){openSkeletonEditor();return;}
     if(id==750){helixDialog();return;}if(id==752){loftControlDialog();return;}if(id==658){selectTangentFaces();return;}
@@ -3560,7 +3607,7 @@ static void uiAction(int id){
     if(id>=42000&&id<43024){size_t index=(size_t)(id-42000);const auto& tools=studioToolEntries();if(index<tools.size()){g_toolsOpen=false;layout();interactiveAction(tools[index].action);}return;}
     if(id>=22000&&id<26096){size_t index=(size_t)(id-22000);if(index<g_bodyIds.size()){selBody=(int)index;g_explorerFeature=0;setBodyHidden(!(index<g_hiddenBodies.size()&&g_hiddenBodies[index]));}return;}
     using V=arkjson::Value;
-    if(id==400){g_assistantDockOpen=!g_assistantDockOpen;layout();return;}
+    if(id==400){g_assistantDockOpen=!g_assistantDockOpen;layout();if(!g_dialogSmoke&&!g_headless)saveUiSettings();return;}
     if(id==401){g_sidebarTab=g_sidebarTab==2?0:2;g_physicalVisible=false;layout();return;}
     if(id>=410&&id<=412){g_sidebarTab=id-410;g_physicalVisible=false;layout();return;}
     if(id==450){g_searchEditing=true;layout();if(g_commandSearch){SetFocus(g_commandSearch);SendMessage(g_commandSearch,EM_SETSEL,0,-1);}else commandPalette();return;}
@@ -3576,7 +3623,7 @@ static void uiAction(int id){
     if(id==468){sheetOpeningDialog(false,true);return;}
     if(id==469){transmissionParametersDialog();return;}
     if(id>=28000&&id<29024){size_t index=(size_t)(id-28000);if(index<g_treeFoldIds.size()){u64 feature=g_treeFoldIds[index];if(g_collapsedFeatures.count(feature))g_collapsedFeatures.erase(feature);else g_collapsedFeatures.insert(feature);}return;}
-    if(id>=30000&&id<31024){size_t index=(size_t)(id-30000);if(index<g_doc.assembly.size()&&!g_doc.assembly[index].feature){u64 group=g_doc.assembly[index].id;if(g_closedAssemblyGroups.count(group))g_closedAssemblyGroups.erase(group);else g_closedAssemblyGroups.insert(group);}return;}
+    if(id>=30000&&id<31024){size_t index=(size_t)(id-30000);if(index<g_doc.assembly.size()&&!g_doc.assembly[index].feature){u64 group=g_doc.assembly[index].id;clearDatumSelection();g_viewportContainer=group;selBody=-1;g_explorerFeature=0;g_picked.clear();refreshSelectionLines();if(g_closedAssemblyGroups.count(group))g_closedAssemblyGroups.erase(group);else g_closedAssemblyGroups.insert(group);}return;}
     if(id>=18000&&id<22000){clearDatumSelection();size_t index=(size_t)(id-18000);if(index<g_explorerEntities.size()){
         g_selectedExplorerEntity=g_explorerEntities[index];g_explorerFeature=g_selectedExplorerEntity->feature;selBody=-1;for(size_t i=0;i<g_bodyIds.size();++i)if(auto* f=g_doc.find(g_bodyIds[i]);f&&featureManufacturingLineage(g_doc,*f).origin==g_explorerFeature){selBody=(int)i;break;}
         g_activeSketch.clear();g_showSketches=false;g_status="Sheet "+g_selectedExplorerEntity->key+" / "+g_selectedExplorerEntity->id+" / double-click to edit";
@@ -3602,7 +3649,12 @@ static void uiAction(int id){
     if(id>=2000){clearDatumSelection();g_selectedExplorerEntity.reset();g_explorerFeature=0;selBody=id-2000;g_activeSketch.clear();g_showSketches=false;rebuildSketchOverlay();g_selectedNotch=0;g_notchScroll=0;g_sourceScroll=0;g_foldPlaying=false;return;}
     if(id>=1000){size_t i=id-1000;if(i>=g_doc.params.size())return;std::string value=g_doc.params[i].expr,name=g_doc.params[i].name;
         if(editText(("Edit parameter: "+name).c_str(),value)){V c=V::makeObj();c.set("op",V::makeStr("param.set"));c.set("name",V::makeStr(name));c.set("expr",V::makeStr(value));applyCommand(c);}return;}
+    if(containerWorkspaceAction(id))return;
     switch(id){
+        case 910:importCadDialog();break;
+        case 911:arkitfySelectedCad();break;
+        case 920:holesOrchestratorDialog();break;
+        case 921:holesPositionsDialog();break;
         case 40:laserStockDialog(true);break;
         case 41:laserStockDialog(false);break;
         case 42:notchPointDialog(true);break;
@@ -3622,7 +3674,7 @@ static void uiAction(int id){
         case 55:newDocument();break;case 56:graphicsDialog();break;case 57:showAssistantAccountMenu();break;case 58:liveConnectionDialog();break;case 59:commandPalette();break;case 187:materialDialog();break;case 188:physicalProperties();break;case 189:g_physicalVisible=false;break;case 190:physicalProperties(!g_physicalAssembly);break;case 216:physicsSettingsDialog();break;
         case 560:{if(selBody<0||(size_t)selBody>=g_bodyIds.size())throw std::runtime_error("Select a part for transparency");auto* feature=g_doc.find(g_bodyIds[(size_t)selBody]);setSelectedOpacity(feature&&resolvedAppearance(g_doc,*feature).opacity<.999?1.:.35);break;}
         case 561:selectedOpacityDialog();break;
-        case 357:connectorDialog();break;case 358:g_assistantConfig.authMode=AssistantAuthMode::ApiKey;g_assistantConfig.model.clear();g_assistantConfig.reasoningEffort.clear();*g_assistantCancel=true;++g_documentEpoch;g_conversation=V::makeArr();saveUiSettings();g_status="API key mode selected. Configure model in Advanced settings.";break;
+        case 368:connectorDialog(true);break;case 357:connectorDialog();break;case 358:g_assistantConfig.authMode=AssistantAuthMode::ApiKey;g_assistantConfig.model.clear();g_assistantConfig.reasoningEffort.clear();*g_assistantCancel=true;++g_documentEpoch;g_conversation=V::makeArr();saveUiSettings();g_status="API key mode selected. Configure model in Advanced settings.";break;
         case 360:startAuthJob(AuthJob::SignIn);break;case 361:chooseChatGptModel();break;case 362:startAuthJob(AuthJob::SignOut);break;
         case 364:if(g_authStatus.activeClientId.empty())throw std::runtime_error("Choose a saved ChatGPT account first");startAuthJob(AuthJob::SignIn,g_authStatus.activeClientId,true);break;
         case 365:if(g_authStatus.pendingClientId.empty())throw std::runtime_error("No pending ChatGPT registration to retry");startAuthJob(AuthJob::SignIn,g_authStatus.pendingClientId);break;
@@ -3664,7 +3716,7 @@ static void uiAction(int id){
         case 68:g_showSketches=!g_showSketches;rebuildSketchOverlay();break;
         case 69:{std::string available="XY, XZ, YZ";for(auto& plane:g_doc.planes)available+=", "+plane.name;std::vector<EditorField> fields{{"Plane name",g_activePlane}};if(editFields("Select construction plane",available.c_str(),fields)){resolvePlane(g_doc,fields[0].value);g_activePlane=fields[0].value;g_activeSketch.clear();g_showSketches=true;rebuildSketchOverlay();}}break;
         case 71:alignSketchCamera();break;
-        case 74:if(g_teamMode)sendTeam();else sendAssistant();break;case 75:clearPendingAssistantImage();if(g_teamMode)cancelTeam();else *g_assistantCancel=true;break;
+        case 74:if(g_teamMode)sendTeam();else sendAssistant();break;case 75:clearPendingAssistantImage();if(g_teamMode)cancelTeam();else {*g_assistantCancel=true;if(g_assistantSteering)g_assistantSteering->cancel();g_deferredAssistantSteering.clear();}break;
         case 470:case 471:if(g_chatBusy||(g_teamStarted&&g_agentTeam.snapshot().running)){g_status="Finish or cancel the active run before switching modes.";break;}if(id==470&&g_teamStarted){cancelTeam();g_teamStarted=false;resetTeamView();}g_teamMode=id==471;g_assistantDockOpen=true;layout();saveUiSettings();break;
         case 472:if(g_teamStarted){pollTeam(true);g_agentTeam.pause(!g_teamSnapshot.paused);pollTeam(true);g_status=g_teamSnapshot.paused?"Team paused at request/tool boundaries; an active request may finish.":"Team resumed.";}break;
         case 473:chooseTeamTarget();break;
@@ -4123,6 +4175,7 @@ static GLuint materialTexture(const std::string& path){
     auto utf8=file.u8string();GLuint tex=canvasTexture(std::string(utf8.begin(),utf8.end()));
     return tex==g_canvasMissing?0:tex;
 }
+#include "stamps_render.inl"
 static void drawSurfaces(bool geometry,const Mat4& view,const Mat4& proj,const GLfloat vpT[16],const Vec3& eye,bool transparentOnly=false,bool selectionOverlay=false){
     GLint modelLoc=geometry?guModel:suModel,hardLoc=geometry?guHard:suHard;
     if(geometry){GLfloat vm[16],pm[16];for(int i=0;i<16;++i){vm[i]=(GLfloat)view.m[i];pm[i]=(GLfloat)proj.m[i];}glUseProgram(pGeom);glUniformMatrix4fv(guView,1,GL_FALSE,vm);glUniformMatrix4fv(guProj,1,GL_FALSE,pm);glUniform1f(glGetUniformLocation(pGeom,"depthFar"),(float)g_projectionFar);glUniform1f(glGetUniformLocation(pGeom,"cameraOrtho"),g_cameraOrtho?1.f:0.f);}
@@ -4144,6 +4197,7 @@ static void drawSurfaces(bool geometry,const Mat4& view,const Mat4& proj,const G
     });
     for(size_t i:order){
         if(!geometry){
+            glUniform1f(glGetUniformLocation(pSolid,"stampMode"),0);
             const Feature* feature=g_doc.find(g_bodyIds[i]);
             Appearance a=feature?resolvedAppearance(g_doc,*feature):Appearance{};
             glUniform3f(suColor,(float)a.baseColor.x,(float)a.baseColor.y,(float)a.baseColor.z);
@@ -4151,7 +4205,7 @@ static void drawSurfaces(bool geometry,const Mat4& view,const Mat4& proj,const G
             glUniform1f(glGetUniformLocation(pSolid,"roughness"),(float)a.roughness);
             glUniform1f(glGetUniformLocation(pSolid,"opacity"),(float)a.opacity);
             glUniform2f(glGetUniformLocation(pSolid,"textureScale"),(float)(a.textureScaleU/100.),(float)(a.textureScaleV/100.));
-            GLuint tex=materialTexture(a.texturePath);
+            GLuint tex=a.textureAsset.empty()?materialTexture(a.texturePath):stampAssetTexture(a.textureAsset);
             glUniform1f(glGetUniformLocation(pSolid,"hasTexture"),tex?1.f:0.f);
             glActiveTexture(GL_TEXTURE2);glBindTexture(GL_TEXTURE_2D,tex);glActiveTexture(GL_TEXTURE0);
         }
@@ -4186,7 +4240,8 @@ static void drawSurfaces(bool geometry,const Mat4& view,const Mat4& proj,const G
         auto* materialFeature=g_doc.find(g_bodyIds[i]);glUniform1f(hardLoc,materialFeature&&(materialFeature->type==FeatureType::Extrude||materialFeature->type==FeatureType::SketchCut)&&!wireframe?1.f:0.f);
         auto& gm=g_meshes[g_instancePart[i]];if(!gm.count)continue;setModel(g_instanceWorld[i]);
         if(!geometry){float sel=i==(size_t)selBody?1.f:i==(size_t)hoverBody?.3f:0.f;glUniform1f(suSel,sel);glUniform1f(suOutline,0.f);}
-        glBindVertexArray(gm.vao);glPolygonMode(GL_FRONT_AND_BACK,!geometry&&wireframe?GL_LINE:GL_FILL);glDrawElements(GL_TRIANGLES,gm.count*3,GL_UNSIGNED_INT,nullptr);
+        glBindVertexArray(gm.vao);glPolygonMode(GL_FRONT_AND_BACK,!geometry&&wireframe?GL_LINE:GL_FILL);if(geometry||wireframe||selectionOverlay||!drawFaceAppearances024(i,materialFeature))glDrawElements(GL_TRIANGLES,gm.count*3,GL_UNSIGNED_INT,nullptr);
+        if(!geometry&&!wireframe&&!selectionOverlay)drawBodyStamps024(i,materialFeature);
         if(!geometry&&!wireframe&&g_instancePart[i]<g_partPicks.size()){glUniform3f(suColor,.93f,.58f,.26f);glUniform1f(suSel,1.f);glPolygonOffset(-1.f,-1.f);
             auto& pick=g_partPicks[g_instancePart[i]];
             for(const auto& item:g_picked)if(item.kind=="face"&&item.feature==g_bodyIds[i]&&(!item.instance||(item.instance==g_instanceIds[i]&&item.copy==g_instanceCopies[i])))for(size_t face=0;face<pick.faceNames.size()&&face<pick.faces.size();++face)if(faceReferenceMatches(pick,face,item.name)&&pick.faces[face].second>0)glDrawElements(GL_TRIANGLES,pick.faces[face].second*3,GL_UNSIGNED_INT,(void*)((size_t)pick.faces[face].first*3*sizeof(unsigned)));
@@ -4449,7 +4504,7 @@ static void drawCanvases(const GLfloat* vpT){
         Mat4 model;
         try{model=resolvePlane(g_doc,canvas.plane)*Mat4::scale(width,height,1);}catch(...){continue;}
         GLfloat matrix[16];for(int i=0;i<16;++i)matrix[i]=(GLfloat)model.m[i];
-        GLuint tex=canvasTexture(canvas.path);bool live=tex&&tex!=g_canvasMissing;
+        GLuint tex=canvas.asset.empty()?canvasTexture(canvas.path):stampAssetTexture(canvas.asset);bool live=tex&&tex!=g_canvasMissing;
         glUniformMatrix4fv(glGetUniformLocation(pCanvas,"model"),1,GL_FALSE,matrix);
         glUniform1f(glGetUniformLocation(pCanvas,"opacity"),(float)clamp(canvas.opacity,0.,1.));
         glUniform1f(glGetUniformLocation(pCanvas,"live"),live?1.f:0.f);
@@ -4458,6 +4513,7 @@ static void drawCanvases(const GLfloat* vpT){
     }
     glBindTexture(GL_TEXTURE_2D,0);glDisable(GL_POLYGON_OFFSET_FILL);
 }
+#include "viewport_dock.inl"
 static void drawFrame(HDC hdc){
     processDirectAuthoringPreview();
     static auto previous=std::chrono::steady_clock::now();auto now=std::chrono::steady_clock::now();
@@ -4515,6 +4571,7 @@ static void drawFrame(HDC hdc){
     if(g_showEdges&&!wireframe)drawFeatureEdges(vpT);
     glEnable(GL_DEPTH_TEST);glDepthFunc(GL_LEQUAL);glDepthMask(GL_FALSE);glEnable(GL_BLEND);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
     drawSurfaces(false,view,proj,vpT,eye,true);
+    drawPlaneStamps024(vpT);
     glDepthMask(GL_TRUE);
 
     if((g_showSketches&&!g_sketchLines.empty())||(g_showDatumPlanes&&!g_datumLines.empty())||!g_selectionLines.empty()||!g_selectionFaceFill.empty()){
@@ -4660,14 +4717,27 @@ static void drawFrame(HDC hdc){
     auto section=[&](const char* name,size_t count,int index){if(count)explorer.push_back({name,"",390+index,false,1,4,408});};
     bool assembled=!g_doc.assembly.empty();section(assembled?"Assembly":g_doc.features.size()==1&&isSheetFeature(g_doc.features.front().id)?"Sheet Metal":"Features",assembled?g_doc.assembly.size():g_doc.features.size(),assembled?0:1);
     size_t featureRows=assembled?(g_explorerOpen[0]?g_doc.assembly.size():0):(g_explorerOpen[1]?g_doc.features.size():0);
-    for(size_t i=0;i<featureRows;++i){
+    // Authored history order need not be parent-first after grouping an existing
+    // occurrence. Traverse the hierarchy for display, retaining source indices
+    // for selection and fold actions; never reorder the authored document.
+    std::vector<size_t> assemblyRows;
+    if(assembled&&featureRows){
+        std::map<u64,std::vector<size_t>> children;std::set<u64> nodeIds;
+        for(size_t i=0;i<g_doc.assembly.size();++i){children[g_doc.assembly[i].parent].push_back(i);nodeIds.insert(g_doc.assembly[i].id);}
+        std::vector<size_t> pending;std::vector<bool> visited(g_doc.assembly.size());
+        auto traverse=[&](size_t root){pending.push_back(root);while(!pending.empty()){const auto i=pending.back();pending.pop_back();if(visited[i])continue;visited[i]=true;assemblyRows.push_back(i);if(const auto found=children.find(g_doc.assembly[i].id);found!=children.end())for(auto it=found->second.rbegin();it!=found->second.rend();++it)pending.push_back(*it);}};
+        for(size_t i=0;i<g_doc.assembly.size();++i)if(!g_doc.assembly[i].parent||!nodeIds.count(g_doc.assembly[i].parent))traverse(i);
+        for(size_t i=0;i<g_doc.assembly.size();++i)if(!visited[i])traverse(i);
+    }
+    for(size_t rowIndex=0;rowIndex<featureRows;++rowIndex){
+        const size_t i=assembled?assemblyRows[rowIndex]:rowIndex;
         ExplorerItem row;
         if(g_doc.assembly.empty()){
             auto& f=g_doc.features[i];row.name=f.name;row.icon=explorerIcon(f);row.subtitle=explorerOperation(f)+" #"+std::to_string(f.id);row.zone=16000+(int)i;row.selected=g_explorerFeature==f.id;if(f.suppressed)row.subtitle+=" / suppressed";
             for(size_t j=0;j<g_bodyIds.size();++j)if(g_bodyIds[j]==f.id){row.zone=2000+(int)j;row.selected|=selBody==(int)j;
                 if(j<g_hiddenBodies.size()&&g_hiddenBodies[j])row.subtitle+=" / hidden";}
         }else{
-            auto& node=g_doc.assembly[i];bool group=node.feature==0;row.kind=group?3:0;row.icon=group?404:405;row.name=node.name;row.zone=group?30000+(int)i:-1;auto* feature=g_doc.find(node.feature);if(feature)row.icon=explorerIcon(*feature);row.subtitle=group?"Subassembly":(feature?explorerOperation(*feature):"Part")+" #"+std::to_string(node.feature);
+            auto& node=g_doc.assembly[i];bool group=node.feature==0;row.kind=group?3:0;row.selected=group&&g_viewportContainer==node.id;row.icon=group?404:405;row.name=node.name;row.zone=group?30000+(int)i:-1;auto* feature=g_doc.find(node.feature);if(feature)row.icon=explorerIcon(*feature);row.subtitle=group?"Subassembly":(feature?explorerOperation(*feature):"Part")+" #"+std::to_string(node.feature);
             u64 parent=node.parent;bool ancestorClosed=false;size_t traversed=0;while(parent&&traversed++<g_doc.assembly.size()){ancestorClosed|=g_closedAssemblyGroups.count(parent)!=0;row.depth=std::min(row.depth+1,5);auto it=std::find_if(g_doc.assembly.begin(),g_doc.assembly.end(),[&](const AssemblyNode& n){return n.id==parent;});if(it==g_doc.assembly.end())break;parent=it->parent;}if(ancestorClosed)continue;
             int copies=0,hiddenCopies=0;for(size_t j=0;j<g_instanceIds.size();++j)if(g_instanceIds[j]==node.id){row.zone=2000+(int)j;row.selected|=selBody==(int)j;++copies;
                 if(j<g_hiddenBodies.size()&&g_hiddenBodies[j])++hiddenCopies;}
@@ -5102,6 +5172,8 @@ static void drawFrame(HDC hdc){
     button("Single",viewX+22,cy+7,74,470,false,!g_teamMode);button("Team",viewX+104,cy+7,74,471,false,g_teamMode);
     std::string connector=!g_teamMode&&g_assistantResponseFinished?(g_assistantResponseError?"Interrupted / inspect prior changes":"Response finished / review result"):g_chatBusy?(g_assistantStatus.empty()?"Working...":g_assistantStatus):g_authBusy?"ChatGPT sign-in in progress":
         g_assistantConfig.authMode==AssistantAuthMode::ChatGptPlan?"ChatGPT plan / "+g_assistantConfig.model:
+        g_assistantConfig.provider=="ollama"&&!g_assistantConfig.model.empty()?"Local Ollama / "+g_assistantConfig.model:
+        g_assistantConfig.authMode==AssistantAuthMode::CliAccount?"Grok Build / "+(g_assistantConfig.model.empty()?std::string("CLI selected model"):g_assistantConfig.model):
         g_authStatus.connected?(g_authStatus.planAuthorized?"ChatGPT signed in / choose model":"ChatGPT identity connected / plan disabled"):
         g_assistantConfig.model.empty()?"Continue with ChatGPT or Advanced API key":"API key / "+g_assistantConfig.model;
     label(fitText(connector,.65f,viewW-(g_assistantConfig.authMode==AssistantAuthMode::ChatGptPlan?694:526)),viewX+192,cy+15,.65f);
@@ -5109,7 +5181,7 @@ static void drawFrame(HDC hdc){
     std::string effortButton="Effort "+(g_assistantConfig.reasoningEffort.empty()?std::string("Auto"):g_assistantConfig.reasoningEffort);
     if(g_teamMode)button(g_teamSnapshot.paused?"Resume":"Pause",viewX+viewW-320,cy+7,105,472,false,g_teamSnapshot.paused);
     else button(effortButton.c_str(),viewX+viewW-320,cy+7,105,367,false,!g_assistantConfig.reasoningEffort.empty());
-    button(g_authBusy?"Connecting...":g_authStatus.connected?"ChatGPT account":"Continue with ChatGPT",viewX+viewW-206,cy+7,184,57);
+    button(g_authBusy?"Connecting...":g_assistantConfig.provider=="ollama"?"Models / account":g_authStatus.connected?"ChatGPT account":"Models / connect",viewX+viewW-206,cy+7,184,57);
     std::string runTokens=g_teamMode?"Team: "+assistantUsageLabel(g_teamSnapshot.usage):"Run: "+assistantUsageLabel(g_assistantUsageRun);
     if(!g_teamMode){auto timing=measuredPerformanceLabel(g_assistantPerformanceRun);if(!timing.empty())runTokens+=" / "+timing;}
     label(fitText(runTokens,.65f,g_teamMode?viewW-652:viewW-350),viewX+22,cy+33,.65f);
@@ -5137,7 +5209,7 @@ static void drawFrame(HDC hdc){
             size_t cardTextStart=g_textVerts.size();
             auto line=[&](const std::string& value,float offset,float scale=.80f){textOut(fitText(value,scale,cardWidth-24),x+12,y+offset,scale,.83f,.91f,.98f);};
             line(g_teamRoleLabels[i],8,.85f);std::string state=role?std::string(agentTeamStateName(role->state))+" / turn "+std::to_string(role->turns):"Ready";line(state+(i==0?" / engineering + CAD":i==2?" / read-only review":" / CAD author"),summaryCard?32.f:29.f);
-            auto config=teamRoleConfig(i);if(summaryCard)line((config.authMode==AssistantAuthMode::ChatGptPlan?"ChatGPT":config.provider)+" / "+(config.model.empty()?"Select model":config.model)+" / "+(config.reasoningEffort.empty()?"Auto":config.reasoningEffort),54);
+            auto config=teamRoleConfig(i);if(summaryCard)line((config.authMode==AssistantAuthMode::ChatGptPlan?std::string("ChatGPT"):config.authMode==AssistantAuthMode::CliAccount?std::string("Grok Build"):config.provider)+" / "+(config.model.empty()?(config.authMode==AssistantAuthMode::CliAccount?"CLI selected model":"Select model"):config.model)+" / "+(config.reasoningEffort.empty()?"Auto":config.reasoningEffort),54);
             if(summaryCard)line(role&&!role->taskSummary.empty()?"Task "+role->taskState+": "+role->taskSummary:role?role->status:"Describe the goal to start",76);if(fullCard)line(g_teamActivity[i].empty()?(role?role->text:"Tools and messages appear live"):g_teamActivity[i],98);
             const float footer=fullCard?125.f:summaryCard?103.f:50.f;
             if(summaryCard)rect(x+12,y+footer-3,cardWidth-24,1,0,.23f,.34f,.42f,.65f,0,0,0,0,0);
@@ -5170,9 +5242,9 @@ static void drawFrame(HDC hdc){
         else if(g_pendingObjectTarget->epoch!=g_objectDocumentEpoch)chip="Object from previous drawing / select again";
         textOut(fitText(chip,.62f,viewW-338),viewX+30,inputY-20,.62f,.50f,.85f,.96f);button("Clear",viewX+viewW-302,inputY-25,66,566);
     }else label(g_teamMode?"GOAL / DECISION  /  Ctrl+Enter to queue":"MESSAGE  /  Ctrl+Enter to send",viewX+30,inputY-16,.55f);
-    button(g_teamMode?(g_teamStarted&&!g_teamSnapshot.cancelled?"Queue":"Start"):(g_chatBusy?"Running":"Send"),viewX+viewW-206,inputY,84,74,true);button("Cancel",viewX+viewW-112,inputY,90,75);
+    button(g_teamMode?(g_teamStarted&&!g_teamSnapshot.cancelled?"Queue":"Start"):(g_chatBusy?"Queue":"Send"),viewX+viewW-206,inputY,84,74,true);button("Cancel",viewX+viewW-112,inputY,90,75);
     if(g_teamMode){std::string target="To: "+(g_teamTarget.empty()?std::string(g_teamFocusedWorkflow?"Engineer":"entire team"):g_teamTarget=="all"?std::string("entire team"):g_teamTarget);button(target.c_str(),viewX+viewW-206,inputY+40,184,473);}
-    else button("Codex MCP",viewX+viewW-206,inputY+40,184,58);
+    else button("Live MCP",viewX+viewW-206,inputY+40,184,58);
     AssistantUsage docTokens=g_assistantUsageDocument;
     textOut(g_status.substr(0,(size_t)std::max((viewW-334)/7,1)),viewX+22,H-51,.58f,g_error?.94f:.58f,g_error?.57f:.65f,g_error?.48f:.74f);
     std::string documentTokens="Document: "+assistantUsageLabel(docTokens);
@@ -5281,6 +5353,7 @@ static void drawFrame(HDC hdc){
     drawMeasurementOverlay(rect,button);
     g_viewSketchDimension={};if(!measurementActive()&&!g_directAuthoring.active&&!g_sketchDrawing.active&&g_showSketches){g_viewSketchDimension=selectedSketchDimension();if(g_viewSketchDimension.valid){float px,py;if(projectScreen(g_viewSketchDimension.position,px,py)){auto& dimension=g_viewSketchDimension;float width=std::min(360.f,textWidth(dimension.text,.66f)+24),x=std::clamp(px+18,(float)viewX+8,(float)(viewX+viewW)-width-8),y=std::clamp(py-40,(float)viewY+185,(float)(viewY+viewH)-58);avoidExtrusionHandle(x,y,width,52);rect(x+2,y+4,width,52,7,0,0,0,.20f,0,0,0,0,0);rect(x,y,width,52,7,.045f,.105f,.135f,.97f,.24f,.57f,.69f,.8f,1);textOut(dimension.text,x+11,y+8,.66f,.71f,.94f,.99f);textOut(dimension.action==577?"Click to edit linked source parameters":dimension.action==89?"Click to edit this native constraint":dimension.action==591?"Click to edit driving dimension":"Click to edit authored coordinates",x+11,y+31,.49f,.59f,.78f,.87f);g_zones.push_back({x,y,width,52,584});}}}
     if(g_error&&!g_lastFailureId.empty())button("Inspect failed operation",(float)(viewX+viewW)-210,(float)viewY+66,190,580);
+    drawViewportDock(rect,glyph,mp);
     g_lastRibbonHint=ribbonHint;
     if(!ribbonHint.empty()){float width=textWidth(ribbonHint,.60f)+22,x=std::clamp((float)mp.x+12.f,10.f,W-width-10.f),y=(float)mp.y+20;rect(x,y,width,29,6,.035,.055,.075,.98,.27,.51,.65,.95,1);textOut(ribbonHint,x+11,y+7,.60f,.87f,.94f,1.f);}
     if(g_drawingViewport.active){
@@ -5313,6 +5386,7 @@ static arkjson::Value captureViewportSnapshot(const arkjson::Value& args){
     try{
         if(args.find("camera"))throw std::runtime_error("Live viewport capture uses the current Studio camera; omit camera or choose snapshot view custom");
         if(g_busy||!g_uiReady)throw std::runtime_error("Current Studio viewport is unavailable while a document operation is applying");
+        if(IsIconic(g_window))throw std::runtime_error("Studio is minimized; restore its window before requesting viewport pixels, or explicitly request a software snapshot view");
         const u64 revision=g_session.revision,epoch=g_documentEpoch;if(auto* expected=args.find("expected_revision");expected&&(expected->t!=V::Num||expected->num!=(double)revision))throw std::runtime_error("Viewport snapshot revision conflict; read current doc_info before retrying");
         if(viewW<=0||viewH<=0||viewX<0||viewY<0||viewX+viewW>winW||viewY+viewH>winH)throw std::runtime_error("Studio viewport bounds are invalid for pixel readback");
         struct CaptureScope {HDC dc=nullptr;bool swap=true;~CaptureScope(){if(dc)ReleaseDC(g_window,dc);g_swap=swap;}} scope{GetDC(g_window),g_swap};
@@ -5545,6 +5619,11 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
                 if(event->hasUsage){g_assistantUsageRun=event->usage;recordAssistantUsageSnapshot(event->usage);}
                 if(event->final)g_assistantUsageRunCounted=true;
                 if(!event->text.empty()&&(!event->status||event->retry)){g_chatLog.push_back({event->error?"Error":event->final?"ARK":"Action",event->text.substr(0,16000)});if(g_chatLog.size()>200)g_chatLog.erase(g_chatLog.begin());g_chatScroll=0;}
+            }
+            if(event->final&&!g_deferredAssistantSteering.empty()){
+                auto queued=std::move(g_deferredAssistantSteering.front());g_deferredAssistantSteering.pop_front();
+                if(queued.epoch==g_documentEpoch&&!*g_assistantCancel){try{sendAssistant("",queued.transport,&queued.message,queued.visiblePrompt);}catch(const std::exception& error){g_chatLog.push_back({"Error",error.what()});g_deferredAssistantSteering.clear();}}
+                else {g_deferredAssistantSteering.clear();g_chatLog.push_back({"ARK","Queued Assistant input was retained for a previous drawing or cancelled run; it was not sent."});}
             }return 0;
         }
         case WM_ARK_AUTH:{std::unique_ptr<UiAuthEvent> event((UiAuthEvent*)lp);bool cancelRequested=g_authCancelRequested;
@@ -5574,11 +5653,12 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
                 }}
             return 0;}
         case WM_COMMAND:if(LOWORD(wp)==500){interactiveAction(74);return 0;}if(LOWORD(wp)==497&&HIWORD(wp)==EN_CHANGE){int length=GetWindowTextLengthA(g_toolSearch);std::string filter((size_t)length+1,' ');GetWindowTextA(g_toolSearch,filter.data(),length+1);filter.resize((size_t)length);g_toolFilter=std::move(filter);g_toolScroll=0;return 0;}break;
-        case WM_DROPFILES:{auto drop=(HDROP)wp;try{if(DragQueryFileW(drop,0xffffffff,nullptr,0)!=1)throw std::runtime_error("Drop one PNG or JPEG image reference at a time");UINT length=DragQueryFileW(drop,0,nullptr,0);std::vector<wchar_t> file((size_t)length+1);DragQueryFileW(drop,0,file.data(),length+1);int size=WideCharToMultiByte(CP_UTF8,0,file.data(),(int)length,nullptr,0,nullptr,nullptr);std::string path((size_t)size,'\0');WideCharToMultiByte(CP_UTF8,0,file.data(),(int)length,path.data(),size,nullptr,nullptr);setPendingAssistantImage(path);}catch(const std::exception& error){g_error=true;g_status=error.what();}DragFinish(drop);return 0;}
+        case WM_DROPFILES:try{droppedStudioFiles((HDROP)wp);}catch(const std::exception& error){g_error=true;g_status=error.what();}return 0;
         case WM_CTLCOLOREDIT:if((HWND)lp==g_chatInput||(HWND)lp==g_commandSearch||(HWND)lp==g_toolSearch||isAssistantImageDimensionEdit((HWND)lp)){SetTextColor((HDC)wp,RGB(219,226,238));SetBkColor((HDC)wp,RGB(14,17,20));return (LRESULT)chatBrush;}break;
         case WM_ERASEBKGND:return 1; // OpenGL owns the parent surface; erase only the native EDIT child.
         case WM_GETMINMAXINFO:((MINMAXINFO*)lp)->ptMinTrackSize={1180,840};return 0;
         case WM_SIZE:
+            if(wp==SIZE_MINIMIZED)return 0; // Keep the last valid viewport while minimized.
             winW=LOWORD(lp)>0?LOWORD(lp):1;
             winH=HIWORD(lp)>0?HIWORD(lp):1;
             layout();return 0;
@@ -5668,7 +5748,7 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
                 else if(g_sketchEditing.active){}
                 else if(g_pickKind)pickReference(p.x,p.y,(wp&(MK_CONTROL|MK_SHIFT))!=0);
                 else{int b=pickBody(p.x,p.y);
-                g_explorerFeature=0;selBody=b;g_picked.clear();refreshSelectionLines();g_selectedNotch=0;g_notchScroll=0;
+                g_viewportContainer=0;g_explorerFeature=0;selBody=b;g_picked.clear();refreshSelectionLines();g_selectedNotch=0;g_notchScroll=0;
                 if(selBody>=0){g_activeSketch.clear();g_showSketches=false;rebuildSketchOverlay();}}
             }
             g_eatNextClick=false;g_pressWasButton=false;g_cubePress=false;g_foldScrubbing=false;g_sheetScrubbing=false;g_suspScrub=-1;
@@ -5719,10 +5799,10 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     cpu_detect();
 
     SetProcessDPIAware();
-    bool startupUiTest=false;
-    bool specializedPatternUiTest=false;bool advancedSheetmetalUiTest=false;bool nativeVertexPullUiTest=false;
-    bool directAuthoringUiTest=false,parametricAuthoringUiTest=false,skeletonEditorUiTest=false,imageAttachmentUiTest=false;
-    bool bomUiTest=false;bool drawingWorkspaceUiTest=false;bool drawingViewportUiTest=false;bool measurementUiTest=false;bool authoringUiTest=false;
+    bool startupUiTest=false;bool stampsUiTest=false;bool planesSectionsUiTest=false;
+    bool specializedPatternUiTest=false;bool advancedSheetmetalUiTest=false;bool nativeVertexPullUiTest=false;bool cadImportUiTest=false;bool holesOrchestratorUiTest=false;bool designContainerUiTest=false;
+    bool directAuthoringUiTest=false,parametricAuthoringUiTest=false,skeletonEditorUiTest=false,imageAttachmentUiTest=false,assistantSteeringUiTest=false;
+    bool localModelsUiTest=false;bool viewportDockUiTest=false;bool bomUiTest=false;bool drawingWorkspaceUiTest=false;bool drawingViewportUiTest=false;bool measurementUiTest=false;bool authoringUiTest=false;
     bool selectionPickingUiTest=false;bool interactionUiTest=false,connectorsUiTest=false,actionIconsUiTest=false,treeUiTest=false,arcUiTest=false,completionUiTest=false,sketchDrawingUiTest=false,sketchEditUiTest=false,selectionGlowUiTest=false,datumAuthoringUiTest=false,typedSketchUiTest=false;
     bool selfTest=false,assemblyTest=false,dialogTest=false,bendTest=false,bendExportTest=false,sourceTest=false,sketchTest=false,assistantTest=false,nativeUiTest=false,renderUiTest=false,engineeringUiTest=false,sheetShowcaseTest=false,contextUiTest=false,suspensionUiTest=false,connectChatGpt=false,motionUiTest=false,motionPlay=false,navigationUiTest=false,projectionUiTest=false,frameToolsUiTest=false;unsigned exitAfterMs=0;std::string endpointFile,requestedSketch;int requestedOpening=-1;double requestedFold=-1,showcaseProgress=-1;std::string shotPath="ark_studio.png",loadPath,scriptPath,importPath,showcaseView,spotlightName,suspensionFeatureName,motionDriverName,motionSpeed;double requestedMotionTime=0;std::vector<std::string> suspensionValues;
     int requestedPathSamples=1;bool studioRenderTest=false,requestedPathTracing=false;
@@ -5737,11 +5817,17 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         else if(a=="--self-test-sketch-edit-ui"){sketchEditUiTest=true;g_headless=true;}
         else if(a=="--self-test-specialized-pattern-ui"){specializedPatternUiTest=true;g_headless=true;}
         else if(a=="--self-test-advanced-sheetmetal-ui"){advancedSheetmetalUiTest=true;g_headless=true;}
+        else if(a=="--self-test-holes-orchestrator-ui"){holesOrchestratorUiTest=true;g_headless=true;}
+        else if(a=="--self-test-design-container-ui"){designContainerUiTest=true;g_headless=true;}
+        else if(a=="--self-test-cad-import-ui"){cadImportUiTest=true;g_headless=true;}
         else if(a=="--self-test-native-vertex-pull-ui"){nativeVertexPullUiTest=true;g_headless=true;}
         else if(a=="--self-test-direct-authoring-ui"){directAuthoringUiTest=true;g_headless=true;}
         else if(a=="--self-test-parametric-authoring-ui"){parametricAuthoringUiTest=true;g_headless=true;}
         else if(a=="--skeleton-editor-test"){skeletonEditorUiTest=true;g_headless=true;}
         else if(a=="--self-test-image-attachment-ui"){imageAttachmentUiTest=true;g_headless=true;}
+        else if(a=="--self-test-stamps-ui"){stampsUiTest=true;g_headless=true;}
+        else if(a=="--self-test-planes-sections-ui"){planesSectionsUiTest=true;g_headless=true;}
+        else if(a=="--self-test-assistant-steering-ui"){assistantSteeringUiTest=true;g_headless=true;}
         else if(a=="--self-test-selection-picking-ui"){selectionPickingUiTest=true;g_headless=true;}
         else if(a=="--self-test-selection-glow-ui"){selectionGlowUiTest=true;g_headless=true;}
         else if(a=="--self-test-sketch-drawing-ui"){sketchDrawingUiTest=true;g_headless=true;}
@@ -5756,6 +5842,8 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         else if(a=="--path-samples"&&i+1<argc)requestedPathSamples=std::clamp(_wtoi(argv[++i]),1,4096);
         else if(a=="--self-test-authoring-ui"){authoringUiTest=true;g_headless=true;}
         else if(a=="--self-test-bom-ui"){bomUiTest=true;g_headless=true;}
+        else if(a=="--self-test-local-models-ui"){localModelsUiTest=true;g_headless=true;}
+        else if(a=="--self-test-viewport-dock-ui"){viewportDockUiTest=true;g_headless=true;}
         else if(a=="--self-test-drawing-viewport-ui"){drawingViewportUiTest=true;g_headless=true;}
         else if(a=="--drawing-workspace-test"){drawingWorkspaceUiTest=true;g_headless=true;}
         else if(a=="--self-test-measurement-ui"){measurementUiTest=true;g_headless=true;}
@@ -6186,16 +6274,42 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         auto draw=[&]{g_swap=false;drawFrame(hdc);};
         auto click=[&](int id){draw();auto z=std::find_if(g_zones.begin(),g_zones.end(),[&](const Zone& zone){return zone.id==id;});if(z==g_zones.end())return false;int x=(int)(z->x+z->w/2),y=(int)(z->y+z->h/2);SendMessage(hwnd,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(x,y));SendMessage(hwnd,WM_LBUTTONUP,0,MAKELPARAM(x,y));return true;};
         g_teamMode=true;g_assistantDockOpen=true;g_teamStarted=false;g_teamConnectors={};g_teamRoleCount=3;layout();
+        g_localModelDiscoveryTestTransport=[](const auto& config,const auto&,const auto*){V v;arkjson::parse(config.endpoint.ends_with("/models")?R"({"data":[{"id":"offline-local"}]})":R"({"capabilities":["completion","tools"]})",v);return v;};
         const char* providers[]={"claude","grok","ollama"};const char* models[]={"offline-claude","offline-grok","offline-local"};
-        for(size_t i=0;i<3;++i){auto preset=assistantProviderPreset(providers[i]);std::vector<std::string> values{preset.endpoint,models[i],preset.apiKeyEnv,assistantProtocolName(preset.protocol)};if(preset.protocol==AssistantProtocol::Messages)values.push_back("8192");values.push_back("auto");g_dialogOverrideQueue={{providers[i],"0"},values};g_dialogSmoke=3;g_dialogShot=shotPath+".provider-"+providers[i]+".png";bool clicked=click(44020+(int)i);g_dialogSmoke=0;if(!clicked||g_error||!g_teamConnectors[i]||teamRoleConfig(i).provider!=providers[i]||teamRoleConfig(i).model!=models[i]||teamRoleConfig(i).protocol!=preset.protocol)return failure(500,"Provider card dropdown/configuration dispatch failed");}
+        for(size_t i=0;i<3;++i){auto preset=assistantProviderPreset(providers[i]);std::vector<std::string> values{preset.endpoint,models[i],preset.apiKeyEnv,assistantProtocolName(preset.protocol)};if(preset.protocol==AssistantProtocol::Messages)values.push_back("8192");values.push_back("auto");if(preset.provider=="ollama")values={models[i],"auto"};g_dialogOverrideQueue={{providers[i],"0"},values};g_dialogSmoke=3;g_dialogShot=shotPath+".provider-"+providers[i]+".png";bool clicked=click(44020+(int)i);g_dialogSmoke=0;if(!clicked||g_error||!g_teamConnectors[i]||teamRoleConfig(i).provider!=providers[i]||teamRoleConfig(i).model!=models[i]||teamRoleConfig(i).protocol!=preset.protocol)return failure(500,"Provider card dropdown/configuration dispatch failed");}
         if(g_assistantConfig.model!=originalConfig.model||g_assistantConfig.endpoint!=originalConfig.endpoint||g_assistantConfig.authMode!=originalConfig.authMode||g_session.revision!=revision||g_documentEpoch!=epoch)return failure(501,"Per-role provider changed global connector, drawing, or epoch");
         draw();glFinish();{std::vector<u8> pixels((size_t)winW*winH*3);glPixelStorei(GL_PACK_ALIGNMENT,1);glReadBuffer(GL_BACK);glReadPixels(0,0,winW,winH,GL_RGB,GL_UNSIGNED_BYTE,pixels.data());Image image;image.w=winW;image.h=winH;image.px.resize(pixels.size());for(int y=0;y<winH;++y)std::memcpy(image.px.data()+(size_t)y*winW*3,pixels.data()+(size_t)(winH-1-y)*winW*3,(size_t)winW*3);if(!writePNG((shotPath+".provider-mixed-cards.png").c_str(),image))return failure(505,"Mixed provider cards capture failed");}
         g_settingsOverride=std::filesystem::temp_directory_path()/("ark-connectors-ui-"+std::to_string(GetCurrentProcessId())+".json");saveUiSettings();g_teamConnectors={};g_teamModels={};g_teamEfforts={};loadUiSettings();for(size_t i=0;i<3;++i)if(!g_teamConnectors[i]||teamRoleConfig(i).provider!=providers[i]||teamRoleConfig(i).model!=models[i]||teamRoleConfig(i).maxOutputTokens!=8192)return failure(502,"Per-role provider settings did not persist");std::filesystem::remove(g_settingsOverride);
         g_dialogOverrideQueue={{"inherit","0"}};g_dialogSmoke=3;bool inherited=click(44020);g_dialogSmoke=0;if(!inherited||g_teamConnectors[0]||!g_teamModels[0].empty()||!g_teamEfforts[0].empty())return failure(503,"Card could not restore inherited connector");
         {auto config=assistantProviderPreset("claude");config.model="foreign-offline-model";config.reasoningEffort="foreign-effort";bool inherit=false;g_dialogOverrideQueue={{"chatgpt-plan","0"}};g_dialogSmoke=3;bool selected=editConnector(config,false,inherit);g_dialogSmoke=0;if(!selected||config.authMode!=AssistantAuthMode::ChatGptPlan||!config.model.empty()||!config.reasoningEffort.empty())return failure(506,"ChatGPT plan switch retained a foreign provider model/effort");}
+        {
+            const auto savedHeadless=g_headless;const auto savedPath=g_settingsOverride;const auto savedDock=g_assistantDockOpen;
+            g_settingsOverride=std::filesystem::temp_directory_path()/("ark-chat-first-run-"+std::to_string(GetCurrentProcessId())+".json");
+            std::filesystem::remove(g_settingsOverride);g_assistantDockOpen=true;loadUiSettings();
+            if(!g_assistantDockOpen)return failure(512,"A fresh installation did not keep the default open chat");
+            g_headless=false;uiAction(400);if(g_assistantDockOpen)return failure(513,"The chat visibility control did not close the panel");
+            g_assistantDockOpen=true;loadUiSettings();if(g_assistantDockOpen)return failure(514,"The closed chat preference was not restored");
+            uiAction(400);g_assistantDockOpen=false;loadUiSettings();if(!g_assistantDockOpen)return failure(515,"The open chat preference was not restored");
+            std::filesystem::remove(g_settingsOverride);g_settingsOverride=savedPath;g_headless=savedHeadless;g_assistantDockOpen=savedDock;layout();
+        }
+        {
+            auto config=assistantProviderPreset("claude");config.model="foreign-offline-model";config.reasoningEffort="high";bool inherit=false;
+            g_dialogOverrideQueue={{"grok-build","0"},{"grok",""}};g_dialogSmoke=3;g_dialogShot=shotPath+".grok-account.png";
+            const bool selected=editConnector(config,false,inherit);g_dialogSmoke=0;
+            if(!selected||config.authMode!=AssistantAuthMode::CliAccount||config.protocol!=AssistantProtocol::Acp||!config.apiKeyEnv.empty()||!config.model.empty()||!config.reasoningEffort.empty()||config.imageInputSupported)return failure(509,"Grok CLI connector retained foreign credentials, model, effort or image capability");
+            AssistantConfig restored;readConnectorSettings(connectorSettings(config),restored);
+            if(restored.authMode!=AssistantAuthMode::CliAccount||restored.protocol!=AssistantProtocol::Acp||restored.provider!="grok-build"||restored.endpoint!="grok"||!restored.apiKeyEnv.empty()||restored.imageInputSupported)return failure(510,"Grok CLI account and protocol did not persist together");
+            const auto savedConnector=g_teamConnectors[0];const auto savedModel=g_teamModels[0],savedEffort=g_teamEfforts[0];
+            g_dialogOverrideQueue={{"grok-build","0"},{"grok","offline-grok-acp"}};g_dialogSmoke=3;g_dialogShot=shotPath+".grok-card.png";
+            const bool clicked=click(44020);g_dialogSmoke=0;
+            if(!clicked||!g_teamConnectors[0]||teamRoleConfig(0).authMode!=AssistantAuthMode::CliAccount||teamRoleConfig(0).model!="offline-grok-acp"||!teamRoleConfig(0).reasoningEffort.empty()||g_session.revision!=revision||g_assistantConfig.authMode!=originalConfig.authMode)return failure(511,"Grok CLI card changed the global connector/drawing or lost its own model");
+            g_teamConnectors[0]=savedConnector;g_teamModels[0]=savedModel;g_teamEfforts[0]=savedEffort;
+        }
         auto exported=assistantExternalMcpConfig("opencode","C:/ARK/ark-mcp.exe","ark-ui-test",assistantProviderPreset("ollama"));if(exported.find("ark-mcp.exe")==std::string::npos||exported.find("--connect")==std::string::npos||exported.find("ark-ui-test")==std::string::npos)return failure(504,"External MCP profile lost executable or live document binding");
-        std::ofstream(shotPath+".connectors-test.log")<<"PASS: real card Connector click, native provider/model/protocol controls, distinct Claude/Grok/Ollama routes, inherited global unchanged, serialized/restored per-role routes, reset inheritance, external MCP binding. Offline model IDs; no provider inference or account authentication performed.\n";
-        g_assistantConfig=originalConfig;g_teamConnectors=originalConnectors;g_teamModels=originalModels;g_teamEfforts=originalEfforts;g_settingsOverride=originalSettings;g_teamMode=originalTeam;g_assistantDockOpen=originalDock;g_status="Connector checks passed / mixed cards / persistence / external MCP profiles";layout();
+        {const auto raw=assistantExternalMcpConfig("grok-build","C:/ARK/ark-mcp.exe","ark-ui-test",originalConfig);const auto display=externalConfigDisplay(raw,"grok-build");std::string roundtrip;for(char c:display)if(c!='\r')roundtrip+=c;if(roundtrip!=raw)return failure(507,"Grok Build copy display changed the TOML configuration");}
+        startLiveBridge();if(g_liveBridge.endpoint().empty())return failure(508,"Grok Build UI check could not start its isolated live bridge");g_dialogOverrideQueue={{"grok-build"}};g_dialogSmoke=3;g_dialogShot=shotPath+".grok-build.png";liveConnectionDialog();g_dialogSmoke=0;g_liveBridge.stop();if(g_status.find("External MCP configuration for grok-build")==std::string::npos||g_session.revision!=revision)return failure(508,"Grok Build client selection failed or changed the drawing");
+        std::ofstream(shotPath+".connectors-test.log")<<"PASS: real card Connector click, native provider/model/protocol controls, distinct Claude/Grok/Ollama routes, inherited global unchanged, serialized/restored per-role routes, reset inheritance, external MCP binding, Grok Build native client selection and TOML copy. Offline model IDs; no provider inference or account authentication performed.\n";
+        g_localModelDiscoveryTestTransport={};g_assistantConfig=originalConfig;g_teamConnectors=originalConnectors;g_teamModels=originalModels;g_teamEfforts=originalEfforts;g_settingsOverride=originalSettings;g_teamMode=originalTeam;g_assistantDockOpen=originalDock;g_status="Connector checks passed / mixed cards / persistence / external MCP profiles";layout();
     }
 
 #include "authoring_extensions_selftest.inl"
@@ -6204,6 +6318,12 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     }
     if(drawingWorkspaceUiTest){
 #include "drawing_workspace_selftest.inl"
+    }
+    if(localModelsUiTest){
+#include "local_models_selftest.inl"
+    }
+    if(viewportDockUiTest){
+#include "viewport_dock_selftest.inl"
     }
     if(drawingViewportUiTest){
 #include "drawing_viewport_selftest.inl"
@@ -6482,8 +6602,9 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
             for(int y=0;y<winH;++y)std::memcpy(&image.px[(size_t)y*winW*3],&pixels[(size_t)(winH-1-y)*winW*3],(size_t)winW*3);
             if(!writePNG((shotPath+suffix).c_str(),image))return std::uint64_t{0};
             std::uint64_t digest=1469598103934665603ull;
-            // Hash only the model area: exclude the view labels, left tool rail, view cube and bottom controls.
-            for(int y=viewY+190;y<viewY+viewH-48;++y)for(int x=viewX+128;x<viewX+viewW-276;++x)for(int c=0;c<3;++c){digest^=image.px[((size_t)y*winW+x)*3+c];digest*=1099511628211ull;}
+            // Keep the measured model region visible when the open chat reduces viewport height.
+            const int modelTop=viewY+std::min(190,viewH/4);
+            for(int y=modelTop;y<viewY+viewH-48;++y)for(int x=viewX+128;x<viewX+viewW-276;++x)for(int c=0;c<3;++c){digest^=image.px[((size_t)y*winW+x)*3+c];digest*=1099511628211ull;}
             return digest;
         };
         target=tTarget;dist=tDist;yaw=tYaw;pitch=tPitch;g_occlusionMode=0;
@@ -6553,9 +6674,15 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
 #include "specialized_pattern_selftest.inl"
 #include "advanced_sheetmetal_selftest.inl"
 #include "native_vertex_pull_selftest.inl"
+#include "cad_import_selftest.inl"
+#include "stamps_selftest.inl"
+#include "planes_sections_selftest.inl"
+#include "holes_orchestrator_selftest.inl"
+#include "design_container_selftest.inl"
 #include "selection_glow_selftest.inl"
 #include "selection_picking_selftest.inl"
 #include "image_attachment_selftest.inl"
+#include "steer_024b_selftest.inl"
     if(skeletonEditorUiTest){int result=runSkeletonEditorSelfTest(shotPath);if(result)return result;}
 #include "datum_authoring_selftest.inl"
 #include "typed_sketch_selftest.inl"

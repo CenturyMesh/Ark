@@ -8,10 +8,12 @@
 #include <optional>
 #include <vector>
 #include <array>
+#include <memory>
 
 namespace ark {
-enum class AssistantAuthMode { ApiKey, ChatGptPlan };
-enum class AssistantProtocol { Responses, ChatCompletions, Messages };
+enum class AssistantAuthMode { ApiKey, ChatGptPlan, CliAccount };
+enum class AssistantProtocol { Responses, ChatCompletions, Messages, Acp };
+class AssistantAcpChannel;
 enum class AssistantImageMode { InspireDesign, ImageToCAD };
 enum class AssistantImageDecoder { Platform, Portable };
 const char* assistantImageModeName(AssistantImageMode mode) noexcept;
@@ -46,6 +48,8 @@ struct AssistantConfig {
     unsigned timeoutSeconds=90;
     std::size_t maxResponseBytes=4*1024*1024;
     std::size_t maxConversationBytes=8*1024*1024; // Outgoing request bound; original host evidence is retained separately.
+    // Offline protocol seam; never persisted. Native ACP uses the CLI's own login.
+    std::function<std::unique_ptr<AssistantAcpChannel>()> acpChannelFactory;
 };
 // Provider-reported usage only. Missing/invalid usage never becomes zero-cost
 // evidence. Cached/reasoning counts are subsets, not extra tokens to add.
@@ -111,6 +115,36 @@ using AssistantInbox=std::function<arkjson::Value()>;
 // Successful input/output/tool-history checkpoints, also retained by a host if
 // a later round fails. A checkpoint is conversation evidence, not run success.
 using AssistantHistory=std::function<void(const arkjson::Value&)>;
+// One synchronous run's user mailbox. Owns real user image bytes; enqueue is
+// atomic and validates the connector/request bound before accepting input.
+// UI hosts copy requestVersion onto queued tools, then call current again at
+// execution time. Geometry already executing is allowed to finish.
+class AssistantSteering {
+public:
+    AssistantSteering(const AssistantConfig& config,const arkjson::Value& tools,const arkjson::Value& history);
+    ~AssistantSteering();
+    AssistantSteering(const AssistantSteering&)=delete;
+    AssistantSteering& operator=(const AssistantSteering&)=delete;
+    bool enqueue(const arkjson::Value& userMessage);
+    arkjson::Value inbox(); // FIFO; called immediately before each provider request.
+    void checkpoint(const arkjson::Value& history);
+    std::uint64_t requestVersion() const;
+    bool current(std::uint64_t requestVersion) const;
+    bool finish(); // Closes only when all accepted steering was consumed.
+    void cancel() noexcept; // Rejects new input; retained pending evidence remains available.
+    arkjson::Value pending() const;
+    arkjson::Value history() const;
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+// Explicit readOnlyHint is required. Unknown tools are conservatively writes;
+// tool_feedback is an audit receipt and can still resolve earlier activity.
+bool assistantToolReadOnly(const arkjson::Value& tools,const std::string& name,const arkjson::Value& args={});
+// Local transport preflight while an in-flight history can still have an
+// unanswered call batch. Discards only those incomplete calls in the temporary
+// validation copy; retained evidence is never rewritten or completed by inference.
+void validateAssistantSteeringInput(const AssistantConfig& config,const arkjson::Value& history,const arkjson::Value& tools);
 // Injectable offline transport. Native transport reads credentials internally,
 // only after validation. Neither requests nor callbacks contain the API key.
 using AssistantTransport=std::function<arkjson::Value(const AssistantConfig&,const arkjson::Value&,const std::atomic_bool*)>;
@@ -121,6 +155,9 @@ struct AssistantRetryHooks {
     std::function<void(std::uint64_t,const std::atomic_bool*)> wait;
     std::function<unsigned()> jitterMilliseconds;
     std::function<arkjson::Value()> completionCheck; // Host finalization gate.
+    std::function<bool()> requestCurrent; // Steering invalidates old writes/final replies.
+    std::function<bool()> acceptCompletion; // Atomic host close; false continues pending input.
+    std::function<bool()> inputPending; // Final-only gate; passive teammate context need not wake a finished turn.
 };
 
 void validateAssistantConfig(const AssistantConfig& config);

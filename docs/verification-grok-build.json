@@ -1,0 +1,62 @@
+{
+  "date": "2026-10-14",
+  "scope": "Development integration of Grok Build as an external live-MCP client; no distributable iteration assigned",
+  "milestone_ids": ["D.02"],
+  "milestone_completion_claimed": false,
+  "checks": [
+    {
+      "name": "native-cpp-build",
+      "result": "passed",
+      "detail": "Windows x64 Release provider tests, Studio, MCP proxy and Studio live-test harness built with the existing OCCT SDK"
+    },
+    {
+      "name": "provider-connectors",
+      "result": "passed",
+      "detail": "Grok Build TOML export, exact executable/endpoint binding, account independence, quoted paths, invalid endpoint/path rejection and environment-placeholder rejection; existing provider completion/replay/team contracts also passed"
+    },
+    {
+      "name": "native-connectors-ui",
+      "result": "passed",
+      "detail": "1440x900 and 1366x800: actual Grok Build client selection, read-only TOML copy, retained line boundaries and unchanged document revision; configuration and selector screenshots inspected"
+    },
+    {
+      "name": "existing-studio-live-mcp",
+      "result": "passed",
+      "detail": "Separate synthetic Studio: prepared edit, parametric holes, mesh inspection, temporary save, undo, New and explicit failure after disconnect. This test used the MCP proxy directly, without a Grok model"
+    },
+    {
+      "name": "official-grok-build-config-and-doctor",
+      "result": "passed",
+      "detail": "Official Grok 1.0.52 parsed the native export in an isolated Grok home; stdio handshake negotiated MCP 2025-11-25 and discovered 92 ARK tools. Doctor also returned healthy against an intentionally nonexistent Studio endpoint, confirming that it verifies only proxy discovery"
+    },
+    {
+      "name": "official-grok-build-acp-initialize",
+      "result": "passed",
+      "detail": "Unauthenticated isolated runtime negotiated protocolVersion 1; advertised auth method grok.com, loadSession true, image false and audio false. No prompt or inference was sent"
+    },
+    {
+      "name": "grok-authenticated-live-authoring",
+      "result": "not_run",
+      "detail": "Requires the operator's CLI login and eligible account. No Grok inference, model-specific vision, cost receipt or Grok-driven Studio mutation was validated"
+    },
+    {
+      "name": "embedded-acp-assistant",
+      "result": "not_implemented",
+      "detail": "This change exports external MCP. ACP session/permission/tool lifecycle is separate from the built-in Responses provider loop"
+    }
+  ],
+  "test_runtime": {
+    "version": "grok 1.0.52 (0920c8169e27) [stable]",
+    "source": "https://x.ai/cli/grok-1.0.52-windows-x86_64.exe",
+    "sha256": "47a5becb08dd0e51f34b60b34eb866086af7f392666f821b350a45f6736ed0cb",
+    "installed_into_user_profile": false,
+    "credentials_used": false
+  },
+  "limits": [
+    "Configuration export and MCP discovery do not establish authenticated inference or live document identity; agent_onboard and doc_info must confirm the selected Studio",
+    "The generic live-MCP test and Grok tool discovery are independent evidence, not a Grok-to-Studio end-to-end authoring test",
+    "CLI subscriptions and xAI API-key billing remain separate; no credential transfer, top-up or model substitution is performed",
+    "Focused defaults, Parallel option, expected_revision and existing atomic publication guards remain unchanged",
+    "No user drawings, sessions or credentials are included in this verification"
+  ]
+}
