@@ -17,6 +17,7 @@ its own connector or inherit the main Assistant configuration.
 | OpenAI API | Responses | Environment-variable name, normally `OPENAI_API_KEY` |
 | Claude API | Anthropic Messages; Chat Completions compatibility also available | `ANTHROPIC_API_KEY` |
 | Grok | xAI Responses | `XAI_API_KEY` |
+| Grok Build | Native ACP CLI session with role-owned MCP tools | Official CLI account; sign in using `grok login` |
 | Ollama local | Local Chat Completions | No key; default loopback port 11434 |
 | OpenCode Zen | Protocol appropriate to the selected catalog model | `OPENCODE_API_KEY` |
 | Custom | Explicit endpoint and supported protocol | Explicit environment-variable name; loopback HTTP has no credential |
@@ -26,11 +27,19 @@ read-only request and does not generate a model response. Listing a model does n
 prove that its tool calling, account eligibility or available hardware can complete
 a CAD task. No model is silently substituted, downloaded or selected.
 
-Only environment-variable names are saved in ARK settings. Do not paste secret
+API connectors save environment-variable names in ARK settings. Grok Build saves
+its executable path and optional model ID; the CLI owns its credentials. Do not paste secret
 keys into model names, endpoints, documents or chat. A Claude/Grok chat subscription
 is not assumed to be a credential for its API; an external agent manages its own
 login. Requests stay on the configured route; the ARK ChatGPT token is never used
 for another provider.
+
+For Grok Build inside ARK, select **Grok Build** from the Assistant connector or
+a Team card's **Connector** control. Set the official CLI executable path when
+it is not installed at the normal `grok` location. Leave the model blank to use
+the CLI's advertised selected model, or refresh the catalog and choose an actual
+ID. Unsupported images and unnegotiated effort controls reject explicitly.
+See [Grok Build setup and scope](GROK_BUILD_CONNECT.md).
 
 The host retains tool IDs, tool results, role permissions and observed revisions
 across protocols. Incomplete or invalid responses do not execute partial tool

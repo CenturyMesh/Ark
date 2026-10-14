@@ -84,11 +84,25 @@ permission requests, model selection, cancellation and MCP tools. It does not
 return the Responses-style tool-request envelope expected by ARK's
 `runAssistant` provider transport.
 
-Embedding that CLI in ARK's Assistant would require a separate ACP client and
-session/permission lifecycle, with explicit tool authority and steering behavior.
-This MCP integration does not implement that embedding or transfer a CLI
-subscription into the existing API connector. It leaves Focused/Parallel and
-their revision/permission contracts unchanged.
+028D adds that separate ACP client to Single Assistant and Team cards. Choose
+**Grok Build** in the connector control after completing `grok login`. The CLI
+field accepts `grok` at the normal installation location or the official
+executable's full path. A blank model uses the selected model advertised by the
+CLI; an explicit model must occur in its negotiated catalog.
+
+ARK starts an isolated CLI process with external filesystem, terminal, hooks,
+subagents and inherited MCP servers disabled. It exposes only the current
+role's model-visible ARK tools through reverse MCP. Role permissions, command
+scope, `expected_revision`, atomic publication, steering and actual tool receipts
+remain host-owned. Cancellation retains completed commits; uncertain interruption
+requires a successful current-document inspection before resumed writes.
+
+The tested CLI advertises no ACP image capability, so ARK rejects image inputs
+on this route. Model discovery starts no inference. The CLI keeps authentication
+and provider eligibility; this route does not supply `XAI_API_KEY` or transfer
+credentials into the existing API connector. Usage without a receipt remains
+unknown. See [028D evidence](iterations/028D.md) for native protocol/UI checks and
+the separate authenticated-authoring gate.
 
 Official CLI/MCP/ACP and GUI-maintainer references checked on 14 October 2026.
 See [the measured development scope](verification-grok-build.json); authenticated
