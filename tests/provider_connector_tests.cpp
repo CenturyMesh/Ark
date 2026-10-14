@@ -20,7 +20,7 @@ void testChat(){
     auto run=runAssistant(config,V::makeStr("Edit my document"),tools,[&](const std::string& name,const V& args){++executions;if(executions==1)check(name=="doc_info","tools execute in response order");else check(name=="doc_apply"&&args.find("expected_revision")->num==7,"revision survives chat conversion");return json(R"({"isError":false,"structuredContent":{"revision":8}})");},{},nullptr,
       [&](const auto&,const V& request,const auto*){
         check(request.find("messages")&&!request.find("input")&&!request.find("include")&&!request.find("instructions"),"chat request uses only its protocol");
-        const auto& functions=request.find("tools")->arr;check(functions[0].find("function")->find("parameters")->dump()==tools.arr[0].find("inputSchema")->dump(),"chat keeps extensible tool schema");
+        const auto& functions=request.find("tools")->arr;auto expectedSchema=*tools.arr[0].find("inputSchema");expectedSchema.set("properties",V::makeObj());check(functions[0].find("function")->find("parameters")->dump()==expectedSchema.dump(),"Ollama makes the empty property map explicit without closing the schema");
         if(++requests==1)return multiChat();
         const auto& messages=request.find("messages")->arr;check(messages.size()==5,"one assistant multi-call message and two tool results");
         const auto& assistant=messages[2];check(assistant.find("tool_calls")->arr.size()==2&&assistant.find("reasoning_content")->str=="Retained local reasoning.","multi-call batch and reasoning replay remain intact");
@@ -31,6 +31,21 @@ void testChat(){
     auto grok=configured("grok");const auto request=assistantRequest(grok,run.conversation,tools);check(request.find("input")&&!request.find("include")&&request.dump().find("ark_chat_reasoning")==std::string::npos&&request.dump().find("write_2")!=std::string::npos,"switching provider retains actual receipts without foreign thinking");
     int replayWrites=0;rejects([&]{runAssistant(config,run.conversation,tools,[&](auto&,auto&){++replayWrites;return V::makeObj();},{},nullptr,[&](auto&,auto&,auto*){return multiChat();});},"old call IDs cannot replay a write");check(replayWrites==0,"replayed response executes no tools");
     auto explicitEffort=config;explicitEffort.reasoningEffort="high";check(assistantRequest(explicitEffort,json(R"([{"role":"user","content":"Inspect"}])"),tools).find("reasoning_effort")->str=="high","chat effort is passed explicitly rather than downgraded");
+}
+void testOllamaEmptyPropertySchemas(){
+    const auto catalog=AgentSession::tools();const auto original=catalog.dump();const auto functions=assistantFunctionTools(catalog);
+    const auto request=assistantRequest(configured("ollama"),json(R"([{"role":"user","content":"Inspect the current document"}])"),catalog);
+    const auto& wire=request.find("tools")->arr;check(wire.size()==functions.arr.size(),"Ollama retains every model-visible function, excluding host-only usage receipts");
+    unsigned adapted=0;
+    for(std::size_t i=0;i<functions.arr.size();++i){
+        const auto& schema=*functions.arr[i].find("parameters");const auto& parameters=*wire[i].find("function")->find("parameters");
+        auto expected=schema;if(schema.find("type")&&schema.find("type")->asStr()=="object"&&!schema.find("properties")){expected.set("properties",V::makeObj());++adapted;}
+        check(parameters.dump()==expected.dump(),"Ollama preserves every declared constraint and property while adapting absent maps");
+        check(parameters.find("properties")&&parameters.find("properties")->t==V::Obj,"every discovered Ollama function has an object property map");
+    }
+    check(adapted>0&&catalog.dump()==original,"actual no-argument tools are covered and canonical MCP discovery is unchanged");
+    auto other=assistantRequest(configured("claude-chat"),json(R"([{"role":"user","content":"Inspect"}])"),tools);
+    check(other.find("tools")->arr[0].find("function")->find("parameters")->dump()==tools.arr[0].find("inputSchema")->dump(),"other provider schemas are unchanged");
 }
 void testCompleteBeforeExecution(){auto config=configured("claude-chat");
     for(int variant=0;variant<6;++variant){int calls=0;AssistantUsage usage;V outcome;
@@ -111,5 +126,5 @@ int main(int argc,char** argv){try{
     if(argc==3&&std::string(argv[1])=="--local-agent-basic-smoke"){liveLocalModelSmoke(argv[2],true);return 0;}
     // Explicit opt-in read-only network smoke. Default test stays fully offline.
     if(argc==3&&std::string(argv[1])=="--catalog"){const auto ids=assistantProviderModels(assistantProviderPreset(argv[2]));V models=V::makeArr();for(const auto& id:ids)models.arr.push_back(V::makeStr(id));std::cout<<models.dump()<<'\n';return 0;}
-    testLocalModelCapabilities();testChat();testCompleteBeforeExecution();testBoundedOutcomes();testMessages();testPresetsCatalogAndExport();testResponsesReplayCustody();testMixedProviderTeam();std::cout<<"Provider connector contracts passed\n";return 0;
+    testLocalModelCapabilities();testChat();testOllamaEmptyPropertySchemas();testCompleteBeforeExecution();testBoundedOutcomes();testMessages();testPresetsCatalogAndExport();testResponsesReplayCustody();testMixedProviderTeam();std::cout<<"Provider connector contracts passed\n";return 0;
 }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

@@ -167,6 +167,11 @@ Goal: explore alternatives and collaborate at complex-product scale.
 
 ## How to choose the next increment
 
+027D addresses **A.03/D.02/F.05 — Em curso**: a reproduced Ollama GGUF
+tool-schema rejection, regression coverage and refreshed public packages.
+[Iteration evidence](iterations/027D.md) separates transport, native CAD,
+distribution and user acceptance. Broader milestone statuses remain **Parcial**.
+
 Prioritize dependable documents and clear editing, then one complete workflow with
 measured outcomes. Useful next contribution areas include crash recovery, sketch
 editing diagnostics, large-assembly fixtures, typed failure resolution, batch library

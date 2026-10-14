@@ -115,7 +115,15 @@ V assistantAdaptRequest(const AssistantConfig& config,const V& canonicalRequest)
     if(config.protocol==AssistantProtocol::ChatCompletions){
         out.set("messages",messages);out.set("parallel_tool_calls",V::makeBool(false));
         if(!config.reasoningEffort.empty())out.set("reasoning_effort",V::makeStr(config.reasoningEffort));
-        for(const auto& function:need(canonicalRequest,"tools").arr){V tool=V::makeObj(),fn=function;erase(fn,"type");tool.set("type",V::makeStr("function"));tool.set("function",fn);tools.arr.push_back(tool);}out.set("tools",tools);return out;
+        for(const auto& function:need(canonicalRequest,"tools").arr){
+            V tool=V::makeObj(),fn=function;erase(fn,"type");
+            // An object schema may omit properties. Ollama's GGUF tool renderer
+            // requires the explicit map; keep its additionalProperties policy.
+            if(config.provider=="ollama")if(const auto* source=fn.find("parameters");source&&text(*source,"type")=="object"&&!source->find("properties")){
+                V parameters=*source;parameters.set("properties",V::makeObj());fn.set("parameters",std::move(parameters));
+            }
+            tool.set("type",V::makeStr("function"));tool.set("function",fn);tools.arr.push_back(tool);
+        }out.set("tools",tools);return out;
     }
     out.set("max_tokens",V::makeNum(config.maxOutputTokens));V system=V::makeArr(),wire=V::makeArr();
     auto append=[&](const std::string& role,V content){if(!wire.arr.empty()&&text(wire.arr.back(),"role")==role){V merged=*wire.arr.back().find("content");for(auto& part:content.arr)merged.arr.push_back(std::move(part));wire.arr.back().set("content",merged);}else{V row=V::makeObj();row.set("role",V::makeStr(role));row.set("content",content);wire.arr.push_back(row);}};
