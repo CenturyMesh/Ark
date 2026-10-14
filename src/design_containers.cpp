@@ -22,6 +22,13 @@ std::string canonicalText(V v){canonical(v);return v.dump();}
 std::string digest(const V& v){return iterationSha256(canonicalText(v));}
 u64 id(const V& v){if(v.t!=V::Num||!std::isfinite(v.num)||v.num<0||v.num>9007199254740991.0||std::floor(v.num)!=v.num)reject("CONTAINER_INVALID_ID","Expected an exact nonnegative integer ID");return (u64)v.num;}
 V number(u64 value){return V::makeNum((double)value);}
+void guardAppearanceBoundary(const V& root){
+    bool unsupported=!field(root,"image_assets").arr.empty()||!field(root,"stamps").arr.empty();
+    for(const auto& feature:field(root,"features").arr)unsupported|=!field(feature,"face_appearances").arr.empty()||!field(field(feature,"appearance"),"texture_asset").asStr().empty();
+    for(const auto& material:field(root,"materials").arr)unsupported|=!field(field(material,"appearance"),"texture_asset").asStr().empty();
+    for(const auto& canvas:field(root,"canvases").arr)unsupported|=!field(canvas,"asset").asStr().empty();
+    if(unsupported)reject("CONTAINER_UNSUPPORTED_APPEARANCE","Embedded images, Stamps and face appearances require source ownership and remapping that this container contract does not support; keep this work in the owning document");
+}
 V sourceRoot(const Document& doc){V root;if(!arkjson::parse(documentToJson(doc,false,false),root))reject("CONTAINER_SOURCE","Unable to serialize authored source");erase(root,"design_container_checkout");for(const auto* collection:collections)if(!root.find(collection))root.set(collection,V::makeArr());root.set("next_feature_id",number(doc.nextFeatureId_));root.set("next_assembly_id",number(doc.nextAssemblyId_));root.set("next_mate_id",number(doc.nextMateId_));return root;}
 std::string rowKey(const char* collection,const V& row){return std::string(collection)+":"+((std::string(collection)=="features"||std::string(collection)=="assembly"||std::string(collection)=="mates")?std::to_string(id(field(row,"id"))):field(row,"name").asStr());}
 using Rows=std::map<std::string,V>;
@@ -64,6 +71,7 @@ Checkout makeCheckout(const Document& doc,u64 revision,u64 group){
     if(doc.designContainerCheckout.t==V::Obj)reject("CONTAINER_NESTED_CHECKOUT","Checkout from the owning source document, not from another checkout");
     if(doc.skeleton.t==V::Obj)reject("CONTAINER_SKELETON_BOUNDARY","Skeleton ownership is global; isolated checkout of that source is not supported");
     const V source=sourceRoot(doc);Graph graph(source);std::set<u64> nodes{group};bool changed=true;
+    guardAppearanceBoundary(source);
     while(changed){changed=false;for(const auto& node:doc.assembly)if(nodes.count(node.parent)&&nodes.insert(node.id).second)changed=true;}
     Keys owned;for(const auto& node:doc.assembly)if(nodes.count(node.id)){owned.insert("assembly:"+std::to_string(node.id));for(u64 feature:occurrenceFeatures(doc,node))owned.insert("features:"+std::to_string(feature));}
     for(const auto& node:doc.assembly)if(!nodes.count(node.id))for(u64 feature:occurrenceFeatures(doc,node))if(owned.count("features:"+std::to_string(feature)))reject("CONTAINER_SHARED_DEFINITION","Feature "+std::to_string(feature)+" has an occurrence outside this group; choose a container containing every occurrence or author a separate definition");
@@ -98,6 +106,7 @@ Checkout makeCheckout(const Document& doc,u64 revision,u64 group){
 
 const V* findRow(const Rows& source,const std::string& key){auto it=source.find(key);return it==source.end()?nullptr:&it->second;}
 void guardWorkspace(const V& manifest,const V& current){
+    guardAppearanceBoundary(current);
     std::string error;if(!validateDesignContainerManifest(manifest,error))reject("CONTAINER_MANIFEST_INVALID",error);
     const auto& baseline=field(manifest,"baseline");const Rows old=rows(baseline),now=rows(current);const Keys editable=keySet(field(manifest,"editable")),readonly=keySet(field(manifest,"readonly"));
     for(const auto& key:readonly){const auto* a=findRow(old,key),*b=findRow(now,key);if(!a||!b||canonicalText(*a)!=canonicalText(*b))reject("CONTAINER_READONLY_DEPENDENCY","External source "+key+" must remain unchanged");}
@@ -136,6 +145,7 @@ bool validateDesignContainerManifest(const V& manifest,std::string& error){
         if(!id(field(manifest,"container_node")))reject("CONTAINER_MANIFEST_INVALID","Container ID must be positive");id(field(manifest,"source_revision"));
         for(const auto* key:{"source_sha256","baseline_sha256"}){const auto& value=field(manifest,key);if(value.t!=V::Str||value.str.size()!=64||value.str.find_first_not_of("0123456789abcdef")!=std::string::npos)reject("CONTAINER_MANIFEST_INVALID","Invalid SHA-256 digest");}
         const auto& baseline=field(manifest,"baseline");if(baseline.t!=V::Obj||baseline.find("design_container_checkout")||baseline.find("agent_activity")||baseline.find("usage")||baseline.find("iteration_history")||digest(baseline)!=field(manifest,"baseline_sha256").str)reject("CONTAINER_MANIFEST_INVALID","Retained baseline hash/source is invalid");
+        guardAppearanceBoundary(baseline);
         if(field(manifest,"editable").t!=V::Arr||field(manifest,"readonly").t!=V::Arr)reject("CONTAINER_MANIFEST_INVALID","Ownership arrays are required");const auto editable=keySet(field(manifest,"editable")),readonly=keySet(field(manifest,"readonly"));const auto all=rows(baseline);for(const auto& key:editable)if(!all.count(key)||readonly.count(key))reject("CONTAINER_MANIFEST_INVALID","Invalid/overlapping editable source");for(const auto& key:readonly)if(!all.count(key))reject("CONTAINER_MANIFEST_INVALID","Unknown readonly source");if(editable.size()+readonly.size()!=all.size())reject("CONTAINER_MANIFEST_INVALID","Every baseline source needs ownership");
         const auto key="assembly:"+std::to_string(id(field(manifest,"container_node")));const auto* group=findRow(all,key);if(!group||!editable.count(key)||id(field(*group,"feature")))reject("CONTAINER_MANIFEST_INVALID","Editable group identity is missing");
         return true;
@@ -154,7 +164,7 @@ V inspectDesignContainers(const Document& doc,u64 revision,const V& args){
 }
 
 V checkoutDesignContainer(const Document& doc,u64 revision,const V& args){
-    expected(revision,args);const auto checkout=makeCheckout(doc,revision,containerId(doc,args));V root=checkout.root;root.set("design_container_checkout",checkout.manifest);root.set("version",number(38));Document child;std::string error;if(!documentFromJson(root.dump(),child,&error))reject("CONTAINER_CHECKOUT_INVALID",error);validateDesignContainerWorkspace(child);
+    expected(revision,args);const auto checkout=makeCheckout(doc,revision,containerId(doc,args));V root=checkout.root;root.set("design_container_checkout",checkout.manifest);root.set("version",number((u64)std::max(38.,field(root,"version").asNum())));Document child;std::string error;if(!documentFromJson(root.dump(),child,&error))reject("CONTAINER_CHECKOUT_INVALID",error);validateDesignContainerWorkspace(child);
     V out=V::makeObj();out.set("revision",number(revision));out.set("container",field(checkout.manifest,"container_node"));out.set("manifest",checkout.manifest);out.set("isolated_document",V::makeBool(true));out.set("editable_feature_count",number(child.features.size()-std::count_if(child.features.begin(),child.features.end(),[&](const Feature& f){return checkout.readonly.count("features:"+std::to_string(f.id));})));out.set("closure_feature_count",number(child.features.size()));
     if(const auto* path=args.find("path")){if(path->t!=V::Str||path->str.empty())reject("CONTAINER_PATH_REQUIRED","A nonempty checkout file path is required");const auto target=std::filesystem::path(reinterpret_cast<const char8_t*>(path->str.c_str()));if(target.extension()!=".ark")reject("CONTAINER_PATH_EXTENSION","Checkout uses an explicit .ark document file");std::error_code ec;if(std::filesystem::exists(target,ec))reject("CONTAINER_PATH_EXISTS","Checkout cannot overwrite an existing project or checkout");if(ec)reject("CONTAINER_PATH_INVALID",ec.message());
         static std::atomic<u64> serial{0};const auto unique=iterationSha256(path->str+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+std::to_string(++serial));auto staging=target;staging+=".checkout-"+unique+".ark";const auto stagingBytes=staging.u8string();const std::string stagingName(stagingBytes.begin(),stagingBytes.end());
@@ -165,6 +175,7 @@ V checkoutDesignContainer(const Document& doc,u64 revision,const V& args){
 
 V proposeDesignContainerMerge(const Document& doc,u64 revision,const V& args){
     expected(revision,args);if(doc.designContainerCheckout.t==V::Obj)reject("CONTAINER_MERGE_TARGET","Apply checkout changes to the owning source document");
+    guardAppearanceBoundary(sourceRoot(doc));if(const auto* root=args.find("document"))guardAppearanceBoundary(*root);
     Document child;std::string error;if(const auto* path=args.find("path")){if(path->t!=V::Str||path->str.empty()||!loadDocument(path->str.c_str(),child,&error))reject("CONTAINER_LOAD_FAILED",error.empty()?"Unable to load child .ark":error);}else if(const auto* root=args.find("document")){if(!documentFromJson(root->dump(),child,&error))reject("CONTAINER_LOAD_FAILED",error);}else reject("CONTAINER_PATH_REQUIRED","Pass path to an edited checkout .ark or its authored document");
     const auto& manifest=child.designContainerCheckout;if(manifest.t!=V::Obj)reject("CONTAINER_MANIFEST_REQUIRED","Child document has no retained checkout provenance");if(!validateDesignContainerManifest(manifest,error))reject("CONTAINER_MANIFEST_INVALID",error);
     if(id(field(manifest,"source_revision"))!=revision)reject("CONTAINER_REVISION_CONFLICT","The source changed since checkout; create a fresh checkout and explicitly transfer intended edits");if(digest(sourceRoot(doc))!=field(manifest,"source_sha256").str)reject("CONTAINER_SOURCE_CONFLICT","Source authoring differs from the retained checkout baseline");

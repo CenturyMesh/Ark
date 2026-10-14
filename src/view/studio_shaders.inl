@@ -55,6 +55,7 @@ static const std::string FS_STUDIO_SOLID_SOURCE=std::string("#version 330 core\n
 in vec3 nrm,wpos,lpos,lnrm;out vec4 o;
 uniform vec3 color,eye;uniform float sel,hardSurface,satin,metallic,roughness,opacity,hasTexture,selectionOverlay,cameraOrtho;
 uniform vec2 textureScale;uniform sampler2D surfaceTexture;
+uniform float stampMode,stampDepth,stampFrontOnly;uniform vec3 stampOrigin,stampU,stampV,stampNormal;uniform vec2 stampSize;
 vec4 triplanar(){
  vec3 a=pow(abs(normalize(dot(lnrm,lnrm)>1e-8?lnrm:vec3(0.,1.,0.))),vec3(4.));a/=max(a.x+a.y+a.z,1e-5);
  return texture(surfaceTexture,lpos.xy*textureScale)*a.z+texture(surfaceTexture,lpos.xz*textureScale)*a.y+texture(surfaceTexture,lpos.yz*textureScale)*a.x;
@@ -63,6 +64,7 @@ void main(){
  if(selectionOverlay>.5){o=vec4(.97,.63,.21,sel*.16);return;}
  vec3 n=hardSurface>0.?normalize(cross(dFdx(wpos),dFdy(wpos))):normalize(nrm),v=cameraOrtho>.5?studioBack:normalize(eye-wpos);
  if(dot(n,v)<0.)n=-n;vec4 texel=hasTexture>.5?triplanar():vec4(1.);
+ if(stampMode>.5){vec3 delta=lpos-stampOrigin;vec2 uv=vec2(dot(delta,stampU),dot(delta,stampV))/stampSize+vec2(.5);if(any(lessThan(uv,vec2(0.)))||any(greaterThan(uv,vec2(1.)))||abs(dot(delta,stampNormal))>stampDepth||(stampFrontOnly>.5&&dot(lnrm,stampNormal)<=0.))discard;texel=texture(surfaceTexture,uv);if(texel.a<.001)discard;}
  vec3 base=srgbToLinear(clamp(color*texel.rgb,0.,1.));float m=clamp(metallic,0.,1.),r=clamp(roughness,.055,1.);
  // Normal variance broadens subpixel highlights instead of letting a sharp
  // highlight sparkle as a curved surface or small part moves across pixels.

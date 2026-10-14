@@ -752,6 +752,14 @@ V solidFeatureRequest(const Feature& feature, const ExprEnv& env,
     if (op == "pocket" || op == "slot") op = "hole";
     if (op == "rigid_transform") op = "transform";
     model.set("op", V::makeStr(op));
+    if(op=="split_line"){
+        const std::set<std::string> allowed{"op","sketch","source_face","source_topology","direction"};for(const auto& item:feature.nativeSpec.obj)if(!allowed.count(item.first))throw std::runtime_error("Unknown native split-line field: "+item.first);
+        for(const auto& item:feature.p)if(item.first!="density")throw std::runtime_error("Unknown native split-line parameter: "+item.first);
+        if(feature.inputs.size()!=1)throw std::runtime_error("Split line requires one exact solid source input");
+        for(const char* key:{"sketch","source_face","source_topology"}){const auto& value=required(feature.nativeSpec,key);if(value.t!=V::Str||value.str.empty())throw std::runtime_error(std::string("Split line requires typed ")+key);}
+        const auto& vector=required(model,"direction");if(vector.t!=V::Arr||vector.arr.size()!=3)throw std::runtime_error("Split-line direction must contain three expressions");
+        model.set("profile",profileFromSketch(document,required(feature.nativeSpec,"sketch").str));
+    }
     if(op=="vertex_pull"){
         for(const auto& item:feature.nativeSpec.obj)if(item.first!="op"&&item.first!="source_vertex"&&item.first!="source_topology")throw std::runtime_error("Unknown native vertex-pull field: "+item.first);
         for(const auto& item:feature.p)if(item.first!="dx"&&item.first!="dy"&&item.first!="dz"&&item.first!="density"&&item.first!="op")throw std::runtime_error("Unknown native vertex-pull parameter: "+item.first);

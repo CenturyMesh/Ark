@@ -1,5 +1,28 @@
 # ARK agent protocol
 
+024B discovers **92 standalone tools**. Read `agent_onboard{topic:"stamps"}`
+for portable embedded PNG/JPEG, projected **Stamps**, same-body face appearances
+and exact split-line regions. Generate imagery through an actually available
+client skill/connector, then import its real artifact using `image_asset`;
+image generation inside ARK is not implied by an import tool. Inspect exact
+face names and `brep_sha256` before binding, and retain expected_revision.
+New image/face/split recipes conditionally require source format **39**.
+
+Read `agent_onboard{topic:"planes"}` for `plane_authoring`: create/offset planes,
+move an editable sketch to a named plane, and create exact contour or retained-
+side cuts from planes or saved sketch lines. A line defines an infinite section
+plane, not a finite kerf. Contours currently require one connected wire.
+
+Users can steer active single/team conversations with new text and images.
+Consume new input at the next provider boundary before planning another write;
+old queued writes reject at the actual UI execution boundary. Inline snapshots
+without `path` are document reads even during a peer write reservation; path
+exports retain write guards. `native_inspect{detail:"report"}` provides compact
+measured evidence; full topology remains available when binding references.
+See [024B evidence](iterations/024B.md), [Stamps](STAMPS_024B.md),
+[split lines](SPLIT_LINES_024B.md), [planes and sections](PLANE_SECTIONS_024B.md),
+and [manual testing](AUTHORING_024B_TESTING.md).
+
 023B discovers **90 standalone tools**. Use `holes_catalog` and
 `agent_onboard{topic:"holes"}` for functional holes: author a parametric
 `native_solid` / `holes_orchestrator` feature, with named locations and explicit

@@ -12,6 +12,7 @@
 #include "ark/drawings.hpp"
 #include "ark/sketch.hpp"
 #include "ark/assembly_io.hpp"
+#include "ark/appearance_024b.hpp"
 #include "ark/usage.hpp"
 #include <cstdio>
 #include <cctype>
@@ -479,6 +480,7 @@ bool arcRecipeDocument(const Document& doc){
 // ---------------------------------------------------------------------------
 std::string documentToJson(const Document& doc,bool includeAudit,bool includeHistory){
     std::string usageError;if(!validateUsageLedger(doc.usage,usageError))throw std::runtime_error(usageError);
+    validateAppearanceAuthoring024B(doc,false);
     Value r=Value::makeObj();
     r.set("format",Value::makeStr("ark"));
     bool sourceTube=false;bool notched=false;bool nativeVersion=false;bool generation8=false;bool generation9=false;bool extended=!doc.assembly.empty()||doc.nextAssemblyId_>1;for(auto& f:doc.features){extended|=f.type==FeatureType::Tube;notched|=f.type==FeatureType::NotchedTube;sourceTube|=f.type==FeatureType::SourceTube;nativeVersion|=f.type==FeatureType::Loft||f.type==FeatureType::SurfaceFill||f.type==FeatureType::BSplineSurface||f.type==FeatureType::Thicken||f.type==FeatureType::SheetMetal||f.type==FeatureType::SourceSheet||f.type==FeatureType::NativeSolid;generation8|=f.type==FeatureType::Sweep||f.type==FeatureType::ExtrudeSurface||f.type==FeatureType::RevolveSurface||f.type==FeatureType::OffsetSurface||f.type==FeatureType::Sew||isMeshModelFeature(f.type);generation9|=generation9Feature(doc,f);}
@@ -523,6 +525,8 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
         ps.arr.push_back(std::move(v));
     }
     r.set("params",std::move(ps));
+    if(!doc.imageAssets.empty()){Value assets=Value::makeArr();for(const auto& asset:doc.imageAssets)assets.arr.push_back(imageAssetToJson(asset,true));r.set("image_assets",assets);}
+    if(!doc.stamps.empty()){Value stamps=Value::makeArr();for(const auto& stamp:doc.stamps)stamps.arr.push_back(stampToJson(stamp));r.set("stamps",stamps);}
     if(usagePresent)r.set("usage",usageLedgerToJson(doc.usage));
     if(!doc.materials.empty()){
         Value materials=Value::makeArr();
@@ -539,6 +543,7 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
         for(auto& canvas:doc.canvases){
             Value item=Value::makeObj();
             item.set("name",Value::makeStr(canvas.name));item.set("plane",Value::makeStr(canvas.plane));item.set("path",Value::makeStr(canvas.path));
+            if(!canvas.asset.empty())item.set("asset",Value::makeStr(canvas.asset));
             item.set("width",Value::makeStr(canvas.width));item.set("height",Value::makeStr(canvas.height));item.set("opacity",Value::makeNum(canvas.opacity));
             canvases.arr.push_back(std::move(item));
         }
@@ -569,6 +574,7 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
         if(f.suppressed)v.set("suppressed",Value::makeBool(true));
         if(!f.material.empty())v.set("material",Value::makeStr(f.material));
         if(f.appearance.t==Value::Obj)v.set("appearance",f.appearance);
+        if(!f.faceAppearances.empty()){Value faces=Value::makeArr();for(const auto& appearance:f.faceAppearances)faces.arr.push_back(faceAppearanceToJson(appearance));v.set("face_appearances",faces);}
         Value in=Value::makeArr();
         for(u64 id:f.inputs) in.arr.push_back(Value::makeNum((double)id));
         v.set("inputs",std::move(in));
@@ -606,9 +612,12 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
     if(generation37Document(doc))r.set("version",Value::makeNum(37));
     if(doc.designContainerCheckout.t!=Value::Null)r.set("design_container_checkout",doc.designContainerCheckout);
     if(generation38Document(doc))r.set("version",Value::makeNum(38));
+    if(appearance024BNeedsVersion39(doc))r.set("version",Value::makeNum(39));
     if(includeAudit&&includeHistory)iterationPersist(r,doc);
     canonicalDocumentKeys(r);
-    return r.dump();
+    std::string serialized=r.dump();
+    if(serialized.size()>maxDocumentBytes)throw std::runtime_error("Document exceeds 4 MiB logical capacity, including embedded images and retained history");
+    return serialized;
 }
 
 bool documentFromJson(const std::string& json, Document& doc, std::string* err){
@@ -617,15 +626,19 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     Value v;
     if(!arkjson::parse(json,v)) return fail("malformed JSON");
     if(v.t!=Value::Obj) return fail("root must be object");
-    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0&&ver->num!=3.0&&ver->num!=4.0&&ver->num!=5.0&&ver->num!=6.0&&ver->num!=7.0&&ver->num!=8.0&&ver->num!=9.0&&ver->num!=10.0&&ver->num!=11.0&&ver->num!=12.0&&ver->num!=13.0&&ver->num!=14.0&&ver->num!=15.0&&ver->num!=16.0&&ver->num!=17.0&&ver->num!=18.0&&ver->num!=19.0&&ver->num!=20.0&&ver->num!=21.0&&ver->num!=22.0&&ver->num!=23.0&&ver->num!=24.0&&ver->num!=25.0&&ver->num!=26.0&&ver->num!=27.0&&ver->num!=28.0&&ver->num!=29.0&&ver->num!=30.0&&ver->num!=31.0&&ver->num!=32.0&&ver->num!=33.0&&ver->num!=34.0&&ver->num!=35.0&&ver->num!=36.0&&ver->num!=37.0&&ver->num!=38.0)))
+    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0&&ver->num!=3.0&&ver->num!=4.0&&ver->num!=5.0&&ver->num!=6.0&&ver->num!=7.0&&ver->num!=8.0&&ver->num!=9.0&&ver->num!=10.0&&ver->num!=11.0&&ver->num!=12.0&&ver->num!=13.0&&ver->num!=14.0&&ver->num!=15.0&&ver->num!=16.0&&ver->num!=17.0&&ver->num!=18.0&&ver->num!=19.0&&ver->num!=20.0&&ver->num!=21.0&&ver->num!=22.0&&ver->num!=23.0&&ver->num!=24.0&&ver->num!=25.0&&ver->num!=26.0&&ver->num!=27.0&&ver->num!=28.0&&ver->num!=29.0&&ver->num!=30.0&&ver->num!=31.0&&ver->num!=32.0&&ver->num!=33.0&&ver->num!=34.0&&ver->num!=35.0&&ver->num!=36.0&&ver->num!=37.0&&ver->num!=38.0&&ver->num!=39.0)))
         return fail("unsupported document version");
     Value history;std::string historyError;if(!iterationExpand(v,history,historyError))return fail(historyError);
 
     if(auto format=v.find("format");format && format->asStr()!="ark")return fail("unsupported format");
     if(auto units=v.find("units");units && units->asStr()!="mm")return fail("unsupported units (expected mm)");
     if(!v.find("features"))return fail("missing features array");
-    for(auto key:{"params","sketches","features","planes","canvases","materials"})if(auto a=v.find(key);a && a->t!=Value::Arr)return fail(std::string(key)+" must be an array");
+    for(auto key:{"params","sketches","features","planes","canvases","materials","image_assets","stamps"})if(auto a=v.find(key);a && a->t!=Value::Arr)return fail(std::string(key)+" must be an array");
     Document nd;   // parse into scratch; commit only on full success
+    try{
+        if(const auto* assets=v.find("image_assets")){if(assets->arr.size()>64)return fail("Embedded image asset capacity is 64");for(const auto& asset:assets->arr)nd.imageAssets.push_back(imageAssetFromJson(asset));}
+        if(const auto* stamps=v.find("stamps")){if(stamps->arr.size()>128)return fail("Stamp capacity is 128");for(const auto& stamp:stamps->arr)nd.stamps.push_back(stampFromJson(stamp));}
+    }catch(const std::exception& error){return fail(error.what());}
     if(const auto* checkout=v.find("design_container_checkout")){const auto* version=v.find("version");std::string reason;if(!version||version->num<38||!validateDesignContainerManifest(*checkout,reason))return fail(reason.empty()?"Design container workspace requires version 38":reason);nd.designContainerCheckout=*checkout;}
     if(const auto* drawings=v.find("drawings")){
         const auto* version=v.find("version");if(!version||version->num<36||drawings->t!=Value::Arr||drawings->arr.size()>256)return fail("Technical drawings require document version 36 and at most 256 authored drawings");
@@ -702,9 +715,10 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
             if(!name||name->t!=Value::Str||name->str.empty()||name->str.size()>128||!names.insert(name->str).second)return fail("Canvas name must be 1..128 characters");
             canvas.name=name->str;
             if(auto plane=j.find("plane")){if(plane->t!=Value::Str||plane->str.empty()||plane->str.size()>128)return fail("Canvas plane must be a name");canvas.plane=plane->str;}
+            if(auto asset=j.find("asset")){if(asset->t!=Value::Str||asset->str.empty()||asset->str.size()>128)return fail("Canvas asset must name an embedded image");canvas.asset=asset->str;}
             auto path=j.find("path");
-            if(!path||path->t!=Value::Str||path->str.empty()||path->str.size()>1024)return fail("Canvas path must be 1..1024 characters");
-            canvas.path=path->str;
+            if(path){if(path->t!=Value::Str||path->str.size()>1024||(path->str.empty()&&canvas.asset.empty()))return fail("Canvas path must be 1..1024 characters or an embedded asset must be specified");canvas.path=path->str;}
+            else if(canvas.asset.empty())return fail("Canvas needs a legacy path or embedded asset");
             auto takeExpr=[&](const char* key,std::string& out){auto value=j.find(key);if(!value)return fail(std::string("Canvas needs ")+key);if(value->t==Value::Str&&!value->str.empty()&&value->str.size()<=2048){out=value->str;return true;}if(value->t==Value::Num&&std::isfinite(value->num)){out=value->dump();return true;}return fail("Canvas width and height must be expressions");};
             if(!takeExpr("width",canvas.width)||!takeExpr("height",canvas.height))return false;
             if(auto opacity=j.find("opacity")){if(opacity->t!=Value::Num||!std::isfinite(opacity->num)||opacity->num<0||opacity->num>1)return fail("Canvas opacity must be 0..1");canvas.opacity=opacity->num;}
@@ -734,6 +748,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
             if(auto flag=fv.find("suppressed")){if(flag->t!=Value::Bool)return fail("suppressed must be boolean");nf.suppressed=flag->b;}
             if(auto material=fv.find("material")){if(material->t!=Value::Str||material->str.empty())return fail("Feature material must be a name");nf.material=material->str;}
             if(auto appearance=fv.find("appearance")){Appearance tested;std::string reason;if(!applyAppearancePatch(tested,*appearance,reason))return fail(reason);nf.appearance=*appearance;}
+            if(auto faces=fv.find("face_appearances")){if(faces->t!=Value::Arr||faces->arr.size()>128)return fail("Face appearances must be an array of at most 128 entries");try{for(const auto& appearance:faces->arr)nf.faceAppearances.push_back(faceAppearanceFromJson(appearance));}catch(const std::exception& error){return fail(error.what());}}
             if(auto in=fv.find("inputs")){
                 if(in->t!=Value::Arr)return fail("inputs must be an array");
                 for(auto&idv:in->arr){
@@ -847,6 +862,8 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     if(generation36Document(nd)){const auto* version=v.find("version");if(!version||version->num<36)return fail("Reverse, symmetric, face-source and face-bounded extrusion require document version 36");}
     if(generation37Document(nd)){const auto* version=v.find("version");if(!version||version->num<37)return fail("Specialized component patterns, advanced sheet programs and drawing source/template recipes require document version 37");}
     if(generation38Document(nd)){const auto* version=v.find("version");if(!version||version->num<38)return fail("Exact CAD imports, Holes Orchestrator and isolated containers require document version 38");}
+    if(appearance024BNeedsVersion39(nd)){const auto* version=v.find("version");if(!version||version->num<39)return fail("Embedded images, stamps, face appearances and exact split lines require document version 39");}
+    try{validateAppearanceAuthoring024B(nd,false);}catch(const std::exception& error){return fail(error.what());}
     try{validateDesignContainerWorkspace(nd);validateSkeletonAuthoring(nd);}catch(const std::exception& error){return fail(error.what());}
     doc=std::move(nd);
     return true;
@@ -912,7 +929,10 @@ bool sketchFromJson(const std::string& json, Sketch& sk, std::string* err){
 bool saveDocument(const Document& doc, const char* path){
     if(!path||!*path) return false;
     if(doc.iterationHistory.t==Value::Obj){std::string historyError;if(!iterationValidate(doc,doc.iterationHistory,historyError))return false;}
-    std::string j=documentToJson(doc);if(j.size()>maxDocumentBytes)return false;
+    // Preserve this bool API's failure contract before opening any staging file.
+    // Authoring validation and logical-capacity errors are serialization failures.
+    std::string j;try{j=documentToJson(doc);}catch(const std::exception&){return false;}
+    if(j.size()>maxDocumentBytes)return false;
     Value persistedRoot;if(!arkjson::parse(j,persistedRoot))return false;
     auto destination=std::filesystem::path(reinterpret_cast<const char8_t*>(path)),temporary=destination;
     auto extension=destination.extension().string();

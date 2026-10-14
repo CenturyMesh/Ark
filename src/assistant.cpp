@@ -19,6 +19,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <mutex>
 #include <cstddef>
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -225,6 +226,8 @@ V nativeTransport(const AssistantConfig&,const V&,const std::atomic_bool*,bool=f
 #endif
 }
 
+#include "assistant_steering.inl"
+
 void accumulateAssistantUsage(AssistantUsage& total,const AssistantUsage& delta){
     total.inputTokens+=delta.inputTokens;total.outputTokens+=delta.outputTokens;
     total.totalTokens+=delta.totalTokens;total.cachedInputTokens+=delta.cachedInputTokens;
@@ -392,19 +395,24 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
     std::set<std::string> pendingFeedback;std::string feedbackProject;bool feedbackReminderSent=false;
     auto trackFeedback=[&](const V& value){const auto* data=value.find("structuredContent");if(!data)data=&value;if(const auto* project=data->find("activity_project_id");project&&project->t==V::Str){if(project->str!=feedbackProject||(data->find("activity_boundary")&&data->find("activity_boundary")->b)){pendingFeedback.clear();feedbackReminderSent=false;}feedbackProject=project->str;}if(const auto* id=data->find("activity_id");id&&id->t==V::Str&&data->find("feedback_required")&&data->find("feedback_required")->b)pendingFeedback.insert(id->str);if(const auto* rated=data->find("rated_ids");rated&&rated->t==V::Arr)for(const auto& id:rated->arr){pendingFeedback.erase(id.asStr());feedbackReminderSent=false;}if(const auto* pending=data->find("pending_feedback_ids");pending&&pending->t==V::Arr)for(const auto& id:pending->arr)pendingFeedback.insert(id.asStr());};
     for(const auto& entry:result.conversation.arr)if(field(entry,"type")=="function_call_output"){V data;if(arkjson::parse(field(entry,"output"),data))trackFeedback(data);}
-    bool earlierToolCalls=false;std::string lastCompletionIssue;
-    for(unsigned round=0;(!config.maxRounds||round<config.maxRounds);++round){
-        cancelled(cancel);emit(events,AssistantEvent::Status,"Thinking...");
+    auto consumeInbox=[&]{bool consumed=false;
         if(inbox){V messages=inbox();require(messages.isNull()||messages.t==V::Arr,"Assistant inbox must return an input array.");
             if(messages.t==V::Arr)for(auto& message:messages.arr){
                 auto role=field(message,"role");auto content=message.find("content");
                 require((role=="user"||role=="developer")&&content,"Assistant inbox messages require user/developer role and content.");
                 if(role=="user")validateAssistantUserMessage(message);else require(content->t==V::Str,"Developer inbox messages require text content.");
                 appendHistory(std::move(message));
+                consumed=true;
             }
         }
+        return consumed;
+    };
+    const auto consumeFinalInbox=[&]{return (!retryHooks.inputPending||retryHooks.inputPending())&&consumeInbox();};
+    bool earlierToolCalls=false;std::string lastCompletionIssue;
+    for(unsigned round=0;(!config.maxRounds||round<config.maxRounds);++round){
+        cancelled(cancel);emit(events,AssistantEvent::Status,"Thinking...");consumeInbox();
         if(history)history(result.conversation);
-        bool projected=false;const V request=assistantRequest(config,result.conversation,tools,&projected);
+        bool projected=false;V request=assistantRequest(config,result.conversation,tools,&projected);
         if(projected&&!projectionAnnounced){projectionAnnounced=true;needsProjectedInspection=true;measuredEvent(AssistantEvent::Status,"Request history compacted for transport; original receipts retained. Inspect current doc_info before writing.");}
         auto& performance=result.performance;
         V response;
@@ -412,7 +420,7 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
         auto retryStatus=[&](const std::string& text){if(events){AssistantEvent event;event.kind=AssistantEvent::Status;event.text=text;event.usage=result.usage;event.performance=performance;event.providerRetry=true;events(event);}};
         for(unsigned attempt=0;;++attempt){
             cancelled(cancel);if(attempt&&retryHooks.checkpoint)retryHooks.checkpoint();cancelled(cancel);
-            if(attempt)retryStatus("Retry "+std::to_string(attempt)+"/3 / requesting the unchanged response");
+            if(attempt){const bool updated=consumeInbox();if(updated){if(history)history(result.conversation);request=assistantRequest(config,result.conversation,tools,&projected);if(projected&&!projectionAnnounced){projectionAnnounced=true;needsProjectedInspection=true;measuredEvent(AssistantEvent::Status,"Request history compacted for transport; original receipts retained. Inspect current doc_info before writing.");}}retryStatus("Retry "+std::to_string(attempt)+"/3 / requesting "+(updated?"the latest user context":"the unchanged response"));}
             ++performance.providerRequests;performance.lastRequestBytes=request.dump().size();performance.lastInputBytes=request.find("input")?request.find("input")->dump().size():request.find("messages")?request.find("messages")->dump().size():0;performance.lastToolSchemaBytes=request.find("tools")->dump().size();
             performance.requestBytes+=performance.lastRequestBytes;performance.inputBytes+=performance.lastInputBytes;performance.toolSchemaBytes+=performance.lastToolSchemaBytes;performance.maxRequestBytes=std::max(performance.maxRequestBytes,performance.lastRequestBytes);
             const auto providerBegan=std::chrono::steady_clock::now();auto completedProvider=[&]{performance.lastProviderMilliseconds=millisecondsSince(providerBegan);performance.providerMilliseconds+=performance.lastProviderMilliseconds;};
@@ -472,12 +480,13 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
                 auto content=item.find("content");if(!content||content->t!=V::Arr)continue;
                 for(auto& part:content->arr){
                     auto type=field(part,"type");auto text=type=="output_text"?field(part,"text"):type=="refusal"?field(part,"refusal"):"";
-                    if(!text.empty()){roundHasText=true;if(calls.empty()&&retryHooks.completionCheck){if(!heldFinalText.empty())heldFinalText+='\n';heldFinalText+=text;continue;}if(calls.empty()&&!pendingFeedback.empty()&&allowed.count("tool_feedback"))continue;if(!result.text.empty())result.text+='\n';result.text+=text;emit(events,AssistantEvent::Text,text);}
+                    if(!text.empty()){roundHasText=true;if(calls.empty()){if(!heldFinalText.empty())heldFinalText+='\n';heldFinalText+=text;continue;}if(!result.text.empty())result.text+='\n';result.text+=text;emit(events,AssistantEvent::Text,text);}
                 }
             }
         }
         if(history)history(result.conversation);
         if(calls.empty()){
+            if(consumeFinalInbox()||(retryHooks.requestCurrent&&!retryHooks.requestCurrent())){if(history)history(result.conversation);emit(events,AssistantEvent::Status,"New user input queued; continuing before final reply");continue;}
             if(!roundHasText)throw std::runtime_error(earlierToolCalls?
                 "Assistant completed without a final visible reply. Earlier ARK tool calls may have changed the document; inspect it before retrying.":
                 "Assistant completed without a visible reply or ARK tool call. It did not request a model change; try again or select another available model.");
@@ -485,7 +494,10 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
                 if(feedbackReminderSent)throw std::runtime_error("Required tool feedback was not supplied after the explicit reminder. CAD work and pending project records are retained; resume to provide the missing ratings.");feedbackReminderSent=true;
                 V pending=V::makeArr();for(const auto& id:pendingFeedback)if(pending.arr.size()<64)pending.arr.push_back(V::makeStr(id));V reminder=V::makeObj();reminder.set("role",V::makeStr("developer"));reminder.set("content",V::makeStr("Before finishing, submit tool_feedback for your actual unscored actions: "+pending.dump()+". Rate utility and difficulty 1..5, describe the action, and note issues or wished tools/options. Do not invent successful outcomes. Feedback can be batched with other tool calls."));appendHistory(reminder);if(history)history(result.conversation);emit(events,AssistantEvent::Status,"Recording required tool feedback before completion");continue;
             }
-            if(retryHooks.completionCheck){auto check=retryHooks.completionCheck();const auto* accepted=check.find("allowed");if(!accepted||accepted->t!=V::Bool)throw std::runtime_error("BOM completion verification unavailable; prior work retained");if(!accepted->b){auto issue=field(check,"error");if(issue.empty())issue="BOM review required";if(issue==lastCompletionIssue)throw std::runtime_error(issue);lastCompletionIssue=issue;V reminder=V::makeObj();reminder.set("role",V::makeStr("developer"));reminder.set("content",V::makeStr(issue));appendHistory(reminder);if(history)history(result.conversation);emit(events,AssistantEvent::Status,"Final reply held: current BOM review required");continue;}auto qualification=field(check,"summary");if(!qualification.empty())heldFinalText+="\n\n"+qualification;if(!heldFinalText.empty()){if(!result.text.empty())result.text+='\n';result.text+=heldFinalText;emit(events,AssistantEvent::Text,heldFinalText);}}
+            if(retryHooks.completionCheck){auto check=retryHooks.completionCheck();const auto* accepted=check.find("allowed");if(!accepted||accepted->t!=V::Bool)throw std::runtime_error("BOM completion verification unavailable; prior work retained");if(!accepted->b){auto issue=field(check,"error");if(issue.empty())issue="BOM review required";if(issue==lastCompletionIssue)throw std::runtime_error(issue);lastCompletionIssue=issue;V reminder=V::makeObj();reminder.set("role",V::makeStr("developer"));reminder.set("content",V::makeStr(issue));appendHistory(reminder);if(history)history(result.conversation);emit(events,AssistantEvent::Status,"Final reply held: current BOM review required");continue;}auto qualification=field(check,"summary");if(!qualification.empty())heldFinalText+="\n\n"+qualification;}
+            cancelled(cancel);
+            if(consumeFinalInbox()||(retryHooks.acceptCompletion&&!retryHooks.acceptCompletion())){if(history)history(result.conversation);emit(events,AssistantEvent::Status,"New user input queued; continuing before final reply");continue;}
+            if(!heldFinalText.empty()){if(!result.text.empty())result.text+='\n';result.text+=heldFinalText;emit(events,AssistantEvent::Text,heldFinalText);}
             return result;
         }
         earlierToolCalls=true;
@@ -495,7 +507,8 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
             const auto toolBegan=std::chrono::steady_clock::now();
             V args,toolResult;
             if(!arkjson::parse(field(call,"arguments"),args)||args.t!=V::Obj)toolResult=errorResult("Tool arguments must be a JSON object; correct them and retry.");
-            else if(needsProjectedInspection&&writeTools.count(name))toolResult=errorResult("Request history was compacted. Read current doc_info successfully before any write; prior commits must not be replayed.");
+            else if(retryHooks.requestCurrent&&!retryHooks.requestCurrent()&&!assistantToolReadOnly(tools,name,args))toolResult=errorResult("User steering arrived after this provider request. Consume it before another write; this operation was not executed.");
+            else if(needsProjectedInspection&&writeTools.count(name)&&!assistantToolReadOnly(tools,name,args))toolResult=errorResult("Request history was compacted. Read current doc_info successfully before any write; prior commits must not be replayed.");
             else if(!callTool)toolResult=errorResult("The host did not provide an ARK tool executor.");
             else {try{toolResult=callTool(name,args);}catch(const std::exception&){toolResult=errorResult("ARK tool execution failed; inspect the document before retrying.");}}
             trackFeedback(toolResult);

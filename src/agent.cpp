@@ -1,4 +1,7 @@
 #include "ark/agent.hpp"
+#include "ark/document_container.hpp"
+#include "ark/authoring_024b.hpp"
+#include "ark/appearance_024b.hpp"
 #include "ark/skeleton.hpp"
 #include "ark/drawings.hpp"
 #include "ark/authoring_023b.hpp"
@@ -171,6 +174,7 @@ void editNode(AssemblyNode& n,const V& j,const Document& doc){
 }
 V result(V data,bool error=false){V r=V::makeObj(),content=V::makeArr(),item=V::makeObj();item.set("type",V::makeStr("text"));item.set("text",V::makeStr(data.dump()));content.arr.push_back(item);r.set("content",content);r.set("structuredContent",data);r.set("isError",V::makeBool(error));return r;}
 void validatedMaterials(const Document& d){
+    validateAppearanceAuthoring024B(d,false);
     if(d.features.size()>1024||d.params.size()>256||d.sketches.size()>64||d.planes.size()>128||d.canvases.size()>8||d.materials.size()>256)throw std::runtime_error("Document capacity exceeded");
     for(const auto& material:d.materials){std::string reason;if(!validateMaterial(material,reason))throw std::runtime_error(reason);}
     for(const auto& feature:d.features){
@@ -186,6 +190,7 @@ void validated(Document& d){
     if(!d.parameterError.empty())throw std::runtime_error(d.parameterError);
     for(auto& r:d.lastResults)if(!r.ok)throw std::runtime_error("Feature #"+std::to_string(r.id)+": "+r.error);
     for(auto& sk:d.sketches)if(!sk.error.empty()||!std::isfinite(sk.residual)||sk.residual>1e-6)throw std::runtime_error("Sketch '"+sk.name+"': "+sk.error);
+    validateAppearanceAuthoring024B(d,true);
     std::vector<AssemblyPlacement> placements;std::string error;if(!resolveAssembly(d,placements,error))throw std::runtime_error(error);
 }
 std::set<u64> consumed(const Document& d){std::set<u64> out;for(auto& f:d.features)if(featureConsumesInputBodies(f))for(auto x:f.inputs)out.insert(x);return out;}
@@ -428,6 +433,7 @@ bool metadataOnlyApply(const Document& document,const V& args){
                 const V* operation=command.find("op");if(!operation||operation->t!=V::Str)return false;
                 const std::string& op=operation->str;
                 if(op=="bom.initialize")return command.obj.size()==1;
+                if(op=="image_asset.set"||op=="image_asset.remove"||op=="stamp.set"||op=="stamp.remove"||op=="face_appearance.set"||op=="face_appearance.remove")return true;
                 if(op!="material.set"&&op!="material.remove"&&op!="feature.edit")return false;
                 if(op=="material.remove"||(op=="material.set"&&(command.find("density")||command.find("density_kg_m3"))))
                     for(const auto& feature:document.features)if(feature.type==FeatureType::ConstructionFrame)return false;
@@ -487,6 +493,7 @@ V designView(const Document& document,u64 revision){
         if(feature.suppressed)row.set("suppressed",V::makeBool(true));
         if(!feature.material.empty())row.set("material",V::makeStr(feature.material));
         if(!feature.material.empty()||feature.appearance.t==V::Obj)row.set("appearance",appearanceToJson(resolvedAppearance(document,feature)));
+        if(!feature.faceAppearances.empty()){V rows=V::makeArr();for(const auto& face:feature.faceAppearances)rows.arr.push_back(faceAppearanceToJson(face));row.set("face_appearances",rows);}
         const DensityValue density=featureDensity(document,feature,env);
         if(density.present&&density.ok)row.set("density_g_cm3",V::makeNum(density.gramsPerCm3));
         if(body){
@@ -508,6 +515,8 @@ V designView(const Document& document,u64 revision){
     for(const auto& node:document.assembly){V row=V::makeObj();row.set("id",V::makeNum((double)node.id));row.set("name",V::makeStr(node.name));row.set("feature",V::makeNum((double)node.feature));row.set("copies",V::makeNum(patternCopies(document,node)));nodes.arr.push_back(row);}
     r.set("parameters",parameters);r.set("features",features);r.set("sketches",sketches);r.set("assembly",nodes);
     if(!document.materials.empty()){V materials=V::makeArr();for(const auto& material:document.materials){V item=V::makeObj();item.set("name",V::makeStr(material.name));item.set("density_g_cm3",V::makeNum(material.densityGcm3));item.set("appearance",appearanceToJson(material.appearance));materials.arr.push_back(item);}r.set("materials",materials);}
+    if(!document.imageAssets.empty()){V assets=V::makeArr();for(const auto& asset:document.imageAssets)assets.arr.push_back(imageAssetToJson(asset));r.set("image_assets",assets);}
+    if(!document.stamps.empty()){V stamps=V::makeArr();for(const auto& stamp:document.stamps)stamps.arr.push_back(stampToJson(stamp));r.set("stamps",stamps);}
     if(!document.canvases.empty()){V canvases=V::makeArr();for(const auto& canvas:document.canvases){V item=V::makeObj();item.set("name",V::makeStr(canvas.name));item.set("plane",V::makeStr(canvas.plane));canvases.arr.push_back(item);}r.set("canvases",canvases);}
     return r;
 }
@@ -639,6 +648,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
                 if(expected->t!=V::Num||expected->num!=(double)revision)
                     throw std::runtime_error("Revision conflict; read doc_info with detail design and retry");
         V extension;if(callAuthoring023Tool(*this,tool,args,extension))return result(extension);if(callComponentLibraryTool(*this,tool,args,extension))return result(extension);if(callAgentFeature(*this,tool,args,extension))return result(extension);
+        {V out;if(callAuthoring024Tool(*this,tool,args,out))return result(out);}
         if(tool=="collision_inspect"||tool=="skeleton_inspect"||tool=="skeleton_compile"){
             if(const auto* expected=args.find("expected_revision"))if(expected->t!=V::Num||expected->num!=(double)revision)throw std::runtime_error("Revision conflict; inspect the current document before querying");
             V report;if(tool=="collision_inspect")report=inspectDocumentCollision(document,args);else if(tool=="skeleton_inspect")report=inspectSkeleton(document);else report=compileSkeletonPreview(document,skeletonSource(args));report.set("revision",V::makeNum((double)revision));return result(report);
@@ -746,6 +756,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
             if(auto p=args.find("faces")){if(p->t!=V::Bool)throw std::runtime_error("faces must be boolean");request.set("faces",*p);}return result(nativeWorkerRequest(request));
         }
         if(tool=="native_inspect"){
+            const auto detail=args.find("detail")?str(args,"detail"):"full";if(detail!="full"&&detail!="report")throw std::runtime_error("native_inspect detail must be full or report");
             const double gravityMs2=gravity(args);
             u64 selected=id(field(args,"id"));
             auto* feature=document.find(selected);
@@ -760,7 +771,8 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
                 V r=V::makeObj();r.set("id",V::makeNum((double)selected));
                 if(auto report=body.nativeData.find("report"))r.set("report",*report);
                 if(auto holes=body.nativeData.find("holes"))r.set("holes",*holes);
-                for(auto key:{"panels","bends","topology"})if(auto data=body.nativeData.find(key))r.set(key,*data);
+                if(detail=="full")for(auto key:{"panels","bends","topology"})if(auto data=body.nativeData.find(key))r.set(key,*data);
+                r.set("detail",V::makeStr(detail));r.set("topology_included",V::makeBool(detail=="full"));
                 r.set("read_only_geometry",V::makeBool(feature->type==FeatureType::SourceSheet));
                 r.set("has_flat",V::makeBool(body.nativeData.find("flat_brep_base64")!=nullptr));
                 if(const V* point=args.find("point")){
@@ -1061,6 +1073,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
                 const auto* op=command.find("op"),*type=command.find("type");
                 if((op&&op->t==V::Str&&op->str.rfind("skeleton.",0)==0)||(type&&type->t==V::Str&&type->str=="mesh_edit"))throw std::runtime_error("Skeleton and indexed mesh authoring require expected_revision from current doc_info");
             }
+            for(const auto& command:commands.arr)if(const auto* op=command.find("op");op&&op->t==V::Str&&(op->str.rfind("stamp.",0)==0||op->str.rfind("image_asset.",0)==0||op->str.rfind("face_appearance.",0)==0)&&!args.find("expected_revision"))throw std::runtime_error("Image and face authoring require expected_revision");
             const bool appearanceOnly=metadataOnlyApply(document,args);
             Document next;std::string error;
             if(appearanceOnly)next=document.authoringCopy();
@@ -1072,6 +1085,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
                 applying=true;commandIndex=(size_t)(&c-commands.arr.data());commandOp=c.find("op")?c.find("op")->asStr():"";
                 auto op=str(c,"op");
                 if(op=="bom.initialize"){if(c.obj.size()!=1)throw std::runtime_error("bom.initialize accepts only op");if(next.bomDocumentId.empty())next.bomDocumentId=newBomDocumentId();}
+                else if(applyAppearance024BCommand(next,c)){}
                 else if(op.rfind("drawing.",0)==0)applyDrawingCommand(next,c);
                 else if(op=="skeleton.set")setSkeletonSource(next,skeletonSource(c));
                 else if(op=="skeleton.remove"){setSkeletonSource(next,"");next.skeleton=V{};}
@@ -1160,7 +1174,8 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
                     else{
                         if(it==next.canvases.end()){if(next.canvases.size()>=8)throw std::runtime_error("Canvas capacity exceeded");next.canvases.push_back({});it=next.canvases.end()-1;it->name=name;}
                         if(!c.find("width")||!c.find("height"))throw std::runtime_error("Canvas needs width and height");
-                        if(c.find("path")||it->path.empty()){auto path=str(c,"path");if(path.size()>1024)throw std::runtime_error("Canvas path must be 1..1024 characters");it->path=path;}
+                        if(c.find("asset")){it->asset=str(c,"asset");it->path.clear();if(c.find("path"))throw std::runtime_error("Choose canvas asset or path, not both");}
+                        else if(c.find("path")||(it->path.empty()&&it->asset.empty())){auto path=str(c,"path");if(path.size()>1024)throw std::runtime_error("Canvas path must be 1..1024 characters");it->path=path;it->asset.clear();}
                         if(c.find("plane")){auto plane=str(c,"plane");if(plane.size()>128)throw std::runtime_error("Canvas plane must be a name");it->plane=plane;}
                         it->width=expression(field(c,"width"));it->height=expression(field(c,"height"));
                         if(auto opacity=c.find("opacity")){if(opacity->t!=V::Num||!std::isfinite(opacity->num)||opacity->num<0||opacity->num>1)throw std::runtime_error("Canvas opacity must be 0..1");it->opacity=opacity->num;}
@@ -1227,9 +1242,11 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
                 if(!conditionReport.find("passed")->b){V failure=V::makeObj();failure.set("error",V::makeStr("Required postconditions failed"));failure.set("error_code",V::makeStr("POSTCONDITION_FAILED"));failure.set("stage",V::makeStr("postconditions"));failure.set("revision",V::makeNum((double)revision));failure.set("document_unchanged",V::makeBool(true));failure.set("conditions",conditionReport);return result(failure,true);}
             }
             if(appearanceOnly){
-                validatedMaterials(next);
-                remember();document.materials=std::move(next.materials);document.bomDocumentId=std::move(next.bomDocumentId);
-                for(size_t i=0;i<document.features.size();++i){document.features[i].material=std::move(next.features[i].material);document.features[i].appearance=std::move(next.features[i].appearance);document.features[i].part=std::move(next.features[i].part);}
+                next.evalBodies=document.evalBodies;next.lastResults=document.lastResults;
+                validatedMaterials(next);validateAppearanceAuthoring024B(next,true);
+                if(appearance024BNeedsVersion39(next)&&documentToJson(next,true,false).size()>maxDocumentBytes)throw std::runtime_error("Embedded image document exceeds 4 MiB; reduce image dimensions/size");
+                remember();document.materials=std::move(next.materials);document.bomDocumentId=std::move(next.bomDocumentId);document.imageAssets=std::move(next.imageAssets);document.stamps=std::move(next.stamps);
+                for(size_t i=0;i<document.features.size();++i){document.features[i].material=std::move(next.features[i].material);document.features[i].appearance=std::move(next.features[i].appearance);document.features[i].part=std::move(next.features[i].part);document.features[i].faceAppearances=std::move(next.features[i].faceAppearances);}
             }else{if(!args.find("checks")&&!drawingEdits)validated(next);remember();document=std::move(next);}
             ++revision;
             V r=info();r.set("created_ids",created);r.set("created_node_ids",createdNodes);r.set("created_mate_ids",createdMates);r.set("sheet_edits",sheetEdits);r.set("geometry_recomputed",V::makeBool(!appearanceOnly));if(args.find("checks"))r.set("conditions",conditionReport);return result(r);
@@ -1353,7 +1370,7 @@ V AgentSession::tools(bool detailed){
         {"electronics_inspect","Read PCB layers, net connectivity, clearance DRC and BOM, or a cable route's bend radius, exact length and independently checked obstacle clearance. Does not certify electrical or manufacturing performance.",R"({"type":"object","properties":{"id":{"type":["integer","string"]}},"required":["id"]})",true},
         {"pcb_export","Export PCB copper and outline Gerbers, plated/non-plated Excellon drill files and JSON netlist as a fabrication preview. Run electronics_inspect for incomplete nets and DRC scope first.",R"({"type":"object","properties":{"id":{"type":["integer","string"]},"path_prefix":{"type":"string"}},"required":["id","path_prefix"]})",false},
         {"export_iges","Export a selected exact B-rep as IGES in millimetres, with independent readback bounds/area checks and solid-topology status. Default pose formed; flat is available only for sheet features.",R"({"type":"object","properties":{"id":{"type":["integer","string"]},"path":{"type":"string"},"pose":{"type":"string","enum":["flat","formed"]}},"required":["id","path"]})",false},
-        {"agent_onboard","START HERE. Discover current document/revision, supported modeling workflows, reusable component library, examples and validation limits. Read-only; choose a topic before modeling.",R"({"type":"object","properties":{"topic":{"type":"string","enum":["bom","fasteners","components","motion","manufacturing","physics","automation","overview","sketch","tube","assembly","surfacing","sheet","solids","mesh","materials","frames","electronics","routing","suspension","skeleton","drawings","holes","cad_import","containers"]}}})",true},
+        {"agent_onboard","START HERE. Discover current document/revision, supported modeling workflows, reusable component library, examples and validation limits. Read-only; choose a topic before modeling.",R"({"type":"object","properties":{"topic":{"type":"string","enum":["bom","fasteners","components","motion","manufacturing","physics","automation","overview","sketch","tube","assembly","surfacing","sheet","solids","mesh","materials","frames","electronics","routing","suspension","skeleton","drawings","holes","cad_import","containers","stamps","planes"]}}})",true},
         {"doc_info","Document summary/inventory. detail design returns feature operations/dependencies/roles, sketch names, origins, manufacturing declarations and measured volume/bounds. ids/sections require detail design or omitted detail (inferred design); explicit summary cannot use either filter. Examples: {detail:summary}, {detail:design,sections:[features,assembly]}. Optional ids selects 1..64 feature ids or unique names (default section features); sections selects features|sketches|parameters|assembly|materials. With ids, sketches/assembly/materials are direct associations; parameters stay document-wide. Selected reads expose partial, scope, section_scopes and total_counts. No meshes/native payloads; read-only.",R"({"type":"object","anyOf":[{"properties":{"detail":{"enum":["design"]}}},{"not":{"anyOf":[{"required":["ids"]},{"required":["sections"]}]}}],"properties":{"detail":{"type":"string","enum":["summary","design"]},"ids":{"type":"array","minItems":1,"maxItems":64,"items":{"oneOf":[{"type":"integer","minimum":1},{"type":"string","minLength":1,"maxLength":128}]}},"sections":{"type":"array","minItems":1,"maxItems":5,"uniqueItems":true,"items":{"type":"string","enum":["features","sketches","parameters","assembly","materials"]}}}})",true},
         {"doc_new","Start an empty document only when requested. Clears the active model with undo and a monotonically increasing revision; does not overwrite saved files.",R"({"type":"object","properties":{"expected_revision":{"type":"integer","minimum":0}},"required":["expected_revision"]})",false},
         {"doc_get","Read full parametric document, including expressions and revision.",R"({"type":"object"})",true},
@@ -1397,7 +1414,9 @@ V AgentSession::tools(bool detailed){
     };
     V list=V::makeArr();for(auto& d:defs){V t=V::makeObj(),schema,annotations=V::makeObj();t.set("name",V::makeStr(d.name));t.set("description",V::makeStr(!detailed&&std::string(d.name)=="doc_apply"?"Atomic batch of 1..128 modeling commands. Core forms: param.set{name,expr}; feature.add{type,name,p,inputs?,native?}; feature.edit{id,p?,native?,name?}; feature.remove{id}. Target id is a positive number or unique name; p maps actual authored parameter keys to numbers/expression strings. Read object_context for the target before editing. Native box keys are width/depth/height; legacy box keys are dx/dy/dz. Native box edit example: {op:feature.edit,id:Native block,p:{height:9}}. Pass expected_revision; stale revisions and failed evaluation leave the document unchanged. Discover operation contracts and examples with agent_onboard for your domain; agent_onboard{topic:automation} supplies the full command reference. Supports parameters, materials/transparency, features, sketches, datums, assemblies, mates, mate-aware assembly.drive and sheet edits. Inspect assembly_info.drive before committing a joint movement. doc_preview evaluates and caches a candidate; doc_apply{candidate_id,expected_revision} commits without recomputation. Optional checks:[{id?,query:{tool,args,path},op:ge|le|eq|between|true|false,value?,min?,max?,tolerance?,parameters?,diagnose?}] must all pass before commit; failures roll back and return measured residuals. diagnose adds bounded local sensitivity probes. Material density accepts g/cm3 or density_kg_m3, plus physical SI elastic properties. Angles are degrees except trig expressions in radians; lengths mm.":d.desc));arkjson::parse(d.schema,schema);if(std::string(d.name)=="mesh_raycast"||std::string(d.name)=="export_mesh"||std::string(d.name)=="snapshot"){
         V props=schema.find("properties")?*schema.find("properties"):V::makeObj(),node=V::makeObj(),kinds=V::makeArr(),integer=V::makeObj(),text=V::makeObj(),copy=V::makeObj();integer.set("type",V::makeStr("integer"));integer.set("minimum",V::makeNum(1));text.set("type",V::makeStr("string"));kinds.arr.push_back(integer);kinds.arr.push_back(text);node.set("anyOf",kinds);copy.set("type",V::makeStr("integer"));copy.set("minimum",V::makeNum(0));copy.set("maximum",V::makeNum(31));props.set("node",node);props.set("copy",copy);schema.set("properties",props);
-    }if(std::string(d.name)=="doc_apply"){
+    }
+        if(std::string(d.name)=="native_inspect"){V props=*schema.find("properties"),detail;arkjson::parse(R"({"type":"string","enum":["full","report"],"description":"report omits topology/panels/bends; use for compact validity and physical-property inspection."})",detail);props.set("detail",detail);schema.set("properties",props);}
+if(std::string(d.name)=="doc_apply"){
         if(detailed)t.set("description",V::makeStr(t.find("description")->str+" Joint limits: prismatic (alias slider) aligns axes and locks relative orientation, leaving axial translation. Revolute/prismatic accept limits:{min:number|expression,max:number|expression}; limits:null clears. Bounds are signed B-relative-A coordinates in deg/mm, revolute spans must be less than 360 degrees. Drive rejects limits crossed along the full requested movement. These additions save document version31. assembly_info.drive.joint reports position/unit/limited/min/max/coordinate_sign."));
         V commands=*schema.find("properties")->find("commands"),command=*commands.find("items"),commandProps=*command.find("properties"),limits;
         // Expose the actual common command fields at discovery. Detailed native,
@@ -1443,6 +1462,7 @@ V AgentSession::tools(bool detailed){
                 V recipe=V::makeObj(),recipeProps=V::makeObj(),type=V::makeObj(),types=V::makeArr();for(const auto& name:sketchRecipeTypes())types.arr.push_back(V::makeStr(name));types.arr.push_back(V::makeStr("three_point"));types.arr.push_back(V::makeStr("tangent"));type.set("type",V::makeStr("string"));type.set("enum",types);recipeProps.set("type",type);recipe.set("type",V::makeStr("object"));recipe.set("properties",recipeProps);recipe.set("additionalProperties",V::makeBool(true));recipe.set("description",V::makeStr("Typed source fields depend on type. agent_onboard sketch provides complete defaults; runtime rejects unknown fields and degeneracy. Edit the source with sketch.entity.set."));properties.set("recipe",recipe);shape.set("properties",properties);variants.arr[1]=shape;V updated=*entity;updated.set("oneOf",variants);commandProps.set("entity",updated);}
         }
         {V remove;arkjson::parse(R"({"type":"array","items":{"type":"string"},"maxItems":128})",remove);commandProps.set("p_remove",remove);}
+        if(auto* op=commandProps.find("op")){V operation=*op;if(auto* choices=operation.find("enum")){V names=*choices;for(const char* name:{"image_asset.set","image_asset.remove","stamp.set","stamp.remove","face_appearance.set","face_appearance.remove"})names.arr.push_back(V::makeStr(name));operation.set("enum",names);commandProps.set("op",operation);}}
         command.set("additionalProperties",V::makeBool(true));
         {V native=commandProps.find("native")?*commandProps.find("native"):V::makeObj();V extra=agentParametricNativeSchema();V fields=native.find("properties")?*native.find("properties"):V::makeObj();if(const auto* props=extra.find("properties"))for(const auto& p:props->obj)fields.set(p.first,p.second);V index=V::makeObj();index.set("type",V::makeStr("integer"));index.set("minimum",V::makeNum(0));V indices=V::makeObj();indices.set("type",V::makeStr("array"));indices.set("items",index);indices.set("minItems",V::makeNum(1));indices.set("maxItems",V::makeNum(12288));fields.set("vertices",indices);fields.set("triangles",indices);V fingerprint=V::makeObj();fingerprint.set("type",V::makeStr("string"));fields.set("source_topology",fingerprint);fields.set("source_vertex",fingerprint);fields.set("recipe",holesRecipeSchema());native.set("properties",fields);commandProps.set("native",native);}
         V examples;arkjson::parse(R"([{"op":"param.set","name":"width","expr":20},{"op":"feature.add","type":"box","name":"Base","p":{"dx":"width","dy":30,"dz":10}},{"op":"feature.edit","id":"Base","p":{"dx":25}},{"op":"feature.add","type":"native_solid","name":"Native block","native":{"op":"box"},"p":{"width":11,"depth":7,"height":4}},{"op":"feature.edit","id":"Native block","p":{"height":9}},{"op":"sketch.set","name":"Profile","sketch":{"plane":"XY","entities":[{"kind":"circle","name":"Ring","dof":[0,0,10]}]}},{"op":"assembly.add","name":"Placed base","feature":"Base","parent":0,"p":{"tx":10}},{"op":"mate.add","a":"Anchor","b":"Moving","type":"revolute","reference_a":"origin","reference_b":"origin"},{"op":"assembly.drive","driver":"Moving","mode":"rotate","delta":15}])",examples);command.set("examples",examples);
@@ -1451,7 +1471,7 @@ V AgentSession::tools(bool detailed){
         V props=*schema.find("properties"),candidate=V::makeObj();candidate.set("type",V::makeStr("string"));props.set("candidate_id",candidate);V acceptDfm=V::makeObj();acceptDfm.set("type",V::makeStr("boolean"));acceptDfm.set("description",V::makeStr("Explicit acceptance after reviewing a manufacturing_propose comparison; required true for those candidates only."));props.set("accept_dfm",acceptDfm);props.set("checks",agentPostconditionsSchema());schema.set("properties",props);schema.obj.erase(std::remove_if(schema.obj.begin(),schema.obj.end(),[](const auto& p){return p.first=="required";}),schema.obj.end());V variants;arkjson::parse(R"([{"required":["commands"]},{"required":["candidate_id","expected_revision"]}])",variants);schema.set("oneOf",variants);
     }if(!d.read&&(std::string(d.name).rfind("doc_",0)==0||std::string(d.name).rfind("import_",0)==0||std::string(d.name)=="iteration_restore")){
         V actor,motivation=V::makeObj(),props=schema.find("properties")?*schema.find("properties"):V::makeObj();arkjson::parse(R"({"type":"object","properties":{"kind":{"type":"string","minLength":1,"maxLength":256},"id":{"type":"string","minLength":1,"maxLength":256},"role":{"type":"string","minLength":1,"maxLength":256},"model":{"type":"string","minLength":1,"maxLength":256}},"required":["kind","id"],"additionalProperties":false})",actor);motivation.set("type",V::makeStr("string"));motivation.set("maxLength",V::makeNum(4096));props.set("actor",actor);props.set("motivation",motivation);schema.set("properties",props);
-    }t.set("inputSchema",schema);annotations.set("readOnlyHint",V::makeBool(d.read));t.set("annotations",annotations);list.arr.push_back(t);}appendAgentFeatureTools(list);appendAuthoring023Tools(list);
+    }t.set("inputSchema",schema);annotations.set("readOnlyHint",V::makeBool(d.read));t.set("annotations",annotations);list.arr.push_back(t);}appendAgentFeatureTools(list);appendAuthoring023Tools(list);appendAuthoring024Tools(list);
     V commandItems;
     for(const auto& tool:list.arr)if(tool.find("name")->str=="doc_apply")commandItems=*tool.find("inputSchema")->find("properties")->find("commands")->find("items");
     for(auto& tool:list.arr)if(tool.find("name")->str=="doc_preview"){V schema=*tool.find("inputSchema"),props=*schema.find("properties"),commands=*props.find("commands");commands.set("items",commandItems);props.set("commands",commands);schema.set("properties",props);tool.set("inputSchema",schema);}

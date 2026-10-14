@@ -139,8 +139,8 @@ struct AgentTeam::Impl {
         cancelled=true;
         {std::lock_guard lock(mutex);jobs.clear();paused=false;
             prepared.clear();preparedBytes=0;writeReservation={};
-            for(auto& role:roles){role.pending.clear();role.context.clear();role.pendingBytes=role.contextBytes=0;role.queued=false;
-                if(!role.active){role.view.state=AgentTeamState::Cancelled;role.view.status="Cancelled";}}
+            for(auto& role:roles){role.context.clear();role.contextBytes=0;role.queued=false;
+                if(!role.active){closeInterruptedCalls(role.view.conversation);for(const auto& pending:role.pending)role.view.conversation.arr.push_back(pending);role.pending.clear();role.pendingBytes=0;role.view.state=AgentTeamState::Cancelled;role.view.status="Cancelled";}}
         }
         wake.notify_all();idle.notify_all();
     }
@@ -166,18 +166,22 @@ struct AgentTeam::Impl {
         if(cancelled)throw std::runtime_error("Team cancelled; previously applied document changes remain.");
     }
     void queue(std::size_t index){auto& role=roles[index];if(role.active||role.queued)return;role.queued=true;role.view.state=AgentTeamState::Queued;role.view.status="Queued";jobs.push_back(index);}
-    bool deliver(const std::string& sender,const std::string& target,const std::string& text,bool user,bool assignment=true,const V* userPayload=nullptr){
+    bool deliver(const std::string& sender,const std::string& target,const std::string& text,bool user,bool assignment=true,const V* userPayload=nullptr,std::string* rejection=nullptr){
         if(!hasText(text))return false;
         std::vector<std::string> accepted;
         {std::lock_guard lock(mutex);if(!started||cancelled)return false;
             if(!user&&!std::any_of(roles.begin(),roles.end(),[&](const auto& r){return r.view.id==sender;}))return false;
+            if(!user&&assignment){const auto& source=*std::find_if(roles.begin(),roles.end(),[&](const auto& r){return r.view.id==sender;});if(source.steeringVersion!=source.requestVersion){if(rejection)*rejection="User steering arrived after this provider request. Consume the new input before assigning downstream work; no assignment was delivered.";return false;}}
             auto effectiveTarget=user&&target=="all"?std::string{}:user&&target.empty()&&config.focusedWorkflow?leadRoleId(config.roles):target;
             auto content=(user?std::string("User steering: "):"Teammate "+sender+": ")+text;
             const V incoming=userPayload?*userPayload:message("user",content);const auto incomingBytes=incoming.dump().size();
-            // Check every addressed route before queuing any image. An active
-            // conversation may temporarily have an unpaired tool batch, so
-            // capability validation uses only this new complete user message.
-            if(userPayload){V history=V::makeArr();history.arr.push_back(incoming);for(const auto& role:roles)if(effectiveTarget.empty()||role.view.id==effectiveTarget)assistantRequest(role.config.assistant,history,role.tools);}
+            // Validate every addressed route plus its actual retained/pending
+            // references before queueing any recipient. Incomplete tool calls
+            // are excluded only from this temporary transport validation copy.
+            if(userPayload)for(const auto& role:roles)if(effectiveTarget.empty()||role.view.id==effectiveTarget){V history=role.view.conversation;for(const auto& item:role.pending)history.arr.push_back(item);history.arr.push_back(incoming);validateAssistantSteeringInput(role.config.assistant,history,role.tools);}
+            // An explicit user broadcast must be accepted by every addressed
+            // role or none. Do not silently deliver an image to only half a team.
+            if(user)for(const auto& role:roles)if(effectiveTarget.empty()||role.view.id==effectiveTarget){const auto limit=userPayload?role.config.assistant.maxConversationBytes:config.maxMailboxBytes;if((config.maxTurnsPerRole&&role.turnsInWindow>=config.maxTurnsPerRole&&!role.active)||incomingBytes>limit||role.pendingBytes>limit-incomingBytes)return false;}
             for(std::size_t i=0;i<roles.size();++i){auto& role=roles[i];if(!effectiveTarget.empty()&&role.view.id!=effectiveTarget)continue;
                 if(!user&&role.view.id==sender)continue;
                 if(config.maxTurnsPerRole&&role.turnsInWindow>=config.maxTurnsPerRole&&!role.active)continue;
@@ -312,8 +316,8 @@ struct AgentTeam::Impl {
                 if(!valid||kind!="assignment")result=errorResult("Scoped context requires an explicit valid kind:assignment message.");
                 else {context=assignmentContext(index,to->str,*scope);if(isError(context))result=context;else deliveredText+="\nAssignment context (observed revision only; inspect current document before writing; no automatic rebase): "+context.dump();}
             }
-            bool sent=valid&&!isError(result)&&deliver(roles[index].config.id,to->str,deliveredText,false,kind.empty()||kind=="assignment");
-            if(!isError(result))result=sent?V::makeObj():errorResult("Message rejected: invalid recipient, empty message, cancellation or team mailbox limit.");if(sent){result.set("delivered",V::makeBool(true));if(!context.isNull()){result.set("context_origin_revision",*context.find("origin_revision"));result.set("context_bytes",V::makeNum(context.dump().size()));}if(config.focusedWorkflow)result.set("scheduling",V::makeStr("The recipient runs after the current turn ends. Finish this turn after the handoff; do not poll or wait for a queued teammate."));}
+            std::string rejection;bool sent=valid&&!isError(result)&&deliver(roles[index].config.id,to->str,deliveredText,false,kind.empty()||kind=="assignment",nullptr,&rejection);
+            if(!isError(result))result=sent?V::makeObj():errorResult(rejection.empty()?"Message rejected: invalid recipient, empty message, cancellation or team mailbox limit.":rejection);if(sent){result.set("delivered",V::makeBool(true));if(!context.isNull()){result.set("context_origin_revision",*context.find("origin_revision"));result.set("context_bytes",V::makeNum(context.dump().size()));}if(config.focusedWorkflow)result.set("scheduling",V::makeStr("The recipient runs after the current turn ends. Finish this turn after the handoff; do not poll or wait for a queued teammate."));}
         }else if(name=="team_report_task"||name=="team_finish_goal")result=report(index,args,name=="team_finish_goal");
         else if(name=="team_context")result=context();
         else if(name=="team_reserve_write")result=reserveWrite(index,args);
@@ -321,8 +325,8 @@ struct AgentTeam::Impl {
         else if(name=="team_propose")result=propose(index,args);
         else if(name=="team_proposal"){std::lock_guard lock(mutex);auto id=field(args,"id");auto found=std::find_if(proposals.begin(),proposals.end(),[&](const auto& proposal){return proposal.view.id==id;});result=found==proposals.end()?errorResult("Unknown team proposal id."):found->data;}
         else {
-            V actual=args,authorized=args;std::string actualName=name,proposalId=field(args,"proposal_id"),scopeError;AgentTeamDiscipline discipline;bool allowed,stale,needsInspection;V reservationBlocked;
-            {std::lock_guard lock(mutex);discipline=roles[index].config.discipline;allowed=(roles[index].config.canWrite||readOnly.count(name)||name=="tool_feedback")&&scopedTool(discipline,name);stale=roles[index].steeringVersion!=roles[index].requestVersion;needsInspection=roles[index].view.needsInspection;
+            V actual=args,authorized=args;std::string actualName=name,proposalId=field(args,"proposal_id"),scopeError;AgentTeamDiscipline discipline;bool allowed,stale,needsInspection;V reservationBlocked;const bool readOnlyCall=assistantToolReadOnly(tools,name,args);
+            {std::lock_guard lock(mutex);discipline=roles[index].config.discipline;allowed=(roles[index].config.canWrite||readOnlyCall)&&scopedTool(discipline,name);stale=roles[index].steeringVersion!=roles[index].requestVersion;needsInspection=roles[index].view.needsInspection;
                 if(name=="team_apply_step"){actualName="doc_apply";actual=V::makeObj();if(auto expected=args.find("expected_revision"))actual.set("expected_revision",*expected);if(!proposalId.empty()){auto found=std::find_if(proposals.begin(),proposals.end(),[&](const auto& p){return p.view.id==proposalId;});if(found==proposals.end()||found->view.toId!=roles[index].view.id)scopeError="Proposal is missing or addressed to another writer.";else if(!revision(args)||found->view.expectedRevision!=(std::uint64_t)args.find("expected_revision")->num)scopeError="Proposal revision differs from the proposed baseline; inspect and request a new proposal rather than rebasing.";else {actual.set("commands",*found->data.find("commands"));if(auto checks=found->data.find("checks"))actual.set("checks",*checks);}}
                     else if(auto candidate=args.find("candidate_id")){actual.set("candidate_id",*candidate);if(auto accepted=args.find("accept_dfm"))actual.set("accept_dfm",*accepted);}
                     else {if(auto commands=args.find("commands"))actual.set("commands",*commands);if(auto checks=args.find("checks"))actual.set("checks",*checks);}
@@ -340,7 +344,7 @@ struct AgentTeam::Impl {
             }
             if(scopeError.empty()&&(actualName=="doc_apply"||name=="doc_preview"||name=="manufacturing_propose"))scopeError=commandsError(authorized,config.maxCommandsPerStep,(name=="doc_preview"||name=="manufacturing_propose")&&!roles[index].config.canWrite?AgentTeamDiscipline::General:discipline,config.maxFeaturesPerStep,config.maxPlacementsPerStep);
             if(!allowed)result=errorResult(roles[index].config.canWrite?"This document operation belongs to the lead engineer. Send a specific request or revision-bound proposal to that role.":"This role is read-only. Send a revision-bound proposal to a writable teammate using team_send.");
-            else if(!readOnly.count(name)&&name!="tool_feedback"&&stale)result=errorResult("User steering arrived after this provider request. Consume it before proposing another write; this operation was not executed.");
+            else if(!readOnlyCall&&stale)result=errorResult("User steering arrived after this provider request. Consume it before proposing another write; this operation was not executed.");
             else if(documentMutation(name)&&!revision(actual))result=errorResult("Team document mutations require an explicit integer expected_revision. Inspect current doc_info and propose the edit again; no automatic rebase is performed.");
             else if(documentMutation(name)&&needsInspection)result=errorResult("This turn resumed after a limit/interruption. Read current doc_info successfully before any new write; previously committed operations must not be replayed.");
             else if(!scopeError.empty())result=errorResult(scopeError);
@@ -349,9 +353,9 @@ struct AgentTeam::Impl {
                 AgentTeamEvent step;bool constructing=documentMutation(name),ended=false,executing=false;if(constructing){step=construction(index,name,authorized,proposalId);step.kind=AgentTeamEvent::ConstructionQueued;step.text="Queued "+step.text+"; draft is uncommitted";emit(step);}
                 struct Finish {std::function<void()> fn;~Finish(){try{fn();}catch(...){}}} finish{[&]{if(constructing&&!ended){step.kind=AgentTeamEvent::ConstructionEnd;step.toolError=true;step.draft=false;step.draftSketchCommands=V::makeArr();step.text=executing?"Step interrupted; inspect the actual execution outcome":"Queued step cancelled before executor started";emit(step);}}};
                 std::unique_lock<std::timed_mutex> serial(toolsMutex,std::defer_lock);while(!serial.try_lock_for(std::chrono::milliseconds(20)))checkpoint(index);checkpoint(index);
-                {std::lock_guard lock(mutex);stale=roles[index].steeringVersion!=roles[index].requestVersion;needsInspection=roles[index].view.needsInspection;if(documentMutation(actualName)||(!readOnly.count(name)&&name!="tool_feedback"))reservationBlocked=writeReservationBusyLocked(index);}
+                {std::lock_guard lock(mutex);stale=roles[index].steeringVersion!=roles[index].requestVersion;needsInspection=roles[index].view.needsInspection;if(documentMutation(actualName)||!readOnlyCall)reservationBlocked=writeReservationBusyLocked(index);}
                 if(isError(reservationBlocked))result=reservationBlocked;
-                else if(!readOnly.count(name)&&name!="tool_feedback"&&stale)result=errorResult("User steering arrived while the step was queued; this old operation was not executed.");
+                else if(!readOnlyCall&&stale)result=errorResult("User steering arrived while the step was queued; this old operation was not executed.");
                 else if(documentMutation(name)&&needsInspection)result=errorResult("Inspect current doc_info before a resumed write; this operation was not executed.");
                 else {executing=true;if(constructing){step.kind=AgentTeamEvent::ConstructionStart;step.text="Executing atomic "+step.stepId+"; draft remains uncommitted";emit(step);}try{result=executor(actualName,actual);}catch(...){result=errorResult("Shared ARK executor failed. Inspect the document and revision before retrying; a running operation may have completed.");std::lock_guard lock(mutex);roles[index].view.needsInspection=true;}}
                 if(!isError(result)&&name=="doc_info"){std::uint64_t observed;if(receiptRevision(payload(result),observed)){std::lock_guard lock(mutex);roles[index].view.needsInspection=false;roles[index].hasInspectedRevision=true;roles[index].inspectedRevision=observed;}}
@@ -415,9 +419,10 @@ struct AgentTeam::Impl {
             workerRoleId=roles[index].config.id;
             try{
                 const auto& roleConfig=roles[index].config;
+                AssistantRetryHooks retryHooks;retryHooks.checkpoint=[&]{checkpoint(index);};retryHooks.inputPending=[&]{std::lock_guard lock(mutex);return !roles[index].pending.empty();};
                 auto result=runAssistant(roleConfig.assistant,input,roles[index].tools,[&](const auto& name,const auto& args){return call(index,name,args);},
                     [&](const auto& event){assistantEvent(index,baseline,performanceBaseline,event);},&cancelled,roleConfig.transport,[&]{return inbox(index);},
-                    [&](const V& history){std::lock_guard lock(mutex);roles[index].view.conversation=history;},AssistantRetryHooks{[&]{checkpoint(index);},{},{}});
+                    [&](const V& history){std::lock_guard lock(mutex);roles[index].view.conversation=history;},retryHooks);
                 {std::lock_guard lock(mutex);roles[index].view.conversation=std::move(result.conversation);roles[index].view.usage=baseline;accumulateAssistantUsage(roles[index].view.usage,result.usage);roles[index].view.performance=performanceBaseline;accumulateAssistantPerformance(roles[index].view.performance,result.performance);roles[index].view.state=cancelled?AgentTeamState::Cancelled:AgentTeamState::Idle;}
                 status(index,cancelled?"Cancelled":"Turn finished / task status requires explicit report");
             }catch(const AssistantRoundLimit&){
@@ -446,6 +451,7 @@ struct AgentTeam::Impl {
             }
             workerRoleId.clear();
             {std::lock_guard lock(mutex);auto& role=roles[index];if(writeReservation.owner==role.view.id)writeReservation={};role.active=false;--active;
+                if(cancelled){closeInterruptedCalls(role.view.conversation);for(const auto& pending:role.pending)role.view.conversation.arr.push_back(pending);role.pending.clear();role.pendingBytes=0;}
                 if(!cancelled&&config.maxTurnsPerRole&&role.turnsInWindow>=config.maxTurnsPerRole){role.view.state=AgentTeamState::AwaitingContinuation;role.view.status="Turn window exhausted; explicit resume retains previous commits";role.view.needsInspection=true;}
                 else if(!cancelled&&!role.pending.empty())queue(index);
             }
@@ -480,7 +486,7 @@ void AgentTeam::start(const AgentTeamConfig& config,const V& userMessage,const V
         for(const auto& roleConfig:config.roles){Impl::Role role;role.config=roleConfig;role.view.id=roleConfig.id;role.view.label=roleConfig.label;role.view.model=roleConfig.assistant.model;role.view.reasoningEffort=roleConfig.assistant.reasoningEffort;role.view.canWrite=roleConfig.canWrite;role.view.discipline=roleConfig.discipline;
             if(roleConfig.canWrite)impl_->preparedByteLimit=std::max(impl_->preparedByteLimit,roleConfig.assistant.maxConversationBytes);
             V allowedOperations=V::makeArr();for(const auto& operation:operationList.arr)if(!roleConfig.canWrite||scopedCommand(roleConfig.discipline,operation.asStr()))allowedOperations.arr.push_back(operation);
-            for(const auto& tool:impl_->tools.arr)if((roleConfig.canWrite||impl_->readOnly.count(field(tool,"name"))||field(tool,"name")=="tool_feedback")&&scopedTool(roleConfig.discipline,field(tool,"name"))){V advertised=tool;const auto name=field(tool,"name");
+            for(const auto& tool:impl_->tools.arr)if((roleConfig.canWrite||impl_->readOnly.count(field(tool,"name"))||field(tool,"name")=="tool_feedback"||field(tool,"name")=="snapshot")&&scopedTool(roleConfig.discipline,field(tool,"name"))){V advertised=tool;const auto name=field(tool,"name");
                 if(!allowedOperations.arr.empty()&&(name=="doc_apply"||name=="team_apply_step"||name=="doc_preview"||name=="manufacturing_propose")){V schema=*tool.find("inputSchema"),props=*schema.find("properties");if(auto original=props.find("commands")){V commands=*original,items=commands.find("items")?*commands.find("items"):V::makeObj(),fields=items.find("properties")?*items.find("properties"):V::makeObj(),op=V::makeObj();op.set("type",V::makeStr("string"));op.set("enum",allowedOperations);fields.set("op",op);items.set("properties",fields);V required=V::makeArr();required.arr.push_back(V::makeStr("op"));items.set("required",required);commands.set("items",items);commands.set("maxItems",V::makeNum(name=="manufacturing_propose"?std::min(8u,config.maxCommandsPerStep):config.maxCommandsPerStep));props.set("commands",commands);schema.set("properties",props);advertised.set("inputSchema",schema);}}
                 role.tools.arr.push_back(std::move(advertised));
             }
@@ -518,6 +524,8 @@ bool AgentTeam::steer(const V& userMessage,const std::string& targetId){validate
 bool AgentTeam::send(const std::string& fromId,const std::string& toId,const std::string& text){return !toId.empty()&&impl_->deliver(fromId,toId,text,false);}
 bool AgentTeam::resume(const std::string& targetId){std::vector<std::string> targets;{std::lock_guard lock(impl_->mutex);for(auto& role:impl_->roles)if((targetId.empty()||targetId==role.view.id)&&!role.active&&(role.view.state==AgentTeamState::AwaitingContinuation||role.view.state==AgentTeamState::Interrupted||role.view.state==AgentTeamState::Failed)){role.turnsInWindow=0;role.view.needsInspection=true;targets.push_back(role.view.id);}}bool accepted=false;for(auto& target:targets)accepted=impl_->deliver("",target,"Continue the remaining task from retained tool receipts. Inspect current doc_info first; do not replay committed changes.",true)||accepted;return accepted;}
 std::string AgentTeam::currentRoleId(){return workerRoleId;}
+std::uint64_t AgentTeam::requestVersion(const std::string& id) const{std::lock_guard lock(impl_->mutex);for(const auto& role:impl_->roles)if(role.view.id==id)return role.requestVersion;return 0;}
+bool AgentTeam::requestCurrent(const std::string& id,std::uint64_t version) const{std::lock_guard lock(impl_->mutex);if(impl_->cancelled)return false;for(const auto& role:impl_->roles)if(role.view.id==id)return role.active&&role.requestVersion==version&&role.steeringVersion==version;return false;}
 void AgentTeam::pause(bool paused){{std::lock_guard lock(impl_->mutex);impl_->paused=paused&&!impl_->cancelled;}impl_->wake.notify_all();}
 void AgentTeam::cancel() noexcept{impl_->cancel();}
 void AgentTeam::waitIdle(){std::unique_lock lock(impl_->mutex);impl_->idle.wait(lock,[&]{return impl_->jobs.empty()&&impl_->active==0;});}

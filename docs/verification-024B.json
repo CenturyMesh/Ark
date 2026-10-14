@@ -1,0 +1,198 @@
+{
+  "iteration": "024B",
+  "runtime": "0.9.25",
+  "date": "2026-10-14",
+  "base_commit": "905b0a5",
+  "verification_status": "Verificado no escopo",
+  "milestones": {
+    "A.01": "Verificado no escopo",
+    "A.02": "Parcial",
+    "A.03": "Parcial",
+    "B.01": "Parcial",
+    "B.02": "Parcial",
+    "B.03": "Parcial",
+    "D.02": "Parcial",
+    "D.03": "Parcial",
+    "E.01": "Parcial"
+  },
+  "build": {
+    "platform": "Windows x64",
+    "compiler": "LLVM-MinGW clang 23.1.3 UCRT",
+    "kernel": "OCCT 8.0.1",
+    "configuration": "Release",
+    "result": "passed",
+    "log_sha256": "56aa9927b7b236a3c6e5d3e3058696a6ecdda012396cd3c15dab98ca251d3c9d"
+  },
+  "tests": {
+    "command": "ctest --test-dir out/native-release --output-on-failure -j 2",
+    "result": "125/125 passed",
+    "wall_seconds": 220.41,
+    "log_sha256": "2cf18b315393d25616e3d5ce72f24ea16d9417d065a86040f1cc5a584a063102",
+    "discovered_tools": 92,
+    "assistant_checks": 356,
+    "agent_team_checks": 343,
+    "compact_inspection": {
+      "full_bytes": 5644,
+      "report_bytes": 1485,
+      "same_measured_report": true,
+      "scope": "Equivalent synthetic solid and input; payload size only, without live-agent cost or performance claims."
+    },
+    "exact_split_checks": 167,
+    "plane_section_core_checks": 43,
+    "ui_sizes": [
+      [
+        1440,
+        900
+      ],
+      [
+        1366,
+        800
+      ]
+    ],
+    "scope": [
+      "Offline single/team steering with actual reference pixels, image intent and rough dimensions; provider-boundary delivery, stale worker/UI writes and stale downstream assignments reject.",
+      "Actual Studio Queue/Cancel controls, final-response delivery gap, retained cancelled references and preservation of a different unsent composer image.",
+      "Portable PNG/JPEG authoring, source/hash rejection, history roundtrip and Undo/Redo, retained preview commit, standalone image import, atomic final document-capacity rollback.",
+      "Actual Stamp dialogs, alpha/orientation/rectangle clipping, foreground plane occlusion, removed-original-file reload, pointer-selected exact split region color and conserved one-solid volume.",
+      "Exact planar/coplanar/oblique/cylindrical split domain, fixed entity tolerances, adaptive area integration, STEP roundtrip and explicit stale/invalid rejection.",
+      "Plane create/offset/sketch reassignment, associative line sections, exact contours and retained-side cuts; source reload and persistent history."
+    ],
+    "earlier_failures": [
+      "Initial compile placement of native_inspect schema extension was corrected before testing.",
+      "Source format 39 was rejected by the older history loader; the conditional history gate and future-version negative regression were corrected.",
+      "Default curved-area integration caused a false conservation failure; adaptive exact integration was used without increasing geometric acceptance tolerances.",
+      "Coplanar/oblique parallel-plane projection exceeded entity tolerance; this supported domain now uses exact rigid translation and bounded face clipping.",
+      "Initial steering UI fixture accessed dimension EDIT controls before redraw and had a readiness data race; actual control creation/readiness and failure cleanup were corrected.",
+      "Large embedded payload preflight packed against an old journal; preflight, outer wrapper journaling, prepared commit and atomic rollback were corrected.",
+      "Stamp reload pixel comparison was confounded by fit/hover changes; the fixture now compares the same camera without highlight. Pixel tolerance was unchanged.",
+      "An intermediate UI run launched before its build completed exercised the previous executable; it is excluded from final evidence.",
+      "Visual review found truncated modal hints and labels; shortened text was rerun and inspected.",
+      "The first full suite passed 122/125: new onboarding topics returned before shared drawing permission guidance, a future-format test still rejected version 39, and saveDocument propagated a serialization-capacity exception instead of returning false. Guidance flow and the bool save contract were restored; the future-version negative case uses 40. The existing atomic save regression was retained."
+    ]
+  },
+  "preview": {
+    "path": "out/test-preview/024B-test1",
+    "identity": {
+      "schema": 1,
+      "product": "ARK",
+      "version": "0.9.25",
+      "iteration_code": "024B",
+      "sequence": 24,
+      "phase": "B",
+      "milestones": [
+        "A.01",
+        "A.02",
+        "A.03",
+        "B.01",
+        "B.02",
+        "B.03",
+        "D.02",
+        "D.03",
+        "E.01"
+      ],
+      "platform": "windows-x64",
+      "entrypoint": "ark-studio.exe"
+    },
+    "files": [
+      {
+        "file": "ark-studio.exe",
+        "sha256": "513aec9d07b8c456685f3216f21caea954f055ace0bb524349861a2e40e1de01"
+      },
+      {
+        "file": "ark-mcp.exe",
+        "sha256": "7ef3d42d16b2506156effd8c727162db8ef8b39a7192f8c32540b4c9a5f5f76f"
+      },
+      {
+        "file": "ark-cli.exe",
+        "sha256": "3113b50fb147c916a318695432069ec9ad1dd610c23a85b84bdf6efe2d153afe"
+      },
+      {
+        "file": "ark-occt-worker.exe",
+        "sha256": "eae2e74db6f79bc51389ccb887c4aa30bbd234ebf845cd500dee4590be2d7915"
+      }
+    ],
+    "relocated_stamps_ui_exit": 0,
+    "dependency_notices_checked": true,
+    "user_projects_included": false
+  },
+  "visual_evidence": [
+    {
+      "path": "out/native-release/ui-checks/assistant-steering-ui.png.steer-active-image.png",
+      "sha256": "35653d5067c903b78d94e5f5c1fd96447826c37e2ddda3dad06a5564977848cc",
+      "inspected": true
+    },
+    {
+      "path": "out/native-release/ui-checks/assistant-steering-ui-compact.png.steer-active-image.png",
+      "sha256": "e7f2d1dbfd7fbbed9d005f0be971e7647bd6b7766f20b791f554bf0889d806f2",
+      "inspected": true
+    },
+    {
+      "path": "out/native-release/ui-checks/stamps-ui.png.stamps-body-artwork.png",
+      "sha256": "49b879a19aff83c01c882f31e04e260ee18306c3c695bef2dbee48dcc2dd9171",
+      "inspected": true
+    },
+    {
+      "path": "out/native-release/ui-checks/stamps-ui.png.stamps-plane-over-body.png",
+      "sha256": "12e90a7e6ebe3fc22aad5fb16377fd2fc8b8586f15c12118a5242be33943ccfb",
+      "inspected": true
+    },
+    {
+      "path": "out/native-release/ui-checks/stamps-ui.png.stamps-reloaded-without-source-file.png",
+      "sha256": "5a8b950c8dc1c899f3284274a1df34e34cc6475aa3480f40045a8c9fb7b6d26a",
+      "inspected": true
+    },
+    {
+      "path": "out/native-release/ui-checks/stamps-ui-compact.png.stamps-exact-split-region.png",
+      "sha256": "87a36e79766ae9a7c8edcbe8cad76c69423204ec14a7520c7bf2910ae8bfeb27",
+      "inspected": true
+    },
+    {
+      "path": "out/native-release/ui-checks/stamps-ui-compact.png.stamps-projection-dialog.png",
+      "sha256": "5c4f9c1c53fcdce33bf6fda8510b91ef295ad9da30a677d07fc3dec373d3447e",
+      "inspected": true
+    },
+    {
+      "path": "out/native-release/ui-checks/planes-sections-ui.png.planes-sections-final.png",
+      "sha256": "e10f91faf9aea155bdbf6c18da22c18e461dc0c5ace526af92129c25356cd2bf",
+      "inspected": true
+    },
+    {
+      "path": "out/native-release/ui-checks/planes-sections-ui-compact.png.planes-section-from-line-dialog.png",
+      "sha256": "9f29546276a440ef28bc7d274ab000ff45e7e7cf63d896fb8fd5648107741929",
+      "inspected": true
+    }
+  ],
+  "source_compatibility": {
+    "format": 39,
+    "conditional_on": "Embedded assets, Stamps, face appearances or exact split-line recipes",
+    "binary_container_version_changed": false,
+    "existing_plane_recipes_keep_prior_source_version": true,
+    "container_boundary": "Containers explicitly reject embedded appearance ownership/merge until supported; bare split-line recipes retain format 39."
+  },
+  "feedback_audit": {
+    "actions": 111,
+    "feedback_entries": 84,
+    "pending_entries": 27,
+    "failed_actions": 12,
+    "issue_entries": 11,
+    "wished_tool_entries": 0,
+    "wished_options_entries": 0,
+    "user_file_modified_or_published": false,
+    "scope": "Aggregate authorized local activity review; no equivalent design-quality, performance or cost benchmark."
+  },
+  "limits": [
+    "No live provider or image-generation provider completion was tested. A client image-generation skill may supply an actual PNG/JPEG artifact; import does not imply generation.",
+    "Stamps are raster appearance, not engraving or STEP texture export; general curved UV unwrapping and independent face transparency sorting are outside scope. Path tracing explicitly falls back to raster.",
+    "Exact split accepts the documented single-wire, planar/cylindrical single-face domain and fixed source digest. Unsupported or ambiguous cases reject.",
+    "Persistent section contours currently require one connected wire with at most 128 edges; a sketch line defines an infinite plane.",
+    "Shell offset validity, degenerate collision meshes and exact compound collision remain open from the reviewed activity. Minimized-size protection is synthetic evidence, not reproduction of the historical snapshot failure.",
+    "Kernel operations already executing finish atomically before steering affects subsequent work. Drawings still require an explicit user request.",
+    "Hosted CI and manual user acceptance are separate gates. No manufacturing qualification or general speedup is claimed."
+  ],
+  "delivery": {
+    "draft": true,
+    "merge_authorized": false,
+    "base_branch": "feature/023B-import-hole-containers",
+    "hosted_ci": "Pending new branch push; previous 023B run was blocked by account payment/spending restrictions, not a test failure."
+  }
+}

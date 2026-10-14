@@ -434,6 +434,9 @@ bool applyAppearancePatch(Appearance& appearance,const arkjson::Value& patch,std
         else if(key=="texture_path"){
             if(value.t!=V::Str||value.str.size()>1024){error="texture_path must be a string of at most 1024 characters";return false;}
             appearance.texturePath=value.str;
+        }else if(key=="texture_asset"){
+            if(value.t!=V::Str||value.str.size()>128){error="texture_asset must be a named embedded asset of at most 128 characters";return false;}
+            appearance.textureAsset=value.str;
         }else if(key=="texture_scale"){
             if(value.t!=V::Arr||value.arr.size()!=2){error="texture_scale needs two positive values";return false;}
             for(int i=0;i<2;++i){const V& scale=value.arr[i];if(scale.t!=V::Num||!std::isfinite(scale.num)||scale.num<=0||scale.num>1e6){error="texture_scale must be positive and at most 1e6";return false;}}
@@ -447,7 +450,7 @@ arkjson::Value appearanceToJson(const Appearance& appearance){
     using V=arkjson::Value;V out=V::makeObj(),color=V::makeArr(),scale=V::makeArr();
     for(double channel:{appearance.baseColor.x,appearance.baseColor.y,appearance.baseColor.z})color.arr.push_back(V::makeNum(channel));
     scale.arr.push_back(V::makeNum(appearance.textureScaleU));scale.arr.push_back(V::makeNum(appearance.textureScaleV));
-    out.set("base_color",color);out.set("metallic",V::makeNum(appearance.metallic));out.set("roughness",V::makeNum(appearance.roughness));out.set("opacity",V::makeNum(appearance.opacity));out.set("texture_path",V::makeStr(appearance.texturePath));out.set("texture_scale",scale);return out;
+    out.set("base_color",color);out.set("metallic",V::makeNum(appearance.metallic));out.set("roughness",V::makeNum(appearance.roughness));out.set("opacity",V::makeNum(appearance.opacity));out.set("texture_path",V::makeStr(appearance.texturePath));if(!appearance.textureAsset.empty())out.set("texture_asset",V::makeStr(appearance.textureAsset));out.set("texture_scale",scale);return out;
 }
 
 bool validateMaterial(const Material& material,std::string& error){
@@ -472,6 +475,7 @@ Appearance resolvedAppearance(const Document& document,const Feature& feature){
 
 Document Document::authoringCopy() const {
     Document out;out.params=params;out.parameterError=parameterError;out.sketches=sketches;out.planes=planes;out.canvases=canvases;
+    out.imageAssets=imageAssets;out.stamps=stamps;
     out.features=features;out.materials=materials;out.usage=usage;out.agentActivity=agentActivity;out.bomDocumentId=bomDocumentId;out.iterationHistory=iterationHistory;out.skeleton=skeleton;
     out.drawings=drawings;out.designContainerCheckout=designContainerCheckout;
     out.assembly=assembly;out.mates=mates;out.nextMateId_=nextMateId_;out.nextAssemblyId_=nextAssemblyId_;out.nextFeatureId_=nextFeatureId_;out.tessOpt=tessOpt;

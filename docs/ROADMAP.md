@@ -50,6 +50,13 @@ remains unimplemented. Portable-core checks are a separate scope.
 
 ## A — Trust and foundation
 
+024B extends B.01/B.02/B.03 with embedded Stamps, exact split-face regions and
+associative plane/line section authoring; D.02/D.03 with live multimodal steering
+and the corrected inline-snapshot coordination contract. Conditional source39
+addresses E.01. [024B verification](iterations/024B.md) distinguishes source,
+local tests, live-provider behavior and user acceptance; broader milestones
+remain **Parcial**.
+
 023B adds bounded exact STEP/IGES reference import and reconstruction evidence
 (B.03/B.05/D.04), parametric functional holes with local published nominal lookup
 (B.02/B.03), and scoped assembly-container checkout/merge (B.04/D.03). Updated
