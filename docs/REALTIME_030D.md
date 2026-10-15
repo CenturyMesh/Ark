@@ -35,7 +35,9 @@ UI scheduling interval, not an agent budget.
 
 The existing measured-activity dialog now includes the last 128 normal local
 dispatches: queue, host, stable-scene capture, model worker and completion-resume
-wall times. It retains tool names and times only. Host time includes its worker
+wall times. Queue time starts at request construction and includes local
+argument handoff before posting. It retains tool names and times only.
+Host time includes its worker
 and capture stages; sums of parallel role times are not elapsed run time.
 These samples end before presentation and exclude provider/network time.
 Cancellation and internal coordination callbacks are outside this sample list.
@@ -59,7 +61,39 @@ Additional checks compare every captured RGB pixel, including orientation,
 exercise texture reallocation and restoration, ensure a slow two-request queue
 yields to rendering without losing either callback, and retain cancellation,
 stale-revision rejection and unchanged source/revision after reads/previews.
-The busy screenshot contains an actual local tool operation and spatial marker.
+The busy screenshot contains an actual local tool operation and role-status
+overlay. Parameter-only previews have no spatial target and explicitly say so.
+
+## Observed local comparison
+
+The [receipt](verification-030D-realtime.json) binds the baseline source
+`ab939dc49343f3690bbae2ab68a773864229c234` and changed runtime source
+`d72469b4ac56a662ff6bd3b67786532158638cdc` to executable hashes and all 480
+measured samples. Three paired runs at each resolution provide 60 samples per
+tool and executable. Values below are medians in milliseconds.
+
+| Size | Preview capture CPU wall time, before → after | Preview through completed render, before → after | Direct mesh inspection through render, before → after |
+|---|---|---|---|
+| 1280 × 800 | 2.233 → 0.880 | 3.878 → 2.290 | 1.282 → 1.130 |
+| 2560 × 1440 | 5.191 → 0.873 | 7.387 → 2.449 | 1.348 → 1.488 |
+
+The direct-call control varies in both directions and has no claimed gain.
+Removing the CPU readback improves the measured preview path; GPU capture-stage
+completion is not timed separately. The through-render endpoint includes
+`glFinish`, so the comparison does not merely defer unfinished GPU work past
+that endpoint. It still excludes compositor and monitor presentation.
+
+The complete Windows native/Studio Release suite passed **154/154 in 269.39 s**
+on the changed runtime source, including the real Studio–MCP integration, product
+controls, steering and new realtime checks. The four recorded executable hashes
+and source inputs remained unchanged after the suite. This is separate from
+the earlier 153-test feature freeze and its focused portable-core check.
+
+An active Studio executable initially prevented linking (`LNK1104`). It was
+preserved, and verification used `CMAKE_RUNTIME_OUTPUT_DIRECTORY` set to
+`out/native-release/realtime-bin`. The tested Studio remains in that directory;
+the default output configuration was restored after verification without
+relinking or replacing the active executable.
 
 Results in the separate realtime receipt compare the baseline and changed
 executables with identical fixtures, sizes and request counts. They establish

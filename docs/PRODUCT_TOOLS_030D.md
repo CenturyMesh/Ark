@@ -143,6 +143,11 @@ collaboration or a measured inference speedup.
 
 ## Development binary loop
 
+The requested communication pipeline is covered by the separate
+[realtime contract and comparison](REALTIME_030D.md): direct C++ dispatch,
+bounded UI scheduling and GPU-retained busy scenes. The build helper below is
+a development convenience, not evidence of faster agent communication.
+
 ```powershell
 ./scripts/dev-build.ps1 -Target Both -Verify
 ```

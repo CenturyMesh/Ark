@@ -4,6 +4,11 @@ This record covers **A.01/A.03/A.04/B.01/B.02/B.03/C.01/C.03/D.02/D.04/E.01/F.03
 for the bounded [030D contract](PRODUCT_TOOLS_030D.md). Broader roadmap milestones
 remain **Parcial**. Runtime identity is **030D / 0.9.31** from `release.json`.
 
+This is the initial feature-freeze record. Subsequent local communication work
+is recorded separately in the [realtime comparison](REALTIME_030D.md) and its
+[source/artifact receipt](verification-030D-realtime.json); do not attribute the
+initial executable hashes below to that later runtime.
+
 ## Source and artifact custody
 
 The runtime source was frozen at
@@ -71,7 +76,10 @@ tolerances and transport timeouts were not widened.
 The 029B hosted run's Windows jobs failed on MSAA annotation GUID linking, while
 its Linux jobs passed. 030D emits the SDK GUID definitions in one translation
 unit and links successfully locally. [That historical run](https://github.com/CenturyMesh/Ark/actions/runs/38768029936)
-is still a failed run; the new source needs its own hosted results.
+is still a failed run. The subsequent 030D run on
+`e9cc4fb606d7e30045fad42da862ce0abb523d2a` passed all four hosted Windows/Linux
+native/portable jobs: [actual results](https://github.com/CenturyMesh/Ark/actions/runs/38790716915).
+The later realtime source requires its own hosted run.
 
 ## Boundaries
 
@@ -88,6 +96,7 @@ and bloom are raster appearance, without calibrated photometry or illumination
 of neighboring parts. Vents are openings; formed louvers and airflow are outside
 this scope. No Revit/Blender adapter is claimed.
 
-Hosted 030D CI, fresh relocated distribution, signing, published OTA transport
-and production/manufacturing acceptance remain separate gates. This record
+Hosted checks must be associated with their actual source. Fresh relocated
+distribution, signing, published OTA transport and production/manufacturing
+acceptance remain separate gates. This record
 does not qualify distribution or complete the broader roadmap milestones.

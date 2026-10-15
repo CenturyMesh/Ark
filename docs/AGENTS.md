@@ -7,6 +7,11 @@ quantities. New persisted recipes conditionally select source42; retain observed
 revisions, exact face custody and atomic writes. Emission and spatial agent
 markers are viewport display, with no manufacturing or speedup claim.
 
+The [030D realtime pipeline](REALTIME_030D.md) keeps document writes serialized
+and revision-bound while yielding normal dispatch to rendering after publication
+or an eight-millisecond UI slice. Local measurements separate queue, capture and
+worker time. This adds no agent budget and makes no inference-speed claim.
+
 
 029B discovers **95 standalone tools**: the 028D tool set plus read-only
 `feature_history{}`, `assembly_authoring_info{}` and revision-bound
