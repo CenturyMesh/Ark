@@ -424,7 +424,8 @@ struct AgentTeam::Impl {
                     [&](const auto& event){assistantEvent(index,baseline,performanceBaseline,event);},&cancelled,roleConfig.transport,[&]{return inbox(index);},
                     [&](const V& history){std::lock_guard lock(mutex);roles[index].view.conversation=history;},retryHooks);
                 {std::lock_guard lock(mutex);roles[index].view.conversation=std::move(result.conversation);roles[index].view.usage=baseline;accumulateAssistantUsage(roles[index].view.usage,result.usage);roles[index].view.performance=performanceBaseline;accumulateAssistantPerformance(roles[index].view.performance,result.performance);roles[index].view.state=cancelled?AgentTeamState::Cancelled:AgentTeamState::Idle;}
-                status(index,cancelled?"Cancelled":"Turn finished / task status requires explicit report");
+                std::string reportedState;{std::lock_guard lock(mutex);reportedState=roles[index].view.taskState;}
+                status(index,cancelled?"Cancelled":reportedState=="needs_input"?"Waiting for input / explicit task report":reportedState=="completed"?"Turn finished / explicit task report completed":reportedState=="in_progress"?"Turn finished / task remains in progress":"Turn finished / task status not reported");
             }catch(const AssistantRoundLimit&){
                 {std::lock_guard lock(mutex);auto& view=roles[index].view;view.state=AgentTeamState::AwaitingContinuation;view.error.clear();view.status="Step request budget reached; committed work retained";view.needsInspection=true;closeInterruptedCalls(view.conversation);view.conversation.arr.push_back(message("developer","This bounded turn reached its provider-round budget after retaining real tool receipts. Continue the existing task from this history; do not replay committed writes. First inspect current doc_info detail design, then choose the next small valid step. Completion has not been claimed."));}
                 AgentTeamEvent event;event.kind=AgentTeamEvent::Yield;event.roleId=roles[index].config.id;event.text="Provider-round budget reached; resume from retained receipts and current geometry";emit(event);
@@ -530,14 +531,21 @@ void AgentTeam::pause(bool paused){{std::lock_guard lock(impl_->mutex);impl_->pa
 void AgentTeam::cancel() noexcept{impl_->cancel();}
 void AgentTeam::waitIdle(){std::unique_lock lock(impl_->mutex);impl_->idle.wait(lock,[&]{return impl_->jobs.empty()&&impl_->active==0;});}
 bool AgentTeam::waitIdleFor(std::chrono::milliseconds timeout){std::unique_lock lock(impl_->mutex);return impl_->idle.wait_for(lock,timeout,[&]{return impl_->jobs.empty()&&impl_->active==0;});}
-AgentTeamSnapshot AgentTeam::snapshot(bool includeConversations,std::uint64_t sinceEvent) const{
+AgentTeamSnapshot AgentTeam::snapshot(bool includeConversations,std::uint64_t sinceEvent,bool includeDiagnostics) const{
     std::lock_guard lock(impl_->mutex);AgentTeamSnapshot result;result.running=impl_->active!=0||!impl_->jobs.empty();result.paused=impl_->paused;result.cancelled=impl_->cancelled;result.droppedEvents=impl_->dropped;result.goalState=impl_->goalState;result.goalSummary=impl_->goalSummary;result.goalDeclared=impl_->goalDeclared;
     for(const auto& role:impl_->roles){if(role.view.taskState=="in_progress"||role.view.taskState=="needs_input")++result.outstandingTasks;result.unresolvedErrors+=(unsigned)role.unresolvedToolFailures.size();if(!role.view.error.empty()||role.view.needsInspection)++result.unresolvedErrors;}
-    if(result.cancelled||result.unresolvedErrors){result.goalState=AgentGoalState::Interrupted;result.goalDeclared=false;}
+    const bool interrupted=std::any_of(impl_->roles.begin(),impl_->roles.end(),[](const auto& role){return role.view.state==AgentTeamState::Failed||role.view.state==AgentTeamState::Interrupted||role.view.state==AgentTeamState::AwaitingContinuation;});
+    // A completed provider turn can explicitly request input because a tool was
+    // rejected. Retain that report and its blockers; rejection is not transport
+    // interruption. A completed goal still cannot survive unresolved failures.
+    if(result.cancelled||interrupted){result.goalState=AgentGoalState::Interrupted;result.goalDeclared=false;}
+    else if(result.unresolvedErrors&&result.goalState==AgentGoalState::Completed){result.goalState=AgentGoalState::NeedsInput;result.goalDeclared=false;}
     else if(!result.running&&!result.goalDeclared)result.goalState=AgentGoalState::NeedsInput;
     else if(result.running&&result.goalState==AgentGoalState::Completed&&std::any_of(impl_->roles.begin(),impl_->roles.end(),[&](const auto& role){return !role.pending.empty()||role.queued;}))result.goalState=AgentGoalState::InProgress;
     for(const auto& role:impl_->roles){const auto& source=role.view;AgentTeamRoleSnapshot view;
         view.taskState=source.taskState;view.taskSummary=source.taskSummary;view.id=source.id;view.label=source.label;view.model=source.model;view.reasoningEffort=source.reasoningEffort;view.status=source.status;view.text=source.text;view.error=source.error;view.state=source.state;view.canWrite=source.canWrite;view.turns=source.turns;view.usage=source.usage;view.performance=source.performance;view.stepsApplied=source.stepsApplied;view.needsInspection=source.needsInspection;view.discipline=source.discipline;
+        view.unresolvedToolErrors=(unsigned)role.unresolvedToolFailures.size();
+        if(includeDiagnostics)for(const auto& entry:role.unresolvedToolFailures){if(view.toolFailures.size()==8)break;view.toolFailures.push_back(entry.second);}
         if(includeConversations)view.conversation=source.conversation;result.roles.push_back(std::move(view));accumulateAssistantUsage(result.usage,source.usage);accumulateAssistantPerformance(result.performance,source.performance);
     }
     for(const auto& proposal:impl_->proposals)result.proposals.push_back(proposal.view);
