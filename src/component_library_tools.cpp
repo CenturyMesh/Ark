@@ -1,4 +1,5 @@
 #include "ark/component_library_tools.hpp"
+#include "ark/history_authoring.hpp"
 #include "ark/component_library.hpp"
 #include "ark/component_sources.hpp"
 #include "ark/native_backend.hpp"
@@ -58,7 +59,7 @@ V insert(AgentSession& session,ComponentLibrary& database,const V& args){
     if(session.document.assembly.empty()){
         // Introducing assembly display must retain every previously visible
         // terminal body in its original coordinates, including unrelated CAD.
-        std::set<u64> consumed,seen;for(const auto& f:session.document.features)if(featureConsumesInputBodies(f))for(u64 input:f.inputs)consumed.insert(input);
+        const auto consumed=consumedFeatureInputs(session.document);std::set<u64> seen;
         for(const auto& body:session.document.evalBodies){const auto* feature=session.document.find(body.id);if(!feature||feature->suppressed||consumed.count(body.id)||!seen.insert(body.id).second)continue;
             AssemblyNode prior;prior.id=capacity.nextAssemblyId_++;prior.name=uniqueInstanceName(capacity,feature->name.empty()?"Existing output":feature->name+" instance");prior.feature=body.id;capacity.assembly.push_back(prior);
             V add=V::makeObj();add.set("op",V::makeStr("assembly.add"));add.set("name",V::makeStr(prior.name));add.set("feature",V::makeNum((double)body.id));commands.arr.push_back(add);preserved.arr.push_back(V::makeNum((double)prior.id));

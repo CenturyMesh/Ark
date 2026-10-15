@@ -1,0 +1,1912 @@
+{
+  "schema": "ark.native.authoring.corpus.v1",
+  "seed": 19020,
+  "authorization": "Repository-authored synthetic geometry; no user documents or external fixtures.",
+  "variants": [
+    {
+      "s": 0.5
+    },
+    {
+      "s": 1
+    },
+    {
+      "s": 2
+    }
+  ],
+  "fixed_geometry_tolerance_mm": 0.000001,
+  "scope": "Exact native authoring, explicit source repair, measured finite continuity evidence, transactional rejection and persistence/recompute; no automatic healing, global G1/G2, arbitrary self-intersection or manufacturing qualification.",
+  "cases": [
+    {
+      "id": "eccentric-four-section-loft",
+      "family": "loft",
+      "parameters": {
+        "H": "30*s"
+      },
+      "setup": [
+        {
+          "op": "plane.set",
+          "name": "P1",
+          "p": {
+            "oz": "H/3",
+            "ox": "2*s"
+          }
+        },
+        {
+          "op": "plane.set",
+          "name": "P2",
+          "p": {
+            "oz": "2*H/3",
+            "ox": "-2*s"
+          }
+        },
+        {
+          "op": "plane.set",
+          "name": "P3",
+          "p": {
+            "oz": "H",
+            "ox": 0
+          }
+        },
+        {
+          "op": "sketch.set",
+          "name": "A",
+          "sketch": {
+            "plane": "XY",
+            "entities": [
+              {
+                "kind": "circle",
+                "name": "rim",
+                "dof": [
+                  0,
+                  0,
+                  "6*s"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "op": "sketch.set",
+          "name": "B",
+          "sketch": {
+            "plane": "P1",
+            "entities": [
+              {
+                "kind": "circle",
+                "name": "rim",
+                "dof": [
+                  0,
+                  0,
+                  "10*s"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "op": "sketch.set",
+          "name": "C",
+          "sketch": {
+            "plane": "P2",
+            "entities": [
+              {
+                "kind": "circle",
+                "name": "rim",
+                "dof": [
+                  0,
+                  0,
+                  "7*s"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "op": "sketch.set",
+          "name": "D",
+          "sketch": {
+            "plane": "P3",
+            "entities": [
+              {
+                "kind": "circle",
+                "name": "rim",
+                "dof": [
+                  0,
+                  0,
+                  "5*s"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "op": "feature.add",
+          "name": "Loft",
+          "type": "loft",
+          "native": {
+            "sections": [
+              "A",
+              "B",
+              "C",
+              "D"
+            ],
+            "controls": {
+              "section_alignment": [
+                {
+                  "seam_angle": 0
+                },
+                {
+                  "seam_angle": 30
+                },
+                {
+                  "seam_angle": -15
+                },
+                {
+                  "seam_angle": 0
+                }
+              ]
+            }
+          },
+          "p": {
+            "solid": 1,
+            "ruled": 0,
+            "smooth": 1,
+            "continuity": 2
+          }
+        }
+      ],
+      "setup_checks": [
+        {
+          "feature": "Loft",
+          "solids": 1,
+          "volume_min": "pi*4*4*H*s*s",
+          "volume_max": "pi*12*12*H*s*s",
+          "height": "H",
+          "report": [
+            {
+              "path": "section_alignment_applied",
+              "equals": true
+            },
+            {
+              "path": "self_intersections_checked",
+              "equals": false
+            }
+          ]
+        }
+      ],
+      "trials": [
+        {
+          "id": "collapsed-axial-stations",
+          "expected": "reject",
+          "commands": [
+            {
+              "op": "param.set",
+              "name": "H",
+              "expr": 0
+            }
+          ],
+          "expected_codes": [
+            "EVALUATION_FAILED",
+            "INVALID_COMMAND",
+            "NATIVE_SINGLE_SOLID_REQUIRED"
+          ]
+        },
+        {
+          "id": "explicit-station-separation",
+          "expected": "accept",
+          "commands": [
+            {
+              "op": "param.set",
+              "name": "H",
+              "expr": "40*s"
+            }
+          ],
+          "checks": [
+            {
+              "feature": "Loft",
+              "solids": 1,
+              "volume_min": "pi*4*4*H*s*s",
+              "volume_max": "pi*12*12*H*s*s",
+              "height": "H"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "strict-two-guide-loft",
+      "family": "guide",
+      "parameters": {
+        "R": "4*s",
+        "H": "30*s"
+      },
+      "setup": [
+        {
+          "op": "plane.set",
+          "name": "Middle",
+          "p": {
+            "oz": "H/2",
+            "ox": 0
+          }
+        },
+        {
+          "op": "plane.set",
+          "name": "Top",
+          "p": {
+            "oz": "H",
+            "ox": 0
+          }
+        },
+        {
+          "op": "sketch.set",
+          "name": "A",
+          "sketch": {
+            "plane": "XY",
+            "entities": [
+              {
+                "kind": "circle",
+                "name": "rim",
+                "dof": [
+                  0,
+                  0,
+                  "R"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "op": "sketch.set",
+          "name": "B",
+          "sketch": {
+            "plane": "Middle",
+            "entities": [
+              {
+                "kind": "circle",
+                "name": "rim",
+                "dof": [
+                  0,
+                  0,
+                  "R"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "op": "sketch.set",
+          "name": "C",
+          "sketch": {
+            "plane": "Top",
+            "entities": [
+              {
+                "kind": "circle",
+                "name": "rim",
+                "dof": [
+                  0,
+                  0,
+                  "R"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "op": "feature.add",
+          "name": "East",
+          "type": "curve",
+          "native": {
+            "start": [
+              "R",
+              0,
+              0
+            ],
+            "segments": [
+              {
+                "kind": "line",
+                "to": [
+                  "R",
+                  0,
+                  "H"
+                ]
+              }
+            ]
+          },
+          "p": {}
+        },
+        {
+          "op": "feature.add",
+          "name": "West",
+          "type": "curve",
+          "native": {
+            "start": [
+              "-R",
+              0,
+              0
+            ],
+            "segments": [
+              {
+                "kind": "line",
+                "to": [
+                  "-R",
+                  0,
+                  "H"
+                ]
+              }
+            ]
+          },
+          "p": {}
+        },
+        {
+          "op": "feature.add",
+          "name": "Guided",
+          "type": "loft",
+          "native": {
+            "sections": [
+              "A",
+              "B",
+              "C"
+            ],
+            "guides": [
+              "East",
+              "West"
+            ],
+            "controls": {
+              "guide_samples": 33,
+              "max_guide_deviation_mm": 0.000001,
+              "require_ordered_contacts": true
+            }
+          },
+          "p": {
+            "solid": 1,
+            "ruled": 0
+          }
+        }
+      ],
+      "setup_checks": [
+        {
+          "feature": "Guided",
+          "solids": 1,
+          "volume": "pi*R*R*H",
+          "tolerance": 0.0001,
+          "report": [
+            {
+              "path": "guide_max_contact_gap_mm",
+              "max": 0.000001
+            },
+            {
+              "path": "guide_observed_max_surface_deviation_mm",
+              "max": 0.000001
+            },
+            {
+              "path": "guide_contact_order_checked",
+              "equals": true
+            },
+            {
+              "path": "guide_between_samples_bound_verified",
+              "equals": false
+            }
+          ]
+        }
+      ],
+      "trials": [
+        {
+          "id": "guide-misses-exact-sections",
+          "expected": "reject",
+          "commands": [
+            {
+              "op": "feature.edit",
+              "id": "East",
+              "native": {
+                "start": [
+                  "R+0.001*s",
+                  0,
+                  0
+                ],
+                "segments": [
+                  {
+                    "kind": "line",
+                    "to": [
+                      "R+0.001*s",
+                      0,
+                      "H"
+                    ]
+                  }
+                ]
+              }
+            }
+          ],
+          "expected_codes": [
+            "EVALUATION_FAILED",
+            "INVALID_COMMAND",
+            "NATIVE_SINGLE_SOLID_REQUIRED"
+          ],
+          "error_contains": "Loft guide"
+        },
+        {
+          "id": "explicit-guide-contact-repair",
+          "expected": "accept",
+          "commands": [
+            {
+              "op": "feature.edit",
+              "id": "East",
+              "native": {
+                "start": [
+                  "R",
+                  0,
+                  0
+                ],
+                "segments": [
+                  {
+                    "kind": "line",
+                    "to": [
+                      "R",
+                      0,
+                      "H"
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "op": "param.set",
+              "name": "H",
+              "expr": "40*s"
+            }
+          ],
+          "checks": [
+            {
+              "feature": "Guided",
+              "solids": 1,
+              "volume": "pi*R*R*H",
+              "tolerance": 0.0001,
+              "report": [
+                {
+                  "path": "guide_observed_max_surface_deviation_mm",
+                  "max": 0.000001
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "quarter-torus-sweep",
+      "family": "sweep",
+      "parameters": {
+        "R": "12*s",
+        "r": "s"
+      },
+      "setup": [
+        {
+          "op": "sketch.set",
+          "name": "Section",
+          "sketch": {
+            "plane": "XY",
+            "entities": [
+              {
+                "kind": "circle",
+                "name": "rim",
+                "dof": [
+                  0,
+                  0,
+                  "r"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "op": "feature.add",
+          "name": "Bend path",
+          "type": "curve",
+          "native": {
+            "start": [
+              0,
+              0,
+              0
+            ],
+            "segments": [
+              {
+                "kind": "arc",
+                "mode": "three_point",
+                "through": [
+                  0,
+                  "R*(1-1/sqrt(2))",
+                  "R/sqrt(2)"
+                ],
+                "to": [
+                  0,
+                  "R",
+                  "R"
+                ]
+              }
+            ]
+          },
+          "p": {}
+        },
+        {
+          "op": "feature.add",
+          "name": "Bent solid",
+          "type": "sweep",
+          "native": {
+            "section": "Section",
+            "path": "Bend path"
+          },
+          "p": {
+            "solid": 1,
+            "correction": 1,
+            "contact": 0
+          }
+        }
+      ],
+      "setup_checks": [
+        {
+          "feature": "Bent solid",
+          "solids": 1,
+          "volume": "pi*r*r*pi*R/2",
+          "tolerance": 0.0001
+        }
+      ],
+      "trials": [
+        {
+          "id": "collapsed-arc-path",
+          "expected": "reject",
+          "commands": [
+            {
+              "op": "param.set",
+              "name": "R",
+              "expr": 0
+            }
+          ],
+          "expected_codes": [
+            "EVALUATION_FAILED",
+            "INVALID_COMMAND",
+            "NATIVE_SINGLE_SOLID_REQUIRED"
+          ]
+        },
+        {
+          "id": "explicit-bend-radius-repair",
+          "expected": "accept",
+          "commands": [
+            {
+              "op": "param.set",
+              "name": "R",
+              "expr": "18*s"
+            }
+          ],
+          "checks": [
+            {
+              "feature": "Bent solid",
+              "solids": 1,
+              "volume": "pi*r*r*pi*R/2",
+              "tolerance": 0.0001
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "varying-three-station-sweep",
+      "family": "varying-sweep",
+      "parameters": {
+        "r": "5*s",
+        "H": "40*s"
+      },
+      "setup": [
+        {
+          "op": "sketch.set",
+          "name": "A",
+          "sketch": {
+            "plane": "XY",
+            "entities": [
+              {
+                "kind": "circle",
+                "name": "rim",
+                "dof": [
+                  0,
+                  0,
+                  "r"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "op": "sketch.set",
+          "name": "B",
+          "sketch": {
+            "plane": "XY",
+            "entities": [
+              {
+                "kind": "circle",
+                "name": "rim",
+                "dof": [
+                  0,
+                  0,
+                  "2*r"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "op": "sketch.set",
+          "name": "C",
+          "sketch": {
+            "plane": "XY",
+            "entities": [
+              {
+                "kind": "circle",
+                "name": "rim",
+                "dof": [
+                  0,
+                  0,
+                  "3*r"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "op": "feature.add",
+          "name": "Path",
+          "type": "curve",
+          "native": {
+            "start": [
+              0,
+              0,
+              0
+            ],
+            "segments": [
+              {
+                "kind": "line",
+                "to": [
+                  0,
+                  0,
+                  "H"
+                ]
+              }
+            ]
+          },
+          "p": {}
+        },
+        {
+          "op": "feature.add",
+          "name": "Taper",
+          "type": "sweep",
+          "native": {
+            "path": "Path",
+            "sections": [
+              {
+                "section": "A",
+                "fraction": 0,
+                "roll": 0
+              },
+              {
+                "section": "B",
+                "fraction": 0.5,
+                "roll": 0
+              },
+              {
+                "section": "C",
+                "fraction": 1,
+                "roll": 0
+              }
+            ]
+          },
+          "p": {
+            "solid": 1
+          }
+        }
+      ],
+      "setup_checks": [
+        {
+          "feature": "Taper",
+          "solids": 1,
+          "volume": "pi*H*(r*r+3*r*r+9*r*r)/3",
+          "tolerance": 0.02,
+          "report": [
+            {
+              "path": "varying_sections",
+              "equals": 3
+            },
+            {
+              "path": "dynamic_tangent_frames.1.origin.2",
+              "expr": "H/2"
+            },
+            {
+              "path": "station_authority",
+              "equals": "exact_path_arclength_and_derivative"
+            }
+          ]
+        }
+      ],
+      "trials": [
+        {
+          "id": "reversed-section-stations",
+          "expected": "reject",
+          "commands": [
+            {
+              "op": "feature.edit",
+              "id": "Taper",
+              "native": {
+                "path": "Path",
+                "sections": [
+                  {
+                    "section": "A",
+                    "fraction": 0
+                  },
+                  {
+                    "section": "B",
+                    "fraction": 0.8
+                  },
+                  {
+                    "section": "C",
+                    "fraction": 0.6
+                  }
+                ]
+              }
+            }
+          ],
+          "expected_codes": [
+            "EVALUATION_FAILED",
+            "INVALID_COMMAND",
+            "NATIVE_SINGLE_SOLID_REQUIRED"
+          ],
+          "error_contains": "fractions"
+        },
+        {
+          "id": "explicit-ordered-station-repair",
+          "expected": "accept",
+          "commands": [
+            {
+              "op": "feature.edit",
+              "id": "Taper",
+              "native": {
+                "path": "Path",
+                "sections": [
+                  {
+                    "section": "A",
+                    "fraction": 0
+                  },
+                  {
+                    "section": "B",
+                    "fraction": 0.5
+                  },
+                  {
+                    "section": "C",
+                    "fraction": 1
+                  }
+                ]
+              }
+            }
+          ],
+          "checks": [
+            {
+              "feature": "Taper",
+              "solids": 1,
+              "volume": "pi*H*(r*r+3*r*r+9*r*r)/3",
+              "tolerance": 0.02
+            }
+          ]
+        },
+        {
+          "id":"curved-spine-frame-transport","expected":"accept",
+          "commands":[{"op":"feature.edit","id":"Path","native":{"start":[0,0,0],"segments":[{"kind":"spline","points":[[0,0,0],["5*s","3*s","H/2"],[0,"8*s","H"]]}]}}],
+          "checks":[{"feature":"Taper","solids":1,"volume_min":"pi*H*r*r","volume_max":"pi*H*12*r*r","report":[{"path":"varying_sections","equals":3},{"path":"station_authority","equals":"exact_path_arclength_and_derivative"}]}]
+        }
+      ]
+    },
+    {
+      "id": "warped-boundary-patch",
+      "family": "patch",
+      "parameters": {
+        "W": "20*s",
+        "D": "12*s",
+        "Z": "3*s"
+      },
+      "setup": [
+        {
+          "op": "feature.add",
+          "name": "Warped patch",
+          "type": "surface_fill",
+          "native": {
+            "profile": {
+              "entities": [
+                {
+                  "kind": "line",
+                  "points": [
+                    [
+                      0,
+                      0,
+                      0
+                    ],
+                    [
+                      "W",
+                      0,
+                      0
+                    ]
+                  ]
+                },
+                {
+                  "kind": "line",
+                  "points": [
+                    [
+                      "W",
+                      0,
+                      0
+                    ],
+                    [
+                      "W",
+                      "D",
+                      "Z"
+                    ]
+                  ]
+                },
+                {
+                  "kind": "line",
+                  "points": [
+                    [
+                      "W",
+                      "D",
+                      "Z"
+                    ],
+                    [
+                      0,
+                      "D",
+                      0
+                    ]
+                  ]
+                },
+                {
+                  "kind": "line",
+                  "points": [
+                    [
+                      0,
+                      "D",
+                      0
+                    ],
+                    [
+                      0,
+                      0,
+                      0
+                    ]
+                  ]
+                }
+              ]
+            }
+          },
+          "p": {}
+        }
+      ],
+      "setup_checks": [
+        {
+          "feature": "Warped patch",
+          "solids": 0,
+          "area_min": "W*D",
+          "area_max": "1.1*W*D",
+          "report": [
+            {
+              "path": "boundary_max_error_mm",
+              "max": 0.000001
+            },
+            {
+              "path": "boundary_tolerance_mm",
+              "equals": 0.000001
+            },
+            {
+              "path": "neighbor_tangency_verified",
+              "equals": false
+            }
+          ]
+        }
+      ],
+      "trials": [
+        {
+          "id": "open-boundary",
+          "expected": "reject",
+          "commands": [
+            {
+              "op": "feature.edit",
+              "id": "Warped patch",
+              "native": {
+                "profile": {
+                  "entities": [
+                    {
+                      "kind": "line",
+                      "points": [
+                        [
+                          0,
+                          0,
+                          0
+                        ],
+                        [
+                          "W",
+                          0,
+                          0
+                        ]
+                      ]
+                    },
+                    {
+                      "kind": "line",
+                      "points": [
+                        [
+                          "W",
+                          0,
+                          0
+                        ],
+                        [
+                          "W",
+                          "D",
+                          "Z"
+                        ]
+                      ]
+                    },
+                    {
+                      "kind": "line",
+                      "points": [
+                        [
+                          "W",
+                          "D",
+                          "Z"
+                        ],
+                        [
+                          0,
+                          "D",
+                          0
+                        ]
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expected_codes": [
+            "EVALUATION_FAILED",
+            "INVALID_COMMAND",
+            "NATIVE_SINGLE_SOLID_REQUIRED"
+          ],
+          "error_contains": "closed"
+        },
+        {
+          "id": "explicit-closing-edge-repair",
+          "expected": "accept",
+          "commands": [
+            {
+              "op": "feature.edit",
+              "id": "Warped patch",
+              "native": {
+                "profile": {
+                  "entities": [
+                    {
+                      "kind": "line",
+                      "points": [
+                        [
+                          0,
+                          0,
+                          0
+                        ],
+                        [
+                          "W",
+                          0,
+                          0
+                        ]
+                      ]
+                    },
+                    {
+                      "kind": "line",
+                      "points": [
+                        [
+                          "W",
+                          0,
+                          0
+                        ],
+                        [
+                          "W",
+                          "D",
+                          "Z"
+                        ]
+                      ]
+                    },
+                    {
+                      "kind": "line",
+                      "points": [
+                        [
+                          "W",
+                          "D",
+                          "Z"
+                        ],
+                        [
+                          0,
+                          "D",
+                          0
+                        ]
+                      ]
+                    },
+                    {
+                      "kind": "line",
+                      "points": [
+                        [
+                          0,
+                          "D",
+                          0
+                        ],
+                        [
+                          0,
+                          0,
+                          0
+                        ]
+                      ]
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "op": "param.set",
+              "name": "Z",
+              "expr": "4*s"
+            }
+          ],
+          "checks": [
+            {
+              "feature": "Warped patch",
+              "solids": 0,
+              "area_min": "W*D",
+              "area_max": "1.1*W*D",
+              "report": [
+                {
+                  "path": "boundary_max_error_mm",
+                  "max": 0.000001
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cylindrical-trim-thicken",
+      "family": "trim-thicken",
+      "parameters": {
+        "R": "8*s",
+        "H": "20*s",
+        "T": "s"
+      },
+      "setup": [
+        {
+          "op": "feature.add",
+          "name": "Cylinder",
+          "type": "native_solid",
+          "native": {
+            "op": "cylinder"
+          },
+          "p": {
+            "radius": "R",
+            "height": "H"
+          }
+        },
+        {
+          "op": "feature.add",
+          "name": "Skin",
+          "type": "surface_edit",
+          "native": {
+            "op": "extract_face",
+            "face": "side"
+          },
+          "p": {},
+          "inputs": [
+            "Cylinder"
+          ]
+        },
+        {
+          "op": "feature.add",
+          "name": "Trimmed",
+          "type": "surface_edit",
+          "native": {
+            "op": "trim_plane",
+            "origin": [
+              0,
+              0,
+              "0.3*H"
+            ],
+            "normal": [
+              0,
+              0,
+              1
+            ],
+            "keep": "positive"
+          },
+          "p": {},
+          "inputs": [
+            "Skin"
+          ]
+        },
+        {
+          "op": "feature.add",
+          "name": "Wall",
+          "type": "thicken",
+          "native": {},
+          "p": {
+            "thickness": "T"
+          },
+          "inputs": [
+            "Trimmed"
+          ]
+        }
+      ],
+      "setup_checks": [
+        {
+          "feature": "Trimmed",
+          "solids": 0,
+          "area": "2*pi*R*0.7*H",
+          "tolerance": 0.00001,
+          "report": [
+            {
+              "path": "area_conservation_checked",
+              "equals": true
+            }
+          ]
+        },
+        {
+          "feature": "Wall",
+          "solids": 1,
+          "volume": "pi*((R+T)*(R+T)-R*R)*0.7*H",
+          "tolerance": 0.0001
+        }
+      ],
+      "trials": [
+        {
+          "id": "zero-thickness",
+          "expected": "reject",
+          "commands": [
+            {
+              "op": "param.set",
+              "name": "T",
+              "expr": 0
+            }
+          ],
+          "expected_codes": [
+            "EVALUATION_FAILED",
+            "INVALID_COMMAND",
+            "NATIVE_SINGLE_SOLID_REQUIRED"
+          ],
+          "error_contains": "thickness"
+        },
+        {
+          "id": "explicit-positive-thickness-repair",
+          "expected": "accept",
+          "commands": [
+            {
+              "op": "param.set",
+              "name": "T",
+              "expr": "1.5*s"
+            }
+          ],
+          "checks": [
+            {
+              "feature": "Wall",
+              "solids": 1,
+              "volume": "pi*((R+T)*(R+T)-R*R)*0.7*H",
+              "tolerance": 0.0001
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "projected-wire-warp-trim",
+      "family": "trim-wire",
+      "parameters": {
+        "W": "20*s",
+        "D": "20*s",
+        "Z": "4*s"
+      },
+      "setup": [
+        {
+          "op": "feature.add",
+          "name": "Warp",
+          "type": "bspline_surface",
+          "native": {
+            "poles": [
+              [
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  "D",
+                  0
+                ]
+              ],
+              [
+                [
+                  "W",
+                  0,
+                  0
+                ],
+                [
+                  "W",
+                  "D",
+                  "Z"
+                ]
+              ]
+            ]
+          },
+          "p": {
+            "u_degree": 1,
+            "v_degree": 1
+          }
+        },
+        {
+          "op": "feature.add",
+          "name": "Raised loop",
+          "type": "curve",
+          "native": {
+            "start": [
+              "5*s",
+              "5*s",
+              "10*s"
+            ],
+            "segments": [
+              {
+                "kind": "line",
+                "to": [
+                  "15*s",
+                  "5*s",
+                  "10*s"
+                ]
+              },
+              {
+                "kind": "line",
+                "to": [
+                  "15*s",
+                  "15*s",
+                  "10*s"
+                ]
+              },
+              {
+                "kind": "line",
+                "to": [
+                  "5*s",
+                  "15*s",
+                  "10*s"
+                ]
+              },
+              {
+                "kind": "line",
+                "to": [
+                  "5*s",
+                  "5*s",
+                  "10*s"
+                ]
+              }
+            ]
+          },
+          "p": {}
+        },
+        {
+          "op": "feature.add",
+          "name": "Projection",
+          "type": "curve",
+          "native": {
+            "op": "project_surface",
+            "direction": [
+              0,
+              0,
+              -1
+            ]
+          },
+          "p": {},
+          "inputs": [
+            "Raised loop",
+            "Warp"
+          ]
+        },
+        {
+          "op": "feature.add",
+          "name": "Retained",
+          "type": "surface_edit",
+          "native": {
+            "op": "trim_wire",
+            "keep_point": [
+              "10*s",
+              "10*s",
+              "Z/4"
+            ]
+          },
+          "p": {},
+          "inputs": [
+            "Warp",
+            "Projection"
+          ]
+        }
+      ],
+      "setup_checks": [
+        {
+          "feature": "Retained",
+          "solids": 0,
+          "area_min": "100*s*s",
+          "area_max": "104*s*s"
+        }
+      ],
+      "trials": [
+        {
+          "id": "boundary-keep-point",
+          "expected": "reject",
+          "commands": [
+            {
+              "op": "feature.edit",
+              "id": "Retained",
+              "native": {
+                "op": "trim_wire",
+                "keep_point": [
+                  "5*s",
+                  "10*s",
+                  "Z/8"
+                ]
+              }
+            }
+          ],
+          "expected_codes": [
+            "EVALUATION_FAILED",
+            "INVALID_COMMAND",
+            "NATIVE_SINGLE_SOLID_REQUIRED"
+          ],
+          "error_contains": "keep point"
+        },
+        {
+          "id": "explicit-interior-point-repair",
+          "expected": "accept",
+          "commands": [
+            {
+              "op": "feature.edit",
+              "id": "Retained",
+              "native": {
+                "op": "trim_wire",
+                "keep_point": [
+                  "10*s",
+                  "10*s",
+                  "Z/4"
+                ]
+              }
+            },
+            {
+              "op": "param.set",
+              "name": "Z",
+              "expr": "5*s"
+            }
+          ],
+          "checks": [
+            {
+              "feature": "Retained",
+              "solids": 0,
+              "area_min": "100*s*s",
+              "area_max": "104*s*s"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "missing-cap-shell-repair",
+      "family": "sewing-repair",
+      "parameters": {
+        "W": "10*s",
+        "D": "8*s",
+        "H": "6*s"
+      },
+      "setup": [
+        {
+          "op": "feature.add",
+          "name": "Source box",
+          "type": "native_solid",
+          "native": {
+            "op": "box"
+          },
+          "p": {
+            "width": "W",
+            "depth": "D",
+            "height": "H"
+          }
+        },
+        {
+          "op": "feature.add",
+          "name": "x_min",
+          "type": "surface_edit",
+          "native": {
+            "op": "extract_face",
+            "face": "x_min"
+          },
+          "p": {},
+          "inputs": [
+            "Source box"
+          ]
+        },
+        {
+          "op": "feature.add",
+          "name": "x_max",
+          "type": "surface_edit",
+          "native": {
+            "op": "extract_face",
+            "face": "x_max"
+          },
+          "p": {},
+          "inputs": [
+            "Source box"
+          ]
+        },
+        {
+          "op": "feature.add",
+          "name": "y_min",
+          "type": "surface_edit",
+          "native": {
+            "op": "extract_face",
+            "face": "y_min"
+          },
+          "p": {},
+          "inputs": [
+            "Source box"
+          ]
+        },
+        {
+          "op": "feature.add",
+          "name": "y_max",
+          "type": "surface_edit",
+          "native": {
+            "op": "extract_face",
+            "face": "y_max"
+          },
+          "p": {},
+          "inputs": [
+            "Source box"
+          ]
+        },
+        {
+          "op": "feature.add",
+          "name": "z_min",
+          "type": "surface_edit",
+          "native": {
+            "op": "extract_face",
+            "face": "z_min"
+          },
+          "p": {},
+          "inputs": [
+            "Source box"
+          ]
+        },
+        {
+          "op": "feature.add",
+          "name": "Open shell",
+          "type": "sew",
+          "native": {
+            "require_connected": true
+          },
+          "p": {
+            "solid": 0
+          },
+          "inputs": [
+            "x_min",
+            "x_max",
+            "y_min",
+            "y_max",
+            "z_min"
+          ]
+        }
+      ],
+      "setup_checks": [
+        {
+          "feature": "Open shell",
+          "solids": 0,
+          "report": [
+            {
+              "path": "free_edges",
+              "equals": 4
+            },
+            {
+              "path": "closed",
+              "equals": false
+            },
+            {
+              "path": "gap_healing",
+              "equals": false
+            },
+            {
+              "path": "sewing_tolerance_mm",
+              "equals": 0.000001
+            }
+          ]
+        }
+      ],
+      "trials": [
+        {
+          "id": "open-shell-cannot-be-solid",
+          "expected": "reject",
+          "commands": [
+            {
+              "op": "feature.add",
+              "name": "Rejected closure",
+              "type": "sew",
+              "native": {
+                "require_connected": true
+              },
+              "p": {
+                "solid": 1
+              },
+              "inputs": [
+                "x_min",
+                "x_max",
+                "y_min",
+                "y_max",
+                "z_min"
+              ]
+            }
+          ],
+          "expected_codes": [
+            "EVALUATION_FAILED",
+            "INVALID_COMMAND",
+            "NATIVE_SINGLE_SOLID_REQUIRED"
+          ],
+          "error_contains": "free edges"
+        },
+        {
+          "id": "explicit-missing-face-closure",
+          "expected": "accept",
+          "commands": [
+            {
+              "op": "feature.add",
+              "name": "Missing cap",
+              "type": "surface_edit",
+              "native": {
+                "op": "extract_face",
+                "face": "z_max"
+              },
+              "p": {},
+              "inputs": [
+                "Source box"
+              ]
+            },
+            {
+              "op": "feature.add",
+              "name": "Closed repair",
+              "type": "sew",
+              "native": {
+                "require_connected": true
+              },
+              "p": {
+                "solid": 1
+              },
+              "inputs": [
+                "x_min",
+                "x_max",
+                "y_min",
+                "y_max",
+                "z_min",
+                "Missing cap"
+              ]
+            }
+          ],
+          "checks": [
+            {
+              "feature": "Closed repair",
+              "solids": 1,
+              "volume": "W*D*H",
+              "tolerance": 0.00001,
+              "report": [
+                {
+                  "path": "free_edges",
+                  "equals": 0
+                },
+                {
+                  "path": "closed",
+                  "equals": true
+                },
+                {
+                  "path": "connected",
+                  "equals": true
+                },
+                {
+                  "path": "gap_healing",
+                  "equals": false
+                },
+                {
+                  "path": "global_g1_verified",
+                  "equals": false
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "coplanar-seam-gap-repair",
+      "family": "continuity",
+      "parameters": {
+        "W": "10*s",
+        "D": "6*s",
+        "H": "4*s",
+        "gap": 0
+      },
+      "setup": [
+        {
+          "op": "feature.add",
+          "name": "Left",
+          "type": "surface_fill",
+          "native": {
+            "profile": {
+              "entities": [
+                {
+                  "kind": "line",
+                  "points": [
+                    [
+                      0,
+                      0
+                    ],
+                    [
+                      "W",
+                      0
+                    ]
+                  ]
+                },
+                {
+                  "kind": "line",
+                  "points": [
+                    [
+                      "W",
+                      0
+                    ],
+                    [
+                      "W",
+                      "D"
+                    ]
+                  ]
+                },
+                {
+                  "kind": "line",
+                  "points": [
+                    [
+                      "W",
+                      "D"
+                    ],
+                    [
+                      0,
+                      "D"
+                    ]
+                  ]
+                },
+                {
+                  "kind": "line",
+                  "points": [
+                    [
+                      0,
+                      "D"
+                    ],
+                    [
+                      0,
+                      0
+                    ]
+                  ]
+                }
+              ]
+            }
+          },
+          "p": {}
+        },
+        {
+          "op": "feature.add",
+          "name": "Right",
+          "type": "surface_fill",
+          "native": {
+            "profile": {
+              "entities": [
+                {
+                  "kind": "line",
+                  "points": [
+                    [
+                      "W+gap",
+                      0
+                    ],
+                    [
+                      "2*W+gap",
+                      0
+                    ]
+                  ]
+                },
+                {
+                  "kind": "line",
+                  "points": [
+                    [
+                      "2*W+gap",
+                      0
+                    ],
+                    [
+                      "2*W+gap",
+                      "D"
+                    ]
+                  ]
+                },
+                {
+                  "kind": "line",
+                  "points": [
+                    [
+                      "2*W+gap",
+                      "D"
+                    ],
+                    [
+                      "W+gap",
+                      "D"
+                    ]
+                  ]
+                },
+                {
+                  "kind": "line",
+                  "points": [
+                    [
+                      "W+gap",
+                      "D"
+                    ],
+                    [
+                      "W+gap",
+                      0
+                    ]
+                  ]
+                }
+              ]
+            }
+          },
+          "p": {}
+        },
+        {
+          "op": "feature.add",
+          "name": "Joined",
+          "type": "sew",
+          "native": {
+            "require_connected": true
+          },
+          "p": {
+            "solid": 0
+          },
+          "inputs": [
+            "Left",
+            "Right"
+          ]
+        }
+      ],
+      "setup_checks": [
+        {
+          "feature": "Joined",
+          "solids": 0,
+          "area": "2*W*D",
+          "tolerance": 0.00001,
+          "report": [
+            {
+              "path": "shared_edge_continuity.0.samples_checked",
+              "equals": 17
+            },
+            {
+              "path": "shared_edge_continuity.0.observed_max_gap_mm",
+              "max": 0.000001
+            },
+            {
+              "path": "shared_edge_continuity.0.observed_max_tangent_plane_angle_deg",
+              "max": 0.0001
+            },
+            {
+              "path": "global_g1_verified",
+              "equals": false
+            },
+            {
+              "path": "gap_healing",
+              "equals": false
+            }
+          ]
+        }
+      ],
+      "trials": [
+        {
+          "id": "finite-gap-not-healed",
+          "expected": "reject",
+          "commands": [
+            {
+              "op": "param.set",
+              "name": "gap",
+              "expr": "0.001*s"
+            }
+          ],
+          "expected_codes": [
+            "EVALUATION_FAILED",
+            "INVALID_COMMAND",
+            "NATIVE_SINGLE_SOLID_REQUIRED"
+          ],
+          "error_contains": "connected"
+        },
+        {
+          "id": "explicit-authored-edge-contact-repair",
+          "expected": "accept",
+          "commands": [
+            {
+              "op": "param.set",
+              "name": "gap",
+              "expr": 0
+            },
+            {
+              "op": "feature.add",
+              "name": "Crease wall",
+              "type": "extrude_surface",
+              "native": {
+                "profile": {
+                  "entities": [
+                    {
+                      "kind": "line",
+                      "points": [
+                        [
+                          "W",
+                          0
+                        ],
+                        [
+                          "W",
+                          "D"
+                        ]
+                      ]
+                    }
+                  ]
+                }
+              },
+              "p": {
+                "solid": 0,
+                "distance": "H"
+              }
+            },
+            {
+              "op": "feature.add",
+              "name": "Creased",
+              "type": "sew",
+              "native": {
+                "require_connected": true
+              },
+              "p": {
+                "solid": 0
+              },
+              "inputs": [
+                "Left",
+                "Crease wall"
+              ]
+            }
+          ],
+          "checks": [
+            {
+              "feature": "Creased",
+              "solids": 0,
+              "area": "W*D+D*H",
+              "tolerance": 0.00001,
+              "report": [
+                {
+                  "path": "shared_edge_continuity.0.observed_max_gap_mm",
+                  "max": 0.000001
+                },
+                {
+                  "path": "shared_edge_continuity.0.observed_max_tangent_plane_angle_deg",
+                  "expr": "90"
+                },
+                {
+                  "path": "global_g1_verified",
+                  "equals": false
+                },
+                {
+                  "path": "gap_healing",
+                  "equals": false
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

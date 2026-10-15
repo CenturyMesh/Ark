@@ -1,0 +1,957 @@
+{
+    "schema":  "ark.surface.repair.corpus.v1",
+    "milestone":  "B.03",
+    "kernel":  "8.0.1",
+    "trials":  [
+                   {
+                       "case":  "six-face-neighbour-orientation",
+                       "expected":  "accept",
+                       "report":  {
+                                      "kernel":  "OCCT",
+                                      "kernel_version":  "8.0.1",
+                                      "brep_valid":  true,
+                                      "solids":  0,
+                                      "faces":  6,
+                                      "area_mm2":  376,
+                                      "volume_mm3":  null,
+                                      "display_mesh_authoritative":  false,
+                                      "self_intersections_checked":  false,
+                                      "manufacturing_authoritative":  false,
+                                      "bounds_mm":  [
+                                                        0,
+                                                        0,
+                                                        0,
+                                                        10,
+                                                        8,
+                                                        6
+                                                    ],
+                                      "operation":  "surface_repair",
+                                      "repair_mode":  "orientation",
+                                      "before":  {
+                                                     "solids":  0,
+                                                     "shells":  1,
+                                                     "faces":  6,
+                                                     "wires":  6,
+                                                     "edges":  12,
+                                                     "vertices":  8,
+                                                     "area_mm2":  376,
+                                                     "max_entity_tolerance_mm":  1E-07,
+                                                     "valid":  true,
+                                                     "orientation_consistent":  false,
+                                                     "free_edges":  0,
+                                                     "free_boundary_length_mm":  0,
+                                                     "boundaries":  [
+
+                                                                    ],
+                                                     "periodic_seam_edges":  0,
+                                                     "degenerated_edges":  0,
+                                                     "nonmanifold_edges":  0,
+                                                     "components":  1
+                                                 },
+                                      "after":  {
+                                                    "solids":  0,
+                                                    "shells":  1,
+                                                    "faces":  6,
+                                                    "wires":  6,
+                                                    "edges":  12,
+                                                    "vertices":  8,
+                                                    "area_mm2":  376,
+                                                    "max_entity_tolerance_mm":  1E-07,
+                                                    "valid":  true,
+                                                    "orientation_consistent":  true,
+                                                    "free_edges":  0,
+                                                    "free_boundary_length_mm":  0,
+                                                    "boundaries":  [
+
+                                                                   ],
+                                                    "periodic_seam_edges":  0,
+                                                    "degenerated_edges":  0,
+                                                    "nonmanifold_edges":  0,
+                                                    "components":  1
+                                                },
+                                      "changed_faces":  5,
+                                      "changed":  true,
+                                      "source_brep_sha256":  "98a32fa78233a60367deddfa8c2c94acb968880a135c952d5594ce836bba76d4",
+                                      "geometry_deviation_mm":  0,
+                                      "geometry_deviation_authority":  "identical serialized forward faces, native supports, pcurves, boundaries and tolerances",
+                                      "tolerances_preserved":  true,
+                                      "all_faces_preserved":  true,
+                                      "all_solids_preserved":  true,
+                                      "gap_healing":  false,
+                                      "exact_method_validation":  true,
+                                      "manufacturing_qualified":  false
+                                  },
+                       "passed":  true
+                   },
+                   {
+                       "case":  "invalid-solid-neighbour-orientation",
+                       "expected":  "accept",
+                       "report":  {
+                                      "kernel":  "OCCT",
+                                      "kernel_version":  "8.0.1",
+                                      "brep_valid":  true,
+                                      "solids":  1,
+                                      "faces":  6,
+                                      "area_mm2":  376,
+                                      "volume_mm3":  479.99999999999994,
+                                      "display_mesh_authoritative":  false,
+                                      "self_intersections_checked":  false,
+                                      "manufacturing_authoritative":  false,
+                                      "bounds_mm":  [
+                                                        0,
+                                                        0,
+                                                        0,
+                                                        10,
+                                                        8,
+                                                        6
+                                                    ],
+                                      "operation":  "surface_repair",
+                                      "repair_mode":  "orientation",
+                                      "before":  {
+                                                     "solids":  1,
+                                                     "shells":  1,
+                                                     "faces":  6,
+                                                     "wires":  6,
+                                                     "edges":  12,
+                                                     "vertices":  8,
+                                                     "area_mm2":  376,
+                                                     "max_entity_tolerance_mm":  1E-07,
+                                                     "valid":  false,
+                                                     "orientation_consistent":  false,
+                                                     "free_edges":  0,
+                                                     "free_boundary_length_mm":  0,
+                                                     "boundaries":  [
+
+                                                                    ],
+                                                     "periodic_seam_edges":  0,
+                                                     "degenerated_edges":  0,
+                                                     "nonmanifold_edges":  0,
+                                                     "components":  1,
+                                                     "signed_volume_mm3":  320
+                                                 },
+                                      "after":  {
+                                                    "solids":  1,
+                                                    "shells":  1,
+                                                    "faces":  6,
+                                                    "wires":  6,
+                                                    "edges":  12,
+                                                    "vertices":  8,
+                                                    "area_mm2":  376,
+                                                    "max_entity_tolerance_mm":  1E-07,
+                                                    "valid":  true,
+                                                    "orientation_consistent":  true,
+                                                    "free_edges":  0,
+                                                    "free_boundary_length_mm":  0,
+                                                    "boundaries":  [
+
+                                                                   ],
+                                                    "periodic_seam_edges":  0,
+                                                    "degenerated_edges":  0,
+                                                    "nonmanifold_edges":  0,
+                                                    "components":  1,
+                                                    "signed_volume_mm3":  479.99999999999994
+                                                },
+                                      "changed_faces":  1,
+                                      "changed":  true,
+                                      "source_brep_sha256":  "b0a7e3b9c946d468931663852af9e9af6fc17a1c893ec4ce45b47dd1581a8e91",
+                                      "geometry_deviation_mm":  0,
+                                      "geometry_deviation_authority":  "identical serialized forward faces, native supports, pcurves, boundaries and tolerances",
+                                      "tolerances_preserved":  true,
+                                      "all_faces_preserved":  true,
+                                      "all_solids_preserved":  true,
+                                      "gap_healing":  false,
+                                      "exact_method_validation":  true,
+                                      "manufacturing_qualified":  false
+                                  },
+                       "passed":  true
+                   },
+                   {
+                       "case":  "valid-solid-noop",
+                       "expected":  "accept",
+                       "report":  {
+                                      "kernel":  "OCCT",
+                                      "kernel_version":  "8.0.1",
+                                      "brep_valid":  true,
+                                      "solids":  1,
+                                      "faces":  6,
+                                      "area_mm2":  376,
+                                      "volume_mm3":  479.99999999999994,
+                                      "display_mesh_authoritative":  false,
+                                      "self_intersections_checked":  false,
+                                      "manufacturing_authoritative":  false,
+                                      "bounds_mm":  [
+                                                        0,
+                                                        0,
+                                                        0,
+                                                        10,
+                                                        8,
+                                                        6
+                                                    ],
+                                      "operation":  "surface_repair",
+                                      "repair_mode":  "orientation",
+                                      "before":  {
+                                                     "solids":  1,
+                                                     "shells":  1,
+                                                     "faces":  6,
+                                                     "wires":  6,
+                                                     "edges":  12,
+                                                     "vertices":  8,
+                                                     "area_mm2":  376,
+                                                     "max_entity_tolerance_mm":  1E-07,
+                                                     "valid":  true,
+                                                     "orientation_consistent":  true,
+                                                     "free_edges":  0,
+                                                     "free_boundary_length_mm":  0,
+                                                     "boundaries":  [
+
+                                                                    ],
+                                                     "periodic_seam_edges":  0,
+                                                     "degenerated_edges":  0,
+                                                     "nonmanifold_edges":  0,
+                                                     "components":  1,
+                                                     "signed_volume_mm3":  480
+                                                 },
+                                      "after":  {
+                                                    "solids":  1,
+                                                    "shells":  1,
+                                                    "faces":  6,
+                                                    "wires":  6,
+                                                    "edges":  12,
+                                                    "vertices":  8,
+                                                    "area_mm2":  376,
+                                                    "max_entity_tolerance_mm":  1E-07,
+                                                    "valid":  true,
+                                                    "orientation_consistent":  true,
+                                                    "free_edges":  0,
+                                                    "free_boundary_length_mm":  0,
+                                                    "boundaries":  [
+
+                                                                   ],
+                                                    "periodic_seam_edges":  0,
+                                                    "degenerated_edges":  0,
+                                                    "nonmanifold_edges":  0,
+                                                    "components":  1,
+                                                    "signed_volume_mm3":  479.99999999999994
+                                                },
+                                      "changed_faces":  0,
+                                      "changed":  false,
+                                      "source_brep_sha256":  "d579646ee48580fa6a856a6fe32e4c03e9ef3dfc044a1511b33587e1b16bfc01",
+                                      "geometry_deviation_mm":  0,
+                                      "geometry_deviation_authority":  "identical serialized forward faces, native supports, pcurves, boundaries and tolerances",
+                                      "tolerances_preserved":  true,
+                                      "all_faces_preserved":  true,
+                                      "all_solids_preserved":  true,
+                                      "gap_healing":  false,
+                                      "exact_method_validation":  true,
+                                      "manufacturing_qualified":  false
+                                  },
+                       "passed":  true
+                   },
+                   {
+                       "case":  "inward-periodic-cylinder",
+                       "expected":  "accept",
+                       "report":  {
+                                      "kernel":  "OCCT",
+                                      "kernel_version":  "8.0.1",
+                                      "brep_valid":  true,
+                                      "solids":  1,
+                                      "faces":  3,
+                                      "area_mm2":  402.12385965949375,
+                                      "volume_mm3":  603.18578948924073,
+                                      "display_mesh_authoritative":  false,
+                                      "self_intersections_checked":  false,
+                                      "manufacturing_authoritative":  false,
+                                      "bounds_mm":  [
+                                                        -4,
+                                                        -4,
+                                                        0,
+                                                        4,
+                                                        4,
+                                                        12
+                                                    ],
+                                      "operation":  "surface_repair",
+                                      "repair_mode":  "orientation",
+                                      "before":  {
+                                                     "solids":  1,
+                                                     "shells":  1,
+                                                     "faces":  3,
+                                                     "wires":  3,
+                                                     "edges":  3,
+                                                     "vertices":  2,
+                                                     "area_mm2":  402.12385965949375,
+                                                     "max_entity_tolerance_mm":  1E-07,
+                                                     "valid":  true,
+                                                     "orientation_consistent":  true,
+                                                     "free_edges":  0,
+                                                     "free_boundary_length_mm":  0,
+                                                     "boundaries":  [
+
+                                                                    ],
+                                                     "periodic_seam_edges":  1,
+                                                     "degenerated_edges":  0,
+                                                     "nonmanifold_edges":  0,
+                                                     "components":  1,
+                                                     "signed_volume_mm3":  -603.18578948924073
+                                                 },
+                                      "after":  {
+                                                    "solids":  1,
+                                                    "shells":  1,
+                                                    "faces":  3,
+                                                    "wires":  3,
+                                                    "edges":  3,
+                                                    "vertices":  2,
+                                                    "area_mm2":  402.12385965949375,
+                                                    "max_entity_tolerance_mm":  1E-07,
+                                                    "valid":  true,
+                                                    "orientation_consistent":  true,
+                                                    "free_edges":  0,
+                                                    "free_boundary_length_mm":  0,
+                                                    "boundaries":  [
+
+                                                                   ],
+                                                    "periodic_seam_edges":  1,
+                                                    "degenerated_edges":  0,
+                                                    "nonmanifold_edges":  0,
+                                                    "components":  1,
+                                                    "signed_volume_mm3":  603.18578948924073
+                                                },
+                                      "changed_faces":  3,
+                                      "changed":  true,
+                                      "source_brep_sha256":  "9c5bc0d8cc95e585eb28bea1fd1cc69ea56a28244da52bee3c86ddddc9fa2525",
+                                      "geometry_deviation_mm":  0,
+                                      "geometry_deviation_authority":  "identical serialized forward faces, native supports, pcurves, boundaries and tolerances",
+                                      "tolerances_preserved":  true,
+                                      "all_faces_preserved":  true,
+                                      "all_solids_preserved":  true,
+                                      "gap_healing":  false,
+                                      "exact_method_validation":  true,
+                                      "manufacturing_qualified":  false
+                                  },
+                       "passed":  true
+                   },
+                   {
+                       "case":  "apex-degenerate-seam-preserved",
+                       "expected":  "accept",
+                       "report":  {
+                                      "kernel":  "OCCT",
+                                      "kernel_version":  "8.0.1",
+                                      "brep_valid":  true,
+                                      "solids":  1,
+                                      "faces":  2,
+                                      "area_mm2":  254.16018461576317,
+                                      "volume_mm3":  261.79938779914971,
+                                      "display_mesh_authoritative":  false,
+                                      "self_intersections_checked":  false,
+                                      "manufacturing_authoritative":  false,
+                                      "bounds_mm":  [
+                                                        -5,
+                                                        -5,
+                                                        0,
+                                                        5,
+                                                        5,
+                                                        9.9999999999999574
+                                                    ],
+                                      "operation":  "surface_repair",
+                                      "repair_mode":  "orientation",
+                                      "before":  {
+                                                     "solids":  1,
+                                                     "shells":  1,
+                                                     "faces":  2,
+                                                     "wires":  2,
+                                                     "edges":  3,
+                                                     "vertices":  2,
+                                                     "area_mm2":  254.16018461576317,
+                                                     "max_entity_tolerance_mm":  1E-07,
+                                                     "valid":  true,
+                                                     "orientation_consistent":  true,
+                                                     "free_edges":  0,
+                                                     "free_boundary_length_mm":  0,
+                                                     "boundaries":  [
+
+                                                                    ],
+                                                     "periodic_seam_edges":  1,
+                                                     "degenerated_edges":  1,
+                                                     "nonmanifold_edges":  0,
+                                                     "components":  1,
+                                                     "signed_volume_mm3":  -261.79938779914971
+                                                 },
+                                      "after":  {
+                                                    "solids":  1,
+                                                    "shells":  1,
+                                                    "faces":  2,
+                                                    "wires":  2,
+                                                    "edges":  3,
+                                                    "vertices":  2,
+                                                    "area_mm2":  254.16018461576317,
+                                                    "max_entity_tolerance_mm":  1E-07,
+                                                    "valid":  true,
+                                                    "orientation_consistent":  true,
+                                                    "free_edges":  0,
+                                                    "free_boundary_length_mm":  0,
+                                                    "boundaries":  [
+
+                                                                   ],
+                                                    "periodic_seam_edges":  1,
+                                                    "degenerated_edges":  1,
+                                                    "nonmanifold_edges":  0,
+                                                    "components":  1,
+                                                    "signed_volume_mm3":  261.79938779914971
+                                                },
+                                      "changed_faces":  2,
+                                      "changed":  true,
+                                      "source_brep_sha256":  "3442944f70cea9e7f2fd350d7e8faad7460c90da03f6dcaaf85b066694e98a25",
+                                      "geometry_deviation_mm":  0,
+                                      "geometry_deviation_authority":  "identical serialized forward faces, native supports, pcurves, boundaries and tolerances",
+                                      "tolerances_preserved":  true,
+                                      "all_faces_preserved":  true,
+                                      "all_solids_preserved":  true,
+                                      "gap_healing":  false,
+                                      "exact_method_validation":  true,
+                                      "manufacturing_qualified":  false
+                                  },
+                       "passed":  true
+                   },
+                   {
+                       "case":  "open-shell-boundary-retained",
+                       "expected":  "accept",
+                       "report":  {
+                                      "kernel":  "OCCT",
+                                      "kernel_version":  "8.0.1",
+                                      "brep_valid":  true,
+                                      "solids":  0,
+                                      "faces":  5,
+                                      "area_mm2":  296,
+                                      "volume_mm3":  null,
+                                      "display_mesh_authoritative":  false,
+                                      "self_intersections_checked":  false,
+                                      "manufacturing_authoritative":  false,
+                                      "bounds_mm":  [
+                                                        0,
+                                                        0,
+                                                        0,
+                                                        10,
+                                                        8,
+                                                        6
+                                                    ],
+                                      "operation":  "surface_repair",
+                                      "repair_mode":  "orientation",
+                                      "before":  {
+                                                     "solids":  0,
+                                                     "shells":  1,
+                                                     "faces":  5,
+                                                     "wires":  5,
+                                                     "edges":  12,
+                                                     "vertices":  8,
+                                                     "area_mm2":  296,
+                                                     "max_entity_tolerance_mm":  1E-07,
+                                                     "valid":  true,
+                                                     "orientation_consistent":  true,
+                                                     "free_edges":  4,
+                                                     "free_boundary_length_mm":  36,
+                                                     "boundaries":  [
+                                                                        {
+                                                                            "edge":  1,
+                                                                            "length_mm":  8
+                                                                        },
+                                                                        {
+                                                                            "edge":  5,
+                                                                            "length_mm":  8
+                                                                        },
+                                                                        {
+                                                                            "edge":  9,
+                                                                            "length_mm":  10
+                                                                        },
+                                                                        {
+                                                                            "edge":  11,
+                                                                            "length_mm":  10
+                                                                        }
+                                                                    ],
+                                                     "periodic_seam_edges":  0,
+                                                     "degenerated_edges":  0,
+                                                     "nonmanifold_edges":  0,
+                                                     "components":  1
+                                                 },
+                                      "after":  {
+                                                    "solids":  0,
+                                                    "shells":  1,
+                                                    "faces":  5,
+                                                    "wires":  5,
+                                                    "edges":  12,
+                                                    "vertices":  8,
+                                                    "area_mm2":  296,
+                                                    "max_entity_tolerance_mm":  1E-07,
+                                                    "valid":  true,
+                                                    "orientation_consistent":  true,
+                                                    "free_edges":  4,
+                                                    "free_boundary_length_mm":  36,
+                                                    "boundaries":  [
+                                                                       {
+                                                                           "edge":  1,
+                                                                           "length_mm":  8
+                                                                       },
+                                                                       {
+                                                                           "edge":  8,
+                                                                           "length_mm":  8
+                                                                       },
+                                                                       {
+                                                                           "edge":  10,
+                                                                           "length_mm":  10
+                                                                       },
+                                                                       {
+                                                                           "edge":  11,
+                                                                           "length_mm":  10
+                                                                       }
+                                                                   ],
+                                                    "periodic_seam_edges":  0,
+                                                    "degenerated_edges":  0,
+                                                    "nonmanifold_edges":  0,
+                                                    "components":  1
+                                                },
+                                      "changed_faces":  0,
+                                      "changed":  false,
+                                      "source_brep_sha256":  "3cccf46e5411ebfbd1c83daf5ed0dc974742000e4b5cd7aeeea7147640ba2eed",
+                                      "geometry_deviation_mm":  0,
+                                      "geometry_deviation_authority":  "identical serialized forward faces, native supports, pcurves, boundaries and tolerances",
+                                      "tolerances_preserved":  true,
+                                      "all_faces_preserved":  true,
+                                      "all_solids_preserved":  true,
+                                      "gap_healing":  false,
+                                      "exact_method_validation":  true,
+                                      "manufacturing_qualified":  false
+                                  },
+                       "passed":  true
+                   },
+                   {
+                       "case":  "open-solid-gap-refused",
+                       "expected":  "repair_open_solid",
+                       "error":  "repair_open_solid: Orientation repair cannot fill a missing face or close a geometric gap",
+                       "passed":  true
+                   },
+                   {
+                       "case":  "multiple-solids-refused",
+                       "expected":  "repair_unsupported_shape",
+                       "error":  "repair_unsupported_shape: Requires one face, one connected shell or one single-shell solid; compounds and multiple solids reject",
+                       "passed":  true
+                   },
+                   {
+                       "case":  "disconnected-gap-refused",
+                       "expected":  "repair_disconnected",
+                       "error":  "repair_disconnected: Orientation repair cannot join disconnected surfaces or close gaps",
+                       "passed":  true
+                   },
+                   {
+                       "case":  "multiple-edge-use-refused",
+                       "expected":  "repair_nonmanifold",
+                       "error":  "repair_nonmanifold: Repeated use of the same face is outside the supported manifold domain",
+                       "passed":  true
+                   },
+                   {
+                       "case":  "missing-boundary-edge-no-reconstruction",
+                       "expected":  "repair_invalid_geometry",
+                       "error":  "repair_invalid_geometry: An individual face has invalid geometry, wires or pcurves; orientation repair cannot heal it",
+                       "passed":  true
+                   },
+                   {
+                       "case":  "explicit-planar-normal-with-semantic-custody",
+                       "expected":  "accept",
+                       "report":  {
+                                      "kernel":  "OCCT",
+                                      "kernel_version":  "8.0.1",
+                                      "brep_valid":  true,
+                                      "solids":  0,
+                                      "faces":  1,
+                                      "area_mm2":  79.999999999999986,
+                                      "volume_mm3":  null,
+                                      "display_mesh_authoritative":  false,
+                                      "self_intersections_checked":  false,
+                                      "manufacturing_authoritative":  false,
+                                      "bounds_mm":  [
+                                                        0,
+                                                        0,
+                                                        0,
+                                                        10,
+                                                        8,
+                                                        0
+                                                    ],
+                                      "operation":  "surface_repair",
+                                      "repair_mode":  "orientation",
+                                      "before":  {
+                                                     "solids":  0,
+                                                     "shells":  0,
+                                                     "faces":  1,
+                                                     "wires":  1,
+                                                     "edges":  4,
+                                                     "vertices":  4,
+                                                     "area_mm2":  79.999999999999986,
+                                                     "max_entity_tolerance_mm":  1E-07,
+                                                     "valid":  true,
+                                                     "orientation_consistent":  true,
+                                                     "free_edges":  4,
+                                                     "free_boundary_length_mm":  36,
+                                                     "boundaries":  [
+                                                                        {
+                                                                            "edge":  0,
+                                                                            "length_mm":  8
+                                                                        },
+                                                                        {
+                                                                            "edge":  1,
+                                                                            "length_mm":  10
+                                                                        },
+                                                                        {
+                                                                            "edge":  2,
+                                                                            "length_mm":  8
+                                                                        },
+                                                                        {
+                                                                            "edge":  3,
+                                                                            "length_mm":  10
+                                                                        }
+                                                                    ],
+                                                     "periodic_seam_edges":  0,
+                                                     "degenerated_edges":  0,
+                                                     "nonmanifold_edges":  0,
+                                                     "components":  1
+                                                 },
+                                      "after":  {
+                                                    "solids":  0,
+                                                    "shells":  0,
+                                                    "faces":  1,
+                                                    "wires":  1,
+                                                    "edges":  4,
+                                                    "vertices":  4,
+                                                    "area_mm2":  79.999999999999986,
+                                                    "max_entity_tolerance_mm":  1E-07,
+                                                    "valid":  true,
+                                                    "orientation_consistent":  true,
+                                                    "free_edges":  4,
+                                                    "free_boundary_length_mm":  36,
+                                                    "boundaries":  [
+                                                                       {
+                                                                           "edge":  0,
+                                                                           "length_mm":  8
+                                                                       },
+                                                                       {
+                                                                           "edge":  1,
+                                                                           "length_mm":  10
+                                                                       },
+                                                                       {
+                                                                           "edge":  2,
+                                                                           "length_mm":  8
+                                                                       },
+                                                                       {
+                                                                           "edge":  3,
+                                                                           "length_mm":  10
+                                                                       }
+                                                                   ],
+                                                    "periodic_seam_edges":  0,
+                                                    "degenerated_edges":  0,
+                                                    "nonmanifold_edges":  0,
+                                                    "components":  1
+                                                },
+                                      "changed_faces":  1,
+                                      "changed":  true,
+                                      "source_brep_sha256":  "6489b71ebdf0ba10c0f466ca085646e4303583838c9637dc14257bcf8d6ea5d2",
+                                      "geometry_deviation_mm":  0,
+                                      "geometry_deviation_authority":  "identical serialized forward faces, native supports, pcurves, boundaries and tolerances",
+                                      "tolerances_preserved":  true,
+                                      "all_faces_preserved":  true,
+                                      "all_solids_preserved":  true,
+                                      "gap_healing":  false,
+                                      "exact_method_validation":  true,
+                                      "manufacturing_qualified":  false,
+                                      "requested_normal":  [
+                                                               0,
+                                                               0,
+                                                               1
+                                                           ]
+                                  },
+                       "passed":  true
+                   },
+                   {
+                       "case":  "stale-source-topology",
+                       "expected":  "repair_stale_topology",
+                       "error":  "repair_stale_topology: Source topology does not match the exact B-rep",
+                       "passed":  true
+                   },
+                   {
+                       "case":  "tilted-normal-no-geometry-rotation",
+                       "expected":  "repair_normal_mismatch",
+                       "error":  "repair_normal_mismatch: Requested normal must be parallel to the exact planar support; geometry is never rotated",
+                       "passed":  true
+                   },
+                   {
+                       "case":  "normal-required-for-single-face",
+                       "expected":  "repair_normal_required",
+                       "error":  "repair_normal_required: A single face requires an explicit planar normal orientation intent",
+                       "passed":  true
+                   },
+                   {
+                       "case":  "periodic-face-no-global-normal",
+                       "expected":  "repair_unsupported_normal",
+                       "error":  "repair_unsupported_normal: A periodic or curved face has no single global normal",
+                       "passed":  true
+                   },
+                   {
+                       "case":  "arbitrary-healing-refused",
+                       "expected":  "repair_unsupported_mode",
+                       "error":  "repair_unsupported_mode: Only explicit orientation repair is supported",
+                       "passed":  true
+                   },
+                   {
+                       "case":  "tolerance-widening-refused",
+                       "expected":  "repair_invalid_request",
+                       "error":  "repair_invalid_request: Unknown repair field: tolerance",
+                       "passed":  true
+                   },
+                   {
+                       "case":  "eccentric-loft-inward-orientation",
+                       "expected":  "accept",
+                       "report":  {
+                                      "kernel":  "OCCT",
+                                      "kernel_version":  "8.0.1",
+                                      "brep_valid":  true,
+                                      "solids":  1,
+                                      "faces":  3,
+                                      "area_mm2":  365.47483840999126,
+                                      "volume_mm3":  513.12679979138329,
+                                      "display_mesh_authoritative":  false,
+                                      "self_intersections_checked":  false,
+                                      "manufacturing_authoritative":  false,
+                                      "bounds_mm":  [
+                                                        -5.0000001000000003,
+                                                        -5.0000001000000003,
+                                                        -1E-07,
+                                                        5.0000001000000012,
+                                                        5.0000001000000003,
+                                                        10.000000099999999
+                                                    ],
+                                      "operation":  "surface_repair",
+                                      "repair_mode":  "orientation",
+                                      "before":  {
+                                                     "solids":  1,
+                                                     "shells":  1,
+                                                     "faces":  3,
+                                                     "wires":  3,
+                                                     "edges":  3,
+                                                     "vertices":  2,
+                                                     "area_mm2":  365.47483840999126,
+                                                     "max_entity_tolerance_mm":  1E-07,
+                                                     "valid":  true,
+                                                     "orientation_consistent":  true,
+                                                     "free_edges":  0,
+                                                     "free_boundary_length_mm":  0,
+                                                     "boundaries":  [
+
+                                                                    ],
+                                                     "periodic_seam_edges":  1,
+                                                     "degenerated_edges":  0,
+                                                     "nonmanifold_edges":  0,
+                                                     "components":  1,
+                                                     "signed_volume_mm3":  -513.12679979138341
+                                                 },
+                                      "after":  {
+                                                    "solids":  1,
+                                                    "shells":  1,
+                                                    "faces":  3,
+                                                    "wires":  3,
+                                                    "edges":  3,
+                                                    "vertices":  2,
+                                                    "area_mm2":  365.47483840999126,
+                                                    "max_entity_tolerance_mm":  1E-07,
+                                                    "valid":  true,
+                                                    "orientation_consistent":  true,
+                                                    "free_edges":  0,
+                                                    "free_boundary_length_mm":  0,
+                                                    "boundaries":  [
+
+                                                                   ],
+                                                    "periodic_seam_edges":  1,
+                                                    "degenerated_edges":  0,
+                                                    "nonmanifold_edges":  0,
+                                                    "components":  1,
+                                                    "signed_volume_mm3":  513.12679979138329
+                                                },
+                                      "changed_faces":  3,
+                                      "changed":  true,
+                                      "source_brep_sha256":  "305101bef20fb191a8fad4b1adfec0db681fbf7961430acdc573dc215a5b3945",
+                                      "geometry_deviation_mm":  0,
+                                      "geometry_deviation_authority":  "identical serialized forward faces, native supports, pcurves, boundaries and tolerances",
+                                      "tolerances_preserved":  true,
+                                      "all_faces_preserved":  true,
+                                      "all_solids_preserved":  true,
+                                      "gap_healing":  false,
+                                      "exact_method_validation":  true,
+                                      "manufacturing_qualified":  false
+                                  },
+                       "passed":  true
+                   },
+                   {
+                       "case":  "sweep-inward-orientation",
+                       "expected":  "accept",
+                       "report":  {
+                                      "kernel":  "OCCT",
+                                      "kernel_version":  "8.0.1",
+                                      "brep_valid":  true,
+                                      "solids":  1,
+                                      "faces":  3,
+                                      "area_mm2":  150.7964473723101,
+                                      "volume_mm3":  125.66370614359181,
+                                      "display_mesh_authoritative":  false,
+                                      "self_intersections_checked":  false,
+                                      "manufacturing_authoritative":  false,
+                                      "bounds_mm":  [
+                                                        -2,
+                                                        -2,
+                                                        0,
+                                                        2,
+                                                        2,
+                                                        10
+                                                    ],
+                                      "operation":  "surface_repair",
+                                      "repair_mode":  "orientation",
+                                      "before":  {
+                                                     "solids":  1,
+                                                     "shells":  1,
+                                                     "faces":  3,
+                                                     "wires":  3,
+                                                     "edges":  3,
+                                                     "vertices":  2,
+                                                     "area_mm2":  150.7964473723101,
+                                                     "max_entity_tolerance_mm":  1E-07,
+                                                     "valid":  true,
+                                                     "orientation_consistent":  true,
+                                                     "free_edges":  0,
+                                                     "free_boundary_length_mm":  0,
+                                                     "boundaries":  [
+
+                                                                    ],
+                                                     "periodic_seam_edges":  1,
+                                                     "degenerated_edges":  0,
+                                                     "nonmanifold_edges":  0,
+                                                     "components":  1,
+                                                     "signed_volume_mm3":  -125.66370614359181
+                                                 },
+                                      "after":  {
+                                                    "solids":  1,
+                                                    "shells":  1,
+                                                    "faces":  3,
+                                                    "wires":  3,
+                                                    "edges":  3,
+                                                    "vertices":  2,
+                                                    "area_mm2":  150.7964473723101,
+                                                    "max_entity_tolerance_mm":  1E-07,
+                                                    "valid":  true,
+                                                    "orientation_consistent":  true,
+                                                    "free_edges":  0,
+                                                    "free_boundary_length_mm":  0,
+                                                    "boundaries":  [
+
+                                                                   ],
+                                                    "periodic_seam_edges":  1,
+                                                    "degenerated_edges":  0,
+                                                    "nonmanifold_edges":  0,
+                                                    "components":  1,
+                                                    "signed_volume_mm3":  125.66370614359181
+                                                },
+                                      "changed_faces":  3,
+                                      "changed":  true,
+                                      "source_brep_sha256":  "d3c7a8418ed423b0d2c06d05585449a962a6c43457bbe113941c6fe75202ed08",
+                                      "geometry_deviation_mm":  0,
+                                      "geometry_deviation_authority":  "identical serialized forward faces, native supports, pcurves, boundaries and tolerances",
+                                      "tolerances_preserved":  true,
+                                      "all_faces_preserved":  true,
+                                      "all_solids_preserved":  true,
+                                      "gap_healing":  false,
+                                      "exact_method_validation":  true,
+                                      "manufacturing_qualified":  false
+                                  },
+                       "passed":  true
+                   },
+                   {
+                       "case":  "thickened-face-inward-orientation",
+                       "expected":  "accept",
+                       "report":  {
+                                      "kernel":  "OCCT",
+                                      "kernel_version":  "8.0.1",
+                                      "brep_valid":  true,
+                                      "solids":  1,
+                                      "faces":  6,
+                                      "area_mm2":  231.99999999999997,
+                                      "volume_mm3":  159.99999999999997,
+                                      "display_mesh_authoritative":  false,
+                                      "self_intersections_checked":  false,
+                                      "manufacturing_authoritative":  false,
+                                      "bounds_mm":  [
+                                                        0,
+                                                        0,
+                                                        -2,
+                                                        10,
+                                                        8,
+                                                        0
+                                                    ],
+                                      "operation":  "surface_repair",
+                                      "repair_mode":  "orientation",
+                                      "before":  {
+                                                     "solids":  1,
+                                                     "shells":  1,
+                                                     "faces":  6,
+                                                     "wires":  6,
+                                                     "edges":  12,
+                                                     "vertices":  8,
+                                                     "area_mm2":  231.99999999999997,
+                                                     "max_entity_tolerance_mm":  1.001E-07,
+                                                     "valid":  true,
+                                                     "orientation_consistent":  true,
+                                                     "free_edges":  0,
+                                                     "free_boundary_length_mm":  0,
+                                                     "boundaries":  [
+
+                                                                    ],
+                                                     "periodic_seam_edges":  0,
+                                                     "degenerated_edges":  0,
+                                                     "nonmanifold_edges":  0,
+                                                     "components":  1,
+                                                     "signed_volume_mm3":  -159.99999999999997
+                                                 },
+                                      "after":  {
+                                                    "solids":  1,
+                                                    "shells":  1,
+                                                    "faces":  6,
+                                                    "wires":  6,
+                                                    "edges":  12,
+                                                    "vertices":  8,
+                                                    "area_mm2":  231.99999999999997,
+                                                    "max_entity_tolerance_mm":  1.001E-07,
+                                                    "valid":  true,
+                                                    "orientation_consistent":  true,
+                                                    "free_edges":  0,
+                                                    "free_boundary_length_mm":  0,
+                                                    "boundaries":  [
+
+                                                                   ],
+                                                    "periodic_seam_edges":  0,
+                                                    "degenerated_edges":  0,
+                                                    "nonmanifold_edges":  0,
+                                                    "components":  1,
+                                                    "signed_volume_mm3":  159.99999999999997
+                                                },
+                                      "changed_faces":  6,
+                                      "changed":  true,
+                                      "source_brep_sha256":  "0b542124e06ab29abd769fd47c90c8c024c525ae3ed3eb1b0a2c3645a7b8d289",
+                                      "geometry_deviation_mm":  0,
+                                      "geometry_deviation_authority":  "identical serialized forward faces, native supports, pcurves, boundaries and tolerances",
+                                      "tolerances_preserved":  true,
+                                      "all_faces_preserved":  true,
+                                      "all_solids_preserved":  true,
+                                      "gap_healing":  false,
+                                      "exact_method_validation":  true,
+                                      "manufacturing_qualified":  false
+                                  },
+                       "passed":  true
+                   }
+               ],
+    "failures":  0,
+    "test_binary_sha256":  "308858ad2d15a958f07d712f258741ba3492c2a5de566fe4cf707ae2c5bf4d50",
+    "implementation_sha256":  "df5ca694733c4ab45f02c1cdb90af1e3183b8b674a75cdbd9c39412ebcb6b376",
+    "test_source_sha256":  "85ae1a8f58d44bee5949a470ef984ac0379ddfd6d590c05c220fd59a6a15e380",
+    "evidence_scope":  "Local native OCCT 8.0.1; synthetic inputs; no GUI, external-product interoperability or manufacturing qualification."
+}

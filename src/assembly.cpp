@@ -1,5 +1,7 @@
 #include "ark/model.hpp"
 #include "ark/references.hpp"
+#include "ark/assembly_authoring.hpp"
+#include "ark/history_authoring.hpp"
 #include <algorithm>
 #include <cmath>
 #include <functional>
@@ -434,6 +436,7 @@ bool resolveAssembly(const Document& d,std::vector<AssemblyPlacement>& placement
     }
     try{validateMechanicalGraph(d);for(const auto& mate:d.mates)if(isMechanicalMate(mate.type))prepareMotionRelation(d,mate,*byId.at(mate.a),*byId.at(mate.b),world.at(mate.a),world.at(mate.b));}catch(const std::exception& e){return fail(e.what());}
     if(!expandAssemblyPatterns(d,parentFrame,rigid,world,visibility,placements,error,&result.patternReports))return fail(error);
+    for(auto& placement:placements)placement.visible=placement.visible&&isAssemblyNodeLoaded(d,placement.node)&&featureWithinHistory(d,placement.feature);
     if(diagnostics)*diagnostics=std::move(result);
     return true;
 }

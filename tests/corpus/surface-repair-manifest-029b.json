@@ -1,0 +1,6 @@
+{
+  "schema":"ark.regression.corpus.v1",
+  "seed":19020,
+  "authorization":"Synthetic repository fixtures only.",
+  "native_fixtures":[{"path":"surface-repair-029b.json","sha256":"c84fe63e8654145072874e84c319f526e0e746566956d6df6a71ff7a67518c12"}]
+}

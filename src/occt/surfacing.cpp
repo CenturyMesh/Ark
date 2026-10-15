@@ -1,6 +1,7 @@
 #include "ark/occt_modeling.hpp"
 #include "ark/occt_solid.hpp"
 #include "common.hpp"
+#include "surface_repair.hpp"
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
@@ -26,6 +27,8 @@
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <BRepPrimAPI_MakeHalfSpace.hxx>
 #include <BRepAlgoAPI_Common.hxx>
+#include <Geom2d_Curve.hxx>
+#include <gp_Ax3.hxx>
 #include <gp_Pln.hxx>
 #include <BRepPrimAPI_MakeRevol.hxx>
 #include <GeomAPI_Interpolate.hxx>
@@ -1109,7 +1112,12 @@ V surfaceFill(const V& request) {
     if (!maker.IsDone()) throw std::runtime_error("OCCT surface filling failed");
     if (!std::isfinite(maker.G0Error()) || maker.G0Error() > tol)
         throw std::runtime_error("surface filling exceeds boundary tolerance");
-    return shapeResult(maker.Shape(), false);
+    V result=shapeResult(maker.Shape(), false),report=*result.find("report");
+    report.set("boundary_continuity_requested",V::makeStr("G0"));
+    report.set("boundary_max_error_mm",V::makeNum(maker.G0Error()));
+    report.set("boundary_tolerance_mm",V::makeNum(tol));
+    report.set("neighbor_tangency_verified",V::makeBool(false));
+    result.set("report",report);return result;
 }
 
 NCollection_Array1<double> knots(int poleCount, int degree) {
@@ -1349,10 +1357,30 @@ V trimSurfacePlane(const V& request){
     const gp_Pnt origin(originVector.X(),originVector.Y(),originVector.Z());const gp_Dir direction(normal);
     const auto& keep=required(request,"keep");if(keep.t!=V::Str||(keep.str!="positive"&&keep.str!="negative"))throw std::runtime_error("Surface trim keep must be positive or negative");
     BRepBuilderAPI_MakeFace plane(gp_Pln(origin,direction));if(!plane.IsDone())throw std::runtime_error("Surface trim plane construction failed");
-    auto half=[&](double sign){BRepPrimAPI_MakeHalfSpace region(plane.Face(),origin.Translated(gp_Vec(direction)*sign));BRepAlgoAPI_Common cut(sourceFaces.front(),region.Solid());cut.Build();if(!cut.IsDone()||cut.HasErrors())throw std::runtime_error("Surface plane trim failed");const auto faces=shapes(cut.Shape(),TopAbs_FACE);if(faces.size()!=1||properties(faces.front(),'a')<=1e-8)throw std::runtime_error("Plane must divide the surface into one connected face on each side; tangent/outside or disconnected result rejected");shapeReport(faces.front(),false);return faces.front();};
-    auto positive=half(1),negative=half(-1);const double originalArea=properties(sourceFaces.front(),'a'),retainedArea=properties(keep.str=="positive"?positive:negative,'a');
-    if(std::abs(properties(positive,'a')+properties(negative,'a')-originalArea)>std::max(1e-6,originalArea*1e-8)||originalArea-retainedArea<=1e-8)throw std::runtime_error("Surface trim failed area conservation");
-    auto result=surfaceEditResult(keep.str=="positive"?positive:negative,"surface_trim_plane");V report=required(result,"report");report.set("original_area_mm2",V::makeNum(originalArea));report.set("removed_area_mm2",V::makeNum(originalArea-retainedArea));report.set("area_conservation_checked",V::makeBool(true));result.set("report",report);return result;
+    // Face/half-space common can silently return empty compounds for a periodic
+    // face. Split once instead, retaining and validating every resulting face.
+    NCollection_List<TopoDS_Shape> arguments,tools;arguments.Append(sourceFaces.front());tools.Append(plane.Face());
+    BRepAlgoAPI_Splitter split;split.SetArguments(arguments);split.SetTools(tools);split.Build();
+    if(!split.IsDone()||split.HasErrors())throw std::runtime_error("Surface plane trim failed");
+    const auto pieces=shapes(split.Shape(),TopAbs_FACE);
+    const char* divisionError="Plane must divide the surface into one connected face on each side; tangent/outside, disconnected or ambiguous result rejected";
+    if(pieces.size()!=2)throw std::runtime_error(divisionError);
+    gp_Trsf toPlane;toPlane.SetTransformation(gp_Ax3(origin,direction));
+    TopoDS_Shape positive,negative;double positiveArea=0,negativeArea=0;
+    for(const auto& piece:pieces){
+        const double area=properties(piece,'a');if(area<=1e-8)throw std::runtime_error(divisionError);
+        shapeReport(piece,false);
+        // Native support/curve bounds in the cutting-plane frame establish the
+        // signed-distance range. No triangulation or sampled centroid chooses a side.
+        const auto box=bounds(transformed(piece,toPlane));
+        if(box[2]>=-kTolerance&&box[5]>kTolerance){if(!positive.IsNull())throw std::runtime_error(divisionError);positive=piece;positiveArea=area;}
+        else if(box[5]<=kTolerance&&box[2]<-kTolerance){if(!negative.IsNull())throw std::runtime_error(divisionError);negative=piece;negativeArea=area;}
+        else throw std::runtime_error(divisionError);
+    }
+    if(positive.IsNull()||negative.IsNull())throw std::runtime_error(divisionError);
+    const double originalArea=properties(sourceFaces.front(),'a'),retainedArea=keep.str=="positive"?positiveArea:negativeArea;
+    if(std::abs(positiveArea+negativeArea-originalArea)>std::max(1e-6,originalArea*1e-8)||originalArea-retainedArea<=1e-8)throw std::runtime_error("Surface trim failed area conservation");
+    auto result=surfaceEditResult(keep.str=="positive"?positive:negative,"surface_trim_plane");V report=required(result,"report");report.set("original_area_mm2",V::makeNum(originalArea));report.set("removed_area_mm2",V::makeNum(originalArea-retainedArea));report.set("positive_area_mm2",V::makeNum(positiveArea));report.set("negative_area_mm2",V::makeNum(negativeArea));report.set("area_conservation_checked",V::makeBool(true));report.set("split_method",V::makeStr("exact_face_plane_splitter"));report.set("side_classification",V::makeStr("exact_brep_bounds_in_plane_frame"));report.set("classification_tolerance_mm",V::makeNum(kTolerance));result.set("report",report);return result;
 }
 V trimSurfaceWire(const V& request){
     const auto source=readBrep(required(request,"input_brep").str),curve=readBrep(required(request,"wire_brep").str);const auto faces=shapes(source,TopAbs_FACE),wires=shapes(curve,TopAbs_WIRE);
@@ -1433,6 +1461,43 @@ V sewSurfaces(const V& request) {
     report.set("contiguous_edges",V::makeNum(sewing.NbContigousEdges()));report.set("multiple_edges",V::makeNum(sewing.NbMultipleEdges()));
     report.set("free_boundary_length_mm",V::makeNum(boundaryLength));report.set("free_boundaries_mm",boundaries);
     report.set("closed",V::makeBool(freeEdges==0));report.set("connected",V::makeBool(components.size()==1));
+    // Evaluate the native surface supports at their shared-edge pcurves.
+    // Tangent planes are unoriented: reversed input faces do not turn a smooth
+    // join into an apparent 180-degree crease. Samples do not prove global G1.
+    V joins=V::makeArr();
+    if(owners.Extent()>4096)throw std::runtime_error("Sew continuity inspection exceeds 4096 native edges");
+    for(int i=1;i<=owners.Extent();++i){
+        std::vector<TopoDS_Face> adjacent;
+        for(NCollection_List<TopoDS_Shape>::Iterator owner(owners.FindFromIndex(i));owner.More();owner.Next())
+            if(std::none_of(adjacent.begin(),adjacent.end(),[&](const TopoDS_Face& f){return f.IsSame(owner.Value());}))adjacent.push_back(TopoDS::Face(owner.Value()));
+        if(adjacent.size()!=2)continue;
+        const auto edge=TopoDS::Edge(owners.FindKey(i));V row=V::makeObj();row.set("edge_index",V::makeNum(i-1));
+        double firstA,lastA,firstB,lastB;const auto a=BRep_Tool::CurveOnSurface(edge,adjacent[0],firstA,lastA),b=BRep_Tool::CurveOnSurface(edge,adjacent[1],firstB,lastB);
+        double gap=0,angle=0;int checked=0;std::string reason;
+        try{
+            if(!BRep_Tool::SameParameter(edge))throw std::runtime_error("Shared edge does not have a verified common pcurve parameterization");
+            if(a.IsNull()||b.IsNull())throw std::runtime_error("Missing shared-edge pcurve");
+            const double first=std::max(firstA,firstB),last=std::min(lastA,lastB);
+            if(!std::isfinite(first)||!std::isfinite(last)||last<=first)throw std::runtime_error("No finite shared pcurve parameter interval");
+            BRepAdaptor_Surface sa(adjacent[0]),sb(adjacent[1]);
+            for(int sample=1;sample<=17;++sample){
+                const double t=first+(last-first)*sample/18.;const auto ua=a->Value(t),ub=b->Value(t);
+                gp_Pnt pa,pb;gp_Vec au,av,bu,bv;sa.D1(ua.X(),ua.Y(),pa,au,av);sb.D1(ub.X(),ub.Y(),pb,bu,bv);
+                gp_Vec na=au.Crossed(av),nb=bu.Crossed(bv);
+                if(na.Magnitude()<=1e-14||nb.Magnitude()<=1e-14)throw std::runtime_error("Singular surface normal at a continuity sample");
+                const double observedGap=pa.Distance(pb),observedAngle=std::acos(std::clamp(std::abs(na.Normalized().Dot(nb.Normalized())),0.,1.))*180/std::acos(-1.);
+                if(!std::isfinite(observedGap)||!std::isfinite(observedAngle))throw std::runtime_error("Nonfinite continuity measurement");
+                gap=std::max(gap,observedGap);angle=std::max(angle,observedAngle);++checked;
+            }
+        }catch(const Standard_Failure& failure){reason=failure.GetMessageString()?failure.GetMessageString():"OCCT continuity measurement failed";}
+        catch(const std::exception& failure){reason=failure.what();}
+        row.set("samples_checked",V::makeNum(checked));row.set("status",V::makeStr(reason.empty()?"measured":"unresolved"));
+        row.set("observed_max_gap_mm",checked?V::makeNum(gap):V{});row.set("observed_max_tangent_plane_angle_deg",checked?V::makeNum(angle):V{});
+        if(!reason.empty())row.set("reason",V::makeStr(reason));joins.arr.push_back(row);
+    }
+    report.set("shared_edge_continuity",joins);
+    report.set("continuity_scope",V::makeStr("17 interior native pcurve checkpoints per shared edge; unoriented tangent planes; endpoints, between-sample extrema and G2 unverified"));
+    report.set("global_g1_verified",V::makeBool(false));
     result.set("report",report);return result;
 }
 
@@ -1506,6 +1571,7 @@ V modelSurfaceNative(const V& request) {
         if (operation.str == "surface_extract_face") return extractSurfaceFace(request);
         if (operation.str == "surface_trim_plane") return trimSurfacePlane(request);
         if (operation.str == "surface_trim_wire") return trimSurfaceWire(request);
+        if (operation.str == "surface_repair") return repairSurfaceOrientation(request);
         if (operation.str == "sew") return sewSurfaces(request);
         if (operation.str == "collision") return collisionReport(request);
         if (operation.str == "helix" || operation.str == "curve" || operation.str == "curve_interpolate" || operation.str == "curve_analytic" || operation.str == "surface_spline" || operation.str == "curve_project_surface" || operation.str == "intersection_curve" || operation.str == "bridge")

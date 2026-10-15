@@ -1,5 +1,6 @@
 #include "ark/manufacturing.hpp"
 #include "ark/dfm.hpp"
+#include "ark/history_authoring.hpp"
 #include <cmath>
 #include <map>
 #include <set>
@@ -200,11 +201,11 @@ bool applyManufacturingIntent(Feature& feature,const V& intent,std::string& erro
 }
 V inspectManufacturing(const Document& document,const V& args,u64 revision){
     if(args.t!=V::Obj)throw std::runtime_error("manufacturing_inspect arguments must be an object");for(const auto& item:args.obj)if(item.first!="id")throw std::runtime_error("Unknown manufacturing_inspect argument: "+item.first);
-    V report=V::makeObj(),components=V::makeArr();std::set<u64> consumed,placed;for(const auto& feature:document.features)if(featureConsumesInputBodies(feature))for(u64 id:feature.inputs)consumed.insert(id);for(const auto& node:document.assembly)if(node.feature)placed.insert(node.feature);
+    V report=V::makeObj(),components=V::makeArr();const auto consumed=consumedFeatureInputs(document),active=activeFeatureIds(document);std::set<u64> placed;for(const auto& node:document.assembly)if(node.feature)placed.insert(node.feature);
     if(const auto* selected=args.find("id")){
         const Feature* match=nullptr;for(const auto& feature:document.features)if((selected->t==V::Str&&selected->str==feature.name)||(selected->t==V::Num&&selected->num==(double)feature.id)){if(match)throw std::runtime_error("Ambiguous manufacturing feature");match=&feature;}
         if(!match)throw std::runtime_error("Manufacturing feature must resolve uniquely by id or name");components.arr.push_back(inspectComponent(document,*match));
-    }else for(const auto& feature:document.features)if(!feature.suppressed&&(!feature.manufacturingRoute.empty()||!consumed.count(feature.id)||placed.count(feature.id)))components.arr.push_back(inspectComponent(document,feature));
+    }else for(const auto& feature:document.features)if(active.count(feature.id)&&(!feature.manufacturingRoute.empty()||!consumed.count(feature.id)||placed.count(feature.id)))components.arr.push_back(inspectComponent(document,feature));
     bool ready=!components.arr.empty();for(const auto& component:components.arr)ready&=component.find("ready_for_process_review")->b;
     report.set("revision",V::makeNum((double)revision));report.set("scope",V::makeStr(args.find("id")?"feature_local":"declared_and_output_feature_definitions"));report.set("components",components);report.set("ready_for_process_review",V::makeBool(ready));report.set("manufacturing_qualified",V::makeBool(false));report.set("geometry_mutated",V::makeBool(false));report.set("dimension_authority",V::makeStr("authored_CAD_and_evaluated_exact_BRep; process_settings_are_caller_declarations"));return report;
 }

@@ -55,9 +55,26 @@ jobs:
       - name: Build ARK and run tests
         shell: pwsh
         run: ./scripts/build.ps1 -Test -Jobs 2
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-release-regressions
+          path: |
+            out/native-release/regression-results.xml
+            out/native-release/native-authoring-corpus-v1.receipt.json
+            out/native-release/drawing-dxf-v1.receipt.json
+          if-no-files-found: warn
       - name: Prepare portable package and update manifest
         shell: pwsh
         run: ./scripts/package-release.ps1
+      - name: Review dependency database for the packaged Windows SBOM
+        shell: pwsh
+        run: |
+          Import-Module ./updates/Ark.Update.psm1 -Force
+          $archive = @(Get-ChildItem out/releases/ark-windows-x64-*.zip)
+          if ($archive.Count -ne 1) { throw 'Expected one Windows archive.' }
+          Expand-ArkPackage $archive[0].FullName (Join-Path $PWD out/dependency-audit-stage)
+          ./scripts/audit-dependencies.ps1 -SbomPath out/dependency-audit-stage/release-evidence/sbom.cdx.json -OutputPath out/releases/windows-dependency-audit.json -FailOnFinding
       - name: Install Inno Setup
         if: inputs.installer
         run: choco install innosetup --no-progress -y
@@ -73,7 +90,9 @@ jobs:
           name: ark-windows-release-assets
           path: |
             out/releases/ark-windows-x64-*.zip
+            out/releases/ark-windows-x64-*.zip.provenance.json
             out/releases/ark-update.json
+            out/releases/windows-dependency-audit.json
             out/releases/ARK-*-windows-x64-setup.exe
             out/releases/SHA256SUMS.txt
           if-no-files-found: error
@@ -113,6 +132,8 @@ jobs:
           fi
           printf 'ARK %s / runtime %s preview. Windows and Linux native tests and relocated Linux package checks passed. Optional installer checks ran only when requested. Interactive Studio and manufacturing qualification remain separate gates. Source commit: %s\n' "$code" "$version" "$GITHUB_SHA" > release-notes.txt
           assets=(ark-windows-x64-*.zip ark-linux-x64-headless-*.tar.gz OCCT-V8_0_1-source.zip SHA256SUMS.txt)
+          assets+=(ark-windows-x64-*.zip.provenance.json ark-linux-x64-headless-*.tar.gz.provenance.json windows-dependency-audit.json linux-release-evidence/*.json)
+          sha256sum ark-windows-x64-*.zip.provenance.json ark-linux-x64-headless-*.tar.gz.provenance.json windows-dependency-audit.json linux-release-evidence/*.json >> SHA256SUMS.txt
           if compgen -G 'ARK-*-windows-x64-setup.exe' >/dev/null; then assets+=(ARK-*-windows-x64-setup.exe); fi
           gh release create "$tag" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "ARK $code / $version preview" --notes-file release-notes.txt --prerelease
   linux-package:
@@ -124,8 +145,31 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y build-essential cmake ninja-build curl ca-certificates unzip patchelf
       - name: Build and test Linux CLI, MCP and OCCT worker
         run: bash scripts/build.sh --test --jobs 2
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-release-regressions
+          path: |
+            out/linux-native-release/regression-results.xml
+            out/linux-native-release/native-authoring-corpus-v1.receipt.json
+            out/linux-native-release/drawing-dxf-v1.receipt.json
+          if-no-files-found: warn
       - name: Prepare Linux headless package
         run: bash scripts/package-linux.sh
+      - name: Generate Linux SBOM, source and payload provenance
+        shell: pwsh
+        run: |
+          $archive = @(Get-ChildItem out/releases/ark-linux-x64-headless-*.tar.gz)
+          if ($archive.Count -ne 1) { throw 'Expected one release archive.' }
+          New-Item -ItemType Directory -Path out/linux-evidence-stage | Out-Null
+          tar -xzf $archive[0].FullName -C out/linux-evidence-stage
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect Linux archive.' }
+          $package = @(Get-ChildItem out/linux-evidence-stage -Directory)
+          if ($package.Count -ne 1) { throw 'Expected one packaged runtime.' }
+          ./scripts/write-release-evidence.ps1 -PackageDirectory $package[0].FullName -OutputDirectory out/releases/linux-release-evidence -Archive $archive[0].FullName
+      - name: Review dependency database for the Linux SBOM
+        shell: pwsh
+        run: ./scripts/audit-dependencies.ps1 -SbomPath out/releases/linux-release-evidence/sbom.cdx.json -OutputPath out/releases/linux-release-evidence/dependency-audit.json -FailOnFinding
       - name: Test relocated package without the build SDK
         run: |
           mkdir -p out/linux-smoke
@@ -137,5 +181,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: ark-linux-release-assets
-          path: out/releases/ark-linux-x64-headless-*.tar.gz*
+          path: |
+            out/releases/ark-linux-x64-headless-*.tar.gz*
+            out/releases/linux-release-evidence/*.json
           if-no-files-found: error

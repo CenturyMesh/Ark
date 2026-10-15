@@ -1,5 +1,6 @@
 #include "ark/design_containers.hpp"
 #include "ark/agent.hpp"
+#include "ark/assembly_authoring.hpp"
 #include "ark/agent_activity.hpp"
 #include "ark/iteration_history.hpp"
 #include <atomic>
@@ -146,6 +147,7 @@ arkjson::Value AgentSession::commitPrepared(const V& args){
     const auto* acceptance=args.find("accept_dfm");
     if(found->requiresDfmAcceptance&&(!acceptance||acceptance->t!=V::Bool||!acceptance->b))throw std::runtime_error("DFM_ACCEPTANCE_REQUIRED: review the retained comparison and explicitly pass accept_dfm:true");
     if(acceptance&&(acceptance->t!=V::Bool||!found->requiresDfmAcceptance))throw std::runtime_error("accept_dfm applies only to a retained manufacturing proposal");
+    verifyAssemblyExternalReferences(*found->document);
     auto next=found->document;V out=found->result;if(found->requiresDfmAcceptance){out.set("dfm_comparison",found->dfmComparison);out.set("dfm_accepted",V::makeBool(true));}
     validateDesignContainerTransition(document,*next);
     const bool metadata=found->metadataOnly;out.set("geometry_changed",V::makeBool(!out.find("geometry_recomputed")||out.find("geometry_recomputed")->b));remember();

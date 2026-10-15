@@ -1,0 +1,29 @@
+{
+    "schema":  "ark.regression.corpus.v1",
+    "seed":  19020,
+    "authorization":  "Repository-authored synthetic fixtures only. User documents are excluded.",
+    "fixtures":  [
+                     {
+                         "path":  "core-commands-v1.json",
+                         "sha256":  "46c0b74cf0892efd5d5e6246f373ead33509dd15f896f9315a5ce42bc8140b1b"
+                     }
+                 ],
+    "companion_suites":  [
+                             "document-container",
+                             "recovery-protection",
+                             "ota-updates",
+                             "ota-launch",
+                             "native-authoring-corpus"
+                         ],
+    "limitations":  "Hosted CI, interactive UI and deployed update execution require their own observed receipts.",
+    "native_fixtures":  [
+                            {
+                                "sha256":  "94add7d676685b6b054ce58ffa32e924869ff91b3c6e0fe1c2385e7f390e1dfe",
+                                "path":  "native-authoring-v1.json"
+                            },
+                            {
+                                "sha256": "c84fe63e8654145072874e84c319f526e0e746566956d6df6a71ff7a67518c12",
+                                "path": "surface-repair-029b.json"
+                            }
+                        ]
+}

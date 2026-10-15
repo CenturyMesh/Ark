@@ -308,6 +308,10 @@ public:
     arkjson::Value designContainerCheckout; // scoped workspace ownership and merge baseline; no derived geometry
     arkjson::Value skeleton; // native declarative source, input overrides and stable ownership manifest
     std::vector<arkjson::Value> drawings; // authored associative technical drawings; derived curves are never persisted
+    u64 historyTip=0; // inclusive feature prefix; zero resumes the full authored history
+    arkjson::Value assemblyConfigurations; // explicit parameter/occurrence visibility recipes
+    arkjson::Value assemblyLoadSelection; // null loads all; array retains selected node subtrees
+    arkjson::Value assemblyExternalReferences; // imported source hashes and producer revisions
     u64 addFeature(Feature f);                    // returns id
     Feature* find(u64 id);
     const Feature* find(u64 id) const;
@@ -330,6 +334,7 @@ public:
     u64 evaluationGeneration=0;
     size_t recomputeReused=0, recomputeEvaluated=0;
     size_t parallelFeatures=0, peakParallelFeatures=0, dependencyEdges=0;
+    size_t parallelContextFeaturesCopied=0; // audited per-job feature closure, never serialized
     unsigned featureWorkers=1, nativeThreadsPerWorker=1;
     TessOptions tessOpt{};
 

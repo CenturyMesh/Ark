@@ -1,0 +1,136 @@
+{
+    "physical_bom_quantity":  2,
+    "version":  "0.9.30",
+    "calls":  [
+                  {
+                      "method":  "initialize",
+                      "id":  1,
+                      "tool":  null
+                  },
+                  {
+                      "method":  "tools/list",
+                      "id":  2,
+                      "tool":  null
+                  },
+                  {
+                      "method":  "tools/call",
+                      "id":  3,
+                      "tool":  "doc_apply"
+                  },
+                  {
+                      "method":  "tools/call",
+                      "id":  4,
+                      "tool":  "doc_apply"
+                  },
+                  {
+                      "method":  "tools/call",
+                      "id":  5,
+                      "tool":  "native_inspect"
+                  },
+                  {
+                      "method":  "tools/call",
+                      "id":  6,
+                      "tool":  "bom_inspect"
+                  },
+                  {
+                      "method":  "tools/call",
+                      "id":  7,
+                      "tool":  "doc_save"
+                  },
+                  {
+                      "method":  "tools/call",
+                      "id":  8,
+                      "tool":  "doc_new"
+                  },
+                  {
+                      "method":  "tools/call",
+                      "id":  9,
+                      "tool":  "doc_load"
+                  },
+                  {
+                      "method":  "tools/call",
+                      "id":  10,
+                      "tool":  "assembly_authoring_info"
+                  },
+                  {
+                      "method":  "tools/call",
+                      "id":  11,
+                      "tool":  "native_inspect"
+                  },
+                  {
+                      "method":  "tools/call",
+                      "id":  12,
+                      "tool":  "bom_inspect"
+                  },
+                  {
+                      "method":  "tools/call",
+                      "id":  13,
+                      "tool":  "doc_info"
+                  },
+                  {
+                      "method":  "tools/call",
+                      "id":  14,
+                      "tool":  "sketch_repair"
+                  },
+                  {
+                      "method":  "tools/call",
+                      "id":  15,
+                      "tool":  "doc_preview"
+                  },
+                  {
+                      "method":  "tools/call",
+                      "id":  16,
+                      "tool":  "doc_apply"
+                  },
+                  {
+                      "method":  "tools/call",
+                      "id":  17,
+                      "tool":  "doc_new"
+                  },
+                  {
+                      "method":  "tools/call",
+                      "id":  18,
+                      "tool":  "doc_apply"
+                  },
+                  {
+                      "method":  "tools/call",
+                      "id":  19,
+                      "tool":  "native_inspect"
+                  },
+                  {
+                      "method":  "tools/call",
+                      "id":  20,
+                      "tool":  "doc_save"
+                  },
+                  {
+                      "method":  "tools/call",
+                      "id":  21,
+                      "tool":  "doc_new"
+                  },
+                  {
+                      "method":  "tools/call",
+                      "id":  22,
+                      "tool":  "doc_load"
+                  },
+                  {
+                      "method":  "tools/call",
+                      "id":  23,
+                      "tool":  "native_inspect"
+                  }
+              ],
+    "mcp_sha256":  "f7fa45484e6ab5fd886d74467589d91da0c68c893baa968b1cd6366d284fb934",
+    "surface_repair_thicken_volume_mm3":  200,
+    "configured_width_mm":  32,
+    "exact_volume_mm3":  1280,
+    "scope":  "Extracted local payload only; isolated profile, PATH without SDK, synthetic documents. Exact configuration/BOM/readback, reviewed sketch preview/commit and source41 surface repair/thickening/readback; no installed update, remote transport or external consumer qualification.",
+    "schema":  "ark.relocated-smoke.v1",
+    "source41_reopened":  true,
+    "iteration_code":  "029B",
+    "reviewed_sketch":  true,
+    "valid":  true,
+    "additional_source_format":  41,
+    "source_format":  40,
+    "tool_count":  95,
+    "revision":  9,
+    "rpc_count":  23
+}

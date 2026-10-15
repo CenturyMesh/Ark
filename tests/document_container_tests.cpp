@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -46,6 +47,7 @@ V fixture(size_t sourceBytes=0){
     if(sourceBytes){std::string source(sourceBytes,'A');for(size_t i=0;i<source.size();++i)source[i]=(char)('A'+i%26);V items=V::makeArr();for(int i=0;i<2;++i){V feature=V::makeObj();feature.set("id",V::makeNum(i+1));feature.set("source",V::makeStr(source));items.arr.push_back(std::move(feature));}root.set("features",std::move(items));}
     return root;
 }
+#include "container_fault_vfs.inl"
 void codecTests(){
     V root=json(R"({"z":[null,true,false,0,1,-1,9007199254740991,-9007199254740991,0.125,1e-20],"a":"Portuguese: a\u00e7o; binary: \u0000\n"})");
     root.set("negative_zero",V::makeNum(-0.0));std::string encoded=canonical(root),error;V restored;check(ark::decodeDocumentValue(encoded,restored,&error),error);check(canonical(restored)==encoded,"typed codec roundtrip retains finite numbers/strings");check(std::signbit(restored.find("negative_zero")->num),"typed codec preserves negative zero");
@@ -102,4 +104,4 @@ void benchmark(){
     V report=V::makeObj();report.set("benchmark",V::makeStr("ARK container v1 storage and codec; median of 7; warm filesystem; no geometry evaluation or journal semantic validation"));report.set("json_durability",V::makeStr("existing ofstream flush plus atomic replace"));report.set("container_durability",V::makeStr("SQLite synchronous FULL rollback transaction"));report.set("results",std::move(results));std::cout<<report.dump()<<'\n';
 }
 }
-int main(int argc,char** argv){try{if(argc==3&&std::string(argv[1])=="--crash-write")return crashWrite(fs::path(reinterpret_cast<const char8_t*>(argv[2])));if(argc==2&&std::string(argv[1])=="--benchmark"){benchmark();return 0;}codecTests();containerTests(fs::absolute(fs::path(reinterpret_cast<const char8_t*>(argv[0]))));persistenceIntegration();std::cout<<"document container tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(int argc,char** argv){try{if(argc==3&&std::string(argv[1])=="--crash-write")return crashWrite(fs::path(reinterpret_cast<const char8_t*>(argv[2])));if(argc==2&&std::string(argv[1])=="--benchmark"){benchmark();return 0;}codecTests();containerTests(fs::absolute(fs::path(reinterpret_cast<const char8_t*>(argv[0]))));diskFullTests();persistenceIntegration();std::cout<<"document container tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

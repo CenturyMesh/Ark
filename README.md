@@ -22,6 +22,11 @@ Extract the Windows ZIP and run `ARK.cmd`. For Linux, extract the archive and ru
 for manual evaluation. [Release notes, checksums and OCCT source](https://github.com/CenturyMesh/Ark/releases/tag/v0.9.29).
 No compilation is required to use these downloads.
 
+The next source iteration, [029B / 0.9.30](docs/iterations/029B.md), adds local
+recovery and regression evidence, editable history/rollback, named configurations,
+selective assembly evaluation and bounded DXF drawing export. The links above
+remain the published 028D packages until a new release is actually published.
+
 The chat opens on first launch and remembers your visibility choice. Windows
 Assistant and Team cards also offer [Grok Build through its official CLI account](docs/GROK_BUILD_CONNECT.md).
 

@@ -13,9 +13,10 @@ stable updater excludes drafts and prereleases and does not offer them automatic
 
 Older installed runtimes and their retained launchers can still contain the retired
 `CenturyMesh/Ark-Releases` placeholder. They cannot discover the new channel through
-that nonexistent old endpoint. Move to a reviewed new portable installation
-manually, preserving drawings and settings, before relying on future checks against
-`CenturyMesh/Ark`. This source change does not rewrite already installed runtimes.
+that nonexistent old endpoint. Launch a reviewed new portable package locally,
+preserving drawings and settings, before relying on future checks against
+`CenturyMesh/Ark`. Only this explicit local invocation can migrate the retained
+launcher module; publishing source does not rewrite installed runtimes.
 
 ## Using updates
 
@@ -59,10 +60,22 @@ This optional developer command creates a baseline and an **ARK** desktop shortc
 Distributed `ARK.cmd`, `start-studio.ps1`, and the first in-app download prepare the
 internal baseline automatically; this script is not a required user installer.
 Administrator rights are unnecessary. For an isolated test, pass `-InstallRoot`.
-The launcher is copied once from trusted local scripts. Updates use its protocol;
-replacing that bootstrap code requires a new portable installation rather than a
-command supplied by a release feed. Version directories are retained; this first
-protocol does not automatically prune old runtimes.
+The stable `ark-launch.ps1` retains its activation and startup-ACK protocol. An
+explicit invocation from a reviewed newer local package atomically refreshes its
+retained `Ark.Update.psm1` from the trusted local module already executing, before
+publishing a pending runtime. Old/equal runtimes cannot replace the helper or a
+newer pending candidate. If replacement fails, the previous helper and exact
+current/pending state remain intact. Downloaded manifests and
+`Install-ArkStagedPackage` never choose bootstrap code. Version directories remain
+available for rollback and are not automatically pruned.
+
+Retained MSVC-only helpers require `TKernel.dll` and reject a complete LLVM-MinGW
+`libTK*.dll` package before staging. Their old online staging path cannot install
+this migration. Launching the reviewed new package's `ARK.cmd` locally imports its
+new module and prepares the LLVM runtime for the retained launcher. The refreshed
+helper still launches and rolls back to a previous MSVC runtime. A fully automatic
+transition needs a separately qualified MSVC-compatible bridge release. No such
+online bridge or older-to-newer hosted delivery trial is claimed.
 
 ## Preparing release assets
 
@@ -81,12 +94,23 @@ The package script includes Studio, CLI, MCP, the native OCCT worker, DLLs,
 UI assets, update scripts, version metadata and the Visual C++ x64 app-local
 runtime from the installed build toolchain. `-MsvcRuntimeDirectory` can name that
 toolchain runtime explicitly. It does not package repository drawings or tests.
+LLVM-MinGW builds instead require `-CompilerDirectory` for matching compiler and
+runtime redistribution notices. The archive retains its actual LLVM/MinGW DLLs.
+The packager generates a CycloneDX SBOM, source/payload inventories and an unsigned
+archive-bound provenance sidecar; see [trust foundation](TRUST_FOUNDATION.md).
+Normal release packages must match `release.json`. Personal test packaging with
+`-SkipUpdateManifest` preserves the compiled runtime identity and records the
+packaging source identity separately; this does not attest its original compiler
+inputs or advertise an update feed.
 Update scripts are taken from the reviewed repository source so that a retained
 compiled runtime cannot package the retired channel scripts. The archive includes
 Apache-2.0/NOTICE and third-party notices; its README.txt links to the maintained
 online handbook and connection guide. Review redistribution notices before publication.
-The **Prepare Windows release package** workflow builds/tests and uploads artifacts;
-it does not create or publish a GitHub release.
+The **Prepare Windows and Linux release packages** workflow builds/tests, audits
+the exact generated SBOMs and uploads artifacts. Its existing explicit `publish`
+option can publish an immutable prerelease only after both platform jobs pass;
+publication remains disabled by default. The optional installer keeps its separate
+build and relocated-installation checks.
 
 These two reviewed assets belong on a release in `CenturyMesh/Ark` whose tag
 matches the numeric runtime, for example `v0.9.17`. Mark evaluation releases as
@@ -147,6 +171,10 @@ from an older build.
 startup acknowledgement, real process failure and fallback, exact Unicode/quoted/
 empty arguments, working directories and environment restoration are checked
 without a network request or changes to the user's installation.
+It also retains the previous MSVC-only validator in an installed helper fixture,
+observes rejection of LLVM staging, and checks local atomic helper migration,
+locked-helper failure with unchanged pointers, LLVM activation, MSVC rollback and
+rejection of helper downgrades.
 
 Implementation follows the official
 [GitHub releases API](https://docs.github.com/en/rest/releases/releases#get-the-latest-release)

@@ -1,5 +1,6 @@
 #include "ark/cad_import.hpp"
 #include "ark/native_features.hpp"
+#include "ark/assembly_authoring.hpp"
 #include "ark/native_backend.hpp"
 #include "ark/references.hpp"
 #include "ark/sketch.hpp"
@@ -423,7 +424,13 @@ V surfaceRequest(const Feature& feature, const ExprEnv& env, Document& document,
         request.set("input_brep",brepOf(*source,"surface_edit input"));
         const auto& operation=required(feature.nativeSpec,"op");
         if(operation.t!=V::Str)throw std::runtime_error("surface_edit op must be extract_face or trim_plane");
-        if(operation.str=="extract_face"){
+        if(operation.str=="repair"){
+            for(const auto& field:feature.nativeSpec.obj)if(field.first!="op"&&field.first!="mode"&&field.first!="normal")throw std::runtime_error("repair_invalid_request: Unknown repair field: "+field.first);
+            request.set("op",V::makeStr("surface_repair"));
+            request.set("mode",required(feature.nativeSpec,"mode"));
+            request.set("topology",required(source->nativeData,"topology"));
+            if(const auto* normal=feature.nativeSpec.find("normal"))request.set("normal",numericNative(*normal,env));
+        }else if(operation.str=="extract_face"){
             request.set("op",V::makeStr("surface_extract_face"));
             request.set("reference",required(feature.nativeSpec,"face"));
             request.set("topology",required(source->nativeData,"topology"));
@@ -442,7 +449,7 @@ V surfaceRequest(const Feature& feature, const ExprEnv& env, Document& document,
             }
         }else if(operation.str=="trim_wire"){
             const Body* curve=precedingBody(preceding,feature.inputs[1]);if(!curve)throw std::runtime_error("Surface trim curve input missing");request.set("op",V::makeStr("surface_trim_wire"));request.set("wire_brep",brepOf(*curve,"trim curve"));request.set("keep_point",numericNative(required(feature.nativeSpec,"keep_point"),env));
-        }else throw std::runtime_error("surface_edit op must be extract_face, trim_plane or trim_wire");
+        }else throw std::runtime_error("surface_edit op must be extract_face, trim_plane, trim_wire or repair");
     } else if (feature.type == FeatureType::OffsetSurface) {
         request.set("op", V::makeStr("offset_surface"));
         if (feature.inputs.size() != 1) throw std::runtime_error("offset_surface requires one native surface input");
@@ -1108,9 +1115,11 @@ bool validateImportedComponentDefinition(const Feature& feature,std::string& err
     return true;
 }
 void validateNativeComponentCustody(const Document& document){
-    for(const auto& feature:document.features)if(!feature.suppressed&&feature.type==FeatureType::NativeSolid&&featureOperation(feature)=="imported_cad"){std::string error;if(!validateCadPackageAuthoring(feature,error))throw std::runtime_error(error);V request=V::makeObj();request.set("operation",V::makeStr("cad_custody"));request.set("package",*feature.nativeSpec.find("package"));nativeWorkerRequest(request);}
+    const auto loaded=assemblyLoadedFeatures(document);std::set<u64> active;bool prefix=true;for(const auto& feature:document.features){if(prefix&&loaded.count(feature.id))active.insert(feature.id);if(feature.id==document.historyTip)prefix=false;}
+    for(const auto& feature:document.features)if(!feature.suppressed&&feature.type==FeatureType::NativeSolid&&featureOperation(feature)=="imported_cad"){std::string error;if(!validateCadPackageAuthoring(feature,error))throw std::runtime_error(error);if(!active.count(feature.id))continue;V request=V::makeObj();request.set("operation",V::makeStr("cad_custody"));request.set("package",*feature.nativeSpec.find("package"));nativeWorkerRequest(request);}
     for(const auto& feature:document.features)if(!feature.suppressed&&feature.type==FeatureType::NativeSolid&&featureOperation(feature)=="imported_brep"){
         std::string error;if(!validateImportedComponentDefinition(feature,error))throw std::runtime_error(error);
+        if(!active.count(feature.id))continue;
         V request=V::makeObj();request.set("operation",V::makeStr("component_custody"));request.set("package",*feature.nativeSpec.find("package"));nativeWorkerRequest(request);
     }
 }

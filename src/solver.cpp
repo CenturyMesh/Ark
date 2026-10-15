@@ -1,13 +1,15 @@
-﻿// ARK-Point :: solver.cpp â€” geometric constraint solver for sketches.
+// ARK-Point :: solver.cpp â€” geometric constraint solver for sketches.
 //
 // Method: parametrize all sketch DOFs into x; each constraint contributes a
 // scalar residual r_i(x). Solve  min ||r(x)||^2  with damped least squares
 // (Levenberg-Marquardt), forward-mode differentiated Jacobian, backtracking on
-// failure. Small dense systems solved by Gaussian elimination with partial
-// pivoting. This is the standard approach in production CAD solvers
-// (cf. "A Geometric Constraint Solver" v5, and Siemens/DS literature).
+// failure. Row/column equilibration and augmented Householder QR avoid the
+// squared conditioning of normal equations. Disconnected components solve
+// independently; final acceptance uses the original unscaled residuals.
 #include "ark/sketch.hpp"
+#include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace ark {
 
@@ -147,7 +149,7 @@ struct Problem {
                     Vec2 b0=point(c.b,0),b1=point(c.b,1);
                     Vec2 da=a1-a0, db=b1-b0;
                     f64 la=da.len(),lb=db.len();
-                    if(la<1e-12||lb<1e-12){ r.push_back(0); break; }
+                    if(la<1e-12||lb<1e-12){ r.push_back(INFINITY); break; }
                     da/=la; db/=lb;
                     r.push_back(da.cross(db));
                     break;
@@ -157,7 +159,7 @@ struct Problem {
                     Vec2 b0=point(c.b,0),b1=point(c.b,1);
                     Vec2 da=a1-a0, db=b1-b0;
                     f64 la=da.len(),lb=db.len();
-                    if(la<1e-12||lb<1e-12){ r.push_back(0); break; }
+                    if(la<1e-12||lb<1e-12){ r.push_back(INFINITY); break; }
                     r.push_back(da.normalized().dot(db.normalized()));
                     break;
                 }
@@ -173,6 +175,7 @@ struct Problem {
                 case SketchCon::AngleLL:{
                     Vec2 a0=point(c.a,0),a1=point(c.a,1);
                     Vec2 b0=point(c.b,0),b1=point(c.b,1);
+                    if((a1-a0).len()<1e-12||(b1-b0).len()<1e-12){r.push_back(INFINITY);break;}
                     f64 aa=std::atan2(a1.y-a0.y,a1.x-a0.x);
                     f64 ab=std::atan2(b1.y-b0.y,b1.x-b0.x);
                     r.push_back(std::remainder(aa-ab-c.val,K_2PI));
@@ -189,7 +192,8 @@ struct Problem {
                     Vec2 p0=point(line,0), p1=point(line,1), center=point(curve,0);
                     Vec2 direction=p1-p0;
                     f64 span=direction.len();
-                    f64 distance=span<1e-12?(center-p0).len():std::fabs((center-p0).cross(direction))/span;
+                    if(span<1e-12){r.push_back(INFINITY);break;}
+                    f64 distance=std::fabs((center-p0).cross(direction))/span;
                     r.push_back(distance-radius(curve));
                     break;
                 }
@@ -198,44 +202,44 @@ struct Problem {
     }
 };
 
-bool solveDense(std::vector<f64>& A,std::vector<f64>& b,int n){
-    for(int col=0;col<n;++col){
-        int piv=col;
-        f64 best=std::fabs(A[(size_t)col*n+col]);
-        for(int rr=col+1;rr<n;++rr){
-            f64 v=std::fabs(A[(size_t)rr*n+col]);
-            if(v>best){best=v;piv=rr;}
+// Solve the augmented least-squares system directly. Column equilibration
+// keeps dimensional and angular derivatives comparable without changing the
+// residual acceptance criterion. Householder QR avoids squaring J's condition
+// number; disconnected components retain their independent small solves.
+bool dampedQrStep(const std::vector<std::vector<double>>& columns,
+                  const std::vector<double>& residual,double damping,std::vector<double>& step){
+    const size_t n=columns.size(),m=residual.size();step.assign(n,0);
+    std::vector<size_t> parent(n);for(size_t j=0;j<n;++j)parent[j]=j;
+    auto root=[&](size_t j){while(parent[j]!=j){parent[j]=parent[parent[j]];j=parent[j];}return j;};
+    for(size_t row=0;row<m;++row){size_t first=n;for(size_t j=0;j<n;++j)if(columns[j][row]!=0){if(first==n)first=j;else parent[root(j)]=root(first);}}
+    std::vector<std::vector<size_t>> groups(n);for(size_t j=0;j<n;++j)groups[root(j)].push_back(j);
+    for(const auto& group:groups){if(group.empty())continue;
+        const size_t width=group.size();std::vector<size_t> rows;
+        for(size_t i=0;i<m;++i){bool active=false;for(size_t j:group)active=active||columns[j][i]!=0;if(active)rows.push_back(i);}
+        if(rows.empty())continue;
+        const size_t height=rows.size()+width;
+        std::vector<double> matrix(height*width,0),rhs(height,0),scale(width,0);
+        for(size_t j=0;j<width;++j){for(size_t row:rows)scale[j]=std::hypot(scale[j],columns[group[j]][row]);if(!std::isfinite(scale[j])||scale[j]==0)return false;
+            // Rows have unit derivative norm; free coordinates use the same
+            // physical length unit. Keep at least that unit coordinate metric
+            // in LM damping. Dividing by a nearly-null column would turn tiny
+            // rotational roundoff into an enormous unconstrained translation.
+            scale[j]=std::max(scale[j],1.);}
+        for(size_t i=0;i<rows.size();++i){rhs[i]=residual[rows[i]];for(size_t j=0;j<width;++j)matrix[i*width+j]=columns[group[j]][rows[i]]/scale[j];}
+        for(size_t j=0;j<width;++j)matrix[(rows.size()+j)*width+j]=std::sqrt(damping);
+        for(size_t k=0;k<width;++k){
+            double norm=0;for(size_t i=k;i<height;++i)norm=std::hypot(norm,matrix[i*width+k]);
+            if(!std::isfinite(norm)||norm==0)return false;
+            const double alpha=-std::copysign(norm,matrix[k*width+k]);
+            std::vector<double> reflector(height-k);for(size_t i=k;i<height;++i)reflector[i-k]=matrix[i*width+k];reflector[0]-=alpha;
+            double vn=0;for(double v:reflector)vn=std::hypot(vn,v);for(double& v:reflector)v/=vn;
+            for(size_t j=k;j<width;++j){double dot=0;for(size_t i=k;i<height;++i)dot+=reflector[i-k]*matrix[i*width+j];for(size_t i=k;i<height;++i)matrix[i*width+j]-=2*reflector[i-k]*dot;}
+            double dot=0;for(size_t i=k;i<height;++i)dot+=reflector[i-k]*rhs[i];for(size_t i=k;i<height;++i)rhs[i]-=2*reflector[i-k]*dot;
         }
-        if(best<1e-14) return false;
-        if(piv!=col){
-            for(int j=0;j<n;++j) std::swap(A[(size_t)col*n+j],A[(size_t)piv*n+j]);
-            std::swap(b[(size_t)col],b[(size_t)piv]);
-        }
-        f64 inv=1.0/A[(size_t)col*n+col];
-        for(int rr=col+1;rr<n;++rr){
-            f64 m=A[(size_t)rr*n+col]*inv;
-            if(m==0) continue;
-            for(int j=col;j<n;++j) A[(size_t)rr*n+j]-=m*A[(size_t)col*n+j];
-            b[(size_t)rr]-=m*b[(size_t)col];
-        }
-    }
-    for(int rr=n-1;rr>=0;--rr){
-        f64 s=b[(size_t)rr];
-        for(int j=rr+1;j<n;++j) s-=A[(size_t)rr*n+j]*b[(size_t)j];
-        b[(size_t)rr]=s/(std::fabs(A[(size_t)rr*n+rr])<1e-300?1e-300:A[(size_t)rr*n+rr]);
-    }
-    return true;
-}
-bool solveIndependentBlocks(std::vector<double>& matrix,std::vector<double>& rhs,int n){
-    std::vector<bool> seen((size_t)n,false);
-    for(int seed=0;seed<n;++seed){if(seen[(size_t)seed])continue;std::vector<int> component{seed};seen[(size_t)seed]=true;
-        for(size_t k=0;k<component.size();++k)for(int j=0;j<n;++j)if(!seen[(size_t)j]&&matrix[(size_t)component[k]*n+j]!=0){seen[(size_t)j]=true;component.push_back(j);}
-        int size=(int)component.size();std::vector<double> block((size_t)size*size),b((size_t)size);
-        for(int i=0;i<size;++i){b[(size_t)i]=rhs[(size_t)component[(size_t)i]];for(int j=0;j<size;++j)block[(size_t)i*size+j]=matrix[(size_t)component[(size_t)i]*n+component[(size_t)j]];}
-        if(!solveDense(block,b,size))return false;for(int i=0;i<size;++i)rhs[(size_t)component[(size_t)i]]=b[(size_t)i];
+        for(size_t k=width;k-->0;){double value=rhs[k];for(size_t j=k+1;j<width;++j)value-=matrix[k*width+j]*rhs[j];rhs[k]=value/matrix[k*width+k];if(!std::isfinite(rhs[k]))return false;}
+        for(size_t j=0;j<width;++j)step[group[j]]=rhs[j]/scale[j];
     }return true;
 }
-
 // The same row ordering is used for each constraint's rank contribution. A
 // second orthogonalization pass limits spurious rank gains from roundoff.
 int appendIndependentRows(const std::vector<std::vector<f64>>& rows,
@@ -282,7 +286,7 @@ f64 solveSketch(Sketch& sk, int* itersOut, int maxIters, SketchDiagnostics* diag
     Problem P(sk);
     int n=P.n;
 
-    std::vector<f64> r,g(n),dx(n);
+    std::vector<f64> r,dx(n);
     static thread_local std::vector<std::vector<f64>> Jcols;
 
     auto buildJ = [&](std::vector<f64>& rOut)->size_t {
@@ -303,32 +307,28 @@ f64 solveSketch(Sketch& sk, int* itersOut, int maxIters, SketchDiagnostics* diag
     int iters=0;
     for(; n>0 && iters<maxIters && c>1e-16 && std::isfinite(c); ++iters){
         std::vector<f64> r0;
-        size_t m=buildJ(r0);
-
-        // normal equations  H = J^T J ,  g = J^T r
-        std::vector<f64> JtJ((size_t)n*n,0.0);
-        g.assign((size_t)n,0.0);
-        for(size_t i=0;i<m;++i){
-            std::vector<int> active;for(int j=0;j<n;++j)if(Jcols[(size_t)j][i]!=0)active.push_back(j);
-            for(int a:active){g[(size_t)a]+=Jcols[(size_t)a][i]*r0[i];for(int b:active)JtJ[(size_t)a*n+b]+=Jcols[(size_t)a][i]*Jcols[(size_t)b][i];}
-        }
-
+        buildJ(r0);
+        // Freeze equation scales for this trial so a one-radian angular error
+        // is compared with its local geometric displacement. Acceptance at
+        // the API boundary still uses each original, unscaled residual.
+        std::vector<double> rowScale(r0.size(),1.);double weightedBaseline=0;
+        for(size_t i=0;i<r0.size();++i){double norm=0;for(const auto& column:Jcols)norm=std::hypot(norm,column[i]);
+            if(std::isfinite(norm)&&norm>0)rowScale[i]=1/norm;
+            r0[i]*=rowScale[i];weightedBaseline+=r0[i]*r0[i];
+            for(auto& column:Jcols)column[i]*=rowScale[i];}
         bool improved=false;
         for(int damp=0;damp<8 && !improved;++damp){
-            std::vector<f64> Hm=JtJ;
-            // LM damping must ADD a floor, not scale: DOFs absent from every
-            // constraint have JtJ diagonal exactly 0 and scaling keeps them
-            // singular forever.
-            for(int j=0;j<n;++j)
-                Hm[(size_t)j*n+j]=Hm[(size_t)j*n+j]*(1.0+lambda)+1e-12*(1.0+c);
-            dx=g;
-            if(!solveIndependentBlocks(Hm,dx,n)) { lambda*=10; continue; }
+            if(!dampedQrStep(Jcols,r0,lambda,dx)){lambda*=10;continue;}
             std::vector<f64> xn=P.x;
             for(int j=0;j<n;++j) xn[P.free[(size_t)j]]-=dx[(size_t)j];
+            // Reject an inadmissible trial, never clamp authored geometry or
+            // widen the same coordinate domain checked by evaluateSketch.
+            if(std::any_of(xn.begin(),xn.end(),[](double value){return !std::isfinite(value)||std::abs(value)>1e7;})){lambda*=10;continue;}
             auto old=P.x; P.x=xn;
             f64 c2=cost();
-            if(c2<c){
-                lambda=tmax(lambda*0.4,1e-9);
+            double weightedTrial=0;for(size_t i=0;i<r.size();++i){double value=r[i]*rowScale[i];weightedTrial+=value*value;}
+            if(std::isfinite(c2)&&weightedTrial<weightedBaseline){
+                lambda=tmax(lambda*0.4,1e-18);
                 c=c2;
                 improved=true;
             } else {
@@ -351,6 +351,36 @@ f64 solveSketch(Sketch& sk, int* itersOut, int maxIters, SketchDiagnostics* diag
     f64 mx=0;
     for(f64 v:r){if(!std::isfinite(v))return INFINITY;mx=tmax(mx,std::fabs(v));}
     return mx;
+}
+
+arkjson::Value proposeSketchConstraintRepairs(const Sketch& sketch,double residualTolerance){
+    using V=arkjson::Value;
+    if(!std::isfinite(residualTolerance)||residualTolerance<=0||residualTolerance>1e-6)throw std::runtime_error("Repair tolerance must be positive and no larger than 1e-6");
+    V report=V::makeObj(),proposals=V::makeArr();
+    report.set("read_only",V::makeBool(true));report.set("requires_explicit_acceptance",V::makeBool(true));
+    report.set("search_scope",V::makeStr("single_constraint_deletion; local numerical convergence; no global uniqueness or conflict-set proof"));
+    report.set("residual_tolerance",V::makeNum(residualTolerance));
+    Problem bounds(sketch);
+    if(sketch.cons.size()>128||bounds.n>256){report.set("status",V::makeStr("unsupported_size"));report.set("proposals",proposals);return report;}
+    Sketch baseline=sketch;const auto initial=solveSketch(baseline);
+    report.set("baseline_residual",std::isfinite(initial)?V::makeNum(initial):V{});
+    if(std::isfinite(initial)&&initial<=residualTolerance){report.set("status",V::makeStr("already_satisfied"));report.set("proposals",proposals);return report;}
+    for(size_t index=0;index<sketch.cons.size();++index){
+        Sketch candidate=sketch;candidate.cons.erase(candidate.cons.begin()+index);
+        SketchDiagnostics diagnostics;const double residual=solveSketch(candidate,nullptr,200,&diagnostics);
+        if(!std::isfinite(residual)||residual>residualTolerance)continue;
+        V proposal=V::makeObj();proposal.set("remove_index",V::makeNum((double)index));
+        proposal.set("remove_id",V::makeStr(sketch.cons[index].id));
+        proposal.set("type",V::makeStr(constraintTypeName(sketch.cons[index].type)));
+        proposal.set("candidate_residual",V::makeNum(residual));
+        proposal.set("remaining_dofs",V::makeNum(diagnostics.variables-diagnostics.rank));
+        proposal.set("deletion_count",V::makeNum(1));
+        proposal.set("minimality_scope",V::makeStr("one deletion; zero-deletion solve failed at the original coordinates; nonlinear feasibility is not proved"));
+        proposal.set("review",V::makeStr("Removing this relation changes design intent. Review its expression and connected geometry, preview the full document, then explicitly accept or reject."));
+        proposals.arr.push_back(std::move(proposal));
+    }
+    report.set("status",V::makeStr(proposals.arr.empty()?"no_single_deletion_repair":"review_required"));
+    report.set("proposals",std::move(proposals));return report;
 }
 
 arkjson::Value diagnoseSketch(const Sketch& sketch,double residualTolerance){
@@ -389,6 +419,16 @@ arkjson::Value diagnoseSketch(const Sketch& sketch,double residualTolerance){
         item.set("locally_redundant",V::makeBool(duplicate));
         item.set("violated",V::makeBool(bad));
         item.set("status",V::makeStr(bad?"conflict_candidate":duplicate?"locally_redundant":"satisfied"));
+        V entities=V::makeArr();
+        for(int index:{con.a,con.b})if(index>=0&&index<(int)sketch.ents.size()&&
+            std::none_of(entities.arr.begin(),entities.arr.end(),[&](const V& entry){return entry.find("index")->num==index;})){
+            V entity=V::makeObj();entity.set("index",V::makeNum(index));
+            entity.set("name",V::makeStr(sketch.ents[(size_t)index].name));
+            entity.set("kind",V::makeStr(sketchEntityKindName(sketch.ents[(size_t)index].kind)));
+            entities.arr.push_back(std::move(entity));
+        }
+        item.set("entities",std::move(entities));
+        item.set("suggestion",V::makeStr(bad?"Inspect this target, its entity expressions and connected constraints; edit or remove only after reviewing design intent":duplicate?"Review whether this locally redundant relation is intentional before removing it":""));
         items.arr.push_back(std::move(item));
     }
     if(offset!=residual.size())throw std::runtime_error("Sketch residual mapping is inconsistent");

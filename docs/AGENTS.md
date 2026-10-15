@@ -1,5 +1,20 @@
 # ARK agent protocol
 
+029B discovers **95 standalone tools**: the 028D tool set plus read-only
+`feature_history{}`, `assembly_authoring_info{}` and revision-bound
+`sketch_repair{name,sketch?,expected_revision}`. Read
+`agent_onboard{topic:"history"}` before reorder/rollback and
+`agent_onboard{topic:"configurations"}` before named configurations, selective
+evaluation or external-source pins. Writes share `doc_apply` and its observed
+`expected_revision`; invalid dependencies and source drift reject atomically.
+History/configuration/loading/pin recipes conditionally require source 40;
+scoped container v2 and explicit orientation repair require source 41. The existing canonical drawings,
+CAD imports, Stamps, planes and scoped container protocols remain authoritative.
+`drawing_export` also accepts `dxf` for a current explicitly requested sheet;
+exact projected curves/hatches and source metadata receive local readback checks.
+Interoperability with another CAD product and drafting qualification require
+separate evidence. See [029B scope](iterations/029B.md).
+
 026D exposes installed Ollama models for the Assistant and individual agent cards.
 Local models use the same tool permissions, revision guards and steering protocol.
 Tool/vision capabilities are checked from Ollama metadata; declared support is not

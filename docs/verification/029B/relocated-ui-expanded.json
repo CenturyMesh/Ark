@@ -1,0 +1,15 @@
+﻿{
+    "scope":  "Extracted ZIP; isolated profile and PATH without SDK; hidden native controls/OpenGL checks",
+    "valid":  true,
+    "studio_sha256":  "676546b3e6d353012989d96aa446eb25c8b96ada43135bec08481c5757588357",
+    "results":  [
+                    {
+                        "exit_code":  0,
+                        "test":  "scene-cache-ui"
+                    },
+                    {
+                        "exit_code":  0,
+                        "test":  "authoring-assistance-ui"
+                    }
+                ]
+}

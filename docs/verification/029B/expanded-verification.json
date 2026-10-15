@@ -1,0 +1,154 @@
+{
+    "core":  {
+                 "log_sha256":  "22ce629845ab1bafb89075f36488267dd03c14f2e762659403f5ea8849ef474d",
+                 "duration_seconds":  66.05,
+                 "failed":  0,
+                 "passed":  71
+             },
+    "native_corpus":  {
+                          "accepted":  75,
+                          "transactions":  120,
+                          "expected_rejections":  45,
+                          "receipt_sha256":  "1b11fee978362fb1be483a826cb63c05bdb5061a5f9fa785218e500989fba3a5",
+                          "failures":  0
+                      },
+    "version":  "0.9.30",
+    "artifact":  {
+                     "published":  false,
+                     "source_formats_tested":  [
+                                                   40,
+                                                   41
+                                               ],
+                     "payload_files":  86,
+                     "archive_file":  "ark-windows-x64-0.9.30.zip",
+                     "studio_sha256":  "676546b3e6d353012989d96aa446eb25c8b96ada43135bec08481c5757588357",
+                     "installed":  false,
+                     "relocated_ui_tests":  2,
+                     "sha256":  "1156171a560bc2f87d74e4a48efe164919ed381f54e989a7ba09ad9ea2946ce7",
+                     "bytes":  51116968,
+                     "sbom_components":  38,
+                     "local_development_folder":  "029b-local-20261015-a5",
+                     "relocated_rpc_count":  23
+                 },
+    "analytic_recompute":  {
+                               "scope":  "Equivalent analytic definitions; not native OCCT or customer-project qualification.",
+                               "feature_counts":  [
+                                                      16,
+                                                      128,
+                                                      512
+                                                  ],
+                               "after":  "performance-recompute-after.json",
+                               "samples_per_size":  101,
+                               "harness_sha256":  "ee6bc35aec87dde2dc9b931a384b5eb8288287e8a2b39eb7fcc6ca79ea055729",
+                               "before":  "performance-recompute-before.json"
+                           },
+    "surface_kernel":  {
+                           "trials":  21,
+                           "receipt":  "surface-repair-kernel.json"
+                       },
+    "assembly_measurements":  "../../verification-assembly-scaling-029B.json",
+    "native_performance":  {
+                               "failures":  0,
+                               "warmups":  18,
+                               "comparisons":  [
+                                                   {
+                                                       "full_apply_to_scene_p95_ms":  61.384999999999998,
+                                                       "fixture_sha256":  "39f9b0c2496f83573c4ad99b3d49f1515a61f9cb470de4602830198ffdfe5031",
+                                                       "occurrences":  12,
+                                                       "full_scene_p95_ms":  1.5202,
+                                                       "reused_scene_p95_ms":  0.54510000000000003,
+                                                       "reused_apply_to_scene_p95_ms":  37.171999999999997
+                                                   },
+                                                   {
+                                                       "full_apply_to_scene_p95_ms":  69.285399999999996,
+                                                       "fixture_sha256":  "0a01c5b4402fc9d438940d0c962b8718ee814b279e14b76ee622b218e04ae41e",
+                                                       "occurrences":  48,
+                                                       "full_scene_p95_ms":  5.1996000000000002,
+                                                       "reused_scene_p95_ms":  1.5721000000000001,
+                                                       "reused_apply_to_scene_p95_ms":  65.688900000000004
+                                                   },
+                                                   {
+                                                       "full_apply_to_scene_p95_ms":  149.16890000000001,
+                                                       "fixture_sha256":  "9d8ec0da6d2c4777c97b99a2317c769ef10707f09eeae8d14e28b938bf3e13ef",
+                                                       "occurrences":  144,
+                                                       "full_scene_p95_ms":  14.3513,
+                                                       "reused_scene_p95_ms":  4.4481999999999999,
+                                                       "reused_apply_to_scene_p95_ms":  140.47800000000001
+                                                   }
+                                               ],
+                               "runtime_sha256":  "676546b3e6d353012989d96aa446eb25c8b96ada43135bec08481c5757588357",
+                               "comparison_scope":  "Same executable and native fixtures; full scene rebuild versus representation reuse. Hidden context; SwapBuffers return is not physical presentation.",
+                               "raw":  "studio-native-performance-final.json",
+                               "attempts":  144,
+                               "measured_attempts":  126
+                           },
+    "attempts":  [
+                     {
+                         "total":  71,
+                         "cause":  "Four retained assertions expected 94 tools or pre-v2 workspace source version; updated to95/41.",
+                         "stage":  "core integration before contract assertions updated",
+                         "passed":  67
+                     },
+                     {
+                         "stage":  "first UI fixture run",
+                         "cause":  "Cache fixture directly changed authored state with history active; assistance fixture called parameter-only editor. Corrected fixtures then passed real dispatch checks."
+                     },
+                     {
+                         "total":  151,
+                         "duration_seconds":  406.58,
+                         "cause":  "New sketch scaling magnified a nearly-null tangent direction. Reproduced with original workflow, fixed unit coordinate metric and domain rejection, added translated/rotated/repeated regression checks.",
+                         "stage":  "first full native run",
+                         "passed":  150
+                     },
+                     {
+                         "total":  7,
+                         "duration_seconds":  11.38,
+                         "stage":  "solver focused verification after correction",
+                         "passed":  7
+                     },
+                     {
+                         "qualification":  "Not selected for delivery: full native suite found tangent regression.",
+                         "sha256":  "06eee4e2116201084df41807e358ef9bfe79502f29a59e8f2066a1a5720543d5",
+                         "focused_rpc_tests":  "passed23",
+                         "stage":  "earlier development package A4"
+                     },
+                     {
+                         "scope":  "All kernel, source-version and fixture assertion failures retained separately.",
+                         "receipts":  [
+                                          "surface-repair-attempts.json",
+                                          "../../verification-assembly-scaling-029B.json"
+                                      ],
+                         "stage":  "surface and assembly attempts"
+                     }
+                 ],
+    "dependency_audit":  {
+                             "scope":  "Bound to exact final SBOM. No complete vulnerability coverage or absence claim.",
+                             "findings":  0,
+                             "query_failures":  0,
+                             "unqueried_components":  34
+                         },
+    "schema":  "ark.029b.expanded-verification.v1",
+    "iteration_code":  "029B",
+    "milestones":  [
+                       "A.04",
+                       "B.01",
+                       "B.02",
+                       "B.03",
+                       "B.04"
+                   ],
+    "observed_utc":  "2026-10-15T15:54:02.2084626Z",
+    "status":  "Verificado no escopo",
+    "broader_milestones":  "Parcial",
+    "native":  {
+                   "log_sha256":  "537fcf566c25a535a490798df700513b17062a90e9c8cb32ce11a2eb19f6c629",
+                   "duration_seconds":  403.48,
+                   "failed":  0,
+                   "passed":  151
+               },
+    "limits":  [
+                   "Repository-authored synthetic fixtures only; no user documents or settings modified.",
+                   "Complete authored source still parsed; derived-data bytes are not process RSS.",
+                   "Bounded single-deletion sketch assistance and orientation-only repair; no automatic general healing.",
+                   "No hosted CI, deployment, signing, physical mixed-monitor study, independent CAD recipient or manufacturing qualification."
+               ]
+}

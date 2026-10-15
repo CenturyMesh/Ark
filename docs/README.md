@@ -9,6 +9,14 @@ current release claim. [release.json](../release.json) owns application identity
 
 | Guide | Read it when |
 |---|---|
+| [029B scope and verification](iterations/029B.md) | You need the current A/B implementation boundaries and fresh local evidence |
+| [Trust foundation](TRUST_FOUNDATION.md) | You need recovery, regression corpora, performance receipts or release inventories/SBOM |
+| [History and configuration authoring](CAD_AUTHORING_FOUNDATION.md) | You need stable-ID reorder/rollback, configurations, selective evaluation or external-source pins |
+| [Configuration workspace](PRODUCT_CONFIGURATIONS_UI.md) | You need the Studio controls for stored parameter and visibility recipes |
+| [029B native performance](PERFORMANCE_029B.md) | You need viewport reuse, evaluation context and matched native timing evidence |
+| [029B sketch assistance and accessibility](SKETCH_ASSISTANCE_029B.md) | You need explicit conflict alternatives, solver bounds or native DPI/focus controls |
+| [029B surface repair](SURFACE_REPAIR_029B.md) | You need exact bounded orientation repair and difficult geometry evidence |
+| [029B assembly scaling](ASSEMBLY_SCALING_029B.md) | You need selective memory/I/O and configuration/pin ownership in isolated workspaces |
 | [023B test guide](AUTHORING_023B_TESTING.md) | You are testing STEP/IGES import, Arkitfy, functional holes or isolated design containers |
 | [023B Holes Orchestrator](HOLES_ORCHESTRATOR_023B.md) | You need parametric holes, thread preparation, dowels or retaining-ring grooves with published nominal sources |
 | [023B CAD import](CAD_IMPORT_023B.md) | You need portable exact STEP/IGES references and measured reconstruction checks |

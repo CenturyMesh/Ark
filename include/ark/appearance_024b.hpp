@@ -26,6 +26,9 @@ struct StampProjector {
     bool frontOnly=true;
 };
 StampProjector resolvedStampProjector(const Document& document,const ProjectedStamp& stamp);
+// False only when an existing source dependency is inactive. Invalid/cyclic
+// metadata still throws; geometry and topology remain checked on activation.
+bool stampGeometryAvailable024B(const Document& document,const ProjectedStamp& stamp);
 // CPU counterpart of the bounded shader projection: UV rectangle, depth slab,
 // and outward-facing triangle guard. UV (0,0) is image bottom-left.
 struct StampVertex {Vec3 position,normal;Vec2 uv;};

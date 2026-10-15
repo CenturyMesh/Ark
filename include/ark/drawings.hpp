@@ -18,4 +18,6 @@ arkjson::Value exportDrawing(Document&, const arkjson::Value& args, u64 revision
 
 namespace ark::occt {
 arkjson::Value drawingViewNative(const arkjson::Value& request);
+// Exact canonical drawing exchange; all derived edge roles and source tags retained.
+arkjson::Value drawingDxfNative(const arkjson::Value& request);
 }

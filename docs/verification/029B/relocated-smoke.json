@@ -1,0 +1,82 @@
+{
+    "physical_bom_quantity":  2,
+    "version":  "0.9.30",
+    "calls":  [
+                  {
+                      "method":  "initialize",
+                      "id":  1,
+                      "tool":  null
+                  },
+                  {
+                      "method":  "tools/list",
+                      "id":  2,
+                      "tool":  null
+                  },
+                  {
+                      "method":  "tools/call",
+                      "id":  3,
+                      "tool":  "doc_apply"
+                  },
+                  {
+                      "method":  "tools/call",
+                      "id":  4,
+                      "tool":  "doc_apply"
+                  },
+                  {
+                      "method":  "tools/call",
+                      "id":  5,
+                      "tool":  "native_inspect"
+                  },
+                  {
+                      "method":  "tools/call",
+                      "id":  6,
+                      "tool":  "bom_inspect"
+                  },
+                  {
+                      "method":  "tools/call",
+                      "id":  7,
+                      "tool":  "doc_save"
+                  },
+                  {
+                      "method":  "tools/call",
+                      "id":  8,
+                      "tool":  "doc_new"
+                  },
+                  {
+                      "method":  "tools/call",
+                      "id":  9,
+                      "tool":  "doc_load"
+                  },
+                  {
+                      "method":  "tools/call",
+                      "id":  10,
+                      "tool":  "assembly_authoring_info"
+                  },
+                  {
+                      "method":  "tools/call",
+                      "id":  11,
+                      "tool":  "native_inspect"
+                  },
+                  {
+                      "method":  "tools/call",
+                      "id":  12,
+                      "tool":  "bom_inspect"
+                  },
+                  {
+                      "method":  "tools/call",
+                      "id":  13,
+                      "tool":  "doc_info"
+                  }
+              ],
+    "mcp_sha256":  "12038a6e504028aebaf67075e392b1685fb75d15267656c72490265eacb38248",
+    "configured_width_mm":  32,
+    "valid":  true,
+    "schema":  "ark.relocated-smoke.v1",
+    "iteration_code":  "029B",
+    "exact_volume_mm3":  1280,
+    "rpc_count":  13,
+    "scope":  "Extracted local payload only; isolated profile, PATH without SDK, synthetic document. Exact construction/configuration/BOM/save/reopen; no installed update, remote transport or external consumer qualification.",
+    "tool_count":  94,
+    "revision":  4,
+    "source_format":  40
+}

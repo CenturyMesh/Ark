@@ -34,5 +34,5 @@ cmake "${configure[@]}" -B "$build"
 $configure_only && exit 0
 cmake --build "$build" --parallel "$jobs"
 if $test; then
-    ctest --test-dir "$build" --output-on-failure --parallel 1
+    ctest --test-dir "$build" --output-on-failure --parallel 1 --output-junit "$build/regression-results.xml"
 fi

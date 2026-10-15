@@ -1,0 +1,2020 @@
+{
+    "schema":  "ark.native.authoring.corpus.receipt.v1",
+    "manifest_sha256":  "cf31d58b3803132d747623e51b042103026756bd8e8dede0648fc443a3c70184",
+    "seed":  19020,
+    "geometry_tolerance_mm":  1E-06,
+    "authority":  "native exact B-rep; no mesh fallback or automatic gap healing",
+    "iteration_code":  "029B",
+    "version":  "0.9.30",
+    "kernel_version":  "8.0.1",
+    "test_binary_sha256":  "ca8baa4840432b52d28002dc472405ce7794ad3474a4755d12ff5a39fb593105",
+    "plane_trim_regressions":  [
+                                   {
+                                       "case":  "periodic-positive",
+                                       "area_mm2":  703.71675440411366,
+                                       "report":  {
+                                                      "kernel":  "OCCT",
+                                                      "kernel_version":  "8.0.1",
+                                                      "brep_valid":  true,
+                                                      "solids":  0,
+                                                      "faces":  1,
+                                                      "area_mm2":  703.71675440411366,
+                                                      "volume_mm3":  null,
+                                                      "display_mesh_authoritative":  false,
+                                                      "self_intersections_checked":  false,
+                                                      "manufacturing_authoritative":  false,
+                                                      "bounds_mm":  [
+                                                                        -8,
+                                                                        -8,
+                                                                        6,
+                                                                        8,
+                                                                        8,
+                                                                        20
+                                                                    ],
+                                                      "operation":  "surface_trim_plane",
+                                                      "original_area_mm2":  1005.3096491487338,
+                                                      "removed_area_mm2":  301.59289474462014,
+                                                      "positive_area_mm2":  703.71675440411366,
+                                                      "negative_area_mm2":  301.59289474462014,
+                                                      "area_conservation_checked":  true,
+                                                      "split_method":  "exact_face_plane_splitter",
+                                                      "side_classification":  "exact_brep_bounds_in_plane_frame",
+                                                      "classification_tolerance_mm":  1E-06
+                                                  },
+                                       "expected":  "accept",
+                                       "passed":  true
+                                   },
+                                   {
+                                       "case":  "periodic-negative",
+                                       "area_mm2":  301.59289474462014,
+                                       "report":  {
+                                                      "kernel":  "OCCT",
+                                                      "kernel_version":  "8.0.1",
+                                                      "brep_valid":  true,
+                                                      "solids":  0,
+                                                      "faces":  1,
+                                                      "area_mm2":  301.59289474462014,
+                                                      "volume_mm3":  null,
+                                                      "display_mesh_authoritative":  false,
+                                                      "self_intersections_checked":  false,
+                                                      "manufacturing_authoritative":  false,
+                                                      "bounds_mm":  [
+                                                                        -8,
+                                                                        -8,
+                                                                        0,
+                                                                        8,
+                                                                        8,
+                                                                        6
+                                                                    ],
+                                                      "operation":  "surface_trim_plane",
+                                                      "original_area_mm2":  1005.3096491487338,
+                                                      "removed_area_mm2":  703.71675440411366,
+                                                      "positive_area_mm2":  703.71675440411366,
+                                                      "negative_area_mm2":  301.59289474462014,
+                                                      "area_conservation_checked":  true,
+                                                      "split_method":  "exact_face_plane_splitter",
+                                                      "side_classification":  "exact_brep_bounds_in_plane_frame",
+                                                      "classification_tolerance_mm":  1E-06
+                                                  },
+                                       "expected":  "accept",
+                                       "passed":  true
+                                   },
+                                   {
+                                       "case":  "periodic-inverted-normal",
+                                       "area_mm2":  301.59289474462014,
+                                       "report":  {
+                                                      "kernel":  "OCCT",
+                                                      "kernel_version":  "8.0.1",
+                                                      "brep_valid":  true,
+                                                      "solids":  0,
+                                                      "faces":  1,
+                                                      "area_mm2":  301.59289474462014,
+                                                      "volume_mm3":  null,
+                                                      "display_mesh_authoritative":  false,
+                                                      "self_intersections_checked":  false,
+                                                      "manufacturing_authoritative":  false,
+                                                      "bounds_mm":  [
+                                                                        -8,
+                                                                        -8,
+                                                                        0,
+                                                                        8,
+                                                                        8,
+                                                                        6
+                                                                    ],
+                                                      "operation":  "surface_trim_plane",
+                                                      "original_area_mm2":  1005.3096491487338,
+                                                      "removed_area_mm2":  703.71675440411366,
+                                                      "positive_area_mm2":  301.59289474462014,
+                                                      "negative_area_mm2":  703.71675440411366,
+                                                      "area_conservation_checked":  true,
+                                                      "split_method":  "exact_face_plane_splitter",
+                                                      "side_classification":  "exact_brep_bounds_in_plane_frame",
+                                                      "classification_tolerance_mm":  1E-06
+                                                  },
+                                       "expected":  "accept",
+                                       "passed":  true
+                                   },
+                                   {
+                                       "case":  "periodic-oblique",
+                                       "area_mm2":  502.65482455627784,
+                                       "report":  {
+                                                      "kernel":  "OCCT",
+                                                      "kernel_version":  "8.0.1",
+                                                      "brep_valid":  true,
+                                                      "solids":  0,
+                                                      "faces":  1,
+                                                      "area_mm2":  502.65482455627784,
+                                                      "volume_mm3":  null,
+                                                      "display_mesh_authoritative":  false,
+                                                      "self_intersections_checked":  false,
+                                                      "manufacturing_authoritative":  false,
+                                                      "bounds_mm":  [
+                                                                        -8,
+                                                                        -8,
+                                                                        6,
+                                                                        8,
+                                                                        8,
+                                                                        20
+                                                                    ],
+                                                      "operation":  "surface_trim_plane",
+                                                      "original_area_mm2":  1005.3096491487338,
+                                                      "removed_area_mm2":  502.65482459245595,
+                                                      "positive_area_mm2":  502.65482455627784,
+                                                      "negative_area_mm2":  502.65482459245618,
+                                                      "area_conservation_checked":  true,
+                                                      "split_method":  "exact_face_plane_splitter",
+                                                      "side_classification":  "exact_brep_bounds_in_plane_frame",
+                                                      "classification_tolerance_mm":  1E-06
+                                                  },
+                                       "expected":  "accept",
+                                       "passed":  true
+                                   },
+                                   {
+                                       "case":  "periodic-boundary",
+                                       "error":  "Plane must divide the surface into one connected face on each side; tangent/outside, disconnected or ambiguous result rejected",
+                                       "expected":  "reject",
+                                       "passed":  true
+                                   },
+                                   {
+                                       "case":  "periodic-outside",
+                                       "error":  "Plane must divide the surface into one connected face on each side; tangent/outside, disconnected or ambiguous result rejected",
+                                       "expected":  "reject",
+                                       "passed":  true
+                                   },
+                                   {
+                                       "case":  "periodic-tangent",
+                                       "error":  "Plane must divide the surface into one connected face on each side; tangent/outside, disconnected or ambiguous result rejected",
+                                       "expected":  "reject",
+                                       "passed":  true
+                                   },
+                                   {
+                                       "case":  "coplanar-ambiguous",
+                                       "error":  "Plane must divide the surface into one connected face on each side; tangent/outside, disconnected or ambiguous result rejected",
+                                       "expected":  "reject",
+                                       "passed":  true
+                                   },
+                                   {
+                                       "case":  "disconnected-side",
+                                       "error":  "Plane must divide the surface into one connected face on each side; tangent/outside, disconnected or ambiguous result rejected",
+                                       "expected":  "reject",
+                                       "passed":  true
+                                   }
+                               ],
+    "fixture_sha256":  "c84fe63e8654145072874e84c319f526e0e746566956d6df6a71ff7a67518c12",
+    "limits":  "B.03 explicit orientation repair and exact producer-custody checks, planar normal intent, downstream thickening and atomic typed rejection; arbitrary gap healing, self-intersection repair and manufacturing qualification remain outside scope.",
+    "accepted_trials":  18,
+    "rejected_trials":  18,
+    "failures":  0,
+    "trials":  [
+                   {
+                       "case":  "editable-planar-orientation-and-thicken",
+                       "family":  "surface-repair",
+                       "variant":  {
+                                       "s":  0.5
+                                   },
+                       "trial":  "baseline",
+                       "expected":  "accept",
+                       "before_authoring_sha256":  "48795ffd67fdefead27814776ab44c30a6553fec220603fb3ce18fdffe3ef1ea",
+                       "observed":  "accept",
+                       "exact_bodies":  [
+                                            {
+                                                "feature":  "Source box",
+                                                "solids":  1,
+                                                "area_mm2":  94,
+                                                "volume_mm3":  60,
+                                                "brep_base64_sha256":  "f3f0b2777d6ed241e501c28ac1fbc987f17b84906ba24a7093d0abc5c59749f5",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Original underside",
+                                                "solids":  0,
+                                                "area_mm2":  19.999999999999996,
+                                                "volume_mm3":  null,
+                                                "brep_base64_sha256":  "99375353916d8cefab20f285156d6a213bdaff8bdfc9a15a2a7e2ed1f1a924d2",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Oriented surface",
+                                                "solids":  0,
+                                                "area_mm2":  19.999999999999996,
+                                                "volume_mm3":  null,
+                                                "brep_base64_sha256":  "240773ac8a6704a8ba7a09559249b4fb9a43096baec94dc043d8556e294fadd7",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Thickened repaired surface",
+                                                "solids":  1,
+                                                "area_mm2":  57.999999999999993,
+                                                "volume_mm3":  19.999999999999996,
+                                                "brep_base64_sha256":  "32f9cfe06f3a9aa051e907e4934e7fbae77a145f3d894502226111e9166fb455",
+                                                "brep_valid":  true
+                                            }
+                                        ],
+                       "measurements":  [
+                                            {
+                                                "feature":  "Oriented surface",
+                                                "area_mm2":  19.999999999999996,
+                                                "volume_mm3":  null,
+                                                "bounds_mm":  [
+                                                                  0,
+                                                                  0,
+                                                                  0,
+                                                                  5,
+                                                                  4,
+                                                                  0
+                                                              ],
+                                                "report_metrics":  [
+                                                                       {
+                                                                           "path":  "changed",
+                                                                           "observed":  true
+                                                                       },
+                                                                       {
+                                                                           "path":  "geometry_deviation_mm",
+                                                                           "observed":  0
+                                                                       },
+                                                                       {
+                                                                           "path":  "tolerances_preserved",
+                                                                           "observed":  true
+                                                                       },
+                                                                       {
+                                                                           "path":  "before.free_edges",
+                                                                           "observed":  4
+                                                                       },
+                                                                       {
+                                                                           "path":  "after.free_edges",
+                                                                           "observed":  4
+                                                                       }
+                                                                   ]
+                                            },
+                                            {
+                                                "feature":  "Thickened repaired surface",
+                                                "area_mm2":  57.999999999999993,
+                                                "volume_mm3":  19.999999999999996,
+                                                "bounds_mm":  [
+                                                                  0,
+                                                                  0,
+                                                                  0,
+                                                                  5,
+                                                                  4,
+                                                                  1
+                                                              ],
+                                                "report_metrics":  [
+
+                                                                   ]
+                                            }
+                                        ],
+                       "native_readback_recomputed":  true,
+                       "passed":  true,
+                       "after_authoring_sha256":  "8de2daf17af4e5e97f74c3d194119c42e3ecc6b08fe73ad9b84fa41841f89a6b",
+                       "revision":  1
+                   },
+                   {
+                       "case":  "editable-planar-orientation-and-thicken",
+                       "family":  "surface-repair",
+                       "variant":  {
+                                       "s":  0.5
+                                   },
+                       "trial":  "edit-explicit-normal-intent",
+                       "expected":  "accept",
+                       "before_authoring_sha256":  "8de2daf17af4e5e97f74c3d194119c42e3ecc6b08fe73ad9b84fa41841f89a6b",
+                       "observed":  "accept",
+                       "exact_bodies":  [
+                                            {
+                                                "feature":  "Source box",
+                                                "solids":  1,
+                                                "area_mm2":  94,
+                                                "volume_mm3":  60,
+                                                "brep_base64_sha256":  "f3f0b2777d6ed241e501c28ac1fbc987f17b84906ba24a7093d0abc5c59749f5",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Original underside",
+                                                "solids":  0,
+                                                "area_mm2":  19.999999999999996,
+                                                "volume_mm3":  null,
+                                                "brep_base64_sha256":  "99375353916d8cefab20f285156d6a213bdaff8bdfc9a15a2a7e2ed1f1a924d2",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Oriented surface",
+                                                "solids":  0,
+                                                "area_mm2":  19.999999999999996,
+                                                "volume_mm3":  null,
+                                                "brep_base64_sha256":  "99375353916d8cefab20f285156d6a213bdaff8bdfc9a15a2a7e2ed1f1a924d2",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Thickened repaired surface",
+                                                "solids":  1,
+                                                "area_mm2":  57.999999999999993,
+                                                "volume_mm3":  19.999999999999996,
+                                                "brep_base64_sha256":  "58fe6a142b72558af2a58e5379a1afa0a20fe468ef1148f13b5a02d8718d307b",
+                                                "brep_valid":  true
+                                            }
+                                        ],
+                       "measurements":  [
+                                            {
+                                                "feature":  "Oriented surface",
+                                                "area_mm2":  19.999999999999996,
+                                                "volume_mm3":  null,
+                                                "bounds_mm":  [
+                                                                  0,
+                                                                  0,
+                                                                  0,
+                                                                  5,
+                                                                  4,
+                                                                  0
+                                                              ],
+                                                "report_metrics":  [
+                                                                       {
+                                                                           "path":  "changed",
+                                                                           "observed":  false
+                                                                       },
+                                                                       {
+                                                                           "path":  "all_faces_preserved",
+                                                                           "observed":  true
+                                                                       }
+                                                                   ]
+                                            },
+                                            {
+                                                "feature":  "Thickened repaired surface",
+                                                "area_mm2":  57.999999999999993,
+                                                "volume_mm3":  19.999999999999996,
+                                                "bounds_mm":  [
+                                                                  0,
+                                                                  0,
+                                                                  -1,
+                                                                  5,
+                                                                  4,
+                                                                  0
+                                                              ],
+                                                "report_metrics":  [
+
+                                                                   ]
+                                            }
+                                        ],
+                       "native_readback_recomputed":  true,
+                       "passed":  true,
+                       "after_authoring_sha256":  "d0b5fac13a00dca1a2794080fa3f8b236ee717782ad3b3bb5214518c4128e57b",
+                       "revision":  2
+                   },
+                   {
+                       "case":  "editable-planar-orientation-and-thicken",
+                       "family":  "surface-repair",
+                       "variant":  {
+                                       "s":  0.5
+                                   },
+                       "trial":  "reject-zero-normal-atomically",
+                       "expected":  "reject",
+                       "before_authoring_sha256":  "d0b5fac13a00dca1a2794080fa3f8b236ee717782ad3b3bb5214518c4128e57b",
+                       "observed":  "reject",
+                       "error_code":  "EVALUATION_FAILED",
+                       "error":  "Feature #3: OCCT: repair_invalid_request: normal cannot be zero",
+                       "document_unchanged":  true,
+                       "passed":  true,
+                       "after_authoring_sha256":  "d0b5fac13a00dca1a2794080fa3f8b236ee717782ad3b3bb5214518c4128e57b",
+                       "revision":  2
+                   },
+                   {
+                       "case":  "editable-planar-orientation-and-thicken",
+                       "family":  "surface-repair",
+                       "variant":  {
+                                       "s":  0.5
+                                   },
+                       "trial":  "source-dimension-recomputes-repair",
+                       "expected":  "accept",
+                       "before_authoring_sha256":  "d0b5fac13a00dca1a2794080fa3f8b236ee717782ad3b3bb5214518c4128e57b",
+                       "observed":  "accept",
+                       "exact_bodies":  [
+                                            {
+                                                "feature":  "Source box",
+                                                "solids":  1,
+                                                "area_mm2":  108,
+                                                "volume_mm3":  72,
+                                                "brep_base64_sha256":  "d2d256142742a6e565dc750372538dabf1553d65a78f3444ea24847143bf888f",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Original underside",
+                                                "solids":  0,
+                                                "area_mm2":  24,
+                                                "volume_mm3":  null,
+                                                "brep_base64_sha256":  "2a552121b9336e7d3b1796ea2a57c54c1bce0350ca8f206c534107e62e0249d5",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Oriented surface",
+                                                "solids":  0,
+                                                "area_mm2":  24,
+                                                "volume_mm3":  null,
+                                                "brep_base64_sha256":  "2a552121b9336e7d3b1796ea2a57c54c1bce0350ca8f206c534107e62e0249d5",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Thickened repaired surface",
+                                                "solids":  1,
+                                                "area_mm2":  68,
+                                                "volume_mm3":  24,
+                                                "brep_base64_sha256":  "7bccfe788de9a9b07f604384ca7dc14eef87442a49386b3faeff75216a0acd98",
+                                                "brep_valid":  true
+                                            }
+                                        ],
+                       "measurements":  [
+                                            {
+                                                "feature":  "Oriented surface",
+                                                "area_mm2":  24,
+                                                "volume_mm3":  null,
+                                                "bounds_mm":  [
+                                                                  0,
+                                                                  0,
+                                                                  0,
+                                                                  6,
+                                                                  4,
+                                                                  0
+                                                              ],
+                                                "report_metrics":  [
+                                                                       {
+                                                                           "path":  "before.faces",
+                                                                           "observed":  1
+                                                                       },
+                                                                       {
+                                                                           "path":  "after.faces",
+                                                                           "observed":  1
+                                                                       }
+                                                                   ]
+                                            },
+                                            {
+                                                "feature":  "Thickened repaired surface",
+                                                "area_mm2":  68,
+                                                "volume_mm3":  24,
+                                                "bounds_mm":  [
+                                                                  0,
+                                                                  0,
+                                                                  -1,
+                                                                  6,
+                                                                  4,
+                                                                  0
+                                                              ],
+                                                "report_metrics":  [
+
+                                                                   ]
+                                            }
+                                        ],
+                       "native_readback_recomputed":  true,
+                       "passed":  true,
+                       "after_authoring_sha256":  "1b2b1f84e8e886aa4f39ff4e85f2114402b774de6fc81851beb57f690a165004",
+                       "revision":  3
+                   },
+                   {
+                       "case":  "editable-planar-orientation-and-thicken",
+                       "family":  "surface-repair",
+                       "variant":  {
+                                       "s":  0.5
+                                   },
+                       "trial":  "restore-positive-normal",
+                       "expected":  "accept",
+                       "before_authoring_sha256":  "1b2b1f84e8e886aa4f39ff4e85f2114402b774de6fc81851beb57f690a165004",
+                       "observed":  "accept",
+                       "exact_bodies":  [
+                                            {
+                                                "feature":  "Source box",
+                                                "solids":  1,
+                                                "area_mm2":  108,
+                                                "volume_mm3":  72,
+                                                "brep_base64_sha256":  "d2d256142742a6e565dc750372538dabf1553d65a78f3444ea24847143bf888f",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Original underside",
+                                                "solids":  0,
+                                                "area_mm2":  24,
+                                                "volume_mm3":  null,
+                                                "brep_base64_sha256":  "2a552121b9336e7d3b1796ea2a57c54c1bce0350ca8f206c534107e62e0249d5",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Oriented surface",
+                                                "solids":  0,
+                                                "area_mm2":  24,
+                                                "volume_mm3":  null,
+                                                "brep_base64_sha256":  "b77f1e5b8fc1c6aafa4fe48b02a5d024d3fd12b969896acc7ad6bd33e18c0e4c",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Thickened repaired surface",
+                                                "solids":  1,
+                                                "area_mm2":  68,
+                                                "volume_mm3":  24,
+                                                "brep_base64_sha256":  "2ce32ab6c44b7f16ce893f894fc334473fdea8db253335f68d3a10aaeb6b0e60",
+                                                "brep_valid":  true
+                                            }
+                                        ],
+                       "measurements":  [
+                                            {
+                                                "feature":  "Oriented surface",
+                                                "area_mm2":  24,
+                                                "volume_mm3":  null,
+                                                "bounds_mm":  [
+                                                                  0,
+                                                                  0,
+                                                                  0,
+                                                                  6,
+                                                                  4,
+                                                                  0
+                                                              ],
+                                                "report_metrics":  [
+                                                                       {
+                                                                           "path":  "changed",
+                                                                           "observed":  true
+                                                                       }
+                                                                   ]
+                                            },
+                                            {
+                                                "feature":  "Thickened repaired surface",
+                                                "area_mm2":  68,
+                                                "volume_mm3":  24,
+                                                "bounds_mm":  [
+                                                                  0,
+                                                                  0,
+                                                                  0,
+                                                                  6,
+                                                                  4,
+                                                                  1
+                                                              ],
+                                                "report_metrics":  [
+
+                                                                   ]
+                                            }
+                                        ],
+                       "native_readback_recomputed":  true,
+                       "passed":  true,
+                       "after_authoring_sha256":  "9f7d83fd96f2c0c593f5a7b6b28d809d7205fbfbb63883cacf493ab1cab2bed5",
+                       "revision":  4
+                   },
+                   {
+                       "case":  "editable-planar-orientation-and-thicken",
+                       "family":  "surface-repair",
+                       "variant":  {
+                                       "s":  0.5
+                                   },
+                       "trial":  "reject-normal-that-rotates-geometry",
+                       "expected":  "reject",
+                       "before_authoring_sha256":  "9f7d83fd96f2c0c593f5a7b6b28d809d7205fbfbb63883cacf493ab1cab2bed5",
+                       "observed":  "reject",
+                       "error_code":  "EVALUATION_FAILED",
+                       "error":  "Feature #3: OCCT: repair_normal_mismatch: Requested normal must be parallel to the exact planar support; geometry is never rotated",
+                       "document_unchanged":  true,
+                       "passed":  true,
+                       "after_authoring_sha256":  "9f7d83fd96f2c0c593f5a7b6b28d809d7205fbfbb63883cacf493ab1cab2bed5",
+                       "revision":  4
+                   },
+                   {
+                       "case":  "editable-planar-orientation-and-thicken",
+                       "family":  "surface-repair",
+                       "variant":  {
+                                       "s":  0.5
+                                   },
+                       "trial":  "reject-generic-heal-mode",
+                       "expected":  "reject",
+                       "before_authoring_sha256":  "9f7d83fd96f2c0c593f5a7b6b28d809d7205fbfbb63883cacf493ab1cab2bed5",
+                       "observed":  "reject",
+                       "error_code":  "EVALUATION_FAILED",
+                       "error":  "Feature #3: OCCT: repair_unsupported_mode: Only explicit orientation repair is supported",
+                       "document_unchanged":  true,
+                       "passed":  true,
+                       "after_authoring_sha256":  "9f7d83fd96f2c0c593f5a7b6b28d809d7205fbfbb63883cacf493ab1cab2bed5",
+                       "revision":  4
+                   },
+                   {
+                       "case":  "editable-planar-orientation-and-thicken",
+                       "family":  "surface-repair",
+                       "variant":  {
+                                       "s":  0.5
+                                   },
+                       "trial":  "reject-tolerance-widening",
+                       "expected":  "reject",
+                       "before_authoring_sha256":  "9f7d83fd96f2c0c593f5a7b6b28d809d7205fbfbb63883cacf493ab1cab2bed5",
+                       "observed":  "reject",
+                       "error_code":  "EVALUATION_FAILED",
+                       "error":  "Feature #3: repair_invalid_request: Unknown repair field: tolerance",
+                       "document_unchanged":  true,
+                       "passed":  true,
+                       "after_authoring_sha256":  "9f7d83fd96f2c0c593f5a7b6b28d809d7205fbfbb63883cacf493ab1cab2bed5",
+                       "revision":  4
+                   },
+                   {
+                       "case":  "editable-planar-orientation-and-thicken",
+                       "family":  "surface-repair",
+                       "variant":  {
+                                       "s":  0.5
+                                   },
+                       "trial":  "reject-degenerate-thickness-after-repair",
+                       "expected":  "reject",
+                       "before_authoring_sha256":  "9f7d83fd96f2c0c593f5a7b6b28d809d7205fbfbb63883cacf493ab1cab2bed5",
+                       "observed":  "reject",
+                       "error_code":  "EVALUATION_FAILED",
+                       "error":  "Feature #4: OCCT: thickness magnitude must exceed tolerance",
+                       "document_unchanged":  true,
+                       "passed":  true,
+                       "after_authoring_sha256":  "9f7d83fd96f2c0c593f5a7b6b28d809d7205fbfbb63883cacf493ab1cab2bed5",
+                       "revision":  4
+                   },
+                   {
+                       "case":  "editable-planar-orientation-and-thicken",
+                       "family":  "surface-repair",
+                       "variant":  {
+                                       "s":  1
+                                   },
+                       "trial":  "baseline",
+                       "expected":  "accept",
+                       "before_authoring_sha256":  "48795ffd67fdefead27814776ab44c30a6553fec220603fb3ce18fdffe3ef1ea",
+                       "observed":  "accept",
+                       "exact_bodies":  [
+                                            {
+                                                "feature":  "Source box",
+                                                "solids":  1,
+                                                "area_mm2":  376,
+                                                "volume_mm3":  480,
+                                                "brep_base64_sha256":  "564b0a8b78929a863d6e11dccfefeb76c6f5726b00285dfcb986b06596de4d58",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Original underside",
+                                                "solids":  0,
+                                                "area_mm2":  79.999999999999986,
+                                                "volume_mm3":  null,
+                                                "brep_base64_sha256":  "ddc924de110c2bd95d706cc830ac75b7c233795490ca04979828dbc05cbd5c32",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Oriented surface",
+                                                "solids":  0,
+                                                "area_mm2":  79.999999999999986,
+                                                "volume_mm3":  null,
+                                                "brep_base64_sha256":  "49e74b56ad283e1e6b2e027215bdae4f8ed0f6c49ebe5b7213e2c9335c30a2ff",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Thickened repaired surface",
+                                                "solids":  1,
+                                                "area_mm2":  231.99999999999997,
+                                                "volume_mm3":  159.99999999999997,
+                                                "brep_base64_sha256":  "672bb634f8ac160baa038cb4a645e6852aac189bc1bca68da789b0d08b0218a8",
+                                                "brep_valid":  true
+                                            }
+                                        ],
+                       "measurements":  [
+                                            {
+                                                "feature":  "Oriented surface",
+                                                "area_mm2":  79.999999999999986,
+                                                "volume_mm3":  null,
+                                                "bounds_mm":  [
+                                                                  0,
+                                                                  0,
+                                                                  0,
+                                                                  10,
+                                                                  8,
+                                                                  0
+                                                              ],
+                                                "report_metrics":  [
+                                                                       {
+                                                                           "path":  "changed",
+                                                                           "observed":  true
+                                                                       },
+                                                                       {
+                                                                           "path":  "geometry_deviation_mm",
+                                                                           "observed":  0
+                                                                       },
+                                                                       {
+                                                                           "path":  "tolerances_preserved",
+                                                                           "observed":  true
+                                                                       },
+                                                                       {
+                                                                           "path":  "before.free_edges",
+                                                                           "observed":  4
+                                                                       },
+                                                                       {
+                                                                           "path":  "after.free_edges",
+                                                                           "observed":  4
+                                                                       }
+                                                                   ]
+                                            },
+                                            {
+                                                "feature":  "Thickened repaired surface",
+                                                "area_mm2":  231.99999999999997,
+                                                "volume_mm3":  159.99999999999997,
+                                                "bounds_mm":  [
+                                                                  0,
+                                                                  0,
+                                                                  0,
+                                                                  10,
+                                                                  8,
+                                                                  2
+                                                              ],
+                                                "report_metrics":  [
+
+                                                                   ]
+                                            }
+                                        ],
+                       "native_readback_recomputed":  true,
+                       "passed":  true,
+                       "after_authoring_sha256":  "cf9b84236d8641bb043adaed859a43f2a70c70213e63983cc387e93b9b3682e9",
+                       "revision":  1
+                   },
+                   {
+                       "case":  "editable-planar-orientation-and-thicken",
+                       "family":  "surface-repair",
+                       "variant":  {
+                                       "s":  1
+                                   },
+                       "trial":  "edit-explicit-normal-intent",
+                       "expected":  "accept",
+                       "before_authoring_sha256":  "cf9b84236d8641bb043adaed859a43f2a70c70213e63983cc387e93b9b3682e9",
+                       "observed":  "accept",
+                       "exact_bodies":  [
+                                            {
+                                                "feature":  "Source box",
+                                                "solids":  1,
+                                                "area_mm2":  376,
+                                                "volume_mm3":  480,
+                                                "brep_base64_sha256":  "564b0a8b78929a863d6e11dccfefeb76c6f5726b00285dfcb986b06596de4d58",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Original underside",
+                                                "solids":  0,
+                                                "area_mm2":  79.999999999999986,
+                                                "volume_mm3":  null,
+                                                "brep_base64_sha256":  "ddc924de110c2bd95d706cc830ac75b7c233795490ca04979828dbc05cbd5c32",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Oriented surface",
+                                                "solids":  0,
+                                                "area_mm2":  79.999999999999986,
+                                                "volume_mm3":  null,
+                                                "brep_base64_sha256":  "ddc924de110c2bd95d706cc830ac75b7c233795490ca04979828dbc05cbd5c32",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Thickened repaired surface",
+                                                "solids":  1,
+                                                "area_mm2":  231.99999999999997,
+                                                "volume_mm3":  159.99999999999997,
+                                                "brep_base64_sha256":  "bf2a243c5949619b0fe8c7fe46ceda91870b4b26d78fef86f8be08cda2a79b03",
+                                                "brep_valid":  true
+                                            }
+                                        ],
+                       "measurements":  [
+                                            {
+                                                "feature":  "Oriented surface",
+                                                "area_mm2":  79.999999999999986,
+                                                "volume_mm3":  null,
+                                                "bounds_mm":  [
+                                                                  0,
+                                                                  0,
+                                                                  0,
+                                                                  10,
+                                                                  8,
+                                                                  0
+                                                              ],
+                                                "report_metrics":  [
+                                                                       {
+                                                                           "path":  "changed",
+                                                                           "observed":  false
+                                                                       },
+                                                                       {
+                                                                           "path":  "all_faces_preserved",
+                                                                           "observed":  true
+                                                                       }
+                                                                   ]
+                                            },
+                                            {
+                                                "feature":  "Thickened repaired surface",
+                                                "area_mm2":  231.99999999999997,
+                                                "volume_mm3":  159.99999999999997,
+                                                "bounds_mm":  [
+                                                                  0,
+                                                                  0,
+                                                                  -2,
+                                                                  10,
+                                                                  8,
+                                                                  0
+                                                              ],
+                                                "report_metrics":  [
+
+                                                                   ]
+                                            }
+                                        ],
+                       "native_readback_recomputed":  true,
+                       "passed":  true,
+                       "after_authoring_sha256":  "7cf82af60fd32b39b47e3afb75968ef4c2d8fce9fa847b73f9b7122712d05882",
+                       "revision":  2
+                   },
+                   {
+                       "case":  "editable-planar-orientation-and-thicken",
+                       "family":  "surface-repair",
+                       "variant":  {
+                                       "s":  1
+                                   },
+                       "trial":  "reject-zero-normal-atomically",
+                       "expected":  "reject",
+                       "before_authoring_sha256":  "7cf82af60fd32b39b47e3afb75968ef4c2d8fce9fa847b73f9b7122712d05882",
+                       "observed":  "reject",
+                       "error_code":  "EVALUATION_FAILED",
+                       "error":  "Feature #3: OCCT: repair_invalid_request: normal cannot be zero",
+                       "document_unchanged":  true,
+                       "passed":  true,
+                       "after_authoring_sha256":  "7cf82af60fd32b39b47e3afb75968ef4c2d8fce9fa847b73f9b7122712d05882",
+                       "revision":  2
+                   },
+                   {
+                       "case":  "editable-planar-orientation-and-thicken",
+                       "family":  "surface-repair",
+                       "variant":  {
+                                       "s":  1
+                                   },
+                       "trial":  "source-dimension-recomputes-repair",
+                       "expected":  "accept",
+                       "before_authoring_sha256":  "7cf82af60fd32b39b47e3afb75968ef4c2d8fce9fa847b73f9b7122712d05882",
+                       "observed":  "accept",
+                       "exact_bodies":  [
+                                            {
+                                                "feature":  "Source box",
+                                                "solids":  1,
+                                                "area_mm2":  432,
+                                                "volume_mm3":  576,
+                                                "brep_base64_sha256":  "753f9d61e2c30b8c96f6ac6e08f3bd4462c73ad85f86ac6e5bad7603aef340d1",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Original underside",
+                                                "solids":  0,
+                                                "area_mm2":  96,
+                                                "volume_mm3":  null,
+                                                "brep_base64_sha256":  "a8af46d67e60468cebdc387186cdc193214340e09fa5f577880fae586a84da44",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Oriented surface",
+                                                "solids":  0,
+                                                "area_mm2":  96,
+                                                "volume_mm3":  null,
+                                                "brep_base64_sha256":  "a8af46d67e60468cebdc387186cdc193214340e09fa5f577880fae586a84da44",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Thickened repaired surface",
+                                                "solids":  1,
+                                                "area_mm2":  272,
+                                                "volume_mm3":  192,
+                                                "brep_base64_sha256":  "0a6057edcac3e3b191e340ae02a01e8a129c9e1baa50c006b5fededff3efecb9",
+                                                "brep_valid":  true
+                                            }
+                                        ],
+                       "measurements":  [
+                                            {
+                                                "feature":  "Oriented surface",
+                                                "area_mm2":  96,
+                                                "volume_mm3":  null,
+                                                "bounds_mm":  [
+                                                                  0,
+                                                                  0,
+                                                                  0,
+                                                                  12,
+                                                                  8,
+                                                                  0
+                                                              ],
+                                                "report_metrics":  [
+                                                                       {
+                                                                           "path":  "before.faces",
+                                                                           "observed":  1
+                                                                       },
+                                                                       {
+                                                                           "path":  "after.faces",
+                                                                           "observed":  1
+                                                                       }
+                                                                   ]
+                                            },
+                                            {
+                                                "feature":  "Thickened repaired surface",
+                                                "area_mm2":  272,
+                                                "volume_mm3":  192,
+                                                "bounds_mm":  [
+                                                                  0,
+                                                                  0,
+                                                                  -2,
+                                                                  12,
+                                                                  8,
+                                                                  0
+                                                              ],
+                                                "report_metrics":  [
+
+                                                                   ]
+                                            }
+                                        ],
+                       "native_readback_recomputed":  true,
+                       "passed":  true,
+                       "after_authoring_sha256":  "8761a08c1bfa48ef49337091036ef1aec07b7bc878f741e1119206af8b756784",
+                       "revision":  3
+                   },
+                   {
+                       "case":  "editable-planar-orientation-and-thicken",
+                       "family":  "surface-repair",
+                       "variant":  {
+                                       "s":  1
+                                   },
+                       "trial":  "restore-positive-normal",
+                       "expected":  "accept",
+                       "before_authoring_sha256":  "8761a08c1bfa48ef49337091036ef1aec07b7bc878f741e1119206af8b756784",
+                       "observed":  "accept",
+                       "exact_bodies":  [
+                                            {
+                                                "feature":  "Source box",
+                                                "solids":  1,
+                                                "area_mm2":  432,
+                                                "volume_mm3":  576,
+                                                "brep_base64_sha256":  "753f9d61e2c30b8c96f6ac6e08f3bd4462c73ad85f86ac6e5bad7603aef340d1",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Original underside",
+                                                "solids":  0,
+                                                "area_mm2":  96,
+                                                "volume_mm3":  null,
+                                                "brep_base64_sha256":  "a8af46d67e60468cebdc387186cdc193214340e09fa5f577880fae586a84da44",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Oriented surface",
+                                                "solids":  0,
+                                                "area_mm2":  96,
+                                                "volume_mm3":  null,
+                                                "brep_base64_sha256":  "d5f70c0b431835daeb4b42fcdd17101ce366c44c55469fe41d7c8a8415866432",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Thickened repaired surface",
+                                                "solids":  1,
+                                                "area_mm2":  272,
+                                                "volume_mm3":  192,
+                                                "brep_base64_sha256":  "850e0ffa72ba47d40adc7d486793c044c75f7ab02d39267a2ecd960355bca3bc",
+                                                "brep_valid":  true
+                                            }
+                                        ],
+                       "measurements":  [
+                                            {
+                                                "feature":  "Oriented surface",
+                                                "area_mm2":  96,
+                                                "volume_mm3":  null,
+                                                "bounds_mm":  [
+                                                                  0,
+                                                                  0,
+                                                                  0,
+                                                                  12,
+                                                                  8,
+                                                                  0
+                                                              ],
+                                                "report_metrics":  [
+                                                                       {
+                                                                           "path":  "changed",
+                                                                           "observed":  true
+                                                                       }
+                                                                   ]
+                                            },
+                                            {
+                                                "feature":  "Thickened repaired surface",
+                                                "area_mm2":  272,
+                                                "volume_mm3":  192,
+                                                "bounds_mm":  [
+                                                                  0,
+                                                                  0,
+                                                                  0,
+                                                                  12,
+                                                                  8,
+                                                                  2
+                                                              ],
+                                                "report_metrics":  [
+
+                                                                   ]
+                                            }
+                                        ],
+                       "native_readback_recomputed":  true,
+                       "passed":  true,
+                       "after_authoring_sha256":  "a07924f479cfae1796001eea397bd2a0136b3b4a535655ea400a57ceb826c5a5",
+                       "revision":  4
+                   },
+                   {
+                       "case":  "editable-planar-orientation-and-thicken",
+                       "family":  "surface-repair",
+                       "variant":  {
+                                       "s":  1
+                                   },
+                       "trial":  "reject-normal-that-rotates-geometry",
+                       "expected":  "reject",
+                       "before_authoring_sha256":  "a07924f479cfae1796001eea397bd2a0136b3b4a535655ea400a57ceb826c5a5",
+                       "observed":  "reject",
+                       "error_code":  "EVALUATION_FAILED",
+                       "error":  "Feature #3: OCCT: repair_normal_mismatch: Requested normal must be parallel to the exact planar support; geometry is never rotated",
+                       "document_unchanged":  true,
+                       "passed":  true,
+                       "after_authoring_sha256":  "a07924f479cfae1796001eea397bd2a0136b3b4a535655ea400a57ceb826c5a5",
+                       "revision":  4
+                   },
+                   {
+                       "case":  "editable-planar-orientation-and-thicken",
+                       "family":  "surface-repair",
+                       "variant":  {
+                                       "s":  1
+                                   },
+                       "trial":  "reject-generic-heal-mode",
+                       "expected":  "reject",
+                       "before_authoring_sha256":  "a07924f479cfae1796001eea397bd2a0136b3b4a535655ea400a57ceb826c5a5",
+                       "observed":  "reject",
+                       "error_code":  "EVALUATION_FAILED",
+                       "error":  "Feature #3: OCCT: repair_unsupported_mode: Only explicit orientation repair is supported",
+                       "document_unchanged":  true,
+                       "passed":  true,
+                       "after_authoring_sha256":  "a07924f479cfae1796001eea397bd2a0136b3b4a535655ea400a57ceb826c5a5",
+                       "revision":  4
+                   },
+                   {
+                       "case":  "editable-planar-orientation-and-thicken",
+                       "family":  "surface-repair",
+                       "variant":  {
+                                       "s":  1
+                                   },
+                       "trial":  "reject-tolerance-widening",
+                       "expected":  "reject",
+                       "before_authoring_sha256":  "a07924f479cfae1796001eea397bd2a0136b3b4a535655ea400a57ceb826c5a5",
+                       "observed":  "reject",
+                       "error_code":  "EVALUATION_FAILED",
+                       "error":  "Feature #3: repair_invalid_request: Unknown repair field: tolerance",
+                       "document_unchanged":  true,
+                       "passed":  true,
+                       "after_authoring_sha256":  "a07924f479cfae1796001eea397bd2a0136b3b4a535655ea400a57ceb826c5a5",
+                       "revision":  4
+                   },
+                   {
+                       "case":  "editable-planar-orientation-and-thicken",
+                       "family":  "surface-repair",
+                       "variant":  {
+                                       "s":  1
+                                   },
+                       "trial":  "reject-degenerate-thickness-after-repair",
+                       "expected":  "reject",
+                       "before_authoring_sha256":  "a07924f479cfae1796001eea397bd2a0136b3b4a535655ea400a57ceb826c5a5",
+                       "observed":  "reject",
+                       "error_code":  "EVALUATION_FAILED",
+                       "error":  "Feature #4: OCCT: thickness magnitude must exceed tolerance",
+                       "document_unchanged":  true,
+                       "passed":  true,
+                       "after_authoring_sha256":  "a07924f479cfae1796001eea397bd2a0136b3b4a535655ea400a57ceb826c5a5",
+                       "revision":  4
+                   },
+                   {
+                       "case":  "editable-planar-orientation-and-thicken",
+                       "family":  "surface-repair",
+                       "variant":  {
+                                       "s":  2
+                                   },
+                       "trial":  "baseline",
+                       "expected":  "accept",
+                       "before_authoring_sha256":  "48795ffd67fdefead27814776ab44c30a6553fec220603fb3ce18fdffe3ef1ea",
+                       "observed":  "accept",
+                       "exact_bodies":  [
+                                            {
+                                                "feature":  "Source box",
+                                                "solids":  1,
+                                                "area_mm2":  1504,
+                                                "volume_mm3":  3840,
+                                                "brep_base64_sha256":  "cf909a9406517c6d833db86adabab87336e5fc5b02be77bf7f5106609eb70696",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Original underside",
+                                                "solids":  0,
+                                                "area_mm2":  319.99999999999994,
+                                                "volume_mm3":  null,
+                                                "brep_base64_sha256":  "0bfe7772e08b763bcf668bf301685f61e8aa3ee079a62ef8784d59738019d5b6",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Oriented surface",
+                                                "solids":  0,
+                                                "area_mm2":  319.99999999999994,
+                                                "volume_mm3":  null,
+                                                "brep_base64_sha256":  "ffe726745d161a3fdfe75a7487b9c736f17642a5be92c946ba2ae0e9c86702b9",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Thickened repaired surface",
+                                                "solids":  1,
+                                                "area_mm2":  927.99999999999989,
+                                                "volume_mm3":  1279.9999999999998,
+                                                "brep_base64_sha256":  "5730544780c191029fd59e4e87dcc22269040c7a56938e734c4393c1c86a7890",
+                                                "brep_valid":  true
+                                            }
+                                        ],
+                       "measurements":  [
+                                            {
+                                                "feature":  "Oriented surface",
+                                                "area_mm2":  319.99999999999994,
+                                                "volume_mm3":  null,
+                                                "bounds_mm":  [
+                                                                  0,
+                                                                  0,
+                                                                  0,
+                                                                  20,
+                                                                  16,
+                                                                  0
+                                                              ],
+                                                "report_metrics":  [
+                                                                       {
+                                                                           "path":  "changed",
+                                                                           "observed":  true
+                                                                       },
+                                                                       {
+                                                                           "path":  "geometry_deviation_mm",
+                                                                           "observed":  0
+                                                                       },
+                                                                       {
+                                                                           "path":  "tolerances_preserved",
+                                                                           "observed":  true
+                                                                       },
+                                                                       {
+                                                                           "path":  "before.free_edges",
+                                                                           "observed":  4
+                                                                       },
+                                                                       {
+                                                                           "path":  "after.free_edges",
+                                                                           "observed":  4
+                                                                       }
+                                                                   ]
+                                            },
+                                            {
+                                                "feature":  "Thickened repaired surface",
+                                                "area_mm2":  927.99999999999989,
+                                                "volume_mm3":  1279.9999999999998,
+                                                "bounds_mm":  [
+                                                                  0,
+                                                                  0,
+                                                                  0,
+                                                                  20,
+                                                                  16,
+                                                                  4
+                                                              ],
+                                                "report_metrics":  [
+
+                                                                   ]
+                                            }
+                                        ],
+                       "native_readback_recomputed":  true,
+                       "passed":  true,
+                       "after_authoring_sha256":  "be12c05512d8007b0e3a00632f7af36e28993b930518aa1e9c10e69946d5f320",
+                       "revision":  1
+                   },
+                   {
+                       "case":  "editable-planar-orientation-and-thicken",
+                       "family":  "surface-repair",
+                       "variant":  {
+                                       "s":  2
+                                   },
+                       "trial":  "edit-explicit-normal-intent",
+                       "expected":  "accept",
+                       "before_authoring_sha256":  "be12c05512d8007b0e3a00632f7af36e28993b930518aa1e9c10e69946d5f320",
+                       "observed":  "accept",
+                       "exact_bodies":  [
+                                            {
+                                                "feature":  "Source box",
+                                                "solids":  1,
+                                                "area_mm2":  1504,
+                                                "volume_mm3":  3840,
+                                                "brep_base64_sha256":  "cf909a9406517c6d833db86adabab87336e5fc5b02be77bf7f5106609eb70696",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Original underside",
+                                                "solids":  0,
+                                                "area_mm2":  319.99999999999994,
+                                                "volume_mm3":  null,
+                                                "brep_base64_sha256":  "0bfe7772e08b763bcf668bf301685f61e8aa3ee079a62ef8784d59738019d5b6",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Oriented surface",
+                                                "solids":  0,
+                                                "area_mm2":  319.99999999999994,
+                                                "volume_mm3":  null,
+                                                "brep_base64_sha256":  "0bfe7772e08b763bcf668bf301685f61e8aa3ee079a62ef8784d59738019d5b6",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Thickened repaired surface",
+                                                "solids":  1,
+                                                "area_mm2":  927.99999999999989,
+                                                "volume_mm3":  1279.9999999999998,
+                                                "brep_base64_sha256":  "c51f3a2eaeaa0b70bacaa0fd307c69ce69972ec598ebf14165c3b4f6d1e37cee",
+                                                "brep_valid":  true
+                                            }
+                                        ],
+                       "measurements":  [
+                                            {
+                                                "feature":  "Oriented surface",
+                                                "area_mm2":  319.99999999999994,
+                                                "volume_mm3":  null,
+                                                "bounds_mm":  [
+                                                                  0,
+                                                                  0,
+                                                                  0,
+                                                                  20,
+                                                                  16,
+                                                                  0
+                                                              ],
+                                                "report_metrics":  [
+                                                                       {
+                                                                           "path":  "changed",
+                                                                           "observed":  false
+                                                                       },
+                                                                       {
+                                                                           "path":  "all_faces_preserved",
+                                                                           "observed":  true
+                                                                       }
+                                                                   ]
+                                            },
+                                            {
+                                                "feature":  "Thickened repaired surface",
+                                                "area_mm2":  927.99999999999989,
+                                                "volume_mm3":  1279.9999999999998,
+                                                "bounds_mm":  [
+                                                                  0,
+                                                                  0,
+                                                                  -4,
+                                                                  20,
+                                                                  16,
+                                                                  0
+                                                              ],
+                                                "report_metrics":  [
+
+                                                                   ]
+                                            }
+                                        ],
+                       "native_readback_recomputed":  true,
+                       "passed":  true,
+                       "after_authoring_sha256":  "c406228fe37e5d6e207e1f2e288f3b489a7d06a866809fb71e05041a181f922d",
+                       "revision":  2
+                   },
+                   {
+                       "case":  "editable-planar-orientation-and-thicken",
+                       "family":  "surface-repair",
+                       "variant":  {
+                                       "s":  2
+                                   },
+                       "trial":  "reject-zero-normal-atomically",
+                       "expected":  "reject",
+                       "before_authoring_sha256":  "c406228fe37e5d6e207e1f2e288f3b489a7d06a866809fb71e05041a181f922d",
+                       "observed":  "reject",
+                       "error_code":  "EVALUATION_FAILED",
+                       "error":  "Feature #3: OCCT: repair_invalid_request: normal cannot be zero",
+                       "document_unchanged":  true,
+                       "passed":  true,
+                       "after_authoring_sha256":  "c406228fe37e5d6e207e1f2e288f3b489a7d06a866809fb71e05041a181f922d",
+                       "revision":  2
+                   },
+                   {
+                       "case":  "editable-planar-orientation-and-thicken",
+                       "family":  "surface-repair",
+                       "variant":  {
+                                       "s":  2
+                                   },
+                       "trial":  "source-dimension-recomputes-repair",
+                       "expected":  "accept",
+                       "before_authoring_sha256":  "c406228fe37e5d6e207e1f2e288f3b489a7d06a866809fb71e05041a181f922d",
+                       "observed":  "accept",
+                       "exact_bodies":  [
+                                            {
+                                                "feature":  "Source box",
+                                                "solids":  1,
+                                                "area_mm2":  1728,
+                                                "volume_mm3":  4608,
+                                                "brep_base64_sha256":  "1ef7c7b80e803dcc6db10f4a9d4df2c0daf9d18a810676336b3f13f07264bee6",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Original underside",
+                                                "solids":  0,
+                                                "area_mm2":  384,
+                                                "volume_mm3":  null,
+                                                "brep_base64_sha256":  "6f7879366632831f8e8372a242a6083fb5cced35127d72b95c0e61989ad48db5",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Oriented surface",
+                                                "solids":  0,
+                                                "area_mm2":  384,
+                                                "volume_mm3":  null,
+                                                "brep_base64_sha256":  "6f7879366632831f8e8372a242a6083fb5cced35127d72b95c0e61989ad48db5",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Thickened repaired surface",
+                                                "solids":  1,
+                                                "area_mm2":  1088,
+                                                "volume_mm3":  1536,
+                                                "brep_base64_sha256":  "32ea4e4065eafc11c577b6e391bb17f7ae8df724ceec2ff971059dc912bb85b7",
+                                                "brep_valid":  true
+                                            }
+                                        ],
+                       "measurements":  [
+                                            {
+                                                "feature":  "Oriented surface",
+                                                "area_mm2":  384,
+                                                "volume_mm3":  null,
+                                                "bounds_mm":  [
+                                                                  0,
+                                                                  0,
+                                                                  0,
+                                                                  24,
+                                                                  16,
+                                                                  0
+                                                              ],
+                                                "report_metrics":  [
+                                                                       {
+                                                                           "path":  "before.faces",
+                                                                           "observed":  1
+                                                                       },
+                                                                       {
+                                                                           "path":  "after.faces",
+                                                                           "observed":  1
+                                                                       }
+                                                                   ]
+                                            },
+                                            {
+                                                "feature":  "Thickened repaired surface",
+                                                "area_mm2":  1088,
+                                                "volume_mm3":  1536,
+                                                "bounds_mm":  [
+                                                                  0,
+                                                                  0,
+                                                                  -4,
+                                                                  24,
+                                                                  16,
+                                                                  0
+                                                              ],
+                                                "report_metrics":  [
+
+                                                                   ]
+                                            }
+                                        ],
+                       "native_readback_recomputed":  true,
+                       "passed":  true,
+                       "after_authoring_sha256":  "2d6a4f847a9a5b6dcde0b870cbc07ec6d258766d149a4a2566fcc2a27a737d95",
+                       "revision":  3
+                   },
+                   {
+                       "case":  "editable-planar-orientation-and-thicken",
+                       "family":  "surface-repair",
+                       "variant":  {
+                                       "s":  2
+                                   },
+                       "trial":  "restore-positive-normal",
+                       "expected":  "accept",
+                       "before_authoring_sha256":  "2d6a4f847a9a5b6dcde0b870cbc07ec6d258766d149a4a2566fcc2a27a737d95",
+                       "observed":  "accept",
+                       "exact_bodies":  [
+                                            {
+                                                "feature":  "Source box",
+                                                "solids":  1,
+                                                "area_mm2":  1728,
+                                                "volume_mm3":  4608,
+                                                "brep_base64_sha256":  "1ef7c7b80e803dcc6db10f4a9d4df2c0daf9d18a810676336b3f13f07264bee6",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Original underside",
+                                                "solids":  0,
+                                                "area_mm2":  384,
+                                                "volume_mm3":  null,
+                                                "brep_base64_sha256":  "6f7879366632831f8e8372a242a6083fb5cced35127d72b95c0e61989ad48db5",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Oriented surface",
+                                                "solids":  0,
+                                                "area_mm2":  384,
+                                                "volume_mm3":  null,
+                                                "brep_base64_sha256":  "b9ac6bd3db3cfc89c36e7c6efc259f89c1e2dfbb4171b663a3aa6a2a232f3e9f",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Thickened repaired surface",
+                                                "solids":  1,
+                                                "area_mm2":  1088,
+                                                "volume_mm3":  1536,
+                                                "brep_base64_sha256":  "a8601566d87e8c80c6205b7a4456ddb54c90c2650cb5813eb1923bbf787726ef",
+                                                "brep_valid":  true
+                                            }
+                                        ],
+                       "measurements":  [
+                                            {
+                                                "feature":  "Oriented surface",
+                                                "area_mm2":  384,
+                                                "volume_mm3":  null,
+                                                "bounds_mm":  [
+                                                                  0,
+                                                                  0,
+                                                                  0,
+                                                                  24,
+                                                                  16,
+                                                                  0
+                                                              ],
+                                                "report_metrics":  [
+                                                                       {
+                                                                           "path":  "changed",
+                                                                           "observed":  true
+                                                                       }
+                                                                   ]
+                                            },
+                                            {
+                                                "feature":  "Thickened repaired surface",
+                                                "area_mm2":  1088,
+                                                "volume_mm3":  1536,
+                                                "bounds_mm":  [
+                                                                  0,
+                                                                  0,
+                                                                  0,
+                                                                  24,
+                                                                  16,
+                                                                  4
+                                                              ],
+                                                "report_metrics":  [
+
+                                                                   ]
+                                            }
+                                        ],
+                       "native_readback_recomputed":  true,
+                       "passed":  true,
+                       "after_authoring_sha256":  "7029b8341a9c9cec105ba5739ac082257f5a13245eda1f8de14c20f55042e5da",
+                       "revision":  4
+                   },
+                   {
+                       "case":  "editable-planar-orientation-and-thicken",
+                       "family":  "surface-repair",
+                       "variant":  {
+                                       "s":  2
+                                   },
+                       "trial":  "reject-normal-that-rotates-geometry",
+                       "expected":  "reject",
+                       "before_authoring_sha256":  "7029b8341a9c9cec105ba5739ac082257f5a13245eda1f8de14c20f55042e5da",
+                       "observed":  "reject",
+                       "error_code":  "EVALUATION_FAILED",
+                       "error":  "Feature #3: OCCT: repair_normal_mismatch: Requested normal must be parallel to the exact planar support; geometry is never rotated",
+                       "document_unchanged":  true,
+                       "passed":  true,
+                       "after_authoring_sha256":  "7029b8341a9c9cec105ba5739ac082257f5a13245eda1f8de14c20f55042e5da",
+                       "revision":  4
+                   },
+                   {
+                       "case":  "editable-planar-orientation-and-thicken",
+                       "family":  "surface-repair",
+                       "variant":  {
+                                       "s":  2
+                                   },
+                       "trial":  "reject-generic-heal-mode",
+                       "expected":  "reject",
+                       "before_authoring_sha256":  "7029b8341a9c9cec105ba5739ac082257f5a13245eda1f8de14c20f55042e5da",
+                       "observed":  "reject",
+                       "error_code":  "EVALUATION_FAILED",
+                       "error":  "Feature #3: OCCT: repair_unsupported_mode: Only explicit orientation repair is supported",
+                       "document_unchanged":  true,
+                       "passed":  true,
+                       "after_authoring_sha256":  "7029b8341a9c9cec105ba5739ac082257f5a13245eda1f8de14c20f55042e5da",
+                       "revision":  4
+                   },
+                   {
+                       "case":  "editable-planar-orientation-and-thicken",
+                       "family":  "surface-repair",
+                       "variant":  {
+                                       "s":  2
+                                   },
+                       "trial":  "reject-tolerance-widening",
+                       "expected":  "reject",
+                       "before_authoring_sha256":  "7029b8341a9c9cec105ba5739ac082257f5a13245eda1f8de14c20f55042e5da",
+                       "observed":  "reject",
+                       "error_code":  "EVALUATION_FAILED",
+                       "error":  "Feature #3: repair_invalid_request: Unknown repair field: tolerance",
+                       "document_unchanged":  true,
+                       "passed":  true,
+                       "after_authoring_sha256":  "7029b8341a9c9cec105ba5739ac082257f5a13245eda1f8de14c20f55042e5da",
+                       "revision":  4
+                   },
+                   {
+                       "case":  "editable-planar-orientation-and-thicken",
+                       "family":  "surface-repair",
+                       "variant":  {
+                                       "s":  2
+                                   },
+                       "trial":  "reject-degenerate-thickness-after-repair",
+                       "expected":  "reject",
+                       "before_authoring_sha256":  "7029b8341a9c9cec105ba5739ac082257f5a13245eda1f8de14c20f55042e5da",
+                       "observed":  "reject",
+                       "error_code":  "EVALUATION_FAILED",
+                       "error":  "Feature #4: OCCT: thickness magnitude must exceed tolerance",
+                       "document_unchanged":  true,
+                       "passed":  true,
+                       "after_authoring_sha256":  "7029b8341a9c9cec105ba5739ac082257f5a13245eda1f8de14c20f55042e5da",
+                       "revision":  4
+                   },
+                   {
+                       "case":  "periodic-solid-and-planar-normal-boundary",
+                       "family":  "surface-repair-periodic",
+                       "variant":  {
+                                       "s":  0.5
+                                   },
+                       "trial":  "baseline",
+                       "expected":  "accept",
+                       "before_authoring_sha256":  "48795ffd67fdefead27814776ab44c30a6553fec220603fb3ce18fdffe3ef1ea",
+                       "observed":  "accept",
+                       "exact_bodies":  [
+                                            {
+                                                "feature":  "Cylinder",
+                                                "solids":  1,
+                                                "area_mm2":  100.53096491487344,
+                                                "volume_mm3":  75.398223686155092,
+                                                "brep_base64_sha256":  "f6bc2eb83f1dcc496fde2f1b9130e160e5093aafb55dc3efbf94742873b4e4e7",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Checked cylinder",
+                                                "solids":  1,
+                                                "area_mm2":  100.53096491487344,
+                                                "volume_mm3":  75.398223686155092,
+                                                "brep_base64_sha256":  "b9aaf1d7a4b3919037ae108dd222e87b8943ad6279a2e81d247d646d1aef5484",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Curved side",
+                                                "solids":  0,
+                                                "area_mm2":  75.398223686155035,
+                                                "volume_mm3":  null,
+                                                "brep_base64_sha256":  "5706c94e676f65cd20318a8bcfeb6058cc123e782a6b0f790a209087d2886986",
+                                                "brep_valid":  true
+                                            }
+                                        ],
+                       "measurements":  [
+                                            {
+                                                "feature":  "Checked cylinder",
+                                                "area_mm2":  100.53096491487344,
+                                                "volume_mm3":  75.398223686155092,
+                                                "bounds_mm":  [
+                                                                  -2,
+                                                                  -2,
+                                                                  0,
+                                                                  2,
+                                                                  2,
+                                                                  6
+                                                              ],
+                                                "report_metrics":  [
+                                                                       {
+                                                                           "path":  "changed",
+                                                                           "observed":  false
+                                                                       },
+                                                                       {
+                                                                           "path":  "before.periodic_seam_edges",
+                                                                           "observed":  1
+                                                                       },
+                                                                       {
+                                                                           "path":  "after.periodic_seam_edges",
+                                                                           "observed":  1
+                                                                       },
+                                                                       {
+                                                                           "path":  "all_solids_preserved",
+                                                                           "observed":  true
+                                                                       }
+                                                                   ]
+                                            }
+                                        ],
+                       "native_readback_recomputed":  true,
+                       "passed":  true,
+                       "after_authoring_sha256":  "371e20a63732aa62378deec7e81d5053e4530e112174f91476dd5f70fbfcfa52",
+                       "revision":  1
+                   },
+                   {
+                       "case":  "periodic-solid-and-planar-normal-boundary",
+                       "family":  "surface-repair-periodic",
+                       "variant":  {
+                                       "s":  0.5
+                                   },
+                       "trial":  "reject-global-normal-on-periodic-face",
+                       "expected":  "reject",
+                       "before_authoring_sha256":  "371e20a63732aa62378deec7e81d5053e4530e112174f91476dd5f70fbfcfa52",
+                       "observed":  "reject",
+                       "error_code":  "EVALUATION_FAILED",
+                       "error":  "Feature #4: OCCT: repair_unsupported_normal: A periodic or curved face has no single global normal",
+                       "document_unchanged":  true,
+                       "passed":  true,
+                       "after_authoring_sha256":  "371e20a63732aa62378deec7e81d5053e4530e112174f91476dd5f70fbfcfa52",
+                       "revision":  1
+                   },
+                   {
+                       "case":  "periodic-solid-and-planar-normal-boundary",
+                       "family":  "surface-repair-periodic",
+                       "variant":  {
+                                       "s":  0.5
+                                   },
+                       "trial":  "periodic-source-edit-preserves-solid",
+                       "expected":  "accept",
+                       "before_authoring_sha256":  "371e20a63732aa62378deec7e81d5053e4530e112174f91476dd5f70fbfcfa52",
+                       "observed":  "accept",
+                       "exact_bodies":  [
+                                            {
+                                                "feature":  "Cylinder",
+                                                "solids":  1,
+                                                "area_mm2":  133.51768777756629,
+                                                "volume_mm3":  117.80972450961734,
+                                                "brep_base64_sha256":  "664bd6f8928c8c8dc0606bc45cdbc080adbbedbadbc197cb87dab39e05dd1be3",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Checked cylinder",
+                                                "solids":  1,
+                                                "area_mm2":  133.51768777756629,
+                                                "volume_mm3":  117.80972450961734,
+                                                "brep_base64_sha256":  "0932b7a7b3d9578b647852d773900937149c72543a32b8f942f01a2b77382ead",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Curved side",
+                                                "solids":  0,
+                                                "area_mm2":  94.247779607693801,
+                                                "volume_mm3":  null,
+                                                "brep_base64_sha256":  "c0dc8977e50aae17255410e4cd4ec2b8bc3b50ac67753975477d99041a67e31c",
+                                                "brep_valid":  true
+                                            }
+                                        ],
+                       "measurements":  [
+                                            {
+                                                "feature":  "Checked cylinder",
+                                                "area_mm2":  133.51768777756629,
+                                                "volume_mm3":  117.80972450961734,
+                                                "bounds_mm":  [
+                                                                  -2.5,
+                                                                  -2.5,
+                                                                  0,
+                                                                  2.5,
+                                                                  2.5,
+                                                                  6
+                                                              ],
+                                                "report_metrics":  [
+                                                                       {
+                                                                           "path":  "after.periodic_seam_edges",
+                                                                           "observed":  1
+                                                                       },
+                                                                       {
+                                                                           "path":  "geometry_deviation_mm",
+                                                                           "observed":  0
+                                                                       }
+                                                                   ]
+                                            }
+                                        ],
+                       "native_readback_recomputed":  true,
+                       "passed":  true,
+                       "after_authoring_sha256":  "e4203707037047b23a41596ac403b8983177158ce8be8080b340fa040c04ab93",
+                       "revision":  2
+                   },
+                   {
+                       "case":  "periodic-solid-and-planar-normal-boundary",
+                       "family":  "surface-repair-periodic",
+                       "variant":  {
+                                       "s":  1
+                                   },
+                       "trial":  "baseline",
+                       "expected":  "accept",
+                       "before_authoring_sha256":  "48795ffd67fdefead27814776ab44c30a6553fec220603fb3ce18fdffe3ef1ea",
+                       "observed":  "accept",
+                       "exact_bodies":  [
+                                            {
+                                                "feature":  "Cylinder",
+                                                "solids":  1,
+                                                "area_mm2":  402.12385965949375,
+                                                "volume_mm3":  603.18578948924073,
+                                                "brep_base64_sha256":  "49fd91f4469d58a98986ffe393c57bfd69b9db251a4212e04ee0651b26902083",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Checked cylinder",
+                                                "solids":  1,
+                                                "area_mm2":  402.12385965949375,
+                                                "volume_mm3":  603.18578948924073,
+                                                "brep_base64_sha256":  "8d009db3af7d073a645f2bcc47740f534aba7cc18f2e9e2801e777cee6bf0d6c",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Curved side",
+                                                "solids":  0,
+                                                "area_mm2":  301.59289474462014,
+                                                "volume_mm3":  null,
+                                                "brep_base64_sha256":  "c2ee5b9998fcd1b2d4b453b187066dc978552fe0e28763200a3bfd76ba4b1d81",
+                                                "brep_valid":  true
+                                            }
+                                        ],
+                       "measurements":  [
+                                            {
+                                                "feature":  "Checked cylinder",
+                                                "area_mm2":  402.12385965949375,
+                                                "volume_mm3":  603.18578948924073,
+                                                "bounds_mm":  [
+                                                                  -4,
+                                                                  -4,
+                                                                  0,
+                                                                  4,
+                                                                  4,
+                                                                  12
+                                                              ],
+                                                "report_metrics":  [
+                                                                       {
+                                                                           "path":  "changed",
+                                                                           "observed":  false
+                                                                       },
+                                                                       {
+                                                                           "path":  "before.periodic_seam_edges",
+                                                                           "observed":  1
+                                                                       },
+                                                                       {
+                                                                           "path":  "after.periodic_seam_edges",
+                                                                           "observed":  1
+                                                                       },
+                                                                       {
+                                                                           "path":  "all_solids_preserved",
+                                                                           "observed":  true
+                                                                       }
+                                                                   ]
+                                            }
+                                        ],
+                       "native_readback_recomputed":  true,
+                       "passed":  true,
+                       "after_authoring_sha256":  "6be16d9c0894ffbe46f7f41ad419f25c26eee936f272479f44074cfbf104988e",
+                       "revision":  1
+                   },
+                   {
+                       "case":  "periodic-solid-and-planar-normal-boundary",
+                       "family":  "surface-repair-periodic",
+                       "variant":  {
+                                       "s":  1
+                                   },
+                       "trial":  "reject-global-normal-on-periodic-face",
+                       "expected":  "reject",
+                       "before_authoring_sha256":  "6be16d9c0894ffbe46f7f41ad419f25c26eee936f272479f44074cfbf104988e",
+                       "observed":  "reject",
+                       "error_code":  "EVALUATION_FAILED",
+                       "error":  "Feature #4: OCCT: repair_unsupported_normal: A periodic or curved face has no single global normal",
+                       "document_unchanged":  true,
+                       "passed":  true,
+                       "after_authoring_sha256":  "6be16d9c0894ffbe46f7f41ad419f25c26eee936f272479f44074cfbf104988e",
+                       "revision":  1
+                   },
+                   {
+                       "case":  "periodic-solid-and-planar-normal-boundary",
+                       "family":  "surface-repair-periodic",
+                       "variant":  {
+                                       "s":  1
+                                   },
+                       "trial":  "periodic-source-edit-preserves-solid",
+                       "expected":  "accept",
+                       "before_authoring_sha256":  "6be16d9c0894ffbe46f7f41ad419f25c26eee936f272479f44074cfbf104988e",
+                       "observed":  "accept",
+                       "exact_bodies":  [
+                                            {
+                                                "feature":  "Cylinder",
+                                                "solids":  1,
+                                                "area_mm2":  534.07075111026518,
+                                                "volume_mm3":  942.47779607693872,
+                                                "brep_base64_sha256":  "29156383774ac52e87f3186560470ac5e6991dc43f9245d365e5be317744f328",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Checked cylinder",
+                                                "solids":  1,
+                                                "area_mm2":  534.07075111026518,
+                                                "volume_mm3":  942.47779607693872,
+                                                "brep_base64_sha256":  "6a0f226b58dd9c7ec9a4dd8b97ee2074b8e726881352a18d35b3122cc9dc6666",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Curved side",
+                                                "solids":  0,
+                                                "area_mm2":  376.9911184307752,
+                                                "volume_mm3":  null,
+                                                "brep_base64_sha256":  "fe1c19b4c39d1bf8eba539ba2b207709152a5457035fa83785ea8081c9d69a8a",
+                                                "brep_valid":  true
+                                            }
+                                        ],
+                       "measurements":  [
+                                            {
+                                                "feature":  "Checked cylinder",
+                                                "area_mm2":  534.07075111026518,
+                                                "volume_mm3":  942.47779607693872,
+                                                "bounds_mm":  [
+                                                                  -5,
+                                                                  -5,
+                                                                  0,
+                                                                  5,
+                                                                  5,
+                                                                  12
+                                                              ],
+                                                "report_metrics":  [
+                                                                       {
+                                                                           "path":  "after.periodic_seam_edges",
+                                                                           "observed":  1
+                                                                       },
+                                                                       {
+                                                                           "path":  "geometry_deviation_mm",
+                                                                           "observed":  0
+                                                                       }
+                                                                   ]
+                                            }
+                                        ],
+                       "native_readback_recomputed":  true,
+                       "passed":  true,
+                       "after_authoring_sha256":  "5be51fa6c5f7cc9238d437db0a65a8d622eedb1c55d23c1231ccf90e09abf885",
+                       "revision":  2
+                   },
+                   {
+                       "case":  "periodic-solid-and-planar-normal-boundary",
+                       "family":  "surface-repair-periodic",
+                       "variant":  {
+                                       "s":  2
+                                   },
+                       "trial":  "baseline",
+                       "expected":  "accept",
+                       "before_authoring_sha256":  "48795ffd67fdefead27814776ab44c30a6553fec220603fb3ce18fdffe3ef1ea",
+                       "observed":  "accept",
+                       "exact_bodies":  [
+                                            {
+                                                "feature":  "Cylinder",
+                                                "solids":  1,
+                                                "area_mm2":  1608.495438637975,
+                                                "volume_mm3":  4825.4863159139259,
+                                                "brep_base64_sha256":  "6360a821a78edd63d08591a7e32a927ab5a82cf1bab79bfc75b466ca7b1af924",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Checked cylinder",
+                                                "solids":  1,
+                                                "area_mm2":  1608.495438637975,
+                                                "volume_mm3":  4825.4863159139259,
+                                                "brep_base64_sha256":  "ef0f3431871ac58b50c6e966ff3eb431af186b80cfedec472fabea56064566c8",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Curved side",
+                                                "solids":  0,
+                                                "area_mm2":  1206.3715789784806,
+                                                "volume_mm3":  null,
+                                                "brep_base64_sha256":  "ce092a19814fd4f72769d4685c76ed69b2bc4e04f89d6b6ee9ba78612c7d94fb",
+                                                "brep_valid":  true
+                                            }
+                                        ],
+                       "measurements":  [
+                                            {
+                                                "feature":  "Checked cylinder",
+                                                "area_mm2":  1608.495438637975,
+                                                "volume_mm3":  4825.4863159139259,
+                                                "bounds_mm":  [
+                                                                  -8,
+                                                                  -8,
+                                                                  0,
+                                                                  8,
+                                                                  8,
+                                                                  24
+                                                              ],
+                                                "report_metrics":  [
+                                                                       {
+                                                                           "path":  "changed",
+                                                                           "observed":  false
+                                                                       },
+                                                                       {
+                                                                           "path":  "before.periodic_seam_edges",
+                                                                           "observed":  1
+                                                                       },
+                                                                       {
+                                                                           "path":  "after.periodic_seam_edges",
+                                                                           "observed":  1
+                                                                       },
+                                                                       {
+                                                                           "path":  "all_solids_preserved",
+                                                                           "observed":  true
+                                                                       }
+                                                                   ]
+                                            }
+                                        ],
+                       "native_readback_recomputed":  true,
+                       "passed":  true,
+                       "after_authoring_sha256":  "52b939da157b731c9775d7196b97294b92dd7531f192844cec2a82590aeba66f",
+                       "revision":  1
+                   },
+                   {
+                       "case":  "periodic-solid-and-planar-normal-boundary",
+                       "family":  "surface-repair-periodic",
+                       "variant":  {
+                                       "s":  2
+                                   },
+                       "trial":  "reject-global-normal-on-periodic-face",
+                       "expected":  "reject",
+                       "before_authoring_sha256":  "52b939da157b731c9775d7196b97294b92dd7531f192844cec2a82590aeba66f",
+                       "observed":  "reject",
+                       "error_code":  "EVALUATION_FAILED",
+                       "error":  "Feature #4: OCCT: repair_unsupported_normal: A periodic or curved face has no single global normal",
+                       "document_unchanged":  true,
+                       "passed":  true,
+                       "after_authoring_sha256":  "52b939da157b731c9775d7196b97294b92dd7531f192844cec2a82590aeba66f",
+                       "revision":  1
+                   },
+                   {
+                       "case":  "periodic-solid-and-planar-normal-boundary",
+                       "family":  "surface-repair-periodic",
+                       "variant":  {
+                                       "s":  2
+                                   },
+                       "trial":  "periodic-source-edit-preserves-solid",
+                       "expected":  "accept",
+                       "before_authoring_sha256":  "52b939da157b731c9775d7196b97294b92dd7531f192844cec2a82590aeba66f",
+                       "observed":  "accept",
+                       "exact_bodies":  [
+                                            {
+                                                "feature":  "Cylinder",
+                                                "solids":  1,
+                                                "area_mm2":  2136.2830044410607,
+                                                "volume_mm3":  7539.8223686155097,
+                                                "brep_base64_sha256":  "2b530c75548156cd88e44418a3be573fc61afe742e2b2c47e3b709f0973bd4dd",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Checked cylinder",
+                                                "solids":  1,
+                                                "area_mm2":  2136.2830044410607,
+                                                "volume_mm3":  7539.8223686155097,
+                                                "brep_base64_sha256":  "817b040eb388cd9eac0930a65178ac585d46f06ca2919c2822f12e0f1ee69ab0",
+                                                "brep_valid":  true
+                                            },
+                                            {
+                                                "feature":  "Curved side",
+                                                "solids":  0,
+                                                "area_mm2":  1507.9644737231008,
+                                                "volume_mm3":  null,
+                                                "brep_base64_sha256":  "3da3fb502ae101e8e018016ea2c2e75eff06b5f68f82e9e25fe0f558dac7732b",
+                                                "brep_valid":  true
+                                            }
+                                        ],
+                       "measurements":  [
+                                            {
+                                                "feature":  "Checked cylinder",
+                                                "area_mm2":  2136.2830044410607,
+                                                "volume_mm3":  7539.8223686155097,
+                                                "bounds_mm":  [
+                                                                  -10,
+                                                                  -10,
+                                                                  0,
+                                                                  10,
+                                                                  10,
+                                                                  24
+                                                              ],
+                                                "report_metrics":  [
+                                                                       {
+                                                                           "path":  "after.periodic_seam_edges",
+                                                                           "observed":  1
+                                                                       },
+                                                                       {
+                                                                           "path":  "geometry_deviation_mm",
+                                                                           "observed":  0
+                                                                       }
+                                                                   ]
+                                            }
+                                        ],
+                       "native_readback_recomputed":  true,
+                       "passed":  true,
+                       "after_authoring_sha256":  "0e613233979047162c7011e3c762d3269086ea113ffb24a6650d2fb4dff34b00",
+                       "revision":  2
+                   }
+               ]
+}

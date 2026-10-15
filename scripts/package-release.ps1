@@ -2,6 +2,7 @@ param(
     [string]$RuntimeDirectory = 'out/native-release/Release',
     [string]$OutputDirectory = 'out/releases',
     [string]$MsvcRuntimeDirectory,
+    [string]$CompilerDirectory,
     [string]$OcctSourceDirectory = 'out/deps/occt/cache/OCCT-8_0_1',
     [switch]$SkipUpdateManifest
 )
@@ -12,8 +13,16 @@ foreach ($variable in @('RuntimeDirectory', 'OutputDirectory', 'OcctSourceDirect
     if (-not [IO.Path]::IsPathRooted($value)) { Set-Variable -Name $variable -Value (Join-Path $repository $value) }
 }
 Import-Module (Join-Path $repository 'updates/Ark.Update.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'Ark.ReleaseEvidence.psm1') -Force
 $version = Get-ArkRuntimeVersion $RuntimeDirectory
-if (-not $MsvcRuntimeDirectory) {
+$llvmRuntime = Test-Path -LiteralPath (Join-Path $RuntimeDirectory 'libc++.dll') -PathType Leaf
+if ($llvmRuntime) {
+    if (-not $CompilerDirectory) { throw 'Supply -CompilerDirectory for this LLVM-MinGW runtime so its matching redistribution notices are preserved.' }
+    if (-not [IO.Path]::IsPathRooted($CompilerDirectory)) { $CompilerDirectory = Join-Path $repository $CompilerDirectory }
+    if (-not (Test-Path -LiteralPath (Join-Path $CompilerDirectory 'LICENSE.TXT') -PathType Leaf)) { throw 'LLVM-MinGW compiler license is missing.' }
+    $mingwNotices = @(Get-ChildItem -LiteralPath (Join-Path $CompilerDirectory 'x86_64-w64-mingw32/share/mingw32') -Filter 'COPYING*' -File)
+    if (-not $mingwNotices.Count) { throw 'The x64 MinGW runtime redistribution notices are missing.' }
+} elseif (-not $MsvcRuntimeDirectory) {
     $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
     if (Test-Path -LiteralPath $vswhere) {
         $visualStudio = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
@@ -21,7 +30,7 @@ if (-not $MsvcRuntimeDirectory) {
         if ($redistributables.Count) { $MsvcRuntimeDirectory = $redistributables[0].FullName }
     }
 }
-if (-not $MsvcRuntimeDirectory) { throw 'Supply -MsvcRuntimeDirectory with the licensed x64 Visual C++ app-local runtime from the build toolchain.' }
+if (-not $llvmRuntime -and -not $MsvcRuntimeDirectory) { throw 'Supply -MsvcRuntimeDirectory with the licensed x64 Visual C++ app-local runtime from the build toolchain.' }
 [IO.Directory]::CreateDirectory($OutputDirectory) | Out-Null
 $staging = Assert-ArkChildPath $OutputDirectory (Join-Path $OutputDirectory ('package-' + [guid]::NewGuid().ToString('N')))
 [IO.Directory]::CreateDirectory($staging) | Out-Null
@@ -42,11 +51,13 @@ try {
         Copy-Item -LiteralPath (Join-Path $repository 'docs/AGENT_BENCHMARK.md') -Destination (Join-Path $staging 'AGENT_BENCHMARK.md')
     }
     Get-ChildItem -LiteralPath $RuntimeDirectory -Filter '*.dll' -File | ForEach-Object { Assert-ArkNoReparsePoint $RuntimeDirectory $_.FullName; Copy-Item -LiteralPath $_.FullName -Destination $staging }
-    foreach ($name in @('vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll', 'concrt140.dll')) {
-        if (-not (Test-Path -LiteralPath (Join-Path $MsvcRuntimeDirectory $name))) { throw "Visual C++ runtime is missing $name." }
-        Copy-Item -LiteralPath (Join-Path $MsvcRuntimeDirectory $name) -Destination $staging -Force
+    if (-not $llvmRuntime) {
+        foreach ($name in @('vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll', 'concrt140.dll')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $MsvcRuntimeDirectory $name))) { throw "Visual C++ runtime is missing $name." }
+            Copy-Item -LiteralPath (Join-Path $MsvcRuntimeDirectory $name) -Destination $staging -Force
+        }
+        Get-ChildItem -LiteralPath $MsvcRuntimeDirectory -Filter '*.dll' -File | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $staging -Force }
     }
-    Get-ChildItem -LiteralPath $MsvcRuntimeDirectory -Filter '*.dll' -File | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $staging -Force }
     foreach ($directory in @('assets', 'updates')) {
         $sourceRoot = if ($directory -eq 'updates') { $repository } else { $RuntimeDirectory }
         $source = Join-Path $sourceRoot $directory
@@ -66,6 +77,10 @@ try {
     Copy-Item -LiteralPath (Join-Path $repository 'docs/schemas/ark-bom-v1.schema.json') -Destination $contracts
     $licenses = Join-Path $staging 'licenses'
     [IO.Directory]::CreateDirectory($licenses) | Out-Null
+    if ($llvmRuntime) {
+        Copy-Item -LiteralPath (Join-Path $CompilerDirectory 'LICENSE.TXT') -Destination (Join-Path $licenses 'LLVM-Apache-exception.txt')
+        foreach ($notice in $mingwNotices) { $noticeName = if ($notice.Extension -eq '.txt') { $notice.Name } else { $notice.Name + '.txt' }; Copy-Item -LiteralPath $notice.FullName -Destination (Join-Path $licenses $noticeName) }
+    }
     Copy-Item -LiteralPath (Join-Path $repository 'LICENSE') -Destination $staging
     Copy-Item -LiteralPath (Join-Path $repository 'NOTICE') -Destination $staging
     # The versioned local installer retains licenses/ as a unit. Keep ARK's
@@ -109,7 +124,10 @@ it is for manual evaluation and is excluded from the stable automatic updater.
     $name = "ark-windows-x64-$version.zip"
     $archive = Join-Path $OutputDirectory $name
     if (Test-Path -LiteralPath $archive) { throw "Package already exists: $archive. Use a new output directory or a new version." }
+    $evidence = Join-Path $staging 'release-evidence'
+    New-ArkReleaseEvidence $repository $staging $evidence -UseRuntimeIdentity:$SkipUpdateManifest | Out-Null
     Compress-ArkPackage $staging $archive
+    New-ArkArtifactReceipt $archive $evidence ($archive + '.provenance.json')
     $info = Get-Item -LiteralPath $archive
     if (-not $SkipUpdateManifest) {
         $manifest = @{ schema=1; product='ARK'; version=$version; platform='windows-x64'; package=@{ name=$name; url="https://github.com/CenturyMesh/Ark/releases/download/v$version/$name"; size=$info.Length; sha256=(Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() } }

@@ -1,5 +1,10 @@
 # Isolated design containers — 023B
 
+029B extends this contract with scoped configuration/pin ownership and
+workspace-local loading in container v2, selecting source 41. Legacy v1 remains
+readable. See the current [assembly scaling contract](ASSEMBLY_SCALING_029B.md)
+for the added boundaries and measured evidence.
+
 Roadmap **B.04** and **D.03**: partial local scope. A container is an existing
 assembly group (`AssemblyNode.feature == 0`). Its ordinary parent/child hierarchy,
 part definitions, occurrence IDs and patterns remain the assembly authority.

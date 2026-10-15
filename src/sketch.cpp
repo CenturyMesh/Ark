@@ -215,7 +215,21 @@ void evaluateSketch(NamedSketch& ns,const ExprEnv& env){
         bakeSketchOffsets(ns.sk,env);
         resolveSketchCorners(ns.sk,env);
         ns.rank=diagnostics.rank;ns.freeDofs=diagnostics.variables-diagnostics.rank;
-        if(!std::isfinite(ns.residual)||ns.residual>1e-6)throw std::runtime_error("Conflicting constraints or solver failed to converge");
+        if(!std::isfinite(ns.residual)||ns.residual>1e-6){
+            std::string message="Conflicting constraints or solver failed to converge";
+            // Diagnose the attempted candidate, never change or remove a
+            // relation to make a failed solve appear successful.
+            const auto report=diagnoseSketch(ns.sk);int shown=0;
+            for(const auto& row:report.find("constraints")->arr)if(row.find("violated")->b){
+                if(shown++==4){message+="; more candidates in sketch_diagnose diagnostics";break;}
+                message+=(shown==1?": ":"; ")+std::string("constraint ")+std::to_string((int)row.find("index")->num+1);
+                if(auto* id=row.find("id"))message+=" ["+id->str+"]";
+                message+=" "+row.find("type")->str;
+                for(const auto& entity:row.find("entities")->arr)if(!entity.find("name")->str.empty())message+=" / "+entity.find("name")->str;
+            }
+            message+=". Review targets and driven expressions; no constraints were removed";
+            throw std::runtime_error(message);
+        }
         for(auto& e:ns.sk.ents){
             for(auto x:e.dof)if(!std::isfinite(x)||std::abs(x)>1e7)throw std::runtime_error("Sketch coordinate outside finite bounds");
             if(drivenKind(e.kind)&&e.dof.empty())continue;

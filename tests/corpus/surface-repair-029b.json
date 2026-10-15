@@ -1,0 +1,50 @@
+{
+  "schema":"ark.native.authoring.corpus.v1",
+  "seed":19020,
+  "authorization":"Repository-authored synthetic geometry only; no user documents.",
+  "variants":[{"s":0.5},{"s":1},{"s":2}],
+  "fixed_geometry_tolerance_mm":0.000001,
+  "scope":"B.03 explicit orientation repair and exact producer-custody checks, planar normal intent, downstream thickening and atomic typed rejection; arbitrary gap healing, self-intersection repair and manufacturing qualification remain outside scope.",
+  "cases":[
+    {
+      "id":"editable-planar-orientation-and-thicken",
+      "family":"surface-repair",
+      "parameters":{"W":"10*s","D":"8*s","H":"6*s","T":"2*s","N":1},
+      "setup":[
+        {"op":"feature.add","name":"Source box","type":"native_solid","native":{"op":"box"},"p":{"width":"W","depth":"D","height":"H"}},
+        {"op":"feature.add","name":"Original underside","type":"surface_edit","native":{"op":"extract_face","face":"z_min"},"p":{},"inputs":["Source box"]},
+        {"op":"feature.add","name":"Oriented surface","type":"surface_edit","native":{"op":"repair","mode":"orientation","normal":[0,0,"N"]},"p":{},"inputs":["Original underside"]},
+        {"op":"feature.add","name":"Thickened repaired surface","type":"thicken","p":{"thickness":"T"},"inputs":["Oriented surface"]}
+      ],
+      "setup_checks":[
+        {"feature":"Oriented surface","solids":0,"area":"W*D","report":[{"path":"changed","equals":true},{"path":"geometry_deviation_mm","equals":0},{"path":"tolerances_preserved","equals":true},{"path":"before.free_edges","equals":4},{"path":"after.free_edges","equals":4}]},
+        {"feature":"Thickened repaired surface","solids":1,"volume":"W*D*T","bounds":[0,0,0,"W","D","T"]}
+      ],
+      "trials":[
+        {"id":"edit-explicit-normal-intent","expected":"accept","commands":[{"op":"param.set","name":"N","expr":-1}],"checks":[{"feature":"Oriented surface","area":"W*D","report":[{"path":"changed","equals":false},{"path":"all_faces_preserved","equals":true}]},{"feature":"Thickened repaired surface","solids":1,"volume":"W*D*T","bounds":[0,0,"-T","W","D",0]}]},
+        {"id":"reject-zero-normal-atomically","expected":"reject","commands":[{"op":"param.set","name":"N","expr":0}],"expected_codes":["EVALUATION_FAILED","INVALID_COMMAND","SURFACE_REPAIR_INVALID_REQUEST"],"error_contains":"repair_invalid_request"},
+        {"id":"source-dimension-recomputes-repair","expected":"accept","commands":[{"op":"param.set","name":"W","expr":"12*s"}],"checks":[{"feature":"Oriented surface","area":"W*D","report":[{"path":"before.faces","equals":1},{"path":"after.faces","equals":1}]},{"feature":"Thickened repaired surface","solids":1,"volume":"W*D*T","bounds":[0,0,"-T","W","D",0]}]},
+        {"id":"restore-positive-normal","expected":"accept","commands":[{"op":"param.set","name":"N","expr":1}],"checks":[{"feature":"Oriented surface","report":[{"path":"changed","equals":true}]},{"feature":"Thickened repaired surface","solids":1,"volume":"W*D*T","bounds":[0,0,0,"W","D","T"]}]},
+        {"id":"reject-normal-that-rotates-geometry","expected":"reject","commands":[{"op":"feature.edit","id":"Oriented surface","native":{"op":"repair","mode":"orientation","normal":[1,0,1]}}],"expected_codes":["EVALUATION_FAILED","INVALID_COMMAND","SURFACE_REPAIR_NORMAL_MISMATCH"],"error_contains":"repair_normal_mismatch"},
+        {"id":"reject-generic-heal-mode","expected":"reject","commands":[{"op":"feature.edit","id":"Oriented surface","native":{"op":"repair","mode":"heal","normal":[0,0,1]}}],"expected_codes":["EVALUATION_FAILED","INVALID_COMMAND","SURFACE_REPAIR_UNSUPPORTED_MODE"]},
+        {"id":"reject-tolerance-widening","expected":"reject","commands":[{"op":"feature.edit","id":"Oriented surface","native":{"op":"repair","mode":"orientation","normal":[0,0,1],"tolerance":0.01}}],"expected_codes":["EVALUATION_FAILED","INVALID_COMMAND","SURFACE_REPAIR_INVALID_REQUEST"]},
+        {"id":"reject-degenerate-thickness-after-repair","expected":"reject","commands":[{"op":"param.set","name":"T","expr":0}],"expected_codes":["EVALUATION_FAILED","INVALID_COMMAND"]}
+      ]
+    },
+    {
+      "id":"periodic-solid-and-planar-normal-boundary",
+      "family":"surface-repair-periodic",
+      "parameters":{"R":"4*s","H":"12*s"},
+      "setup":[
+        {"op":"feature.add","name":"Cylinder","type":"native_solid","native":{"op":"cylinder"},"p":{"radius":"R","height":"H"}},
+        {"op":"feature.add","name":"Checked cylinder","type":"surface_edit","native":{"op":"repair","mode":"orientation"},"p":{},"inputs":["Cylinder"]},
+        {"op":"feature.add","name":"Curved side","type":"surface_edit","native":{"op":"extract_face","face":"side"},"p":{},"inputs":["Cylinder"]}
+      ],
+      "setup_checks":[{"feature":"Checked cylinder","solids":1,"volume":"pi*R*R*H","report":[{"path":"changed","equals":false},{"path":"before.periodic_seam_edges","equals":1},{"path":"after.periodic_seam_edges","equals":1},{"path":"all_solids_preserved","equals":true}]}],
+      "trials":[
+        {"id":"reject-global-normal-on-periodic-face","expected":"reject","commands":[{"op":"feature.add","name":"Unsupported curved repair","type":"surface_edit","native":{"op":"repair","mode":"orientation","normal":[0,0,1]},"p":{},"inputs":["Curved side"]}],"expected_codes":["EVALUATION_FAILED","INVALID_COMMAND","SURFACE_REPAIR_UNSUPPORTED_NORMAL"],"error_contains":"repair_unsupported_normal"},
+        {"id":"periodic-source-edit-preserves-solid","expected":"accept","commands":[{"op":"param.set","name":"R","expr":"5*s"}],"checks":[{"feature":"Checked cylinder","solids":1,"volume":"pi*R*R*H","report":[{"path":"after.periodic_seam_edges","equals":1},{"path":"geometry_deviation_mm","equals":0}]}]}
+      ]
+    }
+  ]
+}

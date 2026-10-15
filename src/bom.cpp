@@ -1,5 +1,8 @@
 #include "ark/bom.hpp"
+#include "ark/history_authoring.hpp"
 #include "ark/assembly_io.hpp"
+#include "ark/assembly_authoring.hpp"
+#include "ark/history_authoring.hpp"
 #include "ark/iteration_history.hpp"
 #include "ark/native_features.hpp"
 #include "ark/serialize.hpp"
@@ -65,16 +68,18 @@ V partMetadataSchema(){
 
 V inspectBom(const Document& d,u64 revision){
     V out=V::makeObj(),items=V::makeArr(),occurrences=V::makeArr(),groups=V::makeArr(),issues=V::makeArr(),unplaced=V::makeArr();
+    out.set("history_tip",V::makeNum((double)d.historyTip));
+    out.set("evaluation_scope",V::makeStr(d.assembly.empty()?"active history prefix terminal definitions":"all authored physical occurrences; loaded/history_active flags distinguish evaluated geometry without changing quantities"));
     std::map<u64,size_t> quantities;std::vector<AssemblyPlacement> placements;std::string error;
     if(!d.assembly.empty())require(resolveAssembly(d,placements,error),error);
     else{
-        std::set<u64> consumed;for(const auto& f:d.features)if(!f.suppressed&&featureConsumesInputBodies(f))for(u64 id:f.inputs)consumed.insert(id);
+        const auto consumed=consumedFeatureInputs(d);
         for(const auto& body:d.evalBodies)if(const auto* f=d.find(body.id);f&&!f->suppressed&&!consumed.count(f->id)&&!isCurveFeature(f->type)&&f->type!=FeatureType::Suspension){AssemblyPlacement p;p.feature=f->id;p.name=f->name;p.world=Mat4::identity();p.visible=true;placements.push_back(p);}
     }
     for(const auto& node:d.assembly)if(!node.feature){V group=V::makeObj();group.set("id",V::makeStr(identity(d,"node",node.id)));group.set("node",V::makeNum((double)node.id));group.set("parent",V::makeNum((double)node.parent));group.set("name",V::makeStr(node.name));groups.arr.push_back(group);}
     for(const auto& p:placements){const auto* feature=d.find(p.feature);require(feature&&!feature->suppressed,"BOM occurrence references a missing or suppressed feature");++quantities[p.feature];V occurrence=V::makeObj();
         occurrence.set("id",V::makeStr(identity(d,p.node?"node":"standalone",p.node?p.node:p.feature)+"/copy/"+std::to_string(p.copy)));occurrence.set("part_id",V::makeStr(identity(d,"feature",p.feature)));occurrence.set("feature",V::makeNum((double)p.feature));occurrence.set("node",V::makeNum((double)p.node));occurrence.set("copy",V::makeNum(p.copy));occurrence.set("name",V::makeStr(p.name));occurrence.set("visible",V::makeBool(p.visible));
-        u64 parent=0;for(const auto& n:d.assembly)if(n.id==p.node)parent=n.parent;occurrence.set("parent",V::makeNum((double)parent));occurrences.arr.push_back(occurrence);
+        u64 parent=0;bool authoredVisible=true;for(const auto& n:d.assembly)if(n.id==p.node){parent=n.parent;authoredVisible=n.visible;}occurrence.set("parent",V::makeNum((double)parent));occurrence.set("loaded",V::makeBool(!p.node||isAssemblyNodeLoaded(d,p.node)));occurrence.set("history_active",V::makeBool(featureWithinHistory(d,p.feature)));occurrence.set("authored_visible",V::makeBool(authoredVisible));occurrences.arr.push_back(occurrence);
     }
     size_t fasteners=0;std::map<std::string,u64> partNumbers;
     for(const auto& [id,quantity]:quantities){const auto& feature=*d.find(id);const V meta=effectiveMetadata(feature);V row=V::makeObj(),missing=V::makeArr();row.set("part_id",V::makeStr(identity(d,"feature",id)));row.set("feature",V::makeNum((double)id));row.set("name",V::makeStr(feature.name));row.set("quantity",V::makeNum((double)quantity));row.set("unit",V::makeStr("each"));row.set("metadata",meta);row.set("metadata_authority",V::makeStr("caller_declared; source custody is separate"));row.set("manufacturing_route",V::makeStr(feature.manufacturingRoute));row.set("geometry_kind",V::makeStr(featureTypeName(feature.type)));

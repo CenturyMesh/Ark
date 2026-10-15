@@ -22,6 +22,9 @@ std::string canonicalText(V v){canonical(v);return v.dump();}
 std::string digest(const V& v){return iterationSha256(canonicalText(v));}
 u64 id(const V& v){if(v.t!=V::Num||!std::isfinite(v.num)||v.num<0||v.num>9007199254740991.0||std::floor(v.num)!=v.num)reject("CONTAINER_INVALID_ID","Expected an exact nonnegative integer ID");return (u64)v.num;}
 V number(u64 value){return V::makeNum((double)value);}
+void guardGlobalAuthoringBoundary(const V& root){
+    if(root.find("history_tip"))reject("CONTAINER_GLOBAL_AUTHORING_BOUNDARY","Resume full history before isolated checkout/merge; a global history tip cannot be remapped to a subset");
+}
 void guardAppearanceBoundary(const V& root){
     bool unsupported=!field(root,"image_assets").arr.empty()||!field(root,"stamps").arr.empty();
     for(const auto& feature:field(root,"features").arr)unsupported|=!field(feature,"face_appearances").arr.empty()||!field(field(feature,"appearance"),"texture_asset").asStr().empty();
@@ -33,7 +36,7 @@ V sourceRoot(const Document& doc){V root;if(!arkjson::parse(documentToJson(doc,f
 std::string rowKey(const char* collection,const V& row){return std::string(collection)+":"+((std::string(collection)=="features"||std::string(collection)=="assembly"||std::string(collection)=="mates")?std::to_string(id(field(row,"id"))):field(row,"name").asStr());}
 using Rows=std::map<std::string,V>;
 const V* findRow(const Rows& source,const std::string& key);
-Rows rows(const V& root){Rows out;for(const auto* collection:collections)for(const auto& row:field(root,collection).arr)out.emplace(rowKey(collection,row),row);return out;}
+Rows rows(const V& root){Rows out;for(const auto* collection:collections)for(const auto& row:field(root,collection).arr)out.emplace(rowKey(collection,row),row);for(const auto& row:field(root,"assembly_configurations").arr)out.emplace("assembly_configurations:"+field(row,"name").asStr(),row);for(const auto& row:field(root,"assembly_external_references").arr)out.emplace("assembly_external_references:"+std::to_string(id(field(row,"feature"))),row);return out;}
 Keys keySet(const V& value){Keys result;for(const auto& row:value.arr){if(row.t!=V::Str)reject("CONTAINER_MANIFEST_INVALID","Ownership entries must be strings");if(!result.insert(row.str).second)reject("CONTAINER_MANIFEST_INVALID","Duplicate ownership entry");}return result;}
 V keyArray(const Keys& keys){V out=V::makeArr();for(const auto& key:keys)out.arr.push_back(V::makeStr(key));return out;}
 bool numericCollection(const std::string& key){return key.rfind("features:",0)==0||key.rfind("assembly:",0)==0||key.rfind("mates:",0)==0;}
@@ -45,9 +48,10 @@ struct Graph {
     Rows all;
     std::map<std::string,Keys> names;
     std::map<std::string,Keys> edges;
-    explicit Graph(const V& root):all(rows(root)){
-        for(const auto& kv:all){const auto name=field(kv.second,"name").asStr();if(!name.empty())names[name].insert(kv.first);}
-        for(const auto& kv:all){Keys refs;scan(kv.second,"",refs);if(kv.first.rfind("mates:",0)==0)for(const auto* endpoint:{"a","b"}){const auto node="assembly:"+std::to_string(id(field(kv.second,endpoint)));if(all.count(node))refs.insert(node);}refs.erase(kv.first);edges[kv.first]=std::move(refs);}
+    explicit Graph(const V& root,bool recipes=true):all(rows(root)){
+        if(!recipes){for(auto it=all.begin();it!=all.end();){if(it->first.rfind("assembly_configurations:",0)==0||it->first.rfind("assembly_external_references:",0)==0)it=all.erase(it);else ++it;}}
+        for(const auto& kv:all){const auto name=field(kv.second,"name").asStr();if(!name.empty()&&kv.first.rfind("assembly_configurations:",0)!=0)names[name].insert(kv.first);}
+        for(const auto& kv:all){Keys refs;if(kv.first.rfind("assembly_external_references:",0)==0)refs.insert("features:"+std::to_string(id(field(kv.second,"feature"))));else scan(kv.second,"",refs);if(kv.first.rfind("mates:",0)==0)for(const auto* endpoint:{"a","b"}){const auto node="assembly:"+std::to_string(id(field(kv.second,endpoint)));if(all.count(node))refs.insert(node);}if(kv.first.rfind("assembly_configurations:",0)==0){for(const auto& p:field(kv.second,"parameters").obj)refs.insert("params:"+p.first);for(const auto& p:field(kv.second,"visibility").obj)refs.insert("assembly:"+p.first);}refs.erase(kv.first);edges[kv.first]=std::move(refs);}
     }
     void named(const std::string& text,Keys& refs) const {
         auto found=names.find(text);if(found!=names.end())refs.insert(found->second.begin(),found->second.end());
@@ -66,11 +70,12 @@ struct Graph {
 u64 containerId(const Document& doc,const V& args){const auto& selection=args.find("node")?field(args,"node"):field(args,"container");u64 result=0;if(selection.t==V::Num)result=id(selection);else if(selection.t==V::Str){for(const auto& node:doc.assembly)if(node.name==selection.str){if(result)reject("CONTAINER_AMBIGUOUS","Container name is ambiguous; use its ID");result=node.id;}}else reject("CONTAINER_REQUIRED","Pass an existing assembly group as node ID or unique name");for(const auto& node:doc.assembly)if(node.id==result){if(node.feature)reject("CONTAINER_NOT_GROUP","A container must be an existing feature=0 assembly group");return result;}reject("CONTAINER_MISSING","Assembly group not found");}
 void expected(u64 revision,const V& args){const auto* observed=args.find("expected_revision");if(!observed)reject("CONTAINER_REVISION_REQUIRED","Read doc_info and pass expected_revision");if(id(*observed)!=revision)reject("CONTAINER_REVISION_CONFLICT","The observed document revision is stale");}
 struct Checkout {V root,manifest;Keys editable,readonly;};
+Keys configurationTargets(const V& recipe){Keys result;for(const auto& p:field(recipe,"parameters").obj)result.insert("params:"+p.first);for(const auto& p:field(recipe,"visibility").obj)result.insert("assembly:"+p.first);return result;}
 std::set<u64> occurrenceFeatures(const Document& doc,const AssemblyNode& node){std::set<u64> result;if(node.feature)result.insert(node.feature);if(node.pattern.active)for(int slot:assemblyPatternCopySlots(doc,node)){const auto feature=assemblyPatternCopyFeature(doc,node,slot);if(feature)result.insert(feature);}return result;}
-Checkout makeCheckout(const Document& doc,u64 revision,u64 group){
+Checkout makeCheckout(const Document& doc,u64 revision,u64 group,bool legacy=false){
     if(doc.designContainerCheckout.t==V::Obj)reject("CONTAINER_NESTED_CHECKOUT","Checkout from the owning source document, not from another checkout");
     if(doc.skeleton.t==V::Obj)reject("CONTAINER_SKELETON_BOUNDARY","Skeleton ownership is global; isolated checkout of that source is not supported");
-    const V source=sourceRoot(doc);Graph graph(source);std::set<u64> nodes{group};bool changed=true;
+    const V source=sourceRoot(doc);guardGlobalAuthoringBoundary(source);Graph graph(source,false);std::set<u64> nodes{group};bool changed=true;
     guardAppearanceBoundary(source);
     while(changed){changed=false;for(const auto& node:doc.assembly)if(nodes.count(node.parent)&&nodes.insert(node.id).second)changed=true;}
     Keys owned;for(const auto& node:doc.assembly)if(nodes.count(node.id)){owned.insert("assembly:"+std::to_string(node.id));for(u64 feature:occurrenceFeatures(doc,node))owned.insert("features:"+std::to_string(feature));}
@@ -91,21 +96,46 @@ Checkout makeCheckout(const Document& doc,u64 revision,u64 group){
     // Drawings and canvas source dependencies remain parent-owned and are never
     // created/copied as a side effect of isolated design work.
     for(const auto* collection:{"drawings","canvases"})for(const auto& row:field(source,collection).arr){Keys refs;graph.scan(row,"",refs);const auto closure=graph.closure(refs);outside.insert(closure.begin(),closure.end());}
+    // Parent-only configurations also consume expressions. Their referenced
+    // parameters stay readonly in the child even before that recipe is applied.
+    for(const auto& recipe:field(source,"assembly_configurations").arr){const auto targets=configurationTargets(recipe);bool retainedTarget=false;for(const auto& target:targets)retainedTarget|=retained.count(target)!=0;if(!retainedTarget){Keys refs;graph.scan(field(recipe,"parameters"),"",refs);const auto dependencies=graph.closure(refs);outside.insert(dependencies.begin(),dependencies.end());}}
     for(const auto& kv:graph.all)if((kv.first.rfind("features:",0)==0&&!owned.count(kv.first))||(!numericCollection(kv.first)&&!retained.count(kv.first))){const auto closure=graph.closure({kv.first});for(const auto& key:owned)if(key.rfind("features:",0)==0&&closure.count(key))reject("CONTAINER_EXTERNAL_CONSUMER","Outside source "+kv.first+" consumes an editable definition; expand the container or remove that dependency explicitly");}
     Checkout checkout;checkout.editable=owned;
     for(const auto& key:retained)if(!numericCollection(key)&&!outside.count(key))checkout.editable.insert(key);
     for(const auto& key:retained)if(!checkout.editable.count(key))checkout.readonly.insert(key);
     checkout.root=source;
     for(const auto* collection:collections){V subset=V::makeArr();for(const auto& row:field(source,collection).arr)if(retained.count(rowKey(collection,row)))subset.arr.push_back(row);checkout.root.set(collection,subset);}
+    // Recipes have their own ownership entries. An outside recipe remains in
+    // the owning source; a mixed recipe must be split explicitly by its author.
+    if(!legacy){const Graph recipeGraph(source);V configurations=V::makeArr(),pins=V::makeArr();
+    for(const auto& recipe:field(source,"assembly_configurations").arr){
+        const auto key="assembly_configurations:"+field(recipe,"name").asStr();const auto targets=configurationTargets(recipe);bool inside=false,outsideTarget=false;
+        for(const auto& target:targets){inside|=retained.count(target)!=0;outsideTarget|=retained.count(target)==0;}
+        if(!inside&&!targets.empty())continue;
+        if(outsideTarget)reject("CONTAINER_CONFIGURATION_BOUNDARY","Configuration "+field(recipe,"name").asStr()+" targets both retained and outside source; split it explicitly before checkout");
+        const auto refs=recipeGraph.closure(recipeGraph.edges.at(key));for(const auto& ref:refs)if(!retained.count(ref))reject("CONTAINER_CONFIGURATION_BOUNDARY","Configuration "+field(recipe,"name").asStr()+" depends on outside source "+ref);
+        bool writable=true;for(const auto& target:targets)writable&=checkout.editable.count(target)!=0;
+        (writable?checkout.editable:checkout.readonly).insert(key);configurations.arr.push_back(recipe);
+    }
+    for(const auto& pin:field(source,"assembly_external_references").arr){const auto feature="features:"+std::to_string(id(field(pin,"feature")));if(!retained.count(feature))continue;const auto key="assembly_external_references:"+std::to_string(id(field(pin,"feature")));(checkout.editable.count(feature)?checkout.editable:checkout.readonly).insert(key);pins.arr.push_back(pin);}
+    if(source.find("assembly_configurations"))checkout.root.set("assembly_configurations",configurations);
+    if(source.find("assembly_external_references"))checkout.root.set("assembly_external_references",pins);
+    // Load selection belongs to this independent workspace. Parent selection is
+    // source-hashed and never receives a child's visibility/evaluation scope.
+    V localRoots=V::makeArr();localRoots.arr.push_back(number(group));checkout.root.set("assembly_load_selection",localRoots);
+    checkout.root.set("version",number(41));
+    }
     erase(checkout.root,"drawings");erase(checkout.root,"canvases");erase(checkout.root,"skeleton");
     // No audit pointer/usage/history crosses documents. The child session starts
     // its own audit when it is opened and edited.
-    V manifest=V::makeObj();manifest.set("format",V::makeStr("ark.design-container.v1"));manifest.set("container_node",number(group));manifest.set("source_revision",number(revision));manifest.set("source_sha256",V::makeStr(digest(source)));manifest.set("baseline_sha256",V::makeStr(digest(checkout.root)));manifest.set("baseline",checkout.root);manifest.set("editable",keyArray(checkout.editable));manifest.set("readonly",keyArray(checkout.readonly));checkout.manifest=manifest;
+    V manifest=V::makeObj();manifest.set("format",V::makeStr(legacy?"ark.design-container.v1":"ark.design-container.v2"));if(!legacy)manifest.set("selection_policy",V::makeStr("workspace_local"));manifest.set("container_node",number(group));manifest.set("source_revision",number(revision));manifest.set("source_sha256",V::makeStr(digest(source)));manifest.set("baseline_sha256",V::makeStr(digest(checkout.root)));manifest.set("baseline",checkout.root);manifest.set("editable",keyArray(checkout.editable));manifest.set("readonly",keyArray(checkout.readonly));checkout.manifest=manifest;
     return checkout;
 }
 
 const V* findRow(const Rows& source,const std::string& key){auto it=source.find(key);return it==source.end()?nullptr:&it->second;}
 void guardWorkspace(const V& manifest,const V& current){
+    guardGlobalAuthoringBoundary(current);
+    if(field(manifest,"format").asStr()=="ark.design-container.v1"&&(current.find("assembly_load_selection")||!field(current,"assembly_configurations").arr.empty()||!field(current,"assembly_external_references").arr.empty()))reject("CONTAINER_GLOBAL_AUTHORING_BOUNDARY","Legacy container manifests cannot own configuration, loading or pin recipes");
     guardAppearanceBoundary(current);
     std::string error;if(!validateDesignContainerManifest(manifest,error))reject("CONTAINER_MANIFEST_INVALID",error);
     const auto& baseline=field(manifest,"baseline");const Rows old=rows(baseline),now=rows(current);const Keys editable=keySet(field(manifest,"editable")),readonly=keySet(field(manifest,"readonly"));
@@ -114,6 +144,9 @@ void guardWorkspace(const V& manifest,const V& current){
     const auto* rootNode=findRow(now,"assembly:"+std::to_string(group));const auto* oldRoot=findRow(old,"assembly:"+std::to_string(group));if(!rootNode||!oldRoot||id(field(*rootNode,"feature"))||canonicalText(field(*rootNode,"parent"))!=canonicalText(field(*oldRoot,"parent")))reject("CONTAINER_ROOT_BOUNDARY","The checked-out root group and its original parent are retained");
     for(const auto& row:field(current,"assembly").arr){const auto key=rowKey("assembly",row);if(!readonly.count(key)&&!nodes.count(id(field(row,"id"))))reject("CONTAINER_NODE_BOUNDARY","Editable/new occurrences must remain descendants of the checked-out group");}
     for(const auto& row:field(current,"mates").arr)if(!nodes.count(id(field(row,"a")))||!nodes.count(id(field(row,"b"))))reject("CONTAINER_MATE_BOUNDARY","Every child mate endpoint must remain in the editable group");
+    for(const auto& root:field(current,"assembly_load_selection").arr)if(!nodes.count(id(root)))reject("CONTAINER_LOAD_BOUNDARY","Workspace load roots must remain inside the editable container");
+    for(const auto& recipe:field(current,"assembly_configurations").arr){const auto key="assembly_configurations:"+field(recipe,"name").asStr();if(readonly.count(key))continue;for(const auto& target:configurationTargets(recipe))if(!now.count(target)||readonly.count(target))reject("CONTAINER_CONFIGURATION_BOUNDARY","Writable configuration cannot change missing or readonly source "+target);}
+    for(const auto& pin:field(current,"assembly_external_references").arr){const auto key="assembly_external_references:"+std::to_string(id(field(pin,"feature")));if(!readonly.count(key)&&readonly.count("features:"+std::to_string(id(field(pin,"feature")))))reject("CONTAINER_PIN_BOUNDARY","An external dependency pin cannot be changed through the child");}
     if(!field(current,"drawings").arr.empty()||!field(current,"canvases").arr.empty()||field(current,"skeleton").t==V::Obj)reject("CONTAINER_UNSUPPORTED_SOURCE","Drawings, canvases and global Skeleton source cannot be introduced through a container merge");
     for(const auto& kv:old)if(!editable.count(kv.first)&&!readonly.count(kv.first))reject("CONTAINER_MANIFEST_INVALID","A baseline source has no declared ownership");
     for(const auto& kv:now)if(!old.count(kv.first)&&numericCollection(kv.first)){
@@ -140,12 +173,15 @@ V featureCommand(const V& row,const V* before){V c=command(before?"feature.edit"
 bool validateDesignContainerManifest(const V& manifest,std::string& error){
     try{
         if(manifest.isNull())return true;
-        if(manifest.t!=V::Obj||field(manifest,"format").asStr()!="ark.design-container.v1")reject("CONTAINER_MANIFEST_INVALID","Unsupported checkout manifest");
-        const Keys fields{"format","container_node","source_revision","source_sha256","baseline_sha256","baseline","editable","readonly"};for(const auto& kv:manifest.obj)if(!fields.count(kv.first))reject("CONTAINER_MANIFEST_INVALID","Unknown checkout manifest field");
+        const bool scoped=field(manifest,"format").asStr()=="ark.design-container.v2";
+        if(manifest.t!=V::Obj||(!scoped&&field(manifest,"format").asStr()!="ark.design-container.v1"))reject("CONTAINER_MANIFEST_INVALID","Unsupported checkout manifest");
+        const Keys fields{"format","container_node","source_revision","source_sha256","baseline_sha256","baseline","editable","readonly","selection_policy"};for(const auto& kv:manifest.obj)if(!fields.count(kv.first))reject("CONTAINER_MANIFEST_INVALID","Unknown checkout manifest field");
+        if(scoped?field(manifest,"selection_policy").asStr()!="workspace_local":manifest.find("selection_policy")!=nullptr)reject("CONTAINER_MANIFEST_INVALID","Invalid workspace selection ownership");
         if(!id(field(manifest,"container_node")))reject("CONTAINER_MANIFEST_INVALID","Container ID must be positive");id(field(manifest,"source_revision"));
         for(const auto* key:{"source_sha256","baseline_sha256"}){const auto& value=field(manifest,key);if(value.t!=V::Str||value.str.size()!=64||value.str.find_first_not_of("0123456789abcdef")!=std::string::npos)reject("CONTAINER_MANIFEST_INVALID","Invalid SHA-256 digest");}
         const auto& baseline=field(manifest,"baseline");if(baseline.t!=V::Obj||baseline.find("design_container_checkout")||baseline.find("agent_activity")||baseline.find("usage")||baseline.find("iteration_history")||digest(baseline)!=field(manifest,"baseline_sha256").str)reject("CONTAINER_MANIFEST_INVALID","Retained baseline hash/source is invalid");
-        guardAppearanceBoundary(baseline);
+        guardAppearanceBoundary(baseline);guardGlobalAuthoringBoundary(baseline);
+        if(!scoped&&(baseline.find("assembly_load_selection")||!field(baseline,"assembly_configurations").arr.empty()||!field(baseline,"assembly_external_references").arr.empty()))reject("CONTAINER_GLOBAL_AUTHORING_BOUNDARY","Legacy container manifests cannot own configuration, loading or pin recipes");
         if(field(manifest,"editable").t!=V::Arr||field(manifest,"readonly").t!=V::Arr)reject("CONTAINER_MANIFEST_INVALID","Ownership arrays are required");const auto editable=keySet(field(manifest,"editable")),readonly=keySet(field(manifest,"readonly"));const auto all=rows(baseline);for(const auto& key:editable)if(!all.count(key)||readonly.count(key))reject("CONTAINER_MANIFEST_INVALID","Invalid/overlapping editable source");for(const auto& key:readonly)if(!all.count(key))reject("CONTAINER_MANIFEST_INVALID","Unknown readonly source");if(editable.size()+readonly.size()!=all.size())reject("CONTAINER_MANIFEST_INVALID","Every baseline source needs ownership");
         const auto key="assembly:"+std::to_string(id(field(manifest,"container_node")));const auto* group=findRow(all,key);if(!group||!editable.count(key)||id(field(*group,"feature")))reject("CONTAINER_MANIFEST_INVALID","Editable group identity is missing");
         return true;
@@ -175,12 +211,15 @@ V checkoutDesignContainer(const Document& doc,u64 revision,const V& args){
 
 V proposeDesignContainerMerge(const Document& doc,u64 revision,const V& args){
     expected(revision,args);if(doc.designContainerCheckout.t==V::Obj)reject("CONTAINER_MERGE_TARGET","Apply checkout changes to the owning source document");
-    guardAppearanceBoundary(sourceRoot(doc));if(const auto* root=args.find("document"))guardAppearanceBoundary(*root);
+    const auto source=sourceRoot(doc);guardGlobalAuthoringBoundary(source);guardAppearanceBoundary(source);if(const auto* root=args.find("document")){guardGlobalAuthoringBoundary(*root);guardAppearanceBoundary(*root);}
     Document child;std::string error;if(const auto* path=args.find("path")){if(path->t!=V::Str||path->str.empty()||!loadDocument(path->str.c_str(),child,&error))reject("CONTAINER_LOAD_FAILED",error.empty()?"Unable to load child .ark":error);}else if(const auto* root=args.find("document")){if(!documentFromJson(root->dump(),child,&error))reject("CONTAINER_LOAD_FAILED",error);}else reject("CONTAINER_PATH_REQUIRED","Pass path to an edited checkout .ark or its authored document");
     const auto& manifest=child.designContainerCheckout;if(manifest.t!=V::Obj)reject("CONTAINER_MANIFEST_REQUIRED","Child document has no retained checkout provenance");if(!validateDesignContainerManifest(manifest,error))reject("CONTAINER_MANIFEST_INVALID",error);
     if(id(field(manifest,"source_revision"))!=revision)reject("CONTAINER_REVISION_CONFLICT","The source changed since checkout; create a fresh checkout and explicitly transfer intended edits");if(digest(sourceRoot(doc))!=field(manifest,"source_sha256").str)reject("CONTAINER_SOURCE_CONFLICT","Source authoring differs from the retained checkout baseline");
-    const auto group=id(field(manifest,"container_node"));const auto authoritative=makeCheckout(doc,revision,group);if(!equal(authoritative.manifest,manifest))reject("CONTAINER_SCOPE_CONFLICT","Child baseline/ownership differs from the source-defined checkout scope");validateDesignContainerWorkspace(child);
+    const auto group=id(field(manifest,"container_node"));const auto authoritative=makeCheckout(doc,revision,group,field(manifest,"format").asStr()=="ark.design-container.v1");if(!equal(authoritative.manifest,manifest))reject("CONTAINER_SCOPE_CONFLICT","Child baseline/ownership differs from the source-defined checkout scope");validateDesignContainerWorkspace(child);
     const auto current=sourceRoot(child),baseline=field(manifest,"baseline"),parent=sourceRoot(doc);const auto childHash=digest(current);if(const auto* reviewed=args.find("expected_child_sha256");reviewed&&(reviewed->t!=V::Str||reviewed->str!=childHash))reject("CONTAINER_CHILD_CONFLICT","The child source changed after review; inspect its current proposal before merging");const Rows old=rows(baseline),now=rows(current),parentRows=rows(parent);const auto editable=keySet(field(manifest,"editable"));
+    // A new child recipe cannot capture a parent-only parameter by spelling its
+    // name in an expression that was unresolved inside the isolated workspace.
+    const Graph parentGraph(parent);for(const auto& recipe:field(current,"assembly_configurations").arr){Keys refs;parentGraph.scan(field(recipe,"parameters"),"",refs);for(const auto& ref:parentGraph.closure(refs))if(parentRows.count(ref)&&!now.count(ref))reject("CONTAINER_CONFIGURATION_BOUNDARY","Configuration expression captures outside source "+ref);}
     // Retained history order is authoritative. Adding features appends to the
     // owning history; changing existing order is not silently approximated.
     for(const auto* collection:{"features","assembly","mates"}){std::vector<std::string> wanted,actual;for(const auto& row:field(baseline,collection).arr){auto key=rowKey(collection,row);if(now.count(key))wanted.push_back(key);}for(const auto& row:field(current,collection).arr){auto key=rowKey(collection,row);if(old.count(key))actual.push_back(key);}if(wanted!=actual)reject("CONTAINER_HISTORY_ORDER","Retained object order changed; this merge contract does not reorder parent source");}
@@ -204,6 +243,15 @@ V proposeDesignContainerMerge(const Document& doc,u64 revision,const V& args){
         }else{const char* op=std::string(collection)=="params"?"param.set":std::string(collection)=="planes"?"plane.set":"material.set";c=command(op);for(const auto& kv:row.obj)c.set(kv.first,kv.second);if(std::string(collection)=="materials"&&before&&!row.find("physical"))c.set("physical",V{});if(std::string(collection)=="planes"&&before){noRemovedParams(field(*before,"p"),field(original,"p"));if(before->find("support")&&!row.find("support"))c.set("support",V{});}}
         append(commands,c);commandKeys.push_back(key);
     }
+    for(const auto* collection:{"assembly_configurations","assembly_external_references"}){
+        const bool config=std::string(collection)=="assembly_configurations";
+        auto recipeKey=[&](const V& row){return std::string(collection)+":"+(config?field(row,"name").asStr():std::to_string(id(field(row,"feature"))));};
+        for(const auto& row:field(baseline,collection).arr){const auto key=recipeKey(row);if(editable.count(key)&&!now.count(key)){V c=command(config?"configuration.remove":"assembly.external.remove");c.set(config?"name":"feature",field(row,config?"name":"feature"));append(commands,c);commandKeys.push_back(key);}}
+        for(const auto& original:field(current,collection).arr){const auto key=recipeKey(original);const auto* before=findRow(old,key);if(before&&equal(*before,original))continue;if(before&&!editable.count(key))reject("CONTAINER_READONLY_DEPENDENCY",key);
+            V row=original;if(config){if(const auto* visibility=original.find("visibility")){V remapped=V::makeObj();for(const auto& entry:visibility->obj)remapped.set(std::to_string(mapped(std::stoull(entry.first),nodeIds)),entry.second);row.set("visibility",remapped);}}else row.set("feature",number(mapped(id(field(original,"feature")),featureIds)));
+            V c=command(config?"configuration.set":"assembly.external.set");for(const auto& entry:row.obj)c.set(entry.first,entry.second);append(commands,c);commandKeys.push_back(key);
+        }
+    }
     // Source arrays retain history order, whereas a creation or rebinding can
     // require a producer whose array row comes later. Replay actual producer
     // commands first; retire deleted source after its consumers are changed.
@@ -212,6 +260,6 @@ V proposeDesignContainerMerge(const Document& doc,u64 revision,const V& args){
     for(size_t i=0;i<commandKeys.size();++i){const auto& key=commandKeys[i];if(now.count(key)){const auto dependencies=currentGraph.edges.find(key);if(dependencies!=currentGraph.edges.end())for(const auto& producer:dependencies->second)if(pending.count(producer))prerequisites[i].insert(producer);}else for(const auto& entry:previousGraph.edges)if(entry.second.count(key)&&pending.count(entry.first))prerequisites[i].insert(entry.first);}
     for(const auto* collection:{"features","assembly","mates"}){std::string preceding;for(const auto& row:field(current,collection).arr){const auto key=rowKey(collection,row);if(!old.count(key)){if(!preceding.empty())prerequisites[pending.at(key)].insert(preceding);preceding=key;}}}
     V ordered=V::makeArr();while(!pending.empty()){bool progressed=false;for(size_t i=0;i<commandKeys.size();++i){const auto& key=commandKeys[i];if(!pending.count(key))continue;bool ready=true;for(const auto& prerequisite:prerequisites[i])if(pending.count(prerequisite)){ready=false;break;}if(ready){ordered.arr.push_back(commands.arr[i]);pending.erase(key);progressed=true;}}if(!progressed)reject("CONTAINER_RECIPE_DEPENDENCY","The scoped recipe has a source/creation-order cycle; preserve explicit producer history and review that dependency");}commands=std::move(ordered);
-    V out=V::makeObj();out.set("expected_revision",number(revision));out.set("container",number(group));out.set("source_sha256",field(manifest,"source_sha256"));out.set("child_sha256",V::makeStr(childHash));out.set("commands",commands);out.set("id_map",maps);out.set("changed",V::makeBool(!commands.arr.empty()));out.set("publication",V::makeStr("owning_session_doc_apply"));out.set("outside_source_preserved",V::makeBool(true));return out;
+    V out=V::makeObj();out.set("expected_revision",number(revision));out.set("container",number(group));out.set("source_sha256",field(manifest,"source_sha256"));out.set("child_sha256",V::makeStr(childHash));out.set("commands",commands);out.set("id_map",maps);out.set("changed",V::makeBool(!commands.arr.empty()));out.set("publication",V::makeStr("owning_session_doc_apply"));out.set("outside_source_preserved",V::makeBool(true));out.set("selection_policy",V::makeStr("workspace_local"));return out;
 }
 }

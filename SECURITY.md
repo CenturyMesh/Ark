@@ -46,3 +46,17 @@ Only the latest source revision is actively developed. Historical releases are
 retained for reproducibility; no separate long-term security maintenance policy
 has been established. Windows packages are currently unsigned; compare hashes
 from a trusted release channel. See [updates](docs/UPDATES.md).
+
+The generated CycloneDX SBOM inventories direct source dependencies and bundled
+runtime binaries. Run `scripts/audit-dependencies.ps1` against that exact SBOM to
+retain public OSV queries and their results; release preparation uses
+`-FailOnFinding`. Database failures, unsupported identities and empty responses
+retain distinct statuses. Empty responses do not establish complete indexing or
+the absence of vulnerabilities.
+
+Review each returned advisory against the pinned source, enabled code paths,
+affected inputs and upstream fixes. Record the advisory ID, observed revision,
+applicability evidence, corrective change and regression result. Keep unresolved
+relevant findings out of a release; do not dismiss a finding solely because a
+generic scanner returned no other records. Report sensitive reproductions through
+the private channel above, using synthetic inputs and redacted diagnostics.
