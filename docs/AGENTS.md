@@ -1,6 +1,6 @@
 # ARK agent protocol
 
-030D develops Wood, mesh networks, exact vents and Light up. Load
+030D adds Wood, mesh networks, exact vents and Light up. Load
 `agent_onboard{topic:"wood"|"networks"|"lighting"}` and read the
 [contracts](PRODUCT_TOOLS_030D.md). `wood_inspect` reports authored stock and BOM
 quantities. New persisted recipes conditionally select source42; retain observed

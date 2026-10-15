@@ -50,6 +50,14 @@ remains unimplemented. Portable-core checks are a separate scope.
 
 ## A — Trust and foundation
 
+030D adds bounded B.01/B.02/B.03/C.01/C.03/D.02/D.04 scopes for Wood, networks,
+vents, LED appearance and spatial agent activity, plus A.01/A.03/A.04/E.01/F.03
+identity and development-binary work. The [contract](PRODUCT_TOOLS_030D.md),
+[iteration scope](iterations/030D.md) and [verification](VERIFICATION_030D.md)
+record the frozen source, inspected captures and **153/153** local native/Studio
+checks. Broader milestones remain **Parcial**; local checks do not establish
+hosted CI, distribution, live-model quality or physical manufacturing acceptance.
+
 029B extends A.01–A.05 and B.01–B.05 on the 028D base: local recovery,
 fault-injection/corpus receipts, measured three-size performance, release
 inventory/SBOM, editable history, configurations/selective evaluation and exact
