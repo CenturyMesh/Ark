@@ -48,5 +48,18 @@ successful tool receipt before a completed goal can be accepted.
 `studio-team-blockers-ui` exercises the actual Review blockers action, an
 editable-session ownership check, the read-only report, Refresh, resize and
 native captures. Synthetic usage bookkeeping is distinguished from CAD edits.
-The source and final observed checks are recorded in the accompanying receipt.
+The native busy-message pump also serves this read-only inspector. Closing it
+while a model operation runs closes only the inspector, without requesting
+Studio shutdown or consuming a provider request.
+The [receipt](verification-030D-team-outcomes.json) freezes runtime source at
+`41e5b6a3d833c474c17e4725425052aba45f8927`. The full Windows native/Studio
+Release suite passed **156/156 in 274.58 seconds**; the focused portable-core
+agent-team test passed **1/1**. The native standalone agent suite reports
+**356 checks**. Source, executable and inspected-image hashes remained unchanged
+after the full suite. Hosted CI for this source is separate from the four
+successful jobs on the preceding `df615d7` source.
 No interrupted user session is restarted or replayed by this change.
+
+![Explicit input report retained in Studio](images/030D/team-input.png)
+
+![Read-only blocker details](images/030D/team-blockers.png)

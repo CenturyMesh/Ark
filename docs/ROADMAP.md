@@ -61,6 +61,10 @@ Subsequent [030D realtime work](REALTIME_030D.md) addresses **A.04/D.02/D.04**
 with GPU-retained busy scenes, UI queue scheduling and matched local preview
 latency evidence. Its separate source/hash receipt preserves the earlier
 feature-freeze evidence; no general inference or design-cost gain is claimed.
+The [030D outcome correction](TEAM_OUTCOMES_030D.md) also preserves explicit
+input reports after tool rejection and exposes read-only blocker inspection.
+Actual interruption and completed-goal guards remain separate; A.03/D.02/D.04
+remain **Parcial**.
 
 029B extends A.01–A.05 and B.01–B.05 on the 028D base: local recovery,
 fault-injection/corpus receipts, measured three-size performance, release
