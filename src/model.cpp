@@ -227,6 +227,7 @@ const char* featureTypeName(FeatureType t){
         case FeatureType::MeshOffset: return "mesh_offset";
         case FeatureType::MeshFill: return "mesh_fill";
         case FeatureType::MeshEdit: return "mesh_edit";
+        case FeatureType::MeshNet: return "mesh_net";
         case FeatureType::Curve: return "curve";
         case FeatureType::IntersectionCurve: return "intersection_curve";
         case FeatureType::Bridge: return "bridge";
@@ -247,7 +248,7 @@ bool isNativeSurfaceFeature(FeatureType t){
 }
 bool isMeshModelFeature(FeatureType t){
     return t==FeatureType::MeshBody || t==FeatureType::MeshWeld || t==FeatureType::MeshSmooth ||
-           t==FeatureType::MeshDecimate || t==FeatureType::MeshOffset || t==FeatureType::MeshFill || t==FeatureType::MeshEdit;
+           t==FeatureType::MeshDecimate || t==FeatureType::MeshOffset || t==FeatureType::MeshFill || t==FeatureType::MeshEdit || t==FeatureType::MeshNet;
 }
 bool featureTypeFromName(const std::string& s, FeatureType& out){
     if(s=="box") out=FeatureType::Box;
@@ -287,6 +288,7 @@ bool featureTypeFromName(const std::string& s, FeatureType& out){
     else if(s=="mesh_offset") out=FeatureType::MeshOffset;
     else if(s=="mesh_fill") out=FeatureType::MeshFill;
     else if(s=="mesh_edit") out=FeatureType::MeshEdit;
+    else if(s=="mesh_net") out=FeatureType::MeshNet;
     else if(s=="curve") out=FeatureType::Curve;
     else if(s=="intersection_curve") out=FeatureType::IntersectionCurve;
     else if(s=="bridge") out=FeatureType::Bridge;
@@ -428,6 +430,16 @@ bool applyAppearancePatch(Appearance& appearance,const arkjson::Value& patch,std
             if(value.t!=V::Arr||value.arr.size()!=3){error="base_color needs three RGB values";return false;}
             double rgb[3];for(int i=0;i<3;++i){const auto& c=value.arr[i];if(c.t!=V::Num||!std::isfinite(c.num)||c.num<0||c.num>1){error="base_color must use sRGB display values 0..1";return false;}rgb[i]=c.num;}
             appearance.baseColor={rgb[0],rgb[1],rgb[2]};
+        }else if(key=="emission_color"){
+            if(value.t!=V::Arr||value.arr.size()!=3){error="emission_color needs three RGB values";return false;}
+            double rgb[3];for(int i=0;i<3;++i){if(value.arr[i].t!=V::Num||!std::isfinite(value.arr[i].num)||value.arr[i].num<0||value.arr[i].num>1){error="emission_color must be RGB 0..1";return false;}rgb[i]=value.arr[i].num;}
+            appearance.emissionColor={rgb[0],rgb[1],rgb[2]};
+        }else if(key=="emission_intensity"){if(!scalar(appearance.emissionIntensity,0,100))return false;}
+        else if(key=="bloom"){if(!scalar(appearance.bloom,0,4))return false;}
+        else if(key=="glow"){if(!scalar(appearance.glow,0,64))return false;}
+        else if(key=="emission_period"){if(!scalar(appearance.emissionPeriod,.05,3600))return false;}
+        else if(key=="emission_effect"){
+            if(value.t!=V::Str||(value.str!="steady"&&value.str!="pulse"&&value.str!="blink")){error="emission_effect must be steady, pulse or blink";return false;}appearance.emissionEffect=value.str;
         }else if(key=="metallic"){if(!scalar(appearance.metallic,0,1))return false;}
         else if(key=="roughness"){if(!scalar(appearance.roughness,0,1))return false;}
         else if(key=="opacity"){if(!scalar(appearance.opacity,0,1))return false;}
@@ -450,6 +462,11 @@ arkjson::Value appearanceToJson(const Appearance& appearance){
     using V=arkjson::Value;V out=V::makeObj(),color=V::makeArr(),scale=V::makeArr();
     for(double channel:{appearance.baseColor.x,appearance.baseColor.y,appearance.baseColor.z})color.arr.push_back(V::makeNum(channel));
     scale.arr.push_back(V::makeNum(appearance.textureScaleU));scale.arr.push_back(V::makeNum(appearance.textureScaleV));
+    // Omit default emission so older ordinary documents retain their format.
+    if(appearance.emissionIntensity!=0||appearance.emissionEffect!="steady"||appearance.bloom!=.6||appearance.glow!=12||appearance.emissionPeriod!=1||appearance.emissionColor.x!=1||appearance.emissionColor.y!=1||appearance.emissionColor.z!=1){
+        V emission=V::makeArr();for(double c:{appearance.emissionColor.x,appearance.emissionColor.y,appearance.emissionColor.z})emission.arr.push_back(V::makeNum(c));
+        out.set("emission_color",emission);out.set("emission_intensity",V::makeNum(appearance.emissionIntensity));out.set("bloom",V::makeNum(appearance.bloom));out.set("glow",V::makeNum(appearance.glow));out.set("emission_period",V::makeNum(appearance.emissionPeriod));out.set("emission_effect",V::makeStr(appearance.emissionEffect));
+    }
     out.set("base_color",color);out.set("metallic",V::makeNum(appearance.metallic));out.set("roughness",V::makeNum(appearance.roughness));out.set("opacity",V::makeNum(appearance.opacity));out.set("texture_path",V::makeStr(appearance.texturePath));if(!appearance.textureAsset.empty())out.set("texture_asset",V::makeStr(appearance.textureAsset));out.set("texture_scale",scale);return out;
 }
 

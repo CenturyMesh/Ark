@@ -135,6 +135,7 @@ static bool rebuildTraceScene(std::uint64_t sceneKey){
  if(!g_doc.stamps.empty()||std::any_of(g_doc.features.begin(),g_doc.features.end(),[](const auto& f){return !f.faceAppearances.empty();})){g_trace.reason="Stamps and face appearances require raster display";return false;}
  if(!g_doc.canvases.empty()){g_trace.reason="Image canvases require raster display";return false;}
  for(size_t i=0;i<g_bodyIds.size();++i){if(!displayInstance(i))continue;const auto* feature=g_doc.find(g_bodyIds[i]);Appearance look=feature?resolvedAppearance(g_doc,*feature):Appearance{};
+  if(look.emissionIntensity>0){g_trace.reason="Light up uses raster emission and bloom";return false;}
   if(look.opacity<.999){g_trace.reason="Transparent bodies require raster display";return false;}
   if(!look.texturePath.empty()||!look.textureAsset.empty()){g_trace.reason="Image-textured materials require raster display";return false;}
   if(feature&&feature->type==FeatureType::NotchedTube){auto& cache=g_notchViews.at(feature->id);auto transforms=displayedNotchTransforms(i);for(size_t k=0;k<cache.preview.segments.size();++k)if(!append(cache.preview.segments[k],g_instanceWorld[i]*transforms[k],look,true))return false;}

@@ -269,6 +269,7 @@ static Body evalFeatureBody(const Feature& f, const ExprEnv& env, Document& doc,
         case FeatureType::MeshDecimate:
         case FeatureType::MeshOffset:
         case FeatureType::MeshEdit:
+        case FeatureType::MeshNet:
         case FeatureType::MeshFill: {
             Body body = evaluateMeshFeature(f, env, work, topt);
             res.tris = body.baked->triCount();

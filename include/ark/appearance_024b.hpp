@@ -12,7 +12,8 @@ ProjectedStamp stampFromJson(const arkjson::Value& value);
 arkjson::Value stampToJson(const ProjectedStamp& stamp);
 FaceAppearance faceAppearanceFromJson(const arkjson::Value& value);
 arkjson::Value faceAppearanceToJson(const FaceAppearance& appearance);
-// Recognizes image_asset.set/remove, stamp.set/remove and face_appearance.set/remove.
+// Recognizes image_asset.set/remove, stamp.set/remove, face_appearance.set/remove
+// and revision-checked, merge-preserving light_up controls.
 // Call on the host's scratch document; revision/commit publication remains host-owned.
 bool applyAppearance024BCommand(Document& document,const arkjson::Value& command);
 void validateAppearanceAuthoring024B(const Document& document,bool validateGeometry=false);

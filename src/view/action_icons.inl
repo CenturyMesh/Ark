@@ -9,6 +9,15 @@ static const ActionIcon* actionVectorIcon(int action){
         auto poly=[&](ActionIcon& icon,std::initializer_list<std::pair<float,float>> points){auto previous=points.begin();for(auto point=previous+1;point!=points.end();++point){line(icon,previous->first,previous->second,point->first,point->second);previous=point;}};
         auto box=[&](ActionIcon& icon,float x,float y,float w,float h){poly(icon,{{x,y},{x+w,y},{x+w,y+h},{x,y+h},{x,y}});};
         auto arc=[&](ActionIcon& icon,float x,float y,float rx,float ry,float start,float end){constexpr float pi=3.14159265359f;for(int i=0;i<24;++i){float a=(start+(end-start)*i/24)*pi/180,b=(start+(end-start)*(i+1)/24)*pi/180;line(icon,x+rx*std::cos(a),y+ry*std::sin(a),x+rx*std::cos(b),y+ry*std::sin(b));}};
+        auto& led=result[980];arc(led,.5f,.39f,.22f,.24f,0,360);poly(led,{{.37f,.59f},{.40f,.78f},{.60f,.78f},{.63f,.59f}});line(led,.42f,.87f,.58f,.87f);
+        for(int i=0;i<7;++i){float a=(i*45.f-225.f)*3.14159265f/180;line(led,.5f+.31f*std::cos(a),.39f+.31f*std::sin(a),.5f+.41f*std::cos(a),.39f+.41f*std::sin(a));}
+        auto& net=result[981];for(int i=0;i<5;++i){float x=.16f+i*.17f;poly(net,{{x,.12f},{x+.035f,.38f},{x-.025f,.64f},{x,.88f}});poly(net,{{.12f,x},{.38f,x+.035f},{.64f,x-.025f},{.88f,x}});}
+        auto& panel=result[982];poly(panel,{{.12f,.29f},{.68f,.12f},{.89f,.30f},{.33f,.49f},{.12f,.29f},{.12f,.68f},{.33f,.87f},{.89f,.67f},{.89f,.30f}});line(panel,.33f,.49f,.33f,.87f);line(panel,.25f,.64f,.76f,.47f);line(panel,.38f,.75f,.76f,.61f);
+        auto& timber=result[983];poly(timber,{{.12f,.58f},{.72f,.13f},{.90f,.26f},{.31f,.73f},{.12f,.58f},{.12f,.74f},{.31f,.89f},{.90f,.42f},{.90f,.26f}});line(timber,.31f,.73f,.31f,.89f);line(timber,.39f,.71f,.80f,.39f);
+        auto& vent=result[984];box(vent,.12f,.14f,.76f,.72f);for(int row=0;row<3;++row)for(int col=0;col<2;++col)box(vent,.23f+col*.31f,.25f+row*.19f,.19f,.065f);result[985]=vent;
+        auto& groove=result[986];poly(groove,{{.12f,.25f},{.34f,.25f},{.34f,.53f},{.54f,.53f},{.54f,.25f},{.88f,.25f},{.88f,.83f},{.12f,.83f},{.12f,.25f}});line(groove,.34f,.53f,.23f,.65f);line(groove,.54f,.53f,.66f,.65f);
+        auto& stock=result[987];for(int row=0;row<3;++row){float y=.19f+row*.27f;box(stock,.12f,y,.16f,.16f);line(stock,.39f,y+.02f,.87f,y+.02f);line(stock,.39f,y+.13f,.71f,y+.13f);}
+        auto& presence=result[988];for(float x:{.25f,.75f}){arc(presence,x,.30f,.12f,.12f,0,360);poly(presence,{{x-.16f,.78f},{x-.16f,.57f},{x,.47f},{x+.16f,.57f},{x+.16f,.78f}});}line(presence,.37f,.30f,.63f,.30f);
         auto& live=result[58];
         box(live,.12f,.16f,.31f,.31f);box(live,.57f,.53f,.31f,.31f);
         poly(live,{{.27f,.47f},{.27f,.68f},{.57f,.68f}});poly(live,{{.43f,.32f},{.73f,.32f},{.73f,.53f}});
