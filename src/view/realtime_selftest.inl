@@ -28,6 +28,21 @@ if(realtimeUiTest){
         }
         report.set("samples",std::move(samples));std::ofstream output(shotPath+".timings.json");output<<report.dump();output.close();check(output.good(),"Cannot write realtime measurements");
         check(g_session.revision==revision&&documentToJson(g_doc)==source,"Realtime reads/preview changed CAD");
+        // Direct GPU capture must retain every RGB pixel, including orientation.
+        auto capturePixels=[&]{
+            std::vector<u8> expected((size_t)winW*winH*3),actual(expected.size());glPixelStorei(GL_PACK_ALIGNMENT,1);glReadBuffer(GL_BACK);glReadPixels(0,0,winW,winH,GL_RGB,GL_UNSIGNED_BYTE,expected.data());
+            captureBusySnapshot030();glGetTexImage(GL_TEXTURE_2D,0,GL_RGB,GL_UNSIGNED_BYTE,actual.data());
+            check(glGetError()==GL_NO_ERROR&&expected==actual,"GPU busy capture changed pixels or orientation");
+            check(g_busySnapshotW==winW&&g_busySnapshotH==winH,"GPU busy capture retained stale dimensions");
+        };
+        capturePixels();const int savedW=winW,savedH=winH;winW=47;winH=31;capturePixels();winW=savedW;winH=savedH;drawFrame(hdc);capturePixels();
+        // A slow queued tool yields to rendering; callbacks must not reenter CAD.
+        unsigned completed=0;g_busyTestDelayMs=25;
+        for(unsigned i=0;i<2;++i){auto request=std::make_unique<UiToolRequest>();request->tool="doc_preview";request->args=preview;request->complete=[&](V result){check(!result.find("isError")->b,"Queued preview rejected");++completed;};postTool(std::move(request));}
+        MSG message{};while(PeekMessage(&message,nullptr,0,0,PM_REMOVE)){TranslateMessage(&message);DispatchMessage(&message);}drainUiTools();check(completed==1&&g_toolQueue.size()==1,"UI dispatch starved the next viewport frame");drawFrame(hdc);drainUiTools();check(completed==2&&g_toolQueue.empty(),"UI dispatch dropped a queued tool");
+        bool cancelled=false;auto stopped=std::make_unique<UiToolRequest>();stopped->tool="doc_apply";stopped->args=preview;stopped->cancel=std::make_shared<std::atomic_bool>(true);stopped->complete=[&](V result){cancelled=result.find("isError")->b;};postTool(std::move(stopped));while(PeekMessage(&message,nullptr,0,0,PM_REMOVE)){TranslateMessage(&message);DispatchMessage(&message);}drainUiTools();check(cancelled&&g_session.revision==revision,"Cancelled queue entry edited CAD");
+        auto stale=preview;stale.set("expected_revision",V::makeNum((double)revision-1));auto rejection=runTool("doc_apply",stale);check(rejection.find("isError")->b&&g_session.revision==revision,"Stale revision escaped realtime dispatch");
+        check(documentToJson(g_doc)==source,"Realtime queue checks changed CAD");
         // Capture the actual busy renderer with a retained spatial role marker.
         g_busyTestDelayMs=60;g_busyTestShot=shotPath+".busy.png";auto result=runTool("doc_preview",preview);check(!result.find("isError")->b,"Realtime busy preview failed");
         g_busyTestMode=false;g_busyTestDelayMs=0;g_busyTestShot.clear();

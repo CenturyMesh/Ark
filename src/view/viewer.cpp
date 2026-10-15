@@ -2775,7 +2775,8 @@ static void showAssistantAccountMenu(){
 }
 static arkjson::Value cancelledTool(){using V=arkjson::Value;V r=V::makeObj(),e=V::makeObj();e.set("error",V::makeStr("Request cancelled before execution"));r.set("isError",V::makeBool(true));r.set("structuredContent",e);return r;}
 static void drainUiTools(){
-    if(g_dialog)return;
+    if(g_dialog||g_busy)return;
+    const auto sliceStarted030=RealtimeClock030::now();
     while(!g_toolQueue.empty()){auto request=std::move(g_toolQueue.front());g_toolQueue.pop_front();
         if(g_closing||request->stop.stop_requested()||(request->cancel&&*request->cancel)){request->complete(cancelledTool());continue;}
         if((request->teamOwned&&request->epoch!=g_documentEpoch)||(request->revision&&(request->epoch!=g_documentEpoch||*request->revision!=g_session.revision))){auto result=cancelledTool();arkjson::Value error=arkjson::Value::makeObj();g_status="Document changed during assistant turn. Inspect and resend from the current revision.";error.set("error",arkjson::Value::makeStr(g_status));result.set("structuredContent",error);g_chatLog.push_back({"ARK",g_status});request->complete(result);if(request->cancel)*request->cancel=true;continue;}
@@ -2786,8 +2787,11 @@ static void drainUiTools(){
         if(request->teamOwned&&request->tool=="__ark_activity"){
             try{const auto& a=request->args;auto result=recordAgentActivity(g_doc,a.find("tool")->asStr(),*a.find("arguments"),*a.find("actor"),*a.find("result"),g_session.revision,g_session.revision,a.find("elapsed_ms")->asNum());if(g_doc.agentActivity&&!g_doc.agentActivity->entries.empty())g_doc.agentActivity->entries.back().set("timing_scope",arkjson::Value::makeStr("team coordination wall time; revision sampled after action"));request->complete(result);}catch(...){request->complete(cancelledTool());}continue;
         }
-        const auto hostStarted030=RealtimeClock030::now();
+        const auto revisionBefore030=g_session.revision;const auto hostStarted030=RealtimeClock030::now();
         try{const auto presenceActor=request->roleId.empty()?(request->revision?"assistant":"mcp"):request->roleId;observePresence030(presenceActor,request->tool,request->args);g_activeToolRole=request->roleId;g_activeToolName=request->tool;if(request->tool=="doc_apply"&&!metadataOnlyApply(g_doc,request->args)){captureDraftContext();for(auto& entry:g_draftViews)buildDraftLines(entry.second);}g_ownAssistantTool=(bool)request->revision||request->teamOwned;auto result=runTool(request->tool,request->args);finishPresence030(presenceActor,result);g_ownAssistantTool=false;g_activeToolRole.clear();g_activeToolName.clear();if(request->revision)*request->revision=g_session.revision;rememberToolTiming030({request->tool,realtimeMs030(request->posted,hostStarted030),realtimeMs030(hostStarted030),g_progressTiming030});request->complete(result);}catch(...){g_ownAssistantTool=false;g_activeToolRole.clear();g_activeToolName.clear();request->complete(cancelledTool());}
+        // Give the viewport a turn after every published revision or 8 ms of
+        // dispatch. This is UI scheduling, not an agent turn/token budget.
+        if(g_session.revision!=revisionBefore030||realtimeMs030(sliceStarted030)>=8.)break;
     }
 }
 static void postTool(std::unique_ptr<UiToolRequest> request){
@@ -2811,6 +2815,12 @@ static void measuredActivityDetails(){
     std::ostringstream detail;detail<<"Measured request and tool activity\r\n\r\n";
     auto row=[&](const std::string& name,const AssistantPerformance& performance){detail<<name<<"\r\n";if(!performance.providerRequests&&!performance.toolCalls){detail<<"No measurements reported for this run.\r\n\r\n";return;}detail<<performance.providerRequests<<" provider requests / "<<performance.providerMilliseconds<<" ms\r\n"<<performance.toolCalls<<" tool calls / "<<performance.toolMilliseconds<<" ms\r\nRequest bytes "<<performance.requestBytes<<" / input "<<performance.inputBytes<<" / tools schema "<<performance.toolSchemaBytes<<" / largest request "<<performance.maxRequestBytes<<"\r\n\r\n";};
     if(g_teamMode)for(const auto& role:g_teamSnapshot.roles)row(role.label.empty()?role.id:role.label,role.performance);else row("Assistant",g_assistantPerformanceRun);
+    if(!g_toolTimings030.empty()){
+        double queue=0,host=0,capture=0,worker=0,resume=0,maxQueue=0;
+        for(const auto& sample:g_toolTimings030){queue+=sample.queueMs;host+=sample.hostMs;capture+=sample.progress.captureMs;worker+=sample.progress.workerMs;resume+=sample.progress.resumeMs;maxQueue=std::max(maxQueue,sample.queueMs);}
+        const double n=(double)g_toolTimings030.size();
+        detail<<"Recent local UI dispatch ("<<g_toolTimings030.size()<<" calls, mean ms)\r\nQueue "<<queue/n<<" / host "<<host/n<<" / scene capture "<<capture/n<<" / model worker "<<worker/n<<" / resume "<<resume/n<<" / max queue "<<maxQueue<<"\r\nHost includes capture, worker and scene update. Worker stages apply only to background calls; other calls contribute zero. Measurements end before presentation and exclude provider time.\r\n\r\n";
+    }
     detail<<"Provider time includes network/server wall time. Tool time includes the UI queue and native execution. Parallel role times may overlap; they are not total elapsed time. Bytes are serialized request measurements, not token estimates or charges.";
     if(!g_dialogSmoke)MessageBoxA(g_window,detail.str().c_str(),"Measured agent activity",MB_OK|MB_ICONINFORMATION);
 }
@@ -4249,7 +4259,7 @@ struct CubeTriangle{Vec3 a,b,c,normal;int face=-1;};
 struct CubeHit{bool hit=false;int face=-1;Vec3 normal{};};
 static std::vector<CubeTriangle> g_cubeTriangles;
 static CubeHit g_cubeHover;
-static GLuint g_busySnapshotTex=0;
+static GLuint g_busySnapshotTex=0;static int g_busySnapshotW=0,g_busySnapshotH=0;
 static int gridCount=0,gOccW=0,gOccH=0,gOccTriedW=-1,gOccTriedH=-1;
 static bool g_swap=true,gOccReady=false;   // headless readback disables the buffer swap
 struct AdaptiveGrid {double spacing=10,radius=200,centerX=0,centerZ=0;int halfLines=20;};static AdaptiveGrid g_adaptiveGrid;
@@ -5576,6 +5586,20 @@ public:
         {std::lock_guard<std::mutex> lock(mutex_);if(stop_||pending_)throw std::runtime_error("ARK session executor is unavailable");pending_=[task]{(*task)();};}ready_.notify_one();return future;
     }
 };
+static void captureBusySnapshot030(){
+    // In-order GPU copy; no GPU -> RAM -> GPU round trip or glFinish fence.
+    // The captured scene is complete before the worker receives CAD ownership.
+    glBindFramebuffer(GL_FRAMEBUFFER,0);glReadBuffer(GL_BACK);glActiveTexture(GL_TEXTURE0);
+    if(!g_busySnapshotTex)glGenTextures(1,&g_busySnapshotTex);
+    glBindTexture(GL_TEXTURE_2D,g_busySnapshotTex);
+    if(g_busySnapshotW!=winW||g_busySnapshotH!=winH){
+        glTexImage2D(GL_TEXTURE_2D,0,GL_RGB8,winW,winH,0,GL_RGB,GL_UNSIGNED_BYTE,nullptr);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+        g_busySnapshotW=winW;g_busySnapshotH=winH;
+    }
+    glCopyTexSubImage2D(GL_TEXTURE_2D,0,0,0,0,0,winW,winH);
+}
 static arkjson::Value callSessionWithProgress(const std::string& tool,const arkjson::Value& args,std::function<arkjson::Value()> operation){
     const auto captureStarted030=RealtimeClock030::now();
     HDC hdc=GetDC(g_window);if(!hdc)throw std::runtime_error("Could not acquire ARK viewport for kernel operation");
@@ -5586,20 +5610,14 @@ static arkjson::Value callSessionWithProgress(const std::string& tool,const arkj
     } cleanup{hdc,g_swap};
     {std::lock_guard lock(g_busyProgressMutex);g_busyFeatureProgress={};}
     g_swap=false;
-    drawFrame(hdc);glFinish();
-    std::vector<u8> stable((size_t)winW*winH*3);glPixelStorei(GL_PACK_ALIGNMENT,1);
-    glReadBuffer(GL_BACK);glReadPixels(0,0,winW,winH,GL_RGB,GL_UNSIGNED_BYTE,stable.data());
-    if(!g_busySnapshotTex)glGenTextures(1,&g_busySnapshotTex);
-    glBindTexture(GL_TEXTURE_2D,g_busySnapshotTex);glPixelStorei(GL_UNPACK_ALIGNMENT,1);
-    glTexImage2D(GL_TEXTURE_2D,0,GL_RGB,winW,winH,0,GL_RGB,GL_UNSIGNED_BYTE,stable.data());
-    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+    drawFrame(hdc);
+    captureBusySnapshot030();
     g_swap=cleanup.previousSwap;g_busy=true;g_busyStarted=std::chrono::steady_clock::now();
     g_busyLabel=tool=="assistant_model_catalog"?"Reading provider model catalog":tool=="ui_projection_preview"?"Previewing exact projection":tool=="library_fetch"?"Downloading component":tool=="library_source_search"?"Searching component catalog":tool=="library_ingest"?"Importing component into library":tool=="library_insert"?"Inserting library component":tool.rfind("library_",0)==0?"Inspecting component library":tool=="doc_load"?"Loading document":tool=="doc_preview"?"Evaluating uncommitted preview":tool=="assembly_info"?"Inspecting assembly":tool=="native_inspect"?"Inspecting exact geometry":tool.rfind("import",0)==0?"Importing geometry":tool.rfind("export",0)==0?"Exporting geometry":"Evaluating geometry";
     g_progressTiming030.captureMs=realtimeMs030(captureStarted030);
     struct WorkTiming030 {double elapsed=0;RealtimeClock030::time_point completed;};
     auto workTiming=std::make_shared<WorkTiming030>();
-    auto measuredOperation=[tool,args,operation=std::move(operation),workTiming]() mutable {
+    auto measuredOperation=[&tool,&args,operation=std::move(operation),workTiming]() mutable {
         const auto started=RealtimeClock030::now();
         struct Finish {WorkTiming030& timing;RealtimeClock030::time_point started;~Finish(){timing.completed=RealtimeClock030::now();timing.elapsed=realtimeMs030(started,timing.completed);}} finish{*workTiming,started};
         return operation?operation():g_session.call(tool,args);
