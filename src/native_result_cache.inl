@@ -23,13 +23,27 @@ static std::string nativeCacheDigest(const std::string& bytes){
 }
 struct NativeResultCache {
     fs::path directory,entry;
-    std::string key,producerIdentity;
+    std::string key,producerIdentity,resolvedRequestIdentity;
     static constexpr size_t maxEntry=64u*1024u*1024u;
     static void canonicalRequest(V& value){
         if(value.t==V::Obj){
             std::sort(value.obj.begin(),value.obj.end(),[](const auto& a,const auto& b){return a.first<b.first;});
             for(size_t i=0;i<value.obj.size();++i){if(i&&value.obj[i-1].first==value.obj[i].first)throw std::runtime_error("Duplicate native request field");canonicalRequest(value.obj[i].second);}
         }else if(value.t==V::Arr)for(auto& item:value.arr)canonicalRequest(item);
+    }
+    static std::string resolvedRequestDigest(V request){
+        // Scheduling is not geometry. Preserve every nested/native parameter,
+        // including tessellation controls; exclude only this host-added field.
+        request.obj.erase(std::remove_if(request.obj.begin(),request.obj.end(),[](const auto& field){return field.first=="native_threads";}),request.obj.end());
+        canonicalRequest(request);return nativeCacheDigest("ark-resolved-native-request-v1\n"+request.dump());
+    }
+    static bool digest(const V* value){return value&&value->t==V::Str&&value->str.size()==64&&value->str.find_first_not_of("0123456789abcdef")==std::string::npos;}
+    static bool portableIdentity(const V& result,std::string& request,std::string& producer){
+        const auto* receipt=result.find("native_cache_provenance");if(!receipt||receipt->t!=V::Obj||receipt->obj.size()!=3)return false;
+        const auto* schema=receipt->find("schema");const auto* resolved=receipt->find("resolved_request_sha256");const auto* original=receipt->find("producer_sha256");
+        if(!schema||schema->t!=V::Num||schema->num!=1||!digest(resolved)||!digest(original))return false;
+        std::set<std::string> fields;for(const auto& field:receipt->obj)if(!fields.insert(field.first).second)return false;
+        request=resolved->str;producer=original->str;return true;
     }
     static fs::path cacheDirectory(){
 #ifdef _WIN32
@@ -38,10 +52,25 @@ struct NativeResultCache {
 #endif
         return {};
     }
+    static bool booleanSequence(const V& envelope){
+        const auto* operation=envelope.find("operation"),*request=envelope.find("request");
+        if(!operation||operation->t!=V::Str||operation->str!="model_boolean_sequence"||!request||request->t!=V::Obj||request->obj.size()!=3)return false;
+        const auto* schema=request->find("schema"),*op=request->find("op"),*pieces=request->find("pieces");
+        if(!schema||schema->t!=V::Num||schema->num!=1||!op||op->t!=V::Str||(op->str!="union"&&op->str!="cut"&&op->str!="common")||!pieces||pieces->t!=V::Arr||pieces->arr.size()<2||pieces->arr.size()>16)return false;
+        for(const auto& piece:pieces->arr){
+            if(piece.t!=V::Obj)return false;const auto* brep=piece.find("brep_base64"),*space=piece.find("namespace");
+            if(!brep||brep->t!=V::Str||brep->str.empty()||brep->str.size()>maxEntry||!space||space->t!=V::Str||space->str.empty()||space->str.size()>512)return false;
+            std::set<std::string> seen;for(const auto& field:piece.obj){if(!seen.insert(field.first).second)return false;if(field.first!="brep_base64"&&field.first!="namespace"&&field.first!="topology"&&field.first!="frame")return false;}
+            if(const auto* topology=piece.find("topology");topology&&topology->t!=V::Obj)return false;
+            if(const auto* frame=piece.find("frame")){if(frame->t!=V::Arr||frame->arr.size()!=16)return false;for(const auto& value:frame->arr)if(value.t!=V::Num||!std::isfinite(value.num))return false;}
+        }
+        return true;
+    }
     static bool pure(const V& envelope){
         const auto* operation=envelope.find("operation"),*request=envelope.find("request");
         if(!operation||operation->t!=V::Str||!request||request->t!=V::Obj)return false;
         const auto* op=request->find("op");
+        if(operation->str=="model_boolean_sequence")return booleanSequence(envelope);
         if(operation->str=="model_electronics"){
             const auto* kind=request->find("kind");
             return kind&&kind->t==V::Str&&(kind->str=="cable_route"||kind->str=="pcb");
@@ -107,6 +136,7 @@ struct NativeResultCache {
 #endif
             if(directory.empty())return;
             V canonical=request;canonicalRequest(canonical);
+            resolvedRequestIdentity=resolvedRequestDigest(canonical);
             key=nativeCacheDigest(producerIdentity+"\n"+canonical.dump());entry=directory/(key+".arknative");
         }catch(...){entry.clear();}
     }
@@ -128,7 +158,10 @@ struct NativeResultCache {
         try{return fs::is_regular_file(entry)&&fs::file_size(entry)<=maxEntry&&decode(key,read(entry),value);}catch(...){return false;}
     }
     V identified(V result)const{
-        if(!entry.empty())result.set("native_cache_key",V::makeStr(key));
+        if(!entry.empty()){
+            result.set("native_cache_key",V::makeStr(key));
+            V provenance=V::makeObj();provenance.set("schema",V::makeNum(1));provenance.set("resolved_request_sha256",V::makeStr(resolvedRequestIdentity));provenance.set("producer_sha256",V::makeStr(producerIdentity));result.set("native_cache_provenance",std::move(provenance));
+        }
         return result;
     }
     void store(const V& result)const{

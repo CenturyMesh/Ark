@@ -21,6 +21,7 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include <bcrypt.h>
 #else
 #include <fcntl.h>
 #include <unistd.h>
@@ -43,7 +44,28 @@ using Payloads=std::map<std::string,Payload>;
 using Slots=std::map<std::string,std::string>;
 std::filesystem::path filePath(const char* path){return std::filesystem::path(reinterpret_cast<const char8_t*>(path));}
 bool digest(const std::string& value){return value.size()==64&&std::all_of(value.begin(),value.end(),[](char c){return(c>='0'&&c<='9')||(c>='a'&&c<='f');});}
-std::string hashPayload(int kind,const std::string& bytes){std::string input(1,(char)kind);input+=bytes;return iterationSha256(input);}
+std::string containerDigest(const std::string& bytes){
+#ifdef _WIN32
+    // Same SHA-256 bytes as existing containers. CNG avoids copying/padding the
+    // complete optional geometry section in the portable implementation.
+    struct Provider {
+        BCRYPT_ALG_HANDLE handle=nullptr;
+        Provider(){if(BCryptOpenAlgorithmProvider(&handle,BCRYPT_SHA256_ALGORITHM,nullptr,0)<0)handle=nullptr;}
+        ~Provider(){if(handle)BCryptCloseAlgorithmProvider(handle,0);}
+    };
+    static Provider provider;
+    struct Hash {BCRYPT_HASH_HANDLE handle=nullptr;~Hash(){if(handle)BCryptDestroyHash(handle);}} hash;
+    unsigned char result[32]{};
+    if(provider.handle&&bytes.size()<=std::numeric_limits<ULONG>::max()&&BCryptCreateHash(provider.handle,&hash.handle,nullptr,0,nullptr,0,0)>=0&&
+       BCryptHashData(hash.handle,reinterpret_cast<PUCHAR>(const_cast<char*>(bytes.data())),(ULONG)bytes.size(),0)>=0&&
+       BCryptFinishHash(hash.handle,result,sizeof result,0)>=0){
+        constexpr char hex[]="0123456789abcdef";std::string out;out.reserve(64);
+        for(auto byte:result){out+=hex[byte>>4];out+=hex[byte&15];}return out;
+    }
+#endif
+    return iterationSha256(bytes);
+}
+std::string hashPayload(int kind,const std::string& bytes){std::string input(1,(char)kind);input+=bytes;return containerDigest(input);}
 std::string addPayload(Payloads& payloads,int kind,std::string bytes){auto hash=hashPayload(kind,bytes);auto [it,inserted]=payloads.emplace(hash,Payload{kind,std::move(bytes)});if(!inserted&&it->second.kind!=kind)throw std::runtime_error("Container payload collision");return hash;}
 void bounded(size_t current,size_t added,size_t maximum,const char* message){if(current>maximum||added>maximum-current)throw std::runtime_error(message);}
 void varint(std::string& out,uint64_t n){do{unsigned char c=(unsigned char)(n&127);n>>=7;out+=(char)(c|(n?128:0));}while(n);}
@@ -151,7 +173,7 @@ struct Package {
         if(value.t==V::Arr&&(depth==1||depth==2)){V d=V::makeObj(),entries=V::makeArr();d.set("k",V::makeStr("a"));for(size_t i=0;i<value.arr.size();++i)entries.arr.push_back(slot(value.arr[i],path+"/"+std::to_string(i)));d.set("e",std::move(entries));return d;}
         return slot(value,path);
     }
-    explicit Package(const V& root){if(root.t!=V::Obj)throw std::runtime_error("ARK document root must be an object");logicalBytes=root.dump().size();if(logicalBytes>maxDocumentBytes)throw std::runtime_error("Document exceeds 4 MiB logical capacity");rootHash=iterationSha256(encode(root));V manifest=split(root,"r",0);slots.emplace("/",addPayload(payloads,0,encode(manifest)));size_t total=0;for(const auto& item:payloads){bounded(total,item.second.bytes.size(),maxDocumentValueBytes,"Container payload total exceeds 16 MiB");total+=item.second.bytes.size();}}
+    explicit Package(const V& root){if(root.t!=V::Obj)throw std::runtime_error("ARK document root must be an object");logicalBytes=root.dump().size();if(logicalBytes>maxDocumentBytes)throw std::runtime_error("Document exceeds 4 MiB logical capacity");rootHash=containerDigest(encode(root));V manifest=split(root,"r",0);slots.emplace("/",addPayload(payloads,0,encode(manifest)));size_t total=0;for(const auto& item:payloads){bounded(total,item.second.bytes.size(),maxDocumentValueBytes,"Container payload total exceeds 16 MiB");total+=item.second.bytes.size();}}
 };
 V assemble(const V& descriptor,const Slots& slots,const Payloads& payloads,std::set<std::string>& usedSlots,std::set<std::string>& usedPayloads,ReadBudget& budget,unsigned depth){
     if(depth>=64||descriptor.t!=V::Obj||descriptor.obj.size()!=2)throw std::runtime_error("Invalid container manifest shape");
@@ -190,7 +212,7 @@ void writePackage(Db& db,const Package& package,DocumentContainerWriteStats& sta
         if(useDerived){
             std::set<std::string> stale;Statement oldDerived(db,"SELECT key FROM ark_derived");while(oldDerived.row())stale.insert(oldDerived.text(0));
             Statement findDerived(db,"SELECT hash,bytes FROM ark_derived WHERE key=?1"),putDerived(db,"INSERT INTO ark_derived(key,hash,bytes) VALUES(?1,?2,?3) ON CONFLICT(key) DO UPDATE SET hash=excluded.hash,bytes=excluded.bytes");
-            if(derived)for(const auto& item:*derived){const auto hash=iterationSha256(item.bytes);findDerived.text(1,item.key);bool same=false;if(findDerived.row())same=findDerived.text(0)==hash&&findDerived.blob(1,maxDocumentDerivedEntryBytes)==item.bytes;findDerived.reset();if(!same){putDerived.text(1,item.key);putDerived.text(2,hash);putDerived.blob(3,item.bytes);putDerived.done();putDerived.reset();}stale.erase(item.key);}
+            if(derived)for(const auto& item:*derived){const auto hash=containerDigest(item.bytes);findDerived.text(1,item.key);bool same=false;if(findDerived.row())same=findDerived.text(0)==hash&&findDerived.blob(1,maxDocumentDerivedEntryBytes)==item.bytes;findDerived.reset();if(!same){putDerived.text(1,item.key);putDerived.text(2,hash);putDerived.blob(3,item.bytes);putDerived.done();putDerived.reset();}stale.erase(item.key);}
             Statement removeDerived(db,"DELETE FROM ark_derived WHERE key=?1");for(const auto& key:stale){removeDerived.text(1,key);removeDerived.done();removeDerived.reset();}
         }
         db.exec("COMMIT");
@@ -242,11 +264,11 @@ bool loadDocumentContainer(const char* path,V& root,std::string* error,DocumentD
         Slots slots;Statement slot(db,"SELECT path,payload_hash FROM ark_slots");while(slot.row()){if(slots.size()>=maxRows)throw std::runtime_error("ARK slot row capacity exceeded");auto name=slot.text(0),hash=slot.text(1);if(name.size()>4096||!digest(hash)||!payloads.count(hash))throw std::runtime_error("Invalid ARK slot reference");slots.emplace(std::move(name),std::move(hash));}
         auto manifestSlot=slots.find("/");if(manifestSlot==slots.end())throw std::runtime_error("Missing ARK document manifest");auto manifestPayload=payloads.find(manifestSlot->second);if(manifestPayload==payloads.end()||manifestPayload->second.kind!=0)throw std::runtime_error("Missing typed ARK manifest");std::set<std::string> usedSlots{"/"},usedPayloads{manifestPayload->first};V manifest=decode(manifestPayload->second.bytes);ReadBudget budget;V candidate=assemble(manifest,slots,payloads,usedSlots,usedPayloads,budget,0);
         if(candidate.t!=V::Obj||usedSlots.size()!=slots.size()||usedPayloads.size()!=payloads.size())throw std::runtime_error("Unreferenced ARK container data");
-        if(candidate.dump().size()!=(size_t)logical||iterationSha256(encode(candidate))!=rootHash)throw std::runtime_error("ARK document root checksum/size mismatch");
+        if(candidate.dump().size()!=(size_t)logical||containerDigest(encode(candidate))!=rootHash)throw std::runtime_error("ARK document root checksum/size mismatch");
         DocumentDerivedPayloads restored;std::string discarded;
         if(version==2)try{
             size_t totalDerived=0;Statement rows(db,"SELECT key,hash,bytes FROM ark_derived ORDER BY key");
-            while(rows.row()){if(restored.size()>=maxRows)throw std::runtime_error("ARK derived row capacity exceeded");auto key=rows.text(0),hash=rows.text(1),bytes=rows.blob(2,maxDocumentDerivedEntryBytes);bounded(totalDerived,bytes.size(),maxDocumentDerivedBytes,"ARK derived section exceeds 128 MiB");totalDerived+=bytes.size();if(!digest(key)||!digest(hash)||bytes.empty()||iterationSha256(bytes)!=hash)throw std::runtime_error("ARK derived payload checksum/identity mismatch");restored.push_back({std::move(key),std::move(bytes)});}
+            while(rows.row()){if(restored.size()>=maxRows)throw std::runtime_error("ARK derived row capacity exceeded");auto key=rows.text(0),hash=rows.text(1),bytes=rows.blob(2,maxDocumentDerivedEntryBytes);bounded(totalDerived,bytes.size(),maxDocumentDerivedBytes,"ARK derived section exceeds 128 MiB");totalDerived+=bytes.size();if(!digest(key)||!digest(hash)||bytes.empty()||containerDigest(bytes)!=hash)throw std::runtime_error("ARK derived payload checksum/identity mismatch");restored.push_back({std::move(key),std::move(bytes)});}
         }catch(const std::exception& failure){restored.clear();discarded=failure.what();}
         db.exec("COMMIT");root=std::move(candidate);if(derived)*derived=std::move(restored);if(derivedDiscardedReason)*derivedDiscardedReason=std::move(discarded);return true;
     }catch(const std::exception& e){if(error)*error=e.what();return false;}

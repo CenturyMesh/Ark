@@ -1,6 +1,12 @@
 // Included by solid_modeling.cpp inside ark::occt, after its exact B-rep,
 // topology propagation and finish helpers. Header is included at file scope.
 namespace {
+double holesValidatedVolume(const TopoDS_Shape& shape){
+    {NativeProfileScope validate("holes.validate");if(shape.IsNull()||!BRepCheck_Analyzer(shape).IsValid())throw std::runtime_error("Native result failed B-rep validation");}
+    const auto solids=shapes(shape,TopAbs_SOLID);const double volume=solids.empty()?0:properties(shape);
+    if(solids.size()!=1||!std::isfinite(volume)||volume<=0)throw std::runtime_error("Holes Orchestrator requires one positive-volume solid");
+    return volume;
+}
 TopoDS_Shape holesCheckedCut(const TopoDS_Shape& input,const TopoDS_Shape& cutter,
                             std::vector<Ref>& refs,const std::string& label,double& removed,double& currentVolume){
     BRepCheck_Analyzer toolCheck(cutter,true);if(!toolCheck.IsValid()||shapes(cutter,TopAbs_SOLID).empty())throw std::runtime_error(label+": invalid analytic cutter");
@@ -8,7 +14,10 @@ TopoDS_Shape holesCheckedCut(const TopoDS_Shape& input,const TopoDS_Shape& cutte
     // validated shape. Non-destructive Boolean construction keeps that source
     // immutable; no cross-request TopoDS cache or approximate mass is involved.
     BRepAlgoAPI_Cut cut;{NativeProfileScope boolean("holes.cut.boolean");NCollection_List<TopoDS_Shape> arguments,tools;arguments.Append(input);tools.Append(cutter);cut.SetArguments(arguments);cut.SetTools(tools);cut.SetNonDestructive(true);cut.Build();}if(!cut.IsDone()||cut.HasErrors())throw std::runtime_error(label+": exact Boolean cut failed");
-    const auto result=cut.Shape();const V measured=shapeReport(result,true);const double resultVolume=need(measured,"volume_mm3").num;removed=currentVolume-resultVolume;
+    // Intermediate cuts need validity, census and exact signed volume. Area and
+    // AddOptimal bounds belong to the final report and were previously computed
+    // for every intermediate shape only to be discarded.
+    const auto result=cut.Shape();const double resultVolume=holesValidatedVolume(result);removed=currentVolume-resultVolume;
     if(!std::isfinite(removed)||removed<=1e-8)throw std::runtime_error(label+": cutter removes no positive material (outside, duplicate or inactive location)");
     currentVolume=resultVolume;refs=propagated(refs,result,cut);return result;
 }
@@ -50,8 +59,8 @@ void holesRequireNominalCylinder(const TopoDS_Shape& shape,const gp_Pnt& origin,
 
 V holesOrchestratorNative(const V& request){
     const V plan=ark::resolveHolesRecipe(request);const V& encoded=need(request,"input_brep");if(encoded.t!=V::Str)throw std::runtime_error("Holes Orchestrator input must be an exact native B-rep");
-    const TopoDS_Shape source=readBrep(encoded.str);const V sourceReport=shapeReport(source,true);TopoDS_Shape current=source;auto refs=inputRefs(request,"input_brep","input_topology",source);
-    std::array<double,6> sourceBounds{};const auto& measuredBounds=need(sourceReport,"bounds_mm");for(size_t i=0;i<sourceBounds.size();++i)sourceBounds[i]=measuredBounds.arr[i].num;const double sourceVolume=need(sourceReport,"volume_mm3").num;double currentVolume=sourceVolume;V receipt=need(plan,"report"),locations=V::makeArr();const auto kind=word(plan,"kind"),termination=word(plan,"termination"),recess=word(plan,"recess");
+    const TopoDS_Shape source=readBrep(encoded.str);const double sourceVolume=holesValidatedVolume(source);TopoDS_Shape current=source;auto refs=inputRefs(request,"input_brep","input_topology",source);
+    const auto sourceBounds=bounds(source);double currentVolume=sourceVolume;V receipt=need(plan,"report"),locations=V::makeArr();const auto kind=word(plan,"kind"),termination=word(plan,"termination"),recess=word(plan,"recess");
     const bool shaft=kind=="groove_external",bore=kind=="groove_internal",groove=shaft||bore;
     for(const auto& location:need(plan,"points").arr){const auto name=word(location,"name");const gp_Pnt origin=point(need(location,"position"),"hole position"),directionPoint=point(need(location,"direction"),"hole direction");const gp_Dir axis(directionPoint.X(),directionPoint.Y(),directionPoint.Z());const std::string prefix="holes."+name;
         double removed=0;V evidence=V::makeObj();evidence.set("name",V::makeStr(name));evidence.set("position_mm",xyz(origin));evidence.set("direction",direction(axis));

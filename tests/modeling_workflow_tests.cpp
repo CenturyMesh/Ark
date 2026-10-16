@@ -35,7 +35,7 @@ Value accepted(const Value& response) {
 }
 
 const Value* bodyData(ark::Document& document, ark::u64 id) {
-    for (auto& body : document.evalBodies) if (body.id == id) return &body.nativeData;
+    for (auto& body : document.evalBodies) if (body.id == id) return &body.nativeData.value();
     throw std::runtime_error("Missing evaluated body");
 }
 
@@ -723,7 +723,11 @@ void testCurvesAndQueries() {
 
     check(accepted(design.call("agent_onboard", parse(R"({"topic":"sketch"})"))).dump().find("sketch.patch") != std::string::npos, "sketch onboarding names sketch.patch");
     check(accepted(design.call("agent_onboard", parse(R"({"topic":"surfacing"})"))).dump().find("zero end curvature") != std::string::npos, "surfacing onboarding names zero end curvature");
-    check(accepted(design.call("agent_onboard", parse(R"({"topic":"overview"})"))).dump().find("detail design") != std::string::npos, "workflow onboarding names detail design");
+    const auto overview=accepted(design.call("agent_onboard", parse(R"({"topic":"overview"})")));
+    const auto workflow=overview.find("workflow");check(workflow&&workflow->t==Value::Arr,"overview retains actionable workflow guidance");
+    const auto workflowText=workflow->dump();
+    check(workflowText.find("doc_info detail:revision")!=std::string::npos&&workflowText.find("doc_info detail:design")!=std::string::npos&&workflowText.find("object_context")!=std::string::npos,"workflow names current revision, selected context and full design evidence modes");
+    check(overview.find("document")&&overview.find("document_state_included")->b,"default onboarding preserves current document discovery");
 }
 }
 

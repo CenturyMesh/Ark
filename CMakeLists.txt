@@ -29,6 +29,7 @@ target_compile_definitions(ark-sqlite PRIVATE SQLITE_ENABLE_FTS5=1 SQLITE_THREAD
 target_link_libraries(ark-sqlite PUBLIC Threads::Threads)
 add_library(ark STATIC
   src/modeling_031b.cpp
+  src/geometry_storage_032d.cpp
   src/wood_tools.cpp
   src/authoring_024b.cpp src/appearance_024b.cpp src/plane_sections_024b.cpp
   src/authoring_023b.cpp src/cad_import.cpp src/holes_orchestrator.cpp src/design_containers.cpp
@@ -58,7 +59,7 @@ add_library(ark STATIC
   src/physics.cpp
   src/core.cpp src/nurbs.cpp src/brep.cpp src/mesh.cpp src/csg.cpp
   src/model.cpp src/evaluate.cpp src/native_features.cpp src/frame.cpp src/electronics.cpp src/usage.cpp src/stock_preview.cpp src/suspension.cpp src/chatgpt_auth.cpp src/sheet_commands.cpp src/sheet_preview.cpp src/references.cpp src/datum.cpp src/solver.cpp src/sketch.cpp src/prism_cut.cpp src/onboarding.cpp src/live_session.cpp src/assistant.cpp src/io.cpp src/serialize.cpp
-  src/source_tube.cpp src/notch.cpp src/notch_preview.cpp src/step_export.cpp src/tube.cpp src/assembly.cpp src/assembly_io.cpp src/compute.cpp src/api.cpp src/mesh_query.cpp src/mesh_analysis.cpp src/mesh_model.cpp src/agent.cpp src/agent_features.cpp src/kernels_scalar.cpp)
+  src/source_tube.cpp src/notch.cpp src/notch_preview.cpp src/step_export.cpp src/tube.cpp src/assembly.cpp src/assembly_io.cpp src/compute.cpp src/api.cpp src/mesh_query.cpp src/mesh_analysis.cpp src/mesh_model.cpp src/agent.cpp src/agent_features.cpp src/kernels_scalar.cpp src/snapshot_032d.cpp)
 target_include_directories(ark PUBLIC include "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_include_directories(ark SYSTEM PRIVATE third_party)
 
@@ -125,6 +126,26 @@ add_executable(ark-mesh-model-tests tests/mesh_model_tests.cpp)
 foreach(app ark-cli ark-mcp ark-tests ark-agent-tests ark-mesh-model-tests)
   target_link_libraries(${app} PRIVATE ark)
 endforeach()
+
+foreach(module IN ITEMS candidate_storage agent_contracts snapshot assembly_motion native_cache geometry_storage evaluation_schedule)
+  if(module STREQUAL "native_cache" AND NOT ARK_WITH_OCCT)
+    continue()
+  endif()
+  add_executable(ark-${module}-032d-tests tests/${module}_032d_tests.cpp)
+  target_link_libraries(ark-${module}-032d-tests PRIVATE ark)
+  add_test(NAME ${module}-032d COMMAND ark-${module}-032d-tests)
+  set_tests_properties(${module}-032d PROPERTIES TIMEOUT 180)
+  if(ARK_WITH_OCCT)
+    add_dependencies(ark-${module}-032d-tests ark-occt-worker)
+    target_compile_definitions(ark-${module}-032d-tests PRIVATE ARK_CONTRACTS_NATIVE_TESTS=1)
+  endif()
+endforeach()
+if(ARK_WITH_OCCT)
+  add_executable(ark-native_validated_snapshot-032d-tests tests/native_validated_snapshot_032d_tests.cpp)
+  target_link_libraries(ark-native_validated_snapshot-032d-tests PRIVATE ark-occt ark)
+  add_test(NAME native_validated_snapshot-032d COMMAND ark-native_validated_snapshot-032d-tests)
+  set_tests_properties(native_validated_snapshot-032d PROPERTIES TIMEOUT 120)
+endif()
 
 # 031B modeling contracts use public synthetic fixtures only. Native geometry
 # checks link the pinned OCCT worker; portable mesh/contracts remain separate.

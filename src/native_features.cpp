@@ -30,7 +30,7 @@ arkjson::Value inspectNativeCollision(const Body& a,const Mat4& aWorld,const Bod
 namespace {
 using V = arkjson::Value;
 
-const V& required(const V& object, const char* key) {
+template<class Object> const V& required(const Object& object, const char* key) {
     const V* found = object.find(key);
     if (!found) throw std::runtime_error(std::string("Missing native ") + key);
     return *found;
@@ -1049,19 +1049,25 @@ V combineExactBoolean(const Feature& feature, Document& document, std::vector<Bo
         }
     }
     if (pieces.size() < 2 || pieces.size() > 16) throw std::runtime_error("Exact boolean needs 2..16 solids");
-    V current = placePiece(pieces.front());
-    for (size_t index = 1; index < pieces.size(); ++index) {
-        V tool = placePiece(pieces[index]);
-        V model = V::makeObj();
-        model.set("op", V::makeStr(op));
-        model.set("input_brep", required(current, "brep_base64"));
-        if (const V* topology = current.find("topology")) model.set("input_topology", *topology);
-        model.set("tool_brep", required(tool, "brep_base64"));
-        if (const V* topology = tool.find("topology")) model.set("tool_topology", *topology);
-        model.set("tool_namespace", V::makeStr(pieces[index].nameSpace));
-        current = solidWorker(std::move(model));
-    }
-    return current;
+    V sequence=V::makeObj(),inputs=V::makeArr(),envelope=V::makeObj();
+    sequence.set("schema",V::makeNum(1));sequence.set("op",V::makeStr(op));
+    for(const auto& piece:pieces){V input=V::makeObj();input.set("brep_base64",V::makeStr(piece.brep));if(piece.topology.t==V::Obj)input.set("topology",piece.topology);input.set("namespace",V::makeStr(piece.nameSpace));if(piece.framed)input.set("frame",frameValue(piece.frame));inputs.arr.push_back(std::move(input));}
+    sequence.set("pieces",std::move(inputs));envelope.set("operation",V::makeStr("model_boolean_sequence"));envelope.set("request",std::move(sequence));
+    return nativeBooleanSequenceRequest(envelope,[&]{
+        V current = placePiece(pieces.front());
+        for (size_t index = 1; index < pieces.size(); ++index) {
+            V tool = placePiece(pieces[index]);
+            V model = V::makeObj();
+            model.set("op", V::makeStr(op));
+            model.set("input_brep", required(current, "brep_base64"));
+            if (const V* topology = current.find("topology")) model.set("input_topology", *topology);
+            model.set("tool_brep", required(tool, "brep_base64"));
+            if (const V* topology = tool.find("topology")) model.set("tool_topology", *topology);
+            model.set("tool_namespace", V::makeStr(pieces[index].nameSpace));
+            current = solidWorker(std::move(model));
+        }
+        return current;
+    });
 }
 
 V roundTubeSolid(const Feature& feature, const ExprEnv& env) {
@@ -1252,13 +1258,13 @@ void ensureNativeBody(Document& document, u64 featureId, std::vector<Body>& bodi
     const ExprEnv env = document.buildEnv();
     if (feature->type == FeatureType::Tube) {
         body->nativeData = feature->get("section", "round") == "rect" ? rectTubeSolid(*feature, env) : roundTubeSolid(*feature, env);
-        appendTubeEndFitOptions(body->nativeData,document,featureId,env);
+        body->nativeData.mutate([&](V& data){appendTubeEndFitOptions(data,document,featureId,env);});
         return;
     }
     if (feature->type == FeatureType::Transform || feature->type == FeatureType::Boolean) {
         body->nativeData = legacyOperationResult(*feature, env, document, bodies);
     } else body->nativeData = exactPrimitive(*feature, env, document, *body);
-    appendTubeEndFitOptions(body->nativeData,document,featureId,env);
+    body->nativeData.mutate([&](V& data){appendTubeEndFitOptions(data,document,featureId,env);});
 }
 
 Body evaluateExactLegacyOperation(const Feature& feature, const ExprEnv& env,
@@ -1283,7 +1289,7 @@ Body evaluateExactLegacyOperation(const Feature& feature, const ExprEnv& env,
     }
     Body result;
     result.nativeData = legacyOperationResult(feature, env, document, preceding);
-    appendTubeEndFitOptions(result.nativeData,document,feature.id,env);
+    result.nativeData.mutate([&](V& data){appendTubeEndFitOptions(data,document,feature.id,env);});
     result.baked = std::make_unique<Mesh>(nativeResultMesh(result.nativeData));
     return result;
 }

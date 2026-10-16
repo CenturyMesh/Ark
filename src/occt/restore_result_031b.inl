@@ -89,13 +89,32 @@ V topology(const V& saved,const TopoDS_Shape& shape,const std::string& identity)
     return out;
 }
 bool genericReportField(const std::string& key){static const std::set<std::string> keys{"kernel","kernel_version","brep_valid","solids","faces","area_mm2","volume_mm3","bounds_mm","display_mesh_authoritative","self_intersections_checked","manufacturing_authoritative","saved_previous_evaluation","derivation_replayed","snapshot_validation"};return keys.count(key)!=0;}
+void booleanSequenceRequest(const V& resolved,const V& request){
+    // This is a host cache identity for its unchanged pairwise callback. It is
+    // not a native CSG dispatch operation or a proof that a recipe was replayed.
+    for(const auto& field:resolved.obj)if(field.first!="operation"&&field.first!="request"&&field.first!="native_threads")reject("unknown boolean sequence envelope field");
+    if(const auto* threads=resolved.find("native_threads");threads&&(threads->t!=V::Num||!std::isfinite(threads->num)||threads->num<1||threads->num>64||threads->num!=std::floor(threads->num)))reject("invalid boolean sequence thread budget");
+    objectUnique(request);for(const auto& field:request.obj)if(field.first!="schema"&&field.first!="op"&&field.first!="pieces")reject("unknown boolean sequence field");
+    if(require(request,"schema",V::Num).num!=1)reject("unsupported boolean sequence schema");const auto& op=require(request,"op",V::Str).str;if(op!="union"&&op!="cut"&&op!="common")reject("unsupported boolean sequence operation");
+    const auto& pieces=require(request,"pieces",V::Arr);if(pieces.arr.size()<2||pieces.arr.size()>16)reject("boolean sequence requires2..16 resolved pieces");
+    for(const auto& piece:pieces.arr){objectUnique(piece);for(const auto& field:piece.obj)if(field.first!="brep_base64"&&field.first!="topology"&&field.first!="namespace"&&field.first!="frame")reject("unknown boolean sequence piece field");
+        const auto& encoded=require(piece,"brep_base64",V::Str).str;if(encoded.empty()||encoded.size()>64u*1024u*1024u)reject("boolean sequence piece B-rep size limit");const auto& name=require(piece,"namespace",V::Str).str;if(!nameValid(name))reject("invalid boolean sequence namespace");if(const auto* topology=piece.find("topology")){objectUnique(*topology);}
+        if(const auto* frame=piece.find("frame")){
+            if(frame->t!=V::Arr||frame->arr.size()!=16)reject("boolean sequence frame requires16 numbers");double m[16];for(size_t i=0;i<16;++i){if(frame->arr[i].t!=V::Num||!std::isfinite(frame->arr[i].num))reject("boolean sequence frame is not finite");m[i]=frame->arr[i].num;}
+            constexpr double tolerance=1e-10;
+            if(std::abs(m[3])>tolerance||std::abs(m[7])>tolerance||std::abs(m[11])>tolerance||std::abs(m[15]-1)>tolerance)reject("boolean sequence frame is not affine");
+            for(int a=0;a<3;++a)for(int b=a;b<3;++b){double dot=0;for(int k=0;k<3;++k)dot+=m[a*4+k]*m[b*4+k];if(std::abs(dot-(a==b?1.:0.))>tolerance)reject("boolean sequence frame is not orthonormal");}
+            const double determinant=m[0]*(m[5]*m[10]-m[6]*m[9])-m[4]*(m[1]*m[10]-m[2]*m[9])+m[8]*(m[1]*m[6]-m[2]*m[5]);if(std::abs(determinant-1)>tolerance)reject("boolean sequence frame must be right-handed");
+        }
+    }
+}
 V restore(const V& resolved,const V& saved){
     NativeProfileScope profile("snapshot.restore");objectUnique(resolved);objectUnique(saved);const auto operation=require(resolved,"operation",V::Str).str;const auto& request=require(resolved,"request",V::Obj);const auto op=require(request,"op",V::Str).str;
     static const std::set<std::string> solidOps{"box","sphere","cylinder","cone","torus","extrude","union","cut","common","hole","holes_orchestrator","fillet","chamfer","transform","linear_pattern","circular_pattern","mirror","shell","draft","split_plane","curve_pattern","hole_pattern","rib","gusset","mount_pad","boss","screw_support","nut_seat","lid_lip","lid_groove","split_surface","split_tool"};
     static const std::set<std::string> surfaceOps{"surface_nurbs","extrude_surface","revolve_surface","sweep","loft","thicken","offset_surface","surface_extract_face","surface_trim_wire","surface_untrim","surface_extend"};
-    const bool solid=operation=="model_solid";if(!(solid?solidOps.count(op):operation=="model"&&surfaceOps.count(op)))reject("operation requires normal derivation replay");
+    const bool sequence=operation=="model_boolean_sequence",solid=operation=="model_solid"||sequence;if(sequence)booleanSequenceRequest(resolved,request);else if(!(solid?solidOps.count(op):operation=="model"&&surfaceOps.count(op)))reject("operation requires normal derivation replay");
     const auto& encoded=require(saved,"brep_base64",V::Str).str;if(encoded.empty()||encoded.size()>64u*1024u*1024u)reject("B-rep size limit");const auto& savedReport=require(saved,"report",V::Obj);const auto& savedTopology=require(saved,"topology",V::Obj);require(savedTopology,"references",V::Arr);
-    const auto identity=sha256(base64Decode(encoded));if(require(savedTopology,"brep_sha256",V::Str).str!=identity)reject("B-rep digest mismatch");const auto shape=readBrep(encoded);V report=shapeReport(shape,false);const auto& count=require(report,"solids",V::Num);const auto& priorCount=require(savedReport,"solids",V::Num);if(priorCount.num!=count.num||require(savedReport,"faces",V::Num).num!=require(report,"faces",V::Num).num)reject("saved topology census mismatch");
+    const ValidatedBrepSnapshot validated(encoded,require(savedTopology,"brep_sha256",V::Str).str);const auto& identity=validated.identity();const auto& shape=validated.shape();V report=validated.report(false);const auto& count=require(report,"solids",V::Num);const auto& priorCount=require(savedReport,"solids",V::Num);if(priorCount.num!=count.num||require(savedReport,"faces",V::Num).num!=require(report,"faces",V::Num).num)reject("saved topology census mismatch");
     if(!require(savedReport,"brep_valid",V::Bool).b||require(savedReport,"manufacturing_authoritative",V::Bool).b||require(savedReport,"display_mesh_authoritative",V::Bool).b)reject("saved authority contract mismatch");
     const auto& volume=*report.find("volume_mm3");const auto* oldVolume=savedReport.find("volume_mm3");if(!oldVolume||(count.num==0?oldVolume->t!=V::Null:oldVolume->t!=V::Num||!std::isfinite(oldVolume->num)||!(oldVolume->num>0)||!(volume.num>0)))reject("saved signed-volume contract mismatch");
     const bool multiple=op=="linear_pattern"||op=="circular_pattern"||op=="curve_pattern"||op=="hole_pattern"||op=="split_plane"||op=="split_surface"||op=="split_tool";if(solid&&(count.num<1||count.num>64||(!multiple&&count.num!=1)))reject("solid count violates operation contract");

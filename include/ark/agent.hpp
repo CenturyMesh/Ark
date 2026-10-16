@@ -29,6 +29,7 @@ public:
         friend class AgentSession;
         explicit PreparedTransfer(std::shared_ptr<Prepared> value):value_(std::move(value)){}
         std::shared_ptr<Prepared> value_;
+          mutable std::unique_ptr<Document> materialized_;
     };
     Document document;
     u64 revision=0;
@@ -69,6 +70,7 @@ private:
         std::string id, baseline;
         u64 revision=0;
         std::shared_ptr<Document> document;
+          std::vector<u64> bodyOrder;
         arkjson::Value result;
         arkjson::Value recipe,readScope;
         std::string refreshUnsupported;
@@ -79,6 +81,11 @@ private:
         arkjson::Value dfmComparison;
     };
     std::vector<Prepared> prepared_;
+      static Document materializePrepared(const Prepared&);
+      static void compactPrepared(Prepared&);
+      static size_t retainedValueBytes(const arkjson::Value&);
+      size_t retainedCandidateBytes(const Prepared* extra=nullptr,bool includeExisting=true) const;
+      void trimPrepared();
     std::vector<std::string> undo_,redo_;
     void remember(bool projectBoundary=false);
     struct Cache { Mesh mesh; MeshReport report; std::unique_ptr<MeshBVH> bvh; };

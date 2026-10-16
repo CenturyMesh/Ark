@@ -318,8 +318,9 @@ static Vec3 shadePixelNormal(Vec3 n, Vec3 viewDir) {
     return {clamp(c.x,0.,1.),clamp(c.y,0.,1.),clamp(c.z,0.,1.)};
 }
 
-Image renderSnapshot(const Mesh& m, int W, int H, const SnapCam& cam) {
+static Image renderSnapshotImpl(const Mesh& m,int W,int H,const SnapCam& cam,const std::vector<SnapshotMaterial>* materials) {
     if(W<=0||H<=0||W>4096||H>4096)return {};
+    if(materials&&materials->size()!=m.triCount())throw std::runtime_error("Snapshot requires one material per triangle");
     Image img; img.w=W; img.h=H; img.px.assign((size_t)W*H*3,0);
 
     // vertical gradient sky
@@ -357,8 +358,24 @@ Image renderSnapshot(const Mesh& m, int W, int H, const SnapCam& cam) {
         if(clipW[i]>K_EPS)wposVp[i]=vp.transformPoint(p)/clipW[i];
     }
 
-    std::vector<f32> depth((size_t)W*H, 1e30f);
-    for(size_t t=0;t<m.idx.size();t+=3){
+    std::vector<f32> depth((size_t)W*H, 1e30f),displayDepth;
+    std::vector<Vec3> emission;
+    std::vector<size_t> order;order.reserve(m.triCount());
+    double glow=0;
+    if(materials){
+        displayDepth=depth;emission.resize(depth.size());
+        for(size_t i=0;i<materials->size();++i)if((*materials)[i].opacity>=1)order.push_back(i*3);
+        std::vector<size_t> translucent;
+        for(size_t i=0;i<materials->size();++i){const auto& a=(*materials)[i];if(a.opacity<1)translucent.push_back(i*3);if(a.emissionIntensity>0&&a.bloom>0)glow=std::max(glow,a.glow);}
+        // Opaque depth first; transparent surfaces are composited back to front.
+        // Triangle sorting is a display approximation for intersecting surfaces.
+        auto z=[&](size_t t){return (wposVp[m.idx[t]].z+wposVp[m.idx[t+1]].z+wposVp[m.idx[t+2]].z)/3;};
+        std::stable_sort(translucent.begin(),translucent.end(),[&](size_t a,size_t b){return z(a)>z(b);});
+        order.insert(order.end(),translucent.begin(),translucent.end());
+    }else for(size_t t=0;t<m.idx.size();t+=3)order.push_back(t);
+    for(size_t t:order){
+        const SnapshotMaterial* material=materials?&(*materials)[t/3]:nullptr;
+        const double opacity=material?clamp(material->opacity,0.,1.):1.;if(opacity<=0)continue;
         u32 ia=m.idx[t],ib=m.idx[t+1],ic=m.idx[t+2];
         if(clipW[ia]<=K_EPS||clipW[ib]<=K_EPS||clipW[ic]<=K_EPS)continue;
         Vec3 A=wposVp[ia],B=wposVp[ib],C=wposVp[ic];
@@ -390,17 +407,26 @@ Image renderSnapshot(const Mesh& m, int W, int H, const SnapCam& cam) {
                 f64 z=l0*A.z+l1*B.z+l2*C.z;
                 f32& dref=depth[(size_t)y*W+x];
                 if(z<dref){
-                    dref=(f32)z;
+                    if(opacity>=1)dref=(f32)z;
+                    if(materials)displayDepth[(size_t)y*W+x]=std::min(displayDepth[(size_t)y*W+x],(f32)z);
                     Vec3 wp=wa*l0+wb*l1+wc*l2;
                     Vec3 nrm=wn.normalized();
                     if(nrm.dot(eyeDir)>0) nrm=-nrm;
                     Vec3 vd=(eye-wp).normalized();
                     Vec3 c=shadePixelNormal(nrm,vd);
+                    Vec3 emissive{};
+                    if(material){
+                        const double light=0.38+0.52*std::max(nrm.dot(Vec3{-0.32,0.86,0.42}.normalized()),0.)+0.10*std::max(nrm.dot(Vec3{0.62,0.18,-0.28}.normalized()),0.);
+                        emissive=material->emission*std::max(material->emissionIntensity,0.);
+                        c=material->color*light+emissive;
+                        auto& e=emission[(size_t)y*W+x];e=e*(1-opacity)+emissive*(opacity*std::max(material->bloom,0.));
+                    }
                     u8* q=&img.px[(size_t)(y*W+x)*3];
-                    q[0]=(u8)(c.x*255);q[1]=(u8)(c.y*255);q[2]=(u8)(c.z*255);
+                    q[0]=(u8)clamp(c.x*255*opacity+q[0]*(1-opacity),0.,255.);q[1]=(u8)clamp(c.y*255*opacity+q[1]*(1-opacity),0.,255.);q[2]=(u8)clamp(c.z*255*opacity+q[2]*(1-opacity),0.,255.);
                 }
             }
     }
+    if(materials)depth.swap(displayDepth);
     for(int y=0;y<H;++y)for(int x=0;x<W;++x){
         f32 z=depth[(size_t)y*W+x];
         if(z>1e20f) continue;
@@ -416,7 +442,18 @@ Image renderSnapshot(const Mesh& m, int W, int H, const SnapCam& cam) {
         u8* q=&img.px[(size_t)(y*W+x)*3];
         q[0]=(u8)(q[0]*0.62);q[1]=(u8)(q[1]*0.62);q[2]=(u8)(q[2]*0.62);
     }
+    if(glow>0){
+        // Bounded separable display bloom; emission effects are sampled steady.
+        const double weight=std::exp(-1.0/clamp(glow,1.,64.));
+        auto blend=[&](Vec3 a,Vec3 b){return a*(1-weight)+b*weight;};
+        for(int y=0;y<H;++y){Vec3 state{};for(int x=0;x<W;++x){auto& e=emission[(size_t)y*W+x];state=blend(e,state);e=state;}state={};for(int x=W-1;x>=0;--x){auto& e=emission[(size_t)y*W+x];state=blend(e,state);e=state;}}
+        for(int x=0;x<W;++x){Vec3 state{};for(int y=0;y<H;++y){auto& e=emission[(size_t)y*W+x];state=blend(e,state);e=state;}state={};for(int y=H-1;y>=0;--y){auto& e=emission[(size_t)y*W+x];state=blend(e,state);e=state;}}
+        for(size_t i=0;i<emission.size();++i){const auto e=emission[i]*0.3;auto* q=&img.px[i*3];q[0]=(u8)clamp(q[0]+e.x*255,0.,255.);q[1]=(u8)clamp(q[1]+e.y*255,0.,255.);q[2]=(u8)clamp(q[2]+e.z*255,0.,255.);}
+    }
     return img;
 }
+
+Image renderSnapshot(const Mesh& m,int W,int H,const SnapCam& cam){return renderSnapshotImpl(m,W,H,cam,nullptr);}
+Image renderSnapshot(const Mesh& m,int W,int H,const SnapCam& cam,const std::vector<SnapshotMaterial>& materials){return renderSnapshotImpl(m,W,H,cam,&materials);}
 
 } // namespace ark

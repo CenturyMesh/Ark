@@ -42,6 +42,7 @@ int main(){try{
     ark::DocumentDerivedPayloads snapshots{{ark::iterationSha256("request+producer"),binary},{ark::iterationSha256("other request"),"opaque result"}};
     ark::DocumentContainerWriteStats stats;
     check(ark::saveDocumentContainer(root,filename.c_str(),&error,&stats,&snapshots),error);
+    {Database db(path);sqlite3_stmt* query=nullptr;check(sqlite3_prepare_v2(db.db,"SELECT hash,bytes FROM ark_derived",-1,&query,nullptr)==SQLITE_OK,"Derived digest cross-check prepares");size_t count=0;while(sqlite3_step(query)==SQLITE_ROW){const std::string hash(reinterpret_cast<const char*>(sqlite3_column_text(query,0)));const std::string payload(reinterpret_cast<const char*>(sqlite3_column_blob(query,1)),(size_t)sqlite3_column_bytes(query,1));check(hash==ark::iterationSha256(payload),"Accelerated derived checksum is portable SHA-256 including NUL bytes");++count;}sqlite3_finalize(query);check(count==2,"Portable digest cross-check covers large binary and small derived entries");}
     {Database db(path);check(db.version()==2,"Adding derived results migrates to container v2");}
     check(ark::loadDocumentContainer(filename.c_str(),loaded,&error,&restored,&diagnostic),error);
     check(diagnostic.empty()&&canonical(loaded)==canonical(root)&&restored.size()==2,"Snapshot does not alter authoring");

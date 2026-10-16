@@ -578,7 +578,7 @@ static bool measurementActive();static void beginMeasurement(int mode);static vo
 static void refreshSelectionLines();
 static std::string pickedSketches();
 static PartPick partPickFrom(const Body& body){
-    PartPick pick;using V=arkjson::Value;const V* mesh=body.nativeData.find("mesh");
+    PartPick pick;using V=arkjson::Value;const V* mesh=body.nativeData.meshMetadata();
     const V* spans=mesh?mesh->find("face_spans"):nullptr;const V* edges=mesh?mesh->find("edges"):nullptr;
     if(spans&&spans->t==V::Arr)for(const auto& span:spans->arr){if(span.t!=V::Arr||span.arr.size()!=2||span.arr[0].t!=V::Num||span.arr[1].t!=V::Num)continue;pick.faces.push_back({(int)span.arr[0].num,(int)span.arr[1].num});}
     pick.faceNames.assign(pick.faces.size(),"");

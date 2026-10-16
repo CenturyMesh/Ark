@@ -242,7 +242,8 @@ bool resolveAssembly(const Document& d,std::vector<AssemblyPlacement>& placement
         auto number=[&](const char* key){auto p=n.p.find(key);if(p==n.p.end())return 0.;bool ok=false;f64 value=evalExpr(p->second,env,&ok);if(!ok||!std::isfinite(value)||std::fabs(value)>1e6)error=std::string("Invalid assembly expression: ")+key;return value;};
         Vec3 t{number("tx"),number("ty"),number("tz")};f64 rx=number("rx"),ry=number("ry"),rz=number("rz");
         if(!error.empty())return false;
-        rigid[id]=Mat4::translation(t)*Mat4::rotZ(deg2rad(rz))*Mat4::rotY(deg2rad(ry))*Mat4::rotX(deg2rad(rx));
+        try{rigid[id]=assemblyPatternCarryFrame(n.pattern)*Mat4::translation(t)*Mat4::rotZ(deg2rad(rz))*Mat4::rotY(deg2rad(ry))*Mat4::rotX(deg2rad(rx));}
+        catch(const std::exception& exception){error=std::string(exception.what())+" on node #"+std::to_string(id);return false;}
         parentFrame[id]=parent;world[id]=parent*rigid[id];
         visibility[id]=n.visible&&(!n.parent||visibility[n.parent]);active.erase(id);return true;
     };
@@ -545,8 +546,10 @@ bool buildAssemblyManipulation(const Document& document,AssemblyManipulationProg
             if(!id)return Mat4::identity();auto known=authored.find(id);if(known!=authored.end())return known->second;
             const auto& node=*nodes.at(id);const Mat4 parent=authoredFrame(node.parent);
             auto number=[&](const char* key){const auto found=node.p.find(key);if(found==node.p.end())return 0.;bool ok=false;const double value=evalExpr(found->second,env,&ok);if(!ok)throw std::runtime_error("MANIPULATION_INVALID_BASELINE: invalid transform expression");return value;};
-            const Mat4 frame=parent*Mat4::translation({number("tx"),number("ty"),number("tz")})*
+            const Mat4 local=Mat4::translation({number("tx"),number("ty"),number("tz")})*
                 Mat4::rotZ(deg2rad(number("rz")))*Mat4::rotY(deg2rad(number("ry")))*Mat4::rotX(deg2rad(number("rx")));
+            const Mat4 frame=parent*assemblyPatternCarryFrame(node.pattern)*local;
+            if(node.pattern.active){program.patternLocalFrames[id]=local;program.patternRecipes[id]=assemblyPatternToJson(node.pattern);}
             authored[id]=frame;if(node.feature){program.parentFrames[id]=parent;program.authoredWorld[id]=frame;}return frame;
         };
         for(const auto& node:document.assembly)authoredFrame(node.id);
@@ -577,6 +580,11 @@ bool buildAssemblyManipulation(const Document& document,AssemblyManipulationProg
                 if(!representative)representative=cluster(id);else program.rigidCluster[cluster(id)]=cluster(representative);}}
         }
         for(auto& item:program.rigidCluster)item.second=cluster(item.first);
+        // Grounding belongs to a rigid carrier, including hardware instances
+        // attached to its grounded member. The static solver uses this same
+        // full-frame equivalence; selecting a follower cannot unground it.
+        std::unordered_set<u64> fixedClusters;for(u64 id:program.fixedNodes)fixedClusters.insert(program.rigidCluster.at(id));
+        for(const auto& item:program.rigidCluster)if(fixedClusters.count(item.second)&&std::find(program.fixedNodes.begin(),program.fixedNodes.end(),item.first)==program.fixedNodes.end())program.fixedNodes.push_back(item.first);
         auto fixed=[&](u64 id){return std::find(program.fixedNodes.begin(),program.fixedNodes.end(),id)!=program.fixedNodes.end();};
         for(const auto& candidate:program.constraints){const auto& mate=candidate.mate;
             if(mate.type!="concentric"&&mate.type!="coincident"&&mate.type!="revolute"&&mate.type!="prismatic")continue;
@@ -629,8 +637,10 @@ bool buildAssemblyManipulation(const Document& document,AssemblyManipulationProg
                 }
                 moving.clear();for(u64 id:component)if(!fixed(id))moving.push_back(id);std::sort(moving.begin(),moving.end());
             }
-            bool unsupported=false;for(u64 id:moving)unsupported|=nodes.at(id)->pattern.active||fixed(id);
-            if(unsupported)continue;
+            // A pattern is a rigid follower of its seed, not an additional
+            // joint. Keep every slot; publication uses its whole-pattern frame.
+            bool anchoredMoving=false;for(u64 id:moving)anchoredMoving|=fixed(id);
+            if(anchoredMoving)continue;
             const Mat4 frame=world.at(moveB?mate.a:mate.b)*(moveB?candidate.localA:candidate.localB);
             AssemblyManipulationJoint joint;joint.mate=mate.id;joint.type=mate.type;joint.mode=mate.type=="prismatic"?"translate":"rotate";
             joint.constrained=constrained;joint.movingEndpoint=moveB?mate.b:mate.a;
@@ -648,11 +658,17 @@ bool buildAssemblyManipulation(const Document& document,AssemblyManipulationProg
 bool selectAssemblyManipulationJoint(const AssemblyManipulationProgram& program,u64 driver,u64 mate,
                                     const std::string& mode,AssemblyManipulationJoint& joint,std::string& error){
     error.clear();joint={};
-    auto fail=[&](const char* message){error=message;return false;};
+    auto fail=[&](const std::string& message){error=message;return false;};
     if(mode!="rotate"&&mode!="translate")return fail("MANIPULATION_INVALID_MODE: mode must be rotate or translate");
     if(!program.rigidCluster.count(driver))return fail("MANIPULATION_INVALID_DRIVER: select an individual assembly part");
     if(std::find(program.fixedNodes.begin(),program.fixedNodes.end(),driver)!=program.fixedNodes.end())return fail("MANIPULATION_FIXED_DRIVER: grounded part cannot be moved");
-    if(std::find(program.patternNodes.begin(),program.patternNodes.end(),driver)!=program.patternNodes.end())return fail("MANIPULATION_PATTERN_UNSUPPORTED: select an individual unpatterned instance");
+    if(std::find(program.patternNodes.begin(),program.patternNodes.end(),driver)!=program.patternNodes.end())return fail("MANIPULATION_PATTERN_DRIVER_UNSUPPORTED: patterned driver node #"+std::to_string(driver)+" requires an explicit individual driver; patterned rigid followers are supported");
+    if(mate){const auto selected=std::find_if(program.constraints.begin(),program.constraints.end(),[&](const AssemblyMotionRelation& edge){return edge.mate.id==mate;});
+        if(selected==program.constraints.end())return fail("MANIPULATION_MATE_NOT_FOUND: mate #"+std::to_string(mate));
+        const auto& type=selected->mate.type;
+        if(type!="concentric"&&type!="coincident"&&type!="revolute"&&type!="prismatic")return fail("MANIPULATION_UNSUPPORTED_JOINT: mate #"+std::to_string(mate)+" has type "+type);
+        if((type=="prismatic"&&mode!="translate")||((type=="revolute"||type=="coincident")&&mode!="rotate"))return fail("MANIPULATION_JOINT_MODE_MISMATCH: mate #"+std::to_string(mate)+" cannot "+mode);
+    }
     // Prefer the nearest joint of the selected rigid component. Selecting a
     // wheel drives its axle; selecting its rigidly attached handlebar steers.
     std::unordered_map<u64,int> distance;std::vector<u64> queue{program.rigidCluster.at(driver)};distance[queue[0]]=0;
@@ -673,7 +689,7 @@ bool selectAssemblyManipulationJoint(const AssemblyManipulationProgram& program,
             if(equivalent){if(candidate.mate<joint.mate)joint=candidate;}else ambiguous=true;
         }
     }
-    if(!joint.mate)return fail("MANIPULATION_NO_GROUNDED_JOINT: requires a grounded revolute/prismatic/coincident/concentric joint with individual unpatterned instances");
+    if(!joint.mate)return fail("MANIPULATION_NO_GROUNDED_JOINT: driver node #"+std::to_string(driver)+(mate?" and mate #"+std::to_string(mate):std::string{})+" have no eligible grounded moving side for "+mode);
     if(ambiguous&&!mate){joint={};return fail("MANIPULATION_AMBIGUOUS_JOINT: specify a mate ID for the desired degree of freedom");}
     return true;
 }
@@ -838,7 +854,7 @@ bool previewAssemblyManipulation(const AssemblyManipulationProgram& program,u64 
         preview.diagnostics.unconstrainedNodes=program.diagnostics.unconstrainedNodes;
         if(joint.constrained&&!constrainedManipulation(program,joint,delta,world,preview,error))return fail(error);
         for(auto& placement:preview.placements){
-            if(joint.constrained&&std::binary_search(joint.movingNodes.begin(),joint.movingNodes.end(),placement.node))placement.world=world.at(placement.node);
+            if(joint.constrained&&std::binary_search(joint.movingNodes.begin(),joint.movingNodes.end(),placement.node))placement.world=world.at(placement.node)*baselineWorld.at(placement.node).inverted()*placement.world;
             else if(std::binary_search(joint.movingNodes.begin(),joint.movingNodes.end(),placement.node))placement.world=change*placement.world;
             if(!finiteFrame(placement.world))return fail("MANIPULATION_NONFINITE_POSE: preview is not a finite rigid transform");
             if(!placement.copy)world[placement.node]=placement.world;}
@@ -853,12 +869,34 @@ bool previewAssemblyManipulation(const AssemblyManipulationProgram& program,u64 
             preview.diagnostics.mates.push_back(r);preview.diagnostics.frames.push_back({r.id,s.pa,s.za,s.pb,s.zb});
             if(!satisfiedResidual(r))return fail("MANIPULATION_CONSTRAINT_VIOLATION: drive violates mate #"+std::to_string(r.id));
         }
+        // Occurrence-linked layouts can change when their source itself moves.
+        // One carry frame cannot simultaneously retain the old rigid layout and
+        // apply a different live source layout. Reject that exact combination;
+        // independent feature/sketch sources retain their existing custody.
+        for(const auto& item:program.patternRecipes){const auto* type=item.second.find("type");const auto* source=item.second.find("source");if(!type||!source)continue;
+            u64 sourceNode=0;bool inherited=false;
+            if(type->str=="pattern_driven"){sourceNode=(u64)source->find("node")->num;inherited=true;}
+            else if(type->str=="chain")if(const auto* alternate=source->find("alternate_node"))sourceNode=(u64)alternate->num;
+            if(!sourceNode)continue;
+            auto same=[&](const Mat4& a,const Mat4& b){return origin(a).approx(origin(b),kPositionTolerance)&&a.transformDir({1,0,0}).approx(b.transformDir({1,0,0}),1e-8)&&a.transformDir({0,1,0}).approx(b.transformDir({0,1,0}),1e-8);};
+            bool compatible=true;
+            if(inherited){const Mat4 oldSeed=baselineWorld.at(sourceNode).inverted(),newSeed=world.at(sourceNode).inverted();
+                for(size_t i=0;i<program.baseline.size();++i)if(program.baseline[i].node==sourceNode)compatible&=same(program.baseline[i].world*oldSeed,preview.placements[i].world*newSeed);
+            }else compatible=same(baselineWorld.at(sourceNode),world.at(sourceNode));
+            if(!compatible)return fail("MANIPULATION_PATTERN_SOURCE_CONFLICT: pattern node #"+std::to_string(item.first)+" cannot retain its rigid layout while occurrence source #"+std::to_string(sourceNode)+" changes under mate #"+std::to_string(joint.mate));
+        }
         using V=arkjson::Value;preview.commands=V::makeArr();
         for(const auto& placement:preview.placements){if(placement.copy||std::find(program.fixedNodes.begin(),program.fixedNodes.end(),placement.node)!=program.fixedNodes.end())continue;
             const Mat4& authored=program.authoredWorld.at(placement.node);double difference=0;
             for(int i=0;i<16;++i)difference=std::max(difference,std::fabs(placement.world.m[i]-authored.m[i]));
             if(difference<1e-12)continue;
             const Mat4 local=program.parentFrames.at(placement.node).inverted()*placement.world;
+            if(program.patternRecipes.count(placement.node)){
+                const Mat4 frame=local*program.patternLocalFrames.at(placement.node).inverted();
+                V recipe=program.patternRecipes.at(placement.node),matrix=V::makeArr();for(double value:frame.m)matrix.arr.push_back(V::makeNum(value));recipe.set("carry_frame",matrix);
+                AssemblyPattern checked;readAssemblyPattern(checked,recipe);
+                V command=V::makeObj();command.set("op",V::makeStr("assembly.edit"));command.set("id",V::makeNum((double)placement.node));command.set("pattern",assemblyPatternToJson(checked));preview.commands.arr.push_back(std::move(command));continue;
+            }
             const double cy=std::hypot(local.m[0],local.m[1]),ry=std::atan2(-local.m[2],cy);
             const double rx=cy>1e-10?std::atan2(local.m[6],local.m[10]):0;
             const double rz=cy>1e-10?std::atan2(local.m[1],local.m[0]):std::atan2(-local.m[4],local.m[5]);

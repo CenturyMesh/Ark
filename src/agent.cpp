@@ -1,4 +1,5 @@
 #include "ark/agent.hpp"
+#include "ark/agent_response_032d.hpp"
 #include "ark/document_container.hpp"
 #include "ark/authoring_024b.hpp"
 #include "ark/appearance_024b.hpp"
@@ -21,6 +22,7 @@
 #include "ark/mesh_analysis.hpp"
 #include "ark/mesh_model.hpp"
 #include "ark/io.hpp"
+#include "ark/snapshot_032d.hpp"
 #include "ark/compute.hpp"
 #include "ark/notch.hpp"
 #include "ark/step_export.hpp"
@@ -220,9 +222,14 @@ MeshSelection meshSelection(const Document& d,const V& args){
     }else if(auto feature=args.find("id")){s.feature=id(*feature);s.cacheKey=s.feature;}
     return s;
 }
-Mesh selectedMesh(Document& d,const V& args,std::vector<AssemblyPlacement>* captured=nullptr){
+Mesh selectedMesh(Document& d,const V& args,std::vector<AssemblyPlacement>* captured=nullptr,std::vector<SnapshotMaterial>* styles=nullptr){
     MeshSelection sel=meshSelection(d,args);
     Mesh m;
+    std::unordered_map<u64,std::vector<SnapshotMaterial>> bodyStyles;
+    auto append=[&](const Body& body,const Mesh& part,const Mat4& world=Mat4::identity()){
+        if(styles){auto found=bodyStyles.find(body.id);if(found==bodyStyles.end())found=bodyStyles.emplace(body.id,snapshotBodyMaterials(d,body,part)).first;styles->insert(styles->end(),found->second.begin(),found->second.end());}
+        m.append(part,world);
+    };
     if(!d.assembly.empty()&&!sel.feature){
         std::vector<AssemblyPlacement> placements;std::string error;if(!resolveAssembly(d,placements,error))throw std::runtime_error(error);
         std::unordered_map<u64,Mesh> parts;bool placed=false;
@@ -231,12 +238,12 @@ Mesh selectedMesh(Document& d,const V& args,std::vector<AssemblyPlacement>* capt
             if(sel.useNode)placed=true;
             if(!p.visible)continue;
             auto part=parts.find(p.feature);if(part==parts.end())for(auto& b:d.evalBodies)if(b.id==p.feature){part=parts.emplace(p.feature,b.tessellate(d.tessOpt)).first;break;}
-            if(part!=parts.end()){m.append(part->second,p.world);if(captured)captured->push_back(p);}
+            if(part!=parts.end()){for(const auto& body:d.evalBodies)if(body.id==p.feature){append(body,part->second,p.world);break;}if(captured)captured->push_back(p);}
         }
         if(sel.useNode&&!placed)throw std::runtime_error("Assembly copy is not placed");
     }else{
         if(sel.useNode)throw std::runtime_error("No assembly instance selected");
-        auto hidden=consumed(d);for(auto& b:d.evalBodies)if(sel.feature?b.id==sel.feature:!hidden.count(b.id))m.append(b.tessellate(d.tessOpt));
+        auto hidden=consumed(d);for(auto& b:d.evalBodies)if(sel.feature?b.id==sel.feature:!hidden.count(b.id))append(b,b.tessellate(d.tessOpt));
     }
     if(!m.triCount())throw std::runtime_error("No mesh for requested selection");
     return m;
@@ -706,9 +713,9 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
                 if(filtered){V retry=args;retry.set("detail",V::makeStr("design"));recovery.set("retry_arguments",std::move(retry));}
                 failure.set("recovery",std::move(recovery));return result(failure,true);
             };
-            if(auto requested=args.find("detail")){if(requested->t!=V::Str||(requested->str!="summary"&&requested->str!="design"))return invalidDetail("doc_info detail must be summary or design");detail=requested->str;}
+            if(auto requested=args.find("detail")){if(requested->t!=V::Str||(requested->str!="summary"&&requested->str!="design"&&requested->str!="revision"))return invalidDetail("doc_info detail must be summary, design or revision");detail=requested->str;}
             if(filtered){if(args.find("detail")&&detail!="design")return invalidDetail("doc_info ids/sections require detail design; retry with detail design and the same filters");detail="design";}
-            return result(detail=="design"?selectedDesignView(document,revision,args):info());
+            return result(detail=="design"?selectedDesignView(document,revision,args):detail=="revision"?revisionReceipt032D(document,revision):info());
         }
         if(tool=="history_info"){
             size_t limit=64;if(const auto* value=args.find("limit")){if(value->t!=V::Num||value->num<1||value->num>64||value->num!=std::floor(value->num))throw std::runtime_error("History limit must be an integer from 1 to 64");limit=(size_t)value->num;}
@@ -824,7 +831,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
             if(auto p=args.find("faces")){if(p->t!=V::Bool)throw std::runtime_error("faces must be boolean");request.set("faces",*p);}return result(nativeWorkerRequest(request));
         }
         if(tool=="native_inspect"){
-            const auto detail=args.find("detail")?str(args,"detail"):"full";if(detail!="full"&&detail!="report")throw std::runtime_error("native_inspect detail must be full or report");
+            const auto detail=args.find("detail")?str(args,"detail"):"full";if(detail!="full"&&detail!="report"&&detail!="properties")throw std::runtime_error("native_inspect detail must be full, report or properties");
             const double gravityMs2=gravity(args);
             u64 selected=id(field(args,"id"));
             auto* feature=document.find(selected);
@@ -837,8 +844,14 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
             catch(const std::exception&){if(density.present)throw std::runtime_error("Density needs an exact solid");throw;}
             for(const Body& body:document.evalBodies)if(body.id==selected){
                 V r=V::makeObj();r.set("id",V::makeNum((double)selected));
-                if(auto report=body.nativeData.find("report"))r.set("report",*report);
-                if(auto holes=body.nativeData.find("holes"))r.set("holes",*holes);
+                if(auto report=body.nativeData.find("report")){
+                    if(detail=="properties"){
+                        V properties=V::makeObj();for(const char* key:{"kernel","kernel_version","brep_valid","solids","shells","faces","edges","vertices","volume_mm3","area_mm2","bounds_mm","closed","connected","display_mesh_authoritative","self_intersections_checked","manufacturing_authoritative"})if(const auto* value=report->find(key))properties.set(key,*value);
+                        r.set("report",std::move(properties));r.set("report_scope",V::makeStr("current_native_validity_and_properties; operation diagnostics omitted"));
+                    }else r.set("report",*report);
+                }
+                if(detail!="properties")if(auto holes=body.nativeData.find("holes"))r.set("holes",*holes);
+                r.set("revision",V::makeNum((double)revision));r.set("geometry_authority",V::makeStr("native_brep"));
                 if(detail=="full")for(auto key:{"panels","bends","topology"})if(auto data=body.nativeData.find(key))r.set(key,*data);
                 r.set("detail",V::makeStr(detail));r.set("topology_included",V::makeBool(detail=="full"));
                 r.set("read_only_geometry",V::makeBool(feature->type==FeatureType::SourceSheet));
@@ -859,7 +872,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
                 }else if(feature->type==FeatureType::ConstructionFrame){
                     const V* frame=body.nativeData.find("frame_report");
                     r.set("mass_checked",V::makeBool(frame&&frame->find("mass_checked")&&frame->find("mass_checked")->b));
-                    if(frame){r.set("frame_report",*frame);if(auto mass=frame->find("mass_g")){setMass(r,mass->num,gravityMs2);if(auto center=frame->find("center_mm"))r.set("center_mm",*center);}else r.set("mass_reason",V::makeStr("Assign density to each frame profile"));}
+                    if(frame){if(detail!="properties")r.set("frame_report",*frame);if(auto mass=frame->find("mass_g")){setMass(r,mass->num,gravityMs2);if(auto center=frame->find("center_mm"))r.set("center_mm",*center);}else r.set("mass_reason",V::makeStr("Assign density to each frame profile"));}
                 }else if(density.present){
                     V response;try{response=centroidOf(document,selected);}catch(const std::exception&){throw std::runtime_error("Density needs an exact solid");}
                     const V* volume=response.find("volume_mm3");const V* center=response.find("center_mm");
@@ -1039,6 +1052,24 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
             V report=inspectAssemblyMotion(motionProgram_,driver,speed,time.num,offset);report.set("revision",V::makeNum((double)revision));return result(report);
         }
         if(tool=="assembly_info"){
+            if(const auto* detail=args.find("detail")){
+                if(detail->t!=V::Str||(detail->str!="full"&&detail->str!="result"))throw std::runtime_error("assembly_info detail must be full or result");
+                if(detail->str=="result"){
+                    size_t selected=0;for(const char* key:{"measure","clearance","drive","sweep"})selected+=args.find(key)?1:0;
+                    if(selected!=1)throw std::runtime_error("assembly_info detail result requires exactly one of measure, clearance, drive or sweep");
+                    for(const auto& field:args.obj)if(field.first!="detail"&&field.first!="measure"&&field.first!="clearance"&&field.first!="drive"&&field.first!="sweep")throw std::runtime_error("assembly_info detail result does not accept: "+field.first);
+                    V receipt=V::makeObj();receipt.set("revision",V::makeNum((double)revision));receipt.set("detail",V::makeStr("result"));receipt.set("document_unchanged",V::makeBool(true));
+                    if(const auto* drive=args.find("drive"))receipt.set("drive",driveReport(driveAssembly(document,*drive),revision));
+                    else if(const auto* sweep=args.find("sweep"))receipt.set("sweep",inspectAssemblySweep031B(document,*sweep));
+                    else{
+                        std::vector<AssemblyPlacement> placements;std::string error;AssemblyDiagnostics diagnostics;if(!resolveAssembly(document,placements,error,&diagnostics))throw std::runtime_error(error);
+                        receipt.set("diagnostics",assemblyDiagnosticsJson(diagnostics));
+                        if(const auto* measure=args.find("measure"))attachMeasure(document,receipt,placements,*measure);
+                        else attachClearance(document,receipt,placements,*args.find("clearance"));
+                    }
+                    return result(receipt);
+                }
+            }
             const double gravityMs2=gravity(args);
             std::vector<AssemblyPlacement> placements;std::string error;AssemblyDiagnostics diagnostics;if(!resolveAssembly(document,placements,error,&diagnostics))throw std::runtime_error(error);
             V r=info(),nodes=V::makeArr(),bom=V::makeArr();std::map<u64,size_t> quantities;
@@ -1128,6 +1159,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
         if(tool=="drawing_inspect")return result(inspectDrawing(document,args,revision));
         if(tool=="drawing_export")return result(exportDrawing(document,args,revision));
         if(tool=="doc_apply"){
+            if(const auto* detail=args.find("detail"))if(detail->t!=V::Str||(detail->str!="full"&&detail->str!="design"&&detail->str!="changes"))throw std::runtime_error("doc_apply detail must be full, design or changes");
             if(args.find("candidate_id"))return result(commitPrepared(args));
             if(args.find("accept_dfm"))throw std::runtime_error("DFM_ACCEPTANCE_INVALID: acceptance requires a retained manufacturing proposal candidate");
             if(auto expected=args.find("expected_revision")){
@@ -1332,7 +1364,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
                 for(size_t i=0;i<document.features.size();++i){document.features[i].material=std::move(next.features[i].material);document.features[i].appearance=std::move(next.features[i].appearance);document.features[i].part=std::move(next.features[i].part);document.features[i].faceAppearances=std::move(next.features[i].faceAppearances);}
             }else{if(!args.find("checks")&&!drawingEdits)validated(next);remember();document=std::move(next);}
             ++revision;
-            V r=info();r.set("created_ids",created);r.set("created_node_ids",createdNodes);r.set("created_mate_ids",createdMates);r.set("sheet_edits",sheetEdits);r.set("geometry_recomputed",V::makeBool(!appearanceOnly));if(args.find("checks"))r.set("conditions",conditionReport);return result(r);
+            V r=args.find("detail")&&args.find("detail")->str=="changes"?revisionReceipt032D(document,revision):info();r.set("created_ids",created);r.set("created_node_ids",createdNodes);r.set("created_mate_ids",createdMates);r.set("sheet_edits",sheetEdits);r.set("geometry_recomputed",V::makeBool(!appearanceOnly));if(args.find("checks"))r.set("conditions",conditionReport);return result(r);
         }
         if(tool=="doc_undo"||tool=="doc_redo"){
             if(document.iterationHistory.t==V::Obj){Document next;iterationRestore(document,iterationUndoTarget(document,tool=="doc_redo"),next);validated(next);document=std::move(next);++revision;prepared_.clear();return result(info());}
@@ -1392,8 +1424,8 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
             if(args.find("candidate_id"))return snapshotCandidate(args);
             bool inlineImage=true;if(const auto* flag=args.find("inline_image")){if(flag->t!=V::Bool)throw std::runtime_error("inline_image must be boolean");inlineImage=flag->b;}
             if(!inlineImage&&path.empty())throw std::runtime_error("A path is required when inline_image is false");
-            std::vector<AssemblyPlacement> captured;Mesh m=selectedMesh(document,args,&captured);SnapCam camera=configuredSnapshotCamera(args,m.computeBBox(),view);
-            const int width=inlineImage?1024:1280,height=inlineImage?640:800;const Image image=renderSnapshot(m,width,height,camera);
+            std::vector<AssemblyPlacement> captured;std::vector<SnapshotMaterial> materials;Mesh m=selectedMesh(document,args,&captured,&materials);SnapCam camera=configuredSnapshotCamera(args,m.computeBBox(),view);
+            const int width=inlineImage?1024:1280,height=inlineImage?640:800;const Image image=renderSnapshot(m,width,height,camera,materials);
             if(!inlineImage&&!path.empty()&&!writePNG(path.c_str(),image))throw std::runtime_error("Snapshot failed");
             MeshSelection sel=meshSelection(document,args);
             V r=V::makeObj();r.set("path",V::makeStr(path));r.set("view",V::makeStr(view));r.set("display_mesh_authoritative",V::makeBool(false));r.set("authority",V::makeStr("display_mesh"));
@@ -1401,6 +1433,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
             if(sel.copy>=0)r.set("copy",V::makeNum(sel.copy));
             V evidence=V::makeObj();evidence.set("revision",V::makeNum((double)revision));evidence.set("current_revision",V::makeNum((double)revision));evidence.set("view",V::makeStr(view));evidence.set("width",V::makeNum(width));evidence.set("height",V::makeNum(height));evidence.set("authority",V::makeStr("display_mesh"));evidence.set("capture_source",V::makeStr("software_snapshot"));
             V viewState=V::makeObj();viewState.set("target_mm",snapshotVectorValue(camera.target));viewState.set("direction_target_to_eye",snapshotVectorValue(camera.direction));viewState.set("up",snapshotVectorValue(camera.up));viewState.set("distance_mm",V::makeNum(camera.dist));viewState.set("fov_deg",V::makeNum(camera.fovDeg));evidence.set("view_state",viewState);
+            evidence.set("appearance",V::makeStr("authored_body_and_face_color_opacity_emission"));evidence.set("emission_sample",V::makeStr("steady"));evidence.set("transparency",V::makeStr("sorted_triangles"));evidence.set("textures_and_stamps",V::makeBool(false));
             if(sel.feature)evidence.set("feature_id",V::makeNum((double)sel.feature));if(sel.useNode){evidence.set("occurrence_id",V::makeNum((double)sel.node));if(!sel.nodeName.empty())evidence.set("name",V::makeStr(sel.nodeName));if(sel.copy>=0)evidence.set("copy",V::makeNum(sel.copy));std::set<u64> definitions;for(const auto& occurrence:captured)definitions.insert(occurrence.feature);if(definitions.size()==1)evidence.set("feature_id",V::makeNum((double)*definitions.begin()));else{V ids=V::makeArr();for(u64 feature:definitions)ids.arr.push_back(V::makeNum((double)feature));evidence.set("feature_ids",ids);}}
             for(const char* key:{"label","reference","stage"})if(const auto* value=args.find(key)){if(value->t!=V::Str||value->str.size()>128)throw std::runtime_error("Snapshot label/reference/stage must be a bounded string");evidence.set(key,*value);}
             evidence.set("committed",V::makeBool(true));r.set("revision",V::makeNum((double)revision));r.set("visual_evidence",evidence);V output=result(r);
@@ -1502,8 +1535,12 @@ V AgentSession::tools(bool detailed){
     V list=V::makeArr();for(auto& d:defs){V t=V::makeObj(),schema,annotations=V::makeObj();t.set("name",V::makeStr(d.name));t.set("description",V::makeStr(!detailed&&std::string(d.name)=="doc_apply"?"Atomic batch of 1..128 modeling commands. Core forms: param.set{name,expr}; feature.add{type,name,p,inputs?,native?}; feature.edit{id,p?,native?,name?}; feature.remove{id}. Target id is a positive number or unique name; p maps actual authored parameter keys to numbers/expression strings. Read object_context for the target before editing. Native box keys are width/depth/height; legacy box keys are dx/dy/dz. Native box edit example: {op:feature.edit,id:Native block,p:{height:9}}. Pass expected_revision; stale revisions and failed evaluation leave the document unchanged. Discover operation contracts and examples with agent_onboard for your domain; agent_onboard{topic:automation} supplies the full command reference. Supports parameters, materials/transparency, features, sketches, datums, assemblies, mates, mate-aware assembly.drive and sheet edits. Inspect assembly_info.drive before committing a joint movement. doc_preview evaluates and caches a candidate; doc_apply{candidate_id,expected_revision} commits without recomputation. Optional checks:[{id?,query:{tool,args,path},op:ge|le|eq|between|true|false,value?,min?,max?,tolerance?,parameters?,diagnose?}] must all pass before commit; failures roll back and return measured residuals. diagnose adds bounded local sensitivity probes. Material density accepts g/cm3 or density_kg_m3, plus physical SI elastic properties. Angles are degrees except trig expressions in radians; lengths mm.":d.desc));arkjson::parse(d.schema,schema);if(std::string(d.name)=="mesh_raycast"||std::string(d.name)=="export_mesh"||std::string(d.name)=="snapshot"){
         V props=schema.find("properties")?*schema.find("properties"):V::makeObj(),node=V::makeObj(),kinds=V::makeArr(),integer=V::makeObj(),text=V::makeObj(),copy=V::makeObj();integer.set("type",V::makeStr("integer"));integer.set("minimum",V::makeNum(1));text.set("type",V::makeStr("string"));kinds.arr.push_back(integer);kinds.arr.push_back(text);node.set("anyOf",kinds);copy.set("type",V::makeStr("integer"));copy.set("minimum",V::makeNum(0));copy.set("maximum",V::makeNum(31));props.set("node",node);props.set("copy",copy);schema.set("properties",props);
     }
-        if(std::string(d.name)=="native_inspect"){V props=*schema.find("properties"),detail;arkjson::parse(R"({"type":"string","enum":["full","report"],"description":"report omits topology/panels/bends; use for compact validity and physical-property inspection."})",detail);props.set("detail",detail);schema.set("properties",props);}
+        if(std::string(d.name)=="native_inspect"){V props=*schema.find("properties"),detail;arkjson::parse(R"({"type":"string","enum":["full","report","properties"],"description":"properties projects current native validity, volume/area/bounds and authority flags; operation diagnostics/openings/topology omitted. report retains operation diagnostics; full includes topology/panels/bends."})",detail);props.set("detail",detail);schema.set("properties",props);}
+        if(std::string(d.name)=="doc_info"){V props=*schema.find("properties"),detail;arkjson::parse(R"({"type":"string","enum":["summary","design","revision"],"description":"revision returns current revision/status without any object inventory; summary preserves the legacy catalog; design supports ids/sections."})",detail);props.set("detail",detail);schema.set("properties",props);}
+        if(std::string(d.name)=="agent_onboard"){V props=*schema.find("properties"),detail;arkjson::parse(R"({"type":"string","enum":["full","guide"],"description":"guide returns reusable static guidance without document state; full preserves document inventory. Prefer guide plus doc_info detail revision and selected object_context."})",detail);props.set("detail",detail);schema.set("properties",props);}
+        if(std::string(d.name)=="assembly_info"){V props=*schema.find("properties"),detail;arkjson::parse(R"({"type":"string","enum":["full","result"],"description":"result requires exactly one measure/clearance/drive/sweep and returns its evidence plus revision, without document inventory/BOM/mass/interference. full/default preserves legacy inspection."})",detail);props.set("detail",detail);schema.set("properties",props);}
 if(std::string(d.name)=="doc_apply"){
+        {V props=*schema.find("properties"),detail;arkjson::parse(R"({"type":"string","enum":["full","design","changes"],"description":"changes returns revision/evaluation/created-ID/check receipts without a document inventory; full/default and design retain the legacy response."})",detail);props.set("detail",detail);schema.set("properties",props);}
         if(detailed)t.set("description",V::makeStr(t.find("description")->str+" Joint limits: prismatic (alias slider) aligns axes and locks relative orientation, leaving axial translation. Revolute/prismatic accept limits:{min:number|expression,max:number|expression}; limits:null clears. Bounds are signed B-relative-A coordinates in deg/mm, revolute spans must be less than 360 degrees. Drive rejects limits crossed along the full requested movement. These additions save document version31. assembly_info.drive.joint reports position/unit/limited/min/max/coordinate_sign."));
         V commands=*schema.find("properties")->find("commands"),command=*commands.find("items"),commandProps=*command.find("properties"),limits;
         // Expose the actual common command fields at discovery. Detailed native,
@@ -1542,6 +1579,7 @@ if(std::string(d.name)=="doc_apply"){
             V fields;arkjson::parse(R"({"parameters":{"type":"object","additionalProperties":{"type":["number","string"]}},"visibility":{"type":"object","additionalProperties":{"type":"boolean"}},"roots":{"type":["array","null"],"items":{"type":"integer","minimum":1},"uniqueItems":true},"source_sha256":{"type":"string","pattern":"^[0-9a-f]{64}$"},"source_revision":{"type":"string","minLength":1}})",fields);for(const auto& entry:fields.obj)commandProps.set(entry.first,entry.second);}
         commandProps.set("drawing",drawingAuthoringSchema());
         {V pattern;arkjson::parse(R"({"oneOf":[{"type":"null"},{"type":"object","properties":{"type":{"type":"string","enum":["linear","circular","pattern_driven","sketch_driven","curve_driven","chain"]},"count":{"type":["number","string"],"description":"2..32 for curve/chain; pattern/sketch may infer stable slots."},"dx":{"type":["number","string"]},"dy":{"type":["number","string"]},"dz":{"type":["number","string"]},"step":{"type":["number","string"]},"axis":{"type":"string","enum":["X","Y","Z"]},"skips":{"type":"array","items":{"type":"integer","minimum":1,"maximum":31},"uniqueItems":true,"maxItems":31},"source":{"type":"object","description":"Bound source recipe. Onboard assembly for actual points, guide, inheritance and chain contracts.","properties":{"node":{"type":["integer","string"]},"feature":{"type":["integer","string"]},"sketch":{"type":"string"},"points":{"type":"array","items":{"type":"string"}},"reference":{"type":"string"},"spacing":{"enum":["equal","pitch"]},"pitch":{"type":["number","string"]},"margin":{"type":["number","string"]},"alignment":{"enum":["fixed","tangent"]},"normal":{"type":"array","minItems":3,"maxItems":3,"items":{"type":["number","string"]}},"closed":{"type":"boolean"},"endpoint":{"enum":["exclude","include"]},"max_source_error":{"type":["number","string"]},"alternate_feature":{"type":["integer","string"]},"alternate_node":{"type":["integer","string"]},"alternate_angle":{"type":["number","string"]}},"additionalProperties":false}},"required":["type"],"additionalProperties":false}]})",pattern);commandProps.set("pattern",pattern);}
+        {V pattern=*commandProps.find("pattern"),variants=*pattern.find("oneOf"),shape=variants.arr[1],props=*shape.find("properties"),carry;arkjson::parse(R"({"type":"array","minItems":16,"maxItems":16,"items":{"type":"number"},"description":"Optional proper rigid column-major transform carrying the entire pattern before node placement; identity when omitted."})",carry);props.set("carry_frame",carry);shape.set("properties",props);variants.arr[1]=shape;pattern.set("oneOf",variants);commandProps.set("pattern",pattern);}
         {V operation=*commandProps.find("op"),choices=*operation.find("enum");for(const char* family:{"miter","swept_flange","corner","rip","tab"})for(const char* action:{"add","edit","remove"})choices.arr.push_back(V::makeStr(std::string("sheet.")+family+"."+action));choices.arr.push_back(V::makeStr("sheet.bend_table.set"));choices.arr.push_back(V::makeStr("sheet.bend_table.remove"));operation.set("enum",choices);commandProps.set("op",operation);
             V object;arkjson::parse(R"({"type":"object","description":"Editable authored sheet operation; agent_onboard sheet supplies exact operation-specific required fields. Unknown geometry fields reject at runtime."})",object);for(const char* field:{"miter","swept_flange","corner","rip","tab","table","base","flange","opening","hem","stamp"})if(std::string(field)=="corner"){V options=V::makeArr();options.arr.push_back(*commandProps.find("corner"));options.arr.push_back(object);V combined=V::makeObj();combined.set("oneOf",options);commandProps.set(field,combined);}else commandProps.set(field,object);
         }

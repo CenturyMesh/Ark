@@ -23,14 +23,6 @@ GeometryReference resolveGeometryReference(const Document& document, u64 feature
     const auto* topology = body->nativeData.find("topology");
     if (!brep || brep->t != arkjson::Value::Str || !topology)
         throw std::runtime_error("Reference producer has no exact B-rep topology");
-    arkjson::Value request = arkjson::Value::makeObj();
-    request.set("input_brep", *brep);
-    request.set("topology", *topology);
-    request.set("reference", arkjson::Value::makeStr(name));
-    request.set("fraction", arkjson::Value::makeNum(fraction));
-    arkjson::Value worker = arkjson::Value::makeObj();
-    worker.set("operation", arkjson::Value::makeStr("reference_frame"));
-    worker.set("request", std::move(request));
     const std::string topologyIdentity=topology->dump();
     const std::string sample=name+":"+arkjson::Value::makeNum(fraction).dump();
     size_t identityBytes=brep->str.size()+topologyIdentity.size();
@@ -40,7 +32,16 @@ GeometryReference resolveGeometryReference(const Document& document, u64 feature
     auto& cache=document.referenceFrameCache[feature];
     if(cache.brep!=brep->str||cache.topology!=topologyIdentity){cache={};if(cacheable){cache.brep=brep->str;cache.topology=topologyIdentity;}}
     auto existing=cache.frames.find(sample);
-    auto response=existing!=cache.frames.end()?existing->second:nativeWorkerRequest(worker);
+    arkjson::Value response;
+    if(existing!=cache.frames.end())response=existing->second;
+    else{
+        // Cache validation above still compares the exact current B-rep and
+        // topology. Construct their large transport copies only on a miss.
+        arkjson::Value request=arkjson::Value::makeObj(),worker=arkjson::Value::makeObj();
+        request.set("input_brep",*brep);request.set("topology",*topology);
+        request.set("reference",arkjson::Value::makeStr(name));request.set("fraction",arkjson::Value::makeNum(fraction));
+        worker.set("operation",arkjson::Value::makeStr("reference_frame"));worker.set("request",std::move(request));response=nativeWorkerRequest(worker);
+    }
     const auto* frame = response.find("frame");
     const auto* kind = response.find("kind");
     if (!frame || frame->t != arkjson::Value::Arr || frame->arr.size() != 16 ||

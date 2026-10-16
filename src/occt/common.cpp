@@ -273,10 +273,35 @@ V meshData(const TopoDS_Shape& s,double deflection,double angle){
     V mesh=V::makeObj();mesh.set("pos",pos);mesh.set("idx",idx);mesh.set("face_spans",spans);mesh.set("edges",edges);mesh.set("edge_visible",edgeVisible);return mesh;
 }
 std::string brepData(const TopoDS_Shape& shape){NativeProfileScope profile("brepData");std::ostringstream stream;BRepTools::Write(shape,stream,false,false,TopTools_FormatVersion_CURRENT);return base64Encode(stream.str());}
-TopoDS_Shape readBrep(const std::string& encoded){NativeProfileScope profile("readBrep");std::string bytes;{NativeProfileScope decode("brep.decode");bytes=base64Decode(encoded);}std::istringstream stream(std::move(bytes));TopoDS_Shape shape;BRep_Builder b;{NativeProfileScope read("brep.read");BRepTools::Read(shape,stream,b);}{NativeProfileScope validate("brep.validate");if(shape.IsNull()||!BRepCheck_Analyzer(shape).IsValid())throw std::runtime_error("Invalid native B-rep payload");}return shape;}
+namespace {
+TopoDS_Shape readCheckedBrepBytes(std::string bytes){std::istringstream stream(std::move(bytes));TopoDS_Shape shape;BRep_Builder builder;{NativeProfileScope read("brep.read");BRepTools::Read(shape,stream,builder);}{NativeProfileScope validate("brep.validate");if(shape.IsNull()||!BRepCheck_Analyzer(shape).IsValid())throw std::runtime_error("Invalid native B-rep payload");}return shape;}
+V measuredShapeReport(const TopoDS_Shape& shape,bool requireSolid);
+// A request-local proof created only by decoding and checking its own B-rep.
+// It exposes no mutable shape or unchecked construction from another shape.
+// Measurements are fresh; neither saved reports nor process caches are evidence.
+class ValidatedBrepSnapshot {
+    TopoDS_Shape shape_;
+    std::string identity_;
+public:
+    ValidatedBrepSnapshot(const std::string& encoded,const std::string& expectedIdentity){
+        NativeProfileScope profile("readBrep");std::string bytes;{NativeProfileScope decode("brep.decode");bytes=base64Decode(encoded);}identity_=sha256(bytes);
+        if(identity_!=expectedIdentity)throw std::runtime_error("Saved native result rejected: B-rep digest mismatch");shape_=readCheckedBrepBytes(std::move(bytes));
+    }
+    ValidatedBrepSnapshot(const ValidatedBrepSnapshot&)=delete;
+    ValidatedBrepSnapshot& operator=(const ValidatedBrepSnapshot&)=delete;
+    const TopoDS_Shape& shape() const{return shape_;}
+    const std::string& identity() const{return identity_;}
+    V report(bool requireSolid) const{NativeProfileScope profile("shapeReport");{NativeProfileScope reused("report.reuse_validation");}return measuredShapeReport(shape_,requireSolid);}
+};
+}
+TopoDS_Shape readBrep(const std::string& encoded){NativeProfileScope profile("readBrep");std::string bytes;{NativeProfileScope decode("brep.decode");bytes=base64Decode(encoded);}return readCheckedBrepBytes(std::move(bytes));}
 std::string kernelVersion(){return OCC_VERSION_COMPLETE;}
 V shapeReport(const TopoDS_Shape& shape,bool requireSolid){
     NativeProfileScope profile("shapeReport");{NativeProfileScope validate("report.validate");if(shape.IsNull()||!BRepCheck_Analyzer(shape).IsValid())throw std::runtime_error("Native result failed B-rep validation");}
+    return measuredShapeReport(shape,requireSolid);
+}
+namespace {
+V measuredShapeReport(const TopoDS_Shape& shape,bool requireSolid){
     auto solids=shapes(shape,TopAbs_SOLID);
     const double measuredVolume=solids.empty()?0:properties(shape);
     if(requireSolid&&(solids.size()!=1||measuredVolume<=0)){
@@ -291,7 +316,6 @@ V shapeReport(const TopoDS_Shape& shape,bool requireSolid){
     V report=V::makeObj();report.set("kernel",V::makeStr("OCCT"));report.set("kernel_version",V::makeStr(kernelVersion()));report.set("brep_valid",V::makeBool(true));report.set("solids",V::makeNum(solids.size()));report.set("faces",V::makeNum(shapes(shape,TopAbs_FACE).size()));report.set("area_mm2",V::makeNum(properties(shape,'a')));report.set("volume_mm3",solids.empty()?V{}:V::makeNum(measuredVolume));report.set("display_mesh_authoritative",V::makeBool(false));report.set("self_intersections_checked",V::makeBool(false));report.set("manufacturing_authoritative",V::makeBool(false));
     V b=V::makeArr();for(auto x:bounds(shape))b.arr.push_back(V::makeNum(x));report.set("bounds_mm",b);return report;
 }
-namespace {
 V takeGeneratedField(V& object,const char* name,V fallback){for(auto& field:object.obj)if(field.first==name)return std::move(field.second);return fallback;}
 V* mutableGeneratedField(V& object,const char* name){for(auto& field:object.obj)if(field.first==name)return &field.second;return nullptr;}
 V completeSelectionReferencesOnShape(V result,const TopoDS_Shape& shape,const std::string& identity){

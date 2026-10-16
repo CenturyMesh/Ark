@@ -9,6 +9,18 @@ The public iteration and numeric runtime are defined in
 increasing sequence and its principal phase. The letter is a roadmap phase, not a
 month; it does not declare the phase complete. The `.ark` format evolves separately.
 
+032D addresses **A.01/A.02/A.03/A.04/B.04/D.02/D.04/E.01** through
+[compact agent contracts](AGENT_CONTRACTS_032D.md), [bounded preview custody](PREVIEWS_032D.md),
+[lossless shared geometry storage](GEOMETRY_STORAGE_032D.md),
+[portable native result identity](PERSISTENCE_032D.md),
+[patterned joint followers](ASSEMBLY_MOTION_032D.md) and
+[authored software snapshot appearance](SNAPSHOTS_032D.md).
+Its local scope is **Verificado no escopo** with 130/130 native and 85/85 portable
+checks, followed by targeted native/portable checks for bounded scheduling.
+[032D evidence](iterations/032D.md) distinguishes those runs and records failed attempts and limitations;
+universal five-second cold opening, three-size p95 performance and measured
+provider savings remain **Parcial** or unproven within the broader milestones.
+
 031B develops **A.01/A.03/A.04/B.02/B.03/B.04/D.02/D.04/E.01** through retained
 solid recipes, advanced surface/sweep controls, triangle diagnostics/editing,
 rigid mate condensation and sampled occurrence-bound cable inspection. Its
@@ -158,7 +170,7 @@ remain **Parcial**; primitive success does not establish general design quality.
 | D.01 | Quality/time/cost benchmark | Parcial | At least 30 versioned briefs, three repeats per initial configuration and blind human evaluation; cost per accepted design includes failures and coordination. Harness exists; 008D pilots were 0/9 and 4/9, 009B closed at 1/9. These results prove no savings. |
 | D.02 | Responsible engineer and adaptive team | Parcial | Compare Single/Focused/Parallel; give specialists concrete useful assignments and choose concurrency by measured benefit. No default turn/token budgets. Context, completion, feedback and retained DFM proposal handoffs have scoped evidence; general quality/cost benefit remains unproven. [019B scope](iterations/019B.md) [021B proposal scope](iterations/021B.md). [022B contract/onboarding and independent performance audit](iterations/022B.md) preserve Focused defaults and explicit-request-only drawing work. |
 | D.03 | Isolated part workspaces | Parcial | [023B design containers](DESIGN_CONTAINERS_023B.md) provide assembly-group checkout, explicit editable/read-only closure and atomic merge bound to parent source/revision and reviewed child digest. Conflicting ownership, unsupported cross-boundary references and stale source reject without silent rebase. Large-project scaling and general distributed collaboration remain unqualified. |
-| D.04 | Multimodal feedback and correction | Parcial | Shared author/reviewer diagnostics, revision-bound previews and intent-preserving correction remain the acceptance scope. 021B adds Z-up/custom snapshot cameras and a guarded Studio viewport readback after a local agent-activity audit; material-colored software pixels and native pattern-copy collision targeting remain open. [020B scope](iterations/020B.md) [021B scope](iterations/021B.md). [022B drawing curve origins, actual alternate-copy context/snapshot identities and guarded direct previews](iterations/022B.md). |
+| D.04 | Multimodal feedback and correction | Parcial | Shared author/reviewer diagnostics, revision-bound previews and intent-preserving correction remain the acceptance scope. 021B adds Z-up/custom snapshot cameras and guarded Studio viewport readback. [032D authored body/face colors and steady emission](SNAPSHOTS_032D.md) and [pattern-copy sampled native clearance](ASSEMBLY_MOTION_032D.md) have local checked scope; textures/stamps, continuous collision and general correction quality remain separate. [020B scope](iterations/020B.md) [021B scope](iterations/021B.md). [022B drawing curve origins, alternate-copy identities and guarded direct previews](iterations/022B.md). |
 | D.05 | Concept alternatives and reusable knowledge | Parcial | Compare alternatives against requirements, mass, process/cost and human preference using validated examples. A proposal must not be reported as a created part. |
 
 ## E — Industrial ecosystem
