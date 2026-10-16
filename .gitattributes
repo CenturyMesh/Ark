@@ -13,6 +13,7 @@
 *.arkops text eol=lf
 *.step -text -diff
 *.arkcut text eol=lf
+tests/corpus/*.json text eol=lf
 # Preserve the verified upstream amalgamation, including its comment spacing.
 third_party/sqlite/sqlite3* -text whitespace=-blank-at-eol
 # Preserve the pinned upstream decoder and license byte for byte.

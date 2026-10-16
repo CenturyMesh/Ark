@@ -138,6 +138,30 @@ try {
     New-Fixture $missing '0.9.2'
     Remove-Item -LiteralPath (Join-Path $missing 'ark-occt-worker.exe')
     Assert-Rejected { Get-ArkRuntimeVersion $missing } 'Incomplete native CAD runtime rejected'
+    $mixedMsvc = Join-Path $temporary 'mixed-msvc'
+    New-Fixture $mixedMsvc '0.9.2'
+    [IO.File]::WriteAllText((Join-Path $mixedMsvc 'libTKBRep.dll'), 'foreign naming family')
+    Assert-Rejected { Get-ArkRuntimeVersion $mixedMsvc } 'MSVC family rejects a partial foreign OCCT family'
+    $llvm = Join-Path $temporary 'llvm'
+    New-Fixture $llvm '0.9.2'
+    foreach ($name in @('TKernel.dll','TKBRep.dll','TKDESTEP.dll')) {
+        Move-Item -LiteralPath (Join-Path $llvm $name) -Destination (Join-Path $llvm ('lib' + $name))
+    }
+    foreach ($name in @('libc++.dll','libunwind.dll')) { [IO.File]::WriteAllText((Join-Path $llvm $name), 'matching synthetic runtime') }
+    Assert-Equal (Get-ArkRuntimeVersion $llvm) '0.9.2' 'Complete LLVM-MinGW runtime accepted with actual DLL names'
+    $llvmArchive = Join-Path $temporary 'llvm.zip'
+    Compress-ArkPackage $llvm $llvmArchive
+    Install-ArkStagedPackage $llvmArchive (New-Manifest $llvmArchive '0.9.2') $install | Out-Null
+    Assert-Equal (Get-ArkState $install).pending '0.9.2' 'LLVM-MinGW package stages through the same verified updater'
+    Assert-ArkInstalledRuntime $install '0.9.2' | Out-Null
+    $script:passed++
+    [IO.File]::WriteAllText((Join-Path $llvm 'TKBRep.dll'), 'wrong naming family')
+    Assert-Rejected { Get-ArkRuntimeVersion $llvm } 'Mixed OCCT runtime families rejected'
+    Remove-Item -LiteralPath (Join-Path $llvm 'TKBRep.dll')
+    Remove-Item -LiteralPath (Join-Path $llvm 'libunwind.dll')
+    Assert-Rejected { Get-ArkRuntimeVersion $llvm } 'Missing LLVM runtime dependency rejected'
+    Remove-Item -LiteralPath (Join-Path $llvm 'libTKBRep.dll')
+    Assert-Rejected { Get-ArkRuntimeVersion $llvm } 'Partial MinGW OCCT runtime rejected'
     # Completed baseline without state simulates a crash between move and pointer write.
     $recovered = Join-Path $temporary 'recovered'
     [IO.Directory]::CreateDirectory((Join-Path $recovered 'versions')) | Out-Null

@@ -30,7 +30,7 @@ try {
     & cmake --build $BuildDirectory --config Release --parallel $Jobs
     if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
     if ($Test) {
-        & ctest --test-dir $BuildDirectory -C Release --output-on-failure
+        & ctest --test-dir $BuildDirectory -C Release --output-on-failure --output-junit (Join-Path $BuildDirectory 'regression-results.xml')
         if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
     }
 } finally {

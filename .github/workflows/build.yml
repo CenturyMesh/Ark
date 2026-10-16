@@ -20,7 +20,13 @@ jobs:
       - uses: actions/checkout@v4
       - run: cmake -S . -B out/core -DARK_WITH_OCCT=OFF -DCMAKE_BUILD_TYPE=Release
       - run: cmake --build out/core --config Release --parallel 2
-      - run: ctest --test-dir out/core -C Release --output-on-failure
+      - run: ctest --test-dir out/core -C Release --output-on-failure --output-junit "${{ github.workspace }}/out/core/regression-results.xml"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: core-regressions-${{ matrix.os }}
+          path: out/core/regression-results.xml
+          if-no-files-found: warn
 
   windows-native-occt:
     runs-on: windows-2022
@@ -58,6 +64,15 @@ jobs:
       - name: Build and test ARK with native OCCT
         shell: pwsh
         run: ./scripts/build.ps1 -Test -Jobs 2
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-native-regressions
+          path: |
+            out/native-release/regression-results.xml
+            out/native-release/native-authoring-corpus-v1.receipt.json
+            out/native-release/drawing-dxf-v1.receipt.json
+          if-no-files-found: warn
       # Live Studio UI checks are opt-in; hosted OpenGL 3.3 availability is not assumed.
 
   linux-native-occt:
@@ -69,6 +84,15 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y build-essential cmake ninja-build curl ca-certificates unzip patchelf
       - name: Build and test Linux CLI, MCP and OCCT worker
         run: bash scripts/build.sh --test --jobs 2
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-native-regressions
+          path: |
+            out/linux-native-release/regression-results.xml
+            out/linux-native-release/native-authoring-corpus-v1.receipt.json
+            out/linux-native-release/drawing-dxf-v1.receipt.json
+          if-no-files-found: warn
       - name: Prepare Linux headless package
         run: bash scripts/package-linux.sh
       - name: Test relocated package without the build SDK

@@ -1,0 +1,24 @@
+{
+    "scope":  "Local integrity/provenance receipt; not independent attestation, publisher signing or hosted execution evidence.",
+    "publisher_signature":  "absent",
+    "evidence":  [
+                     {
+                         "sha256":  "8dd825616570686aec1bfd5a110df0a766a36bfde8dbbf42678133739d298c24",
+                         "name":  "sbom.cdx.json"
+                     },
+                     {
+                         "sha256":  "7cbfb836e334472dcd1651fc89f4ed65cf979d7e17ddc25b34c9b10f160147a3",
+                         "name":  "source-inventory.json"
+                     },
+                     {
+                         "sha256":  "276f02fb57fa95c55eee93d861f270b2ceeab4547c4730fdacfa2bdbbc525b34",
+                         "name":  "package-inventory.json"
+                     }
+                 ],
+    "schema":  "ark.artifact-receipt.v1",
+    "artifact":  {
+                     "sha256":  "06eee4e2116201084df41807e358ef9bfe79502f29a59e8f2066a1a5720543d5",
+                     "name":  "ark-windows-x64-0.9.30.zip",
+                     "size":  51116085
+                 }
+}

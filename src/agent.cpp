@@ -3,6 +3,8 @@
 #include "ark/authoring_024b.hpp"
 #include "ark/appearance_024b.hpp"
 #include "ark/skeleton.hpp"
+#include "ark/history_authoring.hpp"
+#include "ark/assembly_authoring.hpp"
 #include "ark/drawings.hpp"
 #include "ark/authoring_023b.hpp"
 #include "ark/design_containers.hpp"
@@ -184,6 +186,10 @@ void validatedMaterials(const Document& d){
 }
 void validated(Document& d){
     validatedMaterials(d);
+    for(const auto& node:d.assembly)if(const auto* definition=d.find(node.feature);definition&&definition->suppressed)
+        throw std::runtime_error("Assembly occurrence requires a suppressed definition; remove its occurrences before suppressing, or use assembly visibility for display");
+    validateAssemblyAuthoring(d);
+    verifyAssemblyExternalReferences(d);
     std::string manufacturingError;if(!validateManufacturingRoutes(d,manufacturingError))throw std::runtime_error(manufacturingError);
     if(std::any_of(d.assembly.begin(),d.assembly.end(),[](const AssemblyNode& n){return specializedAssemblyPattern(n.pattern);})){std::string patternError;if(!validateAssemblyPatternAuthoring(d,patternError))throw std::runtime_error(patternError);}
     d.recompute();
@@ -193,7 +199,7 @@ void validated(Document& d){
     validateAppearanceAuthoring024B(d,true);
     std::vector<AssemblyPlacement> placements;std::string error;if(!resolveAssembly(d,placements,error))throw std::runtime_error(error);
 }
-std::set<u64> consumed(const Document& d){std::set<u64> out;for(auto& f:d.features)if(featureConsumesInputBodies(f))for(auto x:f.inputs)out.insert(x);return out;}
+std::set<u64> consumed(const Document& d){return consumedFeatureInputs(d);}
 struct MeshSelection { u64 feature=0; u64 node=0; int copy=-1; std::string nodeName; bool useNode=false; u64 cacheKey=0; };
 MeshSelection meshSelection(const Document& d,const V& args){
     MeshSelection s;
@@ -630,16 +636,40 @@ V AgentSession::info() const {
     r.set("features_reused",V::makeNum(document.recomputeReused));r.set("features_evaluated",V::makeNum(document.recomputeEvaluated));
     r.set("feature_workers",V::makeNum(document.featureWorkers));r.set("native_threads_per_worker",V::makeNum(document.nativeThreadsPerWorker));r.set("parallel_features",V::makeNum(document.parallelFeatures));r.set("peak_parallel_features",V::makeNum(document.peakParallelFeatures));r.set("dependency_edges",V::makeNum(document.dependencyEdges));
     r.set("parameter_error",V::makeStr(document.parameterError));
+    r.set("history_tip",document.historyTip?V::makeNum((double)document.historyTip):V{});
     V drawings=V::makeArr();for(const auto& drawing:document.drawings)drawings.arr.push_back(*drawing.find("name"));r.set("drawings",drawings);
     V planes=V::makeArr(),sketches=V::makeArr();for(auto& p:document.planes)planes.arr.push_back(V::makeStr(p.name));for(auto& sk:document.sketches)sketches.arr.push_back(V::makeStr(sk.name));r.set("planes",planes);r.set("sketches",sketches);
-    V fs=V::makeArr();auto hidden=consumed(document);
-    for(auto& f:document.features){V v=V::makeObj();v.set("id",V::makeNum((double)f.id));v.set("name",V::makeStr(f.name));v.set("type",V::makeStr(featureTypeName(f.type)));v.set("output",V::makeBool(!hidden.count(f.id)));fs.arr.push_back(v);}
-    r.set("features",fs);r.set("assembly_nodes",V::makeNum(document.assembly.size()));r.set("material_count",V::makeNum(document.materials.size()));return r;
+    // Query-local state: follow authored order once, then reuse it for output
+    // and consumption. No retained cache can go stale after a direct source edit.
+    const bool loadAll=document.assemblyLoadSelection.isNull();
+    const auto loaded=loadAll?std::unordered_set<u64>{}:assemblyLoadedFeatures(document);
+    struct FeatureState {bool history,active;};
+    std::vector<FeatureState> states;states.reserve(document.features.size());
+    std::unordered_set<u64> hidden;bool within=true;
+    for(const auto& feature:document.features){
+        const bool active=within&&!feature.suppressed&&(loadAll||loaded.count(feature.id));
+        states.push_back({within,active});
+        if(active&&featureConsumesInputBodies(feature))for(u64 input:feature.inputs)hidden.insert(input);
+        if(feature.id==document.historyTip)within=false;
+    }
+    V fs=V::makeArr();fs.arr.reserve(document.features.size());
+    for(size_t index=0;index<document.features.size();++index){
+        const auto& f=document.features[index];const auto state=states[index];
+        V v=V::makeObj();v.obj.reserve(6);v.set("id",V::makeNum((double)f.id));v.set("name",V::makeStr(f.name));v.set("type",V::makeStr(featureTypeName(f.type)));v.set("history_active",V::makeBool(state.history));v.set("evaluation_active",V::makeBool(state.active));v.set("output",V::makeBool(state.active&&!hidden.count(f.id)));fs.arr.push_back(std::move(v));
+    }
+    r.set("features",std::move(fs));r.set("assembly_nodes",V::makeNum(document.assembly.size()));r.set("material_count",V::makeNum(document.materials.size()));return r;
 }
 V AgentSession::dispatch(const std::string& tool,const V& args){
     size_t commandIndex=0;std::string commandOp;bool applying=false;
     try{
         if(args.t!=V::Obj)throw std::runtime_error("Arguments must be an object");
+        if(document.historyTip&&(tool=="import_mesh"||tool=="import_cad"||tool=="library_insert"||tool=="import_step"||tool=="import_sheet_step")){
+            const auto* replace=args.find("replace");
+            if(!(tool=="import_step"||tool=="import_sheet_step")||!replace||replace->t!=V::Bool||!replace->b)
+                throw std::runtime_error("Resume full feature history before appending imported definitions or library components");
+        }
+        static const std::set<std::string> custodyTools{"export_step","export_iges","export_mesh","drawing_export","drawing_inspect","bom_export_parts","snapshot","geometry_query","native_inspect","collision_inspect","assembly_info","assembly_motion","mesh_inspect","mesh_raycast","physics_inspect","manufacturing_inspect","reference_inspect","frame_inspect","electronics_inspect","pcb_export"};
+        if(custodyTools.count(tool))verifyAssemblyExternalReferences(document);
         // Older direct clients may omit this field. When supplied (mandatory
         // for agent teams), every document replacement/history/import path
         // must honor it before reading files or changing the document.
@@ -652,6 +682,14 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
         if(tool=="collision_inspect"||tool=="skeleton_inspect"||tool=="skeleton_compile"){
             if(const auto* expected=args.find("expected_revision"))if(expected->t!=V::Num||expected->num!=(double)revision)throw std::runtime_error("Revision conflict; inspect the current document before querying");
             V report;if(tool=="collision_inspect")report=inspectDocumentCollision(document,args);else if(tool=="skeleton_inspect")report=inspectSkeleton(document);else report=compileSkeletonPreview(document,skeletonSource(args));report.set("revision",V::makeNum((double)revision));return result(report);
+        }
+        if(tool=="feature_history"){
+            if(!args.obj.empty())throw std::runtime_error("feature_history takes no arguments");
+            auto report=inspectFeatureHistory(document);report.set("revision",V::makeNum((double)revision));return result(report);
+        }
+        if(tool=="assembly_authoring_info"){
+            if(!args.obj.empty())throw std::runtime_error("assembly_authoring_info takes no arguments");
+            return result(inspectAssemblyAuthoring(document,revision));
         }
         if(tool=="object_context")return result(objectContext(document,revision,args));
         if(tool=="doc_info"){
@@ -695,6 +733,29 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
             bool ok=false;auto v=evalExpr(str(args,"expr"),document.buildEnv(),&ok);
             if(!ok)throw std::runtime_error("Invalid mathematical expression");
             V r=V::makeObj();r.set("value",V::makeNum(v));return result(r);
+        }
+        if(tool=="sketch_repair"){
+            for(const auto& item:args.obj)if(item.first!="name"&&item.first!="sketch"&&item.first!="expected_revision")throw std::runtime_error("Unknown sketch_repair field: "+item.first);
+            const auto& expected=field(args,"expected_revision");if(expected.t!=V::Num||expected.num!=(double)revision)throw std::runtime_error("Revision conflict; inspect the current sketch before proposing repairs");
+            const auto name=str(args,"name");if(name.empty())throw std::runtime_error("sketch_repair requires a target sketch name");
+            if(const auto* manifest=document.skeleton.find("manifest"))if(const auto* owned=manifest->find("sketches"))for(const auto& row:owned->arr)if(const auto* n=row.find("name");n&&n->asStr()==name)throw std::runtime_error("Skeleton-owned sketch: edit the producer source");
+            V source;NamedSketch scratch;std::string error;
+            if(const auto* candidate=args.find("sketch")){source=*candidate;if(!sketchFromJson(source.dump(),scratch.sk,&error))throw std::runtime_error(error);}
+            else {auto* current=document.findSketch(name);if(!current)throw std::runtime_error("Sketch not found");scratch.sk=current->sk;if(!arkjson::parse(sketchToJson(current->sk),source))throw std::runtime_error("Cannot read sketch source");}
+            // Keep exact authored expressions/projections in command recipes;
+            // the solver may change only its private evaluated copy.
+            V report;
+            if(std::any_of(scratch.sk.ents.begin(),scratch.sk.ents.end(),[](const SketchEnt& e){return e.kind==SketchEnt::Project||e.kind==SketchEnt::Offset;})){
+                report=V::makeObj();report.set("status",V::makeStr("unsupported_driven_geometry"));report.set("reason",V::makeStr("Review the producer/projection first; single-deletion assistance requires self-contained sketch geometry"));report.set("proposals",V::makeArr());
+            }else{evaluateSketch(scratch,document.buildEnv());if(!scratch.error.empty()&&scratch.error.rfind("Conflicting constraints or solver failed to converge",0)!=0)throw std::runtime_error(scratch.error);report=proposeSketchConstraintRepairs(scratch.sk);}
+            report.set("name",V::makeStr(name));report.set("revision",V::makeNum((double)revision));report.set("expected_revision",expected);report.set("source_sha256",V::makeStr(iterationSha256(source.dump())));report.set("document_mutated",V::makeBool(false));
+            if(auto* current=document.findSketch(name))report.set("document_sketch_sha256",V::makeStr(iterationSha256(sketchToJson(current->sk))));
+            V alternatives=report.find("proposals")?*report.find("proposals"):V::makeArr();for(auto& alternative:alternatives.arr){
+                auto recipe=source;const auto* original=recipe.find("constraints");const auto index=(size_t)alternative.find("remove_index")->num;if(!original||index>=original->arr.size())throw std::runtime_error("Repair proposal source mismatch");auto constraints=*original;constraints.arr.erase(constraints.arr.begin()+index);recipe.set("constraints",std::move(constraints));
+                V command=V::makeObj(),commands=V::makeArr();command.set("op",V::makeStr("sketch.set"));command.set("name",V::makeStr(name));command.set("sketch",std::move(recipe));commands.arr.push_back(std::move(command));alternative.set("commands",std::move(commands));alternative.set("expected_revision",expected);
+            }
+            report.set("proposals",std::move(alternatives));
+            return result(report);
         }
         if(tool=="sketch_diagnose"){
             NamedSketch scratch;std::string error;
@@ -1071,6 +1132,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
             for(const auto& command:commands.arr)if((command.find("part")||(command.find("op")&&command.find("op")->asStr()=="bom.initialize"))&&!args.find("expected_revision"))throw std::runtime_error("BOM authoring requires expected_revision from current doc_info");
             for(const auto& command:commands.arr)if(!args.find("expected_revision")){
                 const auto* op=command.find("op"),*type=command.find("type");
+                if(op&&op->t==V::Str&&(op->str=="feature.move"||op->str=="feature.rollback"||op->str.rfind("configuration.",0)==0||op->str=="assembly.load"||op->str.rfind("assembly.external.",0)==0))throw std::runtime_error("History and configuration authoring require expected_revision from current doc_info");
                 if((op&&op->t==V::Str&&op->str.rfind("skeleton.",0)==0)||(type&&type->t==V::Str&&type->str=="mesh_edit"))throw std::runtime_error("Skeleton and indexed mesh authoring require expected_revision from current doc_info");
             }
             for(const auto& command:commands.arr)if(const auto* op=command.find("op");op&&op->t==V::Str&&(op->str.rfind("stamp.",0)==0||op->str.rfind("image_asset.",0)==0||op->str.rfind("face_appearance.",0)==0)&&!args.find("expected_revision"))throw std::runtime_error("Image and face authoring require expected_revision");
@@ -1084,7 +1146,11 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
             for(auto& c:commands.arr){
                 applying=true;commandIndex=(size_t)(&c-commands.arr.data());commandOp=c.find("op")?c.find("op")->asStr():"";
                 auto op=str(c,"op");
-                if(op=="bom.initialize"){if(c.obj.size()!=1)throw std::runtime_error("bom.initialize accepts only op");if(next.bomDocumentId.empty())next.bomDocumentId=newBomDocumentId();}
+                if(next.historyTip&&(op=="feature.add"||op=="sheet.create"||op=="skeleton.set"))throw std::runtime_error("Resume full feature history before adding features or changing Skeleton source");
+                if(op=="feature.move"&&skeletonOwnsFeature(next,featureRef(next,field(c,"id"))))throw std::runtime_error("Skeleton pattern is source-owned; change its source instead of reordering generated features");
+                if(applyFeatureHistoryCommand(next,c)){}
+                else if(applyAssemblyAuthoringCommand(next,c,error)){if(!error.empty())throw std::runtime_error(error);}
+                else if(op=="bom.initialize"){if(c.obj.size()!=1)throw std::runtime_error("bom.initialize accepts only op");if(next.bomDocumentId.empty())next.bomDocumentId=newBomDocumentId();}
                 else if(applyAppearance024BCommand(next,c)){}
                 else if(op.rfind("drawing.",0)==0)applyDrawingCommand(next,c);
                 else if(op=="skeleton.set")setSkeletonSource(next,skeletonSource(c));
@@ -1166,7 +1232,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
                     if(const auto* part=c.find("part")){f->part=part->isNull()?V{}:validatePartMetadata(*part);if(f->part.t==V::Obj&&next.bomDocumentId.empty())next.bomDocumentId=newBomDocumentId();}
                     if(auto flag=c.find("suppressed")){if(flag->t!=V::Bool)throw std::runtime_error("suppressed must be boolean");f->suppressed=flag->b;}
                 }
-                else if(op=="feature.remove"){if(!next.remove(featureRef(next,field(c,"id"))))throw std::runtime_error("Feature not found");}
+                else if(op=="feature.remove"){const auto target=featureRef(next,field(c,"id"));if(target==next.historyTip)throw std::runtime_error("Resume full history before removing its rollback tip");if(!next.remove(target))throw std::runtime_error("Feature not found");}
                 else if(op=="canvas.set"||op=="canvas.remove"){
                     auto name=str(c,"name");if(name.size()>128)throw std::runtime_error("Canvas name must be 1..128 characters");
                     auto it=std::find_if(next.canvases.begin(),next.canvases.end(),[&](const PlaneCanvas& canvas){return canvas.name==name;});
@@ -1370,7 +1436,7 @@ V AgentSession::tools(bool detailed){
         {"electronics_inspect","Read PCB layers, net connectivity, clearance DRC and BOM, or a cable route's bend radius, exact length and independently checked obstacle clearance. Does not certify electrical or manufacturing performance.",R"({"type":"object","properties":{"id":{"type":["integer","string"]}},"required":["id"]})",true},
         {"pcb_export","Export PCB copper and outline Gerbers, plated/non-plated Excellon drill files and JSON netlist as a fabrication preview. Run electronics_inspect for incomplete nets and DRC scope first.",R"({"type":"object","properties":{"id":{"type":["integer","string"]},"path_prefix":{"type":"string"}},"required":["id","path_prefix"]})",false},
         {"export_iges","Export a selected exact B-rep as IGES in millimetres, with independent readback bounds/area checks and solid-topology status. Default pose formed; flat is available only for sheet features.",R"({"type":"object","properties":{"id":{"type":["integer","string"]},"path":{"type":"string"},"pose":{"type":"string","enum":["flat","formed"]}},"required":["id","path"]})",false},
-        {"agent_onboard","START HERE. Discover current document/revision, supported modeling workflows, reusable component library, examples and validation limits. Read-only; choose a topic before modeling.",R"({"type":"object","properties":{"topic":{"type":"string","enum":["bom","fasteners","components","motion","manufacturing","physics","automation","overview","sketch","tube","assembly","surfacing","sheet","solids","mesh","materials","frames","electronics","routing","suspension","skeleton","drawings","holes","cad_import","containers","stamps","planes"]}}})",true},
+        {"agent_onboard","START HERE. Discover current document/revision, supported modeling workflows, reusable component library, examples and validation limits. Read-only; choose a topic before modeling.",R"({"type":"object","properties":{"topic":{"type":"string","enum":["bom","fasteners","components","motion","manufacturing","physics","automation","overview","sketch","tube","assembly","surfacing","sheet","solids","mesh","materials","frames","electronics","routing","suspension","skeleton","drawings","holes","cad_import","containers","stamps","planes","history","configurations"]}}})",true},
         {"doc_info","Document summary/inventory. detail design returns feature operations/dependencies/roles, sketch names, origins, manufacturing declarations and measured volume/bounds. ids/sections require detail design or omitted detail (inferred design); explicit summary cannot use either filter. Examples: {detail:summary}, {detail:design,sections:[features,assembly]}. Optional ids selects 1..64 feature ids or unique names (default section features); sections selects features|sketches|parameters|assembly|materials. With ids, sketches/assembly/materials are direct associations; parameters stay document-wide. Selected reads expose partial, scope, section_scopes and total_counts. No meshes/native payloads; read-only.",R"({"type":"object","anyOf":[{"properties":{"detail":{"enum":["design"]}}},{"not":{"anyOf":[{"required":["ids"]},{"required":["sections"]}]}}],"properties":{"detail":{"type":"string","enum":["summary","design"]},"ids":{"type":"array","minItems":1,"maxItems":64,"items":{"oneOf":[{"type":"integer","minimum":1},{"type":"string","minLength":1,"maxLength":128}]}},"sections":{"type":"array","minItems":1,"maxItems":5,"uniqueItems":true,"items":{"type":"string","enum":["features","sketches","parameters","assembly","materials"]}}}})",true},
         {"doc_new","Start an empty document only when requested. Clears the active model with undo and a monotonically increasing revision; does not overwrite saved files.",R"({"type":"object","properties":{"expected_revision":{"type":"integer","minimum":0}},"required":["expected_revision"]})",false},
         {"doc_get","Read full parametric document, including expressions and revision.",R"({"type":"object"})",true},
@@ -1384,9 +1450,12 @@ V AgentSession::tools(bool detailed){
         {"doc_undo","Undo the previous committed transaction; revision increases.",R"({"type":"object"})",false},
         {"doc_redo","Redo a transaction after undo.",R"({"type":"object"})",false},
         {"eval_expr","Evaluate finite arithmetic and trigonometry with named parameters; trig uses radians, deg() converts degrees.",R"({"type":"object","properties":{"expr":{"type":"string"}},"required":["expr"]})",true},
+        {"sketch_repair","Propose bounded single-constraint deletions for a named sketch or supplied candidate. Read-only, revision- and source-hash-bound; preserves other authored expressions/projections. Review one alternative, doc_preview its commands and explicitly doc_apply the prepared candidate. No automatic deletion or global conflict-set claim.",R"({"type":"object","properties":{"name":{"type":"string","minLength":1},"sketch":{"type":"object"},"expected_revision":{"type":"integer","minimum":0}},"required":["name","expected_revision"],"additionalProperties":false})",true},
+        {"feature_history","Read retained feature order, direct dependencies, suppression and inclusive rollback tip. Author feature.move or feature.rollback with the observed expected_revision; invalid dependency changes reject atomically.",R"({"type":"object","properties":{},"additionalProperties":false})",true},
+        {"assembly_authoring_info","Inspect named configurations, selected loading roots and pinned imported source references at the current revision. Source drift rejects instead of substituting geometry.",R"({"type":"object","properties":{},"additionalProperties":false})",true},
         {"skeleton_inspect","Inspect native Skeleton code, editable inputs, source-owned relations/vector arrays and stable pattern ownership. Read-only; lengths mm.",R"({"type":"object","properties":{"expected_revision":{"type":"integer","minimum":0}},"additionalProperties":false})",true},
         {"drawing_inspect","List authored technical drawings, or inspect one name with exact orthographic HLR/section curves and semantic dimensions. Changed source B-reps return stale and omit current measurements; missing references/source return invalid. Use explicit revision-checked drawing.refresh before export. Feature definitions, exact occurrence/copy or root/group assemblies. Empty args returns a passive source catalog with editable suggested_drawing recipes; users must request drawings before agents author them. Original templates, tolerances, exact sections and isometric views share Studio CAD viewport. SVG is display sampling, JSON retains exact derived curves.",R"({"type":"object","properties":{"name":{"type":"string","minLength":1,"maxLength":128},"expected_revision":{"type":"integer","minimum":0}},"additionalProperties":false})",true},
-        {"drawing_export","Atomically publish a new local json or svg technical drawing at expected_revision. Requires a current exact source/occurrence binding and resolved dimensions. Only export when the user requests it. JSON retains derived exact B-rep curves, samples and measurements; SVG is a display preview with dimension/tolerance labels. Existing destinations and stale/invalid drawings reject.",R"({"type":"object","properties":{"name":{"type":"string","minLength":1,"maxLength":128},"expected_revision":{"type":"integer","minimum":0},"path":{"type":"string","minLength":1,"maxLength":4096},"format":{"enum":["json","svg"]}},"required":["name","expected_revision","path","format"],"additionalProperties":false})",false},
+        {"drawing_export","Atomically publish a new local json, svg or dxf technical drawing at expected_revision. Requires a current exact source/occurrence binding and resolved dimensions. Only export when the user requests it. JSON retains derived exact B-rep curves, samples and measurements; SVG is a display preview with dimension/tolerance labels; DXF preserves exact projected curves and section hatches with source metadata and local readback checks. CAD associativity and drafting qualification are not claimed. Existing destinations and stale/invalid drawings reject.",R"({"type":"object","properties":{"name":{"type":"string","minLength":1,"maxLength":128},"expected_revision":{"type":"integer","minimum":0},"path":{"type":"string","minLength":1,"maxLength":4096},"format":{"enum":["json","svg","dxf"]}},"required":["name","expected_revision","path","format"],"additionalProperties":false})",false},
         {"skeleton_compile","Read-only native declarative Skeleton syntax/relation preview. Declarations: input name = expression; relation name = expression; array name[count] = [x,y,z] using index; pattern name from feature count expression step [x,y,z]. No arbitrary code execution. Use doc_preview/doc_apply skeleton.set for geometry-checked atomic changes.",R"({"type":"object","properties":{"source":{"type":"string","maxLength":65536},"expected_revision":{"type":"integer","minimum":0}},"required":["source"],"additionalProperties":false})",true},
         {"collision_inspect","Read-only collision feedback for two feature definitions or placed assembly occurrences. Exact single solids return contact, distance and intersection volume; triangle meshes return real boundary contacts and bounded containment evidence with explicit unknowns. Not dynamics or manufacturing qualification. mode exact rejects mesh inputs; auto uses existing native authority when both operands have B-reps. a/b are id/name or {id} / {node,copy}. Same operand rejects.",R"({"type":"object","properties":{"a":{"type":["integer","string","object"]},"b":{"type":["integer","string","object"]},"mode":{"type":"string","enum":["auto","exact","mesh"]},"expected_revision":{"type":"integer","minimum":0}},"required":["a","b"],"additionalProperties":false})",true},
         {"mesh_inspect","Compact indexed topology audit: bounds, area, edge counts, components and signed volume for closed oriented edges. Does not certify solids or detect self intersections. Omit id to inspect final outputs only. node accepts a unique instance name or an id, and copy frames one pattern placement.",R"({"type":"object","properties":{"node":{"anyOf":[{"type":"integer","minimum":1},{"type":"string"}]},"copy":{"type":"integer","minimum":0,"maximum":31},"id":{"type":"integer","minimum":1}}})",true},
@@ -1423,7 +1492,7 @@ if(std::string(d.name)=="doc_apply"){
         // sheet and frame programs remain in domain onboarding; dispatch still
         // owns operation-specific required fields and semantic validation.
         V coreFields;arkjson::parse(R"({
-            "id":{"type":["integer","string"],"description":"Required target for feature.edit/remove and assembly.edit/remove: positive id or unique name. Mate ids are numeric; mate endpoints a/b may select a unique mate instead."},
+            "id":{"type":["integer","string","null"],"description":"Required target for feature.edit/remove and assembly.edit/remove: positive id or unique name. feature.rollback accepts null to resume all history. Mate ids are numeric; mate endpoints a/b may select a unique mate instead."},
             "type":{"type":"string","description":"Feature type on feature.add; mate type on mate.add/edit."},
             "name":{"type":"string","minLength":1,"description":"Feature/instance label, parameter name, sketch name or datum name for the selected operation."},
             "p":{"type":"object","additionalProperties":{"type":["number","string"]},"description":"Editable parameters, each a finite number or expression string. Use actual authored keys from object_context: native_solid box uses width/depth/height; legacy box uses dx/dy/dz. feature.edit uses id plus p, not entity. Rigid placements use tx/ty/tz/rx/ry/rz."},
@@ -1450,6 +1519,8 @@ if(std::string(d.name)=="doc_apply"){
             "x":{"type":["number","string"]},"y":{"type":["number","string"]},"r":{"type":["number","string"]},"a0":{"type":["number","string"]},"a1":{"type":["number","string"]},
             "radius":{"type":["number","string"]},"distance":{"type":["number","string"]},"width":{"type":["number","string"]},"height":{"type":["number","string"]},"opacity":{"type":"number"},"path":{"type":"string"}
         })",coreFields);for(const auto& entry:coreFields.obj)commandProps.set(entry.first,entry.second);
+        {V operation=*commandProps.find("op"),choices=*operation.find("enum");for(const char* op:{"feature.move","feature.rollback","configuration.set","configuration.apply","configuration.remove","assembly.load","assembly.external.set","assembly.external.remove"})choices.arr.push_back(V::makeStr(op));operation.set("enum",choices);commandProps.set("op",operation);
+            V fields;arkjson::parse(R"({"parameters":{"type":"object","additionalProperties":{"type":["number","string"]}},"visibility":{"type":"object","additionalProperties":{"type":"boolean"}},"roots":{"type":["array","null"],"items":{"type":"integer","minimum":1},"uniqueItems":true},"source_sha256":{"type":"string","pattern":"^[0-9a-f]{64}$"},"source_revision":{"type":"string","minLength":1}})",fields);for(const auto& entry:fields.obj)commandProps.set(entry.first,entry.second);}
         commandProps.set("drawing",drawingAuthoringSchema());
         {V pattern;arkjson::parse(R"({"oneOf":[{"type":"null"},{"type":"object","properties":{"type":{"type":"string","enum":["linear","circular","pattern_driven","sketch_driven","curve_driven","chain"]},"count":{"type":["number","string"],"description":"2..32 for curve/chain; pattern/sketch may infer stable slots."},"dx":{"type":["number","string"]},"dy":{"type":["number","string"]},"dz":{"type":["number","string"]},"step":{"type":["number","string"]},"axis":{"type":"string","enum":["X","Y","Z"]},"skips":{"type":"array","items":{"type":"integer","minimum":1,"maximum":31},"uniqueItems":true,"maxItems":31},"source":{"type":"object","description":"Bound source recipe. Onboard assembly for actual points, guide, inheritance and chain contracts.","properties":{"node":{"type":["integer","string"]},"feature":{"type":["integer","string"]},"sketch":{"type":"string"},"points":{"type":"array","items":{"type":"string"}},"reference":{"type":"string"},"spacing":{"enum":["equal","pitch"]},"pitch":{"type":["number","string"]},"margin":{"type":["number","string"]},"alignment":{"enum":["fixed","tangent"]},"normal":{"type":"array","minItems":3,"maxItems":3,"items":{"type":["number","string"]}},"closed":{"type":"boolean"},"endpoint":{"enum":["exclude","include"]},"max_source_error":{"type":["number","string"]},"alternate_feature":{"type":["integer","string"]},"alternate_node":{"type":["integer","string"]},"alternate_angle":{"type":["number","string"]}},"additionalProperties":false}},"required":["type"],"additionalProperties":false}]})",pattern);commandProps.set("pattern",pattern);}
         {V operation=*commandProps.find("op"),choices=*operation.find("enum");for(const char* family:{"miter","swept_flange","corner","rip","tab"})for(const char* action:{"add","edit","remove"})choices.arr.push_back(V::makeStr(std::string("sheet.")+family+"."+action));choices.arr.push_back(V::makeStr("sheet.bend_table.set"));choices.arr.push_back(V::makeStr("sheet.bend_table.remove"));operation.set("enum",choices);commandProps.set("op",operation);

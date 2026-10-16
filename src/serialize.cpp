@@ -10,6 +10,7 @@
 #include "ark/native_features.hpp"
 #include "ark/skeleton.hpp"
 #include "ark/drawings.hpp"
+#include "ark/assembly_authoring.hpp"
 #include "ark/sketch.hpp"
 #include "ark/assembly_io.hpp"
 #include "ark/appearance_024b.hpp"
@@ -94,6 +95,11 @@ bool generation36Document(const Document& doc){
 bool generation38Document(const Document& doc){
     if(doc.designContainerCheckout.t!=arkjson::Value::Null)return true;
     for(const auto& feature:doc.features)if(feature.type==FeatureType::NativeSolid&&(featureOperation(feature)=="imported_cad"||featureOperation(feature)=="holes_orchestrator"))return true;
+    return false;
+}
+bool generation41Document(const Document& doc){
+    if(const auto* format=doc.designContainerCheckout.find("format");format&&format->asStr()=="ark.design-container.v2")return true;
+    for(const auto& feature:doc.features)if(feature.type==FeatureType::SurfaceEdit){const auto* op=feature.nativeSpec.find("op");if(op&&op->asStr()=="repair")return true;}
     return false;
 }
 bool generation37Document(const Document& doc){
@@ -613,6 +619,14 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
     if(doc.designContainerCheckout.t!=Value::Null)r.set("design_container_checkout",doc.designContainerCheckout);
     if(generation38Document(doc))r.set("version",Value::makeNum(38));
     if(appearance024BNeedsVersion39(doc))r.set("version",Value::makeNum(39));
+    if(doc.historyTip||!doc.assemblyConfigurations.isNull()||!doc.assemblyLoadSelection.isNull()||!doc.assemblyExternalReferences.isNull()){
+        r.set("version",Value::makeNum(40));
+        if(doc.historyTip)r.set("history_tip",Value::makeNum((double)doc.historyTip));
+        if(!doc.assemblyConfigurations.isNull())r.set("assembly_configurations",doc.assemblyConfigurations);
+        if(!doc.assemblyLoadSelection.isNull())r.set("assembly_load_selection",doc.assemblyLoadSelection);
+        if(!doc.assemblyExternalReferences.isNull())r.set("assembly_external_references",doc.assemblyExternalReferences);
+    }
+    if(generation41Document(doc))r.set("version",Value::makeNum(41));
     if(includeAudit&&includeHistory)iterationPersist(r,doc);
     canonicalDocumentKeys(r);
     std::string serialized=r.dump();
@@ -626,7 +640,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     Value v;
     if(!arkjson::parse(json,v)) return fail("malformed JSON");
     if(v.t!=Value::Obj) return fail("root must be object");
-    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || (ver->num!=1.0&&ver->num!=2.0&&ver->num!=3.0&&ver->num!=4.0&&ver->num!=5.0&&ver->num!=6.0&&ver->num!=7.0&&ver->num!=8.0&&ver->num!=9.0&&ver->num!=10.0&&ver->num!=11.0&&ver->num!=12.0&&ver->num!=13.0&&ver->num!=14.0&&ver->num!=15.0&&ver->num!=16.0&&ver->num!=17.0&&ver->num!=18.0&&ver->num!=19.0&&ver->num!=20.0&&ver->num!=21.0&&ver->num!=22.0&&ver->num!=23.0&&ver->num!=24.0&&ver->num!=25.0&&ver->num!=26.0&&ver->num!=27.0&&ver->num!=28.0&&ver->num!=29.0&&ver->num!=30.0&&ver->num!=31.0&&ver->num!=32.0&&ver->num!=33.0&&ver->num!=34.0&&ver->num!=35.0&&ver->num!=36.0&&ver->num!=37.0&&ver->num!=38.0&&ver->num!=39.0)))
+    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || !std::isfinite(ver->num)||ver->num!=std::floor(ver->num)||ver->num<1||ver->num>41))
         return fail("unsupported document version");
     Value history;std::string historyError;if(!iterationExpand(v,history,historyError))return fail(historyError);
 
@@ -854,6 +868,13 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     try{if(!supported){for(auto& plane:nd.planes)resolvePlane(nd,plane.name);for(auto& sketch:nd.sketches)resolvePlane(nd,sketch.sk.plane);for(auto& canvas:nd.canvases)resolvePlane(nd,canvas.plane);}}
     catch(const std::exception& e){return fail(e.what());}
     for(const auto& feature:nd.features){bool fabrication=false;if(feature.type==FeatureType::SheetMetal)fabrication=feature.nativeSpec.find("jog")||feature.nativeSpec.find("sketch_bend");if(feature.type==FeatureType::ConstructionFrame){if(auto welds=feature.nativeSpec.find("welds"))fabrication|=welds->t==Value::Arr&&!welds->arr.empty();if(auto joints=feature.nativeSpec.find("joints"))for(const auto& joint:joints->arr)if(auto kind=joint.find("kind"))fabrication|=kind->str=="trim_extend"||kind->str=="trim_plane";}if(fabrication&&(!v.find("version")||v.find("version")->num<25))return fail("Frame endpoint/weld or sheet jog/sketch-bend programs require document version 25");}
+    for(const auto& field:{std::pair{"assembly_configurations",&nd.assemblyConfigurations},std::pair{"assembly_load_selection",&nd.assemblyLoadSelection},std::pair{"assembly_external_references",&nd.assemblyExternalReferences}})if(const auto* value=v.find(field.first)){
+        const auto* version=v.find("version");if(!version||version->num<40||value->t!=Value::Arr)return fail(std::string(field.first)+" requires document version 40 array");*field.second=*value;
+    }
+    if(const auto* tip=v.find("history_tip")){
+        const auto* version=v.find("version");if(!version||version->num<40||tip->t!=Value::Num||!std::isfinite(tip->num)||tip->num<1||tip->num>9007199254740990.||tip->num!=std::floor(tip->num)||!nd.find((u64)tip->num))return fail("history_tip requires a valid feature ID and document version 40");nd.historyTip=(u64)tip->num;
+    }
+    try{validateAssemblyAuthoring(nd);}catch(const std::exception& error){return fail(error.what());}
     std::string manufacturingError;if(!validateManufacturingRoutes(nd,manufacturingError))return fail(manufacturingError);
     if(history.t!=Value::Null){if(!iterationValidate(nd,history,historyError))return fail(historyError);nd.iterationHistory=std::move(history);}
     if(arcRecipeDocument(nd)){const auto* version=v.find("version");if(!version||version->num<30)return fail("Arc recipes and linked tube end fits require document version 30");}
@@ -863,6 +884,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     if(generation37Document(nd)){const auto* version=v.find("version");if(!version||version->num<37)return fail("Specialized component patterns, advanced sheet programs and drawing source/template recipes require document version 37");}
     if(generation38Document(nd)){const auto* version=v.find("version");if(!version||version->num<38)return fail("Exact CAD imports, Holes Orchestrator and isolated containers require document version 38");}
     if(appearance024BNeedsVersion39(nd)){const auto* version=v.find("version");if(!version||version->num<39)return fail("Embedded images, stamps, face appearances and exact split lines require document version 39");}
+    if(generation41Document(nd)){const auto* version=v.find("version");if(!version||version->num<41)return fail("Scoped container v2 and explicit surface orientation repair require document version 41");}
     try{validateAppearanceAuthoring024B(nd,false);}catch(const std::exception& error){return fail(error.what());}
     try{validateDesignContainerWorkspace(nd);validateSkeletonAuthoring(nd);}catch(const std::exception& error){return fail(error.what());}
     doc=std::move(nd);

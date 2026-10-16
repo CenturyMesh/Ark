@@ -478,6 +478,8 @@ Document Document::authoringCopy() const {
     out.imageAssets=imageAssets;out.stamps=stamps;
     out.features=features;out.materials=materials;out.usage=usage;out.agentActivity=agentActivity;out.bomDocumentId=bomDocumentId;out.iterationHistory=iterationHistory;out.skeleton=skeleton;
     out.drawings=drawings;out.designContainerCheckout=designContainerCheckout;
+    out.historyTip=historyTip;out.assemblyConfigurations=assemblyConfigurations;
+    out.assemblyLoadSelection=assemblyLoadSelection;out.assemblyExternalReferences=assemblyExternalReferences;
     out.assembly=assembly;out.mates=mates;out.nextMateId_=nextMateId_;out.nextAssemblyId_=nextAssemblyId_;out.nextFeatureId_=nextFeatureId_;out.tessOpt=tessOpt;
     return out;
 }

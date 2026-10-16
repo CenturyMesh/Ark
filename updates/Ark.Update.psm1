@@ -169,7 +169,7 @@ function Get-ArkAvailableUpdate([string]$CurrentVersion) {
 }
 
 function Assert-ArkPackageHash([string]$Path, $Manifest) {
-    if ((Get-Item -LiteralPath $Path).Length -ne $Manifest.package.size -or (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant() -cne $Manifest.package.sha256) { throw 'ARK update package failed SHA-256 verification.' }
+    if ((Get-Item -LiteralPath $Path -Force).Length -ne $Manifest.package.size -or (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant() -cne $Manifest.package.sha256) { throw 'ARK update package failed SHA-256 verification.' }
 }
 
 function Compress-ArkPackage([string]$RuntimeDirectory, [string]$Archive) {
@@ -231,7 +231,18 @@ function Get-ArkRuntimeVersion([string]$RuntimeDirectory) {
     $metadata = Read-ArkJson (Join-Path $RuntimeDirectory 'app-version.json') 4KB
     ConvertTo-ArkVersion $metadata.version | Out-Null
     if ($metadata.schema -ne 1 -or $metadata.product -cne 'ARK' -or $metadata.platform -cne 'windows-x64' -or $metadata.entrypoint -cne 'ark-studio.exe') { throw 'Invalid ARK runtime metadata.' }
-    foreach ($name in @('ark-studio.exe', 'ark-cli.exe', 'ark-mcp.exe', 'ark-occt-worker.exe', 'TKernel.dll', 'TKBRep.dll', 'TKDESTEP.dll', 'assets/ui/ark-wordmark.png', 'assets/ui/ark-tool-atlas-v1.png', 'assets/ui/ark-detail-atlas-v1.png', 'assets/ui/ark-domain-atlas-v1.png', 'updates/ark-update.ps1', 'updates/ark-launch.ps1', 'updates/Ark.Update.psm1')) {
+    # OCCT uses libTK*.dll with MinGW and TK*.dll with MSVC. Preserve the
+    # actual imported names; accepting a mixture can hide an incomplete runtime.
+    $occtPrefix = if (Test-Path -LiteralPath (Join-Path $RuntimeDirectory 'libTKernel.dll') -PathType Leaf) { 'lib' } else { '' }
+    $nativeFiles = @('TKernel.dll', 'TKBRep.dll', 'TKDESTEP.dll') | ForEach-Object { $occtPrefix + $_ }
+    $otherPrefix = if ($occtPrefix) { '' } else { 'lib' }
+    foreach ($name in @('TKernel.dll', 'TKBRep.dll', 'TKDESTEP.dll')) {
+        if (Test-Path -LiteralPath (Join-Path $RuntimeDirectory ($otherPrefix + $name))) { throw 'ARK runtime mixes incompatible OCCT DLL naming families.' }
+    }
+    if ($occtPrefix) {
+        $nativeFiles += @('libc++.dll', 'libunwind.dll')
+    }
+    foreach ($name in (@('ark-studio.exe', 'ark-cli.exe', 'ark-mcp.exe', 'ark-occt-worker.exe', 'assets/ui/ark-wordmark.png', 'assets/ui/ark-tool-atlas-v1.png', 'assets/ui/ark-detail-atlas-v1.png', 'assets/ui/ark-domain-atlas-v1.png', 'updates/ark-update.ps1', 'updates/ark-launch.ps1', 'updates/Ark.Update.psm1') + $nativeFiles)) {
         $file = Join-Path $RuntimeDirectory $name
         Assert-ArkNoReparsePoint $RuntimeDirectory $file
         if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "ARK runtime is missing $name." }
@@ -311,6 +322,27 @@ function Copy-ArkLocalRuntime([string]$RuntimeDirectory, [string]$Root) {
     return $version
 }
 
+function Update-ArkLocalLauncherModule([string]$Root) {
+    # Only Initialize-ArkInstall's explicit newer-local-runtime path calls this.
+    # Publish the module that is already executing as trusted local code; a feed,
+    # manifest field or staged download never selects bootstrap code to execute.
+    # ark-launch.ps1's existing activation/ACK protocol is retained unchanged.
+    $launcher = Assert-ArkChildPath $Root (Join-Path $Root 'launcher')
+    [IO.Directory]::CreateDirectory($launcher) | Out-Null
+    Assert-ArkNoReparsePoint $Root $launcher
+    $source = Join-Path $PSScriptRoot 'Ark.Update.psm1'
+    Assert-ArkNoReparsePoint $PSScriptRoot $source
+    $destination = Assert-ArkChildPath $Root (Join-Path $launcher 'Ark.Update.psm1')
+    Assert-ArkNoReparsePoint $Root $destination
+    if ((Test-Path -LiteralPath $destination -PathType Leaf) -and (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash -ceq (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash) { return }
+    $temporary = Assert-ArkChildPath $Root (Join-Path $launcher ([guid]::NewGuid().ToString('N') + '.tmp'))
+    try {
+        Copy-Item -LiteralPath $source -Destination $temporary
+        if (Test-Path -LiteralPath $destination) { [IO.File]::Replace($temporary, $destination, [System.Management.Automation.Language.NullString]::Value) }
+        else { [IO.File]::Move($temporary, $destination) }
+    } finally { if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force } }
+}
+
 function Initialize-ArkInstall([string]$RuntimeDirectory, [string]$Root = (Get-ArkInstallRoot)) {
     $runtime = [IO.Path]::GetFullPath($RuntimeDirectory).TrimEnd('\', '/')
     $version = Get-ArkRuntimeVersion $runtime
@@ -321,6 +353,14 @@ function Initialize-ArkInstall([string]$RuntimeDirectory, [string]$Root = (Get-A
         Write-ArkAtomicJson (Join-Path $Root 'current.json') @{ schema=1; current=$version; previous=''; pending=''; activating='' }
     } else {
         $state = Get-ArkState $Root
+        if ((Test-ArkNewerVersion $version $state.current) -and -not $state.activating -and (-not $state.pending -or (ConvertTo-ArkVersion $version) -ge (ConvertTo-ArkVersion $state.pending))) {
+            # Refresh the retained module before publishing any pending pointer.
+            # An old helper accepts TK*.dll only and cannot activate libTK*.dll.
+            # Atomic replacement leaves its old bytes and launcher state intact
+            # on failure. Repeating a previously staged local package repairs an
+            # interrupted migration; older/equal selected runtimes cannot replace it.
+            Update-ArkLocalLauncherModule $Root
+        }
         if ((Test-ArkNewerVersion $version $state.current) -and -not $state.activating -and (-not $state.pending -or (Test-ArkNewerVersion $version $state.pending))) {
             # An explicit launch from a newly extracted local package may prepare that package.
             Copy-ArkLocalRuntime $runtime $Root | Out-Null
@@ -437,4 +477,3 @@ function Undo-ArkUpdate([string]$Root) {
 }
 
 Export-ModuleMember -Function *-Ark*
-

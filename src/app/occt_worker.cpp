@@ -51,6 +51,7 @@ int runWorker(const fs::path& requestPath,const fs::path& resultPath){
         else if(op=="geometry_query")result=geometryQueryNative(field("request"));
         else if(op=="project_reference")result=projectReferenceNative(field("request"));
         else if(op=="drawing_view")result=drawingViewNative(field("request"));
+        else if(op=="drawing_dxf")result=drawingDxfNative(field("request"));
         else if(op=="import_sheet")result=importSheetNative(request);
         else if(op=="export_sheet")result=exportSheetNative(request);
         else if(op=="export_sheet_flat_dxf")result=exportSheetFlatDxfNative(request);

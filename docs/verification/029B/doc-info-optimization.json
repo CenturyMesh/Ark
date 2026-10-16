@@ -1,0 +1,152 @@
+{
+    "schema":  "ark.doc-info-optimization.v1",
+    "iteration_code":  "029B",
+    "version":  "0.9.30",
+    "milestones":  [
+                       "A.04",
+                       "B.02"
+                   ],
+    "status":  "Verificado no escopo",
+    "broader_milestones_remain":  "Parcial",
+    "changes":  [
+                    "Derive history/evaluation state and consumed inputs once per summary call.",
+                    "Skip the redundant loaded-ID set for full loading.",
+                    "Ordered feature_history traversal instead of per-row prefix searches.",
+                    "Reserve response capacities and move feature rows/list into the result.",
+                    "No cross-query cache, geometry/revision/format or response-schema change."
+                ],
+    "comparison":  {
+                       "samples_per_size":  101,
+                       "feature_counts":  [
+                                              16,
+                                              128,
+                                              512
+                                          ],
+                       "workload":  "synthetic-analytic-boxes-v1-seed-19020",
+                       "machine_signature":  "dbbc3a3b0053d70e9161c6a8014d02b356859c1c7f951664205b0403ce3fe19d",
+                       "harness_sha256":  "ee6bc35aec87dde2dc9b931a384b5eb8288287e8a2b39eb7fcc6ca79ea055729",
+                       "compiler":  "Clang23.1.3 LLVM-MinGW",
+                       "flags":  "Release -O3 -DNDEBUG -static; OCCT OFF",
+                       "before_executable_sha256":  "77e339855aa0a65f06c27574ff7cdfb9047b6c84d9458a4828eb02f559aa025a",
+                       "after_executable_sha256":  "560567125dcd18708b71b1beef895c2b1f4fe34a9d94172dd5babe1ddeba0080",
+                       "fixture_hashes_verified":  true,
+                       "quiet_window":  "No agent build/test, GUI test or package compression overlapped the measurements.",
+                       "results":  [
+                                       {
+                                           "current_ms":  0.0177,
+                                           "statistic":  "median_ms",
+                                           "metric":  "interaction_doc_info",
+                                           "baseline_ms":  0.0299,
+                                           "feature_count":  16,
+                                           "ratio":  0.59197324414715724
+                                       },
+                                       {
+                                           "current_ms":  0.0188,
+                                           "statistic":  "p95_ms",
+                                           "metric":  "interaction_doc_info",
+                                           "baseline_ms":  0.0378,
+                                           "feature_count":  16,
+                                           "ratio":  0.49735449735449738
+                                       },
+                                       {
+                                           "current_ms":  0.0998,
+                                           "statistic":  "median_ms",
+                                           "metric":  "interaction_doc_info",
+                                           "baseline_ms":  0.1961,
+                                           "feature_count":  128,
+                                           "ratio":  0.50892401835798062
+                                       },
+                                       {
+                                           "current_ms":  0.107,
+                                           "statistic":  "p95_ms",
+                                           "metric":  "interaction_doc_info",
+                                           "baseline_ms":  0.2437,
+                                           "feature_count":  128,
+                                           "ratio":  0.43906442347148134
+                                       },
+                                       {
+                                           "current_ms":  0.3775,
+                                           "statistic":  "median_ms",
+                                           "metric":  "interaction_doc_info",
+                                           "baseline_ms":  0.8573,
+                                           "feature_count":  512,
+                                           "ratio":  0.44033593841129132
+                                       },
+                                       {
+                                           "current_ms":  0.4073,
+                                           "statistic":  "p95_ms",
+                                           "metric":  "interaction_doc_info",
+                                           "baseline_ms":  0.8941,
+                                           "feature_count":  512,
+                                           "ratio":  0.45554188569511239
+                                       }
+                                   ],
+                       "scope":  "Local synchronous API query only; no universal application, viewport/GPU or OCCT-workload speedup claim."
+                   },
+    "intermediate_attempts":  [
+                                  {
+                                      "p95_512_ms":  0.5878,
+                                      "variant":  "linear state and row moves",
+                                      "valid":  true,
+                                      "samples":  21
+                                  },
+                                  {
+                                      "p95_512_ms":  0.7418,
+                                      "variant":  "reserved row capacity",
+                                      "valid":  true,
+                                      "samples":  21
+                                  }
+                              ],
+    "intermediate_scope":  "Raw intermediate files retained locally. Short p95 variance motivated the final101-sample pair; intermediate values are not the final result.",
+    "tests":  [
+                  {
+                      "scope":  "full portable core",
+                      "seconds":  69.84,
+                      "failures":  0,
+                      "passed":  70
+                  },
+                  {
+                      "scope":  "native integration and two Studio UI checks",
+                      "seconds":  33.2,
+                      "failures":  0,
+                      "passed":  18
+                  }
+              ],
+    "semantic_checks":  [
+                            "Inclusive rollback in reordered authored order.",
+                            "Suppressed tip/prefix/suffix; resumed and edited state changes.",
+                            "Selective dependency retention and unloaded consumers.",
+                            "Empty load selection and null load-all reset.",
+                            "Reference extrusion retains its source as output.",
+                            "Inventory/history queries retain authoring, revision and evaluation counters."
+                        ],
+    "package":  {
+                    "profile_isolated":  true,
+                    "evidence_hashes_verified":  true,
+                    "payload_files":  86,
+                    "SDK_PATH_excluded":  true,
+                    "publisher_signature":  "absent",
+                    "artifact":  {
+                                     "sha256":  "78db9cd449ee8c9a043b14c4c9988e99e4532dc91cc85d3b3df9b64aff5f00eb",
+                                     "name":  "ark-windows-x64-0.9.30.zip",
+                                     "size":  50857975
+                                 },
+                    "scope":  "New local development ZIP; original artifact preserved. No publication or installed update. Working-tree inventory is not independent build attestation.",
+                    "payload_hashes_verified":  true,
+                    "sbom_components":  38,
+                    "archive_hash_verified":  true,
+                    "relocated_rpc_count":  13
+                },
+    "audit":  {
+                  "scope":  "No records returned for four supported source identities;34components explicitly unsupported. No vulnerability-absence claim.",
+                  "unqueried_components":  34,
+                  "query_failures":  0,
+                  "returned_records":  0
+              },
+    "limitations":  [
+                        "Only synthetic analytic-box API workloads and local Windows validation.",
+                        "No fresh hosted CI/Linux or universal performance qualification.",
+                        "The initial146-test native suite predates this followup; the18 affected native/UI tests were rerun.",
+                        "No schema, document version, public release identity or installed session changed."
+                    ]
+}

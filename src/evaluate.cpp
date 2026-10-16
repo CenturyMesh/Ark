@@ -1,5 +1,7 @@
 ﻿// ARK-Point :: evaluate.cpp â€” feature-history recompute pipeline.
 #include "ark/model.hpp"
+#include "ark/history_authoring.hpp"
+#include "ark/assembly_authoring.hpp"
 #include "ark/serialize.hpp"
 #include <cctype>
 #include "ark/mesh_model.hpp"
@@ -301,9 +303,12 @@ static Body evalFeatureBody(const Feature& f, const ExprEnv& env, Document& doc,
     return {};
 }
 
+static bool deferredSketch(const Document& document,const NamedSketch& sketch);
+static bool deferredDatum(const Document& document,const std::string& name);
 static void refreshDrivenSketches(Document& document, bool require){
     ExprEnv env=document.buildEnv();
     for(auto& sketch:document.sketches){
+        if(deferredSketch(document,sketch)){sketch.error.clear();sketch.residual=0;continue;}
         bool projects=false;
         for(const auto& entity:sketch.sk.ents) if(entity.kind==SketchEnt::Project) projects=true;
         if(!projects) continue;
@@ -329,6 +334,12 @@ struct AuthoringSources {
         const auto* source=document.find((u64)id.num);if(!source)throw std::runtime_error("Associative source feature not found");
         if(source->suppressed)throw std::runtime_error("Associative source feature is suppressed");features.insert(source->id);
     }
+    void occurrence(const V& id){
+        if(id.t==V::Obj){const auto* node=id.find("node");if(!node)throw std::runtime_error("Associative occurrence object requires a node");occurrence(*node);return;}
+        if(id.t==V::Str){u64 found=0;size_t count=0;for(const auto& node:document.assembly)if(node.name==id.str){found=node.id;++count;}if(count!=1)throw std::runtime_error("Associative occurrence name is missing or ambiguous");occurrence(V::makeNum((double)found));return;}
+        if(id.t!=V::Num||id.num<1||id.num>9007199254740990.||id.num!=std::floor(id.num))throw std::runtime_error("Associative occurrence requires a stable numeric node ID");
+        auto sources=assemblyOccurrenceDependencies(document,(u64)id.num);features.insert(sources.begin(),sources.end());named=true;
+    }
     bool enter(const std::string& key){named=true;if(done.count(key))return false;if(!visiting.insert(key).second)throw std::runtime_error("Cyclic associative authoring dependency: "+key);return true;}
     void leave(const std::string& key){visiting.erase(key);done.insert(key);}
     void datum(const std::string& name){
@@ -344,7 +355,7 @@ struct AuthoringSources {
     void sketch(const std::string& name){
         const auto key="sketch:"+name;if(!enter(key))return;const NamedSketch* source=nullptr;for(const auto& s:document.sketches)if(s.name==name)source=&s;
         if(!source)throw std::runtime_error("Associative sketch not found: "+name);datum(source->sk.plane);
-        for(const auto& e:source->sk.ents)if(e.kind==SketchEnt::Project){if(!e.sourceSketch.empty())sketch(e.sourceSketch);else if(e.sourceFeature)producer(V::makeNum((double)e.sourceFeature));}
+        for(const auto& e:source->sk.ents)if(e.kind==SketchEnt::Project){if(!e.sourceSketch.empty())sketch(e.sourceSketch);else if(e.sourceFeature)producer(V::makeNum((double)e.sourceFeature));if(e.sourceInstance)occurrence(V::makeNum((double)e.sourceInstance));}
         leave(key);
     }
     void anchor(const V& ref){
@@ -352,6 +363,7 @@ struct AuthoringSources {
         if(auto p=ref.find("datum")){if(p->t!=V::Str)throw std::runtime_error("Datum anchor name must be a string");datum(p->str);}
         if(auto p=ref.find("sketch")){if(p->t!=V::Str)throw std::runtime_error("Sketch anchor name must be a string");sketch(p->str);}
         if(auto p=ref.find("feature"))producer(*p);
+        for(const char* key:{"node","source_instance"})if(auto p=ref.find(key))occurrence(*p);
     }
     void profile(const V& value){
         if(value.t==V::Obj){native(value);return;}if(value.t!=V::Str)return;for(const auto& s:document.sketches)if(s.name==value.str){sketch(s.name);return;}
@@ -364,7 +376,10 @@ struct AuthoringSources {
         if(value.t==V::Arr){for(const auto& child:value.arr)native(child);return;}if(value.t!=V::Obj)return;
         if(const auto* type=value.find("type");type&&type->t==V::Str&&type->str=="on_axis")if(const auto* axis=value.find("axis");axis&&axis->t==V::Str)datum(axis->str);
         for(const auto& kv:value.obj){
-            if(kv.first=="start_ref"||kv.first=="to_ref"||kv.first=="through_ref"||kv.first=="point_ref"||kv.first=="normal_ref")anchor(kv.second);
+            if((kv.first=="feature"||kv.first=="second_feature"||kv.first=="source_feature"||kv.first=="alternate_feature"||kv.first=="curve")&&kv.second.t==V::Num)producer(kv.second);
+            else if(kv.first=="node"||kv.first=="source_instance"||kv.first=="alternate_node")occurrence(kv.second);
+            else if(kv.first=="instances"){if(kv.second.t!=V::Arr)throw std::runtime_error("Associative instances must be an array");for(const auto& id:kv.second.arr)occurrence(id);}
+            else if(kv.first=="start_ref"||kv.first=="to_ref"||kv.first=="through_ref"||kv.first=="point_ref"||kv.first=="normal_ref")anchor(kv.second);
             else if(kv.first=="datum") {if(kv.second.t==V::Str)datum(kv.second.str);}
             else if(kv.first=="plane") {if(kv.second.t==V::Str)datum(kv.second.str);else if(kv.second.t==V::Obj)anchor(kv.second);}
             else if(kv.first=="sketch"||kv.first=="source_sketch") {if(kv.second.t==V::Str)sketch(kv.second.str);}
@@ -385,9 +400,42 @@ struct AuthoringSources {
     }
 };
 
+std::unordered_set<u64> assemblyFeatureDependencies(const Document& document,const Feature& feature){
+    AuthoringSources sources(document);sources.collect(feature);return {sources.features.begin(),sources.features.end()};
+}
+
+void validateFeatureHistoryOrder(const Document& document){
+    std::unordered_map<u64,size_t> indices;for(size_t i=0;i<document.features.size();++i)indices[document.features[i].id]=i;
+    for(size_t i=0;i<document.features.size();++i)if(!document.features[i].suppressed){
+        AuthoringSources sources(document);sources.collect(document.features[i]);
+        for(u64 source:sources.features){const auto found=indices.find(source);if(found==indices.end()||found->second>=i)
+            throw std::runtime_error("Forward or cyclic associative feature dependency: "+document.features[i].name+" -> "+std::to_string(source));}
+    }
+}
+
+static bool deferredSources(const Document& document,const AuthoringSources& sources){
+    if(!document.historyTip&&document.assemblyLoadSelection.isNull())return false;
+    const auto loaded=assemblyLoadedFeatures(document);
+    for(u64 source:sources.features)if(!featureWithinHistory(document,source)||!loaded.count(source))return true;
+    return false;
+}
+static bool deferredSketch(const Document& document,const NamedSketch& sketch){
+    if(!document.historyTip&&document.assemblyLoadSelection.isNull())return false;
+    try{AuthoringSources sources(document);sources.sketch(sketch.name);return deferredSources(document,sources);}catch(...){return false;}
+}
+static bool deferredDatum(const Document& document,const std::string& name){
+    if(!document.historyTip&&document.assemblyLoadSelection.isNull())return false;
+    try{AuthoringSources sources(document);sources.datum(name);return deferredSources(document,sources);}catch(...){return false;}
+}
+
 const std::vector<FeatureResult>& Document::recompute() {
     f64 t0=nowMs();
     refreshSkeleton(*this);
+    verifyAssemblyExternalReferences(*this);
+    if(historyTip&&!find(historyTip))throw std::runtime_error("Feature history tip was not found");
+    const auto loadedFeatures=assemblyLoadedFeatures(*this);
+    std::vector<bool> activeFeatures;bool withinHistory=true;
+    for(const auto& feature:features){activeFeatures.push_back(withinHistory&&loadedFeatures.count(feature.id));if(feature.id==historyTip)withinHistory=false;}
     // Cache custody is process-local and never serialized. Complex features use
     // a conservative upstream revision; primitives only depend on their inputs.
     arkjson::Value authored;if(!arkjson::parse(documentToJson(*this,false,false),authored))throw std::runtime_error("Cannot serialize evaluation dependencies");
@@ -423,6 +471,7 @@ const std::vector<FeatureResult>& Document::recompute() {
     ExprEnv env=buildEnv();
     for(auto& ns:sketches){
         for(auto& entity:ns.sk.ents)if(entity.kind==SketchEnt::Project){entity.projectionBrep.clear();entity.projectionSamples.clear();entity.projectionLength=0;entity.dof.clear();entity.expressions.clear();entity.segments.clear();}
+        if(deferredSketch(*this,ns)){ns.error.clear();ns.residual=0;continue;}
         evaluateSketch(ns,env);
     }
     std::vector<Body> work;
@@ -436,12 +485,12 @@ const std::vector<FeatureResult>& Document::recompute() {
     const unsigned cpuBudget=std::min(cores,threadSetting("ARK_CPU_THREADS",std::min(cores,32u),64));
     const unsigned requestedWorkers=threadSetting("ARK_FEATURE_THREADS",std::min(cpuBudget,4u),16);
 
-    parallelFeatures=0;peakParallelFeatures=0;dependencyEdges=0;
+    parallelFeatures=0;peakParallelFeatures=0;dependencyEdges=0;parallelContextFeaturesCopied=0;
     std::unordered_map<u64,size_t> indices;for(size_t i=0;i<features.size();++i)indices[features[i].id]=i;
     std::vector<std::vector<size_t>> dependencies(features.size());
     std::vector<std::string> authoringDependencyErrors(features.size());
     for(size_t i=0;i<features.size();++i){
-        if(!features[i].suppressed)try{
+        if(activeFeatures[i]&&!features[i].suppressed)try{
             AuthoringSources sources(*this);sources.collect(features[i]);if(sources.named)explicitInputs[i]=false;
             for(u64 source:sources.features)if(std::find(features[i].inputs.begin(),features[i].inputs.end(),source)==features[i].inputs.end())explicitInputs[i]=false;
             for(u64 source:sources.features){const auto found=indices.find(source);if(found==indices.end()||found->second>=i)throw std::runtime_error("Forward or cyclic associative feature dependency: "+features[i].name+" -> "+std::to_string(source));}
@@ -470,7 +519,7 @@ const std::vector<FeatureResult>& Document::recompute() {
         for(double n:{tessOpt.tol,tessOpt.maxEdge,tessOpt.minAngleDeg,(double)tessOpt.maxLevels})key+=':'+arkjson::Value::makeNum(n).dump();return key;
     };
     std::vector<std::string> plannedKeys(features.size());std::vector<u64> plannedGenerations(features.size());
-    for(size_t i=0;i<features.size();++i){plannedKeys[i]=keyFor(i);auto old=evaluationCache.find(features[i].id);plannedGenerations[i]=old!=evaluationCache.end()&&old->second.key==plannedKeys[i]?old->second.generation:++evaluationGeneration;if(!features[i].suppressed){keys[features[i].id]=std::to_string(features[i].id)+":"+std::to_string(plannedGenerations[i])+";";upstream+=keys[features[i].id];}}
+    for(size_t i=0;i<features.size();++i){if(!activeFeatures[i])continue;plannedKeys[i]=keyFor(i);auto old=evaluationCache.find(features[i].id);plannedGenerations[i]=old!=evaluationCache.end()&&old->second.key==plannedKeys[i]?old->second.generation:++evaluationGeneration;if(!features[i].suppressed){keys[features[i].id]=std::to_string(features[i].id)+":"+std::to_string(plannedGenerations[i])+";";upstream+=keys[features[i].id];}}
     upstream.clear();
     struct Evaluation {Body body;FeatureResult result;};
     struct Activity {std::atomic<unsigned> active{0},peak{0};void enter(){unsigned n=++active,old=peak.load();while(n>old&&!peak.compare_exchange_weak(old,n)){};}void leave(){--active;}};
@@ -485,11 +534,12 @@ const std::vector<FeatureResult>& Document::recompute() {
         if(!explicitInputs[current]){for(size_t i=0;i<jobs.size();++i)if(jobs[i].valid()){completed[i]=std::make_unique<Evaluation>(jobs[i].get());--outstanding;outstandingBytes-=jobBytes[i];}return;}
         auto inputBody=[&](u64 id)->const Body*{
             for(const auto& b:work)if(b.id==id)return &b;
-            auto found=indices.find(id);if(found==indices.end()||features[found->second].suppressed)return nullptr;size_t index=found->second;
+            auto found=indices.find(id);if(found==indices.end()||!activeFeatures[found->second]||features[found->second].suppressed)return nullptr;size_t index=found->second;
             if(completed[index])return completed[index]->result.ok?&completed[index]->body:nullptr;
             auto cached=evaluationCache.find(id);if(cached!=evaluationCache.end()&&cached->second.key==plannedKeys[index])return cached->second.body.get();return nullptr;
         };
         for(size_t i=current+1;i<features.size()&&outstanding<featureWorkers-1;++i){
+            if(!activeFeatures[i])continue;
             if(!explicitInputs[i])break;
             if(!explicitInputs[i]||jobs[i].valid()||completed[i]||published[i])continue;
             bool ready=true;for(size_t dependency:dependencies[i])ready&=inputBody(features[dependency].id)!=nullptr;if(!ready)continue;
@@ -500,7 +550,17 @@ const std::vector<FeatureResult>& Document::recompute() {
             if(bytes>payloadBudget||outstandingBytes>payloadBudget-bytes)continue;
             // A task owns all mutable evaluation context. Shared cache bodies are
             // immutable; lazy native promotion changes only these input copies.
-            Document snapshot; snapshot.features=features;snapshot.params=params;snapshot.materials=materials;snapshot.tessOpt=tessOpt;
+            Document snapshot;
+            // Audited tasks cannot consume named sketches/datums/occurrences.
+            // Retain the complete explicit ancestor recipes (native promotion
+            // may inspect them), rather than copying every unrelated feature
+            // once for each scheduled task. Preserve original history order.
+            std::set<size_t> contextFeatures;
+            std::function<void(size_t)> includeSource=[&](size_t index){if(!contextFeatures.insert(index).second)return;for(u64 id:features[index].inputs){auto source=indices.find(id);if(source!=indices.end())includeSource(source->second);}};
+            includeSource(i);snapshot.features.reserve(contextFeatures.size());
+            for(size_t index:contextFeatures)snapshot.features.push_back(features[index]);
+            parallelContextFeaturesCopied+=snapshot.features.size();
+            snapshot.params=params;snapshot.materials=materials;snapshot.tessOpt=tessOpt;
             std::vector<Body> inputs;for(u64 id:features[i].inputs)inputs.push_back(*inputBody(id));
             const Feature feature=features[i];const unsigned nativeBudget=nativeThreadsPerWorker;
             auto task=std::make_shared<std::packaged_task<Evaluation()>>([snapshot=std::move(snapshot),inputs=std::move(inputs),feature,env,nativeBudget,activity]()mutable{
@@ -512,7 +572,9 @@ const std::vector<FeatureResult>& Document::recompute() {
         }
     };
     for(auto&f:features){
-        const size_t index=featureIndex++;schedule(index);std::string cacheKey=plannedKeys[index];
+        const size_t index=featureIndex++;
+        if(!activeFeatures[index]){FeatureResult inactive;inactive.id=f.id;lastResults.push_back(inactive);continue;}
+        schedule(index);std::string cacheKey=plannedKeys[index];
         FeatureResult fr; fr.id=f.id;
         const auto previousCache=evaluationCache.find(f.id);const bool cachedFeature=previousCache!=evaluationCache.end()&&previousCache->second.key==cacheKey;
         evaluationProgress(f.id,f.name,index,features.size(),false,cachedFeature);
@@ -554,13 +616,13 @@ const std::vector<FeatureResult>& Document::recompute() {
         bool known=canvas.plane=="XY"||canvas.plane=="XZ"||canvas.plane=="YZ";
         for(const auto& plane:planes) if(plane.name==canvas.plane) known=true;
         if(!known){if(parameterError.empty())parameterError="Canvas plane was not found";continue;}
-        try{resolvePlane(*this,canvas.plane);}catch(const std::exception& e){if(parameterError.empty())parameterError=e.what();}
+        if(!deferredDatum(*this,canvas.plane))try{resolvePlane(*this,canvas.plane);}catch(const std::exception& e){if(parameterError.empty())parameterError=e.what();}
         auto lengthOk=[&](const std::string& expr){bool ok=false;double value=evalExpr(expr,canvasEnv,&ok);return ok&&value>0.&&value<=1e6;};
         if(!lengthOk(canvas.width)||!lengthOk(canvas.height)){if(parameterError.empty())parameterError="Canvas width and height must be positive millimetres";}
     }
-    try{for(auto& plane:planes)resolvePlane(*this,plane.name);}
+    try{for(auto& plane:planes)if(!deferredDatum(*this,plane.name))resolvePlane(*this,plane.name);}
     catch(const std::exception& e){if(parameterError.empty())parameterError=e.what();}
-    for(auto& ns:sketches)if(ns.error.empty()){
+    for(auto& ns:sketches)if(ns.error.empty()&&!deferredSketch(*this,ns)){
         try{resolvePlane(*this,ns.sk.plane);}catch(const std::exception& e){ns.error=e.what();ns.residual=INFINITY;}
     }
     evaluatingBodies=nullptr;
@@ -568,6 +630,10 @@ const std::vector<FeatureResult>& Document::recompute() {
     for(auto& job:jobs)if(job.valid())job.wait();
     peakParallelFeatures=activity->peak.load();
     evaluationCache=std::move(nextCache);
+    // Unloaded definitions retain authored recipes, never derived native
+    // buffers. These two auxiliary caches otherwise outlive evalBodies.
+    for(auto it=referenceFrameCache.begin();it!=referenceFrameCache.end();)if(!evaluationCache.count(it->first))it=referenceFrameCache.erase(it);else ++it;
+    for(auto it=centroidCache.begin();it!=centroidCache.end();)if(!evaluationCache.count(it->first))it=centroidCache.erase(it);else ++it;
     recomputeMs=nowMs()-t0;
     return lastResults;
 }

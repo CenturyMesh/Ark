@@ -1,0 +1,132 @@
+{
+    "schema":  "ark.iteration-verification.v1",
+    "iteration_code":  "029B",
+    "version":  "0.9.30",
+    "base_commit":  "a96a7ed0ff8bd8ca6c9a58e0f6b9ec9739392bbb",
+    "source_state":  "Isolated uncommitted worktree; runtime source frozen before final builds. Package inventory records its own dirty working-tree snapshot; verification documents finalized afterward. No merge, push or public release.",
+    "environment":  {
+                        "configuration":  "Release",
+                        "portable_core_comparison":  "OCCT OFF; identical source measurement harness and compiler/link flags in baseline and candidate",
+                        "platform":  "windows-x64",
+                        "native_kernel":  "OCCT8.0.1",
+                        "compiler":  "LLVM-MinGW Clang23.1.3"
+                    },
+    "tests":  [
+                  {
+                      "scope":  "full native with live Studio UI",
+                      "seconds":  407.76,
+                      "failed":  0,
+                      "passed":  146
+                  },
+                  {
+                      "scope":  "full portable core",
+                      "seconds":  66.33,
+                      "failed":  0,
+                      "passed":  70
+                  },
+                  {
+                      "scope":  "post-allowlist release/distribution checks",
+                      "seconds":  13.7,
+                      "failed":  0,
+                      "passed":  2
+                  }
+              ],
+    "native_corpus":  {
+                          "rejected_trials":  27,
+                          "periodic_trim_guards":  9,
+                          "seed":  19020,
+                          "accepted_trials":  57,
+                          "unexpected_failures":  0
+                      },
+    "drawing_dxf":  {
+                        "scope":  "Canonical part, assembly and occurrence drawings; all exact curve roles and source ownership accounted; local independent readback only.",
+                        "fixtures":  5
+                    },
+    "package":  {
+                    "profile_isolated":  true,
+                    "SDK_PATH_excluded":  true,
+                    "payload_files":  86,
+                    "inventory_hashes_verified":  true,
+                    "publisher_signature":  "absent",
+                    "artifact":  {
+                                     "sha256":  "3c47962edb6176144b6ef68a1fcfe2649eca2ce52a7b3a8776874e8c69baf1c0",
+                                     "name":  "ark-windows-x64-0.9.30.zip",
+                                     "size":  50852153
+                                 },
+                    "runtime_components":  34,
+                    "payload_hashes_verified":  true,
+                    "sbom_components":  38,
+                    "archive_hash_verified":  true,
+                    "relocated_rpc_count":  13
+                },
+    "dependency_audit":  {
+                             "returned_records":  0,
+                             "unqueried_components":  34,
+                             "query_failures":  0,
+                             "supported_queries":  4,
+                             "scope":  "No records returned for supported identities; not evidence of vulnerability absence. Runtime/transitive/OS/GPU coverage remains open."
+                         },
+    "performance":  {
+                        "project_sizes":  [
+                                              16,
+                                              128,
+                                              512
+                                          ],
+                        "studio_p95_apply_to_swap_return_ms":  [
+                                                                   {
+                                                                       "p95_ms":  38.004399999999997,
+                                                                       "feature_count":  16
+                                                                   },
+                                                                   {
+                                                                       "p95_ms":  108.2389,
+                                                                       "feature_count":  128
+                                                                   },
+                                                                   {
+                                                                       "p95_ms":  398.86529999999999,
+                                                                       "feature_count":  512
+                                                                   }
+                                                               ],
+                        "baseline":  "028D",
+                        "comparison_rows":  30,
+                        "observed_regression":  "doc_info p95 at 512 features increased 0.4464 ms -\u003e 0.8920 ms. No speedup, universal latency or cost-reduction claim.",
+                        "candidate":  "029B",
+                        "api_samples_per_size":  21
+                    },
+    "retained_failed_attempts":  [
+                                     "Initial geometry test compilation missing include; corrected before focused/native runs.",
+                                     "Initial full core68/70 failed only two obsolete92-tool expectations; corrected, followup2/2 and final70/70 pass.",
+                                     "New container fixture initially mutated an existing history head directly; fixture corrected, final native/core suites pass.",
+                                     "First baseline fresh-process launch timed out120seconds; failed attempt retained; intermediate successful run had uncontrolled build load. Final controlled pair recorded separately.",
+                                     "First real package rejected legitimate028D authoring atlas absent from reviewed allowlist; exact names and negative fixtures added; distribution38checks, followup2/2 and new package pass."
+                                 ],
+    "milestone_statuses":  {
+                               "B.05":  "Parcial",
+                               "A.04":  "Parcial",
+                               "A.03":  "Parcial",
+                               "A.02":  "Parcial",
+                               "B.03":  "Parcial",
+                               "A.01":  "Verificado no escopo",
+                               "B.01":  "Parcial",
+                               "B.02":  "Parcial",
+                               "A.05":  "Parcial",
+                               "B.04":  "Parcial"
+                           },
+    "limits":  [
+                   "No fresh hosted CI or Linux execution.",
+                   "No actual power-loss, publisher signing or trusted online update transport qualification.",
+                   "No third-party CAD recipient, broad drafting standards or manufacturing qualification.",
+                   "Selective evaluation is conservative for indirect dependencies; no universal I/O or memory scaling claim.",
+                   "Only synthetic fixtures; no user projects, credentials or settings packaged."
+               ],
+    "initial_checkpoint_scope":  "Original test/package/performance records describe the initial A/B salvage checkpoint. The doc_info optimization followup is recorded separately; its18 affected native/UI tests and current artifact do not replace the historical146-test result.",
+    "doc_info_optimization":  {
+                                  "before_p95_512_ms":  0.8941,
+                                  "current_local_artifact_sha256":  "78db9cd449ee8c9a043b14c4c9988e99e4532dc91cc85d3b3df9b64aff5f00eb",
+                                  "samples":  101,
+                                  "after_p95_512_ms":  0.4073,
+                                  "affected_native_UI_tests_passed":  18,
+                                  "initial_records_retained":  true,
+                                  "core_tests_passed":  70,
+                                  "evidence":  "doc-info-optimization.json"
+                              }
+}

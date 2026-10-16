@@ -1,0 +1,294 @@
+{
+    "schema":  "ark.surface.repair.attempts.v1",
+    "milestone":  "B.03",
+    "date":  "2026-10-15",
+    "authority":  "Synthetic local native and document verification; all failed attempts retained.",
+    "attempts":  [
+                     {
+                         "attempt":  "kernel-attempt-01",
+                         "receipt_sha256":  "5d3290a589aa6bd877174155ff347d38dd118148e33d25a5e1e30083d522380c",
+                         "trials":  0,
+                         "failures":  1,
+                         "failed_checks":  [
+
+                                           ]
+                     },
+                     {
+                         "attempt":  "kernel-attempt-02",
+                         "receipt_sha256":  "a0ca7304ba144fc5c6c59aa3154169f6124f403d38671ae59250ce1410216fb1",
+                         "trials":  19,
+                         "failures":  3,
+                         "failed_checks":  [
+                                               {
+                                                   "case":  "open-solid-gap-refused",
+                                                   "trial":  null,
+                                                   "variant":  null,
+                                                   "failure":  "Wrong rejection: repair_invalid_input: Invalid native B-rep payload",
+                                                   "observed_error":  "repair_invalid_input: Invalid native B-rep payload"
+                                               },
+                                               {
+                                                   "case":  "disconnected-gap-refused",
+                                                   "trial":  null,
+                                                   "variant":  null,
+                                                   "failure":  "Wrong rejection: repair_invalid_input: Invalid native B-rep payload",
+                                                   "observed_error":  "repair_invalid_input: Invalid native B-rep payload"
+                                               },
+                                               {
+                                                   "case":  "multiple-edge-use-refused",
+                                                   "trial":  null,
+                                                   "variant":  null,
+                                                   "failure":  "Wrong rejection: repair_invalid_input: Invalid native B-rep payload",
+                                                   "observed_error":  "repair_invalid_input: Invalid native B-rep payload"
+                                               }
+                                           ]
+                     },
+                     {
+                         "attempt":  "kernel-attempt-03",
+                         "receipt_sha256":  "5c8a1796467c39ef5ba4b73a610e0b7b44e41c657b7bcaa09e23012dc3445258",
+                         "trials":  21,
+                         "failures":  0,
+                         "failed_checks":  [
+
+                                           ]
+                     },
+                     {
+                         "attempt":  "kernel-attempt-04",
+                         "receipt_sha256":  "7bede36726f807fa5dfe6c8f8ad729fa35e66ab0e256da2046096cda33b988d6",
+                         "trials":  21,
+                         "failures":  0,
+                         "failed_checks":  [
+
+                                           ]
+                     },
+                     {
+                         "attempt":  "kernel-attempt-05",
+                         "receipt_sha256":  "7bede36726f807fa5dfe6c8f8ad729fa35e66ab0e256da2046096cda33b988d6",
+                         "trials":  21,
+                         "failures":  0,
+                         "failed_checks":  [
+
+                                           ]
+                     },
+                     {
+                         "attempt":  "kernel-attempt-06",
+                         "receipt_sha256":  "7bede36726f807fa5dfe6c8f8ad729fa35e66ab0e256da2046096cda33b988d6",
+                         "trials":  21,
+                         "failures":  0,
+                         "failed_checks":  [
+
+                                           ]
+                     },
+                     {
+                         "attempt":  "authoring-attempt-01",
+                         "receipt_sha256":  "770f216ae3eed52ec753c2858ba66860ac7a971ed23389543a5302d4acce0988",
+                         "trials":  6,
+                         "failures":  6,
+                         "failed_checks":  [
+                                               {
+                                                   "case":  "editable-planar-orientation-and-thicken",
+                                                   "trial":  "baseline",
+                                                   "variant":  {
+                                                                   "s":  0.5
+                                                               },
+                                                   "failure":  "Repair recipe did not select conditional source version 41",
+                                                   "observed_error":  null
+                                               },
+                                               {
+                                                   "case":  "editable-planar-orientation-and-thicken",
+                                                   "trial":  "baseline",
+                                                   "variant":  {
+                                                                   "s":  1
+                                                               },
+                                                   "failure":  "Repair recipe did not select conditional source version 41",
+                                                   "observed_error":  null
+                                               },
+                                               {
+                                                   "case":  "editable-planar-orientation-and-thicken",
+                                                   "trial":  "baseline",
+                                                   "variant":  {
+                                                                   "s":  2
+                                                               },
+                                                   "failure":  "Repair recipe did not select conditional source version 41",
+                                                   "observed_error":  null
+                                               },
+                                               {
+                                                   "case":  "periodic-solid-and-planar-normal-boundary",
+                                                   "trial":  "baseline",
+                                                   "variant":  {
+                                                                   "s":  0.5
+                                                               },
+                                                   "failure":  "Repair recipe did not select conditional source version 41",
+                                                   "observed_error":  null
+                                               },
+                                               {
+                                                   "case":  "periodic-solid-and-planar-normal-boundary",
+                                                   "trial":  "baseline",
+                                                   "variant":  {
+                                                                   "s":  1
+                                                               },
+                                                   "failure":  "Repair recipe did not select conditional source version 41",
+                                                   "observed_error":  null
+                                               },
+                                               {
+                                                   "case":  "periodic-solid-and-planar-normal-boundary",
+                                                   "trial":  "baseline",
+                                                   "variant":  {
+                                                                   "s":  2
+                                                               },
+                                                   "failure":  "Repair recipe did not select conditional source version 41",
+                                                   "observed_error":  null
+                                               }
+                                           ]
+                     },
+                     {
+                         "attempt":  "authoring-attempt-02",
+                         "receipt_sha256":  "01557d77efa27b4fdead474e4b165a2df61d3a2f1cf3ce358994e145044f6f24",
+                         "trials":  6,
+                         "failures":  6,
+                         "failed_checks":  [
+                                               {
+                                                   "case":  "editable-planar-orientation-and-thicken",
+                                                   "trial":  "baseline",
+                                                   "variant":  {
+                                                                   "s":  0.5
+                                                               },
+                                                   "failure":  "Corpus authoring readback failed: Iteration history requires a supported document version 27 or later",
+                                                   "observed_error":  null
+                                               },
+                                               {
+                                                   "case":  "editable-planar-orientation-and-thicken",
+                                                   "trial":  "baseline",
+                                                   "variant":  {
+                                                                   "s":  1
+                                                               },
+                                                   "failure":  "Corpus authoring readback failed: Iteration history requires a supported document version 27 or later",
+                                                   "observed_error":  null
+                                               },
+                                               {
+                                                   "case":  "editable-planar-orientation-and-thicken",
+                                                   "trial":  "baseline",
+                                                   "variant":  {
+                                                                   "s":  2
+                                                               },
+                                                   "failure":  "Corpus authoring readback failed: Iteration history requires a supported document version 27 or later",
+                                                   "observed_error":  null
+                                               },
+                                               {
+                                                   "case":  "periodic-solid-and-planar-normal-boundary",
+                                                   "trial":  "baseline",
+                                                   "variant":  {
+                                                                   "s":  0.5
+                                                               },
+                                                   "failure":  "Corpus authoring readback failed: Iteration history requires a supported document version 27 or later",
+                                                   "observed_error":  null
+                                               },
+                                               {
+                                                   "case":  "periodic-solid-and-planar-normal-boundary",
+                                                   "trial":  "baseline",
+                                                   "variant":  {
+                                                                   "s":  1
+                                                               },
+                                                   "failure":  "Corpus authoring readback failed: Iteration history requires a supported document version 27 or later",
+                                                   "observed_error":  null
+                                               },
+                                               {
+                                                   "case":  "periodic-solid-and-planar-normal-boundary",
+                                                   "trial":  "baseline",
+                                                   "variant":  {
+                                                                   "s":  2
+                                                               },
+                                                   "failure":  "Corpus authoring readback failed: Iteration history requires a supported document version 27 or later",
+                                                   "observed_error":  null
+                                               }
+                                           ]
+                     },
+                     {
+                         "attempt":  "authoring-attempt-03",
+                         "receipt_sha256":  "07bd4d5155d2bf10185988b5678633139f7ef909d0055736ac73dbad112ff2cf",
+                         "trials":  36,
+                         "failures":  0,
+                         "failed_checks":  [
+
+                                           ]
+                     },
+                     {
+                         "attempt":  "authoring-attempt-04",
+                         "receipt_sha256":  "7384ceafd89605de5bf2376a160e7a359346fa770d28ff04f3ec966cf811a779",
+                         "trials":  36,
+                         "failures":  0,
+                         "failed_checks":  [
+
+                                           ]
+                     },
+                     {
+                         "attempt":  "legacy-corpus-attempt-01",
+                         "receipt_sha256":  "ed00e578fb0fe67b8d70bbf2d64bf1c90a034c7c05a9a5057121c194a56103ac",
+                         "trials":  84,
+                         "failures":  0,
+                         "failed_checks":  [
+
+                                           ]
+                     }
+                 ],
+    "corrections":  [
+                        {
+                            "attempt":  "kernel-attempt-01",
+                            "reason":  "Fixture asserted generic BRepCheck_Analyzer would detect inconsistent shell orientation; it can report valid.",
+                            "correction":  "Added explicit BRepCheck_Shell::Orientation before/after evidence and final gate."
+                        },
+                        {
+                            "attempt":  "kernel-attempt-02",
+                            "reason":  "Three invalid candidates rejected by the common validated reader before repair-specific reasons could be established.",
+                            "correction":  "Only explicit surface_repair uses a local candidate parser; every input face and final output remains validated. Common readBrep is unchanged."
+                        },
+                        {
+                            "attempt":  "authoring-attempt-01",
+                            "reason":  "SurfaceEdit repair was missed by the conditional source-version predicate; generic featureOperation only returns native operations for NativeSolid.",
+                            "correction":  "Read SurfaceEdit native op directly for conditional format 41 and downgrade gate."
+                        },
+                        {
+                            "attempt":  "authoring-attempt-02",
+                            "reason":  "Iteration-history loader still capped supported source format at 40.",
+                            "correction":  "Loader admits format 41; valid readback and downgraded-recipe rejection both tested."
+                        },
+                        {
+                            "attempt":  "final-code-review",
+                            "reason":  "Generic edge descriptors could overwrite producer tangent/radius conventions despite unchanged exact geometry.",
+                            "correction":  "Preserve edge and axis descriptors; update only planar face normals. Added a reversed producer-tangent convention assertion; final kernel and document suites passed."
+                        }
+                    ],
+    "build_attempts":  [
+                           {
+                               "attempt":  "initial-configure",
+                               "status":  "failed",
+                               "reason":  "CMake was not on the shell PATH; repeated using the configured tool executable."
+                           },
+                           {
+                               "attempt":  "build-01",
+                               "status":  "failed",
+                               "reason":  "Build started before the new source was added to CMake; unresolved repairSurfaceOrientation. CMake registration completed and build rerun."
+                           },
+                           {
+                               "attempt":  "build-02",
+                               "status":  "failed",
+                               "reason":  "Concurrent integration exposed const JSON mutations in agent compilation; owner corrected them before rebuilding."
+                           },
+                           {
+                               "attempt":  "build-03-through-08",
+                               "status":  "passed",
+                               "reason":  "Targeted compilation and linking completed after integration corrections; subsequent rebuilds included additional evidence checks."
+                           }
+                       ],
+    "final":  {
+                  "kernel_trials":  21,
+                  "kernel_failures":  0,
+                  "editable_trials":  36,
+                  "editable_accepted":  18,
+                  "editable_expected_rejections":  18,
+                  "editable_failures":  0,
+                  "legacy_trials":  84,
+                  "legacy_failures":  0,
+                  "legacy_surface_suite":  "passed"
+              },
+    "limitations":  "No user documents, arbitrary healing, geometric gap closure, global self-intersection proof, GUI verification, deployment or manufacturing qualification."
+}

@@ -1,0 +1,15 @@
+{
+  "schema": "ark.regression.commands.v1",
+  "seed": 19020,
+  "authorization": "Repository-authored synthetic fixtures; no user drawings or session inputs.",
+  "cases": [
+    {"id":"parameter-box","expected":"accept","features":1,"commands":[{"op":"param.set","name":"width","expr":"20"},{"op":"feature.add","type":"box","name":"Body","p":{"dx":"width","dy":10,"dz":5}}]},
+    {"id":"dependent-history","expected":"accept","features":2,"commands":[{"op":"feature.add","type":"box","name":"Base","p":{"dx":10,"dy":10,"dz":10}},{"op":"feature.add","type":"transform","name":"Moved","inputs":["Base"],"p":{"tx":15}}]},
+    {"id":"undefined-expression","expected":"reject","commands":[{"op":"feature.add","type":"box","name":"Bad","p":{"dx":"missing_parameter","dy":10,"dz":5}}]},
+    {"id":"missing-history-input","expected":"reject","commands":[{"op":"feature.add","type":"transform","name":"Bad","inputs":[9999],"p":{"tx":15}}]},
+    {"id":"stale-revision","expected":"reject","revision":9999,"commands":[{"op":"param.set","name":"width","expr":"20"}]},
+    {"id":"invalid-appearance","expected":"reject","commands":[{"op":"feature.add","type":"box","name":"Bad","p":{"dx":10,"dy":10,"dz":5},"appearance":{"opacity":2}}]},
+    {"id":"partial-batch-rollback","expected":"reject","commands":[{"op":"param.set","name":"must_rollback","expr":"20"},{"op":"feature.add","type":"transform","name":"Bad","inputs":[9999],"p":{"tx":15}}]},
+    {"id":"named-parameter-chain","expected":"accept","features":1,"commands":[{"op":"param.set","name":"a","expr":"5"},{"op":"param.set","name":"b","expr":"a*2"},{"op":"feature.add","type":"box","name":"Derived","p":{"dx":"b","dy":"a","dz":3}}]}
+  ]
+}

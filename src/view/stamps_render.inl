@@ -50,7 +50,7 @@ static void drawPlaneStamps024(const GLfloat* vp){
     StampDisplayState024 priorState;
     glUseProgram(pCanvas);glUniformMatrix4fv(glGetUniformLocation(pCanvas,"vp"),1,GL_FALSE,vp);glUniform1i(glGetUniformLocation(pCanvas,"img"),0);glUniform1f(glGetUniformLocation(pCanvas,"live"),1);
     glEnable(GL_BLEND);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);glEnable(GL_DEPTH_TEST);glDepthMask(GL_FALSE);glEnable(GL_POLYGON_OFFSET_FILL);glPolygonOffset(-1.f,-1.f);glActiveTexture(GL_TEXTURE0);glBindVertexArray(canvasVao);
-    for(const auto& stamp:g_doc.stamps){if(stamp.feature)continue;const auto p=resolvedStampProjector(g_doc,stamp);GLuint texture=stampAssetTexture(stamp.asset);if(!texture)continue;
+    for(const auto& stamp:g_doc.stamps){if(stamp.feature||!stampGeometryAvailable024B(g_doc,stamp))continue;const auto p=resolvedStampProjector(g_doc,stamp);GLuint texture=stampAssetTexture(stamp.asset);if(!texture)continue;
         if(p.frontOnly){glEnable(GL_CULL_FACE);glCullFace(GL_BACK);}else glDisable(GL_CULL_FACE);
         Mat4 model=Mat4::identity();const Vec3 origin=p.origin-p.uAxis*(p.width*.5)-p.vAxis*(p.height*.5);for(int axis=0;axis<3;++axis){const Vec3 v=axis==0?p.uAxis*p.width:axis==1?p.vAxis*p.height:p.normal;model.m[axis*4]=v.x;model.m[axis*4+1]=v.y;model.m[axis*4+2]=v.z;}model.m[12]=origin.x;model.m[13]=origin.y;model.m[14]=origin.z;
         GLfloat matrix[16];for(int i=0;i<16;++i)matrix[i]=(GLfloat)model.m[i];glUniformMatrix4fv(glGetUniformLocation(pCanvas,"model"),1,GL_FALSE,matrix);glUniform1f(glGetUniformLocation(pCanvas,"opacity"),(float)p.opacity);glBindTexture(GL_TEXTURE_2D,texture);glDrawArrays(GL_TRIANGLES,0,6);

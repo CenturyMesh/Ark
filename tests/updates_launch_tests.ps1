@@ -7,10 +7,11 @@ function Assert-LaunchEqual($Actual, $Expected, [string]$Name) {
     if ($Actual -cne $Expected) { throw "$Name`: expected [$Expected], got [$Actual]" }
     $script:passed++
 }
-function New-LaunchRuntime([string]$Path, [string]$Version, [string]$Executable) {
+function New-LaunchRuntime([string]$Path, [string]$Version, [string]$Executable, [switch]$LlvmRuntime) {
     [IO.Directory]::CreateDirectory($Path) | Out-Null
     Copy-Item -LiteralPath $Executable -Destination (Join-Path $Path 'ark-studio.exe')
-    foreach ($name in @('ark-cli.exe','ark-mcp.exe','ark-occt-worker.exe','TKernel.dll','TKBRep.dll','TKDESTEP.dll','assets/ui/ark-wordmark.png','assets/ui/ark-tool-atlas-v1.png','assets/ui/ark-detail-atlas-v1.png','assets/ui/ark-domain-atlas-v1.png')) {
+    $nativeFiles = if ($LlvmRuntime) { @('libTKernel.dll','libTKBRep.dll','libTKDESTEP.dll','libc++.dll','libunwind.dll') } else { @('TKernel.dll','TKBRep.dll','TKDESTEP.dll') }
+    foreach ($name in (@('ark-cli.exe','ark-mcp.exe','ark-occt-worker.exe','assets/ui/ark-wordmark.png','assets/ui/ark-tool-atlas-v1.png','assets/ui/ark-detail-atlas-v1.png','assets/ui/ark-domain-atlas-v1.png') + $nativeFiles)) {
         $target = Join-Path $Path $name
         [IO.Directory]::CreateDirectory((Split-Path $target -Parent)) | Out-Null
         [IO.File]::WriteAllText($target, "isolated launch fixture $Version $name")
@@ -20,6 +21,32 @@ function New-LaunchRuntime([string]$Path, [string]$Version, [string]$Executable)
         Copy-Item -LiteralPath (Join-Path $repository "updates/$name") -Destination (Join-Path $Path "updates/$name")
     }
     Write-ArkAtomicJson (Join-Path $Path 'app-version.json') @{ schema=1; product='ARK'; version=$Version; platform='windows-x64'; entrypoint='ark-studio.exe' }
+}
+function Set-LegacyLaunchValidator([string]$ModulePath) {
+    # Retain the previous MSVC-only validation contract in an installed
+    # helper. Other fixture functions use the current implementation so this
+    # regression isolates the compiler-family bootstrap compatibility boundary.
+    $legacy = @'
+function Get-ArkRuntimeVersion([string]$RuntimeDirectory) {
+    $metadata = Read-ArkJson (Join-Path $RuntimeDirectory 'app-version.json') 4KB
+    ConvertTo-ArkVersion $metadata.version | Out-Null
+    if ($metadata.schema -ne 1 -or $metadata.product -cne 'ARK' -or $metadata.platform -cne 'windows-x64' -or $metadata.entrypoint -cne 'ark-studio.exe') { throw 'Invalid ARK runtime metadata.' }
+    foreach ($name in @('ark-studio.exe', 'ark-cli.exe', 'ark-mcp.exe', 'ark-occt-worker.exe', 'TKernel.dll', 'TKBRep.dll', 'TKDESTEP.dll', 'assets/ui/ark-wordmark.png', 'assets/ui/ark-tool-atlas-v1.png', 'assets/ui/ark-detail-atlas-v1.png', 'assets/ui/ark-domain-atlas-v1.png', 'updates/ark-update.ps1', 'updates/ark-launch.ps1', 'updates/Ark.Update.psm1')) {
+        $file = Join-Path $RuntimeDirectory $name
+        Assert-ArkNoReparsePoint $RuntimeDirectory $file
+        if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "ARK runtime is missing $name." }
+    }
+    return $metadata.version
+}
+'@
+    $text = [IO.File]::ReadAllText($ModulePath)
+    $tokens=$null; $errors=$null
+    $ast=[Management.Automation.Language.Parser]::ParseInput($text,[ref]$tokens,[ref]$errors)
+    if ($errors.Count) { throw 'Cannot parse the isolated legacy helper fixture.' }
+    $function=$ast.Find({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq 'Get-ArkRuntimeVersion'},$false)
+    if (-not $function) { throw 'Runtime validation function was not found.' }
+    $text=$text.Substring(0,$function.Extent.StartOffset)+$legacy+$text.Substring($function.Extent.EndOffset)
+    [IO.File]::WriteAllText($ModulePath,$text,(New-Object Text.UTF8Encoding($false)))
 }
 function New-LaunchPayload([string[]]$Arguments, [string]$WorkingDirectory) {
     $value = @{ arguments=@($Arguments); workingDirectory=$WorkingDirectory } | ConvertTo-Json -Depth 4 -Compress
@@ -134,11 +161,15 @@ public static class LaunchFixture {
     $slowCandidate = Join-Path $temporary 'slow-ack-candidate'
     $install = Join-Path $temporary 'isolated install'
     New-LaunchRuntime $baseline '0.9.0' $executable
-    New-LaunchRuntime $candidate '0.9.1' $executable
-    New-LaunchRuntime $failure '0.9.2' $executable
-    New-LaunchRuntime $slowCandidate '0.9.3' $executable
+    New-LaunchRuntime $candidate '0.9.1' $executable -LlvmRuntime
+    New-LaunchRuntime $failure '0.9.2' $executable -LlvmRuntime
+    New-LaunchRuntime $slowCandidate '0.9.3' $executable -LlvmRuntime
+    Set-LegacyLaunchValidator (Join-Path $baseline 'updates/Ark.Update.psm1')
     Initialize-ArkInstall $baseline $install | Out-Null
     $launcher = Join-Path $install 'launcher/ark-launch.ps1'
+    $retainedModule = Join-Path $install 'launcher/Ark.Update.psm1'
+    $legacyHash = (Get-FileHash -LiteralPath $retainedModule -Algorithm SHA256).Hash
+    $launcherHash = (Get-FileHash -LiteralPath $launcher -Algorithm SHA256).Hash
     $unicode = [string][char]0x00e7 + [char]0x00e3 + [char]0x03c0
     $arguments = @('--load', 'relative drawing.ark', "unicode-$unicode", '', 'embedded "quoted" text', 'C:\folder with spaces\', 'slashes\\"quote', '$(Write-Output SHOULD_STAY_LITERAL)', 'last\')
     $payload = New-LaunchPayload $arguments $workspace
@@ -151,7 +182,45 @@ public static class LaunchFixture {
     Assert-LaunchEqual (Get-ArkState $install).current '0.9.0' 'Ordinary launch retains selected baseline'
     Assert-CallerEnvironment
 
+    # The retained validator rejects this fully formed LLVM-family runtime.
+    # Exercise the post-download staging function in a separate PowerShell host;
+    # this is a local compatibility test, not an online update trial.
+    $archive=Join-Path $temporary 'ark-windows-x64-0.9.1.zip'
+    Compress-ArkPackage $candidate $archive
+    $manifest=Join-Path $temporary 'llvm-manifest.json'
+    Write-ArkAtomicJson $manifest @{schema=1;product='ARK';version='0.9.1';platform='windows-x64';package=@{name='ark-windows-x64-0.9.1.zip';url='https://github.com/CenturyMesh/Ark/releases/download/v0.9.1/ark-windows-x64-0.9.1.zip';size=(Get-Item -LiteralPath $archive).Length;sha256=(Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()}}
+    $legacyProbe=Join-Path $temporary 'LegacyProbe.ps1'
+    [IO.File]::WriteAllText($legacyProbe,@'
+param([string]$Helper,[string]$Archive,[string]$Manifest,[string]$Root)
+$ErrorActionPreference='Stop'
+Import-Module $Helper -Force
+try { Install-ArkStagedPackage $Archive (Read-ArkJson $Manifest) $Root | Out-Null; exit 0 }
+catch { if ($_.Exception.Message -notlike '*missing TKernel.dll*') { throw }; exit 23 }
+'@,(New-Object Text.UTF8Encoding($false)))
+    $shell=Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
+    & $shell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $legacyProbe -Helper $retainedModule -Archive $archive -Manifest $manifest -Root $install
+    Assert-LaunchEqual $LASTEXITCODE 23 'Retained old helper rejects LLVM-family package before pending publication'
+    Assert-LaunchEqual (Get-ArkState $install).pending '' 'Legacy rejection preserves pending state'
+    # Reproduce an explicit invocation of the newly extracted local package:
+    # its launch/install entry point imports its reviewed new module. The old
+    # stable launch above intentionally imported a different retained helper.
+    Import-Module (Join-Path $repository 'updates/Ark.Update.psm1') -Force
+    $pointerBytes=[IO.File]::ReadAllText((Join-Path $install 'current.json'))
+    $held=[IO.File]::Open($retainedModule,'Open','Read','Read')
+    $refreshFailed=$false
+    try { try { Initialize-ArkInstall $candidate $install | Out-Null } catch { $refreshFailed=$true } }
+    finally { $held.Dispose() }
+    Assert-LaunchEqual $refreshFailed $true 'Locked retained helper prevents unsafe bootstrap migration'
+    Assert-LaunchEqual ([IO.File]::ReadAllText((Join-Path $install 'current.json'))) $pointerBytes 'Failed module replacement preserves exact current/pending state'
+    Assert-LaunchEqual ((Get-FileHash -LiteralPath $retainedModule -Algorithm SHA256).Hash) $legacyHash 'Failed atomic replacement preserves old helper bytes'
+    Assert-LaunchEqual (Test-Path -LiteralPath (Join-Path $install 'versions/0.9.1')) $false 'Migration failure occurs before local candidate publication'
+    Assert-LaunchEqual (@(Get-ChildItem -LiteralPath (Join-Path $install 'launcher') -Filter '*.tmp')).Count 0 'Failed replacement leaves no pending helper files'
     Initialize-ArkInstall $candidate $install | Out-Null
+    $refreshedHash=(Get-FileHash -LiteralPath $retainedModule -Algorithm SHA256).Hash
+    Assert-LaunchEqual $refreshedHash ((Get-FileHash -LiteralPath (Join-Path $repository 'updates/Ark.Update.psm1') -Algorithm SHA256).Hash) 'New local package refreshes stable module from executing trusted local code'
+    Assert-LaunchEqual ((Get-FileHash -LiteralPath $launcher -Algorithm SHA256).Hash) $launcherHash 'Migration preserves retained launcher script and activation protocol'
+    Initialize-ArkInstall $baseline $install | Out-Null
+    Assert-LaunchEqual ((Get-FileHash -LiteralPath $retainedModule -Algorithm SHA256).Hash) $refreshedHash 'Old or equal selected baseline cannot downgrade refreshed helper'
     Assert-LaunchEqual (Get-ArkState $install).pending '0.9.1' 'Candidate prepared before actual launch'
     & $launcher -InstallRoot $install -ArgumentsBase64 $payload -NoDialogs
     $accepted = Wait-LaunchReceipt '0.9.1' 1
@@ -167,6 +236,17 @@ public static class LaunchFixture {
     Assert-LaunchEqual $state.activating '' 'Successful launch clears activation marker'
     Assert-LaunchEqual $state.pending '' 'Successful launch consumes pending update'
     Assert-CallerEnvironment
+
+    Undo-ArkUpdate $install | Out-Null
+    & $launcher -InstallRoot $install -ArgumentsBase64 $payload -NoDialogs
+    $oldRuntime=Wait-LaunchReceipt '0.9.0' 2
+    Assert-LaunchArguments $oldRuntime $arguments 'Refreshed helper still launches previous MSVC-family runtime'
+    Assert-LaunchEqual (Get-ArkState $install).current '0.9.0' 'Manual rollback retains MSVC runtime compatibility'
+    Import-Module (Join-Path $baseline 'updates/Ark.Update.psm1') -Force
+    Initialize-ArkInstall $baseline $install | Out-Null
+    Assert-LaunchEqual ((Get-FileHash -LiteralPath $retainedModule -Algorithm SHA256).Hash) $refreshedHash 'Equal selected runtime with retained legacy helper cannot downgrade bootstrap'
+    Import-Module (Join-Path $repository 'updates/Ark.Update.psm1') -Force
+    Undo-ArkUpdate $install | Out-Null
 
     & $launcher -InstallRoot $install -ArgumentsBase64 (New-LaunchPayload @('') $workspace) -NoDialogs
     $empty = Wait-LaunchReceipt '0.9.1' 2

@@ -1,0 +1,446 @@
+{
+    "schema":  "ark.dependency-audit.v1",
+    "queried_at_utc":  "2026-10-15T13:37:39.2535154Z",
+    "database":  "https://api.osv.dev/v1/query",
+    "records":  [
+                    {
+                        "component":  "mapbox-earcut",
+                        "name":  "mapbox-earcut",
+                        "status":  "no_records_returned",
+                        "query":  {
+                                      "version":  "v2.2.4",
+                                      "package":  {
+                                                      "name":  "https://github.com/mapbox/earcut.hpp",
+                                                      "ecosystem":  "GIT"
+                                                  }
+                                  },
+                        "pages":  1,
+                        "vulnerabilities":  [
+
+                                            ]
+                    },
+                    {
+                        "component":  "stb_image",
+                        "name":  "stb_image",
+                        "status":  "no_records_returned",
+                        "query":  {
+                                      "commit":  "013ac3beddff3dbffafd5177e7972067cd2b5083"
+                                  },
+                        "pages":  1,
+                        "vulnerabilities":  [
+
+                                            ]
+                    },
+                    {
+                        "component":  "SQLite",
+                        "name":  "SQLite",
+                        "status":  "no_records_returned",
+                        "query":  {
+                                      "version":  "3.54.0",
+                                      "package":  {
+                                                      "name":  "sqlite3",
+                                                      "ecosystem":  "OSS-Fuzz"
+                                                  }
+                                  },
+                        "pages":  1,
+                        "vulnerabilities":  [
+
+                                            ]
+                    },
+                    {
+                        "component":  "Open-CASCADE-Technology",
+                        "name":  "Open-CASCADE-Technology",
+                        "status":  "no_records_returned",
+                        "query":  {
+                                      "version":  "V8_0_1",
+                                      "package":  {
+                                                      "name":  "https://github.com/Open-Cascade-SAS/OCCT",
+                                                      "ecosystem":  "GIT"
+                                                  }
+                                  },
+                        "pages":  1,
+                        "vulnerabilities":  [
+
+                                            ]
+                    },
+                    {
+                        "component":  "runtime:libc++.dll",
+                        "name":  "libc++.dll",
+                        "status":  "not_queried",
+                        "query":  null,
+                        "pages":  0,
+                        "vulnerabilities":  [
+
+                                            ],
+                        "reason":  "No supported public database identity/source revision. Bundled runtime hashes remain in the SBOM; no clean result inferred."
+                    },
+                    {
+                        "component":  "runtime:libTKBO.dll",
+                        "name":  "libTKBO.dll",
+                        "status":  "not_queried",
+                        "query":  null,
+                        "pages":  0,
+                        "vulnerabilities":  [
+
+                                            ],
+                        "reason":  "No supported public database identity/source revision. Bundled runtime hashes remain in the SBOM; no clean result inferred."
+                    },
+                    {
+                        "component":  "runtime:libTKBool.dll",
+                        "name":  "libTKBool.dll",
+                        "status":  "not_queried",
+                        "query":  null,
+                        "pages":  0,
+                        "vulnerabilities":  [
+
+                                            ],
+                        "reason":  "No supported public database identity/source revision. Bundled runtime hashes remain in the SBOM; no clean result inferred."
+                    },
+                    {
+                        "component":  "runtime:libTKBRep.dll",
+                        "name":  "libTKBRep.dll",
+                        "status":  "not_queried",
+                        "query":  null,
+                        "pages":  0,
+                        "vulnerabilities":  [
+
+                                            ],
+                        "reason":  "No supported public database identity/source revision. Bundled runtime hashes remain in the SBOM; no clean result inferred."
+                    },
+                    {
+                        "component":  "runtime:libTKCAF.dll",
+                        "name":  "libTKCAF.dll",
+                        "status":  "not_queried",
+                        "query":  null,
+                        "pages":  0,
+                        "vulnerabilities":  [
+
+                                            ],
+                        "reason":  "No supported public database identity/source revision. Bundled runtime hashes remain in the SBOM; no clean result inferred."
+                    },
+                    {
+                        "component":  "runtime:libTKCDF.dll",
+                        "name":  "libTKCDF.dll",
+                        "status":  "not_queried",
+                        "query":  null,
+                        "pages":  0,
+                        "vulnerabilities":  [
+
+                                            ],
+                        "reason":  "No supported public database identity/source revision. Bundled runtime hashes remain in the SBOM; no clean result inferred."
+                    },
+                    {
+                        "component":  "runtime:libTKDE.dll",
+                        "name":  "libTKDE.dll",
+                        "status":  "not_queried",
+                        "query":  null,
+                        "pages":  0,
+                        "vulnerabilities":  [
+
+                                            ],
+                        "reason":  "No supported public database identity/source revision. Bundled runtime hashes remain in the SBOM; no clean result inferred."
+                    },
+                    {
+                        "component":  "runtime:libTKDEIGES.dll",
+                        "name":  "libTKDEIGES.dll",
+                        "status":  "not_queried",
+                        "query":  null,
+                        "pages":  0,
+                        "vulnerabilities":  [
+
+                                            ],
+                        "reason":  "No supported public database identity/source revision. Bundled runtime hashes remain in the SBOM; no clean result inferred."
+                    },
+                    {
+                        "component":  "runtime:libTKDESTEP.dll",
+                        "name":  "libTKDESTEP.dll",
+                        "status":  "not_queried",
+                        "query":  null,
+                        "pages":  0,
+                        "vulnerabilities":  [
+
+                                            ],
+                        "reason":  "No supported public database identity/source revision. Bundled runtime hashes remain in the SBOM; no clean result inferred."
+                    },
+                    {
+                        "component":  "runtime:libTKernel.dll",
+                        "name":  "libTKernel.dll",
+                        "status":  "not_queried",
+                        "query":  null,
+                        "pages":  0,
+                        "vulnerabilities":  [
+
+                                            ],
+                        "reason":  "No supported public database identity/source revision. Bundled runtime hashes remain in the SBOM; no clean result inferred."
+                    },
+                    {
+                        "component":  "runtime:libTKExpress.dll",
+                        "name":  "libTKExpress.dll",
+                        "status":  "not_queried",
+                        "query":  null,
+                        "pages":  0,
+                        "vulnerabilities":  [
+
+                                            ],
+                        "reason":  "No supported public database identity/source revision. Bundled runtime hashes remain in the SBOM; no clean result inferred."
+                    },
+                    {
+                        "component":  "runtime:libTKFeat.dll",
+                        "name":  "libTKFeat.dll",
+                        "status":  "not_queried",
+                        "query":  null,
+                        "pages":  0,
+                        "vulnerabilities":  [
+
+                                            ],
+                        "reason":  "No supported public database identity/source revision. Bundled runtime hashes remain in the SBOM; no clean result inferred."
+                    },
+                    {
+                        "component":  "runtime:libTKFillet.dll",
+                        "name":  "libTKFillet.dll",
+                        "status":  "not_queried",
+                        "query":  null,
+                        "pages":  0,
+                        "vulnerabilities":  [
+
+                                            ],
+                        "reason":  "No supported public database identity/source revision. Bundled runtime hashes remain in the SBOM; no clean result inferred."
+                    },
+                    {
+                        "component":  "runtime:libTKG2d.dll",
+                        "name":  "libTKG2d.dll",
+                        "status":  "not_queried",
+                        "query":  null,
+                        "pages":  0,
+                        "vulnerabilities":  [
+
+                                            ],
+                        "reason":  "No supported public database identity/source revision. Bundled runtime hashes remain in the SBOM; no clean result inferred."
+                    },
+                    {
+                        "component":  "runtime:libTKG3d.dll",
+                        "name":  "libTKG3d.dll",
+                        "status":  "not_queried",
+                        "query":  null,
+                        "pages":  0,
+                        "vulnerabilities":  [
+
+                                            ],
+                        "reason":  "No supported public database identity/source revision. Bundled runtime hashes remain in the SBOM; no clean result inferred."
+                    },
+                    {
+                        "component":  "runtime:libTKGeomAlgo.dll",
+                        "name":  "libTKGeomAlgo.dll",
+                        "status":  "not_queried",
+                        "query":  null,
+                        "pages":  0,
+                        "vulnerabilities":  [
+
+                                            ],
+                        "reason":  "No supported public database identity/source revision. Bundled runtime hashes remain in the SBOM; no clean result inferred."
+                    },
+                    {
+                        "component":  "runtime:libTKGeomBase.dll",
+                        "name":  "libTKGeomBase.dll",
+                        "status":  "not_queried",
+                        "query":  null,
+                        "pages":  0,
+                        "vulnerabilities":  [
+
+                                            ],
+                        "reason":  "No supported public database identity/source revision. Bundled runtime hashes remain in the SBOM; no clean result inferred."
+                    },
+                    {
+                        "component":  "runtime:libTKHelix.dll",
+                        "name":  "libTKHelix.dll",
+                        "status":  "not_queried",
+                        "query":  null,
+                        "pages":  0,
+                        "vulnerabilities":  [
+
+                                            ],
+                        "reason":  "No supported public database identity/source revision. Bundled runtime hashes remain in the SBOM; no clean result inferred."
+                    },
+                    {
+                        "component":  "runtime:libTKHLR.dll",
+                        "name":  "libTKHLR.dll",
+                        "status":  "not_queried",
+                        "query":  null,
+                        "pages":  0,
+                        "vulnerabilities":  [
+
+                                            ],
+                        "reason":  "No supported public database identity/source revision. Bundled runtime hashes remain in the SBOM; no clean result inferred."
+                    },
+                    {
+                        "component":  "runtime:libTKLCAF.dll",
+                        "name":  "libTKLCAF.dll",
+                        "status":  "not_queried",
+                        "query":  null,
+                        "pages":  0,
+                        "vulnerabilities":  [
+
+                                            ],
+                        "reason":  "No supported public database identity/source revision. Bundled runtime hashes remain in the SBOM; no clean result inferred."
+                    },
+                    {
+                        "component":  "runtime:libTKMath.dll",
+                        "name":  "libTKMath.dll",
+                        "status":  "not_queried",
+                        "query":  null,
+                        "pages":  0,
+                        "vulnerabilities":  [
+
+                                            ],
+                        "reason":  "No supported public database identity/source revision. Bundled runtime hashes remain in the SBOM; no clean result inferred."
+                    },
+                    {
+                        "component":  "runtime:libTKMesh.dll",
+                        "name":  "libTKMesh.dll",
+                        "status":  "not_queried",
+                        "query":  null,
+                        "pages":  0,
+                        "vulnerabilities":  [
+
+                                            ],
+                        "reason":  "No supported public database identity/source revision. Bundled runtime hashes remain in the SBOM; no clean result inferred."
+                    },
+                    {
+                        "component":  "runtime:libTKOffset.dll",
+                        "name":  "libTKOffset.dll",
+                        "status":  "not_queried",
+                        "query":  null,
+                        "pages":  0,
+                        "vulnerabilities":  [
+
+                                            ],
+                        "reason":  "No supported public database identity/source revision. Bundled runtime hashes remain in the SBOM; no clean result inferred."
+                    },
+                    {
+                        "component":  "runtime:libTKPrim.dll",
+                        "name":  "libTKPrim.dll",
+                        "status":  "not_queried",
+                        "query":  null,
+                        "pages":  0,
+                        "vulnerabilities":  [
+
+                                            ],
+                        "reason":  "No supported public database identity/source revision. Bundled runtime hashes remain in the SBOM; no clean result inferred."
+                    },
+                    {
+                        "component":  "runtime:libTKService.dll",
+                        "name":  "libTKService.dll",
+                        "status":  "not_queried",
+                        "query":  null,
+                        "pages":  0,
+                        "vulnerabilities":  [
+
+                                            ],
+                        "reason":  "No supported public database identity/source revision. Bundled runtime hashes remain in the SBOM; no clean result inferred."
+                    },
+                    {
+                        "component":  "runtime:libTKShHealing.dll",
+                        "name":  "libTKShHealing.dll",
+                        "status":  "not_queried",
+                        "query":  null,
+                        "pages":  0,
+                        "vulnerabilities":  [
+
+                                            ],
+                        "reason":  "No supported public database identity/source revision. Bundled runtime hashes remain in the SBOM; no clean result inferred."
+                    },
+                    {
+                        "component":  "runtime:libTKTopAlgo.dll",
+                        "name":  "libTKTopAlgo.dll",
+                        "status":  "not_queried",
+                        "query":  null,
+                        "pages":  0,
+                        "vulnerabilities":  [
+
+                                            ],
+                        "reason":  "No supported public database identity/source revision. Bundled runtime hashes remain in the SBOM; no clean result inferred."
+                    },
+                    {
+                        "component":  "runtime:libTKV3d.dll",
+                        "name":  "libTKV3d.dll",
+                        "status":  "not_queried",
+                        "query":  null,
+                        "pages":  0,
+                        "vulnerabilities":  [
+
+                                            ],
+                        "reason":  "No supported public database identity/source revision. Bundled runtime hashes remain in the SBOM; no clean result inferred."
+                    },
+                    {
+                        "component":  "runtime:libTKVCAF.dll",
+                        "name":  "libTKVCAF.dll",
+                        "status":  "not_queried",
+                        "query":  null,
+                        "pages":  0,
+                        "vulnerabilities":  [
+
+                                            ],
+                        "reason":  "No supported public database identity/source revision. Bundled runtime hashes remain in the SBOM; no clean result inferred."
+                    },
+                    {
+                        "component":  "runtime:libTKXCAF.dll",
+                        "name":  "libTKXCAF.dll",
+                        "status":  "not_queried",
+                        "query":  null,
+                        "pages":  0,
+                        "vulnerabilities":  [
+
+                                            ],
+                        "reason":  "No supported public database identity/source revision. Bundled runtime hashes remain in the SBOM; no clean result inferred."
+                    },
+                    {
+                        "component":  "runtime:libTKXMesh.dll",
+                        "name":  "libTKXMesh.dll",
+                        "status":  "not_queried",
+                        "query":  null,
+                        "pages":  0,
+                        "vulnerabilities":  [
+
+                                            ],
+                        "reason":  "No supported public database identity/source revision. Bundled runtime hashes remain in the SBOM; no clean result inferred."
+                    },
+                    {
+                        "component":  "runtime:libTKXSBase.dll",
+                        "name":  "libTKXSBase.dll",
+                        "status":  "not_queried",
+                        "query":  null,
+                        "pages":  0,
+                        "vulnerabilities":  [
+
+                                            ],
+                        "reason":  "No supported public database identity/source revision. Bundled runtime hashes remain in the SBOM; no clean result inferred."
+                    },
+                    {
+                        "component":  "runtime:libunwind.dll",
+                        "name":  "libunwind.dll",
+                        "status":  "not_queried",
+                        "query":  null,
+                        "pages":  0,
+                        "vulnerabilities":  [
+
+                                            ],
+                        "reason":  "No supported public database identity/source revision. Bundled runtime hashes remain in the SBOM; no clean result inferred."
+                    },
+                    {
+                        "component":  "runtime:libwinpthread-1.dll",
+                        "name":  "libwinpthread-1.dll",
+                        "status":  "not_queried",
+                        "query":  null,
+                        "pages":  0,
+                        "vulnerabilities":  [
+
+                                            ],
+                        "reason":  "No supported public database identity/source revision. Bundled runtime hashes remain in the SBOM; no clean result inferred."
+                    }
+                ],
+    "query_failures":  0,
+    "findings":  0,
+    "unqueried_components":  34,
+    "scope":  "Public upstream commit/tag or OSS-Fuzz package/version queries only. Empty results do not prove project/version indexing, exploitability or absence of vulnerabilities. Runtime source revisions, transitive dependencies and OS/GPU components need separate review. Findings require triage through SECURITY.md.",
+    "sbom_sha256":  "e34bbbfbb5d6258323f4ce50ad0547b55663b79a867380c87d03ff63ad5e897d"
+}

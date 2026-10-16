@@ -1,4 +1,39 @@
-# Current source semantics — format 38
+# Current source semantics — format 41
+
+029B conditionally selects source 41 for explicit `surface_edit` orientation
+repair and `ark.design-container.v2` workspaces. Repair keeps the single input,
+orientation mode and optional planar normal as editable source. Container v2
+retains explicit configuration ownership, feature-owned external pins and a
+workspace-local load selection; merge preserves the parent's selector. Legacy
+v1 workspaces remain readable. Downgraded files reject, including in retained
+iteration history. Ordinary documents keep their earlier required format;
+the binary container schema stays at version 1.
+
+See [surface repair](SURFACE_REPAIR_029B.md) and
+[assembly scaling](ASSEMBLY_SCALING_029B.md).
+
+## Previous source extension — format 40
+
+029B conditionally selects source 40 for an inclusive `history_tip`, named
+`assembly_configurations`, `assembly_load_selection` or
+`assembly_external_references`. The rollback suffix remains authored; selection
+controls evaluation rather than deleting definitions or occurrences. External
+pins retain the imported producer hash, absolute local source path and explicit
+revision label; changed/missing source bytes reject protected use and publication.
+Older runtimes reject these fields instead of silently ignoring them. The
+iteration journal accepts source 40; the binary container schema remains version 1.
+Ordinary documents continue to select their actual required earlier format.
+See [029B](iterations/029B.md), [history/configuration authoring](CAD_AUTHORING_FOUNDATION.md)
+and [configuration controls](PRODUCT_CONFIGURATIONS_UI.md).
+
+## Previous source extension — format 39
+
+024B conditionally uses 39 for embedded image assets, projected Stamps,
+face appearances and exact split-line regions. Their original structures and
+source digests remain intact when combined with source 40 authoring. Resolved
+geometry and display projection stay derived. See [024B](iterations/024B.md).
+
+## Previous source extension — format 38
 
 023B selects format 38 only for exact `imported_cad` source packages,
 `holes_orchestrator` recipes or an isolated `design_container_checkout` manifest.
@@ -55,7 +90,7 @@ varying sweep sections. These source fields persist; resolved geometry remains
 derived. Older runtimes reject the unsupported format. Application iteration and
 document format are independent. See [018B](iterations/018B.md) for that scope.
 
-# ARK file formats, document versions 1 through 38
+# ARK file formats, document versions 1 through 41
 
 ## `.ark`
 

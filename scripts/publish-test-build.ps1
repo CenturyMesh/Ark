@@ -2,6 +2,7 @@ param(
     [string]$RuntimeDirectory = 'out/native-release/Release',
     [string]$OutputDirectory,
     [string]$MsvcRuntimeDirectory,
+    [string]$CompilerDirectory,
     [string]$OcctSourceDirectory = 'out/deps/occt/cache/OCCT-8_0_1',
     [string]$Repository = 'CenturyMesh/Ark',
     [switch]$Installer,
@@ -23,9 +24,11 @@ elseif (-not [IO.Path]::IsPathRooted($OutputDirectory)) { $OutputDirectory = Joi
 # Copy the existing binaries, never build, rewrite their identity, or run tests.
 $packageArguments = @{RuntimeDirectory=$RuntimeDirectory; OutputDirectory=$OutputDirectory; OcctSourceDirectory=$OcctSourceDirectory; SkipUpdateManifest=$true}
 if ($MsvcRuntimeDirectory) { $packageArguments.MsvcRuntimeDirectory = $MsvcRuntimeDirectory }
+if ($CompilerDirectory) { $packageArguments.CompilerDirectory = $CompilerDirectory }
 & (Join-Path $PSScriptRoot 'package-release.ps1') @packageArguments
 $archive = Join-Path $OutputDirectory "ark-windows-x64-$version.zip"
 $assets = @($archive)
+if (Test-Path -LiteralPath ($archive + '.provenance.json')) { $assets += $archive + '.provenance.json' }
 if ($Installer) {
     $installerArguments = @{PackagePath=$archive; OutputDirectory=$OutputDirectory; UseRuntimeIdentity=$true}
     if ($InnoCompiler) { $installerArguments.InnoCompiler = $InnoCompiler }

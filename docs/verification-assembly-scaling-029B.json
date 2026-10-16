@@ -1,0 +1,50 @@
+{
+  "milestone": "B.04",
+  "iteration": "029B",
+  "observed_date": "2026-10-15",
+  "scope": "local Windows OCCT exact-source fixture; no deployment or manufacturing qualification",
+  "test": "assembly-scaling-native-029b",
+  "native_attempts": [
+    {"attempt": 1, "result": "failed", "cause": "Test compared raw JSON insertion order across binary readback; changed to canonical semantic equality."},
+    {"attempt": 2, "result": "failed", "cause": "Added reference-cache test requested topology.faces instead of the published topology.references inventory; corrected to actual bound face references."},
+    {"attempt": 3, "result": "passed", "duration_seconds": 1.81},
+    {"attempt": 4, "result": "passed", "duration_seconds": 1.71, "context": "final targeted three-test integration run"}
+  ],
+  "final_targeted_tests": {"passed": 3, "failed": 0, "duration_seconds": 3.37, "names": ["configurable-assemblies", "assembly-scaling-native-029b", "design-containers-023b"]},
+  "additional_remapping_check": {"test": "design-containers-023b", "result": "passed", "duration_seconds": 0.27, "evidence": "Child occurrence ID5 after explicit deletion of ID4 maps to parent ID4; configuration visibility key remaps with the occurrence."},
+  "comparison": "warmed full and selected recomputes of the same eight retained imported two-solid STEP definitions and 320 authored occurrences",
+  "measurements": {
+    "definitions_authored": 8,
+    "occurrences_authored": 320,
+    "occurrences_visible_selected": 40,
+    "evaluated_definitions_full": 8,
+    "evaluated_definitions_selected": 1,
+    "pinned_files_read_full": 8,
+    "pinned_files_read_selected": 1,
+    "pinned_bytes_read_full": 182292,
+    "pinned_bytes_read_selected": 22776,
+    "retained_native_json_bytes_full": 1229320,
+    "retained_native_json_bytes_selected": 152588,
+    "mesh_capacity_bytes_full": 253440,
+    "mesh_capacity_bytes_selected": 31680,
+    "reference_cache_bytes_full": 112154,
+    "reference_cache_bytes_selected": 13995,
+    "excluded_cache_owners_expired": 7,
+    "selected_exact_solids": 2
+  },
+  "validated": [
+    "actual loaded-pin file reads and bytes",
+    "excluded cache body destruction and exact reference buffer release",
+    "full authored source and physical occurrence inventory retention",
+    "deferred unloaded pin verification and atomic drift rejection on reload",
+    "native imported source, v2 ownership manifest and pin binary readback",
+    "scoped configuration application and pin revision merge with reviewed child digest",
+    "outside pins and independent parent load selection preserved",
+    "explicit reload restores all eight exact definitions"
+  ],
+  "limits": [
+    "The complete authored document and embedded source packages remain resident/readable; this is not streaming .ark deserialization.",
+    "Native JSON payload length and mesh capacities are retained-data measures, not total allocator or operating-system resident memory.",
+    "No latency, total RSS, design-cost, deployment or manufacturing improvement is inferred."
+  ]
+}
