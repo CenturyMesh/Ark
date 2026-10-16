@@ -16,6 +16,7 @@
 #include <unordered_map>
 
 namespace ark {
+struct NativeDocumentResultContext;
 
 // ---------------------------------------------------------------------------
 // Expression evaluator --------------------------------------------------------
@@ -331,6 +332,10 @@ public:
     f64 recomputeMs = 0;
     struct EvaluationCacheEntry { std::string key; std::shared_ptr<const Body> body; u64 generation=0; size_t tris=0; };
     std::unordered_map<u64,EvaluationCacheEntry> evaluationCache;
+    // Runtime receipt for optional .ark derived results. Never authoring/history
+    // or proof that staged native geometry has completed kernel validation.
+    arkjson::Value derivedGeometryStatus;
+    std::shared_ptr<NativeDocumentResultContext> pendingNativeGeometry;
     struct ReferenceFrameCacheEntry {std::string brep,topology;std::unordered_map<std::string,arkjson::Value> frames;};
     mutable std::unordered_map<u64,ReferenceFrameCacheEntry> referenceFrameCache;
     std::unordered_map<u64,std::pair<std::string,arkjson::Value>> centroidCache; // exact B-rep digest -> producer result; never serialized

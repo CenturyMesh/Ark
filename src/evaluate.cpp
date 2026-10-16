@@ -33,12 +33,35 @@ static f64 nowMs() {
 static bool explicitDependencies(const Feature& f){
     if(f.suppressed)return false;
     if(f.type==FeatureType::Box||f.type==FeatureType::Sphere||f.type==FeatureType::Cylinder||f.type==FeatureType::Cone||f.type==FeatureType::Torus||f.type==FeatureType::MeshBody)return f.inputs.empty();
-    if(f.type!=FeatureType::NativeSolid||f.p.count("sketch")||f.p.count("plane")||f.nativeSpec.find("instances"))return false;
+    if(f.p.count("sketch")||f.p.count("plane"))return false;
     std::function<bool(const arkjson::Value&)> local=[](const arkjson::Value&){return true;};
-    local=[&](const arkjson::Value& value){for(const auto& pair:value.obj){if(pair.first=="sketch")return false;if(pair.first=="plane"&&(pair.second.t!=arkjson::Value::Str||(pair.second.str!="XY"&&pair.second.str!="XZ"&&pair.second.str!="YZ")))return false;if(!local(pair.second))return false;}for(const auto& item:value.arr)if(!local(item))return false;return true;};
+    local=[&](const arkjson::Value& value){for(const auto& pair:value.obj){if(pair.first=="sketch"||pair.first=="source_sketch"||pair.first=="instances"||pair.first=="node"||pair.first=="source_instance"||pair.first=="alternate_node")return false;if(pair.first=="plane"&&(pair.second.t!=arkjson::Value::Str||(pair.second.str!="XY"&&pair.second.str!="XZ"&&pair.second.str!="YZ")))return false;if(!local(pair.second))return false;}for(const auto& item:value.arr)if(!local(item))return false;return true;};
     if(!local(f.nativeSpec))return false;
+    // Mesh evaluation consumes only the authored payload, expression environment,
+    // tessellation options and explicit input bodies; it has no Document access.
+    if(isMeshModelFeature(f.type))return f.type==FeatureType::MeshNet?f.inputs.empty():f.inputs.size()==1;
+    auto inlineProfile=[&](const char* key){const auto* value=f.nativeSpec.find(key);return value&&value->t==arkjson::Value::Obj;};
+    if(f.type==FeatureType::BSplineSurface)return f.inputs.empty()&&f.nativeSpec.find("poles");
+    if(f.type==FeatureType::SurfaceFill||f.type==FeatureType::ExtrudeSurface||f.type==FeatureType::RevolveSurface)return inlineProfile("profile");
+    if(f.type==FeatureType::Thicken||f.type==FeatureType::OffsetSurface)return f.inputs.size()==1;
+    if(f.type==FeatureType::Sew)return f.inputs.size()>=2&&f.inputs.size()<=16;
+    if(f.type==FeatureType::Sweep){
+        if(!inlineProfile("path"))return false;
+        if(const auto* sections=f.nativeSpec.find("sections")){
+            if(sections->t!=arkjson::Value::Arr)return false;
+            for(const auto& station:sections->arr){const auto* section=station.find("section");if(!section||section->t!=arkjson::Value::Obj)return false;}
+        }else if(!inlineProfile("section"))return false;
+        if(const auto* orientation=f.nativeSpec.find("orientation"))if(const auto* guide=orientation->find("guide");guide&&guide->t!=arkjson::Value::Obj)return false;
+        return true;
+    }
+    if(f.type==FeatureType::SurfaceEdit){
+        const auto* operation=f.nativeSpec.find("op");if(!operation||operation->t!=arkjson::Value::Str)return false;
+        static const std::set<std::string> edits{"extract_face","trim_plane","trim_wire","repair","untrim","extend","mutual_trim"};
+        return edits.count(operation->str)!=0;
+    }
+    if(f.type!=FeatureType::NativeSolid)return false;
     std::string op=f.get("op");if(op.empty())if(auto value=f.nativeSpec.find("op"))op=value->str;
-    static const std::set<std::string> pure{"box","sphere","cylinder","cone","torus","union","cut","common","hole","fillet","chamfer","transform","linear_pattern","circular_pattern","mirror","shell","draft","split_plane","curve_pattern","hole_pattern"};return pure.count(op)!=0;
+    static const std::set<std::string> pure{"box","sphere","cylinder","cone","torus","union","cut","common","hole","fillet","chamfer","transform","linear_pattern","circular_pattern","mirror","shell","draft","split_plane","curve_pattern","hole_pattern","vertex_pull","rib","gusset","mount_pad","boss","screw_support","nut_seat","lid_lip","lid_groove","split_surface","split_tool"};return pure.count(op)!=0;
 }
 static unsigned threadSetting(const char* name,unsigned fallback,unsigned maximum){if(const char* value=std::getenv(name)){char* end=nullptr;long requested=std::strtol(value,&end,10);if(!end||*end||requested<1||(unsigned long)requested>maximum)throw std::runtime_error(std::string(name)+" has an invalid thread budget");return (unsigned)requested;}return fallback;}
 struct NativeBudgetScope {int previous;explicit NativeBudgetScope(unsigned budget):previous(setNativeThreadBudget((int)budget)){}~NativeBudgetScope(){setNativeThreadBudget(previous);}};
@@ -299,6 +322,9 @@ static Body evalFeatureBody(const Feature& f, const ExprEnv& env, Document& doc,
             res.tris=acc.baked->triCount();
             return acc;
         }
+        // Native features and Suspension return before this portable switch.
+        // Preserve the explicit error below for any unsupported future type.
+        default:break;
     }
     res.ok=false; res.error="unknown feature type";
     return {};
@@ -367,7 +393,7 @@ struct AuthoringSources {
         for(const char* key:{"node","source_instance"})if(auto p=ref.find(key))occurrence(*p);
     }
     void profile(const V& value){
-        if(value.t==V::Obj){native(value);return;}if(value.t!=V::Str)return;for(const auto& s:document.sketches)if(s.name==value.str){sketch(s.name);return;}
+        if(value.t==V::Obj){native(value);return;}if(value.t!=V::Str)return;named=true;for(const auto& s:document.sketches)if(s.name==value.str){sketch(s.name);return;}
         for(const auto& d:document.planes)if(d.name==value.str&&d.kind=="point"){datum(d.name);return;}
         const Feature* source=nullptr;for(const auto& f:document.features)if(f.name==value.str){if(source)throw std::runtime_error("Ambiguous associative curve name: "+value.str);source=&f;}
         if(source){producer(V::makeNum((double)source->id));return;}
@@ -377,7 +403,7 @@ struct AuthoringSources {
         if(value.t==V::Arr){for(const auto& child:value.arr)native(child);return;}if(value.t!=V::Obj)return;
         if(const auto* type=value.find("type");type&&type->t==V::Str&&type->str=="on_axis")if(const auto* axis=value.find("axis");axis&&axis->t==V::Str)datum(axis->str);
         for(const auto& kv:value.obj){
-            if((kv.first=="feature"||kv.first=="second_feature"||kv.first=="source_feature"||kv.first=="alternate_feature"||kv.first=="curve")&&kv.second.t==V::Num)producer(kv.second);
+            if((kv.first=="feature"||kv.first=="second_feature"||kv.first=="source_feature"||kv.first=="alternate_feature"||kv.first=="curve"||kv.first=="support")&&kv.second.t==V::Num)producer(kv.second);
             else if(kv.first=="node"||kv.first=="source_instance"||kv.first=="alternate_node")occurrence(kv.second);
             else if(kv.first=="instances"){if(kv.second.t!=V::Arr)throw std::runtime_error("Associative instances must be an array");for(const auto& id:kv.second.arr)occurrence(id);}
             else if(kv.first=="start_ref"||kv.first=="to_ref"||kv.first=="through_ref"||kv.first=="point_ref"||kv.first=="normal_ref")anchor(kv.second);
@@ -389,6 +415,7 @@ struct AuthoringSources {
             // its cross-section enum. Only a sweep interprets section/path
             // strings as named CAD resources, including station objects.
             else if(sweepProfiles&&(kv.first=="path"||kv.first=="section")&&kv.second.t==V::Str)profile(kv.second);
+            else if(sweepProfiles&&kv.first=="guide"&&kv.second.t==V::Str)profile(kv.second);
             else native(kv.second);
         }
     }
@@ -430,6 +457,7 @@ static bool deferredDatum(const Document& document,const std::string& name){
 }
 
 const std::vector<FeatureResult>& Document::recompute() {
+    NativeDocumentResultScope nativeResults(pendingNativeGeometry);
     f64 t0=nowMs();
     refreshSkeleton(*this);
     verifyAssemblyExternalReferences(*this);
@@ -437,8 +465,8 @@ const std::vector<FeatureResult>& Document::recompute() {
     const auto loadedFeatures=assemblyLoadedFeatures(*this);
     std::vector<bool> activeFeatures;bool withinHistory=true;
     for(const auto& feature:features){activeFeatures.push_back(withinHistory&&loadedFeatures.count(feature.id));if(feature.id==historyTip)withinHistory=false;}
-    // Cache custody is process-local and never serialized. Complex features use
-    // a conservative upstream revision; primitives only depend on their inputs.
+    // Cache custody is process-local and never serialized. Audited literal/input
+    // consumers use explicit sources; unaudited/named consumers retain history.
     arkjson::Value authored;if(!arkjson::parse(documentToJson(*this,false,false),authored))throw std::runtime_error("Cannot serialize evaluation dependencies");
     // Cache only the named authoring context actually reachable from a feature.
     // Substring matching intentionally over-approximates references (never drops
@@ -447,6 +475,10 @@ const std::vector<FeatureResult>& Document::recompute() {
     for(const auto& p:planes)geometricSupports|=p.support.t==arkjson::Value::Obj;
     for(const auto& sk:sketches)for(const auto& e:sk.sk.ents)if(e.kind==SketchEnt::Project){geometricSupports=true;instanceProjection|=e.sourceInstance!=0;}
     for(const auto& f:features)instanceProjection|=f.type==FeatureType::Curve&&f.nativeSpec.find("source_instance")!=nullptr;
+    auto occurrenceBoundCable=[](const Feature& feature){
+        if(feature.type!=FeatureType::CableRoute)return false;
+        std::function<bool(const arkjson::Value&)> contains=[&](const arkjson::Value& v){if(v.t==arkjson::Value::Obj){if(v.find("node"))return true;for(const auto& item:v.obj)if(contains(item.second))return true;}if(v.t==arkjson::Value::Arr)for(const auto& child:v.arr)if(contains(child))return true;return false;};return contains(feature.nativeSpec);
+    };
     auto scopedContext=[&](const Feature& feature,const std::string& own){
         std::string context;std::set<std::string> included;bool changed=true;
         while(changed){changed=false;for(const char* kind:{"sketches","planes"})if(const auto* rows=authored.find(kind))for(const auto& row:rows->arr){
@@ -456,7 +488,7 @@ const std::vector<FeatureResult>& Document::recompute() {
         // Frame mass/stock reports consume material data; ordinary solid geometry
         // does not depend on appearance, BOM or unrelated material declarations.
         if(feature.type==FeatureType::ConstructionFrame)if(const auto* m=authored.find("materials"))context+=m->dump();
-        if(instanceProjection)for(const char* kind:{"assembly","mates"})if(const auto* v=authored.find(kind))context+=v->dump();
+        if(instanceProjection||occurrenceBoundCable(feature))for(const char* kind:{"assembly","mates"})if(const auto* v=authored.find(kind))context+=v->dump();
         return context;
     };
     std::unordered_map<u64,EvaluationCacheEntry> nextCache;
@@ -509,7 +541,10 @@ const std::vector<FeatureResult>& Document::recompute() {
     auto keyFor=[&](size_t index){
         const auto& f=features[index];auto source=authored.find("features")->arr[index];
         source.obj.erase(std::remove_if(source.obj.begin(),source.obj.end(),[](const auto& v){return v.first=="appearance"||v.first=="part";}),source.obj.end());
-        std::string own=source.dump(),context=scopedContext(f,own),dependenciesText=own+context,key=dependenciesText;
+        // A feature that survived semantic source discovery cannot read named
+        // sketches/datums/occurrences. Unrelated global projected geometry must
+        // not add those resources to this feature's otherwise explicit key.
+        std::string own=source.dump(),context=explicitInputs[index]?std::string{}:scopedContext(f,own),dependenciesText=own+context,key=dependenciesText;
         for(const auto& param:params){
             if(param.name.empty())continue;size_t pos=0;bool used=false;
             while((pos=dependenciesText.find(param.name,pos))!=std::string::npos){auto ident=[](char c){return std::isalnum((unsigned char)c)||c=='_';};if((pos==0||!ident(dependenciesText[pos-1]))&&(pos+param.name.size()==dependenciesText.size()||!ident(dependenciesText[pos+param.name.size()]))){used=true;break;}pos+=param.name.size();}
@@ -544,7 +579,13 @@ const std::vector<FeatureResult>& Document::recompute() {
             if(!explicitInputs[i])break;
             if(!explicitInputs[i]||jobs[i].valid()||completed[i]||published[i])continue;
             bool ready=true;for(size_t dependency:dependencies[i])ready&=inputBody(features[dependency].id)!=nullptr;if(!ready)continue;
-            for(u64 id:features[i].inputs){const Body* body=inputBody(id);if(!body){ready=false;break;}if(!body->nativeData.find("brep_base64")){auto source=indices.find(id);if(source==indices.end())ready=false;else{auto type=features[source->second].type;ready&=type==FeatureType::Box||type==FeatureType::Cylinder||type==FeatureType::Sphere||type==FeatureType::Cone||type==FeatureType::Torus;}}}
+            for(u64 id:features[i].inputs){
+                const Body* body=inputBody(id);if(!body){ready=false;break;}
+                // Mesh workers copy an already evaluated triangle payload. Keep
+                // lazy analytic tessellation on the owner thread until audited.
+                if(isMeshModelFeature(features[i].type)){ready&=body->baked&&body->baked->triCount();continue;}
+                if(!body->nativeData.find("brep_base64")){auto source=indices.find(id);if(source==indices.end())ready=false;else{auto type=features[source->second].type;ready&=type==FeatureType::Box||type==FeatureType::Cylinder||type==FeatureType::Sphere||type==FeatureType::Cone||type==FeatureType::Torus;}}
+            }
             if(!ready)continue;
             const auto& key=plannedKeys[i];auto cached=evaluationCache.find(features[i].id);if(cached!=evaluationCache.end()&&cached->second.key==key)continue;
             size_t bytes=contextBytes;for(u64 id:features[i].inputs){const auto* body=inputBody(id);bytes+=sizeof(Body)+body->faces.size()*sizeof(Face)+valueMemory(body->nativeData);if(body->baked)bytes+=(body->baked->pos.size()+body->baked->nrm.size()+body->baked->idx.size())*sizeof(float);}
@@ -564,7 +605,8 @@ const std::vector<FeatureResult>& Document::recompute() {
             snapshot.params=params;snapshot.materials=materials;snapshot.tessOpt=tessOpt;
             std::vector<Body> inputs;for(u64 id:features[i].inputs)inputs.push_back(*inputBody(id));
             const Feature feature=features[i];const unsigned nativeBudget=nativeThreadsPerWorker;
-            auto task=std::make_shared<std::packaged_task<Evaluation()>>([snapshot=std::move(snapshot),inputs=std::move(inputs),feature,env,nativeBudget,activity]()mutable{
+            auto task=std::make_shared<std::packaged_task<Evaluation()>>([snapshot=std::move(snapshot),inputs=std::move(inputs),feature,env,nativeBudget,activity,pending=pendingNativeGeometry]()mutable{
+                NativeDocumentResultScope nativeResults(std::move(pending));
                 NativeBudgetScope budget(nativeBudget);Evaluation value;value.result.id=feature.id;double started=nowMs();activity->enter();
                 try{value.result.error=featureParameterError(feature,env);value.result.ok=value.result.error.empty();if(value.result.ok){snapshot.evaluatingBodies=&inputs;value.body=evalFeatureBody(feature,env,snapshot,inputs,value.result,snapshot.tessOpt);value.body.id=feature.id;}}catch(const std::exception& e){value.result.ok=false;value.result.error=e.what();}
                 activity->leave();value.result.ms=nowMs()-started;return value;

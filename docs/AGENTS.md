@@ -1,5 +1,24 @@
 # ARK agent protocol
 
+031B extends the existing 96 standalone tools with advanced retained modeling
+recipes and compact diagnostics. Read [031B scope](iterations/031B.md),
+[solid recipes](SOLIDS_031B.md), [surface/sweep contracts](SURFACES_031B.md),
+[mesh operations](MESHES_031B.md) and [sampled assembly/cable inspection](ASSEMBLY_SWEEP_031B.md).
+Load the existing `solids`, `surfacing`, `mesh`, `assembly`, `routing` or
+`automation` onboarding topic. New recipes conditionally require source43;
+older drawings retain their required earlier format. `feature.edit inputs`
+requires the observed revision and accepts only unique earlier dependencies.
+Its geometry and all dependents re-evaluate atomically.
+
+Use `mesh_inspect{self_intersections:true}` for bounded complete triangle contact
+diagnosis and `reference_inspect{reference,detail:"frame"}` for a compact exact
+frame. Reference filters belong inside `geometry_query.queries[].filter`.
+`library_source_page.links` and `resource_links` expose observed resolved HTTPS
+anchors; inferred file kinds do not validate target bytes or qualify sourcing.
+`assembly_info.sweep` reports requested sampled poses, never continuous collision
+clearance or dynamics. Every rigid mate remains checked after condensation.
+
+
 030D adds Wood, mesh networks, exact vents and Light up. Load
 `agent_onboard{topic:"wood"|"networks"|"lighting"}` and read the
 [contracts](PRODUCT_TOOLS_030D.md). `wood_inspect` reports authored stock and BOM
@@ -241,7 +260,12 @@ eight created features/placements within that command bound and the role scope.
 Related operations can form one coherent batch; one provider round per feature
 is not required. Cached previews can commit only through a retained same-role
 receipt whose commands/checks and baseline passed the same scope/count validation. Explicit observed `expected_revision` is
-required; proposals cannot be silently rebased. Real queued/start/end events
+required; proposals cannot be silently rebased. Agents retain ownership of their
+prepared recipes. After a peer commit, explicitly request
+`doc_preview{candidate_id,expected_revision:current}` to refresh a supported
+unchanged scope, then inspect and apply the new receipt. The old apply payload
+still rejects; refresh never commits implicitly. See
+[candidate refresh](CANDIDATE_REFRESH_031B.md). Real queued/start/end events
 include step/role IDs and measured revision receipts. Bounded sketch commands
 may be shown as uncommitted drafts; they are not evaluated CAD authority or
 partial OCCT solids. Native operations publish geometry only after completion.

@@ -45,6 +45,8 @@ V assemblyDiagnosticsJson(const AssemblyDiagnostics& d) {
         if(m.hasCoordinate){row.set("position",V::makeNum(m.coordinate));row.set("unit",V::makeStr(m.type=="revolute"?"deg":"mm"));}
         if(m.limited){V limits=V::makeObj();limits.set("min",V::makeNum(m.min));limits.set("max",V::makeNum(m.max));row.set("limits",limits);row.set("limit_residual",V::makeNum(m.limitError));}rows.arr.push_back(row);}
     if(d.patternReports.t==V::Arr)j.set("patterns",d.patternReports);
-    for(auto id:d.unconstrainedNodes)unconstrained.arr.push_back(V::makeNum((double)id));j.set("mates",rows);j.set("unconstrained_nodes",unconstrained);j.set("rank_scope",V::makeStr("local numerical geometric equality constraint Jacobian; joint stop inequalities excluded"));return j;
+    if(d.rigidClusters.t==V::Arr)j.set("rigid_clusters",d.rigidClusters);
+    j.set("solver_moving_bodies",V::makeNum(d.solverMovingBodies));j.set("eliminated_rigid_bodies",V::makeNum(d.eliminatedRigidBodies));
+    for(auto id:d.unconstrainedNodes)unconstrained.arr.push_back(V::makeNum((double)id));j.set("mates",rows);j.set("unconstrained_nodes",unconstrained);j.set("rank_scope",V::makeStr("analytic full-frame rigid rank plus local numerical geometric equality constraint Jacobian; joint stop inequalities excluded"));return j;
 }
 }

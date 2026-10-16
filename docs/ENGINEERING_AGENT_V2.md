@@ -61,7 +61,14 @@ settings. Changed or expired candidates reject; extra commands cannot be
 attached to a prepared commit. The cache holds at most four candidates within
 an estimated 128 MiB budget, with five-minute expiry. Oversized previews remain
 read-only valid evidence but return `candidate_cached:false` and a recomputing
-command payload. Mutations invalidate the session's prepared candidates.
+command payload. Ordinary commits retain other candidates' recipes within those
+bounds. Their old apply payloads still reject after a revision change. An explicit
+`doc_preview{candidate_id,expected_revision}` can refresh a supported recipe
+against the observed current revision when its targets, dependencies and authored
+context are unchanged. It returns a new evaluated candidate and apply payload;
+it never commits automatically. Project replacement and history navigation clear
+custody. See [candidate refresh](CANDIDATE_REFRESH_031B.md) for supported scopes,
+team ownership and conflict behavior.
 
 ## Materials and physical properties
 

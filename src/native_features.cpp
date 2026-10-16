@@ -8,6 +8,7 @@
 #include "ark/frame.hpp"
 #include "ark/electronics.hpp"
 #include "ark/spatial_sketch.hpp"
+#include "ark/modeling_031b.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -214,7 +215,7 @@ V numericNative(const V& value, const ExprEnv& env, const std::string& key = {})
         return value;
     }
     if (value.t == V::Str) {
-        if (key == "grain_axis" || key == "source_vertex" || key == "source_topology" || key == "kind" || key == "join" || key == "sketch" || key == "name" || key == "op" || key == "reference" || key == "second_reference" || key == "mode" || key == "end" || key == "edges" || key == "faces" || key == "face" || key == "source_face" || key == "limit_face" || key == "plane" || key == "keep" || key == "selection" || key == "direction" || key == "axis" || key == "neutral") return value;
+        if (key == "grain_axis" || key == "source_vertex" || key == "source_topology" || key == "kind" || key == "join" || key == "sketch" || key == "name" || key == "op" || key == "reference" || key == "second_reference" || key == "mode" || key == "end" || key == "edges" || key == "faces" || key == "face" || key == "source_face" || key == "limit_face" || key == "plane" || key == "keep" || key == "selection" || key == "direction" || key == "axis" || key == "neutral" || key == "reference_face" || key == "tool_face" || key == "equivalence" || key == "interpolation") return value;
         return V::makeNum(expressionValue(value.str, env));
     }
     if (value.t == V::Arr) {
@@ -325,6 +326,12 @@ V spatialProjectionResult(const Feature& feature,Document& document){
 V surfaceRequest(const Feature& feature, const ExprEnv& env, Document& document,
                  const std::vector<Body>& preceding) {
     V request = V::makeObj();
+    auto supportInput = [&](const V& authored, const char* label) -> const Body& {
+        if(authored.t!=V::Num||!std::isfinite(authored.num)||authored.num<1||authored.num!=std::floor(authored.num)||authored.num>9007199254740990.)throw std::runtime_error(std::string(label)+" must be an explicit feature id");
+        const u64 id=static_cast<u64>(authored.num);
+        if(std::find(feature.inputs.begin(),feature.inputs.end(),id)==feature.inputs.end())throw std::runtime_error(std::string(label)+" must also appear in feature.inputs");
+        const auto* body=precedingBody(preceding,id);if(!body)throw std::runtime_error(std::string(label)+" input is missing");return *body;
+    };
     if (feature.type == FeatureType::Loft) {
         request.set("op", V::makeStr("loft"));
         const V& sections = required(feature.nativeSpec, "sections");
@@ -367,6 +374,20 @@ V surfaceRequest(const Feature& feature, const ExprEnv& env, Document& document,
         if (const V* profile = feature.nativeSpec.find("profile"))
             request.set("profile", numericNative(*profile, env));
         else request.set("profile", profileFromSketch(document, feature.get("sketch")));
+        if(const V* constraints=feature.nativeSpec.find("constraints")){
+            if(constraints->t!=V::Arr||constraints->arr.empty()||constraints->arr.size()>128)throw std::runtime_error("Constrained fill needs 1..128 explicit boundary supports");
+            V resolved=V::makeArr();
+            for(const auto& constraint:constraints->arr){
+                if(constraint.t!=V::Obj)throw std::runtime_error("Boundary support must be an object");
+                for(const auto& field:constraint.obj)if(field.first!="edge"&&field.first!="support"&&field.first!="face"&&field.first!="continuity")throw std::runtime_error("Unknown boundary support field: "+field.first);
+                const auto& body=supportInput(required(constraint,"support"),"Fill support");V item=V::makeObj();
+                item.set("edge",numericNative(required(constraint,"edge"),env));item.set("continuity",numericNative(required(constraint,"continuity"),env));
+                item.set("face",required(constraint,"face"));item.set("support_brep",brepOf(body,"fill support"));item.set("topology",required(body.nativeData,"topology"));resolved.arr.push_back(item);
+            }
+            request.set("constraints",resolved);
+        }
+        if(const V* validation=feature.nativeSpec.find("validation"))request.set("validation",numericNative(*validation,env));
+        if(const V* mode=feature.nativeSpec.find("op")){if(mode->t!=V::Str||mode->str!="blend")throw std::runtime_error("surface_fill native.op supports blend only");request.set("mode",*mode);}
     } else if (feature.type == FeatureType::BSplineSurface) {
         request.set("op", V::makeStr("surface_nurbs"));
         request.set("poles", numericNative(required(feature.nativeSpec, "poles"), env));
@@ -394,6 +415,21 @@ V surfaceRequest(const Feature& feature, const ExprEnv& env, Document& document,
         request.set("solid", V::makeBool(bitParam(feature, env, "solid", 0)));
         request.set("correction", V::makeBool(bitParam(feature, env, "correction", 1)));
         request.set("contact", V::makeBool(bitParam(feature, env, "contact", 0)));
+        if(const V* orientation=feature.nativeSpec.find("orientation")){
+            if(orientation->t!=V::Obj)throw std::runtime_error("Sweep orientation must be an object");
+            const auto& mode=required(*orientation,"mode");if(mode.t!=V::Str)throw std::runtime_error("Sweep orientation mode must be text");
+            V resolved=V::makeObj();resolved.set("mode",mode);
+            for(const auto& field:orientation->obj){
+                if(field.first=="mode")continue;
+                if(mode.str=="fixed_binormal"&&field.first=="binormal")resolved.set("binormal",numericNative(field.second,env));
+                else if(mode.str=="support"&&field.first=="support")resolved.set("support_brep",brepOf(supportInput(field.second,"Sweep orientation support"),"sweep support"));
+                else if(mode.str=="auxiliary"&&field.first=="guide")resolved.set("guide",field.second.t==V::Str?resolveProfileName(document,preceding,field.second.str,"guide"):numericNative(field.second,env));
+                else if(mode.str=="auxiliary"&&field.first=="equivalence")resolved.set("equivalence",field.second);
+                else throw std::runtime_error("Unsupported sweep orientation field: "+field.first);
+            }
+            request.set("orientation",resolved);
+        }
+        if(const V* laws=feature.nativeSpec.find("laws"))request.set("laws",numericNative(*laws,env));
     } else if (feature.type == FeatureType::ExtrudeSurface || feature.type == FeatureType::RevolveSurface) {
         const bool revolve = feature.type == FeatureType::RevolveSurface;
         request.set("op", V::makeStr(revolve ? "revolve_surface" : "extrude_surface"));
@@ -417,8 +453,9 @@ V surfaceRequest(const Feature& feature, const ExprEnv& env, Document& document,
             request.set("distance", V::makeNum(distance));
         }
     } else if (feature.type == FeatureType::SurfaceEdit) {
-        const bool trimWire=feature.nativeSpec.find("op")&&feature.nativeSpec.find("op")->asStr()=="trim_wire";
-        if(feature.inputs.size()!=(trimWire?2u:1u))throw std::runtime_error("surface_edit requires a surface and, for trim_wire, one closed curve input");
+        const std::string editOp=required(feature.nativeSpec,"op").asStr();
+        const bool paired=editOp=="trim_wire"||editOp=="mutual_trim";
+        if(feature.inputs.size()!=(paired?2u:1u)||(paired&&feature.inputs[0]==feature.inputs[1]))throw std::runtime_error("surface_edit requires one surface; trim_wire/mutual_trim require one distinct second input");
         const Body* source=precedingBody(preceding,feature.inputs.front());
         if(!source)throw std::runtime_error("surface_edit input missing");
         request.set("input_brep",brepOf(*source,"surface_edit input"));
@@ -449,7 +486,16 @@ V surfaceRequest(const Feature& feature, const ExprEnv& env, Document& document,
             }
         }else if(operation.str=="trim_wire"){
             const Body* curve=precedingBody(preceding,feature.inputs[1]);if(!curve)throw std::runtime_error("Surface trim curve input missing");request.set("op",V::makeStr("surface_trim_wire"));request.set("wire_brep",brepOf(*curve,"trim curve"));request.set("keep_point",numericNative(required(feature.nativeSpec,"keep_point"),env));
-        }else throw std::runtime_error("surface_edit op must be extract_face, trim_plane, trim_wire or repair");
+        }else if(operation.str=="untrim"||operation.str=="extend"){
+            for(const auto& field:feature.nativeSpec.obj)if(field.first!="op"&&field.first!="bounds"&&field.first!="extension")throw std::runtime_error("Unknown surface domain edit field: "+field.first);
+            request.set("op",V::makeStr(operation.str=="extend"?"surface_extend":"surface_untrim"));
+            if(const auto* bounds=feature.nativeSpec.find("bounds"))request.set("bounds",numericNative(*bounds,env));
+            if(const auto* extension=feature.nativeSpec.find("extension"))request.set("extension",numericNative(*extension,env));
+        }else if(operation.str=="mutual_trim"){
+            for(const auto& field:feature.nativeSpec.obj)if(field.first!="op"&&field.first!="keep_points")throw std::runtime_error("Unknown mutual trim field: "+field.first);
+            const auto* other=precedingBody(preceding,feature.inputs[1]);if(!other)throw std::runtime_error("Mutual trim second surface missing");
+            request.set("op",V::makeStr("surface_mutual_trim"));request.set("other_brep",brepOf(*other,"mutual trim second surface"));request.set("keep_points",numericNative(required(feature.nativeSpec,"keep_points"),env));
+        }else throw std::runtime_error("surface_edit op must be extract_face, trim_plane, trim_wire, repair, untrim, extend or mutual_trim");
     } else if (feature.type == FeatureType::OffsetSurface) {
         request.set("op", V::makeStr("offset_surface"));
         if (feature.inputs.size() != 1) throw std::runtime_error("offset_surface requires one native surface input");
@@ -790,6 +836,12 @@ V solidFeatureRequest(const Feature& feature, const ExprEnv& env,
         throw std::runtime_error("Shell needs one solid input");
     if (op == "split_plane" && feature.inputs.size() != 1)
         throw std::runtime_error("Split plane needs one exact solid input");
+    if((op=="split_surface"||op=="split_tool")&&(feature.inputs.size()!=2||feature.inputs[0]==feature.inputs[1]))
+        throw std::runtime_error("Surface/tool split requires exactly two distinct source and tool inputs");
+    if(op=="rib"||op=="gusset"||op=="mount_pad"||op=="boss"||op=="screw_support"||op=="nut_seat"||op=="lid_lip"||op=="lid_groove"){
+        if(feature.inputs.size()!=1)throw std::runtime_error("Face-owned solid recipe requires exactly one source input");
+        const auto& face=required(feature.nativeSpec,"source_face");if(face.t!=V::Str||face.str.empty())throw std::runtime_error("Face-owned solid recipe requires a semantic source_face");
+    }
     if ((op == "mirror" || op == "split_plane") && !model.find("face") && !model.find("normal")) {
         if (const V* plane = model.find("plane")) {
             if (plane->t != V::Str || plane->str.empty()) throw std::runtime_error("Mirror plane must be a datum name");
@@ -1139,7 +1191,27 @@ Body evaluateNativeFeature(const Feature& feature, const ExprEnv& env,
     if(feature.type==FeatureType::ConstructionFrame)return evaluateFrameFeature(feature,env,document,preceding);
     if(feature.type==FeatureType::PCB||feature.type==FeatureType::CableRoute){
         V request=V::makeObj();request.set("operation",V::makeStr("model_electronics"));
-        request.set("request",electronicsRequest(feature,env));result=nativeWorkerRequest(request);
+        V occurrenceBindingReport;
+        auto occurrenceBound=[&](){
+            for(const char* key:{"start","end"})if(const auto* endpoint=feature.nativeSpec.find(key);endpoint&&endpoint->t==V::Obj&&endpoint->find("node"))return true;
+            for(const char* key:{"waypoints","obstacles"})if(const auto* entries=feature.nativeSpec.find(key);entries&&entries->t==V::Arr)for(const auto& entry:entries->arr)if(entry.t==V::Obj&&entry.find("node"))return true;
+            return false;
+        };
+        if(feature.type==FeatureType::CableRoute&&occurrenceBound()){
+            Feature bound=feature;
+            {
+                // Resolve against the caller's current evaluation frontier, keeping
+                // exact-reference memoization without copying all preceding B-reps.
+                auto* previous=document.evaluatingBodies;
+                struct BindingScope {Document& document;std::vector<Body>* previous;~BindingScope(){document.evaluatingBodies=previous;}} scope{document,previous};
+                document.evaluatingBodies=&preceding;
+                bound.nativeSpec=resolveCableBindings031B(feature,env,document);
+            }
+            if(const auto* binding=bound.nativeSpec.find("occurrence_binding_report"))occurrenceBindingReport=*binding;
+            request.set("request",electronicsRequest(bound,env));
+        }else request.set("request",electronicsRequest(feature,env));
+        result=nativeWorkerRequest(request);
+        if(occurrenceBindingReport.t==V::Obj){V report=required(result,"report");report.set("occurrence_binding_report",occurrenceBindingReport);result.set("report",report);if(const auto* electronics=result.find("electronics")){V routed=*electronics;routed.set("occurrence_binding_report",occurrenceBindingReport);result.set("electronics",routed);}}
         Body body;body.nativeData=std::move(result);body.baked=std::make_unique<Mesh>(nativeResultMesh(body.nativeData));return body;
     }
     if (feature.type == FeatureType::SourceSheet) {

@@ -6,6 +6,7 @@
 #include <map>
 #include <set>
 #include <stdexcept>
+#include <unordered_map>
 
 namespace ark {
 namespace {
@@ -79,6 +80,31 @@ V replay(const V& h,const std::string& id,size_t* sharedBudget=nullptr){
 }
 std::string nodeId(V n){erase(n,"id");canonical(n);return "iteration-"+iterationSha256(n.dump());}
 V fresh(const V& baseline){V h=V::makeObj(),blobs=V::makeObj();const std::string hash=iterationSha256(baseline.dump()),id="baseline-"+hash;h.set("schema",V::makeNum(1));h.set("baseline_id",V::makeStr(id));h.set("baseline_sha256",V::makeStr(hash));h.set("baseline",pack(baseline,blobs));h.set("head_id",V::makeStr(id));h.set("nodes",V::makeArr());h.set("blobs",blobs);h.set("undo_ids",V::makeArr());h.set("redo_ids",V::makeArr());return h;}
+// Only canonical authoring validation is memoized. The complete journal chain,
+// blob identities, deltas, current head and undo/redo stacks are checked on every
+// call. These authoring checks consume retained data, not external source bytes;
+// current external-file verification remains in the document execution path.
+// Exact bytes (including source version) are the key, never a digest alone.
+bool validAuthoringSnapshot(const V& state,const std::string& bytes,std::string& error){
+    if(state.find("iteration_history")||state.find("usage"))return false;
+    struct Memo {
+        std::unordered_map<std::string,uint64_t> entries;
+        size_t bytes=0;uint64_t clock=0;
+    };
+    static thread_local Memo memo;
+    if(auto found=memo.entries.find(bytes);found!=memo.entries.end()){found->second=++memo.clock;return true;}
+    Document parsed;
+    if(!documentFromJson(bytes,parsed,&error)||iterationAuthoring(parsed).dump()!=bytes)return false;
+    constexpr size_t byteLimit=16u*1024u*1024u,entryLimit=512;
+    if(bytes.size()<=byteLimit){
+        while(!memo.entries.empty()&&(memo.entries.size()>=entryLimit||memo.bytes>byteLimit-bytes.size())){
+            auto oldest=std::min_element(memo.entries.begin(),memo.entries.end(),[](const auto& a,const auto& b){return a.second<b.second;});
+            memo.bytes-=oldest->first.size();memo.entries.erase(oldest);
+        }
+        memo.entries.emplace(bytes,++memo.clock);memo.bytes+=bytes.size();
+    }
+    return true;
+}
 }
 
 std::string iterationSha256(const std::string& bytes){
@@ -119,17 +145,17 @@ V iterationInfo(const Document& document,size_t limit,const std::string& beforeI
 void iterationRestore(const Document& source,const std::string& id,Document& target){if(source.iterationHistory.t!=V::Obj)throw std::runtime_error("No iteration history available");V state=replay(source.iterationHistory,id);std::string error;if(!documentFromJson(state.dump(),target,&error))throw std::runtime_error("Iteration authoring invalid: "+error);target.usage=source.usage;target.agentActivity=source.agentActivity;target.iterationHistory=source.iterationHistory;target.nextFeatureId_=std::max(target.nextFeatureId_,source.nextFeatureId_);target.nextAssemblyId_=std::max(target.nextAssemblyId_,source.nextAssemblyId_);target.nextMateId_=std::max(target.nextMateId_,source.nextMateId_);}
 std::string iterationUndoTarget(const Document& document,bool redo){const V& h=document.iterationHistory;if(h.t!=V::Obj)throw std::runtime_error("No iteration history available");const V& ids=need(h,redo?"redo_ids":"undo_ids");if(ids.t!=V::Arr||ids.arr.empty())throw std::runtime_error("No iteration history available");return ids.arr.back().str;}
 void iterationPersist(V& root,const Document& document){if(document.iterationHistory.t!=V::Obj)return;V blobs=need(document.iterationHistory,"blobs"),packed=pack(root,blobs);if(blobs.dump()!=need(document.iterationHistory,"blobs").dump())throw std::runtime_error("Current document has unjournaled large authoring payload");root=std::move(packed);root.set("version",V::makeNum(std::max(27.,root.find("version")?root.find("version")->asNum():27.)));root.set("iteration_history",document.iterationHistory);}
-bool iterationExpand(V& root,V& history,std::string& error){try{if(auto h=root.find("iteration_history")){if(!root.find("version")||(root.find("version")->num<27||root.find("version")->num>42))throw std::runtime_error("Iteration history requires a supported document version 27 or later");history=*h;erase(root,"iteration_history");root=unpack(root,need(history,"blobs"));}else if(root.find("version")&&root.find("version")->num==27)throw std::runtime_error("Version 27 requires iteration history");return true;}catch(const std::exception& e){error=e.what();return false;}}
+bool iterationExpand(V& root,V& history,std::string& error){try{if(auto h=root.find("iteration_history")){if(!root.find("version")||(root.find("version")->num<27||root.find("version")->num>43))throw std::runtime_error("Iteration history requires a supported document version 27 or later");history=*h;erase(root,"iteration_history");root=unpack(root,need(history,"blobs"));}else if(root.find("version")&&root.find("version")->num==27)throw std::runtime_error("Version 27 requires iteration history");return true;}catch(const std::exception& e){error=e.what();return false;}}
 bool iterationValidate(const Document& document,const V& h,std::string& error){
     try{if(h.t!=V::Obj||need(h,"schema").t!=V::Num||need(h,"schema").num!=1)throw std::runtime_error("Unsupported iteration history schema");const V& blobs=need(h,"blobs"),nodes=need(h,"nodes");if(blobs.t!=V::Obj||nodes.t!=V::Arr||nodes.arr.size()>maxNodes)throw std::runtime_error("Invalid history blob/node storage");
         for(const auto& blob:blobs.obj)if(!digest(blob.first)||blob.second.t!=V::Str||blob.second.str.size()<1024||iterationSha256(blob.second.str)!=blob.first)throw std::runtime_error("History blob digest mismatch");
-        V state=unpack(need(h,"baseline"),blobs);const std::string base=text(h,"baseline_id"),baseHash=iterationSha256(state.dump());if(base!="baseline-"+baseHash||text(h,"baseline_sha256")!=baseHash)throw std::runtime_error("History baseline digest mismatch");
-        Document parsed;std::string parseError;if(state.find("iteration_history")||state.find("usage")||!documentFromJson(state.dump(),parsed,&parseError)||iterationAuthoring(parsed).dump()!=state.dump())throw std::runtime_error("Invalid history baseline authoring: "+parseError);
+        V state=unpack(need(h,"baseline"),blobs);std::string stateBytes=state.dump();const std::string base=text(h,"baseline_id"),baseHash=iterationSha256(stateBytes);if(base!="baseline-"+baseHash||text(h,"baseline_sha256")!=baseHash)throw std::runtime_error("History baseline digest mismatch");
+        std::string parseError;if(!validAuthoringSnapshot(state,stateBytes,parseError))throw std::runtime_error("Invalid history baseline authoring: "+parseError);
         size_t replayOps=0;std::map<std::string,std::string> hashes;hashes.emplace(base,baseHash);std::string current=base;
         for(size_t i=0;i<nodes.arr.size();++i){const V& n=nodes.arr[i];const std::string id=text(n,"id"),parent=text(n,"parent_id"),previous=text(n,"previous_head_id");if(id!=nodeId(n)||hashes.count(id)||!hashes.count(parent)||!hashes.count(previous)||text(n,"before_sha256")!=hashes.at(previous)||need(n,"ordinal").num!=(double)(i+1))throw std::runtime_error("History node identity/parent/before digest mismatch");validateActor(need(n,"actor"));if(text(n,"provenance")!="caller_declared"||text(n,"motivation").size()>4096||text(n,"utc").size()!=20||text(n,"tool").empty())throw std::runtime_error("Invalid history node metadata");
             if(auto restored=n.find("restored_from_id");restored&&(restored->t!=V::Str||restored->str!=parent))throw std::runtime_error("Invalid history restore parent");
-            if(parent!=current)state=replay(h,parent,&replayOps);replayBudget(replayOps,need(n,"delta"));apply(state,need(n,"delta"),blobs);const std::string hash=iterationSha256(state.dump());if(!digest(text(n,"after_sha256"))||hash!=text(n,"after_sha256"))throw std::runtime_error("History authoring delta digest mismatch");
-            if(state.find("iteration_history")||state.find("usage")||!documentFromJson(state.dump(),parsed,&parseError)||iterationAuthoring(parsed).dump()!=state.dump())throw std::runtime_error("Invalid iteration authoring: "+parseError);hashes.emplace(id,hash);current=id;
+            if(parent!=current)state=replay(h,parent,&replayOps);replayBudget(replayOps,need(n,"delta"));apply(state,need(n,"delta"),blobs);stateBytes=state.dump();const std::string hash=iterationSha256(stateBytes);if(!digest(text(n,"after_sha256"))||hash!=text(n,"after_sha256"))throw std::runtime_error("History authoring delta digest mismatch");
+            if(!validAuthoringSnapshot(state,stateBytes,parseError))throw std::runtime_error("Invalid iteration authoring: "+parseError);hashes.emplace(id,hash);current=id;
         }
         const std::string head=text(h,"head_id");if(!hashes.count(head)||iterationSha256(iterationAuthoring(document).dump())!=hashes.at(head))throw std::runtime_error("Current document does not match iteration head");
         for(const char* key:{"undo_ids","redo_ids"}){const V& ids=need(h,key);if(ids.t!=V::Arr||ids.arr.size()>maxNodes)throw std::runtime_error("Invalid persistent undo/redo stack");for(const auto& id:ids.arr)if(id.t!=V::Str||!hashes.count(id.str))throw std::runtime_error("Persistent undo/redo target missing");}

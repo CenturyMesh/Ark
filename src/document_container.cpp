@@ -35,6 +35,9 @@ constexpr char codecHeader[]="ARKB\1";
 constexpr char metaSchema[]="CREATE TABLE ark_meta(singleton INTEGER PRIMARY KEY CHECK(singleton=1),logical_bytes INTEGER NOT NULL CHECK(logical_bytes>=0 AND logical_bytes<=4194304),root_hash TEXT NOT NULL CHECK(length(root_hash)=64),generation INTEGER NOT NULL CHECK(generation>=1))";
 constexpr char payloadSchema[]="CREATE TABLE ark_payload(hash TEXT PRIMARY KEY CHECK(length(hash)=64),kind INTEGER NOT NULL CHECK(kind IN(0,1)),bytes BLOB NOT NULL) WITHOUT ROWID";
 constexpr char slotsSchema[]="CREATE TABLE ark_slots(path TEXT PRIMARY KEY,payload_hash TEXT NOT NULL REFERENCES ark_payload(hash)) WITHOUT ROWID";
+// Semantic derived validation belongs to the optional-section reader, so a bad
+// digest/key does not make SQLite's global quick_check reject sound authoring.
+constexpr char derivedSchema[]="CREATE TABLE ark_derived(key TEXT PRIMARY KEY,hash TEXT NOT NULL,bytes BLOB NOT NULL) WITHOUT ROWID";
 struct Payload {int kind=0;std::string bytes;};
 using Payloads=std::map<std::string,Payload>;
 using Slots=std::map<std::string,std::string>;
@@ -118,21 +121,23 @@ struct Statement {
     void done(){if(row())throw std::runtime_error("Unexpected ARK container result row");}
     void reset(){sqlite3_reset(stmt);sqlite3_clear_bindings(stmt);}
     std::string text(int column){if(sqlite3_column_type(stmt,column)!=SQLITE_TEXT)throw std::runtime_error("ARK container text type mismatch");auto bytes=sqlite3_column_bytes(stmt,column);if(bytes<0||bytes>(int)maxDocumentValueBytes)throw std::runtime_error("ARK container text size exceeded");return std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt,column)),(size_t)bytes);}
-    std::string blob(int column){if(sqlite3_column_type(stmt,column)!=SQLITE_BLOB)throw std::runtime_error("ARK container payload type mismatch");auto bytes=sqlite3_column_bytes(stmt,column);if(bytes<0||bytes>(int)maxDocumentValueBytes)throw std::runtime_error("ARK container payload size exceeded");if(!bytes)return{};return std::string(reinterpret_cast<const char*>(sqlite3_column_blob(stmt,column)),(size_t)bytes);}
+    std::string blob(int column,size_t maximum=maxDocumentValueBytes){if(sqlite3_column_type(stmt,column)!=SQLITE_BLOB)throw std::runtime_error("ARK container payload type mismatch");auto bytes=sqlite3_column_bytes(stmt,column);if(bytes<0||(size_t)bytes>maximum)throw std::runtime_error("ARK container payload size exceeded");if(!bytes)return{};return std::string(reinterpret_cast<const char*>(sqlite3_column_blob(stmt,column)),(size_t)bytes);}
     int64_t integer(int column){if(sqlite3_column_type(stmt,column)!=SQLITE_INTEGER)throw std::runtime_error("ARK container integer type mismatch");return sqlite3_column_int64(stmt,column);}
 };
 int64_t scalar(Db& db,const char* sql){Statement query(db,sql);if(!query.row())throw std::runtime_error("Missing ARK container scalar");auto value=query.integer(0);if(query.row())throw std::runtime_error("Multiple ARK container scalar rows");return value;}
-void schema(Db& db){
+int schema(Db& db){
     if(scalar(db,"PRAGMA application_id")!=documentContainerApplicationId)throw std::runtime_error("SQLite file is not an ARK document");
-    if(scalar(db,"PRAGMA user_version")!=documentContainerVersion)throw std::runtime_error("Unsupported ARK container version");
+    const auto version=scalar(db,"PRAGMA user_version");if(version!=1&&version!=2)throw std::runtime_error("Unsupported ARK container version");
     if(scalar(db,"PRAGMA page_size")!=4096)throw std::runtime_error("Unsupported ARK container page size");
     Statement mode(db,"PRAGMA journal_mode");if(!mode.row()||mode.text(0)!="delete")throw std::runtime_error("Unsupported ARK container journal mode");
     std::map<std::string,std::string> expected{{"ark_meta",metaSchema},{"ark_payload",payloadSchema},{"ark_slots",slotsSchema}};
+    if(version==2)expected.emplace("ark_derived",derivedSchema);
     Statement query(db,"SELECT type,name,tbl_name,sql FROM sqlite_schema ORDER BY name");size_t count=0;
     while(query.row()){auto name=query.text(1);auto found=expected.find(name);if(query.text(0)!="table"||query.text(2)!=name||found==expected.end()||query.text(3)!=found->second)throw std::runtime_error("Unsupported ARK container schema");++count;}
     if(count!=expected.size())throw std::runtime_error("Incomplete ARK container schema");
     Statement check(db,"PRAGMA quick_check(1)");if(!check.row()||check.text(0)!="ok"||check.row())throw std::runtime_error("Corrupt ARK container pages");
     Statement foreign(db,"PRAGMA foreign_key_check");if(foreign.row())throw std::runtime_error("Broken ARK container payload references");
+    return (int)version;
 }
 void init(Db& db){db.exec("PRAGMA page_size=4096");db.exec("PRAGMA journal_mode=DELETE");db.exec("PRAGMA synchronous=FULL");db.exec("PRAGMA max_page_count=16384");db.exec("PRAGMA application_id=1095912241");db.exec("PRAGMA user_version=1");db.exec(metaSchema);db.exec(payloadSchema);db.exec(slotsSchema);}
 const V& required(const V& value,const char* key){auto p=value.find(key);if(!p)throw std::runtime_error(std::string("Container manifest missing ")+key);return*p;}
@@ -157,10 +162,18 @@ V assemble(const V& descriptor,const Slots& slots,const Payloads& payloads,std::
     if(kind=="o"){V value=V::makeObj();std::string previous;for(size_t i=0;i<entries.arr.size();++i){const auto& entry=entries.arr[i];if(entry.t!=V::Arr||entry.arr.size()!=2||entry.arr[0].t!=V::Str||(i&&entry.arr[0].str<=previous))throw std::runtime_error("Invalid container manifest object key");previous=entry.arr[0].str;bounded(budget.bytes,previous.size(),maxDocumentBytes,"Expanded document exceeds 4 MiB logical capacity");budget.bytes+=previous.size();value.obj.emplace_back(previous,assemble(entry.arr[1],slots,payloads,usedSlots,usedPayloads,budget,depth+1));}return value;}
     throw std::runtime_error("Unknown ARK container manifest kind");
 }
-size_t physicalSize(const std::filesystem::path& path){std::error_code error;auto size=std::filesystem::file_size(path,error);if(error||size>maxDocumentContainerBytes)throw std::runtime_error("ARK container exceeds 64 MiB physical capacity");if(size==0||size%4096!=0)throw std::runtime_error("Truncated ARK container pages");return(size_t)size;}
-void writePackage(Db& db,const Package& package,DocumentContainerWriteStats& stats){
-    db.exec("PRAGMA synchronous=FULL");db.exec("PRAGMA max_page_count=16384");db.exec("BEGIN IMMEDIATE");
+size_t physicalSize(const std::filesystem::path& path){std::error_code error;auto size=std::filesystem::file_size(path,error);if(error||size>maxDocumentContainerBytes)throw std::runtime_error("ARK container exceeds 256 MiB physical capacity");if(size==0||size%4096!=0)throw std::runtime_error("Truncated ARK container pages");return(size_t)size;}
+void checkDerived(const DocumentDerivedPayloads* derived){
+    if(!derived)return;size_t total=0;std::set<std::string> keys;
+    if(derived->size()>maxRows)throw std::runtime_error("ARK derived row capacity exceeded");
+    for(const auto& item:*derived){if(!digest(item.key)||!keys.insert(item.key).second)throw std::runtime_error("Invalid/duplicate ARK derived key");if(item.bytes.empty()||item.bytes.size()>maxDocumentDerivedEntryBytes)throw std::runtime_error("ARK derived entry exceeds capacity");bounded(total,item.bytes.size(),maxDocumentDerivedBytes,"ARK derived section exceeds 128 MiB");total+=item.bytes.size();}
+}
+void writePackage(Db& db,const Package& package,DocumentContainerWriteStats& stats,const DocumentDerivedPayloads* derived){
+    const bool existingV2=scalar(db,"PRAGMA user_version")==2;
+    const bool useDerived=existingV2||(derived&&!derived->empty());
+    db.exec("PRAGMA synchronous=FULL");db.exec(useDerived?"PRAGMA max_page_count=65536":"PRAGMA max_page_count=16384");db.exec("BEGIN IMMEDIATE");
     try{
+        if(useDerived&&!existingV2){db.exec(derivedSchema);db.exec("PRAGMA user_version=2");}
         Statement meta(db,"SELECT generation FROM ark_meta WHERE singleton=1");int64_t previous=0;if(meta.row()){previous=meta.integer(0);if(previous<1||previous==std::numeric_limits<int64_t>::max()||meta.row())throw std::runtime_error("Invalid container generation");}stats.generation=(uint64_t)(previous+1);
         Statement find(db,"SELECT kind,bytes FROM ark_payload WHERE hash=?1"),insert(db,"INSERT INTO ark_payload(hash,kind,bytes) VALUES(?1,?2,?3)");
         for(const auto& item:package.payloads){find.text(1,item.first);if(find.row()){if(find.integer(0)!=item.second.kind||find.blob(1)!=item.second.bytes||find.row())throw std::runtime_error("Existing ARK payload digest/content mismatch");}else{insert.text(1,item.first);insert.integer(2,item.second.kind);insert.blob(3,item.second.bytes);insert.done();insert.reset();++stats.payloadsInserted;stats.payloadBytesInserted+=item.second.bytes.size();}find.reset();}
@@ -174,6 +187,12 @@ void writePackage(Db& db,const Package& package,DocumentContainerWriteStats& sta
         Statement all(db,"SELECT hash FROM ark_payload WHERE kind=1");std::vector<std::string> obsolete;while(all.row()){auto hash=all.text(0);if(!package.payloads.count(hash))obsolete.push_back(std::move(hash));}
         Statement removePayload(db,"DELETE FROM ark_payload WHERE hash=?1");for(const auto& hash:obsolete){removePayload.text(1,hash);removePayload.done();removePayload.reset();}
         Statement update(db,"INSERT INTO ark_meta(singleton,logical_bytes,root_hash,generation) VALUES(1,?1,?2,?3) ON CONFLICT(singleton) DO UPDATE SET logical_bytes=excluded.logical_bytes,root_hash=excluded.root_hash,generation=excluded.generation");update.integer(1,(int64_t)package.logicalBytes);update.text(2,package.rootHash);update.integer(3,(int64_t)stats.generation);update.done();
+        if(useDerived){
+            std::set<std::string> stale;Statement oldDerived(db,"SELECT key FROM ark_derived");while(oldDerived.row())stale.insert(oldDerived.text(0));
+            Statement findDerived(db,"SELECT hash,bytes FROM ark_derived WHERE key=?1"),putDerived(db,"INSERT INTO ark_derived(key,hash,bytes) VALUES(?1,?2,?3) ON CONFLICT(key) DO UPDATE SET hash=excluded.hash,bytes=excluded.bytes");
+            if(derived)for(const auto& item:*derived){const auto hash=iterationSha256(item.bytes);findDerived.text(1,item.key);bool same=false;if(findDerived.row())same=findDerived.text(0)==hash&&findDerived.blob(1,maxDocumentDerivedEntryBytes)==item.bytes;findDerived.reset();if(!same){putDerived.text(1,item.key);putDerived.text(2,hash);putDerived.blob(3,item.bytes);putDerived.done();putDerived.reset();}stale.erase(item.key);}
+            Statement removeDerived(db,"DELETE FROM ark_derived WHERE key=?1");for(const auto& key:stale){removeDerived.text(1,key);removeDerived.done();removeDerived.reset();}
+        }
         db.exec("COMMIT");
     }catch(...){try{db.exec("ROLLBACK");}catch(...){}throw;}
 }
@@ -190,18 +209,18 @@ void cleanup(const std::filesystem::path& path){std::error_code error;std::files
 bool documentContainerFile(const char* path){if(!path||!*path)return false;std::ifstream input(filePath(path),std::ios::binary);char header[16]{};input.read(header,16);return input.gcount()==16&&std::memcmp(header,"SQLite format 3\0",16)==0;}
 bool encodeDocumentValue(const V& value,std::string& bytes,std::string* error){try{auto encoded=encode(value);bytes=std::move(encoded);return true;}catch(const std::exception& e){if(error)*error=e.what();return false;}}
 bool decodeDocumentValue(const std::string& bytes,V& value,std::string* error){try{auto decoded=decode(bytes);value=std::move(decoded);return true;}catch(const std::exception& e){if(error)*error=e.what();return false;}}
-bool saveDocumentContainer(const V& root,const char* path,std::string* error,DocumentContainerWriteStats* receipt){
+bool saveDocumentContainer(const V& root,const char* path,std::string* error,DocumentContainerWriteStats* receipt,const DocumentDerivedPayloads* derived){
     std::filesystem::path staged;
     try{
         if(!path||!*path)throw std::runtime_error("Empty document path");
-        Package package(root);auto destination=filePath(path);DocumentContainerWriteStats stats;
-        if(documentContainerFile(path)){physicalSize(destination);{Db db(destination,SQLITE_OPEN_READWRITE|SQLITE_OPEN_NOMUTEX);schema(db);writePackage(db,package,stats);}stats.physicalBytes=physicalSize(destination);}
+        checkDerived(derived);Package package(root);auto destination=filePath(path);DocumentContainerWriteStats stats;
+        if(documentContainerFile(path)){physicalSize(destination);{Db db(destination,SQLITE_OPEN_READWRITE|SQLITE_OPEN_NOMUTEX);sqlite3_limit(db.db,SQLITE_LIMIT_LENGTH,(int)maxDocumentDerivedEntryBytes+4096);schema(db);writePackage(db,package,stats,derived);}stats.physicalBytes=physicalSize(destination);}
         else{
             std::error_code existsError;bool exists=std::filesystem::exists(destination,existsError);if(existsError)throw std::runtime_error("Cannot inspect document destination");
             if(exists){std::ifstream prior(destination,std::ios::binary);char header[16]{};prior.read(header,16);if(prior.gcount()>=6&&std::memcmp(header,"SQLite",6)==0)throw std::runtime_error("Refusing to replace an unrecognized SQLite file");}
             static std::atomic<uint64_t> sequence{0};auto tick=std::chrono::steady_clock::now().time_since_epoch().count();staged=destination;staged+=".ark-stage-"+std::to_string(tick)+"-"+std::to_string(++sequence);
             if(std::filesystem::exists(staged))throw std::runtime_error("Staged container already exists");
-            {Db db(staged,SQLITE_OPEN_READWRITE|SQLITE_OPEN_CREATE|SQLITE_OPEN_NOMUTEX);init(db);writePackage(db,package,stats);}stats.physicalBytes=physicalSize(staged);
+            {Db db(staged,SQLITE_OPEN_READWRITE|SQLITE_OPEN_CREATE|SQLITE_OPEN_NOMUTEX);sqlite3_limit(db.db,SQLITE_LIMIT_LENGTH,(int)maxDocumentDerivedEntryBytes+4096);init(db);writePackage(db,package,stats,derived);}stats.physicalBytes=physicalSize(staged);
             if(!replace(staged,destination))throw std::runtime_error("Cannot replace document with staged ARK container");
             staged.clear();stats.stagedReplacement=true;
         }
@@ -209,7 +228,7 @@ bool saveDocumentContainer(const V& root,const char* path,std::string* error,Doc
         return true;
     }catch(const std::exception& e){if(!staged.empty())cleanup(staged);if(error)*error=e.what();return false;}
 }
-bool loadDocumentContainer(const char* path,V& root,std::string* error){
+bool loadDocumentContainer(const char* path,V& root,std::string* error,DocumentDerivedPayloads* derived,std::string* derivedDiscardedReason){
     try{
         if(!path||!*path)throw std::runtime_error("Empty document path");
         if(!documentContainerFile(path))throw std::runtime_error("Not an ARK binary container");
@@ -217,14 +236,19 @@ bool loadDocumentContainer(const char* path,V& root,std::string* error){
         // Read/write permits SQLite to recover a hot rollback journal after an
         // interrupted process. Read-only files remain readable without recovery.
         std::unique_ptr<Db> connection;try{connection=std::make_unique<Db>(source,SQLITE_OPEN_READWRITE|SQLITE_OPEN_NOMUTEX);}catch(...){connection=std::make_unique<Db>(source,SQLITE_OPEN_READONLY|SQLITE_OPEN_NOMUTEX);}
-        Db& db=*connection;db.exec("PRAGMA query_only=ON");db.exec("BEGIN");schema(db);
+        Db& db=*connection;sqlite3_limit(db.db,SQLITE_LIMIT_LENGTH,(int)maxDocumentDerivedEntryBytes+4096);db.exec("PRAGMA query_only=ON");db.exec("BEGIN");const int version=schema(db);
         Statement meta(db,"SELECT logical_bytes,root_hash,generation FROM ark_meta WHERE singleton=1");if(!meta.row())throw std::runtime_error("Missing ARK document metadata");auto logical=meta.integer(0);auto rootHash=meta.text(1);auto generation=meta.integer(2);if(logical<0||logical>(int64_t)maxDocumentBytes||!digest(rootHash)||generation<1||meta.row())throw std::runtime_error("Invalid ARK document metadata");
         Payloads payloads;size_t total=0;Statement payload(db,"SELECT hash,kind,bytes FROM ark_payload");while(payload.row()){if(payloads.size()>=maxRows*2)throw std::runtime_error("ARK payload row capacity exceeded");auto hash=payload.text(0);auto kind=payload.integer(1);auto bytes=payload.blob(2);bounded(total,bytes.size(),maxDocumentValueBytes,"ARK payload total exceeds 16 MiB");total+=bytes.size();if((kind!=0&&kind!=1)||!digest(hash)||hashPayload((int)kind,bytes)!=hash)throw std::runtime_error("ARK payload checksum mismatch");payloads.emplace(std::move(hash),Payload{(int)kind,std::move(bytes)});}
         Slots slots;Statement slot(db,"SELECT path,payload_hash FROM ark_slots");while(slot.row()){if(slots.size()>=maxRows)throw std::runtime_error("ARK slot row capacity exceeded");auto name=slot.text(0),hash=slot.text(1);if(name.size()>4096||!digest(hash)||!payloads.count(hash))throw std::runtime_error("Invalid ARK slot reference");slots.emplace(std::move(name),std::move(hash));}
         auto manifestSlot=slots.find("/");if(manifestSlot==slots.end())throw std::runtime_error("Missing ARK document manifest");auto manifestPayload=payloads.find(manifestSlot->second);if(manifestPayload==payloads.end()||manifestPayload->second.kind!=0)throw std::runtime_error("Missing typed ARK manifest");std::set<std::string> usedSlots{"/"},usedPayloads{manifestPayload->first};V manifest=decode(manifestPayload->second.bytes);ReadBudget budget;V candidate=assemble(manifest,slots,payloads,usedSlots,usedPayloads,budget,0);
         if(candidate.t!=V::Obj||usedSlots.size()!=slots.size()||usedPayloads.size()!=payloads.size())throw std::runtime_error("Unreferenced ARK container data");
         if(candidate.dump().size()!=(size_t)logical||iterationSha256(encode(candidate))!=rootHash)throw std::runtime_error("ARK document root checksum/size mismatch");
-        db.exec("COMMIT");root=std::move(candidate);return true;
+        DocumentDerivedPayloads restored;std::string discarded;
+        if(version==2)try{
+            size_t totalDerived=0;Statement rows(db,"SELECT key,hash,bytes FROM ark_derived ORDER BY key");
+            while(rows.row()){if(restored.size()>=maxRows)throw std::runtime_error("ARK derived row capacity exceeded");auto key=rows.text(0),hash=rows.text(1),bytes=rows.blob(2,maxDocumentDerivedEntryBytes);bounded(totalDerived,bytes.size(),maxDocumentDerivedBytes,"ARK derived section exceeds 128 MiB");totalDerived+=bytes.size();if(!digest(key)||!digest(hash)||bytes.empty()||iterationSha256(bytes)!=hash)throw std::runtime_error("ARK derived payload checksum/identity mismatch");restored.push_back({std::move(key),std::move(bytes)});}
+        }catch(const std::exception& failure){restored.clear();discarded=failure.what();}
+        db.exec("COMMIT");root=std::move(candidate);if(derived)*derived=std::move(restored);if(derivedDiscardedReason)*derivedDiscardedReason=std::move(discarded);return true;
     }catch(const std::exception& e){if(error)*error=e.what();return false;}
 }
 } // namespace ark

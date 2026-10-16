@@ -21,6 +21,7 @@
 #include <Standard_Version.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Compound.hxx>
+#include <TopoDS_Vertex.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopExp.hxx>
 #include <NCollection_IndexedDataMap.hxx>
@@ -40,6 +41,9 @@
 #include <cstdint>
 #include <algorithm>
 #include <set>
+#include <map>
+#include <chrono>
+#include <atomic>
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -48,6 +52,33 @@
 #endif
 
 namespace ark::occt {
+namespace {
+struct NativePhaseTiming {std::uint64_t calls=0,inclusive=0,self=0;};
+struct NativeRequestTiming {fs::path directory;std::string operation="unparsed",modelOperation="none";bool success=false;std::uint64_t start=0;std::map<std::string,NativePhaseTiming> phases;};
+thread_local NativeRequestTiming* activeNativeProfile=nullptr;
+thread_local NativeProfileScope* activeNativeScope=nullptr;
+std::uint64_t nativeProfileClock() noexcept{return (std::uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();}
+std::string profileOperation(const std::string& value){
+    static const std::set<std::string> known{"model","model_solid","model_sheet","model_frame","model_electronics","reference_frame","geometry_query","point_distance","solid_centroid","measurement_pick","clearance","kernel_info","import_tube","export_tube","export_notch","import_cad","inspect_cad","inspect_imported_cad","cad_custody","import_component","component_custody","project_reference","drawing_view","drawing_dxf","import_sheet","export_sheet","export_sheet_flat_dxf","step_inspect","export_iges","export_brep","box","cylinder","sphere","cone","torus","round_tube","rect_tube","extrude","union","cut","common","hole","holes_orchestrator","fillet","chamfer","draft","linear_pattern","circular_pattern","mirror","shell","transform","split_plane","split_line","split_surface","split_tool","offset","vertex_pull","tube_end_fit","imported_brep","imported_cad","vent","wood","rib","gusset","boss","mount_pad","screw_support","nut_seat","lid_lip","lid_groove","curve_pattern","hole_pattern","loft","sweep","surface_fill","bspline_surface","thicken","sew","surface_edit","trim","untrim","extend"};
+    return value=="restore_native_result"?value:known.count(value)?value:"other";
+}
+}
+NativeProfileRequest::NativeProfileRequest() noexcept{
+    if(activeNativeProfile)return;
+    try{const char* directory=std::getenv("ARK_NATIVE_PROFILE_DIRECTORY");if(!directory||!*directory)return;auto* state=new NativeRequestTiming;try{state->directory=fs::u8path(directory);state->start=nativeProfileClock();}catch(...){delete state;throw;}state_=state;activeNativeProfile=state;}catch(...){}
+}
+NativeProfileRequest::~NativeProfileRequest() noexcept{
+    auto* state=static_cast<NativeRequestTiming*>(state_);if(!state)return;
+    const auto elapsed=nativeProfileClock()-state->start;activeNativeProfile=nullptr;activeNativeScope=nullptr;
+    try{static std::atomic<std::uint64_t> serial{0};V trace=V::makeObj(),rows=V::makeArr();trace.set("schema",V::makeStr("ark-native-request-timing-1"));trace.set("operation",V::makeStr(state->operation));trace.set("model_operation",V::makeStr(state->modelOperation));trace.set("success",V::makeBool(state->success));trace.set("elapsed_ms",V::makeNum(elapsed/1e6));
+        for(const auto& [name,time]:state->phases){V row=V::makeObj();row.set("phase",V::makeStr(name));row.set("calls",V::makeNum((double)time.calls));row.set("inclusive_ms",V::makeNum(time.inclusive/1e6));row.set("self_ms",V::makeNum(time.self/1e6));rows.arr.push_back(std::move(row));}trace.set("phases",std::move(rows));
+        writeFile(state->directory/("request-"+std::to_string(state->start)+"-"+std::to_string(++serial)+".json"),trace.dump());
+    }catch(...){}delete state;
+}
+void NativeProfileRequest::operation(const std::string& worker,const std::string& model) noexcept{auto* state=static_cast<NativeRequestTiming*>(state_);if(!state)return;try{state->operation=profileOperation(worker);state->modelOperation=model.empty()?"none":profileOperation(model);}catch(...){} }
+void NativeProfileRequest::succeeded() noexcept{if(auto* state=static_cast<NativeRequestTiming*>(state_))state->success=true;}
+NativeProfileScope::NativeProfileScope(const char* phase) noexcept{if(!activeNativeProfile)return;name_=phase;parent_=activeNativeScope;start_=nativeProfileClock();activeNativeScope=this;}
+NativeProfileScope::~NativeProfileScope() noexcept{if(!name_)return;const auto elapsed=nativeProfileClock()-start_;activeNativeScope=parent_;if(parent_)parent_->children_+=elapsed;if(activeNativeProfile)try{auto& timing=activeNativeProfile->phases[name_];++timing.calls;timing.inclusive+=elapsed;timing.self+=elapsed-std::min(elapsed,children_);}catch(...){} }
 std::string readFile(const fs::path& path){
     std::ifstream file(path,std::ios::binary);if(!file)throw std::runtime_error("Cannot read native geometry file");
     file.seekg(0,std::ios::end);auto length=file.tellg();if(length<0||length>256*1024*1024)throw std::runtime_error("Native geometry file exceeds 256 MiB");file.seekg(0);
@@ -126,8 +157,10 @@ const char* volumeIntegrationMethod(const TopoDS_Shape& shape){
     switch(volumeMethod(shape)){case VolumeMethod::AnalyticGauss:return "analytic_gauss";case VolumeMethod::PolynomialTrimGauss:return "adaptive_gauss_polynomial_trim";default:return "gauss_kronrod_rational_or_freeform";}
 }
 void volumeProperties(const TopoDS_Shape& shape,GProp_GProps& props,bool moments){
+    NativeProfileScope profile("volumeProperties");
     double error=0;
-    switch(volumeMethod(shape)){
+    VolumeMethod method;{NativeProfileScope classify("volume.classify");method=volumeMethod(shape);}
+    NativeProfileScope integrate("volume.integrate");switch(method){
         // Exact analytic surfaces and trims retain the original bounded Gauss rule.
         // GK moment refinement around their zero terms can take seconds per tube.
         case VolumeMethod::AnalyticGauss:BRepGProp::VolumeProperties(shape,props,false,false,false);break;
@@ -139,10 +172,10 @@ void volumeProperties(const TopoDS_Shape& shape,GProp_GProps& props,bool moments
     if(error<0||!std::isfinite(error))throw std::runtime_error("Exact volume integration failed");
 }
 
-double properties(const TopoDS_Shape& shape,char kind){GProp_GProps props;if(shape.IsNull())return 0;if(kind=='a')BRepGProp::SurfaceProperties(shape,props);else if(kind=='l')BRepGProp::LinearProperties(shape,props);else volumeProperties(shape,props,false);return props.Mass();}
+double properties(const TopoDS_Shape& shape,char kind){NativeProfileScope profile(kind=='a'?"areaProperties":kind=='l'?"lengthProperties":"volumeScalar");GProp_GProps props;if(shape.IsNull())return 0;if(kind=='a')BRepGProp::SurfaceProperties(shape,props);else if(kind=='l')BRepGProp::LinearProperties(shape,props);else volumeProperties(shape,props,false);return props.Mass();}
 std::vector<TopoDS_Shape> shapes(const TopoDS_Shape& shape,TopAbs_ShapeEnum kind){std::vector<TopoDS_Shape> out;for(TopExp_Explorer ex(shape,kind);ex.More();ex.Next())out.push_back(ex.Current());return out;}
-std::array<double,6> bounds(const TopoDS_Shape& shape){Bnd_Box box;BRepBndLib::AddOptimal(shape,box,false,false);if(box.IsVoid())throw std::runtime_error("Empty native shape bounds");std::array<double,6> b;box.Get(b[0],b[1],b[2],b[3],b[4],b[5]);return b;}
-template<class Op>TopoDS_Shape booleanOp(const TopoDS_Shape& a,const TopoDS_Shape& b){Op op(a,b);op.Build();if(!op.IsDone()||op.HasErrors())throw std::runtime_error("Native Boolean operation failed");return op.Shape();}
+std::array<double,6> bounds(const TopoDS_Shape& shape){NativeProfileScope profile("bounds");Bnd_Box box;BRepBndLib::AddOptimal(shape,box,false,false);if(box.IsVoid())throw std::runtime_error("Empty native shape bounds");std::array<double,6> b;box.Get(b[0],b[1],b[2],b[3],b[4],b[5]);return b;}
+template<class Op>TopoDS_Shape booleanOp(const TopoDS_Shape& a,const TopoDS_Shape& b){NativeProfileScope profile("boolean.single_build");Op op(a,b);if(!op.IsDone()||op.HasErrors())throw std::runtime_error("Native Boolean operation failed");return op.Shape();}
 TopoDS_Shape cut(const TopoDS_Shape& a,const TopoDS_Shape& b){return booleanOp<BRepAlgoAPI_Cut>(a,b);}
 TopoDS_Shape common(const TopoDS_Shape& a,const TopoDS_Shape& b){return booleanOp<BRepAlgoAPI_Common>(a,b);}
 TopoDS_Shape fuse(const TopoDS_Shape& a,const TopoDS_Shape& b){return booleanOp<BRepAlgoAPI_Fuse>(a,b);}
@@ -196,7 +229,7 @@ V edgeVisibility(const TopoDS_Shape& shape){
     return visible;
 }
 V meshData(const TopoDS_Shape& s,double deflection,double angle){
-    BRepMesh_IncrementalMesh mesher(s,deflection,false,angle,nativeThreadBudget()>1);if(!mesher.IsDone())throw std::runtime_error("Native preview tessellation failed");V pos=V::makeArr(),idx=V::makeArr(),spans=V::makeArr(),edges=V::makeArr(),edgeVisible=edgeVisibility(s);
+    NativeProfileScope profile("meshData");{NativeProfileScope tessellate("mesh.tessellate");BRepMesh_IncrementalMesh mesher(s,deflection,false,angle,nativeThreadBudget()>1);if(!mesher.IsDone())throw std::runtime_error("Native preview tessellation failed");}NativeProfileScope pack("mesh.pack");V pos=V::makeArr(),idx=V::makeArr(),spans=V::makeArr(),edges=V::makeArr(),edgeVisible=edgeVisibility(s);
     for(auto& item:shapes(s,TopAbs_FACE)){auto face=TopoDS::Face(item);TopLoc_Location loc;auto tri=BRep_Tool::Triangulation(face,loc);if(tri.IsNull())throw std::runtime_error("Native face has no triangulation");size_t base=pos.arr.size()/3,start=idx.arr.size()/3;
         for(int i=1;i<=tri->NbNodes();++i){auto p=tri->Node(i).Transformed(loc.Transformation());for(auto v:{p.X(),p.Y(),p.Z()})pos.arr.push_back(V::makeNum(std::round(v*1e8)/1e8));}
         for(int i=1;i<=tri->NbTriangles();++i){int a,b,c;tri->Triangle(i).Get(a,b,c);if(face.Orientation()==TopAbs_REVERSED)std::swap(b,c);for(int v:{a,b,c})idx.arr.push_back(V::makeNum((double)(base+v-1)));}
@@ -239,11 +272,11 @@ V meshData(const TopoDS_Shape& s,double deflection,double angle){
     }
     V mesh=V::makeObj();mesh.set("pos",pos);mesh.set("idx",idx);mesh.set("face_spans",spans);mesh.set("edges",edges);mesh.set("edge_visible",edgeVisible);return mesh;
 }
-std::string brepData(const TopoDS_Shape& shape){std::ostringstream stream;BRepTools::Write(shape,stream,false,false,TopTools_FormatVersion_CURRENT);return base64Encode(stream.str());}
-TopoDS_Shape readBrep(const std::string& encoded){std::istringstream stream(base64Decode(encoded));TopoDS_Shape shape;BRep_Builder b;BRepTools::Read(shape,stream,b);if(shape.IsNull()||!BRepCheck_Analyzer(shape).IsValid())throw std::runtime_error("Invalid native B-rep payload");return shape;}
+std::string brepData(const TopoDS_Shape& shape){NativeProfileScope profile("brepData");std::ostringstream stream;BRepTools::Write(shape,stream,false,false,TopTools_FormatVersion_CURRENT);return base64Encode(stream.str());}
+TopoDS_Shape readBrep(const std::string& encoded){NativeProfileScope profile("readBrep");std::string bytes;{NativeProfileScope decode("brep.decode");bytes=base64Decode(encoded);}std::istringstream stream(std::move(bytes));TopoDS_Shape shape;BRep_Builder b;{NativeProfileScope read("brep.read");BRepTools::Read(shape,stream,b);}{NativeProfileScope validate("brep.validate");if(shape.IsNull()||!BRepCheck_Analyzer(shape).IsValid())throw std::runtime_error("Invalid native B-rep payload");}return shape;}
 std::string kernelVersion(){return OCC_VERSION_COMPLETE;}
 V shapeReport(const TopoDS_Shape& shape,bool requireSolid){
-    if(shape.IsNull()||!BRepCheck_Analyzer(shape).IsValid())throw std::runtime_error("Native result failed B-rep validation");
+    NativeProfileScope profile("shapeReport");{NativeProfileScope validate("report.validate");if(shape.IsNull()||!BRepCheck_Analyzer(shape).IsValid())throw std::runtime_error("Native result failed B-rep validation");}
     auto solids=shapes(shape,TopAbs_SOLID);
     const double measuredVolume=solids.empty()?0:properties(shape);
     if(requireSolid&&(solids.size()!=1||measuredVolume<=0)){
@@ -258,11 +291,11 @@ V shapeReport(const TopoDS_Shape& shape,bool requireSolid){
     V report=V::makeObj();report.set("kernel",V::makeStr("OCCT"));report.set("kernel_version",V::makeStr(kernelVersion()));report.set("brep_valid",V::makeBool(true));report.set("solids",V::makeNum(solids.size()));report.set("faces",V::makeNum(shapes(shape,TopAbs_FACE).size()));report.set("area_mm2",V::makeNum(properties(shape,'a')));report.set("volume_mm3",solids.empty()?V{}:V::makeNum(measuredVolume));report.set("display_mesh_authoritative",V::makeBool(false));report.set("self_intersections_checked",V::makeBool(false));report.set("manufacturing_authoritative",V::makeBool(false));
     V b=V::makeArr();for(auto x:bounds(shape))b.arr.push_back(V::makeNum(x));report.set("bounds_mm",b);return report;
 }
-V completeSelectionReferences(V result){
-    const auto* encoded=result.find("brep_base64");
-    if(!encoded||encoded->t!=V::Str)return result;
-    const std::string identity=sha256(base64Decode(encoded->str));
-    const auto shape=readBrep(encoded->str);
+namespace {
+V takeGeneratedField(V& object,const char* name,V fallback){for(auto& field:object.obj)if(field.first==name)return std::move(field.second);return fallback;}
+V* mutableGeneratedField(V& object,const char* name){for(auto& field:object.obj)if(field.first==name)return &field.second;return nullptr;}
+V completeSelectionReferencesOnShape(V result,const TopoDS_Shape& shape,const std::string& identity){
+    NativeProfileScope profile("completeSelectionReferences");
     const auto faces=shapes(shape,TopAbs_FACE),edges=shapes(shape,TopAbs_EDGE);
     auto describe=[](const TopoDS_Shape& entity,TopAbs_ShapeEnum kind){V descriptor=V::makeObj();
         if(kind==TopAbs_FACE){BRepAdaptor_Surface surface(TopoDS::Face(entity));
@@ -271,11 +304,11 @@ V completeSelectionReferences(V result){
         }else if(!BRep_Tool::Degenerated(TopoDS::Edge(entity))){BRepAdaptor_Curve curve(TopoDS::Edge(entity));const double u=curve.FirstParameter()+(curve.LastParameter()-curve.FirstParameter())*.5;gp_Pnt p;gp_Vec tangent;curve.D1(u,p,tangent);descriptor.set("origin",vec(p.XYZ()));if(tangent.Magnitude()>1e-12){tangent.Normalize();descriptor.set("tangent",vec(tangent.XYZ()));}}
         return descriptor;
     };
-    V topology=result.find("topology")?*result.find("topology"):V::makeObj();
+    V topology=takeGeneratedField(result,"topology",V::makeObj());
     if(topology.t!=V::Obj)throw std::runtime_error("Invalid native selection topology");
     if(const auto* digest=topology.find("brep_sha256");digest&&(digest->t!=V::Str||digest->str!=identity))throw std::runtime_error("Selection topology B-rep digest mismatch");
     topology.set("brep_sha256",V::makeStr(identity));
-    V rows=topology.find("references")?*topology.find("references"):V::makeArr();
+    V rows=takeGeneratedField(topology,"references",V::makeArr());
     if(rows.t!=V::Arr||rows.arr.size()>16384)throw std::runtime_error("Selection reference inventory exceeds16384 entries");
     std::set<std::string> names;size_t semanticCount=0;
     for(auto& row:rows.arr){
@@ -303,7 +336,7 @@ V completeSelectionReferences(V result){
             if(originalDigest!=identity){row.set("status",V::makeStr("obsolete"));row.set("indices",V::makeArr());row.set("reason",V::makeStr("B-rep identity changed; select the current geometry"));}
         }else if(++semanticCount>512)throw std::runtime_error("Semantic topology registry exceeds512 entries");
     }
-    V mesh=result.find("mesh")?*result.find("mesh"):V{};
+    V* mesh=mutableGeneratedField(result,"mesh");
     for(const auto kind:{TopAbs_FACE,TopAbs_EDGE}){
         const std::string label=kind==TopAbs_FACE?"face":"edge";
         const auto& entities=kind==TopAbs_FACE?faces:edges;
@@ -328,11 +361,28 @@ V completeSelectionReferences(V result){
             row.set("reference_scope",V::makeStr("current_brep"));row.set("persistent",V::makeBool(false));row.set("brep_sha256",V::makeStr(identity));
             row.set("descriptor",descriptor);row.set("frame_available",V::makeBool(descriptor.find("normal")||descriptor.find("tangent")));rows.arr.push_back(row);
         }
-        if(mesh.t==V::Obj)if(const auto* displayed=mesh.find(kind==TopAbs_FACE?"face_spans":"edges");displayed&&displayed->t==V::Arr&&displayed->arr.size()==entities.size())mesh.set(kind==TopAbs_FACE?"face_canonical":"edge_canonical",canonical);
+        if(mesh&&mesh->t==V::Obj)if(const auto* displayed=mesh->find(kind==TopAbs_FACE?"face_spans":"edges");displayed&&displayed->t==V::Arr&&displayed->arr.size()==entities.size())mesh->set(kind==TopAbs_FACE?"face_canonical":"edge_canonical",std::move(canonical));
     }
-    if(mesh.t==V::Obj)result.set("mesh",mesh);
-    topology.set("references",rows);topology.set("selection_inventory_complete",V::makeBool(true));topology.set("generic_reference_scope",V::makeStr("current_brep_digest"));topology.set("reference_capacity",V::makeNum(16384));result.set("topology",topology);return result;
+    topology.set("references",std::move(rows));topology.set("selection_inventory_complete",V::makeBool(true));topology.set("generic_reference_scope",V::makeStr("current_brep_digest"));topology.set("reference_capacity",V::makeNum(16384));result.set("topology",std::move(topology));return result;
 }
-V shapeResult(const TopoDS_Shape& shape,bool requireSolid){V r=V::makeObj();r.set("report",shapeReport(shape,requireSolid));r.set("brep_base64",V::makeStr(brepData(shape)));r.set("mesh",meshData(shape));return completeSelectionReferences(std::move(r));}
+}
+V completeSelectionReferences(V result){
+    const auto* encoded=result.find("brep_base64");if(!encoded||encoded->t!=V::Str)return result;
+    const std::string identity=sha256(base64Decode(encoded->str));const auto shape=readBrep(encoded->str);
+    return completeSelectionReferencesOnShape(std::move(result),shape,identity);
+}
+V generatedShapeResult(const TopoDS_Shape& shape,bool requireSolid,const std::function<V(const std::string&)>& topologyBuilder,bool vertices){
+    NativeProfileScope profile("shapeResult");V r=V::makeObj();r.set("report",shapeReport(shape,requireSolid));std::string encoded=brepData(shape);const std::string identity=sha256(base64Decode(encoded));
+    if(topologyBuilder)r.set("topology",topologyBuilder(encoded));r.set("brep_base64",V::makeStr(std::move(encoded)));r.set("mesh",meshData(shape));r=completeSelectionReferencesOnShape(std::move(r),shape,identity);
+    if(vertices){NativeProfileScope inventory("vertexInventory.generated");NCollection_IndexedMap<TopoDS_Shape,TopTools_ShapeMapHasher> points;TopExp::MapShapes(shape,TopAbs_VERTEX,points);V* topology=mutableGeneratedField(r,"topology");if(!topology)throw std::runtime_error("Generated solid lost its topology registry");V rows=V::makeArr();const bool complete=points.Extent()<=16384;
+        if(complete)for(int i=1;i<=points.Extent();++i){V row=V::makeObj();row.set("name",V::makeStr("vertex."+std::to_string(i-1)));row.set("point_mm",vec(BRep_Tool::Pnt(TopoDS::Vertex(points(i))).XYZ()));row.set("source_topology",V::makeStr(identity));row.set("persistent",V::makeBool(false));rows.arr.push_back(std::move(row));}
+        topology->set("vertices",std::move(rows));topology->set("vertex_inventory_complete",V::makeBool(complete));topology->set("vertex_reference_scope",V::makeStr("current_exact_brep_digest"));
+    }return r;
+}
+V shapeResult(const TopoDS_Shape& shape,bool requireSolid){return generatedShapeResult(shape,requireSolid,{},false);}
+namespace {
+#include "restore_result_031b.inl"
+}
+V restoreNativeResult(const V& resolvedRequest,const V& savedResult){return snapshot031b::restore(resolvedRequest,savedResult);}
 double symmetricDifference(const TopoDS_Shape& a,const TopoDS_Shape& b){return std::abs(properties(cut(a,b)))+std::abs(properties(cut(b,a)));}
 }

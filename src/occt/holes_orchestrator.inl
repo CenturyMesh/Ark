@@ -2,12 +2,15 @@
 // topology propagation and finish helpers. Header is included at file scope.
 namespace {
 TopoDS_Shape holesCheckedCut(const TopoDS_Shape& input,const TopoDS_Shape& cutter,
-                            std::vector<Ref>& refs,const std::string& label,double& removed){
+                            std::vector<Ref>& refs,const std::string& label,double& removed,double& currentVolume){
     BRepCheck_Analyzer toolCheck(cutter,true);if(!toolCheck.IsValid()||shapes(cutter,TopAbs_SOLID).empty())throw std::runtime_error(label+": invalid analytic cutter");
-    BRepAlgoAPI_Cut cut(input,cutter);cut.Build();if(!cut.IsDone()||cut.HasErrors())throw std::runtime_error(label+": exact Boolean cut failed");
-    const auto result=cut.Shape();shapeReport(result,true);removed=properties(input)-properties(result);
+    // The carried volume belongs to this request's immediately preceding,
+    // validated shape. Non-destructive Boolean construction keeps that source
+    // immutable; no cross-request TopoDS cache or approximate mass is involved.
+    BRepAlgoAPI_Cut cut;{NativeProfileScope boolean("holes.cut.boolean");NCollection_List<TopoDS_Shape> arguments,tools;arguments.Append(input);tools.Append(cutter);cut.SetArguments(arguments);cut.SetTools(tools);cut.SetNonDestructive(true);cut.Build();}if(!cut.IsDone()||cut.HasErrors())throw std::runtime_error(label+": exact Boolean cut failed");
+    const auto result=cut.Shape();const V measured=shapeReport(result,true);const double resultVolume=need(measured,"volume_mm3").num;removed=currentVolume-resultVolume;
     if(!std::isfinite(removed)||removed<=1e-8)throw std::runtime_error(label+": cutter removes no positive material (outside, duplicate or inactive location)");
-    refs=propagated(refs,result,cut);return result;
+    currentVolume=resultVolume;refs=propagated(refs,result,cut);return result;
 }
 double holesForwardExtent(const std::array<double,6>& b,const gp_Pnt& p,const gp_Dir& d){
     double end=-1e300;for(int mask=0;mask<8;++mask){gp_Pnt corner(b[(mask&1)?3:0],b[(mask&2)?4:1],b[(mask&4)?5:2]);end=std::max(end,gp_Vec(p,corner).Dot(gp_Vec(d)));}
@@ -23,7 +26,7 @@ void holesBlindContainment(const TopoDS_Shape& source,const gp_Pnt& origin,const
     // Verify the full cylindrical wall/bottom is inside stock beyond the entry
     // plane. A flat-bottom blind hole cannot silently break out at a side/end.
     const double inset=std::min(1e-4,depth*.01);const auto body=BRepPrimAPI_MakeCylinder(gp_Ax2(origin.Translated(gp_Vec(direction)*inset),direction),radius,depth-inset).Shape();
-    BRepAlgoAPI_Common common(source,body);common.Build();if(!common.IsDone()||common.HasErrors())throw std::runtime_error("Hole "+name+": blind containment Boolean failed");
+    BRepAlgoAPI_Common common(source,body);if(!common.IsDone()||common.HasErrors())throw std::runtime_error("Hole "+name+": blind containment Boolean failed");
     const double wanted=properties(body),found=properties(common.Shape());if(wanted-found>std::max(1e-6,wanted*1e-8))throw std::runtime_error("Hole "+name+": blind cutter breaks out of exact source stock");
 }
 void holesSemanticRefs(const TopoDS_Shape& shape,const gp_Pnt& origin,const gp_Dir& direction,
@@ -47,15 +50,15 @@ void holesRequireNominalCylinder(const TopoDS_Shape& shape,const gp_Pnt& origin,
 
 V holesOrchestratorNative(const V& request){
     const V plan=ark::resolveHolesRecipe(request);const V& encoded=need(request,"input_brep");if(encoded.t!=V::Str)throw std::runtime_error("Holes Orchestrator input must be an exact native B-rep");
-    const TopoDS_Shape source=readBrep(encoded.str);shapeReport(source,true);TopoDS_Shape current=source;auto refs=inputRefs(request,"input_brep","input_topology",source);
-    const auto sourceBounds=bounds(source);const double sourceVolume=properties(source);V receipt=need(plan,"report"),locations=V::makeArr();const auto kind=word(plan,"kind"),termination=word(plan,"termination"),recess=word(plan,"recess");
+    const TopoDS_Shape source=readBrep(encoded.str);const V sourceReport=shapeReport(source,true);TopoDS_Shape current=source;auto refs=inputRefs(request,"input_brep","input_topology",source);
+    std::array<double,6> sourceBounds{};const auto& measuredBounds=need(sourceReport,"bounds_mm");for(size_t i=0;i<sourceBounds.size();++i)sourceBounds[i]=measuredBounds.arr[i].num;const double sourceVolume=need(sourceReport,"volume_mm3").num;double currentVolume=sourceVolume;V receipt=need(plan,"report"),locations=V::makeArr();const auto kind=word(plan,"kind"),termination=word(plan,"termination"),recess=word(plan,"recess");
     const bool shaft=kind=="groove_external",bore=kind=="groove_internal",groove=shaft||bore;
     for(const auto& location:need(plan,"points").arr){const auto name=word(location,"name");const gp_Pnt origin=point(need(location,"position"),"hole position"),directionPoint=point(need(location,"direction"),"hole direction");const gp_Dir axis(directionPoint.X(),directionPoint.Y(),directionPoint.Z());const std::string prefix="holes."+name;
         double removed=0;V evidence=V::makeObj();evidence.set("name",V::makeStr(name));evidence.set("position_mm",xyz(origin));evidence.set("direction",direction(axis));
         if(groove){const double nominal=positive(plan,"nominal_diameter"),diameter=positive(plan,"groove_diameter"),width=positive(plan,"groove_width");holesRequireNominalCylinder(current,origin,axis,nominal/2,prefix);
-            TopoDS_Shape cutter;if(shaft){const auto outer=BRepPrimAPI_MakeCylinder(gp_Ax2(origin,axis),nominal/2+1e-4,width).Shape(),inner=BRepPrimAPI_MakeCylinder(gp_Ax2(origin.Translated(gp_Vec(axis)*-1e-4),axis),diameter/2,width+2e-4).Shape();BRepAlgoAPI_Cut ring(outer,inner);ring.Build();if(!ring.IsDone()||ring.HasErrors())throw std::runtime_error(prefix+": analytic annular groove cutter failed");cutter=ring.Shape();}
+            TopoDS_Shape cutter;if(shaft){const auto outer=BRepPrimAPI_MakeCylinder(gp_Ax2(origin,axis),nominal/2+1e-4,width).Shape(),inner=BRepPrimAPI_MakeCylinder(gp_Ax2(origin.Translated(gp_Vec(axis)*-1e-4),axis),diameter/2,width+2e-4).Shape();BRepAlgoAPI_Cut ring(outer,inner);if(!ring.IsDone()||ring.HasErrors())throw std::runtime_error(prefix+": analytic annular groove cutter failed");cutter=ring.Shape();}
             else cutter=BRepPrimAPI_MakeCylinder(gp_Ax2(origin,axis),diameter/2,width).Shape();
-            current=holesCheckedCut(current,cutter,refs,prefix,removed);const double expected=3.14159265358979323846/4*std::abs(nominal*nominal-diameter*diameter)*width;
+            current=holesCheckedCut(current,cutter,refs,prefix,removed,currentVolume);const double expected=3.14159265358979323846/4*std::abs(nominal*nominal-diameter*diameter)*width;
             if(std::abs(removed-expected)>std::max(1e-5,expected*1e-7))throw std::runtime_error(prefix+": groove does not remove the complete declared circular band from nominal cylindrical stock");
             evidence.set("axial_width_mm",V::makeNum(width));evidence.set("complete_circular_band_checked",V::makeBool(true));holesSemanticRefs(current,origin,axis,diameter/2,prefix+".groove",refs);
         }else{
@@ -64,18 +67,18 @@ V holesOrchestratorNative(const V& request){
             // This fixed axial overtravel extends the tool outside stock. It
             // changes no Boolean tolerance and avoids a coincident entry cap.
             const double lead=1e-4;const auto cutter=BRepPrimAPI_MakeCylinder(gp_Ax2(origin.Translated(gp_Vec(axis)*-lead),axis),radius,depth+lead).Shape();
-            current=holesCheckedCut(current,cutter,refs,prefix,removed);double totalRemoved=removed;
+            current=holesCheckedCut(current,cutter,refs,prefix,removed,currentVolume);double totalRemoved=removed;
             if(recess!="none"){const double recessRadius=positive(plan,"recess_diameter")/2,recessDepth=positive(plan,"recess_depth");TopoDS_Shape counter;
                 if(recess=="counterbore")counter=BRepPrimAPI_MakeCylinder(gp_Ax2(origin.Translated(gp_Vec(axis)*-lead),axis),recessRadius,recessDepth+lead).Shape();
                 else{const double slope=(recessRadius-radius)/recessDepth;counter=BRepPrimAPI_MakeCone(gp_Ax2(origin.Translated(gp_Vec(axis)*-lead),axis),recessRadius+slope*lead,radius,recessDepth+lead).Shape();}
                 // Validate recess containment against the original stock, since
                 // the central bore is deliberately empty in the current result.
                 holesBlindContainment(source,origin,axis,recessRadius,recessDepth,name+" recess");
-                current=holesCheckedCut(current,counter,refs,prefix+"."+recess,removed);totalRemoved+=removed;
+                current=holesCheckedCut(current,counter,refs,prefix+"."+recess,removed,currentVolume);totalRemoved+=removed;
             }
             removed=totalRemoved;evidence.set("cut_extent_mm",V::makeNum(depth));evidence.set("entry_boundary_checked",V::makeBool(true));evidence.set("blind_stock_containment_checked",V::makeBool(termination=="blind"));holesSemanticRefs(current,origin,axis,radius,prefix,refs);
         }
         evidence.set("removed_volume_mm3",V::makeNum(removed));locations.arr.push_back(evidence);
     }
-    V result=finish(current,refs),report=need(result,"report");receipt.set("locations",locations);receipt.set("source_volume_mm3",V::makeNum(sourceVolume));receipt.set("removed_volume_mm3",V::makeNum(sourceVolume-properties(current)));receipt.set("exact_geometry",V::makeBool(true));receipt.set("source_linked",V::makeBool(true));receipt.set("body_discarded",V::makeBool(false));receipt.set("boolean_tolerance_changed",V::makeBool(false));receipt.set("sheet_flat_lineage",V::makeBool(false));receipt.set("scope",V::makeStr("one native solid; source-linked analytic hole/groove cuts; no manufacturing qualification, tapped-flank B-rep or sheet flat-pattern lineage"));report.set("holes_orchestrator",receipt);result.set("report",report);return result;
+    V result=finish(current,refs),report=need(result,"report");receipt.set("locations",locations);receipt.set("source_volume_mm3",V::makeNum(sourceVolume));receipt.set("removed_volume_mm3",V::makeNum(sourceVolume-currentVolume));receipt.set("exact_geometry",V::makeBool(true));receipt.set("source_linked",V::makeBool(true));receipt.set("body_discarded",V::makeBool(false));receipt.set("boolean_tolerance_changed",V::makeBool(false));receipt.set("sheet_flat_lineage",V::makeBool(false));receipt.set("scope",V::makeStr("one native solid; source-linked analytic hole/groove cuts; no manufacturing qualification, tapped-flank B-rep or sheet flat-pattern lineage"));report.set("holes_orchestrator",receipt);result.set("report",report);return result;
 }

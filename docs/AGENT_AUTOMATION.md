@@ -29,6 +29,11 @@ read-only; it is not an automatic completion, BOM or DFM step.
    history are unchanged.
 4. Execute `doc_apply` with the returned `apply` object. A changed revision
    rejects it. The preview is evidence, not a reservation or a transaction lock.
+   After an independent commit, read the current revision and explicitly request
+   `doc_preview{candidate_id,expected_revision}`. Supported unchanged scopes can
+   return a fresh candidate without resending commands. Inspect its new receipt
+   before applying; genuine conflicts and unsupported scopes require a fresh
+   recipe. See [candidate refresh](CANDIDATE_REFRESH_031B.md).
 
 Errors retain the existing text and revision and add `error_code`, `tool` and
 `stage`. Command parsing errors identify the zero-based `command_index` and

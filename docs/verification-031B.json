@@ -1,0 +1,225 @@
+{
+    "schema":  "ark.iteration-verification.v1",
+    "iteration_code":  "031B",
+    "version":  "0.9.32",
+    "verified_date":  "2026-10-16",
+    "base_commit":  "052476a3e3973bdf6f798fd7f54bd7980f241ac4",
+    "branch":  "feature/031b-modeling-agent-tools",
+    "working_tree_dirty":  true,
+    "source_digest":  "a4ef2cf37984b6a59492a4554c541042b35af7168119da806ea1ff5df055f5a0",
+    "source_digest_scope":  "Git-visible CMakeLists.txt, release.json and cmake/src/include/tests/assets bytes, sorted case-sensitively as path:sha256 joined by LF without trailing LF. Documentation, build outputs and external dependencies excluded. Does not independently attest compiler inputs.",
+    "source_inventory_path":  "out/native/source-inventory-031b.json",
+    "source_file_count":  460,
+    "milestones":  [
+                       "A.01",
+                       "A.03",
+                       "A.04",
+                       "B.02",
+                       "B.03",
+                       "B.04",
+                       "D.02",
+                       "D.04",
+                       "E.01"
+                   ],
+    "status":  "Verificado no escopo",
+    "platform":  "windows-x64",
+    "configuration":  "Release",
+    "compiler":  "LLVM-MinGW 20261006 UCRT x86_64",
+    "native_occt":  "8.0.1 pinned install",
+    "checks":  [
+                   {
+                       "name":  "native-full-final",
+                       "command":  "ctest --test-dir out/native --output-on-failure --parallel 2 --output-junit results-031b-finalsnapshot.xml",
+                       "passed":  123,
+                       "failed":  0,
+                       "elapsed_seconds":  108.33,
+                       "junit_path":  "out/native/results-031b-finalsnapshot.xml",
+                       "junit_sha256":  "f32a5fef41bcbd96b25802c67d487cb5e8054083bcbc1477a3696f811e3e7a21",
+                       "log_path":  "out/native/ctest-031b-finalsnapshot.log",
+                       "log_sha256":  "e892f440414f32c28a45f004ed21615e17fae80e91ba4bc98e2e735fd2a37a99"
+                   },
+                   {
+                       "name":  "portable-core-full",
+                       "command":  "ctest --test-dir out/core --output-on-failure --parallel 4 --output-junit results-031b-finalsnapshot.xml",
+                       "passed":  80,
+                       "failed":  0,
+                       "elapsed_seconds":  28.76,
+                       "junit_path":  "out/core/results-031b-finalsnapshot.xml",
+                       "junit_sha256":  "ef1ec4eebe1ba14697d506efa2222a271fdc832416568d1674f3f9501ee19ddf",
+                       "log_path":  "out/core/ctest-031b-finalsnapshot.log",
+                       "log_sha256":  "84be99b72257d154653b11c8c7332146169151a9fb84d284c6d3637005b891d4"
+                   }
+               ],
+    "artifacts":  [
+                      {
+                          "path":  "out/native/candidate-review/ark-studio.exe",
+                          "sha256":  "5cd0e6fc52e59f48f83576348cdde6d81b4eedd60bc8f9e376887807c46e73a8",
+                          "bytes":  15565824
+                      },
+                      {
+                          "path":  "out/native/candidate-review/ark-mcp.exe",
+                          "sha256":  "eac0a55213dfe2f9fc7719ac420ee767c9cee5545fb731332d6d5957414314e2",
+                          "bytes":  8846336
+                      },
+                      {
+                          "path":  "out/native/candidate-review/ark-occt-worker.exe",
+                          "sha256":  "dc5af10bb7616b30546c4b085f9f1486c607af93f9f1baf0ac78d3c88549e8c4",
+                          "bytes":  9397760
+                      },
+                      {
+                          "path":  "out/native/candidate-review/ark-solids-031b-tests.exe",
+                          "sha256":  "9a408c78833890f1e9acd140b87bdd5a3f69e2aa4d101351afec66e41cc18e01",
+                          "bytes":  10590720
+                      },
+                      {
+                          "path":  "out/native/candidate-review/ark-surfaces-031b-tests.exe",
+                          "sha256":  "276e74d54566bb9d9931fb4f79555577d6a8b2f2e3f388311681bf2f21c80f18",
+                          "bytes":  10583552
+                      },
+                      {
+                          "path":  "out/native/candidate-review/ark-meshes-031b-tests.exe",
+                          "sha256":  "8bed98eff1d874438fe9779ef842981692ae470a37b3ef285b9761157b52f91d",
+                          "bytes":  8891904
+                      },
+                      {
+                          "path":  "out/native/candidate-review/ark-contracts-031b-tests.exe",
+                          "sha256":  "05b79ce1944f00410bc9d79dae89ba135e93f52bbe57b22297ec2a3b3e38f04f",
+                          "bytes":  8883200
+                      },
+                      {
+                          "path":  "out/native/candidate-review/ark-assembly_sweep-031b-tests.exe",
+                          "sha256":  "62ffd9cd943a3dd383b6bc6b6e322431f9508697d161f773ed417de05974e0f4",
+                          "bytes":  8872960
+                      },
+                      {
+                          "path":  "out/native/candidate-review/ark-persistence-031b-tests.exe",
+                          "sha256":  "df06620d7839ce55cc10f9f7ddba1c04b30a56491847907adb9280894ec055d4",
+                          "bytes":  8821248
+                      },
+                      {
+                          "path":  "out/core/ark-mcp.exe",
+                          "sha256":  "a1c2b96632f332e674128f94ac3b6f6e0c31ad3c7504427f381e19708b83e23d",
+                          "bytes":  10354688
+                      },
+                      {
+                          "path":  "out/core/ark-meshes-031b-tests.exe",
+                          "sha256":  "08c44468a892e8c70513fa714ad1b35dbf8713f19ce0f04e94cb052231c0f08a",
+                          "bytes":  10401280
+                      },
+                      {
+                          "path":  "out/core/ark-contracts-031b-tests.exe",
+                          "sha256":  "25e32d264e7eb94ad94d087c4e3a8ac5af03748a3e2513b03ff933bfd14c14b3",
+                          "bytes":  10388992
+                      },
+                      {
+                          "path":  "out/core/ark-assembly_sweep-031b-tests.exe",
+                          "sha256":  "a761ca9d7408ff7c71cc4372d6ccd2d7efd6bafd06b5690acc9f65239aa711f7",
+                          "bytes":  8278016
+                      },
+                      {
+                          "path":  "out/core/ark-persistence-031b-tests.exe",
+                          "sha256":  "68662e26c551cdf6ca5ede9ad2754bacb2ef4b20ed7f722f072572c87e088875",
+                          "bytes":  10331136
+                      },
+                      {
+                          "path":  "out/native/candidate-review/ark-evaluation_performance-031b-tests.exe",
+                          "sha256":  "6536aa3b4e6ca34ba74bda5ddde98c79a4b08bad0daa7503da8908bf0947b712",
+                          "bytes":  8839680
+                      },
+                      {
+                          "path":  "out/core/ark-evaluation_performance-031b-tests.exe",
+                          "sha256":  "de0fbe9d02cd07f0ee465c9a6e05d5b918235fc3d6c1658922a110977a2c53e4",
+                          "bytes":  10338304
+                      },
+                      {
+                          "path":  "out/native/candidate-review/ark-container_snapshot-031b-tests.exe",
+                          "sha256":  "3a4691539e13bb4acf1af208871bd1584b63d574110b502301f80249f5b275ff",
+                          "bytes":  6782464
+                      },
+                      {
+                          "path":  "out/core/ark-container_snapshot-031b-tests.exe",
+                          "sha256":  "49d29f25f7d4516299b3aa7b41d9a69631bd5d184da4c0703caa7503e97458b8",
+                          "bytes":  8296448
+                      },
+                      {
+                          "path":  "out/native/candidate-review/ark-persisted_geometry-031b-tests.exe",
+                          "sha256":  "aca4d659e5828c2a5cce2a45eeb856e86316a5dc5631bac31390b9fef6dbd1d6",
+                          "bytes":  8885248
+                      },
+                      {
+                          "path":  "out/core/ark-persisted_geometry-031b-tests.exe",
+                          "sha256":  "d4d281a0bbe0450462edab19301e78fcc7839ff49f840d0a0b3eb7fea2a40470",
+                          "bytes":  10340352
+                      },
+                      {
+                          "path":  "out/native/candidate-review/ark-native_snapshot-031b-tests.exe",
+                          "sha256":  "d226f6646b7869e8eb47e9e6199c14a3287c86dd83cfc3df9fc12218134dc194",
+                          "bytes":  8681472
+                      },
+                      {
+                          "path":  "out/native/candidate-review/ark-native_cache-031b-tests.exe",
+                          "sha256":  "9bbdd8690a007cdca1278d504edccbab5bac9177404a57feeec628c8729b7390",
+                          "bytes":  6798848
+                      },
+                      {
+                          "path":  "out/native/candidate-review/ark-occt_profile-031b-tests.exe",
+                          "sha256":  "90e53eab749aa63c6899c2c14963156a0c0eb353477607f8a28ab0de74688630",
+                          "bytes":  8612864
+                      },
+                      {
+                          "path":  "out/native/candidate-review/ark-candidate_refresh-031b-tests.exe",
+                          "sha256":  "0496f2efda423d61ba7baf5166eb443635e8bdb7e203dcbe5ab0185744413dc2",
+                          "bytes":  8898048
+                      },
+                      {
+                          "path":  "out/core/ark-candidate_refresh-031b-tests.exe",
+                          "sha256":  "3fca4c7ebbd3b005ed686c29ed2c843994c52b56f30d8d6023a1d6f0487fc1f8",
+                          "bytes":  10387968
+                      },
+                      {
+                          "path":  "out/native/candidate-review/ark-agent-team-tests.exe",
+                          "sha256":  "608ceec36b056d1eb53b2176453a11d22c881a789cb736bd572ddddaf53a115d",
+                          "bytes":  9866240
+                      },
+                      {
+                          "path":  "out/core/ark-agent-team-tests.exe",
+                          "sha256":  "c522136afdeb06caef1442dc9705137b0c792ab2130c2e0bc34d5c05b8cbd5a5",
+                          "bytes":  11371008
+                      }
+                  ],
+    "artifact_hashes_checked_after_full_suite":  true,
+    "studio_live_enabled":  false,
+    "failed_attempts":  [
+                            "Surface test compilation collided with the Windows near macro; the fixture helper was renamed before runtime validation.",
+                            "Split-lineage runtime regression exposed null-typed reference metadata omitting split_into; explicit object initialization restored the real lineage and repeat-split namespace regressions now pass.",
+                            "Mesh regression exposed a legacy closed-tetrahedron collapse into two opposing triangles; candidate acceptance now preserves signed volume, orientation and manifold vertex fans. Minimal protected meshes explicitly report an unmet reduction target.",
+                            "A curved plate G2 request failed independently measured curvature 0.001684/mm against 0.0001/mm; tighter fitting also failed position acceptance. A supported exact Bezier strip passes the same checks; general plate cases still reject failed measurements.",
+                            "Continuous circular-law sweep exposed unmatched analytic cap/fitted rim topology. Shared fitted rim edges, two-way sampled agreement to authored end profiles and closed-shell checks resolved it without raising tolerance.",
+                            "Source/persistence fixtures initially used wrong error classifications and unsupported JSON mutation helpers; corrected fixtures exercise actual source43, undo/redo, revision and atomic rollback contracts.",
+                            "Initial full native run passed 114/116 in 89.50s. Appearance fixture still marked newly supported source43 as future; changed it to unsupported source44. Final complete run passes.",
+                            "The other initial full-suite failure was a Windows File.Replace error in ota-updates. No updater source was changed; two isolated repetitions passed (4.29s,3.72s), followed by the complete final run. The initial I/O failure remains recorded.",
+                            "The pinned Windows SDK did not expose BCryptHash; native SHA-256 uses BCryptCreateHash/HashData/FinishHash with equivalence checks against the portable implementation.",
+                            "Portable restoration initially missed after authoring reload because unordered object fields produced different request bytes. Canonical object ordering now preserves request identity while retaining array and numeric values; reordered request and isolated-cache persistence regressions pass.",
+                            "The container migration fixture initially compared incidental JSON object order; it now compares canonical typed authoring payloads.",
+                            "Exploratory faster geometric integration candidates did not preserve required numerical results and were not adopted. Production algorithms and tolerances remain unchanged.",
+                            "Chained snapshot validation exposed producer face descriptors derived from propagated entity orientation instead of the emitted result index. Producer descriptors now use the actual result entity, while invalid live descriptors still reject. An initial new fixture confused an absent inactive descriptor with explicit null; the corrected cases test both forms separately.",
+                            "A custody review found process-global staged snapshots could survive candidate failure or be consumed by another document with a matching request. Pending payloads now belong to the candidate document and activate through scoped thread-local contexts propagated to its feature jobs; isolation regressions cover legacy loads, failed candidates and parallel evaluation.",
+                            "The first candidate-refresh build could not overwrite native executables used by an open Studio session. Runtime output was redirected to an isolated candidate-review directory; the user session was preserved.",
+                            "Initial refresh dimension assertions exposed existing legacy analytic-box bound differences. Portable checks now measure the actual watertight tessellation with unchanged expected dimensions; native positive fixtures independently verify exact kernel volumes and retained B-reps.",
+                            "Independent refresh review found hidden sketch/datum ancestry and replacement-import custody gaps before source freeze. Named geometry ancestry now conservatively retains every feature definition; replacement imports clear prepared custody while append imports retain the ordinary-commit contract.",
+                            "The first complete candidate-refresh run passed 80/80 portable in 27.49s and 122/123 native in 106.70s. The new append-import fixture compared JSON object insertion order; it now compares canonical typed source-package bytes, exact source identity and immutable geometry ownership. Parameter-removal and repeated-target refresh recipes also fail closed with dedicated regressions."
+                        ],
+    "limits":  [
+                   "Local synthetic geometry/document/tool integration, with a read-only code review; no live-provider design-quality, cost or performance comparison claim.",
+                   "Variable fillets initially support one straight semantic edge; support-bound solid recipes use planar faces and the documented containment domains.",
+                   "G1/G2 evidence uses native derivative checkpoints, not a global between-sample certificate. Continuous twist/scale target laws currently require a straight single-edge spine; actual B-rep sweep fits and end profiles retain measured error scope.",
+                   "Remesh is conforming protected midpoint refinement. Simplification deviation uses bidirectional finite samples, not a global Hausdorff bound. Diagnostic capacity exhaustion rejects.",
+                   "Assembly inspection measures requested static poses only. Cable-to-declared-obstacle checks use exact swept cables against conservative world AABBs; no continuous clearance, dynamics or original obstacle-shape qualification.",
+                   "Portable tests explicitly skip unavailable OCCT geometry scopes. Studio was built, but live desktop tests were not enabled; no UI-change or screenshot evidence is claimed.",
+                   "No private drawings or sessions are included in source fixtures or this receipt. No merge, deployment, published package, signing, OTA transport or manufacturing qualification is established.",
+                   "Physical container v2 carries optional native OCCT B-rep and reference metadata, without STEP or display meshes. Authored source versions remain independent; binary v1 is readable and explicit JSON exports remain source-only.",
+                   "Document-carried geometry is validated on matching requests. Its saved shape is not evidence that its authored derivation was replayed. Unsupported requests, producer changes, corruption and changed inputs follow reconstruction.",
+                   "Local native result reuse is enabled on Windows with measured executable and adjacent DLL custody. Portable-core checks do not establish equivalent dependency custody on other platforms. No universal five-second opening or reconstruction threshold is established.",
+                   "Explicit candidate refresh covers audited feature.add/edit recipes without postconditions. It conservatively compares non-feature authoring and every feature for named sketch/datum ancestry. Unsupported scopes and genuine conflicts require a fresh recipe; no silent rebase, partial commit, provider token-saving or live-provider concurrency benefit is claimed."
+               ]
+}

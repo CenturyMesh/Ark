@@ -41,6 +41,7 @@ public:
     void observeBomInspection(const arkjson::Value& bom);
     static arkjson::Value tools(bool detailed=false);
     arkjson::Value preparePreview(const arkjson::Value& args);
+    arkjson::Value preparedRecipe(const std::string& id) const;
     arkjson::Value proposeManufacturing(const arkjson::Value& args);
     arkjson::Value commitPrepared(const arkjson::Value& args);
     arkjson::Value snapshotCandidate(const arkjson::Value& args);
@@ -69,6 +70,8 @@ private:
         u64 revision=0;
         std::shared_ptr<Document> document;
         arkjson::Value result;
+        arkjson::Value recipe,readScope;
+        std::string refreshUnsupported;
         std::chrono::steady_clock::time_point expires;
         size_t bytes=0;
         bool metadataOnly=false;

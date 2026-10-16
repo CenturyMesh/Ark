@@ -16,25 +16,55 @@
 #include <iostream>
 #include <stdexcept>
 #ifdef _WIN32
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
+#ifdef NONLS
+#undef NONLS
+#endif
 #include <windows.h>
+#include <tlhelp32.h>
+#include <winnls.h>
+#include <stringapiset.h>
 #endif
 using namespace ark::occt;
 #include "../occt/cad_import.inl"
-int runWorker(const fs::path& requestPath,const fs::path& resultPath){
-
+namespace {
+bool nativeCacheProducerLocal() noexcept{
+#ifdef _WIN32
     try{
-        V request;if(!arkjson::parse(readFile(requestPath),request)||request.t!=V::Obj)throw std::runtime_error("Invalid native worker request");
+        std::wstring executable(32768,L'\0'),windowsDirectory(32768,L'\0');const DWORD executableLength=GetModuleFileNameW(nullptr,executable.data(),(DWORD)executable.size()),windowsLength=GetWindowsDirectoryW(windowsDirectory.data(),(UINT)windowsDirectory.size());
+        if(!executableLength||executableLength>=executable.size()||!windowsLength||windowsLength>=windowsDirectory.size())return false;executable.resize(executableLength);windowsDirectory.resize(windowsLength);
+        const auto producer=fs::canonical(fs::path(executable)).parent_path();const auto system=fs::canonical(fs::path(windowsDirectory)).wstring();
+        HANDLE snapshot=CreateToolhelp32Snapshot(TH32CS_SNAPMODULE|TH32CS_SNAPMODULE32,GetCurrentProcessId());if(snapshot==INVALID_HANDLE_VALUE)return false;
+        struct CloseSnapshot{HANDLE handle;~CloseSnapshot(){CloseHandle(handle);}} close{snapshot};MODULEENTRY32W entry{};entry.dwSize=sizeof(entry);if(!Module32FirstW(snapshot,&entry))return false;
+        do{
+            const auto module=fs::canonical(fs::path(entry.szExePath));const auto path=module.wstring();
+            const bool windows=path.size()>system.size()&&(path[system.size()]==L'\\'||path[system.size()]==L'/')&&CompareStringOrdinal(path.c_str(),(int)system.size(),system.c_str(),(int)system.size(),TRUE)==CSTR_EQUAL;
+            if(windows)continue;const auto directory=module.parent_path().wstring(),expected=producer.wstring();if(CompareStringOrdinal(directory.c_str(),-1,expected.c_str(),-1,TRUE)!=CSTR_EQUAL)return false;
+        }while(Module32NextW(snapshot,&entry));return GetLastError()==ERROR_NO_MORE_FILES;
+    }catch(...){return false;}
+#else
+    return false;
+#endif
+}
+}
+int runWorker(const fs::path& requestPath,const fs::path& resultPath){
+    NativeProfileRequest profile;
+    try{
+        V request;{NativeProfileScope read("request.read_parse");if(!arkjson::parse(readFile(requestPath),request)||request.t!=V::Obj)throw std::runtime_error("Invalid native worker request");}
         if(const auto* threads=request.find("native_threads")){if(threads->t!=V::Num||threads->num!=std::floor(threads->num)||threads->num<1||threads->num>64)throw std::runtime_error("Invalid native request thread budget");configureNativeThreadBudget((int)threads->num);}
         auto field=[&](const char* name)->const V&{auto p=request.find(name);if(!p)throw std::runtime_error(std::string("Missing native field: ")+name);return *p;};
         auto text=[&](const char* name){auto& p=field(name);if(p.t!=V::Str||p.str.empty())throw std::runtime_error(std::string("Invalid native string: ")+name);return p.str;};
-        auto op=text("operation");V result;
+        auto op=text("operation");V result;bool completedByProducer=false;std::string modelOperation;if(const auto* model=request.find("request"))if(const auto* selected=model->find("op");selected&&selected->t==V::Str)modelOperation=selected->str;profile.operation(op,modelOperation);
+        {NativeProfileScope dispatch("dispatch");
         if(op=="import_tube")result=importSourceTubeNative(text("source_path"),text("cache_directory"));
         else if(op=="export_tube")result=exportSourceTubeNative(field("package"),text("path"));
         else if(op=="export_notch")result=exportNotchNative(field("plan"),text("path"));
-        else if(op=="model")result=modelSurfaceNative(field("request"));
+        else if(op=="restore_native_result"){result=restoreNativeResult(field("resolved_request"),field("saved_result"));completedByProducer=true;}
+        else if(op=="model"){result=modelSurfaceNative(field("request"));completedByProducer=true;}
         else if(op=="model_sheet")result=modelSheetNative(field("request"));
-        else if(op=="model_solid"){const auto& model=field("request");result=model.find("op")&&model.find("op")->asStr()=="imported_cad"?modelImportedCadNative(model):modelSolidNative(model);}
+        else if(op=="model_solid"){const auto& model=field("request");result=model.find("op")&&model.find("op")->asStr()=="imported_cad"?modelImportedCadNative(model):modelSolidNative(model);completedByProducer=modelOperation!="tube_end_fit";}
         else if(op=="inspect_imported_cad")result=inspectImportedCadNative(request);
         else if(op=="inspect_cad")result=inspectCadNative(request);
         else if(op=="import_cad")result=importCadNative(request);
@@ -91,9 +121,10 @@ int runWorker(const fs::path& requestPath,const fs::path& resultPath){
             auto before=bounds(shape),after=bounds(returned);double boundError=0;for(int i=0;i<6;++i)boundError=std::max(boundError,std::abs(before[i]-after[i]));double areaError=std::abs(properties(shape,'a')-properties(returned,'a'));
             if(error>tol||boundError>1e-6||areaError>std::max(1e-6,properties(shape,'a')*1e-8)||shapes(shape,TopAbs_SOLID).size()!=shapes(returned,TopAbs_SOLID).size())throw std::runtime_error("STEP roundtrip changed native geometry");
             result=shapeReport(returned,false);for(const auto& body:shapes(returned,TopAbs_SOLID))shapeReport(body,true);replaceFile(pending,path);result.set("step_roundtrip_difference_mm3",solid?V::makeNum(error):V{});result.set("step_roundtrip_area_error_mm2",V::makeNum(areaError));result.set("step_roundtrip_bounds_error_mm",V::makeNum(boundError));result.set("step_sha256",V::makeStr(sha256(readFile(path))));result.set("path",V::makeStr(text("path")));auto sidecar=path;sidecar.replace_extension(".validation.json");writeFile(sidecar,result.dump());
-        }else throw std::runtime_error("Unknown native worker operation");
-        result=completeSelectionReferences(std::move(result));
-        writeFile(resultPath,result.dump());return 0;
+        }else throw std::runtime_error("Unknown native worker operation");}
+        if(!completedByProducer){NativeProfileScope complete("worker.complete_selection");result=completeSelectionReferences(std::move(result));}
+        if(const char* cache=std::getenv("ARK_NATIVE_RESULT_CACHE");!cache||std::string(cache)!="0"){NativeProfileScope provenance("worker.producer_local");result.set("native_cache_producer_local",V::makeBool(nativeCacheProducerLocal()));}
+        std::string response;{NativeProfileScope encode("response.serialize");response=result.dump();}{NativeProfileScope write("response.write");writeFile(resultPath,response);}profile.succeeded();return 0;
     }catch(const Standard_Failure& e){V error=V::makeObj();error.set("error",V::makeStr(e.GetMessageString()?e.GetMessageString():"OCCT failure"));writeFile(resultPath,error.dump());std::cerr<<error.dump()<<'\n';return 1;}
     catch(const std::exception& e){V error=V::makeObj();error.set("error",V::makeStr(e.what()));writeFile(resultPath,error.dump());std::cerr<<error.dump()<<'\n';return 1;}
 }
