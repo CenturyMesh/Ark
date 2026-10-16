@@ -118,7 +118,7 @@ endforeach()
 if(WIN32)
   enable_language(RC)
   target_link_libraries(ark PUBLIC advapi32 winhttp bcrypt crypt32 ws2_32 shell32 ole32 windowscodecs)
-  add_executable(ark-studio WIN32 src/view/viewer.cpp src/view/app_icon.rc)
+  add_executable(ark-studio WIN32 src/view/viewer.cpp src/view/accessibility_guids.cpp src/view/app_icon.rc)
   if(MSVC)
     # Studio includes the native authoring controls in one translation unit.
     # MSVC Release builds can exceed the standard COFF section count.
