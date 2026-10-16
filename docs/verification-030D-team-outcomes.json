@@ -1,0 +1,144 @@
+{
+  "schema": "ark.team-outcome-verification.v1",
+  "iteration_code": "030D",
+  "version": "0.9.31",
+  "runtime_source_commit": "41e5b6a3d833c474c17e4725425052aba45f8927",
+  "baseline_commit": "df615d7e5a779f9389f4529edbc6ba3d873e03f1",
+  "milestones": {
+    "A.03": "Parcial",
+    "D.02": "Parcial",
+    "D.04": "Parcial"
+  },
+  "platform": "windows-x64",
+  "configuration": "Release",
+  "scope": "Synthetic offline team reports and Windows controls. No user drawing, supplier URL, live provider history or user-session replay is an input.",
+  "source_inputs": [
+    {
+      "path": "CMakeLists.txt",
+      "sha256": "49a4fb8f241e3f56d1b075a1e25da6568115ace5d50d250ae17e83ba7a4ac444"
+    },
+    {
+      "path": "include/ark/agent_team.hpp",
+      "sha256": "e1dfe698495c0f7fd760b1bc6028cd761f1d38cfa0ca4d1facca6de74b29b0df"
+    },
+    {
+      "path": "src/agent_team.cpp",
+      "sha256": "0703650a9abef66f6cb02505a49645d4477f2dbef62085764688f273a0feddb3"
+    },
+    {
+      "path": "src/view/viewer.cpp",
+      "sha256": "307433013b67cefeea771ba88b1da12e37b2604232e0a2275eadb581dbf6afc8"
+    },
+    {
+      "path": "src/view/team_diagnostics.inl",
+      "sha256": "b0068ad80abda424dbefdc3682ae1abba8605cb5166161fc280425b31271b143"
+    },
+    {
+      "path": "src/view/team_blockers_selftest.inl",
+      "sha256": "f4ffb8c60d89a99348b95d2062d47b27bad80dcb8596abf2d1eecae41bd8cfde"
+    },
+    {
+      "path": "tests/agent_team_tests.cpp",
+      "sha256": "d977deea909d77a4da0937ed2e6ffa5dfbedb3cd16404b01ec37c44a87cf9467"
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "out/native-release/Release/ark-studio.exe",
+      "sha256": "4a92a1ba5ed774a1930afa686a7581055dd191cd04af8bfbf15a25098edf1f44",
+      "bytes": 11020288
+    },
+    {
+      "path": "out/native-release/Release/ark-mcp.exe",
+      "sha256": "4b519503512531377d5e5a9ed3abe30ff56b23a7b9e2e4ac1209ca7654b11f27",
+      "bytes": 5494272
+    },
+    {
+      "path": "out/native-release/Release/ark-occt-worker.exe",
+      "sha256": "32514f63e0f0e2b42a5595670f8df03f65485e26e15c5dc24347b42e4c969782",
+      "bytes": 2976768
+    },
+    {
+      "path": "out/native-release/Release/ark-agent-team-tests.exe",
+      "sha256": "17fc79cdad08dc9cce90dcc5fc4fbba867b92cbe23d667674d9c7a5c8f7f61d3",
+      "bytes": 6482944
+    }
+  ],
+  "checks": [
+    {
+      "name": "native-agent-team",
+      "checks": 356,
+      "passed": true,
+      "log": "out/native-release/team-stop-fixed.log"
+    },
+    {
+      "name": "portable-core-agent-team",
+      "command": "ctest --test-dir out/core -C Release -R ^agent-team$ --output-on-failure --output-junit team-outcomes-core.xml",
+      "passed": 1,
+      "failed": 0,
+      "elapsed_seconds": 1.93,
+      "junit_sha256": "a6c61649fbc75e0eca5db11774a1fea6f8179277cebbec681fa803e4ad31ef28"
+    },
+    {
+      "name": "native-blocker-controls",
+      "command": "ctest --test-dir out/native-release -C Release -R ^studio-team-blockers-ui --output-on-failure",
+      "passed": 2,
+      "failed": 0,
+      "elapsed_seconds": 1.35,
+      "scope": "1280x800 and 1366x800 Studio; native inspector read-only, refresh, title, 640x480 resize, exact input report, real model-worker busy pump and inspector close without Studio shutdown or provider continuation."
+    },
+    {
+      "name": "full-native-and-studio",
+      "source_commit": "41e5b6a3d833c474c17e4725425052aba45f8927",
+      "command": "ctest --test-dir out/native-release -C Release --parallel 2 --output-on-failure --output-junit team-outcomes-native.xml",
+      "studio_live_enabled": true,
+      "passed": 156,
+      "failed": 0,
+      "elapsed_seconds": 274.58,
+      "junit_path": "out/native-release/team-outcomes-native.xml",
+      "junit_sha256": "4f25f3fbbb139538263dd769498cda8ae6aeb4729a7ffc3632b5d394be806355",
+      "log_path": "out/native-release/team-outcomes-native.log",
+      "log_sha256": "0f9e3a3d054e49a1cbf34c4744e42306174e0011b2a4fdd13f1ea83980f4038f",
+      "source_and_artifact_hashes_unchanged_after_suite": true
+    }
+  ],
+  "inspected_captures": [
+    {
+      "path": "docs/images/030D/team-input.png",
+      "sha256": "65daefc2f31e4ecaade7af26bd3921dd80bfe2f21310b555b1a154e792b64a50"
+    },
+    {
+      "path": "docs/images/030D/team-blockers.png",
+      "sha256": "df9f036a5d43c078cad7d4c50cd9aeb33766a87d1206952899b5c1c809c7c546"
+    }
+  ],
+  "failed_attempts": [
+    {
+      "stage": "regression on original runtime source plus the new test",
+      "result": "Failed: explicit needs_input survives a retained tool rejection without pretending the provider was interrupted.",
+      "log": "out/native-release/team-stop-repro.log"
+    },
+    {
+      "stage": "initial UI fixture",
+      "result": "The source-invariance assertion sampled before synthetic provider usage bookkeeping settled. The fixture now samples after pollTeam and checks only subsequent diagnostic actions.",
+      "log": "out/native-release/ui-checks/team-blockers-probe.png.failure.txt"
+    },
+    {
+      "stage": "native capture inspection",
+      "result": "Found a missing inspector title; default WM_NCCREATE processing was restored and a title assertion added. A readable Segoe UI font and minimum size were added before accepted verification."
+    }
+  ],
+  "limits": [
+    "A correct needs_input report is not design completion and does not supply missing engineering/source information.",
+    "Completed-goal rejection, expected_revision, atomicity and interruption/cancellation guards remain in effect.",
+    "UI polling copies counts; explicit diagnostic inspection copies at most eight compact tool failures per role and no provider history.",
+    "No public package, running-session replacement or OTA activation is performed."
+  ],
+  "distribution_qualified": false,
+  "baseline_hosted_ci": {
+    "commit": "df615d7e5a779f9389f4529edbc6ba3d873e03f1",
+    "url": "https://github.com/CenturyMesh/Ark/actions/runs/38799990905",
+    "jobs_passed": 4,
+    "scope": "Before the team-outcome changes. Current-source hosted CI is separate."
+  }
+}

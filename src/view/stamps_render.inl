@@ -16,7 +16,17 @@ static GLuint stampAssetTexture(const std::string& name){
     GLuint id=0;glGenTextures(1,&id);glBindTexture(GL_TEXTURE_2D,id);glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,(GLsizei)asset->width,(GLsizei)asset->height,0,GL_RGBA,GL_UNSIGNED_BYTE,pixels.data());
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);textures.push_back({asset->sha256,id});return id;
 }
+static double emissionLevel030(const Appearance& a,double seconds){
+    const double cycle=seconds/a.emissionPeriod;
+    return a.emissionIntensity*(a.emissionEffect=="pulse"?.5-.5*std::cos(cycle*6.283185307179586):a.emissionEffect=="blink"?(cycle-std::floor(cycle)<.5?1.:0.):1.);
+}
+static void setEmission030(const Appearance& a){
+    glUniform3f(glGetUniformLocation(pSolid,"emissionColor"),(float)a.emissionColor.x,(float)a.emissionColor.y,(float)a.emissionColor.z);
+    glUniform1f(glGetUniformLocation(pSolid,"emissionIntensity"),(float)emissionLevel030(a,GetTickCount64()*.001));
+    glUniform1f(glGetUniformLocation(pSolid,"emissionBloom"),(float)a.bloom);glUniform1f(glGetUniformLocation(pSolid,"emissionGlow"),(float)a.glow);
+}
 static void setSurfaceAppearance024(const Appearance& a){
+    setEmission030(a);
     glUniform3f(suColor,(float)a.baseColor.x,(float)a.baseColor.y,(float)a.baseColor.z);
     glUniform1f(glGetUniformLocation(pSolid,"metallic"),(float)a.metallic);glUniform1f(glGetUniformLocation(pSolid,"roughness"),(float)a.roughness);glUniform1f(glGetUniformLocation(pSolid,"opacity"),(float)a.opacity);
     glUniform2f(glGetUniformLocation(pSolid,"textureScale"),(float)(a.textureScaleU/100.),(float)(a.textureScaleV/100.));

@@ -214,7 +214,7 @@ V numericNative(const V& value, const ExprEnv& env, const std::string& key = {})
         return value;
     }
     if (value.t == V::Str) {
-        if (key == "source_vertex" || key == "source_topology" || key == "kind" || key == "join" || key == "sketch" || key == "name" || key == "op" || key == "reference" || key == "second_reference" || key == "mode" || key == "end" || key == "edges" || key == "faces" || key == "face" || key == "source_face" || key == "limit_face" || key == "plane" || key == "keep" || key == "selection" || key == "direction" || key == "axis" || key == "neutral") return value;
+        if (key == "grain_axis" || key == "source_vertex" || key == "source_topology" || key == "kind" || key == "join" || key == "sketch" || key == "name" || key == "op" || key == "reference" || key == "second_reference" || key == "mode" || key == "end" || key == "edges" || key == "faces" || key == "face" || key == "source_face" || key == "limit_face" || key == "plane" || key == "keep" || key == "selection" || key == "direction" || key == "axis" || key == "neutral") return value;
         return V::makeNum(expressionValue(value.str, env));
     }
     if (value.t == V::Arr) {
@@ -825,6 +825,7 @@ V solidFeatureRequest(const Feature& feature, const ExprEnv& env,
         if (!sourceFace && !model.find("profile")) model.set("profile", profileFromSketch(document, feature.get("sketch")));
         if (mode == "distance" && model.find("limit_face")) throw std::runtime_error("Distance extrusion cannot retain an inactive limit face");
     }
+    if((op=="wood"&&!feature.inputs.empty())||(op=="vent"&&feature.inputs.size()>1))throw std::runtime_error("Wood needs no input; vent accepts at most one exact local XY stock input");
     if (op == "hole") {
         if (const V* source = model.find("cutter")) {
             V cutter = *source;

@@ -549,12 +549,16 @@ V meshToPayload(const Mesh& mesh) {
     return payload;
 }
 
+#include "mesh_net.inl"
+
 Body evaluateMeshFeature(const Feature& feature, const ExprEnv& env, const std::vector<Body>& preceding,
                          const TessOptions& tessellation) {
     bool sampled = false;
     Mesh mesh;
     const char* operation = featureTypeName(feature.type);
-    if (feature.type == FeatureType::MeshBody) {
+    if (feature.type == FeatureType::MeshNet) {
+        mesh=authoredMeshNet(feature,env);
+    } else if (feature.type == FeatureType::MeshBody) {
         mesh = meshFromPayload(feature.sourceData);
         operation = "mesh_body";
     } else {
@@ -586,8 +590,9 @@ Body evaluateMeshFeature(const Feature& feature, const ExprEnv& env, const std::
     }
     if (!mesh.triCount()) throw std::runtime_error("Mesh feature produced no triangles");
     const MeshReport after = analyzeMesh(mesh);
+    if(feature.type==FeatureType::MeshNet&&(after.invalidIndices||after.nonFiniteVertices||after.degenerateTriangles||after.inconsistentEdges||after.nonManifoldEdges||after.boundaryEdges))throw std::runtime_error("mesh_net cannot represent the requested dimensions as valid capped triangle strands");
     Body body;
-    V report = modelReport(operation, feature.type == FeatureType::MeshBody ? after : analyzeMesh(inputMesh(feature, env, preceding, tessellation, sampled)), after, sampled);
+    V report = modelReport(operation, (feature.type == FeatureType::MeshBody || feature.type == FeatureType::MeshNet) ? after : analyzeMesh(inputMesh(feature, env, preceding, tessellation, sampled)), after, sampled);
     if (feature.type == FeatureType::MeshBody) {
         report.set("input_vertices", number((double)after.vertices));
         report.set("input_triangles", number((double)after.triangles));

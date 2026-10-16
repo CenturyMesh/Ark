@@ -123,7 +123,7 @@ Checkout makeCheckout(const Document& doc,u64 revision,u64 group,bool legacy=fal
     // Load selection belongs to this independent workspace. Parent selection is
     // source-hashed and never receives a child's visibility/evaluation scope.
     V localRoots=V::makeArr();localRoots.arr.push_back(number(group));checkout.root.set("assembly_load_selection",localRoots);
-    checkout.root.set("version",number(41));
+    checkout.root.set("version",number((u64)std::max(41.,field(checkout.root,"version").asNum())));
     }
     erase(checkout.root,"drawings");erase(checkout.root,"canvases");erase(checkout.root,"skeleton");
     // No audit pointer/usage/history crosses documents. The child session starts

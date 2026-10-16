@@ -9,6 +9,10 @@ current release claim. [release.json](../release.json) owns application identity
 
 | Guide | Read it when |
 |---|---|
+| [030D tools and viewport agents](PRODUCT_TOOLS_030D.md) | You need Light up, Wood, nets, vents, live activity or the incremental binary loop |
+| [030D realtime pipeline](REALTIME_030D.md) | You need local agent/tool/viewport ownership, queue scheduling and matched latency evidence |
+| [030D team outcomes and blockers](TEAM_OUTCOMES_030D.md) | A team requests input or stops; distinguish declared outcomes, rejected tools and actual interruption |
+| [030D verification](VERIFICATION_030D.md) | You need frozen-source hashes, native/core/UI evidence, retained failures and distribution limits |
 | [029B scope and verification](iterations/029B.md) | You need the current A/B implementation boundaries and fresh local evidence |
 | [Trust foundation](TRUST_FOUNDATION.md) | You need recovery, regression corpora, performance receipts or release inventories/SBOM |
 | [History and configuration authoring](CAD_AUTHORING_FOUNDATION.md) | You need stable-ID reorder/rollback, configurations, selective evaluation or external-source pins |

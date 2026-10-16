@@ -1,5 +1,23 @@
 # ARK agent protocol
 
+030D adds Wood, mesh networks, exact vents and Light up. Load
+`agent_onboard{topic:"wood"|"networks"|"lighting"}` and read the
+[contracts](PRODUCT_TOOLS_030D.md). `wood_inspect` reports authored stock and BOM
+quantities. New persisted recipes conditionally select source42; retain observed
+revisions, exact face custody and atomic writes. Emission and spatial agent
+markers are viewport display, with no manufacturing or speedup claim.
+
+The [030D realtime pipeline](REALTIME_030D.md) keeps document writes serialized
+and revision-bound while yielding normal dispatch to rendering after publication
+or an eight-millisecond UI slice. Local measurements separate queue, capture and
+worker time. This adds no agent budget and makes no inference-speed claim.
+
+[Team outcome reporting](TEAM_OUTCOMES_030D.md) retains explicit `needs_input`
+when a tool was rejected. Review blockers is a read-only UI inspection, without
+provider continuation or CAD writes. Unresolved failures still block completed
+goal acceptance; cancellation and actual interruption retain distinct states.
+
+
 029B discovers **95 standalone tools**: the 028D tool set plus read-only
 `feature_history{}`, `assembly_authoring_info{}` and revision-bound
 `sketch_repair{name,sketch?,expected_revision}`. Read

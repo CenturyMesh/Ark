@@ -1,0 +1,113 @@
+{
+  "schema": "ark.iteration-verification.v1",
+  "iteration_code": "030D",
+  "version": "0.9.31",
+  "runtime_source_commit": "d841714c526c35a76b8c909b40e4bff0e3e629bd",
+  "base_commit": "641c488922fa8feca080d24aabd98726a68c40b4",
+  "source_digest": "e906637510ace8e22fdd7aa1ea1f4906ddc63b78b7d664ab0b5de991d9c64cdd",
+  "milestones": [
+    "A.01",
+    "A.03",
+    "A.04",
+    "B.01",
+    "B.02",
+    "B.03",
+    "C.01",
+    "C.03",
+    "D.02",
+    "D.04",
+    "E.01",
+    "F.03"
+  ],
+  "platform": "windows-x64",
+  "configuration": "Release",
+  "checks": [
+    {
+      "name": "native-and-studio-full",
+      "command": "ctest --test-dir out/native-release -C Release --parallel 2 --output-on-failure --output-junit regression-030d-d841714.xml",
+      "studio_live_enabled": true,
+      "passed": 153,
+      "failed": 0,
+      "elapsed_seconds": 259.32
+    },
+    {
+      "name": "portable-core-focused",
+      "command": "ctest --test-dir out/core -C Release -R ^product-tools-030d$ --output-on-failure",
+      "with_occt": false,
+      "passed": 1,
+      "failed": 0,
+      "elapsed_seconds": 0.14
+    },
+    {
+      "name": "dev-build-receipt",
+      "command": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev-build.ps1 -Target Both -Verify",
+      "status": "verified-in-scope",
+      "stages": [
+        {
+          "name": "incremental-build",
+          "milliseconds": 2049,
+          "exit_code": 0
+        },
+        {
+          "name": "focused-verification",
+          "milliseconds": 1141,
+          "exit_code": 0
+        }
+      ],
+      "scope": "Warm no-change incremental build and the named product recipe test; no equivalent-work speedup claim"
+    }
+  ],
+  "artifacts": [
+    {
+      "name": "ark-studio.exe",
+      "sha256": "c63dd0e67f2fd4db4665c5e135593e058c0b9fffe4fecc4ee3a25fb3aef83846",
+      "bytes": 10971136
+    },
+    {
+      "name": "ark-mcp.exe",
+      "sha256": "7f296f588c530f2a2924b68293921c013eeb95eb03a3902e9083e0afae22477f",
+      "bytes": 5494272
+    },
+    {
+      "name": "ark-product-tools-030d-tests.exe",
+      "sha256": "137a6b28b0c3b0e42035522382aa490a057525aa56125e6acfa4072be9aaa433",
+      "bytes": 5508608
+    },
+    {
+      "name": "ark-occt-worker.exe",
+      "sha256": "31a39a68b9a53b567f2eac71aa3b48ab06139509f1a6df742f052a3c4f523cae",
+      "bytes": 2976768
+    }
+  ],
+  "artifact_hashes_checked_after_full_suite": true,
+  "screenshots": [
+    {
+      "path": "docs/images/030D/agent-presence.png",
+      "sha256": "d7e22415016640943df4873b649954b2b13f77fd39988ab46849769d42da99dc"
+    },
+    {
+      "path": "docs/images/030D/light-controls.png",
+      "sha256": "466955bd0ef8b301f972c1b75ec292058bbf8d3c4c3d2dcaee46d2146c430020"
+    },
+    {
+      "path": "docs/images/030D/light-up.png",
+      "sha256": "9b045483327aa29e3d7472862a4cc82f9b1033f94915b7a819779abf045ed19f"
+    }
+  ],
+  "failed_attempts": [
+    "Initial test compilation used incorrect Mesh bounds and mutable JSON helper APIs; corrected before running those checks.",
+    "Older contract assertions expected 95 tools and future source42; updated for the observed 96 tools and future source43.",
+    "The first UI fixture omitted expected_revision for doc_new; it was rejected and the fixture was corrected.",
+    "Live Studio-MCP preview crashed with presence enabled; an off/on diagnostic isolated the overlay. Caller VAO, buffer, program and viewport restoration plus busy-preview regression tests fixed the observed failure without changing timeouts.",
+    "Generic feature.edit appearance replacement reset other light controls; light_up now merges lighting controls while retaining existing appearances and materials.",
+    "Sheet circle/slot acceptance inputs initially used spaces in entity-ID prefixes and were explicitly rejected; valid identity prefixes and early validation retain the producer contract. A duplicate validation insertion caused one compile failure and was removed."
+  ],
+  "limits": [
+    "Scope uses synthetic local CAD inputs, actual host tool calls and synthetic role state events. No general live-provider design quality or cost result is claimed.",
+    "Wood stock and rectangular top-face joinery are exact; structural, anisotropic, joint-fit and manufacturing qualification remain open.",
+    "Networks are authored triangle tubes with nominal sag/weave; cloth mechanics, contact and self-intersection checks remain open.",
+    "LED emission and bloom are raster display controls, not calibrated photometry or illumination of neighboring parts.",
+    "Hosted CI for 030D, fresh relocated distribution, signing, published OTA transport and production qualification are not established by these local checks."
+  ],
+  "distribution_qualified": false
+}

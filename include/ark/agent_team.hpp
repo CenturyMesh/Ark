@@ -55,6 +55,9 @@ struct AgentTeamRoleSnapshot {
     unsigned turns=0;
     std::uint64_t stepsApplied=0;
     bool needsInspection=false;
+    unsigned unresolvedToolErrors=0;
+    // Opt-in bounded diagnostics; never a CAD/prompt/provider-history payload.
+    std::vector<arkjson::Value> toolFailures;
     AgentTeamDiscipline discipline=AgentTeamDiscipline::General;
     AssistantUsage usage;
     AssistantPerformance performance;
@@ -130,7 +133,8 @@ public:
     bool waitIdleFor(std::chrono::milliseconds timeout);
     // Conversation history is intentionally opt-in: UI polling must not copy
     // multi-megabyte provider histories. sinceEvent avoids repeated log copies.
-    AgentTeamSnapshot snapshot(bool includeConversations=false,std::uint64_t sinceEvent=0) const;
+    AgentTeamSnapshot snapshot(bool includeConversations=false,std::uint64_t sinceEvent=0,
+                               bool includeDiagnostics=false) const;
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

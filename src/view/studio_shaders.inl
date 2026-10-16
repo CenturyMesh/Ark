@@ -53,6 +53,7 @@ vec3 studioTonemap(vec3 c){
 )";
 static const std::string FS_STUDIO_SOLID_SOURCE=std::string("#version 330 core\n")+STUDIO_LIGHTING_GLSL+R"(
 in vec3 nrm,wpos,lpos,lnrm;out vec4 o;
+uniform vec3 emissionColor;uniform float emissionIntensity,emissionBloom,emissionGlow,emissionOnly;
 uniform vec3 color,eye;uniform float sel,hardSurface,satin,metallic,roughness,opacity,hasTexture,selectionOverlay,cameraOrtho;
 uniform vec2 textureScale;uniform sampler2D surfaceTexture;
 uniform float stampMode,stampDepth,stampFrontOnly;uniform vec3 stampOrigin,stampU,stampV,stampNormal;uniform vec2 stampSize;
@@ -61,6 +62,7 @@ vec4 triplanar(){
  return texture(surfaceTexture,lpos.xy*textureScale)*a.z+texture(surfaceTexture,lpos.xz*textureScale)*a.y+texture(surfaceTexture,lpos.yz*textureScale)*a.x;
 }
 void main(){
+ if(emissionOnly>.5){o=vec4(srgbToLinear(emissionColor)*emissionIntensity*emissionBloom*opacity,emissionIntensity>0.?emissionGlow/64.:0.);return;}
  if(selectionOverlay>.5){o=vec4(.97,.63,.21,sel*.16);return;}
  vec3 n=hardSurface>0.?normalize(cross(dFdx(wpos),dFdy(wpos))):normalize(nrm),v=cameraOrtho>.5?studioBack:normalize(eye-wpos);
  if(dot(n,v)<0.)n=-n;vec4 texel=hasTexture>.5?triplanar():vec4(1.);
@@ -75,7 +77,7 @@ void main(){
  vec3 l=fromStudio(normalize(vec3(-.55,.72,.42)));c+=evaluateBRDF(n,v,l,base,m,max(r,.24))*vec3(2.4,2.25,2.05)*max(dot(n,l),0.);
  l=fromStudio(normalize(vec3(.78,.30,-.32)));c+=evaluateBRDF(n,v,l,base,m,max(r,.28))*vec3(.55,.66,.85)*max(dot(n,l),0.);
  l=fromStudio(normalize(vec3(-.25,.28,-.93)));c+=evaluateBRDF(n,v,l,base,m,max(r,.20))*vec3(.72,.82,1.)*max(dot(n,l),0.);
- c=studioTonemap(c);c=mix(c,min(c+vec3(.105,.061,.012),vec3(1.)),sel);
+ c=studioTonemap(c+srgbToLinear(emissionColor)*emissionIntensity);c=mix(c,min(c+vec3(.105,.061,.012),vec3(1.)),sel);
  o=vec4(c,opacity*texel.a);
 })";
 static const char* FS_SOLID=FS_STUDIO_SOLID_SOURCE.c_str();

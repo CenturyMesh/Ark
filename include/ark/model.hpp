@@ -44,7 +44,7 @@ enum class FeatureType : i32 {
     MeshBody, MeshWeld, MeshSmooth, MeshDecimate, MeshOffset, MeshFill,
     Curve, IntersectionCurve, Bridge,
     ConstructionFrame, PCB, CableRoute, Suspension, SurfaceEdit,
-    MeshEdit,
+    MeshEdit, MeshNet,
 };
 
 // Appearance describes the display surface. Density is grams per cubic
@@ -52,6 +52,9 @@ enum class FeatureType : i32 {
 struct Appearance {
     Vec3 baseColor{0.72,0.75,0.80};
     double metallic=0, roughness=0.55, opacity=1;
+    Vec3 emissionColor{1,1,1};
+    double emissionIntensity=0, bloom=0.6, glow=12, emissionPeriod=1;
+    std::string emissionEffect="steady";
     std::string texturePath;
     std::string textureAsset; // named embedded PNG/JPEG; portable replacement for texturePath
     double textureScaleU=1, textureScaleV=1;

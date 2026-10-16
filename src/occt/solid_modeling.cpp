@@ -643,10 +643,12 @@ V finishBodies(const TopoDS_Shape& shape,const std::vector<Ref>& refs){
 #include "vertex_pull.inl"
 #include "holes_orchestrator.inl"
 #include "split_line.inl"
+#include "product_patterns.inl"
 
 V modelSolidNative(const V& request){
     const std::string op=word(request,"op");std::vector<Ref> refs;TopoDS_Shape result;bool many=false;V extrusionReceipt=V::makeObj(),vertexReceipt=V::makeObj(),splitReceipt=V::makeObj();
     try{
+    if(op=="vent"||op=="wood")return productPatternNative(request);
     if(op=="holes_orchestrator")return holesOrchestratorNative(request);
     if(op=="tube_end_fit")return withNativeVertexInventory(tubeEndFitNative(request));
     if(op=="imported_brep"){

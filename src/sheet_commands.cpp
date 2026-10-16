@@ -62,6 +62,23 @@ V applySheetCommand(Document& doc,const V& command){
     }
     const auto& key=required(command,"id");if(key.t!=V::Num||key.num<1||key.num>9007199254740990.||key.num!=std::floor(key.num))throw std::runtime_error("Sheet edit needs a feature ID");
     auto f=doc.find((u64)key.num);if(!f||f->type!=FeatureType::SheetMetal)throw std::runtime_error("Select an authored sheet feature");promote(*f);
+    if(op=="sheet.vent"){
+        const std::set<std::string> fields{"op","id","name","panel","rows","columns","pitch_x","pitch_y","opening"};
+        for(const auto& field:command.obj)if(!fields.count(field.first))throw std::runtime_error("Unknown sheet.vent field: "+field.first);
+        const auto& rows=required(command,"rows");const auto& columns=required(command,"columns");
+        if(rows.t!=V::Num||columns.t!=V::Num||rows.num<1||columns.num<1||rows.num!=std::floor(rows.num)||columns.num!=std::floor(columns.num)||rows.num*columns.num>128)throw std::runtime_error("Sheet vent requires integer rows/columns and at most 128 openings");
+        V list=f->nativeSpec.find("openings")?*f->nativeSpec.find("openings"):V::makeArr();if(list.arr.size()+rows.num*columns.num>128)throw std::runtime_error("Sheet vent exceeds 128 openings");
+        const std::string prefix=text(command,"name"),panel=text(command,"panel"),dx=expression(required(command,"pitch_x")),dy=expression(required(command,"pitch_y"));
+        if(prefix.empty()||prefix.size()>128||prefix.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-")!=std::string::npos)throw std::runtime_error("Vent ID prefix must use letters, digits, dot, underscore or hyphen");
+        V source=required(command,"opening");if(source.t!=V::Obj)throw std::runtime_error("Sheet vent opening must be an object");
+        const auto kind=text(source,"kind");if(kind!="circle"&&kind!="slot"&&kind!="window")throw std::runtime_error("Sheet vent supports circle, slot and window");
+        auto used=usedIds(*f);V identities=V::makeArr();
+        for(int row=0;row<(int)rows.num;++row)for(int col=0;col<(int)columns.num;++col){
+            V item=source;const std::string id=prefix+"."+std::to_string(row+1)+"."+std::to_string(col+1);if(id.size()>128||!used.insert(id).second)throw std::runtime_error("Duplicate or oversized vent opening identity");
+            item.set("id",V::makeStr(id));item.set("panel",V::makeStr(panel));offsetOpening(item,dx,"0",col);offsetOpening(item,"0",dy,row);list.arr.push_back(item);identities.arr.push_back(V::makeStr(id));
+        }
+        f->nativeSpec.set("openings",list);result.set("feature_id",key);result.set("entity_ids",identities);return result;
+    }
     const bool jog=op.rfind("sheet.jog.",0)==0,bend=op.rfind("sheet.sketch_bend.",0)==0;
     if(jog||bend){const char* programKey=jog?"jog":"sketch_bend";const auto action=op.substr(op.find_last_of('.')+1);V program=f->nativeSpec.find(programKey)?*f->nativeSpec.find(programKey):V{};
         if(action=="add"){if(f->nativeSpec.find("jog")||f->nativeSpec.find("sketch_bend"))throw std::runtime_error("Only one jog or sketch bend program is supported on a rectangular blank");for(const char* rows:{"flanges","openings","hems","stamps"})if(const auto* list=f->nativeSpec.find(rows))if(list->t!=V::Arr||!list->arr.empty())throw std::runtime_error("Jog/sketch bend requires an unperforated rectangular blank without other forming operations");program=required(command,jog?"jog":"bend");if(program.t!=V::Obj)throw std::runtime_error("Sheet forming program must be an object");if(!program.find("id"))program.set("id",V::makeStr(jog?"jog":"bend"));}
