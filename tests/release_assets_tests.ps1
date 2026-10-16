@@ -45,6 +45,9 @@ for asset in "${assets[@]}"; do cp -- "$asset" downloaded/; done
         $previousPreference = $ErrorActionPreference
         try { $ErrorActionPreference = 'Continue'; $rejected = & $bash --noprofile --norc ./check.sh 2>&1; $rejectedExit = $LASTEXITCODE } finally { $ErrorActionPreference = $previousPreference }
         if ($rejectedExit -eq 0 -or ($rejected -join "`n") -notmatch 'Duplicate release attachment name') { throw 'Duplicate attachment names must reject publication.' }
+        # GitHub's pwsh wrapper propagates LASTEXITCODE. The nonzero exit above
+        # is an asserted negative case, not this test script's final outcome.
+        $global:LASTEXITCODE = 0
     } finally { Pop-Location }
     Write-Output 'Release attachments: flattened SHA-256 verification, update manifest, optional installer and duplicate-name rejection passed.'
 } finally {
