@@ -23,7 +23,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: Test distribution fixtures
         shell: pwsh
-        run: ./tests/distribution_tests.ps1
+        run: |
+          ./tests/distribution_tests.ps1
+          ./tests/release_assets_tests.ps1
       - name: Identify hosted Windows image
         id: runner-image
         shell: pwsh
@@ -125,22 +127,33 @@ jobs:
           cd out/releases
           curl --fail --location 'https://github.com/Open-Cascade-SAS/OCCT/archive/refs/tags/V8_0_1.zip' -o OCCT-V8_0_1-source.zip
           echo '7c033d917ee8f040c0512d289dcc5f02c148889d5bac17c3e25639accb44f0da  OCCT-V8_0_1-source.zip' | sha256sum -c -
-          sha256sum ark-windows-x64-*.zip ark-linux-x64-headless-*.tar.gz > SHA256SUMS.txt
-          sha256sum OCCT-V8_0_1-source.zip >> SHA256SUMS.txt
-          if compgen -G 'ARK-*-windows-x64-setup.exe' >/dev/null; then
-            sha256sum ARK-*-windows-x64-setup.exe >> SHA256SUMS.txt
-          fi
           printf 'ARK %s / runtime %s preview. Windows and Linux native tests and relocated Linux package checks passed. Optional installer checks ran only when requested. Interactive Studio and manufacturing qualification remain separate gates. Source commit: %s\n' "$code" "$version" "$GITHUB_SHA" > release-notes.txt
-          assets=(ark-windows-x64-*.zip ark-linux-x64-headless-*.tar.gz OCCT-V8_0_1-source.zip SHA256SUMS.txt)
+          assets=(ark-windows-x64-*.zip ark-linux-x64-headless-*.tar.gz OCCT-V8_0_1-source.zip ark-update.json)
           assets+=(ark-windows-x64-*.zip.provenance.json ark-linux-x64-headless-*.tar.gz.provenance.json windows-dependency-audit.json linux-release-evidence/*.json)
-          sha256sum ark-windows-x64-*.zip.provenance.json ark-linux-x64-headless-*.tar.gz.provenance.json windows-dependency-audit.json linux-release-evidence/*.json >> SHA256SUMS.txt
           if compgen -G 'ARK-*-windows-x64-setup.exe' >/dev/null; then assets+=(ARK-*-windows-x64-setup.exe); fi
+          # GitHub stores attachments by basename, including nested evidence.
+          # The downloaded checksum list must use those same names.
+          : > SHA256SUMS.txt
+          declare -A asset_names=()
+          for asset in "${assets[@]}"; do
+            name=$(basename "$asset")
+            if [[ -n "${asset_names[$name]+present}" ]]; then
+              echo "Duplicate release attachment name: $name" >&2
+              exit 1
+            fi
+            asset_names[$name]=1
+            (cd "$(dirname "$asset")" && sha256sum -- "$name") >> SHA256SUMS.txt
+          done
+          assets+=(SHA256SUMS.txt)
           gh release create "$tag" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "ARK $code / $version preview" --notes-file release-notes.txt --prerelease
   linux-package:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+      - name: Test release attachment checksums
+        shell: pwsh
+        run: ./tests/release_assets_tests.ps1
       - name: Install Linux build dependencies
         run: sudo apt-get update && sudo apt-get install -y build-essential cmake ninja-build curl ca-certificates unzip patchelf
       - name: Build and test Linux CLI, MCP and OCCT worker

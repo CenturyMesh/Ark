@@ -116,6 +116,7 @@ box properties and authority flags. Team regressions exercise unchanged TTL,
 expired-owner cleanup, foreign/unknown token rejection, preservation of a newer
 window, project-boundary invalidation and compact verification receipts.
 
-Runtime results and measured byte counts belong in the iteration verification
-record after the registered tests run. These contracts do not promise a fixed
+Runtime results and measured byte counts are recorded in the [iteration
+verification](iterations/032D.md), including complete hosted native/portable
+checks on Windows and Linux. These contracts do not promise a fixed
 full-document rebuild latency or continuous motion/clearance qualification.

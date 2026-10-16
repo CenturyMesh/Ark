@@ -20,6 +20,8 @@ checks, followed by targeted native/portable checks for bounded scheduling.
 [032D evidence](iterations/032D.md) distinguishes those runs and records failed attempts and limitations;
 universal five-second cold opening, three-size p95 performance and measured
 provider savings remain **Parcial** or unproven within the broader milestones.
+Subsequent hosted checks passed Windows native 131/131 and portable 86/86, plus
+Linux native 125/125 and portable 80/80, including the relocated Linux package.
 
 031B develops **A.01/A.03/A.04/B.02/B.03/B.04/D.02/D.04/E.01** through retained
 solid recipes, advanced surface/sweep controls, triangle diagnostics/editing,
