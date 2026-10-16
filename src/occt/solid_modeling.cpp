@@ -7,6 +7,7 @@
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_Section.hxx>
+#include <BRepAlgoAPI_Splitter.hxx>
 #include <BRepFeat_SplitShape.hxx>
 #include <BRepProj_Projection.hxx>
 #include <BRepTools.hxx>
@@ -59,6 +60,7 @@
 #include <GProp_GProps.hxx>
 #include <Geom_TrimmedCurve.hxx>
 #include <NCollection_Array1.hxx>
+#include <gp_Pnt2d.hxx>
 #include <Standard_Failure.hxx>
 #include <TopExp.hxx>
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
@@ -89,7 +91,7 @@
 namespace ark::occt {
 namespace {
 using V = arkjson::Value;
-struct Ref { std::string name,kind,status; TopoDS_Shape shape; V seed; V meta; };
+struct Ref { std::string name,kind,status; TopoDS_Shape shape; V seed; V meta=V::makeObj(); };
 V withNativeVertexInventory(V result);
 bool selectable(const std::string& status){return status=="bound"||status=="merged";}
 const V& need(const V& v,const char* key){auto p=v.find(key);if(!p)throw std::runtime_error(std::string("Missing solid field: ")+key);return *p;}
@@ -159,12 +161,13 @@ std::vector<Ref> inputRefs(const V& request,const char* brepKey,const char* topo
 }
 V topologyOf(const TopoDS_Shape& shape,const std::string& encoded,const std::vector<Ref>& refs){
     const std::string identity=digest(encoded);V out=V::makeObj(),rows=V::makeArr();out.set("brep_sha256",V::makeStr(identity));
+    const auto resultFaces=shapes(shape,TopAbs_FACE),resultEdges=shapes(shape,TopAbs_EDGE);
     std::set<std::string> names;
     for(const auto& ref:refs){if(!names.insert(ref.name).second)throw std::runtime_error("Duplicate output reference name");V row=V::makeObj();row.set("name",V::makeStr(ref.name));row.set("kind",V::makeStr(ref.kind));V indices=V::makeArr();std::string status=ref.status;
         const auto marker=ref.name.find("@ark.");const bool generic=marker!=std::string::npos;
         if(generic){const auto start=ref.name.find('.',marker+5);if(start==std::string::npos||ref.name.substr(start+1,64)!=identity)status="obsolete";}
         if(selectable(status)){int i=indexOf(shape,ref.shape,refType(ref.kind));if(i<0)status="deleted";else indices.arr.push_back(V::makeNum(i));}
-        row.set("status",V::makeStr(status));row.set("indices",indices);if(selectable(status)){V data=generic?ref.seed:descriptor(ref);row.set("frame_available",V::makeBool(data.find("normal")||data.find("axis")||data.find("tangent")));row.set("descriptor",data);}for(const char* key:{"merged_from","surviving","split_into","reason"})if(const V* value=ref.meta.find(key))row.set(key,*value);rows.arr.push_back(row);
+        row.set("status",V::makeStr(status));row.set("indices",indices);if(selectable(status)){Ref bound=ref;bound.shape=(ref.kind=="edge"?resultEdges:resultFaces).at((size_t)indices.arr.front().num);V data=generic?ref.seed:descriptor(bound);row.set("frame_available",V::makeBool(data.find("normal")||data.find("axis")||data.find("tangent")));row.set("descriptor",data);}for(const char* key:{"merged_from","surviving","split_into","reason"})if(const V* value=ref.meta.find(key))row.set(key,*value);rows.arr.push_back(row);
     }out.set("references",rows);return out;
 }
 template<class Operation>std::vector<Ref> propagated(const std::vector<Ref>& refs,const TopoDS_Shape& result,Operation& op){
@@ -178,7 +181,7 @@ template<class Operation>std::vector<Ref> propagated(const std::vector<Ref>& ref
     }return out;
 }
 void add(std::vector<Ref>& refs,const std::string& name,const std::string& kind,const TopoDS_Shape& s){if(s.IsNull())return;for(const auto& existing:refs)if(existing.name==name){if(existing.kind==kind&&existing.shape.IsSame(s))return;throw std::runtime_error("Ambiguous producer reference: "+name);}refs.push_back({name,kind,"bound",s});}
-V finish(const TopoDS_Shape& shape,const std::vector<Ref>& refs){V result=shapeResult(shape,true);result.set("topology",topologyOf(shape,need(result,"brep_base64").str,refs));return withNativeVertexInventory(completeSelectionReferences(std::move(result)));}
+V finish(const TopoDS_Shape& shape,const std::vector<Ref>& refs){return generatedShapeResult(shape,true,[&](const std::string& encoded){return topologyOf(shape,encoded,refs);},true);}
 void boxEdges(const TopoDS_Shape& solid,double x,double y,double z,std::vector<Ref>& refs){
     for(auto& item:shapes(solid,TopAbs_EDGE)){TopoDS_Vertex a,b;TopExp::Vertices(TopoDS::Edge(item),a,b);if(a.IsNull()||b.IsNull())continue;
         gp_Pnt p=BRep_Tool::Pnt(a),q=BRep_Tool::Pnt(b);double delta[3]{std::abs(p.X()-q.X()),std::abs(p.Y()-q.Y()),std::abs(p.Z()-q.Z())};
@@ -283,7 +286,7 @@ TopoDS_Shape makeExtrusion(const V& request,std::vector<Ref>& refs,V* receipt=nu
         depth=gp_Vec(start.Plane().Location(),surface.Plane().Location()).Dot(normal)*direction;
         if(!std::isfinite(depth)||depth<=0||depth>1e8)throw std::runtime_error("Limit face must be ahead of the profile in the selected direction");
         gp_Trsf translation;translation.SetTranslation(normal*(depth*direction));auto end=transformed(face,translation);
-        BRepAlgoAPI_Cut uncovered(end,target);uncovered.Build();if(!uncovered.IsDone()||!shapes(uncovered.Shape(),TopAbs_FACE).empty())throw std::runtime_error("Limit face does not cover the complete extrusion cap");
+        BRepAlgoAPI_Cut uncovered(end,target);if(!uncovered.IsDone()||!shapes(uncovered.Shape(),TopAbs_FACE).empty())throw std::runtime_error("Limit face does not cover the complete extrusion cap");
         coverage=true;
     }else throw std::runtime_error("Extrusion mode must be distance or up_to_face");
     const gp_Vec travel=normal*(depth*direction);const double offset=symmetric?-depth*direction*.5:0;
@@ -306,7 +309,7 @@ TopoDS_Shape cutter(const V& spec){
         TopoDS_Shape b=BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(between/2,0,0),gp_Dir(0,0,1)),r,depth).Shape();
         if(between==0)return transformed(a,t);
         TopoDS_Shape middle=BRepPrimAPI_MakeBox(gp_Pnt(-between/2,-r,0),between,width,depth).Shape();
-        BRepAlgoAPI_Fuse first(a,middle);first.Build();if(!first.IsDone())throw std::runtime_error("Slot cutter union failed");BRepAlgoAPI_Fuse second(first.Shape(),b);second.Build();if(!second.IsDone())throw std::runtime_error("Slot cutter union failed");return transformed(second.Shape(),t);
+        BRepAlgoAPI_Fuse first(a,middle);if(!first.IsDone())throw std::runtime_error("Slot cutter union failed");BRepAlgoAPI_Fuse second(first.Shape(),b);if(!second.IsDone())throw std::runtime_error("Slot cutter union failed");return transformed(second.Shape(),t);
     }
     if(kind=="profile"){V request=V::makeObj(),profile=need(spec,"profile");if(spec.find("frame")){V f=V::makeArr();for(double value:m)f.arr.push_back(V::makeNum(value));profile.set("frame",f);}request.set("profile",profile);request.set("depth",V::makeNum(depth));std::vector<Ref> unused;return makeExtrusion(request,unused);}
     throw std::runtime_error("Unknown hole cutter kind");
@@ -351,7 +354,7 @@ TopoDS_Shape roundTube(const V& request,std::vector<Ref>& refs){
         if(!pipe.IsDone()||!pipe.MakeSolid())throw std::runtime_error("Round tube sweep failed");
         TopoDS_Shape solid=pipe.Shape();if(properties(solid)<0)solid.Reverse();return solid;
     };
-    BRepAlgoAPI_Cut hollow(pipeSolid(outerR),pipeSolid(innerR));hollow.Build();
+    BRepAlgoAPI_Cut hollow(pipeSolid(outerR),pipeSolid(innerR));
     if(!hollow.IsDone()||hollow.HasErrors())throw std::runtime_error("Round tube hollow cut failed");
     TopoDS_Shape solid=hollow.Shape();if(properties(solid)<0)solid.Reverse();
     if(shapes(solid,TopAbs_SOLID).size()!=1||!(properties(solid)>0))throw std::runtime_error("Round tube must be one positive solid");
@@ -431,7 +434,7 @@ TopoDS_Shape rectTube(const V& request,std::vector<Ref>& refs){
         if(!pipe.IsDone()||!pipe.MakeSolid())throw std::runtime_error("Rectangular tube sweep failed");
         TopoDS_Shape solid=pipe.Shape();if(properties(solid)<0)solid.Reverse();return solid;
     };
-    BRepAlgoAPI_Cut hollow(pipeSolid(width,height),pipeSolid(width-2*wall,height-2*wall));hollow.Build();
+    BRepAlgoAPI_Cut hollow(pipeSolid(width,height),pipeSolid(width-2*wall,height-2*wall));
     if(!hollow.IsDone()||hollow.HasErrors())throw std::runtime_error("Rectangular tube hollow cut failed");
     TopoDS_Shape solid=hollow.Shape();if(properties(solid)<0)solid.Reverse();
     if(shapes(solid,TopAbs_SOLID).size()!=1||!(properties(solid)>0))throw std::runtime_error("Rectangular tube must be one positive solid");
@@ -582,13 +585,13 @@ TopoDS_Shape patterned(const TopoDS_Shape& input,const V& request,const std::str
     if(!fuseCopies)return copies.size()==1?copies.front():compound(copies);
     TopoDS_Shape accumulated=copies.front();
     for(size_t index=1;index<copies.size();++index){
-        BRepAlgoAPI_Fuse algorithm(accumulated,copies[index]);algorithm.Build();
+        BRepAlgoAPI_Fuse algorithm(accumulated,copies[index]);
         if(!algorithm.IsDone()||algorithm.HasErrors())throw std::runtime_error("Pattern fuse failed; use fuse 0 to keep separate solids");
         refs=propagated(refs,algorithm.Shape(),algorithm);accumulated=algorithm.Shape();
     }
     return accumulated;
 }
-TopoDS_Shape splitOnPlane(const TopoDS_Shape& input,const V& request,std::vector<Ref>& refs){
+TopoDS_Shape splitOnPlane(const TopoDS_Shape& input,const V& request,std::vector<Ref>& refs,V* receipt=nullptr){
     const std::string keep=word(request,"keep");
     if(keep!="positive"&&keep!="negative"&&keep!="both")
         throw std::runtime_error("Split keep must be positive, negative, or both");
@@ -606,12 +609,12 @@ TopoDS_Shape splitOnPlane(const TopoDS_Shape& input,const V& request,std::vector
     auto half=[&](double sign){
         BRepPrimAPI_MakeHalfSpace space(face.Face(),origin.Translated(normal*sign));
         BRepAlgoAPI_Common algorithm(input,space.Solid());
-        algorithm.Build();
-        if(!algorithm.IsDone()||algorithm.HasErrors())throw std::runtime_error("Native plane split failed");
+        if(!algorithm.IsDone()||algorithm.HasErrors())throw std::runtime_error("Native plane split failed on "+std::string(sign>0?"positive":"negative")+" side; no tolerance fallback");
         TopoDS_Shape part=algorithm.Shape();
         const double volume=properties(part);
         if(shapes(part,TopAbs_SOLID).empty()||!std::isfinite(volume)||volume<=1e-8)
-            throw std::runtime_error("Split plane does not cross the input solid");
+            throw std::runtime_error("Split plane does not cross the input solid: "+std::string(sign>0?"positive":"negative")+" side has "+std::to_string(shapes(part,TopAbs_SOLID).size())+" solids, volume="+std::to_string(volume)+" mm3; exterior, tangent or degenerate partition rejected without discarding pieces");
+        for(const auto& solid:shapes(part,TopAbs_SOLID))shapeReport(solid,true);
         return std::pair<TopoDS_Shape,std::vector<Ref>>(part,propagated(refs,part,algorithm));
     };
     // Evaluate both halves even when only one is requested, so a tangent or
@@ -619,36 +622,42 @@ TopoDS_Shape splitOnPlane(const TopoDS_Shape& input,const V& request,std::vector
     auto positive=half(1.0),negative=half(-1.0);
     const double original=properties(input);
     const double sum=properties(positive.first)+properties(negative.first);
-    if(std::abs(sum-original)>std::max(1e-5,original*1e-7))
-        throw std::runtime_error("Split halves do not conserve exact volume");
+    const double tolerance=std::max(1e-5,original*1e-7);
+    if(std::abs(sum-original)>tolerance)
+        throw std::runtime_error("Split halves do not conserve exact volume: source="+std::to_string(original)+", positive="+std::to_string(properties(positive.first))+", negative="+std::to_string(properties(negative.first))+", error="+std::to_string(sum-original)+", limit="+std::to_string(tolerance));
+    if(receipt){*receipt=V::makeObj();receipt->set("positive_volume_mm3",V::makeNum(properties(positive.first)));receipt->set("negative_volume_mm3",V::makeNum(properties(negative.first)));receipt->set("partition_volume_mm3",V::makeNum(sum));receipt->set("volume_error_mm3",V::makeNum(sum-original));receipt->set("volume_tolerance_mm3",V::makeNum(tolerance));receipt->set("positive_solid_count",V::makeNum(shapes(positive.first,TopAbs_SOLID).size()));receipt->set("negative_solid_count",V::makeNum(shapes(negative.first,TopAbs_SOLID).size()));}
     if(keep=="positive"){refs=std::move(positive.second);return positive.first;}
     if(keep=="negative"){refs=std::move(negative.second);return negative.first;}
     TopoDS_Shape both=compound({positive.first,negative.first});
+    std::vector<Ref> lineage;
     for(size_t i=0;i<refs.size();++i){
         const auto& a=positive.second[i];const auto& b=negative.second[i];
+        V names=V::makeArr();if(refs[i].name.find("@ark.")==std::string::npos)for(const auto& side:std::vector<std::pair<const char*,Ref>>{{"positive",a},{"negative",b}})if(selectable(side.second.status)){Ref child=side.second;child.name=std::string(side.first)+"."+child.name;child.meta=V::makeObj();names.arr.push_back(V::makeStr(child.name));lineage.push_back(child);}if(!names.arr.empty())refs[i].meta.set("split_into",names);
         if(a.status=="split"||b.status=="split"||(selectable(a.status)&&selectable(b.status))){
             refs[i].shape.Nullify();refs[i].status="split";
         }else if(selectable(a.status))refs[i]=a;
         else if(selectable(b.status))refs[i]=b;
         else{refs[i].shape.Nullify();refs[i].status=(a.status=="split"||b.status=="split")?"split":"deleted";}
     }
-    return both;
+    refs.insert(refs.end(),lineage.begin(),lineage.end());return both;
 }
 V finishBodies(const TopoDS_Shape& shape,const std::vector<Ref>& refs){
     auto solids=shapes(shape,TopAbs_SOLID);if(solids.empty()||solids.size()>64)throw std::runtime_error("Pattern needs 1..64 solids");
     for(const auto& solid:solids)if(!(properties(solid)>0))throw std::runtime_error("Pattern instance has no positive volume");
-    V result=shapeResult(shape,false);result.set("topology",topologyOf(shape,need(result,"brep_base64").str,refs));return withNativeVertexInventory(completeSelectionReferences(std::move(result)));
+    return generatedShapeResult(shape,false,[&](const std::string& encoded){return topologyOf(shape,encoded,refs);},true);
 }
 
 #include "vertex_pull.inl"
 #include "holes_orchestrator.inl"
 #include "split_line.inl"
 #include "product_patterns.inl"
+#include "solids_031b.inl"
 
 V modelSolidNative(const V& request){
     const std::string op=word(request,"op");std::vector<Ref> refs;TopoDS_Shape result;bool many=false;V extrusionReceipt=V::makeObj(),vertexReceipt=V::makeObj(),splitReceipt=V::makeObj();
     try{
     if(op=="vent"||op=="wood")return productPatternNative(request);
+    if(solidRecipe031b(op))return modelingRecipe031b(request);
     if(op=="holes_orchestrator")return holesOrchestratorNative(request);
     if(op=="tube_end_fit")return withNativeVertexInventory(tubeEndFitNative(request));
     if(op=="imported_brep"){
@@ -720,21 +729,19 @@ V modelSolidNative(const V& request){
             TopoDS_Shape tool;std::vector<Ref> toolRefs;
             if(op=="hole")tool=cutter(need(request,"cutter"));
             else{const auto& encodedTool=need(request,"tool_brep");if(encodedTool.t!=V::Str)throw std::runtime_error("Tool must be native B-rep");tool=readBrep(encodedTool.str);shapeReport(tool,false);if(shapes(tool,TopAbs_SOLID).empty()||!(properties(tool)>0))throw std::runtime_error("Boolean tool needs one or more positive-volume solids");toolRefs=inputRefs(request,"tool_brep","tool_topology",tool);}
-            if(op=="union"){BRepAlgoAPI_Fuse algorithm(input,tool);algorithm.Build();if(!algorithm.IsDone()||algorithm.HasErrors())throw std::runtime_error("Native union failed");result=algorithm.Shape();refs=propagated(refs,result,algorithm);auto next=propagated(toolRefs,result,algorithm);
+            if(op=="union"){BRepAlgoAPI_Fuse algorithm(input,tool);if(!algorithm.IsDone()||algorithm.HasErrors())throw std::runtime_error("Native union failed");result=algorithm.Shape();refs=propagated(refs,result,algorithm);auto next=propagated(toolRefs,result,algorithm);
                 std::string nameSpace="tool";
                 const V* supplied=request.find("reference_namespace");if(!supplied)supplied=request.find("tool_namespace");
                 if(supplied){if(supplied->t!=V::Str||supplied->str.empty()||supplied->str.size()>128)throw std::runtime_error("Invalid reference namespace");nameSpace=supplied->str;}
                 else{int ordinal=2;bool occupied=true;while(occupied){occupied=false;for(const auto& r:refs)if(r.name.rfind(nameSpace+".",0)==0){occupied=true;break;}if(occupied)nameSpace="tool"+std::to_string(ordinal++);}}
                 for(auto& r:next){r.name=nameSpace+"."+r.name;refs.push_back(r);}
             }
-            else if(op=="common"){BRepAlgoAPI_Common algorithm(input,tool);algorithm.Build();if(!algorithm.IsDone()||algorithm.HasErrors())throw std::runtime_error("Native common failed");result=algorithm.Shape();refs=propagated(refs,result,algorithm);}
-            else{BRepAlgoAPI_Cut algorithm(input,tool);algorithm.Build();if(!algorithm.IsDone()||algorithm.HasErrors())throw std::runtime_error("Native cut failed");result=algorithm.Shape();refs=propagated(refs,result,algorithm);}
+            else if(op=="common"){BRepAlgoAPI_Common algorithm(input,tool);if(!algorithm.IsDone()||algorithm.HasErrors())throw std::runtime_error("Native common failed");result=algorithm.Shape();refs=propagated(refs,result,algorithm);}
+            else{BRepAlgoAPI_Cut algorithm(input,tool);if(!algorithm.IsDone()||algorithm.HasErrors())throw std::runtime_error("Native cut failed");result=algorithm.Shape();refs=propagated(refs,result,algorithm);}
         }else if(op=="fillet"||op=="chamfer"){
-            requireOneSolid(input,"Fillet/chamfer");double size=positive(request,op=="fillet"?"radius":"distance");
-            if(op=="chamfer"&&request.find("distance2")){double second=positive(request,"distance2");if(std::abs(second-size)>1e-12)throw std::runtime_error("Asymmetric chamfer is not supported; use one distance");}
-            auto edges=chosenEdges(input,request,refs);
-            if(op=="fillet"){BRepFilletAPI_MakeFillet algorithm(input);for(auto& edge:edges)algorithm.Add(size,edge);algorithm.Build();if(!algorithm.IsDone())throw std::runtime_error("Native fillet failed");result=algorithm.Shape();refs=propagated(refs,result,algorithm);}
-            else{BRepFilletAPI_MakeChamfer algorithm(input);for(auto& edge:edges)algorithm.Add(size,edge);algorithm.Build();if(!algorithm.IsDone())throw std::runtime_error("Native chamfer failed");result=algorithm.Shape();refs=propagated(refs,result,algorithm);}
+            result=finishEdges031b(input,request,refs,splitReceipt);
+        }else if(op=="split_surface"||op=="split_tool"){
+            result=splitExact031b(input,request,refs,splitReceipt);many=true;
         }else if(op=="draft"){
             requireOneSolid(input,"Draft");gp_Dir pull=axisDir(request.find("direction")?word(request,"direction"):"Z");
             double degrees=scalar(request,"angle");if(!(std::abs(degrees)>0&&std::abs(degrees)<89))throw std::runtime_error("Draft angle must be in (-89, 89) degrees excluding 0");
@@ -749,7 +756,7 @@ V modelSolidNative(const V& request){
         }else if(op=="linear_pattern"||op=="circular_pattern"||op=="mirror"){
             result=patterned(input,request,op,refs);many=true;
         }else if(op=="split_plane"){
-            result=splitOnPlane(input,request,refs);many=true;
+            result=splitOnPlane031b(input,request,refs,splitReceipt);many=true;
         }else if(op=="offset"){
             requireOneSolid(input,"Solid offset");const double distance=scalar(request,"distance");
             if(std::abs(distance)<=1e-6||std::abs(distance)>1e4)throw std::runtime_error("Solid offset distance must be nonzero and within 10000 mm");
@@ -775,7 +782,7 @@ V modelSolidNative(const V& request){
             BRepBuilderAPI_Transform algorithm(input,placement,true);if(!algorithm.IsDone())throw std::runtime_error("Native rigid transform failed");result=algorithm.Shape();refs=propagated(refs,result,algorithm);
         }else throw std::runtime_error("Unknown native solid operation");
     }
-    V output=many?finishBodies(result,refs):finish(result,refs);if(op=="extrude"){V report=need(output,"report");report.set("extrusion",extrusionReceipt);output.set("report",report);}if(op=="vertex_pull"){V report=need(output,"report");report.set("vertex_pull",vertexReceipt);report.set("self_intersections_checked",V::makeBool(true));output.set("report",report);}if(op=="split_line"){V report=need(output,"report");report.set("split_line",splitReceipt);report.set("area_mm2",need(splitReceipt,"result_area_mm2"));output.set("report",report);}return output;
+    V output=many?finishBodies(result,refs):finish(result,refs);if(op=="extrude"){V report=need(output,"report");report.set("extrusion",extrusionReceipt);output.set("report",report);}if(op=="vertex_pull"){V report=need(output,"report");report.set("vertex_pull",vertexReceipt);report.set("self_intersections_checked",V::makeBool(true));output.set("report",report);}if(op=="split_line"){V report=need(output,"report");report.set("split_line",splitReceipt);report.set("area_mm2",need(splitReceipt,"result_area_mm2"));output.set("report",report);}if(op=="split_plane"||op=="split_surface"||op=="split_tool"||op=="fillet"||op=="chamfer"){V report=need(output,"report");report.set(op=="fillet"||op=="chamfer"?"edge_finish":"split",splitReceipt);output.set("report",report);}return output;
     }
     catch(const std::exception& error){
         std::string context="Native "+op;

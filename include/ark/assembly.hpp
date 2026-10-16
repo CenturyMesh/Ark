@@ -49,6 +49,8 @@ struct AssemblyDiagnostics {
     double maxPositionMm=0,maxAngleDeg=0;
     std::vector<u64> unconstrainedNodes;
     arkjson::Value patternReports; // Exact source/placement evidence and explicitly unchecked domains.
+    arkjson::Value rigidClusters; // Analytically condensed same-carrier full-frame attachments.
+    int solverMovingBodies=0,eliminatedRigidBodies=0;
 };
 struct AssemblyPlacement {u64 node=0,feature=0;std::string name;Mat4 world;bool visible=true;int copy=0;};
 class Document;

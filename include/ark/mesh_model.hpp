@@ -18,4 +18,9 @@ arkjson::Value meshToPayload(const Mesh& mesh);
 // the same connectivity to follow dimensional/coordinate changes.
 std::string meshTopologyFingerprint(const Mesh& mesh);
 
+// Bounded complete triangle-pair contact diagnosis. Shared indexed vertices and
+// edges alone are legal adjacency; contact beyond that simplex is reported.
+// Rejects invalid/degenerate inputs or exhausted limits instead of partial proof.
+arkjson::Value inspectMeshSelfIntersections(const Mesh& mesh);
+
 } // namespace ark

@@ -9,12 +9,15 @@
 #include <BRepAlgoAPI_Splitter.hxx>
 #include <BRepClass_FaceClassifier.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
+#include <BRepBuilderAPI_Copy.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakeSolid.hxx>
 #include <BRepBuilderAPI_MakeVertex.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepTools_WireExplorer.hxx>
 #include <BRep_Tool.hxx>
+#include <BRep_Builder.hxx>
+#include <BRepTools.hxx>
 #include <BRepBuilderAPI_Sewing.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepBuilderAPI_PipeError.hxx>
@@ -33,12 +36,25 @@
 #include <BRepPrimAPI_MakeRevol.hxx>
 #include <GeomAPI_Interpolate.hxx>
 #include <GeomAPI_ProjectPointOnCurve.hxx>
+#include <GeomAPI_ProjectPointOnSurf.hxx>
+#include <GeomProjLib.hxx>
+#include <GeomLib.hxx>
+#include <Geom_RectangularTrimmedSurface.hxx>
+#include <Geom_BoundedSurface.hxx>
+#include <GeomFill_TrihedronLaw.hxx>
+#include <GeomFill_CurveAndTrihedron.hxx>
+#include <GeomFill_EvolvedSection.hxx>
+#include <GeomFill_Sweep.hxx>
+#include <GeomAdaptor_Curve.hxx>
+#include <Law_Linear.hxx>
 #include <GCPnts_AbscissaPoint.hxx>
 #include <Geom_BSplineSurface.hxx>
 #include <Geom_BezierCurve.hxx>
+#include <Geom_BezierSurface.hxx>
 #include <gp_Ax2.hxx>
 #include <gp_Circ.hxx>
 #include <Geom_Circle.hxx>
+#include <Geom_Line.hxx>
 #include <Geom_TrimmedCurve.hxx>
 #include <GeomAbs_Shape.hxx>
 #include <NCollection_Array1.hxx>
@@ -53,6 +69,7 @@
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Shape.hxx>
 #include <TopoDS_Wire.hxx>
+#include <TopoDS_Compound.hxx>
 #include <gp_Ax1.hxx>
 #include <gp_Ax2.hxx>
 #include <gp_Trsf.hxx>
@@ -1103,7 +1120,13 @@ V loft(const V& request) {
     return loftEvidence(result,request);
 }
 
+V surfaceEditResult(const TopoDS_Shape& face,const char* operation);
+#include "advanced_surfaces_031b.inl"
+
 V surfaceFill(const V& request) {
+    if (request.find("constraints")) return constrainedSurfaceFill031B(request);
+    if (request.find("validation") || request.find("mode"))
+        throw std::runtime_error("Constrained fill/blend options require explicit support constraints");
     Profile profile = profileOf(required(request, "profile"), true);
     const double tol = tolerance(request);
     BRepOffsetAPI_MakeFilling maker(3, 15, 2, false, tol, tol);
@@ -1299,11 +1322,17 @@ TopoDS_Wire alignSectionPlane(Profile section, const gp_Dir& tangent) {
     return TopoDS::Wire(transformed.Shape());
 }
 
+#include "advanced_sweep_surface_031b.inl"
+
 V sweepSurface(const V& request) {
+    if (request.find("laws")) return lawSweep031B(request);
     const bool solid = flag(request, "solid", false);
-    const Profile path = profileOf(required(request, "path"), false);
+    Profile path = profileOf(required(request, "path"), false);
+    const TopoDS_Face preparedSupport=prepareSweepPath031B(request, path);
     BRepOffsetAPI_MakePipeShell pipe(path.wire);
     pipe.SetMode(false); // corrected Frenet; straight paths stay parallel to the section plane
+    std::string orientationSolver="native_pipe_trihedron";
+    const std::string orientation = setSweepOrientation031B(request, path, pipe, preparedSupport, orientationSolver);
     const bool contact = flag(request, "contact", false);
     const bool correction = flag(request, "correction", true);
     V frames=V::makeArr();
@@ -1330,7 +1359,7 @@ V sweepSurface(const V& request) {
     if (solid && !pipe.MakeSolid()) throw std::runtime_error("OCCT sweep did not make a solid");
     TopoDS_Shape shape = pipe.Shape();
     if (solid && properties(shape) < 0) shape.Reverse();
-    V result=tag(shapeResult(shape, solid), "sweep");if(!frames.arr.empty()){V report=required(result,"report");report.set("varying_sections",V::makeNum(frames.arr.size()));report.set("dynamic_tangent_frames",frames);report.set("station_authority",V::makeStr("exact_path_arclength_and_derivative"));report.set("display_mesh_authoritative",V::makeBool(false));result.set("report",report);}return result;
+    V result=tag(shapeResult(shape, solid), "sweep");V report=required(result,"report");report.set("orientation_mode",V::makeStr(orientation));report.set("orientation_solver",V::makeStr(orientationSolver));if(!frames.arr.empty()){report.set("varying_sections",V::makeNum(frames.arr.size()));report.set("dynamic_tangent_frames",frames);report.set("station_authority",V::makeStr("exact_path_arclength_and_derivative"));report.set("display_mesh_authoritative",V::makeBool(false));}result.set("report",report);return result;
 }
 
 V surfaceEditResult(const TopoDS_Shape& face,const char* operation){
@@ -1571,6 +1600,9 @@ V modelSurfaceNative(const V& request) {
         if (operation.str == "surface_extract_face") return extractSurfaceFace(request);
         if (operation.str == "surface_trim_plane") return trimSurfacePlane(request);
         if (operation.str == "surface_trim_wire") return trimSurfaceWire(request);
+        if (operation.str == "surface_untrim") return untrimExtendSurface031B(request, false);
+        if (operation.str == "surface_extend") return untrimExtendSurface031B(request, true);
+        if (operation.str == "surface_mutual_trim") return mutualTrimSurfaces031B(request);
         if (operation.str == "surface_repair") return repairSurfaceOrientation(request);
         if (operation.str == "sew") return sewSurfaces(request);
         if (operation.str == "collision") return collisionReport(request);

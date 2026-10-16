@@ -11,6 +11,7 @@
 #include "ark/holes_orchestrator.hpp"
 #include "ark/collision.hpp"
 #include "ark/mesh_model.hpp"
+#include "ark/modeling_031b.hpp"
 #include "ark/datum_authoring.hpp"
 #include "ark/spatial_sketch.hpp"
 #include "ark/bom.hpp"
@@ -455,7 +456,7 @@ bool metadataOnlyApply(const Document& document,const V& args){
                 return true;
     });
 }
-void AgentSession::remember(bool projectBoundary){prepared_.clear();if(projectBoundary||document.iterationHistory.t==V::Null){undo_.push_back(documentToJson(document));if(undo_.size()>32)undo_.erase(undo_.begin());}redo_.clear();}
+void AgentSession::remember(bool projectBoundary){if(projectBoundary)prepared_.clear();if(projectBoundary||document.iterationHistory.t==V::Null){undo_.push_back(documentToJson(document));if(undo_.size()>32)undo_.erase(undo_.begin());}redo_.clear();}
 int patternCopies(const Document& document,const AssemblyNode& node){
     if(!node.pattern.active)return 1;
     try{return (int)assemblyPatternCopySlots(document,node).size();}catch(const std::exception&){return 0;}
@@ -467,6 +468,7 @@ bool profileReady(const Document& document,const NamedSketch& sketch){
 V designView(const Document& document,u64 revision){
     V r=V::makeObj(),parameters=V::makeArr(),features=V::makeArr(),sketches=V::makeArr(),nodes=V::makeArr();
     r.set("revision",V::makeNum((double)revision));
+    if(!document.derivedGeometryStatus.isNull())r.set("derived_geometry",document.derivedGeometryStatus);
     const ExprEnv env=document.buildEnv();
     std::unordered_map<u64,std::set<u64>> placedDefinitions;V identityErrors=V::makeArr();
     for(const auto& node:document.assembly)if(node.feature)try{for(int copy:assemblyPatternCopySlots(document,node))placedDefinitions[assemblyPatternCopyFeature(document,node,copy)].insert(node.id);}catch(const std::exception& error){V issue=V::makeObj();issue.set("node",V::makeNum((double)node.id));issue.set("error",V::makeStr(error.what()));identityErrors.arr.push_back(issue);}
@@ -553,6 +555,7 @@ V selectedDesignView(const Document& document,u64 revision,const V& args){
     }
     V result=V::makeObj(),totals=V::makeObj(),selection=V::makeArr(),included=V::makeArr(),scopes=V::makeObj();
     result.set("revision",V::makeNum((double)revision));result.set("units",V::makeStr("mm"));result.set("parameter_error",V::makeStr(document.parameterError));
+    if(!document.derivedGeometryStatus.isNull())result.set("derived_geometry",document.derivedGeometryStatus);
     result.set("partial",V::makeBool(true));result.set("scope",V::makeStr(requestedIds?"selected_features":"selected_sections"));
     for(u64 feature:selectedIds)selection.arr.push_back(V::makeNum((double)feature));if(requestedIds)result.set("selected_ids",selection);
     for(const auto& section:allowed){const auto* all=complete.find(section.c_str());totals.set(section,V::makeNum(all?all->arr.size():0));}
@@ -635,6 +638,7 @@ V AgentSession::info() const {
     V r=V::makeObj();r.set("revision",V::makeNum((double)revision));r.set("units",V::makeStr("mm"));
     r.set("feature_count",V::makeNum(document.features.size()));r.set("recompute_ms",V::makeNum(document.recomputeMs));
     r.set("features_reused",V::makeNum(document.recomputeReused));r.set("features_evaluated",V::makeNum(document.recomputeEvaluated));
+    if(!document.derivedGeometryStatus.isNull())r.set("derived_geometry",document.derivedGeometryStatus);
     r.set("feature_workers",V::makeNum(document.featureWorkers));r.set("native_threads_per_worker",V::makeNum(document.nativeThreadsPerWorker));r.set("parallel_features",V::makeNum(document.parallelFeatures));r.set("peak_parallel_features",V::makeNum(document.peakParallelFeatures));r.set("dependency_edges",V::makeNum(document.dependencyEdges));
     r.set("parameter_error",V::makeStr(document.parameterError));
     r.set("history_tip",document.historyTip?V::makeNum((double)document.historyTip):V{});
@@ -769,6 +773,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
             if(!hasId&&!hasSketch)throw std::runtime_error("reference_inspect needs an id or a sketch");
             if(hasReference&&hasFind)throw std::runtime_error("Pass reference or find");
             if(hasFind&&!hasId)throw std::runtime_error("reference_inspect find needs an id");
+            bool compact=false;if(const auto* detail=args.find("detail")){if(detail->t!=V::Str||(detail->str!="full"&&detail->str!="frame"))throw std::runtime_error("Reference detail must be full or frame");compact=detail->str=="frame";if(compact&&!hasReference&&!hasFind)throw std::runtime_error("Reference detail frame needs reference or find");}
             V r=V::makeObj();r.set("revision",V::makeNum((double)revision));
             if(hasSketch){
                 auto* sketch=document.findSketch(str(args,"sketch"));if(!sketch)throw std::runtime_error("Sketch not found");
@@ -806,6 +811,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
                 }
                 r.set("id",V::makeNum((double)feature));
             }
+            if(compact)r.obj.erase(std::remove_if(r.obj.begin(),r.obj.end(),[](const auto& kv){return kv.first=="topology"||kv.first=="points";}),r.obj.end());
             return result(r);
         }
         if(tool=="kernel_info")return result(nativeKernelInfo());
@@ -879,7 +885,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
             Document next;std::string error;if(!replace&&!documentFromJson(documentToJson(document,true,false),next,&error))throw std::runtime_error(error);
             Feature f;f.type=FeatureType::SourceTube;f.name="Source tube";if(auto p=package.find("source_name"))f.name=p->asStr();f.sourceData=std::move(package);auto id=next.addFeature(std::move(f));validated(next);
             if(documentToJson(next).size()>4*1024*1024)throw std::runtime_error("Imported document exceeds current 4 MiB persistence limit; use replace:true for a standalone source document");
-            remember();document=std::move(next);++revision;V r=info();r.set("created_id",V::makeNum((double)id));r.set("report",*document.find(id)->sourceData.find("report"));return result(r);
+            if(replace)prepared_.clear();remember();document=std::move(next);++revision;V r=info();r.set("created_id",V::makeNum((double)id));r.set("report",*document.find(id)->sourceData.find("report"));return result(r);
         }
         if(tool=="import_sheet_step"){
             bool replace=false;if(auto p=args.find("replace")){if(p->t!=V::Bool)throw std::runtime_error("replace must be boolean");replace=p->b;}
@@ -893,7 +899,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
             Document next;std::string error;if(!replace&&!documentFromJson(documentToJson(document,true,false),next,&error))throw std::runtime_error(error);
             Feature feature;feature.type=FeatureType::SourceSheet;feature.name="Source sheet";if(auto name=package.find("source_name"))feature.name=name->asStr();feature.sourceData=std::move(package);u64 created=next.addFeature(std::move(feature));validated(next);
             if(documentToJson(next).size()>4*1024*1024)throw std::runtime_error("Imported sheet exceeds current 4 MiB document limit");
-            remember();document=std::move(next);++revision;V answer=info();answer.set("created_id",V::makeNum((double)created));if(auto report=document.find(created)->sourceData.find("report"))answer.set("report",*report);return result(answer);
+            if(replace)prepared_.clear();remember();document=std::move(next);++revision;V answer=info();answer.set("created_id",V::makeNum((double)created));if(auto report=document.find(created)->sourceData.find("report"))answer.set("report",*report);return result(answer);
         }
         if(tool=="import_mesh"){
             if(auto expected=args.find("expected_revision")){if(expected->t!=V::Num||expected->num!=(double)revision)throw std::runtime_error("Revision conflict; read doc_info with detail design and retry");}
@@ -1037,6 +1043,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
             std::vector<AssemblyPlacement> placements;std::string error;AssemblyDiagnostics diagnostics;if(!resolveAssembly(document,placements,error,&diagnostics))throw std::runtime_error(error);
             V r=info(),nodes=V::makeArr(),bom=V::makeArr();std::map<u64,size_t> quantities;
             if(const auto* drive=args.find("drive"))r.set("drive",driveReport(driveAssembly(document,*drive),revision));
+            if(const auto* sweep=args.find("sweep"))r.set("sweep",inspectAssemblySweep031B(document,*sweep));
             for(auto& p:placements){V j=V::makeObj(),matrix=V::makeArr();j.set("node",V::makeNum((double)p.node));j.set("feature",V::makeNum((double)p.feature));j.set("name",V::makeStr(p.name));j.set("visible",V::makeBool(p.visible));j.set("copy",V::makeNum(p.copy));
                 for(auto x:p.world.m)matrix.arr.push_back(V::makeNum(x));
                 j.set("world_column_major",matrix);nodes.arr.push_back(j);++quantities[p.feature];}
@@ -1220,7 +1227,16 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
                     auto* f=next.find(featureRef(next,field(c,"id")));if(!f)throw std::runtime_error("Feature not found");
                     if(skeletonOwnsFeature(next,f->id)&&(c.find("p_remove")||c.find("p")||c.find("native")||c.find("inputs")||c.find("name")))throw std::runtime_error("Skeleton pattern is source-owned; edit its skeleton code or inputs");
                     if(f->type==FeatureType::MeshEdit&&!args.find("expected_revision"))throw std::runtime_error("Indexed mesh edits require expected_revision");
-                    if((f->type==FeatureType::SourceTube||f->type==FeatureType::SourceSheet)&&(c.find("p_remove")||c.find("p")||c.find("bends")||c.find("notches")||c.find("native")))throw std::runtime_error("Imported source geometry is read-only; reimport changed STEP");
+                    if((f->type==FeatureType::SourceTube||f->type==FeatureType::SourceSheet)&&(c.find("p_remove")||c.find("p")||c.find("bends")||c.find("notches")||c.find("native")||c.find("inputs")))throw std::runtime_error("Imported source geometry is read-only; reimport changed STEP");
+                    if(const auto* inputs=c.find("inputs")){
+                        if(!args.find("expected_revision"))throw std::runtime_error("Feature input retarget requires expected_revision from current doc_info");
+                        if(inputs->t!=V::Arr||inputs->arr.size()>128)throw std::runtime_error("Feature inputs must be an array of at most 128 earlier dependencies");
+                        std::vector<u64> replacement;std::set<u64> unique;bool earlier=true;
+                        for(const auto& value:inputs->arr){const auto input=featureRef(next,value);if(!next.find(input))throw std::runtime_error("Feature input not found: "+std::to_string(input));if(input==f->id||!unique.insert(input).second)throw std::runtime_error("Feature inputs cannot repeat or reference the edited feature");
+                            earlier=false;for(const auto& prior:next.features){if(prior.id==f->id)break;if(prior.id==input){earlier=true;break;}}
+                            if(!earlier)throw std::runtime_error("Feature inputs must precede the edited feature; forward or cyclic retarget rejected");replacement.push_back(input);}
+                        f->inputs=std::move(replacement);
+                    }
                     if(const auto* remove=c.find("p_remove")){if(remove->t!=V::Arr||remove->arr.size()>128)throw std::runtime_error("p_remove requires at most 128 parameter names");for(const auto& key:remove->arr){if(key.t!=V::Str||key.str.empty())throw std::runtime_error("p_remove names must be nonempty text");f->p.erase(key.str);}}
                     if(auto p=c.find("p"))params(*f,*p);
                     if(auto b=c.find("bends"))bends(*f,*b);
@@ -1338,6 +1354,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
         }
         if(tool=="mesh_inspect"){
             auto& cached=meshCache(args);V report=cached.report.json();report.set("topology_fingerprint",V::makeStr(meshTopologyFingerprint(cached.mesh)));
+            if(const auto* check=args.find("self_intersections")){if(check->t!=V::Bool)throw std::runtime_error("self_intersections must be boolean");if(check->b)report.set("self_intersection_diagnosis",inspectMeshSelfIntersections(cached.mesh));}
             if(auto key=args.find("id");key&&!args.find("node")){
                 const u64 feature=id(*key);
                 for(const Body& body:document.evalBodies)if(body.id==feature&&body.nativeData.find("mesh_operation")){report.set("mesh_model",body.nativeData);break;}
@@ -1548,7 +1565,7 @@ if(std::string(d.name)=="doc_apply"){
     V commandItems;
     for(const auto& tool:list.arr)if(tool.find("name")->str=="doc_apply")commandItems=*tool.find("inputSchema")->find("properties")->find("commands")->find("items");
     for(auto& tool:list.arr)if(tool.find("name")->str=="doc_preview"){V schema=*tool.find("inputSchema"),props=*schema.find("properties"),commands=*props.find("commands");commands.set("items",commandItems);props.set("commands",commands);schema.set("properties",props);tool.set("inputSchema",schema);}
-    return list;
+    enrichModeling031BSchemas(list);return list;
 }
 Document makeDemoDocument(){
     Document d;d.setParam("radius","32");d.setParam("tube","11");d.setParam("waves","7");d.setParam("amplitude","0.22");

@@ -2,12 +2,14 @@
 #include "ark/cad_import.hpp"
 // ARK-Point :: serialize.cpp — document persistence over arkjson.
 #include "ark/serialize.hpp"
+#include "ark/modeling_031b.hpp"
 #include "ark/bom.hpp"
 #include "ark/agent_activity.hpp"
 #include "ark/iteration_history.hpp"
 #include "ark/document_container.hpp"
 #include "ark/manufacturing.hpp"
 #include "ark/native_features.hpp"
+#include "ark/native_backend.hpp"
 #include "ark/skeleton.hpp"
 #include "ark/drawings.hpp"
 #include "ark/assembly_authoring.hpp"
@@ -634,6 +636,7 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
     }
     if(generation41Document(doc))r.set("version",Value::makeNum(41));
     if(generation42Document(doc))r.set("version",Value::makeNum(42));
+    if(modeling031BNeedsVersion43(doc))r.set("version",Value::makeNum(43));
     if(includeAudit&&includeHistory)iterationPersist(r,doc);
     canonicalDocumentKeys(r);
     std::string serialized=r.dump();
@@ -647,7 +650,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     Value v;
     if(!arkjson::parse(json,v)) return fail("malformed JSON");
     if(v.t!=Value::Obj) return fail("root must be object");
-    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || !std::isfinite(ver->num)||ver->num!=std::floor(ver->num)||ver->num<1||ver->num>42))
+    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || !std::isfinite(ver->num)||ver->num!=std::floor(ver->num)||ver->num<1||ver->num>43))
         return fail("unsupported document version");
     Value history;std::string historyError;if(!iterationExpand(v,history,historyError))return fail(historyError);
 
@@ -893,6 +896,7 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     if(appearance024BNeedsVersion39(nd)){const auto* version=v.find("version");if(!version||version->num<39)return fail("Embedded images, stamps, face appearances and exact split lines require document version 39");}
     if(generation41Document(nd)){const auto* version=v.find("version");if(!version||version->num<41)return fail("Scoped container v2 and explicit surface orientation repair require document version 41");}
     if(generation42Document(nd)){const auto* version=v.find("version");if(!version||version->num<42)return fail("Emission, authored nets and exact wood/vent recipes require document version 42");}
+    if(modeling031BNeedsVersion43(nd)){const auto* version=v.find("version");if(!version||version->num<43)return fail("031B advanced modeling and occurrence-bound cable recipes require document version 43");}
     try{validateAppearanceAuthoring024B(nd,false);}catch(const std::exception& error){return fail(error.what());}
     try{validateDesignContainerWorkspace(nd);validateSkeletonAuthoring(nd);}catch(const std::exception& error){return fail(error.what());}
     doc=std::move(nd);
@@ -967,7 +971,10 @@ bool saveDocument(const Document& doc, const char* path){
     auto destination=std::filesystem::path(reinterpret_cast<const char8_t*>(path)),temporary=destination;
     auto extension=destination.extension().string();
     std::transform(extension.begin(),extension.end(),extension.begin(),[](unsigned char c){return static_cast<char>(std::tolower(c));});
-    if(extension!=".arkjson"&&extension!=".json")return saveDocumentContainer(persistedRoot,path);
+    if(extension!=".arkjson"&&extension!=".json"){
+        try{const auto derived=nativeDocumentResults(doc);return saveDocumentContainer(persistedRoot,path,nullptr,nullptr,&derived);}
+        catch(const std::exception&){return false;}
+    }
     temporary+=".tmp";
     std::ofstream f(temporary,std::ios::binary|std::ios::trunc);
     if(!f) return false;
@@ -986,8 +993,22 @@ bool saveDocument(const Document& doc, const char* path){
 bool loadDocument(const char* path, Document& doc, std::string* err){
     if(!path||!*path){ if(err)*err="empty path"; return false; }
     if(documentContainerFile(path)){
-        Value root;if(!loadDocumentContainer(path,root,err))return false;
-        return documentFromJson(root.dump(),doc,err);
+        Value root;DocumentDerivedPayloads derived;std::string discarded;
+        if(!loadDocumentContainer(path,root,err,&derived,&discarded))return false;
+        Document candidate;if(!documentFromJson(root.dump(),candidate,err))return false;
+        try{
+            candidate.derivedGeometryStatus=stageNativeDocumentResults(candidate,derived);
+            if(!discarded.empty()){
+                candidate.derivedGeometryStatus=Value::makeObj();
+                candidate.derivedGeometryStatus.set("status",Value::makeStr("discarded"));
+                candidate.derivedGeometryStatus.set("reason",Value::makeStr(discarded));
+            }
+        }catch(const std::exception& failure){
+            candidate.derivedGeometryStatus=Value::makeObj();
+            candidate.derivedGeometryStatus.set("status",Value::makeStr("discarded"));
+            candidate.derivedGeometryStatus.set("reason",Value::makeStr(failure.what()));
+        }
+        doc=std::move(candidate);return true;
     }
     std::ifstream f(std::filesystem::path(reinterpret_cast<const char8_t*>(path)),std::ios::binary);
     if(!f){ if(err)*err=std::string("cannot open ")+path; return false; }

@@ -9,6 +9,21 @@ The public iteration and numeric runtime are defined in
 increasing sequence and its principal phase. The letter is a roadmap phase, not a
 month; it does not declare the phase complete. The `.ark` format evolves separately.
 
+031B develops **A.01/A.03/A.04/B.02/B.03/B.04/D.02/D.04/E.01** through retained
+solid recipes, advanced surface/sweep controls, triangle diagnostics/editing,
+rigid mate condensation and sampled occurrence-bound cable inspection. Its
+[performance work](PERFORMANCE_031B.md) adds explicit dependency reuse, measured
+native phases, a bounded local result cache and optional native B-rep persistence
+alongside editable history; first-open validation and full rebuild remain
+separate workloads requiring their own timing evidence.
+The [candidate refresh contract](CANDIDATE_REFRESH_031B.md) addresses independent
+parallel proposals through retained recipes and explicit current-revision
+refresh. Genuine dependency conflicts, role ownership and atomic commits remain
+enforced; provider token savings have not been measured.
+The bounded local implementation is **Verificado no escopo** with 123/123 native
+and 80/80 portable checks; broader milestone statuses remain **Parcial** outside
+their recorded scope. See [031B](iterations/031B.md) and its linked contracts.
+
 This matrix keeps the 35 stable milestone IDs from the
 [12 October 2026 audit](history/ROADMAP-2026-10-12.md). The public archive retains
 technical evidence and failed benchmark attempts. The English matrix summarizes

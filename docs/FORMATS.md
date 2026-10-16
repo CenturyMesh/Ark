@@ -1,4 +1,23 @@
-# Current source semantics — format 41
+# Current source semantics — format 43
+
+031B conditionally selects source43 for the retained solid recipes, advanced
+fillet/chamfer/split semantics, constrained fill/blend, surface extend/untrim/
+mutual trim, sweep orientation/law recipes, new indexed mesh edit operations,
+and occurrence-bound cable endpoints/obstacles. Numeric node and producer IDs
+retain dependency custody. The prior source and all authored expressions remain
+editable; evaluated B-reps, triangle reports, pose samples and reference frames
+are derived data. A relabelled older source rejects rather than ignoring these
+recipes, including through iteration history. Physical container version 2 adds
+optional evaluated native geometry independently of source43. Older documents
+retain their actual required earlier source format; container version 1 remains
+readable.
+
+030D's source42 remains the retained format for emission, authored mesh nets
+and exact Wood/Vent recipes without newer authoring. See [031B](iterations/031B.md)
+and the individual [solid](SOLIDS_031B.md), [surface](SURFACES_031B.md),
+[mesh](MESHES_031B.md) and [assembly/cable](ASSEMBLY_SWEEP_031B.md) contracts.
+
+## Previous source extension — format 41
 
 029B conditionally selects source 41 for explicit `surface_edit` orientation
 repair and `ark.design-container.v2` workspaces. Repair keeps the single input,
@@ -95,6 +114,10 @@ document format are independent. See [018B](iterations/018B.md) for that scope.
 ## `.ark`
 
 An owned binary container carries editable design intent and persistent iterations.
+Container version 2 can additionally carry evaluated native geometry for reopening
+on a machine without the original local cache. These are native OCCT B-reps and
+associated result data, not STEP exchange files. The editable feature recipes and
+iteration history remain in their existing authored representation.
 See [binary storage and recovery](DOCUMENT_CONTAINER.md) and [iteration history](ITERATION_HISTORY.md).
 The loader detects the signature and still accepts legacy JSON `.ark` files.
 Explicit `.arkjson` and `.json` exports retain the versioned JSON representation, for example:
@@ -118,9 +141,38 @@ Feature parameters are expression **strings** in saved files. Unknown document v
 
 Named sketches contain `name`, `entities` and `constraints`. Entity kinds are `point` (two DOFs), `line` (four DOFs) and `circle` (three DOFs). Constraint types are discoverable through the source's `constraintTypeName` contract.
 
-Serialization sorts object keys for deterministic diffs. Binary saves update changed chunks in a SQLite transaction; initial saves and legacy migrations use a staged sibling replacement. A concurrent write lock causes a save failure; independently opened sessions do not merge edits or detect intervening completed saves. Loaded content is parsed into scratch state; the agent API commits only after successful geometry evaluation.
+Serialization sorts object keys for deterministic diffs. Binary saves update changed chunks in a SQLite transaction; initial saves and legacy JSON migrations use a staged sibling replacement. Upgrading a version-1 binary container to version 2 changes the schema, authored chunks and optional geometry in one transaction; failure rolls all of them back. A concurrent write lock causes a save failure; independently opened sessions do not merge edits or detect intervening completed saves. Loaded content is parsed into scratch state; the agent API commits only after successful geometry evaluation or supported saved-geometry validation.
 
-Camera, UI layout, cached meshes and session revision are not persisted. Iteration nodes, branches and undo/redo targets are persisted in document version 27. The physical container version is independent of the document and session versions.
+The version-2 `ark_derived` table stores independently hashed payloads keyed by
+the exact normalized native request and producer executable/dependency identity.
+Normal dependency traversal still constructs the current requests; only exact
+matches are candidates for reuse. A matching portable entry must pass native
+B-rep validation and regeneration of current geometric measurements, references
+and display mesh. Operation-specific diagnostics retained from a previous
+evaluation are identified as saved evidence, not proof of a new recipe replay.
+Unsupported operations, changed inputs or producers, and rejected entries use
+normal evaluation. First opening on another machine therefore does not promise
+the timing of an already validated local cache hit.
+
+Authored content retains its **4 MiB logical limit** and **16 MiB typed-value and
+authored payload limits**. Optional derived data has a separate **64 MiB per-entry
+limit**, **128 MiB total limit** and at most **8192 entries**; the physical file
+limit is **256 MiB**. Derived bytes do not enter the authoring hash or iteration
+history. A malformed optional payload discards the derived section with an
+explicit diagnostic; authoring checksum, schema and structural database failures
+remain hard load failures. Missing geometry can be rebuilt from valid authoring.
+
+New authoring-only binary saves remain version 1. Adding saved geometry upgrades
+to version 2. Saving an existing version-2 file without derived entries removes
+stale entries and keeps version 2. Physical format downgrade is unsupported;
+older runtimes reject the newer container. Explicit `.arkjson`/`.json` exports
+remain authoring/history exports and do not carry this optional evaluated cache.
+
+Camera, UI layout and session revision are not persisted. Display meshes may be
+present inside optional saved native results, but portable restoration regenerates
+them from the B-rep. Iteration nodes, branches and undo/redo targets are persisted
+in document version 27. The physical container version is independent of the
+document and session versions.
 
 ## `.arkops`
 

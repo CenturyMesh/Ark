@@ -217,7 +217,9 @@ Mesh decimate(Mesh mesh, double ratio) {
         }
         const Mesh trial = compact();
         const MeshReport audit = analyzeMesh(trial);
-        const bool preserved = before.closedOriented() ? audit.closedOriented() : audit.boundaryEdges == before.boundaryEdges;
+        const bool preserved = before.closedOriented()
+            ? audit.closedOriented() && before.signedVolume * audit.signedVolume > 0 && audit.triangles >= 4
+            : audit.boundaryEdges == before.boundaryEdges;
         if (!preserved || audit.nonManifoldEdges || audit.inconsistentEdges || audit.degenerateTriangles) {
             faces = savedFaces;
             points[bestA] = saved;
@@ -407,17 +409,20 @@ double requiredNumber(const Feature& feature, const ExprEnv& env, const char* ke
     return feature.num(env, key);
 }
 
-Mesh directEdit(Mesh mesh, const Feature& feature, const ExprEnv& env) {
+#include "mesh_031b.inl"
+
+Mesh directEdit(Mesh mesh, const Feature& feature, const ExprEnv& env, V& operationReport) {
     const MeshReport before=analyzeMesh(mesh);
     requireFiniteManifold(before,"mesh_edit");
     if(feature.nativeSpec.t!=V::Obj)throw std::runtime_error("mesh_edit requires a native selection recipe");
-    for(const auto& entry:feature.nativeSpec.obj)
-        if(entry.first!="op"&&entry.first!="vertices"&&entry.first!="triangles"&&entry.first!="source_topology"&&entry.first!="require_closed")
-            throw std::runtime_error("Unknown mesh_edit field: "+entry.first);
     const V* topology=feature.nativeSpec.find("source_topology");
     if(!topology||topology->t!=V::Str||topology->str!=meshTopologyFingerprint(mesh))
         throw std::runtime_error("Mesh selection topology changed; inspect the input mesh and select its current vertices or patch");
     const auto* op=feature.nativeSpec.find("op");
+    if(op&&op->t==V::Str&&isAdvancedMeshEdit(op->str))return advancedMeshEdit(std::move(mesh),feature,env,operationReport);
+    for(const auto& entry:feature.nativeSpec.obj)
+        if(entry.first!="op"&&entry.first!="vertices"&&entry.first!="triangles"&&entry.first!="source_topology"&&entry.first!="require_closed")
+            throw std::runtime_error("Unknown mesh_edit field: "+entry.first);
     if(!op||op->t!=V::Str||(op->str!="displace"&&op->str!="extrude"))throw std::runtime_error("mesh_edit op must be displace or extrude");
     bool requireClosed=before.closedOriented();
     if(const auto* flag=feature.nativeSpec.find("require_closed")){
@@ -471,6 +476,8 @@ Mesh directEdit(Mesh mesh, const Feature& feature, const ExprEnv& env) {
 }
 
 using V = arkjson::Value;
+
+V inspectMeshSelfIntersections(const Mesh& mesh){return meshSelfCheck(mesh);}
 
 std::string meshTopologyFingerprint(const Mesh& mesh){
     u64 hash=14695981039346656037ull;
@@ -555,6 +562,7 @@ Body evaluateMeshFeature(const Feature& feature, const ExprEnv& env, const std::
                          const TessOptions& tessellation) {
     bool sampled = false;
     Mesh mesh;
+    V operationReport=V::makeObj();
     const char* operation = featureTypeName(feature.type);
     if (feature.type == FeatureType::MeshNet) {
         mesh=authoredMeshNet(feature,env);
@@ -584,7 +592,7 @@ Body evaluateMeshFeature(const Feature& feature, const ExprEnv& env, const std::
         } else if (feature.type == FeatureType::MeshFill) {
             mesh = fillBoundaries(std::move(mesh));
         } else if (feature.type == FeatureType::MeshEdit) {
-            mesh = directEdit(std::move(mesh),feature,env);
+            mesh = directEdit(std::move(mesh),feature,env,operationReport);
         } else throw std::runtime_error("Unknown mesh feature");
         (void)audit;
     }
@@ -619,6 +627,7 @@ Body evaluateMeshFeature(const Feature& feature, const ExprEnv& env, const std::
     }
     report.set("topology_fingerprint",V::makeStr(meshTopologyFingerprint(mesh)));
     if(feature.type==FeatureType::MeshEdit){report.set("edit_mode",*feature.nativeSpec.find("op"));report.set("source_topology",*feature.nativeSpec.find("source_topology"));report.set("closed_boundary_preserved",V::makeBool(after.closedOriented()));report.set("self_intersections_checked",V::makeBool(false));}
+    for(const auto& entry:operationReport.obj)report.set(entry.first,entry.second);
     body.nativeData = std::move(report);
     body.baked = std::make_unique<Mesh>(std::move(mesh));
     return body;

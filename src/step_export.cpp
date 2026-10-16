@@ -1,5 +1,7 @@
 #include "ark/step_export.hpp"
 #include "ark/native_backend.hpp"
+#include "ark/iteration_history.hpp"
+#include "ark/model.hpp"
 #include "ark/notch.hpp"
 #include <filesystem>
 #include <fstream>
@@ -8,11 +10,16 @@
 #include <cstdlib>
 #include <stdexcept>
 #include <cerrno>
+#include <map>
+#include <mutex>
+#include <set>
+#include <cwctype>
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include <bcrypt.h>
 #else
 #include <unistd.h>
 #include <sys/wait.h>
@@ -21,14 +28,29 @@
 #endif
 namespace ark {
 namespace fs=std::filesystem;using V=arkjson::Value;
+struct NativeDocumentResultContext {
+    std::mutex mutex;
+    std::map<std::string,std::string> entries;
+    void discard(const std::string& key){std::lock_guard<std::mutex> lock(mutex);entries.erase(key);}
+    bool take(const std::string& key,std::string& bytes){
+        if(key.empty())return false;
+        std::lock_guard<std::mutex> lock(mutex);auto found=entries.find(key);if(found==entries.end())return false;
+        bytes=std::move(found->second);entries.erase(found);return true;
+    }
+};
 namespace {
+thread_local std::shared_ptr<NativeDocumentResultContext> activeNativeDocumentResults;
 thread_local unsigned long long nativeRequests=0,nativeStarts=0;
 std::atomic<unsigned long long> totalNativeRequests{0},totalNativeStarts{0};
+std::atomic<unsigned long long> totalNativeCacheHits{0},totalNativeCacheMisses{0};
+std::atomic<unsigned long long> totalNativeDocumentRestores{0},totalNativeDocumentRejections{0};
+std::mutex nativeDocumentRejectionMutex;std::string nativeDocumentLastRejection;
+std::map<std::string,unsigned long long> nativeDocumentRejectionReasons;
 thread_local int nativeThreadOverride=0;
 int effectiveNativeBudget(){if(nativeThreadOverride)return nativeThreadOverride;if(const char* value=std::getenv("ARK_NATIVE_THREADS")){int n=std::atoi(value);if(n>=1&&n<=64)return n;}return (int)std::min(8u,std::max(1u,std::thread::hardware_concurrency()));}
 fs::path utf8path(const std::string& value){return fs::u8path(value);}
 std::string utf8(const fs::path& path){auto s=path.u8string();return std::string(s.begin(),s.end());}
-std::string read(const fs::path& path){std::ifstream f(path,std::ios::binary);if(!f)return {};f.seekg(0,std::ios::end);auto n=f.tellg();if(n<0||n>256*1024*1024)throw std::runtime_error("Native worker result exceeds 256 MiB");f.seekg(0);return std::string(std::istreambuf_iterator<char>(f),{});}
+std::string read(const fs::path& path){std::ifstream f(path,std::ios::binary);if(!f)return {};f.seekg(0,std::ios::end);auto n=f.tellg();if(n<0||n>256*1024*1024)throw std::runtime_error("Native worker result exceeds 256 MiB");f.seekg(0);std::string bytes((size_t)n,'\0');if(n&&!f.read(bytes.data(),n))throw std::runtime_error("Cannot read complete native worker result");return bytes;}
 fs::path executableDirectory(){
 #ifdef _WIN32
     wchar_t path[32768]{};GetModuleFileNameW(nullptr,path,32768);return fs::path(path).parent_path();
@@ -88,10 +110,11 @@ class ResidentWorker {
     fs::path executable;
     fs::file_time_type executableTime{};
     std::string threadSetting;
+    std::string producerIdentity;
     unsigned requests=0;
 public:
-    bool matches(const fs::path& path)const{const char* value=std::getenv("ARK_NATIVE_THREADS");return requests<256&&threadSetting==(value?value:"")&&executable==path&&executableTime==fs::last_write_time(path)&&process.value&&WaitForSingleObject(process.value,0)==WAIT_TIMEOUT;}
-    explicit ResidentWorker(const fs::path& worker):executable(worker),executableTime(fs::last_write_time(worker)){
+    bool matches(const fs::path& path,const std::string& identity)const{const char* value=std::getenv("ARK_NATIVE_THREADS");return requests<256&&producerIdentity==identity&&threadSetting==(value?value:"")&&executable==path&&executableTime==fs::last_write_time(path)&&process.value&&WaitForSingleObject(process.value,0)==WAIT_TIMEOUT;}
+    explicit ResidentWorker(const fs::path& worker,const std::string& identity):executable(worker),executableTime(fs::last_write_time(worker)),producerIdentity(identity){
         const char* value=std::getenv("ARK_NATIVE_THREADS");threadSetting=value?value:"";
         const auto prefix=L"Local\\"+temp.directory.filename().wstring();
         requestEvent.value=CreateEventW(nullptr,FALSE,FALSE,(prefix+L"-request").c_str());doneEvent.value=CreateEventW(nullptr,FALSE,FALSE,(prefix+L"-done").c_str());
@@ -134,26 +157,77 @@ unsigned execute(const fs::path& worker,const Temporary& temp){
 }
 #endif
 std::string stepPath(const std::string& value){auto path=fs::absolute(utf8path(value));auto extension=path.extension().string();std::transform(extension.begin(),extension.end(),extension.begin(),[](unsigned char c){return(char)std::tolower(c);});if(extension!=".step"&&extension!=".stp")throw std::runtime_error("STEP output must use .step or .stp");return utf8(path);}
-}
-V nativeWorkerRequest(const V& request){
-    ++nativeRequests;++totalNativeRequests;
-    V bounded=request;bounded.set("native_threads",V::makeNum(effectiveNativeBudget()));
+#include "native_result_cache.inl"
+V executeNativeRequest(const V& bounded,const fs::path& worker,const std::string& producerIdentity){
 #ifdef _WIN32
     if(const auto mode=std::getenv("ARK_NATIVE_ONESHOT");!mode||std::string(mode)!="1"){
         static thread_local std::unique_ptr<ResidentWorker> resident;
-        auto worker=workerPath();if(!resident||!resident->matches(worker)){resident.reset();resident=std::make_unique<ResidentWorker>(worker);++nativeStarts;++totalNativeStarts;}
+        if(!resident||!resident->matches(worker,producerIdentity)){resident.reset();resident=std::make_unique<ResidentWorker>(worker,producerIdentity);++nativeStarts;++totalNativeStarts;}
         try{return resident->call(bounded);}catch(...){resident.reset();throw;}
     }
 #endif
-    auto worker=workerPath();Temporary temp;{std::ofstream file(temp.directory/"request.json",std::ios::binary);file<<bounded.dump();if(!file)throw std::runtime_error("Cannot write native request");}
+    Temporary temp;{std::ofstream file(temp.directory/"request.json",std::ios::binary);file<<bounded.dump();if(!file)throw std::runtime_error("Cannot write native request");}
     ++nativeStarts;++totalNativeStarts;unsigned code=execute(worker,temp);V response;bool parsed=arkjson::parse(read(temp.directory/"result.json"),response)&&response.t==V::Obj;
     if(code||!parsed||response.find("error")){
         std::string error=parsed&&response.find("error")?response.find("error")->asStr():read(temp.directory/"worker.log");if(error.empty())error="Native worker failed (exit "+std::to_string(code)+")";if(error.size()>1200)error=error.substr(error.size()-1200);throw std::runtime_error("OCCT: "+error);
     }return response;
 }
+}
+NativeDocumentResultScope::NativeDocumentResultScope(std::shared_ptr<NativeDocumentResultContext> context):previous(std::move(activeNativeDocumentResults)){activeNativeDocumentResults=std::move(context);}
+NativeDocumentResultScope::~NativeDocumentResultScope(){activeNativeDocumentResults=std::move(previous);}
+DocumentDerivedPayloads nativeDocumentResults(const Document& document){
+    DocumentDerivedPayloads records;std::set<std::string> keys;size_t total=0;
+    const auto directory=NativeResultCache::cacheDirectory();if(directory.empty())return records;
+    for(const auto& body:document.evalBodies){
+        const auto* identity=body.nativeData.find("native_cache_key");
+        if(!identity||identity->t!=V::Str||identity->str.size()!=64||identity->str.find_first_not_of("0123456789abcdef")!=std::string::npos||!keys.insert(identity->str).second)continue;
+        std::string bytes;V checked;
+        try{const auto path=directory/(identity->str+".arknative");if(fs::is_regular_file(path)&&fs::file_size(path)<=NativeResultCache::maxEntry)bytes=read(path);}
+        catch(const fs::filesystem_error&){}
+        if(!NativeResultCache::decode(identity->str,bytes,checked)){
+            // The document owns this evaluated body even after cache eviction.
+            // Retained host diagnostics remain saved evidence; portable restore
+            // regenerates current geometry and rejects unsupported evidence.
+            V saved=body.nativeData;saved.obj.erase(std::remove_if(saved.obj.begin(),saved.obj.end(),[](const auto& field){return field.first=="native_cache_key"||field.first=="mesh";}),saved.obj.end());
+            const auto payload=saved.dump();bytes="ARK-NATIVE-CACHE1\n"+identity->str+"\n"+nativeCacheDigest(payload)+"\n"+payload;
+            if(!NativeResultCache::decode(identity->str,bytes,checked))continue;
+        }
+        // Portable restore regenerates display tessellation from the B-rep.
+        // Do not duplicate that disposable mesh in the document payload.
+        checked.obj.erase(std::remove_if(checked.obj.begin(),checked.obj.end(),[](const auto& field){return field.first=="native_cache_key"||field.first=="mesh";}),checked.obj.end());
+        const auto portable=checked.dump();bytes="ARK-NATIVE-CACHE1\n"+identity->str+"\n"+nativeCacheDigest(portable)+"\n"+portable;
+        if(bytes.size()>maxDocumentDerivedBytes-total)throw std::runtime_error("Saved native geometry exceeds derived capacity");
+        total+=bytes.size();records.push_back({identity->str,std::move(bytes)});
+    }return records;
+}
+V stageNativeDocumentResults(Document& document,const DocumentDerivedPayloads& records){
+    std::map<std::string,std::string> staged;size_t total=0,rejected=0;
+    for(const auto& record:records){
+        if(record.key.size()!=64||record.key.find_first_not_of("0123456789abcdef")!=std::string::npos||record.bytes.size()>NativeResultCache::maxEntry||record.bytes.size()>maxDocumentDerivedBytes-total){++rejected;continue;}
+        V checked;if(!NativeResultCache::decode(record.key,record.bytes,checked)||!staged.emplace(record.key,record.bytes).second){++rejected;continue;}total+=record.bytes.size();
+    }
+    V status=V::makeObj();status.set("status",V::makeStr(staged.empty()?(rejected?"discarded":"none"):"loaded_saved_geometry"));status.set("entries_staged",V::makeNum(staged.size()));status.set("entries_discarded",V::makeNum(rejected));status.set("validation",V::makeStr("on_matching_native_request"));status.set("derivation_replayed",V::makeBool(false));
+    auto context=std::make_shared<NativeDocumentResultContext>();context->entries=std::move(staged);document.pendingNativeGeometry=std::move(context);return status;
+}
+V nativeWorkerRequest(const V& request){
+    ++nativeRequests;++totalNativeRequests;
+    V bounded=request;bounded.set("native_threads",V::makeNum(effectiveNativeBudget()));
+    const auto worker=workerPath();NativeResultCache cache(bounded,worker);V hit;
+    if(cache.lookup(hit)){if(activeNativeDocumentResults)activeNativeDocumentResults->discard(cache.key);++totalNativeCacheHits;return cache.identified(std::move(hit));}
+    if(!cache.entry.empty())++totalNativeCacheMisses;
+    std::string portable;
+    if(!cache.entry.empty()&&activeNativeDocumentResults&&activeNativeDocumentResults->take(cache.key,portable)&&NativeResultCache::decode(cache.key,portable,hit)){
+        V restore=V::makeObj();restore.set("operation",V::makeStr("restore_native_result"));restore.set("resolved_request",bounded);restore.set("saved_result",std::move(hit));restore.set("native_threads",V::makeNum(effectiveNativeBudget()));
+        try{auto result=executeNativeRequest(restore,worker,cache.producerIdentity);++totalNativeDocumentRestores;cache.store(result);return cache.identified(std::move(result));}
+        catch(const std::exception& error){++totalNativeDocumentRejections;std::lock_guard<std::mutex> lock(nativeDocumentRejectionMutex);nativeDocumentLastRejection=std::string(error.what()).substr(0,1200);const auto reason=nativeDocumentLastRejection.substr(0,240);if(nativeDocumentRejectionReasons.count(reason)||nativeDocumentRejectionReasons.size()<16)++nativeDocumentRejectionReasons[reason];else ++nativeDocumentRejectionReasons["other"];/* Reconstruct this request normally. */}
+    }
+    auto result=executeNativeRequest(bounded,worker,cache.producerIdentity);cache.store(result);return cache.identified(std::move(result));
+}
 int setNativeThreadBudget(int threads){if(threads<0||threads>64)throw std::runtime_error("Native thread budget must be 0..64");int old=nativeThreadOverride;nativeThreadOverride=threads;return old;}
 V nativeModelRequest(const V& model){V request=V::makeObj();request.set("operation",V::makeStr("model"));request.set("request",model);return nativeWorkerRequest(request);}
-V nativeKernelInfo(){V request=V::makeObj();request.set("operation",V::makeStr("kernel_info"));V result=nativeWorkerRequest(request);result.set("worker_requests",V::makeNum((double)nativeRequests));result.set("worker_process_starts",V::makeNum((double)nativeStarts));result.set("total_worker_requests",V::makeNum((double)totalNativeRequests.load()));result.set("total_worker_process_starts",V::makeNum((double)totalNativeStarts.load()));
+V nativeKernelInfo(){V request=V::makeObj();request.set("operation",V::makeStr("kernel_info"));V result=nativeWorkerRequest(request);result.set("worker_requests",V::makeNum((double)nativeRequests));result.set("worker_process_starts",V::makeNum((double)nativeStarts));result.set("total_worker_requests",V::makeNum((double)totalNativeRequests.load()));result.set("total_worker_process_starts",V::makeNum((double)totalNativeStarts.load()));result.set("native_result_cache_hits",V::makeNum((double)totalNativeCacheHits.load()));result.set("native_result_cache_misses",V::makeNum((double)totalNativeCacheMisses.load()));
+result.set("native_document_restores",V::makeNum((double)totalNativeDocumentRestores.load()));result.set("native_document_rejections",V::makeNum((double)totalNativeDocumentRejections.load()));
+{std::lock_guard<std::mutex> lock(nativeDocumentRejectionMutex);if(!nativeDocumentLastRejection.empty())result.set("native_document_last_rejection",V::makeStr(nativeDocumentLastRejection));V reasons=V::makeArr();for(const auto& [reason,count]:nativeDocumentRejectionReasons){V item=V::makeObj();item.set("reason",V::makeStr(reason));item.set("count",V::makeNum((double)count));reasons.arr.push_back(std::move(item));}result.set("native_document_rejection_reasons",std::move(reasons));}
 #ifdef _WIN32
 const char* mode=std::getenv("ARK_NATIVE_ONESHOT");result.set("worker_transport",V::makeStr(mode&&std::string(mode)=="1"?"one_shot":"resident_events"));
 #else

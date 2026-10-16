@@ -4,6 +4,8 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <chrono>
+#include <future>
 #include <stdexcept>
 namespace {
 using V=arkjson::Value;
@@ -14,6 +16,32 @@ V payload(const V& response){check(response.find("isError")&&!response.find("isE
 V apply(ark::AgentSession& s,const std::string& expression,const std::string& name="length"){V args=V::makeObj(),commands=V::makeArr(),op=V::makeObj();args.set("expected_revision",V::makeNum((double)s.revision));op.set("op",V::makeStr("param.set"));op.set("name",V::makeStr(name));op.set("expr",V::makeStr(expression));commands.arr.push_back(op);args.set("commands",commands);return args;}
 V restoreArgs(const ark::AgentSession& s,const std::string& id){V args=V::makeObj();args.set("id",V::makeStr(id));args.set("expected_revision",V::makeNum((double)s.revision));return args;}
 std::string bytes(const std::filesystem::path& p){std::ifstream f(p,std::ios::binary);return std::string(std::istreambuf_iterator<char>(f),{});}
+void memoContracts(const ark::Document& source){
+    // A fresh thread starts with an empty thread-local memo. No drawing files or
+    // native geometry are needed for this comparison of identical inputs.
+    auto measured=std::async(std::launch::async,[&](){
+        using Clock=std::chrono::steady_clock;std::string error;
+        const auto start=Clock::now();check(ark::iterationValidate(source,source.iterationHistory,error),error.c_str());
+        const auto cold=Clock::now();check(ark::iterationValidate(source,source.iterationHistory,error),error.c_str());
+        const auto warm=Clock::now();
+        V bad=source.iterationHistory;member(bad,"nodes").arr.front().set("motivation",V::makeStr("old node corrupted after warm validation"));
+        check(!ark::iterationValidate(source,bad,error),"Warm snapshot memo cannot hide old node corruption");
+        auto changed=source.authoringCopy();changed.setParam("memo_only_change","99");
+        check(!ark::iterationValidate(changed,source.iterationHistory,error),"Warm snapshot memo cannot hide changed head authoring");
+        bad=source.iterationHistory;member(bad,"undo_ids").arr.push_back(V::makeStr("missing-node"));
+        check(!ark::iterationValidate(source,bad,error),"Warm snapshot memo cannot hide corrupted undo stack");
+        check(ark::iterationValidate(source,source.iterationHistory,error),"Rejected history never poisons valid snapshot memo");
+        return std::pair{std::chrono::duration<double,std::milli>(cold-start).count(),std::chrono::duration<double,std::milli>(warm-cold).count()};
+    }).get();
+    ark::Document doc;doc.setParam("memo_version_fixture","3");V state=ark::iterationAuthoring(doc);
+    auto baseline=[](const V& value){const auto hash=ark::iterationSha256(value.dump());V h=V::makeObj();h.set("schema",V::makeNum(1));h.set("baseline",value);h.set("baseline_id",V::makeStr("baseline-"+hash));h.set("baseline_sha256",V::makeStr(hash));h.set("head_id",V::makeStr("baseline-"+hash));h.set("nodes",V::makeArr());h.set("blobs",V::makeObj());h.set("undo_ids",V::makeArr());h.set("redo_ids",V::makeArr());return h;};
+    std::string error;check(ark::iterationValidate(doc,baseline(state),error),"Canonical baseline warms snapshot memo");
+    state.set("version",V::makeNum(2));const auto distinct=baseline(state);
+    check(!ark::iterationValidate(doc,distinct,error),"Same authoring with a distinct noncanonical version cannot hit warm memo");
+    check(!ark::iterationValidate(doc,distinct,error),"Failed snapshot validation is not memoized as success");
+    check(!std::async(std::launch::async,[&](){std::string coldError;return ark::iterationValidate(doc,distinct,coldError);}).get(),"Cold and warm source-version validation agree");
+    std::cout<<"synthetic 101-node history validation cold_ms="<<measured.first<<" warm_ms="<<measured.second<<'\n';
+}
 }
 int main(){try{
     check(ark::iterationSha256("")=="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","SHA256 empty vector");
@@ -43,6 +71,7 @@ int main(){try{
     ark::AgentSession ids;V add=json(R"({"expected_revision":0,"commands":[{"op":"feature.add","type":"box","name":"A","p":{"dx":"1","dy":"1","dz":"1"}}]})");const auto added=payload(ids.call("doc_apply",add));const std::string beforeB=added.find("iteration_id")->str;add.set("expected_revision",V::makeNum(ids.revision));member(add,"commands").arr[0].set("name",V::makeStr("B"));const double bid=payload(ids.call("doc_apply",add)).find("created_ids")->arr[0].num;payload(ids.call("iteration_restore",restoreArgs(ids,beforeB)));add.set("expected_revision",V::makeNum(ids.revision));member(add,"commands").arr[0].set("name",V::makeStr("C"));check(payload(ids.call("doc_apply",add)).find("created_ids")->arr[0].num>bid,"branch restores do not reuse allocated feature ids");
     ark::AgentSession many;for(int i=0;i<100;++i){add.set("expected_revision",V::makeNum(many.revision));member(add,"commands").arr[0].set("name",V::makeStr("part "+std::to_string(i)));payload(many.call("doc_apply",add));}check(ark::documentToJson(many.document).size()<180000,"one-part-per-step history uses array deltas rather than full array snapshots");
     V page=payload(many.call("history_info",V::makeObj()));check(page.find("nodes")->arr.size()==64&&page.find("has_more")->b,"history first page is bounded and advertises older nodes");V older=V::makeObj();older.set("before_id",*page.find("next_before_id"));V tail=payload(many.call("history_info",older));check(tail.find("nodes")->arr.size()==36&&!tail.find("has_more")->b&&tail.find("next_before_id")->str.empty(),"pagination makes all retained nodes inspectable without overlap");payload(many.call("doc_apply",apply(many,"1")));check(payload(many.call("history_info",older)).find("nodes")->dump()==tail.find("nodes")->dump(),"history cursors remain stable under new commits");check(many.call("history_info",json(R"({"before_id":"missing"})")).find("isError")->b,"unknown history cursor rejects");
+    memoContracts(many.document);
     ark::AgentSession bounded;ark::Feature retained;retained.name="Retained native program";retained.type=ark::FeatureType::NativeSolid;retained.suppressed=true;retained.nativeSpec=json(R"({"op":"box"})");retained.nativeSpec.set("retained_source_bytes",V::makeStr(std::string(ark::maxDocumentBytes-3000,'x')));bounded.document.addFeature(retained);const auto boundedBefore=ark::documentToJson(bounded.document);ark::Document boundedRoundtrip;check(ark::documentFromJson(boundedBefore,boundedRoundtrip,&error),"large suppressed native authoring baseline is a legitimate document");
     V candidate=payload(bounded.call("doc_preview",apply(bounded,"1")));check(candidate.find("valid")->b&&candidate.find("candidate_cached")->b,"large valid prepared candidate cached");V commit=*candidate.find("apply");commit.set("motivation",V::makeStr(std::string(4096,'m')));check(bounded.call("doc_apply",commit).find("isError")->b&&bounded.revision==0&&ark::documentToJson(bounded.document)==boundedBefore,"prepared capacity failure restores document revision and prepared custody");commit.set("motivation",V::makeStr(""));payload(bounded.call("doc_apply",commit));check(bounded.document.getParam("length")==1&&bounded.revision==1,"capacity-rejected prepared candidate remains usable");
     V boundedJson=json(ark::documentToJson(bounded.document));const V& blobs=*boundedJson.find("iteration_history")->find("blobs");check(blobs.obj.size()==1,"large unchanged authoring string stored once in blob dictionary");tampered=boundedJson;member(member(tampered,"iteration_history"),"blobs").obj[0].second.str[0]='y';check(!ark::documentFromJson(tampered.dump(),destination,&error),"large blob tampering rejects");

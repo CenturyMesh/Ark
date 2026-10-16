@@ -7,6 +7,8 @@
 #include <random>
 #include <sstream>
 #include <set>
+#include <cmath>
+#include <functional>
 #include <stdexcept>
 
 namespace ark {
@@ -20,6 +22,7 @@ std::string fingerprint(const Document& doc){
 void checkRevision(const V& args,u64 revision){const auto* expected=args.find("expected_revision");if(!expected||expected->t!=V::Num||expected->num!=(double)revision)throw std::runtime_error("Revision conflict; read doc_info with detail design and retry");}
 size_t candidateBytes(const Document& doc){size_t bytes=documentToJson(doc).size();for(const auto& item:doc.referenceFrameCache){bytes+=item.second.brep.size()+item.second.topology.size();for(const auto& frame:item.second.frames)bytes+=frame.first.size()+frame.second.dump().size()*4;}for(const auto& b:doc.evalBodies){bytes+=2*b.nativeData.dump().size();if(b.baked)bytes+=2*(b.baked->pos.size()+b.baked->nrm.size()+b.baked->idx.size())*sizeof(float);bytes+=b.faces.size()*512;}return bytes;}
 std::string candidateId(){static std::atomic<unsigned long long> next{0};static const auto salt=[](){std::random_device random;return ((unsigned long long)random()<<32)^random();}();std::ostringstream out;out<<std::hex<<salt<<'-'<<++next;return out.str();}
+#include "candidate_scope_031b.inl"
 }
 arkjson::Value AgentSession::call(const std::string& tool,const V& args){
     const auto activityStarted=std::chrono::steady_clock::now();const auto activityBefore=revision;const auto* actor=args.find("actor");
@@ -56,14 +59,32 @@ arkjson::Value AgentSession::call(const std::string& tool,const V& args){
         return finish(std::move(response));
     }catch(const std::exception& exception){rollback();V error=V::makeObj();error.set("error",V::makeStr(exception.what()));error.set("error_code",V::makeStr(std::string(exception.what()).find("capacity")!=std::string::npos?"HISTORY_CAPACITY_EXCEEDED":"HISTORY_FAILED"));error.set("tool",V::makeStr(tool));error.set("revision",V::makeNum((double)revision));error.set("document_unchanged",V::makeBool(true));return finish(envelope(error,true));}
 }
-arkjson::Value AgentSession::preparePreview(const V& args){
-    checkRevision(args,revision);if(args.find("candidate_id"))throw std::runtime_error("Preview requires commands, not another candidate");
+arkjson::Value AgentSession::preparedRecipe(const std::string& id) const{
+    const auto found=std::find_if(prepared_.begin(),prepared_.end(),[&](const Prepared& p){return p.id==id;});
+    if(found==prepared_.end()||found->expires<=std::chrono::steady_clock::now())throw std::runtime_error("Prepared candidate missing, expired, evicted or already applied");
+    return found->recipe;
+}
+arkjson::Value AgentSession::preparePreview(const V& supplied){
+    checkRevision(supplied,revision);V args=supplied,refresh;std::shared_ptr<Document> previousGeometry;V previousScope;
+    if(const auto* id=supplied.find("candidate_id")){
+        for(const auto& field:supplied.obj)if(field.first!="candidate_id"&&field.first!="expected_revision"&&field.first!="detail")throw std::runtime_error("CANDIDATE_REFRESH_UNSUPPORTED: refresh accepts candidate_id, current expected_revision and optional detail only");
+        if(id->t!=V::Str)throw std::runtime_error("candidate_id must be text");
+        const auto found=std::find_if(prepared_.begin(),prepared_.end(),[&](const Prepared& p){return p.id==id->str;});
+        if(found==prepared_.end()||found->expires<=std::chrono::steady_clock::now())throw std::runtime_error("Prepared candidate missing, expired, evicted or already applied");
+        if(found->requiresDfmAcceptance||!found->refreshUnsupported.empty()||found->readScope.isNull())throw std::runtime_error("CANDIDATE_REFRESH_UNSUPPORTED: "+(found->refreshUnsupported.empty()?std::string("proposal requires a fresh explicit preview"):found->refreshUnsupported));
+        V current;try{current=candidateReadScope(document,found->recipe);}catch(const std::exception& error){throw std::runtime_error(std::string("CANDIDATE_REFRESH_CONFLICT: ")+error.what());}
+        if(current.dump()!=found->readScope.dump())throw std::runtime_error("CANDIDATE_REFRESH_CONFLICT: target, dependency or document context changed; inspect current design and submit a new explicit preview");
+        args=found->recipe;args.set("expected_revision",V::makeNum((double)revision));if(const auto* detail=supplied.find("detail"))args.set("detail",*detail);
+        previousGeometry=found->document;previousScope=found->readScope;
+        refresh=V::makeObj();refresh.set("source_candidate_id",*id);refresh.set("source_revision",V::makeNum((double)found->revision));refresh.set("current_revision",V::makeNum((double)revision));refresh.set("scope",V::makeStr("feature_dependencies_and_document_context"));
+    }
     bool changesOnly=false;if(const auto* detail=args.find("detail")){if(detail->t!=V::Str||(detail->str!="design"&&detail->str!="changes"))throw std::runtime_error("Preview detail must be design or changes");changesOnly=detail->str=="changes";}
     const auto now=std::chrono::steady_clock::now();
-    prepared_.erase(std::remove_if(prepared_.begin(),prepared_.end(),[&](const Prepared& p){return p.expires<=now||p.revision!=revision;}),prepared_.end());
+    prepared_.erase(std::remove_if(prepared_.begin(),prepared_.end(),[&](const Prepared& p){return p.expires<=now;}),prepared_.end());
     const bool metadataOnly=metadataOnlyApply(document,args)&&!args.find("checks");
     AgentSession candidate;candidate.document=document.authoringCopy();
     if(!metadataOnly){candidate.document.evaluationCache=document.evaluationCache;candidate.document.evaluationGeneration=document.evaluationGeneration;candidate.document.referenceFrameCache=document.referenceFrameCache;candidate.document.centroidCache=document.centroidCache;}
+    if(!metadataOnly&&previousGeometry){candidate.document.evaluationGeneration=std::max(candidate.document.evaluationGeneration,previousGeometry->evaluationGeneration);for(const auto& feature:previousScope.find("features")->arr){const auto id=(u64)feature.find("id")->num;const auto cached=previousGeometry->evaluationCache.find(id);if(cached!=previousGeometry->evaluationCache.end())candidate.document.evaluationCache[id]=cached->second;}}
     struct BorrowGeometry {
         Document& live;Document& preview;bool active=false;
         BorrowGeometry(Document& a,Document& b,bool requested):live(a),preview(b){if(requested)borrow();}
@@ -73,7 +94,7 @@ arkjson::Value AgentSession::preparePreview(const V& args){
     } borrowed(document,candidate.document,metadataOnly);
     candidate.document.iterationHistory=V{};candidate.suppressIterationHistory();candidate.suppressFailureCapture();candidate.document.evaluatingBodies=nullptr;candidate.revision=revision;
     const auto response=candidate.call("doc_apply",args);V out=V::makeObj();bool valid=!response.find("isError")->b;
-    out.set("valid",V::makeBool(valid));out.set("revision",V::makeNum((double)revision));out.set("candidate_result",*response.find("structuredContent"));out.set("apply",args);
+    out.set("valid",V::makeBool(valid));out.set("revision",V::makeNum((double)revision));out.set("candidate_result",*response.find("structuredContent"));out.set("apply",args);if(!refresh.isNull())out.set("refresh",refresh);
     if(!valid)return out;
     V view=V::makeObj();view.set("detail",V::makeStr("design"));V before,after;
     if(metadataOnly){borrowed.restore();before=*call("doc_info",view).find("structuredContent");borrowed.borrow();after=*candidate.call("doc_info",view).find("structuredContent");}
@@ -87,11 +108,15 @@ arkjson::Value AgentSession::preparePreview(const V& args){
         for(const auto& body:candidate.document.evalBodies)if(body.id==id)if(const auto* report=body.nativeData.find("report"))if(const auto* fit=report->find("end_fit")){V evidence=V::makeObj();evidence.set("id",V::makeNum((double)id));evidence.set("end_fit",*fit);fitEvidence.arr.push_back(evidence);}}
     V beforeSummary=V::makeObj(),afterSummary=V::makeObj();beforeSummary.set("revision",V::makeNum((double)revision));beforeSummary.set("features",beforeRows);beforeSummary.set("partial",V::makeBool(true));afterSummary.set("revision",V::makeNum((double)revision));afterSummary.set("features",afterRows);afterSummary.set("partial",V::makeBool(true));afterSummary.set("committed",V::makeBool(false));out.set("before",changesOnly?beforeSummary:before);out.set("after",changesOnly?afterSummary:after);out.set("changed_feature_ids",changed);out.set("end_fit_evidence",fitEvidence);out.set("detail",V::makeStr(changesOnly?"changes":"design"));if(changesOnly)out.set("summary_scope",V::makeStr("Changed feature definitions/evaluated evidence only; parameter/sketch/assembly changes remain in recipe and candidate_result."));
     borrowed.restore();
-    const size_t bytes=candidateBytes(candidate.document),budget=128u*1024u*1024u;
+    V readScope;std::string refreshUnsupported;try{readScope=candidateReadScope(document,args);}catch(const std::exception& error){refreshUnsupported=error.what();}
+    const auto baseline=fingerprint(document);
+    const size_t bytes=candidateBytes(candidate.document)+baseline.size()+args.dump().size()+readScope.dump().size()+refreshUnsupported.size(),budget=128u*1024u*1024u;
     if(bytes>budget){out.set("candidate_cached",V::makeBool(false));out.set("cache_reason",V::makeStr("Candidate exceeds 128 MiB cache budget; apply commands recomputes"));return out;}
     size_t used=0;for(const auto& p:prepared_)used+=p.bytes;
     while(!prepared_.empty()&&(prepared_.size()>=4||used+bytes>budget)){used-=prepared_.front().bytes;prepared_.erase(prepared_.begin());}
-    Prepared prepared;prepared.metadataOnly=metadataOnly;prepared.id=candidateId();prepared.baseline=fingerprint(document);prepared.revision=revision;prepared.bytes=bytes;prepared.document=std::make_shared<Document>(std::move(candidate.document));prepared.result=*response.find("structuredContent");prepared.expires=std::chrono::steady_clock::now()+std::chrono::minutes(5);
+    Prepared prepared;prepared.metadataOnly=metadataOnly;prepared.id=candidateId();prepared.baseline=baseline;prepared.revision=revision;prepared.bytes=bytes;prepared.document=std::make_shared<Document>(std::move(candidate.document));prepared.result=*response.find("structuredContent");prepared.expires=std::chrono::steady_clock::now()+std::chrono::minutes(5);
+    prepared.recipe=args;prepared.readScope=std::move(readScope);prepared.refreshUnsupported=std::move(refreshUnsupported);
+    out.set("refresh_supported",V::makeBool(prepared.refreshUnsupported.empty()));if(!prepared.refreshUnsupported.empty())out.set("refresh_reason",V::makeStr(prepared.refreshUnsupported));
     V apply=V::makeObj();apply.set("expected_revision",V::makeNum((double)revision));apply.set("candidate_id",V::makeStr(prepared.id));out.set("apply",apply);out.set("candidate_id",V::makeStr(prepared.id));out.set("candidate_cached",V::makeBool(true));out.set("expires_in_seconds",V::makeNum(300));
     // The expanded recipe remains inspectable and can be submitted explicitly.
     out.set("recipe",args);prepared_.push_back(std::move(prepared));return out;
@@ -143,17 +168,17 @@ arkjson::Value AgentSession::commitPrepared(const V& args){
     const auto* id=args.find("candidate_id");if(!id||id->t!=V::Str)throw std::runtime_error("candidate_id must be text");
     auto found=std::find_if(prepared_.begin(),prepared_.end(),[&](const Prepared& p){return p.id==id->str;});
     if(found==prepared_.end())throw std::runtime_error("Prepared candidate missing, evicted or already applied");
-    if(found->expires<=std::chrono::steady_clock::now()||found->revision!=revision||found->baseline!=fingerprint(document)){prepared_.erase(found);throw std::runtime_error("Prepared candidate expired or document changed; preview again");}
+    if(found->expires<=std::chrono::steady_clock::now()||found->revision!=revision||found->baseline!=fingerprint(document))throw std::runtime_error("Prepared candidate expired or document changed; explicitly refresh preview at the current revision");
     const auto* acceptance=args.find("accept_dfm");
     if(found->requiresDfmAcceptance&&(!acceptance||acceptance->t!=V::Bool||!acceptance->b))throw std::runtime_error("DFM_ACCEPTANCE_REQUIRED: review the retained comparison and explicitly pass accept_dfm:true");
     if(acceptance&&(acceptance->t!=V::Bool||!found->requiresDfmAcceptance))throw std::runtime_error("accept_dfm applies only to a retained manufacturing proposal");
     verifyAssemblyExternalReferences(*found->document);
     auto next=found->document;V out=found->result;if(found->requiresDfmAcceptance){out.set("dfm_comparison",found->dfmComparison);out.set("dfm_accepted",V::makeBool(true));}
     validateDesignContainerTransition(document,*next);
-    const bool metadata=found->metadataOnly;out.set("geometry_changed",V::makeBool(!out.find("geometry_recomputed")||out.find("geometry_recomputed")->b));remember();
+    const bool metadata=found->metadataOnly;const auto committedId=found->id;out.set("geometry_changed",V::makeBool(!out.find("geometry_recomputed")||out.find("geometry_recomputed")->b));remember();
     if(metadata){document.features=next->features;document.materials=next->materials;document.bomDocumentId=next->bomDocumentId;document.imageAssets=next->imageAssets;document.stamps=next->stamps;}
     else{auto activity=document.agentActivity;auto usage=document.usage;document=*next;document.agentActivity=std::move(activity);document.usage=std::move(usage);}
-    ++revision;prepared_.clear();
+    ++revision;prepared_.erase(std::remove_if(prepared_.begin(),prepared_.end(),[&](const Prepared& p){return p.id==committedId;}),prepared_.end());
     V evaluation=V::makeObj();for(const char* key:{"recompute_ms","features_evaluated","features_reused","parallel_features","peak_parallel_features"})if(const auto* value=out.find(key))evaluation.set(key,*value);out.set("prepared_evaluation",evaluation);
     out.set("features_evaluated",V::makeNum(0));out.set("features_reused",V::makeNum(document.evalBodies.size()));out.set("parallel_features",V::makeNum(0));out.set("peak_parallel_features",V::makeNum(0));
     out.set("revision",V::makeNum((double)revision));out.set("geometry_recomputed",V::makeBool(false));out.set("applied_prepared",V::makeBool(true));out.set("recompute_ms",V::makeNum(0));return out;

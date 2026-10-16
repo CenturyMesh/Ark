@@ -8,11 +8,35 @@
 #include <array>
 #include <vector>
 #include <string>
+#include <cstdint>
+#include <functional>
 class GProp_GProps;
 
 namespace ark::occt {
 using V=arkjson::Value;
 namespace fs=std::filesystem;
+// Opt-in request-local timing only. Trace rows never contain model data, paths,
+// B-reps, authored names, geometry coordinates or error text.
+class NativeProfileRequest {
+    void* state_=nullptr;
+public:
+    NativeProfileRequest() noexcept;
+    ~NativeProfileRequest() noexcept;
+    NativeProfileRequest(const NativeProfileRequest&)=delete;
+    NativeProfileRequest& operator=(const NativeProfileRequest&)=delete;
+    void operation(const std::string& worker,const std::string& model={}) noexcept;
+    void succeeded() noexcept;
+};
+class NativeProfileScope {
+    const char* name_=nullptr;
+    NativeProfileScope* parent_=nullptr;
+    std::uint64_t start_=0,children_=0;
+public:
+    explicit NativeProfileScope(const char* phase) noexcept;
+    ~NativeProfileScope() noexcept;
+    NativeProfileScope(const NativeProfileScope&)=delete;
+    NativeProfileScope& operator=(const NativeProfileScope&)=delete;
+};
 std::string readFile(const fs::path& path);
 void writeFile(const fs::path& path,const std::string& bytes);
 void replaceFile(const fs::path& staged,const fs::path& destination);
@@ -39,9 +63,16 @@ V matrix(const gp_Trsf& transform);
 std::string brepData(const TopoDS_Shape& shape); // base64 BRep, no tessellation
 TopoDS_Shape readBrep(const std::string& encoded);
 V shapeResult(const TopoDS_Shape& shape,bool requireSolid);
+// One local generation pipeline: validate, serialize, add producer references,
+// and derive selection/vertices from the same exact shape. No mutable cache.
+V generatedShapeResult(const TopoDS_Shape& shape,bool requireSolid,
+    const std::function<V(const std::string&)>& topologyBuilder,bool vertices=false);
 // Complete current-B-rep picking inventory without changing semantic aliases.
 // Generic names embed the exact B-rep digest and never retarget after a change.
 V completeSelectionReferences(V result);
+// Untrusted persisted state: validate the original B-rep and saved reference
+// bindings, regenerate current measurements/mesh, and preserve its exact bytes.
+V restoreNativeResult(const V& resolvedRequest,const V& savedResult);
 V shapeReport(const TopoDS_Shape& shape,bool requireSolid);
 double symmetricDifference(const TopoDS_Shape& a,const TopoDS_Shape& b);
 std::string kernelVersion();

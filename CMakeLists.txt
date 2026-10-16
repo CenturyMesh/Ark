@@ -28,6 +28,7 @@ target_include_directories(ark-sqlite PUBLIC third_party/sqlite)
 target_compile_definitions(ark-sqlite PRIVATE SQLITE_ENABLE_FTS5=1 SQLITE_THREADSAFE=1 SQLITE_OMIT_LOAD_EXTENSION=1 SQLITE_DQS=0 SQLITE_DEFAULT_FOREIGN_KEYS=1)
 target_link_libraries(ark-sqlite PUBLIC Threads::Threads)
 add_library(ark STATIC
+  src/modeling_031b.cpp
   src/wood_tools.cpp
   src/authoring_024b.cpp src/appearance_024b.cpp src/plane_sections_024b.cpp
   src/authoring_023b.cpp src/cad_import.cpp src/holes_orchestrator.cpp src/design_containers.cpp
@@ -124,6 +125,32 @@ add_executable(ark-mesh-model-tests tests/mesh_model_tests.cpp)
 foreach(app ark-cli ark-mcp ark-tests ark-agent-tests ark-mesh-model-tests)
   target_link_libraries(${app} PRIVATE ark)
 endforeach()
+
+# 031B modeling contracts use public synthetic fixtures only. Native geometry
+# checks link the pinned OCCT worker; portable mesh/contracts remain separate.
+foreach(module meshes contracts assembly_sweep persistence evaluation_performance container_snapshot persisted_geometry candidate_refresh)
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/${module}_031b_tests.cpp")
+    add_executable(ark-${module}-031b-tests tests/${module}_031b_tests.cpp)
+    target_link_libraries(ark-${module}-031b-tests PRIVATE ark ark-sqlite)
+    add_test(NAME ${module}-031b COMMAND ark-${module}-031b-tests)
+    set_tests_properties(${module}-031b PROPERTIES TIMEOUT 180)
+    if(ARK_WITH_OCCT)
+      add_dependencies(ark-${module}-031b-tests ark-occt-worker)
+      target_compile_definitions(ark-${module}-031b-tests PRIVATE ARK_CONTRACTS_NATIVE_TESTS=1)
+    endif()
+  endif()
+endforeach()
+if(ARK_WITH_OCCT)
+  foreach(module solids surfaces occt_profile native_cache native_snapshot)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/${module}_031b_tests.cpp")
+      add_executable(ark-${module}-031b-tests tests/${module}_031b_tests.cpp)
+      target_link_libraries(ark-${module}-031b-tests PRIVATE ark-occt ark)
+      add_dependencies(ark-${module}-031b-tests ark-occt-worker)
+      add_test(NAME native-${module}-031b COMMAND ark-${module}-031b-tests)
+      set_tests_properties(native-${module}-031b PROPERTIES TIMEOUT 240)
+    endif()
+  endforeach()
+endif()
 if(WIN32)
   enable_language(RC)
   target_link_libraries(ark PUBLIC advapi32 winhttp bcrypt crypt32 ws2_32 shell32 ole32 windowscodecs)
