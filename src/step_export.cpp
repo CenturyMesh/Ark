@@ -31,11 +31,15 @@ namespace fs=std::filesystem;using V=arkjson::Value;
 struct NativeDocumentResultContext {
     std::mutex mutex;
     std::map<std::string,std::string> entries;
-    void discard(const std::string& key){std::lock_guard<std::mutex> lock(mutex);entries.erase(key);}
-    bool take(const std::string& key,std::string& bytes){
+    std::map<std::string,std::string> requests;
+    void discard(const std::string& key,const std::string& request){std::string ignoredKey,ignoredBytes;take(key,request,ignoredKey,ignoredBytes);}
+    bool take(const std::string& key,const std::string& request,std::string& storedKey,std::string& bytes){
         if(key.empty())return false;
-        std::lock_guard<std::mutex> lock(mutex);auto found=entries.find(key);if(found==entries.end())return false;
-        bytes=std::move(found->second);entries.erase(found);return true;
+        std::lock_guard<std::mutex> lock(mutex);auto found=entries.find(key);
+        if(found==entries.end()){const auto indexed=requests.find(request);if(indexed==requests.end())return false;found=entries.find(indexed->second);if(found==entries.end())return false;}
+        storedKey=found->first;bytes=std::move(found->second);entries.erase(found);
+        for(auto it=requests.begin();it!=requests.end();)if(it->second==storedKey)it=requests.erase(it);else ++it;
+        return true;
     }
 };
 namespace {
@@ -188,12 +192,17 @@ DocumentDerivedPayloads nativeDocumentResults(const Document& document){
             // The document owns this evaluated body even after cache eviction.
             // Retained host diagnostics remain saved evidence; portable restore
             // regenerates current geometry and rejects unsupported evidence.
-            V saved=body.nativeData;saved.obj.erase(std::remove_if(saved.obj.begin(),saved.obj.end(),[](const auto& field){return field.first=="native_cache_key"||field.first=="mesh";}),saved.obj.end());
+            V saved=body.nativeData.metadata();saved.obj.erase(std::remove_if(saved.obj.begin(),saved.obj.end(),[](const auto& field){return field.first=="native_cache_key"||field.first=="mesh";}),saved.obj.end());
             const auto payload=saved.dump();bytes="ARK-NATIVE-CACHE1\n"+identity->str+"\n"+nativeCacheDigest(payload)+"\n"+payload;
             if(!NativeResultCache::decode(identity->str,bytes,checked))continue;
         }
         // Portable restore regenerates display tessellation from the B-rep.
         // Do not duplicate that disposable mesh in the document payload.
+        // An exact local cache hit may predate portable request receipts. The
+        // evaluated body was identified against the actual current request, so
+        // save that binding rather than perpetuating the old opaque payload.
+        std::string savedRequest,savedProducer;
+        if(NativeResultCache::portableIdentity(body.nativeData.metadata(),savedRequest,savedProducer))checked.set("native_cache_provenance",*body.nativeData.find("native_cache_provenance"));
         checked.obj.erase(std::remove_if(checked.obj.begin(),checked.obj.end(),[](const auto& field){return field.first=="native_cache_key"||field.first=="mesh";}),checked.obj.end());
         const auto portable=checked.dump();bytes="ARK-NATIVE-CACHE1\n"+identity->str+"\n"+nativeCacheDigest(portable)+"\n"+portable;
         if(bytes.size()>maxDocumentDerivedBytes-total)throw std::runtime_error("Saved native geometry exceeds derived capacity");
@@ -201,27 +210,42 @@ DocumentDerivedPayloads nativeDocumentResults(const Document& document){
     }return records;
 }
 V stageNativeDocumentResults(Document& document,const DocumentDerivedPayloads& records){
-    std::map<std::string,std::string> staged;size_t total=0,rejected=0;
+    std::map<std::string,std::string> staged,requests;std::set<std::string> ambiguous;size_t total=0,rejected=0,legacy=0;
     for(const auto& record:records){
         if(record.key.size()!=64||record.key.find_first_not_of("0123456789abcdef")!=std::string::npos||record.bytes.size()>NativeResultCache::maxEntry||record.bytes.size()>maxDocumentDerivedBytes-total){++rejected;continue;}
-        V checked;if(!NativeResultCache::decode(record.key,record.bytes,checked)||!staged.emplace(record.key,record.bytes).second){++rejected;continue;}total+=record.bytes.size();
+        V checked;if(!NativeResultCache::decode(record.key,record.bytes,checked)){++rejected;continue;}
+        std::string request,producer;const bool portable=NativeResultCache::portableIdentity(checked,request,producer);
+        if(checked.find("native_cache_provenance")&&!portable){++rejected;continue;}
+        if(!staged.emplace(record.key,record.bytes).second){++rejected;continue;}total+=record.bytes.size();
+        if(portable){if(!requests.emplace(request,record.key).second)ambiguous.insert(request);}else ++legacy;
     }
+    for(const auto& request:ambiguous)requests.erase(request);
     V status=V::makeObj();status.set("status",V::makeStr(staged.empty()?(rejected?"discarded":"none"):"loaded_saved_geometry"));status.set("entries_staged",V::makeNum(staged.size()));status.set("entries_discarded",V::makeNum(rejected));status.set("validation",V::makeStr("on_matching_native_request"));status.set("derivation_replayed",V::makeBool(false));
-    auto context=std::make_shared<NativeDocumentResultContext>();context->entries=std::move(staged);document.pendingNativeGeometry=std::move(context);return status;
+    status.set("portable_request_entries",V::makeNum(requests.size()));status.set("legacy_exact_key_entries",V::makeNum(legacy));status.set("ambiguous_request_entries",V::makeNum(ambiguous.size()));
+    auto context=std::make_shared<NativeDocumentResultContext>();context->entries=std::move(staged);context->requests=std::move(requests);document.pendingNativeGeometry=std::move(context);return status;
 }
-V nativeWorkerRequest(const V& request){
+static V cachedNativeRequest(const V& request,const std::function<V()>* evaluate=nullptr){
     ++nativeRequests;++totalNativeRequests;
     V bounded=request;bounded.set("native_threads",V::makeNum(effectiveNativeBudget()));
     const auto worker=workerPath();NativeResultCache cache(bounded,worker);V hit;
-    if(cache.lookup(hit)){if(activeNativeDocumentResults)activeNativeDocumentResults->discard(cache.key);++totalNativeCacheHits;return cache.identified(std::move(hit));}
+    if(cache.lookup(hit)){if(activeNativeDocumentResults)activeNativeDocumentResults->discard(cache.key,cache.resolvedRequestIdentity);++totalNativeCacheHits;return cache.identified(std::move(hit));}
     if(!cache.entry.empty())++totalNativeCacheMisses;
-    std::string portable;
-    if(!cache.entry.empty()&&activeNativeDocumentResults&&activeNativeDocumentResults->take(cache.key,portable)&&NativeResultCache::decode(cache.key,portable,hit)){
+    std::string portable,storedKey;
+    if(!cache.entry.empty()&&activeNativeDocumentResults&&activeNativeDocumentResults->take(cache.key,cache.resolvedRequestIdentity,storedKey,portable)&&NativeResultCache::decode(storedKey,portable,hit)){
+        std::string savedRequest,savedProducer;const bool hasIdentity=NativeResultCache::portableIdentity(hit,savedRequest,savedProducer);
+        // Old opaque keys remain usable only under the original exact-key rule.
+        // A new receipt is independently matched to the current effective input.
+        const bool mismatch=(hasIdentity&&savedRequest!=cache.resolvedRequestIdentity)||(!hasIdentity&&storedKey!=cache.key);
         V restore=V::makeObj();restore.set("operation",V::makeStr("restore_native_result"));restore.set("resolved_request",bounded);restore.set("saved_result",std::move(hit));restore.set("native_threads",V::makeNum(effectiveNativeBudget()));
-        try{auto result=executeNativeRequest(restore,worker,cache.producerIdentity);++totalNativeDocumentRestores;cache.store(result);return cache.identified(std::move(result));}
+        try{if(mismatch)throw std::runtime_error("Saved native request identity mismatch");auto result=executeNativeRequest(restore,worker,cache.producerIdentity);if(hasIdentity)result.set("native_snapshot_source_producer_sha256",V::makeStr(savedProducer));++totalNativeDocumentRestores;result=cache.identified(std::move(result));cache.store(result);return result;}
         catch(const std::exception& error){++totalNativeDocumentRejections;std::lock_guard<std::mutex> lock(nativeDocumentRejectionMutex);nativeDocumentLastRejection=std::string(error.what()).substr(0,1200);const auto reason=nativeDocumentLastRejection.substr(0,240);if(nativeDocumentRejectionReasons.count(reason)||nativeDocumentRejectionReasons.size()<16)++nativeDocumentRejectionReasons[reason];else ++nativeDocumentRejectionReasons["other"];/* Reconstruct this request normally. */}
     }
-    auto result=executeNativeRequest(bounded,worker,cache.producerIdentity);cache.store(result);return cache.identified(std::move(result));
+    auto result=cache.identified(evaluate?(*evaluate)():executeNativeRequest(bounded,worker,cache.producerIdentity));cache.store(result);return result;
+}
+V nativeWorkerRequest(const V& request){return cachedNativeRequest(request);}
+V nativeBooleanSequenceRequest(const V& request,const std::function<V()>& evaluate){
+    if(!evaluate||!NativeResultCache::booleanSequence(request))throw std::runtime_error("Invalid resolved native boolean sequence");
+    return cachedNativeRequest(request,&evaluate);
 }
 int setNativeThreadBudget(int threads){if(threads<0||threads>64)throw std::runtime_error("Native thread budget must be 0..64");int old=nativeThreadOverride;nativeThreadOverride=threads;return old;}
 V nativeModelRequest(const V& model){V request=V::makeObj();request.set("operation",V::makeStr("model"));request.set("request",model);return nativeWorkerRequest(request);}

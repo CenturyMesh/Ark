@@ -67,6 +67,7 @@ static unsigned threadSetting(const char* name,unsigned fallback,unsigned maximu
 struct NativeBudgetScope {int previous;explicit NativeBudgetScope(unsigned budget):previous(setNativeThreadBudget((int)budget)){}~NativeBudgetScope(){setNativeThreadBudget(previous);}};
 struct OuterParallelScope {bool previous;explicit OuterParallelScope(bool value):previous(setOuterParallelRegion(value)){}~OuterParallelScope(){setOuterParallelRegion(previous);}};
 static size_t valueMemory(const arkjson::Value& value){size_t bytes=sizeof(value)+value.str.size()+64;for(const auto& child:value.arr)bytes+=valueMemory(child);for(const auto& pair:value.obj)bytes+=sizeof(pair.first)+pair.first.size()+valueMemory(pair.second);return bytes;}
+static size_t valueMemory(const NativePayload& value){return value.maximumRetainedBytes();}
 
 static std::string featureParameterError(const Feature& f,const ExprEnv& env){
     std::string error;
@@ -187,7 +188,7 @@ static Body evalFeatureBody(const Feature& f, const ExprEnv& env, Document& doc,
             f64 u0=f.num(env,"u0",0),u1=f.num(env,"u1",K_2PI);
             f64 v0=f.num(env,"v0",0),v1=f.num(env,"v1",K_2PI);
             if(u1<=u0||v1<=v0){res.ok=false;res.error="surface domains must increase";return {};}
-            Body out; out.baked=std::make_unique<Mesh>();auto& m=*out.baked;
+            Body out;Mesh m;
             int cols=nu+(wrapU?0:1),rows=nv+(wrapV?0:1);
             m.pos.reserve((size_t)cols*rows*3);m.idx.reserve((size_t)nu*nv*6);
             ExprEnv local=env;
@@ -215,7 +216,7 @@ static Body evalFeatureBody(const Feature& f, const ExprEnv& env, Document& doc,
                 m.addTri(a,b,c);m.addTri(a,c,d);
             }
             if(wrapU&&wrapV)meshOrientOutward(m);
-            m.computeNormals();res.tris=m.triCount();return out;
+            m.computeNormals();res.tris=m.triCount();out.baked=std::make_unique<Mesh>(std::move(m));return out;
         }
         case FeatureType::Box:
             return makeBox({ f.num(env,"dx",10), f.num(env,"dy",10), f.num(env,"dz",10) });
@@ -279,9 +280,8 @@ static Body evalFeatureBody(const Feature& f, const ExprEnv& env, Document& doc,
             Mesh ma=A->tessellate(topt), mb=B->tessellate(topt);
             CsgOp op = f.opInt==1?CsgOp::Subtract : f.opInt==2?CsgOp::Intersect : CsgOp::Union;
             Body out; out.id=f.id;
-            out.baked=std::make_unique<Mesh>(meshBoolean(ma,mb,op));
-            meshOrientOutward(*out.baked);
-            out.baked->computeNormals();
+            Mesh combined=meshBoolean(ma,mb,op);meshOrientOutward(combined);combined.computeNormals();
+            out.baked=std::make_unique<Mesh>(std::move(combined));
             res.tris=out.baked->triCount();
             return out;
         }
@@ -304,7 +304,7 @@ static Body evalFeatureBody(const Feature& f, const ExprEnv& env, Document& doc,
                 res.ok=false; res.error="pattern: input missing"; return {}; }
             int n=(int)clamp(f.num(env,"count",3),1.0,256.0);
             Vec3 dir={f.num(env,"dx",20),f.num(env,"dy",0),f.num(env,"dz",0)};
-            Body acc; acc.id=f.id; acc.baked=std::make_unique<Mesh>();
+            Body acc; acc.id=f.id;Mesh combined;
             Mesh base=src->tessellate(topt);
             for(int k=0;k<n;++k){
                 Mesh part; part.pos=base.pos; part.idx=base.idx;
@@ -314,11 +314,10 @@ static Body evalFeatureBody(const Feature& f, const ExprEnv& env, Document& doc,
                 for(size_t i=0;i<nv;++i) in[i]={part.pos[i*3],part.pos[i*3+1],part.pos[i*3+2]};
                 transform_points_f32(M,in.data(),outv.data(),nv);
                 for(size_t i=0;i<nv;++i){ part.pos[i*3]=(f32)outv[i].x; part.pos[i*3+1]=(f32)outv[i].y; part.pos[i*3+2]=(f32)outv[i].z; }
-                acc.baked->append(part);
+                combined.append(part);
             }
-            acc.baked->weld(1e-7*tmax(src->bbox().diagonal(),1.0));
-            meshOrientOutward(*acc.baked);
-            acc.baked->computeNormals();
+            combined.weld(1e-7*tmax(src->bbox().diagonal(),1.0));
+            meshOrientOutward(combined);combined.computeNormals();acc.baked=std::make_unique<Mesh>(std::move(combined));
             res.tris=acc.baked->triCount();
             return acc;
         }
@@ -566,8 +565,15 @@ const std::vector<FeatureResult>& Document::recompute() {
     struct Drain {std::vector<std::future<Evaluation>>& jobs;~Drain(){for(auto& job:jobs)if(job.valid())job.wait();}} drain{jobs};
     auto schedule=[&](size_t current){
         if(featureWorkers<2||!parameterError.empty())return;
-        for(size_t i=current;i<jobs.size();++i)if(jobs[i].valid()&&jobs[i].wait_for(std::chrono::milliseconds(0))==std::future_status::ready){completed[i]=std::make_unique<Evaluation>(jobs[i].get());--outstanding;outstandingBytes-=jobBytes[i];}
-        if(!explicitInputs[current]){for(size_t i=0;i<jobs.size();++i)if(jobs[i].valid()){completed[i]=std::make_unique<Evaluation>(jobs[i].get());--outstanding;outstandingBytes-=jobBytes[i];}return;}
+        for(size_t i=current;i<jobs.size();++i)if(jobs[i].valid()&&jobs[i].wait_for(std::chrono::milliseconds(0))==std::future_status::ready){
+            completed[i]=std::make_unique<Evaluation>(jobs[i].get());
+            const auto& body=completed[i]->body;size_t retained=sizeof(Evaluation)+body.faces.size()*sizeof(Face)+valueMemory(body.nativeData);
+            if(body.baked)retained+=sizeof(Mesh)+(body.baked->pos.capacity()+body.baked->nrm.capacity())*sizeof(f32)+body.baked->idx.capacity()*sizeof(u32);
+            const size_t charge=std::max(jobBytes[i],retained);outstandingBytes+=charge-jobBytes[i];jobBytes[i]=charge;
+            // Finished outputs keep their slot and charge until publication.
+            // Otherwise looking beyond owner-only rows could accumulate a
+            // document-sized queue of completed, unpublished geometry.
+        }
         auto inputBody=[&](u64 id)->const Body*{
             for(const auto& b:work)if(b.id==id)return &b;
             auto found=indices.find(id);if(found==indices.end()||!activeFeatures[found->second]||features[found->second].suppressed)return nullptr;size_t index=found->second;
@@ -576,7 +582,8 @@ const std::vector<FeatureResult>& Document::recompute() {
         };
         for(size_t i=current+1;i<features.size()&&outstanding<featureWorkers-1;++i){
             if(!activeFeatures[i])continue;
-            if(!explicitInputs[i])break;
+            // Only owned, audited explicit-input jobs cross owner-only rows.
+            // Named sketch/datum/occurrence consumers stay on the owner thread.
             if(!explicitInputs[i]||jobs[i].valid()||completed[i]||published[i])continue;
             bool ready=true;for(size_t dependency:dependencies[i])ready&=inputBody(features[dependency].id)!=nullptr;if(!ready)continue;
             for(u64 id:features[i].inputs){
@@ -631,7 +638,7 @@ const std::vector<FeatureResult>& Document::recompute() {
         fr.error=!authoringDependencyErrors[index].empty()?authoringDependencyErrors[index]:parameterError.empty()?featureParameterError(f,env):parameterError;
         fr.ok=fr.error.empty();
         Body b;bool measuredByWorker=false;
-        try{if(fr.ok){auto cached=evaluationCache.find(f.id);if(cached!=evaluationCache.end()&&cached->second.key==cacheKey){b=*cached->second.body;fr.tris=cached->second.tris;++recomputeReused;}else if(completed[index]){b=std::move(completed[index]->body);fr=std::move(completed[index]->result);measuredByWorker=true;completed[index].reset();++recomputeEvaluated;}else if(jobs[index].valid()){auto value=jobs[index].get();--outstanding;outstandingBytes-=jobBytes[index];b=std::move(value.body);fr=std::move(value.result);measuredByWorker=true;++recomputeEvaluated;}else{OuterParallelScope nested(outstanding>0);NativeBudgetScope budget(!explicitInputs[index]&&outstanding==0?std::min(threadSetting("ARK_NATIVE_THREADS",8,64),cpuBudget):nativeThreadsPerWorker);activity->enter();try{b=evalFeatureBody(f,env,*this,work,fr,tessOpt);}catch(...){activity->leave();throw;}activity->leave();++recomputeEvaluated;}}}
+        try{if(fr.ok){auto cached=evaluationCache.find(f.id);if(cached!=evaluationCache.end()&&cached->second.key==cacheKey){b=*cached->second.body;fr.tris=cached->second.tris;++recomputeReused;}else if(completed[index]){b=std::move(completed[index]->body);fr=std::move(completed[index]->result);measuredByWorker=true;completed[index].reset();--outstanding;outstandingBytes-=jobBytes[index];++recomputeEvaluated;}else if(jobs[index].valid()){auto value=jobs[index].get();--outstanding;outstandingBytes-=jobBytes[index];b=std::move(value.body);fr=std::move(value.result);measuredByWorker=true;++recomputeEvaluated;}else{OuterParallelScope nested(outstanding>0);NativeBudgetScope budget(!explicitInputs[index]&&outstanding==0?std::min(threadSetting("ARK_NATIVE_THREADS",8,64),cpuBudget):nativeThreadsPerWorker);activity->enter();try{b=evalFeatureBody(f,env,*this,work,fr,tessOpt);}catch(...){activity->leave();throw;}activity->leave();++recomputeEvaluated;}}}
         catch(const std::exception& e){fr.ok=false;fr.error=e.what();}
         // A completed worker retains its actual evaluation duration; publication
         // wait time alone can be near zero even for an expensive operation.

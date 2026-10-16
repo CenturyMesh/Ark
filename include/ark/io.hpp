@@ -26,5 +26,11 @@ struct SnapCam {
     f64 fovDeg=35;
 };
 Image renderSnapshot(const Mesh& m, int W, int H, const SnapCam& cam);
+// One display material per triangle. Geometry authority remains the B-rep.
+struct SnapshotMaterial {
+    Vec3 color{0.72,0.75,0.80},emission{1,1,1};
+    double opacity=1,emissionIntensity=0,bloom=0.6,glow=12;
+};
+Image renderSnapshot(const Mesh& m,int W,int H,const SnapCam& cam,const std::vector<SnapshotMaterial>& materials);
 
 } // namespace ark

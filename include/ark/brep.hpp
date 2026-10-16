@@ -10,6 +10,7 @@
 #include "ark/nurbs.hpp"
 #include "ark/mesh.hpp"
 #include "ark/json.hpp"
+#include "ark/geometry_storage_032d.hpp"
 #include <memory>
 
 namespace ark {
@@ -51,13 +52,13 @@ struct SketchProfile {
 
 struct Body {
     Body()=default;
-    Body(const Body& b):faces(b.faces),baked(b.baked?std::make_unique<Mesh>(*b.baked):nullptr),nativeData(b.nativeData),cachedBox(b.cachedBox),id(b.id),dirty(b.dirty),kind(b.kind),pd1(b.pd1),pd2(b.pd2),profile(b.profile),prismHoles(b.prismHoles),sweepDeg(b.sweepDeg){}
+    Body(const Body& b):faces(b.faces),baked(b.baked),nativeData(b.nativeData),cachedBox(b.cachedBox),id(b.id),dirty(b.dirty),kind(b.kind),pd1(b.pd1),pd2(b.pd2),profile(b.profile),prismHoles(b.prismHoles),sweepDeg(b.sweepDeg){}
     Body(Body&&)=default;
     Body& operator=(Body&&)=default;
     Body& operator=(const Body& b){if(this!=&b){Body copy(b);*this=std::move(copy);}return *this;}
     std::vector<Face> faces;                           // exact B-rep faces
-    std::unique_ptr<Mesh> baked;                       // CSG result mesh (if any)
-    arkjson::Value nativeData;                          // derived exact OCCT result for this evaluation
+    MeshSnapshot baked;                               // shared immutable display geometry
+    NativePayload nativeData;                         // shared exact producer payload, packed display channels
     mutable AABB cachedBox;
     u64 id = 0;
     bool dirty = true;

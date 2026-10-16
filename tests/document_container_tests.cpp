@@ -62,6 +62,7 @@ void codecTests(){
 void containerTests(const fs::path& executable){
     Workspace workspace;auto path=workspace.path/"document.ark";std::string error;V root=fixture(128*1024),loaded;ark::DocumentContainerWriteStats first,second,changed;
     check(ark::saveDocumentContainer(root,utf8(path).c_str(),&error,&first),error);check(first.stagedReplacement&&first.generation==1&&ark::documentContainerFile(utf8(path).c_str()),"initial save publishes owned binary container");
+    {Sqlite sql(path);sqlite3_stmt* query=nullptr;check(sqlite3_prepare_v2(sql.db,"SELECT hash,kind,bytes FROM ark_payload",-1,&query,nullptr)==SQLITE_OK,"Portable digest cross-check prepares");size_t rows=0;while(sqlite3_step(query)==SQLITE_ROW){const std::string hash(reinterpret_cast<const char*>(sqlite3_column_text(query,0)));std::string payload(1,(char)sqlite3_column_int(query,1));payload.append(reinterpret_cast<const char*>(sqlite3_column_blob(query,2)),(size_t)sqlite3_column_bytes(query,2));check(ark::iterationSha256(payload)==hash,"Accelerated payload digest matches portable SHA-256 byte for byte");++rows;}sqlite3_finalize(query);check(rows>1,"Digest cross-check covers typed and external string payloads");check(sqlite3_prepare_v2(sql.db,"SELECT root_hash FROM ark_meta",-1,&query,nullptr)==SQLITE_OK&&sqlite3_step(query)==SQLITE_ROW,"Root digest cross-check reads");const std::string rootHash(reinterpret_cast<const char*>(sqlite3_column_text(query,0)));sqlite3_finalize(query);check(rootHash==ark::iterationSha256(canonical(root)),"Accelerated root digest retains existing canonical container identity");}
     check(ark::loadDocumentContainer(utf8(path).c_str(),loaded,&error)&&canonical(loaded)==canonical(root),error);
     {Sqlite sql(path);check(sql.scalar("SELECT count(*) FROM ark_payload WHERE kind=1")==1,"repeated large source strings use one content-addressed payload");check(sql.scalar("PRAGMA application_id")==ark::documentContainerApplicationId,"owned SQLite application magic");}
     check(ark::saveDocumentContainer(root,utf8(path).c_str(),&error,&second),error);check(!second.stagedReplacement&&second.generation==2&&second.payloadsInserted==0&&second.slotsChanged==0,"unchanged save reuses every immutable payload and slot");
@@ -89,7 +90,14 @@ void persistenceIntegration(){
     auto jsonExport=workspace.path/"export.JSON",renamed=workspace.path/"signature.data";
     check(ark::saveDocument(doc,utf8(jsonExport).c_str())&&!ark::documentContainerFile(utf8(jsonExport).c_str()),"JSON extension is a case-insensitive explicit text export");
     fs::copy_file(native,renamed);check(ark::loadDocument(utf8(renamed).c_str(),loaded,&error)&&loaded.getParam("length")==42,"binary load uses signature rather than filename extension");
-
+    const auto stable=ark::documentToJson(loaded);V valid=json(stable);
+    for(const char* defect:{"units","version","features"}){
+        V invalid=valid;if(std::string(defect)=="units")invalid.set("units",V::makeStr("cm"));else if(std::string(defect)=="version")invalid.set("version",V::makeNum(999));else invalid.set("features",V::makeStr("invalid array"));
+        auto rejected=workspace.path/(std::string("invalid-")+defect+".ark");check(ark::saveDocumentContainer(invalid,utf8(rejected).c_str(),&error),error);
+        ark::Document fromText=loaded;std::string textError,binaryError;
+        check(!ark::documentFromJson(invalid.dump(),fromText,&textError)&&!ark::loadDocument(utf8(rejected).c_str(),loaded,&binaryError),"Binary value load and JSON load reject the same malformed authoring");
+        check(textError==binaryError&&ark::documentToJson(fromText)==stable&&ark::documentToJson(loaded)==stable,"Direct binary value path retains exact authoring rejection and atomicity");
+    }
 }
 int crashWrite(const fs::path& path){Sqlite sql(path);sql.exec("PRAGMA cache_size=1");sql.exec("PRAGMA synchronous=FULL");sql.exec("BEGIN IMMEDIATE");sql.exec("UPDATE ark_meta SET generation=generation+10000");sql.exec("UPDATE ark_payload SET bytes=zeroblob(length(bytes))");check(sqlite3_db_cacheflush(sql.db)==SQLITE_OK,"crash test forces dirty pages to disk");std::_Exit(17);}
 void atomicText(const fs::path& path,const std::string& value){auto staged=path;staged+=".tmp";write(staged,value);

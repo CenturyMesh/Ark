@@ -15,7 +15,7 @@ using V=arkjson::Value;
 constexpr int maxCopies=32;
 constexpr double connectionTolerance=1e-6;
 [[noreturn]] void fail(const std::string& message){throw std::runtime_error("ASSEMBLY_PATTERN_"+message);}
-const V& need(const V& value,const char* key){auto item=value.find(key);if(!item)fail(std::string("FIELD_REQUIRED: ")+key);return *item;}
+template<class Object> const V& need(const Object& value,const char* key){auto item=value.find(key);if(!item)fail(std::string("FIELD_REQUIRED: ")+key);return *item;}
 std::string text(const V& value,const char* key,const char* fallback=nullptr){auto item=value.find(key);if(!item){if(fallback)return fallback;fail(std::string("FIELD_REQUIRED: ")+key);}if(item->t!=V::Str||item->str.empty()||item->str.size()>2048)fail(std::string("INVALID_TEXT: ")+key);return item->str;}
 std::string expression(const V& value){if(value.t==V::Num&&std::isfinite(value.num))return value.dump();if(value.t==V::Str&&!value.str.empty()&&value.str.size()<=2048)return value.str;fail("INVALID_EXPRESSION: expected a finite number or expression");}
 u64 identity(const V& value){if(value.t!=V::Num||!std::isfinite(value.num)||value.num<1||value.num>9007199254740990.||value.num!=std::floor(value.num))fail("INVALID_ID: bound source ID required");return (u64)value.num;}
@@ -125,15 +125,22 @@ std::vector<Vec3> sketchPoints(const Document& doc,const AssemblyNode& target,co
 }
 }
 
-bool specializedAssemblyPattern(const AssemblyPattern& pattern){return pattern.active&&((canonical(pattern.type)!="linear"&&canonical(pattern.type)!="circular")||pattern.source.t!=V::Null||!pattern.skips.empty());}
+bool assemblyPatternHasCarry(const AssemblyPattern& pattern){const Mat4 identity;for(size_t i=0;i<16;++i)if(pattern.carryFrame.m[i]!=identity.m[i])return true;return false;}
+Mat4 assemblyPatternCarryFrame(const AssemblyPattern& pattern){
+    const auto& frame=pattern.carryFrame;if(!pattern.active&&assemblyPatternHasCarry(pattern))fail("CARRY_REQUIRES_PATTERN: carry_frame requires an active part pattern");
+    for(double value:frame.m)if(!std::isfinite(value)||std::abs(value)>1e6)fail("INVALID_CARRY_FRAME: sixteen finite bounded rigid matrix numbers required");
+    if(std::abs(frame.m[3])>1e-12||std::abs(frame.m[7])>1e-12||std::abs(frame.m[11])>1e-12||std::abs(frame.m[15]-1)>1e-12)fail("INVALID_CARRY_FRAME: affine column-major matrix required");
+    try{validateFrame(frame);}catch(const std::exception&){fail("INVALID_CARRY_FRAME: proper right-handed rigid transform required");}return frame;
+}
+bool specializedAssemblyPattern(const AssemblyPattern& pattern){return pattern.active&&((canonical(pattern.type)!="linear"&&canonical(pattern.type)!="circular")||pattern.source.t!=V::Null||!pattern.skips.empty()||assemblyPatternHasCarry(pattern));}
 
 V assemblyPatternToJson(const AssemblyPattern& pattern){
     if(!pattern.active)return V{};V value=V::makeObj();value.set("type",V::makeStr(pattern.type));if(!pattern.count.empty())value.set("count",V::makeStr(pattern.count));
     if(pattern.type=="linear"){value.set("dx",V::makeStr(pattern.dx));value.set("dy",V::makeStr(pattern.dy));value.set("dz",V::makeStr(pattern.dz));}else if(pattern.type=="circular"){value.set("step",V::makeStr(pattern.step));value.set("axis",V::makeStr(pattern.axis));}
-    if(pattern.source.t!=V::Null)value.set("source",pattern.source);if(!pattern.skips.empty()){V skips=V::makeArr();for(int copy:pattern.skips)skips.arr.push_back(V::makeNum(copy));value.set("skips",skips);}return value;
+    if(pattern.source.t!=V::Null)value.set("source",pattern.source);if(!pattern.skips.empty()){V skips=V::makeArr();for(int copy:pattern.skips)skips.arr.push_back(V::makeNum(copy));value.set("skips",skips);}if(assemblyPatternHasCarry(pattern)){V frame=V::makeArr();for(double number:assemblyPatternCarryFrame(pattern).m)frame.arr.push_back(V::makeNum(number));value.set("carry_frame",frame);}return value;
 }
 void readAssemblyPattern(AssemblyPattern& pattern,const V& value){
-    if(value.t==V::Null){pattern={};return;}keys(value,{"type","count","dx","dy","dz","step","axis","source","skips"});AssemblyPattern next;next.active=true;next.type=canonical(text(value,"type"));
+    if(value.t==V::Null){pattern={};return;}keys(value,{"type","count","dx","dy","dz","step","axis","source","skips","carry_frame"});AssemblyPattern next;next.active=true;next.type=canonical(text(value,"type"));
     if(next.type!="linear"&&next.type!="circular"&&next.type!="pattern_driven"&&next.type!="sketch_driven"&&next.type!="curve_driven"&&next.type!="chain")fail("UNSUPPORTED_TYPE: "+next.type);
     if(auto item=value.find("count"))next.count=expression(*item);else if(next.type!="pattern_driven"&&next.type!="sketch_driven")fail("FIELD_REQUIRED: count");
     auto take=[&](const char* key,std::string& to){if(auto item=value.find(key))to=expression(*item);};take("dx",next.dx);take("dy",next.dy);take("dz",next.dz);take("step",next.step);if(auto axis=value.find("axis")){next.axis=axis->asStr();if(next.axis!="X"&&next.axis!="Y"&&next.axis!="Z")fail("INVALID_AXIS: X/Y/Z required");}
@@ -145,7 +152,8 @@ void readAssemblyPattern(AssemblyPattern& pattern,const V& value){
         for(const char* key:{"pitch","margin","max_source_error","alternate_angle"})if(auto item=next.source.find(key))expression(*item);boolean(next.source,"closed");if(next.type!="chain"&&(next.source.find("alternate_feature")||next.source.find("alternate_node")||next.source.find("alternate_angle")))fail("ALTERNATE_REQUIRES_CHAIN");if(next.source.find("alternate_feature")&&next.source.find("alternate_node"))fail("ALTERNATE_SOURCE: choose alternate_feature or alternate_node");
     }else if(next.source.t!=V::Null)fail("SOURCE_REQUIRES_SPECIALIZED_TYPE");
     if(auto skips=value.find("skips")){if(skips->t!=V::Arr||skips->arr.size()>31)fail("INVALID_SKIPS: at most 31 slots");std::set<int> seen;for(const auto& copy:skips->arr){if(copy.t!=V::Num||copy.num!=std::floor(copy.num)||copy.num<1||copy.num>31||!seen.insert((int)copy.num).second)fail("INVALID_SKIP: unique integer 1..31 required");next.skips.push_back((int)copy.num);}}
-    pattern=std::move(next);
+    if(const auto* frame=value.find("carry_frame")){if(frame->t!=V::Arr||frame->arr.size()!=16)fail("INVALID_CARRY_FRAME: sixteen column-major matrix numbers required");for(size_t i=0;i<16;++i){if(frame->arr[i].t!=V::Num||!std::isfinite(frame->arr[i].num))fail("INVALID_CARRY_FRAME: finite numeric matrix required");next.carryFrame.m[i]=frame->arr[i].num;}}
+    (void)assemblyPatternCarryFrame(next);pattern=std::move(next);
 }
 void bindAssemblyPatternSource(const Document& doc,AssemblyPattern& pattern){
     for(const char* key:{"feature","alternate_feature"})if(auto value=pattern.source.find(key))pattern.source.set(key,V::makeNum((double)bindFeature(doc,*value)));
@@ -209,8 +217,8 @@ bool expandAssemblyPatterns(const Document& doc,const std::unordered_map<u64,Mat
             if(resolved.count(n.id))return;if(depth>64||!active.insert(n.id).second)fail("DEPENDENCY_CYCLE: pattern source graph exceeds 64 levels or cycles");
             if(!n.feature)fail("GROUP_UNSUPPORTED: only part occurrences can carry a pattern");
             std::vector<AssemblyPlacement> copies;V report=V::makeObj();report.set("node",V::makeNum((double)n.id));report.set("type",V::makeStr(n.pattern.active?n.pattern.type:"none"));
-            const Mat4 seed=world.at(n.id),parent=parentFrames.at(n.id),local=rigid.at(n.id),carry=seed*(parent*local).inverted();
-            auto emit=[&](int slot,const Mat4& delta,u64 definition=0,const Mat4* alternate=nullptr){if(n.pattern.active&&skipped(n.pattern,slot))return;const Mat4 placed=slot==0?seed:carry*parent*delta*(alternate?*alternate:local);validateFrame(placed);copies.push_back({n.id,definition?definition:n.feature,n.name,placed,visibility.at(n.id),slot});};
+            const Mat4 patternCarry=assemblyPatternCarryFrame(n.pattern),seed=world.at(n.id),parent=parentFrames.at(n.id),local=patternCarry.inverted()*rigid.at(n.id),carriedParent=parent*patternCarry,carry=seed*(carriedParent*local).inverted();
+            auto emit=[&](int slot,const Mat4& delta,u64 definition=0,const Mat4* alternate=nullptr){if(n.pattern.active&&skipped(n.pattern,slot))return;const Mat4 placed=slot==0?seed:carry*carriedParent*delta*(alternate?*alternate:local);validateFrame(placed);copies.push_back({n.id,definition?definition:n.feature,n.name,placed,visibility.at(n.id),slot});};
             if(!n.pattern.active){slotCounts[n.id]=1;emit(0,Mat4{});}
             else if(n.pattern.type=="linear"||n.pattern.type=="circular"){
                 const int total=count(n.pattern,env);slotCounts[n.id]=total;skipValidation(n.pattern,total);const double dx=scalar(V::makeStr(n.pattern.dx),env,"dx"),dy=scalar(V::makeStr(n.pattern.dy),env,"dy"),dz=scalar(V::makeStr(n.pattern.dz),env,"dz"),step=scalar(V::makeStr(n.pattern.step),env,"step");
@@ -220,7 +228,7 @@ bool expandAssemblyPatterns(const Document& doc,const std::unordered_map<u64,Mat
                 const auto& source=node(doc,identity(need(n.pattern.source,"node")));if(!source.pattern.active)fail("SOURCE_NOT_PATTERNED: choose a patterned occurrence");expand(source,depth+1);const auto& sourceCopies=resolved.at(source.id);const int total=count(n.pattern,env,slotCounts.at(source.id));slotCounts[n.id]=total;skipValidation(n.pattern,total);const Mat4 source0=world.at(source.id);
                 // World-space deltas retain rotated source parents and solved
                 // source mates. Target mates carry the whole inherited pattern.
-                const Mat4 targetCarry=seed*(parent*local).inverted();for(const auto& p:sourceCopies)if(!skipped(n.pattern,p.copy)){const Mat4 placed=p.copy?targetCarry*(p.world*source0.inverted())*(parent*local):seed;validateFrame(placed);copies.push_back({n.id,n.feature,n.name,placed,visibility.at(n.id),p.copy});}report.set("source_node",V::makeNum((double)source.id));report.set("source_linked",V::makeBool(true));
+                const Mat4 targetCarry=seed*(carriedParent*local).inverted();for(const auto& p:sourceCopies)if(!skipped(n.pattern,p.copy)){const Mat4 placed=p.copy?targetCarry*carriedParent*parent.inverted()*(p.world*source0.inverted())*(parent*local):seed;validateFrame(placed);copies.push_back({n.id,n.feature,n.name,placed,visibility.at(n.id),p.copy});}report.set("source_node",V::makeNum((double)source.id));report.set("source_linked",V::makeBool(true));
             }else if(n.pattern.type=="sketch_driven"){
                 const auto points=sketchPoints(doc,n,env);const int total=count(n.pattern,env,(int)points.size());slotCounts[n.id]=total;skipValidation(n.pattern,total);for(int slot=0;slot<total;++slot)emit(slot,Mat4::translation(points[slot]-points[0]));report.set("source_linked",V::makeBool(true));report.set("source_point_count",V::makeNum(total));report.set("source_coordinates",V::makeStr(n.pattern.source.find("sketch")?"solved_named_sketch_points_in_datum_frame":"solved_spatial_curve_named_handles_XYZ"));
             }else if(n.pattern.type=="curve_driven"||n.pattern.type=="chain"){

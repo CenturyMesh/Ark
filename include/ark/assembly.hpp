@@ -9,6 +9,7 @@ struct AssemblyPattern {
     std::string count,dx="0",dy="0",dz="0",step="90",axis="Z";
     arkjson::Value source; // Persistent recipe; evaluated points/frames are never stored.
     std::vector<int> skips; // Stable copy slots; seed 0 cannot be skipped.
+    Mat4 carryFrame; // Optional whole-pattern parent-local rigid pose, before node.p.
 };
 struct AssemblyNode {
     u64 id=0,parent=0,feature=0; // feature=0 is a subassembly/group
@@ -55,6 +56,8 @@ struct AssemblyDiagnostics {
 struct AssemblyPlacement {u64 node=0,feature=0;std::string name;Mat4 world;bool visible=true;int copy=0;};
 class Document;
 bool specializedAssemblyPattern(const AssemblyPattern&);
+bool assemblyPatternHasCarry(const AssemblyPattern&);
+Mat4 assemblyPatternCarryFrame(const AssemblyPattern&); // Validates finite proper rigid/affine bounds.
 arkjson::Value assemblyPatternToJson(const AssemblyPattern&);
 void readAssemblyPattern(AssemblyPattern&,const arkjson::Value&);
 // Bind unique source names once at authoring; stored identities are IDs.
@@ -115,6 +118,8 @@ struct AssemblyManipulationProgram {
     std::vector<AssemblyManipulationJoint> joints;
     std::vector<AssemblyMotionRelation> constraints;
     std::unordered_map<u64,Mat4> parentFrames,authoredWorld;
+    std::unordered_map<u64,Mat4> patternLocalFrames; // Original node.p remains editable and unchanged.
+    std::unordered_map<u64,arkjson::Value> patternRecipes;
     std::unordered_map<u64,u64> rigidCluster;
     std::vector<u64> fixedNodes,patternNodes;
 };

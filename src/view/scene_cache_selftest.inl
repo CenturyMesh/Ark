@@ -46,7 +46,7 @@ if(sceneCacheUiTest){
         check(g_sceneRebuiltParts==1&&g_sceneReusedParts==1&&g_cpuMeshes[partOf(1)].nrm==authoritative.nrm,"GPU/display mutation was reused as authoritative geometry");
         // New immutable cache body with identical generation/positions but
         // changed normals must not alias the previous representation.
-        auto& entry=g_doc.evaluationCache.at(1);const auto generation=entry.generation;auto replacement=std::make_shared<Body>(*entry.body);check(replacement->baked&&!replacement->baked->nrm.empty(),"Expected baked native test body");replacement->baked->nrm[0]+=.5f;entry.body=replacement;
+        auto& entry=g_doc.evaluationCache.at(1);const auto generation=entry.generation;auto replacement=std::make_shared<Body>(*entry.body);check(replacement->baked&&!replacement->baked->nrm.empty(),"Expected baked native test body");replacement->baked.mutate([](Mesh& mesh){mesh.nrm[0]+=.5f;});entry.body=replacement;
         for(auto& body:g_doc.evalBodies)if(body.id==1)body=*replacement;rebuildScene();
         check(entry.generation==generation&&g_sceneRebuiltParts==1&&g_cpuMeshes[partOf(1)].nrm==replacement->baked->nrm,"Same-generation normal-only replacement did not invalidate");equivalentFullRebuild();
         const std::string saved=documentToJson(g_doc);Document loaded;std::string error;check(documentFromJson(saved,loaded,&error),"Synthetic document reload parse failed");loaded.recompute();g_doc=std::move(loaded);rebuildScene();check(g_sceneRebuiltParts==2&&g_sceneReusedParts==0,"Reload with colliding IDs reused a foreign evaluation body");equivalentFullRebuild();

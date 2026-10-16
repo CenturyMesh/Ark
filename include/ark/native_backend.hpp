@@ -1,6 +1,8 @@
 #pragma once
+#include <functional>
 #include "ark/json.hpp"
 #include "ark/mesh.hpp"
+#include "ark/geometry_storage_032d.hpp"
 #include "ark/document_container.hpp"
 #include <memory>
 namespace ark {
@@ -19,10 +21,16 @@ public:
 DocumentDerivedPayloads nativeDocumentResults(const Document& document);
 arkjson::Value stageNativeDocumentResults(Document& document,const DocumentDerivedPayloads& records);
 arkjson::Value nativeWorkerRequest(const arkjson::Value& request);
+// Aggregate identity for a fully resolved host boolean sequence. On a miss the
+// callback executes the existing pairwise solver; portable hits validate the
+// saved final B-rep in the worker, never dispatch this operation as pairwise CSG.
+arkjson::Value nativeBooleanSequenceRequest(const arkjson::Value& request,
+                                          const std::function<arkjson::Value()>& evaluate);
 arkjson::Value nativeModelRequest(const arkjson::Value& request);
 arkjson::Value nativeKernelInfo();
 // Thread-local request allowance; returns previous value (0 inherits host setting).
 int setNativeThreadBudget(int threads);
 arkjson::Value exportNativeBrep(const std::string& brep,const std::string& path);
 Mesh nativeResultMesh(const arkjson::Value& result);
+inline Mesh nativeResultMesh(const NativePayload& result){return result.displayMesh();}
 }

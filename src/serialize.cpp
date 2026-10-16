@@ -637,6 +637,7 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
     if(generation41Document(doc))r.set("version",Value::makeNum(41));
     if(generation42Document(doc))r.set("version",Value::makeNum(42));
     if(modeling031BNeedsVersion43(doc))r.set("version",Value::makeNum(43));
+    for(const auto& node:doc.assembly)if(assemblyPatternHasCarry(node.pattern)){r.set("version",Value::makeNum(44));break;}
     if(includeAudit&&includeHistory)iterationPersist(r,doc);
     canonicalDocumentKeys(r);
     std::string serialized=r.dump();
@@ -644,15 +645,15 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
     return serialized;
 }
 
-bool documentFromJson(const std::string& json, Document& doc, std::string* err){
+static bool documentFromValue(Value& v,Document& doc,std::string* err){
     auto fail=[&](const std::string& m){ if(err)*err=m; return false; };
-    if(json.size()>maxDocumentBytes)return fail("document exceeds 4 MiB");
-    Value v;
-    if(!arkjson::parse(json,v)) return fail("malformed JSON");
     if(v.t!=Value::Obj) return fail("root must be object");
-    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || !std::isfinite(ver->num)||ver->num!=std::floor(ver->num)||ver->num<1||ver->num>43))
+    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || !std::isfinite(ver->num)||ver->num!=std::floor(ver->num)||ver->num<1||ver->num>44))
         return fail("unsupported document version");
     Value history;std::string historyError;if(!iterationExpand(v,history,historyError))return fail(historyError);
+    if(const auto* nodes=v.find("assembly");nodes&&nodes->t==Value::Arr)for(const auto& node:nodes->arr)if(const auto* pattern=node.find("pattern");pattern&&pattern->find("carry_frame")){
+        const auto* version=v.find("version");if(!version||version->num<44)return fail("Pattern carry frames require document version 44");
+    }
 
     if(auto format=v.find("format");format && format->asStr()!="ark")return fail("unsupported format");
     if(auto units=v.find("units");units && units->asStr()!="mm")return fail("unsupported units (expected mm)");
@@ -897,10 +898,17 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err){
     if(generation41Document(nd)){const auto* version=v.find("version");if(!version||version->num<41)return fail("Scoped container v2 and explicit surface orientation repair require document version 41");}
     if(generation42Document(nd)){const auto* version=v.find("version");if(!version||version->num<42)return fail("Emission, authored nets and exact wood/vent recipes require document version 42");}
     if(modeling031BNeedsVersion43(nd)){const auto* version=v.find("version");if(!version||version->num<43)return fail("031B advanced modeling and occurrence-bound cable recipes require document version 43");}
+    for(const auto& node:nd.assembly)if(assemblyPatternHasCarry(node.pattern)){const auto* version=v.find("version");if(!version||version->num<44)return fail("Pattern carry frames require document version 44");}
     try{validateAppearanceAuthoring024B(nd,false);}catch(const std::exception& error){return fail(error.what());}
     try{validateDesignContainerWorkspace(nd);validateSkeletonAuthoring(nd);}catch(const std::exception& error){return fail(error.what());}
     doc=std::move(nd);
     return true;
+}
+
+bool documentFromJson(const std::string& json,Document& doc,std::string* err){
+    if(json.size()>maxDocumentBytes){if(err)*err="document exceeds 4 MiB";return false;}
+    Value root;if(!arkjson::parse(json,root)){if(err)*err="malformed JSON";return false;}
+    return documentFromValue(root,doc,err);
 }
 
 // ---------------------------------------------------------------------------
@@ -995,7 +1003,10 @@ bool loadDocument(const char* path, Document& doc, std::string* err){
     if(documentContainerFile(path)){
         Value root;DocumentDerivedPayloads derived;std::string discarded;
         if(!loadDocumentContainer(path,root,err,&derived,&discarded))return false;
-        Document candidate;if(!documentFromJson(root.dump(),candidate,err))return false;
+        // The container reader already enforced logical JSON capacity, exact
+        // codec limits and checksums. Apply the same authoring validation to
+        // its decoded value without constructing and parsing another JSON copy.
+        Document candidate;if(!documentFromValue(root,candidate,err))return false;
         try{
             candidate.derivedGeometryStatus=stageNativeDocumentResults(candidate,derived);
             if(!discarded.empty()){

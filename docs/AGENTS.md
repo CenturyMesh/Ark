@@ -1,5 +1,24 @@
 # ARK agent protocol
 
+032D keeps the existing tool set and adds [compact response and coordination
+contracts](AGENT_CONTRACTS_032D.md). Load `agent_onboard{topic,detail:"guide"}`
+once per needed topic. Read `doc_info{detail:"revision"}` for status and selected
+`object_context` for live authoring/dependencies. Prefer preview/apply
+`detail:"changes"`, native inspection `detail:"properties"`, and
+`assembly_info{detail:"result",drive|sweep|measure|clearance}` when only that
+operation is needed. Reuse observed revision receipts, preserve atomic writes,
+and acquire a reservation only when ready to publish within its explicit TTL.
+Expired owner receipts can be released idempotently within their retained epoch;
+they never grant write authority or silently renew a reservation.
+
+Read [preview storage](PREVIEWS_032D.md), [saved geometry identity](PERSISTENCE_032D.md),
+[pattern motion](ASSEMBLY_MOTION_032D.md), [software snapshots](SNAPSHOTS_032D.md)
+and [032D verification](iterations/032D.md) for their checked scopes and limits.
+See [compact native payloads and shared meshes](GEOMETRY_STORAGE_032D.md) for the
+immutable storage and lossless display-channel contracts.
+Nonidentity whole-pattern carry frames conditionally require source44. Saved
+geometry remains native B-rep, with no STEP or display mesh embedded by this work.
+
 031B extends the existing 96 standalone tools with advanced retained modeling
 recipes and compact diagnostics. Read [031B scope](iterations/031B.md),
 [solid recipes](SOLIDS_031B.md), [surface/sweep contracts](SURFACES_031B.md),
