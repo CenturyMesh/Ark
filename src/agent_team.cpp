@@ -109,6 +109,22 @@ std::string toolFailureKey(const std::string& name,const V& args,bool queryRead,
     if(revisionRecovery)identity.obj.erase(std::remove_if(identity.obj.begin(),identity.obj.end(),[](const auto& entry){return entry.first=="expected_revision";}),identity.obj.end());
     return name+(revisionRecovery?":revision-recovery:":":")+canonicalQueryArguments(std::move(identity)).dump();
 }
+bool sameCorrectedReadSubject(V failed,V evidence){
+    bool subject=false;
+    for(const char* name:{"id","ids","name","node","instance","copy"}){
+        const auto* a=failed.find(name),*b=evidence.find(name);
+        if(bool(a)!=bool(b)||(a&&canonicalQueryArguments(*a).dump()!=canonicalQueryArguments(*b).dump()))return false;
+        if(a&&std::string(name)!="copy"){
+            auto identifier=[](const V& value){return (value.t==V::Str&&hasText(value.str))||(value.t==V::Num&&std::isfinite(value.num)&&value.num>=0&&std::floor(value.num)==value.num);};
+            if(std::string(name)=="ids"){if(a->t!=V::Arr||a->arr.empty()||!std::all_of(a->arr.begin(),a->arr.end(),identifier))return false;}
+            else if(!identifier(*a))return false;
+            subject=true;
+        }
+    }
+    auto selection=[](V& args){args.obj.erase(std::remove_if(args.obj.begin(),args.obj.end(),[](const auto& entry){return entry.first=="reference"||entry.first=="find"||entry.first=="detail"||entry.first=="expected_revision";}),args.obj.end());};
+    selection(failed);selection(evidence);
+    return subject&&canonicalQueryArguments(failed).dump()==canonicalQueryArguments(evidence).dump();
+}
 V teamTools(V tools,unsigned maxCommands){
     for(const auto& item:tools.arr)require(field(item,"name").rfind("team_",0)!=0,"ARK tool names collide with team coordination tools.");
     V commandItems,checksSchema;
@@ -122,7 +138,7 @@ V teamTools(V tools,unsigned maxCommands){
     }
     auto add=[&](const char* name,const char* desc,const char* schema){V tool=V::makeObj(),parsed,annotations=V::makeObj();arkjson::parse(schema,parsed);tool.set("name",V::makeStr(name));tool.set("description",V::makeStr(desc));tool.set("inputSchema",parsed);annotations.set("readOnlyHint",V::makeBool(true));tool.set("annotations",annotations);tools.arr.push_back(tool);};
     add("team_send","Send a concise proposal, question or measured evidence to a teammate by role id. Include expected_revision in a proposed document edit; only a role with write permission may apply it. Set kind:assignment for new work, message for FYI, report for evidence/outcome. Missing kind keeps legacy lead-to-specialist assignment semantics. For a lead-to-specialist assignment, including read-only reviewers, optional scope:{ids:[up to eight existing feature IDs/names],expected_revision} attaches measured compact object context at that exact revision, rejecting stale/missing targets. It is task context, not enforced write ownership; recipient must inspect current revision before a write. A message schedules the recipient; use only useful coordination, no acknowledgement loops.",R"({"type":"object","properties":{"to":{"type":"string"},"message":{"type":"string"},"kind":{"type":"string","enum":["assignment","message","report"]},"scope":{"type":"object","properties":{"ids":{"type":"array","minItems":1,"maxItems":8,"items":{"oneOf":[{"type":"integer","minimum":1},{"type":"string","minLength":1,"maxLength":128}]}},"expected_revision":{"type":"integer","minimum":0}},"required":["ids","expected_revision"],"additionalProperties":false}},"required":["to","message"]})");
-    add("team_report_task","Report the assignment state with actual IDs/evidence and limits. Idle/provider turn completion is not task completion. This declaration does not certify geometry or manufacture.",R"({"type":"object","properties":{"state":{"type":"string","enum":["completed","needs_input","in_progress"]},"summary":{"type":"string"}},"required":["state","summary"]})");
+    add("team_report_task","Report actual IDs/evidence and limits. After a corrected selector succeeds for the same object, optionally use state:in_progress, expected_revision and read_resolutions to explicitly supersede your exact rejected read with your later successful current-revision read. Both descriptors need tool and exact args, plus a concrete reason. Only reference/find/detail/read revision may differ; this never makes the original query successful or waives writes, feedback or completion checks.",R"({"type":"object","properties":{"state":{"type":"string","enum":["completed","needs_input","in_progress"]},"summary":{"type":"string"},"expected_revision":{"type":"integer","minimum":0},"read_resolutions":{"type":"array","minItems":1,"maxItems":8,"items":{"type":"object","properties":{"failed":{"type":"object","properties":{"tool":{"type":"string"},"args":{"type":"object"}},"required":["tool","args"],"additionalProperties":false},"evidence":{"type":"object","properties":{"tool":{"type":"string"},"args":{"type":"object"}},"required":["tool","args"],"additionalProperties":false},"reason":{"type":"string","minLength":1,"maxLength":1024}},"required":["failed","evidence","reason"],"additionalProperties":false}}},"required":["state","summary"]})");
     add("team_finish_goal","Lead-only goal outcome and evidence/limits. Completed rejects outstanding tasks, active/queued peers, pending mail and tool/worker errors. Finish the turn afterward. This is an explicit declaration, not certification.",R"({"type":"object","properties":{"state":{"type":"string","enum":["completed","needs_input","in_progress"]},"summary":{"type":"string"}},"required":["state","summary"]})");
     add("team_context","Read semantic team progress after a new task, message or document receipt. changed/no_new_evidence excludes polling, provider status and token accounting. Follow next_action; do not routinely poll or substitute catalogue/reviewer waiting for an editable design checkpoint. detail:diagnostics explicitly includes transient status and measured provider/request accounting. These are collaboration updates, not manufacturing certification.",R"({"type":"object","properties":{"detail":{"type":"string","enum":["progress","diagnostics"]}},"additionalProperties":false})");
     add("team_reserve_write","Optionally reserve only when concrete commands/candidate are ready to submit, after a successful doc_info detail:revision. Do reasoning and independent reads before reserving. Verify the same explicit expected_revision; a grant never rebases commands or clears failures. Other roles may inspect but their writes return team_write_busy. Release promptly; lease_ms defaults to 10000, maximum 30000. Receipt states lease_ms/lease_remaining_ms and auto_renew:false; reserving again never extends an active lease. The window also ends on task/goal finish, owner turn exit or cancellation. External/manual writers remain guarded by expected_revision.",R"({"type":"object","properties":{"expected_revision":{"type":"integer","minimum":0},"lease_ms":{"type":"integer","minimum":100,"maximum":30000},"reason":{"type":"string","maxLength":256}},"required":["expected_revision"],"additionalProperties":false})");
@@ -143,6 +159,8 @@ const char* agentTeamStateName(AgentTeamState state) noexcept{
 }
 const char* agentGoalStateName(AgentGoalState state) noexcept{switch(state){case AgentGoalState::InProgress:return "In progress";case AgentGoalState::Completed:return "Completed";case AgentGoalState::NeedsInput:return "Needs input";case AgentGoalState::Interrupted:return "Interrupted";}return "Unknown";}
 struct AgentTeam::Impl {
+    struct ReadFailureStamp {std::uint64_t sequence=0,epoch=0;};
+    struct SuccessfulRead {std::string identity;std::uint64_t revision=0,sequence=0,epoch=0;};
     struct Role {
         AgentTeamRole config;
         V tools=V::makeArr();
@@ -150,6 +168,9 @@ struct AgentTeam::Impl {
         V lastToolFailure;
         std::set<std::string> pendingFeedback;
         std::map<std::string,V> unresolvedToolFailures;
+        std::map<std::string,ReadFailureStamp> readFailureStamps;
+        std::deque<SuccessfulRead> successfulReads;
+        std::uint64_t readSequence=0;
         std::string turnText;
         std::deque<V> pending;
         std::deque<std::string> context;
@@ -187,7 +208,7 @@ struct AgentTeam::Impl {
     std::size_t preparedBytes=0,preparedByteLimit=0;
     std::uint64_t preparedProjectEpoch=0;
     std::string preparedProjectId;
-    void clearPreparedLocked(){prepared.clear();preparedBytes=0;++preparedProjectEpoch;retiredReservations.clear();}
+    void clearPreparedLocked(){prepared.clear();preparedBytes=0;++preparedProjectEpoch;retiredReservations.clear();for(auto& role:roles)role.successfulReads.clear();}
     std::uint64_t proposalSerial=0,stepSerial=0;
     struct WriteReservation {std::string owner,id,reason;std::uint64_t revision=0;unsigned leaseMs=0;std::chrono::steady_clock::time_point until;};
     WriteReservation writeReservation;
@@ -200,6 +221,7 @@ struct AgentTeam::Impl {
     V tools;
     std::set<std::string> readOnly;
     std::set<std::string> queryRecoveryTools;
+    bool resolutionRead(const std::string& name) const{return queryRecoveryTools.count(name)&&readOnly.count(name)&&!documentMutation(name)&&name!="query_batch"&&name!="doc_preview"&&name!="manufacturing_propose"&&name!="postconditions";}
     AssistantTool executor;
     AgentTeamEvents observer;
 
@@ -370,10 +392,56 @@ struct AgentTeam::Impl {
         const auto state=field(args,"state");auto summary=field(args,"summary");
         if((state!="completed"&&state!="needs_input"&&state!="in_progress")||!hasText(summary)||summary.size()>config.maxEventTextBytes)return errorResult("Provide a valid state and a concise nonempty summary with actual evidence and limits.");
         std::unique_lock<std::timed_mutex> completionLock(toolsMutex,std::defer_lock);
+        const auto* resolutions=args.find("read_resolutions");V verification,resolvedReads=V::makeArr();
+        auto reject=[&](const std::string& text){V result=errorResult(text);if(!verification.isNull())result.set("revision_verification",verification);return result;};
+        std::vector<std::string> resolvedKeys;
+        const auto expected=revision(args)?(std::uint64_t)args.find("expected_revision")->num:0;
+        // Called only under mutex, both before inspection and immediately before
+        // mutation. No earlier valid item can hide an invalid later item.
+        auto validateResolutions=[&]()->std::string{
+            resolvedKeys.clear();resolvedReads=V::makeArr();const auto& role=roles[index];
+            if(role.steeringVersion!=role.requestVersion||role.view.needsInspection)return "Consume pending input and inspect the current document before superseding a rejected read.";
+            for(const auto& item:resolutions->arr){
+                const auto* failed=item.find("failed"),*evidence=item.find("evidence"),*reason=item.find("reason");
+                if(item.t!=V::Obj||item.obj.size()!=3||!failed||!evidence||!reason||reason->t!=V::Str||!hasText(reason->str)||reason->str.size()>1024)return "Each read resolution needs failed, evidence and a concrete reason of at most 1024 bytes.";
+                auto descriptor=[](const V& value){const auto* args=value.find("args"),*tool=value.find("tool");return value.t==V::Obj&&value.obj.size()==2&&tool&&tool->t==V::Str&&args&&args->t==V::Obj&&args->dump().size()<=2048;};
+                if(!descriptor(*failed)||!descriptor(*evidence))return "Read descriptors require only tool and exact bounded args.";
+                const auto tool=field(*failed,"tool");if(tool!=field(*evidence,"tool")||!resolutionRead(tool))return "Read supersession only accepts the same allowlisted read tool; writes, previews and postconditions cannot be superseded.";
+                const V failedArgs=compactTeamArguments(tool,*failed->find("args")),evidenceArgs=compactTeamArguments(tool,*evidence->find("args"));
+                if(!sameCorrectedReadSubject(failedArgs,evidenceArgs))return "Corrected reads must identify the same object/occurrence; only reference, find, detail and optional read revision may differ.";
+                if(evidenceArgs.find("expected_revision")&&(!revision(evidenceArgs)||(std::uint64_t)evidenceArgs.find("expected_revision")->num!=expected))return "Evidence read precondition must agree with this current expected_revision.";
+                const auto failedIdentity=toolFailureKey(tool,failedArgs,true),evidenceIdentity=toolFailureKey(tool,evidenceArgs,true);
+                const auto failure=std::find_if(role.unresolvedToolFailures.begin(),role.unresolvedToolFailures.end(),[&](const auto& entry){const auto* retainedArgs=entry.second.find("args");return field(entry.second,"tool")==tool&&retainedArgs&&toolFailureKey(tool,*retainedArgs,true)==failedIdentity;});
+                if(failure==role.unresolvedToolFailures.end())return "The exact rejected read is not an unresolved failure owned by this role.";
+                if(std::find(resolvedKeys.begin(),resolvedKeys.end(),failure->first)!=resolvedKeys.end())return "A rejected read may appear only once in a resolution list.";
+                const auto stamp=role.readFailureStamps.find(failure->first);if(stamp==role.readFailureStamps.end()||stamp->second.epoch!=preparedProjectEpoch)return "The rejected read has no current-project read occurrence receipt.";
+                std::uint64_t failedRevision=0;if(receiptRevision(failure->second,failedRevision)&&failedRevision>expected)return "A newer rejected read cannot be superseded by older evidence.";
+                const auto receipt=std::find_if(role.successfulReads.rbegin(),role.successfulReads.rend(),[&](const auto& read){return read.identity==evidenceIdentity&&read.revision==expected&&read.epoch==preparedProjectEpoch&&read.sequence>stamp->second.sequence;});
+                if(receipt==role.successfulReads.rend())return "Read evidence must be this role's retained successful exact query after the failure, at the current revision and project.";
+                V attributed=item;attributed.set("kind",V::makeStr("corrected_selection"));attributed.set("role",V::makeStr(role.view.id));attributed.set("revision",V::makeNum((double)expected));attributed.set("original_query_succeeded",V::makeBool(false));
+                if(attributed.dump().size()+64>config.maxEventTextBytes)return "Read supersession exceeds the bounded audit receipt; shorten its arguments or reason.";
+                resolvedKeys.push_back(failure->first);resolvedReads.arr.push_back(std::move(attributed));
+            }
+            return {};
+        };
+        if(resolutions){
+            if(goal||state!="in_progress"||!revision(args)||resolutions->t!=V::Arr||resolutions->arr.empty()||resolutions->arr.size()>8)return errorResult("Read resolutions require team_report_task state:in_progress, explicit expected_revision and 1..8 items; completion cannot supersede failed reads.");
+            while(!completionLock.try_lock_for(std::chrono::milliseconds(20)))checkpoint(index);checkpoint(index);
+            {std::lock_guard lock(mutex);if(!executor||!readOnly.count("doc_info"))return reject("Read supersession requires the host's read-only doc_info executor.");const auto invalid=validateResolutions();if(!invalid.empty())return reject(invalid);}
+            V proof;try{V query=V::makeObj();query.set("detail",V::makeStr("revision"));proof=executor("doc_info",query);}catch(...){return reject("Read supersession revision verification failed; no failure was cleared.");}
+            verification=revisionVerification032D(proof);
+            // Retain feedback immediately, including a later rejection or
+            // cancellation after this internal read already created activity.
+            {std::lock_guard lock(mutex);const auto& receipt=payload(verification);if(const auto* id=receipt.find("activity_id");id&&receipt.find("feedback_required")&&receipt.find("feedback_required")->b)roles[index].pendingFeedback.insert(id->asStr());if(const auto* pending=receipt.find("pending_feedback_ids");pending&&pending->t==V::Arr)for(const auto& id:pending->arr)roles[index].pendingFeedback.insert(id.asStr());}
+            std::uint64_t current=0;if(isError(proof)||!receiptRevision(payload(proof),current))return reject("Read supersession verification did not return a successful measured revision; no failure was cleared.");
+            {std::lock_guard lock(mutex);const auto project=field(payload(proof),"activity_project_id");if(explicitProjectBoundary("doc_info",V::makeObj(),proof)||(!project.empty()&&!preparedProjectId.empty()&&project!=preparedProjectId))clearPreparedLocked();if(!project.empty())preparedProjectId=project;}
+            if(current!=expected){auto result=reject("The current document revision differs from expected_revision; no read failure was cleared and no automatic rebase occurred.");result.set("revision",V::makeNum((double)current));result.set("expected_revision",V::makeNum((double)expected));return result;}
+            checkpoint(index);
+        }
         if(goal&&state=="completed"&&config.completionCheck){while(!completionLock.try_lock_for(std::chrono::milliseconds(20)))checkpoint(index);V check;try{check=config.completionCheck();}catch(const std::exception& e){return errorResult(e.what());}const auto* allowed=check.find("allowed");if(!allowed||allowed->t!=V::Bool)return errorResult("BOM completion verification unavailable");if(!allowed->b)return errorResult(field(check,"error"));const auto note=field(check,"summary");if(!note.empty())summary=note+"\n"+summary;}
         std::string eventText;
         {std::lock_guard lock(mutex);auto& role=roles[index];
-            if(role.steeringVersion!=role.requestVersion)return errorResult("New user input is pending. Consume it before declaring completion.");
+            if(role.steeringVersion!=role.requestVersion)return reject("New user input is pending. Consume it before declaring completion.");
             if(goal&&role.view.id!=leadRoleId(config.roles))return errorResult("Only the lead can report the entire user goal. Report your task to the lead.");
             if(state=="completed"){
                 if(goal&&awaitingLeadCheckpoint())return errorResult("The initial lead authoring checkpoint remains unfinished. The lead must successfully commit a coherent editable sketch/feature before completing the goal; deferred writer assignments have not run.");
@@ -384,12 +452,14 @@ struct AgentTeam::Impl {
                     if(goal&&i!=index&&(peer.view.taskState=="in_progress"||peer.view.taskState=="needs_input"))return errorResult("A teammate assignment has not been explicitly reported completed.");
                 }
             }
+            if(resolutions){const auto invalid=validateResolutions();if(!invalid.empty())return reject(invalid);for(const auto& key:resolvedKeys){role.unresolvedToolFailures.erase(key);role.readFailureStamps.erase(key);}role.lastToolFailure=role.unresolvedToolFailures.empty()?V{}:role.unresolvedToolFailures.rbegin()->second;documentRevisionKnown=true;documentRevision=expected;}
             role.view.taskState=state;role.view.taskSummary=summary;if(state!="in_progress"&&(writeReservation.owner==role.view.id||(goal&&state=="completed")))writeReservation={};
             if(goal){goalState=state=="completed"?AgentGoalState::Completed:state=="needs_input"?AgentGoalState::NeedsInput:AgentGoalState::InProgress;goalSummary=summary;goalDeclared=true;}
             eventText=std::string(goal?"Goal ":"Task ")+state+" / explicit "+role.view.id+" report: "+summary;
         }
         AgentTeamEvent event;event.kind=AgentTeamEvent::Message;event.roleId=roles[index].view.id;event.text=eventText;emit(event);
-        V result=V::makeObj();result.set("reported",V::makeBool(true));result.set("state",V::makeStr(state));result.set("evidence_kind",V::makeStr("explicit_role_report; actual tool receipts remain authoritative; not independent certification"));return result;
+        for(const auto& resolution:resolvedReads.arr){AgentTeamEvent supersession;supersession.kind=AgentTeamEvent::Message;supersession.roleId=roles[index].view.id;supersession.text="Attributed read supersession: "+resolution.dump();emit(supersession);}
+        V result=V::makeObj();result.set("reported",V::makeBool(true));result.set("state",V::makeStr(state));result.set("evidence_kind",V::makeStr("explicit_role_report; actual tool receipts remain authoritative; not independent certification"));if(resolutions){result.set("read_resolutions",resolvedReads);result.set("revision_verification",verification);}return result;
     }
     V assignmentContext(std::size_t index,const std::string& target,const V& scope){
         const auto* ids=scope.find("ids");
@@ -411,6 +481,7 @@ struct AgentTeam::Impl {
     V call(std::size_t index,const std::string& name,const V& args){
         const auto actionStarted=std::chrono::steady_clock::now();
         checkpoint(index);V result;
+        std::uint64_t outcomeProjectEpoch=0;{std::lock_guard lock(mutex);outcomeProjectEpoch=preparedProjectEpoch;}
         if(documentMutation(name)){std::lock_guard lock(mutex);roles[index].view.taskState="in_progress";roles[index].view.taskSummary.clear();goalState=AgentGoalState::InProgress;goalDeclared=false;goalSummary.clear();}
         if(name.rfind("team_",0)!=0||name=="team_apply_step"){std::lock_guard lock(mutex);roles[index].reportedToCoordinator=false;}
         if(name=="team_send"){
@@ -466,9 +537,9 @@ struct AgentTeam::Impl {
                 else if(crossedProject)result=errorResult("Prepared candidate ownership changed while queued; inspect the current project and prepare again.");
                 else if(!readOnlyCall&&stale)result=errorResult("User steering arrived while the step was queued; this old operation was not executed.");
                 else if(documentMutation(name)&&needsInspection)result=errorResult("Inspect current doc_info before a resumed write; this operation was not executed.");
-                else {executing=true;if(constructing){step.kind=AgentTeamEvent::ConstructionStart;step.text="Executing atomic "+step.stepId+"; draft remains uncommitted";emit(step);}try{result=executor(actualName,actual);}catch(...){result=errorResult("Shared ARK executor failed. Inspect the document and revision before retrying; a running operation may have completed.");std::lock_guard lock(mutex);roles[index].view.needsInspection=true;}}
+                else {executing=true;{std::lock_guard lock(mutex);outcomeProjectEpoch=preparedProjectEpoch;}if(constructing){step.kind=AgentTeamEvent::ConstructionStart;step.text="Executing atomic "+step.stepId+"; draft remains uncommitted";emit(step);}try{result=executor(actualName,actual);}catch(...){result=errorResult("Shared ARK executor failed. Inspect the document and revision before retrying; a running operation may have completed.");std::lock_guard lock(mutex);roles[index].view.needsInspection=true;}}
                 if(!isError(result)&&name=="doc_info"){std::uint64_t observed;if(receiptRevision(payload(result),observed)){std::lock_guard lock(mutex);roles[index].view.needsInspection=false;roles[index].hasInspectedRevision=true;roles[index].inspectedRevision=observed;}}
-                if(!isError(result)){std::lock_guard lock(mutex);std::uint64_t observed=0;if(receiptRevision(payload(result),observed)){documentRevisionKnown=true;documentRevision=observed;}const auto project=field(payload(result),"activity_project_id");const bool changed=!project.empty()&&!preparedProjectId.empty()&&project!=preparedProjectId;if(explicitProjectBoundary(actualName,actual,result)||changed)clearPreparedLocked();if(!project.empty())preparedProjectId=project;}
+                if(!isError(result)){std::lock_guard lock(mutex);std::uint64_t observed=0;if(receiptRevision(payload(result),observed)){documentRevisionKnown=true;documentRevision=observed;}const auto project=field(payload(result),"activity_project_id");const bool changed=!project.empty()&&!preparedProjectId.empty()&&project!=preparedProjectId;if(explicitProjectBoundary(actualName,actual,result)||changed)clearPreparedLocked();if(!project.empty())preparedProjectId=project;outcomeProjectEpoch=preparedProjectEpoch;}
                 if(!isError(result)&&(name=="doc_preview"||name=="manufacturing_propose")&&roles[index].config.canWrite){const auto& proof=payload(result);const auto* valid=proof.find("valid");const auto* cached=proof.find("candidate_cached");const auto* recipe=proof.find("recipe");const auto candidate=field(proof,"candidate_id");std::uint64_t observed=0;
                     bool receiptMatches=valid&&valid->t==V::Bool&&valid->b&&cached&&cached->t==V::Bool&&cached->b&&recipe&&recipe->t==V::Obj&&!candidate.empty()&&candidate.size()<=256&&receiptRevision(proof,observed)&&revision(actual)&&observed==(std::uint64_t)actual.find("expected_revision")->num&&samePreparedRecipe(*recipe,authorized);
                     if(refreshing){const auto* refresh=proof.find("refresh");bool sameProject;{std::lock_guard lock(mutex);sameProject=authorizedProjectEpoch==preparedProjectEpoch;}receiptMatches=receiptMatches&&sameProject&&candidate!=authorizedCandidate&&refresh&&refresh->t==V::Obj&&field(*refresh,"source_candidate_id")==authorizedCandidate;if(!receiptMatches)result=errorResult("Prepared refresh receipt did not attest this role's unchanged authorized recipe at the requested revision; no candidate ownership was granted.");}
@@ -506,7 +577,7 @@ struct AgentTeam::Impl {
                 if(queryArgs.dump().size()<=2048)compact.set("args",queryArgs);
                 for(const char* fieldName:{"error_code","error","stage","operation","command_index","feature_id","observed_solid_count","revision","document_unchanged","recovery","tool_succeeded","requested_fields","missing_fields","available_fields","reservation_owner","reservation_id","reservation_revision","lease_remaining_ms"})if(auto value=detail.find(fieldName)){if(value->dump().size()<=2048)compact.set(fieldName,*value);else if(value->t==V::Str)compact.set(fieldName,V::makeStr(clipped(value->str,1800)));}
                 if(queryIndex>=0&&!compact.find("revision"))if(const auto* observed=payload(result).find("revision"))compact.set("revision",*observed);
-                {std::lock_guard lock(mutex);if(tool.rfind("team_",0)!=0||tool=="team_apply_step"){roles[index].lastToolFailure=compact;roles[index].unresolvedToolFailures[key]=compact;}}
+                {std::lock_guard lock(mutex);if(tool.rfind("team_",0)!=0||tool=="team_apply_step"){auto& role=roles[index];role.lastToolFailure=compact;role.unresolvedToolFailures[key]=compact;if(resolutionRead(tool))role.readFailureStamps[key]={++role.readSequence,outcomeProjectEpoch};}}
                 event.text=clipped(field(detail,"error_code")+": "+field(detail,"error"),config.maxEventTextBytes);
                 if(event.text==": ")event.text="Tool rejected the request; inspect its retained response.";
                 share(index,"Tool failure diagnostic (data): "+compact.dump()+" Inspect the cause before another proposal; choose a correction from design intent, not an identical blind retry.");
@@ -514,7 +585,13 @@ struct AgentTeam::Impl {
                 std::uint64_t measuredRevision=0;const bool measured=receiptRevision(detail,measuredRevision)||(queryIndex>=0&&receiptRevision(payload(result),measuredRevision));
                 if(documentMutation(tool)&&!measured)return;
                 std::lock_guard lock(mutex);auto& role=roles[index];
-                auto resolve=[&](const std::string& identity){const auto failed=role.unresolvedToolFailures.find(identity);std::uint64_t failedRevision=0;if(failed!=role.unresolvedToolFailures.end()&&measured&&receiptRevision(failed->second,failedRevision)&&measuredRevision<failedRevision)return;role.unresolvedToolFailures.erase(identity);};
+                if(resolutionRead(tool)&&measured&&queryArgs.dump().size()<=2048){
+                    // Memory retention only, never an execution/turn/token budget.
+                    // Keep exact query identity plus freshness/ownership, not results.
+                    while(role.successfulReads.size()>=64)role.successfulReads.pop_front();
+                    role.successfulReads.push_back({toolFailureKey(tool,queryArgs,true),measuredRevision,++role.readSequence,outcomeProjectEpoch});
+                }
+                auto resolve=[&](const std::string& identity){const auto failed=role.unresolvedToolFailures.find(identity);std::uint64_t failedRevision=0;if(failed!=role.unresolvedToolFailures.end()&&measured&&receiptRevision(failed->second,failedRevision)&&measuredRevision<failedRevision)return;role.unresolvedToolFailures.erase(identity);role.readFailureStamps.erase(identity);};
                 resolve(key);
                 if(tool=="doc_apply"||tool=="team_apply_step"){resolve("doc_apply");resolve("team_apply_step");}
                 // A stale read needs current measured evidence of the same
@@ -544,7 +621,7 @@ struct AgentTeam::Impl {
             try{result=config.recordAction(roles[index].config.id,name,args,result,std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-actionStarted).count());}
             catch(...){result.set("activity_capture_error",V::makeStr("Action finished but its coordination audit could not be attached; do not replay the action."));}
         }
-        {std::lock_guard lock(mutex);const auto& data=payload(result);if(const auto* project=data.find("activity_project_id")){if(project->asStr()!=activityProjectId||(data.find("activity_boundary")&&data.find("activity_boundary")->b))for(auto& role:roles)role.pendingFeedback.clear();activityProjectId=project->asStr();}if(const auto* id=data.find("activity_id");id&&data.find("feedback_required")&&data.find("feedback_required")->b)roles[index].pendingFeedback.insert(id->asStr());if(const auto* rated=data.find("rated_ids");rated&&rated->t==V::Arr)for(const auto& id:rated->arr)roles[index].pendingFeedback.erase(id.asStr());if(const auto* pending=data.find("pending_feedback_ids");pending&&pending->t==V::Arr)for(const auto& id:pending->arr)roles[index].pendingFeedback.insert(id.asStr());if(name=="team_reserve_write")if(const auto* verification=data.find("revision_verification")){const auto& receipt=payload(*verification);if(const auto* id=receipt.find("activity_id");id&&receipt.find("feedback_required")&&receipt.find("feedback_required")->b)roles[index].pendingFeedback.insert(id->asStr());if(const auto* pending=receipt.find("pending_feedback_ids");pending&&pending->t==V::Arr)for(const auto& id:pending->arr)roles[index].pendingFeedback.insert(id.asStr());}}
+        {std::lock_guard lock(mutex);const auto& data=payload(result);if(const auto* project=data.find("activity_project_id")){if(project->asStr()!=activityProjectId||(data.find("activity_boundary")&&data.find("activity_boundary")->b))for(auto& role:roles)role.pendingFeedback.clear();activityProjectId=project->asStr();}if(const auto* id=data.find("activity_id");id&&data.find("feedback_required")&&data.find("feedback_required")->b)roles[index].pendingFeedback.insert(id->asStr());if(const auto* rated=data.find("rated_ids");rated&&rated->t==V::Arr)for(const auto& id:rated->arr)roles[index].pendingFeedback.erase(id.asStr());if(const auto* pending=data.find("pending_feedback_ids");pending&&pending->t==V::Arr)for(const auto& id:pending->arr)roles[index].pendingFeedback.insert(id.asStr());if(name=="team_reserve_write"||name=="team_report_task")if(const auto* verification=data.find("revision_verification")){const auto& receipt=payload(*verification);if(const auto* id=receipt.find("activity_id");id&&receipt.find("feedback_required")&&receipt.find("feedback_required")->b)roles[index].pendingFeedback.insert(id->asStr());if(const auto* pending=receipt.find("pending_feedback_ids");pending&&pending->t==V::Arr)for(const auto& id:pending->arr)roles[index].pendingFeedback.insert(id.asStr());}}
         if(const auto* verification=result.find("initial_checkpoint_verification"))if(const auto* inspection=verification->find("inspection")){std::lock_guard lock(mutex);const auto& data=payload(*inspection);if(const auto* id=data.find("activity_id");id&&data.find("feedback_required")&&data.find("feedback_required")->b)roles[index].pendingFeedback.insert(id->asStr());if(const auto* pending=data.find("pending_feedback_ids");pending&&pending->t==V::Arr)for(const auto& id:pending->arr)roles[index].pendingFeedback.insert(id.asStr());}
         emit(event);
         return result;
@@ -671,6 +748,7 @@ void AgentTeam::start(const AgentTeamConfig& config,const V& userMessage,const V
             }
             if(roleConfig.discipline==AgentTeamDiscipline::PartDesigner)workflow+="You own only your assigned parts, sketches, datums, materials, dimensions and manufacturing geometry. Prefix new names with your role ID to avoid clashes unless the orchestrator specifies shared names. Do not edit another designer's parts without explicit coordination. Write those operations directly as small checked steps and report actual created IDs to the orchestrator; assembly and mate writes belong to the orchestrator. When the assigned part is complete or blocked, use team_send to report created IDs, attachment datums, evidence and blockers to the orchestrator; then finish your turn and await new work.";
             if(roleConfig.discipline==AgentTeamDiscipline::PhysicsReviewer)workflow+="You own independent read-only review at the requested design checkpoint. For a concept, address the requested layout, proportions, interfaces, continuity and geometric consistency using actual evidence; do not impose fabrication routes, catalogue details or load calculations unrelated to the user goal. For requested physical or manufacturing checks, use actual physics_inspect, math_eval, geometry_query and materials evidence, including beam_test/weld_test only with applicable explicit assumptions. State unknown loads, supports, material properties and validity limits; do not invent FEA or production qualification. Propose concrete corrections to the responsible author, preserving the user's concept and constraints. Report findings to the lead engineer and finish your turn; wait for another concrete assignment.";
+            workflow+=" A corrected reference/find/detail read for the same object does not automatically clear its earlier rejected selector. After your corrected read succeeds, use team_report_task state:in_progress with expected_revision and read_resolutions:[{failed:{tool,args},evidence:{tool,args},reason}]. Cite both exact queries and the concrete selector correction; the host verifies current revision and your own later evidence. This is attributed supersession, never a successful original query or permission to skip write/BOM/feedback gates.";
             workflow+=" Functional holes must use Holes Orchestrator with persistent parameters and feature dependencies; sketch-only holes are for nonfunctional contours. Onboard holes before functional drilling and retain exact source/flat-pattern limits. Use container checkout for scoped independent sessions, preserve read-only dependencies and reject stale merges.";
             workflow+=" Create or update 2D/manufacturing drawings only if the user explicitly requests drawings for this task. Never add them automatically to design, assembly, BOM or manufacturing-review completion. A teammate suggestion or read-only source catalog is not user authorization for drawing writes or exports.";
             workflow+=" For bought components use library_source_search source web, read matching product pages using library_source_page, then persist genuine source_url, manufacturer/supplier references and evidence-based sourcing_status in part metadata. Report unavailable access or unresolved specifications; never invent URLs. Maintain part BOM metadata while authoring final physical definitions. Specialists may inspect bom_inspect{ids:[their counted definitions]} and submit bom_review with the same ids for a partial review; this never satisfies global goal completion. The lead must still inspect the complete BOM and submit global bom_review at the current revision. Concept reviews must disclose pending fields; detailed reviews reject them. Never downgrade an explicitly requested detailed deliverable: report needs_input for unknown requirements. Inspect bom_inspect: retain quantities/source links, review mounting fasteners and report unresolved metadata or connections. Catalogue provenance cannot be fabricated from a generic fastener recipe. Concept scope may remain explicitly incomplete.";

@@ -1,10 +1,12 @@
 // D.02: real Team/Session receipts and scripted exact-reference recovery.
+static void explicitCorrectedSelectionRecovery038d();
 static V lastTeamReceipt038d(const V& request){
     const auto* input=request.find("input");
     if(input)for(auto it=input->arr.rbegin();it!=input->arr.rend();++it)if(it->find("type")&&it->find("type")->asStr()=="function_call_output")return json(it->find("output")->asStr());
     throw std::runtime_error("Missing scripted team receipt");
 }
 static void projectedBatchReadRecovery038d(){
+    explicitCorrectedSelectionRecovery038d();
     ark::AgentSession session;ark::AgentTeam team;ark::AgentTeamConfig config;config.focusedWorkflow=true;config.roles={role("engineer")};config.roles[0].discipline=ark::AgentTeamDiscipline::Orchestrator;
     int round=0,executed=0;bool rejected=false,retained=false;
     config.roles[0].transport=[&](auto&,const V& request,auto*){
@@ -100,4 +102,82 @@ static void batchReceiptAssociationRecovery038d(){
         if(round==6)rows.arr[1].set("args",json(R"({"id":8,"reference":"face.right"})"));
         content.set("results",rows);receipt.set("structuredContent",content);return receipt;
     });complete(team);const auto snapshot=team.snapshot(true,0,true);check(snapshot.unresolvedErrors==0&&snapshot.goalState==ark::AgentGoalState::Completed,"metadata/count mismatches cannot manufacture recovery or permanently block a subsequent valid batch");
+}
+
+static V readDescriptor038d(const std::string& tool,const V& args){V item=V::makeObj();item.set("tool",V::makeStr(tool));item.set("args",args);return item;}
+static V readResolutionReport038d(const V& failed,const V& evidence){
+    V report=json(R"({"state":"in_progress","summary":"Corrected the unsupported selector for this same object; original query remains rejected.","expected_revision":4,"read_resolutions":[]})"),item=V::makeObj();item.set("failed",failed);item.set("evidence",evidence);item.set("reason",V::makeStr("The requested normal selector did not identify the face; the producer-authored cap.start reference now resolves on the same object."));auto rows=*report.find("read_resolutions");rows.arr.push_back(item);report.set("read_resolutions",rows);return report;
+}
+static void explicitCorrectedSelectionRecovery038d(){
+    for(const std::string mode:{"direct","batch","multiple","unrelated","other_role","stale","missing","before","repeated_failure","other_args","no_subject","copy","second_invalid","preview","write","finish_goal","completed","no_revision","verification_stale","verification_failed","epoch","external_epoch","evicted"}){
+        ark::AgentTeam team;ark::AgentTeamConfig config;config.focusedWorkflow=true;config.roles={role("engineer",true)};config.roles[0].discipline=ark::AgentTeamDiscipline::Orchestrator;
+        const bool accepted=mode=="direct"||mode=="batch"||mode=="multiple";int round=0,verifications=0;bool completionAllowed=false;
+        std::mutex peerMutex;std::condition_variable peerCondition;bool peerRead=false;
+        if(mode=="other_role"){
+            config.focusedWorkflow=false;config.maxWorkers=2;config.roles.push_back(role("reviewer"));auto peerRound=std::make_shared<int>(0);
+            config.roles[1].transport=[&,peerRound](auto&,const V&,auto*){if(++*peerRound==1)return call("peer_selection","reference_inspect",R"({"id":7,"reference":"cap.start","detail":"frame"})");{std::lock_guard lock(peerMutex);peerRead=true;}peerCondition.notify_all();return done("Other role read its own exact selection receipt.");};
+        }
+        config.completionCheck=[&]{V receipt=V::makeObj();receipt.set("allowed",V::makeBool(completionAllowed));receipt.set("error",V::makeStr("Global BOM review is still required."));return receipt;};
+        V failedArgs=json(R"({"id":7,"find":{"normal":[1,0,0]},"detail":"frame"})"),evidenceArgs=json(R"({"id":7,"reference":"cap.start","detail":"frame"})");
+        if(mode=="unrelated")evidenceArgs.set("id",V::makeNum(8));
+        if(mode=="other_args")evidenceArgs.set("limit",V::makeNum(2));
+        if(mode=="no_subject"){failedArgs.obj.erase(failedArgs.obj.begin());evidenceArgs.obj.erase(evidenceArgs.obj.begin());}
+        if(mode=="copy"){failedArgs.set("copy",V::makeNum(0));evidenceArgs.set("copy",V::makeNum(1));}
+        const std::string failedTool=mode=="preview"?"doc_preview":mode=="write"?"doc_apply":"reference_inspect";
+        V failed=readDescriptor038d(failedTool,failedArgs),evidence=readDescriptor038d(mode=="preview"||mode=="write"?failedTool:"reference_inspect",evidenceArgs);
+        V report=readResolutionReport038d(failed,evidence);
+        if(mode=="completed")report.set("state",V::makeStr("completed"));
+        if(mode=="no_revision")report.obj.erase(std::remove_if(report.obj.begin(),report.obj.end(),[](const auto& entry){return entry.first=="expected_revision";}),report.obj.end());
+        if(mode=="second_invalid"){V entries=*report.find("read_resolutions"),bad=entries.arr[0];bad.set("reason",V::makeStr(" "));entries.arr.push_back(bad);report.set("read_resolutions",entries);}
+        struct Step {std::string tool;V args;};std::vector<Step> steps;
+        if(mode=="before")steps.push_back({"reference_inspect",evidenceArgs});
+        // Write/preview errors are generated by the host even though the
+        // resolution descriptors attempt to disguise them as selected reads.
+        if(mode=="preview"||mode=="write")failedArgs=json(R"({"id":7,"expected_revision":4,"commands":[{"op":"param.set","name":"width","expr":"unknown"}]})");
+        if(mode=="preview"||mode=="write"){failed=readDescriptor038d(failedTool,failedArgs);report=readResolutionReport038d(failed,readDescriptor038d(failedTool,failedArgs));}
+        steps.push_back({failedTool,failedArgs});
+        if(mode=="multiple"){V second=failedArgs;second.set("find",json(R"({"normal":[-1,0,0]})"));steps.push_back({failedTool,second});V secondEvidence=evidenceArgs;secondEvidence.set("reference",V::makeStr("cap.end"));steps.push_back({"reference_inspect",secondEvidence});V entries=*report.find("read_resolutions"),item=entries.arr[0];item.set("failed",readDescriptor038d(failedTool,second));item.set("evidence",readDescriptor038d("reference_inspect",secondEvidence));entries.arr.push_back(item);report.set("read_resolutions",entries);}
+        if(mode!="missing"&&mode!="before"&&mode!="other_role"){
+            if(mode=="batch"){V batch=json(R"({"queries":[]})"),queries=V::makeArr();queries.arr.push_back(readDescriptor038d("reference_inspect",evidenceArgs));batch.set("queries",queries);steps.push_back({"query_batch",batch});}
+            else steps.push_back({"reference_inspect",evidenceArgs});
+        }
+        if(mode=="repeated_failure")steps.push_back({failedTool,failedArgs});
+        if(mode=="epoch")steps.push_back({"doc_new",json(R"({"expected_revision":4})")});
+        if(mode=="evicted")for(int i=0;i<65;++i){V other=evidenceArgs;other.set("id",V::makeNum(100+i));steps.push_back({"reference_inspect",other});}
+        const auto reportRound=(int)steps.size()+1;
+        config.roles[0].transport=[&](auto&,const V& request,auto*){
+            ++round;
+            if(round<reportRound)return call("selection_"+std::to_string(round),steps[round-1].tool,steps[round-1].args.dump());
+            if(round==reportRound){if(mode=="other_role"){std::unique_lock lock(peerMutex);check(peerCondition.wait_for(lock,1s,[&]{return peerRead;}),"other role retains its own successful query before supersession attempt");}check(team.snapshot().roles[0].unresolvedToolErrors==(mode=="multiple"?2u:1u),"corrected selector does not silently discharge a distinct failed query");return call("explicit_selection",mode=="finish_goal"?"team_finish_goal":"team_report_task",report.dump());}
+            if(round==reportRound+1){
+                const auto receipt=lastTeamReceipt038d(request);check(receipt.find("isError")?receipt.find("isError")->b!=accepted:accepted,"only a current attributed same-object corrected read is accepted");
+                check(team.snapshot().roles[0].unresolvedToolErrors==(accepted?0u:1u),"all invalid supersession lists retain the original failure atomically");
+                if(accepted){const auto* resolutions=receipt.find("read_resolutions");check(resolutions&&resolutions->arr.size()==(mode=="multiple"?2u:1u)&&resolutions->arr[0].find("kind")->asStr()=="corrected_selection"&&!resolutions->arr[0].find("original_query_succeeded")->b&&resolutions->arr[0].find("role")->asStr()=="engineer"&&resolutions->arr[0].find("revision")->num==4,"supersession receipt attributes failed/evidence/reason/revision without rewriting original success");check(receipt.find("revision_verification")&&receipt.find("revision_verification")->find("structuredContent")->find("activity_id"),"internal revision read retains compact activity custody");}
+                if(mode=="verification_stale"||mode=="verification_failed")check(receipt.find("revision_verification")&&receipt.find("revision_verification")->find("structuredContent")->find("activity_id"),"a rejected report retains the internal read activity and feedback receipt");
+                return call("bom_gate","team_finish_goal",R"({"state":"completed","summary":"Completion still needs normal BOM and feedback evidence."})");
+            }
+            if(round==reportRound+2){check(lastTeamReceipt038d(request).find("isError")->b,"explicit supersession never waives the BOM completion check");completionAllowed=true;return call("normal_gate","team_finish_goal",R"({"state":"completed","summary":"Normal completion gates remain effective."})");}
+            if(round==reportRound+3){const auto receipt=lastTeamReceipt038d(request);check(receipt.find("isError")->b,"pending feedback or retained failures still block goal completion");if(accepted||mode=="verification_stale"||mode=="verification_failed"||mode=="external_epoch")check(receipt.find("error")->asStr().find("tool_feedback")!=std::string::npos,"internal read feedback blocks completion even when the supersession report was rejected");if(!accepted)return call("blocked_selection","team_report_task",R"({"state":"needs_input","summary":"Retained the exact unsupported selector and reported its remaining blocker."})");return call("rate_revision","tool_feedback",R"({"ratings":[{"activity_id":"selection-verification","rating":"useful"}]})");}
+            if(accepted&&round==reportRound+4)return call("finish_selection","team_finish_goal",R"({"state":"completed","summary":"Corrected same-object selector was explicitly attributed; current global checks and feedback are complete."})");
+            return done("Explicit read supersession checked.");
+        };
+        team.start(config,"Inspect exact semantic selection recovery",ark::AgentSession::tools(),[&](const std::string& tool,const V& args){
+            if(tool=="doc_info"){
+                ++verifications;V receipt=json(R"({"isError":false,"structuredContent":{"revision":4,"activity_id":"selection-verification","activity_project_id":"selection-project","feedback_required":true,"pending_feedback_ids":["selection-verification"]}})");
+                if(mode=="verification_stale"){V data=*receipt.find("structuredContent");data.set("revision",V::makeNum(5));receipt.set("structuredContent",data);}
+                if(mode=="verification_failed")receipt.set("isError",V::makeBool(true));
+                return receipt;
+            }
+            if(tool=="tool_feedback")return json(R"({"isError":false,"structuredContent":{"revision":4,"rated_ids":["selection-verification"]}})");
+            if(tool=="doc_new")return json(R"({"isError":false,"structuredContent":{"revision":4,"activity_boundary":true}})");
+            if(tool=="query_batch")return json(R"({"isError":false,"structuredContent":{"revision":4,"results":[{"isError":false,"structuredContent":{"reference_valid":true}}]}})");
+            if(tool=="doc_apply"||tool=="doc_preview"||args.find("find"))return json(R"({"isError":true,"structuredContent":{"revision":4,"error_code":"REFERENCE_MISSING","error":"The unsupported selector remains rejected."}})");
+            if(mode=="external_epoch")return json(R"({"isError":false,"structuredContent":{"revision":4,"reference_valid":true,"activity_project_id":"old-project"}})");
+            return mode=="stale"?json(R"({"isError":false,"structuredContent":{"revision":3,"reference_valid":true}})"):json(R"({"isError":false,"structuredContent":{"revision":4,"reference_valid":true}})");
+        });complete(team);const auto snapshot=team.snapshot(true,0,true);
+        check(snapshot.unresolvedErrors==(accepted?0u:1u)&&(accepted?snapshot.goalState==ark::AgentGoalState::Completed:snapshot.goalState!=ark::AgentGoalState::Completed),("only explicit valid selection recovery reaches completed after normal checks: "+mode+" / "+snapshot.roles[0].error+" / "+snapshot.roles[0].status+" / errors="+std::to_string(snapshot.unresolvedErrors)).c_str());
+        check(verifications==((accepted||mode=="verification_stale"||mode=="verification_failed"||mode=="external_epoch")?1:0),"invalid descriptors never cause an internal revision read");
+        bool attributed=false;for(const auto& event:snapshot.events)if(event.kind==ark::AgentTeamEvent::Message&&event.text.find("Attributed read supersession:")!=std::string::npos){attributed=event.roleId=="engineer"&&event.text.find("\"failed\"")!=std::string::npos&&event.text.find("\"evidence\"")!=std::string::npos&&event.text.find("\"reason\"")!=std::string::npos;}
+        check(attributed==accepted,"only an accepted corrected selection publishes its attributed supersession event");
+    }
 }
