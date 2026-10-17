@@ -1,5 +1,14 @@
 # ARK agent protocol
 
+037D preloads static overview/sketch/solids contracts for Studio writers and
+retains loaded guides across request compaction. For an empty document in
+Parallel mode, the lead commits initial editable geometry before other writers
+start their retained assignments; read-only reviews may run independently.
+Released writers still inspect current revision before editing. Studio allows
+one coherent atomic step of up to 128 commands, 32 new features and 64 placements
+within role scope. External core defaults remain eight. See
+[037D evidence and real-model limits](iterations/037D.md).
+
 035B adds natural `plastics` and `vendors` onboarding, explicit spline/ribbon
 cable recipes and shared graph navigation for endpoints, PCB component/net
 labels and source/artifact links. See [cables](ELECTRONICS_035B.md),
@@ -302,8 +311,9 @@ The team adds `team_send`, `team_context`, `team_propose`, `team_proposal`,
 connector schema, not standalone MCP discovery. Report completed/needs_input/
 in_progress explicitly with output IDs, evidence and limits. Idle is not a goal
 completion report; pending work and unresolved failures prevent completion.
-Construction steps are atomic and default to at most eight commands, with up to
-eight created features/placements within that command bound and the role scope.
+Construction steps are atomic. Studio permits up to 128 commands, 32 created
+features and 64 placements within that command bound and the role scope;
+external core teams default to eight commands/features/placements.
 Related operations can form one coherent batch; one provider round per feature
 is not required. Cached previews can commit only through a retained same-role
 receipt whose commands/checks and baseline passed the same scope/count validation. Explicit observed `expected_revision` is

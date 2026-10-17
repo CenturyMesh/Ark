@@ -74,8 +74,10 @@ V edge(const char* kind, std::initializer_list<Vec2> coordinates) {
 
 V profileFromSketch(Document& document, const std::string& name,const NamedSketch* supplied=nullptr) {
     const NamedSketch* named = supplied?supplied:document.findSketch(name);
-    if (!named || !named->error.empty())
+    if (!named)
         throw std::runtime_error("Native profile sketch is missing or invalid: " + name);
+    if (!named->error.empty())
+        throw std::runtime_error("Native profile sketch is invalid: " + name + "; " + named->error);
     V profile = V::makeObj(), frame = V::makeArr(), entities = V::makeArr();
     const Mat4 transform = resolvePlane(document, named->sk.plane);
     for (double value : transform.m) frame.arr.push_back(V::makeNum(value));

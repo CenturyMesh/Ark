@@ -1,0 +1,175 @@
+{
+  "schema": "ark.iteration-verification.v1",
+  "iteration": "037D",
+  "version": "0.9.38",
+  "milestones": [
+    "A.03",
+    "A.04",
+    "D.02",
+    "D.04"
+  ],
+  "source_commit": "bee9912f01608b3429b5392a10dba1b735ebd49b",
+  "configuration": "Windows x64 MSVC Release; OCCT 8.0.1; portable core separately; Studio live tests opt-in",
+  "status": "verified-host-contracts-in-local-scope; real-model-delivery-partial",
+  "checks": [
+    {
+      "name": "native-final",
+      "tests": 135,
+      "failures": 0,
+      "seconds": 91.0,
+      "receipt": "out/verification-037d/native-final.xml",
+      "sha256": "4fd52cc2e5c66aebbc75ee9c105d8b25607639f9e479ed7abf76b100f8392905"
+    },
+    {
+      "name": "core-final",
+      "tests": 90,
+      "failures": 0,
+      "seconds": 29.0,
+      "receipt": "out/verification-037d/core-final.xml",
+      "sha256": "1d122be30c8d0c4b795ef55d9d925219debe949f31541e66300690739073dffd"
+    },
+    {
+      "name": "studio-final",
+      "tests": 5,
+      "failures": 0,
+      "seconds": 18.0,
+      "receipt": "out/verification-037d/studio-final.xml",
+      "sha256": "6c13b16ecb0208e09384135177a1c163424991ec32d1c0251731b9d22eeead7b"
+    }
+  ],
+  "focused_checks": {
+    "workflow": 70,
+    "assistant": 442,
+    "agent_team": 744
+  },
+  "runtime_artifacts": [
+    {
+      "name": "ark-studio.exe",
+      "bytes": 11895296,
+      "sha256": "ccc62e6259bea9f848f578a9667f2b288be6e41466955746e0a942b3982f2abf"
+    },
+    {
+      "name": "ark-mcp.exe",
+      "bytes": 6084096,
+      "sha256": "02c6f38112b3477196b96e598900b1d154ac151b84badb59ecb3bac6a750c924"
+    },
+    {
+      "name": "ark-cli.exe",
+      "bytes": 3331072,
+      "sha256": "5735b6cf9a1175f6750248d50937a9944801498ebc6f5266df0ee0d81147e1af"
+    },
+    {
+      "name": "ark-occt-worker.exe",
+      "bytes": 3229184,
+      "sha256": "a466d1be03580db2516227c75a659c2973b8ed55a80aedfeb28f1ee7dd4dcc22"
+    },
+    {
+      "name": "app-version.json",
+      "bytes": 202,
+      "sha256": "c0ed1ec9ff79aa1b4bd034aff1abb05df8daf050febeff5cedf6e2bf47807cd6"
+    }
+  ],
+  "package_smoke": {
+    "schema": "ark.relocated-package-smoke.v1",
+    "iteration": "037D",
+    "version": "0.9.38",
+    "isolated_windows_path": true,
+    "native_create_export_passed": true,
+    "native_volume_mm3": 3000,
+    "step_bytes": 15403,
+    "archive_sha256": "62df63c32335d832d3aa59279019f1776772b1ef6ca89c24b89cd6bf37d457b6",
+    "user_ark_files": 0,
+    "paid_model_calls": 0
+  },
+  "projection_witness": {
+    "baseline": {
+      "original_bytes": 171188,
+      "projected_bytes": 17633,
+      "rules_retained": false,
+      "next_action_retained": false,
+      "host_unchanged": true,
+      "paid_model_calls": 0
+    },
+    "corrected": {
+      "original_bytes": 171188,
+      "projected_bytes": 33058,
+      "rules_retained": true,
+      "next_action_retained": true,
+      "host_unchanged": true,
+      "paid_model_calls": 0
+    },
+    "paid_model_calls": 0
+  },
+  "code_graph": {
+    "source_sha256": "56dd71f94bb6173efc25e8e0f9afe41af159030972869310977f74dd55ac7377",
+    "graph_sha256": "ea860e071499dda41e10cd48836510ab72169400885bbccc15ad83a7d5f47a65",
+    "nodes": 9799,
+    "edges": 31254,
+    "knowledge_notes": 4,
+    "knowledge_sha256": "a77aacfecbf8a70f8b2c3afecc7087dbf661bb1ba02c190f78d93fe4c206b669",
+    "model_backend": "none",
+    "user_drawings_sessions_credentials_indexed": false
+  },
+  "real_model_pilot": {
+    "source_commit": "1e79093",
+    "model": "gpt-6.1-sol",
+    "reasoning": "xhigh",
+    "configured_roles": 3,
+    "mode": "Parallel; actual provider/AgentTeam/AgentSession; GUI loop omitted",
+    "fresh_document": true,
+    "initial_request_preflight_passed": true,
+    "host_test_window_seconds": 300,
+    "product_turn_token_budget_added": false,
+    "checkpoint_reached": false,
+    "first_geometry_ms": 92199,
+    "elapsed_ms": 300193,
+    "geometry": {
+      "revision": 4,
+      "native_valid_definition_ids": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ],
+      "native_valid_definitions": 6,
+      "visible_native_occurrences_or_outputs": 2,
+      "visible_native_unique_definitions": 2,
+      "assembly_solved": true,
+      "assembly_error": ""
+    },
+    "goal_state": "Interrupted",
+    "provider_call_attempts": 42,
+    "reported_responses": 40,
+    "executor_tool_errors": 3,
+    "transport_failures_on_cancellation": 2,
+    "usage_lower_bound": {
+      "input_tokens": 1756545,
+      "output_tokens": 12519,
+      "total_tokens": 1769064,
+      "cached_input_tokens": 150400,
+      "reasoning_tokens": 8202,
+      "reported_responses": 40,
+      "missing_responses": 2
+    },
+    "unknown_partial_usage_possible": true,
+    "criteria": "At least four distinct visible native definitions and eight visible native occurrences/outputs, native-valid and assembly solved.",
+    "comparison_limit": "First-concept brief differs from earlier full-design request; no matched token/cost or speedup ratio.",
+    "subsequent_fixes": "Verified initial retained geometry, larger coherent Studio atomic batches and owned profile cause have local regression evidence only; no second paid pilot."
+  },
+  "failed_attempts": [
+    "Initial native and portable compilation stopped with disk-full errors; later builds completed after disk space became available. No source or drawing cleanup was required.",
+    "Initial projection witness used a semantic team receipt below the compaction threshold; refined to the representative three-role receipt before freezing the counterexample.",
+    "The one real-provider fresh-document pilot failed the coherent-concept checkpoint; all 42 attempted requests, three tool rejections and two cancelled responses with missing final usage are retained in the pilot accounting.",
+    "Review found create-then-remove/empty batches could falsely release deferred writers; corrected using selected actual design inspection at the exact commit revision and covered by offline regressions.",
+    "Verification-receipt generation initially expected UTF-8 for an earlier PowerShell UTF-16 witness; corrected the BOM-aware reader without changing the witness or runtime."
+  ],
+  "limits": [
+    "Local contract tests do not establish real-model design quality or matched token/cost savings.",
+    "No second paid run validated the final checkpoint/batch/diagnostic changes.",
+    "The real-provider pilot omitted Studio GUI dispatch/render latency and price refresh.",
+    "Graphify code navigation and the derived Obsidian vault remain separate from the shared runtime project graph; no automatic private cross-project ingestion.",
+    "Hosted CI, public OTA endpoint, commercial vendor API integration and manufacturing qualification are separate gates."
+  ]
+}

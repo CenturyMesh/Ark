@@ -2,6 +2,7 @@
 #include "ark/assistant.hpp"
 #include "ark/assistant_connectors.hpp"
 #include "ark/serialize.hpp"
+#include "ark/onboarding.hpp"
 #include <iostream>
 #include <algorithm>
 #include <cmath>
@@ -63,7 +64,56 @@ void proactiveContext(){
     auto messages=assistantProviderPreset("claude");messages.model="offline-message-context";auto other=runAssistant(messages,history,AgentSession::tools(),{}, {},nullptr,[](const auto&,const V&,auto*){return json(R"({"type":"message","role":"assistant","content":[{"type":"text","text":"Read-only review."}],"stop_reason":"end_turn","usage":{"input_tokens":100,"output_tokens":2}})");});check(other.performance.lastInstructionBytes>0&&other.performance.lastToolResultBytes>0,"Messages protocol measures system instructions and tool-result content blocks separately");
     std::cout<<"context original_history_bytes="<<original.size()<<" projected_input_bytes="<<result.performance.lastInputBytes<<" schema_bytes="<<result.performance.lastToolSchemaBytes<<'\n';
 }
+void authoringBootstrap(){
+    const auto pack=agentAuthoringOnboardingPack();V parsed;if(!arkjson::parse(pack,parsed))throw std::runtime_error("authoring bootstrap pack JSON");
+    check(field(parsed,"topics").arr.size()==3,"initial authoring pack supplies overview, sketch and solids without unrelated specialist topics");
+    bool sketch=false,solids=false;for(const auto& guide:field(parsed,"topics").arr){check(!guide.find("document")&&!field(guide,"document_state_included").b,"bootstrap documentation contains no document snapshot");if(field(guide,"topic").str=="sketch")sketch=guide.find("example_doc_apply")!=nullptr;if(field(guide,"topic").str=="solids"){solids=guide.find("example_doc_apply")!=nullptr;check(!guide.find("example_doc_apply")->find("expected_revision"),"bootstrap examples do not bake a document revision");}}
+    check(sketch&&solids,"initial writer knows actual editable sketch and native authoring examples");
+    AssistantConfig config;config.model="offline-authoring-bootstrap";config.onboardingPack=pack;int requests=0;
+    auto run=runAssistant(config,V::makeStr("Create a coherent editable concept in this new file."),AgentSession::tools(),{}, {},nullptr,[&](const auto&,const V& request,const auto*){++requests;const auto body=request.dump();check(body.find("ARK_PREBAKED_GUIDE_V1")!=std::string::npos&&body.find("Solid profile")!=std::string::npos&&body.find("example_doc_apply")!=std::string::npos,"very first provider request already contains the core authoring contracts");return json(R"({"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Initial contract inspected; no geometry claim."}]}]})");});
+    check(requests==1&&run.rounds==1,"bootstrap evidence requires no onboarding discovery round or paid transport");
+}
 #ifdef ARK_CONTRACTS_NATIVE_TESTS
+void invalidProfileReportsOwnedCause(){
+    AgentSession session;session.suppressFailureCapture();session.suppressIterationHistory();
+    const auto before=documentToJson(session.document);
+    V args=json(R"({"expected_revision":0,"commands":[{"op":"sketch.set","name":"Invalid ellipse","sketch":{"plane":"XY","entities":[{"kind":"recipe","name":"Oval","recipe":{"type":"ellipse","center":[0,0],"major":20,"minor":30,"angle":0}}]}}]})");
+    const auto sketchOnly=session.call("doc_apply",args);check(field(sketchOnly,"isError").b,"invalid ellipse fails at the owned sketch predicate");const auto sketchError=field(field(sketchOnly,"structuredContent"),"error").str;
+    auto commands=field(args,"commands");commands.arr.push_back(json(R"({"op":"feature.add","type":"native_solid","name":"Dependent extrusion","native":{"op":"extrude"},"p":{"sketch":"Invalid ellipse","depth":12}})"));args.set("commands",commands);
+    const auto dependent=session.call("doc_apply",args);check(field(dependent,"isError").b,"dependent native extrusion rejects invalid profile atomically");const auto nativeError=field(field(dependent,"structuredContent"),"error").str;
+    const auto start=sketchError.find(": ");check(start!=std::string::npos&&nativeError.find(sketchError.substr(start+2))!=std::string::npos,"native profile rejection retains the exact underlying sketch error instead of only a missing/invalid label");
+    check(session.revision==0&&documentToJson(session.document)==before,"profile diagnostic improvement preserves source and revision after both rejections");
+}
+bool visibleStaticGuide(const V& value,V& found,int depth=0){
+    if(depth>24)return false;
+    if(value.t==V::Obj){
+        const auto* topic=value.find("topic"),*mode=value.find("detail"),*example=value.find("example_doc_apply");
+        if(topic&&topic->asStr()=="solids"&&mode&&mode->asStr()=="guide"&&example){found=value;return true;}
+        for(const auto& entry:value.obj)if(visibleStaticGuide(entry.second,found,depth+1))return true;
+    }else if(value.t==V::Arr){for(const auto& item:value.arr)if(visibleStaticGuide(item,found,depth+1))return true;}
+    else if(value.t==V::Str){const auto offset=value.str.find('{');V parsed;if(offset!=std::string::npos&&arkjson::parse(value.str.substr(offset),parsed)&&visibleStaticGuide(parsed,found,depth+1))return true;}
+    return false;
+}
+void retainedGuideAuthorsNativeCheckpoint(){
+    AgentSession session;session.suppressFailureCapture();session.suppressIterationHistory();
+    V history=json(R"([{"role":"user","content":"Create an editable circular profile of radius 20 mm and extrude it 12 mm. Preserve those explicit dimensions."}])");
+    auto exchange=[&](const std::string& id,const std::string& name,V args,V receipt){V request=V::makeObj(),output=V::makeObj();request.set("type",V::makeStr("function_call"));request.set("call_id",V::makeStr(id));request.set("name",V::makeStr(name));request.set("arguments",V::makeStr(args.dump()));output.set("type",V::makeStr("function_call_output"));output.set("call_id",V::makeStr(id));output.set("output",V::makeStr(receipt.dump()));history.arr.push_back(request);history.arr.push_back(output);};
+    const V guideArgs=json(R"({"topic":"solids","detail":"guide"})");const V guideEnvelope=session.call("agent_onboard",guideArgs);const V originalGuide=accepted(guideEnvelope);exchange("loaded-native-guide","agent_onboard",guideArgs,guideEnvelope);
+    for(int i=0;i<10;++i){V receipt=V::makeObj();receipt.set("revision",V::makeNum(0));receipt.set("historical_inventory",V::makeStr(std::string(14000,'x')));exchange("earlier-read-"+std::to_string(i),"doc_info",V::makeObj(),receipt);}
+    const auto original=history.dump();check(original.size()>96*1024,"native guide continuation crosses the actual request-projection threshold");
+    AssistantConfig config;config.model="offline-retained-contract";int rounds=0,writes=0;V retained;
+    auto responseCall=[](const std::string& id,const char* name,const V& args){V response=json(R"({"status":"completed","output":[]})"),call=V::makeObj();call.set("type",V::makeStr("function_call"));call.set("call_id",V::makeStr(id));call.set("name",V::makeStr(name));call.set("arguments",V::makeStr(args.dump()));auto output=*response.find("output");output.arr.push_back(call);response.set("output",output);return response;};
+    auto run=runAssistant(config,history,AgentSession::tools(),[&](const auto& name,const V& args){if(name=="doc_apply")++writes;return session.call(name,args);},{},nullptr,[&](const auto&,const V& request,const auto*){
+        ++rounds;V current;check(visibleStaticGuide(request,current)&&current.dump()==originalGuide.dump(),"complete native contract remains readable after projection and subsequent tool calls");retained=current;
+        if(rounds==1)return responseCall("fresh-required-revision","doc_info",json(R"({"detail":"revision"})"));
+        if(rounds==2){V commands=field(retained,"example_doc_apply");commands.set("expected_revision",V::makeNum(session.revision));commands.set("detail",V::makeStr("changes"));return responseCall("create-from-retained-guide","doc_apply",commands);}
+        return json(R"({"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Editable profile and native extrusion created; fabrication is unqualified."}]}]})");
+    });
+    check(rounds==3&&writes==1&&session.revision==1&&session.document.sketches.size()==1&&session.document.features.size()==1,"retained contract reaches one atomic editable native checkpoint without rediscovery");
+    const auto native=accepted(session.call("native_inspect",json(R"({"id":1,"detail":"properties"})")));const auto& report=field(native,"report");check(field(report,"brep_valid").b&&std::abs(field(report,"volume_mm3").num-std::acos(-1.)*400*12)<1e-6,"checkpoint produced the exact requested native volume");
+    for(size_t i=0;i<history.arr.size();++i)check(run.conversation.arr[i].dump()==history.arr[i].dump(),"native continuation preserves every original host message and receipt");check(history.dump()==original,"native execution does not mutate caller history");
+    std::cout<<"RETAINED_NATIVE_CHECKPOINT original_history_bytes="<<original.size()<<" offline_provider_responses="<<rounds<<" writes="<<writes<<" native_volume_mm3="<<field(report,"volume_mm3").num<<" paid_model_calls=0\n";
+}
 void exactNativeRefresh(){
     AgentSession s;s.suppressFailureCapture();s.suppressIterationHistory();apply(s,R"([{"op":"feature.add","type":"native_solid","name":"Exact target","native":{"op":"box"},"p":{"width":2,"depth":3,"height":4}},{"op":"feature.add","type":"native_solid","name":"Exact peer","native":{"op":"box"},"p":{"width":4,"depth":5,"height":6}}])");
     V args=json(R"({"expected_revision":1,"detail":"changes","commands":[{"op":"feature.edit","id":1,"p":{"width":7}}],"checks":[{"query":{"tool":"native_inspect","args":{"id":1,"detail":"properties"},"path":"report.brep_valid"},"op":"true"}]})");
@@ -74,8 +124,8 @@ void exactNativeRefresh(){
 }
 #endif
 }
-int main(){try{packedRetention();refreshAndCommit();scopedBom();proactiveContext();
+int main(){try{packedRetention();refreshAndCommit();scopedBom();proactiveContext();authoringBootstrap();
 #ifdef ARK_CONTRACTS_NATIVE_TESTS
-exactNativeRefresh();
+invalidProfileReportsOwnedCause();retainedGuideAuthorsNativeCheckpoint();exactNativeRefresh();
 #endif
 std::cout<<checks<<" workflow checks passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
