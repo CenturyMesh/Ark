@@ -9,7 +9,7 @@ The public iteration and numeric runtime are defined in
 increasing sequence and its principal phase. The letter is a roadmap phase, not a
 month; it does not declare the phase complete. The `.ark` format evolves separately.
 
-038B addresses **A.03/A.04/B.01/B.02/D.02/D.04**, **Em curso**, through native
+038B addresses **A.03/A.04/A.05/B.01/B.02/D.02/D.04**, **Em curso**, through native
 loft/shell failure investigation, per-query recovery and verified Obsidian
 exports. Portable recovery has 90 passing registrations and the script audit
 has 52 passing checks; native recovery/distribution remain open in

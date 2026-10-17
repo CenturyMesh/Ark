@@ -39,6 +39,11 @@ request only the exact needed recovery query when fresh evidence is required.
 The coordinator retains the rejected query's identity, so unrelated successful
 reads cannot conceal its failure. Historical recovery packets survive request
 compaction without granting a current revision or write authority.
+When a corrected selector succeeds for the same object, report both exact reads
+through `team_report_task` with `state:in_progress`, `expected_revision` and
+`read_resolutions`. The host verifies your later receipt and current project
+revision before attributing the supersession. This records a corrected selection;
+it does not claim the original query succeeded or waive write/completion checks.
 
 Graphify indexes the repository code locally without a model backend. Curated
 notes under `docs/knowledge` are copied into a separately versioned Obsidian vault,
