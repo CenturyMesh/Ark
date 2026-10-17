@@ -20,6 +20,7 @@ std::string agentOnboardingPack(const std::vector<std::string>& topics){
     }
     pack.set("topics",guides);return packs.emplace(topics,pack.dump()).first->second;
 }
+std::string agentAuthoringOnboardingPack(){return agentOnboardingPack({"overview","sketch","solids"});}
 arkjson::Value agentOnboard(const AgentSession& session,const arkjson::Value& args){
     using V=arkjson::Value;std::string topic="overview";
     for(const auto& field:args.obj)if(field.first!="topic"&&field.first!="detail")throw std::runtime_error("Unknown agent_onboard field: "+field.first);

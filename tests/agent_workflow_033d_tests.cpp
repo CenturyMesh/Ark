@@ -2,6 +2,7 @@
 #include "ark/assistant.hpp"
 #include "ark/assistant_connectors.hpp"
 #include "ark/serialize.hpp"
+#include "ark/onboarding.hpp"
 #include <iostream>
 #include <algorithm>
 #include <cmath>
@@ -63,6 +64,15 @@ void proactiveContext(){
     auto messages=assistantProviderPreset("claude");messages.model="offline-message-context";auto other=runAssistant(messages,history,AgentSession::tools(),{}, {},nullptr,[](const auto&,const V&,auto*){return json(R"({"type":"message","role":"assistant","content":[{"type":"text","text":"Read-only review."}],"stop_reason":"end_turn","usage":{"input_tokens":100,"output_tokens":2}})");});check(other.performance.lastInstructionBytes>0&&other.performance.lastToolResultBytes>0,"Messages protocol measures system instructions and tool-result content blocks separately");
     std::cout<<"context original_history_bytes="<<original.size()<<" projected_input_bytes="<<result.performance.lastInputBytes<<" schema_bytes="<<result.performance.lastToolSchemaBytes<<'\n';
 }
+void authoringBootstrap(){
+    const auto pack=agentAuthoringOnboardingPack();V parsed;if(!arkjson::parse(pack,parsed))throw std::runtime_error("authoring bootstrap pack JSON");
+    check(field(parsed,"topics").arr.size()==3,"initial authoring pack supplies overview, sketch and solids without unrelated specialist topics");
+    bool sketch=false,solids=false;for(const auto& guide:field(parsed,"topics").arr){check(!guide.find("document")&&!field(guide,"document_state_included").b,"bootstrap documentation contains no document snapshot");if(field(guide,"topic").str=="sketch")sketch=guide.find("example_doc_apply")!=nullptr;if(field(guide,"topic").str=="solids"){solids=guide.find("example_doc_apply")!=nullptr;check(!guide.find("example_doc_apply")->find("expected_revision"),"bootstrap examples do not bake a document revision");}}
+    check(sketch&&solids,"initial writer knows actual editable sketch and native authoring examples");
+    AssistantConfig config;config.model="offline-authoring-bootstrap";config.onboardingPack=pack;int requests=0;
+    auto run=runAssistant(config,V::makeStr("Create a coherent editable concept in this new file."),AgentSession::tools(),{}, {},nullptr,[&](const auto&,const V& request,const auto*){++requests;const auto body=request.dump();check(body.find("ARK_PREBAKED_GUIDE_V1")!=std::string::npos&&body.find("Solid profile")!=std::string::npos&&body.find("example_doc_apply")!=std::string::npos,"very first provider request already contains the core authoring contracts");return json(R"({"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Initial contract inspected; no geometry claim."}]}]})");});
+    check(requests==1&&run.rounds==1,"bootstrap evidence requires no onboarding discovery round or paid transport");
+}
 #ifdef ARK_CONTRACTS_NATIVE_TESTS
 bool visibleStaticGuide(const V& value,V& found,int depth=0){
     if(depth>24)return false;
@@ -104,7 +114,7 @@ void exactNativeRefresh(){
 }
 #endif
 }
-int main(){try{packedRetention();refreshAndCommit();scopedBom();proactiveContext();
+int main(){try{packedRetention();refreshAndCommit();scopedBom();proactiveContext();authoringBootstrap();
 #ifdef ARK_CONTRACTS_NATIVE_TESTS
 retainedGuideAuthorsNativeCheckpoint();exactNativeRefresh();
 #endif
