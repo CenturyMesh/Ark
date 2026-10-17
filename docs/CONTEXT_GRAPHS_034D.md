@@ -22,6 +22,18 @@ discovery, instead of `query`, to retain the intended target. Nodes cover featur
 parameters, sketches, planes, materials, assembly nodes and mates. Directed links
 come from explicit selectors or expression identifiers; both dependencies and
 backlinks can be traversed. This is not complete evaluator dependency analysis.
+A repeated read in the same session reuses the index when an authoring stamp
+matches the saved source. That read does not rebuild the authoring JSON or the
+graph. The stamp follows the saved authoring fields, so an in-place edit at the
+same revision still rebuilds. `source_sha256` remains the hash of that JSON, and
+the returned neighborhood stays bounded.
+The stamp retains the saved JSON's full numeric precision, length-delimited
+values and explicit collection boundaries. Small density/opacity edits cannot
+alias through six-decimal formatting. Serialization diagnostics use an atomic
+counter; independent sessions keep their own cache, while a host must still
+serialize calls to the same session. The stamp scans saved fields and serializes
+some subobjects, so avoiding the full JSON is not constant-time or a measured
+provider-token saving. Future persistent fields must join the stamp contract.
 
 The response includes project `scope`, observed `revision`, saved-authoring
 `source_sha256`, node fingerprints and explicit `partial` status. Depth is 0..2,

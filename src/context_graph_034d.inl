@@ -53,15 +53,49 @@ V buildProjectGraph(const V& authored,const std::string& scope){
     }
     return graph.finish(scope);
 }
-V projectContextGraph(const Document& document,u64 revision,const V& args,V& cache,std::string& cachedHash){
+// Superset of the fields written by documentToJson(document, false, false).
+// A miss only costs another serialization. A hit must mean that JSON is unchanged.
+std::string authoringStamp(const Document& document){
+    std::string stamp;
+    // Lengths and collection tags/counts make field boundaries unambiguous,
+    // including authored strings containing embedded NUL bytes.
+    auto add=[&](const std::string& value){stamp.append(std::to_string(value.size()));stamp.push_back(':');stamp.append(value);};
+    auto section=[&](const char* name,size_t count){add(name);add(std::to_string(count));};
+    auto addNumber=[&](double value){add(V::makeNum(value).dump());}; // Same lossless numeric form as saved JSON.
+    auto addMap=[&](const std::unordered_map<std::string,std::string>& values){section("map",values.size());std::vector<std::string> keys;keys.reserve(values.size());for(const auto& item:values)keys.push_back(item.first);std::sort(keys.begin(),keys.end());for(const auto& key:keys){add(key);add(values.at(key));}};
+    add(document.bomDocumentId);add(std::to_string(document.nextFeatureId_));add(std::to_string(document.nextAssemblyId_));add(std::to_string(document.nextMateId_));add(std::to_string(document.historyTip));
+    add(document.skeleton.dump());add(document.designContainerCheckout.dump());add(document.assemblyConfigurations.dump());add(document.assemblyLoadSelection.dump());add(document.assemblyExternalReferences.dump());
+    section("drawings",document.drawings.size());for(const auto& drawing:document.drawings)add(drawing.dump());
+    section("params",document.params.size());for(const auto& parameter:document.params){add(parameter.name);add(parameter.expr);}
+    section("image_assets",document.imageAssets.size());for(const auto& asset:document.imageAssets)add(imageAssetToJson(asset,true).dump());
+    section("stamps",document.stamps.size());for(const auto& row:document.stamps)add(stampToJson(row).dump());
+    section("materials",document.materials.size());for(const auto& material:document.materials){add(material.name);addNumber(material.densityGcm3);add(appearanceToJson(material.appearance).dump());add(material.physical.dump());}
+    section("planes",document.planes.size());for(const auto& plane:document.planes){add(plane.name);add(plane.parent);add(plane.kind);addMap(plane.p);add(plane.support.dump());}
+    section("canvases",document.canvases.size());for(const auto& canvas:document.canvases){add(canvas.name);add(canvas.plane);add(canvas.path);add(canvas.asset);add(canvas.width);add(canvas.height);addNumber(canvas.opacity);}
+    section("sketches",document.sketches.size());for(const auto& sketch:document.sketches){add(sketch.name);add(sketchToJson(sketch.sk));}
+    section("features",document.features.size());for(const auto& feature:document.features){
+        add(std::to_string(feature.id));add(featureTypeName(feature.type));add(feature.name);add(std::to_string(feature.opInt));add(feature.suppressed?"1":"0");add(feature.material);add(feature.manufacturingRoute);
+        add(feature.part.dump());add(feature.appearance.dump());add(feature.manufacturingProcess.dump());add(feature.nativeSpec.dump());add(feature.sourceData.dump());addMap(feature.p);
+        section("inputs",feature.inputs.size());for(auto input:feature.inputs)add(std::to_string(input));
+        section("bends",feature.bends.size());for(const auto& bend:feature.bends){add(bend.feed);add(bend.radius);add(bend.angle);add(bend.roll);}
+        section("notches",feature.notches.size());for(const auto& notch:feature.notches){add(notch.station);add(notch.angle);add(notch.face);}
+        section("face_appearances",feature.faceAppearances.size());for(const auto& face:feature.faceAppearances)add(faceAppearanceToJson(face).dump());
+    }
+    section("assembly",document.assembly.size());for(const auto& node:document.assembly){add(std::to_string(node.id));add(std::to_string(node.parent));add(std::to_string(node.feature));add(node.name);add(node.visible?"1":"0");add(node.fixed?"1":"0");addMap(node.p);add(node.pattern.active?assemblyPatternToJson(node.pattern).dump():std::string());}
+    section("mates",document.mates.size());for(const auto& mate:document.mates)add(mateToJson(mate).dump());
+    return iterationSha256(stamp);
+}
+V projectContextGraph(const Document& document,u64 revision,const V& args,V& cache,std::string& cachedHash,std::string& cachedStamp){
     for(const auto& item:args.obj)if(item.first!="query"&&item.first!="keys"&&item.first!="depth"&&item.first!="limit"&&item.first!="expected_revision"&&item.first!="known_fingerprints"&&item.first!="known_scope"&&item.first!="history_limit")throw std::runtime_error("Unknown context_graph argument: "+item.first);
     if(const auto* expected=args.find("expected_revision"))if(expected->t!=V::Num||expected->num!=(double)revision)throw std::runtime_error("Revision conflict; retrieve current context_graph");
     const int depth=contextInteger(args,"depth",1,0,2),limit=contextInteger(args,"limit",12,1,64),historyLimit=contextInteger(args,"history_limit",3,0,8);
     const auto query=args.find("query")?str(args,"query"):std::string();if(query.size()>256)throw std::runtime_error("context_graph query exceeds 256 bytes");
     if(args.find("keys")&&!query.empty())throw std::runtime_error("Use context_graph keys or query, not both");
-    const auto saved=documentToJson(document,false,false),hash=iterationSha256(saved);V authored;if(!arkjson::parse(saved,authored))throw std::runtime_error("Cannot index project authoring");
-    std::string scope=document.bomDocumentId;if(scope.empty()&&document.agentActivity)scope=document.agentActivity->id;if(scope.empty())scope="unassigned:"+hash;
-    const bool reused=cachedHash==hash&&!cache.isNull()&&graphText(cache,"scope")==scope;if(!reused){cache=buildProjectGraph(authored,scope);cachedHash=hash;}
+    std::string usageError;if(!validateUsageLedger(document.usage,usageError))throw std::runtime_error(usageError);validateAppearanceAuthoring024B(document,false);
+    const auto stamp=authoringStamp(document);std::string hash,scope;bool reused=false;
+    auto bindScope=[&](const std::string& sourceHash){if(!document.bomDocumentId.empty())return document.bomDocumentId;if(document.agentActivity&&!document.agentActivity->id.empty())return document.agentActivity->id;return std::string("unassigned:")+sourceHash;};
+    if(stamp==cachedStamp&&!cache.isNull()){hash=cachedHash;scope=bindScope(hash);reused=graphText(cache,"scope")==scope;}
+    if(!reused){const auto saved=documentToJson(document,false,false);contextGraphAuthoringSerializationsCount.fetch_add(1,std::memory_order_relaxed);hash=iterationSha256(saved);scope=bindScope(hash);const bool same=hash==cachedHash&&!cache.isNull()&&graphText(cache,"scope")==scope;if(!same){V authored;if(!arkjson::parse(saved,authored))throw std::runtime_error("Cannot index project authoring");cache=buildProjectGraph(authored,scope);cachedHash=hash;}cachedStamp=stamp;reused=same;}
     const auto& nodes=*cache.find("nodes");const auto& edges=*cache.find("edges");const auto* known=args.find("known_fingerprints");
     if(known){if(known->t!=V::Obj||known->obj.size()>1024||graphText(args,"known_scope")!=scope)throw std::runtime_error("context_graph known_fingerprints require the matching known_scope");for(const auto& item:known->obj)if(item.second.t!=V::Str||item.second.str.size()>64)throw std::runtime_error("Invalid known graph fingerprint");}
     std::set<std::string> roots;const auto words=graphWords(query);if(!query.empty()&&words.empty())throw std::runtime_error("context_graph query needs a word or an exact key");

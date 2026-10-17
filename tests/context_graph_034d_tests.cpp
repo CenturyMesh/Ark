@@ -1,7 +1,9 @@
 #include "ark/agent.hpp"
 #include "ark/agent_activity.hpp"
 #include "ark/assistant.hpp"
+#include "ark/iteration_history.hpp"
 #include "../src/assistant_context.hpp"
+#include <future>
 #include <iostream>
 #include <stdexcept>
 namespace {
@@ -12,6 +14,27 @@ const V& field(const V& v,const char* key){const auto* p=v.find(key);if(!p)throw
 V accepted(const V& v){if(field(v,"isError").b)throw std::runtime_error(v.dump());return field(v,"structuredContent");}
 V apply(AgentSession& s,const char* commands){V args=V::makeObj();args.set("expected_revision",V::makeNum(s.revision));args.set("commands",json(commands));args.set("detail",V::makeStr("changes"));return accepted(s.call("doc_apply",args));}
 const V* node(const V& graph,const std::string& key){for(const auto& row:field(graph,"nodes").arr)if(field(row,"key").str==key)return &row;return nullptr;}
+void preciseStamp(){
+    AgentSession s;s.suppressFailureCapture();s.suppressIterationHistory();
+    apply(s,R"([{"op":"material.set","name":"Precision probe","density":1.0000001}])");
+    const auto args=json(R"({"keys":["materials:Precision probe"],"depth":0})");
+    auto first=accepted(s.call("context_graph",args));
+    apply(s,R"([{"op":"material.set","name":"Precision probe","density":1.0000002}])");
+    auto second=accepted(s.call("context_graph",args));
+    check(!field(second,"index_reused").b&&field(first,"source_sha256").str!=field(second,"source_sha256").str,"sub-micro density edit invalidates the stamp through normal publication");
+    check(field(field(*node(second,"materials:Precision probe"),"facts"),"density").num==1.0000002,"graph returns the exact current density without decimal truncation");
+    s.document.materials[0].densityGcm3=1.0000003;const auto revision=s.revision;
+    auto direct=accepted(s.call("context_graph",args));check(!field(direct,"index_reused").b&&field(direct,"source_sha256").str==iterationSha256(documentToJson(s.document,false,false))&&s.revision==revision,"in-place small density change has the hash of actual saved authoring");
+    PlaneCanvas canvas;canvas.name="Opacity probe";canvas.path="synthetic-not-loaded.png";canvas.opacity=.5000001;s.document.canvases.push_back(canvas);
+    auto before=accepted(s.call("context_graph",args));s.document.canvases[0].opacity=.5000002;
+    auto after=accepted(s.call("context_graph",args));check(!field(after,"index_reused").b&&field(before,"source_sha256").str!=field(after,"source_sha256").str&&field(after,"source_sha256").str==iterationSha256(documentToJson(s.document,false,false)),"sub-micro canvas opacity change invalidates the saved source hash");
+    const auto serializations=contextGraphAuthoringSerializations();auto quiet=accepted(s.call("context_graph",args));check(field(quiet,"index_reused").b&&contextGraphAuthoringSerializations()==serializations,"precise unchanged authoring still avoids full serialization");
+}
+void parallelStamps(){
+    const auto start=contextGraphAuthoringSerializations();std::vector<std::future<std::string>> readers;
+    for(int i=0;i<8;++i)readers.push_back(std::async(std::launch::async,[i]{AgentSession s;Material material;material.name="Parallel material";material.densityGcm3=i+1;s.document.materials.push_back(material);auto args=json(R"({"keys":["materials:Parallel material"],"depth":0})");const auto graph=accepted(s.call("context_graph",args));const auto hash=field(graph,"source_sha256").str;for(int n=0;n<32;++n){const auto next=accepted(s.call("context_graph",args));if(!field(next,"index_reused").b||field(next,"source_sha256").str!=hash||field(field(*node(next,"materials:Parallel material"),"facts"),"density").num!=i+1)throw std::runtime_error("Independent session graph cache crossed concurrent authoring");}return hash;}));
+    std::set<std::string> hashes;for(auto& reader:readers)hashes.insert(reader.get());check(hashes.size()==8,"independent concurrent sessions retain distinct current graph sources");check(contextGraphAuthoringSerializations()==start+8,"atomic serialization diagnostic counts exactly one build per concurrent session");
+}
 bool edge(const V& graph,const char* from,const char* to,const char* relation){for(const auto& row:field(graph,"edges").arr)if(field(row,"from").str==from&&field(row,"to").str==to&&field(row,"relation").str==relation)return true;return false;}
 void projectGraph(){
     AgentSession s;s.suppressFailureCapture();s.suppressIterationHistory();
@@ -19,10 +42,24 @@ void projectGraph(){
     const auto originalScope=s.document.bomDocumentId;
     const auto saved=documentToJson(s.document);const auto rev=s.revision;int evaluated=0;
     auto previous=setEvaluationObserver([&](u64,const std::string&,size_t,size_t,bool,bool){++evaluated;});
+    const auto serializedBefore=contextGraphAuthoringSerializations();
     const auto graph=accepted(s.call("context_graph",json(R"({"keys":["feature:2"],"depth":2,"limit":12})")));
+    const auto serializedOnce=contextGraphAuthoringSerializations();
     const auto reused=accepted(s.call("context_graph",json(R"({"keys":["feature:2"],"depth":2,"limit":12})")));setEvaluationObserver(previous);
     check(evaluated==0&&documentToJson(s.document)==saved&&s.revision==rev,"graph reads neither evaluate geometry nor mutate saved authoring/revision");
     check(field(reused,"index_reused").b&&!field(graph,"index_reused").b,"unchanged authoring reuses the session index");
+    check(serializedOnce==serializedBefore+1&&contextGraphAuthoringSerializations()==serializedOnce,"unchanged authoring does not serialize the document again");
+    const auto originalName=s.document.features[0].name;s.document.features[0].name=originalName+" edited";
+    const auto renamed=accepted(s.call("context_graph",json(R"({"keys":["feature:1"],"depth":0})")));
+    check(!field(renamed,"index_reused").b&&field(renamed,"source_sha256").str!=field(graph,"source_sha256").str&&field(*node(renamed,"feature:1"),"name").str==originalName+" edited","in-place edit rebuilds the graph without a revision change");
+    s.document.features[0].name=originalName;for(auto& parameter:s.document.params)if(parameter.name=="span")parameter.expr="travel*4";
+    const auto retargeted=accepted(s.call("context_graph",json(R"({"keys":["params:span"],"depth":0})")));
+    check(!field(retargeted,"index_reused").b&&field(*node(retargeted,"params:span"),"facts").find("expr")->str=="travel*4","in-place parameter edit is visible in the rebuilt graph");
+    for(auto& parameter:s.document.params)if(parameter.name=="span")parameter.expr="travel*2";
+    const auto restoredAuthoring=accepted(s.call("context_graph",json(R"({"keys":["feature:2"],"depth":2,"limit":12})")));
+    check(!field(restoredAuthoring,"index_reused").b&&field(restoredAuthoring,"source_sha256").str==field(graph,"source_sha256").str,"restored authoring recovers the original source hash");
+    const auto quiet=contextGraphAuthoringSerializations();accepted(s.call("context_graph",json(R"({"keys":["feature:2"],"depth":2,"limit":12})")));
+    check(contextGraphAuthoringSerializations()==quiet,"restored authoring reuses the index without serialization");
     check(node(graph,"feature:1")&&node(graph,"params:span")&&node(graph,"assembly:2")&&!node(graph,"feature:3"),"selected neighborhood includes dependencies and backlinks while excluding unrelated objects");
     check(edge(graph,"feature:2","feature:1","depends_on")&&edge(graph,"feature:1","params:span","uses_parameter")&&edge(graph,"assembly:2","feature:2","places"),"typed authored/expression links preserve direction");
     check(!field(graph,"manufacturing_qualified").b&&!field(graph,"partial").b,"navigation graph makes no manufacturing claim");
@@ -77,4 +114,4 @@ void graphRequests(){
     std::cout<<"GRAPH_DEDUP original_history_bytes="<<original.size()<<" projected_history_bytes="<<projected.dump().size()<<" provider_request_bytes="<<request.dump().size()<<" calls=7 paid_model_calls=0\n";
 }
 }
-int main(){try{projectGraph();graphRequests();std::cout<<checks<<" context graph checks passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(){try{preciseStamp();parallelStamps();projectGraph();graphRequests();std::cout<<checks<<" context graph checks passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

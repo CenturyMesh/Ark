@@ -1,4 +1,5 @@
 #include <tuple>
+#include <atomic>
 #include "ark/agent_activity.hpp"
 #include "ark/agent.hpp"
 #include "ark/agent_response_032d.hpp"
@@ -587,6 +588,8 @@ V selectedDesignView(const Document& document,u64 revision,const V& args){
     result.set("sections",included);result.set("section_scopes",scopes);return result;
 }
 #include "object_context.inl"
+static std::atomic_size_t contextGraphAuthoringSerializationsCount{0};
+size_t contextGraphAuthoringSerializations(){return contextGraphAuthoringSerializationsCount.load(std::memory_order_relaxed);}
 #include "context_graph_034d.inl"
 int wholeIndex(const V& value,const char* what){
     if(value.t!=V::Num||!std::isfinite(value.num)||value.num<0||value.num>1024||value.num!=std::floor(value.num))throw std::runtime_error(std::string(what)+" must be a nonnegative integer");
@@ -692,7 +695,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
             if(const auto* expected=args.find("expected_revision"))
                 if(expected->t!=V::Num||expected->num!=(double)revision)
                     throw std::runtime_error("Revision conflict; read doc_info with detail design and retry");
-        if(tool=="context_graph")return result(projectContextGraph(document,revision,args,contextGraphCache_,contextGraphSource_));
+        if(tool=="context_graph")return result(projectContextGraph(document,revision,args,contextGraphCache_,contextGraphSource_,contextGraphStamp_));
         V extension;if(callAuthoring023Tool(*this,tool,args,extension))return result(extension);if(callComponentLibraryTool(*this,tool,args,extension))return result(extension);if(callAgentFeature(*this,tool,args,extension))return result(extension);
         {V out;if(callAuthoring024Tool(*this,tool,args,out))return result(out);}
         if(tool=="collision_inspect"||tool=="skeleton_inspect"||tool=="skeleton_compile"){

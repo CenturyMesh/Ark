@@ -62,6 +62,7 @@ private:
     std::set<u64> bomInspectedItems_;
     arkjson::Value contextGraphCache_;
     std::string contextGraphSource_;
+    std::string contextGraphStamp_;
     arkjson::Value dispatch(const std::string& tool,const arkjson::Value& args);
     bool suppressHistory_=false;
     bool suppressFailures_=false;
@@ -99,4 +100,7 @@ private:
     Cache& meshCache(const arkjson::Value& args);
 };
 Document makeDemoDocument();
+// Full saved-authoring serializations performed by context_graph. A repeated
+// read of unchanged authoring does not increment this.
+size_t contextGraphAuthoringSerializations();
 }
