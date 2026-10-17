@@ -568,6 +568,10 @@ set_tests_properties(provider-connectors PROPERTIES TIMEOUT 30)
 
 add_executable(ark-agent-team-tests tests/agent_team_tests.cpp)
 target_link_libraries(ark-agent-team-tests PRIVATE ark)
+if(ARK_WITH_OCCT)
+  target_compile_definitions(ark-agent-team-tests PRIVATE ARK_TEAM_NATIVE_RECOVERY_TESTS=1)
+  add_dependencies(ark-agent-team-tests ark-occt-worker)
+endif()
 add_test(NAME agent-team COMMAND ark-agent-team-tests)
 set_tests_properties(agent-team PROPERTIES TIMEOUT 45)
 

@@ -91,6 +91,17 @@ int main(int argc, char** argv) {
         const Value onboard = tool(mcpExe, root, endpoint, "agent_onboard", parse(R"({"topic":"sketch"})"));
         const Value& before = field(onboard, "document");
         check(field(before, "feature_count").asNum() == 2, "Sample feature count mismatch");
+        const auto listing=parse(R"({"jsonrpc":"2.0","id":1,"method":"tools/list"})");
+        auto advertisesDiagnostics=[&](const std::vector<std::string>& arguments){const auto response=parse(native_test::run(mcpExe,arguments,root,listing.dump()+"\n",std::chrono::seconds(4)));for(const auto& entry:field(field(response,"result"),"tools").arr)if(field(entry,"name").str=="studio_team_diagnostics")return true;return false;};
+        check(advertisesDiagnostics({"--connect",endpoint})&&!advertisesDiagnostics({}),"Human diagnostic tool must be discoverable only on an explicit live connection");
+        const auto diagnostic=tool(mcpExe,root,endpoint,"studio_team_diagnostics",Value::makeObj());
+        check(field(diagnostic,"schema").str=="ark.studio-team-diagnostics.v1"&&field(diagnostic,"read_only").b&&!field(diagnostic,"team_started").b&&field(diagnostic,"roles").arr.empty(),"Actual Studio bridge must route an empty-team diagnostic without creating a team");
+        const auto denied=parse(native_test::run(mcpExe,{"--connect",endpoint},root,rpcCall("studio_team_diagnostics",parse(R"({"commands":[{"op":"param.set","name":"forbidden_diagnostic_write","expr":99}]})")).dump()+"\n",std::chrono::seconds(4)));
+        check(field(field(denied,"result"),"isError").b,"Diagnostic route must reject write-shaped arguments");
+        const auto standalone=parse(native_test::run(mcpExe,{},root,rpcCall("studio_team_diagnostics",Value::makeObj()).dump()+"\n",std::chrono::seconds(4)));
+        check(standalone.find("error")!=nullptr,"Standalone MCP must reject the Studio-only diagnostic before document dispatch");
+        const auto afterDiagnostics=tool(mcpExe,root,endpoint,"doc_info",parse(R"({"detail":"revision"})"));
+        check(field(afterDiagnostics,"revision").num==field(before,"revision").num&&field(afterDiagnostics,"feature_count").num==2,"Successful and rejected diagnostics must leave native CAD revision and feature count unchanged");
         Value change = parse(R"({"commands":[{"op":"param.set","name":"width","expr":"144"}]})");
         change.set("expected_revision", field(before, "revision"));
         const Value preview = tool(mcpExe, root, endpoint, "doc_preview", std::move(change));

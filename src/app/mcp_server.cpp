@@ -13,6 +13,7 @@ int main(int argc,char** argv){
     std::ios::sync_with_stdio(false);ark::cpu_detect();ark::AgentSession session;
     session.memoryProjectOverride=memoryProject;if(!memoryProject.empty())session.memoryActor="coding-mcp:caller-declared";
     auto availableTools=ark::AgentSession::tools();
+    if(!endpoint.empty())availableTools.arr.push_back(ark::studioDiagnosticsToolSchema());
     if(!memoryProject.empty())availableTools.arr.erase(std::remove_if(availableTools.arr.begin(),availableTools.arr.end(),[](const V& tool){const auto* name=tool.find("name");return !name||name->str.rfind("memory_",0)!=0;}),availableTools.arr.end());
     std::string line;
     while(std::getline(std::cin,line)){
@@ -38,6 +39,7 @@ int main(int argc,char** argv){
             else if(method=="tools/call"){
                 auto p=req.find("params");auto name=p?p->find("name"):nullptr;
                 if(!name||name->t!=V::Str)error(-32602,"Missing tool name");
+                else if(ark::isStudioDiagnosticsTool(name->str)&&endpoint.empty())error(-32602,"Studio diagnostics require an explicit live --connect endpoint.");
                 else if(!memoryProject.empty()&&std::none_of(availableTools.arr.begin(),availableTools.arr.end(),[&](const V& t){return t.find("name")->str==name->str;}))error(-32602,"This memory-only host does not expose CAD tools");
                 else {
                     auto a=p->find("arguments");

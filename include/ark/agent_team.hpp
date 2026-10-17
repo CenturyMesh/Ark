@@ -59,6 +59,12 @@ struct AgentTeamRoleSnapshot {
     unsigned unresolvedToolErrors=0;
     // Opt-in bounded diagnostics; never a CAD/prompt/provider-history payload.
     std::vector<arkjson::Value> toolFailures;
+    // Event phases and clocks are observed host events, not a provider-hang diagnosis.
+    std::string currentPhase="idle",activeTool;
+    std::uint64_t phaseStartedMs=0,activeToolStartedMs=0,lastEventMs=0;
+    // Opt-in projections of the existing attributed failure/evidence stores.
+    std::vector<arkjson::Value> rejectedReads,laterReadEvidence;
+    unsigned rejectedReadCount=0,laterReadEvidenceCount=0;
     AgentTeamDiscipline discipline=AgentTeamDiscipline::General;
     AssistantUsage usage;
     AssistantPerformance performance;
@@ -77,7 +83,10 @@ struct AgentTeamSnapshot {
     bool goalDeclared=false;
     unsigned outstandingTasks=0, unresolvedErrors=0;
     bool running=false, paused=false, cancelled=false;
+    bool started=false,documentRevisionObserved=false;
+    std::uint64_t documentRevision=0;
     std::uint64_t droppedEvents=0;
+    std::uint64_t elapsedMs=0;
     std::vector<AgentTeamRoleSnapshot> roles;
     std::vector<AgentTeamEvent> events;
     AssistantUsage usage;
