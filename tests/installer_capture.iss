@@ -24,6 +24,7 @@ var
   CaptureTimer: LongWord;
   LastCapturedPage: Integer;
   CaptureDirectory: String;
+  CaptureLayoutOnly: Boolean;
 
 function Bounds(Control: TControl): String;
 begin
@@ -73,8 +74,12 @@ begin
   else
     SaveStringToFile(CaptureDirectory + '\layout.txt', 'directory: path=' + Bounds(WizardForm.DirEdit) +
       '; browse=' + Bounds(WizardForm.DirBrowseButton) + '; next=' + Bounds(WizardForm.NextButton) + #13#10, True);
-  Bitmap := TBitmap.Create;
-  try
+  SaveStringToFile(CaptureDirectory + '\controls.txt', Name + ': next=' +
+    WizardForm.NextButton.Caption + '; path=' + WizardDirValue + #13#10, True);
+  if not CaptureLayoutOnly then
+  begin
+    Bitmap := TBitmap.Create;
+    try
     Bitmap.Width := WizardForm.Width;
     Bitmap.Height := WizardForm.Height;
     ShowOwnWizard(WizardForm.Handle, SW_SHOW);
@@ -88,12 +93,11 @@ begin
     CaptureError := CaptureLastError;
     ReleaseOwnDC(WizardForm.Handle, SourceDC);
     Bitmap.SaveToFile(CaptureDirectory + '\' + Name + '.bmp');
-    SaveStringToFile(CaptureDirectory + '\controls.txt', Name + ': next=' +
-      WizardForm.NextButton.Caption + '; path=' + WizardDirValue + #13#10, True);
     SaveStringToFile(CaptureDirectory + '\capture-results.txt', Name + ': hwnd=' + IntToStr(WizardForm.Handle) +
       '; dc=' + IntToStr(DestinationDC) + '; source=' + IntToStr(SourceDC) + '; print=' + IntToStr(Ord(Printed)) + '; copy=' + IntToStr(Ord(Copied)) + '; error=' + IntToStr(CaptureError) + #13#10, True);
-  finally
-    Bitmap.Free;
+    finally
+      Bitmap.Free;
+    end;
   end;
   if WizardForm.CurPageID = wpFinished then StopCaptureTimer(0, CaptureTimer);
   WizardForm.NextButton.OnClick(WizardForm.NextButton);
@@ -103,6 +107,7 @@ procedure StartInstallerSelfTest;
 begin
   CaptureDirectory := ExpandConstant('{param:ARKTESTCAPTURE|}');
   if CaptureDirectory = '' then exit;
+  CaptureLayoutOnly := ExpandConstant('{param:ARKTESTLAYOUTONLY|0}') = '1';
   ForceDirectories(CaptureDirectory);
   LastCapturedPage := -100;
   CaptureTimer := SetCaptureTimer(0, 0, 700, CreateCallback(@CaptureTick));

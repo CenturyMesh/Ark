@@ -2,11 +2,13 @@ param(
     [Parameter(Mandatory=$true)][string]$InstallerPath,
     [string]$PreviousInstallerPath,
     [Parameter(Mandatory=$true)][string]$OutputDirectory,
-    [switch]$CaptureWizard
+    [switch]$CaptureWizard,
+    [switch]$LayoutOnly
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $repository = Split-Path $PSScriptRoot -Parent
+if ($LayoutOnly -and -not $CaptureWizard) { throw '-LayoutOnly requires -CaptureWizard for the private control harness.' }
 Import-Module (Join-Path $repository 'updates/Ark.Update.psm1') -Force
 $match = [regex]::Match([IO.Path]::GetFileName($InstallerPath), '-test-([a-zA-Z0-9-]{1,48})\.exe$')
 if (-not $match.Success) { throw 'Smoke tests require an installer built with -TestIsolationId.' }
@@ -45,6 +47,7 @@ try {
     if (-not $oldState) { $options += '/DIR="' + $installRoot + '"' }
     if ($CaptureWizard) { $options += '/ARKTESTCAPTURE="' + $fixture + '/captures"' }
     else { $options += '/VERYSILENT' }
+    if ($LayoutOnly) { $options += '/ARKTESTLAYOUTONLY=1' }
     Invoke-PrivateSetup $InstallerPath $options
     $registered = Get-ItemProperty -LiteralPath $registry
     if ([IO.Path]::GetFullPath($registered.InstallLocation).TrimEnd('\') -ine $installRoot.TrimEnd('\')) { throw 'The chosen/remembered folder was not used.' }
@@ -66,7 +69,7 @@ try {
     if ($CaptureWizard) {
         $controls = [IO.File]::ReadAllText((Join-Path $fixture 'captures/controls.txt'))
         if ($controls -notmatch 'welcome: next=&Next' -or $controls -notmatch 'directory: next=&Install' -or $controls -notmatch 'finished: next=&Finish') { throw 'Wizard controls did not follow the welcome/folder/install/finish flow.' }
-        foreach ($page in @('welcome','directory','finished')) {
+        foreach ($page in @('welcome','directory','finished') | Where-Object { -not $LayoutOnly }) {
             if (-not (Test-Path -LiteralPath (Join-Path $fixture "captures/$page.bmp"))) { throw "Missing $page capture." }
         }
         $layout = [IO.File]::ReadAllText((Join-Path $fixture 'captures/layout.txt'))
@@ -81,5 +84,5 @@ foreach ($path in @($sentinels) + @($protected)) {
 }
 if (Test-Path -LiteralPath (Join-Path $installRoot 'versions')) { throw 'Uninstall left application runtimes behind.' }
 if (Test-Path -LiteralPath $registry) { throw 'Uninstall left the isolated registration behind.' }
-[IO.File]::WriteAllText((Join-Path $fixture 'result.txt'), "PASS: custom/remembered path with spaces; payload/licenses; reinstall; uninstall; preserved drawings/settings/live pointer/desktop shortcut.`r`nUpgrade/rollback exercised: $([bool]$PreviousInstallerPath)`r`nWizard control/layout harness exercised: $([bool]$CaptureWizard)`r`nCapture generation is an attempt; inspect capture-results.txt and images before declaring visual acceptance.`r`n")
+[IO.File]::WriteAllText((Join-Path $fixture 'result.txt'), "PASS: custom/remembered path with spaces; payload/licenses; reinstall; uninstall; preserved drawings/settings/live pointer/desktop shortcut.`r`nUpgrade/rollback exercised: $([bool]$PreviousInstallerPath)`r`nWizard control/layout harness exercised: $([bool]$CaptureWizard)`r`nCapture generation skipped (layout only): $([bool]$LayoutOnly)`r`nCapture generation, when enabled, is an attempt; inspect capture-results.txt and images before declaring visual acceptance.`r`n")
 Write-Output "Installer smoke passed: $fixture"

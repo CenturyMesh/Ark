@@ -47,6 +47,12 @@ startup acknowledgement or hosted delivery trial. Inspect the generated page
 captures before declaring visual acceptance; unsupported/blank captures do not
 establish it.
 
+When desktop capture is unavailable, `-CaptureWizard -LayoutOnly` still exercises
+the private wizard's own welcome/folder/install/finish controls and records their
+actual bounds, captions and selected folder. It omits GDI capture explicitly and
+does not establish pixel-level visual acceptance. The public setup contains no
+self-test instrumentation.
+
 This addresses **F.03/F.05 — Parcial**. Local installer tests do not establish
 clean-machine setup, Authenticode publisher trust, production delivery, or
 measured first-valid-part and adoption outcomes.
