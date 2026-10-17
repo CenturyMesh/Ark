@@ -113,9 +113,13 @@ The inspector filters **Body**, **Face**, **Edge**, and **Curve**. Click a face
 or an edge on the exact solid; the highlight uses its semantic name, not a
 triangle number. Click a visible sketch curve, or the sketch in the explorer,
 to collect that sketch for a loft or a sweep. With **Face** active, a datum in
-the explorer is a mirror plane. At most 64 names are kept. **Fillet / chamfer**
-uses those edge names, or the selection `sharp`, `convex`, `concave`, or `all`
-with a minimum dihedral angle in degrees. At most 64 edges are taken. A loft
+the explorer is a mirror plane. At most 64 names are kept. Feature editors for
+fillet, chamfer, draft, mirror, pattern, Boolean, hole, extrude, loft, sweep
+and the other solid and surface tools stay open while the view is clicked.
+Each click adds the semantic reference; Apply writes the same feature command
+as a typed name. **Fillet / chamfer** uses those clicked edges, or the selection
+`sharp`, `convex`, `concave`, or `all` with a minimum dihedral angle in degrees.
+At most 64 edges are taken. A loft
 publishes `edge.start.<entity>`, `edge.end.<entity>`, and `rail.<index>` in
 addition to its face names. **Draft faces** takes an angle in degrees, a pull
 direction `X`, `Y`, or `Z`, and a neutral coordinate plane. It accepts planar,
