@@ -74,6 +74,16 @@ void authoringBootstrap(){
     check(requests==1&&run.rounds==1,"bootstrap evidence requires no onboarding discovery round or paid transport");
 }
 #ifdef ARK_CONTRACTS_NATIVE_TESTS
+void invalidProfileReportsOwnedCause(){
+    AgentSession session;session.suppressFailureCapture();session.suppressIterationHistory();
+    const auto before=documentToJson(session.document);
+    V args=json(R"({"expected_revision":0,"commands":[{"op":"sketch.set","name":"Invalid ellipse","sketch":{"plane":"XY","entities":[{"kind":"recipe","name":"Oval","recipe":{"type":"ellipse","center":[0,0],"major":20,"minor":30,"angle":0}}]}}]})");
+    const auto sketchOnly=session.call("doc_apply",args);check(field(sketchOnly,"isError").b,"invalid ellipse fails at the owned sketch predicate");const auto sketchError=field(field(sketchOnly,"structuredContent"),"error").str;
+    auto commands=field(args,"commands");commands.arr.push_back(json(R"({"op":"feature.add","type":"native_solid","name":"Dependent extrusion","native":{"op":"extrude"},"p":{"sketch":"Invalid ellipse","depth":12}})"));args.set("commands",commands);
+    const auto dependent=session.call("doc_apply",args);check(field(dependent,"isError").b,"dependent native extrusion rejects invalid profile atomically");const auto nativeError=field(field(dependent,"structuredContent"),"error").str;
+    const auto start=sketchError.find(": ");check(start!=std::string::npos&&nativeError.find(sketchError.substr(start+2))!=std::string::npos,"native profile rejection retains the exact underlying sketch error instead of only a missing/invalid label");
+    check(session.revision==0&&documentToJson(session.document)==before,"profile diagnostic improvement preserves source and revision after both rejections");
+}
 bool visibleStaticGuide(const V& value,V& found,int depth=0){
     if(depth>24)return false;
     if(value.t==V::Obj){
@@ -116,6 +126,6 @@ void exactNativeRefresh(){
 }
 int main(){try{packedRetention();refreshAndCommit();scopedBom();proactiveContext();authoringBootstrap();
 #ifdef ARK_CONTRACTS_NATIVE_TESTS
-retainedGuideAuthorsNativeCheckpoint();exactNativeRefresh();
+invalidProfileReportsOwnedCause();retainedGuideAuthorsNativeCheckpoint();exactNativeRefresh();
 #endif
 std::cout<<checks<<" workflow checks passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
