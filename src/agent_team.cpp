@@ -92,6 +92,23 @@ V compactTeamArguments(const std::string& name,V args){
     }
     return args;
 }
+V canonicalQueryArguments(V args){
+    // JSON object ordering is presentation; array ordering and every query
+    // argument remain significant. Batch projection fields are outside args.
+    if(args.t==V::Obj){for(auto& entry:args.obj)entry.second=canonicalQueryArguments(std::move(entry.second));std::sort(args.obj.begin(),args.obj.end(),[](const auto& a,const auto& b){return a.first<b.first;});}
+    else if(args.t==V::Arr)for(auto& item:args.arr)item=canonicalQueryArguments(std::move(item));
+    return args;
+}
+std::string toolFailureKey(const std::string& name,const V& args,bool queryRead,bool revisionRecovery=false){
+    // Keep the existing corrected-write contract (including the apply alias).
+    // Successful reads only discharge the same rejected query, never all reads
+    // sharing a tool name or all rows in a successful query_batch envelope.
+    if(documentMutation(name))return name;
+    if(!queryRead)return name;
+    V identity=compactTeamArguments(name,args);
+    if(revisionRecovery)identity.obj.erase(std::remove_if(identity.obj.begin(),identity.obj.end(),[](const auto& entry){return entry.first=="expected_revision";}),identity.obj.end());
+    return name+(revisionRecovery?":revision-recovery:":":")+canonicalQueryArguments(std::move(identity)).dump();
+}
 V teamTools(V tools,unsigned maxCommands){
     for(const auto& item:tools.arr)require(field(item,"name").rfind("team_",0)!=0,"ARK tool names collide with team coordination tools.");
     V commandItems,checksSchema;
@@ -182,6 +199,7 @@ struct AgentTeam::Impl {
     std::chrono::steady_clock::time_point began;
     V tools;
     std::set<std::string> readOnly;
+    std::set<std::string> queryRecoveryTools;
     AssistantTool executor;
     AgentTeamEvents observer;
 
@@ -479,19 +497,49 @@ struct AgentTeam::Impl {
                 }
             }
         }
-        AgentTeamEvent event;event.kind=AgentTeamEvent::ToolEnd;event.roleId=roles[index].config.id;event.tool=name;event.toolError=isError(result);
-        if(event.toolError){
-            const auto& detail=payload(result);V compact=V::makeObj();compact.set("tool",V::makeStr(name));
-            for(const char* key:{"error_code","error","stage","operation","command_index","feature_id","observed_solid_count","revision","document_unchanged","recovery","reservation_owner","reservation_id","reservation_revision","lease_remaining_ms"})if(auto value=detail.find(key)){if(value->dump().size()<=2048)compact.set(key,*value);else if(value->t==V::Str)compact.set(key,V::makeStr(clipped(value->str,1800)));}
-            {std::lock_guard lock(mutex);if(name.rfind("team_",0)!=0||name=="team_apply_step"){roles[index].lastToolFailure=compact;roles[index].unresolvedToolFailures[name]=compact;}}
-            event.text=clipped(field(detail,"error_code")+": "+field(detail,"error"),config.maxEventTextBytes);
-            if(event.text==": ")event.text="Tool rejected the request; inspect its retained response.";
-            share(index,"Tool failure diagnostic (data): "+compact.dump()+" Inspect the cause before another proposal; choose a correction from design intent, not an identical blind retry.");
-        }else {event.text="Tool returned result";
-            std::lock_guard lock(mutex);auto& role=roles[index];const auto failed=field(role.lastToolFailure,"tool");
-            std::uint64_t measuredRevision=0;const bool resolved=!documentMutation(name)||receiptRevision(payload(result),measuredRevision);
-            if(resolved){role.unresolvedToolFailures.erase(name);if(name=="doc_apply"||name=="team_apply_step"){role.unresolvedToolFailures.erase("doc_apply");role.unresolvedToolFailures.erase("team_apply_step");}if(failed==name||((failed=="doc_apply"||failed=="team_apply_step")&&(name=="doc_apply"||name=="team_apply_step")))role.lastToolFailure=V{};}
-        }
+        AgentTeamEvent event;event.kind=AgentTeamEvent::ToolEnd;event.roleId=roles[index].config.id;event.tool=name;event.text="Tool returned result";
+        auto retainOutcome=[&](const std::string& tool,const V& queryArgs,const V& response,int queryIndex){
+            const bool queryRead=queryIndex>=0||queryRecoveryTools.count(tool)!=0;const auto& detail=payload(response);const auto key=toolFailureKey(tool,queryArgs,queryRead,isError(response)&&field(detail,"error_code")=="REVISION_CONFLICT");
+            if(isError(response)){
+                event.toolError=true;V compact=V::makeObj();compact.set("tool",V::makeStr(tool));
+                if(queryIndex>=0){compact.set("batch_tool",V::makeStr("query_batch"));compact.set("query_index",V::makeNum(queryIndex));}
+                if(queryArgs.dump().size()<=2048)compact.set("args",queryArgs);
+                for(const char* fieldName:{"error_code","error","stage","operation","command_index","feature_id","observed_solid_count","revision","document_unchanged","recovery","tool_succeeded","requested_fields","missing_fields","available_fields","reservation_owner","reservation_id","reservation_revision","lease_remaining_ms"})if(auto value=detail.find(fieldName)){if(value->dump().size()<=2048)compact.set(fieldName,*value);else if(value->t==V::Str)compact.set(fieldName,V::makeStr(clipped(value->str,1800)));}
+                if(queryIndex>=0&&!compact.find("revision"))if(const auto* observed=payload(result).find("revision"))compact.set("revision",*observed);
+                {std::lock_guard lock(mutex);if(tool.rfind("team_",0)!=0||tool=="team_apply_step"){roles[index].lastToolFailure=compact;roles[index].unresolvedToolFailures[key]=compact;}}
+                event.text=clipped(field(detail,"error_code")+": "+field(detail,"error"),config.maxEventTextBytes);
+                if(event.text==": ")event.text="Tool rejected the request; inspect its retained response.";
+                share(index,"Tool failure diagnostic (data): "+compact.dump()+" Inspect the cause before another proposal; choose a correction from design intent, not an identical blind retry.");
+            }else {
+                std::uint64_t measuredRevision=0;const bool measured=receiptRevision(detail,measuredRevision)||(queryIndex>=0&&receiptRevision(payload(result),measuredRevision));
+                if(documentMutation(tool)&&!measured)return;
+                std::lock_guard lock(mutex);auto& role=roles[index];
+                auto resolve=[&](const std::string& identity){const auto failed=role.unresolvedToolFailures.find(identity);std::uint64_t failedRevision=0;if(failed!=role.unresolvedToolFailures.end()&&measured&&receiptRevision(failed->second,failedRevision)&&measuredRevision<failedRevision)return;role.unresolvedToolFailures.erase(identity);};
+                resolve(key);
+                if(tool=="doc_apply"||tool=="team_apply_step"){resolve("doc_apply");resolve("team_apply_step");}
+                // A stale read needs current measured evidence of the same
+                // query. Preserve optional read preconditions; writes still
+                // require their explicit revision and never rebase.
+                if(queryRead&&measured&&(!queryArgs.find("expected_revision")||(revision(queryArgs)&&(std::uint64_t)queryArgs.find("expected_revision")->num==measuredRevision)))resolve(toolFailureKey(tool,queryArgs,true,true));
+                // A resolved latest failure must not hide other outstanding rows.
+                role.lastToolFailure=role.unresolvedToolFailures.empty()?V{}:role.unresolvedToolFailures.rbegin()->second;
+            }
+        };
+        if(name=="query_batch"&&!isError(result)){
+            const auto batchArgs=compactTeamArguments(name,args);const auto* queries=batchArgs.find("queries");const auto* rows=payload(result).find("results");
+            bool associated=queries&&queries->t==V::Arr&&rows&&rows->t==V::Arr&&queries->arr.size()==rows->arr.size();
+            // Validate all associations before discharging any failed read. Old
+            // hosts may omit metadata; when supplied it must match the query.
+            if(associated)for(std::size_t i=0;i<queries->arr.size();++i){
+                const auto& query=queries->arr[i];const auto& row=rows->arr[i];const auto* values=query.find("args");const auto* error=row.find("isError");
+                if(field(query,"tool").empty()||!values||values->t!=V::Obj||!error||error->t!=V::Bool){associated=false;break;}
+                if(const auto* index=row.find("query_index");index&&(index->t!=V::Num||index->num!=(double)i)){associated=false;break;}
+                if(row.find("tool")&&field(row,"tool")!=field(query,"tool")){associated=false;break;}
+                if(const auto* returned=row.find("args");returned&&canonicalQueryArguments(*returned).dump()!=canonicalQueryArguments(*values).dump()){associated=false;break;}
+            }
+            if(!associated){V diagnostic=errorResult("Batch receipt count or row association does not match the submitted queries. No nested result resolved an earlier failed read; inspect the host receipt before retrying.");diagnostic.set("error_code",V::makeStr("QUERY_BATCH_RECEIPT_MISMATCH"));retainOutcome(name,args,diagnostic,-1);}
+            else {retainOutcome(name,args,result,-1);for(std::size_t i=0;i<queries->arr.size();++i)retainOutcome(field(queries->arr[i],"tool"),*queries->arr[i].find("args"),rows->arr[i],(int)i);}
+        }else retainOutcome(name,args,result,-1);
         if(config.recordAction&&!payload(result).find("activity_id")&&!payload(result).find("activity_capture_error")&&name!="usage_record"&&name!="tool_feedback"&&name!="activity_info"&&name!="team_finish_goal"&&name!="team_report_task"){
             try{result=config.recordAction(roles[index].config.id,name,args,result,std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-actionStarted).count());}
             catch(...){result.set("activity_capture_error",V::makeStr("Action finished but its coordination audit could not be attached; do not replay the action."));}
@@ -592,6 +640,11 @@ void AgentTeam::start(const AgentTeamConfig& config,const V& userMessage,const V
     impl_->stop();
     {std::lock_guard lock(impl_->mutex);impl_->config=config;impl_->tools=std::move(tools);impl_->executor=executor;impl_->observer=observer;impl_->roles.clear();impl_->events.clear();impl_->proposals.clear();impl_->writeReservation={};impl_->prepared.clear();impl_->preparedBytes=impl_->preparedByteLimit=0;impl_->proposalSerial=impl_->stepSerial=0;impl_->jobs.clear();impl_->readOnly.clear();impl_->eventBytes=0;impl_->sequence=impl_->dropped=0;impl_->active=0;impl_->paused=false;impl_->goalState=AgentGoalState::InProgress;impl_->goalSummary.clear();impl_->goalDeclared=false;impl_->documentRevisionKnown=false;impl_->documentRevision=0;impl_->initialLeadAuthoringCheckpoint=false;impl_->began=std::chrono::steady_clock::now();impl_->cancelled=false;impl_->started=true;
         for(const auto& tool:impl_->tools.arr)if(const auto* annotations=tool.find("annotations"))if(const auto* hint=annotations->find("readOnlyHint"))if(hint->t==V::Bool&&hint->b)impl_->readOnly.insert(field(tool,"name"));
+        // Recover query reads by exact subject/arguments using the published
+        // batch allowlist. Corrected previews and other ordinary operations
+        // keep their existing same-tool recovery contract.
+        impl_->queryRecoveryTools.clear();
+        for(const auto& tool:impl_->tools.arr)if(field(tool,"name")=="query_batch")if(auto schema=tool.find("inputSchema"))if(auto props=schema->find("properties"))if(auto queries=props->find("queries"))if(auto items=queries->find("items"))if(auto fields=items->find("properties"))if(auto name=fields->find("tool"))if(auto choices=name->find("enum"))for(const auto& choice:choices->arr)if(choice.t==V::Str)impl_->queryRecoveryTools.insert(choice.str);
         std::string roster;for(const auto& role:config.roles){if(!roster.empty())roster+=", ";roster+=role.id+" ("+(role.canWrite?"writable":"read-only")+")";}
         V operationList=V::makeArr();for(const auto& tool:impl_->tools.arr)if(field(tool,"name")=="doc_apply")if(auto schema=tool.find("inputSchema"))if(auto props=schema->find("properties"))if(auto commands=props->find("commands"))if(auto items=commands->find("items"))if(auto fields=items->find("properties"))if(auto op=fields->find("op"))if(auto choices=op->find("enum"))operationList=*choices;
         for(const auto& roleConfig:config.roles){Impl::Role role;role.config=roleConfig;role.view.id=roleConfig.id;role.view.label=roleConfig.label;role.view.model=roleConfig.assistant.model;role.view.reasoningEffort=roleConfig.assistant.reasoningEffort;role.view.canWrite=roleConfig.canWrite;role.view.discipline=roleConfig.discipline;

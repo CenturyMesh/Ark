@@ -1,11 +1,13 @@
 {
-  "sequence": 37,
-  "phase": "D",
-  "code": "037D",
-  "version": "0.9.38",
+  "sequence": 38,
+  "phase": "B",
+  "code": "038B",
+  "version": "0.9.39",
   "milestones": [
     "A.03",
     "A.04",
+    "B.01",
+    "B.02",
     "D.02",
     "D.04"
   ]

@@ -13,7 +13,40 @@ static V contextRetainedGuides(const V& history){
     for(const auto& row:history.arr){const auto* content=row.find("content");if(!content||content->t!=V::Str||content->str.rfind(prefix,0)!=0)continue;V record;if(arkjson::parse(content->str.substr(prefix.size()),record))if(const auto* retained=record.find("retained_static_guides"))for(const auto& guide:retained->arr)guides.arr.push_back(guide);}
     return guides;
 }
+static void batchFailureProjectionChecks(){
+    ark::AgentSession session;session.suppressIterationHistory();
+    const V args=json(R"({"queries":[{"tool":"plane_inspect","args":{"name":"XY"},"fields":["plane"]},{"tool":"doc_info","args":{"detail":"revision"}}]})");
+    const V receipt=session.call("query_batch",args);
+    const auto& rows=*receipt.find("structuredContent")->find("results");
+    check(!receipt.find("isError")->b&&rows.arr[0].find("isError")->b&&!rows.arr[1].find("isError")->b,"real mixed batch preserves successful rows and rejects missing plane projection");
+    V history=json(R"([{"role":"user","content":"Inspect the retained XY plane; preserve existing design."}])");
+    V inventory=json(R"({"isError":false,"structuredContent":{"revision":0}})");member(inventory,"structuredContent").set("inventory",V::makeStr(std::string(120*1024,'x')));
+    contextExchange(history,"prior_large_inventory","doc_info",V::makeObj(),inventory);
+    contextExchange(history,"missing_plane_projection","query_batch",args,receipt);
+    contextExchange(history,"subsequent_status","doc_info",json(R"({"detail":"revision"})"),session.call("doc_info",json(R"({"detail":"revision"})")));
+    const auto original=history.dump();ark::AssistantConfig config;config.model="offline-batched-recovery";
+    bool projected=false;const auto request=ark::assistantRequest(config,history,ark::AgentSession::tools(),&projected);
+    check(projected&&original.size()>96*1024,"batch recovery crosses the real provider request projection threshold");
+    const auto record=contextHistoricalRecord(*request.find("input"),"missing_plane_projection");const auto* retained=record.find("retained_query_failures");
+    check(retained&&retained->arr.size()==1&&retained->arr[0].find("tool")->asStr()=="plane_inspect","projected request keeps only the actual rejected query with its tool and index");
+    const auto& evidence=*retained->arr[0].find("receipt");
+    check(evidence.dump()==rows.arr[0].find("structuredContent")->dump()&&evidence.find("observed_result")->find("world_column_major")&&evidence.find("recovery")->find("args")->find("name")->asStr()=="XY","exact observed frame, available fields and executable recovery survive a subsequent read");
+    check(history.dump()==original&&session.revision==0,"projection preserves original history and document revision");
+    int requests=0,reads=0;auto run=ark::runAssistant(config,history,ark::AgentSession::tools(),[&](const auto& tool,const V& values){++reads;check(tool=="plane_inspect"&&values.dump()==R"({"name":"XY"})","recovery executes only the selected actual query");return session.call(tool,values);},{},nullptr,[&](const auto&,const V& outgoing,auto*){
+        ++requests;const auto prior=contextHistoricalRecord(*outgoing.find("input"),"missing_plane_projection");
+        if(requests==1){check(prior.find("retained_query_failures"),"real provider seam receives retained recovery evidence");return toolResponse("fresh_plane_recovery","plane_inspect",R"({"name":"XY"})");}
+        check(!prior.find("retained_query_failures"),"successful direct same-query read retires its retained historical recovery packet");return finalResponse();
+    });
+    check(requests==2&&reads==1&&session.revision==0,"one exact read recovers without repeated batch work or any paid transport");
+    for(size_t i=0;i<history.arr.size();++i)check(run.conversation.arr[i].dump()==history.arr[i].dump(),"recovery continuation retains every original host receipt");
+    V mismatched=receipt;member(member(mismatched,"structuredContent"),"results").arr[0].set("tool",V::makeStr("native_inspect"));V invalidHistory=history;
+    member(invalidHistory.arr[4],"output")=V::makeStr(mismatched.dump());
+    auto invalid=ark::assistantRequest(config,invalidHistory,ark::AgentSession::tools());
+    check(!contextHistoricalRecord(*invalid.find("input"),"missing_plane_projection").find("retained_query_failures"),"mismatched batch tool metadata cannot supply retained recovery evidence");
+    check(ark::assistant_context::readEvidenceKey("math_eval",json(R"({"op":"norm","a":[1,2,3]})"))==ark::assistant_context::readEvidenceKey("math_eval",json(R"({"a":[1,2,3],"op":"norm"})")),"read evidence identity ignores JSON object ordering without changing array order");
+}
 static void staticContractProjectionChecks(){
+    batchFailureProjectionChecks();
     ark::AgentSession session;
     const V solidArgs=json(R"({"topic":"solids","detail":"guide"})"),sketchArgs=json(R"({"topic":"sketch","detail":"guide"})"),surfaceArgs=json(R"({"topic":"surfacing","detail":"guide"})");
     V solid=session.call("agent_onboard",solidArgs),sketch=session.call("agent_onboard",sketchArgs),surface=session.call("agent_onboard",surfaceArgs);

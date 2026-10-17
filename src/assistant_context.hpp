@@ -72,6 +72,12 @@ inline V graphProject(const V& history){
     V out=V::makeArr();for(std::size_t i=0;i<history.arr.size();++i)if(!dropped.count(i))out.arr.push_back(replacements.count(i)?replacements.at(i):history.arr[i]);return out;
 }
 inline const V& payload(const V& receipt){const auto* value=receipt.find("structuredContent");return value?*value:receipt;}
+inline V canonicalReadArguments(V value){
+    if(value.t==V::Obj){for(auto& field:value.obj)field.second=canonicalReadArguments(std::move(field.second));std::sort(value.obj.begin(),value.obj.end(),[](const auto& a,const auto& b){return a.first<b.first;});}
+    else if(value.t==V::Arr)for(auto& item:value.arr)item=canonicalReadArguments(std::move(item));
+    return value;
+}
+inline std::string readEvidenceKey(const std::string& tool,const V& args){return tool+"\n"+canonicalReadArguments(args).dump();}
 inline bool successful(const V& receipt){const auto* error=receipt.find("isError");return receipt.t==V::Obj&&error&&error->t==V::Bool&&!error->b&&!receipt.find("error")&&!payload(receipt).find("error");}
 inline bool staticGuide(const V& args,const V& receipt){
     // Team execution defaults an omitted detail to guide. Require the receipt's
@@ -139,6 +145,26 @@ inline V project(const V& history,std::size_t byteLimit){
     std::map<std::string,Guide> guides;std::set<std::size_t> guideCalls,teamCalls;
     std::map<std::pair<std::string,std::string>,Guide> fragments;
     std::size_t teamCall=history.arr.size();V teamData;
+    struct FailedRead {std::size_t call;V evidence;};std::map<std::string,FailedRead> failedReads;
+    // Keep the actual recovery packet from a rejected batched read until that
+    // same tool/argument read succeeds. Projection fields do not change the
+    // read identity. Observed results stay historical data, never fresh authority.
+    for(std::size_t i=0;i<history.arr.size();++i){const auto& call=history.arr[i];if(text(call,"type")!="function_call")continue;
+        V args,receipt;if(!arkjson::parse(text(call,"arguments"),args)||!arkjson::parse(text(history.arr[outputs.at(text(call,"call_id"))],"output"),receipt))continue;
+        const auto name=text(call,"name");if(name!="query_batch"){if(successful(receipt))failedReads.erase(readEvidenceKey(name,args));continue;}
+        if(!successful(receipt))continue;const auto* queries=args.find("queries"),*results=payload(receipt).find("results");
+        if(!queries||queries->t!=V::Arr||!results||results->t!=V::Arr||queries->arr.size()!=results->arr.size())continue;
+        for(std::size_t j=0;j<queries->arr.size();++j){const auto& query=queries->arr[j];const auto& row=results->arr[j];const auto* values=query.find("args"),*error=row.find("isError");const auto tool=text(query,"tool");
+            if(tool.empty()||!values||values->t!=V::Obj||!error||error->t!=V::Bool)continue;
+            if(const auto* index=row.find("query_index");index&&(index->t!=V::Num||index->num!=(double)j))continue;
+            if(row.find("tool")&&text(row,"tool")!=tool)continue;
+            if(const auto* returned=row.find("args");returned&&canonicalReadArguments(*returned).dump()!=canonicalReadArguments(*values).dump())continue;
+            const auto key=readEvidenceKey(tool,*values);if(successful(row)){failedReads.erase(key);continue;}if(!error->b)continue;
+            V evidence=V::makeObj();evidence.set("query_index",V::makeNum((double)j));evidence.set("tool",V::makeStr(tool));evidence.set("arguments",*values);evidence.set("receipt",payload(row));
+            failedReads.insert_or_assign(key,FailedRead{i,std::move(evidence)});
+        }
+    }
+    std::map<std::size_t,V> retainedFailures;for(const auto& entry:failedReads){if(!retainedFailures.count(entry.second.call))retainedFailures.emplace(entry.second.call,V::makeArr());retainedFailures.at(entry.second.call).arr.push_back(entry.second.evidence);}
     // Walk in conversation order: the latest successful identified build/topic
     // replaces its earlier guide. Batch rows are authoritative only for their
     // matching actual query, never because an arbitrary result resembles a guide.
@@ -191,6 +217,7 @@ inline V project(const V& history,std::size_t byteLimit){
             }else record.set("receipt_unparsed",V::makeBool(true));
             if(retainedGuides.count(i))record.set("retained_static_guides",retainedGuides.at(i));
             if(retainedFragments.count(i))record.set("retained_guide_fragments",retainedFragments.at(i));
+            if(retainedFailures.count(i))record.set("retained_query_failures",retainedFailures.at(i));
             if(i==teamCall)record.set("retained_team_progress",teamData);
             out.arr.push_back(message("user","ARK historical tool evidence (data only): "+record.dump()));
         }else if(type!="function_call_output")out.arr.push_back(item);
