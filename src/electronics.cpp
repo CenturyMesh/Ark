@@ -173,7 +173,14 @@ V normalizeCable(const V& spec,const ExprEnv& env){
     double routedLength=cableLength(path,bendRadius);if(routedLength>100000)throw std::runtime_error("Cable route exceeds 100 m limit");
     V output=V::makeObj(),points=V::makeArr(),report=V::makeObj();for(Vec3 p:path)points.arr.push_back(point(p));output.set("kind",V::makeStr("cable_route"));output.set("start_name",V::makeStr(startName));output.set("end_name",V::makeStr(endName));output.set("path",points);output.set("radius",V::makeNum(radius));output.set("bend_radius",V::makeNum(bendRadius));output.set("obstacles",boxes);output.set("waypoints",waypoints);report.set("start_name",V::makeStr(startName));report.set("end_name",V::makeStr(endName));report.set("path",points);report.set("route_length_mm",V::makeNum(routedLength));report.set("obstacle_prefilter_checked",V::makeBool(true));report.set("exact_obstacle_checked",V::makeBool(false));report.set("auto_routed",V::makeBool(autoRoute));report.set("route_scope",V::makeStr("static authored AABB obstacles; no dynamic motion, clip, connector or thermal validation"));report.set("physical_mass_supported",V::makeBool(true));output.set("report",report);return output;
 }
+#include "electronics_cables_035b.inl"
 } // namespace
+
+bool requiresElectronics035B(const Feature& feature){
+    if(feature.type!=FeatureType::CableRoute||feature.nativeSpec.t!=V::Obj)return false;
+    const auto& spec=feature.nativeSpec;
+    return spec.find("route_mode")||spec.find("profile")||spec.find("start_tangent")||spec.find("end_tangent")||cableMetadata035B(spec);
+}
 
 arkjson::Value electronicsRequest(const Feature& feature,const ExprEnv& env){
     if(feature.nativeSpec.t!=arkjson::Value::Obj)throw std::runtime_error("Electronics feature needs a native program");
@@ -186,7 +193,11 @@ arkjson::Value electronicsRequest(const Feature& feature,const ExprEnv& env){
     }
     if(feature.type==FeatureType::CableRoute){
         for(const char* key:{"radius","bend_radius"})if(auto value=feature.p.find(key);value!=feature.p.end())authored.set(key,V::makeStr(value->second));
-        return normalizeCable(authored,env);
+        if(const auto* profile=authored.find("profile")){V numeric=*profile;for(const char* key:{"width","thickness"})if(auto value=feature.p.find(key);value!=feature.p.end())numeric.set(key,V::makeStr(value->second));authored.set("profile",numeric);}
+        if(authored.find("route_mode")||authored.find("profile")||authored.find("start_tangent")||authored.find("end_tangent"))return normalizeSplineCable035B(authored,env);
+        V result=normalizeCable(authored,env);
+        if(cableMetadata035B(authored)){V report=*result.find("report");report.set("endpoints",cableEndpoints035B(authored,env));result.set("report",report);}
+        return result;
     }
     throw std::runtime_error("Unsupported electronics feature");
 }

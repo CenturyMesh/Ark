@@ -60,6 +60,9 @@ private:
     std::string bomInspectedHash_;
     u64 bomInspectedRevision_=~u64(0);
     std::set<u64> bomInspectedItems_;
+    arkjson::Value contextGraphCache_;
+    std::string contextGraphSource_;
+    std::string contextGraphStamp_;
     arkjson::Value dispatch(const std::string& tool,const arkjson::Value& args);
     bool suppressHistory_=false;
     bool suppressFailures_=false;
@@ -71,6 +74,7 @@ private:
         u64 revision=0;
         std::shared_ptr<Document> document;
           std::vector<u64> bodyOrder;
+        std::vector<u64> deferredMeshes;
         arkjson::Value result;
         arkjson::Value recipe,readScope;
         std::string refreshUnsupported;
@@ -82,7 +86,7 @@ private:
     };
     std::vector<Prepared> prepared_;
       static Document materializePrepared(const Prepared&);
-      static void compactPrepared(Prepared&);
+      void compactPrepared(Prepared&);
       static size_t retainedValueBytes(const arkjson::Value&);
       size_t retainedCandidateBytes(const Prepared* extra=nullptr,bool includeExisting=true) const;
       void trimPrepared();
@@ -96,4 +100,7 @@ private:
     Cache& meshCache(const arkjson::Value& args);
 };
 Document makeDemoDocument();
+// Full saved-authoring serializations performed by context_graph. A repeated
+// read of unchanged authoring does not increment this.
+size_t contextGraphAuthoringSerializations();
 }

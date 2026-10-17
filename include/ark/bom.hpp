@@ -7,6 +7,7 @@ arkjson::Value partMetadataSchema();
 std::string newBomDocumentId();
 bool validBomDocumentId(const std::string& value);
 arkjson::Value inspectBom(const Document& document,u64 revision);
+arkjson::Value selectBomDefinitions(const Document&,const arkjson::Value& full,const arkjson::Value& ids);
 arkjson::Value inspectBomPage(const Document& document,u64 revision,const arkjson::Value& args);
 arkjson::Value exportBom(const Document& document,u64 revision,const arkjson::Value& args);
 class AgentSession;

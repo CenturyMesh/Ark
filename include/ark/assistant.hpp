@@ -67,8 +67,11 @@ struct AssistantPerformance {
     std::uint64_t requestBytes=0,inputBytes=0,toolSchemaBytes=0,maxRequestBytes=0;
     std::uint64_t lastProviderMilliseconds=0,lastToolMilliseconds=0;
     std::uint64_t lastRequestBytes=0,lastInputBytes=0,lastToolSchemaBytes=0;
+    std::uint64_t originalHistoryBytes=0,instructionBytes=0,messageBytes=0,toolResultBytes=0,projectedRequests=0;
+    std::uint64_t lastOriginalHistoryBytes=0,lastInstructionBytes=0,lastMessageBytes=0,lastToolResultBytes=0;
 };
 void accumulateAssistantPerformance(AssistantPerformance& total,const AssistantPerformance& delta);
+arkjson::Value assistantContextMetrics(const AssistantPerformance&);
 struct AssistantEvent {
     enum Kind { Status, Text, ToolStart, ToolEnd, Usage } kind=Status;
     std::string text; // Tool events contain only tool name; never credentials.

@@ -1,5 +1,33 @@
 # ARK agent protocol
 
+035B adds natural `plastics` and `vendors` onboarding, explicit spline/ribbon
+cable recipes and shared graph navigation for endpoints, PCB component/net
+labels and source/artifact links. See [cables](ELECTRONICS_035B.md),
+[Plastics](PLASTICS_035B.md) and [Approved Vendors](APPROVED_VENDORS_035B.md).
+`library_vendors` reads/updates local source policy; its expected revision belongs
+to the policy, separately from CAD and component-record revisions. Public
+discovery/download, a browser account and an authenticated API adapter are
+distinct states. Preserve observed links and actual STEP bytes/hash; never
+invent product matching, credentials, electrical continuity or manufacture.
+Only the new cable semantics conditionally require document source45.
+
+034D adds read-only `context_graph` discovery over saved authoring and attributed
+activity. All team roles use the same host index; a committed edit invalidates
+it before the next query. Query a small neighborhood, then inspect selected
+objects/current revision before editing. Scope/fingerprints omit unchanged node
+facts without granting write authority. Historical complaints retain their
+author and do not prove an unresolved current defect. See
+[context graphs](CONTEXT_GRAPHS_034D.md) for code lookup, local Obsidian export,
+safe request deduplication and measured limits.
+
+033D adds actual-allocation preview receipts, explicit owned-candidate
+`refresh_candidate:true` publication, compact team defaults and measured request
+context. Read [033D contracts](iterations/033D.md). Selected read-only assignments
+and `bom_inspect`/`bom_review` `ids` support specialists without satisfying the
+lead's global BOM completion gate. `release_reservation:true` on a successful
+`team_apply_step` cleans up only that owner's window. Revisions, dependency checks,
+role permissions, DFM acceptance and atomic rejection remain mandatory.
+
 032D keeps the existing tool set and adds [compact response and coordination
 contracts](AGENT_CONTRACTS_032D.md). Load `agent_onboard{topic,detail:"guide"}`
 once per needed topic. Read `doc_info{detail:"revision"}` for status and selected

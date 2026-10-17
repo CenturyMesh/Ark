@@ -3,6 +3,23 @@
 Estas regras aplicam-se a todo o repositório. O protocolo de utilização das
 ferramentas CAD continua em [docs/AGENTS.md](docs/AGENTS.md).
 
+## Contexto de código e projeto
+
+- Para descobrir símbolos e relações no código, usar
+  `powershell -NoProfile -File scripts/code-context.ps1 -Query 'simbolo'`.
+  `-Prepare` prepara a versão fixa; as consultas seguintes usam o cache local
+  offline, sem backend de modelo. Confirmar o resultado no código atual com `rg`
+  e leitura do ficheiro antes de editar. Ambiguidade, ausências e extração parcial
+  não são prova de ausência de dependências. Usar `-Context call` para restringir
+  relações de chamadas quando um símbolo produz uma vizinhança demasiado ampla.
+- O índice e a exportação opcional `-Obsidian` ficam em `out/context-code`.
+  Não indexar desenhos, sessões, credenciais ou ficheiros privados. Não executar
+  a instalação automática de integrações do Graphify para alterar estas regras.
+- Dentro do ARK, `context_graph` consulta a vizinhança partilhada do projeto.
+  Reutilizar `known_scope` e `known_fingerprints` apenas dos recibos recebidos.
+  Os grafos navegam contexto; revisão atual, `object_context`, inspeção nativa
+  e as regras de publicação continuam a governar edições.
+
 ## Identificação das iterações — obrigatório
 
 1. A identidade pública de uma iteração tem **três dígitos sequenciais e uma

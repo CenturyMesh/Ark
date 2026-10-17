@@ -1,0 +1,161 @@
+{
+  "schema": "ark.iteration-verification.v1",
+  "iteration": "033D",
+  "version": "0.9.34",
+  "source_base_commit": "f9f8733097c1a03be8ed08ee5c6afff5af30aaa1",
+  "source_state": "local working changes on feature/033d-agent-workflow",
+  "source_manifest_sha256": "fac433ca3e8f53b62202a2487f91c3cf4af5e0a46eec3b6017070b3c1cee8d7b",
+  "milestones": [
+    "A.01",
+    "A.02",
+    "A.03",
+    "A.04",
+    "B.04",
+    "D.02",
+    "D.04",
+    "E.01"
+  ],
+  "qualification": "Windows local focused verification only",
+  "tests": {
+    "native": {
+      "passed": 12,
+      "failed": 0,
+      "cases": [
+        {
+          "name": "agent-workflow-033d",
+          "seconds": 0.302095
+        },
+        {
+          "name": "candidate_storage-032d",
+          "seconds": 0.145159
+        },
+        {
+          "name": "agent_contracts-032d",
+          "seconds": 0.112651
+        },
+        {
+          "name": "geometry_storage-032d",
+          "seconds": 0.065025
+        },
+        {
+          "name": "candidate_refresh-031b",
+          "seconds": 0.671401
+        },
+        {
+          "name": "release-metadata",
+          "seconds": 0.486907
+        },
+        {
+          "name": "bom-completion",
+          "seconds": 0.0460074
+        },
+        {
+          "name": "engineering-agents",
+          "seconds": 0.798645
+        },
+        {
+          "name": "agent",
+          "seconds": 0.215491
+        },
+        {
+          "name": "assistant-connector",
+          "seconds": 2.55198
+        },
+        {
+          "name": "agent-team",
+          "seconds": 2.84636
+        },
+        {
+          "name": "bom-contract",
+          "seconds": 0.203187
+        }
+      ]
+    },
+    "portable": {
+      "passed": 10,
+      "failed": 0,
+      "cases": [
+        {
+          "name": "agent-workflow-033d",
+          "seconds": 0.253577
+        },
+        {
+          "name": "candidate_storage-032d",
+          "seconds": 0.0404156
+        },
+        {
+          "name": "agent_contracts-032d",
+          "seconds": 0.042702
+        },
+        {
+          "name": "geometry_storage-032d",
+          "seconds": 0.0662336
+        },
+        {
+          "name": "candidate_refresh-031b",
+          "seconds": 0.0484899
+        },
+        {
+          "name": "release-metadata",
+          "seconds": 0.397032
+        },
+        {
+          "name": "bom-completion",
+          "seconds": 0.0440456
+        },
+        {
+          "name": "agent",
+          "seconds": 0.149668
+        },
+        {
+          "name": "assistant-connector",
+          "seconds": 2.52005
+        },
+        {
+          "name": "agent-team",
+          "seconds": 2.87647
+        }
+      ]
+    }
+  },
+  "synthetic_measurements": {
+    "context_history_bytes": 146498,
+    "projected_input_bytes": 15977,
+    "tool_schema_bytes": 126435,
+    "canonical_command_parameters_bytes": 24507,
+    "compact_alias_parameters_bytes": 3756,
+    "measurement_scope": "Identical public synthetic input; actual serialized bytes, not live provider token/cost/design-quality gains"
+  },
+  "artifacts": {
+    "ark-studio.exe": {
+      "sha256": "387bc26f8cfbe0164b5304982f93f5077e2d1ce9ab71d46c834b2bb3dea55a15",
+      "bytes": 11440640
+    },
+    "ark-cli.exe": {
+      "sha256": "28169bfd83553ffc8ac1a31a31a16288e3ffc1ac80068ef9508f4f4f282e72c7",
+      "bytes": 3308032
+    },
+    "ark-mcp.exe": {
+      "sha256": "cfbe4bbf0f14e604887bc7b00ac8a609fb8fef08f24ff440bd8082e51cc46bc5",
+      "bytes": 5888000
+    },
+    "ark-occt-worker.exe": {
+      "sha256": "2271504564d12901354299eb4d9a89df0cc4ae020e47c3c07dafa7c86573566f",
+      "bytes": 3191296
+    }
+  },
+  "limits": [
+    "Full suites and hosted CI were not run for these local changes.",
+    "No distribution/OTA qualification, Linux run or live-model design benchmark is claimed.",
+    "Metadata compression uses the Windows system codec; other platforms retain verified uncompressed metadata bytes.",
+    "Transient decoding/display materialization is outside the retained-candidate memory bound.",
+    "No user design or session is included in this receipt or the public test fixtures."
+  ],
+  "initial_failures_and_corrections": [
+    "Offline fixture response envelopes and a missing test include were corrected.",
+    "Native inspection checks initially required a fresh preview; audited selectors now join the checked refresh scope.",
+    "Deferred display geometry initially reached refresh reuse before materialization; refresh now materializes the retained cache first.",
+    "Excess string capacity and compressor output-bound handling were corrected before the final retention verification.",
+    "The activity persistence regression now supplies the real measured context to the host activity recorder."
+  ]
+}

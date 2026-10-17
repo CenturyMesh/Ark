@@ -2,6 +2,7 @@ bool assistantToolReadOnly(const V& tools,const std::string& name,const V& args)
     if(name=="tool_feedback")return true;
     if(name=="snapshot"&&args.t==V::Obj&&!args.find("path"))return true;
     if(name=="image_asset"&&field(args,"action")=="inspect")return true;
+    if(name=="library_vendors"&&args.t==V::Obj&&(!args.find("operation")||field(args,"operation")=="list"))return true;
     for(const auto& tool:tools.arr)if(field(tool,"name")==name){
         const auto* annotations=tool.find("annotations");const auto* hint=annotations?annotations->find("readOnlyHint"):nullptr;
         return hint&&hint->t==V::Bool&&hint->b;

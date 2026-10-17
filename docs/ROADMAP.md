@@ -9,6 +9,32 @@ The public iteration and numeric runtime are defined in
 increasing sequence and its principal phase. The letter is a roadmap phase, not a
 month; it does not declare the phase complete. The `.ark` format evolves separately.
 
+036A addresses **A.01/A.02/A.03/A.04/B.01/B.04/D.02/D.04** through
+context-stamp correctness, preserved datum identity, navigation and team
+coordination. Local integration is **Verificado no escopo** in the
+[036A scope](iterations/036A.md), with 135 native, 90 portable and five Studio
+registrations passing. Hosted CI and real-model behavior remain separate gates.
+The broader milestones remain **Parcial**; a local coordinator regression is
+distinct from real-model design delivery and measured token savings.
+
+035B addresses **B.01/B.02/B.03/B.04/C.03/D.02/D.04/E.01**, with
+**A.01/A.02/A.03/A.04** custody, through
+[editable 3D/ribbon cables](ELECTRONICS_035B.md),
+[Plastics workflows](PLASTICS_035B.md) and
+[approved component sources](APPROVED_VENDORS_035B.md).
+Local verification is **Verificado no escopo** in the focused
+[035B receipt](iterations/035B.md). Broader milestones remain **Parcial**; documented commercial APIs,
+CAD validity and readable menus do not establish account integration, supplier
+qualification or physical manufacturing acceptance.
+
+034D addresses **A.01/A.03/A.04/D.02/D.04** with
+[shared project context and local code graphs](CONTEXT_GRAPHS_034D.md).
+The local implementation is **Verificado no escopo** through the focused checks
+recorded in [034D](iterations/034D.md). A.02/B.04/E.01 preserve the existing document,
+revision, assembly and publication contracts. Broader milestones remain
+**Parcial**; response-byte measurements do not establish live model token,
+cost or design-quality savings.
+
 032D addresses **A.01/A.02/A.03/A.04/B.04/D.02/D.04/E.01** through
 [compact agent contracts](AGENT_CONTRACTS_032D.md), [bounded preview custody](PREVIEWS_032D.md),
 [lossless shared geometry storage](GEOMETRY_STORAGE_032D.md),
@@ -161,6 +187,12 @@ Goal: connect design choices to exact geometry and measured process evidence.
 ## D — Effective design agents
 
 Goal: reach valid, useful designs with explainable quality, time and total cost.
+
+033D addresses **A.03/A.04/D.02/D.04 — Verificado no escopo local** with actual retained-allocation
+accounting, packed preview custody, explicit checked refresh/publication,
+request-context measurements and specialist scope. [Contracts and verification](iterations/033D.md)
+keep local checks separate from live provider gains, global BOM completion and
+manufacturing qualification. Broader milestones remain **Parcial**.
 
 026D adds explicit local Ollama discovery and capability-aware single/team model
 selection. [026D evidence](iterations/026D.md) separates metadata declarations,

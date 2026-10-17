@@ -1,5 +1,10 @@
 #include "ark/electronics.hpp"
 #include "ark/agent.hpp"
+#include "ark/modeling_031b.hpp"
+#include "ark/serialize.hpp"
+#include <algorithm>
+#include <cmath>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -11,10 +16,12 @@ Value parse(const char* text){Value value;if(!arkjson::parse(text,value))throw s
 void check(bool condition,const char* message){if(!condition)throw std::runtime_error(message);}
 bool fails(const ark::Feature& feature){try{(void)ark::electronicsRequest(feature,{});return false;}catch(const std::exception&){return true;}}
 const Value& accepted(const Value& reply){const Value* error=reply.find("isError");if(error&&error->b){const Value* result=reply.find("structuredContent");throw std::runtime_error(result&&result->find("error")?result->find("error")->str:"MCP request failed");}const Value* result=reply.find("structuredContent");if(!result)throw std::runtime_error("Missing result");return *result;}
+#include "electronics_035b_tests.inl"
 }
 
 int main(){
     try{
+        electronics035BCoreTests();
         ark::Feature pcb;pcb.type=ark::FeatureType::PCB;
         pcb.nativeSpec=parse(R"({"outline":[[0,0],[40,0],[40,30],[0,30]],"thickness":1.6,
           "layers":[{"name":"top","z":1.6},{"name":"bottom","z":0}],
@@ -35,6 +42,7 @@ int main(){
         const auto prefix=(std::filesystem::temp_directory_path()/"ark-electronics-test").string();Value exportResult=ark::exportPcbFabrication(pcb,{},prefix);check(!exportResult.find("fabrication_qualified")->b,"fabrication export stays preview");for(const auto& file:exportResult.find("files")->arr){const auto path=std::filesystem::u8path(file.str);std::ifstream stream(path,std::ios::binary);check(stream.good(),"fabrication preview file opens");const std::string contents((std::istreambuf_iterator<char>(stream)),std::istreambuf_iterator<char>());stream.close();if(path.extension()==".gbr")check(contents.find("%FSLAX45Y45*%")!=std::string::npos&&contents.find("M02*")!=std::string::npos,"Gerber has coordinate format and footer");else if(path.extension()==".drl")check(contents.find("M48")!=std::string::npos&&contents.find("M30")!=std::string::npos,"Excellon has drill header and footer");else{Value netlist;check(arkjson::parse(contents,netlist)&&!netlist.find("fabrication_qualified")->b,"netlist preview parses and stays unqualified");}std::filesystem::remove(path);}
 
 #ifdef ARK_ELECTRONICS_EXACT_TESTS
+        electronics035BNativeTests();
         ark::AgentSession session;
         accepted(session.call("doc_apply",parse(R"({"commands":[{"op":"feature.add","type":"pcb","name":"Board","native":{"outline":[[0,0],[40,0],[40,30],[0,30]],"thickness":1.6,"pads":[{"name":"J1","net":"PWR","layer":"top","x":10,"y":10,"width":2,"height":2}]}}]})")));
         Value inspected=accepted(session.call("electronics_inspect",parse(R"({"id":1})")));check(inspected.find("drc_checked")&&inspected.find("drc_checked")->b,"MCP PCB inspection reports DRC");
