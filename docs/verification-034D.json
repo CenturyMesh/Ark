@@ -1,0 +1,361 @@
+{
+  "schema": "ark.iteration-verification.v1",
+  "iteration": "034D",
+  "version": "0.9.35",
+  "source_base_commit": "d43ddf18b98952eda13b7848cbbe7008534059cb",
+  "source_state": "local verified changes on feature/034d-context-graphs",
+  "source_manifest_sha256": "bac020ac65e72c2c9162be066db9148bfa30177ee411f90ff52135feca791105",
+  "source_manifest": [
+    {
+      "path": ".graphifyrc",
+      "sha256": "300ea5fce5ff13146d39b4bd11825dc8afc99c62de534be54504657e0b05e08e"
+    },
+    {
+      "path": "AGENTS.md",
+      "sha256": "ebca76aa1383ab09d14161246c0711d4bb5c048c72efe54df51dcf44cdbceb05"
+    },
+    {
+      "path": "CMakeLists.txt",
+      "sha256": "e2bd3c50f36a6acccad065d99386818f4e7f4278b4042f61392d356bbb1d2f3d"
+    },
+    {
+      "path": "README.md",
+      "sha256": "4f98f65f34815ae03001f4892aecdf2c1e3fecd9263a405ad1aee3bdf9174964"
+    },
+    {
+      "path": "docs/AGENTS.md",
+      "sha256": "703ec103d8eb2e42d6a1732c881c7abf57aaf66dd70a878f0c82934b7da990a0"
+    },
+    {
+      "path": "docs/CONTEXT_GRAPHS_034D.md",
+      "sha256": "5320623f76aea440b864c42e4156eae930a92e0e03ceba17b1e12177008158f6"
+    },
+    {
+      "path": "docs/README.md",
+      "sha256": "d4fa06c964c847cf87bee24f7c4e587dcce666764fbac2085c96563ed42c3873"
+    },
+    {
+      "path": "docs/ROADMAP.md",
+      "sha256": "4eb06cefbf725b218bb43e284fd26697d021230dc4a6ef5e8dc4451ce5de97f2"
+    },
+    {
+      "path": "docs/iterations/034D.md",
+      "sha256": "b6513dc9ab679475597d02c4567a93cd077ba846048c3b2d434a024659204973"
+    },
+    {
+      "path": "include/ark/agent.hpp",
+      "sha256": "784bb4c585ff6c731ac85e506ad8c108bdf65db46c408f40ca80ab84ed4523fb"
+    },
+    {
+      "path": "release.json",
+      "sha256": "e2fec4deef48bb9eb140cb61fe9f74254bffa612920e79797beb732dc5161cef"
+    },
+    {
+      "path": "scripts/code-context.ps1",
+      "sha256": "f77225a79f34e5ebd905a93ad078cca4edebc56947cc700c1908dc246a039a08"
+    },
+    {
+      "path": "src/agent.cpp",
+      "sha256": "6fcadfec001bf66b4b6c4435be11fe7e739563a85cbf70584c44e81a0c51d75a"
+    },
+    {
+      "path": "src/agent_features.cpp",
+      "sha256": "9bb439d98679761ef5b09c3d0333660cceb2c04a04c1a1f096ea8ff33887053f"
+    },
+    {
+      "path": "src/agent_team.cpp",
+      "sha256": "a072eb895611b512d50a529880cfca291df025033b56d1479ccd764614fadf03"
+    },
+    {
+      "path": "src/assistant.cpp",
+      "sha256": "aacb4e939a0666608a0b9911c1e787d5bd8ca85766df222ab6c2d19b9a459d04"
+    },
+    {
+      "path": "src/assistant_context.hpp",
+      "sha256": "3e76f163abe6c3e31a7e394cab76a182762362980b475bac02cf7563b7802739"
+    },
+    {
+      "path": "src/context_graph_034d.inl",
+      "sha256": "74a076fdce3165e28b9422218bbc305fdd8a63e529ec205d3dcd1f300946a663"
+    },
+    {
+      "path": "tests/agent_features_tests.cpp",
+      "sha256": "8b8681ed958a57ee1068ea763dd8c4da1e4f0b2a86cdbf010b9cf32727aaf823"
+    },
+    {
+      "path": "tests/agent_team_graph_034d_tests.inl",
+      "sha256": "14361016f988adc1dfc41747f3da01a4d18c9f747e10cd0158fe39f7ce6eb02d"
+    },
+    {
+      "path": "tests/agent_team_tests.cpp",
+      "sha256": "241e8a8af94c77e36a09c2b66443042240a8280dbe96e8e6ee00872c81523175"
+    },
+    {
+      "path": "tests/agent_tests.cpp",
+      "sha256": "10f3e971d38656ce953fd01886c8c2ed03f2217d09a5c38fdf68feb06eb61875"
+    },
+    {
+      "path": "tests/assembly_manipulation_tools_tests.cpp",
+      "sha256": "bac20fbd14224a9c00efecfa7cbf22047e2efe9de37857f599e3e1f4704464a9"
+    },
+    {
+      "path": "tests/authoring_023b_contract_tests.cpp",
+      "sha256": "9652df26783444986d9608cec9f16c1e668dcea924b61776e6121659d19c8d1d"
+    },
+    {
+      "path": "tests/authoring_024b_contract_tests.cpp",
+      "sha256": "fb8040b6f7ef32cbee7b9af3a216cbc67ac474e8c74949d103189e4737fc9691"
+    },
+    {
+      "path": "tests/authoring_029b_integration_tests.cpp",
+      "sha256": "6d30c5f7f859585f500bbc046c28965dba2f34d25fd95d0eadb0533b9680b972"
+    },
+    {
+      "path": "tests/code_context_tests.ps1",
+      "sha256": "6df8af7710f9173a912326501a879003e5a177dd6b583202d275a8fd3bfb4e0d"
+    },
+    {
+      "path": "tests/context_graph_034d_tests.cpp",
+      "sha256": "b5f1473c014f7b9537831a3493e199c347a7c12a39c10f61832515400fd07006"
+    },
+    {
+      "path": "tests/modeling_workflow_tests.cpp",
+      "sha256": "c324b65c86660067e6b9cbb9a4e35aa8089f4459e29cc4a57315ff6239099212"
+    }
+  ],
+  "milestones": [
+    "A.01",
+    "A.02",
+    "A.03",
+    "A.04",
+    "B.04",
+    "D.02",
+    "D.04",
+    "E.01"
+  ],
+  "qualification": "Windows local focused native and portable-core verification",
+  "tests": {
+    "native": {
+      "passed": 15,
+      "failed": 0,
+      "cases": [
+        {
+          "name": "context-graph-034d",
+          "seconds": 0.0873864
+        },
+        {
+          "name": "agent-workflow-033d",
+          "seconds": 0.504778
+        },
+        {
+          "name": "release-metadata",
+          "seconds": 0.607914
+        },
+        {
+          "name": "ota-updates",
+          "seconds": 2.72762
+        },
+        {
+          "name": "bom-completion",
+          "seconds": 0.0753158
+        },
+        {
+          "name": "agent-features",
+          "seconds": 1.74376
+        },
+        {
+          "name": "agent",
+          "seconds": 0.358347
+        },
+        {
+          "name": "authoring-029b-integration",
+          "seconds": 0.472605
+        },
+        {
+          "name": "modeling-workflow",
+          "seconds": 4.18123
+        },
+        {
+          "name": "assistant-connector",
+          "seconds": 3.01421
+        },
+        {
+          "name": "agent-team",
+          "seconds": 3.04419
+        },
+        {
+          "name": "bom-contract",
+          "seconds": 0.440902
+        },
+        {
+          "name": "assembly-manipulation-tools",
+          "seconds": 0.052331
+        },
+        {
+          "name": "authoring-023b-contracts",
+          "seconds": 0.189199
+        },
+        {
+          "name": "authoring-024b-contract",
+          "seconds": 0.141699
+        }
+      ]
+    },
+    "portable_core": {
+      "passed": 12,
+      "failed": 0,
+      "cases": [
+        {
+          "name": "context-graph-034d",
+          "seconds": 0.0765452
+        },
+        {
+          "name": "agent-workflow-033d",
+          "seconds": 0.275512
+        },
+        {
+          "name": "release-metadata",
+          "seconds": 0.401229
+        },
+        {
+          "name": "ota-updates",
+          "seconds": 2.26594
+        },
+        {
+          "name": "bom-completion",
+          "seconds": 0.0841817
+        },
+        {
+          "name": "agent-features",
+          "seconds": 0.0741462
+        },
+        {
+          "name": "agent",
+          "seconds": 0.14701
+        },
+        {
+          "name": "assistant-connector",
+          "seconds": 2.9885
+        },
+        {
+          "name": "agent-team",
+          "seconds": 3.05414
+        },
+        {
+          "name": "assembly-manipulation-tools",
+          "seconds": 0.0556086
+        },
+        {
+          "name": "authoring-023b-contracts",
+          "seconds": 0.0587113
+        },
+        {
+          "name": "authoring-024b-contract",
+          "seconds": 0.0471542
+        }
+      ]
+    }
+  },
+  "assertions": {
+    "context_graph_native_and_core": 59,
+    "team_native_and_core": 397,
+    "code_context_optional_script": 24
+  },
+  "mcp_smoke": {
+    "schema": "ark.context-graph-smoke.v1",
+    "iteration": "034D",
+    "version": "0.9.35",
+    "tools": 97,
+    "graph_nodes": 2,
+    "shared_index_reused": true,
+    "stale_revision_rejected": true,
+    "final_revision": 1,
+    "isolated_synthetic_project": true,
+    "paid_model_calls": 0
+  },
+  "measurements": {
+    "units": "serialized JSON bytes, not provider tokens",
+    "selected_96_part_fixture": {
+      "full_design_response_bytes": 33879,
+      "selected_graph_response_bytes": 957,
+      "required_target_preserved": true,
+      "geometry_inspection_separate": true
+    },
+    "same_source_graph_dedup": {
+      "original_host_history_bytes": 10995,
+      "projected_wire_history_bytes": 4138,
+      "complete_provider_request_bytes": 139000,
+      "successful_graph_reads": 7,
+      "retained_failed_write": true,
+      "retained_exact_user_and_role_messages": true,
+      "host_history_unchanged": true,
+      "fresh_doc_info_before_write_required": true
+    },
+    "paid_model_calls": 0
+  },
+  "code_graph": {
+    "tool": "graphifyy==0.9.92",
+    "backend": "none",
+    "source_sha256": "d05e4d203d73fff0a6dcda4cadf89b2cf439d29a8980ba0f63fbc3bfc43df022",
+    "graph_sha256": "fed07cfc3577b718b330b7ba7be606a6500b560ba224e3d5f35fc62af6486742",
+    "allowlisted_inputs": 479,
+    "classified_code_files": 475,
+    "nodes": 9512,
+    "edges": 30332,
+    "reported_input_tokens": 0,
+    "reported_output_tokens": 0,
+    "parser_partial_files": 8,
+    "files_without_symbols": 73,
+    "unclassified_inputs": 4,
+    "warnings_may_overlap": true,
+    "obsidian_notes": 9512,
+    "obsidian_canvas_file_cards": 9512,
+    "missing_card_files": 0,
+    "broken_wikilinks": 0,
+    "graphical_app_opened": false
+  },
+  "artifacts": {
+    "ark-studio.exe": {
+      "sha256": "0b468bc683b52451b2928d6486f058605e58601f41afc9469b7177c2bdb89d4b",
+      "bytes": 11501568
+    },
+    "ark-cli.exe": {
+      "sha256": "0b71ff903f4d47af826171a91bf370647bafa8c991c958942ce0c9f95640b3ce",
+      "bytes": 3308032
+    },
+    "ark-mcp.exe": {
+      "sha256": "54d4ddfcbd57d088070e73bc50bcc943afc76e0e436b3e0091e22ad602742ec6",
+      "bytes": 5930496
+    },
+    "ark-occt-worker.exe": {
+      "sha256": "99a16ec134644d4d2d7d3b4baaa49cfc0abb01aad96781ae6534d51651067b1a",
+      "bytes": 3191296
+    },
+    "app-version.json": {
+      "sha256": "a40b4fa07133ff8fbaf7dbe471a5b749189d7b5f2adcc34bef83e4045653193c",
+      "bytes": 234
+    }
+  },
+  "local_install": {
+    "current_running_iteration": "033D",
+    "staged_iteration": "034D",
+    "staged_version": "0.9.35",
+    "existing_studio_session_preserved": true
+  },
+  "initial_failures_and_corrections": [
+    "Missing activity-ledger include and an obsolete read-batch fixture name were corrected.",
+    "Windows stderr capture, UTF-8 reads, absolute MCP subprocess path and configuration-specific build targets were corrected.",
+    "A repeated upstream Obsidian export pruned 74 referenced note files. Versioned fresh vaults now verify every canvas file card before selection."
+  ],
+  "limits": [
+    "Focused local tests only; full suites, hosted CI and Linux execution were not run.",
+    "No live-provider token, cost, design-quality or time benefit is established; schemas and instructions remain input costs.",
+    "Parallel roles share a project host index, not model-internal memory or cross-provider prompt caches.",
+    "No general cross-project knowledge store or automatic sharing of unrelated/private data is introduced.",
+    "Code AST links and authored selector links are navigation evidence, not complete dependency or geometric proof.",
+    "No changed .ark format, geometric authority, expected_revision/atomic publication policy, Focused default or agent turn/token execution budgets.",
+    "Obsidian export files and links are verified; rendering in the Obsidian app and user acceptance are separate.",
+    "The new runtime is locally staged; packages, trusted OTA transport and production deployment are not qualified.",
+    "No user project/session is included in public fixtures, receipt, commit or runtime package."
+  ]
+}

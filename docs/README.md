@@ -9,6 +9,7 @@ current release claim. [release.json](../release.json) owns application identity
 
 | Guide | Read it when |
 |---|---|
+| [034D context graphs](CONTEXT_GRAPHS_034D.md) | You need shared project neighborhoods, local code-symbol lookup or an Obsidian export |
 | [031B modeling and agent contracts](iterations/031B.md) | You need advanced solids, constrained surfaces, sweep laws, triangle edits, rigid condensation or sampled cable/pose inspection |
 | [031B candidate refresh](CANDIDATE_REFRESH_031B.md) | An independent peer commit made a retained agent proposal stale |
 | [030D tools and viewport agents](PRODUCT_TOOLS_030D.md) | You need Light up, Wood, nets, vents, live activity or the incremental binary loop |

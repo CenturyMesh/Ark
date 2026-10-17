@@ -1,5 +1,14 @@
 # ARK agent protocol
 
+034D adds read-only `context_graph` discovery over saved authoring and attributed
+activity. All team roles use the same host index; a committed edit invalidates
+it before the next query. Query a small neighborhood, then inspect selected
+objects/current revision before editing. Scope/fingerprints omit unchanged node
+facts without granting write authority. Historical complaints retain their
+author and do not prove an unresolved current defect. See
+[context graphs](CONTEXT_GRAPHS_034D.md) for code lookup, local Obsidian export,
+safe request deduplication and measured limits.
+
 033D adds actual-allocation preview receipts, explicit owned-candidate
 `refresh_candidate:true` publication, compact team defaults and measured request
 context. Read [033D contracts](iterations/033D.md). Selected read-only assignments

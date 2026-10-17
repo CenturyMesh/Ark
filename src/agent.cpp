@@ -1,3 +1,5 @@
+#include <tuple>
+#include "ark/agent_activity.hpp"
 #include "ark/agent.hpp"
 #include "ark/agent_response_032d.hpp"
 #include "ark/document_container.hpp"
@@ -585,6 +587,7 @@ V selectedDesignView(const Document& document,u64 revision,const V& args){
     result.set("sections",included);result.set("section_scopes",scopes);return result;
 }
 #include "object_context.inl"
+#include "context_graph_034d.inl"
 int wholeIndex(const V& value,const char* what){
     if(value.t!=V::Num||!std::isfinite(value.num)||value.num<0||value.num>1024||value.num!=std::floor(value.num))throw std::runtime_error(std::string(what)+" must be a nonnegative integer");
     return (int)value.num;
@@ -689,6 +692,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
             if(const auto* expected=args.find("expected_revision"))
                 if(expected->t!=V::Num||expected->num!=(double)revision)
                     throw std::runtime_error("Revision conflict; read doc_info with detail design and retry");
+        if(tool=="context_graph")return result(projectContextGraph(document,revision,args,contextGraphCache_,contextGraphSource_));
         V extension;if(callAuthoring023Tool(*this,tool,args,extension))return result(extension);if(callComponentLibraryTool(*this,tool,args,extension))return result(extension);if(callAgentFeature(*this,tool,args,extension))return result(extension);
         {V out;if(callAuthoring024Tool(*this,tool,args,out))return result(out);}
         if(tool=="collision_inspect"||tool=="skeleton_inspect"||tool=="skeleton_compile"){
@@ -1605,6 +1609,7 @@ if(std::string(d.name)=="doc_apply"){
     for(const auto& tool:list.arr)if(tool.find("name")->str=="doc_apply")commandItems=*tool.find("inputSchema")->find("properties")->find("commands")->find("items");
     for(auto& tool:list.arr)if(tool.find("name")->str=="doc_preview"){V schema=*tool.find("inputSchema"),props=*schema.find("properties"),commands=*props.find("commands");commands.set("items",commandItems);props.set("commands",commands);schema.set("properties",props);tool.set("inputSchema",schema);}
     enrichModeling031BSchemas(list);
+    {V tool=V::makeObj(),schema,annotations=V::makeObj();tool.set("name",V::makeStr("context_graph"));tool.set("description",V::makeStr("Retrieve a small linked project context by query or exact keys. Includes authored dependencies/backlinks and attributed saved feedback; no geometry evaluation. Use known_scope and known_fingerprints to omit unchanged facts. Read object_context/native evidence before editing; this graph grants no write or manufacturing authority."));arkjson::parse(R"({"type":"object","properties":{"query":{"type":"string","maxLength":256},"keys":{"type":"array","minItems":1,"maxItems":64,"items":{"type":"string","maxLength":256}},"depth":{"type":"integer","minimum":0,"maximum":2},"limit":{"type":"integer","minimum":1,"maximum":64},"history_limit":{"type":"integer","minimum":0,"maximum":8},"expected_revision":{"type":"integer","minimum":0},"known_scope":{"type":"string","maxLength":256},"known_fingerprints":{"type":"object","additionalProperties":{"type":"string","maxLength":64}}},"additionalProperties":false})",schema);tool.set("inputSchema",schema);annotations.set("readOnlyHint",V::makeBool(true));tool.set("annotations",annotations);list.arr.push_back(tool);}
     for(auto& tool:list.arr)if(tool.find("name")->str=="doc_apply"){V schema=*tool.find("inputSchema"),props=*schema.find("properties"),flag=V::makeObj();flag.set("type",V::makeStr("boolean"));props.set("refresh_candidate",flag);schema.set("properties",props);tool.set("inputSchema",schema);}
     return list;
 }

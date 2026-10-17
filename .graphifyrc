@@ -1,0 +1,4 @@
+# Repository analysis only. CAD files and private sessions are not inputs.
+language.h=cpp
+language.hpp=cpp
+language.inl=cpp

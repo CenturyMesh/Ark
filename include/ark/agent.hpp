@@ -60,6 +60,8 @@ private:
     std::string bomInspectedHash_;
     u64 bomInspectedRevision_=~u64(0);
     std::set<u64> bomInspectedItems_;
+    arkjson::Value contextGraphCache_;
+    std::string contextGraphSource_;
     arkjson::Value dispatch(const std::string& tool,const arkjson::Value& args);
     bool suppressHistory_=false;
     bool suppressFailures_=false;

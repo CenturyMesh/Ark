@@ -9,6 +9,14 @@ The public iteration and numeric runtime are defined in
 increasing sequence and its principal phase. The letter is a roadmap phase, not a
 month; it does not declare the phase complete. The `.ark` format evolves separately.
 
+034D addresses **A.01/A.03/A.04/D.02/D.04** with
+[shared project context and local code graphs](CONTEXT_GRAPHS_034D.md).
+The local implementation is **Verificado no escopo** through the focused checks
+recorded in [034D](iterations/034D.md). A.02/B.04/E.01 preserve the existing document,
+revision, assembly and publication contracts. Broader milestones remain
+**Parcial**; response-byte measurements do not establish live model token,
+cost or design-quality savings.
+
 032D addresses **A.01/A.02/A.03/A.04/B.04/D.02/D.04/E.01** through
 [compact agent contracts](AGENT_CONTRACTS_032D.md), [bounded preview custody](PREVIEWS_032D.md),
 [lossless shared geometry storage](GEOMETRY_STORAGE_032D.md),

@@ -22,10 +22,15 @@ Extract the Windows ZIP and run `ARK.cmd`. For Linux, extract the archive and ru
 for manual evaluation. [Release notes, checksums and OCCT source](https://github.com/CenturyMesh/Ark/releases/tag/v0.9.33).
 No compilation is required to use these downloads.
 
-The current iteration, [032D / 0.9.33](docs/iterations/032D.md), adds shared
+The published iteration, [032D / 0.9.33](docs/iterations/032D.md), adds shared
 geometry storage, reusable agent previews, compact inspection responses,
 motion for patterned rigid followers and authored colors in agent snapshots.
 The iteration notes record the verified scope and remaining performance limits.
+
+Source development in [034D / 0.9.35](docs/iterations/034D.md) adds shared project
+context graphs, local Graphify code lookup and an optional Obsidian vault.
+[Usage and measured limits](docs/CONTEXT_GRAPHS_034D.md) distinguish local checks
+from published packages and unmeasured live-provider savings.
 
 The chat opens on first launch and remembers your visibility choice. Windows
 Assistant and Team cards also offer [Grok Build through its official CLI account](docs/GROK_BUILD_CONNECT.md).
