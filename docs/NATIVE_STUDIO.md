@@ -113,9 +113,17 @@ The inspector filters **Body**, **Face**, **Edge**, and **Curve**. Click a face
 or an edge on the exact solid; the highlight uses its semantic name, not a
 triangle number. Click a visible sketch curve, or the sketch in the explorer,
 to collect that sketch for a loft or a sweep. With **Face** active, a datum in
-the explorer is a mirror plane. At most 64 names are kept. **Fillet / chamfer**
-uses those edge names, or the selection `sharp`, `convex`, `concave`, or `all`
-with a minimum dihedral angle in degrees. At most 64 edges are taken. A loft
+the explorer is a mirror plane. At most 64 names are kept. Feature editors for
+fillet, chamfer, draft, mirror, pattern, Boolean, hole, extrude, loft, sweep
+and the other solid and surface tools stay open while the view is clicked.
+Each click adds the semantic reference; Apply writes the same feature command
+as a typed name. In a Boolean editor the first viewport click chooses the base
+and the second chooses the tool, replacing the initially suggested inputs.
+Sketch-based editors also accept clicks in the browser while open; unrelated
+authoring actions remain blocked until Apply or Cancel.
+**Fillet / chamfer** uses those clicked edges, or the selection
+`sharp`, `convex`, `concave`, or `all` with a minimum dihedral angle in degrees.
+At most 64 edges are taken. A loft
 publishes `edge.start.<entity>`, `edge.end.<entity>`, and `rail.<index>` in
 addition to its face names. **Draft faces** takes an angle in degrees, a pull
 direction `X`, `Y`, or `Z`, and a neutral coordinate plane. It accepts planar,
@@ -213,3 +221,10 @@ build must contain the Studio UI changes being tested.
 sheet-transform restoration, hem/emboss forms, responsive ribbon bounds,
 Properties scrolling, and Assistant toggling at 1280x800 and 1600x1000. It
 writes context-menu and workspace/dock PNG evidence beside the requested shot.
+
+`--self-test-feature-editor-picking-ui --shot <temporary-png-path>` exercises
+the B.01/B.02 editor-selection scope in a separate headless Studio process:
+viewport Boolean base/tool clicks, exact cut inputs and volume, browser sketch
+selection with an extrusion editor open, atomic Apply, and unchanged document
+after Cancel. It writes dialog PNGs and a pass/fail log beside the shot.
+B.01/B.02 remain **Parcial**; this check does not qualify every feature editor.

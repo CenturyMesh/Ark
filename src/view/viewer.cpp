@@ -1522,6 +1522,7 @@ static LRESULT CALLBACK editorProc(HWND h,UINT m,WPARAM w,LPARAM l){
             SelectObject(dc,old);DeleteObject(bitmap);DeleteDC(dc);ReleaseDC(h,screen);g_dialogShot.clear();
         }
         if(g_dialogSmoke==1)SetWindowTextA(g_edit,g_dialogReplacement.c_str());
+        if(g_dialogSmoke==4){if(!g_dialogDone)SetTimer(h,901,200,nullptr);return 0;}
         SendMessage(h,WM_COMMAND,g_dialogSmoke==2?2:1,0);return 0;
     }
     if(m==WM_CTLCOLORSTATIC||m==WM_CTLCOLOREDIT||m==WM_CTLCOLORLISTBOX){bool field=m!=WM_CTLCOLORSTATIC;SetTextColor((HDC)w,RGB(223,226,234));SetBkColor((HDC)w,field?RGB(42,45,52):RGB(29,31,36));return (LRESULT)(field?fieldBrush:dialogBrush);}
@@ -1533,7 +1534,13 @@ static LRESULT CALLBACK editorProc(HWND h,UINT m,WPARAM w,LPARAM l){
     }
     return DefWindowProcA(h,m,w,l);
 }
-struct EditorField { std::string name,value;bool toggle=false;std::vector<std::string> choices;bool editableChoice=false; };
+static std::string pickedNames(const char* kind);
+static std::string pickedSketches();
+static std::string trimField(std::string value);
+static int g_editorLivePick=0;
+static std::vector<u64> g_editorBodies;
+static u64 g_editorPickSerial=0;
+struct EditorField { std::string name,value;bool toggle=false;std::vector<std::string> choices;bool editableChoice=false;int picks=0; };
 static bool editFields(const char* title,const char* hint,std::vector<EditorField>& fields,bool multiline=false,const char* confirm="Apply",HBITMAP previewBitmap=nullptr,bool readOnly=false){
     EditorAccessibility accessibility;
     if(fields.empty())throw std::runtime_error("A native editor needs at least one field");
@@ -1557,7 +1564,9 @@ static bool editFields(const char* title,const char* hint,std::vector<EditorFiel
     HDC measureDc=GetDC(g_dialog);auto previousFont=SelectObject(measureDc,font);SIZE confirmSize{};GetTextExtentPoint32A(measureDc,confirm,(int)std::strlen(confirm),&confirmSize);SelectObject(measureDc,previousFont);ReleaseDC(g_dialog,measureDc);const int confirmWidth=std::max(px(106),(int)confirmSize.cx+px(24));
     HWND controlParent=g_dialog;
     auto control=[&](const char* cls,const char* text,DWORD style,int x,int y,int w,int h,int id,HFONT f){HWND c=CreateWindowExA(0,cls,text,WS_CHILD|WS_VISIBLE|style,x,y,w,h,controlParent,(HMENU)(INT_PTR)id,wc.hInstance,nullptr);SendMessage(c,WM_SETFONT,(WPARAM)f,TRUE);return c;};
-    control("STATIC",title,0,px(26),px(22),width-px(52),px(27),0,font);control("STATIC",hint,0,px(26),px(58),width-px(52),px(44),0,font);
+    bool live=false;int geometryPick=0,bodyPick=0;for(const auto& field:fields){if(!field.picks)continue;live=true;if(field.picks>=1&&field.picks<=3)geometryPick=geometryPick?geometryPick:field.picks;if(field.picks==7)bodyPick=7;else if(field.picks==5)bodyPick=std::max(bodyPick,5);else if(field.picks==4)bodyPick=std::max(bodyPick,4);if(field.picks==8||field.picks==9)geometryPick=geometryPick?geometryPick:3;}
+    std::string liveHint=hint?hint:"";if(live)liveHint+=" Clicks add; Apply commits.";
+    control("STATIC",title,0,px(26),px(22),width-px(52),px(27),0,font);control("STATIC",liveHint.c_str(),0,px(26),px(58),width-px(52),px(44),0,font);
     EditorScrollState scroll;scroll.line=px(62);
     if(!multiline){WNDCLASSA panelClass{};panelClass.lpfnWndProc=editorScrollProc;panelClass.hInstance=wc.hInstance;panelClass.lpszClassName="ARK_EDITOR_SCROLL";panelClass.hbrBackground=dialogBrush;panelClass.hCursor=wc.hCursor;RegisterClassA(&panelClass);
         scroll.contentHeight=previewHeight+(int)(mateColumns?5:fields.size())*px(62);
@@ -1581,8 +1590,15 @@ static bool editFields(const char* title,const char* hint,std::vector<EditorFiel
     control("BUTTON","Cancel",WS_TABSTOP|BS_OWNERDRAW,width-px(142)-confirmWidth,height-px(58),px(100),px(34),2,font);
     control("BUTTON",confirm,WS_TABSTOP|BS_OWNERDRAW,width-px(26)-confirmWidth,height-px(58),confirmWidth,px(34),1,font);
     accessibility.capture(g_dialog,scroll.panel?&scroll:nullptr,editorDpi());
-    g_edit=edits.front();g_dialogDone=g_dialogAccept=false;EnableWindow(g_window,FALSE);ShowWindow(g_dialog,SW_SHOW);SetFocus(g_edit);SendMessage(g_edit,EM_SETSEL,0,-1);
+    auto pickedSketchAt=[&](int index){std::string all=pickedSketches();int seen=0;std::istringstream stream(all);std::string part;while(std::getline(stream,part,';')){part=trimField(part);if(part.empty())continue;if(seen++==index)return part;}return std::string();};
+    auto liveText=[&](int picks){if(picks==1)return pickedNames("face");if(picks==2)return pickedNames("edge");if(picks==3)return pickedSketches();if(picks==8)return pickedSketchAt(0);if(picks==9)return pickedSketchAt(1);if(picks==4){if(g_pickKind==1||g_pickKind==2||g_pickKind==3)for(const auto& item:g_picked)if(item.feature&&(item.kind=="face"||item.kind=="edge"||item.kind=="curve"))return std::to_string(item.feature);if(!g_editorBodies.empty())return std::to_string(g_editorBodies[0]);return std::string();}if(picks==5)return g_editorBodies.size()<2?std::string():std::to_string(g_editorBodies[1]);if(picks==7){std::string text;for(u64 id:g_editorBodies){if(!text.empty())text+="; ";text+=std::to_string(id);}return text;}return std::string();};
+    int savedPick=g_pickKind;bool savedEdges=g_showEdges,savedSketches=g_showSketches;
+    // Two-body editors explicitly collect base, then tool; the current body is
+    // only an initial field value and must not consume the first click.
+    if(live){g_editorBodies.clear();if(bodyPick&&bodyPick!=5&&selBody>=0&&selBody<(int)g_bodyIds.size())g_editorBodies.push_back(g_bodyIds[(size_t)selBody]);g_editorLivePick=geometryPick?geometryPick:bodyPick;if(geometryPick>=1&&geometryPick<=3)g_pickKind=geometryPick;else if(bodyPick)g_pickKind=0;if(g_pickKind==2)g_showEdges=true;if(g_pickKind==3)g_showSketches=true;}
+    g_edit=edits.front();g_dialogDone=g_dialogAccept=false;if(!live)EnableWindow(g_window,FALSE);ShowWindow(g_dialog,SW_SHOW);SetFocus(g_edit);SendMessage(g_edit,EM_SETSEL,0,-1);
     if(g_dialogSmoke)SetTimer(g_dialog,901,200,nullptr);
+    u64 seenPick=g_editorPickSerial;std::vector<char> filled(fields.size(),0);
     MSG msg;while(!g_dialogDone&&GetMessage(&msg,nullptr,0,0)>0){
         if(scroll.panel&&msg.message==WM_MOUSEWHEEL&&!SendMessage(GetFocus(),CB_GETDROPPEDSTATE,0,0)){SendMessage(scroll.panel,msg.message,msg.wParam,msg.lParam);continue;}
         char focusedClass[32]{};GetClassNameA(GetFocus(),focusedClass,sizeof focusedClass);if(std::strcmp(focusedClass,"ComboBox")==0&&SendMessage(GetFocus(),CB_GETDROPPEDSTATE,0,0)&&(msg.message==WM_KEYDOWN&&(msg.wParam==VK_ESCAPE||msg.wParam==VK_RETURN))){SendMessage(GetFocus(),CB_SHOWDROPDOWN,FALSE,0);continue;}
@@ -1590,10 +1606,13 @@ static bool editFields(const char* title,const char* hint,std::vector<EditorFiel
         if(msg.message==WM_KEYDOWN&&msg.wParam==VK_ESCAPE){g_dialogDone=true;continue;}
         if(msg.message==WM_KEYDOWN&&msg.wParam==VK_RETURN&&(!multiline||GetDlgCtrlID(GetFocus())<=2||(GetKeyState(VK_CONTROL)&0x8000))){g_dialogDone=true;g_dialogAccept=GetDlgCtrlID(GetFocus())!=2;continue;}
         if(!IsDialogMessage(g_dialog,&msg)){TranslateMessage(&msg);DispatchMessage(&msg);}
+        if(live&&g_editorPickSerial!=seenPick){seenPick=g_editorPickSerial;for(size_t i=0;i<fields.size();++i)if(fields[i].picks&&fields[i].choices.empty()){std::string text=liveText(fields[i].picks);if(!text.empty()){SetWindowTextA(edits[i],text.c_str());filled[i]=1;}else if(filled[i])SetWindowTextA(edits[i],"");}}
     }
     if(g_dialogAccept)for(size_t i=0;i<fields.size();++i){if(fields[i].toggle){fields[i].value=SendMessage(edits[i],BM_GETCHECK,0,0)==BST_CHECKED?"1":"0";continue;}int n=GetWindowTextLengthA(edits[i]);std::vector<char> b(n+1);GetWindowTextA(edits[i],b.data(),n+1);fields[i].value=b.data();}
-    EnableWindow(g_window,TRUE);DestroyWindow(g_dialog);g_dialog=nullptr;DeleteObject(font);DeleteObject(mono);SetForegroundWindow(g_window);return g_dialogAccept;
+    g_editorLivePick=0;g_editorBodies.clear();if(live){g_pickKind=savedPick;g_showEdges=savedEdges;g_showSketches=savedSketches;}else EnableWindow(g_window,TRUE);DestroyWindow(g_dialog);g_dialog=nullptr;DeleteObject(font);DeleteObject(mono);SetForegroundWindow(g_window);return g_dialogAccept;
 }
+static EditorField choiceField(const char* name,std::string value,std::vector<std::string> choices){EditorField field;field.name=name;field.value=std::move(value);field.choices=std::move(choices);return field;}
+static EditorField pickField(const char* name,std::string value,int picks){EditorField field;field.name=name;field.value=std::move(value);field.picks=picks;return field;}
 static bool editText(const char* title,std::string& value,bool multiline=false){
     std::vector<EditorField> fields{{"Value",value}};
     bool ok=editFields(title,multiline?"Edit the program below. Changes are applied atomically through the agent API.":"Update this value, then apply to recompute the document.",fields,multiline);
@@ -1724,8 +1743,8 @@ static void loftDialog(const Feature* editing=nullptr){
     using V=arkjson::Value;
     std::string picked=pickedSketches();int pickedCount=picked.empty()?0:1+(int)std::count(picked.begin(),picked.end(),';');
     std::string initial=editing?joinedSketchList(editing->nativeSpec.find("sections")):(pickedCount>=2?picked:(g_doc.sketches.size()>=2?g_doc.sketches[0].name+"; "+g_doc.sketches[1].name:"Section 1; Section 2"));
-    std::vector<EditorField> fields{{"Section sketches",initial},{"Solid",editing?editing->get("solid","1"):"1",true},{"Ruled",editing?editing->get("ruled","0"):"0",true},{"Smooth",editing?editing->get("smooth","0"):"0",true},{"Compatible sections",editing?editing->get("compatible","0"):"0",true}};
-    std::string hint=sketchNames()+"  /  List 2 or more sections in order. A sketch with one point is a tip. Smooth and compatible are optional.";
+    std::vector<EditorField> fields{pickField("Section sketches",initial,3),{"Solid",editing?editing->get("solid","1"):"1",true},{"Ruled",editing?editing->get("ruled","0"):"0",true},{"Smooth",editing?editing->get("smooth","0"):"0",true},{"Compatible sections",editing?editing->get("compatible","0"):"0",true}};
+    std::string hint="Click the section sketches in order. A sketch with one point is a tip. "+sketchNames();
     if(!editFields(editing?"Edit loft":"Loft through sketches",hint.c_str(),fields))return;
     V sections=V::makeArr();std::istringstream names(fields[0].value);std::string name;
     while(std::getline(names,name,';')){name=trimField(name);if(name.empty())continue;if(!g_doc.findSketch(name))throw std::runtime_error("Unknown loft section: "+name);sections.arr.push_back(V::makeStr(name));}
@@ -1737,8 +1756,8 @@ static void loftDialog(const Feature* editing=nullptr){
 }
 static void surfaceFillDialog(const Feature* editing=nullptr){
     using V=arkjson::Value;std::string current=editing?editing->get("sketch","Profile"):(g_activeSketch.empty()?"Profile":g_activeSketch);
-    std::vector<EditorField> fields{{"Closed sketch",current}};
-    auto hint=sketchNames();if(!editFields(editing?"Edit surface fill":"Fill sketch boundary",hint.c_str(),fields))return;
+    std::vector<EditorField> fields{pickField("Closed sketch",current,8)};
+    auto hint=std::string("Click the closed sketch. ")+sketchNames();if(!editFields(editing?"Edit surface fill":"Fill sketch boundary",hint.c_str(),fields))return;
     auto name=trimField(fields[0].value);if(!g_doc.findSketch(name))throw std::runtime_error("Choose an existing closed sketch");
     V p=V::makeObj();p.set("sketch",V::makeStr(name));
     commitNativeFeature(FeatureType::SurfaceFill,"Surface fill",std::move(p),V::makeObj(),{},editing?editing->id:0,false);
@@ -1831,8 +1850,8 @@ static void sheetFlangeDialog(bool edit){
     using V=arkjson::Value;auto* feature=authoredSheet();V row=V::makeObj();std::string entity;
     if(edit){entity=sheetEntityIdDialog(*feature,"flanges","Select flange to edit");if(entity.empty())return;for(auto& item:sheetEntityRows(*feature,"flanges").arr)if(item.find("id")->asStr()==entity){row=item;break;}}
     auto get=[&](const char* key,const char* fallback){auto* v=row.find(key);return v?sheetFieldText(*v):std::string(fallback);};
-    std::vector<EditorField> fields{{"Parent panel ID",get("parent",sheetBaseId(*feature).c_str())},{"Parent edge: u_min/u_max/v_min/v_max",get("edge","u_max")},{"Flange length / mm",get("length","45")},{"Width / mm (blank: edge span)",get("width","")},{"Offset / mm (blank: 0)",get("offset","")},{"Inner radius / mm",get("inner_radius","3")},{"Angle / degrees",get("angle","90")},{"K factor (blank: sheet)",get("k_factor","")}};
-    if(!editFields(edit?"Edit sheet flange":"Add sheet flange","Parent must exist earlier. Edge length, parent_length, and parent_width are available expressions.",fields))return;
+    std::vector<EditorField> fields{{"Parent panel ID",get("parent",sheetBaseId(*feature).c_str())},choiceField("Parent edge",get("edge","u_max"),{"u_min","u_max","v_min","v_max"}),{"Flange length / mm",get("length","45")},{"Width / mm (blank: edge span)",get("width","")},{"Offset / mm (blank: 0)",get("offset","")},{"Inner radius / mm",get("inner_radius","3")},{"Angle / degrees",get("angle","90")},{"K factor (blank: sheet)",get("k_factor","")}};
+    if(!editFields(edit?"Edit sheet flange":"Add sheet flange","Choose which side of the panel grows the flange. Length and angle accept expressions.",fields))return;
     V values=V::makeObj();const char* keys[]={"parent","edge","length","width","offset","inner_radius","angle","k_factor"};
     for(size_t i=0;i<fields.size();++i){auto input=trimField(fields[i].value);if(input.empty()){if(i==3||i==4||i==7)continue;throw std::runtime_error("Required flange field is empty");}values.set(keys[i],V::makeStr(input));}
     V command=V::makeObj();command.set("op",V::makeStr(edit?"sheet.flange.edit":"sheet.flange.add"));command.set("id",V::makeNum((double)feature->id));
@@ -1858,7 +1877,7 @@ static void sheetOpeningDialog(bool edit,bool pattern=false){
     using V=arkjson::Value;auto* feature=authoredSheet();V row=V::makeObj();std::string entity;
     if(edit){entity=sheetEntityIdDialog(*feature,"openings","Select opening to edit");if(entity.empty())return;for(auto& item:sheetEntityRows(*feature,"openings").arr)if(item.find("id")->asStr()==entity){row=item;break;}}
     auto get=[&](const char* key,const char* fallback){auto* v=row.find(key);return v?sheetFieldText(*v):std::string(fallback);};
-    std::string kind=get("kind","circle");if(!edit){std::vector<EditorField> pick{{"Opening: circle / slot / window / polygon",kind}};if(!editFields("Choose sheet opening","Circle, rounded slot, rotated rectangular window or polygon.",pick))return;kind=trimField(pick[0].value);}
+    std::string kind=get("kind","circle");if(!edit){std::vector<EditorField> pick{choiceField("Opening",kind,{"circle","slot","window","polygon"})};if(!editFields("Choose sheet opening","Circle, rounded slot, rotated rectangular window or polygon.",pick))return;kind=trimField(pick[0].value);}
     if(kind!="circle"&&kind!="slot"&&kind!="window"&&kind!="polygon")throw std::runtime_error("Opening kind must be circle, slot, window or polygon");
     std::vector<EditorField> fields{{"Panel ID",get("panel",sheetBaseId(*feature).c_str())}};
     if(kind=="polygon"){auto* points=row.find("points");fields.push_back({"Points: x,y; x,y; ...",points?sheetPolygonText(*points):"15,15; 35,15; 35,30; 15,30"});}
@@ -1993,7 +2012,7 @@ static std::string selectedFeatureId(){return selBody>=0&&selBody<(int)g_bodyIds
 static void applyUiCommandAtRevision(arkjson::Value command,u64 revision,u64 epoch);
 #include "selection_glow.inl"
 static void refreshSelectionLines(){
-    ++g_selectionGeometrySerial;
+    ++g_selectionGeometrySerial;++g_editorPickSerial;
     g_selectionLines.clear();g_selectionEdgeLines.clear();g_selectionFaceFill.clear();g_selectionFaceBoundary.clear();auto put=[&](Vec3 p){g_selectionLines.insert(g_selectionLines.end(),{(float)p.x,(float)p.y,(float)p.z});};auto putEdge=[&](Vec3 p){g_selectionEdgeLines.insert(g_selectionEdgeLines.end(),{(float)p.x,(float)p.y,(float)p.z});};
     for(const auto& item:g_picked){
         if(item.kind=="curve"){for(const auto& sample:g_curveSamples)if(sample.sketch==item.owner&&(item.name.empty()||item.name==item.owner||sample.name==item.name)){put(sample.a);put(sample.b);}continue;}
@@ -2038,8 +2057,8 @@ static std::string nativeReferenceHint(const char* wanted){
     return shown?names:"Select a native solid to inspect its semantic references.";
 }
 static void nativePrimitiveDialog(){
-    using V=arkjson::Value;std::vector<EditorField> choose{{"Exact primitive","box"}};
-    if(!editFields("Native solid primitive","box, cylinder, sphere, cone, or torus",choose))return;
+    using V=arkjson::Value;std::vector<EditorField> choose{choiceField("Exact primitive","box",{"box","cylinder","sphere","cone","torus"})};
+    if(!editFields("Native solid primitive","Choose a solid. Dimensions on the next step accept expressions.",choose))return;
     auto op=trimField(choose[0].value);std::vector<EditorField> fields;
     if(op=="box")fields={{"Width / mm","80"},{"Depth / mm","60"},{"Height / mm","20"}};
     else if(op=="cylinder")fields={{"Radius / mm","20"},{"Height / mm","30"}};
@@ -2054,27 +2073,28 @@ static void nativePrimitiveDialog(){
     addNativeFeature(FeatureType::NativeSolid,"Native "+op,std::move(p));
 }
 static void nativeExtrudeDialog(){
-    using V=arkjson::Value;std::vector<EditorField> fields{{"Closed sketch",g_activeSketch.empty()?(g_doc.sketches.empty()?"":g_doc.sketches.front().name):g_activeSketch},{"Depth / mm","10"}};
-    if(!editFields("Exact sketch extrusion",sketchNames().c_str(),fields))return;
+    using V=arkjson::Value;std::vector<EditorField> fields{pickField("Closed sketch",g_activeSketch.empty()?(g_doc.sketches.empty()?"":g_doc.sketches.front().name):g_activeSketch,8),{"Depth / mm","10"}};
+    if(!editFields("Exact sketch extrusion","Click a sketch in the view or the browser, then set the depth.",fields))return;
     auto name=trimField(fields[0].value);if(!g_doc.findSketch(name))throw std::runtime_error("Choose an existing closed sketch");
     V p=V::makeObj();p.set("op",V::makeStr("extrude"));p.set("sketch",V::makeStr(name));p.set("depth",V::makeStr(trimField(fields[1].value)));
     addNativeFeature(FeatureType::NativeSolid,"Exact "+name+" extrusion",std::move(p));
 }
 static void nativeBooleanDialog(){
-    using V=arkjson::Value;std::vector<EditorField> fields{{"Operation: union / cut / common","cut"},{"Base feature ID",selectedFeatureId()},{"Tool feature ID","1"}};
-    if(!editFields("Exact solid Boolean","Select two authored solids. Native topology is preserved and validated.",fields))return;
+    using V=arkjson::Value;std::vector<EditorField> fields{choiceField("Operation","cut",{"union","cut","common"}),pickField("Base solid",selectedFeatureId(),4),pickField("Tool solid","",5)};
+    if(!editFields("Exact solid Boolean","Click the base solid, then the tool solid. The sources stay in the history.",fields))return;
     auto op=trimField(fields[0].value);if(op!="union"&&op!="cut"&&op!="common")throw std::runtime_error("Boolean operation must be union, cut, or common");
     auto base=featureIdField(fields[1].value),tool=featureIdField(fields[2].value);if(base==tool)throw std::runtime_error("Choose a distinct tool feature");
     V p=V::makeObj();p.set("op",V::makeStr(op));addNativeFeature(FeatureType::NativeSolid,"Exact "+op,std::move(p),V::makeObj(),{base,tool});
 }
 static void namedBooleanDialog(int mode){
-    using V=arkjson::Value;if(!g_doc.assembly.empty())throw std::runtime_error("Use exact part definitions before assembly; placed occurrence Boolean authoring requires explicit instance inputs");if(g_bodyIds.size()<2)throw std::runtime_error("Create two output bodies before combining solids");const u64 revision=g_session.revision,epoch=g_documentEpoch;const char* titles[]={"Fuse bodies","Carve body","Keep overlap"};const char* operations[]={"union","cut","common"};std::string base=selectedFeatureId(),tool;for(auto id:g_bodyIds)if(std::to_string(id)!=base)tool=std::to_string(id);if(tool.empty()){base=std::to_string(g_bodyIds[g_bodyIds.size()-2]);tool=std::to_string(g_bodyIds.back());}std::vector<EditorField> fields{{"Result name",titles[mode]},{"Base feature ID",base},{"Tool feature ID",tool}};if(!editFields(titles[mode],mode==1?"The tool removes material from the base. Both source solids and their parameters stay in history.":"Uses the existing exact solid kernel. Inputs stay as editable source history; invalid geometry rejects atomically.",fields))return;auto first=featureIdField(fields[1].value),second=featureIdField(fields[2].value);if(first==second)throw std::runtime_error("Choose two distinct source bodies");V command=V::makeObj(),p=V::makeObj(),inputs=V::makeArr();command.set("op",V::makeStr("feature.add"));command.set("type",V::makeStr("native_solid"));command.set("name",V::makeStr(fields[0].value));p.set("op",V::makeStr(operations[mode]));command.set("p",p);inputs.arr={V::makeNum((double)first),V::makeNum((double)second)};command.set("inputs",inputs);applyUiCommandAtRevision(command,revision,epoch);if(!g_error){selBody=(int)g_bodyIds.size()-1;frameScene();}
+    using V=arkjson::Value;if(!g_doc.assembly.empty())throw std::runtime_error("Use exact part definitions before assembly; placed occurrence Boolean authoring requires explicit instance inputs");if(g_bodyIds.size()<2)throw std::runtime_error("Create two output bodies before combining solids");const u64 revision=g_session.revision,epoch=g_documentEpoch;const char* titles[]={"Fuse bodies","Carve body","Keep overlap"};const char* operations[]={"union","cut","common"};std::string base=selectedFeatureId(),tool;for(auto id:g_bodyIds)if(std::to_string(id)!=base)tool=std::to_string(id);if(tool.empty()){base=std::to_string(g_bodyIds[g_bodyIds.size()-2]);tool=std::to_string(g_bodyIds.back());}std::vector<EditorField> fields{{"Result name",titles[mode]},pickField("Base solid",base,4),pickField("Tool solid",tool,5)};if(!editFields(titles[mode],mode==1?"Click the base, then the tool. The tool removes material. Both sources stay in the history.":"Click the base, then the tool. Inputs stay as editable source history.",fields))return;auto first=featureIdField(fields[1].value),second=featureIdField(fields[2].value);if(first==second)throw std::runtime_error("Choose two distinct source bodies");V command=V::makeObj(),p=V::makeObj(),inputs=V::makeArr();command.set("op",V::makeStr("feature.add"));command.set("type",V::makeStr("native_solid"));command.set("name",V::makeStr(fields[0].value));p.set("op",V::makeStr(operations[mode]));command.set("p",p);inputs.arr={V::makeNum((double)first),V::makeNum((double)second)};command.set("inputs",inputs);applyUiCommandAtRevision(command,revision,epoch);if(!g_error){selBody=(int)g_bodyIds.size()-1;frameScene();}
 }
 static void nativeHoleDialog(){
-    using V=arkjson::Value;std::vector<EditorField> choose{{"Cutter: circle / slot / profile","circle"}};
+    using V=arkjson::Value;std::vector<EditorField> choose{choiceField("Cutter","circle",{"circle","slot","profile"})};
     if(!editFields("Native hole or pocket","Circle, slot, or a saved closed sketch profile.",choose))return;
     auto kind=trimField(choose[0].value);if(kind!="circle"&&kind!="slot"&&kind!="profile")throw std::runtime_error("Hole cutter must be circle, slot, or profile");
-    std::vector<EditorField> fields{{"Base feature ID",selectedFeatureId()},{"Construction plane",g_activePlane},{"Centre X / mm","20"},{"Centre Y / mm","20"},{"Offset along normal / mm","-24"},{"Cut depth / mm","25"}};
+    std::vector<EditorField> fields{pickField("Base solid",selectedFeatureId(),4),choiceField("Construction plane",g_activePlane,{"XY","XZ","YZ"}),{"Centre X / mm","20"},{"Centre Y / mm","20"},{"Offset along normal / mm","-24"},{"Cut depth / mm","25"}};
+    fields[1].editableChoice=true;for(const auto& plane:g_doc.planes)fields[1].choices.push_back(plane.name);
     if(kind=="circle")fields.push_back({"Radius / mm","5"});
     else if(kind=="slot"){fields.push_back({"Overall length / mm","20"});fields.push_back({"Width / mm","6"});}
     else fields.push_back({"Closed sketch",g_activeSketch.empty()?(g_doc.sketches.empty()?"":g_doc.sketches.front().name):g_activeSketch});
@@ -2097,13 +2117,13 @@ static void nativeEdgeBlendDialog(const Feature* editing=nullptr){
     std::string op=editing?editing->get("op","fillet"):"fillet";
     std::string listed=editing?nativeText(editing,"selection"):"";
     if(listed.empty())listed=editing?joinedNativeNames(editing,"edges"):pickedNames("edge");
-    if(listed.empty())listed="edge.x.ymin.zmin";
-    std::vector<EditorField> fields{{"Operation: fillet / chamfer",op}};
-    if(!editing)fields.push_back({"Base feature ID",pickedFeatureId("edge")});
-    fields.push_back({"Edges, or sharp / convex / concave / all",listed});
+    std::vector<EditorField> fields{choiceField("Operation",op,{"fillet","chamfer"})};
+    if(!editing)fields.push_back(pickField("Base solid",pickedFeatureId("edge"),4));
+    fields.push_back(pickField("Edges",listed,2));
     fields.push_back({"Radius or distance / mm",editing?editing->get(op=="chamfer"?"distance":"radius","2"):"2"});
     fields.push_back({"Minimum dihedral / deg",editing?editing->get("min_angle","15"):"15"});
-    auto hint=nativeReferenceHint("edge");if(!editFields(editing?"Edit fillet / chamfer":"Exact edge treatment",hint.c_str(),fields))return;
+    auto hint=nativeReferenceHint("edge");if(!editFields(editing?"Edit fillet / chamfer":"Fillet or chamfer",("Click the edges to round. "+hint+" sharp, convex, concave or all still select by shape.").c_str(),fields))return;
+    if(trimField(fields[editing?1:2].value).empty())throw std::runtime_error("Click edges on the model, or choose sharp, convex, concave or all");
     op=trimField(fields[0].value);if(op!="fillet"&&op!="chamfer")throw std::runtime_error("Choose fillet or chamfer");
     auto choice=trimField(fields[editing?1:2].value);
     V native=V::makeObj(),p=V::makeObj();p.set("op",V::makeStr(op));p.set(op=="fillet"?"radius":"distance",V::makeStr(trimField(fields[editing?2:3].value)));
@@ -2114,13 +2134,13 @@ static void nativeEdgeBlendDialog(const Feature* editing=nullptr){
 }
 static void nativeDraftDialog(const Feature* editing=nullptr){
     using V=arkjson::Value;std::vector<EditorField> fields;
-    if(!editing)fields.push_back({"Base feature ID",pickedFeatureId("face")});
+    if(!editing)fields.push_back(pickField("Base solid",pickedFeatureId("face"),4));
     fields.push_back({"Angle / deg",editing?editing->get("angle","5"):"5"});
-    fields.push_back({"Pull direction X / Y / Z",editing?nativeText(editing,"direction","Z"):"Z"});
-    fields.push_back({"Neutral plane XY / XZ / YZ",editing?nativeText(editing,"neutral","XY"):"XY"});
+    fields.push_back(choiceField("Pull direction",editing?nativeText(editing,"direction","Z"):"Z",{"X","Y","Z"}));
+    fields.push_back(choiceField("Neutral plane",editing?nativeText(editing,"neutral","XY"):"XY",{"XY","XZ","YZ"}));
     std::string faces=editing?joinedNativeNames(editing,"faces"):pickedNames("face");if(faces.empty())faces="sides";
-    fields.push_back({"Faces, or sides",faces});
-    if(!editFields(editing?"Edit draft":"Draft exact faces","Planar, cylindrical, and conical faces only. A freeform loft face is rejected.",fields))return;
+    fields.push_back(pickField("Faces",faces,1));
+    if(!editFields(editing?"Edit draft":"Draft faces","Click the faces to draft. sides drafts the side faces. A freeform loft face is rejected.",fields))return;
     auto direction=trimField(fields[editing?1:2].value),neutral=trimField(fields[editing?2:3].value),faceText=trimField(fields[editing?3:4].value);
     if(direction!="X"&&direction!="Y"&&direction!="Z")throw std::runtime_error("Draft direction must be X, Y, or Z");
     if(neutral!="XY"&&neutral!="XZ"&&neutral!="YZ")throw std::runtime_error("Neutral plane must be XY, XZ, or YZ");
@@ -2131,15 +2151,15 @@ static void nativeDraftDialog(const Feature* editing=nullptr){
 }
 static void nativePatternDialog(const Feature* editing=nullptr){
     using V=arkjson::Value;std::string op=editing?editing->get("op","linear_pattern"):"linear_pattern";
-    std::vector<EditorField> fields{{"Pattern: linear / circular",op=="circular_pattern"?"circular":"linear"}};
-    if(!editing)fields.push_back({"Base feature ID",selectedFeatureId()});
+    std::vector<EditorField> fields{choiceField("Pattern",op=="circular_pattern"?"circular":"linear",{"linear","circular"})};
+    if(!editing)fields.push_back(pickField("Base solid",selectedFeatureId(),4));
     fields.push_back({"Count",editing?editing->get("count","3"):"3"});
     fields.push_back({op=="circular_pattern"?"Step / deg":"Spacing X / mm",editing?editing->get(op=="circular_pattern"?"step":"dx","20"):(op=="circular_pattern"?"90":"20")});
     fields.push_back({"Spacing Y / mm",editing?editing->get("dy","0"):"0"});
     fields.push_back({"Spacing Z / mm",editing?editing->get("dz","0"):"0"});
-    fields.push_back({"Axis X / Y / Z",editing?nativeText(editing,"axis","Z"):"Z"});
+    fields.push_back(choiceField("Axis",editing?nativeText(editing,"axis","Z"):"Z",{"X","Y","Z"}));
     fields.push_back({"Fuse into one solid",editing?editing->get("fuse","0"):"0",true});
-    if(!editFields(editing?"Edit pattern":"Exact pattern","fuse 0 keeps separate exact solids. Circular step is degrees about the axis.",fields))return;
+    if(!editFields(editing?"Edit pattern":"Pattern","Click the solid to repeat. Fuse off keeps separate exact solids. A circular step is degrees about the axis.",fields))return;
     auto kind=trimField(fields[0].value);if(kind!="linear"&&kind!="circular")throw std::runtime_error("Pattern must be linear or circular");
     int baseField=editing?0:1;V native=V::makeObj(),p=V::makeObj();
     p.set("op",V::makeStr(kind=="circular"?"circular_pattern":"linear_pattern"));p.set("count",V::makeStr(trimField(fields[baseField+1].value)));
@@ -2151,9 +2171,9 @@ static void nativePatternDialog(const Feature* editing=nullptr){
 }
 static void nativeMirrorDialog(const Feature* editing=nullptr){
     using V=arkjson::Value;std::vector<EditorField> fields;
-    if(!editing)fields.push_back({"Base feature ID",pickedFeatureId("face")});
+    if(!editing)fields.push_back(pickField("Base solid",pickedFeatureId("face"),4));
     std::string current=editing?nativeText(editing,"face"):"";if(current.empty())current=editing?nativeText(editing,"plane","XY"):suggestedMirror();
-    fields.push_back({"Plane, datum, or one planar face",current});
+    fields.push_back(pickField("Mirror plane or face",current,1));
     fields.push_back({"Fuse with the original",editing?editing->get("fuse","0"):"0",true});
     if(!editFields(editing?"Edit mirror":"Mirror exact solid","Select a planar face or a datum, or enter XY, XZ, YZ. The seed solid is kept. fuse 1 needs one connected solid.",fields))return;
     auto target=trimField(fields[editing?0:1].value);if(target.find(';')!=std::string::npos)throw std::runtime_error("Mirror uses one plane or one planar face");
@@ -2166,8 +2186,8 @@ static void nativeMirrorDialog(const Feature* editing=nullptr){
     else addNativeFeature(FeatureType::NativeSolid,"Mirror",std::move(p),std::move(native),{featureIdField(fields[0].value)});
 }
 static void nativeTransformDialog(){
-    using V=arkjson::Value;std::vector<EditorField> fields{{"Base feature ID",selectedFeatureId()},{"X translation / mm","0"},{"Y translation / mm","0"},{"Z translation / mm","0"},{"X rotation / deg","0"},{"Y rotation / deg","0"},{"Z rotation / deg","0"}};
-    if(!editFields("Exact rigid transform","A rigid placement of the selected native solid.",fields))return;
+    using V=arkjson::Value;std::vector<EditorField> fields{pickField("Base solid",selectedFeatureId(),4),{"X translation / mm","0"},{"Y translation / mm","0"},{"Z translation / mm","0"},{"X rotation / deg","0"},{"Y rotation / deg","0"},{"Z rotation / deg","0"}};
+    if(!editFields("Exact rigid transform","Click the solid, then set the move and the turn.",fields))return;
     auto base=featureIdField(fields[0].value);
     Mat4 transform=Mat4::translation({formNumber(fields[1].value),formNumber(fields[2].value),formNumber(fields[3].value)})*
         Mat4::rotZ(deg2rad(formNumber(fields[6].value)))*Mat4::rotY(deg2rad(formNumber(fields[5].value)))*Mat4::rotX(deg2rad(formNumber(fields[4].value)));
@@ -3202,8 +3222,8 @@ static void sweepDialog(const Feature* editing=nullptr){
     std::string picked=pickedSketches();std::string firstSketch,secondSketch;if(!picked.empty()){auto mark=picked.find(';');firstSketch=trimField(mark==std::string::npos?picked:picked.substr(0,mark));if(mark!=std::string::npos)secondSketch=trimField(picked.substr(mark+1));}
     std::string section=editing?nativeText(editing,"section"):(!firstSketch.empty()?firstSketch:(g_doc.sketches.empty()?std::string():g_doc.sketches.front().name));
     std::string path=editing?nativeText(editing,"path"):(!secondSketch.empty()?secondSketch:(g_doc.sketches.size()>1?g_doc.sketches[1].name:section));
-    std::vector<EditorField> fields{{"Section sketch",section},{"Path sketch",path},{"Solid",editing?editing->get("solid","0"):"0",true}};
-    if(!editFields(editing?"Edit sweep":"Sweep section along path",(sketchNames()+"  /  Corrected Frenet. Contact stays off so a centered section is not shifted onto the path.").c_str(),fields))return;
+    std::vector<EditorField> fields{pickField("Section sketch",section,8),pickField("Path sketch",path,9),{"Solid",editing?editing->get("solid","0"):"0",true}};
+    if(!editFields(editing?"Edit sweep":"Sweep section along path","Click the section sketch, then the path sketch. A centered section is not shifted onto the path.",fields))return;
     auto sectionName=trimField(fields[0].value),pathName=trimField(fields[1].value);
     if(!g_doc.findSketch(sectionName)||!g_doc.findSketch(pathName))throw std::runtime_error("Sweep needs two existing sketches");
     V native=V::makeObj(),p=V::makeObj();native.set("section",V::makeStr(sectionName));native.set("path",V::makeStr(pathName));p.set("solid",V::makeStr(fields[2].value));
@@ -3211,15 +3231,15 @@ static void sweepDialog(const Feature* editing=nullptr){
 }
 static void extrudeSurfaceDialog(const Feature* editing=nullptr){
     using V=arkjson::Value;
-    std::vector<EditorField> fields{{"Sketch",editing?editing->get("sketch"):defaultSketchName()},{"Distance / mm",editing?editing->get("distance","10"):"10"},{"Solid",editing?editing->get("solid","0"):"0",true}};
-    if(!editFields(editing?"Edit extruded surface":"Extrude sketch as a surface","Distance follows the sketch plane normal. A solid needs a closed sketch.",fields))return;
+    std::vector<EditorField> fields{pickField("Sketch",editing?editing->get("sketch"):defaultSketchName(),8),{"Distance / mm",editing?editing->get("distance","10"):"10"},{"Solid",editing?editing->get("solid","0"):"0",true}};
+    if(!editFields(editing?"Edit extruded surface":"Extrude sketch as a surface","Click the sketch. Distance follows the sketch plane normal. A solid needs a closed sketch.",fields))return;
     auto name=trimField(fields[0].value);if(!g_doc.findSketch(name))throw std::runtime_error("Choose an existing sketch");
     V p=V::makeObj();p.set("sketch",V::makeStr(name));p.set("distance",V::makeStr(trimField(fields[1].value)));p.set("solid",V::makeStr(fields[2].value));
     commitNativeFeature(FeatureType::ExtrudeSurface,"Extruded surface",std::move(p),V::makeObj(),{},editing?editing->id:0,false);
 }
 static void revolveSurfaceDialog(const Feature* editing=nullptr){
     using V=arkjson::Value;
-    std::vector<EditorField> fields{{"Sketch",editing?editing->get("sketch"):defaultSketchName()},{"Angle / degrees",editing?editing->get("angle","360"):"360"},{"Axis X Y or Z",editing?nativeText(editing,"axis"):"Y"},{"Solid",editing?editing->get("solid","0"):"0",true}};
+    std::vector<EditorField> fields{pickField("Sketch",editing?editing->get("sketch"):defaultSketchName(),8),{"Angle / degrees",editing?editing->get("angle","360"):"360"},choiceField("Axis",editing&&!nativeText(editing,"axis").empty()?nativeText(editing,"axis"):"Y",{"X","Y","Z"}),{"Solid",editing?editing->get("solid","0"):"0",true}};
     if(fields[2].value.empty())fields[2].value="Y";
     if(!editFields(editing?"Edit revolved surface":"Revolve sketch","The axis passes through the sketch-plane origin. Angle is in (0, 360] degrees.",fields))return;
     auto name=trimField(fields[0].value),axis=trimField(fields[2].value);
@@ -3251,8 +3271,8 @@ static void sewDialog(const Feature* editing=nullptr){
     }
     std::string initial=selectedFeatureId();
     if(g_bodyIds.size()>=2)initial=std::to_string(g_bodyIds[g_bodyIds.size()-2])+"; "+std::to_string(g_bodyIds.back());
-    std::vector<EditorField> fields{{"Surface feature IDs",initial},{"Solid","0",true},{"Require one connected surface patch","1",true}};
-    if(!editFields("Glue native surfaces","List 2 to 16 face or shell IDs, separated by semicolons. Connected patches are checked; a solid additionally requires one closed shell with no free edges.",fields))return;
+    std::vector<EditorField> fields{pickField("Surfaces",initial,7),{"Solid","0",true},{"Require one connected surface patch","1",true}};
+    if(!editFields("Glue native surfaces","Click the surfaces to glue, from 2 to 16. A solid needs one closed shell.",fields))return;
     if(revision!=g_session.revision||epoch!=g_documentEpoch)throw std::runtime_error("Drawing changed while choosing surface glue; select current surfaces again");
     std::vector<u64> ids;std::istringstream names(fields[0].value);std::string token;
     while(std::getline(names,token,';')){token=trimField(token);if(token.empty())continue;ids.push_back(featureIdField(token));}
@@ -4021,6 +4041,7 @@ static void uiAction(int id){
 
 // Ribbon property sheets use expressions; programmatic smoke actions stay deterministic.
 static void interactiveAction(int id){
+    if(g_editorLivePick&&!(g_editorLivePick==3&&id>=11000&&id<12000)){g_status="Click the model to select, then Apply in the open editor.";return;}
     try{
     using V=arkjson::Value;std::vector<EditorField> fields;FeatureType type=FeatureType::Box;
     switch(id){
@@ -5904,7 +5925,8 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
                 if(clickMeasurement(p.x,p.y)){}
                 else if(clickSketchDrawing(p.x,p.y)){}
                 else if(g_sketchEditing.active){}
-                else if(g_pickKind)pickReference(p.x,p.y,(wp&(MK_CONTROL|MK_SHIFT))!=0);
+                else if(g_pickKind)pickReference(p.x,p.y,(wp&(MK_CONTROL|MK_SHIFT))!=0||(g_editorLivePick>0&&g_editorLivePick==g_pickKind));
+                else if(g_editorLivePick>=4){int b=pickBody(p.x,p.y);if(b>=0&&(size_t)b<g_bodyIds.size()){u64 id=g_bodyIds[(size_t)b];if(g_editorLivePick==7){auto found=std::find(g_editorBodies.begin(),g_editorBodies.end(),id);if(found!=g_editorBodies.end())g_editorBodies.erase(found);else if(g_editorBodies.size()<16)g_editorBodies.push_back(id);}else if(g_editorLivePick==4||g_editorBodies.empty()){g_editorBodies.clear();g_editorBodies.push_back(id);}else if(g_editorBodies.size()==1){if(g_editorBodies[0]!=id)g_editorBodies.push_back(id);}else g_editorBodies.back()=id;selBody=b;++g_editorPickSerial;}}
                 else{int b=pickBody(p.x,p.y);
                 g_viewportContainer=0;g_explorerFeature=0;selBody=b;g_picked.clear();refreshSelectionLines();g_selectedNotch=0;g_notchScroll=0;
                 if(selBody>=0){g_activeSketch.clear();g_showSketches=false;rebuildSketchOverlay();}}
@@ -5961,7 +5983,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     auto setDpiContext=reinterpret_cast<BOOL(WINAPI*)(HANDLE)>(GetProcAddress(GetModuleHandleW(L"user32.dll"),"SetProcessDpiAwarenessContext"));
     if(!setDpiContext||!setDpiContext(reinterpret_cast<HANDLE>(-4)))SetProcessDPIAware();
     bool plasticsUiTest=false,electronicsWorkspaceUiTest=false,cableGuideUiTest=false;
-    bool nativeProductPerformanceUiTest=false,sceneCacheUiTest=false,authoringAssistanceUiTest=false;
+    bool nativeProductPerformanceUiTest=false,sceneCacheUiTest=false,authoringAssistanceUiTest=false,featureEditorPickingUiTest=false;
     bool featureHistoryUiTest=false,recoveryUiTest=false,editorScrollUiTest=false,configurationWorkspaceUiTest=false,interactionPerformanceUiTest=false;bool startupUiTest=false;bool stampsUiTest=false;bool planesSectionsUiTest=false;
     bool specializedPatternUiTest=false;bool advancedSheetmetalUiTest=false;bool nativeVertexPullUiTest=false;bool cadImportUiTest=false;bool holesOrchestratorUiTest=false;bool designContainerUiTest=false;
     bool directAuthoringUiTest=false,parametricAuthoringUiTest=false,skeletonEditorUiTest=false,imageAttachmentUiTest=false,assistantSteeringUiTest=false;
@@ -5982,6 +6004,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         else if(a=="--self-test-realtime-ui"){realtimeUiTest=true;g_headless=true;}
         else if(a=="--self-test-product-tools-ui"){productToolsUiTest=true;g_headless=true;}
         else if(a=="--self-test-editor-scroll-ui"){editorScrollUiTest=true;g_headless=true;}
+        else if(a=="--self-test-feature-editor-picking-ui"){featureEditorPickingUiTest=true;g_headless=true;}
         else if(a=="--self-test-configuration-workspace-ui"){configurationWorkspaceUiTest=true;g_headless=true;}
         else if(a=="--self-test-scene-cache-ui"){sceneCacheUiTest=true;g_headless=true;}
         else if(a=="--self-test-authoring-assistance-ui"){authoringAssistanceUiTest=true;g_headless=true;}
@@ -6840,6 +6863,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
 #include "typed_sketch_selftest.inl"
 #include "history_recovery_selftest.inl"
 #include "editor_scroll_selftest.inl"
+#include "feature_editor_picking_selftest.inl"
 #include "configuration_workspace_selftest.inl"
 #include "scene_cache_selftest.inl"
 #include "authoring_assistance_selftest.inl"
