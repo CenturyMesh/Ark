@@ -17,6 +17,18 @@ and exact Wood/Vent recipes without newer authoring. See [031B](iterations/031B.
 and the individual [solid](SOLIDS_031B.md), [surface](SURFACES_031B.md),
 [mesh](MESHES_031B.md) and [assembly/cable](ASSEMBLY_SWEEP_031B.md) contracts.
 
+## Conditional source extensions — formats 45 and 46
+
+Smooth/ribbon cable recipes and endpoint electrical metadata select format 45.
+A stored bisector plane (`support.kind` `bisector`) selects format 46, including
+documents that also contain those cables. Format 44 remains the conditional
+version for assembly pattern carry frames. Implicit Origin, XY, XZ and YZ are
+not stored and do not select a format. Legacy authored datums named Origin
+retain their source and reference identity when reopened. A file at version 45
+or 46 without the corresponding extension still loads. Bisectors stored below
+46 and cable extensions stored below 45 reject. Version 47 and later reject as
+a future format.
+
 ## Previous source extension — format 41
 
 029B conditionally selects source 41 for explicit `surface_edit` orientation

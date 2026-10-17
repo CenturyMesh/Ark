@@ -68,7 +68,7 @@ static Mat4 resolveDatumFrame(const Document& doc,const std::string& name,const 
     std::function<Mat4(const std::string&)> resolve;
     std::function<Vec3(const V&)> point;
     auto field=[](const V& value,const char* key)->const V&{auto p=value.find(key);if(!p)throw std::runtime_error(std::string("Missing datum ")+key);return *p;};
-    auto namedKind=[&](const std::string& key){if(key=="XY"||key=="XZ"||key=="YZ")return std::string("plane");for(const auto& d:doc.planes)if(d.name==key)return d.kind;throw std::runtime_error("Construction datum not found: "+key);};
+    auto namedKind=[&](const std::string& key){for(const auto& d:doc.planes)if(d.name==key)return d.kind;if(key=="Origin")return std::string("point");if(key=="XY"||key=="XZ"||key=="YZ")return std::string("plane");throw std::runtime_error("Construction datum not found: "+key);};
     auto reference=[&](const V& anchor)->GeometryReference{
         double fraction=.5;
         if(auto p=anchor.find("fraction"))fraction=scalar(*p,env);
@@ -120,11 +120,13 @@ static Mat4 resolveDatumFrame(const Document& doc,const std::string& name,const 
         return frame.transformPoint({p.x,p.y,0});
     };
     resolve=[&](const std::string& key)->Mat4 {
-        if(key=="XY")return Mat4::identity();
-        if(key=="XZ")return Mat4::rotX(deg2rad(90));
-        if(key=="YZ")return Mat4::rotZ(K_HALF_PI)*Mat4::rotX(K_HALF_PI);
-        if(!visiting.insert(key).second)throw std::runtime_error("Cyclic construction datum: "+key);
         const DatumPlane* datum=nullptr;for(auto& p:doc.planes)if(p.name==key)datum=&p;
+        if(!datum){
+            if(key=="Origin"||key=="XY")return Mat4::identity();
+            if(key=="XZ")return Mat4::rotX(deg2rad(90));
+            if(key=="YZ")return Mat4::rotZ(K_HALF_PI)*Mat4::rotX(K_HALF_PI);
+        }
+        if(!visiting.insert(key).second)throw std::runtime_error("Cyclic construction datum: "+key);
         if(!datum)throw std::runtime_error("Construction datum not found: "+key);
         validateDatumDefinition(*datum);
         if(datum->kind!="plane"&&datum->kind!="axis"&&datum->kind!="frame"&&datum->kind!="point")throw std::runtime_error("Datum kind must be plane, axis, frame or point");
@@ -159,6 +161,18 @@ static Mat4 resolveDatumFrame(const Document& doc,const std::string& name,const 
                 auto a=plane(field(s,"first")),b=plane(field(s,"second"));auto n=a.transformDir({0,0,1}),m=b.transformDir({0,0,1});
                 auto cross=n.cross(m);unit(cross,"parallel intersection planes");auto p=a.transformPoint({}),q=b.transformPoint({});
                 auto origin=(m.cross(cross)*n.dot(p)+cross.cross(n)*m.dot(q))/cross.lensq();base=normalFrame(origin,cross);
+            }
+            else if(kind=="bisector"){
+                auto a=plane(field(s,"first")),b=plane(field(s,"second"));Vec3 n=a.transformDir({0,0,1}),m=b.transformDir({0,0,1}),p=a.transformPoint({}),q=b.transformPoint({});
+                std::string side="sum";if(auto chosen=s.find("side")){if(chosen->t!=V::Str||(chosen->str!="sum"&&chosen->str!="difference"))throw std::runtime_error("Bisector side must be sum or difference");side=chosen->str;}
+                // Parallel result keeps the first normal. An opposing second normal is not flipped; difference negates the result.
+                if(std::abs(std::abs(n.dot(m))-1)<=1e-8){
+                    auto mid=p+n*((q-p).dot(n)*.5);Vec3 normal=side=="difference"?-n:n;Vec3 guide=a.transformDir({1,0,0});
+                    if(std::abs(guide.dot(normal))>0.999)guide=a.transformDir({0,1,0});base=normalFrame(mid,normal,guide);
+                }else{
+                    auto cross=n.cross(m);auto dir=unit(cross,"parallel intersection planes");auto origin=(m.cross(cross)*n.dot(p)+cross.cross(n)*m.dot(q))/cross.lensq();
+                    Vec3 raw=side=="difference"?n-m:n+m;if(raw.len()<=K_TOL)throw std::runtime_error("Degenerate construction datum: bisector");base=normalFrame(origin,raw,dir);
+                }
             }
             else if(kind=="point")base=Mat4::translation(point(field(s,"point")));
             else if(kind=="tube_path") {auto feature=identifier(s,"feature");auto station=s.find("station");if(!station)throw std::runtime_error("tube_path needs station");base=tubeStation(doc,feature,scalar(*station,env));}

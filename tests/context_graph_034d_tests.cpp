@@ -36,6 +36,22 @@ void parallelStamps(){
     std::set<std::string> hashes;for(auto& reader:readers)hashes.insert(reader.get());check(hashes.size()==8,"independent concurrent sessions retain distinct current graph sources");check(contextGraphAuthoringSerializations()==start+8,"atomic serialization diagnostic counts exactly one build per concurrent session");
 }
 bool edge(const V& graph,const char* from,const char* to,const char* relation){for(const auto& row:field(graph,"edges").arr)if(field(row,"from").str==from&&field(row,"to").str==to&&field(row,"relation").str==relation)return true;return false;}
+void bisectorGraph(){
+    AgentSession s;s.suppressFailureCapture();s.suppressIterationHistory();
+    apply(s,R"([{"op":"plane.set","name":"Lower","p":{"oz":2}},{"op":"plane.set","name":"Upper","p":{"oz":12}},{"op":"plane.set","name":"Middle","support":{"kind":"bisector","first":"Lower","second":"Upper"}}])");
+    const auto args=json(R"({"keys":["planes:Middle"],"depth":1})");
+    const auto graph=accepted(s.call("context_graph",args));
+    check(edge(graph,"planes:Middle","planes:Lower","uses_plane")&&edge(graph,"planes:Middle","planes:Upper","uses_plane"),"bisector string anchors retain both authored plane dependencies");
+    s.document.planes.back().support.set("second",V::makeStr("Lower"));
+    const auto changed=accepted(s.call("context_graph",args));
+    check(!field(changed,"index_reused").b&&field(changed,"source_sha256").str!=field(graph,"source_sha256").str&&!edge(changed,"planes:Middle","planes:Upper","uses_plane"),"in-place bisector retarget invalidates graph and removes the old dependency");
+    s.document.planes.back().support.set("second",V::makeStr("Upper"));
+    Feature cable;cable.type=FeatureType::CableRoute;cable.name="Format probe";cable.nativeSpec=json(R"({"route_mode":"spline","start":{"point":[0,0,0]},"end":{"point":[80,0,10]},"waypoints":[[30,5,8]],"profile":{"type":"ribbon","width":4,"thickness":0.4,"up":[0,0,1]},"bend_radius":8})");s.document.addFeature(cable);
+    auto saved=json(documentToJson(s.document,false,false));Document restored;std::string error;
+    check(field(saved,"version").num==46&&documentFromJson(saved.dump(),restored,&error),"mixed cable and bisector authoring saves and reopens at format46");
+    saved.set("version",V::makeNum(45));check(!documentFromJson(saved.dump(),restored,&error)&&error.find("Bisector planes require document version 46")!=std::string::npos,"format45 cable contract cannot conceal a downgraded bisector");
+    s.document.planes.pop_back();saved=json(documentToJson(s.document,false,false));check(field(saved,"version").num==45&&documentFromJson(saved.dump(),restored,&error),"existing format45 cable-only source stays readable and does not upgrade unnecessarily");
+}
 void projectGraph(){
     AgentSession s;s.suppressFailureCapture();s.suppressIterationHistory();
     apply(s,R"([{"op":"bom.initialize"},{"op":"param.set","name":"travel","expr":20},{"op":"param.set","name":"span","expr":"travel*2"},{"op":"feature.add","type":"box","name":"Suspension base","p":{"dx":"span","dy":4,"dz":3}},{"op":"feature.add","type":"transform","name":"Suspension placed","inputs":[1],"p":{"tx":5}},{"op":"feature.add","type":"box","name":"Unrelated antenna"},{"op":"assembly.add","name":"Suspension group","feature":0},{"op":"assembly.add","name":"Suspension occurrence","feature":2,"parent":1}])");
@@ -114,4 +130,4 @@ void graphRequests(){
     std::cout<<"GRAPH_DEDUP original_history_bytes="<<original.size()<<" projected_history_bytes="<<projected.dump().size()<<" provider_request_bytes="<<request.dump().size()<<" calls=7 paid_model_calls=0\n";
 }
 }
-int main(){try{preciseStamp();parallelStamps();projectGraph();graphRequests();std::cout<<checks<<" context graph checks passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(){try{preciseStamp();parallelStamps();bisectorGraph();projectGraph();graphRequests();std::cout<<checks<<" context graph checks passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

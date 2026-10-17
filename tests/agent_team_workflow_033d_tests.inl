@@ -10,7 +10,7 @@ static void workflow033d(){
         case 2:return call("wf_scope","team_send",R"({"to":"reviewer","kind":"assignment","message":"Inspect this selected fixture only.","scope":{"ids":[1],"expected_revision":1}})");
         case 3:return call("wf_reserve","team_reserve_write",R"({"expected_revision":1,"lease_ms":30000})");
         case 4:return call("wf_commit","team_apply_step",R"({"expected_revision":1,"release_reservation":true,"commands":[{"op":"param.set","name":"local_width","expr":"10"}]})");
-        case 5:return call("wf_context","team_context","{}");
+        case 5:return call("wf_context","team_context",R"({"detail":"diagnostics"})");
         case 6:{const auto wireOutput=writeWindowOutput(request);measuredContext=wireOutput;const auto output=wireOutput.find("structuredContent")?*wireOutput.find("structuredContent"):wireOutput;released=output.find("write_reservation")&&!output.find("write_reservation")->find("active")->b;metrics=output.find("roles")->arr[0].find("request_context")!=nullptr;return call("wf_preview","doc_preview",R"({"expected_revision":2,"commands":[{"op":"feature.edit","id":1,"p":{"dx":6}}]})");}
         case 7:{const auto wireOutput=writeWindowOutput(request);const auto output=wireOutput.find("structuredContent")?*wireOutput.find("structuredContent"):wireOutput;candidate=output.find("candidate_id")->asStr();check(!session.call("doc_apply",json(R"({"expected_revision":2,"commands":[{"op":"feature.edit","id":2,"p":{"dx":8}}]})")).find("isError")->b,"serialized external peer edit succeeds");return call("wf_current","doc_info","{}");}
         case 8:return call("wf_refresh_commit","team_apply_step",std::string("{\"expected_revision\":3,\"candidate_id\":\"")+candidate+"\",\"refresh_candidate\":true}");

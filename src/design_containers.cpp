@@ -8,6 +8,7 @@
 #include <map>
 #include <set>
 #include <stdexcept>
+#include <vector>
 
 namespace ark {
 namespace {
@@ -193,7 +194,16 @@ void validateDesignContainerTransition(const Document& before,const Document& af
 
 V inspectDesignContainers(const Document& doc,u64 revision,const V& args){
     V out=V::makeObj(),groups=V::makeArr();out.set("revision",number(revision));out.set("authority",V::makeStr("assembly_group"));
-    for(const auto& node:doc.assembly)if(!node.feature){V group=V::makeObj();group.set("container",number(node.id));group.set("name",V::makeStr(node.name));group.set("parent",number(node.parent));groups.arr.push_back(group);}out.set("containers",groups);
+    std::vector<const AssemblyNode*> containers;for(const auto& node:doc.assembly)if(!node.feature)containers.push_back(&node);
+    for(const auto* node:containers){
+        V group=V::makeObj();group.set("container",number(node->id));group.set("name",V::makeStr(node->name));group.set("parent",number(node->parent));
+        std::vector<const AssemblyNode*> chain;std::set<u64> seen;const AssemblyNode* cursor=node;size_t guard=0;
+        while(cursor&&seen.insert(cursor->id).second&&guard++<containers.size()){chain.push_back(cursor);const AssemblyNode* parent=nullptr;if(cursor->parent)for(const auto* candidate:containers)if(candidate->id==cursor->parent){parent=candidate;break;}cursor=parent;}
+        std::reverse(chain.begin(),chain.end());int depth=(int)chain.size()-1;if(depth<0)depth=0;if(depth>(int)containers.size())depth=(int)containers.size();
+        V path=V::makeArr();for(const auto* item:chain)path.arr.push_back(V::makeStr(item->name));V children=V::makeArr();for(const auto* candidate:containers)if(candidate->parent==node->id)children.arr.push_back(number(candidate->id));
+        group.set("depth",number((u64)depth));group.set("path",path);group.set("children",children);groups.arr.push_back(group);
+    }
+    out.set("containers",groups);out.set("container_nesting",V::makeStr("path is root-first; children are direct nested groups"));
     if(doc.designContainerCheckout.t==V::Obj){validateDesignContainerWorkspace(doc);out.set("workspace",doc.designContainerCheckout);out.set("isolated_document",V::makeBool(true));}
     if(args.find("node")||args.find("container")){const auto checkout=makeCheckout(doc,revision,containerId(doc,args));V scope=V::makeObj();scope.set("editable",keyArray(checkout.editable));scope.set("readonly",keyArray(checkout.readonly));scope.set("features",number(field(checkout.root,"features").arr.size()));scope.set("instances",number(field(checkout.root,"assembly").arr.size()));scope.set("source_sha256",field(checkout.manifest,"source_sha256"));out.set("scope",scope);}
     return out;

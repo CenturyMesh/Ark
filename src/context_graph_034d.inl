@@ -48,6 +48,7 @@ V buildProjectGraph(const V& authored,const std::string& scope){
     if(const auto* rows=authored.find("mates"))for(const auto& row:rows->arr)graph.node("mate:"+std::to_string((u64)row.find("id")->num),"mate",row);
     graphDomains035B(graph);
     for(const auto& item:graph.source){const auto& key=item.first;const auto& row=item.second;graph.scan(key,row);
+        if(key.rfind("planes:",0)==0)if(const auto* support=row.find("support");support&&graphText(*support,"kind")=="bisector")for(const char* anchor:{"first","second"})if(const auto* value=support->find(anchor);value&&value->t==V::Str)graph.edge(key,"uses_plane","planes:"+value->str);
         if(key.rfind("assembly:",0)==0){if(const auto* parent=row.find("parent"))graph.edge(key,"in_group","assembly:"+std::to_string((u64)parent->num));if(const auto* feature=row.find("feature"))graph.edge(key,"places",contextKey((u64)feature->num));}
         if(key.rfind("mate:",0)==0)for(const char* end:{"a","b"})if(const auto* node=row.find(end))graph.edge(key,"constrains","assembly:"+std::to_string((u64)node->num));
     }

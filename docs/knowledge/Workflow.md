@@ -11,6 +11,12 @@ revision and selected exact geometry before writing. Parallel roles share the
 host index; model conversations still pay input costs for the facts they read.
 Keep Focused as the default, record failed attempts and never silently rebase.
 
+Team progress is useful when a document, assignment, message or result changes.
+Repeated status reads are not design progress. After inspecting the current
+revision, author a coherent editable checkpoint or deliver a concrete assignment
+and let that turn finish. Use diagnostic metrics only to investigate a measured
+problem; token/provider counters changing do not prove new geometry or evidence.
+
 Graphify indexes the repository code locally without a model backend. Curated
 notes under `docs/knowledge` are copied into a separately versioned Obsidian vault,
 with links to code notes when the exporter has actually produced those files.

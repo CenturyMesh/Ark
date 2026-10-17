@@ -91,6 +91,25 @@ void scopedConfigurations(){
     AgentSession history;basic(history);auto editable=child(checkout(history));args.set("expected_revision",V::makeNum(editable.revision));args.set("commands",json(R"([{"op":"feature.rollback","id":2}])"));rejectTool(editable,"doc_apply",args,"CONTAINER_GLOBAL_AUTHORING_BOUNDARY");
     history.document.historyTip=2;rejectTool(history,"design_containers",request(history,"checkout","Scope"),"CONTAINER_GLOBAL_AUTHORING_BOUNDARY");
 }
+const V* namedContainer(const V& rows,const char* name){for(const auto& row:rows.arr)if(row.find("name")&&row.find("name")->asStr()==name)return &row;return nullptr;}
+bool pathEquals(const V& path,const char* a,const char* b=nullptr,const char* c=nullptr){const char* names[]={a,b,c};size_t count=c?3:b?2:1;if(path.t!=V::Arr||path.arr.size()!=count)return false;for(size_t i=0;i<count;++i)if(path.arr[i].asStr()!=names[i])return false;return true;}
+void nesting(){
+    AgentSession s;apply(s,R"([{"op":"feature.add","type":"box","name":"Bolt","p":{"dx":1,"dy":1,"dz":1}},{"op":"assembly.add","name":"Machine","feature":0},{"op":"assembly.add","name":"Arm","feature":0,"parent":"Machine"},{"op":"assembly.add","name":"Grip","feature":0,"parent":"Arm"},{"op":"assembly.add","name":"Bolt occurrence","feature":"Bolt","parent":"Machine"}])");
+    auto report=data(s.call("design_containers",request(s,"inspect")));check(report.find("container_nesting")&&report.find("container_nesting")->asStr()=="path is root-first; children are direct nested groups","Nesting contract");
+    const auto& rows=*report.find("containers");const auto* machine=namedContainer(rows,"Machine");const auto* arm=namedContainer(rows,"Arm");const auto* grip=namedContainer(rows,"Grip");
+    check(machine&&arm&&grip&&rows.arr.size()==3,"Inspect lists only assembly groups");
+    check(machine->find("depth")->num==0&&pathEquals(*machine->find("path"),"Machine"),"Machine is the root");
+    check(arm->find("depth")->num==1&&pathEquals(*arm->find("path"),"Machine","Arm"),"Arm path is root-first");
+    check(grip->find("depth")->num==2&&pathEquals(*grip->find("path"),"Machine","Arm","Grip"),"Grip path includes both ancestors");
+    check(machine->find("children")->arr.size()==1&&machine->find("children")->arr[0].num==arm->find("container")->num,"Machine children are the direct group");
+    check(arm->find("children")->arr.size()==1&&arm->find("children")->arr[0].num==grip->find("container")->num,"Arm children are the direct group");
+    check(grip->find("children")->arr.empty(),"Leaf group has no nested groups");
+    double bolt=0;for(const auto& node:s.document.assembly)if(node.name=="Bolt occurrence")bolt=(double)node.id;for(const auto& row:rows.arr)for(const auto& child:row.find("children")->arr)check(child.num!=bolt,"Children exclude part occurrences");
+    u64 machineId=0,armId=0;for(const auto& node:s.document.assembly){if(node.name=="Machine")machineId=node.id;if(node.name=="Arm")armId=node.id;}
+    for(auto& node:s.document.assembly){if(node.name=="Machine")node.parent=armId;if(node.name=="Arm")node.parent=machineId;}
+    auto cycled=inspectDesignContainers(s.document,s.revision,V::makeObj());check(cycled.find("containers")&&cycled.find("containers")->arr.size()==3,"A parent cycle still returns the groups");
+    for(const auto& row:cycled.find("containers")->arr)check(row.find("depth")&&row.find("depth")->num>=0&&row.find("depth")->num<=3,"Cycle depth stays finite");
+}
 void legacyManifestCompatibility(){
     AgentSession parent;basic(parent);auto exported=checkout(parent);V source=*exported.find("document"),manifest=*exported.find("manifest"),baseline=*manifest.find("baseline");
     auto erase=[](V& value,const char* key){value.obj.erase(std::remove_if(value.obj.begin(),value.obj.end(),[&](const auto& entry){return entry.first==key;}),value.obj.end());};
@@ -101,4 +120,4 @@ void legacyManifestCompatibility(){
     apply(child,R"([{"op":"param.set","name":"local","expr":12}])");data(parent.call("design_containers",merge(parent,child)));check(parent.document.getParam("local")==12,"Existing v1 checkout remains mergeable with its original restricted ownership contract");
 }
 }
-int main(){try{scopedMerge();recipeOrdering();boundaries();dependencyClosure();identitiesAndNamespaces();crossBoundaryRelations();persistenceAndPaths();scopedConfigurations();legacyManifestCompatibility();std::cout<<"Design container contracts passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(){try{scopedMerge();recipeOrdering();boundaries();dependencyClosure();identitiesAndNamespaces();crossBoundaryRelations();persistenceAndPaths();scopedConfigurations();legacyManifestCompatibility();nesting();std::cout<<"Design container contracts passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

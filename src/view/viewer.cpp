@@ -1104,7 +1104,7 @@ static void rebuildScene(bool evaluate=false){
     else if(selBody<0||selBody>=(int)g_bodyIds.size())selBody=g_bodyIds.empty()?-1:0;
     hoverBody=-1;
     if(!g_activeSketch.empty()&&!g_doc.findSketch(g_activeSketch))g_activeSketch.clear();
-    if(g_activePlane!="XY"&&g_activePlane!="XZ"&&g_activePlane!="YZ"&&std::none_of(g_doc.planes.begin(),g_doc.planes.end(),[](auto& p){return p.name==g_activePlane;}))g_activePlane="XY";
+    if((g_activePlane=="Origin"&&std::none_of(g_doc.planes.begin(),g_doc.planes.end(),[](const auto& p){return p.name=="Origin"&&(p.kind=="plane"||p.kind=="frame");}))||(g_activePlane!="XY"&&g_activePlane!="XZ"&&g_activePlane!="YZ"&&std::none_of(g_doc.planes.begin(),g_doc.planes.end(),[](auto& p){return p.name==g_activePlane;})))g_activePlane="XY";
     rebuildSketchOverlay();
     includeCanvasBounds();
     if(auto* f=selectedNotchedTube())g_selectedNotch=std::max(0,std::min(g_selectedNotch,(int)f->notches.size()-1));
@@ -1431,6 +1431,8 @@ static arkjson::Value captureViewportSnapshot(const arkjson::Value& args);
 static void resetDatumViewState();
 static void sanitizeDatumViewState();
 static void clearDatumSelection();
+static bool datumVisible(const std::string& name);
+static void applyAgentDatumSelection(const std::string& name,const std::string& kind);
 static arkjson::Value runTool(const std::string& tool,const arkjson::Value& args){
     const bool containerWrite=tool=="design_containers"&&args.find("action")&&args.find("action")->asStr()=="merge"&&!(args.find("preview")&&args.find("preview")->t==arkjson::Value::Bool&&args.find("preview")->b);
     size_t previousVisibleBodies=g_bodyIds.size();
@@ -1443,7 +1445,16 @@ static arkjson::Value runTool(const std::string& tool,const arkjson::Value& args
     auto result=viewportSnapshot?captureViewportSnapshot(effectiveArgs):potentiallySlow&&g_uiReady&&(!g_headless||g_busyTestMode)?callSessionWithProgress(tool,effectiveArgs):g_session.call(tool,effectiveArgs);g_error=result.find("isError")->b;
     if(auto* data=result.find("structuredContent"))if(auto* id=data->find("failure_id");id&&id->t==arkjson::Value::Str)g_lastFailureId=id->str;
     u64 loadedUsageSerial=g_doc.usage.serial;
-    if(!g_error&&tool=="selection_set"){clearDatumSelection();const auto& selected=*result.find("structuredContent")->find("selection");g_picked.clear();SelectionItem item;item.feature=(u64)selected.find("feature")->num;item.kind=selected.find("kind")->str;item.name=selected.find("reference")->str;item.instance=(u64)selected.find("instance")->num;item.copy=(int)selected.find("copy")->num;g_picked.push_back(item);g_pickKind=item.kind=="face"?1:2;g_explorerFeature=item.feature;selBody=-1;rebuildScene();bool displayed=false;for(size_t i=0;i<g_bodyIds.size();++i)if(g_bodyIds[i]==item.feature&&(!item.instance||(g_instanceIds[i]==item.instance&&g_instanceCopies[i]==item.copy))){selBody=(int)i;displayed=i>=g_hiddenBodies.size()||!g_hiddenBodies[i];break;}refreshSelectionLines();auto data=*result.find("structuredContent");data.set("view_state_applied",arkjson::Value::makeBool(true));data.set("selection_visible",arkjson::Value::makeBool(displayed));if(!displayed)data.set("visibility_note",arkjson::Value::makeStr("Reference selected in history; definition/occurrence is hidden or consumed by a later operation"));result.set("structuredContent",data);auto content=*result.find("content");for(auto& block:content.arr)if(block.find("type")&&block.find("type")->asStr()=="text")block.set("text",arkjson::Value::makeStr(data.dump()));result.set("content",content);}
+    if(!g_error&&tool=="selection_set"){
+        const auto& selected=*result.find("structuredContent")->find("selection");
+        auto publish=[&](arkjson::Value data){result.set("structuredContent",data);auto content=*result.find("content");for(auto& block:content.arr)if(block.find("type")&&block.find("type")->asStr()=="text")block.set("text",arkjson::Value::makeStr(data.dump()));result.set("content",content);};
+        if(selected.find("datum")&&selected.find("datum")->t==arkjson::Value::Bool&&selected.find("datum")->b){
+            const auto name=selected.find("reference")->str;applyAgentDatumSelection(name,selected.find("kind")->str);
+            auto data=*result.find("structuredContent");data.set("view_state_applied",arkjson::Value::makeBool(true));data.set("selection_visible",arkjson::Value::makeBool(datumVisible(name)));publish(std::move(data));
+        }else{
+            clearDatumSelection();g_picked.clear();SelectionItem item;item.feature=(u64)selected.find("feature")->num;item.kind=selected.find("kind")->str;item.name=selected.find("reference")->str;item.instance=(u64)selected.find("instance")->num;item.copy=(int)selected.find("copy")->num;g_picked.push_back(item);g_pickKind=item.kind=="face"?1:2;g_explorerFeature=item.feature;selBody=-1;rebuildScene();bool displayed=false;for(size_t i=0;i<g_bodyIds.size();++i)if(g_bodyIds[i]==item.feature&&(!item.instance||(g_instanceIds[i]==item.instance&&g_instanceCopies[i]==item.copy))){selBody=(int)i;displayed=i>=g_hiddenBodies.size()||!g_hiddenBodies[i];break;}refreshSelectionLines();auto data=*result.find("structuredContent");data.set("view_state_applied",arkjson::Value::makeBool(true));data.set("selection_visible",arkjson::Value::makeBool(displayed));if(!displayed)data.set("visibility_note",arkjson::Value::makeStr("Reference selected in history; definition/occurrence is hidden or consumed by a later operation"));publish(std::move(data));
+        }
+    }
     if(!g_error&&documentWrite){clearProjectionPreview();cancelComponentMove(false);}
     if(g_error)g_status=result.find("structuredContent")->find("error")->asStr();
     else g_status=tool+" completed  /  revision "+std::to_string(g_session.revision);
@@ -3563,7 +3574,7 @@ static const std::vector<StudioCommandGroup>& studioCommandGroups(){
     group("Design containers",{{930,"Create design container"},{931,"Inspect design container"},{932,"Check out container"},{933,"Check out and open another ARK"},{934,"Merge edited container"},{935,"Inspect isolated workspace"}});
     group("Document",{{55,"New document"},{17,"Open ARK"},{16,"Save ARK"},{52,"Import source STEP"},{213,"Export STL/OBJ/FBX/STEP/IGES"},{51,"Export straight tube STEP"},{82,"Export native STEP"},{12,"Export mesh snapshot"}});
     group("Sketch entities",{{660,"Corner rectangle"},{661,"Center rectangle"},{662,"Rectangle through three points"},{663,"Parallelogram"},{664,"Straight slot"},{665,"Center slot"},{666,"Arc slot"},{667,"Arc slot through three points"},{668,"Polygon"},{669,"Circle through three perimeter points"},{670,"Ellipse"},{671,"Partial ellipse"},{672,"Parabola"},{673,"Conic"},{674,"Style spline"},{675,"Equation curve 2D"},{676,"Sketch point"},{677,"Centerline"},{678,"Midpoint line"},{679,"Route sketch"},{680,"Belt sketch"},{681,"Text engraving"},{682,"Spline on exact surface"},{683,"Interpolating spline 3D"},{684,"Sweep with varying sections"},{685,"Exact polynomial XYZ"},{686,"Center rectangle through three points"}});
-    group("Construction",{{630,"Offset plane"},{631,"Plane at angle"},{632,"Plane through three points"},{633,"Plane through axis and point"},{634,"Plane normal to axis at point"},{635,"Axis through two points"},{636,"Axis at plane intersection"},{637,"Construction point XYZ"},{638,"Linked construction point"},{639,"Frame between two points"},{640,"Select construction datum"},{641,"Toggle selected datum"},{642,"Show all datums"},{643,"Hide all datums"},{644,"Edit selected datum"}});
+    group("Construction",{{630,"Offset plane"},{631,"Plane at angle"},{632,"Plane through three points"},{633,"Plane through axis and point"},{634,"Plane normal to axis at point"},{635,"Axis through two points"},{636,"Axis at plane intersection"},{637,"Construction point XYZ"},{638,"Linked construction point"},{639,"Frame between two points"},{645,"Bisector plane"},{640,"Select construction datum"},{641,"Toggle selected datum"},{642,"Show all datums"},{643,"Hide all datums"},{644,"Edit selected datum"}});
     group("Direct authoring",{{650,"Push / pull source face"},{651,"Move body"},{652,"Extrude mesh patch"},{653,"Pull vertex (CAD / mesh)"},{654,"Move mesh edge"},{659,"Source dimensions"},{754,"Sample and weld mesh"},{658,"Select adjacent tangent faces"},{750,"Helix curve"},{752,"Loft section and guide controls"},{710,"Skeleton code editor"},{756,"Feature history / dependencies / rollback"}});
     group("Component patterns",{{770,"Linear component pattern"},{771,"Circular component pattern"},{772,"Pattern driven component pattern"},{773,"Sketch driven component pattern"},{774,"Curve driven component pattern"},{775,"Chain component pattern"},{776,"Edit selected component pattern"},{777,"Remove pattern / keep seed"},{778,"Inspect pattern evidence"},{779,"Rebind pattern source"}});
     group("Advanced sheet metal",{{800,"Miter flange"},{801,"Edit miter flange"},{802,"Remove miter flange"},{803,"Contour flange / straight-edge sweep"},{804,"Edit contour flange"},{805,"Remove contour flange"},{806,"Corner relief / trim / break / closure"},{807,"Edit corner operation"},{808,"Remove corner operation"},{809,"Edge rip / bend notch"},{810,"Edit edge rip"},{811,"Remove edge rip"},{812,"Paired tab and slot"},{813,"Edit tab and slot"},{814,"Remove tab and slot"},{815,"Declared bend allowance table"},{816,"Remove bend table"}});
@@ -3764,7 +3775,8 @@ static void uiAction(int id){
         for(size_t i=0;i<g_bodyIds.size();++i)if(g_bodyIds[i]==g_explorerFeature){selBody=(int)i;break;}
         g_activeSketch.clear();g_showSketches=false;rebuildSketchOverlay();g_status="Feature #"+std::to_string(g_explorerFeature)+" / double-click to edit definition";
     }return;}
-    if(id>=14000&&id<15000){selectDatumTree((size_t)(id-14000));return;}
+    if(id>=14900&&id<=14903){selectBuiltinDatum(id-14900);return;}
+    if(id>=14000&&id<14128){selectDatumTree((size_t)(id-14000));return;}
     if(id==97){g_matePage=std::max(0,g_matePage-1);return;}
     if(id==98){++g_matePage;return;}
     if(id>=13000&&id<14000){int index=id-13000;if(index<(int)g_doc.mates.size())g_selectedMate=index;return;}
@@ -3847,7 +3859,7 @@ static void uiAction(int id){
         case 100:nativePrimitiveDialog();break;case 101:nativeExtrudeDialog();break;case 102:nativeBooleanDialog();break;
         case 103:nativeHoleDialog();break;case 104:nativeEdgeBlendDialog();break;case 105:nativeTransformDialog();break;case 106:nativeDraftDialog();break;case 107:nativePatternDialog();break;case 108:nativeMirrorDialog();break;case 113:supportedDatumDialog();break;
         case 68:g_showSketches=!g_showSketches;rebuildSketchOverlay();break;
-        case 69:{std::string available="XY, XZ, YZ";for(auto& plane:g_doc.planes)available+=", "+plane.name;std::vector<EditorField> fields{{"Plane name",g_activePlane}};if(editFields("Select construction plane",available.c_str(),fields)){resolvePlane(g_doc,fields[0].value);g_activePlane=fields[0].value;g_activeSketch.clear();g_showSketches=true;rebuildSketchOverlay();}}break;
+        case 69:{std::string available="XY, XZ, YZ";for(auto& plane:g_doc.planes)available+=", "+plane.name;std::vector<EditorField> fields{{"Plane name",g_activePlane}};if(editFields("Select construction plane",available.c_str(),fields)){auto name=trimField(fields[0].value);if(name=="Origin"&&std::none_of(g_doc.planes.begin(),g_doc.planes.end(),[](const auto& p){return p.name=="Origin"&&(p.kind=="plane"||p.kind=="frame");}))throw std::runtime_error("Origin is a starting point, not a sketch plane");resolvePlane(g_doc,name);g_activePlane=name;g_activeSketch.clear();g_showSketches=true;rebuildSketchOverlay();}}break;
         case 71:alignSketchCamera();break;
         case 74:if(g_teamMode)sendTeam();else sendAssistant();break;case 75:clearPendingAssistantImage();if(g_teamMode)cancelTeam();else {*g_assistantCancel=true;if(g_assistantSteering)g_assistantSteering->cancel();g_deferredAssistantSteering.clear();}break;
         case 470:case 471:if(g_chatBusy||(g_teamStarted&&g_agentTeam.snapshot().running)){g_status="Finish or cancel the active run before switching modes.";break;}if(id==470&&g_teamStarted){cancelTeam();g_teamStarted=false;resetTeamView();}g_teamMode=id==471;g_assistantDockOpen=true;layout();saveUiSettings();break;
@@ -4878,7 +4890,9 @@ static void drawFrame(HDC hdc){
             for(size_t j=0;j<g_bodyIds.size();++j)if(g_bodyIds[j]==f.id){row.zone=2000+(int)j;row.selected|=selBody==(int)j;
                 if(j<g_hiddenBodies.size()&&g_hiddenBodies[j])row.subtitle+=" / hidden";}
         }else{
-            auto& node=g_doc.assembly[i];bool group=node.feature==0;row.kind=group?3:0;row.selected=group&&g_viewportContainer==node.id;row.icon=group?404:405;row.name=node.name;row.zone=group?30000+(int)i:-1;auto* feature=g_doc.find(node.feature);if(feature)row.icon=explorerIcon(*feature);row.subtitle=group?"Subassembly":(feature?explorerOperation(*feature):"Part")+" #"+std::to_string(node.feature);
+            auto& node=g_doc.assembly[i];bool group=node.feature==0;row.kind=group?3:0;row.selected=group&&g_viewportContainer==node.id;row.icon=group?404:405;row.name=node.name;row.zone=group?30000+(int)i:-1;auto* feature=g_doc.find(node.feature);if(feature)row.icon=explorerIcon(*feature);
+            if(group){std::vector<std::string> names;std::set<u64> seen;const AssemblyNode* cursor=&node;size_t guard=0;while(cursor&&!cursor->feature&&seen.insert(cursor->id).second&&guard++<g_doc.assembly.size()){names.push_back(cursor->name);if(!cursor->parent)break;auto parent=std::find_if(g_doc.assembly.begin(),g_doc.assembly.end(),[&](const AssemblyNode& item){return item.id==cursor->parent&&!item.feature;});if(parent==g_doc.assembly.end())break;cursor=&*parent;}std::reverse(names.begin(),names.end());row.subtitle="Container";for(const auto& nest:names)row.subtitle+=" / "+nest;}
+            else row.subtitle=(feature?explorerOperation(*feature):"Part")+" #"+std::to_string(node.feature);
             u64 parent=node.parent;bool ancestorClosed=false;size_t traversed=0;while(parent&&traversed++<g_doc.assembly.size()){ancestorClosed|=g_closedAssemblyGroups.count(parent)!=0;row.depth=std::min(row.depth+1,5);auto it=std::find_if(g_doc.assembly.begin(),g_doc.assembly.end(),[&](const AssemblyNode& n){return n.id==parent;});if(it==g_doc.assembly.end())break;parent=it->parent;}if(ancestorClosed)continue;
             int copies=0,hiddenCopies=0;for(size_t j=0;j<g_instanceIds.size();++j)if(g_instanceIds[j]==node.id){row.zone=2000+(int)j;row.selected|=selBody==(int)j;++copies;
                 if(j<g_hiddenBodies.size()&&g_hiddenBodies[j])++hiddenCopies;}
@@ -4890,8 +4904,11 @@ static void drawFrame(HDC hdc){
     section("Sketches",g_doc.sketches.size(),2);
     if(g_explorerOpen[2])for(size_t k=0;k<g_doc.sketches.size();++k){auto& sketch=g_doc.sketches[k];size_t users=0;for(const auto& f:g_doc.features){auto drivers=drivingSketchNames(f);if(std::find(drivers.begin(),drivers.end(),sketch.name)!=drivers.end())++users;}
         explorer.push_back({sketch.name,"Sketch / "+sketch.sk.plane+" / "+std::to_string(users)+" features",11000+(int)k,sketch.name==g_activeSketch&&g_showSketches,2,1,401});}
-    section("Reference geometry",g_doc.planes.size()+g_doc.canvases.size(),3);
-    if(g_explorerOpen[3]){for(size_t k=0;k<g_doc.planes.size();++k){auto& datum=g_doc.planes[k];explorer.push_back({datum.name,"Datum / "+datum.kind,14000+(int)k,datum.name==g_selectedDatumName,2,2,402});}
+    const bool authoredOrigin=std::any_of(g_doc.planes.begin(),g_doc.planes.end(),[](const auto& p){return p.name=="Origin";});
+    section("Reference geometry",4-(authoredOrigin?1:0)+g_doc.planes.size()+g_doc.canvases.size(),3);
+    if(g_explorerOpen[3]){const char* builtinNames[]={"Origin","XY","XZ","YZ"};const char* builtinNotes[]={"Starting point","Standard plane","Standard plane","Standard plane"};
+        for(int i=authoredOrigin?1:0;i<4;++i)explorer.push_back({builtinNames[i],builtinNotes[i],14900+i,std::string(builtinNames[i])==g_selectedDatumName,2,2,402});
+        for(size_t k=0;k<g_doc.planes.size();++k){auto& datum=g_doc.planes[k];std::string note="Datum / "+datum.kind;if(const auto* kind=datum.support.find("kind");kind&&kind->t==arkjson::Value::Str&&kind->str=="bisector")note="Bisector plane";explorer.push_back({datum.name,note,14000+(int)k,datum.name==g_selectedDatumName,2,2,402});}
         for(size_t k=0;k<g_doc.canvases.size();++k){auto& canvas=g_doc.canvases[k];explorer.push_back({canvas.name,"Canvas / "+canvas.plane,-1,false,2,2,402});}}
     if(!g_doc.params.empty()){explorer.push_back({"Parameters","",403,false,1,4,408});if(g_parametersOpen)for(size_t i=0;i<g_doc.params.size();++i)explorer.push_back({g_doc.params[i].name+" = "+g_doc.params[i].expr,"Parameter expression",1000+(int)i,false,2,2,402});}
     if(!visibleSheetIds().empty()){explorer.push_back({"Manufacturing","",466,false,1,4,408});if(g_manufacturingOpen){explorer.push_back({"Flat pattern", "Exact unstamped blank / nominal stamped reference",320,false,2,2,403});explorer.push_back({"Bend sequence","Read-only geometric preview",322,false,2,2,403});}}
@@ -4912,11 +4929,11 @@ static void drawFrame(HDC hdc){
         if(folder||children){glUniform1i(uuGlyph,expanded?409:410);glUniform4f(uuRc,branchX-6,treeY+3,12,12);glUniform4f(uuFill,.65,.76,.84,1);glBindVertexArray(quadVao);glDrawArrays(GL_TRIANGLES,0,6);}
         float iconX=branchX+((folder||children)?8:0);float cr=row.kind==1?.16f:folder?.96f:row.icon==406?.98f:.44f,cg=row.kind==1?.84f:folder?.72f:row.icon==406?.71f:.71f,cb=row.kind==1?.93f:folder?.22f:row.icon==406?.30f:.94f;
         glUniform1i(uuGlyph,row.icon);glUniform4f(uuRc,iconX,treeY,22,22);glUniform4f(uuFill,cr,cg,cb,1);glBindVertexArray(quadVao);glDrawArrays(GL_TRIANGLES,0,6);
-        bool datumRow=row.zone>=14000&&row.zone<15000;float titleRight=treeRight-(datumRow?29:7);float tx=iconX+28;std::string title=row.name;while(title.size()>1&&textWidth(title,.78f)>titleRight-tx)title.pop_back();if(title!=row.name&&title.size()>3)title=title.substr(0,title.size()-3)+"...";textOut(title,tx,treeY+2,.78f,.84f,.90f,.95f);
+        bool datumRow=(row.zone>=14000&&row.zone<14128)||(row.zone>=14900&&row.zone<=14903);float titleRight=treeRight-(datumRow?29:7);float tx=iconX+28;std::string title=row.name;while(title.size()>1&&textWidth(title,.78f)>titleRight-tx)title.pop_back();if(title!=row.name&&title.size()>3)title=title.substr(0,title.size()-3)+"...";textOut(title,tx,treeY+2,.78f,.84f,.90f,.95f);
         if(hover)ribbonHint=row.name+(row.subtitle.empty()?"":" / "+row.subtitle);if(row.zone>=0)g_zones.push_back({8,treeY-3,treeRight-8,h,row.zone});
         if(row.zone>=2000&&row.zone<9000){auto* f=g_doc.find(g_bodyIds[(size_t)(row.zone-2000)]);if(f&&isSheetFeature(f->id)){int zone=28000+(int)g_treeFoldIds.size();g_treeFoldIds.push_back(f->id);g_zones.insert(g_zones.end()-1,{branchX-12,treeY-3,18,h,zone});}}
         else if(row.zone>=16000&&row.zone<17024){auto* f=&g_doc.features[(size_t)(row.zone-16000)];if(isSheetFeature(f->id)){int zone=28000+(int)g_treeFoldIds.size();g_treeFoldIds.push_back(f->id);g_zones.insert(g_zones.end()-1,{branchX-12,treeY-3,18,h,zone});}}
-        if(datumRow){bool visible=datumVisible(row.name);float ex=treeRight-23;glUniform1i(uuGlyph,visible?406:410);glUniform4f(uuRc,ex,treeY+2,18,18);glUniform4f(uuFill,visible?.47f:.28f,visible?.82f:.39f,visible?.68f:.43f,1);glBindVertexArray(quadVao);glDrawArrays(GL_TRIANGLES,0,6);g_zones.insert(g_zones.end()-1,{ex,treeY-3,23,h,32000+row.zone-14000});}
+        if(datumRow){bool visible=datumVisible(row.name);float ex=treeRight-23;glUniform1i(uuGlyph,visible?406:410);glUniform4f(uuRc,ex,treeY+2,18,18);glUniform4f(uuFill,visible?.47f:.28f,visible?.82f:.39f,visible?.68f:.43f,1);glBindVertexArray(quadVao);glDrawArrays(GL_TRIANGLES,0,6);int eye=row.zone>=14900?32300+row.zone-14900:32000+row.zone-14000;g_zones.insert(g_zones.end()-1,{ex,treeY-3,23,h,eye});}
         treeY+=h;
     }
     glDisable(GL_SCISSOR_TEST);
@@ -5742,7 +5759,8 @@ static ContextTarget contextTargetAt(int mx,int my,int& body){
             else if(zone.id>=2000&&zone.id<9000){g_explorerFeature=0;body=zone.id-2000;target=ContextTarget::Body;}
             else if(zone.id>=11000&&zone.id<12000){size_t index=(size_t)(zone.id-11000);if(index<g_doc.sketches.size()){
                     g_activeSketch=g_doc.sketches[index].name;g_activePlane=g_doc.sketches[index].sk.plane;g_showSketches=true;rebuildSketchOverlay();target=ContextTarget::Sketch;}}
-            else if(zone.id>=14000&&zone.id<15000){size_t index=(size_t)(zone.id-14000);if(index<g_doc.planes.size()){
+            else if(zone.id>=14900&&zone.id<=14903){int index=zone.id-14900;const char* names[]={"Origin","XY","XZ","YZ"};g_selectedDatumName=names[index];if(index>0)g_activePlane=names[index];g_activeSketch.clear();target=ContextTarget::Datum;}
+            else if(zone.id>=14000&&zone.id<14128){size_t index=(size_t)(zone.id-14000);if(index<g_doc.planes.size()){
                     g_activePlane=g_doc.planes[index].name;g_selectedDatumName=g_doc.planes[index].name;g_activeSketch.clear();target=ContextTarget::Datum;}}
             break;
         }}

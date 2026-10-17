@@ -1,8 +1,8 @@
 {
-  "sequence": 35,
-  "phase": "B",
-  "code": "035B",
-  "version": "0.9.36",
+  "sequence": 36,
+  "phase": "A",
+  "code": "036A",
+  "version": "0.9.37",
   "milestones": [
     "A.01",
     "A.02",

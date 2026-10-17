@@ -5,6 +5,8 @@ namespace ark {
 // Recipes stay in DatumPlane::support, retaining source names and expressions.
 // Throws for unknown fields, malformed anchors and incompatible display kinds.
 void validateDatumDefinition(const DatumPlane& datum);
+// Preserve the identity of a retained authored Origin across atomic edits.
+void validateDatumTransition(const Document& before,const Document& after);
 // Shared semantic endpoint resolver for associative spatial-curve authoring.
 Vec3 datumAnchorPoint(const Document& document, const arkjson::Value& anchor);
 // Stages a full replacement/removal against an explicitly observed revision.

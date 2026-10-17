@@ -1,6 +1,8 @@
 #include "ark/datum_authoring.hpp"
 #include "ark/sketch.hpp"
+#include "ark/serialize.hpp"
 #include <algorithm>
+#include <functional>
 #include <set>
 #include <stdexcept>
 
@@ -47,6 +49,9 @@ void healthy(Document& candidate){
 void guard(u64 expected,u64 current){require(expected==current,"Revision conflict; inspect the current document before datum authoring");}
 }
 void validateDatumDefinition(const DatumPlane& d){
+    // Origin was a legal authored name before the world-zero fallback existed.
+    // Definition validation is also used while loading retained source; only
+    // context-aware authoring may decide whether this is a new creation.
     require(!d.name.empty()&&d.name.size()<=128&&d.name!="XY"&&d.name!="XZ"&&d.name!="YZ","Built-in datums are immutable; custom names must be 1..128 characters");
     require(d.kind=="plane"||d.kind=="axis"||d.kind=="frame"||d.kind=="point","Datum kind must be plane, axis, frame or point");
     require(!d.parent.empty()&&d.parent.size()<=128,"Datum parent must be a name");
@@ -65,6 +70,7 @@ void validateDatumDefinition(const DatumPlane& d){
         for(auto key:{"fraction","roll"})if(s.find(key))scalar(key);if(s.find("x_axis"))ref("x_axis","axis");output=kind=="axis_points"?"axis":"frame";
     }
     else if(kind=="axis_planes"){keys(s,{"kind","first","second"},{"first","second"});ref("first","plane");ref("second","plane");output="axis";}
+    else if(kind=="bisector"){keys(s,{"kind","first","second","side"},{"first","second"});ref("first","plane");ref("second","plane");if(auto side=s.find("side"))require(side->t==V::Str&&(side->str=="sum"||side->str=="difference"),"Bisector side must be sum or difference");output="plane";}
     else if(kind=="point"){keys(s,{"kind","point"},{"point"});ref("point","point");output="point";}
     else {
         if(kind=="tube_path")keys(s,{"kind","feature","station"},{"feature","station"});
@@ -82,12 +88,36 @@ void validateDatumDefinition(const DatumPlane& d){
 Document stageDatumSet(const Document& document,const DatumPlane& datum,u64 expected,u64 current){
     guard(expected,current);validateDatumDefinition(datum);auto candidate=document.authoringCopy();
     auto existing=std::find_if(candidate.planes.begin(),candidate.planes.end(),[&](const DatumPlane& d){return d.name==datum.name;});
-    if(existing==candidate.planes.end()){require(candidate.planes.size()<128,"Datum capacity exceeded");candidate.planes.push_back(datum);}else *existing=datum;
+    if(existing==candidate.planes.end()){require(datum.name!="Origin","Built-in datums are immutable; cannot create a new authored Origin");require(candidate.planes.size()<128,"Datum capacity exceeded");candidate.planes.push_back(datum);}else *existing=datum;
     healthy(candidate);return candidate;
 }
 Document stageDatumRemove(const Document& document,const std::string& name,u64 expected,u64 current){
     guard(expected,current);auto candidate=document.authoringCopy();auto existing=std::find_if(candidate.planes.begin(),candidate.planes.end(),[&](const DatumPlane& d){return d.name==name;});
-    require(existing!=candidate.planes.end(),"Construction datum not found: "+name);candidate.planes.erase(existing);healthy(candidate);return candidate;
+    require(existing!=candidate.planes.end(),"Construction datum not found: "+name);candidate.planes.erase(existing);validateDatumTransition(document,candidate);healthy(candidate);return candidate;
+}
+void validateDatumTransition(const Document& before,const Document& after){
+    auto retained=[](const Document& document){return std::any_of(document.planes.begin(),document.planes.end(),[](const DatumPlane& datum){return datum.name=="Origin";});};
+    if(!retained(before)||retained(after))return;
+    auto reject=[](){throw std::runtime_error("Cannot remove authored Origin with remaining consumers; this would silently rebind them to the built-in origin");};
+    auto anchorUsesOrigin=[](const V& value){if(value.t==V::Str)return value.str=="Origin";const auto* name=value.find("datum");return name&&name->t==V::Str&&name->str=="Origin";};
+    for(const auto& datum:after.planes){if(datum.support.isNull()){if(datum.parent=="Origin")reject();}else for(const char* key:{"plane","axis","point","a","b","c","start","end","first","second","x_axis"})if(const auto* anchor=datum.support.find(key);anchor&&anchorUsesOrigin(*anchor))reject();}
+    for(const auto& sketch:after.sketches)if(sketch.sk.plane=="Origin")reject();
+    for(const auto& canvas:after.canvases)if(canvas.plane=="Origin")reject();
+    for(const auto& stamp:after.stamps)if(!stamp.feature&&stamp.plane=="Origin")reject();
+    // Scan only geometric selector fields. Labels, BOM provenance, imported
+    // packages and display buffers cannot manufacture a datum dependency.
+    std::function<bool(const V&,const std::string&)> usesOrigin=[&](const V& value,const std::string& key){
+        if(key=="name"||key=="part"||key=="component_metadata"||key=="package"||key=="mesh"||key=="appearance"||key=="source_topology")return false;
+        if(value.t==V::Str)return value.str=="Origin"&&(key=="plane"||key=="datum"||key=="axis"||key=="start_ref"||key=="to_ref"||key=="through_ref");
+        if(value.t==V::Arr){for(const auto& item:value.arr)if(usesOrigin(item,key))return true;}
+        else if(value.t==V::Obj)for(const auto& item:value.obj)if(usesOrigin(item.second,item.first))return true;
+        return false;
+    };
+    for(const auto& feature:after.features)if(feature.get("plane")=="Origin"||usesOrigin(feature.nativeSpec,"")||usesOrigin(feature.sourceData,""))reject();
+    V serialized;if(!arkjson::parse(documentToJson(after,false,false),serialized))throw std::runtime_error("Cannot inspect datum consumers in the candidate authoring");
+    // Spatial sketch constraints, projected entity recipes and skeleton source
+    // carry their selectors inside persisted source rather than top-level fields.
+    for(const char* section:{"sketches","skeleton","drawings"})if(const auto* value=serialized.find(section);value&&usesOrigin(*value,""))reject();
 }
 void bindDatumSupportProducers(const Document& document,V& support){
     if(support.t==V::Obj){
@@ -99,6 +129,10 @@ void bindDatumSupportProducers(const Document& document,V& support){
 }
 V inspectDatum(const Document& document,const std::string& name){
     const auto frame=resolvePlane(document,name);V result=V::makeObj(),matrix=V::makeArr(),origin=V::makeArr(),directions=V::makeObj();result.set("name",V::makeStr(name));result.set("kind",V::makeStr("plane"));
+    const bool authored=std::any_of(document.planes.begin(),document.planes.end(),[&](const DatumPlane& datum){return datum.name==name;});
+    const bool builtin=!authored&&(name=="Origin"||name=="XY"||name=="XZ"||name=="YZ");
+    result.set("builtin",V::makeBool(builtin));result.set("immutable",V::makeBool(builtin));if(authored&&name=="Origin")result.set("role",V::makeStr("legacy_authored_datum"));
+    if(builtin){result.set("builtin",V::makeBool(true));result.set("immutable",V::makeBool(true));if(name=="Origin"){result.set("kind",V::makeStr("point"));result.set("role",V::makeStr("starting_point"));}else result.set("role",V::makeStr("standard_plane"));}
     for(double n:frame.m)matrix.arr.push_back(V::makeNum(n));result.set("world_column_major",matrix);
     for(double n:{frame.m[12],frame.m[13],frame.m[14]})origin.arr.push_back(V::makeNum(n));result.set("origin_mm",origin);result.set("coordinate_space",V::makeStr("world"));
     for(size_t axis=0;axis<3;++axis){V direction=V::makeArr();for(size_t i=0;i<3;++i)direction.arr.push_back(V::makeNum(frame.m[axis*4+i]));directions.set(std::string(1,"XYZ"[axis]),direction);}result.set("axes",directions);
