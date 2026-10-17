@@ -87,6 +87,19 @@ inline bool declaredReadArgumentsMatch(const V& requested,const V& executed){
     V withoutDetail=executed;withoutDetail.obj.erase(std::remove_if(withoutDetail.obj.begin(),withoutDetail.obj.end(),[](const auto& item){return item.first=="detail";}),withoutDetail.obj.end());
     return canonicalReadArguments(requested).dump()==canonicalReadArguments(withoutDetail).dump();
 }
+inline bool batchRowMatchesQuery(const V& query,const V& row,std::size_t index){
+    const auto* args=query.find("args");const auto tool=text(query,"tool");if(tool.empty()||!args||args->t!=V::Obj)return false;
+    if(const auto* actual=row.find("query_index");actual&&(actual->t!=V::Num||actual->num!=(double)index))return false;
+    if(row.find("tool")&&text(row,"tool")!=tool)return false;
+    const auto* actual=row.find("args");return !actual||declaredReadArgumentsMatch(*args,*actual);
+}
+inline V observedReadArguments(const std::string& tool,const V& args,const V& receipt){
+    V observed=args;if(observed.t!=V::Obj||observed.find("detail"))return observed;
+    const auto& data=payload(receipt);
+    if(tool=="doc_info"&&text(data,"response_scope")=="revision_status")observed.set("detail",V::makeStr("revision"));
+    else if(tool=="agent_onboard"&&text(data,"detail")=="guide")observed.set("detail",V::makeStr("guide"));
+    return observed;
+}
 inline bool successful(const V& receipt){const auto* error=receipt.find("isError");return receipt.t==V::Obj&&error&&error->t==V::Bool&&!error->b&&!receipt.find("error")&&!payload(receipt).find("error");}
 inline bool staticGuide(const V& args,const V& receipt){
     // Team execution defaults an omitted detail to guide. Require the receipt's
@@ -161,14 +174,12 @@ inline V project(const V& history,std::size_t byteLimit){
     // read identity. Observed results stay historical data, never fresh authority.
     for(std::size_t i=0;i<history.arr.size();++i){const auto& call=history.arr[i];if(text(call,"type")!="function_call")continue;
         V args,receipt;if(!arkjson::parse(text(call,"arguments"),args)||!arkjson::parse(text(history.arr[outputs.at(text(call,"call_id"))],"output"),receipt))continue;
-        const auto name=text(call,"name");if(name!="query_batch"){if(successful(receipt))resolvedRead(readEvidenceKey(name,args));continue;}
+        const auto name=text(call,"name");if(name!="query_batch"){if(successful(receipt)){resolvedRead(readEvidenceKey(name,args));resolvedRead(readEvidenceKey(name,observedReadArguments(name,args,receipt)));}continue;}
         if(!successful(receipt))continue;const auto* queries=args.find("queries"),*results=payload(receipt).find("results");
         if(!queries||queries->t!=V::Arr||!results||results->t!=V::Arr||queries->arr.size()!=results->arr.size())continue;
         for(std::size_t j=0;j<queries->arr.size();++j){const auto& query=queries->arr[j];const auto& row=results->arr[j];const auto* values=query.find("args"),*error=row.find("isError");const auto tool=text(query,"tool");
-            if(tool.empty()||!values||values->t!=V::Obj||!error||error->t!=V::Bool)continue;
-            if(const auto* index=row.find("query_index");index&&(index->t!=V::Num||index->num!=(double)j))continue;
-            if(row.find("tool")&&text(row,"tool")!=tool)continue;
-            const auto* returned=row.find("args");if(returned&&!declaredReadArgumentsMatch(*values,*returned))continue;
+            if(!batchRowMatchesQuery(query,row,j)||!error||error->t!=V::Bool)continue;
+            const auto* returned=row.find("args");
             const auto key=readEvidenceKey(tool,*values),executedKey=readEvidenceKey(tool,returned?*returned:*values);if(successful(row)){resolvedRead(key);resolvedRead(executedKey);continue;}if(!error->b)continue;
             V evidence=V::makeObj();evidence.set("query_index",V::makeNum((double)j));evidence.set("tool",V::makeStr(tool));evidence.set("arguments",*values);evidence.set("receipt",payload(row));
             if(returned&&executedKey!=key)evidence.set("executed_arguments",*returned);
@@ -187,6 +198,7 @@ inline V project(const V& history,std::size_t byteLimit){
             const auto* queries=args.find("queries"),*results=payload(receipt).find("results");
             if(!queries||queries->t!=V::Arr||!results||results->t!=V::Arr||queries->arr.size()!=results->arr.size())continue;
             for(std::size_t j=0;j<queries->arr.size();++j){const auto& query=queries->arr[j];const auto* values=query.find("args");
+                if(!batchRowMatchesQuery(query,results->arr[j],j))continue;
                 if(text(query,"tool")=="agent_onboard"&&values&&!query.find("fields")&&staticGuide(*values,results->arr[j])){guides.insert_or_assign(text(payload(results->arr[j]),"topic"),Guide{i,(int)j,*values,payload(results->arr[j])});guideCalls.insert(i);}
                 else if(staticGuideFragment(query,results->arr[j])){const auto topic=text(*values,"topic").empty()?std::string("overview"):text(*values,"topic");for(const auto& field:payload(results->arr[j]).obj){V subset=V::makeObj();subset.set(field.first,field.second);fragments.insert_or_assign(std::make_pair(topic,field.first),Guide{i,(int)j,*values,subset});}guideCalls.insert(i);}
             }
