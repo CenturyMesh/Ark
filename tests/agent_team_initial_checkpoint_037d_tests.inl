@@ -69,8 +69,46 @@ static void coherentConstructionBounds037d(){
     check(session.call("doc_undo",json(R"({"expected_revision":2})")).find("isError")->b,"coherent batch has exactly one undo entry");
 }
 
+static V initialCheckpointRawOutput037d(const V& request){
+    for(auto item=request.find("input")->arr.rbegin();item!=request.find("input")->arr.rend();++item)if(item->find("type")&&item->find("type")->asStr()=="function_call_output")return json(item->find("output")->asStr());
+    throw std::runtime_error("missing initial checkpoint receipt");
+}
+
+static void initialCheckpointRetainedGeometry037d(){
+    ark::AgentTeam team;ark::AgentSession session;session.suppressIterationHistory();ark::AgentTeamConfig config;config.requireLeadAuthoringCheckpoint=true;config.orchestratedStart=true;config.roles={role("engineer",true),role("designer",true)};config.roles[0].discipline=ark::AgentTeamDiscipline::Orchestrator;
+    const std::vector<V> emptyBatches={
+        json(R"([{"op":"sketch.set","name":"Removed profile","sketch":{"plane":"XY","entities":[{"kind":"line","name":"Edge","dof":[0,0,12,0]}]}},{"op":"sketch.remove","name":"Removed profile"}])"),
+        json(R"([{"op":"feature.add","name":"Removed part","type":"box","p":{"dx":8,"dy":4,"dz":2}},{"op":"feature.remove","id":"Removed part"}])"),
+        json(R"([{"op":"sketch.set","name":"Retained profile","sketch":{"plane":"XY","entities":[{"kind":"line","name":"Edge","dof":[0,0,12,0]}]}},{"op":"sketch.set","name":"Retained profile","sketch":{"plane":"XY","entities":[]}}])"),
+        json(R"([{"op":"sketch.entity.set","name":"Retained profile","entity":{"kind":"line","name":"Edge","dof":[0,0,12,0]}},{"op":"sketch.set","name":"Retained profile","sketch":{"plane":"XY","entities":[]}}])")
+    };
+    std::atomic_int designers=0;int lead=0,inspectionReads=0;
+    config.roles[0].transport=[&](auto&,const V& request,auto*){
+        const int round=++lead;if(round==1)return call("retained_assign","team_send",R"({"to":"designer","message":"Continue only after retained editable geometry exists."})");
+        if(round>=3&&round<=6){const auto result=initialCheckpointRawOutput037d(request);const auto* verification=result.find("initial_checkpoint_verification");check(result.find("isError")&&!result.find("isError")->b&&semanticTeamOutput036a(request).find("revision")->num==round-2,"create/remove or replace-empty remains a successful atomic commit");check(verification&&verification->find("state")->asStr()=="pending"&&verification->find("reason")->asStr()=="no_retained_authoring_geometry"&&designers==0&&team.snapshot().roles[1].status.find("Deferred")!=std::string::npos,"removed feature/sketch or last sketch entity cannot satisfy the retained geometry checkpoint");}
+        if(round>=2&&round<=5){V args=V::makeObj();args.set("expected_revision",V::makeNum(round-2));args.set("commands",emptyBatches[round-2]);return call("retained_empty_"+std::to_string(round),"team_apply_step",args.dump());}
+        if(round==6)return call("retained_real_geometry","doc_apply",R"({"expected_revision":4,"commands":[{"op":"sketch.entity.set","name":"Retained profile","entity":{"kind":"line","name":"Persistent edge","dof":[0,0,20,0]}}]})");
+        if(round==7){const auto result=initialCheckpointRawOutput037d(request);check(result.find("initial_checkpoint_verification")&&result.find("initial_checkpoint_verification")->find("state")->asStr()=="verified","retained geometry at the committed revision verifies the initial checkpoint");}
+        return done("Only the final retained sketch releases the writer.");
+    };
+    config.roles[1].transport=[&](auto&,auto&,auto*){if(++designers==1)return call("retained_revision","doc_info","{}");return done("Retained sketch observed.");};
+    team.start(config,"Retain a real initial editable checkpoint",ark::AgentSession::tools(),[&](const auto& name,const V& args){if(name=="doc_info"&&args.find("sections")){++inspectionReads;check(ark::AgentTeam::currentRoleId()=="engineer"&&args.find("detail")->asStr()=="design"&&args.find("sections")->dump()==R"(["features","sketches"])","checkpoint proof is a lead-only selected design inspection");}return session.call(name,args);});complete(team);
+    check(session.revision==5&&inspectionReads==5&&designers==2&&session.document.features.empty()&&session.document.findSketch("Retained profile")->sk.ents.size()==1,"four net-empty commits keep writers deferred until a fifth actually retained checkpoint");
+
+    for(int failure=0;failure<4;++failure){
+        ark::AgentSession recovered;recovered.suppressIterationHistory();lead=0;designers=0;inspectionReads=0;
+        config.roles[0].transport=[&](auto&,const V& request,auto*){switch(++lead){case 1:return call("proof_assign","team_send",R"({"to":"designer","message":"Wait for a confirmed retained checkpoint."})");case 2:return call("proof_committed","doc_apply",R"({"expected_revision":0,"commands":[{"op":"feature.add","name":"Committed before unavailable proof","type":"box","p":{"dx":8,"dy":4,"dz":2}}]})");case 3:{const auto result=initialCheckpointRawOutput037d(request);const auto* proof=result.find("initial_checkpoint_verification");check(result.find("isError")&&!result.find("isError")->b&&semanticTeamOutput036a(request).find("revision")->num==1&&team.snapshot().roles[0].stepsApplied==1&&team.snapshot().roles[0].unresolvedToolErrors==0,"unavailable or changed inspection never turns a successful commit into a rejected operation");check(proof&&proof->find("state")->asStr()=="pending"&&designers==0&&team.snapshot().roles[1].status.find("Deferred")!=std::string::npos,"missing, failed or different-revision evidence leaves the checkpoint pending");return call("proof_recovered_commit","team_apply_step",R"({"expected_revision":1,"commands":[{"op":"feature.add","name":"Verified checkpoint","type":"box","p":{"dx":6,"dy":3,"dz":2}}]})");}default:return done("Verified current retained geometry releases the writer.");}};
+        team.start(config,"Preserve successful commits when checkpoint inspection is unavailable",ark::AgentSession::tools(),[&](const auto& name,const V& args){
+            if(name=="doc_info"&&args.find("sections")&&++inspectionReads==1){if(failure==0)return json(R"({"isError":true,"error":"Read unavailable"})");if(failure==1)throw std::runtime_error("Inspection transport unavailable");V response=recovered.call("doc_info",json(R"({"detail":"design","sections":["features","sketches"]})"));V data=*response.find("structuredContent");data.set("revision",failure==2?V::makeNum(0):V{});response.set("structuredContent",data);return response;}
+            return recovered.call(name,args);
+        });complete(team);
+        check(recovered.revision==2&&recovered.document.features.size()==2&&inspectionReads==2&&designers==2&&team.snapshot().roles[0].stepsApplied==2&&team.snapshot().roles[0].unresolvedToolErrors==0,"later exact revision inspection releases writers without replaying earlier successful commits");
+    }
+}
+
 static void initialCheckpointNeedsSketchGeometry037d(){
     ark::AgentTeam team;ark::AgentSession session;session.suppressIterationHistory();ark::AgentTeamConfig config;config.requireLeadAuthoringCheckpoint=true;config.orchestratedStart=true;config.roles={role("engineer",true),role("designer",true)};config.roles[0].discipline=ark::AgentTeamDiscipline::Orchestrator;config.roles[1].discipline=ark::AgentTeamDiscipline::PartDesigner;std::atomic_int lead=0,designer=0;
     config.roles[0].transport=[&](auto&,const V& request,auto*){switch(++lead){case 1:return call("empty_assign","team_send",R"({"to":"designer","kind":"assignment","message":"Continue after the lead's first actual sketch line."})");case 2:return call("empty_sketch","doc_apply",R"({"expected_revision":0,"commands":[{"op":"sketch.set","name":"Initial profile","sketch":{"plane":"XY","entities":[]}}]})");case 3:return call("still_empty","team_context","{}");case 4:check(designer==0&&!semanticTeamOutput036a(request).find("initial_authoring_checkpoint")->find("satisfied")->b,"an empty sketch cannot release writers before any editable geometry exists");return call("first_line","doc_apply",R"({"expected_revision":1,"commands":[{"op":"sketch.entity.set","name":"Initial profile","entity":{"kind":"line","name":"Interface","dof":[0,0,20,0]}}]})");default:return done("Initial sketch geometry committed.");}};
     config.roles[1].transport=[&](auto&,auto&,auto*){if(++designer==1)return call("line_revision","doc_info","{}");return done("Initial sketch line observed.");};team.start(config,"Start a new editable concept",ark::AgentSession::tools(),[&](const auto& name,const V& args){return session.call(name,args);});complete(team);check(session.revision==2&&designer>=2&&session.document.findSketch("Initial profile")->sk.ents.size()==1,"a real sketch entity releases deferred writers with current revision evidence");
+    initialCheckpointRetainedGeometry037d();
 }
