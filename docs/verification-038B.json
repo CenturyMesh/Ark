@@ -1,0 +1,312 @@
+{
+    "schema":  "ark.iteration-verification.v1",
+    "iteration":  "038B",
+    "version":  "0.9.39",
+    "milestones":  [
+                       "A.03",
+                       "A.04",
+                       "A.05",
+                       "B.01",
+                       "B.02",
+                       "B.03",
+                       "D.02",
+                       "D.04"
+                   ],
+    "source_commit":  "4c530167411a52be5fd8b7061b4f98ebc151e6a0",
+    "source_dirty_at_packaging":  false,
+    "source_tree_sha256":  "641dfe656d142c6eaea38feb0be55e107768417ff4d1efe97f8f4c0a5904572d",
+    "configuration":  "Windows x64 MSVC Release; full source-built OCCT 8.0.1 patchset; separate portable core and isolated Studio tests",
+    "status":  "verified-native-host-and-local-package-scope; autonomous-design-delivery-partial",
+    "checks":  [
+                   {
+                       "name":  "native-final",
+                       "tests":  135,
+                       "failures":  0,
+                       "seconds":  86.4,
+                       "receipt":  "out/verification-038b/native-final.xml",
+                       "sha256":  "99329b06b7e0fd44b152e0ef4062cc82659b06eefc15e14a734d883feda2b83e"
+                   },
+                   {
+                       "name":  "core-release",
+                       "tests":  90,
+                       "failures":  0,
+                       "seconds":  34.11,
+                       "receipt":  "out/verification-038b/core-release.xml",
+                       "sha256":  "4e793175aebf35de69ef0efa25a275eb575054d025d6496d97b24f87616fe77b"
+                   },
+                   {
+                       "name":  "studio-final",
+                       "tests":  6,
+                       "failures":  0,
+                       "seconds":  28.59,
+                       "receipt":  "out/verification-038b/studio-final.xml",
+                       "sha256":  "0fe0017fdd2fa98450f60a6cea1dc0baac8c2050fcb4a2948401ef0695bde53e"
+                   }
+               ],
+    "focused_checks":  {
+                           "agent_team":  1012,
+                           "assistant":  479,
+                           "obsidian_synthetic":  52,
+                           "occt_patch_require_pinned":  74,
+                           "distribution":  41
+                       },
+    "runtime_artifacts":  [
+                              {
+                                  "name":  "ark-cli.exe",
+                                  "bytes":  3331072,
+                                  "sha256":  "13a2935d22a9129db39ef41e027419778ffd79dd27a6844a1d25b7bb08dfa4ae"
+                              },
+                              {
+                                  "name":  "ark-mcp.exe",
+                                  "bytes":  6092800,
+                                  "sha256":  "a5e1d3863a6cbf86807a2b33b68044369cd2fca75653fe2dd54fb7f0befb8d90"
+                              },
+                              {
+                                  "name":  "ark-occt-worker.exe",
+                                  "bytes":  3229184,
+                                  "sha256":  "3377a2f0d954a6b08518f17458f4c35b5e79881de56cd7c61c846ab08c1f3368"
+                              },
+                              {
+                                  "name":  "ark-studio.exe",
+                                  "bytes":  11953152,
+                                  "sha256":  "205e19a4dee059822f5945fbe02311939329dce34480d1e01917d3ef0b07a5f6"
+                              },
+                              {
+                                  "name":  "TKBO.dll",
+                                  "bytes":  1962496,
+                                  "sha256":  "2bfc57b206b3db352539ee718d25ba91156de631e4b94f13f7e69fa781c8a53d"
+                              },
+                              {
+                                  "name":  "TKBool.dll",
+                                  "bytes":  3407872,
+                                  "sha256":  "95dc16d30045f546bdcd1a4d39f91f9f07a9c207f262de3804d9ef61267ed996"
+                              },
+                              {
+                                  "name":  "TKBRep.dll",
+                                  "bytes":  2040832,
+                                  "sha256":  "25a21457af4610d8441cd339a5c2b57a5d5f5c5b910b877f2f35e20103f09b68"
+                              },
+                              {
+                                  "name":  "TKCAF.dll",
+                                  "bytes":  471040,
+                                  "sha256":  "6bc0a7b72066dd3ba42100d19f1c533bfe9da01e79d70edc74faab0ec2465d22"
+                              },
+                              {
+                                  "name":  "TKCDF.dll",
+                                  "bytes":  262144,
+                                  "sha256":  "8a1c4d5efe5f21dc9f0de18a5ca212f1a13816c2cde52efc70a5270e7bfc4c4e"
+                              },
+                              {
+                                  "name":  "TKDE.dll",
+                                  "bytes":  174592,
+                                  "sha256":  "87f2dd39170ca1ddc21bd9af4c06925d89b854cd3b9bb0fc734a66917cd36a17"
+                              },
+                              {
+                                  "name":  "TKDEIGES.dll",
+                                  "bytes":  2789888,
+                                  "sha256":  "61aad48b7037005b17364cb56f00e4a4300a0538f45ebed4bd4de80d67910dd7"
+                              },
+                              {
+                                  "name":  "TKDESTEP.dll",
+                                  "bytes":  5433344,
+                                  "sha256":  "358708d6a741e44f6023354b1484626dca525d7090f277b64b13f047ac82db0d"
+                              },
+                              {
+                                  "name":  "TKernel.dll",
+                                  "bytes":  1556992,
+                                  "sha256":  "9c44b0a97172948ca7e589f3df11c4317480aeb014e2962577535b5b4b063744"
+                              },
+                              {
+                                  "name":  "TKExpress.dll",
+                                  "bytes":  312832,
+                                  "sha256":  "2bdc8fea1010989c89dd81b316a6c72619a9e5fb7ed58e29f6e310acd529e3b2"
+                              },
+                              {
+                                  "name":  "TKFeat.dll",
+                                  "bytes":  988160,
+                                  "sha256":  "fb8856c854f00eb59c2a42d7585b3969b3a1c1d51331564e1700e5bba3b8dbdd"
+                              },
+                              {
+                                  "name":  "TKFillet.dll",
+                                  "bytes":  2143744,
+                                  "sha256":  "3eecb63a644dea5575aa3502e728012c60d9edd0bddca18ddedae21585fb66ab"
+                              },
+                              {
+                                  "name":  "TKG2d.dll",
+                                  "bytes":  417792,
+                                  "sha256":  "baf76e551d4f18ca7336f943c8c5ca285a24f738d325ff03634e306427556429"
+                              },
+                              {
+                                  "name":  "TKG3d.dll",
+                                  "bytes":  1309184,
+                                  "sha256":  "5b663becca77456d7ee89444a9a114133be29d20901f5997991f534d7b9c54c2"
+                              },
+                              {
+                                  "name":  "TKGeomAlgo.dll",
+                                  "bytes":  4008448,
+                                  "sha256":  "d0ec87d1aff37ab0617758b4c13a7173fcc1387b80504b7bbfa2f1d90b61e240"
+                              },
+                              {
+                                  "name":  "TKGeomBase.dll",
+                                  "bytes":  4248576,
+                                  "sha256":  "4d688a55a6809e2d533d8025e0984374ae0843b7a129c22d1deeee0ebffaf3be"
+                              },
+                              {
+                                  "name":  "TKHelix.dll",
+                                  "bytes":  78848,
+                                  "sha256":  "7fe8e8479506b90c713b0ac0f4913e7af6ceb282f5232c3fece306a7a2237eac"
+                              },
+                              {
+                                  "name":  "TKHLR.dll",
+                                  "bytes":  923136,
+                                  "sha256":  "8b449367606df8fa4aa417ff653fc1c19eaa27abde6264297426a09fd1d07fe7"
+                              },
+                              {
+                                  "name":  "TKLCAF.dll",
+                                  "bytes":  631808,
+                                  "sha256":  "7396d7d3988a76d3020badbcd3fd91fe62a95c9a4f0759993971ebe70785187f"
+                              },
+                              {
+                                  "name":  "TKMath.dll",
+                                  "bytes":  1396224,
+                                  "sha256":  "2bfb1a9822ab3b1ad56cacd8cb2446babe7c3454baa26f33f80e3ac113cd7f6b"
+                              },
+                              {
+                                  "name":  "TKMesh.dll",
+                                  "bytes":  621568,
+                                  "sha256":  "ba80dc0fda6724be2cb828ebfd8e753f9a762dcef576d8b2afff4376d5f4444f"
+                              },
+                              {
+                                  "name":  "TKOffset.dll",
+                                  "bytes":  1720832,
+                                  "sha256":  "11bb027057ebeb9d56e9d6cb08734b2390ee5331a343ae9ed11d0ce69c65ac42"
+                              },
+                              {
+                                  "name":  "TKPrim.dll",
+                                  "bytes":  306688,
+                                  "sha256":  "cb263c088767892186ba0840188b939399f7d90d7f1b40121e0b4dc14c089733"
+                              },
+                              {
+                                  "name":  "TKService.dll",
+                                  "bytes":  992256,
+                                  "sha256":  "e04bc1427f42960a49517743d8d0eca34af64e344d777a30af8829a1ce4f8cd2"
+                              },
+                              {
+                                  "name":  "TKShHealing.dll",
+                                  "bytes":  2424832,
+                                  "sha256":  "376c3142593da296b65b2c7ab1b813491ff1fcd028e3f75e488e0be40e6097e4"
+                              },
+                              {
+                                  "name":  "TKTopAlgo.dll",
+                                  "bytes":  2366464,
+                                  "sha256":  "b8976befb87e3103cecab4415ae4f83b65403bfde162e25522da0b8837a4bd81"
+                              },
+                              {
+                                  "name":  "TKV3d.dll",
+                                  "bytes":  2493952,
+                                  "sha256":  "1fb59f807b8e9616e09c66becdb8df413ca26cb83b789bd08fe686573f27b29a"
+                              },
+                              {
+                                  "name":  "TKVCAF.dll",
+                                  "bytes":  201728,
+                                  "sha256":  "b6b6192f93cd01920d76aadf893649e05a5d45146aecac8283960c9d2a914f0e"
+                              },
+                              {
+                                  "name":  "TKXCAF.dll",
+                                  "bytes":  779264,
+                                  "sha256":  "678bfe2e98cb90bec73d4399c52eac8dbeda25994d3673ab5b6081ea497f565a"
+                              },
+                              {
+                                  "name":  "TKXMesh.dll",
+                                  "bytes":  17408,
+                                  "sha256":  "ddf32e791b1aa8591e19026852613b1dcf1d5b2435975ecdc7b7fcf489fd44df"
+                              },
+                              {
+                                  "name":  "TKXSBase.dll",
+                                  "bytes":  1522176,
+                                  "sha256":  "4e2c1e63a1cdcdabcdc9dd09b763af09943644370c00b936e47352634c621992"
+                              }
+                          ],
+    "native_dependency":  {
+                              "patchset":  "ark-offset-001",
+                              "status":  "verified-in-scope",
+                              "patches":  5,
+                              "modified_source_headers":  18,
+                              "compiled_toolkits":  31,
+                              "affected_toolkit_closure":  9,
+                              "compiler_inputs":  1494,
+                              "closure_files":  6428,
+                              "original_refinement_counter_preserved":  true,
+                              "acceptance_tolerances_widened":  false,
+                              "manifest_sha256":  "2fbbd4f68b8c06a36aa04787d378540fa6e9ee43d353a57d7e09870c185f9562",
+                              "candidate_manifest_sha256":  "b2dd0dcd1bb5c8a329111e82fcaf661a472b3f2b714cd0efe1988ea4753349dd",
+                              "sdk_delivery_receipt_sha256":  "692f0912b9b87710cf673070fae9886b53fbde228e460a4240680fa4e53a5e93",
+                              "promotion_receipt_sha256":  "275ca4fa633dcdbfcd9e05445c185f210ec8cba4724a174d651238dea80cebaa",
+                              "promotion_scope":  "Metadata-only promotion of unchanged source-built SDK copy; no new compilation or DLL overlay",
+                              "notice_sha256":  "7a6ea7c78cc91e56eab614c03c534e036e1a4661b6dab71b4f99f57fa86558cf"
+                          },
+    "frozen_offline_replays":  {
+                                   "loft":  "PASS: original request, final worker, valid exact solid",
+                                   "loft_receipt_sha256":  "e3e28e51782515ea96087b272fe4a9c8e565fd5641d79a4e673a1df2e7ae811f",
+                                   "shell":  "PASS: original five commands through final standalone MCP; baseline/session preserved; harness validity, stale rejection and persistence",
+                                   "shell_receipt_sha256":  "1e99ced4458c0619a28453a397b67e7d1b16a41e3fdb5b9a9251da33a0e86014",
+                                   "saved_artifacts":  8,
+                                   "reopened_artifacts_byte_identical":  true,
+                                   "cold_evaluated":  8,
+                                   "cold_reused":  0,
+                                   "cold_geometric_difference":  0,
+                                   "cold_volume_max_difference_mm3":  2.3283064365386963E-10,
+                                   "independent_green_residual_mm3":  0.000286039896,
+                                   "unchanged_conservation_gate_mm3":  0.106848728665,
+                                   "independent_green_receipt_sha256":  "b99a8ca6da17797ed4e19fd43641672f0bceb5bbb2d311f22451cbf67aa2d1e7",
+                                   "private_requests_and_drawings_not_published":  true,
+                                   "paid_model_calls":  0
+                               },
+    "graph":  {
+                  "tool":  "graphifyy==0.9.92",
+                  "backend":  "none",
+                  "source_sha256":  "aed6f0e8c42da3dfd4ee544ca53954d2b1814d435ad14023915133f336e7f6f4",
+                  "graph_sha256":  "4f5a48264156ce07c304356386532c1afab700d5c218d788943188d501dafd2c",
+                  "vault_content_sha256":  "81ca5cebc7020c25e291ca1cd8203ec00fa1f7594d4a360740e2773c8c485d79",
+                  "generated_notes":  9879,
+                  "curated_notes":  4,
+                  "verified_file_links":  72685,
+                  "scope":  "Code navigation and verified derived file links; partial extraction remains; distinct from runtime project graph; no private ingestion"
+              },
+    "package":  {
+                    "name":  "ark-windows-x64-0.9.39.zip",
+                    "bytes":  40034897,
+                    "sha256":  "c78aca3d1aa03af752df5dd5cdba87b1ce003f9d1478de2c4510a00d23366100",
+                    "provenance_sha256":  "3604e5ebad6eadf3c6b4b835b22a4811b93be922675979ad4b4a8e8f3804cdd4",
+                    "relocatable_smoke":  "PASS",
+                    "relocatable_receipt_sha256":  "28973d44b03f471a7fde19f42c2c4b7d201da0dfb2cdc67ab79971ba7aca7d29",
+                    "packaged_user_drawings":  0,
+                    "checks":  "Identity, 31 DLLs, exact patches/notices, synthetic native create, rollback/stale rejection, save/fresh reopen, STEP export/import with zero measured geometric difference",
+                    "installed_version":  "0.9.39",
+                    "previous_version":  "0.9.38",
+                    "launcher_health_ack":  true,
+                    "launch_receipt_sha256":  "57e75aca2ac44dab01f1fe2fb55a53d266056f5746f3022db9f5f27b92491391",
+                    "public_release_uploaded":  false
+                },
+    "failed_attempts":  [
+                            "Earlier QR-only SDK passed133/135; missing concat/offset owners remained open until complete SDK integration.",
+                            "Range-only and stricter-fit shell candidates were rejected; common-origin integration evidence was disproved by origin-shift controls.",
+                            "First continuity test missed an unreturned tail; final public coverage checks all segments and both global endpoints.",
+                            "Initial full SDK compile exposed the second template consumer; both consumers were fixed before the final clean build.",
+                            "Promotion preflight and distribution wrappers initially treated native Git warnings as errors; corrected only the harness and retained failed attempts.",
+                            "Package smoke initially expected LF in the rendered notice header; corrected header parsing while requiring every source patch byte to remain exact."
+                        ],
+    "limits":  [
+                   "Local tests and offline reproductions do not prove real-provider design quality or matched token/cost savings. No new paid trial was started.",
+                   "Native B-rep recomputation may change serialization and one floating-point volume unit; saved artifact reuse is separately byte-identical.",
+                   "Independent integration retains measured nonzero residuals; no exact-closure or manufacturing qualification claim.",
+                   "Direct isoline/subdomain and injected-failure probes remain private harness evidence, not public CTest registrations.",
+                   "Linux execution, broader third-party ABI use, hosted CI, stable OTA publication and commercial vendor API adapters remain separate gates."
+               ],
+    "final_delivery_checks":  {
+                                  "release_evidence_script":  "PASS",
+                                  "release_evidence_log_sha256":  "7ff6f6ed2c4d864c3645766b1598920daf71a68c88305a1aa250e6802d6f58b5",
+                                  "identity_and_iteration_registrations":  2,
+                                  "identity_xml_sha256":  "caaa6b25dce808e1831408ad79ffdcfb3ea5c9b0607a41f9a9944c085604babc"
+                              }
+}

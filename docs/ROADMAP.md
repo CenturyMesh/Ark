@@ -12,7 +12,7 @@ month; it does not declare the phase complete. The `.ark` format evolves separat
 038B addresses **A.03/A.04/A.05/B.01/B.02/B.03/D.02/D.04** through corrected native
 loft/shell construction, per-query recovery and verified Obsidian exports.
 Recovery is **Verificado no escopo local**: 135 native, 90 portable and six Studio
-registrations pass. Distribution is pending; autonomous design delivery and
+registrations pass; the relocated test package and launcher also pass. Autonomous design delivery and
 matched token savings remain **Parcial**. See [038B](iterations/038B.md).
 
 037D addresses **A.03/A.04/D.02/D.04** through retained authoring contracts,
