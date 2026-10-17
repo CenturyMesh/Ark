@@ -4284,8 +4284,8 @@ static GLuint quadVao,gridVao,gridVbo,textVao,textVbo,gFbo=0,gGeomTex=0,gAoTex=0
 static void drawAssistantAttachmentThumbnail(const AssistantImageAttachment& attachment,float x,float y,float w,float h){
     if(attachment.thumbnailRGBA.empty()||!attachment.thumbnailWidth||!attachment.thumbnailHeight)return;static GLuint texture=0;static std::vector<unsigned char> uploaded;static unsigned uploadedW=0,uploadedH=0;if(!texture)glGenTextures(1,&texture);glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,texture);if(uploaded!=attachment.thumbnailRGBA||uploadedW!=attachment.thumbnailWidth||uploadedH!=attachment.thumbnailHeight){glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,(GLsizei)attachment.thumbnailWidth,(GLsizei)attachment.thumbnailHeight,0,GL_RGBA,GL_UNSIGNED_BYTE,attachment.thumbnailRGBA.data());glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);uploaded=attachment.thumbnailRGBA;uploadedW=attachment.thumbnailWidth;uploadedH=attachment.thumbnailHeight;}float scale=std::min(w/attachment.thumbnailWidth,h/attachment.thumbnailHeight),width=attachment.thumbnailWidth*scale,height=attachment.thumbnailHeight*scale;glUseProgram(pImage);glUniform2f(glGetUniformLocation(pImage,"vp"),(float)winW,(float)winH);glUniform4f(glGetUniformLocation(pImage,"rc"),x+(w-width)*.5f,y+(h-height)*.5f,width,height);glUniform1i(glGetUniformLocation(pImage,"image"),0);glBindVertexArray(quadVao);glDrawArrays(GL_TRIANGLES,0,6);glUseProgram(pUI);
 }
-struct CubeTriangle{Vec3 a,b,c,normal;int face=-1;};
-struct CubeHit{bool hit=false;int face=-1;Vec3 normal{};};
+struct CubeTriangle{Vec3 a,b,c,normal;int face=-1,facet=-1;};
+struct CubeHit{bool hit=false;int face=-1;Vec3 normal{};int facet=-1;};
 static std::vector<CubeTriangle> g_cubeTriangles;
 static CubeHit g_cubeHover;
 static GLuint g_busySnapshotTex=0;static int g_busySnapshotW=0,g_busySnapshotH=0;
@@ -4443,46 +4443,7 @@ static void drawFeatureEdges(const GLfloat vpT[16]){
         size_t part=g_instancePart[i];if(part>=g_edgeLines.size()||g_edgeLines[part].verts<6)continue;GLfloat m[16];for(int k=0;k<16;++k)m[k]=(GLfloat)g_instanceWorld[i].m[k];glUniformMatrix4fv(glGetUniformLocation(pFeatureEdge,"model"),1,GL_FALSE,m);glBindVertexArray(g_edgeLines[part].vao);glDrawArrays(GL_TRIANGLES,0,g_edgeLines[part].verts);}
     glDepthMask(GL_TRUE);
 }
-static void updateNavigationBounds(){
-    float expansion=std::clamp(((float)viewW-622.f)/420.f,0.f,1.f);
-    g_cubeS=std::max(44,std::min((int)std::lround(136.f+24.f*expansion),viewH-26));g_cubeX=viewX+14;g_cubeY=viewY+12;
-}
-static bool overViewCube(float x,float y,float padding=20.f){return g_showViewCube&&x>=g_cubeX-padding&&x<=g_cubeX+g_cubeS+padding&&y>=g_cubeY-padding&&y<=g_cubeY+g_cubeS+padding;}
-static void cubeCamera(Vec3& eye,Mat4& view,Mat4& proj){
-    Vec3 dw{std::cos(pitch)*std::sin(yaw),std::sin(pitch),std::cos(pitch)*std::cos(yaw)};eye=dw*4.2;view=Mat4::lookAt(eye,{},cameraFrame(yaw,pitch,cameraRoll).up);proj=Mat4::ortho(-1.5,1.5,-1.5,1.5,0.05,20);
-}
-static CubeHit cubeHitAt(int mx,int my){
-    CubeHit hit;if(g_cubeS<8||mx<g_cubeX||my<g_cubeY||mx>=g_cubeX+g_cubeS||my>=g_cubeY+g_cubeS)return hit;
-    Vec3 eye;Mat4 view,proj;cubeCamera(eye,view,proj);
-    double nx=((mx-g_cubeX)/(double)g_cubeS)*2-1,ny=(1.-(my-g_cubeY)/(double)g_cubeS)*2-1;
-    Vec3 right{view.m[0],view.m[4],view.m[8]},up{view.m[1],view.m[5],view.m[9]},dir{-view.m[2],-view.m[6],-view.m[10]};
-    Vec3 origin=eye+right*(nx*1.5)+up*(ny*1.5);double nearest=1e100;
-    for(const CubeTriangle& triangle:g_cubeTriangles){
-        Vec3 ab=triangle.b-triangle.a,ac=triangle.c-triangle.a,p=dir.cross(ac);double determinant=ab.dot(p);
-        if(std::abs(determinant)<1e-10)continue;double inverse=1./determinant;Vec3 from=origin-triangle.a;
-        double u=from.dot(p)*inverse;if(u<0||u>1)continue;Vec3 q=from.cross(ab);double v=dir.dot(q)*inverse;
-        if(v<0||u+v>1)continue;double distance=ac.dot(q)*inverse;
-        if(distance>=0&&distance<nearest){nearest=distance;hit={true,triangle.face,triangle.normal};}
-    }
-    return hit;
-}
-static int cubeFaceAt(int mx,int my){auto hit=cubeHitAt(mx,my);return hit.hit?hit.face:-1;}
-static void orientViewCube(int mx,int my){static const int faceView[6]={182,183,23,184,180,181};auto hit=cubeHitAt(mx,my);if(!hit.hit)return;
-    if(hit.face>=0)uiAction(faceView[hit.face]);
-    else{Vec3 normal=hit.normal.normalized();setOrbitView(std::atan2(normal.x,normal.z),std::asin(clamp(normal.y,-1.,1.)),true,"Diagonal");}}
-static void paintViewCube(){
-    if(!gCubeVao)return;
-    glEnable(GL_SCISSOR_TEST);glScissor(g_cubeX,winH-g_cubeY-g_cubeS,g_cubeS,g_cubeS);glViewport(g_cubeX,winH-g_cubeY-g_cubeS,g_cubeS,g_cubeS);glEnable(GL_DEPTH_TEST);glClear(GL_DEPTH_BUFFER_BIT);glDisable(GL_SCISSOR_TEST);
-    Vec3 eye;Mat4 view,proj;cubeCamera(eye,view,proj);Mat4 vp=proj*view;GLfloat vpT[16];for(int i=0;i<16;++i)vpT[i]=(GLfloat)vp.m[i];
-    static const GLfloat ident[16]={1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};static const float colors[6][3]={{.77f,.84f,.91f},{.58f,.67f,.78f},{.43f,.79f,.94f},{.39f,.45f,.53f},{.91f,.94f,.98f},{.60f,.69f,.79f}};
-    glUseProgram(pCube);glUniform3f(glGetUniformLocation(pCube,"eye"),(float)eye.x,(float)eye.y,(float)eye.z);glUniformMatrix4fv(glGetUniformLocation(pCube,"vp"),1,GL_FALSE,vpT);glUniformMatrix4fv(glGetUniformLocation(pCube,"model"),1,GL_FALSE,ident);glUniform1f(glGetUniformLocation(pCube,"outline"),0.f);
-    glBindVertexArray(gCubeVao);for(int face=0;face<6;++face){float glow=g_cubeHover.hit&&g_cubeHover.face==face?.13f:0.f;
-        glUniform3f(glGetUniformLocation(pCube,"color"),std::min(1.f,colors[face][0]+glow),std::min(1.f,colors[face][1]+glow),std::min(1.f,colors[face][2]+glow));glDrawArrays(GL_TRIANGLES,face*6,6);}
-    float edgeGlow=g_cubeHover.hit&&g_cubeHover.face<0?.18f:0.f;
-    glUniform3f(glGetUniformLocation(pCube,"color"),.68f+edgeGlow,.77f+edgeGlow,.86f+edgeGlow);
-    glDrawArrays(GL_TRIANGLES,36,72);glUniform3f(glGetUniformLocation(pCube,"color"),.60f+edgeGlow,.70f+edgeGlow,.80f+edgeGlow);glDrawArrays(GL_TRIANGLES,108,24);
-    glDisable(GL_DEPTH_TEST);glViewport(0,0,winW,winH);
-}
+#include "navigation_widget.inl"
 static void paintCompass(int x,int y,int width,int height){
     if(!gCompassVao)return;
     Vec3 eye;Mat4 view,projection;cubeCamera(eye,view,projection);Mat4 vp=projection*view;
@@ -5425,13 +5386,6 @@ static void drawFrame(HDC hdc){
     updateNavigationBounds();
     g_cubeHover=cubeHitAt(mp.x,mp.y);
     paintViewCube();glUseProgram(pUI);glUniform2f(uuVp,W,H);
-    {Vec3 cubeEye;Mat4 cubeView,cubeProj;cubeCamera(cubeEye,cubeView,cubeProj);Mat4 cvp=cubeProj*cubeView;Vec3 toEye=cubeEye.normalized();
-        static const char* faceName[]={"Right","Left","Top","Bottom","Front","Back"};
-        static const Vec3 faceNormal[]={{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
-        for(int face=0;face<6;++face){double visibility=faceNormal[face].dot(toEye);if(visibility<.18)continue;Vec3 p=faceNormal[face]*.88;double cw=cvp.m[3]*p.x+cvp.m[7]*p.y+cvp.m[11]*p.z+cvp.m[15];if(cw<=1e-5)continue;Vec3 clip=cvp.transformPoint(p);
-            float x=g_cubeX+(float)((clip.x/cw+1)*.5*g_cubeS),y=g_cubeY+(float)((1-clip.y/cw)*.5*g_cubeS);
-            float scale=(visibility>.55?.61f:.56f)*std::min(1.f,g_cubeS/134.f);textOut(faceName[face],x-textWidth(faceName[face],scale)*.5f,y-6,scale,.06f,.11f,.16f);}
-    }
     float homeX=(float)g_cubeX+g_cubeS-29,homeY=(float)g_cubeY+g_cubeS-28;
     bool homeHover=mp.x>=homeX&&mp.x<homeX+28&&mp.y>=homeY&&mp.y<homeY+28;
     rect(homeX,homeY,28,28,14,homeHover?.21f:.08f,homeHover?.32f:.11f,homeHover?.43f:.15f,homeHover?.94f:.72f,.41f,.59f,.73f,homeHover?.78f:.42f,1);
@@ -5470,7 +5424,9 @@ static void drawFrame(HDC hdc){
         }else std::snprintf(angle,sizeof angle,"Ready to drag a joint");textOut(angle,px+4,py+6,.72f,.72f,.96f,.97f);
         button("Apply",px+224,py,70,563);button("Cancel",px+302,py,73,564);textOut("Drag part / release saves / Esc cancels / middle mouse orbits",px+3,py+37,.52f,.65f,.82f,.86f);
     }
-    if(g_grid&&!g_allSheetsFlat&&!g_stockMode){std::string scale="Grid "+g_displayUnits.distance(g_adaptiveGrid.spacing)+" / major "+g_displayUnits.distance(g_adaptiveGrid.spacing*5.);float gx=(float)viewX+17,gy=(float)viewY+viewH-78;rect(gx-6,gy-5,textWidth(scale,.65f)+12,24,5,.065f,.09f,.115f,.85f,0,0,0,0,0);textOut(scale,gx,gy,.65f,.68f,.81f,.89f);}
+    if(g_grid&&!g_allSheetsFlat&&!g_stockMode){std::string scale="Grid "+g_displayUnits.distance(g_adaptiveGrid.spacing)+" / major "+g_displayUnits.distance(g_adaptiveGrid.spacing*5.);float gx=(float)viewX+17,gy=(float)viewY+viewH-78;
+        if(g_showViewCube&&gy-5<g_cubeY+g_cubeS+12){gx=(float)g_cubeX+g_cubeS+24;if(!g_compactNavigation)gy=(float)viewY+viewH-34;}
+        rect(gx-6,gy-5,textWidth(scale,.65f)+12,24,5,.065f,.09f,.115f,.85f,0,0,0,0,0);textOut(scale,gx,gy,.65f,.68f,.81f,.89f);}
     panel(0,H-32,W,32);
     textOut(g_status.substr(0,(size_t)std::max(28,(winW-430)/7)),20,H-23,.70f,g_error?.96f:.62f,g_error?.56f:.73f,g_error?.40f:.81f);
     textOut(g_displayUnits.length,W-164,H-23,.73f,.67f,.76f,.83f);iconButton(22,"Show / hide grid",W-118,H-29,24);iconButton(461,"Navigation controls",W-81,H-29,24);iconButton(460,"Full screen",W-44,H-29,24);
@@ -5860,7 +5816,7 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
             g_pressWasButton=p.x<viewX||p.x>viewX+viewW||p.y<viewY||p.y>viewY+viewH;
             for(auto&z:g_zones)
                 if((float)p.x>=z.x&&(float)p.x<=z.x+z.w&&(float)p.y>=z.y&&(float)p.y<=z.y+z.h)
-                    { if(z.id==688){try{if(!g_directAuthoring.active)beginDirectHandle();g_directAuthoring.handleStart=true;g_pressWasButton=false;}catch(const std::exception& error){g_error=true;g_status=error.what();g_pressWasButton=true;}}else if(z.id==179){g_cubePress=cubeHitAt(p.x,p.y).hit;g_pressWasButton=false;}
+                    { if(z.id==688){try{if(!g_directAuthoring.active)beginDirectHandle();g_directAuthoring.handleStart=true;g_pressWasButton=false;}catch(const std::exception& error){g_error=true;g_status=error.what();g_pressWasButton=true;}}else if(z.id==179){g_cubePress=cubeHitAt(p.x,p.y).hit;g_pressWasButton=!g_cubePress;}
                         else{g_pressWasButton=true;if(z.id==50){g_foldScrubbing=true;g_foldPlaying=false;g_foldProgress=clamp((double)(p.x-z.x)/z.w,0.,1.);}
                         else if(z.id==53){g_sheetScrubbing=true;g_sheetPlayingId=0;if(auto* sheet=selectedSheet())try{sheetPreviewSet(sheet->id,(double)(p.x-z.x)/z.w);}catch(const std::exception& error){g_error=true;g_status=error.what();}}
                         else if(z.id>=380&&z.id<=382){g_suspScrub=z.id-380;g_suspSpinPlaying=false;try{setSuspensionControl(g_suspScrub,(p.x-z.x)/z.w);}catch(const std::exception& error){g_error=true;g_status=error.what();}}} break; }
@@ -6222,25 +6178,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     glEnableVertexAttribArray(1);glVertexAttribPointer(1,1,GL_FLOAT,GL_FALSE,16,(void*)(3*sizeof(float)));
     glGenVertexArrays(1,&textVao);
     glGenBuffers(1,&textVbo);
-    glGenVertexArrays(1,&gCubeVao);glGenBuffers(1,&gCubeVbo);
-    {std::vector<float> cube;g_cubeTriangles.clear();const double s=.85,a=.72;
-        auto with=[](Vec3 v,int axis,double value){if(axis==0)v.x=value;else if(axis==1)v.y=value;else v.z=value;return v;};
-        auto triangle=[&](Vec3 p,Vec3 q,Vec3 r,Vec3 normal,int face){normal=normal.normalized();
-            g_cubeTriangles.push_back({p,q,r,normal,face});for(Vec3 v:{p,q,r})cube.insert(cube.end(),{(float)v.x,(float)v.y,(float)v.z,(float)normal.x,(float)normal.y,(float)normal.z});};
-        for(int face=0;face<6;++face){int axis=face/2,sign=face%2?-1:1,tangent=(axis+1)%3,bitangent=(axis+2)%3;
-            Vec3 normal=with({},axis,(double)sign);auto point=[&](double u,double v){return with(with(with({},axis,sign*s),tangent,u),bitangent,v);};
-            Vec3 p=point(-a,-a),q=point(a,-a),r=point(a,a),v=point(-a,a);triangle(p,q,r,normal,face);triangle(p,r,v,normal,face);
-        }
-        for(int axis=0;axis<3;++axis)for(int other=axis+1;other<3;++other){int edgeAxis=3-axis-other;
-            for(int sa:{-1,1})for(int sb:{-1,1}){auto point=[&](double first,double second,double along){return with(with(with({},axis,first),other,second),edgeAxis,along);};
-                Vec3 p=point(sa*s,sb*a,-a),q=point(sa*s,sb*a,a),r=point(sa*a,sb*s,a),v=point(sa*a,sb*s,-a);
-                Vec3 normal=with(with({},axis,(double)sa),other,(double)sb);triangle(p,q,r,normal,-1);triangle(p,r,v,normal,-1);
-            }}
-        for(int sx:{-1,1})for(int sy:{-1,1})for(int sz:{-1,1}){
-            Vec3 p{sx*s,sy*a,sz*a},q{sx*a,sy*s,sz*a},r{sx*a,sy*a,sz*s};triangle(p,q,r,{(double)sx,(double)sy,(double)sz},-1);
-        }
-        glBindVertexArray(gCubeVao);glBindBuffer(GL_ARRAY_BUFFER,gCubeVbo);glBufferData(GL_ARRAY_BUFFER,(GLsizeiptr)(cube.size()*sizeof(float)),cube.data(),GL_STATIC_DRAW);
-        glEnableVertexAttribArray(0);glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,24,nullptr);glEnableVertexAttribArray(1);glVertexAttribPointer(1,3,GL_FLOAT,GL_FALSE,24,(void*)12);}
+    buildNavigationWidget();
     glGenVertexArrays(1,&gCompassVao);glGenBuffers(1,&gCompassVbo);
     {const float axes[]={0,0,0, 1,0,0, 0,0,0, 0,1,0, 0,0,0, 0,0,1};
         glBindVertexArray(gCompassVao);glBindBuffer(GL_ARRAY_BUFFER,gCompassVbo);glBufferData(GL_ARRAY_BUFFER,sizeof axes,axes,GL_STATIC_DRAW);
@@ -6453,20 +6391,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         g_status="Motion UI checks passed / 48T-16T-24T / cadence / wheel rpm / native recompute / undo / read-only playback";
     }
     if(navigationUiTest){
-        u64 revision=g_session.revision;int savedW=winW,savedH=winH;bool savedDock=g_assistantDockOpen,savedMode=g_teamMode,savedCompact=g_compactNavigation;unsigned savedCount=g_teamRoleCount;double savedRoll=cameraRoll;g_assistantDockOpen=true;g_teamMode=true;g_teamRoleCount=3;g_compactNavigation=false;g_pickKind=1;g_verifyTeamCardBounds=true;
-        auto failure=[&](const std::string& detail){std::ofstream log(shotPath+".navigation-test.log");log<<detail<<"\n";std::fprintf(stderr,"Navigation UI selftest: %s\n",detail.c_str());return 402;};
-        auto resize=[&](int width,int height){RECT bounds{0,0,width,height};AdjustWindowRectEx(&bounds,(DWORD)GetWindowLongPtr(g_window,GWL_STYLE),FALSE,(DWORD)GetWindowLongPtr(g_window,GWL_EXSTYLE));SetWindowPos(g_window,nullptr,0,0,bounds.right-bounds.left,bounds.bottom-bounds.top,SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);winW=width;winH=height;layout();};
-        for(auto size:std::vector<std::pair<int,int>>{{1180,800},{1600,1000}}){resize(size.first,size.second);frameScene();target=tTarget;dist=tDist;uiAction(24);yaw=tYaw;pitch=tPitch;cameraRoll=.35;g_swap=false;HDC dc=GetDC(g_window);drawFrame(dc);glFinish();std::string detail;
-            if(!navigationUiFits(detail)||!g_teamCardContentFits||viewH<160){ReleaseDC(g_window,dc);return failure(detail+" / "+g_teamCardBoundsFailure);}
-            std::vector<u8> pixels((size_t)winW*winH*3);glPixelStorei(GL_PACK_ALIGNMENT,1);glReadBuffer(GL_BACK);glReadPixels(0,0,winW,winH,GL_RGB,GL_UNSIGNED_BYTE,pixels.data());Image shot;shot.w=winW;shot.h=winH;shot.px.resize(pixels.size());for(int y=0;y<winH;++y)std::memcpy(shot.px.data()+(size_t)y*winW*3,pixels.data()+(size_t)(winH-1-y)*winW*3,(size_t)winW*3);ReleaseDC(g_window,dc);
-            std::array<unsigned,3> colors{};for(int y=g_compassBounds.top;y<g_compassBounds.bottom;++y)for(int x=g_compassBounds.left;x<g_compassBounds.right;++x){const u8* pixel=shot.px.data()+((size_t)y*winW+x)*3;for(int axis=0;axis<3;++axis)if(pixel[axis]>80&&pixel[axis]>pixel[(axis+1)%3]*1.2&&pixel[axis]>pixel[(axis+2)%3]*1.2)++colors[axis];}
-            for(unsigned count:colors)if(count<20)return failure("Cartesian triad lost an RGB axis in the rendered image.");
-            if(!writePNG((shotPath+".navigation-"+std::to_string(size.first)+"x"+std::to_string(size.second)+".png").c_str(),shot))return failure("Could not save navigation screenshot.");
-        }
-        static const int faceViews[]={182,183,23,184,180,181};
-        for(int face=0;face<6;++face)for(double roll:{0.,.63}){uiAction(faceViews[face]);double expectedYaw=tYaw,expectedPitch=tPitch;yaw=tYaw;pitch=tPitch;cameraRoll=roll;HDC dc=GetDC(g_window);drawFrame(dc);ReleaseDC(g_window,dc);int x=g_cubeX+g_cubeS/2,y=g_cubeY+g_cubeS/2;auto hit=cubeHitAt(x,y);if(!hit.hit||hit.face!=face)return failure("Face "+std::to_string(face)+" failed picking with roll "+std::to_string(roll));orientViewCube(x,y);if(std::abs(tYaw-expectedYaw)>1e-8||std::abs(tPitch-expectedPitch)>1e-8||!g_cameraOrtho)return failure("Cube face click changed the canonical view mapping.");}
-        if(g_session.revision!=revision)return failure("Navigation changed the CAD document revision.");
-        resize(savedW,savedH);g_assistantDockOpen=savedDock;g_teamMode=savedMode;g_teamRoleCount=savedCount;g_compactNavigation=savedCompact;g_pickKind=0;g_verifyTeamCardBounds=false;cameraRoll=savedRoll;uiAction(24);yaw=tYaw;pitch=tPitch;frameScene();target=tTarget;dist=tDist;g_status="Navigation UI checks passed / upper-left cube / shaded RGB triad / six faces / camera roll / unchanged document";
+#include "navigation_widget_selftest.inl"
     }
 
     if(actionIconsUiTest){
