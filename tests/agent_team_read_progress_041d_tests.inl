@@ -5,7 +5,45 @@ static V semanticReferenceReceipt041d(unsigned revision=1){
     V result=json(R"({"isError":false,"structuredContent":{"revision":1,"id":1,"kind":"face","topology":{"references":[{"name":"z_min","kind":"face","status":"bound","descriptor":{"normal":[0,0,-1]}}]}}})");
     V data=*result.find("structuredContent");data.set("revision",V::makeNum(revision));result.set("structuredContent",data);return result;
 }
+static V reducedReadTools041d(){
+    V tools=ark::AgentSession::tools();tools.arr.erase(std::remove_if(tools.arr.begin(),tools.arr.end(),[](const auto& tool){return tool.find("name")->asStr()=="query_batch";}),tools.arr.end());return tools;
+}
+static void reducedCatalogReadRecovery041d(){
+    for(const std::string mode:{"find","reference","wrong_subject","stale","failed","missing_revision","other_copy","doc_info","object_context"}){
+        ark::AgentSession session;session.suppressIterationHistory();check(!session.call("doc_apply",json(R"({"expected_revision":0,"commands":[{"op":"feature.add","type":"box","name":"Reduced catalogue body","p":{"dx":10,"dy":8,"dz":4}}]})")).find("isError")->b,"reduced catalogue fixture starts with an actual editable body");
+        ark::AgentTeam team;ark::AgentTeamConfig config;config.focusedWorkflow=true;config.roles={role("engineer",true)};int round=0,writes=0;const bool selected=mode=="find"||mode=="reference",exact=mode=="doc_info"||mode=="object_context",recovered=selected||exact;V report;
+        const std::string tool=exact?mode:"reference_inspect";
+        V failed=mode=="doc_info"?json(R"({"detail":"summary"})"):mode=="object_context"?json(R"({"ids":[1],"expected_revision":1})"):json(R"({"id":1,"reference":"missing.synthetic.face","detail":"frame"})");
+        V evidence=mode=="doc_info"?json(R"({"detail":"revision"})"):mode=="object_context"?json(R"({"ids":[2],"expected_revision":1})"):mode=="reference"?json(R"({"id":1,"reference":"z_min","detail":"frame"})"):json(R"({"id":1,"find":{"kind":"planar","normal":"-Z"},"detail":"frame"})");
+        if(mode=="wrong_subject")evidence.set("id",V::makeNum(2));if(mode=="other_copy"){failed.set("copy",V::makeNum(0));evidence.set("copy",V::makeNum(1));}
+        config.roles[0].transport=[&](auto&,const V& request,auto*){
+            switch(++round){
+            case 1:{bool offeredBatch=false;for(const auto& offered:request.find("tools")->arr)offeredBatch|=offered.find("name")->asStr()=="query_batch";check(!offeredBatch,"recovery catalogue genuinely omits query_batch");return call("reduced_rejected_read",tool,failed.dump());}
+            case 2:check(team.snapshot().roles[0].unresolvedToolErrors==1,"reduced catalogue retains the original read occurrence");return call("reduced_different_read",tool,evidence.dump());
+            case 3:{
+                const auto receipt=lastTeamReceipt038d(request);check(team.snapshot().roles[0].unresolvedToolErrors==(mode=="failed"?2u:1u),"a different successful selection never silently clears an earlier read merely because batch discovery is absent");
+                if(selected){const auto& next=*receipt.find("team_progress")->find("next_action");check(next.find("action")->str=="confirm_corrected_read"&&next.find("requires_author_decision")->b,"literal or FIND recovery receives the same explicit author decision");report=*next.find("args");const auto& resolution=report.find("read_resolutions")->arr[0];const auto& retainedArgs=*resolution.find("evidence")->find("args");check(resolution.find("failed")->find("args")->dump()==failed.dump()&&retainedArgs.obj.size()==evidence.obj.size(),"reduced catalogue proposal retains the exact rejected and successful query argument fields");for(const auto& field:evidence.obj)check(retainedArgs.find(field.first.c_str())&&retainedArgs.find(field.first.c_str())->dump()==field.second.dump(),"all observed successful query argument values are preserved without relying on object key order");if(mode=="find")check(retainedArgs.find("find")&&resolution.find("reason")->str.find("producer-authored semantic")==std::string::npos,"FIND evidence is attributed as the actual selected inspection rather than a literal semantic request");return call("reduced_author_confirmation","team_report_task",report.dump());}
+                if(exact)return call("reduced_exact_recovery",tool,failed.dump());
+                if(mode!="failed"&&mode!="missing_revision")check(receipt.find("team_progress")->find("next_action")->find("action")->str!="confirm_corrected_read","wrong-subject or stale FIND cannot become an author-confirmation proposal");
+                return call("reduced_reject_completion","team_finish_goal",R"({"state":"completed","summary":"Attempt to ignore the original read failure."})");
+            }
+            case 4:
+                if(recovered){check(team.snapshot().roles[0].unresolvedToolErrors==0,"only explicit corrected-selection confirmation or an exact current read resolves the retained error");return call("reduced_actual_cad_edit","doc_apply",R"({"expected_revision":1,"commands":[{"op":"feature.edit","id":1,"p":{"dx":22}}]})");}
+                check(lastTeamReceipt038d(request).find("isError")->b,"reduced catalogue cannot complete with the original unresolved read");return done("Original reduced-catalogue read remains rejected.");
+            case 5:check(session.revision==2&&writes==1,"reduced catalogue recovery reaches one actual geometry publication");return call("reduced_completed","team_finish_goal",R"({"state":"completed","summary":"Recovered the exact read and authored the next editable checkpoint."})");
+            default:return done("Reduced catalogue recovery checked.");
+            }
+        };
+        team.start(config,"Recover a selected read without the optional batch envelope",reducedReadTools041d(),[&](const std::string& name,const V& args){
+            if(round==1||((mode=="failed")&&round==2))return json(R"({"isError":true,"structuredContent":{"revision":1,"error_code":"EVALUATION_FAILED","error":"Original selected read rejected."}})");
+            if(name=="reference_inspect"){auto receipt=semanticReferenceReceipt041d(mode=="stale"?0:1);V data=*receipt.find("structuredContent");data.obj.erase(std::remove_if(data.obj.begin(),data.obj.end(),[](const auto& field){return field.first=="topology";}),data.obj.end());data.set("reference",V::makeStr("z_min"));if(mode=="wrong_subject")data.set("id",V::makeNum(2));if(mode=="missing_revision")data.obj.erase(std::remove_if(data.obj.begin(),data.obj.end(),[](const auto& field){return field.first=="revision";}),data.obj.end());receipt.set("structuredContent",data);return receipt;}
+            if(mode=="object_context"&&round==2)return json(R"({"isError":false,"structuredContent":{"revision":1,"objects":[]}})");
+            if(name=="doc_apply")++writes;return session.call(name,args);
+        });complete(team);const auto snapshot=team.snapshot();check(snapshot.roles[0].state==ark::AgentTeamState::Idle&&snapshot.unresolvedErrors==(recovered?0u:mode=="failed"?2u:1u)&&session.revision==(recovered?2u:1u)&&(recovered?snapshot.goalState==ark::AgentGoalState::Completed:snapshot.goalState!=ark::AgentGoalState::Completed),("reduced catalogue strict recovery: "+mode+" / "+snapshot.roles[0].error).c_str());
+    }
+}
 static void observedReadProgress041d(){
+    reducedCatalogReadRecovery041d();
     for(const std::string mode:{"predicate","frame","wrong_normal","ambiguous","split","wrong_receipt_id","unmeasured","stale","known_newer","other_target","other_copy","failed","project","failed_write"}){
         ark::AgentSession session;session.suppressIterationHistory();
         check(!session.call("doc_apply",json(R"({"expected_revision":0,"commands":[{"op":"feature.add","type":"box","name":"Synthetic recovery body","p":{"dx":10,"dy":8,"dz":4}}]})")).find("isError")->b,"synthetic editable body starts at revision one");
@@ -98,7 +136,8 @@ static void inspectionProgressProjection041d(){
 }
 #ifdef ARK_TEAM_NATIVE_RECOVERY_TESTS
 static void nativeReadThenGeometry041d(){
-    for(bool predicateProof:{false,true}){
+    for(const std::string selection:{"reference","find","predicate"}){
+        const bool predicateProof=selection=="predicate",findRecovery=selection=="find";
         ark::AgentSession session;session.suppressIterationHistory();
         const auto setup=predicateProof?R"({"expected_revision":0,"commands":[{"op":"feature.add","type":"native_solid","name":"Synthetic native recovery","native":{"op":"sphere"},"p":{"radius":5}}]})":R"({"expected_revision":0,"commands":[{"op":"feature.add","type":"native_solid","name":"Synthetic native recovery","native":{"op":"box"},"p":{"width":10,"depth":8,"height":4}}]})";
         const auto initial=session.call("doc_apply",json(setup));check(!initial.find("isError")->b,"synthetic native body is authored through the actual OCCT Session");
@@ -110,13 +149,13 @@ static void nativeReadThenGeometry041d(){
             case 2:{
                 check(lastTeamReceipt038d(request).find("isError")->b&&team.snapshot().roles[0].unresolvedToolErrors==1,"actual original native selector failure remains visible");
                 if(predicateProof){const auto changed=session.call("doc_apply",json(R"({"expected_revision":1,"commands":[{"op":"feature.edit","id":1,"native":{"op":"box"},"p":{"width":10,"depth":8,"height":4}}]})"));check(!changed.find("isError")->b&&session.revision==2,"an explicit source edit makes the original unique planar predicate true at a later revision");}
-                return call("native_corrected_semantic","reference_inspect",predicateProof?R"({"id":1,"reference":"z_min","detail":"full"})":R"({"id":1,"reference":"z_min","detail":"frame"})");
+                return call("native_corrected_semantic","reference_inspect",predicateProof?R"({"id":1,"reference":"z_min","detail":"full"})":findRecovery?R"({"id":1,"find":{"kind":"planar","normal":"-Z"},"detail":"frame"})":R"({"id":1,"reference":"z_min","detail":"frame"})");
             }
             case 3:{
                 const auto receipt=lastTeamReceipt038d(request);check(!receipt.find("isError")->b&&receipt.find("structuredContent")->find("world_column_major"),"corrected reference resolves an actual current native frame");
                 const auto& progress=*receipt.find("team_progress");
                 if(predicateProof){check(team.snapshot().roles[0].unresolvedToolErrors==0&&progress.find("read_resolutions")->arr[0].find("selection_predicate_verified")->b,"actual full B-rep topology proves the original unique -Z selector before automatic recovery");}
-                else{const auto& next=*progress.find("next_action");check(next.find("requires_author_decision")->b&&team.snapshot().roles[0].unresolvedToolErrors==1,"actual compact frame supplies a ready author decision and retains the original rejected reference");report=*next.find("args");return call("native_author_decision","team_report_task",report.dump());}
+                else{const auto& next=*progress.find("next_action");check(next.find("requires_author_decision")->b&&team.snapshot().roles[0].unresolvedToolErrors==1,"actual compact frame supplies a ready author decision and retains the original rejected reference");report=*next.find("args");if(findRecovery)check(report.find("read_resolutions")->arr[0].find("evidence")->find("args")->find("find")&&!report.find("read_resolutions")->arr[0].find("evidence")->find("args")->find("reference"),"actual native FIND receipt supplies its exact selected inspection without inventing a literal semantic request");return call("native_author_decision","team_report_task",report.dump());}
                 break;
             }
             case 4:
@@ -129,10 +168,10 @@ static void nativeReadThenGeometry041d(){
             }
             V edit=json(R"({"expected_revision":0,"commands":[{"op":"feature.edit","id":1,"p":{"height":9}}]})");edit.set("expected_revision",V::makeNum(baseline));return call("native_actual_next_geometry","doc_apply",edit.dump());
         };
-        team.start(config,"Recover synthetic native reference and continue editable geometry",ark::AgentSession::tools(),[&](const auto& tool,const V& args){if(tool=="doc_apply")++writes;return session.call(tool,args);});complete(team);
+        team.start(config,"Recover synthetic native reference and continue editable geometry",findRecovery?reducedReadTools041d():ark::AgentSession::tools(),[&](const auto& tool,const V& args){if(tool=="doc_apply")++writes;return session.call(tool,args);});complete(team);
         const auto snapshot=team.snapshot(true,0,true);check(snapshot.roles[0].state==ark::AgentTeamState::Idle&&snapshot.goalState==ark::AgentGoalState::Completed&&snapshot.unresolvedErrors==0&&writes==1&&session.revision==baseline+1,("real native failure -> current reference -> actual geometry write: "+snapshot.roles[0].error).c_str());
         const auto inspected=session.call("native_inspect",json(R"({"id":1,"detail":"properties"})"));check(!inspected.find("isError")->b&&session.document.features[0].p.at("height")=="9","final native body remains inspectable with the intended edited height");const auto& native=*inspected.find("structuredContent")->find("report");check(native.find("brep_valid")->b&&native.find("solids")->num==1&&std::abs(native.find("volume_mm3")->num-720)<1e-6,"actual recovered native body is one valid exact solid with measured720 cubic millimetres");
-        std::cout<<"AGENT_NATIVE_RECOVERY_041D predicate="<<(predicateProof?"verified":"author_confirmed")<<" final_revision="<<session.revision<<" writes="<<writes<<" volume_mm3="<<native.find("volume_mm3")->num<<'\n';
+        std::cout<<"AGENT_NATIVE_RECOVERY_041D selector="<<selection<<" predicate="<<(predicateProof?"verified":"author_confirmed")<<" final_revision="<<session.revision<<" writes="<<writes<<" volume_mm3="<<native.find("volume_mm3")->num<<'\n';
     }
 }
 #else

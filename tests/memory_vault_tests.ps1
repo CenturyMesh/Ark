@@ -13,6 +13,49 @@ function Export {
     return ($result|ConvertFrom-Json)
 }
 function Reject($Action,$Reason){$rejected=$false;try{& $Action|Out-Null}catch{$rejected=$true};if(-not $rejected){throw $Reason}}
+# Exercise the actual nested entry point through a native uvx shim. Successful
+# native stderr must stay visible under Stop, while exit/hash failures reject.
+$nativeFixture=Join-Path $root 'native-stderr-source';$nativeBin=Join-Path $root 'native warning tool'
+foreach($directory in @((Join-Path $nativeFixture 'src'),$nativeBin)){[IO.Directory]::CreateDirectory($directory)|Out-Null}
+$nativeSource=Join-Path $nativeFixture 'src/model.cpp';WriteText $nativeSource 'double warning_fixture() { return 1.; }'
+WriteText (Join-Path $nativeFixture '.gitignore') "out/`n"
+& git -C $nativeFixture init --quiet
+if($LASTEXITCODE){throw 'Cannot initialize the native warning fixture.'}
+WriteText (Join-Path $nativeBin 'fake-graphify.ps1') @'
+$ErrorActionPreference='Stop'
+if($env:ARK_CODE_CONTEXT_FAKE_EXIT -and [int]$env:ARK_CODE_CONTEXT_FAKE_EXIT -ne 0){exit ([int]$env:ARK_CODE_CONTEXT_FAKE_EXIT)}
+if($args -contains '--version'){Write-Output 'synthetic graphify version';exit 0}
+$at=[Array]::IndexOf($args,'--out')
+if($at -lt 0 -or $at+1 -ge $args.Count){exit 23}
+$directory=Join-Path $args[$at+1] 'graphify-out';[IO.Directory]::CreateDirectory($directory)|Out-Null
+[IO.File]::WriteAllText((Join-Path $directory 'graph.json'),'{"nodes":[],"edges":[]}',(New-Object Text.UTF8Encoding($false)))
+if($env:ARK_CODE_CONTEXT_FAKE_MUTATE){[IO.File]::AppendAllText($env:ARK_CODE_CONTEXT_FAKE_MUTATE,"`ndouble changed_during_extract() { return 2.; }")}
+Write-Output 'synthetic graph extraction completed'
+exit 0
+'@
+$nativePowerShell=Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
+WriteText (Join-Path $nativeBin 'uvx.cmd') ("@echo off`r`n>&2 echo SYNTHETIC_AST_PARTIAL_WARNING`r`n"+'"'+$nativePowerShell+'" -NoProfile -ExecutionPolicy Bypass -File "%~dp0fake-graphify.ps1" %*'+"`r`nexit /b %errorlevel%`r`n")
+$pathBeforeNative=$env:PATH;$exitBeforeNative=$env:ARK_CODE_CONTEXT_FAKE_EXIT;$mutationBeforeNative=$env:ARK_CODE_CONTEXT_FAKE_MUTATE
+$flagBeforeNative=Get-Variable PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue
+try{
+    $env:PATH=$nativeBin+[IO.Path]::PathSeparator+$env:PATH;$env:ARK_CODE_CONTEXT_FAKE_EXIT='0';$env:ARK_CODE_CONTEXT_FAKE_MUTATE=$null
+    $PSNativeCommandUseErrorActionPreference=$true
+    $codeContext=Join-Path $repository 'scripts/code-context.ps1'
+    $nativeWarningOutput=@(& { & $codeContext -SourceRoot $nativeFixture -Refresh | Out-Host } 6>&1)
+    if(-not (($nativeWarningOutput|Out-String).Contains('SYNTHETIC_AST_PARTIAL_WARNING'))){throw 'A successful native stderr warning was hidden from the nested caller.'}
+    $nativeManifest=Join-Path $nativeFixture 'out/context-code/source-manifest.json'
+    if(-not (Test-Path -LiteralPath $nativeManifest) -or $ErrorActionPreference -cne 'Stop' -or -not $PSNativeCommandUseErrorActionPreference){throw 'Nested extraction failed or leaked its local native-error preferences.'}
+    $nativeManifestHash=Hash $nativeManifest
+    $env:ARK_CODE_CONTEXT_FAKE_EXIT='17';$nativeRejected='';$nativeExit=0
+    try{& $codeContext -SourceRoot $nativeFixture -Refresh | Out-Host}catch{$nativeRejected=$_.Exception.Message;$nativeExit=$LASTEXITCODE}
+    if(-not $nativeRejected.Contains('Local code graph extraction failed') -or $nativeExit -ne 17 -or (Hash $nativeManifest) -cne $nativeManifestHash){throw 'A real native failure was hidden or replaced the last verified source manifest.'}
+    $env:ARK_CODE_CONTEXT_FAKE_EXIT='0';$env:ARK_CODE_CONTEXT_FAKE_MUTATE=$nativeSource;$changedRejected=''
+    try{& $codeContext -SourceRoot $nativeFixture -Refresh | Out-Host}catch{$changedRejected=$_.Exception.Message}
+    if(-not $changedRejected.Contains('Code changed during indexing') -or (Hash $nativeManifest) -cne $nativeManifestHash){throw 'Native warning handling bypassed the source-change guard or published a stale source receipt.'}
+}finally{
+    $env:PATH=$pathBeforeNative;$env:ARK_CODE_CONTEXT_FAKE_EXIT=$exitBeforeNative;$env:ARK_CODE_CONTEXT_FAKE_MUTATE=$mutationBeforeNative
+    if($flagBeforeNative){$PSNativeCommandUseErrorActionPreference=$flagBeforeNative.Value}else{Remove-Variable PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue}
+}
 # Exercise the actual publisher function with real Windows file-sharing handles.
 # Import only its declarations; do not execute the export script's entry point.
 $tokens=$null;$parseErrors=$null
