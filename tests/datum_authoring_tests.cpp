@@ -13,6 +13,8 @@ void check(bool yes,const char* what){++checks;if(!yes)throw std::runtime_error(
 void close(Vec3 actual,Vec3 expected,const char* what){check(actual.approx(expected,1e-8),what);}
 V parse(const char* text){V result;if(!arkjson::parse(text,result))throw std::runtime_error("Invalid fixture JSON");return result;}
 template<class Fn>void rejects(Fn&& fn,const char* what){++checks;try{fn();}catch(const std::exception&){return;}throw std::runtime_error(what);}
+template<class Fn>void rejectsWith(Fn&& fn,const char* fragment,const char* what){++checks;try{fn();}catch(const std::exception& error){if(std::string(error.what()).find(fragment)==std::string::npos)throw std::runtime_error(std::string(what)+": "+error.what());return;}throw std::runtime_error(what);}
+void setVersion(V& root,double version){for(auto& kv:root.obj)if(kv.first=="version"){kv.second.num=version;return;}throw std::runtime_error("missing version");}
 DatumPlane datum(const char* name,const char* kind,const char* recipe){DatumPlane d;d.name=name;d.kind=kind;d.support=parse(recipe);return d;}
 void put(Document& doc,DatumPlane d){validateDatumDefinition(d);doc.planes.push_back(std::move(d));}
 Vec3 origin(const Document& d,const char* name){return resolvePlane(d,name).transformPoint({});}
@@ -115,9 +117,52 @@ void sessionGuardAndRollback(){
     V request=parse(R"({"commands":[{"op":"plane.remove","name":"P"}]})");request.set("expected_revision",V::makeNum((double)revision));result=session.call("doc_apply",request);
     check(result.find("isError")->b&&session.revision==revision&&documentToJson(session.document)==before,"dependent point removal atomically rejected");
 }
+void originBisectorAndSelection(){
+    Document empty;V emptyJson;check(arkjson::parse(documentToJson(empty),emptyJson),"empty document json");check(emptyJson.find("version")&&emptyJson.find("version")->num==1,"empty document stays version 1");
+    Document builtins;close(origin(builtins,"Origin"),{0,0,0},"Origin is world zero");check(inspectDatum(builtins,"Origin").find("kind")->str=="point","Origin kind is point");
+    close(z(builtins,"XY"),{0,0,1},"XY normal +Z");close(z(builtins,"XZ"),{0,-1,0},"XZ normal -Y");close(z(builtins,"YZ"),{1,0,0},"YZ normal +X");
+    auto originReport=inspectDatum(builtins,"Origin");check(originReport.find("role")->str=="starting_point"&&originReport.find("builtin")->b&&originReport.find("immutable")->b,"Origin inspect role");
+    auto xyReport=inspectDatum(builtins,"XY");check(xyReport.find("kind")->str=="plane"&&xyReport.find("role")->str=="standard_plane"&&xyReport.find("builtin")->b,"XY inspect role");
+    Document d;put(d,datum("Angle","plane",R"({"kind":"bisector","first":"XY","second":"XZ"})"));
+    close(origin(d,"Angle"),{0,0,0},"intersecting bisector origin");close(z(d,"Angle"),Vec3{0,-1,1}.normalized(),"sum angle bisector");
+    put(d,datum("AngleDiff","plane",R"({"kind":"bisector","first":"XY","second":"XZ","side":"difference"})"));
+    close(z(d,"AngleDiff"),Vec3{0,1,1}.normalized(),"difference angle bisector");
+    put(d,datum("Raised","plane",R"({"kind":"offset_plane","plane":"XY","offset":20})"));
+    put(d,datum("Mid","plane",R"({"kind":"bisector","first":"XY","second":"Raised"})"));
+    close(origin(d,"Mid"),{0,0,10},"parallel sum origin");close(z(d,"Mid"),{0,0,1},"parallel sum keeps first normal");
+    put(d,datum("Flip","plane",R"({"kind":"bisector","first":"XY","second":"Raised","side":"difference"})"));
+    close(origin(d,"Flip"),{0,0,10},"parallel difference keeps origin");close(z(d,"Flip"),{0,0,-1},"parallel difference flips first normal");
+    put(d,datum("Down","axis",R"({"kind":"axis_points","start":[0,0,1],"end":[0,0,0]})"));
+    put(d,datum("Ceiling","plane",R"({"kind":"plane_point_normal","point":[0,0,20],"axis":"Down"})"));
+    put(d,datum("Opposed","plane",R"({"kind":"bisector","first":"XY","second":"Ceiling"})"));
+    close(origin(d,"Opposed"),{0,0,10},"opposed parallel midpoint");close(z(d,"Opposed"),{0,0,1},"opposed parallel keeps first normal");
+    put(d,datum("Same","plane",R"({"kind":"bisector","first":"XY","second":"XY"})"));
+    close(origin(d,"Same"),{0,0,0},"coincident bisector is the source plane");close(z(d,"Same"),{0,0,1},"omitted side defaults to sum");
+    rejectsWith([&]{stageDatumSet(Document{},datum("FromOrigin","plane",R"({"kind":"bisector","first":"Origin","second":"XY"})"),0,0);},"Plane support requires a plane or frame","Origin is not a bisector anchor");
+    rejectsWith([&]{validateDatumDefinition(datum("BadSide","plane",R"({"kind":"bisector","first":"XY","second":"XZ","side":"left"})"));},"Bisector side must be sum or difference","bad bisector side");
+    rejectsWith([&]{validateDatumDefinition(datum("Missing","plane",R"({"kind":"bisector","first":"XY"})"));},"Missing datum support field: second","bisector needs second");
+    rejectsWith([&]{validateDatumDefinition(datum("Origin","point",R"({"kind":"point","point":[0,0,0]})"));},"Built-in datums are immutable","Origin name rejected");
+    V saved;check(arkjson::parse(documentToJson(d),saved),"bisector document json");check(saved.find("version")->num==45,"stored bisector selects version 45");
+    Document loaded;std::string error;check(documentFromJson(saved.dump(),loaded,&error),error.c_str());close(origin(loaded,"Mid"),{0,0,10},"reloaded bisector geometry");close(z(loaded,"Flip"),{0,0,-1},"reloaded difference normal");
+    setVersion(saved,44);check(!documentFromJson(saved.dump(),loaded,&error),"bisector below version 45 rejected");check(error.find("Bisector planes require document version 45")!=std::string::npos,error.c_str());
+    Document offset;put(offset,datum("Raised","plane",R"({"kind":"offset_plane","plane":"XY","offset":20})"));V older;check(arkjson::parse(documentToJson(offset),older),"offset json");check(older.find("version")->num==34,"offset plane stays version 34");
+    setVersion(older,45);Document promoted;check(documentFromJson(older.dump(),promoted,&error),error.c_str());setVersion(older,46);check(!documentFromJson(older.dump(),promoted,&error),"version 46 rejected");check(error.find("unsupported document version")!=std::string::npos,error.c_str());
+    AgentSession session;auto denied=session.call("doc_apply",parse(R"({"expected_revision":0,"commands":[{"op":"plane.set","name":"Origin","kind":"point","support":{"kind":"point","point":[0,0,0]}}]})"));
+    check(denied.find("isError")->b&&denied.find("structuredContent")->dump().find("Built-in datums are immutable")!=std::string::npos,"session cannot author Origin");
+    auto selected=session.call("selection_set",parse(R"({"plane":"Origin","expected_revision":0})"));check(!selected.find("isError")->b,"Origin selection");
+    auto body=selected.find("structuredContent");auto pick=body->find("selection");check(pick->find("feature")->num==0&&pick->find("kind")->str=="point"&&pick->find("datum")->b&&pick->find("builtin")->b,"Origin selection payload");
+    check(!body->find("view_state_applied")->b&&body->find("document_unchanged")->b&&body->find("revision")->num==0&&session.revision==0,"headless datum selection does not edit");
+    selected=session.call("selection_set",parse(R"({"plane":"XZ","expected_revision":0})"));pick=selected.find("structuredContent")->find("selection");check(pick->find("kind")->str=="plane"&&pick->find("builtin")->b,"XZ selection payload");
+    check(session.call("selection_set",parse(R"({"expected_revision":0})")).find("isError")->b,"plane selection needs a name");
+    check(session.call("selection_set",parse(R"({"plane":"XY","id":1,"reference":"face.0","expected_revision":0})")).find("structuredContent")->dump().find("Plane selection cannot mix feature references")!=std::string::npos,"mixed plane selection rejected");
+    auto created=session.call("doc_apply",parse(R"({"expected_revision":0,"commands":[{"op":"plane.set","name":"Mark","kind":"point","support":{"kind":"point","point":[1,2,3]}}]})"));check(!created.find("isError")->b,"user datum published");
+    V request=V::makeObj();request.set("plane",V::makeStr("Mark"));request.set("expected_revision",V::makeNum((double)session.revision));selected=session.call("selection_set",request);pick=selected.find("structuredContent")->find("selection");
+    check(!selected.find("isError")->b&&pick->find("kind")->str=="point"&&!pick->find("builtin")->b,"user datum selection");
+    auto inspected=session.call("plane_inspect",parse(R"({"name":"Origin"})"));check(!inspected.find("isError")->b&&inspected.find("structuredContent")->find("kind")->str=="point","plane_inspect keeps Origin kind point");
+}
 }
 int main(){try{analyticConstructions();sketchEndpointsAndPersistence();invalidAndAtomic();sourceOrdering();
 #ifdef ARK_DATUM_NATIVE_TESTS
 nativeEndpointAndSourceLineage();
 #endif
-sessionGuardAndRollback();std::cout<<checks<<" datum authoring checks passed\n";return 0;}catch(const std::exception& error){std::cerr<<"Datum authoring failure after "<<checks<<" checks: "<<error.what()<<'\n';return 1;}}
+sessionGuardAndRollback();originBisectorAndSelection();std::cout<<checks<<" datum authoring checks passed\n";return 0;}catch(const std::exception& error){std::cerr<<"Datum authoring failure after "<<checks<<" checks: "<<error.what()<<'\n';return 1;}}

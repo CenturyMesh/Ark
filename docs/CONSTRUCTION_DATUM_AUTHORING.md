@@ -28,6 +28,7 @@ coordinate snapshot.
 | `axis_planes` | `first`, `second` | Exact intersection line of two nonparallel planes. |
 | `point` | `point` | Position driven by an explicit point or semantic source. |
 | `between_points` | `start`, `end` | Frame with Z from start to end; optional `fraction` 0..1, `roll` in degrees, `x_axis` guide. |
+| `bisector` | `first`, `second` | Plane through two plane anchors. Parallel anchors use the midplane and the first normal; `side:difference` flips that normal. Intersecting anchors use the angle bisector through the intersection (`sum` or `difference` of the unit normals). Optional `side` is `sum` or `difference`. A stored bisector saves document version 45. |
 
 All scalar values accept finite numbers or parameter expressions. Offset and
 rotation parameters `p:{ox,oy,oz,rx,ry,rz}` still compose locally after the
@@ -84,6 +85,16 @@ resolver chooses the least-aligned global axis deterministically. That choice
 can change at alignment boundaries; use an explicit guide where orientation
 continuity matters. This frame construction does not itself implement a
 parallel-transport field along an arbitrary sweep.
+
+Origin, XY, XZ and YZ are always present. They are not stored in `planes` and
+do not change the document version. Origin is a point at world zero and is not
+an active sketch plane. XY, XZ (normal −Y) and YZ (normal +X) are the standard
+planes. `plane_inspect` marks them `builtin` and `immutable`, with `role`
+`starting_point` or `standard_plane`. Origin stays `kind` `point`.
+`selection_set` with `plane` and `expected_revision` selects one of these names
+or a stored datum and does not edit the document. Mixing `plane` with `id` or
+`reference` rejects. Studio lists them under Reference geometry and can select
+them when datums are shown.
 
 Studio's construction tools create these typed definitions. Individual tree
 visibility, selected datum, Show all and Hide all are view state. The viewport

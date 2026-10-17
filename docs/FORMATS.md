@@ -17,6 +17,15 @@ and exact Wood/Vent recipes without newer authoring. See [031B](iterations/031B.
 and the individual [solid](SOLIDS_031B.md), [surface](SURFACES_031B.md),
 [mesh](MESHES_031B.md) and [assembly/cable](ASSEMBLY_SWEEP_031B.md) contracts.
 
+## Conditional source extension — format 45
+
+A stored bisector plane (`support.kind` `bisector`) selects format 45. Format 44
+remains the conditional version for assembly pattern carry frames. Format 45 is
+written only when a bisector is stored. Implicit Origin, XY, XZ and YZ are not
+stored and do not select a format. A file at version 45 without a bisector still
+loads. A bisector stored below version 45 rejects. Version 46 and later reject
+as a future format.
+
 ## Previous source extension — format 41
 
 029B conditionally selects source 41 for explicit `surface_edit` orientation

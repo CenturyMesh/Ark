@@ -47,7 +47,7 @@ void healthy(Document& candidate){
 void guard(u64 expected,u64 current){require(expected==current,"Revision conflict; inspect the current document before datum authoring");}
 }
 void validateDatumDefinition(const DatumPlane& d){
-    require(!d.name.empty()&&d.name.size()<=128&&d.name!="XY"&&d.name!="XZ"&&d.name!="YZ","Built-in datums are immutable; custom names must be 1..128 characters");
+    require(!d.name.empty()&&d.name.size()<=128&&d.name!="Origin"&&d.name!="XY"&&d.name!="XZ"&&d.name!="YZ","Built-in datums are immutable; custom names must be 1..128 characters");
     require(d.kind=="plane"||d.kind=="axis"||d.kind=="frame"||d.kind=="point","Datum kind must be plane, axis, frame or point");
     require(!d.parent.empty()&&d.parent.size()<=128,"Datum parent must be a name");
     for(const auto& kv:d.p){require(kv.first=="ox"||kv.first=="oy"||kv.first=="oz"||kv.first=="rx"||kv.first=="ry"||kv.first=="rz","Unknown datum parameter: "+kv.first);expression(V::makeStr(kv.second));}
@@ -65,6 +65,7 @@ void validateDatumDefinition(const DatumPlane& d){
         for(auto key:{"fraction","roll"})if(s.find(key))scalar(key);if(s.find("x_axis"))ref("x_axis","axis");output=kind=="axis_points"?"axis":"frame";
     }
     else if(kind=="axis_planes"){keys(s,{"kind","first","second"},{"first","second"});ref("first","plane");ref("second","plane");output="axis";}
+    else if(kind=="bisector"){keys(s,{"kind","first","second","side"},{"first","second"});ref("first","plane");ref("second","plane");if(auto side=s.find("side"))require(side->t==V::Str&&(side->str=="sum"||side->str=="difference"),"Bisector side must be sum or difference");output="plane";}
     else if(kind=="point"){keys(s,{"kind","point"},{"point"});ref("point","point");output="point";}
     else {
         if(kind=="tube_path")keys(s,{"kind","feature","station"},{"feature","station"});
@@ -99,6 +100,8 @@ void bindDatumSupportProducers(const Document& document,V& support){
 }
 V inspectDatum(const Document& document,const std::string& name){
     const auto frame=resolvePlane(document,name);V result=V::makeObj(),matrix=V::makeArr(),origin=V::makeArr(),directions=V::makeObj();result.set("name",V::makeStr(name));result.set("kind",V::makeStr("plane"));
+    const bool builtin=name=="Origin"||name=="XY"||name=="XZ"||name=="YZ";
+    if(builtin){result.set("builtin",V::makeBool(true));result.set("immutable",V::makeBool(true));if(name=="Origin"){result.set("kind",V::makeStr("point"));result.set("role",V::makeStr("starting_point"));}else result.set("role",V::makeStr("standard_plane"));}
     for(double n:frame.m)matrix.arr.push_back(V::makeNum(n));result.set("world_column_major",matrix);
     for(double n:{frame.m[12],frame.m[13],frame.m[14]})origin.arr.push_back(V::makeNum(n));result.set("origin_mm",origin);result.set("coordinate_space",V::makeStr("world"));
     for(size_t axis=0;axis<3;++axis){V direction=V::makeArr();for(size_t i=0;i<3;++i)direction.arr.push_back(V::makeNum(frame.m[axis*4+i]));directions.set(std::string(1,"XYZ"[axis]),direction);}result.set("axes",directions);

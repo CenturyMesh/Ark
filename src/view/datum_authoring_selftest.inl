@@ -15,7 +15,7 @@ if(datumAuthoringUiTest){
     if(!capture(".datum-hidden.png"))return failure(853,"Hidden datum capture failed");
     if(!click(32000)||!datumVisible("Offset"))return failure(854,"Tree eye did not show datum again");
     for(size_t index=0;index<g_doc.planes.size();++index){
-        g_hiddenDatumNames.clear();for(size_t other=0;other<g_doc.planes.size();++other)if(other!=index)g_hiddenDatumNames.insert(g_doc.planes[other].name);
+        g_hiddenDatumNames.clear();for(const char* name:{"Origin","XY","XZ","YZ"})g_hiddenDatumNames.insert(name);for(size_t other=0;other<g_doc.planes.size();++other)if(other!=index)g_hiddenDatumNames.insert(g_doc.planes[other].name);
         g_selectedDatumName.clear();g_picked.clear();g_pickKind=4;rebuildSketchOverlay();draw();
         const auto frame=resolvePlane(g_doc,g_doc.planes[index].name);Vec3 probe=frame.transformPoint(index==1?Vec3{0,0,12}:Vec3{});float x,y;if(!projectScreen(probe,x,y))return failure(855,"Datum probe cannot project to viewport");
         SendMessage(g_window,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM((int)std::lround(x),(int)std::lround(y)));SendMessage(g_window,WM_LBUTTONUP,0,MAKELPARAM((int)std::lround(x),(int)std::lround(y)));

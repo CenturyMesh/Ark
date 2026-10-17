@@ -41,6 +41,13 @@ under a new identity at the same parent, retaining that occurrence's local pose.
  "path":"C:/design/module-work.ark"}
 ```
 
+`inspect` keeps the flat `containers` list. Each row adds `depth`, a root-first
+`path` of group names, and `children` (ids of direct nested groups only,
+`feature == 0`). `container_nesting` states that contract: `path is root-first;
+children are direct nested groups`. A parent cycle is bounded and does not fail
+the read. Part occurrences stay out of `children`. Studio shows the same path
+on the group row as `Container / Root / Child`.
+
 Checkout without `path` returns the authored child `document` and retained
 `manifest`. An explicit new `.ark` path publishes a binary child document without
 overwriting an existing file. Publication uses an atomic exclusive hard link
