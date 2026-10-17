@@ -26,6 +26,9 @@ public:
     const void* ownerIdentity() const{return storage_.get();}
     size_t allocatedBytes() const;
     size_t maximumRetainedBytes() const;
+    // Same immutable values and packed channels, without a lazily expanded JSON
+    // cache. The source owner is never mutated or stripped of validated data.
+    NativePayload compacted() const;
     bool packedMesh() const;
     Mesh displayMesh() const;
 };

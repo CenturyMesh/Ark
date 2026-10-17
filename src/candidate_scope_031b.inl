@@ -20,7 +20,6 @@ bool refreshFeatureSupported(const Feature& feature){
     }
 }
 V candidateReadScope(const Document& document,const V& recipe){
-    if(recipe.find("checks"))throw std::runtime_error("checks require a fresh explicit preview");
     const auto* commands=recipe.find("commands");if(!commands||commands->t!=V::Arr)throw std::runtime_error("missing commands");
     V authored;if(!arkjson::parse(documentToJson(document,false,false),authored))throw std::runtime_error("authoring unavailable");
     const V features=*authored.find("features");
@@ -50,6 +49,20 @@ V candidateReadScope(const Document& document,const V& recipe){
         readsGeometricContext|=geometricContext(effective);
         if(!addition)if(const auto* name=command.find("name")){if(name->t!=V::Str)throw std::runtime_error("invalid edited name");for(const auto& feature:document.features)if(feature.name==name->str&&feature.id!=effective.id)throw std::runtime_error("edited feature name collides with another feature");}
         if(addition)if(const auto* name=command.find("name")){if(name->t!=V::Str||name->str.empty()||localNames.count(name->str))throw std::runtime_error("added names must be unique");for(const auto& feature:document.features)if(feature.name==name->str)throw std::runtime_error("added feature name already exists: "+name->str);localNames.insert(name->str);}
+    }
+    // Re-run supported measured checks on the refreshed candidate. Existing
+    // checked definitions join the same read closure; provisional numeric IDs
+    // and implicit occurrence/external selectors remain unsupported.
+    if(const auto* checks=recipe.find("checks")){
+        if(checks->t!=V::Arr)throw std::runtime_error("checks require a fresh explicit preview");
+        for(const auto& check:checks->arr){
+            const auto* query=check.find("query");const auto* tool=query?query->find("tool"):nullptr;const auto* args=query?query->find("args"):nullptr;
+            if(!tool||tool->t!=V::Str||!args||args->t!=V::Obj)throw std::runtime_error("checks require a fresh explicit preview");
+            if(tool->str=="eval_expr")continue; // Complete parameter context is retained below.
+            if(tool->str!="native_inspect"&&tool->str!="mesh_inspect")throw std::runtime_error("checks require a fresh explicit preview; supported refresh checks: native_inspect, mesh_inspect and eval_expr");
+            for(const auto& field:args->obj)if(field.first!="id"&&field.first!="detail")throw std::runtime_error("checked selectors require a fresh explicit preview");
+            const auto* id=args->find("id");if(!id)throw std::runtime_error("checked feature ID is missing");input(*id);
+        }
     }
     // Named sketches/datums have additional selectors (second_feature,
     // alternate_feature, projected supports, occurrence frames). Until their

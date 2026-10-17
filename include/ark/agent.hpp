@@ -71,6 +71,7 @@ private:
         u64 revision=0;
         std::shared_ptr<Document> document;
           std::vector<u64> bodyOrder;
+        std::vector<u64> deferredMeshes;
         arkjson::Value result;
         arkjson::Value recipe,readScope;
         std::string refreshUnsupported;
@@ -82,7 +83,7 @@ private:
     };
     std::vector<Prepared> prepared_;
       static Document materializePrepared(const Prepared&);
-      static void compactPrepared(Prepared&);
+      void compactPrepared(Prepared&);
       static size_t retainedValueBytes(const arkjson::Value&);
       size_t retainedCandidateBytes(const Prepared* extra=nullptr,bool includeExisting=true) const;
       void trimPrepared();

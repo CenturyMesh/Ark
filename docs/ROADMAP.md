@@ -162,6 +162,12 @@ Goal: connect design choices to exact geometry and measured process evidence.
 
 Goal: reach valid, useful designs with explainable quality, time and total cost.
 
+033D addresses **A.03/A.04/D.02/D.04 — Verificado no escopo local** with actual retained-allocation
+accounting, packed preview custody, explicit checked refresh/publication,
+request-context measurements and specialist scope. [Contracts and verification](iterations/033D.md)
+keep local checks separate from live provider gains, global BOM completion and
+manufacturing qualification. Broader milestones remain **Parcial**.
+
 026D adds explicit local Ollama discovery and capability-aware single/team model
 selection. [026D evidence](iterations/026D.md) separates metadata declarations,
 offline transport/UI checks and live scratch CAD tool use. Broader D.01/D.02

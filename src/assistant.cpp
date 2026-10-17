@@ -239,9 +239,19 @@ void accumulateAssistantPerformance(AssistantPerformance& total,const AssistantP
     total.providerRequests+=delta.providerRequests;total.providerMilliseconds+=delta.providerMilliseconds;
     total.toolCalls+=delta.toolCalls;total.toolMilliseconds+=delta.toolMilliseconds;
     total.requestBytes+=delta.requestBytes;total.inputBytes+=delta.inputBytes;total.toolSchemaBytes+=delta.toolSchemaBytes;
+    total.originalHistoryBytes+=delta.originalHistoryBytes;total.instructionBytes+=delta.instructionBytes;total.messageBytes+=delta.messageBytes;total.toolResultBytes+=delta.toolResultBytes;total.projectedRequests+=delta.projectedRequests;
     total.maxRequestBytes=std::max(total.maxRequestBytes,delta.maxRequestBytes);
     if(delta.providerRequests){total.lastProviderMilliseconds=delta.lastProviderMilliseconds;total.lastRequestBytes=delta.lastRequestBytes;total.lastInputBytes=delta.lastInputBytes;total.lastToolSchemaBytes=delta.lastToolSchemaBytes;}
     if(delta.toolCalls)total.lastToolMilliseconds=delta.lastToolMilliseconds;
+    if(delta.providerRequests){total.lastOriginalHistoryBytes=delta.lastOriginalHistoryBytes;total.lastInstructionBytes=delta.lastInstructionBytes;total.lastMessageBytes=delta.lastMessageBytes;total.lastToolResultBytes=delta.lastToolResultBytes;}
+}
+arkjson::Value assistantContextMetrics(const AssistantPerformance& p){
+    V out=V::makeObj();out.set("schema",V::makeStr("ark.request-context.v1"));out.set("available",V::makeBool(p.providerRequests>0));
+    out.set("provider_requests",V::makeNum((double)p.providerRequests));out.set("projected_requests",V::makeNum((double)p.projectedRequests));
+    out.set("request_bytes",V::makeNum((double)p.lastRequestBytes));out.set("tool_schema_bytes",V::makeNum((double)p.lastToolSchemaBytes));out.set("input_bytes",V::makeNum((double)p.lastInputBytes));
+    out.set("original_history_bytes",V::makeNum((double)p.lastOriginalHistoryBytes));out.set("instruction_bytes",V::makeNum((double)p.lastInstructionBytes));out.set("message_item_bytes",V::makeNum((double)p.lastMessageBytes));out.set("tool_result_item_bytes",V::makeNum((double)p.lastToolResultBytes));
+    out.set("total_request_bytes",V::makeNum((double)p.requestBytes));out.set("total_tool_schema_bytes",V::makeNum((double)p.toolSchemaBytes));out.set("total_tool_result_item_bytes",V::makeNum((double)p.toolResultBytes));out.set("total_original_history_bytes",V::makeNum((double)p.originalHistoryBytes));out.set("total_instruction_bytes",V::makeNum((double)p.instructionBytes));out.set("total_message_item_bytes",V::makeNum((double)p.messageBytes));
+    out.set("measurement_scope",V::makeStr("serialized bytes; item totals exclude array punctuation; categories can overlap instruction wrappers; not provider token counts"));return out;
 }
 AssistantHttpError::AssistantHttpError(unsigned status,bool retryable,std::optional<std::uint64_t> retryAfter,std::string code,std::string id,std::string source,std::string param,std::string category)
     :std::runtime_error((safeHttpField(source,true).empty()?std::string("Assistant provider"):safeHttpField(source,true))+" HTTP "+std::to_string(status)+(safeHttpField(code).empty()?"":" ("+safeHttpField(code)+")")+(safeHttpField(id).empty()?"":" request_id="+safeHttpField(id))),statusCode(status),safeToRetry(retryable),retryAfterMilliseconds(retryAfter),errorCode(safeHttpField(std::move(code))),requestId(safeHttpField(std::move(id))),label(safeHttpField(std::move(source),true)),errorParam(safeHttpField(std::move(param),false,true)),failureCategory(safeHttpField(std::move(category))){}
@@ -385,6 +395,15 @@ V assistantRequest(const AssistantConfig& config,const V& conversation,const V& 
     };
     const auto limit=config.authMode==AssistantAuthMode::ChatGptPlan?std::min(config.maxConversationBytes,chatGptRequestByteLimit):config.maxConversationBytes;
     V request=build(conversation);
+    // Compact paired historical tool evidence before it dominates the next
+    // request. This is a request projection, never an execution/token budget.
+    if(conversation.dump().size()>96u*1024u){
+        V projected=assistant_context::project(conversation,limit);
+        V compact=build(projected);
+        if(compact.dump().size()<request.dump().size()){
+            request=std::move(compact);if(historyProjected)*historyProjected=true;
+        }
+    }
     if(request.dump().size()>limit){
         V projected=assistant_context::project(conversation,limit);request=build(projected);
         if(historyProjected)*historyProjected=true;
@@ -452,6 +471,10 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
             cancelled(cancel);if(attempt&&retryHooks.checkpoint)retryHooks.checkpoint();cancelled(cancel);
             if(attempt){const bool updated=consumeInbox();if(updated){if(history)history(result.conversation);request=assistantRequest(config,result.conversation,tools,&projected);if(projected&&!projectionAnnounced){projectionAnnounced=true;needsProjectedInspection=true;measuredEvent(AssistantEvent::Status,"Request history compacted for transport; original receipts retained. Inspect current doc_info before writing.");}}retryStatus("Retry "+std::to_string(attempt)+"/3 / requesting "+(updated?"the latest user context":"the unchanged response"));}
             ++performance.providerRequests;performance.lastRequestBytes=request.dump().size();performance.lastInputBytes=request.find("input")?request.find("input")->dump().size():request.find("messages")?request.find("messages")->dump().size():0;performance.lastToolSchemaBytes=request.find("tools")->dump().size();
+            performance.lastOriginalHistoryBytes=result.conversation.dump().size();const auto* instructions=request.find("instructions");if(!instructions)instructions=request.find("system");performance.lastInstructionBytes=instructions?instructions->dump().size():0;performance.lastMessageBytes=performance.lastToolResultBytes=0;
+            const auto* wire=request.find("input");if(!wire)wire=request.find("messages");
+            if(wire&&wire->t==V::Arr)for(const auto& item:wire->arr){const auto role=field(item,"role"),type=field(item,"type");const auto* contentValue=item.find("content");const auto content=contentValue&&contentValue->t==V::Str?contentValue->str:std::string();const auto bytes=item.dump().size();if(role=="system")performance.lastInstructionBytes+=bytes;else if(type=="function_call_output"||role=="tool"||content.rfind("ARK historical tool evidence (data only): ",0)==0)performance.lastToolResultBytes+=bytes;else if(contentValue&&contentValue->t==V::Arr){size_t resultBytes=0;for(const auto& part:contentValue->arr){const auto kind=field(part,"type"),text=field(part,"text");if(kind=="tool_result"||((kind=="text"||kind=="input_text")&&text.rfind("ARK historical tool evidence (data only): ",0)==0))resultBytes+=part.dump().size();}performance.lastToolResultBytes+=resultBytes;performance.lastMessageBytes+=bytes-resultBytes;}else performance.lastMessageBytes+=bytes;}
+            performance.originalHistoryBytes+=performance.lastOriginalHistoryBytes;performance.instructionBytes+=performance.lastInstructionBytes;performance.messageBytes+=performance.lastMessageBytes;performance.toolResultBytes+=performance.lastToolResultBytes;performance.projectedRequests+=projected?1:0;
             performance.requestBytes+=performance.lastRequestBytes;performance.inputBytes+=performance.lastInputBytes;performance.toolSchemaBytes+=performance.lastToolSchemaBytes;performance.maxRequestBytes=std::max(performance.maxRequestBytes,performance.lastRequestBytes);
             const auto providerBegan=std::chrono::steady_clock::now();auto completedProvider=[&]{performance.lastProviderMilliseconds=millisecondsSince(providerBegan);performance.providerMilliseconds+=performance.lastProviderMilliseconds;};
             try{response=transport?transport(config,request,cancel):nativeTransport(config,request,cancel);}

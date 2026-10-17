@@ -8,7 +8,7 @@ size_t jsonAllocationBytes(const V& value){
 }
 size_t bodyAllocationBytes(const Body& body,std::set<const Surface*>& surfaces,std::set<const void*>& nativeOwners,std::set<const Mesh*>& meshes){
     size_t bytes=sizeof(Body)+64+body.kind.capacity()+body.faces.capacity()*sizeof(Face)+body.profile.segs.capacity()*sizeof(ProfileSeg)+body.prismHoles.capacity()*sizeof(std::vector<Vec2>);
-    if(nativeOwners.insert(body.nativeData.ownerIdentity()).second)bytes+=body.nativeData.maximumRetainedBytes();
+    if(nativeOwners.insert(body.nativeData.ownerIdentity()).second)bytes+=body.nativeData.allocatedBytes();
     if(body.baked&&meshes.insert(body.baked.get()).second)bytes+=sizeof(Mesh)+64+body.baked->pos.capacity()*sizeof(f32)+body.baked->nrm.capacity()*sizeof(f32)+body.baked->idx.capacity()*sizeof(u32);
     for(const auto& hole:body.prismHoles)bytes+=hole.capacity()*sizeof(Vec2);
     for(const auto& face:body.faces){

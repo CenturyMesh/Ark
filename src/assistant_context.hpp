@@ -10,9 +10,9 @@ using V=arkjson::Value;
 inline std::string text(const V& value,const char* key){const auto* item=value.find(key);return item?item->asStr():"";}
 inline V message(const char* role,const std::string& content){V out=V::makeObj();out.set("role",V::makeStr(role));out.set("content",V::makeStr(content));return out;}
 inline V excerpt(const V& value){
-    if(value.dump().size()<=4096)return value;
+    if(value.dump().size()<=512)return value;
     V out=V::makeObj();out.set("partial",V::makeBool(true));out.set("original_bytes",V::makeNum((double)value.dump().size()));
-    for(const char* key:{"activity_id","activity_project_id","activity_boundary","feedback_required","isError","error","error_code","document_unchanged","revision","expected_revision","created_ids","id","ids","name","op","type","state","task_state","summary","candidate_id","proposal_id","valid","applied","applied_prepared","partial","scope","total_counts","recovery"})
+    for(const char* key:{"activity_id","activity_project_id","activity_boundary","feedback_required","isError","error","error_code","document_unchanged","revision","expected_revision","created_ids","id","ids","name","op","type","state","task_state","summary","candidate_id","proposal_id","valid","applied","applied_prepared","partial","scope","total_counts","recovery","conditions","checks","created_node_ids","created_mate_ids","geometry_recomputed","geometry_changed","pending_feedback_ids"})
         if(const auto* item=value.find(key);item&&item->dump().size()<=512)out.set(key,*item);
     out.set("partial",V::makeBool(true));out.set("excerpt_only",V::makeBool(true));return out;
 }

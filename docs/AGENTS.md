@@ -1,5 +1,13 @@
 # ARK agent protocol
 
+033D adds actual-allocation preview receipts, explicit owned-candidate
+`refresh_candidate:true` publication, compact team defaults and measured request
+context. Read [033D contracts](iterations/033D.md). Selected read-only assignments
+and `bom_inspect`/`bom_review` `ids` support specialists without satisfying the
+lead's global BOM completion gate. `release_reservation:true` on a successful
+`team_apply_step` cleans up only that owner's window. Revisions, dependency checks,
+role permissions, DFM acceptance and atomic rejection remain mandatory.
+
 032D keeps the existing tool set and adds [compact response and coordination
 contracts](AGENT_CONTRACTS_032D.md). Load `agent_onboard{topic,detail:"guide"}`
 once per needed topic. Read `doc_info{detail:"revision"}` for status and selected

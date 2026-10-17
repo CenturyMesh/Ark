@@ -1161,6 +1161,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
         if(tool=="doc_apply"){
             if(const auto* detail=args.find("detail"))if(detail->t!=V::Str||(detail->str!="full"&&detail->str!="design"&&detail->str!="changes"))throw std::runtime_error("doc_apply detail must be full, design or changes");
             if(args.find("candidate_id"))return result(commitPrepared(args));
+            if(args.find("refresh_candidate"))throw std::runtime_error("refresh_candidate requires an owned retained candidate_id");
             if(args.find("accept_dfm"))throw std::runtime_error("DFM_ACCEPTANCE_INVALID: acceptance requires a retained manufacturing proposal candidate");
             if(auto expected=args.find("expected_revision")){
                 if(expected->t!=V::Num||expected->num!=(double)revision)throw std::runtime_error("Revision conflict; read doc_info with detail design and retry");
@@ -1603,7 +1604,9 @@ if(std::string(d.name)=="doc_apply"){
     V commandItems;
     for(const auto& tool:list.arr)if(tool.find("name")->str=="doc_apply")commandItems=*tool.find("inputSchema")->find("properties")->find("commands")->find("items");
     for(auto& tool:list.arr)if(tool.find("name")->str=="doc_preview"){V schema=*tool.find("inputSchema"),props=*schema.find("properties"),commands=*props.find("commands");commands.set("items",commandItems);props.set("commands",commands);schema.set("properties",props);tool.set("inputSchema",schema);}
-    enrichModeling031BSchemas(list);return list;
+    enrichModeling031BSchemas(list);
+    for(auto& tool:list.arr)if(tool.find("name")->str=="doc_apply"){V schema=*tool.find("inputSchema"),props=*schema.find("properties"),flag=V::makeObj();flag.set("type",V::makeStr("boolean"));props.set("refresh_candidate",flag);schema.set("properties",props);tool.set("inputSchema",schema);}
+    return list;
 }
 Document makeDemoDocument(){
     Document d;d.setParam("radius","32");d.setParam("tube","11");d.setParam("waves","7");d.setParam("amplitude","0.22");

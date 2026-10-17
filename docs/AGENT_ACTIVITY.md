@@ -12,6 +12,14 @@ excludes provider and UI queue wait; coordination entries identify their wider
 timing scope. Full prompts, images, arguments and B-reps are not copied into
 the log. Failed attempts are retained. Undo and iteration restore preserve it.
 
+033D also retains bounded numeric request-context snapshots on successful
+`team_context` activity records. Per-role counters separate serialized schemas,
+instructions, original history, messages and tool results. These are measurements
+at that observation, not complete provider transcripts or token estimates.
+Unavailable measurements remain explicit; an oversized snapshot is marked
+`request_context_omitted`. Saving retains these optional fields in the existing
+activity schema without changing document identity/version requirements.
+
 Agents must submit `tool_feedback` before completing their work. Each actual
 activity ID receives utility and difficulty scores from 1 to 5, a description
 of the action, and optional `issue`, `wished_tool` and `wished_options` text.
