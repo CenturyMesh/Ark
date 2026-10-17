@@ -38,6 +38,12 @@ independent components. Each role has an independent conversation:
 | Part designers (up to six) | Actual parts, sketches, dimensions, materials and fabrication intent | Part/sketch writes using observed revision |
 | Physics reviewer | Actual calculations, geometry checks and measured revision proposals | Read and propose corrections |
 
+On a new empty document in Parallel mode, the engineer first commits editable
+geometry. The app retains other writers' accepted assignments and steering until
+that checkpoint; read-only review may run independently. Then concurrent design
+starts with fresh revision inspection. Stopping the engineer without geometry
+leaves an explicit unfinished checkpoint.
+
 Saved role IDs remain `engineer`, `designer` and `reviewer`, so existing model
 and effort settings retain their owners. Additional parallel designers use
 `designer2` through `designer6`. The runtime enforces each role's scope.
@@ -110,8 +116,9 @@ the shared executor. Team writes must supply the model's observed
 `expected_revision`; stale or missing revisions reject without automatic
 rebasing. The single Assistant and team cannot run simultaneously.
 
-Each atomic construction step can create related features/placements, with at
-most eight commands. Queued and executing steps identify their actual role and
+Each atomic Studio construction step can create related features/placements,
+with up to 128 commands, 32 new features and 64 placements within the role's
+permissions. Queued and executing steps identify their actual role and
 step ID. Studio renders bounded `sketch.set`, `sketch.entity.set` and
 `sketch.patch` intent as dashed, uncommitted drafts from captured sketch/plane
 context. It never invents partial solids or geometry from private reasoning.

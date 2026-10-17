@@ -9,6 +9,14 @@ The public iteration and numeric runtime are defined in
 increasing sequence and its principal phase. The letter is a roadmap phase, not a
 month; it does not declare the phase complete. The `.ark` format evolves separately.
 
+037D addresses **A.03/A.04/D.02/D.04** through retained authoring contracts,
+basic writer onboarding, initial lead geometry before Parallel writers and
+coherent atomic construction batches. Host contracts are **Verificado no escopo
+local** in [037D](iterations/037D.md): 135 native, 90 portable and five Studio
+registrations passed. The one real-provider pilot failed its concept checkpoint;
+final scheduling/batch changes have local regression evidence, with no second
+paid trial. Real-model delivery and matched token savings remain **Parcial**.
+
 036A addresses **A.01/A.02/A.03/A.04/B.01/B.04/D.02/D.04** through
 context-stamp correctness, preserved datum identity, navigation and team
 coordination. Local integration is **Verificado no escopo** in the
