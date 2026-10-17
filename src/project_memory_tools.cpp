@@ -27,6 +27,13 @@ namespace ark {
 namespace {
 using V=arkjson::Value;
 std::string text(const V& v,const char* k){const auto* p=v.find(k);return p&&p->t==V::Str?p->str:std::string();}
+V prefetchArguments(){V args=V::makeObj();args.set("operation",V::makeStr("wakeup"));args.set("scope",V::makeStr("both"));return args;}
+std::string prefetchIdentity(const std::string& arguments,const std::string& output,bool legacy=false){
+    // Responses permits at most 64 characters. Keep a stable host prefix and
+    // 176 digest bits; the original 039D ID incorrectly used all 256 bits.
+    const auto digest=iterationSha256(arguments+"\n"+output);
+    return "ark_memory_prefetch_"+digest.substr(0,legacy?64:44);
+}
 std::string utf8(const std::filesystem::path& p){const auto b=p.u8string();return {b.begin(),b.end()};}
 std::string projectScope(AgentSession& session){
     if(!session.memoryProjectOverride.empty())return session.memoryProjectOverride;
@@ -136,15 +143,40 @@ void appendProjectMemoryTools(V& tools){
     add("memory_record","Store an explicit concise attributed decision, procedure, failure or evidence; do not copy conversations, credentials or geometry. expected_revision is the MEMORY record revision (0=create). scope shared is only reusable non-project-specific knowledge. Does not alter CAD or certify findings. Only writable roles can record; reviewers send proposals to the lead.",R"({"type":"object","required":["key","expected_revision"],"properties":{"operation":{"type":"string","enum":["store","forget","promote","feedback"]},"scope":{"type":"string","enum":["project","shared"]},"key":{"type":"string"},"expected_revision":{"type":"integer","minimum":0},"kind":{"type":"string","enum":["decision","failure","procedure","evidence","episode"]},"state":{"type":"string","enum":["scratch","promoted"]},"outcome":{"type":"string","enum":["successful","failed","unknown"]},"steps":{"type":"array","maxItems":32,"items":{"type":"string"}},"facts":{"type":"array","items":{"type":"object"}},"signal":{"type":"string","enum":["useful","unhelpful"]},"reason":{"type":"string"},"title":{"type":"string"},"content":{"type":"string","maxLength":32768},"source":{"type":"string"},"source_fingerprint":{"type":"string"},"observed_revision":{"type":["integer","null"]},"tags":{"type":"array","items":{"type":"string"}},"anchors":{"type":"array","items":{"type":"object"}},"expires_at":{"type":["integer","null"]}},"additionalProperties":false})",false);
     add("memory_maintain","Maintain explicit selected memory records using their observed MEMORY revisions. Consolidate flags contradictory declared facts and proposes procedures from repeated successful episodes; it never rewrites history or certifies truth. Reindex uses the current pinned local model. Compress stores measured bounded-loss q4 vectors, preserving original text. Preview consolidation before apply; promote useful scratch records with memory_record.",R"({"type":"object","required":["operation","keys","expected_revisions"],"properties":{"operation":{"type":"string","enum":["consolidate","reindex","compress"]},"scope":{"type":"string","enum":["project","shared"]},"keys":{"type":"array","minItems":1,"maxItems":64,"items":{"type":"string"}},"expected_revisions":{"type":"object","additionalProperties":{"type":"integer","minimum":1}},"apply":{"type":"boolean"},"max_cosine_loss":{"type":"number","minimum":0,"maximum":0.2}},"additionalProperties":false})",false);
 }
+bool isProjectMemoryAssistantPair(const V& call,const V& output){
+    if(call.t!=V::Obj||call.obj.size()!=4||output.t!=V::Obj||output.obj.size()!=3||
+       text(call,"type")!="function_call"||text(call,"name")!="memory_context"||
+       text(call,"arguments")!=prefetchArguments().dump()||text(output,"type")!="function_call_output")return false;
+    const auto* encoded=output.find("output");if(!encoded||encoded->t!=V::Str)return false;
+    const auto id=text(call,"call_id");if(id!=text(output,"call_id"))return false;
+    return id==prefetchIdentity(text(call,"arguments"),encoded->str)||id==prefetchIdentity(text(call,"arguments"),encoded->str,true);
+}
+V projectMemoryAssistantWireInput(const V& input){
+    if(input.t!=V::Arr)return input;
+    V wire=input;
+    for(std::size_t i=0;i+1<input.arr.size();++i){
+        const auto& call=input.arr[i];const auto& output=input.arr[i+1];
+        if(!isProjectMemoryAssistantPair(call,output))continue;
+        const auto id=prefetchIdentity(text(call,"arguments"),text(output,"output"));
+        for(std::size_t j=0;j<wire.arr.size();++j)if(j!=i&&j!=i+1&&
+            (text(wire.arr[j],"type")=="function_call"||text(wire.arr[j],"type")=="function_call_output")&&text(wire.arr[j],"call_id")==id)
+            throw std::runtime_error("Invalid Responses history parameter input["+std::to_string(i)+"].call_id: host memory recovery would collide with another retained tool ID. Inspect the retained tool pairs before resuming; history has been preserved.");
+        if(text(call,"call_id").size()==84){wire.arr[i].set("call_id",V::makeStr(id));wire.arr[i+1].set("call_id",V::makeStr(id));}
+    }
+    return wire;
+}
 V projectMemoryAssistantInput(const V& input,const V& tools,const std::function<V(const std::string&,const V&)>& call){
     if(!call||tools.t!=V::Arr||std::none_of(tools.arr.begin(),tools.arr.end(),[](const V& t){return text(t,"name")=="memory_context";}))return input;
-    V args=V::makeObj();args.set("operation",V::makeStr("wakeup"));args.set("scope",V::makeStr("both"));
+    const auto args=prefetchArguments();
     V receipt;try{receipt=call("memory_context",args);}catch(const std::exception&){receipt=V::makeObj();receipt.set("unavailable",V::makeBool(true));receipt.set("next_action",V::makeStr("Continue with current source; memory is unavailable. Do not assume an empty history or retry routinely."));}
     V observed=receipt.find("structuredContent")?*receipt.find("structuredContent"):receipt;
     if(const auto* error=receipt.find("isError");error&&error->t==V::Bool&&error->b)observed.set("isError",V::makeBool(true));
     auto encoded=observed.dump();if(encoded.size()>24576)encoded="{\"unavailable\":true,\"reason\":\"Host memory receipt exceeded startup transport bound\"}";
-    const auto arguments=args.dump();const auto identity="ark_memory_prefetch_"+iterationSha256(arguments+"\n"+encoded);
-    if(input.t==V::Arr)for(std::size_t i=0;i+1<input.arr.size();++i){const auto& c=input.arr[i];const auto& r=input.arr[i+1];if(text(c,"type")=="function_call"&&text(c,"call_id")==identity&&text(c,"name")=="memory_context"&&text(c,"arguments")==arguments&&text(r,"type")=="function_call_output"&&text(r,"call_id")==identity&&text(r,"output")==encoded)return input;}
+    const auto arguments=args.dump();const auto identity=prefetchIdentity(arguments,encoded);
+    if(input.t==V::Arr)for(std::size_t i=0;i+1<input.arr.size();++i)if(isProjectMemoryAssistantPair(input.arr[i],input.arr[i+1])&&text(input.arr[i+1],"output")==encoded)return input;
+    if(input.t==V::Arr)for(std::size_t i=0;i<input.arr.size();++i)if(
+        (text(input.arr[i],"type")=="function_call"||text(input.arr[i],"type")=="function_call_output")&&text(input.arr[i],"call_id")==identity)
+        throw std::runtime_error("Invalid host memory history parameter input["+std::to_string(i)+"].call_id: startup memory would collide with another retained tool ID. Inspect the retained tool pairs before resuming; history has been preserved.");
     V history=input;if(input.t==V::Str){history=V::makeArr();V u=V::makeObj();u.set("role",V::makeStr("user"));u.set("content",input);history.arr.push_back(u);}if(history.t!=V::Arr)return input;
     V callItem=V::makeObj();callItem.set("type",V::makeStr("function_call"));callItem.set("call_id",V::makeStr(identity));callItem.set("name",V::makeStr("memory_context"));callItem.set("arguments",V::makeStr(arguments));history.arr.push_back(callItem);
     V output=V::makeObj();output.set("type",V::makeStr("function_call_output"));output.set("call_id",V::makeStr(identity));output.set("output",V::makeStr(encoded));history.arr.push_back(output);return history;

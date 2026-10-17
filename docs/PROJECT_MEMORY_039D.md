@@ -1,5 +1,10 @@
 # Persistent memory for ARK agents
 
+040D repairs the original startup call identifier to fit the Responses
+64-character limit. Exact legacy 039D host pairs are recovered only in the
+outgoing request; stored history is preserved. Other malformed IDs are rejected
+with a safe field path before transport. See [040D verification scope](iterations/040D.md).
+
 039D addresses **A.03/A.04/A.05/D.02/D.05** with a native local memory system.
 It complements Graphify's code navigation, the live CAD `context_graph` and
 Obsidian's derived views. No external memory account, API key or paid inference

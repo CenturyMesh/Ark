@@ -9,6 +9,13 @@ The public iteration and numeric runtime are defined in
 increasing sequence and its principal phase. The letter is a roadmap phase, not a
 month; it does not declare the phase complete. The `.ark` format evolves separately.
 
+040D addresses **A.03/A.05/B.01/B.02/D.02/D.05/F.05**, **Parcial**, through
+valid memory-call identities and exact legacy request recovery, bounded unrated
+feedback evidence, explicit preview recovery and tested editor picking.
+Focused local checks and one synthetic real-provider admission are
+**Verificado no escopo**; see [040D](iterations/040D.md). General autonomous design
+quality and matched token savings remain separate gates.
+
 039D addresses **A.03/A.04/A.05/D.02/D.05/F.02/F.03/F.05**, **Parcial**, through
 persistent episodic/hybrid memory, derived knowledge views, packed UI resources
 and a branded Windows installer. See [039D](iterations/039D.md) for the current

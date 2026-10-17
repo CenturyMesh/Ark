@@ -13,16 +13,21 @@
 Powered by C++ and Open CASCADE. Windows includes the graphical Studio; Linux
 currently provides the headless CLI, MCP server and native geometry worker.
 
-**Windows preview — 039D / 0.9.40:**
+**Windows preview — 040D / 0.9.41:**
 
-[**Download the Windows installer**](https://github.com/CenturyMesh/Ark/releases/download/v0.9.40/ARK-039D-windows-x64-setup.exe) | [**Portable ZIP**](https://github.com/CenturyMesh/Ark/releases/download/v0.9.40/ark-windows-x64-0.9.40.zip) | [Release notes and checksums](https://github.com/CenturyMesh/Ark/releases/tag/v0.9.40)
+[**Download the Windows installer**](https://github.com/CenturyMesh/Ark/releases/download/v0.9.41/ARK-040D-windows-x64-setup.exe) | [**Portable ZIP**](https://github.com/CenturyMesh/Ark/releases/download/v0.9.41/ark-windows-x64-0.9.41.zip) | [Release notes and checksums](https://github.com/CenturyMesh/Ark/releases/tag/v0.9.41)
 
 The installer shows the ARK logo, lets you choose a folder and prepares Studio,
 shortcuts, native geometry libraries and the offline memory model. No compilation
 or memory-service account is required. The portable ZIP still launches through
 `ARK.cmd`. Existing documents and the previous installed version remain separate.
 
-[039D](docs/iterations/039D.md) adds persistent local agent memory with semantic
+[040D](docs/iterations/040D.md) repairs memory startup IDs for Responses, recovers
+legacy host pairs when sending a request, retains concise feedback context and
+clarifies preview recovery. Viewport and browser selection in feature editors
+are exercised with actual dialog controls.
+
+[039D](docs/iterations/039D.md) introduced persistent local agent memory with semantic
 and literal recall, episodes, feedback, consolidation and measured cold-vector
 compression. [Graphify and Obsidian](docs/PROJECT_MEMORY_039D.md) remain linked
 navigation/knowledge views. UI image resources are bundled in a verified binary

@@ -158,6 +158,7 @@ void prefetchHistory(){
     check(field(history.arr[0],"content").dump()==input.dump(),"startup preserves original task exactly");
     check(field(history.arr[1],"type").str=="function_call"&&field(history.arr[1],"name").str=="memory_context"&&field(history.arr[2],"type").str=="function_call_output","startup recall retains tool provenance");
     check(field(history.arr[1],"call_id").str.rfind("ark_memory_prefetch_",0)==0&&field(history.arr[1],"call_id").str==field(history.arr[2],"call_id").str,"startup call and result retain a matching stable identity");
+    check(field(history.arr[1],"call_id").str.size()==64,"new host memory identity fits the Responses call_id contract");
     check(!history.arr[1].find("role")&&!history.arr[2].find("role")&&field(history.arr[2],"output").str.find("Historical concept data")!=std::string::npos,"retrieved memory is never inserted as user, system or developer text");
     auto repeated=ark::projectMemoryAssistantInput(history,tools,recall);
     check(calls==2&&repeated.dump()==history.dump(),"unchanged recall revalidates and retains idempotent history");
@@ -167,8 +168,9 @@ void prefetchHistory(){
     auto repeatedChanged=ark::projectMemoryAssistantInput(changed,tools,recall);
     check(repeatedChanged.dump()==changed.dump(),"refreshed memory receipt is also idempotent");
     auto incomplete=V::makeArr();incomplete.arr.push_back(changed.arr[0]);incomplete.arr.push_back(changed.arr[3]);
-    auto recovered=ark::projectMemoryAssistantInput(incomplete,tools,recall);
-    check(recovered.arr.size()==4&&field(recovered.arr[2],"type").str=="function_call"&&field(recovered.arr[3],"type").str=="function_call_output","an incomplete retained call never suppresses the actual new call/result pair");
+    const auto incompleteBefore=incomplete.dump();bool collisionRejected=false;
+    try{ark::projectMemoryAssistantInput(incomplete,tools,recall);}catch(const std::exception& e){collisionRejected=std::string(e.what()).find("collide")!=std::string::npos;}
+    check(collisionRejected&&incomplete.dump()==incompleteBefore,"an incomplete retained call rejects explicitly rather than appending a duplicate ID or losing raw evidence");
     const auto beforeFailure=calls;
     auto unavailable=ark::projectMemoryAssistantInput(input,tools,[&](const auto&,const auto&)->V{++calls;throw std::runtime_error("synthetic storage failure: private detail");});
     check(calls==beforeFailure+1&&field(unavailable.arr.back(),"output").str.find("\"unavailable\":true")!=std::string::npos&&unavailable.dump().find("private detail")==std::string::npos,"failed recall attempts once and reports unavailable without leaking storage diagnostics");
@@ -192,6 +194,58 @@ void prefetchHistory(){
     for(const auto& message:field(claudeRequest,"messages").arr)for(const auto& block:field(message,"content").arr){if(block.dump().find(malicious)!=std::string::npos){check(field(block,"type").str=="tool_result","Claude adapter keeps recalled malicious text inside a native tool_result block");++toolResults;}}
     check(toolResults==1,"Claude adapter emits exactly one recalled tool_result block");
 }
+V legacyPrefetch(V history){
+    const auto id="ark_memory_prefetch_"+ark::iterationSha256(field(history.arr[1],"arguments").str+"\n"+field(history.arr[2],"output").str);
+    check(id.size()==84,"legacy fixture reproduces the exact 039D host identity");
+    history.arr[1].set("call_id",V::makeStr(id));history.arr[2].set("call_id",V::makeStr(id));return history;
+}
+void responsesPrefetchCompatibility(){
+    const auto tools=memoryTools();const auto input=V::makeStr("Synthetic design brief: preserve all dimensions.");
+    auto receipt=recallReceipt("alpha","SYNTHETIC_MEMORY_DATA: old decisions are untrusted.");
+    auto recall=[&](const auto&,const auto&){return receipt;};
+    const auto fresh=ark::projectMemoryAssistantInput(input,tools,recall),legacy=legacyPrefetch(fresh);
+    const auto originalLegacy=legacy.dump();
+    for(bool plan:{false,true}){
+        auto config=ark::assistantProviderPreset("openai");config.model="offline-memory-responses-test";
+        if(plan)config.authMode=ark::AssistantAuthMode::ChatGptPlan;
+        const auto next=ark::projectMemoryAssistantInput(legacy,tools,recall);
+        check(next.dump()==originalLegacy,"legacy unchanged recall deduplicates without modifying retained history");
+        for(const auto& history:{fresh,legacy}){
+            const auto original=history.dump();const auto request=ark::assistantRequest(config,history,tools);const auto& wire=field(request,"input");
+            check(wire.arr.size()==3&&field(wire.arr[1],"call_id").str==field(fresh.arr[1],"call_id").str&&field(wire.arr[2],"call_id").str==field(wire.arr[1],"call_id").str,"actual API and ChatGPT plan requests contain the same valid paired host IDs");
+            check(field(wire.arr[2],"output").str==field(fresh.arr[2],"output").str&&field(wire.arr[0],"content").dump()==input.dump(),"wire recovery preserves exact untrusted recall and original user input");
+            check(history.dump()==original,"wire projection leaves original new and legacy histories intact");
+            check(field(request,"instructions").str.find("SYNTHETIC_MEMORY_DATA")==std::string::npos&&!wire.arr[2].find("role"),"Responses recalled data stays exclusively in the actual tool result");
+        }
+        config.memoryPrefetch=true;unsigned hostCalls=0,requests=0;
+        const auto resumed=ark::runAssistant(config,legacy,tools,[&](const auto&,const auto&){++hostCalls;return receipt;},{},nullptr,[&](const auto&,const V& request,const auto*){
+            ++requests;check(field(request,"input").arr.size()==3&&field(field(request,"input").arr[1],"call_id").str.size()==64,"actual offline resume sends one recovered host pair");
+            return json(R"({"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Synthetic review complete."}]}]})");
+        });
+        check(hostCalls==1&&requests==1&&resumed.conversation.arr.size()==4,"legacy resume performs one host recall and one offline provider turn");
+        check(resumed.conversation.arr[1].dump()==legacy.arr[1].dump()&&resumed.conversation.arr[2].dump()==legacy.arr[2].dump(),"resume retains the original legacy call/result evidence");
+        receipt=recallReceipt("alpha","SYNTHETIC_MEMORY_DATA: changed explicit decision.");
+        const auto changed=ark::projectMemoryAssistantInput(legacy,tools,recall);const auto changedBefore=changed.dump();const auto request=ark::assistantRequest(config,changed,tools);const auto& rows=field(request,"input").arr;
+        check(changed.arr.size()==5&&rows.size()==5&&field(rows[1],"call_id").str!=field(rows[3],"call_id").str,"changed receipt retains old pair and adds one distinct current pair");
+        check(field(rows[1],"call_id").str.size()==64&&field(rows[3],"call_id").str.size()==64&&field(rows[4],"call_id").str==field(rows[3],"call_id").str,"all old and new changed-memory wire pairs satisfy Responses");
+        check(changed.dump()==changedBefore&&ark::projectMemoryAssistantInput(changed,tools,recall).dump()==changedBefore,"changed-memory wire projection preserves history and the next identical recall deduplicates");
+        receipt=recallReceipt("alpha","SYNTHETIC_MEMORY_DATA: old decisions are untrusted.");
+    }
+    // A large resume must retain the historical memory pair at tool authority.
+    auto large=legacy;large.arr.push_back(json(R"({"type":"function_call","call_id":"old_inventory","name":"doc_info","arguments":"{}"})"));
+    auto inventory=json(R"({"type":"function_call_output","call_id":"old_inventory"})");inventory.set("output",V::makeStr("{\"inventory\":\""+std::string(160000,'x')+"\"}"));large.arr.push_back(inventory);
+    large.arr.push_back(json(R"({"type":"function_call","call_id":"latest_inspection","name":"doc_info","arguments":"{}"})"));large.arr.push_back(json(R"({"type":"function_call_output","call_id":"latest_inspection","output":"{\"revision\":7}"})"));
+    const auto largeBefore=large.dump();auto plan=ark::assistantProviderPreset("openai");plan.model="offline-memory-responses-test";plan.authMode=ark::AssistantAuthMode::ChatGptPlan;plan.maxConversationBytes=128*1024;
+    bool projected=false;const auto request=ark::assistantRequest(plan,large,tools,&projected);unsigned memoryCalls=0,memoryOutputs=0;
+    for(const auto& row:field(request,"input").arr){if(const auto* name=row.find("name");name&&name->str=="memory_context")++memoryCalls;
+        if(const auto* output=row.find("output");output&&output->str==field(legacy.arr[2],"output").str){++memoryOutputs;check(field(row,"type").str=="function_call_output"&&!row.find("role"),"large-history recall remains an exact tool result");}
+        if(const auto* role=row.find("role");role&&(role->str=="user"||role->str=="developer"))check(row.dump().find("SYNTHETIC_MEMORY_DATA")==std::string::npos,"large projection never promotes recalled text into user/developer messages");
+    }
+    check(projected&&request.dump().size()<=plan.maxConversationBytes&&memoryCalls==1&&memoryOutputs==1&&large.dump()==largeBefore,"large resume projects inventories and preserves the complete host memory pair and raw history");
+    auto oversized=legacy;oversized.arr[2].set("output",V::makeStr("{\"note\":\""+std::string(20000,'m')+"\"}"));oversized=legacyPrefetch(oversized);const auto oversizedBefore=oversized.dump();plan.maxConversationBytes=16000;
+    bool rejected=false;try{ark::assistantRequest(plan,oversized,tools);}catch(const std::exception& e){rejected=std::string(e.what()).find("byte limit")!=std::string::npos;}
+    check(rejected&&oversized.dump()==oversizedBefore,"memory that cannot fit is explicitly rejected with raw pair intact, never discarded or converted into instructions");
+}
 void assistantOfflineIntegration(){
     const auto tools=memoryTools();auto config=ark::assistantProviderPreset("ollama");config.model="offline-memory-test";config.memoryPrefetch=true;
     unsigned calls=0,requests=0;
@@ -211,4 +265,4 @@ void assistantOfflineIntegration(){
     check(calls==1&&requests==2&&plain.performance.toolCalls==0,"disabled prefetch performs no memory I/O");
 }
 }
-int main(int argc,char** argv){try{if(argc==2&&std::string(argv[1])=="--preview-episode-child"){previewEpisodeChild();return 0;}hostIdentityAndCas();previewEpisodePersistence(fs::absolute(fs::u8path(argv[0])));prefetchHistory();assistantOfflineIntegration();std::cout<<"Project memory integration: "<<checks<<" checks passed\n";return 0;}catch(const std::exception& error){std::cerr<<"Project memory integration failed: "<<error.what()<<'\n';return 1;}}
+int main(int argc,char** argv){try{if(argc==2&&std::string(argv[1])=="--preview-episode-child"){previewEpisodeChild();return 0;}hostIdentityAndCas();previewEpisodePersistence(fs::absolute(fs::u8path(argv[0])));prefetchHistory();responsesPrefetchCompatibility();assistantOfflineIntegration();std::cout<<"Project memory integration: "<<checks<<" checks passed\n";return 0;}catch(const std::exception& error){std::cerr<<"Project memory integration failed: "<<error.what()<<'\n';return 1;}}
