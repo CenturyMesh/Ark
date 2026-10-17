@@ -11,7 +11,9 @@ month; it does not declare the phase complete. The `.ark` format evolves separat
 
 036A addresses **A.01/A.02/A.03/A.04/B.01/B.04/D.02/D.04** through
 context-stamp correctness, preserved datum identity, navigation and team
-coordination. Integration is **Em curso** in the [036A scope](iterations/036A.md).
+coordination. Local integration is **Verificado no escopo** in the
+[036A scope](iterations/036A.md), with 135 native, 90 portable and five Studio
+registrations passing. Hosted CI and real-model behavior remain separate gates.
 The broader milestones remain **Parcial**; a local coordinator regression is
 distinct from real-model design delivery and measured token savings.
 

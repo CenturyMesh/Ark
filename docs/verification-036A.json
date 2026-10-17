@@ -1,0 +1,103 @@
+{
+  "schema": "ark.iteration-verification.v1",
+  "iteration": "036A",
+  "version": "0.9.37",
+  "source_commit": "edb68a8d6d740f3e727464c2ced9fc092e67b5ea",
+  "configuration": "Windows x64 MSVC Release; OCCT 8.0.1; portable-core separately; Studio live tests opt-in",
+  "status": "verified-in-local-scope",
+  "checks": [
+    {
+      "name": "native-final",
+      "tests": 135,
+      "failures": 0,
+      "seconds": 80.0,
+      "receipt": "out/verification-036a/native-final.xml",
+      "sha256": "3d66d6ccd4b5be15bf58f38aba745b823fced05ddb39ddb64c366104bf56b7ad"
+    },
+    {
+      "name": "core-final",
+      "tests": 90,
+      "failures": 0,
+      "seconds": 39.0,
+      "receipt": "out/verification-036a/core-final.xml",
+      "sha256": "3b33191787d48eb0dde5b1c003e34212084660a7d1635b3b23bf4aa84c8f2e81"
+    },
+    {
+      "name": "studio-final",
+      "tests": 5,
+      "failures": 0,
+      "seconds": 19.0,
+      "receipt": "out/verification-036a/studio-final.xml",
+      "sha256": "8749a6bb634eb0ce2a9e8b0d4cb1207d154574eec9268eab1bc880870d8f0402"
+    }
+  ],
+  "focused_checks": {
+    "agent_team": 417,
+    "context_graph": 76,
+    "datum_authoring": 159
+  },
+  "runtime_artifacts": [
+    {
+      "name": "ark-studio.exe",
+      "bytes": 11860480,
+      "sha256": "a154905181624a526ac235faefbdcb008d93c8c1bacf41ed343827cc9668088e"
+    },
+    {
+      "name": "ark-mcp.exe",
+      "bytes": 6083072,
+      "sha256": "1c3ad608b6ed4c1d54137ce79b4e0c66d07a21db460021cf10a11480027eb245"
+    },
+    {
+      "name": "ark-cli.exe",
+      "bytes": 3332096,
+      "sha256": "dad562d447fdfe3db163c60aab98370a1e478d0508449390df51de0c3af24f5c"
+    },
+    {
+      "name": "ark-occt-worker.exe",
+      "bytes": 3229184,
+      "sha256": "47214f09e8f2196f6cbd2f26eabb21512b7f42d2347118e79df681ed2c401b20"
+    },
+    {
+      "name": "app-version.json",
+      "bytes": 303,
+      "sha256": "93b0db2f9f3bf59ce25f922c45d298a74b57cbab6ba299b100e5849a2be3e7d1"
+    }
+  ],
+  "package_smoke": {
+    "schema": "ark.relocated-package-smoke.v1",
+    "version": "0.9.37",
+    "iteration": "036A",
+    "isolated_windows_path": true,
+    "native_create_export_passed": true,
+    "step_bytes": 15416,
+    "archive_sha256": "823b4917074779054b8b172af66f3fa8de460310565dd022661294ee02021ccb",
+    "user_ark_files": 0,
+    "paid_model_calls": 0
+  },
+  "code_graph": {
+    "source_sha256": "a85a025dad4ba21884f952313e64d2a2699f8de6b2a606b6864ad225dc995810",
+    "graph_sha256": "9a719b53f7b83b899c5107ca07d48dca92b500512dc2550236ff8dfa5bbc680b",
+    "nodes": 9768,
+    "edges": 31118,
+    "knowledge_notes": 4,
+    "knowledge_sha256": "1cb0948676013129157017f67648eecd0f36a848aac8f75ca23e02eae8f25704",
+    "partial_extraction_files": 10,
+    "no_symbol_files": 72,
+    "model_backend": "none"
+  },
+  "failed_attempts": [
+    "Initial native compilation: missing serialize declaration include; corrected.",
+    "Initial native suite:134/135; specialized onboarding missed shared drawing authorization; corrected before final full reruns.",
+    "Isolated navigation run: compact cardinal word missing; corrected and repeated successfully.",
+    "First package smoke harness failed before starting MCP because environment-key case differed; corrected and isolated native create/export passed."
+  ],
+  "paid_model_calls": 0,
+  "limits": [
+    "Real-model polling-loop resolution and matched token/cost savings remain unverified.",
+    "Hosted CI is separate from these local receipts.",
+    "Physical input latency and actual monitor-DPI transitions are untested.",
+    "Public OTA endpoint, commercial vendor account/API integration and manufacturing qualification remain unestablished."
+  ],
+  "user_drawings_in_package": 0,
+  "user_sessions_committed": false
+}
