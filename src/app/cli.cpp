@@ -2,11 +2,13 @@
 // snapshots, benchmarks. Also serves as an integration smoke test.
 #include "ark/model.hpp"
 #include "ark/io.hpp"
+#include "ark/project_memory_tools.hpp"
 #include <cstdio>
 
 using namespace ark;
 
 int main(int argc,char** argv){
+    if(argc>1&&std::string(argv[1])=="--memory")return ark::projectMemoryCli(argc-2,argv+2);
     const char* dir = argc>1?argv[1]:".";
     cpu_detect();
     printf("ARK-Point kernel demo | avx2=%d fma=%d threads=%u\n",

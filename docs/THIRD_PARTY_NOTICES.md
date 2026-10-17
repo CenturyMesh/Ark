@@ -10,6 +10,15 @@ notices is not a claim of an independent legal audit or manufacturing certificat
 
 ## Actual technology
 
+039D adds local semantic memory using the CPU ONNX Runtime 1.23.2 (MIT) and
+the Apache-2.0 DistilUSE multilingual sentence model with its pinned Dense
+projection. Original model cards, attribution, runtime license and runtime
+third-party notices accompany the payload under `assets/memory` and `licenses`.
+`scripts/prepare-memory-embeddings.ps1` pins download bytes and source revisions;
+the asset manifest and package SBOM identify model/runtime files separately.
+The runtime performs local inference without an external embedding service.
+These dependencies do not change the geometric authority of OCCT/B-rep.
+
 The CAD core and Studio UI use C++20, Win32 and OpenGL 3.3 with GLSL shaders.
 Open CASCADE Technology (OCCT) produces native exact B-reps, validation and
 STEP/IGES exchange through the isolated C++ worker. The viewport displays a
@@ -29,6 +38,17 @@ OCCT is distributed under GNU LGPL version 2.1 with the Open CASCADE exception
 (version 1.0). The pinned source retains `LICENSE_LGPL_21.txt` and
 `OCCT_LGPL_EXCEPTION.txt`; the package includes both texts without alteration.
 These terms apply to OCCT separately from ARK's Apache-2.0 license.
+
+ARK's versioned source changes, when enabled, are identified by
+`third_party/occt/patches/8.0.1/patchset.json`. That manifest records each diff
+and every modified source/header's original and resulting SHA-256. Modified
+OCCT files retain the upstream LGPL/exception terms and original notices;
+ARK's license does not replace them. The corresponding pinned archive plus
+exact diffs and declared SDK build route are packaged as
+`licenses/OCCT-ARK-patches.txt`. SDKs, runtime binaries and that notice receive
+separate hashes; a source declaration alone does not attest compiler inputs,
+ABI compatibility or geometric qualification. See [native build](NATIVE_BUILD.md)
+for separated source/build/install directories and the pending/verified gates.
 
 - [Official OCCT license](https://occt3d.com/dev/doc/overview/html/occt_public_license.html)
 - [Pinned V8_0_1 source](https://github.com/Open-Cascade-SAS/OCCT/tree/V8_0_1)

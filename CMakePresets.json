@@ -11,7 +11,7 @@
       "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
       "cacheVariables": {
         "ARK_WITH_OCCT": "ON",
-        "OpenCASCADE_DIR": "${sourceDir}/out/deps/occt/install-msvc/cmake"
+        "OpenCASCADE_DIR": "${sourceDir}/out/deps/occt/install-msvc-ark-offset-001/cmake"
       }
     },
     {
@@ -23,7 +23,7 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "ARK_WITH_OCCT": "ON",
-        "OpenCASCADE_DIR": "${sourceDir}/out/deps/occt/install-linux/lib/cmake/opencascade"
+        "OpenCASCADE_DIR": "${sourceDir}/out/deps/occt/install-linux-ark-offset-001/lib/cmake/opencascade"
       }
     },
     {

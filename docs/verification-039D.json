@@ -1,0 +1,326 @@
+{
+  "schema": "ark.iteration-verification.v1",
+  "iteration": "039D",
+  "version": "0.9.40",
+  "milestones": [
+    "A.03",
+    "A.04",
+    "A.05",
+    "D.02",
+    "D.05",
+    "F.02",
+    "F.03",
+    "F.05"
+  ],
+  "source_commit": "bf0fce6fdf087370a49cb81b5b2f7d79116b9d6c",
+  "source_dirty_at_packaging": false,
+  "source_tree_sha256": "4a9a2f5763c22dae563c10cb20e9d17bc4b29d592377ee5a33de53906b2c8459",
+  "configuration": "Windows x64 MSVC Release; full source-built OCCT 8.0.1 patchset; portable core, native and isolated Studio checks",
+  "status": "verified-native-memory-resource-and-local-distribution-scope; autonomous-design-and-matched-provider-savings-partial",
+  "checks": [
+    {
+      "name": "core-release",
+      "tests": 98,
+      "failures": 0,
+      "seconds": 68.16854390000005,
+      "receipt": "out/verification-039d/core-release-final.xml",
+      "sha256": "214f348d3df54aae3d228443ad8da010035e946d2b61154969195c6fb49cc0db"
+    },
+    {
+      "name": "native-release",
+      "tests": 143,
+      "failures": 0,
+      "seconds": 195.77871249999995,
+      "receipt": "out/verification-039d/native-release.xml",
+      "sha256": "133558b69f414c5ef0cd18ba8eb0c399247db3c2700e773b16b0599706fb5524"
+    },
+    {
+      "name": "studio-selected",
+      "tests": 6,
+      "failures": 0,
+      "seconds": 32.170329,
+      "receipt": "out/verification-039d/studio-release.xml",
+      "sha256": "e5682a31bbd7363398207db26b1ba3649df564a7b06c4ab158f960bd55fca8ef"
+    }
+  ],
+  "runtime_artifacts": [
+    {
+      "name": "ark-cli.exe",
+      "bytes": 3594240,
+      "sha256": "62200d7204daa7124f48809d94b0f3c7a95f62f91225193075162548117a6350"
+    },
+    {
+      "name": "ark-mcp.exe",
+      "bytes": 6375424,
+      "sha256": "251043c79b3f7485bad0abd379230df20f17b0abe04520faafbcb375052edf94"
+    },
+    {
+      "name": "ark-studio.exe",
+      "bytes": 12252672,
+      "sha256": "9bb96333e5fe25487ac8c9c6f96b4b7e0496a87470fd5090698fb21895ccaa13"
+    },
+    {
+      "name": "ark-occt-worker.exe",
+      "bytes": 3232256,
+      "sha256": "536808db85c2117c5891921858d8a30975d6c8641ade211683b6c0ec9e677d29"
+    },
+    {
+      "name": "ark-benchmark.exe",
+      "bytes": 7217152,
+      "sha256": "d3b5efc5c62541919774f3efcee8325b2f10636023326a32ad39cdc92bd3a6f8"
+    },
+    {
+      "name": "assets/ark-ui.arklib",
+      "bytes": 7305206,
+      "sha256": "27fba86af3c71db0ffcc5f0b237014bc8c8a3860ab3fda4c322244ddc3a59793"
+    },
+    {
+      "name": "assets/memory/manifest.json",
+      "bytes": 3146,
+      "sha256": "1a1ed9c1c9d823fd8570601482230c736c557f26e03bf437d2111a1bcdc25b67"
+    }
+  ],
+  "artifacts": [
+    {
+      "name": "ark-windows-x64-0.9.40.zip",
+      "bytes": 101384297,
+      "sha256": "cd05c9c95e93afd9e32652f2ce16b7dd0731ea72acebc7fc684293c31bf16733"
+    },
+    {
+      "name": "ARK-039D-windows-x64-setup.exe",
+      "bytes": 83105391,
+      "sha256": "ff4f176bcd09021fbed12c7ec655ce81b5cd45f9cb51ec90d7ad366985b540df"
+    },
+    {
+      "name": "ark-windows-x64-0.9.40.zip.provenance.json",
+      "bytes": 1133,
+      "sha256": "536c2fa1d507506dff493372151c59d8eb77cd87d290bad158ec7090b8e6565d"
+    }
+  ],
+  "memory": {
+    "implementation": "Native ARK memory inspired by memXT; no upstream memXT binary or feature-equivalence claim",
+    "storage": "SQLite 3.54.0 WAL, explicit memory CAS, isolated project scopes and explicit shared knowledge",
+    "provider": {
+      "ready": true,
+      "semantic": true,
+      "provider": "onnxruntime-cpu-1.23.2",
+      "model": "Xenova/distiluse-base-multilingual-cased-v2@cad454171d918d9873a2701ba245054b6c1760dd",
+      "projection_revision": "bfe45d0732ca50787611c0fe107ba278c7f3f889",
+      "model_fingerprint": "ark-distiluse-v2:onnx-int8:1724c10ba3b33b58afb6ce73bbf3e0528921bd4d4e1bf5a569b6d73f234e72bf:wordpiece-cased:fe0fda7c425b48c516fc8f160d594c8022a0808447475c1a7c6d6479763f310c:dense-tanh:0a21b1ce908e772ebf09f93c20ca09524c32706e9918d9c0169a3f0663b191ed:mean-l2:128:overlap16:weighted-window-l2",
+      "dimensions": 512,
+      "window_tokens": 128,
+      "window_overlap": 16,
+      "max_text_bytes": 32768,
+      "long_text": "all WordPiece tokens; overlapping windows, masked mean, Dense/Tanh, novel-token-weighted average and L2",
+      "offline": true
+    },
+    "lifecycle": [
+      "Attributed source/fingerprint records and code anchors",
+      "Literal FTS5 plus actual multilingual cosine retrieval and RRF",
+      "Scratch episodes, explicit promotion, feedback and contradiction/procedure consolidation",
+      "Measured bounded-loss q4 with original text/model retained and explicit float32 reindex",
+      "Expiry, logical content forget with revision tombstones, bounded/delta recall and scoped export"
+    ],
+    "unit_and_benchmark_checks": 133,
+    "final_preview_fix": "Actual valid:false rejected preview persists failed scratch after graceful process exit; success preview excluded; authored CAD and revision unchanged",
+    "final_receipt_fix": "semantic_recall consistently reflects actual semantic use",
+    "startup": "Executed function_call/function_call_output pair; original user input retained; historical memory remains untrusted",
+    "native_cad_capture": "Background scratch receipts for successful doc_apply and rejected doc_apply/doc_preview; no geometry/conversation copy; queue acceptance is not durability",
+    "actual_probes": [
+      "Memory-only MCP exposes three memory tools, attributes coding actor, performs hybrid recall and rejects CAD calls",
+      "Native box operation -> durable scratch -> explicit promotion/reindex -> semantic recall; memory maintenance preserves CAD revision"
+    ],
+    "semantic_reference": {
+      "full_vectors": 4,
+      "dimensions": 512,
+      "maximum_component_error": 5.96e-08
+    },
+    "fixed_quality_and_q4": [
+      {
+        "corpus": "synthetic-semantic-en",
+        "top1": 4,
+        "queries": 4,
+        "ranks_before": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "ranks_after": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "vector_bytes_before": 8192,
+        "vector_bytes_after": 1024,
+        "max_measured_cosine_loss": 0.014265112833252491
+      },
+      {
+        "corpus": "synthetic-semantic-pt",
+        "top1": 2,
+        "queries": 3,
+        "ranks_before": [
+          1,
+          1,
+          2
+        ],
+        "ranks_after": [
+          1,
+          1,
+          2
+        ],
+        "vector_bytes_before": 6144,
+        "vector_bytes_after": 768,
+        "max_measured_cosine_loss": 0.01053452357061102
+      }
+    ],
+    "quality_receipt_sha256": "b4d1fb5607c109d3bb09df43dc238dd159c1f459784c0b0016ad29a923323486",
+    "synthetic_local_transport": {
+      "format": "ark-project-memory-performance-v1",
+      "fixture": "300 synthetic attributed records; no user drawings, conversation files or credentials",
+      "records": 300,
+      "sqlite_version": "3.54.0",
+      "retrieval_mode": "lexical_fts5",
+      "seed_and_readback_ms": 742.4314,
+      "full_history_bytes": 675131,
+      "selected_recall_bytes": 2125,
+      "full_history_serialization": {
+        "samples": 30,
+        "p50_ms": 1.4362,
+        "p95_ms": 1.5028
+      },
+      "warm_selected_recall_and_serialization": {
+        "samples": 30,
+        "p50_ms": 0.2414,
+        "p95_ms": 0.3266
+      },
+      "cold_open_and_selected_recall": {
+        "samples": 5,
+        "p50_ms": 8.2753,
+        "p95_ms": 8.6001
+      },
+      "four_connection_parallel_recall": {
+        "samples": 80,
+        "p50_ms": 0.7593,
+        "p95_ms": 1.1858
+      },
+      "parallel_agents": 4,
+      "failed_attempts": 0,
+      "baseline_scope": "Serialize all 300 synthetic historical read exchanges versus retrieve and serialize the one same relevant persisted fact. This is bounded local context transport, not an equivalent complete-history content contract or a model task comparison.",
+      "exclusions": "No model/provider requests, embeddings, code graph extraction, CAD evaluation, live tokens, price, design quality, end-to-end agent workload or memXT comparison.",
+      "superiority_claim": false
+    },
+    "matched_provider_token_savings_established": false
+  },
+  "knowledge_views": {
+    "code_source_sha256": "b69130bbd11b540b45fd5fedb9a0527f123ba9e4dc5bf016e38a6facfe0316bb",
+    "code_graph_sha256": "a68cc9ea975d8bdc3214e897fb0668bd06b7307cbebc92373b41146e80301003",
+    "code_nodes": 10204,
+    "verified_code_links": 75058,
+    "code_content_sha256": "20e82170c285f126ac3cb24f3dcfd31a9de2fa81adb687ba1dbc50b419f9b699",
+    "combined_receipt_sha256": "a52f1fb0b9ebfef9028320386d7c4f84ed2b23972d57f7b5a5c1158b8c21fd73",
+    "combined_graph_sha256": "a68cc9ea975d8bdc3214e897fb0668bd06b7307cbebc92373b41146e80301003",
+    "memory_manifest_sha256": "54bfc32e566be9c8980c5df941b8a81658287ae34b93bf7eb07291e546450fd4",
+    "memory_anchor_links": 3,
+    "anchor_statuses": [
+      "current_source_hash_matches_anchor",
+      "current_source_hash_matches_anchor",
+      "current_source_hash_matches_anchor"
+    ],
+    "original_code_vault_modified": false,
+    "personal_vault_modified": false,
+    "publication": "Exclusive publisher lock; bounded retries for transient I/O replacement; permanent failures explicit; previous pointer retained on failure",
+    "coverage": "Local AST navigation; partial extraction/no-symbol warnings remain explicit and are not absence-of-dependency proof"
+  },
+  "resource_library": {
+    "format": "ARKLIB01 / ark.resource-library.v1",
+    "path": "assets/ark-ui.arklib",
+    "entries": 6,
+    "original_png_payload_bytes": 7304158,
+    "container_bytes": 7305206,
+    "sha256": "27fba86af3c71db0ffcc5f0b237014bc8c8a3860ab3fda4c322244ddc3a59793",
+    "loose_duplicate_pngs_in_package": 0,
+    "packed_only_startup_and_action_icons": "PASS; actual captures inspected at compact and wider sizes",
+    "compression_or_startup_speedup_claim": false
+  },
+  "distribution": {
+    "payload_files": 102,
+    "patched_occt_dlls_matched": 31,
+    "occt_patch_manifest_sha256": "2fbbd4f68b8c06a36aa04787d378540fa6e9ee43d353a57d7e09870c185f9562",
+    "semantic_assets_verified": 12,
+    "model_manifest_sha256": "1a1ed9c1c9d823fd8570601482230c736c557f26e03bf437d2111a1bcdc25b67",
+    "msvcp140_1_included": true,
+    "user_ark_files_in_package": 0,
+    "relocated_minimal_path": "System32; Windows",
+    "relocated_semantic_restart_q4_isolation": "PASS",
+    "relocated_cad": {
+      "box_volume_mm3": 120,
+      "save_reopen": "PASS",
+      "step_roundtrip_volume_difference_mm3": 0,
+      "step_roundtrip_area_difference_mm2": 0,
+      "step_roundtrip_bounds_difference_mm": 0
+    },
+    "relocated_receipt_sha256": "01a0a3fbe6ece00998c4c8bdd3f164060f11d7d846048a9543e78dc338457a8a",
+    "installer": {
+      "compiler": "Inno Setup 6.7.3 (PE32)",
+      "public_installer": {
+        "filename": "ARK-039D-windows-x64-setup.exe",
+        "size": 83105391,
+        "sha256": "ff4f176bcd09021fbed12c7ec655ce81b5cd45f9cb51ec90d7ad366985b540df",
+        "authenticode": "NotSigned",
+        "private_instrumentation": false
+      },
+      "checks": [
+        "fresh 039 install",
+        "custom path with spaces",
+        "remembered folder",
+        "038 to 039 pending state",
+        "same-version reinstall preserves selection",
+        "next-launch activation state",
+        "manual rollback state",
+        "uninstall removes immutable runtimes",
+        "synthetic drawings/settings preserved",
+        "real current.json and desktop shortcut hashes preserved",
+        "private AppId and no shortcut generation",
+        "centered welcome/finish mark and nonoverlapping native control bounds"
+      ],
+      "visual": {
+        "artwork_inspected": true,
+        "native_control_bounds_verified": true,
+        "full_wizard_capture_available": false,
+        "unchanged_gdi_capture_retried": false,
+        "limitation": "Computer Use native pipe unavailable; prior PE32 GDI capture returned error 6. Final tests used LayoutOnly."
+      },
+      "fresh_install": "PASS",
+      "upgrade_038_to_039": "PASS",
+      "reinstall": "PASS",
+      "manual_activation_and_rollback_state": "PASS",
+      "uninstall": "PASS",
+      "real_user_selection_and_shortcut_hashes_preserved": true
+    },
+    "runtime_source": "Clean source commit above; subsequent commit contains verification/docs and private LayoutOnly test support only, with no runtime-byte changes",
+    "internet_update_feed_published": false
+  },
+  "attempts_and_limits": {
+    "preserved_attempts": [
+      "Initial full core suite exposed eight legacy tool-count/fixture/package-test failures; fixed and final suite passed",
+      "One full core run exposed transient vault pointer replacement failure; bounded specific-error retry and permanent-failure preservation controls passed",
+      "New preview child fixture initially used an invalid BOM identity; corrected only the synthetic fixture; real native validation retained",
+      "One private export harness lost JSON quotes through nested PowerShell invocation; fixed private argument transport",
+      "A graph export rejected concurrent source edits and retained the prior pointer; rerun after source freeze passed",
+      "An earlier English-only embedding candidate missed Portuguese pilot queries; final multilingual pilot still retains one rank-two result",
+      "Prior installer capture failed with GDI error 6 and computer-use native pipe was unavailable; artwork and actual control bounds checked, full wizard pixel acceptance remains open"
+    ],
+    "paid_provider_trials_run": 0,
+    "hosted_ci": "Separate GitHub execution gate; local receipts do not claim hosted CI success",
+    "linux": "Prior 032D package retains its own scope; new Windows semantic runtime is not a newly qualified Linux release",
+    "open_gates": [
+      "Matched provider-task token/cost and autonomous-design quality comparisons",
+      "Broader multilingual retrieval quality beyond the fixed small corpus",
+      "Full interactive installer pixel capture, clean-machine and real-user pilot",
+      "Publisher signing, vulnerability qualification and trusted Internet update feed",
+      "Manufacturing qualification remains independent of memory, images and display meshes"
+    ]
+  }
+}

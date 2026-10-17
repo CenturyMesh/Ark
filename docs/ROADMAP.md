@@ -9,6 +9,34 @@ The public iteration and numeric runtime are defined in
 increasing sequence and its principal phase. The letter is a roadmap phase, not a
 month; it does not declare the phase complete. The `.ark` format evolves separately.
 
+040D addresses **A.03/A.05/B.01/B.02/D.02/D.05/F.05**, **Parcial**, through
+valid memory-call identities and exact legacy request recovery, bounded unrated
+feedback evidence, explicit preview recovery and tested editor picking.
+Focused local checks and one synthetic real-provider admission are
+**Verificado no escopo**; see [040D](iterations/040D.md). General autonomous design
+quality and matched token savings remain separate gates.
+
+039D addresses **A.03/A.04/A.05/D.02/D.05/F.02/F.03/F.05**, **Parcial**, through
+persistent episodic/hybrid memory, derived knowledge views, packed UI resources
+and a branded Windows installer. See [039D](iterations/039D.md) for the current
+evidence: native memory/resource contracts are **Verificado no escopo local**;
+distribution and general retrieval/design quality have separate gates.
+No matched end-to-end token-savings claim is made.
+
+038B addresses **A.03/A.04/A.05/B.01/B.02/B.03/D.02/D.04** through corrected native
+loft/shell construction, per-query recovery and verified Obsidian exports.
+Recovery is **Verificado no escopo local**: 135 native, 90 portable and six Studio
+registrations pass; the relocated test package and launcher also pass. Autonomous design delivery and
+matched token savings remain **Parcial**. See [038B](iterations/038B.md).
+
+037D addresses **A.03/A.04/D.02/D.04** through retained authoring contracts,
+basic writer onboarding, initial lead geometry before Parallel writers and
+coherent atomic construction batches. Host contracts are **Verificado no escopo
+local** in [037D](iterations/037D.md): 135 native, 90 portable and five Studio
+registrations passed. The one real-provider pilot failed its concept checkpoint;
+final scheduling/batch changes have local regression evidence, with no second
+paid trial. Real-model delivery and matched token savings remain **Parcial**.
+
 036A addresses **A.01/A.02/A.03/A.04/B.01/B.04/D.02/D.04** through
 context-stamp correctness, preserved datum identity, navigation and team
 coordination. Local integration is **Verificado no escopo** in the

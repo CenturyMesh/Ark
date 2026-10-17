@@ -61,10 +61,19 @@ executed by delivery, and only a measured successful revision receipt marks a
 proposal applied. A conflicting proposal needs fresh inspection and a new
 baseline, rather than automatic revision substitution.
 
-Each construction step defaults to eight commands and up to eight created features
-or placements within that command bound and the role's permissions. Coherent
+Studio permits 128 commands, 32 created features and 64 placements per atomic
+construction step within the role's permissions; external core team defaults
+remain eight commands/features/placements. Coherent
 sketch/feature/placement changes evaluate once in an atomic batch. Independent
 sketch increments remain available when useful, but are not compulsory.
+
+For an empty Studio document in Parallel mode, the lead first commits retained
+editable geometry at a verified revision. Other writers' assignments and steering
+remain in their mailboxes until that checkpoint; read-only reviews may run.
+Parameters, groups, empty/removed sketches, previews and failed edits cannot
+satisfy the gate. Released writers must inspect current revision before writing.
+If the lead stops without geometry, the goal remains unfinished without an
+automatic provider continuation. Core hosts opt into this gate explicitly.
 
 The engineer can use the public document new/undo/redo/import operations with
 observed revision and task authorization. Part designers cannot place assemblies

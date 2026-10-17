@@ -106,6 +106,11 @@ int main(int argc,char** argv){
         auto invalidCapability=httpFailure(400,R"({"error":{"code":"subscription_sharing_unsupported_capability","param":"tools[0].type"}})");
         check(!invalidCapability.safeToRetry&&invalidCapability.errorParam=="tools[0].type",
               "unsupported capability preserves its sanitized parameter without replaying invalid input");
+        auto oversizedId=httpFailure(400,R"({"error":{"code":"string_above_max_length","param":"input[3].call_id","message":"Expected at most 64 characters; echoed-private-request"}})");
+        check(!oversizedId.safeToRetry&&oversizedId.errorParam=="input[3].call_id"&&
+              std::string(oversizedId.what()).find("field=input[3].call_id")!=std::string::npos&&
+              std::string(oversizedId.what()).find("echoed-private-request")==std::string::npos,
+              "oversized string diagnosis exposes only its safe field path and never retries or echoes provider text");
         for(unsigned status:{429u,503u}){
             auto quota=httpFailure(status,R"({"error":{"code":"subscription_sharing_usage_limit_exceeded"}})","1");
             check(!quota.safeToRetry&&quota.failureCategory=="plan_usage_limit",

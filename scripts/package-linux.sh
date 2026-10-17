@@ -4,8 +4,8 @@ set -euo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 build_root=${ARK_BUILD_ROOT:-"$root/out"}
 runtime=${ARK_RUNTIME_DIR:-"$build_root/linux-native-release"}
-sdk=${ARK_OCCT_INSTALL_DIR:-"$build_root/deps/occt/install-linux"}
-occt_source=${ARK_OCCT_SOURCE_DIR:-"$build_root/deps/occt/cache/OCCT-8_0_1"}
+sdk=${ARK_OCCT_INSTALL_DIR:-"$build_root/deps/occt/install-linux-ark-offset-001"}
+occt_source=${ARK_OCCT_SOURCE_DIR:-"$sdk/licenses"}
 output=${ARK_OUTPUT_DIR:-"$root/out/releases"}
 [[ $(uname -s) == Linux && $(uname -m) == x86_64 ]] || { echo 'This package currently targets Linux x64.' >&2; exit 2; }
 command -v patchelf >/dev/null || { echo 'Install patchelf to prepare a relocatable package.' >&2; exit 1; }
@@ -32,6 +32,8 @@ for file in ark-cli ark-mcp ark-occt-worker; do
 done
 # Preserve the SONAME symlink chain, and never bundle user documents/sessions.
 cp -a -- "$sdk/lib/"*.so* "$package/lib/"
+# Bind exact copied SDK bytes before the declared package RPATH transformation.
+cmake -DARK_OCCT_MODE=VERIFY_RUNTIME -DARK_OCCT_INSTALL="$sdk" -DARK_OCCT_RUNTIME="$package" -P "$root/scripts/ApplyOcctPatch.cmake"
 for file in "$package/lib/"*.so*; do
     [[ -L $file ]] || patchelf --set-rpath '$ORIGIN' "$file"
 done
@@ -48,6 +50,7 @@ done
 for file in LICENSE_LGPL_21.txt OCCT_LGPL_EXCEPTION.txt; do
     cp -- "$occt_source/$file" "$package/licenses/$file"
 done
+cmake -DARK_OCCT_MODE=NOTICE -DARK_OCCT_INSTALL="$sdk" -DARK_OCCT_NOTICE="$package/licenses/OCCT-ARK-patches.txt" -P "$root/scripts/ApplyOcctPatch.cmake"
 cat > "$package/licenses/OCCT-SOURCE.txt" <<'EOF'
 OCCT 8.0.1, official V8_0_1 source archive:
 https://github.com/Open-Cascade-SAS/OCCT/archive/refs/tags/V8_0_1.zip

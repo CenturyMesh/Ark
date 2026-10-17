@@ -1,6 +1,9 @@
 #include "ark/assistant_connectors.hpp"
 #include "ark/agent_team.hpp"
 #include "ark/agent.hpp"
+#include "ark/project_memory_tools.hpp"
+#include "ark/iteration_history.hpp"
+#include <algorithm>
 #include <array>
 #include <iostream>
 #include <stdexcept>
@@ -112,6 +115,50 @@ void testResponsesReplayCustody(){auto openai=configured("openai");V response=js
     auto changedModel=openai;changedModel.model="different-explicit-model";check(assistantRequest(changedModel,transcript,tools).dump().find("opaque_source_payload")==std::string::npos,"reasoning is not replayed to a different model");
     auto plan=openai;plan.authMode=AssistantAuthMode::ChatGptPlan;check(assistantRequest(plan,transcript,tools).dump().find("opaque_source_payload")==std::string::npos,"API and ChatGPT plan reasoning custody stay separate");
 }
+void testResponsesCallIdPreflight(){
+    auto base=json(R"([{"role":"user","content":"Synthetic request."},{"type":"function_call","call_id":"valid_call","name":"doc_info","arguments":"{}"},{"type":"function_call_output","call_id":"valid_call","output":"sk_FAKE_HISTORY_SECRET"}])");
+    const std::string boundary(64,'b');base.arr[1].set("call_id",V::makeStr(boundary));base.arr[2].set("call_id",V::makeStr(boundary));
+    for(bool plan:{false,true}){
+        auto config=configured("openai");if(plan)config.authMode=AssistantAuthMode::ChatGptPlan;
+        const auto valid=assistantRequest(config,base,tools);
+        check(valid.find("input")->arr[1].find("call_id")->str==boundary&&valid.find("input")->arr[2].find("call_id")->str==boundary,"valid external 64-character IDs are preserved exactly");
+        for(int variant=0;variant<7;++variant){auto malformed=base;std::size_t expectedIndex=1;
+            if(variant==0)malformed.arr[1].set("call_id",V::makeStr(""));
+            if(variant==1)malformed.arr[1].set("call_id",V::makeStr(std::string(65,'s')));
+            if(variant==2)malformed.arr[1].set("call_id",V::makeNum(123));
+            if(variant==3){auto& fields=malformed.arr[1].obj;fields.erase(std::remove_if(fields.begin(),fields.end(),[](const auto& pair){return pair.first=="call_id";}),fields.end());}
+            if(variant==4)malformed.arr[1].set("call_id",V::makeStr("private\nprovider_id"));
+            if(variant==5)malformed.arr[1].set("call_id",V::makeStr("ark_memory_prefetch_"+std::string(64,'a')));
+            if(variant==6){malformed.arr[2].set("call_id",V::makeStr(std::string(65,'r')));expectedIndex=2;}
+            const auto before=malformed.dump();unsigned requests=0;std::string failure;
+            try{runAssistant(config,malformed,tools,{}, {},nullptr,[&](const auto&,const V&,const auto*){++requests;return json(R"({"status":"completed","output":[]})");});}catch(const std::exception& e){failure=e.what();}
+            check(requests==0&&failure.find("input["+std::to_string(expectedIndex)+"].call_id")!=std::string::npos&&failure.find("64")!=std::string::npos,"malformed Responses IDs reject with the exact parameter before any transport invocation");
+            check(failure.find("sk_FAKE_HISTORY_SECRET")==std::string::npos&&failure.find("private")==std::string::npos&&failure.find(std::string(65,'s'))==std::string::npos&&malformed.dump()==before,"preflight failure reveals no raw IDs or tool contents and preserves original history");
+        }
+    }
+    V memoryTools=V::makeArr();appendProjectMemoryTools(memoryTools);
+    auto recall=[](const auto&,const auto&){return json(R"({"structuredContent":{"note":"Synthetic private historical data."}})");};
+    const auto fresh=projectMemoryAssistantInput(V::makeStr("Synthetic task"),memoryTools,recall);auto legacy=fresh;
+    const auto legacyId="ark_memory_prefetch_"+iterationSha256(legacy.arr[1].find("arguments")->str+"\n"+legacy.arr[2].find("output")->str);
+    legacy.arr[1].set("call_id",V::makeStr(legacyId));legacy.arr[2].set("call_id",V::makeStr(legacyId));
+    for(int variant=0;variant<7;++variant){auto malformed=legacy;
+        if(variant==0)malformed.arr[1].set("name",V::makeStr("external_tool"));
+        if(variant==1)malformed.arr[1].set("arguments",V::makeStr("{\"operation\":\"wakeup\",\"scope\":\"shared\"}"));
+        if(variant==2)malformed.arr[2].set("output",V::makeStr("tampered private receipt"));
+        if(variant==3)malformed.arr[1].set("external_metadata",V::makeStr("external provenance"));
+        if(variant==4)malformed.arr[2].set("call_id",V::makeStr("unrelated_result"));
+        if(variant==5)malformed.arr.pop_back();
+        if(variant==6)malformed.arr.insert(malformed.arr.begin()+2,json(R"({"role":"assistant","content":"Nonadjacent external result."})"));
+        const auto before=malformed.dump();std::string failure;try{assistantRequest(configured("openai"),malformed,memoryTools);}catch(const std::exception& e){failure=e.what();}
+        check(failure.find("input[1].call_id")!=std::string::npos&&failure.find("historical data")==std::string::npos&&malformed.dump()==before,"legacy recovery rejects forged provenance, changed payload, incomplete and nonadjacent pairs without rewriting");
+    }
+    auto colliding=legacy;colliding.arr.push_back(fresh.arr[1]);colliding.arr.back().set("name",V::makeStr("doc_info"));colliding.arr.push_back(fresh.arr[2]);const auto before=colliding.dump();
+    std::string failure;try{assistantRequest(configured("openai"),colliding,memoryTools);}catch(const std::exception& e){failure=e.what();}
+    check(failure.find("collide")!=std::string::npos&&colliding.dump()==before,"legacy recovery refuses an ID already owned by another retained pair");
+    auto claimed=base;claimed.arr[1].set("call_id",*fresh.arr[1].find("call_id"));claimed.arr[2].set("call_id",*fresh.arr[1].find("call_id"));const auto claimedBefore=claimed.dump();failure.clear();
+    try{projectMemoryAssistantInput(claimed,memoryTools,recall);}catch(const std::exception& e){failure=e.what();}
+    check(failure.find("collide")!=std::string::npos&&claimed.dump()==claimedBefore,"new prefetch refuses a host ID already claimed by an unrelated external pair");
+}
 void testMixedProviderTeam(){AgentTeam team;AgentTeamConfig config;config.maxWorkers=3;std::array<std::atomic<int>,3> requests{};std::atomic<int> inspections=0;
     const char* providers[]={"grok","ollama","claude"};
     for(int i=0;i<3;++i){AgentTeamRole role;role.id="provider"+std::to_string(i);role.label=role.id;role.assistant=configured(providers[i]);role.assistant.model+="-"+std::to_string(i);role.canWrite=true;
@@ -131,5 +178,5 @@ int main(int argc,char** argv){try{
     if(argc==3&&std::string(argv[1])=="--local-agent-basic-smoke"){liveLocalModelSmoke(argv[2],true);return 0;}
     // Explicit opt-in read-only network smoke. Default test stays fully offline.
     if(argc==3&&std::string(argv[1])=="--catalog"){const auto ids=assistantProviderModels(assistantProviderPreset(argv[2]));V models=V::makeArr();for(const auto& id:ids)models.arr.push_back(V::makeStr(id));std::cout<<models.dump()<<'\n';return 0;}
-    testLocalModelCapabilities();testChat();testOllamaEmptyPropertySchemas();testCompleteBeforeExecution();testBoundedOutcomes();testMessages();testPresetsCatalogAndExport();testResponsesReplayCustody();testMixedProviderTeam();std::cout<<"Provider connector contracts passed\n";return 0;
+    testLocalModelCapabilities();testChat();testOllamaEmptyPropertySchemas();testCompleteBeforeExecution();testBoundedOutcomes();testMessages();testPresetsCatalogAndExport();testResponsesReplayCustody();testResponsesCallIdPreflight();testMixedProviderTeam();std::cout<<"Provider connector contracts passed\n";return 0;
 }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

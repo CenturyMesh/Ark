@@ -44,6 +44,7 @@ struct AssistantConfig {
     unsigned maxOutputTokens=8192; // Required per-response max_tokens for Messages; not a run budget.
     unsigned maxRounds=0; // Zero: continue until completion/cancel; optional bounded test/host mode.
     std::string onboardingPack; // Static source-owned guide, inserted once per conversation.
+    bool memoryPrefetch=false; // Studio opts in; separate untrusted startup data, not a static guide.
     bool imageInputSupported=true; // Host capability override; false rejects pixels explicitly.
     unsigned timeoutSeconds=90;
     std::size_t maxResponseBytes=4*1024*1024;

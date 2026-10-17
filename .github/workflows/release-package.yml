@@ -3,9 +3,9 @@ on:
   workflow_dispatch:
     inputs:
       installer:
-        description: Build and test the optional Windows installer
+        description: Build and test the Windows installer
         type: boolean
-        default: false
+        default: true
       publish:
         description: Publish a prerelease after both platform jobs pass
         type: boolean
@@ -37,10 +37,8 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: |
-            out/deps/occt/install-msvc
-            out/deps/occt/cache/OCCT-8_0_1/LICENSE_LGPL_21.txt
-            out/deps/occt/cache/OCCT-8_0_1/OCCT_LGPL_EXCEPTION.txt
-          key: windows-2022-occt-msvc-x64-notices-v1-${{ steps.runner-image.outputs.version }}-${{ hashFiles('scripts/build-occt.ps1') }}
+            out/deps/occt/install-msvc-ark-offset-001
+          key: windows-2022-occt-msvc-x64-ark-offset-001-v1-${{ steps.runner-image.outputs.version }}-${{ hashFiles('scripts/build-occt.ps1', 'scripts/ApplyOcctPatch.cmake', 'third_party/occt/patches/8.0.1/**') }}
       - name: Build OCCT 8 native SDK
         if: steps.occt-cache.outputs.cache-hit != 'true'
         shell: pwsh
@@ -50,9 +48,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: |
-            out/deps/occt/install-msvc
-            out/deps/occt/cache/OCCT-8_0_1/LICENSE_LGPL_21.txt
-            out/deps/occt/cache/OCCT-8_0_1/OCCT_LGPL_EXCEPTION.txt
+            out/deps/occt/install-msvc-ark-offset-001
           key: ${{ steps.occt-cache.outputs.cache-primary-key }}
       - name: Build ARK and run tests
         shell: pwsh
@@ -86,7 +82,10 @@ jobs:
         run: |
           $release = Get-Content release.json -Raw | ConvertFrom-Json
           ./scripts/build-installer.ps1 -PackagePath "out/releases/ark-windows-x64-$($release.version).zip"
-          ./scripts/test-distribution.ps1 -PackagePath "out/releases/ark-windows-x64-$($release.version).zip" -InstallerPath "out/releases/ARK-$($release.code)-windows-x64-setup.exe"
+          ./scripts/build-installer.ps1 -PackagePath "out/releases/ark-windows-x64-$($release.version).zip" -OutputDirectory out/installer-ci -TestIsolationId hosted-ci
+          $testSetup = @(Get-ChildItem out/installer-ci/*-test-hosted-ci.exe)
+          if ($testSetup.Count -ne 1) { throw 'Expected one isolated test installer.' }
+          ./tests/installer_smoke_tests.ps1 -InstallerPath $testSetup[0].FullName -OutputDirectory out/installer-ci/checks
       - uses: actions/upload-artifact@v4
         with:
           name: ark-windows-release-assets

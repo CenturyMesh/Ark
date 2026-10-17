@@ -1,9 +1,22 @@
 #include "ark/occt_solid.hpp"
+#include "ark/occt_modeling.hpp"
 #include "../src/occt/common.hpp"
 #include <BRep_Tool.hxx>
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
+#include <BRepBuilderAPI_MakePolygon.hxx>
+#include <BRepBuilderAPI_MakeWire.hxx>
+#include <BRepBuilderAPI_Sewing.hxx>
+#include <BRepPrimAPI_MakePrism.hxx>
+#include <BRepGProp.hxx>
+#include <GProp_GProps.hxx>
+#include <BRepCheck_Analyzer.hxx>
+#include <BRepLib.hxx>
+#include <BRepOffset_Analyse.hxx>
+#include <BRepOffset_Interval.hxx>
+#include <Geom_BSplineSurface.hxx>
+#include <Geom_BSplineCurve.hxx>
 #include <Geom_Surface.hxx>
 #include <Geom_Curve.hxx>
 #include <TopoDS.hxx>
@@ -13,6 +26,7 @@
 #include <NCollection_List.hxx>
 #include <TopTools_ShapeMapHasher.hxx>
 #include <gp_Pln.hxx>
+#include <array>
 #include <cmath>
 #include <filesystem>
 #include <iostream>
@@ -31,6 +45,139 @@ Value on(const char* op,const Value& base){Value q=Value::makeObj();q.set("op",V
 double volume(const Value& solid){return solid.find("report")->find("volume_mm3")->num;}
 void rejected(const Value& request,bool reference=false){try{if(reference)(void)occt::referenceFrameNative(request);else (void)result(request);}catch(const std::exception&){return;}throw std::runtime_error("Invalid request was accepted");}
 const Value* referenceNamed(const Value& solid,const std::string& name){for(const auto& row:solid.find("topology")->find("references")->arr)if(row.find("name")->str==name)return &row;return nullptr;}
+
+void offsetEdgeRegularity(){
+    // A planar B-spline patch has the same exact geometry as a plane. Its
+    // representation must not replace the operation's angular tolerance with
+    // the much looser visual G1 test used by the fillet helper.
+    for(const double angle:{-.3,-.05,0.,.05,.3}){
+        BRepBuilderAPI_MakePolygon boundary;
+        for(const auto& point:{gp_Pnt(0,0,0),gp_Pnt(10,0,0),gp_Pnt(10,10,0),gp_Pnt(0,10,0)})boundary.Add(point);
+        boundary.Close();
+        const auto plane=BRepBuilderAPI_MakeFace(boundary.Wire()).Face();
+        NCollection_Array2<gp_Pnt> poles(1,2,1,2);
+        for(int i=1;i<=2;++i)for(int j=1;j<=2;++j)
+            poles(i,j)=gp_Pnt(10*(i-1),-10*(j-1)*std::cos(angle),-10*(j-1)*std::sin(angle));
+        NCollection_Array1<double> knots(1,2);knots(1)=0;knots(2)=1;
+        NCollection_Array1<int> multiplicities(1,2);multiplicities(1)=multiplicities(2)=2;
+        occ::handle<Geom_BSplineSurface> support=new Geom_BSplineSurface(poles,knots,knots,multiplicities,multiplicities,1,1);
+        auto spline=BRepBuilderAPI_MakeFace(support,1e-7).Face();spline.Reverse();
+        BRepBuilderAPI_Sewing sewing(1e-7);sewing.Add(plane);sewing.Add(spline);sewing.Perform();
+        const auto shape=sewing.SewedShape();BRepLib::EncodeRegularity(shape);
+        check(BRepCheck_Analyzer(shape,true,false,true).IsValid(),"offset regularity fixture has exact curve/pcurve agreement");
+        NCollection_IndexedDataMap<TopoDS_Shape,NCollection_List<TopoDS_Shape>,TopTools_ShapeMapHasher> ancestors;
+        TopExp::MapShapesAndAncestors(shape,TopAbs_EDGE,TopAbs_FACE,ancestors);
+        BRepOffset_Analyse analysis(shape,1e-5);
+        size_t shared=0;
+        for(int i=1;i<=ancestors.Extent();++i){
+            const auto& faces=ancestors.FindFromIndex(i);if(faces.Extent()!=2)continue;
+            ++shared;const auto edge=TopoDS::Edge(ancestors.FindKey(i));
+            check((BRep_Tool::Continuity(edge,TopoDS::Face(faces.First()),TopoDS::Face(faces.Last()))>GeomAbs_C0)==(angle==0),"only the coplanar fixture carries tangent regularity");
+            const auto expected=angle<0?ChFiDS_Concave:angle>0?ChFiDS_Convex:ChFiDS_Tangential;
+            check(analysis.Type(edge).Extent()==1,"offset edge has one unambiguous interval");
+            check(analysis.Type(edge).First().Type()==expected,"offset analysis preserves genuine shallow concave and convex C0 joins");
+        }
+        check(shared==1,"offset regularity fixture has one shared edge");
+    }
+}
+
+void volumeAcrossPlanarSplineSpans(){
+    // The polygon has area 10*5 + 8*3 = 74 mm2. Concentrating two
+    // parameter spans does not change its geometry or its five-mm prism.
+    const double xy[7][2]={{0,0},{10,0},{10,5},{8,5},{8,8},{0,8},{0,0}};
+    const double parameters[7]={0,1e-6,2e-6,.1,.5,.9,1};
+    NCollection_Array1<gp_Pnt> poles(1,7);
+    NCollection_Array1<double> knots(1,7);
+    NCollection_Array1<int> mults(1,7);
+    for(int i=1;i<=7;++i){
+        poles(i)=gp_Pnt(xy[i-1][0]+123,xy[i-1][1]-97,11);
+        knots(i)=parameters[i-1];mults(i)=i==1||i==7?2:1;
+    }
+    occ::handle<Geom_BSplineCurve> boundary=new Geom_BSplineCurve(poles,knots,mults,1);
+    const auto wire=BRepBuilderAPI_MakeWire(BRepBuilderAPI_MakeEdge(boundary).Edge()).Wire();
+    const auto face=BRepBuilderAPI_MakeFace(wire).Face();
+    const auto solid=BRepPrimAPI_MakePrism(face,gp_Vec(0,0,5)).Shape();
+    check(BRepCheck_Analyzer(solid,true,false,true).IsValid(),"piecewise spline prism is exact-valid");
+    for(double eps:{1e-10,1e-13}){
+        GProp_GProps props;
+        const double achieved=BRepGProp::VolumePropertiesGK(solid,props,eps,false,true,false,false,false);
+        check(achieved>=0&&std::isfinite(achieved),"piecewise spline volume integration completes");
+        close(props.Mass(),370,1e-6,"planar spline trim spans preserve the analytic prism volume");
+    }
+}
+
+void extendedTangentShellConservation(){
+    // Four exact rational ellipse quadrants make independent G1 supports.
+    // The nonuniform section heights force the opening to extend those
+    // supports. A shared 3D edge must retain both physical pcurve images.
+    Value loft=Value::makeObj(),profiles=Value::makeArr();
+    loft.set("op",Value::makeStr("loft"));loft.set("solid",Value::makeBool(true));
+    loft.set("compatible",Value::makeBool(true));loft.set("max_degree",Value::makeNum(3));
+    const double major[4]={80,79,64,40},minor[4]={50,49,40,25},height[4]={0,30,39,40};
+    const double pi=std::acos(-1.),weight=std::sqrt(.5);
+    for(int i=0;i<4;++i){
+        Value profile=Value::makeObj(),frame=Value::makeArr(),entities=Value::makeArr();
+        for(double x:std::array<double,16>{1,0,0,0,0,1,0,0,0,0,1,0,0,0,height[i],1})frame.arr.push_back(Value::makeNum(x));
+        profile.set("frame",frame);
+        for(int quadrant=0;quadrant<4;++quadrant){
+            const double a=quadrant*pi/2,b=(quadrant+1)*pi/2,m=(a+b)/2;
+            Value entity=Value::makeObj(),points=Value::makeArr(),weights=Value::makeArr();
+            for(const auto& p:std::array<std::array<double,2>,3>{{{major[i]*std::cos(a),minor[i]*std::sin(a)},
+                {major[i]*std::cos(m)/weight,minor[i]*std::sin(m)/weight},{major[i]*std::cos(b),minor[i]*std::sin(b)}}}){
+                Value point=Value::makeArr();point.arr={Value::makeNum(p[0]),Value::makeNum(p[1])};points.arr.push_back(point);
+            }
+            weights.arr={Value::makeNum(1),Value::makeNum(weight),Value::makeNum(1)};
+            entity.set("kind",Value::makeStr("bezier"));entity.set("name",Value::makeStr("quadrant."+std::to_string(quadrant)));
+            entity.set("points",points);entity.set("weights",weights);entities.arr.push_back(entity);
+        }
+        profile.set("entities",entities);profiles.arr.push_back(profile);
+    }
+    loft.set("profiles",profiles);
+    const auto base=occt::modelSurfaceNative(loft);
+    for(bool moved:{false,true}){
+        auto input=base;const double angle=moved?.31:0,c=std::cos(angle),s=std::sin(angle);
+        const double tx=moved?123:0,ty=moved?-97:0,tz=moved?41:0;
+        if(moved){
+            auto transform=on("transform",base);Value frame=Value::makeArr();
+            for(double x:std::array<double,16>{c,s,0,0,-s,c,0,0,0,0,1,0,tx,ty,tz,1})frame.arr.push_back(Value::makeNum(x));
+            transform.set("frame",frame);input=result(transform);
+        }
+        auto shellRequest=on("shell",input);shellRequest.set("thickness",Value::makeNum(-2));
+        shellRequest.set("faces",parse(R"(["cap.start"])"));
+        const auto shell=result(shellRequest);const auto source=occt::readBrep(shell.find("brep_base64")->str);
+        check(BRepCheck_Analyzer(source,true,false,true).IsValid(),"extended tangent shell is exact-valid");
+        auto split=on("split_plane",shell);Value normal=Value::makeArr(),origin=Value::makeArr();
+        normal.arr={Value::makeNum(c),Value::makeNum(s),Value::makeNum(0)};
+        origin.arr={Value::makeNum(tx-17.25*c),Value::makeNum(ty-17.25*s),Value::makeNum(tz)};
+        split.set("normal",normal);split.set("origin",origin);
+        split.set("keep",Value::makeStr("positive"));const auto positive=result(split);
+        split.set("keep",Value::makeStr("negative"));const auto negative=result(split);
+        close(volume(positive)+volume(negative),volume(shell),volume(shell)*1e-7,"extended tangent shell conserves volume across an off-center split");
+        for(const auto& half:{positive,negative})check(BRepCheck_Analyzer(occt::readBrep(half.find("brep_base64")->str),true,false,true).IsValid(),"extended tangent shell halves remain exact-valid");
+    }
+    // A closed support carries two pcurves for its seam. Reading the reversed
+    // original pcurve must not overwrite the extended shared-edge interval.
+    auto closedLoft=loft;auto closedProfiles=*loft.find("profiles");size_t section=0;
+    for(auto& profile:closedProfiles.arr){
+        Value circle=Value::makeObj(),entities=Value::makeArr();
+        circle.set("kind",Value::makeStr("circle"));circle.set("name",Value::makeStr("closed.section"));
+        circle.set("center",parse("[0,0]"));circle.set("radius",Value::makeNum(major[section++]));
+        entities.arr.push_back(circle);profile.set("entities",entities);
+    }
+    closedLoft.set("profiles",closedProfiles);
+    const auto closedBase=occt::modelSurfaceNative(closedLoft);
+    const auto closedSource=occt::readBrep(closedBase.find("brep_base64")->str);bool hasSeam=false;
+    for(const auto& fs:occt::shapes(closedSource,TopAbs_FACE))for(const auto& es:occt::shapes(fs,TopAbs_EDGE))
+        hasSeam=hasSeam||BRep_Tool::IsClosed(TopoDS::Edge(es),TopoDS::Face(fs));
+    check(hasSeam,"closed loft control contains a native seam with two pcurves");
+    auto shellRequest=on("shell",closedBase);shellRequest.set("thickness",Value::makeNum(-2));shellRequest.set("faces",parse(R"(["cap.start"])"));
+    const auto shell=result(shellRequest);check(BRepCheck_Analyzer(occt::readBrep(shell.find("brep_base64")->str),true,false,true).IsValid(),"closed seam shell is exact-valid");
+    auto split=on("split_plane",shell);split.set("normal",parse("[1,0,0]"));split.set("origin",parse("[-17.25,0,0]"));
+    split.set("keep",Value::makeStr("positive"));const auto positive=result(split);
+    split.set("keep",Value::makeStr("negative"));const auto negative=result(split);
+    close(volume(positive)+volume(negative),volume(shell),volume(shell)*1e-7,"closed seam shell conserves volume across an off-center split");
+    for(const auto& half:{positive,negative})check(BRepCheck_Analyzer(occt::readBrep(half.find("brep_base64")->str),true,false,true).IsValid(),"closed seam shell halves remain exact-valid");
+}
 
 void currentSelectionCoverage(const Value& solid){
     const auto shape=occt::readBrep(solid.find("brep_base64")->str);
@@ -361,4 +508,4 @@ void planeSplitAndMirrorCopy(){
     mirror.set("fuse",Value::makeNum(1));rejected(mirror);
 }
 }
-int main(){try{primitivesAndNames();nativeDisplayEdges();disconnectedDiagnostic();operations();genuineMergedFaceAliases();rejection();finishingFeatures();repeatedUnionNamespaces();planeSplitAndMirrorCopy();std::cout<<"native solid tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(){try{offsetEdgeRegularity();volumeAcrossPlanarSplineSpans();extendedTangentShellConservation();primitivesAndNames();nativeDisplayEdges();disconnectedDiagnostic();operations();genuineMergedFaceAliases();rejection();finishingFeatures();repeatedUnionNamespaces();planeSplitAndMirrorCopy();std::cout<<"native solid tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

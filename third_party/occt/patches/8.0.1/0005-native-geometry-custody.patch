@@ -1,0 +1,527 @@
+--- a/src/ModelingData/TKGeomBase/AppParCurves/AppParCurves_Gradient.gxx
++++ b/src/ModelingData/TKGeomBase/AppParCurves/AppParCurves_Gradient.gxx
+@@ -180,6 +180,7 @@
+     Done = false;
+     return;
+   }
++  SCU = MyF.CurveValue();
+   MError3d = MyF.MaxError3d();
+   MError2d = MyF.MaxError2d();
+ 
+--- a/src/ModelingAlgorithms/TKGeomAlgo/ApproxInt/ApproxInt_Approx.gxx
++++ b/src/ModelingAlgorithms/TKGeomAlgo/ApproxInt/ApproxInt_Approx.gxx
+@@ -18,6 +18,10 @@
+ #include <ApproxInt_KnotTools.hxx>
+ #include <GeomAbs_SurfaceType.hxx>
+ #include <IntSurf_PntOn2S.hxx>
++#include <IntSurf_LineOn2S.hxx>
++#include <GeomAdaptor_TransformedSurface.hxx>
++#include <Standard_ConstructionError.hxx>
++#include <type_traits>
+ #include <IntSurf_Quadric.hxx>
+ #include <Precision.hxx>
+ #include <gp_Trsf.hxx>
+@@ -30,7 +34,38 @@
+ // This constant should be removed in the future.
+ const double RatioTol = 1.5;
+ 
+-//=================================================================================================
++#include <algorithm>
++#include <limits>
++#include <memory>
++#include <vector>
++
++//=================================================================================================
++
++// Preserve the surface adaptor contract of each template instantiation.
++// Value adaptors retain their face and placement while adopting only trim bounds;
++// handle adaptors keep the existing virtual UTrim/VTrim result unchanged.
++template <class SurfaceType>
++static SurfaceType ApproxInt_PreserveSurfaceType(
++  const SurfaceType& theSurface,
++  const occ::handle<Adaptor3d_Surface>& theTrimmed,
++  const bool theIsU)
++{
++  if constexpr (std::is_base_of<GeomAdaptor_TransformedSurface, SurfaceType>::value)
++  {
++    SurfaceType aResult = theSurface;
++    aResult.Load(theSurface.GeomSurfaceOriginal(),
++                 theTrimmed->FirstUParameter(), theTrimmed->LastUParameter(),
++                 theTrimmed->FirstVParameter(), theTrimmed->LastVParameter(),
++                 theSurface.Trsf(),
++                 theIsU ? 0.0 : theSurface.AdaptorSurfaceOriginal().ToleranceU(),
++                 theIsU ? theSurface.AdaptorSurfaceOriginal().ToleranceV() : 0.0);
++    return aResult;
++  }
++  else
++  {
++    return theTrimmed;
++  }
++}
+ 
+ static void ComputeTrsf3d(const occ::handle<TheWLine>& theline,
+                           double&                      theXo,
+@@ -357,8 +392,124 @@
+                                const int                    indicemax,
+                                const bool                   isTheQuadFirst)
+ {
++  // An offset of a C1 surface is only C0 at its extension boundaries.
++  // Retain those producer-declared breaks in the approximation, rather than
++  // asking one smooth Bezier segment to cross a discontinuous tangent.
++  Handle_TheWLine aLine = theline;
++  int aFirst = indicemin, aLast = indicemax;
++  std::vector<int> aRequiredKnots;
++  if (ISurf.TypeQuadric() == GeomAbs_Plane)
++  {
++    struct Boundary { bool IsU; double Parameter; };
++    std::vector<Boundary> aBoundaries;
++    for (bool isU : {true, false})
++    {
++      int aNbIntervals = isU ? ThePSurfaceTool::NbUIntervals(PSurf, GeomAbs_C1)
++                            : ThePSurfaceTool::NbVIntervals(PSurf, GeomAbs_C1);
++      if (aNbIntervals < 2)
++        continue;
++      NCollection_Array1<double> anIntervals(1, aNbIntervals + 1);
++      if (isU)
++        ThePSurfaceTool::UIntervals(PSurf, anIntervals, GeomAbs_C1);
++      else
++        ThePSurfaceTool::VIntervals(PSurf, anIntervals, GeomAbs_C1);
++      for (int k = 2; k <= aNbIntervals; ++k)
++        aBoundaries.push_back({isU, anIntervals(k)});
++    }
++    if (!aBoundaries.empty())
++    {
++      occ::handle<IntSurf_LineOn2S> aPoints = new IntSurf_LineOn2S();
++      aPoints->Add(theline->Point(indicemin));
++      for (int i = indicemin + 1; i <= indicemax; ++i)
++      {
++        const gp_Pnt2d aUV0 = theline->Point(i - 1).ValueOnSurface(!isTheQuadFirst);
++        const gp_Pnt2d aUV1 = theline->Point(i).ValueOnSurface(!isTheQuadFirst);
++        struct Crossing { double Fraction; Boundary Break; };
++        std::vector<Crossing> aCrossings;
++        for (const Boundary& aBoundary : aBoundaries)
++        {
++          const double aD0 = (aBoundary.IsU ? aUV0.X() : aUV0.Y()) - aBoundary.Parameter;
++          const double aD1 = (aBoundary.IsU ? aUV1.X() : aUV1.Y()) - aBoundary.Parameter;
++          if (aD0 * aD1 < 0.0)
++            aCrossings.push_back({-aD0 / (aD1 - aD0), aBoundary});
++          else if (aD0 == 0.0)
++            aRequiredKnots.push_back(aPoints->NbPoints());
++        }
++        std::sort(aCrossings.begin(), aCrossings.end(),
++                  [](const Crossing& a, const Crossing& b) { return a.Fraction < b.Fraction; });
++        int aPreviousCrossingIndex = 0;
++        double aPreviousCrossingFraction = 0.0;
++        for (const Crossing& aCrossing : aCrossings)
++        {
++          double aU = aUV0.X() + aCrossing.Fraction * (aUV1.X() - aUV0.X());
++          double aV = aUV0.Y() + aCrossing.Fraction * (aUV1.Y() - aUV0.Y());
++          if (aCrossing.Break.IsU) aU = aCrossing.Break.Parameter;
++          else                    aV = aCrossing.Break.Parameter;
++          gp_Pnt aPoint;
++          bool isConverged = false;
++          for (int anIteration = 0; anIteration < 32; ++anIteration)
++          {
++            gp_Vec aDU, aDV, aGradient;
++            ThePSurfaceTool::D1(PSurf, aU, aV, aPoint, aDU, aDV);
++            double aResidual;
++            ISurf.ValAndGrad(aPoint, aResidual, aGradient);
++            const double aRoundoff = 16.0 * std::numeric_limits<double>::epsilon()
++              * std::max(1.0, std::max(std::abs(aPoint.X()),
++                                     std::max(std::abs(aPoint.Y()), std::abs(aPoint.Z()))));
++            if (std::abs(aResidual) <= aRoundoff)
++            {
++              isConverged = true;
++              break;
++            }
++            const double aDerivative = aGradient.Dot(aCrossing.Break.IsU ? aDV : aDU);
++            if (std::abs(aDerivative) <= std::numeric_limits<double>::min())
++              break;
++            const double aStep = aResidual / aDerivative;
++            if (aCrossing.Break.IsU) aV -= aStep;
++            else                    aU -= aStep;
++          }
++          if (!isConverged)
++            throw Standard_ConstructionError("Cannot isolate a surface continuity boundary");
++          double anImplicitU, anImplicitV;
++          ISurf.Parameters(aPoint, anImplicitU, anImplicitV);
++          IntSurf_PntOn2S aNewPoint;
++          if (isTheQuadFirst)
++            aNewPoint.SetValue(aPoint, anImplicitU, anImplicitV, aU, aV);
++          else
++            aNewPoint.SetValue(aPoint, aU, aV, anImplicitU, anImplicitV);
++          // Coincident U/V events own one exact intersection point and knot.
++          // Equal fractions alone do not prove identical corrected roots.
++          bool isSameCrossing = false;
++          if (aPreviousCrossingIndex != 0 && aCrossing.Fraction == aPreviousCrossingFraction)
++          {
++            const IntSurf_PntOn2S& aPrevious = aPoints->Value(aPreviousCrossingIndex);
++            double aCurrentUV[4], aPreviousUV[4];
++            aNewPoint.Parameters(aCurrentUV[0], aCurrentUV[1], aCurrentUV[2], aCurrentUV[3]);
++            aPrevious.Parameters(aPreviousUV[0], aPreviousUV[1], aPreviousUV[2], aPreviousUV[3]);
++            isSameCrossing = true;
++            for (int axis = 1; axis <= 3; ++axis)
++              isSameCrossing = isSameCrossing && aNewPoint.Value().Coord(axis) == aPrevious.Value().Coord(axis);
++            for (int axis = 0; axis < 4; ++axis)
++              isSameCrossing = isSameCrossing && aCurrentUV[axis] == aPreviousUV[axis];
++          }
++          if (!isSameCrossing)
++            aPoints->Add(aNewPoint);
++          aPreviousCrossingIndex = aPoints->NbPoints();
++          aPreviousCrossingFraction = aCrossing.Fraction;
++          aRequiredKnots.push_back(aPoints->NbPoints());
++        }
++        aPoints->Add(theline->Point(i));
++      }
++      if (!aRequiredKnots.empty())
++      {
++        aLine = new TheWLine(aPoints, false);
++        aFirst = 1;
++        aLast = aPoints->NbPoints();
++      }
++    }
++  }
+   // Prepare DS.
+-  prepareDS(ApproxXYZ, ApproxU1V1, ApproxU2V2, indicemin, indicemax);
++  prepareDS(ApproxXYZ, ApproxU1V1, ApproxU2V2, aFirst, aLast);
+ 
+   // Non-analytical case: Analytic-Param perform.
+   ApproxInt_TheImpPrmSvSurfaces myImpPrmSvSurfaces =
+@@ -367,7 +518,7 @@
+ 
+   myImpPrmSvSurfaces.SetUseSolver(false);
+ 
+-  const int nbpntbez = indicemax - indicemin;
++  const int nbpntbez = aLast - aFirst;
+   if (nbpntbez < aMinNbPointsForApprox)
+   {
+     myData.myBezierApprox = false;
+@@ -377,21 +528,37 @@
+     myData.myBezierApprox = true;
+   }
+ 
+-  const bool  cut       = myData.myBezierApprox;
+   void* const ptrsvsurf = &myImpPrmSvSurfaces;
+ 
+   // Fill data structure.
+-  fillData(theline);
++  fillData(aLine);
+ 
+   // Build knots.
+-  buildKnots(theline, ptrsvsurf);
++  buildKnots(aLine, ptrsvsurf);
++  if (!aRequiredKnots.empty())
++  {
++    for (int i = myKnots.Lower(); i <= myKnots.Upper(); ++i)
++      aRequiredKnots.push_back(myKnots(i));
++    std::sort(aRequiredKnots.begin(), aRequiredKnots.end());
++    aRequiredKnots.erase(std::unique(aRequiredKnots.begin(), aRequiredKnots.end()), aRequiredKnots.end());
++    myKnots.Clear();
++    for (int aKnot : aRequiredKnots)
++      myKnots.Append(aKnot);
++  }
++
++  // The small-line B-spline shortcut owns one interval only. Mandatory
++  // interior continuity knots require the existing piecewise Bezier backend
++  // so every ordered span participates in the single concatenated result.
++  if (myKnots.Length() > 2)
++    myData.myBezierApprox = true;
++  const bool cut = myData.myBezierApprox;
+ 
+   myComputeLine
+     .Init(myDegMin, myDegMax, myTol3d, myTol2d, myNbIterMax, cut, myData.parametrization);
+   myComputeLineBezier
+     .Init(myDegMin, myDegMax, myTol3d, myTol2d, myNbIterMax, cut, myData.parametrization);
+ 
+-  buildCurve(theline, ptrsvsurf);
++  buildCurve(aLine, ptrsvsurf, &PSurf, &ISurf, isTheQuadFirst);
+ }
+ 
+ //=================================================================================================
+@@ -622,6 +789,15 @@
+ 
+ void ApproxInt_Approx::buildCurve(const occ::handle<TheWLine>& theline, void* const thePtrSVSurf)
+ {
++  buildCurve(theline, thePtrSVSurf, nullptr, nullptr, true);
++}
++
++void ApproxInt_Approx::buildCurve(const occ::handle<TheWLine>& theline,
++                                  void* const thePtrSVSurf,
++                                  const ThePSurface* theParamSurface,
++                                  const TheISurface* theImplicitSurface,
++                                  const bool isTheQuadFirst)
++{
+   if (myData.myBezierApprox)
+   {
+     myBezToBSpl.Reset();
+@@ -635,8 +811,54 @@
+     // Base cycle: iterate over knots.
+     imin = myKnots(kind);
+     imax = myKnots(kind + 1);
++    void* aSectionSVSurf = thePtrSVSurf;
++    std::unique_ptr<ApproxInt_TheImpPrmSvSurfaces> aBoundedSVSurf;
++    ThePSurface aSectionSurface;
++    if (theParamSurface != nullptr && theImplicitSurface != nullptr)
++    {
++      aSectionSurface = *theParamSurface;
++      gp_Pnt2d aMiddleUV = theline->Point((imin + imax) / 2).ValueOnSurface(!isTheQuadFirst);
++      if (imax - imin == 1)
++      {
++        const gp_Pnt2d aLastUV = theline->Point(imax).ValueOnSurface(!isTheQuadFirst);
++        aMiddleUV.SetCoord((aMiddleUV.X() + aLastUV.X()) * 0.5,
++                          (aMiddleUV.Y() + aLastUV.Y()) * 0.5);
++      }
++      bool isTrimmed = false;
++      for (bool isU : {true, false})
++      {
++        const int n = isU ? ThePSurfaceTool::NbUIntervals(aSectionSurface, GeomAbs_C1)
++                          : ThePSurfaceTool::NbVIntervals(aSectionSurface, GeomAbs_C1);
++        if (n < 2) continue;
++        NCollection_Array1<double> aBounds(1, n + 1);
++        if (isU) ThePSurfaceTool::UIntervals(aSectionSurface, aBounds, GeomAbs_C1);
++        else     ThePSurfaceTool::VIntervals(aSectionSurface, aBounds, GeomAbs_C1);
++        const double aParameter = isU ? aMiddleUV.X() : aMiddleUV.Y();
++        for (int k = 1; k <= n; ++k)
++        {
++          if (aParameter > aBounds(k) && aParameter < aBounds(k + 1))
++          {
++            const occ::handle<Adaptor3d_Surface> aTrimmed =
++              isU ? ThePSurfaceTool::UTrim(aSectionSurface, aBounds(k), aBounds(k + 1), 0.0)
++                  : ThePSurfaceTool::VTrim(aSectionSurface, aBounds(k), aBounds(k + 1), 0.0);
++            aSectionSurface = ApproxInt_PreserveSurfaceType(aSectionSurface, aTrimmed, isU);
++            isTrimmed = true;
++            break;
++          }
++        }
++      }
++      if (isTrimmed)
++      {
++        if (isTheQuadFirst)
++          aBoundedSVSurf.reset(new ApproxInt_TheImpPrmSvSurfaces(*theImplicitSurface, aSectionSurface));
++        else
++          aBoundedSVSurf.reset(new ApproxInt_TheImpPrmSvSurfaces(aSectionSurface, *theImplicitSurface));
++        aBoundedSVSurf->SetUseSolver(false);
++        aSectionSVSurf = aBoundedSVSurf.get();
++      }
++    }
+     ApproxInt_TheMultiLine myMultiLine(theline,
+-                                       thePtrSVSurf,
++                                       aSectionSVSurf,
+                                        ((myData.ApproxXYZ) ? 1 : 0),
+                                        ((myData.ApproxU1V1) ? 1 : 0)
+                                          + ((myData.ApproxU2V2) ? 1 : 0),
+--- a/src/ModelingAlgorithms/TKGeomAlgo/ApproxInt/ApproxInt_ImpPrmSvSurfaces.gxx
++++ b/src/ModelingAlgorithms/TKGeomAlgo/ApproxInt/ApproxInt_ImpPrmSvSurfaces.gxx
+@@ -574,6 +574,7 @@
+       {
+         u2 = X(1) - TranslationU;
+         v2 = X(2) - TranslationV;
++        aQSurf.Parameters(P, u1, v1);
+ 
+         if (aQSurf.TypeQuadric() != GeomAbs_Plane)
+         {
+@@ -598,7 +599,7 @@
+       {
+         u1 = X(1) - TranslationU;
+         v1 = X(2) - TranslationV;
+-        // aQSurf.Parameters(P, u2, v2);
++        aQSurf.Parameters(P, u2, v2);
+         if (aQSurf.TypeQuadric() != GeomAbs_Plane)
+         {
+           while (u2 - tu2 > M_PI)
+--- a/src/ModelingAlgorithms/TKGeomAlgo/ApproxInt/ApproxInt_MultiLine.gxx
++++ b/src/ModelingAlgorithms/TKGeomAlgo/ApproxInt/ApproxInt_MultiLine.gxx
+@@ -538,9 +538,16 @@
+     du   = P1C.X() - u1;
+     dv   = P1C.Y() - v1;
+     d    = du * du + dv * dv;
++    const double aNextSquared1 = P1B.SquareDistance(P1C);
++    if (duv2 > 0.0 && aNextSquared1 > 0.0)
++    {
++      const double aScale = std::sqrt(4.0 * duv2 / aNextSquared1);
++      du = aScale * (P1C.X() - P1B.X()) - (P1B.X() - P1A.X());
++      dv = aScale * (P1C.Y() - P1B.Y()) - (P1B.Y() - P1A.Y());
++      d = du * du + dv * dv;
++    }
+     if (d > duv2)
+     {
+-      CodeErreur = 1;
+       CodeErreur = 1;
+       break;
+     }
+@@ -555,6 +562,14 @@
+     du   = P2C.X() - u2;
+     dv   = P2C.Y() - v2;
+     d    = du * du + dv * dv;
++    const double aNextSquared2 = P2B.SquareDistance(P2C);
++    if (duv2 > 0.0 && aNextSquared2 > 0.0)
++    {
++      const double aScale = std::sqrt(4.0 * duv2 / aNextSquared2);
++      du = aScale * (P2C.X() - P2B.X()) - (P2B.X() - P2A.X());
++      dv = aScale * (P2C.Y() - P2B.Y()) - (P2B.Y() - P2A.Y());
++      d = du * du + dv * dv;
++    }
+     if (d > duv2)
+     {
+       CodeErreur = 2;
+@@ -584,7 +599,7 @@
+   {
+     ((TheSvSurfaces*)PtrOnmySvSurfaces)->SetUseSolver(aSaveUseSolver);
+     return (ApproxInt_MultiLine(temp,
+-                                (High - Low > 10) ? PtrOnmySvSurfaces : NULL,
++                                PtrOnmySvSurfaces,
+                                 nbp3d,
+                                 nbp2d,
+                                 myApproxU1V1,
+--- a/src/ModelingAlgorithms/TKTopAlgo/BRepApprox/BRepApprox_Approx.hxx
++++ b/src/ModelingAlgorithms/TKTopAlgo/BRepApprox/BRepApprox_Approx.hxx
+@@ -159,6 +159,11 @@
+   Standard_EXPORT void buildCurve(const occ::handle<BRepApprox_ApproxLine>& theline,
+                                   void* const                               thePtrSVSurf);
+ 
++  Standard_EXPORT void buildCurve(const occ::handle<BRepApprox_ApproxLine>& theline,
++                                  void* const thePtrSVSurf,
++                                  const BRepAdaptor_Surface* theParamSurface,
++                                  const IntSurf_Quadric* theImplicitSurface,
++                                  const bool isTheQuadFirst);
+   BRepApprox_TheComputeLineOfApprox       myComputeLine;
+   BRepApprox_TheComputeLineBezierOfApprox myComputeLineBezier;
+   Approx_MCurvesToBSpCurve                myBezToBSpl;
+--- a/src/ModelingAlgorithms/TKTopAlgo/BRepGProp/BRepGProp_Face.cxx
++++ b/src/ModelingAlgorithms/TKTopAlgo/BRepGProp/BRepGProp_Face.cxx
+@@ -18,6 +18,8 @@
+ #include <Geom2d_BezierCurve.hxx>
+ #include <Geom2d_BSplineCurve.hxx>
+ #include <Geom2d_Line.hxx>
++#include <Geom2d_TrimmedCurve.hxx>
++#include <Geom2dAPI_InterCurveCurve.hxx>
+ #include <Geom_BezierSurface.hxx>
+ #include <Geom_BSplineCurve.hxx>
+ #include <Geom_BSplineSurface.hxx>
+@@ -31,6 +33,8 @@
+ #include <TopoDS.hxx>
+ #include <TopoDS_Edge.hxx>
+ #include <TopoDS_Face.hxx>
++#include <algorithm>
++#include <vector>
+ 
+ static const double Epsilon1 = Epsilon(1.);
+ 
+@@ -710,9 +714,20 @@
+   }
+   else
+   {
+-    theUKnots = new NCollection_HArray1<double>(1, 2);
+-    theUKnots->SetValue(1, theUMin);
+-    theUKnots->SetValue(2, theUMax);
++    const int aNbIntervals = myIsUseSpan ? mySurface.NbUIntervals(GeomAbs_CN) : 1;
++    if (aNbIntervals > 1)
++    {
++      NCollection_Array1<double> anIntervals(1, aNbIntervals + 1);
++      mySurface.UIntervals(anIntervals, GeomAbs_CN);
++      occ::handle<NCollection_HArray1<double>> aKnots = new NCollection_HArray1<double>(anIntervals);
++      GetRealKnots(theUMin, theUMax, aKnots, theUKnots);
++    }
++    else
++    {
++      theUKnots = new NCollection_HArray1<double>(1, 2);
++      theUKnots->SetValue(1, theUMin);
++      theUKnots->SetValue(2, theUMax);
++    }
+   }
+   return theUKnots;
+ }
+@@ -732,17 +747,41 @@
+                                                                    const double theTMax) const
+ {
+   occ::handle<NCollection_HArray1<double>> theTKnots;
+-  bool isBSpline = mySurface.GetType() == GeomAbs_BSplineSurface;
+-
+-  if (myIsUseSpan && isBSpline)
+-  {
+-    occ::handle<NCollection_HArray1<double>> aSurfKnots;
+-    occ::handle<Geom_Surface>                aSurf = mySurface.GeomSurfaceOriginal();
+-    occ::handle<Geom_BSplineSurface>         aBSplSurf;
+-
+-    aBSplSurf  = occ::down_cast<Geom_BSplineSurface>(aSurf);
+-    aSurfKnots = new NCollection_HArray1<double>(aBSplSurf->VKnots());
++  if (myIsUseSpan)
++  {
+     GetCurveKnots(theTMin, theTMax, myCurve, theTKnots);
++    for (bool isU : {true, false})
++    {
++      const int aNbIntervals = isU ? mySurface.NbUIntervals(GeomAbs_CN)
++                                   : mySurface.NbVIntervals(GeomAbs_CN);
++      if (aNbIntervals < 2)
++        continue;
++      NCollection_Array1<double> aBounds(1, aNbIntervals + 1);
++      if (isU) mySurface.UIntervals(aBounds, GeomAbs_CN);
++      else     mySurface.VIntervals(aBounds, GeomAbs_CN);
++      std::vector<double> aBreaks;
++      for (int i = theTKnots->Lower(); i <= theTKnots->Upper(); ++i)
++        aBreaks.push_back(theTKnots->Value(i));
++      occ::handle<Geom2d_Curve> aTrim = new Geom2d_TrimmedCurve(myCurve.Curve(), theTMin, theTMax);
++      for (int i = 2; i <= aNbIntervals; ++i)
++      {
++        occ::handle<Geom2d_Curve> anIso = isU
++          ? new Geom2d_Line(gp_Pnt2d(aBounds(i), 0.0), gp_Dir2d(0.0, 1.0))
++          : new Geom2d_Line(gp_Pnt2d(0.0, aBounds(i)), gp_Dir2d(1.0, 0.0));
++        Geom2dAPI_InterCurveCurve anIntersection(aTrim, anIso, Precision::PConfusion());
++        for (int point = 1; point <= anIntersection.NbPoints(); ++point)
++        {
++          const double aParameter = anIntersection.Intersector().Point(point).ParamOnFirst();
++          if (aParameter > theTMin && aParameter < theTMax)
++            aBreaks.push_back(aParameter);
++        }
++      }
++      std::sort(aBreaks.begin(), aBreaks.end());
++      aBreaks.erase(std::unique(aBreaks.begin(), aBreaks.end()), aBreaks.end());
++      theTKnots = new NCollection_HArray1<double>(1, static_cast<int>(aBreaks.size()));
++      for (int i = 1; i <= theTKnots->Length(); ++i)
++        theTKnots->SetValue(i, aBreaks[static_cast<size_t>(i - 1)]);
++    }
+   }
+   else
+   {
+--- a/src/ModelingAlgorithms/TKOffset/BRepOffset/BRepOffset_Analyse.cxx
++++ b/src/ModelingAlgorithms/TKOffset/BRepOffset/BRepOffset_Analyse.cxx
+@@ -125,7 +125,7 @@
+ 
+     if (!isMixedConcavity)
+     {
+-      if (ChFi3d::IsTangentFaces(E, F1, F2)) // weak condition
++      if (BRep_Tool::Continuity(E, F1, F2) > GeomAbs_C0) // encoded regularity
+       {
+         ConnectType = ChFiDS_Tangential;
+       }
+--- a/src/ModelingAlgorithms/TKGeomAlgo/GeomInt/GeomInt_WLApprox.hxx
++++ b/src/ModelingAlgorithms/TKGeomAlgo/GeomInt/GeomInt_WLApprox.hxx
+@@ -151,6 +151,11 @@
+   Standard_EXPORT void buildCurve(const occ::handle<IntPatch_WLine>& theline,
+                                   void* const                        thePtrSVSurf);
+ 
++  Standard_EXPORT void buildCurve(const occ::handle<IntPatch_WLine>& theline,
++                                  void* const thePtrSVSurf,
++                                  const occ::handle<Adaptor3d_Surface>* theParamSurface,
++                                  const IntSurf_Quadric* theImplicitSurface,
++                                  const bool isTheQuadFirst);
+   GeomInt_TheComputeLineOfWLApprox       myComputeLine;
+   GeomInt_TheComputeLineBezierOfWLApprox myComputeLineBezier;
+   Approx_MCurvesToBSpCurve               myBezToBSpl;
+--- a/src/ModelingAlgorithms/TKBO/IntTools/IntTools_FaceFace.cxx
++++ b/src/ModelingAlgorithms/TKBO/IntTools/IntTools_FaceFace.cxx
+@@ -1236,6 +1236,14 @@
+         //
+         aTolApproxImp = 1.e-5;
+         tol2d         = myTolApprox;
++        // The same fitting error is used for both parameter-space curves.
++        // Convert the physical approximation tolerance through each support.
++        if (myHS1->GetType() == GeomAbs_Plane || myHS2->GetType() == GeomAbs_Plane)
++        {
++          tol2d = std::min({tol2d,
++                            myHS1->UResolution(myTolApprox), myHS1->VResolution(myTolApprox),
++                            myHS2->UResolution(myTolApprox), myHS2->VResolution(myTolApprox)});
++        }
+ 
+         GeomAbs_SurfaceType typs1, typs2;
+         typs1         = myHS1->GetType();

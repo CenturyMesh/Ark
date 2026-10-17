@@ -3,6 +3,7 @@
 #include "ark/assembly_authoring.hpp"
 #include "ark/agent_activity.hpp"
 #include "ark/iteration_history.hpp"
+#include "ark/project_memory_tools.hpp"
 #include <atomic>
 #include <random>
 #include <sstream>
@@ -93,10 +94,12 @@ void AgentSession::trimPrepared(){
 arkjson::Value AgentSession::call(const std::string& tool,const V& args){
     if(callDepth_==0)trimPrepared();
     const auto activityStarted=std::chrono::steady_clock::now();const auto activityBefore=revision;const auto* actor=args.find("actor");
-    const bool audit=callDepth_==0&&actor&&actor->t==V::Obj&&actor->find("kind")&&actor->find("kind")->asStr()=="agent"&&tool!="tool_feedback"&&tool!="activity_info"&&tool!="usage_record";
+    struct MemoryActorGuard {std::string& value;std::string before;~MemoryActorGuard(){value=std::move(before);}} memoryActorGuard{memoryActor,memoryActor};
+    if(actor&&actor->t==V::Obj&&actor->find("id")&&actor->find("id")->t==V::Str)memoryActor="declared:"+actor->find("id")->str.substr(0,240);
+    const bool audit=callDepth_==0&&actor&&actor->t==V::Obj&&actor->find("kind")&&actor->find("kind")->asStr()=="agent"&&tool!="tool_feedback"&&tool!="activity_info"&&tool!="usage_record"&&tool!="memory_context"&&tool!="memory_record"&&tool!="memory_maintain";
     const bool recording=!suppressFailures_&&callDepth_==0&&(tool=="doc_apply"||tool=="doc_preview");
     const auto rejectedRevision=revision;const std::string rejectedBaseline=recording?documentToJson(document):std::string();
-    auto finish=[&](V response){trimPrepared();if(revision!=activityBefore&&response.find("isError")&&!response.find("isError")->b){trimPrepared();if(tool=="doc_load"||tool=="doc_new")resetBomReview();else if(audit)markBomAuthored();}if(recording)response=captureFailure(tool,args,args,rejectedBaseline,rejectedRevision,std::move(response));if(audit)response=recordAgentActivity(document,tool,args,*actor,std::move(response),activityBefore,revision,std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-activityStarted).count());return response;};
+    auto finish=[&](V response){trimPrepared();if(revision!=activityBefore&&response.find("isError")&&!response.find("isError")->b){trimPrepared();if(tool=="doc_load"||tool=="doc_new")resetBomReview();else if(audit)markBomAuthored();}if(recording)response=captureFailure(tool,args,args,rejectedBaseline,rejectedRevision,std::move(response));if(audit)response=recordAgentActivity(document,tool,args,*actor,std::move(response),activityBefore,revision,std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-activityStarted).count());if(audit&&!suppressHistory_)captureProjectMemoryEpisode(*this,tool,args,response);return response;};
     V clean=args;if(clean.t==V::Obj)clean.obj.erase(std::remove_if(clean.obj.begin(),clean.obj.end(),[&](const auto& field){return (field.first=="actor"&&tool!="tool_feedback")||field.first=="motivation";}),clean.obj.end());
     const bool mutating=tool=="doc_apply"||tool=="doc_new"||tool=="doc_load"||tool=="doc_undo"||tool=="doc_redo"||tool=="iteration_restore"||tool=="import_step"||tool=="import_sheet_step"||tool=="import_mesh"||tool=="import_cad"||(tool=="design_containers"&&args.find("action")&&args.find("action")->asStr()=="merge"&&!(args.find("preview")&&args.find("preview")->t==V::Bool&&args.find("preview")->b))||(tool=="image_asset"&&args.find("action")&&args.find("action")->asStr()=="import")||tool=="usage_record"||tool=="library_insert";
     struct Depth {size_t& value;Depth(size_t& n):value(n){++value;}~Depth(){--value;}} depth(callDepth_);

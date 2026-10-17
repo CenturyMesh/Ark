@@ -33,6 +33,11 @@ public:
     };
     Document document;
     u64 revision=0;
+    // Unsaved sessions have a private ephemeral memory scope. Persistent CAD
+    // identities use their saved project key; no scope is written to .ark.
+    std::string memorySessionScope;
+    std::string memoryActor;
+    std::string memoryProjectOverride; // Host-selected coding project; never a model argument.
     arkjson::Value call(const std::string& tool,const arkjson::Value& args);
     arkjson::Value info() const;
     arkjson::Value reviewBom(const arkjson::Value& args);

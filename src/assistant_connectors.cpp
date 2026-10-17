@@ -1,4 +1,5 @@
 #include "ark/assistant_connectors.hpp"
+#include "ark/project_memory_tools.hpp"
 #include "assistant_vision.hpp"
 #include <algorithm>
 #include <cmath>
@@ -104,12 +105,20 @@ AssistantProtocol assistantProtocolFromName(const std::string& name){if(name=="r
 V assistantAdaptRequest(const AssistantConfig& config,const V& canonicalRequest){
     if(config.protocol==AssistantProtocol::Acp){V out=canonicalRequest;V input=V::makeArr();for(const auto& row:need(out,"input").arr)if(text(row,"type")!="reasoning")input.arr.push_back(row);out.set("input",input);erase(out,"include");return out;}
     if(config.protocol==AssistantProtocol::Responses){V out=canonicalRequest;
-        V input=V::makeArr();for(const auto& item:need(out,"input").arr){
+        const auto projected=projectMemoryAssistantWireInput(need(out,"input"));
+        V input=V::makeArr();for(const auto& item:projected.arr){
             if(text(item,"type")=="reasoning"){
                 if(item.find("ark_protocol")){if(!sameReplayRoute(config,item)||text(item,"ark_protocol")!="responses")continue;V wire=item;for(const char* key:{"ark_provider","ark_protocol","ark_endpoint","ark_model","ark_auth_mode"})erase(wire,key);input.arr.push_back(wire);}
                 else if(config.provider=="openai"&&config.endpoint=="https://api.openai.com/v1/responses")input.arr.push_back(item);
             }else{if(const auto* content=item.find("content");content&&content->t==V::Arr)for(const auto& part:content->arr)if(text(part,"type")=="input_image")assistant_vision::dataUrl(need(part,"image_url"));input.arr.push_back(item);}
-        }out.set("input",input);
+        }
+        for(std::size_t i=0;i<input.arr.size();++i){const auto& item=input.arr[i];const auto type=text(item,"type");
+            if(type!="function_call"&&type!="function_call_output")continue;
+            const auto* id=item.find("call_id");
+            if(!id||id->t!=V::Str||!validId(id->str)||id->str.size()>64)
+                throw std::runtime_error("Invalid Responses history parameter input["+std::to_string(i)+"].call_id: expected a nonempty tool ID of at most 64 characters without whitespace or control characters. Inspect the retained tool pair before resuming; history has been preserved.");
+        }
+        out.set("input",input);
         if(config.authMode!=AssistantAuthMode::ChatGptPlan&&config.provider!="openai")erase(out,"include");return out;
     }
     require(config.authMode!=AssistantAuthMode::ChatGptPlan,"ChatGPT plan transport requires Responses.");V out=V::makeObj();out.set("model",V::makeStr(config.model));out.set("stream",V::makeBool(false));

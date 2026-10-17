@@ -242,7 +242,11 @@ function Get-ArkRuntimeVersion([string]$RuntimeDirectory) {
     if ($occtPrefix) {
         $nativeFiles += @('libc++.dll', 'libunwind.dll')
     }
-    foreach ($name in (@('ark-studio.exe', 'ark-cli.exe', 'ark-mcp.exe', 'ark-occt-worker.exe', 'assets/ui/ark-wordmark.png', 'assets/ui/ark-tool-atlas-v1.png', 'assets/ui/ark-detail-atlas-v1.png', 'assets/ui/ark-domain-atlas-v1.png', 'updates/ark-update.ps1', 'updates/ark-launch.ps1', 'updates/Ark.Update.psm1') + $nativeFiles)) {
+    $resources = @('assets/ui/ark-wordmark.png', 'assets/ui/ark-tool-atlas-v1.png', 'assets/ui/ark-detail-atlas-v1.png', 'assets/ui/ark-domain-atlas-v1.png')
+    if ((ConvertTo-ArkVersion $metadata.version) -ge [version]'0.9.40') {
+        $resources = @('assets/ark-ui.arklib','assets/memory/manifest.json','assets/memory/model_quantized.onnx','assets/memory/dense.safetensors','assets/memory/vocab.txt','assets/memory/onnxruntime.dll','assets/memory/onnxruntime_providers_shared.dll')
+    }
+    foreach ($name in (@('ark-studio.exe', 'ark-cli.exe', 'ark-mcp.exe', 'ark-occt-worker.exe', 'updates/ark-update.ps1', 'updates/ark-launch.ps1', 'updates/Ark.Update.psm1') + $resources + $nativeFiles)) {
         $file = Join-Path $RuntimeDirectory $name
         Assert-ArkNoReparsePoint $RuntimeDirectory $file
         if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "ARK runtime is missing $name." }

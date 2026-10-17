@@ -47,6 +47,8 @@ function Get-ArkPackageInventory([string]$PackageDirectory) {
             $relative -match '^bin/ark-(cli|mcp|occt-worker)$' -or $relative -match '^lib/[^/]+\.so(?:\.[0-9]+)*$' -or
             $relative -match '^licenses/(LICENSE|[^/]+\.(txt|md|h))$' -or
             $relative -match '^updates/(ARK\.cmd|ark-launch\.ps1|ark-update\.ps1|Ark\.Update\.psm1)$' -or
+            $relative -match '^assets/ark-ui\.arklib$' -or
+            $relative -match '^assets/memory/(model_quantized\.onnx|dense\.safetensors|vocab\.txt|onnxruntime(?:_providers_shared)?\.dll|MODEL-(LICENSE\.txt|README\.md|ORIGINAL-README\.md|NOTICE\.txt)|ONNXRUNTIME-(LICENSE|ThirdPartyNotices)\.txt|manifest\.json)$' -or
             $relative -match '^assets/ui/(ark-(app-mark|authoring-atlas-v1|detail-atlas-v1|domain-atlas-v1|tool-atlas-v1|wordmark)\.png|ark-app\.ico|README\.md)$' -or
             $relative -match '^assets/contracts/(BOM\.md|AGENT_ACTIVITY\.md|MEASUREMENT\.md|ark-bom-v1\.schema\.json)$' -or
             $relative -match '^benchmarks/(agent_briefs_v1|offline|ollama-qwen-q3|ollama-qwen-27b)\.json$' -or
@@ -86,9 +88,19 @@ function New-ArkReleaseEvidence([string]$Repository,[string]$PackageDirectory,[s
         $component = @{type='library'; 'bom-ref'=$definition[0]; name=$definition[0]; version=$definition[1]; licenses=@(@{license=$license}); externalReferences=@(@{type='vcs';url=$definition[4]})}
         if ($definition[3]) { $component.hashes=@(@{alg='SHA-256';content=(Get-ArkEvidenceHash (Join-Path $Repository $definition[3]))}) }
         else { $component.hashes=@(@{alg='SHA-256';content='7c033d917ee8f040c0512d289dcc5f02c148889d5bac17c3e25639accb44f0da'}); $component.properties=@(@{name='ark:hash-scope';value='Pinned OCCT source archive; individual runtime binary hashes are in package-inventory.json.'}) }
+        if($definition[0] -eq 'Open-CASCADE-Technology'){
+            $patchNotice=Join-Path $PackageDirectory 'licenses/OCCT-ARK-patches.txt'
+            if(Test-Path -LiteralPath $patchNotice -PathType Leaf){$component.properties+=@(@{name='ark:modified-source-notice';value='licenses/OCCT-ARK-patches.txt'},@{name='ark:modified-source-notice-sha256';value=(Get-ArkEvidenceHash $patchNotice)},@{name='ark:modified-source-scope';value='Bundled exact patch/source and SDK build declarations; not independent binary-source attestation or geometric qualification.'})}
+        }
         $component.properties = @($component['properties'] | Where-Object { $null -ne $_ }) + @{name='ark:source-association';value=$source.runtime_identity_mode}
         $component
     })
+    $memoryManifestPath = Join-Path $PackageDirectory 'assets/memory/manifest.json'
+    if (Test-Path -LiteralPath $memoryManifestPath) {
+        $memory = Get-Content -LiteralPath $memoryManifestPath -Raw | ConvertFrom-Json
+        $components += @{type='library';'bom-ref'='ark-memory-model';name=$memory.model;version=$memory.revision;licenses=@(@{license=@{id='Apache-2.0'}});properties=@(@{name='ark:component-kind';value='Local semantic model, original quantized ONNX weights plus pinned sentence projection'},@{name='ark:projection-revision';value=$memory.projection_revision},@{name='ark:asset-manifest-sha256';value=(Get-ArkEvidenceHash $memoryManifestPath)},@{name='ark:license-evidence';value='licenses/memory-MODEL-LICENSE.txt; licenses/memory-MODEL-NOTICE.txt'})}
+        $components += @{type='library';'bom-ref'='onnxruntime-cpu';name='ONNX Runtime CPU';version='1.23.2';licenses=@(@{license=@{id='MIT'}});externalReferences=@(@{type='vcs';url='https://github.com/microsoft/onnxruntime/tree/v1.23.2'});properties=@(@{name='ark:license-evidence';value='licenses/memory-ONNXRUNTIME-LICENSE.txt; licenses/memory-ONNXRUNTIME-ThirdPartyNotices.txt'})}
+    }
     # Runtime binaries are components too. Classify every bundled DLL/shared
     # object without inventing a source version from its filename or tool path.
     $runtimeCount = 0
@@ -98,6 +110,7 @@ function New-ArkReleaseEvidence([string]$Repository,[string]$PackageDirectory,[s
         $family = 'Unclassified bundled runtime'
         $dependency = $null
         if ($leaf -match '^(lib)?TK[^/]+\.(dll|so)(\.[0-9]+)*$') { $family='Open CASCADE runtime'; $dependency='Open-CASCADE-Technology' }
+        elseif ($leaf -match '^onnxruntime(?:_providers_shared)?[.]dll$') { $family='ONNX Runtime CPU' }
         elseif ($leaf -eq 'libc++.dll') { $family='LLVM libc++' }
         elseif ($leaf -eq 'libunwind.dll') { $family='LLVM libunwind' }
         elseif ($leaf -eq 'libwinpthread-1.dll') { $family='MinGW-w64 winpthreads' }

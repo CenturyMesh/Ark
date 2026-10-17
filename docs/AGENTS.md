@@ -1,5 +1,32 @@
 # ARK agent protocol
 
+039D adds local persistent semantic/text memory. Studio supplies bounded startup
+data from the current project (including labelled scratch episodes) and curated
+shared ARK knowledge, separate from static onboarding instructions. Use
+`memory_context` for relevant recall, `memory_record` for attributed outcomes,
+promotion and feedback, and `memory_maintain` for selected consolidation/reindex/
+compression with observed memory revisions. Native CAD writes enqueue small
+scratch episode receipts in a background worker; queue acceptance is not durable
+storage. Historical memories never authorize writes or satisfy CAD completion.
+See [memory contracts](PROJECT_MEMORY_039D.md).
+
+038B preserves successful query-batch rows when another row requests an absent
+field. Use the returned observed result, available fields and recovery arguments;
+do not repeat an unchanged failed projection. A corrected same-subject read may
+explicitly resolve an earlier selector failure through the documented
+`team_report_task` `read_resolutions` contract. Only a later successful receipt
+at the current revision can support that resolution; it never waives a write,
+preview or completion gate. See [038B evidence](iterations/038B.md).
+
+037D preloads static overview/sketch/solids contracts for Studio writers and
+retains loaded guides across request compaction. For an empty document in
+Parallel mode, the lead commits initial editable geometry before other writers
+start their retained assignments; read-only reviews may run independently.
+Released writers still inspect current revision before editing. Studio allows
+one coherent atomic step of up to 128 commands, 32 new features and 64 placements
+within role scope. External core defaults remain eight. See
+[037D evidence and real-model limits](iterations/037D.md).
+
 035B adds natural `plastics` and `vendors` onboarding, explicit spline/ribbon
 cable recipes and shared graph navigation for endpoints, PCB component/net
 labels and source/artifact links. See [cables](ELECTRONICS_035B.md),
@@ -302,8 +329,9 @@ The team adds `team_send`, `team_context`, `team_propose`, `team_proposal`,
 connector schema, not standalone MCP discovery. Report completed/needs_input/
 in_progress explicitly with output IDs, evidence and limits. Idle is not a goal
 completion report; pending work and unresolved failures prevent completion.
-Construction steps are atomic and default to at most eight commands, with up to
-eight created features/placements within that command bound and the role scope.
+Construction steps are atomic. Studio permits up to 128 commands, 32 created
+features and 64 placements within that command bound and the role scope;
+external core teams default to eight commands/features/placements.
 Related operations can form one coherent batch; one provider round per feature
 is not required. Cached previews can commit only through a retained same-role
 receipt whose commands/checks and baseline passed the same scope/count validation. Explicit observed `expected_revision` is

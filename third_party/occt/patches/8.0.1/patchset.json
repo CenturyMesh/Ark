@@ -1,0 +1,130 @@
+{
+    "schema":  "ark.occt-patchset.v1",
+    "id":  "ark-offset-001",
+    "version":  "8.0.1",
+    "status":  "verified-in-scope",
+    "archive_sha256":  "7c033d917ee8f040c0512d289dcc5f02c148889d5bac17c3e25639accb44f0da",
+    "scope":  "Verified in scope for source-owned offset/continuity regressions, the native OCCT suite (135 tests), Studio smoke (6 tests), and exact source/SDK/runtime byte custody. No manufacturing qualification is claimed.",
+    "patches":  [
+                    {
+                        "file":  "0002-variational-factor-qr.patch",
+                        "sha256":  "8c196bed50c4b10637b0b7ef41a25b7a8d26b88d2d0f6693559839624233d3d3",
+                        "targets":  [
+                                        {
+                                            "path":  "src/ModelingData/TKGeomBase/AppDef/AppDef_LinearCriteria.cxx",
+                                            "source_sha256":  "d94e6135e9790bab250991254dbd7a0e8bd69200f130995b920712df7e2a9791",
+                                            "patched_sha256":  "2059faa5813de2f0705bb52f993e93acaeab742a6a796fa72a04e81b0a95e54f"
+                                        },
+                                        {
+                                            "path":  "src/ModelingData/TKGeomBase/AppDef/AppDef_LinearCriteria.hxx",
+                                            "source_sha256":  "836187c8088ff41fe63bb5e957e0214fb12bab8a19fd86fc2b86ee0c8e9c2cef",
+                                            "patched_sha256":  "036602efe3670ce1d27f0fdaae7776d686979a23f099604beb7c5f81dd7e2a3b"
+                                        },
+                                        {
+                                            "path":  "src/ModelingData/TKGeomBase/AppDef/AppDef_Variational.cxx",
+                                            "source_sha256":  "d1473162d4dee2a460c831ab50d4f30027c1c9f6beac775f17290a6989abd6db",
+                                            "patched_sha256":  "0f9f402e08834dbd36d9306a1a51bf0e6ad67af0e8b35dfb9363f650330d4f5b"
+                                        },
+                                        {
+                                            "path":  "src/ModelingData/TKGeomBase/AppDef/AppDef_Variational.hxx",
+                                            "source_sha256":  "a41c9faa627f560752aa887a26789ba9bd7600c67c5f692bfd02eb9e421eea92",
+                                            "patched_sha256":  "2f8f1578adacae4b1bbc857ea866c5c97ccccba2ee96469fbae9999510208e19"
+                                        },
+                                        {
+                                            "path":  "src/ModelingData/TKGeomBase/FEmTool/FEmTool_Assembly.hxx",
+                                            "source_sha256":  "fea0fd47b1e7e102be3e220a38488c7ea88415ff2b029902ffb1d9250b7c289a",
+                                            "patched_sha256":  "55c8ff2af831440d5676feb1dde28fe60834b41500edd5db02e9ed22bc66ac5c"
+                                        }
+                                    ]
+                    },
+                    {
+                        "file":  "0003-multicurve-join-custody.patch",
+                        "sha256":  "4a7037b361b50eea1ed0da27468acd51229e44a036812440a26b1c7e463aa714",
+                        "targets":  [
+                                        {
+                                            "path":  "src/ModelingData/TKGeomBase/Approx/Approx_MCurvesToBSpCurve.cxx",
+                                            "source_sha256":  "a1fc4db5bb7eea427b2134e9d9806ed4b8bbd1c08999e455a6ec3138ce9e477c",
+                                            "patched_sha256":  "58eaa5db8c23ffa953e3e55628e389e9d24821e8a3e4127eb340eac6e4e20a30"
+                                        }
+                                    ]
+                    },
+                    {
+                        "file":  "0004-boolean-extension-custody.patch",
+                        "sha256":  "67b76417b31faf50e553abaab23846321fb8959a047fe90f942fc0c539cbfe93",
+                        "targets":  [
+                                        {
+                                            "path":  "src/ModelingAlgorithms/TKBO/BOPAlgo/BOPAlgo_PaveFiller_6.cxx",
+                                            "source_sha256":  "4ad550a359b9bd35391a8c4fdeb52364c2b47ec9d1541638021636a4856716aa",
+                                            "patched_sha256":  "1f7fdb4a3a76f7687b473f3afef268b35bfec6e0880c22c4ebdfb6ff278a7b35"
+                                        },
+                                        {
+                                            "path":  "src/ModelingAlgorithms/TKOffset/BRepOffset/BRepOffset_Tool.cxx",
+                                            "source_sha256":  "405f66364bee880e069cb34996d4f96541d7276ff529e9e030a2d79f0fb98067",
+                                            "patched_sha256":  "9ac5b1b6ea840cfc7aa53654cbe3b3dc236059955f2a2c59abddaa26abde6798"
+                                        }
+                                    ]
+                    },
+                    {
+                        "file":  "0005-native-geometry-custody.patch",
+                        "sha256":  "0c72743f5204949223677e88bc6c2a3aaefdc9c3da347447d3c81e824cea5817",
+                        "targets":  [
+                                        {
+                                            "path":  "src/ModelingData/TKGeomBase/AppParCurves/AppParCurves_Gradient.gxx",
+                                            "source_sha256":  "c2427ced2b97add5b72f4bac7740eaf2bc10811b39731e5483105b8a80b31235",
+                                            "patched_sha256":  "2d40d2eb14ea79dd1318b36c8b055b8089048bca6f963b0f01baced3fb153267"
+                                        },
+                                        {
+                                            "path":  "src/ModelingAlgorithms/TKGeomAlgo/ApproxInt/ApproxInt_Approx.gxx",
+                                            "source_sha256":  "1ffa6756efea81973e851c9543fd0feb24cc1fb1667192f7311962db7a17b5f1",
+                                            "patched_sha256":  "5ef79afa9ce9611d8515185db9f607775c29d0db15280b16ec1feabb1bff6ee4"
+                                        },
+                                        {
+                                            "path":  "src/ModelingAlgorithms/TKGeomAlgo/ApproxInt/ApproxInt_ImpPrmSvSurfaces.gxx",
+                                            "source_sha256":  "fb95acffe499571bbf21c84c150934c17fef54f0b75992e7572ee352d89fca7c",
+                                            "patched_sha256":  "6cd676a032d6a55e45709d3c2c933890ceb46bf2cf86dc3cf93bb09860936a39"
+                                        },
+                                        {
+                                            "path":  "src/ModelingAlgorithms/TKGeomAlgo/ApproxInt/ApproxInt_MultiLine.gxx",
+                                            "source_sha256":  "994075084128fd183ecbc06bb1825c5a64d408d9258c196bdae4ba6c0757a852",
+                                            "patched_sha256":  "4117cd14425906af13b119493a1ef3867d8d0f7b4d895d0c2d24a3b04b55d976"
+                                        },
+                                        {
+                                            "path":  "src/ModelingAlgorithms/TKTopAlgo/BRepApprox/BRepApprox_Approx.hxx",
+                                            "source_sha256":  "fb7936c229bac3c1abbd004a611f12ee2534e37a5dc1cc9a5dc64608e10f8f10",
+                                            "patched_sha256":  "e705d2ce25aefa482101c7e6a792ba3fd7d3f16df9818a23ac09b3f0a7d4aaa2"
+                                        },
+                                        {
+                                            "path":  "src/ModelingAlgorithms/TKTopAlgo/BRepGProp/BRepGProp_Face.cxx",
+                                            "source_sha256":  "a03307922ac0e02446193e445163f5f66558a90c04da8a9d0eb72a7d0590036a",
+                                            "patched_sha256":  "8b0408e30f533b23d74bda53c0678efbbfe441a7f1a00826601e681d6bcf0b4b"
+                                        },
+                                        {
+                                            "path":  "src/ModelingAlgorithms/TKOffset/BRepOffset/BRepOffset_Analyse.cxx",
+                                            "source_sha256":  "94c63042cd60fb109fc5a450d9e26fab61a9d547688cfe328bbb04c5e57c78b5",
+                                            "patched_sha256":  "e79f8ca28997a9fd75216f33b535f252c5074dbd31229fb3552ec9bc3a9b74a1"
+                                        },
+                                        {
+                                            "path":  "src/ModelingAlgorithms/TKGeomAlgo/GeomInt/GeomInt_WLApprox.hxx",
+                                            "source_sha256":  "bfed9a81b9477ddbe63a474ff8d55baddab530a6bba966c6d4275a4663a86862",
+                                            "patched_sha256":  "414694880937a6cd794ee7778e8ec80bf8148d3437539860eebbc67bd0e5a01c"
+                                        },
+                                        {
+                                            "path":  "src/ModelingAlgorithms/TKBO/IntTools/IntTools_FaceFace.cxx",
+                                            "source_sha256":  "79f302f8bf4e80808fcd74ddbe775c030ed0f699cc54fb669b39d641b2c64909",
+                                            "patched_sha256":  "48030e81dd93132a64bb40ec6a42329c03784515f019c0080a05d560fdde6261"
+                                        }
+                                    ]
+                    },
+                    {
+                        "file":  "0006-offset-iso-curve-custody.patch",
+                        "sha256":  "f5f9167618fcea796b3ecb834352a96e7233487a53d2a93377c60dc841318e9f",
+                        "targets":  [
+                                        {
+                                            "path":  "src/ModelingData/TKGeomBase/GeomLib/GeomLib.cxx",
+                                            "source_sha256":  "c10033103fd8b82217763cd546fd5901f6c2d1ec69673ee22a6a8cabfdcb8521",
+                                            "patched_sha256":  "2a28226ffbe84c03a3b98353fcd326ff85d5bf45b0ec467f3e4af611572d417d"
+                                        }
+                                    ]
+                    }
+                ]
+}

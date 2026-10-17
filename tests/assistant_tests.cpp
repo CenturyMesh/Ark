@@ -26,6 +26,42 @@ static V finalResponse(){return json(R"({"status":"completed","output":[{"type":
 #include "assistant_context_tests.inl"
 #include "assistant_image_tests.inl"
 #include "assistant_steering_tests.inl"
+static void unratedFeedbackProjectionChecks(){
+    V history=json(R"([{"role":"user","content":"Inspect the selected editable design; retain all geometry."}])");
+    V inventory=json(R"({"isError":false,"structuredContent":{"revision":7}})");member(inventory,"structuredContent").set("inventory",V::makeStr(std::string(140*1024,'x')));
+    contextExchange(history,"feedback_large_inventory","doc_info",V::makeObj(),inventory);
+    const auto docArgs=json(R"({"detail":"design","ids":[1],"sections":["features"]})");
+    auto objectArgs=json(R"({"ids":[1],"limit":1,"known_fingerprints":{}})");
+    for(int i=0;i<8;++i)member(objectArgs,"known_fingerprints").set("object:"+std::to_string(i),V::makeStr(std::string(64,'a')));
+    check(objectArgs.dump().size()>512,"synthetic object read reproduces selector arguments larger than generic excerpt threshold");
+    auto doc=json(R"({"isError":false,"structuredContent":{"activity_id":"synthetic:doc","activity_project_id":"synthetic:project","feedback_required":true,"revision":7,"response_scope":"design","partial":true,"total_counts":{"features":12},"features":[]}})");
+    member(doc,"structuredContent").set("inventory",V::makeStr("RAW_FEEDBACK_GEOMETRY_MUST_BE_OMITTED"+std::string(1800,'g')));
+    auto object=json(R"({"isError":false,"structuredContent":{"activity_id":"synthetic:object","activity_project_id":"synthetic:project","feedback_required":true,"revision":7,"scope":"selected_objects","partial":true,"total_counts":{"objects":3},"objects":[{"id":1}]}})");
+    member(member(object,"structuredContent"),"objects").arr[0].set("geometry",V::makeStr("RAW_FEEDBACK_OBJECT_BODY_MUST_BE_OMITTED"+std::string(1800,'b')));
+    auto failed=object;failed.set("isError",V::makeBool(true));member(failed,"structuredContent").set("activity_id",V::makeStr("synthetic:failed"));member(failed,"structuredContent").set("error_code",V::makeStr("OBJECT_CONTEXT_UNAVAILABLE"));member(failed,"structuredContent").set("error",V::makeStr(std::string(1200,'e')));
+    contextExchange(history,"feedback_doc_read","doc_info",docArgs,doc);contextExchange(history,"feedback_object_read","object_context",objectArgs,object);contextExchange(history,"feedback_failed_read","object_context",json(R"({"ids":[2],"limit":1})"),failed);
+    auto finish=[&](V candidate){contextExchange(candidate,"feedback_current_revision","doc_info",json(R"({"detail":"revision"})"),json(R"({"isError":false,"structuredContent":{"revision":8}})"));return candidate;};
+    ark::AssistantConfig config;config.model="offline-feedback-projection";config.authMode=ark::AssistantAuthMode::ChatGptPlan;
+    auto project=[&](const V& candidate){const auto before=candidate.dump();bool projected=false;const auto request=ark::assistantRequest(config,candidate,ark::AgentSession::tools(),&projected);check(projected&&candidate.dump()==before,"real request projection retains all original read and rating receipts");return *request.find("input");};
+    const auto initial=project(finish(history));
+    for(const char* id:{"feedback_doc_read","feedback_object_read","feedback_failed_read"}){const auto record=contextHistoricalRecord(initial,id);const auto* feedback=record.find("feedback_context");check(feedback&&feedback->dump().size()<=1024&&feedback->find("detail_omitted")->b,"every projected unrated action retains at most one KiB of attributed feedback context");check(feedback->dump().find("RAW_FEEDBACK_")==std::string::npos&&feedback->find("revision")->num==7&&feedback->find("authority")->str.find("Historical")!=std::string::npos,"retained feedback describes the observed historical revision without geometry or current edit authority");}
+    const auto docContext=*contextHistoricalRecord(initial,"feedback_doc_read").find("feedback_context");
+    check(docContext.find("tool")->str=="doc_info"&&docContext.find("outcome")->str=="success"&&docContext.find("selectors")->dump()==docArgs.dump()&&docContext.find("counts")->find("features")->num==12&&docContext.find("partial")->b,"document feedback retains actual selectors, successful tool outcome, scope/counts and partial status");
+    const auto objectContext=*contextHistoricalRecord(initial,"feedback_object_read").find("feedback_context");
+    check(objectContext.find("selectors")->find("ids")->dump()=="[1]"&&objectContext.find("selectors")->find("limit")->num==1&&!objectContext.find("selectors")->find("known_fingerprints")&&objectContext.find("counts")->find("objects_returned")->num==1,"large object-read arguments preserve concise selected IDs and actual returned counts without copying fingerprint inventories");
+    const auto failedContext=*contextHistoricalRecord(initial,"feedback_failed_read").find("feedback_context");check(failedContext.find("outcome")->str=="failed"&&failedContext.find("error_code")->str=="OBJECT_CONTEXT_UNAVAILABLE"&&!failedContext.find("error"),"failed read retains categorical outcome/code without copying raw error bodies");
+    const auto ratings=json(R"({"ratings":[{"activity_id":"synthetic:doc","utility":4,"difficulty":2,"action":"Inspected selected design metadata."}]})");
+    for(int variant=0;variant<4;++variant){auto candidate=history;auto receipt=json(R"({"isError":false,"structuredContent":{"rated_ids":["synthetic:doc"]}})");const char* tool="tool_feedback";
+        if(variant==0)receipt.set("isError",V::makeBool(true));
+        if(variant==1)member(receipt,"structuredContent").set("error",V::makeStr("Rejected synthetic feedback"));
+        if(variant==2){auto& fields=receipt.obj;fields.erase(std::remove_if(fields.begin(),fields.end(),[](const auto& field){return field.first=="isError";}),fields.end());}
+        if(variant==3)tool="doc_info";
+        contextExchange(candidate,"feedback_rejected_or_unrelated",tool,ratings,receipt);const auto projected=project(finish(candidate));
+        check(contextHistoricalRecord(projected,"feedback_doc_read").find("feedback_context")!=nullptr,"failed, malformed or unrelated rated_ids cannot release unscored action context");
+    }
+    auto rated=history;contextExchange(rated,"feedback_committed","tool_feedback",ratings,json(R"({"isError":false,"structuredContent":{"rated_ids":["synthetic:doc"]}})"));const auto after=project(finish(rated));
+    check(!contextHistoricalRecord(after,"feedback_doc_read").find("feedback_context")&&contextHistoricalRecord(after,"feedback_object_read").find("feedback_context")&&contextHistoricalRecord(after,"feedback_failed_read").find("feedback_context"),"only successfully rated action releases its extra feedback context; other unscored reads remain attributable");
+}
 static void visionChecks(){
     const std::string png="iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC";
     auto receipt=json(R"({"isError":false,"structuredContent":{"visual_evidence":{"revision":7,"current_revision":7,"view":"front","feature_id":19,"occurrence_id":23,"copy":1,"reference":"face.front","label":"before"}},"content":[{"type":"image","mimeType":"image/png"}]})");member(receipt,"content").arr[0].set("data",V::makeStr(png));
@@ -303,5 +339,5 @@ int main(int argc,char** argv){try{
         [&](const auto& e){if(e.kind==ark::AssistantEvent::Usage)partial=e.usage;},nullptr,
         [&](auto&,auto&,auto*){return incompleteCounted;});},"incomplete response remains rejected");
     check(partial.totalTokens==15,"usage from incomplete response survives via event");
-    requestContextChecks();payloadAndPerformanceChecks();nestedReceiptChecks();transientHttpRetryChecks();visionChecks();userImageAuthoringChecks();assistantSteeringChecks();std::cout<<checks<<" assistant checks passed\n";return 0;
+    requestContextChecks();unratedFeedbackProjectionChecks();payloadAndPerformanceChecks();nestedReceiptChecks();transientHttpRetryChecks();visionChecks();userImageAuthoringChecks();assistantSteeringChecks();std::cout<<checks<<" assistant checks passed\n";return 0;
 }catch(const std::exception& e){std::cerr<<"assistant test failed: "<<e.what()<<'\n';return 1;}}

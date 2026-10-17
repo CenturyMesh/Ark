@@ -1,0 +1,183 @@
+--- a/src/ModelingData/TKGeomBase/Approx/Approx_MCurvesToBSpCurve.cxx
++++ b/src/ModelingData/TKGeomBase/Approx/Approx_MCurvesToBSpCurve.cxx
+@@ -18,9 +18,14 @@
+ #include <Convert_CompBezierCurves2dToBSplineCurve2d.hxx>
+ #include <Convert_CompBezierCurvesToBSplineCurve.hxx>
+ #include <Standard_Integer.hxx>
++#include <Standard_ConstructionError.hxx>
++#include <StdFail_NotDone.hxx>
+ #include <NCollection_Array1.hxx>
+ #include <gp_Pnt.hxx>
+ #include <gp_Pnt2d.hxx>
++#include <cmath>
++#include <limits>
++#include <vector>
+ 
+ #ifdef OCCT_DEBUG
+ static void DEBUG(const AppParCurves_MultiCurve& MC)
+@@ -78,6 +83,7 @@
+ 
+ void Approx_MCurvesToBSpCurve::Perform(const NCollection_Sequence<AppParCurves_MultiCurve>& TheSeq)
+ {
++  myDone = false;
+ 
+   int                     i, j, deg = 0;
+   int                     nbcu = TheSeq.Length();
+@@ -86,6 +92,142 @@
+ #ifdef OCCT_DEBUG
+   bool debug = false;
+ #endif
++
++  if (nbcu > 1 && TheSeq.Value(1).NbCurves() > 1)
++  {
++    // A common knot may only lose a pole when every component supports the
++    // same change of parameter. The single-curve converters do not prove
++    // this for the remaining components of a multicurve.
++    for (int segment = 1; segment <= nbcu; ++segment)
++      deg = std::max(deg, TheSeq.Value(segment).Degree());
++    if (deg < 1)
++      throw Standard_ConstructionError("A multicurve join requires nonconstant Bezier segments");
++    const AppParCurves_MultiPoint aPoint = TheSeq.Value(1).Value(1);
++    const int n3 = aPoint.NbPoints(), n2 = aPoint.NbPoints2d();
++    const int aDimension = 3 * n3 + 2 * n2;
++    using Coordinates = std::vector<double>;
++    using Controls = std::vector<Coordinates>;
++    std::vector<Controls> aControls(nbcu, Controls(deg + 1, Coordinates(aDimension)));
++    for (int segment = 0; segment < nbcu; ++segment)
++    {
++      const AppParCurves_MultiCurve& aCurve = TheSeq.Value(segment + 1);
++      const AppParCurves_MultiPoint aFirstPoint = aCurve.Value(1);
++      if (aFirstPoint.NbPoints() != n3 || aFirstPoint.NbPoints2d() != n2)
++        throw Standard_ConstructionError("Multicurve segments have different component dimensions");
++      for (int component = 1; component <= n3; ++component)
++      {
++        NCollection_Array1<gp_Pnt> aSource(1, aCurve.NbPoles()), aElevated(1, deg + 1);
++        aCurve.Curve(component, aSource);
++        if (aCurve.Degree() < deg)
++          BSplCLib::IncreaseDegree(deg, aSource, BSplCLib::NoWeights(), aElevated, BSplCLib::NoWeights());
++        else
++          aElevated = aSource;
++        aElevated(1) = aSource(1);
++        aElevated(deg + 1) = aSource(aSource.Upper());
++        for (int pole = 0; pole <= deg; ++pole)
++          for (int axis = 1; axis <= 3; ++axis)
++            aControls[segment][pole][3 * (component - 1) + axis - 1] = aElevated(pole + 1).Coord(axis);
++      }
++      for (int component = 1; component <= n2; ++component)
++      {
++        NCollection_Array1<gp_Pnt2d> aSource(1, aCurve.NbPoles()), aElevated(1, deg + 1);
++        aCurve.Curve(n3 + component, aSource);
++        if (aCurve.Degree() < deg)
++          BSplCLib::IncreaseDegree(deg, aSource, BSplCLib::NoWeights(), aElevated, BSplCLib::NoWeights());
++        else
++          aElevated = aSource;
++        aElevated(1) = aSource(1);
++        aElevated(deg + 1) = aSource(aSource.Upper());
++        for (int pole = 0; pole <= deg; ++pole)
++          for (int axis = 1; axis <= 2; ++axis)
++            aControls[segment][pole][3 * n3 + 2 * (component - 1) + axis - 1] = aElevated(pole + 1).Coord(axis);
++      }
++    }
++
++    std::vector<bool> isC1(nbcu, false);
++    std::vector<double> aLengths(nbcu, 1.0);
++    double aTotalLength = 1.0;
++    int aNbPoles = nbcu * deg + 1;
++    for (int segment = 1; segment < nbcu; ++segment)
++    {
++      const Controls& aPrevious = aControls[segment - 1];
++      const Controls& aCurrent = aControls[segment];
++      for (int axis = 0; axis < aDimension; ++axis)
++        if (aPrevious[deg][axis] != aCurrent[0][axis]) {
++          throw Standard_ConstructionError("Multicurve segments do not share an exact endpoint");
++        }
++      double aLeftSquared = 0.0, aRightSquared = 0.0;
++      for (int axis = 0; axis < aDimension; ++axis)
++      {
++        const double aLeft = aPrevious[deg][axis] - aPrevious[deg - 1][axis];
++        const double aRight = aCurrent[1][axis] - aCurrent[0][axis];
++        aLeftSquared += aLeft * aLeft;
++        aRightSquared += aRight * aRight;
++      }
++      if (deg > 1 && aLeftSquared > 0.0 && aRightSquared > 0.0)
++      {
++        const double aRatio = std::sqrt(aRightSquared / aLeftSquared);
++        const double aLength = aLengths[segment - 1] * aRatio;
++        bool isCompatible = std::isfinite(aLength) && aLength > 10.0 * Epsilon(aTotalLength);
++        for (int axis = 0; isCompatible && axis < aDimension; ++axis)
++        {
++          const double aLeft = (aPrevious[deg][axis] - aPrevious[deg - 1][axis]) * aRatio;
++          const double aRight = aCurrent[1][axis] - aCurrent[0][axis];
++          const double aRoundoff = 8.0 * std::numeric_limits<double>::epsilon()
++            * std::max(std::abs(aLeft), std::abs(aRight));
++          isCompatible = aPrevious[deg][axis] == aCurrent[0][axis]
++                      && std::abs(aLeft - aRight) <= aRoundoff;
++        }
++        if (isCompatible)
++        {
++          isC1[segment] = true;
++          aLengths[segment] = aLength;
++          --aNbPoles;
++        }
++      }
++      aTotalLength += aLengths[segment];
++      if (!std::isfinite(aTotalLength) || !(aTotalLength > 0.0))
++        throw Standard_ConstructionError("Multicurve parameter length is not finite and positive");
++    }
++
++    NCollection_Array1<AppParCurves_MultiPoint> aPoles(1, aNbPoles);
++    NCollection_Array1<double> aKnots(1, nbcu + 1);
++    NCollection_Array1<int> aMults(1, nbcu + 1);
++    int aPoleIndex = 1;
++    auto appendPole = [&](const Coordinates& aCoordinates)
++    {
++      AppParCurves_MultiPoint aPole(n3, n2);
++      for (int component = 1; component <= n3; ++component)
++      {
++        const int axis = 3 * (component - 1);
++        aPole.SetPoint(component, gp_Pnt(aCoordinates[axis], aCoordinates[axis + 1], aCoordinates[axis + 2]));
++      }
++      for (int component = 1; component <= n2; ++component)
++      {
++        const int axis = 3 * n3 + 2 * (component - 1);
++        aPole.SetPoint2d(n3 + component, gp_Pnt2d(aCoordinates[axis], aCoordinates[axis + 1]));
++      }
++      aPoles(aPoleIndex++) = aPole;
++    };
++    aKnots(1) = 0.0;
++    aMults(1) = deg + 1;
++    for (int segment = 0; segment < nbcu; ++segment)
++    {
++      if (!isC1[segment]) appendPole(aControls[segment][0]);
++      for (int pole = 1; pole < deg; ++pole)
++        appendPole(aControls[segment][pole]);
++      aKnots(segment + 2) = segment + 1 == nbcu ? 1.0
++        : aKnots(segment + 1) + aLengths[segment] / aTotalLength;
++      if (!std::isfinite(aKnots(segment + 2)) || !(aKnots(segment + 2) > aKnots(segment + 1)))
++        throw Standard_ConstructionError("Multicurve knot sequence is not finite and strictly increasing");
++      aMults(segment + 2) = segment + 1 == nbcu ? deg + 1
++        : (isC1[segment + 1] ? deg - 1 : deg);
++    }
++    appendPole(aControls.back()[deg]);
++    mySpline = AppParCurves_MultiBSpCurve(aPoles, aKnots, aMults);
++    myDone = true;
++    return;
++  }
+ 
+   if (nbcu == 1)
+   {
+@@ -283,10 +425,14 @@
+ 
+ const AppParCurves_MultiBSpCurve& Approx_MCurvesToBSpCurve::Value() const
+ {
++  if (!myDone)
++    throw StdFail_NotDone("Multicurve conversion is not complete");
+   return mySpline;
+ }
+ 
+ const AppParCurves_MultiBSpCurve& Approx_MCurvesToBSpCurve::ChangeValue()
+ {
++  if (!myDone)
++    throw StdFail_NotDone("Multicurve conversion is not complete");
+   return mySpline;
+ }

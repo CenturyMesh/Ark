@@ -2,10 +2,13 @@ param(
     [Parameter(Mandatory=$true)][string]$PackagePath,
     [string]$OutputDirectory = 'out/releases',
     [string]$InnoCompiler,
-    [switch]$UseRuntimeIdentity
+    [switch]$UseRuntimeIdentity,
+    [ValidatePattern('^[a-zA-Z0-9-]{1,48}$')][string]$TestIsolationId,
+    [switch]$SelfTest
 )
 $ErrorActionPreference = 'Stop'
 $repository = Split-Path $PSScriptRoot -Parent
+if ($SelfTest -and -not $TestIsolationId) { throw '-SelfTest requires -TestIsolationId to protect the installed ARK registration.' }
 foreach ($variable in @('PackagePath', 'OutputDirectory')) {
     $value = Get-Variable -Name $variable -ValueOnly
     if (-not [IO.Path]::IsPathRooted($value)) { Set-Variable -Name $variable -Value (Join-Path $repository $value) }
@@ -33,13 +36,26 @@ try {
     foreach ($name in @('Install-ARK.ps1', 'Install-ARK.cmd', 'GETTING_STARTED.txt', 'licenses/LICENSE_LGPL_21.txt', 'licenses/OCCT_LGPL_EXCEPTION.txt')) {
         if (-not (Test-Path -LiteralPath (Join-Path $staging $name) -PathType Leaf)) { throw "Installer payload is missing $name." }
     }
-    $installer = Join-Path $OutputDirectory "ARK-$($release.code)-windows-x64-setup.exe"
+    $filename = "ARK-$($release.code)-windows-x64-setup"
+    $appId = 'MeshSphere.ARK'
+    if ($TestIsolationId) {
+        # Private smoke tests must not share installed-app registration with ARK.
+        $appId += '.Test.' + $TestIsolationId
+        $filename += '-test-' + $TestIsolationId
+    }
+    $installer = Join-Path $OutputDirectory ($filename + '.exe')
     if (Test-Path -LiteralPath $installer) { throw 'Installer already exists. Use a new output directory or release identity.' }
-    & $InnoCompiler "/DRuntimeDirectory=$staging" "/DOutputDirectory=$OutputDirectory" "/DAppVersion=$version" "/DIterationCode=$($release.code)" (Join-Path $repository 'packaging/ark.iss')
+    $branding = Join-Path $OutputDirectory ('branding-' + [guid]::NewGuid().ToString('N'))
+    & (Join-Path $PSScriptRoot 'build-installer-artwork.ps1') -OutputDirectory $branding
+    $testOptions = @()
+    if ($TestIsolationId) { $testOptions += '/DInstallerIsolatedTest' }
+    if ($SelfTest) { $testOptions += '/DInstallerSelfTest' }
+    & $InnoCompiler @testOptions "/DRuntimeDirectory=$staging" "/DOutputDirectory=$OutputDirectory" "/DAppVersion=$version" "/DIterationCode=$($release.code)" "/DBrandingDirectory=$branding" "/DInstallerAppId=$appId" "/DInstallerFilename=$filename" (Join-Path $repository 'packaging/ark.iss')
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $installer)) { throw 'Inno Setup compilation failed.' }
     $lines = @($PackagePath, $installer) | ForEach-Object { (Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant() + '  ' + [IO.Path]::GetFileName($_) }
     [IO.File]::WriteAllLines((Join-Path $OutputDirectory 'SHA256SUMS.txt'), [string[]]$lines, (New-Object Text.UTF8Encoding($false)))
     Write-Output "Prepared installer: $installer"
 } finally {
+    if ($branding -and (Test-Path -LiteralPath $branding)) { Remove-Item -LiteralPath (Assert-ArkChildPath $OutputDirectory $branding) -Recurse -Force }
     if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath (Assert-ArkChildPath $OutputDirectory $staging) -Recurse -Force }
 }
