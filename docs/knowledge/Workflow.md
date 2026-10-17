@@ -32,11 +32,22 @@ revision, author a coherent editable checkpoint or deliver a concrete assignment
 and let that turn finish. Use diagnostic metrics only to investigate a measured
 problem; token/provider counters changing do not prove new geometry or evidence.
 
+038B preserves mixed `query_batch` outcomes per query. Read `error_count` and
+each row's `isError`: a missing projected field does not invalidate another
+successful query. Reuse the returned `observed_result` and `available_fields`;
+request only the exact needed recovery query when fresh evidence is required.
+The coordinator retains the rejected query's identity, so unrelated successful
+reads cannot conceal its failure. Historical recovery packets survive request
+compaction without granting a current revision or write authority.
+
 Graphify indexes the repository code locally without a model backend. Curated
 notes under `docs/knowledge` are copied into a separately versioned Obsidian vault,
 with links to code notes when the exporter has actually produced those files.
 No semantic extraction/upload is required. These are public product guides,
 not imported user drawings, private sessions or an automatic cross-project brain.
+Vault verification covers generated file hashes and file-link destinations.
+An edited prior vault is preserved and exported separately before publishing a
+new current pointer. Heading/block anchor existence is outside that check.
 
 Start with [[ARK Knowledge/Electronics]], [[ARK Knowledge/Plastics]] or
 [[ARK Knowledge/Vendors]] and retrieve only what the task needs.

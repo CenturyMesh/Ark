@@ -78,6 +78,15 @@ inline V canonicalReadArguments(V value){
     return value;
 }
 inline std::string readEvidenceKey(const std::string& tool,const V& args){return tool+"\n"+canonicalReadArguments(args).dump();}
+inline bool declaredReadArgumentsMatch(const V& requested,const V& executed){
+    if(canonicalReadArguments(requested).dump()==canonicalReadArguments(executed).dump())return true;
+    // The team host can make an omitted read detail explicit. Retain that
+    // declared execution scope, but never accept another object or selector.
+    if(requested.find("detail")||executed.t!=V::Obj)return false;
+    const auto* detail=executed.find("detail");if(!detail||detail->t!=V::Str)return false;
+    V withoutDetail=executed;withoutDetail.obj.erase(std::remove_if(withoutDetail.obj.begin(),withoutDetail.obj.end(),[](const auto& item){return item.first=="detail";}),withoutDetail.obj.end());
+    return canonicalReadArguments(requested).dump()==canonicalReadArguments(withoutDetail).dump();
+}
 inline bool successful(const V& receipt){const auto* error=receipt.find("isError");return receipt.t==V::Obj&&error&&error->t==V::Bool&&!error->b&&!receipt.find("error")&&!payload(receipt).find("error");}
 inline bool staticGuide(const V& args,const V& receipt){
     // Team execution defaults an omitted detail to guide. Require the receipt's
@@ -145,23 +154,25 @@ inline V project(const V& history,std::size_t byteLimit){
     std::map<std::string,Guide> guides;std::set<std::size_t> guideCalls,teamCalls;
     std::map<std::pair<std::string,std::string>,Guide> fragments;
     std::size_t teamCall=history.arr.size();V teamData;
-    struct FailedRead {std::size_t call;V evidence;};std::map<std::string,FailedRead> failedReads;
+    struct FailedRead {std::size_t call;std::string executedKey;V evidence;};std::map<std::string,FailedRead> failedReads;
+    auto resolvedRead=[&](const std::string& key){for(auto it=failedReads.begin();it!=failedReads.end();)if(it->first==key||it->second.executedKey==key)it=failedReads.erase(it);else ++it;};
     // Keep the actual recovery packet from a rejected batched read until that
     // same tool/argument read succeeds. Projection fields do not change the
     // read identity. Observed results stay historical data, never fresh authority.
     for(std::size_t i=0;i<history.arr.size();++i){const auto& call=history.arr[i];if(text(call,"type")!="function_call")continue;
         V args,receipt;if(!arkjson::parse(text(call,"arguments"),args)||!arkjson::parse(text(history.arr[outputs.at(text(call,"call_id"))],"output"),receipt))continue;
-        const auto name=text(call,"name");if(name!="query_batch"){if(successful(receipt))failedReads.erase(readEvidenceKey(name,args));continue;}
+        const auto name=text(call,"name");if(name!="query_batch"){if(successful(receipt))resolvedRead(readEvidenceKey(name,args));continue;}
         if(!successful(receipt))continue;const auto* queries=args.find("queries"),*results=payload(receipt).find("results");
         if(!queries||queries->t!=V::Arr||!results||results->t!=V::Arr||queries->arr.size()!=results->arr.size())continue;
         for(std::size_t j=0;j<queries->arr.size();++j){const auto& query=queries->arr[j];const auto& row=results->arr[j];const auto* values=query.find("args"),*error=row.find("isError");const auto tool=text(query,"tool");
             if(tool.empty()||!values||values->t!=V::Obj||!error||error->t!=V::Bool)continue;
             if(const auto* index=row.find("query_index");index&&(index->t!=V::Num||index->num!=(double)j))continue;
             if(row.find("tool")&&text(row,"tool")!=tool)continue;
-            if(const auto* returned=row.find("args");returned&&canonicalReadArguments(*returned).dump()!=canonicalReadArguments(*values).dump())continue;
-            const auto key=readEvidenceKey(tool,*values);if(successful(row)){failedReads.erase(key);continue;}if(!error->b)continue;
+            const auto* returned=row.find("args");if(returned&&!declaredReadArgumentsMatch(*values,*returned))continue;
+            const auto key=readEvidenceKey(tool,*values),executedKey=readEvidenceKey(tool,returned?*returned:*values);if(successful(row)){resolvedRead(key);resolvedRead(executedKey);continue;}if(!error->b)continue;
             V evidence=V::makeObj();evidence.set("query_index",V::makeNum((double)j));evidence.set("tool",V::makeStr(tool));evidence.set("arguments",*values);evidence.set("receipt",payload(row));
-            failedReads.insert_or_assign(key,FailedRead{i,std::move(evidence)});
+            if(returned&&executedKey!=key)evidence.set("executed_arguments",*returned);
+            resolvedRead(key);resolvedRead(executedKey);failedReads.insert_or_assign(key,FailedRead{i,executedKey,std::move(evidence)});
         }
     }
     std::map<std::size_t,V> retainedFailures;for(const auto& entry:failedReads){if(!retainedFailures.count(entry.second.call))retainedFailures.emplace(entry.second.call,V::makeArr());retainedFailures.at(entry.second.call).arr.push_back(entry.second.evidence);}

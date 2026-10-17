@@ -44,6 +44,13 @@ static void batchFailureProjectionChecks(){
     auto invalid=ark::assistantRequest(config,invalidHistory,ark::AgentSession::tools());
     check(!contextHistoricalRecord(*invalid.find("input"),"missing_plane_projection").find("retained_query_failures"),"mismatched batch tool metadata cannot supply retained recovery evidence");
     check(ark::assistant_context::readEvidenceKey("math_eval",json(R"({"op":"norm","a":[1,2,3]})"))==ark::assistant_context::readEvidenceKey("math_eval",json(R"({"a":[1,2,3],"op":"norm"})")),"read evidence identity ignores JSON object ordering without changing array order");
+    const V requested=json(R"({"queries":[{"tool":"doc_info","args":{},"fields":["invented_field"]}]})"),executed=json(R"({"queries":[{"tool":"doc_info","args":{"detail":"revision"},"fields":["invented_field"]}]})");
+    V normalized=history;contextExchange(normalized,"host_explicit_detail","query_batch",requested,session.call("query_batch",executed));contextExchange(normalized,"later_normalized_status","doc_info",json(R"({"detail":"design"})"),session.call("doc_info",json(R"({"detail":"design"})")));
+    auto normalizedRequest=ark::assistantRequest(config,normalized,ark::AgentSession::tools());const auto normalizedRecord=contextHistoricalRecord(*normalizedRequest.find("input"),"host_explicit_detail");
+    const auto* normalizedFailures=normalizedRecord.find("retained_query_failures");check(normalizedFailures&&normalizedFailures->arr.size()==1&&normalizedFailures->arr[0].find("executed_arguments")->dump()==R"({"detail":"revision"})","team host's explicit compact detail preserves the actual query recovery scope");
+    contextExchange(normalized,"explicit_normalized_recovery","doc_info",json(R"({"detail":"revision"})"),session.call("doc_info",json(R"({"detail":"revision"})")));
+    normalizedRequest=ark::assistantRequest(config,normalized,ark::AgentSession::tools());check(!contextHistoricalRecord(*normalizedRequest.find("input"),"host_explicit_detail").find("retained_query_failures"),"successful executed-detail recovery retires its corresponding original request packet");
+    check(!ark::assistant_context::declaredReadArgumentsMatch(json(R"({"id":1})"),json(R"({"id":2,"detail":"properties"})")),"declared compact detail cannot disguise another requested object");
 }
 static void staticContractProjectionChecks(){
     batchFailureProjectionChecks();
