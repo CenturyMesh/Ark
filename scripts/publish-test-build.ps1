@@ -3,7 +3,8 @@ param(
     [string]$OutputDirectory,
     [string]$MsvcRuntimeDirectory,
     [string]$CompilerDirectory,
-    [string]$OcctSourceDirectory = 'out/deps/occt/cache/OCCT-8_0_1',
+    [string]$OcctSourceDirectory = 'out/deps/occt/install-msvc-ark-offset-001/licenses',
+    [string]$OcctSdkDirectory = 'out/deps/occt/install-msvc-ark-offset-001',
     [string]$Repository = 'CenturyMesh/Ark',
     [switch]$Installer,
     [string]$InnoCompiler,
@@ -22,7 +23,7 @@ if (-not $OutputDirectory) { $OutputDirectory = Join-Path $root ('out/test-relea
 elseif (-not [IO.Path]::IsPathRooted($OutputDirectory)) { $OutputDirectory = Join-Path $root $OutputDirectory }
 
 # Copy the existing binaries, never build, rewrite their identity, or run tests.
-$packageArguments = @{RuntimeDirectory=$RuntimeDirectory; OutputDirectory=$OutputDirectory; OcctSourceDirectory=$OcctSourceDirectory; SkipUpdateManifest=$true}
+$packageArguments = @{RuntimeDirectory=$RuntimeDirectory; OutputDirectory=$OutputDirectory; OcctSourceDirectory=$OcctSourceDirectory; OcctSdkDirectory=$OcctSdkDirectory; SkipUpdateManifest=$true}
 if ($MsvcRuntimeDirectory) { $packageArguments.MsvcRuntimeDirectory = $MsvcRuntimeDirectory }
 if ($CompilerDirectory) { $packageArguments.CompilerDirectory = $CompilerDirectory }
 & (Join-Path $PSScriptRoot 'package-release.ps1') @packageArguments

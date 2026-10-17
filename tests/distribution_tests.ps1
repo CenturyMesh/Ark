@@ -14,7 +14,7 @@ function Write-Fixture([string]$Path, [string]$Value = 'fixture') {
 }
 try {
     $fixture = Join-Path $temporary 'repository'
-    foreach ($path in @('scripts/package-release.ps1','scripts/Ark.ReleaseEvidence.psm1','scripts/install-portable.ps1','scripts/publish-test-build.ps1','updates/Ark.Update.psm1','updates/ARK.cmd','updates/ark-update.ps1','updates/ark-launch.ps1','packaging/Install-ARK.cmd','packaging/GETTING_STARTED.txt')) {
+    foreach ($path in @('scripts/package-release.ps1','scripts/ApplyOcctPatch.cmake','scripts/Ark.ReleaseEvidence.psm1','scripts/install-portable.ps1','scripts/publish-test-build.ps1','updates/Ark.Update.psm1','updates/ARK.cmd','updates/ark-update.ps1','updates/ark-launch.ps1','packaging/Install-ARK.cmd','packaging/GETTING_STARTED.txt')) {
         $target = Join-Path $fixture $path
         [IO.Directory]::CreateDirectory((Split-Path $target -Parent)) | Out-Null
         Copy-Item -LiteralPath (Join-Path $repository $path) -Destination $target
@@ -35,6 +35,18 @@ try {
     Write-Fixture (Join-Path $runtime 'private-design.ark') 'never ship this document'
     $msvc = Join-Path $fixture 'msvc'
     foreach ($name in @('vcruntime140.dll','vcruntime140_1.dll','msvcp140.dll','concrt140.dll')) { Write-Fixture (Join-Path $msvc $name) }
+    # Freeze a wholly synthetic verified patch/SDK; this does not qualify OCCT.
+    $patchDirectory=Join-Path $fixture 'third_party/occt/patches/8.0.1'
+    $patch=Join-Path $patchDirectory 'fixture.patch'
+    Write-Fixture $patch "--- a/src/fixture.cxx`n+++ b/src/fixture.cxx`n@@ -1 +1 @@`n-before`n+after`n"
+    $patchManifest=Join-Path $patchDirectory 'patchset.json'
+    Write-ArkAtomicJson $patchManifest @{schema='ark.occt-patchset.v1';id='ark-distribution-fixture';version='8.0.1';status='verified-in-scope';archive_sha256=('0'*64);scope='Synthetic distribution test only';patches=@(@{file='fixture.patch';sha256=(Get-FileHash -LiteralPath $patch).Hash.ToLowerInvariant();targets=@(@{path='src/fixture.cxx';source_sha256=('1'*64);patched_sha256=('2'*64)})})}
+    $sdk=Join-Path $fixture 'out/deps/occt/install-msvc-ark-offset-001'
+    [IO.Directory]::CreateDirectory($sdk)|Out-Null
+    Copy-Item -LiteralPath $patchManifest -Destination (Join-Path $sdk '.ark-occt-patchset.json')
+    foreach($name in @('TKernel.dll','TKBRep.dll','TKDESTEP.dll')){Write-Fixture (Join-Path $sdk ('bin/'+$name))}
+    & cmake -DARK_OCCT_MODE=RECORD_BUILD -DARK_OCCT_BUILD_KIND=local-sdk-overlay "-DARK_OCCT_INSTALL=$sdk" -P (Join-Path $fixture 'scripts/ApplyOcctPatch.cmake')
+    if($LASTEXITCODE -ne 0){throw 'Cannot record synthetic SDK distribution inventory'}
     $output = Join-Path $fixture 'output'
     & (Join-Path $fixture 'scripts/package-release.ps1') -RuntimeDirectory $runtime -OutputDirectory $output -MsvcRuntimeDirectory $msvc -OcctSourceDirectory (Join-Path $fixture 'occt') -SkipUpdateManifest
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $output 'ark-update.json'))) 'Private downloads must not advertise the placeholder update feed.'
@@ -46,6 +58,17 @@ try {
     foreach ($name in @('ark-app-mark.png','ark-authoring-atlas-v1.png','ark-app.ico','README.md')) { Assert-True (Test-Path -LiteralPath (Join-Path $expanded ('assets/ui/' + $name))) "Reviewed UI asset missing: $name" }
     Assert-True (Test-Path -LiteralPath (Join-Path $expanded 'release-evidence/sbom.cdx.json')) 'Portable package contains its SBOM.'
     Assert-True (Test-Path -LiteralPath (Join-Path $output 'ark-windows-x64-0.9.15.zip.provenance.json')) 'Portable archive has an integrity receipt.'
+    Assert-True (Test-Path -LiteralPath (Join-Path $expanded 'licenses/OCCT-ARK-patches.txt')) 'Portable package preserves the exact modified-source notice and SDK declaration.'
+    Write-Fixture (Join-Path $runtime 'TKBRep.dll') 'different runtime bytes'
+    $rejectedOutput=Join-Path $fixture 'rejected runtime output';$rejected=$false
+    try { & (Join-Path $fixture 'scripts/package-release.ps1') -RuntimeDirectory $runtime -OutputDirectory $rejectedOutput -MsvcRuntimeDirectory $msvc -OcctSourceDirectory (Join-Path $fixture 'occt') -SkipUpdateManifest } catch { $rejected=$true }
+    Assert-True ($rejected -and -not (Test-Path -LiteralPath (Join-Path $rejectedOutput 'ark-windows-x64-0.9.15.zip'))) 'Mismatched runtime DLL rejects before an archive is published.'
+    Write-Fixture (Join-Path $runtime 'TKBRep.dll')
+    Move-Item -LiteralPath $patchManifest -Destination ($patchManifest+'.saved')
+    $missingOutput=Join-Path $fixture 'missing manifest output';$rejected=$false
+    try { & (Join-Path $fixture 'scripts/package-release.ps1') -RuntimeDirectory $runtime -OutputDirectory $missingOutput -MsvcRuntimeDirectory $msvc -OcctSourceDirectory (Join-Path $fixture 'occt') -SkipUpdateManifest } catch { $rejected=$true }
+    Assert-True ($rejected -and -not (Test-Path -LiteralPath (Join-Path $missingOutput 'ark-windows-x64-0.9.15.zip'))) 'A missing source manifest rejects rather than bypassing the SDK gate.'
+    Move-Item -LiteralPath ($patchManifest+'.saved') -Destination $patchManifest
     $installRoot = Join-Path $fixture 'installation with spaces'
     $document = Join-Path $fixture 'Documents/untouched.ark'
     Write-Fixture $document 'preserve user drawing'
@@ -68,11 +91,16 @@ try {
     Copy-Item -LiteralPath $runtime -Destination $llvm -Recurse
     foreach ($name in @('TKernel.dll','TKBRep.dll','TKDESTEP.dll')) { Move-Item -LiteralPath (Join-Path $llvm $name) -Destination (Join-Path $llvm ('lib' + $name)) }
     foreach ($name in @('libc++.dll','libunwind.dll')) { Write-Fixture (Join-Path $llvm $name) }
+    $llvmSdk=Join-Path $fixture 'llvm-sdk';[IO.Directory]::CreateDirectory($llvmSdk)|Out-Null
+    Copy-Item -LiteralPath $patchManifest -Destination (Join-Path $llvmSdk '.ark-occt-patchset.json')
+    foreach($name in @('libTKernel.dll','libTKBRep.dll','libTKDESTEP.dll')){Write-Fixture (Join-Path $llvmSdk ('bin/'+$name))}
+    & cmake -DARK_OCCT_MODE=RECORD_BUILD -DARK_OCCT_BUILD_KIND=local-sdk-overlay "-DARK_OCCT_INSTALL=$llvmSdk" -P (Join-Path $fixture 'scripts/ApplyOcctPatch.cmake')
+    if($LASTEXITCODE -ne 0){throw 'Cannot record synthetic LLVM SDK inventory'}
     $compiler = Join-Path $fixture 'compiler'
     Write-Fixture (Join-Path $compiler 'LICENSE.TXT') 'synthetic matching compiler notice'
     Write-Fixture (Join-Path $compiler 'x86_64-w64-mingw32/share/mingw32/COPYING.MinGW-w64-runtime') 'synthetic matching runtime notice'
     $llvmOutput = Join-Path $fixture 'llvm output'
-    & (Join-Path $fixture 'scripts/publish-test-build.ps1') -RuntimeDirectory $llvm -OutputDirectory $llvmOutput -CompilerDirectory $compiler -OcctSourceDirectory (Join-Path $fixture 'occt')
+    & (Join-Path $fixture 'scripts/publish-test-build.ps1') -RuntimeDirectory $llvm -OutputDirectory $llvmOutput -CompilerDirectory $compiler -OcctSourceDirectory (Join-Path $fixture 'occt') -OcctSdkDirectory $llvmSdk
     $llvmExpanded = Join-Path $fixture 'llvm expanded'
     Expand-ArkPackage (Join-Path $llvmOutput 'ark-windows-x64-0.9.15.zip') $llvmExpanded
     foreach ($name in @('libTKernel.dll','libTKBRep.dll','libTKDESTEP.dll','libc++.dll','libunwind.dll','licenses/LLVM-Apache-exception.txt','licenses/COPYING.MinGW-w64-runtime.txt')) { Assert-True (Test-Path -LiteralPath (Join-Path $llvmExpanded $name)) "Missing LLVM payload/notice: $name" }

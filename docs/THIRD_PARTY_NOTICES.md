@@ -30,6 +30,17 @@ OCCT is distributed under GNU LGPL version 2.1 with the Open CASCADE exception
 `OCCT_LGPL_EXCEPTION.txt`; the package includes both texts without alteration.
 These terms apply to OCCT separately from ARK's Apache-2.0 license.
 
+ARK's versioned source changes, when enabled, are identified by
+`third_party/occt/patches/8.0.1/patchset.json`. That manifest records each diff
+and every modified source/header's original and resulting SHA-256. Modified
+OCCT files retain the upstream LGPL/exception terms and original notices;
+ARK's license does not replace them. The corresponding pinned archive plus
+exact diffs and declared SDK build route are packaged as
+`licenses/OCCT-ARK-patches.txt`. SDKs, runtime binaries and that notice receive
+separate hashes; a source declaration alone does not attest compiler inputs,
+ABI compatibility or geometric qualification. See [native build](NATIVE_BUILD.md)
+for separated source/build/install directories and the pending/verified gates.
+
 - [Official OCCT license](https://occt3d.com/dev/doc/overview/html/occt_public_license.html)
 - [Pinned V8_0_1 source](https://github.com/Open-Cascade-SAS/OCCT/tree/V8_0_1)
 - [Pinned source archive](https://github.com/Open-Cascade-SAS/OCCT/archive/refs/tags/V8_0_1.zip)

@@ -1,38 +1,51 @@
 param(
     [ValidateRange(1, 16)][int]$Jobs = 4,
-    [switch]$ConfigureOnly
+    [switch]$ConfigureOnly,
+    [switch]$AllowCandidatePatchset
 )
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $deps = Join-Path $root 'out/deps/occt'
+$patchset = 'ark-offset-001'
+$patchHelper = Join-Path $PSScriptRoot 'ApplyOcctPatch.cmake'
 $cache = Join-Path $deps 'cache'
 $archive = Join-Path $cache 'OCCT-V8_0_1.zip'
-$source = Join-Path $cache 'OCCT-8_0_1'
-$build = Join-Path $deps 'build-msvc'
-$install = Join-Path $deps 'install-msvc'
+$source = Join-Path $deps "source-$patchset"
+$build = Join-Path $deps "build-msvc-$patchset"
+$install = Join-Path $deps "install-msvc-$patchset"
 $sourceStamp = Join-Path $source '.ark-source-sha256'
 $expectedSha256 = '7C033D917EE8F040C0512D289DCC5F02C148889D5BAC17C3E25639ACCB44F0DA'
 $archiveUrl = 'https://github.com/Open-Cascade-SAS/OCCT/archive/refs/tags/V8_0_1.zip'
+& cmake -DARK_OCCT_MODE=BUILD_POLICY "-DARK_OCCT_EXPECTED_PATCHSET=$patchset" "-DARK_OCCT_EXPECTED_ARCHIVE_SHA256=$($expectedSha256.ToLowerInvariant())" "-DARK_OCCT_ALLOW_CANDIDATE=$([bool]$AllowCandidatePatchset)" -P $patchHelper
+if($LASTEXITCODE -ne 0){throw 'OCCT patchset build policy rejected this preparation'}
 
 New-Item -ItemType Directory -Path $cache -Force | Out-Null
 if (-not (Test-Path -LiteralPath $archive)) {
     & curl.exe -fL --retry 3 -o $archive $archiveUrl
     if ($LASTEXITCODE -ne 0) { throw 'OCCT source download failed' }
 }
-$sha256 = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash
+$sha256 = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($sha256 -ne $expectedSha256) {
     throw "OCCT archive SHA-256 mismatch: $sha256"
 }
-if (-not (Test-Path -LiteralPath $sourceStamp) -or
-    (Get-Content -LiteralPath $sourceStamp -Raw).Trim() -ne $sha256) {
-    & tar.exe -xf $archive -C $cache
+if (-not (Test-Path -LiteralPath $source)) {
+    $stage = Join-Path $deps ('.source-' + [Guid]::NewGuid().ToString('N'))
+    [IO.Directory]::CreateDirectory($stage) | Out-Null
+    & tar.exe -xf $archive -C $stage
     if ($LASTEXITCODE -ne 0) { throw 'OCCT source extraction failed' }
-    if (-not (Test-Path -LiteralPath (Join-Path $source 'src/MODULES.cmake'))) {
+    $extracted = Join-Path $stage 'OCCT-8_0_1'
+    if (-not (Test-Path -LiteralPath (Join-Path $extracted 'src/MODULES.cmake'))) {
         throw 'OCCT source tree is incomplete'
     }
+    $ownedRoot=[IO.Path]::GetFullPath($deps).TrimEnd('\','/')+[IO.Path]::DirectorySeparatorChar
+    foreach($owned in @($extracted,$source)){if(-not [IO.Path]::GetFullPath($owned).StartsWith($ownedRoot,[StringComparison]::OrdinalIgnoreCase)){throw 'OCCT source preparation escaped its dependency directory'}}
+    Move-Item -LiteralPath $extracted -Destination $source
     Set-Content -LiteralPath $sourceStamp -Value $sha256 -NoNewline
 }
+if (-not (Test-Path -LiteralPath $sourceStamp) -or (Get-Content -LiteralPath $sourceStamp -Raw).Trim() -ne $sha256) { throw 'Separate OCCT source archive stamp differs; preserve it and choose a fresh dependency directory.' }
+& cmake "-DARK_OCCT_SOURCE=$source" -P $patchHelper
+if ($LASTEXITCODE -ne 0) { throw 'Exact OCCT patch preparation failed' }
 
 $configure = @(
     '-S', $source, '-B', $build, '-G', 'Visual Studio 17 2022', '-A', 'x64',
@@ -72,5 +85,12 @@ $stepLib = Get-ChildItem -LiteralPath $install -Filter TKDESTEP.lib -File -Recur
 if (-not $config -or -not $stepLib) { throw 'Installed OCCT SDK lacks CMake config or STEP library' }
 $igesLib = Get-ChildItem -LiteralPath $install -Filter TKDEIGES.lib -File -Recurse | Select-Object -First 1
 if (-not $igesLib) { throw 'Installed OCCT SDK lacks IGES library' }
+$licenses=Join-Path $install 'licenses';[IO.Directory]::CreateDirectory($licenses)|Out-Null
+foreach($notice in @('LICENSE_LGPL_21.txt','OCCT_LGPL_EXCEPTION.txt')){Copy-Item -LiteralPath (Join-Path $source $notice) -Destination $licenses}
+Copy-Item -LiteralPath (Join-Path $source '.ark-occt-patchset.json') -Destination $install
+& cmake -DARK_OCCT_MODE=RECORD_BUILD -DARK_OCCT_BUILD_KIND=clean-source-rebuild "-DARK_OCCT_ALLOW_CANDIDATE=$([bool]$AllowCandidatePatchset)" "-DARK_OCCT_INSTALL=$install" -P $patchHelper
+if($LASTEXITCODE -ne 0){throw 'OCCT complete shared-library build inventory failed'}
+& cmake -DARK_OCCT_MODE=NOTICE "-DARK_OCCT_ALLOW_CANDIDATE=$([bool]$AllowCandidatePatchset)" "-DARK_OCCT_INSTALL=$install" "-DARK_OCCT_NOTICE=$(Join-Path $licenses 'OCCT-ARK-patches.txt')" -P $patchHelper
+if($LASTEXITCODE -ne 0){throw 'OCCT patch notice generation failed'}
 Write-Host "OCCT_DIR=$($config.DirectoryName)"
 Write-Host "STEP_LIBRARY=$($stepLib.FullName)"

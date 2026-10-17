@@ -1,0 +1,563 @@
+--- a/src/ModelingData/TKGeomBase/AppDef/AppDef_LinearCriteria.cxx
++++ b/src/ModelingData/TKGeomBase/AppDef/AppDef_LinearCriteria.cxx
+@@ -511,6 +511,73 @@
+ 
+ //=================================================================================================
+ 
++// Return factors separately: summing a large least-squares Gram matrix with
++// a small positive regularizer can lose the regularizer in double precision.
++void AppDef_LinearCriteria::LinearSystem(const int                   Element,
++                                         NCollection_Array2<double>& Quality,
++                                         NCollection_Array2<double>& Factors,
++                                         NCollection_Array2<double>& Targets,
++                                         NCollection_Array1<double>& Weights)
++{
++  if (myCurve.IsNull())
++    throw Standard_DomainError("AppDef_LinearCriteria::LinearSystem: no curve");
++  const int degree     = myCurve->Base().WorkDegree();
++  const int continuity = order(myCurve->Base());
++  const int samples = myParameters->Length(), dimensions = myCurve->Dimension();
++  if (Quality.LowerRow() != 0 || Quality.UpperRow() != degree || Quality.LowerCol() != 0
++      || Quality.UpperCol() != degree || Factors.LowerRow() != 1 || Factors.UpperRow() != samples
++      || Factors.LowerCol() != 0 || Factors.UpperCol() != degree || Targets.LowerRow() != 1
++      || Targets.UpperRow() != samples || Targets.LowerCol() != 1
++      || Targets.UpperCol() != dimensions || Weights.Lower() != 1 || Weights.Upper() != samples)
++    throw Standard_DomainError("AppDef_LinearCriteria::LinearSystem: array dimensions");
++  Quality.Init(0.);
++  Factors.Init(0.);
++  Targets.Init(0.);
++  Weights.Init(0.);
++  const double first = myCurve->Knots()(Element), last = myCurve->Knots()(Element + 1);
++  math_Matrix  part(0, degree, 0, degree, 0.);
++  for (int criterion = 0; criterion < 3; ++criterion)
++  {
++    myCriteria[criterion]->Set(first, last);
++    myCriteria[criterion]->Hessian(1, 1, part);
++    const double scale = myQualityWeight * myPercent[criterion] / myEstimation[criterion];
++    for (int i = 0; i <= degree; ++i)
++      for (int j = 0; j <= degree; ++j)
++        Quality(i, j) += scale * part(i, j);
++  }
++  if (myE != Element)
++    BuildCache(Element);
++  const int                    points3d = AppDef_MyLineTool::NbP3d(mySSP);
++  const int                    points2d = AppDef_MyLineTool::NbP2d(mySSP);
++  NCollection_Array1<gp_Pnt>   p3(1, std::max(1, points3d));
++  NCollection_Array1<gp_Pnt2d> p2(1, std::max(1, points2d));
++  const double                 halfSpan = (last - first) / 2.;
++  const int                    offset   = myPntWeight.Lower() - myParameters->Lower();
++  for (int point = IF, cache = 1; point <= IL; ++point, cache += degree + 1)
++  {
++    const int row = point - myParameters->Lower() + 1;
++    Weights(row)  = myQuadraticWeight * (myPntWeight(offset + point) * 2.);
++    for (int i = 0; i <= degree; ++i)
++    {
++      const int power = i <= 2 * continuity + 1 ? (i <= continuity ? i : i - continuity - 1) : 0;
++      Factors(row, i) = myCache->Value(cache + i) * std::pow(halfSpan, power);
++    }
++    if (points3d && points2d)
++      AppDef_MyLineTool::Value(mySSP, point, p3, p2);
++    else if (points3d)
++      AppDef_MyLineTool::Value(mySSP, point, p3);
++    else
++      AppDef_MyLineTool::Value(mySSP, point, p2);
++    int dimension = 1;
++    for (int i = 1; i <= points3d; ++i)
++      for (int coordinate = 1; coordinate <= 3; ++coordinate)
++        Targets(row, dimension++) = p3(i).Coord(coordinate);
++    for (int i = 1; i <= points2d; ++i)
++      for (int coordinate = 1; coordinate <= 2; ++coordinate)
++        Targets(row, dimension++) = p2(i).Coord(coordinate);
++  }
++}
++
+ void AppDef_LinearCriteria::Hessian(const int    Element,
+                                     const int    Dimension1,
+                                     const int    Dimension2,
+--- a/src/ModelingData/TKGeomBase/AppDef/AppDef_LinearCriteria.hxx
++++ b/src/ModelingData/TKGeomBase/AppDef/AppDef_LinearCriteria.hxx
+@@ -94,6 +94,17 @@
+ 
+   Standard_EXPORT void SetWeight(const NCollection_Array1<double>& Weight) override;
+ 
++  //! Return the same quadratic objective before forming its normal equations.
++  //! Quality is the regularizer; Factors/Weights/Targets describe the weighted
++  //! point residuals. Arrays use coefficient indices 0..WorkDegree, sample
++  //! indices 1..parameter count and dimension indices 1..curve dimension.
++  //! Inactive samples of an element have zero weight. No criterion is changed.
++  Standard_EXPORT void LinearSystem(const int Element,
++                                    NCollection_Array2<double>& Quality,
++                                    NCollection_Array2<double>& Factors,
++                                    NCollection_Array2<double>& Targets,
++                                    NCollection_Array1<double>& Weights);
++
+   DEFINE_STANDARD_RTTIEXT(AppDef_LinearCriteria, AppDef_SmoothCriterion)
+ 
+ private:
+--- a/src/ModelingData/TKGeomBase/AppDef/AppDef_Variational.cxx
++++ b/src/ModelingData/TKGeomBase/AppDef/AppDef_Variational.cxx
+@@ -17,6 +17,10 @@
+ // Approximation of a MultiLine of points described by the tool MLineTool.
+ // with variational criteria
+ 
++#include <cmath>
++#include <cstring>
++#include <vector>
++#include <math_Householder.hxx>
+ #include <AppDef_MultiLine.hxx>
+ #include <AppDef_Variational.hxx>
+ #include <AppParCurves_MultiBSpCurve.hxx>
+@@ -68,6 +72,326 @@
+ //
+ //=================================================================================================
+ //
++// Stable solution of an unchanged, separable C2 smoothing objective.
++// No normal-equation regularization, pivot clamping or geometric fallback.
++struct AppDef_StableContext
++{
++  using Row                 = std::vector<double>;
++  using Matrix              = std::vector<Row>;
++  bool                ready = false;
++  std::vector<double> identity;
++  std::vector<int>    tableIdentity;
++  Matrix              transform, triangularConstraints, lowerQuality, transformedFactors, design;
++  std::vector<double> weights;
++  int                 unknowns = 0, constraints = 0;
++
++  void Reset() { *this = AppDef_StableContext(); }
++
++  static bool SameValues(const Row& left, const Row& right)
++  {
++    return left.size() == right.size()
++           && (left.empty()
++               || std::memcmp(left.data(), right.data(), left.size() * sizeof(double)) == 0);
++  }
++
++  static bool SameMatrix(const Matrix& left, const Matrix& right)
++  {
++    if (left.size() != right.size())
++      return false;
++    for (size_t row = 0; row < left.size(); ++row)
++      if (!SameValues(left[row], right[row]))
++        return false;
++    return true;
++  }
++
++  static int Position(const std::vector<int>& indices, int index)
++  {
++    auto found = std::lower_bound(indices.begin(), indices.end(), index);
++    return found != indices.end() && *found == index ? int(found - indices.begin()) : -1;
++  }
++
++  void Solve(AppDef_LinearCriteria&  criterion,
++             const FEmTool_Assembly& assembly,
++             int                     degree,
++             int                     samples,
++             int                     dimensions,
++             bool                    assemble,
++             math_Vector&            solution)
++  {
++    const auto&                   table    = assembly.AssemblyTable();
++    const int                     elements = table->RowLength();
++    std::vector<std::vector<int>> indices(dimensions);
++    std::vector<int>              currentTable;
++    for (int dim = 1; dim <= dimensions; ++dim)
++    {
++      for (int element = 1; element <= elements; ++element)
++      {
++        const auto& map = table->Value(dim, element)->Array1();
++        for (int i = map.Lower(); i <= map.Upper(); ++i)
++        {
++          indices[dim - 1].push_back(map(i));
++          currentTable.push_back(map(i));
++        }
++      }
++      auto& block = indices[dim - 1];
++      std::sort(block.begin(), block.end());
++      block.erase(std::unique(block.begin(), block.end()), block.end());
++      if (dim > 1 && block.size() != indices[0].size())
++        throw Standard_DomainError("AppDef stable system: unequal dimension blocks");
++    }
++    const int           n = int(indices[0].size());
++    Matrix              quality(n, Row(n)), factors, targetValues;
++    std::vector<double> currentWeights;
++    for (int element = 1; element <= elements; ++element)
++    {
++      NCollection_Array2<double> q(0, degree, 0, degree);
++      NCollection_Array2<double> f(1, samples, 0, degree);
++      NCollection_Array2<double> targets(1, samples, 1, dimensions);
++      NCollection_Array1<double> w(1, samples);
++      criterion.LinearSystem(element, q, f, targets, w);
++      const auto&      firstMap = table->Value(1, element)->Array1();
++      std::vector<int> local(degree + 1);
++      for (int i = 0; i <= degree; ++i)
++        local[i] = Position(indices[0], firstMap(firstMap.Lower() + i));
++      // Prove that the same coefficient matrix applies to every RHS.
++      for (int dim = 2; dim <= dimensions; ++dim)
++      {
++        const auto& map = table->Value(dim, element)->Array1();
++        for (int i = 0; i <= degree; ++i)
++          if (Position(indices[dim - 1], map(map.Lower() + i)) != local[i])
++            throw Standard_DomainError("AppDef stable system: nonseparable assembly map");
++      }
++      for (int i = 0; i <= degree; ++i)
++        for (int j = 0; j <= degree; ++j)
++          quality[local[i]][local[j]] += q(i, j);
++      for (int row = 1; row <= samples; ++row)
++      {
++        if (w(row) == 0.)
++          continue;
++        if (!(w(row) > 0.) || !std::isfinite(w(row)))
++          throw Standard_DomainError("AppDef stable system: invalid residual weight");
++        Row factor(n), values(dimensions);
++        for (int i = 0; i <= degree; ++i)
++          factor[local[i]] += f(row, i);
++        for (int dim = 1; dim <= dimensions; ++dim)
++          values[dim - 1] = targets(row, dim);
++        factors.push_back(std::move(factor));
++        targetValues.push_back(std::move(values));
++        currentWeights.push_back(w(row));
++      }
++    }
++    Matrix      constraintMatrix, constraintValues(dimensions);
++    const auto& sparse = assembly.Constraints();
++    const auto& right  = assembly.ConstraintValues();
++    for (int dim = 1; dim <= dimensions; ++dim)
++    {
++      Matrix block;
++      for (int row = 1; row <= sparse.Length(); ++row)
++      {
++        Row  coefficients(n);
++        bool own = false, other = false;
++        for (NCollection_List<occ::handle<NCollection_HArray1<double>>>::Iterator it(
++               sparse.Value(row));
++             it.More();
++             it.Next())
++        {
++          const auto& part = it.Value();
++          for (int index = part->Lower(); index <= part->Upper(); ++index)
++          {
++            if (part->Value(index) == 0.)
++              continue;
++            const int position = Position(indices[dim - 1], index);
++            if (position < 0)
++            {
++              other = true;
++              continue;
++            }
++            coefficients[position] += part->Value(index);
++            own = true;
++          }
++        }
++        if (!own)
++          continue;
++        if (other)
++          throw Standard_DomainError("AppDef stable system: coupled constraints");
++        block.push_back(std::move(coefficients));
++        constraintValues[dim - 1].push_back(right.Value(row));
++      }
++      if (dim == 1)
++        constraintMatrix = std::move(block);
++      else if (!SameMatrix(block, constraintMatrix))
++        throw Standard_DomainError("AppDef stable system: unequal constraint matrices");
++    }
++    if (constraintMatrix.size() != 2)
++      throw Standard_DomainError("AppDef stable system: expected two point constraints");
++    std::vector<double> currentIdentity;
++    auto                append = [&](const Matrix& matrix) {
++      currentIdentity.push_back(double(matrix.size()));
++      for (const auto& row : matrix)
++      {
++        currentIdentity.push_back(double(row.size()));
++        currentIdentity.insert(currentIdentity.end(), row.begin(), row.end());
++      }
++    };
++    append(quality);
++    append(factors);
++    append(constraintMatrix);
++    currentIdentity.insert(currentIdentity.end(), currentWeights.begin(), currentWeights.end());
++    if (!assemble
++        && (!ready || !SameValues(currentIdentity, identity) || currentTable != tableIdentity))
++      throw Standard_DomainError("AppDef stable system: reused matrix or constraints changed");
++    if (assemble)
++    {
++      Reset();
++      unknowns      = n;
++      constraints   = int(constraintMatrix.size());
++      identity      = std::move(currentIdentity);
++      tableIdentity = std::move(currentTable);
++      transform.assign(n, Row(n));
++      for (int i = 0; i < n; ++i)
++        transform[i][i] = 1.;
++      triangularConstraints = constraintMatrix;
++      // Right Householder reflections give G*T=[R,0] without squaring its condition.
++      for (int k = 0; k < constraints; ++k)
++      {
++        Row    reflector(n);
++        double norm = 0.;
++        for (int j = k; j < n; ++j)
++          norm = std::hypot(norm, triangularConstraints[k][j]);
++        if (!(norm > 0.))
++          throw Standard_DomainError("AppDef stable system: constraint rank");
++        const double alpha = -std::copysign(norm, triangularConstraints[k][k]);
++        for (int j = k; j < n; ++j)
++          reflector[j] = triangularConstraints[k][j];
++        reflector[k] -= alpha;
++        norm = 0.;
++        for (int j = k; j < n; ++j)
++          norm = std::hypot(norm, reflector[j]);
++        for (int j = k; j < n; ++j)
++          reflector[j] /= norm;
++        auto reflect = [&](Matrix& matrix) {
++          for (auto& row : matrix)
++          {
++            double dot = 0.;
++            for (int j = k; j < n; ++j)
++              dot = std::fma(row[j], reflector[j], dot);
++            for (int j = k; j < n; ++j)
++              row[j] = std::fma(-2. * dot, reflector[j], row[j]);
++          }
++        };
++        reflect(triangularConstraints);
++        reflect(transform);
++      }
++      Matrix temporary(n, Row(n)), transformed(n, Row(n));
++      for (int i = 0; i < n; ++i)
++        for (int j = 0; j < n; ++j)
++          for (int k = 0; k < n; ++k)
++            temporary[i][j] = std::fma(quality[i][k], transform[k][j], temporary[i][j]);
++      for (int i = 0; i < n; ++i)
++        for (int j = 0; j < n; ++j)
++          for (int k = 0; k < n; ++k)
++            transformed[i][j] = std::fma(transform[k][i], temporary[k][j], transformed[i][j]);
++      const int free = n - constraints;
++      lowerQuality.assign(free, Row(free));
++      for (int i = 0; i < free; ++i)
++        for (int j = 0; j <= i; ++j)
++        {
++          double value = transformed[constraints + i][constraints + j];
++          for (int k = 0; k < j; ++k)
++            value = std::fma(-lowerQuality[i][k], lowerQuality[j][k], value);
++          if (i == j)
++          {
++            if (!(value > 0.))
++              throw Standard_DomainError("AppDef stable system: regularizer not positive definite");
++            lowerQuality[i][j] = std::sqrt(value);
++          }
++          else
++            lowerQuality[i][j] = value / lowerQuality[j][j];
++        }
++      // Cache the transformed free/fixed quality block after verifying the same matrix.
++      qualityCross.assign(free, Row(constraints));
++      for (int i = 0; i < free; ++i)
++        for (int j = 0; j < constraints; ++j)
++          qualityCross[i][j] = transformed[constraints + i][j];
++      transformedFactors.assign(factors.size(), Row(n));
++      for (size_t row = 0; row < factors.size(); ++row)
++        for (int j = 0; j < n; ++j)
++          for (int k = 0; k < n; ++k)
++            transformedFactors[row][j] =
++              std::fma(factors[row][k], transform[k][j], transformedFactors[row][j]);
++      weights = std::move(currentWeights);
++      design.assign(free + int(factors.size()), Row(free));
++      for (int i = 0; i < free; ++i)
++        for (int j = i; j < free; ++j)
++          design[i][j] = lowerQuality[j][i];
++      for (size_t row = 0; row < factors.size(); ++row)
++        for (int j = 0; j < free; ++j)
++          design[free + row][j] =
++            std::sqrt(weights[row]) * transformedFactors[row][constraints + j];
++      ready = true;
++    }
++    const int   free = unknowns - constraints, rows = int(design.size());
++    math_Matrix coefficients(1, rows, 1, free), rhs(1, rows, 1, dimensions, 0.);
++    for (int i = 0; i < rows; ++i)
++      for (int j = 0; j < free; ++j)
++        coefficients(i + 1, j + 1) = design[i][j];
++    Matrix fixed(dimensions, Row(constraints));
++    for (int dim = 0; dim < dimensions; ++dim)
++    {
++      for (int i = 0; i < constraints; ++i)
++      {
++        double value = constraintValues[dim][i];
++        for (int j = 0; j < i; ++j)
++          value = std::fma(-triangularConstraints[i][j], fixed[dim][j], value);
++        fixed[dim][i] = value / triangularConstraints[i][i];
++      }
++      Row qualityTarget(free);
++      for (int i = 0; i < free; ++i)
++      {
++        double value = 0.;
++        for (int j = 0; j < constraints; ++j)
++          value = std::fma(-qualityCross[i][j], fixed[dim][j], value);
++        for (int j = 0; j < i; ++j)
++          value = std::fma(-lowerQuality[i][j], qualityTarget[j], value);
++        qualityTarget[i]    = value / lowerQuality[i][i];
++        rhs(i + 1, dim + 1) = qualityTarget[i];
++      }
++      for (size_t row = 0; row < targetValues.size(); ++row)
++      {
++        double value = targetValues[row][dim];
++        for (int j = 0; j < constraints; ++j)
++          value = std::fma(-transformedFactors[row][j], fixed[dim][j], value);
++        rhs(free + int(row) + 1, dim + 1) = std::sqrt(weights[row]) * value;
++      }
++    }
++    // One factorization, multiple RHS only after proving identical dimension blocks.
++    math_Householder qr(coefficients, rhs);
++    if (!qr.IsDone())
++      throw Standard_DomainError("AppDef stable system: QR rank failure");
++    const math_Matrix& values = qr.AllValues();
++    for (int dim = 0; dim < dimensions; ++dim)
++    {
++      Row coordinates(unknowns);
++      for (int i = 0; i < constraints; ++i)
++        coordinates[i] = fixed[dim][i];
++      for (int i = 0; i < free; ++i)
++        coordinates[constraints + i] = values(i + 1, dim + 1);
++      for (int i = 0; i < unknowns; ++i)
++      {
++        double value = 0.;
++        for (int j = 0; j < unknowns; ++j)
++          value = std::fma(transform[i][j], coordinates[j], value);
++        if (!std::isfinite(value))
++          throw Standard_DomainError("AppDef stable system: nonfinite solution");
++        solution(indices[dim][i]) = value;
++      }
++    }
++  }
++
++private:
++  Matrix qualityCross;
++};
++
+ AppDef_Variational::AppDef_Variational(
+   const AppDef_MultiLine&                                                SSP,
+   const int                                                              FirstPoint,
+@@ -1219,6 +1543,7 @@
+ 
+   J->SetCurve(CCurrent);
+   FEmTool_Assembly* TheAssembly = new FEmTool_Assembly(Dependence->Array2(), J->AssemblyTable());
++  AppDef_StableContext stableContext;
+ 
+   //============        Optimization      ============================
+   //  int inagain = 0;
+@@ -1244,7 +1569,7 @@
+       J->SetParameters(CurrentTi);
+       EpsDeg = std::min(WQuality * .1, CBLONG * .001);
+ 
+-      Optimization(J, *TheAssembly, lconst, EpsDeg, CNew, CurrentTi->Array1());
++      Optimization(J, *TheAssembly, lconst, EpsDeg, CNew, CurrentTi->Array1(), stableContext);
+ 
+       lconst = false;
+ 
+@@ -1414,7 +1739,7 @@
+       J->SetParameters(CurrentTi);
+ 
+       EpsDeg = std::min(WQuality * .1, CBLONG * .001);
+-      Optimization(J, *TheAssembly, lconst, EpsDeg, CNew, CurrentTi->Array1());
++      Optimization(J, *TheAssembly, lconst, EpsDeg, CNew, CurrentTi->Array1(), stableContext);
+ 
+       CCurrent = CNew;
+ 
+@@ -1540,6 +1865,7 @@
+         CCurrent = CNew;
+         // New Knots => New Assembly.
+         J->SetCurve(CNew);
++        stableContext.Reset();
+         delete TheAssembly;
+         TheAssembly = new FEmTool_Assembly(Dependence->Array2(), J->AssemblyTable());
+       }
+@@ -1595,7 +1921,8 @@
+                                       const bool                           ToAssemble,
+                                       const double                         EpsDeg,
+                                       occ::handle<FEmTool_Curve>&          Curve,
+-                                      const NCollection_Array1<double>&    Parameters) const
++                                      const NCollection_Array1<double>&    Parameters,
++                                      AppDef_StableContext&               StableContext) const
+ {
+   int MxDeg = Curve->Base().WorkDegree(), NbElm = Curve->NbElements(), NbDim = Curve->Dimension();
+ 
+@@ -1636,16 +1963,37 @@
+     }
+   }
+ 
+-  // Solution of system
+-  if (ToAssemble)
+-  {
+-    if (NbConstr != 0)
+-    { // Treatment of constraints
+-      AssemblingConstraints(Curve, Parameters, CBLONG, A);
+-    }
+-    A.Solve();
+-  }
+-  A.Solution(Sol);
++  // The bounded C2, independent-dimension, two-passpoint domain is solved
++  // from its original factors. Tangency/curvature and other domains keep
++  // their existing solver; this dispatch is not a retry after geometric failure.
++  auto* linear = dynamic_cast<AppDef_LinearCriteria*>(J.get());
++  bool  stable = linear && myContinuity == GeomAbs_C2 && myMaxDegree <= 8 && myNbPoints >= 3
++                && myNbPoints <= 32 && myNbPassPoints == 2 && myNbTangPoints == 0
++                && myNbCurvPoints == 0;
++  if (stable)
++  {
++    const auto dependency = J->DependenceTable();
++    for (int i = dependency->LowerRow(); i <= dependency->UpperRow(); ++i)
++      for (int j = dependency->LowerCol(); j <= dependency->UpperCol(); ++j)
++        if (dependency->Value(i, j) != (i == j ? 1 : 0))
++          stable = false;
++  }
++  // Preserve the original assembled constraint lifecycle before either solve.
++  if (ToAssemble && NbConstr != 0)
++    AssemblingConstraints(Curve, Parameters, CBLONG, A);
++  if (stable)
++  {
++    StableContext.Solve(*linear, A, MxDeg, myNbPoints, NbDim, ToAssemble, Sol);
++  }
++  else
++  {
++    // Solution of system
++    if (ToAssemble)
++    {
++      A.Solve();
++    }
++    A.Solution(Sol);
++  }
+ 
+   // Updating J
+   J->SetCurve(Curve);
+--- a/src/ModelingData/TKGeomBase/AppDef/AppDef_Variational.hxx
++++ b/src/ModelingData/TKGeomBase/AppDef/AppDef_Variational.hxx
+@@ -36,6 +36,7 @@
+ class math_Matrix;
+ class FEmTool_Curve;
+ class FEmTool_Assembly;
++struct AppDef_StableContext;
+ 
+ //! This class is used to smooth N points with constraints
+ //! by minimization of quadratic criterium but also
+@@ -233,7 +234,8 @@
+                                     const bool                           ToAssemble,
+                                     const double                         EpsDeg,
+                                     occ::handle<FEmTool_Curve>&          Curve,
+-                                    const NCollection_Array1<double>&    Parameters) const;
++                                    const NCollection_Array1<double>&    Parameters,
++                                      AppDef_StableContext&               StableContext) const;
+ 
+   Standard_EXPORT void Project(const occ::handle<FEmTool_Curve>& C,
+                                const NCollection_Array1<double>& Ti,
+--- a/src/ModelingData/TKGeomBase/FEmTool/FEmTool_Assembly.hxx
++++ b/src/ModelingData/TKGeomBase/FEmTool/FEmTool_Assembly.hxx
+@@ -78,6 +78,12 @@
+   Standard_EXPORT void Solution(math_Vector& Solution) const;
+ 
+   Standard_EXPORT int NbGlobVar() const;
++  //! Read-only constraint custody for solvers of the same assembled system.
++  //! These accessors add no instance state or virtual methods.
++  const NCollection_Sequence<NCollection_List<occ::handle<NCollection_HArray1<double>>>>&
++    Constraints() const { return G; }
++  const NCollection_Sequence<double>& ConstraintValues() const { return C; }
++
+ 
+   //! Returns the assembly table mapping element-local indices to global indices.
+   //! @return const reference to the assembly table

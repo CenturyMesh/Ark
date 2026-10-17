@@ -15,18 +15,18 @@ pwsh -File scripts/build-occt.ps1 -Jobs 4
 Windows PowerShell also works (`powershell -File scripts/build-occt.ps1 -Jobs 4`).
 The script downloads the official `V8_0_1` source archive, verifies its pinned
 SHA-256, configures the x64 Visual Studio 2022 generator, builds Release DLLs,
-and installs them under the ignored `out/deps/occt/install-msvc` directory.
+and installs them under the ignored `out/deps/occt/install-msvc-ark-offset-001` directory.
 It uses no Python interpreter or binding. `-ConfigureOnly` stops before compilation.
 The source, build, and download cache remain under ignored `out/deps/occt`.
 
 The installed CMake package is
-`out/deps/occt/install-msvc/cmake/OpenCASCADEConfig.cmake`; pass its directory
+`out/deps/occt/install-msvc-ark-offset-001/cmake/OpenCASCADEConfig.cmake`; pass its directory
 as `OpenCASCADE_DIR` when configuring ARK with the same Visual Studio 2022 x64
 generator. Use `find_package(OpenCASCADE REQUIRED)` so OCCT imports all of the
 target groups required by the STEP dependency closure. Set C++17 or newer for
-all consumers; ARK uses C++20. The headers are under `install-msvc/inc`, Release import libraries
-under `install-msvc/win64/vc14/lib`, and Release DLLs under
-`install-msvc/win64/vc14/bin`. Put that DLL directory on `PATH` for native
+all consumers; ARK uses C++20. The headers are under `install-msvc-ark-offset-001/inc`, Release import libraries
+under `install-msvc-ark-offset-001/win64/vc14/lib`, and Release DLLs under
+`install-msvc-ark-offset-001/win64/vc14/bin`. Put that DLL directory on `PATH` for native
 applications and tests, or copy the required DLLs alongside a produced `.exe`.
 Do not mix these MSVC libraries with the existing MinGW build in `out/sketch`.
 
@@ -39,7 +39,7 @@ modeling and STEP exchange SDK; other exchange
 formats can be added through `BUILD_ADDITIONAL_TOOLKITS` in the script when
 needed.
 
-The installed SDK was checked with an independent MSVC C++20 program that
+The historical unmodified SDK was checked with an independent MSVC C++20 program that
 linked `TKDESTEP`, `TKPrim`, `TKBRep`, and `TKTopAlgo`. It built a box, verified
 the B-rep, wrote a STEP file, then read it back successfully.
 
@@ -51,6 +51,63 @@ The source distribution includes [LGPL 2.1](https://github.com/Open-Cascade-SAS/
 and the [OCCT LGPL exception](https://github.com/Open-Cascade-SAS/OCCT/blob/V8_0_1/OCCT_LGPL_EXCEPTION.txt).
 Keep the license and exception with redistributed binaries and review the
 terms for an eventual packaged ARK release.
+
+## Versioned ARK source patches
+
+`third_party/occt/patches/8.0.1/patchset.json` identifies the source patchset,
+archive digest, exact patch-file digests and every target's before/after digest.
+`scripts/ApplyOcctPatch.cmake` is shared by Windows and Linux. It rejects unknown
+bytes, stale stamps, undeclared patch paths and mixed target states; repeated application
+does not apply a patch twice. It changes only the explicitly selected extracted
+source directory. Git configuration and parent-repository line-ending rules do
+not select the resulting source bytes.
+
+The stable suffix is `ark-offset-001`: patched sources use
+`out/deps/occt/source-ark-offset-001`, with separate
+`build-msvc-ark-offset-001` / `build-linux-ark-offset-001` and
+`install-msvc-ark-offset-001` / `install-linux-ark-offset-001` directories.
+The former SDK/source directories remain intact. There is no fallback to an
+unpatched SDK. CI cache identity includes the build/helper scripts and all patch
+definitions/files. Installed upstream LGPL/exception texts remain unchanged.
+
+Normal SDK builds and packaging require manifest status `verified-in-scope`.
+An empty list or another status is an explicit unfinished native dependency,
+not a delivered repair. Freeze source hashes only after the applicable
+exact geometry and regression gates. An explicit local diagnostic SDK build
+may use `build-occt.ps1 -AllowCandidatePatchset` or
+`build-occt.sh --allow-candidate-patchset`; the ARK build wrappers accept the
+same option. This option does not enable release packaging or qualify geometry.
+
+For a temporary local SDK overlay, copy the original SDK into the new suffix
+directory, retain the original, and declare the overlay separately from a clean
+build. After the relevant modules have actually been rebuilt, invoke the helper
+with `ARK_OCCT_MODE=RECORD_BUILD`, `ARK_OCCT_BUILD_KIND=local-sdk-overlay`,
+`ARK_OCCT_INSTALL=<new-sdk>` and the candidate opt-in if applicable.
+`.ark-occt-build.json` uses schema `ark.occt-sdk-build.v2` and records the exact
+source manifest digest plus every installed OCCT shared library's path and hash.
+Copy the corresponding verified-source
+`.ark-occt-patchset.json`; its bytes bind the source definition, not compiler
+inputs. Such a copy is not a clean rebuild. Header/class-layout changes require
+rebuilding dependent SDK modules and ARK consumers; replacing one object/DLL
+does not establish ABI compatibility. The provided clean build scripts rebuild
+the SDK from the pinned archive and write `kind: clean-source-rebuild` only
+after successful build/install. Readers reject missing or unsupported build
+kinds; an overlay is never inferred to be a clean rebuild.
+SDK verification rejects missing inventories,
+added/removed libraries and changed library bytes. Windows packaging checks the
+actual staged OCCT DLLs against this SDK. Linux packaging checks the copied
+shared objects before its declared RPATH transformation; final package hashes
+describe the transformed bytes. Build declarations remain local provenance,
+not independent attestation or manufacturing qualification.
+
+Packages include the exact source diffs and source/build declarations in
+`licenses/OCCT-ARK-patches.txt`, alongside the unmodified upstream license and
+exception. The SBOM hashes that notice separately from actual runtime binaries.
+`tests/occt_patch_tests.ps1` checks synthetic multi-file application, idempotence,
+rejection and notice packaging. Add `-RequirePinned -VendorSourceDirectory <path>`
+to require the frozen real vendor targets as well; it applies only to copied
+targets and checks that the original files remain unchanged. These script tests
+do not compile OCCT or certify the geometric repair.
 
 ## VS Code
 

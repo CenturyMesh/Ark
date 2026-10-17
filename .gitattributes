@@ -19,3 +19,7 @@ third_party/sqlite/sqlite3* -text whitespace=-blank-at-eol
 # Preserve the pinned upstream decoder and license byte for byte.
 third_party/stb/stb_image.h -text whitespace=-blank-at-eol
 third_party/stb/LICENSE -text whitespace=-blank-at-eol
+# Preserve manifest stamps and patch digests byte for byte on every platform.
+# Blank context lines in unified diffs require their leading space.
+third_party/occt/patches/**/*.patch -text whitespace=-blank-at-eol
+third_party/occt/patches/**/patchset.json -text whitespace=cr-at-eol

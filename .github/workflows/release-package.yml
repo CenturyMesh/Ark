@@ -37,10 +37,8 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: |
-            out/deps/occt/install-msvc
-            out/deps/occt/cache/OCCT-8_0_1/LICENSE_LGPL_21.txt
-            out/deps/occt/cache/OCCT-8_0_1/OCCT_LGPL_EXCEPTION.txt
-          key: windows-2022-occt-msvc-x64-notices-v1-${{ steps.runner-image.outputs.version }}-${{ hashFiles('scripts/build-occt.ps1') }}
+            out/deps/occt/install-msvc-ark-offset-001
+          key: windows-2022-occt-msvc-x64-ark-offset-001-v1-${{ steps.runner-image.outputs.version }}-${{ hashFiles('scripts/build-occt.ps1', 'scripts/ApplyOcctPatch.cmake', 'third_party/occt/patches/8.0.1/**') }}
       - name: Build OCCT 8 native SDK
         if: steps.occt-cache.outputs.cache-hit != 'true'
         shell: pwsh
@@ -50,9 +48,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: |
-            out/deps/occt/install-msvc
-            out/deps/occt/cache/OCCT-8_0_1/LICENSE_LGPL_21.txt
-            out/deps/occt/cache/OCCT-8_0_1/OCCT_LGPL_EXCEPTION.txt
+            out/deps/occt/install-msvc-ark-offset-001
           key: ${{ steps.occt-cache.outputs.cache-primary-key }}
       - name: Build ARK and run tests
         shell: pwsh

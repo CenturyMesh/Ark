@@ -16,6 +16,13 @@ try{
     Assert ($result.iteration_code -eq $release.code -and $result.payload_files -eq 9) 'Identity and complete payload inventory'
     $sbom=Get-Content -LiteralPath (Join-Path $output 'sbom.cdx.json') -Raw | ConvertFrom-Json
     Assert ($sbom.bomFormat -eq 'CycloneDX' -and $sbom.components.Count -eq 4) 'SBOM contains the four direct source dependencies'
+    $patchNotice=Join-Path $package 'licenses/OCCT-ARK-patches.txt';[IO.File]::WriteAllText($patchNotice,'Synthetic exact modified-source notice; not binary qualification')
+    New-ArkReleaseEvidence $repository $package $output | Out-Null
+    $patchedSbom=Get-Content -LiteralPath (Join-Path $output 'sbom.cdx.json') -Raw | ConvertFrom-Json
+    $patchedOcct=@($patchedSbom.components|Where-Object {$_.'bom-ref' -eq 'Open-CASCADE-Technology'})[0]
+    Assert (@($patchedOcct.properties|Where-Object {$_.name -eq 'ark:modified-source-notice-sha256'})[0].value -ceq (Get-FileHash -LiteralPath $patchNotice -Algorithm SHA256).Hash.ToLowerInvariant()) 'The SBOM binds the actual packaged source-patch notice bytes'
+    Assert (@($patchedOcct.properties|Where-Object {$_.name -eq 'ark:modified-source-scope'})[0].value -match 'not independent binary-source attestation') 'Modified-source declaration does not become a binary or geometry qualification'
+    Remove-Item -LiteralPath $patchNotice
     foreach($name in @('Install-ARK.ps1','Install-ARK.cmd','GETTING_STARTED.txt')) { [IO.File]::WriteAllText((Join-Path $package $name),'synthetic reviewed distribution entrypoint') }
     $distribution=Get-ArkPackageInventory $package
     Assert ($distribution.files.Count -eq 12) 'Current portable installer and getting-started payloads are included in the hash census'

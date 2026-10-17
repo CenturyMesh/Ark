@@ -1,0 +1,41 @@
+{
+    "schema":  "ark.occt-patchset.v1",
+    "id":  "ark-offset-001",
+    "version":  "8.0.1",
+    "status":  "candidate",
+    "archive_sha256":  "7c033d917ee8f040c0512d289dcc5f02c148889d5bac17c3e25639accb44f0da",
+    "scope":  "Local-test candidate: variational-factor QR source bytes only. Shell recovery remains pending and is not included. SDK overlay provenance, ABI/module closure and complete native integration gates remain separate; public build/package use is blocked.",
+    "patches":  [
+                    {
+                        "file":  "0002-variational-factor-qr.patch",
+                        "sha256":  "8c196bed50c4b10637b0b7ef41a25b7a8d26b88d2d0f6693559839624233d3d3",
+                        "targets":  [
+                                        {
+                                            "path":  "src/ModelingData/TKGeomBase/AppDef/AppDef_LinearCriteria.cxx",
+                                            "source_sha256":  "d94e6135e9790bab250991254dbd7a0e8bd69200f130995b920712df7e2a9791",
+                                            "patched_sha256":  "2059faa5813de2f0705bb52f993e93acaeab742a6a796fa72a04e81b0a95e54f"
+                                        },
+                                        {
+                                            "path":  "src/ModelingData/TKGeomBase/AppDef/AppDef_LinearCriteria.hxx",
+                                            "source_sha256":  "836187c8088ff41fe63bb5e957e0214fb12bab8a19fd86fc2b86ee0c8e9c2cef",
+                                            "patched_sha256":  "036602efe3670ce1d27f0fdaae7776d686979a23f099604beb7c5f81dd7e2a3b"
+                                        },
+                                        {
+                                            "path":  "src/ModelingData/TKGeomBase/AppDef/AppDef_Variational.cxx",
+                                            "source_sha256":  "d1473162d4dee2a460c831ab50d4f30027c1c9f6beac775f17290a6989abd6db",
+                                            "patched_sha256":  "0f9f402e08834dbd36d9306a1a51bf0e6ad67af0e8b35dfb9363f650330d4f5b"
+                                        },
+                                        {
+                                            "path":  "src/ModelingData/TKGeomBase/AppDef/AppDef_Variational.hxx",
+                                            "source_sha256":  "a41c9faa627f560752aa887a26789ba9bd7600c67c5f692bfd02eb9e421eea92",
+                                            "patched_sha256":  "2f8f1578adacae4b1bbc857ea866c5c97ccccba2ee96469fbae9999510208e19"
+                                        },
+                                        {
+                                            "path":  "src/ModelingData/TKGeomBase/FEmTool/FEmTool_Assembly.hxx",
+                                            "source_sha256":  "fea0fd47b1e7e102be3e220a38488c7ea88415ff2b029902ffb1d9250b7c289a",
+                                            "patched_sha256":  "55c8ff2af831440d5676feb1dde28fe60834b41500edd5db02e9ed22bc66ac5c"
+                                        }
+                                    ]
+                    }
+                ]
+}

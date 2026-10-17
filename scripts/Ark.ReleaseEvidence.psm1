@@ -86,6 +86,10 @@ function New-ArkReleaseEvidence([string]$Repository,[string]$PackageDirectory,[s
         $component = @{type='library'; 'bom-ref'=$definition[0]; name=$definition[0]; version=$definition[1]; licenses=@(@{license=$license}); externalReferences=@(@{type='vcs';url=$definition[4]})}
         if ($definition[3]) { $component.hashes=@(@{alg='SHA-256';content=(Get-ArkEvidenceHash (Join-Path $Repository $definition[3]))}) }
         else { $component.hashes=@(@{alg='SHA-256';content='7c033d917ee8f040c0512d289dcc5f02c148889d5bac17c3e25639accb44f0da'}); $component.properties=@(@{name='ark:hash-scope';value='Pinned OCCT source archive; individual runtime binary hashes are in package-inventory.json.'}) }
+        if($definition[0] -eq 'Open-CASCADE-Technology'){
+            $patchNotice=Join-Path $PackageDirectory 'licenses/OCCT-ARK-patches.txt'
+            if(Test-Path -LiteralPath $patchNotice -PathType Leaf){$component.properties+=@(@{name='ark:modified-source-notice';value='licenses/OCCT-ARK-patches.txt'},@{name='ark:modified-source-notice-sha256';value=(Get-ArkEvidenceHash $patchNotice)},@{name='ark:modified-source-scope';value='Bundled exact patch/source and SDK build declarations; not independent binary-source attestation or geometric qualification.'})}
+        }
         $component.properties = @($component['properties'] | Where-Object { $null -ne $_ }) + @{name='ark:source-association';value=$source.runtime_identity_mode}
         $component
     })

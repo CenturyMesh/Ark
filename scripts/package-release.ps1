@@ -3,12 +3,13 @@ param(
     [string]$OutputDirectory = 'out/releases',
     [string]$MsvcRuntimeDirectory,
     [string]$CompilerDirectory,
-    [string]$OcctSourceDirectory = 'out/deps/occt/cache/OCCT-8_0_1',
+    [string]$OcctSourceDirectory = 'out/deps/occt/install-msvc-ark-offset-001/licenses',
+    [string]$OcctSdkDirectory = 'out/deps/occt/install-msvc-ark-offset-001',
     [switch]$SkipUpdateManifest
 )
 $ErrorActionPreference = 'Stop'
 $repository = Split-Path $PSScriptRoot -Parent
-foreach ($variable in @('RuntimeDirectory', 'OutputDirectory', 'OcctSourceDirectory')) {
+foreach ($variable in @('RuntimeDirectory', 'OutputDirectory', 'OcctSourceDirectory', 'OcctSdkDirectory')) {
     $value = Get-Variable -Name $variable -ValueOnly
     if (-not [IO.Path]::IsPathRooted($value)) { Set-Variable -Name $variable -Value (Join-Path $repository $value) }
 }
@@ -120,6 +121,10 @@ it is for manual evaluation and is excluded from the stable automatic updater.
         }
         Copy-Item -LiteralPath $sourceNotice -Destination $licenses
     }
+    & cmake -DARK_OCCT_MODE=VERIFY_RUNTIME "-DARK_OCCT_INSTALL=$OcctSdkDirectory" "-DARK_OCCT_RUNTIME=$staging" -P (Join-Path $PSScriptRoot 'ApplyOcctPatch.cmake')
+    if($LASTEXITCODE -ne 0){throw 'Packaged OCCT DLLs differ from the selected SDK; no archive was published'}
+    & cmake -DARK_OCCT_MODE=NOTICE "-DARK_OCCT_INSTALL=$OcctSdkDirectory" "-DARK_OCCT_NOTICE=$(Join-Path $licenses 'OCCT-ARK-patches.txt')" -P (Join-Path $PSScriptRoot 'ApplyOcctPatch.cmake')
+    if($LASTEXITCODE -ne 0){throw 'OCCT patch/source notice verification rejected packaging; no archive was published'}
     Get-ArkRuntimeVersion $staging | Out-Null
     $name = "ark-windows-x64-$version.zip"
     $archive = Join-Path $OutputDirectory $name

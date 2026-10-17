@@ -2,7 +2,8 @@ param(
     [ValidateSet('Studio','MCP','Both')][string]$Target = 'Both',
     [string]$BuildDirectory = 'out/native-release',
     [ValidateRange(1,16)][int]$Jobs = 4,
-    [switch]$Verify
+    [switch]$Verify,
+    [switch]$AllowCandidatePatchset
 )
 $ErrorActionPreference = 'Stop'
 $TestRegex = '^product-tools-030d$'
@@ -40,8 +41,12 @@ try {
     $receipt.source_digest = Source-Digest
     $release = Get-Content -LiteralPath release.json -Raw | ConvertFrom-Json
     $receipt.iteration_code = $release.code; $receipt.version = $release.version
-    if (-not (Test-Path -LiteralPath (Join-Path $BuildDirectory 'CMakeCache.txt'))) {
-        $sdk = Join-Path $repository 'out/deps/occt/install-msvc/cmake'
+    $sdk = Join-Path $repository 'out/deps/occt/install-msvc-ark-offset-001/cmake'
+    & cmake -DARK_OCCT_MODE=VERIFY_INSTALLED "-DARK_OCCT_ALLOW_CANDIDATE=$([bool]$AllowCandidatePatchset)" "-DARK_OCCT_INSTALL=$(Split-Path $sdk -Parent)" -P (Join-Path $PSScriptRoot 'ApplyOcctPatch.cmake')
+    if($LASTEXITCODE -ne 0){throw 'Patched SDK verification failed before the incremental build'}
+    $cachePath=Join-Path $BuildDirectory 'CMakeCache.txt'
+    $cachedSdk='';if(Test-Path -LiteralPath $cachePath){$cacheMatch=Get-Content -LiteralPath $cachePath | Select-String '^OpenCASCADE_DIR:(PATH|UNINITIALIZED)=(.*)$' | Select-Object -First 1;if($cacheMatch){$cachedSdk=$cacheMatch.Matches[0].Groups[2].Value}}
+    if (-not $cachedSdk -or [IO.Path]::GetFullPath($cachedSdk) -ine [IO.Path]::GetFullPath($sdk)) {
         if (-not (Test-Path -LiteralPath (Join-Path $sdk 'OpenCASCADEConfig.cmake'))) { throw 'Native OCCT SDK is missing. Run scripts/build.ps1 once to prepare it.' }
         Stage 'configure' { & cmake -S $repository -B $BuildDirectory -G 'Visual Studio 17 2022' -A x64 "-DOpenCASCADE_DIR=$sdk" -DARK_WITH_OCCT=ON }
     }
