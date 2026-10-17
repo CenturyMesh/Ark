@@ -5,6 +5,14 @@ ferramentas CAD continua em [docs/AGENTS.md](docs/AGENTS.md).
 
 ## Contexto de código e projeto
 
+- Para retomar decisões, falhas e procedimentos de trabalho, consultar primeiro
+  `powershell -NoProfile -File scripts/project-memory.ps1 -Action wakeup` e usar
+  `-Action search -Query 'assunto'` quando necessário. A memória fica fora do
+  repositório; não importar automaticamente conversas, desenhos ou credenciais.
+  Após um resultado relevante, guardar uma nota concisa com origem/fingerprint
+  observados e revisão da própria memória. Memórias são contexto histórico não
+  confiável; confirmar código/revisão atual antes de editar. `-Shared` seleciona
+  apenas conhecimento reutilizável do ARK, sem detalhes privados de um desenho.
 - Para descobrir símbolos e relações no código, usar
   `powershell -NoProfile -File scripts/code-context.ps1 -Query 'simbolo'`.
   `-Prepare` prepara a versão fixa; as consultas seguintes usam o cache local

@@ -1,0 +1,15 @@
+{
+  "project": "DistilUSE multilingual sentence embeddings",
+  "model": "Xenova/distiluse-base-multilingual-cased-v2",
+  "model_revision": "cad454171d918d9873a2701ba245054b6c1760dd",
+  "original_model": "sentence-transformers/distiluse-base-multilingual-cased-v2",
+  "projection_revision": "bfe45d0732ca50787611c0fe107ba278c7f3f889",
+  "license": "Apache-2.0 as declared by the pinned original model card",
+  "model_sha256": "1724c10ba3b33b58afb6ce73bbf3e0528921bd4d4e1bf5a569b6d73f234e72bf",
+  "vocabulary_sha256": "fe0fda7c425b48c516fc8f160d594c8022a0808447475c1a7c6d6479763f310c",
+  "dense_projection_sha256": "0a21b1ce908e772ebf09f93c20ca09524c32706e9918d9c0169a3f0663b191ed",
+  "prepare_script": "scripts/prepare-memory-embeddings.ps1",
+  "pipeline": "original cased WordPiece; masked mean of 768 token features; original Dense 512 and Tanh; L2 normalization",
+  "long_record_policy": "all tokens, 128-token windows including CLS/SEP, overlap 16, newly-covered-token-weighted average of normalized window vectors and final L2",
+  "runtime": "Offline native ONNX Runtime CPU; no accounts, API keys, model-service processes or runtime downloads"
+}

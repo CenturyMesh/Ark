@@ -15,8 +15,12 @@ if (-not [System.IO.Path]::IsPathRooted($BuildDirectory)) {
 
 Push-Location $root
 try {
+    if ($env:OS -eq 'Windows_NT') {
+        & (Join-Path $PSScriptRoot 'prepare-memory-embeddings.ps1')
+    }
     if ($CoreOnly) {
-        & cmake -S $root -B $BuildDirectory -DARK_WITH_OCCT=OFF -DCMAKE_BUILD_TYPE=Release
+        if ($env:OS -eq 'Windows_NT') { & cmake -S $root -B $BuildDirectory -G 'Visual Studio 17 2022' -A x64 -DARK_WITH_OCCT=OFF }
+        else { & cmake -S $root -B $BuildDirectory -DARK_WITH_OCCT=OFF -DCMAKE_BUILD_TYPE=Release }
     } else {
         if ($env:OS -ne 'Windows_NT') { throw 'The default native build requires Windows and Visual Studio 2022; use -CoreOnly for the portable core.' }
         $sdk = Join-Path $root 'out/deps/occt/install-msvc-ark-offset-001'

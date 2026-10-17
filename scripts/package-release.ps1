@@ -16,6 +16,20 @@ foreach ($variable in @('RuntimeDirectory', 'OutputDirectory', 'OcctSourceDirect
 Import-Module (Join-Path $repository 'updates/Ark.Update.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'Ark.ReleaseEvidence.psm1') -Force
 $version = Get-ArkRuntimeVersion $RuntimeDirectory
+if ([version]$version -ge [version]'0.9.40') {
+    foreach ($resource in @('assets/ark-ui.arklib','assets/memory/manifest.json')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $RuntimeDirectory $resource))) { throw "Required runtime resource is absent: $resource" }
+    }
+    $memoryRoot = Join-Path $RuntimeDirectory 'assets/memory'
+    $memoryManifest = Get-Content -LiteralPath (Join-Path $memoryRoot 'manifest.json') -Raw | ConvertFrom-Json
+    $memoryNames = @('model_quantized.onnx','dense.safetensors','vocab.txt','onnxruntime.dll','onnxruntime_providers_shared.dll','MODEL-LICENSE.txt','MODEL-README.md','MODEL-ORIGINAL-README.md','MODEL-NOTICE.txt','ONNXRUNTIME-LICENSE.txt','ONNXRUNTIME-ThirdPartyNotices.txt')
+    foreach ($entry in $memoryManifest.files) {
+        if ($entry.path -cnotin $memoryNames) { throw 'Unexpected semantic memory asset path.' }
+        $asset = Join-Path $memoryRoot $entry.path
+        if ((Get-FileHash -LiteralPath $asset).Hash.ToLowerInvariant() -cne $entry.sha256 -or (Get-Item -LiteralPath $asset).Length -ne $entry.bytes) { throw "Semantic memory asset does not match its manifest: $($entry.path)" }
+    }
+    foreach ($name in $memoryNames) { if (@($memoryManifest.files | Where-Object path -CEQ $name).Count -ne 1) { throw "Semantic memory manifest is incomplete: $name" } }
+}
 $llvmRuntime = Test-Path -LiteralPath (Join-Path $RuntimeDirectory 'libc++.dll') -PathType Leaf
 if ($llvmRuntime) {
     if (-not $CompilerDirectory) { throw 'Supply -CompilerDirectory for this LLVM-MinGW runtime so its matching redistribution notices are preserved.' }
@@ -53,7 +67,9 @@ try {
     }
     Get-ChildItem -LiteralPath $RuntimeDirectory -Filter '*.dll' -File | ForEach-Object { Assert-ArkNoReparsePoint $RuntimeDirectory $_.FullName; Copy-Item -LiteralPath $_.FullName -Destination $staging }
     if (-not $llvmRuntime) {
-        foreach ($name in @('vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll', 'concrt140.dll')) {
+        $requiredCrt = @('vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll', 'concrt140.dll')
+        if ([version]$version -ge [version]'0.9.40') { $requiredCrt += 'msvcp140_1.dll' }
+        foreach ($name in $requiredCrt) {
             if (-not (Test-Path -LiteralPath (Join-Path $MsvcRuntimeDirectory $name))) { throw "Visual C++ runtime is missing $name." }
             Copy-Item -LiteralPath (Join-Path $MsvcRuntimeDirectory $name) -Destination $staging -Force
         }
@@ -64,6 +80,14 @@ try {
         $source = Join-Path $sourceRoot $directory
         Get-ChildItem -LiteralPath $source -Recurse -Force | ForEach-Object { Assert-ArkNoReparsePoint $sourceRoot $_.FullName }
         Copy-Item -LiteralPath $source -Destination $staging -Recurse
+    }
+    if (Test-Path -LiteralPath (Join-Path $staging 'assets/ark-ui.arklib')) {
+        # UI originals remain in source; this runtime reads the verified binary
+        # library. Do not ship duplicate loose copies of the same PNG resources.
+        foreach ($name in @('ark-app-mark','ark-authoring-atlas-v1','ark-detail-atlas-v1','ark-domain-atlas-v1','ark-tool-atlas-v1','ark-wordmark')) {
+            $loose = Join-Path $staging ('assets/ui/' + $name + '.png')
+            if (Test-Path -LiteralPath $loose) { Remove-Item -LiteralPath $loose }
+        }
     }
     Copy-Item -LiteralPath (Join-Path $repository 'updates/ARK.cmd') -Destination $staging
     Copy-Item -LiteralPath (Join-Path $repository 'scripts/install-portable.ps1') -Destination (Join-Path $staging 'Install-ARK.ps1')
@@ -113,6 +137,11 @@ it is for manual evaluation and is excluded from the stable automatic updater.
     Copy-Item -LiteralPath (Join-Path $repository 'third_party/sqlite/sqlite3.h') -Destination (Join-Path $licenses 'sqlite3.h')
     Copy-Item -LiteralPath (Join-Path $repository 'assets/ui/README.md') -Destination (Join-Path $licenses 'ark-ui-assets.txt')
     Copy-Item -LiteralPath (Join-Path $repository 'docs/THIRD_PARTY_NOTICES.md') -Destination (Join-Path $licenses 'THIRD_PARTY_NOTICES.md')
+    if (Test-Path -LiteralPath (Join-Path $staging 'assets/memory/manifest.json')) {
+        foreach ($name in @('MODEL-LICENSE.txt','MODEL-README.md','MODEL-ORIGINAL-README.md','MODEL-NOTICE.txt','ONNXRUNTIME-LICENSE.txt','ONNXRUNTIME-ThirdPartyNotices.txt')) {
+            Copy-Item -LiteralPath (Join-Path $staging ('assets/memory/' + $name)) -Destination (Join-Path $licenses ('memory-' + $name))
+        }
+    }
     foreach ($name in @('LICENSE', 'LICENSE.md', 'LICENSE.txt')) { if (Test-Path -LiteralPath (Join-Path $repository $name)) { Copy-Item -LiteralPath (Join-Path $repository $name) -Destination $licenses } }
     foreach ($file in @('LICENSE_LGPL_21.txt', 'OCCT_LGPL_EXCEPTION.txt')) {
         $sourceNotice = Join-Path $OcctSourceDirectory $file

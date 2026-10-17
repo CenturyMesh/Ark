@@ -1,5 +1,15 @@
 # ARK agent protocol
 
+039D adds local persistent semantic/text memory. Studio supplies bounded startup
+data from the current project (including labelled scratch episodes) and curated
+shared ARK knowledge, separate from static onboarding instructions. Use
+`memory_context` for relevant recall, `memory_record` for attributed outcomes,
+promotion and feedback, and `memory_maintain` for selected consolidation/reindex/
+compression with observed memory revisions. Native CAD writes enqueue small
+scratch episode receipts in a background worker; queue acceptance is not durable
+storage. Historical memories never authorize writes or satisfy CAD completion.
+See [memory contracts](PROJECT_MEMORY_039D.md).
+
 038B preserves successful query-batch rows when another row requests an absent
 field. Use the returned observed result, available fields and recovery arguments;
 do not repeat an unchanged failed projection. A corrected same-subject read may

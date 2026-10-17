@@ -3,9 +3,9 @@ on:
   workflow_dispatch:
     inputs:
       installer:
-        description: Build and test the optional Windows installer
+        description: Build and test the Windows installer
         type: boolean
-        default: false
+        default: true
       publish:
         description: Publish a prerelease after both platform jobs pass
         type: boolean
@@ -82,7 +82,10 @@ jobs:
         run: |
           $release = Get-Content release.json -Raw | ConvertFrom-Json
           ./scripts/build-installer.ps1 -PackagePath "out/releases/ark-windows-x64-$($release.version).zip"
-          ./scripts/test-distribution.ps1 -PackagePath "out/releases/ark-windows-x64-$($release.version).zip" -InstallerPath "out/releases/ARK-$($release.code)-windows-x64-setup.exe"
+          ./scripts/build-installer.ps1 -PackagePath "out/releases/ark-windows-x64-$($release.version).zip" -OutputDirectory out/installer-ci -TestIsolationId hosted-ci
+          $testSetup = @(Get-ChildItem out/installer-ci/*-test-hosted-ci.exe)
+          if ($testSetup.Count -ne 1) { throw 'Expected one isolated test installer.' }
+          ./tests/installer_smoke_tests.ps1 -InstallerPath $testSetup[0].FullName -OutputDirectory out/installer-ci/checks
       - uses: actions/upload-artifact@v4
         with:
           name: ark-windows-release-assets

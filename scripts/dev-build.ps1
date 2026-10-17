@@ -36,6 +36,7 @@ function Stage([string]$Name,[scriptblock]$Command) {
 }
 Push-Location $repository
 try {
+    & (Join-Path $PSScriptRoot 'prepare-memory-embeddings.ps1')
     $receipt.commit = (& git rev-parse HEAD).Trim()
     $receipt.branch = (& git branch --show-current).Trim()
     $receipt.source_digest = Source-Digest

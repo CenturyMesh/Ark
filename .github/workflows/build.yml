@@ -21,6 +21,10 @@ jobs:
       - name: Test exact OCCT patch mechanism without an SDK build
         shell: pwsh
         run: ./tests/occt_patch_tests.ps1
+      - name: Prepare pinned local semantic model on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/prepare-memory-embeddings.ps1
       - run: cmake -S . -B out/core -DARK_WITH_OCCT=OFF -DCMAKE_BUILD_TYPE=Release
       - run: cmake --build out/core --config Release --parallel 2
       - run: ctest --test-dir out/core -C Release --output-on-failure --output-junit "${{ github.workspace }}/out/core/regression-results.xml"

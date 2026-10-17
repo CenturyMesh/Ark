@@ -13,31 +13,37 @@
 Powered by C++ and Open CASCADE. Windows includes the graphical Studio; Linux
 currently provides the headless CLI, MCP server and native geometry worker.
 
-**Download ready-to-run preview packages - 032D / 0.9.33:**
+**Windows preview — 039D / 0.9.40:**
 
-[**Windows x64 - Studio + CLI/MCP (ZIP)**](https://github.com/CenturyMesh/Ark/releases/download/v0.9.33/ark-windows-x64-0.9.33.zip) | [**Linux x64 - headless CLI/MCP (tar.gz)**](https://github.com/CenturyMesh/Ark/releases/download/v0.9.33/ark-linux-x64-headless-0.9.33.tar.gz)
+[**Download the Windows installer**](https://github.com/CenturyMesh/Ark/releases/download/v0.9.40/ARK-039D-windows-x64-setup.exe) | [**Portable ZIP**](https://github.com/CenturyMesh/Ark/releases/download/v0.9.40/ark-windows-x64-0.9.40.zip) | [Release notes and checksums](https://github.com/CenturyMesh/Ark/releases/tag/v0.9.40)
 
-Extract the Windows ZIP and run `ARK.cmd`. For Linux, extract the archive and run
-`bin/ark-mcp`; this package has no graphical Studio. These are prerelease binaries
-for manual evaluation. [Release notes, checksums and OCCT source](https://github.com/CenturyMesh/Ark/releases/tag/v0.9.33).
-No compilation is required to use these downloads.
+The installer shows the ARK logo, lets you choose a folder and prepares Studio,
+shortcuts, native geometry libraries and the offline memory model. No compilation
+or memory-service account is required. The portable ZIP still launches through
+`ARK.cmd`. Existing documents and the previous installed version remain separate.
 
-The published iteration, [032D / 0.9.33](docs/iterations/032D.md), adds shared
-geometry storage, reusable agent previews, compact inspection responses,
-motion for patterned rigid followers and authored colors in agent snapshots.
-The iteration notes record the verified scope and remaining performance limits.
+[039D](docs/iterations/039D.md) adds persistent local agent memory with semantic
+and literal recall, episodes, feedback, consolidation and measured cold-vector
+compression. [Graphify and Obsidian](docs/PROJECT_MEMORY_039D.md) remain linked
+navigation/knowledge views. UI image resources are bundled in a verified binary
+[resource library](docs/RESOURCE_LIBRARIES.md). Native loft/shell recovery and
+current-revision publication are preserved from [038B](docs/iterations/038B.md).
+Read the iteration evidence for measured scope and remaining quality limits.
 
-Source development in [035B / 0.9.36](docs/iterations/035B.md) adds smooth 3D and
-ribbon cables with draggable path anchors, Plastics/Electronics workspaces and
-Approved Vendors with observed STEP download custody. Project context and local
-Graphify/Obsidian notes cover these domains. Local verification remains separate
-from the published packages, authenticated commercial APIs and manufacturing
-qualification; read the linked contracts and iteration evidence.
+The separate [Linux x64 headless preview — 032D / 0.9.33](https://github.com/CenturyMesh/Ark/releases/download/v0.9.33/ark-linux-x64-headless-0.9.33.tar.gz)
+provides CLI/MCP/native geometry without graphical Studio. It retains its own
+iteration, checksums and verification scope; the new Windows memory runtime is
+not represented as a newly qualified Linux package.
+
+Smooth 3D/ribbon cables, draggable path anchors, Plastics/Electronics workspaces
+and Approved Vendors remain available with their [035B contracts](docs/iterations/035B.md).
+Authenticated commercial APIs, real-provider design quality and manufacturing
+qualification have separate evidence requirements.
 
 The chat opens on first launch and remembers your visibility choice. Windows
 Assistant and Team cards also offer [Grok Build through its official CLI account](docs/GROK_BUILD_CONNECT.md).
 
-Optional installer builds and explicit personal packages are documented in
+Installer builds and explicit personal packages are documented in
 [distribution instructions](DISTRIBUTION.md). Existing published binaries keep
 their own iteration identity and checksums.
 

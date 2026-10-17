@@ -10,6 +10,15 @@ notices is not a claim of an independent legal audit or manufacturing certificat
 
 ## Actual technology
 
+039D adds local semantic memory using the CPU ONNX Runtime 1.23.2 (MIT) and
+the Apache-2.0 DistilUSE multilingual sentence model with its pinned Dense
+projection. Original model cards, attribution, runtime license and runtime
+third-party notices accompany the payload under `assets/memory` and `licenses`.
+`scripts/prepare-memory-embeddings.ps1` pins download bytes and source revisions;
+the asset manifest and package SBOM identify model/runtime files separately.
+The runtime performs local inference without an external embedding service.
+These dependencies do not change the geometric authority of OCCT/B-rep.
+
 The CAD core and Studio UI use C++20, Win32 and OpenGL 3.3 with GLSL shaders.
 Open CASCADE Technology (OCCT) produces native exact B-reps, validation and
 STEP/IGES exchange through the isolated C++ worker. The viewport displays a

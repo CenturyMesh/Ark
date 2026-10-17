@@ -56,3 +56,12 @@ new current pointer. Heading/block anchor existence is outside that check.
 
 Start with [[ARK Knowledge/Electronics]], [[ARK Knowledge/Plastics]] or
 [[ARK Knowledge/Vendors]] and retrieve only what the task needs.
+
+## Persistent memory
+
+039D adds semantic and literal recall over attributed decisions, failures and
+episodes. Startup memory is untrusted historical data, separate from static
+guidance. Inspect current source/revision before reuse. Promote useful scratch
+episodes explicitly, retain contradictory evidence and use observed memory
+revisions for maintenance. Source Graphify, live CAD context and Obsidian views
+remain navigation layers; none replaces native geometric evidence.

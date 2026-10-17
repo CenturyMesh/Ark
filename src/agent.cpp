@@ -21,6 +21,7 @@
 #include "ark/bom.hpp"
 #include "ark/manufacturing.hpp"
 #include "ark/component_library_tools.hpp"
+#include "ark/project_memory_tools.hpp"
 #include "ark/agent_features.hpp"
 #include "ark/mesh_analysis.hpp"
 #include "ark/mesh_model.hpp"
@@ -696,7 +697,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
                 if(expected->t!=V::Num||expected->num!=(double)revision)
                     throw std::runtime_error("Revision conflict; read doc_info with detail design and retry");
         if(tool=="context_graph")return result(projectContextGraph(document,revision,args,contextGraphCache_,contextGraphSource_,contextGraphStamp_));
-        V extension;if(callAuthoring023Tool(*this,tool,args,extension))return result(extension);if(callComponentLibraryTool(*this,tool,args,extension))return result(extension);if(callAgentFeature(*this,tool,args,extension))return result(extension);
+        V extension;if(callProjectMemoryTool(*this,tool,args,extension))return result(extension);if(callAuthoring023Tool(*this,tool,args,extension))return result(extension);if(callComponentLibraryTool(*this,tool,args,extension))return result(extension);if(callAgentFeature(*this,tool,args,extension))return result(extension);
         {V out;if(callAuthoring024Tool(*this,tool,args,out))return result(out);}
         if(tool=="collision_inspect"||tool=="skeleton_inspect"||tool=="skeleton_compile"){
             if(const auto* expected=args.find("expected_revision"))if(expected->t!=V::Num||expected->num!=(double)revision)throw std::runtime_error("Revision conflict; inspect the current document before querying");
@@ -736,7 +737,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
         if(tool=="doc_new"){
             const auto& expected=field(args,"expected_revision");
             if(expected.t!=V::Num||expected.num!=(double)revision)throw std::runtime_error("Revision conflict; read doc_info and retry");
-            remember(true);document=Document{};++revision;return result(info());
+            remember(true);document=Document{};memorySessionScope.clear();++revision;return result(info());
         }
         if(tool=="agent_onboard")return result(agentOnboard(*this,args));
         if(tool=="doc_get"){V r=info(),j;arkjson::parse(documentToJson(document,true,false),j);r.set("document",j);if(document.iterationHistory.t==V::Obj){V summary=V::makeObj();summary.set("head_id",*document.iterationHistory.find("head_id"));summary.set("node_count",V::makeNum(document.iterationHistory.find("nodes")->arr.size()));r.set("history_summary",summary);}return result(r);}
@@ -1392,7 +1393,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
         if(tool=="doc_load"){
             Document next;std::string error;
             if(!loadDocument(str(args,"path").c_str(),next,&error))throw std::runtime_error(error);
-            validated(next);remember(true);document=std::move(next);++revision;prepared_.clear();return result(info());
+            validated(next);remember(true);document=std::move(next);memorySessionScope.clear();++revision;prepared_.clear();return result(info());
         }
         if(tool=="mesh_inspect"){
             auto& cached=meshCache(args);V report=cached.report.json();report.set("topology_fingerprint",V::makeStr(meshTopologyFingerprint(cached.mesh)));
@@ -1616,6 +1617,7 @@ if(std::string(d.name)=="doc_apply"){
     enrichModeling031BSchemas(list);
     {V tool=V::makeObj(),schema,annotations=V::makeObj();tool.set("name",V::makeStr("context_graph"));tool.set("description",V::makeStr("Retrieve a small linked project context by query or exact keys. Includes authored dependencies/backlinks and attributed saved feedback; no geometry evaluation. Use known_scope and known_fingerprints to omit unchanged facts. Read object_context/native evidence before editing; this graph grants no write or manufacturing authority."));arkjson::parse(R"({"type":"object","properties":{"query":{"type":"string","maxLength":256},"keys":{"type":"array","minItems":1,"maxItems":64,"items":{"type":"string","maxLength":256}},"depth":{"type":"integer","minimum":0,"maximum":2},"limit":{"type":"integer","minimum":1,"maximum":64},"history_limit":{"type":"integer","minimum":0,"maximum":8},"expected_revision":{"type":"integer","minimum":0},"known_scope":{"type":"string","maxLength":256},"known_fingerprints":{"type":"object","additionalProperties":{"type":"string","maxLength":64}}},"additionalProperties":false})",schema);tool.set("inputSchema",schema);annotations.set("readOnlyHint",V::makeBool(true));tool.set("annotations",annotations);list.arr.push_back(tool);}
     for(auto& tool:list.arr)if(tool.find("name")->str=="doc_apply"){V schema=*tool.find("inputSchema"),props=*schema.find("properties"),flag=V::makeObj();flag.set("type",V::makeStr("boolean"));props.set("refresh_candidate",flag);schema.set("properties",props);tool.set("inputSchema",schema);}
+    appendProjectMemoryTools(list);
     return list;
 }
 Document makeDemoDocument(){

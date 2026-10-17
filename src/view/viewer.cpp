@@ -92,6 +92,7 @@ typedef ptrdiff_t GLsizeiptr;
 #include "ark/history_authoring.hpp"
 #include "ark/iteration_history.hpp"
 #include "ark/assistant.hpp"
+#include "ark/resource_library.hpp"
 #include "ark/assistant_connectors.hpp"
 #include "ark/onboarding.hpp"
 #include "ark/view_camera.hpp"
@@ -560,7 +561,7 @@ static int atlasIcon(int action){switch(action){
     case 63:return 16;case 78:return 17;case 77:return 18;case 79:return 19;case 211:return 20;case 212:return 21;case 210:return 22;case 215:case 384:return 23;
     case 73:case 89:return 24;case 108:return 25;case 105:return 26;case 104:return 27;case 321:return 28;case 320:return 29;case 322:return 30;case 326:return 31;case 154:return 56;default:return -1;
 }}
-static std::filesystem::path toolAtlasPath(int sheet=0){static const char* paths[]={"assets/ui/ark-tool-atlas-v1.png","assets/ui/ark-domain-atlas-v1.png","assets/ui/ark-detail-atlas-v1.png","assets/ui/ark-authoring-atlas-v1.png"};if(sheet<0||sheet>=4)return {};wchar_t path[32768]{};GetModuleFileNameW(nullptr,path,32768);auto directory=std::filesystem::path(path).parent_path();for(int i=0;i<6&&!directory.empty();++i,directory=directory.parent_path()){auto atlas=directory/paths[sheet];if(std::filesystem::is_regular_file(atlas))return atlas;}return {};}
+static std::filesystem::path toolAtlasPath(int sheet=0){static const char* paths[]={"assets/ui/ark-tool-atlas-v1.png","assets/ui/ark-domain-atlas-v1.png","assets/ui/ark-detail-atlas-v1.png","assets/ui/ark-authoring-atlas-v1.png"};if(sheet<0||sheet>=4)return {};wchar_t path[32768]{};GetModuleFileNameW(nullptr,path,32768);auto directory=std::filesystem::path(path).parent_path();for(int i=0;i<6&&!directory.empty();++i,directory=directory.parent_path()){auto bundle=directory/"assets/ark-ui.arklib";if(std::filesystem::is_regular_file(bundle))return bundle/std::filesystem::path(paths[sheet]).filename();auto atlas=directory/paths[sheet];if(std::filesystem::is_regular_file(atlas))return atlas;}return {};}
 static void decorateMenu(HMENU menu){
     static std::map<int,HBITMAP> bitmaps;struct Atlas{std::vector<unsigned char> pixels;unsigned w=0,h=0;};static Atlas atlases[4];
     for(int i=0;i<GetMenuItemCount(menu);++i){MENUITEMINFOW item{sizeof item};item.fMask=MIIM_ID|MIIM_SUBMENU;GetMenuItemInfoW(menu,(UINT)i,TRUE,&item);if(item.hSubMenu)decorateMenu(item.hSubMenu);
@@ -3000,7 +3001,7 @@ static void sendTeam(const std::string& explicitPrompt={},const std::array<Assis
                 if(!transports[i]&&config.authMode==AssistantAuthMode::ApiKey&&!assistantKeyAvailable(config))throw std::runtime_error("The configured credential environment variable is unavailable.");
                 if(!transports[i]&&config.authMode==AssistantAuthMode::ChatGptPlan){if(!g_authStatus.connected||!g_authStatus.planAuthorized)throw std::runtime_error("Connect and authorize ChatGPT from Account first.");if(g_authModels.empty())throw std::runtime_error("Load the account model catalog from Account first.");if(std::none_of(g_authModels.begin(),g_authModels.end(),[&](const auto& model){return model.slug==config.model;}))throw std::runtime_error("The selected model is unavailable in this account's catalog.");}
             }catch(const std::exception& error){throw std::runtime_error(std::string(g_teamRoleLabels[i])+": "+error.what());}
-            AgentTeamRole role;role.id=g_teamRoleIds[i];role.label=g_teamRoleLabels[i];role.instructions=instructions[i==2?2:i==0?0:1];if(!transports[i])config.onboardingPack=(i==2?agentOnboardingPack({"overview","physics"}):agentAuthoringOnboardingPack());role.assistant=config;role.transport=feedbackFixtureTransport(transports[i]);role.canWrite=i!=2;role.discipline=i==0?AgentTeamDiscipline::Orchestrator:i==2?AgentTeamDiscipline::PhysicsReviewer:AgentTeamDiscipline::PartDesigner;team.roles.push_back(std::move(role));}
+            AgentTeamRole role;role.id=g_teamRoleIds[i];role.label=g_teamRoleLabels[i];role.instructions=instructions[i==2?2:i==0?0:1];if(!transports[i])config.onboardingPack=(i==2?agentOnboardingPack({"overview","physics"}):agentAuthoringOnboardingPack());config.memoryPrefetch=!transports[i];role.assistant=config;role.transport=feedbackFixtureTransport(transports[i]);role.canWrite=i!=2;role.discipline=i==0?AgentTeamDiscipline::Orchestrator:i==2?AgentTeamDiscipline::PhysicsReviewer:AgentTeamDiscipline::PartDesigner;team.roles.push_back(std::move(role));}
         g_teamCancel=std::make_shared<std::atomic_bool>(false);auto cancel=g_teamCancel;auto epoch=g_documentEpoch;auto runSerial=++g_teamRunSerial;g_teamEpoch=epoch;g_teamEventSequence=0;g_teamReceipts={};g_teamActivity={};g_teamLiveUsage={};g_draftViews.clear();g_liveCompletedSteps=0;g_liveStepLabel.clear();captureDraftContext();g_teamGoal=visiblePrompt;for(auto& id:g_teamReceiptIds)id=newUsageReceiptId();if(!transports[0]&&!transports[1]&&!transports[2]&&std::any_of(team.roles.begin(),team.roles.end(),[](const auto& role){return role.assistant.provider!="ollama"&&role.assistant.authMode!=AssistantAuthMode::CliAccount;}))refreshPricing();
         g_assistantReceiptId.clear();g_currentUsageReceipt.reset();g_pendingUsageReceipt.reset();
         auto teamExecutor=[cancel,epoch](const std::string& name,const arkjson::Value& args){
@@ -3023,7 +3024,7 @@ static void sendAssistant(const std::string& explicitPrompt="",const AssistantTr
     if(g_assistantWorker.joinable())g_assistantWorker.join();
     V input=g_conversation;if(input.t!=V::Arr)input=V::makeArr();input.arr.push_back(user);
     if(queuedMessage||(explicitPrompt.empty()&&g_pendingAssistantImage)){auto preflight=g_assistantConfig;if(!transport)preflight.onboardingPack=agentAuthoringOnboardingPack();assistantRequest(preflight,input,AgentSession::tools());}
-    if(!queuedMessage)g_pendingObjectTarget.reset();if(!queuedMessage)g_chatLog.push_back({"You",visiblePrompt});g_chatScroll=0;g_chatBusy=true;g_assistantResponseFinished=g_assistantResponseError=false;g_assistantStatus="Working...";g_assistantUsageRun={};g_assistantPerformanceRun={};g_assistantUsageRunCounted=false;g_assistantReceiptId=newUsageReceiptId();g_assistantReceiptModel=g_assistantConfig.model;g_currentUsageReceipt.reset();g_pendingUsageReceipt.reset();g_assistantCancel=std::make_shared<std::atomic_bool>(false);auto cancel=g_assistantCancel;auto config=g_assistantConfig;if(!transport)config.onboardingPack=agentAuthoringOnboardingPack();auto schema=AgentSession::tools();if(g_chatInput&&!queuedMessage)SetWindowTextW(g_chatInput,L"");
+    if(!queuedMessage)g_pendingObjectTarget.reset();if(!queuedMessage)g_chatLog.push_back({"You",visiblePrompt});g_chatScroll=0;g_chatBusy=true;g_assistantResponseFinished=g_assistantResponseError=false;g_assistantStatus="Working...";g_assistantUsageRun={};g_assistantPerformanceRun={};g_assistantUsageRunCounted=false;g_assistantReceiptId=newUsageReceiptId();g_assistantReceiptModel=g_assistantConfig.model;g_currentUsageReceipt.reset();g_pendingUsageReceipt.reset();g_assistantCancel=std::make_shared<std::atomic_bool>(false);auto cancel=g_assistantCancel;auto config=g_assistantConfig;if(!transport)config.onboardingPack=agentAuthoringOnboardingPack();config.memoryPrefetch=!transport;auto schema=AgentSession::tools();if(g_chatInput&&!queuedMessage)SetWindowTextW(g_chatInput,L"");
     auto epoch=g_documentEpoch;auto revision=std::make_shared<std::atomic<u64>>(g_session.revision);
     auto steering=std::make_shared<AssistantSteering>(config,schema,input);g_assistantSteering=steering;g_assistantSteeringEpoch=epoch;g_assistantSteeringTransport=transport;
     g_assistantWorker=std::thread([config,input,schema,cancel,transport,epoch,revision,steering]{
@@ -4551,8 +4552,20 @@ static bool decodeCanvasFile(const std::wstring& path,std::vector<unsigned char>
     IWICImagingFactory* factory=nullptr;
     if(FAILED(CoCreateInstance(factoryId,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&factory))))return false;
     IWICBitmapDecoder* decoder=nullptr;IWICBitmapFrameDecode* frame=nullptr;IWICFormatConverter* converter=nullptr;IWICFormatConverter* scaledConverter=nullptr;IWICBitmapScaler* scaler=nullptr;
-    bool ok=false;
-    if(SUCCEEDED(factory->CreateDecoderFromFilename(path.c_str(),nullptr,GENERIC_READ,WICDecodeMetadataCacheOnDemand,&decoder))
+    bool ok=false;IWICStream* packedStream=nullptr;std::vector<unsigned char> packedBytes;
+    HRESULT decoded=E_FAIL;
+    const auto separator=path.find(L".arklib");
+    if(separator!=std::wstring::npos&&separator+8<path.size()&&(path[separator+7]==L'/'||path[separator+7]==L'\\')){
+        try{
+            const auto container=path.substr(0,separator+7);
+            static std::map<std::wstring,std::pair<unsigned long long,std::shared_ptr<ResourceLibrary>>> libraries;
+            const auto stamp=fileStamp(container);auto& cached=libraries[container];
+            if(!cached.second||cached.first!=stamp){const auto bytes=std::filesystem::path(container).u8string();cached.second=std::make_shared<ResourceLibrary>(std::string(bytes.begin(),bytes.end()));cached.first=stamp;}
+            const auto name=std::filesystem::path(path.substr(separator+8)).u8string();packedBytes=cached.second->read(std::string(name.begin(),name.end()));
+            if(SUCCEEDED(factory->CreateStream(&packedStream))&&SUCCEEDED(packedStream->InitializeFromMemory(packedBytes.data(),(DWORD)packedBytes.size())))decoded=factory->CreateDecoderFromStream(packedStream,nullptr,WICDecodeMetadataCacheOnDemand,&decoder);
+        }catch(const std::exception&){decoded=E_FAIL;}
+    }else decoded=factory->CreateDecoderFromFilename(path.c_str(),nullptr,GENERIC_READ,WICDecodeMetadataCacheOnDemand,&decoder);
+    if(SUCCEEDED(decoded)
         &&SUCCEEDED(decoder->GetFrame(0,&frame))
         &&SUCCEEDED(factory->CreateFormatConverter(&converter))
         &&SUCCEEDED(converter->Initialize(frame,GUID_WICPixelFormat32bppRGBA,WICBitmapDitherTypeNone,nullptr,0.0,WICBitmapPaletteTypeCustom))){
@@ -4577,7 +4590,7 @@ static bool decodeCanvasFile(const std::wstring& path,std::vector<unsigned char>
             }
         }
     }
-    if(scaledConverter)scaledConverter->Release();if(scaler)scaler->Release();if(converter)converter->Release();if(frame)frame->Release();if(decoder)decoder->Release();factory->Release();
+    if(scaledConverter)scaledConverter->Release();if(scaler)scaler->Release();if(converter)converter->Release();if(frame)frame->Release();if(decoder)decoder->Release();if(packedStream)packedStream->Release();factory->Release();
     return ok;
 }
 static HBITMAP candidateReviewBitmap(const std::string& path){
@@ -4586,7 +4599,9 @@ static HBITMAP candidateReviewBitmap(const std::string& path){
     double scale=std::min((double)previewW/width,(double)previewH/height);int imageW=std::max(1,(int)std::floor(width*scale)),imageH=std::max(1,(int)std::floor(height*scale)),offsetX=(previewW-imageW)/2,offsetY=(previewH-imageH)/2;for(int y=0;y<imageH;++y)for(int x=0;x<imageW;++x){size_t source=((size_t)(height-1-std::min(height-1,(unsigned)(y/scale)))*width+std::min(width-1,(unsigned)(x/scale)))*4,destination=((size_t)(y+offsetY)*previewW+x+offsetX)*4;output[destination]=rgba[source+2];output[destination+1]=rgba[source+1];output[destination+2]=rgba[source];output[destination+3]=255;}return bitmap;
 }
 static GLuint canvasTexture(const std::string& path){
-    std::wstring wide=widePath(path);unsigned long long stamp=wide.empty()?0:fileStamp(wide);
+    std::wstring wide=widePath(path);auto packed=wide.find(L".arklib");
+    if(packed!=std::wstring::npos&&(packed+7>=wide.size()||(wide[packed+7]!=L'/'&&wide[packed+7]!=L'\\')))packed=std::wstring::npos;
+    unsigned long long stamp=wide.empty()?0:fileStamp(packed==std::wstring::npos?wide:wide.substr(0,packed+7));
     CanvasTexture* cached=nullptr;
     for(auto& item:g_canvasTextures)if(item.path==path)cached=&item;
     if(!cached){g_canvasTextures.push_back({path,0,true,0});cached=&g_canvasTextures.back();}
