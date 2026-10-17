@@ -10,6 +10,10 @@ namespace ark {
 // can remain unrouted; its disconnected islands are reported, not healed.
 arkjson::Value electronicsRequest(const Feature& feature,const ExprEnv& env);
 
+// Only explicit 035B cable semantics select the newer document contract.
+// Legacy rounded-polyline recipes keep their original source-format needs.
+bool requiresElectronics035B(const Feature& feature);
+
 // Preview fabrication files from a checked PCB program. Outputs individual
 // copper Gerbers, board outline Gerber and plated/non-plated Excellon drills.
 // This is a data export, not a fabrication release or CAM qualification.

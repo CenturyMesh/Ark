@@ -4,6 +4,9 @@ $script = Join-Path $repo 'scripts/code-context.ps1'
 $fixture = Join-Path $repo ('out/private/code-context-tests-' + [Guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory((Join-Path $fixture 'src')) | Out-Null
 [IO.Directory]::CreateDirectory((Join-Path $fixture 'include')) | Out-Null
+[IO.Directory]::CreateDirectory((Join-Path $fixture 'docs/knowledge')) | Out-Null
+'# Public electronics fixture [[ARK Knowledge/Workflow]]' | Set-Content -LiteralPath (Join-Path $fixture 'docs/knowledge/Electronics.md') -Encoding ASCII
+'# Public workflow fixture [[ARK Knowledge/Electronics]]' | Set-Content -LiteralPath (Join-Path $fixture 'docs/knowledge/Workflow.md') -Encoding ASCII
 function Check($Condition,[string]$Reason) { if (-not $Condition) { throw $Reason }; $script:checks++ }
 $checks = 0
 & git -C $fixture init --quiet
@@ -35,6 +38,7 @@ Check (@($graph.nodes).Count -gt 0 -and $firstManifest.backend -eq 'none' -and $
 Check (-not (Test-Path -LiteralPath (Join-Path $index 'corpus/src/private.ark')) -and -not (Test-Path -LiteralPath (Join-Path $index 'corpus/.env'))) 'CAD and environment files must be excluded.'
 $selectedVault = Get-Content -Raw -LiteralPath (Join-Path $index 'obsidian-current.json') | ConvertFrom-Json
 $vault = Join-Path $index $selectedVault.directory
+Check ($selectedVault.knowledge_notes -eq 2 -and (Test-Path -LiteralPath (Join-Path $vault 'ARK Knowledge/Electronics.md'))) 'Curated knowledge notes must be included without semantic model extraction.'
 Check (Test-Path -LiteralPath (Join-Path $vault 'graph.canvas')) 'Obsidian canvas must be exported.'
 $notes = @(Get-ChildItem -LiteralPath $vault -Filter '*.md' -Recurse)
 Check ($notes.Count -gt 0 -and (($notes | ForEach-Object { Get-Content -Raw -LiteralPath $_.FullName }) -join "`n").Contains('[[')) 'Obsidian notes must contain local links.'
@@ -64,6 +68,13 @@ Check ($nextVault.directory -cne $selectedVault.directory -and (Test-Path -Liter
 Check (-not (Test-Path -LiteralPath (Join-Path $index 'corpus/src/obsolete.cpp'))) 'Deleted sources must leave the owned snapshot.'
 $graph = Get-Content -Raw -LiteralPath $graphPath | ConvertFrom-Json
 Check (-not (($graph.nodes | ConvertTo-Json -Depth 20 -Compress).Contains('obsolete()'))) 'Deleted symbols must leave the extracted graph.'
+$priorKnowledge = $nextVault
+'# Updated public workflow fixture [[ARK Knowledge/Electronics]]' | Set-Content -LiteralPath (Join-Path $fixture 'docs/knowledge/Workflow.md') -Encoding ASCII
+$knowledgeOnly = Invoke-Context @('-Obsidian')
+Check ($knowledgeOnly.code -eq 0 -and $knowledgeOnly.text.Contains('rebuilt False')) 'Knowledge-only edits must reuse the unchanged code graph.'
+$changedKnowledge = Get-Content -Raw -LiteralPath (Join-Path $index 'obsidian-current.json') | ConvertFrom-Json
+Check ($changedKnowledge.graph_sha256 -ceq $priorKnowledge.graph_sha256 -and $changedKnowledge.knowledge_sha256 -cne $priorKnowledge.knowledge_sha256 -and $changedKnowledge.directory -cne $priorKnowledge.directory) 'Knowledge notes must version the vault independently from code.'
+Check ((Get-Content -Raw -LiteralPath (Join-Path (Join-Path $index $changedKnowledge.directory) 'ARK Knowledge/Workflow.md')).Contains('Updated public workflow')) 'Selected notes must match the current curated source.'
 $rejected = Invoke-Context @('-IndexDirectory',(Join-Path $repo 'out/not-owned-by-fixture'))
 Check ($rejected.code -ne 0 -and $rejected.text.Contains('must stay inside')) 'An index outside the selected repository output must reject.'
 $before = Get-Content -Raw -LiteralPath $manifestPath

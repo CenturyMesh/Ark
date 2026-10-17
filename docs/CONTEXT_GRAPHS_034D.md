@@ -1,5 +1,12 @@
 # Shared project context and local code graphs
 
+035B extends this contract with authored cable endpoints/occurrences, PCB
+components/scoped net labels, supplier URLs and stored STEP retrieval metadata.
+See [035B](iterations/035B.md). The source-derived code graph remains separate
+from live CAD authoring. Four curated guides in `docs/knowledge` are exported
+under `ARK Knowledge` with actually resolving code-note links, without semantic
+model calls. Code-graph and knowledge hashes jointly version each vault.
+
 034D / 0.9.35 addresses A.01, A.03, A.04, D.02 and D.04. The project graph is
 native read-only ARK code. The optional repository graph uses pinned
 [Graphify CLI](https://github.com/Graphify-Labs/graphify), `graphifyy==0.9.92`.

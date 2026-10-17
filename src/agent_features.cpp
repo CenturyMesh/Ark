@@ -59,7 +59,7 @@ V math(const V& args){
     }
     r.set("units",V::makeStr(op=="angle"?"deg":op=="normalize"?"dimensionless":op=="dot"||op=="cross"?"caller_coordinates_squared":"caller_coordinates"));return r;
 }
-const std::set<std::string> queryTools{"context_graph","object_context","sketch_repair","feature_history","assembly_authoring_info","holes_catalog","cad_inspect","drawing_inspect","collision_inspect","skeleton_inspect","skeleton_compile","reference_navigate","library_get","library_search","library_info","library_sources","activity_info","bom_inspect","fastener_recipe","manufacturing_inspect","physics_inspect","materials_inspect","wood_inspect","doc_info","eval_expr","plane_inspect","sketch_inspect","sketch_diagnose","reference_inspect","native_inspect","assembly_info","assembly_motion","geometry_query","math_eval","mesh_inspect","frame_inspect","electronics_inspect","sheet_inspect","suspension_inspect","tube_inspect"};
+const std::set<std::string> queryTools{"context_graph","object_context","sketch_repair","feature_history","assembly_authoring_info","holes_catalog","cad_inspect","drawing_inspect","collision_inspect","skeleton_inspect","skeleton_compile","reference_navigate","library_get","library_search","library_info","library_sources","library_vendors","activity_info","bom_inspect","fastener_recipe","manufacturing_inspect","physics_inspect","materials_inspect","wood_inspect","doc_info","eval_expr","plane_inspect","sketch_inspect","sketch_diagnose","reference_inspect","native_inspect","assembly_info","assembly_motion","geometry_query","math_eval","mesh_inspect","frame_inspect","electronics_inspect","sheet_inspect","suspension_inspect","tube_inspect"};
 bool batchTool(const std::string& name){return queryTools.count(name)||name=="agent_onboard";}
 void validateBatchQuery(const V& query,size_t index){
     const std::string prefix="query_batch queries["+std::to_string(index)+"]";
@@ -67,6 +67,7 @@ void validateBatchQuery(const V& query,size_t index){
     for(const auto& field:query.obj)if(field.first!="tool"&&field.first!="args"&&field.first!="fields")throw std::runtime_error(prefix+" unknown field: "+field.first+"; accepted: tool, args, fields");
     const auto name=text(query,"tool");if(!batchTool(name))throw std::runtime_error(prefix+" tool is not allowed: "+name+"; use the query_batch tool enum; mutation, export and recursive batches are excluded");
     const auto& args=required(query,"args");if(args.t!=V::Obj)throw std::runtime_error(prefix+" args must be an object");
+    if(name=="library_vendors"&&(!args.find("operation")||args.find("operation")->asStr()!="list"))throw std::runtime_error(prefix+" library_vendors requires operation:list; policy updates cannot be batched reads");
     if(name=="agent_onboard"){const auto* detail=args.find("detail");if(!detail||detail->t!=V::Str||detail->str!="guide")throw std::runtime_error(prefix+" agent_onboard requires explicit detail:guide; document inventory is excluded from batched onboarding");}
     if(const auto* fields=query.find("fields")){
         if(fields->t!=V::Arr||fields->arr.empty()||fields->arr.size()>32)throw std::runtime_error(prefix+" fields requires 1..32 distinct top-level response names");

@@ -9,6 +9,9 @@ current release claim. [release.json](../release.json) owns application identity
 
 | Guide | Read it when |
 |---|---|
+| [035B cables and electronics](ELECTRONICS_035B.md) | You need smooth editable 3D sweeps, ribbon sections or low-latency path guidance |
+| [035B Plastics](PLASTICS_035B.md) | You need hollow walls, planar supports, lid fit or explicit part separation |
+| [035B Approved Vendors](APPROVED_VENDORS_035B.md) | You need actual source access, STEP download custody and the API/account boundaries |
 | [034D context graphs](CONTEXT_GRAPHS_034D.md) | You need shared project neighborhoods, local code-symbol lookup or an Obsidian export |
 | [031B modeling and agent contracts](iterations/031B.md) | You need advanced solids, constrained surfaces, sweep laws, triangle edits, rigid condensation or sampled cable/pose inspection |
 | [031B candidate refresh](CANDIDATE_REFRESH_031B.md) | An independent peer commit made a retained agent proposal stale |

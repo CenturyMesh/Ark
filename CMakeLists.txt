@@ -53,6 +53,7 @@ add_library(ark STATIC
   src/component_sources.cpp
   src/component_library.cpp
   src/component_library_tools.cpp
+  src/component_vendors.cpp
   src/agent_transactions.cpp
   src/agent_failures.cpp
   src/agent_benchmark.cpp
@@ -92,6 +93,10 @@ else()
 endif()
 add_executable(ark-cli src/app/cli.cpp)
 add_executable(ark-context-graph-034d-tests tests/context_graph_034d_tests.cpp)
+add_executable(ark-product-context-035b-tests tests/product_context_035b_tests.cpp)
+target_link_libraries(ark-product-context-035b-tests PRIVATE ark)
+add_test(NAME product-context-035b COMMAND ark-product-context-035b-tests)
+set_tests_properties(product-context-035b PROPERTIES TIMEOUT 60)
 target_link_libraries(ark-context-graph-034d-tests PRIVATE ark)
 add_test(NAME context-graph-034d COMMAND ark-context-graph-034d-tests)
 set_tests_properties(context-graph-034d PROPERTIES TIMEOUT 120)
@@ -188,6 +193,13 @@ if(WIN32)
   enable_language(RC)
   target_link_libraries(ark PUBLIC advapi32 winhttp bcrypt crypt32 ws2_32 shell32 ole32 windowscodecs)
   add_executable(ark-studio WIN32 src/view/viewer.cpp src/view/accessibility_guids.cpp src/view/app_icon.rc)
+  if(ARK_WITH_OCCT)
+    file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/verification-035b")
+    foreach(workspace IN ITEMS plastics electronics-workspace cable-guide)
+      add_test(NAME studio-${workspace}-035b COMMAND ark-studio --self-test-${workspace}-ui --settings-file "${CMAKE_CURRENT_BINARY_DIR}/verification-035b/${workspace}.settings.json" --shot "${CMAKE_CURRENT_BINARY_DIR}/verification-035b/${workspace}.png" --size 1440 900)
+      set_tests_properties(studio-${workspace}-035b PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE)
+    endforeach()
+  endif()
   if(MSVC)
     # Studio includes the native authoring controls in one translation unit.
     # MSVC Release builds can exceed the standard COFF section count.
@@ -518,6 +530,10 @@ add_executable(ark-component-sources-tests tests/component_sources_tests.cpp)
 target_link_libraries(ark-component-sources-tests PRIVATE ark)
 add_test(NAME component-sources COMMAND ark-component-sources-tests)
 set_tests_properties(component-sources PROPERTIES TIMEOUT 15)
+add_executable(ark-component-vendors-tests tests/component_vendors_tests.cpp)
+target_link_libraries(ark-component-vendors-tests PRIVATE ark)
+add_test(NAME component-vendors-035b COMMAND ark-component-vendors-tests)
+set_tests_properties(component-vendors-035b PROPERTIES TIMEOUT 30)
 
 add_executable(ark-component-library-tests tests/component_library_tests.cpp)
 target_link_libraries(ark-component-library-tests PRIVATE ark ark-sqlite)

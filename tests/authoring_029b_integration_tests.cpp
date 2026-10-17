@@ -53,7 +53,7 @@ void unloadedNamedHistory(){
     apply(session,json(R"([{"op":"assembly.load","roots":null}])"));check(session.document.evalBodies.size()==4,"Loading all definitions remains valid after the rejected reorder");for(const auto& result:session.document.lastResults)check(result.ok,"Named loft and curve sources recompute after rejection");
 }
 void discoveryAndHistory(){
-    const auto tools=AgentSession::tools();check(tools.arr.size()==97,"029 tools plus the read-only Wood cutlist remain discoverable");
+    const auto tools=AgentSession::tools();check(tools.arr.size()==98,"029 tools plus the read-only Wood cutlist remain discoverable");
     const auto schema=tools.dump();check(schema.find("configuration.apply")!=std::string::npos&&schema.find("configuration.activate")==std::string::npos,"Discovery exposes executable configuration operations");
     AgentSession session;for(const char* topic:{"history","configurations","drawings","stamps","planes","cad_import","containers"}){V args=V::makeObj();args.set("topic",V::makeStr(topic));accepted(session.call("agent_onboard",args));}
     apply(session,json(R"([{"op":"feature.add","type":"box","p":{"dx":10,"dy":8,"dz":5}},{"op":"feature.add","type":"box","p":{"dx":3,"dy":2,"dz":1}},{"op":"feature.rollback","id":1}])"));

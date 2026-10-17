@@ -79,9 +79,22 @@ try {
         # existing Windows vault can remove case-renamed current notes.
         # Never overwrite a personal edit or remove an earlier export.
         $graphHash = (Get-FileHash -LiteralPath $graph -Algorithm SHA256).Hash.ToLowerInvariant()
-        $vaultRelative = 'obsidian/' + $graphHash
+        $knowledgeRoot = Join-Path $SourceRoot 'docs/knowledge'
+        $knowledge = @()
+        if (Test-Path -LiteralPath $knowledgeRoot -PathType Container) {
+            $knowledge = @(Get-ChildItem -LiteralPath $knowledgeRoot -Filter '*.md' -File | Sort-Object Name | ForEach-Object { [pscustomobject]@{path=$_.Name;sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()} })
+        }
+        $knowledgeHash = Inventory-Digest $knowledge
+        $vaultKey = Inventory-Digest @([pscustomobject]@{path='graph';sha256=$graphHash},[pscustomobject]@{path='knowledge';sha256=$knowledgeHash})
+        # Short directory names leave room for note filenames on Windows.
+        # Full digests remain in the completion receipt and are checked below.
+        $vaultRelative = 'obsidian/' + $vaultKey.Substring(0,24)
         $vault = Join-Path $IndexDirectory $vaultRelative
         $complete = Join-Path $vault '.ark-code-vault.json'
+        if (Test-Path -LiteralPath $complete) {
+            $priorVault = Get-Content -Raw -Encoding UTF8 -LiteralPath $complete | ConvertFrom-Json
+            if ($priorVault.graph_sha256 -cne $graphHash -or $priorVault.knowledge_sha256 -cne $knowledgeHash) { throw 'Vault identity differs from its full source digests; retain it and choose a new index directory.' }
+        }
         if ((Test-Path -LiteralPath $vault) -and -not (Test-Path -LiteralPath $complete)) {
             $vaultRelative += '-' + [Guid]::NewGuid().ToString('N')
             $vault = Join-Path $IndexDirectory $vaultRelative
@@ -99,8 +112,26 @@ try {
             $note = [IO.Path]::GetFullPath((Join-Path $vault $card.file))
             if (-not $note.StartsWith($vault.TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path -LiteralPath $note -PathType Leaf)) { throw 'Obsidian canvas references a missing or invalid note; retain the earlier vault.' }
         }
-        [ordered]@{graph_sha256=$graphHash;source_sha256=$digest;nodes=$cards.Count;tool=$tool} | ConvertTo-Json | Set-Content -LiteralPath $complete -Encoding UTF8
-        [ordered]@{directory=$vaultRelative;graph_sha256=$graphHash;source_sha256=$digest} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $IndexDirectory 'obsidian-current.json') -Encoding UTF8
+        $guideDirectory = Join-Path $vault 'ARK Knowledge'
+        if ($knowledge.Count) { [IO.Directory]::CreateDirectory($guideDirectory) | Out-Null }
+        foreach ($guide in $knowledge) {
+            $sourceGuide = Join-Path $knowledgeRoot $guide.path
+            if ((Get-FileHash -LiteralPath $sourceGuide -Algorithm SHA256).Hash.ToLowerInvariant() -cne $guide.sha256) { throw 'Knowledge notes changed during export; retain the earlier vault and retry.' }
+            $destinationGuide = Join-Path $guideDirectory $guide.path
+            if (-not (Test-Path -LiteralPath $destinationGuide)) {
+                Copy-Item -LiteralPath $sourceGuide -Destination $destinationGuide
+                $codeNotes = switch ([IO.Path]::GetFileNameWithoutExtension($guide.path)) {
+                    'Electronics' { @('electronics.cpp','electronics_modeling.cpp','cable_guide_035b.inl') }
+                    'Plastics' { @('plastics_electronics_035b.inl','modeling_031b.cpp','solid_modeling.cpp') }
+                    'Vendors' { @('component_vendors.cpp','component_sources.cpp','component_library_tools.cpp') }
+                    'Workflow' { @('context_graph_034d.inl','agent_team.cpp','assistant.cpp') }
+                }
+                $links = @($codeNotes | Where-Object { Test-Path -LiteralPath (Join-Path $vault ($_ + '.md')) } | ForEach-Object { '- [[' + $_ + ']]' })
+                if ($links.Count) { Add-Content -LiteralPath $destinationGuide -Encoding UTF8 -Value ("`n## Related code`n`n" + ($links -join "`n")) }
+            }
+        }
+        [ordered]@{graph_sha256=$graphHash;source_sha256=$digest;knowledge_sha256=$knowledgeHash;knowledge_notes=$knowledge.Count;nodes=$cards.Count;tool=$tool} | ConvertTo-Json | Set-Content -LiteralPath $complete -Encoding UTF8
+        [ordered]@{directory=$vaultRelative;graph_sha256=$graphHash;source_sha256=$digest;knowledge_sha256=$knowledgeHash;knowledge_notes=$knowledge.Count} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $IndexDirectory 'obsidian-current.json') -Encoding UTF8
         Write-Host "Verified separate Obsidian vault: $vault ($($cards.Count) file cards)."
     }
     Write-Host "Code context / source $digest / rebuilt $changed / local AST / graph links are navigation evidence; read current source before editing."

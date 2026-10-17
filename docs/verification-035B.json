@@ -1,0 +1,783 @@
+{
+  "schema": "ark.iteration-verification.v1",
+  "iteration": "035B",
+  "version": "0.9.36",
+  "source_base_commit": "08386e186707aa72da5abdf81cf2305d52b07c52",
+  "source_state": "verified local changes on feature/035b-electronics-plastics-sourcing",
+  "source_manifest_sha256": "00d7005d66fe1aea4c253c92009d01e0d0c7b3254635974a902afa48667eb435",
+  "source_manifest": [
+    {
+      "path": "CMakeLists.txt",
+      "sha256": "c2190b71c923156a8f7e234dbcd31537c389b15e2317f0b38bbcd9a008a14566"
+    },
+    {
+      "path": "README.md",
+      "sha256": "057cc2302ee70f6994283c361f456d30eb2210dcd7224ca94c60d51afc2c2f75"
+    },
+    {
+      "path": "docs/AGENTS.md",
+      "sha256": "40b1d25f019e1bb4344dfe0b899dcef8570a74e3aaef8ca63780fe597f604de2"
+    },
+    {
+      "path": "docs/APPROVED_VENDORS_035B.md",
+      "sha256": "a689ea76601d027b816d30c55665a551dd69920cc965f23a92bfef4c36fcd8aa"
+    },
+    {
+      "path": "docs/CONTEXT_GRAPHS_034D.md",
+      "sha256": "7c78524dfbd686dfa87bf6a2531bc73a3c67d9cfee0ac410a2772f096c96b79c"
+    },
+    {
+      "path": "docs/ELECTRONICS_035B.md",
+      "sha256": "4a277ea3c4de3f69d2d07e4d73e48e0787ff491b25526ba47b6243ffeb2a4a61"
+    },
+    {
+      "path": "docs/PLASTICS_035B.md",
+      "sha256": "7d5a5de9df7e1f7d56a6f1e2ce265365c6efaa74453b86c5fbc5ff0c7ba321e1"
+    },
+    {
+      "path": "docs/README.md",
+      "sha256": "116bfe5b4cc5d5973af8063bfd8a5c8eb7d58037c1c35cae4a668c3533010c9b"
+    },
+    {
+      "path": "docs/ROADMAP.md",
+      "sha256": "2c8f476c9a22cbb6d9b0f742f9cd859a02052a1c05d7c11d968fbf104a05839a"
+    },
+    {
+      "path": "docs/iterations/035B.md",
+      "sha256": "2679d4b3040941a5c8982f6b6a68b1e8ca591909eb9ef3f632eeaad1d79a9b18"
+    },
+    {
+      "path": "docs/knowledge/Electronics.md",
+      "sha256": "ef1184a49b30705344c2cabcc1844daa1cf594da5e7e0c2cfa3b28f9bb31c703"
+    },
+    {
+      "path": "docs/knowledge/Plastics.md",
+      "sha256": "f14d392f382a8dc89fdc5876767df1f8f5f7cd5060a881c7aff5bd6e02bcd4d7"
+    },
+    {
+      "path": "docs/knowledge/Vendors.md",
+      "sha256": "49d191e444bb13c1e126e2e8b294e3ab333ba01fa3d6225b3b9b7490717be51e"
+    },
+    {
+      "path": "docs/knowledge/Workflow.md",
+      "sha256": "197adf89300f0698217900061353f0d6b750e9fb816c6061f937a3ed443e8643"
+    },
+    {
+      "path": "include/ark/component_sources.hpp",
+      "sha256": "80f9f7a9a17c57447be45b2f6a73000d8996ebc58f366bb0c7bed543b9dc2cd6"
+    },
+    {
+      "path": "include/ark/component_vendors.hpp",
+      "sha256": "6de092d778a75d2743f409c7a2872411f777f2b9a20b03575d6e51f601726f38"
+    },
+    {
+      "path": "include/ark/electronics.hpp",
+      "sha256": "c83fe73ef1d5acdea1cfb7bc2a1ca3dd8b23b809c717e2f27b1a728e0eebd783"
+    },
+    {
+      "path": "release.json",
+      "sha256": "a82917579606d61d4f92d3b0fde2d688367e3db294af2a7a2867e8fac1995290"
+    },
+    {
+      "path": "scripts/code-context.ps1",
+      "sha256": "3586c83174fdfc633cac26a716e4e921a0038d0ff474bcd61e42ab293bf38e98"
+    },
+    {
+      "path": "scripts/verify-public-component-035b.py",
+      "sha256": "01e801ca9a995cac802abf9c80126029d4b993aaf11fd20c0e3d94bccf31f245"
+    },
+    {
+      "path": "src/agent.cpp",
+      "sha256": "67b2b39b3cd2f7e4ec4f6b4fd64cefb98c45e8d0b6b2f4228b5872a0670de78c"
+    },
+    {
+      "path": "src/agent_features.cpp",
+      "sha256": "1892d46d5e1c2462f3c62ae6f6f01d2a73cb659ed5bf6f8d41de1f76781cbda8"
+    },
+    {
+      "path": "src/agent_team.cpp",
+      "sha256": "41361eb4f13516b00a0f79d46aa7991abd347c650c1599cc7a155a8ba6426759"
+    },
+    {
+      "path": "src/assembly_sweep_031b.inl",
+      "sha256": "005344c763d9328b67722d9cf48020f1eb09ef7b5ffad80ceb46623074737d98"
+    },
+    {
+      "path": "src/assistant_steering.inl",
+      "sha256": "b7defc8a251c436a59231e68a3fde271c90a2847845ffe7df85f1cd5fb87f8e4"
+    },
+    {
+      "path": "src/component_library.cpp",
+      "sha256": "fd4c907f99eece0404726f4ba382e6f652353413c4dff51e6f781eb7a0e9602d"
+    },
+    {
+      "path": "src/component_library_tools.cpp",
+      "sha256": "06070f9f444f50acb384f7e07a2f0cee7326571bec0689b6ea6e714f6bdae269"
+    },
+    {
+      "path": "src/component_source_http_035b.inl",
+      "sha256": "5363aa46a868f22e0d725c1297388166c938987b8d3a2343111480b9ebd78e04"
+    },
+    {
+      "path": "src/component_sources.cpp",
+      "sha256": "5fb68fa62fd2a24f3d05c175c85dbffad048f4ac72c94220bb54955923f59640"
+    },
+    {
+      "path": "src/component_vendors.cpp",
+      "sha256": "3fce5083822072ea5f84a2c2cb358ed572a73e8c2d95f9fdd9b310a51e32aed0"
+    },
+    {
+      "path": "src/context_graph_034d.inl",
+      "sha256": "a157a2afade39d74c769844b573423ab612b43e5b80061e6ec5c4a3010bb3aec"
+    },
+    {
+      "path": "src/context_graph_domains_035b.inl",
+      "sha256": "38caafd25e74c2be967bd2585680b318c1860861035c2aca5de2b2c99dc2722b"
+    },
+    {
+      "path": "src/electronics.cpp",
+      "sha256": "9be39ecb421140a3c1b825857eed5d3baf4adcfee3dd6706ebef5477c99f50cf"
+    },
+    {
+      "path": "src/electronics_cables_035b.inl",
+      "sha256": "274bee9882f6e2784e8052cba8b353cd1874c2f157d7132b3c82ecd62c75ab67"
+    },
+    {
+      "path": "src/iteration_history.cpp",
+      "sha256": "02a55f4706b7733e578351683d0c6e74903ab9e74bdaf9b025dbbff951a3baf7"
+    },
+    {
+      "path": "src/occt/electronics_cables_035b.inl",
+      "sha256": "eb708e11d5f083544c535c499e57eb4f5c46a5a71d97ecb49cd82e54fed321df"
+    },
+    {
+      "path": "src/occt/electronics_modeling.cpp",
+      "sha256": "98db74bad6a93e290550916452c8319b3f48616d86075fb39dfd4bacac977a6a"
+    },
+    {
+      "path": "src/onboarding.cpp",
+      "sha256": "d04b298886af57f9e607c9d5abca9f7368295ef495e88106af19e2203e8691db"
+    },
+    {
+      "path": "src/onboarding_035b.inl",
+      "sha256": "8cc8c0b15ac1f33bd402dab720fb3efe93d4a576c9b0f07387d7ba4a5f2dd6a3"
+    },
+    {
+      "path": "src/serialize.cpp",
+      "sha256": "b9a5df6490e483d3eddcfb12f78440754e4c4d770a7bfe59fec0441cf772eafb"
+    },
+    {
+      "path": "src/view/cable_guide_035b.inl",
+      "sha256": "c233e668aa4fcc0717abb456f91972d69796e39f37fd64f92863896251380e75"
+    },
+    {
+      "path": "src/view/cable_guide_035b_selftest.inl",
+      "sha256": "dd002ed79748aaae1f1cc98a3461a648ff4817ebeaa0c7622493d9e837d658d5"
+    },
+    {
+      "path": "src/view/plastics_electronics_035b.inl",
+      "sha256": "ed240690e0e7c45321db959a4b114b837f80bfe958f16a08e8e9f2dd2ac626f1"
+    },
+    {
+      "path": "src/view/plastics_electronics_035b_selftest.inl",
+      "sha256": "9031fcbf75f408cc923419b3bf73c180bd746c92ba75dbd85494c5d21fea6cc3"
+    },
+    {
+      "path": "src/view/viewer.cpp",
+      "sha256": "8768af398645e98812a26808c6334f8da957edc7f027a35e39c02b0d42992e01"
+    },
+    {
+      "path": "tests/agent_features_tests.cpp",
+      "sha256": "59348765baf77c2cbc0ef199344222e23f0da652d3bb2a1f64032dbdd190d5f3"
+    },
+    {
+      "path": "tests/agent_tests.cpp",
+      "sha256": "e5a134cea4bd3139f1d54cb0ca9481af6bc3d4b878e5d9196c4d9476ce24544e"
+    },
+    {
+      "path": "tests/assembly_manipulation_tools_tests.cpp",
+      "sha256": "1236fa5f9bfb0fc9c3b8b1b6899ef237d40d41c9bdd7d0fb6202461ed7b663bc"
+    },
+    {
+      "path": "tests/authoring_023b_contract_tests.cpp",
+      "sha256": "a8666e8a382ecd7ebd7f9e11aca031df54f06e18e8c7410cdf288f754853f9f8"
+    },
+    {
+      "path": "tests/authoring_024b_contract_tests.cpp",
+      "sha256": "0d4b0c8a0ad0ca214098595943a2a1eab25f066bfc26bab728be8d8807ba602d"
+    },
+    {
+      "path": "tests/authoring_029b_integration_tests.cpp",
+      "sha256": "c05be1fca66f9f2013d05df22998e3cbb9ad0346f1d6de63b48fe2bb0e7042eb"
+    },
+    {
+      "path": "tests/code_context_tests.ps1",
+      "sha256": "824eb4debc0a60387717355f71b0d56668c2c115de38b408496eae80c7701485"
+    },
+    {
+      "path": "tests/component_library_tests.cpp",
+      "sha256": "10f34a3baf9931999f2facf1ad10ccee37ca34e7d983cc9bf9a92f49966befff"
+    },
+    {
+      "path": "tests/component_sources_tests.cpp",
+      "sha256": "1713a0372b186eb7165dc7691c632d7b9e3d6943b8e3a55cef5e220f03277cbc"
+    },
+    {
+      "path": "tests/component_vendors_tests.cpp",
+      "sha256": "23664f6d22479eb20e59ae7bd233602a3cd9e474e2ddf525e7373819a62b6b52"
+    },
+    {
+      "path": "tests/electronics_035b_tests.inl",
+      "sha256": "17787703fcc79ff4c1b6dafe81c9afd8fa59043a1f3bf3b311c6c789eec69b7d"
+    },
+    {
+      "path": "tests/electronics_tests.cpp",
+      "sha256": "ad4853694f0e1756e1c015d0c171f3ef55a49f6f7f4f32642be11dfdbc790cc3"
+    },
+    {
+      "path": "tests/modeling_workflow_tests.cpp",
+      "sha256": "daa6d0cc6ea4e0a8b0307fd298c12f40f70bfd701983dbb18575eeb3e0e24211"
+    },
+    {
+      "path": "tests/product_context_035b_tests.cpp",
+      "sha256": "e0897d588222e92f6f4fc970c1e8378aaed8043548c932aeb5ebeb4abaf3b72a"
+    }
+  ],
+  "milestones": [
+    "A.01",
+    "A.02",
+    "A.03",
+    "A.04",
+    "B.01",
+    "B.02",
+    "B.03",
+    "B.04",
+    "C.03",
+    "D.02",
+    "D.04",
+    "E.01"
+  ],
+  "delegation": [
+    {
+      "task": "electronics and native cable geometry",
+      "model": "gpt-6.1-sol",
+      "reasoning_effort": "xhigh"
+    },
+    {
+      "task": "Plastics, electronics UI and path interaction",
+      "model": "gpt-6.1-sol",
+      "reasoning_effort": "high"
+    },
+    {
+      "task": "approved vendors, public source pipeline and live verification",
+      "model": "gpt-6.1-sol",
+      "reasoning_effort": "xhigh"
+    }
+  ],
+  "qualification": "Windows local focused native/core/Studio checks; public KiCad integration only",
+  "tests": {
+    "native": {
+      "passed": 22,
+      "failed": 0,
+      "cases": [
+        {
+          "name": "direct-preview-worker",
+          "passed": true,
+          "seconds": 0.0502602
+        },
+        {
+          "name": "product-context-035b",
+          "passed": true,
+          "seconds": 0.0525931
+        },
+        {
+          "name": "context-graph-034d",
+          "passed": true,
+          "seconds": 0.0825825
+        },
+        {
+          "name": "release-metadata",
+          "passed": true,
+          "seconds": 0.510941
+        },
+        {
+          "name": "ota-updates",
+          "passed": true,
+          "seconds": 2.52715
+        },
+        {
+          "name": "iteration-history",
+          "passed": true,
+          "seconds": 2.03181
+        },
+        {
+          "name": "agent-features",
+          "passed": true,
+          "seconds": 1.56564
+        },
+        {
+          "name": "assistant-connector",
+          "passed": true,
+          "seconds": 3.03862
+        },
+        {
+          "name": "agent-team",
+          "passed": true,
+          "seconds": 3.06506
+        },
+        {
+          "name": "component-sources",
+          "passed": true,
+          "seconds": 0.0391079
+        },
+        {
+          "name": "component-vendors-035b",
+          "passed": true,
+          "seconds": 0.0624674
+        },
+        {
+          "name": "component-library",
+          "passed": true,
+          "seconds": 9.1504
+        },
+        {
+          "name": "component-library-tools",
+          "passed": true,
+          "seconds": 1.20436
+        },
+        {
+          "name": "electronics",
+          "passed": true,
+          "seconds": 1.63396
+        },
+        {
+          "name": "assembly_sweep-031b",
+          "passed": true,
+          "seconds": 0.982634
+        },
+        {
+          "name": "native-solids-031b",
+          "passed": true,
+          "seconds": 0.964167
+        },
+        {
+          "name": "agent",
+          "passed": true,
+          "seconds": 0.217964
+        },
+        {
+          "name": "authoring-029b-integration",
+          "passed": true,
+          "seconds": 0.497879
+        },
+        {
+          "name": "modeling-workflow",
+          "passed": true,
+          "seconds": 3.95648
+        },
+        {
+          "name": "assembly-manipulation-tools",
+          "passed": true,
+          "seconds": 0.0587851
+        },
+        {
+          "name": "authoring-023b-contracts",
+          "passed": true,
+          "seconds": 0.193451
+        },
+        {
+          "name": "authoring-024b-contract",
+          "passed": true,
+          "seconds": 0.144817
+        }
+      ],
+      "earlier_failed_attempts": [
+        {
+          "name": "agent",
+          "passed": false,
+          "seconds": 0.261318
+        }
+      ]
+    },
+    "portable_core": {
+      "passed": 18,
+      "failed": 0,
+      "cases": [
+        {
+          "name": "direct-preview-worker",
+          "passed": true,
+          "seconds": 0.0538979
+        },
+        {
+          "name": "product-context-035b",
+          "passed": true,
+          "seconds": 0.0455606
+        },
+        {
+          "name": "context-graph-034d",
+          "passed": true,
+          "seconds": 0.078982
+        },
+        {
+          "name": "release-metadata",
+          "passed": true,
+          "seconds": 0.416949
+        },
+        {
+          "name": "ota-updates",
+          "passed": true,
+          "seconds": 2.30547
+        },
+        {
+          "name": "iteration-history",
+          "passed": true,
+          "seconds": 2.02668
+        },
+        {
+          "name": "agent-features",
+          "passed": true,
+          "seconds": 0.0700237
+        },
+        {
+          "name": "assistant-connector",
+          "passed": true,
+          "seconds": 2.98107
+        },
+        {
+          "name": "agent-team",
+          "passed": true,
+          "seconds": 2.94412
+        },
+        {
+          "name": "component-sources",
+          "passed": true,
+          "seconds": 0.0349552
+        },
+        {
+          "name": "component-vendors-035b",
+          "passed": true,
+          "seconds": 0.0453639
+        },
+        {
+          "name": "component-library",
+          "passed": true,
+          "seconds": 9.00356
+        },
+        {
+          "name": "component-library-tools",
+          "passed": true,
+          "seconds": 0.0921609
+        },
+        {
+          "name": "electronics",
+          "passed": true,
+          "seconds": 0.0138334
+        },
+        {
+          "name": "agent",
+          "passed": true,
+          "seconds": 0.148273
+        },
+        {
+          "name": "assembly-manipulation-tools",
+          "passed": true,
+          "seconds": 0.0575705
+        },
+        {
+          "name": "authoring-023b-contracts",
+          "passed": true,
+          "seconds": 0.0623275
+        },
+        {
+          "name": "authoring-024b-contract",
+          "passed": true,
+          "seconds": 0.0486301
+        }
+      ],
+      "earlier_failed_attempts": []
+    },
+    "studio_ui": {
+      "passed": 3,
+      "failed": 0,
+      "cases": [
+        {
+          "name": "studio-plastics-035b",
+          "passed": true,
+          "seconds": 3.81262
+        },
+        {
+          "name": "studio-electronics-workspace-035b",
+          "passed": true,
+          "seconds": 3.70352
+        },
+        {
+          "name": "studio-cable-guide-035b",
+          "passed": true,
+          "seconds": 0.792378
+        }
+      ],
+      "earlier_failed_attempts": [
+        {
+          "name": "studio-cable-guide-035b",
+          "passed": false,
+          "seconds": 3.52217
+        }
+      ]
+    },
+    "code_graph_export_script": {
+      "checks": 28,
+      "passed": true,
+      "paid_model_calls": 0
+    }
+  },
+  "interaction": {
+    "latest_preview_wall_ms_including_test_gate": 39.5557,
+    "worker_evaluation_ms_including_test_gate": 10.0267,
+    "latency_scope": "local UI handlers separate from exact native evaluation; latest preview timings include the deterministic test gate and screenshot interval",
+    "bound_preview_wall_ms": 11.2451,
+    "bound_worker_evaluation_ms": 10.4494,
+    "driven_anchor_protected": true,
+    "bound_offset_preserved": true,
+    "cage_frame_samples": 10,
+    "mouse_to_cage_frame_p95_ms": 1.3737,
+    "mouse_to_cage_frame_max_ms": 1.3737,
+    "cage_frame_timing_scope": "one local fixture; sampled WM_MOUSEMOVE through full frame draw and glFinish after updated cage VBO upload; CPU and GL completion, not display panel latency or GPU timestamps",
+    "mouse_samples": 100,
+    "handler_p95_ms": 0.0069,
+    "handler_p99_ms": 0.0111,
+    "handler_max_ms": 0.0151,
+    "latest_requested_generation": 100,
+    "coalesced_requests": 98,
+    "undo_comparison": "recursive exact JSON types, values and array order; object key order ignored because document serialization sorts keys",
+    "one_atomic_commit_one_undo": true,
+    "cancel_and_stale_preserved": true,
+    "display_authority": "authored anchor cage; exact BRep and tessellation arrive from isolated native worker",
+    "manufacturing_qualified": false
+  },
+  "earlier_interaction_observation": {
+    "provenance": "transcribed from earlier successful tool output in this task before the guide appearance-visibility fix",
+    "scope": "earlier UI build; no forced-cold cache or independent baseline",
+    "bound_preview_wall_ms": 934.7276,
+    "bound_worker_evaluation_ms": 934.533,
+    "mouse_to_cage_frame_p95_ms": 1.2621,
+    "handler_p95_ms": 0.0078,
+    "coalesced_requests": 98,
+    "mouse_samples": 100,
+    "manufacturing_qualified": false
+  },
+  "interaction_limits": [
+    "One synthetic ribbon fixture, 1440x900; cache state was not forced cold.",
+    "Mouse-to-cage measures CPU processing/full frame draw/glFinish, not display panel latency or independent GPU timestamp.",
+    "Coalescing probe intentionally gates evaluation; nongated bound-preview timing is separate.",
+    "The sealed rerun reused a warm native result; the earlier nongated 934.7ms observation is retained with its earlier-build scope."
+  ],
+  "public_component_integration": {
+    "status": "passed",
+    "scope": "live public KiCad repository/native import, not supplier or manufacture qualification",
+    "attempts": [
+      {
+        "tool": "library_vendors",
+        "status": "passed"
+      },
+      {
+        "tool": "library_source_search",
+        "status": "passed"
+      },
+      {
+        "tool": "library_fetch",
+        "status": "passed"
+      },
+      {
+        "tool": "library_get",
+        "status": "passed"
+      },
+      {
+        "tool": "library_insert",
+        "status": "passed"
+      },
+      {
+        "tool": "native_inspect",
+        "status": "passed"
+      },
+      {
+        "tool": "doc_save",
+        "status": "passed"
+      },
+      {
+        "tool": "doc_load",
+        "status": "passed"
+      },
+      {
+        "tool": "native_inspect",
+        "status": "passed"
+      },
+      {
+        "tool": "context_graph",
+        "status": "passed"
+      }
+    ],
+    "elapsed_seconds": 1.86,
+    "observed_catalog_item": {
+      "name": "PinHeader_1x02_P2.54mm_Horizontal.step",
+      "path": "Connector_PinHeader_2.54mm.3dshapes/PinHeader_1x02_P2.54mm_Horizontal.step",
+      "kind": "step",
+      "download_url": "https://gitlab.com/kicad/libraries/kicad-packages3D/-/raw/master/Connector_PinHeader_2.54mm.3dshapes/PinHeader_1x02_P2.54mm_Horizontal.step",
+      "source_url": "https://gitlab.com/kicad/libraries/kicad-packages3D/-/blob/master/Connector_PinHeader_2.54mm.3dshapes/PinHeader_1x02_P2.54mm_Horizontal.step",
+      "license": "CC-BY-SA-4.0 WITH KiCad-library-exception",
+      "license_url": "https://www.kicad.org/libraries/license/"
+    },
+    "download_evidence": {
+      "requested_url": "https://gitlab.com/kicad/libraries/kicad-packages3D/-/raw/master/Connector_PinHeader_2.54mm.3dshapes/PinHeader_1x02_P2.54mm_Horizontal.step",
+      "final_url": "https://gitlab.com/kicad/libraries/kicad-packages3D/-/raw/master/Connector_PinHeader_2.54mm.3dshapes/PinHeader_1x02_P2.54mm_Horizontal.step",
+      "http_status": 200,
+      "content_type": "text/plain; charset=utf-8",
+      "byte_size": 86820,
+      "sha256": "433bdeece09baa59c6447f154b95f20145c63547819a58e8e01460bcbfb3fb2f",
+      "retrieved_at_utc": "2026-10-17T12:02:30Z",
+      "redirect_chain": [
+        {
+          "url": "https://gitlab.com/kicad/libraries/kicad-packages3D/-/raw/master/Connector_PinHeader_2.54mm.3dshapes/PinHeader_1x02_P2.54mm_Horizontal.step",
+          "http_status": 200
+        }
+      ],
+      "authority": "retrieved_STEP_bytes; native_geometry_validation_required",
+      "credentials_sent": false,
+      "source_policy": {
+        "vendor": "kicad",
+        "observed_vendor": "kicad",
+        "approved": true,
+        "policy_revision": 1,
+        "policy_sha256": "8772fdae2bf7a0f6381a8c98211b6493034b63b527c86a890b15c6f7ad10b9f6",
+        "authority": "network_policy_only"
+      }
+    },
+    "native_report": {
+      "brep_valid": true,
+      "solids": 1,
+      "faces": 58,
+      "volume_mm3": 41.538889605624775,
+      "area_mm2": 121.98688250246995
+    },
+    "portable_reopen_verified": true,
+    "graph_verified": true,
+    "graph_nodes": 6,
+    "graph_edges": 7,
+    "privacy_verified": true,
+    "manufacturing_qualified": false,
+    "earlier_successful_run": {
+      "calls": 9,
+      "elapsed_seconds": 1.828,
+      "scope": "before adding actual artifact-to-graph check"
+    }
+  },
+  "context_graph_and_obsidian": {
+    "code_notes": 9714,
+    "knowledge_notes": 4,
+    "total_notes": 9718,
+    "graph_nodes": 9714,
+    "graph_edges": 30918,
+    "allowlisted_inputs": 493,
+    "missing_canvas_files": 0,
+    "broken_wikilinks": 0,
+    "code_source_sha256": "b877d64d6074d6faea3b91cca0f61d103c8c432dd6d3fd6e6db3061f95ae6792",
+    "knowledge_sha256": "dd3f2b09221a48d0879b8af14854028d66f9ee7489aff888ff471280f79629f9",
+    "graph_sha256": "71317cfa7d340ae2610c6cee3623ca9641318e3676f0fdfa7c1238501ca37431",
+    "reported_input_tokens": 0,
+    "reported_output_tokens": 0
+  },
+  "graph_parser_limits": {
+    "partial_files": 9,
+    "files_without_symbols": 72,
+    "unclassified_inputs": 4,
+    "warnings_may_overlap": true,
+    "whole_program_dependency_proof": false
+  },
+  "visual_qa": [
+    {
+      "file": "verification-035b/plastics.png.plastics-hollow.png",
+      "sha256": "62eec14895be4d9b75fd002cc253c3e1cc312361e5115f2c46a51d2d1f731457",
+      "inspected": true
+    },
+    {
+      "file": "verification-035b/plastics.png.reinforcement-dialog.png.step-2.png",
+      "sha256": "cfdfd5eae42d3aedaf7abb807d380d4c124e9ca9cb8a0d2d45f758116ebc27fd",
+      "inspected": true
+    },
+    {
+      "file": "verification-035b/electronics-workspace.png.electronics-ribbon.png",
+      "sha256": "0399c594d014fdb37fce8ce2daf9b59b2b3070ec990ef14cd1c535a09c2264fc",
+      "inspected": true
+    },
+    {
+      "file": "verification-035b/electronics-workspace.png.ribbon-controls.png.step-2.png",
+      "sha256": "44a97ab4ad1b2786c7a2348cdc29ba3f27282e72a1fb8bb3276dc2242661c8af",
+      "inspected": true
+    },
+    {
+      "file": "verification-035b/electronics-workspace.png.approved-vendors.png.step-2.png",
+      "sha256": "95ab4c157036b897b2b0a450580ca9e3da7dc0cd14397966929342acd5156e09",
+      "inspected": true
+    },
+    {
+      "file": "verification-035b/cable-guide.png.cable-guide-pending.png",
+      "sha256": "406e6800b9d4a64dcbab0bf63f7b0325cb2ffe08f6afddf3259a9072e3cd254b",
+      "inspected": true
+    },
+    {
+      "file": "verification-035b/cable-guide.png.cable-guide-saved.png",
+      "sha256": "6fb6f7bade877f061c85c7f93927c465fb62a07824bbdc6f21d5e30b14d22a7c",
+      "inspected": true
+    }
+  ],
+  "artifacts": {
+    "ark-studio.exe": {
+      "sha256": "27f0439b77ff35fa98083989b0440552507fdeebf079fe0c4ce489560042adae",
+      "bytes": 11768832
+    },
+    "ark-cli.exe": {
+      "sha256": "d81025ec78a5e6dc908ada4ff57984a1792735a7ab0ab106caff925881c81cfa",
+      "bytes": 3328512
+    },
+    "ark-mcp.exe": {
+      "sha256": "cdd33e05e74075b7f3e9c409a60b150a27c8baed6966fdef998d4c4d0c728356",
+      "bytes": 6054912
+    },
+    "ark-occt-worker.exe": {
+      "sha256": "f37eaa603f915720caea6d22d62ad27ee4e3309600cbf83e74b6eb5353120992",
+      "bytes": 3229184
+    },
+    "app-version.json": {
+      "sha256": "ffd8d4f8a53ee8f2686ed35589181a827460e2c7386f787845c439e52cb01949",
+      "bytes": 303
+    }
+  },
+  "local_install": {
+    "current": "0.9.35",
+    "current_iteration": "034D",
+    "pending": "0.9.36",
+    "pending_iteration": "035B",
+    "existing_session_preserved": true,
+    "staged_hashes_match": true
+  },
+  "initial_failures_and_corrections": [
+    "Early preparation compiled onboarding before its included guide was created; final source compile succeeded.",
+    "Harness target spelling and --shot Studio argument were corrected.",
+    "Source45 is now supported; the earlier future-format negative fixture now checks46.",
+    "Full structural JSON comparisons retain exact types, values and array order while ignoring the existing canonical object-key reordering; production Undo unchanged.",
+    "An exact-zero centroid assertion was corrected within the existing1e-6 endpoint criterion.",
+    "Native round terminals may be rational/nonrational BSpline; full Bezier circle/plane bounds preserve the fixed1e-6 acceptance limit.",
+    "Exact injective/short-turn Bezier leaves retain sweep topology for full-profile self-interference checking; near-self-overlap and actual centerline crossings reject.",
+    "Clipped modal hints and the overlapping appearance/guide HUD were corrected and captures inspected."
+  ],
+  "limits": [
+    "Full suites, hosted CI, Linux execution and trusted remote OTA transport were not run.",
+    "Authenticated commercial APIs/logins remain unconfigured; website access stays in the user browser.",
+    "A retrieved valid solid does not certify the requested manufacturer/reference, license, electrical ratings, stock, price or manufacture.",
+    "Plastics reuses bounded exact part-design operations, not automatic mold parting, shutoff, core/cavity, mold flow or shrinkage qualification.",
+    "New spline/ribbon/endpoint semantics conditionally select source45; legacy recipes keep their existing format and geometry.",
+    "Graphs expose attributed navigation data, not complete evaluator dependencies or electrical continuity.",
+    "The independent origin/reference-plane branch remains separate and was not switched, merged or edited.",
+    "No user drawing/session or credentials are included in this commit, receipt, source graph corpus or runtime package.",
+    "No provider token/cost or general design-quality gain is established."
+  ]
+}

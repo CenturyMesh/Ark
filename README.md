@@ -27,10 +27,12 @@ geometry storage, reusable agent previews, compact inspection responses,
 motion for patterned rigid followers and authored colors in agent snapshots.
 The iteration notes record the verified scope and remaining performance limits.
 
-Source development in [034D / 0.9.35](docs/iterations/034D.md) adds shared project
-context graphs, local Graphify code lookup and an optional Obsidian vault.
-[Usage and measured limits](docs/CONTEXT_GRAPHS_034D.md) distinguish local checks
-from published packages and unmeasured live-provider savings.
+Source development in [035B / 0.9.36](docs/iterations/035B.md) adds smooth 3D and
+ribbon cables with draggable path anchors, Plastics/Electronics workspaces and
+Approved Vendors with observed STEP download custody. Project context and local
+Graphify/Obsidian notes cover these domains. Local verification remains separate
+from the published packages, authenticated commercial APIs and manufacturing
+qualification; read the linked contracts and iteration evidence.
 
 The chat opens on first launch and remembers your visibility choice. Windows
 Assistant and Team cards also offer [Grok Build through its official CLI account](docs/GROK_BUILD_CONNECT.md).

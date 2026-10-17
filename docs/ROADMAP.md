@@ -9,6 +9,16 @@ The public iteration and numeric runtime are defined in
 increasing sequence and its principal phase. The letter is a roadmap phase, not a
 month; it does not declare the phase complete. The `.ark` format evolves separately.
 
+035B addresses **B.01/B.02/B.03/B.04/C.03/D.02/D.04/E.01**, with
+**A.01/A.02/A.03/A.04** custody, through
+[editable 3D/ribbon cables](ELECTRONICS_035B.md),
+[Plastics workflows](PLASTICS_035B.md) and
+[approved component sources](APPROVED_VENDORS_035B.md).
+Local verification is **Verificado no escopo** in the focused
+[035B receipt](iterations/035B.md). Broader milestones remain **Parcial**; documented commercial APIs,
+CAD validity and readable menus do not establish account integration, supplier
+qualification or physical manufacturing acceptance.
+
 034D addresses **A.01/A.03/A.04/D.02/D.04** with
 [shared project context and local code graphs](CONTEXT_GRAPHS_034D.md).
 The local implementation is **Verificado no escopo** through the focused checks

@@ -3,15 +3,16 @@
 namespace {
 std::string graphText(const V& value,const char* key){const auto* p=value.find(key);return p&&p->t==V::Str?p->str:std::string();}
 std::string graphClip(std::string value,size_t limit=512){if(value.size()<=limit)return value;while(limit&&(static_cast<unsigned char>(value[limit])&0xc0)==0x80)--limit;return value.substr(0,limit);}
-std::vector<std::string> graphWords(const std::string& text){std::vector<std::string> words;const auto lower=contextLower(text);for(size_t i=0;i<lower.size();){if(std::isalnum((unsigned char)lower[i])||lower[i]=='_'){const auto start=i++;while(i<lower.size()&&(std::isalnum((unsigned char)lower[i])||lower[i]=='_'))++i;if(i-start>=1)words.push_back(lower.substr(start,i-start));}else ++i;}return words;}
+std::vector<std::string> graphWords(const std::string& text){std::vector<std::string> words;const auto lower=contextLower(text);auto token=[](unsigned char c){return std::isalnum(c)||c=='_'||c>=128;};for(size_t i=0;i<lower.size();){if(token((unsigned char)lower[i])){const auto start=i++;while(i<lower.size()&&token((unsigned char)lower[i]))++i;words.push_back(lower.substr(start,i-start));}else ++i;}return words;}
 struct ProjectGraph {
     std::map<std::string,V> nodes,source;
     std::set<std::tuple<std::string,std::string,std::string,std::string>> edges;
     void node(const std::string& key,const std::string& kind,const V& authored){
         V row=V::makeObj(),facts=V::makeObj();row.set("key",V::makeStr(key));row.set("kind",V::makeStr(kind));row.set("name",V::makeStr(graphText(authored,"name")));source[key]=authored;
-        for(const char* field:{"type","expr","p","material","suppressed","fixed","visible","pattern","density","density_g_cm3"})if(const auto* value=authored.find(field))facts.set(field,contextCompact(*value));
-        if(const auto* part=authored.find("part")){V metadata=V::makeObj();for(const char* field:{"part_number","description","procurement","specification"})if(const auto* value=part->find(field);value&&value->t==V::Str)metadata.set(field,V::makeStr(graphClip(value->str)));facts.set("part",metadata);}
+        for(const char* field:{"type","expr","p","material","suppressed","fixed","visible","pattern","density","density_g_cm3","url","host","authority","binding","ref","net"})if(const auto* value=authored.find(field))facts.set(field,contextCompact(*value));
+        if(const auto* part=authored.find("part")){V metadata=V::makeObj();for(const char* field:{"part_number","description","procurement","specification","manufacturer","manufacturer_part_number","supplier","supplier_part_number","sourcing_status"})if(const auto* value=part->find(field);value&&value->t==V::Str)metadata.set(field,V::makeStr(graphClip(value->str)));facts.set("part",metadata);}
         if(const auto* native=authored.find("native"))if(const auto* op=native->find("op"))facts.set("operation",*op);
+        if(const auto* native=authored.find("native")){V program=V::makeObj();for(const char* field:{"route_mode","profile","start_tangent","end_tangent","auto_route"})if(const auto* value=native->find(field))program.set(field,contextCompact(*value));for(const char* field:{"waypoints","obstacles","components","pads","traces","vias"})if(const auto* value=native->find(field);value&&value->t==V::Arr)program.set(std::string(field)+"_count",V::makeNum(value->arr.size()));if(!program.obj.empty())facts.set("program",program);}
         if(facts.dump().size()>2048)facts=contextOmitted(facts,"graph facts exceed 2 KiB; inspect object_context or the source tool");row.set("facts",facts);nodes[key]=row;
     }
     void edge(const std::string& from,const std::string& relation,const std::string& to,const std::string& basis="authored_selector"){
@@ -38,12 +39,14 @@ struct ProjectGraph {
         out.set("nodes",rows);out.set("edges",links);out.set("scope",V::makeStr(scope));return out;
     }
 };
+#include "context_graph_domains_035b.inl"
 V buildProjectGraph(const V& authored,const std::string& scope){
     ProjectGraph graph;
     for(const auto& row:authored.find("features")->arr)graph.node(contextKey((u64)row.find("id")->num),"feature",row);
     for(const char* section:{"params","sketches","planes","materials"})if(const auto* rows=authored.find(section))for(const auto& row:rows->arr)graph.node(std::string(section)+":"+graphText(row,"name"),section,row);
     if(const auto* rows=authored.find("assembly"))for(const auto& row:rows->arr)graph.node("assembly:"+std::to_string((u64)row.find("id")->num),"assembly",row);
     if(const auto* rows=authored.find("mates"))for(const auto& row:rows->arr)graph.node("mate:"+std::to_string((u64)row.find("id")->num),"mate",row);
+    graphDomains035B(graph);
     for(const auto& item:graph.source){const auto& key=item.first;const auto& row=item.second;graph.scan(key,row);
         if(key.rfind("assembly:",0)==0){if(const auto* parent=row.find("parent"))graph.edge(key,"in_group","assembly:"+std::to_string((u64)parent->num));if(const auto* feature=row.find("feature"))graph.edge(key,"places",contextKey((u64)feature->num));}
         if(key.rfind("mate:",0)==0)for(const char* end:{"a","b"})if(const auto* node=row.find(end))graph.edge(key,"constrains","assembly:"+std::to_string((u64)node->num));

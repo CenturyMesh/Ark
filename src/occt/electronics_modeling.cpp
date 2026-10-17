@@ -8,6 +8,17 @@
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepOffsetAPI_MakePipe.hxx>
+#include <BRepOffsetAPI_MakePipeShell.hxx>
+#include <BOPAlgo_ArgumentAnalyzer.hxx>
+#include <BRepCheck_Analyzer.hxx>
+#include <BRepTools_WireExplorer.hxx>
+#include <BRep_Tool.hxx>
+#include <BRepAdaptor_Curve.hxx>
+#include <GeomAPI_Interpolate.hxx>
+#include <Geom_BSplineCurve.hxx>
+#include <Geom_BezierCurve.hxx>
+#include <GeomConvert_BSplineCurveToBezierCurve.hxx>
+#include <TColgp_HArray1OfPnt.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepGProp.hxx>
@@ -67,13 +78,20 @@ V modelCable(const V& request){
     double nearest=1e300;for(const V& item:sequence(request,"obstacles",64).arr){gp_Pnt lo=xyz(need(item,"min")),hi=xyz(need(item,"max"));if(hi.X()<=lo.X()||hi.Y()<=lo.Y()||hi.Z()<=lo.Z())throw std::runtime_error("Cable obstacle bounds invalid");TopoDS_Shape block=BRepPrimAPI_MakeBox(lo,hi).Shape();BRepExtrema_DistShapeShape distance(shape,block);distance.Perform();if(!distance.IsDone())throw std::runtime_error("Exact cable obstacle check failed");nearest=std::min(nearest,distance.Value());if(distance.Value()<=1e-6)throw std::runtime_error("Exact cable collides with obstacle "+word(item,"name"));}
     GProp_GProps properties;BRepGProp::LinearProperties(spine,properties);V result=shapeResult(shape,true),report=need(request,"report");report.set("route_length_mm",V::makeNum(properties.Mass()));report.set("exact_obstacle_checked",V::makeBool(true));if(nearest<1e299)report.set("minimum_obstacle_clearance_mm",V::makeNum(nearest));result.set("electronics",report);result.set("electronics_kind",V::makeStr("cable_route"));return result;
 }
+#include "electronics_cables_035b.inl"
 } // namespace
 
 V modelElectronicsNative(const V& request){
     if(request.t!=V::Obj)throw std::runtime_error("Electronics request must be an object");
     const std::string kind=word(request,"kind");
     if(kind=="pcb")return modelPcb(request);
-    if(kind=="cable_route")return modelCable(request);
+    if(kind=="cable_route"){
+        if(const auto* mode=request.find("route_mode")){
+            if(mode->t!=V::Str||mode->str!="spline")throw std::runtime_error("CABLE_MODE_INVALID: native route_mode must be spline");
+            return modelSplineCable035B(request);
+        }
+        return modelCable(request);
+    }
     throw std::runtime_error("Unknown electronics kind");
 }
 

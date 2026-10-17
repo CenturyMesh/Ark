@@ -48,7 +48,7 @@ V resolveCableBindings031B(const Feature& cable,const ExprEnv& env,const Documen
     V bindingReport=V::makeObj(),endpoints=V::makeArr(),obstacles=V::makeArr();
     auto endpoint=[&](const V& item,const std::string& role){
         if(!bound(item))return item;
-        for(const auto& field:item.obj)if(field.first!="node"&&field.first!="copy"&&field.first!="reference"&&field.first!="offset"&&field.first!="name")throw std::runtime_error("Unknown cable occurrence endpoint field: "+field.first);
+        for(const auto& field:item.obj)if(field.first!="node"&&field.first!="copy"&&field.first!="reference"&&field.first!="offset"&&field.first!="name"&&field.first!="connector"&&field.first!="pin"&&field.first!="net")throw std::runtime_error("Unknown cable occurrence endpoint field: "+field.first);
         const auto node=stableBindingNode031(document,item);const int copy=copy031(item);const auto& occurrence=placement031(*suppliedPose,node,copy);cableDependency031(document,cable,occurrence.feature);
         std::string reference="origin";if(const auto* value=item.find("reference")){if(value->t!=V::Str||value->str.empty()||value->str.size()>128)throw std::runtime_error("Cable binding reference must be a semantic name");reference=value->str;}
         Mat4 local=Mat4::identity();if(reference!="origin")local=resolveGeometryReference(document,occurrence.feature,reference).frame;finitePose031(local);
@@ -57,7 +57,12 @@ V resolveCableBindings031B(const Feature& cable,const ExprEnv& env,const Documen
         if(!std::isfinite(point.x)||!std::isfinite(point.y)||!std::isfinite(point.z)||std::max({std::abs(point.x),std::abs(point.y),std::abs(point.z)})>10000)throw std::runtime_error("Cable bound point exceeds finite 10 m domain");
         std::string name=role;if(const auto* value=item.find("name")){if(value->t!=V::Str||value->str.empty()||value->str.size()>128)throw std::runtime_error("Cable bound endpoint name must be nonempty");name=value->str;}
         V result=V::makeObj();result.set("name",V::makeStr(name));result.set("point",xyz031(point));
-        V row=V::makeObj();row.set("role",V::makeStr(role));row.set("node",V::makeNum((double)node));row.set("copy",V::makeNum(copy));row.set("feature",V::makeNum((double)occurrence.feature));row.set("reference",V::makeStr(reference));row.set("world_point_mm",xyz031(point));endpoints.arr.push_back(row);return result;
+        V row=V::makeObj();row.set("role",V::makeStr(role));row.set("node",V::makeNum((double)node));row.set("copy",V::makeNum(copy));row.set("feature",V::makeNum((double)occurrence.feature));row.set("reference",V::makeStr(reference));row.set("world_point_mm",xyz031(point));
+        for(const char* key:{"connector","pin","net"})if(const auto* value=item.find(key)){
+            if(value->t!=V::Str||value->str.empty()||value->str.size()>128)throw std::runtime_error(std::string("Cable binding ")+key+" must be a nonempty name of at most 128 bytes");
+            result.set(key,*value);row.set(key,*value);
+        }
+        endpoints.arr.push_back(row);return result;
     };
     for(const char* key:{"start","end"})if(const auto* item=resolved.find(key)){const V result=endpoint(*item,key);resolved.set(key,result);}
     if(const auto* source=resolved.find("waypoints")){if(source->arr.size()>32)throw std::runtime_error("Cable waypoint limit is 32");V points=V::makeArr();for(size_t i=0;i<source->arr.size();++i)points.arr.push_back(endpoint(source->arr[i],"waypoint."+std::to_string(i)));resolved.set("waypoints",points);}
