@@ -1521,6 +1521,7 @@ static LRESULT CALLBACK editorProc(HWND h,UINT m,WPARAM w,LPARAM l){
             SelectObject(dc,old);DeleteObject(bitmap);DeleteDC(dc);ReleaseDC(h,screen);g_dialogShot.clear();
         }
         if(g_dialogSmoke==1)SetWindowTextA(g_edit,g_dialogReplacement.c_str());
+        if(g_dialogSmoke==4){if(!g_dialogDone)SetTimer(h,901,200,nullptr);return 0;}
         SendMessage(h,WM_COMMAND,g_dialogSmoke==2?2:1,0);return 0;
     }
     if(m==WM_CTLCOLORSTATIC||m==WM_CTLCOLOREDIT||m==WM_CTLCOLORLISTBOX){bool field=m!=WM_CTLCOLORSTATIC;SetTextColor((HDC)w,RGB(223,226,234));SetBkColor((HDC)w,field?RGB(42,45,52):RGB(29,31,36));return (LRESULT)(field?fieldBrush:dialogBrush);}
@@ -1563,7 +1564,7 @@ static bool editFields(const char* title,const char* hint,std::vector<EditorFiel
     HWND controlParent=g_dialog;
     auto control=[&](const char* cls,const char* text,DWORD style,int x,int y,int w,int h,int id,HFONT f){HWND c=CreateWindowExA(0,cls,text,WS_CHILD|WS_VISIBLE|style,x,y,w,h,controlParent,(HMENU)(INT_PTR)id,wc.hInstance,nullptr);SendMessage(c,WM_SETFONT,(WPARAM)f,TRUE);return c;};
     bool live=false;int geometryPick=0,bodyPick=0;for(const auto& field:fields){if(!field.picks)continue;live=true;if(field.picks>=1&&field.picks<=3)geometryPick=geometryPick?geometryPick:field.picks;if(field.picks==7)bodyPick=7;else if(field.picks==5)bodyPick=std::max(bodyPick,5);else if(field.picks==4)bodyPick=std::max(bodyPick,4);if(field.picks==8||field.picks==9)geometryPick=geometryPick?geometryPick:3;}
-    std::string liveHint=hint?hint:"";if(live)liveHint+=" Click the model to select. Further clicks add. Apply uses the same feature command.";
+    std::string liveHint=hint?hint:"";if(live)liveHint+=" Clicks add; Apply commits.";
     control("STATIC",title,0,px(26),px(22),width-px(52),px(27),0,font);control("STATIC",liveHint.c_str(),0,px(26),px(58),width-px(52),px(44),0,font);
     EditorScrollState scroll;scroll.line=px(62);
     if(!multiline){WNDCLASSA panelClass{};panelClass.lpfnWndProc=editorScrollProc;panelClass.hInstance=wc.hInstance;panelClass.lpszClassName="ARK_EDITOR_SCROLL";panelClass.hbrBackground=dialogBrush;panelClass.hCursor=wc.hCursor;RegisterClassA(&panelClass);
@@ -1591,7 +1592,9 @@ static bool editFields(const char* title,const char* hint,std::vector<EditorFiel
     auto pickedSketchAt=[&](int index){std::string all=pickedSketches();int seen=0;std::istringstream stream(all);std::string part;while(std::getline(stream,part,';')){part=trimField(part);if(part.empty())continue;if(seen++==index)return part;}return std::string();};
     auto liveText=[&](int picks){if(picks==1)return pickedNames("face");if(picks==2)return pickedNames("edge");if(picks==3)return pickedSketches();if(picks==8)return pickedSketchAt(0);if(picks==9)return pickedSketchAt(1);if(picks==4){if(g_pickKind==1||g_pickKind==2||g_pickKind==3)for(const auto& item:g_picked)if(item.feature&&(item.kind=="face"||item.kind=="edge"||item.kind=="curve"))return std::to_string(item.feature);if(!g_editorBodies.empty())return std::to_string(g_editorBodies[0]);return std::string();}if(picks==5)return g_editorBodies.size()<2?std::string():std::to_string(g_editorBodies[1]);if(picks==7){std::string text;for(u64 id:g_editorBodies){if(!text.empty())text+="; ";text+=std::to_string(id);}return text;}return std::string();};
     int savedPick=g_pickKind;bool savedEdges=g_showEdges,savedSketches=g_showSketches;
-    if(live){g_editorBodies.clear();if(bodyPick&&selBody>=0&&selBody<(int)g_bodyIds.size())g_editorBodies.push_back(g_bodyIds[(size_t)selBody]);g_editorLivePick=geometryPick?geometryPick:bodyPick;if(geometryPick>=1&&geometryPick<=3)g_pickKind=geometryPick;else if(bodyPick)g_pickKind=0;if(g_pickKind==2)g_showEdges=true;if(g_pickKind==3)g_showSketches=true;}
+    // Two-body editors explicitly collect base, then tool; the current body is
+    // only an initial field value and must not consume the first click.
+    if(live){g_editorBodies.clear();if(bodyPick&&bodyPick!=5&&selBody>=0&&selBody<(int)g_bodyIds.size())g_editorBodies.push_back(g_bodyIds[(size_t)selBody]);g_editorLivePick=geometryPick?geometryPick:bodyPick;if(geometryPick>=1&&geometryPick<=3)g_pickKind=geometryPick;else if(bodyPick)g_pickKind=0;if(g_pickKind==2)g_showEdges=true;if(g_pickKind==3)g_showSketches=true;}
     g_edit=edits.front();g_dialogDone=g_dialogAccept=false;if(!live)EnableWindow(g_window,FALSE);ShowWindow(g_dialog,SW_SHOW);SetFocus(g_edit);SendMessage(g_edit,EM_SETSEL,0,-1);
     if(g_dialogSmoke)SetTimer(g_dialog,901,200,nullptr);
     u64 seenPick=g_editorPickSerial;std::vector<char> filled(fields.size(),0);
@@ -4034,7 +4037,7 @@ static void uiAction(int id){
 
 // Ribbon property sheets use expressions; programmatic smoke actions stay deterministic.
 static void interactiveAction(int id){
-    if(g_editorLivePick){g_status="Click the model to select, then Apply in the open editor.";return;}
+    if(g_editorLivePick&&!(g_editorLivePick==3&&id>=11000&&id<12000)){g_status="Click the model to select, then Apply in the open editor.";return;}
     try{
     using V=arkjson::Value;std::vector<EditorField> fields;FeatureType type=FeatureType::Box;
     switch(id){
@@ -5962,7 +5965,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     auto setDpiContext=reinterpret_cast<BOOL(WINAPI*)(HANDLE)>(GetProcAddress(GetModuleHandleW(L"user32.dll"),"SetProcessDpiAwarenessContext"));
     if(!setDpiContext||!setDpiContext(reinterpret_cast<HANDLE>(-4)))SetProcessDPIAware();
     bool plasticsUiTest=false,electronicsWorkspaceUiTest=false,cableGuideUiTest=false;
-    bool nativeProductPerformanceUiTest=false,sceneCacheUiTest=false,authoringAssistanceUiTest=false;
+    bool nativeProductPerformanceUiTest=false,sceneCacheUiTest=false,authoringAssistanceUiTest=false,featureEditorPickingUiTest=false;
     bool featureHistoryUiTest=false,recoveryUiTest=false,editorScrollUiTest=false,configurationWorkspaceUiTest=false,interactionPerformanceUiTest=false;bool startupUiTest=false;bool stampsUiTest=false;bool planesSectionsUiTest=false;
     bool specializedPatternUiTest=false;bool advancedSheetmetalUiTest=false;bool nativeVertexPullUiTest=false;bool cadImportUiTest=false;bool holesOrchestratorUiTest=false;bool designContainerUiTest=false;
     bool directAuthoringUiTest=false,parametricAuthoringUiTest=false,skeletonEditorUiTest=false,imageAttachmentUiTest=false,assistantSteeringUiTest=false;
@@ -5983,6 +5986,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         else if(a=="--self-test-realtime-ui"){realtimeUiTest=true;g_headless=true;}
         else if(a=="--self-test-product-tools-ui"){productToolsUiTest=true;g_headless=true;}
         else if(a=="--self-test-editor-scroll-ui"){editorScrollUiTest=true;g_headless=true;}
+        else if(a=="--self-test-feature-editor-picking-ui"){featureEditorPickingUiTest=true;g_headless=true;}
         else if(a=="--self-test-configuration-workspace-ui"){configurationWorkspaceUiTest=true;g_headless=true;}
         else if(a=="--self-test-scene-cache-ui"){sceneCacheUiTest=true;g_headless=true;}
         else if(a=="--self-test-authoring-assistance-ui"){authoringAssistanceUiTest=true;g_headless=true;}
@@ -6841,6 +6845,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
 #include "typed_sketch_selftest.inl"
 #include "history_recovery_selftest.inl"
 #include "editor_scroll_selftest.inl"
+#include "feature_editor_picking_selftest.inl"
 #include "configuration_workspace_selftest.inl"
 #include "scene_cache_selftest.inl"
 #include "authoring_assistance_selftest.inl"
