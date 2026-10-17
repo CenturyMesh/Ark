@@ -1,0 +1,110 @@
+--- a/src/ModelingData/TKGeomBase/GeomLib/GeomLib.cxx
++++ b/src/ModelingData/TKGeomBase/GeomLib/GeomLib.cxx
+@@ -66,12 +66,14 @@
+ #include <Geom_Hyperbola.hxx>
+ #include <Geom_Line.hxx>
+ #include <Geom_OffsetCurve.hxx>
++#include <Geom_OffsetSurface.hxx>
+ #include <Geom_Parabola.hxx>
+ #include <Geom_Plane.hxx>
+ #include <Geom_RectangularTrimmedSurface.hxx>
+ #include <Geom_Surface.hxx>
+ #include <Geom_TrimmedCurve.hxx>
+ #include <GeomAdaptor_Surface.hxx>
++#include <GeomAdaptor_Curve.hxx>
+ #include <GeomConvert.hxx>
+ #include <GeomConvert_ApproxSurface.hxx>
+ #include <GeomConvert_CompCurveToBSplineCurve.hxx>
+@@ -79,6 +81,8 @@
+ #include <GeomLib_DenominatorMultiplierPtr.hxx>
+ #include <GeomLib_LogSample.hxx>
+ #include <GeomLib_MakeCurvefromApprox.hxx>
++#include <GeomLib_CheckCurveOnSurface.hxx>
++#include <cmath>
+ #include <GeomLib_PolyFunc.hxx>
+ #include <gp_Ax2.hxx>
+ #include <gp_Circ.hxx>
+@@ -1048,6 +1052,35 @@
+ 
+ //=================================================================================================
+ 
++static bool CheckOffsetIsoCurve(const occ::handle<Geom_Curve>& theCurve,
++  Adaptor3d_CurveOnSurface& theSource,const double theFirst,const double theLast,
++  const double theTolerance,double& theMaximum,double& theAverage)
++{
++  occ::handle<GeomAdaptor_Curve> aReference=new GeomAdaptor_Curve(theCurve,theFirst,theLast);
++  occ::handle<Adaptor3d_CurveOnSurface> aSource=
++    new Adaptor3d_CurveOnSurface(
++      theSource.GetCurve()->Trim(theFirst,theLast,0.0),theSource.GetSurface());
++  GeomLib_CheckCurveOnSurface aCheck(aReference);aCheck.Perform(aSource);
++  if(!aCheck.IsDone()||!std::isfinite(aCheck.MaxDistance()))return false;
++  theMaximum=aCheck.MaxDistance();theAverage=0.;
++  math_Vector aPoints(1,16),aWeights(1,16);
++  math::GaussPoints(16,aPoints);math::GaussWeights(16,aWeights);
++  for(int i=1;i<=16;++i)
++  {
++    const double aT=(theFirst+theLast)*.5+(theLast-theFirst)*.5*aPoints(i);
++    const double aDistance=theCurve->Value(aT).Distance(theSource.Value(aT));
++    if(!std::isfinite(aDistance))return false;
++    theAverage+=.5*aWeights(i)*aDistance;
++  }
++  for(const double aT:{theFirst,theLast})
++  {
++    const double aDistance=theCurve->Value(aT).Distance(theSource.Value(aT));
++    if(!std::isfinite(aDistance))return false;
++    theMaximum=std::max(theMaximum,aDistance);
++  }
++  return std::isfinite(theAverage)&&theMaximum<=theTolerance;
++}
++
+ void GeomLib::BuildCurve3d(const double              Tolerance,
+                            Adaptor3d_CurveOnSurface& Curve,
+                            const double              FirstParameter,
+@@ -1063,6 +1096,7 @@
+ 
+   MaxDeviation     = 0.0e0;
+   AverageDeviation = 0.0e0;
++  bool mustCheckOffsetIso=false;
+   occ::handle<GeomAdaptor_Surface> geom_adaptor_surface_ptr(
+     occ::down_cast<GeomAdaptor_Surface>(Curve.GetSurface()));
+   occ::handle<Geom2dAdaptor_Curve> geom_adaptor_curve_ptr(
+@@ -1100,6 +1134,13 @@
+     double aParam;
+     if (isIsoLine(TrimmedC2D, isU, aParam, isForward))
+     {
++      occ::handle<Geom_Surface> aBasis=geom_adaptor_surface_ptr->Surface();
++      while(aBasis->IsKind(STANDARD_TYPE(Geom_RectangularTrimmedSurface)))
++        aBasis=occ::down_cast<Geom_RectangularTrimmedSurface>(aBasis)->BasisSurface();
++      const occ::handle<Geom_OffsetSurface> anOffset=occ::down_cast<Geom_OffsetSurface>(aBasis);
++      // Canonical or zero offsets expose an exact equivalent surface. Only
++      // the offset domain whose UIso/VIso may approximate needs this custody.
++      mustCheckOffsetIso=!anOffset.IsNull()&&anOffset->Surface().IsNull();
+       NewCurvePtr = buildC3dOnIsoLine(TrimmedC2D,
+                                       geom_adaptor_surface_ptr,
+                                       FirstParameter,
+@@ -1110,7 +1151,13 @@
+                                       isForward);
+       if (!NewCurvePtr.IsNull())
+       {
+-        return;
++        if(!mustCheckOffsetIso||CheckOffsetIsoCurve(NewCurvePtr,Curve,FirstParameter,LastParameter,
++              Tolerance,MaxDeviation,AverageDeviation))
++          return;
++        // An offset iso can itself be an approximation. The unverified iso
++        // shortcut must not report zero error; approximate the same adaptor
++        // and interval through the normal constrained approximation below.
++        NewCurvePtr.Nullify();
+       }
+     }
+   }
+@@ -1161,6 +1208,10 @@
+     MaxDeviation     = anApproximator.MaxError(3, 1);
+     AverageDeviation = anApproximator.AverageError(3, 1);
+     NewCurvePtr      = aCurvePtr;
++    if(mustCheckOffsetIso&&(!std::isfinite(MaxDeviation)||!std::isfinite(AverageDeviation)
++        ||MaxDeviation>Tolerance||!CheckOffsetIsoCurve(NewCurvePtr,Curve,
++          FirstParameter,LastParameter,Tolerance,MaxDeviation,AverageDeviation)))
++      NewCurvePtr.Nullify();
+   }
+ }
+ 

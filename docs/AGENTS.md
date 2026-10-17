@@ -1,5 +1,13 @@
 # ARK agent protocol
 
+038B preserves successful query-batch rows when another row requests an absent
+field. Use the returned observed result, available fields and recovery arguments;
+do not repeat an unchanged failed projection. A corrected same-subject read may
+explicitly resolve an earlier selector failure through the documented
+`team_report_task` `read_resolutions` contract. Only a later successful receipt
+at the current revision can support that resolution; it never waives a write,
+preview or completion gate. See [038B evidence](iterations/038B.md).
+
 037D preloads static overview/sketch/solids contracts for Studio writers and
 retains loaded guides across request compaction. For an empty document in
 Parallel mode, the lead commits initial editable geometry before other writers

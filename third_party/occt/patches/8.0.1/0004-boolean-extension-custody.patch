@@ -1,0 +1,457 @@
+--- a/src/ModelingAlgorithms/TKBO/BOPAlgo/BOPAlgo_PaveFiller_6.cxx
++++ b/src/ModelingAlgorithms/TKBO/BOPAlgo/BOPAlgo_PaveFiller_6.cxx
+@@ -544,12 +544,10 @@
+     aFaceFace.Indices(nF1, nF2);
+     if (!aFaceFace.IsDone() || aFaceFace.HasErrors())
+     {
+-      BOPDS_InterfFF& aFF = aFFs.Appended();
+-      aFF.SetIndices(nF1, nF2);
+-      aFF.Init(0, 0);
+-      // Warn about failed intersection of faces
+-      AddIntersectionFailedWarning(aFaceFace.Face1(), aFaceFace.Face2());
+-      continue;
++      // A failed face-face computation does not prove an empty intersection.
++      // Preserve its failure instead of constructing an empty FF interference.
++      AddError(new BOPAlgo_AlertIntersectionFailed);
++      return;
+     }
+     //
+     bool   bTangentFaces = aFaceFace.TangentFaces();
+--- a/src/ModelingAlgorithms/TKOffset/BRepOffset/BRepOffset_Tool.cxx
++++ b/src/ModelingAlgorithms/TKOffset/BRepOffset/BRepOffset_Tool.cxx
+@@ -18,6 +18,7 @@
+ 
+ #include <Bnd_Box2d.hxx>
+ #include <BndLib_Add3dCurve.hxx>
++#include <BSplCLib.hxx>
+ #include <BOPAlgo_PaveFiller.hxx>
+ #include <BOPDS_DS.hxx>
+ #include <BOPTools_AlgoTools.hxx>
+@@ -57,9 +58,11 @@
+ #include <Geom2d_TrimmedCurve.hxx>
+ #include <Geom2dAdaptor_Curve.hxx>
+ #include <Geom2dConvert_ApproxCurve.hxx>
++#include <Geom2dConvert.hxx>
+ #include <Geom2dConvert_CompCurveToBSplineCurve.hxx>
+ #include <Geom2dInt_GInter.hxx>
+ #include <Geom_BezierSurface.hxx>
++#include <Geom_BezierCurve.hxx>
+ #include <Geom_BSplineCurve.hxx>
+ #include <Geom_Conic.hxx>
+ #include <Geom_ConicalSurface.hxx>
+@@ -73,10 +76,15 @@
+ #include <Geom_SurfaceOfRevolution.hxx>
+ #include <Geom_TrimmedCurve.hxx>
+ #include <GeomAdaptor_Surface.hxx>
++#include <GeomAdaptor_Curve.hxx>
++#include <Adaptor3d_CurveOnSurface.hxx>
++#include <GeomLib_CheckCurveOnSurface.hxx>
+ #include <GeomAPI.hxx>
+ #include <GeomAPI_ExtremaCurveCurve.hxx>
+ #include <GeomAPI_ProjectPointOnCurve.hxx>
++#include <GeomAPI_ProjectPointOnSurf.hxx>
+ #include <GeomConvert_ApproxCurve.hxx>
++#include <GeomConvert.hxx>
+ #include <GeomConvert_CompCurveToBSplineCurve.hxx>
+ #include <GeomInt_IntSS.hxx>
+ #include <GeomLib.hxx>
+@@ -107,6 +115,7 @@
+ #include <NCollection_Sequence.hxx>
+ 
+ #include <cstdio>
++#include <cmath>
+ 
+ // The constant defines the maximal value to enlarge surfaces.
+ // It is limited to 1.e+7. This limitation is justified by the
+@@ -1479,6 +1488,8 @@
+   aPF.SetArguments(aLS);
+   //
+   aPF.Perform();
++  if (aPF.HasErrors())
++    throw Standard_ConstructionError("Offset face-face intersection failed");
+ 
+   NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> TrueEdges;
+   if (!RefEdge.IsNull())
+@@ -3790,6 +3801,304 @@
+ 
+ //=================================================================================================
+ 
++// Concatenate bounded pcurves without changing either parameter interval.
++// The original boundary supplies the common pole; the complete result is
++// checked in physical space by ExtendedSharedPCurve before publication.
++static bool PreservesCurveParameter(const occ::handle<Geom2d_Curve>& theCurve)
++{
++  if(theCurve.IsNull())return false;
++  occ::handle<Geom2d_Curve> aBasis=theCurve;
++  while(aBasis->IsKind(STANDARD_TYPE(Geom2d_TrimmedCurve)))
++    aBasis=occ::down_cast<Geom2d_TrimmedCurve>(aBasis)->BasisCurve();
++  return aBasis->IsKind(STANDARD_TYPE(Geom2d_Line))
++      || aBasis->IsKind(STANDARD_TYPE(Geom2d_BSplineCurve))
++      || aBasis->IsKind(STANDARD_TYPE(Geom2d_BezierCurve));
++}
++
++static double SharedCurveDeviation(const occ::handle<Geom_Curve>& theCurve,
++  const occ::handle<Geom2d_Curve>& thePC,const occ::handle<Geom_Surface>& theSurface,
++  const double theFirst,const double theLast)
++{
++  if(theCurve.IsNull()||thePC.IsNull()||theSurface.IsNull()
++      ||!std::isfinite(theFirst)||!std::isfinite(theLast)||theFirst>=theLast)
++    throw Standard_ConstructionError("BRepOffset: invalid shared curve verification input");
++  occ::handle<GeomAdaptor_Curve> aReference=new GeomAdaptor_Curve(theCurve,theFirst,theLast);
++  occ::handle<Geom2dAdaptor_Curve> aUV=new Geom2dAdaptor_Curve(thePC,theFirst,theLast);
++  occ::handle<GeomAdaptor_Surface> aSupport=new GeomAdaptor_Surface(theSurface);
++  occ::handle<Adaptor3d_CurveOnSurface> anOnSurface=new Adaptor3d_CurveOnSurface(aUV,aSupport);
++  GeomLib_CheckCurveOnSurface aCheck(aReference);aCheck.Perform(anOnSurface);
++  if(!aCheck.IsDone()||!std::isfinite(aCheck.MaxDistance()))
++    throw Standard_ConstructionError("BRepOffset: cannot verify shared edge pcurve");
++  double aMaximum=aCheck.MaxDistance();
++  for(const double aT:{theFirst,theLast})
++  {
++    const gp_Pnt2d aPoint=thePC->Value(aT);
++    const double aDistance=theCurve->Value(aT).Distance(theSurface->Value(aPoint.X(),aPoint.Y()));
++    if(!std::isfinite(aDistance))throw Standard_ConstructionError("BRepOffset: non-finite shared edge pcurve");
++    aMaximum=std::max(aMaximum,aDistance);
++  }
++  return aMaximum;
++}
++
++static occ::handle<Geom2d_BSplineCurve> JoinSharedPCurves(
++  const occ::handle<Geom2d_Curve>& theFirst,
++  const double theFirstStart,
++  const double theJoin,
++  const occ::handle<Geom2d_Curve>& theSecond,
++  const double theSecondEnd,
++  const bool theKeepFirstJoin = false)
++{
++  if(!PreservesCurveParameter(theFirst)||!PreservesCurveParameter(theSecond))
++    throw Standard_ConstructionError("BRepOffset: shared pcurve parameter conversion unsupported");
++  occ::handle<Geom2d_BSplineCurve> aFirst = Geom2dConvert::CurveToBSplineCurve(
++    new Geom2d_TrimmedCurve(theFirst, theFirstStart, theJoin));
++  occ::handle<Geom2d_BSplineCurve> aSecond = Geom2dConvert::CurveToBSplineCurve(
++    new Geom2d_TrimmedCurve(theSecond, theJoin, theSecondEnd));
++  for(const auto& anInterval:{std::make_pair(aFirst,std::make_pair(theFirstStart,theJoin)),
++      std::make_pair(aSecond,std::make_pair(theJoin,theSecondEnd))})
++  {
++    const auto& aSpline=anInterval.first;
++    const double aStart=anInterval.second.first,anEnd=anInterval.second.second;
++    if(aSpline->FirstParameter()!=aStart||aSpline->LastParameter()!=anEnd)
++    {
++      NCollection_Array1<double> aParameters(aSpline->Knots());
++      BSplCLib::Reparametrize(aStart,anEnd,aParameters);aSpline->SetKnots(aParameters);
++    }
++  }
++  const int aDegree = std::max(aFirst->Degree(), aSecond->Degree());
++  aFirst->IncreaseDegree(aDegree);
++  aSecond->IncreaseDegree(aDegree);
++  const int aNP1 = aFirst->NbPoles(), aNP2 = aSecond->NbPoles();
++  const int aNK1 = aFirst->NbKnots(), aNK2 = aSecond->NbKnots();
++  NCollection_Array1<gp_Pnt2d> aPoles(1, aNP1 + aNP2 - 1);
++  NCollection_Array1<double> aWeights(1, aNP1 + aNP2 - 1);
++  NCollection_Array1<double> aKnots(1, aNK1 + aNK2 - 1);
++  NCollection_Array1<int> aMults(1, aNK1 + aNK2 - 1);
++  const double aW1 = aFirst->Weight(aNP1), aW2 = aSecond->Weight(1);
++  for (int i = 1; i < aNP1; ++i)
++  {
++    aPoles(i) = aFirst->Pole(i);
++    aWeights(i) = aFirst->Weight(i) / aW1;
++  }
++  for (int i = 1; i <= aNP2; ++i)
++  {
++    aPoles(aNP1 + i - 1) = aSecond->Pole(i);
++    aWeights(aNP1 + i - 1) = aSecond->Weight(i) / aW2;
++  }
++  if (theKeepFirstJoin)
++  {
++    aPoles(aNP1) = aFirst->Pole(aNP1);
++    aWeights(aNP1) = 1.;
++  }
++  for (int i = 1; i < aNK1; ++i)
++  {
++    aKnots(i) = aFirst->Knot(i);
++    aMults(i) = aFirst->Multiplicity(i);
++  }
++  aKnots(aNK1) = theJoin;
++  aMults(aNK1) = aDegree;
++  for (int i = 2; i <= aNK2; ++i)
++  {
++    aKnots(aNK1 + i - 1) = aSecond->Knot(i);
++    aMults(aNK1 + i - 1) = aSecond->Multiplicity(i);
++  }
++  return new Geom2d_BSplineCurve(aPoles, aWeights, aKnots, aMults, aDegree, false);
++}
++
++static occ::handle<Geom_BSplineCurve> JoinOwnedCurves(
++  const occ::handle<Geom_Curve>& theFirst, const double theFirstStart,
++  const double theJoin, const occ::handle<Geom_Curve>& theSecond,
++  const double theSecondEnd, const bool theKeepFirstJoin)
++{
++  for(occ::handle<Geom_Curve> aBasis:{theFirst,theSecond})
++  {
++    while(aBasis->IsKind(STANDARD_TYPE(Geom_TrimmedCurve)))
++      aBasis=occ::down_cast<Geom_TrimmedCurve>(aBasis)->BasisCurve();
++    if(!aBasis->IsKind(STANDARD_TYPE(Geom_Line))
++        &&!aBasis->IsKind(STANDARD_TYPE(Geom_BSplineCurve))
++        &&!aBasis->IsKind(STANDARD_TYPE(Geom_BezierCurve)))
++      throw Standard_ConstructionError("BRepOffset: shared curve parameter conversion unsupported");
++  }
++  occ::handle<Geom_BSplineCurve> aFirst = GeomConvert::CurveToBSplineCurve(
++    new Geom_TrimmedCurve(theFirst, theFirstStart, theJoin));
++  occ::handle<Geom_BSplineCurve> aSecond = GeomConvert::CurveToBSplineCurve(
++    new Geom_TrimmedCurve(theSecond, theJoin, theSecondEnd));
++  for(const auto& anInterval:{std::make_pair(aFirst,std::make_pair(theFirstStart,theJoin)),
++      std::make_pair(aSecond,std::make_pair(theJoin,theSecondEnd))})
++  {
++    const auto& aSpline=anInterval.first;
++    const double aStart=anInterval.second.first,anEnd=anInterval.second.second;
++    if(aSpline->FirstParameter()!=aStart||aSpline->LastParameter()!=anEnd)
++    {
++      NCollection_Array1<double> aParameters(aSpline->Knots());
++      BSplCLib::Reparametrize(aStart,anEnd,aParameters);aSpline->SetKnots(aParameters);
++    }
++  }
++  const int aDegree = std::max(aFirst->Degree(), aSecond->Degree());
++  aFirst->IncreaseDegree(aDegree); aSecond->IncreaseDegree(aDegree);
++  const int aNP1=aFirst->NbPoles(), aNP2=aSecond->NbPoles();
++  const int aNK1=aFirst->NbKnots(), aNK2=aSecond->NbKnots();
++  NCollection_Array1<gp_Pnt> aPoles(1,aNP1+aNP2-1);
++  NCollection_Array1<double> aWeights(1,aNP1+aNP2-1),aKnots(1,aNK1+aNK2-1);
++  NCollection_Array1<int> aMults(1,aNK1+aNK2-1);
++  const double aW1=aFirst->Weight(aNP1),aW2=aSecond->Weight(1);
++  for(int i=1;i<aNP1;++i){aPoles(i)=aFirst->Pole(i);aWeights(i)=aFirst->Weight(i)/aW1;}
++  for(int i=1;i<=aNP2;++i){aPoles(aNP1+i-1)=aSecond->Pole(i);aWeights(aNP1+i-1)=aSecond->Weight(i)/aW2;}
++  if(theKeepFirstJoin){aPoles(aNP1)=aFirst->Pole(aNP1);aWeights(aNP1)=1.;}
++  for(int i=1;i<aNK1;++i){aKnots(i)=aFirst->Knot(i);aMults(i)=aFirst->Multiplicity(i);}
++  aKnots(aNK1)=theJoin;aMults(aNK1)=aDegree;
++  for(int i=2;i<=aNK2;++i){aKnots(aNK1+i-1)=aSecond->Knot(i);aMults(aNK1+i-1)=aSecond->Multiplicity(i);}
++  return new Geom_BSplineCurve(aPoles,aWeights,aKnots,aMults,aDegree,false);
++}
++
++static occ::handle<Geom_Curve> MaterializeOwnedCurve(
++  const TopoDS_Edge& theEdge, const TopoDS_Face& theFace,
++  const double theFirst, const double theLast, const double theTolerance)
++{
++  if(!std::isfinite(theFirst)||!std::isfinite(theLast)||!std::isfinite(theTolerance)
++      ||theFirst>=theLast||theTolerance<=0.)
++    throw Standard_ConstructionError("BRepOffset: invalid constructed edge interval");
++  double aPF,aPL;
++  const occ::handle<Geom2d_Curve> aPC=BRep_Tool::CurveOnSurface(theEdge,theFace,aPF,aPL);
++  if(aPC.IsNull())throw Standard_ConstructionError("BRepOffset: missing constructed edge pcurve");
++  double aCF,aCL;
++  const occ::handle<Geom_Curve> anExisting=BRep_Tool::Curve(theEdge,aCF,aCL);
++  if(!anExisting.IsNull()&&anExisting->FirstParameter()<=theFirst&&anExisting->LastParameter()>=theLast)
++  {
++    if(SharedCurveDeviation(anExisting,aPC,BRep_Tool::Surface(theFace),theFirst,theLast)>theTolerance)
++      throw Standard_ConstructionError("BRepOffset: inconsistent original edge curve");
++    return anExisting;
++  }
++  occ::handle<Geom2dAdaptor_Curve> aUV=new Geom2dAdaptor_Curve(aPC,theFirst,theLast);
++  occ::handle<GeomAdaptor_Surface> aSupport=new GeomAdaptor_Surface(BRep_Tool::Surface(theFace));
++  Adaptor3d_CurveOnSurface anOnSurface(aUV,aSupport);occ::handle<Geom_Curve> aCurve;
++  double aMaximum,anAverage;
++  GeomLib::BuildCurve3d(theTolerance,anOnSurface,theFirst,theLast,aCurve,aMaximum,anAverage);
++  const double aPhysical=aCurve.IsNull()?Precision::Infinite():
++    SharedCurveDeviation(aCurve,aPC,BRep_Tool::Surface(theFace),theFirst,theLast);
++  if(aCurve.IsNull()||!std::isfinite(aMaximum)||!std::isfinite(anAverage)||aMaximum>theTolerance
++      ||aPhysical>theTolerance)
++    throw Standard_ConstructionError("BRepOffset: cannot materialize constructed edge");
++  return aCurve;
++}
++
++static occ::handle<Geom2d_Curve> ProjectOwnedExtension(
++  const occ::handle<Geom_Curve>& theCurve,const occ::handle<Geom_Surface>& theSurface,
++  const occ::handle<Geom2d_Curve>& theOriginal,const double theFirst,const double theLast,
++  const bool theAnchorAtLast,const double theTolerance)
++{
++  double aReached=theTolerance;
++  occ::handle<Geom_Curve> aRestricted=theCurve;
++  if(const occ::handle<Geom_BSplineCurve> aSpline=occ::down_cast<Geom_BSplineCurve>(theCurve))
++  {
++    const occ::handle<Geom_BSplineCurve> aSegment=occ::down_cast<Geom_BSplineCurve>(aSpline->Copy());
++    aSegment->Segment(theFirst,theLast);
++    aRestricted=aSegment;
++  }
++  const occ::handle<Geom2d_Curve> aProjected=GeomProjLib::Curve2d(
++    aRestricted,theFirst,theLast,theSurface,aReached);
++  if(aProjected.IsNull()||!std::isfinite(aReached)||!PreservesCurveParameter(aProjected))
++    throw Standard_ConstructionError("BRepOffset: cannot project shared edge extension");
++  occ::handle<Geom2d_BSplineCurve> aBasis=Geom2dConvert::CurveToBSplineCurve(
++    new Geom2d_TrimmedCurve(aProjected,theFirst,theLast));
++  if(aBasis->FirstParameter()!=theFirst||aBasis->LastParameter()!=theLast)
++  {
++    NCollection_Array1<double> aParameters(aBasis->Knots());
++    BSplCLib::Reparametrize(theFirst,theLast,aParameters);aBasis->SetKnots(aParameters);
++  }
++  const double anAnchorParameter=theAnchorAtLast?theLast:theFirst;
++  const gp_Pnt2d anAnchor=theOriginal->Value(anAnchorParameter);
++  const gp_Pnt2d aProjectedAnchor=aBasis->Value(anAnchorParameter);
++  const double aShiftU=theSurface->IsUPeriodic()
++    ?std::round((anAnchor.X()-aProjectedAnchor.X())/theSurface->UPeriod())*theSurface->UPeriod():0.;
++  const double aShiftV=theSurface->IsVPeriodic()
++    ?std::round((anAnchor.Y()-aProjectedAnchor.Y())/theSurface->VPeriod())*theSurface->VPeriod():0.;
++  aBasis->Translate(gp_Vec2d(aShiftU,aShiftV));
++  const double aNewEndParameter=theAnchorAtLast?theFirst:theLast;
++  const gp_Pnt2d aBranch=theOriginal->Value(aNewEndParameter);
++  GeomAPI_ProjectPointOnSurf anEndProjection(theCurve->Value(aNewEndParameter),theSurface,theTolerance);
++  bool hasEndpoint=false;gp_Pnt2d aNewEnd;
++  for(int i=1;i<=anEndProjection.NbPoints();++i)
++  {
++    if(!std::isfinite(anEndProjection.Distance(i))||anEndProjection.Distance(i)>theTolerance)continue;
++    double aU,aV;anEndProjection.Parameters(i,aU,aV);
++    if(theSurface->IsUPeriodic())aU+=std::round((aBranch.X()-aU)/theSurface->UPeriod())*theSurface->UPeriod();
++    if(theSurface->IsVPeriodic())aV+=std::round((aBranch.Y()-aV)/theSurface->VPeriod())*theSurface->VPeriod();
++    const gp_Pnt2d aCandidate(aU,aV);
++    if(hasEndpoint&&aCandidate.Distance(aNewEnd)>Precision::PConfusion())
++      throw Standard_ConstructionError("BRepOffset: ambiguous shared edge endpoint projection");
++    aNewEnd=aCandidate;hasEndpoint=true;
++  }
++  if(!hasEndpoint)throw Standard_ConstructionError("BRepOffset: missing shared edge endpoint projection");
++  aBasis->SetPole(theAnchorAtLast?1:aBasis->NbPoles(),aNewEnd);
++  if(!std::isfinite(aNewEnd.X())||!std::isfinite(aNewEnd.Y()))
++    throw Standard_ConstructionError("BRepOffset: non-finite shared edge endpoint projection");
++  // Constrain the known original endpoint. Refine only the terminal span;
++  // knot insertion is exact before anchoring and the physical criterion is
++  // unchanged. A singular support cannot silently choose another UV branch.
++  for(;;)
++  {
++    occ::handle<Geom2d_BSplineCurve> aCandidate=occ::down_cast<Geom2d_BSplineCurve>(aBasis->Copy());
++    aCandidate->SetPole(theAnchorAtLast?aCandidate->NbPoles():1,anAnchor);
++    if(SharedCurveDeviation(theCurve,aCandidate,theSurface,theFirst,theLast)<=theTolerance)
++      return aCandidate;
++    const int aKnot=theAnchorAtLast?aBasis->NbKnots()-1:1;
++    const double aLeft=aBasis->Knot(aKnot),aRight=aBasis->Knot(aKnot+1);
++    if(aRight-aLeft<=2.*Precision::PConfusion())
++      throw Standard_ConstructionError("BRepOffset: cannot anchor shared edge extension");
++    const int anOldCount=aBasis->NbKnots();
++    aBasis->InsertKnot((aLeft+aRight)*.5,aBasis->Degree(),Precision::PConfusion());
++    if(aBasis->NbKnots()==anOldCount)
++      throw Standard_ConstructionError("BRepOffset: cannot refine shared edge endpoint");
++  }
++}
++
++static occ::handle<Geom2d_Curve> ExtendedSharedPCurve(
++  const TopoDS_Edge& theEdge,
++  const TopoDS_Face& theFace,
++  const occ::handle<Geom2d_Curve>& theOriginal,
++  const double theOriginalFirst,
++  const double theOriginalLast,
++  const double theFirst,
++  const double theLast,
++  const double theTolerance)
++{
++  if(!std::isfinite(theOriginalFirst)||!std::isfinite(theOriginalLast)
++      ||!std::isfinite(theFirst)||!std::isfinite(theLast)||!std::isfinite(theTolerance)
++      ||theOriginalFirst>=theOriginalLast||theFirst>=theLast||theTolerance<=0.)
++    throw Standard_ConstructionError("BRepOffset: invalid shared edge interval");
++  const bool hasBefore = theFirst < theOriginalFirst - Precision::PConfusion();
++  const bool hasAfter = theLast > theOriginalLast + Precision::PConfusion();
++  if (!hasBefore && !hasAfter)
++    return theOriginal;
++  double aCF, aCL;
++  const occ::handle<Geom_Curve> aCurve = BRep_Tool::Curve(theEdge, aCF, aCL);
++  const occ::handle<Geom_Surface> aSurface = BRep_Tool::Surface(theFace);
++  if (aCurve.IsNull())
++    throw Standard_ConstructionError("BRepOffset: missing extended shared curve");
++  if(SharedCurveDeviation(aCurve,theOriginal,aSurface,theFirst,theLast)<=theTolerance)
++    return theOriginal;
++  occ::handle<Geom2d_Curve> aPC = theOriginal;
++  double aFirst = theOriginalFirst, aLast = theOriginalLast;
++  if (hasBefore)
++  {
++    const occ::handle<Geom2d_Curve> anExtension = ProjectOwnedExtension(
++      aCurve,aSurface,theOriginal,theFirst,theOriginalFirst,true,theTolerance);
++    aPC = JoinSharedPCurves(anExtension, theFirst, theOriginalFirst, aPC, aLast);
++    aFirst = theFirst;
++  }
++  if (hasAfter)
++  {
++    const occ::handle<Geom2d_Curve> anExtension = ProjectOwnedExtension(
++      aCurve,aSurface,theOriginal,theOriginalLast,theLast,false,theTolerance);
++    aPC = JoinSharedPCurves(aPC, aFirst, theOriginalLast, anExtension, theLast, true);
++    aLast = theLast;
++  }
++  if(SharedCurveDeviation(aCurve,aPC,aSurface,aFirst,aLast)>theTolerance)
++    throw Standard_ConstructionError("BRepOffset: inconsistent shared edge extension");
++  return aPC;
++}
++
+ void BRepOffset_Tool::ExtentFace(
+   const TopoDS_Face&                                                        F,
+   NCollection_DataMap<TopoDS_Shape, TopoDS_Shape, TopTools_ShapeMapHasher>& ConstShapes,
+@@ -3841,31 +4150,42 @@
+       occ::handle<Geom2d_Curve> C2 = BRep_Tool::CurveOnSurface(CE, Fforward, f, l);
+       if (!C2.IsNull())
+       {
++        const double anOriginalFirst = f, anOriginalLast = l;
+         if (ConstShapes.IsBound(CE))
+         {
+           Ecs = TopoDS::Edge(ConstShapes(CE));
+           BRep_Tool::Range(Ecs, f, l);
+         }
++        const double anExtendedFirst=f,anExtendedLast=l;
+         if (BRep_Tool::IsClosed(CE, Fforward))
+         {
+           TopoDS_Shape              aLocalShapeReversedCE = CE.Reversed();
++          double aReverseFirst,aReverseLast;
+           occ::handle<Geom2d_Curve> C2R =
+-            BRep_Tool::CurveOnSurface(TopoDS::Edge(aLocalShapeReversedCE), Fforward, f, l);
++            BRep_Tool::CurveOnSurface(TopoDS::Edge(aLocalShapeReversedCE), Fforward, aReverseFirst, aReverseLast);
+           //	  occ::handle<Geom2d_Curve> C2R =
+           //	    BRep_Tool::CurveOnSurface(TopoDS::Edge(CE.Reversed()),F,f,l);
+-          B.UpdateEdge(CE, C2, C2R, EF, BRep_Tool::Tolerance(CE));
+           if (!Ecs.IsNull())
+           {
+-            B.UpdateEdge(Ecs, C2, C2R, EF, BRep_Tool::Tolerance(CE));
++            const occ::handle<Geom2d_Curve> aFirstPC = ExtendedSharedPCurve(
++              Ecs, EF, C2, anOriginalFirst, anOriginalLast, anExtendedFirst, anExtendedLast, std::min(TolConf,BRep_Tool::Tolerance(Ecs)));
++            const occ::handle<Geom2d_Curve> aSecondPC = ExtendedSharedPCurve(
++              Ecs, EF, C2R, aReverseFirst, aReverseLast, anExtendedFirst, anExtendedLast, std::min(TolConf,BRep_Tool::Tolerance(Ecs)));
++            B.UpdateEdge(Ecs, aFirstPC, aSecondPC, EF, BRep_Tool::Tolerance(CE));
+           }
++          if (Ecs.IsNull() || !CE.IsSame(Ecs))
++            B.UpdateEdge(CE, C2, C2R, EF, BRep_Tool::Tolerance(CE));
+         }
+         else
+         {
+-          B.UpdateEdge(CE, C2, EF, BRep_Tool::Tolerance(CE));
+           if (!Ecs.IsNull())
+           {
+-            B.UpdateEdge(Ecs, C2, EF, BRep_Tool::Tolerance(CE));
++            const occ::handle<Geom2d_Curve> aPC = ExtendedSharedPCurve(
++              Ecs, EF, C2, anOriginalFirst, anOriginalLast, f, l, std::min(TolConf,BRep_Tool::Tolerance(Ecs)));
++            B.UpdateEdge(Ecs, aPC, EF, BRep_Tool::Tolerance(CE));
+           }
++          if (Ecs.IsNull() || !CE.IsSame(Ecs))
++            B.UpdateEdge(CE, C2, EF, BRep_Tool::Tolerance(CE));
+         }
+         B.Range(CE, f, l);
+         if (!Ecs.IsNull())
+@@ -4303,6 +4623,29 @@
+             }
+           }
+         }
++        // This face constructed the new edge image. Materialize its curve from
++        // that explicit support before any neighbour can append a pcurve.
++        double aCF, aCL;
++        if (BRep_Tool::Curve(NE, aCF, aCL).IsNull() && !BRep_Tool::Degenerated(NE))
++        {
++          double aPF,aPL,anOriginalFirst,anOriginalLast;
++          BRep_Tool::CurveOnSurface(NE,EF,aPF,aPL);
++          BRep_Tool::CurveOnSurface(E,F,anOriginalFirst,anOriginalLast);
++          const double aTolerance=std::min(TolConf,BRep_Tool::Tolerance(E));
++          occ::handle<Geom_Curve> aCurve=MaterializeOwnedCurve(E,F,anOriginalFirst,anOriginalLast,aTolerance);
++          if(aPF<anOriginalFirst-Precision::PConfusion())
++          {
++            const occ::handle<Geom_Curve> anExtension=MaterializeOwnedCurve(NE,EF,aPF,anOriginalFirst,aTolerance);
++            aCurve=JoinOwnedCurves(anExtension,aPF,anOriginalFirst,aCurve,anOriginalLast,false);
++          }
++          if(aPL>anOriginalLast+Precision::PConfusion())
++          {
++            const occ::handle<Geom_Curve> anExtension=MaterializeOwnedCurve(NE,EF,anOriginalLast,aPL,aTolerance);
++            aCurve=JoinOwnedCurves(aCurve,std::min(aPF,anOriginalFirst),anOriginalLast,anExtension,aPL,true);
++          }
++          B.UpdateEdge(NE, aCurve, BRep_Tool::Tolerance(NE));
++          B.Range(NE, aPF, aPL);
++        }
+         Build.UnBind(E);
+       } // Build.IsBound(E)
+       else if (ConstShapes.IsBound(E))

@@ -100,6 +100,14 @@ shared objects before its declared RPATH transformation; final package hashes
 describe the transformed bytes. Build declarations remain local provenance,
 not independent attestation or manufacturing qualification.
 
+Promoting a tested candidate manifest changes metadata, not its compiled code.
+Preserve the candidate SDK and receipts, copy the complete SDK to a new location,
+and verify every library remains byte-identical. The copied build record retains
+the actual originating build kind and explicitly records the parent manifest,
+parent build record and `no_new_compilation` promotion. Rebind its manifest digest
+and regenerate the notice only in that copy. This is not a new compiler run or
+permission to replace DLLs without rebuilding their dependent consumers.
+
 Packages include the exact source diffs and source/build declarations in
 `licenses/OCCT-ARK-patches.txt`, alongside the unmodified upstream license and
 exception. The SBOM hashes that notice separately from actual runtime binaries.
