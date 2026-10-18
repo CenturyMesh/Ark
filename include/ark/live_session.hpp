@@ -6,6 +6,12 @@
 #include <string>
 
 namespace ark {
+struct AgentTeamSnapshot;
+// Human/local IPC inspection only; never part of AgentSession/agent discovery.
+bool isStudioDiagnosticsTool(const std::string& tool) noexcept;
+arkjson::Value studioDiagnosticsToolSchema();
+arkjson::Value studioTeamDiagnostics(const AgentTeamSnapshot& snapshot,
+                                    const arkjson::Value& args);
 // Local current-user IPC only. The dispatcher must return promptly, posting work
 // to the document's owning thread. Complete with AgentSession::call's tool result.
 // Check cancellation before executing queued work; a running geometry operation

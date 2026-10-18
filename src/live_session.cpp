@@ -1,4 +1,9 @@
 #include "ark/live_session.hpp"
+#include "ark/agent.hpp"
+#include "ark/agent_team.hpp"
+#include <algorithm>
+#include <cctype>
+#include <cmath>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -181,6 +186,37 @@ void LiveSessionBridge::stop()noexcept {
     if(impl_->stopped){CloseHandle(impl_->stopped);impl_->stopped=nullptr;}
 #endif
     impl_->name.clear();
+}
+bool isStudioDiagnosticsTool(const std::string& tool) noexcept{return tool=="studio_team_diagnostics";}
+V studioDiagnosticsToolSchema(){
+    V tool;arkjson::parse(R"({"name":"studio_team_diagnostics","description":"Read bounded local Studio team event phases and attributed rejected-read/later-read evidence. Human diagnostic only; no conversations, provider requests, CAD writes or failure resolution. Team-observed document revision may be historical.","inputSchema":{"type":"object","properties":{"role_id":{"type":"string","minLength":1,"maxLength":256},"max_records":{"type":"integer","minimum":1,"maximum":8}},"additionalProperties":false},"annotations":{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true}})",tool);return tool;
+}
+V studioTeamDiagnostics(const AgentTeamSnapshot& snapshot,const V& args){
+    constexpr std::size_t maxDataBytes=64*1024,maxRecordBytes=8192;
+    auto envelope=[](const V& data,bool error){V result=V::makeObj(),content=V::makeArr(),part=V::makeObj();result.set("isError",V::makeBool(error));result.set("structuredContent",data);part.set("type",V::makeStr("text"));part.set("text",V::makeStr(data.dump()));content.arr.push_back(part);result.set("content",content);return result;};
+    auto invalid=[&](const char* message){V error=V::makeObj();error.set("error_code",V::makeStr("INVALID_ARGUMENT"));error.set("error",V::makeStr(message));error.set("document_unchanged",V::makeBool(true));return envelope(error,true);};
+    if(args.t!=V::Obj)return invalid("Studio diagnostics arguments must be an object.");
+    std::string selected;std::size_t limit=8;
+    for(const auto& entry:args.obj){if(entry.first=="role_id"){if(entry.second.t!=V::Str||entry.second.str.empty()||entry.second.str.size()>256)return invalid("role_id must be bounded nonempty text.");selected=entry.second.str;}else if(entry.first=="max_records"){if(entry.second.t!=V::Num||!std::isfinite(entry.second.num)||entry.second.num<1||entry.second.num>8||entry.second.num!=std::floor(entry.second.num))return invalid("max_records must be an integer from 1 to 8.");limit=(std::size_t)entry.second.num;}else return invalid("Unknown Studio diagnostic argument; no writes or control operations are accepted.");}
+    if(!selected.empty()&&std::none_of(snapshot.roles.begin(),snapshot.roles.end(),[&](const auto& role){return role.id==selected;}))return invalid("No such role exists in this Studio team.");
+    auto sensitive=[](const V& value,auto&& self,unsigned depth)->bool{
+        if(depth>16)return true;
+        if(value.t==V::Str){auto text=value.str;std::transform(text.begin(),text.end(),text.begin(),[](unsigned char c){return (char)std::tolower(c);});return text.find("data:image/")!=std::string::npos||text.find("bearer ")!=std::string::npos;}
+        if(value.t==V::Obj)for(const auto& entry:value.obj){std::string key;for(unsigned char c:entry.first)if(std::isalnum(c))key+=(char)std::tolower(c);for(const char* denied:{"credential","password","secret","apikey","authorization","accesstoken","refreshtoken","image","base64","conversation","prompt"})if(key.find(denied)!=std::string::npos)return true;if(self(entry.second,self,depth+1))return true;}
+        if(value.t==V::Arr)for(const auto& item:value.arr)if(self(item,self,depth+1))return true;
+        return false;
+    };
+    static const V tools=AgentSession::tools();
+    auto record=[&](const V& source){V result=V::makeObj();for(const char* key:{"tool","args","revision","read_sequence","project_epoch","same_subject_rejected_read_sequences","query_index","batch_tool","error_code","error","stage","operation","tool_succeeded","requested_fields","missing_fields","available_fields","recovery"})if(const auto* value=source.find(key))result.set(key,*value);return result;};
+    V out=V::makeObj(),rows=V::makeArr();out.set("schema",V::makeStr("ark.studio-team-diagnostics.v1"));out.set("read_only",V::makeBool(true));out.set("document_unchanged",V::makeBool(true));out.set("team_started",V::makeBool(snapshot.started));out.set("running",V::makeBool(snapshot.running));out.set("paused",V::makeBool(snapshot.paused));out.set("cancelled",V::makeBool(snapshot.cancelled));out.set("goal_state",V::makeStr(agentGoalStateName(snapshot.goalState)));out.set("document_revision_observed",V::makeBool(snapshot.documentRevisionObserved));if(snapshot.documentRevisionObserved)out.set("document_revision",V::makeNum((double)snapshot.documentRevision));out.set("revision_scope",V::makeStr("Last document revision observed by this team; inspect doc_info for the current CAD revision."));out.set("elapsed_ms",V::makeNum((double)snapshot.elapsedMs));out.set("clock",V::makeStr("Monotonic milliseconds since team start."));out.set("phase_scope",V::makeStr("Observed host event phase. Assistant includes preparation and provider wait; this is not a provider-hang diagnosis."));out.set("active_tool_scope",V::makeStr("Host ToolStart through actual ToolEnd, including document queue wait."));out.set("evidence_scope",V::makeStr("Existing attributed read receipts only. Same-subject evidence does not itself resolve a failure or authorize CAD changes."));out.set("record_byte_limit",V::makeNum(maxRecordBytes));out.set("response_byte_limit",V::makeNum(256*1024));out.set("roles",rows);
+    bool partial=false;std::size_t omittedRoles=0;
+    for(const auto& role:snapshot.roles){if(!selected.empty()&&role.id!=selected)continue;if(rows.arr.size()>=8){++omittedRoles;partial=true;continue;}
+        V row=V::makeObj(),failures=V::makeArr(),reads=V::makeArr();row.set("role_id",V::makeStr(role.id));row.set("state",V::makeStr(agentTeamStateName(role.state)));row.set("task_state",V::makeStr(role.taskState));row.set("phase",V::makeStr(role.currentPhase));row.set("phase_started_ms",V::makeNum((double)role.phaseStartedMs));row.set("last_event_ms",V::makeNum((double)role.lastEventMs));row.set("active_tool",V::makeStr(role.activeTool));if(!role.activeTool.empty())row.set("active_tool_started_ms",V::makeNum((double)role.activeToolStartedMs));row.set("unresolved_tool_errors",V::makeNum(role.unresolvedToolErrors));row.set("rejected_reads",failures);row.set("later_read_evidence",reads);
+        std::size_t omittedFailures=role.rejectedReadCount>role.rejectedReads.size()?role.rejectedReadCount-role.rejectedReads.size():0,omittedReads=role.laterReadEvidenceCount>role.laterReadEvidence.size()?role.laterReadEvidenceCount-role.laterReadEvidence.size():0,sensitiveRecords=0;
+        auto append=[&](const std::vector<V>& source,const char* key,V& accepted,std::size_t& omitted){for(const auto& original:source){const auto* tool=original.find("tool"),*arguments=original.find("args");if(accepted.arr.size()>=limit||!tool||tool->t!=V::Str||!arguments||arguments->t!=V::Obj||arguments->dump().size()>2048||!assistantToolReadOnly(tools,tool->str,*arguments)){++omitted;continue;}V kept=record(original);if(sensitive(kept,sensitive,0)){++omitted;++sensitiveRecords;continue;}if(kept.dump().size()>maxRecordBytes){++omitted;continue;}V next=accepted;next.arr.push_back(kept);V candidate=row;candidate.set(key,next);V all=rows;all.arr.push_back(candidate);V measured=out;measured.set("roles",all);if(measured.dump().size()+4096>maxDataBytes){++omitted;continue;}accepted=std::move(next);row.set(key,accepted);}};
+        append(role.rejectedReads,"rejected_reads",failures,omittedFailures);append(role.laterReadEvidence,"later_read_evidence",reads,omittedReads);row.set("omitted_rejected_reads",V::makeNum((double)omittedFailures));row.set("omitted_later_read_evidence",V::makeNum((double)omittedReads));row.set("omitted_sensitive_records",V::makeNum((double)sensitiveRecords));row.set("partial",V::makeBool(omittedFailures||omittedReads));partial=partial||omittedFailures||omittedReads;rows.arr.push_back(row);out.set("roles",rows);
+    }
+    out.set("partial",V::makeBool(partial));out.set("omitted_roles",V::makeNum((double)omittedRoles));return envelope(out,false);
 }
 V callLiveSession(const std::string& endpoint,const std::string& tool,const V& args,unsigned timeoutMs) {
     V request=V::makeObj();request.set("tool",V::makeStr(tool));request.set("arguments",args);

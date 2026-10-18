@@ -9,6 +9,13 @@ The public iteration and numeric runtime are defined in
 increasing sequence and its principal phase. The letter is a roadmap phase, not a
 month; it does not declare the phase complete. The `.ark` format evolves separately.
 
+041D addresses **A.03/A.04/D.02/D.04/D.05**, **Parcial**, through actionable
+read recovery, strictly attributed semantic-reference supersession and external
+read-only team diagnostics. Native recovery followed by a valid atomic edit and
+the diagnostic contracts are **Verificado no escopo local**; see
+[041D](iterations/041D.md). General autonomous task progress and matched cost
+improvements require separate evidence.
+
 040D addresses **A.03/A.05/B.01/B.02/D.02/D.05/F.05**, **Parcial**, through
 valid memory-call identities and exact legacy request recovery, bounded unrated
 feedback evidence, explicit preview recovery and tested editor picking.

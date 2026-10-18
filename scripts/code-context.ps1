@@ -20,6 +20,23 @@ $savedLogging = $env:GRAPHIFY_QUERY_LOG_DISABLE
 $env:GRAPHIFY_BACKEND = 'none'
 $env:GRAPHIFY_QUERY_LOG_DISABLE = '1'
 $lock = $null
+function Invoke-Graphify([string[]]$NativeArguments) {
+    # Windows PowerShell wraps native stderr in ErrorRecord when this script is
+    # nested in a pipeline. Keep diagnostic text visible without turning a
+    # successful extraction's warning into a terminating PowerShell error.
+    $nativePreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $PSNativeCommandUseErrorActionPreference = $false
+    try {
+        & uvx @NativeArguments 2>&1 | ForEach-Object {
+            if ($_ -is [Management.Automation.ErrorRecord]) {
+                if ($_.FullyQualifiedErrorId -notlike 'NativeCommandError*') { throw $_ }
+                Write-Host ($_.ToString())
+            } else { Write-Output $_ }
+        }
+        $script:graphifyExitCode = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $nativePreference }
+}
 function Private-SourcePath([string]$Relative) {
     $normalized = $Relative.Replace('\','/')
     return $normalized -match '(?i)(^|/)[.]?(out|private|credentials?|secrets?|sessions?)(/|$)' -or
@@ -114,7 +131,7 @@ function Vault-Evidence([string]$Vault,[string]$Graph) {
 }
 try {
     if (-not (Get-Command uvx -ErrorAction SilentlyContinue)) { throw 'Install uv, then run this script with -Prepare.' }
-    if ($Prepare) { & uvx --from $tool graphify --version; if ($LASTEXITCODE) { throw 'Cannot prepare pinned Graphify.' }; if (-not $Query -and -not $Refresh -and -not $Obsidian) { return } }
+    if ($Prepare) { Invoke-Graphify -NativeArguments @('--from',$tool,'graphify','--version'); if ($graphifyExitCode) { throw 'Cannot prepare pinned Graphify.' }; if (-not $Query -and -not $Refresh -and -not $Obsidian) { return } }
     [IO.Directory]::CreateDirectory($IndexDirectory) | Out-Null
     try { $lock = [IO.File]::Open((Join-Path $IndexDirectory 'context.lock'),'OpenOrCreate','ReadWrite','None') }
     catch { throw 'Code context index is busy; retry after its current operation.' }
@@ -143,8 +160,8 @@ try {
             if (-not $obsolete.StartsWith($corpus.TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)) { throw 'Obsolete snapshot path escaped its owned corpus.' }
             if (Test-Path -LiteralPath $obsolete -PathType Leaf) { Remove-Item -LiteralPath $obsolete -Force }
         } } }
-        & uvx --offline --from $tool graphify extract $corpus --code-only --force --no-cluster --max-workers 2 --out $graphRoot
-        if ($LASTEXITCODE -or -not (Test-Path -LiteralPath $graph)) { throw 'Local code graph extraction failed; no fresh context is available.' }
+        Invoke-Graphify -NativeArguments @('--offline','--from',$tool,'graphify','extract',$corpus,'--code-only','--force','--no-cluster','--max-workers','2','--out',$graphRoot)
+        if ($graphifyExitCode -or -not (Test-Path -LiteralPath $graph)) { throw 'Local code graph extraction failed; no fresh context is available.' }
         if ((Inventory-Digest @(Source-Inventory)) -cne $digest) { throw 'Code changed during indexing; retry on the current source.' }
         $manifest = [ordered]@{schema='ark.code-context.v1';source_sha256=$digest;tool=$tool;backend='none';files=$rows;graph='index/graphify-out/graph.json';graph_sha256=(Get-FileHash -LiteralPath $graph -Algorithm SHA256).Hash.ToLowerInvariant()}
         $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
@@ -187,8 +204,8 @@ try {
             $complete = Join-Path $vault '.ark-code-vault.json'
         }
         if (-not $reusedVault) {
-            & uvx --offline --from $tool graphify export obsidian --graph $graph --dir $vault
-            if ($LASTEXITCODE) { throw 'Cannot export the derived Obsidian vault.' }
+            Invoke-Graphify -NativeArguments @('--offline','--from',$tool,'graphify','export','obsidian','--graph',$graph,'--dir',$vault)
+            if ($graphifyExitCode) { throw 'Cannot export the derived Obsidian vault.' }
         }
         $guideDirectory = Join-Path $vault 'ARK Knowledge'
         if (-not $reusedVault -and $knowledge.Count) { [IO.Directory]::CreateDirectory($guideDirectory) | Out-Null }
@@ -226,9 +243,9 @@ try {
         $arguments = @('--offline','--from',$tool,'graphify','query',$Query,'--graph',$graph)
         foreach ($item in $Seed) { $arguments += @('--seed',$item) }
         foreach ($item in $Context) { $arguments += @('--context',$item) }
-        & uvx @arguments
-        if ($LASTEXITCODE -notin @(0,3,4)) { throw 'Code graph query failed.' }
-        $queryCode = $LASTEXITCODE
+        Invoke-Graphify -NativeArguments $arguments
+        if ($graphifyExitCode -notin @(0,3,4)) { throw 'Code graph query failed.' }
+        $queryCode = $graphifyExitCode
         if ((Inventory-Digest @(Source-Inventory)) -cne $digest) { throw 'Code changed during this query; discard its result and retry.' }
         if ($queryCode) { exit $queryCode }
     } else {

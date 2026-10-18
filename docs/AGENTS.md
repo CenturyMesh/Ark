@@ -1,5 +1,15 @@
 # ARK agent protocol
 
+041D read receipts include `team_progress.next_action`. Follow the actual
+target-specific recovery; repeated coordination evidence is not a new design
+checkpoint. A rejected selector is superseded automatically only when later full
+native topology proves its original unique predicate. Otherwise a ready
+`read_resolutions` report requires your explicit decision that the observed
+semantic reference serves the design intent. Preserve the blocker when it does
+not. Historical projected progress never authorizes a write at an old revision.
+External `studio_team_diagnostics` is read-only and is not a model tool.
+See [041D contracts and evidence](iterations/041D.md).
+
 039D adds local persistent semantic/text memory. Studio supplies bounded startup
 data from the current project (including labelled scratch episodes) and curated
 shared ARK knowledge, separate from static onboarding instructions. Use

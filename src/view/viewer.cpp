@@ -3061,6 +3061,10 @@ static void sendAssistant(const std::string& explicitPrompt="",const AssistantTr
 }
 static void startLiveBridge(){
     if(!g_liveBridge.start([](const std::string& tool,const arkjson::Value& args,LiveSessionBridge::Completion complete,std::stop_token stop){
+        // Snapshot owns its lock and contains no conversation by default. Keep
+        // human diagnostics available while document/UI work is busy, without
+        // reading mutable CAD state or dispatching another agent/provider call.
+        if(isStudioDiagnosticsTool(tool)){if(stop.stop_requested()){complete(cancelledTool());return;}complete(studioTeamDiagnostics(g_agentTeam.snapshot(false,std::numeric_limits<u64>::max(),true),args));return;}
         auto request=std::make_unique<UiToolRequest>();request->tool=tool;request->args=args;request->complete=std::move(complete);request->stop=stop;postTool(std::move(request));
     }))g_status="Live MCP unavailable: "+g_liveBridge.lastError();
 }
