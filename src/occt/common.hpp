@@ -47,6 +47,8 @@ TopoDS_Shape readStep(const fs::path& path);
 void writeStep(const TopoDS_Shape& shape,const fs::path& path);
 double properties(const TopoDS_Shape& shape,char kind='v');
 void volumeProperties(const TopoDS_Shape& shape,GProp_GProps& properties,bool moments=true);
+// Volume and centre of mass only; the inertia tensor is not guaranteed.
+void volumeCentroidProperties(const TopoDS_Shape& shape,GProp_GProps& properties);
 const char* volumeIntegrationMethod(const TopoDS_Shape& shape);
 std::vector<TopoDS_Shape> shapes(const TopoDS_Shape& shape,TopAbs_ShapeEnum kind);
 std::array<double,6> bounds(const TopoDS_Shape& shape);

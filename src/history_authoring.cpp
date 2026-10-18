@@ -49,7 +49,7 @@ bool applyFeatureHistoryCommand(Document& document,const V& command) {
        (operation->str!="feature.move"&&operation->str!="feature.rollback"))return false;
     for(const auto& item:command.obj)
         if(item.first!="op"&&item.first!="id"&&!(operation->str=="feature.move"&&item.first=="delta"))
-            throw std::runtime_error("Unknown feature history field: "+item.first);
+            throw std::runtime_error("Unknown feature history field: "+item.first+(operation->str=="feature.move"?"; feature.move accepts id and delta (signed integer steps in history order)":"; feature.rollback accepts id"));
     if(operation->str=="feature.rollback") {
         const auto* value=command.find("id");
         if(!value)throw std::runtime_error("feature.rollback requires id; use null to resume all history");

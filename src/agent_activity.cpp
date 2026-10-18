@@ -59,7 +59,14 @@ V recordAgentActivity(Document& d,const std::string& tool,const V& args,const V&
         }
         row.set("query_errors",diagnostics);if(omitted)row.set("query_errors_omitted",V::makeNum((double)omitted));
     }
+    // A rejected preview is a successful tool call carrying a failed candidate;
+    // record the candidate rejection so progress views do not report it as success.
+    const V* rejectedCandidate=nullptr;
+    if(tool=="doc_preview"&&!outerFailed)if(const auto* valid=payload->find("valid");valid&&valid->t==V::Bool&&!valid->b){
+        actionFailed=true;row.set("outcome",V::makeStr("candidate_rejected"));if(const auto* candidate=payload->find("candidate_result");candidate&&candidate->t==V::Obj)rejectedCandidate=candidate;
+    }
     row.set("is_error",V::makeBool(actionFailed));for(const auto* key:{"error_code","error","geometry_recomputed","geometry_changed"})if(const auto* value=payload->find(key)){if(value->t==V::Str)row.set(key,V::makeStr(clipped(value->str,512)));else if(value->t==V::Bool)row.set(key,*value);}
+    if(rejectedCandidate)for(const auto* key:{"error_code","error"})if(const auto* value=rejectedCandidate->find(key);value&&value->t==V::Str&&!row.find(key))row.set(key,V::makeStr(clipped(value->str,512)));
     if(const auto* computed=payload->find("geometry_recomputed");computed&&computed->t==V::Bool){row.set("evaluation_ms",V::makeNum(computed->b&&payload->find("recompute_ms")?payload->find("recompute_ms")->asNum():0));if(computed->b)for(const auto* key:{"features_evaluated","features_reused"})if(const auto* value=payload->find(key))row.set(key,*value);}
     if(const auto* commands=args.find("commands");commands&&commands->t==V::Arr){row.set("command_count",V::makeNum((double)commands->arr.size()));for(const auto& c:commands->arr)if(operations.arr.size()<16)operations.arr.push_back(V::makeStr(clipped(text(c,"op"),80)));}row.set("operations",operations);row.set("feedback_required",V::makeBool(true));if(tool=="bom_review"&&!actionFailed)row.set("bom_review",*payload);
     if(tool=="team_context"&&!actionFailed)if(const auto* roles=payload->find("roles");roles&&roles->t==V::Arr){V metrics=V::makeArr();for(const auto& role:roles->arr){if(metrics.arr.size()>=8)break;const auto* context=role.find("request_context");if(!context||context->t!=V::Obj)continue;V item=V::makeObj();item.set("role",V::makeStr(clipped(text(role,"id"),80)));V values=V::makeObj();for(const auto& field:context->obj)if(field.second.t==V::Num||field.second.t==V::Bool)values.set(field.first,field.second);item.set("metrics",values);metrics.arr.push_back(item);}V measured=row;measured.set("request_context",metrics);if(measured.dump().size()<=8192)row=std::move(measured);else row.set("request_context_omitted",V::makeBool(true));}

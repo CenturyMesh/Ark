@@ -7,7 +7,7 @@ static V lastTeamReceipt038d(const V& request){
 }
 static void projectedBatchReadRecovery038d(){
     explicitCorrectedSelectionRecovery038d();
-    ark::AgentSession session;ark::AgentTeam team;ark::AgentTeamConfig config;config.focusedWorkflow=true;config.roles={role("engineer")};config.roles[0].discipline=ark::AgentTeamDiscipline::Orchestrator;
+    ark::AgentSession session;ark::AgentTeam team;ark::AgentTeamConfig config;config.readFailuresBlockCompletion=true;config.focusedWorkflow=true;config.roles={role("engineer")};config.roles[0].discipline=ark::AgentTeamDiscipline::Orchestrator;
     int round=0,executed=0;bool rejected=false,retained=false;
     config.roles[0].transport=[&](auto&,const V& request,auto*){
         switch(++round){
@@ -24,7 +24,7 @@ static void projectedBatchReadRecovery038d(){
     bool errorEvent=false;for(const auto& event:snapshot.events)if(event.kind==ark::AgentTeamEvent::ToolEnd&&event.tool=="query_batch"&&event.toolError)errorEvent=true;check(errorEvent,"nested batch rejection marks the team tool event as failed");
 }
 static void exactReferenceReadRecovery038d(){
-    ark::AgentTeam team;ark::AgentTeamConfig config;config.focusedWorkflow=true;config.roles={role("engineer")};config.roles[0].discipline=ark::AgentTeamDiscipline::Orchestrator;
+    ark::AgentTeam team;ark::AgentTeamConfig config;config.readFailuresBlockCompletion=true;config.focusedWorkflow=true;config.roles={role("engineer")};config.roles[0].discipline=ark::AgentTeamDiscipline::Orchestrator;
     int round=0,leftReads=0;bool rejected=false;
     config.roles[0].transport=[&](auto&,const V& request,auto*){
         switch(++round){
@@ -49,7 +49,7 @@ static void exactReferenceReadRecovery038d(){
 }
 static void staleReadRevisionRecovery038d(){
     for(bool omitPrecondition:{false,true}){
-    ark::AgentSession session;session.revision=4;ark::AgentTeam team;ark::AgentTeamConfig config;config.focusedWorkflow=true;config.roles={role("engineer")};config.roles[0].discipline=ark::AgentTeamDiscipline::Orchestrator;
+    ark::AgentSession session;session.revision=4;ark::AgentTeam team;ark::AgentTeamConfig config;config.readFailuresBlockCompletion=true;config.focusedWorkflow=true;config.roles={role("engineer")};config.roles[0].discipline=ark::AgentTeamDiscipline::Orchestrator;
     int round=0;bool rejected=false;
     config.roles[0].transport=[&](auto&,const V& request,auto*){
         switch(++round){
@@ -67,7 +67,7 @@ static void staleReadRevisionRecovery038d(){
 }
 static void correctedPreviewRecovery038d(){
     for(const char* tool:{"doc_preview","manufacturing_propose"}){
-        ark::AgentTeam team;ark::AgentTeamConfig config;config.focusedWorkflow=true;config.roles={role("engineer",true)};int round=0,executed=0;
+        ark::AgentTeam team;ark::AgentTeamConfig config;config.readFailuresBlockCompletion=true;config.focusedWorkflow=true;config.roles={role("engineer",true)};int round=0,executed=0;
         config.roles[0].transport=[&](auto&,const V&,auto*){
             switch(++round){
             case 1:return call("failed_preview",tool,R"({"expected_revision":0,"commands":[{"op":"param.set","name":"width","expr":"unknown_width"}]})");
@@ -81,7 +81,7 @@ static void correctedPreviewRecovery038d(){
     }
 }
 static void batchReceiptAssociationRecovery038d(){
-    ark::AgentTeam team;ark::AgentTeamConfig config;config.focusedWorkflow=true;config.roles={role("engineer")};int round=0;
+    ark::AgentTeam team;ark::AgentTeamConfig config;config.readFailuresBlockCompletion=true;config.focusedWorkflow=true;config.roles={role("engineer")};int round=0;
     config.roles[0].transport=[&](auto&,const V&,auto*){
         ++round;
         if(round==1)return call("initial_reference_error","reference_inspect",R"({"id":7,"reference":"face.left"})");
@@ -110,7 +110,7 @@ static V readResolutionReport038d(const V& failed,const V& evidence){
 }
 static void explicitCorrectedSelectionRecovery038d(){
     for(const std::string mode:{"direct","batch","multiple","unrelated","other_role","stale","missing","before","repeated_failure","other_args","no_subject","copy","second_invalid","preview","write","finish_goal","completed","no_revision","verification_stale","verification_failed","epoch","external_epoch","evicted"}){
-        ark::AgentTeam team;ark::AgentTeamConfig config;config.focusedWorkflow=true;config.roles={role("engineer",true)};config.roles[0].discipline=ark::AgentTeamDiscipline::Orchestrator;
+        ark::AgentTeam team;ark::AgentTeamConfig config;config.readFailuresBlockCompletion=true;config.focusedWorkflow=true;config.roles={role("engineer",true)};config.roles[0].discipline=ark::AgentTeamDiscipline::Orchestrator;
         const bool accepted=mode=="direct"||mode=="batch"||mode=="multiple";int round=0,verifications=0;bool completionAllowed=false;
         std::mutex peerMutex;std::condition_variable peerCondition;bool peerRead=false;
         if(mode=="other_role"){

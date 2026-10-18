@@ -1,5 +1,6 @@
 #include "ark/assistant_connectors.hpp"
 #include "ark/project_memory_tools.hpp"
+#include "ark/iteration_history.hpp"
 #include "assistant_vision.hpp"
 #include <algorithm>
 #include <cmath>
@@ -95,6 +96,8 @@ std::vector<AssistantProviderPreset> assistantProviderPresets(){return {
     {"claude","Claude API","https://api.anthropic.com/v1/messages","ANTHROPIC_API_KEY",AssistantProtocol::Messages},
     {"claude-chat","Claude OpenAI compatibility","https://api.anthropic.com/v1/chat/completions","ANTHROPIC_API_KEY",AssistantProtocol::ChatCompletions},
     {"grok","Grok / xAI API","https://api.x.ai/v1/responses","XAI_API_KEY",AssistantProtocol::Responses},
+    // DeepSeek offers OpenAI Chat Completions (and Anthropic Messages), not Responses.
+    {"deepseek","DeepSeek API","https://api.deepseek.com/chat/completions","DEEPSEEK_API_KEY",AssistantProtocol::ChatCompletions},
     {"grok-build","Grok Build / CLI account","grok","",AssistantProtocol::Acp},
     {"ollama","Ollama local","http://127.0.0.1:11434/v1/chat/completions","",AssistantProtocol::ChatCompletions},
     {"opencode","OpenCode Zen","https://opencode.ai/zen/v1/chat/completions","OPENCODE_API_KEY",AssistantProtocol::ChatCompletions},
@@ -119,12 +122,24 @@ V assistantAdaptRequest(const AssistantConfig& config,const V& canonicalRequest)
                 throw std::runtime_error("Invalid Responses history parameter input["+std::to_string(i)+"].call_id: expected a nonempty tool ID of at most 64 characters without whitespace or control characters. Inspect the retained tool pair before resuming; history has been preserved.");
         }
         out.set("input",input);
+        // OpenAI routes prompt caching by prefix hash plus prompt_cache_key. With
+        // store:false and no key, every role and turn competes for the same
+        // short shared prefix. Key by this role's stable prefix (model,
+        // instructions, tools and leading guide), never by user content.
+        // ChatGPT plan requests are not keyed: with the key a gpt-6-astra team
+        // reported 0 cached tokens over rounds whose requests were 88-98%
+        // byte-identical, while earlier unkeyed team runs reported 41-53%.
+        if(config.provider=="openai"&&config.authMode!=AssistantAuthMode::ChatGptPlan&&config.endpoint=="https://api.openai.com/v1/responses"){
+            std::string prefix=text(out,"model")+'|'+text(out,"instructions")+'|';if(const auto* tools=out.find("tools"))prefix+=tools->dump();
+            if(!input.arr.empty()&&(text(input.arr.front(),"role")=="developer"||text(input.arr.front(),"role")=="system"))prefix+=input.arr.front().dump();
+            out.set("prompt_cache_key",V::makeStr("ark-"+iterationSha256(prefix).substr(0,32)));
+        }
         if(config.authMode!=AssistantAuthMode::ChatGptPlan&&config.provider!="openai")erase(out,"include");return out;
     }
     require(config.authMode!=AssistantAuthMode::ChatGptPlan,"ChatGPT plan transport requires Responses.");V out=V::makeObj();out.set("model",V::makeStr(config.model));out.set("stream",V::makeBool(false));
     auto messages=chatMessages(config,need(canonicalRequest,"input"),text(canonicalRequest,"instructions"));V tools=V::makeArr();
     if(config.protocol==AssistantProtocol::ChatCompletions){
-        out.set("messages",messages);out.set("parallel_tool_calls",V::makeBool(false));
+        out.set("messages",messages);out.set("parallel_tool_calls",V::makeBool(config.parallelToolCalls));
         if(!config.reasoningEffort.empty())out.set("reasoning_effort",V::makeStr(config.reasoningEffort));
         for(const auto& function:need(canonicalRequest,"tools").arr){
             V tool=V::makeObj(),fn=function;erase(fn,"type");
@@ -148,7 +163,12 @@ V assistantAdaptRequest(const AssistantConfig& config,const V& canonicalRequest)
         if(const auto* calls=row.find("tool_calls"))for(const auto& call:calls->arr){V use=V::makeObj(),args;const auto& fn=need(call,"function");require(arkjson::parse(text(fn,"arguments"),args)&&args.t==V::Obj,"Messages tool arguments must be a complete JSON object.");use.set("type",V::makeStr("tool_use"));use.set("id",need(call,"id"));use.set("name",need(fn,"name"));use.set("input",args);content.arr.push_back(use);}
         require(!content.arr.empty(),"Messages history has an empty content entry.");append(role,content);
     }
-    for(const auto& function:need(canonicalRequest,"tools").arr){V tool=V::makeObj();tool.set("name",need(function,"name"));tool.set("description",need(function,"description"));tool.set("input_schema",need(function,"parameters"));tools.arr.push_back(tool);}out.set("tools",tools);out.set("system",system);out.set("messages",wire);return out;
+    for(const auto& function:need(canonicalRequest,"tools").arr){V tool=V::makeObj();tool.set("name",need(function,"name"));tool.set("description",need(function,"description"));tool.set("input_schema",need(function,"parameters"));tools.arr.push_back(tool);}out.set("tools",tools);
+    // Anthropic prompt caching: an explicit breakpoint closes the stable tools+system
+    // prefix and top-level automatic caching follows the growing conversation tail.
+    // Only the first-party endpoint is known to accept both forms.
+    if(config.provider=="claude"&&config.endpoint=="https://api.anthropic.com/v1/messages"){V ephemeral=V::makeObj();ephemeral.set("type",V::makeStr("ephemeral"));if(!system.arr.empty())system.arr.back().set("cache_control",ephemeral);out.set("cache_control",ephemeral);}
+    out.set("system",system);out.set("messages",wire);return out;
 }
 V assistantNormalizeResponse(const AssistantConfig& config,const V& source){
     if(config.protocol==AssistantProtocol::Responses){V out=source;if(const auto* original=source.find("output");original&&original->t==V::Arr){V output=*original;for(auto& item:output.arr)if(text(item,"type")=="reasoning")tagReplay(item,config);out.set("output",output);}out.set("ark_provider_outcome",providerOutcome(config,source,out,"responses_passthrough"));return out;}
@@ -189,6 +209,13 @@ std::string assistantExternalMcpConfig(const std::string& target,const std::stri
         // Reject that path rather than exporting a different executable silently.
         require(target!="grok-build"||executable.find("${")==std::string::npos,"Grok Build expands environment placeholders; the MCP executable path must not contain ${.");
         return "[mcp_servers.ark]\ncommand = "+V::makeStr(executable).dump()+"\nargs = "+args.dump()+"\n"+(target=="grok-build"?"enabled = true\n":"");
+    }
+    if(target=="claude-code-cli"){
+        // One command for a user's own, unmodified Claude Code login (its subscription
+        // or key stays inside Claude Code). Options precede --; the pipe changes when
+        // Studio restarts, so the command removes a stale entry first.
+        require(executable.find('"')==std::string::npos,"The MCP executable path must not contain quotes for the Claude Code command.");
+        return "claude mcp remove ark --scope user\nclaude mcp add --transport stdio --scope user ark -- \""+executable+"\" --connect "+endpoint+"\n";
     }
     V root=V::makeObj(),servers=V::makeObj(),server=V::makeObj();
     if(target=="claude-code"||target=="claude-desktop"){if(target=="claude-code")server.set("type",V::makeStr("stdio"));server.set("command",V::makeStr(executable));server.set("args",args);servers.set("ark",server);root.set("mcpServers",servers);return root.dump();}

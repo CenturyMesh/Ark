@@ -11,7 +11,7 @@ static V reducedReadTools041d(){
 static void reducedCatalogReadRecovery041d(){
     for(const std::string mode:{"find","reference","wrong_subject","stale","failed","missing_revision","other_copy","doc_info","object_context"}){
         ark::AgentSession session;session.suppressIterationHistory();check(!session.call("doc_apply",json(R"({"expected_revision":0,"commands":[{"op":"feature.add","type":"box","name":"Reduced catalogue body","p":{"dx":10,"dy":8,"dz":4}}]})")).find("isError")->b,"reduced catalogue fixture starts with an actual editable body");
-        ark::AgentTeam team;ark::AgentTeamConfig config;config.focusedWorkflow=true;config.roles={role("engineer",true)};int round=0,writes=0;const bool selected=mode=="find"||mode=="reference",exact=mode=="doc_info"||mode=="object_context",recovered=selected||exact;V report;
+        ark::AgentTeam team;ark::AgentTeamConfig config;config.readFailuresBlockCompletion=true;config.focusedWorkflow=true;config.roles={role("engineer",true)};int round=0,writes=0;const bool selected=mode=="find"||mode=="reference",exact=mode=="doc_info"||mode=="object_context",recovered=selected||exact;V report;
         const std::string tool=exact?mode:"reference_inspect";
         V failed=mode=="doc_info"?json(R"({"detail":"summary"})"):mode=="object_context"?json(R"({"ids":[1],"expected_revision":1})"):json(R"({"id":1,"reference":"missing.synthetic.face","detail":"frame"})");
         V evidence=mode=="doc_info"?json(R"({"detail":"revision"})"):mode=="object_context"?json(R"({"ids":[2],"expected_revision":1})"):mode=="reference"?json(R"({"id":1,"reference":"z_min","detail":"frame"})"):json(R"({"id":1,"find":{"kind":"planar","normal":"-Z"},"detail":"frame"})");
@@ -48,7 +48,7 @@ static void observedReadProgress041d(){
         ark::AgentSession session;session.suppressIterationHistory();
         check(!session.call("doc_apply",json(R"({"expected_revision":0,"commands":[{"op":"feature.add","type":"box","name":"Synthetic recovery body","p":{"dx":10,"dy":8,"dz":4}}]})")).find("isError")->b,"synthetic editable body starts at revision one");
         if(mode=="known_newer")check(!session.call("doc_apply",json(R"({"expected_revision":1,"commands":[{"op":"param.set","name":"external_change","expr":2}]})")).find("isError")->b,"newer known revision is an actual external publication");
-        ark::AgentTeam team;ark::AgentTeamConfig config;config.focusedWorkflow=true;config.roles={role("engineer",true)};config.roles[0].discipline=ark::AgentTeamDiscipline::Orchestrator;
+        ark::AgentTeam team;ark::AgentTeamConfig config;config.readFailuresBlockCompletion=true;config.focusedWorkflow=true;config.roles={role("engineer",true)};config.roles[0].discipline=ark::AgentTeamDiscipline::Orchestrator;
         const bool automatic=mode=="predicate",proposal=mode=="frame"||mode=="wrong_normal"||mode=="ambiguous";const unsigned retained=mode=="failed"?2:1;int round=0,writes=0;V report;
         V failedArgs=json(R"({"id":1,"find":{"kind":"planar","normal":"-Z"},"detail":"frame"})"),evidenceArgs=json(R"({"id":1,"reference":"z_min","detail":"full"})");
         if(mode=="other_target")evidenceArgs.set("id",V::makeNum(2));
@@ -108,7 +108,7 @@ static void observedReadProgress041d(){
 }
 static void inspectionActionPriorities041d(){
     for(const std::string mode:{"completed","needs_input","focused","inspection"}){
-        ark::AgentSession session;ark::AgentTeam team;ark::AgentTeamConfig config;config.focusedWorkflow=true;config.roles={role("engineer",true)};int round=0;V action;
+        ark::AgentSession session;ark::AgentTeam team;ark::AgentTeamConfig config;config.readFailuresBlockCompletion=true;config.focusedWorkflow=true;config.roles={role("engineer",true)};int round=0;V action;
         if(mode=="focused"){config.roles.push_back(role("reviewer"));config.roles[1].transport=[](auto&,const V&,auto*){return done("Assigned read-only report remains separate from CAD work.");};}
         config.roles[0].transport=[&](auto&,const V& request,auto*){
             const int n=++round;
@@ -141,7 +141,7 @@ static void nativeReadThenGeometry041d(){
         ark::AgentSession session;session.suppressIterationHistory();
         const auto setup=predicateProof?R"({"expected_revision":0,"commands":[{"op":"feature.add","type":"native_solid","name":"Synthetic native recovery","native":{"op":"sphere"},"p":{"radius":5}}]})":R"({"expected_revision":0,"commands":[{"op":"feature.add","type":"native_solid","name":"Synthetic native recovery","native":{"op":"box"},"p":{"width":10,"depth":8,"height":4}}]})";
         const auto initial=session.call("doc_apply",json(setup));check(!initial.find("isError")->b,"synthetic native body is authored through the actual OCCT Session");
-        ark::AgentTeam team;ark::AgentTeamConfig config;config.focusedWorkflow=true;config.roles={role("engineer",true)};config.roles[0].discipline=ark::AgentTeamDiscipline::Orchestrator;int round=0,writes=0;V report;
+        ark::AgentTeam team;ark::AgentTeamConfig config;config.readFailuresBlockCompletion=true;config.focusedWorkflow=true;config.roles={role("engineer",true)};config.roles[0].discipline=ark::AgentTeamDiscipline::Orchestrator;int round=0,writes=0;V report;
         const auto baseline=predicateProof?2u:1u;
         config.roles[0].transport=[&](auto&,const V& request,auto*){
             switch(++round){

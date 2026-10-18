@@ -116,6 +116,12 @@ int main(){
     CHECK(bridge.start([&](auto&,auto&,auto,std::stop_token){++calls;}));
     CHECK(throws([&]{ark::callLiveSession(bridge.endpoint(),"doc_apply",V::makeObj(),100);}));
     CHECK(calls==1);bridge.stop();
+    // A CAD evaluation may outlast the 30-second transfer window: its result is
+    // delivered instead of an unknown-outcome timeout.
+    CHECK(bridge.start([](auto&,auto&,auto done,std::stop_token){std::thread([done]{std::this_thread::sleep_for(std::chrono::seconds(31));V slow=V::makeObj();slow.set("completed_after_ms",V::makeNum(31000));done(slow);}).detach();}));
+    const auto slowStarted=std::chrono::steady_clock::now();auto slow=ark::callLiveSession(bridge.endpoint(),"doc_preview",V::makeObj());
+    CHECK(slow.find("completed_after_ms")&&slow.find("completed_after_ms")->num==31000);CHECK(std::chrono::steady_clock::now()-slowStarted>=std::chrono::seconds(31));
+    CHECK(throws([&]{ark::callLiveSession(bridge.endpoint(),"doc_info",V::makeObj(),660001);}));bridge.stop();
 #else
     ark::LiveSessionBridge bridge;CHECK(!bridge.start([](auto&,auto&,auto,std::stop_token){}));
     CHECK(throws([&]{ark::callLiveSession("unavailable","doc_info",V::makeObj());}));

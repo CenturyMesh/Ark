@@ -43,9 +43,13 @@ $nativeArgs=@('--memory',$Action,'--project',$Project,'--actor',$Actor)
 if($Directory){$nativeArgs+=@('--root',$Directory)}
 $previousEncoding=$OutputEncoding
 $previousConsoleEncoding=[Console]::OutputEncoding
+$previousInputEncoding=[Console]::InputEncoding
 try{
  $OutputEncoding=New-Object Text.UTF8Encoding($false)
  [Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
+ # Windows PowerShell writes native stdin with the console input encoding,
+ # which adds a UTF-8 BOM on code page 65001.
+ [Console]::InputEncoding=New-Object Text.UTF8Encoding($false)
  $nativeOutput=@($json | & $Executable @nativeArgs)
  if($LASTEXITCODE -ne 0){$nativeOutput | Write-Output;throw 'ARK memory returned an explicit rejection.'}
  if($Obsidian){
@@ -54,4 +58,4 @@ try{
   if($LASTEXITCODE -ne 0){throw 'Code vault verification failed before memory bridge export.'}
   & (Join-Path $PSScriptRoot 'export-memory-vault.ps1') -MemorySnapshotDirectory $snapshot.directory
  }else{$nativeOutput | Write-Output}
-}finally{$OutputEncoding=$previousEncoding;[Console]::OutputEncoding=$previousConsoleEncoding}
+}finally{$OutputEncoding=$previousEncoding;[Console]::OutputEncoding=$previousConsoleEncoding;[Console]::InputEncoding=$previousInputEncoding}

@@ -26,6 +26,9 @@ using V = arkjson::Value;
 namespace {
 constexpr std::size_t requestLimit = 4 * 1024 * 1024;
 constexpr std::size_t responseLimit = 32 * 1024 * 1024;
+// Bounded wait for one tool's Studio result; request/reply transfers keep 30 s.
+constexpr unsigned liveExecutionLimitMs = 600000;
+constexpr unsigned liveCallLimitMs = liveExecutionLimitMs + 60000;
 V failure(const std::string& text) {
     V result=V::makeObj(), content=V::makeArr(), item=V::makeObj();
     item.set("type",V::makeStr("text")); item.set("text",V::makeStr(text));
@@ -103,9 +106,12 @@ struct LiveSessionBridge::Impl {
                 connected=finish(pipe,ov,stopped,Clock::now()+std::chrono::hours(24),unused);
             else if(code==ERROR_PIPE_CONNECTED)connected=TRUE;
             if(!connected){DisconnectNamedPipe(pipe);continue;}
-            const auto deadline=Clock::now()+std::chrono::seconds(30);
+            // The request and reply transfers stay bounded; a CAD evaluation may
+            // legitimately run longer than the 30-second transfer window.
+            const auto requestDeadline=Clock::now()+std::chrono::seconds(30);
             std::string text;V req;
-            if(readFrame(pipe,text,requestLimit,stopped,deadline)&&arkjson::parse(text,req)) {
+            if(readFrame(pipe,text,requestLimit,stopped,requestDeadline)&&arkjson::parse(text,req)) {
+                const auto deadline=Clock::now()+std::chrono::milliseconds(liveExecutionLimitMs);
                 auto name=req.find("tool"),args=req.find("arguments");
                 V result=failure("Invalid live session request");
                 if(name&&name->t==V::Str&&args&&args->t==V::Obj) {
@@ -127,10 +133,11 @@ struct LiveSessionBridge::Impl {
                 }
                 text=result.dump();
                 if(text.size()>responseLimit)text=failure("Studio result exceeds 32 MiB; request compact inspection instead").dump();
-                if(writeFrame(pipe,text,stopped,deadline)) {
+                const auto replyDeadline=Clock::now()+std::chrono::seconds(30);
+                if(writeFrame(pipe,text,stopped,replyDeadline)) {
                     // A byte-mode pipe discards unread bytes on DisconnectNamedPipe.
                     // An explicit bounded receipt avoids blocking FlushFileBuffers.
-                    char received=0;transfer(pipe,&received,1,false,stopped,deadline);
+                    char received=0;transfer(pipe,&received,1,false,stopped,replyDeadline);
                 }
             }
             // No FlushFileBuffers: an unresponsive client must never block close.
@@ -211,7 +218,7 @@ V studioTeamDiagnostics(const AgentTeamSnapshot& snapshot,const V& args){
     V out=V::makeObj(),rows=V::makeArr();out.set("schema",V::makeStr("ark.studio-team-diagnostics.v1"));out.set("read_only",V::makeBool(true));out.set("document_unchanged",V::makeBool(true));out.set("team_started",V::makeBool(snapshot.started));out.set("running",V::makeBool(snapshot.running));out.set("paused",V::makeBool(snapshot.paused));out.set("cancelled",V::makeBool(snapshot.cancelled));out.set("goal_state",V::makeStr(agentGoalStateName(snapshot.goalState)));out.set("document_revision_observed",V::makeBool(snapshot.documentRevisionObserved));if(snapshot.documentRevisionObserved)out.set("document_revision",V::makeNum((double)snapshot.documentRevision));out.set("revision_scope",V::makeStr("Last document revision observed by this team; inspect doc_info for the current CAD revision."));out.set("elapsed_ms",V::makeNum((double)snapshot.elapsedMs));out.set("clock",V::makeStr("Monotonic milliseconds since team start."));out.set("phase_scope",V::makeStr("Observed host event phase. Assistant includes preparation and provider wait; this is not a provider-hang diagnosis."));out.set("active_tool_scope",V::makeStr("Host ToolStart through actual ToolEnd, including document queue wait."));out.set("evidence_scope",V::makeStr("Existing attributed read receipts only. Same-subject evidence does not itself resolve a failure or authorize CAD changes."));out.set("record_byte_limit",V::makeNum(maxRecordBytes));out.set("response_byte_limit",V::makeNum(256*1024));out.set("roles",rows);
     bool partial=false;std::size_t omittedRoles=0;
     for(const auto& role:snapshot.roles){if(!selected.empty()&&role.id!=selected)continue;if(rows.arr.size()>=8){++omittedRoles;partial=true;continue;}
-        V row=V::makeObj(),failures=V::makeArr(),reads=V::makeArr();row.set("role_id",V::makeStr(role.id));row.set("state",V::makeStr(agentTeamStateName(role.state)));row.set("task_state",V::makeStr(role.taskState));row.set("phase",V::makeStr(role.currentPhase));row.set("phase_started_ms",V::makeNum((double)role.phaseStartedMs));row.set("last_event_ms",V::makeNum((double)role.lastEventMs));row.set("active_tool",V::makeStr(role.activeTool));if(!role.activeTool.empty())row.set("active_tool_started_ms",V::makeNum((double)role.activeToolStartedMs));row.set("unresolved_tool_errors",V::makeNum(role.unresolvedToolErrors));row.set("rejected_reads",failures);row.set("later_read_evidence",reads);
+        V row=V::makeObj(),failures=V::makeArr(),reads=V::makeArr();row.set("role_id",V::makeStr(role.id));row.set("state",V::makeStr(agentTeamStateName(role.state)));row.set("task_state",V::makeStr(role.taskState));row.set("phase",V::makeStr(role.currentPhase));row.set("phase_started_ms",V::makeNum((double)role.phaseStartedMs));row.set("last_event_ms",V::makeNum((double)role.lastEventMs));row.set("active_tool",V::makeStr(role.activeTool));if(!role.activeTool.empty())row.set("active_tool_started_ms",V::makeNum((double)role.activeToolStartedMs));row.set("unresolved_tool_errors",V::makeNum(role.unresolvedToolErrors));row.set("request_context",assistantContextMetrics(role.performance));row.set("rejected_reads",failures);row.set("later_read_evidence",reads);
         std::size_t omittedFailures=role.rejectedReadCount>role.rejectedReads.size()?role.rejectedReadCount-role.rejectedReads.size():0,omittedReads=role.laterReadEvidenceCount>role.laterReadEvidence.size()?role.laterReadEvidenceCount-role.laterReadEvidence.size():0,sensitiveRecords=0;
         auto append=[&](const std::vector<V>& source,const char* key,V& accepted,std::size_t& omitted){for(const auto& original:source){const auto* tool=original.find("tool"),*arguments=original.find("args");if(accepted.arr.size()>=limit||!tool||tool->t!=V::Str||!arguments||arguments->t!=V::Obj||arguments->dump().size()>2048||!assistantToolReadOnly(tools,tool->str,*arguments)){++omitted;continue;}V kept=record(original);if(sensitive(kept,sensitive,0)){++omitted;++sensitiveRecords;continue;}if(kept.dump().size()>maxRecordBytes){++omitted;continue;}V next=accepted;next.arr.push_back(kept);V candidate=row;candidate.set(key,next);V all=rows;all.arr.push_back(candidate);V measured=out;measured.set("roles",all);if(measured.dump().size()+4096>maxDataBytes){++omitted;continue;}accepted=std::move(next);row.set(key,accepted);}};
         append(role.rejectedReads,"rejected_reads",failures,omittedFailures);append(role.laterReadEvidence,"later_read_evidence",reads,omittedReads);row.set("omitted_rejected_reads",V::makeNum((double)omittedFailures));row.set("omitted_later_read_evidence",V::makeNum((double)omittedReads));row.set("omitted_sensitive_records",V::makeNum((double)sensitiveRecords));row.set("partial",V::makeBool(omittedFailures||omittedReads));partial=partial||omittedFailures||omittedReads;rows.arr.push_back(row);out.set("roles",rows);
@@ -223,17 +230,20 @@ V callLiveSession(const std::string& endpoint,const std::string& tool,const V& a
     std::string text=request.dump();
     if(text.size()>requestLimit)throw std::runtime_error("Live Studio request exceeds 4 MiB");
 #ifdef _WIN32
-    if(timeoutMs<1||timeoutMs>30000)throw std::runtime_error("Live Studio timeout must be 1..30000 ms");
-    std::string pipePath=path(endpoint);const auto deadline=Clock::now()+std::chrono::milliseconds(timeoutMs);
+    if(timeoutMs<1||timeoutMs>liveCallLimitMs)throw std::runtime_error("Live Studio timeout must be 1..660000 ms");
+    // Connecting stays bounded at 30 s (the single pipe instance is busy while
+    // another client's call runs); the reply may wait for a long evaluation.
+    std::string pipePath=path(endpoint);const auto began=Clock::now();
+    const auto connectDeadline=began+std::chrono::milliseconds(std::min(timeoutMs,30000u)),deadline=began+std::chrono::milliseconds(timeoutMs);
     HANDLE raw=INVALID_HANDLE_VALUE;
-    while(remaining(deadline)) {
+    while(remaining(connectDeadline)) {
         raw=CreateFileA(pipePath.c_str(),GENERIC_READ|GENERIC_WRITE,0,nullptr,OPEN_EXISTING,FILE_FLAG_OVERLAPPED|SECURITY_SQOS_PRESENT|SECURITY_IDENTIFICATION,nullptr);
         if(raw!=INVALID_HANDLE_VALUE)break;
         DWORD code=GetLastError();
         if(code!=ERROR_PIPE_BUSY)throw std::runtime_error("Studio disconnected or unavailable (Windows error "+std::to_string(code)+"). No separate document was created.");
-        WaitNamedPipeA(pipePath.c_str(),remaining(deadline));
+        WaitNamedPipeA(pipePath.c_str(),remaining(connectDeadline));
     }
-    if(raw==INVALID_HANDLE_VALUE)throw std::runtime_error("Timed out waiting for Studio connection");
+    if(raw==INVALID_HANDLE_VALUE)throw std::runtime_error("Timed out waiting for Studio connection; another live call may still be running. Nothing was sent.");
     Handle pipe(raw);
     if(!writeFrame(pipe.value,text,nullptr,deadline)||!readFrame(pipe.value,text,responseLimit,nullptr,deadline))
         throw std::runtime_error("Studio connection lost or timed out; outcome may be unknown. Inspect document revision before retrying a mutation.");

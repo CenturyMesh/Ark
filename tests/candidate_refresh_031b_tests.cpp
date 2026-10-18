@@ -85,11 +85,40 @@ void namesAndUnsupportedScopes(){
     {AgentSession session;setup(session);const auto candidate=preview(session,R"([{"op":"feature.add","type":"box","name":"Reserved name"}])");apply(session,R"([{"op":"feature.add","type":"box","name":"Reserved name"}])");conflict(session,candidate);check(session.document.features.size()==2,"Conflicting added name must not publish duplicate proposed geometry");}
     {AgentSession session;setup(session);const auto candidate=preview(session,R"([{"op":"feature.edit","id":"Anchor","p":{"dx":9}}])");apply(session,R"([{"op":"feature.add","type":"box","name":"Anchor"}])");conflict(session,candidate);check(session.document.features.size()==2,"New name ambiguity must not silently retarget the retained recipe");}
     {AgentSession session;setup(session);const auto candidate=preview(session,R"([{"op":"feature.add","type":"box","name":"Numeric local"},{"op":"feature.add","type":"transform","name":"Numeric child","inputs":[2]}])");apply(session,R"([{"op":"feature.add","type":"box","name":"Peer occupies prior ID"}])");rejected(session,"doc_preview",candidateArgs(session,candidate),"CANDIDATE_REFRESH_UNSUPPORTED");}
-    {AgentSession session;setup(session);const auto candidate=preview(session,R"([{"op":"param.set","name":"NewSetting","expr":"7"}])");apply(session,R"([{"op":"feature.add","type":"box","name":"Peer"}])");rejected(session,"doc_preview",candidateArgs(session,candidate),"CANDIDATE_REFRESH_UNSUPPORTED");}
+    {AgentSession session;setup(session);const auto candidate=preview(session,R"([{"op":"param.set","name":"NewSetting","expr":"7"}])");apply(session,R"([{"op":"feature.add","type":"box","name":"Peer"}])");commitChecked(session,refresh(session,candidate));check(session.document.params.size()==1,"A new parameter definition refreshes over an unrelated peer addition");}
+    {AgentSession session;setup(session);const auto candidate=preview(session,R"([{"op":"param.set","name":"NewSetting","expr":"7"}])");apply(session,R"([{"op":"param.set","name":"NewSetting","expr":"9"}])");conflict(session,candidate);}
+    {AgentSession session;setup(session);apply(session,R"([{"op":"param.set","name":"Existing","expr":"2"}])");const auto candidate=preview(session,R"([{"op":"param.set","name":"Existing","expr":"3"}])");check(!field(candidate,"refresh_supported").b,"Editing an existing definition still needs a fresh explicit preview");}
     {AgentSession session;setup(session);const auto candidate=preview(session,R"([{"op":"feature.remove","id":1}])");apply(session,R"([{"op":"feature.add","type":"box","name":"Peer"}])");rejected(session,"doc_preview",candidateArgs(session,candidate),"CANDIDATE_REFRESH_UNSUPPORTED");}
     {AgentSession session;setup(session);const auto candidate=preview(session,R"([{"op":"feature.edit","id":1,"p":{"dx":7}}])");V injected=candidateArgs(session,candidate);injected.set("commands",commands(R"([{"op":"feature.edit","id":1,"p":{"dx":99}}])"));rejected(session,"doc_preview",injected,"candidate");extent(session.document,"Anchor",{2,3,4});}
     {AgentSession session;setup(session);const auto candidate=preview(session,R"([{"op":"feature.edit","id":1,"p_remove":["dy"]}])");check(!field(candidate,"refresh_supported").b,"Parameter removal remains previewable but must not claim audited refresh support");apply(session,R"([{"op":"feature.add","type":"box","name":"Peer"}])");rejected(session,"doc_preview",candidateArgs(session,candidate),"CANDIDATE_REFRESH_UNSUPPORTED");extent(session.document,"Anchor",{2,3,4});}
     {AgentSession session;setup(session);const auto candidate=preview(session,R"([{"op":"feature.edit","id":1,"p":{"dx":5}},{"op":"feature.edit","id":"Anchor","p":{"dy":6}}])");check(!field(candidate,"refresh_supported").b,"Repeated edits of one target remain previewable but require a new explicit recipe preview");apply(session,R"([{"op":"feature.add","type":"box","name":"Peer"}])");rejected(session,"doc_preview",candidateArgs(session,candidate),"CANDIDATE_REFRESH_UNSUPPORTED");extent(session.document,"Anchor",{2,3,4});}
+}
+// Parallel writers mostly ADD their own sketches, parameters and parts. Such
+// additions cannot change what a retained recipe read, so its candidate refreshes;
+// any change to an entry that existed at preview time still conflicts.
+void additionsOnlyRefresh(){
+    const char* sketched=R"([{"op":"sketch.set","name":"Mine profile","sketch":{"plane":"XY","entities":[{"kind":"circle","dof":[0,0,2]}]}},{"op":"feature.add","type":"extrude","name":"Mine","p":{"sketch":"Mine profile","height":4}}])";
+    {AgentSession session;setup(session);const auto candidate=preview(session,sketched);check(field(candidate,"refresh_supported").b,"A new sketch with its first feature has an audited refresh scope");
+     apply(session,R"([{"op":"param.set","name":"PeerWidth","expr":"6"},{"op":"sketch.set","name":"Peer profile","sketch":{"plane":"XY","entities":[{"kind":"circle","dof":[20,0,3]}]}},{"op":"feature.add","type":"extrude","name":"Peer part","p":{"sketch":"Peer profile","height":"PeerWidth"}}])");
+     const auto peerId=named(session.document,"Peer part").id;commitChecked(session,refresh(session,candidate));
+     check(session.document.sketches.size()==2&&named(session.document,"Mine").id!=peerId,"Refresh publishes the recipe's own sketch and part beside the peer's additions");check(session.document.params.size()==1,"Peer parameter addition is retained");}
+    {AgentSession session;setup(session);const auto candidate=preview(session,sketched);apply(session,R"([{"op":"sketch.set","name":"Mine profile","sketch":{"plane":"XY","entities":[{"kind":"circle","dof":[0,0,5]}]}}])");conflict(session,candidate);}
+    {AgentSession session;setup(session);apply(session,R"([{"op":"sketch.set","name":"Shared","sketch":{"plane":"XY","entities":[{"kind":"circle","dof":[0,0,1]}]}}])");const auto candidate=preview(session,sketched);
+     apply(session,R"([{"op":"sketch.set","name":"Shared","sketch":{"plane":"XY","entities":[{"kind":"circle","dof":[0,0,2]}]}}])");conflict(session,candidate);}
+    {AgentSession session;setup(session);const auto candidate=preview(session,sketched);apply(session,R"([{"op":"feature.edit","id":1,"p":{"dx":9}}])");conflict(session,candidate);extent(session.document,"Anchor",{9,3,4});}
+    {AgentSession session;setup(session);const auto candidate=preview(session,sketched);apply(session,R"([{"op":"feature.add","type":"box","name":"Mine"}])");conflict(session,candidate);}
+    // Parallel writers place their own parts: a recipe that adds a part and its
+    // instance refreshes over a peer's part and instance, never over edits.
+    const char* placed=R"([{"op":"feature.add","type":"box","name":"Mine part","p":{"dx":2,"dy":2,"dz":2}},{"op":"assembly.add","name":"Mine group","feature":0},{"op":"assembly.add","name":"Mine placed","parent":"Mine group","feature":"Mine part","p":{"tx":5}}])";
+    const char* peerPlaced=R"([{"op":"feature.add","type":"box","name":"Peer part"},{"op":"assembly.add","name":"Peer placed","feature":"Peer part","p":{"ty":7}}])";
+    {AgentSession session;setup(session);apply(session,R"([{"op":"assembly.add","name":"Existing","feature":1}])");const auto candidate=preview(session,placed);check(field(candidate,"refresh_supported").b,"A new part with its own instances has an audited refresh scope");
+     apply(session,peerPlaced);commitChecked(session,refresh(session,candidate));
+     const auto& nodes=session.document.assembly;check(nodes.size()==4,"Refresh publishes the recipe's instances beside the peer's instance");
+     const auto mine=std::find_if(nodes.begin(),nodes.end(),[](const AssemblyNode& node){return node.name=="Mine placed";});const auto group=std::find_if(nodes.begin(),nodes.end(),[](const AssemblyNode& node){return node.name=="Mine group";});
+     check(mine!=nodes.end()&&group!=nodes.end()&&mine->parent==group->id&&mine->feature==named(session.document,"Mine part").id,"Refreshed instance binds its own part and its own group, not the peer's IDs");}
+    {AgentSession session;setup(session);apply(session,R"([{"op":"assembly.add","name":"Existing","feature":1}])");const auto candidate=preview(session,placed);apply(session,R"([{"op":"assembly.edit","id":"Existing","p":{"tx":3}}])");conflict(session,candidate);}
+    {AgentSession session;setup(session);const auto candidate=preview(session,placed);apply(session,R"([{"op":"assembly.add","name":"Mine placed","feature":1}])");conflict(session,candidate);}
+    {AgentSession session;setup(session);const auto candidate=preview(session,R"([{"op":"assembly.add","name":"Numeric group","feature":0},{"op":"assembly.add","name":"Numeric child","parent":1,"feature":1}])");check(!field(candidate,"refresh_supported").b,"A provisional numeric node reference must not claim a refresh scope");}
 }
 void revisionsBoundariesAndEviction(){
     {AgentSession session;setup(session);const auto candidate=preview(session,R"([{"op":"feature.edit","id":1,"p":{"dz":8}}])");apply(session,R"([{"op":"feature.add","type":"box","name":"Peer"}])");V stale=candidateArgs(session,candidate);stale.set("expected_revision",V::makeNum(session.revision-1));rejected(session,"doc_preview",stale,"Revision conflict");}
@@ -137,7 +166,7 @@ void implicitDatumAncestorConflict(){
 }
 #endif
 }
-int main(){try{independentProposals();ordinaryPeerCommitAndNamedBatch();targetAndDependencyConflicts();authoringContextConflicts();namesAndUnsupportedScopes();revisionsBoundariesAndEviction();
+int main(){try{independentProposals();ordinaryPeerCommitAndNamedBatch();targetAndDependencyConflicts();authoringContextConflicts();namesAndUnsupportedScopes();additionsOnlyRefresh();revisionsBoundariesAndEviction();
 #ifdef ARK_CONTRACTS_NATIVE_TESTS
     replacementImportBoundary();
     exactIndependentEdits();

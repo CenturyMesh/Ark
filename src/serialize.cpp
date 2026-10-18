@@ -188,7 +188,7 @@ bool entFromJson(const Value& v, SketchEnt& e, std::string* err){
     const bool recipeDriven=e.kind==SketchEnt::Recipe;
     if(e.kind==SketchEnt::Wire||driven){
         auto segments=v.find("segments");
-        if(e.kind==SketchEnt::Wire){if(!segments||segments->t!=Value::Arr||segments->arr.empty()||segments->arr.size()>64) return fail("Wire needs 1..64 segments");}
+        if(e.kind==SketchEnt::Wire){if(!segments||segments->t!=Value::Arr||segments->arr.empty()||segments->arr.size()>64) return fail("Wire needs 1..64 segments: {kind:\"wire\",start:[x,y],segments:[{kind:\"line\",to:[x,y]}|{kind:\"arc\",to:[x,y],radius:r,sweep?:1|-1}|{kind:\"cubic\",c1:[x,y],c2:[x,y],to:[x,y]}]}");}
         else if(segments&&(segments->t!=Value::Arr||segments->arr.size()>64)) return fail("Projected or offset geometry exceeds 64 segments");
         if(segments&&segments->t==Value::Arr)for(const auto& segment:segments->arr){
             if(segment.t!=Value::Obj) return fail("Wire segment must be an object");

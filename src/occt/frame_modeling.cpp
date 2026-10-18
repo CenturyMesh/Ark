@@ -386,7 +386,7 @@ V frameModelNative(const V& request){
         shapesForCompound.push_back(solid);
         const double volume=required(required(member.result,"report"),"volume_mm3").num;
         if(!(volume>0))throw std::runtime_error("Frame member has no positive exact volume");
-        GProp_GProps exactProperties;volumeProperties(solid,exactProperties);
+        GProp_GProps exactProperties;volumeCentroidProperties(solid,exactProperties);
         const gp_Pnt center=exactProperties.CentreOfMass();
         if(!std::isfinite(center.X())||!std::isfinite(center.Y())||!std::isfinite(center.Z())||
            std::abs(exactProperties.Mass()-volume)>std::max(1e-5,volume*1e-7))

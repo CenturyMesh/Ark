@@ -5,7 +5,9 @@
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
+#include <BRepPrimAPI_MakeRevol.hxx>
 #include <Geom_Circle.hxx>
+#include <Geom_Ellipse.hxx>
 #include <Geom_TrimmedCurve.hxx>
 #include <GeomConvert.hxx>
 #include <GProp_GProps.hxx>
@@ -59,5 +61,26 @@ int main(){try{
     GProp_GProps diskProperties;volumeProperties(disk,diskProperties);const double diskVolume=pi*100*100*2;
     relative(diskProperties.Mass(),diskVolume,1e-10,"Rational disk precise volume");relative(diskProperties.CentreOfMass().Z(),1,1e-10,"Rational disk centroid");
     inertia=diskProperties.MatrixOfInertia();relative(inertia.Value(3,3),diskVolume*100*100/2,1e-10,"Rational disk axial inertia");relative(inertia.Value(1,1),diskVolume*(3*100*100+4)/12,1e-10,"Rational disk transverse inertia");
+    // Revolved rational ellipse (the moto tyre): GK moments at 1e-10 used the
+    // whole 30 s worker limit. Bounded Gauss is exact here and is accepted only
+    // because its volume matches the GK volume.
+    const double tyreRadius=267,radialSemi=48,axialSemi=75,axle=315;
+    occ::handle<Geom_Ellipse> section=new Geom_Ellipse(gp_Ax2(gp_Pnt(tyreRadius,0,axle),gp_Dir(0,1,0),gp_Dir(0,0,1)),axialSemi,radialSemi);
+    // Sketch ellipses reach the kernel as four rational quarter arcs (four faces
+    // after revolution). A single seamed face misses the volume cross-check and
+    // keeps the full GK integration.
+    BRepBuilderAPI_MakeWire sectionWire;for(int quarter=0;quarter<4;++quarter){occ::handle<Geom_TrimmedCurve> arc=new Geom_TrimmedCurve(section,quarter*pi/2,(quarter+1)*pi/2);sectionWire.Add(BRepBuilderAPI_MakeEdge(GeomConvert::CurveToBSplineCurve(arc)).Edge());}
+    auto sectionFace=BRepBuilderAPI_MakeFace(sectionWire.Wire(),true).Face();
+    auto tyre=BRepPrimAPI_MakeRevol(sectionFace,gp_Ax1(gp_Pnt(0,0,0),gp_Dir(0,0,1)),2*pi).Shape();
+    check(std::string(volumeIntegrationMethod(tyre))=="gauss_kronrod_rational_or_freeform","Revolved rational ellipse is classified as rational");
+    const auto tyreStarted=std::chrono::steady_clock::now();
+    GProp_GProps tyreCentroid,tyreInertia;volumeCentroidProperties(tyre,tyreCentroid);volumeProperties(tyre,tyreInertia);
+    const double tyreSeconds=std::chrono::duration<double>(std::chrono::steady_clock::now()-tyreStarted).count();
+    const double tyreVolume=2*pi*pi*tyreRadius*radialSemi*axialSemi,tyreAxial=2*pi*pi*radialSemi*axialSemi*(std::pow(tyreRadius,3)+3*tyreRadius*radialSemi*radialSemi/4);
+    relative(tyreCentroid.Mass(),tyreVolume,1e-10,"Revolved ellipse volume");
+    check(std::abs(tyreCentroid.CentreOfMass().X())<1e-6&&std::abs(tyreCentroid.CentreOfMass().Y())<1e-6,"Revolved ellipse centroid stays on the axis");
+    relative(tyreCentroid.CentreOfMass().Z(),axle,1e-10,"Revolved ellipse centroid height");
+    relative(tyreInertia.MatrixOfInertia().Value(3,3),tyreAxial,1e-10,"Revolved ellipse axial inertia");
+    check(tyreSeconds<5,"Revolved ellipse mass properties stay far inside the worker limit");
     std::cout<<"Native volume integration checks: "<<checks<<" passed; elapsed_ms="<<std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count()<<'\n';return 0;
 }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

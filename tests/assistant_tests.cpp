@@ -28,7 +28,7 @@ static V finalResponse(){return json(R"({"status":"completed","output":[{"type":
 #include "assistant_steering_tests.inl"
 static void unratedFeedbackProjectionChecks(){
     V history=json(R"([{"role":"user","content":"Inspect the selected editable design; retain all geometry."}])");
-    V inventory=json(R"({"isError":false,"structuredContent":{"revision":7}})");member(inventory,"structuredContent").set("inventory",V::makeStr(std::string(140*1024,'x')));
+    V inventory=json(R"({"isError":false,"structuredContent":{"revision":7}})");member(inventory,"structuredContent").set("inventory",V::makeStr(std::string(300*1024,'x')));
     contextExchange(history,"feedback_large_inventory","doc_info",V::makeObj(),inventory);
     const auto docArgs=json(R"({"detail":"design","ids":[1],"sections":["features"]})");
     auto objectArgs=json(R"({"ids":[1],"limit":1,"known_fingerprints":{}})");
@@ -40,7 +40,8 @@ static void unratedFeedbackProjectionChecks(){
     member(member(object,"structuredContent"),"objects").arr[0].set("geometry",V::makeStr("RAW_FEEDBACK_OBJECT_BODY_MUST_BE_OMITTED"+std::string(1800,'b')));
     auto failed=object;failed.set("isError",V::makeBool(true));member(failed,"structuredContent").set("activity_id",V::makeStr("synthetic:failed"));member(failed,"structuredContent").set("error_code",V::makeStr("OBJECT_CONTEXT_UNAVAILABLE"));member(failed,"structuredContent").set("error",V::makeStr(std::string(1200,'e')));
     contextExchange(history,"feedback_doc_read","doc_info",docArgs,doc);contextExchange(history,"feedback_object_read","object_context",objectArgs,object);contextExchange(history,"feedback_failed_read","object_context",json(R"({"ids":[2],"limit":1})"),failed);
-    auto finish=[&](V candidate){contextExchange(candidate,"feedback_current_revision","doc_info",json(R"({"detail":"revision"})"),json(R"({"isError":false,"structuredContent":{"revision":8}})"));return candidate;};
+    // A large later read moves the rated reads out of the verbatim recency window.
+    auto finish=[&](V candidate){contextExchange(candidate,"feedback_later_large_read","doc_info",json(R"({"detail":"summary"})"),inventory);contextExchange(candidate,"feedback_current_revision","doc_info",json(R"({"detail":"revision"})"),json(R"({"isError":false,"structuredContent":{"revision":8}})"));return candidate;};
     ark::AssistantConfig config;config.model="offline-feedback-projection";config.authMode=ark::AssistantAuthMode::ChatGptPlan;
     auto project=[&](const V& candidate){const auto before=candidate.dump();bool projected=false;const auto request=ark::assistantRequest(config,candidate,ark::AgentSession::tools(),&projected);check(projected&&candidate.dump()==before,"real request projection retains all original read and rating receipts");return *request.find("input");};
     const auto initial=project(finish(history));
@@ -101,6 +102,76 @@ static void visionChecks(){
     check(session.revision==1&&ark::documentToJson(session.document)==cameraBaseline,"camera inspection never changes the drawing");
     auto preview=session.call("doc_preview",json(R"({"expected_revision":1,"commands":[{"op":"feature.edit","id":1,"p":{"dx":20}}]})"));check(!preview.find("isError")->b&&preview.find("structuredContent")->find("candidate_cached")->b,"disposable evaluated preview candidate retained");V capture=json(R"({"id":1,"view":"front","expected_revision":1})");capture.set("candidate_id",*preview.find("structuredContent")->find("candidate_id"));auto previewImage=session.call("snapshot",capture);check(!previewImage.find("isError")->b&&!previewImage.find("structuredContent")->find("visual_evidence")->find("committed")->b&&session.revision==1,"prepared candidate snapshot renders actual uncommitted pixels without changing document");session.call("doc_apply",json(R"({"expected_revision":1,"commands":[{"op":"param.set","name":"changed","expr":1}]})"));capture.set("expected_revision",V::makeNum(2));auto expired=session.call("snapshot",capture);check(expired.find("isError")->b&&expired.find("content")->arr.size()==1,"changed baseline invalidates prepared preview pixels explicitly");
 }
+// Specialist tools are advertised after their topic is loaded; execution still
+// accepts every tool of the host catalogue.
+static void deferredToolChecks(){
+    const auto full=ark::AgentSession::tools();
+    auto names=[](const V& tools){std::vector<std::string> out;for(const auto& tool:tools.arr)out.push_back(tool.find("name")->asStr());return out;};
+    auto has=[&](const V& tools,const char* name){const auto list=names(tools);return std::find(list.begin(),list.end(),name)!=list.end();};
+    const auto core=ark::assistantActiveTools(full,V::makeArr(),"");
+    check(!has(core,"bom_inspect")&&!has(core,"library_source_search")&&!has(core,"drawing_export")&&has(core,"doc_apply")&&has(core,"doc_info")&&has(core,"agent_onboard")&&has(core,"collision_inspect"),"core tools stay advertised while specialist tools wait for their topic");
+    std::string onboard;for(const auto& tool:core.arr)if(tool.find("name")->asStr()=="agent_onboard")onboard=tool.find("description")->asStr();
+    check(onboard.find("bom: bom_inspect")!=std::string::npos&&onboard.find("drawings: drawing_inspect, drawing_export")!=std::string::npos,"agent_onboard lists which topic offers each deferred tool");
+    std::cout<<"ASSISTANT_DEFERRED_TOOLS {\"full_tools\":"<<full.arr.size()<<",\"full_bytes\":"<<full.dump().size()<<",\"core_tools\":"<<core.arr.size()<<",\"core_bytes\":"<<core.dump().size()<<"}\n";
+    check(core.dump().size()*10<full.dump().size()*8,"deferring specialist tools removes at least a fifth of the catalogue bytes");
+    V history=V::makeArr();V call=V::makeObj();call.set("type",V::makeStr("function_call"));call.set("call_id",V::makeStr("load_bom"));call.set("name",V::makeStr("agent_onboard"));call.set("arguments",V::makeStr(R"({"topic":"bom"})"));history.arr.push_back(call);
+    const auto bom=ark::assistantActiveTools(full,history,"");
+    check(has(bom,"bom_inspect")&&has(bom,"bom_export")&&!has(bom,"drawing_export"),"loading a topic offers exactly its specialist tools");
+    bool prefix=bom.arr.size()>core.arr.size();for(std::size_t i=0;prefix&&i<core.arr.size();++i)prefix=bom.arr[i].dump()==core.arr[i].dump();
+    check(prefix,"a topic load appends to the advertised tools, keeping the earlier list as a cacheable prefix");
+    V batch=V::makeObj();batch.set("type",V::makeStr("function_call"));batch.set("call_id",V::makeStr("batch_guides"));batch.set("name",V::makeStr("query_batch"));batch.set("arguments",V::makeStr(R"({"queries":[{"tool":"agent_onboard","args":{"topic":"drawings","detail":"guide"}}]})"));history.arr.push_back(batch);
+    check(has(ark::assistantActiveTools(full,history,""),"drawing_inspect"),"onboarding rows inside query_batch load their topic");
+    check(has(ark::assistantActiveTools(full,V::makeArr(),ark::agentOnboardingPack({"overview","physics"})),"physics_inspect"),"topics in the preloaded guide are loaded from the start");
+    V custom=json(R"([{"name":"future_tool","description":"Not mapped","inputSchema":{"type":"object"}}])");check(ark::assistantActiveTools(custom,V::makeArr(),"").arr.size()==1,"a tool without a topic stays core");
+    // Through the real loop: the second request offers bom tools, and a tool
+    // that was not yet advertised still executes from the host catalogue.
+    ark::AssistantConfig config;config.model="offline-deferred";config.deferSpecialistTools=true;int rounds=0;std::vector<std::string> executed;bool firstLacks=false,secondHas=false;
+    ark::runAssistant(config,V::makeStr("Review the drawing exports"),full,[&](const std::string& name,const V&){executed.push_back(name);return json(R"({"isError":false,"structuredContent":{"revision":0}})");},{},nullptr,
+        [&](auto&,const V& request,auto*){const auto& tools=*request.find("tools");++rounds;
+            if(rounds==1){firstLacks=!has(tools,"bom_inspect");return toolResponse("early_drawing","drawing_inspect",R"({})");}
+            if(rounds==2)return toolResponse("load_bom","agent_onboard",R"({"topic":"bom"})");
+            if(rounds==3){secondHas=has(tools,"bom_inspect");return toolResponse("inspect_bom","bom_inspect",R"({})");}
+            return finalResponse();});
+    check(firstLacks&&secondHas&&std::count(executed.begin(),executed.end(),std::string("drawing_inspect"))==1&&std::count(executed.begin(),executed.end(),std::string("bom_inspect"))==1,"the loop advertises loaded topics and still executes any catalogue tool");
+}
+// Real runs looped on identical reads for hundreds of thousands of tokens.
+// The loop tells the model, without stopping it or imposing a budget.
+static void repeatedReadChecks(){
+    ark::AssistantConfig config;config.model="offline-repeat";int rounds=0,serial=0;std::vector<V> requests;
+    const auto tools=ark::AgentSession::tools();
+    auto result=ark::runAssistant(config,V::makeStr("Edit the bracket"),tools,[&](const std::string& name,const V&){
+            V out=json(R"({"isError":false,"structuredContent":{"revision":4,"units":"mm"}})");member(out,"structuredContent").set("activity_id",V::makeStr("act-"+std::to_string(++serial)));member(out,"structuredContent").set("recompute_ms",V::makeNum(serial*1.5));
+            if(name=="doc_apply")member(out,"structuredContent").set("revision",V::makeNum(5));return out;},{},nullptr,
+        [&](auto&,const V& request,auto*){requests.push_back(request);++rounds;
+            if(rounds<=4)return toolResponse(("read_"+std::to_string(rounds)).c_str(),"doc_info",R"({"detail":"revision"})");
+            if(rounds==5)return toolResponse("write","doc_apply",R"({"expected_revision":4,"commands":[{"op":"param.set","name":"w","expr":"2"}]})");
+            if(rounds==6)return toolResponse("read_after_write","doc_info",R"({"detail":"revision"})");
+            return finalResponse();});
+    auto output=[&](const char* id){for(const auto& item:result.conversation.arr)if(item.find("call_id")&&item.find("call_id")->asStr()==id&&item.find("output"))return item.find("output")->asStr();return std::string();};
+    check(output("read_1").find("ark_repeat_notice")==std::string::npos&&output("read_2").find("ark_repeat_notice")!=std::string::npos&&output("read_4").find("ark_repeat_notice")!=std::string::npos,"an identical repeated read is marked even when bookkeeping fields differ");
+    check(output("read_after_write").find("ark_repeat_notice")==std::string::npos,"a successful write clears repeated-read evidence");
+    std::size_t notes=0;for(const auto& item:result.conversation.arr)if(item.find("role")&&item.find("role")->asStr()=="developer"&&item.find("content")&&item.find("content")->t==V::Str&&item.find("content")->str.find("three consecutive rounds")!=std::string::npos)++notes;
+    check(notes==1&&rounds==7,"three rounds of repeated reads add one plain notice and the loop still runs to completion");
+}
+// One response may batch independent calls; document writes stay one per
+// response so the next write is authored after the previous result.
+static void batchedCallsKeepOneWritePerResponse(){
+    ark::AssistantConfig config;config.model="offline-batch";int rounds=0;std::vector<std::string> executed;
+    const auto tools=ark::AgentSession::tools();
+    auto result=ark::runAssistant(config,V::makeStr("Edit the bracket"),tools,[&](const std::string& name,const V&){executed.push_back(name);
+            V out=json(R"({"isError":false,"structuredContent":{"revision":4}})");if(name=="doc_apply")member(out,"structuredContent").set("revision",V::makeNum(5));return out;},{},nullptr,
+        [&](auto&,const V& request,auto*){
+            if(++rounds==1){check(request.find("parallel_tool_calls")->b,"responses may batch independent tool calls");
+                V response=toolResponse("batch_read","doc_info",R"({"detail":"revision"})");V output=*response.find("output");
+                for(const auto& [id,args]:{std::pair{"batch_write_1",R"({"expected_revision":4,"commands":[{"op":"param.set","name":"w","expr":"2"}]})"},std::pair{"batch_write_2",R"({"expected_revision":5,"commands":[{"op":"param.set","name":"h","expr":"3"}]})"}}){
+                    V call=V::makeObj();call.set("type",V::makeStr("function_call"));call.set("call_id",V::makeStr(id));call.set("name",V::makeStr("doc_apply"));call.set("arguments",V::makeStr(args));output.arr.push_back(call);}
+                response.set("output",output);return response;}
+            return finalResponse();});
+    auto output=[&](const char* id){for(const auto& item:result.conversation.arr)if(item.find("call_id")&&item.find("call_id")->asStr()==id&&item.find("output"))return item.find("output")->asStr();return std::string();};
+    check(executed==std::vector<std::string>{"doc_info","doc_apply"},"a batched read and the first write execute in order");
+    check(output("batch_write_2").find("one document write per response")!=std::string::npos,"a second write in the same response is rejected without execution");
+    config.parallelToolCalls=false;check(!ark::assistantRequest(config,json(R"([{"role":"user","content":"Inspect"}])"),tools).find("parallel_tool_calls")->b,"hosts can still request serial tool calls");
+}
 static void payloadAndPerformanceChecks(){
     ark::AgentSession session;ark::AssistantConfig config;config.model="offline-payload";config.reasoningEffort="high";
     config.onboardingPack=ark::agentOnboardingPack({"overview"});auto tools=ark::AgentSession::tools();
@@ -118,6 +189,8 @@ static void payloadAndPerformanceChecks(){
     check(beforeInitial>afterInitial&&fullPack.size()>config.onboardingPack.size(),"a lazily loaded core guide lowers initial context while all tool schemas remain advertised");
     check(run.performance.providerRequests==2&&run.performance.toolCalls==1&&run.performance.providerMilliseconds>=8&&run.performance.toolMilliseconds>=1,"provider and tool timings are measured independently from real callback boundaries");
     check(run.performance.requestBytes==afterInitial+afterRequest&&run.performance.lastRequestBytes==afterRequest&&run.performance.maxRequestBytes==std::max(afterInitial,afterRequest),"request byte totals and peak count the exact serialized requests once");
+    check(run.performance.prefixComparedRequests==1&&run.performance.prefixComparedBytes==afterRequest&&run.performance.prefixReuseBytes>0&&run.performance.prefixReuseBytes<afterRequest&&run.performance.lastPrefixBreak.empty(),"an appended tool round reuses the previous request as an unchanged prefix");
+    const auto metrics=ark::assistantContextMetrics(run.performance);check(metrics.find("prefix_reuse_ratio")&&metrics.find("prefix_reuse_ratio")->num>0&&metrics.find("prefix_reuse_ratio")->num<1&&!metrics.find("last_prefix_break"),"request context reports prefix reuse without a divergence for append-only history");
     check(measured.size()==3&&measured[0].providerRequests==1&&measured[1].toolCalls==1&&measured[2].providerRequests==2&&measured[2].toolCalls==1,"existing Usage and ToolEnd events carry cumulative measured performance without extra requests");
     V report=V::makeObj();report.set("tools",V::makeNum(ark::assistantFunctionTools(tools).arr.size()));report.set("tool_schema_bytes",V::makeNum(run.performance.lastToolSchemaBytes));report.set("full_pack_bytes",V::makeNum(fullPack.size()));report.set("core_pack_bytes",V::makeNum(config.onboardingPack.size()));report.set("initial_request_full_pack",V::makeNum(beforeInitial));report.set("initial_request_core_pack",V::makeNum(afterInitial));report.set("receipt_bytes_full",V::makeNum(receipt.dump().size()));report.set("receipt_bytes_compact",V::makeNum(compactReceiptBytes));report.set("next_request_full_receipt",V::makeNum(beforeRequest));report.set("next_request_compact_receipt",V::makeNum(afterRequest));std::cout<<"ASSISTANT_PAYLOAD_BENCHMARK "<<report.dump()<<'\n';
     // Images, annotations and distinct text are not duplicate evidence.
@@ -196,7 +269,7 @@ int main(int argc,char** argv){try{
     check(converted.arr[0].find("parameters")->dump()==tools.arr[0].find("inputSchema")->dump(),"preserve schema");
     V conversation=json(R"([{"role":"user","content":"Inspect"}])");
     auto request=ark::assistantRequest(config,conversation,tools);
-    check(!request.find("store")->b,"no stored response");check(!request.find("parallel_tool_calls")->b,"serial tools");
+    check(!request.find("store")->b,"no stored response");check(request.find("parallel_tool_calls")->b,"independent tool calls may share a response");
     check(request.find("include")->arr[0].str=="reasoning.encrypted_content","request portable reasoning");
     check(request.find("instructions")->str.find("agent_onboard")!=std::string::npos,"onboarding instruction");
     const auto policy=request.find("instructions")->str;
@@ -339,5 +412,5 @@ int main(int argc,char** argv){try{
         [&](const auto& e){if(e.kind==ark::AssistantEvent::Usage)partial=e.usage;},nullptr,
         [&](auto&,auto&,auto*){return incompleteCounted;});},"incomplete response remains rejected");
     check(partial.totalTokens==15,"usage from incomplete response survives via event");
-    requestContextChecks();unratedFeedbackProjectionChecks();payloadAndPerformanceChecks();nestedReceiptChecks();transientHttpRetryChecks();visionChecks();userImageAuthoringChecks();assistantSteeringChecks();std::cout<<checks<<" assistant checks passed\n";return 0;
+    deferredToolChecks();repeatedReadChecks();batchedCallsKeepOneWritePerResponse();requestContextChecks();unratedFeedbackProjectionChecks();payloadAndPerformanceChecks();nestedReceiptChecks();transientHttpRetryChecks();visionChecks();userImageAuthoringChecks();assistantSteeringChecks();std::cout<<checks<<" assistant checks passed\n";return 0;
 }catch(const std::exception& e){std::cerr<<"assistant test failed: "<<e.what()<<'\n';return 1;}}

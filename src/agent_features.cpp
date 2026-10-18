@@ -12,6 +12,7 @@
 #include <chrono>
 #include <set>
 #include <map>
+#include <cctype>
 #include <stdexcept>
 
 namespace ark {
@@ -77,14 +78,30 @@ void validateBatchQuery(const V& query,size_t index){
 void batchContent(V& row,const V& data){
     row.set("structuredContent",data);V content=V::makeArr(),item=V::makeObj();item.set("type",V::makeStr("text"));item.set("text",V::makeStr(data.dump()));content.arr.push_back(item);row.set("content",content);
 }
+// Guessed projection names usually share a word with the real field
+// (length_mm -> route_length_mm, layers -> layer_count). Suggestions are hints
+// only; the row stays rejected until the caller requests real fields.
+V suggestedFields(const std::string& missing,const V& result){
+    auto words=[](const std::string& name){std::vector<std::string> out;std::string word;for(char c:name+"_"){if(c=='_'){if(word.size()>=3&&word!="mm"&&word!="deg"&&word!="min"&&word!="max")out.push_back(word);word.clear();}else word+=(char)std::tolower((unsigned char)c);}return out;};
+    static const std::map<std::string,std::string> synonyms={{"separation","distance"},{"clearance","distance"},{"gap","distance"},{"centre","center"},{"centroid","center"},{"weight","mass"},{"result","value"},{"output","value"}};
+    auto stem=[](const std::string& a,const std::string& b){const size_t n=std::min(a.size(),b.size());return n>=4&&a.compare(0,n,b,0,n)==0;};
+    V out=V::makeArr();
+    for(const auto& field:result.obj){bool match=false;
+        for(auto wanted:words(missing)){if(const auto alias=synonyms.find(wanted);alias!=synonyms.end())wanted=alias->second;for(const auto& candidate:words(field.first))if(stem(wanted,candidate))match=true;}
+        if(match&&out.arr.size()<4)out.arr.push_back(V::makeStr(field.first));}
+    return out;
+}
 void projectBatchRow(V& row,const V& query,size_t index){
     const auto* fields=query.find("fields");if(!fields||required(row,"isError").b)return;
     const V full=required(row,"structuredContent");V compact=V::makeObj(),missing=V::makeArr();
+    // "structuredContent" names the whole tool payload, not a field inside it.
+    if(std::any_of(fields->arr.begin(),fields->arr.end(),[](const V& key){return key.t==V::Str&&key.str=="structuredContent";}))return;
     for(const auto& key:fields->arr){if(const auto* value=full.find(key.str.c_str()))compact.set(key.str,*value);else missing.arr.push_back(key);}
     if(missing.arr.empty()){batchContent(row,compact);return;}
     V available=V::makeArr();std::string names;for(const auto& field:full.obj){available.arr.push_back(V::makeStr(field.first));if(!names.empty())names+=", ";names+=field.first;}
-    V error=V::makeObj(),recovery=V::makeObj();error.set("error_code",V::makeStr("QUERY_BATCH_FIELD_MISSING"));error.set("error",V::makeStr("Requested result field is absent: "+missing.arr.front().str+"; available fields: "+names));error.set("query_index",V::makeNum((double)index));error.set("tool",required(query,"tool"));error.set("requested_fields",*fields);error.set("missing_fields",missing);error.set("available_fields",available);error.set("tool_succeeded",V::makeBool(true));error.set("observed_result",full);
-    recovery.set("action",V::makeStr("reuse_observed_result"));recovery.set("hint",V::makeStr("The tool already ran once. Use observed_result and its actual available_fields; no successful query needs repeating. If fresh evidence is needed, call only the tool/args below, without the invalid fields projection."));recovery.set("tool",required(query,"tool"));recovery.set("args",required(query,"args"));error.set("recovery",recovery);
+    V suggestions=V::makeObj();std::string hint;for(const auto& key:missing.arr){auto candidates=suggestedFields(key.str,full);if(candidates.arr.empty())continue;std::string list;for(const auto& c:candidates.arr)list+=(list.empty()?"":"|")+c.str;hint+=(hint.empty()?"; did you mean ":", ")+key.str+" -> "+list;suggestions.set(key.str,candidates);}
+    V error=V::makeObj(),recovery=V::makeObj();error.set("error_code",V::makeStr("QUERY_BATCH_FIELD_MISSING"));error.set("error",V::makeStr("Requested result field is absent: "+missing.arr.front().str+hint+"; available fields: "+names));if(!suggestions.obj.empty())error.set("suggested_fields",suggestions);error.set("query_index",V::makeNum((double)index));error.set("tool",required(query,"tool"));error.set("requested_fields",*fields);error.set("missing_fields",missing);error.set("available_fields",available);error.set("tool_succeeded",V::makeBool(true));error.set("observed_result",full);
+    recovery.set("action",V::makeStr("reuse_observed_result"));recovery.set("hint",V::makeStr("The tool already ran once. Read observed_result and its actual available_fields; the other successful queries need no repeat. To record this evidence (and clear a retained team error), call only the tool/args below once with valid fields or without a fields projection."));recovery.set("tool",required(query,"tool"));recovery.set("args",required(query,"args"));error.set("recovery",recovery);
     row.set("isError",V::makeBool(true));batchContent(row,error);
 }
 V queryValue(AgentSession& s,const V& spec){

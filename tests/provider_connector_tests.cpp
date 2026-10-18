@@ -1,3 +1,8 @@
+#include "ark/assistant_credentials.hpp"
+#include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include "ark/assistant_connectors.hpp"
 #include "ark/agent_team.hpp"
 #include "ark/agent.hpp"
@@ -115,6 +120,44 @@ void testResponsesReplayCustody(){auto openai=configured("openai");V response=js
     auto changedModel=openai;changedModel.model="different-explicit-model";check(assistantRequest(changedModel,transcript,tools).dump().find("opaque_source_payload")==std::string::npos,"reasoning is not replayed to a different model");
     auto plan=openai;plan.authMode=AssistantAuthMode::ChatGptPlan;check(assistantRequest(plan,transcript,tools).dump().find("opaque_source_payload")==std::string::npos,"API and ChatGPT plan reasoning custody stay separate");
 }
+void testSavedKeysAndClaudeRoutes(){
+    auto deepseek=assistantProviderPreset("deepseek");check(deepseek.endpoint=="https://api.deepseek.com/chat/completions"&&deepseek.apiKeyEnv=="DEEPSEEK_API_KEY"&&deepseek.protocol==AssistantProtocol::ChatCompletions&&deepseek.model.empty(),"DeepSeek preset uses its Chat Completions endpoint without choosing a model");
+    auto claude=configured("claude");const auto request=assistantRequest(claude,json(R"([{"role":"user","content":"Inspect"}])"),tools);
+    check(request.find("cache_control")&&request.find("cache_control")->find("type")->str=="ephemeral"&&request.find("system")->arr.back().find("cache_control"),"first-party Messages requests cache the stable prefix and the growing tail");
+    auto compatible=claude;compatible.provider="custom";compatible.endpoint="https://messages.example.invalid/v1/messages";check(!assistantRequest(compatible,json(R"([{"role":"user","content":"Inspect"}])"),tools).find("cache_control"),"other Messages endpoints receive no Anthropic cache fields");
+    const auto command=assistantExternalMcpConfig("claude-code-cli","C:/ARK/ark-mcp.exe","ark-studio-7-1-2");
+    check(command.find("claude mcp add --transport stdio --scope user ark -- \"C:/ARK/ark-mcp.exe\" --connect ark-studio-7-1-2")!=std::string::npos&&command.find("claude mcp remove ark --scope user")==0,"Claude Code export is one user-scope stdio command with options before --");
+#ifdef _WIN32
+    const auto directory=std::filesystem::temp_directory_path()/("ark-api-keys-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    struct Cleanup {std::filesystem::path path;~Cleanup(){std::error_code ignored;std::filesystem::remove_all(path,ignored);_putenv_s("ARK_API_KEY_DIRECTORY","");}} cleanup{directory};
+    _putenv_s("ARK_API_KEY_DIRECTORY",directory.string().c_str());
+    auto keyed=claude;keyed.apiKeyEnv="ARK_TEST_UNSET_KEY_VARIABLE";const std::string key="sk-ant-test-0123456789abcdef";
+    check(!assistantApiKeyStored(keyed)&&!assistantKeyAvailable(keyed),"no saved key and no environment variable means no credential");
+    storeAssistantApiKey(keyed,key);check(assistantApiKeyStored(keyed)&&assistantKeyAvailable(keyed)&&loadAssistantApiKey(keyed)==key,"a pasted key is available immediately without an environment variable or restart");
+    std::string bytes;for(const auto& entry:std::filesystem::directory_iterator(directory)){std::ifstream input(entry.path(),std::ios::binary);bytes+=std::string((std::istreambuf_iterator<char>(input)),std::istreambuf_iterator<char>());}
+    check(!bytes.empty()&&bytes.find(key)==std::string::npos,"the saved key is DPAPI-protected, never plaintext on disk");
+    auto discovery=keyed;discovery.endpoint="https://api.anthropic.com/v1/models";check(loadAssistantApiKey(discovery)==key,"model discovery on the same provider host uses the saved key");
+    auto otherHost=keyed;otherHost.endpoint="https://proxy.example.invalid/v1/messages";check(!assistantApiKeyStored(otherHost)&&loadAssistantApiKey(otherHost).empty(),"a saved key is never released to another host");
+    auto otherProvider=keyed;otherProvider.provider="claude-chat";check(loadAssistantApiKey(otherProvider).empty(),"a saved key is bound to its provider");
+    rejects([&]{storeAssistantApiKey(keyed,"sk ant with spaces");},"keys with spaces or line breaks are rejected");
+    auto local=keyed;local.endpoint="http://127.0.0.1:9/v1/messages";rejects([&]{storeAssistantApiKey(local,key);},"keys are never saved for a non-HTTPS endpoint");
+    check(removeAssistantApiKey(keyed)&&!assistantApiKeyStored(keyed)&&loadAssistantApiKey(keyed).empty(),"forgetting the key removes it");
+    auto customDeepSeek=assistantProviderPreset("custom");customDeepSeek.endpoint="https://api.deepseek.com/chat/completions";customDeepSeek.protocol=AssistantProtocol::ChatCompletions;const auto presetDeepSeek=assistantProviderPreset("deepseek");const std::string deepKey="sk-deepseek-test-0123456789";
+    storeAssistantApiKey(customDeepSeek,deepKey);check(assistantApiKeyStored(presetDeepSeek)&&loadAssistantApiKey(presetDeepSeek)==deepKey,"the DeepSeek preset reuses a key saved for a custom DeepSeek endpoint");
+    auto customElsewhere=customDeepSeek;customElsewhere.endpoint="https://proxy.example.invalid/chat/completions";check(loadAssistantApiKey(customElsewhere).empty(),"a custom connector on another host never receives that key");
+    check(removeAssistantApiKey(presetDeepSeek)&&!assistantApiKeyStored(customDeepSeek),"forgetting through the preset removes the shared key");
+    storeAssistantApiKey(presetDeepSeek,deepKey);check(loadAssistantApiKey(customDeepSeek)==deepKey,"a custom DeepSeek endpoint reuses the preset's saved key");removeAssistantApiKey(presetDeepSeek);
+#endif
+}
+void testPromptCacheKey(){
+    auto openai=configured("openai");V first=json(R"([{"role":"developer","content":"Static guide"},{"role":"user","content":"First turn"}])"),later=first;later.arr.push_back(json(R"({"role":"user","content":"Later turn with new evidence"})"));
+    const auto a=assistantRequest(openai,first,tools),b=assistantRequest(openai,later,tools);
+    check(a.find("prompt_cache_key")&&a.find("prompt_cache_key")->str.rfind("ark-",0)==0&&a.find("prompt_cache_key")->str==b.find("prompt_cache_key")->str,"OpenAI requests keep one prompt cache key while the history grows");
+    check(a.find("prompt_cache_key")->str.find("First turn")==std::string::npos&&a.find("prompt_cache_key")->str.size()==36,"prompt cache key is an opaque digest, not request text");
+    const V readOnly=json(R"([{"name":"doc_info","description":"Inspect current document","inputSchema":{"type":"object"}}])");check(assistantRequest(openai,first,readOnly).find("prompt_cache_key")->str!=a.find("prompt_cache_key")->str,"roles with different tool catalogs use different cache keys");
+    auto plan=openai;plan.authMode=AssistantAuthMode::ChatGptPlan;check(!assistantRequest(plan,first,tools).find("prompt_cache_key"),"ChatGPT plan Responses requests stay unkeyed (keyed plan runs reported no cached tokens)");
+    for(auto config:{configured("grok"),configured("custom")})check(!assistantRequest(config,first,tools).find("prompt_cache_key"),"other Responses providers receive no OpenAI-specific cache field");
+}
 void testResponsesCallIdPreflight(){
     auto base=json(R"([{"role":"user","content":"Synthetic request."},{"type":"function_call","call_id":"valid_call","name":"doc_info","arguments":"{}"},{"type":"function_call_output","call_id":"valid_call","output":"sk_FAKE_HISTORY_SECRET"}])");
     const std::string boundary(64,'b');base.arr[1].set("call_id",V::makeStr(boundary));base.arr[2].set("call_id",V::makeStr(boundary));
@@ -178,5 +221,5 @@ int main(int argc,char** argv){try{
     if(argc==3&&std::string(argv[1])=="--local-agent-basic-smoke"){liveLocalModelSmoke(argv[2],true);return 0;}
     // Explicit opt-in read-only network smoke. Default test stays fully offline.
     if(argc==3&&std::string(argv[1])=="--catalog"){const auto ids=assistantProviderModels(assistantProviderPreset(argv[2]));V models=V::makeArr();for(const auto& id:ids)models.arr.push_back(V::makeStr(id));std::cout<<models.dump()<<'\n';return 0;}
-    testLocalModelCapabilities();testChat();testOllamaEmptyPropertySchemas();testCompleteBeforeExecution();testBoundedOutcomes();testMessages();testPresetsCatalogAndExport();testResponsesReplayCustody();testResponsesCallIdPreflight();testMixedProviderTeam();std::cout<<"Provider connector contracts passed\n";return 0;
+    testLocalModelCapabilities();testChat();testOllamaEmptyPropertySchemas();testCompleteBeforeExecution();testBoundedOutcomes();testMessages();testPresetsCatalogAndExport();testResponsesReplayCustody();testPromptCacheKey();testSavedKeysAndClaudeRoutes();testResponsesCallIdPreflight();testMixedProviderTeam();std::cout<<"Provider connector contracts passed\n";return 0;
 }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

@@ -80,6 +80,13 @@ double gravity(const V& args){
     return value->num;
 }
 void setMass(V& result,double grams,double gravityMs2){result.set("mass_g",V::makeNum(grams));result.set("mass_kg",V::makeNum(grams/1000.0));result.set("gravity_m_s2",V::makeNum(gravityMs2));result.set("weight_N",V::makeNum(grams*gravityMs2/1000.0));}
+// A native worker timeout is not a missing solid: keep the resource-limit
+// wording (RESOURCE_LIMIT) so a client does not retry the identical request.
+std::string exactSolidFailure(const std::exception& error){
+    const std::string reason=error.what();
+    if(reason.find("worker limit")!=std::string::npos)return "Exact mass properties exceeded the native OCCT worker limit; repeating the same request will exceed it again";
+    return "Density needs an exact solid";
+}
 V centroidOf(Document& document, u64 feature) {
     ensureNativeBody(document,feature,document.evalBodies);
     const V* brep=nullptr;
@@ -91,7 +98,35 @@ V centroidOf(Document& document, u64 feature) {
     V measured=nativeWorkerRequest(request);if(document.centroidCache.size()>=256)document.centroidCache.erase(document.centroidCache.begin());document.centroidCache[feature]={digest,measured};return measured;
 }
 std::string absolutePath(const std::string& name){auto path=std::filesystem::absolute(std::filesystem::u8path(name));auto utf=path.u8string();return std::string(utf.begin(),utf.end());}
-void params(Feature& f,const V& p){if(p.t!=V::Obj)throw std::runtime_error("p must be an object");for(auto& kv:p.obj)f.p[kv.first]=expression(kv.second);}
+std::string failedPostconditionSummary(const V& report){
+    // Name the failing checks in the error text: logs, memory and compacted
+    // history keep this text even when the conditions object is dropped.
+    std::string text="Required postconditions failed";size_t named=0,failed=0;
+    if(const auto* rows=report.find("checks");rows&&rows->t==V::Arr)for(const auto& row:rows->arr){
+        const auto* passed=row.find("passed");if(!passed||passed->t!=V::Bool||passed->b)continue;++failed;if(named==4||text.size()>600)continue;
+        text+=(named++?"; ":": ")+(row.find("id")&&row.find("id")->t==V::Str?row.find("id")->str:std::string("check"));
+        if(const auto* observed=row.find("observed")){auto value=observed->dump();if(value.size()>48)value=value.substr(0,48)+"...";text+=" observed "+value;}
+        if(const auto* target=row.find("target"))text+=" target "+target->dump();
+        else if(row.find("min")&&row.find("max"))text+=" range ["+row.find("min")->dump()+", "+row.find("max")->dump()+"]";
+        if(const auto* delta=row.find("required_delta"))text+=" delta "+delta->dump();
+    }
+    if(failed>named)text+="; "+std::to_string(failed-named)+" more in conditions.checks";
+    return text;
+}
+void nativeSpecAllowed(FeatureType type,const V& spec){
+    if(!isNativeFeature(type)&&type!=FeatureType::Suspension&&type!=FeatureType::MeshEdit)throw std::runtime_error(std::string("Feature type ")+featureTypeName(type)+" does not accept a native object; its inputs go in p. Exact revolves use type revolve_surface; native solid primitives and patterns use type native_solid with native.op");
+    if(spec.t!=V::Obj)throw std::runtime_error("native must be an object for a native feature");
+}
+std::string unknownFeatureType(const std::string& type){
+    // Common native_solid ops are often sent as feature types.
+    static const std::set<std::string> nativeOps={"circular_pattern","linear_pattern","mirror","common","hole","fillet","chamfer","shell","offset","draft","round_tube","rect_tube","split_plane"};
+    if(nativeOps.count(type))return "Unknown feature type: "+type+"; it is a native_solid operation: use type native_solid with native:{op:\""+type+"\", ...} and its inputs";
+    std::string names;for(int i=0;i<=(int)FeatureType::MeshNet;++i){FeatureType known;const char* name=featureTypeName((FeatureType)i);if(name&&*name&&featureTypeFromName(name,known)&&known==(FeatureType)i){if(!names.empty())names+=", ";names+=name;}}
+    return "Unknown feature type: "+type+"; accepted types: "+names;
+}
+void params(Feature& f,const V& p){if(p.t!=V::Obj)throw std::runtime_error("p must be an object");for(auto& kv:p.obj){
+    if(kv.second.t==V::Bool)throw std::runtime_error("Feature parameter p."+kv.first+" must be an expression string or finite number; flags use 1 or 0, not true/false");
+    try{f.p[kv.first]=expression(kv.second);}catch(const std::exception& e){throw std::runtime_error("Feature parameter p."+kv.first+": "+e.what());}}}
 void featureAppearance(Feature& feature,const V& command){
     if(const V* intent=command.find("manufacturing")){
         std::string error;if(!applyManufacturingIntent(feature,*intent,error))throw std::runtime_error(error);
@@ -117,7 +152,8 @@ void notches(Feature& f,const V& list){
     if(f.type!=FeatureType::NotchedTube||list.t!=V::Arr||list.arr.size()>64)throw std::runtime_error("notches requires notched_tube and 0..64 points");
     f.notches.clear();for(auto& j:list.arr){NotchPoint p;p.station=expression(field(j,"station"));p.angle=expression(field(j,"angle"));p.face=str(j,"face");f.notches.push_back(p);}
 }
-u64 namedFeature(const Document& d,const std::string& name){u64 found=0;int count=0;for(const auto& feature:d.features)if(feature.name==name){found=feature.id;++count;}if(count!=1)throw std::runtime_error(count?"Ambiguous feature name: "+name:"Feature name not found: "+name);return found;}
+std::string featureNameList(const Document& d){std::string names;size_t listed=0;for(const auto& feature:d.features){if(feature.name.empty())continue;if(listed==24||names.size()>480){names+=", ...";break;}names+=(listed++?", ":"")+feature.name;}return names.empty()?std::string("none"):names;}
+u64 namedFeature(const Document& d,const std::string& name){u64 found=0;int count=0;for(const auto& feature:d.features)if(feature.name==name){found=feature.id;++count;}if(count!=1)throw std::runtime_error(count?"Ambiguous feature name: "+name:"Feature name not found: "+name+"; existing feature names: "+featureNameList(d));return found;}
 u64 featureRef(const Document& d,const V& value){if(value.t==V::Num)return id(value);if(value.t==V::Str)return namedFeature(d,value.str);throw std::runtime_error("Feature reference must be an id or a unique name");}
 void bindProjectFeature(const Document& document,V& entity){
     auto kind=entity.find("kind");if(!kind||kind->t!=V::Str||kind->str!="project")return;
@@ -290,7 +326,7 @@ V displayInterference(Document& d,const std::vector<AssemblyPlacement>& placemen
     std::vector<const AssemblyPlacement*> visible;for(const auto& placement:placements)if(placement.visible)visible.push_back(&placement);
     std::unordered_map<u64,Mesh> meshes;auto meshOf=[&](u64 feature)->const Mesh*{auto found=meshes.find(feature);if(found!=meshes.end())return &found->second;for(const auto& body:d.evalBodies)if(body.id==feature)return &meshes.emplace(feature,body.tessellate(d.tessOpt)).first->second;return nullptr;};
     size_t triangles=0;bool missing=false;for(const auto* placement:visible){const Mesh* mesh=meshOf(placement->feature);if(!mesh){missing=true;break;}triangles+=mesh->triCount();}
-    if(missing||triangles>(force?120000u:8000u)){report.set("interference_checked",V::makeBool(false));report.set("interference",pairs);report.set("interference_note",V::makeStr(missing?"An instance has no display mesh.":"Display-mesh interference was skipped because the visible instances exceed the triangle budget. Pass interference:true to raise it to 120000 triangles."));return report;}
+    if(missing||triangles>(force?120000u:8000u)){report.set("interference_checked",V::makeBool(false));report.set("interference",pairs);report.set("visible_triangles",V::makeNum((double)triangles));report.set("interference_note",V::makeStr(missing?"An instance has no display mesh.":force?"Display-mesh interference was skipped: the visible instances exceed even the raised 120000-triangle budget. Check specific pairs with collision_inspect or assembly_info clearance instead.":"Display-mesh interference was skipped because the visible instances exceed the triangle budget. Pass interference:true to raise it to 120000 triangles, or check specific pairs with collision_inspect."));return report;}
     report.set("interference_checked",V::makeBool(true));
     for(size_t i=0;i<visible.size();++i)for(size_t j=i+1;j<visible.size();++j){
         const auto& a=*visible[i];const auto& b=*visible[j];const Mesh& ma=*meshOf(a.feature);const Mesh& mb=*meshOf(b.feature);
@@ -695,7 +731,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
         if(tool=="doc_undo"||tool=="doc_redo"||tool=="doc_load"||tool=="import_step"||tool=="import_sheet_step")
             if(const auto* expected=args.find("expected_revision"))
                 if(expected->t!=V::Num||expected->num!=(double)revision)
-                    throw std::runtime_error("Revision conflict; read doc_info with detail design and retry");
+                    throw std::runtime_error("Revision conflict; the current revision is in this result. Inspect only what your edit depends on and retry");
         if(tool=="context_graph")return result(projectContextGraph(document,revision,args,contextGraphCache_,contextGraphSource_,contextGraphStamp_));
         V extension;if(callProjectMemoryTool(*this,tool,args,extension))return result(extension);if(callAuthoring023Tool(*this,tool,args,extension))return result(extension);if(callComponentLibraryTool(*this,tool,args,extension))return result(extension);if(callAgentFeature(*this,tool,args,extension))return result(extension);
         {V out;if(callAuthoring024Tool(*this,tool,args,out))return result(out);}
@@ -731,7 +767,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
             V r=iterationInfo(document,limit,cursor);r.set("revision",V::makeNum((double)revision));return result(r);
         }
         if(tool=="iteration_restore"){
-            const auto& expected=field(args,"expected_revision");if(expected.t!=V::Num||expected.num!=(double)revision)throw std::runtime_error("Revision conflict; read doc_info with detail design and retry");
+            const auto& expected=field(args,"expected_revision");if(expected.t!=V::Num||expected.num!=(double)revision)throw std::runtime_error("Revision conflict; the current revision is in this result. Inspect only what your edit depends on and retry");
             Document next;iterationRestore(document,str(args,"id"),next);validated(next);remember();document=std::move(next);++revision;return result(info());
         }
         if(tool=="doc_new"){
@@ -841,7 +877,8 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
         if(tool=="native_inspect"){
             const auto detail=args.find("detail")?str(args,"detail"):"full";if(detail!="full"&&detail!="report"&&detail!="properties")throw std::runtime_error("native_inspect detail must be full, report or properties");
             const double gravityMs2=gravity(args);
-            u64 selected=id(field(args,"id"));
+            // A preview check can only name a feature it adds: accept a unique name.
+            u64 selected=field(args,"id").t==V::Str?namedFeature(document,field(args,"id").str):id(field(args,"id"));
             auto* feature=document.find(selected);
             if(!feature)throw std::runtime_error("Select a modeling feature");
             if(feature->type==FeatureType::Suspension)throw std::runtime_error("Suspension is a kinematic display model; use suspension_inspect");
@@ -882,7 +919,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
                     r.set("mass_checked",V::makeBool(frame&&frame->find("mass_checked")&&frame->find("mass_checked")->b));
                     if(frame){if(detail!="properties")r.set("frame_report",*frame);if(auto mass=frame->find("mass_g")){setMass(r,mass->num,gravityMs2);if(auto center=frame->find("center_mm"))r.set("center_mm",*center);}else r.set("mass_reason",V::makeStr("Assign density to each frame profile"));}
                 }else if(density.present){
-                    V response;try{response=centroidOf(document,selected);}catch(const std::exception&){throw std::runtime_error("Density needs an exact solid");}
+                    V response;try{response=centroidOf(document,selected);}catch(const std::exception& error){throw std::runtime_error(exactSolidFailure(error));}
                     const V* volume=response.find("volume_mm3");const V* center=response.find("center_mm");
                     if(!volume||volume->t!=V::Num||!center||center->t!=V::Arr||center->arr.size()!=3)throw std::runtime_error("Density needs an exact solid");
                     for(const auto& coordinate:center->arr)if(coordinate.t!=V::Num||!std::isfinite(coordinate.num))throw std::runtime_error("Density needs a finite exact solid centroid");
@@ -923,7 +960,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
             if(replace)prepared_.clear();remember();document=std::move(next);++revision;V answer=info();answer.set("created_id",V::makeNum((double)created));if(auto report=document.find(created)->sourceData.find("report"))answer.set("report",*report);return result(answer);
         }
         if(tool=="import_mesh"){
-            if(auto expected=args.find("expected_revision")){if(expected->t!=V::Num||expected->num!=(double)revision)throw std::runtime_error("Revision conflict; read doc_info with detail design and retry");}
+            if(auto expected=args.find("expected_revision")){if(expected->t!=V::Num||expected->num!=(double)revision)throw std::runtime_error("Revision conflict; the current revision is in this result. Inspect only what your edit depends on and retry");}
             double weld=0;if(auto value=args.find("weld_mm")){if(value->t!=V::Num||!(value->num>0&&value->num<=1))throw std::runtime_error("weld_mm must be in (0, 1]");weld=value->num;}
             Mesh imported=importMeshPath(str(args,"path"));const double rawVertices=(double)imported.vertCount(),rawTriangles=(double)imported.triCount();
             if(weld){imported.weld(weld);imported.computeNormals();if(!imported.triCount())throw std::runtime_error("weld removed every imported triangle");}
@@ -1143,7 +1180,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
                                 if(!volume||volume->t!=V::Num||!center||center->t!=V::Arr||center->arr.size()!=3)local.reason="Density needs an exact solid";
                                 else if(!std::isfinite(volume->num)||volume->num<=0||!std::isfinite(center->arr[0].num)||!std::isfinite(center->arr[1].num)||!std::isfinite(center->arr[2].num))local.reason="Density needs a positive exact solid volume and finite centroid";
                                 else{local.ok=true;local.volume=volume->num;local.center={center->arr[0].num,center->arr[1].num,center->arr[2].num};}
-                            }catch(const std::exception&){local.reason="Density needs an exact solid";}
+                            }catch(const std::exception& error){local.reason=exactSolidFailure(error);}
                             cached=cache.emplace(feature->id,local).first;
                         }
                         if(!cached->second.ok){if(reason.empty())reason=name+": "+cached->second.reason;continue;}
@@ -1172,7 +1209,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
             if(args.find("refresh_candidate"))throw std::runtime_error("refresh_candidate requires an owned retained candidate_id");
             if(args.find("accept_dfm"))throw std::runtime_error("DFM_ACCEPTANCE_INVALID: acceptance requires a retained manufacturing proposal candidate");
             if(auto expected=args.find("expected_revision")){
-                if(expected->t!=V::Num||expected->num!=(double)revision)throw std::runtime_error("Revision conflict; read doc_info with detail design and retry");
+                if(expected->t!=V::Num||expected->num!=(double)revision)throw std::runtime_error("Revision conflict; the current revision is in this result. Inspect only what your edit depends on and retry");
             }
             const auto& commands=field(args,"commands");
             if(commands.t!=V::Arr||commands.arr.empty()||commands.arr.size()>128)throw std::runtime_error("commands must contain 1..128 operations");
@@ -1238,13 +1275,13 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
                 }
                 else if(op=="feature.add"){
                     Feature f;auto type=str(c,"type");
-                    if(!featureTypeFromName(type,f.type))throw std::runtime_error("Unknown feature type: "+type);
+                    if(!featureTypeFromName(type,f.type))throw std::runtime_error(unknownFeatureType(type));
                     if(f.type==FeatureType::SourceTube||f.type==FeatureType::SourceSheet)throw std::runtime_error("Use the source STEP import tool to create verified source geometry");
                     f.name=c.find("name")?str(c,"name"):type;
                     if(auto p=c.find("p"))params(f,*p);
                     if(auto b=c.find("bends"))bends(f,*b);
                     if(auto n=c.find("notches"))notches(f,*n);
-                    if(auto spec=c.find("native")){if((!isNativeFeature(f.type)&&f.type!=FeatureType::Suspension&&f.type!=FeatureType::MeshEdit)||spec->t!=V::Obj)throw std::runtime_error("native must be an object for a native feature");f.nativeSpec=*spec;}
+                    if(auto spec=c.find("native")){nativeSpecAllowed(f.type,*spec);f.nativeSpec=*spec;}
                     else if(isNativeFeature(f.type)||f.type==FeatureType::Suspension||f.type==FeatureType::MeshEdit)f.nativeSpec=V::makeObj();
                     if(auto mesh=c.find("mesh")){if(f.type!=FeatureType::MeshBody||mesh->t!=V::Obj)throw std::runtime_error("mesh is only valid as an object on mesh_body");f.sourceData=*mesh;}
                     if(const auto* edit=c.find("mesh_edit")){if(c.find("native")||f.type!=FeatureType::MeshEdit||edit->t!=V::Obj)throw std::runtime_error("mesh_edit selection must be an object on mesh_edit, without another native field");f.nativeSpec=*edit;}
@@ -1283,7 +1320,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
                     if(auto p=c.find("p"))params(*f,*p);
                     if(auto b=c.find("bends"))bends(*f,*b);
                     if(auto n=c.find("notches"))notches(*f,*n);
-                    if(auto spec=c.find("native")){if((!isNativeFeature(f->type)&&f->type!=FeatureType::Suspension&&f->type!=FeatureType::MeshEdit)||spec->t!=V::Obj)throw std::runtime_error("native must be an object for a native feature");f->nativeSpec=*spec;}
+                    if(auto spec=c.find("native")){nativeSpecAllowed(f->type,*spec);f->nativeSpec=*spec;}
                     if(auto mesh=c.find("mesh")){if(f->type!=FeatureType::MeshBody||mesh->t!=V::Obj)throw std::runtime_error("mesh is only valid as an object on mesh_body");f->sourceData=*mesh;}
                     if(const auto* edit=c.find("mesh_edit")){if(c.find("native")||f->type!=FeatureType::MeshEdit||edit->t!=V::Obj)throw std::runtime_error("mesh_edit selection must be an object on mesh_edit, without another native field");f->nativeSpec=*edit;}
                     if(c.find("name"))f->name=str(c,"name");
@@ -1365,7 +1402,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
                 else validated(next);
                 AgentSession checking;checking.document=std::move(next);checking.revision=revision;
                 conditionReport=evaluatePostconditions(checking,*checks);next=std::move(checking.document);
-                if(!conditionReport.find("passed")->b){V failure=V::makeObj();failure.set("error",V::makeStr("Required postconditions failed"));failure.set("error_code",V::makeStr("POSTCONDITION_FAILED"));failure.set("stage",V::makeStr("postconditions"));failure.set("revision",V::makeNum((double)revision));failure.set("document_unchanged",V::makeBool(true));failure.set("conditions",conditionReport);return result(failure,true);}
+                if(!conditionReport.find("passed")->b){V failure=V::makeObj();failure.set("error",V::makeStr(failedPostconditionSummary(conditionReport)));failure.set("error_code",V::makeStr("POSTCONDITION_FAILED"));failure.set("stage",V::makeStr("postconditions"));failure.set("revision",V::makeNum((double)revision));failure.set("document_unchanged",V::makeBool(true));failure.set("conditions",conditionReport);return result(failure,true);}
             }
             if(appearanceOnly){
                 next.evalBodies=document.evalBodies;next.lastResults=document.lastResults;
@@ -1431,7 +1468,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
         }
         if(tool=="snapshot"){
             std::string path;if(args.find("path"))path=str(args,"path");std::string view="iso";
-            if(const auto* expected=args.find("expected_revision");expected&&(expected->t!=V::Num||expected->num!=(double)revision))throw std::runtime_error("Revision conflict; read doc_info with detail design and retry");
+            if(const auto* expected=args.find("expected_revision");expected&&(expected->t!=V::Num||expected->num!=(double)revision))throw std::runtime_error("Revision conflict; the current revision is in this result. Inspect only what your edit depends on and retry");
             if(args.find("candidate_id"))return snapshotCandidate(args);
             bool inlineImage=true;if(const auto* flag=args.find("inline_image")){if(flag->t!=V::Bool)throw std::runtime_error("inline_image must be boolean");inlineImage=flag->b;}
             if(!inlineImage&&path.empty())throw std::runtime_error("A path is required when inline_image is false");
@@ -1461,6 +1498,16 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
         if(tool=="object_context"&&(message.find("OBJECT_CONTEXT_REFERENCE_MISSING")!=std::string::npos||message.find("name not found")!=std::string::npos))r.set("error_code",V::makeStr("REFERENCE_MISSING"));
         for(const char* prefix:{"MECHANICAL_","ASSEMBLY_","MANIPULATION_"})if(const auto start=message.find(prefix);start!=std::string::npos){const auto end=message.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ_",start);r.set("error_code",V::makeStr(message.substr(start,end==std::string::npos?end:end-start)));break;}
         if(message.rfind("DFM_ACCEPTANCE_",0)==0){const auto end=message.find(':');r.set("error_code",V::makeStr(message.substr(0,end)));}
+        if(r.find("error_code")->str=="REVISION_CONFLICT"){
+            // The current revision is already in this result. Point at the cheap
+            // explicit path instead of a full design read; never rebase silently.
+            if(const auto* expected=args.find("expected_revision"))r.set("expected_revision",*expected);
+            V recovery=V::makeObj(),steps=V::makeArr();recovery.set("current_revision",V::makeNum((double)revision));
+            steps.arr.push_back(V::makeStr("Use this result's revision as the current revision; doc_info detail:revision confirms it without a full design read."));
+            steps.arr.push_back(V::makeStr("Inspect only the objects your edit depends on (object_context or doc_info ids) to see whether another writer changed them."));
+            steps.arr.push_back(V::makeStr(args.find("candidate_id")?"Retry this owned candidate with candidate_id, expected_revision set to the current revision and refresh_candidate:true; the host rechecks it atomically or rejects it.":"Resubmit with expected_revision set to the current revision after confirming your inputs are unchanged."));
+            recovery.set("steps",steps);recovery.set("avoid",V::makeStr("Do not reread the full design or broadcast this conflict; it is a concurrency outcome, not a geometry failure."));r.set("recovery",recovery);
+        }
         r.set("stage",V::makeStr(args.find("candidate_id")?"prepared_apply":applying?"command":"evaluation"));
         if(tool=="tool_feedback"||tool=="activity_info")r.set("stage",V::makeStr("audit_arguments"));
         if(applying){r.set("command_index",V::makeNum(commandIndex));r.set("operation",V::makeStr(commandOp));}
@@ -1527,7 +1574,7 @@ V AgentSession::tools(bool detailed){
         {"assembly_info","Hierarchy placements, pattern copies and BOM quantities by shared feature definition. Each instance includes copy. Hidden instances remain in BOM. A patterned node counts once for degrees of freedom. Optional drive:{driver,mate?,mode?:rotate|translate,delta:number|expression} previews mate-aware connected-component manipulation. Returns drive.joint, delta, instances, diagnostics and assembly.edit commands; document/revision unchanged. Commit assembly.drive through doc_apply with expected_revision. Revolute leaves axial rotation, rigid locks the full frame. Closed loops, ambiguous joints, grounded moving sides and invalid residuals reject. Optional candidate probes one mate and reports residuals, the two frames and the axis convention without saving it or changing revision. interference compares display meshes: the default budget is 8000 triangles and interference:true raises it to 120000. A skip sets interference_checked false. Overlap is display mesh evidence for a cheap screen, not a motion study. clearance:{a,b} is exact separation and overlap evidence between B-reps. separation_mm is the nonnegative gap; overlap_volume_mm3 reports measured intersection. Legacy clearance_mm negative values are penetration estimates, not minimum translation distances; penetration_depth_checked is false. Both faces and the method are reported. a and b take a name, an id, or {node,copy}; copy_a and copy_b also select a pattern copy. A body without a B-rep sets clearance_checked false and clearance_reason. measure:{a,b} is read-only and returns distance_mm, angle_deg and both frames for axis, planar face or origin references. Neither field writes the document or the revision. For visible placed parts with material density or p.density override, exact B-rep volume yields mass_g, mass_kg, center_mm, weight_N, gravity_m_s2, mass_scope and mass_checked. Hidden parts are excluded by the reported scope. A missing or invalid density sets mass_checked false and does not return a partial mass. Concentric, coincident/contact, signed distance and angle mates, grounded instances, local DOFs and residual diagnosis.",R"({"type":"object","properties":{"gravity_m_s2":{"type":"number","minimum":0,"maximum":100},"interference":{"type":"boolean"},"drive":{"type":"object","properties":{"driver":{"type":["integer","string"]},"mate":{"type":"integer","minimum":1},"mode":{"type":"string","enum":["rotate","translate"]},"delta":{"type":["number","string"]}},"required":["driver","delta"],"additionalProperties":false},"candidate":{"type":"object"},"clearance":{"type":"object"},"measure":{"type":"object"}}})",true},
         {"tube_inspect","Ideal centerline length, section area and bend table. No springback, weld allowance or material compensation.",R"({"type":"object","properties":{"node":{"type":"integer","minimum":1},"id":{"type":"integer","minimum":1}},"required":["id"]})",true},
         {"source_inspect","Read source projection evidence and exact opening coordinates without large mesh buffers. Optional progress returns finite-hinge display transforms; source geometry stays read-only.",R"({"type":"object","properties":{"id":{"type":"integer","minimum":1},"progress":{"type":"number","minimum":0,"maximum":1}},"required":["id"]})",true},
-        {"native_inspect","Read native feature validation, opening inventory, and flat availability without transmitting B-rep or mesh buffers. When a named material density or p.density override is set, exact B-rep volume yields mass_g, mass_kg, weight_N, gravity_m_s2 and the local center_mm. Optional point returns the signed distance in mm, negative inside one solid, and the nearest face name.",R"({"type":"object","properties":{"gravity_m_s2":{"type":"number","minimum":0,"maximum":100},"id":{"type":"integer","minimum":1},"point":{"type":"array","items":{"type":"number"},"minItems":3,"maxItems":3}},"required":["id"]})",true},
+        {"native_inspect","Read native feature validation, opening inventory, and flat availability without transmitting B-rep or mesh buffers. When a named material density or p.density override is set, exact B-rep volume yields mass_g, mass_kg, weight_N, gravity_m_s2 and the local center_mm. Optional point returns the signed distance in mm, negative inside one solid, and the nearest face name.",R"({"type":"object","properties":{"gravity_m_s2":{"type":"number","minimum":0,"maximum":100},"id":{"oneOf":[{"type":"integer","minimum":1},{"type":"string","minLength":1,"maxLength":128}],"description":"feature id or unique feature name"},"point":{"type":"array","items":{"type":"number"},"minItems":3,"maxItems":3}},"required":["id"]})",true},
         {"kernel_info","Report the isolated native OCCT modeling backend and version.",R"({"type":"object"})",true},
         {"step_inspect","Read STEP solids, units, B-rep validity, dimensions, volume and surface types before choosing an explicit body. Optional faces includes source face inventory. Read-only C++ OCCT; no automatic sheet classification.",R"({"type":"object","properties":{"path":{"type":"string"},"faces":{"type":"boolean"}},"required":["path"]})",true},
         {"import_step","Import and geometrically verify a planar tube STEP with cylindrical retained-wall hinges. Preserves exact hole/cutout B-reps, projects rigid spans, checks refolding and imports native preview. Optional replace:true starts a new document. Fails closed outside supported domain.",R"({"type":"object","properties":{"path":{"type":"string"},"replace":{"type":"boolean"}},"required":["path"]})",false},

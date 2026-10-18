@@ -304,9 +304,78 @@ static void testSingleSolidRecovery(){
     check(detail.find("document_unchanged")->b&&session.revision==revision&&ark::documentToJson(session.document)==before,"failure guidance cannot commit or alter rejected geometry");
 }
 
+// The moto concept's tyre (an ellipse recipe revolved into a solid) took the
+// 30-second worker limit for its centroid and then reported a missing solid.
+static void testRevolvedEllipseMassProperties(){
+    ark::AgentSession session;
+    accepted(session.call("doc_apply",parse(R"({"expected_revision":0,"commands":[
+      {"op":"param.set","name":"wheel_r","expr":"315"},{"op":"param.set","name":"tire_hw","expr":"75"},{"op":"param.set","name":"tire_sec","expr":"48"},
+      {"op":"material.set","name":"Tyre rubber","density":1.15},
+      {"op":"plane.set","name":"wheel_plane","parent":"XY","p":{"oz":"wheel_r"}},
+      {"op":"sketch.set","name":"tire_profile","sketch":{"plane":"wheel_plane","entities":[{"kind":"recipe","name":"tire_section","recipe":{"type":"ellipse","center":["wheel_r-tire_sec",0],"major":"tire_hw","minor":"tire_sec","angle":90}}]}},
+      {"op":"feature.add","type":"revolve_surface","name":"Tyre","p":{"sketch":"tire_profile","angle":360,"solid":1},"native":{"axis":"Y"},"material":"Tyre rubber"}]})")));
+    const auto started=std::chrono::steady_clock::now();
+    const Value inspected=accepted(session.call("native_inspect",parse(R"({"id":"Tyre","detail":"properties","gravity_m_s2":9.80665})")));
+    const double seconds=std::chrono::duration<double>(std::chrono::steady_clock::now()-started).count();
+    const double pi=std::acos(-1.0),volume=2.0*pi*pi*267.0*75.0*48.0;
+    check(inspected.find("mass_checked")&&inspected.find("mass_checked")->b,"revolved ellipse tyre has exact mass properties");
+    check(std::abs(inspected.find("mass_kg")->num-volume*1.15e-6)<1e-6,"tyre mass matches the analytic elliptic torus volume");
+    const Value& center=*inspected.find("center_mm");
+    check(std::abs(center.arr[0].num)<1e-6&&std::abs(center.arr[2].num-315.0)<1e-6,"tyre centroid is on the axle");
+    check(seconds<10.0,"tyre centroid stays far inside the native worker limit");
+}
+
+// Agent-facing contracts observed failing in Studio sessions: each rejection
+// names the field, operation or alternative instead of a bare kernel failure.
+static std::string rejectedError(ark::AgentSession& session, const char* commands) {
+    const auto before = session.revision;
+    const Value response = session.call("doc_preview", parse(commands));
+    const Value& payload = *response.find("structuredContent");
+    if (response.find("isError")->b) { check(session.revision == before, "rejected request leaves revision unchanged"); return payload.find("error")->str; }
+    check(!payload.find("valid")->b && session.revision == before, "invalid candidate is rejected without commit");
+    return payload.find("candidate_result")->find("error")->str;
+}
+static void testAgentGeometryDiagnostics() {
+    ark::AgentSession session;
+    const char* sections = R"({"op":"plane.set","name":"Top","p":{"oz":"10"}},
+      {"op":"sketch.set","name":"Low","sketch":{"entities":[{"kind":"circle","dof":[0,0,5]}]}},
+      {"op":"sketch.set","name":"High","sketch":{"plane":"Top","entities":[{"kind":"circle","dof":[0,0,3]}]}},
+      {"op":"sketch.set","name":"OpenHigh","sketch":{"plane":"Top","entities":[{"kind":"line","dof":[-3,0,3,0]}]}})";
+    accepted(session.call("doc_apply", parse((std::string(R"({"expected_revision":0,"commands":[)") + sections + "]}").c_str())));
+    accepted(session.call("doc_preview", parse(R"({"expected_revision":1,"commands":[{"op":"feature.add","type":"loft","name":"Default ruled","p":{"solid":1},"native":{"sections":["Low","High"]}}]})")));
+    // A preview check can only reach the feature it adds by name.
+    accepted(session.call("doc_preview", parse(R"({"expected_revision":1,"commands":[{"op":"feature.add","type":"native_solid","name":"Checked block","native":{"op":"box"},"p":{"width":4,"depth":5,"height":6}}],"checks":[{"query":{"tool":"native_inspect","args":{"id":"Checked block"},"path":"report.brep_valid"},"op":"true"}]})")));
+    auto error = rejectedError(session, R"({"expected_revision":1,"commands":[{"op":"feature.add","type":"loft","name":"Mixed","p":{"solid":0,"compatible":1},"native":{"sections":["Low","OpenHigh"]}}]})");
+    check(error.find("mix open and closed profiles") != std::string::npos && error.find("section 1") != std::string::npos, "loft names the open/closed section mismatch instead of a bare OCCT failure");
+    error = rejectedError(session, R"({"expected_revision":1,"commands":[{"op":"feature.add","type":"native_solid","name":"Spun","native":{"op":"revolve"}}]})");
+    check(error.find("Unknown native_solid op 'revolve'") != std::string::npos && error.find("revolve_surface") != std::string::npos && error.find("input_brep") == std::string::npos, "unknown native op is named before any input body is required");
+    error = rejectedError(session, R"({"expected_revision":1,"commands":[{"op":"feature.add","type":"circular_pattern","name":"Ring"}]})");
+    check(error.find("native_solid operation") != std::string::npos, "native op sent as a feature type points to native_solid");
+    error = rejectedError(session, R"({"expected_revision":1,"commands":[{"op":"feature.add","type":"no_such_type","name":"X"}]})");
+    check(error.find("accepted types:") != std::string::npos && error.find("revolve_surface") != std::string::npos, "unknown feature type lists accepted types");
+    error = rejectedError(session, R"({"expected_revision":1,"commands":[{"op":"feature.add","type":"loft","name":"Bool","p":{"solid":true},"native":{"sections":["Low","High"]}}]})");
+    check(error.find("p.solid") != std::string::npos && error.find("1 or 0") != std::string::npos, "boolean parameter is rejected with its field and flag syntax");
+    error = rejectedError(session, R"({"expected_revision":1,"commands":[{"op":"feature.add","type":"revolve","name":"Legacy","p":{"sketch":"Low"},"native":{"axis":"Y"}}]})");
+    check(error.find("does not accept a native object") != std::string::npos && error.find("revolve_surface") != std::string::npos, "native object on a legacy type is distinguished from a malformed native object");
+    error = rejectedError(session, R"({"expected_revision":1,"commands":[{"op":"feature.add","type":"native_solid","name":"Cut","inputs":["Missing body"],"native":{"op":"cut"}}]})");
+    check(error.find("existing feature names") != std::string::npos || error.find("not found") != std::string::npos, "missing named input is reported");
+    const Value stale = session.call("doc_apply", parse(R"({"expected_revision":0,"commands":[{"op":"param.set","name":"stale","expr":"1"}]})"));
+    const Value& conflict = *stale.find("structuredContent");
+    check(stale.find("isError")->b && conflict.find("error_code")->str == "REVISION_CONFLICT" && conflict.find("recovery")->find("current_revision")->num == 1 && conflict.find("expected_revision")->num == 0, "revision conflict echoes both revisions with an explicit recovery");
+    check(conflict.dump().find("detail design") == std::string::npos, "revision conflict does not ask for a full design read");
+    accepted(session.call("doc_apply", parse(R"({"expected_revision":1,"commands":[
+      {"op":"sketch.set","name":"Ring profile","sketch":{"entities":[{"kind":"line","dof":[5,0,10,0]},{"kind":"line","dof":[10,0,10,10]},{"kind":"line","dof":[10,10,5,10]},{"kind":"line","dof":[5,10,5,0]}]}},
+      {"op":"feature.add","type":"revolve_surface","name":"Closed skin","p":{"sketch":"Ring profile","angle":"360","solid":"0"},"native":{"axis":"Y"}}]})")));
+    const auto closedSkin = session.document.features.back().id;
+    error = rejectedError(session, (R"({"expected_revision":2,"commands":[{"op":"feature.add","type":"thicken","inputs":[)" + std::to_string(closedSkin) + R"(],"p":{"thickness":"1"}}]})").c_str());
+    check(error.find("shell is closed") != std::string::npos, "thicken explains that a closed shell has no boundary to offset");
+}
+
 int main() {
     try {
+        testAgentGeometryDiagnostics();
         testSingleSolidRecovery();
+        testRevolvedEllipseMassProperties();
         testLoftHistoryAndExport();
         testMirrorPlanes();
         testFinishingHistory();

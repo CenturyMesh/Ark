@@ -64,6 +64,7 @@
 #include <TopTools_ShapeMapHasher.hxx>
 #include <Standard_Failure.hxx>
 #include <TopExp.hxx>
+#include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Vertex.hxx>
 #include <TopoDS_Edge.hxx>
@@ -966,6 +967,7 @@ V loft(const V& request) {
     size_t segments = 0;
     bool closed = false;
     bool sawWire = false;
+    std::string sectionSummary;
     std::vector<std::pair<std::string, EdgeRecord>> firstSectionEdges, lastSectionEdges;
     TopoDS_Wire firstWire;
     auto namedEdges = [](const V& value, const Profile& profile) {
@@ -998,21 +1000,34 @@ V loft(const V& request) {
             continue;
         }
         Profile profile = alignedSection(request,profileIndex,solid);
+        if (!sectionSummary.empty()) sectionSummary += "; ";
+        sectionSummary += "section " + std::to_string(profileIndex) + ": " + std::to_string(profile.edges.size()) + " edges, " + (profile.closed ? "closed" : "open");
         if (!sawWire) {
             segments = profile.edges.size();
             closed = profile.closed;
             sawWire = true;
             firstWire = profile.wire;
             firstSectionEdges = namedEdges(value, profile);
-        } else if (!compatible && (profile.edges.size() != segments || profile.closed != closed)) {
-            throw std::runtime_error("loft profiles have incompatible edge topology");
+        } else if (profile.closed != closed) {
+            // OCCT cannot blend an open and a closed wire, even with compatibility repair.
+            throw std::runtime_error("loft sections mix open and closed profiles: section " + std::to_string(profileIndex) + " is " + (profile.closed ? "closed" : "open") + " but the first wire section is " + (closed ? "closed" : "open") + "; close every section for a solid loft or keep all open for a surface");
+        } else if (!compatible && profile.edges.size() != segments) {
+            throw std::runtime_error("loft profiles have incompatible edge topology: section " + std::to_string(profileIndex) + " has " + std::to_string(profile.edges.size()) + " edges but the first wire section has " + std::to_string(segments) + "; give every section the same edge count or set p.compatible:1");
         }
         lastSectionEdges = namedEdges(value, profile);
         maker.AddWire(profile.wire);
     }
     if (!sawWire) throw std::runtime_error("loft needs at least one wire section");
     maker.Build();
-    if (!maker.IsDone()) throw std::runtime_error("OCCT loft failed");
+    if (!maker.IsDone()) {
+        const auto status = maker.GetStatus();
+        const char* reason = status == BRepFill_ThruSectionErrorStatus_NotSameTopology ? "sections do not share one topology"
+            : status == BRepFill_ThruSectionErrorStatus_ProfilesInconsistent ? "profiles are inconsistent (check winding, seam alignment and self-crossing sections)"
+            : status == BRepFill_ThruSectionErrorStatus_WrongUsage ? "point sections may only start or end the loft"
+            : status == BRepFill_ThruSectionErrorStatus_Null3DCurve ? "a section edge has no 3D curve"
+            : "the surface through the sections could not be built (check that sections do not coincide or cross)";
+        throw std::runtime_error(std::string("OCCT loft failed: ") + reason + "; " + sectionSummary + (solid && !closed ? "; solid:1 needs closed sections" : ""));
+    }
     V result = shapeResult(maker.Shape(), solid), topology = V::makeObj(), rows = V::makeArr();
     topology.set("brep_sha256", V::makeStr(sha256(base64Decode(required(result, "brep_base64").str))));
     auto bind = [&](const std::string& name, const std::string& kind, const TopoDS_Shape& source) {
@@ -1259,16 +1274,30 @@ V revolveSurface(const V& request) {
                             {frame[axis * 4], frame[axis * 4 + 1], frame[axis * 4 + 2]});
     const TopoDS_Shape basis = basisOf(profile, solid);
     const bool full = std::abs(degrees - 360.0) <= 1.0e-9;
+    // Explain the common failure: profile vertices on both sides of the axis.
+    auto revolutionFailure = [&]() {
+        const gp_XYZ origin = revolution.Location().XYZ(), direction = revolution.Direction().XYZ();
+        gp_XYZ reference(0, 0, 0);bool positive = false, negative = false;
+        for (const TopoDS_Shape& vertex : shapes(basis, TopAbs_VERTEX)) {
+            gp_XYZ radial = BRep_Tool::Pnt(TopoDS::Vertex(vertex)).XYZ() - origin;radial -= direction * radial.Dot(direction);
+            if (radial.Modulus() <= 1.0e-6) continue;
+            if (reference.Modulus() == 0) reference = radial;
+            (radial.Dot(reference) > 0 ? positive : negative) = true;
+        }
+        return std::runtime_error(positive && negative
+            ? "OCCT surface revolution failed: the profile crosses the revolution axis; keep it on one side (it may touch the axis)"
+            : "OCCT surface revolution failed: check that the profile is planar, contains the axis direction and is not degenerate");
+    };
     TopoDS_Shape shape;
     if (full) {
         BRepPrimAPI_MakeRevol revol(basis, revolution, true);
         revol.Build();
-        if (!revol.IsDone()) throw std::runtime_error("OCCT surface revolution failed");
+        if (!revol.IsDone()) throw revolutionFailure();
         shape = revol.Shape();
     } else {
         BRepPrimAPI_MakeRevol revol(basis, revolution, degrees * std::acos(-1.0) / 180.0, true);
         revol.Build();
-        if (!revol.IsDone()) throw std::runtime_error("OCCT surface revolution failed");
+        if (!revol.IsDone()) throw revolutionFailure();
         shape = revol.Shape();
     }
     if (solid && properties(shape) < 0) shape.Reverse();
@@ -1566,6 +1595,15 @@ V thicken(const V& request) {
     const TopoDS_Shape source = readBrep(input.str);
     if (source.ShapeType() != TopAbs_FACE && source.ShapeType() != TopAbs_SHELL)
         throw std::runtime_error("thicken requires one open face or shell");
+    if (source.ShapeType() == TopAbs_SHELL) {
+        // A closed shell has no free boundary to offset from; OCCT only reports a bare failure.
+        TopTools_IndexedDataMapOfShapeListOfShape faces;
+        TopExp::MapShapesAndAncestors(source, TopAbs_EDGE, TopAbs_FACE, faces);
+        bool open = false;
+        for (int i = 1; i <= faces.Extent() && !open; ++i)
+            open = faces(i).Extent() == 1 && !BRep_Tool::Degenerated(TopoDS::Edge(faces.FindKey(i)));
+        if (!open) throw std::runtime_error("thicken requires an open face or shell, but this shell is closed (no free boundary edges); thicken an open skin (an open profile with solid:0), or build the solid with solid:1 and hollow it with native_solid shell");
+    }
     BRepOffsetAPI_MakeThickSolid maker;
     maker.MakeThickSolidBySimple(source, thickness);
     if (!maker.IsDone()) throw std::runtime_error("OCCT thickening failed");

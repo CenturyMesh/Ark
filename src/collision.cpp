@@ -8,7 +8,7 @@ namespace ark {
 namespace {
 using V=arkjson::Value;
 struct Operand {u64 feature=0,node=0;int copy=0;Mat4 transform=Mat4::identity();};
-u64 featureId(const Document& d,const V& value){u64 selected=0;for(const auto& f:d.features)if((value.t==V::Str&&f.name==value.str)||(value.t==V::Num&&value.num==(double)f.id)){if(selected)throw std::runtime_error("Ambiguous collision feature");selected=f.id;}if(!selected)throw std::runtime_error("Collision feature not found");return selected;}
+u64 featureId(const Document& d,const V& value){u64 selected=0;for(const auto& f:d.features)if((value.t==V::Str&&f.name==value.str)||(value.t==V::Num&&value.num==(double)f.id)){if(selected)throw std::runtime_error("Ambiguous collision feature");selected=f.id;}if(!selected)throw std::runtime_error("Collision feature not found: "+(value.t==V::Str?"\""+value.str+"\"":value.dump())+". a and b take a feature id or unique feature name, {id}, or a placed occurrence {node,copy} with the assembly node id; find them with object_context or assembly_info.");return selected;}
 Operand operand(const Document& d,const V& value,const std::vector<AssemblyPlacement>& placements){
     Operand out;if(value.t==V::Num||value.t==V::Str){out.feature=featureId(d,value);return out;}
     if(value.t!=V::Obj)throw std::runtime_error("Collision operand needs a feature id/name or {id} / {node,copy}");

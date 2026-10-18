@@ -36,6 +36,7 @@ private:
 
 // Throws on transport failure; NEVER falls back to another document. A timeout
 // after dispatch has an unknown outcome: inspect revision before retrying writes.
+// timeoutMs bounds the whole call (1..660000); connecting is bounded at 30 s.
 arkjson::Value callLiveSession(const std::string& endpoint, const std::string& tool,
-                              const arkjson::Value& args, unsigned timeoutMs = 30000);
+                              const arkjson::Value& args, unsigned timeoutMs = 660000);
 }

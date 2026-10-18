@@ -1,5 +1,6 @@
 #include "ark/agent.hpp"
 #include "ark/bom.hpp"
+#include <algorithm>
 #include <map>
 #include <stdexcept>
 namespace ark {
@@ -27,6 +28,11 @@ arkjson::Value AgentSession::reviewBom(const V& args){
 arkjson::Value AgentSession::bomCompletionCheck(bool onlyIfAuthored)const{
     V out=V::makeObj();out.set("allowed",V::makeBool(true));out.set("summary",V::makeStr(""));
     if(onlyIfAuthored&&!bomAuthored_&&bomReview_.isNull())return out;
+    // Until BOM work is in play (identity initialized, part metadata declared or a
+    // review submitted), a concept goal completes without a BOM review. Geometry
+    // alone is not a request for procurement data.
+    const bool bomInPlay=!document.bomDocumentId.empty()||!bomReview_.isNull()||std::any_of(document.features.begin(),document.features.end(),[](const Feature& feature){return feature.part.t==V::Obj&&!feature.part.obj.empty();});
+    if(!bomInPlay)return out;
     const auto bom=inspectBom(document,revision);if(bom.find("items")->arr.empty())return out;out.set("revision",V::makeNum((double)revision));out.set("review_summary",summary(bom));
     const auto* reviewed=bomReview_.find("revision");bool current=reviewed&&reviewed->num==(double)revision&&text(bomReview_,"authoring_sha256")==text(bom,"authoring_sha256");
     if(!current){out.set("allowed",V::makeBool(false));out.set("error",V::makeStr("BOM completion blocked at revision "+std::to_string(revision)+": inspect bom_inspect and submit bom_review for this revision, with scope, pending_notes for unresolved fields and fastening_review. Part numbers/descriptions are required. Detailed scope rejects unresolved metadata. Use needs_input for missing required specifications; never invent materials or supplier data."));return out;}

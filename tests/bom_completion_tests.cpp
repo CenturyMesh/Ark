@@ -11,6 +11,8 @@ static V response(const char* name,const char* id,V args){V r=json(R"({"status":
 static V done(){return json(R"({"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Design complete."}]}]})");}
 int main(){try{
     AgentSession s;check(s.bomCompletionCheck().find("allowed")->b,"empty drawing has no fabricated BOM obligation");
+    {AgentSession conceptSession;V args=json(R"({"expected_revision":0,"commands":[{"op":"feature.add","type":"box","name":"Concept body"}]})");args.set("actor",json(R"({"kind":"agent","id":"engineer"})"));call(conceptSession,"doc_apply",args);
+     check(conceptSession.bomCompletionCheck().find("allowed")->b&&conceptSession.bomCompletionCheck(true).find("allowed")->b,"agent concept geometry without part metadata or BOM identity completes without a BOM review");}
     call(s,"doc_apply",json(R"({"expected_revision":0,"commands":[{"op":"feature.add","type":"box","name":"First","part":{"part_number":"TEST-1","description":"Fixture one","procurement":"make"}},{"op":"feature.add","type":"box","name":"Second","part":{"part_number":"TEST-2","description":"Fixture two","procurement":"buy"}}]})"));
     auto review=json(R"({"expected_revision":1,"scope":"concept","pending_notes":"Material and vendor selection unresolved; not ready for purchasing","fastening_review":"Connections remain to be designed; no fasteners claimed"})");
     check(!s.bomCompletionCheck().find("allowed")->b&&s.call("bom_review",review).find("isError")->b,"review requires current inspection");

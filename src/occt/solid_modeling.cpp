@@ -698,6 +698,10 @@ V modelSolidNative(const V& request){
     else if(op=="rect_tube")result=rectTube(request,refs);
     else if(op=="extrude")result=makeExtrusion(request,refs,&extrusionReceipt);
     else {
+        // Only body edits consume input_brep. Name an unknown op before asking for
+        // an input body, so "revolve" is not reported as a missing input.
+        static const std::set<std::string> bodyEdits={"vertex_pull","split_line","curve_pattern","hole_pattern","union","cut","common","hole","fillet","chamfer","split_surface","split_tool","draft","linear_pattern","circular_pattern","mirror","split_plane","offset","shell","transform"};
+        if(!bodyEdits.count(op))throw std::runtime_error("Unknown native_solid op '"+op+"'. Primitives: box, cylinder, sphere, cone, torus, round_tube, rect_tube, extrude; body edits with inputs: union, cut, common, hole, fillet, chamfer, shell, offset, draft, linear_pattern, circular_pattern, mirror, transform. An exact revolved solid is feature type revolve_surface with p:{sketch,angle,solid:1} and native:{axis}; a lofted solid is feature type loft");
         const auto& encoded=need(request,"input_brep");if(encoded.t!=V::Str)throw std::runtime_error("Input must be a native B-rep");TopoDS_Shape input=readBrep(encoded.str);shapeReport(input,true);refs=inputRefs(request,"input_brep","input_topology",input);
         if(op=="vertex_pull")result=pullNativeVertex(input,request,refs,vertexReceipt);
         else if(op=="split_line")result=splitNativeFace(input,request,refs,splitReceipt);
@@ -947,7 +951,7 @@ V solidCentroidNative(const V& request){
     if(encoded.t!=V::Str)throw std::runtime_error("Centroid input is not a B-rep");
     TopoDS_Shape shape=readBrep(encoded.str);
     if(shapes(shape,TopAbs_SOLID).size()!=1)throw std::runtime_error("Centroid needs one solid");
-    GProp_GProps props;volumeProperties(shape,props);
+    GProp_GProps props;volumeCentroidProperties(shape,props);
     if(!(props.Mass()>0))throw std::runtime_error("Centroid needs positive volume");
     const gp_Pnt center=props.CentreOfMass();
     V result=V::makeObj(),pointValue=V::makeArr();

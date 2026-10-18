@@ -4,7 +4,7 @@ Two independent connections are available. Choose the one matching your workflow
 
 | Goal | Connection | Credentials |
 |---|---|---|
-| Run Single/Team inside ARK Studio | Assistant connector | ARK's ChatGPT sign-in, provider API environment variable, or local model endpoint |
+| Run Single/Team inside ARK Studio | Assistant connector | ARK's ChatGPT sign-in, a provider API key saved in Studio or its environment variable, or a local model endpoint |
 | Let Codex or another MCP client edit an open Studio drawing | Live MCP | The external client manages its own model account; ARK exports the local CAD connection |
 | Automate CAD without Studio | Standalone `ark-mcp` over stdio | No model account is needed by the CAD server itself |
 
@@ -39,6 +39,41 @@ principle applies to Grok Build, Claude Code/Desktop and OpenCode configuration 
 For Grok Build and its VS Code GUI, see [the CLI/MCP setup](GROK_BUILD_CONNECT.md).
 See [the bridge contract](CODEX_CONNECT.md), [provider options](AI_CONNECTORS.md)
 and [official Codex MCP setup](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
+
+## Provider API keys saved in Studio
+
+In **Assistant connector** (or an agent card connector), choose the provider,
+then paste its API key in **API key / paste to save**. The field is masked. ARK
+stores the key with current-user DPAPI under
+`%LOCALAPPDATA%\ARK-Point\api-keys\`, bound to that provider and its endpoint
+host: changing the host requires saving the key again, and a saved key is never
+sent to a different host. The key is not written to Studio settings, documents,
+recovery files, activity, memory or logs, and it takes effect without restarting
+ARK. **Forget saved API key** removes it. When no key is saved, the provider's
+API key environment variable remains the fallback (Linux and scripted runs).
+
+The **DeepSeek API** preset uses Chat Completions at
+`https://api.deepseek.com/chat/completions` with `DEEPSEEK_API_KEY` as fallback.
+Enable **Refresh model catalog** and pick the current model ID the account
+offers; ARK does not choose a model for you. DeepSeek thinking mode returns
+`reasoning_content`, which ARK passes back in later tool rounds as DeepSeek
+requires.
+
+## Claude: API key or your Claude Code subscription
+
+- **Claude API inside ARK:** choose the **Claude API** preset and save an
+  Anthropic API key as above. Requests to the official endpoint use prompt
+  caching (a breakpoint after the stable tools and system prefix, plus automatic
+  caching of the growing conversation).
+- **Claude subscription (Pro/Max):** ARK does not offer claude.ai sign-in and
+  never handles Claude subscription credentials; Anthropic does not permit third-party
+  apps to do so ([legal and compliance](https://code.claude.com/docs/en/legal-and-compliance)).
+  Use your own, unmodified Claude Code instead and connect it to the open
+  drawing: in **Live MCP** select `claude-code-cli` and run the two commands it
+  shows (they register `ark-mcp.exe --connect <this window>` with
+  `claude mcp add --transport stdio --scope user`). Claude Code keeps its own
+  login and model; ARK only exports the local CAD connection. Re-run the commands
+  after restarting Studio, because the endpoint changes.
 
 ## ChatGPT account inside ARK
 

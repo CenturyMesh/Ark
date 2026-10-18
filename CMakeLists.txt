@@ -60,7 +60,7 @@ add_library(ark STATIC
   src/agent_benchmark.cpp
   src/physics.cpp
   src/core.cpp src/nurbs.cpp src/brep.cpp src/mesh.cpp src/csg.cpp
-  src/model.cpp src/evaluate.cpp src/native_features.cpp src/frame.cpp src/electronics.cpp src/usage.cpp src/stock_preview.cpp src/suspension.cpp src/chatgpt_auth.cpp src/sheet_commands.cpp src/sheet_preview.cpp src/references.cpp src/datum.cpp src/solver.cpp src/sketch.cpp src/prism_cut.cpp src/onboarding.cpp src/live_session.cpp src/assistant.cpp src/io.cpp src/serialize.cpp
+  src/model.cpp src/evaluate.cpp src/native_features.cpp src/frame.cpp src/electronics.cpp src/usage.cpp src/stock_preview.cpp src/suspension.cpp src/chatgpt_auth.cpp src/assistant_credentials.cpp src/sheet_commands.cpp src/sheet_preview.cpp src/references.cpp src/datum.cpp src/solver.cpp src/sketch.cpp src/prism_cut.cpp src/onboarding.cpp src/live_session.cpp src/assistant.cpp src/io.cpp src/serialize.cpp
   src/source_tube.cpp src/notch.cpp src/notch_preview.cpp src/step_export.cpp src/tube.cpp src/assembly.cpp src/assembly_io.cpp src/compute.cpp src/api.cpp src/mesh_query.cpp src/mesh_analysis.cpp src/mesh_model.cpp src/agent.cpp src/agent_features.cpp src/kernels_scalar.cpp src/snapshot_032d.cpp)
 target_include_directories(ark PUBLIC include "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_include_directories(ark SYSTEM PRIVATE third_party)
@@ -376,6 +376,34 @@ if(ARK_WITH_OCCT)
   if(NOT OpenCASCADE_MAJOR_VERSION EQUAL 8)
     message(FATAL_ERROR "ARK native modeling requires OCCT 8.x; Python/OCP backends are not supported")
   endif()
+  # An unpatched OCCT 8 SDK configures, links and runs, but changes offset and
+  # loft results; the build then ships its unpatched DLLs. Require the stamped
+  # ARK patchset (scripts/build-occt.ps1 or build-occt.sh) at configure time.
+  option(ARK_ALLOW_UNPATCHED_OCCT "Configure against an OCCT SDK without the verified ARK patchset (local diagnosis only)" OFF)
+  set(ARK_OCCT_SDK_ROOT "")
+  set(ark_occt_probe "${OpenCASCADE_DIR}")
+  foreach(ark_occt_level RANGE 3)
+    if(EXISTS "${ark_occt_probe}/.ark-occt-patchset.json")
+      set(ARK_OCCT_SDK_ROOT "${ark_occt_probe}")
+      break()
+    endif()
+    get_filename_component(ark_occt_probe "${ark_occt_probe}" DIRECTORY)
+  endforeach()
+  set(ark_occt_verified OFF)
+  if(ARK_OCCT_SDK_ROOT)
+    execute_process(COMMAND "${CMAKE_COMMAND}" -DARK_OCCT_MODE=VERIFY_INSTALLED "-DARK_OCCT_INSTALL=${ARK_OCCT_SDK_ROOT}" -P "${CMAKE_SOURCE_DIR}/scripts/ApplyOcctPatch.cmake"
+      RESULT_VARIABLE ark_occt_verify_result OUTPUT_VARIABLE ark_occt_verify_output ERROR_VARIABLE ark_occt_verify_output)
+    if(ark_occt_verify_result EQUAL 0)
+      set(ark_occt_verified ON)
+    endif()
+  endif()
+  if(ark_occt_verified)
+    message(STATUS "ARK OCCT SDK: verified ARK patchset at ${ARK_OCCT_SDK_ROOT}")
+  elseif(ARK_ALLOW_UNPATCHED_OCCT)
+    message(WARNING "ARK OCCT SDK at ${OpenCASCADE_DIR} is not the verified ARK patchset; native offset/loft results and native tests may differ from releases. ${ark_occt_verify_output}")
+  else()
+    message(FATAL_ERROR "OCCT SDK at ${OpenCASCADE_DIR} is not the verified ARK patchset. Run scripts/build-occt.ps1 (or build-occt.sh) and configure with -DOpenCASCADE_DIR=out/deps/occt/install-msvc-ark-offset-001/cmake (the native preset). Use -DARK_ALLOW_UNPATCHED_OCCT=ON only for local diagnosis. ${ark_occt_verify_output}")
+  endif()
   add_library(ark-occt STATIC src/occt/common.cpp src/occt/projection.cpp src/occt/drawings.cpp src/occt/source_tube_native.cpp src/occt/notch_native.cpp src/occt/surfacing.cpp src/occt/solid_modeling.cpp src/occt/measurement.cpp src/occt/sheet_model.cpp src/occt/sheet_source.cpp src/occt/curves.cpp src/occt/frame_modeling.cpp src/occt/electronics_modeling.cpp)
   target_sources(ark-occt PRIVATE src/occt/drawing_dxf.cpp src/occt/surface_repair.cpp)
   target_include_directories(ark-occt PUBLIC include PRIVATE src/occt)
@@ -553,7 +581,8 @@ set_tests_properties(parametric-sketch PROPERTIES TIMEOUT 60)
 add_executable(ark-live-tests tests/live_session_tests.cpp)
 target_link_libraries(ark-live-tests PRIVATE ark)
 add_test(NAME live-session COMMAND ark-live-tests)
-set_tests_properties(live-session PROPERTIES TIMEOUT 30)
+# Includes a 31 s Studio dispatch: tool execution outlasts the 30 s transfer window.
+set_tests_properties(live-session PROPERTIES TIMEOUT 90)
 
 add_executable(ark-assistant-tests tests/assistant_tests.cpp)
 target_link_libraries(ark-assistant-tests PRIVATE ark)

@@ -89,6 +89,9 @@ void hostIdentityAndCas(){
     check(field(field(data(both),"project"),"records").arr.empty(),"other project has no accidental project-memory bleed");
     check(field(field(data(both),"shared"),"records").arr.size()==1,"explicit shared memory is reusable across CAD identities");
     check(data(both).dump().size()<9216,"combined host recall remains bounded across both scopes");
+    {auto episode=record("automatic-outcome","Automatic outcome boilerplate");episode.set("kind",V::makeStr("episode"));data(other.call("memory_record",episode));
+     auto startup=other.call("memory_context",json(R"({"scope":"both"})"));check(field(field(data(startup),"project"),"records").arr.empty(),"startup recall omits automatic episodes");
+     auto searched=other.call("memory_context",json(R"({"operation":"search","scope":"both","text":"Automatic outcome"})"));check(field(field(data(searched),"project"),"records").arr.size()==1,"search still returns automatic episodes on request");}
     const std::string longFact(24*1024,'L');
     data(lead.call("memory_record",record("large-verbatim",longFact)));
     const auto exactLarge=lead.call("memory_context",json(R"({"operation":"get","key":"large-verbatim"})"));
@@ -167,6 +170,9 @@ void prefetchHistory(){
     check(calls==3&&changed.arr.size()==5&&changed.arr[0].dump()==history.arr[0].dump(),"changed scope refreshes a complete tool pair while retaining original input");
     auto repeatedChanged=ark::projectMemoryAssistantInput(changed,tools,recall);
     check(repeatedChanged.dump()==changed.dump(),"refreshed memory receipt is also idempotent");
+    {auto volatileOnly=receipt;auto observed=field(volatileOnly,"structuredContent");auto queue=V::makeObj();queue.set("queued",V::makeNum(calls));observed.set("capture_queue",queue);observed.set("activity_id",V::makeStr("activity-"+std::to_string(calls)));auto project=field(observed,"project");project.set("current_revision",V::makeNum(calls));observed.set("project",project);volatileOnly.set("structuredContent",observed);receipt=volatileOnly;}
+    auto bookkeepingOnly=ark::projectMemoryAssistantInput(repeatedChanged,tools,recall);
+    check(bookkeepingOnly.dump()==changed.dump()&&field(changed.arr[4],"output").str.find("capture_queue")==std::string::npos,"host bookkeeping changes neither append a memory pair nor reach the model receipt");
     auto incomplete=V::makeArr();incomplete.arr.push_back(changed.arr[0]);incomplete.arr.push_back(changed.arr[3]);
     const auto incompleteBefore=incomplete.dump();bool collisionRejected=false;
     try{ark::projectMemoryAssistantInput(incomplete,tools,recall);}catch(const std::exception& e){collisionRejected=std::string(e.what()).find("collide")!=std::string::npos;}

@@ -5,6 +5,9 @@
 #include <vector>
 
 namespace ark {
+// Single-assistant tool list: doc_preview advertises shallow command hints while
+// doc_apply keeps the canonical nested schema (the same split Team writers use).
+arkjson::Value compactAuthoringPreviewTools(arkjson::Value tools);
 enum class AgentTeamDiscipline { General, Orchestrator, PartDesigner, PhysicsReviewer };
 const char* agentTeamDisciplineName(AgentTeamDiscipline value) noexcept;
 struct AgentTeamRole {
@@ -20,6 +23,14 @@ struct AgentTeamConfig {
     bool orchestratedStart=false; // Specialists await explicit assignments.
     bool focusedWorkflow=false; // One conversation at a time; the lead starts and delegates specific tasks.
     bool requireLeadAuthoringCheckpoint=false; // Parallel empty-document startup: defer other writers until the lead commits a sketch/feature.
+    // Strict 038D/041D contract: any retained failed read also blocks completion
+    // until its exact recovery. Off while agents stabilize: failed reads stay
+    // visible and recoverable, and only failed writes block completion.
+    bool readFailuresBlockCompletion=false;
+    // Studio: the lead's first completed goal report is answered once with a
+    // reminder to request a review checkpoint when a read-only reviewer was
+    // never assigned. Repeating the report completes; it is not a turn budget.
+    bool requireReviewerCheckpoint=false;
     std::function<arkjson::Value()> completionCheck; // Required host BOM review before lead completion.
     std::size_t maxEvents=2048, maxMailboxBytes=64*1024;
     std::size_t maxEventTextBytes=4096, maxEventBytes=1024*1024;

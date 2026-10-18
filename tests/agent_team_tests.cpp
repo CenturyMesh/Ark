@@ -8,6 +8,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <iostream>
+#include <map>
 #include <mutex>
 #include <set>
 #include <stdexcept>
@@ -388,10 +389,73 @@ static void ownedPreparedCandidates(){
     check(filtered&&borrowedRejected&&scopeRejected&&sharedExecutors==3&&isolated.revision==1&&isolated.document.features.size()==1&&isolated.document.features[0].name=="Designer concept"&&isolated.document.assembly.empty(),"role-filtered schema and runtime reject borrowed or foreign-operation candidates while allowing an owned designer cache commit");
     check(roles.roles[1].conversation.dump().find("new features and 8 placements")==std::string::npos,"generic designer workflow no longer advertises forbidden assembly placements");
 }
+// By default a retained failed read stays visible but does not block completion;
+// a failed write still does. Agents spent whole runs chasing read errors.
+static void readFailureDoesNotBlockCompletion(){
+    ark::AgentTeam team;ark::AgentTeamConfig config;config.focusedWorkflow=true;config.roles={role("engineer",true)};config.roles[0].discipline=ark::AgentTeamDiscipline::Orchestrator;int round=0;bool accepted=false;
+    config.roles[0].transport=[&](auto&,const V& request,auto*){switch(++round){
+        case 1:return call("failed_read","collision_inspect",R"({"a":"Missing part","b":"Other part"})");
+        case 2:return call("finish_with_read_failure","team_finish_goal",R"({"state":"completed","summary":"Concept complete; one collision query used a wrong selector."})");
+        case 3:{const auto& output=request.find("input")->arr.back();accepted=output.find("output")&&output.find("output")->str.find("Unresolved tool")==std::string::npos;return done("Reported.");}
+        default:return done("Done.");}};
+    team.start(config,"Finish a concept after a rejected read",ark::AgentSession::tools(),[](const std::string& name,const V&){if(name=="collision_inspect")return json(R"({"isError":true,"structuredContent":{"revision":0,"error_code":"EVALUATION_FAILED","error":"Collision feature not found"}})");return json(R"({"revision":0})");});
+    complete(team);const auto snapshot=team.snapshot();
+    check(accepted&&snapshot.goalState==ark::AgentGoalState::Completed&&snapshot.unresolvedErrors==1,"a retained failed read stays visible without blocking the goal report");
+}
+// Studio asks the lead once for a review checkpoint before completing when the
+// read-only reviewer was never assigned; repeating the report still completes.
+static void reviewerCheckpointReminder(){
+    ark::AgentTeam team;ark::AgentTeamConfig config;config.focusedWorkflow=true;config.requireReviewerCheckpoint=true;
+    config.roles={role("engineer",true),role("reviewer",false)};config.roles[0].discipline=ark::AgentTeamDiscipline::Orchestrator;config.roles[1].discipline=ark::AgentTeamDiscipline::PhysicsReviewer;
+    int round=0;std::string reminder,second;
+    config.roles[0].transport=[&](auto&,const V& request,auto*){auto last=[&]{const auto& output=request.find("input")->arr.back();return output.find("output")?output.find("output")->str:std::string();};switch(++round){
+        case 1:return call("finish_unreviewed","team_finish_goal",R"({"state":"completed","summary":"Concept placed as an assembly."})");
+        case 2:reminder=last();return call("finish_review_skipped","team_finish_goal",R"({"state":"completed","summary":"Concept placed as an assembly; the user declined a review, so it was skipped."})");
+        case 3:second=last();return done("Reported.");
+        default:return done("Done.");}};
+    config.roles[1].transport=[](auto&,auto&,auto*){return done("Not assigned.");};
+    team.start(config,"Finish an unreviewed concept",ark::AgentSession::tools(),[](auto&,auto&){return json(R"({"revision":0})");});
+    complete(team);const auto snapshot=team.snapshot();
+    check(reminder.find("Reviewer reviewer has not checked")!=std::string::npos&&reminder.find("team_send kind:assignment")!=std::string::npos,"the first unreviewed completion asks for a reviewer checkpoint");
+    check(second.find("has not checked")==std::string::npos&&snapshot.goalState==ark::AgentGoalState::Completed,"the reminder is sent once and the repeated report completes");
+}
+// Every provider round re-sends tools, instructions and history. Measure the
+// first request of the Studio's three roles with their real catalogues and
+// onboarding packs as Studio configures them (specialist tools deferred), so
+// catalogue growth is visible in the test output.
+static void teamRequestSizes(){
+    ark::AgentTeam team;ark::AgentTeamConfig config;config.maxWorkers=1;
+    const std::pair<const char*,ark::AgentTeamDiscipline> roles[]={{"engineer",ark::AgentTeamDiscipline::Orchestrator},{"designer",ark::AgentTeamDiscipline::PartDesigner},{"reviewer",ark::AgentTeamDiscipline::PhysicsReviewer}};
+    std::mutex mutex;std::map<std::string,V> first;
+    for(const auto& [id,discipline]:roles){auto item=role(id,discipline!=ark::AgentTeamDiscipline::PhysicsReviewer);item.discipline=discipline;item.assistant.deferSpecialistTools=true;item.assistant.onboardingPack=discipline==ark::AgentTeamDiscipline::PhysicsReviewer?ark::agentOnboardingPack({"overview","physics"}):ark::agentAuthoringOnboardingPack();
+        const std::string roleId=id;auto rounds=std::make_shared<int>(0);
+        item.transport=[&,roleId,rounds](const auto&,const V& request,const auto*){{std::lock_guard lock(mutex);first.emplace(roleId,request);}
+            if(++*rounds<=6)return call(roleId+"_read_"+std::to_string(*rounds),"doc_info",R"({"detail":"revision"})");return done(roleId+" measured");};config.roles.push_back(std::move(item));}
+    team.start(config,"Measure the request envelope",ark::AgentSession::tools(),[](auto&,auto&){return json(R"({"revision":0})");});complete(team);
+    std::cout<<"TEAM_REQUEST_BYTES {";bool comma=false;
+    for(const auto& [id,request]:first){const auto tools=request.find("tools")?request.find("tools")->dump().size():0;const auto input=request.find("input")?request.find("input")->dump().size():0;const auto instructions=request.find("instructions")?request.find("instructions")->dump().size():0;
+        std::size_t largest=0;std::string largestName;if(const auto* list=request.find("tools"))for(const auto& tool:list->arr){const auto size=tool.dump().size();if(size>largest){largest=size;largestName=tool.find("name")?tool.find("name")->asStr():"";}}
+        std::cout<<(comma?",":"")<<"\""<<id<<"\":{\"request\":"<<request.dump().size()<<",\"tools\":"<<tools<<",\"tool_count\":"<<(request.find("tools")?request.find("tools")->arr.size():0)<<",\"largest_tool\":\""<<largestName<<"\",\"largest_tool_bytes\":"<<largest<<",\"instructions\":"<<instructions<<",\"input\":"<<input<<"}";comma=true;}
+    std::cout<<"}\n";check(first.size()==3,"each Studio role sends a measured first request");
+    for(const auto& role:team.snapshot().roles){const auto metrics=ark::assistantContextMetrics(role.performance);std::cout<<"TEAM_PREFIX_REUSE "<<role.id<<" "<<metrics.dump()<<"\n";
+        check(metrics.find("prefix_compared_requests")->num>=6&&metrics.find("prefix_reuse_ratio")->num>.9,"tool rounds of one turn keep the previous request as a cacheable prefix");}
+    for(const auto& [id,request]:first){std::vector<std::pair<std::size_t,std::string>> sizes;if(const auto* list=request.find("tools"))for(const auto& tool:list->arr)sizes.push_back({tool.dump().size(),tool.find("name")?tool.find("name")->asStr():""});std::sort(sizes.rbegin(),sizes.rend());
+        std::cout<<"TEAM_LARGEST_TOOLS "<<id<<":";for(std::size_t i=0;i<sizes.size()&&i<12;++i)std::cout<<" "<<sizes[i].second<<"="<<sizes[i].first;std::cout<<"\n";}
+}
+static void singleAssistantPreviewSchema(){
+    const auto full=ark::AgentSession::tools(),compact=ark::compactAuthoringPreviewTools(full);
+    auto tool=[](const V& tools,const char* name)->const V&{for(const auto& item:tools.arr)if(item.find("name")->asStr()==name)return item;throw std::runtime_error("missing tool");};
+    const auto& preview=tool(compact,"doc_preview");const auto& fullPreview=tool(full,"doc_preview");
+    check(tool(compact,"doc_apply").dump()==tool(full,"doc_apply").dump(),"doc_apply keeps the canonical nested command schema");
+    check(preview.dump().size()*2<fullPreview.dump().size(),"single assistant doc_preview drops the duplicated nested command schema");
+    const auto& fields=*preview.find("inputSchema")->find("properties")->find("commands")->find("items")->find("properties");const auto& original=*fullPreview.find("inputSchema")->find("properties")->find("commands")->find("items")->find("properties");
+    check(fields.obj.size()==original.obj.size(),"every real command field remains advertised with a shallow hint");
+    check(ark::compactAuthoringPreviewTools(V::makeArr()).arr.empty(),"lists without doc_apply are unchanged");
+}
 static void unsupportedCandidateRecovery040d(){
     ark::AgentTeam team;ark::AgentTeamConfig config;config.focusedWorkflow=true;config.roles={role("engineer",true)};config.roles[0].discipline=ark::AgentTeamDiscipline::Orchestrator;
     ark::AgentSession session;session.suppressFailureCapture();int round=0,previews=0,applies=0;std::string original,fresh;bool guidance=false,staleRejected=false;
-    const auto recipe=json(R"({"expected_revision":0,"commands":[{"op":"param.set","name":"PreviewRadius","expr":4},{"op":"sketch.set","name":"PreviewProfile","sketch":{"plane":"XY","entities":[{"kind":"circle","name":"rim","dof":[0,0,4]}],"constraints":[]}}],"checks":[{"query":{"tool":"eval_expr","args":{"expr":"PreviewRadius"},"path":"value"},"op":"eq","value":4}]})");
+    const auto recipe=json(R"({"expected_revision":0,"commands":[{"op":"param.set","name":"PreviewRadius","expr":4},{"op":"material.set","name":"PreviewMaterial","density":1}],"checks":[{"query":{"tool":"eval_expr","args":{"expr":"PreviewRadius"},"path":"value"},"op":"eq","value":4}]})");
     auto receipt=[](const V& request){V result;check(arkjson::parse(request.find("input")->arr.back().find("output")->str,result),"candidate recovery receives the actual preceding tool receipt");return result;};
     config.roles[0].transport=[&](auto&,const V& request,auto*){switch(++round){
         case 1:{const auto startup=request.find("input")->dump();guidance=startup.find("refresh_supported:false")!=std::string::npos&&startup.find("refresh_reason")!=std::string::npos&&startup.find("original authored commands/checks")!=std::string::npos&&startup.find("receipt reports refresh_supported:true")!=std::string::npos;return call("initial_authored_preview","doc_preview",recipe.dump());}
@@ -403,7 +467,7 @@ static void unsupportedCandidateRecovery040d(){
         default:{const auto result=receipt(request);check(!result.find("isError")->b,"fresh current-revision candidate publishes successfully");return done("The explicit authored preview preserves unrelated peer work.");}}};
     team.start(config,"Recover a synthetic unsupported-refresh preview after an unrelated edit",ark::AgentSession::tools(),[&](const auto& name,const V& args){if(name=="doc_preview"){++previews;check(!args.find("candidate_id"),"unsupported preview recovery submits explicit authored commands, never candidate-ID refresh");}if(name=="doc_apply")++applies;return session.call(name,args);});complete(team);
     check(guidance&&staleRejected&&previews==2&&applies==1,"team guidance selects explicit re-preview while stale candidate publication remains rejected before execution");
-    check(session.revision==2&&session.document.getParam("PeerSetting")==9&&session.document.getParam("PreviewRadius")==4&&session.document.sketches.size()==1&&team.snapshot().roles[0].stepsApplied==1,"only the fresh checked candidate publishes and retains the unrelated current edit");
+    check(session.revision==2&&session.document.getParam("PeerSetting")==9&&session.document.getParam("PreviewRadius")==4&&session.document.materials.size()==1&&team.snapshot().roles[0].stepsApplied==1,"only the fresh checked candidate publishes and retains the unrelated current edit");
 }
 static void explicitGoalCompletion(){
     ark::AgentTeam team;ark::AgentTeamConfig config;config.focusedWorkflow=true;config.roles={role("engineer",true)};config.roles[0].discipline=ark::AgentTeamDiscipline::Orchestrator;int round=0;
@@ -446,4 +510,4 @@ static void explicitInputWithRetainedToolFailure(){
 #include "agent_team_steering_tests.inl"
 #include "agent_team_read_recovery_038d_tests.inl"
 #include "agent_team_read_progress_041d_tests.inl"
-int main(){try{inspectionProgressProjection041d();inspectionActionPriorities041d();nativeReadThenGeometry041d();observedReadProgress041d();unsupportedCandidateRecovery040d();projectedBatchReadRecovery038d();exactReferenceReadRecovery038d();staleReadRevisionRecovery038d();correctedPreviewRecovery038d();batchReceiptAssociationRecovery038d();initialCheckpointNeedsSketchGeometry037d();initialLeadAuthoringCheckpoint037d();initialCheckpointLifecycle037d();coherentConstructionBounds037d();semanticProgress036a();semanticHandoff036a();sharedGraph034d();workflow033d();cooperativeReceiptContracts032d();expiredReceiptOwnership032d();independentTeamCandidateRefresh031b();teamCandidateDependencyConflict031b();teamCandidateProjectBoundary031b();teamCandidateRefreshReceipt031b();explicitInputWithRetainedToolFailure();staleLeadCannotAssignDownstream();inFlightImageTeamSteering();snapshotsDuringPeerWriteWindow();userImageTeamChecks();cooperativeWriteWindows();cooperativeWriteWindowLifecycle();cooperativeWriteWindowPermissionsAndAudit();oversizedHistoryResume();sharedAuthoringSchemas();drawingTeamScope();explicitGoalCompletion();ownedPreparedCandidates();restoredDocumentAndCanvasTools();coherentBatchBenchmark();focusedSequentialAssignments();leadEngineerAuthorsPartsAndAssembly();parallelProgressStillReportsCompletion();sharedFailureEvidence();parallelAutomaticCompletionBoundaries();unlimitedEightRoleAssignments();configChecks();concurrencyAndRevision();steeringAndPause();collaboration();cancellationAndFailures();interruptedBatchHistory();limitsAndMutationSchemas();conversationMemoryBound();incrementalStepsAndScopes();frameDisciplineScope();proposalsAndPhysicsRole();concurrentQueuedDrafts();yieldedAndInterruptedContinuation();std::cout<<"Agent team checks passed: "<<checks<<"\n";return 0;}catch(const std::exception& error){std::cerr<<"Agent team checks failed: "<<error.what()<<"\n";return 1;}}
+int main(){try{teamRequestSizes();readFailureDoesNotBlockCompletion();reviewerCheckpointReminder();singleAssistantPreviewSchema();inspectionProgressProjection041d();inspectionActionPriorities041d();nativeReadThenGeometry041d();observedReadProgress041d();unsupportedCandidateRecovery040d();projectedBatchReadRecovery038d();exactReferenceReadRecovery038d();staleReadRevisionRecovery038d();correctedPreviewRecovery038d();batchReceiptAssociationRecovery038d();initialCheckpointNeedsSketchGeometry037d();initialLeadAuthoringCheckpoint037d();initialCheckpointLifecycle037d();coherentConstructionBounds037d();semanticProgress036a();semanticHandoff036a();sharedGraph034d();workflow033d();cooperativeReceiptContracts032d();expiredReceiptOwnership032d();independentTeamCandidateRefresh031b();teamCandidateDependencyConflict031b();teamCandidateProjectBoundary031b();teamCandidateRefreshReceipt031b();explicitInputWithRetainedToolFailure();staleLeadCannotAssignDownstream();inFlightImageTeamSteering();snapshotsDuringPeerWriteWindow();userImageTeamChecks();cooperativeWriteWindows();cooperativeWriteWindowLifecycle();cooperativeWriteWindowPermissionsAndAudit();oversizedHistoryResume();sharedAuthoringSchemas();drawingTeamScope();explicitGoalCompletion();ownedPreparedCandidates();restoredDocumentAndCanvasTools();coherentBatchBenchmark();focusedSequentialAssignments();leadEngineerAuthorsPartsAndAssembly();parallelProgressStillReportsCompletion();sharedFailureEvidence();parallelAutomaticCompletionBoundaries();unlimitedEightRoleAssignments();configChecks();concurrencyAndRevision();steeringAndPause();collaboration();cancellationAndFailures();interruptedBatchHistory();limitsAndMutationSchemas();conversationMemoryBound();incrementalStepsAndScopes();frameDisciplineScope();proposalsAndPhysicsRole();concurrentQueuedDrafts();yieldedAndInterruptedContinuation();std::cout<<"Agent team checks passed: "<<checks<<"\n";return 0;}catch(const std::exception& error){std::cerr<<"Agent team checks failed: "<<error.what()<<"\n";return 1;}}

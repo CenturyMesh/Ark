@@ -95,7 +95,7 @@ TopoDS_Shape finishEdges031b(const TopoDS_Shape& input,const V& request,std::vec
     requireOneSolid(result,"Edge finish result");shapeReport(result,true);receipt.set("manufacturing_qualified",V::makeBool(false));return result;
 }
 
-std::array<double,4> pieceOrder031b(const TopoDS_Shape& shape){GProp_GProps p;volumeProperties(shape,p);const auto c=p.CentreOfMass();return {c.X(),c.Y(),c.Z(),p.Mass()};}
+std::array<double,4> pieceOrder031b(const TopoDS_Shape& shape){GProp_GProps p;volumeCentroidProperties(shape,p);const auto c=p.CentreOfMass();return {c.X(),c.Y(),c.Z(),p.Mass()};}
 template<class Algorithm>std::vector<Ref> splitLineage031b(const std::vector<Ref>& source,const std::vector<TopoDS_Shape>& pieces,const std::set<size_t>& retained,Algorithm& algorithm,const std::string& nameSpace){
     std::vector<Ref> result;
     for(auto ref:source){if(ref.name.find("@ark.")!=std::string::npos)continue;if(!selectable(ref.status)){result.push_back(ref);continue;}std::vector<Ref> children;V names=V::makeArr();
