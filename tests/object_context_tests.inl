@@ -35,6 +35,8 @@ void testObjectContext(){
     CHECK(failed(context.call("object_context",json(R"({"known_fingerprints":{"feature:1":3}})"))));
     response=context.call("object_context",json(R"({"query":"sUsPeNsIoN","type":"transform"})"));CHECK(!failed(response)&&response.find("structuredContent")->find("objects")->arr.size()==1);
     response=context.call("object_context",json(R"({"limit":1})"));CHECK(!failed(response));const auto* page=response.find("structuredContent");CHECK(page->find("truncated")->b&&page->find("next_after_id")->num==1);
+    // A truncated discovery lists every match compactly so an agent selects ids instead of paging details.
+    CHECK(page->find("index")&&page->find("index")->arr.size()==page->find("matched_count")->num&&page->find("index")->arr[1].find("id")->num==2&&page->find("index")->arr[1].find("name")&&page->find("index")->arr[1].find("type")&&!page->find("index")->arr[1].find("authored")&&page->find("next_action"));
     response=context.call("object_context",json(R"({"limit":1,"after_id":1})"));CHECK(!failed(response)&&response.find("structuredContent")->find("objects")->arr[0].find("id")->num==2);
     response=context.call("object_context",json(R"({"ids":[2],"depth":1,"limit":1})"));CHECK(!failed(response));CHECK(response.find("structuredContent")->find("objects")->arr[0].find("id")->num==2&&response.find("structuredContent")->find("truncated")->b);
     // Authored JSON key order cannot change a token. Loading the same recipes

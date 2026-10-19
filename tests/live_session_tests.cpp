@@ -116,6 +116,28 @@ int main(){
     CHECK(bridge.start([&](auto&,auto&,auto,std::stop_token){++calls;}));
     CHECK(throws([&]{ark::callLiveSession(bridge.endpoint(),"doc_apply",V::makeObj(),100);}));
     CHECK(calls==1);bridge.stop();
+    // A CAD evaluation may outlast the 30-second transfer window: its result is
+    // delivered instead of an unknown-outcome timeout.
+    CHECK(bridge.start([](auto&,auto&,auto done,std::stop_token){std::thread([done]{std::this_thread::sleep_for(std::chrono::seconds(31));V slow=V::makeObj();slow.set("completed_after_ms",V::makeNum(31000));done(slow);}).detach();}));
+    const auto slowStarted=std::chrono::steady_clock::now();auto slow=ark::callLiveSession(bridge.endpoint(),"doc_preview",V::makeObj());
+    CHECK(slow.find("completed_after_ms")&&slow.find("completed_after_ms")->num==31000);CHECK(std::chrono::steady_clock::now()-slowStarted>=std::chrono::seconds(31));
+    CHECK(throws([&]{ark::callLiveSession(bridge.endpoint(),"doc_info",V::makeObj(),660001);}));bridge.stop();
+    // 042D: a client that asks for progress receives notes before the single
+    // result; a client that does not ask receives only the result, as before.
+    CHECK(bridge.start([](auto&,auto&,auto done,std::stop_token){std::thread([done]{std::this_thread::sleep_for(std::chrono::milliseconds(4500));V finished=V::makeObj();finished.set("finished",V::makeBool(true));done(finished);}).detach();},{},[]{return std::string("Feature 3/5 #12 evaluating");}));
+    std::vector<V> notes;const auto noted=ark::callLiveSession(bridge.endpoint(),"doc_preview",V::makeObj(),660000,[&](const V& note){notes.push_back(note);});
+    CHECK(noted.find("finished")&&notes.size()>=2);
+    CHECK(notes.size()>=2&&notes[0].find("message")&&notes[0].find("message")->str=="Feature 3/5 #12 evaluating"&&notes[1].find("elapsed_ms")->num>notes[0].find("elapsed_ms")->num);
+    CHECK(ark::callLiveSession(bridge.endpoint(),"doc_preview",V::makeObj()).find("finished"));bridge.stop();
+    // 042D: a second client connects and reaches the dispatcher while a long call
+    // is still running, instead of waiting out the 30-second connect window.
+    {std::atomic<int> dispatched=0;std::promise<void> releasePromise;auto release=releasePromise.get_future().share();
+        CHECK(bridge.start([&](auto&,auto&,auto done,std::stop_token){++dispatched;std::thread([done,release]{release.wait();done(V::makeObj());}).detach();}));
+        const auto concurrentEndpoint=bridge.endpoint();
+        auto first=std::async(std::launch::async,[&]{return ark::callLiveSession(concurrentEndpoint,"doc_preview",V::makeObj());});
+        auto second=std::async(std::launch::async,[&]{return ark::callLiveSession(concurrentEndpoint,"doc_info",V::makeObj());});
+        const auto waited=std::chrono::steady_clock::now();while(dispatched<2&&std::chrono::steady_clock::now()-waited<std::chrono::seconds(5))std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        CHECK(dispatched==2);releasePromise.set_value();CHECK(!first.get().find("isError")&&!second.get().find("isError"));bridge.stop();}
 #else
     ark::LiveSessionBridge bridge;CHECK(!bridge.start([](auto&,auto&,auto,std::stop_token){}));
     CHECK(throws([&]{ark::callLiveSession("unavailable","doc_info",V::makeObj());}));

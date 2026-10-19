@@ -11,6 +11,7 @@
 #include <functional>
 #include <iostream>
 #include <map>
+#include <set>
 #include <mutex>
 #include <condition_variable>
 #include <deque>
@@ -111,6 +112,10 @@ bool callProjectMemoryTool(AgentSession& session,const std::string& tool,const V
         // Bound the combined transport as well as each independent project read.
         actual.set("max_bytes",V::makeNum(4096));actual.set("limit",V::makeNum(6));
         if(actual.find("known_scope")||actual.find("known_fingerprints"))throw std::runtime_error("Delta receipts require one selected memory scope");
+        // Startup recall leaves out the automatic per-operation episodes: they
+        // restate outcomes already in the activity ledger and crowd out recorded
+        // decisions. search (or explicit kinds) still returns them.
+        if(action=="wakeup"&&!actual.find("kinds")){V kinds=V::makeArr();for(const char* kind:{"decision","failure","procedure","evidence"})kinds.arr.push_back(V::makeStr(kind));actual.set("kinds",kinds);}
         actual.set("include_scratch",V::makeBool(true));
         out=V::makeObj();out.set("schema",V::makeStr("ark.memory-context.v1"));out.set("project",memory.call(action,actual,projectScope(session),actor));
         actual.obj.erase(std::remove_if(actual.obj.begin(),actual.obj.end(),[](const auto& p){return p.first=="current_revision"||p.first=="include_scratch";}),actual.obj.end());
@@ -165,15 +170,27 @@ V projectMemoryAssistantWireInput(const V& input){
     }
     return wire;
 }
+static void stripVolatilePrefetchFields(V& value){
+    static const std::set<std::string> volatileKeys={"capture_queue","current_revision","activity_id","activity_updated","activity_project_id","activity_boundary","pending_feedback_ids","feedback_required"};
+    if(value.t==V::Obj){value.obj.erase(std::remove_if(value.obj.begin(),value.obj.end(),[](const auto& field){return volatileKeys.count(field.first)!=0;}),value.obj.end());for(auto& field:value.obj)stripVolatilePrefetchFields(field.second);}
+    else if(value.t==V::Arr)for(auto& item:value.arr)stripVolatilePrefetchFields(item);
+}
 V projectMemoryAssistantInput(const V& input,const V& tools,const std::function<V(const std::string&,const V&)>& call){
     if(!call||tools.t!=V::Arr||std::none_of(tools.arr.begin(),tools.arr.end(),[](const V& t){return text(t,"name")=="memory_context";}))return input;
     const auto args=prefetchArguments();
     V receipt;try{receipt=call("memory_context",args);}catch(const std::exception&){receipt=V::makeObj();receipt.set("unavailable",V::makeBool(true));receipt.set("next_action",V::makeStr("Continue with current source; memory is unavailable. Do not assume an empty history or retry routinely."));}
     V observed=receipt.find("structuredContent")?*receipt.find("structuredContent"):receipt;
     if(const auto* error=receipt.find("isError");error&&error->t==V::Bool&&error->b)observed.set("isError",V::makeBool(true));
+    // Host bookkeeping (queue counters, activity ids, the live revision) changes on
+    // every call. Keep it out of the model-facing receipt and the duplicate test,
+    // so unchanged memory is not appended again on every turn.
+    stripVolatilePrefetchFields(observed);
     auto encoded=observed.dump();if(encoded.size()>24576)encoded="{\"unavailable\":true,\"reason\":\"Host memory receipt exceeded startup transport bound\"}";
     const auto arguments=args.dump();const auto identity=prefetchIdentity(arguments,encoded);
-    if(input.t==V::Arr)for(std::size_t i=0;i+1<input.arr.size();++i)if(isProjectMemoryAssistantPair(input.arr[i],input.arr[i+1])&&text(input.arr[i+1],"output")==encoded)return input;
+    if(input.t==V::Arr)for(std::size_t i=0;i+1<input.arr.size();++i)if(isProjectMemoryAssistantPair(input.arr[i],input.arr[i+1])){
+        const auto retained=text(input.arr[i+1],"output");if(retained==encoded)return input;
+        V parsed;if(arkjson::parse(retained,parsed)){stripVolatilePrefetchFields(parsed);if(parsed.dump()==encoded)return input;}
+    }
     if(input.t==V::Arr)for(std::size_t i=0;i<input.arr.size();++i)if(
         (text(input.arr[i],"type")=="function_call"||text(input.arr[i],"type")=="function_call_output")&&text(input.arr[i],"call_id")==identity)
         throw std::runtime_error("Invalid host memory history parameter input["+std::to_string(i)+"].call_id: startup memory would collide with another retained tool ID. Inspect the retained tool pairs before resuming; history has been preserved.");
@@ -187,7 +204,10 @@ int projectMemoryCli(int argc,char** argv){
         const std::string action=argv[0];std::string project,root=defaultProjectMemoryDirectory(),actor="coding-agent:caller-declared";
         for(int i=1;i<argc;i+=2){if(i+1>=argc)throw std::runtime_error("Memory option needs a value");const std::string option=argv[i];if(option=="--project")project=argv[i+1];else if(option=="--root")root=argv[i+1];else if(option=="--actor")actor=argv[i+1];else throw std::runtime_error("Unknown memory CLI option");}
         if(project.empty())throw std::runtime_error("Memory CLI requires an explicit host-selected project key");
-        std::string line;if(!std::getline(std::cin,line))line="{}";if(line.size()>1024*1024)throw std::runtime_error("Memory input exceeds 1 MiB");V args;if(!arkjson::parse(line,args)||args.t!=V::Obj)throw std::runtime_error("Memory input must be one JSON object");
+        // Windows PowerShell on a UTF-8 console prefixes native stdin with a BOM
+        // and ends lines with CR; both are transport framing, not JSON input.
+        std::string line;if(!std::getline(std::cin,line))line="{}";if(line.size()>1024*1024)throw std::runtime_error("Memory input exceeds 1 MiB");
+        if(line.rfind("\xEF\xBB\xBF",0)==0)line.erase(0,3);if(!line.empty()&&line.back()=='\r')line.pop_back();if(line.empty())line="{}";V args;if(!arkjson::parse(line,args)||args.t!=V::Obj)throw std::runtime_error("Memory input must be one JSON object");
         auto config=localProjectMemoryConfig(root);if(action!="get"&&action!="search"&&action!="wakeup")config.maxResultBytes=16384;if((action=="search"||action=="wakeup")&&!args.find("max_bytes"))args.set("max_bytes",V::makeNum(16384));ProjectMemory memory(config);std::cout<<memory.call(action,args,project,actor).dump()<<'\n';return 0;
     }catch(const std::exception& e){V result=V::makeObj();result.set("error",V::makeStr(e.what()));result.set("isError",V::makeBool(true));std::cout<<result.dump()<<'\n';return 1;}
 }

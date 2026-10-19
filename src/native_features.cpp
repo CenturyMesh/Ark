@@ -53,7 +53,7 @@ double expressionValue(const std::string& text, const ExprEnv& env) {
 double param(const Feature& feature, const ExprEnv& env, const char* key) {
     auto found = feature.p.find(key);
     if (found == feature.p.end())
-        throw std::runtime_error(std::string("Missing native parameter: ") + key);
+        throw std::runtime_error(std::string("Missing native parameter: ") + key + " (an expression in the feature's p object, e.g. p:{\"" + key + "\":1})");
     return expressionValue(found->second, env);
 }
 
@@ -346,11 +346,10 @@ V surfaceRequest(const Feature& feature, const ExprEnv& env, Document& document,
         }
         request.set("profiles", std::move(profiles));
         const double solid = param(feature, env, "solid");
-        const double ruled = param(feature, env, "ruled");
-        if ((solid != 0 && solid != 1) || (ruled != 0 && ruled != 1))
-            throw std::runtime_error("Loft solid and ruled must be 0 or 1");
+        if (solid != 0 && solid != 1) throw std::runtime_error("Loft solid must be 0 or 1");
+        // The kernel treats an absent ruled flag as a smooth (non-ruled) loft.
         request.set("solid", V::makeBool(solid == 1));
-        request.set("ruled", V::makeBool(ruled == 1));
+        request.set("ruled", V::makeBool(bitParam(feature, env, "ruled", 0)));
         if (feature.p.count("max_degree")) request.set("max_degree", V::makeNum(param(feature, env, "max_degree")));
         if (feature.p.count("smooth")) request.set("smooth", V::makeBool(bitParam(feature, env, "smooth", 0)));
         if (feature.p.count("compatible")) request.set("compatible", V::makeBool(bitParam(feature, env, "compatible", 0)));
@@ -574,7 +573,15 @@ V surfaceRequest(const Feature& feature, const ExprEnv& env, Document& document,
                     id = static_cast<u64>(featureValue.num);
                 } else if (featureValue.t == V::Str) {
                     const Feature* named = uniqueFeature(document, featureValue.str);
-                    if (!named) throw std::runtime_error("Feature name not found: " + featureValue.str);
+                    if (!named) {
+                        std::string names;size_t listed = 0;
+                        for (const Feature& feature : document.features) {
+                            if (feature.name.empty()) continue;
+                            if (listed == 24 || names.size() > 480) { names += ", ..."; break; }
+                            names += (listed++ ? ", " : "") + feature.name;
+                        }
+                        throw std::runtime_error("Feature name not found: " + featureValue.str + "; existing feature names: " + (names.empty() ? std::string("none") : names));
+                    }
                     id = named->id;
                 } else throw std::runtime_error("Feature reference must be an id or a unique name");
                 const GeometryReference ref = resolveGeometryReference(document, id, reference.str, fraction);

@@ -104,6 +104,25 @@ void batchActivityChecks038d(){
     V many=V::makeObj(),queries=V::makeArr();for(int i=0;i<128;++i)queries.arr.push_back(json(R"({"tool":"eval_expr","args":{"expr":"missing_many_parameter"}})"));many.set("queries",queries);many.set("actor",actor());call(session,"query_batch",many);const auto& bounded=session.document.agentActivity->entries.back();check(bounded.find("error_count")->num==128&&bounded.find("query_errors_omitted")&&bounded.dump().size()<=8192,"large failed batch counts every rejection while bounding audit diagnostics");
     const auto path=std::filesystem::temp_directory_path()/("ark-batch-activity-"+session.document.agentActivity->id+".ark");Document loaded;std::string error;check(saveDocument(session.document,path.string().c_str())&&loadDocument(path.string().c_str(),loaded,&error),"mixed-batch activity reopens through actual project persistence");V restored=agentActivityJson(loaded.agentActivity),original=agentActivityJson(session.document.agentActivity);canonical(restored);canonical(original);check(restored.dump()==original.dump(),"partial/all-failed outcomes and bounded diagnostics roundtrip exactly");std::filesystem::remove(path);
 }
+void projectionSuggestionChecks(){
+    AgentSession session;const auto receipt=session.call("query_batch",json(R"({"queries":[{"tool":"doc_info","args":{"detail":"revision"},"fields":["revisions"]},{"tool":"doc_info","args":{"detail":"revision"},"fields":["zz_unrelated"]}]})"));
+    const auto data=good(receipt);const auto& rows=*data.find("results");const auto& guessed=*rows.arr[0].find("structuredContent");const auto& unrelated=*rows.arr[1].find("structuredContent");
+    check(rows.arr[0].find("isError")->b&&std::any_of(guessed.find("suggested_fields")->find("revisions")->arr.begin(),guessed.find("suggested_fields")->find("revisions")->arr.end(),[](const V& name){return name.str=="revision";})&&guessed.find("error")->str.find("did you mean revisions -> ")!=std::string::npos,"guessed projection names a close real field while the row stays rejected");
+    check(rows.arr[1].find("isError")->b&&!unrelated.find("suggested_fields")&&unrelated.find("error")->str.find("did you mean")==std::string::npos,"unrelated projection gets no invented suggestion");
+    // Agents named the envelope ("structuredContent") or "result" for eval_expr's value.
+    const auto envelope=session.call("query_batch",json(R"({"queries":[{"tool":"doc_info","args":{"detail":"revision"},"fields":["structuredContent"]},{"tool":"eval_expr","args":{"expr":"2+3"},"fields":["result"]}]})"));
+    const auto envelopeData=good(envelope);const auto& envelopeRows=*envelopeData.find("results");
+    check(!envelopeRows.arr[0].find("isError")->b&&envelopeRows.arr[0].find("structuredContent")->find("revision"),"requesting structuredContent returns the whole payload instead of a missing-field error");
+    const auto& resultRow=*envelopeRows.arr[1].find("structuredContent");check(envelopeRows.arr[1].find("isError")->b&&resultRow.find("error")->str.find("did you mean result -> value")!=std::string::npos,"result is suggested as value");
+}
+void rejectedPreviewActivityChecks(){
+    AgentSession session;V rejected=json(R"({"expected_revision":0,"commands":[{"op":"feature.add","type":"loft","name":"Missing sections","p":{"solid":1},"native":{"sections":["absent_low","absent_high"]}}]})");rejected.set("actor",actor());const auto receipt=session.call("doc_preview",rejected);
+    check(!receipt.find("isError")->b&&!good(receipt).find("valid")->b,"fixture preview is a successful call carrying a rejected candidate");
+    const auto& measured=session.document.agentActivity->entries.back();
+    check(measured.find("is_error")->b&&measured.find("outcome")->asStr()=="candidate_rejected"&&measured.find("error")->str.find("absent_low")!=std::string::npos&&measured.find("error_code")->asStr()=="EVALUATION_FAILED","rejected preview is recorded as a failed action with the candidate rejection reason");
+    V accepted=json(R"({"expected_revision":0,"commands":[{"op":"feature.add","type":"box","name":"Fixture"}]})");accepted.set("actor",actor());call(session,"doc_preview",accepted);
+    const auto& valid=session.document.agentActivity->entries.back();check(!valid.find("is_error")->b&&!valid.find("outcome")&&!valid.find("error"),"valid preview remains a successful action without a fabricated rejection");
+}
 V response(const V& output){V value=V::makeObj();value.set("status",V::makeStr("completed"));value.set("output",output);return value;}
 V toolResponse(const char* id,const char* name,V args){V item=V::makeObj(),out=V::makeArr();item.set("type",V::makeStr("function_call"));item.set("call_id",V::makeStr(id));item.set("name",V::makeStr(name));item.set("arguments",V::makeStr(args.dump()));out.arr.push_back(item);return response(out);}
 V done(){return json(R"({"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Completed fixture"}]}]})");}
@@ -111,7 +130,9 @@ void requiredFeedbackChecks(){
     AgentSession session;AssistantConfig config;config.model="offline-feedback";int rounds=0;std::string activity;
     auto run=runAssistant(config,V::makeStr("Inspect and report"),AgentSession::tools(),[&](const std::string& name,V args){args.set("actor",actor());auto result=session.call(name,args);if(const auto* id=result.find("structuredContent")->find("activity_id"))activity=id->str;return result;},{},nullptr,[&](auto&,const V& request,auto*){
         switch(++rounds){case 1:return toolResponse("inspect","doc_info",V::makeObj());case 2:return done();case 3:{check(request.dump().find("Before finishing, submit tool_feedback")!=std::string::npos,"premature completion triggers required feedback");V args=json(R"({"ratings":[{"utility":5,"difficulty":1,"action":"Read the empty fixture inventory"}]})");auto rows=*args.find("ratings");rows.arr.front().set("activity_id",V::makeStr(activity));args.set("ratings",rows);return toolResponse("rate","tool_feedback",args);}default:return done();}
-    });check(rounds==4&&session.document.agentActivity->entries.front().find("feedback")&&!run.text.empty(),"single agent cannot complete before rating actual tool use");
+    // 042D: the reply held for feedback is final once a feedback-only round rates
+    // the action; no fourth round repeats it.
+    });check(rounds==3&&session.document.agentActivity->entries.front().find("feedback")&&run.text.find("Completed fixture")!=std::string::npos,"single agent cannot complete before rating actual tool use");
 }
 void pngChecks(){
     Image image;image.w=1024;image.h=768;image.px.resize((size_t)image.w*image.h*3);for(size_t i=0;i<image.px.size();i+=3){image.px[i]=(u8)((i/3)%255);image.px[i+1]=73;image.px[i+2]=201;}
@@ -125,4 +146,4 @@ void pngChecks(){
     std::cout<<"PNG_LOSSLESS raw_rgb_bytes="<<image.px.size()<<" png_bytes="<<png.size()<<"\n";
 }
 }
-int main(){try{cacheChecks();schedulerAccountingChecks();activityChecks();batchActivityChecks038d();requiredFeedbackChecks();pngChecks();std::cout<<checks<<" reactivity/activity checks passed\n";return 0;}catch(const std::exception& error){std::cerr<<"Reactivity/activity failed: "<<error.what()<<'\n';return 1;}}
+int main(){try{cacheChecks();schedulerAccountingChecks();activityChecks();batchActivityChecks038d();rejectedPreviewActivityChecks();projectionSuggestionChecks();requiredFeedbackChecks();pngChecks();std::cout<<checks<<" reactivity/activity checks passed\n";return 0;}catch(const std::exception& error){std::cerr<<"Reactivity/activity failed: "<<error.what()<<'\n';return 1;}}

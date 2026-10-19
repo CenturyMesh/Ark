@@ -156,7 +156,8 @@ VolumeMethod volumeMethod(const TopoDS_Shape& shape){
 const char* volumeIntegrationMethod(const TopoDS_Shape& shape){
     switch(volumeMethod(shape)){case VolumeMethod::AnalyticGauss:return "analytic_gauss";case VolumeMethod::PolynomialTrimGauss:return "adaptive_gauss_polynomial_trim";default:return "gauss_kronrod_rational_or_freeform";}
 }
-void volumeProperties(const TopoDS_Shape& shape,GProp_GProps& props,bool moments){
+namespace {
+void integrateVolume(const TopoDS_Shape& shape,GProp_GProps& props,bool centroid,bool inertia){
     NativeProfileScope profile("volumeProperties");
     double error=0;
     VolumeMethod method;{NativeProfileScope classify("volume.classify");method=volumeMethod(shape);}
@@ -167,10 +168,27 @@ void volumeProperties(const TopoDS_Shape& shape,GProp_GProps& props,bool moments
         // Polynomial trimming of analytic surfaces needs adaptive integration,
         // but not the expensive rational/freeform moment algorithm.
         case VolumeMethod::PolynomialTrimGauss:error=BRepGProp::VolumeProperties(shape,props,1e-12,false,false);break;
-        case VolumeMethod::RationalSurfaceKronrod:error=BRepGProp::VolumePropertiesGK(shape,props,1e-10,false,true,moments,moments,false);break;
+        case VolumeMethod::RationalSurfaceKronrod:{
+            // GK refines every requested moment to a 1e-10 relative error; on a
+            // symmetric revolved conic that alone exceeds the worker time limit.
+            // The bounded Gauss rule is accepted only when its volume matches the
+            // GK volume (cheap without moments) to 1e-9; trimmed freeform bodies
+            // miss that by far more and keep the full GK integration.
+            if(centroid||inertia){
+                GProp_GProps reference;const double referenceError=BRepGProp::VolumePropertiesGK(shape,reference,1e-10,false,true,false,false,false);
+                if(referenceError>=0&&std::isfinite(referenceError)&&reference.Mass()>0){
+                    GProp_GProps bounded;BRepGProp::VolumeProperties(shape,bounded,false,false,false);
+                    if(std::isfinite(bounded.Mass())&&std::abs(bounded.Mass()-reference.Mass())<=1e-9*reference.Mass()){props=bounded;return;}
+                }
+            }
+            error=BRepGProp::VolumePropertiesGK(shape,props,1e-10,false,true,centroid||inertia,inertia,false);break;
+        }
     }
     if(error<0||!std::isfinite(error))throw std::runtime_error("Exact volume integration failed");
 }
+}
+void volumeProperties(const TopoDS_Shape& shape,GProp_GProps& props,bool moments){integrateVolume(shape,props,moments,moments);}
+void volumeCentroidProperties(const TopoDS_Shape& shape,GProp_GProps& props){integrateVolume(shape,props,true,false);}
 
 double properties(const TopoDS_Shape& shape,char kind){NativeProfileScope profile(kind=='a'?"areaProperties":kind=='l'?"lengthProperties":"volumeScalar");GProp_GProps props;if(shape.IsNull())return 0;if(kind=='a')BRepGProp::SurfaceProperties(shape,props);else if(kind=='l')BRepGProp::LinearProperties(shape,props);else volumeProperties(shape,props,false);return props.Mass();}
 std::vector<TopoDS_Shape> shapes(const TopoDS_Shape& shape,TopAbs_ShapeEnum kind){std::vector<TopoDS_Shape> out;for(TopExp_Explorer ex(shape,kind);ex.More();ex.Next())out.push_back(ex.Current());return out;}

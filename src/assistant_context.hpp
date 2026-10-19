@@ -190,7 +190,10 @@ inline const V* observedTeamReadProgress(const std::string& name,const V& receip
 // at ordinary historical-data trust, never as developer instructions. Their
 // examples and team observations do not supply a current expected_revision.
 // The latest complete response remains intact when it fits.
-inline V project(const V& history,std::size_t byteLimit){
+// verbatimFrom, when given, receives the first history index copied verbatim at
+// the end of the projection (0 when nothing was projected).
+inline V project(const V& history,std::size_t byteLimit,std::size_t recencyBytes=0,std::size_t* verbatimFrom=nullptr){
+    if(verbatimFrom)*verbatimFrom=0;
     if(history.t!=V::Arr)return history;
     std::map<std::string,std::size_t> calls,outputs;
     for(std::size_t i=0;i<history.arr.size();++i){const auto& item=history.arr[i];const auto type=text(item,"type"),id=text(item,"call_id");
@@ -208,6 +211,15 @@ inline V project(const V& history,std::size_t byteLimit){
     while(keepFrom){const auto& previous=history.arr[keepFrom-1];const auto type=text(previous,"type");if(type=="reasoning"||type=="function_call"||(type=="message"&&text(previous,"role")=="assistant"))--keepFrom;else break;}
     std::size_t tailBytes=0;for(std::size_t i=keepFrom;i<history.arr.size();++i)tailBytes+=history.arr[i].dump().size()+1;
     if(tailBytes>byteLimit/2)keepFrom=history.arr.size();
+    // Keep the most recent complete exchanges verbatim within recencyBytes. An
+    // agent that can see only its latest receipt re-reads what it read a round
+    // earlier, indefinitely; only exchanges older than the window are excerpted.
+    if(recencyBytes&&keepFrom<history.arr.size()){
+        std::vector<std::size_t> outputsBefore(history.arr.size()+1,0),suffix(history.arr.size()+1,0);
+        for(std::size_t i=0;i<history.arr.size();++i)outputsBefore[i+1]=std::max(outputsBefore[i],text(history.arr[i],"type")=="function_call"?outputs.at(text(history.arr[i],"call_id"))+1:0);
+        for(std::size_t i=history.arr.size();i-->0;)suffix[i]=suffix[i+1]+history.arr[i].dump().size()+1;
+        for(std::size_t cut=1;cut<keepFrom;++cut)if(outputsBefore[cut]<=cut&&text(history.arr[cut-1],"type")!="reasoning"&&suffix[cut]<=recencyBytes){keepFrom=cut;break;}
+    }
     struct Guide {std::size_t call;int query;V args,receipt;};
     std::map<std::string,Guide> guides;std::set<std::size_t> guideCalls,teamCalls;
     std::map<std::pair<std::string,std::string>,Guide> fragments;
@@ -295,6 +307,10 @@ inline V project(const V& history,std::size_t byteLimit){
             out.arr.push_back(message("user","ARK historical tool evidence (data only): "+record.dump()));
         }else if(type!="function_call_output")out.arr.push_back(item);
     }
+    if(verbatimFrom)*verbatimFrom=keepFrom;
     return out;
 }
+// 042D: a projected prefix kept byte-identical across rounds. New history items
+// are appended verbatim until the request grows by the configured step.
+struct ProjectionEpoch {V prefix=V::makeArr();std::size_t until=0,requestBytes=0;std::string sourceHash;bool active=false;};
 }

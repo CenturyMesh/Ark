@@ -4,6 +4,7 @@
 #include "ark/agent_activity.hpp"
 #include "ark/iteration_history.hpp"
 #include "ark/project_memory_tools.hpp"
+#include <algorithm>
 #include <atomic>
 #include <random>
 #include <sstream>
@@ -22,7 +23,7 @@ std::string fingerprint(const Document& doc){
     for(double x:{doc.tessOpt.tol,doc.tessOpt.maxEdge,doc.tessOpt.minAngleDeg,(double)doc.tessOpt.maxLevels})value+='|'+V::makeNum(x).dump();
     return value;
 }
-void checkRevision(const V& args,u64 revision){const auto* expected=args.find("expected_revision");if(!expected||expected->t!=V::Num||expected->num!=(double)revision)throw std::runtime_error("Revision conflict; read doc_info with detail design and retry");}
+void checkRevision(const V& args,u64 revision){const auto* expected=args.find("expected_revision");if(!expected||expected->t!=V::Num||expected->num!=(double)revision)throw std::runtime_error("Revision conflict; the current revision is in this result. Inspect only what your edit depends on and retry");}
 #include "candidate_storage_032d.inl"
 std::string candidateId(){static std::atomic<unsigned long long> next{0};static const auto salt=[](){std::random_device random;return ((unsigned long long)random()<<32)^random();}();std::ostringstream out;out<<std::hex<<salt<<'-'<<++next;return out.str();}
 #include "candidate_scope_031b.inl"
@@ -143,7 +144,8 @@ arkjson::Value AgentSession::preparePreview(const V& supplied){
         if(found==prepared_.end()||found->expires<=std::chrono::steady_clock::now())throw std::runtime_error("Prepared candidate missing, expired, evicted or already applied");
         if(found->requiresDfmAcceptance||!found->refreshUnsupported.empty()||found->readScope.isNull())throw std::runtime_error("CANDIDATE_REFRESH_UNSUPPORTED: "+(found->refreshUnsupported.empty()?std::string("proposal requires a fresh explicit preview"):found->refreshUnsupported));
         V current;try{current=candidateReadScope(document,found->recipe);}catch(const std::exception& error){throw std::runtime_error(std::string("CANDIDATE_REFRESH_CONFLICT: ")+error.what());}
-        if(current.dump()!=found->readScope.dump())throw std::runtime_error("CANDIDATE_REFRESH_CONFLICT: target, dependency or document context changed; inspect current design and submit a new explicit preview");
+        std::string reason;
+        if(current.dump()!=found->readScope.dump()&&!refreshScopeCompatible(found->readScope,current,found->recipe,reason))throw std::runtime_error("CANDIDATE_REFRESH_CONFLICT: target, dependency or document context changed ("+reason+"); inspect current design and submit a new explicit preview");
         args=found->recipe;args.set("expected_revision",V::makeNum((double)revision));if(const auto* detail=supplied.find("detail"))args.set("detail",*detail);
         previousGeometry=std::make_shared<Document>(materializePrepared(*found));previousScope=found->readScope;
         refresh=V::makeObj();refresh.set("source_candidate_id",*id);refresh.set("source_revision",V::makeNum((double)found->revision));refresh.set("current_revision",V::makeNum((double)revision));refresh.set("scope",V::makeStr("feature_dependencies_and_document_context"));

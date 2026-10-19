@@ -124,6 +124,26 @@ int main(int argc, char** argv) {
               "Snapshot is not a PNG");
         const std::string saved = native_test::readFile(work / "roundtrip.ark");
         check(saved.size() >= 16 && std::memcmp(saved.data(), "SQLite format 3\0", 16) == 0, "Saved document is a binary container");
+        // 042D --core-tools: core tools are listed first; loading a topic announces
+        // list_changed and adds that topic's tools, as the in-app agents see them.
+        std::vector<Value> core;
+        core.push_back(request(1, "initialize", parse(R"({"protocolVersion":"2025-11-25"})")));
+        core.push_back(request(2, "tools/list", Value::makeObj()));
+        core.push_back(call(3, "agent_onboard", parse(R"({"topic":"sheet","detail":"guide"})")));
+        core.push_back(request(4, "tools/list", Value::makeObj()));
+        std::string coreInput;
+        for (const auto& message : core) coreInput += message.dump() + "\n";
+        std::vector<Value> coreReplies;
+        std::istringstream coreStream(native_test::run(mcp, {"--core-tools"}, root, coreInput, std::chrono::seconds(20)));
+        while (std::getline(coreStream, line)) if (!line.empty()) coreReplies.push_back(parse(line));
+        check(coreReplies.size() == 5, "core tools: four replies and one list_changed notification");
+        check(field(field(field(field(coreReplies[0], "result"), "capabilities"), "tools"), "listChanged").b, "core tools announce listChanged");
+        auto listed = [&](const Value& reply) { std::unordered_set<std::string> out; for (const Value& entry : field(field(reply, "result"), "tools").arr) out.insert(field(entry, "name").asStr()); return out; };
+        const auto first = listed(coreReplies[1]);
+        check(first.count("agent_onboard") == 1 && first.count("doc_apply") == 1 && first.count("sheet_inspect") == 0 && first.size() < names.size(), "core tools hide specialist tools until their topic loads");
+        check(!field(field(coreReplies[2], "result"), "isError").b, "core-tools onboarding succeeds");
+        check(field(coreReplies[3], "method").asStr() == "notifications/tools/list_changed", "loading a topic announces list_changed after its reply");
+        check(listed(coreReplies[4]).count("sheet_inspect") == 1, "the loaded topic's tools are listed");
         std::cout << "MCP stdio: discovery, revision conflict, batch, persistence, STL and PNG passed\n";
         return 0;
     } catch (const std::exception& error) {

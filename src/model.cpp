@@ -453,7 +453,7 @@ bool applyAppearancePatch(Appearance& appearance,const arkjson::Value& patch,std
             if(value.t!=V::Arr||value.arr.size()!=2){error="texture_scale needs two positive values";return false;}
             for(int i=0;i<2;++i){const V& scale=value.arr[i];if(scale.t!=V::Num||!std::isfinite(scale.num)||scale.num<=0||scale.num>1e6){error="texture_scale must be positive and at most 1e6";return false;}}
             appearance.textureScaleU=value.arr[0].num;appearance.textureScaleV=value.arr[1].num;
-        }else{error="Unknown appearance property: "+key;return false;}
+        }else{error="Unknown appearance property: "+key+"; accepted: base_color, metallic, roughness, opacity, emission_color, emission_intensity, emission_period, emission_effect, bloom, glow, texture_path, texture_asset, texture_scale";return false;}
     }
     return true;
 }

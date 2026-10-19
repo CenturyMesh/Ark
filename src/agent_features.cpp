@@ -9,9 +9,13 @@
 #include "ark/physics.hpp"
 #include "ark/manufacturing.hpp"
 #include "ark/component_library_tools.hpp"
+#include "ark/result_path.hpp"
+#include <algorithm>
 #include <chrono>
+#include <vector>
 #include <set>
 #include <map>
+#include <cctype>
 #include <stdexcept>
 
 namespace ark {
@@ -61,10 +65,39 @@ V math(const V& args){
 }
 const std::set<std::string> queryTools{"context_graph","object_context","sketch_repair","feature_history","assembly_authoring_info","holes_catalog","cad_inspect","drawing_inspect","collision_inspect","skeleton_inspect","skeleton_compile","reference_navigate","library_get","library_search","library_info","library_sources","library_vendors","activity_info","bom_inspect","fastener_recipe","manufacturing_inspect","physics_inspect","materials_inspect","wood_inspect","doc_info","eval_expr","plane_inspect","sketch_inspect","sketch_diagnose","reference_inspect","native_inspect","assembly_info","assembly_motion","geometry_query","math_eval","mesh_inspect","frame_inspect","electronics_inspect","sheet_inspect","suspension_inspect","tube_inspect"};
 bool batchTool(const std::string& name){return queryTools.count(name)||name=="agent_onboard";}
+// 042D: bounded dataflow inside one batch. {"$ref":"id.path"} in a query's args
+// takes an earlier row's value; rows still run once, in order, at one revision.
+bool batchReference(const V& value){return value.t==V::Obj&&value.obj.size()==1&&value.obj.front().first=="$ref";}
+void batchReferences(const V& value,std::vector<std::string>& out){
+    if(batchReference(value)){out.push_back(value.obj.front().second.t==V::Str?value.obj.front().second.str:std::string());return;}
+    if(value.t==V::Arr)for(const auto& item:value.arr)batchReferences(item,out);else if(value.t==V::Obj)for(const auto& item:value.obj)batchReferences(item.second,out);
+}
+bool batchIdentifier(const std::string& id){return !id.empty()&&id.size()<=32&&std::all_of(id.begin(),id.end(),[](char c){return std::isalnum((unsigned char)c)||c=='_'||c=='-';});}
+std::pair<std::string,std::string> batchTarget(const std::string& reference){const auto dot=reference.find('.');return {reference.substr(0,dot),dot==std::string::npos?std::string():reference.substr(dot+1)};}
+// Resolves every reference against earlier rows' full results; false names the first unresolved one.
+bool resolveBatchReferences(V& value,const std::map<std::string,V>& outputs,std::string& failure){
+    if(batchReference(value)){
+        const auto [id,path]=batchTarget(value.obj.front().second.str);const auto& source=outputs.at(id);
+        if(path.empty()){value=source;return true;}
+        V resolved;std::string where;if(!selectResultPath(source,path,resolved,where)){failure=value.obj.front().second.str+" is absent at "+where;return false;}
+        if(resolved.dump().size()>64*1024){failure=value.obj.front().second.str+" resolves to more than 64 KiB; select fewer values";return false;}
+        value=std::move(resolved);return true;
+    }
+    if(value.t==V::Arr){for(auto& item:value.arr)if(!resolveBatchReferences(item,outputs,failure))return false;}
+    else if(value.t==V::Obj){for(auto& item:value.obj)if(!resolveBatchReferences(item.second,outputs,failure))return false;}
+    return true;
+}
 void validateBatchQuery(const V& query,size_t index){
     const std::string prefix="query_batch queries["+std::to_string(index)+"]";
     if(query.t!=V::Obj)throw std::runtime_error(prefix+" must be an object");
-    for(const auto& field:query.obj)if(field.first!="tool"&&field.first!="args"&&field.first!="fields")throw std::runtime_error(prefix+" unknown field: "+field.first+"; accepted: tool, args, fields");
+    for(const auto& field:query.obj)if(field.first!="tool"&&field.first!="args"&&field.first!="fields"&&field.first!="id"&&field.first!="paths"&&field.first!="max_bytes")throw std::runtime_error(prefix+" unknown field: "+field.first+"; accepted: tool, args, fields, id, paths, max_bytes");
+    if(const auto* id=query.find("id");id&&(id->t!=V::Str||!batchIdentifier(id->str)))throw std::runtime_error(prefix+" id must be 1..32 letters, digits, '_' or '-'");
+    if(query.find("fields")&&query.find("paths"))throw std::runtime_error(prefix+" accepts fields or paths, not both");
+    if(const auto* paths=query.find("paths")){
+        if(paths->t!=V::Arr||paths->arr.empty()||paths->arr.size()>32)throw std::runtime_error(prefix+" paths requires 1..32 distinct result paths");
+        std::set<std::string> seen;for(const auto& path:paths->arr){if(path.t!=V::Str||!seen.insert(path.str).second)throw std::runtime_error(prefix+" paths requires distinct strings");try{validateResultPath(path.str);}catch(const std::exception& error){throw std::runtime_error(prefix+" "+error.what());}}
+    }
+    if(const auto* cap=query.find("max_bytes");cap&&(cap->t!=V::Num||!std::isfinite(cap->num)||std::floor(cap->num)!=cap->num||cap->num<256||cap->num>262144))throw std::runtime_error(prefix+" max_bytes must be an integer from 256 to 262144");
     const auto name=text(query,"tool");if(!batchTool(name))throw std::runtime_error(prefix+" tool is not allowed: "+name+"; use the query_batch tool enum; mutation, export and recursive batches are excluded");
     const auto& args=required(query,"args");if(args.t!=V::Obj)throw std::runtime_error(prefix+" args must be an object");
     if(name=="library_vendors"&&(!args.find("operation")||args.find("operation")->asStr()!="list"))throw std::runtime_error(prefix+" library_vendors requires operation:list; policy updates cannot be batched reads");
@@ -77,14 +110,57 @@ void validateBatchQuery(const V& query,size_t index){
 void batchContent(V& row,const V& data){
     row.set("structuredContent",data);V content=V::makeArr(),item=V::makeObj();item.set("type",V::makeStr("text"));item.set("text",V::makeStr(data.dump()));content.arr.push_back(item);row.set("content",content);
 }
+// Guessed projection names usually share a word with the real field
+// (length_mm -> route_length_mm, layers -> layer_count). Suggestions are hints
+// only; the row stays rejected until the caller requests real fields.
+V suggestedFields(const std::string& missing,const V& result){
+    auto words=[](const std::string& name){std::vector<std::string> out;std::string word;for(char c:name+"_"){if(c=='_'){if(word.size()>=3&&word!="mm"&&word!="deg"&&word!="min"&&word!="max")out.push_back(word);word.clear();}else word+=(char)std::tolower((unsigned char)c);}return out;};
+    static const std::map<std::string,std::string> synonyms={{"separation","distance"},{"clearance","distance"},{"gap","distance"},{"centre","center"},{"centroid","center"},{"weight","mass"},{"result","value"},{"output","value"}};
+    auto stem=[](const std::string& a,const std::string& b){const size_t n=std::min(a.size(),b.size());return n>=4&&a.compare(0,n,b,0,n)==0;};
+    V out=V::makeArr();
+    for(const auto& field:result.obj){bool match=false;
+        for(auto wanted:words(missing)){if(const auto alias=synonyms.find(wanted);alias!=synonyms.end())wanted=alias->second;for(const auto& candidate:words(field.first))if(stem(wanted,candidate))match=true;}
+        if(match&&out.arr.size()<4)out.arr.push_back(V::makeStr(field.first));}
+    return out;
+}
 void projectBatchRow(V& row,const V& query,size_t index){
     const auto* fields=query.find("fields");if(!fields||required(row,"isError").b)return;
     const V full=required(row,"structuredContent");V compact=V::makeObj(),missing=V::makeArr();
+    // "structuredContent" names the whole tool payload, not a field inside it.
+    if(std::any_of(fields->arr.begin(),fields->arr.end(),[](const V& key){return key.t==V::Str&&key.str=="structuredContent";}))return;
     for(const auto& key:fields->arr){if(const auto* value=full.find(key.str.c_str()))compact.set(key.str,*value);else missing.arr.push_back(key);}
     if(missing.arr.empty()){batchContent(row,compact);return;}
     V available=V::makeArr();std::string names;for(const auto& field:full.obj){available.arr.push_back(V::makeStr(field.first));if(!names.empty())names+=", ";names+=field.first;}
-    V error=V::makeObj(),recovery=V::makeObj();error.set("error_code",V::makeStr("QUERY_BATCH_FIELD_MISSING"));error.set("error",V::makeStr("Requested result field is absent: "+missing.arr.front().str+"; available fields: "+names));error.set("query_index",V::makeNum((double)index));error.set("tool",required(query,"tool"));error.set("requested_fields",*fields);error.set("missing_fields",missing);error.set("available_fields",available);error.set("tool_succeeded",V::makeBool(true));error.set("observed_result",full);
-    recovery.set("action",V::makeStr("reuse_observed_result"));recovery.set("hint",V::makeStr("The tool already ran once. Use observed_result and its actual available_fields; no successful query needs repeating. If fresh evidence is needed, call only the tool/args below, without the invalid fields projection."));recovery.set("tool",required(query,"tool"));recovery.set("args",required(query,"args"));error.set("recovery",recovery);
+    V suggestions=V::makeObj();std::string hint;for(const auto& key:missing.arr){auto candidates=suggestedFields(key.str,full);if(candidates.arr.empty())continue;std::string list;for(const auto& c:candidates.arr)list+=(list.empty()?"":"|")+c.str;hint+=(hint.empty()?"; did you mean ":", ")+key.str+" -> "+list;suggestions.set(key.str,candidates);}
+    V error=V::makeObj(),recovery=V::makeObj();error.set("error_code",V::makeStr("QUERY_BATCH_FIELD_MISSING"));error.set("error",V::makeStr("Requested result field is absent: "+missing.arr.front().str+hint+"; available fields: "+names));if(!suggestions.obj.empty())error.set("suggested_fields",suggestions);error.set("query_index",V::makeNum((double)index));error.set("tool",required(query,"tool"));error.set("requested_fields",*fields);error.set("missing_fields",missing);error.set("available_fields",available);error.set("tool_succeeded",V::makeBool(true));error.set("observed_result",full);
+    recovery.set("action",V::makeStr("reuse_observed_result"));recovery.set("hint",V::makeStr("The tool already ran once. Read observed_result and its actual available_fields; the other successful queries need no repeat. To record this evidence (and clear a retained team error), call only the tool/args below once with valid fields or without a fields projection."));recovery.set("tool",required(query,"tool"));recovery.set("args",required(query,"args"));error.set("recovery",recovery);
+    row.set("isError",V::makeBool(true));batchContent(row,error);
+}
+V batchRecovery(const V& query,const char* hint){V recovery=V::makeObj();recovery.set("action",V::makeStr("narrow_paths"));recovery.set("hint",V::makeStr(hint));recovery.set("tool",required(query,"tool"));recovery.set("args",required(query,"args"));return recovery;}
+// paths keep only the selected values, keyed by path, plus the observed revision.
+void projectBatchPaths(V& row,const V& query,size_t index){
+    const auto* paths=query.find("paths");if(!paths||required(row,"isError").b)return;
+    const V full=required(row,"structuredContent");V compact=V::makeObj();
+    for(const auto& path:paths->arr){V value;std::string where;
+        if(!selectResultPath(full,path.str,value,where)){
+            V error=V::makeObj(),available=V::makeArr();for(const auto& field:full.obj)available.arr.push_back(V::makeStr(field.first));
+            error.set("error_code",V::makeStr("QUERY_BATCH_PATH_MISSING"));error.set("error",V::makeStr("Requested result path is absent: "+path.str+" at "+where));error.set("query_index",V::makeNum((double)index));error.set("tool",required(query,"tool"));error.set("requested_paths",*paths);error.set("available_fields",available);error.set("tool_succeeded",V::makeBool(true));
+            error.set("recovery",batchRecovery(query,"The tool already ran. Choose paths from available_fields, or run the tool/args below without a projection."));
+            row.set("isError",V::makeBool(true));batchContent(row,error);return;
+        }
+        compact.set(path.str,value);
+    }
+    if(const auto* revision=full.find("revision");revision&&!compact.find("revision"))compact.set("revision",*revision);
+    batchContent(row,compact);
+}
+// max_bytes bounds what the row may return; above it the row reports its shape instead of its data.
+void capBatchRow(V& row,const V& query,size_t index){
+    const auto* cap=query.find("max_bytes");if(!cap||required(row,"isError").b)return;
+    const V& data=required(row,"structuredContent");const auto bytes=data.dump().size();if(bytes<=(size_t)cap->num)return;
+    V keys=V::makeObj();for(const auto& field:data.obj){V shape=V::makeObj();const auto& value=field.second;shape.set("type",V::makeStr(value.t==V::Obj?"object":value.t==V::Arr?"array":value.t==V::Str?"string":value.t==V::Num?"number":value.t==V::Bool?"boolean":"null"));if(value.t==V::Arr)shape.set("count",V::makeNum((double)value.arr.size()));shape.set("bytes",V::makeNum((double)value.dump().size()));keys.set(field.first,shape);}
+    V error=V::makeObj();error.set("error_code",V::makeStr("QUERY_BATCH_ROW_TOO_LARGE"));error.set("error",V::makeStr("Result is "+std::to_string(bytes)+" bytes, above max_bytes "+std::to_string((size_t)cap->num)+"; select the needed values with paths."));error.set("query_index",V::makeNum((double)index));error.set("tool",required(query,"tool"));error.set("tool_succeeded",V::makeBool(true));error.set("bytes",V::makeNum((double)bytes));error.set("max_bytes",*cap);error.set("result_keys",keys);
+    if(const auto* revision=data.find("revision"))error.set("revision",*revision);
+    error.set("recovery",batchRecovery(query,"The tool already ran. Request only the values you need with paths, or raise max_bytes."));
     row.set("isError",V::makeBool(true));batchContent(row,error);
 }
 V queryValue(AgentSession& s,const V& spec){
@@ -232,8 +308,25 @@ bool callAgentFeature(AgentSession& s,const std::string& tool,const V& args,V& o
     else if(tool=="query_batch"){
         for(const auto& field:args.obj)if(field.first!="queries")throw std::runtime_error("query_batch unknown field: "+field.first+"; accepted: queries");
         const auto& queries=required(args,"queries");if(queries.t!=V::Arr||queries.arr.empty()||queries.arr.size()>128)throw std::runtime_error("Batch needs 1..128 read-only queries");
-        V rows=V::makeArr();for(size_t i=0;i<queries.arr.size();++i)validateBatchQuery(queries.arr[i],i);
-        size_t errors=0;for(size_t i=0;i<queries.arr.size();++i){const auto& query=queries.arr[i];auto start=std::chrono::steady_clock::now();V row=s.call(text(query,"tool"),required(query,"args"));projectBatchRow(row,query,i);row.set("query_index",V::makeNum((double)i));row.set("tool",required(query,"tool"));row.set("args",required(query,"args"));row.set("elapsed_ms",V::makeNum(std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count()));if(required(row,"isError").b)++errors;rows.arr.push_back(row);}out=V::makeObj();out.set("results",rows);out.set("revision",V::makeNum((double)s.revision));out.set("error_count",V::makeNum((double)errors));
+        V rows=V::makeArr();std::set<std::string> ids;
+        // Every structure, path and reference is checked before any row runs.
+        for(size_t i=0;i<queries.arr.size();++i){const auto& query=queries.arr[i];validateBatchQuery(query,i);const std::string prefix="query_batch queries["+std::to_string(i)+"]";
+            std::vector<std::string> references;batchReferences(required(query,"args"),references);
+            for(const auto& reference:references){const auto [id,path]=batchTarget(reference);if(!ids.count(id))throw std::runtime_error(prefix+" $ref must name an earlier query id: "+reference);if(!path.empty())try{validateResultPath(path);}catch(const std::exception& error){throw std::runtime_error(prefix+" "+error.what());}}
+            if(const auto* id=query.find("id");id&&!ids.insert(id->str).second)throw std::runtime_error(prefix+" id must be unique in the batch: "+id->str);}
+        std::map<std::string,V> outputs;std::set<std::string> unavailable;
+        size_t errors=0;for(size_t i=0;i<queries.arr.size();++i){const auto& query=queries.arr[i];auto start=std::chrono::steady_clock::now();const auto& submitted=required(query,"args");
+            std::vector<std::string> references;batchReferences(submitted,references);std::string blocked,failure;for(const auto& reference:references)if(unavailable.count(batchTarget(reference).first)){blocked=batchTarget(reference).first;break;}
+            V executed=submitted,row;
+            if(!blocked.empty()){row=V::makeObj();row.set("isError",V::makeBool(true));V error=V::makeObj();error.set("error_code",V::makeStr("QUERY_BATCH_ROW_SKIPPED"));error.set("error",V::makeStr("Not run: query '"+blocked+"', which this query references, failed or was skipped."));error.set("skipped_due_to",V::makeStr(blocked));batchContent(row,error);}
+            else if(!references.empty()&&!resolveBatchReferences(executed,outputs,failure)){row=V::makeObj();row.set("isError",V::makeBool(true));V error=V::makeObj();error.set("error_code",V::makeStr("QUERY_BATCH_REF_UNRESOLVED"));error.set("error",V::makeStr("Not run: "+failure));batchContent(row,error);}
+            else row=s.call(text(query,"tool"),executed);
+            // References read the full result, before this row's own projection.
+            if(const auto* id=query.find("id")){if(required(row,"isError").b)unavailable.insert(id->str);else outputs[id->str]=required(row,"structuredContent");}
+            projectBatchRow(row,query,i);projectBatchPaths(row,query,i);capBatchRow(row,query,i);
+            row.set("query_index",V::makeNum((double)i));row.set("tool",required(query,"tool"));row.set("args",submitted);if(!references.empty()&&blocked.empty()&&failure.empty())row.set("resolved_args",executed);
+            row.set("elapsed_ms",V::makeNum(std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count()));if(required(row,"isError").b)++errors;rows.arr.push_back(row);}
+        out=V::makeObj();out.set("results",rows);out.set("revision",V::makeNum((double)s.revision));out.set("error_count",V::makeNum((double)errors));
     }else return false;
     return true;
 }
@@ -326,7 +419,7 @@ void appendAgentFeatureTools(V& tools){
       {"geometry_query","Batch 1..128 exact queries on one feature id/name. actions: references (filter kind, surface, oriented normal, unoriented axis, radius_mm, near+within_mm, coaxial_origin, adjacent_to; unique rejects ambiguity), properties (reference?, density_g_cm3?), curve (reference,count?,margin_mm?,fraction?), surface (reference,u?,v?), section (origin,normal), continuity (a,b,fraction_a?,fraction_b?), point_distance(point). Coordinates are feature-local mm; curve fractions use arc length. Results have index and ok; failed queries never invent values.",R"({"type":"object","properties":{"id":{"type":["integer","string"]},"queries":{"type":"array","minItems":1,"maxItems":128,"items":{"type":"object","properties":{"action":{"type":"string","enum":["references","properties","curve","surface","section","continuity","point_distance"]}},"required":["action"]}}},"required":["id","queries"]})"},
       {"math_eval","Deterministic vector and rigid-frame math. op add/subtract/dot/cross/distance/angle uses a,b xyz; norm/normalize uses a; frame uses origin,z,x_hint; transform_point/direction uses a,from_frame,to_frame (16 column-major values); project_plane uses a,origin,normal; line_plane also direction. convert uses value,from,to: mm/cm/m/in, deg/rad, g/kg. Incompatible units and degenerate directions reject.",R"({"type":"object","properties":{"op":{"type":"string","enum":["add","subtract","dot","cross","distance","angle","norm","normalize","frame","transform_point","transform_direction","project_plane","line_plane","convert"]},"a":{"type":"array"},"b":{"type":"array"},"origin":{"type":"array"},"normal":{"type":"array"},"direction":{"type":"array"},"z":{"type":"array"},"x_hint":{"type":"array"},"from_frame":{"type":"array"},"to_frame":{"type":"array"},"value":{"type":"number"},"from":{"type":"string"},"to":{"type":"string"}},"required":["op"]})"},
       {"doc_preview","Evaluate commands/checks on an isolated candidate, or explicitly refresh this session's retained candidate_id at the observed current expected_revision without resending commands. Refresh verifies retained targets/dependencies and supported authoring scope, rejects real conflicts, and returns a new candidate for the current document. It never commits or silently rebases an old apply. Candidates expire after 300 seconds; at most four/128 MiB, and project boundaries invalidate them. recipe retains expanded commands; valid previews return candidate_id for an atomic apply without a second geometry evaluation. detail:changes returns compact partial evidence. Live document, revision and undo remain unchanged.",R"({"type":"object","properties":{"expected_revision":{"type":"integer"},"candidate_id":{"type":"string","minLength":1},"detail":{"type":"string","enum":["design","changes"],"description":"changes returns explicitly partial changed-feature summaries; design retains full compact design inventories"},"commands":{"type":"array","minItems":1,"maxItems":128,"items":{"type":"object"}},"checks":{"type":"array","minItems":1,"maxItems":32,"items":{"type":"object"}}},"required":["expected_revision"],"oneOf":[{"required":["commands"],"not":{"required":["candidate_id"]}},{"required":["candidate_id"],"not":{"anyOf":[{"required":["commands"]},{"required":["checks"]}]}}]})"},
-      {"query_batch","Run 1..128 read-only calls against one revision, once per query. Invalid structure/forbidden tools reject the batch before execution. agent_onboard requires detail:guide; object_context retains its 64-object/256KiB bounds. fields selects 1..32 distinct top-level structuredContent names, not dot paths. Missing fields produce only that row's QUERY_BATCH_FIELD_MISSING error with available_fields, actual observed_result and executable recovery tool/args. Reuse retained evidence; request a fresh read only when needed. Tool/projection errors preserve all other rows. Every row has query_index (zero-based), tool, args, structuredContent/content/isError and elapsed_ms. Outer results/revision/error_count require checking each row. Prefer doc_info detail:revision and native_inspect detail:properties.",R"({"type":"object","properties":{"queries":{"type":"array","minItems":1,"maxItems":128,"items":{"type":"object","properties":{"tool":{"type":"string"},"args":{"type":"object"},"fields":{"type":"array","minItems":1,"maxItems":32,"uniqueItems":true,"items":{"type":"string","minLength":1},"description":"Exact top-level structuredContent names. Missing fields are an individual row error with available_fields and retained observed_result; other rows remain available."}},"required":["tool","args"],"additionalProperties":false}}},"required":["queries"],"additionalProperties":false})"},
+      {"query_batch","Run 1..128 read-only calls against one revision, once per query. Invalid structure/forbidden tools reject the batch before execution. agent_onboard requires detail:guide; object_context retains its 64-object/256KiB bounds. fields selects 1..32 distinct top-level structuredContent names, not dot paths. paths instead selects nested values (key, key[n], key[a:b], or key[] for each element), keyed by path, plus revision. An optional id lets a later query take a value from this row's full result: put {\"$ref\":\"id.path\"} anywhere in its args; the row echoes args and adds resolved_args. A reference to a failed row skips that row explicitly. max_bytes (256..262144) makes a larger row return its shape instead of its data. Missing fields produce only that row's QUERY_BATCH_FIELD_MISSING error with available_fields, actual observed_result and executable recovery tool/args. Reuse retained evidence; request a fresh read only when needed. Tool/projection errors preserve all other rows. Every row has query_index (zero-based), tool, args, structuredContent/content/isError and elapsed_ms. Outer results/revision/error_count require checking each row. Prefer doc_info detail:revision and native_inspect detail:properties.",R"({"type":"object","properties":{"queries":{"type":"array","minItems":1,"maxItems":128,"items":{"type":"object","properties":{"tool":{"type":"string"},"args":{"type":"object"},"fields":{"type":"array","minItems":1,"maxItems":32,"uniqueItems":true,"items":{"type":"string","minLength":1},"description":"Exact top-level structuredContent names. Missing fields are an individual row error with available_fields and retained observed_result; other rows remain available."},"id":{"type":"string","pattern":"^[A-Za-z0-9_-]{1,32}$","description":"Name later queries use in {\"$ref\":\"id.path\"}."},"paths":{"type":"array","minItems":1,"maxItems":32,"uniqueItems":true,"items":{"type":"string","minLength":1,"maxLength":256},"description":"Nested values to return instead of the whole result; not combined with fields."},"max_bytes":{"type":"integer","minimum":256,"maximum":262144}},"required":["tool","args"],"additionalProperties":false}}},"required":["queries"],"additionalProperties":false})"},
       {"placement_plan","Preview a rigid placement of a free instance. node is name/id; reference defaults origin. target is {node|feature,reference?,copy?,fraction?}, {plane:name} or {frame:16-column-major-values}; mode align matches frames, center aligns area/volume centroids by translation. offset xyz uses target coordinates. Refuses grounded/mated instances and nested placements in mated assemblies. Returns doc_apply payload; use mates for persistent relations.",R"({"type":"object","properties":{"expected_revision":{"type":"integer"},"node":{"type":["integer","string"]},"reference":{"type":"string"},"target":{"type":"object"},"mode":{"type":"string","enum":["align","center"]},"offset":{"type":"array"}},"required":["expected_revision","node","target"]})"},
       {"pattern_plan","Preview equally arc-length spaced instances or point datums along one semantic edge. path is feature id/name; reference is edge name; count 2..128; margin_mm at each end; name is unique prefix. instances requires feature and optional x_hint (local Z follows curve tangent). instances/points are snapshots in path feature coordinates. solid/holes create linked version-19 native features; holes requires feature target, normal,radius,depth and optional offset. solid duplicates the feature with semantic copy.N names. Linked counts/margins/offsets remain editable in native payloads. Returns revision-bound doc_apply commands.",R"({"type":"object","properties":{"expected_revision":{"type":"integer"},"path":{"type":["integer","string"]},"reference":{"type":"string"},"count":{"type":"integer","minimum":2,"maximum":128},"margin_mm":{"type":"number"},"name":{"type":"string"},"mode":{"type":"string","enum":["instances","points","solid","holes"]},"offset":{"type":"array"},"normal":{"type":"array"},"radius":{"type":"number"},"depth":{"type":"number"},"feature":{"type":["integer","string"]},"x_hint":{"type":"array"}},"required":["expected_revision","path","reference","count","name"]})"},
       {"design_solve","Read-only scalar parameter target solve by bounded bisection; requires a continuous bracket, aborts invalid geometry. parameter,lower,upper,target,tolerance; objective:{tool,args,path} selects a finite scalar using dot paths including array indices. max_evaluations 3..64 (default32), max_seconds <=120 (default30, checked between operations). Returns apply only on convergence. mode sensitivity returns a finite-interval secant. No global optimum or topology continuity certification.",R"({"type":"object","properties":{"expected_revision":{"type":"integer"},"parameter":{"type":"string"},"lower":{"type":"number"},"upper":{"type":"number"},"target":{"type":"number"},"tolerance":{"type":"number","exclusiveMinimum":0},"objective":{"type":"object"},"max_evaluations":{"type":"integer","minimum":3,"maximum":64},"max_seconds":{"type":"number"},"mode":{"type":"string","enum":["target","sensitivity"]}},"required":["expected_revision","parameter","lower","upper","objective"]})"}
@@ -334,7 +427,7 @@ void appendAgentFeatureTools(V& tools){
     for(const auto& d:defs){V tool=V::makeObj(),schema,annotations=V::makeObj(),output=V::makeObj();arkjson::parse(d.schema,schema);if(std::string(d.name)=="doc_preview"||std::string(d.name)=="manufacturing_propose"){V props=*schema.find("properties");props.set("checks",agentPostconditionsSchema());schema.set("properties",props);}
         if(std::string(d.name)=="query_batch"){
             V props=*schema.find("properties"),queries=*props.find("queries"),item=*queries.find("items"),fields=*item.find("properties"),name=*fields.find("tool"),names=V::makeArr();for(const auto& allowed:queryTools)names.arr.push_back(V::makeStr(allowed));names.arr.push_back(V::makeStr("agent_onboard"));name.set("enum",names);fields.set("tool",name);item.set("properties",fields);queries.set("items",item);props.set("queries",queries);schema.set("properties",props);
-            arkjson::parse(R"({"type":"object","properties":{"results":{"type":"array","items":{"type":"object","properties":{"query_index":{"type":"integer","minimum":0},"tool":{"type":"string"},"args":{"type":"object"},"isError":{"type":"boolean"},"structuredContent":{"type":"object","description":"A result or explicit row error. QUERY_BATCH_FIELD_MISSING includes query_index, tool, requested_fields, missing_fields, available_fields, tool_succeeded:true, observed_result and recovery:{action:reuse_observed_result,tool,args,hint}."},"content":{"type":"array"},"elapsed_ms":{"type":"number","minimum":0}},"required":["query_index","tool","args","structuredContent","content","isError","elapsed_ms"]}},"revision":{"type":"integer"},"error_count":{"type":"integer","minimum":0,"maximum":128}},"required":["results","revision","error_count"]})",output);
+            arkjson::parse(R"({"type":"object","properties":{"results":{"type":"array","items":{"type":"object","properties":{"query_index":{"type":"integer","minimum":0},"tool":{"type":"string"},"args":{"type":"object"},"isError":{"type":"boolean"},"structuredContent":{"type":"object","description":"A result or explicit row error. QUERY_BATCH_FIELD_MISSING includes query_index, tool, requested_fields, missing_fields, available_fields, tool_succeeded:true, observed_result and recovery:{action:reuse_observed_result,tool,args,hint}."},"content":{"type":"array"},"resolved_args":{"type":"object","description":"Arguments actually executed after resolving $ref values."},"elapsed_ms":{"type":"number","minimum":0}},"required":["query_index","tool","args","structuredContent","content","isError","elapsed_ms"]}},"revision":{"type":"integer"},"error_count":{"type":"integer","minimum":0,"maximum":128}},"required":["results","revision","error_count"]})",output);
         }else output.set("type",V::makeStr("object"));
         tool.set("name",V::makeStr(d.name));tool.set("description",V::makeStr(d.description));tool.set("inputSchema",schema);tool.set("outputSchema",output);annotations.set("readOnlyHint",V::makeBool(std::string(d.name)!="failure_export"));tool.set("annotations",annotations);tools.arr.push_back(tool);}
 }

@@ -44,6 +44,30 @@ struct AssistantConfig {
     unsigned maxOutputTokens=8192; // Required per-response max_tokens for Messages; not a run budget.
     unsigned maxRounds=0; // Zero: continue until completion/cancel; optional bounded test/host mode.
     std::string onboardingPack; // Static source-owned guide, inserted once per conversation.
+    std::string traceRole; // ARK_ASSISTANT_TRACE label, such as a team role id; never sent to providers.
+    // Advertise specialist tools only after their onboarding topic is loaded
+    // (agent_onboard or the preloaded guide); core tools are always offered.
+    bool deferSpecialistTools=false;
+    // Lets a response batch independent calls (the API default). The runtime
+    // still executes at most one document write per response.
+    bool parallelToolCalls=true;
+    // A/B options, off by default; neither is a turn or token budget.
+    // resultHandleBytes: a successful read result larger than this enters history
+    // as its shape plus a handle; result_get returns selected paths from the
+    // full result held for this turn. Zero keeps whole results in history.
+    std::size_t resultHandleBytes=0;
+    // projectionStepBytes: once history is projected, keep that projected prefix
+    // byte-identical and append new items verbatim until the request grows by
+    // this many bytes, then project again. Zero re-projects every round.
+    std::size_t projectionStepBytes=0;
+    // API-key OpenAI only: key prompt caching by model, instructions, traceRole
+    // and the leading guide, not by tools or the projection header, so loading
+    // a topic or projecting history keeps the same cache routing.
+    bool stablePromptCacheKey=false;
+    // First-party Claude Messages with deferSpecialistTools: send the whole tool
+    // list from the start with specialist tools deferred, and surface a loaded
+    // topic with tool_addition blocks, so the tool list never changes.
+    bool anthropicToolAdditions=false;
     bool memoryPrefetch=false; // Studio opts in; separate untrusted startup data, not a static guide.
     bool imageInputSupported=true; // Host capability override; false rejects pixels explicitly.
     unsigned timeoutSeconds=90;
@@ -70,6 +94,10 @@ struct AssistantPerformance {
     std::uint64_t lastRequestBytes=0,lastInputBytes=0,lastToolSchemaBytes=0;
     std::uint64_t originalHistoryBytes=0,instructionBytes=0,messageBytes=0,toolResultBytes=0,projectedRequests=0;
     std::uint64_t lastOriginalHistoryBytes=0,lastInstructionBytes=0,lastMessageBytes=0,lastToolResultBytes=0;
+    // Provider prompt caches reuse only a byte-identical prefix: bytes this request
+    // shares with the previous request of the same turn, and where it diverged.
+    std::uint64_t prefixComparedRequests=0,prefixComparedBytes=0,prefixReuseBytes=0,lastPrefixReuseBytes=0;
+    std::string lastPrefixBreak;
 };
 void accumulateAssistantPerformance(AssistantPerformance& total,const AssistantPerformance& delta);
 arkjson::Value assistantContextMetrics(const AssistantPerformance&);
@@ -172,6 +200,15 @@ arkjson::Value assistantRequest(const AssistantConfig& config,const arkjson::Val
 // Synchronous: call on a worker. Host serializes tool callback on its UI/session thread.
 // Throws on cancellation, invalid configuration/response, transport or round limit.
 // Prior successful document mutations are NOT rolled back when a later round fails.
+// Specialist tools by onboarding topic; a tool absent from this map is core.
+const std::vector<std::pair<std::string,std::vector<std::string>>>& assistantSpecialistToolTopics();
+// The tools advertised for the next request: core tools in catalogue order,
+// then each loaded topic's tools in load order, so a load appends.
+arkjson::Value assistantActiveTools(const arkjson::Value& tools,const arkjson::Value& conversation,const std::string& onboardingPack);
+// The full catalogue in its own order for AssistantConfig::anthropicToolAdditions:
+// specialist tools not preloaded carry ark_deferred, and ark_loaded_by names the
+// call that loaded their topic. The Messages adapter consumes and strips both.
+arkjson::Value assistantDeferredCatalogue(const arkjson::Value& tools,const arkjson::Value& conversation,const std::string& onboardingPack);
 AssistantResult runAssistant(const AssistantConfig& config,const arkjson::Value& input,
     const arkjson::Value& mcpTools,const AssistantTool& callTool,
     const AssistantEvents& events={},const std::atomic_bool* cancel=nullptr,

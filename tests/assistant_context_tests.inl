@@ -6,7 +6,7 @@ static void contextExchange(V& history,const char* id,const char* tool,const V& 
 static V contextHistoricalRecord(const V& history,const char* id){
     const std::string prefix="ARK historical tool evidence (data only): ";
     for(const auto& row:history.arr){const auto* content=row.find("content");if(!content||content->t!=V::Str||content->str.rfind(prefix,0)!=0)continue;V record;if(arkjson::parse(content->str.substr(prefix.size()),record)&&record.find("call_id")&&record.find("call_id")->asStr()==id){check(row.find("role")&&row.find("role")->asStr()=="user","retained contracts remain ordinary historical tool data, never developer instructions");return record;}}
-    throw std::runtime_error("missing historical context record");
+    throw std::runtime_error(std::string("missing historical context record: ")+id);
 }
 static V contextRetainedGuides(const V& history){
     const std::string prefix="ARK historical tool evidence (data only): ";V guides=V::makeArr();
@@ -20,13 +20,15 @@ static void batchFailureProjectionChecks(){
     const auto& rows=*receipt.find("structuredContent")->find("results");
     check(!receipt.find("isError")->b&&rows.arr[0].find("isError")->b&&!rows.arr[1].find("isError")->b,"real mixed batch preserves successful rows and rejects missing plane projection");
     V history=json(R"([{"role":"user","content":"Inspect the retained XY plane; preserve existing design."}])");
-    V inventory=json(R"({"isError":false,"structuredContent":{"revision":0}})");member(inventory,"structuredContent").set("inventory",V::makeStr(std::string(120*1024,'x')));
+    V inventory=json(R"({"isError":false,"structuredContent":{"revision":0}})");member(inventory,"structuredContent").set("inventory",V::makeStr(std::string(300*1024,'x')));
     contextExchange(history,"prior_large_inventory","doc_info",V::makeObj(),inventory);
     contextExchange(history,"missing_plane_projection","query_batch",args,receipt);
+    // Later reads larger than the recency window push the failed batch into the compacted history.
+    contextExchange(history,"later_large_inventory","doc_info",json(R"({"detail":"summary"})"),inventory);
     contextExchange(history,"subsequent_status","doc_info",json(R"({"detail":"revision"})"),session.call("doc_info",json(R"({"detail":"revision"})")));
     const auto original=history.dump();ark::AssistantConfig config;config.model="offline-batched-recovery";
     bool projected=false;const auto request=ark::assistantRequest(config,history,ark::AgentSession::tools(),&projected);
-    check(projected&&original.size()>96*1024,"batch recovery crosses the real provider request projection threshold");
+    check(projected&&original.size()>512*1024,"batch recovery crosses the real provider request projection threshold");
     const auto record=contextHistoricalRecord(*request.find("input"),"missing_plane_projection");const auto* retained=record.find("retained_query_failures");
     check(retained&&retained->arr.size()==1&&retained->arr[0].find("tool")->asStr()=="plane_inspect","projected request keeps only the actual rejected query with its tool and index");
     const auto& evidence=*retained->arr[0].find("receipt");
@@ -43,21 +45,23 @@ static void batchFailureProjectionChecks(){
     member(invalidHistory.arr[4],"output")=V::makeStr(mismatched.dump());
     auto invalid=ark::assistantRequest(config,invalidHistory,ark::AgentSession::tools());
     check(!contextHistoricalRecord(*invalid.find("input"),"missing_plane_projection").find("retained_query_failures"),"mismatched batch tool metadata cannot supply retained recovery evidence");
+    // Requests keep recent exchanges verbatim; a large later read moves an exchange into compacted history.
+    int pads=0;auto pad=[&](V& target){contextExchange(target,("recency_padding_"+std::to_string(++pads)).c_str(),"doc_info",json(R"({"detail":"summary"})"),inventory);};
     check(ark::assistant_context::readEvidenceKey("math_eval",json(R"({"op":"norm","a":[1,2,3]})"))==ark::assistant_context::readEvidenceKey("math_eval",json(R"({"a":[1,2,3],"op":"norm"})")),"read evidence identity ignores JSON object ordering without changing array order");
     const V requested=json(R"({"queries":[{"tool":"doc_info","args":{},"fields":["invented_field"]}]})"),executed=json(R"({"queries":[{"tool":"doc_info","args":{"detail":"revision"},"fields":["invented_field"]}]})");
-    V normalized=history;contextExchange(normalized,"host_explicit_detail","query_batch",requested,session.call("query_batch",executed));contextExchange(normalized,"later_normalized_status","doc_info",json(R"({"detail":"design"})"),session.call("doc_info",json(R"({"detail":"design"})")));
+    V normalized=history;contextExchange(normalized,"host_explicit_detail","query_batch",requested,session.call("query_batch",executed));pad(normalized);contextExchange(normalized,"later_normalized_status","doc_info",json(R"({"detail":"design"})"),session.call("doc_info",json(R"({"detail":"design"})")));
     auto normalizedRequest=ark::assistantRequest(config,normalized,ark::AgentSession::tools());const auto normalizedRecord=contextHistoricalRecord(*normalizedRequest.find("input"),"host_explicit_detail");
     const auto* normalizedFailures=normalizedRecord.find("retained_query_failures");check(normalizedFailures&&normalizedFailures->arr.size()==1&&normalizedFailures->arr[0].find("executed_arguments")->dump()==R"({"detail":"revision"})","team host's explicit compact detail preserves the actual query recovery scope");
     contextExchange(normalized,"explicit_normalized_recovery","doc_info",json(R"({"detail":"revision"})"),session.call("doc_info",json(R"({"detail":"revision"})")));
     normalizedRequest=ark::assistantRequest(config,normalized,ark::AgentSession::tools());check(!contextHistoricalRecord(*normalizedRequest.find("input"),"host_explicit_detail").find("retained_query_failures"),"successful executed-detail recovery retires its corresponding original request packet");
     check(!ark::assistant_context::declaredReadArgumentsMatch(json(R"({"id":1})"),json(R"({"id":2,"detail":"properties"})")),"declared compact detail cannot disguise another requested object");
-    V reverse=history;contextExchange(reverse,"explicit_revision_failure","query_batch",executed,session.call("query_batch",executed));contextExchange(reverse,"single_default_read","doc_info",V::makeObj(),session.call("doc_info",V::makeObj()));
+    V reverse=history;contextExchange(reverse,"explicit_revision_failure","query_batch",executed,session.call("query_batch",executed));pad(reverse);contextExchange(reverse,"single_default_read","doc_info",V::makeObj(),session.call("doc_info",V::makeObj()));
     auto reverseRequest=ark::assistantRequest(config,reverse,ark::AgentSession::tools());check(contextHistoricalRecord(*reverseRequest.find("input"),"explicit_revision_failure").find("retained_query_failures"),"standalone default summary does not pretend to be an explicit revision read");
     contextExchange(reverse,"team_default_read","doc_info",V::makeObj(),session.call("doc_info",json(R"({"detail":"revision"})")));
     reverseRequest=ark::assistantRequest(config,reverse,ark::AgentSession::tools());check(!contextHistoricalRecord(*reverseRequest.find("input"),"explicit_revision_failure").find("retained_query_failures"),"observed revision_status resolves a Team-normalized omitted detail without guessing standalone defaults");
     const V guideQueries=json(R"({"queries":[{"tool":"agent_onboard","args":{"topic":"solids","detail":"guide"}}]})");
     const V guideBatch=session.call("query_batch",guideQueries);
-    for(int mismatch=0;mismatch<3;++mismatch){V changed=guideBatch;auto& row=member(member(changed,"structuredContent"),"results").arr[0];if(mismatch==0)row.set("tool",V::makeStr("doc_info"));if(mismatch==1)row.set("query_index",V::makeNum(1));if(mismatch==2)member(row,"args").set("topic",V::makeStr("sketch"));V candidate=history;contextExchange(candidate,"mismatched_guide_metadata","query_batch",guideQueries,changed);contextExchange(candidate,"after_mismatched_guide","doc_info",V::makeObj(),session.call("doc_info",V::makeObj()));auto projectedGuide=ark::assistantRequest(config,candidate,ark::AgentSession::tools());const auto retainedGuide=contextHistoricalRecord(*projectedGuide.find("input"),"mismatched_guide_metadata");check(!retainedGuide.find("retained_static_guides")&&!retainedGuide.find("retained_guide_fragments"),"mismatched guide row metadata cannot supply a retained contract");}
+    for(int mismatch=0;mismatch<3;++mismatch){V changed=guideBatch;auto& row=member(member(changed,"structuredContent"),"results").arr[0];if(mismatch==0)row.set("tool",V::makeStr("doc_info"));if(mismatch==1)row.set("query_index",V::makeNum(1));if(mismatch==2)member(row,"args").set("topic",V::makeStr("sketch"));V candidate=history;contextExchange(candidate,"mismatched_guide_metadata","query_batch",guideQueries,changed);pad(candidate);contextExchange(candidate,"after_mismatched_guide","doc_info",V::makeObj(),session.call("doc_info",V::makeObj()));auto projectedGuide=ark::assistantRequest(config,candidate,ark::AgentSession::tools());const auto retainedGuide=contextHistoricalRecord(*projectedGuide.find("input"),"mismatched_guide_metadata");check(!retainedGuide.find("retained_static_guides")&&!retainedGuide.find("retained_guide_fragments"),"mismatched guide row metadata cannot supply a retained contract");}
 }
 static void staticContractProjectionChecks(){
     batchFailureProjectionChecks();
@@ -106,6 +110,8 @@ static void staticContractProjectionChecks(){
     V meta=V::makeObj();for(const char* key:{"product","version","iteration_code","topic","detail","document_state_included"})meta.set(key,*latestSolid.find("structuredContent")->find(key));
     V metaRow=V::makeObj(),metaRows=V::makeArr(),metaPayload=V::makeObj(),metaBatch=V::makeObj();metaRow.set("isError",V::makeBool(false));metaRow.set("structuredContent",meta);metaRows.arr.push_back(metaRow);metaPayload.set("results",metaRows);metaBatch.set("isError",V::makeBool(false));metaBatch.set("structuredContent",metaPayload);
     contextExchange(history,"metadata_only_fragment","query_batch",json(R"({"queries":[{"tool":"agent_onboard","args":{"topic":"solids","detail":"guide"},"fields":["product","version","iteration_code","topic","detail","document_state_included"]}]})"),metaBatch);
+    // A large later read moves the guide exchanges out of the verbatim recency window.
+    V laterInventory=json(R"({"isError":false,"structuredContent":{"revision":7}})");member(laterInventory,"structuredContent").set("inventory",V::makeStr(std::string(300*1024,'y')));contextExchange(history,"later_large_read","doc_info",json(R"({"detail":"summary"})"),laterInventory);
     contextExchange(history,"after_guides_revision","doc_info",json(R"({"detail":"revision"})"),json(R"({"isError":false,"structuredContent":{"revision":7,"feature_count":0}})"));
     contextExchange(history,"after_guides_measurement","math_eval",json(R"({"expressions":["240/2"]})"),json(R"({"isError":false,"structuredContent":{"value":120}})"));
     const auto original=history.dump();check(original.size()>96*1024,"mixed guide fixture crosses proactive history projection threshold");
@@ -161,7 +167,31 @@ static V largeCompletedHistory(){
     }
     return history;
 }
+// Provider prompt caches bill a request prefix at the cached rate only when it
+// is byte-identical to an earlier request. Grow a tool conversation past the
+// projection threshold and measure the prefix each projected history shares
+// with the previous one; a projection that rewrites older excerpts on every
+// round would defeat the cache for the whole history.
+static void projectionPrefixChecks(){
+    auto common=[](const std::string& a,const std::string& b){std::size_t n=0;const auto limit=std::min(a.size(),b.size());while(n<limit&&a[n]==b[n])++n;return n;};
+    V history=json(R"([{"role":"user","content":"Add the mower suspension; preserve the existing design."}])");
+    std::size_t shared=0,bytes=0,rounds=0;std::string previous;
+    for(int round=0;round<90;++round){
+        V receipt=json(R"({"isError":false,"structuredContent":{"revision":3}})");member(receipt,"structuredContent").set("activity_id",V::makeStr("act-"+std::to_string(round)));member(receipt,"structuredContent").set("feedback_required",V::makeBool(true));
+        member(receipt,"structuredContent").set("inventory",V::makeStr(std::string(1500+(round%7)*900,static_cast<char>('a'+round%26))));
+        contextExchange(history,("call_"+std::to_string(round)).c_str(),round%9==4?"team_context":"doc_info",json(R"({"detail":"revision"})"),receipt);
+        if(history.dump().size()<=96*1024)continue;
+        const auto projected=ark::assistant_context::project(history,ark::chatGptRequestByteLimit).dump();
+        if(!previous.empty()){shared+=common(previous,projected);bytes+=projected.size();++rounds;}
+        previous=projected;
+    }
+    check(rounds>=20,"prefix fixture crosses the projection threshold for many rounds");
+    const double reuse=(double)shared/(double)bytes;
+    std::cout<<"HISTORY_PREFIX_REUSE {\"rounds\":"<<rounds<<",\"projection_prefix_reuse\":"<<reuse<<",\"mean_projected_bytes\":"<<bytes/rounds<<"}\n";
+    check(reuse>.8,"projected history keeps most of each previous request as an identical cacheable prefix");
+}
 static void requestContextChecks(){
+    projectionPrefixChecks();
     staticContractProjectionChecks();
     const auto tools=ark::AgentSession::tools();const V history=largeCompletedHistory();const auto original=history.dump();
     check(original.size()>8*1024*1024,"fixture exceeds both old history cap and ChatGPT HTTP cap");

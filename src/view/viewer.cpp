@@ -94,6 +94,7 @@ typedef ptrdiff_t GLsizeiptr;
 #include "ark/assistant.hpp"
 #include "ark/resource_library.hpp"
 #include "ark/assistant_connectors.hpp"
+#include "ark/assistant_credentials.hpp"
 #include "ark/onboarding.hpp"
 #include "ark/view_camera.hpp"
 #include "ark/agent_team.hpp"
@@ -1540,7 +1541,7 @@ static std::string trimField(std::string value);
 static int g_editorLivePick=0;
 static std::vector<u64> g_editorBodies;
 static u64 g_editorPickSerial=0;
-struct EditorField { std::string name,value;bool toggle=false;std::vector<std::string> choices;bool editableChoice=false;int picks=0; };
+struct EditorField { std::string name,value;bool toggle=false;std::vector<std::string> choices;bool editableChoice=false;int picks=0;bool secret=false; };
 static bool editFields(const char* title,const char* hint,std::vector<EditorField>& fields,bool multiline=false,const char* confirm="Apply",HBITMAP previewBitmap=nullptr,bool readOnly=false){
     EditorAccessibility accessibility;
     if(fields.empty())throw std::runtime_error("A native editor needs at least one field");
@@ -1576,7 +1577,7 @@ static bool editFields(const char* title,const char* hint,std::vector<EditorFiel
     std::vector<HWND> edits;
     for(size_t i=0;i<fields.size();++i){int y=(multiline?px(110):0)+previewHeight+(int)(mateColumns?i%5:i)*px(62),x=mateColumns?(int)(i/5)*px(480):0;
         if(!multiline)control("STATIC",fields[i].name.c_str(),0,x+px(28),y+px(7),px(205),px(28),0,font);
-        HWND e=fields[i].toggle?control("BUTTON","",WS_TABSTOP|BS_AUTOCHECKBOX,x+px(235),y,px(40),px(33),3+(int)i,font):!fields[i].choices.empty()?control("COMBOBOX","",WS_TABSTOP|WS_VSCROLL|(fields[i].editableChoice?CBS_DROPDOWN:CBS_DROPDOWNLIST),x+px(235),y,mateColumns?px(217):width-px(263),px(240),3+(int)i,font):control("EDIT",fields[i].value.c_str(),WS_TABSTOP|WS_BORDER|((multiline&&readOnly)?0:ES_AUTOHSCROLL)|(multiline?ES_MULTILINE|ES_AUTOVSCROLL|WS_VSCROLL|ES_WANTRETURN:0),multiline?px(26):x+px(235),y,multiline?width-px(52):mateColumns?px(217):width-px(263),multiline?height-px(184):px(33),3+(int)i,mono);
+        HWND e=fields[i].toggle?control("BUTTON","",WS_TABSTOP|BS_AUTOCHECKBOX,x+px(235),y,px(40),px(33),3+(int)i,font):!fields[i].choices.empty()?control("COMBOBOX","",WS_TABSTOP|WS_VSCROLL|(fields[i].editableChoice?CBS_DROPDOWN:CBS_DROPDOWNLIST),x+px(235),y,mateColumns?px(217):width-px(263),px(240),3+(int)i,font):control("EDIT",fields[i].value.c_str(),WS_TABSTOP|WS_BORDER|(fields[i].secret?ES_PASSWORD:0)|((multiline&&readOnly)?0:ES_AUTOHSCROLL)|(multiline?ES_MULTILINE|ES_AUTOVSCROLL|WS_VSCROLL|ES_WANTRETURN:0),multiline?px(26):x+px(235),y,multiline?width-px(52):mateColumns?px(217):width-px(263),multiline?height-px(184):px(33),3+(int)i,mono);
         accessibility.name(e,fields[i].name);
         if(!fields[i].choices.empty()){for(const auto& choice:fields[i].choices)SendMessageA(e,CB_ADDSTRING,0,(LPARAM)choice.c_str());auto selected=SendMessageA(e,CB_FINDSTRINGEXACT,-1,(LPARAM)fields[i].value.c_str());if(selected!=CB_ERR)SendMessage(e,CB_SETCURSEL,selected,0);else if(fields[i].editableChoice)SetWindowTextA(e,fields[i].value.c_str());}
         if(!fields[i].choices.empty()&&std::string(title)=="Local models / Ollama"){HDC dc=GetDC(e);auto previousFont=SelectObject(dc,font);int dropped=width-263;for(const auto& choice:fields[i].choices){SIZE measured{};GetTextExtentPoint32A(dc,choice.c_str(),(int)choice.size(),&measured);dropped=std::max(dropped,(int)measured.cx+px(40));}SelectObject(dc,previousFont);ReleaseDC(e,dc);MONITORINFO monitor{sizeof(MONITORINFO)};GetMonitorInfo(MonitorFromWindow(g_dialog,MONITOR_DEFAULTTONEAREST),&monitor);SendMessage(e,CB_SETDROPPEDWIDTH,std::min(dropped,(int)(monitor.rcWork.right-monitor.rcWork.left)-px(32)),0);}
@@ -2419,13 +2420,27 @@ static const char* connectorAuthName(AssistantAuthMode mode){return mode==Assist
 static AssistantAuthMode connectorAuthMode(const std::string& value){if(value=="chatgpt_plan")return AssistantAuthMode::ChatGptPlan;if(value=="cli-account")return AssistantAuthMode::CliAccount;if(value=="api_key")return AssistantAuthMode::ApiKey;throw std::runtime_error("Unknown stored connector account mode");}
 static arkjson::Value connectorSettings(const AssistantConfig& config){using V=arkjson::Value;V v=V::makeObj();v.set("provider",V::makeStr(config.provider));v.set("auth_mode",V::makeStr(connectorAuthName(config.authMode)));v.set("protocol",V::makeStr(assistantProtocolName(config.protocol)));v.set("endpoint",V::makeStr(config.endpoint));v.set("api_key_env",V::makeStr(config.apiKeyEnv));v.set("max_output_tokens",V::makeNum(config.maxOutputTokens));v.set("image_input_supported",V::makeBool(config.imageInputSupported));v.set("timeout_seconds",V::makeNum(config.timeoutSeconds));return v;}
 static void readConnectorSettings(const arkjson::Value& v,AssistantConfig& config){using V=arkjson::Value;if(auto* p=v.find("auth_mode")){if(p->t!=V::Str)throw std::runtime_error("Invalid stored connector account mode");config.authMode=connectorAuthMode(p->str);}if(auto* p=v.find("image_input_supported")){if(p->t!=V::Bool)throw std::runtime_error("Invalid stored image capability");config.imageInputSupported=p->b;}if(auto* p=v.find("timeout_seconds")){if(p->t!=V::Num||p->num<1||p->num>300||std::floor(p->num)!=p->num)throw std::runtime_error("Invalid stored provider timeout");config.timeoutSeconds=(unsigned)p->num;}if(auto* p=v.find("provider");p&&p->t==V::Str)config.provider=p->str;if(auto* p=v.find("protocol");p&&p->t==V::Str)config.protocol=assistantProtocolFromName(p->str);if(auto* p=v.find("endpoint");p&&p->t==V::Str)config.endpoint=p->str;if(auto* p=v.find("api_key_env");p&&p->t==V::Str)config.apiKeyEnv=p->str;if(auto* p=v.find("max_output_tokens")){if(p->t!=V::Num||p->num<1||p->num>131072||std::floor(p->num)!=p->num)throw std::runtime_error("Stored Messages response limit must be an integer from 1 to 131072");config.maxOutputTokens=(unsigned)p->num;}}
-static void saveUiSettings(){
+static arkjson::Value g_settingsBase; // Settings as this window last loaded or wrote them.
+static arkjson::Value uiSettingsJson(){
     using V=arkjson::Value;V j=V::makeObj();j.set("endpoint",V::makeStr(g_assistantConfig.endpoint));j.set("model",V::makeStr(g_assistantConfig.model));j.set("reasoning_effort",V::makeStr(g_assistantConfig.reasoningEffort));j.set("api_key_env",V::makeStr(g_assistantConfig.apiKeyEnv));j.set("assistant_auth_mode",V::makeStr(connectorAuthName(g_assistantConfig.authMode)));j.set("grid",V::makeBool(g_grid));j.set("wireframe",V::makeBool(wireframe));j.set("light_background",V::makeBool(g_lightBackground));j.set("satin",V::makeBool(g_satin));j.set("show_datum_planes",V::makeBool(g_showDatumPlanes));j.set("occlusion_mode",V::makeNum(g_occlusionMode));j.set("occlusion_strength",V::makeNum(g_occlusionStrength));j.set("occlusion_radius",V::makeNum(g_occlusionRadius));j.set("path_tracing",V::makeBool(g_pathTracing));j.set("show_edges",V::makeBool(g_showEdges));j.set("orthographic",V::makeBool(g_cameraOrtho));
     V team=V::makeArr();for(size_t i=0;i<teamCapacity;++i){V role=V::makeObj();role.set("model",V::makeStr(g_teamModels[i]));role.set("reasoning_effort",V::makeStr(g_teamEfforts[i]));team.arr.push_back(std::move(role));}j.set("team_roles",std::move(team));j.set("team_role_count",V::makeNum(g_teamRoleCount));j.set("team_focused_workflow",V::makeBool(g_teamFocusedWorkflow));j.set("team_mode",V::makeBool(g_teamMode));j.set("library_root",V::makeStr(g_libraryRoot));j.set("library_search",V::makeStr(g_libraryText));
     j.set("agent_presence",arkjson::Value::makeBool(g_showAgentPresence));j.set("assistant_dock_open",V::makeBool(g_assistantDockOpen));j.set("display_units",g_displayUnits.json());j.set("connector",connectorSettings(g_assistantConfig));V connectors=V::makeArr();for(size_t i=0;i<teamCapacity;++i)connectors.arr.push_back(g_teamConnectors[i]?connectorSettings(*g_teamConnectors[i]):V{});j.set("team_connectors",connectors);
-    auto path=uiSettingsPath();std::filesystem::create_directories(path.parent_path());std::ofstream out(path);out<<j.dump();if(!out)throw std::runtime_error("Could not save ARK settings");
+    return j;
 }
-static void loadUiSettings(){
+// Several Studio windows (and builds) share studio.json. Write only the keys
+// this window changed since it last loaded or saved them, keeping newer values
+// another window saved; replace the file atomically.
+static void saveUiSettings(){
+    using V=arkjson::Value;const V j=uiSettingsJson();V merged=j;
+    auto path=uiSettingsPath();std::filesystem::create_directories(path.parent_path());
+    {std::ifstream in(path,std::ios::binary);if(in){std::string data((std::istreambuf_iterator<char>(in)),{});V disk;
+        if(arkjson::parse(data,disk)&&disk.t==V::Obj&&g_settingsBase.t==V::Obj){merged=disk;for(const auto& [key,value]:j.obj){const V* base=g_settingsBase.find(key.c_str());if(!base||!disk.find(key.c_str())||base->dump()!=value.dump())merged.set(key,value);}}}}
+    auto pending=path;pending+=L".pending";
+    {std::ofstream out(pending,std::ios::binary|std::ios::trunc);out<<merged.dump();if(!out)throw std::runtime_error("Could not save ARK settings");}
+    std::error_code error;std::filesystem::rename(pending,path,error);if(error){std::filesystem::remove(pending,error);throw std::runtime_error("Could not save ARK settings");}
+    g_settingsBase=j;
+}
+static void loadUiSettingsFile(){
     try{std::ifstream in(uiSettingsPath());if(!in)return;std::string data((std::istreambuf_iterator<char>(in)),{});arkjson::Value j;if(!arkjson::parse(data,j))return;
         if(auto* units=j.find("display_units")){try{g_displayUnits=DisplayUnits::fromJson(*units);}catch(...){g_displayUnits={};}}
         if(auto* v=j.find("endpoint"))g_assistantConfig.endpoint=v->asStr();if(auto* v=j.find("model"))g_assistantConfig.model=v->asStr();if(auto* v=j.find("reasoning_effort");v&&v->t==arkjson::Value::Str)g_assistantConfig.reasoningEffort=v->str;if(auto* v=j.find("api_key_env"))g_assistantConfig.apiKeyEnv=v->asStr();
@@ -2449,6 +2464,7 @@ static void loadUiSettings(){
         if(auto* v=j.find("show_edges");v&&v->t==arkjson::Value::Bool)g_showEdges=v->b;if(auto* v=j.find("orthographic");v&&v->t==arkjson::Value::Bool)g_cameraOrtho=v->b;
     }catch(...){g_status="ARK settings unavailable; defaults loaded";}
 }
+static void loadUiSettings(){loadUiSettingsFile();try{g_settingsBase=uiSettingsJson();}catch(...){g_settingsBase=arkjson::Value{};}}
 static void unitsDialog(){
     std::vector<EditorField> fields{{"Length",g_displayUnits.length,false,{"mm","cm","m","in","ft"}},{"Mass",g_displayUnits.mass,false,{"mg","g","kg","lb"}},{"Volume",g_displayUnits.volume,false,{"mm3","cm3","mL","L","m3"}},{"Significant digits",std::to_string(g_displayUnits.precision),false,{"3","4","5","6","7","8","9"}}};
     if(!editFields("Units / SI defaults: mm, g, L","Display units for measurement and physical properties. Existing geometry and editor fields labelled mm keep their original units.",fields))return;
@@ -2698,9 +2714,20 @@ static bool editConnector(AssistantConfig& config,bool role,bool& inherit){
     std::vector<EditorField> fields{{"Endpoint",config.endpoint},{"Model / choose or type",config.model,false,models,true},{"API key env / blank local",config.apiKeyEnv},{"Protocol",assistantProtocolName(config.protocol),false,{"responses","chat-completions","messages"}}};
     bool hasMessagesLimit=config.protocol==AssistantProtocol::Messages;if(hasMessagesLimit)fields.push_back({"Messages response limit",std::to_string(config.maxOutputTokens)});
     fields.push_back({"Reasoning effort / auto",config.reasoningEffort.empty()?"auto":config.reasoningEffort});
+    // Pasted keys are saved encrypted for this Windows user, bound to the provider
+    // and endpoint host; they never enter settings, documents or logs.
+    const bool keyStored=assistantApiKeyStored(config);const size_t keyField=fields.size();
+    fields.push_back({keyStored?"API key / saved; paste to replace":"API key / paste to save",""});fields.back().secret=true;
+    fields.push_back({"Forget saved API key","0",true});
     if(!profileShot.empty()&&g_dialogSmoke)g_dialogShot=profileShot+".endpoint.png";
-    if(!editFields("Provider endpoint and model","Choose an actual model ID. Remote providers need their own API key; Ollama can run locally. Endpoint/protocol must match the selected service.",fields))return false;
-    config.endpoint=trimField(fields[0].value);config.model=trimField(fields[1].value);config.apiKeyEnv=trimField(fields[2].value);config.protocol=assistantProtocolFromName(fields[3].value);auto effort=trimField(fields[hasMessagesLimit?5:4].value);config.reasoningEffort=effort=="auto"?"":effort;if(hasMessagesLimit){double output=formNumber(fields[4].value);if(output<1||output>131072||std::floor(output)!=output)throw std::runtime_error("Messages response limit must be a positive integer up to 131072");config.maxOutputTokens=(unsigned)output;}validateAssistantConfig(config);return true;
+    struct WipeKey {std::vector<EditorField>& fields;size_t index;~WipeKey(){auto& value=fields[index].value;if(!value.empty())SecureZeroMemory(value.data(),value.size());value.clear();}} wipeKey{fields,keyField};
+    if(!editFields("Provider endpoint and model",assistantApiKeyStoreSupported()?"Choose an actual model ID. Paste the provider API key to save it encrypted for this Windows user (no restart needed); the key env variable stays as fallback. Ollama can run locally. Endpoint/protocol must match the selected service.":"Choose an actual model ID. Remote providers need their own API key environment variable; Ollama can run locally. Endpoint/protocol must match the selected service.",fields))return false;
+    config.endpoint=trimField(fields[0].value);config.model=trimField(fields[1].value);config.apiKeyEnv=trimField(fields[2].value);config.protocol=assistantProtocolFromName(fields[3].value);auto effort=trimField(fields[hasMessagesLimit?5:4].value);config.reasoningEffort=effort=="auto"?"":effort;if(hasMessagesLimit){double output=formNumber(fields[4].value);if(output<1||output>131072||std::floor(output)!=output)throw std::runtime_error("Messages response limit must be a positive integer up to 131072");config.maxOutputTokens=(unsigned)output;}validateAssistantConfig(config);
+    auto pasted=trimField(fields[keyField].value);
+    struct WipeText {std::string& value;~WipeText(){if(!value.empty())SecureZeroMemory(value.data(),value.size());}} wipePasted{pasted};
+    if(fields[keyField+1].value=="1")removeAssistantApiKey(config);
+    if(!pasted.empty())storeAssistantApiKey(config,pasted);
+    return true;
 }
 static void connectorDialog(bool local=false){
     if(g_teamStarted&&g_agentTeam.snapshot().running){g_status="Finish or cancel the active team before changing connectors";return;}
@@ -3003,6 +3030,16 @@ static void askAgentAboutBody(int body){
 #include "image_attachment.inl"
 #include "steer_024b.inl"
 #include "studio_feedback_fixture.inl"
+// 042D A/B options for agent requests, read when a run starts and off unless
+// set: ARK_RESULT_HANDLE_BYTES, ARK_PROJECTION_STEP_BYTES, ARK_PROMPT_CACHE_KEY=role,
+// ARK_DEFER_SPECIALIST_TOOLS=0 and ARK_ANTHROPIC_TOOL_ADDITIONS=1 (see AssistantConfig).
+static void applyAgentRequestOptions(AssistantConfig& config){
+    auto bytes=[](const char* name,std::size_t lowest,std::size_t highest)->std::size_t{const char* value=std::getenv(name);if(!value||!*value)return 0;char* end=nullptr;const auto parsed=std::strtoull(value,&end,10);if(!end||*end||parsed==0)return 0;return std::clamp<std::size_t>((std::size_t)parsed,lowest,highest);};
+    auto equals=[](const char* name,const char* expected){const char* value=std::getenv(name);return value&&std::string(value)==expected;};
+    config.resultHandleBytes=bytes("ARK_RESULT_HANDLE_BYTES",4096,1024*1024);config.projectionStepBytes=bytes("ARK_PROJECTION_STEP_BYTES",16*1024,4*1024*1024);
+    config.stablePromptCacheKey=equals("ARK_PROMPT_CACHE_KEY","role");if(equals("ARK_DEFER_SPECIALIST_TOOLS","0"))config.deferSpecialistTools=false;
+    config.anthropicToolAdditions=equals("ARK_ANTHROPIC_TOOL_ADDITIONS","1");
+}
 static void sendTeam(const std::string& explicitPrompt={},const std::array<AssistantTransport,8>& transports={}){
     if(g_busy&&!g_teamStarted){g_status="Wait for the current document operation before starting a new team.";return;}
     if(g_chatBusy){g_status="Wait for the single Assistant turn to finish.";return;}std::string prompt=assistantPrompt(explicitPrompt);if(prompt.find_first_not_of(" \r\n\t")==std::string::npos&&(!explicitPrompt.empty()||!g_pendingAssistantImage))return;
@@ -3012,7 +3049,7 @@ static void sendTeam(const std::string& explicitPrompt={},const std::array<Assis
         if(g_teamStarted&&g_teamSnapshot.running){g_status="Team is still stopping.";return;}
         AgentTeamConfig team;team.maxWorkers=g_teamRoleCount;team.focusedWorkflow=g_teamFocusedWorkflow;team.orchestratedStart=g_teamFocusedWorkflow||std::none_of(transports.begin(),transports.end(),[](const auto& t){return (bool)t;});
         team.maxCommandsPerStep=128;team.maxFeaturesPerStep=32;team.maxPlacementsPerStep=64;
-        team.requireLeadAuthoringCheckpoint=!team.focusedWorkflow&&g_doc.features.empty()&&g_doc.sketches.empty();
+        team.requireLeadAuthoringCheckpoint=!team.focusedWorkflow&&g_doc.features.empty()&&g_doc.sketches.empty();team.requireReviewerCheckpoint=g_teamRoleCount>2;
         static const char* instructions[]={
             "Own design concept and orchestration, actual part sketches/features/materials/parameters and assembly. Start with the user's intent and a distinctive coherent concept; preserve requested curves, spatial form and proportions. Inspect the current document/revision before edits. Apply coherent atomic batches of related sketches, features and placements using one observed expected_revision, then inspect actual validation results. Delegate concrete tasks and requested checks with team_send kind:assignment; store revision-bound edit proposals with team_propose. team_context reads progress and team_proposal reads an existing proposal. Honor user-specified dimensions, materials and process constraints from the start; undeclared routes remain unspecified during concept work. Detailed fabrication checks belong to a requested production-readiness checkpoint or process claim, not every concept step or rendering/export action. Preserve the existing drawing; load/new/import/save/export operations require task authorization. Report actual tool results and remaining decisions.",
             "Own part design and actual sketches, features, materials and spatial form. Develop the requested concept before detailing fabrication; use curves when they express the design, and do not reduce a concept to boxes just to simplify a workflow. Inspect the current document/revision before edits. Write coherent atomic batches of related sketch entities and part features using one observed expected_revision; preserve the requested geometry. Honor explicit dimensions, materials and process constraints from the start; keep undeclared routes unspecified. The engineer owns assembly placements. Do not replace, load, save or export unrelated drawings. Send assembly decisions to engineer. Never claim an unexecuted proposal is implemented.",
@@ -3021,7 +3058,7 @@ static void sendTeam(const std::string& explicitPrompt={},const std::array<Assis
                 if(!transports[i]&&config.authMode==AssistantAuthMode::ApiKey&&!assistantKeyAvailable(config))throw std::runtime_error("The configured credential environment variable is unavailable.");
                 if(!transports[i]&&config.authMode==AssistantAuthMode::ChatGptPlan){if(!g_authStatus.connected||!g_authStatus.planAuthorized)throw std::runtime_error("Connect and authorize ChatGPT from Account first.");if(g_authModels.empty())throw std::runtime_error("Load the account model catalog from Account first.");if(std::none_of(g_authModels.begin(),g_authModels.end(),[&](const auto& model){return model.slug==config.model;}))throw std::runtime_error("The selected model is unavailable in this account's catalog.");}
             }catch(const std::exception& error){throw std::runtime_error(std::string(g_teamRoleLabels[i])+": "+error.what());}
-            AgentTeamRole role;role.id=g_teamRoleIds[i];role.label=g_teamRoleLabels[i];role.instructions=instructions[i==2?2:i==0?0:1];if(!transports[i])config.onboardingPack=(i==2?agentOnboardingPack({"overview","physics"}):agentAuthoringOnboardingPack());config.memoryPrefetch=!transports[i];role.assistant=config;role.transport=feedbackFixtureTransport(transports[i]);role.canWrite=i!=2;role.discipline=i==0?AgentTeamDiscipline::Orchestrator:i==2?AgentTeamDiscipline::PhysicsReviewer:AgentTeamDiscipline::PartDesigner;team.roles.push_back(std::move(role));}
+            AgentTeamRole role;role.id=g_teamRoleIds[i];role.label=g_teamRoleLabels[i];role.instructions=instructions[i==2?2:i==0?0:1];if(!transports[i])config.onboardingPack=(i==2?agentOnboardingPack({"overview","physics"}):i==0?agentOnboardingPack({"overview","sketch","solids","assembly"}):agentAuthoringOnboardingPack());config.memoryPrefetch=!transports[i];config.deferSpecialistTools=!transports[i];applyAgentRequestOptions(config);role.assistant=config;role.transport=feedbackFixtureTransport(transports[i]);role.canWrite=i!=2;role.discipline=i==0?AgentTeamDiscipline::Orchestrator:i==2?AgentTeamDiscipline::PhysicsReviewer:AgentTeamDiscipline::PartDesigner;team.roles.push_back(std::move(role));}
         g_teamCancel=std::make_shared<std::atomic_bool>(false);auto cancel=g_teamCancel;auto epoch=g_documentEpoch;auto runSerial=++g_teamRunSerial;g_teamEpoch=epoch;g_teamEventSequence=0;g_teamReceipts={};g_teamActivity={};g_teamLiveUsage={};g_draftViews.clear();g_liveCompletedSteps=0;g_liveStepLabel.clear();captureDraftContext();g_teamGoal=visiblePrompt;for(auto& id:g_teamReceiptIds)id=newUsageReceiptId();if(!transports[0]&&!transports[1]&&!transports[2]&&std::any_of(team.roles.begin(),team.roles.end(),[](const auto& role){return role.assistant.provider!="ollama"&&role.assistant.authMode!=AssistantAuthMode::CliAccount;}))refreshPricing();
         g_assistantReceiptId.clear();g_currentUsageReceipt.reset();g_pendingUsageReceipt.reset();
         auto teamExecutor=[cancel,epoch](const std::string& name,const arkjson::Value& args){
@@ -3044,7 +3081,7 @@ static void sendAssistant(const std::string& explicitPrompt="",const AssistantTr
     if(g_assistantWorker.joinable())g_assistantWorker.join();
     V input=g_conversation;if(input.t!=V::Arr)input=V::makeArr();input.arr.push_back(user);
     if(queuedMessage||(explicitPrompt.empty()&&g_pendingAssistantImage)){auto preflight=g_assistantConfig;if(!transport)preflight.onboardingPack=agentAuthoringOnboardingPack();assistantRequest(preflight,input,AgentSession::tools());}
-    if(!queuedMessage)g_pendingObjectTarget.reset();if(!queuedMessage)g_chatLog.push_back({"You",visiblePrompt});g_chatScroll=0;g_chatBusy=true;g_assistantResponseFinished=g_assistantResponseError=false;g_assistantStatus="Working...";g_assistantUsageRun={};g_assistantPerformanceRun={};g_assistantUsageRunCounted=false;g_assistantReceiptId=newUsageReceiptId();g_assistantReceiptModel=g_assistantConfig.model;g_currentUsageReceipt.reset();g_pendingUsageReceipt.reset();g_assistantCancel=std::make_shared<std::atomic_bool>(false);auto cancel=g_assistantCancel;auto config=g_assistantConfig;if(!transport)config.onboardingPack=agentAuthoringOnboardingPack();config.memoryPrefetch=!transport;auto schema=AgentSession::tools();if(g_chatInput&&!queuedMessage)SetWindowTextW(g_chatInput,L"");
+    if(!queuedMessage)g_pendingObjectTarget.reset();if(!queuedMessage)g_chatLog.push_back({"You",visiblePrompt});g_chatScroll=0;g_chatBusy=true;g_assistantResponseFinished=g_assistantResponseError=false;g_assistantStatus="Working...";g_assistantUsageRun={};g_assistantPerformanceRun={};g_assistantUsageRunCounted=false;g_assistantReceiptId=newUsageReceiptId();g_assistantReceiptModel=g_assistantConfig.model;g_currentUsageReceipt.reset();g_pendingUsageReceipt.reset();g_assistantCancel=std::make_shared<std::atomic_bool>(false);auto cancel=g_assistantCancel;auto config=g_assistantConfig;if(!transport)config.onboardingPack=agentAuthoringOnboardingPack();config.memoryPrefetch=!transport;config.deferSpecialistTools=!transport;applyAgentRequestOptions(config);auto schema=compactAuthoringPreviewTools(AgentSession::tools());if(g_chatInput&&!queuedMessage)SetWindowTextW(g_chatInput,L"");
     auto epoch=g_documentEpoch;auto revision=std::make_shared<std::atomic<u64>>(g_session.revision);
     auto steering=std::make_shared<AssistantSteering>(config,schema,input);g_assistantSteering=steering;g_assistantSteeringEpoch=epoch;g_assistantSteeringTransport=transport;
     g_assistantWorker=std::thread([config,input,schema,cancel,transport,epoch,revision,steering]{
@@ -3059,6 +3096,7 @@ static void sendAssistant(const std::string& explicitPrompt="",const AssistantTr
     });
     if(explicitPrompt.empty()&&!queuedMessage)clearPendingAssistantImage();
 }
+static std::string liveCallProgress();
 static void startLiveBridge(){
     if(!g_liveBridge.start([](const std::string& tool,const arkjson::Value& args,LiveSessionBridge::Completion complete,std::stop_token stop){
         // Snapshot owns its lock and contains no conversation by default. Keep
@@ -3066,7 +3104,7 @@ static void startLiveBridge(){
         // reading mutable CAD state or dispatching another agent/provider call.
         if(isStudioDiagnosticsTool(tool)){if(stop.stop_requested()){complete(cancelledTool());return;}complete(studioTeamDiagnostics(g_agentTeam.snapshot(false,std::numeric_limits<u64>::max(),true),args));return;}
         auto request=std::make_unique<UiToolRequest>();request->tool=tool;request->args=args;request->complete=std::move(complete);request->stop=stop;postTool(std::move(request));
-    }))g_status="Live MCP unavailable: "+g_liveBridge.lastError();
+    },{},liveCallProgress))g_status="Live MCP unavailable: "+g_liveBridge.lastError();
 }
 static void stopIntegrations(){
     g_closing=true;*g_pricingCancel=true;*g_teamCancel=true;g_agentTeam.cancel();*g_assistantCancel=true;*g_authCancel=true;g_liveBridge.stop();
@@ -3096,7 +3134,7 @@ static std::string externalConfigDisplay(const std::string& raw,const std::strin
 static void liveConnectionDialog(){
     if(g_liveBridge.endpoint().empty()){std::string text="Live MCP is not running.";editText("Live document connection",text,true);return;}
     auto profileShot=g_dialogShot;
-    std::vector<EditorField> fields{{"External client","codex",false,{"codex","grok-build","claude-code","claude-desktop","opencode"}}};if(!editFields("Connect an external agent","Export the connection to this open document. The external client keeps its own model account and MCP settings.",fields))return;
+    std::vector<EditorField> fields{{"External client","codex",false,{"codex","grok-build","claude-code-cli","claude-code","claude-desktop","opencode"}}};if(!editFields("Connect an external agent","Export the connection to this open document. The external client keeps its own model account and MCP settings.",fields))return;
     wchar_t executable[32768]{};GetModuleFileNameW(nullptr,executable,32768);auto file=std::filesystem::path(executable).parent_path()/"ark-mcp.exe";auto utf8=file.u8string();std::string text=assistantExternalMcpConfig(fields[0].value,std::string(utf8.begin(),utf8.end()),g_liveBridge.endpoint(),g_assistantConfig);
     // Native multiline EDIT controls require CRLF. Keep TOML line boundaries
     // intact in both the visible text and what the user copies into the client.
@@ -5566,6 +5604,12 @@ static arkjson::Value captureViewportSnapshot(const arkjson::Value& args){
 }
 struct BusyFeatureProgress {u64 id=0;std::string name;size_t index=0,total=0;bool completed=false,reused=false;};
 static std::mutex g_busyProgressMutex;static BusyFeatureProgress g_busyFeatureProgress;
+// Live MCP progress text: the feature the busy document executor is evaluating.
+// Empty while queued or between features; the bridge then sends elapsed time only.
+static std::string liveCallProgress(){
+    BusyFeatureProgress progress;{std::lock_guard lock(g_busyProgressMutex);progress=g_busyFeatureProgress;}if(!progress.total)return {};
+    return "Feature "+std::to_string(progress.index+1)+"/"+std::to_string(progress.total)+" #"+std::to_string(progress.id)+(progress.name.empty()?std::string():" "+progress.name)+" "+(progress.completed?"ready":progress.reused?"cached":"evaluating");
+}
 static void drawBusyFrame(HDC hdc){
     // The worker exclusively owns g_session. This path reads only a captured GL
     // frame and UI progress state; drawFrame and document access are forbidden.
@@ -6465,6 +6509,17 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
             g_assistantDockOpen=true;loadUiSettings();if(g_assistantDockOpen)return failure(514,"The closed chat preference was not restored");
             uiAction(400);g_assistantDockOpen=false;loadUiSettings();if(!g_assistantDockOpen)return failure(515,"The open chat preference was not restored");
             std::filesystem::remove(g_settingsOverride);g_settingsOverride=savedPath;g_headless=savedHeadless;g_assistantDockOpen=savedDock;layout();
+        }
+        {   // Another window's newer API connector survives this window's unrelated save.
+            const auto savedPath=g_settingsOverride;const auto savedDock=g_assistantDockOpen;const auto savedConfig=g_assistantConfig;
+            g_settingsOverride=std::filesystem::temp_directory_path()/("ark-settings-merge-"+std::to_string(GetCurrentProcessId())+".json");
+            std::filesystem::remove(g_settingsOverride);loadUiSettings();
+            V other=uiSettingsJson();AssistantConfig deep=assistantProviderPreset("deepseek");deep.model="deepseek-flash";other.set("connector",connectorSettings(deep));other.set("endpoint",V::makeStr(deep.endpoint));other.set("model",V::makeStr(deep.model));other.set("api_key_env",V::makeStr(deep.apiKeyEnv));other.set("assistant_auth_mode",V::makeStr("api_key"));
+            {std::ofstream(g_settingsOverride)<<other.dump();}
+            g_assistantDockOpen=!g_assistantDockOpen;const bool dock=g_assistantDockOpen;saveUiSettings();g_assistantConfig=savedConfig;g_assistantDockOpen=!dock;loadUiSettings();
+            const bool merged=g_assistantConfig.provider=="deepseek"&&g_assistantConfig.model=="deepseek-flash"&&g_assistantConfig.endpoint==deep.endpoint&&g_assistantDockOpen==dock;
+            std::filesystem::remove(g_settingsOverride);g_settingsOverride=savedPath;g_assistantDockOpen=savedDock;g_assistantConfig=savedConfig;layout();
+            if(!merged)return failure(516,"An unrelated settings save overwrote another window's API connector");
         }
         {
             auto config=assistantProviderPreset("claude");config.model="foreign-offline-model";config.reasoningEffort="high";bool inherit=false;
