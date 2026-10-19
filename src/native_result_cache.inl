@@ -45,10 +45,20 @@ struct NativeResultCache {
         std::set<std::string> fields;for(const auto& field:receipt->obj)if(!fields.insert(field.first).second)return false;
         request=resolved->str;producer=original->str;return true;
     }
+#ifdef _WIN32
+    // Entry and temporary names add up to 96 characters. Without an extended
+    // path, writes under a deep directory failed silently at MAX_PATH.
+    static fs::path extendedPath(const fs::path& path){
+        if(path.empty())return path;
+        auto absolute=fs::absolute(path).lexically_normal();absolute.make_preferred();const auto& text=absolute.native();
+        if(text.rfind(L"\\\\",0)==0)return absolute;
+        return fs::path(L"\\\\?\\"+text);
+    }
+#endif
     static fs::path cacheDirectory(){
 #ifdef _WIN32
-        if(const wchar_t* custom=_wgetenv(L"ARK_NATIVE_CACHE_DIRECTORY");custom&&*custom)return custom;
-        if(const wchar_t* local=_wgetenv(L"LOCALAPPDATA");local&&*local)return fs::path(local)/"ARK"/"cache"/"native-v1";
+        if(const wchar_t* custom=_wgetenv(L"ARK_NATIVE_CACHE_DIRECTORY");custom&&*custom)return extendedPath(custom);
+        if(const wchar_t* local=_wgetenv(L"LOCALAPPDATA");local&&*local)return extendedPath(fs::path(local)/"ARK"/"cache"/"native-v1");
 #endif
         return {};
     }
@@ -127,8 +137,7 @@ struct NativeResultCache {
             producerIdentity=producer(worker);
             if(!pure(request))return;
 #ifdef _WIN32
-            if(const wchar_t* custom=_wgetenv(L"ARK_NATIVE_CACHE_DIRECTORY");custom&&*custom)directory=custom;
-            else if(const wchar_t* local=_wgetenv(L"LOCALAPPDATA");local&&*local)directory=fs::path(local)/"ARK"/"cache"/"native-v1";
+            directory=cacheDirectory();
 #else
             if(const char* custom=std::getenv("ARK_NATIVE_CACHE_DIRECTORY");custom&&*custom)directory=fs::u8path(custom);
             else if(const char* cache=std::getenv("XDG_CACHE_HOME");cache&&*cache)directory=fs::u8path(cache)/"ark"/"native-v1";
@@ -153,9 +162,21 @@ struct NativeResultCache {
             value=std::move(result);return true;
         }catch(...){return false;}
     }
+    // Total bytes kept on disk. One metre-scale freeform document can need
+    // hundreds of MiB, so the default retains several of them; 64 MiB..64 GiB.
+    static uintmax_t capacityBytes(){
+        uintmax_t megabytes=2048;
+        if(const char* value=std::getenv("ARK_NATIVE_CACHE_MAX_MB")){char* end=nullptr;const long long requested=std::strtoll(value,&end,10);if(end!=value&&!*end&&requested>=64&&requested<=65536)megabytes=(uintmax_t)requested;}
+        return megabytes*1024u*1024u;
+    }
     bool lookup(V& value)const{
         if(entry.empty())return false;
-        try{return fs::is_regular_file(entry)&&fs::file_size(entry)<=maxEntry&&decode(key,read(entry),value);}catch(...){return false;}
+        try{
+            if(!fs::is_regular_file(entry)||fs::file_size(entry)>maxEntry||!decode(key,read(entry),value))return false;
+            // Eviction removes the least recently used entries, not merely the
+            // oldest written: a hit refreshes the entry's time.
+            std::error_code ignored;fs::last_write_time(entry,fs::file_time_type::clock::now(),ignored);return true;
+        }catch(...){return false;}
     }
     V identified(V result)const{
         if(!entry.empty()){
@@ -185,8 +206,8 @@ struct NativeResultCache {
                 const auto name=file.path().filename().string();if(name.size()!=74||name.substr(64)!=".arknative"||name.substr(0,64).find_first_not_of("0123456789abcdef")!=std::string::npos)continue;
                 auto size=file.file_size();entries.push_back({file.path(),file.last_write_time(),size});total+=size;
             }
-            std::sort(entries.begin(),entries.end(),[](const Item& a,const Item& b){return a.time<b.time;});size_t count=entries.size();
-            for(const auto& item:entries){if(total<=256u*1024u*1024u&&count<=1024)break;std::error_code error;if(fs::remove(item.path,error)){total-=item.bytes;--count;}}
+            std::sort(entries.begin(),entries.end(),[](const Item& a,const Item& b){return a.time<b.time;});size_t count=entries.size();const auto capacity=capacityBytes();
+            for(const auto& item:entries){if(item.path==entry)continue;if(total<=capacity&&count<=8192)break;std::error_code error;if(fs::remove(item.path,error)){total-=item.bytes;--count;}}
         }catch(...){if(!temporary.empty()){std::error_code error;fs::remove(temporary,error);}}
     }
 };

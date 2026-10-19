@@ -21,7 +21,7 @@ The source STEP and project-specific derived artifacts stay local; they are not 
 7. Assign each opening contour to its rigid span. A face shared by several spans is resolved using full common edge length of the contour, never its centroid. Retain source/flat centers, oriented normals, radii where applicable, perimeters and source face IDs.
 8. Refold with independently composed finite-radius transforms and reconstructed annular sectors. Check material conservation and Boolean symmetric difference against the complete input, including extra solids. Write STEP, read it back, and check the result again.
 
-The B-rep checks use [OCCT validity analysis](https://occt3d.com/dev/doc/refman/html/class_b_rep_check___analyzer.html). The viewport mesh is only a tessellation, with 0.025 mm display deflection and 0.12 rad angular tolerance; it is not the authority for the exported geometry.
+The B-rep checks use [OCCT validity analysis](https://occt3d.com/dev/doc/refman/html/class_b_rep_check___analyzer.html). The viewport mesh is only a tessellation, with 0.025 mm display deflection and 0.12 rad angular tolerance for parts up to a 250 mm diagonal (larger parts use 1e-4 of the diagonal, at most 0.5 mm, and 0.25 rad); it is not the authority for the exported geometry.
 
 ## Openings and projection evidence
 

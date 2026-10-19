@@ -63,6 +63,7 @@ int runWorker(const fs::path& requestPath,const fs::path& resultPath){
         else if(op=="export_notch")result=exportNotchNative(field("plan"),text("path"));
         else if(op=="restore_native_result"){result=restoreNativeResult(field("resolved_request"),field("saved_result"));completedByProducer=true;}
         else if(op=="model"){result=modelSurfaceNative(field("request"));completedByProducer=true;}
+        else if(op=="model_boolean_sequence"){result=booleanSequenceNative(field("request"));completedByProducer=true;}
         else if(op=="model_sheet")result=modelSheetNative(field("request"));
         else if(op=="model_solid"){const auto& model=field("request");result=model.find("op")&&model.find("op")->asStr()=="imported_cad"?modelImportedCadNative(model):modelSolidNative(model);completedByProducer=modelOperation!="tube_end_fit";}
         else if(op=="inspect_imported_cad")result=inspectImportedCadNative(request);

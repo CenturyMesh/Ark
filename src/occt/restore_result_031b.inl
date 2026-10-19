@@ -122,7 +122,7 @@ V restore(const V& resolved,const V& saved){
     V diagnostics=V::makeObj();if(const auto* prior=savedReport.find("saved_previous_evaluation")){objectUnique(*prior);if(require(*prior,"provenance",V::Str).str!="saved_previous_evaluation"||require(*prior,"derivation_replayed",V::Bool).b)reject("invalid previous-evaluation provenance");diagnostics=require(*prior,"diagnostics",V::Obj);}
     for(const auto& field:savedReport.obj)if(!genericReportField(field.first))diagnostics.set(field.first,field.second);
     V provenance=V::makeObj();provenance.set("provenance",V::makeStr("saved_previous_evaluation"));provenance.set("derivation_replayed",V::makeBool(false));provenance.set("diagnostics",std::move(diagnostics));report.set("saved_previous_evaluation",std::move(provenance));report.set("derivation_replayed",V::makeBool(false));report.set("snapshot_validation",V::makeStr("current_exact_brep_measurements_and_references"));
-    V validatedTopology=topology(savedTopology,shape,identity),result=V::makeObj();result.set("brep_base64",V::makeStr(encoded));result.set("report",std::move(report));result.set("mesh",meshData(shape));result.set("topology",validatedTopology);
+    V validatedTopology=topology(savedTopology,shape,identity),result=V::makeObj();result.set("brep_base64",V::makeStr(encoded));result.set("report",std::move(report));result.set("mesh",displayMeshData(shape));result.set("topology",validatedTopology);
     // Same local shape already passed readBrep/BRepCheck, exact measurement,
     // census/sign checks and every saved binding guard. Reuse it privately;
     // arbitrary serialized callers still use the validating public completion.

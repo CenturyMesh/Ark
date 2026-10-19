@@ -83,6 +83,13 @@ struct Temporary{
 };
 #ifdef _WIN32
 struct Handle{HANDLE value=nullptr;~Handle(){if(value&&value!=INVALID_HANDLE_VALUE)CloseHandle(value);}};
+// Windows can run windowless background processes under EcoQoS. Measured on
+// a hybrid CPU, that made native evaluation about 1.8x slower. Opting out
+// changes only CPU scheduling and power use, never results. Best effort.
+void optOutOfPowerThrottling(HANDLE process){
+    PROCESS_POWER_THROTTLING_STATE state{};state.Version=PROCESS_POWER_THROTTLING_CURRENT_VERSION;state.ControlMask=PROCESS_POWER_THROTTLING_EXECUTION_SPEED;state.StateMask=0;
+    SetProcessInformation(process,ProcessPowerThrottling,&state,sizeof state);
+}
 std::vector<wchar_t> workerEnvironment(){
     if(nativeThreadOverride<=0)return {};
     std::vector<std::wstring> entries;wchar_t* block=GetEnvironmentStringsW();if(!block)throw std::runtime_error("Cannot read worker environment");
@@ -101,7 +108,7 @@ unsigned execute(const fs::path& worker,const Temporary& temp){
     STARTUPINFOW startup{};startup.cb=sizeof startup;startup.dwFlags=STARTF_USESTDHANDLES;startup.hStdInput=input.value;startup.hStdOutput=output.value;startup.hStdError=output.value;
     std::wstring command=quote(worker.wstring())+L" "+quote((temp.directory/"request.json").wstring())+L" "+quote((temp.directory/"result.json").wstring());PROCESS_INFORMATION info{};
     auto environment=workerEnvironment();if(!CreateProcessW(worker.c_str(),command.data(),nullptr,nullptr,TRUE,CREATE_NO_WINDOW|CREATE_SUSPENDED|CREATE_UNICODE_ENVIRONMENT,environment.empty()?nullptr:environment.data(),worker.parent_path().c_str(),&startup,&info))throw std::runtime_error("Cannot launch native OCCT worker");
-    Handle process{info.hProcess},thread{info.hThread};if(!AssignProcessToJobObject(job.value,process.value)){TerminateProcess(process.value,1);throw std::runtime_error("Cannot assign native worker watchdog");}ResumeThread(thread.value);
+    Handle process{info.hProcess},thread{info.hThread};if(!AssignProcessToJobObject(job.value,process.value)){TerminateProcess(process.value,1);throw std::runtime_error("Cannot assign native worker watchdog");}optOutOfPowerThrottling(process.value);ResumeThread(thread.value);
     if(WaitForSingleObject(process.value,30000)!=WAIT_OBJECT_0){TerminateJobObject(job.value,1);WaitForSingleObject(process.value,5000);throw std::runtime_error("Native OCCT operation exceeded 30-second worker limit");}
     DWORD code=1;GetExitCodeProcess(process.value,&code);return code;
 }
@@ -132,7 +139,7 @@ public:
         // The process keeps the host pool capacity. Each serialized request sets
         // its bounded allowance without replacing the isolated process.
         std::vector<wchar_t> environment;if(!CreateProcessW(worker.c_str(),command.data(),nullptr,nullptr,TRUE,CREATE_NO_WINDOW|CREATE_SUSPENDED|CREATE_UNICODE_ENVIRONMENT,environment.empty()?nullptr:environment.data(),worker.parent_path().c_str(),&startup,&info))throw std::runtime_error("Cannot launch resident worker");
-        process.value=info.hProcess;Handle thread{info.hThread};if(!AssignProcessToJobObject(job.value,process.value)){TerminateProcess(process.value,1);throw std::runtime_error("Cannot assign resident worker watchdog");}ResumeThread(thread.value);
+        process.value=info.hProcess;Handle thread{info.hThread};if(!AssignProcessToJobObject(job.value,process.value)){TerminateProcess(process.value,1);throw std::runtime_error("Cannot assign resident worker watchdog");}optOutOfPowerThrottling(process.value);ResumeThread(thread.value);
     }
     ~ResidentWorker(){if(job.value&&process.value){TerminateJobObject(job.value,0);WaitForSingleObject(process.value,5000);}}
     V call(const V& request){
@@ -224,7 +231,7 @@ V stageNativeDocumentResults(Document& document,const DocumentDerivedPayloads& r
     status.set("portable_request_entries",V::makeNum(requests.size()));status.set("legacy_exact_key_entries",V::makeNum(legacy));status.set("ambiguous_request_entries",V::makeNum(ambiguous.size()));
     auto context=std::make_shared<NativeDocumentResultContext>();context->entries=std::move(staged);context->requests=std::move(requests);document.pendingNativeGeometry=std::move(context);return status;
 }
-static V cachedNativeRequest(const V& request,const std::function<V()>* evaluate=nullptr){
+static V cachedNativeRequest(const V& request){
     ++nativeRequests;++totalNativeRequests;
     V bounded=request;bounded.set("native_threads",V::makeNum(effectiveNativeBudget()));
     const auto worker=workerPath();NativeResultCache cache(bounded,worker);V hit;
@@ -240,12 +247,17 @@ static V cachedNativeRequest(const V& request,const std::function<V()>* evaluate
         try{if(mismatch)throw std::runtime_error("Saved native request identity mismatch");auto result=executeNativeRequest(restore,worker,cache.producerIdentity);if(hasIdentity)result.set("native_snapshot_source_producer_sha256",V::makeStr(savedProducer));++totalNativeDocumentRestores;result=cache.identified(std::move(result));cache.store(result);return result;}
         catch(const std::exception& error){++totalNativeDocumentRejections;std::lock_guard<std::mutex> lock(nativeDocumentRejectionMutex);nativeDocumentLastRejection=std::string(error.what()).substr(0,1200);const auto reason=nativeDocumentLastRejection.substr(0,240);if(nativeDocumentRejectionReasons.count(reason)||nativeDocumentRejectionReasons.size()<16)++nativeDocumentRejectionReasons[reason];else ++nativeDocumentRejectionReasons["other"];/* Reconstruct this request normally. */}
     }
-    auto result=cache.identified(evaluate?(*evaluate)():executeNativeRequest(bounded,worker,cache.producerIdentity));cache.store(result);return result;
+    auto result=cache.identified(executeNativeRequest(bounded,worker,cache.producerIdentity));cache.store(result);return result;
 }
 V nativeWorkerRequest(const V& request){return cachedNativeRequest(request);}
-V nativeBooleanSequenceRequest(const V& request,const std::function<V()>& evaluate){
-    if(!evaluate||!NativeResultCache::booleanSequence(request))throw std::runtime_error("Invalid resolved native boolean sequence");
-    return cachedNativeRequest(request,&evaluate);
+V nativeBooleanSequenceRequest(const V& request){
+    if(!NativeResultCache::booleanSequence(request))throw std::runtime_error("Invalid resolved native boolean sequence");
+    return cachedNativeRequest(request);
+}
+void disableProcessPowerThrottling(){
+#ifdef _WIN32
+    optOutOfPowerThrottling(GetCurrentProcess());
+#endif
 }
 int setNativeThreadBudget(int threads){if(threads<0||threads>64)throw std::runtime_error("Native thread budget must be 0..64");int old=nativeThreadOverride;nativeThreadOverride=threads;return old;}
 V nativeModelRequest(const V& model){V request=V::makeObj();request.set("operation",V::makeStr("model"));request.set("request",model);return nativeWorkerRequest(request);}

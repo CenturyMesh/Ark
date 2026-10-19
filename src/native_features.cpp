@@ -979,21 +979,6 @@ bool spansExactBoolean(const Feature& feature) {
 
 struct ExactPiece { std::string brep; V topology; Mat4 frame; bool framed=false; std::string nameSpace; };
 
-V placePiece(const ExactPiece& piece) {
-    if (!piece.framed) {
-        V held = V::makeObj();
-        held.set("brep_base64", V::makeStr(piece.brep));
-        if (piece.topology.t == V::Obj) held.set("topology", piece.topology);
-        return held;
-    }
-    V model = V::makeObj();
-    model.set("op", V::makeStr("transform"));
-    model.set("frame", frameValue(piece.frame));
-    model.set("input_brep", V::makeStr(piece.brep));
-    if (piece.topology.t == V::Obj) model.set("input_topology", piece.topology);
-    return solidWorker(std::move(model));
-}
-
 u64 instanceRef(const Document& document, const V& value) {
     if (value.t == V::Num) {
         if (!std::isfinite(value.num) || value.num < 1 || value.num > 9007199254740990. || value.num != std::floor(value.num))
@@ -1062,21 +1047,7 @@ V combineExactBoolean(const Feature& feature, Document& document, std::vector<Bo
     sequence.set("schema",V::makeNum(1));sequence.set("op",V::makeStr(op));
     for(const auto& piece:pieces){V input=V::makeObj();input.set("brep_base64",V::makeStr(piece.brep));if(piece.topology.t==V::Obj)input.set("topology",piece.topology);input.set("namespace",V::makeStr(piece.nameSpace));if(piece.framed)input.set("frame",frameValue(piece.frame));inputs.arr.push_back(std::move(input));}
     sequence.set("pieces",std::move(inputs));envelope.set("operation",V::makeStr("model_boolean_sequence"));envelope.set("request",std::move(sequence));
-    return nativeBooleanSequenceRequest(envelope,[&]{
-        V current = placePiece(pieces.front());
-        for (size_t index = 1; index < pieces.size(); ++index) {
-            V tool = placePiece(pieces[index]);
-            V model = V::makeObj();
-            model.set("op", V::makeStr(op));
-            model.set("input_brep", required(current, "brep_base64"));
-            if (const V* topology = current.find("topology")) model.set("input_topology", *topology);
-            model.set("tool_brep", required(tool, "brep_base64"));
-            if (const V* topology = tool.find("topology")) model.set("tool_topology", *topology);
-            model.set("tool_namespace", V::makeStr(pieces[index].nameSpace));
-            current = solidWorker(std::move(model));
-        }
-        return current;
-    });
+    return nativeBooleanSequenceRequest(envelope);
 }
 
 V roundTubeSolid(const Feature& feature, const ExprEnv& env) {
