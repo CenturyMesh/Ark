@@ -78,6 +78,11 @@ and does not invent a projected value. Reads do not publish a new document
 revision. Existing read-side activity logging and native result preparation
 remain subject to their existing contracts.
 
+042D adds optional query `id`, `{"$ref":"id.path"}` arguments, nested `paths`
+and `max_bytes` to the same batch; see
+[AGENT_TOOL_LAYER_042D.md](AGENT_TOOL_LAYER_042D.md). Batches without them behave
+as described here.
+
 ## Cooperative write windows
 
 Focused remains the default. Parallel roles should reason, inspect selected

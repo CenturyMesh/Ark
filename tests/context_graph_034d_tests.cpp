@@ -21,6 +21,7 @@ void preciseStamp(){
     auto first=accepted(s.call("context_graph",args));
     apply(s,R"([{"op":"material.set","name":"Precision probe","density":1.0000002}])");
     auto second=accepted(s.call("context_graph",args));
+    {auto empty=args;empty.set("query",V::makeStr(""));accepted(s.call("context_graph",empty));}
     check(!field(second,"index_reused").b&&field(first,"source_sha256").str!=field(second,"source_sha256").str,"sub-micro density edit invalidates the stamp through normal publication");
     check(field(field(*node(second,"materials:Precision probe"),"facts"),"density").num==1.0000002,"graph returns the exact current density without decimal truncation");
     s.document.materials[0].densityGcm3=1.0000003;const auto revision=s.revision;

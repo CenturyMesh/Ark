@@ -90,7 +90,8 @@ V projectContextGraph(const Document& document,u64 revision,const V& args,V& cac
     for(const auto& item:args.obj)if(item.first!="query"&&item.first!="keys"&&item.first!="depth"&&item.first!="limit"&&item.first!="expected_revision"&&item.first!="known_fingerprints"&&item.first!="known_scope"&&item.first!="history_limit")throw std::runtime_error("Unknown context_graph argument: "+item.first);
     if(const auto* expected=args.find("expected_revision"))if(expected->t!=V::Num||expected->num!=(double)revision)throw std::runtime_error("Revision conflict; retrieve current context_graph");
     const int depth=contextInteger(args,"depth",1,0,2),limit=contextInteger(args,"limit",12,1,64),historyLimit=contextInteger(args,"history_limit",3,0,8);
-    const auto query=args.find("query")?str(args,"query"):std::string();if(query.size()>256)throw std::runtime_error("context_graph query exceeds 256 bytes");
+    // An empty query is treated as absent, as in object_context.
+    const auto* queryArg=args.find("query");const auto query=queryArg&&!(queryArg->t==V::Str&&queryArg->str.empty())?str(args,"query"):std::string();if(query.size()>256)throw std::runtime_error("context_graph query exceeds 256 bytes");
     if(args.find("keys")&&!query.empty())throw std::runtime_error("Use context_graph keys or query, not both");
     std::string usageError;if(!validateUsageLedger(document.usage,usageError))throw std::runtime_error(usageError);validateAppearanceAuthoring024B(document,false);
     const auto stamp=authoringStamp(document);std::string hash,scope;bool reused=false;

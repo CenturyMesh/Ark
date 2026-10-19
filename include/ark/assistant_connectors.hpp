@@ -13,6 +13,9 @@ AssistantProtocol assistantProtocolFromName(const std::string& name);
 // Protocol adapters retain one canonical Responses-style history inside ARK.
 // Provider-specific thinking replay is kept only on its originating route.
 arkjson::Value assistantAdaptRequest(const AssistantConfig&,const arkjson::Value& responsesRequest);
+// True when AssistantConfig::anthropicToolAdditions applies: first-party Messages
+// on a model that accepts mid-conversation tool changes.
+bool assistantMessagesToolAdditions(const AssistantConfig&);
 arkjson::Value assistantNormalizeResponse(const AssistantConfig&,const arkjson::Value& providerResponse);
 // Read-only GET /models, no inference. Returns actual IDs without choosing one.
 std::vector<std::string> assistantProviderModels(const AssistantConfig&,const AssistantTransport& offlineTransport={});

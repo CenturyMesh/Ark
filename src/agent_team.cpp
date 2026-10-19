@@ -174,6 +174,12 @@ V teamTools(V tools,unsigned maxCommands){
     for(auto& tool:tools.arr){auto name=field(tool,"name");if(name=="team_apply_step"){V annotations=*tool.find("annotations");annotations.set("readOnlyHint",V::makeBool(false));tool.set("annotations",annotations);}
         if(name=="doc_apply"||name=="team_apply_step"||name=="team_propose"){V schema=*tool.find("inputSchema"),props=schema.find("properties")?*schema.find("properties"):V::makeObj();if(auto source=props.find("commands")){V commands=*source;commands.set("maxItems",V::makeNum(maxCommands));if(commandItems.t==V::Obj)commands.set("items",name=="doc_apply"?commandItems:compactSchemaAnnotations(commandItems));props.set("commands",commands);}if(checksSchema.t==V::Obj)props.set("checks",name=="doc_apply"?checksSchema:compactSchemaAnnotations(checksSchema));schema.set("properties",props);tool.set("inputSchema",schema);}
     }
+    // 042D: reports carry the same rating items as tool_feedback, so a role
+    // need not spend a provider round on feedback before reporting.
+    V ratingsSchema;for(const auto& tool:tools.arr)if(field(tool,"name")=="tool_feedback")if(const auto* schema=tool.find("inputSchema"))if(const auto* props=schema->find("properties"))if(const auto* ratings=props->find("ratings"))ratingsSchema=*ratings;
+    if(ratingsSchema.t==V::Obj)for(auto& tool:tools.arr){const auto name=field(tool,"name");if(name!="team_report_task"&&name!="team_finish_goal")continue;
+        V schema=*tool.find("inputSchema"),props=*schema.find("properties");props.set("ratings",ratingsSchema);schema.set("properties",props);tool.set("inputSchema",schema);
+        tool.set("description",V::makeStr(field(tool,"description")+" Optional ratings: your pending activity ratings, the same items as tool_feedback. They are recorded only after this report passes its checks, so completion needs no separate tool_feedback call."));}
     return tools;
 }
 }
@@ -546,13 +552,25 @@ struct AgentTeam::Impl {
             checkpoint(index);
         }
         if(goal&&state=="completed"&&config.completionCheck){while(!completionLock.try_lock_for(std::chrono::milliseconds(20)))checkpoint(index);V check;try{check=config.completionCheck();}catch(const std::exception& e){return errorResult(e.what());}const auto* allowed=check.find("allowed");if(!allowed||allowed->t!=V::Bool)return errorResult("BOM completion verification unavailable");if(!allowed->b)return errorResult(field(check,"error"));const auto note=field(check,"summary");if(!note.empty())summary=note+"\n"+summary;}
-        std::string eventText;
-        {std::lock_guard lock(mutex);auto& role=roles[index];
+        // 042D: a report may carry the role's pending activity ratings, so
+        // completion costs no separate tool_feedback round. Same items and
+        // owner rules as tool_feedback, whose executor validates every item
+        // before applying any; they are recorded only after this report's own
+        // checks pass.
+        const auto* ratings=args.find("ratings");std::set<std::string> ratedIds;V ratingReceipt;
+        if(ratings){
+            if(ratings->t!=V::Arr||ratings->arr.empty()||ratings->arr.size()>64)return errorResult("ratings requires 1..64 tool_feedback items; nothing was rated or reported.");
+            for(const auto& item:ratings->arr){const auto id=item.t==V::Obj?field(item,"activity_id"):std::string();if(id.empty()||!ratedIds.insert(id).second)return errorResult("Each rating needs its own activity_id; nothing was rated or reported.");}
+        }
+        // Called under mutex. rated: IDs this report rates that are not recorded yet.
+        auto blockedLocked=[&](const std::set<std::string>& rated)->V{
+            auto& role=roles[index];
             if(role.steeringVersion!=role.requestVersion)return reject("New user input is pending. Consume it before declaring completion.");
             if(goal&&role.view.id!=leadRoleId(config.roles))return errorResult("Only the lead can report the entire user goal. Report your task to the lead.");
             if(state=="completed"){
                 if(goal&&awaitingLeadCheckpoint())return errorResult("The initial lead authoring checkpoint remains unfinished. The lead must successfully commit a coherent editable sketch/feature before completing the goal; deferred writer assignments have not run.");
-                if(!role.pendingFeedback.empty())return errorResult("Record tool_feedback for your actual pending activity IDs before declaring completion.");
+                V remaining=V::makeArr();for(const auto& id:role.pendingFeedback)if(!rated.count(id)&&remaining.arr.size()<64)remaining.arr.push_back(V::makeStr(id));
+                if(!remaining.arr.empty()){auto result=errorResult("Record tool_feedback for your actual pending activity IDs before declaring completion: add them to this report's ratings (the same items as tool_feedback) or call tool_feedback.");result.set("unrated_activity_ids",remaining);return result;}
                 for(std::size_t i=0;i<roles.size();++i){const auto& peer=roles[i];
                     if((goal||i==index)&&(blockingFailures(peer)||!peer.view.error.empty()||peer.view.needsInspection))return errorResult("Unresolved tool or worker errors remain. Inspect and resolve the failed operation before declaring completion.");
                     if((goal||i==index)&&(!peer.pending.empty()||peer.queued||(i!=index&&peer.active)))return errorResult("Pending messages or active/queued teammate work remain. Finish integration before declaring completion.");
@@ -563,14 +581,37 @@ struct AgentTeam::Impl {
                     return errorResult("Reviewer "+peer.view.id+" has not checked this design. Before completing the goal, assign it one concrete checkpoint of the integrated design with team_send kind:assignment (layout, proportions, interfaces, clearances or checks the user asked for) and integrate its findings. If the user declined a review, call team_finish_goal again and state that the review was skipped.");
                 }
             }
-            if(resolutions){const auto invalid=validateResolutions();if(!invalid.empty())return reject(invalid);for(const auto& key:resolvedKeys){role.unresolvedToolFailures.erase(key);role.readFailureStamps.erase(key);}role.lastToolFailure=role.unresolvedToolFailures.empty()?V{}:role.unresolvedToolFailures.rbegin()->second;documentRevisionKnown=true;documentRevision=expected;}
+            if(resolutions){const auto invalid=validateResolutions();if(!invalid.empty())return reject(invalid);}
+            return V{};
+        };
+        if(ratings){
+            {std::lock_guard lock(mutex);auto blocked=blockedLocked(ratedIds);if(!blocked.isNull())return blocked;}
+            if(!executor)return errorResult("The host did not provide an ARK executor for ratings; nothing was rated or reported.");
+            if(!completionLock.owns_lock())while(!completionLock.try_lock_for(std::chrono::milliseconds(20)))checkpoint(index);
+            checkpoint(index);
+            V request=V::makeObj();request.set("ratings",*ratings);
+            try{ratingReceipt=executor("tool_feedback",request);}catch(...){return reject("The ratings could not be recorded, so the report was not recorded. Read activity_info before retrying.");}
+            if(isError(ratingReceipt)){
+                const auto& detail=payload(ratingReceipt);auto result=reject("The ratings were rejected, so the report was not recorded: "+field(detail,"error"));if(const auto* code=detail.find("error_code"))result.set("error_code",*code);
+                V remaining=V::makeArr();{std::lock_guard lock(mutex);for(const auto& id:roles[index].pendingFeedback)if(remaining.arr.size()<64)remaining.arr.push_back(V::makeStr(id));}result.set("unrated_activity_ids",remaining);return result;
+            }
+            std::lock_guard lock(mutex);if(const auto* rated=payload(ratingReceipt).find("rated_ids");rated&&rated->t==V::Arr)for(const auto& id:rated->arr)roles[index].pendingFeedback.erase(id.asStr());
+        }
+        // Receipts carry what the executor actually rated, so the role and the
+        // assistant loop clear the same IDs without another round.
+        auto withRatings=[&](V result){if(ratingReceipt.isNull())return result;const auto& receipt=payload(ratingReceipt);for(const char* key:{"rated_ids","pending_feedback_ids"})if(const auto* value=receipt.find(key))result.set(key,*value);return result;};
+        std::string eventText;
+        {std::lock_guard lock(mutex);auto& role=roles[index];
+            // Rechecked: a peer may have changed state while the ratings were recorded.
+            if(auto blocked=blockedLocked({});!blocked.isNull()){if(!ratingReceipt.isNull())blocked.set("error",V::makeStr("The ratings were recorded, but the report was not: "+field(blocked,"error")));return withRatings(std::move(blocked));}
+            if(resolutions){for(const auto& key:resolvedKeys){role.unresolvedToolFailures.erase(key);role.readFailureStamps.erase(key);}role.lastToolFailure=role.unresolvedToolFailures.empty()?V{}:role.unresolvedToolFailures.rbegin()->second;documentRevisionKnown=true;documentRevision=expected;}
             role.view.taskState=state;role.view.taskSummary=summary;if(state!="in_progress"&&(writeReservation.owner==role.view.id||(goal&&state=="completed")))writeReservation={};
             if(goal){goalState=state=="completed"?AgentGoalState::Completed:state=="needs_input"?AgentGoalState::NeedsInput:AgentGoalState::InProgress;goalSummary=summary;goalDeclared=true;}
             eventText=std::string(goal?"Goal ":"Task ")+state+" / explicit "+role.view.id+" report: "+summary;
         }
         AgentTeamEvent event;event.kind=AgentTeamEvent::Message;event.roleId=roles[index].view.id;event.text=eventText;emit(event);
         for(const auto& resolution:resolvedReads.arr){AgentTeamEvent supersession;supersession.kind=AgentTeamEvent::Message;supersession.roleId=roles[index].view.id;supersession.text="Attributed read supersession: "+resolution.dump();emit(supersession);}
-        V result=V::makeObj();result.set("reported",V::makeBool(true));result.set("state",V::makeStr(state));result.set("evidence_kind",V::makeStr("explicit_role_report; actual tool receipts remain authoritative; not independent certification"));if(resolutions){result.set("read_resolutions",resolvedReads);result.set("revision_verification",verification);}return result;
+        V result=V::makeObj();result.set("reported",V::makeBool(true));result.set("state",V::makeStr(state));result.set("evidence_kind",V::makeStr("explicit_role_report; actual tool receipts remain authoritative; not independent certification"));if(resolutions){result.set("read_resolutions",resolvedReads);result.set("revision_verification",verification);}return withRatings(std::move(result));
     }
     V assignmentContext(std::size_t index,const std::string& target,const V& scope){
         const auto* ids=scope.find("ids");
@@ -753,7 +794,9 @@ struct AgentTeam::Impl {
                 if(const auto* returned=row.find("args");returned&&canonicalQueryArguments(*returned).dump()!=canonicalQueryArguments(*values).dump()){associated=false;break;}
             }
             if(!associated){V diagnostic=errorResult("Batch receipt count or row association does not match the submitted queries. No nested result resolved an earlier failed read; inspect the host receipt before retrying.");diagnostic.set("error_code",V::makeStr("QUERY_BATCH_RECEIPT_MISMATCH"));retainOutcome(name,args,diagnostic,-1);}
-            else {retainOutcome(name,args,result,-1);for(std::size_t i=0;i<queries->arr.size();++i)retainOutcome(field(queries->arr[i],"tool"),*queries->arr[i].find("args"),rows->arr[i],(int)i);}
+            // A row with $ref arguments is retained under the arguments it actually
+            // executed, so a recovery read never repeats an unresolvable reference.
+            else {retainOutcome(name,args,result,-1);for(std::size_t i=0;i<queries->arr.size();++i){const auto* executed=rows->arr[i].find("resolved_args");retainOutcome(field(queries->arr[i],"tool"),executed&&executed->t==V::Obj?*executed:*queries->arr[i].find("args"),rows->arr[i],(int)i);}}
         }else retainOutcome(name,args,result,-1);
         if((name=="doc_info"||name=="object_context"||name=="reference_inspect"||name=="query_batch")&&!isError(result)){
             std::uint64_t observed=0;if(receiptRevision(payload(result),observed)){
@@ -805,7 +848,8 @@ struct AgentTeam::Impl {
             try{
                 const auto& roleConfig=roles[index].config;
                 AssistantRetryHooks retryHooks;retryHooks.checkpoint=[&]{checkpoint(index);};retryHooks.inputPending=[&]{std::lock_guard lock(mutex);return !roles[index].pending.empty();};
-                auto result=runAssistant(roleConfig.assistant,input,roles[index].tools,[&](const auto& name,const auto& args){return call(index,name,args);},
+                auto assistantConfig=roleConfig.assistant;if(assistantConfig.traceRole.empty())assistantConfig.traceRole=roleConfig.id;
+                auto result=runAssistant(assistantConfig,input,roles[index].tools,[&](const auto& name,const auto& args){return call(index,name,args);},
                     [&](const auto& event){assistantEvent(index,baseline,performanceBaseline,event);},&cancelled,roleConfig.transport,[&]{return inbox(index);},
                     [&](const V& history){std::lock_guard lock(mutex);roles[index].view.conversation=history;},retryHooks);
                 {std::lock_guard lock(mutex);roles[index].view.conversation=std::move(result.conversation);roles[index].view.usage=baseline;accumulateAssistantUsage(roles[index].view.usage,result.usage);roles[index].view.performance=performanceBaseline;accumulateAssistantPerformance(roles[index].view.performance,result.performance);roles[index].view.state=cancelled?AgentTeamState::Cancelled:AgentTeamState::Idle;}
@@ -832,7 +876,11 @@ struct AgentTeam::Impl {
                 {std::lock_guard lock(mutex);const auto& role=roles[index];
                  if(role.view.id!=leadRoleId(config.roles)&&(!config.focusedWorkflow||!role.reportedToCoordinator||role.view.state!=AgentTeamState::Idle)){
                     coordinator=leadRoleId(config.roles);
-                    from=role.view.id;notification="Assignment turn "+std::to_string(role.view.turns)+" finished: "+role.view.label+" is "+agentTeamStateName(role.view.state)+". "+clipped(role.view.error.empty()?role.turnText:role.view.error,2048)+" Inspect team_context and current doc_info; integrate accepted parts or resolve blockers. Do not assume unverified work succeeded.";
+                    // 042D: the notice carries the role's explicit report and measured
+                    // counts, so the lead need not spend a team_context round per handoff.
+                    const std::string report=role.view.taskState.empty()||role.view.taskState=="unassigned"?" No explicit task report.":" Explicit task report: "+role.view.taskState+(role.view.taskSummary.empty()?std::string():" / "+clipped(role.view.taskSummary,1024))+".";
+                    const std::string measured=" Committed steps by this role: "+std::to_string(role.view.stepsApplied)+"; unresolved tool errors: "+std::to_string(role.unresolvedToolFailures.size())+(documentRevisionKnown?"; last observed document revision: "+std::to_string(documentRevision):std::string())+".";
+                    from=role.view.id;notification="Assignment turn "+std::to_string(role.view.turns)+" finished: "+role.view.label+" is "+agentTeamStateName(role.view.state)+". "+clipped(role.view.error.empty()?role.turnText:role.view.error,2048)+report+measured+" This notice already carries that role's report, so team_context adds nothing unless another role matters. Inspect only what you will integrate at the current revision (object_context for the reported IDs, or doc_info detail:digest with your known_fingerprints); integrate accepted parts or resolve blockers. Do not assume unverified work succeeded.";
                  }
                 }
                 if(!coordinator.empty())deliver(from,coordinator,notification,false);
@@ -894,7 +942,7 @@ void AgentTeam::start(const AgentTeamConfig& config,const V& userMessage,const V
                 workflow="Author coherent atomic batches with team_apply_step or doc_apply, up to "+std::to_string(config.maxCommandsPerStep)+" commands and "+std::to_string(config.maxFeaturesPerStep)+" new features"+(placements?" and "+std::to_string(config.maxPlacementsPerStep)+" placements":"")+" per batch. Create related profiles, datums and curved features"+(placements?std::string(" and placements"):std::string{})+" together when their complete intent is known; each batch evaluates once. Do not add a separate provider round for every sketch entity or feature merely to animate construction. Use valid independently useful checkpoints, keeping dependent changes and checks atomic. Use native loft, sweep, revolve and curved sketches/surfaces when the design calls for them; primitives are not the only design vocabulary. A successful doc_preview candidate owned by your role may be committed at its observed revision without reevaluating geometry; other-role, unknown and stale candidate IDs reject. ";
             }else workflow="Inspect and review existing geometry without writing. Use read-only previews when a concrete proposal needs measured evidence; an edit proposal must retain its explicit commands/checks and current revision for the responsible writer. ";
             if(roleConfig.canWrite)workflow+="Inspect each doc_preview receipt's refresh_supported and refresh_reason before choosing recovery after unrelated commits. Only when refresh_supported:true may you request doc_preview{candidate_id,expected_revision:current} for your own retained candidate. Refresh re-evaluates the unchanged authorized recipe on the current document and returns a new ID only when dependency/scope checks pass. When refresh_supported:false, including sketch/plane/parameter recipes, inspect the current relevant geometry, reconsider your original authored commands/checks against it, and submit a fresh explicit doc_preview with those commands/checks and your freshly observed expected_revision. Do not request candidate-ID refresh for an unsupported recipe. Commit the new candidate at its observed revision; an old candidate never silently merges. ";
-            workflow+="Use team_send kind:assignment for work, message for FYI, report for outcomes; avoid acknowledgement loops. team_context defaults to semantic progress: no_new_evidence means another status read is not useful. Follow next_action, use detail:diagnostics only for an explicit accounting diagnosis, and never treat token totals or provider status as design progress. Without a new task, document receipt, peer message or actual blocker, do not repeat team_context/doc_info/catalogue reads or wait for a reviewer; carry a design assignment to the next coherent editable checkpoint, or report the specific missing input and finish. Idle/provider turn completion never proves task/goal completion. Use team_report_task with actual IDs/evidence/limits; the lead calls team_finish_goal after integration/checks, or needs_input with remaining blockers. Reports do not certify geometry/manufacture. There is no authoritative partial OCCT result inside a kernel operation. Use team_propose for concrete revision-bound requested changes and evidence. Use doc_info detail:revision for current status and object_context for selected targets; reuse agent_onboard detail:guide. Prepare reasoning and commands first, then commit in short verified steps: a sketch with its first feature before its dependents. One failing command rejects the whole batch, so do not stack many unproven features into one preview. In parallel mode reserve only when ready to submit a short preview/commit; your previews/applies at the reserved revision keep it alive and your commit releases it. Release an unused reservation_id promptly; releasing an expired own receipt is idempotent and does not reserve again. Busy peers can inspect and coordinate, then read the current revision after release/expiry. Reservations never permit rebase, replay, or clearing unresolved errors. Prefer a ready commands/checks team_apply_step with detail:changes and release_reservation:true over separate reservation/release rounds. If an owned preview became stale after unrelated writes and its receipt reports refresh_supported:true, you may explicitly request team_apply_step with candidate_id, your freshly inspected expected_revision and refresh_candidate:true: the host rechecks dependencies and checks, then publishes in one serialized operation or rejects atomically. A false refresh_supported requires a fresh explicit commands/checks preview instead. ";
+            workflow+="Use team_send kind:assignment for work, message for FYI, report for outcomes; avoid acknowledgement loops. team_context defaults to semantic progress: no_new_evidence means another status read is not useful. Follow next_action, use detail:diagnostics only for an explicit accounting diagnosis, and never treat token totals or provider status as design progress. Without a new task, document receipt, peer message or actual blocker, do not repeat team_context/doc_info/catalogue reads or wait for a reviewer; carry a design assignment to the next coherent editable checkpoint, or report the specific missing input and finish. Idle/provider turn completion never proves task/goal completion. Use team_report_task with actual IDs/evidence/limits; the lead calls team_finish_goal after integration/checks, or needs_input with remaining blockers. Put your pending activity ratings in that report's ratings field instead of a separate tool_feedback call. Reports do not certify geometry/manufacture. There is no authoritative partial OCCT result inside a kernel operation. Use team_propose for concrete revision-bound requested changes and evidence. Use doc_info detail:revision for current status and object_context for selected targets; reuse agent_onboard detail:guide. Prepare reasoning and commands first, then commit in short verified steps: a sketch with its first feature before its dependents. One failing command rejects the whole batch, so do not stack many unproven features into one preview. In parallel mode reserve only when ready to submit a short preview/commit; your previews/applies at the reserved revision keep it alive and your commit releases it. Release an unused reservation_id promptly; releasing an expired own receipt is idempotent and does not reserve again. Busy peers can inspect and coordinate, then read the current revision after release/expiry. Reservations never permit rebase, replay, or clearing unresolved errors. Prefer a ready commands/checks team_apply_step with detail:changes and release_reservation:true over separate reservation/release rounds. If an owned preview became stale after unrelated writes and its receipt reports refresh_supported:true, you may explicitly request team_apply_step with candidate_id, your freshly inspected expected_revision and refresh_candidate:true: the host rechecks dependencies and checks, then publishes in one serialized operation or rejects atomically. A false refresh_supported requires a fresh explicit commands/checks preview instead. ";
             if(config.focusedWorkflow)workflow+="This is a focused sequential team: only one role runs at a time. A team_send assignment is queued until your current turn finishes. After handing off work, finish your turn; do not poll team_context or wait for a queued teammate. Use team_send only for a specific needed assignment, question or final report, not acknowledgements of acknowledgements. ";
             if(impl_->awaitingLeadCheckpoint())workflow+="This Parallel session starts with an empty document. The lead must author first coherent editable checkpoint before other writable roles start. team_send assignments to writers are accepted and retained, deferred until initial lead authoring checkpoint, without a provider request. A successful lead doc_apply/team_apply_step creating a sketch or feature releases deferred writers; parameters/groups alone, previews and failed edits do not. Keep authoring the lead checkpoint after assigning work; finishing the lead turn does not release writers. Read-only reviews may run, and all released writers must inspect current doc_info before writing. ";
             if(roleConfig.discipline==AgentTeamDiscipline::Orchestrator){workflow+="You are the lead engineer and can author parts, sketches, datums, dimensions, materials and manufacturing geometry as well as assembly/mate operations and reusable component placement. Make coherent engineering and design decisions from the user goal and measured native evidence. ";

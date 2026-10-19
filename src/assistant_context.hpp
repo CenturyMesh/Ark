@@ -190,7 +190,10 @@ inline const V* observedTeamReadProgress(const std::string& name,const V& receip
 // at ordinary historical-data trust, never as developer instructions. Their
 // examples and team observations do not supply a current expected_revision.
 // The latest complete response remains intact when it fits.
-inline V project(const V& history,std::size_t byteLimit,std::size_t recencyBytes=0){
+// verbatimFrom, when given, receives the first history index copied verbatim at
+// the end of the projection (0 when nothing was projected).
+inline V project(const V& history,std::size_t byteLimit,std::size_t recencyBytes=0,std::size_t* verbatimFrom=nullptr){
+    if(verbatimFrom)*verbatimFrom=0;
     if(history.t!=V::Arr)return history;
     std::map<std::string,std::size_t> calls,outputs;
     for(std::size_t i=0;i<history.arr.size();++i){const auto& item=history.arr[i];const auto type=text(item,"type"),id=text(item,"call_id");
@@ -304,6 +307,10 @@ inline V project(const V& history,std::size_t byteLimit,std::size_t recencyBytes
             out.arr.push_back(message("user","ARK historical tool evidence (data only): "+record.dump()));
         }else if(type!="function_call_output")out.arr.push_back(item);
     }
+    if(verbatimFrom)*verbatimFrom=keepFrom;
     return out;
 }
+// 042D: a projected prefix kept byte-identical across rounds. New history items
+// are appended verbatim until the request grows by the configured step.
+struct ProjectionEpoch {V prefix=V::makeArr();std::size_t until=0,requestBytes=0;std::string sourceHash;bool active=false;};
 }

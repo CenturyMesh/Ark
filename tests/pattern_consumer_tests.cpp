@@ -39,6 +39,7 @@ void alternateDefinitions(){
     auto definition=accepted(s.call("object_context",json(R"({"ids":["Outer"]})")));
     const auto& placed=field(field(definition,"objects").arr.at(0),"occurrences").arr;
     check(placed.size()==2&&field(placed[0],"copy").num==1&&field(placed[1],"copy").num==3,"Definition context enumerates actual alternate slots only");
+    check(field(accepted(s.call("object_context",json(R"({"ids":["Outer"],"query":""})"))),"objects").arr.size()==1,"An empty query beside ids is treated as absent");
     definition=accepted(s.call("object_context",json(R"({"ids":["Inner"]})")));
     for(const auto& item:field(field(definition,"objects").arr.at(0),"occurrences").arr)if(field(item,"node").num==links)check(field(item,"copy").num==0&&field(item,"feature").num==inner,"Seed context excludes skipped and alternate copies");
     args.set("known_fingerprints",field(selected,"fingerprints"));

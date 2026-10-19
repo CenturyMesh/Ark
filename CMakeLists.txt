@@ -61,7 +61,7 @@ add_library(ark STATIC
   src/physics.cpp
   src/core.cpp src/nurbs.cpp src/brep.cpp src/mesh.cpp src/csg.cpp
   src/model.cpp src/evaluate.cpp src/native_features.cpp src/frame.cpp src/electronics.cpp src/usage.cpp src/stock_preview.cpp src/suspension.cpp src/chatgpt_auth.cpp src/assistant_credentials.cpp src/sheet_commands.cpp src/sheet_preview.cpp src/references.cpp src/datum.cpp src/solver.cpp src/sketch.cpp src/prism_cut.cpp src/onboarding.cpp src/live_session.cpp src/assistant.cpp src/io.cpp src/serialize.cpp
-  src/source_tube.cpp src/notch.cpp src/notch_preview.cpp src/step_export.cpp src/tube.cpp src/assembly.cpp src/assembly_io.cpp src/compute.cpp src/api.cpp src/mesh_query.cpp src/mesh_analysis.cpp src/mesh_model.cpp src/agent.cpp src/agent_features.cpp src/kernels_scalar.cpp src/snapshot_032d.cpp)
+  src/source_tube.cpp src/notch.cpp src/notch_preview.cpp src/step_export.cpp src/tube.cpp src/assembly.cpp src/assembly_io.cpp src/compute.cpp src/api.cpp src/mesh_query.cpp src/mesh_analysis.cpp src/mesh_model.cpp src/agent.cpp src/agent_features.cpp src/result_path.cpp src/kernels_scalar.cpp src/snapshot_032d.cpp)
 target_include_directories(ark PUBLIC include "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_include_directories(ark SYSTEM PRIVATE third_party)
 
@@ -605,6 +605,14 @@ if(ARK_WITH_OCCT)
 endif()
 add_test(NAME agent-team COMMAND ark-agent-team-tests)
 set_tests_properties(agent-team PROPERTIES TIMEOUT 45)
+
+add_executable(ark-agent-tool-layer-042d-tests tests/agent_tool_layer_042d_tests.cpp)
+target_link_libraries(ark-agent-tool-layer-042d-tests PRIVATE ark)
+if(ARK_WITH_OCCT)
+  add_dependencies(ark-agent-tool-layer-042d-tests ark-occt-worker)
+endif()
+add_test(NAME agent-tool-layer-042d COMMAND ark-agent-tool-layer-042d-tests)
+set_tests_properties(agent-tool-layer-042d PROPERTIES TIMEOUT 120)
 
 add_executable(ark-component-sources-tests tests/component_sources_tests.cpp)
 target_link_libraries(ark-component-sources-tests PRIVATE ark)

@@ -4,7 +4,9 @@
 #include "assistant_vision.hpp"
 #include <algorithm>
 #include <cmath>
+#include <map>
 #include <set>
+#include <vector>
 #include <stdexcept>
 namespace ark {
 namespace {
@@ -62,6 +64,8 @@ V chatMessages(const AssistantConfig& config,const V& canonical,const std::strin
     flush();require(pending.empty(),"Retained tool call has no result; inspect document before continuing.");return messages;
 }
 V block(const char* kind,const std::string& value){V out=V::makeObj();out.set("type",V::makeStr(kind));out.set("text",V::makeStr(value));return out;}
+// Claude models documented to accept {"role":"system"} inside messages.
+bool assistantMessagesInPlaceSystem(const std::string& model){for(const char* prefix:{"claude-opus-5","claude-opus-4-8","claude-fable-5","claude-mythos-5","claude-sonnet-5-5","claude-haiku-5-5"})if(model.rfind(prefix,0)==0)return true;return false;}
 V normalizedMessage(const std::string& value){V out=V::makeObj(),content=V::makeArr();out.set("type",V::makeStr("message"));out.set("role",V::makeStr("assistant"));content.arr.push_back(block("output_text",value));out.set("content",content);return out;}
 V normalizedCall(const std::string& id,const std::string& name,const V& arguments){require(validId(id),"Provider tool call needs a valid ID.");require(!name.empty()&&arguments.t==V::Str,"Provider tool call needs name and JSON text arguments.");V checked;require(arkjson::parse(arguments.str,checked)&&checked.t==V::Obj,"Provider tool arguments must be a complete JSON object.");V out=V::makeObj();out.set("type",V::makeStr("function_call"));out.set("call_id",V::makeStr(id));out.set("name",V::makeStr(name));out.set("arguments",arguments);return out;}
 V providerOutcome(const AssistantConfig& config,const V& source,const V& normalized,const char* normalization){
@@ -105,6 +109,11 @@ std::vector<AssistantProviderPreset> assistantProviderPresets(){return {
 AssistantConfig assistantProviderPreset(const std::string& id){for(const auto& preset:assistantProviderPresets())if(preset.id==id){AssistantConfig out;out.provider=preset.id;out.protocol=preset.protocol;out.endpoint=preset.endpoint;out.apiKeyEnv=preset.apiKeyEnv;if(id=="grok-build"){out.authMode=AssistantAuthMode::CliAccount;out.imageInputSupported=false;}return out;}throw std::runtime_error("Unknown assistant provider preset.");}
 std::string assistantProtocolName(AssistantProtocol protocol){switch(protocol){case AssistantProtocol::Responses:return "responses";case AssistantProtocol::ChatCompletions:return "chat-completions";case AssistantProtocol::Messages:return "messages";case AssistantProtocol::Acp:return "acp";}throw std::runtime_error("Unknown assistant protocol.");}
 AssistantProtocol assistantProtocolFromName(const std::string& name){if(name=="responses")return AssistantProtocol::Responses;if(name=="chat-completions"||name=="chat"||name=="chat_completions")return AssistantProtocol::ChatCompletions;if(name=="messages")return AssistantProtocol::Messages;if(name=="acp")return AssistantProtocol::Acp;throw std::runtime_error("Unknown assistant protocol; choose responses, chat-completions, messages or acp.");}
+bool assistantMessagesToolAdditions(const AssistantConfig& config){
+    if(!config.anthropicToolAdditions||config.protocol!=AssistantProtocol::Messages||config.provider!="claude"||config.endpoint!="https://api.anthropic.com/v1/messages")return false;
+    for(const char* prefix:{"claude-opus-5","claude-opus-4-8","claude-fable-5","claude-mythos-5","claude-sonnet-5-5"})if(config.model.rfind(prefix,0)==0)return true;
+    return false;
+}
 V assistantAdaptRequest(const AssistantConfig& config,const V& canonicalRequest){
     if(config.protocol==AssistantProtocol::Acp){V out=canonicalRequest;V input=V::makeArr();for(const auto& row:need(out,"input").arr)if(text(row,"type")!="reasoning")input.arr.push_back(row);out.set("input",input);erase(out,"include");return out;}
     if(config.protocol==AssistantProtocol::Responses){V out=canonicalRequest;
@@ -130,8 +139,15 @@ V assistantAdaptRequest(const AssistantConfig& config,const V& canonicalRequest)
         // reported 0 cached tokens over rounds whose requests were 88-98%
         // byte-identical, while earlier unkeyed team runs reported 41-53%.
         if(config.provider=="openai"&&config.authMode!=AssistantAuthMode::ChatGptPlan&&config.endpoint=="https://api.openai.com/v1/responses"){
-            std::string prefix=text(out,"model")+'|'+text(out,"instructions")+'|';if(const auto* tools=out.find("tools"))prefix+=tools->dump();
-            if(!input.arr.empty()&&(text(input.arr.front(),"role")=="developer"||text(input.arr.front(),"role")=="system"))prefix+=input.arr.front().dump();
+            std::string prefix=text(out,"model")+'|'+text(out,"instructions")+'|';
+            if(config.stablePromptCacheKey){
+                // 042D A/B option: one routing key per role for the whole run.
+                prefix+=config.traceRole+'|';
+                for(const auto& item:input.arr){const auto role=text(item,"role");if(role!="developer"&&role!="system")break;if(text(item,"content").rfind("ARK_REQUEST_HISTORY_PROJECTION_V1",0)==0)continue;prefix+=item.dump();break;}
+            }else{
+                if(const auto* tools=out.find("tools"))prefix+=tools->dump();
+                if(!input.arr.empty()&&(text(input.arr.front(),"role")=="developer"||text(input.arr.front(),"role")=="system"))prefix+=input.arr.front().dump();
+            }
             out.set("prompt_cache_key",V::makeStr("ark-"+iterationSha256(prefix).substr(0,32)));
         }
         if(config.authMode!=AssistantAuthMode::ChatGptPlan&&config.provider!="openai")erase(out,"include");return out;
@@ -153,7 +169,11 @@ V assistantAdaptRequest(const AssistantConfig& config,const V& canonicalRequest)
     }
     out.set("max_tokens",V::makeNum(config.maxOutputTokens));V system=V::makeArr(),wire=V::makeArr();
     auto append=[&](const std::string& role,V content){if(!wire.arr.empty()&&text(wire.arr.back(),"role")==role){V merged=*wire.arr.back().find("content");for(auto& part:content.arr)merged.arr.push_back(std::move(part));wire.arr.back().set("content",merged);}else{V row=V::makeObj();row.set("role",V::makeStr(role));row.set("content",content);wire.arr.push_back(row);}};
-    for(const auto& row:messages.arr){const auto role=text(row,"role");if(role=="system"){system.arr.push_back(block("text",text(row,"content")));continue;}V content=V::makeArr();
+    // 042D: editing top-level system re-processes the whole cached history. On
+    // the first-party models that accept role:system inside messages, a host note
+    // after the conversation starts stays in place; others keep it in system.
+    const bool inPlaceSystem=config.provider=="claude"&&config.endpoint=="https://api.anthropic.com/v1/messages"&&assistantMessagesInPlaceSystem(config.model);bool leading=true;
+    for(const auto& row:messages.arr){const auto role=text(row,"role");if(role=="system"){if(leading||!inPlaceSystem)system.arr.push_back(block("text",text(row,"content")));else{V note=V::makeArr();note.arr.push_back(block("text",text(row,"content")));append("system",note);}continue;}leading=false;V content=V::makeArr();
         if(role=="tool"){V result=V::makeObj();result.set("type",V::makeStr("tool_result"));result.set("tool_use_id",need(row,"tool_call_id"));result.set("content",need(row,"content"));content.arr.push_back(result);append("user",content);continue;}
         if(const auto* reasoning=row.find("ark_messages_reasoning"))for(const auto& part:reasoning->arr)content.arr.push_back(part);
         if(const auto* parts=row.find("content");parts&&parts->t==V::Arr){for(const auto& part:parts->arr){if(text(part,"type")=="image_url"){
@@ -163,7 +183,36 @@ V assistantAdaptRequest(const AssistantConfig& config,const V& canonicalRequest)
         if(const auto* calls=row.find("tool_calls"))for(const auto& call:calls->arr){V use=V::makeObj(),args;const auto& fn=need(call,"function");require(arkjson::parse(text(fn,"arguments"),args)&&args.t==V::Obj,"Messages tool arguments must be a complete JSON object.");use.set("type",V::makeStr("tool_use"));use.set("id",need(call,"id"));use.set("name",need(fn,"name"));use.set("input",args);content.arr.push_back(use);}
         require(!content.arr.empty(),"Messages history has an empty content entry.");append(role,content);
     }
-    for(const auto& function:need(canonicalRequest,"tools").arr){V tool=V::makeObj();tool.set("name",need(function,"name"));tool.set("description",need(function,"description"));tool.set("input_schema",need(function,"parameters"));tools.arr.push_back(tool);}out.set("tools",tools);
+    // A messages system note must follow a user turn and precede an assistant
+    // turn or end the request; elsewhere it becomes a labelled user note in place.
+    if(inPlaceSystem){V placed=V::makeArr();
+        auto push=[&](V row){if(!placed.arr.empty()&&text(placed.arr.back(),"role")==text(row,"role")&&text(row,"role")!="system"){V merged=*placed.arr.back().find("content");for(auto& part:row.find("content")->arr)merged.arr.push_back(part);placed.arr.back().set("content",merged);}else placed.arr.push_back(std::move(row));};
+        for(std::size_t i=0;i<wire.arr.size();++i){V row=wire.arr[i];
+            if(text(row,"role")=="system"&&!(!placed.arr.empty()&&text(placed.arr.back(),"role")=="user"&&(i+1==wire.arr.size()||text(wire.arr[i+1],"role")=="assistant"))){V notes=V::makeArr();for(const auto& part:row.find("content")->arr)notes.arr.push_back(block("text","ARK host note: "+text(part,"text")));row.set("role",V::makeStr("user"));row.set("content",notes);}
+            push(std::move(row));}
+        wire=std::move(placed);}
+    // 042D (anthropicToolAdditions): deferred tools stay declared in a fixed list;
+    // a loaded topic is surfaced by tool_addition blocks after the tool result
+    // that loaded it, so the tools and earlier history stay byte-identical.
+    std::map<std::string,std::vector<std::string>> additions;std::map<std::string,std::string> loaderOf;
+    for(const auto& function:need(canonicalRequest,"tools").arr){V tool=V::makeObj();tool.set("name",need(function,"name"));tool.set("description",need(function,"description"));tool.set("input_schema",need(function,"parameters"));
+        if(const auto* deferred=function.find("ark_deferred");deferred&&deferred->t==V::Bool&&deferred->b){tool.set("defer_loading",V::makeBool(true));if(const auto* loader=function.find("ark_loaded_by");loader&&loader->t==V::Str&&!loader->str.empty()){additions[loader->str].push_back(text(function,"name"));loaderOf[text(function,"name")]=loader->str;}}
+        tools.arr.push_back(tool);}
+    if(!additions.empty()){
+        std::set<std::string> anchored;V placed=V::makeArr();
+        for(std::size_t i=0;i<wire.arr.size();++i){placed.arr.push_back(wire.arr[i]);const auto& row=wire.arr[i];if(text(row,"role")!="user")continue;V blocks=V::makeArr();
+            if(const auto* content=row.find("content");content&&content->t==V::Arr)for(const auto& part:content->arr){if(text(part,"type")!="tool_result")continue;const auto id=text(part,"tool_use_id");const auto found=additions.find(id);if(found==additions.end()||!anchored.insert(id).second)continue;
+                for(const auto& name:found->second){V reference=V::makeObj(),addition=V::makeObj();reference.set("type",V::makeStr("tool_reference"));reference.set("name",V::makeStr(name));addition.set("type",V::makeStr("tool_addition"));addition.set("tool",reference);blocks.arr.push_back(addition);}}
+            if(blocks.arr.empty())continue;
+            if(i+1<wire.arr.size()&&text(wire.arr[i+1],"role")=="system"){V next=wire.arr[i+1];for(const auto& part:next.find("content")->arr)blocks.arr.push_back(part);next.set("content",blocks);wire.arr[i+1]=next;}
+            else{V system=V::makeObj();system.set("role",V::makeStr("system"));system.set("content",blocks);placed.arr.push_back(system);}
+        }
+        wire=std::move(placed);
+        // A loading result removed by history projection cannot anchor an
+        // addition: those tools are sent undeferred so they stay callable.
+        for(auto& tool:tools.arr)if(const auto loader=loaderOf.find(text(tool,"name"));loader!=loaderOf.end()&&!anchored.count(loader->second))tool.obj.erase(std::remove_if(tool.obj.begin(),tool.obj.end(),[](const auto& entry){return entry.first=="defer_loading";}),tool.obj.end());
+    }
+    out.set("tools",tools);
     // Anthropic prompt caching: an explicit breakpoint closes the stable tools+system
     // prefix and top-level automatic caching follows the growing conversation tail.
     // Only the first-party endpoint is known to accept both forms.

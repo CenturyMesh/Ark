@@ -130,7 +130,9 @@ void requiredFeedbackChecks(){
     AgentSession session;AssistantConfig config;config.model="offline-feedback";int rounds=0;std::string activity;
     auto run=runAssistant(config,V::makeStr("Inspect and report"),AgentSession::tools(),[&](const std::string& name,V args){args.set("actor",actor());auto result=session.call(name,args);if(const auto* id=result.find("structuredContent")->find("activity_id"))activity=id->str;return result;},{},nullptr,[&](auto&,const V& request,auto*){
         switch(++rounds){case 1:return toolResponse("inspect","doc_info",V::makeObj());case 2:return done();case 3:{check(request.dump().find("Before finishing, submit tool_feedback")!=std::string::npos,"premature completion triggers required feedback");V args=json(R"({"ratings":[{"utility":5,"difficulty":1,"action":"Read the empty fixture inventory"}]})");auto rows=*args.find("ratings");rows.arr.front().set("activity_id",V::makeStr(activity));args.set("ratings",rows);return toolResponse("rate","tool_feedback",args);}default:return done();}
-    });check(rounds==4&&session.document.agentActivity->entries.front().find("feedback")&&!run.text.empty(),"single agent cannot complete before rating actual tool use");
+    // 042D: the reply held for feedback is final once a feedback-only round rates
+    // the action; no fourth round repeats it.
+    });check(rounds==3&&session.document.agentActivity->entries.front().find("feedback")&&run.text.find("Completed fixture")!=std::string::npos,"single agent cannot complete before rating actual tool use");
 }
 void pngChecks(){
     Image image;image.w=1024;image.h=768;image.px.resize((size_t)image.w*image.h*3);for(size_t i=0;i<image.px.size();i+=3){image.px[i]=(u8)((i/3)%255);image.px[i+1]=73;image.px[i+2]=201;}

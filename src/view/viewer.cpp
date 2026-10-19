@@ -3030,6 +3030,16 @@ static void askAgentAboutBody(int body){
 #include "image_attachment.inl"
 #include "steer_024b.inl"
 #include "studio_feedback_fixture.inl"
+// 042D A/B options for agent requests, read when a run starts and off unless
+// set: ARK_RESULT_HANDLE_BYTES, ARK_PROJECTION_STEP_BYTES, ARK_PROMPT_CACHE_KEY=role,
+// ARK_DEFER_SPECIALIST_TOOLS=0 and ARK_ANTHROPIC_TOOL_ADDITIONS=1 (see AssistantConfig).
+static void applyAgentRequestOptions(AssistantConfig& config){
+    auto bytes=[](const char* name,std::size_t lowest,std::size_t highest)->std::size_t{const char* value=std::getenv(name);if(!value||!*value)return 0;char* end=nullptr;const auto parsed=std::strtoull(value,&end,10);if(!end||*end||parsed==0)return 0;return std::clamp<std::size_t>((std::size_t)parsed,lowest,highest);};
+    auto equals=[](const char* name,const char* expected){const char* value=std::getenv(name);return value&&std::string(value)==expected;};
+    config.resultHandleBytes=bytes("ARK_RESULT_HANDLE_BYTES",4096,1024*1024);config.projectionStepBytes=bytes("ARK_PROJECTION_STEP_BYTES",16*1024,4*1024*1024);
+    config.stablePromptCacheKey=equals("ARK_PROMPT_CACHE_KEY","role");if(equals("ARK_DEFER_SPECIALIST_TOOLS","0"))config.deferSpecialistTools=false;
+    config.anthropicToolAdditions=equals("ARK_ANTHROPIC_TOOL_ADDITIONS","1");
+}
 static void sendTeam(const std::string& explicitPrompt={},const std::array<AssistantTransport,8>& transports={}){
     if(g_busy&&!g_teamStarted){g_status="Wait for the current document operation before starting a new team.";return;}
     if(g_chatBusy){g_status="Wait for the single Assistant turn to finish.";return;}std::string prompt=assistantPrompt(explicitPrompt);if(prompt.find_first_not_of(" \r\n\t")==std::string::npos&&(!explicitPrompt.empty()||!g_pendingAssistantImage))return;
@@ -3048,7 +3058,7 @@ static void sendTeam(const std::string& explicitPrompt={},const std::array<Assis
                 if(!transports[i]&&config.authMode==AssistantAuthMode::ApiKey&&!assistantKeyAvailable(config))throw std::runtime_error("The configured credential environment variable is unavailable.");
                 if(!transports[i]&&config.authMode==AssistantAuthMode::ChatGptPlan){if(!g_authStatus.connected||!g_authStatus.planAuthorized)throw std::runtime_error("Connect and authorize ChatGPT from Account first.");if(g_authModels.empty())throw std::runtime_error("Load the account model catalog from Account first.");if(std::none_of(g_authModels.begin(),g_authModels.end(),[&](const auto& model){return model.slug==config.model;}))throw std::runtime_error("The selected model is unavailable in this account's catalog.");}
             }catch(const std::exception& error){throw std::runtime_error(std::string(g_teamRoleLabels[i])+": "+error.what());}
-            AgentTeamRole role;role.id=g_teamRoleIds[i];role.label=g_teamRoleLabels[i];role.instructions=instructions[i==2?2:i==0?0:1];if(!transports[i])config.onboardingPack=(i==2?agentOnboardingPack({"overview","physics"}):i==0?agentOnboardingPack({"overview","sketch","solids","assembly"}):agentAuthoringOnboardingPack());config.memoryPrefetch=!transports[i];config.deferSpecialistTools=!transports[i];role.assistant=config;role.transport=feedbackFixtureTransport(transports[i]);role.canWrite=i!=2;role.discipline=i==0?AgentTeamDiscipline::Orchestrator:i==2?AgentTeamDiscipline::PhysicsReviewer:AgentTeamDiscipline::PartDesigner;team.roles.push_back(std::move(role));}
+            AgentTeamRole role;role.id=g_teamRoleIds[i];role.label=g_teamRoleLabels[i];role.instructions=instructions[i==2?2:i==0?0:1];if(!transports[i])config.onboardingPack=(i==2?agentOnboardingPack({"overview","physics"}):i==0?agentOnboardingPack({"overview","sketch","solids","assembly"}):agentAuthoringOnboardingPack());config.memoryPrefetch=!transports[i];config.deferSpecialistTools=!transports[i];applyAgentRequestOptions(config);role.assistant=config;role.transport=feedbackFixtureTransport(transports[i]);role.canWrite=i!=2;role.discipline=i==0?AgentTeamDiscipline::Orchestrator:i==2?AgentTeamDiscipline::PhysicsReviewer:AgentTeamDiscipline::PartDesigner;team.roles.push_back(std::move(role));}
         g_teamCancel=std::make_shared<std::atomic_bool>(false);auto cancel=g_teamCancel;auto epoch=g_documentEpoch;auto runSerial=++g_teamRunSerial;g_teamEpoch=epoch;g_teamEventSequence=0;g_teamReceipts={};g_teamActivity={};g_teamLiveUsage={};g_draftViews.clear();g_liveCompletedSteps=0;g_liveStepLabel.clear();captureDraftContext();g_teamGoal=visiblePrompt;for(auto& id:g_teamReceiptIds)id=newUsageReceiptId();if(!transports[0]&&!transports[1]&&!transports[2]&&std::any_of(team.roles.begin(),team.roles.end(),[](const auto& role){return role.assistant.provider!="ollama"&&role.assistant.authMode!=AssistantAuthMode::CliAccount;}))refreshPricing();
         g_assistantReceiptId.clear();g_currentUsageReceipt.reset();g_pendingUsageReceipt.reset();
         auto teamExecutor=[cancel,epoch](const std::string& name,const arkjson::Value& args){
@@ -3071,7 +3081,7 @@ static void sendAssistant(const std::string& explicitPrompt="",const AssistantTr
     if(g_assistantWorker.joinable())g_assistantWorker.join();
     V input=g_conversation;if(input.t!=V::Arr)input=V::makeArr();input.arr.push_back(user);
     if(queuedMessage||(explicitPrompt.empty()&&g_pendingAssistantImage)){auto preflight=g_assistantConfig;if(!transport)preflight.onboardingPack=agentAuthoringOnboardingPack();assistantRequest(preflight,input,AgentSession::tools());}
-    if(!queuedMessage)g_pendingObjectTarget.reset();if(!queuedMessage)g_chatLog.push_back({"You",visiblePrompt});g_chatScroll=0;g_chatBusy=true;g_assistantResponseFinished=g_assistantResponseError=false;g_assistantStatus="Working...";g_assistantUsageRun={};g_assistantPerformanceRun={};g_assistantUsageRunCounted=false;g_assistantReceiptId=newUsageReceiptId();g_assistantReceiptModel=g_assistantConfig.model;g_currentUsageReceipt.reset();g_pendingUsageReceipt.reset();g_assistantCancel=std::make_shared<std::atomic_bool>(false);auto cancel=g_assistantCancel;auto config=g_assistantConfig;if(!transport)config.onboardingPack=agentAuthoringOnboardingPack();config.memoryPrefetch=!transport;config.deferSpecialistTools=!transport;auto schema=compactAuthoringPreviewTools(AgentSession::tools());if(g_chatInput&&!queuedMessage)SetWindowTextW(g_chatInput,L"");
+    if(!queuedMessage)g_pendingObjectTarget.reset();if(!queuedMessage)g_chatLog.push_back({"You",visiblePrompt});g_chatScroll=0;g_chatBusy=true;g_assistantResponseFinished=g_assistantResponseError=false;g_assistantStatus="Working...";g_assistantUsageRun={};g_assistantPerformanceRun={};g_assistantUsageRunCounted=false;g_assistantReceiptId=newUsageReceiptId();g_assistantReceiptModel=g_assistantConfig.model;g_currentUsageReceipt.reset();g_pendingUsageReceipt.reset();g_assistantCancel=std::make_shared<std::atomic_bool>(false);auto cancel=g_assistantCancel;auto config=g_assistantConfig;if(!transport)config.onboardingPack=agentAuthoringOnboardingPack();config.memoryPrefetch=!transport;config.deferSpecialistTools=!transport;applyAgentRequestOptions(config);auto schema=compactAuthoringPreviewTools(AgentSession::tools());if(g_chatInput&&!queuedMessage)SetWindowTextW(g_chatInput,L"");
     auto epoch=g_documentEpoch;auto revision=std::make_shared<std::atomic<u64>>(g_session.revision);
     auto steering=std::make_shared<AssistantSteering>(config,schema,input);g_assistantSteering=steering;g_assistantSteeringEpoch=epoch;g_assistantSteeringTransport=transport;
     g_assistantWorker=std::thread([config,input,schema,cancel,transport,epoch,revision,steering]{
@@ -3086,6 +3096,7 @@ static void sendAssistant(const std::string& explicitPrompt="",const AssistantTr
     });
     if(explicitPrompt.empty()&&!queuedMessage)clearPendingAssistantImage();
 }
+static std::string liveCallProgress();
 static void startLiveBridge(){
     if(!g_liveBridge.start([](const std::string& tool,const arkjson::Value& args,LiveSessionBridge::Completion complete,std::stop_token stop){
         // Snapshot owns its lock and contains no conversation by default. Keep
@@ -3093,7 +3104,7 @@ static void startLiveBridge(){
         // reading mutable CAD state or dispatching another agent/provider call.
         if(isStudioDiagnosticsTool(tool)){if(stop.stop_requested()){complete(cancelledTool());return;}complete(studioTeamDiagnostics(g_agentTeam.snapshot(false,std::numeric_limits<u64>::max(),true),args));return;}
         auto request=std::make_unique<UiToolRequest>();request->tool=tool;request->args=args;request->complete=std::move(complete);request->stop=stop;postTool(std::move(request));
-    }))g_status="Live MCP unavailable: "+g_liveBridge.lastError();
+    },{},liveCallProgress))g_status="Live MCP unavailable: "+g_liveBridge.lastError();
 }
 static void stopIntegrations(){
     g_closing=true;*g_pricingCancel=true;*g_teamCancel=true;g_agentTeam.cancel();*g_assistantCancel=true;*g_authCancel=true;g_liveBridge.stop();
@@ -5593,6 +5604,12 @@ static arkjson::Value captureViewportSnapshot(const arkjson::Value& args){
 }
 struct BusyFeatureProgress {u64 id=0;std::string name;size_t index=0,total=0;bool completed=false,reused=false;};
 static std::mutex g_busyProgressMutex;static BusyFeatureProgress g_busyFeatureProgress;
+// Live MCP progress text: the feature the busy document executor is evaluating.
+// Empty while queued or between features; the bridge then sends elapsed time only.
+static std::string liveCallProgress(){
+    BusyFeatureProgress progress;{std::lock_guard lock(g_busyProgressMutex);progress=g_busyFeatureProgress;}if(!progress.total)return {};
+    return "Feature "+std::to_string(progress.index+1)+"/"+std::to_string(progress.total)+" #"+std::to_string(progress.id)+(progress.name.empty()?std::string():" "+progress.name)+" "+(progress.completed?"ready":progress.reused?"cached":"evaluating");
+}
 static void drawBusyFrame(HDC hdc){
     // The worker exclusively owns g_session. This path reads only a captured GL
     // frame and UI progress state; drawFrame and document access are forbidden.

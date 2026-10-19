@@ -120,6 +120,39 @@ void testResponsesReplayCustody(){auto openai=configured("openai");V response=js
     auto changedModel=openai;changedModel.model="different-explicit-model";check(assistantRequest(changedModel,transcript,tools).dump().find("opaque_source_payload")==std::string::npos,"reasoning is not replayed to a different model");
     auto plan=openai;plan.authMode=AssistantAuthMode::ChatGptPlan;check(assistantRequest(plan,transcript,tools).dump().find("opaque_source_payload")==std::string::npos,"API and ChatGPT plan reasoning custody stay separate");
 }
+// 042D: host notes added after the conversation starts stay in place on models
+// that accept role:system inside messages, so the cached history is reused.
+void testMessagesInPlaceSystemNotes(){
+    const auto history=json(R"([{"role":"user","content":"Inspect"},{"type":"function_call","call_id":"read_1","name":"doc_info","arguments":"{}"},{"type":"function_call_output","call_id":"read_1","output":"{\"revision\":3}"},{"role":"developer","content":"Host note after a tool result."},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Revision 3 inspected."}]},{"role":"developer","content":"Host note after a reply."}])");
+    auto claude=configured("claude");claude.model="claude-opus-5-5";
+    const auto request=assistantRequest(claude,history,tools);const auto& messages=request.find("messages")->arr;const auto system=request.find("system")->dump();
+    check(system.find("Host note")==std::string::npos,"supported models keep later host notes out of the top-level system prompt");
+    check(messages.size()==6&&messages[2].find("role")->str=="user"&&messages[3].find("role")->str=="system"&&messages[3].dump().find("after a tool result")!=std::string::npos&&messages[4].find("role")->str=="assistant","a note after a tool result is a messages system turn between user and assistant");
+    check(messages[5].find("role")->str=="user"&&messages[5].dump().find("ARK host note: Host note after a reply.")!=std::string::npos,"a note after an assistant reply becomes a labelled user note in place");
+    check(!messages[3].find("content")->arr.front().find("cache_control"),"in-place system notes carry no cache breakpoint");
+    auto older=claude;older.model="claude-sonnet-5";const auto hoisted=assistantRequest(older,history,tools);
+    check(hoisted.find("system")->dump().find("Host note after a tool result.")!=std::string::npos&&hoisted.find("messages")->dump().find("Host note")==std::string::npos,"other models keep host notes in the system prompt");
+}
+// 042D A/B option: deferred tools keep one declared tool list; a loaded topic is
+// surfaced in place with tool_addition blocks.
+void testMessagesToolAdditions(){
+    auto claude=configured("claude");claude.model="claude-opus-5-5";claude.anthropicToolAdditions=true;claude.deferSpecialistTools=true;
+    check(assistantMessagesToolAdditions(claude),"tool additions apply to supported first-party Claude models");
+    auto older=claude;older.model="claude-sonnet-5";check(!assistantMessagesToolAdditions(older),"other models keep the existing tool list behaviour");
+    const auto catalogue=AgentSession::tools();const auto& topic=assistantSpecialistToolTopics().front();std::string specialist;
+    for(const auto& name:topic.second)for(const auto& tool:catalogue.arr)if(specialist.empty()&&tool.find("name")->str==name)specialist=name;
+    check(!specialist.empty(),"the catalogue contains a specialist tool of the first topic");
+    const auto before=json(R"([{"role":"user","content":"Inspect"}])");V after=before,call=V::makeObj(),args=V::makeObj(),output=V::makeObj();
+    args.set("topic",V::makeStr(topic.first));args.set("detail",V::makeStr("guide"));call.set("type",V::makeStr("function_call"));call.set("call_id",V::makeStr("load_topic"));call.set("name",V::makeStr("agent_onboard"));call.set("arguments",V::makeStr(args.dump()));after.arr.push_back(call);
+    output.set("type",V::makeStr("function_call_output"));output.set("call_id",V::makeStr("load_topic"));output.set("output",V::makeStr(R"({"isError":false,"structuredContent":{"detail":"guide"}})"));after.arr.push_back(output);
+    const auto first=assistantRequest(claude,before,assistantDeferredCatalogue(catalogue,before,"")),second=assistantRequest(claude,after,assistantDeferredCatalogue(catalogue,after,""));
+    check(first.find("tools")->dump()==second.find("tools")->dump(),"loading a topic leaves the declared tools byte-identical");
+    bool deferred=false;for(const auto& tool:first.find("tools")->arr)if(tool.find("name")->str==specialist)deferred=tool.find("defer_loading")&&tool.find("defer_loading")->b;
+    check(deferred&&first.find("tools")->dump().find("ark_deferred")==std::string::npos&&first.find("tools")->dump().find("ark_loaded_by")==std::string::npos,"specialist tools are declared deferred without internal marks");
+    const auto& messages=second.find("messages")->arr;
+    check(messages.size()==4&&messages[2].dump().find("tool_result")!=std::string::npos&&messages[3].find("role")->str=="system"&&messages[3].dump().find("\"tool_addition\"")!=std::string::npos&&messages[3].dump().find("\""+specialist+"\"")!=std::string::npos,"the loaded topic is surfaced right after the tool result that loaded it");
+    check(first.find("messages")->dump().find("tool_addition")==std::string::npos&&second.find("messages")->arr[0].dump()==first.find("messages")->arr[0].dump(),"nothing is surfaced earlier and earlier history stays identical");
+}
 void testSavedKeysAndClaudeRoutes(){
     auto deepseek=assistantProviderPreset("deepseek");check(deepseek.endpoint=="https://api.deepseek.com/chat/completions"&&deepseek.apiKeyEnv=="DEEPSEEK_API_KEY"&&deepseek.protocol==AssistantProtocol::ChatCompletions&&deepseek.model.empty(),"DeepSeek preset uses its Chat Completions endpoint without choosing a model");
     auto claude=configured("claude");const auto request=assistantRequest(claude,json(R"([{"role":"user","content":"Inspect"}])"),tools);
@@ -157,6 +190,11 @@ void testPromptCacheKey(){
     const V readOnly=json(R"([{"name":"doc_info","description":"Inspect current document","inputSchema":{"type":"object"}}])");check(assistantRequest(openai,first,readOnly).find("prompt_cache_key")->str!=a.find("prompt_cache_key")->str,"roles with different tool catalogs use different cache keys");
     auto plan=openai;plan.authMode=AssistantAuthMode::ChatGptPlan;check(!assistantRequest(plan,first,tools).find("prompt_cache_key"),"ChatGPT plan Responses requests stay unkeyed (keyed plan runs reported no cached tokens)");
     for(auto config:{configured("grok"),configured("custom")})check(!assistantRequest(config,first,tools).find("prompt_cache_key"),"other Responses providers receive no OpenAI-specific cache field");
+    // 042D A/B option: one key per role across topic loads and projection.
+    auto stable=openai;stable.stablePromptCacheKey=true;stable.traceRole="lead";const auto key=assistantRequest(stable,first,tools).find("prompt_cache_key")->str;
+    V projected=first;projected.arr.insert(projected.arr.begin(),json(R"({"role":"developer","content":"ARK_REQUEST_HISTORY_PROJECTION_V1: historical excerpts follow."})"));
+    check(assistantRequest(stable,first,readOnly).find("prompt_cache_key")->str==key&&assistantRequest(stable,projected,tools).find("prompt_cache_key")->str==key,"a stable role key survives tool loads and the projection header");
+    auto designer=stable;designer.traceRole="designer";check(assistantRequest(designer,first,tools).find("prompt_cache_key")->str!=key,"stable keys still separate roles");
 }
 void testResponsesCallIdPreflight(){
     auto base=json(R"([{"role":"user","content":"Synthetic request."},{"type":"function_call","call_id":"valid_call","name":"doc_info","arguments":"{}"},{"type":"function_call_output","call_id":"valid_call","output":"sk_FAKE_HISTORY_SECRET"}])");
@@ -221,5 +259,5 @@ int main(int argc,char** argv){try{
     if(argc==3&&std::string(argv[1])=="--local-agent-basic-smoke"){liveLocalModelSmoke(argv[2],true);return 0;}
     // Explicit opt-in read-only network smoke. Default test stays fully offline.
     if(argc==3&&std::string(argv[1])=="--catalog"){const auto ids=assistantProviderModels(assistantProviderPreset(argv[2]));V models=V::makeArr();for(const auto& id:ids)models.arr.push_back(V::makeStr(id));std::cout<<models.dump()<<'\n';return 0;}
-    testLocalModelCapabilities();testChat();testOllamaEmptyPropertySchemas();testCompleteBeforeExecution();testBoundedOutcomes();testMessages();testPresetsCatalogAndExport();testResponsesReplayCustody();testPromptCacheKey();testSavedKeysAndClaudeRoutes();testResponsesCallIdPreflight();testMixedProviderTeam();std::cout<<"Provider connector contracts passed\n";return 0;
+    testLocalModelCapabilities();testChat();testOllamaEmptyPropertySchemas();testCompleteBeforeExecution();testBoundedOutcomes();testMessages();testPresetsCatalogAndExport();testResponsesReplayCustody();testPromptCacheKey();testSavedKeysAndClaudeRoutes();testMessagesInPlaceSystemNotes();testMessagesToolAdditions();testResponsesCallIdPreflight();testMixedProviderTeam();std::cout<<"Provider connector contracts passed\n";return 0;
 }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}
