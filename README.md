@@ -13,14 +13,23 @@
 Powered by C++ and Open CASCADE. Windows includes the graphical Studio; Linux
 currently provides the headless CLI, MCP server and native geometry worker.
 
-**Windows preview — 040D / 0.9.41:**
+**Windows preview — 042D / 0.9.43:**
 
-[**Download the Windows installer**](https://github.com/CenturyMesh/Ark/releases/download/v0.9.41/ARK-040D-windows-x64-setup.exe) | [**Portable ZIP**](https://github.com/CenturyMesh/Ark/releases/download/v0.9.41/ark-windows-x64-0.9.41.zip) | [Release notes and checksums](https://github.com/CenturyMesh/Ark/releases/tag/v0.9.41)
+[**Download the Windows installer**](https://github.com/CenturyMesh/Ark/releases/download/v0.9.43/ARK-042D-windows-x64-setup.exe) | [**Portable ZIP**](https://github.com/CenturyMesh/Ark/releases/download/v0.9.43/ark-windows-x64-0.9.43.zip) | [Release notes and checksums](https://github.com/CenturyMesh/Ark/releases/tag/v0.9.43)
 
 The installer shows the ARK logo, lets you choose a folder and prepares Studio,
 shortcuts, native geometry libraries and the offline memory model. No compilation
 or memory-service account is required. The portable ZIP still launches through
 `ARK.cmd`. Existing documents and the previous installed version remain separate.
+
+[042D](docs/iterations/042D.md) cuts agent rounds that author no geometry:
+ratings travel inside team reports, `query_batch` chains reads, a fingerprinted
+revision digest returns only changes, and history projection starts later.
+Live MCP waits for long Studio results and reports progress. Provider API keys
+can be saved in Studio. No real-model cost or quality comparison is claimed.
+
+[041D](docs/iterations/041D.md) added actionable read recovery and read-only
+team diagnostics.
 
 [040D](docs/iterations/040D.md) repairs memory startup IDs for Responses, recovers
 legacy host pairs when sending a request, retains concise feedback context and
