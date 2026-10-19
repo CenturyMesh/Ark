@@ -130,6 +130,8 @@ struct ObjectContext {
     }
 };
 V objectContext(const Document& document,u64 revision,const V& args){
+    // An empty query selects nothing extra; agents send query:"" beside ids.
+    if(const auto* query=args.find("query");query&&query->t==V::Str&&query->str.empty()){V normalized=args;normalized.obj.erase(std::remove_if(normalized.obj.begin(),normalized.obj.end(),[](const auto& entry){return entry.first=="query";}),normalized.obj.end());return objectContext(document,revision,normalized);}
     for(const auto& field:args.obj)if(field.first!="ids"&&field.first!="node"&&field.first!="copy"&&field.first!="query"&&field.first!="type"&&field.first!="expected_revision"&&field.first!="known_fingerprints"&&field.first!="depth"&&field.first!="limit"&&field.first!="after_id")throw std::runtime_error("Unknown object_context field: "+field.first);
     if(const auto* expected=args.find("expected_revision"))if(expected->t!=V::Num||expected->num!=(double)revision)throw std::runtime_error("Revision conflict; refresh object_context before editing");
     const int depth=contextInteger(args,"depth",0,0,2),limit=contextInteger(args,"limit",16,1,64),copy=contextInteger(args,"copy",0,0,31);

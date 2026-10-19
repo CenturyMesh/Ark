@@ -29,6 +29,9 @@ constexpr std::size_t responseLimit = 32 * 1024 * 1024;
 // Bounded wait for one tool's Studio result; request/reply transfers keep 30 s.
 constexpr unsigned liveExecutionLimitMs = 600000;
 constexpr unsigned liveCallLimitMs = liveExecutionLimitMs + 60000;
+// Progress notes for clients that request them; heartbeat plus optional text.
+constexpr unsigned liveProgressIntervalMs = 2000;
+constexpr unsigned liveInstances = 4;
 V failure(const std::string& text) {
     V result=V::makeObj(), content=V::makeArr(), item=V::makeObj();
     item.set("type",V::makeStr("text")); item.set("text",V::makeStr(text));
@@ -95,9 +98,22 @@ struct Reply {
 struct LiveSessionBridge::Impl {
     std::string name,error;
 #ifdef _WIN32
-    HANDLE pipe=INVALID_HANDLE_VALUE,stopped=nullptr;
-    std::thread worker;
-    void run(Dispatch dispatch) {
+    // Several instances let further clients connect and queue while one call
+    // runs; the document dispatcher still executes calls one at a time.
+    std::vector<HANDLE> pipes;HANDLE stopped=nullptr;
+    std::vector<std::thread> workers;
+    Progress progress;
+    // A progress frame is {"ark_progress":{elapsed_ms,message?}}, sent only to a
+    // client whose request asked for it, before the single result frame.
+    bool sendProgress(HANDLE pipe,Clock::time_point began) {
+        V note=V::makeObj(),frame=V::makeObj();
+        note.set("elapsed_ms",V::makeNum((double)std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now()-began).count()));
+        std::string message;if(progress)try{message=progress();}catch(...){}
+        if(!message.empty())note.set("message",V::makeStr(message.substr(0,512)));
+        frame.set("ark_progress",note);
+        return writeFrame(pipe,frame.dump(),stopped,Clock::now()+std::chrono::seconds(5));
+    }
+    void run(Dispatch dispatch,HANDLE pipe) {
         while(WaitForSingleObject(stopped,0)!=WAIT_OBJECT_0) {
             Handle event(CreateEventW(nullptr,TRUE,FALSE,nullptr)); if(!event.value)break;
             OVERLAPPED ov{};ov.hEvent=event.value;DWORD unused=0;
@@ -112,7 +128,8 @@ struct LiveSessionBridge::Impl {
             std::string text;V req;
             if(readFrame(pipe,text,requestLimit,stopped,requestDeadline)&&arkjson::parse(text,req)) {
                 const auto deadline=Clock::now()+std::chrono::milliseconds(liveExecutionLimitMs);
-                auto name=req.find("tool"),args=req.find("arguments");
+                auto name=req.find("tool"),args=req.find("arguments");const auto* wants=req.find("progress");
+                bool progressOpen=wants&&wants->t==V::Bool&&wants->b;
                 V result=failure("Invalid live session request");
                 if(name&&name->t==V::Str&&args&&args->t==V::Obj) {
                     auto reply=std::make_shared<Reply>();
@@ -122,9 +139,12 @@ struct LiveSessionBridge::Impl {
                             if(!reply->value&&!reply->cancellation.stop_requested())reply->value=std::move(value);
                             reply->changed.notify_all();
                         },reply->cancellation.get_token());
+                        const auto began=Clock::now();auto nextProgress=began+std::chrono::milliseconds(liveProgressIntervalMs);
                         std::unique_lock lock(reply->mutex);
-                        while(!reply->value&&remaining(deadline)&&WaitForSingleObject(stopped,0)!=WAIT_OBJECT_0)
+                        while(!reply->value&&remaining(deadline)&&WaitForSingleObject(stopped,0)!=WAIT_OBJECT_0){
                             reply->changed.wait_for(lock,std::chrono::milliseconds(10));
+                            if(progressOpen&&!reply->value&&Clock::now()>=nextProgress){lock.unlock();progressOpen=sendProgress(pipe,began);nextProgress=Clock::now()+std::chrono::milliseconds(liveProgressIntervalMs);lock.lock();}
+                        }
                         if(reply->value)result=std::move(*reply->value);
                         else result=failure("Studio call cancelled or timed out; outcome may be unknown. Inspect revision before retrying a mutation.");
                     }catch(const std::exception& e){result=failure(std::string("Studio dispatch failed: ")+e.what());}
@@ -150,8 +170,13 @@ LiveSessionBridge::LiveSessionBridge():impl_(std::make_unique<Impl>()){}
 LiveSessionBridge::~LiveSessionBridge(){stop();}
 std::string LiveSessionBridge::endpoint()const{return impl_->name;}
 std::string LiveSessionBridge::lastError()const{return impl_->error;}
-bool LiveSessionBridge::start(Dispatch dispatch,std::string name) {
+bool LiveSessionBridge::start(Dispatch dispatch,std::string name,Progress progress) {
     stop();impl_->error.clear();
+#ifdef _WIN32
+    impl_->progress=std::move(progress);
+#else
+    (void)progress;
+#endif
 #ifdef _WIN32
     if(!dispatch){impl_->error="Missing Studio dispatcher";return false;}
     try {
@@ -171,14 +196,18 @@ bool LiveSessionBridge::start(Dispatch dispatch,std::string name) {
         PSECURITY_DESCRIPTOR security=nullptr;
         if(!ConvertStringSecurityDescriptorToSecurityDescriptorA(descriptor.c_str(),SDDL_REVISION_1,&security,nullptr))throw std::runtime_error("Cannot create current-user pipe ACL");
         SECURITY_ATTRIBUTES attrs{sizeof(SECURITY_ATTRIBUTES),security,FALSE};
-        impl_->pipe=CreateNamedPipeA(pipePath.c_str(),PIPE_ACCESS_DUPLEX|FILE_FLAG_OVERLAPPED|FILE_FLAG_FIRST_PIPE_INSTANCE,
-                                    PIPE_TYPE_BYTE|PIPE_READMODE_BYTE|PIPE_WAIT|PIPE_REJECT_REMOTE_CLIENTS,1,65536,65536,0,&attrs);
+        // The first instance claims the name exclusively; the others join it.
+        for(unsigned i=0;i<liveInstances;++i){
+            HANDLE instance=CreateNamedPipeA(pipePath.c_str(),PIPE_ACCESS_DUPLEX|FILE_FLAG_OVERLAPPED|(i?0:FILE_FLAG_FIRST_PIPE_INSTANCE),
+                                            PIPE_TYPE_BYTE|PIPE_READMODE_BYTE|PIPE_WAIT|PIPE_REJECT_REMOTE_CLIENTS,liveInstances,65536,65536,0,&attrs);
+            if(instance==INVALID_HANDLE_VALUE){const auto code=GetLastError();LocalFree(security);throw std::runtime_error(std::string(i?"Cannot create a further local Studio pipe instance":"Cannot create exclusive local Studio pipe")+" (Windows error "+std::to_string(code)+")");}
+            impl_->pipes.push_back(instance);
+        }
         LocalFree(security);
-        if(impl_->pipe==INVALID_HANDLE_VALUE)throw std::runtime_error("Cannot create exclusive local Studio pipe (Windows error "+std::to_string(GetLastError())+")");
         impl_->stopped=CreateEventW(nullptr,TRUE,FALSE,nullptr);
         if(!impl_->stopped)throw std::runtime_error("Cannot create Studio cancellation event");
         impl_->name=std::move(name);
-        impl_->worker=std::thread([this,dispatch=std::move(dispatch)]{impl_->run(dispatch);});
+        for(HANDLE instance:impl_->pipes)impl_->workers.emplace_back([this,dispatch,instance]{impl_->run(dispatch,instance);});
         return true;
     }catch(const std::exception& e){impl_->error=e.what();stop();return false;}
 #else
@@ -188,8 +217,10 @@ bool LiveSessionBridge::start(Dispatch dispatch,std::string name) {
 void LiveSessionBridge::stop()noexcept {
 #ifdef _WIN32
     if(impl_->stopped)SetEvent(impl_->stopped);
-    if(impl_->worker.joinable())impl_->worker.join();
-    if(impl_->pipe!=INVALID_HANDLE_VALUE){CloseHandle(impl_->pipe);impl_->pipe=INVALID_HANDLE_VALUE;}
+    for(auto& worker:impl_->workers)if(worker.joinable())worker.join();
+    impl_->workers.clear();
+    for(HANDLE instance:impl_->pipes)if(instance!=INVALID_HANDLE_VALUE)CloseHandle(instance);
+    impl_->pipes.clear();
     if(impl_->stopped){CloseHandle(impl_->stopped);impl_->stopped=nullptr;}
 #endif
     impl_->name.clear();
@@ -225,14 +256,14 @@ V studioTeamDiagnostics(const AgentTeamSnapshot& snapshot,const V& args){
     }
     out.set("partial",V::makeBool(partial));out.set("omitted_roles",V::makeNum((double)omittedRoles));return envelope(out,false);
 }
-V callLiveSession(const std::string& endpoint,const std::string& tool,const V& args,unsigned timeoutMs) {
-    V request=V::makeObj();request.set("tool",V::makeStr(tool));request.set("arguments",args);
+V callLiveSession(const std::string& endpoint,const std::string& tool,const V& args,unsigned timeoutMs,const std::function<void(const V&)>& onProgress) {
+    V request=V::makeObj();request.set("tool",V::makeStr(tool));request.set("arguments",args);if(onProgress)request.set("progress",V::makeBool(true));
     std::string text=request.dump();
     if(text.size()>requestLimit)throw std::runtime_error("Live Studio request exceeds 4 MiB");
 #ifdef _WIN32
     if(timeoutMs<1||timeoutMs>liveCallLimitMs)throw std::runtime_error("Live Studio timeout must be 1..660000 ms");
-    // Connecting stays bounded at 30 s (the single pipe instance is busy while
-    // another client's call runs); the reply may wait for a long evaluation.
+    // Connecting stays bounded at 30 s (every pipe instance may be busy with
+    // other clients' calls); the reply may wait for a long evaluation.
     std::string pipePath=path(endpoint);const auto began=Clock::now();
     const auto connectDeadline=began+std::chrono::milliseconds(std::min(timeoutMs,30000u)),deadline=began+std::chrono::milliseconds(timeoutMs);
     HANDLE raw=INVALID_HANDLE_VALUE;
@@ -245,13 +276,18 @@ V callLiveSession(const std::string& endpoint,const std::string& tool,const V& a
     }
     if(raw==INVALID_HANDLE_VALUE)throw std::runtime_error("Timed out waiting for Studio connection; another live call may still be running. Nothing was sent.");
     Handle pipe(raw);
-    if(!writeFrame(pipe.value,text,nullptr,deadline)||!readFrame(pipe.value,text,responseLimit,nullptr,deadline))
-        throw std::runtime_error("Studio connection lost or timed out; outcome may be unknown. Inspect document revision before retrying a mutation.");
+    const char* lost="Studio connection lost or timed out; outcome may be unknown. Inspect document revision before retrying a mutation.";
+    if(!writeFrame(pipe.value,text,nullptr,deadline))throw std::runtime_error(lost);
+    for(;;){
+        if(!readFrame(pipe.value,text,responseLimit,nullptr,deadline))throw std::runtime_error(lost);
+        V frame;if(!onProgress||!arkjson::parse(text,frame)||frame.t!=V::Obj||frame.obj.size()!=1||!frame.find("ark_progress"))break;
+        try{onProgress(*frame.find("ark_progress"));}catch(...){} // A client display failure never changes the call outcome.
+    }
     char received=1;transfer(pipe.value,&received,1,true,nullptr,deadline);
     V response;if(!arkjson::parse(text,response)||response.t!=V::Obj)throw std::runtime_error("Invalid Studio tool response");
     return response;
 #else
-    (void)endpoint;(void)timeoutMs;throw std::runtime_error("Live Studio connections currently require Windows");
+    (void)endpoint;(void)timeoutMs;(void)onProgress;throw std::runtime_error("Live Studio connections currently require Windows");
 #endif
 }
 }

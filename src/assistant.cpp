@@ -6,6 +6,8 @@
 #include "assistant_context.hpp"
 #include "ark/chatgpt_auth.hpp"
 #include "ark/assistant_credentials.hpp"
+#include "ark/iteration_history.hpp"
+#include "ark/result_path.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -26,6 +28,7 @@
 #include <cstddef>
 #include <cctype>
 #include <map>
+#include <deque>
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -211,6 +214,9 @@ V nativeTransport(const AssistantConfig& config,const V& request,const std::atom
         SecureZeroMemory(auth.data(),auth.size()*sizeof(wchar_t));check(ok);
     }
     if(config.protocol==AssistantProtocol::Messages)check(WinHttpAddRequestHeaders(handle,L"anthropic-version: 2023-06-01\r\n",(DWORD)-1,WINHTTP_ADDREQ_FLAG_ADD));
+    // Deferred tools and tool_addition blocks need this beta (anthropicToolAdditions).
+    if(config.protocol==AssistantProtocol::Messages)if(const auto* declared=request.find("tools");declared&&declared->t==V::Arr&&std::any_of(declared->arr.begin(),declared->arr.end(),[](const V& tool){const auto* deferred=tool.find("defer_loading");return deferred&&deferred->t==V::Bool&&deferred->b;}))
+        check(WinHttpAddRequestHeaders(handle,L"anthropic-beta: mid-conversation-tool-changes-2026-07-01\r\n",(DWORD)-1,WINHTTP_ADDREQ_FLAG_ADD));
     auto body=modelDiscovery?std::string{}:request.dump();require(body.size()<=config.maxConversationBytes,"Assistant request exceeds configured size limit.");
     check(WinHttpSendRequest(handle,WINHTTP_NO_ADDITIONAL_HEADERS,0,body.empty()?WINHTTP_NO_REQUEST_DATA:body.data(),(DWORD)body.size(),(DWORD)body.size(),0));
     check(WinHttpReceiveResponse(handle,nullptr));DWORD status=0,size=sizeof(status);
@@ -424,6 +430,24 @@ V assistantActiveTools(const V& tools,const V& conversation,const std::string& o
     for(const auto& topic:loaded)for(const auto& [name,names]:topics)if(name==topic)for(const auto& toolName:names)if(available.count(toolName)&&added.insert(toolName).second)for(const auto& tool:tools.arr)if(field(tool,"name")==toolName){out.arr.push_back(tool);break;}
     return out;
 }
+V assistantDeferredCatalogue(const V& tools,const V& conversation,const std::string& onboardingPack){
+    if(tools.t!=V::Arr)return tools;
+    const auto& topics=assistantSpecialistToolTopics();std::map<std::string,std::string> topicOf;for(const auto& [topic,names]:topics)for(const auto& name:names)topicOf.emplace(name,topic);
+    std::set<std::string> preloaded;if(V pack;!onboardingPack.empty()&&arkjson::parse(onboardingPack,pack))if(const auto* guides=pack.find("topics");guides&&guides->t==V::Arr)for(const auto& guide:guides->arr)preloaded.insert(field(guide,"topic"));
+    // First call that loaded each topic, including agent_onboard rows in query_batch.
+    std::map<std::string,std::string> loadedBy;auto onboarded=[&](const V& args,const std::string& id){const auto* topic=args.find("topic");loadedBy.emplace(topic&&topic->t==V::Str?topic->str:std::string("overview"),id);};
+    if(conversation.t==V::Arr)for(const auto& item:conversation.arr){if(field(item,"type")!="function_call")continue;V args;if(!arkjson::parse(field(item,"arguments"),args)||args.t!=V::Obj)continue;const auto name=field(item,"name"),id=field(item,"call_id");
+        if(name=="agent_onboard")onboarded(args,id);
+        else if(name=="query_batch")if(const auto* queries=args.find("queries");queries&&queries->t==V::Arr)for(const auto& query:queries->arr)if(field(query,"tool")=="agent_onboard")if(const auto* values=query.find("args");values&&values->t==V::Obj)onboarded(*values,id);}
+    std::set<std::string> available;for(const auto& tool:tools.arr)available.insert(field(tool,"name"));
+    std::string index;for(const auto& [topic,names]:topics){std::string listed;for(const auto& name:names)if(available.count(name)){if(!listed.empty())listed+=", ";listed+=name;}if(!listed.empty())index+=(index.empty()?"":"; ")+topic+": "+listed;}
+    V out=V::makeArr();
+    for(const auto& tool:tools.arr){const auto name=field(tool,"name");V advertised=tool;
+        if(name=="agent_onboard"&&!index.empty())advertised.set("description",V::makeStr(field(tool,"description")+" Specialist tools become available after their topic is loaded with agent_onboard (or already preloaded) and stay available for this conversation. "+index+"."));
+        if(const auto topic=topicOf.find(name);topic!=topicOf.end()&&!preloaded.count(topic->second)){advertised.set("ark_deferred",V::makeBool(true));if(const auto by=loadedBy.find(topic->second);by!=loadedBy.end())advertised.set("ark_loaded_by",V::makeStr(by->second));}
+        out.arr.push_back(std::move(advertised));}
+    return out;
+}
 static V preloadedGuideReceipt(const V& args){
     V out=V::makeObj();out.set("topic",*args.find("topic"));out.set("already_loaded",V::makeBool(true));
     out.set("guide_location",V::makeStr("ARK_PREBAKED_GUIDE_V1 developer message at the start of this conversation"));
@@ -444,11 +468,15 @@ V assistantFunctionTools(const V& tools){
         fn.set("description",V::makeStr(field(tool,"description")));fn.set("parameters",*schema);
         // ARK operation payloads contain extensible geometry maps. Do not force
         // optional fields to required/null or silently narrow that contract.
-        fn.set("strict",V::makeBool(false));functions.arr.push_back(std::move(fn));
+        fn.set("strict",V::makeBool(false));
+        // Internal deferral marks for the Messages adapter (see assistantDeferredCatalogue).
+        if(const auto* deferred=tool.find("ark_deferred");deferred&&deferred->t==V::Bool&&deferred->b)fn.set("ark_deferred",V::makeBool(true));
+        if(const auto* loaded=tool.find("ark_loaded_by");loaded&&loaded->t==V::Str)fn.set("ark_loaded_by",*loaded);
+        functions.arr.push_back(std::move(fn));
     }
     return functions;
 }
-V assistantRequest(const AssistantConfig& config,const V& conversation,const V& tools,bool* historyProjected){
+static V assistantRequestWith(const AssistantConfig& config,const V& conversation,const V& tools,bool* historyProjected,assistant_context::ProjectionEpoch* epoch){
     if(historyProjected)*historyProjected=false;
     validateAssistantConfig(config);require(conversation.t==V::Arr,"Assistant history must be a Responses input array.");
     if(!config.imageInputSupported)for(const auto& message:conversation.arr)require(!assistant_vision::containsImage(message),"This connector explicitly does not support image input. Choose an image-capable connector; ARK will not silently send only the filename or text.");
@@ -462,8 +490,8 @@ V assistantRequest(const AssistantConfig& config,const V& conversation,const V& 
     V include=V::makeArr();include.arr.push_back(V::makeStr("reasoning.encrypted_content"));request.set("include",include);
     request.set("instructions",V::makeStr(
         "You are the modeling assistant inside ARK CAD. Use the provided ARK tools within your assigned role's permissions. Read-only roles inspect the existing design and propose changes rather than authoring it. "
-        "Use the compact preloaded capability guide when present. Request agent_onboard with detail:guide for a relevant topic when its operation contract is needed, and reuse the result across parts. Static guides contain no live document state. Obtain doc_info with detail:revision before initial writes when only a static guide is available, and object_context for the selected objects when their live geometry or dependencies are needed. Use expected_revision and do not repeat unchanged inventories merely to start another feature. Prefer doc_preview/doc_apply detail:changes, native_inspect detail:properties, and assembly_info detail:result for a selected measurement or motion query. "
-        "Each response is a full provider round over the whole conversation: request independent reads, checks, tool_feedback and team coordination calls together in one response. ARK executes them in order and runs at most one document write per response; author the next write after reading its result. "
+        "Use the compact preloaded capability guide when present. Request agent_onboard with detail:guide for a relevant topic when its operation contract is needed, and reuse the result across parts. Static guides contain no live document state. Obtain doc_info with detail:revision before initial writes when only a static guide is available, and object_context for the selected objects when their live geometry or dependencies are needed. Use expected_revision and do not repeat unchanged inventories merely to start another feature. For orientation in an existing design, doc_info detail:digest is the compact per-revision inventory; send its fingerprints back as known_fingerprints to receive only what changed.Prefer doc_preview/doc_apply detail:changes, native_inspect detail:properties, and assembly_info detail:result for a selected measurement or motion query. "
+        "Each response is a full provider round over the whole conversation: request independent reads, checks, tool_feedback and team coordination calls together in one response. ARK executes them in order and runs at most one document write per response; author the next write after reading its result. Put a write's verification in its checks (postconditions) instead of a separate read round when they can express it. "
         "For an open-ended design brief, start with a coherent editable concept: build the overall form, proportions, interfaces and main components with the CAD tools, then refine details. User-specified dimensions, materials, process and functional constraints apply from the beginning. Unknown fabrication choices may remain explicitly unspecified; label the design as a concept and state assumptions rather than treating it as production-qualified. "
         "Functional fastener holes, tapped holes, dowels and retaining-ring grooves use Holes Orchestrator (holes_catalog and native_solid op holes_orchestrator) as persistent parametric features; sketch-only holes are for nonfunctional contours. Onboard holes for the exact recipe and sheet-lineage limits. Arkitfy preserves imported exact references and validates reconstruction with cad_inspect comparison (agent_onboard topic cad_import); containers isolate editable work only after checkout into a separate session. "
         "Create or update 2D/manufacturing drawings only when the user explicitly requests drawings for the task. They are optional and must not be generated automatically during design, assembly, BOM completion or manufacturing review. Read-only drawing source discovery does not authorize drawing.set/refresh/remove or exports. "
@@ -482,6 +510,29 @@ V assistantRequest(const AssistantConfig& config,const V& conversation,const V& 
     return assistantAdaptRequest(config,request);
     };
     const auto limit=config.authMode==AssistantAuthMode::ChatGptPlan?std::min(config.maxConversationBytes,chatGptRequestByteLimit):config.maxConversationBytes;
+    const std::size_t proactiveBytes=config.provider=="ollama"?96u*1024u:512u*1024u;
+    // 042D A/B option: reuse one projected prefix byte-identically while the
+    // request grows by less than projectionStepBytes. Graph deduplication and
+    // a moving recency cut both rewrite earlier items, so this path uses neither.
+    if(epoch&&config.projectionStepBytes&&conversation.dump().size()>proactiveBytes){
+        auto prefixHash=[&](std::size_t count){std::string bytes;for(std::size_t i=0;i<count;++i)bytes+=conversation.arr[i].dump();return iterationSha256(bytes);};
+        if(epoch->active&&epoch->until<=conversation.arr.size()&&epoch->sourceHash==prefixHash(epoch->until)){
+            V wire=epoch->prefix;for(std::size_t i=epoch->until;i<conversation.arr.size();++i)wire.arr.push_back(conversation.arr[i]);
+            V reused=build(wire);const auto bytes=reused.dump().size();
+            if(bytes<=limit&&bytes<=epoch->requestBytes+config.projectionStepBytes){if(historyProjected)*historyProjected=true;return reused;}
+        }
+        std::size_t from=0;V projected=assistant_context::project(conversation,limit,proactiveBytes/2,&from);
+        const auto tail=conversation.arr.size()-std::min(from,conversation.arr.size());
+        if(from>0&&projected.arr.size()>=tail){
+            V fresh=build(projected);const auto bytes=fresh.dump().size();
+            if(bytes<=limit){
+                V prefix=V::makeArr();prefix.arr.assign(projected.arr.begin(),projected.arr.end()-(std::ptrdiff_t)tail);
+                epoch->prefix=std::move(prefix);epoch->until=from;epoch->requestBytes=bytes;epoch->sourceHash=prefixHash(from);epoch->active=true;
+                if(historyProjected)*historyProjected=true;return fresh;
+            }
+        }
+        epoch->active=false;
+    }
     V wireHistory=assistant_context::graphProject(conversation);
     V request=build(conversation);
     if(wireHistory.dump().size()<conversation.dump().size()){
@@ -494,7 +545,6 @@ V assistantRequest(const AssistantConfig& config,const V& conversation,const V& 
     // keeps recent exchanges verbatim: compacting at 96 KB left agents seeing
     // only their latest receipt, so they re-read the design every round. Local
     // models keep the smaller bound.
-    const std::size_t proactiveBytes=config.provider=="ollama"?96u*1024u:512u*1024u;
     if(conversation.dump().size()>proactiveBytes){
         V projected=assistant_context::project(wireHistory,limit,proactiveBytes/2);
         V compact=build(projected);
@@ -514,6 +564,7 @@ V assistantRequest(const AssistantConfig& config,const V& conversation,const V& 
     }
     return request;
 }
+V assistantRequest(const AssistantConfig& config,const V& conversation,const V& tools,bool* historyProjected){return assistantRequestWith(config,conversation,tools,historyProjected,nullptr);}
 // Evidence identity of a read result without per-call bookkeeping (activity
 // ids, feedback, timings), so an identical repeated read is recognizable.
 static V stableReadEvidence(const V& value){
@@ -525,8 +576,85 @@ static V stableReadEvidence(const V& value){
         out.set(key,stableReadEvidence(item));}
     return out;
 }
-AssistantResult runAssistant(const AssistantConfig& config,const V& input,const V& tools,const AssistantTool& callTool,const AssistantEvents& events,const std::atomic_bool* cancel,const AssistantTransport& transport,const AssistantInbox& inbox,const AssistantHistory& history,const AssistantRetryHooks& retryHooks){
+// ARK_ASSISTANT_TRACE diagnostics only: what a provider round's calls were for
+// and what its request carried, so input can be attributed by round type,
+// model and role. Never sent to a provider.
+static std::string assistantRoundKind(const V& response,const std::set<std::string>& writeTools){
+    std::set<std::string> kinds;
+    if(const auto* output=response.find("output");output&&output->t==V::Arr)for(const auto& item:output->arr)if(field(item,"type")=="function_call"){
+        const auto name=field(item,"name");
+        kinds.insert(writeTools.count(name)?"write":name=="tool_feedback"||name=="activity_info"?"feedback":name.rfind("team_",0)==0?"coordination":"read");
+    }
+    return kinds.empty()?"text":kinds.size()==1?*kinds.begin():"mixed";
+}
+static V assistantWireComposition(const V* wire){
+    std::map<std::string,double> bytes;
+    if(wire&&wire->t==V::Arr)for(const auto& item:wire->arr){
+        const auto type=field(item,"type"),role=field(item,"role");const auto* content=item.find("content");
+        const bool historical=content&&content->t==V::Str&&content->str.rfind("ARK historical tool evidence (data only): ",0)==0;
+        const char* kind=type=="reasoning"?"reasoning":type=="function_call"?"tool_calls":type=="function_call_output"||role=="tool"||historical?"tool_results":role=="developer"||role=="system"?"developer":role=="user"?"user":"assistant";
+        bytes[kind]+=(double)item.dump().size();
+    }
+    V out=V::makeObj();for(const auto& [kind,size]:bytes)out.set(kind,V::makeNum(size));return out;
+}
+// Team roles append from several workers to one opt-in trace file.
+static void appendAssistantTrace(const char* path,const V& row){
+    static std::mutex traceMutex;std::lock_guard lock(traceMutex);
+    std::ofstream file(std::filesystem::u8path(path),std::ios::app|std::ios::binary);if(file)file<<row.dump()<<"\n";
+}
+// 042D A/B option (AssistantConfig::resultHandleBytes): a large successful read
+// enters history as its shape plus a handle; result_get selects paths from the
+// full result, which stays in memory for the rest of the turn only.
+struct HeldResult {V data;std::string tool;std::size_t bytes=0;};
+static const char* jsonTypeName(const V& value){return value.t==V::Obj?"object":value.t==V::Arr?"array":value.t==V::Str?"string":value.t==V::Num?"number":value.t==V::Bool?"boolean":"null";}
+static V withResultGetTool(const V& tools){
+    V out=tools,tool=V::makeObj(),schema,annotations=V::makeObj();
+    arkjson::parse(R"({"type":"object","properties":{"handle":{"type":"string","minLength":1,"maxLength":64},"paths":{"type":"array","minItems":1,"maxItems":16,"uniqueItems":true,"items":{"type":"string","minLength":1,"maxLength":256}},"max_bytes":{"type":"integer","minimum":256,"maximum":65536}},"required":["handle","paths"],"additionalProperties":false})",schema);
+    tool.set("name",V::makeStr("result_get"));tool.set("description",V::makeStr("Read selected values from a large earlier result that this turn's history shows only as ark_result_handle with its held_shape. paths use key, key[n], key[a:b] and key[] (each element), joined by dots. Handles last for the turn that produced them; after that, repeat the original read named by held_tool/held_args. max_bytes defaults to 16384."));
+    tool.set("inputSchema",schema);annotations.set("readOnlyHint",V::makeBool(true));tool.set("annotations",annotations);out.arr.push_back(std::move(tool));return out;
+}
+static bool heldResultEligible(const std::string& name,const V& tools,const V& args,const V& result,std::size_t threshold){
+    static const std::set<std::string> excluded={"result_get","tool_feedback","activity_info","agent_onboard","snapshot","doc_preview","memory_context","usage_record"};
+    if(excluded.count(name)||name.rfind("team_",0)==0||name.rfind("snapshot",0)==0||args.t!=V::Obj||!assistantToolReadOnly(tools,name,args))return false;
+    const auto* failed=result.find("isError");if(!failed||failed->t!=V::Bool||failed->b)return false;
+    const auto* data=result.find("structuredContent");return data&&data->t==V::Obj&&data->dump().size()>threshold;
+}
+static V heldResultReceipt(const std::string& id,const std::string& tool,const V& args,const V& data){
+    static const std::set<std::string> kept={"pending_feedback_ids","rated_ids","team_progress","ark_repeat_notice","activity_capture_error"};
+    V summary=V::makeObj(),shape=V::makeObj();
+    for(const auto& [key,value]:data.obj){
+        const bool scalar=value.t==V::Num||value.t==V::Bool||value.t==V::Null||(value.t==V::Str&&value.str.size()<=160);
+        if(scalar||(kept.count(key)&&value.dump().size()<=16384)){summary.set(key,value);continue;}
+        V item=V::makeObj();item.set("type",V::makeStr(jsonTypeName(value)));if(value.t==V::Arr)item.set("count",V::makeNum((double)value.arr.size()));if(value.t==V::Obj){V names=V::makeArr();for(const auto& child:value.obj)if(names.arr.size()<24)names.arr.push_back(V::makeStr(child.first));item.set("keys",names);}item.set("bytes",V::makeNum((double)value.dump().size()));shape.set(key,item);
+    }
+    summary.set("ark_result_handle",V::makeStr(id));summary.set("held_tool",V::makeStr(tool));if(args.dump().size()<=2048)summary.set("held_args",args);summary.set("held_bytes",V::makeNum((double)data.dump().size()));summary.set("held_shape",shape);
+    summary.set("held_note",V::makeStr("ARK holds the full result for the rest of this turn. Read the values you need with result_get {handle, paths}, for example paths [\"features[].id\"]. Scalar fields are shown here."));
+    V receipt=V::makeObj();receipt.set("isError",V::makeBool(false));receipt.set("structuredContent",summary);return receipt;
+}
+static V readHeldResult(const std::map<std::string,HeldResult>& held,const V& args){
+    auto failure=[](const char* code,const std::string& text){V out=errorResult(text);V data=V::makeObj();data.set("error_code",V::makeStr(code));data.set("error",V::makeStr(text));out.set("structuredContent",data);return out;};
+    for(const auto& entry:args.obj)if(entry.first!="handle"&&entry.first!="paths"&&entry.first!="max_bytes")return failure("INVALID_ARGUMENT","result_get accepts handle, paths and max_bytes only.");
+    const auto* handle=args.find("handle");const auto* paths=args.find("paths");const auto* cap=args.find("max_bytes");
+    if(!handle||handle->t!=V::Str||!paths||paths->t!=V::Arr||paths->arr.empty()||paths->arr.size()>16)return failure("INVALID_ARGUMENT","result_get needs a handle and 1..16 paths.");
+    const double maxBytes=cap?cap->num:16384;if(cap&&(cap->t!=V::Num||maxBytes<256||maxBytes>65536||std::floor(maxBytes)!=maxBytes))return failure("INVALID_ARGUMENT","result_get max_bytes must be an integer from 256 to 65536.");
+    const auto found=held.find(handle->str);
+    if(found==held.end())return failure("RESULT_HANDLE_EXPIRED","This result is no longer held: handles last for the turn that produced them. Repeat the read named by held_tool and held_args in that receipt.");
+    V values=V::makeObj(),missing=V::makeObj();
+    for(const auto& path:paths->arr){
+        if(path.t!=V::Str)return failure("INVALID_ARGUMENT","result_get paths must be strings.");
+        V value;std::string where;try{if(selectResultPath(found->second.data,path.str,value,where))values.set(path.str,value);else missing.set(path.str,V::makeStr(where));}catch(const std::exception& error){return failure("INVALID_ARGUMENT",error.what());}
+    }
+    V data=V::makeObj();data.set("handle",*handle);data.set("held_tool",V::makeStr(found->second.tool));if(const auto* revision=found->second.data.find("revision"))data.set("revision",*revision);data.set("values",values);if(!missing.obj.empty())data.set("missing",missing);
+    if(data.dump().size()>(std::size_t)maxBytes){V sizes=V::makeObj();for(const auto& [path,value]:values.obj)sizes.set(path,V::makeNum((double)value.dump().size()));auto out=failure("RESULT_GET_TOO_LARGE","The selected values are larger than max_bytes; select narrower paths or ranges.");V detail=*out.find("structuredContent");detail.set("bytes_by_path",sizes);out.set("structuredContent",detail);return out;}
+    V out=V::makeObj();out.set("isError",V::makeBool(false));out.set("structuredContent",data);return out;
+}
+AssistantResult runAssistant(const AssistantConfig& config,const V& input,const V& catalogTools,const AssistantTool& callTool,const AssistantEvents& events,const std::atomic_bool* cancel,const AssistantTransport& transport,const AssistantInbox& inbox,const AssistantHistory& history,const AssistantRetryHooks& retryHooks){
     cancelled(cancel);
+    const bool holdResults=config.resultHandleBytes>0&&config.protocol!=AssistantProtocol::Acp;
+    const V tools=holdResults?withResultGetTool(catalogTools):catalogTools;
+    std::map<std::string,HeldResult> held;std::deque<std::string> heldOrder;std::size_t heldBytes=0;unsigned heldSerial=0;
+    const std::string heldNonce=[]{std::random_device device;std::ostringstream out;out<<std::hex<<std::setw(8)<<std::setfill('0')<<(device()&0xffffffffu);return out.str();}();
+    assistant_context::ProjectionEpoch epoch;auto* stableProjection=config.projectionStepBytes?&epoch:nullptr;
     unsigned memoryCalls=0;std::uint64_t memoryMs=0;
     const auto recalled=config.memoryPrefetch?projectMemoryAssistantInput(input,tools,[&](const std::string& name,const V& args){const auto began=std::chrono::steady_clock::now();++memoryCalls;auto receipt=callTool(name,args);memoryMs+=(std::uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-began).count();return receipt;}):input;
     if(config.protocol==AssistantProtocol::Acp){require(!transport,"Grok Build ACP cannot use an HTTP provider transport or cloud fallback.");auto result=runAssistantAcp(config,recalled,tools,callTool,events,cancel,inbox,history,retryHooks);result.performance.toolCalls+=memoryCalls;result.performance.toolMilliseconds+=memoryMs;return result;}
@@ -571,15 +699,27 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
     };
     const auto consumeFinalInbox=[&]{return (!retryHooks.inputPending||retryHooks.inputPending())&&consumeInbox();};
     bool earlierToolCalls=false;std::string lastCompletionIssue;V previousRequest;
+    // The reply held while required feedback is requested (042D).
+    std::string replyHeldForFeedback;
+    // Final checks shared by a plain final reply and a reply held only for
+    // feedback. false: new input or a completion issue needs another round.
+    auto finishReply=[&](std::string reply)->bool{
+        if(retryHooks.completionCheck){auto check=retryHooks.completionCheck();const auto* accepted=check.find("allowed");if(!accepted||accepted->t!=V::Bool)throw std::runtime_error("BOM completion verification unavailable; prior work retained");if(!accepted->b){auto issue=field(check,"error");if(issue.empty())issue="BOM review required";if(issue==lastCompletionIssue)throw std::runtime_error(issue);lastCompletionIssue=issue;V reminder=V::makeObj();reminder.set("role",V::makeStr("developer"));reminder.set("content",V::makeStr(issue));appendHistory(reminder);if(history)history(result.conversation);emit(events,AssistantEvent::Status,"Final reply held: current BOM review required");return false;}auto qualification=field(check,"summary");if(!qualification.empty())reply+="\n\n"+qualification;}
+        cancelled(cancel);
+        if(consumeFinalInbox()||(retryHooks.acceptCompletion&&!retryHooks.acceptCompletion())){if(history)history(result.conversation);emit(events,AssistantEvent::Status,"New user input queued; continuing before final reply");return false;}
+        if(!reply.empty()){if(!result.text.empty())result.text+='\n';result.text+=reply;emit(events,AssistantEvent::Text,reply);}
+        return true;
+    };
     // Reads repeated with identical results since the last successful write.
     // This is a notice to the model, never a turn or token budget.
     std::map<std::string,std::pair<unsigned,std::string>> readEvidence;unsigned repeatedReadRounds=0;
     // Execution still checks the full catalogue; only the advertised list is deferred.
-    auto advertisedTools=[&]{return config.deferSpecialistTools?assistantActiveTools(tools,result.conversation,config.onboardingPack):tools;};
+    const bool toolAdditions=config.deferSpecialistTools&&assistantMessagesToolAdditions(config);
+    auto advertisedTools=[&]{return toolAdditions?assistantDeferredCatalogue(tools,result.conversation,config.onboardingPack):config.deferSpecialistTools?assistantActiveTools(tools,result.conversation,config.onboardingPack):tools;};
     for(unsigned round=0;(!config.maxRounds||round<config.maxRounds);++round){
         cancelled(cancel);emit(events,AssistantEvent::Status,"Thinking...");consumeInbox();
         if(history)history(result.conversation);
-        bool projected=false;V request=assistantRequest(config,result.conversation,advertisedTools(),&projected);
+        bool projected=false;V request=assistantRequestWith(config,result.conversation,advertisedTools(),&projected,stableProjection);
         if(projected&&!projectionAnnounced){projectionAnnounced=true;needsProjectedInspection=true;measuredEvent(AssistantEvent::Status,"Request history compacted for transport; original receipts retained. Inspect current doc_info before writing.");}
         auto& performance=result.performance;
         V response;
@@ -587,7 +727,7 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
         auto retryStatus=[&](const std::string& text){if(events){AssistantEvent event;event.kind=AssistantEvent::Status;event.text=text;event.usage=result.usage;event.performance=performance;event.providerRetry=true;events(event);}};
         for(unsigned attempt=0;;++attempt){
             cancelled(cancel);if(attempt&&retryHooks.checkpoint)retryHooks.checkpoint();cancelled(cancel);
-            if(attempt){const bool updated=consumeInbox();if(updated){if(history)history(result.conversation);request=assistantRequest(config,result.conversation,advertisedTools(),&projected);if(projected&&!projectionAnnounced){projectionAnnounced=true;needsProjectedInspection=true;measuredEvent(AssistantEvent::Status,"Request history compacted for transport; original receipts retained. Inspect current doc_info before writing.");}}retryStatus("Retry "+std::to_string(attempt)+"/3 / requesting "+(updated?"the latest user context":"the unchanged response"));}
+            if(attempt){const bool updated=consumeInbox();if(updated){if(history)history(result.conversation);request=assistantRequestWith(config,result.conversation,advertisedTools(),&projected,stableProjection);if(projected&&!projectionAnnounced){projectionAnnounced=true;needsProjectedInspection=true;measuredEvent(AssistantEvent::Status,"Request history compacted for transport; original receipts retained. Inspect current doc_info before writing.");}}retryStatus("Retry "+std::to_string(attempt)+"/3 / requesting "+(updated?"the latest user context":"the unchanged response"));}
             ++performance.providerRequests;performance.lastRequestBytes=request.dump().size();performance.lastInputBytes=request.find("input")?request.find("input")->dump().size():request.find("messages")?request.find("messages")->dump().size():0;performance.lastToolSchemaBytes=request.find("tools")->dump().size();
             performance.lastOriginalHistoryBytes=result.conversation.dump().size();const auto* instructions=request.find("instructions");if(!instructions)instructions=request.find("system");performance.lastInstructionBytes=instructions?instructions->dump().size():0;performance.lastMessageBytes=performance.lastToolResultBytes=0;
             const auto* wire=request.find("input");if(!wire)wire=request.find("messages");
@@ -618,9 +758,13 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
             const V* wire=request.find("input");if(!wire)wire=request.find("messages");double sentBytes=0,receivedBytes=0;
             const auto sent=reasoningRows(wire,sentBytes),received=reasoningRows(response.find("output"),receivedBytes);const auto usage=responseUsage(response);
             V row=V::makeObj();row.set("round",V::makeNum(round));row.set("provider_round",V::makeBool(true));row.set("protocol",V::makeStr(assistantProtocolName(config.protocol)));row.set("auth_mode",V::makeStr(config.authMode==AssistantAuthMode::ChatGptPlan?"chatgpt-plan":"api-key"));row.set("request_bytes",V::makeNum((double)performance.lastRequestBytes));row.set("input_items",V::makeNum(wire&&wire->t==V::Arr?(double)wire->arr.size():0));
+            row.set("provider",V::makeStr(config.provider));row.set("model",V::makeStr(config.model));if(!config.traceRole.empty())row.set("role",V::makeStr(config.traceRole));
+            row.set("round_kind",V::makeStr(assistantRoundKind(response,writeTools)));V calledTools=V::makeArr();if(const auto* output=response.find("output");output&&output->t==V::Arr)for(const auto& item:output->arr)if(field(item,"type")=="function_call"&&calledTools.arr.size()<32)calledTools.arr.push_back(V::makeStr(field(item,"name")));row.set("calls",calledTools);
+            row.set("tools_bytes",V::makeNum((double)performance.lastToolSchemaBytes));row.set("instruction_bytes",V::makeNum((double)performance.lastInstructionBytes));row.set("tool_result_bytes",V::makeNum((double)performance.lastToolResultBytes));row.set("message_bytes",V::makeNum((double)performance.lastMessageBytes));row.set("input_composition_bytes",assistantWireComposition(wire));
+            if(const auto* key=request.find("prompt_cache_key");key&&key->t==V::Str)row.set("prompt_cache_key",*key);
             row.set("reasoning_sent",V::makeNum(sent.first));row.set("reasoning_sent_encrypted",V::makeNum(sent.second));row.set("reasoning_sent_encrypted_bytes",V::makeNum(sentBytes));row.set("reasoning_received",V::makeNum(received.first));row.set("reasoning_received_encrypted",V::makeNum(received.second));row.set("reasoning_received_encrypted_bytes",V::makeNum(receivedBytes));
             row.set("input_tokens",V::makeNum((double)usage.inputTokens));row.set("cached_input_tokens",V::makeNum((double)usage.cachedInputTokens));row.set("reasoning_tokens",V::makeNum((double)usage.reasoningTokens));row.set("output_tokens",V::makeNum((double)usage.outputTokens));row.set("projected",V::makeBool(projected));row.set("prefix_reuse_bytes",V::makeNum((double)performance.lastPrefixReuseBytes));row.set("prefix_break",V::makeStr(performance.lastPrefixBreak));
-            std::ofstream file(std::filesystem::u8path(trace),std::ios::app|std::ios::binary);if(file)file<<row.dump()<<"\n";
+            appendAssistantTrace(trace,row);
         }
         measuredEvent(AssistantEvent::Usage,assistantUsageLabel(result.usage),response.find("ark_provider_outcome")?*response.find("ark_provider_outcome"):V{});
         // A returned response can have billed tokens even if it was incomplete,
@@ -674,14 +818,11 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
                 "Assistant completed without a final visible reply. Earlier ARK tool calls may have changed the document; inspect it before retrying.":
                 "Assistant completed without a visible reply or ARK tool call. It did not request a model change; try again or select another available model.");
             if(!pendingFeedback.empty()&&allowed.count("tool_feedback")){
-                if(feedbackReminderSent)throw std::runtime_error("Required tool feedback was not supplied after the explicit reminder. CAD work and pending project records are retained; resume to provide the missing ratings.");feedbackReminderSent=true;
-                V pending=V::makeArr();for(const auto& id:pendingFeedback)if(pending.arr.size()<64)pending.arr.push_back(V::makeStr(id));V reminder=V::makeObj();reminder.set("role",V::makeStr("developer"));reminder.set("content",V::makeStr("Before finishing, submit tool_feedback for your actual unscored actions: "+pending.dump()+". Rate utility and difficulty 1..5, describe the action, and note issues or wished tools/options. Do not invent successful outcomes. Feedback can be batched with other tool calls."));appendHistory(reminder);if(history)history(result.conversation);emit(events,AssistantEvent::Status,"Recording required tool feedback before completion");continue;
+                if(feedbackReminderSent)throw std::runtime_error("Required tool feedback was not supplied after the explicit reminder. CAD work and pending project records are retained; resume to provide the missing ratings.");feedbackReminderSent=true;replyHeldForFeedback=heldFinalText;
+                V pending=V::makeArr();for(const auto& id:pendingFeedback)if(pending.arr.size()<64)pending.arr.push_back(V::makeStr(id));V reminder=V::makeObj();reminder.set("role",V::makeStr("developer"));reminder.set("content",V::makeStr("Before finishing, submit tool_feedback for your actual unscored actions: "+pending.dump()+". Rate utility and difficulty 1..5, describe the action, and note issues or wished tools/options. Do not invent successful outcomes. Feedback can be batched with other tool calls."+std::string(allowed.count("team_report_task")?" In a team, the same ratings can go in team_report_task or team_finish_goal ratings.":"")));appendHistory(reminder);if(history)history(result.conversation);emit(events,AssistantEvent::Status,"Recording required tool feedback before completion");continue;
             }
-            if(retryHooks.completionCheck){auto check=retryHooks.completionCheck();const auto* accepted=check.find("allowed");if(!accepted||accepted->t!=V::Bool)throw std::runtime_error("BOM completion verification unavailable; prior work retained");if(!accepted->b){auto issue=field(check,"error");if(issue.empty())issue="BOM review required";if(issue==lastCompletionIssue)throw std::runtime_error(issue);lastCompletionIssue=issue;V reminder=V::makeObj();reminder.set("role",V::makeStr("developer"));reminder.set("content",V::makeStr(issue));appendHistory(reminder);if(history)history(result.conversation);emit(events,AssistantEvent::Status,"Final reply held: current BOM review required");continue;}auto qualification=field(check,"summary");if(!qualification.empty())heldFinalText+="\n\n"+qualification;}
-            cancelled(cancel);
-            if(consumeFinalInbox()||(retryHooks.acceptCompletion&&!retryHooks.acceptCompletion())){if(history)history(result.conversation);emit(events,AssistantEvent::Status,"New user input queued; continuing before final reply");continue;}
-            if(!heldFinalText.empty()){if(!result.text.empty())result.text+='\n';result.text+=heldFinalText;emit(events,AssistantEvent::Text,heldFinalText);}
-            return result;
+            if(finishReply(heldFinalText))return result;
+            continue;
         }
         earlierToolCalls=true;
         // Independent reads, feedback and coordination may share a response;
@@ -697,6 +838,7 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
             else if(needsProjectedInspection&&writeTools.count(name)&&!assistantToolReadOnly(tools,name,args))toolResult=errorResult("Request history was compacted. Read current doc_info successfully before any write; prior commits must not be replayed.");
             else if(responseWrote&&writeTools.count(name)&&!assistantToolReadOnly(tools,name,args))toolResult=errorResult("Not executed: ARK runs one document write per response. Inspect the earlier write result from this response, then resubmit this change at the revision it reports.");
             else if(name=="agent_onboard"&&preloadedGuideTopic(config.onboardingPack,args))toolResult=preloadedGuideReceipt(args);
+            else if(holdResults&&name=="result_get")toolResult=readHeldResult(held,args);
             else if(!callTool)toolResult=errorResult("The host did not provide an ARK tool executor.");
             else {try{toolResult=callTool(name,args);}catch(const std::exception&){toolResult=errorResult("ARK tool execution failed; inspect the document before retrying.");}}
             if(args.t==V::Obj&&writeTools.count(name)&&!assistantToolReadOnly(tools,name,args))responseWrote=true;
@@ -712,11 +854,19 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
                         V* target=&toolResult;if(data)for(auto& entry:toolResult.obj)if(entry.first=="structuredContent"){target=&entry.second;break;}if(target->t==V::Obj)target->set("ark_repeat_notice",V::makeStr(notice));}
                     else readEvidence.insert_or_assign(key,std::make_pair(round,evidence));}
                 onlyRepeatedReads=onlyRepeatedReads&&repeated;}
+            const auto fullBytes=toolResult.dump().size();
+            if(holdResults&&heldResultEligible(name,tools,args,toolResult,config.resultHandleBytes)){
+                const auto id="rh-"+heldNonce+"-"+std::to_string(++heldSerial);const auto& data=*toolResult.find("structuredContent");const auto bytes=data.dump().size();
+                V receipt=heldResultReceipt(id,name,args,data);held[id]=HeldResult{data,name,bytes};heldOrder.push_back(id);heldBytes+=bytes;
+                // Memory bound for one turn's held results, not an agent budget.
+                while(heldBytes>64u*1024u*1024u&&heldOrder.size()>1){const auto oldest=heldOrder.front();heldOrder.pop_front();heldBytes-=held[oldest].bytes;held.erase(oldest);}
+                toolResult=std::move(receipt);
+            }
             // Opt-in local diagnosis: ARK_ASSISTANT_TRACE names a JSONL file that
             // receives each tool call's name, arguments (bounded) and outcome.
-            if(const char* trace=std::getenv("ARK_ASSISTANT_TRACE");trace&&*trace){V row=V::makeObj();row.set("round",V::makeNum(round));row.set("tool",V::makeStr(name));auto argsText=field(call,"arguments");if(argsText.size()>4096)argsText=argsText.substr(0,4096)+"...";row.set("arguments",V::makeStr(argsText));
-                const auto* failed=toolResult.find("isError");row.set("is_error",V::makeBool(failed&&failed->t==V::Bool&&failed->b));row.set("result_bytes",V::makeNum((double)toolResult.dump().size()));const auto* data=toolResult.find("structuredContent");row.set("repeat_notice",V::makeBool(data&&data->find("ark_repeat_notice")));
-                std::ofstream file(std::filesystem::u8path(trace),std::ios::app|std::ios::binary);if(file)file<<row.dump()<<"\n";}
+            if(const char* trace=std::getenv("ARK_ASSISTANT_TRACE");trace&&*trace){V row=V::makeObj();row.set("round",V::makeNum(round));if(!config.traceRole.empty())row.set("role",V::makeStr(config.traceRole));row.set("tool",V::makeStr(name));auto argsText=field(call,"arguments");if(argsText.size()>4096)argsText=argsText.substr(0,4096)+"...";row.set("arguments",V::makeStr(argsText));
+                const auto* failed=toolResult.find("isError");row.set("is_error",V::makeBool(failed&&failed->t==V::Bool&&failed->b));row.set("result_bytes",V::makeNum((double)fullBytes));row.set("history_bytes",V::makeNum((double)toolResult.dump().size()));const auto* data=toolResult.find("structuredContent");row.set("repeat_notice",V::makeBool(data&&data->find("ark_repeat_notice")));
+                appendAssistantTrace(trace,row);}
             cancelled(cancel);V observation=visualObservation(name,args,toolResult);if(!observation.isNull())observations.push_back(std::move(observation));std::string data=compactToolReceipt(std::move(toolResult)).dump();
             if(data.size()>config.maxResponseBytes)data=errorResult("Tool result exceeded the assistant size limit. Use a compact inspection. The operation may already have completed.").dump();
             V reply=V::makeObj();reply.set("type",V::makeStr("function_call_output"));reply.set("call_id",V::makeStr(field(call,"call_id")));reply.set("output",V::makeStr(data));
@@ -735,6 +885,14 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
             result.conversation.arr.push_back(std::move(observation));assistant_vision::prune(result.conversation,config.maxConversationBytes-std::min<std::size_t>(65536,config.maxConversationBytes/8));
         }
         if(!observations.empty()&&history)history(result.conversation);
+        // 042D: a reply held only for required feedback is final once a round of
+        // nothing but feedback calls has recorded it; no provider round is spent
+        // to repeat the same reply. Any other call or new text keeps the loop.
+        if(!replyHeldForFeedback.empty()){
+            const bool onlyFeedback=!roundHasText&&std::all_of(calls.begin(),calls.end(),[](const V& call){const auto name=field(call,"name");return name=="tool_feedback"||name=="activity_info";});
+            if(!onlyFeedback)replyHeldForFeedback.clear();
+            else if(pendingFeedback.empty()){const auto reply=std::move(replyHeldForFeedback);replyHeldForFeedback.clear();if(finishReply(reply))return result;}
+        }
     }
     throw AssistantRoundLimit(config.maxRounds);
 }

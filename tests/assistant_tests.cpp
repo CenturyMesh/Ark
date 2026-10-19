@@ -11,6 +11,9 @@
 #include <stdexcept>
 #include <thread>
 #include <vector>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
 using V=arkjson::Value;
 static int checks=0;
 static void check(bool ok,const char* why){++checks;if(!ok)throw std::runtime_error(why);}
@@ -155,6 +158,79 @@ static void repeatedReadChecks(){
 }
 // One response may batch independent calls; document writes stay one per
 // response so the next write is authored after the previous result.
+static void setTraceEnvironment(const std::string& value){
+#ifdef _WIN32
+    _putenv_s("ARK_ASSISTANT_TRACE",value.c_str());
+#else
+    if(value.empty())unsetenv("ARK_ASSISTANT_TRACE");else setenv("ARK_ASSISTANT_TRACE",value.c_str(),1);
+#endif
+}
+// 042D: provider rounds are attributable to model, role and round kind.
+static void traceAttributionChecks(){
+    const auto path=std::filesystem::temp_directory_path()/("ark-trace-042d-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".jsonl");
+    setTraceEnvironment(path.string());
+    ark::AssistantConfig config;config.model="offline-trace";config.traceRole="lead";int rounds=0;
+    try{ark::runAssistant(config,V::makeStr("Inspect the revision"),ark::AgentSession::tools(),[](const std::string&,const V&){return json(R"({"isError":false,"structuredContent":{"revision":4}})");},{},nullptr,
+        [&](auto&,auto&,auto*){return ++rounds==1?toolResponse("trace_read","doc_info",R"({"detail":"revision"})"):finalResponse();});}
+    catch(...){setTraceEnvironment("");throw;}
+    setTraceEnvironment("");
+    std::vector<V> provider,tool;{std::ifstream file(path);for(std::string line;std::getline(file,line);){auto row=json(line);(row.find("provider_round")?provider:tool).push_back(std::move(row));}}
+    std::filesystem::remove(path);
+    check(provider.size()==2&&tool.size()==1,"trace records both provider rounds and the tool call");
+    const auto& first=provider[0];
+    check(first.find("model")->asStr()=="offline-trace"&&first.find("provider")->asStr()=="openai"&&first.find("role")->asStr()=="lead","provider rounds name model, provider and role");
+    check(first.find("round_kind")->asStr()=="read"&&first.find("calls")->arr.size()==1&&first.find("calls")->arr[0].asStr()=="doc_info"&&provider[1].find("round_kind")->asStr()=="text","rounds are classified by the calls they made");
+    check(first.find("tools_bytes")->num>0&&first.find("input_composition_bytes")->find("user")&&provider[1].find("input_composition_bytes")->find("tool_results")&&provider[1].find("input_composition_bytes")->find("tool_calls"),"trace splits request bytes by schema and history kind");
+    check(tool[0].find("role")->asStr()=="lead","tool rows carry the role");
+}
+static V lastToolOutput(const V& request){const auto& input=request.find("input")->arr;for(auto it=input.rbegin();it!=input.rend();++it)if(it->find("type")&&it->find("type")->asStr()=="function_call_output")return json(it->find("output")->asStr());return V{};}
+static const V& payloadOf(const V& result){const auto* data=result.find("structuredContent");return data?*data:result;}
+// 042D A/B option: a large read enters history as a handle that result_get reads.
+static void heldResultChecks(){
+    ark::AssistantConfig config;config.model="offline-held";config.resultHandleBytes=4096;int rounds=0,executed=0;std::string handle;bool advertised=false,shaped=false,selected=false,expired=false;
+    V big=V::makeObj(),features=V::makeArr();for(int i=0;i<200;++i){V feature=V::makeObj();feature.set("id",V::makeNum(i+1));feature.set("name",V::makeStr("Feature "+std::to_string(i+1)));features.arr.push_back(feature);}big.set("revision",V::makeNum(7));big.set("features",features);
+    ark::runAssistant(config,V::makeStr("Inspect the frame"),ark::AgentSession::tools(),[&](const std::string&,const V&){++executed;V out=V::makeObj();out.set("isError",V::makeBool(false));out.set("structuredContent",big);return out;},{},nullptr,
+        [&](auto&,const V& request,auto*){
+            switch(++rounds){
+            case 1:for(const auto& tool:request.find("tools")->arr)if(tool.find("name")->asStr()=="result_get")advertised=true;return toolResponse("held_read","doc_info","{}");
+            case 2:{const auto out=lastToolOutput(request);const auto& data=payloadOf(out);handle=data.find("ark_result_handle")?data.find("ark_result_handle")->asStr():"";
+                shaped=!handle.empty()&&!data.find("features")&&data.find("revision")->num==7&&data.find("held_shape")->find("features")->find("count")->num==200&&out.dump().size()<2048;
+                const std::string args=R"({"handle":")"+handle+R"(","paths":["features[0:2].name"]})";return toolResponse("held_get","result_get",args.c_str());}
+            case 3:{const auto output=lastToolOutput(request);const auto& data=payloadOf(output);const auto* values=data.find("values");selected=values&&values->find("features[0:2].name")&&values->find("features[0:2].name")->dump()==R"(["Feature 1","Feature 2"])";if(!selected)std::cerr<<"result_get receipt: "<<output.dump().substr(0,600)<<'\n';
+                return toolResponse("held_unknown","result_get",R"({"handle":"rh-unknown-1","paths":["revision"]})");}
+            case 4:{const auto output=lastToolOutput(request);const auto& data=payloadOf(output);expired=data.find("error_code")&&data.find("error_code")->asStr()=="RESULT_HANDLE_EXPIRED";return finalResponse();}
+            default:return finalResponse();}});
+    check(advertised,"result_get is advertised when results are held");
+    check(shaped,"a large read enters history as its shape, scalars and a handle");
+    check(selected&&executed==1,"result_get selects paths from the held result without another tool call");
+    check(expired,"an unknown handle is rejected explicitly");
+}
+// 042D: a reply held only for required feedback is final once a feedback-only
+// round records the ratings; no extra provider round repeats the reply.
+static void heldReplyAfterFeedbackChecks(){
+    ark::AssistantConfig config;config.model="offline-feedback";int rounds=0;
+    auto result=ark::runAssistant(config,V::makeStr("Inspect the bracket"),ark::AgentSession::tools(),[](const std::string& name,const V&){
+            if(name=="tool_feedback")return json(R"({"isError":false,"structuredContent":{"rated_ids":["held-a1"],"pending_feedback_ids":[]}})");
+            return json(R"({"isError":false,"structuredContent":{"revision":2,"activity_id":"held-a1","feedback_required":true}})");},{},nullptr,
+        [&](auto&,auto&,auto*){switch(++rounds){
+            case 1:return toolResponse("held_read","doc_info",R"({"detail":"revision"})");
+            case 2:return json(R"({"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Bracket inspected at revision 2."}]}]})");
+            case 3:return toolResponse("held_rating","tool_feedback",R"({"ratings":[{"activity_id":"held-a1","utility":4,"difficulty":1,"action":"Read the revision"}]})");
+            default:return finalResponse();}});
+    check(rounds==3,"no provider round follows a feedback-only round that releases the held reply");
+    check(result.text.find("Bracket inspected at revision 2.")!=std::string::npos&&result.text.find("Done.")==std::string::npos,"the held reply is the final reply");
+}
+// 042D A/B option: once projected, the request prefix stays byte-identical.
+static void stableProjectionChecks(){
+    V history=json(R"([{"role":"user","content":"Inspect every bracket."}])");const std::string bulk(8000,'x');
+    for(int i=0;i<80;++i){const auto id="old_"+std::to_string(i);V call=V::makeObj();call.set("type",V::makeStr("function_call"));call.set("call_id",V::makeStr(id));call.set("name",V::makeStr("doc_info"));call.set("arguments",V::makeStr("{\"detail\":\"revision\",\"n\":"+std::to_string(i)+"}"));history.arr.push_back(call);
+        V output=V::makeObj();output.set("type",V::makeStr("function_call_output"));output.set("call_id",V::makeStr(id));output.set("output",V::makeStr(R"({"isError":false,"structuredContent":{"revision":4,"notes":")"+bulk+std::to_string(i)+R"("}})"));history.arr.push_back(output);}
+    ark::AssistantConfig config;config.model="offline-stable";config.projectionStepBytes=64*1024;std::vector<V> inputs;int rounds=0;
+    ark::runAssistant(config,history,ark::AgentSession::tools(),[&](const std::string&,const V& args){V out=json(R"({"isError":false,"structuredContent":{"revision":4}})");member(out,"structuredContent").set("n",*args.find("n"));return out;},{},nullptr,
+        [&](auto&,const V& request,auto*){inputs.push_back(*request.find("input"));++rounds;return rounds<5?toolResponse(("new_"+std::to_string(rounds)).c_str(),"doc_info",(R"({"detail":"revision","n":)"+std::to_string(100+rounds)+"}").c_str()):finalResponse();});
+    check(inputs.size()==5&&inputs[0].arr.front().find("content")->asStr().rfind("ARK_REQUEST_HISTORY_PROJECTION_V1",0)==0,"the oversized history is projected");
+    for(size_t k=1;k<inputs.size();++k){const auto& previous=inputs[k-1].arr;const auto& next=inputs[k].arr;bool prefix=next.size()>previous.size();for(size_t i=0;prefix&&i<previous.size();++i)prefix=previous[i].dump()==next[i].dump();check(prefix,"each request extends the previous projected request byte for byte");}
+}
 static void batchedCallsKeepOneWritePerResponse(){
     ark::AssistantConfig config;config.model="offline-batch";int rounds=0;std::vector<std::string> executed;
     const auto tools=ark::AgentSession::tools();
@@ -412,5 +488,5 @@ int main(int argc,char** argv){try{
         [&](const auto& e){if(e.kind==ark::AssistantEvent::Usage)partial=e.usage;},nullptr,
         [&](auto&,auto&,auto*){return incompleteCounted;});},"incomplete response remains rejected");
     check(partial.totalTokens==15,"usage from incomplete response survives via event");
-    deferredToolChecks();repeatedReadChecks();batchedCallsKeepOneWritePerResponse();requestContextChecks();unratedFeedbackProjectionChecks();payloadAndPerformanceChecks();nestedReceiptChecks();transientHttpRetryChecks();visionChecks();userImageAuthoringChecks();assistantSteeringChecks();std::cout<<checks<<" assistant checks passed\n";return 0;
+    deferredToolChecks();repeatedReadChecks();traceAttributionChecks();heldReplyAfterFeedbackChecks();heldResultChecks();stableProjectionChecks();batchedCallsKeepOneWritePerResponse();requestContextChecks();unratedFeedbackProjectionChecks();payloadAndPerformanceChecks();nestedReceiptChecks();transientHttpRetryChecks();visionChecks();userImageAuthoringChecks();assistantSteeringChecks();std::cout<<checks<<" assistant checks passed\n";return 0;
 }catch(const std::exception& e){std::cerr<<"assistant test failed: "<<e.what()<<'\n';return 1;}}

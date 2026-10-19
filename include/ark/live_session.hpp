@@ -21,11 +21,14 @@ public:
     using Completion = std::function<void(arkjson::Value)>;
     using Dispatch = std::function<void(const std::string&, const arkjson::Value&,
                                         Completion, std::stop_token)>;
+    // Optional short text describing the call in progress (for example the
+    // feature being evaluated). Called from the bridge thread; must be thread-safe.
+    using Progress = std::function<std::string()>;
     LiveSessionBridge();
     ~LiveSessionBridge();
     LiveSessionBridge(const LiveSessionBridge&) = delete;
     LiveSessionBridge& operator=(const LiveSessionBridge&) = delete;
-    bool start(Dispatch dispatch, std::string name = {});
+    bool start(Dispatch dispatch, std::string name = {}, Progress progress = {});
     void stop() noexcept;
     std::string endpoint() const;
     std::string lastError() const;
@@ -37,6 +40,9 @@ private:
 // Throws on transport failure; NEVER falls back to another document. A timeout
 // after dispatch has an unknown outcome: inspect revision before retrying writes.
 // timeoutMs bounds the whole call (1..660000); connecting is bounded at 30 s.
+// onProgress, when given, asks Studio for progress notes while the call runs
+// ({elapsed_ms, message?} about every 2 s); Studio builds without it send none.
 arkjson::Value callLiveSession(const std::string& endpoint, const std::string& tool,
-                              const arkjson::Value& args, unsigned timeoutMs = 660000);
+                              const arkjson::Value& args, unsigned timeoutMs = 660000,
+                              const std::function<void(const arkjson::Value&)>& onProgress = {});
 }

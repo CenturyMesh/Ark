@@ -37,6 +37,18 @@ feedback. No turn or token budget is introduced. The ledger retains up to
 storage limits, not agent execution quotas. Scores alone do not qualify
 geometry, manufacturing, tool quality or model performance.
 
+Since 042D a team role can put the same rating items in the optional `ratings`
+field of `team_report_task` or `team_finish_goal` instead of calling
+`tool_feedback` in a separate provider round. The host first runs the report's
+own checks with those IDs counted as rated, then records the ratings through
+the role's audited executor, which validates every item before applying any.
+An invalid, duplicate or partial set rejects the report explicitly, lists the
+remaining `unrated_activity_ids` and records nothing. The accepted receipt
+returns `rated_ids`. If a teammate changes the team state while the ratings are
+being recorded, the report can still be rejected afterwards; that rejection
+states that the ratings were recorded. `tool_feedback` remains the route for
+the single assistant, ACP and external MCP clients.
+
 Documents containing this ledger use schema 33. Older documents remain
 readable; the application version alone does not migrate them. Older ARK
 versions cannot open a newly saved v33 document. There is no external

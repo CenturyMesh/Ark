@@ -40,10 +40,23 @@ fallback to an empty standalone document.
 ## Transport and failure contract
 
 The Windows named pipe allows the current Windows user only, rejects remote
-clients, and is created exclusively. It accepts one request at a time. Request
+clients, and is created exclusively. Four instances accept connections, so a
+further client can connect and queue while a long call runs; Studio still
+executes one document call at a time. Request
 payloads are limited to 4 MiB and responses to 32 MiB; prefer `doc_info`,
 `sketch_inspect`, `source_inspect` and other compact tools over large geometry
-payloads. Each connection has a 30-second limit and cancellable overlapped I/O.
+payloads. Connecting and transferring each request or response have 30-second
+windows with cancellable overlapped I/O; Studio then waits up to 10 minutes for
+the tool result, because full recomputes of large models can exceed a minute.
+A client that sends `_meta.progressToken` with `tools/call` receives MCP
+`notifications/progress` about every two seconds while it waits: elapsed seconds
+and, during a recompute, the feature being evaluated. Progress is display
+information only; the single tool result remains the outcome.
+
+`ark-mcp --connect <pipe> --core-tools` lists core tools first and adds a
+topic's specialist tools after `agent_onboard` loads it. It announces each change
+with `notifications/tools/list_changed`, and every catalogue tool remains
+callable. Without the flag, the full catalogue is listed as before.
 Do not point untrusted clients at the bridge: its tools have the same local file
 and document authority as the standalone ARK MCP host.
 
