@@ -3,11 +3,14 @@
 #include "ark/agent.hpp"
 #include "ark/live_session.hpp"
 #include "ark/assistant.hpp"
+#include "ark/native_backend.hpp"
 #include <iostream>
 #include <algorithm>
 #include <functional>
 using V=arkjson::Value;
 int main(int argc,char** argv){
+    // Agents start ark-mcp from background shells; evaluate at full speed.
+    ark::disableProcessPowerThrottling();
     std::string endpoint,memoryProject;bool coreTools=false,valid=true;
     for(int i=1;i<argc&&valid;++i){const std::string arg=argv[i];
         if((arg=="--connect"||arg=="--memory-project")&&i+1<argc&&argv[i+1][0]&&endpoint.empty()&&memoryProject.empty())(arg=="--connect"?endpoint:memoryProject)=argv[++i];

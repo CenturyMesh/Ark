@@ -6025,6 +6025,8 @@ static void seedDocument(){g_doc=makeDemoDocument();rebuildScene();frameScene();
 
 int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     if(redirect_to_updated_runtime())return 0;
+    // Recompute continues at full speed while Studio is in the background.
+    ark::disableProcessPowerThrottling();
     struct JoinDirectPreview {~JoinDirectPreview(){g_cablePreviewGate035=false;if(g_cablePreviewInstance035)g_cablePreviewInstance035->shutdown();g_directPreviewTestGate=false;if(g_directPreviewInstance)g_directPreviewInstance->shutdown();}} joinDirectPreview;
     cpu_detect();
 

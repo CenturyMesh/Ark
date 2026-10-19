@@ -1614,8 +1614,10 @@ V thicken(const V& request) {
                                  " shells=" + std::to_string(shapes(solid, TopAbs_SHELL).size()));
     // The simple offset can return the opposite topological orientation for a
     // positive offset. Reverse orientation only; never alter offset geometry.
-    if (properties(solid) < 0) solid.Reverse();
-    return shapeResult(solid, true);
+    // Reversal negates the same integral, so the measured volume is reused.
+    const double signedVolume = properties(solid);
+    if (signedVolume < 0) solid.Reverse();
+    return solidShapeResult(solid, std::abs(signedVolume));
 }
 } // namespace
 

@@ -59,12 +59,24 @@ TopoDS_Shape compound(const std::vector<TopoDS_Shape>& parts);
 TopoDS_Shape transformed(const TopoDS_Shape& shape,const gp_Trsf& transform);
 // Full ordered picking edges plus optional edge_visible bools for display only.
 V meshData(const TopoDS_Shape& shape,double deflection=.025,double angle=.12);
+// Display/picking tessellation of a generated or restored body. Parts up to
+// 250 mm keep 0.025 mm / 0.12 rad; larger parts scale the chord deviation with
+// their diagonal. The exact B-rep remains the only geometry authority.
+struct DisplayTessellation {double deflection,angle;};
+DisplayTessellation displayTessellation(const TopoDS_Shape& shape);
+V displayMeshData(const TopoDS_Shape& shape);
 V edgeVisibility(const TopoDS_Shape& shape); // Read-only native topology/regularity classification.
 V vec(const gp_XYZ& xyz);
 V matrix(const gp_Trsf& transform);
 std::string brepData(const TopoDS_Shape& shape); // base64 BRep, no tessellation
 TopoDS_Shape readBrep(const std::string& encoded);
+// Exactly one solid with positive measured volume, else the same explicit
+// rejection as shapeReport(shape,true). Returns that volume; no BRepCheck.
+double requireOnePositiveSolid(const TopoDS_Shape& shape);
 V shapeResult(const TopoDS_Shape& shape,bool requireSolid);
+// shapeResult(shape,true) for a solid whose volume this request has already
+// measured with properties(shape); avoids integrating the same volume twice.
+V solidShapeResult(const TopoDS_Shape& shape,double measuredVolume);
 // One local generation pipeline: validate, serialize, add producer references,
 // and derive selection/vertices from the same exact shape. No mutable cache.
 V generatedShapeResult(const TopoDS_Shape& shape,bool requireSolid,

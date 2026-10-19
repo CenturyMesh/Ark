@@ -86,6 +86,10 @@ certificate and a warm hit is not a native algorithm timing improvement.
 
 `ARK_NATIVE_RESULT_CACHE=0` disables this cache, and
 `ARK_NATIVE_CACHE_DIRECTORY` selects an isolated cache for a comparison.
+Since 043A the cache keeps 2 GiB by default (`ARK_NATIVE_CACHE_MAX_MB`,
+64..65536) and at most 8192 entries, evicting the least recently used entry:
+a hit refreshes the entry's time. Deep cache directories use extended Windows
+paths, so entries are no longer silently dropped beyond `MAX_PATH`.
 [Synthetic cache regressions](../tests/native_cache_031b_tests.cpp) cover warm
 result equality, changed requests, corrupted entries, rejected requests,
 disabled reuse and preservation of unrelated directory contents. The cable

@@ -52,21 +52,31 @@ void run(){
     workspace.fresh(directory);ark::setNativeThreadBudget(1);before=counter("native_document_restores");volume(restore(encoded(records.front().key,legacy),3),60);check(counter("native_document_restores")==before+1,"legacy exact producer/request key remains compatible");
     V malformed=saved;origin=provenance;origin.set("schema",V::makeNum(2));malformed.set("native_cache_provenance",origin);ark::Document discarded;const auto status=ark::stageNativeDocumentResults(discarded,{encoded(records.front().key,malformed)});check(field(status,"entries_staged").num==0&&field(status,"entries_discarded").num==1,"unknown provenance schema rejects rather than downgrading to legacy");
 
-    // Three original inputs produce two pairwise calls, but only one final
-    // feature body needs persistence. Restore must not reconstruct its prefix.
+    // Three original inputs need two boolean steps, executed by one worker
+    // request; only the final feature body needs persistence. Restore must not
+    // reconstruct its prefix.
     workspace.fresh(directory);V sequence=V::makeObj(),sequenceRequest=V::makeObj(),pieces=V::makeArr();
     for(int width=2;width<=4;++width){const auto part=ark::nativeWorkerRequest(box(width));V piece=V::makeObj();piece.set("brep_base64",field(part,"brep_base64"));piece.set("topology",field(part,"topology"));piece.set("namespace",V::makeStr("feature."+std::to_string(width)));pieces.arr.push_back(piece);}
     sequenceRequest.set("schema",V::makeNum(1));sequenceRequest.set("op",V::makeStr("union"));sequenceRequest.set("pieces",pieces);sequence.set("operation",V::makeStr("model_boolean_sequence"));sequence.set("request",sequenceRequest);
-    size_t pairwiseCalls=0;auto evaluate=[&]{const auto& inputs=field(field(sequence,"request"),"pieces");V current=inputs.arr.front();for(size_t i=1;i<inputs.arr.size();++i){V model=V::makeObj(),request=V::makeObj();model.set("op",field(field(sequence,"request"),"op"));model.set("input_brep",field(current,"brep_base64"));model.set("input_topology",field(current,"topology"));model.set("tool_brep",field(inputs.arr[i],"brep_base64"));model.set("tool_topology",field(inputs.arr[i],"topology"));model.set("tool_namespace",field(inputs.arr[i],"namespace"));request.set("operation",V::makeStr("model_solid"));request.set("request",model);++pairwiseCalls;current=ark::nativeWorkerRequest(request);}return current;};
-    const auto combined=ark::nativeBooleanSequenceRequest(sequence,evaluate);volume(combined,80);check(pairwiseCalls==2,"cold aggregate uses unchanged pairwise solver");
-    const auto combinedHit=ark::nativeBooleanSequenceRequest(sequence,evaluate);check(pairwiseCalls==2&&combinedHit.dump()==combined.dump(),"aggregate local hit bypasses both pairwise operations with exact result");
+    // Reference: the same steps as separate native_solid requests.
+    auto pairwise=[&]{const auto& inputs=field(field(sequence,"request"),"pieces");V current=inputs.arr.front();for(size_t i=1;i<inputs.arr.size();++i){V model=V::makeObj(),request=V::makeObj();model.set("op",field(field(sequence,"request"),"op"));model.set("input_brep",field(current,"brep_base64"));model.set("input_topology",field(current,"topology"));model.set("tool_brep",field(inputs.arr[i],"brep_base64"));model.set("tool_topology",field(inputs.arr[i],"topology"));model.set("tool_namespace",field(inputs.arr[i],"namespace"));request.set("operation",V::makeStr("model_solid"));request.set("request",model);current=ark::nativeWorkerRequest(request);}return current;};
+    auto semanticRows=[](const V& result){std::string rows;for(const auto& row:field(field(result,"topology"),"references").arr){const auto& name=field(row,"name").str;if(name.find("@ark.")!=std::string::npos)continue;for(const char* key:{"name","kind","status","indices"})rows+=field(row,key).dump();rows+=';';}return rows;};
+    const auto reference=pairwise();double hits=counter("native_result_cache_hits");
+    const auto combined=ark::nativeBooleanSequenceRequest(sequence);volume(combined,80);check(counter("native_result_cache_hits")==hits,"cold aggregate runs in the worker");
+    check(field(combined,"brep_base64").str==field(reference,"brep_base64").str,"one-request sequence produces the pairwise exact B-rep");
+    check(!semanticRows(combined).empty()&&semanticRows(combined)==semanticRows(reference),"one-request sequence propagates the pairwise semantic references");
+    hits=counter("native_result_cache_hits");const auto combinedHit=ark::nativeBooleanSequenceRequest(sequence);check(counter("native_result_cache_hits")==hits+1&&combinedHit.dump()==combined.dump(),"aggregate local hit returns the exact result");
     ark::Document combinedDocument;ark::Body combinedBody;combinedBody.nativeData=combined;combinedDocument.evalBodies.push_back(std::move(combinedBody));const auto combinedRecords=ark::nativeDocumentResults(combinedDocument);check(combinedRecords.size()==1,"aggregate persists only final result");
     workspace.fresh(directory);ark::setNativeThreadBudget(2);ark::Document pending;ark::stageNativeDocumentResults(pending,combinedRecords);before=counter("native_document_restores");
-    {ark::NativeDocumentResultScope scope(pending.pendingNativeGeometry);const auto restored=ark::nativeBooleanSequenceRequest(sequence,evaluate);volume(restored,80);check(field(field(restored,"report"),"snapshot_validation").str=="current_exact_brep_measurements_and_references","aggregate restore validates final exact geometry");}
-    check(pairwiseCalls==2&&counter("native_document_restores")==before+1,"portable aggregate restores once without reconstructing intermediate CSG");
+    {ark::NativeDocumentResultScope scope(pending.pendingNativeGeometry);const auto restored=ark::nativeBooleanSequenceRequest(sequence);volume(restored,80);check(field(field(restored,"report"),"snapshot_validation").str=="current_exact_brep_measurements_and_references","aggregate restore validates final exact geometry");}
+    check(counter("native_document_restores")==before+1,"portable aggregate restores once without reconstructing intermediate CSG");
     workspace.fresh(directory);pieces.arr.back().set("namespace",V::makeStr("feature.changed"));sequenceRequest.set("pieces",pieces);sequence.set("request",sequenceRequest);ark::Document edited;ark::stageNativeDocumentResults(edited,combinedRecords);before=counter("native_document_restores");
-    {ark::NativeDocumentResultScope scope(edited.pendingNativeGeometry);volume(ark::nativeBooleanSequenceRequest(sequence,evaluate),80);}
-    check(pairwiseCalls==4&&counter("native_document_restores")==before,"changed semantic namespace invalidates aggregate request");
+    {ark::NativeDocumentResultScope scope(edited.pendingNativeGeometry);volume(ark::nativeBooleanSequenceRequest(sequence),80);}
+    check(counter("native_document_restores")==before,"changed semantic namespace invalidates aggregate request");
+    // A framed tool is placed in the worker exactly as by native_solid transform.
+    // The 4 mm box moved 2 mm along X overlaps the 3 mm box: one 6x4x5 solid.
+    V framed=pieces;V shifted=V::makeArr();for(double value:{1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.,0.,2.,0.,0.,1.})shifted.arr.push_back(V::makeNum(value));framed.arr.back().set("frame",shifted);
+    sequenceRequest.set("pieces",framed);sequence.set("request",sequenceRequest);volume(ark::nativeBooleanSequenceRequest(sequence),120);
 }
 #endif
 }

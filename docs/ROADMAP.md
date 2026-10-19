@@ -9,6 +9,13 @@ The public iteration and numeric runtime are defined in
 increasing sequence and its principal phase. The letter is a roadmap phase, not a
 month; it does not declare the phase complete. The `.ark` format evolves separately.
 
+043A addresses **A.04**, **Parcial**, through size-relative display
+tessellation, owner-dispatched parallel feature scheduling, EcoQoS opt-out,
+a least-recently-used 2 GiB native cache and one-request boolean sequences.
+On one private 74-feature freeform document, cold opening fell from 105 s to
+19 s and a full rebuild from 133 s to 48 s with identical per-feature bounds;
+see [043A](iterations/043A.md). Three-size p95 qualification remains open.
+
 042D addresses **A.04/D.01/D.02/D.04/E.01**, **Parcial**, through later
 history projection, ratings inside team reports, `query_batch` dataflow, a
 fingerprinted revision digest, attributed provider-round traces and longer live
@@ -199,7 +206,7 @@ Goal: work for days without lost work, ambiguous identity or unverifiable regres
 | A.01 | Iteration identity and release records | Verificado no escopo | Validate `release.json`; expose one consistent identity in application, MCP, onboarding and packages. Preserve global sequence and runtime/document separation. [001A evidence](iterations/001A.md) [019B source identity](iterations/019B.md). [022B identity and compatibility](iterations/022B.md). |
 | A.02 | Recovery and work protection | Parcial | Crash during save/modeling/update, disk-full and truncation tests preserve the last intact revision; recoverable autosave cannot replace the original silently. [029B local recovery and injected persistence failures](TRUST_FOUNDATION.md) retain explicit recovery choices; real power-loss qualification remains open. |
 | A.03 | Regression corpus and release chain | Parcial | Authorized reproducible positives/negatives with seeds/hashes; native, UI, persistence and OTA suites; receipts for distributed artifacts; actual hosted CI execution. [019B hosted native/portable checks and relocated Linux package](iterations/019B.md) establish that scope, with broader release qualification still open. [022B native, persistence, consumer and viewport regression](iterations/022B.md) adds local evidence; hosted CI and user acceptance remain separate gates. |
-| A.04 | Observable performance | Parcial | Measure cold/warm open, incremental save, p95 interaction and recompute at three project sizes against the same machine/baseline. [012D scope](iterations/012D.md) [022B source audit and equivalent synthetic measurements](PERFORMANCE_AUDIT_022B.md) distinguish native evaluation, pending gesture handlers, prepared commit and display work; three-size project p95 qualification remains open. 029B adds native viewport reuse and a matched native three-size control benchmark; see [029B performance](PERFORMANCE_029B.md). |
+| A.04 | Observable performance | Parcial | Measure cold/warm open, incremental save, p95 interaction and recompute at three project sizes against the same machine/baseline. [012D scope](iterations/012D.md) [022B source audit and equivalent synthetic measurements](PERFORMANCE_AUDIT_022B.md) distinguish native evaluation, pending gesture handlers, prepared commit and display work; three-size project p95 qualification remains open. 029B adds native viewport reuse and a matched native three-size control benchmark; see [029B performance](PERFORMANCE_029B.md). [043A opening/rebuild](iterations/043A.md) measures one large freeform document before and after. |
 | A.05 | Security, licensing and dependencies | Parcial | Apache-2.0 source license and dependency notices are adopted; source/publication inventory, software SBOM, binary provenance, signing and vulnerability handling need evidence. Never package credentials or user designs. [019B portable image decoder provenance and notices](iterations/019B.md). |
 
 ## B — Competitive CAD authoring

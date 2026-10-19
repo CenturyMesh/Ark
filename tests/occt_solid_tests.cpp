@@ -206,16 +206,21 @@ void currentSelectionCoverage(const Value& solid){
 }
 
 void primitivesAndNames(){
-    auto pickCylinder=result(parse(R"({"op":"cylinder","radius":500,"height":20})"));
-    bool curvedEdge=false;
-    for(const auto& edge:pickCylinder.find("mesh")->find("edges")->arr)if(edge.arr.size()>6){
-        curvedEdge=true;check(edge.arr.size()>39,"curved picking edges are not fixed twelve-chord approximations");
-        for(size_t i=3;i<edge.arr.size();i+=3){
-            const double x=(edge.arr[i-3].num+edge.arr[i].num)/2,y=(edge.arr[i-2].num+edge.arr[i+1].num)/2;
-            check(500-std::hypot(x,y)<0.0251,"circle picking chord follows surface tessellation deflection");
+    // Display chords follow the surface tessellation: 0.025 mm up to a 250 mm
+    // diagonal, then 1e-4 of the diagonal (here about 1414 mm -> 0.141 mm).
+    for(const auto& [radius,deflection]:std::vector<std::pair<double,double>>{{50,.0251},{500,.1416}}){
+        const std::string request=std::string(R"({"op":"cylinder","radius":)")+std::to_string((int)radius)+R"(,"height":20})";
+        auto pickCylinder=result(parse(request.c_str()));
+        bool curvedEdge=false;
+        for(const auto& edge:pickCylinder.find("mesh")->find("edges")->arr)if(edge.arr.size()>6){
+            curvedEdge=true;check(edge.arr.size()>39,"curved picking edges are not fixed twelve-chord approximations");
+            for(size_t i=3;i<edge.arr.size();i+=3){
+                const double x=(edge.arr[i-3].num+edge.arr[i].num)/2,y=(edge.arr[i-2].num+edge.arr[i+1].num)/2;
+                check(radius-std::hypot(x,y)<deflection,"circle picking chord follows surface tessellation deflection");
+            }
         }
+        check(curvedEdge,"cylinder publishes selectable curved edges");
     }
-    check(curvedEdge,"cylinder publishes selectable curved edges");
     auto box=result(parse(R"({"op":"box","width":10,"depth":20,"height":5})"));
     close(volume(box),1000,1e-7,"box volume");
     auto top=occt::referenceFrameNative(frameRequest(box,"z_max"));

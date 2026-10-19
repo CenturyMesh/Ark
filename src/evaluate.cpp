@@ -67,7 +67,10 @@ static unsigned threadSetting(const char* name,unsigned fallback,unsigned maximu
 struct NativeBudgetScope {int previous;explicit NativeBudgetScope(unsigned budget):previous(setNativeThreadBudget((int)budget)){}~NativeBudgetScope(){setNativeThreadBudget(previous);}};
 struct OuterParallelScope {bool previous;explicit OuterParallelScope(bool value):previous(setOuterParallelRegion(value)){}~OuterParallelScope(){setOuterParallelRegion(previous);}};
 static size_t valueMemory(const arkjson::Value& value){size_t bytes=sizeof(value)+value.str.size()+64;for(const auto& child:value.arr)bytes+=valueMemory(child);for(const auto& pair:value.obj)bytes+=sizeof(pair.first)+pair.first.size()+valueMemory(pair.second);return bytes;}
-static size_t valueMemory(const NativePayload& value){return value.maximumRetainedBytes();}
+// Actual retained allocation. Payloads are shared immutable storage, so a job
+// that reads an input does not duplicate it; the bound is not a worst case
+// for a JSON mesh expansion that scheduled evaluation never performs.
+static size_t valueMemory(const NativePayload& value){return value.allocatedBytes();}
 
 static std::string featureParameterError(const Feature& f,const ExprEnv& env){
     std::string error;
@@ -563,8 +566,7 @@ const std::vector<FeatureResult>& Document::recompute() {
     std::vector<std::unique_ptr<Evaluation>> completed(features.size());
     const size_t contextBytes=valueMemory(authored)+features.size()*sizeof(Feature),payloadBudget=128u*1024u*1024u;
     struct Drain {std::vector<std::future<Evaluation>>& jobs;~Drain(){for(auto& job:jobs)if(job.valid())job.wait();}} drain{jobs};
-    auto schedule=[&](size_t current){
-        if(featureWorkers<2||!parameterError.empty())return;
+    auto harvest=[&](size_t current){
         for(size_t i=current;i<jobs.size();++i)if(jobs[i].valid()&&jobs[i].wait_for(std::chrono::milliseconds(0))==std::future_status::ready){
             completed[i]=std::make_unique<Evaluation>(jobs[i].get());
             const auto& body=completed[i]->body;size_t retained=sizeof(Evaluation)+body.faces.size()*sizeof(Face)+valueMemory(body.nativeData);
@@ -574,29 +576,35 @@ const std::vector<FeatureResult>& Document::recompute() {
             // Otherwise looking beyond owner-only rows could accumulate a
             // document-sized queue of completed, unpublished geometry.
         }
-        auto inputBody=[&](u64 id)->const Body*{
-            for(const auto& b:work)if(b.id==id)return &b;
-            auto found=indices.find(id);if(found==indices.end()||!activeFeatures[found->second]||features[found->second].suppressed)return nullptr;size_t index=found->second;
-            if(completed[index])return completed[index]->result.ok?&completed[index]->body:nullptr;
-            auto cached=evaluationCache.find(id);if(cached!=evaluationCache.end()&&cached->second.key==plannedKeys[index])return cached->second.body.get();return nullptr;
-        };
-        for(size_t i=current+1;i<features.size()&&outstanding<featureWorkers-1;++i){
-            if(!activeFeatures[i])continue;
-            // Only owned, audited explicit-input jobs cross owner-only rows.
-            // Named sketch/datum/occurrence consumers stay on the owner thread.
-            if(!explicitInputs[i]||jobs[i].valid()||completed[i]||published[i])continue;
-            bool ready=true;for(size_t dependency:dependencies[i])ready&=inputBody(features[dependency].id)!=nullptr;if(!ready)continue;
-            for(u64 id:features[i].inputs){
-                const Body* body=inputBody(id);if(!body){ready=false;break;}
-                // Mesh workers copy an already evaluated triangle payload. Keep
-                // lazy analytic tessellation on the owner thread until audited.
-                if(isMeshModelFeature(features[i].type)){ready&=body->baked&&body->baked->triCount();continue;}
-                if(!body->nativeData.find("brep_base64")){auto source=indices.find(id);if(source==indices.end())ready=false;else{auto type=features[source->second].type;ready&=type==FeatureType::Box||type==FeatureType::Cylinder||type==FeatureType::Sphere||type==FeatureType::Cone||type==FeatureType::Torus;}}
-            }
-            if(!ready)continue;
-            const auto& key=plannedKeys[i];auto cached=evaluationCache.find(features[i].id);if(cached!=evaluationCache.end()&&cached->second.key==key)continue;
-            size_t bytes=contextBytes;for(u64 id:features[i].inputs){const auto* body=inputBody(id);bytes+=sizeof(Body)+body->faces.size()*sizeof(Face)+valueMemory(body->nativeData);if(body->baked)bytes+=(body->baked->pos.size()+body->baked->nrm.size()+body->baked->idx.size())*sizeof(float);}
-            if(bytes>payloadBudget||outstandingBytes>payloadBudget-bytes)continue;
+    };
+    auto inputBody=[&](u64 id)->const Body*{
+        for(const auto& b:work)if(b.id==id)return &b;
+        auto found=indices.find(id);if(found==indices.end()||!activeFeatures[found->second]||features[found->second].suppressed)return nullptr;size_t index=found->second;
+        if(completed[index])return completed[index]->result.ok?&completed[index]->body:nullptr;
+        auto cached=evaluationCache.find(id);if(cached!=evaluationCache.end()&&cached->second.key==plannedKeys[index])return cached->second.body.get();return nullptr;
+    };
+    // An unpublished feature whose audited explicit inputs are all evaluated
+    // may run on the pool. bytes receives its input charge for the budget.
+    auto workerReady=[&](size_t i,size_t& bytes){
+        if(!activeFeatures[i])return false;
+        // Only owned, audited explicit-input jobs cross owner-only rows.
+        // Named sketch/datum/occurrence consumers stay on the owner thread.
+        if(!explicitInputs[i]||jobs[i].valid()||completed[i]||published[i])return false;
+        bool ready=true;for(size_t dependency:dependencies[i])ready&=inputBody(features[dependency].id)!=nullptr;if(!ready)return false;
+        for(u64 id:features[i].inputs){
+            const Body* body=inputBody(id);if(!body)return false;
+            // Mesh workers copy an already evaluated triangle payload. Keep
+            // lazy analytic tessellation on the owner thread until audited.
+            if(isMeshModelFeature(features[i].type)){ready&=body->baked&&body->baked->triCount();continue;}
+            if(!body->nativeData.find("brep_base64")){auto source=indices.find(id);if(source==indices.end())ready=false;else{auto type=features[source->second].type;ready&=type==FeatureType::Box||type==FeatureType::Cylinder||type==FeatureType::Sphere||type==FeatureType::Cone||type==FeatureType::Torus;}}
+        }
+        if(!ready)return false;
+        const auto& key=plannedKeys[i];auto cached=evaluationCache.find(features[i].id);if(cached!=evaluationCache.end()&&cached->second.key==key)return false;
+        bytes=contextBytes;for(u64 id:features[i].inputs){const auto* body=inputBody(id);bytes+=sizeof(Body)+body->faces.size()*sizeof(Face)+valueMemory(body->nativeData);if(body->baked)bytes+=(body->baked->pos.size()+body->baked->nrm.size()+body->baked->idx.size())*sizeof(float);}
+        return bytes<=payloadBudget&&outstandingBytes<=payloadBudget-bytes;
+    };
+    auto dispatch=[&](size_t i,size_t bytes){
+        {
             // A task owns all mutable evaluation context. Shared cache bodies are
             // immutable; lazy native promotion changes only these input copies.
             Document snapshot;
@@ -621,10 +629,17 @@ const std::vector<FeatureResult>& Document::recompute() {
             jobs[i]=task->get_future();ThreadPool::get().submit([task]{(*task)();});++outstanding;++parallelFeatures;jobBytes[i]=bytes;outstandingBytes+=bytes;
         }
     };
+    // While the owner waits for a pool job it evaluates nothing itself, so
+    // every feature worker may be busy; otherwise one slot stays the owner's.
+    auto schedule=[&](size_t current,bool ownerWaiting){
+        if(featureWorkers<2||!parameterError.empty())return;
+        harvest(current);
+        for(size_t i=current+1;i<features.size()&&outstanding<(ownerWaiting?featureWorkers:featureWorkers-1);++i){size_t bytes=0;if(workerReady(i,bytes))dispatch(i,bytes);}
+    };
     for(auto&f:features){
         const size_t index=featureIndex++;
         if(!activeFeatures[index]){FeatureResult inactive;inactive.id=f.id;lastResults.push_back(inactive);continue;}
-        schedule(index);std::string cacheKey=plannedKeys[index];
+        schedule(index,false);std::string cacheKey=plannedKeys[index];
         FeatureResult fr; fr.id=f.id;
         const auto previousCache=evaluationCache.find(f.id);const bool cachedFeature=previousCache!=evaluationCache.end()&&previousCache->second.key==cacheKey;
         evaluationProgress(f.id,f.name,index,features.size(),false,cachedFeature);
@@ -637,6 +652,12 @@ const std::vector<FeatureResult>& Document::recompute() {
         if(blocked){fr.ms=nowMs()-tf;lastResults.push_back(std::move(fr));refreshDrivenSketches(*this,false);continue;}
         fr.error=!authoringDependencyErrors[index].empty()?authoringDependencyErrors[index]:parameterError.empty()?featureParameterError(f,env):parameterError;
         fr.ok=fr.error.empty();
+        // An audited feature of the owner's own runs on the pool as well, and
+        // the owner keeps dispatching later ready features whenever a job
+        // finishes instead of blocking all scheduling while it evaluates.
+        // Publication below still follows document order.
+        if(fr.ok&&!cachedFeature&&featureWorkers>=2&&parameterError.empty()&&!completed[index]&&!jobs[index].valid()&&outstanding<featureWorkers){size_t bytes=0;if(workerReady(index,bytes))dispatch(index,bytes);}
+        while(fr.ok&&!completed[index]&&jobs[index].valid()&&jobs[index].wait_for(std::chrono::milliseconds(2))!=std::future_status::ready)schedule(index,true);
         Body b;bool measuredByWorker=false;
         try{if(fr.ok){auto cached=evaluationCache.find(f.id);if(cached!=evaluationCache.end()&&cached->second.key==cacheKey){b=*cached->second.body;fr.tris=cached->second.tris;++recomputeReused;}else if(completed[index]){b=std::move(completed[index]->body);fr=std::move(completed[index]->result);measuredByWorker=true;completed[index].reset();--outstanding;outstandingBytes-=jobBytes[index];++recomputeEvaluated;}else if(jobs[index].valid()){auto value=jobs[index].get();--outstanding;outstandingBytes-=jobBytes[index];b=std::move(value.body);fr=std::move(value.result);measuredByWorker=true;++recomputeEvaluated;}else{OuterParallelScope nested(outstanding>0);NativeBudgetScope budget(!explicitInputs[index]&&outstanding==0?std::min(threadSetting("ARK_NATIVE_THREADS",8,64),cpuBudget):nativeThreadsPerWorker);activity->enter();try{b=evalFeatureBody(f,env,*this,work,fr,tessOpt);}catch(...){activity->leave();throw;}activity->leave();++recomputeEvaluated;}}}
         catch(const std::exception& e){fr.ok=false;fr.error=e.what();}

@@ -653,6 +653,46 @@ V finishBodies(const TopoDS_Shape& shape,const std::vector<Ref>& refs){
 #include "product_patterns.inl"
 #include "solids_031b.inl"
 
+namespace {
+// Shared by native_solid union/cut/common and the in-worker boolean sequence.
+TopoDS_Shape booleanStep(const std::string& op,const TopoDS_Shape& input,std::vector<Ref>& refs,const TopoDS_Shape& tool,const std::vector<Ref>& toolRefs,const V* supplied){
+    TopoDS_Shape result;
+    if(op=="union"){BRepAlgoAPI_Fuse algorithm(input,tool);if(!algorithm.IsDone()||algorithm.HasErrors())throw std::runtime_error("Native union failed");result=algorithm.Shape();refs=propagated(refs,result,algorithm);auto next=propagated(toolRefs,result,algorithm);
+        std::string nameSpace="tool";
+        if(supplied){if(supplied->t!=V::Str||supplied->str.empty()||supplied->str.size()>128)throw std::runtime_error("Invalid reference namespace");nameSpace=supplied->str;}
+        else{int ordinal=2;bool occupied=true;while(occupied){occupied=false;for(const auto& r:refs)if(r.name.rfind(nameSpace+".",0)==0){occupied=true;break;}if(occupied)nameSpace="tool"+std::to_string(ordinal++);}}
+        for(auto& r:next){r.name=nameSpace+"."+r.name;refs.push_back(r);}
+    }
+    else if(op=="common"){BRepAlgoAPI_Common algorithm(input,tool);if(!algorithm.IsDone()||algorithm.HasErrors())throw std::runtime_error("Native common failed");result=algorithm.Shape();refs=propagated(refs,result,algorithm);}
+    else{BRepAlgoAPI_Cut algorithm(input,tool);if(!algorithm.IsDone()||algorithm.HasErrors())throw std::runtime_error("Native cut failed");result=algorithm.Shape();refs=propagated(refs,result,algorithm);}
+    return result;
+}
+TopoDS_Shape rigidlyPlaced(const TopoDS_Shape& input,const V& request,std::vector<Ref>& refs){
+    auto m=frame(request);auto placement=transform(m);
+    for(auto& ref:refs)for(const char* key:{"axis","tangent"})if(const V* previous=ref.seed.find(key)){auto value=point(*previous,"reference direction");gp_Vec vector(value.X(),value.Y(),value.Z());vector.Transform(placement);ref.seed.set(key,vec(vector.XYZ()));}
+    BRepBuilderAPI_Transform algorithm(input,placement,true);if(!algorithm.IsDone())throw std::runtime_error("Native rigid transform failed");const auto result=algorithm.Shape();refs=propagated(refs,result,algorithm);return result;
+}
+// The in-memory equivalent of publishing an intermediate result with
+// topologyOf() and binding it again with inputRefs(): explored sub-shapes,
+// fresh descriptors as orientation seeds, and digest-bound handles obsolete.
+void rebindIntermediate(std::vector<Ref>& refs,const TopoDS_Shape& shape){
+    const auto faces=shapes(shape,TopAbs_FACE),edges=shapes(shape,TopAbs_EDGE);std::set<std::string> names;
+    for(auto& ref:refs){
+        if(!names.insert(ref.name).second)throw std::runtime_error("Duplicate output reference name");
+        if(ref.name.find("@ark.")!=std::string::npos){ref.status="obsolete";ref.shape.Nullify();ref.seed=V{};continue;}
+        if(selectable(ref.status)){const int index=indexOf(shape,ref.shape,refType(ref.kind));
+            if(index<0){ref.status="deleted";ref.shape.Nullify();}
+            else{Ref bound=ref;bound.shape=(ref.kind=="edge"?edges:faces).at((size_t)index);ref.seed=descriptor(bound);ref.shape=bound.shape;}
+        }
+        if(!selectable(ref.status))ref.seed=V{};
+    }
+}
+// The same acceptance as finish(result,refs) applies to each pairwise result.
+void requireValidIntermediate(const TopoDS_Shape& shape){
+    if(shape.IsNull()||!BRepCheck_Analyzer(shape).IsValid())throw std::runtime_error("Native result failed B-rep validation");requireOnePositiveSolid(shape);
+}
+}
+
 V modelSolidNative(const V& request){
     const std::string op=word(request,"op");std::vector<Ref> refs;TopoDS_Shape result;bool many=false;V extrusionReceipt=V::makeObj(),vertexReceipt=V::makeObj(),splitReceipt=V::makeObj();
     try{
@@ -702,7 +742,7 @@ V modelSolidNative(const V& request){
         // an input body, so "revolve" is not reported as a missing input.
         static const std::set<std::string> bodyEdits={"vertex_pull","split_line","curve_pattern","hole_pattern","union","cut","common","hole","fillet","chamfer","split_surface","split_tool","draft","linear_pattern","circular_pattern","mirror","split_plane","offset","shell","transform"};
         if(!bodyEdits.count(op))throw std::runtime_error("Unknown native_solid op '"+op+"'. Primitives: box, cylinder, sphere, cone, torus, round_tube, rect_tube, extrude; body edits with inputs: union, cut, common, hole, fillet, chamfer, shell, offset, draft, linear_pattern, circular_pattern, mirror, transform. An exact revolved solid is feature type revolve_surface with p:{sketch,angle,solid:1} and native:{axis}; a lofted solid is feature type loft");
-        const auto& encoded=need(request,"input_brep");if(encoded.t!=V::Str)throw std::runtime_error("Input must be a native B-rep");TopoDS_Shape input=readBrep(encoded.str);shapeReport(input,true);refs=inputRefs(request,"input_brep","input_topology",input);
+        const auto& encoded=need(request,"input_brep");if(encoded.t!=V::Str)throw std::runtime_error("Input must be a native B-rep");TopoDS_Shape input=readBrep(encoded.str);requireOnePositiveSolid(input);refs=inputRefs(request,"input_brep","input_topology",input);
         if(op=="vertex_pull")result=pullNativeVertex(input,request,refs,vertexReceipt);
         else if(op=="split_line")result=splitNativeFace(input,request,refs,splitReceipt);
         else if(op=="curve_pattern"||op=="hole_pattern"){
@@ -732,16 +772,9 @@ V modelSolidNative(const V& request){
         }else if(op=="union"||op=="cut"||op=="common"||op=="hole"){
             TopoDS_Shape tool;std::vector<Ref> toolRefs;
             if(op=="hole")tool=cutter(need(request,"cutter"));
-            else{const auto& encodedTool=need(request,"tool_brep");if(encodedTool.t!=V::Str)throw std::runtime_error("Tool must be native B-rep");tool=readBrep(encodedTool.str);shapeReport(tool,false);if(shapes(tool,TopAbs_SOLID).empty()||!(properties(tool)>0))throw std::runtime_error("Boolean tool needs one or more positive-volume solids");toolRefs=inputRefs(request,"tool_brep","tool_topology",tool);}
-            if(op=="union"){BRepAlgoAPI_Fuse algorithm(input,tool);if(!algorithm.IsDone()||algorithm.HasErrors())throw std::runtime_error("Native union failed");result=algorithm.Shape();refs=propagated(refs,result,algorithm);auto next=propagated(toolRefs,result,algorithm);
-                std::string nameSpace="tool";
-                const V* supplied=request.find("reference_namespace");if(!supplied)supplied=request.find("tool_namespace");
-                if(supplied){if(supplied->t!=V::Str||supplied->str.empty()||supplied->str.size()>128)throw std::runtime_error("Invalid reference namespace");nameSpace=supplied->str;}
-                else{int ordinal=2;bool occupied=true;while(occupied){occupied=false;for(const auto& r:refs)if(r.name.rfind(nameSpace+".",0)==0){occupied=true;break;}if(occupied)nameSpace="tool"+std::to_string(ordinal++);}}
-                for(auto& r:next){r.name=nameSpace+"."+r.name;refs.push_back(r);}
-            }
-            else if(op=="common"){BRepAlgoAPI_Common algorithm(input,tool);if(!algorithm.IsDone()||algorithm.HasErrors())throw std::runtime_error("Native common failed");result=algorithm.Shape();refs=propagated(refs,result,algorithm);}
-            else{BRepAlgoAPI_Cut algorithm(input,tool);if(!algorithm.IsDone()||algorithm.HasErrors())throw std::runtime_error("Native cut failed");result=algorithm.Shape();refs=propagated(refs,result,algorithm);}
+            else{const auto& encodedTool=need(request,"tool_brep");if(encodedTool.t!=V::Str)throw std::runtime_error("Tool must be native B-rep");tool=readBrep(encodedTool.str);if(shapes(tool,TopAbs_SOLID).empty()||!(properties(tool)>0))throw std::runtime_error("Boolean tool needs one or more positive-volume solids");toolRefs=inputRefs(request,"tool_brep","tool_topology",tool);}
+            const V* supplied=request.find("reference_namespace");if(!supplied)supplied=request.find("tool_namespace");
+            result=booleanStep(op=="hole"?"cut":op,input,refs,tool,toolRefs,supplied);
         }else if(op=="fillet"||op=="chamfer"){
             result=finishEdges031b(input,request,refs,splitReceipt);
         }else if(op=="split_surface"||op=="split_tool"){
@@ -781,9 +814,7 @@ V modelSolidNative(const V& request){
             algorithm.Build();if(!algorithm.IsDone())throw std::runtime_error("Native shell failed");
             result=algorithm.Shape();refs=propagated(refs,result,algorithm);
         }else if(op=="transform"){
-            auto m=frame(request);auto placement=transform(m);
-            for(auto& ref:refs)for(const char* key:{"axis","tangent"})if(const V* previous=ref.seed.find(key)){auto value=point(*previous,"reference direction");gp_Vec vector(value.X(),value.Y(),value.Z());vector.Transform(placement);ref.seed.set(key,vec(vector.XYZ()));}
-            BRepBuilderAPI_Transform algorithm(input,placement,true);if(!algorithm.IsDone())throw std::runtime_error("Native rigid transform failed");result=algorithm.Shape();refs=propagated(refs,result,algorithm);
+            result=rigidlyPlaced(input,request,refs);
         }else throw std::runtime_error("Unknown native solid operation");
     }
     V output=many?finishBodies(result,refs):finish(result,refs);if(op=="extrude"){V report=need(output,"report");report.set("extrusion",extrusionReceipt);output.set("report",report);}if(op=="vertex_pull"){V report=need(output,"report");report.set("vertex_pull",vertexReceipt);report.set("self_intersections_checked",V::makeBool(true));output.set("report",report);}if(op=="split_line"){V report=need(output,"report");report.set("split_line",splitReceipt);report.set("area_mm2",need(splitReceipt,"result_area_mm2"));output.set("report",report);}if(op=="split_plane"||op=="split_surface"||op=="split_tool"||op=="fillet"||op=="chamfer"){V report=need(output,"report");report.set(op=="fillet"||op=="chamfer"?"edge_finish":"split",splitReceipt);output.set("report",report);}return output;
@@ -798,6 +829,47 @@ V modelSolidNative(const V& request){
         }
         throw std::runtime_error(context+": "+error.what());
     }
+}
+
+V booleanSequenceNative(const V& sequence){
+    // One worker request runs every pairwise step of a 2..16-input exact
+    // boolean with the same OCCT operation and reference propagation as the
+    // native_solid request. Intermediates stay in memory: they are validated
+    // (valid B-rep, one positive solid) but not serialized, meshed or re-read.
+    // Only the final body is published, through the same finish() contract.
+    NativeProfileScope profile("booleanSequence");
+    if(sequence.t!=V::Obj||scalar(sequence,"schema")!=1)throw std::runtime_error("Unsupported native boolean sequence schema");
+    const std::string op=word(sequence,"op");if(op!="union"&&op!="cut"&&op!="common")throw std::runtime_error("Native boolean sequence op must be union, cut or common");
+    const V& pieces=need(sequence,"pieces");if(pieces.t!=V::Arr||pieces.arr.size()<2||pieces.arr.size()>16)throw std::runtime_error("Exact boolean needs 2..16 solids");
+    // A piece is bound exactly as a pairwise input_brep/tool_brep with its
+    // topology; a framed piece is first placed as by native_solid transform.
+    auto load=[&](const V& piece,std::vector<Ref>& refs){
+        if(piece.t!=V::Obj)throw std::runtime_error("Invalid native boolean sequence piece");
+        V operand=V::makeObj();operand.set("brep",need(piece,"brep_base64"));if(const V* topology=piece.find("topology"))operand.set("topology",*topology);
+        const auto& encoded=need(operand,"brep");if(encoded.t!=V::Str)throw std::runtime_error("Boolean sequence piece must be a native B-rep");
+        TopoDS_Shape shape=readBrep(encoded.str);refs=inputRefs(operand,"brep","topology",shape);
+        if(!piece.find("frame"))return std::make_pair(shape,false);
+        requireOnePositiveSolid(shape);shape=rigidlyPlaced(shape,piece,refs);requireValidIntermediate(shape);rebindIntermediate(refs,shape);return std::make_pair(shape,true);
+    };
+    auto pieceName=[&](size_t index){const auto* name=pieces.arr[index].find("namespace");return name&&name->t==V::Str?" ("+name->str+")":std::string();};
+    std::vector<Ref> refs;TopoDS_Shape current;
+    try{auto loaded=load(pieces.arr.front(),refs);current=loaded.first;if(!loaded.second)requireOnePositiveSolid(current);}
+    catch(const std::exception& error){throw std::runtime_error("Native "+op+" base input"+pieceName(0)+": "+error.what());}
+    const size_t steps=pieces.arr.size()-1;
+    for(size_t index=1;index<=steps;++index){
+        NativeProfileScope step("booleanSequence.step");std::vector<Ref> toolRefs;TopoDS_Shape tool;const size_t inputSolids=shapes(current,TopAbs_SOLID).size();
+        try{
+            auto loaded=load(pieces.arr[index],toolRefs);tool=loaded.first;
+            if(!loaded.second&&(shapes(tool,TopAbs_SOLID).empty()||!(properties(tool)>0)))throw std::runtime_error("Boolean tool needs one or more positive-volume solids");
+            current=booleanStep(op,current,refs,tool,toolRefs,pieces.arr[index].find("namespace"));
+            if(index<steps){requireValidIntermediate(current);rebindIntermediate(refs,current);}
+        }catch(const std::exception& error){
+            std::string context="Native "+op+" step "+std::to_string(index)+" of "+std::to_string(steps)+pieceName(index)+" input contains "+std::to_string(inputSolids)+" solids";
+            if(!tool.IsNull())context+=" tool contains "+std::to_string(shapes(tool,TopAbs_SOLID).size())+" solids";
+            throw std::runtime_error(context+": "+error.what());
+        }
+    }
+    return finish(current,refs);
 }
 
 V componentCustodyNative(const V& package){

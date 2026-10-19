@@ -59,7 +59,7 @@ thread_local NativeRequestTiming* activeNativeProfile=nullptr;
 thread_local NativeProfileScope* activeNativeScope=nullptr;
 std::uint64_t nativeProfileClock() noexcept{return (std::uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();}
 std::string profileOperation(const std::string& value){
-    static const std::set<std::string> known{"model","model_solid","model_sheet","model_frame","model_electronics","reference_frame","geometry_query","point_distance","solid_centroid","measurement_pick","clearance","kernel_info","import_tube","export_tube","export_notch","import_cad","inspect_cad","inspect_imported_cad","cad_custody","import_component","component_custody","project_reference","drawing_view","drawing_dxf","import_sheet","export_sheet","export_sheet_flat_dxf","step_inspect","export_iges","export_brep","box","cylinder","sphere","cone","torus","round_tube","rect_tube","extrude","union","cut","common","hole","holes_orchestrator","fillet","chamfer","draft","linear_pattern","circular_pattern","mirror","shell","transform","split_plane","split_line","split_surface","split_tool","offset","vertex_pull","tube_end_fit","imported_brep","imported_cad","vent","wood","rib","gusset","boss","mount_pad","screw_support","nut_seat","lid_lip","lid_groove","curve_pattern","hole_pattern","loft","sweep","surface_fill","bspline_surface","thicken","sew","surface_edit","trim","untrim","extend"};
+    static const std::set<std::string> known{"model","model_solid","model_boolean_sequence","model_sheet","model_frame","model_electronics","reference_frame","geometry_query","point_distance","solid_centroid","measurement_pick","clearance","kernel_info","import_tube","export_tube","export_notch","import_cad","inspect_cad","inspect_imported_cad","cad_custody","import_component","component_custody","project_reference","drawing_view","drawing_dxf","import_sheet","export_sheet","export_sheet_flat_dxf","step_inspect","export_iges","export_brep","box","cylinder","sphere","cone","torus","round_tube","rect_tube","extrude","union","cut","common","hole","holes_orchestrator","fillet","chamfer","draft","linear_pattern","circular_pattern","mirror","shell","transform","split_plane","split_line","split_surface","split_tool","offset","vertex_pull","tube_end_fit","imported_brep","imported_cad","vent","wood","rib","gusset","boss","mount_pad","screw_support","nut_seat","lid_lip","lid_groove","curve_pattern","hole_pattern","loft","sweep","surface_fill","bspline_surface","thicken","sew","surface_edit","trim","untrim","extend"};
     return value=="restore_native_result"?value:known.count(value)?value:"other";
 }
 }
@@ -290,10 +290,21 @@ V meshData(const TopoDS_Shape& s,double deflection,double angle){
     }
     V mesh=V::makeObj();mesh.set("pos",pos);mesh.set("idx",idx);mesh.set("face_spans",spans);mesh.set("edges",edges);mesh.set("edge_visible",edgeVisible);return mesh;
 }
+DisplayTessellation displayTessellation(const TopoDS_Shape& shape){
+    // A fixed 0.025 mm / 0.12 rad produced millions of triangles on metre-scale
+    // freeform panels, and their tessellation dominated opening a document.
+    Bnd_Box box;BRepBndLib::Add(shape,box,false);if(box.IsVoid())return {.025,.12};
+    double x0,y0,z0,x1,y1,z1;box.Get(x0,y0,z0,x1,y1,z1);const double diagonal=std::sqrt((x1-x0)*(x1-x0)+(y1-y0)*(y1-y0)+(z1-z0)*(z1-z0));
+    if(!std::isfinite(diagonal)||diagonal<=250)return {.025,.12};
+    return {std::min(.5,std::max(.025,diagonal*1e-4)),.25};
+}
+V displayMeshData(const TopoDS_Shape& shape){const auto tessellation=displayTessellation(shape);return meshData(shape,tessellation.deflection,tessellation.angle);}
 std::string brepData(const TopoDS_Shape& shape){NativeProfileScope profile("brepData");std::ostringstream stream;BRepTools::Write(shape,stream,false,false,TopTools_FormatVersion_CURRENT);return base64Encode(stream.str());}
 namespace {
 TopoDS_Shape readCheckedBrepBytes(std::string bytes){std::istringstream stream(std::move(bytes));TopoDS_Shape shape;BRep_Builder builder;{NativeProfileScope read("brep.read");BRepTools::Read(shape,stream,builder);}{NativeProfileScope validate("brep.validate");if(shape.IsNull()||!BRepCheck_Analyzer(shape).IsValid())throw std::runtime_error("Invalid native B-rep payload");}return shape;}
-V measuredShapeReport(const TopoDS_Shape& shape,bool requireSolid);
+// knownVolume: this exact shape's volume, already measured by properties().
+V measuredShapeReport(const TopoDS_Shape& shape,bool requireSolid,const double* knownVolume=nullptr);
+double measuredSolidVolume(const TopoDS_Shape& shape,bool requireSolid,const double* knownVolume=nullptr);
 // A request-local proof created only by decoding and checking its own B-rep.
 // It exposes no mutable shape or unchecked construction from another shape.
 // Measurements are fresh; neither saved reports nor process caches are evidence.
@@ -312,6 +323,7 @@ public:
     V report(bool requireSolid) const{NativeProfileScope profile("shapeReport");{NativeProfileScope reused("report.reuse_validation");}return measuredShapeReport(shape_,requireSolid);}
 };
 }
+double requireOnePositiveSolid(const TopoDS_Shape& shape){NativeProfileScope profile("requireOnePositiveSolid");return measuredSolidVolume(shape,true);}
 TopoDS_Shape readBrep(const std::string& encoded){NativeProfileScope profile("readBrep");std::string bytes;{NativeProfileScope decode("brep.decode");bytes=base64Decode(encoded);}return readCheckedBrepBytes(std::move(bytes));}
 std::string kernelVersion(){return OCC_VERSION_COMPLETE;}
 V shapeReport(const TopoDS_Shape& shape,bool requireSolid){
@@ -319,9 +331,9 @@ V shapeReport(const TopoDS_Shape& shape,bool requireSolid){
     return measuredShapeReport(shape,requireSolid);
 }
 namespace {
-V measuredShapeReport(const TopoDS_Shape& shape,bool requireSolid){
+double measuredSolidVolume(const TopoDS_Shape& shape,bool requireSolid,const double* knownVolume){
     auto solids=shapes(shape,TopAbs_SOLID);
-    const double measuredVolume=solids.empty()?0:properties(shape);
+    const double measuredVolume=solids.empty()?0:knownVolume?*knownVolume:properties(shape);
     if(requireSolid&&(solids.size()!=1||measuredVolume<=0)){
         std::ostringstream message;
         message<<"Native operation must produce one positive-volume solid; result contains "<<solids.size()<<" solids";
@@ -331,6 +343,11 @@ V measuredShapeReport(const TopoDS_Shape& shape,bool requireSolid){
         else message<<". Check orientation and degenerate dimensions.";
         throw std::runtime_error(message.str());
     }
+    return measuredVolume;
+}
+V measuredShapeReport(const TopoDS_Shape& shape,bool requireSolid,const double* knownVolume){
+    auto solids=shapes(shape,TopAbs_SOLID);
+    const double measuredVolume=measuredSolidVolume(shape,requireSolid,knownVolume);
     V report=V::makeObj();report.set("kernel",V::makeStr("OCCT"));report.set("kernel_version",V::makeStr(kernelVersion()));report.set("brep_valid",V::makeBool(true));report.set("solids",V::makeNum(solids.size()));report.set("faces",V::makeNum(shapes(shape,TopAbs_FACE).size()));report.set("area_mm2",V::makeNum(properties(shape,'a')));report.set("volume_mm3",solids.empty()?V{}:V::makeNum(measuredVolume));report.set("display_mesh_authoritative",V::makeBool(false));report.set("self_intersections_checked",V::makeBool(false));report.set("manufacturing_authoritative",V::makeBool(false));
     V b=V::makeArr();for(auto x:bounds(shape))b.arr.push_back(V::makeNum(x));report.set("bounds_mm",b);return report;
 }
@@ -413,15 +430,20 @@ V completeSelectionReferences(V result){
     const std::string identity=sha256(base64Decode(encoded->str));const auto shape=readBrep(encoded->str);
     return completeSelectionReferencesOnShape(std::move(result),shape,identity);
 }
-V generatedShapeResult(const TopoDS_Shape& shape,bool requireSolid,const std::function<V(const std::string&)>& topologyBuilder,bool vertices){
-    NativeProfileScope profile("shapeResult");V r=V::makeObj();r.set("report",shapeReport(shape,requireSolid));std::string encoded=brepData(shape);const std::string identity=sha256(base64Decode(encoded));
-    if(topologyBuilder)r.set("topology",topologyBuilder(encoded));r.set("brep_base64",V::makeStr(std::move(encoded)));r.set("mesh",meshData(shape));r=completeSelectionReferencesOnShape(std::move(r),shape,identity);
+namespace {
+V generatedShapeResultWithVolume(const TopoDS_Shape& shape,bool requireSolid,const std::function<V(const std::string&)>& topologyBuilder,bool vertices,const double* knownVolume){
+    NativeProfileScope profile("shapeResult");V r=V::makeObj();
+    {NativeProfileScope report("shapeReport");{NativeProfileScope validate("report.validate");if(shape.IsNull()||!BRepCheck_Analyzer(shape).IsValid())throw std::runtime_error("Native result failed B-rep validation");}r.set("report",measuredShapeReport(shape,requireSolid,knownVolume));}std::string encoded=brepData(shape);const std::string identity=sha256(base64Decode(encoded));
+    if(topologyBuilder)r.set("topology",topologyBuilder(encoded));r.set("brep_base64",V::makeStr(std::move(encoded)));r.set("mesh",displayMeshData(shape));r=completeSelectionReferencesOnShape(std::move(r),shape,identity);
     if(vertices){NativeProfileScope inventory("vertexInventory.generated");NCollection_IndexedMap<TopoDS_Shape,TopTools_ShapeMapHasher> points;TopExp::MapShapes(shape,TopAbs_VERTEX,points);V* topology=mutableGeneratedField(r,"topology");if(!topology)throw std::runtime_error("Generated solid lost its topology registry");V rows=V::makeArr();const bool complete=points.Extent()<=16384;
         if(complete)for(int i=1;i<=points.Extent();++i){V row=V::makeObj();row.set("name",V::makeStr("vertex."+std::to_string(i-1)));row.set("point_mm",vec(BRep_Tool::Pnt(TopoDS::Vertex(points(i))).XYZ()));row.set("source_topology",V::makeStr(identity));row.set("persistent",V::makeBool(false));rows.arr.push_back(std::move(row));}
         topology->set("vertices",std::move(rows));topology->set("vertex_inventory_complete",V::makeBool(complete));topology->set("vertex_reference_scope",V::makeStr("current_exact_brep_digest"));
     }return r;
 }
+}
+V generatedShapeResult(const TopoDS_Shape& shape,bool requireSolid,const std::function<V(const std::string&)>& topologyBuilder,bool vertices){return generatedShapeResultWithVolume(shape,requireSolid,topologyBuilder,vertices,nullptr);}
 V shapeResult(const TopoDS_Shape& shape,bool requireSolid){return generatedShapeResult(shape,requireSolid,{},false);}
+V solidShapeResult(const TopoDS_Shape& shape,double measuredVolume){return generatedShapeResultWithVolume(shape,true,{},false,&measuredVolume);}
 namespace {
 #include "restore_result_031b.inl"
 }
