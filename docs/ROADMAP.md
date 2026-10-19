@@ -9,6 +9,13 @@ The public iteration and numeric runtime are defined in
 increasing sequence and its principal phase. The letter is a roadmap phase, not a
 month; it does not declare the phase complete. The `.ark` format evolves separately.
 
+042D addresses **A.04/D.01/D.02/D.04/E.01**, **Parcial**, through later
+history projection, ratings inside team reports, `query_batch` dataflow, a
+fingerprinted revision digest, attributed provider-round traces and longer live
+MCP result waits. The contracts are **Verificado no escopo local** by offline
+tests; see [042D](iterations/042D.md). No real-model A/B, cost reduction or
+design-quality change is claimed.
+
 041D addresses **A.03/A.04/D.02/D.04/D.05**, **Parcial**, through actionable
 read recovery, strictly attributed semantic-reference supersession and external
 read-only team diagnostics. Native recovery followed by a valid atomic edit and

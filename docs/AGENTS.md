@@ -1,5 +1,13 @@
 # ARK agent protocol
 
+042D: rate activities inside `team_report_task`/`team_finish_goal` with
+`ratings` instead of a separate `tool_feedback` round. Use `query_batch` row
+`id`, `{"$ref":"id.path"}`, `paths` and `max_bytes` to chain reads in one call,
+and `doc_info {detail:"digest"}` with `known_fingerprints` to see only what
+changed. Fingerprints detect change; `expected_revision` still governs writes.
+Failed reads stay visible but no longer block completion by default. See
+[042D](iterations/042D.md) and [the tool layer](AGENT_TOOL_LAYER_042D.md).
+
 041D read receipts include `team_progress.next_action`. Follow the actual
 target-specific recovery; repeated coordination evidence is not a new design
 checkpoint. A rejected selector is superseded automatically only when later full
