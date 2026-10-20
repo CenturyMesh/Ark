@@ -23,7 +23,10 @@ static void uploadMediaFrame044B(MediaPlayer044B& player,unsigned width,unsigned
 static void reportMedia044B(MediaPlayer044B& player,const std::string& asset,const std::string& status){player.status=status;if(!player.reported){player.reported=true;g_status="Media "+asset+": "+status;}}
 // Current frame of an animated asset for one playback (a stamp) or the material default.
 static GLuint mediaTexture044B(const ImageAsset& asset,const ProjectedStamp* playback){
-    tickMedia044B();const std::string key=asset.name+"|"+(playback?playback->name:std::string("material"));auto& player=g_mediaPlayers044B[key];
+    tickMedia044B();
+    // Players of removed assets (or a replaced document) release their decoder thread and texture.
+    for(auto it=g_mediaPlayers044B.begin();it!=g_mediaPlayers044B.end();)if(std::none_of(g_doc.imageAssets.begin(),g_doc.imageAssets.end(),[&](const ImageAsset& a){return a.sha256==it->second.sha;})){if(it->second.texture)glDeleteTextures(1,&it->second.texture);it=g_mediaPlayers044B.erase(it);}else ++it;
+    const std::string key=asset.name+"|"+(playback?playback->name:std::string("material"));auto& player=g_mediaPlayers044B[key];
     if(player.sha!=asset.sha256){if(player.texture)glDeleteTextures(1,&player.texture);player=MediaPlayer044B{};player.sha=asset.sha256;}
     if(!player.status.empty()&&player.status!="ok"&&player.status!="decoding"&&player.status!="playing")return player.texture;
     const double elapsed=g_mediaClockOverride044B>=0?g_mediaClockOverride044B:g_mediaClock044B;
