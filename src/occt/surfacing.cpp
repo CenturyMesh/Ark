@@ -22,6 +22,7 @@
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepBuilderAPI_PipeError.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
+#include <TopLoc_Location.hxx>
 #include <BRepOffsetAPI_MakeFilling.hxx>
 #include <BRepOffsetAPI_MakeOffsetShape.hxx>
 #include <BRepOffsetAPI_MakePipeShell.hxx>
@@ -81,6 +82,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cctype>
 #include <cmath>
 #include <map>
@@ -1585,6 +1587,7 @@ V collisionReport(const V& request){
     result.set("a_brep_sha256",V::makeStr(sha256(base64Decode(required(request,"a_brep").str))));
     result.set("b_brep_sha256",V::makeStr(sha256(base64Decode(required(request,"b_brep").str))));return result;
 }
+#include "collision_frames_046b.inl"
 
 V thicken(const V& request) {
     const V& input = required(request, "input_brep");
@@ -1646,6 +1649,7 @@ V modelSurfaceNative(const V& request) {
         if (operation.str == "surface_repair") return repairSurfaceOrientation(request);
         if (operation.str == "sew") return sewSurfaces(request);
         if (operation.str == "collision") return collisionReport(request);
+        if (operation.str == "collision_frames") return collisionFrames(request);
         if (operation.str == "helix" || operation.str == "curve" || operation.str == "curve_interpolate" || operation.str == "curve_analytic" || operation.str == "surface_spline" || operation.str == "curve_project_surface" || operation.str == "intersection_curve" || operation.str == "bridge")
             return modelCurveNative(request);
         throw std::runtime_error("unsupported surfacing operation");
