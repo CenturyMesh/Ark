@@ -114,7 +114,11 @@ edge), count, margin_mm, name, and a mode:
   an assertion of independent or manufacturable holes.
 
 Linked patterns save version 19 and reject stale path names. Count is 2..128;
-solid patterns also obey the 64-solid and 512-reference registry capacities. Inputs, offsets
+legacy single-edge solid patterns also obey the 64-solid and 512-reference
+registry capacities. 044B solid patterns (version 47) accept `references` chains
+or a whole wire path, `count` 2..2048 or `pitch_mm`, closed-loop spacing, `skip`,
+`frenet`/`surface` orientation with a `support` input and projection, and the
+`compact` reference scheme; see [044B curve patterns](CURVE_PATTERNS_044B.md). Inputs, offsets
 and normals share part coordinates. There is no implicit assembly placement.
 
 For persistent component placement, use `assembly.add`/`assembly.edit` with
