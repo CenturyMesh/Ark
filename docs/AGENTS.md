@@ -1,5 +1,35 @@
 # ARK agent protocol
 
+044B adds Skeleton Motion: author a vector motion graph over existing revolute
+and prismatic joints with `motion.graph.set{name,graph}` and bake it through the
+joint solver with `motion.bake{name,fps}`, both in revision-checked `doc_apply`.
+Graphs are analytic and cubic Bezier segments composed by sequence, parallel,
+delay, repeat, ping-pong, reverse, time-scale and offset nodes, plus expression
+couplings between channels; never keyframe lists. Read `motion_info` for
+continuity, ranges and stale status; it never edits. Baked frames are display
+poses with no dynamics or collision evidence, and a stale bake must be baked
+again. Load `agent_onboard{topic:"motion"}` and see
+[Skeleton Motion](SKELETON_MOTION_044B.md).
+
+044B `curve_pattern` also follows a chain of `references[]` or a whole wire
+feature (curves, spatial splines, intersection and bridge curves, spline cable
+centerlines), with `count` up to 2048 or `pitch_mm`, margins, `skip`, closed
+loops without a seam duplicate, and `x_hint`/`frenet`/`surface` orientation.
+Use `reference_scheme:"compact"` for large counts. Requests with only the
+earlier fields evaluate unchanged. [Curve patterns](CURVE_PATTERNS_044B.md).
+
+044B appearance accepts procedural `pattern` fields (twill, weave, carbon,
+leather, brushed, knurl, perforated) without image files, and stamps accept
+animated GIF and MP4 assets with `loop`, `speed`, `autoplay` and `start_s`.
+`snapshot` draws textures, patterns and surface stamps at `media_time_s`; check
+`appearance_surfaces` for media status. Appearance stays non-authoritative for
+geometry. [Media and textures](MEDIA_TEXTURES_044B.md).
+
+044B Claude Code connector: inside ARK, Claude Code reaches only the role's
+ARK tools through the host-owned SDK MCP server; built-in file, shell and web
+tools are disabled. Tool contracts are the same as on every other route.
+[Claude Code inside ARK](CLAUDE_CODE_CONNECT_044B.md).
+
 042D: rate activities inside `team_report_task`/`team_finish_goal` with
 `ratings` instead of a separate `tool_feedback` round. Use `query_batch` row
 `id`, `{"$ref":"id.path"}`, `paths` and `max_bytes` to chain reads in one call,

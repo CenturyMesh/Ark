@@ -40,7 +40,7 @@ std::set<u64> activeFeatureIds(const Document& document) {
 std::set<u64> consumedFeatureInputs(const Document& document) {
     const auto active=activeFeatureIds(document);std::set<u64> consumed;
     for(const auto& feature:document.features)if(active.count(feature.id)&&featureConsumesInputBodies(feature))
-        for(u64 input:feature.inputs)consumed.insert(input);
+        for(size_t index=0;index<feature.inputs.size();++index)if(featureConsumesInputBody(feature,index))consumed.insert(feature.inputs[index]);
     return consumed;
 }
 bool applyFeatureHistoryCommand(Document& document,const V& command) {

@@ -26,8 +26,17 @@ version for assembly pattern carry frames. Implicit Origin, XY, XZ and YZ are
 not stored and do not select a format. Legacy authored datums named Origin
 retain their source and reference identity when reopened. A file at version 45
 or 46 without the corresponding extension still loads. Bisectors stored below
-46 and cable extensions stored below 45 reject. Version 47 and later reject as
-a future format.
+46 and cable extensions stored below 45 reject.
+
+## Conditional source extension — format 47
+
+044B selects format 47 for a `curve_pattern` with chained/whole-wire paths,
+pitch spacing, orientation, support input or the compact reference scheme
+([curve patterns](CURVE_PATTERNS_044B.md)), and for procedural appearance
+`pattern*` fields, `image/gif` or `video/mp4` assets and non-default stamp
+playback ([media](MEDIA_TEXTURES_044B.md)). Documents without them keep their
+earlier version; those fields below 47 reject. Version 48 and later reject as a
+future format.
 
 ## Previous source extension — format 41
 
@@ -380,7 +389,8 @@ previous version when none of these are present.
 The document `materials` array stores each material's name, nominal density
 in g/cm3 and appearance. Features optionally store `material` and `appearance`.
 Appearance includes sRGB `base_color`, `metallic`, `roughness`, `opacity`,
-`texture_path`, and `texture_scale`. Image pixels remain external files; moving
+`texture_path`, and `texture_scale`, plus the format-47 procedural `pattern`,
+`pattern_scale_mm`, `pattern_angle_deg`, `pattern_contrast` and `pattern_color`. Image pixels remain external files; moving
 a document does not copy its textures. These display properties do not change
 the B-rep. An explicit feature `p.density` overrides material density.
 

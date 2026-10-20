@@ -28,12 +28,14 @@ target_include_directories(ark-sqlite PUBLIC third_party/sqlite)
 target_compile_definitions(ark-sqlite PRIVATE SQLITE_ENABLE_FTS5=1 SQLITE_THREADSAFE=1 SQLITE_OMIT_LOAD_EXTENSION=1 SQLITE_DQS=0 SQLITE_DEFAULT_FOREIGN_KEYS=1)
 target_link_libraries(ark-sqlite PUBLIC Threads::Threads)
 add_library(ark STATIC
+  src/curve_pattern_044b.cpp src/media_044b.cpp
   src/modeling_031b.cpp
   src/geometry_storage_032d.cpp
   src/wood_tools.cpp
   src/authoring_024b.cpp src/appearance_024b.cpp src/plane_sections_024b.cpp
   src/authoring_023b.cpp src/cad_import.cpp src/holes_orchestrator.cpp src/design_containers.cpp
   src/assembly_patterns.cpp
+  src/motion_graph.cpp
   src/direct_preview.cpp
   src/agent_activity.cpp
   src/skeleton.cpp
@@ -50,6 +52,7 @@ add_library(ark STATIC
   src/dfm.cpp src/dfm_proposals.cpp
   src/assistant_connectors.cpp
   src/assistant_acp.cpp
+  src/assistant_claude_code.cpp
   src/component_sources.cpp
   src/component_library.cpp
   src/project_memory.cpp src/project_memory_tools.cpp src/memory_embeddings.cpp src/resource_library.cpp
@@ -222,6 +225,8 @@ endif()
 if(WIN32)
   enable_language(RC)
   target_link_libraries(ark PUBLIC advapi32 winhttp bcrypt crypt32 ws2_32 shell32 ole32 windowscodecs)
+  # 044B video: Media Foundation entry points load at run time; mfuuid only supplies static GUIDs.
+  target_link_libraries(ark PUBLIC mfuuid)
   add_executable(ark-studio WIN32 src/view/viewer.cpp src/view/accessibility_guids.cpp src/view/app_icon.rc)
   if(MSVC)
     # Studio includes the native authoring controls in one translation unit.
@@ -456,6 +461,11 @@ if(ARK_WITH_OCCT)
     add_test(NAME native-${test_name} COMMAND ark-occt-${test_name}-tests)
     set_tests_properties(native-${test_name} PROPERTIES TIMEOUT 120)
   endforeach()
+  add_executable(ark-curve-pattern-044b-tests tests/curve_pattern_044b_tests.cpp)
+  target_link_libraries(ark-curve-pattern-044b-tests PRIVATE ark-occt ark)
+  add_dependencies(ark-curve-pattern-044b-tests ark-occt-worker)
+  add_test(NAME curve-pattern-044b COMMAND ark-curve-pattern-044b-tests)
+  set_tests_properties(curve-pattern-044b PROPERTIES TIMEOUT 300)
   add_executable(ark-native-feature-tests tests/native_features_tests.cpp)
   add_executable(ark-native-geometry-019b-tests tests/native_geometry_019b_tests.cpp)
   target_link_libraries(ark-native-geometry-019b-tests PRIVATE ark-occt ark)
@@ -522,12 +532,12 @@ if(WIN32)
       add_test(NAME studio-${check} COMMAND ark-studio --self-test-${check} --settings-file "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}.settings.json" --shot "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}.png" --size 1280 800)
       set_tests_properties(studio-${check} PROPERTIES TIMEOUT 300 RUN_SERIAL TRUE)
     endforeach()
-    foreach(check connectors-ui local-models-ui viewport-dock-ui assistant-steering-ui stamps-ui planes-sections-ui holes-orchestrator-ui design-container-ui cad-import-ui native-vertex-pull-ui advanced-sheetmetal-ui specialized-pattern-ui drawing-viewport-ui direct-authoring-ui parametric-authoring-ui selection-glow-ui selection-picking-ui image-attachment-ui sketch-edit-ui sketch-drawing-ui typed-sketch-ui arc-ui assistant-ui render-ui action-icons-ui interaction-ui)
+    foreach(check connectors-ui local-models-ui viewport-dock-ui assistant-steering-ui stamps-ui media-044b-ui planes-sections-ui holes-orchestrator-ui design-container-ui cad-import-ui native-vertex-pull-ui advanced-sheetmetal-ui specialized-pattern-ui drawing-viewport-ui direct-authoring-ui parametric-authoring-ui selection-glow-ui selection-picking-ui image-attachment-ui sketch-edit-ui sketch-drawing-ui typed-sketch-ui arc-ui assistant-ui render-ui action-icons-ui interaction-ui baked-motions-ui)
       add_test(NAME studio-${check} COMMAND ark-studio --self-test-${check} --settings-file "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}.settings.json" --shot "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}.png" --size 1440 900)
       set_tests_properties(studio-${check} PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
     endforeach()
     set_tests_properties(studio-interaction-ui PROPERTIES WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
-    foreach(check team-blockers-ui local-models-ui viewport-dock-ui assistant-steering-ui stamps-ui planes-sections-ui)
+    foreach(check team-blockers-ui local-models-ui viewport-dock-ui assistant-steering-ui stamps-ui planes-sections-ui baked-motions-ui)
       add_test(NAME studio-${check}-compact COMMAND ark-studio --self-test-${check} --settings-file "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}-compact.settings.json" --shot "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}-compact.png" --size 1366 800)
       set_tests_properties(studio-${check}-compact PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
     endforeach()
@@ -593,6 +603,10 @@ add_executable(ark-provider-connector-tests tests/provider_connector_tests.cpp)
 add_executable(ark-assistant-acp-tests tests/assistant_acp_tests.cpp)
 target_link_libraries(ark-assistant-acp-tests PRIVATE ark)
 add_test(NAME assistant-acp COMMAND ark-assistant-acp-tests)
+add_executable(ark-assistant-claude-code-tests tests/assistant_claude_code_tests.cpp)
+target_link_libraries(ark-assistant-claude-code-tests PRIVATE ark)
+add_test(NAME assistant-claude-code COMMAND ark-assistant-claude-code-tests)
+set_tests_properties(assistant-claude-code PROPERTIES TIMEOUT 60)
 target_link_libraries(ark-provider-connector-tests PRIVATE ark)
 add_test(NAME provider-connectors COMMAND ark-provider-connector-tests)
 set_tests_properties(provider-connectors PROPERTIES TIMEOUT 30)
@@ -686,6 +700,15 @@ set_tests_properties(dfm PROPERTIES TIMEOUT 120)
 if(ARK_WITH_OCCT)
   target_compile_definitions(ark-dfm-tests PRIVATE ARK_DFM_NATIVE_TESTS=1 ARK_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   add_dependencies(ark-dfm-tests ark-occt-worker)
+endif()
+
+add_executable(ark-media-044b-tests tests/media_044b_tests.cpp)
+target_link_libraries(ark-media-044b-tests PRIVATE ark)
+add_test(NAME media-044b COMMAND ark-media-044b-tests)
+set_tests_properties(media-044b PROPERTIES TIMEOUT 180)
+if(ARK_WITH_OCCT)
+  target_compile_definitions(ark-media-044b-tests PRIVATE ARK_MEDIA_NATIVE_TESTS=1)
+  add_dependencies(ark-media-044b-tests ark-occt-worker)
 endif()
 
 add_executable(ark-material-tests tests/material_tests.cpp)
@@ -813,6 +836,11 @@ if(ARK_WITH_OCCT)
   target_compile_definitions(ark-assembly-joint-limits-tests PRIVATE ARK_JOINT_NATIVE_TESTS=1 ARK_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   add_dependencies(ark-assembly-joint-limits-tests ark-occt-worker)
 endif()
+# 044B Skeleton Motion: vector motion graphs, solver bakes and persistence on synthetic assemblies.
+add_executable(ark-motion-graph-044b-tests tests/motion_graph_044b_tests.cpp)
+target_link_libraries(ark-motion-graph-044b-tests PRIVATE ark)
+add_test(NAME motion-graph-044b COMMAND ark-motion-graph-044b-tests)
+set_tests_properties(motion-graph-044b PROPERTIES TIMEOUT 180)
 if(ARK_WITH_OCCT)
   add_executable(ark-bicycle-transmission-tests tests/bicycle_transmission_tests.cpp)
   target_link_libraries(ark-bicycle-transmission-tests PRIVATE ark-occt ark)

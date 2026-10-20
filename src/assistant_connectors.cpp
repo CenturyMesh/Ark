@@ -103,19 +103,20 @@ std::vector<AssistantProviderPreset> assistantProviderPresets(){return {
     // DeepSeek offers OpenAI Chat Completions (and Anthropic Messages), not Responses.
     {"deepseek","DeepSeek API","https://api.deepseek.com/chat/completions","DEEPSEEK_API_KEY",AssistantProtocol::ChatCompletions},
     {"grok-build","Grok Build / CLI account","grok","",AssistantProtocol::Acp},
+    {"claude-code","Claude Code / CLI account","claude","",AssistantProtocol::ClaudeCode},
     {"ollama","Ollama local","http://127.0.0.1:11434/v1/chat/completions","",AssistantProtocol::ChatCompletions},
     {"opencode","OpenCode Zen","https://opencode.ai/zen/v1/chat/completions","OPENCODE_API_KEY",AssistantProtocol::ChatCompletions},
     {"custom","Custom compatible endpoint","https://api.openai.com/v1/responses","OPENAI_API_KEY",AssistantProtocol::Responses}};}
-AssistantConfig assistantProviderPreset(const std::string& id){for(const auto& preset:assistantProviderPresets())if(preset.id==id){AssistantConfig out;out.provider=preset.id;out.protocol=preset.protocol;out.endpoint=preset.endpoint;out.apiKeyEnv=preset.apiKeyEnv;if(id=="grok-build"){out.authMode=AssistantAuthMode::CliAccount;out.imageInputSupported=false;}return out;}throw std::runtime_error("Unknown assistant provider preset.");}
-std::string assistantProtocolName(AssistantProtocol protocol){switch(protocol){case AssistantProtocol::Responses:return "responses";case AssistantProtocol::ChatCompletions:return "chat-completions";case AssistantProtocol::Messages:return "messages";case AssistantProtocol::Acp:return "acp";}throw std::runtime_error("Unknown assistant protocol.");}
-AssistantProtocol assistantProtocolFromName(const std::string& name){if(name=="responses")return AssistantProtocol::Responses;if(name=="chat-completions"||name=="chat"||name=="chat_completions")return AssistantProtocol::ChatCompletions;if(name=="messages")return AssistantProtocol::Messages;if(name=="acp")return AssistantProtocol::Acp;throw std::runtime_error("Unknown assistant protocol; choose responses, chat-completions, messages or acp.");}
+AssistantConfig assistantProviderPreset(const std::string& id){for(const auto& preset:assistantProviderPresets())if(preset.id==id){AssistantConfig out;out.provider=preset.id;out.protocol=preset.protocol;out.endpoint=preset.endpoint;out.apiKeyEnv=preset.apiKeyEnv;if(id=="grok-build"||id=="claude-code"){out.authMode=AssistantAuthMode::CliAccount;out.imageInputSupported=false;}return out;}throw std::runtime_error("Unknown assistant provider preset.");}
+std::string assistantProtocolName(AssistantProtocol protocol){switch(protocol){case AssistantProtocol::Responses:return "responses";case AssistantProtocol::ChatCompletions:return "chat-completions";case AssistantProtocol::Messages:return "messages";case AssistantProtocol::Acp:return "acp";case AssistantProtocol::ClaudeCode:return "claude-code";}throw std::runtime_error("Unknown assistant protocol.");}
+AssistantProtocol assistantProtocolFromName(const std::string& name){if(name=="responses")return AssistantProtocol::Responses;if(name=="chat-completions"||name=="chat"||name=="chat_completions")return AssistantProtocol::ChatCompletions;if(name=="messages")return AssistantProtocol::Messages;if(name=="acp")return AssistantProtocol::Acp;if(name=="claude-code")return AssistantProtocol::ClaudeCode;throw std::runtime_error("Unknown assistant protocol; choose responses, chat-completions, messages, acp or claude-code.");}
 bool assistantMessagesToolAdditions(const AssistantConfig& config){
     if(!config.anthropicToolAdditions||config.protocol!=AssistantProtocol::Messages||config.provider!="claude"||config.endpoint!="https://api.anthropic.com/v1/messages")return false;
     for(const char* prefix:{"claude-opus-5","claude-opus-4-8","claude-fable-5","claude-mythos-5","claude-sonnet-5-5"})if(config.model.rfind(prefix,0)==0)return true;
     return false;
 }
 V assistantAdaptRequest(const AssistantConfig& config,const V& canonicalRequest){
-    if(config.protocol==AssistantProtocol::Acp){V out=canonicalRequest;V input=V::makeArr();for(const auto& row:need(out,"input").arr)if(text(row,"type")!="reasoning")input.arr.push_back(row);out.set("input",input);erase(out,"include");return out;}
+    if(config.protocol==AssistantProtocol::Acp||config.protocol==AssistantProtocol::ClaudeCode){V out=canonicalRequest;V input=V::makeArr();for(const auto& row:need(out,"input").arr)if(text(row,"type")!="reasoning")input.arr.push_back(row);out.set("input",input);erase(out,"include");return out;}
     if(config.protocol==AssistantProtocol::Responses){V out=canonicalRequest;
         const auto projected=projectMemoryAssistantWireInput(need(out,"input"));
         V input=V::makeArr();for(const auto& item:projected.arr){

@@ -71,6 +71,12 @@
 #include <TopLoc_Location.hxx>
 #include <gp_Ax1.hxx>
 #include <gp_Ax2.hxx>
+#include <gp_Ax3.hxx>
+#include <gp.hxx>
+#include <Geom_BSplineCurve.hxx>
+#include <Geom2d_Curve.hxx>
+#include <NCollection_IndexedMap.hxx>
+#include <TopTools_ShapeMapHasher.hxx>
 #include <gp_Circ.hxx>
 #include <gp_Pln.hxx>
 #include <gp_Pnt2d.hxx>
@@ -652,6 +658,7 @@ V finishBodies(const TopoDS_Shape& shape,const std::vector<Ref>& refs){
 #include "split_line.inl"
 #include "product_patterns.inl"
 #include "solids_031b.inl"
+#include "curve_pattern_044b.inl"
 
 namespace {
 // Shared by native_solid union/cut/common and the in-worker boolean sequence.
@@ -694,7 +701,7 @@ void requireValidIntermediate(const TopoDS_Shape& shape){
 }
 
 V modelSolidNative(const V& request){
-    const std::string op=word(request,"op");std::vector<Ref> refs;TopoDS_Shape result;bool many=false;V extrusionReceipt=V::makeObj(),vertexReceipt=V::makeObj(),splitReceipt=V::makeObj();
+    const std::string op=word(request,"op");std::vector<Ref> refs;TopoDS_Shape result;bool many=false,pattern044b=false;V patternReceipt;V extrusionReceipt=V::makeObj(),vertexReceipt=V::makeObj(),splitReceipt=V::makeObj();
     try{
     if(op=="vent"||op=="wood")return productPatternNative(request);
     if(solidRecipe031b(op))return modelingRecipe031b(request);
@@ -745,6 +752,7 @@ V modelSolidNative(const V& request){
         const auto& encoded=need(request,"input_brep");if(encoded.t!=V::Str)throw std::runtime_error("Input must be a native B-rep");TopoDS_Shape input=readBrep(encoded.str);requireOnePositiveSolid(input);refs=inputRefs(request,"input_brep","input_topology",input);
         if(op=="vertex_pull")result=pullNativeVertex(input,request,refs,vertexReceipt);
         else if(op=="split_line")result=splitNativeFace(input,request,refs,splitReceipt);
+        else if(op=="curve_pattern"&&curvePattern044b(request)){result=curvePatternNative044b(input,request,refs,patternReceipt);pattern044b=true;}
         else if(op=="curve_pattern"||op=="hole_pattern"){
             V query=V::makeObj(),queries=V::makeArr(),model=V::makeObj();query.set("action",V::makeStr("curve"));query.set("reference",need(request,"reference"));query.set("count",need(request,"count"));query.set("margin_mm",V::makeNum(optional(request,"margin_mm",0)));queries.arr.push_back(query);model.set("brep",need(request,"tool_brep"));model.set("topology",need(request,"tool_topology"));model.set("queries",queries);
             const double count=scalar(request,"count");if(count<2||count>128||count!=std::floor(count))throw std::runtime_error("Curve pattern count must be 2..128");
@@ -817,7 +825,7 @@ V modelSolidNative(const V& request){
             result=rigidlyPlaced(input,request,refs);
         }else throw std::runtime_error("Unknown native solid operation");
     }
-    V output=many?finishBodies(result,refs):finish(result,refs);if(op=="extrude"){V report=need(output,"report");report.set("extrusion",extrusionReceipt);output.set("report",report);}if(op=="vertex_pull"){V report=need(output,"report");report.set("vertex_pull",vertexReceipt);report.set("self_intersections_checked",V::makeBool(true));output.set("report",report);}if(op=="split_line"){V report=need(output,"report");report.set("split_line",splitReceipt);report.set("area_mm2",need(splitReceipt,"result_area_mm2"));output.set("report",report);}if(op=="split_plane"||op=="split_surface"||op=="split_tool"||op=="fillet"||op=="chamfer"){V report=need(output,"report");report.set(op=="fillet"||op=="chamfer"?"edge_finish":"split",splitReceipt);output.set("report",report);}return output;
+    V output=pattern044b?finishCurvePattern044b(result,refs,patternReceipt):many?finishBodies(result,refs):finish(result,refs);if(op=="extrude"){V report=need(output,"report");report.set("extrusion",extrusionReceipt);output.set("report",report);}if(op=="vertex_pull"){V report=need(output,"report");report.set("vertex_pull",vertexReceipt);report.set("self_intersections_checked",V::makeBool(true));output.set("report",report);}if(op=="split_line"){V report=need(output,"report");report.set("split_line",splitReceipt);report.set("area_mm2",need(splitReceipt,"result_area_mm2"));output.set("report",report);}if(op=="split_plane"||op=="split_surface"||op=="split_tool"||op=="fillet"||op=="chamfer"){V report=need(output,"report");report.set(op=="fillet"||op=="chamfer"?"edge_finish":"split",splitReceipt);output.set("report",report);}return output;
     }
     catch(const std::exception& error){
         std::string context="Native "+op;

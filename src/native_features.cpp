@@ -9,6 +9,7 @@
 #include "ark/electronics.hpp"
 #include "ark/spatial_sketch.hpp"
 #include "ark/modeling_031b.hpp"
+#include "ark/curve_pattern_044b.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -217,7 +218,7 @@ V numericNative(const V& value, const ExprEnv& env, const std::string& key = {})
         return value;
     }
     if (value.t == V::Str) {
-        if (key == "grain_axis" || key == "source_vertex" || key == "source_topology" || key == "kind" || key == "join" || key == "sketch" || key == "name" || key == "op" || key == "reference" || key == "second_reference" || key == "mode" || key == "end" || key == "edges" || key == "faces" || key == "face" || key == "source_face" || key == "limit_face" || key == "plane" || key == "keep" || key == "selection" || key == "direction" || key == "axis" || key == "neutral" || key == "reference_face" || key == "tool_face" || key == "equivalence" || key == "interpolation") return value;
+        if (key == "grain_axis" || key == "source_vertex" || key == "source_topology" || key == "kind" || key == "join" || key == "sketch" || key == "name" || key == "op" || key == "reference" || key == "second_reference" || key == "mode" || key == "end" || key == "edges" || key == "faces" || key == "face" || key == "source_face" || key == "limit_face" || key == "plane" || key == "keep" || key == "selection" || key == "direction" || key == "axis" || key == "neutral" || key == "reference_face" || key == "tool_face" || key == "equivalence" || key == "interpolation" || key == "references" || key == "pitch_mode" || key == "orientation" || key == "support_faces" || key == "reference_scheme") return value;
         return V::makeNum(expressionValue(value.str, env));
     }
     if (value.t == V::Arr) {
@@ -837,8 +838,8 @@ V solidFeatureRequest(const Feature& feature, const ExprEnv& env,
         model.set("tube_authority",tubeAuthority(document,feature.inputs[0],env,true));
         if(const auto* mode=model.find("mode");mode&&mode->t==V::Str&&mode->str=="envelope")model.set("host_authority",tubeAuthority(document,feature.inputs[1],env,false));
     }
-    if ((op == "curve_pattern" || op == "hole_pattern") && feature.inputs.size() != 2)
-        throw std::runtime_error("Curve pattern needs target and path feature inputs");
+    if ((op == "hole_pattern" && feature.inputs.size() != 2) || (op == "curve_pattern" && (feature.inputs.size() < 2 || feature.inputs.size() > 3)))
+        throw std::runtime_error("Curve pattern needs seed and path feature inputs, plus an optional support input");
     if (op == "vertex_pull" && feature.inputs.size() != 1)
         throw std::runtime_error("Vertex pull requires one exact polyhedral solid input");
     if (op == "shell" && feature.inputs.size() != 1)
@@ -918,7 +919,7 @@ V solidFeatureRequest(const Feature& feature, const ExprEnv& env,
         if (const V* topology = input->nativeData.find("topology")) model.set("input_topology", *topology);
     }
     if (feature.inputs.size() > 1) {
-        if (feature.inputs.size() != 2) throw std::runtime_error("Native solid supports at most two inputs");
+        if (feature.inputs.size() != 2 && !(op == "curve_pattern" && feature.inputs.size() == 3)) throw std::runtime_error("Native solid supports at most two inputs");
         ensureNativeBody(document, feature.inputs[1], preceding);
         const Body* tool = nullptr;
         for (const auto& body : preceding) if (body.id == feature.inputs[1]) tool = &body;
@@ -926,6 +927,7 @@ V solidFeatureRequest(const Feature& feature, const ExprEnv& env,
         model.set("tool_brep", required(tool->nativeData, "brep_base64"));
         if (const V* topology = tool->nativeData.find("topology")) model.set("tool_topology", *topology);
         model.set("tool_namespace", V::makeStr("tool." + std::to_string(feature.inputs[1])));
+        if (op == "curve_pattern") curvePatternHostInputs044B(feature, document, preceding, *tool, model);
     }
     return model;
 }
@@ -974,7 +976,7 @@ std::string normalizedSolidOp(const Feature& feature) {
 
 bool spansExactBoolean(const Feature& feature) {
     return feature.type == FeatureType::NativeSolid &&
-           (feature.nativeSpec.find("instances") || feature.inputs.size() > 2);
+           (feature.nativeSpec.find("instances") || (feature.inputs.size() > 2 && normalizedSolidOp(feature) != "curve_pattern"));
 }
 
 struct ExactPiece { std::string brep; V topology; Mat4 frame; bool framed=false; std::string nameSpace; };

@@ -8,7 +8,7 @@ struct StampDisplayState024 {
 static GLuint stampAssetTexture(const std::string& name){
     struct Texture {std::string hash;GLuint id=0;};static std::vector<Texture> textures;
     for(auto it=textures.begin();it!=textures.end();)if(std::none_of(g_doc.imageAssets.begin(),g_doc.imageAssets.end(),[&](const auto& a){return a.sha256==it->hash;})){glDeleteTextures(1,&it->id);it=textures.erase(it);}else ++it;
-    const auto* asset=findImageAsset(g_doc,name);if(!asset)return 0;
+    const auto* asset=findImageAsset(g_doc,name);if(!asset)return 0;if(mediaMime044B(asset->mimeType))return mediaTexture044B(*asset,nullptr);
     for(const auto& texture:textures)if(texture.hash==asset->sha256)return texture.id;
     auto pixels=decodeImageAssetRGBA(*asset);
     // OpenGL bottom-left image coordinates; source PNG/JPEG rows are top-down.
@@ -30,7 +30,7 @@ static void setSurfaceAppearance024(const Appearance& a){
     glUniform3f(suColor,(float)a.baseColor.x,(float)a.baseColor.y,(float)a.baseColor.z);
     glUniform1f(glGetUniformLocation(pSolid,"metallic"),(float)a.metallic);glUniform1f(glGetUniformLocation(pSolid,"roughness"),(float)a.roughness);glUniform1f(glGetUniformLocation(pSolid,"opacity"),(float)a.opacity);
     glUniform2f(glGetUniformLocation(pSolid,"textureScale"),(float)(a.textureScaleU/100.),(float)(a.textureScaleV/100.));
-    GLuint texture=a.textureAsset.empty()?materialTexture(a.texturePath):stampAssetTexture(a.textureAsset);glUniform1f(glGetUniformLocation(pSolid,"hasTexture"),texture?1.f:0.f);glActiveTexture(GL_TEXTURE2);glBindTexture(GL_TEXTURE_2D,texture);glActiveTexture(GL_TEXTURE0);
+    GLuint texture=materialTexture044B(a);setPatternUniforms044B(a);glUniform1f(glGetUniformLocation(pSolid,"hasTexture"),texture?1.f:0.f);glActiveTexture(GL_TEXTURE2);glBindTexture(GL_TEXTURE_2D,texture);glActiveTexture(GL_TEXTURE0);
 }
 static bool drawFaceAppearances024(size_t instance,const Feature* feature){
     if(!feature||feature->faceAppearances.empty())return false;
@@ -45,7 +45,7 @@ static void drawBodyStamps024(size_t instance,const Feature* feature){
     if(!feature||g_doc.stamps.empty())return;const auto part=g_instancePart[instance];if(part>=g_partPicks.size())return;
     const auto& pick=g_partPicks[part];bool changed=false;StampDisplayState024 priorState;
     for(const auto& stamp:g_doc.stamps){if(stamp.feature!=feature->id)continue;
-        const auto projector=resolvedStampProjector(g_doc,stamp);const GLuint texture=stampAssetTexture(stamp.asset);if(!texture)continue;
+        const auto projector=resolvedStampProjector(g_doc,stamp);const GLuint texture=stampTexture044B(stamp);if(!texture)continue;
         changed=true;glEnable(GL_BLEND);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);glDepthMask(GL_FALSE);glPolygonOffset(-1.f,-1.f);
         glUniform1f(glGetUniformLocation(pSolid,"stampMode"),1.f);glUniform1f(glGetUniformLocation(pSolid,"stampFrontOnly"),projector.frontOnly?1.f:0.f);glUniform1f(glGetUniformLocation(pSolid,"stampDepth"),(float)projector.depth);
         auto vector=[&](const char* name,Vec3 v){glUniform3f(glGetUniformLocation(pSolid,name),(float)v.x,(float)v.y,(float)v.z);};vector("stampOrigin",projector.origin);vector("stampU",projector.uAxis);vector("stampV",projector.vAxis);vector("stampNormal",projector.normal);
@@ -60,7 +60,7 @@ static void drawPlaneStamps024(const GLfloat* vp){
     StampDisplayState024 priorState;
     glUseProgram(pCanvas);glUniformMatrix4fv(glGetUniformLocation(pCanvas,"vp"),1,GL_FALSE,vp);glUniform1i(glGetUniformLocation(pCanvas,"img"),0);glUniform1f(glGetUniformLocation(pCanvas,"live"),1);
     glEnable(GL_BLEND);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);glEnable(GL_DEPTH_TEST);glDepthMask(GL_FALSE);glEnable(GL_POLYGON_OFFSET_FILL);glPolygonOffset(-1.f,-1.f);glActiveTexture(GL_TEXTURE0);glBindVertexArray(canvasVao);
-    for(const auto& stamp:g_doc.stamps){if(stamp.feature||!stampGeometryAvailable024B(g_doc,stamp))continue;const auto p=resolvedStampProjector(g_doc,stamp);GLuint texture=stampAssetTexture(stamp.asset);if(!texture)continue;
+    for(const auto& stamp:g_doc.stamps){if(stamp.feature||!stampGeometryAvailable024B(g_doc,stamp))continue;const auto p=resolvedStampProjector(g_doc,stamp);GLuint texture=stampTexture044B(stamp);if(!texture)continue;
         if(p.frontOnly){glEnable(GL_CULL_FACE);glCullFace(GL_BACK);}else glDisable(GL_CULL_FACE);
         Mat4 model=Mat4::identity();const Vec3 origin=p.origin-p.uAxis*(p.width*.5)-p.vAxis*(p.height*.5);for(int axis=0;axis<3;++axis){const Vec3 v=axis==0?p.uAxis*p.width:axis==1?p.vAxis*p.height:p.normal;model.m[axis*4]=v.x;model.m[axis*4+1]=v.y;model.m[axis*4+2]=v.z;}model.m[12]=origin.x;model.m[13]=origin.y;model.m[14]=origin.z;
         GLfloat matrix[16];for(int i=0;i<16;++i)matrix[i]=(GLfloat)model.m[i];glUniformMatrix4fv(glGetUniformLocation(pCanvas,"model"),1,GL_FALSE,matrix);glUniform1f(glGetUniformLocation(pCanvas,"opacity"),(float)p.opacity);glBindTexture(GL_TEXTURE_2D,texture);glDrawArrays(GL_TRIANGLES,0,6);

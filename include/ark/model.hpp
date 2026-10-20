@@ -59,10 +59,20 @@ struct Appearance {
     std::string texturePath;
     std::string textureAsset; // named embedded PNG/JPEG; portable replacement for texturePath
     double textureScaleU=1, textureScaleV=1;
+    // 044B procedural display pattern (no image): triplanar, part-local mm.
+    std::string pattern; // empty, twill, weave, carbon, leather, brushed, knurl, perforated
+    double patternScaleMm=4, patternAngleDeg=0, patternContrast=.35;
+    Vec3 patternColor{0,0,0};
+    bool patternColorSet=false;
 };
 struct ImageAsset {
     std::string name,mimeType,base64,sha256;
     unsigned width=0,height=0;
+    // 044B media: image/gif embeds every frame; video/mp4 is a relative path
+    // beside the document plus the SHA-256 of its bytes, optionally embedded.
+    std::string path;
+    double durationS=0;
+    unsigned frames=0;
 };
 struct FaceAppearance {
     std::string face,sourceTopology,material;
@@ -78,6 +88,9 @@ struct ProjectedStamp {
     std::string width="100",height="100";
     double opacity=1,depth=1;
     bool frontOnly=true;
+    // 044B playback for animated GIF/video assets; still images ignore it.
+    bool loop=true,autoplay=true;
+    double speed=1,startS=0;
 };
 struct Material {
     std::string name;
@@ -316,6 +329,7 @@ public:
     arkjson::Value assemblyConfigurations; // explicit parameter/occurrence visibility recipes
     arkjson::Value assemblyLoadSelection; // null loads all; array retains selected node subtrees
     arkjson::Value assemblyExternalReferences; // imported source hashes and producer revisions
+    arkjson::Value motions; // 044B Skeleton Motion vector graphs and their baked display frames; null when absent
     u64 addFeature(Feature f);                    // returns id
     Feature* find(u64 id);
     const Feature* find(u64 id) const;
@@ -383,6 +397,8 @@ std::string featureOperation(const Feature& feature);
 // Face extrusion inputs are geometric references for a separate body; their
 // source/limit bodies remain physical outputs until an actual modeling recipe consumes them.
 bool featureConsumesInputBodies(const Feature& feature);
+// Per input: a 044B curve-pattern support (third input) stays a visible reference.
+bool featureConsumesInputBody(const Feature& feature,size_t index);
 ManufacturingLineage featureManufacturingLineage(const Document& document,const Feature& feature);
 bool validateManufacturingRoutes(const Document& document,std::string& error);
 
