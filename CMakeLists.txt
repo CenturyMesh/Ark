@@ -35,6 +35,7 @@ add_library(ark STATIC
   src/authoring_024b.cpp src/appearance_024b.cpp src/plane_sections_024b.cpp
   src/authoring_023b.cpp src/cad_import.cpp src/holes_orchestrator.cpp src/design_containers.cpp
   src/assembly_patterns.cpp
+  src/motion_graph.cpp
   src/direct_preview.cpp
   src/agent_activity.cpp
   src/skeleton.cpp
@@ -531,12 +532,12 @@ if(WIN32)
       add_test(NAME studio-${check} COMMAND ark-studio --self-test-${check} --settings-file "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}.settings.json" --shot "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}.png" --size 1280 800)
       set_tests_properties(studio-${check} PROPERTIES TIMEOUT 300 RUN_SERIAL TRUE)
     endforeach()
-    foreach(check connectors-ui local-models-ui viewport-dock-ui assistant-steering-ui stamps-ui media-044b-ui planes-sections-ui holes-orchestrator-ui design-container-ui cad-import-ui native-vertex-pull-ui advanced-sheetmetal-ui specialized-pattern-ui drawing-viewport-ui direct-authoring-ui parametric-authoring-ui selection-glow-ui selection-picking-ui image-attachment-ui sketch-edit-ui sketch-drawing-ui typed-sketch-ui arc-ui assistant-ui render-ui action-icons-ui interaction-ui)
+    foreach(check connectors-ui local-models-ui viewport-dock-ui assistant-steering-ui stamps-ui media-044b-ui planes-sections-ui holes-orchestrator-ui design-container-ui cad-import-ui native-vertex-pull-ui advanced-sheetmetal-ui specialized-pattern-ui drawing-viewport-ui direct-authoring-ui parametric-authoring-ui selection-glow-ui selection-picking-ui image-attachment-ui sketch-edit-ui sketch-drawing-ui typed-sketch-ui arc-ui assistant-ui render-ui action-icons-ui interaction-ui baked-motions-ui)
       add_test(NAME studio-${check} COMMAND ark-studio --self-test-${check} --settings-file "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}.settings.json" --shot "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}.png" --size 1440 900)
       set_tests_properties(studio-${check} PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
     endforeach()
     set_tests_properties(studio-interaction-ui PROPERTIES WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
-    foreach(check team-blockers-ui local-models-ui viewport-dock-ui assistant-steering-ui stamps-ui planes-sections-ui)
+    foreach(check team-blockers-ui local-models-ui viewport-dock-ui assistant-steering-ui stamps-ui planes-sections-ui baked-motions-ui)
       add_test(NAME studio-${check}-compact COMMAND ark-studio --self-test-${check} --settings-file "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}-compact.settings.json" --shot "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}-compact.png" --size 1366 800)
       set_tests_properties(studio-${check}-compact PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
     endforeach()
@@ -835,6 +836,11 @@ if(ARK_WITH_OCCT)
   target_compile_definitions(ark-assembly-joint-limits-tests PRIVATE ARK_JOINT_NATIVE_TESTS=1 ARK_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   add_dependencies(ark-assembly-joint-limits-tests ark-occt-worker)
 endif()
+# 044B Skeleton Motion: vector motion graphs, solver bakes and persistence on synthetic assemblies.
+add_executable(ark-motion-graph-044b-tests tests/motion_graph_044b_tests.cpp)
+target_link_libraries(ark-motion-graph-044b-tests PRIVATE ark)
+add_test(NAME motion-graph-044b COMMAND ark-motion-graph-044b-tests)
+set_tests_properties(motion-graph-044b PROPERTIES TIMEOUT 180)
 if(ARK_WITH_OCCT)
   add_executable(ark-bicycle-transmission-tests tests/bicycle_transmission_tests.cpp)
   target_link_libraries(ark-bicycle-transmission-tests PRIVATE ark-occt ark)

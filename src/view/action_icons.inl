@@ -66,6 +66,7 @@ static const ActionIcon* actionVectorIcon(int action){
         auto& edges=result[963];poly(edges,{{.17f,.29f},{.50f,.10f},{.83f,.29f},{.83f,.72f},{.50f,.92f},{.17f,.72f},{.17f,.29f},{.50f,.48f},{.83f,.29f}});line(edges,.50f,.48f,.50f,.92f);
         auto& dockFit=result[964];for(float x:{.14f,.86f})for(float y:{.14f,.86f}){line(dockFit,x,y,x+(x<.5f?.20f:-.20f),y);line(dockFit,x,y,x,y+(y<.5f?.20f:-.20f));}box(dockFit,.36f,.36f,.28f,.28f);
         auto& sheet=result[965];box(sheet,.19f,.08f,.62f,.84f);box(sheet,.30f,.22f,.23f,.25f);arc(sheet,.65f,.34f,.07f,.07f,0,360);line(sheet,.30f,.61f,.70f,.61f);line(sheet,.30f,.74f,.70f,.74f);line(sheet,.55f,.74f,.55f,.90f);
+        auto& motions=result[45000];line(motions,.12f,.86f,.90f,.86f);line(motions,.12f,.86f,.12f,.12f);for(int i=0;i<16;++i){auto curve=[](float t){return .74f-.52f*t*t*(3-2*t);};const float a=i/16.f,b=(i+1)/16.f;line(motions,.18f+.64f*a,curve(a),.18f+.64f*b,curve(b));}line(motions,.58f,.16f,.58f,.80f);poly(motions,{{.66f,.18f},{.86f,.30f},{.66f,.42f},{.66f,.18f}});
         return result;
     }();
     auto found=icons.find(action);return found==icons.end()?nullptr:&found->second;

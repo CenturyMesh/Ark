@@ -1,5 +1,16 @@
 # ARK agent protocol
 
+044B adds Skeleton Motion: author a vector motion graph over existing revolute
+and prismatic joints with `motion.graph.set{name,graph}` and bake it through the
+joint solver with `motion.bake{name,fps}`, both in revision-checked `doc_apply`.
+Graphs are analytic and cubic Bezier segments composed by sequence, parallel,
+delay, repeat, ping-pong, reverse, time-scale and offset nodes, plus expression
+couplings between channels; never keyframe lists. Read `motion_info` for
+continuity, ranges and stale status; it never edits. Baked frames are display
+poses with no dynamics or collision evidence, and a stale bake must be baked
+again. Load `agent_onboard{topic:"motion"}` and see
+[Skeleton Motion](SKELETON_MOTION_044B.md).
+
 042D: rate activities inside `team_report_task`/`team_finish_goal` with
 `ratings` instead of a separate `tool_feedback` round. Use `query_batch` row
 `id`, `{"$ref":"id.path"}`, `paths` and `max_bytes` to chain reads in one call,

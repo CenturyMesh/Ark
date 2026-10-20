@@ -401,7 +401,7 @@ const std::vector<std::pair<std::string,std::vector<std::string>>>& assistantSpe
         {"vendors",{"library_vendors","library_sources","library_source_search","library_source_page","library_fetch","library_ingest"}},
         {"manufacturing",{"manufacturing_propose","manufacturing_inspect"}},{"plastics",{"manufacturing_propose","manufacturing_inspect"}},
         {"physics",{"physics_inspect","materials_inspect","compute_info"}},{"materials",{"materials_inspect"}},{"wood",{"wood_inspect"}},
-        {"motion",{"assembly_motion","suspension_inspect"}},{"suspension",{"suspension_inspect","assembly_motion"}},
+        {"motion",{"assembly_motion","suspension_inspect","motion_info"}},{"suspension",{"suspension_inspect","assembly_motion"}},
         {"assembly",{"assembly_authoring_info","placement_plan","pattern_plan","assembly_motion"}},{"configurations",{"assembly_authoring_info"}},
         {"sheet",{"sheet_inspect","sheet_preview","export_flat_dxf","import_sheet_step"}},{"stamps",{"sheet_inspect","sheet_preview"}},
         {"frames",{"frame_inspect","stock_preview"}},{"tube",{"tube_inspect","notch_inspect","notch_plan","source_inspect","stock_preview"}},
