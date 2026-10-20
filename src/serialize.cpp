@@ -19,6 +19,7 @@
 #include "ark/usage.hpp"
 #include "ark/electronics.hpp"
 #include "ark/curve_pattern_044b.hpp"
+#include "ark/media_044b.hpp"
 #include <cstdio>
 #include <cctype>
 #include <fstream>
@@ -642,7 +643,7 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
     for(const auto& node:doc.assembly)if(assemblyPatternHasCarry(node.pattern)){r.set("version",Value::makeNum(44));break;}
     for(const auto& feature:doc.features)if(requiresElectronics035B(feature)){r.set("version",Value::makeNum(45));break;}
     for(const auto& plane:doc.planes)if(plane.support.t==Value::Obj)if(const auto* kind=plane.support.find("kind");kind&&kind->t==Value::Str&&kind->str=="bisector"){r.set("version",Value::makeNum(46));break;}
-    if(curvePattern044BNeedsVersion47(doc))r.set("version",Value::makeNum(47));
+    if(curvePattern044BNeedsVersion47(doc)||media044BNeedsVersion47(doc))r.set("version",Value::makeNum(47));
     if(includeAudit&&includeHistory)iterationPersist(r,doc);
     canonicalDocumentKeys(r);
     std::string serialized=r.dump();
@@ -909,6 +910,7 @@ static bool documentFromValue(Value& v,Document& doc,std::string* err){
     for(const auto& feature:nd.features)if(requiresElectronics035B(feature)){const auto* version=v.find("version");if(!version||version->num<45)return fail("Smooth/ribbon cable recipes and endpoint electrical metadata require document version 45");}
     for(const auto& node:nd.assembly)if(assemblyPatternHasCarry(node.pattern)){const auto* version=v.find("version");if(!version||version->num<44)return fail("Pattern carry frames require document version 44");}
     if(curvePattern044BNeedsVersion47(nd)){const auto* version=v.find("version");if(!version||version->num<47)return fail("044B curve pattern paths, pitch spacing, frames and support inputs require document version 47");}
+    if(media044BNeedsVersion47(nd)){const auto* version=v.find("version");if(!version||version->num<47)return fail("044B procedural appearance patterns, animated GIF/video assets and stamp playback require document version 47");}
     try{validateAppearanceAuthoring024B(nd,false);}catch(const std::exception& error){return fail(error.what());}
     try{validateDesignContainerWorkspace(nd);validateSkeletonAuthoring(nd);}catch(const std::exception& error){return fail(error.what());}
     doc=std::move(nd);

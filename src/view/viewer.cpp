@@ -63,6 +63,7 @@ typedef ptrdiff_t GLsizeiptr;
 #include "ark/model.hpp"
 #include "ark/modeling_031b.hpp"
 #include "ark/appearance_024b.hpp"
+#include "ark/media_044b.hpp"
 #include "ark/drawings.hpp"
 #include "ark/cad_import.hpp"
 #include "ark/holes_orchestrator.hpp"
@@ -2508,8 +2509,10 @@ static void materialDialog(){
         {"Texture repeats U, V",scale},
         {"Young modulus / GPa (0 = unknown)",number(existing&&existing->physical.find("young_modulus_Pa")?existing->physical.find("young_modulus_Pa")->num/1e9:0)},
         {"Poisson ratio",number(existing&&existing->physical.find("poisson_ratio")?existing->physical.find("poisson_ratio")->num:.3)},
-        {"Yield strength / MPa (0 = unknown)",number(existing&&existing->physical.find("yield_strength_Pa")?existing->physical.find("yield_strength_Pa")->num/1e6:0)}};
-    if(!editFields("Body material","Presets are nominal. Use the actual grade. A frame assignment updates every profile. Image paths are relative to the document.",fields))return;
+        {"Yield strength / MPa (0 = unknown)",number(existing&&existing->physical.find("yield_strength_Pa")?existing->physical.find("yield_strength_Pa")->num/1e6:0)},
+        choiceField("Procedural pattern",appearance.pattern.empty()?"none":appearance.pattern,{"none","twill","weave","carbon","leather","brushed","knurl","perforated"}),
+        {"Pattern period / mm",number(appearance.patternScaleMm)},{"Pattern angle / degrees",number(appearance.patternAngleDeg)},{"Pattern contrast / 0-1",number(appearance.patternContrast)}};
+    if(!editFields("Body material","Presets are nominal. Use the actual grade. A frame assignment updates every profile. Image paths are relative to the document. Procedural patterns are display-only and need no image.",fields))return;
     auto pairValues=[&](const std::string& value,int count){std::string clean=value;std::replace(clean.begin(),clean.end(),',',' ');std::istringstream input(clean);std::vector<double> values;double n;
         while(input>>n)values.push_back(n);if(!input.eof()||(int)values.size()!=count)throw std::runtime_error("Enter comma-separated numeric color or texture scale values");return values;};
     std::string name=trimField(fields[0].value);if(name.empty())throw std::runtime_error("Material name is required");
@@ -2519,6 +2522,7 @@ static void materialDialog(){
     for(double c:color)base.arr.push_back(V::makeNum(c));for(double s:repeats)scaleValue.arr.push_back(V::makeNum(s));
     ap.set("base_color",std::move(base));ap.set("metallic",V::makeNum(metallic));ap.set("roughness",V::makeNum(roughness));ap.set("opacity",V::makeNum(opacity));
     ap.set("texture_path",V::makeStr(trimField(fields[6].value)));ap.set("texture_scale",std::move(scaleValue));
+    ap.set("pattern",V::makeStr(trimField(fields[11].value)));ap.set("pattern_scale_mm",V::makeNum(formNumber(fields[12].value)));ap.set("pattern_angle_deg",V::makeNum(formNumber(fields[13].value)));ap.set("pattern_contrast",V::makeNum(formNumber(fields[14].value)));
     material.set("op",V::makeStr("material.set"));material.set("name",V::makeStr(name));material.set("density",V::makeNum(density));V physical=existing&&existing->physical.t==V::Obj?existing->physical:V::makeObj();physical.obj.erase(std::remove_if(physical.obj.begin(),physical.obj.end(),[](const auto& item){return item.first=="young_modulus_Pa"||item.first=="poisson_ratio"||item.first=="yield_strength_Pa";}),physical.obj.end());double young=formNumber(fields[8].value),poisson=formNumber(fields[9].value),yield=formNumber(fields[10].value);if(young<0||yield<0)throw std::runtime_error("Material stiffness and strength cannot be negative");if(young>0){physical.set("young_modulus_Pa",V::makeNum(young*1e9));physical.set("poisson_ratio",V::makeNum(poisson));}if(yield>0)physical.set("yield_strength_Pa",V::makeNum(yield*1e6));material.set("physical",physical);material.set("appearance",std::move(ap));commands.arr.push_back(std::move(material));
     V assign=V::makeObj();assign.set("op",V::makeStr("feature.edit"));assign.set("id",V::makeNum((double)feature->id));assign.set("material",V::makeStr(name));assign.set("appearance",V::makeObj());
     if(feature->type==FeatureType::ConstructionFrame){V native=feature->nativeSpec;if(const auto* profiles=native.find("profiles")){V changed=*profiles;for(auto& profile:changed.arr){profile.obj.erase(std::remove_if(profile.obj.begin(),profile.obj.end(),[](const auto& item){return item.first=="density_g_cm3";}),profile.obj.end());profile.set("material",V::makeStr(name));}native.set("profiles",changed);assign.set("native",native);}}
@@ -4389,6 +4393,7 @@ static GLuint materialTexture(const std::string& path){
     auto utf8=file.u8string();GLuint tex=canvasTexture(std::string(utf8.begin(),utf8.end()));
     return tex==g_canvasMissing?0:tex;
 }
+#include "media_044b.inl"
 #include "stamps_render.inl"
 static void drawSurfaces(bool geometry,const Mat4& view,const Mat4& proj,const GLfloat vpT[16],const Vec3& eye,bool transparentOnly=false,bool selectionOverlay=false){
     GLint modelLoc=geometry?guModel:suModel,hardLoc=geometry?guHard:suHard;
@@ -4419,7 +4424,7 @@ static void drawSurfaces(bool geometry,const Mat4& view,const Mat4& proj,const G
             glUniform1f(glGetUniformLocation(pSolid,"roughness"),(float)a.roughness);
             glUniform1f(glGetUniformLocation(pSolid,"opacity"),(float)a.opacity);
             glUniform2f(glGetUniformLocation(pSolid,"textureScale"),(float)(a.textureScaleU/100.),(float)(a.textureScaleV/100.));
-            GLuint tex=a.textureAsset.empty()?materialTexture(a.texturePath):stampAssetTexture(a.textureAsset);
+            GLuint tex=materialTexture044B(a);setPatternUniforms044B(a);
             glUniform1f(glGetUniformLocation(pSolid,"hasTexture"),tex?1.f:0.f);
             glActiveTexture(GL_TEXTURE2);glBindTexture(GL_TEXTURE_2D,tex);glActiveTexture(GL_TEXTURE0);
         }
@@ -4441,7 +4446,7 @@ static void drawSurfaces(bool geometry,const Mat4& view,const Mat4& proj,const G
             auto found=g_suspViews.find(f->id);if(found==g_suspViews.end())continue;
             glUniform1f(hardLoc,0.f);glPolygonMode(GL_FRONT_AND_BACK,!geometry&&wireframe?GL_LINE:GL_FILL);
             if(!geometry){glUniform1f(suSel,i==(size_t)selBody?1.f:i==(size_t)hoverBody?.3f:0.f);glUniform1f(suOutline,0.f);
-                glUniform1f(glGetUniformLocation(pSolid,"hasTexture"),0.f);glUniform1f(glGetUniformLocation(pSolid,"opacity"),(float)resolvedAppearance(g_doc,*f).opacity);}
+                glUniform1f(glGetUniformLocation(pSolid,"hasTexture"),0.f);clearPatternUniforms044B();glUniform1f(glGetUniformLocation(pSolid,"opacity"),(float)resolvedAppearance(g_doc,*f).opacity);}
             auto& cache=found->second;
             for(size_t part=0;part<cache.preview.parts.size()&&part<cache.gpu.size();++part){
                 const auto& item=cache.preview.parts[part];if(!geometry){glUniform3f(suColor,(float)item.color.x,(float)item.color.y,(float)item.color.z);
@@ -4553,7 +4558,7 @@ static void paintNavigationTriad(int x,int y,int size){
     static const GLfloat identity[16]={1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
     glEnable(GL_SCISSOR_TEST);glScissor(x,winH-y-size,size,size);glViewport(x,winH-y-size,size,size);glEnable(GL_DEPTH_TEST);glDepthMask(GL_TRUE);glClear(GL_DEPTH_BUFFER_BIT);glDisable(GL_SCISSOR_TEST);
     glUseProgram(pSolid);setEmission030(Appearance{});glUniformMatrix4fv(suVp,1,GL_FALSE,matrix);glUniformMatrix4fv(suModel,1,GL_FALSE,identity);glUniform3f(suEye,(float)eye.x,(float)eye.y,(float)eye.z);glUniform1f(suHard,0);glUniform1f(suOutline,0);glUniform1f(suSel,0);
-    glUniform1f(glGetUniformLocation(pSolid,"satin"),1);glUniform1f(glGetUniformLocation(pSolid,"opacity"),1);glUniform1f(glGetUniformLocation(pSolid,"hasTexture"),0);glUniform1f(glGetUniformLocation(pSolid,"metallic"),.38f);glUniform1f(glGetUniformLocation(pSolid,"roughness"),.22f);
+    glUniform1f(glGetUniformLocation(pSolid,"satin"),1);glUniform1f(glGetUniformLocation(pSolid,"opacity"),1);glUniform1f(glGetUniformLocation(pSolid,"hasTexture"),0);clearPatternUniforms044B();glUniform1f(glGetUniformLocation(pSolid,"metallic"),.38f);glUniform1f(glGetUniformLocation(pSolid,"roughness"),.22f);
     static const float colors[][3]={{1.f,.32f,.28f},{.28f,.92f,.51f},{.29f,.62f,1.f}};
     glBindVertexArray(g_triadVao);for(int part=0;part<3;++part){glUniform3f(suColor,colors[part][0],colors[part][1],colors[part][2]);glDrawArrays(GL_TRIANGLES,g_triadRanges[part].first,g_triadRanges[part].second);}
     glDisable(GL_DEPTH_TEST);glViewport(0,0,winW,winH);
@@ -6034,7 +6039,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     if(!setDpiContext||!setDpiContext(reinterpret_cast<HANDLE>(-4)))SetProcessDPIAware();
     bool plasticsUiTest=false,electronicsWorkspaceUiTest=false,cableGuideUiTest=false;
     bool nativeProductPerformanceUiTest=false,sceneCacheUiTest=false,authoringAssistanceUiTest=false,featureEditorPickingUiTest=false;
-    bool featureHistoryUiTest=false,recoveryUiTest=false,editorScrollUiTest=false,configurationWorkspaceUiTest=false,interactionPerformanceUiTest=false;bool startupUiTest=false;bool stampsUiTest=false;bool planesSectionsUiTest=false;
+    bool featureHistoryUiTest=false,recoveryUiTest=false,editorScrollUiTest=false,configurationWorkspaceUiTest=false,interactionPerformanceUiTest=false;bool startupUiTest=false;bool stampsUiTest=false;bool media044bUiTest=false;bool planesSectionsUiTest=false;
     bool specializedPatternUiTest=false;bool advancedSheetmetalUiTest=false;bool nativeVertexPullUiTest=false;bool cadImportUiTest=false;bool holesOrchestratorUiTest=false;bool designContainerUiTest=false;
     bool directAuthoringUiTest=false,parametricAuthoringUiTest=false,skeletonEditorUiTest=false,imageAttachmentUiTest=false,assistantSteeringUiTest=false;
     bool localModelsUiTest=false;bool viewportDockUiTest=false;bool bomUiTest=false;bool drawingWorkspaceUiTest=false;bool drawingViewportUiTest=false;bool measurementUiTest=false;bool authoringUiTest=false;
@@ -6076,6 +6081,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         else if(a=="--skeleton-editor-test"){skeletonEditorUiTest=true;g_headless=true;}
         else if(a=="--self-test-image-attachment-ui"){imageAttachmentUiTest=true;g_headless=true;}
         else if(a=="--self-test-stamps-ui"){stampsUiTest=true;g_headless=true;}
+        else if(a=="--self-test-media-044b-ui"){media044bUiTest=true;g_headless=true;}
         else if(a=="--self-test-planes-sections-ui"){planesSectionsUiTest=true;g_headless=true;}
         else if(a=="--self-test-assistant-steering-ui"){assistantSteeringUiTest=true;g_headless=true;}
         else if(a=="--self-test-selection-picking-ui"){selectionPickingUiTest=true;g_headless=true;}
@@ -6907,6 +6913,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
 #include "native_vertex_pull_selftest.inl"
 #include "cad_import_selftest.inl"
 #include "stamps_selftest.inl"
+#include "media_044b_selftest.inl"
 #include "planes_sections_selftest.inl"
 #include "team_blockers_selftest.inl"
 #include "realtime_selftest.inl"
