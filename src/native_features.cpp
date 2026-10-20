@@ -18,6 +18,10 @@
 #include <string>
 
 namespace ark {
+bool profileRegions046BNeedsVersion48(const Document& document){
+    for(const auto& feature:document.features)if((feature.type==FeatureType::NativeSolid||feature.type==FeatureType::ExtrudeSurface||feature.type==FeatureType::RevolveSurface||feature.type==FeatureType::Sweep)&&feature.nativeSpec.t==arkjson::Value::Obj&&feature.nativeSpec.find("regions"))return true;
+    return false;
+}
 arkjson::Value inspectNativeCollision(const Body& a,const Mat4& aWorld,const Body& b,const Mat4& bWorld,double tolerance){
     if(tolerance!=1e-6)throw std::runtime_error("Collision uses fixed 1e-6 mm native contact tolerance");
     arkjson::Value request=arkjson::Value::makeObj();request.set("op",arkjson::Value::makeStr("collision"));
@@ -73,7 +77,7 @@ V edge(const char* kind, std::initializer_list<Vec2> coordinates) {
     return item;
 }
 
-V profileFromSketch(Document& document, const std::string& name,const NamedSketch* supplied=nullptr) {
+V profileFromSketch(Document& document, const std::string& name,const NamedSketch* supplied=nullptr,std::vector<size_t>* origins=nullptr) {
     const NamedSketch* named = supplied?supplied:document.findSketch(name);
     if (!named)
         throw std::runtime_error("Native profile sketch is missing or invalid: " + name);
@@ -192,6 +196,7 @@ V profileFromSketch(Document& document, const std::string& name,const NamedSketc
             }
             }
         }
+        if (origins) while (origins->size() < entities.arr.size()) origins->push_back(static_cast<size_t>(&source - named->sk.ents.data()));
         ++entityIndex;
     }
     if (entities.arr.empty()) {
@@ -218,7 +223,7 @@ V numericNative(const V& value, const ExprEnv& env, const std::string& key = {})
         return value;
     }
     if (value.t == V::Str) {
-        if (key == "grain_axis" || key == "source_vertex" || key == "source_topology" || key == "kind" || key == "join" || key == "sketch" || key == "name" || key == "op" || key == "reference" || key == "second_reference" || key == "mode" || key == "end" || key == "edges" || key == "faces" || key == "face" || key == "source_face" || key == "limit_face" || key == "plane" || key == "keep" || key == "selection" || key == "direction" || key == "axis" || key == "neutral" || key == "reference_face" || key == "tool_face" || key == "equivalence" || key == "interpolation" || key == "references" || key == "pitch_mode" || key == "orientation" || key == "support_faces" || key == "reference_scheme") return value;
+        if (key == "grain_axis" || key == "source_vertex" || key == "source_topology" || key == "kind" || key == "join" || key == "sketch" || key == "name" || key == "op" || key == "reference" || key == "second_reference" || key == "mode" || key == "end" || key == "edges" || key == "faces" || key == "face" || key == "source_face" || key == "limit_face" || key == "plane" || key == "keep" || key == "selection" || key == "direction" || key == "axis" || key == "neutral" || key == "reference_face" || key == "tool_face" || key == "equivalence" || key == "interpolation" || key == "references" || key == "pitch_mode" || key == "orientation" || key == "support_faces" || key == "reference_scheme" || key == "entity") return value;
         return V::makeNum(expressionValue(value.str, env));
     }
     if (value.t == V::Arr) {
@@ -236,6 +241,62 @@ V numericNative(const V& value, const ExprEnv& env, const std::string& key = {})
 }
 
 V profileArgument(const Feature& feature, const ExprEnv& env, Document& document, const std::vector<Body>& preceding, const char* key);
+
+// 046B profile regions. A single connected sketch without native.regions keeps
+// the unchanged legacy payload (byte-identical requests). Several closed loops
+// or an authored selection add the region contract; the OCCT worker resolves
+// loops, containment depth and seeds from exact edges.
+V regionProfileFromSketch(Document& document, const std::string& name, const V* regions, const ExprEnv& env) {
+    std::vector<size_t> origins;
+    V profile = profileFromSketch(document, name, nullptr, &origins);
+    const NamedSketch* named = document.findSketch(name);
+    if (!regions) {
+        size_t components = 1;
+        try { components = sketchProfileComponents(named->sk); } catch (const std::exception&) {}
+        if (components < 2) return profile;
+    }
+    if (!profile.find("entities")) throw std::runtime_error("Profile regions need closed sketch curves; sketch " + name + " has none");
+    V spec = V::makeObj();
+    if (regions) {
+        if (regions->t != V::Arr || regions->arr.empty() || regions->arr.size() > 64)
+            throw std::runtime_error("native.regions needs 1..64 seeds: {point:[x,y]} in sketch coordinates or {entity:name} naming an outer-loop curve");
+        V select = V::makeArr();
+        for (size_t index = 0; index < regions->arr.size(); ++index) {
+            const V& seed = regions->arr[index];
+            const std::string label = "native.regions[" + std::to_string(index) + "]";
+            if (seed.t != V::Obj || seed.obj.size() != 1) throw std::runtime_error(label + " must be exactly one of {point:[x,y]} or {entity:name}");
+            V row = V::makeObj();
+            if (const V* at = seed.find("point")) {
+                V xy = numericNative(*at, env);
+                if (xy.t != V::Arr || xy.arr.size() != 2 || xy.arr[0].t != V::Num || xy.arr[1].t != V::Num)
+                    throw std::runtime_error(label + ".point must be [x,y] numbers or expressions in sketch coordinates");
+                row.set("point", std::move(xy));
+            } else if (const V* entity = seed.find("entity")) {
+                if (entity->t != V::Str || entity->str.empty()) throw std::runtime_error(label + ".entity must be a sketch entity name");
+                int found = -1;
+                for (size_t i = 0; i < named->sk.ents.size(); ++i) if (named->sk.ents[i].name == entity->str) {
+                    if (found >= 0) throw std::runtime_error(label + " entity '" + entity->str + "' is ambiguous in sketch " + name);
+                    found = static_cast<int>(i);
+                }
+                if (found < 0) throw std::runtime_error(label + " entity '" + entity->str + "' is not in sketch " + name);
+                const SketchEnt& source = named->sk.ents[static_cast<size_t>(found)];
+                if (source.construction || source.kind == SketchEnt::Pnt) throw std::runtime_error(label + " entity '" + entity->str + "' is construction or a point, not a profile curve");
+                row.set("entity_index", V::makeNum(found));
+                row.set("entity", *entity);
+            } else throw std::runtime_error(label + " must be exactly one of {point:[x,y]} or {entity:name}");
+            select.arr.push_back(std::move(row));
+        }
+        spec.set("select", std::move(select));
+    }
+    for (auto& field : profile.obj) if (field.first == "entities")
+        for (size_t i = 0; i < field.second.arr.size() && i < origins.size(); ++i) {
+            const SketchEnt& source = named->sk.ents[origins[i]];
+            field.second.arr[i].set("source", V::makeNum(static_cast<double>(origins[i])));
+            field.second.arr[i].set("entity", V::makeStr(source.name.empty() ? "sketch entity #" + std::to_string(origins[i]) : source.name));
+        }
+    profile.set("regions", std::move(spec));
+    return profile;
+}
 
 bool bitParam(const Feature& feature, const ExprEnv& env, const char* key, double fallback) {
     const double value = feature.p.count(key) ? param(feature, env, key) : fallback;
@@ -329,6 +390,9 @@ V spatialProjectionResult(const Feature& feature,Document& document){
 V surfaceRequest(const Feature& feature, const ExprEnv& env, Document& document,
                  const std::vector<Body>& preceding) {
     V request = V::makeObj();
+    const V* regions = feature.nativeSpec.find("regions");
+    if (regions && feature.type != FeatureType::ExtrudeSurface && feature.type != FeatureType::RevolveSurface && feature.type != FeatureType::Sweep)
+        throw std::runtime_error("native.regions applies to extrude, extrude_surface, revolve_surface and sweep sketch profiles only");
     auto supportInput = [&](const V& authored, const char* label) -> const Body& {
         if(authored.t!=V::Num||!std::isfinite(authored.num)||authored.num<1||authored.num!=std::floor(authored.num)||authored.num>9007199254740990.)throw std::runtime_error(std::string(label)+" must be an explicit feature id");
         const u64 id=static_cast<u64>(authored.num);
@@ -412,7 +476,10 @@ V surfaceRequest(const Feature& feature, const ExprEnv& env, Document& document,
         if(const V* sections=feature.nativeSpec.find("sections")){
             if(feature.nativeSpec.find("section"))throw std::runtime_error("Sweep chooses either section or varying sections");if(sections->t!=V::Arr||sections->arr.size()<2||sections->arr.size()>32)throw std::runtime_error("Varying sweep needs 2..32 section stations");V resolved=V::makeArr();double previous=-1;
             for(const V& station:sections->arr){if(station.t!=V::Obj)throw std::runtime_error("Sweep station must be an object");for(auto& field:station.obj)if(field.first!="section"&&field.first!="fraction"&&field.first!="roll"&&field.first!="x_axis")throw std::runtime_error("Unknown sweep station field: "+field.first);const V& fractionValue=required(station,"fraction");double fraction=fractionValue.t==V::Num?fractionValue.num:fractionValue.t==V::Str?expressionValue(fractionValue.str,env):-1;if(!std::isfinite(fraction)||fraction<0||fraction>1||fraction<=previous)throw std::runtime_error("Sweep fractions must increase in 0..1");previous=fraction;V item=V::makeObj();const V& section=required(station,"section");item.set("section",section.t==V::Str?resolveProfileName(document,preceding,section.str,"section"):numericNative(section,env));item.set("fraction",V::makeNum(fraction));if(const V* roll=station.find("roll"))item.set("roll",numericNative(*roll,env));if(const V* axis=station.find("x_axis"))item.set("x_axis",numericNative(*axis,env));resolved.arr.push_back(item);}if(resolved.arr.front().find("fraction")->num!=0||resolved.arr.back().find("fraction")->num!=1)throw std::runtime_error("Varying sweep sections must explicitly include fractions 0 and 1");request.set("sections",resolved);
-        }else request.set("section", profileArgument(feature, env, document, preceding, "section"));
+        }else if(regions){const V& section=required(feature.nativeSpec,"section");if(section.t!=V::Str||!document.findSketch(section.str))throw std::runtime_error("native.regions selects regions of a sweep section sketch; the section must be a sketch name");request.set("section",regionProfileFromSketch(document,section.str,regions,env));}
+        else if(const V* section=feature.nativeSpec.find("section");section&&section->t==V::Str&&document.findSketch(section->str))request.set("section",regionProfileFromSketch(document,section->str,nullptr,env));
+        else request.set("section", profileArgument(feature, env, document, preceding, "section"));
+        if(regions&&feature.nativeSpec.find("sections"))throw std::runtime_error("native.regions requires one section; varying sweep sections keep one loop per station");
         request.set("path", profileArgument(feature, env, document, preceding, "path"));
         request.set("solid", V::makeBool(bitParam(feature, env, "solid", 0)));
         request.set("correction", V::makeBool(bitParam(feature, env, "correction", 1)));
@@ -435,8 +502,10 @@ V surfaceRequest(const Feature& feature, const ExprEnv& env, Document& document,
     } else if (feature.type == FeatureType::ExtrudeSurface || feature.type == FeatureType::RevolveSurface) {
         const bool revolve = feature.type == FeatureType::RevolveSurface;
         request.set("op", V::makeStr(revolve ? "revolve_surface" : "extrude_surface"));
-        if (const V* profile = feature.nativeSpec.find("profile")) request.set("profile", numericNative(*profile, env));
-        else request.set("profile", profileFromSketch(document, feature.get("sketch")));
+        if (const V* profile = feature.nativeSpec.find("profile")) {
+            if (regions) throw std::runtime_error("native.regions selects regions of p.sketch; an inline native.profile has none");
+            request.set("profile", numericNative(*profile, env));
+        } else request.set("profile", regionProfileFromSketch(document, feature.get("sketch"), regions, env));
         request.set("solid", V::makeBool(bitParam(feature, env, "solid", 0)));
         if (revolve) {
             const double angle = param(feature, env, "angle");
@@ -640,7 +709,7 @@ V frameValue(const Mat4& matrix) {
 
 V exactLegacyProfile(const Feature& feature, const ExprEnv& env,
                      Document& document, const Body& body) {
-    if (!feature.get("sketch").empty()) return profileFromSketch(document, feature.get("sketch"));
+    if (!feature.get("sketch").empty()) return regionProfileFromSketch(document, feature.get("sketch"), nullptr, env);
     V profile = V::makeObj(), entities = V::makeArr();
     profile.set("frame", frameValue(body.profile.frame));
     if (std::string(feature.get("shape", "rect")) == "circle") {
@@ -815,6 +884,7 @@ V solidFeatureRequest(const Feature& feature, const ExprEnv& env,
     if (op == "pocket" || op == "slot") op = "hole";
     if (op == "rigid_transform") op = "transform";
     model.set("op", V::makeStr(op));
+    if (op != "extrude" && model.find("regions")) throw std::runtime_error("native.regions applies to extrude, extrude_surface, revolve_surface and sweep sketch profiles only");
     if(op=="split_line"){
         const std::set<std::string> allowed{"op","sketch","source_face","source_topology","direction"};for(const auto& item:feature.nativeSpec.obj)if(!allowed.count(item.first))throw std::runtime_error("Unknown native split-line field: "+item.first);
         for(const auto& item:feature.p)if(item.first!="density")throw std::runtime_error("Unknown native split-line parameter: "+item.first);
@@ -884,7 +954,10 @@ V solidFeatureRequest(const Feature& feature, const ExprEnv& env,
         const size_t expectedInputs = (sourceFace ? 1u : 0u) + (mode == "up_to_face" ? 1u : 0u);
         if (feature.inputs.size() != expectedInputs) throw std::runtime_error("Extrusion requires its exact source face and/or limit face inputs only");
         if (sourceFace && (model.find("profile") || !feature.get("sketch").empty())) throw std::runtime_error("Extrusion needs one saved sketch or one exact source face");
-        if (!sourceFace && !model.find("profile")) model.set("profile", profileFromSketch(document, feature.get("sketch")));
+        const V* regions = feature.nativeSpec.find("regions");
+        if (regions && (sourceFace || model.find("profile"))) throw std::runtime_error("native.regions selects regions of p.sketch; an exact source_face or inline profile has none");
+        if (!sourceFace && !model.find("profile")) model.set("profile", regionProfileFromSketch(document, feature.get("sketch"), regions, env));
+        model.obj.erase(std::remove_if(model.obj.begin(), model.obj.end(), [](const auto& item) { return item.first == "regions"; }), model.obj.end());
         if (mode == "distance" && model.find("limit_face")) throw std::runtime_error("Distance extrusion cannot retain an inactive limit face");
     }
     if((op=="wood"&&!feature.inputs.empty())||(op=="vent"&&feature.inputs.size()>1))throw std::runtime_error("Wood needs no input; vent accepts at most one exact local XY stock input");

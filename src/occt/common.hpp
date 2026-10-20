@@ -89,6 +89,10 @@ V completeSelectionReferences(V result);
 V restoreNativeResult(const V& resolvedRequest,const V& savedResult);
 V shapeReport(const TopoDS_Shape& shape,bool requireSolid);
 double symmetricDifference(const TopoDS_Shape& a,const TopoDS_Shape& b);
+// 046B: exact planar region faces (outer loop minus its holes) of a sketch
+// profile carrying "regions", placed in the profile frame. Exactly one region
+// is returned; several selected regions reject (one solid per exact feature).
+std::vector<TopoDS_Shape> profileRegionFaces046B(const V& profile,V& receipt);
 std::string kernelVersion();
 int nativeThreadBudget(); // ARK_NATIVE_THREADS=1 disables parallel tessellation
 void configureNativeThreadBudget(int threads); // Idle, serialized worker request boundary only.

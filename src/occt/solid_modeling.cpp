@@ -5,6 +5,9 @@
 #include "common.hpp"
 
 #include <BRepAdaptor_Curve.hxx>
+#include <BRepBndLib.hxx>
+#include <Bnd_Box.hxx>
+#include <Precision.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_Section.hxx>
 #include <BRepAlgoAPI_Splitter.hxx>
@@ -93,6 +96,7 @@
 #include <vector>
 #include <atomic>
 #include <chrono>
+#include <sstream>
 
 namespace ark::occt {
 namespace {
@@ -204,6 +208,25 @@ void axialFaces(const TopoDS_Shape& solid,std::vector<Ref>& refs,bool cylinder){
         }else if(s.GetType()==GeomAbs_Cylinder||s.GetType()==GeomAbs_Cone){add(refs,"side","face",item);if(cylinder)add(refs,"axis","axis",item);}
     }
 }
+TopoDS_Edge authoredProfileEdge(const V& e,const std::string& kind){TopoDS_Edge edge;
+    if(kind=="circle"){
+        auto& c=need(e,"center");if(c.t!=V::Arr||c.arr.size()!=2||c.arr[0].t!=V::Num||c.arr[1].t!=V::Num)throw std::runtime_error("Circle center needs xy");
+        double r=positive(e,"radius");edge=BRepBuilderAPI_MakeEdge(gp_Circ(gp_Ax2(gp_Pnt(c.arr[0].num,c.arr[1].num,0),gp_Dir(0,0,1)),r)).Edge();
+    }else if(kind=="line"||kind=="bezier"){
+        auto& pts=need(e,"points");if(pts.t!=V::Arr||(kind=="line"?pts.arr.size()!=2u:pts.arr.size()<2u||pts.arr.size()>26u))throw std::runtime_error("Line needs two endpoints; Bezier needs 2..26 controls");
+        auto xy=[](const V& v){if(v.t!=V::Arr||v.arr.size()!=2||v.arr[0].t!=V::Num||v.arr[1].t!=V::Num||!std::isfinite(v.arr[0].num)||!std::isfinite(v.arr[1].num))throw std::runtime_error("Profile point needs finite xy");return gp_Pnt(v.arr[0].num,v.arr[1].num,0);};
+        if(kind=="line")edge=BRepBuilderAPI_MakeEdge(xy(pts.arr[0]),xy(pts.arr[1])).Edge();
+        else{const int count=(int)pts.arr.size();NCollection_Array1<gp_Pnt> poles(1,count);for(int i=0;i<count;++i)poles.SetValue(i+1,xy(pts.arr[static_cast<size_t>(i)]));Handle(Geom_BezierCurve) curve;
+            if(const auto* weights=e.find("weights")){if(weights->t!=V::Arr||weights->arr.size()!=pts.arr.size())throw std::runtime_error("Bezier weights must match controls");NCollection_Array1<double> w(1,count);for(int i=0;i<count;++i){double weight=weights->arr[(size_t)i].asNum();if(weights->arr[(size_t)i].t!=V::Num||!std::isfinite(weight)||weight<=0)throw std::runtime_error("Bezier weights must be finite positive numbers");w.SetValue(i+1,weight);}curve=new Geom_BezierCurve(poles,w);}else curve=new Geom_BezierCurve(poles);BRepBuilderAPI_MakeEdge maker(curve);if(!maker.IsDone())throw std::runtime_error("Exact Bezier profile failed");edge=maker.Edge();}
+    }else if(kind=="arc"){
+        auto& c=need(e,"center");if(c.t!=V::Arr||c.arr.size()!=2||c.arr[0].t!=V::Num||c.arr[1].t!=V::Num)throw std::runtime_error("Arc center needs xy");
+        const double radius=positive(e,"radius"),degrees=std::acos(-1.0)/180.0,u0=scalar(e,"a0")*degrees,u1=scalar(e,"a1")*degrees;
+        gp_Circ circ(gp_Ax2(gp_Pnt(c.arr[0].num,c.arr[1].num,0),gp_Dir(0,0,1)),radius);
+        if(u1+1e-12>=u0){BRepBuilderAPI_MakeEdge maker(circ,u0,u1);if(!maker.IsDone())throw std::runtime_error("Profile arc failed");edge=maker.Edge();}
+        else{BRepBuilderAPI_MakeEdge maker(circ,u1,u0);if(!maker.IsDone())throw std::runtime_error("Profile arc failed");edge=maker.Edge();edge.Reverse();}
+    }else throw std::runtime_error("Solid profile supports line, Bezier, circle, and arc entities");
+    return edge;
+}
 std::pair<TopoDS_Face,std::vector<std::pair<std::string,TopoDS_Edge>>> profileFace(const V& profile){
     const char* stage="profile setup";
     try {
@@ -220,22 +243,7 @@ std::pair<TopoDS_Face,std::vector<std::pair<std::string,TopoDS_Edge>>> profileFa
             }
             ++index;continue;
         }
-        if(kind=="circle"){
-            auto& c=need(e,"center");if(c.t!=V::Arr||c.arr.size()!=2||c.arr[0].t!=V::Num||c.arr[1].t!=V::Num)throw std::runtime_error("Circle center needs xy");
-            double r=positive(e,"radius");edge=BRepBuilderAPI_MakeEdge(gp_Circ(gp_Ax2(gp_Pnt(c.arr[0].num,c.arr[1].num,0),gp_Dir(0,0,1)),r)).Edge();
-        }else if(kind=="line"||kind=="bezier"){
-            auto& pts=need(e,"points");if(pts.t!=V::Arr||(kind=="line"?pts.arr.size()!=2u:pts.arr.size()<2u||pts.arr.size()>26u))throw std::runtime_error("Line needs two endpoints; Bezier needs 2..26 controls");
-            auto xy=[](const V& v){if(v.t!=V::Arr||v.arr.size()!=2||v.arr[0].t!=V::Num||v.arr[1].t!=V::Num||!std::isfinite(v.arr[0].num)||!std::isfinite(v.arr[1].num))throw std::runtime_error("Profile point needs finite xy");return gp_Pnt(v.arr[0].num,v.arr[1].num,0);};
-            if(kind=="line")edge=BRepBuilderAPI_MakeEdge(xy(pts.arr[0]),xy(pts.arr[1])).Edge();
-            else{const int count=(int)pts.arr.size();NCollection_Array1<gp_Pnt> poles(1,count);for(int i=0;i<count;++i)poles.SetValue(i+1,xy(pts.arr[static_cast<size_t>(i)]));Handle(Geom_BezierCurve) curve;
-                if(const auto* weights=e.find("weights")){if(weights->t!=V::Arr||weights->arr.size()!=pts.arr.size())throw std::runtime_error("Bezier weights must match controls");NCollection_Array1<double> w(1,count);for(int i=0;i<count;++i){double weight=weights->arr[(size_t)i].asNum();if(weights->arr[(size_t)i].t!=V::Num||!std::isfinite(weight)||weight<=0)throw std::runtime_error("Bezier weights must be finite positive numbers");w.SetValue(i+1,weight);}curve=new Geom_BezierCurve(poles,w);}else curve=new Geom_BezierCurve(poles);BRepBuilderAPI_MakeEdge maker(curve);if(!maker.IsDone())throw std::runtime_error("Exact Bezier profile failed");edge=maker.Edge();}
-        }else if(kind=="arc"){
-            auto& c=need(e,"center");if(c.t!=V::Arr||c.arr.size()!=2||c.arr[0].t!=V::Num||c.arr[1].t!=V::Num)throw std::runtime_error("Arc center needs xy");
-            const double radius=positive(e,"radius"),degrees=std::acos(-1.0)/180.0,u0=scalar(e,"a0")*degrees,u1=scalar(e,"a1")*degrees;
-            gp_Circ circ(gp_Ax2(gp_Pnt(c.arr[0].num,c.arr[1].num,0),gp_Dir(0,0,1)),radius);
-            if(u1+1e-12>=u0){BRepBuilderAPI_MakeEdge maker(circ,u0,u1);if(!maker.IsDone())throw std::runtime_error("Profile arc failed");edge=maker.Edge();}
-            else{BRepBuilderAPI_MakeEdge maker(circ,u1,u0);if(!maker.IsDone())throw std::runtime_error("Profile arc failed");edge=maker.Edge();edge.Reverse();}
-        }else throw std::runtime_error("Solid profile supports line, Bezier, circle, and arc entities");
+        edge=authoredProfileEdge(e,kind);
         stage="profile wire edge";wire.Add(edge);if(wire.Edge().IsNull())throw std::runtime_error("Profile edge did not join authored wire");std::string name=e.find("name")?word(e,"name"):"side."+std::to_string(index);edges.push_back({name,wire.Edge()});++index;
     }
     if(!wire.IsDone())throw std::runtime_error("Profile wire does not close");stage="profile planar face";BRepBuilderAPI_MakeFace maker(wire.Wire(),true);if(!maker.IsDone())throw std::runtime_error("Profile is not a planar face");
@@ -263,13 +271,14 @@ std::pair<TopoDS_Face,std::vector<std::pair<std::string,TopoDS_Edge>>> profileFa
     }return {TopoDS::Face(move.Shape()),edges};
     } catch(const Standard_Failure& failure) {throw std::runtime_error(std::string("OCCT failed during ")+stage+": "+(failure.GetMessageString()?failure.GetMessageString():""));}
 }
+#include "profile_regions_046b.inl"
 TopoDS_Face extrusionFace(const V& request,const char* brepKey,const char* topologyKey,const char* referenceKey){
     const auto source=readBrep(word(request,brepKey));const auto names=inputRefs(request,brepKey,topologyKey,source);const auto name=word(request,referenceKey);
     for(const auto& ref:names)if(ref.name==name){if(ref.kind!="face"||!selectable(ref.status)||ref.shape.IsNull())throw std::runtime_error("Extrusion face is missing, split, deleted or ambiguous: "+name);return TopoDS::Face(ref.shape);}
     throw std::runtime_error("Unknown exact extrusion face: "+name);
 }
 TopoDS_Shape makeExtrusion(const V& request,std::vector<Ref>& refs,V* receipt=nullptr){
-    TopoDS_Face face;std::vector<std::pair<std::string,TopoDS_Edge>> edges;gp_Vec normal;
+    TopoDS_Face face;std::vector<std::pair<std::string,TopoDS_Edge>> edges;gp_Vec normal;V regionReceipt;
     const bool fromFace=request.find("source_face")!=nullptr;
     if(fromFace){
         face=extrusionFace(request,"input_brep","input_topology","source_face");BRepAdaptor_Surface surface(face);
@@ -277,7 +286,10 @@ TopoDS_Shape makeExtrusion(const V& request,std::vector<Ref>& refs,V* receipt=nu
         normal=gp_Vec(surface.Plane().Axis().Direction());if(face.Orientation()==TopAbs_REVERSED)normal.Reverse();
         const auto source=readBrep(word(request,"input_brep"));const auto names=inputRefs(request,"input_brep","input_topology",source);
         for(const auto& edge:shapes(face,TopAbs_EDGE))for(const auto& ref:names)if(ref.kind=="edge"&&selectable(ref.status)&&ref.name.find("@ark.")==std::string::npos&&ref.shape.IsSame(edge)){edges.push_back({ref.name,TopoDS::Edge(edge)});break;}
-    }else{const auto& profile=need(request,"profile");auto source=profileFace(profile);face=source.first;edges=std::move(source.second);auto m=frame(profile);normal=gp_Vec(m[8],m[9],m[10]);}
+    }else{const auto& profile=need(request,"profile");
+        if(profile.find("regions")){auto regions=profileRegions046B(profile);requireOneRegion046B(regions,"native extrude");face=regions.faces.front();edges=std::move(regions.edges);regionReceipt=std::move(regions.receipt);}
+        else{auto source=profileFace(profile);face=source.first;edges=std::move(source.second);}
+        auto m=frame(profile);normal=gp_Vec(m[8],m[9],m[10]);}
     const double direction=optional(request,"direction",1),symmetric=optional(request,"symmetric",0);
     if(direction!=1&&direction!=-1)throw std::runtime_error("Extrusion direction must be +1 or -1");
     if(symmetric!=0&&symmetric!=1)throw std::runtime_error("Extrusion symmetric must be 0 or 1");
@@ -303,7 +315,7 @@ TopoDS_Shape makeExtrusion(const V& request,std::vector<Ref>& refs,V* receipt=nu
         if(count==1)add(refs,"side."+name,"face",generated);else refs.push_back({"side."+name,"face",count?"split":"deleted",{}});
         add(refs,"edge.start."+name,"edge",op.FirstShape(edge));
         add(refs,"edge.end."+name,"edge",op.LastShape(edge));
-    }if(receipt){receipt->set("mode",V::makeStr(mode));receipt->set("depth_mm",V::makeNum(depth));receipt->set("direction",V::makeNum(direction));receipt->set("symmetric",V::makeBool(symmetric!=0));receipt->set("start_offset_mm",V::makeNum(offset));receipt->set("limit_cap_coverage_checked",V::makeBool(coverage));receipt->set("source",V::makeStr(fromFace?"exact_planar_face":"saved_sketch"));}
+    }if(receipt){receipt->set("mode",V::makeStr(mode));receipt->set("depth_mm",V::makeNum(depth));receipt->set("direction",V::makeNum(direction));receipt->set("symmetric",V::makeBool(symmetric!=0));receipt->set("start_offset_mm",V::makeNum(offset));receipt->set("limit_cap_coverage_checked",V::makeBool(coverage));receipt->set("source",V::makeStr(fromFace?"exact_planar_face":"saved_sketch"));if(regionReceipt.t==V::Obj)receipt->set("profile_regions",regionReceipt);}
     return op.Shape();
 }
 TopoDS_Shape cutter(const V& spec){
@@ -839,6 +851,7 @@ V modelSolidNative(const V& request){
     }
 }
 
+std::vector<TopoDS_Shape> profileRegionFaces046B(const V& profile,V& receipt){auto regions=profileRegions046B(profile);receipt=std::move(regions.receipt);std::vector<TopoDS_Shape> faces(regions.faces.begin(),regions.faces.end());if(faces.size()!=1){ProfileRegions046B labels;labels.faces=std::move(regions.faces);labels.labels=std::move(regions.labels);requireOneRegion046B(labels,"this exact feature");}return faces;}
 V booleanSequenceNative(const V& sequence){
     // One worker request runs every pairwise step of a 2..16-input exact
     // boolean with the same OCCT operation and reference propagation as the
