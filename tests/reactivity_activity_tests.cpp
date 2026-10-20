@@ -123,6 +123,21 @@ void rejectedPreviewActivityChecks(){
     V accepted=json(R"({"expected_revision":0,"commands":[{"op":"feature.add","type":"box","name":"Fixture"}]})");accepted.set("actor",actor());call(session,"doc_preview",accepted);
     const auto& valid=session.document.agentActivity->entries.back();check(!valid.find("is_error")->b&&!valid.find("outcome")&&!valid.find("error"),"valid preview remains a successful action without a fabricated rejection");
 }
+void clientActivityChecks045a(){
+    // A declared client (Studio's live MCP bridge) records committed authoring and
+    // failed calls, never successful reads, and can rate only its own records.
+    AgentSession s;const V client=json(R"({"kind":"client","id":"live_mcp"})");
+    V read=json(R"({"detail":"revision"})");read.set("actor",client);call(s,"doc_info",read);check(!s.document.agentActivity,"successful client read is not recorded");
+    V write=json(R"({"expected_revision":0,"commands":[{"op":"feature.add","type":"box","name":"Client box"}]})");write.set("actor",client);const auto written=call(s,"doc_apply",write);
+    check(written.find("activity_id")&&written.find("feedback_required")->b&&s.document.agentActivity&&s.document.agentActivity->entries.size()==1,"committed client authoring gets a measured record and feedback ID");
+    const auto& row=s.document.agentActivity->entries.front();check(row.find("actor")->find("kind")->str=="client"&&row.find("actor")->find("id")->str=="live_mcp"&&!row.find("is_error")->b&&row.find("revision_after")->num==1,"client record keeps the declared actor and measured revisions");
+    V stale=json(R"({"expected_revision":0,"commands":[{"op":"param.set","name":"late","expr":1}]})");stale.set("actor",client);check(s.call("doc_apply",stale).find("isError")->b&&s.document.agentActivity->entries.size()==2&&s.document.agentActivity->entries.back().find("is_error")->b,"rejected client write keeps its failure trail");
+    V failed=json(R"({"queries":[{"tool":"eval_expr","args":{"expr":"missing_client_parameter"}}]})");failed.set("actor",client);call(s,"query_batch",failed);check(s.document.agentActivity->entries.size()==3&&s.document.agentActivity->entries.back().find("outcome")->str=="all_failed","failed client batch rows are recorded");
+    V passed=json(R"({"queries":[{"tool":"doc_info","args":{"detail":"revision"},"fields":["revision"]}]})");passed.set("actor",client);call(s,"query_batch",passed);check(s.document.agentActivity->entries.size()==3,"successful client batch is not recorded");
+    V rating=json(R"({"ratings":[{"utility":3,"difficulty":2,"action":"Added a box through the live bridge"}]})");auto rows=*rating.find("ratings");rows.arr.front().set("activity_id",*written.find("activity_id"));rating.set("ratings",rows);rating.set("actor",client);call(s,"tool_feedback",rating);
+    check(s.document.agentActivity->entries.front().find("feedback")->find("utility")->num==3,"client rates its own recorded action");
+    V human=json(R"({"expected_revision":1,"commands":[{"op":"param.set","name":"human_value","expr":2}]})");human.set("actor",json(R"({"kind":"human","id":"studio"})"));call(s,"doc_apply",human);check(s.document.agentActivity->entries.size()==3,"human Studio edits stay outside the agent activity ledger");
+}
 V response(const V& output){V value=V::makeObj();value.set("status",V::makeStr("completed"));value.set("output",output);return value;}
 V toolResponse(const char* id,const char* name,V args){V item=V::makeObj(),out=V::makeArr();item.set("type",V::makeStr("function_call"));item.set("call_id",V::makeStr(id));item.set("name",V::makeStr(name));item.set("arguments",V::makeStr(args.dump()));out.arr.push_back(item);return response(out);}
 V done(){return json(R"({"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Completed fixture"}]}]})");}
@@ -146,4 +161,4 @@ void pngChecks(){
     std::cout<<"PNG_LOSSLESS raw_rgb_bytes="<<image.px.size()<<" png_bytes="<<png.size()<<"\n";
 }
 }
-int main(){try{cacheChecks();schedulerAccountingChecks();activityChecks();batchActivityChecks038d();rejectedPreviewActivityChecks();projectionSuggestionChecks();requiredFeedbackChecks();pngChecks();std::cout<<checks<<" reactivity/activity checks passed\n";return 0;}catch(const std::exception& error){std::cerr<<"Reactivity/activity failed: "<<error.what()<<'\n';return 1;}}
+int main(){try{cacheChecks();schedulerAccountingChecks();activityChecks();batchActivityChecks038d();rejectedPreviewActivityChecks();clientActivityChecks045a();projectionSuggestionChecks();requiredFeedbackChecks();pngChecks();std::cout<<checks<<" reactivity/activity checks passed\n";return 0;}catch(const std::exception& error){std::cerr<<"Reactivity/activity failed: "<<error.what()<<'\n';return 1;}}

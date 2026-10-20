@@ -18,7 +18,14 @@ public:
 };
 // Optional portable native results remain derived data. Matching loaded entries
 // pass through the current native worker's snapshot validation before reuse.
-DocumentDerivedPayloads nativeDocumentResults(const Document& document);
+// Entries beyond the derived capacity are omitted in document order rather than
+// failing the save; omitted bodies are evaluated normally on the next open.
+struct NativeDocumentResultsReport {
+    size_t entries=0,bytes=0,omittedEntries=0,omittedBytes=0;
+    size_t capacityBytes=maxDocumentDerivedBytes,capacityEntries=maxDocumentDerivedEntries;
+};
+DocumentDerivedPayloads nativeDocumentResults(const Document& document,NativeDocumentResultsReport* report=nullptr,
+                                              size_t capacityBytes=maxDocumentDerivedBytes,size_t capacityEntries=maxDocumentDerivedEntries);
 arkjson::Value stageNativeDocumentResults(Document& document,const DocumentDerivedPayloads& records);
 arkjson::Value nativeWorkerRequest(const arkjson::Value& request);
 // Aggregate identity for a fully resolved host boolean sequence. On a miss one

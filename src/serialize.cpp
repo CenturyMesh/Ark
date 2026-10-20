@@ -986,34 +986,40 @@ bool sketchFromJson(const std::string& json, Sketch& sk, std::string* err){
     return true;
 }
 
-bool saveDocument(const Document& doc, const char* path){
-    if(!path||!*path) return false;
-    if(doc.iterationHistory.t==Value::Obj){std::string historyError;if(!iterationValidate(doc,doc.iterationHistory,historyError))return false;}
+bool saveDocument(const Document& doc, const char* path, DocumentSaveReport* report){
+    if(report)*report={};
+    auto fail=[&](std::string reason){if(report)report->error=std::move(reason);return false;};
+    if(!path||!*path) return fail("Empty document path");
+    if(doc.iterationHistory.t==Value::Obj){std::string historyError;if(!iterationValidate(doc,doc.iterationHistory,historyError))return fail("Iteration history invalid: "+historyError);}
     // Preserve this bool API's failure contract before opening any staging file.
     // Authoring validation and logical-capacity errors are serialization failures.
-    std::string j;try{j=documentToJson(doc);}catch(const std::exception&){return false;}
-    if(j.size()>maxDocumentBytes)return false;
-    Value persistedRoot;if(!arkjson::parse(j,persistedRoot))return false;
+    std::string j;try{j=documentToJson(doc);}catch(const std::exception& e){return fail(e.what());}
+    if(j.size()>maxDocumentBytes)return fail("Document exceeds the total 4 MiB logical capacity");
+    Value persistedRoot;if(!arkjson::parse(j,persistedRoot))return fail("Document JSON exceeds the parser nesting limit");
     auto destination=std::filesystem::path(reinterpret_cast<const char8_t*>(path)),temporary=destination;
     auto extension=destination.extension().string();
     std::transform(extension.begin(),extension.end(),extension.begin(),[](unsigned char c){return static_cast<char>(std::tolower(c));});
     if(extension!=".arkjson"&&extension!=".json"){
-        try{const auto derived=nativeDocumentResults(doc);return saveDocumentContainer(persistedRoot,path,nullptr,nullptr,&derived);}
-        catch(const std::exception&){return false;}
+        try{
+            NativeDocumentResultsReport selected;const auto derived=nativeDocumentResults(doc,&selected);
+            if(report){report->derivedGeometry=true;report->derivedEntries=selected.entries;report->derivedBytes=selected.bytes;report->derivedOmittedEntries=selected.omittedEntries;report->derivedOmittedBytes=selected.omittedBytes;report->derivedCapacityBytes=selected.capacityBytes;}
+            std::string error;if(saveDocumentContainer(persistedRoot,path,&error,nullptr,&derived))return true;
+            return fail(error.empty()?"ARK container save failed":error);
+        }catch(const std::exception& e){return fail(e.what());}
     }
     temporary+=".tmp";
     std::ofstream f(temporary,std::ios::binary|std::ios::trunc);
-    if(!f) return false;
+    if(!f) return fail("Cannot create the staged JSON export");
     f.write(j.data(),(std::streamsize)j.size());f.flush();
-    if(!f)return false;
-    f.close();if(!f)return false;
+    if(!f)return fail("Cannot write the staged JSON export");
+    f.close();if(!f)return fail("Cannot close the staged JSON export");
 #ifdef _WIN32
     bool committed=MoveFileExW(temporary.c_str(),destination.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)!=0;
 #else
     std::error_code ec;std::filesystem::rename(temporary,destination,ec);bool committed=!ec;
 #endif
-    if(!committed){std::error_code cleanup;std::filesystem::remove(temporary,cleanup);}
-    return committed;
+    if(!committed){std::error_code cleanup;std::filesystem::remove(temporary,cleanup);return fail("Cannot replace the JSON export target");}
+    return true;
 }
 
 bool loadDocument(const char* path, Document& doc, std::string* err){

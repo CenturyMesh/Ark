@@ -51,6 +51,18 @@ int main(){try{
     apply(session,R"({"commands":[{"op":"feature.edit","id":"Fixture body","appearance":{"opacity":0.25}}]})");check(resolvedAppearance(session.document,session.document.features[0]).opacity==.25,"transparency commits through existing feature contract");
     const auto appearance=accepted(session.call("agent_onboard",json(R"({"topic":"materials"})")));check(appearance.dump().find("Interior inspection")!=std::string::npos,"agents discover opacity scope");
     const auto overview=accepted(session.call("agent_onboard",V::makeObj()));check(overview.dump().find("assembly_info.drive")!=std::string::npos,"compact overview dispatches manipulation");
+    // 045A: a drive that returns exactly to the state before the previous
+    // iteration reports the round trip and the read-only alternative. The first
+    // drive writes the solved placement, so the following open/close cycle is exact.
+    AgentSession door;apply(door,R"({"commands":[{"op":"feature.add","type":"box","name":"Panel","p":{"dx":60,"dy":8,"dz":8}},{"op":"assembly.add","name":"Frame","feature":"Panel","fixed":true},{"op":"assembly.add","name":"Door","feature":"Panel"},{"op":"mate.add","a":"Frame","b":"Door","type":"revolute","reference_a":"Z","reference_b":"Z"}]})");
+    const char* open=R"({"commands":[{"op":"assembly.drive","driver":"Door","delta":20}]})";const char* close=R"({"commands":[{"op":"assembly.drive","driver":"Door","delta":-20}]})";
+    check(!apply(door,open).find("history_round_trip"),"a pose kept after the authored placement is not a round trip");apply(door,close);
+    const auto reopened=apply(door,open);const auto* trip=reopened.find("history_round_trip");
+    check(trip&&trip->find("nodes_used")->num==2&&trip->find("hint")->str.find("snapshot{candidate_id")!=std::string::npos,"drive round trip names the read-only preview path");
+    check(!reopened.find("history_capacity"),"capacity warning stays quiet far below the journal limit");
+    check(!apply(door,R"({"commands":[{"op":"assembly.drive","driver":"Door","delta":15}]})").find("history_round_trip"),"a new pose is not a round trip");
+    check(accepted(door.call("history_info",V::makeObj())).find("max_nodes")->num==512,"history_info reports the node capacity");
+    check(accepted(session.call("agent_onboard",json(R"({"topic":"assembly"})"))).dump().find("snapshot{candidate_id")!=std::string::npos,"assembly onboarding keeps temporary poses read-only");
     const auto tools=AgentSession::tools();check(tools.arr.size()==102&&tools.dump().find("assembly.drive")!=std::string::npos&&tools.dump().find("\"drive\"")!=std::string::npos,"compact schema advertises command and preview with stable tool count");
     std::cout<<"assembly manipulation tool contracts passed\n";return 0;
 }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}
