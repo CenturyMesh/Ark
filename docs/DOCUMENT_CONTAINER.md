@@ -11,7 +11,10 @@ SQLite library. `application_id` is `0x41524b31` (`ARK1`) and `user_version` is 
 This physical version is independent of the authored document version, including
 the version-27 iteration journal. The existing C++ document parser, authoring
 rules, journal checks and exact geometry authority remain the semantic contract.
-Evaluated geometry caches are not added to the save file.
+Container version 2 (`user_version` 2) adds an optional `ark_derived` table of
+saved native geometry, with its own 128 MiB capacity and a 256 MiB physical
+file limit; see [formats](FORMATS.md). The 64 MiB physical cap below applies to
+version 1; the authoring limits apply to both versions.
 
 ## Storage and incremental writes
 
