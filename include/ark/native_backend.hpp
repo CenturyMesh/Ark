@@ -39,6 +39,19 @@ arkjson::Value nativeKernelInfo();
 void disableProcessPowerThrottling();
 // Thread-local request allowance; returns previous value (0 inherits host setting).
 int setNativeThreadBudget(int threads);
+// 046B: thread-local control of native requests made by this thread. A true
+// predicate stops the isolated worker (polled every 50 ms) and throws an error
+// containing NATIVE_CANCELLED; limitMs replaces the default 30000 ms per-request
+// watchdog only inside the scope. A timeout keeps the "worker limit" wording.
+class NativeRequestControlScope {
+    const std::function<bool()>* previousCancel;unsigned previousLimit;std::function<bool()> cancel;
+public:
+    NativeRequestControlScope(std::function<bool()> cancelled,unsigned limitMs);
+    ~NativeRequestControlScope();
+    NativeRequestControlScope(const NativeRequestControlScope&)=delete;
+    NativeRequestControlScope& operator=(const NativeRequestControlScope&)=delete;
+};
+unsigned nativeRequestLimitMs(); // effective per-request limit on this thread
 arkjson::Value exportNativeBrep(const std::string& brep,const std::string& path);
 Mesh nativeResultMesh(const arkjson::Value& result);
 inline Mesh nativeResultMesh(const NativePayload& result){return result.displayMesh();}
