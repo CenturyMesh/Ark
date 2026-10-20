@@ -8,6 +8,8 @@ struct BakedMotionsPanel {
     std::string cacheName;BakedMotionFrames frames;bool framesValid=false;CompiledMotion graph;bool graphValid=false;std::string graphError,status;arkjson::Value diagnostics;
     std::vector<std::vector<float>> curves;std::vector<float> lo,hi,rangeLo,rangeHi;std::vector<std::string> units;std::vector<std::vector<MotionBezierHandle>> handles;std::vector<std::vector<double>> seams;
     std::vector<int> display;size_t displayCount=0;u64 displayRevision=~u64(0);size_t shownFrame=~size_t(0);
+    // 046B clearance evidence: shown only for the motion, revision and document epoch it was measured at.
+    arkjson::Value clearance;std::string clearanceMotion,clearanceError;u64 clearanceRevision=~u64(0),clearanceEpoch=~u64(0);double clearanceThreshold=1;bool clearanceRunning=false;
 };
 static BakedMotionsPanel g_bakedMotions;
 static void stopBakedMotion(bool restore=true);static bool bakedMotionsAction(int id);

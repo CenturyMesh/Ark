@@ -152,6 +152,8 @@ persistent iteration history.
   `solve:true` also drives the joints from the committed pose through every
   frame up to `time_s` (at most 600 frames) and returns solved instance matrices.
 - `{name, frame}` decodes one baked frame.
+- `{name, clearance}` (046B) checks exact clearance over a fresh bake and
+  certifies the time between frames; see [motion clearance](MOTION_CLEARANCE_046B.md).
 
 Load `agent_onboard{topic:"motion"}` for the `skeleton_motion` guide; Studio
 agents receive `motion_info` with that topic.
@@ -189,9 +191,11 @@ independent of this format.
   joints and patterned drivers are not driven directly.
 - Joint limits are checked on sampled graph values and on every baked frame,
   not continuously between frames.
-- Collision and clearance are not checked by the bake (`clearance_checked:
-  false`). Check sampled poses with `assembly_info{sweep}` or
-  `collision_inspect`.
+- The bake itself does not check collision or clearance and still records
+  `clearance_checked: false`. Clearance is derived evidence:
+  `motion_info{name,clearance}` measures it over a fresh bake without changing
+  the bake or the document ([046B](MOTION_CLEARANCE_046B.md)). Single poses
+  remain available through `assembly_info{sweep}` and `collision_inspect`.
 - The bake drives channels in declaration order from the previous frame. A
   closed loop driven by two independent channels rejects instead of choosing
   one.

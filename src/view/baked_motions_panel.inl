@@ -1,6 +1,21 @@
 // 044B Baked Motions panel: list, vector graph, timeline and transport.
 // Rename, delete and bake use ordinary revision-checked doc_apply transactions.
 static const float kBakedMotionColors[6][3]={{.24f,.80f,.94f},{.99f,.71f,.27f},{.86f,.48f,.95f},{.46f,.88f,.54f},{.96f,.46f,.42f},{.50f,.64f,1.f}};
+// 046B async integration point. The only Studio call of the read-only motion
+// clearance query (motion_info{name,clearance}) through the ordinary tool path;
+// done receives the report on the UI thread. It runs synchronously today; the
+// shared off-UI-thread exact-query runner replaces this body, not its callers.
+static void runMotionClearance046B(const std::string& motion,double thresholdMm,const std::function<void(bool,const arkjson::Value&,const std::string&)>& done){
+    using V=arkjson::Value;V args=V::makeObj(),request=V::makeObj();request.set("threshold_mm",V::makeNum(thresholdMm));args.set("name",V::makeStr(motion));args.set("clearance",request);args.set("expected_revision",V::makeNum((double)g_session.revision));
+    const V result=runTool("motion_info",args);const V* data=result.find("structuredContent");const V* report=data?data->find("clearance"):nullptr;
+    if(g_error||!report){done(false,V{},g_status);return;}done(true,*report,std::string());
+}
+static bool bakedMotionClearanceShown(){const auto& p=g_bakedMotions;return !p.selected.empty()&&p.clearanceMotion==p.selected&&p.clearanceRevision==g_session.revision&&p.clearanceEpoch==g_documentEpoch&&!p.clearance.isNull();}
+static std::string bakedMotionClearanceSummary(const arkjson::Value& r){
+    char text[320];const auto* worst=r.find("worst");const auto* minimum=r.find("min_clearance_mm");const bool certified=r.find("continuous_certified")&&r.find("continuous_certified")->b;
+    std::string pair=worst?worst->find("a")->find("name")->str+" / "+worst->find("b")->find("name")->str:std::string("no measured pair");
+    std::snprintf(text,sizeof text,"Clearance: min %.3f mm %s at %.2f s / %s / %.0f uncertified, %.0f between-frame contacts",minimum&&minimum->t==arkjson::Value::Num?minimum->num:0.,pair.c_str(),worst?worst->find("time_s")->num:0.,certified?"continuous certified":"not certified",r.find("uncertified_interval_count")->num,r.find("between_frame_contact_count")->num);return text;
+}
 static void bakedMotionsRestorePose(){if(g_formedInstanceWorld.size()==g_instanceWorld.size())g_instanceWorld=g_formedInstanceWorld;rebuildDisplayBounds();refreshSelectionLines();}
 static void stopBakedMotion(bool restore){auto& p=g_bakedMotions;const bool shown=p.active;p.playing=p.active=p.scrubbing=false;p.time=0;p.shownFrame=~size_t(0);if(shown&&restore)bakedMotionsRestorePose();}
 static void loadBakedMotionSelection(){
@@ -85,12 +100,23 @@ static bool bakedMotionsAction(int id){
     if(id==45005){std::vector<EditorField> fields{{"Motion name",p.selected}};if(!editFields("Rename baked motion","Renames the graph and its baked frames through one undoable, revision-checked transaction.",fields))return true;
         const std::string name=trimField(fields[0].value);if(name.empty()||name==p.selected)return true;V c=motionCommand("motion.rename");c.set("new_name",V::makeStr(name));const std::string previous=p.selected;applyCommand(c);if(!g_error){stopBakedMotion();p.selected=name;refreshBakedMotions();g_status="Renamed "+previous+" to "+name+" / undo restores it";}return true;}
     if(id==45006){stopBakedMotion();const std::string name=p.selected;applyCommand(motionCommand("motion.remove"));if(!g_error){p.selected.clear();refreshBakedMotions();g_status="Deleted baked motion "+name+" / undo restores it";}return true;}
+    if(id==45014){if(p.clearanceRunning)return true;p.clearanceRunning=true;p.clearance={};p.clearanceError.clear();const std::string motion=p.selected;const u64 revision=g_session.revision,epoch=g_documentEpoch;
+        runMotionClearance046B(motion,p.clearanceThreshold,[motion,revision,epoch](bool ok,const arkjson::Value& report,const std::string& error){auto& q=g_bakedMotions;q.clearanceRunning=false;q.clearanceMotion=motion;q.clearanceRevision=revision;q.clearanceEpoch=epoch;q.clearance=ok?report:arkjson::Value{};q.clearanceError=ok?std::string():error;if(ok)g_status=bakedMotionClearanceSummary(report);});return true;}
+    if(id==45015){static const double thresholds[]={0,.5,1,2,5};size_t next=0;for(size_t i=0;i<5;++i)if(std::fabs(thresholds[i]-p.clearanceThreshold)<1e-9)next=(i+1)%5;p.clearanceThreshold=thresholds[next];p.clearanceMotion.clear();p.clearanceError.clear();return true;}
+    if(id==45016){if(!bakedMotionClearanceShown()||!p.clearance.find("worst"))return true;std::string reason;if(!bakedMotionPlaybackAvailable(reason)){g_status=reason;return true;}const auto& worst=*p.clearance.find("worst");
+        p.playing=false;p.time=std::min(p.frames.duration,worst.find("frame")->num/p.frames.fps);startBakedMotionDisplay();char text[200];std::snprintf(text,sizeof text,"Worst clearance frame %.0f / %.3f mm %s / %s",worst.find("frame")->num+1,worst.find("clearance_mm")->num,worst.find("at_baked_frame")->b?"at this frame":"between frames (nearest baked frame shown)",worst.find("status")->str.c_str());g_status=text;return true;}
     if(id==45007){stopBakedMotion();V c=motionCommand("motion.bake");if(const auto* motion=findMotion(g_doc,p.selected))if(const auto* bake=motion->find("bake"))c.set("fps",*bake->find("fps"));applyCommand(c);if(!g_error){refreshBakedMotions();g_status="Baked "+p.selected+" through the joint solver / revision "+std::to_string(g_session.revision);}return true;}
     return true;
 }
 static void bakedMotionLine(GLint lineAB,float ax,float ay,float bx,float by,float r,float g,float b,float a,float width){
     const float x=std::min(ax,bx)-width-1,y=std::min(ay,by)-width-1,w=std::fabs(bx-ax)+2*width+2,h=std::fabs(by-ay)+2*width+2;
     glUniform1i(uuGlyph,500);glUniform4f(uuRc,x,y,w,h);glUniform1f(uuBW,width);glUniform4f(uuFill,r,g,b,a);glUniform4f(lineAB,ax-x,ay-y,bx-x,by-y);glBindVertexArray(quadVao);glDrawArrays(GL_TRIANGLES,0,6);glUniform1i(uuGlyph,0);
+}
+// Clearance marker colours: interference/touching red, below threshold amber,
+// threshold unproven dim amber (hatched), uncertified grey (hatched).
+static void bakedMotionMarkerColor(const std::string& status,float& r,float& g,float& b,bool& hatched){
+    hatched=status=="uncertified"||status=="threshold_unproven";
+    if(status=="interference"||status=="touching"){r=.96f;g=.34f;b=.32f;}else if(status=="below_threshold"){r=.99f;g=.72f;b=.27f;}else if(status=="threshold_unproven"){r=.78f;g=.62f;b=.32f;}else{r=.56f;g=.62f;b=.66f;}
 }
 template<class Rect,class Button>static void drawBakedMotionsPanel(Rect rect,Button button,POINT pointer,std::string& hint){
     auto& p=g_bakedMotions;if(!p.open)return;refreshBakedMotions();
@@ -105,7 +131,9 @@ template<class Rect,class Button>static void drawBakedMotionsPanel(Rect rect,But
         float y=y0+64;for(const char* line:{"No motions in this document yet.","Ask the agent to author a vector motion","graph on existing joints and bake it:","motion.graph.set, then motion.bake.","Baked motions play here without","changing the saved design."}){muted(line,left,y,.60f,inner);y+=21;}
         g_zones.push_back({x0,y0,w,h,45009});return;
     }
-    const float fixed=316,remaining=std::max(120.f,h-fixed),rowH=42;
+    // Clearance chips share the title line; result lines take height only while shown.
+    const bool clearanceShown=bakedMotionClearanceShown()&&p.clearance.find("markers"),clearanceLines=clearanceShown||p.clearanceRunning||(!p.clearanceError.empty()&&p.clearanceMotion==p.selected);
+    const float fixed=316+(clearanceLines?34.f:0.f),remaining=std::max(120.f,h-fixed),rowH=42;
     const int visible=std::clamp((int)((remaining-96-6)/rowH),1,std::min(4,(int)p.rows.size()));p.scroll=std::clamp(p.scroll,0,std::max(0,(int)p.rows.size()-visible));
     const float graphH=std::clamp(remaining-visible*rowH-6-((int)p.rows.size()>visible?12.f:0.f),90.f,240.f);
     float y=y0+54;
@@ -117,10 +145,16 @@ template<class Rect,class Button>static void drawBakedMotionsPanel(Rect rect,But
         textOut(fitText(row.name,.64f,inner-badgeW-30),left+10,y+4,.64f,.88f,.94f,.98f);muted(row.detail,left+10,y+21,.50f,inner-20);g_zones.push_back({left,y,inner,rowH-4,45100+(int)index});y+=rowH;}
     if((int)p.rows.size()>visible){char more[64];std::snprintf(more,sizeof more,"%d-%d of %zu / scroll",p.scroll+1,std::min((int)p.rows.size(),p.scroll+visible),p.rows.size());muted(more,left+2,y-2,.48f,inner);y+=12;}
     y+=6;rect(left,y,inner,1,0,.20f,.29f,.35f,1,0,0,0,0,0);y+=8;
-    textOut(fitText(p.selected,.68f,inner),left,y,.68f,.86f,.95f,1.f);y+=22;
+    {const std::string check=p.clearanceRunning?"Checking...":"Check clearance";char limit[24];std::snprintf(limit,sizeof limit,"%g mm",p.clearanceThreshold);const float scale=.50f,cw=textWidth(check,scale)+16,lw=textWidth(limit,scale)+14,cx=left+inner-cw-lw-6,lx=left+inner-lw;
+        auto chip=[&](const std::string& label,float x,float w,int id,bool accent){const bool hover=pointer.x>=x&&pointer.x<x+w&&pointer.y>=y-1&&pointer.y<y+19;rect(x,y,w,18,9,accent?(hover?.12f:.09f):hover?.15f:.10f,accent?(hover?.30f:.24f):hover?.19f:.13f,accent?(hover?.36f:.29f):hover?.23f:.16f,1,accent?.22f:.28f,accent?.66f:.36f,accent?.76f:.42f,hover?1.f:.8f,1);
+            textOut(label,x+(w-textWidth(label,scale))/2,y+2,scale,.86f,.95f,1.f);g_zones.push_back({x,y-1,w,20,id});if(hover)hint=id==45014?"Check exact B-rep clearance at every baked frame and certify between frames / read-only":"Clearance threshold / click cycles 0, 0.5, 1, 2, 5 mm";};
+        textOut(fitText(p.selected,.68f,std::max(40.f,cx-left-8)),left,y,.68f,.86f,.95f,1.f);chip(check,cx,cw,45014,true);chip(limit,lx,lw,45015,false);}
+    y+=22;
     const float gx=left,gy=y,gw=inner,gh=graphH;rect(gx,gy,gw,gh,4,.030f,.043f,.054f,1,.17f,.24f,.29f,.9f,1);
     const double duration=p.framesValid?p.frames.duration:p.graphValid?p.graph.duration:0;
     if(p.graphValid&&!p.curves.empty()&&duration>0){
+        if(clearanceShown)for(const auto& m:p.clearance.find("markers")->arr){float r,g,b;bool hatched;bakedMotionMarkerColor(m.find("status")->str,r,g,b,hatched);const float ax=gx+6+(gw-12)*(float)std::clamp(m.find("from_s")->num/duration,0.,1.),bx=gx+6+(gw-12)*(float)std::clamp(m.find("to_s")->num/duration,0.,1.);
+            rect(ax,gy+1,std::max(2.f,bx-ax),gh-2,0,r,g,b,.14f,0,0,0,0,0);if(hatched)for(float hx=ax-gh;hx<bx;hx+=9){const float x0=std::max(ax,hx),x1=std::min(bx,hx+gh-2);if(x1>x0)bakedMotionLine(lineAB,x0,gy+gh-1-(x0-hx),x1,gy+gh-1-(x1-hx),r,g,b,.32f,1);}}
         for(float f:{.25f,.5f,.75f})bakedMotionLine(lineAB,gx+4,gy+gh*f,gx+gw-4,gy+gh*f,.30f,.40f,.46f,.35f,1);
         const double step=duration<=2?.5:duration<=6?1:duration<=20?5:duration<=90?15:60;for(double t=step;t<duration-1e-9;t+=step){const float tx=gx+(float)(t/duration)*gw;bakedMotionLine(lineAB,tx,gy+4,tx,gy+gh-4,.30f,.40f,.46f,.28f,1);}
         for(size_t c=0;c<p.curves.size();++c){const auto* color=kBakedMotionColors[c%6];const auto& curve=p.curves[c];const float lo=p.lo[c],span=p.hi[c]-p.lo[c];auto px=[&](size_t i){return gx+6+(gw-12)*(float)i/(float)(curve.size()-1);};auto py=[&](float v){return gy+gh-6-(gh-12)*(v-lo)/span;};
@@ -141,11 +175,25 @@ template<class Rect,class Button>static void drawBakedMotionsPanel(Rect rect,But
             if(!continuity.empty()){const bool smooth=continuity=="C1";textOut(continuity=="discontinuous"?"jump":continuity,left+inner-textWidth(continuity=="discontinuous"?"jump":continuity,.52f),y,.52f,smooth?.48f:.98f,smooth?.86f:.72f,smooth?.60f:.30f);}y+=18;}
         if(p.graph.channels.size()>shown){muted("+"+std::to_string(p.graph.channels.size()-shown)+" more channels",left+16,y,.50f,inner);y+=16;}}
     y+=4;const float trackY=y+10,trackX=left+2,trackW=inner-4;rect(trackX,trackY,trackW,6,3,.10f,.15f,.18f,1,.22f,.32f,.38f,.8f,1);
+    if(clearanceShown&&duration>0){for(const auto& m:p.clearance.find("markers")->arr){float r,g,b;bool hatched;bakedMotionMarkerColor(m.find("status")->str,r,g,b,hatched);const float ax=trackX+trackW*(float)std::clamp(m.find("from_s")->num/duration,0.,1.),bx=trackX+trackW*(float)std::clamp(m.find("to_s")->num/duration,0.,1.);
+            rect(ax,trackY-8,std::max(2.f,bx-ax),5,0,r,g,b,.95f,0,0,0,0,0);if(hatched)for(float hx=ax+1;hx<bx-1;hx+=4)rect(hx,trackY-8,1.5f,5,0,.05f,.07f,.08f,.85f,0,0,0,0,0);}
+        if(const auto* worst=p.clearance.find("worst")){const float wx=trackX+trackW*(float)std::clamp(worst->find("time_s")->num/duration,0.,1.);rect(wx-1,trackY-11,2,22,0,.96f,.97f,1.f,.95f,0,0,0,0,0);}}
     if(duration>0){const float fraction=(float)std::clamp(p.time/duration,0.,1.);rect(trackX,trackY,trackW*fraction,6,3,.16f,.66f,.78f,1,0,0,0,0,0);rect(trackX+trackW*fraction-7,trackY-4,14,14,7,.86f,.96f,1.f,1,.16f,.66f,.78f,1,1);}
     g_zones.push_back({trackX,trackY-9,trackW,24,45008});if(pointer.x>=trackX&&pointer.x<trackX+trackW&&pointer.y>=trackY-9&&pointer.y<trackY+15)hint="Drag to scrub baked frames / Left and Right step frames";
     char timeline[160];if(p.framesValid)std::snprintf(timeline,sizeof timeline,"%.2f / %.2f s   frame %zu / %zu",p.time,duration,frame+1,p.frames.frameCount);else std::snprintf(timeline,sizeof timeline,"%.2f s graph / not baked",duration);muted(timeline,left,trackY+12,.52f,inner);y=trackY+34;
     const float bw=(inner-18)/4;button(p.playing?"Pause":"Play",left,y,bw,45001,true);button("Stop",left+bw+6,y,bw,45002);button("Loop",left+2*(bw+6),y,bw,45003,false,p.loop);char speed[16];std::snprintf(speed,sizeof speed,"%gx",p.speed);button(speed,left+3*(bw+6),y,bw,45004);y+=38;
     const float mw=(inner-12)/3;button("Rename",left,y,mw,45005);button("Bake",left+mw+6,y,mw,45007);button("Delete",left+2*(mw+6),y,mw,45006);y+=40;
+    if(clearanceShown){const auto& r=p.clearance;const auto* worst=r.find("worst");const auto* minimum=r.find("min_clearance_mm");const std::string status=worst?worst->find("status")->str:"clear";const bool hit=status=="interference"||status=="touching",low=status=="below_threshold";
+        char line[240];if(worst)std::snprintf(line,sizeof line,"Min %.3f mm  %s / %s  frame %.0f",minimum&&minimum->t==arkjson::Value::Num?minimum->num:0.,worst->find("a")->find("name")->str.c_str(),worst->find("b")->find("name")->str.c_str(),worst->find("frame")->num+1);else std::snprintf(line,sizeof line,"No exact pair measured");
+        const std::string shown=fitText(line,.54f,inner);const bool hover=pointer.x>=left&&pointer.x<left+inner&&pointer.y>=y-2&&pointer.y<y+15;textOut(shown,left,y,.54f,hit?.98f:low?.99f:.52f,hit?.46f:low?.76f:.90f,hit?.42f:low?.34f:.62f);
+        if(hover){rect(left,y+15,std::min(inner,textWidth(shown,.54f)),1,0,.80f,.88f,.93f,.8f,0,0,0,0,0);hint="Show the worst clearance frame";}g_zones.push_back({left,y-2,inner,17,45016});y+=17;
+        const bool certified=r.find("continuous_certified")->b,threshold=r.find("threshold_certified")->b;
+        if(certified)std::snprintf(line,sizeof line,"%s / floor %.3f mm between frames",threshold?"Certified above threshold":"Contact free, threshold not proven",r.find("continuous_lower_bound_mm")->num);
+        else if(r.find("envelope_assumption_certified"))std::snprintf(line,sizeof line,"Not certified: closed loop, envelope assumed%s",r.find("envelope_assumption_certified")->b?" (clear)":"");
+        else std::snprintf(line,sizeof line,"Not certified / %.0f contact frames, %.0f between, %.0f uncertified",r.find("contact_frame_count")->num,r.find("between_frame_contact_count")->num,r.find("uncertified_interval_count")->num);
+        textOut(fitText(line,.50f,inner),left,y,.50f,certified?.52f:.96f,certified?.84f:.70f,certified?.64f:.40f);y+=17;}
+    else if(p.clearanceRunning){muted("Checking exact clearance...",left,y,.52f,inner);y+=34;}
+    else if(clearanceLines){textOut(fitText(p.clearanceError,.50f,inner),left,y,.50f,.98f,.52f,.44f);y+=17;muted(p.clearanceError.find("MOTION_BAKE_STALE")!=std::string::npos?"Bake again first / clearance never re-bakes":"No clearance result published",left,y,.50f,inner);y+=17;}
     for(const auto& row:p.rows)if(row.name==p.selected){
         std::string state;if(const auto* motion=findMotion(g_doc,p.selected))if(const auto* bake=motion->find("bake")){char text[160];std::snprintf(text,sizeof text,"Baked %.0f fps / %zu frames / source rev %.0f",bake->find("fps")->num,p.framesValid?p.frames.frameCount:0,bake->find("source_revision")->num);state=text;}
         if(state.empty())state="Not baked / Bake drives the joints through the solver";
@@ -153,6 +201,6 @@ template<class Rect,class Button>static void drawBakedMotionsPanel(Rect rect,But
         if(row.stale||row.invalid){textOut(fitText(row.invalid?"Graph invalid for the current joints / edit graph":"Stale: "+std::string(row.detail.find("graph changed")!=std::string::npos?"graph changed":"assembly changed")+" / Bake again",.52f,inner),left,y,.52f,.99f,.74f,.32f);y+=17;}
         break;}
     if(!p.note.empty()){textOut(fitText(p.note,.50f,inner),left,y,.50f,.96f,.56f,.48f);y+=16;}
-    if(y<y0+h-20)muted("Display only / kinematic poses / no dynamics or collision",left,std::min(y0+h-20,std::max(y,y0+h-20)),.48f,inner);
+    if(y<y0+h-20)muted("Display only / kinematic poses / no dynamics",left,std::min(y0+h-20,std::max(y,y0+h-20)),.48f,inner);
     g_zones.push_back({x0,y0,w,h,45009});
 }

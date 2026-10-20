@@ -1,5 +1,6 @@
 #pragma once
 #include "ark/model.hpp"
+#include <atomic>
 #include <map>
 namespace ark {
 class AgentSession;
@@ -42,16 +43,20 @@ arkjson::Value motionDiagnostics(const CompiledMotion&,const std::vector<MotionL
 struct MotionJointBinding {std::string channel,type,unit;u64 mate=0,driver=0;bool limited=false,constrained=false;double min=0,max=0,position=0;};
 // Every bound channel names an existing revolute or prismatic mate with a grounded moving side.
 bool bindMotionJoints(const AssemblyManipulationProgram&,const Document&,const arkjson::Value& graph,std::vector<MotionJointBinding>&,std::string& error);
+// Solved joint at one frame: world pivot/axis and its moving occurrence set.
+struct MotionJointFrame {Vec3 origin,axis;bool rotate=false,constrained=false,valid=false;size_t movingSet=0;};
 struct MotionSolvedFrames {
     std::vector<double> times;
     std::vector<AssemblyPlacement> baseline;   // committed pose
     std::vector<std::vector<Mat4>> poses;      // per frame, aligned with baseline
     std::vector<std::vector<double>> coordinates; // per frame, measured joint coordinate per channel
+    std::vector<std::vector<MotionJointFrame>> joints; // per frame and channel; only with recordJoints
+    std::vector<std::vector<u64>> movingSets;  // distinct sorted moving node sets referenced by joints
     size_t rigidSteps=0,constrainedSteps=0;int maxContinuationSteps=0;double maxChannelError=0;
 };
 // Drives the bound joints frame by frame with the assembly manipulation solver.
 // Work-document placements are restored before returning; it never commits.
-bool solveMotionFrames(Document& work,const CompiledMotion&,const std::vector<MotionJointBinding>&,const std::vector<double>& times,MotionSolvedFrames&,std::string& error);
+bool solveMotionFrames(Document& work,const CompiledMotion&,const std::vector<MotionJointBinding>&,const std::vector<double>& times,MotionSolvedFrames&,std::string& error,bool recordJoints=false);
 std::vector<double> motionFrameTimes(double duration,double fps);
 
 // Studio playback form of a persisted bake. Matrices are rigid display poses.
@@ -74,5 +79,12 @@ void validateMotionStorage(const arkjson::Value& motions);
 // Callers evaluate geometry first; bake/graph.set resolve the candidate assembly.
 bool applyMotionCommand(Document&,const arkjson::Value& command,u64 revision,std::string& error);
 bool callMotionTool(AgentSession&,const std::string& tool,const arkjson::Value& args,arkjson::Value& out);
+// 046B read-only clearance over a fresh bake (motion_info{name,clearance}).
+// Rejects a stale or mismatched bake, re-solves its frames in double precision,
+// measures exact B-rep distance per frame and certifies frame intervals with a
+// conservative displacement bound, subdividing through the same joint solver.
+// Derived evidence only: nothing is persisted. cancel is polled between bounded
+// native requests and subdivision levels.
+arkjson::Value inspectMotionClearance(Document&,u64 revision,const std::string& motion,const arkjson::Value& request,const std::atomic_bool* cancel=nullptr);
 void appendMotionTools(arkjson::Value& tools);
 }
