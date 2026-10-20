@@ -220,7 +220,7 @@ void testContractsAndTiming(){
     V args=V::makeObj();args.set("commands",commands);args.set("expected_revision",V::makeNum((double)session.revision));accepted(session.call("doc_apply",args));apply(session,kSweep);
     const auto started=std::chrono::steady_clock::now();auto wide=clearance(session,R"J({"scope":"static"})J");const double ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();
     check(wide.find("pairs_checked")->num==251,"arm against 126 static solids and pivot B against 125: "+wide.find("pairs_checked")->dump());check(wide.find("evaluations")->find("box_settled_pair_frames")->num>=240*11,"far blocks are settled by the box lower bound");
-    std::cout<<"timing: scope static, 126 pairs x 11 frames: "<<ms<<" ms total, "<<wide.find("evaluations")->find("exact_pair_frames")->num<<" exact pair-frames, "<<wide.find("evaluations")->find("native_requests")->num<<" native requests, "<<wide.find("evaluations")->find("sub_poses")->num<<" sub-poses\n";
+    std::cout<<"timing: scope static, 251 pairs x 11 frames: "<<ms<<" ms total, "<<wide.find("evaluations")->find("exact_pair_frames")->num<<" exact pair-frames, "<<wide.find("evaluations")->find("native_requests")->num<<" native requests, "<<wide.find("evaluations")->find("sub_poses")->num<<" sub-poses\n";
 }
 }
 int main(){

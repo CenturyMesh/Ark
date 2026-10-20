@@ -175,10 +175,18 @@ Windows MSVC Release against the patched OCCT SDK, synthetic fixtures only.
   certified floor. A closed four-bar uses the envelope and is never
   `continuous_certified`.
 
+The suite passed **130 checks**. One local Release run measured: the bridge
+check 263 ms (8 exact frames, 32 bisection poses, 4 levels); the coupled arm,
+121 frames and 3 pairs, 164 ms; the four-bar, 31 frames, 117 ms; scope `static`
+with 251 pairs over 11 frames, 694 ms (39 exact pair-frames, 16 native
+requests, 46 bisection poses). These are single local measurements, not
+performance claims. The certified floor is conservative: against the near wall
+it was 0.051 mm for a measured minimum of 3.671 mm.
+
 Studio `studio-baked-motions-ui` and `-compact` (1440x900, 1366x800) cover the
 action, threshold, markers, worst-frame scrub, read-only behaviour and stale
-rejection; captures were inspected. Timings and counts are in the 046B
-verification record; they are local measurements, not performance claims.
+rejection; captures were inspected for clipping and overlaps. The complete
+local CTest run passed 204 of 204.
 
 ## Not established
 
