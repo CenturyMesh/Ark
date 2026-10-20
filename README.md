@@ -55,7 +55,8 @@ Authenticated commercial APIs, real-provider design quality and manufacturing
 qualification have separate evidence requirements.
 
 The chat opens on first launch and remembers your visibility choice. Windows
-Assistant and Team cards also offer [Grok Build through its official CLI account](docs/GROK_BUILD_CONNECT.md).
+Assistant and Team cards also offer [Grok Build through its official CLI account](docs/GROK_BUILD_CONNECT.md)
+and [Claude Code through the CLI you installed](docs/CLAUDE_CODE_CONNECT_044B.md).
 
 Installer builds and explicit personal packages are documented in
 [distribution instructions](DISTRIBUTION.md). Existing published binaries keep

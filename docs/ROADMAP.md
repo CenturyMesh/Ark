@@ -9,6 +9,15 @@ The public iteration and numeric runtime are defined in
 increasing sequence and its principal phase. The letter is a roadmap phase, not a
 month; it does not declare the phase complete. The `.ark` format evolves separately.
 
+044B addresses **B.01/B.03/B.04/C.04/D.02/D.04**, **Parcial**, through Skeleton
+Motion vector graphs baked through the joint solver and played in a Baked Motions
+panel, `curve_pattern` along chained edges, whole wires and splines with pitch,
+closed loops and surface orientation up to 2048 copies, procedural appearance
+patterns, animated GIF/MP4 stamps, textured software snapshots, and a Claude Code
+connector that runs the user's own CLI with host-owned ARK tools. The scopes are
+**Verificado no escopo local**; see [044B](iterations/044B.md). No dynamics,
+design-quality or cost claim is made.
+
 043A addresses **A.04**, **Parcial**, through size-relative display
 tessellation, owner-dispatched parallel feature scheduling, EcoQoS opt-out,
 a least-recently-used 2 GiB native cache and one-request boolean sequences.
