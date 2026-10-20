@@ -1,5 +1,17 @@
 # ARK agent protocol
 
+045A protects work at capacity limits. `doc_save` no longer fails when the
+optional saved-geometry cache is full: excess entries are omitted and recompute
+on open, reported in `saved_geometry`, and a failed save states its reason.
+The iteration journal stays a hard limit (512 nodes / 4 MiB, never pruned):
+commit receipts add `history_capacity` from 75%, and `history_round_trip` when
+an `assembly.drive` only returns to the previous pose. Look at temporary poses
+read-only with `assembly_info{drive|sweep}` or `doc_preview` plus
+`snapshot{candidate_id,expected_revision}`; commit a drive only for a pose the
+design keeps. Studio's live MCP bridge now records committed and failed client
+calls in the activity ledger; rate them with `tool_feedback`. See
+[045A](iterations/045A.md).
+
 044B adds Skeleton Motion: author a vector motion graph over existing revolute
 and prismatic joints with `motion.graph.set{name,graph}` and bake it through the
 joint solver with `motion.bake{name,fps}`, both in revision-checked `doc_apply`.

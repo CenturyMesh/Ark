@@ -49,6 +49,16 @@ being recorded, the report can still be rejected afterwards; that rejection
 states that the ratings were recorded. `tool_feedback` remains the route for
 the single assistant, ACP and external MCP clients.
 
+045A extends the ledger to declared clients (`actor.kind:"client"`), which is
+how Studio's live MCP bridge identifies every call (`id:"live_mcp"`). For a
+client, only committed authoring and failed calls are recorded: a rejected
+call, a `query_batch` with a failed row or a rejected preview. Successful reads
+are not, so external sessions do not fill the 4096-row ledger or the 4 MiB
+document with inspections. Client records require feedback like agent records
+and are rated with `tool_feedback` under the same actor. Pending client
+feedback belongs to that actor only; it does not block a team role's
+completion. Human Studio edits remain outside the ledger.
+
 Documents containing this ledger use schema 33. Older documents remain
 readable; the application version alone does not migrate them. Older ARK
 versions cannot open a newly saved v33 document. There is no external

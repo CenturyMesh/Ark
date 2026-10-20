@@ -32,6 +32,14 @@ use `doc_apply` with `expected_revision` to protect against intervening operator
 edits. Successful changes appear in the same Studio window; they share undo
 history. Saving/exporting still requires an explicit tool operation.
 
+Since 045A every bridged call declares the client actor `{kind:"client",
+id:"live_mcp"}`. Committed authoring and failed calls, including failed
+`query_batch` rows and rejected previews, enter the project's
+[activity ledger](AGENT_ACTIVITY.md) with their measured outcome; successful
+reads are not recorded. Receipts then carry `activity_id` and
+`pending_feedback_ids`; rate them with `tool_feedback`. The client's token
+usage remains unknown to ARK unless the client reports it with `usage_record`.
+
 Without `--connect`, `ark-mcp` keeps its original standalone behavior: it owns an
 independent document and does not change any Studio window. With `--connect`, a
 missing/disconnected Studio is an explicit transport error. There is no silent

@@ -183,6 +183,14 @@ history. A malformed optional payload discards the derived section with an
 explicit diagnostic; authoring checksum, schema and structural database failures
 remain hard load failures. Missing geometry can be rebuilt from valid authoring.
 
+Since 045A a save never fails because the optional section is full. Entries
+that would exceed the per-entry, total or entry-count limit are omitted in
+document order and evaluated from authoring on the next open. The `doc_save`
+receipt reports `saved_geometry` (`status` `saved` or `partial`,
+`entries_saved`, `bytes_saved`, `entries_omitted`, `bytes_omitted`,
+`capacity_bytes`), and Studio states a partial save in its status bar. A failed
+save now returns its reason instead of only "Could not save document".
+
 New authoring-only binary saves remain version 1. Adding saved geometry upgrades
 to version 2. Saving an existing version-2 file without derived entries removes
 stale entries and keeps version 2. Physical format downgrade is unsupported;

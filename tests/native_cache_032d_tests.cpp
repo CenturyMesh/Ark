@@ -1,6 +1,7 @@
 #include "ark/model.hpp"
 #include "ark/native_backend.hpp"
 #include "ark/iteration_history.hpp"
+#include "ark/serialize.hpp"
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -77,6 +78,20 @@ void run(){
     // The 4 mm box moved 2 mm along X overlaps the 3 mm box: one 6x4x5 solid.
     V framed=pieces;V shifted=V::makeArr();for(double value:{1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.,0.,2.,0.,0.,1.})shifted.arr.push_back(V::makeNum(value));framed.arr.back().set("frame",shifted);
     sequenceRequest.set("pieces",framed);sequence.set("request",sequenceRequest);volume(ark::nativeBooleanSequenceRequest(sequence),120);
+
+    // 045A: saved geometry is an optional cache. Over capacity, entries are
+    // omitted in document order and the authoring save still succeeds.
+    ark::Document many;for(double width:{3.,4.,5.}){ark::Body seed;seed.nativeData=ark::nativeWorkerRequest(box(width));many.evalBodies.push_back(std::move(seed));}
+    ark::NativeDocumentResultsReport full;const auto all=ark::nativeDocumentResults(many,&full);
+    check(all.size()==3&&full.entries==3&&full.omittedEntries==0&&full.bytes==all[0].bytes.size()+all[1].bytes.size()+all[2].bytes.size(),"all saved results fit the default capacity");
+    ark::NativeDocumentResultsReport bounded;const auto fitted=ark::nativeDocumentResults(many,&bounded,all[0].bytes.size()+all[1].bytes.size()/2);
+    check(fitted.size()==1&&fitted[0].key==all[0].key&&bounded.bytes==all[0].bytes.size()&&bounded.omittedEntries==2&&bounded.omittedBytes==all[1].bytes.size()+all[2].bytes.size(),"byte capacity omits later entries instead of throwing");
+    ark::NativeDocumentResultsReport counted;check(ark::nativeDocumentResults(many,&counted,ark::maxDocumentDerivedBytes,2).size()==2&&counted.omittedEntries==1,"entry capacity omits instead of failing");
+    V root;check(arkjson::parse(ark::documentToJson(many),root),"fixture document serializes");std::string error;const auto bounds=(workspace.path/"bounded-045a.ark").string();
+    check(ark::saveDocumentContainer(root,bounds.c_str(),&error,nullptr,&fitted),"bounded derived subset saves");
+    ark::DocumentDerivedPayloads reopened;V loaded;check(ark::loadDocumentContainer(bounds.c_str(),loaded,&error,&reopened)&&reopened.size()==1&&reopened.front().key==all[0].key,"bounded derived subset reopens");
+    ark::DocumentSaveReport receipt;check(ark::saveDocument(many,(workspace.path/"report-045a.ark").string().c_str(),&receipt)&&receipt.error.empty()&&receipt.derivedGeometry&&receipt.derivedEntries==3&&receipt.derivedOmittedEntries==0&&receipt.derivedCapacityBytes==ark::maxDocumentDerivedBytes,"save receipt reports saved geometry");
+    check(!ark::saveDocument(many,(workspace.path/"missing-045a"/"target.ark").string().c_str(),&receipt)&&!receipt.error.empty(),"failed save explains its reason");
 }
 #endif
 }

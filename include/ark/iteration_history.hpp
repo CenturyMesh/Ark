@@ -5,6 +5,7 @@
 namespace ark {
 class Document;
 inline constexpr size_t maxDocumentBytes=4u*1024u*1024u;
+inline constexpr size_t maxIterationNodes=512;
 // Caller metadata is declared provenance, never an authenticated identity.
 arkjson::Value iterationActor(const arkjson::Value& args);
 arkjson::Value iterationAuthoring(const Document& document);

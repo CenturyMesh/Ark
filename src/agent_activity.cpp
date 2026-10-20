@@ -22,6 +22,13 @@ V pendingIds(const AgentActivityLedger& ledger,const V& actor){V out=V::makeArr(
 int score(const V& value,const char* key){const auto* n=value.find(key);require(n&&n->t==V::Num&&std::isfinite(n->num)&&n->num>=1&&n->num<=5&&n->num==std::floor(n->num),"Feedback scores must be integers 1..5");return (int)n->num;}
 }
 std::uint64_t agentActivitySerial(const Document& d){return d.agentActivity?d.agentActivity->serial:0;}
+bool agentActivityFailed(const std::string& tool,const V& result){
+    if(const auto* error=result.find("isError");error&&error->t==V::Bool&&error->b)return true;
+    const auto* payload=result.find("structuredContent");if(!payload)payload=&result;
+    if(tool=="query_batch")if(const auto* rows=payload->find("results");rows&&rows->t==V::Arr)for(const auto& row:rows->arr)if(const auto* failed=row.find("isError");failed&&failed->t==V::Bool&&failed->b)return true;
+    if(tool=="doc_preview")if(const auto* valid=payload->find("valid");valid&&valid->t==V::Bool&&!valid->b)return true;
+    return false;
+}
 V agentActivityJson(const std::shared_ptr<AgentActivityLedger>& ledger){
     V out=V::makeObj();out.set("schema",V::makeNum(1));out.set("id",V::makeStr(ledger->id));out.set("serial",V::makeNum((double)ledger->serial));out.set("unrecorded_actions",V::makeNum((double)ledger->unrecordedActions));V rows=V::makeArr();rows.arr=ledger->entries;out.set("entries",rows);return out;
 }

@@ -186,9 +186,11 @@ V executeNativeRequest(const V& bounded,const fs::path& worker,const std::string
 }
 NativeDocumentResultScope::NativeDocumentResultScope(std::shared_ptr<NativeDocumentResultContext> context):previous(std::move(activeNativeDocumentResults)){activeNativeDocumentResults=std::move(context);}
 NativeDocumentResultScope::~NativeDocumentResultScope(){activeNativeDocumentResults=std::move(previous);}
-DocumentDerivedPayloads nativeDocumentResults(const Document& document){
+DocumentDerivedPayloads nativeDocumentResults(const Document& document,NativeDocumentResultsReport* report,size_t capacityBytes,size_t capacityEntries){
     DocumentDerivedPayloads records;std::set<std::string> keys;size_t total=0;
-    const auto directory=NativeResultCache::cacheDirectory();if(directory.empty())return records;
+    NativeDocumentResultsReport measured;measured.capacityBytes=std::min(capacityBytes,maxDocumentDerivedBytes);measured.capacityEntries=std::min(capacityEntries,maxDocumentDerivedEntries);
+    auto publish=[&]{measured.entries=records.size();measured.bytes=total;if(report)*report=measured;};
+    const auto directory=NativeResultCache::cacheDirectory();if(directory.empty()){publish();return records;}
     for(const auto& body:document.evalBodies){
         const auto* identity=body.nativeData.find("native_cache_key");
         if(!identity||identity->t!=V::Str||identity->str.size()!=64||identity->str.find_first_not_of("0123456789abcdef")!=std::string::npos||!keys.insert(identity->str).second)continue;
@@ -212,9 +214,11 @@ DocumentDerivedPayloads nativeDocumentResults(const Document& document){
         if(NativeResultCache::portableIdentity(body.nativeData.metadata(),savedRequest,savedProducer))checked.set("native_cache_provenance",*body.nativeData.find("native_cache_provenance"));
         checked.obj.erase(std::remove_if(checked.obj.begin(),checked.obj.end(),[](const auto& field){return field.first=="native_cache_key"||field.first=="mesh";}),checked.obj.end());
         const auto portable=checked.dump();bytes="ARK-NATIVE-CACHE1\n"+identity->str+"\n"+nativeCacheDigest(portable)+"\n"+portable;
-        if(bytes.size()>maxDocumentDerivedBytes-total)throw std::runtime_error("Saved native geometry exceeds derived capacity");
+        // Saved geometry is an optional cache: an entry that does not fit is
+        // omitted in document order, never a reason to fail the authoring save.
+        if(bytes.size()>maxDocumentDerivedEntryBytes||bytes.size()>measured.capacityBytes-total||records.size()>=measured.capacityEntries){++measured.omittedEntries;measured.omittedBytes+=bytes.size();continue;}
         total+=bytes.size();records.push_back({identity->str,std::move(bytes)});
-    }return records;
+    }publish();return records;
 }
 V stageNativeDocumentResults(Document& document,const DocumentDerivedPayloads& records){
     std::map<std::string,std::string> staged,requests;std::set<std::string> ambiguous;size_t total=0,rejected=0,legacy=0;

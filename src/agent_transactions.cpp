@@ -27,6 +27,26 @@ void checkRevision(const V& args,u64 revision){const auto* expected=args.find("e
 #include "candidate_storage_032d.inl"
 std::string candidateId(){static std::atomic<unsigned long long> next{0};static const auto salt=[](){std::random_device random;return ((unsigned long long)random()<<32)^random();}();std::ostringstream out;out<<std::hex<<salt<<'-'<<++next;return out.str();}
 #include "candidate_scope_031b.inl"
+// 045A: journal capacity is a hard wall (512 nodes / 4 MiB); nodes are never
+// silently pruned. Commit receipts report a drive round trip and capacity use
+// so callers can keep temporary poses read-only before reaching it.
+void iterationReceipt045A(V& receipt,const V& history,const std::string& tool,const V& args,size_t documentBytes){
+    const auto* nodes=history.find("nodes");if(!nodes||nodes->t!=V::Arr||nodes->arr.empty())return;
+    const auto* commands=args.find("commands");
+    const bool driveOnly=tool=="doc_apply"&&commands&&commands->t==V::Arr&&!commands->arr.empty()&&std::all_of(commands->arr.begin(),commands->arr.end(),[](const V& command){const auto* op=command.find("op");return op&&op->t==V::Str&&op->str=="assembly.drive";});
+    const V& head=nodes->arr.back();const auto* parent=head.find("parent_id");
+    const auto prior=std::find_if(nodes->arr.begin(),nodes->arr.end(),[&](const V& node){const auto* id=node.find("id");return parent&&id&&id->str==parent->str;});
+    if(driveOnly&&prior!=nodes->arr.end()&&prior->find("before_sha256")->str==head.find("after_sha256")->str){
+        V trip=V::makeObj();trip.set("returned_to_before",*prior->find("id"));trip.set("nodes_used",V::makeNum(2));
+        trip.set("hint",V::makeStr("This assembly.drive returned the assembly to its pose before the previous iteration; both drives stay in the journal. Check temporary poses read-only with assembly_info{drive|sweep}, or doc_preview with assembly.drive and snapshot{candidate_id,expected_revision}. Commit assembly.drive only for a pose the design keeps."));
+        receipt.set("history_round_trip",trip);
+    }
+    if(nodes->arr.size()*4>=maxIterationNodes*3||documentBytes*4>=maxDocumentBytes*3){
+        V capacity=V::makeObj();capacity.set("node_count",V::makeNum((double)nodes->arr.size()));capacity.set("max_nodes",V::makeNum((double)maxIterationNodes));capacity.set("document_bytes",V::makeNum((double)documentBytes));capacity.set("max_document_bytes",V::makeNum((double)maxDocumentBytes));
+        capacity.set("warning",V::makeStr("Iteration history is above 75% of its capacity. At 512 nodes or 4 MiB further edits reject atomically and old nodes are never deleted; avoid committing temporary states."));
+        receipt.set("history_capacity",capacity);
+    }
+}
 }
 Document AgentSession::materializePrepared(const Prepared& prepared){
     if(!prepared.document)throw std::runtime_error("Prepared candidate has no document");
@@ -97,10 +117,15 @@ arkjson::Value AgentSession::call(const std::string& tool,const V& args){
     const auto activityStarted=std::chrono::steady_clock::now();const auto activityBefore=revision;const auto* actor=args.find("actor");
     struct MemoryActorGuard {std::string& value;std::string before;~MemoryActorGuard(){value=std::move(before);}} memoryActorGuard{memoryActor,memoryActor};
     if(actor&&actor->t==V::Obj&&actor->find("id")&&actor->find("id")->t==V::Str)memoryActor="declared:"+actor->find("id")->str.substr(0,240);
-    const bool audit=callDepth_==0&&actor&&actor->t==V::Obj&&actor->find("kind")&&actor->find("kind")->asStr()=="agent"&&tool!="tool_feedback"&&tool!="activity_info"&&tool!="usage_record"&&tool!="memory_context"&&tool!="memory_record"&&tool!="memory_maintain";
+    const std::string actorKind=actor&&actor->t==V::Obj&&actor->find("kind")?actor->find("kind")->asStr():std::string();
+    const bool auditable=callDepth_==0&&tool!="tool_feedback"&&tool!="activity_info"&&tool!="usage_record"&&tool!="memory_context"&&tool!="memory_record"&&tool!="memory_maintain";
+    const bool audit=auditable&&actorKind=="agent";
+    // Declared clients (Studio's live MCP bridge) keep a failure trail: committed
+    // authoring and failed calls are recorded and can be rated with tool_feedback.
+    const bool clientAudit=auditable&&actorKind=="client";
     const bool recording=!suppressFailures_&&callDepth_==0&&(tool=="doc_apply"||tool=="doc_preview");
     const auto rejectedRevision=revision;const std::string rejectedBaseline=recording?documentToJson(document):std::string();
-    auto finish=[&](V response){trimPrepared();if(revision!=activityBefore&&response.find("isError")&&!response.find("isError")->b){trimPrepared();if(tool=="doc_load"||tool=="doc_new")resetBomReview();else if(audit)markBomAuthored();}if(recording)response=captureFailure(tool,args,args,rejectedBaseline,rejectedRevision,std::move(response));if(audit)response=recordAgentActivity(document,tool,args,*actor,std::move(response),activityBefore,revision,std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-activityStarted).count());if(audit&&!suppressHistory_)captureProjectMemoryEpisode(*this,tool,args,response);return response;};
+    auto finish=[&](V response){trimPrepared();if(revision!=activityBefore&&response.find("isError")&&!response.find("isError")->b){trimPrepared();if(tool=="doc_load"||tool=="doc_new")resetBomReview();else if(audit)markBomAuthored();}if(recording)response=captureFailure(tool,args,args,rejectedBaseline,rejectedRevision,std::move(response));if(audit||(clientAudit&&(revision!=activityBefore||agentActivityFailed(tool,response))))response=recordAgentActivity(document,tool,args,*actor,std::move(response),activityBefore,revision,std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-activityStarted).count());if(audit&&!suppressHistory_)captureProjectMemoryEpisode(*this,tool,args,response);return response;};
     V clean=args;if(clean.t==V::Obj)clean.obj.erase(std::remove_if(clean.obj.begin(),clean.obj.end(),[&](const auto& field){return (field.first=="actor"&&tool!="tool_feedback")||field.first=="motivation";}),clean.obj.end());
     const bool mutating=tool=="doc_apply"||tool=="doc_new"||tool=="doc_load"||tool=="doc_undo"||tool=="doc_redo"||tool=="iteration_restore"||tool=="import_step"||tool=="import_sheet_step"||tool=="import_mesh"||tool=="import_cad"||(tool=="design_containers"&&args.find("action")&&args.find("action")->asStr()=="merge"&&!(args.find("preview")&&args.find("preview")->t==V::Bool&&args.find("preview")->b))||(tool=="image_asset"&&args.find("action")&&args.find("action")->asStr()=="import")||tool=="usage_record"||tool=="library_insert";
     struct Depth {size_t& value;Depth(size_t& n):value(n){++value;}~Depth(){--value;}} depth(callDepth_);
@@ -126,7 +151,7 @@ arkjson::Value AgentSession::call(const std::string& tool,const V& args){
         if(!boundary&&(changed||!target.empty())&&document.iterationHistory.t==V::Obj){std::string error;if(!iterationValidate(document,document.iterationHistory,error))throw std::runtime_error(error);}
         const std::string persisted=documentToJson(document);if(persisted.size()>maxDocumentBytes)throw std::runtime_error("Iteration history capacity exceeds the total 4 MiB document limit; edit rejected atomically");
         V persistedRoot;if(!arkjson::parse(persisted,persistedRoot))throw std::runtime_error("Iteration history nesting capacity exceeds the JSON depth limit of 64; edit rejected atomically");
-        if(document.iterationHistory.t==V::Obj&&!boundary&&(changed||!target.empty())){V receipt=*response.find("structuredContent");receipt.set("iteration_id",*document.iterationHistory.find("head_id"));receipt.set("head_id",*document.iterationHistory.find("head_id"));response=envelope(receipt,false);}
+        if(document.iterationHistory.t==V::Obj&&!boundary&&(changed||!target.empty())){V receipt=*response.find("structuredContent");receipt.set("iteration_id",*document.iterationHistory.find("head_id"));receipt.set("head_id",*document.iterationHistory.find("head_id"));iterationReceipt045A(receipt,document.iterationHistory,tool,clean,persisted.size());response=envelope(receipt,false);}
         return finish(std::move(response));
     }catch(const std::exception& exception){rollback();V error=V::makeObj();error.set("error",V::makeStr(exception.what()));error.set("error_code",V::makeStr(std::string(exception.what()).find("capacity")!=std::string::npos?"HISTORY_CAPACITY_EXCEEDED":"HISTORY_FAILED"));error.set("tool",V::makeStr(tool));error.set("revision",V::makeNum((double)revision));error.set("document_unchanged",V::makeBool(true));return finish(envelope(error,true));}
 }

@@ -18,8 +18,16 @@ std::string documentToJson(const Document& doc,bool includeAudit=true,bool inclu
 // Replace doc contents from JSON. Returns false + err on malformed input.
 bool documentFromJson(const std::string& json, Document& doc, std::string* err=nullptr);
 
+// Optional save receipt: the failure reason, and for binary containers how much
+// optional saved geometry was written or omitted over the derived capacity.
+struct DocumentSaveReport {
+    std::string error;
+    bool derivedGeometry=false;
+    size_t derivedEntries=0,derivedBytes=0,derivedOmittedEntries=0,derivedOmittedBytes=0,derivedCapacityBytes=0;
+};
+
 // Binary by default; .arkjson/.json select text export. Loads detect the signature.
-bool saveDocument(const Document& doc, const char* path);
+bool saveDocument(const Document& doc, const char* path, DocumentSaveReport* report=nullptr);
 bool loadDocument(const char* path, Document& doc, std::string* err=nullptr);
 
 // Sketch <-> JSON. Accepted shape:

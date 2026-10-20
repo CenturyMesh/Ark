@@ -187,7 +187,7 @@ V assemble(const V& descriptor,const Slots& slots,const Payloads& payloads,std::
 size_t physicalSize(const std::filesystem::path& path){std::error_code error;auto size=std::filesystem::file_size(path,error);if(error||size>maxDocumentContainerBytes)throw std::runtime_error("ARK container exceeds 256 MiB physical capacity");if(size==0||size%4096!=0)throw std::runtime_error("Truncated ARK container pages");return(size_t)size;}
 void checkDerived(const DocumentDerivedPayloads* derived){
     if(!derived)return;size_t total=0;std::set<std::string> keys;
-    if(derived->size()>maxRows)throw std::runtime_error("ARK derived row capacity exceeded");
+    if(derived->size()>maxDocumentDerivedEntries)throw std::runtime_error("ARK derived row capacity exceeded");
     for(const auto& item:*derived){if(!digest(item.key)||!keys.insert(item.key).second)throw std::runtime_error("Invalid/duplicate ARK derived key");if(item.bytes.empty()||item.bytes.size()>maxDocumentDerivedEntryBytes)throw std::runtime_error("ARK derived entry exceeds capacity");bounded(total,item.bytes.size(),maxDocumentDerivedBytes,"ARK derived section exceeds 128 MiB");total+=item.bytes.size();}
 }
 void writePackage(Db& db,const Package& package,DocumentContainerWriteStats& stats,const DocumentDerivedPayloads* derived){

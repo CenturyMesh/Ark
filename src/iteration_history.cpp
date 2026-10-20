@@ -11,7 +11,7 @@
 namespace ark {
 namespace {
 using V=arkjson::Value;
-constexpr size_t maxNodes=512;
+constexpr size_t maxNodes=maxIterationNodes;
 const V& need(const V& v,const char* key){const V* p=v.find(key);if(!p)throw std::runtime_error(std::string("History missing ")+key);return *p;}
 std::string text(const V& v,const char* key){const V& p=need(v,key);if(p.t!=V::Str)throw std::runtime_error(std::string("History text required: ")+key);return p.str;}
 V& member(V& v,const char* key){for(auto& p:v.obj)if(p.first==key)return p.second;throw std::runtime_error(std::string("History missing ")+key);}
@@ -140,7 +140,7 @@ V iterationInfo(const Document& document,size_t limit,const std::string& beforeI
         size_t end=nodes.size();if(!beforeId.empty()){if(beforeId==text(h,"baseline_id"))end=0;else{auto found=std::find_if(nodes.begin(),nodes.end(),[&](const V& n){return text(n,"id")==beforeId;});if(found==nodes.end())throw std::runtime_error("History before_id cursor not found");end=(size_t)(found-nodes.begin());}}
         for(size_t i=end;i>0&&rows.arr.size()<limit;--i){V meta=nodes[i-1];erase(meta,"delta");rows.arr.push_back(meta);}const bool more=end>rows.arr.size();out.set("has_more",V::makeBool(more));out.set("next_before_id",V::makeStr(more?text(rows.arr.back(),"id"):""));out.set("node_count",V::makeNum(nodes.size()));out.set("storage_bytes",V::makeNum(h.dump().size()));
     }else{if(!beforeId.empty())throw std::runtime_error("History before_id cursor not found");out.set("has_more",V::makeBool(false));out.set("next_before_id",V::makeStr(""));out.set("node_count",V::makeNum(0));out.set("storage_bytes",V::makeNum(0));}
-    out.set("nodes",rows);out.set("branch_heads",heads);out.set("max_document_bytes",V::makeNum(maxDocumentBytes));out.set("document_bytes",V::makeNum(documentToJson(document).size()));out.set("actor_identity_verified",V::makeBool(false));return out;
+    out.set("nodes",rows);out.set("branch_heads",heads);out.set("max_nodes",V::makeNum(maxNodes));out.set("max_document_bytes",V::makeNum(maxDocumentBytes));out.set("document_bytes",V::makeNum(documentToJson(document).size()));out.set("actor_identity_verified",V::makeBool(false));return out;
 }
 void iterationRestore(const Document& source,const std::string& id,Document& target){if(source.iterationHistory.t!=V::Obj)throw std::runtime_error("No iteration history available");V state=replay(source.iterationHistory,id);std::string error;if(!documentFromJson(state.dump(),target,&error))throw std::runtime_error("Iteration authoring invalid: "+error);target.usage=source.usage;target.agentActivity=source.agentActivity;target.iterationHistory=source.iterationHistory;target.nextFeatureId_=std::max(target.nextFeatureId_,source.nextFeatureId_);target.nextAssemblyId_=std::max(target.nextAssemblyId_,source.nextAssemblyId_);target.nextMateId_=std::max(target.nextMateId_,source.nextMateId_);}
 std::string iterationUndoTarget(const Document& document,bool redo){const V& h=document.iterationHistory;if(h.t!=V::Obj)throw std::runtime_error("No iteration history available");const V& ids=need(h,redo?"redo_ids":"undo_ids");if(ids.t!=V::Arr||ids.arr.empty())throw std::runtime_error("No iteration history available");return ids.arr.back().str;}

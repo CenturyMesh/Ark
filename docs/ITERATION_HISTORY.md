@@ -62,3 +62,22 @@ Authoring commits verify that the same journal can reopen before acceptance.
 Capacity failure restores document, revision, undo/redo and prepared candidate
 custody; it never silently deletes old nodes. An oversized save leaves the
 existing target file intact. External exports are outside drawing history.
+
+## Capacity visibility — 045A
+
+`history_info` also returns `max_nodes:512`. Because reaching either limit
+rejects every further edit, commit receipts add `history_capacity`
+(`node_count`, `max_nodes`, `document_bytes`, `max_document_bytes`, `warning`)
+once the journal reaches 75% of the node limit or the document 75% of 4 MiB.
+
+Undo and redo also write nodes, so a temporary state committed and then
+reverted costs two nodes. When a `doc_apply` made only of `assembly.drive`
+commands returns the assembly exactly to its state before the previous
+iteration, the receipt adds `history_round_trip` (`returned_to_before`,
+`nodes_used:2`, `hint`). Detection compares exact authoring digests: the first
+drive replaces an authored placement with the solved one, and a return that
+differs by floating-point drift is not reported. Look at temporary poses
+read-only instead:
+`assembly_info{drive|sweep}`, or `doc_preview` with `assembly.drive` followed
+by `snapshot{candidate_id,expected_revision}`. Both nodes of a round trip stay
+in the journal; no node is merged, rewritten or deleted.

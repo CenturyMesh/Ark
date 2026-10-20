@@ -81,5 +81,9 @@ int main(){try{
     ark::AgentSession loader;V loadArgs=V::makeObj();loadArgs.set("path",V::makeStr(pathText));payload(loader.call("doc_load",loadArgs));check(payload(loader.call("history_info",V::makeObj())).find("node_count")->num==5,"load adopts saved journal without fabricated load iteration");
     payload(loader.call("doc_undo",V::makeObj()));check(loader.document.getParam("length")==20,"binary reopen retains persistent undo target");payload(loader.call("doc_redo",V::makeObj()));check(loader.document.getParam("length")==10&&ark::usageTotals(loader.document).totalTokens==60,"binary reopen undo/redo preserves geometry and usage");
     V newArgs=V::makeObj();newArgs.set("expected_revision",V::makeNum(bounded.revision));payload(bounded.call("doc_new",newArgs));payload(bounded.call("doc_apply",apply(bounded,"2")));check(ark::documentToJson(bounded.document).find(std::string(1024,'x'))==std::string::npos&&bounded.document.canvases.empty(),"new project journal never retains old project blob data");std::error_code ignored;std::filesystem::remove(path,ignored);
+    // 045A: commit receipts warn from 75% of the 512-node journal, never earlier.
+    ark::AgentSession busy;V busyReceipt,previousReceipt;for(int i=0;i<384;++i){previousReceipt=busyReceipt;busyReceipt=payload(busy.call("doc_apply",(apply)(busy,std::to_string(i+1))));}
+    const auto* capacity=busyReceipt.find("history_capacity");
+    check(!previousReceipt.find("history_capacity")&&capacity&&capacity->find("node_count")->num==384&&capacity->find("max_nodes")->num==ark::maxIterationNodes,"journal capacity warning starts at 75% of the node limit");
     std::cout<<"iteration history tests passed\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

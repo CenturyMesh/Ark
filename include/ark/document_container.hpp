@@ -14,6 +14,7 @@ inline constexpr size_t maxDocumentContainerBytes=256*1024*1024;
 inline constexpr size_t maxDocumentValueBytes=16*1024*1024;
 inline constexpr size_t maxDocumentDerivedEntryBytes=64*1024*1024;
 inline constexpr size_t maxDocumentDerivedBytes=128*1024*1024;
+inline constexpr size_t maxDocumentDerivedEntries=8192;
 struct DocumentDerivedPayload {std::string key,bytes;};
 using DocumentDerivedPayloads=std::vector<DocumentDerivedPayload>;
 
