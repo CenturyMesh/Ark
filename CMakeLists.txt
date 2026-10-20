@@ -50,6 +50,7 @@ add_library(ark STATIC
   src/dfm.cpp src/dfm_proposals.cpp
   src/assistant_connectors.cpp
   src/assistant_acp.cpp
+  src/assistant_claude_code.cpp
   src/component_sources.cpp
   src/component_library.cpp
   src/project_memory.cpp src/project_memory_tools.cpp src/memory_embeddings.cpp src/resource_library.cpp
@@ -593,6 +594,10 @@ add_executable(ark-provider-connector-tests tests/provider_connector_tests.cpp)
 add_executable(ark-assistant-acp-tests tests/assistant_acp_tests.cpp)
 target_link_libraries(ark-assistant-acp-tests PRIVATE ark)
 add_test(NAME assistant-acp COMMAND ark-assistant-acp-tests)
+add_executable(ark-assistant-claude-code-tests tests/assistant_claude_code_tests.cpp)
+target_link_libraries(ark-assistant-claude-code-tests PRIVATE ark)
+add_test(NAME assistant-claude-code COMMAND ark-assistant-claude-code-tests)
+set_tests_properties(assistant-claude-code PROPERTIES TIMEOUT 60)
 target_link_libraries(ark-provider-connector-tests PRIVATE ark)
 add_test(NAME provider-connectors COMMAND ark-provider-connector-tests)
 set_tests_properties(provider-connectors PROPERTIES TIMEOUT 30)

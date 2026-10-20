@@ -1,5 +1,6 @@
 #include "ark/assistant.hpp"
 #include "ark/project_memory_tools.hpp"
+#include "ark/assistant_claude_code.hpp"
 #include "ark/assistant_acp.hpp"
 #include "ark/assistant_connectors.hpp"
 #include "assistant_vision.hpp"
@@ -310,7 +311,8 @@ std::string assistantUsageLabel(const AssistantUsage& usage){
 }
 void validateAssistantConfig(const AssistantConfig& config){
     if(config.protocol==AssistantProtocol::Acp){validateAssistantAcpConfig(config);return;}
-    require(config.authMode!=AssistantAuthMode::CliAccount,"CLI account mode requires the Grok Build ACP connector.");
+    if(config.protocol==AssistantProtocol::ClaudeCode){validateAssistantClaudeCodeConfig(config);return;}
+    require(config.authMode!=AssistantAuthMode::CliAccount,"CLI account mode requires the Grok Build or Claude Code connector.");
     require(!config.model.empty()&&config.model.size()<=128,"Choose an API model in Assistant settings first.");
     require(std::all_of(config.model.begin(),config.model.end(),[](unsigned char c){return c>=33&&c<127;}),"Invalid assistant model name.");
     require(config.endpoint.size()<=2048&&config.endpoint.find_first_of("\r\n\t #?\\")==std::string::npos,"Invalid assistant endpoint URL; queries and fragments are not supported.");
@@ -334,6 +336,7 @@ void validateAssistantConfig(const AssistantConfig& config){
 }
 bool assistantKeyAvailable(const AssistantConfig& config){
     if(config.protocol==AssistantProtocol::Acp)return assistantAcpAvailable(config);
+    if(config.protocol==AssistantProtocol::ClaudeCode)return assistantClaudeCodeAvailable(config);
     if(config.authMode==AssistantAuthMode::ChatGptPlan)return chatGptPlanReady();
     if(assistantApiKeyStored(config))return true;
     if(config.apiKeyEnv.empty())return localHttp(config.endpoint);
@@ -342,6 +345,7 @@ bool assistantKeyAvailable(const AssistantConfig& config){
 }
 std::vector<std::string> assistantProviderModels(const AssistantConfig& config,const AssistantTransport& offlineTransport){
     if(config.protocol==AssistantProtocol::Acp){require(!offlineTransport,"ACP catalog discovery uses its explicit channel seam, not an HTTP transport.");return assistantAcpModels(config);}
+    if(config.protocol==AssistantProtocol::ClaudeCode){require(!offlineTransport,"Claude Code catalog discovery uses its explicit channel seam, not an HTTP transport.");return assistantClaudeCodeModels(config);}
     require(config.authMode==AssistantAuthMode::ApiKey,"ChatGPT plan models use account discovery.");AssistantConfig discovery=config;
     discovery.model="model-catalog-inspection";discovery.reasoningEffort.clear();
     const std::string suffix=config.protocol==AssistantProtocol::Responses?"/responses":config.protocol==AssistantProtocol::Messages?"/messages":"/chat/completions";
@@ -650,7 +654,7 @@ static V readHeldResult(const std::map<std::string,HeldResult>& held,const V& ar
 }
 AssistantResult runAssistant(const AssistantConfig& config,const V& input,const V& catalogTools,const AssistantTool& callTool,const AssistantEvents& events,const std::atomic_bool* cancel,const AssistantTransport& transport,const AssistantInbox& inbox,const AssistantHistory& history,const AssistantRetryHooks& retryHooks){
     cancelled(cancel);
-    const bool holdResults=config.resultHandleBytes>0&&config.protocol!=AssistantProtocol::Acp;
+    const bool holdResults=config.resultHandleBytes>0&&config.protocol!=AssistantProtocol::Acp&&config.protocol!=AssistantProtocol::ClaudeCode;
     const V tools=holdResults?withResultGetTool(catalogTools):catalogTools;
     std::map<std::string,HeldResult> held;std::deque<std::string> heldOrder;std::size_t heldBytes=0;unsigned heldSerial=0;
     const std::string heldNonce=[]{std::random_device device;std::ostringstream out;out<<std::hex<<std::setw(8)<<std::setfill('0')<<(device()&0xffffffffu);return out.str();}();
@@ -658,6 +662,7 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
     unsigned memoryCalls=0;std::uint64_t memoryMs=0;
     const auto recalled=config.memoryPrefetch?projectMemoryAssistantInput(input,tools,[&](const std::string& name,const V& args){const auto began=std::chrono::steady_clock::now();++memoryCalls;auto receipt=callTool(name,args);memoryMs+=(std::uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-began).count();return receipt;}):input;
     if(config.protocol==AssistantProtocol::Acp){require(!transport,"Grok Build ACP cannot use an HTTP provider transport or cloud fallback.");auto result=runAssistantAcp(config,recalled,tools,callTool,events,cancel,inbox,history,retryHooks);result.performance.toolCalls+=memoryCalls;result.performance.toolMilliseconds+=memoryMs;return result;}
+    if(config.protocol==AssistantProtocol::ClaudeCode){require(!transport,"Claude Code cannot use an HTTP provider transport or API fallback.");auto result=runAssistantClaudeCode(config,recalled,tools,callTool,events,cancel,inbox,history,retryHooks);result.performance.toolCalls+=memoryCalls;result.performance.toolMilliseconds+=memoryMs;return result;}
     validateAssistantConfig(config);cancelled(cancel);
     auto functions=assistantFunctionTools(tools);std::set<std::string> allowed;
     for(auto& fn:functions.arr)allowed.insert(field(fn,"name"));

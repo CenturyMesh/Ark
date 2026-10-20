@@ -12,7 +12,7 @@
 
 namespace ark {
 enum class AssistantAuthMode { ApiKey, ChatGptPlan, CliAccount };
-enum class AssistantProtocol { Responses, ChatCompletions, Messages, Acp };
+enum class AssistantProtocol { Responses, ChatCompletions, Messages, Acp, ClaudeCode };
 class AssistantAcpChannel;
 enum class AssistantImageMode { InspireDesign, ImageToCAD };
 enum class AssistantImageDecoder { Platform, Portable };
@@ -73,7 +73,8 @@ struct AssistantConfig {
     unsigned timeoutSeconds=90;
     std::size_t maxResponseBytes=4*1024*1024;
     std::size_t maxConversationBytes=8*1024*1024; // Outgoing request bound; original host evidence is retained separately.
-    // Offline protocol seam; never persisted. Native ACP uses the CLI's own login.
+    // Offline CLI protocol seam (ACP and Claude Code stream-json); never persisted.
+    // Native CLI routes use the CLI's own login.
     std::function<std::unique_ptr<AssistantAcpChannel>()> acpChannelFactory;
 };
 // Provider-reported usage only. Missing/invalid usage never becomes zero-cost

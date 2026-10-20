@@ -18,6 +18,7 @@ its own connector or inherit the main Assistant configuration.
 | Claude API | Anthropic Messages; Chat Completions compatibility also available | `ANTHROPIC_API_KEY` |
 | Grok | xAI Responses | `XAI_API_KEY` |
 | Grok Build | Native ACP CLI session with role-owned MCP tools | Official CLI account; sign in using `grok login` |
+| Claude Code | Your installed Claude Code CLI over stream-json, with role-owned SDK MCP tools | Claude Code's own sign-in or your own key, as configured in the CLI |
 | Ollama local | Local Chat Completions | No key; default loopback port 11434 |
 | OpenCode Zen | Protocol appropriate to the selected catalog model | `OPENCODE_API_KEY` |
 | Custom | Explicit endpoint and supported protocol | Explicit environment-variable name; loopback HTTP has no credential |
@@ -40,6 +41,12 @@ it is not installed at the normal `grok` location. Leave the model blank to use
 the CLI's advertised selected model, or refresh the catalog and choose an actual
 ID. Unsupported images and unnegotiated effort controls reject explicitly.
 See [Grok Build setup and scope](GROK_BUILD_CONNECT.md).
+
+For Claude Code inside ARK, select **Claude Code / CLI account**. ARK runs the
+Claude Code you installed, unmodified, and executes its permitted ARK tools
+itself; built-in file, shell, web and subagent tools stay disabled. The CLI
+authenticates as you configured it and ARK reads no Claude credentials.
+See [Claude Code inside ARK](CLAUDE_CODE_CONNECT_044B.md).
 
 The host retains tool IDs, tool results, role permissions and observed revisions
 across protocols. Incomplete or invalid responses do not execute partial tool

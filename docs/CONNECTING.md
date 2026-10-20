@@ -74,6 +74,12 @@ requires.
   `claude mcp add --transport stdio --scope user`). Claude Code keeps its own
   login and model; ARK only exports the local CAD connection. Re-run the commands
   after restarting Studio, because the endpoint changes.
+- **Claude Code inside ARK:** choose the **Claude Code / CLI account** connector
+  in Assistant or a Team card. ARK starts the Claude Code you installed,
+  unmodified, and executes its ARK tool calls itself. You sign in through Claude
+  Code (`claude`, then `/login`) or any other method it supports; ARK neither
+  sees nor stores those credentials. See
+  [Claude Code inside ARK](CLAUDE_CODE_CONNECT_044B.md).
 
 ## ChatGPT account inside ARK
 

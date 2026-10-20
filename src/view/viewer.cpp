@@ -2695,9 +2695,9 @@ static bool editConnector(AssistantConfig& config,bool role,bool& inherit){
     std::string current=inherit?"inherit":config.authMode==AssistantAuthMode::ChatGptPlan?"chatgpt-plan":config.provider;
     if(std::find(providers.begin(),providers.end(),current)==providers.end())current="custom";
     std::vector<EditorField> profile{{"Provider",current,false,providers},{"Refresh model catalog", "0",true}};
-    if(!editFields(role?"Agent card connector":"Assistant connector","Grok Build uses its CLI account; API providers use environment credentials. Catalog refresh reads model IDs without inference.",profile))return false;
+    if(!editFields(role?"Agent card connector":"Assistant connector","Grok Build and Claude Code use their CLI sign-in; API providers use environment keys. Catalog refresh runs no inference.",profile))return false;
     auto provider=profile[0].value;inherit=provider=="inherit";if(inherit)return true;if(provider=="chatgpt-plan"){if(config.authMode!=AssistantAuthMode::ChatGptPlan){config.model.clear();config.reasoningEffort.clear();}config.authMode=AssistantAuthMode::ChatGptPlan;config.provider="openai";config.protocol=AssistantProtocol::Responses;config.endpoint="https://api.openai.com/v1/responses";return true;}
-    const auto expectedAuth=provider=="grok-build"?AssistantAuthMode::CliAccount:AssistantAuthMode::ApiKey;
+    const auto expectedAuth=(provider=="grok-build"||provider=="claude-code")?AssistantAuthMode::CliAccount:AssistantAuthMode::ApiKey;
     if(provider!=config.provider||config.authMode!=expectedAuth)config=assistantProviderPreset(provider);
     config.authMode=expectedAuth;if(provider=="ollama")return editLocalModel(config);std::vector<std::string> models;
     if(profile[1].value=="1"){
@@ -2710,6 +2710,12 @@ static bool editConnector(AssistantConfig& config,bool role,bool& inherit){
         if(!profileShot.empty()&&g_dialogSmoke)g_dialogShot=profileShot+".endpoint.png";
         if(!editFields("Grok Build account and model","Sign in with grok login first. Blank model uses the CLI selected model when advertised. ARK executes its own permitted tools.",fields))return false;
         config.endpoint=trimField(fields[0].value);config.model=trimField(fields[1].value);config.apiKeyEnv.clear();config.reasoningEffort.clear();config.imageInputSupported=false;validateAssistantConfig(config);return true;
+    }
+    if(provider=="claude-code"){
+        std::vector<EditorField> fields{{"CLI path / claude = auto",config.endpoint},{"Model / blank: CLI default",config.model,false,models,true},{"Effort / blank: CLI default",config.reasoningEffort,false,{"","low","medium","high","xhigh","max"}}};
+        if(!profileShot.empty()&&g_dialogSmoke)g_dialogShot=profileShot+".endpoint.png";
+        if(!editFields("Claude Code account and model","Sign in with claude (/login) first. Blank model/effort use CLI defaults. ARK runs only its own tools; built-in tools stay off.",fields))return false;
+        config.endpoint=trimField(fields[0].value);config.model=trimField(fields[1].value);config.reasoningEffort=trimField(fields[2].value);config.apiKeyEnv.clear();config.imageInputSupported=false;validateAssistantConfig(config);return true;
     }
     std::vector<EditorField> fields{{"Endpoint",config.endpoint},{"Model / choose or type",config.model,false,models,true},{"API key env / blank local",config.apiKeyEnv},{"Protocol",assistantProtocolName(config.protocol),false,{"responses","chat-completions","messages"}}};
     bool hasMessagesLimit=config.protocol==AssistantProtocol::Messages;if(hasMessagesLimit)fields.push_back({"Messages response limit",std::to_string(config.maxOutputTokens)});
@@ -2736,7 +2742,7 @@ static void connectorDialog(bool local=false){
     if(routeChanged)for(size_t i=0;i<teamCapacity;++i)if(!g_teamConnectors[i]){g_teamModels[i].clear();g_teamEfforts[i].clear();}
     if(g_teamStarted){*g_teamCancel=true;g_agentTeam.cancel();g_teamStarted=false;resetTeamView();}
     g_assistantConfig=config;*g_assistantCancel=true;++g_documentEpoch;g_conversation=arkjson::Value::makeArr();if(!g_dialogSmoke)saveUiSettings();clearPendingRoleSettings();
-    g_status=config.authMode==AssistantAuthMode::ChatGptPlan?"ChatGPT connector selected; choose the connected account model from Account.":config.authMode==AssistantAuthMode::CliAccount?"Grok Build connector saved; the CLI keeps its account and selected model.":config.provider=="ollama"?"Local Ollama / "+config.model+(config.imageInputSupported?" / tools and images":" / tools; text only"):"Provider connector saved; no inference started.";
+    g_status=config.authMode==AssistantAuthMode::ChatGptPlan?"ChatGPT connector selected; choose the connected account model from Account.":config.authMode==AssistantAuthMode::CliAccount?(config.provider=="claude-code"?"Claude Code connector saved; the CLI keeps its account and selected model.":"Grok Build connector saved; the CLI keeps its account and selected model."):config.provider=="ollama"?"Local Ollama / "+config.model+(config.imageInputSupported?" / tools and images":" / tools; text only"):"Provider connector saved; no inference started.";
 }
 static void teamConnectorDialog(size_t index){
     if(index>=teamCapacity)return;if(g_teamStarted&&g_agentTeam.snapshot().running){g_status="Finish or cancel the active team before changing a card connector";return;}
@@ -2782,7 +2788,7 @@ static void chooseChatGptModel(){
     }
 }
 static void chooseReasoningEffort(){
-    if(g_assistantConfig.authMode==AssistantAuthMode::CliAccount){g_status="Grok Build uses its CLI reasoning configuration; no separate effort control is negotiated.";return;}
+    if(g_assistantConfig.authMode==AssistantAuthMode::CliAccount){g_status=g_assistantConfig.provider=="claude-code"?"Claude Code effort is set in its connector; blank uses the CLI default.":"Grok Build uses its CLI reasoning configuration; no separate effort control is negotiated.";return;}
     if(g_assistantConfig.model.empty()){g_status="Choose an assistant model before setting reasoning effort";return;}
     static const std::set<std::string> vocabulary{"none","minimal","low","medium","high","xhigh","max","ultra"};
     std::vector<std::string> advertised;std::string providerDefault;
@@ -2988,7 +2994,7 @@ static bool editRoleModel(size_t index,std::string& model,std::string& effort){
 static void teamRoleDialog(size_t index){
     if(g_teamStarted&&g_agentTeam.snapshot().running){g_status="Finish or cancel the team before changing role settings. Changes apply to a new team run.";return;}
     std::string model=g_teamModels[index],effort=g_teamEfforts[index];
-    if(teamRoleConfig(index).authMode==AssistantAuthMode::CliAccount){auto config=teamRoleConfig(index);bool inherit=false;if(!editConnector(config,true,inherit))return;if(g_teamStarted){cancelTeam();g_teamStarted=false;resetTeamView();}if(inherit){g_teamConnectors[index].reset();g_teamModels[index].clear();g_teamEfforts[index].clear();}else{g_teamConnectors[index]=config;g_teamModels[index]=config.model;g_teamEfforts[index].clear();}if(!g_dialogSmoke)saveUiSettings();g_status="Grok Build agent connector saved for the next run.";return;}
+    if(teamRoleConfig(index).authMode==AssistantAuthMode::CliAccount){auto config=teamRoleConfig(index);bool inherit=false;if(!editConnector(config,true,inherit))return;if(g_teamStarted){cancelTeam();g_teamStarted=false;resetTeamView();}if(inherit){g_teamConnectors[index].reset();g_teamModels[index].clear();g_teamEfforts[index].clear();}else{g_teamConnectors[index]=config;g_teamModels[index]=config.model;g_teamEfforts[index]=config.provider=="claude-code"?config.reasoningEffort:std::string();}if(!g_dialogSmoke)saveUiSettings();g_status=config.provider=="claude-code"?"Claude Code agent connector saved for the next run.":"Grok Build agent connector saved for the next run.";return;}
     if(teamRoleConfig(index).provider=="ollama"){auto config=teamRoleConfig(index);if(!editLocalModel(config))return;if(g_teamStarted){cancelTeam();g_teamStarted=false;resetTeamView();}g_teamConnectors[index]=config;g_teamModels[index]=config.model;g_teamEfforts[index]=config.reasoningEffort.empty()?"auto":config.reasoningEffort;if(!g_dialogSmoke)saveUiSettings();g_status="Local agent model saved for the next run.";return;}
     if(teamRoleConfig(index).authMode==AssistantAuthMode::ChatGptPlan){if(!g_authStatus.connected||!g_authStatus.planAuthorized){g_status="Connect and authorize ChatGPT from Account before choosing role models.";return;}if(g_authBusy||g_authModels.empty()){requestRoleCatalog(index);return;}if(!editRoleModel(index,model,effort))return;}
     else{auto config=teamRoleConfig(index);std::vector<EditorField> fields{{"Model (manual)",model.empty()?config.model:model},{"Effort (manual)",effort}};if(!editFields("Advanced role connector","Configure this card model and provider-supported effort. Blank inherits the card connector model; auto uses the provider default.",fields))return;model=trimField(fields[0].value);effort=trimField(fields[1].value);if(!model.empty())config.model=model;config.reasoningEffort=effort=="auto"?"":effort;validateAssistantConfig(config);}
@@ -5373,7 +5379,7 @@ static void drawFrame(HDC hdc){
     std::string connector=!g_teamMode&&g_assistantResponseFinished?(g_assistantResponseError?"Interrupted / inspect prior changes":"Response finished / review result"):g_chatBusy?(g_assistantStatus.empty()?"Working...":g_assistantStatus):g_authBusy?"ChatGPT sign-in in progress":
         g_assistantConfig.authMode==AssistantAuthMode::ChatGptPlan?"ChatGPT plan / "+g_assistantConfig.model:
         g_assistantConfig.provider=="ollama"&&!g_assistantConfig.model.empty()?"Local Ollama / "+g_assistantConfig.model:
-        g_assistantConfig.authMode==AssistantAuthMode::CliAccount?"Grok Build / "+(g_assistantConfig.model.empty()?std::string("CLI selected model"):g_assistantConfig.model):
+        g_assistantConfig.authMode==AssistantAuthMode::CliAccount?(g_assistantConfig.provider=="claude-code"?"Claude Code / ":"Grok Build / ")+(g_assistantConfig.model.empty()?std::string("CLI selected model"):g_assistantConfig.model):
         g_authStatus.connected?(g_authStatus.planAuthorized?"ChatGPT signed in / choose model":"ChatGPT identity connected / plan disabled"):
         g_assistantConfig.model.empty()?"Continue with ChatGPT or Advanced API key":"API key / "+g_assistantConfig.model;
     label(fitText(connector,.65f,viewW-(g_assistantConfig.authMode==AssistantAuthMode::ChatGptPlan?694:526)),viewX+192,cy+15,.65f);
@@ -5410,7 +5416,7 @@ static void drawFrame(HDC hdc){
             size_t cardTextStart=g_textVerts.size();
             auto line=[&](const std::string& value,float offset,float scale=.80f){textOut(fitText(value,scale,cardWidth-24),x+12,y+offset,scale,.83f,.91f,.98f);};
             line(g_teamRoleLabels[i],8,.85f);std::string state=role?std::string(agentTeamStateName(role->state))+" / turn "+std::to_string(role->turns):"Ready";line(state+(i==0?" / engineering + CAD":i==2?" / read-only review":" / CAD author"),summaryCard?32.f:29.f);
-            auto config=teamRoleConfig(i);if(summaryCard)line((config.authMode==AssistantAuthMode::ChatGptPlan?std::string("ChatGPT"):config.authMode==AssistantAuthMode::CliAccount?std::string("Grok Build"):config.provider)+" / "+(config.model.empty()?(config.authMode==AssistantAuthMode::CliAccount?"CLI selected model":"Select model"):config.model)+" / "+(config.reasoningEffort.empty()?"Auto":config.reasoningEffort),54);
+            auto config=teamRoleConfig(i);if(summaryCard)line((config.authMode==AssistantAuthMode::ChatGptPlan?std::string("ChatGPT"):config.authMode==AssistantAuthMode::CliAccount?std::string(config.provider=="claude-code"?"Claude Code":"Grok Build"):config.provider)+" / "+(config.model.empty()?(config.authMode==AssistantAuthMode::CliAccount?"CLI selected model":"Select model"):config.model)+" / "+(config.reasoningEffort.empty()?"Auto":config.reasoningEffort),54);
             if(summaryCard)line(role&&!role->taskSummary.empty()?"Task "+role->taskState+": "+role->taskSummary:role?role->status:"Describe the goal to start",76);if(fullCard)line(role&&role->unresolvedToolErrors?"Unresolved tool requests: "+std::to_string(role->unresolvedToolErrors)+" / Review blockers":g_teamActivity[i].empty()?(role?role->text:"Tools and messages appear live"):g_teamActivity[i],98);
             const float footer=fullCard?125.f:summaryCard?103.f:50.f;
             if(summaryCard)rect(x+12,y+footer-3,cardWidth-24,1,0,.23f,.34f,.42f,.65f,0,0,0,0,0);
@@ -6535,6 +6541,14 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
             const bool clicked=click(44020);g_dialogSmoke=0;
             if(!clicked||!g_teamConnectors[0]||teamRoleConfig(0).authMode!=AssistantAuthMode::CliAccount||teamRoleConfig(0).model!="offline-grok-acp"||!teamRoleConfig(0).reasoningEffort.empty()||g_session.revision!=revision||g_assistantConfig.authMode!=originalConfig.authMode)return failure(511,"Grok CLI card changed the global connector/drawing or lost its own model");
             g_teamConnectors[0]=savedConnector;g_teamModels[0]=savedModel;g_teamEfforts[0]=savedEffort;
+        }
+        {
+            auto config=assistantProviderPreset("openai");config.model="foreign-offline-model";config.apiKeyEnv="OPENAI_API_KEY";bool inherit=false;
+            g_dialogOverrideQueue={{"claude-code","0"},{"claude","opus","high"}};g_dialogSmoke=3;g_dialogShot=shotPath+".claude-code-account.png";
+            const bool selected=editConnector(config,false,inherit);g_dialogSmoke=0;
+            if(!selected||config.authMode!=AssistantAuthMode::CliAccount||config.protocol!=AssistantProtocol::ClaudeCode||!config.apiKeyEnv.empty()||config.model!="opus"||config.reasoningEffort!="high"||config.imageInputSupported)return failure(545,"Claude Code connector retained foreign credentials or lost its model/effort");
+            AssistantConfig restored;readConnectorSettings(connectorSettings(config),restored);
+            if(restored.authMode!=AssistantAuthMode::CliAccount||restored.protocol!=AssistantProtocol::ClaudeCode||restored.provider!="claude-code"||restored.endpoint!="claude"||!restored.apiKeyEnv.empty()||restored.imageInputSupported)return failure(546,"Claude Code account, protocol and CLI path did not persist together");
         }
         auto exported=assistantExternalMcpConfig("opencode","C:/ARK/ark-mcp.exe","ark-ui-test",assistantProviderPreset("ollama"));if(exported.find("ark-mcp.exe")==std::string::npos||exported.find("--connect")==std::string::npos||exported.find("ark-ui-test")==std::string::npos)return failure(504,"External MCP profile lost executable or live document binding");
         {const auto raw=assistantExternalMcpConfig("grok-build","C:/ARK/ark-mcp.exe","ark-ui-test",originalConfig);const auto display=externalConfigDisplay(raw,"grok-build");std::string roundtrip;for(char c:display)if(c!='\r')roundtrip+=c;if(roundtrip!=raw)return failure(507,"Grok Build copy display changed the TOML configuration");}
