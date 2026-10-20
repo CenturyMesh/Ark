@@ -741,7 +741,7 @@ V AgentSession::info() const {
     for(const auto& feature:document.features){
         const bool active=within&&!feature.suppressed&&(loadAll||loaded.count(feature.id));
         states.push_back({within,active});
-        if(active&&featureConsumesInputBodies(feature))for(u64 input:feature.inputs)hidden.insert(input);
+        if(active&&featureConsumesInputBodies(feature))for(size_t index=0;index<feature.inputs.size();++index)if(featureConsumesInputBody(feature,index))hidden.insert(feature.inputs[index]);
         if(feature.id==document.historyTip)within=false;
     }
     V fs=V::makeArr();fs.arr.reserve(document.features.size());

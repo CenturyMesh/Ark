@@ -28,6 +28,7 @@ target_include_directories(ark-sqlite PUBLIC third_party/sqlite)
 target_compile_definitions(ark-sqlite PRIVATE SQLITE_ENABLE_FTS5=1 SQLITE_THREADSAFE=1 SQLITE_OMIT_LOAD_EXTENSION=1 SQLITE_DQS=0 SQLITE_DEFAULT_FOREIGN_KEYS=1)
 target_link_libraries(ark-sqlite PUBLIC Threads::Threads)
 add_library(ark STATIC
+  src/curve_pattern_044b.cpp src/media_044b.cpp
   src/modeling_031b.cpp
   src/geometry_storage_032d.cpp
   src/wood_tools.cpp
@@ -456,6 +457,11 @@ if(ARK_WITH_OCCT)
     add_test(NAME native-${test_name} COMMAND ark-occt-${test_name}-tests)
     set_tests_properties(native-${test_name} PROPERTIES TIMEOUT 120)
   endforeach()
+  add_executable(ark-curve-pattern-044b-tests tests/curve_pattern_044b_tests.cpp)
+  target_link_libraries(ark-curve-pattern-044b-tests PRIVATE ark-occt ark)
+  add_dependencies(ark-curve-pattern-044b-tests ark-occt-worker)
+  add_test(NAME curve-pattern-044b COMMAND ark-curve-pattern-044b-tests)
+  set_tests_properties(curve-pattern-044b PROPERTIES TIMEOUT 300)
   add_executable(ark-native-feature-tests tests/native_features_tests.cpp)
   add_executable(ark-native-geometry-019b-tests tests/native_geometry_019b_tests.cpp)
   target_link_libraries(ark-native-geometry-019b-tests PRIVATE ark-occt ark)

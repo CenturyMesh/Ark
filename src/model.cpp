@@ -18,6 +18,7 @@ std::string featureOperation(const Feature& feature){
     return operation;
 }
 bool featureConsumesInputBodies(const Feature& feature){return feature.type!=FeatureType::NativeSolid||featureOperation(feature)!="extrude";}
+bool featureConsumesInputBody(const Feature& feature,size_t index){return featureConsumesInputBodies(feature)&&!(index==2&&feature.type==FeatureType::NativeSolid&&featureOperation(feature)=="curve_pattern");}
 
 ManufacturingLineage featureManufacturingLineage(const Document& document,const Feature& feature){
     const Feature* current=&feature;
