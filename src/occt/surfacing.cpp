@@ -4,6 +4,10 @@
 #include "surface_repair.hpp"
 
 #include <BRepAdaptor_Curve.hxx>
+#include <BRepGProp.hxx>
+#include <GProp_GProps.hxx>
+#include <TopoDS_Face.hxx>
+#include <TopoDS_Iterator.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepAlgoAPI_Splitter.hxx>
@@ -1242,26 +1246,39 @@ TopoDS_Shape basisOf(const Profile& profile, bool solid) {
     return face.Face();
 }
 
+// 046B: a sketch profile with several loops or a region selection becomes one
+// exact planar face with holes. Surface (non-solid) results keep one loop.
+TopoDS_Shape regionBasis046B(const V& request, const V& profileValue, V& receipt) {
+    if (!profileValue.find("regions")) return {};
+    if (!flag(request, "solid", false)) throw std::runtime_error("Profile regions (several loops or native.regions) need p.solid=1; a surface result keeps one loop");
+    return profileRegionFaces046B(profileValue, receipt).front();
+}
+
 V extrudeSurface(const V& request) {
     const V& profileValue = required(request, "profile");
     const auto frame = frameOf(profileValue);
-    const Profile profile = profileOf(profileValue, false);
+    V regionReceipt;
+    const TopoDS_Shape regionBasis = regionBasis046B(request, profileValue, regionReceipt);
+    const Profile profile = regionBasis.IsNull() ? profileOf(profileValue, false) : Profile{};
     const double distance = number(required(request, "distance"), "distance");
     if (std::abs(distance) <= kTolerance) throw std::runtime_error("extrude distance must exceed tolerance");
     const bool solid = flag(request, "solid", false);
     const gp_Vec direction(frame[8] * distance, frame[9] * distance, frame[10] * distance);
-    BRepPrimAPI_MakePrism prism(basisOf(profile, solid), direction, true, true);
+    BRepPrimAPI_MakePrism prism(regionBasis.IsNull() ? basisOf(profile, solid) : regionBasis, direction, true, true);
     prism.Build();
     if (!prism.IsDone()) throw std::runtime_error("OCCT surface extrusion failed");
     TopoDS_Shape shape = prism.Shape();
     if (solid && properties(shape) < 0) shape.Reverse();
+    if (!regionBasis.IsNull()) return tag(shapeResult(shape, solid), "extrude_surface", "profile_regions", regionReceipt);
     return tag(shapeResult(shape, solid), "extrude_surface");
 }
 
 V revolveSurface(const V& request) {
     const V& profileValue = required(request, "profile");
     const auto frame = frameOf(profileValue);
-    const Profile profile = profileOf(profileValue, false);
+    V regionReceipt;
+    const TopoDS_Shape regionBasis = regionBasis046B(request, profileValue, regionReceipt);
+    const Profile profile = regionBasis.IsNull() ? profileOf(profileValue, false) : Profile{};
     const V& axisName = required(request, "axis");
     if (axisName.t != V::Str || (axisName.str != "X" && axisName.str != "Y" && axisName.str != "Z"))
         throw std::runtime_error("revolve axis must be X, Y or Z");
@@ -1272,7 +1289,7 @@ V revolveSurface(const V& request) {
     const bool solid = flag(request, "solid", false);
     const gp_Ax1 revolution({frame[12], frame[13], frame[14]},
                             {frame[axis * 4], frame[axis * 4 + 1], frame[axis * 4 + 2]});
-    const TopoDS_Shape basis = basisOf(profile, solid);
+    const TopoDS_Shape basis = regionBasis.IsNull() ? basisOf(profile, solid) : regionBasis;
     const bool full = std::abs(degrees - 360.0) <= 1.0e-9;
     // Explain the common failure: profile vertices on both sides of the axis.
     auto revolutionFailure = [&]() {
@@ -1301,6 +1318,7 @@ V revolveSurface(const V& request) {
         shape = revol.Shape();
     }
     if (solid && properties(shape) < 0) shape.Reverse();
+    if (!regionBasis.IsNull()) return tag(shapeResult(shape, solid), "revolve_surface", "profile_regions", regionReceipt);
     return tag(shapeResult(shape, solid), "revolve_surface");
 }
 
@@ -1353,7 +1371,89 @@ TopoDS_Wire alignSectionPlane(Profile section, const gp_Dir& tangent) {
 
 #include "advanced_sweep_surface_031b.inl"
 
+// 046B hollow sweep: every loop of one region is swept with one shared
+// placement and trihedron (no per-loop correction or contact), then the hole
+// sweeps are cut from the outer sweep. Volume must equal outer minus holes.
+V hollowSweep046B(const V& request) {
+    if (request.find("laws") || request.find("sections")) throw std::runtime_error("A sweep section with profile regions keeps one section; laws and varying sections need one loop per station");
+    if (!flag(request, "solid", false)) throw std::runtime_error("A sweep section with profile regions needs p.solid=1");
+    if (flag(request, "contact", false)) throw std::runtime_error("A hollow sweep section cannot use contact: moving each loop onto the path separately would displace its holes; set contact:0");
+    const bool correction = flag(request, "correction", true);
+    Profile path = profileOf(required(request, "path"), false);
+    const TopoDS_Face preparedSupport = prepareSweepPath031B(request, path);
+    const V& sectionValue = required(request, "section");
+    V regionReceipt;
+    const TopoDS_Face face = TopoDS::Face(profileRegionFaces046B(sectionValue, regionReceipt).front());
+    const TopoDS_Wire outer = BRepTools::OuterWire(face);
+    std::vector<TopoDS_Wire> loops{outer};
+    for (TopoDS_Iterator it(face); it.More(); it.Next()) if (it.Value().ShapeType() == TopAbs_WIRE && !it.Value().IsSame(outer)) loops.push_back(TopoDS::Wire(it.Value()));
+    const auto frame = frameOf(sectionValue);
+    const gp_Dir normal(frame[8], frame[9], frame[10]);
+    gp_Trsf placement;
+    std::string correctionMode = correction ? "already_normal_to_initial_tangent" : "none";
+    if (correction) {
+        // The existing straight-section rule, applied once to the whole section.
+        const gp_Dir tangent = initialTangent(path);
+        if (!normal.IsParallel(tangent, 1.0e-9)) {
+            GProp_GProps props;
+            BRepGProp::SurfaceProperties(face, props);
+            const gp_Dir axis = normal.Crossed(tangent);
+            placement.SetRotation(gp_Ax1(props.CentreOfMass(), axis), normal.AngleWithRef(tangent, axis));
+            correctionMode = "shared_rigid_rotation_to_initial_tangent";
+        }
+    }
+    std::vector<TopoDS_Shape> solids;
+    std::vector<double> volumes;
+    std::string orientation, orientationSolver = "native_pipe_trihedron";
+    for (size_t k = 0; k < loops.size(); ++k) {
+        const std::string role = k ? "hole loop " + std::to_string(k) : std::string("outer loop");
+        const TopoDS_Wire wire = correctionMode == "shared_rigid_rotation_to_initial_tangent" ? TopoDS::Wire(transformed(loops[k], placement)) : loops[k];
+        BRepOffsetAPI_MakePipeShell pipe(path.wire);
+        pipe.SetMode(false);
+        orientation = setSweepOrientation031B(request, path, pipe, preparedSupport, orientationSolver);
+        pipe.Add(wire, false, false);
+        pipe.Build();
+        if (!pipe.IsDone()) throw std::runtime_error("OCCT sweep failed for the hollow section " + role);
+        if (!pipe.MakeSolid()) throw std::runtime_error("OCCT sweep did not make a solid for the hollow section " + role);
+        TopoDS_Shape shape = pipe.Shape();
+        double volume = properties(shape);
+        if (volume < 0) { shape.Reverse(); volume = -volume; }
+        if (!(volume > 0)) throw std::runtime_error("Hollow section " + role + " swept to zero volume");
+        solids.push_back(shape);
+        volumes.push_back(volume);
+    }
+    TopoDS_Shape shape = solids.front();
+    double expected = volumes.front();
+    if (solids.size() > 1) {
+        for (size_t k = 1; k < volumes.size(); ++k) expected -= volumes[k];
+        shape = cut(solids.front(), compound(std::vector<TopoDS_Shape>(solids.begin() + 1, solids.end())));
+    }
+    const double measured = properties(shape), limit = std::max(1.0e-5, volumes.front() * 1.0e-7), error = measured - expected;
+    if (std::abs(error) > limit)
+        throw std::runtime_error("Hollow sweep does not conserve volume: outer " + std::to_string(volumes.front()) + " mm3 minus holes gives " + std::to_string(expected) + " mm3 but the result has " + std::to_string(measured) + " mm3 (limit " + std::to_string(limit) + "); a hole sweep leaves the outer sweep or the loops overlap along the path");
+    V result = tag(shapeResult(shape, true), "sweep");
+    V report = required(result, "report");
+    report.set("orientation_mode", V::makeStr(orientation));
+    report.set("orientation_solver", V::makeStr(orientationSolver));
+    V hollow = V::makeObj(), holes = V::makeArr();
+    for (size_t k = 1; k < volumes.size(); ++k) holes.arr.push_back(V::makeNum(volumes[k]));
+    hollow.set("loops", V::makeNum(static_cast<double>(loops.size())));
+    hollow.set("outer_volume_mm3", V::makeNum(volumes.front()));
+    hollow.set("hole_volumes_mm3", holes);
+    hollow.set("expected_volume_mm3", V::makeNum(expected));
+    hollow.set("result_volume_mm3", V::makeNum(measured));
+    hollow.set("conservation_error_mm3", V::makeNum(error));
+    hollow.set("conservation_limit_mm3", V::makeNum(limit));
+    hollow.set("correction", V::makeStr(correctionMode));
+    hollow.set("method", V::makeStr("each loop swept with one shared placement and trihedron; outer minus holes by exact Boolean"));
+    report.set("hollow_section", hollow);
+    report.set("profile_regions", regionReceipt);
+    result.set("report", report);
+    return result;
+}
+
 V sweepSurface(const V& request) {
+    if (const V* section = request.find("section"); section && section->t == V::Obj && section->find("regions")) return hollowSweep046B(request);
     if (request.find("laws")) return lawSweep031B(request);
     const bool solid = flag(request, "solid", false);
     Profile path = profileOf(required(request, "path"), false);

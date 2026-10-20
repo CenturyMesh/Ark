@@ -511,7 +511,7 @@ int patternCopies(const Document& document,const AssemblyNode& node){
     try{return (int)assemblyPatternCopySlots(document,node).size();}catch(const std::exception&){return 0;}
 }
 bool profileReady(const Document& document,const NamedSketch& sketch){
-    try{sketchProfiles(sketch.sk,resolvePlane(document,sketch.sk.plane));return true;}
+    try{sketchProfileRegions(sketch.sk,resolvePlane(document,sketch.sk.plane));return true;}
     catch(const std::exception&){return false;}
 }
 V designView(const Document& document,u64 revision){

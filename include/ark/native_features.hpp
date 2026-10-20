@@ -14,6 +14,9 @@ arkjson::Value sketchEntityNativeProfile(Document& document,const std::string& s
 Body evaluateExactLegacyOperation(const Feature& feature, const ExprEnv& env,
                                   Document& document, std::vector<Body>& preceding);
 bool validateImportedComponentDefinition(const Feature& feature,std::string& error);
+// 046B: an authored native.regions selection on an extrude, extrude_surface,
+// revolve_surface or sweep. Multi-loop sketches without it keep their format.
+bool profileRegions046BNeedsVersion48(const Document& document);
 // Check stored hashes and any still-present library-owned source even when
 // geometry comes from an evaluation cache. Does not regenerate display data.
 void validateNativeComponentCustody(const Document& document);
