@@ -10,10 +10,14 @@ Emission has bounded display bloom and is sampled steadily; this does not render
 the time evolution of pulse or blink effects. Opaque geometry writes depth first,
 then transparent triangles are sorted back to front. Intersecting transparent
 surfaces can have sorting artifacts. This renderer does not reproduce Studio's
-PBR/metallic/roughness response, textures or projected image stamps.
+PBR/metallic/roughness response. 044B adds triplanar image textures, procedural
+pattern colors and surface stamps (GIF/video frames at `media_time_s`); plane
+stamps and bump relief remain Studio-only. See [044B](MEDIA_TEXTURES_044B.md).
 
 The evidence receipt identifies software capture, authored appearance scope,
-steady emission, sorted transparency and unsupported textures/stamps. Geometry
+steady emission and sorted transparency; since 044B `textures_and_stamps` is true
+and `appearance_surfaces` lists the drawn textures, patterns, stamps and media
+status. Geometry
 remains `display_mesh` evidence; snapshot pixels never certify exact geometry or
 manufacturing suitability. Existing unstyled rendering callers retain their
 neutral display API.

@@ -418,7 +418,7 @@ static Image renderSnapshotImpl(const Mesh& m,int W,int H,const SnapCam& cam,con
                     if(material){
                         const double light=0.38+0.52*std::max(nrm.dot(Vec3{-0.32,0.86,0.42}.normalized()),0.)+0.10*std::max(nrm.dot(Vec3{0.62,0.18,-0.28}.normalized()),0.);
                         emissive=material->emission*std::max(material->emissionIntensity,0.);
-                        c=material->color*light+emissive;
+                        c=(material->shader?material->shader->shade(wp,wn.normalized(),material->color):material->color)*light+emissive;
                         auto& e=emission[(size_t)y*W+x];e=e*(1-opacity)+emissive*(opacity*std::max(material->bloom,0.));
                     }
                     u8* q=&img.px[(size_t)(y*W+x)*3];

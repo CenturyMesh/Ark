@@ -1,6 +1,7 @@
 // ARK-Point :: model.cpp — expressions, parameters, document bookkeeping.
 #include "ark/model.hpp"
 #include "ark/manufacturing.hpp"
+#include "ark/media_044b.hpp"
 #include <cctype>
 #include <cmath>
 
@@ -18,6 +19,7 @@ std::string featureOperation(const Feature& feature){
     return operation;
 }
 bool featureConsumesInputBodies(const Feature& feature){return feature.type!=FeatureType::NativeSolid||featureOperation(feature)!="extrude";}
+bool featureConsumesInputBody(const Feature& feature,size_t index){return featureConsumesInputBodies(feature)&&!(index==2&&feature.type==FeatureType::NativeSolid&&featureOperation(feature)=="curve_pattern");}
 
 ManufacturingLineage featureManufacturingLineage(const Document& document,const Feature& feature){
     const Feature* current=&feature;
@@ -453,7 +455,8 @@ bool applyAppearancePatch(Appearance& appearance,const arkjson::Value& patch,std
             if(value.t!=V::Arr||value.arr.size()!=2){error="texture_scale needs two positive values";return false;}
             for(int i=0;i<2;++i){const V& scale=value.arr[i];if(scale.t!=V::Num||!std::isfinite(scale.num)||scale.num<=0||scale.num>1e6){error="texture_scale must be positive and at most 1e6";return false;}}
             appearance.textureScaleU=value.arr[0].num;appearance.textureScaleV=value.arr[1].num;
-        }else{error="Unknown appearance property: "+key+"; accepted: base_color, metallic, roughness, opacity, emission_color, emission_intensity, emission_period, emission_effect, bloom, glow, texture_path, texture_asset, texture_scale";return false;}
+        }else if(key.rfind("pattern",0)==0){if(!applyAppearancePattern044B(appearance,key,value,error))return false;}
+        else{error="Unknown appearance property: "+key+"; accepted: base_color, metallic, roughness, opacity, emission_color, emission_intensity, emission_period, emission_effect, bloom, glow, texture_path, texture_asset, texture_scale, pattern, pattern_scale_mm, pattern_angle_deg, pattern_contrast, pattern_color";return false;}
     }
     return true;
 }
@@ -467,7 +470,7 @@ arkjson::Value appearanceToJson(const Appearance& appearance){
         V emission=V::makeArr();for(double c:{appearance.emissionColor.x,appearance.emissionColor.y,appearance.emissionColor.z})emission.arr.push_back(V::makeNum(c));
         out.set("emission_color",emission);out.set("emission_intensity",V::makeNum(appearance.emissionIntensity));out.set("bloom",V::makeNum(appearance.bloom));out.set("glow",V::makeNum(appearance.glow));out.set("emission_period",V::makeNum(appearance.emissionPeriod));out.set("emission_effect",V::makeStr(appearance.emissionEffect));
     }
-    out.set("base_color",color);out.set("metallic",V::makeNum(appearance.metallic));out.set("roughness",V::makeNum(appearance.roughness));out.set("opacity",V::makeNum(appearance.opacity));out.set("texture_path",V::makeStr(appearance.texturePath));if(!appearance.textureAsset.empty())out.set("texture_asset",V::makeStr(appearance.textureAsset));out.set("texture_scale",scale);return out;
+    out.set("base_color",color);out.set("metallic",V::makeNum(appearance.metallic));out.set("roughness",V::makeNum(appearance.roughness));out.set("opacity",V::makeNum(appearance.opacity));out.set("texture_path",V::makeStr(appearance.texturePath));if(!appearance.textureAsset.empty())out.set("texture_asset",V::makeStr(appearance.textureAsset));out.set("texture_scale",scale);appearancePatternToJson044B(appearance,out);return out;
 }
 
 bool validateMaterial(const Material& material,std::string& error){

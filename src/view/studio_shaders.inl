@@ -61,13 +61,34 @@ vec4 triplanar(){
  vec3 a=pow(abs(normalize(dot(lnrm,lnrm)>1e-8?lnrm:vec3(0.,1.,0.))),vec3(4.));a/=max(a.x+a.y+a.z,1e-5);
  return texture(surfaceTexture,lpos.xy*textureScale)*a.z+texture(surfaceTexture,lpos.xz*textureScale)*a.y+texture(surfaceTexture,lpos.yz*textureScale)*a.x;
 }
+// 044B procedural patterns: the same scalar fields as appearancePatternField044B.
+uniform float patternKind,patternScale,patternAngle,patternContrast,patternColorSet;uniform vec3 patternColor;
+float patternHash(float x,float y){return fract(sin(x*127.1+y*311.7)*43758.5453);}
+float patternNoise(float x){float i=floor(x),f=x-i,u=f*f*(3.-2.*f);return mix(patternHash(i,0.),patternHash(i+1.,0.),u);}
+float patternField(float k,vec2 q){
+ if(k>.5&&k<3.5){bool plain=abs(k-2.)<.5;float t=plain?2.:4.;vec2 g=q*t,c=floor(g),f=g-c;bool warp=plain?mod(c.x+c.y,2.)<1.:mod(c.x+c.y,4.)<2.;float p=warp?sin(3.14159265*f.y):sin(3.14159265*f.x);float lit=abs(k-3.)<.5?(warp?.75+.25*p:.25+.25*p):(warp?.55+.45*p:.1+.45*p);return 1.-lit;}
+ if(abs(k-4.)<.5){vec2 g=q*3.,i0=floor(g);float d1=9.,d2=9.;for(int j=-1;j<=1;++j)for(int i=-1;i<=1;++i){vec2 c=i0+vec2(float(i),float(j));vec2 p=c+vec2(patternHash(c.x,c.y),patternHash(c.y+17.3,c.x-9.1));float d=length(p-g);if(d<d1){d2=d1;d1=d;}else if(d<d2)d2=d;}return clamp(.85*(1.-smoothstep(.02,.22,d2-d1))+.15*patternHash(floor(q.x*12.),floor(q.y*12.)),0.,1.);}
+ if(abs(k-5.)<.5)return clamp(.65*patternNoise(q.y*60.)+.35*patternNoise(q.y*170.+3.7),0.,1.);
+ if(abs(k-6.)<.5){float a=abs(fract(q.x+q.y)-.5),b=abs(fract(q.x-q.y)-.5);return 1.-2.*min(.5-a,.5-b);}
+ if(abs(k-7.)<.5){float x=q.x+.5*mod(floor(q.y),2.);return 1.-smoothstep(.26,.30,length(vec2(fract(x)-.5,fract(q.y)-.5)));}
+ return 0.;
+}
+float patternTriplanar(){
+ vec3 a=pow(abs(normalize(dot(lnrm,lnrm)>1e-8?lnrm:vec3(0.,1.,0.))),vec3(4.));a/=max(a.x+a.y+a.z,1e-5);float c=cos(radians(patternAngle)),s=sin(radians(patternAngle)),sc=max(patternScale,1e-6);mat2 rot=mat2(c,-s,s,c);
+ return a.z*patternField(patternKind,rot*lpos.xy/sc)+a.y*patternField(patternKind,rot*lpos.xz/sc)+a.x*patternField(patternKind,rot*lpos.yz/sc);
+}
+// Screen-space bump from the pattern height (mm); display relief only.
+vec3 patternBump(vec3 n,float h){vec3 dpx=dFdx(wpos),dpy=dFdy(wpos);float dhx=dFdx(h),dhy=dFdy(h);vec3 r1=cross(dpy,n),r2=cross(n,dpx);float det=dot(dpx,r1);if(abs(det)<1e-12)return n;return normalize(abs(det)*n-sign(det)*(dhx*r1+dhy*r2));}
 void main(){
  if(emissionOnly>.5){o=vec4(srgbToLinear(emissionColor)*emissionIntensity*emissionBloom*opacity,emissionIntensity>0.?emissionGlow/64.:0.);return;}
  if(selectionOverlay>.5){o=vec4(.97,.63,.21,sel*.16);return;}
  vec3 n=hardSurface>0.?normalize(cross(dFdx(wpos),dFdy(wpos))):normalize(nrm),v=cameraOrtho>.5?studioBack:normalize(eye-wpos);
  if(dot(n,v)<0.)n=-n;vec4 texel=hasTexture>.5?triplanar():vec4(1.);
  if(stampMode>.5){vec3 delta=lpos-stampOrigin;vec2 uv=vec2(dot(delta,stampU),dot(delta,stampV))/stampSize+vec2(.5);if(any(lessThan(uv,vec2(0.)))||any(greaterThan(uv,vec2(1.)))||abs(dot(delta,stampNormal))>stampDepth||(stampFrontOnly>.5&&dot(lnrm,stampNormal)<=0.))discard;texel=texture(surfaceTexture,uv);if(texel.a<.001)discard;}
- vec3 base=srgbToLinear(clamp(color*texel.rgb,0.,1.));float m=clamp(metallic,0.,1.),r=clamp(roughness,.055,1.);
+ vec3 tint=clamp(color*texel.rgb,0.,1.);float m=clamp(metallic,0.,1.),r=clamp(roughness,.055,1.);
+ if(patternKind>.5&&stampMode<.5){float pf=patternTriplanar();vec3 second=patternColorSet>.5?patternColor:tint*(patternKind>6.5?.08:.45);tint=mix(tint,second,clamp(pf*patternContrast,0.,1.));
+  if(abs(patternKind-5.)>.5)r=clamp(r+(abs(patternKind-3.)<.5?-(1.-pf)*.25:patternKind>5.5?pf*.2:(pf-.5)*.35)*patternContrast,.04,1.);n=patternBump(n,(1.-pf)*patternContrast*patternScale*.06);}
+ vec3 base=srgbToLinear(tint);
  // Normal variance broadens subpixel highlights instead of letting a sharp
  // highlight sparkle as a curved surface or small part moves across pixels.
  float variance=max(dot(dFdx(n),dFdx(n)),dot(dFdy(n),dFdy(n)));r=sqrt(clamp(r*r+min(variance,.18),.003,1.));

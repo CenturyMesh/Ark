@@ -1,5 +1,6 @@
 #include "ark/snapshot_032d.hpp"
 #include "ark/appearance_024b.hpp"
+#include "ark/media_044b.hpp"
 #include <stdexcept>
 #include <cmath>
 #include <algorithm>
@@ -11,7 +12,7 @@ SnapshotMaterial displayMaterial(const Appearance& a){
     out.emissionIntensity=a.emissionIntensity;out.bloom=a.bloom;out.glow=a.glow;return out;
 }
 }
-std::vector<SnapshotMaterial> snapshotBodyMaterials(const Document& document,const Body& body,const Mesh& mesh){
+static std::vector<SnapshotMaterial> baseSnapshotMaterials(const Document& document,const Body& body,const Mesh& mesh){
     const auto* feature=document.find(body.id);
     std::vector<SnapshotMaterial> out(mesh.triCount(),displayMaterial(feature?resolvedAppearance(document,*feature):Appearance{}));
     if(!feature||feature->faceAppearances.empty())return out;
@@ -29,5 +30,8 @@ std::vector<SnapshotMaterial> snapshotBodyMaterials(const Document& document,con
         std::fill(out.begin()+(size_t)start,out.begin()+(size_t)(start+count),material);
     }
     return out;
+}
+std::vector<SnapshotMaterial> snapshotBodyMaterials(const Document& document,const Body& body,const Mesh& mesh,SnapshotAppearanceOptions044B* options){
+    auto out=baseSnapshotMaterials(document,body,mesh);if(options)attachSnapshotSurfaces044B(document,body,mesh,out,*options);return out;
 }
 }

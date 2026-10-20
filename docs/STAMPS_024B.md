@@ -123,7 +123,10 @@ override with:
 
 `material` optionally names a document material. `appearance` is a partial
 override using the existing color/metallic/roughness/texture fields; the new
-`texture_asset` names embedded artwork. An appearance texture follows the
+`texture_asset` names embedded artwork. 044B stamps may use an animated GIF or an
+MP4 video asset with `loop`, `speed`, `autoplay` and `start_s` playback, and the
+software snapshot draws surface stamps at `media_time_s`; see
+[044B media](MEDIA_TEXTURES_044B.md). An appearance texture follows the
 renderer's body texture coordinate convention; a Stamp provides explicit
 physical projector placement. Regional materials affect display only: density,
 mass and manufacturing intent remain body-owned. There are at most 128 face

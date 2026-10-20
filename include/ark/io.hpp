@@ -1,6 +1,7 @@
 // ARK-Point :: ark/io.hpp — export & offscreen rendering API.
 #pragma once
 #include "ark/mesh.hpp"
+#include <memory>
 #include <vector>
 
 namespace ark {
@@ -26,10 +27,16 @@ struct SnapCam {
     f64 fovDeg=35;
 };
 Image renderSnapshot(const Mesh& m, int W, int H, const SnapCam& cam);
+// Optional per-pixel display surface (044B textures, patterns, stamps).
+struct SnapshotShader {
+    virtual ~SnapshotShader()=default;
+    virtual Vec3 shade(const Vec3& worldPoint,const Vec3& worldNormal,const Vec3& color) const=0;
+};
 // One display material per triangle. Geometry authority remains the B-rep.
 struct SnapshotMaterial {
     Vec3 color{0.72,0.75,0.80},emission{1,1,1};
     double opacity=1,emissionIntensity=0,bloom=0.6,glow=12;
+    std::shared_ptr<const SnapshotShader> shader;
 };
 Image renderSnapshot(const Mesh& m,int W,int H,const SnapCam& cam,const std::vector<SnapshotMaterial>& materials);
 

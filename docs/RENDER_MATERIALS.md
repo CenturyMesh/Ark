@@ -5,11 +5,16 @@ metallic/roughness BRDF, linear-light evaluation of sRGB colors, and tone
 mapping. Local image textures are projected in three directions in part
 coordinates, so they follow an assembly instance without requiring authored
 UV coordinates. Texture scale is repeats per 100 mm along each projected axis.
+Embedded `texture_asset` images tile with repeat wrapping. 044B adds procedural
+patterns (twill, weave, carbon, leather, brushed, knurl, perforated) that need no
+image, with period, angle, contrast and optional secondary color, plus animated
+GIF/video textures; see [044B media and patterns](MEDIA_TEXTURES_044B.md).
 Transparent bodies use a sorted blended pass and do not act
 as opaque occluders in the screen-space AO buffer.
 
 Select a body and choose **Material** to assign or edit its named material,
-color, metallic factor, roughness, opacity, image path and texture scale.
+color, metallic factor, roughness, opacity, image path, texture scale and the
+044B procedural pattern, period, angle and contrast.
 Aluminium, steel, ABS, rubber and glass presets provide editable nominal
 densities. Editing a named material changes every feature using that material.
 Use a new material name for an independent variant. Material definitions and
@@ -54,8 +59,9 @@ and `assembly_info` accept `gravity_m_s2` (default 9.80665) and return `mass_g`,
 This is a viewport improvement, not a ray-traced renderer or a claim of Fusion
 rendering parity. Screen-space occlusion cannot see off-screen geometry, and
 sorted transparency does not model refraction or arbitrary intersecting glass.
-The MCP `snapshot` tool remains a software geometry preview; use Studio captures
-to review materials. Exact STEP geometry is independent of appearance.
+The MCP `snapshot` tool is a flat-lit software preview: since 044B it draws
+triplanar textures, pattern colors and surface stamps, but not PBR response or
+bump relief; use Studio captures to review materials. Exact STEP geometry is independent of appearance.
 Material density does not establish structural strength or simulate dynamics.
 
 The [AURORA materials example](../examples/aurora-plane-materials.ark) assigns
