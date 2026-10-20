@@ -316,6 +316,7 @@ public:
     arkjson::Value assemblyConfigurations; // explicit parameter/occurrence visibility recipes
     arkjson::Value assemblyLoadSelection; // null loads all; array retains selected node subtrees
     arkjson::Value assemblyExternalReferences; // imported source hashes and producer revisions
+    arkjson::Value motions; // 044B Skeleton Motion vector graphs and their baked display frames; null when absent
     u64 addFeature(Feature f);                    // returns id
     Feature* find(u64 id);
     const Feature* find(u64 id) const;

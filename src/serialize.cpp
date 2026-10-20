@@ -18,6 +18,7 @@
 #include "ark/appearance_024b.hpp"
 #include "ark/usage.hpp"
 #include "ark/electronics.hpp"
+#include "ark/motion_graph.hpp"
 #include <cstdio>
 #include <cctype>
 #include <fstream>
@@ -641,6 +642,7 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
     for(const auto& node:doc.assembly)if(assemblyPatternHasCarry(node.pattern)){r.set("version",Value::makeNum(44));break;}
     for(const auto& feature:doc.features)if(requiresElectronics035B(feature)){r.set("version",Value::makeNum(45));break;}
     for(const auto& plane:doc.planes)if(plane.support.t==Value::Obj)if(const auto* kind=plane.support.find("kind");kind&&kind->t==Value::Str&&kind->str=="bisector"){r.set("version",Value::makeNum(46));break;}
+    if(motionsRequireDocumentVersion47(doc)){r.set("motions",doc.motions);r.set("version",Value::makeNum(47));}
     if(includeAudit&&includeHistory)iterationPersist(r,doc);
     canonicalDocumentKeys(r);
     std::string serialized=r.dump();
@@ -651,7 +653,7 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
 static bool documentFromValue(Value& v,Document& doc,std::string* err){
     auto fail=[&](const std::string& m){ if(err)*err=m; return false; };
     if(v.t!=Value::Obj) return fail("root must be object");
-    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || !std::isfinite(ver->num)||ver->num!=std::floor(ver->num)||ver->num<1||ver->num>46))
+    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || !std::isfinite(ver->num)||ver->num!=std::floor(ver->num)||ver->num<1||ver->num>47))
         return fail("unsupported document version");
     Value history;std::string historyError;if(!iterationExpand(v,history,historyError))return fail(historyError);
     if(const auto* nodes=v.find("assembly");nodes&&nodes->t==Value::Arr)for(const auto& node:nodes->arr)if(const auto* pattern=node.find("pattern");pattern&&pattern->find("carry_frame")){
@@ -887,6 +889,10 @@ static bool documentFromValue(Value& v,Document& doc,std::string* err){
     for(const auto& feature:nd.features){bool fabrication=false;if(feature.type==FeatureType::SheetMetal)fabrication=feature.nativeSpec.find("jog")||feature.nativeSpec.find("sketch_bend");if(feature.type==FeatureType::ConstructionFrame){if(auto welds=feature.nativeSpec.find("welds"))fabrication|=welds->t==Value::Arr&&!welds->arr.empty();if(auto joints=feature.nativeSpec.find("joints"))for(const auto& joint:joints->arr)if(auto kind=joint.find("kind"))fabrication|=kind->str=="trim_extend"||kind->str=="trim_plane";}if(fabrication&&(!v.find("version")||v.find("version")->num<25))return fail("Frame endpoint/weld or sheet jog/sketch-bend programs require document version 25");}
     for(const auto& field:{std::pair{"assembly_configurations",&nd.assemblyConfigurations},std::pair{"assembly_load_selection",&nd.assemblyLoadSelection},std::pair{"assembly_external_references",&nd.assemblyExternalReferences}})if(const auto* value=v.find(field.first)){
         const auto* version=v.find("version");if(!version||version->num<40||value->t!=Value::Arr)return fail(std::string(field.first)+" requires document version 40 array");*field.second=*value;
+    }
+    if(const auto* motions=v.find("motions")){
+        const auto* version=v.find("version");if(!version||version->num<47||motions->t!=Value::Arr)return fail("Baked motions require document version 47 array");
+        try{validateMotionStorage(*motions);}catch(const std::exception& error){return fail(error.what());}nd.motions=*motions;
     }
     if(const auto* tip=v.find("history_tip")){
         const auto* version=v.find("version");if(!version||version->num<40||tip->t!=Value::Num||!std::isfinite(tip->num)||tip->num<1||tip->num>9007199254740990.||tip->num!=std::floor(tip->num)||!nd.find((u64)tip->num))return fail("history_tip requires a valid feature ID and document version 40");nd.historyTip=(u64)tip->num;

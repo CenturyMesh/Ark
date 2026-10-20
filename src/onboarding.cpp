@@ -8,6 +8,7 @@
 #include <mutex>
 namespace ark {
 #include "onboarding_035b.inl"
+#include "onboarding_044b.inl"
 std::string agentOnboardingPack(const std::vector<std::string>& topics){
     using V=arkjson::Value;
     static std::mutex mutex;static std::map<std::vector<std::string>,std::string> packs;
@@ -107,7 +108,7 @@ arkjson::Value agentOnboard(const AgentSession& session,const arkjson::Value& ar
         }));
         r.set("next_step",V::makeStr("For explicitly requested 2D drawing work: drawing_inspect{} -> select a supported source and its suggested_drawing -> revision-checked drawing.set -> inspect the current sheet -> explicit drawing.refresh after source edits -> drawing_export at the current revision. Human Studio controls and agents use this same source recipe; availability never authorizes an automatic drawing write."));
     }else if(topic=="motion"){
-        r.set("tools",list({"doc_info","doc_apply","reference_inspect","assembly_info","assembly_motion","doc_save"}));
+        r.set("tools",list({"doc_info","doc_apply","reference_inspect","assembly_info","assembly_motion","motion_info","doc_save"}));onboardingSkeletonMotion044B(r);
         r.set("rules",list({
             "For direct steering/dragging, inspect assembly_info{drive:{driver,mate?,mode:rotate|translate,delta}} and commit assembly.drive with observed expected_revision. This moves the grounded joint's connected side; rigid handlebar attachments and wheel mounts follow the fork while passive wheel spin stays at its current coordinate. Load assembly onboarding for the joint contract. assembly_motion remains the separate ideal transmission inspection.","First solve static positioning with ordinary geometric mates and grounded supports. Mechanical couplings relate instance degrees of freedom; they do not position sprockets, enforce pitch-center distances or replace mounts. Endpoints a/b are part instances, never feature definitions or groups. Moving endpoints must not be fixed or assembly patterns.",
             "mate.add{a,b,type:chain|gear,reference_a,reference_b,motion:{teeth_a,teeth_b,phase_deg?}} couples rotations. Teeth are integer expressions 1..10000; chain uses same physical direction and ratio teeth_a/teeth_b, external gear opposite physical direction. Signed local rotation correctly accounts for opposite selected semantic axes. Axes must be parallel. Phase is a driven angular offset from the authored static pose.",
