@@ -123,7 +123,9 @@ anchors can also be constrained using `pa`/`pb` as their zero-based anchor index
 
 `extrude` consumes `p:{sketch,height,both}`. Its direction is the sketch plane's
 normal, and `both=1` centres it about that plane. `revolve` uses local Y as its
-axis. A named sketch must have exactly one closed outer profile for either.
+axis. A named sketch supplies one closed loop, or since 046B several
+non-touching closed loops forming one region with holes; mesh `revolve` keeps
+one loop. See [profile regions](PROFILE_REGIONS_046B.md).
 
 `sketch_cut` takes one base feature ID in `inputs`, and
 `p:{sketch,depth,offset}`. Depth is positive along the cut sketch's normal; offset
@@ -133,8 +135,10 @@ disjoint openings. For an extrusion from 0 to `thickness`, use `offset=-1` and
 plane placement, not an inferred “through all” mode.
 
 Lines and open splines can join at endpoints to form a profile. No closing edge
-is invented. Open, branching, self-intersecting/touching sampled profiles and
-nested loops are rejected. Nested loops must be expressed as separate cuts.
+is invented. Open, branching and self-intersecting/touching sampled profiles are
+rejected. A `sketch_cut` sketch still needs disjoint, non-nested loops; extrusion,
+`extrude_surface`/`revolve_surface` and sweep sections accept nested loops as
+046B profile regions.
 Imported source tubes remain read-only and are not edited by this operation.
 
 Full-depth interior openings in an extrusion use a dedicated native prismatic
