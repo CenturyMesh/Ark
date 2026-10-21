@@ -1,14 +1,16 @@
 // 044B Baked Motions panel: list, vector graph, timeline and transport.
 // Rename, delete and bake use ordinary revision-checked doc_apply transactions.
 static const float kBakedMotionColors[6][3]={{.24f,.80f,.94f},{.99f,.71f,.27f},{.86f,.48f,.95f},{.46f,.88f,.54f},{.96f,.46f,.42f},{.50f,.64f,1.f}};
-// 046B async integration point. The only Studio call of the read-only motion
-// clearance query (motion_info{name,clearance}) through the ordinary tool path;
-// done receives the report on the UI thread. It runs synchronously today; the
-// shared off-UI-thread exact-query runner replaces this body, not its callers.
+// 046B: the only Studio call of the read-only motion clearance query
+// (motion_info{name,clearance}). It runs as a background exact job on a private
+// session copy, so orbit and selection stay live; done receives the report on
+// the UI thread. With background jobs off it falls back to the UI-thread tool path.
 static void runMotionClearance046B(const std::string& motion,double thresholdMm,const std::function<void(bool,const arkjson::Value&,const std::string&)>& done){
     using V=arkjson::Value;V args=V::makeObj(),request=V::makeObj();request.set("threshold_mm",V::makeNum(thresholdMm));args.set("name",V::makeStr(motion));args.set("clearance",request);args.set("expected_revision",V::makeNum((double)g_session.revision));
-    const V result=runTool("motion_info",args);const V* data=result.find("structuredContent");const V* report=data?data->find("clearance"):nullptr;
-    if(g_error||!report){done(false,V{},g_status);return;}done(true,*report,std::string());
+    auto deliver=[done](const V& result){const V* data=result.find("structuredContent");const V* report=data?data->find("clearance"):nullptr;const V* error=result.find("isError");
+        if((error&&error->b)||!report){done(false,V{},data&&data->find("error")?data->find("error")->asStr():g_status);return;}done(true,*report,std::string());};
+    if(submitExactJob046B("motion_info",args,[deliver](const V& result,u64){deliver(result);},"Check clearance"))return;
+    const V result=runTool("motion_info",args);if(g_error){done(false,V{},g_status);return;}deliver(result);
 }
 static bool bakedMotionClearanceShown(){const auto& p=g_bakedMotions;return !p.selected.empty()&&p.clearanceMotion==p.selected&&p.clearanceRevision==g_session.revision&&p.clearanceEpoch==g_documentEpoch&&!p.clearance.isNull();}
 static std::string bakedMotionClearanceSummary(const arkjson::Value& r){

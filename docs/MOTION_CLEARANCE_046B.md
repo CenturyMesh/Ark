@@ -147,8 +147,12 @@ amber below-threshold, hatched amber threshold-unproven and hatched grey
 uncertified intervals, plus a tick at the worst time. Results are shown only
 for the motion, revision and document they were measured on; a stale bake
 shows the explicit rejection. The panel calls the query through one function,
-`runMotionClearance046B(motion, threshold_mm, done)`, the integration point for
-the shared off-UI-thread exact-query runner; it runs synchronously today.
+`runMotionClearance046B(motion, threshold_mm, done)`. It submits the query as a
+[background exact job](ASYNC_EXACT_046B.md) on a private session copy, so orbit
+and selection stay live and the running check can be cancelled from its chip.
+The report is delivered on the UI thread. With background jobs off
+(`ARK_STUDIO_EXACT_JOBS=0`, or headless self-tests that do not opt in), it
+falls back to the earlier UI-thread call.
 
 ## Local evidence
 
@@ -185,8 +189,11 @@ it was 0.051 mm for a measured minimum of 3.671 mm.
 
 Studio `studio-baked-motions-ui` and `-compact` (1440x900, 1366x800) cover the
 action, threshold, markers, worst-frame scrub, read-only behaviour and stale
-rejection; captures were inspected for clipping and overlaps. The complete
-local CTest run passed 204 of 204.
+rejection; captures were inspected for clipping and overlaps. On the
+integrated 046B tree the same self-test also runs the action as a background
+exact job and checks that it returns at once, leaves the document and revision
+unchanged and delivers the same minimum as the UI-thread call. The complete
+local CTest run passed 204 of 204 on the feature branch.
 
 ## Not established
 
@@ -196,4 +203,5 @@ local CTest run passed 204 of 204.
   assumed), or for joint excursions between the sampled graph points of
   function nodes and couplings that change faster than those samples.
 - Penetration depth; hidden occurrences in scope queries; mesh-only bodies.
-- Production-scale performance and the asynchronous Studio integration.
+- Production-scale performance. The background panel path is checked on the
+  synthetic fixture only; its UI responsiveness was not measured separately.

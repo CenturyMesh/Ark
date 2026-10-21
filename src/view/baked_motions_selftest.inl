@@ -76,7 +76,13 @@
          apply(R"J({"commands":[{"op":"assembly.edit","id":"Post","p":{"tz":-9}}]})J");draw();check(!bakedMotionClearanceShown(),"An edit kept showing clearance evidence of an older revision");
          {auto zone=zoneOf(45014,true);check(zone!=g_zones.end(),"Check clearance unavailable on a stale bake");const int x=(int)(zone->x+zone->w*.5f),y=(int)(zone->y+zone->h*.5f);SendMessage(hwnd,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(x,y));SendMessage(hwnd,WM_LBUTTONUP,0,MAKELPARAM(x,y));}
          check(g_error&&g_bakedMotions.clearanceError.find("MOTION_BAKE_STALE")!=std::string::npos&&!bakedMotionClearanceShown(),"Stale bake was not rejected explicitly in the panel: "+g_bakedMotions.clearanceError);g_error=false;capture(".baked-motions-clearance-stale.png");
-         press(45007);press(45014);check(bakedMotionClearanceShown(),"Bake then Check clearance did not recover from the stale state");}
+         press(45007);press(45014);check(bakedMotionClearanceShown(),"Bake then Check clearance did not recover from the stale state");
+         // Background path: the panel returns at once, the document is untouched and the delivered report matches the UI-thread one.
+         const double syncMinimum=g_bakedMotions.clearance.find("min_clearance_mm")->num;const auto asyncDocument=documentToJson(g_doc);const auto asyncAt=g_session.revision;g_exactJobsTestMode046=true;g_exactJobsMode046=1;
+         press(45014);check(g_bakedMotions.clearanceRunning&&!bakedMotionClearanceShown(),"Check clearance did not start as a background exact job");
+         {const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(60);while(g_bakedMotions.clearanceRunning&&std::chrono::steady_clock::now()<deadline){MSG message{};while(PeekMessage(&message,nullptr,0,0,PM_REMOVE)){TranslateMessage(&message);DispatchMessage(&message);}drainExactJobs046();Sleep(1);}}
+         g_exactJobsTestMode046=false;check(!g_bakedMotions.clearanceRunning&&bakedMotionClearanceShown()&&!g_error,"Background Check clearance did not deliver: "+g_status);
+         check(documentToJson(g_doc)==asyncDocument&&g_session.revision==asyncAt&&std::fabs(g_bakedMotions.clearance.find("min_clearance_mm")->num-syncMinimum)<1e-9,"Background Check clearance changed the document or its report");}
         std::fprintf(stderr,"Baked motions UI passed: docked list, vector graph, play/pause/stop, scrub, frame step, loop, speed, rename, stale badge, bake, delete/undo, clearance check, markers, worst-frame scrub, stale clearance rejection\n");
     }catch(const std::exception& error){g_dialogSmoke=0;std::fprintf(stderr,"Baked motions UI failed: %s\n",error.what());return 4401;}
 }
