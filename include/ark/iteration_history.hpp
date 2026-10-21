@@ -2,6 +2,8 @@
 #include "ark/json.hpp"
 #include <string>
 #include <cstddef>
+#include <functional>
+#include <map>
 namespace ark {
 class Document;
 inline constexpr size_t maxDocumentBytes=4u*1024u*1024u;
@@ -17,4 +19,10 @@ std::string iterationUndoTarget(const Document& document,bool redo);
 void iterationPersist(arkjson::Value& root,const Document& document);
 bool iterationExpand(arkjson::Value& root,arkjson::Value& history,std::string& error);
 bool iterationValidate(const Document& document,const arkjson::Value& history,std::string& error);
+// 049A: count of inline 044B-048B baked-frame payload references in a journal and their unique bytes.
+void iterationInlineBakePayloads(const arkjson::Value& history,size_t& references,size_t& bytes);
+// 049A explicit journal rewrite (schema 2): maps every retained authoring state through
+// transform and rebuilds deltas, the blob dictionary, digests and node ids with the same
+// topology and node metadata. ids maps every old node and baseline id to its new id.
+arkjson::Value iterationRewrite(const arkjson::Value& history,const std::function<void(arkjson::Value& state)>& transform,std::map<std::string,std::string>& ids);
 }

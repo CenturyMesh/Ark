@@ -13,7 +13,9 @@ the version-27 iteration journal. The existing C++ document parser, authoring
 rules, journal checks and exact geometry authority remain the semantic contract.
 Container version 2 (`user_version` 2) adds an optional `ark_derived` table of
 saved native geometry, with its own 128 MiB capacity and a 256 MiB physical
-file limit; see [formats](FORMATS.md). The 64 MiB physical cap below applies to
+file limit; see [formats](FORMATS.md). Since 049A it also carries cached
+baked-motion frames, verified against their receipts on open
+([derived bakes](DERIVED_BAKES_049A.md)); the table schema is unchanged. The 64 MiB physical cap below applies to
 version 1; the authoring limits apply to both versions.
 
 ## Storage and incremental writes

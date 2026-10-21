@@ -37,19 +37,23 @@ std::vector<std::string> identifiers(const std::string& s){std::vector<std::stri
     ++i;}return out;}
 void canonical(V& value){if(value.t==V::Obj){for(auto& item:value.obj)canonical(item.second);std::sort(value.obj.begin(),value.obj.end(),[](const auto& a,const auto& b){return a.first<b.first;});}else if(value.t==V::Arr)for(auto& item:value.arr)canonical(item);}
 const char* kBase64="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-std::string encodeFloats(const std::vector<float>& values){
-    std::string bytes;bytes.reserve(values.size()*4);for(float f:values){uint32_t u;std::memcpy(&u,&f,4);for(int k=0;k<4;++k)bytes+=(char)((u>>(8*k))&255u);}
+// Raw little-endian float32 bytes: the 049A receipt digests hash exactly these.
+std::string floatBytes(const std::vector<float>& values){std::string bytes(values.size()*4,'\0');for(size_t i=0;i<values.size();++i){uint32_t u;std::memcpy(&u,&values[i],4);for(int k=0;k<4;++k)bytes[i*4+k]=(char)((u>>(8*k))&255u);}return bytes;}
+std::vector<float> bytesFloats(const std::string& bytes,size_t expected,const char* what){
+    need(bytes.size()==expected*4,std::string("MOTION_INVALID_BAKE: ")+what+" byte count does not match its declared frames");
+    std::vector<float> out(expected);for(size_t i=0;i<expected;++i){uint32_t u=0;for(int k=0;k<4;++k)u|=(uint32_t)(unsigned char)bytes[i*4+k]<<(8*k);float f;std::memcpy(&f,&u,4);need(std::isfinite(f),std::string("MOTION_INVALID_BAKE: nonfinite ")+what);out[i]=f;}return out;
+}
+std::string encodeBase64(const std::string& bytes){
     std::string out;out.reserve((bytes.size()+2)/3*4);for(size_t i=0;i<bytes.size();i+=3){uint32_t x=(uint32_t)(unsigned char)bytes[i]<<16;if(i+1<bytes.size())x|=(uint32_t)(unsigned char)bytes[i+1]<<8;if(i+2<bytes.size())x|=(unsigned char)bytes[i+2];
         out+=kBase64[(x>>18)&63];out+=kBase64[(x>>12)&63];out+=i+1<bytes.size()?kBase64[(x>>6)&63]:'=';out+=i+2<bytes.size()?kBase64[x&63]:'=';}return out;
 }
-std::vector<float> decodeFloats(const std::string& textValue,size_t expected,const char* what){
-    need(textValue.size()%4==0&&textValue.size()/4*3>=expected*4&&textValue.size()/4*3<expected*4+3,std::string("MOTION_INVALID_BAKE: ")+what+" size does not match its declared frames");
+std::string decodeBase64(const std::string& textValue,size_t expectedBytes,const char* what){
+    need(textValue.size()%4==0&&textValue.size()/4*3>=expectedBytes&&textValue.size()/4*3<expectedBytes+3,std::string("MOTION_INVALID_BAKE: ")+what+" size does not match its declared frames");
     int table[256];std::fill(std::begin(table),std::end(table),-1);for(int i=0;i<64;++i)table[(unsigned char)kBase64[i]]=i;
-    std::vector<unsigned char> bytes;bytes.reserve(expected*4);
+    std::string bytes;bytes.reserve(expectedBytes);
     for(size_t i=0;i<textValue.size();i+=4){int q[4];int pad=0;for(int k=0;k<4;++k){const unsigned char c=(unsigned char)textValue[i+k];if(c=='='){need(i+4==textValue.size()&&k>=2,"MOTION_INVALID_BAKE: invalid base64 padding");q[k]=0;++pad;}else{need(!pad&&table[c]>=0,"MOTION_INVALID_BAKE: invalid base64 payload");q[k]=table[c];}}
-        const uint32_t x=(uint32_t)q[0]<<18|(uint32_t)q[1]<<12|(uint32_t)q[2]<<6|(uint32_t)q[3];bytes.push_back((unsigned char)(x>>16));if(pad<2)bytes.push_back((unsigned char)(x>>8));if(pad<1)bytes.push_back((unsigned char)x);}
-    need(bytes.size()==expected*4,std::string("MOTION_INVALID_BAKE: ")+what+" byte count does not match its declared frames");
-    std::vector<float> out(expected);for(size_t i=0;i<expected;++i){uint32_t u=0;for(int k=0;k<4;++k)u|=(uint32_t)bytes[i*4+k]<<(8*k);float f;std::memcpy(&f,&u,4);need(std::isfinite(f),std::string("MOTION_INVALID_BAKE: nonfinite ")+what);out[i]=f;}return out;
+        const uint32_t x=(uint32_t)q[0]<<18|(uint32_t)q[1]<<12|(uint32_t)q[2]<<6|(uint32_t)q[3];bytes+=(char)(x>>16);if(pad<2)bytes+=(char)(x>>8);if(pad<1)bytes+=(char)x;}
+    need(bytes.size()==expectedBytes,std::string("MOTION_INVALID_BAKE: ")+what+" byte count does not match its declared frames");return bytes;
 }
 Sample sampleNode(const CompiledMotion& m,int index,double t,int side){
     const auto& n=m.nodes[(size_t)index];const double d=n.duration;t=std::clamp(t,0.,d);const auto& type=n.type;
@@ -178,20 +182,29 @@ GraphCheck checkGraph(const Document& d,const V& graph){
     if(!g.compiled.allowJumps)if(const auto* jump=g.diagnostics.find("discontinuity"))throw std::runtime_error("MOTION_DISCONTINUITY: "+jump->find("message")->str+"; make the segments meet or set allow_jumps:true");
     return g;
 }
-V encodeBake(const CompiledMotion& m,const std::vector<MotionJointBinding>& bindings,const MotionSolvedFrames& f,double fps,u64 revision,const std::string& digest,const std::string& graphDigest){
-    std::vector<size_t> moving;
-    for(size_t i=0;i<f.baseline.size();++i){bool moved=false;for(const auto& frame:f.poses){for(int e=0;e<16&&!moved;++e)moved=std::fabs(frame[i].m[e]-f.baseline[i].world.m[e])>1e-9;if(moved)break;}if(moved)moving.push_back(i);}
-    need(moving.size()*f.poses.size()<=kMaxInstanceFrames,"MOTION_BAKE_CAPACITY: "+std::to_string(moving.size()*f.poses.size())+" moving instance-frames exceed 16384; reduce fps, duration or moving occurrences");
-    std::vector<float> poses,coordinates;poses.reserve(moving.size()*f.poses.size()*12);
-    for(const auto& frame:f.poses)for(size_t i:moving)for(int e:{0,1,2,4,5,6,8,9,10,12,13,14})poses.push_back((float)frame[i].m[e]);
+// Moving instances and the raw little-endian float32 frame/coordinate bytes of a solve.
+struct BakeBytes {std::vector<size_t> moving;std::string frames,coordinates;};
+BakeBytes bakeBytes(const MotionSolvedFrames& f){
+    BakeBytes out;
+    for(size_t i=0;i<f.baseline.size();++i){bool moved=false;for(const auto& frame:f.poses){for(int e=0;e<16&&!moved;++e)moved=std::fabs(frame[i].m[e]-f.baseline[i].world.m[e])>1e-9;if(moved)break;}if(moved)out.moving.push_back(i);}
+    need(out.moving.size()*f.poses.size()<=kMaxInstanceFrames,"MOTION_BAKE_CAPACITY: "+std::to_string(out.moving.size()*f.poses.size())+" moving instance-frames exceed 16384; reduce fps, duration or moving occurrences");
+    std::vector<float> poses,coordinates;poses.reserve(out.moving.size()*f.poses.size()*12);
+    for(const auto& frame:f.poses)for(size_t i:out.moving)for(int e:{0,1,2,4,5,6,8,9,10,12,13,14})poses.push_back((float)frame[i].m[e]);
     for(const auto& frame:f.coordinates)for(double value:frame)coordinates.push_back((float)value);
+    out.frames=floatBytes(poses);out.coordinates=floatBytes(coordinates);return out;
+}
+std::atomic<bool> g_inlineBakeFixture{false};
+V encodeBake(const CompiledMotion& m,const std::vector<MotionJointBinding>& bindings,const MotionSolvedFrames& f,double fps,u64 revision,const std::string& digest,const std::string& graphDigest,BakeBytes& raw){
+    raw=bakeBytes(f);const auto& moving=raw.moving;
     V bake=V::makeObj(),instances=V::makeArr(),channels=V::makeArr(),solver=V::makeObj();
     bake.set("format",V::makeStr("ark.baked_motion.v1"));bake.set("fps",V::makeNum(fps));bake.set("frame_count",V::makeNum((double)f.times.size()));bake.set("duration_s",V::makeNum(m.duration));
     bake.set("source_revision",V::makeNum((double)revision));bake.set("source_digest",V::makeStr(digest));bake.set("graph_digest",V::makeStr(graphDigest));
     for(size_t i:moving){V row=V::makeObj();row.set("node",V::makeNum((double)f.baseline[i].node));row.set("copy",V::makeNum(f.baseline[i].copy));row.set("name",V::makeStr(f.baseline[i].name));instances.arr.push_back(row);}
     for(size_t c=0;c<bindings.size();++c){const auto& b=bindings[c];V row=V::makeObj();row.set("name",V::makeStr(m.channels[c].name));if(b.mate){row.set("mate",V::makeNum((double)b.mate));row.set("unit",V::makeStr(b.unit));}else if(!b.explodeView.empty()){row.set("explode_view",V::makeStr(b.explodeView));row.set("unit",V::makeStr("factor"));}else row.set("unit",V::makeStr("signal"));row.set("start",V::makeNum(f.coordinates.empty()?m.channels[c].start:f.coordinates.front()[c]));
         row.set("graph_start",V::makeNum(m.channels[c].start));if(b.limited){row.set("min",V::makeNum(b.min));row.set("max",V::makeNum(b.max));}channels.arr.push_back(row);}
-    bake.set("instances",instances);bake.set("channels",channels);bake.set("frames_f32le_base64",V::makeStr(encodeFloats(poses)));bake.set("coordinates_f32le_base64",V::makeStr(encodeFloats(coordinates)));
+    bake.set("instances",instances);bake.set("channels",channels);
+    if(g_inlineBakeFixture){bake.set("frames_f32le_base64",V::makeStr(encodeBase64(raw.frames)));bake.set("coordinates_f32le_base64",V::makeStr(encodeBase64(raw.coordinates)));}
+    else{bake.set("frames_sha256",V::makeStr(iterationSha256(raw.frames)));bake.set("coordinates_sha256",V::makeStr(iterationSha256(raw.coordinates)));}
     solver.set("rigid_side_steps",V::makeNum((double)f.rigidSteps));solver.set("constrained_steps",V::makeNum((double)f.constrainedSteps));solver.set("max_continuation_steps",V::makeNum(f.maxContinuationSteps));solver.set("max_channel_error",V::makeNum(f.maxChannelError));
     bake.set("solver",solver);bake.set("clearance_checked",V::makeBool(false));bake.set("dynamics_checked",V::makeBool(false));return bake;
 }
@@ -204,7 +217,26 @@ V motionStatus(const V& motion,const std::string* digest,const std::string& grap
     if(!graphError.empty())reasons.arr.push_back(V::makeStr("graph_invalid"));
     status.set("baked",V::makeBool(bake!=nullptr));status.set("stale",V::makeBool(bake&&!reasons.arr.empty()));status.set("stale_reasons",reasons);if(!digest)status.set("assembly_digest_checked",V::makeBool(false));if(!graphError.empty())status.set("graph_error",V::makeStr(graphError));return status;
 }
+// 049A: the frame-step rejection states its fix. The graph is analytic, so the
+// channel is sampled over every remaining frame; required_fps is searched upward
+// from the velocity estimate until every unlimited revolute step over the solved
+// span is at most 170 degrees, within the 240 fps and 7201-frame bake limits.
+std::string frameStepError(const CompiledMotion& m,const std::vector<MotionJointBinding>& bindings,size_t channel,const std::vector<double>& times,size_t k){
+    const std::string& name=bindings[channel].channel;const double span=times.back(),fps=std::max(1.,std::round(1/(times[1]-times[0])));
+    const double step=std::fabs(evaluateMotion(m,times[k])[channel]-evaluateMotion(m,times[k-1])[channel]);double maxStep=0,before=evaluateMotion(m,times[k-1])[channel];
+    for(size_t i=k;i<times.size();++i){const double value=evaluateMotion(m,times[i])[channel];maxStep=std::max(maxStep,std::fabs(value-before));before=value;}
+    std::vector<size_t> turning;for(size_t c=0;c<bindings.size();++c)if(bindings[c].mate&&bindings[c].type=="revolute"&&!bindings[c].limited)turning.push_back(c);
+    auto worst=[&](double f){const size_t last=(size_t)std::floor(span*f+1e-9);double w=0;std::vector<double> prior;
+        for(size_t j=0;j<=last+1;++j){double t=(double)j/f;if(j==last+1){if(t-1/f>=span-1e-9)break;t=span;}const auto values=evaluateMotion(m,std::min(t,span));if(!prior.empty())for(size_t c:turning)w=std::max(w,std::fabs(values[c]-prior[c]));prior=values;}return w;};
+    const double limit=std::min(kMaxFps,std::floor((double)(kMaxFrames-2)/std::max(span,1e-9)+1e-9));double required=0,atLimit=0;int tries=0;
+    for(double f=std::max(fps+1,std::ceil(fps*maxStep/170-1e-9));f<=limit&&tries<24;++tries){const double w=worst(f);if(w<=170){required=f;break;}f=std::max(f+1,std::ceil(f*w/170-1e-9));}
+    if(!required&&limit>=1)atLimit=worst(limit);
+    std::string text="MOTION_FRAME_STEP_TOO_LARGE: channel "+name+" turns "+num(step)+" degrees between frames at frame "+std::to_string(k)+" t="+num(times[k])+" s; an unlimited revolute channel must turn less than 180 degrees per frame. Its largest remaining step is "+num(maxStep)+" deg/frame at "+num(fps)+" fps. ";
+    text+=required?"Bake with fps "+num(required)+" or more (every sampled unlimited revolute step <=170 deg)":"No fps up to the "+num(limit)+" fps limit keeps every step <=170 deg (largest "+num(atLimit)+" deg at "+num(limit)+" fps); slow the channel or spread the turn over more time";
+    return text+" [channel="+name+" frame="+std::to_string(k)+" time_s="+num(times[k])+" max_step_deg="+num(maxStep)+" fps="+num(fps)+" required_fps="+num(required)+" fps_limit="+num(limit)+"]";
 }
+}
+#include "motion_frames_049a.inl"
 
 bool compileMotionGraph(const V& graph,const ExprEnv& env,const std::map<std::string,double>& startValues,CompiledMotion& out,std::string& error){
     out={};error.clear();
@@ -312,7 +344,7 @@ bool solveMotionFrames(Document& work,const CompiledMotion& m,const std::vector<
         for(size_t k=0;k<times.size();++k){
             const double t=times[k];const auto targets=evaluateMotion(m,t);bool dirty=false;const std::string at="frame "+std::to_string(k)+" t="+num(t)+" s";
             for(size_t c=0;c<bindings.size();++c){const auto& b=bindings[c];if(!b.mate)continue;
-                if(!previous.empty()&&b.type=="revolute"&&!b.limited)need(std::fabs(targets[c]-previous[c])<180,"MOTION_FRAME_STEP_TOO_LARGE: channel "+b.channel+" turns 180 degrees or more between frames at "+at+"; raise fps");
+                if(!previous.empty()&&b.type=="revolute"&&!b.limited&&std::fabs(targets[c]-previous[c])>=180)throw std::runtime_error(frameStepError(m,bindings,c,times,k));
                 if(dirty){build();dirty=false;}
                 const std::string mode=b.type=="revolute"?"rotate":"translate";AssemblyManipulationJoint joint;
                 need(selectAssemblyManipulationJoint(program,b.driver,b.mate,mode,joint,reason),"MOTION_BAKE_REJECTED: "+at+" channel "+b.channel+": "+reason);
@@ -336,16 +368,10 @@ bool solveMotionFrames(Document& work,const CompiledMotion& m,const std::vector<
 }
 bool decodeBakedMotion(const V& motion,BakedMotionFrames& out,std::string& error){
     out={};error.clear();
-    try{const auto* bake=motion.find("bake");need(bake&&bake->t==V::Obj,"MOTION_NOT_BAKED: motion has no baked frames");
-        auto number=[&](const char* key){const auto* p=bake->find(key);need(p&&p->t==V::Num&&std::isfinite(p->num),std::string("MOTION_INVALID_BAKE: missing ")+key);return p->num;};
-        out.fps=number("fps");out.duration=number("duration_s");const double frames=number("frame_count");need(out.fps>=1&&out.fps<=kMaxFps&&out.duration>0&&out.duration<=kMaxDuration&&frames>=1&&frames<=(double)kMaxFrames&&frames==std::floor(frames),"MOTION_INVALID_BAKE: fps, duration or frame_count out of range");out.frameCount=(size_t)frames;
-        const auto* instances=bake->find("instances");const auto* channels=bake->find("channels");need(instances&&instances->t==V::Arr&&channels&&channels->t==V::Arr&&channels->arr.size()<=kMaxChannels,"MOTION_INVALID_BAKE: instances and channels must be arrays");
-        need(instances->arr.size()*out.frameCount<=kMaxInstanceFrames,"MOTION_INVALID_BAKE: instance-frames exceed 16384");
-        for(const auto& row:instances->arr){const auto* node=row.find("node");const auto* copy=row.find("copy");need(node&&node->t==V::Num&&node->num>=1&&copy&&copy->t==V::Num&&copy->num>=0,"MOTION_INVALID_BAKE: instance requires node and copy");out.nodes.push_back((u64)node->num);out.copies.push_back((int)copy->num);out.names.push_back(row.find("name")?row.find("name")->asStr():std::string());}
-        for(const auto& row:channels->arr){out.channels.push_back(row.find("name")?row.find("name")->asStr():std::string());out.units.push_back(row.find("unit")?row.find("unit")->asStr():std::string());out.starts.push_back(row.find("start")?row.find("start")->asNum():0);out.explodeViews.push_back(row.find("explode_view")?row.find("explode_view")->asStr():std::string());}
+    try{const auto* bake=motion.find("bake");need(bake&&bake->t==V::Obj,"MOTION_NOT_BAKED: motion has no baked frames");decodeBakeHeader(*bake,out);
+        if(bakeIsReceipt(*bake)){std::string frames,coordinates,origin;need(sha256Text(bake->find("frames_sha256"))&&sha256Text(bake->find("coordinates_sha256"))&&cachedFrames(frameKey(*bake),frames,coordinates,origin),"MOTION_FRAMES_NOT_CACHED: baked frames are derived data and are not cached in this process; resolve them with the document (motion_info frame or Studio playback re-bakes and verifies frames_sha256)");fillFrames(out,frames,coordinates);return true;}
         const auto* frames64=bake->find("frames_f32le_base64");const auto* coords64=bake->find("coordinates_f32le_base64");need(frames64&&frames64->t==V::Str&&coords64&&coords64->t==V::Str,"MOTION_INVALID_BAKE: missing frame payloads");
-        const auto values=decodeFloats(frames64->str,out.frameCount*out.nodes.size()*12,"frame matrices");out.coordinates=decodeFloats(coords64->str,out.frameCount*out.channels.size(),"joint coordinates");
-        out.poses.resize(out.frameCount*out.nodes.size());for(size_t i=0;i<out.poses.size();++i){Mat4 m;const float* v=&values[i*12];const int slots[12]={0,1,2,4,5,6,8,9,10,12,13,14};for(int e=0;e<12;++e)m.m[slots[e]]=v[e];m.m[3]=m.m[7]=m.m[11]=0;m.m[15]=1;out.poses[i]=m;}
+        fillFrames(out,decodeBase64(frames64->str,out.frameCount*out.nodes.size()*48,"frame matrices"),decodeBase64(coords64->str,out.frameCount*out.channels.size()*4,"joint coordinates"));
         return true;
     }catch(const std::exception& e){error=e.what();out={};return false;}
 }
@@ -365,8 +391,11 @@ void validateMotionStorage(const V& motions){
     std::set<std::string> names;size_t bytes=0;
     for(const auto& row:motions.arr){keys(row,{"name","graph","bake"},"motion");const auto name=motionName(row,"name");need(names.insert(name).second,"MOTION_NAME_CONFLICT: duplicate motion "+name);
         const auto* graph=row.find("graph");need(graph&&graph->t==V::Obj&&graph->find("channels")&&graph->find("channels")->t==V::Arr&&graph->dump().size()<=kMaxGraphBytes,"MOTION_INVALID_GRAPH: motion "+name+" requires a bounded graph object with channels");
-        if(row.find("bake")){BakedMotionFrames frames;std::string error;need(decodeBakedMotion(row,frames,error),error);bytes+=row.find("bake")->find("frames_f32le_base64")->str.size();
-            for(const char* key:{"source_digest","graph_digest"}){const auto* digest=row.find("bake")->find(key);need(digest&&digest->t==V::Str&&digest->str.size()==64,std::string("MOTION_INVALID_BAKE: missing ")+key);}}}
+        if(const auto* bake=row.find("bake")){BakedMotionFrames frames;std::string error;need(bake->t==V::Obj&&bakeIsReceipt(*bake)!=bakeHasInlineFrames(*bake),"MOTION_INVALID_BAKE: motion "+name+" bake requires either a frames_sha256/coordinates_sha256 receipt or 044B-048B inline frames, not both");
+            // 049A receipts count their declared frame bytes (base64 size) against the same per-document bound.
+            if(bakeIsReceipt(*bake)){decodeBakeHeader(*bake,frames);need(sha256Text(bake->find("frames_sha256"))&&sha256Text(bake->find("coordinates_sha256")),"MOTION_INVALID_BAKE: motion "+name+" receipt digests must be SHA-256 hex");bytes+=(frames.frameCount*frames.nodes.size()*48+2)/3*4;}
+            else{need(decodeBakedMotion(row,frames,error),error);bytes+=bake->find("frames_f32le_base64")->str.size();}
+            for(const char* key:{"source_digest","graph_digest"}){const auto* digest=bake->find(key);need(digest&&digest->t==V::Str&&digest->str.size()==64,std::string("MOTION_INVALID_BAKE: missing ")+key);}}}
     need(bytes<=kMaxBakeBytes,"MOTION_BAKE_CAPACITY: baked frames exceed 2 MiB per document; remove a motion or bake fewer frames");
 }
 bool applyMotionCommand(Document& d,const V& command,u64 revision,std::string& error){
@@ -382,7 +411,8 @@ bool applyMotionCommand(Document& d,const V& command,u64 revision,std::string& e
             double fps=30;if(const auto* f=command.find("fps")){need(f->t==V::Num&&f->num>=1&&f->num<=kMaxFps&&f->num==std::floor(f->num),"MOTION_INVALID_BAKE: fps must be an integer 1..240");fps=f->num;}
             const V graph=*at->find("graph");auto g=checkGraph(d,graph);need(std::any_of(g.bindings.begin(),g.bindings.end(),[](const MotionJointBinding& b){return b.mate!=0||!b.explodeView.empty();}),"MOTION_INVALID_GRAPH: a bake requires at least one channel bound to a joint mate or an explode_view");
             const auto times=motionFrameTimes(g.compiled.duration,fps);MotionSolvedFrames frames;std::string reason;need(solveMotionFrames(d,g.compiled,g.bindings,times,frames,reason),reason);
-            at=locate(key);at->set("bake",encodeBake(g.compiled,g.bindings,frames,fps,revision,motionSourceDigest(d,frames.baseline),motionGraphDigest(graph)));}
+            BakeBytes raw;V bake=encodeBake(g.compiled,g.bindings,frames,fps,revision,motionSourceDigest(d,frames.baseline),motionGraphDigest(graph),raw);
+            if(bakeIsReceipt(bake))cacheFrames(frameKey(bake),std::move(raw.frames),std::move(raw.coordinates),"memory");at=locate(key);at->set("bake",bake);}
         else if(name=="motion.rename"){keys(command,{"op","name","new_name"},name);const auto key=motionName(command,"name"),next=motionName(command,"new_name");auto at=locate(key);need(at!=rows.arr.end(),"MOTION_NOT_FOUND: "+key);need(next==key||locate(next)==rows.arr.end(),"MOTION_NAME_CONFLICT: "+next+" already exists");at->set("name",V::makeStr(next));}
         else{keys(command,{"op","name"},name);const auto key=motionName(command,"name");auto at=locate(key);need(at!=rows.arr.end(),"MOTION_NOT_FOUND: "+key);rows.arr.erase(at);}
         V next=rows.arr.empty()?V{}:std::move(rows);validateMotionStorage(next);d.motions=std::move(next);error.clear();
@@ -410,7 +440,8 @@ bool callMotionTool(AgentSession& session,const std::string& tool,const V& args,
             try{std::vector<MotionJointBinding> bindings;need(solved,"MOTION_JOINT_NOT_DRIVABLE: assembly solve failed: "+error);need(bindMotionJoints(program,d,*motion.find("graph"),bindings,graphError),graphError);std::map<std::string,double> starts;for(const auto& b:bindings)if(b.mate)starts[b.channel]=b.position;
                 CompiledMotion compiled;need(compileMotionGraph(*motion.find("graph"),d.buildEnv(),starts,compiled,graphError),graphError);row.set("duration_s",V::makeNum(compiled.duration));row.set("channels",V::makeNum((double)compiled.channels.size()));}
             catch(const std::exception& e){graphError=e.what();}
-            if(const auto* bake=motion.find("bake")){row.set("fps",*bake->find("fps"));row.set("frame_count",*bake->find("frame_count"));row.set("baked_instances",V::makeNum((double)bake->find("instances")->arr.size()));if(!row.find("duration_s"))row.set("duration_s",*bake->find("duration_s"));}
+            if(const auto* bake=motion.find("bake")){row.set("fps",*bake->find("fps"));row.set("frame_count",*bake->find("frame_count"));row.set("baked_instances",V::makeNum((double)bake->find("instances")->arr.size()));if(!row.find("duration_s"))row.set("duration_s",*bake->find("duration_s"));
+                row.set("frames_storage",V::makeStr(bakeIsReceipt(*bake)?"derived":"inline_legacy"));if(bakeIsReceipt(*bake))row.set("frames_cached",V::makeBool(bakedMotionFramesCached(*bake)));}
             const auto status=motionStatus(motion,solved?&digest:nullptr,graphError);for(const auto& item:status.obj)row.set(item.first,item.second);rows.arr.push_back(row);}
         out.set("motions",rows);out.set("count",V::makeNum((double)rows.arr.size()));out.set("document_unchanged",V::makeBool(true));return true;
     }
@@ -419,7 +450,9 @@ bool callMotionTool(AgentSession& session,const std::string& tool,const V& args,
     std::string graphError;GraphCheck g;bool valid=true;
     try{g=checkGraph(d,graph);}catch(const std::exception& e){if(!motion)throw;graphError=e.what();valid=false;}
     out.set("graph",graph);out.set("valid",V::makeBool(valid));if(valid)out.set("diagnostics",g.diagnostics);else out.set("graph_error",V::makeStr(graphError));
-    if(motion){const std::string digest=valid?motionSourceDigest(d,g.program.baseline):std::string();const auto status=motionStatus(*motion,valid?&digest:nullptr,graphError);out.set("status",status);if(const auto* bake=motion->find("bake"))out.set("bake",bakeSummary(*bake));}
+    if(motion){const std::string digest=valid?motionSourceDigest(d,g.program.baseline):std::string();const auto status=motionStatus(*motion,valid?&digest:nullptr,graphError);out.set("status",status);
+        if(const auto* bake=motion->find("bake")){V summary=bakeSummary(*bake);const bool receipt=bakeIsReceipt(*bake);summary.set("frames_storage",V::makeStr(receipt?"derived":"inline_legacy"));if(receipt)summary.set("frames_cached",V::makeBool(bakedMotionFramesCached(*bake)));
+            summary.set("frames_note",V::makeStr(receipt?"Frames are derived data: served from memory or the document's derived section, otherwise re-baked on demand and verified against frames_sha256":"044B-048B inline frames in the authoring and journal; the next motion.bake or history_migrate_derived stores a receipt"));out.set("bake",summary);}}
     if(timeArg){need(valid,"MOTION_INVALID_GRAPH: "+graphError);const double t=std::min(timeArg->num,g.compiled.duration);std::vector<double> slopes;const auto values=evaluateMotion(g.compiled,t,&slopes);V rows=V::makeArr();
         for(size_t c=0;c<values.size();++c){V row=V::makeObj();row.set("name",V::makeStr(g.compiled.channels[c].name));row.set("value",V::makeNum(values[c]));row.set("velocity_per_s",V::makeNum(slopes[c]));row.set("unit",V::makeStr(!g.bindings[c].unit.empty()?g.bindings[c].unit:"signal"));if(!g.bindings[c].explodeView.empty())row.set("explode_view",V::makeStr(g.bindings[c].explodeView));rows.arr.push_back(row);}
         V evaluation=V::makeObj();evaluation.set("time_s",V::makeNum(t));evaluation.set("channels",rows);
@@ -429,7 +462,7 @@ bool callMotionTool(AgentSession& session,const std::string& tool,const V& args,
             for(size_t i=0;i<frames.baseline.size();++i){const auto& world=frames.poses.back()[i];bool moved=false;for(int e=0;e<16;++e)moved|=std::fabs(world.m[e]-frames.baseline[i].world.m[e])>1e-9;if(!moved)continue;V row=V::makeObj(),matrix=V::makeArr();row.set("node",V::makeNum((double)frames.baseline[i].node));row.set("copy",V::makeNum(frames.baseline[i].copy));row.set("name",V::makeStr(frames.baseline[i].name));for(double x:world.m)matrix.arr.push_back(V::makeNum(x));row.set("world_column_major",matrix);instances.arr.push_back(row);}
             V coords=V::makeArr();for(double x:frames.coordinates.back())coords.arr.push_back(V::makeNum(x));evaluation.set("solved_instances",instances);evaluation.set("measured_coordinates",coords);evaluation.set("frames_solved",V::makeNum((double)times.size()));evaluation.set("solver_path",V::makeStr("committed pose, then every frame at the bake rate up to time_s"));}
         out.set("evaluation",evaluation);}
-    if(frameArg){BakedMotionFrames frames;std::string reason;need(decodeBakedMotion(*motion,frames,reason),reason);const size_t k=(size_t)frameArg->num;need(k<frames.frameCount,"motion_info frame exceeds frame_count");V instances=V::makeArr();
+    if(frameArg){BakedMotionFrames frames;std::string reason;BakedMotionFramesSource source;need(resolveBakedMotion(d,*motion,frames,reason,&source),reason);out.set("frames",source.json());const size_t k=(size_t)frameArg->num;need(k<frames.frameCount,"motion_info frame exceeds frame_count");V instances=V::makeArr();
         for(size_t i=0;i<frames.nodes.size();++i){V row=V::makeObj(),matrix=V::makeArr();row.set("node",V::makeNum((double)frames.nodes[i]));row.set("copy",V::makeNum(frames.copies[i]));row.set("name",V::makeStr(frames.names[i]));for(double x:frames.poses[k*frames.nodes.size()+i].m)matrix.arr.push_back(V::makeNum(x));row.set("world_column_major",matrix);instances.arr.push_back(row);}
         V coords=V::makeArr();for(size_t c=0;c<frames.channels.size();++c)coords.arr.push_back(V::makeNum(frames.coordinates[k*frames.channels.size()+c]));V frame=V::makeObj();frame.set("index",V::makeNum((double)k));frame.set("time_s",V::makeNum(std::min(frames.duration,(double)k/frames.fps)));frame.set("instances",instances);frame.set("coordinates",coords);frame.set("precision",V::makeStr("float32 display poses"));out.set("frame",frame);}
     out.set("document_unchanged",V::makeBool(true));out.set("dynamics_checked",V::makeBool(false));out.set("collision_checked",V::makeBool(false));return true;
@@ -437,7 +470,7 @@ bool callMotionTool(AgentSession& session,const std::string& tool,const V& args,
 void appendMotionTools(V& tools){
     V tool=V::makeObj(),schema,annotations=V::makeObj();
     arkjson::parse(R"({"type":"object","properties":{"name":{"type":"string","minLength":1,"maxLength":128},"graph":{"type":"object","description":"Uncommitted vector motion graph to validate; same shape as motion.graph.set graph."},"time_s":{"type":"number","minimum":0,"maximum":600},"solve":{"type":"boolean","description":"With time_s, drive the joints through the assembly solver from the committed pose to time_s and return solved instance matrices. Read-only."},"frame":{"type":"integer","minimum":0},"expected_revision":{"type":"integer","description":"Optional observed revision; a mismatch rejects with REVISION_CONFLICT."},"clearance":{"type":"object","description":"With name only: read-only exact clearance over a fresh bake. Rejects a stale bake (bake again first). Measures exact B-rep distance at every baked frame and certifies each frame interval with a conservative displacement bound, bisecting undecided intervals through the joint solver. continuous_certified:true means every interval is proven contact free under ideal rigid kinematics.","properties":{"pairs":{"type":"array","minItems":1,"maxItems":256,"items":{"type":"object","properties":{"a":{"type":["integer","string"]},"b":{"type":["integer","string"]},"copy_a":{"type":"integer","minimum":0,"maximum":31},"copy_b":{"type":"integer","minimum":0,"maximum":31}},"required":["a","b"],"additionalProperties":false}},"scope":{"type":"string","enum":["all","static"],"description":"Without pairs: each moving occurrence against every other visible solid (all, default) or only non-moving ones (static); rigidly co-moving and directly mated pairs are skipped and counted."},"threshold_mm":{"type":"number","minimum":0,"maximum":1000},"max_subdivisions":{"type":"integer","minimum":0,"maximum":10},"from_frame":{"type":"integer","minimum":0},"to_frame":{"type":"integer","minimum":1}},"additionalProperties":false}},"additionalProperties":false})",schema);
-    tool.set("name",V::makeStr("motion_info"));tool.set("description",V::makeStr("Read-only Skeleton Motion inspection. No arguments lists baked motions with duration, fps and stale status. name returns its vector graph, joint bindings, C0/C1 continuity, sampled ranges and bake summary; graph validates an uncommitted graph. time_s evaluates channel values and velocities; solve:true also returns solved instance matrices at that time. frame decodes one baked frame. name with clearance{pairs|scope,threshold_mm,max_subdivisions} checks exact clearance over a fresh bake and certifies between frames (continuous_certified); a stale bake rejects. Never edits the document; author with doc_apply motion.graph.set and motion.bake (agent_onboard motion)."));
+    tool.set("name",V::makeStr("motion_info"));tool.set("description",V::makeStr("Read-only Skeleton Motion inspection. No arguments lists baked motions with duration, fps and stale status. name returns its vector graph, joint bindings, C0/C1 continuity, sampled ranges and bake summary; graph validates an uncommitted graph. time_s evaluates channel values and velocities; solve:true also returns solved instance matrices at that time. frame decodes one baked frame; frames are derived data behind a frames_sha256 receipt, served from cache or re-baked and verified (frames.source/verified). name with clearance{pairs|scope,threshold_mm,max_subdivisions} checks exact clearance over a fresh bake and certifies between frames (continuous_certified); a stale bake rejects. Never edits the document; author with doc_apply motion.graph.set and motion.bake (agent_onboard motion)."));
     annotations.set("readOnlyHint",V::makeBool(true));tool.set("inputSchema",schema);tool.set("annotations",annotations);tools.arr.push_back(tool);
 }
 }

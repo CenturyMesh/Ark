@@ -44,7 +44,29 @@ earlier version; those fields below 47 reject.
 ([profile regions](PROFILE_REGIONS_046B.md)). A sketch with several closed
 loops consumed without `native.regions` adds no field and keeps its earlier
 required version. `native.regions` below 48 rejects on load, including through
-iteration history. Version 49 and later reject as a future format.
+iteration history. Version 49 is the 049A receipt extension below.
+
+## Conditional source extension — format 49
+
+049A selects format 49 only when a motion `bake` is a receipt: the 044B bake
+fields without `frames_f32le_base64`/`coordinates_f32le_base64`, plus
+`frames_sha256` and `coordinates_sha256` over the raw little-endian float32
+bytes ([derived bakes](DERIVED_BAKES_049A.md)). The frames themselves are
+derived data: process memory, the optional `ark_derived` section of container
+version 2, or a deterministic re-bake checked against the receipt. A bake must
+be either a receipt or inline frames, never both. Documents whose bakes still
+hold inline frames keep format 47 and load unchanged; opening never converts
+them. A receipt labelled below 49 rejects on load, including through iteration
+history. A 048B or older reader rejects format 49 as a future format instead
+of reading a bake without frames. Version 50 and later reject as a future format.
+
+Iteration history keeps `schema:1` for every journal ARK writes in normal use,
+so documents without motions stay readable by older runtimes. Only the explicit
+`history_migrate_derived` writes `schema:2`: the same journal rebuilt over
+receipt-form states (new digests and node ids), with a required `migrations`
+record list, and no state may hold inline frames. Readers accept schema 1 and
+2; a 048B or older reader rejects schema 2 explicitly
+("Unsupported iteration history schema"). See [iteration history](ITERATION_HISTORY.md).
 
 ## Optional parameter field — 048B HUD (no format change)
 
@@ -204,6 +226,12 @@ limit is **256 MiB**. Derived bytes do not enter the authoring hash or iteration
 history. A malformed optional payload discards the derived section with an
 explicit diagnostic; authoring checksum, schema and structural database failures
 remain hard load failures. Missing geometry can be rebuilt from valid authoring.
+
+Since 049A the same section also holds the cached frames of current baked-motion
+receipts (`ARK-MOTION-FRAMES1` entries keyed by motion name and receipt digests).
+They use the capacity left after saved geometry; on open, an entry is accepted
+only when its bytes reproduce the receipt's SHA-256 digests, and is otherwise
+discarded and counted. The `doc_save` receipt adds `saved_motion_frames`.
 
 Since 045A a save never fails because the optional section is full. Entries
 that would exceed the per-entry, total or entry-count limit are omitted in

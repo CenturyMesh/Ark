@@ -1,5 +1,6 @@
 #pragma once
 #include "ark/model.hpp"
+#include "ark/document_container.hpp"
 #include <atomic>
 #include <map>
 namespace ark {
@@ -67,7 +68,37 @@ struct BakedMotionFrames {
     std::vector<std::string> channels,units,explodeViews;std::vector<double> starts; // explodeViews: per channel, empty unless explode_view
     size_t frameCount=0;double fps=30,duration=0;
 };
+// Inline 044B-048B payloads, or a 049A receipt whose frames are in this process cache.
 bool decodeBakedMotion(const arkjson::Value& motion,BakedMotionFrames&,std::string& error);
+// 049A derived bakes. A persisted bake is a receipt: every bake field except the
+// float32 payloads, plus frames_sha256/coordinates_sha256 over the raw
+// little-endian bytes. Frames are derived data: this process cache first (seeded
+// by bakes, re-bakes and the document's optional derived section on open), then
+// a deterministic re-bake whose digests must match. Inline payloads stay readable
+// until the next bake or an explicit history_migrate_derived.
+bool bakeIsReceipt(const arkjson::Value& bake);
+bool bakeHasInlineFrames(const arkjson::Value& bake);
+bool bakedMotionFramesCached(const arkjson::Value& bake);
+bool motionReceiptsRequireDocumentVersion49(const Document&);
+// source: memory (baked or re-baked here), derived (document derived section),
+// rebake (solved now) or inline (legacy payload). A re-bake that does not
+// reproduce the receipt is returned with verified=false and mismatch set; it is
+// the current solve, never the recorded evidence.
+struct BakedMotionFramesSource {std::string source,mismatch;bool verified=false;std::vector<std::string> staleReasons;arkjson::Value json() const;};
+bool resolveBakedMotion(Document&,const arkjson::Value& motion,BakedMotionFrames&,std::string& error,BakedMotionFramesSource* source=nullptr,bool allowRebake=true);
+// Replaces inline payloads by a receipt; with cache the frames stay available. False without inline payloads.
+bool motionReceiptFromInline(arkjson::Value& bake,bool cache);
+struct BakedMotionCacheStats {size_t entries=0,bytes=0,capacityBytes=0,hits=0,misses=0,rebakes=0,rebakeMismatches=0,evictions=0;};
+BakedMotionCacheStats bakedMotionCacheStats();
+void clearBakedMotionCache();
+// Optional derived-section entries for cached frames of current receipts, within the given remaining capacity.
+struct MotionDerivedReport {size_t entries=0,bytes=0,omittedEntries=0,omittedBytes=0,notCached=0;};
+void appendMotionDerivedPayloads(const Document&,DocumentDerivedPayloads& records,size_t capacityBytes,size_t capacityEntries,MotionDerivedReport* report=nullptr);
+bool motionDerivedPayload(const DocumentDerivedPayload&);
+// Caches entries whose key and digests match a current receipt; others are discarded and counted.
+arkjson::Value stageMotionDerivedPayloads(const Document&,const DocumentDerivedPayloads& records);
+// Fixture support only: write the 044B-048B inline bake shape to build legacy documents. ARK never enables it.
+void setMotionBakeInlineFixture(bool inlinePayloads);
 // Assembly authoring, parameters and solved placements a bake depends on.
 std::string motionSourceDigest(const Document&,const std::vector<AssemblyPlacement>& placements);
 std::string motionGraphDigest(const arkjson::Value& graph);
