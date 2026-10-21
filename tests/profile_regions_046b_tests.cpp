@@ -48,8 +48,10 @@ std::string rectangle(const char* name,double x0,double y0,double x1,double y1){
 std::string circle(const char* name,double x,double y,double r){char text[256];std::snprintf(text,sizeof text,R"({"kind":"circle","name":"%s","dof":[%.17g,%.17g,%.17g]})",name,x,y,r);return text;}
 std::string sketch(const char* name,const std::vector<std::string>& entities,const char* plane="XY"){std::string list;for(const auto& e:entities)list+=(list.empty()?"":",")+e;return std::string(R"({"op":"sketch.set","name":")")+name+R"(","sketch":{"plane":")"+plane+R"(","entities":[)"+list+"]}}";}
 
-// Digests recorded from the unchanged 045A build (e8ca022, OCCT 8.0.1) for the
-// same commands: single-loop sketches keep their exact requests and results.
+// Digests recorded from the unchanged 045A build (e8ca022, OCCT 8.0.1, Windows
+// MSVC) for the same commands: single-loop sketches keep their exact requests
+// and results. Serialized B-rep bytes are toolchain-specific (the Linux build
+// differs on the symmetric circle), so only that toolchain compares them.
 const char* kLegacy=R"([
   {"op":"sketch.set","name":"Plate","sketch":{"entities":[{"kind":"wire","name":"outline","start":[0,0],"segments":[{"kind":"line","to":[80,0]},{"kind":"line","to":[80,50]},{"kind":"arc","to":[70,60],"radius":10,"sweep":1},{"kind":"line","to":[0,60]},{"kind":"line","to":[0,0]}]}]}},
   {"op":"sketch.set","name":"Disc","sketch":{"entities":[{"kind":"circle","name":"rim","dof":[0,0,12]}]}},
@@ -66,6 +68,11 @@ const char* kLegacy=R"([
   {"op":"feature.add","type":"native_solid","name":"G","inputs":["F"],"native":{"op":"transform"},"p":{"tx":"200"}}])";
 void legacyIdentity(){
     ark::AgentSession s;applyOk(s,kLegacy);
+#if defined(_WIN32)&&defined(_MSC_VER)
+    const bool recordedToolchain=occt::kernelVersion()==std::string("8.0.1");
+#else
+    const bool recordedToolchain=false;
+#endif
     const std::vector<std::pair<const char*,std::pair<const char*,const char*>>> recorded{
         {"A",{"df8d065a544e4d5f4e1671a4121b8a67359201c413dc5cb320de1a3963ff6598","d9ec45e41dcb499d6ebacaf55645371e4d055d838d477b3e57b584c303878ad7"}},
         {"B",{"e2609c0652cc7e9ee7990a33ca8174fe7b2a8209bc0cf021e8052d3566582076","73bccf6ee1d3763b93ac62e93f779fdf35659a9333ed7b67c9331d90c6e80529"}},
@@ -74,11 +81,11 @@ void legacyIdentity(){
         {"E",{"d9c456fd2de129592a7ed4fa8ef30f04f44405bb6d4cc1cf4b95ab0aaf07eb8a","ec4d889416a66725aa280d3eb82ad7366bb7c794e00838fa2bb382792b882951"}},
         {"G",{"de0ff280c442dc6cddf0be63fce1f199ba07a2c171bef9551052a8a0b5035c60","3c6b068b69579ec6584189f401470ea43b9108af0b8686957c3804ac2dce4e10"}}};
     for(const auto& [name,digests]:recorded){const auto& b=body(s,name);check(!b.nativeData.find("report")->find("profile_regions")&&!(b.nativeData.find("report")->find("extrusion")&&b.nativeData.find("report")->find("extrusion")->find("profile_regions")),std::string("legacy ")+name+" stays on the single-loop path");
-        if(occt::kernelVersion()!="8.0.1")continue;check(brepDigest(b)==digests.first,std::string("legacy B-rep bytes changed: ")+name);check(refDigest(b)==digests.second,std::string("legacy references changed: ")+name);}
-    if(occt::kernelVersion()==std::string("8.0.1"))check(meshDigest(body(s,"F"))=="e37ead2d9af9fa99c50312909155f9971a09938900a0e1039a5c2077bc245a51","legacy mesh extrude bytes changed");
-    else std::cout<<"  legacy digest comparison skipped: kernel "<<occt::kernelVersion()<<"\n";
+        if(!recordedToolchain)continue;check(brepDigest(b)==digests.first,std::string("legacy B-rep bytes changed: ")+name);check(refDigest(b)==digests.second,std::string("legacy references changed: ")+name);}
+    if(recordedToolchain)check(meshDigest(body(s,"F"))=="e37ead2d9af9fa99c50312909155f9971a09938900a0e1039a5c2077bc245a51","legacy mesh extrude bytes changed");
+    else std::cout<<"  legacy digest comparison skipped: digests were recorded with Windows MSVC and OCCT 8.0.1; kernel "<<occt::kernelVersion()<<"\n";
     check(savedVersion(s.document)<48,"legacy features keep their earlier format");
-    std::cout<<"legacy single-loop native extrude/symmetric, extrude_surface, revolve_surface, sweep, mesh extrude and promotion: B-rep, reference and mesh digests unchanged\n";
+    std::cout<<"legacy single-loop native extrude/symmetric, extrude_surface, revolve_surface, sweep, mesh extrude and promotion: "<<(recordedToolchain?"B-rep, reference and mesh digests unchanged":"single-loop path kept")<<"\n";
 }
 
 std::string plateSketch(){return sketch("Holes",{rectangle("plate",0,0,100,60),R"({"kind":"circle","name":"h1","dof":["hx","hy","r"]})",R"({"kind":"circle","name":"h2","dof":["100-hx","hy","r"]})",R"({"kind":"circle","name":"h3","dof":["100-hx","60-hy","r"]})",R"({"kind":"circle","name":"h4","dof":["hx","60-hy","r"]})"});}

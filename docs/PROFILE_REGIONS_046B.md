@@ -131,7 +131,11 @@ See the integration record for full-suite counts. `ark-profile-regions-046b-test
 - legacy identity: B-rep and reference digests of single-loop `native_solid`
   extrude (wire with arc; circle symmetric/reversed), `extrude_surface` (slot
   recipe), `revolve_surface`, `sweep`, the legacy mesh extrude bytes and its
-  exact promotion equal those recorded from the untouched 045A build;
+  exact promotion equal those recorded from the untouched 045A build. The
+  digests were recorded with Windows MSVC and OCCT 8.0.1 and are compared only
+  there: the Linux build serializes the symmetric circle extrude to different
+  bytes, so other toolchains check only that legacy cases stay on the
+  single-loop path;
 - plate 100×60×10 with four r5 holes and every extrude end condition;
   dimension edits keep `side.h1..h4` names and order; legacy mesh extrude and
   its exact promotion;
