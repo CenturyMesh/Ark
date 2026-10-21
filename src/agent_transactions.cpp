@@ -3,6 +3,7 @@
 #include "ark/assembly_authoring.hpp"
 #include "ark/agent_activity.hpp"
 #include "ark/iteration_history.hpp"
+#include "ark/derived_bakes.hpp"
 #include "ark/project_memory_tools.hpp"
 #include <algorithm>
 #include <atomic>
@@ -44,6 +45,7 @@ void iterationReceipt045A(V& receipt,const V& history,const std::string& tool,co
     if(nodes->arr.size()*4>=maxIterationNodes*3||documentBytes*4>=maxDocumentBytes*3){
         V capacity=V::makeObj();capacity.set("node_count",V::makeNum((double)nodes->arr.size()));capacity.set("max_nodes",V::makeNum((double)maxIterationNodes));capacity.set("document_bytes",V::makeNum((double)documentBytes));capacity.set("max_document_bytes",V::makeNum((double)maxDocumentBytes));
         capacity.set("warning",V::makeStr("Iteration history is above 75% of its capacity. At 512 nodes or 4 MiB further edits reject atomically and old nodes are never deleted; avoid committing temporary states."));
+        size_t references=0,bytes=0;iterationInlineBakePayloads(history,references,bytes);if(references)capacity.set("inline_bake_payload_bytes",V::makeNum((double)bytes));
         receipt.set("history_capacity",capacity);
     }
 }
@@ -129,6 +131,12 @@ arkjson::Value AgentSession::call(const std::string& tool,const V& args){
     V clean=args;if(clean.t==V::Obj)clean.obj.erase(std::remove_if(clean.obj.begin(),clean.obj.end(),[&](const auto& field){return (field.first=="actor"&&tool!="tool_feedback")||field.first=="motivation";}),clean.obj.end());
     const bool mutating=tool=="doc_apply"||tool=="doc_new"||tool=="doc_load"||tool=="doc_undo"||tool=="doc_redo"||tool=="iteration_restore"||tool=="import_step"||tool=="import_sheet_step"||tool=="import_mesh"||tool=="import_cad"||(tool=="design_containers"&&args.find("action")&&args.find("action")->asStr()=="merge"&&!(args.find("preview")&&args.find("preview")->t==V::Bool&&args.find("preview")->b))||(tool=="image_asset"&&args.find("action")&&args.find("action")->asStr()=="import")||tool=="usage_record"||tool=="library_insert";
     struct Depth {size_t& value;Depth(size_t& n):value(n){++value;}~Depth(){--value;}} depth(callDepth_);
+    // 049A explicit journal rewrite: its own atomic path (backup, migrate, then publish); never an iteration node.
+    if(tool=="history_migrate_derived"){V out;bool failed=false;
+        try{out=historyMigrateDerivedTool(document,revision,args);prepared_.clear();cache_.clear();cacheRevision_=~u64(0);motionRevision_=~u64(0);}
+        catch(const std::exception& e){failed=true;const std::string message=e.what();out=V::makeObj();out.set("error",V::makeStr(message));const auto end=message.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ_");
+            out.set("error_code",V::makeStr(message.find("Revision conflict")!=std::string::npos?"REVISION_CONFLICT":message.rfind("HISTORY_MIGRATION_",0)==0?message.substr(0,end):"HISTORY_MIGRATION_FAILED"));out.set("tool",V::makeStr(tool));out.set("revision",V::makeNum((double)revision));out.set("document_unchanged",V::makeBool(true));}
+        V response=V::makeObj(),content=V::makeArr(),item=V::makeObj();item.set("type",V::makeStr("text"));item.set("text",V::makeStr(out.dump()));content.arr.push_back(item);response.set("content",content);response.set("structuredContent",out);response.set("isError",V::makeBool(failed));return finish(std::move(response));}
     const bool planeMutation=tool=="plane_authoring"&&!(args.find("preview")&&args.find("preview")->t==V::Bool&&args.find("preview")->b);
     if((!mutating&&!planeMutation)||callDepth_>1||suppressHistory_)return finish(dispatch(tool,clean));
     const auto* preparedId=args.find("candidate_id");
@@ -153,7 +161,10 @@ arkjson::Value AgentSession::call(const std::string& tool,const V& args){
         V persistedRoot;if(!arkjson::parse(persisted,persistedRoot))throw std::runtime_error("Iteration history nesting capacity exceeds the JSON depth limit of 64; edit rejected atomically");
         if(document.iterationHistory.t==V::Obj&&!boundary&&(changed||!target.empty())){V receipt=*response.find("structuredContent");receipt.set("iteration_id",*document.iterationHistory.find("head_id"));receipt.set("head_id",*document.iterationHistory.find("head_id"));iterationReceipt045A(receipt,document.iterationHistory,tool,clean,persisted.size());response=envelope(receipt,false);}
         return finish(std::move(response));
-    }catch(const std::exception& exception){rollback();V error=V::makeObj();error.set("error",V::makeStr(exception.what()));error.set("error_code",V::makeStr(std::string(exception.what()).find("capacity")!=std::string::npos?"HISTORY_CAPACITY_EXCEEDED":"HISTORY_FAILED"));error.set("tool",V::makeStr(tool));error.set("revision",V::makeNum((double)revision));error.set("document_unchanged",V::makeBool(true));return finish(envelope(error,true));}
+    }catch(const std::exception& exception){rollback();V error=V::makeObj();error.set("error",V::makeStr(exception.what()));error.set("error_code",V::makeStr(std::string(exception.what()).find("capacity")!=std::string::npos?"HISTORY_CAPACITY_EXCEEDED":"HISTORY_FAILED"));error.set("tool",V::makeStr(tool));error.set("revision",V::makeNum((double)revision));error.set("document_unchanged",V::makeBool(true));
+        // 049A: name the reclaimable derived bytes when old inline baked frames fill the journal.
+        if(error.find("error_code")->str=="HISTORY_CAPACITY_EXCEEDED"){size_t references=0,bytes=0;iterationInlineBakePayloads(document.iterationHistory,references,bytes);if(references){V hint=V::makeObj();hint.set("inline_bake_payload_bytes",V::makeNum((double)bytes));hint.set("hint",V::makeStr("The journal holds 044B-048B baked frames, which are derived data. With the user's explicit approval, history_migrate_derived{path,expected_revision,confirm:true} backs up the saved document and removes them; then save."));error.set("derived_bakes",hint);}}
+        return finish(envelope(error,true));}
 }
 arkjson::Value AgentSession::preparedRecipe(const std::string& id) const{
     const auto found=std::find_if(prepared_.begin(),prepared_.end(),[&](const Prepared& p){return p.id==id;});

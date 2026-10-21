@@ -35,7 +35,7 @@ add_library(ark STATIC
   src/authoring_024b.cpp src/appearance_024b.cpp src/plane_sections_024b.cpp
   src/authoring_023b.cpp src/cad_import.cpp src/holes_orchestrator.cpp src/design_containers.cpp
   src/assembly_patterns.cpp
-  src/motion_graph.cpp src/exploded_view.cpp src/visualize.cpp
+  src/motion_graph.cpp src/exploded_view.cpp src/visualize.cpp src/derived_bakes_049a.cpp
   src/direct_preview.cpp
   src/exact_jobs_046b.cpp
   src/parametric_hud.cpp
@@ -862,6 +862,15 @@ add_executable(ark-motion-graph-044b-tests tests/motion_graph_044b_tests.cpp)
 target_link_libraries(ark-motion-graph-044b-tests PRIVATE ark)
 add_test(NAME motion-graph-044b COMMAND ark-motion-graph-044b-tests)
 set_tests_properties(motion-graph-044b PROPERTIES TIMEOUT 180)
+# 049A derived bakes: receipts, cached/derived/re-baked frames, journal migration and frame-step guidance.
+add_executable(ark-derived-bakes-049a-tests tests/derived_bakes_049a_tests.cpp)
+target_link_libraries(ark-derived-bakes-049a-tests PRIVATE ark)
+add_test(NAME derived-bakes-049a COMMAND ark-derived-bakes-049a-tests)
+set_tests_properties(derived-bakes-049a PROPERTIES TIMEOUT 600)
+if(ARK_WITH_OCCT)
+  target_compile_definitions(ark-derived-bakes-049a-tests PRIVATE ARK_DERIVED_BAKES_NATIVE=1)
+  add_dependencies(ark-derived-bakes-049a-tests ark-occt-worker)
+endif()
 # 048B exploded views, explode_view motion channels and Visualize renders on synthetic assemblies.
 add_executable(ark-exploded-view-048b-tests tests/exploded_view_048b_tests.cpp)
 target_link_libraries(ark-exploded-view-048b-tests PRIVATE ark)

@@ -126,9 +126,11 @@ void testGlassBakeAndStale(){
     rejected(session,"doc_apply",withRevision(session,R"({"commands":[{"op":"motion.rename","name":"Second","new_name":"Window down and up"}]})"),"MOTION_NAME_CONFLICT","rename onto an existing motion");
     rejected(session,"doc_apply",withRevision(session,R"({"commands":[{"op":"motion.remove","name":"Absent"}]})"),"MOTION_NOT_FOUND","remove of a missing motion");
     apply(session,R"({"commands":[{"op":"motion.rename","name":"Window down and up","new_name":"Window cycle"}]})");check(findMotion(session.document,"Window cycle")&&!findMotion(session.document,"Window down and up"),"rename keeps the bake under its new name");
-    check(version(session.document)==47,"baked motions conditionally require document version 47");
+    check(version(session.document)==49,"049A baked motion receipts conditionally require document version 49");
+    check(documentToJson(session.document).find("frames_f32le_base64")==std::string::npos&&bakeIsReceipt(*findMotion(session.document,"Window cycle")->find("bake")),"049A: authoring and journal keep a receipt, never frame payloads");
     const auto saved=documentToJson(session.document);Document restored;check(documentFromJson(saved,restored,&error),error);check(restored.motions.dump()==session.document.motions.dump(),"JSON round trip preserves graphs and bakes");
     auto older=json(saved);older.set("version",V::makeNum(46));Document rejectedDoc;check(!documentFromJson(older.dump(),rejectedDoc,&error)&&error.find("version 47")!=std::string::npos,"version 46 readers of motions reject explicitly");
+    older.set("version",V::makeNum(48));check(!documentFromJson(older.dump(),rejectedDoc,&error)&&error.find("version 49")!=std::string::npos,"a receipt labelled version 48 rejects explicitly: "+error);
     const auto path=std::filesystem::temp_directory_path()/("ark-motion-044b-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".ark");
     check(saveDocument(session.document,path.string().c_str()),"binary save");Document loaded;check(loadDocument(path.string().c_str(),loaded,&error),error);std::filesystem::remove(path);check(loaded.motions.dump()==session.document.motions.dump(),"binary .ark round trip preserves motions");
     const auto beforeUndo=session.document.motions.dump();accepted(session.call("doc_undo",V::makeObj()));check(findMotion(session.document,"Window down and up")&&!findMotion(session.document,"Window cycle"),"undo restores the previous motion name");

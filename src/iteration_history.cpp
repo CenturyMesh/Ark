@@ -79,6 +79,13 @@ V replay(const V& h,const std::string& id,size_t* sharedBudget=nullptr){
     size_t localBudget=0;size_t& budget=sharedBudget?*sharedBudget:localBudget;const V& blobs=need(h,"blobs");V state=unpack(need(h,"baseline"),blobs);for(auto it=chain.rbegin();it!=chain.rend();++it){replayBudget(budget,need(**it,"delta"));apply(state,need(**it,"delta"),blobs);}return state;
 }
 std::string nodeId(V n){erase(n,"id");canonical(n);return "iteration-"+iterationSha256(n.dump());}
+// 049A: schema 2 journals were rewritten without derived baked-frame payloads and must stay free of them.
+bool payloadKey(const std::string& key){return key=="frames_f32le_base64"||key=="coordinates_f32le_base64";}
+bool inlineBakeState(const V& state){const V* motions=state.find("motions");if(!motions||motions->t!=V::Arr)return false;for(const auto& row:motions->arr)if(const auto* bake=row.find("bake");bake&&bake->t==V::Obj)for(const auto& item:bake->obj)if(payloadKey(item.first))return true;return false;}
+void validateMigrations(const V& h){
+    const V& list=need(h,"migrations");if(list.t!=V::Arr||list.arr.empty()||list.arr.size()>16)throw std::runtime_error("Schema 2 history requires 1..16 migration records");
+    for(const auto& m:list.arr){if(m.t!=V::Obj||m.dump().size()>8192||text(m,"kind")!="derived_bakes"||text(m,"utc").size()!=20||text(m,"provenance")!="caller_declared")throw std::runtime_error("Invalid history migration record");validateActor(need(m,"actor"));}
+}
 V fresh(const V& baseline){V h=V::makeObj(),blobs=V::makeObj();const std::string hash=iterationSha256(baseline.dump()),id="baseline-"+hash;h.set("schema",V::makeNum(1));h.set("baseline_id",V::makeStr(id));h.set("baseline_sha256",V::makeStr(hash));h.set("baseline",pack(baseline,blobs));h.set("head_id",V::makeStr(id));h.set("nodes",V::makeArr());h.set("blobs",blobs);h.set("undo_ids",V::makeArr());h.set("redo_ids",V::makeArr());return h;}
 // Only canonical authoring validation is memoized. The complete journal chain,
 // blob identities, deltas, current head and undo/redo stacks are checked on every
@@ -140,21 +147,52 @@ V iterationInfo(const Document& document,size_t limit,const std::string& beforeI
         size_t end=nodes.size();if(!beforeId.empty()){if(beforeId==text(h,"baseline_id"))end=0;else{auto found=std::find_if(nodes.begin(),nodes.end(),[&](const V& n){return text(n,"id")==beforeId;});if(found==nodes.end())throw std::runtime_error("History before_id cursor not found");end=(size_t)(found-nodes.begin());}}
         for(size_t i=end;i>0&&rows.arr.size()<limit;--i){V meta=nodes[i-1];erase(meta,"delta");rows.arr.push_back(meta);}const bool more=end>rows.arr.size();out.set("has_more",V::makeBool(more));out.set("next_before_id",V::makeStr(more?text(rows.arr.back(),"id"):""));out.set("node_count",V::makeNum(nodes.size()));out.set("storage_bytes",V::makeNum(h.dump().size()));
     }else{if(!beforeId.empty())throw std::runtime_error("History before_id cursor not found");out.set("has_more",V::makeBool(false));out.set("next_before_id",V::makeStr(""));out.set("node_count",V::makeNum(0));out.set("storage_bytes",V::makeNum(0));}
+    if(h.t==V::Obj){out.set("schema",*h.find("schema"));if(const auto* migrations=h.find("migrations"))out.set("migrations",*migrations);size_t references=0,bytes=0;iterationInlineBakePayloads(h,references,bytes);
+        V payloads=V::makeObj();payloads.set("references",V::makeNum((double)references));payloads.set("bytes",V::makeNum((double)bytes));if(references)payloads.set("hint",V::makeStr("These 044B-048B baked frames are derived data. history_migrate_derived{path,expected_revision,confirm:true} removes them from the journal after writing a backup."));out.set("inline_bake_payloads",payloads);}
     out.set("nodes",rows);out.set("branch_heads",heads);out.set("max_nodes",V::makeNum(maxNodes));out.set("max_document_bytes",V::makeNum(maxDocumentBytes));out.set("document_bytes",V::makeNum(documentToJson(document).size()));out.set("actor_identity_verified",V::makeBool(false));return out;
 }
 void iterationRestore(const Document& source,const std::string& id,Document& target){if(source.iterationHistory.t!=V::Obj)throw std::runtime_error("No iteration history available");V state=replay(source.iterationHistory,id);std::string error;if(!documentFromJson(state.dump(),target,&error))throw std::runtime_error("Iteration authoring invalid: "+error);target.usage=source.usage;target.agentActivity=source.agentActivity;target.iterationHistory=source.iterationHistory;target.nextFeatureId_=std::max(target.nextFeatureId_,source.nextFeatureId_);target.nextAssemblyId_=std::max(target.nextAssemblyId_,source.nextAssemblyId_);target.nextMateId_=std::max(target.nextMateId_,source.nextMateId_);}
 std::string iterationUndoTarget(const Document& document,bool redo){const V& h=document.iterationHistory;if(h.t!=V::Obj)throw std::runtime_error("No iteration history available");const V& ids=need(h,redo?"redo_ids":"undo_ids");if(ids.t!=V::Arr||ids.arr.empty())throw std::runtime_error("No iteration history available");return ids.arr.back().str;}
 void iterationPersist(V& root,const Document& document){if(document.iterationHistory.t!=V::Obj)return;V blobs=need(document.iterationHistory,"blobs"),packed=pack(root,blobs);if(blobs.dump()!=need(document.iterationHistory,"blobs").dump())throw std::runtime_error("Current document has unjournaled large authoring payload");root=std::move(packed);root.set("version",V::makeNum(std::max(27.,root.find("version")?root.find("version")->asNum():27.)));root.set("iteration_history",document.iterationHistory);}
-bool iterationExpand(V& root,V& history,std::string& error){try{if(auto h=root.find("iteration_history")){if(!root.find("version")||(root.find("version")->num<27||root.find("version")->num>48))throw std::runtime_error("Iteration history requires a supported document version 27 or later");history=*h;erase(root,"iteration_history");root=unpack(root,need(history,"blobs"));}else if(root.find("version")&&root.find("version")->num==27)throw std::runtime_error("Version 27 requires iteration history");return true;}catch(const std::exception& e){error=e.what();return false;}}
+void iterationInlineBakePayloads(const V& h,size_t& references,size_t& bytes){
+    references=bytes=0;if(h.t!=V::Obj)return;const V* blobs=h.find("blobs");std::set<std::string> counted;
+    auto charge=[&](const V& value){++references;if(value.t==V::Str)bytes+=value.str.size();else if(const auto* ref=value.find("$ark_history_blob");ref&&ref->t==V::Str&&blobs&&counted.insert(ref->str).second)if(const auto* blob=blobs->find(ref->str.c_str());blob&&blob->t==V::Str)bytes+=blob->str.size();};
+    std::function<void(const V&)> walk=[&](const V& v){
+        if(v.t==V::Obj){if(const auto* path=v.find("path");path&&path->t==V::Arr&&!path->arr.empty()&&path->arr.back().t==V::Str&&payloadKey(path->arr.back().str))if(const auto* value=v.find("value"))charge(*value);
+            for(const auto& item:v.obj){if(payloadKey(item.first))charge(item.second);else walk(item.second);}}
+        else if(v.t==V::Arr)for(const auto& item:v.arr)walk(item);};
+    if(const auto* baseline=h.find("baseline"))walk(*baseline);if(const auto* nodes=h.find("nodes"))walk(*nodes);
+}
+V iterationRewrite(const V& h,const std::function<void(V&)>& transform,std::map<std::string,std::string>& ids){
+    const V& blobs=need(h,"blobs");V newBlobs=V::makeObj(),nodes=V::makeArr();ids.clear();
+    auto mapState=[&](V state){transform(state);canonical(state);return state;};
+    V original=unpack(need(h,"baseline"),blobs),mapped=mapState(original);
+    const std::string baseHash=iterationSha256(mapped.dump()),baseId="baseline-"+baseHash;ids[text(h,"baseline_id")]=baseId;std::map<std::string,std::string> hashes{{baseId,baseHash}};
+    V out=V::makeObj();out.set("schema",V::makeNum(2));out.set("baseline_id",V::makeStr(baseId));out.set("baseline_sha256",V::makeStr(baseHash));out.set("baseline",pack(mapped,newBlobs));
+    std::string current=text(h,"baseline_id");
+    for(const auto& n:need(h,"nodes").arr){
+        const std::string parent=text(n,"parent_id"),previous=text(n,"previous_head_id");if(parent!=current){original=replay(h,parent);mapped=mapState(original);}
+        V next=original;apply(next,need(n,"delta"),blobs);V nextMapped=mapState(next),delta=V::makeArr();diff(mapped,nextMapped,V::makeArr(),delta,newBlobs);
+        V m=n;erase(m,"id");m.set("parent_id",V::makeStr(ids.at(parent)));m.set("previous_head_id",V::makeStr(ids.at(previous)));if(n.find("restored_from_id"))m.set("restored_from_id",V::makeStr(ids.at(text(n,"restored_from_id"))));
+        const std::string hash=iterationSha256(nextMapped.dump());m.set("before_sha256",V::makeStr(hashes.at(ids.at(previous))));m.set("after_sha256",V::makeStr(hash));m.set("delta",delta);
+        const std::string id=nodeId(m);m.set("id",V::makeStr(id));ids[text(n,"id")]=id;hashes[id]=hash;nodes.arr.push_back(std::move(m));current=text(n,"id");original=std::move(next);mapped=std::move(nextMapped);
+    }
+    out.set("head_id",V::makeStr(ids.at(text(h,"head_id"))));out.set("nodes",nodes);out.set("blobs",newBlobs);
+    for(const char* key:{"undo_ids","redo_ids"}){V list=V::makeArr();for(const auto& id:need(h,key).arr)list.arr.push_back(V::makeStr(ids.at(id.str)));out.set(key,list);}
+    if(const auto* migrations=h.find("migrations"))out.set("migrations",*migrations);return out;
+}
+bool iterationExpand(V& root,V& history,std::string& error){try{if(auto h=root.find("iteration_history")){if(!root.find("version")||(root.find("version")->num<27||root.find("version")->num>49))throw std::runtime_error("Iteration history requires a supported document version 27 or later");history=*h;erase(root,"iteration_history");root=unpack(root,need(history,"blobs"));}else if(root.find("version")&&root.find("version")->num==27)throw std::runtime_error("Version 27 requires iteration history");return true;}catch(const std::exception& e){error=e.what();return false;}}
 bool iterationValidate(const Document& document,const V& h,std::string& error){
-    try{if(h.t!=V::Obj||need(h,"schema").t!=V::Num||need(h,"schema").num!=1)throw std::runtime_error("Unsupported iteration history schema");const V& blobs=need(h,"blobs"),nodes=need(h,"nodes");if(blobs.t!=V::Obj||nodes.t!=V::Arr||nodes.arr.size()>maxNodes)throw std::runtime_error("Invalid history blob/node storage");
+    try{if(h.t!=V::Obj||need(h,"schema").t!=V::Num||(need(h,"schema").num!=1&&need(h,"schema").num!=2))throw std::runtime_error("Unsupported iteration history schema");const V& blobs=need(h,"blobs"),nodes=need(h,"nodes");if(blobs.t!=V::Obj||nodes.t!=V::Arr||nodes.arr.size()>maxNodes)throw std::runtime_error("Invalid history blob/node storage");
+        const bool derivedOnly=need(h,"schema").num==2;if(derivedOnly)validateMigrations(h);else if(h.find("migrations"))throw std::runtime_error("History migration records require schema 2");
+        auto noPayload=[&](const V& s){if(derivedOnly&&inlineBakeState(s))throw std::runtime_error("Schema 2 history state contains inline baked-frame payloads");};
         for(const auto& blob:blobs.obj)if(!digest(blob.first)||blob.second.t!=V::Str||blob.second.str.size()<1024||iterationSha256(blob.second.str)!=blob.first)throw std::runtime_error("History blob digest mismatch");
-        V state=unpack(need(h,"baseline"),blobs);std::string stateBytes=state.dump();const std::string base=text(h,"baseline_id"),baseHash=iterationSha256(stateBytes);if(base!="baseline-"+baseHash||text(h,"baseline_sha256")!=baseHash)throw std::runtime_error("History baseline digest mismatch");
+        V state=unpack(need(h,"baseline"),blobs);noPayload(state);std::string stateBytes=state.dump();const std::string base=text(h,"baseline_id"),baseHash=iterationSha256(stateBytes);if(base!="baseline-"+baseHash||text(h,"baseline_sha256")!=baseHash)throw std::runtime_error("History baseline digest mismatch");
         std::string parseError;if(!validAuthoringSnapshot(state,stateBytes,parseError))throw std::runtime_error("Invalid history baseline authoring: "+parseError);
         size_t replayOps=0;std::map<std::string,std::string> hashes;hashes.emplace(base,baseHash);std::string current=base;
         for(size_t i=0;i<nodes.arr.size();++i){const V& n=nodes.arr[i];const std::string id=text(n,"id"),parent=text(n,"parent_id"),previous=text(n,"previous_head_id");if(id!=nodeId(n)||hashes.count(id)||!hashes.count(parent)||!hashes.count(previous)||text(n,"before_sha256")!=hashes.at(previous)||need(n,"ordinal").num!=(double)(i+1))throw std::runtime_error("History node identity/parent/before digest mismatch");validateActor(need(n,"actor"));if(text(n,"provenance")!="caller_declared"||text(n,"motivation").size()>4096||text(n,"utc").size()!=20||text(n,"tool").empty())throw std::runtime_error("Invalid history node metadata");
             if(auto restored=n.find("restored_from_id");restored&&(restored->t!=V::Str||restored->str!=parent))throw std::runtime_error("Invalid history restore parent");
-            if(parent!=current)state=replay(h,parent,&replayOps);replayBudget(replayOps,need(n,"delta"));apply(state,need(n,"delta"),blobs);stateBytes=state.dump();const std::string hash=iterationSha256(stateBytes);if(!digest(text(n,"after_sha256"))||hash!=text(n,"after_sha256"))throw std::runtime_error("History authoring delta digest mismatch");
+            if(parent!=current)state=replay(h,parent,&replayOps);replayBudget(replayOps,need(n,"delta"));apply(state,need(n,"delta"),blobs);noPayload(state);stateBytes=state.dump();const std::string hash=iterationSha256(stateBytes);if(!digest(text(n,"after_sha256"))||hash!=text(n,"after_sha256"))throw std::runtime_error("History authoring delta digest mismatch");
             if(!validAuthoringSnapshot(state,stateBytes,parseError))throw std::runtime_error("Invalid iteration authoring: "+parseError);hashes.emplace(id,hash);current=id;
         }
         const std::string head=text(h,"head_id");if(!hashes.count(head)||iterationSha256(iterationAuthoring(document).dump())!=hashes.at(head))throw std::runtime_error("Current document does not match iteration head");

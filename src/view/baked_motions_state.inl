@@ -5,7 +5,7 @@ struct BakedMotionsPanel {
     bool open=false,playing=false,loop=true,active=false,scrubbing=false;
     double time=0,speed=1;int scroll=0;std::string selected;
     u64 revision=~u64(0),epoch=~u64(0);std::vector<BakedMotionsRow> rows;std::string digest,note;bool digestKnown=false;
-    std::string cacheName;BakedMotionFrames frames;bool framesValid=false;CompiledMotion graph;bool graphValid=false;std::string graphError,status;arkjson::Value diagnostics;
+    std::string cacheName;BakedMotionFrames frames;BakedMotionFramesSource framesSource;bool framesValid=false;CompiledMotion graph;bool graphValid=false;std::string graphError,status;arkjson::Value diagnostics;
     std::vector<std::vector<float>> curves;std::vector<float> lo,hi,rangeLo,rangeHi;std::vector<std::string> units;std::vector<std::vector<MotionBezierHandle>> handles;std::vector<std::vector<double>> seams;
     std::vector<int> display;size_t displayCount=0;u64 displayRevision=~u64(0);size_t shownFrame=~size_t(0);
     // 046B clearance evidence: shown only for the motion, revision and document epoch it was measured at.

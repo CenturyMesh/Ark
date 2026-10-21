@@ -23,7 +23,8 @@ static void stopBakedMotion(bool restore){auto& p=g_bakedMotions;const bool show
 static void loadBakedMotionSelection(){
     auto& p=g_bakedMotions;p.cacheName=p.selected;p.framesValid=p.graphValid=false;p.curves.clear();p.handles.clear();p.seams.clear();p.lo.clear();p.hi.clear();p.rangeLo.clear();p.rangeHi.clear();p.display.clear();p.displayRevision=~u64(0);p.shownFrame=~size_t(0);p.graphError.clear();p.diagnostics={};
     const auto* motion=findMotion(g_doc,p.selected);if(!motion)return;std::string error;
-    p.framesValid=decodeBakedMotion(*motion,p.frames,error);
+    // 049A: frames are derived; a cache miss re-bakes here and is labelled when it does not match the receipt.
+    p.framesSource={};p.framesValid=resolveBakedMotion(g_doc,*motion,p.frames,error,&p.framesSource);if(!p.framesValid&&motion->find("bake"))p.framesSource.mismatch=error;
     std::map<std::string,double> starts;for(const auto& row:p.rows)if(row.name==p.selected)starts=row.starts;
     if(const auto* bake=motion->find("bake"))if(const auto* channels=bake->find("channels"))for(const auto& c:channels->arr)if(const auto* start=c.find("graph_start"))starts[c.find("name")->str]=start->num;
     p.graphValid=compileMotionGraph(*motion->find("graph"),g_doc.buildEnv(),starts,p.graph,error);if(!p.graphValid){p.graphError=error;return;}
@@ -198,9 +199,10 @@ template<class Rect,class Button>static void drawBakedMotionsPanel(Rect rect,But
     else if(p.clearanceRunning){muted("Checking exact clearance...",left,y,.52f,inner);y+=34;}
     else if(clearanceLines){textOut(fitText(p.clearanceError,.50f,inner),left,y,.50f,.98f,.52f,.44f);y+=17;muted(p.clearanceError.find("MOTION_BAKE_STALE")!=std::string::npos?"Bake again first / clearance never re-bakes":"No clearance result published",left,y,.50f,inner);y+=17;}
     for(const auto& row:p.rows)if(row.name==p.selected){
-        std::string state;if(const auto* motion=findMotion(g_doc,p.selected))if(const auto* bake=motion->find("bake")){char text[160];std::snprintf(text,sizeof text,"Baked %.0f fps / %zu frames / source rev %.0f",bake->find("fps")->num,p.framesValid?p.frames.frameCount:0,bake->find("source_revision")->num);state=text;}
+        std::string state;if(const auto* motion=findMotion(g_doc,p.selected))if(const auto* bake=motion->find("bake")){const std::string& s=p.framesSource.source;char text[200];std::snprintf(text,sizeof text,"Baked %.0f fps / %zu frames / source rev %.0f / frames %s",bake->find("fps")->num,p.framesValid?p.frames.frameCount:0,bake->find("source_revision")->num,s=="inline"?"inline (legacy)":s=="rebake"?"re-baked":s.empty()?"unavailable":s.c_str());state=text;}
         if(state.empty())state="Not baked / Bake drives the joints through the solver";
         textOut(fitText(state,.52f,inner),left,y,.52f,.72f,.82f,.88f);y+=17;
+        if(!p.framesSource.mismatch.empty()){textOut(fitText(p.framesValid?"Re-baked frames differ from the recorded bake / showing current solve / Bake again":p.framesSource.mismatch,.52f,inner),left,y,.52f,.99f,.74f,.32f);y+=17;}
         if(row.stale||row.invalid){textOut(fitText(row.invalid?"Graph invalid for the current joints / edit graph":"Stale: "+std::string(row.detail.find("graph changed")!=std::string::npos?"graph changed":"assembly changed")+" / Bake again",.52f,inner),left,y,.52f,.99f,.74f,.32f);y+=17;}
         break;}
     if(!p.note.empty()){textOut(fitText(p.note,.50f,inner),left,y,.50f,.96f,.56f,.48f);y+=16;}

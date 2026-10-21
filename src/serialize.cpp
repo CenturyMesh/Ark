@@ -651,6 +651,7 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
     if(doc.explodedViews.t==Value::Arr&&!doc.explodedViews.arr.empty())r.set("exploded_views",doc.explodedViews); // 048B: optional, no format version
     if(curvePattern044BNeedsVersion47(doc)||media044BNeedsVersion47(doc)||motionsRequireDocumentVersion47(doc))r.set("version",Value::makeNum(47));
     if(profileRegions046BNeedsVersion48(doc))r.set("version",Value::makeNum(48));
+    if(motionReceiptsRequireDocumentVersion49(doc))r.set("version",Value::makeNum(49));
     if(includeAudit&&includeHistory)iterationPersist(r,doc);
     canonicalDocumentKeys(r);
     std::string serialized=r.dump();
@@ -661,7 +662,7 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
 static bool documentFromValue(Value& v,Document& doc,std::string* err){
     auto fail=[&](const std::string& m){ if(err)*err=m; return false; };
     if(v.t!=Value::Obj) return fail("root must be object");
-    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || !std::isfinite(ver->num)||ver->num!=std::floor(ver->num)||ver->num<1||ver->num>48))
+    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || !std::isfinite(ver->num)||ver->num!=std::floor(ver->num)||ver->num<1||ver->num>49))
         return fail("unsupported document version");
     Value history;std::string historyError;if(!iterationExpand(v,history,historyError))return fail(historyError);
     if(const auto* nodes=v.find("assembly");nodes&&nodes->t==Value::Arr)for(const auto& node:nodes->arr)if(const auto* pattern=node.find("pattern");pattern&&pattern->find("carry_frame")){
@@ -926,6 +927,7 @@ static bool documentFromValue(Value& v,Document& doc,std::string* err){
     if(curvePattern044BNeedsVersion47(nd)){const auto* version=v.find("version");if(!version||version->num<47)return fail("044B curve pattern paths, pitch spacing, frames and support inputs require document version 47");}
     if(media044BNeedsVersion47(nd)){const auto* version=v.find("version");if(!version||version->num<47)return fail("044B procedural appearance patterns, animated GIF/video assets and stamp playback require document version 47");}
     if(profileRegions046BNeedsVersion48(nd)){const auto* version=v.find("version");if(!version||version->num<48)return fail("046B profile region selections (native.regions) require document version 48");}
+    if(motionReceiptsRequireDocumentVersion49(nd)){const auto* version=v.find("version");if(!version||version->num<49)return fail("049A baked motion receipts (frames_sha256, frames as derived data) require document version 49");}
     try{validateAppearanceAuthoring024B(nd,false);}catch(const std::exception& error){return fail(error.what());}
     try{validateDesignContainerWorkspace(nd);validateSkeletonAuthoring(nd);}catch(const std::exception& error){return fail(error.what());}
     doc=std::move(nd);
@@ -1010,8 +1012,11 @@ bool saveDocument(const Document& doc, const char* path, DocumentSaveReport* rep
     std::transform(extension.begin(),extension.end(),extension.begin(),[](unsigned char c){return static_cast<char>(std::tolower(c));});
     if(extension!=".arkjson"&&extension!=".json"){
         try{
-            NativeDocumentResultsReport selected;const auto derived=nativeDocumentResults(doc,&selected);
-            if(report){report->derivedGeometry=true;report->derivedEntries=selected.entries;report->derivedBytes=selected.bytes;report->derivedOmittedEntries=selected.omittedEntries;report->derivedOmittedBytes=selected.omittedBytes;report->derivedCapacityBytes=selected.capacityBytes;}
+            NativeDocumentResultsReport selected;auto derived=nativeDocumentResults(doc,&selected);
+            // 049A: cached baked frames of current receipts use the capacity left by saved geometry.
+            MotionDerivedReport motions;appendMotionDerivedPayloads(doc,derived,selected.capacityBytes-std::min(selected.capacityBytes,selected.bytes),selected.capacityEntries-std::min(selected.capacityEntries,derived.size()),&motions);
+            if(report){report->derivedGeometry=true;report->derivedEntries=selected.entries;report->derivedBytes=selected.bytes;report->derivedOmittedEntries=selected.omittedEntries;report->derivedOmittedBytes=selected.omittedBytes;report->derivedCapacityBytes=selected.capacityBytes;
+                report->motionFrameEntries=motions.entries;report->motionFrameBytes=motions.bytes;report->motionFrameOmittedEntries=motions.omittedEntries;report->motionFrameOmittedBytes=motions.omittedBytes;report->motionFrameNotCached=motions.notCached;}
             std::string error;if(saveDocumentContainer(persistedRoot,path,&error,nullptr,&derived))return true;
             return fail(error.empty()?"ARK container save failed":error);
         }catch(const std::exception& e){return fail(e.what());}
@@ -1041,7 +1046,10 @@ bool loadDocument(const char* path, Document& doc, std::string* err){
         // its decoded value without constructing and parsing another JSON copy.
         Document candidate;if(!documentFromValue(root,candidate,err))return false;
         try{
-            candidate.derivedGeometryStatus=stageNativeDocumentResults(candidate,derived);
+            // 049A baked-frame entries share the optional section; they never reach native staging.
+            DocumentDerivedPayloads native,motions;for(auto& record:derived)(motionDerivedPayload(record)?motions:native).push_back(std::move(record));
+            candidate.derivedGeometryStatus=stageNativeDocumentResults(candidate,native);
+            if(!motions.empty())candidate.derivedGeometryStatus.set("motion_frames",stageMotionDerivedPayloads(candidate,motions));
             if(!discarded.empty()){
                 candidate.derivedGeometryStatus=Value::makeObj();
                 candidate.derivedGeometryStatus.set("status",Value::makeStr("discarded"));
