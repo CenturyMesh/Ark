@@ -9,6 +9,10 @@ The public iteration and numeric runtime are defined in
 increasing sequence and its principal phase. The letter is a roadmap phase, not a
 month; it does not declare the phase complete. The `.ark` format evolves separately.
 
+050B addresses **B.04/C.04/B.02/A.02**, **Parcial**, with native driven drag
+chains, carriage playback and a 256-sketch document limit. Integration
+verification and limits are recorded in [050B](iterations/050B.md).
+
 Sketch capacity follow-up for **B.02/A.02**, **Verificado no escopo** (local
 development build): mutation and loading accept 256 sketches per document,
 shared across all parts and assemblies. Local llvm-mingw core `agent` and

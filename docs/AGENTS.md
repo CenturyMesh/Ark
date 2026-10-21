@@ -29,6 +29,17 @@ agent value. A flex pass covers only the sampled values. The human edits the
 same parameters from the Studio HUD as ordinary human `param.set` transactions.
 See [Parametric HUD](PARAMETRIC_HUD_048B.md).
 
+050B drag chains (B.04/C.04, **Parcial**): when a design needs a cable carrier
+(drag chain, energy chain) between a fixed bracket and a moving carriage, use
+revision-checked `drag_chain.set{name,link,bend_radius,anchor,moving:{occurrence,
+attach,joint},link_count?,travel?}` with the fixed-end pin, run and bend-side
+directions, the carriage's moving-end pin and its prismatic joint. Never model a
+drag chain as telescoping rigid segments, `min()`/`max()` couplings or one motion
+channel per link. Links are native B-rep occurrences driven from the joint
+coordinate in every pose, drive preview and bake; bake only the carriage joint.
+Inspect with read-only `drag_chain_info{name,q?}`; load
+`agent_onboard{topic:"assembly"}` and see [drag chains](DRAG_CHAIN_050B.md).
+
 048B exploded views and Visualize (B.04/B.05/D.04, **Parcial**): author an
 exploded view only when the user explicitly asks for one, an assembly image or
 an assembly drawing, the same rule as 2D drawings. `explode.set{name,steps}`,

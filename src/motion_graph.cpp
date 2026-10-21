@@ -381,6 +381,9 @@ std::string motionSourceDigest(const Document& d,const std::vector<AssemblyPlace
     for(const auto& m:d.mates)mates.arr.push_back(mateToJson(m));
     for(const auto& p:d.params){V row=V::makeArr();row.arr.push_back(V::makeStr(p.name));row.arr.push_back(V::makeNum(p.value));params.arr.push_back(row);}
     for(const auto& placement:placements){V row=V::makeArr();row.arr.push_back(V::makeNum((double)placement.node));row.arr.push_back(V::makeNum(placement.copy));for(double x:placement.world.m)row.arr.push_back(V::makeNum(std::round(x*1e5)/1e5));poses.arr.push_back(row);}
+    // Followers can change their motion recipe without changing the baseline pose.
+    // Omit the new field for legacy documents to preserve their bake digests.
+    if(d.dragChains.t==V::Arr&&!d.dragChains.arr.empty())root.set("drag_chains",d.dragChains);
     root.set("assembly",nodes);root.set("mates",mates);root.set("params",params);root.set("placements",poses);canonical(root);return iterationSha256(root.dump());
 }
 std::string motionGraphDigest(const V& graph){V copy=graph;canonical(copy);return iterationSha256(copy.dump());}

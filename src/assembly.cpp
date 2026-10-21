@@ -229,6 +229,7 @@ bool resolveAssembly(const Document& d,std::vector<AssemblyPlacement>& placement
         if(!n.id||!byId.emplace(n.id,&n).second)return fail("Duplicate/zero assembly ID");
         if(n.feature&&!features.count(n.feature))return fail("Assembly references missing feature #"+std::to_string(n.feature));
     }
+    AssemblyFollowers followers;try{followers=assemblyFollowers(d);}catch(const std::exception& e){return fail(e.what());} // 050B drag chain links
     ExprEnv env=d.buildEnv();std::set<u64> active;
     std::function<bool(u64,int)> resolve=[&](u64 id,int depth){
         if(world.count(id))return true;
@@ -461,7 +462,7 @@ bool resolveAssembly(const Document& d,std::vector<AssemblyPlacement>& placement
     auto carried=[&](u64 id){u64 parent=byId.at(id)->parent;while(parent){
         for(const auto& mover:moving)if(mover.group&&mover.id==parent)return true;
         parent=byId.at(parent)->parent;}return false;};
-    for(const auto& n:d.assembly)if(n.feature&&!n.fixed&&!mated.count(n.id)&&!carried(n.id)){
+    for(const auto& n:d.assembly)if(n.feature&&!n.fixed&&!mated.count(n.id)&&!carried(n.id)&&!followers.nodes.count(n.id)){
         result.unconstrainedNodes.push_back(n.id);result.freeDofs+=6;}
     for(const auto& mate:mates){const auto s=state(mate,world);const auto r=measuredResidual(mate,world);
         result.maxPositionMm=std::max(result.maxPositionMm,r.positionMm);
@@ -472,7 +473,7 @@ bool resolveAssembly(const Document& d,std::vector<AssemblyPlacement>& placement
             if(!reportUnsatisfied)return fail(!satisfiedLimit(r)?
                 "ASSEMBLY_JOINT_LIMIT_VIOLATION: pose exceeds mate #"+std::to_string(r.id)+" limits":"Unsatisfied assembly mate #"+std::to_string(r.id));
     }
-    try{validateMechanicalGraph(d);for(const auto& mate:d.mates)if(isMechanicalMate(mate.type))prepareMotionRelation(d,mate,*byId.at(mate.a),*byId.at(mate.b),world.at(mate.a),world.at(mate.b));}catch(const std::exception& e){return fail(e.what());}
+    try{validateMechanicalGraph(d);for(const auto& mate:d.mates)if(isMechanicalMate(mate.type))prepareMotionRelation(d,mate,*byId.at(mate.a),*byId.at(mate.b),world.at(mate.a),world.at(mate.b));if(followers.pose)followers.pose(world);}catch(const std::exception& e){return fail(e.what());}
     if(!expandAssemblyPatterns(d,parentFrame,rigid,world,visibility,placements,error,&result.patternReports))return fail(error);
     for(auto& placement:placements)placement.visible=placement.visible&&isAssemblyNodeLoaded(d,placement.node)&&featureWithinHistory(d,placement.feature);
     if(diagnostics)*diagnostics=std::move(result);
@@ -535,6 +536,7 @@ arkjson::Value inspectAssemblyMotion(const AssemblyMotionProgram& program,u64 dr
 bool buildAssemblyManipulation(const Document& document,AssemblyManipulationProgram& program,std::string& error){
     program={};if(!resolveAssembly(document,program.baseline,error,&program.diagnostics))return false;
     try{
+        program.followers=assemblyFollowers(document);
         std::unordered_map<u64,const AssemblyNode*> nodes;
         std::unordered_map<u64,Mat4> world;
         std::unordered_map<u64,std::vector<u64>> children;
@@ -858,6 +860,7 @@ bool previewAssemblyManipulation(const AssemblyManipulationProgram& program,u64 
             else if(std::binary_search(joint.movingNodes.begin(),joint.movingNodes.end(),placement.node))placement.world=change*placement.world;
             if(!finiteFrame(placement.world))return fail("MANIPULATION_NONFINITE_POSE: preview is not a finite rigid transform");
             if(!placement.copy)world[placement.node]=placement.world;}
+        if(program.followers.pose){program.followers.pose(world);for(auto& placement:preview.placements)if(!placement.copy&&program.followers.nodes.count(placement.node))placement.world=world.at(placement.node);}
         for(u64 id:program.fixedNodes){const auto baseline=std::find_if(program.baseline.begin(),program.baseline.end(),[&](const AssemblyPlacement& row){return row.node==id&&!row.copy;});
             for(int i=0;i<16;++i)if(world.at(id).m[i]!=baseline->world.m[i])return fail("MANIPULATION_FIXED_CONFLICT: drive would move a grounded instance");}
         for(const auto& constraint:program.constraints){
@@ -886,7 +889,7 @@ bool previewAssemblyManipulation(const AssemblyManipulationProgram& program,u64 
             if(!compatible)return fail("MANIPULATION_PATTERN_SOURCE_CONFLICT: pattern node #"+std::to_string(item.first)+" cannot retain its rigid layout while occurrence source #"+std::to_string(sourceNode)+" changes under mate #"+std::to_string(joint.mate));
         }
         using V=arkjson::Value;preview.commands=V::makeArr();
-        for(const auto& placement:preview.placements){if(placement.copy||std::find(program.fixedNodes.begin(),program.fixedNodes.end(),placement.node)!=program.fixedNodes.end())continue;
+        for(const auto& placement:preview.placements){if(placement.copy||program.followers.nodes.count(placement.node)||std::find(program.fixedNodes.begin(),program.fixedNodes.end(),placement.node)!=program.fixedNodes.end())continue;
             const Mat4& authored=program.authoredWorld.at(placement.node);double difference=0;
             for(int i=0;i<16;++i)difference=std::max(difference,std::fabs(placement.world.m[i]-authored.m[i]));
             if(difference<1e-12)continue;

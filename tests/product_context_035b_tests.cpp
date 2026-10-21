@@ -26,7 +26,7 @@ void domainGraph(){
     const auto privateGraph=accepted(s.call("context_graph",json(R"({"keys":["feature:2"],"depth":2,"limit":32})")));check(privateGraph.dump().find("DO_NOT_EXPOSE")==std::string::npos&&!relation(privateGraph,"sourced_from"),"Credential-bearing source URLs never enter graph facts");
 }
 void discovery(){
-    AgentSession s;const auto tools=AgentSession::tools();check(tools.arr.size()==107,"New vendor policy tool is discoverable");
+    AgentSession s;const auto tools=AgentSession::tools();check(tools.arr.size()==108,"New vendor policy tool is discoverable");
     check(assistantToolReadOnly(tools,"library_vendors",json(R"({"operation":"list"})"))&&!assistantToolReadOnly(tools,"library_vendors",json(R"({"operation":"update"})")),"Role permissions distinguish policy reads from writes");
     auto plastics=accepted(s.call("agent_onboard",json(R"({"topic":"plastics","detail":"guide"})")));check(plastics.dump().find("Hollow walls")!=std::string::npos&&!field(plastics,"document_state_included").b,"Plastics uses natural supported part-design guidance");
     auto vendors=accepted(s.call("agent_onboard",json(R"({"topic":"vendors","detail":"guide"})")));check(vendors.dump().find("partner-required")!=std::string::npos&&vendors.dump().find("policy revision")!=std::string::npos,"Vendor onboarding discloses authentication and revision boundaries");

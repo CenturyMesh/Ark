@@ -3,6 +3,7 @@
 #include "ark/modeling_031b.hpp"
 #include "ark/sketch.hpp"
 #include "ark/parametric_hud.hpp"
+#include "ark/drag_chain.hpp"
 #include <stdexcept>
 #include <algorithm>
 #include <map>
@@ -339,6 +340,7 @@ arkjson::Value agentOnboard(const AgentSession& session,const arkjson::Value& ar
     }
     if(topic=="sketch")r.set("constraint_assistance",V::makeStr("sketch_repair{name,sketch?,expected_revision} proposes read-only bounded single-constraint deletions, with original source SHA-256 and ordinary sketch.set commands. Review one intended relation, doc_preview at that revision and explicitly apply its retained candidate. Other expressions/seeds remain intact. Producer-driven projection/offset geometry and conflicts needing more than one deletion are explicitly outside this assistance scope; do not delete constraints automatically or loosen solve tolerance."));
     if(topic=="surfacing")r.set("orientation_repair",V::makeStr("surface_edit inputs:[one native feature], native:{op:repair,mode:orientation,normal?:[x,y,z]} preserves exact support geometry, topology inventory and every entity tolerance. A single planar face needs an explicit parallel normal; a connected shell/single-shell solid can repair face consistency/outward solid orientation. Gaps, multiple solids, nonmanifold or geometric defects reject. Native inspection reports before/after validity and orientation; save selects conditional source41. This is bounded orientation repair, not automatic general healing."));
+    appendDragChainOnboarding(topic,r); // 050B assembly/motion section
     appendModeling031BOnboarding(r,topic);return r;
 }
 }

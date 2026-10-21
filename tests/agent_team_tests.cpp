@@ -273,7 +273,7 @@ static void focusedSequentialAssignments(){
 }
 static void leadEngineerAuthorsPartsAndAssembly(){
     ark::AgentTeam team;ark::AgentTeamConfig config;config.focusedWorkflow=true;config.roles={role("engineer",true)};config.roles[0].discipline=ark::AgentTeamDiscipline::Orchestrator;
-    int rounds=0,rejected=0;ark::AgentSession session;
+    int rounds=0,rejected=0;bool chainReachedKernel=false;ark::AgentSession session;
     config.roles[0].transport=[&](auto&,auto&,auto*){switch(++rounds){
         case 1:return call("lead_sketch","team_apply_step",R"({"expected_revision":0,"commands":[{"op":"sketch.set","name":"Profile","sketch":{"plane":"XY","entities":[{"kind":"circle","name":"rim","dof":[0,0,2]}],"constraints":[]}}]})");
         case 2:return call("lead_part","team_apply_step",R"({"expected_revision":1,"commands":[{"op":"param.set","name":"width","expr":10},{"op":"material.set","name":"Lead material","density":2.7},{"op":"feature.add","type":"box","name":"Lead part","p":{"dx":"width","dy":12,"dz":4},"material":"Lead material"}]})");
@@ -282,10 +282,11 @@ static void leadEngineerAuthorsPartsAndAssembly(){
         case 5:return call("lead_mate","team_apply_step",R"({"expected_revision":4,"commands":[{"op":"mate.add","a":"Anchor","b":"Follower","type":"coincident"}]})");
         case 6:return call("invalid_part","team_apply_step",R"({"expected_revision":5,"commands":[{"op":"param.set","name":"rollback","expr":999},{"op":"feature.edit","id":"Missing geometry","p":{"dx":20}}]})");
         case 7:return call("stale_lead","team_apply_step",R"({"expected_revision":4,"commands":[{"op":"param.set","name":"width","expr":99}]})");
+        case 8:return call("chain_authority","team_apply_step",R"({"expected_revision":5,"commands":[{"op":"drag_chain.remove","name":"Missing chain"}]})");
         default:return done("Part and assembly authored through measured transactions.");}};
-    team.start(config,"Engineer the geometry and assembly",ark::AgentSession::tools(),[&](auto& name,auto& args){auto result=session.call(name,args);if(result.find("isError")->b)++rejected;return result;});complete(team);
+    team.start(config,"Engineer the geometry and assembly",ark::AgentSession::tools(),[&](auto& name,auto& args){auto result=session.call(name,args);if(result.find("isError")->b)++rejected;if(result.dump().find("DRAG_CHAIN_NOT_FOUND")!=std::string::npos)chainReachedKernel=true;return result;});complete(team);
     check(session.revision==5&&session.document.features.size()==1&&session.document.assembly.size()==2&&session.document.mates.size()==1&&session.document.sketches.size()==1&&session.document.materials.size()==1,"lead engineer can actually author sketches, materials, parts, placements and mates");
-    check(rejected==2&&session.document.params.size()==1&&session.document.getParam("width")==10&&team.snapshot().roles[0].stepsApplied==5,"engineer authority retains atomic evaluation rollback and stale-revision rejection");
+    check(rejected==3&&chainReachedKernel&&session.document.params.size()==1&&session.document.getParam("width")==10&&team.snapshot().roles[0].stepsApplied==5,"engineer authority includes drag chains and retains atomic evaluation rollback and stale-revision rejection");
 }
 static void parallelProgressStillReportsCompletion(){
     ark::AgentTeam team;ark::AgentTeamConfig config;config.orchestratedStart=true;config.roles={role("engineer",true),role("designer",true)};

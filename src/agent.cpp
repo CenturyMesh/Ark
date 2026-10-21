@@ -7,6 +7,7 @@
 #include "ark/authoring_024b.hpp"
 #include "ark/motion_graph.hpp"
 #include "ark/exploded_view.hpp"
+#include "ark/drag_chain.hpp"
 #include "ark/appearance_024b.hpp"
 #include "ark/skeleton.hpp"
 #include "ark/history_authoring.hpp"
@@ -766,7 +767,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
             if(!(tool=="import_step"||tool=="import_sheet_step")||!replace||replace->t!=V::Bool||!replace->b)
                 throw std::runtime_error("Resume full feature history before appending imported definitions or library components");
         }
-        static const std::set<std::string> custodyTools{"export_step","export_iges","export_mesh","drawing_export","drawing_inspect","bom_export_parts","snapshot","geometry_query","native_inspect","collision_inspect","assembly_info","assembly_motion","motion_info","explode_info","visualize_render","mesh_inspect","mesh_raycast","physics_inspect","manufacturing_inspect","reference_inspect","frame_inspect","electronics_inspect","pcb_export"};
+        static const std::set<std::string> custodyTools{"export_step","export_iges","export_mesh","drawing_export","drawing_inspect","bom_export_parts","snapshot","geometry_query","native_inspect","collision_inspect","assembly_info","assembly_motion","motion_info","explode_info","drag_chain_info","visualize_render","mesh_inspect","mesh_raycast","physics_inspect","manufacturing_inspect","reference_inspect","frame_inspect","electronics_inspect","pcb_export"};
         if(custodyTools.count(tool))verifyAssemblyExternalReferences(document);
         // Older direct clients may omit this field. When supplied (mandatory
         // for agent teams), every document replacement/history/import path
@@ -777,7 +778,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
                     throw std::runtime_error("Revision conflict; the current revision is in this result. Inspect only what your edit depends on and retry");
         if(tool=="context_graph")return result(projectContextGraph(document,revision,args,contextGraphCache_,contextGraphSource_,contextGraphStamp_));
         V extension;if(callProjectMemoryTool(*this,tool,args,extension))return result(extension);if(callAuthoring023Tool(*this,tool,args,extension))return result(extension);if(callComponentLibraryTool(*this,tool,args,extension))return result(extension);if(callAgentFeature(*this,tool,args,extension))return result(extension);if(callParametricHudTool(*this,tool,args,extension))return result(extension);
-        {V out;if(callAuthoring024Tool(*this,tool,args,out))return result(out);if(callMotionTool(*this,tool,args,out))return result(out);Image image;if(callExplodedViewTool(*this,tool,args,out,&image))return image.w?snapshotImageResult(image,out,std::string()):result(out);}
+        {V out;if(callAuthoring024Tool(*this,tool,args,out))return result(out);if(callMotionTool(*this,tool,args,out))return result(out);if(callDragChainTool(*this,tool,args,out))return result(out);Image image;if(callExplodedViewTool(*this,tool,args,out,&image))return image.w?snapshotImageResult(image,out,std::string()):result(out);}
         if(tool=="collision_inspect"||tool=="skeleton_inspect"||tool=="skeleton_compile"){
             if(const auto* expected=args.find("expected_revision"))if(expected->t!=V::Num||expected->num!=(double)revision)throw std::runtime_error("Revision conflict; inspect the current document before querying");
             V report;if(tool=="collision_inspect")report=inspectDocumentCollision(document,args);else if(tool=="skeleton_inspect")report=inspectSkeleton(document);else report=compileSkeletonPreview(document,skeletonSource(args));report.set("revision",V::makeNum((double)revision));return result(report);
@@ -1261,6 +1262,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
             for(const auto& command:commands.arr)if(const auto* op=command.find("op");op&&op->asStr()=="assembly.drive"&&!args.find("expected_revision"))throw std::runtime_error("assembly.drive requires expected_revision from the inspected document");
             for(const auto& command:commands.arr)if(const auto* op=command.find("op");op&&op->t==V::Str&&op->str.rfind("motion.",0)==0&&!args.find("expected_revision"))throw std::runtime_error("Motion authoring requires expected_revision from current doc_info");
             for(const auto& command:commands.arr)if(const auto* op=command.find("op");op&&op->t==V::Str&&op->str.rfind("explode.",0)==0&&!args.find("expected_revision"))throw std::runtime_error("Exploded view authoring requires expected_revision from current doc_info");
+            for(const auto& command:commands.arr)if(const auto* op=command.find("op");op&&op->t==V::Str&&op->str.rfind("drag_chain.",0)==0&&!args.find("expected_revision"))throw std::runtime_error("Drag chain authoring requires expected_revision from current doc_info");
             for(const auto& command:commands.arr)if((command.find("part")||(command.find("op")&&command.find("op")->asStr()=="bom.initialize"))&&!args.find("expected_revision"))throw std::runtime_error("BOM authoring requires expected_revision from current doc_info");
             for(const auto& command:commands.arr)if(!args.find("expected_revision")){
                 const auto* op=command.find("op"),*type=command.find("type");
@@ -1284,6 +1286,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
                 else if(applyAssemblyAuthoringCommand(next,c,error)){if(!error.empty())throw std::runtime_error(error);}
                 else if(op.rfind("motion.",0)==0){if(op=="motion.graph.set"||op=="motion.bake")validated(next);if(!applyMotionCommand(next,c,revision,error))throw std::runtime_error("Unknown operation: "+op);if(!error.empty())throw std::runtime_error(error);}
                 else if(op.rfind("explode.",0)==0){if(!applyExplodedViewCommand(next,c,error))throw std::runtime_error("Unknown operation: "+op);if(!error.empty())throw std::runtime_error(error);}
+                else if(op.rfind("drag_chain.",0)==0){if(op=="drag_chain.set")validated(next);if(!applyDragChainCommand(next,c,error))throw std::runtime_error("Unknown operation: "+op);if(!error.empty())throw std::runtime_error(error);} // 050B
                 else if(op=="bom.initialize"){if(c.obj.size()!=1)throw std::runtime_error("bom.initialize accepts only op");if(next.bomDocumentId.empty())next.bomDocumentId=newBomDocumentId();}
                 else if(applyAppearance024BCommand(next,c)){}
                 else if(op.rfind("drawing.",0)==0)applyDrawingCommand(next,c);
@@ -1724,7 +1727,7 @@ if(std::string(d.name)=="doc_apply"){
         V props=*schema.find("properties"),candidate=V::makeObj();candidate.set("type",V::makeStr("string"));props.set("candidate_id",candidate);V acceptDfm=V::makeObj();acceptDfm.set("type",V::makeStr("boolean"));acceptDfm.set("description",V::makeStr("Explicit acceptance after reviewing a manufacturing_propose comparison; required true for those candidates only."));props.set("accept_dfm",acceptDfm);props.set("checks",agentPostconditionsSchema());schema.set("properties",props);schema.obj.erase(std::remove_if(schema.obj.begin(),schema.obj.end(),[](const auto& p){return p.first=="required";}),schema.obj.end());V variants;arkjson::parse(R"([{"required":["commands"]},{"required":["candidate_id","expected_revision"]}])",variants);schema.set("oneOf",variants);
     }if(!d.read&&(std::string(d.name).rfind("doc_",0)==0||std::string(d.name).rfind("import_",0)==0||std::string(d.name)=="iteration_restore")){
         V actor,motivation=V::makeObj(),props=schema.find("properties")?*schema.find("properties"):V::makeObj();arkjson::parse(R"({"type":"object","properties":{"kind":{"type":"string","minLength":1,"maxLength":256},"id":{"type":"string","minLength":1,"maxLength":256},"role":{"type":"string","minLength":1,"maxLength":256},"model":{"type":"string","minLength":1,"maxLength":256}},"required":["kind","id"],"additionalProperties":false})",actor);motivation.set("type",V::makeStr("string"));motivation.set("maxLength",V::makeNum(4096));props.set("actor",actor);props.set("motivation",motivation);schema.set("properties",props);
-    }t.set("inputSchema",schema);annotations.set("readOnlyHint",V::makeBool(d.read));t.set("annotations",annotations);list.arr.push_back(t);}appendAgentFeatureTools(list);appendAuthoring023Tools(list);appendAuthoring024Tools(list);appendMotionTools(list);appendParametricHudTools(list);appendExplodedViewTools(list);
+    }t.set("inputSchema",schema);annotations.set("readOnlyHint",V::makeBool(d.read));t.set("annotations",annotations);list.arr.push_back(t);}appendAgentFeatureTools(list);appendAuthoring023Tools(list);appendAuthoring024Tools(list);appendMotionTools(list);appendParametricHudTools(list);appendExplodedViewTools(list);appendDragChainTools(list);
     V commandItems;
     for(const auto& tool:list.arr)if(tool.find("name")->str=="doc_apply")commandItems=*tool.find("inputSchema")->find("properties")->find("commands")->find("items");
     for(auto& tool:list.arr)if(tool.find("name")->str=="doc_preview"){V schema=*tool.find("inputSchema"),props=*schema.find("properties"),commands=*props.find("commands");commands.set("items",commandItems);props.set("commands",commands);schema.set("properties",props);tool.set("inputSchema",schema);}

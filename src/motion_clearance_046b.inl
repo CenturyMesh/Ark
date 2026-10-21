@@ -98,7 +98,10 @@ V inspectMotionClearance(Document& d,u64 revision,const std::string& name,const 
     size_t movingCount=0;
     for(auto& it:items){for(size_t c=0;c<g.bindings.size();++c)if(channelSet[c]>=0){const auto& set=solved.movingSets[(size_t)channelSet[c]];if(std::binary_search(set.begin(),set.end(),it.node)){it.channels.push_back(c);if(channelConstrained[c])it.chain=false;}}
         for(size_t x=0;x<it.channels.size();++x)for(size_t y=x+1;y<it.channels.size();++y){const auto& a=solved.movingSets[(size_t)channelSet[it.channels[x]]];const auto& b=solved.movingSets[(size_t)channelSet[it.channels[y]]];if(!std::includes(a.begin(),a.end(),b.begin(),b.end())&&!std::includes(b.begin(),b.end(),a.begin(),a.end()))it.chain=false;}
-        it.moving=!it.channels.empty()||movedAt(it.index);if(it.moving&&it.channels.empty())it.chain=false;if(it.moving)it.slot=movingCount++;}
+        // A follower rolls through a bend; rigid joint-tree displacement bounds
+        // cannot certify it, even when the sampled endpoint poses coincide.
+        const bool follower=program.followers.nodes.count(it.node)!=0;
+        it.moving=follower||!it.channels.empty()||movedAt(it.index);if(follower||(it.moving&&it.channels.empty()))it.chain=false;if(it.moving)it.slot=movingCount++;}
     // Candidate pairs. Scope queries skip structurally rigid pairs (one rigid
     // cluster, or proven chains with identical channel sets) and mated pairs.
     std::set<std::pair<u64,u64>> mated;for(const auto& m:d.mates){mated.insert({m.a,m.b});mated.insert({m.b,m.a});}
@@ -107,7 +110,7 @@ V inspectMotionClearance(Document& d,u64 revision,const std::string& name,const 
         std::set_difference(items[a].channels.begin(),items[a].channels.end(),items[b].channels.begin(),items[b].channels.end(),std::back_inserter(p.onlyA));std::set_difference(items[b].channels.begin(),items[b].channels.end(),items[a].channels.begin(),items[a].channels.end(),std::back_inserter(p.onlyB));return p;};
     if(!explicitPairs.empty()){for(const auto& [a,b]:explicitPairs){need(items[a].moving||items[b].moving,"MOTION_CLEARANCE_STATIC_PAIR: neither "+items[a].name+" nor "+items[b].name+" moves in motion "+name+"; use collision_inspect for a static pair");pairs.push_back(makePair(a,b));}}
     else for(size_t a=0;a<items.size();++a)if(items[a].moving)for(size_t b=0;b<items.size();++b){if(b==a||(items[b].moving&&b<a))continue;if(scope=="static"&&items[b].moving)continue;
-        if(items[a].cluster==items[b].cluster){++skippedRigid;continue;}if(mated.count({items[a].node,items[b].node})){++skippedMated;continue;}
+        if(items[a].cluster==items[b].cluster&&!program.followers.nodes.count(items[a].node)&&!program.followers.nodes.count(items[b].node)){++skippedRigid;continue;}if(mated.count({items[a].node,items[b].node})){++skippedMated;continue;}
         if(items[a].chain&&items[b].chain&&items[a].channels==items[b].channels){++skippedComoving;continue;}
         need(pairs.size()<kMaxClearancePairs046,"MOTION_CLEARANCE_CAPACITY: more than 1024 candidate pairs exceed the query capacity; declare pairs");pairs.push_back(makePair(a,b));}
     need(!pairs.empty(),"MOTION_CLEARANCE_NO_PAIRS: motion "+name+" has no candidate pair in scope "+scope+"; no clearance evidence is produced. Declare pairs explicitly");
