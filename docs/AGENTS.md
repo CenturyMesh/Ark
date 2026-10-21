@@ -78,6 +78,12 @@ native topology proves its original unique predicate. Otherwise a ready
 `read_resolutions` report requires your explicit decision that the observed
 semantic reference serves the design intent. Preserve the blocker when it does
 not. Historical projected progress never authorizes a write at an old revision.
+From 047D, a rejected read is also superseded automatically in one case: a
+committed `doc_apply` or `team_apply_step` that removes the inspected feature
+with a numeric `feature.remove` id. That rejection can no longer be answered.
+The committing receipt lists it under `team_progress.read_resolutions` with
+`resolution_source:"subject_removed"`. Rejected reads of surviving features
+remain.
 External `studio_team_diagnostics` is read-only and is not a model tool.
 See [041D contracts and evidence](iterations/041D.md).
 

@@ -9,6 +9,14 @@ The public iteration and numeric runtime are defined in
 increasing sequence and its principal phase. The letter is a roadmap phase, not a
 month; it does not declare the phase complete. The `.ark` format evolves separately.
 
+047D addresses **D.02/D.04**, **Parcial**. The Claude Code and Grok Build CLI
+channels drain stdout on a dedicated thread, so a CLI that streams while a tool
+runs no longer deadlocks the stdio pipes until the timeout. The Claude Code
+route sends user images as stream-json image blocks. A committed
+`feature.remove` supersedes rejected team reads of that feature as
+`subject_removed`. The scopes are **Verificado no escopo local**, without
+GitHub Actions; see [047D](iterations/047D.md).
+
 046B addresses **A.04/B.02/B.03/C.04/D.04**, **Parcial**. Sketches with
 several closed loops extrude, revolve and sweep as faces with holes in one
 feature, with an optional region selection at format 48. `motion_info` checks
@@ -276,9 +284,9 @@ remain **Parcial**; primitive success does not establish general design quality.
 | ID | Milestone | Status | Acceptance still governing the work |
 |---|---|---|---|
 | D.01 | Quality/time/cost benchmark | Parcial | At least 30 versioned briefs, three repeats per initial configuration and blind human evaluation; cost per accepted design includes failures and coordination. Harness exists; 008D pilots were 0/9 and 4/9, 009B closed at 1/9. These results prove no savings. |
-| D.02 | Responsible engineer and adaptive team | Parcial | Compare Single/Focused/Parallel; give specialists concrete useful assignments and choose concurrency by measured benefit. No default turn/token budgets. Context, completion, feedback and retained DFM proposal handoffs have scoped evidence; general quality/cost benefit remains unproven. [019B scope](iterations/019B.md) [021B proposal scope](iterations/021B.md). [022B contract/onboarding and independent performance audit](iterations/022B.md) preserve Focused defaults and explicit-request-only drawing work. [045A](iterations/045A.md) records live MCP bridge commits and failures for client feedback. |
+| D.02 | Responsible engineer and adaptive team | Parcial | Compare Single/Focused/Parallel; give specialists concrete useful assignments and choose concurrency by measured benefit. No default turn/token budgets. Context, completion, feedback and retained DFM proposal handoffs have scoped evidence; general quality/cost benefit remains unproven. [019B scope](iterations/019B.md) [021B proposal scope](iterations/021B.md). [022B contract/onboarding and independent performance audit](iterations/022B.md) preserve Focused defaults and explicit-request-only drawing work. [045A](iterations/045A.md) records live MCP bridge commits and failures for client feedback. [047D](iterations/047D.md) removes a CLI stdio deadlock and supersedes rejected reads of removed features. |
 | D.03 | Isolated part workspaces | Parcial | [023B design containers](DESIGN_CONTAINERS_023B.md) provide assembly-group checkout, explicit editable/read-only closure and atomic merge bound to parent source/revision and reviewed child digest. Conflicting ownership, unsupported cross-boundary references and stale source reject without silent rebase. Large-project scaling and general distributed collaboration remain unqualified. |
-| D.04 | Multimodal feedback and correction | Parcial | Shared author/reviewer diagnostics, revision-bound previews and intent-preserving correction remain the acceptance scope. 021B adds Z-up/custom snapshot cameras and guarded Studio viewport readback. [032D authored body/face colors and steady emission](SNAPSHOTS_032D.md) and [pattern-copy sampled native clearance](ASSEMBLY_MOTION_032D.md) have local checked scope; textures/stamps, continuous collision and general correction quality remain separate. [020B scope](iterations/020B.md) [021B scope](iterations/021B.md). [022B drawing curve origins, alternate-copy identities and guarded direct previews](iterations/022B.md). [046B Baked Motions clearance markers](MOTION_CLEARANCE_046B.md) show interference, below-threshold and uncertified intervals bound to the measured revision. |
+| D.04 | Multimodal feedback and correction | Parcial | Shared author/reviewer diagnostics, revision-bound previews and intent-preserving correction remain the acceptance scope. 021B adds Z-up/custom snapshot cameras and guarded Studio viewport readback. [032D authored body/face colors and steady emission](SNAPSHOTS_032D.md) and [pattern-copy sampled native clearance](ASSEMBLY_MOTION_032D.md) have local checked scope; textures/stamps, continuous collision and general correction quality remain separate. [020B scope](iterations/020B.md) [021B scope](iterations/021B.md). [022B drawing curve origins, alternate-copy identities and guarded direct previews](iterations/022B.md). [046B Baked Motions clearance markers](MOTION_CLEARANCE_046B.md) show interference, below-threshold and uncertified intervals bound to the measured revision. [047D](iterations/047D.md) sends user images through the Claude Code route. |
 | D.05 | Concept alternatives and reusable knowledge | Parcial | Compare alternatives against requirements, mass, process/cost and human preference using validated examples. A proposal must not be reported as a created part. |
 
 ## E — Industrial ecosystem
