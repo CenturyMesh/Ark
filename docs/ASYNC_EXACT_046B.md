@@ -132,22 +132,29 @@ background job (after), through the UI queue and through Studio code:
 | Studio code, after | 4586 ms | 6 ms | 4.4 ms | 0 ms | applied in 2 ms |
 | Queue, before (UI-thread call) | 5945 ms | 5951 ms | 5951 ms | 5457 ms | queued until the end |
 
-External live MCP probe: a real Studio window, two `ark-mcp --connect`
-clients, `SendMessageTimeout` every 20 ms, same fixture:
+External live MCP probe (`tests/async_exact_046b_live_probe.ps1`): a real
+Studio window with an isolated profile, two `ark-mcp --connect` clients,
+`SendMessageTimeout` every 20 ms, same fixture, about 20 ms resolution:
 
 | Binary | Wall time | Round trip max | Second client `doc_info` |
 |---|---|---|---|
-| e8ca022 (045A) | 4466 ms | 17.5 ms | 3935 ms |
-| 046B | 4623 ms | 11.3 ms | 31.5 ms |
+| e8ca022 (045A) | 4369 ms | 16.8 ms | 3843 ms |
+| 046B | 4433 ms | 10.8 ms | 30.6 ms |
 
-The exact job itself took 2-5% longer than the earlier path in these runs,
-while the live viewport kept rendering; contention was not isolated. This is
-not a speedup claim. Cancel through the chip delivered `CANCELLED` 46 ms after
-the click; a native request inside a cancelled job stopped in 12-19 ms.
+An earlier probe run with one warm-up gave 4466 and 4623 ms. The exact read
+took 1.5-5% longer than the earlier path in these runs while the live viewport
+kept rendering; contention was not isolated. This is not a speedup claim.
+Cancel through the chip delivered `CANCELLED` 46 ms after the click; a native
+request inside a cancelled job stopped in 12-19 ms.
 
 ## Verification
 
-`ctest -R "^(async-exact-046b|studio-async-exact-ui)$"` covers the allow-list,
+```powershell
+ctest --test-dir out/native-release -C Release -R '^(async-exact-046b|studio-async-exact-ui)$' --output-on-failure
+powershell -NoProfile -File tests/async_exact_046b_live_probe.ps1 -StudioPath <ark-studio.exe> -McpPath <ark-mcp.exe> -Out <probe.json>
+```
+
+The two tests cover the allow-list,
 write rejection, ordering after writes, revision labels, cancellation (queued,
 running, external predicate, native mid-request, human chip), the 120 s/1 s
 scoped limit wording, shutdown, concurrent writes during a read and a later read
