@@ -46,6 +46,20 @@ loops consumed without `native.regions` adds no field and keeps its earlier
 required version. `native.regions` below 48 rejects on load, including through
 iteration history. Version 49 and later reject as a future format.
 
+## Optional parameter field — 048B HUD (no format change)
+
+A `params` row may carry `hud:{label?,min?,max?,step,unit,group?,order?}`
+([Parametric HUD](PARAMETRIC_HUD_048B.md)). It is written only for exposed
+parameters, canonicalized (sorted keys, `unit` mm|deg|count|none, default
+`step`) and does not select a document version. Documents without it load
+unchanged. By code reading (not run against an older binary), a pre-048B reader
+ignores the field in a document without iteration history, but rejects a
+journaled document that carries it, because its history round-trip check
+cannot reproduce the stored snapshots; it does not drop the metadata silently.
+On load an invalid `hud` rejects with
+`HUD_INVALID`, and more than 64 exposed parameters reject with `HUD_CAPACITY`.
+A stored value outside its range loads and is rechecked only when it changes.
+
 ## Previous source extension — format 41
 
 029B conditionally selects source 41 for explicit `surface_edit` orientation

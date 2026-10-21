@@ -6,6 +6,7 @@
 #include "ark/document_container.hpp"
 #include "ark/authoring_024b.hpp"
 #include "ark/motion_graph.hpp"
+#include "ark/exploded_view.hpp"
 #include "ark/appearance_024b.hpp"
 #include "ark/skeleton.hpp"
 #include "ark/history_authoring.hpp"
@@ -47,6 +48,7 @@
 #include "ark/iteration_history.hpp"
 #include "ark/stock_preview.hpp"
 #include "ark/suspension.hpp"
+#include "ark/parametric_hud.hpp"
 #include <stdexcept>
 #include <set>
 #include <map>
@@ -762,7 +764,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
             if(!(tool=="import_step"||tool=="import_sheet_step")||!replace||replace->t!=V::Bool||!replace->b)
                 throw std::runtime_error("Resume full feature history before appending imported definitions or library components");
         }
-        static const std::set<std::string> custodyTools{"export_step","export_iges","export_mesh","drawing_export","drawing_inspect","bom_export_parts","snapshot","geometry_query","native_inspect","collision_inspect","assembly_info","assembly_motion","motion_info","mesh_inspect","mesh_raycast","physics_inspect","manufacturing_inspect","reference_inspect","frame_inspect","electronics_inspect","pcb_export"};
+        static const std::set<std::string> custodyTools{"export_step","export_iges","export_mesh","drawing_export","drawing_inspect","bom_export_parts","snapshot","geometry_query","native_inspect","collision_inspect","assembly_info","assembly_motion","motion_info","explode_info","visualize_render","mesh_inspect","mesh_raycast","physics_inspect","manufacturing_inspect","reference_inspect","frame_inspect","electronics_inspect","pcb_export"};
         if(custodyTools.count(tool))verifyAssemblyExternalReferences(document);
         // Older direct clients may omit this field. When supplied (mandatory
         // for agent teams), every document replacement/history/import path
@@ -772,8 +774,8 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
                 if(expected->t!=V::Num||expected->num!=(double)revision)
                     throw std::runtime_error("Revision conflict; the current revision is in this result. Inspect only what your edit depends on and retry");
         if(tool=="context_graph")return result(projectContextGraph(document,revision,args,contextGraphCache_,contextGraphSource_,contextGraphStamp_));
-        V extension;if(callProjectMemoryTool(*this,tool,args,extension))return result(extension);if(callAuthoring023Tool(*this,tool,args,extension))return result(extension);if(callComponentLibraryTool(*this,tool,args,extension))return result(extension);if(callAgentFeature(*this,tool,args,extension))return result(extension);
-        {V out;if(callAuthoring024Tool(*this,tool,args,out))return result(out);if(callMotionTool(*this,tool,args,out))return result(out);}
+        V extension;if(callProjectMemoryTool(*this,tool,args,extension))return result(extension);if(callAuthoring023Tool(*this,tool,args,extension))return result(extension);if(callComponentLibraryTool(*this,tool,args,extension))return result(extension);if(callAgentFeature(*this,tool,args,extension))return result(extension);if(callParametricHudTool(*this,tool,args,extension))return result(extension);
+        {V out;if(callAuthoring024Tool(*this,tool,args,out))return result(out);if(callMotionTool(*this,tool,args,out))return result(out);Image image;if(callExplodedViewTool(*this,tool,args,out,&image))return image.w?snapshotImageResult(image,out,std::string()):result(out);}
         if(tool=="collision_inspect"||tool=="skeleton_inspect"||tool=="skeleton_compile"){
             if(const auto* expected=args.find("expected_revision"))if(expected->t!=V::Num||expected->num!=(double)revision)throw std::runtime_error("Revision conflict; inspect the current document before querying");
             V report;if(tool=="collision_inspect")report=inspectDocumentCollision(document,args);else if(tool=="skeleton_inspect")report=inspectSkeleton(document);else report=compileSkeletonPreview(document,skeletonSource(args));report.set("revision",V::makeNum((double)revision));return result(report);
@@ -1256,6 +1258,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
             for(const auto& command:commands.arr)if(const auto* op=command.find("op");op&&op->t==V::Str&&op->str.rfind("drawing.",0)==0&&!args.find("expected_revision"))throw std::runtime_error("Technical drawing authoring requires expected_revision from current doc_info");
             for(const auto& command:commands.arr)if(const auto* op=command.find("op");op&&op->asStr()=="assembly.drive"&&!args.find("expected_revision"))throw std::runtime_error("assembly.drive requires expected_revision from the inspected document");
             for(const auto& command:commands.arr)if(const auto* op=command.find("op");op&&op->t==V::Str&&op->str.rfind("motion.",0)==0&&!args.find("expected_revision"))throw std::runtime_error("Motion authoring requires expected_revision from current doc_info");
+            for(const auto& command:commands.arr)if(const auto* op=command.find("op");op&&op->t==V::Str&&op->str.rfind("explode.",0)==0&&!args.find("expected_revision"))throw std::runtime_error("Exploded view authoring requires expected_revision from current doc_info");
             for(const auto& command:commands.arr)if((command.find("part")||(command.find("op")&&command.find("op")->asStr()=="bom.initialize"))&&!args.find("expected_revision"))throw std::runtime_error("BOM authoring requires expected_revision from current doc_info");
             for(const auto& command:commands.arr)if(!args.find("expected_revision")){
                 const auto* op=command.find("op"),*type=command.find("type");
@@ -1278,12 +1281,13 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
                 if(applyFeatureHistoryCommand(next,c)){}
                 else if(applyAssemblyAuthoringCommand(next,c,error)){if(!error.empty())throw std::runtime_error(error);}
                 else if(op.rfind("motion.",0)==0){if(op=="motion.graph.set"||op=="motion.bake")validated(next);if(!applyMotionCommand(next,c,revision,error))throw std::runtime_error("Unknown operation: "+op);if(!error.empty())throw std::runtime_error(error);}
+                else if(op.rfind("explode.",0)==0){if(!applyExplodedViewCommand(next,c,error))throw std::runtime_error("Unknown operation: "+op);if(!error.empty())throw std::runtime_error(error);}
                 else if(op=="bom.initialize"){if(c.obj.size()!=1)throw std::runtime_error("bom.initialize accepts only op");if(next.bomDocumentId.empty())next.bomDocumentId=newBomDocumentId();}
                 else if(applyAppearance024BCommand(next,c)){}
                 else if(op.rfind("drawing.",0)==0)applyDrawingCommand(next,c);
                 else if(op=="skeleton.set")setSkeletonSource(next,skeletonSource(c));
                 else if(op=="skeleton.remove"){setSkeletonSource(next,"");next.skeleton=V{};}
-                else if(op=="param.set"){const auto name=str(c,"name"),expr=expression(field(c,"expr"));setSkeletonInput(next,name,expr);next.setParam(name,expr);}
+                else if(op=="param.set"){const auto name=str(c,"name");if(c.find("expr")||!c.find("hud")){const auto expr=expression(field(c,"expr"));setSkeletonInput(next,name,expr);next.setParam(name,expr);}if(const auto* hud=c.find("hud"))applyParameterHud(next,name,*hud);}
                 else if(op.rfind("sheet.",0)==0){V bound=c;if(op!="sheet.create")bound.set("id",V::makeNum((double)featureRef(next,field(c,"id"))));auto edited=applySheetCommand(next,bound);if(op=="sheet.create")created.arr.push_back(*edited.find("feature_id"));sheetEdits.arr.push_back(edited);}
                 else if(op.rfind("frame.",0)==0){V bound=c;bound.set("id",V::makeNum((double)featureRef(next,field(c,"id"))));auto edited=applyFrameCommand(next,bound);sheetEdits.arr.push_back(edited);}
                 else if(op=="plane.set"||op=="plane.remove"){
@@ -1434,6 +1438,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
                 else throw std::runtime_error("Unknown operation: "+op);
             }
             applying=false;
+            validateHudTransition(document,next);
             validateDesignContainerTransition(document,next);
             validateDatumTransition(document,next);
             const bool drawingEdits=std::any_of(commands.arr.begin(),commands.arr.end(),[](const V& c){const auto* op=c.find("op");return op&&op->t==V::Str&&(op->str=="drawing.set"||op->str=="drawing.refresh");});
@@ -1547,7 +1552,8 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
         if(tool=="tool_feedback"||tool=="activity_info"){r.set("error_code",V::makeStr("ACTIVITY_VALIDATION_FAILED"));}
         if(tool=="object_context"&&(message.find("OBJECT_CONTEXT_REFERENCE_MISSING")!=std::string::npos||message.find("name not found")!=std::string::npos))r.set("error_code",V::makeStr("REFERENCE_MISSING"));
         for(const char* prefix:{"MECHANICAL_","ASSEMBLY_","MANIPULATION_"})if(const auto start=message.find(prefix);start!=std::string::npos){const auto end=message.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ_",start);r.set("error_code",V::makeStr(message.substr(start,end==std::string::npos?end:end-start)));break;}
-        if(message.rfind("DFM_ACCEPTANCE_",0)==0){const auto end=message.find(':');r.set("error_code",V::makeStr(message.substr(0,end)));}
+        if(message.rfind("DFM_ACCEPTANCE_",0)==0||message.rfind("HUD_",0)==0){const auto end=message.find(':');r.set("error_code",V::makeStr(message.substr(0,end)));}
+        if(message.rfind("EXPLODE_",0)==0||message.rfind("VISUALIZE_",0)==0)r.set("error_code",V::makeStr(message.substr(0,message.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ_"))));
         if(r.find("error_code")->str=="REVISION_CONFLICT"){
             // The current revision is already in this result. Point at the cheap
             // explicit path instead of a full design read; never rebase silently.
@@ -1595,7 +1601,7 @@ V AgentSession::tools(bool detailed){
         {"electronics_inspect","Read PCB layers, net connectivity, clearance DRC and BOM, or a cable route's bend radius, exact length and independently checked obstacle clearance. Does not certify electrical or manufacturing performance.",R"({"type":"object","properties":{"id":{"type":["integer","string"]}},"required":["id"]})",true},
         {"pcb_export","Export PCB copper and outline Gerbers, plated/non-plated Excellon drill files and JSON netlist as a fabrication preview. Run electronics_inspect for incomplete nets and DRC scope first.",R"({"type":"object","properties":{"id":{"type":["integer","string"]},"path_prefix":{"type":"string"}},"required":["id","path_prefix"]})",false},
         {"export_iges","Export a selected exact B-rep as IGES in millimetres, with independent readback bounds/area checks and solid-topology status. Default pose formed; flat is available only for sheet features.",R"({"type":"object","properties":{"id":{"type":["integer","string"]},"path":{"type":"string"},"pose":{"type":"string","enum":["flat","formed"]}},"required":["id","path"]})",false},
-        {"agent_onboard","START HERE. Discover current document/revision, supported modeling workflows, reusable component library, examples and validation limits. Read-only; choose a topic before modeling.",R"({"type":"object","properties":{"topic":{"type":"string","enum":["bom","fasteners","components","vendors","plastics","motion","manufacturing","physics","automation","overview","sketch","tube","assembly","surfacing","sheet","solids","mesh","materials","frames","electronics","routing","suspension","skeleton","drawings","holes","cad_import","containers","stamps","planes","history","configurations","wood","networks","lighting"]}}})",true},
+        {"agent_onboard","START HERE. Discover current document/revision, supported modeling workflows, reusable component library, examples and validation limits. Read-only; choose a topic before modeling.",R"({"type":"object","properties":{"topic":{"type":"string","enum":["bom","fasteners","components","vendors","plastics","motion","manufacturing","physics","automation","overview","sketch","tube","assembly","surfacing","sheet","solids","mesh","materials","frames","electronics","routing","suspension","skeleton","drawings","holes","cad_import","containers","stamps","planes","history","configurations","wood","networks","lighting","hud"]}}})",true},
         {"doc_info","Document summary/inventory. detail design returns feature operations/dependencies/roles, sketch names, origins, manufacturing declarations and measured volume/bounds. ids/sections require detail design or omitted detail (inferred design); explicit summary cannot use either filter. Examples: {detail:summary}, {detail:design,sections:[features,assembly]}. Optional ids selects 1..64 feature ids or unique names (default section features); sections selects features|sketches|parameters|assembly|materials. With ids, sketches/assembly/materials are direct associations; parameters stay document-wide. Selected reads expose partial, scope, section_scopes and total_counts. detail digest returns compact feature/sketch/node rows, parameters and a fingerprints map; send that map back as known_fingerprints to receive only changed rows plus removed keys. No meshes/native payloads; read-only.",R"({"type":"object","anyOf":[{"properties":{"detail":{"enum":["design"]}}},{"not":{"anyOf":[{"required":["ids"]},{"required":["sections"]}]}}],"properties":{"detail":{"type":"string","enum":["summary","design"]},"ids":{"type":"array","minItems":1,"maxItems":64,"items":{"oneOf":[{"type":"integer","minimum":1},{"type":"string","minLength":1,"maxLength":128}]}},"sections":{"type":"array","minItems":1,"maxItems":5,"uniqueItems":true,"items":{"type":"string","enum":["features","sketches","parameters","assembly","materials"]}}}})",true},
         {"doc_new","Start an empty document only when requested. Clears the active model with undo and a monotonically increasing revision; does not overwrite saved files.",R"({"type":"object","properties":{"expected_revision":{"type":"integer","minimum":0}},"required":["expected_revision"]})",false},
         {"doc_get","Read full parametric document, including expressions and revision.",R"({"type":"object"})",true},
@@ -1708,7 +1714,7 @@ if(std::string(d.name)=="doc_apply"){
         V props=*schema.find("properties"),candidate=V::makeObj();candidate.set("type",V::makeStr("string"));props.set("candidate_id",candidate);V acceptDfm=V::makeObj();acceptDfm.set("type",V::makeStr("boolean"));acceptDfm.set("description",V::makeStr("Explicit acceptance after reviewing a manufacturing_propose comparison; required true for those candidates only."));props.set("accept_dfm",acceptDfm);props.set("checks",agentPostconditionsSchema());schema.set("properties",props);schema.obj.erase(std::remove_if(schema.obj.begin(),schema.obj.end(),[](const auto& p){return p.first=="required";}),schema.obj.end());V variants;arkjson::parse(R"([{"required":["commands"]},{"required":["candidate_id","expected_revision"]}])",variants);schema.set("oneOf",variants);
     }if(!d.read&&(std::string(d.name).rfind("doc_",0)==0||std::string(d.name).rfind("import_",0)==0||std::string(d.name)=="iteration_restore")){
         V actor,motivation=V::makeObj(),props=schema.find("properties")?*schema.find("properties"):V::makeObj();arkjson::parse(R"({"type":"object","properties":{"kind":{"type":"string","minLength":1,"maxLength":256},"id":{"type":"string","minLength":1,"maxLength":256},"role":{"type":"string","minLength":1,"maxLength":256},"model":{"type":"string","minLength":1,"maxLength":256}},"required":["kind","id"],"additionalProperties":false})",actor);motivation.set("type",V::makeStr("string"));motivation.set("maxLength",V::makeNum(4096));props.set("actor",actor);props.set("motivation",motivation);schema.set("properties",props);
-    }t.set("inputSchema",schema);annotations.set("readOnlyHint",V::makeBool(d.read));t.set("annotations",annotations);list.arr.push_back(t);}appendAgentFeatureTools(list);appendAuthoring023Tools(list);appendAuthoring024Tools(list);appendMotionTools(list);
+    }t.set("inputSchema",schema);annotations.set("readOnlyHint",V::makeBool(d.read));t.set("annotations",annotations);list.arr.push_back(t);}appendAgentFeatureTools(list);appendAuthoring023Tools(list);appendAuthoring024Tools(list);appendMotionTools(list);appendParametricHudTools(list);appendExplodedViewTools(list);
     V commandItems;
     for(const auto& tool:list.arr)if(tool.find("name")->str=="doc_apply")commandItems=*tool.find("inputSchema")->find("properties")->find("commands")->find("items");
     for(auto& tool:list.arr)if(tool.find("name")->str=="doc_preview"){V schema=*tool.find("inputSchema"),props=*schema.find("properties"),commands=*props.find("commands");commands.set("items",commandItems);props.set("commands",commands);schema.set("properties",props);tool.set("inputSchema",schema);}

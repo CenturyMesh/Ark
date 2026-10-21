@@ -1,5 +1,30 @@
 # ARK agent protocol
 
+048B Parametric HUD: only when the user explicitly asks for a HUD, adjustable
+dimensions or a parametric design, load `agent_onboard{topic:"hud"}`. Declare
+the driving parameters with `param.set{name,expr,hud:{label,min,max,step,unit,group,order}}`,
+make every driven dimension an expression of them, run the read-only
+`hud_flex_check` (min/mid/max per parameter on a scratch copy) and fix failures,
+then report `hud_info`'s list. A value outside the HUD range rejects with
+`HUD_VALUE_OUT_OF_RANGE` and the document is unchanged; ARK never clamps an
+agent value. A flex pass covers only the sampled values. The human edits the
+same parameters from the Studio HUD as ordinary human `param.set` transactions.
+See [Parametric HUD](PARAMETRIC_HUD_048B.md).
+
+048B exploded views and Visualize (B.04/B.05/D.04, **Parcial**): author an
+exploded view only when the user explicitly asks for one, an assembly image or
+an assembly drawing, the same rule as 2D drawings. `explode.set{name,steps}`,
+`explode.rename` and `explode.remove` use revision-checked `doc_apply`; each step
+moves instances along `+X..-Z` or `[x,y,z]` by a distance in mm or a parameter
+expression, and steps play in order over factor 0..1. Exploded positions are
+display transforms: B-rep, mates and placements never move, and changing the
+factor never changes the revision. A motion channel without `mate` may set
+`explode_view` (values 0..1) to animate a view with the joints. Read
+`explode_info` (`propose` suggests an uncommitted step list) and render images
+with `visualize_render`; images are display tessellation, never geometric
+authority. Load `agent_onboard{topic:"exploded_views"}` and see
+[exploded views and Visualize](EXPLODED_VISUALIZE_048B.md).
+
 046B profile regions: a sketch with several non-touching closed loops extrudes
 (`native_solid` extrude, all end conditions; legacy extrude), revolves
 (`revolve_surface` solid:1) and sweeps (section, solid:1) as faces with holes by
@@ -561,6 +586,7 @@ Use `created_ids` returned by a batch as inputs to later features. IDs are monot
 | `doc_apply` | Atomic modeling batch |
 | `doc_undo`, `doc_redo` | Persistent iteration undo/redo after reopen; revision increases |
 | `history_info`, `iteration_restore` | Bounded iteration metadata and branch-preserving authoring restoration |
+| `hud_info`, `hud_flex_check` | Read-only Parametric HUD inventory with dependents, and a sampled min/mid/max scratch rebuild check (topic `hud`) |
 | `eval_expr` | Finite arithmetic and trig evaluation |
 | `mesh_inspect` | Indexed topology, measurements and explicit validation limits |
 | `mesh_raycast` | Nearest triangle hit, normalized direction, distance in mm |

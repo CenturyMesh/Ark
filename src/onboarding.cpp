@@ -2,6 +2,7 @@
 #include "ark/onboarding.hpp"
 #include "ark/modeling_031b.hpp"
 #include "ark/sketch.hpp"
+#include "ark/parametric_hud.hpp"
 #include <stdexcept>
 #include <algorithm>
 #include <map>
@@ -9,6 +10,7 @@
 namespace ark {
 #include "onboarding_035b.inl"
 #include "onboarding_044b.inl"
+#include "onboarding_048b.inl"
 std::string agentOnboardingPack(const std::vector<std::string>& topics){
     using V=arkjson::Value;
     static std::mutex mutex;static std::map<std::vector<std::string>,std::string> packs;
@@ -27,15 +29,15 @@ arkjson::Value agentOnboard(const AgentSession& session,const arkjson::Value& ar
     for(const auto& field:args.obj)if(field.first!="topic"&&field.first!="detail")throw std::runtime_error("Unknown agent_onboard field: "+field.first);
     std::string detail="full";if(const auto* value=args.find("detail")){if(value->t!=V::Str||(value->str!="full"&&value->str!="guide"))throw std::runtime_error("agent_onboard detail must be full or guide");detail=value->str;}
     if(auto p=args.find("topic")){if(p->t!=V::Str)throw std::runtime_error("topic must be a string");topic=p->str;}
-    if(topic!="bom"&&topic!="fasteners"&&topic!="components"&&topic!="vendors"&&topic!="plastics"&&topic!="motion"&&topic!="manufacturing"&&topic!="physics"&&topic!="automation"&&topic!="overview"&&topic!="sketch"&&topic!="tube"&&topic!="assembly"&&topic!="surfacing"&&topic!="sheet"&&topic!="solids"&&topic!="mesh"&&topic!="materials"&&topic!="frames"&&topic!="electronics"&&topic!="routing"&&topic!="suspension"&&topic!="skeleton"&&topic!="drawings"&&topic!="holes"&&topic!="cad_import"&&topic!="containers"&&topic!="stamps"&&topic!="planes"&&topic!="history"&&topic!="configurations"&&topic!="wood"&&topic!="networks"&&topic!="lighting")throw std::runtime_error("Unknown onboarding topic; use available_topics from agent_onboard overview");
+    if(topic!="bom"&&topic!="fasteners"&&topic!="components"&&topic!="vendors"&&topic!="plastics"&&topic!="motion"&&topic!="manufacturing"&&topic!="physics"&&topic!="automation"&&topic!="overview"&&topic!="sketch"&&topic!="tube"&&topic!="assembly"&&topic!="surfacing"&&topic!="sheet"&&topic!="solids"&&topic!="mesh"&&topic!="materials"&&topic!="frames"&&topic!="electronics"&&topic!="routing"&&topic!="suspension"&&topic!="skeleton"&&topic!="drawings"&&topic!="holes"&&topic!="cad_import"&&topic!="containers"&&topic!="stamps"&&topic!="planes"&&topic!="history"&&topic!="configurations"&&topic!="wood"&&topic!="networks"&&topic!="lighting"&&topic!="hud"&&topic!="exploded_views")throw std::runtime_error("Unknown onboarding topic; use available_topics from agent_onboard overview");
     V r=V::makeObj();r.set("product",V::makeStr("ARK"));r.set("name",V::makeStr("Agent-Ready Kernel"));r.set("tagline",V::makeStr("Parametric CAD for people and agents."));r.set("version",V::makeStr(ark::app_version()));r.set("iteration_code",V::makeStr(ark::app_iteration_code()));r.set("topic",V::makeStr(topic));if(detail=="full")r.set("document",session.info());
     r.set("detail",V::makeStr(detail));r.set("document_state_included",V::makeBool(detail=="full"));
     r.set("units",V::makeStr("Lengths mm; plane/feature rotations degrees; sketch angle constraints and trig radians. deg(x) converts degrees to radians."));
     auto list=[](std::initializer_list<const char*> strings){V a=V::makeArr();for(auto s:strings)a.arr.push_back(V::makeStr(s));return a;};
     r.set("workflow",list({"Reuse agent_onboard detail:guide for static guidance. Read doc_info detail:revision for current revision/status, or doc_info detail:digest for a compact per-revision inventory whose fingerprints, sent back as known_fingerprints, return only later changes. Then use object_context for selected targets or filtered doc_info detail:design for required operations/dependencies and measured evidence. Use doc_get only when the full document is needed.","Use doc_preview detail:changes for compact checked proposals and doc_apply with expected_revision. One batch recomputes once; any failure rolls back the entire batch.","Use created_ids returned by a batch for later feature inputs. Do not assume IDs or use triangle IDs as persistent references.","Inspect native_inspect detail:properties for current native validity/physical properties, report for operation diagnostics, full for reference topology. Mesh/raycast evidence is display tessellation.","Keep queries compact; request meshes or snapshots only when needed. Save the parametric document with doc_save."}));
-    r.set("available_topics",list({"bom","fasteners","components","vendors","plastics","motion","manufacturing","physics","automation","overview","sketch","tube","assembly","surfacing","sheet","solids","mesh","materials","frames","electronics","routing","suspension","skeleton","drawings","holes","cad_import","containers","stamps","planes","history","configurations","wood","networks","lighting"}));
+    r.set("available_topics",list({"bom","fasteners","components","vendors","plastics","motion","manufacturing","physics","automation","overview","sketch","tube","assembly","surfacing","sheet","solids","mesh","materials","frames","electronics","routing","suspension","skeleton","drawings","holes","cad_import","containers","stamps","planes","history","configurations","wood","networks","lighting","hud","exploded_views"}));
     r.set("drawing_authorization",V::makeStr("Agents create, edit, refresh or export 2D technical/manufacturing drawings only when the user explicitly requests that drawing work. Design completion, a BOM review or an available drawing template does not authorize drawing writes. Read-only drawing_inspect discovery remains available; human Studio drawing controls remain manual."));
-    if(onboarding035B(session,topic,r))return r;
+    if(onboarding035B(session,topic,r)||onboardingParametricHud(session,topic,r)||onboarding048B(session,topic,r))return r;
     if(topic=="wood"||topic=="networks"||topic=="lighting"){
         r.set("tools",list({"doc_info","doc_apply","native_inspect","mesh_inspect","wood_inspect","snapshot"}));
         r.set("rules",list({
@@ -109,7 +111,7 @@ arkjson::Value agentOnboard(const AgentSession& session,const arkjson::Value& ar
         }));
         r.set("next_step",V::makeStr("For explicitly requested 2D drawing work: drawing_inspect{} -> select a supported source and its suggested_drawing -> revision-checked drawing.set -> inspect the current sheet -> explicit drawing.refresh after source edits -> drawing_export at the current revision. Human Studio controls and agents use this same source recipe; availability never authorizes an automatic drawing write."));
     }else if(topic=="motion"){
-        r.set("tools",list({"doc_info","doc_apply","reference_inspect","assembly_info","assembly_motion","motion_info","doc_save"}));onboardingSkeletonMotion044B(r);
+        r.set("tools",list({"doc_info","doc_apply","reference_inspect","assembly_info","assembly_motion","motion_info","doc_save"}));onboardingSkeletonMotion044B(r);onboardingExplodeMotion048B(r);
         r.set("rules",list({
             "For direct steering/dragging, inspect assembly_info{drive:{driver,mate?,mode:rotate|translate,delta}} and commit assembly.drive with observed expected_revision. To only look at a pose, use doc_preview plus snapshot{candidate_id} instead of committing and reverting a drive. This moves the grounded joint's connected side; rigid handlebar attachments and wheel mounts follow the fork while passive wheel spin stays at its current coordinate. Load assembly onboarding for the joint contract. assembly_motion remains the separate ideal transmission inspection.","First solve static positioning with ordinary geometric mates and grounded supports. Mechanical couplings relate instance degrees of freedom; they do not position sprockets, enforce pitch-center distances or replace mounts. Endpoints a/b are part instances, never feature definitions or groups. Moving endpoints must not be fixed or assembly patterns.",
             "mate.add{a,b,type:chain|gear,reference_a,reference_b,motion:{teeth_a,teeth_b,phase_deg?}} couples rotations. Teeth are integer expressions 1..10000; chain uses same physical direction and ratio teeth_a/teeth_b, external gear opposite physical direction. Signed local rotation correctly accounts for opposite selected semantic axes. Axes must be parallel. Phase is a driven angular offset from the authored static pose.",

@@ -1,6 +1,6 @@
 struct MeasurementState {int mode=0,count=0;u64 revision=0,epoch=0;Mat4 frame;std::string plane="XY";Vec3 a,b;std::string sourceA,sourceB;};
 static MeasurementState g_measure;
-static bool measurementPreviewActive(){return g_allSheetsFlat||g_allSheetsPlaying||g_stockMode||g_motionActive||g_foldProgress!=0||g_sheetPlayingId||g_componentMove.active||std::any_of(g_sheetProgress.begin(),g_sheetProgress.end(),[](const auto& p){return p.second<1;})||std::any_of(g_sheetFlatViews.begin(),g_sheetFlatViews.end(),[](const auto& p){return p.second;});}
+static bool measurementPreviewActive(){return g_allSheetsFlat||g_allSheetsPlaying||g_stockMode||g_motionActive||g_foldProgress!=0||g_sheetPlayingId||g_componentMove.active||explodedDisplayActive()||std::any_of(g_sheetProgress.begin(),g_sheetProgress.end(),[](const auto& p){return p.second<1;})||std::any_of(g_sheetFlatViews.begin(),g_sheetFlatViews.end(),[](const auto& p){return p.second;});}
 static bool measurementActive(){return g_measure.mode!=0;}
 static void endMeasurement(){g_measure={};g_status="Measurement closed";}
 static void beginMeasurement(int mode){
