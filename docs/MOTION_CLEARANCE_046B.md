@@ -39,7 +39,12 @@ solid; otherwise `MOTION_CLEARANCE_UNSUPPORTED_GEOMETRY`, never a mesh fallback.
   re-bakes. No bake: `MOTION_NOT_BAKED`.
 - The frames are re-solved in double precision with the bake's solver path.
   The stored float32 frames must agree within 0.01 mm (rotation entries scaled
-  by 1000 mm), else `MOTION_BAKE_MISMATCH`.
+  by 1000 mm), else `MOTION_BAKE_MISMATCH`. Since 049A a bake is a receipt
+  without stored frames: the re-solve, rounded to float32, must reproduce the
+  receipt's `frames_sha256`, `coordinates_sha256` and moving instances, else
+  `MOTION_BAKE_MISMATCH`; the verified frames are then cached for playback.
+  `method.bake_frames` states which check ran. Results are otherwise unchanged
+  ([derived bakes](DERIVED_BAKES_049A.md)).
 - The result carries `bound_to{revision,source_digest,graph_digest,bake_source_revision}`.
   It is derived evidence: nothing is saved and the document format is unchanged.
   A process cache of 8 results is keyed by motion name, both digests, fps, the

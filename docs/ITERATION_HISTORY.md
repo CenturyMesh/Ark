@@ -10,6 +10,8 @@ adding a node because its authoring state did not change.
 Version 27 stores a first observed baseline, structural authoring deltas and a
 SHA-256 dictionary for strings of at least 1024 bytes, including imported STEP
 and B-rep payloads. The current authoring also references that dictionary.
+The journal object carries `schema:1`; only an explicit 049A migration writes
+`schema:2` (see below).
 Evaluated meshes, caches, journal snapshots and token ledger snapshots are
 excluded. Older versions through 26 remain readable; their first mutation
 captures the loaded state as baseline. Earlier unsaved actions are unknown.
@@ -81,3 +83,70 @@ read-only instead:
 `assembly_info{drive|sweep}`, or `doc_preview` with `assembly.drive` followed
 by `snapshot{candidate_id,expected_revision}`. Both nodes of a round trip stay
 in the journal; no node is merged, rewritten or deleted.
+
+## Derived baked frames — 049A
+
+Baked-motion frames are derived data and never enter the journal. A bake stores
+a receipt with `frames_sha256` and `coordinates_sha256`; the frames live in
+memory and the optional derived section ([derived bakes](DERIVED_BAKES_049A.md)).
+Re-baking at a higher fps therefore no longer grows the journal.
+
+Documents written by 044B-048B kept inline frames in the authoring, so every
+re-bake added a new copy to the blob dictionary. Opening such a document
+changes nothing: authoring and journal stay byte-identical and the frames stay
+readable. The next `motion.bake` of a motion writes a receipt; that node's
+delta erases the payload keys and adds no frame bytes. Older nodes keep theirs.
+
+`history_info` reports `schema`, `migrations` and `inline_bake_payloads`
+(`references`, unique `bytes`, and a hint while any remain). A commit rejected
+for capacity adds `derived_bakes.inline_bake_payload_bytes` when old frames are
+present, and the 75% `history_capacity` warning adds
+`inline_bake_payload_bytes`.
+
+### Explicit migration
+
+```json
+{"tool":"history_migrate_derived","arguments":{
+  "path":"C:/designs/kiosk.ark","expected_revision":41,"confirm":true,
+  "motivation":"Reclaim derived frames","actor":{"kind":"human","id":"studio"}
+}}
+```
+
+Run it only on the user's explicit instruction. It rejects with
+`HISTORY_MIGRATION_CONFIRM_REQUIRED` without `confirm:true`,
+`HISTORY_MIGRATION_PATH_REQUIRED` unless `path` is an existing saved `.ark`,
+`REVISION_CONFLICT`, `HISTORY_MIGRATION_NO_JOURNAL` and
+`HISTORY_MIGRATION_NOT_NEEDED`. Every rejection leaves the document and its
+revision unchanged. Then:
+
+1. The complete current document (authoring, journal, usage and activity) is
+   saved beside `path` as `<name>.pre-049A.ark`, or `-2` up to `-99` when that
+   name exists. It is written to a staging file and published without replacing
+   any file, then reopened and compared with the session document. Failure
+   stops here (`HISTORY_MIGRATION_BACKUP_*`).
+2. Every authoring state (baseline, every node, every branch) is replayed and
+   every inline bake becomes a receipt; a state with a receipt selects format 49.
+   Deltas are recomputed from the converted parent and child states, the blob
+   dictionary is rebuilt from what they reference (frame blobs disappear), and
+   `before_sha256`, `after_sha256`, the baseline id and node ids are recomputed.
+   Parent, previous head, restore, head and undo/redo references are remapped.
+   Actor, tool, summary, motivation, UTC time and ordinal of every node are kept.
+3. The journal becomes `schema:2` and gains a `migrations` record:
+   `kind:"derived_bakes"`, actor, caller-declared provenance, motivation, UTC,
+   previous and new head and baseline ids, node and state counts, payload
+   references and bytes, blob counts, journal and document bytes before and
+   after, and the backup path, size and verification. The record is not part of
+   any node hash; like undo/redo stacks it is checked for shape, not signed.
+4. The rewritten journal is validated and the migrated document reopened in
+   memory; only then does it replace the session document and the revision
+   advance by one. Prepared candidates are discarded. The current frames stay
+   cached for playback.
+
+The tool does not save. `doc_save{path}` writes the migrated document and its
+frames to the derived section. Studio's **Persistent iterations** dialog offers
+**Reclaim baked frames** while inline frames remain; it states the backup name,
+asks for confirmation, runs the tool and saves to the open document's path. A
+document that was never saved is refused.
+
+Node ids change. Agents must re-read `history_info` before `iteration_restore`.
+Restore, undo and redo work on the rewritten journal.

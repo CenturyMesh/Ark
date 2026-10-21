@@ -1,5 +1,23 @@
 # ARK agent protocol
 
+049A derived bakes (A.02/C.04, **Parcial**): `motion.bake` now stores a receipt
+(the bake fields plus `frames_sha256`/`coordinates_sha256`), never frames. Frames
+are derived data from memory, the document's derived section or a re-bake that
+must reproduce the receipt; `motion_info{name,frame}` and `visualize_render`
+report `frames.source` and `verified`, and an unverified re-bake is never the
+recorded evidence. Re-baking no longer grows the journal, so choose fps for the
+motion, not for the file size. `MOTION_FRAME_STEP_TOO_LARGE` returns
+`frame_step{channel,frame,time_s,max_step_deg,fps,required_fps,fps_limit}`:
+bake again with `required_fps`, or slow the channel when it is 0. A 044B-048B
+document may still hold inline frames; `history_info.inline_bake_payloads` and
+capacity rejections (`derived_bakes`) say so. Only on the user's explicit
+instruction call `history_migrate_derived{path,expected_revision,confirm:true}`:
+it backs up the saved document beside `path` as `<name>.pre-049A.ark`, rewrites
+the journal without the frames (schema 2, new iteration ids, recorded in
+`history_info.migrations`) and leaves saving to `doc_save`. Re-read
+`history_info` before any `iteration_restore`. See
+[derived bakes](DERIVED_BAKES_049A.md).
+
 048B Parametric HUD: only when the user explicitly asks for a HUD, adjustable
 dimensions or a parametric design, load `agent_onboard{topic:"hud"}`. Declare
 the driving parameters with `param.set{name,expr,hud:{label,min,max,step,unit,group,order}}`,
@@ -586,6 +604,7 @@ Use `created_ids` returned by a batch as inputs to later features. IDs are monot
 | `doc_apply` | Atomic modeling batch |
 | `doc_undo`, `doc_redo` | Persistent iteration undo/redo after reopen; revision increases |
 | `history_info`, `iteration_restore` | Bounded iteration metadata and branch-preserving authoring restoration |
+| `history_migrate_derived` | 049A explicit, confirmed journal rewrite removing derived baked frames after a verified backup |
 | `hud_info`, `hud_flex_check` | Read-only Parametric HUD inventory with dependents, and a sampled min/mid/max scratch rebuild check (topic `hud`) |
 | `eval_expr` | Finite arithmetic and trig evaluation |
 | `mesh_inspect` | Indexed topology, measurements and explicit validation limits |

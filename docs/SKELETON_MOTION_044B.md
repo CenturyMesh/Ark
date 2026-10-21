@@ -89,10 +89,23 @@ atomically:
 | `MOTION_COUPLING_CYCLE` | coupling expressions depend on each other cyclically |
 | `MOTION_INVALID_EXPRESSION`, `MOTION_NONFINITE` | an expression fails or a value is not finite |
 | `MOTION_BEZIER_NOT_MONOTONIC` | a control time is on or outside the segment boundary |
-| `MOTION_FRAME_STEP_TOO_LARGE` | an unlimited revolute turns 180 degrees or more between frames |
+| `MOTION_FRAME_STEP_TOO_LARGE` | an unlimited revolute turns 180 degrees or more between frames; 049A adds the fix (below) |
 | `MOTION_CHANNEL_CONFLICT` | after a frame solve a channel's joint does not hold its target |
 | `MOTION_BAKE_REJECTED` | the joint solver refused a frame; frame, time, channel and solver code are included |
-| `MOTION_BAKE_CAPACITY` | more than 16384 moving instance-frames, 7201 frames or 2 MiB of frames per document |
+| `MOTION_BAKE_CAPACITY` | more than 16384 moving instance-frames, 7201 frames or 2 MiB of frames per document (049A receipts count their declared frame size) |
+
+Since 049A a frame-step rejection states its fix. The graph is analytic, so ARK
+samples the channel over every remaining frame and reports, in the message and
+as `frame_step` in the error object: `channel`, the first offending `frame` and
+`time_s`, `max_step_deg` per frame at the current `fps`, `required_fps` and
+`fps_limit`. `required_fps` is searched upward from the velocity estimate until
+every sampled step of every unlimited revolute channel is at most 170 degrees
+(a margin below 180), within 240 fps and the 7201-frame limit. When no such fps
+exists, `required_fps` is 0, `required_fps_within_limit` is false and the
+message asks to slow the channel or spread the turn over more time. Before
+049A a higher fps also grew the iteration journal by one frame copy per bake,
+which is how re-baking collided with the 4 MiB capacity; with derived frames it
+no longer does.
 
 The graph limit check samples each channel at 240 Hz plus every segment
 boundary. Each baked frame is then checked again by the joint solver, with the
@@ -116,14 +129,15 @@ continuation. After each frame it rebuilds the static solve and verifies every
 channel within 1e-5 mm or 1e-4 degrees. The work placements are restored
 afterwards; authored placements never change.
 
-The bake stores only instances that move:
+The bake covers only instances that move. Since 049A the document stores a
+receipt, not the frames:
 
 ```json
 "bake":{"format":"ark.baked_motion.v1","fps":30,"frame_count":136,"duration_s":4.5,
   "source_revision":12,"source_digest":"<sha256>","graph_digest":"<sha256>",
   "instances":[{"node":2,"copy":0,"name":"Glass"},{"node":3,"copy":0,"name":"Carriage"}],
   "channels":[{"name":"glass","mate":1,"unit":"mm","start":0,"graph_start":0,"min":-420,"max":0}],
-  "frames_f32le_base64":"...","coordinates_f32le_base64":"...",
+  "frames_sha256":"<sha256>","coordinates_sha256":"<sha256>",
   "solver":{"rigid_side_steps":120,"constrained_steps":0,"max_continuation_steps":0,"max_channel_error":0},
   "clearance_checked":false,"dynamics_checked":false}
 ```
@@ -131,6 +145,13 @@ The bake stores only instances that move:
 Frames are little-endian float32, frame-major and instance-minor, 12 values per
 instance: the column-major rotation columns followed by the translation (mm).
 They are display poses. Coordinates are the measured joint values per frame.
+`frames_sha256` and `coordinates_sha256` hash exactly those raw bytes. The
+frames are derived data, served from process memory, the document's optional
+derived section, or a deterministic re-bake that must reproduce both digests
+([derived bakes](DERIVED_BAKES_049A.md)). 044B-048B documents stored the same
+bytes inline as `frames_f32le_base64` and `coordinates_f32le_base64`; those
+stay readable, and the next bake or `history_migrate_derived` replaces them by a
+receipt.
 `source_digest` hashes assembly nodes, mates, parameter values and the solved
 placements at the bake. A later change to any of them reports the motion
 **stale** with `assembly_changed`; replacing the graph reports `graph_changed`.
@@ -151,7 +172,10 @@ persistent iteration history.
 - `{name|graph, time_s}` evaluates channel values and velocities;
   `solve:true` also drives the joints from the committed pose through every
   frame up to `time_s` (at most 600 frames) and returns solved instance matrices.
-- `{name, frame}` decodes one baked frame.
+- `{name, frame}` decodes one baked frame. Since 049A it adds
+  `frames:{source,verified,mismatch?,stale_reasons?}`; `source` is `memory`,
+  `derived`, `rebake` or `inline`. Listings and the bake summary add
+  `frames_storage` (`derived` or `inline_legacy`), `frames_cached` and a note.
 - `{name, clearance}` (046B) checks exact clearance over a fresh bake and
   certifies the time between frames; see [motion clearance](MOTION_CLEARANCE_046B.md).
 
@@ -180,10 +204,16 @@ accessible native editor, and Delete can be undone.
 
 ## Persistence
 
-Documents with motions conditionally require document source version **47**.
-Older readers reject them instead of dropping the motions. Removing every motion
-returns the document to its previous required version. Application identity is
-independent of this format.
+Documents with motions conditionally require document source version **47**;
+a bake receipt (049A) requires **49**. Older readers reject them instead of
+dropping the motions. Removing every motion returns the document to its previous
+required version. Application identity is independent of this format.
+
+Studio's panel states where the selected motion's frames came from (`memory`,
+`derived`, `re-baked`, `inline (legacy)`). A re-bake that does not reproduce the
+receipt, for example after the assembly changed with no cached frames, still
+plays the current solve but shows an amber "Re-baked frames differ from the
+recorded bake" line; it is never presented as the recorded bake.
 
 ## Limits and scope
 
@@ -200,7 +230,9 @@ independent of this format.
   closed loop driven by two independent channels rejects instead of choosing
   one.
 - Float32 frames are display evidence; the authored graph, joints and
-  placements remain the geometric authority.
+  placements remain the geometric authority. Since 049A they are not authoring
+  at all: the receipt digests bind the evidence, and a different solver build
+  that cannot reproduce them is reported, not accepted.
 
 ## Verification record
 
