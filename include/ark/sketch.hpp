@@ -62,6 +62,13 @@ std::vector<std::string> sketchRecipeTypes();
 arkjson::Value measureSketchEntity(const Document& doc, const NamedSketch& sketch, const std::string& entity);
 // Explicitly closed, simple, non-touching loops. No automatic closing/healing.
 std::vector<SketchProfile> sketchProfiles(const Sketch& sketch, const Mat4& frame);
+// 046B sampled regions by containment depth (even = outer, odd = hole of
+// its immediate container). Portable mesh consumers only; exact native
+// consumers rebuild regions from B-rep edges in the OCCT worker.
+struct SketchProfileRegion { SketchProfile outer; std::vector<SketchProfile> holes; std::string outerName; std::vector<std::string> holeNames; int depth=0; };
+std::vector<SketchProfileRegion> sketchProfileRegions(const Sketch& sketch, const Mat4& frame);
+// Endpoint-connected groups of non-construction profile curves.
+size_t sketchProfileComponents(const Sketch& sketch);
 // Display regions only: ignore open/branched components, triangulate closed
 // simple loops with nested holes. Never used as exact modeling authority.
 Mesh sketchRegionMesh(const Sketch& sketch, const Mat4& frame);

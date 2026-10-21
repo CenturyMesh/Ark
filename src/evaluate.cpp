@@ -97,17 +97,24 @@ static std::string featureParameterError(const Feature& f,const ExprEnv& env){
     return error;
 }
 static bool makeProfile(const Feature& f, const ExprEnv& env, Document& doc,
-                        SketchProfile& prof, std::string& err) {
+                        SketchProfile& prof, std::string& err, std::vector<SketchProfile>* holes=nullptr) {
     std::string sname=f.get("sketch");
     if(!sname.empty()){
         NamedSketch* ns=doc.findSketch(sname);
         if(!ns){ err="sketch '"+sname+"' not found"; return false; }
         if(!ns->error.empty()){err=ns->error;return false;}
         try{
-            auto profiles=sketchProfiles(ns->sk,resolvePlane(doc,ns->sk.plane)*Mat4::translation({f.num(env,"ox"),f.num(env,"oy"),f.num(env,"oz")}));
-            if(profiles.size()!=1){err="Extrude/revolve requires one outer loop; use sketch_cut for multiple openings";return false;}
+            const Mat4 frame=resolvePlane(doc,ns->sk.plane)*Mat4::translation({f.num(env,"ox"),f.num(env,"oy"),f.num(env,"oz")});
+            if(holes&&sketchProfileComponents(ns->sk)>1){
+                // 046B: one region (outer loop minus its direct holes) per mesh body.
+                auto regions=sketchProfileRegions(ns->sk,frame);
+                if(regions.size()!=1){std::string outers;for(const auto& region:regions)outers+=(outers.empty()?"":"; ")+region.outerName;err="Profile has "+std::to_string(regions.size())+" separate regions (outer loops: "+outers+"); a mesh extrude publishes one body. Extrude each region separately, or use native_solid extrude with native.regions to select one";return false;}
+                prof=std::move(regions.front().outer);*holes=std::move(regions.front().holes);return true;
+            }
+            auto profiles=sketchProfiles(ns->sk,frame);
+            if(profiles.size()!=1){err=holes?"Extrude requires one outer loop; use sketch_cut for multiple openings":"Mesh revolve requires one closed loop; use revolve_surface with p.solid=1 for profile regions with holes";return false;}
             prof=std::move(profiles.front());return true;
-        }catch(const std::exception& e){err=e.what();return false;}
+        }catch(const std::exception& e){err=e.what();if(!holes&&err.find("Nested sketch loops")!=std::string::npos)err="Mesh revolve requires one closed loop; use revolve_surface with p.solid=1 for profile regions with holes";return false;}
     }
 
     prof.frame = resolvePlane(doc,f.get("plane","XY"))*Mat4::translation({f.num(env,"ox"),f.num(env,"oy"),f.num(env,"oz")});
@@ -234,9 +241,17 @@ static Body evalFeatureBody(const Feature& f, const ExprEnv& env, Document& doc,
             return makeTorus(tmax(f.num(env,"R",8),1e-9), tmax(f.num(env,"r",2),1e-9));
 
         case FeatureType::Extrude: {
-            SketchProfile prof; std::string perr;
-            if(!makeProfile(f,env,doc,prof,perr)){ res.ok=false; res.error=perr; return {}; }
+            SketchProfile prof; std::string perr; std::vector<SketchProfile> holes;
+            if(!makeProfile(f,env,doc,prof,perr,&holes)){ res.ok=false; res.error=perr; return {}; }
             Body body=extrudeProfile(prof,tmax(f.num(env,"height",8),1e-9),f.num(env,"both",0)!=0.0);
+            if(!holes.empty()){
+                // Holes are full-depth openings of this same prism: reuse the
+                // validated prismatic path (area x height volume, closed mesh).
+                for(auto& hole:holes)hole.frame=body.profile.frame;Body opened;
+                try{if(!tryPrismaticCut(body,holes,body.pd1.x,opened)){res.ok=false;res.error="Extrusion with profile holes requires a rigid sketch frame";return {};}}
+                catch(const std::exception& e){res.ok=false;res.error=std::string("Extrusion with profile holes: ")+e.what();return {};}
+                res.tris=opened.baked->triCount();return opened;
+            }
             auto mesh=body.tessellate(topt);
             auto audit=analyzeMesh(mesh);
             if(!audit.closedOriented()||!(audit.signedVolume>0)){res.ok=false;res.error="Extrusion failed closed mesh/positive volume validation; check profile and mesh precision at this placement";return {};}

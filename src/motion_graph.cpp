@@ -2,13 +2,20 @@
 #include "ark/agent.hpp"
 #include "ark/assembly_io.hpp"
 #include "ark/iteration_history.hpp"
+#include "ark/native_backend.hpp"
+#include "ark/native_features.hpp"
 #include <algorithm>
+#include <array>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <iterator>
 #include <limits>
+#include <list>
+#include <mutex>
 #include <set>
 #include <stdexcept>
 namespace ark {
@@ -292,7 +299,7 @@ std::vector<double> motionFrameTimes(double duration,double fps){
     const size_t last=(size_t)std::floor(duration*fps+1e-9);need(last+2<=kMaxFrames,"MOTION_BAKE_CAPACITY: more than 7201 frames; reduce fps or duration");
     std::vector<double> times;for(size_t k=0;k<=last;++k)times.push_back(std::min(duration,(double)k/fps));if(times.back()<duration-1e-9)times.push_back(duration);return times;
 }
-bool solveMotionFrames(Document& work,const CompiledMotion& m,const std::vector<MotionJointBinding>& bindings,const std::vector<double>& times,MotionSolvedFrames& out,std::string& error){
+bool solveMotionFrames(Document& work,const CompiledMotion& m,const std::vector<MotionJointBinding>& bindings,const std::vector<double>& times,MotionSolvedFrames& out,std::string& error,bool recordJoints){
     out={};error.clear();
     struct Restore {Document& d;std::vector<AssemblyNode> nodes;~Restore(){d.assembly=std::move(nodes);}} restore{work,work.assembly};
     try{
@@ -310,15 +317,16 @@ bool solveMotionFrames(Document& work,const CompiledMotion& m,const std::vector<
                 AssemblyManipulationPreview preview;need(previewAssemblyManipulation(program,b.driver,b.mate,mode,change*joint.coordinateSign,preview,reason),"MOTION_BAKE_REJECTED: "+at+" channel "+b.channel+" (mate #"+std::to_string(b.mate)+"): "+reason);
                 (preview.joint.constrained?out.constrainedSteps:out.rigidSteps)++;out.maxContinuationSteps=std::max(out.maxContinuationSteps,preview.continuationSteps);applyPose(work,preview.commands);dirty=true;}
             if(dirty)build();
-            std::vector<double> measured(bindings.size());
+            std::vector<double> measured(bindings.size());std::vector<MotionJointFrame> solvedJoints(recordJoints?bindings.size():0);
             for(size_t c=0;c<bindings.size();++c){const auto& b=bindings[c];if(!b.mate){measured[c]=targets[c];continue;}const std::string mode=b.type=="revolute"?"rotate":"translate";AssemblyManipulationJoint joint;
                 need(selectAssemblyManipulationJoint(program,b.driver,b.mate,mode,joint,reason),"MOTION_BAKE_REJECTED: "+at+" channel "+b.channel+": "+reason);
+                if(recordJoints){auto& f=solvedJoints[c];f.origin=joint.origin;f.axis=joint.axis;f.rotate=mode=="rotate";f.constrained=joint.constrained;f.valid=true;const auto known=std::find(out.movingSets.begin(),out.movingSets.end(),joint.movingNodes);f.movingSet=(size_t)(known-out.movingSets.begin());if(known==out.movingSets.end())out.movingSets.push_back(joint.movingNodes);}
                 double residual=joint.position-targets[c];if(b.type=="revolute"&&!joint.limited)residual=std::remainder(residual,360.);
                 need(std::fabs(residual)<=(b.type=="revolute"?kRevoluteTolerance:kPrismaticTolerance),"MOTION_CHANNEL_CONFLICT: channel "+b.channel+" measures "+num(targets[c]+residual)+" "+b.unit+" after the "+at+" solve, target "+num(targets[c])+"; coupled or shared joints cannot follow independent channels");
                 out.maxChannelError=std::max(out.maxChannelError,std::fabs(residual));measured[c]=targets[c]+residual;}
             need(program.baseline.size()==out.baseline.size(),"MOTION_BAKE_REJECTED: occurrence inventory changed during the bake");std::vector<Mat4> poses;poses.reserve(out.baseline.size());
             for(size_t i=0;i<program.baseline.size();++i){need(program.baseline[i].node==out.baseline[i].node&&program.baseline[i].copy==out.baseline[i].copy,"MOTION_BAKE_REJECTED: occurrence order changed during the bake");poses.push_back(program.baseline[i].world);}
-            out.poses.push_back(std::move(poses));out.coordinates.push_back(std::move(measured));previous=targets;
+            out.poses.push_back(std::move(poses));out.coordinates.push_back(std::move(measured));if(recordJoints)out.joints.push_back(std::move(solvedJoints));previous=targets;
         }
         return true;
     }catch(const std::exception& e){error=e.what();out={};return false;}
@@ -378,12 +386,17 @@ bool applyMotionCommand(Document& d,const V& command,u64 revision,std::string& e
     }catch(const std::exception& e){error=e.what();}
     return true;
 }
+#include "motion_clearance_046b.inl"
 bool callMotionTool(AgentSession& session,const std::string& tool,const V& args,V& out){
     if(tool!="motion_info")return false;
-    keys(args,{"name","graph","time_s","solve","frame"},"motion_info");Document& d=session.document;
+    keys(args,{"name","graph","time_s","solve","frame","clearance","expected_revision"},"motion_info");Document& d=session.document;
     out=V::makeObj();out.set("revision",V::makeNum((double)session.revision));
     const auto* nameArg=args.find("name");const auto* graphArg=args.find("graph");const auto* timeArg=args.find("time_s");const auto* solveArg=args.find("solve");const auto* frameArg=args.find("frame");
+    if(const auto* expected=args.find("expected_revision"))need(expected->t==V::Num&&expected->num==(double)session.revision,"Revision conflict; the current revision is in this result. Re-read motion_info and retry");
     need(!(nameArg&&graphArg),"motion_info accepts name or graph, not both");
+    if(const auto* clearance=args.find("clearance")){
+        need(nameArg&&nameArg->t==V::Str&&!timeArg&&!solveArg&&!frameArg,"motion_info clearance requires name and excludes graph, time_s, solve and frame");
+        out.set("name",*nameArg);out.set("clearance",inspectMotionClearance(d,session.revision,nameArg->str,*clearance));out.set("document_unchanged",V::makeBool(true));out.set("dynamics_checked",V::makeBool(false));out.set("collision_checked",V::makeBool(true));return true;}
     if(timeArg)need(timeArg->t==V::Num&&std::isfinite(timeArg->num)&&timeArg->num>=0&&timeArg->num<=kMaxDuration,"motion_info time_s must be in [0,600]");
     if(solveArg)need(solveArg->t==V::Bool&&(!solveArg->b||timeArg),"motion_info solve must be boolean and requires time_s");
     if(frameArg)need(frameArg->t==V::Num&&frameArg->num>=0&&frameArg->num==std::floor(frameArg->num)&&nameArg,"motion_info frame must be a nonnegative integer with name");
@@ -420,8 +433,8 @@ bool callMotionTool(AgentSession& session,const std::string& tool,const V& args,
 }
 void appendMotionTools(V& tools){
     V tool=V::makeObj(),schema,annotations=V::makeObj();
-    arkjson::parse(R"({"type":"object","properties":{"name":{"type":"string","minLength":1,"maxLength":128},"graph":{"type":"object","description":"Uncommitted vector motion graph to validate; same shape as motion.graph.set graph."},"time_s":{"type":"number","minimum":0,"maximum":600},"solve":{"type":"boolean","description":"With time_s, drive the joints through the assembly solver from the committed pose to time_s and return solved instance matrices. Read-only."},"frame":{"type":"integer","minimum":0}},"additionalProperties":false})",schema);
-    tool.set("name",V::makeStr("motion_info"));tool.set("description",V::makeStr("Read-only Skeleton Motion inspection. No arguments lists baked motions with duration, fps and stale status. name returns its vector graph, joint bindings, C0/C1 continuity, sampled ranges and bake summary; graph validates an uncommitted graph. time_s evaluates channel values and velocities; solve:true also returns solved instance matrices at that time. frame decodes one baked frame. Never edits the document; author with doc_apply motion.graph.set and motion.bake (agent_onboard motion)."));
+    arkjson::parse(R"({"type":"object","properties":{"name":{"type":"string","minLength":1,"maxLength":128},"graph":{"type":"object","description":"Uncommitted vector motion graph to validate; same shape as motion.graph.set graph."},"time_s":{"type":"number","minimum":0,"maximum":600},"solve":{"type":"boolean","description":"With time_s, drive the joints through the assembly solver from the committed pose to time_s and return solved instance matrices. Read-only."},"frame":{"type":"integer","minimum":0},"expected_revision":{"type":"integer","description":"Optional observed revision; a mismatch rejects with REVISION_CONFLICT."},"clearance":{"type":"object","description":"With name only: read-only exact clearance over a fresh bake. Rejects a stale bake (bake again first). Measures exact B-rep distance at every baked frame and certifies each frame interval with a conservative displacement bound, bisecting undecided intervals through the joint solver. continuous_certified:true means every interval is proven contact free under ideal rigid kinematics.","properties":{"pairs":{"type":"array","minItems":1,"maxItems":256,"items":{"type":"object","properties":{"a":{"type":["integer","string"]},"b":{"type":["integer","string"]},"copy_a":{"type":"integer","minimum":0,"maximum":31},"copy_b":{"type":"integer","minimum":0,"maximum":31}},"required":["a","b"],"additionalProperties":false}},"scope":{"type":"string","enum":["all","static"],"description":"Without pairs: each moving occurrence against every other visible solid (all, default) or only non-moving ones (static); rigidly co-moving and directly mated pairs are skipped and counted."},"threshold_mm":{"type":"number","minimum":0,"maximum":1000},"max_subdivisions":{"type":"integer","minimum":0,"maximum":10},"from_frame":{"type":"integer","minimum":0},"to_frame":{"type":"integer","minimum":1}},"additionalProperties":false}},"additionalProperties":false})",schema);
+    tool.set("name",V::makeStr("motion_info"));tool.set("description",V::makeStr("Read-only Skeleton Motion inspection. No arguments lists baked motions with duration, fps and stale status. name returns its vector graph, joint bindings, C0/C1 continuity, sampled ranges and bake summary; graph validates an uncommitted graph. time_s evaluates channel values and velocities; solve:true also returns solved instance matrices at that time. frame decodes one baked frame. name with clearance{pairs|scope,threshold_mm,max_subdivisions} checks exact clearance over a fresh bake and certifies between frames (continuous_certified); a stale bake rejects. Never edits the document; author with doc_apply motion.graph.set and motion.bake (agent_onboard motion)."));
     annotations.set("readOnlyHint",V::makeBool(true));tool.set("inputSchema",schema);tool.set("annotations",annotations);tools.arr.push_back(tool);
 }
 }

@@ -543,36 +543,68 @@ std::vector<std::vector<Vec2>> sampleSketchEntityPaths(const SketchEnt& entity,d
     return {sampleSketchEntity(entity,tolerance,owner)};
 }
 
-std::vector<SketchProfile> sketchProfiles(const Sketch& sketch,const Mat4& frame){
-    std::vector<std::vector<Vec2>> curves,loops;size_t samples=0;
-    for(auto& e:sketch.ents)if(!e.construction&&e.kind!=SketchEnt::Pnt){auto p=sampleSketchEntity(e,sketch.tolerance,&sketch);samples+=p.size();if(samples>4096)throw std::runtime_error("Sketch exceeds 4096 profile samples");curves.push_back(std::move(p));}
+namespace {
+// Sampled closed loops in sketch order. nested=false keeps the legacy
+// rejection of contained loops; 046B regions accept containment only.
+std::vector<std::vector<Vec2>> sampledSketchLoops(const Sketch& sketch,bool nested,std::vector<std::string>* loopNames){
+    std::vector<std::vector<Vec2>> curves,loops;std::vector<std::string> names;size_t samples=0;
+    for(auto& e:sketch.ents)if(!e.construction&&e.kind!=SketchEnt::Pnt){auto p=sampleSketchEntity(e,sketch.tolerance,&sketch);samples+=p.size();if(samples>4096)throw std::runtime_error("Sketch exceeds 4096 profile samples");names.push_back(e.name.empty()?"entity."+std::to_string(curves.size()):e.name);curves.push_back(std::move(p));}
     if(curves.empty())throw std::runtime_error("Sketch has no profile geometry");
     std::vector<bool> used(curves.size(),false);
     for(size_t seed=0;seed<curves.size();++seed){
         if(used[seed])continue;
-        auto loop=curves[seed];used[seed]=true;
+        auto loop=curves[seed];used[seed]=true;std::string members=names[seed];
         while((loop.front()-loop.back()).len()>1e-6){
             int found=-1;bool reverse=false;
             for(size_t i=0;i<curves.size();++i)if(!used[i])for(int end=0;end<2;++end){
                 Vec2 p=end?curves[i].back():curves[i].front();
                 if((loop.back()-p).len()<=1e-6){if(found>=0)throw std::runtime_error("Ambiguous/branched profile connection");found=(int)i;reverse=end!=0;}
             }
-            if(found<0)throw std::runtime_error("Open sketch profile; explicitly close its endpoints");
+            if(found<0)throw std::runtime_error(nested?"Open sketch profile at entity "+members+"; close it, mark it construction, or select regions on an exact native consumer":"Open sketch profile; explicitly close its endpoints");
             auto curve=curves[(size_t)found];if(reverse)std::reverse(curve.begin(),curve.end());
-            loop.insert(loop.end(),curve.begin()+1,curve.end());used[(size_t)found]=true;
+            loop.insert(loop.end(),curve.begin()+1,curve.end());used[(size_t)found]=true;members+=","+names[(size_t)found];
         }
         loop.pop_back();if(loop.size()<3||loop.size()>2048)throw std::runtime_error("Profile requires 3..2048 sampled vertices");
         double area=0;for(size_t i=0;i<loop.size();++i){auto a=loop[i],b=loop[(i+1)%loop.size()];if((b-a).len()<1e-8)throw std::runtime_error("Degenerate profile edge");area+=a.cross(b);
-            for(size_t j=i+1;j<loop.size();++j)if(j!=i+1&&!(i==0&&j==loop.size()-1)&&intersects(a,b,loop[j],loop[(j+1)%loop.size()]))throw std::runtime_error("Self-intersecting or touching sampled profile");
+            for(size_t j=i+1;j<loop.size();++j)if(j!=i+1&&!(i==0&&j==loop.size()-1)&&intersects(a,b,loop[j],loop[(j+1)%loop.size()]))throw std::runtime_error(nested?"Self-intersecting or touching sampled profile loop "+members:"Self-intersecting or touching sampled profile");
         }
-        if(std::abs(area)<1e-8)throw std::runtime_error("Profile has zero area");
+        if(std::abs(area)<1e-8)throw std::runtime_error(nested?"Profile loop "+members+" has zero area":"Profile has zero area");
         if(area<0)std::reverse(loop.begin(),loop.end());
-        for(auto& previous:loops){
-            for(size_t i=0;i<loop.size();++i)for(size_t j=0;j<previous.size();++j)if(intersects(loop[i],loop[(i+1)%loop.size()],previous[j],previous[(j+1)%previous.size()]))throw std::runtime_error("Profile loops intersect or touch");
-            if(inside(loop.front(),previous)||inside(previous.front(),loop))throw std::runtime_error("Nested sketch loops require separate cut features");
-        }loops.push_back(std::move(loop));
+        for(size_t k=0;k<loops.size();++k){const auto& previous=loops[k];
+            for(size_t i=0;i<loop.size();++i)for(size_t j=0;j<previous.size();++j)if(intersects(loop[i],loop[(i+1)%loop.size()],previous[j],previous[(j+1)%previous.size()]))throw std::runtime_error(nested?"Profile loops intersect or touch: "+(*loopNames)[k]+" and "+members:"Profile loops intersect or touch");
+            if(!nested&&(inside(loop.front(),previous)||inside(previous.front(),loop)))throw std::runtime_error("Nested sketch loops require separate cut features");
+        }loops.push_back(std::move(loop));if(loopNames)loopNames->push_back(members);
     }
-    std::vector<SketchProfile> profiles;for(auto& loop:loops){SketchProfile p;p.frame=frame;for(size_t i=0;i<loop.size();++i)p.segs.push_back({ProfileSeg::Line,loop[i],loop[(i+1)%loop.size()]});profiles.push_back(std::move(p));}return profiles;
+    return loops;
+}
+SketchProfile sampledLoopProfile(const std::vector<Vec2>& loop,const Mat4& frame){SketchProfile p;p.frame=frame;for(size_t i=0;i<loop.size();++i)p.segs.push_back({ProfileSeg::Line,loop[i],loop[(i+1)%loop.size()]});return p;}
+}
+
+std::vector<SketchProfile> sketchProfiles(const Sketch& sketch,const Mat4& frame){
+    auto loops=sampledSketchLoops(sketch,false,nullptr);
+    std::vector<SketchProfile> profiles;for(auto& loop:loops)profiles.push_back(sampledLoopProfile(loop,frame));return profiles;
+}
+
+std::vector<SketchProfileRegion> sketchProfileRegions(const Sketch& sketch,const Mat4& frame){
+    std::vector<std::string> names;auto loops=sampledSketchLoops(sketch,true,&names);
+    std::vector<int> parent(loops.size(),-1),depth(loops.size(),0);std::vector<double> area(loops.size());
+    for(size_t i=0;i<loops.size();++i){double sum=0;for(size_t k=0;k<loops[i].size();++k)sum+=loops[i][k].cross(loops[i][(k+1)%loops[i].size()]);area[i]=std::abs(sum)*.5;}
+    for(size_t i=0;i<loops.size();++i)for(size_t j=0;j<loops.size();++j)if(i!=j&&inside(loops[i].front(),loops[j])){++depth[i];if(parent[i]<0||area[j]<area[(size_t)parent[i]])parent[i]=(int)j;}
+    std::vector<SketchProfileRegion> regions;
+    for(size_t i=0;i<loops.size();++i)if(depth[i]%2==0){SketchProfileRegion region;region.outer=sampledLoopProfile(loops[i],frame);region.outerName=names[i];region.depth=depth[i];
+        for(size_t j=0;j<loops.size();++j)if(parent[j]==(int)i){region.holes.push_back(sampledLoopProfile(loops[j],frame));region.holeNames.push_back(names[j]);}
+        regions.push_back(std::move(region));}
+    return regions;
+}
+
+size_t sketchProfileComponents(const Sketch& sketch){
+    // Endpoint-connected groups of profile curves (1e-6 mm, as sampled loops).
+    std::vector<std::pair<Vec2,Vec2>> ends;
+    for(const auto& e:sketch.ents)if(!e.construction&&e.kind!=SketchEnt::Pnt)for(const auto& path:sampleSketchEntityPaths(e,sketch.tolerance,&sketch))if(path.size()>=2)ends.push_back({path.front(),path.back()});
+    std::vector<size_t> group(ends.size());for(size_t i=0;i<group.size();++i)group[i]=i;
+    auto root=[&](size_t i){while(group[i]!=i)i=group[i]=group[group[i]];return i;};
+    for(size_t a=0;a<ends.size();++a)for(size_t b=a+1;b<ends.size();++b){bool joins=false;for(Vec2 p:{ends[a].first,ends[a].second})for(Vec2 q:{ends[b].first,ends[b].second})joins|=(p-q).len()<=1e-6;if(joins)group[root(a)]=root(b);}
+    size_t count=0;for(size_t i=0;i<group.size();++i)if(root(i)==i)++count;return count;
 }
 
 Mesh sketchRegionMesh(const Sketch& sketch,const Mat4& frame){
@@ -624,8 +656,17 @@ arkjson::Value inspectSketch(const Document& doc,const NamedSketch& ns,bool samp
         auto points=sampleSketchEntity(e,ns.sk.tolerance,&ns.sk);item.set("sample_count",V::makeNum(points.size()));
         if(samples){for(auto p:points){local.arr.push_back(vectorValue({p.x,p.y,0}));world.arr.push_back(vectorValue(frame.transformPoint({p.x,p.y,0})));}item.set("local",local);item.set("world",world);}entities.arr.push_back(item);
     }r.set("entities",entities);
-    try{auto profiles=sketchProfiles(ns.sk,frame);r.set("profile_ready",V::makeBool(true));r.set("loops",V::makeNum(profiles.size()));}
-    catch(const std::exception& e){r.set("profile_ready",V::makeBool(false));r.set("profile_error",V::makeStr(e.what()));}
+    // Legacy single/disjoint loops keep their report; 046B adds nested regions.
+    auto regionSummary=[&](const std::vector<SketchProfileRegion>& regions){V rows=V::makeArr();size_t loops=0;
+        for(const auto& region:regions){loops+=1+region.holes.size();V row=V::makeObj(),holes=V::makeArr();row.set("outer",V::makeStr(region.outerName));row.set("depth",V::makeNum(region.depth));for(const auto& hole:region.holeNames)holes.arr.push_back(V::makeStr(hole));row.set("holes",holes);rows.arr.push_back(row);}
+        V summary=V::makeObj();summary.set("regions",rows);summary.set("authority",V::makeStr("sampled_preview; exact native consumers rebuild regions from B-rep edges"));r.set("profile_regions",summary);return loops;};
+    std::string legacyError;
+    try{auto profiles=sketchProfiles(ns.sk,frame);r.set("profile_ready",V::makeBool(true));r.set("loops",V::makeNum(profiles.size()));if(profiles.size()>1)regionSummary(sketchProfileRegions(ns.sk,frame));}
+    catch(const std::exception& e){legacyError=e.what();}
+    if(!legacyError.empty()){
+        try{const size_t loops=regionSummary(sketchProfileRegions(ns.sk,frame));r.set("profile_ready",V::makeBool(true));r.set("loops",V::makeNum(loops));}
+        catch(const std::exception& e){r.set("profile_ready",V::makeBool(false));r.set("profile_error",V::makeStr(legacyError.find("Nested sketch loops")!=std::string::npos?e.what():legacyError));}
+    }
     r.set("solid_certified",V::makeBool(false));return r;
 }
 

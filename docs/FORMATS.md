@@ -35,8 +35,16 @@ pitch spacing, orientation, support input or the compact reference scheme
 ([curve patterns](CURVE_PATTERNS_044B.md)), and for procedural appearance
 `pattern*` fields, `image/gif` or `video/mp4` assets and non-default stamp
 playback ([media](MEDIA_TEXTURES_044B.md)). Documents without them keep their
-earlier version; those fields below 47 reject. Version 48 and later reject as a
-future format.
+earlier version; those fields below 47 reject.
+
+## Conditional source extension — format 48
+
+046B selects format 48 only for an authored `native.regions` selection on a
+`native_solid` extrude, `extrude_surface`, `revolve_surface` or `sweep`
+([profile regions](PROFILE_REGIONS_046B.md)). A sketch with several closed
+loops consumed without `native.regions` adds no field and keeps its earlier
+required version. `native.regions` below 48 rejects on load, including through
+iteration history. Version 49 and later reject as a future format.
 
 ## Previous source extension — format 41
 

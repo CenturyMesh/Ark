@@ -37,6 +37,7 @@ add_library(ark STATIC
   src/assembly_patterns.cpp
   src/motion_graph.cpp
   src/direct_preview.cpp
+  src/exact_jobs_046b.cpp
   src/agent_activity.cpp
   src/skeleton.cpp
   src/drawings.cpp
@@ -72,6 +73,12 @@ add_executable(ark-direct-preview-tests tests/direct_preview_tests.cpp)
 target_link_libraries(ark-direct-preview-tests PRIVATE ark)
 add_test(NAME direct-preview-worker COMMAND ark-direct-preview-tests)
 set_tests_properties(direct-preview-worker PROPERTIES TIMEOUT 90)
+
+add_executable(ark-async-exact-046b-tests tests/exact_jobs_046b_tests.cpp)
+target_link_libraries(ark-async-exact-046b-tests PRIVATE ark)
+add_test(NAME async-exact-046b COMMAND ark-async-exact-046b-tests)
+# Exact timings need real worker requests, not local result-cache hits.
+set_tests_properties(async-exact-046b PROPERTIES TIMEOUT 240 ENVIRONMENT "ARK_NATIVE_RESULT_CACHE=0")
 
 add_executable(ark-authoring-022b-contract-tests tests/authoring_022b_contract_tests.cpp)
 target_link_libraries(ark-authoring-022b-contract-tests PRIVATE ark)
@@ -466,6 +473,11 @@ if(ARK_WITH_OCCT)
   add_dependencies(ark-curve-pattern-044b-tests ark-occt-worker)
   add_test(NAME curve-pattern-044b COMMAND ark-curve-pattern-044b-tests)
   set_tests_properties(curve-pattern-044b PROPERTIES TIMEOUT 300)
+  add_executable(ark-profile-regions-046b-tests tests/profile_regions_046b_tests.cpp)
+  target_link_libraries(ark-profile-regions-046b-tests PRIVATE ark-occt ark)
+  add_dependencies(ark-profile-regions-046b-tests ark-occt-worker)
+  add_test(NAME profile-regions-046b COMMAND ark-profile-regions-046b-tests)
+  set_tests_properties(profile-regions-046b PROPERTIES TIMEOUT 300)
   add_executable(ark-native-feature-tests tests/native_features_tests.cpp)
   add_executable(ark-native-geometry-019b-tests tests/native_geometry_019b_tests.cpp)
   target_link_libraries(ark-native-geometry-019b-tests PRIVATE ark-occt ark)
@@ -528,7 +540,7 @@ if(WIN32)
     set_tests_properties(studio-navigation-036a PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
     add_test(NAME studio-datum-authoring-036a COMMAND ark-studio --datum-authoring-ui-test --settings-file "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/datum-authoring-036a.settings.json" --shot "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/datum-authoring-036a.png" --size 1440 900)
     set_tests_properties(studio-datum-authoring-036a PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
-    foreach(check team-blockers-ui realtime-ui product-tools-ui scene-cache-ui authoring-assistance-ui editor-scroll-ui feature-editor-picking-ui history-ui recovery-ui configuration-workspace-ui interaction-performance-ui)
+    foreach(check async-exact-ui team-blockers-ui realtime-ui product-tools-ui scene-cache-ui authoring-assistance-ui editor-scroll-ui feature-editor-picking-ui history-ui recovery-ui configuration-workspace-ui interaction-performance-ui)
       add_test(NAME studio-${check} COMMAND ark-studio --self-test-${check} --settings-file "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}.settings.json" --shot "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}.png" --size 1280 800)
       set_tests_properties(studio-${check} PROPERTIES TIMEOUT 300 RUN_SERIAL TRUE)
     endforeach()
@@ -841,6 +853,14 @@ add_executable(ark-motion-graph-044b-tests tests/motion_graph_044b_tests.cpp)
 target_link_libraries(ark-motion-graph-044b-tests PRIVATE ark)
 add_test(NAME motion-graph-044b COMMAND ark-motion-graph-044b-tests)
 set_tests_properties(motion-graph-044b PROPERTIES TIMEOUT 180)
+# 046B motion clearance: exact distance over baked frames and certified intervals (native worker).
+if(ARK_WITH_OCCT)
+  add_executable(ark-motion-clearance-046b-tests tests/motion_clearance_046b_tests.cpp)
+  target_link_libraries(ark-motion-clearance-046b-tests PRIVATE ark)
+  add_dependencies(ark-motion-clearance-046b-tests ark-occt-worker)
+  add_test(NAME motion-clearance-046b COMMAND ark-motion-clearance-046b-tests)
+  set_tests_properties(motion-clearance-046b PROPERTIES TIMEOUT 300)
+endif()
 if(ARK_WITH_OCCT)
   add_executable(ark-bicycle-transmission-tests tests/bicycle_transmission_tests.cpp)
   target_link_libraries(ark-bicycle-transmission-tests PRIVATE ark-occt ark)

@@ -3,6 +3,7 @@
 #include "ark/iteration_history.hpp"
 #include "ark/model.hpp"
 #include "ark/notch.hpp"
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <atomic>
@@ -51,6 +52,12 @@ std::atomic<unsigned long long> totalNativeDocumentRestores{0},totalNativeDocume
 std::mutex nativeDocumentRejectionMutex;std::string nativeDocumentLastRejection;
 std::map<std::string,unsigned long long> nativeDocumentRejectionReasons;
 thread_local int nativeThreadOverride=0;
+// 046B: background read-only jobs install a cancellation predicate and an
+// explicit per-request limit for their own thread; others keep 30 s.
+thread_local const std::function<bool()>* nativeCancel=nullptr;thread_local unsigned nativeLimitMs=30000;
+bool nativeCancelled(){return nativeCancel&&*nativeCancel&&(*nativeCancel)();}
+std::string nativeLimitText(){return "Native OCCT operation exceeded "+std::to_string(nativeLimitMs/1000)+"-second worker limit";}
+constexpr const char* nativeCancelText="NATIVE_CANCELLED: native OCCT request cancelled; its isolated worker was stopped";
 int effectiveNativeBudget(){if(nativeThreadOverride)return nativeThreadOverride;if(const char* value=std::getenv("ARK_NATIVE_THREADS")){int n=std::atoi(value);if(n>=1&&n<=64)return n;}return (int)std::min(8u,std::max(1u,std::thread::hardware_concurrency()));}
 fs::path utf8path(const std::string& value){return fs::u8path(value);}
 std::string utf8(const fs::path& path){auto s=path.u8string();return std::string(s.begin(),s.end());}
@@ -97,6 +104,12 @@ std::vector<wchar_t> workerEnvironment(){
     entries.push_back(L"ARK_NATIVE_THREADS="+std::to_wstring(nativeThreadOverride));std::sort(entries.begin(),entries.end(),[](const auto& a,const auto& b){return _wcsicmp(a.c_str(),b.c_str())<0;});
     std::vector<wchar_t> result;for(const auto& entry:entries){result.insert(result.end(),entry.begin(),entry.end());result.push_back(0);}result.push_back(0);return result;
 }
+// Slices of 50 ms only while a cancellation predicate is installed.
+DWORD waitNative(DWORD count,const HANDLE* handles,bool& cancelled){
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::milliseconds(nativeLimitMs);cancelled=false;
+    for(;;){if(nativeCancelled()){cancelled=true;return WAIT_TIMEOUT;}const auto left=std::chrono::duration_cast<std::chrono::milliseconds>(deadline-std::chrono::steady_clock::now()).count();if(left<=0)return WAIT_TIMEOUT;
+        const DWORD wait=WaitForMultipleObjects(count,handles,FALSE,(DWORD)(nativeCancel?std::min<long long>(left,50):left));if(wait!=WAIT_TIMEOUT)return wait;}
+}
 std::wstring quote(const std::wstring& value){std::wstring out=L"\"";size_t slash=0;for(auto c:value){if(c==L'\\'){++slash;continue;}out.append(c==L'\"'?slash*2+1:slash,L'\\');out+=c;slash=0;}out.append(slash*2,L'\\');return out+L"\"";}
 unsigned execute(const fs::path& worker,const Temporary& temp){
     SECURITY_ATTRIBUTES security{sizeof(SECURITY_ATTRIBUTES),nullptr,TRUE};
@@ -109,7 +122,7 @@ unsigned execute(const fs::path& worker,const Temporary& temp){
     std::wstring command=quote(worker.wstring())+L" "+quote((temp.directory/"request.json").wstring())+L" "+quote((temp.directory/"result.json").wstring());PROCESS_INFORMATION info{};
     auto environment=workerEnvironment();if(!CreateProcessW(worker.c_str(),command.data(),nullptr,nullptr,TRUE,CREATE_NO_WINDOW|CREATE_SUSPENDED|CREATE_UNICODE_ENVIRONMENT,environment.empty()?nullptr:environment.data(),worker.parent_path().c_str(),&startup,&info))throw std::runtime_error("Cannot launch native OCCT worker");
     Handle process{info.hProcess},thread{info.hThread};if(!AssignProcessToJobObject(job.value,process.value)){TerminateProcess(process.value,1);throw std::runtime_error("Cannot assign native worker watchdog");}optOutOfPowerThrottling(process.value);ResumeThread(thread.value);
-    if(WaitForSingleObject(process.value,30000)!=WAIT_OBJECT_0){TerminateJobObject(job.value,1);WaitForSingleObject(process.value,5000);throw std::runtime_error("Native OCCT operation exceeded 30-second worker limit");}
+    bool cancelled=false;if(waitNative(1,&process.value,cancelled)!=WAIT_OBJECT_0){TerminateJobObject(job.value,1);WaitForSingleObject(process.value,5000);throw std::runtime_error(cancelled?std::string(nativeCancelText):nativeLimitText());}
     DWORD code=1;GetExitCodeProcess(process.value,&code);return code;
 }
 // One isolated resident worker per calling thread. Named events carry only
@@ -148,8 +161,8 @@ public:
         SetFilePointer(output.value,0,nullptr,FILE_BEGIN);SetEndOfFile(output.value);
         {V bounded=request;bounded.set("native_threads",V::makeNum(effectiveNativeBudget()));std::ofstream file(temp.directory/"request.json",std::ios::binary|std::ios::trunc);file<<bounded.dump();if(!file)throw std::runtime_error("Cannot write resident request");}
         std::error_code ec;fs::remove(temp.directory/"result.json",ec);ResetEvent(doneEvent.value);if(!SetEvent(requestEvent.value))throw std::runtime_error("Cannot signal resident worker");
-        HANDLE handles[]{doneEvent.value,process.value};DWORD wait=WaitForMultipleObjects(2,handles,FALSE,30000);
-        if(wait!=WAIT_OBJECT_0){TerminateJobObject(job.value,1);WaitForSingleObject(process.value,5000);throw std::runtime_error(wait==WAIT_TIMEOUT?"Native OCCT operation exceeded 30-second worker limit":"Resident OCCT worker exited");}
+        HANDLE handles[]{doneEvent.value,process.value};bool cancelled=false;DWORD wait=waitNative(2,handles,cancelled);
+        if(wait!=WAIT_OBJECT_0){TerminateJobObject(job.value,1);WaitForSingleObject(process.value,5000);throw std::runtime_error(cancelled?std::string(nativeCancelText):wait==WAIT_TIMEOUT?nativeLimitText():std::string("Resident OCCT worker exited"));}
         V result;if(!arkjson::parse(read(temp.directory/"result.json"),result)||result.t!=V::Obj)throw std::runtime_error("Invalid resident worker result");
         if(auto error=result.find("error"))throw std::runtime_error("OCCT: "+error->asStr());return result;
     }
@@ -159,10 +172,10 @@ unsigned execute(const fs::path& worker,const Temporary& temp){
     auto request=(temp.directory/"request.json").string(),response=(temp.directory/"result.json").string(),binary=worker.string();auto log=temp.directory/"worker.log";
     pid_t pid=fork();if(pid<0)throw std::runtime_error("Cannot fork native worker");
     if(pid==0){setsid();int fd=open(log.c_str(),O_WRONLY|O_CREAT|O_TRUNC,0600);if(fd>=0){dup2(fd,STDOUT_FILENO);dup2(fd,STDERR_FILENO);close(fd);}execl(binary.c_str(),binary.c_str(),request.c_str(),response.c_str(),(char*)nullptr);_exit(127);}
-    auto end=std::chrono::steady_clock::now()+std::chrono::seconds(30);int status=0;
+    auto end=std::chrono::steady_clock::now()+std::chrono::milliseconds(nativeLimitMs);int status=0;
     for(;;){auto waited=waitpid(pid,&status,WNOHANG);if(waited==pid)break;
         if(waited<0&&errno!=EINTR){kill(-pid,SIGKILL);kill(pid,SIGKILL);throw std::runtime_error("Cannot collect native worker exit status");}
-        if(std::chrono::steady_clock::now()>end){kill(-pid,SIGKILL);kill(pid,SIGKILL);while(waitpid(pid,&status,0)<0&&errno==EINTR){}throw std::runtime_error("Native OCCT operation exceeded 30-second worker limit");}
+        const bool cancelled=nativeCancelled();if(cancelled||std::chrono::steady_clock::now()>end){kill(-pid,SIGKILL);kill(pid,SIGKILL);while(waitpid(pid,&status,0)<0&&errno==EINTR){}throw std::runtime_error(cancelled?std::string(nativeCancelText):nativeLimitText());}
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }return WIFEXITED(status)?(unsigned)WEXITSTATUS(status):255;
 }
@@ -236,6 +249,7 @@ V stageNativeDocumentResults(Document& document,const DocumentDerivedPayloads& r
     auto context=std::make_shared<NativeDocumentResultContext>();context->entries=std::move(staged);context->requests=std::move(requests);document.pendingNativeGeometry=std::move(context);return status;
 }
 static V cachedNativeRequest(const V& request){
+    if(nativeCancelled())throw std::runtime_error(nativeCancelText);
     ++nativeRequests;++totalNativeRequests;
     V bounded=request;bounded.set("native_threads",V::makeNum(effectiveNativeBudget()));
     const auto worker=workerPath();NativeResultCache cache(bounded,worker);V hit;
@@ -263,6 +277,11 @@ void disableProcessPowerThrottling(){
     optOutOfPowerThrottling(GetCurrentProcess());
 #endif
 }
+NativeRequestControlScope::NativeRequestControlScope(std::function<bool()> cancelled,unsigned limitMs):previousCancel(nativeCancel),previousLimit(nativeLimitMs),cancel(std::move(cancelled)){
+    if(limitMs<1000||limitMs>3600000)throw std::runtime_error("Native request limit must be 1..3600 seconds");nativeCancel=cancel?&cancel:nullptr;nativeLimitMs=limitMs;
+}
+NativeRequestControlScope::~NativeRequestControlScope(){nativeCancel=previousCancel;nativeLimitMs=previousLimit;}
+unsigned nativeRequestLimitMs(){return nativeLimitMs;}
 int setNativeThreadBudget(int threads){if(threads<0||threads>64)throw std::runtime_error("Native thread budget must be 0..64");int old=nativeThreadOverride;nativeThreadOverride=threads;return old;}
 V nativeModelRequest(const V& model){V request=V::makeObj();request.set("operation",V::makeStr("model"));request.set("request",model);return nativeWorkerRequest(request);}
 V nativeKernelInfo(){V request=V::makeObj();request.set("operation",V::makeStr("kernel_info"));V result=nativeWorkerRequest(request);result.set("worker_requests",V::makeNum((double)nativeRequests));result.set("worker_process_starts",V::makeNum((double)nativeStarts));result.set("total_worker_requests",V::makeNum((double)totalNativeRequests.load()));result.set("total_worker_process_starts",V::makeNum((double)totalNativeStarts.load()));result.set("native_result_cache_hits",V::makeNum((double)totalNativeCacheHits.load()));result.set("native_result_cache_misses",V::makeNum((double)totalNativeCacheMisses.load()));
