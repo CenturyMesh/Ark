@@ -158,7 +158,10 @@ void projectBatchPaths(V& row,const V& query,size_t index){
 void capBatchRow(V& row,const V& query,size_t index){
     const auto* cap=query.find("max_bytes");if(!cap||required(row,"isError").b)return;
     const V& data=required(row,"structuredContent");const auto bytes=data.dump().size();if(bytes<=(size_t)cap->num)return;
-    V keys=V::makeObj();for(const auto& field:data.obj){V shape=V::makeObj();const auto& value=field.second;shape.set("type",V::makeStr(value.t==V::Obj?"object":value.t==V::Arr?"array":value.t==V::Str?"string":value.t==V::Num?"number":value.t==V::Bool?"boolean":"null"));if(value.t==V::Arr)shape.set("count",V::makeNum((double)value.arr.size()));shape.set("bytes",V::makeNum((double)value.dump().size()));keys.set(field.first,shape);}
+    V keys=V::makeObj();for(const auto& field:data.obj){V shape=V::makeObj();const auto& value=field.second;shape.set("type",V::makeStr(value.t==V::Obj?"object":value.t==V::Arr?"array":value.t==V::Str?"string":value.t==V::Num?"number":value.t==V::Bool?"boolean":"null"));if(value.t==V::Arr)shape.set("count",V::makeNum((double)value.arr.size()));shape.set("bytes",V::makeNum((double)value.dump().size()));
+        // One level of child names, so a narrower path is chosen without guessing.
+        if(value.t==V::Obj){V names=V::makeArr();for(const auto& child:value.obj){if(names.arr.size()==32){shape.set("keys_truncated",V::makeBool(true));break;}names.arr.push_back(V::makeStr(child.first));}shape.set("keys",names);}
+        keys.set(field.first,shape);}
     V error=V::makeObj();error.set("error_code",V::makeStr("QUERY_BATCH_ROW_TOO_LARGE"));error.set("error",V::makeStr("Result is "+std::to_string(bytes)+" bytes, above max_bytes "+std::to_string((size_t)cap->num)+"; select the needed values with paths."));error.set("query_index",V::makeNum((double)index));error.set("tool",required(query,"tool"));error.set("tool_succeeded",V::makeBool(true));error.set("bytes",V::makeNum((double)bytes));error.set("max_bytes",*cap);error.set("result_keys",keys);
     if(const auto* revision=data.find("revision"))error.set("revision",*revision);
     error.set("recovery",batchRecovery(query,"The tool already ran. Request only the values you need with paths, or raise max_bytes."));

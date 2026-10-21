@@ -65,11 +65,31 @@ ARK starts the CLI with these arguments:
 - The CLI process runs in a disposable working directory containing a
   `.git` fence, inside a kill-on-close job object. ARK deletes the directory
   after the run.
-- Only a parent Claude Code session's markers (`CLAUDECODE`,
-  `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_SSE_PORT`, `CLAUDE_CODE_SIMPLE`) are
-  dropped from its environment. User settings still load, so the sign-in
+- Only a parent Claude Code session's markers are dropped from its
+  environment: `CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_SSE_PORT`
+  and `CLAUDE_CODE_SIMPLE`. 047D adds the session and SDK-host markers observed
+  when Studio itself is started from a Claude Code IDE session:
+  - `CLAUDE_PID` and `CLAUDE_AGENT_SDK_VERSION`.
+  - `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_EMIT_STARTUP_TIMING`,
+    `CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING`, `CLAUDE_CODE_ENABLE_TASKS` and
+    `CLAUDE_CODE_QUESTION_PREVIEW_FORMAT`.
+  - Every `CLAUDE_CODE_SESSION_*` and `CLAUDE_CODE_MESSAGING_*` name.
+
+  Without this, the role would inherit that session's identity, messaging
+  socket and token. User settings and sign-in variables such as
+  `ANTHROPIC_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN` still pass, so the sign-in
   methods configured there keep working. Hooks configured there run as they do
   in any Claude Code session.
+- **stdout reader thread (047D).** A dedicated thread drains the CLI's stdout
+  continuously, holding at most the configured response bound of unread bytes.
+  Before 047D, one thread ran the tool and wrote its reply without reading
+  stdout. A CLI that kept streaming then blocked on a full pipe and stopped
+  reading stdin. ARK blocked writing a reply larger than the pipe buffer, and
+  after the 90 s timeout the role ended with "stdin write was cancelled,
+  disconnected or timed out".
+- **Stdin write errors (047D).** These now name the cause: cancelled, timed out
+  (the CLI read no input for the timeout and was stopped) or disconnected.
+- **Grok Build.** The Grok Build ACP channel uses the same reader.
 - Before any CAD call, ARK checks the session `init` message. The tools must be
   exactly `mcp__ark__` role tools, `ark` must be the only connected MCP server,
   and the permission mode must be `dontAsk`. Any other result stops the
@@ -97,7 +117,18 @@ ARK starts the CLI with these arguments:
 ## Limits
 
 - The native transport is Windows-only, like the Grok Build route.
-- Image input has not been qualified on this route and rejects explicitly.
+- **User images (047D).** Inline user images (Attach image, Inspire design,
+  Image to CAD and steering images) are sent as stream-json `image` blocks in
+  the same user turn.
+  - Only validated inline PNG or JPEG data of at most 4 MiB each is sent, up to
+    20 per prompt. Nothing is fetched, dropped or recoded.
+  - The JSON text keeps an `attached_image N` placeholder in place of the
+    base64 data.
+  - Invalid image data rejects the turn before the prompt is sent.
+  - Settings saved before 047D stored `image_input_supported:false` for this
+    route; Studio enables it on load.
+  - Tool-result images, such as `snapshot` receipts, are not converted on this
+    route.
 - Each ARK run starts a fresh CLI session; earlier context is resent as
   retained text, not resumed from a stored CLI session.
 - The tool list is fixed for the run. Specialist tools loaded later by
@@ -116,8 +147,18 @@ ARK starts the CLI with these arguments:
   - isolation failures (an exposed built-in tool, a foreign server, repeated
     IDs, a missing catalog);
   - sign-in and turn failures;
-  - permission denial, steering, cancellation, resume inspection and image
-    rejection.
+  - permission denial, steering, cancellation and resume inspection;
+  - from 047D, a user image sent as one text block plus one `image` block with
+    the exact PNG data and no base64 in the text, and rejection of invalid image
+    bytes;
+  - from 047D, a fake CLI that writes about 1 MiB to stdout before reading a
+    512 KiB tool reply, which completes. Against the 046B transport the same
+    test ended with the user-reported stdin write error after its 5 s timeout.
+- **Live image probe (047D).** Claude Code 2.1.304, model `haiku`. One
+  stream-json user packet held a text block and a 64×64 red PNG `image` block
+  with `media_type:image/png`. The CLI returned `result` `success` with the
+  answer `red`. This verifies the wire format only, not image-guided CAD
+  quality.
 - **Live, local.** With Claude Code 2.1.301, the handshake served `initialize`
   and `tools/list` from ARK's SDK server before any prompt. One minimal live
   turn reported only `mcp__ark__doc_info` as available, `ark` connected through

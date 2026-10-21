@@ -1,6 +1,7 @@
 #include "ark/assistant_claude_code.hpp"
 #include "ark/assistant_acp.hpp"
 #include "ark/assistant_connectors.hpp"
+#include "assistant_vision.hpp"
 #include <algorithm>
 #include <cctype>
 #include <chrono>
@@ -34,7 +35,20 @@ std::string env(const char* key){const char* value=std::getenv(key);return value
 std::string clean(const std::string& text){std::string out;for(unsigned char c:text)if((std::isalnum(c)||c=='_'||c=='-'||c=='.'||c==' ')&&out.size()<64)out+=(char)c;return out;}
 bool validId(const std::string& id){return !id.empty()&&id.size()<=256&&std::all_of(id.begin(),id.end(),[](unsigned char c){return c>=33&&c!=127;});}
 bool validMcpId(const V& id){return (id.t==V::Str&&validId(id.str))||(id.t==V::Num&&std::isfinite(id.num)&&id.num>=0&&id.num<=9007199254740991.0&&std::floor(id.num)==id.num);}
-bool imageIn(const V& value){if(value.t==V::Obj){const auto kind=str(value,"type");if(kind=="input_image"||kind=="image")return true;for(const auto& entry:value.obj)if(imageIn(entry.second))return true;}if(value.t==V::Arr)for(const auto& entry:value.arr)if(imageIn(entry))return true;return false;}
+constexpr std::size_t kMaxPromptImages=20;
+// User images leave the JSON text as image blocks of the same stream-json user turn.
+// The text keeps a numbered placeholder so each image stays tied to its message.
+// Only validated inline PNG/JPEG data is sent; nothing is fetched, dropped or recoded.
+V detachImages(V value,V& blocks){
+    if(value.t==V::Arr){for(auto& item:value.arr)item=detachImages(std::move(item),blocks);return value;}
+    if(value.t!=V::Obj)return value;
+    if(const auto kind=str(value,"type");kind=="input_image"||kind=="image"){
+        const V* url=value.find("image_url");if(url&&url->t==V::Obj)url=url->find("url");need(url!=nullptr,"Claude Code image input requires inline image data; no image was dropped.");
+        std::pair<std::string,std::string> image;try{image=assistant_vision::dataUrl(*url);}catch(const std::exception& error){throw AssistantTransportError(std::string("Claude Code image input rejected: ")+error.what());}
+        need(blocks.arr.size()<kMaxPromptImages,"Claude Code prompt exceeds "+std::to_string(kMaxPromptImages)+" images; no image was dropped.");
+        auto source=obj(),block=obj(),placeholder=obj();source.set("type",V::makeStr("base64"));source.set("media_type",V::makeStr(image.first));source.set("data",V::makeStr(image.second));block.set("type",V::makeStr("image"));block.set("source",source);blocks.arr.push_back(std::move(block));
+        placeholder.set("type",V::makeStr("input_image"));placeholder.set("attached_image",V::makeNum((double)blocks.arr.size()));return placeholder;}
+    for(auto& entry:value.obj)entry.second=detachImages(std::move(entry.second),blocks);return value;}
 std::optional<std::uint64_t> count(const V* object,const char* key){const auto* p=object?object->find(key):nullptr;if(!p||p->t!=V::Num||!std::isfinite(p->num)||p->num<0||p->num>9007199254740991.0||std::floor(p->num)!=p->num)return {};return (std::uint64_t)p->num;}
 V toolError(const std::string& text){auto data=obj(),result=obj(),content=array(),item=obj();data.set("error",V::makeStr(text));item.set("type",V::makeStr("text"));item.set("text",V::makeStr(data.dump()));content.arr.push_back(item);result.set("content",content);result.set("structuredContent",data);result.set("isError",V::makeBool(true));return result;}
 // MCP CallToolResult: content is required and structuredContent must be an object.
@@ -67,6 +81,7 @@ std::filesystem::path discoveredCli(){
 std::wstring wide(const std::string& text){if(text.empty())return {};int size=MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,text.data(),(int)text.size(),nullptr,0);need(size>0,"Invalid UTF-8 in Claude Code configuration.");std::wstring value(size,L'\0');MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,text.data(),(int)text.size(),value.data(),size);return value;}
 std::wstring quote(const std::wstring& text){std::wstring value=L"\"";unsigned slashes=0;for(auto c:text){if(c==L'\\'){++slashes;continue;}if(c==L'\"')value.append(slashes*2+1,L'\\');else value.append(slashes,L'\\');slashes=0;value+=c;}value.append(slashes*2,L'\\');return value+L'\"';}
 struct OwnedHandle {HANDLE value=nullptr;~OwnedHandle(){if(value&&value!=INVALID_HANDLE_VALUE)CloseHandle(value);}};
+#include "assistant_child_stdout.inl"
 class NativeChannel final:public AssistantAcpChannel {
     HANDLE process=nullptr,job=nullptr,input=nullptr,output=nullptr;
     std::filesystem::path directory;
@@ -74,6 +89,7 @@ class NativeChannel final:public AssistantAcpChannel {
     std::size_t limit;
     unsigned timeoutSeconds;
     const std::atomic_bool* cancel;
+    ChildStdout reader;
     std::string exitDetail(){std::ifstream in(directory/"stderr.txt",std::ios::binary);std::string text(512,'\0');in.read(text.data(),(std::streamsize)text.size());text.resize((std::size_t)std::max<std::streamsize>(0,in.gcount()));std::string out;for(unsigned char c:text)if(c>=32&&c<127)out+=(char)c;else if(!out.empty()&&out.back()!=' ')out+=' ';return out.empty()?"":" CLI stderr: "+out.substr(0,300);}
 public:
     NativeChannel(const AssistantConfig& config,const V& roleTools,const std::string& systemPrompt,const std::atomic_bool* cancellation):limit(config.maxResponseBytes),timeoutSeconds(config.timeoutSeconds),cancel(cancellation){
@@ -88,8 +104,8 @@ public:
             const auto promptUtf8=promptFile.u8string();std::wstring command=quote(cli.wstring());
             for(const auto& argument:assistantClaudeCodeArguments(config,roleTools,std::string(promptUtf8.begin(),promptUtf8.end())))command+=L" "+quote(wide(argument));
             need(command.size()<32000,"The ARK role tool list is too long for the Claude Code command line.");
-            // The CLI authenticates exactly as the user configured it; only a parent Claude Code
-            // session marker is dropped so the child starts as its own session.
+            // The CLI authenticates exactly as the user configured it; only parent Claude Code
+            // session/host markers are dropped so the child starts as its own session.
             std::vector<std::wstring> environment;LPWCH block=GetEnvironmentStringsW();need(block!=nullptr,"Cannot prepare Claude Code process environment.");
             for(const wchar_t* cursor=block;*cursor;cursor+=wcslen(cursor)+1){std::wstring item(cursor);const auto equals=item.find(L'=',1);std::string name;for(std::size_t i=0;i<(equals==std::wstring::npos?item.size():equals);++i)name+=item[i]<128?(char)item[i]:'?';if(equals==std::wstring::npos||assistantClaudeCodeInheritsEnvironment(name))environment.push_back(item);}FreeEnvironmentStringsW(block);
             std::sort(environment.begin(),environment.end());std::wstring childEnv;for(const auto& item:environment){childEnv+=item;childEnv+=L'\0';}childEnv+=L'\0';
@@ -99,19 +115,20 @@ public:
             STARTUPINFOW start{};start.cb=sizeof(start);start.dwFlags=STARTF_USESTDHANDLES|STARTF_USESHOWWINDOW;start.wShowWindow=SW_HIDE;start.hStdInput=childIn.value;start.hStdOutput=childOut.value;start.hStdError=childErr.value;
             job=CreateJobObjectW(nullptr,nullptr);need(job!=nullptr,"Cannot isolate Claude Code process lifetime.");JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};limits.BasicLimitInformation.LimitFlags=JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;need(SetInformationJobObject(job,JobObjectExtendedLimitInformation,&limits,sizeof(limits))!=FALSE,"Cannot configure Claude Code process lifetime.");
             PROCESS_INFORMATION info{};const BOOL made=CreateProcessW(cli.c_str(),command.data(),nullptr,nullptr,TRUE,CREATE_NO_WINDOW|CREATE_UNICODE_ENVIRONMENT|CREATE_SUSPENDED,childEnv.data(),directory.c_str(),&start,&info);need(made!=FALSE,"Cannot start the configured Claude Code CLI.");process=info.hProcess;
-            if(!AssignProcessToJobObject(job,process)){TerminateProcess(process,1);CloseHandle(info.hThread);throw AssistantTransportError("Cannot own the Claude Code process; inference was not started.");}ResumeThread(info.hThread);CloseHandle(info.hThread);
+            if(!AssignProcessToJobObject(job,process)){TerminateProcess(process,1);CloseHandle(info.hThread);throw AssistantTransportError("Cannot own the Claude Code process; inference was not started.");}ResumeThread(info.hThread);CloseHandle(info.hThread);reader.start(output,limit);
         }catch(...){close();throw;}
     }
     ~NativeChannel()override{close();}
-    void close(){if(job){CloseHandle(job);job=nullptr;}if(process){WaitForSingleObject(process,2000);CloseHandle(process);process=nullptr;}if(input){CloseHandle(input);input=nullptr;}if(output){CloseHandle(output);output=nullptr;}if(!directory.empty()){std::error_code ignored;std::filesystem::remove_all(directory,ignored);directory.clear();}}
-    void send(const V& packet)override{std::string bytes=packet.dump()+"\n";need(bytes.size()<=32*1024*1024,"Claude Code request exceeded its transport bound.");stopped(cancel);std::mutex mutex;std::condition_variable ready;bool done=false,ok=true;std::thread writer([&]{DWORD written=0;std::size_t offset=0;while(offset<bytes.size()){if(!WriteFile(input,bytes.data()+offset,(DWORD)std::min<std::size_t>(65536,bytes.size()-offset),&written,nullptr)||!written){ok=false;break;}offset+=written;}{std::lock_guard lock(mutex);done=true;}ready.notify_one();});const auto deadline=Clock::now()+std::chrono::seconds(timeoutSeconds);bool aborted=false;{std::unique_lock lock(mutex);while(!done){if((cancel&&cancel->load())||Clock::now()>=deadline){aborted=true;TerminateJobObject(job,ERROR_CANCELLED);CancelSynchronousIo(writer.native_handle());break;}ready.wait_for(lock,std::chrono::milliseconds(10));}}writer.join();need(!aborted&&ok,"Claude Code stdin write was cancelled, disconnected or timed out; prior host receipts remain authoritative."+exitDetail());}
+    void close(){if(job){CloseHandle(job);job=nullptr;}if(process){WaitForSingleObject(process,2000);CloseHandle(process);process=nullptr;}reader.stop();if(input){CloseHandle(input);input=nullptr;}if(output){CloseHandle(output);output=nullptr;}if(!directory.empty()){std::error_code ignored;std::filesystem::remove_all(directory,ignored);directory.clear();}}
+    void send(const V& packet)override{std::string bytes=packet.dump()+"\n";need(bytes.size()<=32*1024*1024,"Claude Code request exceeded its transport bound.");stopped(cancel);std::mutex mutex;std::condition_variable ready;bool done=false,ok=true;std::thread writer([&]{DWORD written=0;std::size_t offset=0;while(offset<bytes.size()){if(!WriteFile(input,bytes.data()+offset,(DWORD)std::min<std::size_t>(65536,bytes.size()-offset),&written,nullptr)||!written){ok=false;break;}offset+=written;}{std::lock_guard lock(mutex);done=true;}ready.notify_one();});const auto deadline=Clock::now()+std::chrono::seconds(timeoutSeconds);bool aborted=false,cancelled=false;{std::unique_lock lock(mutex);while(!done){if((cancel&&cancel->load())||Clock::now()>=deadline){aborted=true;cancelled=cancel&&cancel->load();TerminateJobObject(job,ERROR_CANCELLED);CancelSynchronousIo(writer.native_handle());break;}ready.wait_for(lock,std::chrono::milliseconds(10));}}writer.join();
+        need(!aborted&&ok,"Claude Code stdin write "+(cancelled?std::string("was cancelled"):aborted?"timed out: the CLI read no input for "+std::to_string(timeoutSeconds)+" s and was stopped":std::string("failed: the CLI disconnected"))+"; prior host receipts remain authoritative."+exitDetail());}
     std::optional<V> receive(std::chrono::milliseconds wait)override{
         const auto deadline=Clock::now()+wait;
-        do{auto newline=pending.find('\n');if(newline!=std::string::npos){std::string line=pending.substr(0,newline);pending.erase(0,newline+1);if(!line.empty()&&line.back()=='\r')line.pop_back();if(line.empty())continue;V packet;need(arkjson::parse(line,packet)&&packet.t==V::Obj,"Claude Code returned malformed stream JSON; no partial packet was executed.");return packet;}
-            DWORD available=0;need(PeekNamedPipe(output,nullptr,0,nullptr,&available,nullptr)!=FALSE,"Claude Code stdout disconnected; prior receipts retained."+exitDetail());
-            if(available){char bytes[16384];DWORD read=0;need(ReadFile(output,bytes,std::min<DWORD>(available,sizeof(bytes)),&read,nullptr)&&read,"Claude Code output ended unexpectedly.");pending.append(bytes,read);need(pending.size()<=limit,"Claude Code packet exceeded the configured response bound.");continue;}
-            need(WaitForSingleObject(process,0)==WAIT_TIMEOUT,"Claude Code exited before completing the request."+exitDetail());std::this_thread::sleep_for(std::chrono::milliseconds(5));
-        }while(Clock::now()<deadline);return {};
+        for(;;){auto newline=pending.find('\n');if(newline!=std::string::npos){std::string line=pending.substr(0,newline);pending.erase(0,newline+1);if(!line.empty()&&line.back()=='\r')line.pop_back();if(line.empty())continue;V packet;need(arkjson::parse(line,packet)&&packet.t==V::Obj,"Claude Code returned malformed stream JSON; no partial packet was executed.");return packet;}
+            need(pending.size()<=limit,"Claude Code packet exceeded the configured response bound.");
+            if(!reader.take(pending,std::max(std::chrono::milliseconds(0),std::chrono::duration_cast<std::chrono::milliseconds>(deadline-Clock::now())))){need(WaitForSingleObject(process,100)==WAIT_TIMEOUT,"Claude Code exited before completing the request."+exitDetail());throw AssistantTransportError("Claude Code stdout disconnected; prior receipts retained."+exitDetail());}
+            if(pending.find('\n')==std::string::npos&&Clock::now()>=deadline)return {};
+        }
     }
 };
 #endif
@@ -134,16 +151,17 @@ struct Session {
         if(input.t==V::Str){need(!input.str.empty(),"Enter a Claude Code message first.");result.conversation.arr.push_back(message("user",input.str));}else{need(input.t==V::Arr&&!input.arr.empty(),"Claude Code requires a nonempty prompt/history.");result.conversation=input;}
         for(const auto& row:result.conversation.arr)if(str(row,"role")=="user")validateAssistantUserMessage(row);
         if(!config.onboardingPack.empty()){bool loaded=false;for(const auto& row:result.conversation.arr)if(str(row,"role")=="developer"&&str(row,"content").rfind("ARK_PREBAKED_GUIDE_V1\n",0)==0)loaded=true;if(!loaded)result.conversation.arr.insert(result.conversation.arr.begin(),message("developer","ARK_PREBAKED_GUIDE_V1\n"+config.onboardingPack));}
-        need(!imageIn(result.conversation),"Claude Code image input has not been qualified for this route. Pixels were not dropped or converted to text.");
         for(const auto& function:assistantFunctionTools(tools).arr){auto entry=obj();const auto name=str(function,"name");need(allowed.insert(name).second,"Duplicate ARK tool in the Claude Code role catalog.");entry.set("name",V::makeStr(name));if(function.find("description"))entry.set("description",*function.find("description"));entry.set("inputSchema",*function.find("parameters"));for(const auto& source:tools.arr)if(str(source,"name")==name&&source.find("annotations"))entry.set("annotations",*source.find("annotations"));catalog.arr.push_back(entry);}
         for(const auto& row:result.conversation.arr){const auto content=str(row,"content");if(content.rfind("ARK_ACP_INSPECT_REQUIRED",0)==0)inspectionRequired=true;else if(content.rfind("ARK_ACP_INSPECTION_CONFIRMED",0)==0)inspectionRequired=false;if(str(row,"type")=="function_call_output"){V receipt;if(arkjson::parse(str(row,"output"),receipt))track(receipt);}}
     }
-    bool consume(){if(!inbox)return false;auto batch=inbox();need(batch.isNull()||batch.t==V::Arr,"Invalid Claude Code steering mailbox.");bool changed=false;if(batch.t==V::Arr)for(auto& row:batch.arr){need(!imageIn(row),"Claude Code does not accept this image steering input.");const auto role=str(row,"role");need(role=="user"||role=="developer","Invalid Claude Code steering role.");result.conversation.arr.push_back(row);pendingMessages.arr.push_back(row);changed=true;}if(changed)checkpoint();return changed;}
-    void prompt(bool first){stopped(cancel);if(hooks.checkpoint)hooks.checkpoint();consume();std::string text;
-        if(first){const auto request=assistantRequest(config,result.conversation,tools);text="Retained context and current input:\n"+request.find("input")->dump();}
-        else{need(!pendingMessages.arr.empty(),"Claude Code continuation has no new host input.");text="New ARK host input since your last reply:\n"+pendingMessages.dump();}
+    bool consume(){if(!inbox)return false;auto batch=inbox();need(batch.isNull()||batch.t==V::Arr,"Invalid Claude Code steering mailbox.");bool changed=false;if(batch.t==V::Arr)for(auto& row:batch.arr){const auto role=str(row,"role");need(role=="user"||role=="developer","Invalid Claude Code steering role.");result.conversation.arr.push_back(row);pendingMessages.arr.push_back(row);changed=true;}if(changed)checkpoint();return changed;}
+    void prompt(bool first){stopped(cancel);if(hooks.checkpoint)hooks.checkpoint();consume();std::string text;V images=array();
+        if(first){const auto request=assistantRequest(config,result.conversation,tools);text="Retained context and current input:\n"+detachImages(*request.find("input"),images).dump();}
+        else{need(!pendingMessages.arr.empty(),"Claude Code continuation has no new host input.");text="New ARK host input since your last reply:\n"+detachImages(pendingMessages,images).dump();}
+        if(!images.arr.empty())text+="\n"+std::to_string(images.arr.size())+" image(s) follow this text in order; input_image attached_image N is the Nth.";
         pendingMessages=array();need(text.size()<=config.maxConversationBytes,"Claude Code prompt exceeded the configured conversation bound.");
-        auto packet=obj();packet.set("type",V::makeStr("user"));packet.set("message",message("user",text));packet.set("parent_tool_use_id",V{});packet.set("session_id",V::makeStr("default"));
+        auto user=message("user",text);if(!images.arr.empty()){auto content=array(),part=obj();part.set("type",V::makeStr("text"));part.set("text",V::makeStr(text));content.arr.push_back(std::move(part));for(auto& image:images.arr)content.arr.push_back(std::move(image));user.set("content",content);}
+        auto packet=obj();packet.set("type",V::makeStr("user"));packet.set("message",user);packet.set("parent_tool_use_id",V{});packet.set("session_id",V::makeStr("default"));
         ++result.rounds;++result.performance.providerRequests;result.performance.lastRequestBytes=packet.dump().size();result.performance.requestBytes+=result.performance.lastRequestBytes;result.performance.maxRequestBytes=std::max(result.performance.maxRequestBytes,result.performance.lastRequestBytes);result.performance.toolSchemaBytes=catalog.dump().size();
         io->send(packet);active=true;restart=false;promptText.clear();promptBegan=Clock::now();lastPacket=Clock::now();emit(AssistantEvent::Status,"Claude Code / CLI account / working");}
     V toolCall(const V& request,const V& requestId){
@@ -241,7 +259,6 @@ void validateAssistantClaudeCodeConfig(const AssistantConfig& config){
     need(!config.endpoint.empty()&&config.endpoint.size()<=2048&&config.endpoint.find_first_of("\r\n\t\"")==std::string::npos,"Invalid Claude Code CLI path.");
     need(config.model.size()<=128&&std::all_of(config.model.begin(),config.model.end(),[](unsigned char c){return std::isalnum(c)||c=='-'||c=='.'||c=='_'||c==':'||c=='['||c==']'||c=='@';}),"Invalid Claude Code model name.");
     need(config.reasoningEffort.empty()||config.reasoningEffort=="low"||config.reasoningEffort=="medium"||config.reasoningEffort=="high"||config.reasoningEffort=="xhigh"||config.reasoningEffort=="max","Claude Code effort must be blank (CLI default) or low, medium, high, xhigh or max.");
-    need(!config.imageInputSupported,"Claude Code image input has not been qualified on this route; keep image input disabled.");
     need(config.maxRounds<=32,"Assistant round limit must be zero (unlimited) or 1..32.");
     need(config.timeoutSeconds>=1&&config.timeoutSeconds<=300,"Assistant timeout must be between 1 and 300 seconds.");
     need(config.maxResponseBytes>=1024&&config.maxResponseBytes<=16*1024*1024,"Invalid assistant response size limit.");
@@ -259,7 +276,11 @@ std::string assistantClaudeCodeExecutable(const AssistantConfig& config){
 }
 bool assistantClaudeCodeAvailable(const AssistantConfig& config){try{validateAssistantClaudeCodeConfig(config);if(config.acpChannelFactory)return true;(void)assistantClaudeCodeExecutable(config);return true;}catch(...){return false;}}
 bool assistantClaudeCodeInheritsEnvironment(const std::string& name){std::string upper=name;std::transform(upper.begin(),upper.end(),upper.begin(),[](unsigned char c){return (char)std::toupper(c);});
-    for(const char* blocked:{"CLAUDECODE","CLAUDE_CODE_ENTRYPOINT","CLAUDE_CODE_SSE_PORT","CLAUDE_CODE_SIMPLE"})if(upper==blocked)return false;return true;}
+    // Markers a parent Claude Code session or SDK host sets for its own children (observed
+    // from a 2.1.x IDE session). Inherited, they bind ARK's role to that session's identity,
+    // messaging socket/token and host features. User sign-in and routing settings still pass.
+    for(const char* blocked:{"CLAUDECODE","CLAUDE_PID","CLAUDE_AGENT_SDK_VERSION","CLAUDE_CODE_ENTRYPOINT","CLAUDE_CODE_SSE_PORT","CLAUDE_CODE_SIMPLE","CLAUDE_CODE_CHILD_SESSION","CLAUDE_CODE_EMIT_STARTUP_TIMING","CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING","CLAUDE_CODE_ENABLE_TASKS","CLAUDE_CODE_QUESTION_PREVIEW_FORMAT"})if(upper==blocked)return false;
+    for(const char* prefix:{"CLAUDE_CODE_SESSION_","CLAUDE_CODE_MESSAGING_"})if(upper.rfind(prefix,0)==0)return false;return true;}
 std::vector<std::string> assistantClaudeCodeArguments(const AssistantConfig& config,const V& roleTools,const std::string& systemPromptFile){
     validateAssistantClaudeCodeConfig(config);std::string allowed;
     for(const auto& function:assistantFunctionTools(roleTools).arr){const auto name=str(function,"name");need(!name.empty()&&name.size()<=54&&std::all_of(name.begin(),name.end(),[](unsigned char c){return std::isalnum(c)||c=='_'||c=='-';}),"Invalid ARK role tool name for Claude Code.");allowed+=(allowed.empty()?"":",")+std::string("mcp__ark__")+name;}

@@ -58,6 +58,9 @@ void batchExplicitFailures(){
     const auto& large=field(row(batch,0),"structuredContent");
     check(field(large,"error_code").str=="QUERY_BATCH_ROW_TOO_LARGE"&&field(large,"bytes").num>256&&field(field(large,"result_keys"),"features").find("count"),"a row above max_bytes returns its shape, not its data");
     check(!field(row(batch,1),"isError").b,"a projected row within max_bytes passes");
+    batch=call(s,"query_batch",R"({"queries":[{"tool":"agent_onboard","args":{"detail":"guide"},"max_bytes":256}]})");
+    const auto& shaped=field(field(row(batch,0),"structuredContent"),"result_keys");const auto* nested=shaped.find("modeling_031B");
+    check(nested&&field(*nested,"type").str=="object"&&field(*nested,"keys").t==V::Arr&&!field(*nested,"keys").arr.empty(),"047D: an oversized row names one level of child keys for object fields");
     for(const auto& [args,text]:std::initializer_list<std::pair<const char*,const char*>>{
         {R"({"queries":[{"tool":"object_context","args":{"ids":{"$ref":"later.value"}}},{"id":"later","tool":"doc_info","args":{}}]})","earlier"},
         {R"({"queries":[{"id":"a","tool":"doc_info","args":{}},{"id":"a","tool":"doc_info","args":{}}]})","unique"},

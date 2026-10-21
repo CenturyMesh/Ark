@@ -99,7 +99,7 @@ keys available there.
 | `QUERY_BATCH_ROW_SKIPPED` | The row references a row that failed |
 | `QUERY_BATCH_REF_UNRESOLVED` | A reference names an absent value |
 | `QUERY_BATCH_PATH_MISSING` | A requested path is absent; returns the available fields, without a full result dump |
-| `QUERY_BATCH_ROW_TOO_LARGE` | The row is above `max_bytes`; returns each top-level field's type, count and bytes |
+| `QUERY_BATCH_ROW_TOO_LARGE` | The row is above `max_bytes`; returns each top-level field's type, count and bytes, and from 047D the child key names of object fields (up to 32, `keys_truncated` beyond) |
 
 Other rows are unaffected. Batches without these fields keep the
 [032D contract](AGENT_CONTRACTS_032D.md).

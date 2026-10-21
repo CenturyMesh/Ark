@@ -27,6 +27,8 @@ bool documentMutation(const std::string& name){static const std::set<std::string
 bool revision(const V& args){auto p=args.find("expected_revision");return p&&p->t==V::Num&&std::isfinite(p->num)&&p->num>=0&&p->num<=9007199254740991.0&&std::floor(p->num)==p->num;}
 bool receiptRevision(const V& value,std::uint64_t& result){auto p=value.find("revision");if(p&&p->t==V::Num&&std::isfinite(p->num)&&p->num>=0&&p->num<=9007199254740991.0&&std::floor(p->num)==p->num){result=(std::uint64_t)p->num;return true;}return false;}
 bool samePreparedRecipe(const V& a,const V& b){const auto* ac=a.find("commands"),*bc=b.find("commands"),*at=a.find("checks"),*bt=b.find("checks");return ac&&bc&&ac->t==V::Arr&&bc->t==V::Arr&&ac->dump()==bc->dump()&&((!at&&!bt)||(at&&bt&&at->dump()==bt->dump()));}
+// Read tools whose numeric `id` names a feature (the subject a removal makes unanswerable).
+bool featureSubjectRead(const std::string& tool){static const std::set<std::string> extra{"sheet_preview","stock_preview","geometry_query","mesh_get","mesh_raycast","reference_navigate"};return (tool.size()>8&&tool.compare(tool.size()-8,8,"_inspect")==0)||extra.count(tool);}
 bool createsAuthoringCheckpoint(const V& recipe){const auto* commands=recipe.find("commands");return commands&&commands->t==V::Arr&&std::any_of(commands->arr.begin(),commands->arr.end(),[](const auto& command){const auto op=field(command,"op");if(op=="feature.add"||op=="sheet.create"||op=="sketch.entity.set")return true;if(op!="sketch.set")return false;const auto* sketch=command.find("sketch"),*entities=sketch?sketch->find("entities"):nullptr;return entities&&entities->t==V::Arr&&!entities->arr.empty();});}
 bool explicitProjectBoundary(const std::string& name,const V& args,const V& result){if(isError(result))return false;if(name=="doc_new"||name=="doc_load")return true;if(name=="import_step"||name=="import_sheet_step"||name=="import_cad"){const auto* replace=args.find("replace");if(replace&&replace->t==V::Bool&&replace->b)return true;}const auto* content=result.find("structuredContent");const auto* boundary=(content?*content:result).find("activity_boundary");return boundary&&boundary->t==V::Bool&&boundary->b;}
 const V& payload(const V& result){auto p=result.find("structuredContent");return p&&p->t==V::Obj?*p:result;}
@@ -638,6 +640,7 @@ struct AgentTeam::Impl {
         std::unique_lock<std::timed_mutex> actionSerial(toolsMutex,std::defer_lock);
         std::uint64_t readRevisionFloor=0;
         std::uint64_t outcomeProjectEpoch=0;{std::lock_guard lock(mutex);outcomeProjectEpoch=preparedProjectEpoch;}
+        std::vector<double> removedFeatures; // numeric feature.remove ids of this call's measured commit
         if(documentMutation(name)){std::lock_guard lock(mutex);roles[index].view.taskState="in_progress";roles[index].view.taskSummary.clear();goalState=AgentGoalState::InProgress;goalDeclared=false;goalSummary.clear();}
         if(name.rfind("team_",0)!=0||name=="team_apply_step"){std::lock_guard lock(mutex);roles[index].reportedToCoordinator=false;}
         if(name=="team_send"){
@@ -705,7 +708,7 @@ struct AgentTeam::Impl {
                         std::lock_guard lock(mutex);if(!cancelled&&bytes<=preparedByteLimit){while(!prepared.empty()&&(prepared.size()>=64||preparedBytes+bytes>preparedByteLimit)){preparedBytes-=prepared.front().bytes;prepared.pop_front();}prepared.push_back({candidate,roles[index].view.id,std::move(retained),observed,bytes});preparedBytes+=bytes;}
                     }
                 }
-                if(constructing){step.kind=AgentTeamEvent::ConstructionEnd;step.draft=false;step.draftSketchCommands=V::makeArr();step.toolError=isError(result);step.hasDocumentRevision=receiptRevision(payload(result),step.documentRevision);bool committed=!step.toolError&&step.hasDocumentRevision&&step.hasExpectedRevision&&step.documentRevision>step.expectedRevision;if(auto ids=payload(result).find("created_ids"))if(ids->t==V::Arr)for(const auto& id:ids->arr)if(id.t==V::Num&&std::isfinite(id.num)&&id.num>0&&id.num<=9007199254740991.0&&std::floor(id.num)==id.num&&step.createdIds.size()<128)step.createdIds.push_back((std::uint64_t)id.num);
+                if(constructing){step.kind=AgentTeamEvent::ConstructionEnd;step.draft=false;step.draftSketchCommands=V::makeArr();step.toolError=isError(result);step.hasDocumentRevision=receiptRevision(payload(result),step.documentRevision);bool committed=!step.toolError&&step.hasDocumentRevision&&step.hasExpectedRevision&&step.documentRevision>step.expectedRevision;if(committed)if(const auto* commands=authorized.find("commands");commands&&commands->t==V::Arr)for(const auto& command:commands->arr)if(const auto* id=command.find("id");field(command,"op")=="feature.remove"&&id&&id->t==V::Num)removedFeatures.push_back(id->num);if(auto ids=payload(result).find("created_ids"))if(ids->t==V::Arr)for(const auto& id:ids->arr)if(id.t==V::Num&&std::isfinite(id.num)&&id.num>0&&id.num<=9007199254740991.0&&std::floor(id.num)==id.num&&step.createdIds.size()<128)step.createdIds.push_back((std::uint64_t)id.num);
                     step.text=step.toolError?"Atomic step rejected; draft is uncommitted":committed?"Committed "+step.stepId+" at revision "+std::to_string(step.documentRevision):"Step returned without a measured commit revision";
                     {std::lock_guard lock(mutex);if(committed){if(writeReservation.owner==roles[index].view.id)retireWriteReservationLocked("released_after_commit");++roles[index].view.stepsApplied;if(!authorizedCandidate.empty()){for(auto preview=prepared.begin();preview!=prepared.end();){if(preview->id==authorizedCandidate&&preview->roleId==roles[index].view.id){preparedBytes-=preview->bytes;preview=prepared.erase(preview);}else ++preview;}}}roles[index].view.status=step.text;for(auto& proposal:proposals)if(proposal.view.id==proposalId)proposal.view.state=committed?"applied":step.toolError?"rejected":"outcome unknown";}
                     if(committed&&actualName=="doc_apply"&&createsAuthoringCheckpoint(authorized)){
@@ -773,6 +776,17 @@ struct AgentTeam::Impl {
                 auto resolve=[&](const std::string& identity){const auto failed=role.unresolvedToolFailures.find(identity);if(failed==role.unresolvedToolFailures.end())return;if(resolutionRead(tool)){const auto stamp=role.readFailureStamps.find(identity);if(!measured||!subjectConsistent||measuredRevision<readRevisionFloor||outcomeProjectEpoch!=preparedProjectEpoch||stamp==role.readFailureStamps.end()||stamp->second.epoch!=preparedProjectEpoch)return;}std::uint64_t failedRevision=0;if(measured&&receiptRevision(failed->second,failedRevision)&&measuredRevision<failedRevision)return;role.unresolvedToolFailures.erase(identity);role.readFailureStamps.erase(identity);};
                 resolve(key);
                 if(tool=="doc_apply"||tool=="team_apply_step"){resolve("doc_apply");resolve("team_apply_step");}
+                // A committed removal of the inspected feature leaves its rejected read
+                // unanswerable: no later same-subject read can succeed. Supersede it
+                // visibly for every role instead of steering repairs of a deleted subject.
+                if(!removedFeatures.empty()&&(tool=="doc_apply"||tool=="team_apply_step"))for(auto& owner:roles)for(auto failure=owner.unresolvedToolFailures.begin();failure!=owner.unresolvedToolFailures.end();){
+                    const auto failedTool=field(failure->second,"tool");const auto* failedArgs=failure->second.find("args");const auto* id=failedArgs&&failedArgs->t==V::Obj?failedArgs->find("id"):nullptr;
+                    if(!id||id->t!=V::Num||!featureSubjectRead(failedTool)||std::find(removedFeatures.begin(),removedFeatures.end(),id->num)==removedFeatures.end()){++failure;continue;}
+                    V superseded=V::makeObj();superseded.set("role_id",V::makeStr(owner.view.id));for(const char* name:{"tool","args","error_code","revision"})if(const auto* value=failure->second.find(name))superseded.set(name,*value);superseded.set("resolution_source",V::makeStr("subject_removed"));superseded.set("removed_feature_id",*id);superseded.set("committed_revision",V::makeNum((double)measuredRevision));
+                    if(superseded.dump().size()+64<=config.maxEventTextBytes)automaticResolutions.arr.push_back(std::move(superseded));
+                    owner.readFailureStamps.erase(failure->first);failure=owner.unresolvedToolFailures.erase(failure);
+                    owner.lastToolFailure=owner.unresolvedToolFailures.empty()?V{}:owner.unresolvedToolFailures.rbegin()->second;
+                }
                 // A stale read needs current measured evidence of the same
                 // query. Preserve optional read preconditions; writes still
                 // require their explicit revision and never rebase.
@@ -811,6 +825,8 @@ struct AgentTeam::Impl {
                 progress.set("next_action",next);if(!automaticResolutions.arr.empty())progress.set("read_resolutions",automaticResolutions);result.set("team_progress",progress);
             }
         }
+        // Writes carry no read progress; a removal's supersessions still reach the author.
+        if(!automaticResolutions.arr.empty()&&!result.find("team_progress")){V progress=V::makeObj();progress.set("response_scope",V::makeStr("team_write_progress"));progress.set("read_resolutions",automaticResolutions);result.set("team_progress",progress);}
         for(const auto& resolution:automaticResolutions.arr){AgentTeamEvent supersession;supersession.kind=AgentTeamEvent::Message;supersession.roleId=roles[index].view.id;supersession.text="Attributed read supersession: "+resolution.dump();emit(supersession);}
         if(config.recordAction&&!payload(result).find("activity_id")&&!payload(result).find("activity_capture_error")&&name!="usage_record"&&name!="tool_feedback"&&name!="activity_info"&&name!="team_finish_goal"&&name!="team_report_task"){
             try{result=config.recordAction(roles[index].config.id,name,args,result,std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-actionStarted).count());}
