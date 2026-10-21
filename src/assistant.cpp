@@ -83,7 +83,7 @@ V compactToolReceipt(V value){
     return value;
 }
 V visualObservation(const std::string& tool,const V& args,V& receipt){
-    if(tool!="snapshot")return V{};
+    if(tool!="snapshot"&&tool!="visualize_render")return V{};
     V content=receipt.find("content")?*receipt.find("content"):V::makeArr(),images=V::makeArr();
     if(content.t!=V::Arr)return V{};
     for(const auto& part:content.arr)if(field(part,"type")=="image")images.arr.push_back(part);
@@ -402,13 +402,14 @@ const std::vector<std::pair<std::string,std::vector<std::string>>>& assistantSpe
         {"manufacturing",{"manufacturing_propose","manufacturing_inspect"}},{"plastics",{"manufacturing_propose","manufacturing_inspect"}},
         {"physics",{"physics_inspect","materials_inspect","compute_info"}},{"materials",{"materials_inspect"}},{"wood",{"wood_inspect"}},
         {"motion",{"assembly_motion","suspension_inspect","motion_info"}},{"suspension",{"suspension_inspect","assembly_motion"}},
+        {"exploded_views",{"explode_info","visualize_render"}},
         {"assembly",{"assembly_authoring_info","placement_plan","pattern_plan","assembly_motion"}},{"configurations",{"assembly_authoring_info"}},
         {"sheet",{"sheet_inspect","sheet_preview","export_flat_dxf","import_sheet_step"}},{"stamps",{"sheet_inspect","sheet_preview"}},
         {"frames",{"frame_inspect","stock_preview"}},{"tube",{"tube_inspect","notch_inspect","notch_plan","source_inspect","stock_preview"}},
         {"electronics",{"electronics_inspect","pcb_export"}},{"routing",{"electronics_inspect","pcb_export"}},
         {"mesh",{"mesh_inspect","mesh_get","import_mesh","export_mesh"}},{"drawings",{"drawing_inspect","drawing_export"}},
         {"skeleton",{"skeleton_inspect","skeleton_compile"}},{"automation",{"skeleton_inspect","skeleton_compile","design_solve"}},
-        {"planes",{"plane_authoring"}},{"sketch",{"sketch_repair"}},{"containers",{"design_containers"}},
+        {"planes",{"plane_authoring"}},{"sketch",{"sketch_repair"}},{"containers",{"design_containers"}},{"hud",{"hud_info","hud_flex_check"}},
         {"cad_import",{"import_step","import_cad","step_inspect","cad_inspect","image_asset","export_step","export_iges","doc_new","doc_load"}},
         {"history",{"feature_history","history_info","iteration_restore","failure_replay","failure_export","usage_info","usage_record","memory_maintain"}}};
     return topics;

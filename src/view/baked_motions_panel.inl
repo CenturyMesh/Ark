@@ -62,6 +62,7 @@ static void applyBakedMotionFrame(){
     if(p.displayRevision!=g_session.revision||p.displayCount!=g_instanceIds.size()){p.display.assign(p.frames.nodes.size(),-1);for(size_t i=0;i<p.frames.nodes.size();++i)for(size_t j=0;j<g_instanceIds.size();++j)if(g_instanceIds[j]==p.frames.nodes[i]&&g_instanceCopies[j]==p.frames.copies[i]){p.display[i]=(int)j;break;}p.displayRevision=g_session.revision;p.displayCount=g_instanceIds.size();p.shownFrame=~size_t(0);}
     const size_t k=bakedMotionFrame();if(k==p.shownFrame)return;p.shownFrame=k;g_instanceWorld=g_formedInstanceWorld;
     for(size_t i=0;i<p.frames.nodes.size();++i)if(p.display[i]>=0)g_instanceWorld[(size_t)p.display[i]]=p.frames.poses[k*p.frames.nodes.size()+i];
+    explodedBakedFrame(k); // 048B explode_view channels
     rebuildDisplayBounds();refreshSelectionLines();
 }
 static bool bakedMotionPlaybackAvailable(std::string& reason){

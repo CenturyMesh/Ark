@@ -35,9 +35,10 @@ add_library(ark STATIC
   src/authoring_024b.cpp src/appearance_024b.cpp src/plane_sections_024b.cpp
   src/authoring_023b.cpp src/cad_import.cpp src/holes_orchestrator.cpp src/design_containers.cpp
   src/assembly_patterns.cpp
-  src/motion_graph.cpp
+  src/motion_graph.cpp src/exploded_view.cpp src/visualize.cpp
   src/direct_preview.cpp
   src/exact_jobs_046b.cpp
+  src/parametric_hud.cpp
   src/agent_activity.cpp
   src/skeleton.cpp
   src/drawings.cpp
@@ -79,6 +80,11 @@ target_link_libraries(ark-async-exact-046b-tests PRIVATE ark)
 add_test(NAME async-exact-046b COMMAND ark-async-exact-046b-tests)
 # Exact timings need real worker requests, not local result-cache hits.
 set_tests_properties(async-exact-046b PROPERTIES TIMEOUT 240 ENVIRONMENT "ARK_NATIVE_RESULT_CACHE=0")
+
+add_executable(ark-parametric-hud-048b-tests tests/parametric_hud_048b_tests.cpp)
+target_link_libraries(ark-parametric-hud-048b-tests PRIVATE ark)
+add_test(NAME parametric-hud-048b COMMAND ark-parametric-hud-048b-tests)
+set_tests_properties(parametric-hud-048b PROPERTIES TIMEOUT 120)
 
 add_executable(ark-authoring-022b-contract-tests tests/authoring_022b_contract_tests.cpp)
 target_link_libraries(ark-authoring-022b-contract-tests PRIVATE ark)
@@ -544,15 +550,18 @@ if(WIN32)
       add_test(NAME studio-${check} COMMAND ark-studio --self-test-${check} --settings-file "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}.settings.json" --shot "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}.png" --size 1280 800)
       set_tests_properties(studio-${check} PROPERTIES TIMEOUT 300 RUN_SERIAL TRUE)
     endforeach()
-    foreach(check connectors-ui local-models-ui viewport-dock-ui assistant-steering-ui stamps-ui media-044b-ui planes-sections-ui holes-orchestrator-ui design-container-ui cad-import-ui native-vertex-pull-ui advanced-sheetmetal-ui specialized-pattern-ui drawing-viewport-ui direct-authoring-ui parametric-authoring-ui selection-glow-ui selection-picking-ui image-attachment-ui sketch-edit-ui sketch-drawing-ui typed-sketch-ui arc-ui assistant-ui render-ui action-icons-ui interaction-ui baked-motions-ui)
+    foreach(check connectors-ui local-models-ui viewport-dock-ui assistant-steering-ui stamps-ui media-044b-ui planes-sections-ui holes-orchestrator-ui design-container-ui cad-import-ui native-vertex-pull-ui advanced-sheetmetal-ui specialized-pattern-ui drawing-viewport-ui direct-authoring-ui parametric-authoring-ui selection-glow-ui selection-picking-ui image-attachment-ui sketch-edit-ui sketch-drawing-ui typed-sketch-ui arc-ui assistant-ui render-ui action-icons-ui interaction-ui baked-motions-ui exploded-views-ui)
       add_test(NAME studio-${check} COMMAND ark-studio --self-test-${check} --settings-file "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}.settings.json" --shot "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}.png" --size 1440 900)
       set_tests_properties(studio-${check} PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
     endforeach()
     set_tests_properties(studio-interaction-ui PROPERTIES WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
-    foreach(check team-blockers-ui local-models-ui viewport-dock-ui assistant-steering-ui stamps-ui planes-sections-ui baked-motions-ui)
+    foreach(check team-blockers-ui local-models-ui viewport-dock-ui assistant-steering-ui stamps-ui planes-sections-ui baked-motions-ui exploded-views-ui)
       add_test(NAME studio-${check}-compact COMMAND ark-studio --self-test-${check} --settings-file "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}-compact.settings.json" --shot "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}-compact.png" --size 1366 800)
       set_tests_properties(studio-${check}-compact PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
     endforeach()
+    # 048B Parametric HUD overlay; the selftest also checks a 1100x700 layout.
+    add_test(NAME studio-parametric-hud-ui COMMAND ark-studio --self-test-parametric-hud-ui --settings-file "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/parametric-hud-ui.settings.json" --shot "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/parametric-hud-ui.png" --size 1280 800)
+    set_tests_properties(studio-parametric-hud-ui PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
     add_test(NAME studio-skeleton-editor COMMAND ark-studio --skeleton-editor-test --settings-file "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/skeleton-editor.settings.json" --shot "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/skeleton-editor.png" --size 1440 900)
     set_tests_properties(studio-skeleton-editor PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
     foreach(width 1180 1440)
@@ -853,6 +862,11 @@ add_executable(ark-motion-graph-044b-tests tests/motion_graph_044b_tests.cpp)
 target_link_libraries(ark-motion-graph-044b-tests PRIVATE ark)
 add_test(NAME motion-graph-044b COMMAND ark-motion-graph-044b-tests)
 set_tests_properties(motion-graph-044b PROPERTIES TIMEOUT 180)
+# 048B exploded views, explode_view motion channels and Visualize renders on synthetic assemblies.
+add_executable(ark-exploded-view-048b-tests tests/exploded_view_048b_tests.cpp)
+target_link_libraries(ark-exploded-view-048b-tests PRIVATE ark)
+add_test(NAME exploded-view-048b COMMAND ark-exploded-view-048b-tests)
+set_tests_properties(exploded-view-048b PROPERTIES TIMEOUT 180)
 # 046B motion clearance: exact distance over baked frames and certified intervals (native worker).
 if(ARK_WITH_OCCT)
   add_executable(ark-motion-clearance-046b-tests tests/motion_clearance_046b_tests.cpp)

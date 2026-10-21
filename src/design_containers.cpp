@@ -250,7 +250,7 @@ V proposeDesignContainerMerge(const Document& doc,u64 revision,const V& args){
             row.set("a",number(mapped(id(field(original,"a")),nodeIds)));row.set("b",number(mapped(id(field(original,"b")),nodeIds)));c=command(before?"mate.edit":"mate.add");for(const auto& kv:row.obj)if(kv.first!="id"||before)c.set(kv.first,kv.second);
         }else if(std::string(collection)=="sketches"){
             c=command("sketch.set");c.set("name",field(row,"name"));erase(row,"name");c.set("sketch",row);
-        }else{const char* op=std::string(collection)=="params"?"param.set":std::string(collection)=="planes"?"plane.set":"material.set";c=command(op);for(const auto& kv:row.obj)c.set(kv.first,kv.second);if(std::string(collection)=="materials"&&before&&!row.find("physical"))c.set("physical",V{});if(std::string(collection)=="planes"&&before){noRemovedParams(field(*before,"p"),field(original,"p"));if(before->find("support")&&!row.find("support"))c.set("support",V{});}}
+        }else{const char* op=std::string(collection)=="params"?"param.set":std::string(collection)=="planes"?"plane.set":"material.set";c=command(op);for(const auto& kv:row.obj)c.set(kv.first,kv.second);if(std::string(collection)=="materials"&&before&&!row.find("physical"))c.set("physical",V{});if(std::string(collection)=="params"&&before&&before->find("hud")&&!row.find("hud"))c.set("hud",V{});if(std::string(collection)=="planes"&&before){noRemovedParams(field(*before,"p"),field(original,"p"));if(before->find("support")&&!row.find("support"))c.set("support",V{});}}
         append(commands,c);commandKeys.push_back(key);
     }
     for(const auto* collection:{"assembly_configurations","assembly_external_references"}){

@@ -33,6 +33,7 @@ struct Parameter {
     std::string name;
     std::string expr;     // canonical expression ("10", "width/2", ...)
     f64 value = 0;
+    arkjson::Value hud;   // 048B optional HUD exposure, canonical object; null keeps it hidden
     bool depends(const std::string& var) const;
 };
 
@@ -330,6 +331,7 @@ public:
     arkjson::Value assemblyLoadSelection; // null loads all; array retains selected node subtrees
     arkjson::Value assemblyExternalReferences; // imported source hashes and producer revisions
     arkjson::Value motions; // 044B Skeleton Motion vector graphs and their baked display frames; null when absent
+    arkjson::Value explodedViews; // 048B named exploded display layouts over assembly instances; null when absent
     u64 addFeature(Feature f);                    // returns id
     Feature* find(u64 id);
     const Feature* find(u64 id) const;

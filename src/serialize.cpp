@@ -21,6 +21,8 @@
 #include "ark/curve_pattern_044b.hpp"
 #include "ark/media_044b.hpp"
 #include "ark/motion_graph.hpp"
+#include "ark/parametric_hud.hpp"
+#include "ark/exploded_view.hpp"
 #include <cstdio>
 #include <cctype>
 #include <fstream>
@@ -540,6 +542,7 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
         Value v=Value::makeObj();
         v.set("name",Value::makeStr(p.name));
         v.set("expr",Value::makeStr(p.expr));
+        if(p.hud.t==Value::Obj)v.set("hud",p.hud); // 048B optional; older readers ignore it
         ps.arr.push_back(std::move(v));
     }
     r.set("params",std::move(ps));
@@ -645,6 +648,7 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
     for(const auto& feature:doc.features)if(requiresElectronics035B(feature)){r.set("version",Value::makeNum(45));break;}
     for(const auto& plane:doc.planes)if(plane.support.t==Value::Obj)if(const auto* kind=plane.support.find("kind");kind&&kind->t==Value::Str&&kind->str=="bisector"){r.set("version",Value::makeNum(46));break;}
     if(motionsRequireDocumentVersion47(doc))r.set("motions",doc.motions);
+    if(doc.explodedViews.t==Value::Arr&&!doc.explodedViews.arr.empty())r.set("exploded_views",doc.explodedViews); // 048B: optional, no format version
     if(curvePattern044BNeedsVersion47(doc)||media044BNeedsVersion47(doc)||motionsRequireDocumentVersion47(doc))r.set("version",Value::makeNum(47));
     if(profileRegions046BNeedsVersion48(doc))r.set("version",Value::makeNum(48));
     if(includeAudit&&includeHistory)iterationPersist(r,doc);
@@ -701,8 +705,10 @@ static bool documentFromValue(Value& v,Document& doc,std::string* err){
             np.name=p.find("name")?p.find("name")->asStr():"";
             np.expr=p.find("expr")?p.find("expr")->asStr():"0";
             if(np.name.empty() || !paramNames.insert(np.name).second) return fail("empty or duplicate parameter name");
+            if(const auto* hud=p.find("hud");hud&&!hud->isNull())try{np.hud=canonicalHud(*hud);}catch(const std::exception& e){return fail("Parameter '"+np.name+"': "+e.what());}
             nd.params.push_back(std::move(np));
         }
+    if(size_t exposed=std::count_if(nd.params.begin(),nd.params.end(),[](const Parameter& p){return hudExposed(p);});exposed>maxHudParameters)return fail("HUD_CAPACITY: at most 64 parameters can be exposed to the HUD");
 
     if(auto materials=v.find("materials")){
         if(materials->arr.size()>256)return fail("Material capacity exceeded");
@@ -898,6 +904,7 @@ static bool documentFromValue(Value& v,Document& doc,std::string* err){
         const auto* version=v.find("version");if(!version||version->num<47||motions->t!=Value::Arr)return fail("Baked motions require document version 47 array");
         try{validateMotionStorage(*motions);}catch(const std::exception& error){return fail(error.what());}nd.motions=*motions;
     }
+    if(const auto* views=v.find("exploded_views")){try{validateExplodedViewStorage(*views);}catch(const std::exception& error){return fail(error.what());}nd.explodedViews=*views;}
     if(const auto* tip=v.find("history_tip")){
         const auto* version=v.find("version");if(!version||version->num<40||tip->t!=Value::Num||!std::isfinite(tip->num)||tip->num<1||tip->num>9007199254740990.||tip->num!=std::floor(tip->num)||!nd.find((u64)tip->num))return fail("history_tip requires a valid feature ID and document version 40");nd.historyTip=(u64)tip->num;
     }

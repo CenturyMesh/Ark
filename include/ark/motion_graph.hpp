@@ -40,7 +40,7 @@ struct MotionLimit {bool limited=false;double min=0,max=0;};
 // Continuity (C0/C1) at every seam, sampled ranges and optional limit violations.
 arkjson::Value motionDiagnostics(const CompiledMotion&,const std::vector<MotionLimit>& limits={});
 
-struct MotionJointBinding {std::string channel,type,unit;u64 mate=0,driver=0;bool limited=false,constrained=false;double min=0,max=0,position=0;};
+struct MotionJointBinding {std::string channel,type,unit;u64 mate=0,driver=0;bool limited=false,constrained=false;double min=0,max=0,position=0;std::string explodeView;}; // 048B: explode_view signal, factor 0..1
 // Every bound channel names an existing revolute or prismatic mate with a grounded moving side.
 bool bindMotionJoints(const AssemblyManipulationProgram&,const Document&,const arkjson::Value& graph,std::vector<MotionJointBinding>&,std::string& error);
 // Solved joint at one frame: world pivot/axis and its moving occurrence set.
@@ -64,7 +64,7 @@ struct BakedMotionFrames {
     std::vector<u64> nodes;std::vector<int> copies;std::vector<std::string> names;
     std::vector<Mat4> poses; // frame-major, instance-minor
     std::vector<float> coordinates; // frame-major, channel-minor
-    std::vector<std::string> channels,units;std::vector<double> starts;
+    std::vector<std::string> channels,units,explodeViews;std::vector<double> starts; // explodeViews: per channel, empty unless explode_view
     size_t frameCount=0;double fps=30,duration=0;
 };
 bool decodeBakedMotion(const arkjson::Value& motion,BakedMotionFrames&,std::string& error);

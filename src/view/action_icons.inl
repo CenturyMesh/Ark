@@ -67,6 +67,9 @@ static const ActionIcon* actionVectorIcon(int action){
         auto& dockFit=result[964];for(float x:{.14f,.86f})for(float y:{.14f,.86f}){line(dockFit,x,y,x+(x<.5f?.20f:-.20f),y);line(dockFit,x,y,x,y+(y<.5f?.20f:-.20f));}box(dockFit,.36f,.36f,.28f,.28f);
         auto& sheet=result[965];box(sheet,.19f,.08f,.62f,.84f);box(sheet,.30f,.22f,.23f,.25f);arc(sheet,.65f,.34f,.07f,.07f,0,360);line(sheet,.30f,.61f,.70f,.61f);line(sheet,.30f,.74f,.70f,.74f);line(sheet,.55f,.74f,.55f,.90f);
         auto& motions=result[45000];line(motions,.12f,.86f,.90f,.86f);line(motions,.12f,.86f,.12f,.12f);for(int i=0;i<16;++i){auto curve=[](float t){return .74f-.52f*t*t*(3-2*t);};const float a=i/16.f,b=(i+1)/16.f;line(motions,.18f+.64f*a,curve(a),.18f+.64f*b,curve(b));}line(motions,.58f,.16f,.58f,.80f);poly(motions,{{.66f,.18f},{.86f,.30f},{.66f,.42f},{.66f,.18f}});
+        auto& hud=result[48000];for(int i=0;i<3;++i){const float y=.24f+i*.26f,k=i==0?.62f:i==1?.34f:.74f;line(hud,.12f,y,k-.07f,y);line(hud,k+.07f,y,.88f,y);box(hud,k-.07f,y-.09f,.14f,.18f);} // 048B Parametric HUD
+        auto& explode=result[47000];box(explode,.36f,.36f,.28f,.28f);for(int k=0;k<4;++k){const float dx=k==0?0:k==1?0:k==2?-1:1,dy=k==0?-1:k==1?1:0;auto at=[&](float along,float side){return std::pair{.5f+dx*along-dy*side,.5f+dy*along+dx*side};};const auto a=at(.22f,0),b=at(.42f,0),c=at(.34f,.08f),d=at(.34f,-.08f);line(explode,a.first,a.second,b.first,b.second);line(explode,c.first,c.second,b.first,b.second);line(explode,d.first,d.second,b.first,b.second);}
+        auto& visualize=result[47001];box(visualize,.10f,.20f,.80f,.60f);poly(visualize,{{.18f,.72f},{.36f,.46f},{.50f,.62f},{.60f,.52f},{.82f,.72f}});arc(visualize,.68f,.36f,.08f,.08f,0,360);line(visualize,.62f,.42f,.48f,.56f);
         return result;
     }();
     auto found=icons.find(action);return found==icons.end()?nullptr:&found->second;
