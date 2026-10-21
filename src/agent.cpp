@@ -226,7 +226,7 @@ void editNode(AssemblyNode& n,const V& j,const Document& doc){
 V result(V data,bool error=false){V r=V::makeObj(),content=V::makeArr(),item=V::makeObj();item.set("type",V::makeStr("text"));item.set("text",V::makeStr(data.dump()));content.arr.push_back(item);r.set("content",content);r.set("structuredContent",data);r.set("isError",V::makeBool(error));return r;}
 void validatedMaterials(const Document& d){
     validateAppearanceAuthoring024B(d,false);
-    if(d.features.size()>1024||d.params.size()>256||d.sketches.size()>64||d.planes.size()>128||d.canvases.size()>8||d.materials.size()>256)throw std::runtime_error("Document capacity exceeded");
+    if(d.features.size()>1024||d.params.size()>256||d.sketches.size()>256||d.planes.size()>128||d.canvases.size()>8||d.materials.size()>256)throw std::runtime_error("Document capacity exceeded");
     for(const auto& material:d.materials){std::string reason;if(!validateMaterial(material,reason))throw std::runtime_error(reason);}
     for(const auto& feature:d.features){
         if(!feature.material.empty()&&std::none_of(d.materials.begin(),d.materials.end(),[&](const Material& material){return material.name==feature.material;}))throw std::runtime_error("Feature references a missing material: "+feature.material);

@@ -880,7 +880,7 @@ static bool documentFromValue(Value& v,Document& doc,std::string* err){
         }
         if(feature.appearance.t==Value::Obj){auto version=v.find("version");if(!version||version->asNum()<15)return fail("Feature appearance requires document version 15");}
     }
-    if(nd.params.size()>256||nd.features.size()>1024||nd.sketches.size()>64||nd.canvases.size()>8||nd.materials.size()>256)return fail("document capacity exceeded");
+    if(nd.params.size()>256||nd.features.size()>1024||nd.sketches.size()>256||nd.canvases.size()>8||nd.materials.size()>256)return fail("document capacity exceeded");
     nd.refreshParams();
     if(!nd.parameterError.empty())return fail(nd.parameterError);
     for(auto& canvas:nd.canvases){

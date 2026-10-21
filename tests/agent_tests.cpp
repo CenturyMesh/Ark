@@ -42,6 +42,40 @@ void testDocInfoDiscoveryContract(){
         CHECK(schemaAccepts(schema,json(R"({"ids":[1]})")));CHECK(schemaAccepts(schema,json(R"({"detail":"design","ids":[1]})")));
     }
 }
+// B.02/A.02: 256 sketches per document, including atomic rejection and persistence.
+void testSketchCapacity050B(){
+    auto sketches=[](int from,int to){std::string batch=R"({"commands":[)";for(int i=from;i<to;++i)batch+=std::string(i>from?",":"")+R"({"op":"sketch.set","name":"S)"+std::to_string(i)+R"(","sketch":{"entities":[{"kind":"line","name":"L","dof":[0,0,10,0]}]}})";return batch+"]}";};
+    AgentSession s;
+    auto applySketches=[&](int from,int to){auto args=json(sketches(from,to).c_str());args.set("expected_revision",V::makeNum((double)s.revision));return s.call("doc_apply",args);};
+    for(const auto count:{64,65,128,200,256}){
+        CHECK(!failed(applySketches((int)s.document.sketches.size(),count)));
+        CHECK(s.document.sketches.size()==(size_t)count);
+    }
+    // Replacing an existing sketch at capacity must still work.
+    CHECK(!failed(applySketches(255,256)));CHECK(s.document.sketches.size()==256);
+    const auto path=std::string("sketch-capacity-050b.ark");V save=V::makeObj();save.set("path",V::makeStr(path));CHECK(!failed(s.call("doc_save",save)));
+    AgentSession reopened;save.set("expected_revision",V::makeNum((double)reopened.revision));
+    CHECK(!failed(reopened.call("doc_load",save)));CHECK(reopened.document.sketches.size()==256);
+    CHECK(documentToJson(reopened.document)==documentToJson(s.document));std::remove(path.c_str());
+    const auto revision=s.revision;const auto baseline=documentToJson(s.document);
+    auto overflow=json(sketches(256,257).c_str());overflow.set("expected_revision",V::makeNum((double)revision));
+    auto commands=*overflow.find("commands");commands.arr.insert(commands.arr.begin(),json(R"({"op":"param.set","name":"must_rollback","expr":"7"})"));overflow.set("commands",commands);
+    for(const auto* tool:{"doc_preview","doc_apply"}){
+        const auto over=s.call(tool,overflow);
+        const auto* valid=over.find("structuredContent")->find("valid");
+        CHECK(std::string(tool)=="doc_preview"?valid&&!valid->b:failed(over));
+        CHECK(over.dump().find("Document capacity exceeded")!=std::string::npos);
+        CHECK(s.revision==revision&&documentToJson(s.document)==baseline);
+    }
+    // Exercise the loader independently of the mutation guard and journal replay.
+    auto oversized=json(documentToJson(s.document,true,false).c_str());
+    auto storedSketches=*oversized.find("sketches");auto extra=storedSketches.arr.back();extra.set("name",V::makeStr("S256"));storedSketches.arr.push_back(extra);oversized.set("sketches",storedSketches);
+    Document preserved=s.document;std::string error;
+    CHECK(!documentFromJson(oversized.dump(),preserved,&error));
+    CHECK(error=="document capacity exceeded"&&documentToJson(preserved)==baseline);
+    auto onboarding=s.call("agent_onboard",json(R"({"topic":"sketch","detail":"guide"})"));
+    CHECK(!failed(onboarding)&&onboarding.dump().find("256 sketches per document")!=std::string::npos);
+}
 void testDocApplyDiscoveryContract(){
     V advertised,previewSchema;
     for(const auto& tool:AgentSession::tools().arr){if(tool.find("name")->str=="doc_apply")advertised=*tool.find("inputSchema");if(tool.find("name")->str=="doc_preview")previewSchema=*tool.find("inputSchema");}
@@ -104,7 +138,7 @@ int main(){
     cpu_detect();
     testObjectContext();
     benchmarkObjectContext();
-    testDocInfoDiscoveryContract();testDocApplyDiscoveryContract();
+    testDocInfoDiscoveryContract();testDocApplyDiscoveryContract();testSketchCapacity050B();
     // Detect the old f64/f32 reinterpretation bug on arrays entering the batch path.
     std::vector<Vec3> in(128),out(128);Mat4 m=Mat4::translation({1000000.125,-12.3,8})*Mat4::rotZ(.73);
     for(size_t i=0;i<in.size();++i)in[i]={(double)i/7.,(double)i/11.,(double)i/13.};
