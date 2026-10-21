@@ -23,6 +23,7 @@
 #include "ark/motion_graph.hpp"
 #include "ark/parametric_hud.hpp"
 #include "ark/exploded_view.hpp"
+#include "ark/drag_chain.hpp"
 #include <cstdio>
 #include <cctype>
 #include <fstream>
@@ -649,6 +650,7 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
     for(const auto& plane:doc.planes)if(plane.support.t==Value::Obj)if(const auto* kind=plane.support.find("kind");kind&&kind->t==Value::Str&&kind->str=="bisector"){r.set("version",Value::makeNum(46));break;}
     if(motionsRequireDocumentVersion47(doc))r.set("motions",doc.motions);
     if(doc.explodedViews.t==Value::Arr&&!doc.explodedViews.arr.empty())r.set("exploded_views",doc.explodedViews); // 048B: optional, no format version
+    if(doc.dragChains.t==Value::Arr&&!doc.dragChains.arr.empty())r.set("drag_chains",doc.dragChains); // 050B: optional like exploded_views; see DRAG_CHAIN_050B
     if(curvePattern044BNeedsVersion47(doc)||media044BNeedsVersion47(doc)||motionsRequireDocumentVersion47(doc))r.set("version",Value::makeNum(47));
     if(profileRegions046BNeedsVersion48(doc))r.set("version",Value::makeNum(48));
     if(motionReceiptsRequireDocumentVersion49(doc))r.set("version",Value::makeNum(49));
@@ -880,7 +882,7 @@ static bool documentFromValue(Value& v,Document& doc,std::string* err){
         }
         if(feature.appearance.t==Value::Obj){auto version=v.find("version");if(!version||version->asNum()<15)return fail("Feature appearance requires document version 15");}
     }
-    if(nd.params.size()>256||nd.features.size()>1024||nd.sketches.size()>64||nd.canvases.size()>8||nd.materials.size()>256)return fail("document capacity exceeded");
+    if(nd.params.size()>256||nd.features.size()>1024||nd.sketches.size()>256||nd.canvases.size()>8||nd.materials.size()>256)return fail("document capacity exceeded");
     nd.refreshParams();
     if(!nd.parameterError.empty())return fail(nd.parameterError);
     for(auto& canvas:nd.canvases){
@@ -906,6 +908,7 @@ static bool documentFromValue(Value& v,Document& doc,std::string* err){
         try{validateMotionStorage(*motions);}catch(const std::exception& error){return fail(error.what());}nd.motions=*motions;
     }
     if(const auto* views=v.find("exploded_views")){try{validateExplodedViewStorage(*views);}catch(const std::exception& error){return fail(error.what());}nd.explodedViews=*views;}
+    if(const auto* chains=v.find("drag_chains")){try{validateDragChainStorage(*chains);}catch(const std::exception& error){return fail(error.what());}nd.dragChains=*chains;}
     if(const auto* tip=v.find("history_tip")){
         const auto* version=v.find("version");if(!version||version->num<40||tip->t!=Value::Num||!std::isfinite(tip->num)||tip->num<1||tip->num>9007199254740990.||tip->num!=std::floor(tip->num)||!nd.find((u64)tip->num))return fail("history_tip requires a valid feature ID and document version 40");nd.historyTip=(u64)tip->num;
     }

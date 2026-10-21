@@ -29,6 +29,17 @@ agent value. A flex pass covers only the sampled values. The human edits the
 same parameters from the Studio HUD as ordinary human `param.set` transactions.
 See [Parametric HUD](PARAMETRIC_HUD_048B.md).
 
+050B drag chains (B.04/C.04, **Parcial**): when a design needs a cable carrier
+(drag chain, energy chain) between a fixed bracket and a moving carriage, use
+revision-checked `drag_chain.set{name,link,bend_radius,anchor,moving:{occurrence,
+attach,joint},link_count?,travel?}` with the fixed-end pin, run and bend-side
+directions, the carriage's moving-end pin and its prismatic joint. Never model a
+drag chain as telescoping rigid segments, `min()`/`max()` couplings or one motion
+channel per link. Links are native B-rep occurrences driven from the joint
+coordinate in every pose, drive preview and bake; bake only the carriage joint.
+Inspect with read-only `drag_chain_info{name,q?}`; load
+`agent_onboard{topic:"assembly"}` and see [drag chains](DRAG_CHAIN_050B.md).
+
 048B exploded views and Visualize (B.04/B.05/D.04, **Parcial**): author an
 exploded view only when the user explicitly asks for one, an assembly image or
 an assembly drawing, the same rule as 2D drawings. `explode.set{name,steps}`,
@@ -632,7 +643,7 @@ Reports use indexed connectivity without silently welding/healing. `closed_orien
 
 ## Capacity and performance
 
-Documents are limited to 4 MiB on load, 1024 features, 256 parameters and 64 sketches. A sketch accepts 128 entities and 256 constraints. JSON nesting is limited to 64; mathematical expressions to 2048 characters. These are request limits, not a bound on all possible boolean or solver runtime. There is no cancellation or worker isolation yet.
+Documents are limited to 4 MiB on load, 1024 features, 256 parameters and 256 sketches total across all parts and assemblies. Assembly nesting does not create a separate sketch allowance. A sketch accepts 128 entities and 256 constraints. JSON nesting is limited to 64; mathematical expressions to 2048 characters. These are request limits, not a bound on all possible boolean or solver runtime. There is no cancellation or worker isolation yet.
 
 Mesh buffers, reports and BVHs are cached per session revision and selected feature ID. One geometry recompute handles the whole batch. Version-27 documents retain immutable iteration deltas and shared large source strings, with persistent undo/redo. Limits are 512 nodes, 131072 replay operations and the total 4 MiB document cap; excess capacity rejects the mutation atomically. Existing documents acquire only their first observed baseline. Evaluated meshes and usage snapshots are excluded from the journal. See [persistent iterations](ITERATION_HISTORY.md). The old hand-written SIMD routines are retained as source archaeology but are disabled until ABI/numerical parity and profiling justify them.
 

@@ -105,6 +105,7 @@ typedef ptrdiff_t GLsizeiptr;
 #include "ark/updates.hpp"
 #include "ark/motion_graph.hpp"
 #include "ark/exploded_view.hpp"
+#include "ark/drag_chain.hpp"
 #include "ark/exact_jobs_046b.hpp"
 #include "ark/parametric_hud.hpp"
 #include <thread>
@@ -4759,6 +4760,7 @@ static void drawCanvases(const GLfloat* vpT){
 #include "baked_motions_panel.inl"
 #include "parametric_hud.inl"
 #include "exploded_view.inl"
+#include "drag_chain.inl"
 static void drawFrame(HDC hdc){
     processDirectAuthoringPreview();processCableGuide035();
     static auto previous=std::chrono::steady_clock::now();auto now=std::chrono::steady_clock::now();
@@ -5118,8 +5120,9 @@ static void drawFrame(HDC hdc){
     label(pickText.empty()?"No face, edge, or curve":pickText,rx,210,.58f);
     button("Body",rx,228,60,170,false,g_pickKind==0);button("Face",rx+64,228,60,171,false,g_pickKind==1);button("Edge",rx+128,228,60,172,false,g_pickKind==2);button("Curve",rx+192,228,62,173,false,g_pickKind==3);
     const bool assemblySelected=selBody>=0&&g_instanceIds[selBody]&&!activeSketch;
+    const bool dragChainSelected=assemblySelected&&!dragChainOfNode(g_doc,g_instanceIds[selBody]).empty();
     if(!g_allSheetsFlat&&!g_stockMode){
-    if(!laser&&!source&&!activeSketch)label(assemblySelected?"ASSEMBLY CONSTRAINTS":nativeReport?"NATIVE GEOMETRY":"GEOMETRY",rx,283,.66f);
+    if(!laser&&!source&&!activeSketch)label(dragChainSelected?"DRIVEN CABLE CARRIER":assemblySelected?"ASSEMBLY CONSTRAINTS":nativeReport?"NATIVE GEOMETRY":"GEOMETRY",rx,283,.66f);
     auto metric=[&](const char* title,const std::string& value,float y){label(title,rx,y,.76f);textOut(value,W-24-textWidth(value,.80f),y,.80f);};
     if(selBody>=0&&!laser&&!source&&!activeSketch&&!assemblySelected){auto& r=g_reports[g_instancePart[selBody]];
         if(nativeReport){
@@ -5172,6 +5175,7 @@ static void drawFrame(HDC hdc){
         const u64 selectedNode=g_instanceIds[selBody];
         auto node=std::find_if(g_doc.assembly.begin(),g_doc.assembly.end(),[&](const AssemblyNode& n){return n.id==selectedNode;});
         if(node!=g_doc.assembly.end()){
+            if(!dragChainSelected){
             metric("Instance #",std::to_string(node->id),314);
             metric("Grounded",node->fixed?"yes":"no",343);
             metric("Parent #",std::to_string(node->parent),372);
@@ -5180,6 +5184,9 @@ static void drawFrame(HDC hdc){
             char residual[80];std::snprintf(residual,sizeof residual,"%.4g mm / %.4g deg",g_assemblyDiagnostics.maxPositionMm,g_assemblyDiagnostics.maxAngleDeg);
             metric("Max residual",residual,471);
             rect(rx,506,254,1,0,.17,.21,.22,1,0,0,0,0,0);
+            }
+            std::string chainTitle;std::vector<std::pair<std::string,std::string>> chainRows; // 050B driven drag chain link
+            if(dragChainProperties(selectedNode,chainTitle,chainRows)){label(chainTitle.substr(0,36),rx,314,.62f);float y=350;for(const auto& row:chainRows){metric(row.first.c_str(),row.second,y);y+=29;}label("Motion follows the carriage",rx,566,.64f);}else{
             label("MATES / CLICK TO SELECT",rx,525,.62f);
             std::vector<size_t> related;for(size_t i=0;i<g_doc.mates.size();++i)
                 if(g_doc.mates[i].a==selectedNode||g_doc.mates[i].b==selectedNode)related.push_back(i);
@@ -5199,6 +5206,7 @@ static void drawFrame(HDC hdc){
             if(related.size()>(size_t)maxMateRows){
                 button("<",rx+158,512,30,97);button(">",rx+191,512,30,98);
                 label(std::to_string(g_matePage+1)+"/"+std::to_string((related.size()+maxMateRows-1)/maxMateRows),rx+225,520,.52f);
+            }
             }
         }
     }
@@ -5234,6 +5242,10 @@ static void drawFrame(HDC hdc){
         button("Extrude",rx,H-158,121,65,true);button("Cut",rx+131,H-158,121,66);
         button("Source parameters",rx,H-118,252,577);button(g_showSketches?"Hide sketch":"Show sketch",rx,H-78,121,68);button(g_showDatumPlanes?"Hide datums":"Show datums",rx+131,H-78,121,72);
     }else if(assemblySelected){
+        if(dragChainSelected){
+            button("Edit link geometry",rx,H-198,252,161,true);
+            button("Source parameters",rx,H-158,252,577);
+        }else{
         const u64 selectedNode=g_instanceIds[selBody];
         auto node=std::find_if(g_doc.assembly.begin(),g_doc.assembly.end(),[&](const AssemblyNode& n){return n.id==selectedNode;});
         button(node!=g_doc.assembly.end()&&node->fixed?"Unground":"Ground",rx,H-238,121,93);
@@ -5243,6 +5255,7 @@ static void drawFrame(HDC hdc){
         button("Remove mate",rx,H-158,121,96);
         button("Duplicate",rx+131,H-158,121,28);
         button("Delete selected",rx,H-78,252,25);
+        }
     }else if(sheet){
         if(sheet->type==FeatureType::SheetMetal){
             button("Edit base",rx,H-286,121,127);button("Add flange",rx+131,H-286,121,121,true);
@@ -6101,7 +6114,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     bool featureHistoryUiTest=false,recoveryUiTest=false,editorScrollUiTest=false,configurationWorkspaceUiTest=false,interactionPerformanceUiTest=false;bool startupUiTest=false;bool stampsUiTest=false;bool media044bUiTest=false;bool planesSectionsUiTest=false;
     bool specializedPatternUiTest=false;bool advancedSheetmetalUiTest=false;bool nativeVertexPullUiTest=false;bool cadImportUiTest=false;bool holesOrchestratorUiTest=false;bool designContainerUiTest=false;
     bool directAuthoringUiTest=false,parametricAuthoringUiTest=false,skeletonEditorUiTest=false,imageAttachmentUiTest=false,assistantSteeringUiTest=false;
-    bool localModelsUiTest=false;bool viewportDockUiTest=false;bool bakedMotionsUiTest=false;bool parametricHudUiTest=false;bool explodedViewsUiTest=false;bool bomUiTest=false;bool drawingWorkspaceUiTest=false;bool drawingViewportUiTest=false;bool measurementUiTest=false;bool authoringUiTest=false;
+    bool localModelsUiTest=false;bool viewportDockUiTest=false;bool bakedMotionsUiTest=false;bool parametricHudUiTest=false;bool explodedViewsUiTest=false;bool dragChainUiTest=false;bool bomUiTest=false;bool drawingWorkspaceUiTest=false;bool drawingViewportUiTest=false;bool measurementUiTest=false;bool authoringUiTest=false;
     bool selectionPickingUiTest=false;bool interactionUiTest=false,connectorsUiTest=false,actionIconsUiTest=false,treeUiTest=false,arcUiTest=false,completionUiTest=false,sketchDrawingUiTest=false,sketchEditUiTest=false,selectionGlowUiTest=false,datumAuthoringUiTest=false,typedSketchUiTest=false;
     bool teamBlockersUiTest=false;bool realtimeUiTest=false;bool asyncExactUiTest=false;bool productToolsUiTest=false;bool selfTest=false,assemblyTest=false,dialogTest=false,bendTest=false,bendExportTest=false,sourceTest=false,sketchTest=false,assistantTest=false,nativeUiTest=false,renderUiTest=false,engineeringUiTest=false,sheetShowcaseTest=false,contextUiTest=false,suspensionUiTest=false,connectChatGpt=false,motionUiTest=false,motionPlay=false,navigationUiTest=false,projectionUiTest=false,frameToolsUiTest=false;unsigned exitAfterMs=0;std::string endpointFile,requestedSketch;int requestedOpening=-1;double requestedFold=-1,showcaseProgress=-1;std::string shotPath="ark_studio.png",loadPath,scriptPath,importPath,showcaseView,spotlightName,suspensionFeatureName,motionDriverName,motionSpeed;double requestedMotionTime=0;std::vector<std::string> suspensionValues;
     int requestedPathSamples=1;bool studioRenderTest=false,requestedPathTracing=false;
@@ -6163,6 +6176,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         else if(a=="--self-test-baked-motions-ui"){bakedMotionsUiTest=true;g_headless=true;}
         else if(a=="--self-test-parametric-hud-ui"){parametricHudUiTest=true;g_headless=true;}
         else if(a=="--self-test-exploded-views-ui"){explodedViewsUiTest=true;g_headless=true;}
+        else if(a=="--self-test-drag-chain-ui"){dragChainUiTest=true;g_headless=true;}
         else if(a=="--self-test-drawing-viewport-ui"){drawingViewportUiTest=true;g_headless=true;}
         else if(a=="--drawing-workspace-test"){drawingWorkspaceUiTest=true;g_headless=true;}
         else if(a=="--self-test-measurement-ui"){measurementUiTest=true;g_headless=true;}
@@ -6643,6 +6657,9 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     }
     if(explodedViewsUiTest){
 #include "exploded_view_selftest.inl"
+    }
+    if(dragChainUiTest){
+#include "drag_chain_selftest.inl"
     }
     if(drawingViewportUiTest){
 #include "drawing_viewport_selftest.inl"

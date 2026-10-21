@@ -500,6 +500,7 @@ Document Document::authoringCopy() const {
     out.drawings=drawings;out.designContainerCheckout=designContainerCheckout;
     out.historyTip=historyTip;out.assemblyConfigurations=assemblyConfigurations;
     out.assemblyLoadSelection=assemblyLoadSelection;out.assemblyExternalReferences=assemblyExternalReferences;out.motions=motions;out.explodedViews=explodedViews;
+    out.dragChains=dragChains;
     out.assembly=assembly;out.mates=mates;out.nextMateId_=nextMateId_;out.nextAssemblyId_=nextAssemblyId_;out.nextFeatureId_=nextFeatureId_;out.tessOpt=tessOpt;
     return out;
 }

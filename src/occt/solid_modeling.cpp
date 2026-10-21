@@ -710,6 +710,7 @@ void rebindIntermediate(std::vector<Ref>& refs,const TopoDS_Shape& shape){
 void requireValidIntermediate(const TopoDS_Shape& shape){
     if(shape.IsNull()||!BRepCheck_Analyzer(shape).IsValid())throw std::runtime_error("Native result failed B-rep validation");requireOnePositiveSolid(shape);
 }
+#include "drag_chain_link_050b.inl"
 }
 
 V modelSolidNative(const V& request){
@@ -755,6 +756,7 @@ V modelSolidNative(const V& request){
         double major=positive(request,"major_radius"),minor=positive(request,"minor_radius");if(major<=minor)throw std::runtime_error("Torus major radius must exceed minor radius");result=BRepPrimAPI_MakeTorus(major,minor).Shape();for(auto& f:shapes(result,TopAbs_FACE))add(refs,"surface","face",f);
     }else if(op=="round_tube")result=roundTube(request,refs);
     else if(op=="rect_tube")result=rectTube(request,refs);
+    else if(op=="drag_chain_link")result=dragChainLink050b(request); // 050B
     else if(op=="extrude")result=makeExtrusion(request,refs,&extrusionReceipt);
     else {
         // Only body edits consume input_brep. Name an unknown op before asking for

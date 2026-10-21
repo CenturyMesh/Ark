@@ -9,6 +9,19 @@ The public iteration and numeric runtime are defined in
 increasing sequence and its principal phase. The letter is a roadmap phase, not a
 month; it does not declare the phase complete. The `.ark` format evolves separately.
 
+050B addresses **B.04/C.04/B.02/A.02**, **Parcial**, with native driven drag
+chains, carriage playback and a 256-sketch document limit. Integration
+verification and limits are recorded in [050B](iterations/050B.md).
+
+Sketch capacity follow-up for **B.02/A.02**, **Verificado no escopo** (local
+development build): mutation and loading accept 256 sketches per document,
+shared across all parts and assemblies. Local llvm-mingw core `agent` and
+`kernel` tests pass, including 64/65/256 boundaries, replacement at capacity,
+256-sketch save/reopen, atomic overflow rejection in preview/apply and rejection
+of serialized input with 257 sketches. Each command batch still accepts at most
+128 operations. This does not change the document format or establish a
+distributed runtime; the broader milestones remain **Parcial**.
+
 049A addresses **A.02/C.04**, **Parcial**. Baked motion frames become derived
 data: authoring and the iteration journal keep the graph and a receipt with
 frame digests, and frames come from a bounded cache, the optional derived

@@ -1,7 +1,9 @@
 #pragma once
 #include "ark/core.hpp"
 #include "ark/json.hpp"
+#include <functional>
 #include <unordered_map>
+#include <unordered_set>
 namespace ark {
 struct AssemblyPattern {
     bool active=false;
@@ -55,6 +57,10 @@ struct AssemblyDiagnostics {
 };
 struct AssemblyPlacement {u64 node=0,feature=0;std::string name;Mat4 world;bool visible=true;int copy=0;};
 class Document;
+// 050B driven followers (drag chain links): pose re-derives their copy-0 world frames from the
+// solved frames of the other occurrences and throws a typed error when they cannot follow.
+struct AssemblyFollowers {std::unordered_set<u64> nodes;std::function<void(std::unordered_map<u64,Mat4>&)> pose;};
+AssemblyFollowers assemblyFollowers(const Document&); // drag_chain.cpp
 bool specializedAssemblyPattern(const AssemblyPattern&);
 bool assemblyPatternHasCarry(const AssemblyPattern&);
 Mat4 assemblyPatternCarryFrame(const AssemblyPattern&); // Validates finite proper rigid/affine bounds.
@@ -122,6 +128,7 @@ struct AssemblyManipulationProgram {
     std::unordered_map<u64,arkjson::Value> patternRecipes;
     std::unordered_map<u64,u64> rigidCluster;
     std::vector<u64> fixedNodes,patternNodes;
+    AssemblyFollowers followers; // 050B: re-posed in previews; never written as pose commands
 };
 struct AssemblyManipulationPreview {
     std::vector<AssemblyPlacement> placements;

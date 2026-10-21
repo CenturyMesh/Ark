@@ -35,7 +35,7 @@ add_library(ark STATIC
   src/authoring_024b.cpp src/appearance_024b.cpp src/plane_sections_024b.cpp
   src/authoring_023b.cpp src/cad_import.cpp src/holes_orchestrator.cpp src/design_containers.cpp
   src/assembly_patterns.cpp
-  src/motion_graph.cpp src/exploded_view.cpp src/visualize.cpp src/derived_bakes_049a.cpp
+  src/motion_graph.cpp src/exploded_view.cpp src/visualize.cpp src/derived_bakes_049a.cpp src/drag_chain.cpp
   src/direct_preview.cpp
   src/exact_jobs_046b.cpp
   src/parametric_hud.cpp
@@ -550,7 +550,7 @@ if(WIN32)
       add_test(NAME studio-${check} COMMAND ark-studio --self-test-${check} --settings-file "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}.settings.json" --shot "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}.png" --size 1280 800)
       set_tests_properties(studio-${check} PROPERTIES TIMEOUT 300 RUN_SERIAL TRUE)
     endforeach()
-    foreach(check connectors-ui local-models-ui viewport-dock-ui assistant-steering-ui stamps-ui media-044b-ui planes-sections-ui holes-orchestrator-ui design-container-ui cad-import-ui native-vertex-pull-ui advanced-sheetmetal-ui specialized-pattern-ui drawing-viewport-ui direct-authoring-ui parametric-authoring-ui selection-glow-ui selection-picking-ui image-attachment-ui sketch-edit-ui sketch-drawing-ui typed-sketch-ui arc-ui assistant-ui render-ui action-icons-ui interaction-ui baked-motions-ui exploded-views-ui)
+    foreach(check connectors-ui local-models-ui viewport-dock-ui assistant-steering-ui stamps-ui media-044b-ui planes-sections-ui holes-orchestrator-ui design-container-ui cad-import-ui native-vertex-pull-ui advanced-sheetmetal-ui specialized-pattern-ui drawing-viewport-ui direct-authoring-ui parametric-authoring-ui selection-glow-ui selection-picking-ui image-attachment-ui sketch-edit-ui sketch-drawing-ui typed-sketch-ui arc-ui assistant-ui render-ui action-icons-ui interaction-ui baked-motions-ui exploded-views-ui drag-chain-ui)
       add_test(NAME studio-${check} COMMAND ark-studio --self-test-${check} --settings-file "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}.settings.json" --shot "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}.png" --size 1440 900)
       set_tests_properties(studio-${check} PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
     endforeach()
@@ -876,6 +876,15 @@ add_executable(ark-exploded-view-048b-tests tests/exploded_view_048b_tests.cpp)
 target_link_libraries(ark-exploded-view-048b-tests PRIVATE ark)
 add_test(NAME exploded-view-048b COMMAND ark-exploded-view-048b-tests)
 set_tests_properties(exploded-view-048b PROPERTIES TIMEOUT 180)
+# 050B native drag chain: authoring, rigid-link kinematics, driven bake followers and the native link solid.
+add_executable(ark-drag-chain-050b-tests tests/drag_chain_050b_tests.cpp)
+target_link_libraries(ark-drag-chain-050b-tests PRIVATE ark)
+add_test(NAME drag-chain-050b COMMAND ark-drag-chain-050b-tests)
+set_tests_properties(drag-chain-050b PROPERTIES TIMEOUT 300)
+if(ARK_WITH_OCCT)
+  target_compile_definitions(ark-drag-chain-050b-tests PRIVATE ARK_DRAG_CHAIN_NATIVE=1)
+  add_dependencies(ark-drag-chain-050b-tests ark-occt-worker)
+endif()
 # 046B motion clearance: exact distance over baked frames and certified intervals (native worker).
 if(ARK_WITH_OCCT)
   add_executable(ark-motion-clearance-046b-tests tests/motion_clearance_046b_tests.cpp)
