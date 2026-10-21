@@ -41,6 +41,7 @@ std::filesystem::path executable(const AssistantConfig& config){
 std::wstring wide(const std::string& text){int count=MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,text.data(),(int)text.size(),nullptr,0);need(count>0,"Invalid UTF-8 in Grok Build configuration.");std::wstring value(count,L'\0');MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,text.data(),(int)text.size(),value.data(),count);return value;}
 std::wstring quote(const std::wstring& text){std::wstring value=L"\"";unsigned slashes=0;for(auto c:text){if(c==L'\\'){++slashes;continue;}if(c==L'\"')value.append(slashes*2+1,L'\\');else value.append(slashes,L'\\');slashes=0;value+=c;}value.append(slashes*2,L'\\');return value+L'\"';}
 struct OwnedHandle {HANDLE value=nullptr;~OwnedHandle(){if(value&&value!=INVALID_HANDLE_VALUE)CloseHandle(value);}};
+#include "assistant_child_stdout.inl"
 class NativeChannel final:public AssistantAcpChannel {
     HANDLE process=nullptr,job=nullptr,input=nullptr,output=nullptr;
     std::filesystem::path directory;
@@ -48,6 +49,7 @@ class NativeChannel final:public AssistantAcpChannel {
     std::size_t limit;
     unsigned timeoutSeconds;
     const std::atomic_bool* cancel;
+    ChildStdout reader;
 public:
     explicit NativeChannel(const AssistantConfig& config,const V& roleTools,const std::atomic_bool* cancellation):limit(config.maxResponseBytes),timeoutSeconds(config.timeoutSeconds),cancel(cancellation){
         try{
@@ -85,19 +87,20 @@ public:
             command+=L" agent stdio --leader-socket "+quote((directory/"leader.sock").wstring());
             job=CreateJobObjectW(nullptr,nullptr);need(job!=nullptr,"Cannot isolate Grok Build process lifetime.");JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};limits.BasicLimitInformation.LimitFlags=JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;need(SetInformationJobObject(job,JobObjectExtendedLimitInformation,&limits,sizeof(limits))!=FALSE,"Cannot configure Grok Build process lifetime.");
             PROCESS_INFORMATION info{};const BOOL made=CreateProcessW(cli.c_str(),command.data(),nullptr,nullptr,TRUE,CREATE_NO_WINDOW|CREATE_UNICODE_ENVIRONMENT|CREATE_SUSPENDED,childEnv.data(),directory.c_str(),&start,&info);need(made!=FALSE,"Cannot start the configured Grok Build CLI.");process=info.hProcess;
-            if(!AssignProcessToJobObject(job,process)){TerminateProcess(process,1);CloseHandle(info.hThread);throw AssistantTransportError("Cannot own the Grok Build process; inference was not started.");}ResumeThread(info.hThread);CloseHandle(info.hThread);
+            if(!AssignProcessToJobObject(job,process)){TerminateProcess(process,1);CloseHandle(info.hThread);throw AssistantTransportError("Cannot own the Grok Build process; inference was not started.");}ResumeThread(info.hThread);CloseHandle(info.hThread);reader.start(output,limit);
         }catch(...){close();throw;}
     }
     ~NativeChannel()override{close();}
-    void close(){if(job){CloseHandle(job);job=nullptr;}if(process){WaitForSingleObject(process,2000);CloseHandle(process);process=nullptr;}if(input){CloseHandle(input);input=nullptr;}if(output){CloseHandle(output);output=nullptr;}if(!directory.empty()){std::error_code ignored;std::filesystem::remove_all(directory,ignored);directory.clear();}}
-    void send(const V& packet)override{std::string bytes=packet.dump()+"\n";need(bytes.size()<=32*1024*1024,"ACP request exceeded its transport bound.");stopped(cancel);std::mutex mutex;std::condition_variable ready;bool done=false,ok=true;std::thread writer([&]{DWORD written=0;std::size_t offset=0;while(offset<bytes.size()){if(!WriteFile(input,bytes.data()+offset,(DWORD)std::min<std::size_t>(65536,bytes.size()-offset),&written,nullptr)||!written){ok=false;break;}offset+=written;}{std::lock_guard lock(mutex);done=true;}ready.notify_one();});const auto deadline=Clock::now()+std::chrono::seconds(timeoutSeconds);bool aborted=false;{std::unique_lock lock(mutex);while(!done){if((cancel&&cancel->load())||Clock::now()>=deadline){aborted=true;TerminateJobObject(job,ERROR_CANCELLED);CancelSynchronousIo(writer.native_handle());break;}ready.wait_for(lock,std::chrono::milliseconds(10));}}writer.join();need(!aborted&&ok,"Grok Build stdin write was cancelled, disconnected or timed out; prior host receipts remain authoritative.");}
+    void close(){if(job){CloseHandle(job);job=nullptr;}if(process){WaitForSingleObject(process,2000);CloseHandle(process);process=nullptr;}reader.stop();if(input){CloseHandle(input);input=nullptr;}if(output){CloseHandle(output);output=nullptr;}if(!directory.empty()){std::error_code ignored;std::filesystem::remove_all(directory,ignored);directory.clear();}}
+    void send(const V& packet)override{std::string bytes=packet.dump()+"\n";need(bytes.size()<=32*1024*1024,"ACP request exceeded its transport bound.");stopped(cancel);std::mutex mutex;std::condition_variable ready;bool done=false,ok=true;std::thread writer([&]{DWORD written=0;std::size_t offset=0;while(offset<bytes.size()){if(!WriteFile(input,bytes.data()+offset,(DWORD)std::min<std::size_t>(65536,bytes.size()-offset),&written,nullptr)||!written){ok=false;break;}offset+=written;}{std::lock_guard lock(mutex);done=true;}ready.notify_one();});const auto deadline=Clock::now()+std::chrono::seconds(timeoutSeconds);bool aborted=false,cancelled=false;{std::unique_lock lock(mutex);while(!done){if((cancel&&cancel->load())||Clock::now()>=deadline){aborted=true;cancelled=cancel&&cancel->load();TerminateJobObject(job,ERROR_CANCELLED);CancelSynchronousIo(writer.native_handle());break;}ready.wait_for(lock,std::chrono::milliseconds(10));}}writer.join();
+        need(!aborted&&ok,cancelled?"Grok Build stdin write was cancelled; prior host receipts remain authoritative.":aborted?"Grok Build stdin write timed out: the CLI read no input and was stopped; prior host receipts remain authoritative.":"Grok Build stdin write failed: the CLI disconnected; prior host receipts remain authoritative.");}
     std::optional<V> receive(std::chrono::milliseconds wait)override{
         const auto deadline=Clock::now()+wait;
-        do{auto newline=pending.find('\n');if(newline!=std::string::npos){std::string line=pending.substr(0,newline);pending.erase(0,newline+1);V packet;need(arkjson::parse(line,packet)&&packet.t==V::Obj,"Grok Build returned malformed ACP JSON; no partial packet was executed.");return packet;}
-            DWORD available=0;need(PeekNamedPipe(output,nullptr,0,nullptr,&available,nullptr)!=FALSE,"Grok Build stdout disconnected; prior receipts retained.");
-            if(available){char bytes[16384];DWORD count=0;need(ReadFile(output,bytes,std::min<DWORD>(available,sizeof(bytes)),&count,nullptr)&&count,"Grok Build output ended unexpectedly.");pending.append(bytes,count);need(pending.size()<=limit,"ACP packet exceeded the configured response bound.");continue;}
-            need(WaitForSingleObject(process,0)==WAIT_TIMEOUT,"Grok Build exited before completing the ACP request.");std::this_thread::sleep_for(std::chrono::milliseconds(5));
-        }while(Clock::now()<deadline);return {};
+        for(;;){auto newline=pending.find('\n');if(newline!=std::string::npos){std::string line=pending.substr(0,newline);pending.erase(0,newline+1);V packet;need(arkjson::parse(line,packet)&&packet.t==V::Obj,"Grok Build returned malformed ACP JSON; no partial packet was executed.");return packet;}
+            need(pending.size()<=limit,"ACP packet exceeded the configured response bound.");
+            if(!reader.take(pending,std::max(std::chrono::milliseconds(0),std::chrono::duration_cast<std::chrono::milliseconds>(deadline-Clock::now())))){need(WaitForSingleObject(process,100)==WAIT_TIMEOUT,"Grok Build exited before completing the ACP request.");throw AssistantTransportError("Grok Build stdout disconnected; prior receipts retained.");}
+            if(pending.find('\n')==std::string::npos&&Clock::now()>=deadline)return {};
+        }
     }
 };
 #endif

@@ -2,6 +2,7 @@
 #include "ark/assistant_acp.hpp"
 #include "ark/assistant_connectors.hpp"
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <deque>
 #include <filesystem>
@@ -59,17 +60,17 @@ public:
 };
 V tools(){return json(R"([{"name":"doc_info","description":"Read document identity","inputSchema":{"type":"object","properties":{}},"annotations":{"readOnlyHint":true}},{"name":"doc_apply","description":"Apply commands","inputSchema":{"type":"object","properties":{"expected_revision":{"type":"number"}}},"annotations":{"readOnlyHint":false}}])");}
 AssistantConfig config(std::shared_ptr<State> state){auto c=assistantProviderPreset("claude-code");c.timeoutSeconds=2;c.acpChannelFactory=[state]{return std::make_unique<Script>(state);};return c;}
-V receipt(double revision){V data=V::makeObj();data.set("revision",V::makeNum(revision));auto r=V::makeObj(),content=V::makeArr(),item=V::makeObj();item.set("type",V::makeStr("text"));item.set("text",V::makeStr(data.dump()));content.arr.push_back(item);r.set("content",content);r.set("structuredContent",data);r.set("isError",V::makeBool(false));return r;}
+V receipt(double revision,std::size_t padding=0){V data=V::makeObj();data.set("revision",V::makeNum(revision));if(padding)data.set("padding",V::makeStr(std::string(padding,'p')));auto r=V::makeObj(),content=V::makeArr(),item=V::makeObj();item.set("type",V::makeStr("text"));item.set("text",V::makeStr(data.dump()));content.arr.push_back(item);r.set("content",content);r.set("structuredContent",data);r.set("isError",V::makeBool(false));return r;}
 bool contains(const V& conversation,const char* prefix){for(const auto& row:conversation.arr)if(field(row,"content").rfind(prefix,0)==0)return true;return false;}
 void presetAndValidation(){
-    auto c=assistantProviderPreset("claude-code");check(c.protocol==AssistantProtocol::ClaudeCode&&c.authMode==AssistantAuthMode::CliAccount&&c.endpoint=="claude"&&c.apiKeyEnv.empty()&&!c.imageInputSupported,"Claude Code preset must be the CLI-account route");
+    auto c=assistantProviderPreset("claude-code");check(c.protocol==AssistantProtocol::ClaudeCode&&c.authMode==AssistantAuthMode::CliAccount&&c.endpoint=="claude"&&c.apiKeyEnv.empty()&&c.imageInputSupported,"Claude Code preset must be the CLI-account route with image input");
     check(assistantProtocolName(AssistantProtocol::ClaudeCode)=="claude-code"&&assistantProtocolFromName("claude-code")==AssistantProtocol::ClaudeCode,"Protocol name must round-trip for saved settings");
     validateAssistantConfig(c);
     auto bad=c;bad.apiKeyEnv="ANTHROPIC_API_KEY";rejected([&]{validateAssistantConfig(bad);},"API-key variable must reject on the CLI route");
-    bad=c;bad.imageInputSupported=true;rejected([&]{validateAssistantConfig(bad);},"Unqualified image input must reject");
     bad=c;bad.reasoningEffort="ultra";rejected([&]{validateAssistantConfig(bad);},"Unknown effort must reject");
     bad=c;bad.model="bad model";rejected([&]{validateAssistantConfig(bad);},"Model names with spaces must reject");
     check(!assistantClaudeCodeInheritsEnvironment("CLAUDECODE")&&!assistantClaudeCodeInheritsEnvironment("claude_code_entrypoint"),"A parent Claude Code session marker must not be inherited");
+    for(const char* marker:{"CLAUDE_PID","CLAUDE_AGENT_SDK_VERSION","CLAUDE_CODE_SESSION_ID","CLAUDE_CODE_SESSION_ATTENDED","CLAUDE_CODE_MESSAGING_SOCKET","CLAUDE_CODE_MESSAGING_TOKEN","CLAUDE_CODE_CHILD_SESSION","CLAUDE_CODE_ENABLE_TASKS"})check(!assistantClaudeCodeInheritsEnvironment(marker),"A parent Claude Code session/host marker must not be inherited");
     check(assistantClaudeCodeInheritsEnvironment("ANTHROPIC_API_KEY")&&assistantClaudeCodeInheritsEnvironment("CLAUDE_CODE_OAUTH_TOKEN")&&assistantClaudeCodeInheritsEnvironment("PATH"),"Every sign-in method the user configured must stay available to the CLI");
 }
 void arguments(){
@@ -129,30 +130,52 @@ void cancellationAndResume(){
     state=std::make_shared<State>();int writes=0;auto context=json(R"([{"role":"user","content":"Resume"},{"role":"developer","content":"ARK_ACP_INSPECT_REQUIRED: previous interruption"}])");
     auto run=runAssistant(config(state),context,tools(),[&](const auto& name,const V&){if(name=="doc_apply")++writes;return receipt(7);});
     check(writes==1&&contains(run.conversation,"ARK_ACP_INSPECTION_CONFIRMED"),"A real doc_info receipt must unlock writes after an interruption");
-    state=std::make_shared<State>();auto image=json(R"([{"role":"user","content":[{"type":"input_text","text":"x"},{"type":"input_image","image_url":"data:image/png;base64,AA=="}]}])");rejected([&]{runAssistant(config(state),image,tools(),[](const auto&,const V&){return receipt(7);});},"Images must reject on this route");check(state->sent.empty(),"No CLI traffic before rejecting images");
+    state=std::make_shared<State>();auto image=json(R"([{"role":"user","content":[{"type":"input_text","text":"x"},{"type":"input_image","image_url":"data:image/png;base64,AA=="}]}])");rejected([&]{runAssistant(config(state),image,tools(),[](const auto&,const V&){return receipt(7);});},"Invalid image bytes must reject");
+}
+// 047D: inline user images travel as stream-json image blocks of the same user turn;
+// the JSON text keeps a numbered placeholder instead of the base64 payload.
+void imageInput(){
+    const std::string png="iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    auto state=std::make_shared<State>();auto input=json((R"([{"role":"user","content":[{"type":"input_text","text":"[ARK user image | mode: inspire_design] kiosk reference"},{"type":"input_image","image_url":"data:image/png;base64,)"+png+R"("}]}])").c_str());
+    auto run=runAssistant(config(state),input,tools(),[](const auto&,const V&){return receipt(7);});
+    const V* user=nullptr;for(const auto& packet:state->sent)if(field(packet,"type")=="user"){user=&packet;break;}
+    check(user&&user->find("message"),"The prompt must reach the CLI");const auto* content=user->find("message")->find("content");
+    check(content&&content->t==V::Arr&&content->arr.size()==2&&field(content->arr[0],"type")=="text"&&field(content->arr[1],"type")=="image","An image prompt is one text block plus one image block");
+    const auto& text=field(content->arr[0],"text");const auto* source=content->arr[1].find("source");
+    check(text.find("attached_image")!=std::string::npos&&text.find(png)==std::string::npos&&text.find("kiosk reference")!=std::string::npos,"The text keeps the message and a placeholder, never the base64 payload");
+    check(source&&field(*source,"type")=="base64"&&field(*source,"media_type")=="image/png"&&field(*source,"data")==png,"The image block carries the exact validated PNG bytes");
+    check(!run.text.empty(),"The image turn completes");
 }
 #ifdef _WIN32
 // The test executable doubles as a fake native CLI so the real process channel is exercised.
 int fakeCli(int argc,char** argv){
     std::vector<std::string> args(argv+1,argv+argc);auto after=[&](const char* flag){auto it=std::find(args.begin(),args.end(),flag);return it!=args.end()&&it+1!=args.end()?*(it+1):std::string("<missing>");};
     if(after("--tools")!=""||after("--allowedTools")!="mcp__ark__doc_info,mcp__ark__doc_apply")return 3;
-    const char* key=std::getenv("ANTHROPIC_API_KEY");if(!key||std::string(key)!="sk-test-user-own-key"||std::getenv("CLAUDECODE")||!std::getenv("ARK_CLAUDE_FAKE_MARKER"))return 4;
+    const char* key=std::getenv("ANTHROPIC_API_KEY");if(!key||std::string(key)!="sk-test-user-own-key"||std::getenv("CLAUDECODE")||std::getenv("CLAUDE_CODE_SESSION_ID")||std::getenv("CLAUDE_CODE_MESSAGING_TOKEN")||!std::getenv("ARK_CLAUDE_FAKE_MARKER"))return 4;
+    const bool flood=std::getenv("ARK_CLAUDE_FAKE_FLOOD")!=nullptr;
     const auto cwd=std::filesystem::current_path();if(!std::filesystem::is_directory(cwd/".git")||std::filesystem::path(after("--system-prompt-file"))!=cwd/"ark-role.md")return 5;
     std::ifstream prompt(cwd/"ark-role.md");std::string first;std::getline(prompt,first);if(first.rfind("You are an ARK CAD role",0)!=0)return 6;
     auto out=[](const std::string& line){std::cout<<line<<"\n";std::cout.flush();};std::string line;int toolsSeen=0;
     while(std::getline(std::cin,line)){V p;if(!arkjson::parse(line,p))return 7;const auto type=field(p,"type");
         if(type=="control_request"&&field(*p.find("request"),"subtype")=="initialize"){out(R"({"type":"control_request","request_id":"n1","request":{"subtype":"mcp_message","server_name":"ark","message":{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}}})");out(std::string(R"({"type":"control_response","response":{"subtype":"success","request_id":"ark_init","response":)")+kInit+"}}");}
-        else if(type=="control_response"){const auto& body=*p.find("response")->find("response");const auto& m=*body.find("mcp_response");const auto& r=*m.find("result");if(r.find("serverInfo"))out(R"({"type":"control_request","request_id":"n2","request":{"subtype":"mcp_message","server_name":"ark","message":{"jsonrpc":"2.0","id":1,"method":"tools/list"}}})");else if(r.find("tools"))toolsSeen=(int)r.find("tools")->arr.size();else if(r.find("content")){out(R"({"type":"result","subtype":"success","is_error":false,"result":"native ok","usage":{"input_tokens":10,"output_tokens":2}})");}}
-        else if(type=="user"){if(toolsSeen!=2)return 8;out(R"({"type":"system","subtype":"init","permissionMode":"dontAsk","model":"claude-opus-5-5","tools":["mcp__ark__doc_info","mcp__ark__doc_apply"],"mcp_servers":[{"name":"ark","status":"connected"}]})");out(R"({"type":"control_request","request_id":"n3","request":{"subtype":"mcp_message","server_name":"ark","message":{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"doc_info","arguments":{}}}}})");}}
+        else if(type=="control_response"){const auto& body=*p.find("response")->find("response");const auto& m=*body.find("mcp_response");const auto& r=*m.find("result");if(r.find("serverInfo"))out(R"({"type":"control_request","request_id":"n2","request":{"subtype":"mcp_message","server_name":"ark","message":{"jsonrpc":"2.0","id":1,"method":"tools/list"}}})");else if(r.find("tools"))toolsSeen=(int)r.find("tools")->arr.size();else if(r.find("content")){if(flood&&line.size()<256*1024)return 9;out(R"({"type":"result","subtype":"success","is_error":false,"result":"native ok","usage":{"input_tokens":10,"output_tokens":2}})");}}
+        else if(type=="user"){if(toolsSeen!=2)return 8;out(R"({"type":"system","subtype":"init","permissionMode":"dontAsk","model":"claude-opus-5-5","tools":["mcp__ark__doc_info","mcp__ark__doc_apply"],"mcp_servers":[{"name":"ark","status":"connected"}]})");out(R"({"type":"control_request","request_id":"n3","request":{"subtype":"mcp_message","server_name":"ark","message":{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"doc_info","arguments":{}}}}})");
+            // Like the real CLI streaming while a tool runs: blocking stdout writes before reading the reply.
+            if(flood){const std::string text(900,'x');for(int i=0;i<1024;++i)out(R"({"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":")"+text+"\"}}}");}}}
     return 0;
 }
 void nativeProcess(){
     wchar_t file[32768]{};check(GetModuleFileNameW(nullptr,file,32768)!=0,"No test executable path");
-    _putenv_s("ANTHROPIC_API_KEY","sk-test-user-own-key");_putenv_s("CLAUDECODE","1");_putenv_s("ARK_CLAUDE_FAKE_MARKER","1");
+    _putenv_s("ANTHROPIC_API_KEY","sk-test-user-own-key");_putenv_s("CLAUDECODE","1");_putenv_s("ARK_CLAUDE_FAKE_MARKER","1");_putenv_s("CLAUDE_CODE_SESSION_ID","parent-session");_putenv_s("CLAUDE_CODE_MESSAGING_TOKEN","parent-token");
     auto c=assistantProviderPreset("claude-code");const auto utf8=std::filesystem::path(file).u8string();c.endpoint=std::string(utf8.begin(),utf8.end());c.timeoutSeconds=10;int reads=0;
     auto run=runAssistant(c,V::makeStr("Native"),tools(),[&](const auto& name,const V&){check(name=="doc_info","Unexpected native tool");++reads;return receipt(7);});
-    _putenv_s("ANTHROPIC_API_KEY","");_putenv_s("CLAUDECODE","");
     check(reads==1&&run.text=="native ok"&&run.usage.inputTokens==10,"Native channel must run the role tool through real pipes");
+    // The CLI writes ~1 MiB to stdout before reading a 512 KiB tool reply. Without
+    // continuous stdout draining both pipes fill and the write times out.
+    _putenv_s("ARK_CLAUDE_FAKE_FLOOD","1");c.timeoutSeconds=5;reads=0;const auto began=std::chrono::steady_clock::now();
+    run=runAssistant(c,V::makeStr("Native"),tools(),[&](const auto& name,const V&){check(name=="doc_info","Unexpected native tool");++reads;return receipt(7,512*1024);});
+    check(reads==1&&run.text=="native ok"&&std::chrono::steady_clock::now()-began<std::chrono::seconds(5),"A CLI that streams while the host replies must not deadlock the stdio pipes");
+    _putenv_s("ANTHROPIC_API_KEY","");_putenv_s("CLAUDECODE","");_putenv_s("CLAUDE_CODE_SESSION_ID","");_putenv_s("CLAUDE_CODE_MESSAGING_TOKEN","");_putenv_s("ARK_CLAUDE_FAKE_FLOOD","");
     auto script=c;script.endpoint="C:/Windows/System32/cmd.cmd";rejected([&]{assistantClaudeCodeExecutable(script);},"Script shims must reject");
 }
 #endif
@@ -163,7 +186,7 @@ int main(int argc,char** argv){
 #else
     (void)argc;(void)argv;
 #endif
-    try{presetAndValidation();arguments();single();rejections();negotiation();permissionAndSteering();cancellationAndResume();
+    try{presetAndValidation();arguments();single();rejections();negotiation();permissionAndSteering();cancellationAndResume();imageInput();
 #ifdef _WIN32
         nativeProcess();
 #endif
