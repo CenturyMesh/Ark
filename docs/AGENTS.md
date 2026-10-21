@@ -1,5 +1,26 @@
 # ARK agent protocol
 
+046B profile regions: a sketch with several non-touching closed loops extrudes
+(`native_solid` extrude, all end conditions; legacy extrude), revolves
+(`revolve_surface` solid:1) and sweeps (section, solid:1) as faces with holes by
+even-odd containment. Each feature publishes one solid; choose one of several
+regions with `native.regions:[{entity}|{point}]` (format 48). Crossing,
+touching, branched, zero-area or self-intersecting loops and open chains
+without a selection reject naming the entities. See
+[profile regions](PROFILE_REGIONS_046B.md).
+
+046B motion clearance: `motion_info{name,clearance:{pairs|scope,threshold_mm,max_subdivisions}}`
+measures exact clearance over a fresh bake, read-only. A stale bake rejects
+with `MOTION_BAKE_STALE`; re-bake with `motion.bake` first. `continuous_certified`
+is true only when every frame interval is proven contact-free by the joint-chain
+bound. Closed loops and transmissions use an assumed envelope and are never
+certified. Nothing is persisted. See [motion clearance](MOTION_CLEARANCE_046B.md).
+
+046B exact reads in Studio may run off the UI thread and return
+`exact_job{observed_revision,document_changed_since_read}`. Treat the result as
+evidence at that revision and inspect the current revision before writing. See
+[background exact reads](ASYNC_EXACT_046B.md).
+
 045A protects work at capacity limits. `doc_save` no longer fails when the
 optional saved-geometry cache is full: excess entries are omitted and recompute
 on open, reported in `saved_geometry`, and a failed save states its reason.
