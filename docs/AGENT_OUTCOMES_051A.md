@@ -16,9 +16,11 @@ revision and authoring SHA-256. Recovery counts only if that rejection was atomi
 The model receives the brief, acceptance criteria and rejection receipt. The reference
 repair is available only to preflight and the deterministic offline transport.
 
-Each attempt reserves a unique directory, saves `result.ark`, hashes its actual bytes,
+After model execution the host oracle reserves a unique directory, saves `result.ark`, hashes its actual bytes,
 loads it, reconstructs authoring without the saved derived geometry in a fresh session,
-and reruns the same independent oracle. It compares authoring and checks file bytes
+and reruns the same independent oracle. This is fresh-session authoring reconstruction,
+not a process-cold kernel: shared worker/process caches are not reset. Saving and
+reopening are host actions; these receipts do not prove the model issued save/load. It compares authoring and checks file bytes
 again after reopen. `persistence.saved` means writing succeeded; `persisted` also
 requires the cold oracle and authoring comparison. A completed response or an in-memory
 valid body alone cannot satisfy this gate. `artifact_directory` in the config selects
@@ -48,7 +50,9 @@ No rate is invented or downloaded. Rates must match the configured provider/mode
 Offline runs, absent tariffs, missing/partial usage or a mismatch between accounted
 responses and provider requests produce `cost: null`. Strategy summaries sum all
 known attempt costs, including failures; cost per accepted outcome stays null if
-any attempt cost is unknown or none is accepted. Provenance is retained with receipts.
+any attempt cost is unknown or none is accepted. Provenance is retained with receipts. Priced strategy aggregates reject mixtures of
+tariff definitions, currencies or model provenance. Baseline setup failures and
+attempts with no accounted provider response keep unknown cost.
 
 Validation: the extended `agent-benchmark` test passed locally with actual native
 executor calls and real .ark files: the original 30 preflights and nine strategy
