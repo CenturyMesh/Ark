@@ -95,7 +95,15 @@ struct Handle{HANDLE value=nullptr;~Handle(){if(value&&value!=INVALID_HANDLE_VAL
 // changes only CPU scheduling and power use, never results. Best effort.
 void optOutOfPowerThrottling(HANDLE process){
     PROCESS_POWER_THROTTLING_STATE state{};state.Version=PROCESS_POWER_THROTTLING_CURRENT_VERSION;state.ControlMask=PROCESS_POWER_THROTTLING_EXECUTION_SPEED;state.StateMask=0;
-    SetProcessInformation(process,ProcessPowerThrottling,&state,sizeof state);
+    // The scheduling hint is optional on older Windows targets. Resolve the
+    // entry point at runtime rather than importing a newer API or raising the
+    // application's minimum target just to expose its declaration in MinGW.
+    using SetInformation = BOOL (WINAPI *)(HANDLE,PROCESS_INFORMATION_CLASS,LPVOID,DWORD);
+    static const auto setInformation=[]()->SetInformation {
+        const auto kernel=GetModuleHandleW(L"kernel32.dll");
+        return kernel?reinterpret_cast<SetInformation>(GetProcAddress(kernel,"SetProcessInformation")):nullptr;
+    }();
+    if(setInformation)setInformation(process,ProcessPowerThrottling,&state,sizeof state);
 }
 std::vector<wchar_t> workerEnvironment(){
     if(nativeThreadOverride<=0)return {};
