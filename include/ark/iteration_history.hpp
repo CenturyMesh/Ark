@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <functional>
 #include <map>
+#include <cstdint>
 namespace ark {
 class Document;
 inline constexpr size_t maxDocumentBytes=4u*1024u*1024u;
@@ -25,4 +26,8 @@ void iterationInlineBakePayloads(const arkjson::Value& history,size_t& reference
 // transform and rebuilds deltas, the blob dictionary, digests and node ids with the same
 // topology and node metadata. ids maps every old node and baseline id to its new id.
 arkjson::Value iterationRewrite(const arkjson::Value& history,const std::function<void(arkjson::Value& state)>& transform,std::map<std::string,std::string>& ids);
+// Explicit archive-backed compaction. Retains the current-head ancestor suffix;
+// undo keeps only its contiguous retained targets, redo is cleared. No auto pruning.
+arkjson::Value iterationCompact(const Document& source,size_t keepRecent,const arkjson::Value& receipt,const arkjson::Value& retainIds=arkjson::Value::makeArr());
+arkjson::Value historyCompactTool(Document& document,std::uint64_t& revision,const arkjson::Value& args);
 }

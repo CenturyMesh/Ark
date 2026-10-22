@@ -85,10 +85,10 @@ void ExactJobScheduler046B::run(){
 }
 void ExactJobScheduler046B::execute(Job& job){
     Completion done;done.id=job.id;done.revision=job.request.revision;done.epoch=job.request.epoch;done.tool=job.request.tool;done.queueMs=elapsedMs(job.submitted,job.started);
-    const auto deadline=job.started+std::chrono::milliseconds(jobLimitMs);bool overtime=false;
+    const auto deadline=job.started+std::chrono::milliseconds(jobLimitMs);std::atomic_bool overtime{false};
     const auto& external=job.request.cancelled;
     auto cancelled=[&]{return job.cancelRequested.load()||(external&&external());};
-    auto stop=[&]{if(cancelled())return true;if(Clock::now()>=deadline)overtime=true;return overtime;};
+    auto stop=[&]{if(cancelled())return true;if(Clock::now()>=deadline)overtime=true;return overtime.load();};
     try{
         NativeRequestControlScope control(stop,nativeRequestLimitMs);
         for(unsigned waited=0;waited<testDelayMs_.load()&&!stop();waited+=5)std::this_thread::sleep_for(std::chrono::milliseconds(5));

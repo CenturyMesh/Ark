@@ -63,6 +63,11 @@ int      ark_feature_set_param(ArkDoc*, uint64_t id, const char* key, const char
  * ark_sketch_json returns malloc'd UTF-8 (free via ark_free) or nullptr. */
 int      ark_sketch_set (ArkDoc*, const char* name,
                           const char* entitiesJson, const char* constraintsJson /*may be null*/);
+/* Explicit shared-definition scope; ownerFeature=0 retains the legacy global
+ * contract. Other sketch APIs accept part:<id>::<local-name>. Errors: -1 invalid
+ * arguments, -2 malformed sketch JSON, -3 owner/name/capacity rejection. */
+int      ark_sketch_set_owned(ArkDoc*, uint64_t ownerFeature, const char* localName,
+                             const char* entitiesJson, const char* constraintsJson);
 char*    ark_sketch_json(ArkDoc*, const char* name);
 int      ark_sketch_remove(ArkDoc*, const char* name);
 

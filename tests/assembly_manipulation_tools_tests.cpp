@@ -63,6 +63,6 @@ int main(){try{
     check(!apply(door,R"({"commands":[{"op":"assembly.drive","driver":"Door","delta":15}]})").find("history_round_trip"),"a new pose is not a round trip");
     check(accepted(door.call("history_info",V::makeObj())).find("max_nodes")->num==512,"history_info reports the node capacity");
     check(accepted(session.call("agent_onboard",json(R"({"topic":"assembly"})"))).dump().find("snapshot{candidate_id")!=std::string::npos,"assembly onboarding keeps temporary poses read-only");
-    const auto tools=AgentSession::tools();check(tools.arr.size()==108&&tools.dump().find("assembly.drive")!=std::string::npos&&tools.dump().find("\"drive\"")!=std::string::npos,"compact schema advertises command and preview with stable tool count");
+    const auto tools=AgentSession::tools();check(tools.arr.size()==110&&tools.dump().find("assembly.drive")!=std::string::npos&&tools.dump().find("\"drive\"")!=std::string::npos,"compact schema advertises command and preview with stable tool count");
     std::cout<<"assembly manipulation tool contracts passed\n";return 0;
 }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

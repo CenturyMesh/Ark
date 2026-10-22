@@ -1,0 +1,17 @@
+{
+  "assistant": {
+    "provider": "openai",
+    "model": "gpt-6.1-sol",
+    "protocol": "responses",
+    "endpoint": "https://api.openai.com/v1/responses",
+    "api_key_env": "",
+    "auth_mode": "chatgpt-plan",
+    "reasoning_effort": "medium",
+    "timeout_seconds": 120
+  },
+  "require_part_delegation": false,
+  "repetitions": 2,
+  "deadline_seconds": 300,
+  "strategies": ["Single", "PartFocused"],
+  "artifact_directory": "out/052d-neutral-artifacts"
+}

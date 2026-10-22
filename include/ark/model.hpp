@@ -267,7 +267,10 @@ struct NamedSketch {
     f64         residual = 0;   // max |residual| after the last solve
     std::string error;
     int freeDofs=0, rank=0;
+    u64 ownerFeature=0; // Stable shared definition ID; zero retains legacy global scope.
+    std::string localName() const;
 };
+std::string sketchReference(u64 ownerFeature,const std::string& localName);
 
 struct DatumPlane {
     std::string name, parent="XY";
@@ -313,8 +316,9 @@ public:
     std::vector<ImageAsset> imageAssets;
     std::vector<ProjectedStamp> stamps;
     NamedSketch* findSketch(const std::string& name);
-    void setSketch(const std::string& name, Sketch sk);   // create or replace
+    void setSketch(const std::string& name, Sketch sk,u64 ownerFeature=0); // local name with explicit owner, otherwise canonical/global reference
     bool removeSketch(const std::string& name);
+    bool validateSketchScopes(std::string& error) const;
 
     // features ----------------------------------------------------------------
     std::vector<Feature> features;
@@ -324,6 +328,8 @@ public:
     std::string bomDocumentId; // assigned on explicit BOM authoring; stable across edits/save
     arkjson::Value iterationHistory; // immutable authoring journal; no evaluated geometry or usage snapshots
     arkjson::Value designContainerCheckout; // scoped workspace ownership and merge baseline; no derived geometry
+    arkjson::Value parametricComponents; // embedded immutable .arkprt/.arktop definitions and explicit instance bindings
+    std::vector<std::string> componentBindingsToSeal; // transient, only a component command can request a new evaluated baseline
     arkjson::Value skeleton; // native declarative source, input overrides and stable ownership manifest
     std::vector<arkjson::Value> drawings; // authored associative technical drawings; derived curves are never persisted
     u64 historyTip=0; // inclusive feature prefix; zero resumes the full authored history

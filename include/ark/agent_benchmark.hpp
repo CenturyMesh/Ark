@@ -11,6 +11,8 @@ struct AgentBenchmarkCase {
     arkjson::Value baseline=arkjson::Value::makeArr();
     arkjson::Value reference=arkjson::Value::makeArr();
     arkjson::Value checks=arkjson::Value::makeArr();
+    arkjson::Value rejectedCommands=arkjson::Value::makeArr();
+    arkjson::Value partContainer; // Explicit synthetic existing container for delegated trials.
 };
 struct AgentBenchmarkSuite {
     std::string id;
@@ -19,11 +21,21 @@ struct AgentBenchmarkSuite {
 };
 struct AgentBenchmarkConfig {
     AssistantConfig assistant;
+    AssistantConfig specialistAssistant; // Explicit optional role model; otherwise inherit assistant.
+    bool hasSpecialistAssistant=false;
+    bool requirePartDelegation=true; // False: identical user task; lead chooses whether to delegate.
     unsigned repetitions=3,deadlineSeconds=120;
     std::vector<std::string> strategies={"Single","Focused","Parallel"};
     std::vector<std::string> caseIds;
+    std::string artifactDirectory; // Empty uses a unique temporary directory per attempt.
+    arkjson::Value tariff; // Explicit flat input/output estimate with provenance, never inferred.
+    std::function<void(const std::string&)> offlineBeforeReopen; // Persistence fault injection; forbidden live.
     AssistantTransport offlineTransport; // Test seam only; --live rejects it.
 };
+// Pure accounting seam: only complete live usage under the supplied tariff is estimable.
+arkjson::Value estimateAgentBenchmarkCost(const arkjson::Value& tariff, const AssistantConfig&,
+    const AssistantUsage&, const AssistantPerformance&, bool live);
+arkjson::Value summarizeAgentBenchmarkAttempts(const arkjson::Value& attempts);
 AgentBenchmarkSuite parseAgentBenchmarkSuite(const arkjson::Value& value);
 AgentBenchmarkConfig parseAgentBenchmarkConfig(const arkjson::Value& value);
 // Evaluates every supplied baseline and reference with the production C++ CAD

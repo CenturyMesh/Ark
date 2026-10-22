@@ -4,6 +4,8 @@
 #include "ark/media_044b.hpp"
 #include <cctype>
 #include <cmath>
+#include <stdexcept>
+#include <unordered_set>
 
 namespace ark {
 
@@ -344,9 +346,43 @@ NamedSketch* Document::findSketch(const std::string& name){
     for(auto&s:sketches) if(s.name==name) return &s;
     return nullptr;
 }
-void Document::setSketch(const std::string& name, Sketch sk){
-    if(auto* s=findSketch(name)){ s->sk=std::move(sk); return; }
-    sketches.push_back({name,std::move(sk)});
+std::string sketchReference(u64 owner,const std::string& local){
+    return owner?"part:"+std::to_string(owner)+"::"+local:local;
+}
+std::string NamedSketch::localName() const {
+    return ownerFeature?name.substr(sketchReference(ownerFeature,"").size()):name;
+}
+bool Document::validateSketchScopes(std::string& error) const {
+    std::unordered_map<u64,size_t> counts;
+    std::unordered_set<std::string> names;
+    size_t entities=0,constraints=0,coordinates=0;
+    for(const auto& sketch:sketches){
+        if(sketch.ownerFeature&&(!find(sketch.ownerFeature)||sketch.name.rfind(sketchReference(sketch.ownerFeature,""),0)!=0)){
+            error="Sketch owner must be an existing feature definition";return false;
+        }
+        if(sketch.name.empty()||!names.insert(sketch.name).second){error="Empty or duplicate canonical sketch reference";return false;}
+        if(sketch.ownerFeature&&(sketch.localName().empty()||sketch.localName().size()>96||sketch.localName().rfind("part:",0)==0)){
+            error="Scoped sketch local name must have 1..96 characters and cannot start with part:";return false;
+        }
+        if(++counts[sketch.ownerFeature]>256||sketches.size()>4096){error="Document capacity exceeded: 256 sketches per scope and 4096 total";return false;}
+        entities+=sketch.sk.ents.size();constraints+=sketch.sk.cons.size();
+        for(const auto& entity:sketch.sk.ents)coordinates+=entity.dof.size();
+        if(entities>32768||constraints>65536||coordinates>131072){error="Sketch aggregate resource capacity exceeded";return false;}
+    }
+    return true;
+}
+void Document::setSketch(const std::string& name, Sketch sk,u64 owner){
+    if(owner&&!find(owner))throw std::runtime_error("Sketch owner must be an existing feature definition");
+    const auto reference=sketchReference(owner,name);
+    if(auto* s=findSketch(reference)){
+        if(owner&&s->ownerFeature!=owner)throw std::runtime_error("Scoped sketch reference collides with a legacy global name");
+        Sketch previous=std::move(s->sk);s->sk=std::move(sk);
+        std::string error;if(!validateSketchScopes(error)){s->sk=std::move(previous);throw std::runtime_error(error);}return;
+    }
+    if(!owner&&name.rfind("part:",0)==0)throw std::runtime_error("Reserved sketch reference: create with owner_feature and a local name");
+    NamedSketch named;named.name=reference;named.sk=std::move(sk);named.ownerFeature=owner;
+    sketches.push_back(std::move(named));
+    std::string error;if(!validateSketchScopes(error)){sketches.pop_back();throw std::runtime_error(error);}
 }
 bool Document::removeSketch(const std::string& name){
     for(auto it=sketches.begin();it!=sketches.end();++it)
@@ -406,6 +442,7 @@ const Feature* Document::find(u64 id) const {
     return nullptr;
 }
 bool Document::remove(u64 id) {
+    for(const auto& sketch:sketches)if(sketch.ownerFeature==id)throw std::runtime_error("Remove owned sketches explicitly before removing their feature definition");
     for(auto it=features.begin();it!=features.end();++it)
         if(it->id==id){ features.erase(it); return true; }
     return false;
@@ -497,7 +534,7 @@ Document Document::authoringCopy() const {
     Document out;out.params=params;out.parameterError=parameterError;out.sketches=sketches;out.planes=planes;out.canvases=canvases;
     out.imageAssets=imageAssets;out.stamps=stamps;
     out.features=features;out.materials=materials;out.usage=usage;out.agentActivity=agentActivity;out.bomDocumentId=bomDocumentId;out.iterationHistory=iterationHistory;out.skeleton=skeleton;
-    out.drawings=drawings;out.designContainerCheckout=designContainerCheckout;
+    out.drawings=drawings;out.designContainerCheckout=designContainerCheckout;out.parametricComponents=parametricComponents;
     out.historyTip=historyTip;out.assemblyConfigurations=assemblyConfigurations;
     out.assemblyLoadSelection=assemblyLoadSelection;out.assemblyExternalReferences=assemblyExternalReferences;out.motions=motions;out.explodedViews=explodedViews;
     out.dragChains=dragChains;

@@ -15,6 +15,7 @@
 #include "ark/drawings.hpp"
 #include "ark/authoring_023b.hpp"
 #include "ark/design_containers.hpp"
+#include "ark/parametric_components.hpp"
 #include "ark/holes_orchestrator.hpp"
 #include "ark/collision.hpp"
 #include "ark/mesh_model.hpp"
@@ -227,7 +228,8 @@ void editNode(AssemblyNode& n,const V& j,const Document& doc){
 V result(V data,bool error=false){V r=V::makeObj(),content=V::makeArr(),item=V::makeObj();item.set("type",V::makeStr("text"));item.set("text",V::makeStr(data.dump()));content.arr.push_back(item);r.set("content",content);r.set("structuredContent",data);r.set("isError",V::makeBool(error));return r;}
 void validatedMaterials(const Document& d){
     validateAppearanceAuthoring024B(d,false);
-    if(d.features.size()>1024||d.params.size()>256||d.sketches.size()>256||d.planes.size()>128||d.canvases.size()>8||d.materials.size()>256)throw std::runtime_error("Document capacity exceeded");
+    if(d.features.size()>1024||d.params.size()>256||d.planes.size()>128||d.canvases.size()>8||d.materials.size()>256)throw std::runtime_error("Document capacity exceeded");
+    {std::string error;if(!d.validateSketchScopes(error))throw std::runtime_error(error);}
     for(const auto& material:d.materials){std::string reason;if(!validateMaterial(material,reason))throw std::runtime_error(reason);}
     for(const auto& feature:d.features){
         if(!feature.material.empty()&&std::none_of(d.materials.begin(),d.materials.end(),[&](const Material& material){return material.name==feature.material;}))throw std::runtime_error("Feature references a missing material: "+feature.material);
@@ -248,6 +250,7 @@ void validated(Document& d){
     for(auto& sk:d.sketches)if(!sk.error.empty()||!std::isfinite(sk.residual)||sk.residual>1e-6)throw std::runtime_error("Sketch '"+sk.name+"': "+sk.error);
     validateAppearanceAuthoring024B(d,true);
     std::vector<AssemblyPlacement> placements;std::string error;if(!resolveAssembly(d,placements,error))throw std::runtime_error(error);
+    sealParametricComponentBindings(d);
 }
 std::set<u64> consumed(const Document& d){return consumedFeatureInputs(d);}
 struct MeshSelection { u64 feature=0; u64 node=0; int copy=-1; std::string nodeName; bool useNode=false; u64 cacheKey=0; };
@@ -570,7 +573,7 @@ V designView(const Document& document,u64 revision){
         features.arr.push_back(row);
     }
     for(const auto& sketch:document.sketches){
-        V row=V::makeObj(),entities=V::makeArr();row.set("name",V::makeStr(sketch.name));row.set("plane",V::makeStr(sketch.sk.plane));row.set("profile_ready",V::makeBool(profileReady(document,sketch)));
+        V row=V::makeObj(),entities=V::makeArr();row.set("name",V::makeStr(sketch.name));row.set("local_name",V::makeStr(sketch.localName()));row.set("owner_feature",V::makeNum((double)sketch.ownerFeature));row.set("reference",V::makeStr(sketch.name));row.set("plane",V::makeStr(sketch.sk.plane));row.set("profile_ready",V::makeBool(profileReady(document,sketch)));
         for(size_t index=0;index<sketch.sk.ents.size();++index){const auto& entity=sketch.sk.ents[index];V item=V::makeObj();item.set("name",V::makeStr(entity.name));item.set("kind",V::makeStr(sketchEntityKindName(entity.kind)));item.set("index",V::makeNum((double)index));item.set("construction",V::makeBool(entity.construction));if(!entity.name.empty()&&entity.kind==SketchEnt::Pnt)item.set("reference",V::makeStr("point."+entity.name));if(entity.sourceFeature){item.set("source_feature",V::makeNum((double)entity.sourceFeature));item.set("source_reference",V::makeStr(entity.reference));}entities.arr.push_back(item);}
         V consumers=V::makeArr();for(const auto& feature:features.arr)for(const auto& used:feature.find("sketches")->arr)if(used.str==sketch.name)consumers.arr.push_back(*feature.find("id"));row.set("consumers",consumers);
         row.set("entities",entities);sketches.arr.push_back(row);
@@ -608,7 +611,7 @@ V designDigest(const Document& document,u64 revision,const V& args){
     }
     for(const auto& row:design.find("sketches")->arr){
         if(known_("sketch:"+row.find("name")->str,row))continue;
-        V out=V::makeObj();copy(row,out,{"name","plane","profile_ready","consumers"});out.set("entities",V::makeNum((double)row.find("entities")->arr.size()));sketches.arr.push_back(std::move(out));
+        V out=V::makeObj();copy(row,out,{"name","local_name","owner_feature","reference","plane","profile_ready","consumers"});out.set("entities",V::makeNum((double)row.find("entities")->arr.size()));sketches.arr.push_back(std::move(out));
     }
     for(const auto& row:design.find("assembly")->arr){if(!known_("node:"+std::to_string((u64)row.find("id")->num),row))nodes.arr.push_back(row);}
     r.set("features",features);r.set("sketches",sketches);r.set("assembly",nodes);
@@ -672,6 +675,7 @@ V selectedDesignView(const Document& document,u64 revision,const V& args){
 static std::atomic_size_t contextGraphAuthoringSerializationsCount{0};
 size_t contextGraphAuthoringSerializations(){return contextGraphAuthoringSerializationsCount.load(std::memory_order_relaxed);}
 #include "context_graph_034d.inl"
+V parametricGraphSnapshot(const Document& document,u64 revision){V root;if(!arkjson::parse(documentToJson(document,false,false),root))throw std::runtime_error("Cannot read authored graph");auto graph=buildProjectGraph(root,"studio");graph.set("revision",V::makeNum((double)revision));graph.set("partial_dependencies",V::makeBool(true));return graph;}
 int wholeIndex(const V& value,const char* what){
     if(value.t!=V::Num||!std::isfinite(value.num)||value.num<0||value.num>1024||value.num!=std::floor(value.num))throw std::runtime_error(std::string(what)+" must be a nonnegative integer");
     return (int)value.num;
@@ -777,7 +781,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
                 if(expected->t!=V::Num||expected->num!=(double)revision)
                     throw std::runtime_error("Revision conflict; the current revision is in this result. Inspect only what your edit depends on and retry");
         if(tool=="context_graph")return result(projectContextGraph(document,revision,args,contextGraphCache_,contextGraphSource_,contextGraphStamp_));
-        V extension;if(callProjectMemoryTool(*this,tool,args,extension))return result(extension);if(callAuthoring023Tool(*this,tool,args,extension))return result(extension);if(callComponentLibraryTool(*this,tool,args,extension))return result(extension);if(callAgentFeature(*this,tool,args,extension))return result(extension);if(callParametricHudTool(*this,tool,args,extension))return result(extension);
+        V extension;if(callParametricComponentTool(*this,tool,args,extension))return result(extension);if(callProjectMemoryTool(*this,tool,args,extension))return result(extension);if(callAuthoring023Tool(*this,tool,args,extension))return result(extension);if(callComponentLibraryTool(*this,tool,args,extension))return result(extension);if(callAgentFeature(*this,tool,args,extension))return result(extension);if(callParametricHudTool(*this,tool,args,extension))return result(extension);
         {V out;if(callAuthoring024Tool(*this,tool,args,out))return result(out);if(callMotionTool(*this,tool,args,out))return result(out);if(callDragChainTool(*this,tool,args,out))return result(out);Image image;if(callExplodedViewTool(*this,tool,args,out,&image))return image.w?snapshotImageResult(image,out,std::string()):result(out);}
         if(tool=="collision_inspect"||tool=="skeleton_inspect"||tool=="skeleton_compile"){
             if(const auto* expected=args.find("expected_revision"))if(expected->t!=V::Num||expected->num!=(double)revision)throw std::runtime_error("Revision conflict; inspect the current document before querying");
@@ -1280,9 +1284,11 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
             for(auto& c:commands.arr){
                 applying=true;commandIndex=(size_t)(&c-commands.arr.data());commandOp=c.find("op")?c.find("op")->asStr():"";
                 auto op=str(c,"op");
+                const auto sketchName=op.rfind("sketch.",0)==0&&c.find("name")?sketchReference(c.find("owner_feature")?featureRef(next,*c.find("owner_feature")):0,str(c,"name")):std::string();
                 if(next.historyTip&&(op=="feature.add"||op=="sheet.create"||op=="skeleton.set"))throw std::runtime_error("Resume full feature history before adding features or changing Skeleton source");
                 if(op=="feature.move"&&skeletonOwnsFeature(next,featureRef(next,field(c,"id"))))throw std::runtime_error("Skeleton pattern is source-owned; change its source instead of reordering generated features");
-                if(applyFeatureHistoryCommand(next,c)){}
+                if(op.rfind("component.",0)==0){if(!args.find("expected_revision"))throw std::runtime_error("Parametric component commands require expected_revision");if(!applyParametricComponentCommand(next,c))throw std::runtime_error("Unknown component command");validated(next);}
+                else if(applyFeatureHistoryCommand(next,c)){}
                 else if(applyAssemblyAuthoringCommand(next,c,error)){if(!error.empty())throw std::runtime_error(error);}
                 else if(op.rfind("motion.",0)==0){if(op=="motion.graph.set"||op=="motion.bake")validated(next);if(!applyMotionCommand(next,c,revision,error))throw std::runtime_error("Unknown operation: "+op);if(!error.empty())throw std::runtime_error(error);}
                 else if(op.rfind("explode.",0)==0){if(!applyExplodedViewCommand(next,c,error))throw std::runtime_error("Unknown operation: "+op);if(!error.empty())throw std::runtime_error(error);}
@@ -1397,12 +1403,13 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
                 else if(op=="sketch.set"){
                     V sketch=field(c,"sketch");bindSketchProjects(next,sketch);
                     Sketch sk;if(!sketchFromJson(sketch.dump(),sk,&error))throw std::runtime_error(error);
-                    next.setSketch(str(c,"name"),std::move(sk));
+                    const auto* owner=c.find("owner_feature");
+                    next.setSketch(str(c,"name"),std::move(sk),owner?featureRef(next,*owner):0);
                 }
-                else if(op=="sketch.remove"){if(!next.removeSketch(str(c,"name")))throw std::runtime_error("Sketch not found");}
-                else if(op=="sketch.patch"){auto* sketch=next.findSketch(str(c,"name"));if(!sketch)throw std::runtime_error("Sketch not found");patchSketch(*sketch,c,error);}
+                else if(op=="sketch.remove"){if(!next.removeSketch(sketchName))throw std::runtime_error("Sketch not found");}
+                else if(op=="sketch.patch"){auto* sketch=next.findSketch(sketchName);if(!sketch)throw std::runtime_error("Sketch not found");patchSketch(*sketch,c,error);}
                 else if(op=="sketch.entity.set"){
-                    auto* sk=next.findSketch(str(c,"name"));if(!sk)throw std::runtime_error("Sketch not found");
+                    auto* sk=next.findSketch(sketchName);if(!sk)throw std::runtime_error("Sketch not found");
                     V entity=field(c,"entity");bindProjectFeature(next,entity);auto name=str(entity,"name");V wrapper=V::makeObj(),entities=V::makeArr();entities.arr.push_back(entity);wrapper.set("entities",entities);Sketch single;
                     if(!sketchFromJson(wrapper.dump(),single,&error))throw std::runtime_error(error);
                     auto it=std::find_if(sk->sk.ents.begin(),sk->sk.ents.end(),[&](const SketchEnt& e){return e.name==name;});
@@ -1410,7 +1417,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
                     Sketch checked;if(!sketchFromJson(sketchToJson(sk->sk),checked,&error))throw std::runtime_error(error);sk->sk=std::move(checked);
                 }
                 else if(op=="sketch.fillet"||op=="sketch.chamfer"){
-                    auto* sk=next.findSketch(str(c,"name"));if(!sk)throw std::runtime_error("Sketch not found");
+                    auto* sk=next.findSketch(sketchName);if(!sk)throw std::runtime_error("Sketch not found");
                     const bool chamfer=op=="sketch.chamfer";
                     const std::string entity=str(c,"entity");
                     const V& index=field(c,"corner");
@@ -1603,6 +1610,7 @@ V AgentSession::tools(bool detailed){
     const Def defs[]={
         {"history_info","Inspect persistent immutable iteration metadata and branch heads. limit 1..64, newest first. before_id excludes that anchor and pages older nodes; has_more/next_before_id indicate continuation. Baseline represents only the first observed authoring state. Actor identity is caller-declared. No geometry or token ledger snapshots are returned.",R"({"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":64},"before_id":{"type":"string"}}})",true},
         {"iteration_restore","Restore saved authoring as a new branch iteration, preserving all prior nodes, current usage receipts and monotonic revision. Exact geometry is re-evaluated; any failure or total 4 MiB capacity violation rejects atomically. Actor is declared provenance.",R"({"type":"object","properties":{"id":{"type":"string"},"expected_revision":{"type":"integer","minimum":0},"motivation":{"type":"string","maxLength":4096},"actor":{"type":"object","properties":{"kind":{"type":"string"},"id":{"type":"string"},"role":{"type":"string"}},"required":["kind","id"]}},"required":["id","expected_revision"]})",false},
+        {"history_compact","Explicit recoverable history compaction, only on user instruction. Writes the complete current document to a NEW archive_path .ark and verifies reopening before publication. Retains at most keep_recent current-head ancestors and a baseline; optional retain_ids explicitly preserves other selected states (combined nodes at most 256), rewrites their ids, retains only contiguous available undo targets and clears redo. Other branches and older history remain in the archive, recoverable using doc_load. No authoring, geometry or usage is removed. Never overwrites archives; stale revision or archive failure leaves current document unchanged. Save the compacted document afterwards with doc_save.",R"({"type":"object","additionalProperties":false,"properties":{"archive_path":{"type":"string"},"keep_recent":{"type":"integer","minimum":0,"maximum":256},"retain_ids":{"type":"array","maxItems":256,"items":{"type":"string"}},"expected_revision":{"type":"integer","minimum":0},"confirm":{"type":"boolean","const":true},"motivation":{"type":"string","maxLength":4096},"actor":{"type":"object"}},"required":["archive_path","keep_recent","expected_revision","confirm"]})",false},
         {"history_migrate_derived","049A explicit journal rewrite; only on the user's explicit instruction. Removes 044B-048B inline baked-motion frames (derived data) from the current authoring, the journal baseline, deltas and blobs, keeping receipts with frames_sha256. First writes the complete document beside path as <name>.pre-049A.ark (never overwriting) and verifies it reopens; then rebuilds the journal (schema 2, new node ids and digests, same actors, tools, times and branches), records the migration in history_info migrations and advances revision. Rejects without confirm:true, a saved .ark path or inline payloads. Save afterwards with doc_save.",R"({"type":"object","properties":{"path":{"type":"string","description":"Saved .ark document; the backup is written beside it."},"expected_revision":{"type":"integer","minimum":0},"confirm":{"type":"boolean","const":true},"motivation":{"type":"string","maxLength":4096},"actor":{"type":"object","properties":{"kind":{"type":"string"},"id":{"type":"string"},"role":{"type":"string"},"model":{"type":"string"}},"required":["kind","id"]}},"required":["path","expected_revision","confirm"]})",false},
         {"suspension_inspect","Solve a double-wishbone suspension preview at jounce_mm, rack_mm and wheel_spin_deg, returning hardpoints, link closure residuals, toe/camber, spring stroke and declared-rate force. Read-only kinematics, not dynamic/inertia/contact simulation or native B-rep authority.",R"({"type":"object","properties":{"id":{"type":["integer","string"]},"jounce_mm":{"type":"number"},"rack_mm":{"type":"number"},"wheel_spin_deg":{"type":"number"}},"required":["id"]})",true},
         {"usage_info","Read persisted drawing token receipts and reported lower-bound totals. External MCP consumption may remain unknown; client receipts cover only reported calls. detail receipts includes provenance; no estimate is invented.",R"({"type":"object","properties":{"detail":{"type":"string","enum":["summary","receipts"]}}})",true},
@@ -1678,6 +1686,7 @@ if(std::string(d.name)=="doc_apply"){
             "id":{"type":["integer","string","null"],"description":"Required target for feature.edit/remove and assembly.edit/remove: positive id or unique name. feature.rollback accepts null to resume all history. Mate ids are numeric; mate endpoints a/b may select a unique mate instead."},
             "type":{"type":"string","description":"Feature type on feature.add; mate type on mate.add/edit."},
             "name":{"type":"string","minLength":1,"description":"Feature/instance label, parameter name, sketch name or datum name for the selected operation."},
+            "owner_feature":{"type":["integer","string"],"description":"Sketch commands only: existing shared feature definition ID or unique name; name is local to this owner. Omit for legacy globals or an existing canonical part:<id>::<local-name> reference. Occurrences reuse definition sketches. New scoped names are 1..96 characters."},
             "p":{"type":"object","additionalProperties":{"type":["number","string"]},"description":"Editable parameters, each a finite number or expression string. Use actual authored keys from object_context: native_solid box uses width/depth/height; legacy box uses dx/dy/dz. feature.edit uses id plus p, not entity. Rigid placements use tx/ty/tz/rx/ry/rz."},
             "inputs":{"type":"array","items":{"type":["integer","string"]},"description":"Feature inputs as positive ids or unique feature names, in operation order."},
             "expr":{"type":["number","string"],"description":"param.set value or one sketch.patch coordinate expression."},
@@ -1734,7 +1743,12 @@ if(std::string(d.name)=="doc_apply"){
     enrichModeling031BSchemas(list);
     {V tool=V::makeObj(),schema,annotations=V::makeObj();tool.set("name",V::makeStr("context_graph"));tool.set("description",V::makeStr("Retrieve a small linked project context by query or exact keys. Includes authored dependencies/backlinks and attributed saved feedback; no geometry evaluation. Use known_scope and known_fingerprints to omit unchanged facts. Read object_context/native evidence before editing; this graph grants no write or manufacturing authority."));arkjson::parse(R"({"type":"object","properties":{"query":{"type":"string","maxLength":256},"keys":{"type":"array","minItems":1,"maxItems":64,"items":{"type":"string","maxLength":256}},"depth":{"type":"integer","minimum":0,"maximum":2},"limit":{"type":"integer","minimum":1,"maximum":64},"history_limit":{"type":"integer","minimum":0,"maximum":8},"expected_revision":{"type":"integer","minimum":0},"known_scope":{"type":"string","maxLength":256},"known_fingerprints":{"type":"object","additionalProperties":{"type":"string","maxLength":64}}},"additionalProperties":false})",schema);tool.set("inputSchema",schema);annotations.set("readOnlyHint",V::makeBool(true));tool.set("annotations",annotations);list.arr.push_back(tool);}
     for(auto& tool:list.arr)if(tool.find("name")->str=="doc_apply"){V schema=*tool.find("inputSchema"),props=*schema.find("properties"),flag=V::makeObj();flag.set("type",V::makeStr("boolean"));props.set("refresh_candidate",flag);schema.set("properties",props);tool.set("inputSchema",schema);}
-    appendProjectMemoryTools(list);
+    appendProjectMemoryTools(list);appendParametricComponentTools(list);
+    for(auto& tool:list.arr)if(tool.find("name")->str=="doc_apply"||tool.find("name")->str=="doc_preview"){
+        V schema=*tool.find("inputSchema"),props=*schema.find("properties"),commands=*props.find("commands"),items=*commands.find("items"),cp=*items.find("properties"),op=*cp.find("op"),en=*op.find("enum");
+        for(const auto* name:{"component.insert","component.update","component.configure"})en.arr.push_back(V::makeStr(name));op.set("enum",en);cp.set("op",op);
+        for(const auto* key:{"package","overrides"}){V shape=V::makeObj();shape.set("type",V::makeStr("object"));cp.set(key,shape);}for(const auto* key:{"namespace","package_sha256","expected_package_sha256"}){V shape=V::makeObj();shape.set("type",V::makeStr("string"));cp.set(key,shape);}items.set("properties",cp);commands.set("items",items);props.set("commands",commands);schema.set("properties",props);tool.set("inputSchema",schema);
+    }
     return list;
 }
 Document makeDemoDocument(){

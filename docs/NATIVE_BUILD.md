@@ -30,6 +30,23 @@ under `install-msvc-ark-offset-001/win64/vc14/lib`, and Release DLLs under
 applications and tests, or copy the required DLLs alongside a produced `.exe`.
 Do not mix these MSVC libraries with the existing MinGW build in `out/sketch`.
 
+051A also supports LLVM-MinGW without bypassing the patchset verification:
+
+```powershell
+powershell -NoProfile -File scripts/build-occt.ps1 -Toolchain LLVMMinGW -CompilerDirectory C:/tools/llvm-mingw/bin -Jobs 4
+```
+
+The compiler directory must contain `clang.exe`, `clang++.exe` and
+`mingw32-make.exe`; CMake and Git must be on PATH. This route uses a separate
+`build-mingw-ark-offset-001` and `install-mingw-ark-offset-001`, the same pinned
+archive and frozen patches, and the same installed DLL inventory and license
+notices. Configure ARK with `MinGW Makefiles`, the same compiler/make program,
+`ARK_WITH_OCCT=ON` and `OpenCASCADE_DIR` pointing to that installation's `cmake`
+directory. Put its `win64/clang/bin` and compiler `bin` on PATH for tests. Leave
+`ARK_ALLOW_UNPATCHED_OCCT` OFF. The optional metadata compression declarations
+are handled in source; an external forced-include compatibility header is not
+needed. See [051A native geometry evidence](NATIVE_GEOMETRY_051A.md).
+
 The configuration builds FoundationClasses, ModelingData, ModelingAlgorithms,
 and the `TKDESTEP` toolkit with its dependencies. Full visualization and Draw
 modules are not requested; the STEP dependency closure still includes some

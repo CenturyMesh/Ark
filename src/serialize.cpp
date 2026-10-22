@@ -1,4 +1,5 @@
 #include "ark/design_containers.hpp"
+#include "ark/parametric_components.hpp"
 #include "ark/cad_import.hpp"
 // ARK-Point :: serialize.cpp — document persistence over arkjson.
 #include "ark/serialize.hpp"
@@ -576,6 +577,7 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
     for(auto&ns:doc.sketches){
         Value v;arkjson::parse(sketchToJson(ns.sk),v);
         v.set("name",Value::makeStr(ns.name));
+        if(ns.ownerFeature){v.set("owner_feature",Value::makeNum((double)ns.ownerFeature));v.set("local_name",Value::makeStr(ns.localName()));}
         Value es=Value::makeArr();   for(auto&e:ns.sk.ents) es.arr.push_back(entToJson(e));
         Value cs=Value::makeArr();   for(auto&c:ns.sk.cons) cs.arr.push_back(conToJson(c));
         v.set("entities",std::move(es));
@@ -654,6 +656,8 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
     if(curvePattern044BNeedsVersion47(doc)||media044BNeedsVersion47(doc)||motionsRequireDocumentVersion47(doc))r.set("version",Value::makeNum(47));
     if(profileRegions046BNeedsVersion48(doc))r.set("version",Value::makeNum(48));
     if(motionReceiptsRequireDocumentVersion49(doc))r.set("version",Value::makeNum(49));
+    for(const auto& sketch:doc.sketches)if(sketch.ownerFeature){r.set("version",Value::makeNum(50));break;}
+    if(!doc.parametricComponents.isNull()){validateParametricComponents(doc.parametricComponents);r.set("parametric_components",doc.parametricComponents);r.set("version",Value::makeNum(51));}
     if(includeAudit&&includeHistory)iterationPersist(r,doc);
     canonicalDocumentKeys(r);
     std::string serialized=r.dump();
@@ -664,7 +668,7 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
 static bool documentFromValue(Value& v,Document& doc,std::string* err){
     auto fail=[&](const std::string& m){ if(err)*err=m; return false; };
     if(v.t!=Value::Obj) return fail("root must be object");
-    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || !std::isfinite(ver->num)||ver->num!=std::floor(ver->num)||ver->num<1||ver->num>49))
+    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || !std::isfinite(ver->num)||ver->num!=std::floor(ver->num)||ver->num<1||ver->num>51))
         return fail("unsupported document version");
     Value history;std::string historyError;if(!iterationExpand(v,history,historyError))return fail(historyError);
     if(const auto* nodes=v.find("assembly");nodes&&nodes->t==Value::Arr)for(const auto& node:nodes->arr)if(const auto* pattern=node.find("pattern");pattern&&pattern->find("carry_frame")){
@@ -676,6 +680,7 @@ static bool documentFromValue(Value& v,Document& doc,std::string* err){
     if(!v.find("features"))return fail("missing features array");
     for(auto key:{"params","sketches","features","planes","canvases","materials","image_assets","stamps"})if(auto a=v.find(key);a && a->t!=Value::Arr)return fail(std::string(key)+" must be an array");
     Document nd;   // parse into scratch; commit only on full success
+    if(const auto* components=v.find("parametric_components")){const auto* version=v.find("version");if(!version||version->num<51)return fail("Embedded parametric components require document version 51");try{validateParametricComponents(*components);nd.parametricComponents=*components;}catch(const std::exception& error){return fail(error.what());}}
     try{
         if(const auto* assets=v.find("image_assets")){if(assets->arr.size()>64)return fail("Embedded image asset capacity is 64");for(const auto& asset:assets->arr)nd.imageAssets.push_back(imageAssetFromJson(asset));}
         if(const auto* stamps=v.find("stamps")){if(stamps->arr.size()>128)return fail("Stamp capacity is 128");for(const auto& stamp:stamps->arr)nd.stamps.push_back(stampFromJson(stamp));}
@@ -731,6 +736,13 @@ static bool documentFromValue(Value& v,Document& doc,std::string* err){
         for(auto&s:sks->arr){
             NamedSketch ns;
             ns.name=s.find("name")?s.find("name")->asStr():"";
+            if(const auto* owner=s.find("owner_feature")){
+                const auto* version=v.find("version");
+                if(!version||version->num<50||owner->t!=Value::Num||!std::isfinite(owner->num)||owner->num<1||owner->num>9007199254740991.0||owner->num!=std::floor(owner->num))return fail("Scoped sketches require version 50 and a positive owner_feature ID");
+                ns.ownerFeature=(u64)owner->num;
+                const auto* local=s.find("local_name");if(!local||local->t!=Value::Str||ns.name!=sketchReference(ns.ownerFeature,local->str))return fail("Scoped sketch canonical reference does not match owner_feature/local_name");
+            }
+            else if(s.find("local_name"))return fail("local_name requires owner_feature");
             if(ns.name.empty() || !sketchNames.insert(ns.name).second) return fail("empty or duplicate sketch name");
             if(!sketchFromJson(s.dump(),ns.sk,err))return false;
             nd.sketches.push_back(std::move(ns));
@@ -882,7 +894,8 @@ static bool documentFromValue(Value& v,Document& doc,std::string* err){
         }
         if(feature.appearance.t==Value::Obj){auto version=v.find("version");if(!version||version->asNum()<15)return fail("Feature appearance requires document version 15");}
     }
-    if(nd.params.size()>256||nd.features.size()>1024||nd.sketches.size()>256||nd.canvases.size()>8||nd.materials.size()>256)return fail("document capacity exceeded");
+    if(nd.params.size()>256||nd.features.size()>1024||nd.canvases.size()>8||nd.materials.size()>256)return fail("document capacity exceeded");
+    {std::string scopeError;if(!nd.validateSketchScopes(scopeError))return fail(scopeError.rfind("Document capacity exceeded",0)==0?"document capacity exceeded":scopeError);}
     nd.refreshParams();
     if(!nd.parameterError.empty())return fail(nd.parameterError);
     for(auto& canvas:nd.canvases){

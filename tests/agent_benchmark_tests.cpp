@@ -6,6 +6,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <thread>
+#include <filesystem>
 using V=arkjson::Value;
 static void check(bool condition,const char* message){if(!condition)throw std::runtime_error(message);}
 static V read(const std::string& path){std::ifstream stream(path);check((bool)stream,"fixture file present");std::ostringstream text;text<<stream.rdbuf();V value;check(arkjson::parse(text.str(),value),"fixture JSON valid");return value;}
@@ -27,8 +28,64 @@ static void scopedAssignments(){
     designer.transport=[&](const auto&,const V& request,const auto*){auto n=++designerRound;if(n==1){received=request.dump().find("origin_revision")!=std::string::npos&&request.dump().find("requires_reinspection")!=std::string::npos&&request.dump().find("ownership_enforced")!=std::string::npos&&request.dump().find("Block")!=std::string::npos;return tool("doc_info",json(R"({"detail":"design"})"));}if(n==2)return tool("team_report_task",json(R"({"state":"completed","summary":"Inspected scoped Block at current revision 1; no mutation."})"));if(n==3)return tool("team_send",json(R"({"to":"engineer","kind":"report","message":"Block inspection complete at revision 1; no mutation."})"));return done();};config.roles={lead,designer};ark::AgentTeam team;
     team.start(config,"Inspect only existing Block with a specific scoped assignment",ark::AgentSession::tools(),[&](const auto& name,const V& args){if(name=="object_context")++contextCalls;return session.call(name,args);});check(team.waitIdleFor(std::chrono::seconds(5)),"scoped focused workflow completed");auto snapshot=team.snapshot();if(!received||!staleRejected||!missingRejected||!tooManyRejected)throw std::runtime_error("scope flags received="+std::to_string(received)+" stale="+std::to_string(staleRejected)+" missing="+std::to_string(missingRejected)+" oversized="+std::to_string(tooManyRejected)+" context_calls="+std::to_string(contextCalls));check(contextCalls==3&&session.revision==1,"context reads serialized without mutating baseline");check(snapshot.goalDeclared&&snapshot.goalState==ark::AgentGoalState::Completed&&snapshot.unresolvedErrors==0,"corrected assignment integrated without unresolved failures");
 }
+static void outcomeCoverage(const std::string& root){
+    auto suite=ark::parseAgentBenchmarkSuite(read(root+"/benchmarks/agent_outcomes_v2.json"));
+    auto config=ark::parseAgentBenchmarkConfig(read(root+"/benchmarks/offline.json"));config.repetitions=1;
+    auto preflight=ark::preflightAgentBenchmark(suite);if(!preflight.find("passed")->b)throw std::runtime_error(preflight.dump());
+    auto report=ark::runAgentBenchmark(suite,config);if(report.find("accepted_count")->num!=9)throw std::runtime_error(report.dump());
+    for(const auto& row:report.find("attempts")->arr){
+        check(row.find("completed")->b&&row.find("persisted")->b,"completed editable outcome survives cold reopen");
+        check(row.find("case_sha256")->str.size()==64&&row.find("build")->find("executable_sha256")->str.size()==64,"fixture and executable fingerprints bind every attempt");
+        const auto& persistence=*row.find("persistence");check(persistence.find("saved")->b&&persistence.find("authoring_equal")->b&&persistence.find("file_sha256")->str.size()==64,"actual artifact bytes and independent authoring oracle recorded");
+        check(std::filesystem::is_regular_file(persistence.find("path")->str),"real .ark artifact retained for review");
+        if(row.find("case")->str=="E03"){
+            const auto& probe=*row.find("initial_rejection");check(probe.find("required")->b&&probe.find("passed")->b&&probe.find("receipt")->find("isError")->b,"deliberate failure is observed, never inferred from successful recovery");
+            check(probe.find("revision_before")->num==probe.find("revision_after")->num&&probe.find("authoring_before_sha256")->str==probe.find("authoring_after_sha256")->str,"rejected batch remains atomic");
+        }
+    }
+    config.strategies={"Single"};config.caseIds={"E01"};
+    config.offlineTransport=[](const auto&,const V&,const auto*){return done();};
+    auto unacceptable=ark::runAgentBenchmark(suite,config);const auto& bad=unacceptable.find("attempts")->arr.front();
+    check(bad.find("completed")->b&&!bad.find("accepted")->b&&!bad.find("persisted")->b,"provider completion is distinct from accepted and persisted outcome");config.offlineTransport={};
+    auto artifact=report.find("attempts")->arr.front().find("persistence")->find("path")->str;config.artifactDirectory=artifact;
+    auto saveFailure=ark::runAgentBenchmark(suite,config);const auto& unsaved=saveFailure.find("attempts")->arr.front();
+    check(unsaved.find("postconditions_passed")->b&&!unsaved.find("persisted")->b&&!unsaved.find("accepted")->b&&unsaved.find("persistence")->find("error"),"save failure cannot count as accepted persistence");config.artifactDirectory.clear();
+    config.offlineBeforeReopen=[](const std::string& file){ark::AgentSession other;auto args=V::makeObj();args.set("path",V::makeStr(file));check(!other.call("doc_load",args).find("isError")->b,"fault seam loads real artifact");auto edit=json(R"({"commands":[{"op":"param.set","name":"width","expr":"14"}]})");edit.set("expected_revision",V::makeNum(other.revision));check(!other.call("doc_apply",edit).find("isError")->b,"fault seam edits persisted authoring");check(!other.call("doc_save",args).find("isError")->b,"fault seam replaces only owned test artifact");};
+    auto mismatch=ark::runAgentBenchmark(suite,config);const auto& changed=mismatch.find("attempts")->arr.front();
+    check(changed.find("postconditions_passed")->b&&!changed.find("persisted")->b&&!changed.find("persistence")->find("authoring_equal")->b,"cold reopen catches changed authoring even when in-memory geometry passed");
+    rejects([&]{ark::runAgentBenchmark(suite,config,true);},"live cannot use persistence fault seam");config.offlineBeforeReopen={};
+    auto tariff=json(R"({"provider":"test","model":"test","currency":"USD","as_of":"2026-10-22","source":"synthetic unit test tariff, not provider pricing","basis":"flat_input_output_tokens","input_per_million":2,"output_per_million":4})");
+    ark::AssistantConfig assistant;assistant.provider="test";assistant.model="test";ark::AssistantUsage usage;usage.inputTokens=1000000;usage.outputTokens=500000;usage.totalTokens=1500000;usage.reportedResponses=1;ark::AssistantPerformance performance;performance.providerRequests=1;
+    auto cost=ark::estimateAgentBenchmarkCost(tariff,assistant,usage,performance,true);check(cost.num==4,"explicit synthetic tariff calculation");
+    check(ark::estimateAgentBenchmarkCost(tariff,assistant,usage,performance,false).isNull(),"offline usage cannot be billed evidence");usage.missingResponses=1;check(ark::estimateAgentBenchmarkCost(tariff,assistant,usage,performance,true).isNull(),"partial usage is unknown");usage.missingResponses=0;performance.providerRequests=2;check(ark::estimateAgentBenchmarkCost(tariff,assistant,usage,performance,true).isNull(),"unaccounted request is unknown");
+    auto invalid=tariff;invalid.set("output_per_million",V::makeNum(-1));rejects([&]{ark::estimateAgentBenchmarkCost(invalid,assistant,usage,performance,true);},"negative tariff rejected");invalid=tariff;invalid.set("model",V::makeStr("other"));rejects([&]{ark::estimateAgentBenchmarkCost(invalid,assistant,usage,performance,true);},"tariff for another model rejected");
+    invalid=tariff;invalid.set("as_of",V::makeStr("2026-1--22"));rejects([&]{ark::estimateAgentBenchmarkCost(invalid,assistant,usage,performance,true);},"malformed tariff date rejected");invalid.set("as_of",V::makeStr("2026-02-30"));rejects([&]{ark::estimateAgentBenchmarkCost(invalid,assistant,usage,performance,true);},"nonexistent tariff date rejected");
+    auto attempts=json(R"([{"strategy":"Single","accepted":true,"cost":4},{"strategy":"Single","accepted":false,"cost":6}])");for(auto& row:attempts.arr){row.set("tariff",tariff);row.set("provider",V::makeStr("test"));row.set("model",V::makeStr("test"));}auto totals=ark::summarizeAgentBenchmarkAttempts(attempts);check(totals.arr.front().find("cost_per_accepted_design")->num==10&&totals.arr.front().find("failed_attempt_count")->num==1,"failed attempts contribute all their costs to accepted outcome denominator");auto mixed=attempts;auto alternate=tariff;alternate.set("currency",V::makeStr("EUR"));mixed.arr.back().set("tariff",alternate);rejects([&]{ark::summarizeAgentBenchmarkAttempts(mixed);},"mixed currencies never aggregated");alternate=tariff;alternate.set("source",V::makeStr("another tariff provenance"));mixed.arr.back().set("tariff",alternate);rejects([&]{ark::summarizeAgentBenchmarkAttempts(mixed);},"mixed tariff provenance never aggregated");attempts.arr.back().set("cost",V{});totals=ark::summarizeAgentBenchmarkAttempts(attempts);check(totals.arr.front().find("cost_per_accepted_design")->isNull()&&totals.arr.front().find("cost_unknown_attempts")->num==1,"one unknown failed cost prevents false comparative cost conclusion");
+}
+static void benchmarkAuth(){
+    auto settings=json(R"({"assistant":{"provider":"openai","model":"gpt-6.1-sol","protocol":"responses","endpoint":"https://api.openai.com/v1/responses","api_key_env":"","auth_mode":"chatgpt-plan","reasoning_effort":"medium"}})");
+    auto parsed=ark::parseAgentBenchmarkConfig(settings);
+    check(parsed.assistant.authMode==ark::AssistantAuthMode::ChatGptPlan&&parsed.assistant.reasoningEffort=="medium","benchmark uses explicitly selected ChatGPT account route");
+    auto assistant=*settings.find("assistant");assistant.set("endpoint",V::makeStr("https://example.com/v1/responses"));settings.set("assistant",assistant);
+    rejects([&]{ark::parseAgentBenchmarkConfig(settings);},"plan auth cannot be sent to another host");
+    assistant.set("endpoint",V::makeStr("https://api.openai.com/v1/responses"));assistant.set("auth_mode",V::makeStr("typo"));settings.set("assistant",assistant);
+    rejects([&]{ark::parseAgentBenchmarkConfig(settings);},"unknown auth mode cannot silently fall back");
+}
+static void neutralPartComparison(const std::string& root){
+    const auto suite=ark::parseAgentBenchmarkSuite(read(root+"/benchmarks/part_agents_052d.json"));
+    auto settings=read(root+"/benchmarks/part_agents_offline_052d.json");settings.set("require_part_delegation",V::makeBool(false));
+    auto config=ark::parseAgentBenchmarkConfig(settings);config.repetitions=1;config.strategies={"Single","PartFocused"};
+    check(!config.requirePartDelegation,"neutral comparison opt-in parsed");
+    auto result=ark::runAgentBenchmark(suite,config);const auto& attempts=result.find("attempts")->arr;
+    check(attempts.size()==2&&result.find("accepted_count")->num==2,"neutral team may finish a valid task directly");
+    check(attempts[0].find("user_task_sha256")->str==attempts[1].find("user_task_sha256")->str,"neutral strategies receive identical user task and acceptance oracle");
+    check(!attempts[1].find("delegation_required")->b&&!attempts[1].find("delegation_integrated")->b,"lead-only result is explicitly distinguished from delegation");
+    settings.set("require_part_delegation",V::makeStr("false"));rejects([&]{ark::parseAgentBenchmarkConfig(settings);},"ambiguous neutral-mode configuration rejects");
+}
 int main(){try{
-    const std::string root=ARK_SOURCE_DIR;auto suiteValue=read(root+"/benchmarks/agent_briefs_v1.json");auto suite=ark::parseAgentBenchmarkSuite(suiteValue);check(suite.cases.size()==30,"thirty distinct versioned synthetic briefs");auto preflight=ark::preflightAgentBenchmark(suite);if(!preflight.find("passed")->b)throw std::runtime_error(preflight.dump());
+    benchmarkAuth();
+    neutralPartComparison(ARK_SOURCE_DIR);
+    const std::string root=ARK_SOURCE_DIR;outcomeCoverage(root);auto suiteValue=read(root+"/benchmarks/agent_briefs_v1.json");auto suite=ark::parseAgentBenchmarkSuite(suiteValue);check(suite.cases.size()==30,"thirty distinct versioned synthetic briefs");auto preflight=ark::preflightAgentBenchmark(suite);if(!preflight.find("passed")->b)throw std::runtime_error(preflight.dump());
     auto config=ark::parseAgentBenchmarkConfig(read(root+"/benchmarks/offline.json"));check(config.repetitions==3&&config.assistant.maxRounds==0,"three repetitions without production round budgets");config.repetitions=1;config.caseIds={"B01","P01","A01"};unsigned persisted=0;auto report=ark::runAgentBenchmark(suite,config,false,[&](const V& row){check(row.find("transport")->str=="offline_scripted_harness","offline classification");check(row.find("cost")->isNull(),"no invented pricing");check(row.find("usage")->find("reported_responses")->num==0&&row.find("usage")->find("missing_responses")->num>0,"missing scripted usage stays missing");check(row.find("performance")->find("provider_requests")->num>=3,"real connector round receipts");check(row.find("performance")->find("request_bytes")->num>0,"request envelope measured");check(row.find("tool_receipts")->arr.size()>=2,"actual native executor receipts persisted");++persisted;});check(persisted==9&&report.find("accepted_count")->num==9,"three tasks across three real strategies accepted");
     auto broken=suite;broken.cases={suite.cases[0]};broken.cases[0].checks.arr[2].set("equals",V::makeNum(123));config.caseIds={"B01"};auto failed=ark::runAgentBenchmark(broken,config);check(failed.find("failed_attempt_count")->num==3&&failed.find("attempt_count")->num==3,"failed attempts retained in every strategy");check(!ark::preflightAgentBenchmark(broken).find("passed")->b,"invalid reference postcondition detected");
     auto duplicate=suiteValue;auto cases=*duplicate.find("cases");cases.arr.push_back(cases.arr[0]);duplicate.set("cases",cases);rejects([&]{ark::parseAgentBenchmarkSuite(duplicate);},"duplicate case IDs rejected");auto invalid=read(root+"/benchmarks/offline.json");invalid.set("repetitions",V::makeNum(0));rejects([&]{ark::parseAgentBenchmarkConfig(invalid);},"zero repetition rejected");config.caseIds={"absent"};rejects([&]{ark::runAgentBenchmark(suite,config);},"unknown case filter rejected");

@@ -1,4 +1,14 @@
-# Current source semantics — format 43
+# Current source semantics — conditional format 51
+
+053B selects source51 only when a project retains `parametric_components`:
+embedded immutable authored definitions, namespace/identity maps, configured
+public parameters and fingerprints for explicit revision replacement. `.arkprt`
+and `.arktop` use the owned binary container with an
+`ark.parametric-component.v1` envelope. The physical container version and
+`.arkops` command replay do not change. See
+[parametric components](PARAMETRIC_COMPONENTS_053B.md) for the contract and limits.
+
+## Earlier source semantics
 
 031B conditionally selects source43 for the retained solid recipes, advanced
 fillet/chamfer/split semantics, constrained fill/blend, surface extend/untrim/

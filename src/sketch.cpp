@@ -644,6 +644,7 @@ Mesh sketchRegionMesh(const Sketch& sketch,const Mat4& frame){
 arkjson::Value inspectSketch(const Document& doc,const NamedSketch& ns,bool samples){
     using V=arkjson::Value;V r=V::makeObj(),entities=V::makeArr();auto frame=resolvePlane(doc,ns.sk.plane);
     r.set("name",V::makeStr(ns.name));r.set("plane",V::makeStr(ns.sk.plane));r.set("tolerance_mm",V::makeNum(ns.sk.tolerance));
+    r.set("local_name",V::makeStr(ns.localName()));r.set("owner_feature",V::makeNum((double)ns.ownerFeature));r.set("reference",V::makeStr(ns.name));
     r.set("residual",V::makeNum(ns.residual));r.set("remaining_dofs",V::makeNum(ns.freeDofs));r.set("jacobian_rank",V::makeNum(ns.rank));
     r.set("constraint_status",V::makeStr(ns.error.empty()?(ns.freeDofs?"underconstrained":"locally_fully_constrained"):"failed"));r.set("error",V::makeStr(ns.error));
     r.set("diagnosis",diagnoseSketch(ns.sk));

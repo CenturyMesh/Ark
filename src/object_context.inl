@@ -53,6 +53,7 @@ struct ObjectContext {
     // through resources captures parameter cascades, datum supports and sketch
     // projections without treating tessellation indices as persistent references.
     void scan(const V& value,std::set<u64>& ids,std::set<std::string>& names,std::set<u64>& occurrences,const std::string& key="")const{
+        if(key=="owner_feature"||key=="local_name")return; // Scope metadata is not a geometric source.
         if(value.t==V::Str){
             for(const char* section:{"sketches","planes","materials"}){const std::string candidate=std::string(section)+":"+value.str;if(resources.count(candidate))names.insert(candidate);}
             if(key!="name"&&key!="material"&&key!="reference")for(const auto& feature:document.features)if(!feature.name.empty()&&feature.name==value.str)ids.insert(feature.id);
@@ -88,7 +89,7 @@ struct ObjectContext {
         else for(const auto& place:placements)if(place.feature==feature)occurrences.insert(place.node);
         bool changed=true;
         while(changed){changed=false;
-            const auto pending=ids;for(u64 current:pending)if(visited.insert(current).second){changed=true;const auto& authored=features.at(current);authors.set(contextKey(current),authored);evidence.set(contextKey(current),measured.at(current));scan(authored,ids,names,occurrences);for(u64 dependency:dependencies(current))ids.insert(dependency);}
+            const auto pending=ids;for(u64 current:pending)if(visited.insert(current).second){changed=true;const auto& authored=features.at(current);for(const auto& sketch:document.sketches)if(sketch.ownerFeature==current)names.insert("sketches:"+sketch.name);authors.set(contextKey(current),authored);evidence.set(contextKey(current),measured.at(current));scan(authored,ids,names,occurrences);for(u64 dependency:dependencies(current))ids.insert(dependency);}
             const auto pendingNames=names;for(const auto& name:pendingNames)if(read.insert(name).second){changed=true;const auto& resource=resources.at(name);linked.set(name,resource);scan(resource,ids,names,occurrences);}
             // A mate can couple this occurrence to a remotely authored part.
             // Keep its whole connected neighborhood in the change token even

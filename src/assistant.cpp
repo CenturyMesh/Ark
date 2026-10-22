@@ -411,7 +411,7 @@ const std::vector<std::pair<std::string,std::vector<std::string>>>& assistantSpe
         {"skeleton",{"skeleton_inspect","skeleton_compile"}},{"automation",{"skeleton_inspect","skeleton_compile","design_solve"}},
         {"planes",{"plane_authoring"}},{"sketch",{"sketch_repair"}},{"containers",{"design_containers"}},{"hud",{"hud_info","hud_flex_check"}},
         {"cad_import",{"import_step","import_cad","step_inspect","cad_inspect","image_asset","export_step","export_iges","doc_new","doc_load"}},
-        {"history",{"feature_history","history_info","iteration_restore","history_migrate_derived","failure_replay","failure_export","usage_info","usage_record","memory_maintain"}}};
+        {"history",{"feature_history","history_info","iteration_restore","history_migrate_derived","history_compact","failure_replay","failure_export","usage_info","usage_record","memory_maintain"}}};
     return topics;
 }
 V assistantActiveTools(const V& tools,const V& conversation,const std::string& onboardingPack){
