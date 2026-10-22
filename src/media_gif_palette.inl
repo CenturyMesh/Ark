@@ -1,0 +1,15 @@
+// One shared adaptive palette avoids temporal color changes and preserves dark
+// UI backgrounds. Histogram sampling and a 32^3 lookup keep quantization bounded.
+static unsigned paletteBin(unsigned char r,unsigned char g,unsigned char b){return ((unsigned)(r>>3)<<10)|((unsigned)(g>>3)<<5)|(b>>3);}
+static void displayPalette(const std::vector<std::vector<unsigned char>>& frames,std::array<Color,256>& palette,std::array<unsigned char,32768>& lookup){
+    struct Bin {uint64_t count=0,r=0,g=0,b=0;};std::vector<Bin> bins(32768);
+    for(const auto& frame:frames){size_t pixels=frame.size()/4,step=std::max<size_t>(1,pixels/16000);for(size_t p=0;p<pixels;p+=step){auto& bin=bins[paletteBin(frame[p*4],frame[p*4+1],frame[p*4+2])];++bin.count;bin.r+=frame[p*4];bin.g+=frame[p*4+1];bin.b+=frame[p*4+2];}}
+    std::vector<Color> colors(32768);std::vector<unsigned> occupied;
+    for(unsigned i=0;i<bins.size();++i){const auto& b=bins[i];colors[i]=b.count?Color{(unsigned char)(b.r/b.count),(unsigned char)(b.g/b.count),(unsigned char)(b.b/b.count)}:Color{(unsigned char)(((i>>10)&31)*8+4),(unsigned char)(((i>>5)&31)*8+4),(unsigned char)((i&31)*8+4)};if(b.count)occupied.push_back(i);}
+    struct Box {std::vector<unsigned> bins;int axis=0;double score=0;};
+    auto makeBox=[&](std::vector<unsigned> indices){Box box;box.bins=std::move(indices);if(box.bins.size()<2)return box;int low[3]={255,255,255},high[3]={0,0,0};uint64_t weight=0;for(auto i:box.bins){weight+=bins[i].count;for(int c=0;c<3;++c){low[c]=std::min(low[c],(int)colors[i][c]);high[c]=std::max(high[c],(int)colors[i][c]);}}for(int c=1;c<3;++c)if(high[c]-low[c]>high[box.axis]-low[box.axis])box.axis=c;box.score=(high[box.axis]-low[box.axis])*std::sqrt((double)weight);return box;};
+    std::vector<Box> boxes;boxes.push_back(makeBox(std::move(occupied)));
+    while(boxes.size()<256){auto best=std::max_element(boxes.begin(),boxes.end(),[](const Box& a,const Box& b){return a.score<b.score;});if(best==boxes.end()||best->score<=0)break;auto ids=std::move(best->bins);int axis=best->axis;std::sort(ids.begin(),ids.end(),[&](unsigned a,unsigned b){return colors[a][axis]<colors[b][axis];});uint64_t total=0,partial=0;for(auto i:ids)total+=bins[i].count;size_t split=1;for(size_t i=0;i+1<ids.size();++i){partial+=bins[ids[i]].count;split=i+1;if(partial*2>=total)break;}std::vector<unsigned> right(ids.begin()+split,ids.end());ids.resize(split);*best=makeBox(std::move(ids));boxes.push_back(makeBox(std::move(right)));}
+    for(size_t i=0;i<palette.size();++i){if(i>=boxes.size()){palette[i]=palette[0];continue;}uint64_t n=0,r=0,g=0,b=0;for(auto index:boxes[i].bins){const auto& bin=bins[index];n+=bin.count;r+=bin.r;g+=bin.g;b+=bin.b;}palette[i]={(unsigned char)(r/std::max<uint64_t>(n,1)),(unsigned char)(g/std::max<uint64_t>(n,1)),(unsigned char)(b/std::max<uint64_t>(n,1))};}
+    for(unsigned i=0;i<lookup.size();++i){unsigned winner=0;int distance=1000000;for(unsigned p=0;p<boxes.size();++p){int r=(int)colors[i][0]-palette[p][0],g=(int)colors[i][1]-palette[p][1],b=(int)colors[i][2]-palette[p][2];int d=2*r*r+4*g*g+3*b*b;if(d<distance){distance=d;winner=p;}}lookup[i]=(unsigned char)winner;}
+}

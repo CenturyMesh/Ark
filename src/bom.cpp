@@ -56,6 +56,12 @@ V validatePartMetadata(const V& value){
     if(text(out,"sourcing_status")=="selected")require(!text(out,"source_url").empty()&&(!text(out,"manufacturer_part_number").empty()||!text(out,"supplier_part_number").empty()),"Selected sourcing requires a source URL and an explicit manufacturer or supplier reference");
     return out;
 }
+V patchPartMetadata(const V& current,const V& patch){
+    require(patch.t==V::Obj&&!patch.obj.empty(),"part_patch must be a nonempty object; use part:null to clear the entire record");
+    V merged=current.t==V::Obj?current:V::makeObj();
+    for(const auto& entry:patch.obj)merged.set(entry.first,entry.second);
+    return validatePartMetadata(merged);
+}
 V partMetadataSchema(){
     V schema=V::makeObj(),props=V::makeObj();schema.set("type",V::makeStr("object"));schema.set("additionalProperties",V::makeBool(false));
     for(const auto* key:fields){V item=V::makeObj();item.set("type",V::makeStr("string"));item.set("maxLength",V::makeNum(2048));item.set("pattern",V::makeStr("^[^\\x00-\\x1F]*$"));props.set(key,item);}
@@ -176,8 +182,8 @@ void appendBomTools(V& tools){
     for(auto& tool:tools.arr){
         const auto name=text(tool,"name");
         if(name=="bom_review"){
-            auto reviewSchema=*tool.find("inputSchema"),reviewProps=*reviewSchema.find("properties");V completion;arkjson::parse(R"({"type":"string","enum":["project","task"],"description":"Default project. Explicit task + ids requires a host task and coverage of every bom_inspect.task_scope affected definition; never approves the global BOM."})",completion);reviewProps.set("completion",completion);reviewSchema.set("properties",reviewProps);tool.set("inputSchema",reviewSchema);
-            tool.set("description",V::makeStr(text(tool,"description")+" For an explicitly limited user task, completion:task plus ids can satisfy Studio task finalization when the host-observed affected definitions are all covered. Unrelated preexisting incomplete parts remain pending. Removals require project review; never use task completion for a requested whole-project deliverable."));
+            auto reviewSchema=*tool.find("inputSchema"),reviewProps=*reviewSchema.find("properties");V completion;arkjson::parse(R"({"type":"string","enum":["project","task"],"description":"Default project. Explicit task requires a host task; omitted ids selects every affected definition (0..64). Explicit ids must cover every affected definition; never approves the global BOM."})",completion);reviewProps.set("completion",completion);reviewSchema.set("properties",reviewProps);tool.set("inputSchema",reviewSchema);
+            tool.set("description",V::makeStr(text(tool,"description")+" For an explicitly limited user task, completion:task can satisfy Studio task finalization; omit ids to select the host-observed affected set (0..64, including no changed definitions for display-only work) when the host-observed affected definitions are all covered. Unrelated preexisting incomplete parts remain pending. Removals require project review; never use task completion for a requested whole-project deliverable."));
         }else if(name=="bom_inspect")tool.set("description",V::makeStr(text(tool,"description")+" task_scope reports host-observed affected/removed definitions since this Studio task began; ids does not narrow that coverage report."));
     }
 }

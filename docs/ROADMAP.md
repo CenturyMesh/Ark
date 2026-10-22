@@ -8,6 +8,25 @@ also handle shallow corners with explicit tighter tolerances and measured surfac
 error. See [055D evidence](iterations/055D.md).
 Broader milestones remain **Parcial**.
 
+The additional 055D **A.02 / D.02** BOM recovery work is **Verificado no escopo** locally (13 selected suites): incremental
+metadata patches, concrete completion diagnostics, explicit input/review-pending
+states, and retained task scope on Resume. Detailed/global completion requirements
+remain enforced; see [BOM recovery](BOM.md) and [055D evidence](iterations/055D.md).
+
+The 055D local **A.02 / D.02** UI follow-up is **Verificado no escopo** for a
+readable, selectable agent conversation, pinned goal and explicit execution
+states. Ten selected native suites and conversation captures passed local
+verification; see [055D evidence](iterations/055D.md) and the
+[conversation contract](ASSISTANT_CONVERSATION.md). Broader agent milestones
+remain **Parcial**.
+
+The same development iteration adds scoped **A.02 / B.04 / D.02 / E.01** media
+authoring: local PNG/GIF/MP4 composition, a credential-explicit Images API entry,
+and session-local GIF/LED display binding to baked motion. Local composition and
+playback tests are **Verificado no escopo**; live provider access depends on the
+configured API key, and persistent/hardware synchronization is not claimed.
+See [media authoring](MEDIA_AUTHORING.md) and [055D evidence](iterations/055D.md).
+
 054B is **Verificado no escopo** locally for **A.02/B.04/B.05/C.04/D.02**: editable electrical
 schematics, sheet BOM/DXF, part and assembly families with Eye visibility filters,
 and native cable display at baked poses. See the [054B contract](DISCIPLINES_SCHEMATICS_054B.md)

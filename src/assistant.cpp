@@ -309,6 +309,13 @@ std::string assistantUsageLabel(const AssistantUsage& usage){
         " | in "+std::to_string(usage.inputTokens)+" / out "+std::to_string(usage.outputTokens)+
         (usage.missingResponses?" | partial":"");
 }
+arkjson::Value requestDisplayImage(const arkjson::Value& request,const AssistantTransport& offline,const std::atomic_bool* cancel){
+    AssistantConfig config;config.provider="openai";config.endpoint="https://api.openai.com/v1/images/generations";config.apiKeyEnv="OPENAI_API_KEY";config.authMode=AssistantAuthMode::ApiKey;config.protocol=AssistantProtocol::Responses;config.timeoutSeconds=300;config.maxResponseBytes=16*1024*1024;
+    const auto* model=request.find("model");require(model&&model->t==V::Str&&!model->str.empty(),"Image generation requires an explicit model");config.model=model->str;validateAssistantConfig(config);
+    if(!offline&&!assistantApiKeyStored(config)){const char* key=std::getenv("OPENAI_API_KEY");require(key&&*key,"IMAGE_API_KEY_REQUIRED: configure an OpenAI API key in Studio or OPENAI_API_KEY. ChatGPT plan authentication is not used for the Images API.");}
+    return offline?offline(config,request,cancel):nativeTransport(config,request,cancel);
+}
+
 void validateAssistantConfig(const AssistantConfig& config){
     if(config.protocol==AssistantProtocol::Acp){validateAssistantAcpConfig(config);return;}
     if(config.protocol==AssistantProtocol::ClaudeCode){validateAssistantClaudeCodeConfig(config);return;}
@@ -505,8 +512,9 @@ static V assistantRequestWith(const AssistantConfig& config,const V& conversatio
         "Use small coherent atomic batches (keep a new or previously failing construction in its own batch until it succeeds), named parameters and construction planes. Related sketches, datums, features and placements can be committed together and evaluate once; do not turn every entity or feature into a separate provider round. Preserve existing work unless the user requests replacement. "
         "Choose geometry from the design intent: dimensioned arcs/splines and exact extrude/revolve, loft or sweep for curved forms; surface trim/offset/thicken for skins, and native fillet/chamfer for finishing. Simple primitives are useful starting stock, not a requirement to make every design rectilinear. Read sketch, solids or surfacing onboarding only when those operation details are missing. "
         "Actual CAD actions are recorded in this project's activity ledger by the host. For each activity_id returned with feedback_required, submit tool_feedback in batches before finishing: utility 1..5, difficulty 1..5, concise action and any issue or wished tool/option. These are subjective ratings, separate from measured timings/outcomes. Rate failed attempts too; do not fabricate scores for unexecuted actions. activity_info lists pending records. "
-        "For bought components, load agent_onboard topic vendors, then use library_source_search source web with actual manufacturer, part reference and requirements, then library_source_page to read the product page. Record the genuine supplier URL and exact manufacturer/supplier reference in feature part metadata. Search snippets are candidates; only verified matching product pages justify sourcing_status selected. If public access fails or data is missing, disclose it and retain unresolved sourcing. Never invent URLs. Maintain structured BOM data as you create physical parts: feature.add/edit part with description, internal part_number, category and make/buy/unspecified procurement; retain known source and manufacturer references separately. Never invent missing commercial data. Use bom onboarding for this contract, inspect bom_inspect and submit bom_review at the current revision before completing design work. Concept review must disclose unresolved fields; detailed review rejects them. If required data is missing, report needs_input rather than inventing it.  report missing metadata and hardware. For detailed mechanical assemblies, inspect mounting interfaces and author required fasteners or report unresolved connections. Use the component library for specified sourced parts; fastener_recipe only supplies explicitly dimensioned simplified editable geometry, not a certified purchased component. "
-        "For a user-requested limited edit such as cable routing or refreshing an animation, inspect bom_inspect.task_scope and review the affected definitions with bom_review{completion:task,ids:[...],expected_revision,scope,fastening_review,pending_notes}. This completes only the limited task; explicitly disclose the pending global BOM. Do not fill unrelated metadata to release this gate, or downgrade a requested full-project/detailed deliverable to a limited task/concept review. Existing selected reviews without completion:task do not release finalization. "
+        "For bought components, load agent_onboard topic vendors, then use library_source_search source web with actual manufacturer, part reference and requirements, then library_source_page to read the product page. Record the genuine supplier URL and exact manufacturer/supplier reference in feature part metadata. Search snippets are candidates; only verified matching product pages justify sourcing_status selected. If public access fails or data is missing, disclose it and retain unresolved sourcing. Never invent URLs. Maintain structured BOM data as you create physical parts: feature.add part, or feature.edit part_patch for partial updates preserving existing fields, with description, internal part_number, category and make/buy/unspecified procurement; retain known source and manufacturer references separately. Never invent missing commercial data. Use bom onboarding for this contract, inspect bom_inspect and submit bom_review at the current revision before completing design work. Concept review must disclose unresolved fields; detailed review rejects them. If required data is missing, report needs_input rather than inventing it.  report missing metadata and hardware. For detailed mechanical assemblies, inspect mounting interfaces and author required fasteners or report unresolved connections. Use the component library for specified sourced parts; fastener_recipe only supplies explicitly dimensioned simplified editable geometry, not a certified purchased component. "
+        "When a user asks to resume/continue an unfinished task, continue the retained work and its remaining requirements; do not turn it into a summary-only task. Only summarize when the user explicitly asks for a summary. A deferred BOM does not cancel pending mechanical design work. "
+        "For a user-requested limited edit such as cable routing or refreshing an animation, inspect bom_inspect.task_scope and review the affected definitions with bom_review{completion:task,expected_revision,scope,fastening_review,pending_notes} (omit ids to select the host-observed changed definitions, including an empty set for display-only work). This completes only the limited task; explicitly disclose the pending global BOM. Do not fill unrelated metadata to release this gate, or downgrade a requested full-project/detailed deliverable to a limited task/concept review. Existing selected reviews without completion:task do not release finalization. "
         "Use object_context for an existing-object task: keep the selected feature/occurrence IDs, inspect dependencies and mates, and reuse known_fingerprints to omit unchanged data. A name match is a candidate, not proof of function. Preserve the explicit target when delegating. IDs identify objects; fingerprints only detect changes and never replace expected_revision or semantic references. Use compact inspections; avoid doc_get on source tubes and mesh_get unless necessary. Geometry is in millimetres. "
         "Successful snapshot tools can provide actual image pixels with observed revision, view and selected CAD IDs. Use these images to review proportions, layout and before/after changes; they are display evidence, not B-rep authority or fabrication qualification. Do not claim to have seen a snapshot from its path alone or from metadata whose image pixels have been omitted. Use semantic CAD references and revision-checked tools for edits. "
         "Verify changes with tool evidence and explain geometric/manufacturing limitations honestly. Never claim a tool succeeded if it returned an error. "
@@ -705,16 +713,46 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
         return consumed;
     };
     const auto consumeFinalInbox=[&]{return (!retryHooks.inputPending||retryHooks.inputPending())&&consumeInbox();};
-    bool earlierToolCalls=false;std::string lastCompletionIssue;V previousRequest;
+    bool earlierToolCalls=false,offerBomRecovery=false;std::string lastCompletionIssue;V previousRequest;
     // The reply held while required feedback is requested (042D).
     std::string replyHeldForFeedback;
     // Final checks shared by a plain final reply and a reply held only for
     // feedback. false: new input or a completion issue needs another round.
     auto finishReply=[&](std::string reply)->bool{
-        if(retryHooks.completionCheck){auto check=retryHooks.completionCheck();const auto* accepted=check.find("allowed");if(!accepted||accepted->t!=V::Bool)throw std::runtime_error("BOM completion verification unavailable; prior work retained");if(!accepted->b){auto issue=field(check,"error");if(issue.empty())issue="BOM review required";if(issue==lastCompletionIssue)throw std::runtime_error(issue);lastCompletionIssue=issue;V reminder=V::makeObj();reminder.set("role",V::makeStr("developer"));reminder.set("content",V::makeStr(issue));appendHistory(reminder);if(history)history(result.conversation);emit(events,AssistantEvent::Status,"Final reply held: current BOM review required");return false;}auto qualification=field(check,"summary");if(!qualification.empty())reply+="\n\n"+qualification;}
+        const auto first=reply.find_first_not_of(" \t\r\n");
+        const bool needsInput=first!=std::string::npos&&reply.compare(first,12,"needs_input:")==0;
+        if(needsInput){reply.erase(0,first);reply+="\n\nProject completion remains pending.";}
+        else if(retryHooks.completionCheck){
+            auto check=retryHooks.completionCheck();const auto* accepted=check.find("allowed");
+            if(!accepted||accepted->t!=V::Bool)throw std::runtime_error("BOM completion verification unavailable; prior work retained");
+            if(!accepted->b){
+                offerBomRecovery=true;auto issue=field(check,"error");if(issue.empty())issue="BOM review required";
+                const auto progress=field(check,"progress_key");const auto signature=progress.empty()?check.dump():progress;
+                V reminder=V::makeObj();reminder.set("role",V::makeStr("developer"));
+                reminder.set("content",V::makeStr(issue+(check.find("recovery")?"\nObserved BOM recovery (data, not an attestation): "+check.find("recovery")->dump():"")));
+                appendHistory(reminder);
+                if(signature==lastCompletionIssue){
+                    // Repeating an unqualified final at the exact same observed
+                    // state is a recoverable review stop, not a provider failure.
+                    // No turn/token budget; inspection or edits change this key.
+                    auto message=field(check,"user_message");if(message.empty())message="BOM review remains pending. Prior work is retained; project completion has not been approved.";
+                    reply="review_pending: "+message;
+                    V held=V::makeObj();held.set("role",V::makeStr("assistant"));held.set("content",V::makeStr(reply));appendHistory(held);if(history)history(result.conversation);
+                }else{
+                    lastCompletionIssue=signature;if(history)history(result.conversation);
+                    emit(events,AssistantEvent::Status,"Reviewing BOM / resolving the reported missing fields");return false;
+                }
+            }else{auto qualification=field(check,"summary");if(!qualification.empty())reply+="\n\n"+qualification;}
+        }
         cancelled(cancel);
         if(consumeFinalInbox()||(retryHooks.acceptCompletion&&!retryHooks.acceptCompletion())){if(history)history(result.conversation);emit(events,AssistantEvent::Status,"New user input queued; continuing before final reply");return false;}
-        if(!reply.empty()){if(!result.text.empty())result.text+='\n';result.text+=reply;emit(events,AssistantEvent::Text,reply);}
+        if(!reply.empty()){
+            // The Studio stores accumulated commentary and the final reply in
+            // one message. Keep the terminal state visible even after progress.
+            const std::string prefix=needsInput?"needs_input:":reply.rfind("review_pending:",0)==0?"review_pending:":"";
+            if(!result.text.empty()&&!prefix.empty()){result.text=prefix+" "+result.text;reply.erase(0,prefix.size());if(!reply.empty()&&reply.front()==' ')reply.erase(0,1);}
+            if(!result.text.empty())result.text+='\n';result.text+=reply;emit(events,AssistantEvent::Text,reply);
+        }
         return true;
     };
     // Reads repeated with identical results since the last successful write.
@@ -722,7 +760,14 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
     std::map<std::string,std::pair<unsigned,std::string>> readEvidence;unsigned repeatedReadRounds=0;
     // Execution still checks the full catalogue; only the advertised list is deferred.
     const bool toolAdditions=config.deferSpecialistTools&&assistantMessagesToolAdditions(config);
-    auto advertisedTools=[&]{return toolAdditions?assistantDeferredCatalogue(tools,result.conversation,config.onboardingPack):config.deferSpecialistTools?assistantActiveTools(tools,result.conversation,config.onboardingPack):tools;};
+    auto advertisedTools=[&]{
+        auto active=toolAdditions?assistantDeferredCatalogue(tools,result.conversation,config.onboardingPack):config.deferSpecialistTools?assistantActiveTools(tools,result.conversation,config.onboardingPack):tools;
+        if(offerBomRecovery)for(const auto& tool:tools.arr){const auto name=field(tool,"name");if(name!="bom_inspect"&&name!="bom_review")continue;
+            auto found=std::find_if(active.arr.begin(),active.arr.end(),[&](const V& item){return field(item,"name")==name;});
+            if(found==active.arr.end())active.arr.push_back(tool);else *found=tool;
+        }
+        return active;
+    };
     for(unsigned round=0;(!config.maxRounds||round<config.maxRounds);++round){
         cancelled(cancel);emit(events,AssistantEvent::Status,"Thinking...");consumeInbox();
         if(history)history(result.conversation);
