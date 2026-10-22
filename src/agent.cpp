@@ -1481,8 +1481,14 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
             if(saved.derivedGeometry){
                 // Optional geometry cache receipt; omitted bodies recompute from authoring on open.
                 V geometry=V::makeObj();geometry.set("status",V::makeStr(saved.derivedOmittedEntries?"partial":"saved"));geometry.set("entries_saved",V::makeNum((double)saved.derivedEntries));geometry.set("bytes_saved",V::makeNum((double)saved.derivedBytes));geometry.set("entries_omitted",V::makeNum((double)saved.derivedOmittedEntries));geometry.set("bytes_omitted",V::makeNum((double)saved.derivedOmittedBytes));geometry.set("capacity_bytes",V::makeNum((double)saved.derivedCapacityBytes));
-                if(saved.derivedOmittedEntries)geometry.set("omitted_reason",V::makeStr("Saved geometry is an optional cache with a 128 MiB capacity. Authoring was saved in full; omitted bodies are evaluated from authoring on the next open."));
+                // 051A: one zstd pack holds geometry and baked frames; stored_bytes is its compressed size.
+                geometry.set("encoding",V::makeStr("zstd_pack"));geometry.set("stored_bytes",V::makeNum((double)saved.derivedStoredBytes));geometry.set("stored_capacity_bytes",V::makeNum((double)maxDocumentDerivedStoredBytes));
+                if(saved.derivedOmittedEntries)geometry.set("omitted_reason",V::makeStr("Saved geometry is an optional cache with a 256 MiB decoded and 128 MiB compressed capacity. Authoring was saved in full; omitted bodies are evaluated from authoring on the next open."));
                 r.set("saved_geometry",geometry);
+                V file=V::makeObj();file.set("physical_bytes",V::makeNum((double)saved.physicalBytes));file.set("compacted",V::makeBool(saved.compacted));
+                if(saved.compacted)file.set("bytes_before_compaction",V::makeNum((double)saved.bytesBeforeCompaction));
+                if(!saved.compactionSkipped.empty())file.set("compaction_skipped",V::makeStr(saved.compactionSkipped));
+                r.set("container",file);
                 if(motionReceiptsRequireDocumentVersion49(document)){V frames=V::makeObj();frames.set("entries_saved",V::makeNum((double)saved.motionFrameEntries));frames.set("bytes_saved",V::makeNum((double)saved.motionFrameBytes));frames.set("entries_omitted",V::makeNum((double)saved.motionFrameOmittedEntries));frames.set("entries_not_cached",V::makeNum((double)saved.motionFrameNotCached));
                     frames.set("note",V::makeStr("Baked frames are derived data saved in the optional derived section. Omitted or uncached frames are re-baked on demand and verified against each receipt's frames_sha256."));r.set("saved_motion_frames",frames);}
             }

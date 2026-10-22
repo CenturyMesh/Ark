@@ -27,7 +27,24 @@ add_library(ark-sqlite STATIC third_party/sqlite/sqlite3.c)
 target_include_directories(ark-sqlite PUBLIC third_party/sqlite)
 target_compile_definitions(ark-sqlite PRIVATE SQLITE_ENABLE_FTS5=1 SQLITE_THREADSAFE=1 SQLITE_OMIT_LOAD_EXTENSION=1 SQLITE_DQS=0 SQLITE_DEFAULT_FOREIGN_KEYS=1)
 target_link_libraries(ark-sqlite PUBLIC Threads::Threads)
+# 051A: unmodified zstd 1.5.7 library sources for the derived-section pack.
+# Single-threaded, no assembly, no legacy formats and no dictionary builder.
+add_library(ark-zstd STATIC
+  third_party/zstd/lib/common/debug.c third_party/zstd/lib/common/entropy_common.c third_party/zstd/lib/common/error_private.c
+  third_party/zstd/lib/common/fse_decompress.c third_party/zstd/lib/common/pool.c third_party/zstd/lib/common/threading.c
+  third_party/zstd/lib/common/xxhash.c third_party/zstd/lib/common/zstd_common.c
+  third_party/zstd/lib/compress/fse_compress.c third_party/zstd/lib/compress/hist.c third_party/zstd/lib/compress/huf_compress.c
+  third_party/zstd/lib/compress/zstd_compress.c third_party/zstd/lib/compress/zstd_compress_literals.c
+  third_party/zstd/lib/compress/zstd_compress_sequences.c third_party/zstd/lib/compress/zstd_compress_superblock.c
+  third_party/zstd/lib/compress/zstd_double_fast.c third_party/zstd/lib/compress/zstd_fast.c third_party/zstd/lib/compress/zstd_lazy.c
+  third_party/zstd/lib/compress/zstd_ldm.c third_party/zstd/lib/compress/zstd_opt.c third_party/zstd/lib/compress/zstd_preSplit.c
+  third_party/zstd/lib/compress/zstdmt_compress.c
+  third_party/zstd/lib/decompress/huf_decompress.c third_party/zstd/lib/decompress/zstd_ddict.c
+  third_party/zstd/lib/decompress/zstd_decompress.c third_party/zstd/lib/decompress/zstd_decompress_block.c)
+target_include_directories(ark-zstd PUBLIC third_party/zstd/lib)
+target_compile_definitions(ark-zstd PRIVATE ZSTD_DISABLE_ASM=1 ZSTD_LEGACY_SUPPORT=0)
 add_library(ark STATIC
+  src/derived_pack_051a.cpp
   src/curve_pattern_044b.cpp src/media_044b.cpp
   src/modeling_031b.cpp
   src/geometry_storage_032d.cpp
@@ -94,7 +111,7 @@ if(ARK_WITH_OCCT)
   target_compile_definitions(ark-authoring-022b-contract-tests PRIVATE ARK_022B_NATIVE_TESTS=1)
   add_dependencies(ark-authoring-022b-contract-tests ark-occt-worker)
 endif()
-target_link_libraries(ark PUBLIC Threads::Threads PRIVATE ark-sqlite)
+target_link_libraries(ark PUBLIC Threads::Threads PRIVATE ark-sqlite ark-zstd)
 if(WIN32)
   target_link_libraries(ark PRIVATE bcrypt normaliz)
 endif()
@@ -344,6 +361,11 @@ add_executable(ark-document-container-tests tests/document_container_tests.cpp)
 target_link_libraries(ark-document-container-tests PRIVATE ark ark-sqlite)
 add_test(NAME document-container COMMAND ark-document-container-tests)
 set_tests_properties(document-container PROPERTIES TIMEOUT 60)
+# 051A derived pack: exact round trip, hostile frames, legacy rows, capacity tail and compaction.
+add_executable(ark-derived-pack-051a-tests tests/derived_pack_051a_tests.cpp)
+target_link_libraries(ark-derived-pack-051a-tests PRIVATE ark ark-sqlite ark-zstd)
+add_test(NAME derived-pack-051a COMMAND ark-derived-pack-051a-tests)
+set_tests_properties(derived-pack-051a PROPERTIES TIMEOUT 300)
 add_executable(ark-iteration-history-tests tests/iteration_history_tests.cpp)
 target_link_libraries(ark-iteration-history-tests PRIVATE ark)
 add_test(NAME iteration-history COMMAND ark-iteration-history-tests)

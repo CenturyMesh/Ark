@@ -12,11 +12,14 @@ This physical version is independent of the authored document version, including
 the version-27 iteration journal. The existing C++ document parser, authoring
 rules, journal checks and exact geometry authority remain the semantic contract.
 Container version 2 (`user_version` 2) adds an optional `ark_derived` table of
-saved native geometry, with its own 128 MiB capacity and a 256 MiB physical
-file limit; see [formats](FORMATS.md). Since 049A it also carries cached
-baked-motion frames, verified against their receipts on open
-([derived bakes](DERIVED_BAKES_049A.md)); the table schema is unchanged. The 64 MiB physical cap below applies to
-version 1; the authoring limits apply to both versions.
+saved native geometry, with a 256 MiB decoded and 128 MiB compressed capacity
+and a 256 MiB physical file limit; see [formats](FORMATS.md). Since 049A it also
+carries cached baked-motion frames, verified against their receipts on open
+([derived bakes](DERIVED_BAKES_049A.md)). Since 051A the whole section is one
+Zstandard pack split across `pack1.<manifest>.<index>` rows; per-entry rows from
+earlier runtimes still load, and the table schema and container version are
+unchanged. The 64 MiB physical cap below applies to version 1; the authoring
+limits apply to both versions.
 
 ## Storage and incremental writes
 
@@ -56,6 +59,17 @@ process interrupted after dirty pages reach disk leaves a rollback journal;
 the next load permits SQLite's recovery before reading the validated snapshot.
 This recovery requires write access to the file/directory when a hot journal
 exists. An ordinary clean container remains readable with read-only access.
+
+SQLite keeps the pages freed by a save for later reuse; the file does not
+shrink by itself. Since 051A, when a committed incremental save leaves at least
+a quarter of the file and at least 1 MiB free, the same connection writes a
+compact copy with `VACUUM INTO` to a unique sibling stage. That copy is loaded
+with the normal checked reader and must reproduce the committed authoring hash
+and derived entry count; only then does an atomic replacement publish it. A
+failed verification or replacement (for example, another process holding the
+file open on Windows) removes the stage and keeps the committed incremental
+save. The window between closing the connection and the replacement is not
+locked; ARK does not support concurrent writers to one document.
 
 ## Limits and rejection rules
 
