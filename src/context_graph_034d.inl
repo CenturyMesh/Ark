@@ -9,7 +9,7 @@ struct ProjectGraph {
     std::set<std::tuple<std::string,std::string,std::string,std::string>> edges;
     void node(const std::string& key,const std::string& kind,const V& authored){
         V row=V::makeObj(),facts=V::makeObj();row.set("key",V::makeStr(key));row.set("kind",V::makeStr(kind));row.set("name",V::makeStr(graphText(authored,"name")));source[key]=authored;
-        for(const char* field:{"type","expr","p","material","suppressed","fixed","visible","pattern","density","density_g_cm3","url","host","authority","binding","ref","net"})if(const auto* value=authored.find(field))facts.set(field,contextCompact(*value));
+        for(const char* field:{"type","expr","p","material","suppressed","fixed","visible","pattern","density","density_g_cm3","url","host","authority","binding","ref","net","owner_feature","local_name"})if(const auto* value=authored.find(field))facts.set(field,contextCompact(*value));
         if(const auto* part=authored.find("part")){V metadata=V::makeObj();for(const char* field:{"part_number","description","procurement","specification","manufacturer","manufacturer_part_number","supplier","supplier_part_number","sourcing_status"})if(const auto* value=part->find(field);value&&value->t==V::Str)metadata.set(field,V::makeStr(graphClip(value->str)));facts.set("part",metadata);}
         if(const auto* native=authored.find("native"))if(const auto* op=native->find("op"))facts.set("operation",*op);
         if(const auto* native=authored.find("native")){V program=V::makeObj();for(const char* field:{"route_mode","profile","start_tangent","end_tangent","auto_route"})if(const auto* value=native->find(field))program.set(field,contextCompact(*value));for(const char* field:{"waypoints","obstacles","components","pads","traces","vias"})if(const auto* value=native->find(field);value&&value->t==V::Arr)program.set(std::string(field)+"_count",V::makeNum(value->arr.size()));if(!program.obj.empty())facts.set("program",program);}
@@ -19,6 +19,7 @@ struct ProjectGraph {
         if(from!=to&&nodes.count(from)&&nodes.count(to))edges.emplace(from,relation,to,basis);
     }
     void scan(const std::string& from,const V& value,const std::string& key=""){
+        if(key=="local_name"||key=="owner_feature")return;
         if(value.t==V::Str){
             if(key=="sketch"||key=="source_sketch"||key=="sections"||key=="guides"||key=="profile"||key=="path"||key=="section")edge(from,"uses_sketch","sketches:"+value.str);
             if(key=="plane"||key=="datum"||key=="parent")edge(from,"uses_plane","planes:"+value.str);
@@ -48,6 +49,7 @@ V buildProjectGraph(const V& authored,const std::string& scope){
     if(const auto* rows=authored.find("mates"))for(const auto& row:rows->arr)graph.node("mate:"+std::to_string((u64)row.find("id")->num),"mate",row);
     graphDomains035B(graph);
     for(const auto& item:graph.source){const auto& key=item.first;const auto& row=item.second;graph.scan(key,row);
+        if(key.rfind("sketches:",0)==0)if(const auto* owner=row.find("owner_feature"))graph.edge(key,"owned_by_definition",contextKey((u64)owner->num)); // Ownership is metadata, not a recompute dependency.
         if(key.rfind("planes:",0)==0)if(const auto* support=row.find("support");support&&graphText(*support,"kind")=="bisector")for(const char* anchor:{"first","second"})if(const auto* value=support->find(anchor);value&&value->t==V::Str)graph.edge(key,"uses_plane","planes:"+value->str);
         if(key.rfind("assembly:",0)==0){if(const auto* parent=row.find("parent"))graph.edge(key,"in_group","assembly:"+std::to_string((u64)parent->num));if(const auto* feature=row.find("feature"))graph.edge(key,"places",contextKey((u64)feature->num));}
         if(key.rfind("mate:",0)==0)for(const char* end:{"a","b"})if(const auto* node=row.find(end))graph.edge(key,"constrains","assembly:"+std::to_string((u64)node->num));
@@ -73,7 +75,7 @@ std::string authoringStamp(const Document& document){
     section("materials",document.materials.size());for(const auto& material:document.materials){add(material.name);addNumber(material.densityGcm3);add(appearanceToJson(material.appearance).dump());add(material.physical.dump());}
     section("planes",document.planes.size());for(const auto& plane:document.planes){add(plane.name);add(plane.parent);add(plane.kind);addMap(plane.p);add(plane.support.dump());}
     section("canvases",document.canvases.size());for(const auto& canvas:document.canvases){add(canvas.name);add(canvas.plane);add(canvas.path);add(canvas.asset);add(canvas.width);add(canvas.height);addNumber(canvas.opacity);}
-    section("sketches",document.sketches.size());for(const auto& sketch:document.sketches){add(sketch.name);add(sketchToJson(sketch.sk));}
+    section("sketches",document.sketches.size());for(const auto& sketch:document.sketches){add(sketch.name);add(std::to_string(sketch.ownerFeature));add(sketchToJson(sketch.sk));}
     section("features",document.features.size());for(const auto& feature:document.features){
         add(std::to_string(feature.id));add(featureTypeName(feature.type));add(feature.name);add(std::to_string(feature.opInt));add(feature.suppressed?"1":"0");add(feature.material);add(feature.manufacturingRoute);
         add(feature.part.dump());add(feature.appearance.dump());add(feature.manufacturingProcess.dump());add(feature.nativeSpec.dump());add(feature.sourceData.dump());addMap(feature.p);

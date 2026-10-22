@@ -74,7 +74,7 @@ void testSketchCapacity050B(){
     CHECK(!documentFromJson(oversized.dump(),preserved,&error));
     CHECK(error=="document capacity exceeded"&&documentToJson(preserved)==baseline);
     auto onboarding=s.call("agent_onboard",json(R"({"topic":"sketch","detail":"guide"})"));
-    CHECK(!failed(onboarding)&&onboarding.dump().find("256 sketches per document")!=std::string::npos);
+    CHECK(!failed(onboarding)&&onboarding.dump().find("256 sketches per scope")!=std::string::npos);
 }
 void testDocApplyDiscoveryContract(){
     V advertised,previewSchema;
@@ -192,7 +192,7 @@ int main(){
     CHECK(documentFromJson(R"({"version":35,"features":[]})",invalid,&error));
     CHECK(documentFromJson(R"({"version":37,"features":[]})",invalid,&error));
     CHECK(documentFromJson(R"({"version":48,"features":[]})",invalid,&error));
-    CHECK(!documentFromJson(R"({"version":50,"features":[]})",invalid,&error));
+    CHECK(!documentFromJson(R"({"version":51,"features":[]})",invalid,&error));
     CHECK(error.find("unsupported document version")!=std::string::npos);
     CHECK(!documentFromJson(R"({"version":13,"features":[],"sketches":[{"name":"Plate","entities":[{"kind":"wire","name":"Outline","dof":[0,0,10,0,10,10,0,10,0,0],"segments":[{"kind":"line"},{"kind":"line"},{"kind":"line"},{"kind":"line"}]}],"corners":[{"entity":"Outline","corner":1,"kind":"fillet","size":"2"}]}]})",invalid,&error));
     CHECK(error.find("sketch fillets, sketch chamfers, or mates across assembly groups require document version 14")!=std::string::npos);

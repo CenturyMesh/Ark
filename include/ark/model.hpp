@@ -267,7 +267,10 @@ struct NamedSketch {
     f64         residual = 0;   // max |residual| after the last solve
     std::string error;
     int freeDofs=0, rank=0;
+    u64 ownerFeature=0; // Stable shared definition ID; zero retains legacy global scope.
+    std::string localName() const;
 };
+std::string sketchReference(u64 ownerFeature,const std::string& localName);
 
 struct DatumPlane {
     std::string name, parent="XY";
@@ -313,8 +316,9 @@ public:
     std::vector<ImageAsset> imageAssets;
     std::vector<ProjectedStamp> stamps;
     NamedSketch* findSketch(const std::string& name);
-    void setSketch(const std::string& name, Sketch sk);   // create or replace
+    void setSketch(const std::string& name, Sketch sk,u64 ownerFeature=0); // local name with explicit owner, otherwise canonical/global reference
     bool removeSketch(const std::string& name);
+    bool validateSketchScopes(std::string& error) const;
 
     // features ----------------------------------------------------------------
     std::vector<Feature> features;

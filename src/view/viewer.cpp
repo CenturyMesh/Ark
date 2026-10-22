@@ -2238,12 +2238,22 @@ static void planeDialog(){
     V c=V::makeObj(),params=V::makeObj();c.set("op",V::makeStr("plane.set"));c.set("name",V::makeStr(fields[0].value));c.set("parent",V::makeStr(fields[1].value));c.set("kind",V::makeStr(trimField(fields[8].value)));for(int i=0;i<6;++i)params.set(keys[i],V::makeStr(fields[i+2].value));c.set("p",params);applyCommand(c);
     if(!g_error){g_activePlane=fields[0].value;g_activeSketch.clear();g_showSketches=true;rebuildSketchOverlay();auto frame=resolvePlane(g_doc,g_activePlane);tTarget=frame.transformPoint({0,0,0});tDist=200;}
 }
+static EditorField sketchOwnerField(){
+    std::vector<std::string> choices{"Document"};for(const auto& feature:g_doc.features)choices.push_back(feature.name+" [#"+std::to_string(feature.id)+"]");
+    return {"Sketch owner",choices.front(),false,choices};
+}
+static u64 sketchOwnerChoice(const std::string& choice){
+    if(choice=="Document")return 0;for(const auto& feature:g_doc.features)if(choice==feature.name+" [#"+std::to_string(feature.id)+"]")return feature.id;
+    throw std::runtime_error("Choose an existing definition as sketch owner");
+}
 static void shapeSketchDialog(int shape){
     using V=arkjson::Value;std::vector<EditorField> fields{{"Sketch name",shape==0?"Profile":shape==1?"Holes":"Freeform"},{"Plane",g_activePlane}};
     if(shape==0)fields.insert(fields.end(),{{"Origin X / mm","0"},{"Origin Y / mm","0"},{"Width / mm","100"},{"Height / mm","60"}});
     else if(shape==1)fields.insert(fields.end(),{{"Centre X / mm","25"},{"Centre Y / mm","30"},{"Radius / mm","4"}});
     else fields.insert(fields.end(),{{"Anchors x,y; x,y ...","-40,0; -25,-25; 25,-25; 40,0; 25,25; -25,25"},{"Closed curve","1",true},{"Tension / 0 to 1","0"},{"Tolerance / mm","0.05"}});
-    if(!editFields(shape==0?"Dimensioned rectangle":shape==1?"Dimensioned circle":"Interpolating spline","Coordinates accept expressions. Existing sketch names append a shape; use a new name for cuts.",fields))return;
+    fields.push_back(sketchOwnerField());
+    if(!editFields(shape==0?"Dimensioned rectangle":shape==1?"Dimensioned circle":"Interpolating spline","Coordinates accept expressions. Sketch names are local to their owner. Repeated occurrences share their definition sketches.",fields))return;
+    const auto owner=sketchOwnerChoice(fields.back().value);const auto localName=fields[0].value;fields[0].value=sketchReference(owner,localName);
     V sketch=V::makeObj();if(auto* found=g_doc.findSketch(fields[0].value))arkjson::parse(sketchToJson(found->sk),sketch);
     if(!sketch.find("entities"))sketch.set("entities",V::makeArr());if(!sketch.find("constraints"))sketch.set("constraints",V::makeArr());sketch.set("plane",V::makeStr(fields[1].value));V entities=*sketch.find("entities");
     auto entity=[&](const char* kind,std::vector<std::string> coordinates){V e=V::makeObj(),dof=V::makeArr();e.set("kind",V::makeStr(kind));e.set("name",V::makeStr(std::string(kind)+std::to_string(entities.arr.size()+1)));for(auto& x:coordinates)dof.arr.push_back(V::makeStr(x));e.set("dof",dof);return e;};
@@ -2252,7 +2262,7 @@ static void shapeSketchDialog(int shape){
     else if(shape==1)entities.arr.push_back(entity("circle",{fields[2].value,fields[3].value,fields[4].value}));
     else {std::vector<std::string> coordinates;std::istringstream pairs(fields[2].value);std::string pair;while(std::getline(pairs,pair,';')){size_t comma=std::string::npos;int depth=0;for(size_t i=0;i<pair.size();++i){if(pair[i]=='(')++depth;else if(pair[i]==')')--depth;else if(pair[i]==','&&depth==0){if(comma!=std::string::npos)throw std::runtime_error("Each anchor has exactly two coordinates");comma=i;}if(depth<0)throw std::runtime_error("Unbalanced anchor expression");}if(comma==std::string::npos||depth)throw std::runtime_error("Each anchor needs x,y; separate anchors with semicolons.");coordinates.push_back(pair.substr(0,comma));coordinates.push_back(pair.substr(comma+1));}
         auto e=entity("spline",coordinates);e.set("closed",V::makeBool(formNumber(fields[3].value)!=0));e.set("tension",V::makeNum(formNumber(fields[4].value)));sketch.set("tolerance",V::makeNum(formNumber(fields[5].value)));entities.arr.push_back(e);}
-    sketch.set("entities",entities);V c=V::makeObj();c.set("op",V::makeStr("sketch.set"));c.set("name",V::makeStr(fields[0].value));c.set("sketch",sketch);applyCommand(c);
+    sketch.set("entities",entities);V c=V::makeObj();c.set("op",V::makeStr("sketch.set"));c.set("name",V::makeStr(owner?localName:fields[0].value));if(owner)c.set("owner_feature",V::makeNum((double)owner));c.set("sketch",sketch);applyCommand(c);
     if(!g_error){g_toolModule=2;g_activeSketch=fields[0].value;g_activePlane=fields[1].value;g_showSketches=true;rebuildSketchOverlay();if(g_sketchBounds.valid()){tTarget=g_sketchBounds.center();tDist=std::max(80.,g_sketchBounds.diagonal()*1.8);}}
 }
 static void basicCurveSketchDialog(int mode){
@@ -3912,7 +3922,7 @@ static void uiAction(int id){
     if(id==98){++g_matePage;return;}
     if(id>=13000&&id<14000){int index=id-13000;if(index<(int)g_doc.mates.size())g_selectedMate=index;return;}
     if(id>=12000&&id<13000){int index=id-12000;if(auto* named=editableSketch();named&&index<(int)named->sk.cons.size()){g_selectedSketchConstraint=index;rebuildSketchOverlay();}return;}
-    if(id>=11000&&id<12000){clearDatumSelection();g_explorerFeature=0;g_selectedExplorerEntity.reset();size_t index=id-11000;if(index<g_doc.sketches.size()){g_activeSketch=g_doc.sketches[index].name;g_activePlane=g_doc.sketches[index].sk.plane;g_selectedSketchConstraint=-1;g_sketchConstraintPage=0;g_showSketches=true;rebuildSketchOverlay();alignSketchCamera();if(g_pickKind==3){SelectionItem item;item.kind="curve";item.owner=g_activeSketch;item.name=g_activeSketch;toggleSelection(item);}}return;}
+    if(id>=60000&&id<64096){clearDatumSelection();g_explorerFeature=0;g_selectedExplorerEntity.reset();size_t index=id-60000;if(index<g_doc.sketches.size()){g_activeSketch=g_doc.sketches[index].name;g_activePlane=g_doc.sketches[index].sk.plane;g_selectedSketchConstraint=-1;g_sketchConstraintPage=0;g_showSketches=true;rebuildSketchOverlay();alignSketchCamera();if(g_pickKind==3){SelectionItem item;item.kind="curve";item.owner=g_activeSketch;item.name=g_activeSketch;toggleSelection(item);}}return;}
     if(id>=10000){focusSourceOpening(id-10000);return;}
     if(id>=9000){g_selectedNotch=id-9000;return;}
     if(id>=500&&id<532){size_t index=(size_t)(id-500);if(index>=g_authStatus.accounts.size()||g_authBusy)return;
@@ -4148,7 +4158,7 @@ static void uiAction(int id){
 
 // Ribbon property sheets use expressions; programmatic smoke actions stay deterministic.
 static void interactiveAction(int id){
-    if(g_editorLivePick&&!(g_editorLivePick==3&&id>=11000&&id<12000)){g_status="Click the model to select, then Apply in the open editor.";return;}
+    if(g_editorLivePick&&!(g_editorLivePick==3&&id>=60000&&id<64096)){g_status="Click the model to select, then Apply in the open editor.";return;}
     try{
     using V=arkjson::Value;std::vector<EditorField> fields;FeatureType type=FeatureType::Box;
     switch(id){
@@ -5014,8 +5024,14 @@ static void drawFrame(HDC hdc){
     }
     if(assembled){section("Feature history",g_doc.features.size(),1);if(g_explorerOpen[1])for(size_t k=0;k<g_doc.features.size();++k){auto& f=g_doc.features[k];explorer.push_back({f.name,explorerOperation(f)+" #"+std::to_string(f.id)+(f.suppressed?" / suppressed":""),16000+(int)k,g_explorerFeature==f.id,2,0,explorerIcon(f)});sheetChildren(&f,g_explorerFeature==f.id,2);}}
     section("Sketches",g_doc.sketches.size(),2);
-    if(g_explorerOpen[2])for(size_t k=0;k<g_doc.sketches.size();++k){auto& sketch=g_doc.sketches[k];size_t users=0;for(const auto& f:g_doc.features){auto drivers=drivingSketchNames(f);if(std::find(drivers.begin(),drivers.end(),sketch.name)!=drivers.end())++users;}
-        explorer.push_back({sketch.name,"Sketch / "+sketch.sk.plane+" / "+std::to_string(users)+" features",11000+(int)k,sketch.name==g_activeSketch&&g_showSketches,2,1,401});}
+    if(g_explorerOpen[2]){
+        std::vector<u64> scopes{0};for(const auto& feature:g_doc.features)scopes.push_back(feature.id);
+        for(u64 owner:scopes){bool heading=false;for(size_t k=0;k<g_doc.sketches.size();++k){const auto& sketch=g_doc.sketches[k];if(sketch.ownerFeature!=owner)continue;
+            if(!heading){const auto* definition=g_doc.find(owner);explorer.push_back({definition?definition->name:"Document",definition?"Shared definition #"+std::to_string(owner):"Global sketches",-1,false,2,3,405});heading=true;}
+            size_t users=0;for(const auto& f:g_doc.features){auto drivers=drivingSketchNames(f);if(std::find(drivers.begin(),drivers.end(),sketch.name)!=drivers.end())++users;}
+            explorer.push_back({sketch.localName(),"Sketch / "+sketch.sk.plane+" / "+std::to_string(users)+" features",60000+(int)k,sketch.name==g_activeSketch&&g_showSketches,3,1,401});
+        }}
+    }
     const bool authoredOrigin=std::any_of(g_doc.planes.begin(),g_doc.planes.end(),[](const auto& p){return p.name=="Origin";});
     section("Reference geometry",4-(authoredOrigin?1:0)+g_doc.planes.size()+g_doc.canvases.size(),3);
     if(g_explorerOpen[3]){const char* builtinNames[]={"Origin","XY","XZ","YZ"};const char* builtinNotes[]={"Starting point","Standard plane","Standard plane","Standard plane"};
@@ -5886,7 +5902,7 @@ static ContextTarget contextTargetAt(int mx,int my,int& body){
             else if(zone.id>=18000&&zone.id<22000){uiAction(zone.id);target=ContextTarget::SheetEntity;}
             else if(zone.id>=16000&&zone.id<17024){uiAction(zone.id);target=ContextTarget::Feature;}
             else if(zone.id>=2000&&zone.id<9000){g_explorerFeature=0;body=zone.id-2000;target=ContextTarget::Body;}
-            else if(zone.id>=11000&&zone.id<12000){size_t index=(size_t)(zone.id-11000);if(index<g_doc.sketches.size()){
+            else if(zone.id>=60000&&zone.id<64096){size_t index=(size_t)(zone.id-60000);if(index<g_doc.sketches.size()){
                     g_activeSketch=g_doc.sketches[index].name;g_activePlane=g_doc.sketches[index].sk.plane;g_showSketches=true;rebuildSketchOverlay();target=ContextTarget::Sketch;}}
             else if(zone.id>=14900&&zone.id<=14903){int index=zone.id-14900;const char* names[]={"Origin","XY","XZ","YZ"};g_selectedDatumName=names[index];if(index>0)g_activePlane=names[index];g_activeSketch.clear();target=ContextTarget::Datum;}
             else if(zone.id>=14000&&zone.id<14128){size_t index=(size_t)(zone.id-14000);if(index<g_doc.planes.size()){
@@ -6080,7 +6096,7 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
                 else if(z.id>=2000&&z.id<9000){selBody=z.id-2000;g_activeSketch.clear();g_showSketches=false;interactiveAction(161);}
                 else if(z.id>=16000&&z.id<17024){interactiveAction(z.id);interactiveAction(161);}
                 else if(z.id>=18000&&z.id<22000){interactiveAction(z.id);if(g_selectedExplorerEntity)interactiveAction(g_selectedExplorerEntity->edit);}
-                else if(z.id>=11000&&z.id<12000){interactiveAction(z.id);interactiveAction(70);}
+                else if(z.id>=60000&&z.id<64096){interactiveAction(z.id);interactiveAction(70);}
                 break;
             }
             if(!inControl&&!g_pickKind&&drawingInView(p.x,p.y)&&!measurementActive()&&!g_sketchDrawing.active&&!g_sketchEditing.active&&!g_directAuthoring.active){int body=pickBody(p.x,p.y);if(body>=0)exposeSolidDimensions(body);}
@@ -7061,10 +7077,17 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         V args=V::makeObj();args.set("expected_revision",V::makeNum((double)g_session.revision));runTool("doc_new",args);if(g_error)return failure(520,"Could not create isolated fixture");g_assistantDockOpen=false;g_sidebarTab=0;g_toolModule=2;g_activePlane="XY";g_activeSketch.clear();g_showSketches=true;layout();
         if(treeUiTest){
             V commands=V::makeArr();for(int i=0;i<56;++i){V command,sketch;arkjson::parse(R"({"plane":"XY","entities":[{"kind":"line","name":"edge","dof":[0,0,10,0]}],"constraints":[]})",sketch);command=V::makeObj();command.set("op",V::makeStr("sketch.set"));command.set("name",V::makeStr("Tree sketch "+std::to_string(i+1)));command.set("sketch",sketch);commands.arr.push_back(command);}args=V::makeObj();args.set("commands",commands);args.set("expected_revision",V::makeNum((double)g_session.revision));runTool("doc_apply",args);if(g_error)return failure(521,"Tree sketch fixture rejected");g_activeSketch.clear();g_treeSelectedZone=-1;g_treeScroll=0;draw();if(g_treeMaxScroll<20||g_treeThumb.bottom<=g_treeThumb.top||!capture(".tree-top.png"))return failure(522,"Overflow tree has no useful thumb");u64 unchanged=g_session.revision;
-            int x=(g_treeThumb.left+g_treeThumb.right)/2,y=g_treeThumb.top+8;SendMessage(g_window,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(x,y));SendMessage(g_window,WM_MOUSEMOVE,MK_LBUTTON,MAKELPARAM(x,g_treeTrack.bottom+200));SendMessage(g_window,WM_LBUTTONUP,0,MAKELPARAM(x,g_treeTrack.bottom+200));draw();if(g_treeScroll!=g_treeMaxScroll||std::none_of(g_zones.begin(),g_zones.end(),[](const Zone& z){return z.id==11055;})||!capture(".tree-bottom.png"))return failure(523,"Thumb drag cannot reach the last real tree row");
-            for(const auto& zone:g_zones)if(zone.id>=11000&&zone.id<12000)if(zone.y<g_treeViewport.top||zone.y+zone.h>g_treeViewport.bottom||zone.x+zone.w>g_treeTrack.left)return failure(524,"Tree hit zone escapes its clipped viewport or touches the scroll track");
+            int x=(g_treeThumb.left+g_treeThumb.right)/2,y=g_treeThumb.top+8;SendMessage(g_window,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(x,y));SendMessage(g_window,WM_MOUSEMOVE,MK_LBUTTON,MAKELPARAM(x,g_treeTrack.bottom+200));SendMessage(g_window,WM_LBUTTONUP,0,MAKELPARAM(x,g_treeTrack.bottom+200));draw();if(g_treeScroll!=g_treeMaxScroll||std::none_of(g_zones.begin(),g_zones.end(),[](const Zone& z){return z.id==60055;})||!capture(".tree-bottom.png"))return failure(523,"Thumb drag cannot reach the last real tree row");
+            for(const auto& zone:g_zones)if(zone.id>=60000&&zone.id<64096)if(zone.y<g_treeViewport.top||zone.y+zone.h>g_treeViewport.bottom||zone.x+zone.w>g_treeTrack.left)return failure(524,"Tree hit zone escapes its clipped viewport or touches the scroll track");
             int before=g_treeScroll;y=g_treeTrack.top+2;SendMessage(g_window,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(x,y));SendMessage(g_window,WM_LBUTTONUP,0,MAKELPARAM(x,y));draw();if(g_treeScroll!=std::max(0,before-g_treeVisibleRows))return failure(525,"Track click did not page the tree");POINT wheel{24,g_treeViewport.top+18};ClientToScreen(g_window,&wheel);before=g_treeScroll;SendMessage(g_window,WM_MOUSEWHEEL,MAKEWPARAM(0,WHEEL_DELTA),MAKELPARAM(wheel.x,wheel.y));draw();if(g_treeScroll!=std::max(0,before-3))return failure(526,"Wheel did not scroll tree content");
-            g_activeSketch="Tree sketch 56";draw();if(std::none_of(g_zones.begin(),g_zones.end(),[](const Zone& z){return z.id==11055;}))return failure(527,"New selected sketch was not revealed");int savedH=winH;winH+=280;layout();draw();if(g_treeScroll>g_treeMaxScroll)return failure(528,"Resize failed to clamp the tree end");winH=savedH;layout();g_explorerOpen[2]=false;draw();if(g_treeMaxScroll!=0||g_treeScroll!=0||g_treeThumb.bottom)return failure(529,"Collapsed tree retained an invalid scroll thumb");g_explorerOpen[2]=true;g_activeSketch.clear();g_treeScroll=0;draw();if(g_session.revision!=unchanged)return failure(530,"Scrolling changed the drawing");g_status="Tree UI checks passed / thumb / page / wheel / selected row / resize / collapse / clipped hit zones";
+            g_activeSketch="Tree sketch 56";draw();if(std::none_of(g_zones.begin(),g_zones.end(),[](const Zone& z){return z.id==60055;}))return failure(527,"New selected sketch was not revealed");int savedH=winH;winH+=280;layout();draw();if(g_treeScroll>g_treeMaxScroll)return failure(528,"Resize failed to clamp the tree end");winH=savedH;layout();g_explorerOpen[2]=false;draw();if(g_treeMaxScroll!=0||g_treeScroll!=0||g_treeThumb.bottom)return failure(529,"Collapsed tree retained an invalid scroll thumb");g_explorerOpen[2]=true;g_activeSketch.clear();g_treeScroll=0;draw();if(g_session.revision!=unchanged)return failure(530,"Scrolling changed the drawing");// 051A: sketch actions cover the full pool without overlapping constraints.
+            args=V::makeObj();args.set("expected_revision",V::makeNum((double)g_session.revision));runTool("doc_new",args);if(g_error)return failure(531,"Scoped UI fixture reset failed");
+            for(int i=0;i<5;++i){Feature feature;feature.type=FeatureType::Box;feature.name="Definition "+std::to_string(i+1);g_doc.addFeature(feature);}
+            for(int i=0;i<1025;++i){Sketch sketch;sketch.addCircle(0,0,2);g_doc.setSketch("Profile "+std::to_string(i%256+1),std::move(sketch),(u64)(i/256+1));}
+            g_treeScroll=0;g_activeSketch.clear();g_showSketches=true;g_explorerOpen[2]=true;g_treeSelectedZone=-1;draw();if(!capture(".scoped-top.png"))return failure(532,"Scoped tree capture failed");
+            interactiveAction(61024);draw();if(g_activeSketch!="part:5::Profile 1"||std::none_of(g_zones.begin(),g_zones.end(),[](const Zone& z){return z.id==61024;})||!capture(".scoped-last.png"))return failure(533,"Scoped sketch beyond index1000 cannot be selected and revealed");
+            const auto selected=g_activeSketch;interactiveAction(12000);if(g_activeSketch!=selected)return failure(534,"Constraint action collided with scoped sketch selection");
+            g_status="Tree UI checks passed / scoped definitions / 1025 sketch selection / clipping / scroll";
         }
         if(completionUiTest){
             AgentTeamConfig config;config.focusedWorkflow=true;int round=0;AgentTeamRole lead;lead.id="engineer";lead.label="Lead engineer";lead.discipline=AgentTeamDiscipline::Orchestrator;lead.assistant.endpoint="http://127.0.0.1:1/v1/responses";lead.assistant.model="offline-completion-ui";lead.assistant.apiKeyEnv="";

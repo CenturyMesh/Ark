@@ -227,7 +227,8 @@ void editNode(AssemblyNode& n,const V& j,const Document& doc){
 V result(V data,bool error=false){V r=V::makeObj(),content=V::makeArr(),item=V::makeObj();item.set("type",V::makeStr("text"));item.set("text",V::makeStr(data.dump()));content.arr.push_back(item);r.set("content",content);r.set("structuredContent",data);r.set("isError",V::makeBool(error));return r;}
 void validatedMaterials(const Document& d){
     validateAppearanceAuthoring024B(d,false);
-    if(d.features.size()>1024||d.params.size()>256||d.sketches.size()>256||d.planes.size()>128||d.canvases.size()>8||d.materials.size()>256)throw std::runtime_error("Document capacity exceeded");
+    if(d.features.size()>1024||d.params.size()>256||d.planes.size()>128||d.canvases.size()>8||d.materials.size()>256)throw std::runtime_error("Document capacity exceeded");
+    {std::string error;if(!d.validateSketchScopes(error))throw std::runtime_error(error);}
     for(const auto& material:d.materials){std::string reason;if(!validateMaterial(material,reason))throw std::runtime_error(reason);}
     for(const auto& feature:d.features){
         if(!feature.material.empty()&&std::none_of(d.materials.begin(),d.materials.end(),[&](const Material& material){return material.name==feature.material;}))throw std::runtime_error("Feature references a missing material: "+feature.material);
@@ -570,7 +571,7 @@ V designView(const Document& document,u64 revision){
         features.arr.push_back(row);
     }
     for(const auto& sketch:document.sketches){
-        V row=V::makeObj(),entities=V::makeArr();row.set("name",V::makeStr(sketch.name));row.set("plane",V::makeStr(sketch.sk.plane));row.set("profile_ready",V::makeBool(profileReady(document,sketch)));
+        V row=V::makeObj(),entities=V::makeArr();row.set("name",V::makeStr(sketch.name));row.set("local_name",V::makeStr(sketch.localName()));row.set("owner_feature",V::makeNum((double)sketch.ownerFeature));row.set("reference",V::makeStr(sketch.name));row.set("plane",V::makeStr(sketch.sk.plane));row.set("profile_ready",V::makeBool(profileReady(document,sketch)));
         for(size_t index=0;index<sketch.sk.ents.size();++index){const auto& entity=sketch.sk.ents[index];V item=V::makeObj();item.set("name",V::makeStr(entity.name));item.set("kind",V::makeStr(sketchEntityKindName(entity.kind)));item.set("index",V::makeNum((double)index));item.set("construction",V::makeBool(entity.construction));if(!entity.name.empty()&&entity.kind==SketchEnt::Pnt)item.set("reference",V::makeStr("point."+entity.name));if(entity.sourceFeature){item.set("source_feature",V::makeNum((double)entity.sourceFeature));item.set("source_reference",V::makeStr(entity.reference));}entities.arr.push_back(item);}
         V consumers=V::makeArr();for(const auto& feature:features.arr)for(const auto& used:feature.find("sketches")->arr)if(used.str==sketch.name)consumers.arr.push_back(*feature.find("id"));row.set("consumers",consumers);
         row.set("entities",entities);sketches.arr.push_back(row);
@@ -608,7 +609,7 @@ V designDigest(const Document& document,u64 revision,const V& args){
     }
     for(const auto& row:design.find("sketches")->arr){
         if(known_("sketch:"+row.find("name")->str,row))continue;
-        V out=V::makeObj();copy(row,out,{"name","plane","profile_ready","consumers"});out.set("entities",V::makeNum((double)row.find("entities")->arr.size()));sketches.arr.push_back(std::move(out));
+        V out=V::makeObj();copy(row,out,{"name","local_name","owner_feature","reference","plane","profile_ready","consumers"});out.set("entities",V::makeNum((double)row.find("entities")->arr.size()));sketches.arr.push_back(std::move(out));
     }
     for(const auto& row:design.find("assembly")->arr){if(!known_("node:"+std::to_string((u64)row.find("id")->num),row))nodes.arr.push_back(row);}
     r.set("features",features);r.set("sketches",sketches);r.set("assembly",nodes);
@@ -1280,6 +1281,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
             for(auto& c:commands.arr){
                 applying=true;commandIndex=(size_t)(&c-commands.arr.data());commandOp=c.find("op")?c.find("op")->asStr():"";
                 auto op=str(c,"op");
+                const auto sketchName=op.rfind("sketch.",0)==0&&c.find("name")?sketchReference(c.find("owner_feature")?featureRef(next,*c.find("owner_feature")):0,str(c,"name")):std::string();
                 if(next.historyTip&&(op=="feature.add"||op=="sheet.create"||op=="skeleton.set"))throw std::runtime_error("Resume full feature history before adding features or changing Skeleton source");
                 if(op=="feature.move"&&skeletonOwnsFeature(next,featureRef(next,field(c,"id"))))throw std::runtime_error("Skeleton pattern is source-owned; change its source instead of reordering generated features");
                 if(applyFeatureHistoryCommand(next,c)){}
@@ -1397,12 +1399,13 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
                 else if(op=="sketch.set"){
                     V sketch=field(c,"sketch");bindSketchProjects(next,sketch);
                     Sketch sk;if(!sketchFromJson(sketch.dump(),sk,&error))throw std::runtime_error(error);
-                    next.setSketch(str(c,"name"),std::move(sk));
+                    const auto* owner=c.find("owner_feature");
+                    next.setSketch(str(c,"name"),std::move(sk),owner?featureRef(next,*owner):0);
                 }
-                else if(op=="sketch.remove"){if(!next.removeSketch(str(c,"name")))throw std::runtime_error("Sketch not found");}
-                else if(op=="sketch.patch"){auto* sketch=next.findSketch(str(c,"name"));if(!sketch)throw std::runtime_error("Sketch not found");patchSketch(*sketch,c,error);}
+                else if(op=="sketch.remove"){if(!next.removeSketch(sketchName))throw std::runtime_error("Sketch not found");}
+                else if(op=="sketch.patch"){auto* sketch=next.findSketch(sketchName);if(!sketch)throw std::runtime_error("Sketch not found");patchSketch(*sketch,c,error);}
                 else if(op=="sketch.entity.set"){
-                    auto* sk=next.findSketch(str(c,"name"));if(!sk)throw std::runtime_error("Sketch not found");
+                    auto* sk=next.findSketch(sketchName);if(!sk)throw std::runtime_error("Sketch not found");
                     V entity=field(c,"entity");bindProjectFeature(next,entity);auto name=str(entity,"name");V wrapper=V::makeObj(),entities=V::makeArr();entities.arr.push_back(entity);wrapper.set("entities",entities);Sketch single;
                     if(!sketchFromJson(wrapper.dump(),single,&error))throw std::runtime_error(error);
                     auto it=std::find_if(sk->sk.ents.begin(),sk->sk.ents.end(),[&](const SketchEnt& e){return e.name==name;});
@@ -1410,7 +1413,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
                     Sketch checked;if(!sketchFromJson(sketchToJson(sk->sk),checked,&error))throw std::runtime_error(error);sk->sk=std::move(checked);
                 }
                 else if(op=="sketch.fillet"||op=="sketch.chamfer"){
-                    auto* sk=next.findSketch(str(c,"name"));if(!sk)throw std::runtime_error("Sketch not found");
+                    auto* sk=next.findSketch(sketchName);if(!sk)throw std::runtime_error("Sketch not found");
                     const bool chamfer=op=="sketch.chamfer";
                     const std::string entity=str(c,"entity");
                     const V& index=field(c,"corner");
@@ -1679,6 +1682,7 @@ if(std::string(d.name)=="doc_apply"){
             "id":{"type":["integer","string","null"],"description":"Required target for feature.edit/remove and assembly.edit/remove: positive id or unique name. feature.rollback accepts null to resume all history. Mate ids are numeric; mate endpoints a/b may select a unique mate instead."},
             "type":{"type":"string","description":"Feature type on feature.add; mate type on mate.add/edit."},
             "name":{"type":"string","minLength":1,"description":"Feature/instance label, parameter name, sketch name or datum name for the selected operation."},
+            "owner_feature":{"type":["integer","string"],"description":"Sketch commands only: existing shared feature definition ID or unique name; name is local to this owner. Omit for legacy globals or an existing canonical part:<id>::<local-name> reference. Occurrences reuse definition sketches. New scoped names are 1..96 characters."},
             "p":{"type":"object","additionalProperties":{"type":["number","string"]},"description":"Editable parameters, each a finite number or expression string. Use actual authored keys from object_context: native_solid box uses width/depth/height; legacy box uses dx/dy/dz. feature.edit uses id plus p, not entity. Rigid placements use tx/ty/tz/rx/ry/rz."},
             "inputs":{"type":"array","items":{"type":["integer","string"]},"description":"Feature inputs as positive ids or unique feature names, in operation order."},
             "expr":{"type":["number","string"],"description":"param.set value or one sketch.patch coordinate expression."},
