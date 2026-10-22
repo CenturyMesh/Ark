@@ -5,6 +5,7 @@
 #include "ark/failure_record.hpp"
 #include <chrono>
 #include <set>
+#include <map>
 namespace ark {
 struct Image;
 bool metadataOnlyApply(const Document&,const arkjson::Value& args);
@@ -41,9 +42,12 @@ public:
     arkjson::Value call(const std::string& tool,const arkjson::Value& args);
     arkjson::Value info() const;
     arkjson::Value reviewBom(const arkjson::Value& args);
-    arkjson::Value bomCompletionCheck(bool onlyIfAuthored=false) const;
+    arkjson::Value bomCompletionCheck(bool onlyIfAuthored=false,bool allowTaskReview=false) const;
+    // Host-owned boundary, never resettable through an agent tool.
+    void beginBomTask();
+    arkjson::Value bomTaskScope() const;
     void markBomAuthored(){bomAuthored_=true;}
-    void resetBomReview(){bomAuthored_=false;bomReview_={};bomInspectedHash_.clear();bomInspectedItems_.clear();bomInspectedRevision_=~u64(0);}
+    void resetBomReview(){bomAuthored_=false;bomReview_={};bomTaskReview_={};bomTaskActive_=false;bomTaskBaseline_.clear();bomTaskError_.clear();bomInspectedHash_.clear();bomInspectedItems_.clear();bomInspectedRevision_=~u64(0);}
     void observeBomInspection(const arkjson::Value& bom);
     static arkjson::Value tools(bool detailed=false);
     arkjson::Value preparePreview(const arkjson::Value& args);
@@ -65,6 +69,10 @@ public:
 private:
     bool bomAuthored_=false;
     arkjson::Value bomReview_;
+    arkjson::Value bomTaskReview_;
+    bool bomTaskActive_=false;
+    std::map<u64,std::string> bomTaskBaseline_;
+    std::string bomTaskError_;
     std::string bomInspectedHash_;
     u64 bomInspectedRevision_=~u64(0);
     std::set<u64> bomInspectedItems_;
