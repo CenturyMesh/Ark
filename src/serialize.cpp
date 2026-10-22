@@ -1020,8 +1020,19 @@ bool saveDocument(const Document& doc, const char* path, DocumentSaveReport* rep
             MotionDerivedReport motions;appendMotionDerivedPayloads(doc,derived,selected.capacityBytes-std::min(selected.capacityBytes,selected.bytes),selected.capacityEntries-std::min(selected.capacityEntries,derived.size()),&motions);
             if(report){report->derivedGeometry=true;report->derivedEntries=selected.entries;report->derivedBytes=selected.bytes;report->derivedOmittedEntries=selected.omittedEntries;report->derivedOmittedBytes=selected.omittedBytes;report->derivedCapacityBytes=selected.capacityBytes;
                 report->motionFrameEntries=motions.entries;report->motionFrameBytes=motions.bytes;report->motionFrameOmittedEntries=motions.omittedEntries;report->motionFrameOmittedBytes=motions.omittedBytes;report->motionFrameNotCached=motions.notCached;}
-            std::string error;if(saveDocumentContainer(persistedRoot,path,&error,nullptr,&derived))return true;
-            return fail(error.empty()?"ARK container save failed":error);
+            std::string error;DocumentContainerWriteStats written;
+            if(!saveDocumentContainer(persistedRoot,path,&error,&written,&derived))return fail(error.empty()?"ARK container save failed":error);
+            if(report){
+                // 051A: a pack over its stored capacity drops the document-order tail,
+                // where the motion frames follow the geometry entries.
+                const size_t geometry=std::min(selected.entries,derived.size());
+                for(size_t i=written.derivedEntries;i<derived.size();++i){const size_t bytes=derived[i].bytes.size();
+                    if(i<geometry){--report->derivedEntries;report->derivedBytes-=bytes;++report->derivedOmittedEntries;report->derivedOmittedBytes+=bytes;}
+                    else{--report->motionFrameEntries;report->motionFrameBytes-=bytes;++report->motionFrameOmittedEntries;report->motionFrameOmittedBytes+=bytes;}}
+                report->derivedStoredBytes=written.derivedStoredBytes;report->physicalBytes=written.physicalBytes;report->bytesBeforeCompaction=written.bytesBeforeCompaction;
+                report->derivedRewritten=written.derivedRewritten;report->compacted=written.compacted;report->compactionSkipped=written.compactionSkipped;
+            }
+            return true;
         }catch(const std::exception& e){return fail(e.what());}
     }
     temporary+=".tmp";
@@ -1042,8 +1053,8 @@ bool saveDocument(const Document& doc, const char* path, DocumentSaveReport* rep
 bool loadDocument(const char* path, Document& doc, std::string* err){
     if(!path||!*path){ if(err)*err="empty path"; return false; }
     if(documentContainerFile(path)){
-        Value root;DocumentDerivedPayloads derived;std::string discarded;
-        if(!loadDocumentContainer(path,root,err,&derived,&discarded))return false;
+        Value root;DocumentDerivedPayloads derived;std::string discarded;DocumentContainerReadStats read;
+        if(!loadDocumentContainer(path,root,err,&derived,&discarded,&read))return false;
         // The container reader already enforced logical JSON capacity, exact
         // codec limits and checksums. Apply the same authoring validation to
         // its decoded value without constructing and parsing another JSON copy.
@@ -1053,6 +1064,10 @@ bool loadDocument(const char* path, Document& doc, std::string* err){
             DocumentDerivedPayloads native,motions;for(auto& record:derived)(motionDerivedPayload(record)?motions:native).push_back(std::move(record));
             candidate.derivedGeometryStatus=stageNativeDocumentResults(candidate,native);
             if(!motions.empty())candidate.derivedGeometryStatus.set("motion_frames",stageMotionDerivedPayloads(candidate,motions));
+            // 051A: how the optional section was stored, independent of its validation.
+            candidate.derivedGeometryStatus.set("container_encoding",Value::makeStr(read.derivedEncoding));
+            candidate.derivedGeometryStatus.set("stored_bytes",Value::makeNum((double)read.derivedStoredBytes));
+            candidate.derivedGeometryStatus.set("decoded_bytes",Value::makeNum((double)read.derivedDecodedBytes));
             if(!discarded.empty()){
                 candidate.derivedGeometryStatus=Value::makeObj();
                 candidate.derivedGeometryStatus.set("status",Value::makeStr("discarded"));

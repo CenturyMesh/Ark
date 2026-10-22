@@ -134,6 +134,8 @@ it is for manual evaluation and is excluded from the stable automatic updater.
     Copy-Item -LiteralPath (Join-Path $repository 'third_party/stb/LICENSE') -Destination (Join-Path $licenses 'stb-image-LICENSE.txt')
     Copy-Item -LiteralPath (Join-Path $repository 'third_party/stb/README.md') -Destination (Join-Path $licenses 'stb-image-provenance.md')
     Copy-Item -LiteralPath (Join-Path $repository 'third_party/sqlite/README.md') -Destination (Join-Path $licenses 'sqlite-provenance.txt')
+    Copy-Item -LiteralPath (Join-Path $repository 'third_party/zstd/LICENSE') -Destination (Join-Path $licenses 'zstd-LICENSE.txt')
+    Copy-Item -LiteralPath (Join-Path $repository 'third_party/zstd/README.md') -Destination (Join-Path $licenses 'zstd-provenance.md')
     Copy-Item -LiteralPath (Join-Path $repository 'third_party/sqlite/sqlite3.h') -Destination (Join-Path $licenses 'sqlite3.h')
     Copy-Item -LiteralPath (Join-Path $repository 'assets/ui/README.md') -Destination (Join-Path $licenses 'ark-ui-assets.txt')
     Copy-Item -LiteralPath (Join-Path $repository 'docs/THIRD_PARTY_NOTICES.md') -Destination (Join-Path $licenses 'THIRD_PARTY_NOTICES.md')

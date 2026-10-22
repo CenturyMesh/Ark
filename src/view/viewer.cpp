@@ -1493,7 +1493,7 @@ static arkjson::Value runTool(const std::string& tool,const arkjson::Value& args
     flushPendingUsage();refreshDocumentUsage();
     if(!g_error&&(tool=="doc_save"||tool=="doc_load")){if(auto* path=args.find("path"))g_path=path->asStr();g_savedRevision=g_session.revision;g_savedUsageSerial=tool=="doc_load"?loadedUsageSerial:g_doc.usage.serial;g_savedActivitySerial=agentActivitySerial(g_doc);const auto* actor=effectiveArgs.find("actor");const std::string actorKind=actor&&actor->find("kind")?actor->find("kind")->asStr():std::string();const auto* data=result.find("structuredContent");if((actorKind=="agent"||(actorKind=="client"&&data&&data->find("activity_id")))&&g_savedActivitySerial)--g_savedActivitySerial;}
     if(!g_error&&tool=="doc_save")if(const auto* data=result.find("structuredContent"))if(const auto* saved=data->find("saved_geometry");saved&&saved->find("status")&&saved->find("status")->asStr()=="partial")
-        g_status="Saved / "+std::to_string((long long)saved->find("entries_omitted")->asNum())+" saved geometry entries over the 128 MiB cache omitted / they recompute from authoring on open";
+        g_status="Saved / "+std::to_string((long long)saved->find("entries_omitted")->asNum())+" saved geometry entries over the geometry cache capacity omitted / they recompute from authoring on open";
     if(!g_error)recoveryDocumentEvent(tool,args);
     // A newly baked motion appears in the docked Baked Motions panel, ready to play.
     if(!g_error&&tool=="doc_apply")if(const auto* commands=args.find("commands");commands&&commands->t==arkjson::Value::Arr)for(const auto& command:commands->arr){const auto* op=command.find("op");const auto* name=command.find("name");

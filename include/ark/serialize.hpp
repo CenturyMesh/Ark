@@ -26,6 +26,10 @@ struct DocumentSaveReport {
     size_t derivedEntries=0,derivedBytes=0,derivedOmittedEntries=0,derivedOmittedBytes=0,derivedCapacityBytes=0;
     // 049A cached baked frames of current receipts; not cached or omitted frames re-bake on demand.
     size_t motionFrameEntries=0,motionFrameBytes=0,motionFrameOmittedEntries=0,motionFrameOmittedBytes=0,motionFrameNotCached=0;
+    // 051A: compressed bytes of the whole derived pack (geometry and frames) and the file after saving.
+    size_t derivedStoredBytes=0,physicalBytes=0,bytesBeforeCompaction=0;
+    bool derivedRewritten=false,compacted=false;
+    std::string compactionSkipped;
 };
 
 // Binary by default; .arkjson/.json select text export. Loads detect the signature.
