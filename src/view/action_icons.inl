@@ -70,6 +70,10 @@ static const ActionIcon* actionVectorIcon(int action){
         auto& hud=result[48000];for(int i=0;i<3;++i){const float y=.24f+i*.26f,k=i==0?.62f:i==1?.34f:.74f;line(hud,.12f,y,k-.07f,y);line(hud,k+.07f,y,.88f,y);box(hud,k-.07f,y-.09f,.14f,.18f);} // 048B Parametric HUD
         auto& explode=result[47000];box(explode,.36f,.36f,.28f,.28f);for(int k=0;k<4;++k){const float dx=k==0?0:k==1?0:k==2?-1:1,dy=k==0?-1:k==1?1:0;auto at=[&](float along,float side){return std::pair{.5f+dx*along-dy*side,.5f+dy*along+dx*side};};const auto a=at(.22f,0),b=at(.42f,0),c=at(.34f,.08f),d=at(.34f,-.08f);line(explode,a.first,a.second,b.first,b.second);line(explode,c.first,c.second,b.first,b.second);line(explode,d.first,d.second,b.first,b.second);}
         auto& visualize=result[47001];box(visualize,.10f,.20f,.80f,.60f);poly(visualize,{{.18f,.72f},{.36f,.46f},{.50f,.62f},{.60f,.52f},{.82f,.72f}});arc(visualize,.68f,.36f,.08f,.08f,0,360);line(visualize,.62f,.42f,.48f,.56f);
+        auto& graph=result[49000];for(auto p:{std::pair{.2f,.5f},std::pair{.55f,.2f},std::pair{.55f,.8f},std::pair{.86f,.5f}})arc(graph,p.first,p.second,.085f,.085f,0,360);line(graph,.27f,.45f,.48f,.25f);line(graph,.27f,.55f,.48f,.75f);line(graph,.62f,.25f,.80f,.45f);line(graph,.62f,.75f,.80f,.55f);
+        auto& eye=result[49101];poly(eye,{{.08f,.5f},{.23f,.31f},{.5f,.19f},{.77f,.31f},{.92f,.5f},{.77f,.69f},{.5f,.81f},{.23f,.69f},{.08f,.5f}});arc(eye,.5f,.5f,.17f,.17f,0,360);
+        auto& tag=result[49102];poly(tag,{{.13f,.16f},{.49f,.16f},{.89f,.56f},{.56f,.89f},{.13f,.46f},{.13f,.16f}});arc(tag,.29f,.31f,.065f,.065f,0,360);line(tag,.44f,.45f,.68f,.69f);
+        auto& schematic=result[49100];poly(schematic,{{.12f,.3f},{.34f,.3f},{.39f,.2f},{.47f,.4f},{.55f,.2f},{.63f,.4f},{.68f,.3f},{.88f,.3f},{.88f,.76f},{.12f,.76f},{.12f,.3f}});line(schematic,.08f,.51f,.16f,.51f);line(schematic,.04f,.59f,.20f,.59f);arc(schematic,.88f,.76f,.035f,.035f,0,360);
         return result;
     }();
     auto found=icons.find(action);return found==icons.end()?nullptr:&found->second;

@@ -69,6 +69,8 @@ typedef ptrdiff_t GLsizeiptr;
 #include "ark/holes_orchestrator.hpp"
 #include "ark/design_containers.hpp"
 #include "ark/parametric_components.hpp"
+#include "ark/design_disciplines.hpp"
+#include "ark/motion_cables.hpp"
 #include "ark/datum_authoring.hpp"
 #include "ark/spatial_sketch.hpp"
 #include "ark/native_features.hpp"
@@ -283,6 +285,7 @@ static double g_foldProgress=0;static bool g_foldPlaying=false,g_foldScrubbing=f
 static size_t g_notchBuildCount=0;
 static AgentSession g_session;
 static Document& g_doc=g_session.document;
+static std::set<std::string> g_familyFilter054B;
 static std::vector<u64> g_bodyIds,g_instanceIds;static std::vector<int> g_instanceCopies;
 static std::vector<bool> g_hiddenBodies,g_beforeSpotlightHidden;
 static bool g_spotlightActive=false;static int g_spotlightBody=-1;
@@ -438,6 +441,7 @@ static constexpr UINT WM_ARK_PRICE=WM_APP+26,WM_ARK_TEAM=WM_APP+27;
 static std::array<AssistantUsage,8> g_teamLiveUsage{};static std::string g_activeToolRole,g_activeToolName,g_liveStepLabel;static u64 g_liveCompletedSteps=0;
 #include "agent_presence_state.inl"
 #include "baked_motions_state.inl"
+static void restoreMotionCables054B();static void shutdownMotionCables054B();
 #include "exploded_view_state.inl"
 struct DraftSketchView {arkjson::Value commands;std::vector<float> lines;std::string role,step;bool committed=false;std::vector<float> fill,points;};static std::map<std::pair<std::string,std::string>,DraftSketchView> g_draftViews;static std::map<std::string,DraftSketchView> g_committedRoleSketches;
 static std::vector<Parameter> g_draftParameters;static std::vector<DatumPlane> g_draftPlaneDefinitions;
@@ -958,7 +962,7 @@ static Mat4 sheetDefinitionPlacement(u64 id){
     }return placement;
 }
 static bool displayInstance(size_t index){return index<g_bodyIds.size()&&(index>=g_hiddenBodies.size()||!g_hiddenBodies[index])&&
-    (!g_stockMode||g_bodyIds[index]==g_stockFeatureId)&&(!g_allSheetsFlat||g_flatShowChassis||isSheetFeature(g_bodyIds[index]));}
+    matchesFamilyFilter(g_doc,g_bodyIds[index],index<g_instanceIds.size()?g_instanceIds[index]:0,g_familyFilter054B)&&(!g_stockMode||g_bodyIds[index]==g_stockFeatureId)&&(!g_allSheetsFlat||g_flatShowChassis||isSheetFeature(g_bodyIds[index]));}
 static const Body* selectedNativeBody(){
     if(selBody<0||(size_t)selBody>=g_bodyIds.size())return nullptr;
     auto id=g_bodyIds[selBody];auto it=std::find_if(g_doc.evalBodies.begin(),g_doc.evalBodies.end(),[&](const Body& body){return body.id==id;});
@@ -1022,6 +1026,7 @@ static void includeCanvasBounds(){
     }
 }
 static void rebuildScene(bool evaluate=false){
+    restoreMotionCables054B();
     const auto sceneStarted=std::chrono::steady_clock::now();g_sceneRebuiltParts=0;g_sceneReusedParts=0;
     ++g_displayMeshSerial;
     auto previousIds=g_bodyIds,previousNodes=g_instanceIds;auto previousCopies=g_instanceCopies;auto previousHidden=g_hiddenBodies;
@@ -1478,7 +1483,7 @@ static arkjson::Value runTool(const std::string& tool,const arkjson::Value& args
     bool appearanceOnly=false;
     if(tool=="doc_apply")if(auto* content=result.find("structuredContent"))if(auto* flag=content->find("geometry_recomputed"))appearanceOnly=flag->t==arkjson::Value::Bool&&!flag->b;
     if(tool=="doc_apply")if(auto* content=result.find("structuredContent"))if(auto* prepared=content->find("applied_prepared");prepared&&prepared->b){const auto* changed=content->find("geometry_changed");appearanceOnly=changed&&changed->t==arkjson::Value::Bool&&!changed->b;}
-    if(!g_error&&(tool=="doc_new"||tool=="doc_load"||tool=="iteration_restore")){resetDatumViewState();g_picked.clear();g_hiddenBodies.clear();g_beforeSpotlightHidden.clear();g_spotlightActive=false;g_spotlightBody=-1;selBody=-1;}else if(!g_error&&documentWrite)sanitizeDatumViewState();
+    if(!g_error&&(tool=="doc_new"||tool=="doc_load"||tool=="iteration_restore")){resetDatumViewState();g_familyFilter054B.clear();g_picked.clear();g_hiddenBodies.clear();g_beforeSpotlightHidden.clear();g_spotlightActive=false;g_spotlightBody=-1;selBody=-1;}else if(!g_error&&documentWrite)sanitizeDatumViewState();
     if(!g_error&&!appearanceOnly&&(tool=="library_insert"||tool=="doc_apply"||tool=="doc_load"||tool=="iteration_restore"||tool=="doc_undo"||tool=="doc_redo"||tool=="import_step"||tool=="import_sheet_step"||tool=="import_mesh"||tool=="import_cad"||tool=="plane_authoring"||containerWrite||tool=="doc_new"))rebuildScene();
     if(!g_error&&tool=="doc_apply"){if(auto* commands=args.find("commands");commands&&commands->t==arkjson::Value::Arr)for(const auto& command:commands->arr){auto* op=command.find("op"),*name=command.find("name");if(op&&name&&op->t==arkjson::Value::Str&&name->t==arkjson::Value::Str&&op->str.rfind("sketch.",0)==0&&op->str!="sketch.remove"&&g_doc.findSketch(name->str)){g_activeSketch=name->str;g_activePlane=g_doc.findSketch(name->str)->sk.plane;g_showSketches=true;rebuildSketchOverlay();}}
         if(!previousVisibleBodies&&!g_bodyIds.empty())frameScene();}
@@ -3154,7 +3159,7 @@ static void startLiveBridge(){
     },{},liveCallProgress))g_status="Live MCP unavailable: "+g_liveBridge.lastError();
 }
 static void stopIntegrations(){
-    g_closing=true;if(g_authoringWorker)g_authoringWorker->shutdown();*g_pricingCancel=true;*g_teamCancel=true;g_agentTeam.cancel();*g_assistantCancel=true;*g_authCancel=true;g_liveBridge.stop();shutdownExactJobs046();
+    g_closing=true;shutdownMotionCables054B();if(g_authoringWorker)g_authoringWorker->shutdown();*g_pricingCancel=true;*g_teamCancel=true;g_agentTeam.cancel();*g_assistantCancel=true;*g_authCancel=true;g_liveBridge.stop();shutdownExactJobs046();
     MSG msg{};while(PeekMessage(&msg,g_window,WM_ARK_TOOL,WM_ARK_AUTH,PM_REMOVE)){if(msg.message==WM_ARK_TOOL){std::unique_ptr<UiToolRequest> request((UiToolRequest*)msg.lParam);request->complete(cancelledTool());}else if(msg.message==WM_ARK_CHAT)delete (UiChatEvent*)msg.lParam;else if(msg.message==WM_ARK_AUTH)delete (UiAuthEvent*)msg.lParam;}
     while(!g_toolQueue.empty()){g_toolQueue.front()->complete(cancelledTool());g_toolQueue.pop_front();}
     if(g_assistantWorker.joinable())g_assistantWorker.join();
@@ -3395,6 +3400,7 @@ static std::string readableJson(const arkjson::Value& value){std::string source=
 #include "holes_orchestrator_authoring.inl"
 #include "design_container_workspace.inl"
 #include "parametric_graph_053b.inl"
+#include "design_disciplines_054b.inl"
 static void failureOperationDialog(int mode=0){
     using V=arkjson::Value;V arguments=V::makeObj();if(g_lastFailureId.empty()){arguments.set("limit",V::makeNum(1));auto latest=runTool("failure_info",arguments);if(g_error)return;auto* rows=latest.find("structuredContent")->find("records");if(!rows||rows->arr.empty())throw std::runtime_error("No failed operation was retained in this local session");g_lastFailureId=rows->arr.front().find("id")->asStr();}
     arguments=V::makeObj();arguments.set("id",V::makeStr(g_lastFailureId));auto info=runTool("failure_info",arguments);if(g_error)return;auto record=*info.find("structuredContent")->find("record");
@@ -3733,7 +3739,7 @@ static const std::vector<StudioCommandGroup>& studioCommandGroups(){
     group("Native surfaces",{{161,"Edit selected feature"},{162,"Edit driving sketch"},{76,"Loft sketches"},{77,"Fill closed sketch"},{78,"NURBS surface"},{150,"Sweep sketches"},{151,"Extrude sketch surface"},{152,"Revolve sketch surface"},{153,"Offset selected surface"},{154,"Glue surfaces"},{79,"Thicken selected surface"},{830,"Repair exact surface orientation"},{491,"Extract exact semantic face"},{492,"Trim exact surface by datum plane"},{595,"Project curve onto surface"},{596,"Trim surface by closed curve"}});
     group("Mesh",{{155,"Weld mesh"},{156,"Smooth mesh"},{157,"Decimate mesh"},{158,"Offset mesh"},{159,"Fill planar holes"},{160,"Import STL/OBJ"}});
     group("Sheet metal",{{120,"Create sheet base"},{127,"Edit sheet base"},{494,"Original-blank jog add/edit/remove"},{495,"Linked sketch bend add/edit/remove"},{121,"Add flange"},{122,"Edit flange"},{123,"Remove flange"},{394,"Add return hem"},{395,"Edit return hem"},{396,"Remove return hem"},{397,"Add circular emboss"},{398,"Edit circular emboss"},{399,"Remove circular emboss"},{124,"Add opening or pattern"},{125,"Edit opening"},{126,"Remove opening"},{327,"Export analytic flat DXF"},{128,"Play / pause bend preview"},{80,"Create L bend"},{81,"Import sheet STEP"},{83,"Show formed"},{84,"Show flat"}});
-    group("View & agents",{{860,"Technical drawings / associative sheets"},{590,"BOM / bill of materials"},{585,"Measure 2D / X and Y"},{586,"Measure 3D / distance and XYZ"},{587,"Units / length, mass and volume"},{20,"Fit document"},{71,"Normal to sketch plane"},{180,"Front"},{181,"Back"},{23,"Top"},{184,"Bottom"},{182,"Right"},{183,"Left"},{24,"Isometric"},{175,"Orthographic"},{174,"Visible edges"},{186,"Cycle ambient occlusion"},{187,"Edit selected body material"},{188,"Inspect mass and center of mass"},{176,"Orbit"},{177,"Pan"},{178,"Zoom"},{14,"Wireframe"},{22,"Grid"},{56,"Graphics settings"},{567,"Project tool activity"},{57,"ChatGPT account"},{357,"Connectors / OpenAI, Claude, Grok, Ollama..."},{368,"Local models / Ollama"},{58,"Codex / live MCP"},{21,"Raw agent command"},{31,"Help"},{44015,"ARK updates"}});
+    group("View & agents",{{49100,"Schematic Designer / electrical sheets"},{49101,"Eye mode / family visibility"},{49102,"Families and tags / selected part or assembly"},{860,"Technical drawings / associative sheets"},{590,"BOM / bill of materials"},{585,"Measure 2D / X and Y"},{586,"Measure 3D / distance and XYZ"},{587,"Units / length, mass and volume"},{20,"Fit document"},{71,"Normal to sketch plane"},{180,"Front"},{181,"Back"},{23,"Top"},{184,"Bottom"},{182,"Right"},{183,"Left"},{24,"Isometric"},{175,"Orthographic"},{174,"Visible edges"},{186,"Cycle ambient occlusion"},{187,"Edit selected body material"},{188,"Inspect mass and center of mass"},{176,"Orbit"},{177,"Pan"},{178,"Zoom"},{14,"Wireframe"},{22,"Grid"},{56,"Graphics settings"},{567,"Project tool activity"},{57,"ChatGPT account"},{357,"Connectors / OpenAI, Claude, Grok, Ollama..."},{368,"Local models / Ollama"},{58,"Codex / live MCP"},{21,"Raw agent command"},{31,"Help"},{44015,"ARK updates"}});
     group("Frames, electronics & routing",{{210,"Construction frame"},{549,"Exact tube end fit"},{496,"Frame endpoint trim/extend"},{497,"Frame crossing-plane trim"},{498,"Frame weld add/edit/remove"},{211,"PCB and mounting"},{212,"Cable route"}});
     group("Physics & loads",{{755,"Collision check"},{190,"Assembly mass"},{216,"Loads and physical assumptions"},{189,"Close mass inspector"}});
     group("Motion",{{451,"Mechanical relation"},{452,"Motion driver"},{453,"Play / pause motion"},{454,"Reset motion"},{469,"Transmission teeth and cadence"},{45000,"Baked motions panel"},{47000,"Exploded views"},{47001,"Visualize assembly images"}});
@@ -3930,7 +3936,7 @@ static void uiAction(int id){
     if(id>=13000&&id<14000){int index=id-13000;if(index<(int)g_doc.mates.size())g_selectedMate=index;return;}
     if(id>=12000&&id<13000){int index=id-12000;if(auto* named=editableSketch();named&&index<(int)named->sk.cons.size()){g_selectedSketchConstraint=index;rebuildSketchOverlay();}return;}
     if(id>=60000&&id<64096){clearDatumSelection();g_explorerFeature=0;g_selectedExplorerEntity.reset();size_t index=id-60000;if(index<g_doc.sketches.size()){g_activeSketch=g_doc.sketches[index].name;g_activePlane=g_doc.sketches[index].sk.plane;g_selectedSketchConstraint=-1;g_sketchConstraintPage=0;g_showSketches=true;rebuildSketchOverlay();alignSketchCamera();if(g_pickKind==3){SelectionItem item;item.kind="curve";item.owner=g_activeSketch;item.name=g_activeSketch;toggleSelection(item);}}return;}
-    if(parametricComponentAction053B(id))return;
+    if(parametricComponentAction053B(id)||designDisciplineAction054B(id))return;
     if(id>=10000){focusSourceOpening(id-10000);return;}
     if(id>=9000){g_selectedNotch=id-9000;return;}
     if(id>=500&&id<532){size_t index=(size_t)(id-500);if(index>=g_authStatus.accounts.size()||g_authBusy)return;
@@ -4790,6 +4796,7 @@ static void drawCanvases(const GLfloat* vpT){
     glBindTexture(GL_TEXTURE_2D,0);glDisable(GL_POLYGON_OFFSET_FILL);
 }
 #include "viewport_dock.inl"
+#include "motion_cables_054b.inl"
 #include "baked_motions_panel.inl"
 #include "parametric_hud.inl"
 #include "exploded_view.inl"
@@ -4962,7 +4969,7 @@ static void drawFrame(HDC hdc){
     else if(g_toolModule==2&&g_sketchEditing.active)groups={{"Edit in view",{{"Exit sketch",611},{"Coordinates",70},{"Dimensions",591},{"Source params",577},{"Constraint",73},{"Normal view",71},{"Grid",579}}},{"Sketch",{{"Draw sketch",570},{"Undo",18},{"Redo",19}}}};
     else if(g_toolModule==2&&g_sketchDrawing.active)groups={{"Draw in view",{{"Line",571},{"Polyline",572},{"Rectangle",573},{"Circle",574},{"Arc 3 pt",575},{"Dimensions",576},{"Grid",579},{"Exit sketch",578}}},{"Coordinate forms",{{"Line form",543},{"Arc form",544},{"Tangent arc",545},{"Rectangle",61},{"Circle",62},{"Spline",63}}},{"Modify",{{"Project 2D",536},{"Include 3D",537},{"Edit curve",70},{"Constraint",73},{"Plane",60},{"Source params",577}}},{"Build",{{"Extrude",65},{"Drag extrude",687},{"Cut",66}}}};
     else if(g_toolModule==2)groups={{"Interactive",{{"Draw sketch",570},{"Edit sketch",610}}},{"Draw 2D",{{"Line",543},{"Arc 3 pt",544},{"Tangent arc",545},{"Rectangle",61},{"Circle",62},{"Spline",63}}},{"Draw 3D",{{"Arc 3D",547},{"Tangent 3D",548},{"3D curve",538}}},{"Modify",{{"Project 2D",536},{"Include 3D",537},{"Edit curve",70},{"Constraint",73},{"Plane",60}}},{"Build",{{"Extrude",65},{"Drag extrude",687},{"Cut",66}}}};
-    else if(g_toolModule==3)groups={{"Measure",{{"Measure 2D",585},{"Measure 3D",586},{"Units",587}}},{"Selection",{{"Body",170},{"Face",171},{"Tangent faces",658},{"Edge",172},{"Curve",173}}},{"Inspect",{{"Collision",755},{"BOM",590},{"Properties",401},{"Mass / CG",188},{"Material",187}}},{"Display",{{"Graph",49000},{"Graphics",56},{"Fit",20}}}};
+    else if(g_toolModule==3)groups={{"Measure",{{"Measure 2D",585},{"Measure 3D",586},{"Units",587}}},{"Selection",{{"Body",170},{"Face",171},{"Tangent faces",658},{"Edge",172},{"Curve",173}}},{"Inspect",{{"Collision",755},{"BOM",590},{"Properties",401},{"Mass / CG",188},{"Material",187}}},{"Display",{{"Graph",49000},{"Eye mode",49101},{"Families",49102},{"Schematic",49100},{"Graphics",56},{"Fit",20}}}};
     else if(g_toolModule==8)groups={{"Shape",{{"Start solid",100},{"Hollow walls",999},{"Release angle",106},{"Round edges",104}}},{"Details",{{"Reinforce / fit",990},{"Vent",984},{"Separate",992}}},{"Review",{{"Exact part",991},{"Edit recipe",161},{"Workflow",993}}}};
     else if(g_toolModule==9)groups={{"Board",{{"Board / pads",211}}},{"Cables",{{"Rounded route",212},{"Smooth 3D",996},{"Flat ribbon",997},{"Guide path",998},{"Edit route",161}}},{"Review",{{"Board / cable",995},{"Collision",755},{"BOM",590}}},{"Sources",{{"Approved Vendors",994},{"Library",484}}}};
     else if(g_toolModule==7)groups={{"Wood stock",{{"Panel",982},{"Timber beam",983}}},{"Joinery",{{"Groove / pocket",986},{"Source dims",659}}},{"Review",{{"Stock cutlist",987},{"Material",187},{"BOM",590}}},{"Appearance",{{"Light up",980}}}};
@@ -6158,7 +6165,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     bool plasticsUiTest=false,electronicsWorkspaceUiTest=false,cableGuideUiTest=false;
     bool nativeProductPerformanceUiTest=false,sceneCacheUiTest=false,authoringAssistanceUiTest=false,featureEditorPickingUiTest=false;
     bool asyncAuthoringUiTest=false;bool historyCompactionUiTest=false;bool featureHistoryUiTest=false,recoveryUiTest=false,editorScrollUiTest=false,configurationWorkspaceUiTest=false,interactionPerformanceUiTest=false;bool startupUiTest=false;bool stampsUiTest=false;bool media044bUiTest=false;bool planesSectionsUiTest=false;
-    bool specializedPatternUiTest=false;bool advancedSheetmetalUiTest=false;bool nativeVertexPullUiTest=false;bool cadImportUiTest=false;bool holesOrchestratorUiTest=false;bool designContainerUiTest=false;bool parametricGraphUiTest=false;
+    bool specializedPatternUiTest=false;bool advancedSheetmetalUiTest=false;bool nativeVertexPullUiTest=false;bool cadImportUiTest=false;bool holesOrchestratorUiTest=false;bool designContainerUiTest=false;bool parametricGraphUiTest=false;bool designDisciplinesUiTest=false;
     bool directAuthoringUiTest=false,parametricAuthoringUiTest=false,skeletonEditorUiTest=false,imageAttachmentUiTest=false,assistantSteeringUiTest=false;
     bool localModelsUiTest=false;bool viewportDockUiTest=false;bool bakedMotionsUiTest=false;bool parametricHudUiTest=false;bool explodedViewsUiTest=false;bool dragChainUiTest=false;bool bomUiTest=false;bool drawingWorkspaceUiTest=false;bool drawingViewportUiTest=false;bool measurementUiTest=false;bool authoringUiTest=false;
     bool selectionPickingUiTest=false;bool interactionUiTest=false,connectorsUiTest=false,actionIconsUiTest=false,treeUiTest=false,arcUiTest=false,completionUiTest=false,sketchDrawingUiTest=false,sketchEditUiTest=false,selectionGlowUiTest=false,datumAuthoringUiTest=false,typedSketchUiTest=false;
@@ -6194,6 +6201,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         else if(a=="--self-test-specialized-pattern-ui"){specializedPatternUiTest=true;g_headless=true;}
         else if(a=="--self-test-advanced-sheetmetal-ui"){advancedSheetmetalUiTest=true;g_headless=true;}
         else if(a=="--self-test-holes-orchestrator-ui"){holesOrchestratorUiTest=true;g_headless=true;}
+        else if(a=="--self-test-design-disciplines-ui"){designDisciplinesUiTest=true;g_headless=true;}
         else if(a=="--self-test-parametric-graph-ui"){parametricGraphUiTest=true;g_headless=true;}
         else if(a=="--self-test-design-container-ui"){designContainerUiTest=true;g_headless=true;}
         else if(a=="--self-test-cad-import-ui"){cadImportUiTest=true;g_headless=true;}
@@ -7072,6 +7080,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
 #include "holes_orchestrator_selftest.inl"
 #include "design_container_selftest.inl"
 #include "parametric_graph_selftest_053b.inl"
+#include "design_disciplines_selftest_054b.inl"
 #include "selection_glow_selftest.inl"
 #include "selection_picking_selftest.inl"
 #include "image_attachment_selftest.inl"

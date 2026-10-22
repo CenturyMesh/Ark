@@ -407,7 +407,7 @@ const std::vector<std::pair<std::string,std::vector<std::string>>>& assistantSpe
         {"sheet",{"sheet_inspect","sheet_preview","export_flat_dxf","import_sheet_step"}},{"stamps",{"sheet_inspect","sheet_preview"}},
         {"frames",{"frame_inspect","stock_preview"}},{"tube",{"tube_inspect","notch_inspect","notch_plan","source_inspect","stock_preview"}},
         {"electronics",{"electronics_inspect","pcb_export"}},{"routing",{"electronics_inspect","pcb_export"}},
-        {"mesh",{"mesh_inspect","mesh_get","import_mesh","export_mesh"}},{"drawings",{"drawing_inspect","drawing_export"}},
+        {"mesh",{"mesh_inspect","mesh_get","import_mesh","export_mesh"}},{"drawings",{"drawing_inspect","drawing_export","schematic_inspect","schematic_export"}},{"schematics",{"schematic_inspect","schematic_export"}},
         {"skeleton",{"skeleton_inspect","skeleton_compile"}},{"automation",{"skeleton_inspect","skeleton_compile","design_solve"}},
         {"planes",{"plane_authoring"}},{"sketch",{"sketch_repair"}},{"containers",{"design_containers"}},{"hud",{"hud_info","hud_flex_check"}},
         {"cad_import",{"import_step","import_cad","step_inspect","cad_inspect","image_asset","export_step","export_iges","doc_new","doc_load"}},

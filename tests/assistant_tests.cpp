@@ -112,6 +112,8 @@ static void deferredToolChecks(){
     auto names=[](const V& tools){std::vector<std::string> out;for(const auto& tool:tools.arr)out.push_back(tool.find("name")->asStr());return out;};
     auto has=[&](const V& tools,const char* name){const auto list=names(tools);return std::find(list.begin(),list.end(),name)!=list.end();};
     const auto core=ark::assistantActiveTools(full,V::makeArr(),"");
+    check(has(core,"classification_info")&&!has(core,"schematic_export"),"part classification is core; sheet export waits for its topic");
+    const auto schematics=ark::assistantActiveTools(full,V::makeArr(),ark::agentOnboardingPack({"schematics"}));check(has(schematics,"schematic_inspect")&&has(schematics,"schematic_export"),"schematic onboarding exposes the editable sheet tools");
     check(!has(core,"bom_inspect")&&!has(core,"library_source_search")&&!has(core,"drawing_export")&&has(core,"doc_apply")&&has(core,"doc_info")&&has(core,"agent_onboard")&&has(core,"collision_inspect"),"core tools stay advertised while specialist tools wait for their topic");
     std::string onboard;for(const auto& tool:core.arr)if(tool.find("name")->asStr()=="agent_onboard")onboard=tool.find("description")->asStr();
     check(onboard.find("bom: bom_inspect")!=std::string::npos&&onboard.find("drawings: drawing_inspect, drawing_export")!=std::string::npos,"agent_onboard lists which topic offers each deferred tool");

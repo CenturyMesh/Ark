@@ -57,6 +57,8 @@ std::string encodeMetadata(const std::string&){return {};}
 std::string decodeMetadata(const std::string&,size_t){throw std::runtime_error("Unsupported retained metadata compression");}
 #endif
 }
+std::string compressDerivedBytes(const std::string& source){return encodeMetadata(source);}
+std::string expandDerivedBytes(const std::string& bytes,size_t originalBytes){return decodeMetadata(bytes,originalBytes);}
 struct NativePayload::Storage {
     V metadata;
     std::string encodedMetadata;

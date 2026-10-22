@@ -20,6 +20,7 @@ struct AssemblyNode {
     bool visible=true;
     bool fixed=false; // Grounded instance; its authored placement is retained by the mate solver.
     AssemblyPattern pattern;
+    arkjson::Value classification; // explicit occurrence/group families and tags
 };
 struct AssemblyJointLimits {
     bool enabled=false;

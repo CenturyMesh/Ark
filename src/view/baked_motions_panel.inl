@@ -18,8 +18,8 @@ static std::string bakedMotionClearanceSummary(const arkjson::Value& r){
     std::string pair=worst?worst->find("a")->find("name")->str+" / "+worst->find("b")->find("name")->str:std::string("no measured pair");
     std::snprintf(text,sizeof text,"Clearance: min %.3f mm %s at %.2f s / %s / %.0f uncertified, %.0f between-frame contacts",minimum&&minimum->t==arkjson::Value::Num?minimum->num:0.,pair.c_str(),worst?worst->find("time_s")->num:0.,certified?"continuous certified":"not certified",r.find("uncertified_interval_count")->num,r.find("between_frame_contact_count")->num);return text;
 }
-static void bakedMotionsRestorePose(){if(g_formedInstanceWorld.size()==g_instanceWorld.size())g_instanceWorld=g_formedInstanceWorld;rebuildDisplayBounds();refreshSelectionLines();}
-static void stopBakedMotion(bool restore){auto& p=g_bakedMotions;const bool shown=p.active;p.playing=p.active=p.scrubbing=false;p.time=0;p.shownFrame=~size_t(0);if(shown&&restore)bakedMotionsRestorePose();}
+static void bakedMotionsRestorePose(){restoreMotionCables054B();if(g_formedInstanceWorld.size()==g_instanceWorld.size())g_instanceWorld=g_formedInstanceWorld;rebuildDisplayBounds();refreshSelectionLines();}
+static void stopBakedMotion(bool restore){cancelMotionCables054B();auto& p=g_bakedMotions;const bool shown=p.active;p.playing=p.active=p.scrubbing=false;p.time=0;p.shownFrame=~size_t(0);if(shown&&restore)bakedMotionsRestorePose();}
 static void loadBakedMotionSelection(){
     auto& p=g_bakedMotions;p.cacheName=p.selected;p.framesValid=p.graphValid=false;p.curves.clear();p.handles.clear();p.seams.clear();p.lo.clear();p.hi.clear();p.rangeLo.clear();p.rangeHi.clear();p.display.clear();p.displayRevision=~u64(0);p.shownFrame=~size_t(0);p.graphError.clear();p.diagnostics={};
     const auto* motion=findMotion(g_doc,p.selected);if(!motion)return;std::string error;
@@ -64,15 +64,17 @@ static void applyBakedMotionFrame(){
     const size_t k=bakedMotionFrame();if(k==p.shownFrame)return;p.shownFrame=k;g_instanceWorld=g_formedInstanceWorld;
     for(size_t i=0;i<p.frames.nodes.size();++i)if(p.display[i]>=0)g_instanceWorld[(size_t)p.display[i]]=p.frames.poses[k*p.frames.nodes.size()+i];
     explodedBakedFrame(k); // 048B explode_view channels
+    applyMotionCableFrame054B(k);
     rebuildDisplayBounds();refreshSelectionLines();
 }
 static bool bakedMotionPlaybackAvailable(std::string& reason){
     if(g_allSheetsFlat||g_stockMode){reason="Return to the formed assembly before playing a baked motion";return false;}
     if(g_drawingViewport.active){reason="Return to the 3D design before playing a baked motion";return false;}
     if(g_componentMove.armed||g_componentMove.active){reason="Finish or cancel the component move first";return false;}
-    refreshBakedMotions();if(!g_bakedMotions.framesValid){reason=g_bakedMotions.selected.empty()?"No baked motion selected":"Bake this motion first: Bake, or ask the agent for motion.bake";return false;}return true;
+    refreshBakedMotions();if(!g_bakedMotions.framesValid){reason=g_bakedMotions.selected.empty()?"No baked motion selected":"Bake this motion first: Bake, or ask the agent for motion.bake";return false;}for(const auto& row:g_bakedMotions.rows)if(row.name==g_bakedMotions.selected&&row.stale&&!motionCableFeatures(g_doc,g_bakedMotions.frames).empty()){reason="Animation is stale. Use Bake to refresh the current assembly before playback.";return false;}return ensureMotionCables054B(reason);
 }
 static void advanceBakedMotion(double seconds){
+    pollMotionCables054B();
     auto& p=g_bakedMotions;if(!p.active)return;std::string reason;
     if(g_motionActive||!bakedMotionPlaybackAvailable(reason)){stopBakedMotion();return;}
     if(p.playing){p.time+=seconds*p.speed;const double duration=p.frames.duration;if(p.time>=duration){if(p.loop&&duration>0)p.time=std::fmod(p.time,duration);else{p.time=duration;p.playing=false;}}}
@@ -95,7 +97,7 @@ static bool bakedMotionsAction(int id){
     if(id>=45100){const size_t index=(size_t)(id-45100);if(index<p.rows.size()&&p.rows[index].name!=p.selected){stopBakedMotion();p.selected=p.rows[index].name;refreshBakedMotions();}return true;}
     if(id==45009||id==45008)return true;
     if(id==45010||id==45011){p.scroll=std::clamp(p.scroll+(id==45010?-1:1),0,std::max(0,(int)p.rows.size()-1));return true;}
-    if(id==45001){std::string reason;if(!bakedMotionPlaybackAvailable(reason)){g_status=reason;return true;}if(!p.playing&&!p.loop&&p.time>=p.frames.duration-1e-9)p.time=0;p.playing=!p.playing;startBakedMotionDisplay();g_status=p.playing?"Playing baked motion / display transforms only":"Baked motion paused";return true;}
+    if(id==45001){std::string reason;if(!bakedMotionPlaybackAvailable(reason)){if(motion_cables_view_054b::state.worker.valid())motion_cables_view_054b::state.autoPlay=true;g_status=reason;return true;}if(!p.playing&&!p.loop&&p.time>=p.frames.duration-1e-9)p.time=0;p.playing=!p.playing;startBakedMotionDisplay();g_status=p.playing?"Playing baked motion / display transforms only":"Baked motion paused";return true;}
     if(id==45002){stopBakedMotion();g_status="Baked motion stopped / solved pose restored";return true;}
     if(id==45003){p.loop=!p.loop;return true;}
     if(id==45004){static const double speeds[]={.25,.5,1,2};size_t next=0;for(size_t i=0;i<4;++i)if(std::fabs(speeds[i]-p.speed)<1e-9)next=(i+1)%4;p.speed=speeds[next];return true;}

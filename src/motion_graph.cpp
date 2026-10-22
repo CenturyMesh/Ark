@@ -1,4 +1,6 @@
 #include "ark/motion_graph.hpp"
+#include "ark/motion_cables.hpp"
+#include "ark/serialize.hpp"
 #include "ark/exploded_view.hpp"
 #include "ark/agent.hpp"
 #include "ark/assembly_io.hpp"
@@ -384,6 +386,16 @@ std::string motionSourceDigest(const Document& d,const std::vector<AssemblyPlace
     // Followers can change their motion recipe without changing the baseline pose.
     // Omit the new field for legacy documents to preserve their bake digests.
     if(d.dragChains.t==V::Arr&&!d.dragChains.arr.empty())root.set("drag_chains",d.dragChains);
+    BakedMotionFrames allNodes;for(const auto& n:d.assembly)allNodes.nodes.push_back(n.id);
+    if(!motionCableFeatures(d,allNodes).empty()){
+        // Bound cables depend on both the recorded poses and authored geometry.
+        // Keep legacy digests unchanged when there are no bound cables; visual
+        // classification, sheet BOM and appearance do not alter motion geometry.
+        V authored;need(arkjson::parse(documentToJson(d,false,false),authored),"MOTION_SOURCE_INVALID: cannot snapshot cable geometry");
+        V geometry=V::makeObj();for(const char* key:{"features","sketches","planes","skeleton","history_tip","configurations","active_configuration"})if(const auto* value=authored.find(key))geometry.set(key,*value);
+        for(auto& entry:geometry.obj)if(entry.first=="features")for(auto& f:entry.second.arr)f.obj.erase(std::remove_if(f.obj.begin(),f.obj.end(),[](const auto& field){return field.first=="classification"||field.first=="appearance"||field.first=="face_appearances"||field.first=="part"||field.first=="material"||field.first=="manufacturing";}),f.obj.end());
+        canonical(geometry);root.set("cable_geometry_sha256",V::makeStr(iterationSha256(geometry.dump())));
+    }
     root.set("assembly",nodes);root.set("mates",mates);root.set("params",params);root.set("placements",poses);canonical(root);return iterationSha256(root.dump());
 }
 std::string motionGraphDigest(const V& graph){V copy=graph;canonical(copy);return iterationSha256(copy.dump());}
