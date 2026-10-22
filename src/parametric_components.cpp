@@ -48,7 +48,7 @@ std::string freshId(){static std::atomic<u64> serial{0};return "ark-"+iterationS
 std::string remapTokens(const std::string& s,const V& mapping){std::string out;for(size_t i=0;i<s.size();){if(std::isalpha((unsigned char)s[i])||s[i]=='_'){const auto start=i++;while(i<s.size()&&(std::isalnum((unsigned char)s[i])||s[i]=='_'))++i;const auto token=s.substr(start,i-start);const auto* n=mapping.find(token.c_str());out+=n?n->str:token;}else out+=s[i++];}return out;}
 V mapped(const V& maps,const char* c,const V& v){if(v.t==V::Num&&v.num==0)return v;const auto key=v.t==V::Num?std::to_string(id(v)):v.asStr();const auto* p=get(maps,c).find(key.c_str());if(!p)fail("REFERENCE","Unmapped "+std::string(c)+":"+key);return *p;}
 void remapValue(V& v,const std::string& key,const V& maps,bool expression=false){
-    static const std::set<std::string> opaque{"name","local_name","type","op","kind","reference","reference_a","reference_b","source_entity","entity","face","material_side","format","units","appearance","face_appearances","mesh","topology","part","manufacturing"};
+    static const std::set<std::string> opaque{"name","local_name","type","op","kind","reference","reference_a","reference_b","source_entity","entity","face","material_side","format","units","appearance","face_appearances","mesh","topology","part","manufacturing","classification"};
     if(opaque.count(key))return;
     if(v.t==V::Num){
         if(key=="owner_feature"||key=="feature"||key=="second_feature"||key=="source_feature"||key=="alternate_feature"||key=="inputs"||key=="curve")v=mapped(maps,"features",v);

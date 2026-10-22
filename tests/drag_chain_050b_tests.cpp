@@ -1,11 +1,14 @@
 #include "ark/agent.hpp"
 #include "ark/drag_chain.hpp"
 #include "ark/motion_graph.hpp"
+#include "ark/motion_cables.hpp"
 #include "ark/onboarding.hpp"
 #include "ark/serialize.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <chrono>
 #include <functional>
 #include <iostream>
 #include <map>
@@ -233,11 +236,38 @@ void agentSurface(){
 #endif
 }
 
+void flexibleCables054B(){
+    AgentSession session;commit(session,kKiosk);commit(session,"{\"commands\":["+chainSet()+"]}");const auto links=linkIds(session);
+    auto command=json(R"({"op":"feature.add","type":"cable_route","name":"Flexible chain harness","inputs":[],"native":{"route_mode":"spline","radius":1,"bend_radius":5}})");
+    V spec=*command.find("native"),points=V::makeArr(),inputs=V::makeArr();inputs.arr.push_back(*findDragChain(session.document,"Camera cable chain")->find("link_feature"));command.set("inputs",inputs);
+    auto pin=[](u64 node,double x=0){V p=V::makeObj(),offset=V::makeArr();p.set("node",V::makeNum((double)node));offset.arr={V::makeNum(x),V::makeNum(0),V::makeNum(0)};p.set("offset",offset);return p;};
+    spec.set("start",pin(links.front()));spec.set("end",pin(links.back(),15));for(size_t i=2;i<links.size();i+=2)points.arr.push_back(pin(links[i]));spec.set("waypoints",points);command.set("native",spec);
+    commit(session,"{\"commands\":["+command.dump()+"]}");const auto cable=session.document.features.back().id;
+    commit(session,R"({"commands":[{"op":"assembly.add","feature":"Flexible chain harness","fixed":true},{"op":"motion.graph.set","name":"Cable cycle","graph":{"channels":[{"name":"lift","mate":1,"curve":{"type":"sequence","items":[{"type":"ease","duration":1,"to":120},{"type":"ease","duration":2,"to":570},{"type":"ease","duration":1,"to":345}]}}]}},{"op":"motion.bake","name":"Cable cycle","fps":1}]})");
+    BakedMotionFrames frames;std::string error;check(resolveBakedMotion(session.document,*findMotion(session.document,"Cable cycle"),frames,error),error);const auto unchanged=documentToJson(session.document);const auto revision=session.revision;std::atomic_bool cancelled{false};size_t completed=0;
+    const auto display=prepareMotionCableDisplay(session.document,frames,cancelled,[&](size_t done,size_t total){completed=done;check(total==5,"Cable progress total");});
+    check(display.features==std::vector<u64>{cable}&&display.frameCount==5&&display.meshes.size()==5&&completed==5,"Five native cable frames");
+    check(display.nativeRequests>=3&&display.nativeRequests<=5&&display.bytes>0,"Native cache accounting");check(display.meshes[1]->mesh().pos!=display.meshes[3]->mesh().pos,"Cable remained frozen across the stroke");
+    check(session.revision==revision&&documentToJson(session.document)==unchanged,"Cable preparation mutated source authoring");
+    cancelled.store(true);check(throwsCode([&]{prepareMotionCableDisplay(session.document,frames,cancelled);},"MOTION_CABLE_CANCELLED"),"Cable preparation cancellation");cancelled.store(false);
+    auto repeated=frames;repeated.frameCount=2;repeated.poses.assign(frames.poses.begin(),frames.poses.begin()+frames.nodes.size());repeated.poses.insert(repeated.poses.end(),frames.poses.begin(),frames.poses.begin()+frames.nodes.size());const auto cached=prepareMotionCableDisplay(session.document,repeated,cancelled);check(cached.nativeRequests==1&&cached.meshes[0]==cached.meshes[1],"Identical cable sweeps share native geometry");
+    rejected(session,"motion_info",json(R"({"name":"Cable cycle","clearance":{"scope":"all"}})"),"MOTION_CLEARANCE_FLEXIBLE_UNSUPPORTED","Flexible sweep cannot be certified from rigid bodies");
+    commit(session,"{\"commands\":[{\"op\":\"classification.set\",\"feature\":"+std::to_string(cable)+",\"families\":[\"electrical\"]}]}");check(accepted(session.call("motion_info",json(R"({"name":"Cable cycle"})"))).find("status")->dump().find("\"stale\":true")==std::string::npos,"Classification must not invalidate geometric motion");
+    spec.set("radius",V::makeNum(1.1));commit(session,"{\"commands\":[{\"op\":\"feature.edit\",\"id\":"+std::to_string(cable)+",\"native\":"+spec.dump()+"}]}");check(accepted(session.call("motion_info",json(R"({"name":"Cable cycle"})"))).find("status")->dump().find("assembly_changed")!=std::string::npos,"Cable geometry edit must invalidate old frames");
+    std::cout<<"flexible cables 054B: 5 native sweep frames, "<<display.nativeRequests<<" unique requests, "<<display.bytes<<" cache bytes; display-only, cancellation and stale geometry checked\n";
+    if(std::getenv("ARK_CABLE_LONG_TEST")){
+        commit(session,R"({"commands":[{"op":"motion.graph.set","name":"Long cable cycle","graph":{"channels":[{"name":"lift","mate":1,"curve":{"type":"sequence","items":[{"type":"ease","duration":3.5,"to":120},{"type":"ease","duration":7,"to":570},{"type":"ease","duration":3.5,"to":345}]}}]}},{"op":"motion.bake","name":"Long cable cycle","fps":30}]})");
+        check(resolveBakedMotion(session.document,*findMotion(session.document,"Long cable cycle"),frames,error),error);const auto start=std::chrono::steady_clock::now();const auto longDisplay=prepareMotionCableDisplay(session.document,frames,cancelled);const auto prepareMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();check(longDisplay.frameCount==421&&longDisplay.meshes.size()==421,"14-second cable motion cache");
+        const auto playback=std::chrono::steady_clock::now();size_t triangles=0;for(const auto& frame:longDisplay.meshes)triangles+=frame->mesh().idx.size()/3;const auto decodeMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-playback).count();
+        std::cout<<"long flexible cable 054B: frames=421 fps=30 duration_s=14 native_requests="<<longDisplay.nativeRequests<<" cache_bytes="<<longDisplay.bytes<<" preparation_ms="<<prepareMs<<" decode_total_ms="<<decodeMs<<" decoded_triangles="<<triangles<<" (decode excludes GPU upload and rendering)\n";
+    }
+}
+
 int main(){
     try{
         kinematics();
 #ifdef ARK_DRAG_CHAIN_NATIVE
-        agentSurface();document();
+        agentSurface();document();flexibleCables054B();
 #else
         std::cout<<"native worker unavailable: document, bake and clearance sections skipped\n";
 #endif

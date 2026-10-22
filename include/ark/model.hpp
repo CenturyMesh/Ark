@@ -128,6 +128,7 @@ struct Feature {
     int opInt = 0;                                    // Boolean: 0 union 1 cut 2 intersect
     bool suppressed = false;                          // history and parameters stay; recompute skips the body
     arkjson::Value part;                              // explicit BOM metadata, independent of geometry
+    arkjson::Value classification;                    // explicit families/tags; navigation, never geometry authority
     std::string material;                             // named document material, empty uses default
     std::string manufacturingRoute;                   // explicit intent; empty is undeclared
     arkjson::Value manufacturingProcess;              // bounded caller-declared route-specific process inputs
@@ -329,6 +330,7 @@ public:
     arkjson::Value iterationHistory; // immutable authoring journal; no evaluated geometry or usage snapshots
     arkjson::Value designContainerCheckout; // scoped workspace ownership and merge baseline; no derived geometry
     arkjson::Value parametricComponents; // embedded immutable .arkprt/.arktop definitions and explicit instance bindings
+    arkjson::Value schematics; // independent editable 2D circuit sheets, symbols, pins and explicit wires
     std::vector<std::string> componentBindingsToSeal; // transient, only a component command can request a new evaluated baseline
     arkjson::Value skeleton; // native declarative source, input overrides and stable ownership manifest
     std::vector<arkjson::Value> drawings; // authored associative technical drawings; derived curves are never persisted

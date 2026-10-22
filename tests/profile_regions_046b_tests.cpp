@@ -228,7 +228,7 @@ void persistence(){
         double v=0;std::vector<std::string> names;for(const auto& f:restored.features)if(f.name=="Selected")for(const auto& b:restored.evalBodies)if(b.id==f.id){v=b.nativeData.find("report")->find("volume_mm3")->num;names=semanticNames(b);}
         close(v,volume(s,"Selected"),1e-9,"cold rebuild parity");check(names==semanticNames(body(s,"Selected")),"references reproduce after reload");
         Value older;check(arkjson::parse(saved,older),"older");older.set("version",Value::makeNum(47));ark::Document stale;check(!ark::documentFromJson(older.dump(),stale,&error)&&error.find("version 48")!=std::string::npos,"format 47 cannot carry native.regions: "+error);
-        Value future;check(arkjson::parse(saved,future),"future");future.set("version",Value::makeNum(52));check(!ark::documentFromJson(future.dump(),stale,&error)&&error.find("unsupported document version")!=std::string::npos,"format 52 is a future format");
+        Value future;check(arkjson::parse(saved,future),"future");future.set("version",Value::makeNum(53));check(!ark::documentFromJson(future.dump(),stale,&error)&&error.find("unsupported document version")!=std::string::npos,"format 53 is a future format");
     }
     applyOk(s,R"([{"op":"feature.remove","id":"Selected"}])");check(savedVersion(s.document)==implicit,"removing the selection returns to the earlier format");
     std::cout<<"persistence: implicit multi-loop extrude keeps format "<<implicit<<", native.regions saves 48 with history round-trip, 47 rejects the field, 50 rejects as future\n";

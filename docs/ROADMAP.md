@@ -1,5 +1,10 @@
 # ARK roadmap A–G
 
+054B is **Verificado no escopo** locally for **A.02/B.04/B.05/C.04/D.02**: editable electrical
+schematics, sheet BOM/DXF, part and assembly families with Eye visibility filters,
+and native cable display at baked poses. See the [054B contract](DISCIPLINES_SCHEMATICS_054B.md)
+and [verification](iterations/054B.md). Broader milestones remain **Parcial**.
+
 053B is **Verificado no escopo** locally for **A.02/A.03/B.01/B.04/E.01**: portable parametric
 parts/assemblies, explicit revision replacement and a native local graph.
 See the [component contract](PARAMETRIC_COMPONENTS_053B.md) and

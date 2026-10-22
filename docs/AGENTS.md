@@ -1,5 +1,20 @@
 # ARK agent protocol
 
+054B families, editable schematics and flexible motion (A.02/B.04/B.05/C.04/D.02):
+classify authored definitions or assembly nodes with known design intent through
+`classification.set{feature|node,families,tags}`. Families are electrical,
+electronics, mechanical, bodywork, sheet_metal and plastics. Inspect one object
+with `classification_info{feature|node}`. Labels never supply electrical ratings
+or geometric authority. On explicit request, load `agent_onboard{topic:schematics}`
+and author editable sheets through `schematic.set{sheet}` / `schematic.remove`;
+use `schematic_inspect` for nets, unconnected pins and the sheet's own BOM, and
+`schematic_export` for DXF/SVG/CSV. Exclude annotations from BOM with `bom:false`.
+All writes and exports require the current `expected_revision`.
+Classifications/sheets require conditional semantic format 52. A moving-bound
+cable is prepared from native sweeps at baked poses in Studio; old bakes require
+explicit refresh and no continuous flexible-cable clearance is inferred. See
+[054B contracts and limits](DISCIPLINES_SCHEMATICS_054B.md).
+
 053B reusable parametric source (A.02/A.03/B.01/B.04/E.01):
 `parametric_components{action:inspect|export|prepare}` reads installed definitions,
 exports immutable `.arkprt`/`.arktop` files, or prepares insert/update/configure

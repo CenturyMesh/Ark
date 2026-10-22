@@ -49,6 +49,22 @@
         press(45002);check(!g_bakedMotions.active,"Stop did not restore the solved pose");
         check(documentToJson(g_doc)==unchanged&&g_session.revision==revision,"Chain playback or inspection changed the document");
         g_sidebarTab=0;layout();
+        // 054B: a cable bound to link pins deforms in the same recorded poses.
+        auto cable=json(R"({"op":"feature.add","type":"cable_route","name":"Flexible harness","inputs":[],"appearance":{"base_color":[0.1,0.65,0.95]},"native":{"route_mode":"spline","radius":1.5,"bend_radius":5}})");
+        V spec=*cable.find("native"),points=V::makeArr(),inputs=V::makeArr();inputs.arr.push_back(*findDragChain(g_doc,"Camera cable chain")->find("link_feature"));cable.set("inputs",inputs);
+        auto pin=[](u64 id,double x=0){V p=V::makeObj(),offset=V::makeArr();p.set("node",V::makeNum((double)id));offset.arr={V::makeNum(x),V::makeNum(0),V::makeNum(0)};p.set("offset",offset);return p;};
+        spec.set("start",pin(links.front()));spec.set("end",pin(links.back(),15));for(size_t i=2;i<links.size();i+=2)points.arr.push_back(pin(links[i]));spec.set("waypoints",points);cable.set("native",spec);
+        apply("{\"commands\":["+cable.dump()+",{\"op\":\"assembly.add\",\"feature\":\"Flexible harness\",\"fixed\":true}]}");
+        std::string unavailable;check(!bakedMotionPlaybackAvailable(unavailable)&&unavailable.find("stale")!=std::string::npos,"Stale motion must ask for Bake");
+        apply(R"({"commands":[{"op":"motion.bake","name":"Lift cycle","fps":1}]})");
+        const auto cableNode=g_doc.assembly.back().id;const auto part=g_instancePart[display(cableNode)];const auto originalMesh=g_cpuMeshes[part].pos;const auto cableSource=documentToJson(g_doc);const auto cableRevision=g_session.revision;
+        auto waitCables=[&]{const auto end=std::chrono::steady_clock::now()+std::chrono::seconds(60);while(motion_cables_view_054b::state.worker.valid()&&std::chrono::steady_clock::now()<end){pollMotionCables054B();Sleep(10);}check(!motion_cables_view_054b::state.worker.valid(),"Cable preparation timeout");};
+        press(45001);check(motion_cables_view_054b::state.worker.valid(),"Cable preparation did not start");press(45002);waitCables();check(!g_bakedMotions.playing&&g_cpuMeshes[part].pos==originalMesh,"Cancellation changed cable display");
+        press(45001);waitCables();check(motion_cables_view_054b::state.ready&&g_bakedMotions.playing,"Native cable preparation failed: "+motion_cables_view_054b::state.error);press(45001);
+        selBody=-1;g_picked.clear();g_showEdges=false;for(size_t i=0;i<g_bodyIds.size();++i){const auto link=std::find(links.begin(),links.end(),g_instanceIds[i]);g_hiddenBodies[i]=g_bodyIds[i]<=3||(link!=links.end()&&(link-links.begin())%2==0);}rebuildDisplayBounds();setOrbitView(0,-1.45,true,nullptr);frameScene();g_status="Flexible harness / alternate links hidden for inspection";
+        g_bakedMotions.time=1;g_bakedMotions.shownFrame=~size_t(0);applyBakedMotionFrame();const auto lowMesh=g_cpuMeshes[part].pos;frameScene();capture(".cable-low.png");
+        g_bakedMotions.time=3;g_bakedMotions.shownFrame=~size_t(0);applyBakedMotionFrame();check(g_cpuMeshes[part].pos!=lowMesh,"Cable display remained frozen");frameScene();capture(".cable-high.png");
+        press(45002);check(g_cpuMeshes[part].pos==originalMesh,"Stop did not restore cable mesh");check(documentToJson(g_doc)==cableSource&&g_session.revision==cableRevision,"Flexible display edited source geometry");
         std::fprintf(stderr,"Drag chain UI passed: 25 driven link occurrences, baked carriage playback at q=120/345/570 with a static fixed run, rigid carriage end and half-speed loop, link properties\n");
     }catch(const std::exception& error){g_dialogSmoke=0;std::fprintf(stderr,"Drag chain UI failed: %s\n",error.what());return 5001;}
 }

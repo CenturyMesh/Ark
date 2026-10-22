@@ -43,6 +43,9 @@ int main(){try{
     bool overwritten=false;try{saveParametricComponent(second,path);}catch(const std::exception&){overwritten=true;}check(overwritten&&parametricComponentHash(loadParametricComponent(path))==parametricComponentHash(package),"Immutable file publication");
     V topArgs=json(R"({"kind":"assembly","node":1,"name":"Base assembly","parameters":["width"]})");auto top=makeParametricComponent(source.document,topArgs);const auto topPath=(dir/"base.arktop").string();saveParametricComponent(top,topPath);AgentSession assembly;commit(assembly,prepare(assembly,topPath,"module"));check(assembly.document.assembly.size()==2&&assembly.document.lastResults.back().ok,"Assembly package placement and exact geometry");
     // Scoped work keeps only materialized recipes, not unrelated embedded definitions.
+    apply(source,R"([{"op":"classification.set","feature":1,"families":["mechanical"],"tags":["reusable","width"]},{"op":"classification.set","node":1,"families":["bodywork"]}])");
+    const auto classifiedPath=(dir/"classified.arktop").string();saveParametricComponent(makeParametricComponent(source.document,topArgs),classifiedPath);AgentSession classified;commit(classified,prepare(classified,classifiedPath,"classified"));
+    check(classified.document.find(1)->classification.dump()==source.document.find(1)->classification.dump()&&classified.document.assembly.front().classification.dump()==source.document.assembly.front().classification.dump(),"Reuse preserves feature and assembly family metadata");
     auto checkout=call(assembly,"design_containers",json(R"({"action":"checkout","node":1})"));check(!at(checkout,"document").find("parametric_components"),"Scoped workers must not inherit the full component library");
     // Owned sketches keep their local names while feature IDs are remapped.
     apply(source,R"([{"op":"sketch.set","name":"Detail","owner_feature":1,"sketch":{"entities":[{"kind":"line","name":"axis","dof":[0,0,"width",0]}]}}])");

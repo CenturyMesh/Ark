@@ -61,7 +61,7 @@ struct Graph {
         for(size_t at=0;at<text.size();){if(!(std::isalpha((unsigned char)text[at])||text[at]=='_')){++at;continue;}const auto start=at++;while(at<text.size()&&(std::isalnum((unsigned char)text[at])||text[at]=='_'))++at;const auto key="params:"+text.substr(start,at-start);if(all.count(key))refs.insert(key);}
     }
     void scan(const V& value,const std::string& key,Keys& refs) const {
-        if(key=="name"||key=="local_name"||key=="id"||key=="part"||key=="mesh"||key=="appearance"||key=="component_metadata"||key=="package"||key=="topology"||key=="source_topology")return;
+        if(key=="name"||key=="local_name"||key=="id"||key=="part"||key=="classification"||key=="mesh"||key=="appearance"||key=="component_metadata"||key=="package"||key=="topology"||key=="source_topology")return;
         if(value.t==V::Str){named(value.str,refs);return;}
         if(value.t==V::Num){const bool feature=key=="owner_feature"||key=="feature"||key=="second_feature"||key=="source_feature"||key=="alternate_feature"||key=="inputs"||key=="curve";const bool node=key=="node"||key=="source_instance"||key=="alternate_node"||key=="instances"||key=="parent";if(feature||node){const auto k=std::string(feature?"features:":"assembly:")+std::to_string(id(value));if(all.count(k))refs.insert(k);}return;}
         if(value.t==V::Arr){for(const auto& row:value.arr)scan(row,key,refs);return;}
@@ -129,7 +129,7 @@ Checkout makeCheckout(const Document& doc,u64 revision,u64 group,bool legacy=fal
     V localRoots=V::makeArr();localRoots.arr.push_back(number(group));checkout.root.set("assembly_load_selection",localRoots);
     checkout.root.set("version",number((u64)std::max(41.,field(checkout.root,"version").asNum())));
     }
-    erase(checkout.root,"drawings");erase(checkout.root,"canvases");erase(checkout.root,"skeleton");
+    erase(checkout.root,"schematics");erase(checkout.root,"drawings");erase(checkout.root,"canvases");erase(checkout.root,"skeleton");
     // The owning project keeps immutable library definitions. A scoped worker
     // receives only its materialized recipe closure, never unrelated packages.
     erase(checkout.root,"parametric_components");
@@ -154,7 +154,7 @@ void guardWorkspace(const V& manifest,const V& current){
     for(const auto& root:field(current,"assembly_load_selection").arr)if(!nodes.count(id(root)))reject("CONTAINER_LOAD_BOUNDARY","Workspace load roots must remain inside the editable container");
     for(const auto& recipe:field(current,"assembly_configurations").arr){const auto key="assembly_configurations:"+field(recipe,"name").asStr();if(readonly.count(key))continue;for(const auto& target:configurationTargets(recipe))if(!now.count(target)||readonly.count(target))reject("CONTAINER_CONFIGURATION_BOUNDARY","Writable configuration cannot change missing or readonly source "+target);}
     for(const auto& pin:field(current,"assembly_external_references").arr){const auto key="assembly_external_references:"+std::to_string(id(field(pin,"feature")));if(!readonly.count(key)&&readonly.count("features:"+std::to_string(id(field(pin,"feature")))))reject("CONTAINER_PIN_BOUNDARY","An external dependency pin cannot be changed through the child");}
-    if(!field(current,"drawings").arr.empty()||!field(current,"canvases").arr.empty()||field(current,"skeleton").t==V::Obj)reject("CONTAINER_UNSUPPORTED_SOURCE","Drawings, canvases and global Skeleton source cannot be introduced through a container merge");
+    if(!field(current,"schematics").arr.empty()||!field(current,"drawings").arr.empty()||!field(current,"canvases").arr.empty()||field(current,"skeleton").t==V::Obj)reject("CONTAINER_UNSUPPORTED_SOURCE","Schematics, drawings, canvases and global Skeleton source cannot be introduced through a container merge");
     for(const auto& kv:old)if(!editable.count(kv.first)&&!readonly.count(kv.first))reject("CONTAINER_MANIFEST_INVALID","A baseline source has no declared ownership");
     for(const auto& kv:now)if(!old.count(kv.first)&&numericCollection(kv.first)){
         const auto value=id(field(kv.second,"id"));const char* counter=kv.first.rfind("features:",0)==0?"next_feature_id":kv.first.rfind("assembly:",0)==0?"next_assembly_id":"next_mate_id";
@@ -172,12 +172,12 @@ void remap(V& value,const std::string& key,const IdMap& features,const IdMap& no
         if(const auto found=sketches.find(value.str);found!=sketches.end())value.str=found->second;
     }
     if(value.t==V::Num){const bool f=key=="owner_feature"||key=="feature"||key=="second_feature"||key=="source_feature"||key=="alternate_feature"||key=="inputs"||key=="curve";const bool n=key=="node"||key=="source_instance"||key=="alternate_node"||key=="instances"||key=="parent";if(f||n)value=number(mapped(id(value),f?features:nodes));}
-    else if(value.t==V::Obj){if(value.find("owner_feature"))if(auto* name=value.find("name")){if(const auto found=sketches.find(name->str);found!=sketches.end())value.set("name",V::makeStr(found->second));}for(auto& kv:value.obj)if(kv.first!="mesh"&&kv.first!="part"&&kv.first!="package"&&kv.first!="component_metadata")remap(kv.second,kv.first,features,nodes,sketches);}
+    else if(value.t==V::Obj){if(value.find("owner_feature"))if(auto* name=value.find("name")){if(const auto found=sketches.find(name->str);found!=sketches.end())value.set("name",V::makeStr(found->second));}for(auto& kv:value.obj)if(kv.first!="mesh"&&kv.first!="classification"&&kv.first!="part"&&kv.first!="package"&&kv.first!="component_metadata")remap(kv.second,kv.first,features,nodes,sketches);}
     else if(value.t==V::Arr)for(auto& row:value.arr)remap(row,key,features,nodes,sketches);
 }
 bool equal(const V& a,const V& b){return canonicalText(a)==canonicalText(b);}
 void noRemovedParams(const V& before,const V& after){for(const auto& kv:before.obj)if(!after.find(kv.first.c_str()))reject("CONTAINER_UNSUPPORTED_PARAMETER_REMOVAL","Existing placement/datum parameter keys cannot be removed by the current edit contract");}
-V featureCommand(const V& row,const V* before){V c=command(before?"feature.edit":"feature.add");for(const auto& kv:row.obj){if(kv.first=="id"){if(before)c.set("id",kv.second);}else if(kv.first=="op"){if(!before)c.set("mode",kv.second);}else if(kv.first=="type"||kv.first=="inputs"){if(!before)c.set(kv.first,kv.second);}else if(!before||!equal(field(*before,kv.first.c_str()),kv.second))c.set(kv.first,kv.second);}if(before){for(const auto* key:{"part","material","appearance","manufacturing"})if(before->find(key)&&!row.find(key))c.set(key,V{});if(before->find("suppressed")&&!row.find("suppressed"))c.set("suppressed",V::makeBool(false));V removed=V::makeArr();for(const auto& kv:field(*before,"p").obj)if(!field(row,"p").find(kv.first.c_str()))removed.arr.push_back(V::makeStr(kv.first));if(!removed.arr.empty())c.set("p_remove",removed);}return c;}
+V featureCommand(const V& row,const V* before){V c=command(before?"feature.edit":"feature.add");for(const auto& kv:row.obj){if(kv.first=="id"){if(before)c.set("id",kv.second);}else if(kv.first=="op"){if(!before)c.set("mode",kv.second);}else if(kv.first=="type"||kv.first=="inputs"){if(!before)c.set(kv.first,kv.second);}else if(!before||!equal(field(*before,kv.first.c_str()),kv.second))c.set(kv.first,kv.second);}if(before){for(const auto* key:{"part","material","appearance","manufacturing","classification"})if(before->find(key)&&!row.find(key))c.set(key,V{});if(before->find("suppressed")&&!row.find("suppressed"))c.set("suppressed",V::makeBool(false));V removed=V::makeArr();for(const auto& kv:field(*before,"p").obj)if(!field(row,"p").find(kv.first.c_str()))removed.arr.push_back(V::makeStr(kv.first));if(!removed.arr.empty())c.set("p_remove",removed);}return c;}
 }
 
 V componentSourceClosure(const Document& doc,const V& args){
@@ -207,7 +207,7 @@ V componentSourceClosure(const Document& doc,const V& args){
     const Graph graph(root,false);const auto retained=graph.closure(seed);
     for(const auto& key:retained)if(!graph.all.count(key))reject("COMPONENT_PORT_MISSING",key);
     for(const auto* collection:collections){V subset=V::makeArr();for(const auto& row:field(root,collection).arr)if(retained.count(rowKey(collection,row)))subset.arr.push_back(row);root.set(collection,subset);}
-    for(const char* key:{"design_container_checkout","parametric_components","drawings","canvases","skeleton","motions","drag_chains","exploded_views","assembly_configurations","assembly_load_selection","assembly_external_references","bom_document_id"})erase(root,key);
+    for(const char* key:{"design_container_checkout","parametric_components","schematics","drawings","canvases","skeleton","motions","drag_chains","exploded_views","assembly_configurations","assembly_load_selection","assembly_external_references","bom_document_id"})erase(root,key);
     return root;
 }
 
@@ -285,7 +285,7 @@ V proposeDesignContainerMerge(const Document& doc,u64 revision,const V& args){
         if(std::string(collection)=="features"){
             if(before){if(!equal(field(*before,"type"),field(original,"type"))||!equal(field(*before,"inputs"),field(original,"inputs"))||!equal(field(*before,"op"),field(original,"op")))reject("CONTAINER_UNSUPPORTED_FEATURE_REWRITE","Retained feature type, inputs and Boolean mode are immutable in this merge contract");if(!equal(field(*before,"source"),field(original,"source")))reject("CONTAINER_READONLY_SOURCE","Imported source payload cannot be replaced by a container edit");}c=featureCommand(row,before);
         }else if(std::string(collection)=="assembly"){
-            if(before)noRemovedParams(field(*before,"p"),field(original,"p"));c=command(before?"assembly.edit":"assembly.add");for(const auto& kv:row.obj)if(kv.first!="id"||before)c.set(kv.first,kv.second);if(before&&!row.find("pattern"))c.set("pattern",V{});
+            if(before)noRemovedParams(field(*before,"p"),field(original,"p"));c=command(before?"assembly.edit":"assembly.add");for(const auto& kv:row.obj)if(kv.first!="id"||before)c.set(kv.first,kv.second);if(before&&!row.find("pattern"))c.set("pattern",V{});if(before&&before->find("classification")&&!row.find("classification"))c.set("classification",V{});
         }else if(std::string(collection)=="mates"){
             if(before)for(const auto* optional:{"motion","limits"})if(before->find(optional)&&!row.find(optional))reject("CONTAINER_UNSUPPORTED_MATE_REWRITE","Removing retained mate motion/limits is outside this scoped merge contract; edit that constraint in the owning document explicitly");
             row.set("a",number(mapped(id(field(original,"a")),nodeIds)));row.set("b",number(mapped(id(field(original,"b")),nodeIds)));c=command(before?"mate.edit":"mate.add");for(const auto& kv:row.obj)if(kv.first!="id"||before)c.set(kv.first,kv.second);
