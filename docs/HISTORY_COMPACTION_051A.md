@@ -1,7 +1,8 @@
 # Recoverable history compaction — 051A
 
-Milestone **A.02**. Implementation and synthetic verification targets are present;
-execution evidence is recorded in the iteration verification notes after running them.
+Milestone **A.02**: **Verificado no escopo** for the synthetic persistence and
+Studio checks recorded in [051A](iterations/051A.md). The broader recovery
+milestone remains partial.
 
 `history_compact` is an explicit operation for a long-running drawing. ARK still
 rejects an edit beyond 512 retained nodes or the 4 MiB metadata limit. It never
@@ -78,6 +79,12 @@ Verification targets:
   of usage receipts and atomic rejection contracts.
 - `studio-history-compaction-ui`: synthetic Studio control exercise with decline,
   confirmation, saved archive and compacted reopen, and before/after captures.
+
+The integrated core and patched-native suites passed `history-compaction-051a`,
+`iteration-history` and `scoped-sketches-history-051a`. The latter preserves two
+same-named definition-owned sketches, their canonical consumers and a legacy
+global sketch through compaction, selected branch restore and full archive load.
+Portable and native Studio compaction selftests exited 0; captures were inspected.
 
 These are local persistence/UI checks. They do not qualify manufacturing geometry,
 external deployment, archive storage availability or protection against external

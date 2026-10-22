@@ -1,6 +1,6 @@
 # Agent outcomes, 051A
 
-D.02 and A.02: **Verificado no escopo** for the offline harness checks below;
+D.01/D.02 and A.02: **Verificado no escopo** for the offline harness checks below;
 real provider comparisons remain **Parcial**. No paid provider was called.
 
 The existing `ark-benchmark` harness now records distinct `completed`,
@@ -22,7 +22,7 @@ and reruns the same independent oracle. This is fresh-session authoring reconstr
 not a process-cold kernel: shared worker/process caches are not reset. Saving and
 reopening are host actions; these receipts do not prove the model issued save/load. It compares authoring and checks file bytes
 again after reopen. `persistence.saved` means writing succeeded; `persisted` also
-requires the cold oracle and authoring comparison. A completed response or an in-memory
+requires the reopened oracle and authoring comparison. A completed response or an in-memory
 valid body alone cannot satisfy this gate. `artifact_directory` in the config selects
 the parent; otherwise files remain under the system temporary directory's
 `ark-agent-benchmark` folder. These artifacts contain synthetic fixtures only.
@@ -59,6 +59,10 @@ executor calls and real .ark files: the original 30 preflights and nine strategy
 runs, plus three v2 preflights and nine v2 strategy runs. Negative checks cover
 completion without acceptable geometry, save failure, changed authoring on reopen,
 atomic rejection/recovery, incomplete usage, mismatched tariff, and failed-attempt
-cost accounting. The changed benchmark and test translation units were compiled
-with LLVM-MinGW and linked against the existing ARK baseline library for this local
-check; this is not a new packaged runtime or a live-model speed/cost comparison.
+cost accounting. The integrated 051A native `agent-benchmark` suite also passed
+against the verified patched SDK. The built CLI passed all three v2 preflights
+and accepted/persisted all nine offline attempts (three cases across
+Single/Focused/Parallel). These deterministic harness checks are not a live-model
+quality, speed or cost comparison. Local receipts are
+`out/051a-outcomes-preflight.log` and `out/051a-outcomes.jsonl`; no paid provider
+calls or deployment were used.

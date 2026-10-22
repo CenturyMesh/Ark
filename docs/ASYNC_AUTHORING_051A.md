@@ -68,5 +68,8 @@ revision-guarded synthetic drawings. Inspected captures show live orbit/zoom and
 selection during preparation, the progress and Cancel control, published geometry,
 and the retained drawing during cancellation. These are local runtime/UI checks,
 not provider latency, deployment or manufacturing qualification evidence. Native
-pool cancellation has its separate evaluation-schedule test; the local Studio
-capture build used the portable backend.
+pool cancellation has its separate evaluation-schedule test. The integrated
+051A core and patched-native worker suites also passed, followed by native
+Studio async-authoring and history-compaction selftests (exit 0). The final
+native captures confirm navigation/selection, publication and cancellation on
+that build; the initial isolated capture build used the portable backend.

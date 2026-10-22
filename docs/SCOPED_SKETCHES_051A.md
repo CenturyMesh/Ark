@@ -58,6 +58,14 @@ references remain canonical strings throughout solver evaluation, history,
 serialization, native operations and context. Context graph ownership edges are
 labelled `owned_by_definition`, separately from geometry source edges.
 
+For bounded agent context, select the definition with `object_context{ids:[12]}`
+and its explicit neighborhood with `context_graph{keys:["feature:12"],depth:1}`.
+Reuse only the scope/fingerprints and associated facts actually received. Shared
+occurrences reuse definition context; their placement remains an occurrence
+selection. This uses the live CAD context API; it does not export private drawing
+content into the repository's Graphify/Obsidian code index or establish measured
+provider-token savings.
+
 The Studio sketch browser groups local labels under shared definitions and the
 Document scope. Rectangle, circle and spline authoring expose an owner chooser;
 existing sketch editing and curve appending use the canonical selection. Sketch

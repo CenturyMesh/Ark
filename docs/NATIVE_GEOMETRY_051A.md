@@ -70,7 +70,7 @@ does not stand in for an integrated 051A application build, complete-suite run,
 packaging or deployment. Those are separate delivery gates. No manufacturing or
 arbitrary-surface qualification is inferred from these regression fixtures.
 
-## B.03 cancellation across evaluation threads
+## A.04/B.03 cancellation across evaluation threads
 
 The request cancellation scope and timeout allowance were thread-local. Native
 jobs dispatched to the feature pool therefore lost their owner's cancellation
@@ -88,3 +88,11 @@ recompute succeeded on reused pool threads without invoking the prior callback.
 The test also verifies inheritance and restoration of the request allowance.
 This evidence uses freshly compiled changed objects linked with the existing
 baseline library and worker. An integrated build and suite remain separate gates.
+
+The integrated 051A build subsequently passed `native-solid`, `native-surface`,
+`evaluation_schedule-032d`, `async-exact-046b` and `async-authoring-051a` against
+the verified SDK. The fresh native CMake configuration has
+`ARK_ALLOW_UNPATCHED_OCCT=OFF` and empty C/C++ extra flags. Full-suite outcomes,
+including separately repeated filesystem failures, are recorded in
+[051A](iterations/051A.md). This is local build evidence, not hosted CI,
+distribution or manufacturing qualification.
