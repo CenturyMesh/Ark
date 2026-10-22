@@ -150,7 +150,7 @@ arkjson::Value AgentSession::call(const std::string& tool,const V& args){
         // Validate caller metadata before running geometry or touching usage.
         (void)iterationActor(args);if(auto reason=args.find("motivation");reason&&(reason->t!=V::Str||reason->str.size()>4096))throw std::runtime_error("motivation must be text of at most 4096 bytes");
         std::string target;if(tool=="iteration_restore"){if(auto id=args.find("id");id&&id->t==V::Str)target=id->str;}
-        
+
         V response=dispatchCurrent();if(auto error=response.find("isError");error&&error->b){rollback();return finish(std::move(response));}
         if((tool=="doc_undo"||tool=="doc_redo")&&before.iterationHistory.t==V::Obj)target=iterationUndoTarget(before,tool=="doc_redo");
         // Opening/New are project boundaries. They never copy another project's

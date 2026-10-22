@@ -41,11 +41,11 @@ Failure to append history rolls the prepared geometry back. A stale, cancelled,
 invalid or over-capacity result remains a failed result.
 
 Cancellation uses the existing native RPC cancellation scope with its existing
-request limit on the preparation thread. Evaluation-pool tasks do not currently
-inherit that thread-local scope. Those native requests can finish up to their
-existing timeout; CPU work without an interrupt point may also finish privately.
-Its cancelled generation cannot publish. The persistent worker joins at shutdown,
-so closing or the next queued edit can wait for that private work to finish.
+request limit. Evaluation-pool tasks capture that scope when scheduled, so their
+native requests inherit cancellation and the request limit. CPU work without an
+interrupt point may still finish privately. Its cancelled generation cannot
+publish. The persistent worker joins at shutdown, so closing or the next queued
+edit can wait for that remaining private work to finish.
 There are no new agent turn/token budgets, geometry tolerances or silent rebases.
 
 Local verification:
@@ -56,12 +56,17 @@ Local verification:
   cancel (including a ready result cancelled at publication), rejection with
   history suppression, malformed arguments, no-op preservation of ordinary and
   compacted journals/undo/redo, journal-capacity failure after successful
-  preparation, and shutdown.
+  preparation, parameter-driven evaluated geometry, and shutdown.
 - `studio-async-authoring-ui` drives actual queued window messages during a HUD
   rebuild, checks orbit/zoom/selection and unchanged live authoring before
   publication, captures the live scene, and checks successful geometry, a stale
   external queued request, Escape, same-revision replacement and close cancellation.
 
-The portable worker target passed locally on the isolated build. Studio capture
-verification is recorded after the UI target runs. These are local runtime/UI
-checks, not provider latency, deployment or manufacturing qualification evidence.
+The portable worker target passed locally on the isolated build. Both Studio
+async-authoring and history-compaction selftests exited successfully with fresh,
+revision-guarded synthetic drawings. Inspected captures show live orbit/zoom and
+selection during preparation, the progress and Cancel control, published geometry,
+and the retained drawing during cancellation. These are local runtime/UI checks,
+not provider latency, deployment or manufacturing qualification evidence. Native
+pool cancellation has its separate evaluation-schedule test; the local Studio
+capture build used the portable backend.
