@@ -9,6 +9,12 @@ The public iteration and numeric runtime are defined in
 increasing sequence and its principal phase. The letter is a roadmap phase, not a
 month; it does not declare the phase complete. The `.ark` format evolves separately.
 
+051A is **Em curso** for **A.02/A.03/A.04/B.02/B.03/B.04/D.01/D.02**:
+explicit archived history compaction, part-scoped sketches, background edit
+preparation, native geometry regression verification and measured agent task
+outcomes. Acceptance and evidence are tracked in [051A](iterations/051A.md).
+The broader milestones remain **Parcial** while integration is in progress.
+
 050B addresses **B.04/C.04/B.02/A.02**, **Parcial**, with native driven drag
 chains, carriage playback and a 256-sketch document limit. Integration
 verification and limits are recorded in [050B](iterations/050B.md).
