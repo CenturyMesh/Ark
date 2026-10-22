@@ -69,3 +69,22 @@ This comparison isolates the dependency repair using existing test binaries; it
 does not stand in for an integrated 051A application build, complete-suite run,
 packaging or deployment. Those are separate delivery gates. No manufacturing or
 arbitrary-surface qualification is inferred from these regression fixtures.
+
+## B.03 cancellation across evaluation threads
+
+The request cancellation scope and timeout allowance were thread-local. Native
+jobs dispatched to the feature pool therefore lost their owner's cancellation
+policy and could remain in a worker RPC until the default watchdog expired.
+Each submitted job now owns a copy of that policy and installs an RAII scope on
+the pool thread. Scope exit restores the thread's prior policy, including after
+native failure. This changes neither geometric authority nor tolerances.
+
+The native variant of `ark-evaluation-schedule-032d-tests` exercises four independent
+native boxes on two feature workers with the result cache disabled. Its cancellation
+callback permits dispatch and then cancels inside the real isolated process wait.
+The local isolated test started two native processes and returned in 29.27 ms
+against a 120-second allowance; every job reported `NATIVE_CANCELLED`. A subsequent
+recompute succeeded on reused pool threads without invoking the prior callback.
+The test also verifies inheritance and restoration of the request allowance.
+This evidence uses freshly compiled changed objects linked with the existing
+baseline library and worker. An integrated build and suite remain separate gates.

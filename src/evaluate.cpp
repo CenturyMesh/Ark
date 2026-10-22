@@ -635,7 +635,8 @@ const std::vector<FeatureResult>& Document::recompute() {
             snapshot.params=params;snapshot.materials=materials;snapshot.tessOpt=tessOpt;
             std::vector<Body> inputs;for(u64 id:features[i].inputs)inputs.push_back(*inputBody(id));
             const Feature feature=features[i];const unsigned nativeBudget=nativeThreadsPerWorker;
-            auto task=std::make_shared<std::packaged_task<Evaluation()>>([snapshot=std::move(snapshot),inputs=std::move(inputs),feature,env,nativeBudget,activity,pending=pendingNativeGeometry]()mutable{
+            auto task=std::make_shared<std::packaged_task<Evaluation()>>([snapshot=std::move(snapshot),inputs=std::move(inputs),feature,env,nativeBudget,activity,pending=pendingNativeGeometry,requestControl=captureNativeRequestControl()]()mutable{
+                NativeRequestControlScope requestScope(std::move(requestControl.cancelled),requestControl.limitMs);
                 NativeDocumentResultScope nativeResults(std::move(pending));
                 NativeBudgetScope budget(nativeBudget);Evaluation value;value.result.id=feature.id;double started=nowMs();activity->enter();
                 try{value.result.error=featureParameterError(feature,env);value.result.ok=value.result.error.empty();if(value.result.ok){snapshot.evaluatingBodies=&inputs;value.body=evalFeatureBody(feature,env,snapshot,inputs,value.result,snapshot.tessOpt);value.body.id=feature.id;}}catch(const std::exception& e){value.result.ok=false;value.result.error=e.what();}

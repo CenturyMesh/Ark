@@ -289,6 +289,7 @@ NativeRequestControlScope::NativeRequestControlScope(std::function<bool()> cance
     if(limitMs<1000||limitMs>3600000)throw std::runtime_error("Native request limit must be 1..3600 seconds");nativeCancel=cancel?&cancel:nullptr;nativeLimitMs=limitMs;
 }
 NativeRequestControlScope::~NativeRequestControlScope(){nativeCancel=previousCancel;nativeLimitMs=previousLimit;}
+NativeRequestControl captureNativeRequestControl(){return {nativeCancel?*nativeCancel:std::function<bool()>{},nativeLimitMs};}
 unsigned nativeRequestLimitMs(){return nativeLimitMs;}
 int setNativeThreadBudget(int threads){if(threads<0||threads>64)throw std::runtime_error("Native thread budget must be 0..64");int old=nativeThreadOverride;nativeThreadOverride=threads;return old;}
 V nativeModelRequest(const V& model){V request=V::makeObj();request.set("operation",V::makeStr("model"));request.set("request",model);return nativeWorkerRequest(request);}

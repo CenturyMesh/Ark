@@ -51,6 +51,10 @@ public:
     NativeRequestControlScope(const NativeRequestControlScope&)=delete;
     NativeRequestControlScope& operator=(const NativeRequestControlScope&)=delete;
 };
+// Own a copy of the calling thread's policy for a child evaluation task. The
+// scope on that task restores the pool thread's previous policy on every exit.
+struct NativeRequestControl {std::function<bool()> cancelled;unsigned limitMs=30000;};
+NativeRequestControl captureNativeRequestControl();
 unsigned nativeRequestLimitMs(); // effective per-request limit on this thread
 arkjson::Value exportNativeBrep(const std::string& brep,const std::string& path);
 Mesh nativeResultMesh(const arkjson::Value& result);
