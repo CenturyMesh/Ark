@@ -1,7 +1,9 @@
 param(
     [ValidateRange(1, 16)][int]$Jobs = 4,
     [switch]$ConfigureOnly,
-    [switch]$AllowCandidatePatchset
+    [switch]$AllowCandidatePatchset,
+    [ValidateSet('MSVC', 'LLVMMinGW')][string]$Toolchain = 'MSVC',
+    [string]$CompilerDirectory
 )
 
 $ErrorActionPreference = 'Stop'
@@ -12,8 +14,9 @@ $patchHelper = Join-Path $PSScriptRoot 'ApplyOcctPatch.cmake'
 $cache = Join-Path $deps 'cache'
 $archive = Join-Path $cache 'OCCT-V8_0_1.zip'
 $source = Join-Path $deps "source-$patchset"
-$build = Join-Path $deps "build-msvc-$patchset"
-$install = Join-Path $deps "install-msvc-$patchset"
+$toolchainSuffix = if ($Toolchain -eq 'LLVMMinGW') { 'mingw' } else { 'msvc' }
+$build = Join-Path $deps "build-$toolchainSuffix-$patchset"
+$install = Join-Path $deps "install-$toolchainSuffix-$patchset"
 $sourceStamp = Join-Path $source '.ark-source-sha256'
 $expectedSha256 = '7C033D917EE8F040C0512D289DCC5F02C148889D5BAC17C3E25639ACCB44F0DA'
 $archiveUrl = 'https://github.com/Open-Cascade-SAS/OCCT/archive/refs/tags/V8_0_1.zip'
@@ -48,8 +51,9 @@ if (-not (Test-Path -LiteralPath $sourceStamp) -or (Get-Content -LiteralPath $so
 if ($LASTEXITCODE -ne 0) { throw 'Exact OCCT patch preparation failed' }
 
 $configure = @(
-    '-S', $source, '-B', $build, '-G', 'Visual Studio 17 2022', '-A', 'x64',
+    '-S', $source, '-B', $build,
     "-DINSTALL_DIR=$install",
+    '-DCMAKE_EXPORT_NO_PACKAGE_REGISTRY=ON',
     '-DBUILD_MODULE_FoundationClasses=ON',
     '-DBUILD_MODULE_ModelingData=ON',
     '-DBUILD_MODULE_ModelingAlgorithms=ON',
@@ -69,6 +73,20 @@ $configure = @(
     '-DINSTALL_DOC_Overview=OFF',
     '-DINSTALL_TEST_CASES=OFF'
 )
+if ($Toolchain -eq 'LLVMMinGW') {
+    if (-not $CompilerDirectory) { throw 'LLVMMinGW requires -CompilerDirectory pointing to the LLVM-MinGW bin directory' }
+    foreach ($tool in @('clang.exe', 'clang++.exe', 'mingw32-make.exe')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $CompilerDirectory $tool) -PathType Leaf)) { throw "Missing LLVM-MinGW tool: $tool" }
+    }
+    $CompilerDirectory = (Resolve-Path -LiteralPath $CompilerDirectory).Path.Replace('\','/')
+    $env:PATH = "$CompilerDirectory;$env:PATH"
+    $configure += @('-G', 'MinGW Makefiles', '-DCMAKE_BUILD_TYPE=Release',
+        "-DCMAKE_C_COMPILER=$CompilerDirectory/clang.exe",
+        "-DCMAKE_CXX_COMPILER=$CompilerDirectory/clang++.exe",
+        "-DCMAKE_MAKE_PROGRAM=$CompilerDirectory/mingw32-make.exe")
+} else {
+    $configure += @('-G', 'Visual Studio 17 2022', '-A', 'x64')
+}
 & cmake @configure
 if ($LASTEXITCODE -ne 0) { throw 'OCCT configuration failed' }
 if ($ConfigureOnly) { return }
@@ -80,10 +98,12 @@ if ($LASTEXITCODE -ne 0) { throw 'OCCT install failed' }
 
 $config = Get-ChildItem -LiteralPath $install -Filter OpenCASCADEConfig.cmake -File -Recurse |
     Select-Object -First 1
-$stepLib = Get-ChildItem -LiteralPath $install -Filter TKDESTEP.lib -File -Recurse |
+$libraryPattern = if ($Toolchain -eq 'LLVMMinGW') { 'libTKDESTEP.dll.a' } else { 'TKDESTEP.lib' }
+$stepLib = Get-ChildItem -LiteralPath $install -Filter $libraryPattern -File -Recurse |
     Select-Object -First 1
 if (-not $config -or -not $stepLib) { throw 'Installed OCCT SDK lacks CMake config or STEP library' }
-$igesLib = Get-ChildItem -LiteralPath $install -Filter TKDEIGES.lib -File -Recurse | Select-Object -First 1
+$igesPattern = if ($Toolchain -eq 'LLVMMinGW') { 'libTKDEIGES.dll.a' } else { 'TKDEIGES.lib' }
+$igesLib = Get-ChildItem -LiteralPath $install -Filter $igesPattern -File -Recurse | Select-Object -First 1
 if (-not $igesLib) { throw 'Installed OCCT SDK lacks IGES library' }
 $licenses=Join-Path $install 'licenses';[IO.Directory]::CreateDirectory($licenses)|Out-Null
 foreach($notice in @('LICENSE_LGPL_21.txt','OCCT_LGPL_EXCEPTION.txt')){Copy-Item -LiteralPath (Join-Path $source $notice) -Destination $licenses}
