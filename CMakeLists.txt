@@ -177,7 +177,7 @@ add_executable(ark-benchmark src/app/benchmark.cpp)
 target_link_libraries(ark-benchmark PRIVATE ark)
 add_custom_command(TARGET ark-benchmark POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:ark-benchmark>/benchmarks" "$<TARGET_FILE_DIR:ark-benchmark>/examples"
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/benchmarks/agent_briefs_v1.json" "${CMAKE_SOURCE_DIR}/benchmarks/offline.json" "${CMAKE_SOURCE_DIR}/benchmarks/ollama-qwen-q3.json" "${CMAKE_SOURCE_DIR}/benchmarks/ollama-qwen-27b.json" "$<TARGET_FILE_DIR:ark-benchmark>/benchmarks"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/benchmarks/agent_briefs_v1.json" "${CMAKE_SOURCE_DIR}/benchmarks/agent_outcomes_v2.json" "${CMAKE_SOURCE_DIR}/benchmarks/offline.json" "${CMAKE_SOURCE_DIR}/benchmarks/ollama-qwen-q3.json" "${CMAKE_SOURCE_DIR}/benchmarks/ollama-qwen-27b.json" "$<TARGET_FILE_DIR:ark-benchmark>/benchmarks"
   COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/examples/pneumatic-cylinder.arkops" "$<TARGET_FILE_DIR:ark-benchmark>/examples")
 add_executable(ark-tests tests/tests.cpp)
 add_executable(ark-agent-tests tests/agent_tests.cpp)

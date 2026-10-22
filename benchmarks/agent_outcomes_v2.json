@@ -1,0 +1,302 @@
+{
+  "id": "ark-agent-outcomes-v2",
+  "version": 2,
+  "source": "Synthetic editable tasks; all attempts are saved and cold-reopened by the host oracle. Reference commands are never sent to live models.",
+  "milestones": [
+    "A.02",
+    "D.02"
+  ],
+  "cases": [
+    {
+      "id": "E01",
+      "version": 1,
+      "category": "parametric_edit",
+      "brief": "Change driving parameter width from 10 to 15 mm. Keep Block width driven by width, depth 20 and height 30. Preserve editable parameter and feature expressions.",
+      "baseline": [
+        {
+          "op": "param.set",
+          "name": "width",
+          "expr": "10"
+        },
+        {
+          "op": "feature.add",
+          "type": "native_solid",
+          "name": "Block",
+          "native": {
+            "op": "box"
+          },
+          "p": {
+            "width": "width",
+            "depth": 20,
+            "height": 30
+          }
+        }
+      ],
+      "reference": [
+        {
+          "op": "param.set",
+          "name": "width",
+          "expr": "15"
+        }
+      ],
+      "checks": [
+        {
+          "id": "valid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.brep_valid"
+          },
+          "equals": true
+        },
+        {
+          "id": "single_solid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.solids"
+          },
+          "equals": 1
+        },
+        {
+          "id": "volume",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.volume_mm3"
+          },
+          "equals": 9000,
+          "absolute_tolerance": 1e-05
+        },
+        {
+          "id": "bound_3",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.bounds_mm.3"
+          },
+          "equals": 15,
+          "absolute_tolerance": 1e-05
+        },
+        {
+          "id": "driving_parameter",
+          "query": {
+            "tool": "eval_expr",
+            "args": {
+              "expr": "width"
+            },
+            "path": "value"
+          },
+          "equals": 15
+        },
+        {
+          "id": "editable_expression",
+          "query": {
+            "tool": "doc_get",
+            "args": {},
+            "path": "document.features.0.p.width"
+          },
+          "equals": "width"
+        }
+      ]
+    },
+    {
+      "id": "E02",
+      "version": 1,
+      "category": "assembly_edit",
+      "brief": "Move Free Block instance to X=25 mm, retaining Fixed at origin and unchanged 10 by 20 by 30 Block geometry. Exact gap must be 15 mm.",
+      "baseline": [
+        {
+          "op": "feature.add",
+          "type": "native_solid",
+          "name": "Block",
+          "native": {
+            "op": "box"
+          },
+          "p": {
+            "width": 10,
+            "depth": 20,
+            "height": 30
+          }
+        },
+        {
+          "op": "assembly.add",
+          "name": "Fixed",
+          "feature": "Block",
+          "p": {},
+          "fixed": true
+        },
+        {
+          "op": "assembly.add",
+          "name": "Free",
+          "feature": "Block",
+          "p": {
+            "tx": 15
+          }
+        }
+      ],
+      "reference": [
+        {
+          "op": "assembly.edit",
+          "id": "Free",
+          "p": {
+            "tx": 25
+          }
+        }
+      ],
+      "checks": [
+        {
+          "id": "valid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.brep_valid"
+          },
+          "equals": true
+        },
+        {
+          "id": "single_solid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.solids"
+          },
+          "equals": 1
+        },
+        {
+          "id": "volume",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.volume_mm3"
+          },
+          "equals": 6000,
+          "absolute_tolerance": 1e-05
+        },
+        {
+          "id": "exact_gap",
+          "query": {
+            "tool": "assembly_info",
+            "args": {
+              "clearance": {
+                "a": "Fixed",
+                "b": "Free"
+              }
+            },
+            "path": "separation_mm"
+          },
+          "equals": 15,
+          "absolute_tolerance": 1e-05
+        }
+      ]
+    },
+    {
+      "id": "E03",
+      "version": 1,
+      "category": "rejection_recovery",
+      "brief": "A previous atomic edit attempted to set Block depth to 99 and width to -1 and was rejected. Recover from the unchanged baseline: set width to 15, retain original depth 20 and height 30, and keep the feature editable. Inspect the rejection and current document first.",
+      "baseline": [
+        {
+          "op": "feature.add",
+          "type": "native_solid",
+          "name": "Block",
+          "native": {
+            "op": "box"
+          },
+          "p": {
+            "width": 10,
+            "depth": 20,
+            "height": 30
+          }
+        }
+      ],
+      "reference": [
+        {
+          "op": "feature.edit",
+          "id": "Block",
+          "p": {
+            "width": 15
+          }
+        }
+      ],
+      "checks": [
+        {
+          "id": "valid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.brep_valid"
+          },
+          "equals": true
+        },
+        {
+          "id": "single_solid",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.solids"
+          },
+          "equals": 1
+        },
+        {
+          "id": "volume",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.volume_mm3"
+          },
+          "equals": 9000,
+          "absolute_tolerance": 1e-05
+        },
+        {
+          "id": "bound_3",
+          "query": {
+            "tool": "native_inspect",
+            "args": {
+              "id": 1
+            },
+            "path": "report.bounds_mm.3"
+          },
+          "equals": 15,
+          "absolute_tolerance": 1e-05
+        }
+      ],
+      "rejected_commands": [
+        {
+          "op": "feature.edit",
+          "id": "Block",
+          "p": {
+            "depth": 99
+          }
+        },
+        {
+          "op": "feature.edit",
+          "id": "Block",
+          "p": {
+            "width": -1
+          }
+        }
+      ]
+    }
+  ]
+}
