@@ -1,4 +1,5 @@
 #include "ark/design_containers.hpp"
+#include "ark/parametric_components.hpp"
 #include "ark/cad_import.hpp"
 // ARK-Point :: serialize.cpp — document persistence over arkjson.
 #include "ark/serialize.hpp"
@@ -656,6 +657,7 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
     if(profileRegions046BNeedsVersion48(doc))r.set("version",Value::makeNum(48));
     if(motionReceiptsRequireDocumentVersion49(doc))r.set("version",Value::makeNum(49));
     for(const auto& sketch:doc.sketches)if(sketch.ownerFeature){r.set("version",Value::makeNum(50));break;}
+    if(!doc.parametricComponents.isNull()){validateParametricComponents(doc.parametricComponents);r.set("parametric_components",doc.parametricComponents);r.set("version",Value::makeNum(51));}
     if(includeAudit&&includeHistory)iterationPersist(r,doc);
     canonicalDocumentKeys(r);
     std::string serialized=r.dump();
@@ -666,7 +668,7 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
 static bool documentFromValue(Value& v,Document& doc,std::string* err){
     auto fail=[&](const std::string& m){ if(err)*err=m; return false; };
     if(v.t!=Value::Obj) return fail("root must be object");
-    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || !std::isfinite(ver->num)||ver->num!=std::floor(ver->num)||ver->num<1||ver->num>50))
+    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || !std::isfinite(ver->num)||ver->num!=std::floor(ver->num)||ver->num<1||ver->num>51))
         return fail("unsupported document version");
     Value history;std::string historyError;if(!iterationExpand(v,history,historyError))return fail(historyError);
     if(const auto* nodes=v.find("assembly");nodes&&nodes->t==Value::Arr)for(const auto& node:nodes->arr)if(const auto* pattern=node.find("pattern");pattern&&pattern->find("carry_frame")){
@@ -678,6 +680,7 @@ static bool documentFromValue(Value& v,Document& doc,std::string* err){
     if(!v.find("features"))return fail("missing features array");
     for(auto key:{"params","sketches","features","planes","canvases","materials","image_assets","stamps"})if(auto a=v.find(key);a && a->t!=Value::Arr)return fail(std::string(key)+" must be an array");
     Document nd;   // parse into scratch; commit only on full success
+    if(const auto* components=v.find("parametric_components")){const auto* version=v.find("version");if(!version||version->num<51)return fail("Embedded parametric components require document version 51");try{validateParametricComponents(*components);nd.parametricComponents=*components;}catch(const std::exception& error){return fail(error.what());}}
     try{
         if(const auto* assets=v.find("image_assets")){if(assets->arr.size()>64)return fail("Embedded image asset capacity is 64");for(const auto& asset:assets->arr)nd.imageAssets.push_back(imageAssetFromJson(asset));}
         if(const auto* stamps=v.find("stamps")){if(stamps->arr.size()>128)return fail("Stamp capacity is 128");for(const auto& stamp:stamps->arr)nd.stamps.push_back(stampFromJson(stamp));}

@@ -1,4 +1,5 @@
 #include "ark/design_containers.hpp"
+#include "ark/parametric_components.hpp"
 #include "ark/serialize.hpp"
 #include "ark/iteration_history.hpp"
 #include <algorithm>
@@ -129,6 +130,9 @@ Checkout makeCheckout(const Document& doc,u64 revision,u64 group,bool legacy=fal
     checkout.root.set("version",number((u64)std::max(41.,field(checkout.root,"version").asNum())));
     }
     erase(checkout.root,"drawings");erase(checkout.root,"canvases");erase(checkout.root,"skeleton");
+    // The owning project keeps immutable library definitions. A scoped worker
+    // receives only its materialized recipe closure, never unrelated packages.
+    erase(checkout.root,"parametric_components");
     // No audit pointer/usage/history crosses documents. The child session starts
     // its own audit when it is opened and edited.
     V manifest=V::makeObj();manifest.set("format",V::makeStr(legacy?"ark.design-container.v1":"ark.design-container.v2"));if(!legacy)manifest.set("selection_policy",V::makeStr("workspace_local"));manifest.set("container_node",number(group));manifest.set("source_revision",number(revision));manifest.set("source_sha256",V::makeStr(digest(source)));manifest.set("baseline_sha256",V::makeStr(digest(checkout.root)));manifest.set("baseline",checkout.root);manifest.set("editable",keyArray(checkout.editable));manifest.set("readonly",keyArray(checkout.readonly));checkout.manifest=manifest;
@@ -174,6 +178,37 @@ void remap(V& value,const std::string& key,const IdMap& features,const IdMap& no
 bool equal(const V& a,const V& b){return canonicalText(a)==canonicalText(b);}
 void noRemovedParams(const V& before,const V& after){for(const auto& kv:before.obj)if(!after.find(kv.first.c_str()))reject("CONTAINER_UNSUPPORTED_PARAMETER_REMOVAL","Existing placement/datum parameter keys cannot be removed by the current edit contract");}
 V featureCommand(const V& row,const V* before){V c=command(before?"feature.edit":"feature.add");for(const auto& kv:row.obj){if(kv.first=="id"){if(before)c.set("id",kv.second);}else if(kv.first=="op"){if(!before)c.set("mode",kv.second);}else if(kv.first=="type"||kv.first=="inputs"){if(!before)c.set(kv.first,kv.second);}else if(!before||!equal(field(*before,kv.first.c_str()),kv.second))c.set(kv.first,kv.second);}if(before){for(const auto* key:{"part","material","appearance","manufacturing"})if(before->find(key)&&!row.find(key))c.set(key,V{});if(before->find("suppressed")&&!row.find("suppressed"))c.set("suppressed",V::makeBool(false));V removed=V::makeArr();for(const auto& kv:field(*before,"p").obj)if(!field(row,"p").find(kv.first.c_str()))removed.arr.push_back(V::makeStr(kv.first));if(!removed.arr.empty())c.set("p_remove",removed);}return c;}
+}
+
+V componentSourceClosure(const Document& doc,const V& args){
+    // A reusable definition is copied in its local frame. It is not a checkout
+    // that can publish into this source session. No audit/private session data.
+    auto root=sourceRoot(doc);guardGlobalAuthoringBoundary(root);guardAppearanceBoundary(root);
+    for(const char* key:{"skeleton","motions","drag_chains","assembly_configurations","assembly_external_references"})
+        if(const auto* value=root.find(key);value&&!value->isNull()&&(value->t!=V::Arr||!value->arr.empty()))reject("COMPONENT_UNSUPPORTED_SOURCE",std::string(key)+" needs a component remapping contract before export");
+    if(!doc.designContainerCheckout.isNull())reject("COMPONENT_WORKSPACE","Export from the owning project, not an isolated checkout");
+    Keys seed;const bool part=field(args,"kind").asStr()=="part";
+    if(part){
+        const auto feature=id(field(args,"feature"));if(!feature||!doc.find(feature))reject("COMPONENT_FEATURE","Choose an existing part feature ID");
+        seed.insert("features:"+std::to_string(feature));
+        V nodes=V::makeArr(),group=V::makeObj(),node=V::makeObj();
+        group.set("id",number(doc.nextAssemblyId_));group.set("name",V::makeStr("Component"));group.set("feature",number(0));group.set("parent",number(0));nodes.arr.push_back(group);
+        node.set("id",number(doc.nextAssemblyId_+1));node.set("name",V::makeStr(doc.find(feature)->name));node.set("feature",number(feature));node.set("parent",number(doc.nextAssemblyId_));nodes.arr.push_back(node);
+        root.set("assembly",nodes);root.set("mates",V::makeArr());root.set("next_assembly_id",number(doc.nextAssemblyId_+2));
+        seed.insert("assembly:"+std::to_string(doc.nextAssemblyId_));seed.insert("assembly:"+std::to_string(doc.nextAssemblyId_+1));
+    }else{
+        const auto group=containerId(doc,args);std::set<u64> nodes{group};bool changed=true;
+        while(changed){changed=false;for(const auto& node:doc.assembly)if(nodes.count(node.parent)&&nodes.insert(node.id).second)changed=true;}
+        V localNodes=field(root,"assembly");for(auto& row:localNodes.arr)if(nodes.count(id(field(row,"id")))){seed.insert(rowKey("assembly",row));if(id(field(row,"id"))==group)row.set("parent",number(0));}root.set("assembly",localNodes);
+        for(const auto& mate:doc.mates){const bool a=nodes.count(mate.a),b=nodes.count(mate.b);if(a!=b)reject("COMPONENT_CROSS_BOUNDARY_MATE","Selected assembly has a mate outside its boundary");if(a&&b)seed.insert("mates:"+std::to_string(mate.id));}
+    }
+    for(const auto& parameter:field(args,"parameters").arr)seed.insert("params:"+parameter.asStr());
+    for(const auto& plane:field(args,"interfaces").arr)seed.insert("planes:"+plane.asStr());
+    const Graph graph(root,false);const auto retained=graph.closure(seed);
+    for(const auto& key:retained)if(!graph.all.count(key))reject("COMPONENT_PORT_MISSING",key);
+    for(const auto* collection:collections){V subset=V::makeArr();for(const auto& row:field(root,collection).arr)if(retained.count(rowKey(collection,row)))subset.arr.push_back(row);root.set(collection,subset);}
+    for(const char* key:{"design_container_checkout","parametric_components","drawings","canvases","skeleton","motions","drag_chains","exploded_views","assembly_configurations","assembly_load_selection","assembly_external_references","bom_document_id"})erase(root,key);
+    return root;
 }
 
 bool validateDesignContainerManifest(const V& manifest,std::string& error){

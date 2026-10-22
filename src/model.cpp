@@ -534,7 +534,7 @@ Document Document::authoringCopy() const {
     Document out;out.params=params;out.parameterError=parameterError;out.sketches=sketches;out.planes=planes;out.canvases=canvases;
     out.imageAssets=imageAssets;out.stamps=stamps;
     out.features=features;out.materials=materials;out.usage=usage;out.agentActivity=agentActivity;out.bomDocumentId=bomDocumentId;out.iterationHistory=iterationHistory;out.skeleton=skeleton;
-    out.drawings=drawings;out.designContainerCheckout=designContainerCheckout;
+    out.drawings=drawings;out.designContainerCheckout=designContainerCheckout;out.parametricComponents=parametricComponents;
     out.historyTip=historyTip;out.assemblyConfigurations=assemblyConfigurations;
     out.assemblyLoadSelection=assemblyLoadSelection;out.assemblyExternalReferences=assemblyExternalReferences;out.motions=motions;out.explodedViews=explodedViews;
     out.dragChains=dragChains;

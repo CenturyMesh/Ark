@@ -34,6 +34,7 @@ add_library(ark STATIC
   src/wood_tools.cpp
   src/authoring_024b.cpp src/appearance_024b.cpp src/plane_sections_024b.cpp
   src/authoring_023b.cpp src/cad_import.cpp src/holes_orchestrator.cpp src/design_containers.cpp
+  src/parametric_components.cpp
   src/assembly_patterns.cpp
   src/motion_graph.cpp src/exploded_view.cpp src/visualize.cpp src/derived_bakes_049a.cpp src/drag_chain.cpp
   src/direct_preview.cpp src/async_authoring_051a.cpp
@@ -116,6 +117,13 @@ else()
   target_compile_options(ark PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -fno-fast-math)
 endif()
 add_executable(ark-cli src/app/cli.cpp)
+add_executable(ark-parametric-components-053b-tests tests/parametric_components_053b_tests.cpp)
+target_link_libraries(ark-parametric-components-053b-tests PRIVATE ark)
+add_test(NAME parametric-components-053b COMMAND ark-parametric-components-053b-tests)
+set_tests_properties(parametric-components-053b PROPERTIES TIMEOUT 180)
+if(ARK_WITH_OCCT)
+  add_dependencies(ark-parametric-components-053b-tests ark-occt-worker)
+endif()
 add_executable(ark-project-memory-tests tests/project_memory_tests.cpp)
 target_link_libraries(ark-project-memory-tests PRIVATE ark ark-sqlite)
 add_test(NAME project-memory COMMAND ark-project-memory-tests)
@@ -181,7 +189,7 @@ add_executable(ark-benchmark src/app/benchmark.cpp)
 target_link_libraries(ark-benchmark PRIVATE ark)
 add_custom_command(TARGET ark-benchmark POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:ark-benchmark>/benchmarks" "$<TARGET_FILE_DIR:ark-benchmark>/examples"
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/benchmarks/agent_briefs_v1.json" "${CMAKE_SOURCE_DIR}/benchmarks/agent_outcomes_v2.json" "${CMAKE_SOURCE_DIR}/benchmarks/offline.json" "${CMAKE_SOURCE_DIR}/benchmarks/ollama-qwen-q3.json" "${CMAKE_SOURCE_DIR}/benchmarks/ollama-qwen-27b.json" "$<TARGET_FILE_DIR:ark-benchmark>/benchmarks"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/benchmarks/agent_briefs_v1.json" "${CMAKE_SOURCE_DIR}/benchmarks/agent_outcomes_v2.json" "${CMAKE_SOURCE_DIR}/benchmarks/part_agents_052d.json" "${CMAKE_SOURCE_DIR}/benchmarks/part_agents_offline_052d.json" "${CMAKE_SOURCE_DIR}/benchmarks/part_agents_sol_052d.json" "${CMAKE_SOURCE_DIR}/benchmarks/part_agents_neutral_sol_052d.json" "${CMAKE_SOURCE_DIR}/benchmarks/offline.json" "${CMAKE_SOURCE_DIR}/benchmarks/ollama-qwen-q3.json" "${CMAKE_SOURCE_DIR}/benchmarks/ollama-qwen-27b.json" "$<TARGET_FILE_DIR:ark-benchmark>/benchmarks"
   COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/examples/pneumatic-cylinder.arkops" "$<TARGET_FILE_DIR:ark-benchmark>/examples")
 add_executable(ark-tests tests/tests.cpp)
 add_executable(ark-agent-tests tests/agent_tests.cpp)
@@ -564,7 +572,7 @@ if(WIN32)
       add_test(NAME studio-${check} COMMAND ark-studio --self-test-${check} --settings-file "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}.settings.json" --shot "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}.png" --size 1280 800)
       set_tests_properties(studio-${check} PROPERTIES TIMEOUT 300 RUN_SERIAL TRUE)
     endforeach()
-    foreach(check connectors-ui local-models-ui viewport-dock-ui assistant-steering-ui stamps-ui media-044b-ui planes-sections-ui holes-orchestrator-ui design-container-ui cad-import-ui native-vertex-pull-ui advanced-sheetmetal-ui specialized-pattern-ui drawing-viewport-ui direct-authoring-ui parametric-authoring-ui selection-glow-ui selection-picking-ui image-attachment-ui sketch-edit-ui sketch-drawing-ui typed-sketch-ui arc-ui assistant-ui render-ui action-icons-ui interaction-ui baked-motions-ui exploded-views-ui drag-chain-ui)
+    foreach(check connectors-ui local-models-ui viewport-dock-ui assistant-steering-ui stamps-ui media-044b-ui planes-sections-ui holes-orchestrator-ui design-container-ui parametric-graph-ui cad-import-ui native-vertex-pull-ui advanced-sheetmetal-ui specialized-pattern-ui drawing-viewport-ui direct-authoring-ui parametric-authoring-ui selection-glow-ui selection-picking-ui image-attachment-ui sketch-edit-ui sketch-drawing-ui typed-sketch-ui arc-ui assistant-ui render-ui action-icons-ui interaction-ui baked-motions-ui exploded-views-ui drag-chain-ui)
       add_test(NAME studio-${check} COMMAND ark-studio --self-test-${check} --settings-file "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}.settings.json" --shot "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}.png" --size 1440 900)
       set_tests_properties(studio-${check} PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
     endforeach()
@@ -653,6 +661,13 @@ if(ARK_WITH_OCCT)
   add_dependencies(ark-agent-team-tests ark-occt-worker)
 endif()
 add_test(NAME agent-team COMMAND ark-agent-team-tests)
+add_executable(ark-part-agents-tests tests/part_agents_052d_tests.cpp)
+target_link_libraries(ark-part-agents-tests PRIVATE ark)
+if(ARK_WITH_OCCT)
+  add_dependencies(ark-part-agents-tests ark-occt-worker)
+endif()
+add_test(NAME part-agents-052d COMMAND ark-part-agents-tests)
+set_tests_properties(part-agents-052d PROPERTIES TIMEOUT 60)
 set_tests_properties(agent-team PROPERTIES TIMEOUT 45)
 
 add_executable(ark-agent-tool-layer-042d-tests tests/agent_tool_layer_042d_tests.cpp)

@@ -328,6 +328,8 @@ public:
     std::string bomDocumentId; // assigned on explicit BOM authoring; stable across edits/save
     arkjson::Value iterationHistory; // immutable authoring journal; no evaluated geometry or usage snapshots
     arkjson::Value designContainerCheckout; // scoped workspace ownership and merge baseline; no derived geometry
+    arkjson::Value parametricComponents; // embedded immutable .arkprt/.arktop definitions and explicit instance bindings
+    std::vector<std::string> componentBindingsToSeal; // transient, only a component command can request a new evaluated baseline
     arkjson::Value skeleton; // native declarative source, input overrides and stable ownership manifest
     std::vector<arkjson::Value> drawings; // authored associative technical drawings; derived curves are never persisted
     u64 historyTip=0; // inclusive feature prefix; zero resumes the full authored history

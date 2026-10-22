@@ -1,5 +1,15 @@
 # ARK agent protocol
 
+053B reusable parametric source (A.02/A.03/B.01/B.04/E.01):
+`parametric_components{action:inspect|export|prepare}` reads installed definitions,
+exports immutable `.arkprt`/`.arktop` files, or prepares insert/update/configure
+candidates. Export/prepare require `expected_revision`. Review the returned
+candidate, then publish with `doc_apply{candidate_id,expected_revision}`. Public
+overrides are finite numbers; updates require the next exact revision and reject
+local internal edits or changed source identities. Embedded definitions reopen
+without their original files and require conditional document version 51. Graph
+navigation is local and partial. See [component contract](PARAMETRIC_COMPONENTS_053B.md).
+
 051A recoverable history compaction (A.02): only on explicit user instruction,
 `history_compact{archive_path,keep_recent,expected_revision,confirm:true}` writes
 and verifies a complete new `.ark` archive before replacing the live journal.

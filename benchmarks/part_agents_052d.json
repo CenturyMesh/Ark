@@ -1,0 +1,30 @@
+{
+  "id": "ark-part-delegation-052d",
+  "version": 1,
+  "source": "Synthetic scoped detail with a shared read-only interface and reused part definition. Reference commands are offline harness input only.",
+  "cases": [{
+    "id": "PD01",
+    "version": 1,
+    "category": "isolated_parametric_part_detail",
+    "part_container": 1,
+    "brief": "The initial editable concept is complete. Detail the Part definition in PartGroup (container 1): change its depth from 6 to 9 mm, retain width driven by SharedWidth=12 mm and height 7 mm. Both occurrences must reuse that definition. Preserve the other module and shared interfaces. Review the result and preserve editable authoring.",
+    "baseline": [
+      {"op":"param.set","name":"SharedWidth","expr":12},
+      {"op":"feature.add","type":"native_solid","name":"Part","native":{"op":"box"},"p":{"width":"SharedWidth","depth":6,"height":7}},
+      {"op":"feature.add","type":"native_solid","name":"OtherModule","native":{"op":"box"},"p":{"width":"SharedWidth","depth":3,"height":4}},
+      {"op":"assembly.add","name":"PartGroup","feature":0},
+      {"op":"assembly.add","name":"PartA","feature":1,"parent":1},
+      {"op":"assembly.add","name":"PartB","feature":1,"parent":1,"p":{"tx":30}},
+      {"op":"assembly.add","name":"OtherOccurrence","feature":2,"p":{"tx":60}}
+    ],
+    "reference": [{"op":"feature.edit","id":1,"p":{"depth":9}}],
+    "checks": [
+      {"id":"valid_part","query":{"tool":"native_inspect","args":{"id":1},"path":"report.brep_valid"},"equals":true},
+      {"id":"detail_volume","query":{"tool":"native_inspect","args":{"id":1},"path":"report.volume_mm3"},"equals":756,"absolute_tolerance":0.00001},
+      {"id":"outside_volume","query":{"tool":"native_inspect","args":{"id":2},"path":"report.volume_mm3"},"equals":144,"absolute_tolerance":0.00001},
+      {"id":"shared_interface","query":{"tool":"eval_expr","args":{"expr":"SharedWidth"},"path":"value"},"equals":12},
+      {"id":"authored_expression","query":{"tool":"doc_get","args":{},"path":"document.features.0.p.width"},"equals":"SharedWidth"},
+      {"id":"reused_definition","query":{"tool":"doc_get","args":{},"path":"document.assembly.2.feature"},"equals":1}
+    ]
+  }]
+}

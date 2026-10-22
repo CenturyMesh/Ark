@@ -62,7 +62,29 @@ static void outcomeCoverage(const std::string& root){
     invalid=tariff;invalid.set("as_of",V::makeStr("2026-1--22"));rejects([&]{ark::estimateAgentBenchmarkCost(invalid,assistant,usage,performance,true);},"malformed tariff date rejected");invalid.set("as_of",V::makeStr("2026-02-30"));rejects([&]{ark::estimateAgentBenchmarkCost(invalid,assistant,usage,performance,true);},"nonexistent tariff date rejected");
     auto attempts=json(R"([{"strategy":"Single","accepted":true,"cost":4},{"strategy":"Single","accepted":false,"cost":6}])");for(auto& row:attempts.arr){row.set("tariff",tariff);row.set("provider",V::makeStr("test"));row.set("model",V::makeStr("test"));}auto totals=ark::summarizeAgentBenchmarkAttempts(attempts);check(totals.arr.front().find("cost_per_accepted_design")->num==10&&totals.arr.front().find("failed_attempt_count")->num==1,"failed attempts contribute all their costs to accepted outcome denominator");auto mixed=attempts;auto alternate=tariff;alternate.set("currency",V::makeStr("EUR"));mixed.arr.back().set("tariff",alternate);rejects([&]{ark::summarizeAgentBenchmarkAttempts(mixed);},"mixed currencies never aggregated");alternate=tariff;alternate.set("source",V::makeStr("another tariff provenance"));mixed.arr.back().set("tariff",alternate);rejects([&]{ark::summarizeAgentBenchmarkAttempts(mixed);},"mixed tariff provenance never aggregated");attempts.arr.back().set("cost",V{});totals=ark::summarizeAgentBenchmarkAttempts(attempts);check(totals.arr.front().find("cost_per_accepted_design")->isNull()&&totals.arr.front().find("cost_unknown_attempts")->num==1,"one unknown failed cost prevents false comparative cost conclusion");
 }
+static void benchmarkAuth(){
+    auto settings=json(R"({"assistant":{"provider":"openai","model":"gpt-6.1-sol","protocol":"responses","endpoint":"https://api.openai.com/v1/responses","api_key_env":"","auth_mode":"chatgpt-plan","reasoning_effort":"medium"}})");
+    auto parsed=ark::parseAgentBenchmarkConfig(settings);
+    check(parsed.assistant.authMode==ark::AssistantAuthMode::ChatGptPlan&&parsed.assistant.reasoningEffort=="medium","benchmark uses explicitly selected ChatGPT account route");
+    auto assistant=*settings.find("assistant");assistant.set("endpoint",V::makeStr("https://example.com/v1/responses"));settings.set("assistant",assistant);
+    rejects([&]{ark::parseAgentBenchmarkConfig(settings);},"plan auth cannot be sent to another host");
+    assistant.set("endpoint",V::makeStr("https://api.openai.com/v1/responses"));assistant.set("auth_mode",V::makeStr("typo"));settings.set("assistant",assistant);
+    rejects([&]{ark::parseAgentBenchmarkConfig(settings);},"unknown auth mode cannot silently fall back");
+}
+static void neutralPartComparison(const std::string& root){
+    const auto suite=ark::parseAgentBenchmarkSuite(read(root+"/benchmarks/part_agents_052d.json"));
+    auto settings=read(root+"/benchmarks/part_agents_offline_052d.json");settings.set("require_part_delegation",V::makeBool(false));
+    auto config=ark::parseAgentBenchmarkConfig(settings);config.repetitions=1;config.strategies={"Single","PartFocused"};
+    check(!config.requirePartDelegation,"neutral comparison opt-in parsed");
+    auto result=ark::runAgentBenchmark(suite,config);const auto& attempts=result.find("attempts")->arr;
+    check(attempts.size()==2&&result.find("accepted_count")->num==2,"neutral team may finish a valid task directly");
+    check(attempts[0].find("user_task_sha256")->str==attempts[1].find("user_task_sha256")->str,"neutral strategies receive identical user task and acceptance oracle");
+    check(!attempts[1].find("delegation_required")->b&&!attempts[1].find("delegation_integrated")->b,"lead-only result is explicitly distinguished from delegation");
+    settings.set("require_part_delegation",V::makeStr("false"));rejects([&]{ark::parseAgentBenchmarkConfig(settings);},"ambiguous neutral-mode configuration rejects");
+}
 int main(){try{
+    benchmarkAuth();
+    neutralPartComparison(ARK_SOURCE_DIR);
     const std::string root=ARK_SOURCE_DIR;outcomeCoverage(root);auto suiteValue=read(root+"/benchmarks/agent_briefs_v1.json");auto suite=ark::parseAgentBenchmarkSuite(suiteValue);check(suite.cases.size()==30,"thirty distinct versioned synthetic briefs");auto preflight=ark::preflightAgentBenchmark(suite);if(!preflight.find("passed")->b)throw std::runtime_error(preflight.dump());
     auto config=ark::parseAgentBenchmarkConfig(read(root+"/benchmarks/offline.json"));check(config.repetitions==3&&config.assistant.maxRounds==0,"three repetitions without production round budgets");config.repetitions=1;config.caseIds={"B01","P01","A01"};unsigned persisted=0;auto report=ark::runAgentBenchmark(suite,config,false,[&](const V& row){check(row.find("transport")->str=="offline_scripted_harness","offline classification");check(row.find("cost")->isNull(),"no invented pricing");check(row.find("usage")->find("reported_responses")->num==0&&row.find("usage")->find("missing_responses")->num>0,"missing scripted usage stays missing");check(row.find("performance")->find("provider_requests")->num>=3,"real connector round receipts");check(row.find("performance")->find("request_bytes")->num>0,"request envelope measured");check(row.find("tool_receipts")->arr.size()>=2,"actual native executor receipts persisted");++persisted;});check(persisted==9&&report.find("accepted_count")->num==9,"three tasks across three real strategies accepted");
     auto broken=suite;broken.cases={suite.cases[0]};broken.cases[0].checks.arr[2].set("equals",V::makeNum(123));config.caseIds={"B01"};auto failed=ark::runAgentBenchmark(broken,config);check(failed.find("failed_attempt_count")->num==3&&failed.find("attempt_count")->num==3,"failed attempts retained in every strategy");check(!ark::preflightAgentBenchmark(broken).find("passed")->b,"invalid reference postcondition detected");

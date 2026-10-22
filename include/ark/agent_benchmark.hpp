@@ -12,6 +12,7 @@ struct AgentBenchmarkCase {
     arkjson::Value reference=arkjson::Value::makeArr();
     arkjson::Value checks=arkjson::Value::makeArr();
     arkjson::Value rejectedCommands=arkjson::Value::makeArr();
+    arkjson::Value partContainer; // Explicit synthetic existing container for delegated trials.
 };
 struct AgentBenchmarkSuite {
     std::string id;
@@ -20,6 +21,9 @@ struct AgentBenchmarkSuite {
 };
 struct AgentBenchmarkConfig {
     AssistantConfig assistant;
+    AssistantConfig specialistAssistant; // Explicit optional role model; otherwise inherit assistant.
+    bool hasSpecialistAssistant=false;
+    bool requirePartDelegation=true; // False: identical user task; lead chooses whether to delegate.
     unsigned repetitions=3,deadlineSeconds=120;
     std::vector<std::string> strategies={"Single","Focused","Parallel"};
     std::vector<std::string> caseIds;
