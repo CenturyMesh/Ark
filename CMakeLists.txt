@@ -46,7 +46,7 @@ add_library(ark STATIC
   src/bom.cpp src/bom_review.cpp src/bom_export.cpp src/curve_equation.cpp src/spatial_sketch.cpp src/sketch_entities.cpp src/datum_authoring.cpp
   src/updates.cpp
   src/document_container.cpp
-  src/iteration_history.cpp
+  src/iteration_history.cpp src/history_compaction_051a.cpp
   src/history_authoring.cpp src/assembly_authoring.cpp src/recovery.cpp
   src/pricing.cpp
   src/agent_team.cpp
@@ -344,6 +344,10 @@ add_executable(ark-document-container-tests tests/document_container_tests.cpp)
 target_link_libraries(ark-document-container-tests PRIVATE ark ark-sqlite)
 add_test(NAME document-container COMMAND ark-document-container-tests)
 set_tests_properties(document-container PROPERTIES TIMEOUT 60)
+add_executable(ark-history-compaction-051a-tests tests/history_compaction_051a_tests.cpp)
+target_link_libraries(ark-history-compaction-051a-tests PRIVATE ark)
+add_test(NAME history-compaction-051a COMMAND ark-history-compaction-051a-tests)
+set_tests_properties(history-compaction-051a PROPERTIES TIMEOUT 180)
 add_executable(ark-iteration-history-tests tests/iteration_history_tests.cpp)
 target_link_libraries(ark-iteration-history-tests PRIVATE ark)
 add_test(NAME iteration-history COMMAND ark-iteration-history-tests)
@@ -546,7 +550,7 @@ if(WIN32)
     set_tests_properties(studio-navigation-036a PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
     add_test(NAME studio-datum-authoring-036a COMMAND ark-studio --datum-authoring-ui-test --settings-file "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/datum-authoring-036a.settings.json" --shot "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/datum-authoring-036a.png" --size 1440 900)
     set_tests_properties(studio-datum-authoring-036a PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
-    foreach(check async-exact-ui team-blockers-ui realtime-ui product-tools-ui scene-cache-ui authoring-assistance-ui editor-scroll-ui feature-editor-picking-ui history-ui recovery-ui configuration-workspace-ui interaction-performance-ui)
+    foreach(check async-exact-ui team-blockers-ui realtime-ui product-tools-ui scene-cache-ui authoring-assistance-ui editor-scroll-ui feature-editor-picking-ui history-ui history-compaction-ui recovery-ui configuration-workspace-ui interaction-performance-ui)
       add_test(NAME studio-${check} COMMAND ark-studio --self-test-${check} --settings-file "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}.settings.json" --shot "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}.png" --size 1280 800)
       set_tests_properties(studio-${check} PROPERTIES TIMEOUT 300 RUN_SERIAL TRUE)
     endforeach()
