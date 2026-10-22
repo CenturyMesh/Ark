@@ -22,6 +22,9 @@ queries and context keys (`sketches:part:12::Profile`). Every sketch mutation
 accepts `owner_feature` with a local `name`; an existing canonical reference
 also works without that selector. No unqualified local name is searched in
 other scopes. Unqualified names retain their legacy document meaning.
+The C ABI exposes `ark_sketch_set_owned`; lookup, editing and removal also
+accept canonical references. Ownership and capacity failures return error codes
+instead of crossing the C boundary as exceptions.
 
 The owner must already exist. To author a result from its own sketch, create an
 extrude definition with its ordinary initial profile, create the owned sketch,
@@ -35,6 +38,9 @@ definition with owned sketches rejects; explicitly remove its sketches first.
 Referenced sketch deletion still fails normal dependency evaluation and rolls
 back the batch. Removing an occurrence does not remove definition sketches.
 There is no automatic sketch rename/rebinding operation.
+Sketch-to-sketch projection uses the shared definitions' authored datum frames.
+It does not select an occurrence or implicitly inherit its assembly placement;
+placed-source projections still use the explicit feature/instance contract.
 
 Each definition and the legacy global scope permit 256 sketches, with 4096
 total. Aggregate guards limit sketches to 32768 entities, 65536 constraints and
@@ -68,3 +74,11 @@ exercises cross-scope exact projection and extrusion, source edits, rejected
 unqualified references/cycles/deletion, and reload. `design-containers-023b`
 includes owned sketch retention and merge. Studio's `--self-test-tree-ui`
 checks browser scrolling/selection; captures are local verification artifacts.
+
+Observed local verification: 34 scoped core/C ABI checks and 9 exact projection
+checks passed; the existing kernel, agent, context-graph and design-container
+suites passed. The native checks used the existing OCCT worker through its
+published geometry contract. Studio built successfully; its tree fixture
+selected and revealed sketch index1024 among 1025 owned sketches, with separate
+constraint actions, and the top/last-row captures were visually inspected.
+No production deployment or external CAD adapter qualification is claimed.

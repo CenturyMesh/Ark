@@ -1,4 +1,5 @@
 #include "ark/agent.hpp"
+#include "ark/api.h"
 #include "ark/serialize.hpp"
 #include "ark/sketch.hpp"
 #include <iostream>
@@ -28,6 +29,12 @@ static void nativeProjection(){
 }
 int main(int argc,char**){try{
     if(argc>1){nativeProjection();std::cout<<checks<<" native checks / "<<failures<<" failures\n";return failures?1:0;}
+    {ArkDoc* api=ark_doc_create();const auto owner=ark_add_box(api,1,1,1);
+    check(ark_sketch_set(api,"part:1::Profile","[]",nullptr)==-3,"C ABI catches reserved-reference rejection");
+    check(ark_sketch_set_owned(api,owner,"Profile","[]",nullptr)==0,"C ABI creates explicit definition-owned sketch");
+    check(ark_sketch_set(api,"part:1::Profile","[]",nullptr)==0,"C ABI canonical edit retains owner");
+    check(ark_feature_remove(api,owner)==-1,"C ABI catches owner removal rejection");
+    check(ark_sketch_remove(api,"part:1::Profile")==0&&ark_feature_remove(api,owner)==0,"C ABI explicit sketch removal permits owner removal");ark_doc_destroy(api);}
     AgentSession s;
     auto setup=apply(s,json(R"([{"op":"feature.add","type":"extrude","name":"Left","p":{"height":5,"w":10,"d":10}},{"op":"feature.add","type":"extrude","name":"Right","p":{"height":5,"w":10,"d":10}}])"));check(!failed(setup),setup.dump());
     for(u64 owner:{1,2})for(int batch=0;batch<2;++batch){V commands=V::makeArr();for(int i=0;i<128;++i)commands.arr.push_back(sketch(owner,"S"+std::to_string(batch*128+i),owner==1?2:3));auto result=apply(s,commands);check(!failed(result),result.dump());}

@@ -5027,7 +5027,7 @@ static void drawFrame(HDC hdc){
     if(g_explorerOpen[2]){
         std::vector<u64> scopes{0};for(const auto& feature:g_doc.features)scopes.push_back(feature.id);
         for(u64 owner:scopes){bool heading=false;for(size_t k=0;k<g_doc.sketches.size();++k){const auto& sketch=g_doc.sketches[k];if(sketch.ownerFeature!=owner)continue;
-            if(!heading){const auto* definition=g_doc.find(owner);explorer.push_back({definition?definition->name:"Document",definition?"Shared definition #"+std::to_string(owner):"Global sketches",-1,false,2,3,405});heading=true;}
+            if(!heading){const auto* definition=g_doc.find(owner);explorer.push_back({definition?definition->name+" #"+std::to_string(owner):"Document","",-1,false,2,3,405});heading=true;}
             size_t users=0;for(const auto& f:g_doc.features){auto drivers=drivingSketchNames(f);if(std::find(drivers.begin(),drivers.end(),sketch.name)!=drivers.end())++users;}
             explorer.push_back({sketch.localName(),"Sketch / "+sketch.sk.plane+" / "+std::to_string(users)+" features",60000+(int)k,sketch.name==g_activeSketch&&g_showSketches,3,1,401});
         }}
