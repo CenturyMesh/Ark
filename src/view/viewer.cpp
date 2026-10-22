@@ -2894,7 +2894,7 @@ static void drainUiTools(){
         // their journal attribution, and committed or failed calls enter the
         // project activity ledger where the client can rate them (045A).
         if(!request->teamOwned&&!request->revision&&!request->args.find("actor")&&request->args.t==arkjson::Value::Obj){using V=arkjson::Value;V actor=V::makeObj();actor.set("kind",V::makeStr("client"));actor.set("id",V::makeStr("live_mcp"));request->args.set("actor",actor);}
-        if((request->teamOwned||request->revision)&&request->tool=="__ark_bom_completion"){try{request->complete(g_session.bomCompletionCheck((bool)request->revision));}catch(...){request->complete(cancelledTool());}continue;}
+        if((request->teamOwned||request->revision)&&request->tool=="__ark_bom_completion"){try{request->complete(g_session.bomCompletionCheck((bool)request->revision,true));}catch(...){request->complete(cancelledTool());}continue;}
         if(request->teamOwned&&request->tool=="__ark_activity"){
             try{const auto& a=request->args;auto result=recordAgentActivity(g_doc,a.find("tool")->asStr(),*a.find("arguments"),*a.find("actor"),*a.find("result"),g_session.revision,g_session.revision,a.find("elapsed_ms")->asNum());if(g_doc.agentActivity&&!g_doc.agentActivity->entries.empty())g_doc.agentActivity->entries.back().set("timing_scope",arkjson::Value::makeStr("team coordination wall time; revision sampled after action"));request->complete(result);}catch(...){request->complete(cancelledTool());}continue;
         }
@@ -3099,6 +3099,7 @@ static void sendTeam(const std::string& explicitPrompt={},const std::array<Assis
     pollTeam(true);if(g_teamStarted&&!g_teamSnapshot.cancelled){if(!g_agentTeam.steer(userMessage,g_teamTarget)){g_status="Decision could not be queued; check team state and turn limits.";return;}g_chatLog.push_back({"You -> "+(g_teamTarget.empty()?std::string("team"):g_teamTarget),visiblePrompt});g_status="Decision queued for the next provider request.";}
     else{
         if(g_teamStarted&&g_teamSnapshot.running){g_status="Team is still stopping.";return;}
+        g_session.beginBomTask();
         AgentTeamConfig team;team.maxWorkers=g_teamRoleCount;team.focusedWorkflow=g_teamFocusedWorkflow;team.isolatePartDesigners=team.focusedWorkflow;team.orchestratedStart=g_teamFocusedWorkflow||std::none_of(transports.begin(),transports.end(),[](const auto& t){return (bool)t;});
         team.maxCommandsPerStep=128;team.maxFeaturesPerStep=32;team.maxPlacementsPerStep=64;
         team.requireLeadAuthoringCheckpoint=!team.focusedWorkflow&&g_doc.features.empty()&&g_doc.sketches.empty();team.requireReviewerCheckpoint=g_teamRoleCount>2;
@@ -3131,6 +3132,7 @@ static void sendAssistant(const std::string& explicitPrompt="",const AssistantTr
     if(g_chatBusy){queueActiveAssistantSteering(user,visiblePrompt,explicitPrompt.empty()&&!queuedMessage);return;}validateAssistantConfig(g_assistantConfig);
     if(g_conversation.arr.empty()&&!transport&&g_assistantConfig.provider!="ollama"&&g_assistantConfig.authMode!=AssistantAuthMode::CliAccount)refreshPricing();
     if(g_assistantWorker.joinable())g_assistantWorker.join();
+    g_session.beginBomTask();
     V input=g_conversation;if(input.t!=V::Arr)input=V::makeArr();input.arr.push_back(user);
     if(queuedMessage||(explicitPrompt.empty()&&g_pendingAssistantImage)){auto preflight=g_assistantConfig;if(!transport)preflight.onboardingPack=agentAuthoringOnboardingPack();assistantRequest(preflight,input,AgentSession::tools());}
     if(!queuedMessage)g_pendingObjectTarget.reset();if(!queuedMessage)g_chatLog.push_back({"You",visiblePrompt});g_chatScroll=0;g_chatBusy=true;g_assistantResponseFinished=g_assistantResponseError=false;g_assistantStatus="Working...";g_assistantUsageRun={};g_assistantPerformanceRun={};g_assistantUsageRunCounted=false;g_assistantReceiptId=newUsageReceiptId();g_assistantReceiptModel=g_assistantConfig.model;g_currentUsageReceipt.reset();g_pendingUsageReceipt.reset();g_assistantCancel=std::make_shared<std::atomic_bool>(false);auto cancel=g_assistantCancel;auto config=g_assistantConfig;if(!transport)config.onboardingPack=agentAuthoringOnboardingPack();config.memoryPrefetch=!transport;config.deferSpecialistTools=!transport;applyAgentRequestOptions(config);auto schema=compactAuthoringPreviewTools(AgentSession::tools());if(g_chatInput&&!queuedMessage)SetWindowTextW(g_chatInput,L"");

@@ -1,5 +1,13 @@
 # ARK roadmap A–G
 
+055D is **Verificado no escopo** locally for **A.02/B.04/C.04/D.02**: host-observed limited
+task BOM review permits qualified Single/Team completion without requiring
+unrelated legacy part identities. Global review, current revisions, inspection,
+and detailed metadata requirements remain enforced. Native rounded cable sweeps
+also handle shallow corners with explicit tighter tolerances and measured surface
+error. See [055D evidence](iterations/055D.md).
+Broader milestones remain **Parcial**.
+
 054B is **Verificado no escopo** locally for **A.02/B.04/B.05/C.04/D.02**: editable electrical
 schematics, sheet BOM/DXF, part and assembly families with Eye visibility filters,
 and native cable display at baked poses. See the [054B contract](DISCIPLINES_SCHEMATICS_054B.md)

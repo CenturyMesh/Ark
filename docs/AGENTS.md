@@ -1,5 +1,18 @@
 # ARK agent protocol
 
+055D limited task completion (A.02/D.02): Studio records a host-owned task
+baseline before Single or Team work. For an explicitly limited edit, inspect
+`bom_inspect.task_scope` and the selected definitions, then submit
+`bom_review{completion:"task",ids:[...],expected_revision,scope,fastening_review,pending_notes?}`.
+Every affected counted definition must be covered at the current revision.
+The host appends a qualification that global project/BOM completion remains
+pending. Do not fill unrelated legacy identities merely to finish a local edit.
+Ordinary selected reviews still do not complete anything globally, and the
+default project review retains its complete inspection/metadata requirements.
+Never downgrade a requested whole-project or detailed deliverable. Removals,
+unavailable task baselines and scopes beyond the selected-definition limit
+require project review. See [055D evidence](iterations/055D.md).
+
 054B families, editable schematics and flexible motion (A.02/B.04/B.05/C.04/D.02):
 classify authored definitions or assembly nodes with known design intent through
 `classification.set{feature|node,families,tags}`. Families are electrical,
@@ -455,7 +468,7 @@ metadata. `reference_navigate` discovers adjacent exact faces/edges;
 `bom_export_parts` atomically publishes counted definitions with hashes.
 
 
-014D adds `bom_review` (76 standalone tools). Before Studio design completion,
+014D adds `bom_review` (76 standalone tools). Before global Studio design completion,
 inspect every `bom_inspect` item page at one current revision and submit
 `bom_review{expected_revision,scope,fastening_review,pending_notes?}`.
 Every counted physical definition needs an internal part number and description.

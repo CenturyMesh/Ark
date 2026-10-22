@@ -17,11 +17,29 @@ void check(bool condition,const char* message){if(!condition)throw std::runtime_
 bool fails(const ark::Feature& feature){try{(void)ark::electronicsRequest(feature,{});return false;}catch(const std::exception&){return true;}}
 const Value& accepted(const Value& reply){const Value* error=reply.find("isError");if(error&&error->b){const Value* result=reply.find("structuredContent");throw std::runtime_error(result&&result->find("error")?result->find("error")->str:"MCP request failed");}const Value* result=reply.find("structuredContent");if(!result)throw std::runtime_error("Missing result");return *result;}
 #include "electronics_035b_tests.inl"
+#ifdef ARK_ELECTRONICS_EXACT_TESTS
+void shallowRoundedCable055D(){
+    // Synthetic nearly straight corners: three-point arc reconstruction loses
+    // the tiny sagitta, especially away from the world origin.
+    for(double height:{0.,1750.})for(double angle:{2e-7,1e-6,1e-5,1e-3,.1})for(double sign:{-1.,1.}){
+        ark::AgentSession session;Value apply=parse(R"({"commands":[{"op":"feature.add","type":"cable_route","name":"Synthetic shallow rounded cable","native":{"start":[0,0,0],"waypoints":[[15,0,0]],"end":[30,0,0],"radius":1,"bend_radius":5}}]})");
+        auto commands=*apply.find("commands"),spec=*commands.arr[0].find("native"),start=*spec.find("start"),waypoints=*spec.find("waypoints"),end=*spec.find("end");start.arr[2]=Value::makeNum(height);waypoints.arr[0].arr[2]=Value::makeNum(height);end.arr={Value::makeNum(15+15*std::cos(angle)),Value::makeNum(sign*15*std::sin(angle)),Value::makeNum(height)};spec.set("start",start);spec.set("waypoints",waypoints);spec.set("end",end);commands.arr[0].set("native",spec);apply.set("commands",commands);
+        accepted(session.call("doc_apply",apply));const auto inspected=accepted(session.call("electronics_inspect",parse(R"({"id":1})")));
+        check(inspected.find("geometry")->find("solids")->num==1&&inspected.find("geometry")->find("brep_valid")->b,"Shallow rounded cable retains one valid exact solid");
+        const double length=30+5*angle-10*std::tan(angle/2);check(std::abs(inspected.find("route_length_mm")->num-length)<1e-5,"Shallow arc retains prescribed path length");
+        check(std::abs(inspected.find("geometry")->find("volume_mm3")->num-std::acos(-1.)*length)<.01,"Shallow cable preserves analytic cross section and volume");
+        check(inspected.find("sweep_tolerance_mm")->num==1e-7&&inspected.find("sweep_surface_error_mm")->num<=1e-7,"Shallow cable respects explicit tighter native tolerance");
+    }
+}
+#endif
 }
 
 int main(){
     try{
         electronics035BCoreTests();
+#ifdef ARK_ELECTRONICS_EXACT_TESTS
+        shallowRoundedCable055D();
+#endif
         ark::Feature pcb;pcb.type=ark::FeatureType::PCB;
         pcb.nativeSpec=parse(R"({"outline":[[0,0],[40,0],[40,30],[0,30]],"thickness":1.6,
           "layers":[{"name":"top","z":1.6},{"name":"bottom","z":0}],

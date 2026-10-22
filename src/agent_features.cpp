@@ -268,7 +268,7 @@ bool callAgentFeature(AgentSession& s,const std::string& tool,const V& args,V& o
     if(tool=="activity_info")out=inspectAgentActivity(s.document,args);
     else if(tool=="tool_feedback"){V ratings=args;ratings.obj.erase(std::remove_if(ratings.obj.begin(),ratings.obj.end(),[](const auto& field){return field.first=="actor";}),ratings.obj.end());out=rateAgentActivity(s.document,ratings,args.find("actor")?*args.find("actor"):V{});out.set("revision",V::makeNum((double)s.revision));}
     else if(tool=="bom_review")out=s.reviewBom(args);
-    else if(tool=="bom_inspect"){out=inspectBomPage(s.document,s.revision,args);s.observeBomInspection(out);}
+    else if(tool=="bom_inspect"){out=inspectBomPage(s.document,s.revision,args);s.observeBomInspection(out);out.set("task_scope",s.bomTaskScope());}
     else if(tool=="bom_export")out=exportBom(s.document,s.revision,args);
     else if(tool=="bom_export_parts")out=exportBomParts(s,args);
     else if(tool=="reference_navigate"){
