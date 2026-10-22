@@ -53,6 +53,9 @@ public:
     arkjson::Value snapshotCandidate(const arkjson::Value& args);
     std::unique_ptr<PreparedTransfer> takePreparedCandidate(const std::string& id);
     void adoptPreparedCandidate(PreparedTransfer&&, u64 expectedRevision);
+    // Host-only completion: run the original request through normal transaction,
+    // history and failure guards while dispatch consumes a private worker receipt.
+    arkjson::Value completePreparedApply(const arkjson::Value& originalArgs,std::unique_ptr<PreparedTransfer> transfer,const arkjson::Value& rejection={});
     arkjson::Value failureInfo(const arkjson::Value& args) const;
     arkjson::Value failureExport(const arkjson::Value& args) const;
     arkjson::Value failureReplay(const arkjson::Value& args);
@@ -74,6 +77,8 @@ private:
     std::vector<FailureRecord> failures_;
     arkjson::Value captureFailure(const std::string&,const arkjson::Value&,const arkjson::Value&,const std::string&,u64,arkjson::Value);
     size_t callDepth_=0;
+    std::string hostPreparedApplyId_;
+    arkjson::Value hostPreparedApplyRejection_;
     struct Prepared {
         std::string id, baseline;
         u64 revision=0;

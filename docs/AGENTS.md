@@ -1,5 +1,19 @@
 # ARK agent protocol
 
+051A recoverable history compaction (A.02): only on explicit user instruction,
+`history_compact{archive_path,keep_recent,expected_revision,confirm:true}` writes
+and verifies a complete new `.ark` archive before replacing the live journal.
+It never overwrites archives or silently prunes. `keep_recent` retains 0–256
+current-head ancestors plus a baseline; undo keeps only consecutive available
+targets and redo is cleared. Optional `retain_ids` preserves explicitly selected
+states from other branches, with a combined maximum of 256 nodes. The receipt
+maps original ids and records archive path/fingerprints and the retained range.
+Save with `doc_save`; reopen the complete archive with `doc_load`. At a full
+512-node archive, compact with `keep_recent:0,retain_ids:[chosen_id]` to a new
+archive, then `iteration_restore` its mapped id. Current authoring is unchanged
+until that restore. Compacted journals require document format 50. See
+[history compaction](HISTORY_COMPACTION_051A.md).
+
 049A derived bakes (A.02/C.04, **Parcial**): `motion.bake` now stores a receipt
 (the bake fields plus `frames_sha256`/`coordinates_sha256`), never frames. Frames
 are derived data from memory, the document's derived section or a re-bake that
@@ -78,7 +92,7 @@ evidence at that revision and inspect the current revision before writing. See
 045A protects work at capacity limits. `doc_save` no longer fails when the
 optional saved-geometry cache is full: excess entries are omitted and recompute
 on open, reported in `saved_geometry`, and a failed save states its reason.
-The iteration journal stays a hard limit (512 nodes / 4 MiB, never pruned):
+The iteration journal stays a hard limit (512 nodes / 4 MiB, never automatically pruned):
 commit receipts add `history_capacity` from 75%, and `history_round_trip` when
 an `assembly.drive` only returns to the previous pose. Look at temporary poses
 read-only with `assembly_info{drive|sweep}` or `doc_preview` plus

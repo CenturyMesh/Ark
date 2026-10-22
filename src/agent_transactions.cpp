@@ -138,7 +138,8 @@ arkjson::Value AgentSession::call(const std::string& tool,const V& args){
             out.set("error_code",V::makeStr(message.find("Revision conflict")!=std::string::npos?"REVISION_CONFLICT":(message.rfind("HISTORY_MIGRATION_",0)==0||message.rfind("HISTORY_COMPACTION_",0)==0)?message.substr(0,end):(tool=="history_compact"?"HISTORY_COMPACTION_FAILED":"HISTORY_MIGRATION_FAILED")));out.set("tool",V::makeStr(tool));out.set("revision",V::makeNum((double)revision));out.set("document_unchanged",V::makeBool(true));}
         V response=V::makeObj(),content=V::makeArr(),item=V::makeObj();item.set("type",V::makeStr("text"));item.set("text",V::makeStr(out.dump()));content.arr.push_back(item);response.set("content",content);response.set("structuredContent",out);response.set("isError",V::makeBool(failed));return finish(std::move(response));}
     const bool planeMutation=tool=="plane_authoring"&&!(args.find("preview")&&args.find("preview")->t==V::Bool&&args.find("preview")->b);
-    if((!mutating&&!planeMutation)||callDepth_>1||suppressHistory_)return finish(dispatch(tool,clean));
+    auto dispatchCurrent=[&](){if(tool=="doc_apply"&&callDepth_==1){if(!hostPreparedApplyRejection_.isNull())return hostPreparedApplyRejection_;if(!hostPreparedApplyId_.empty()){V preparedArgs=V::makeObj();preparedArgs.set("candidate_id",V::makeStr(hostPreparedApplyId_));preparedArgs.set("expected_revision",V::makeNum((double)revision));if(const auto* detail=clean.find("detail"))preparedArgs.set("detail",*detail);return dispatch(tool,preparedArgs);}}return dispatch(tool,clean);};
+    if((!mutating&&!planeMutation)||callDepth_>1||suppressHistory_)return finish(dispatchCurrent());
     const auto* preparedId=args.find("candidate_id");
     const bool metadataPrepared=preparedId&&preparedId->t==V::Str&&std::any_of(prepared_.begin(),prepared_.end(),[&](const Prepared& p){return p.id==preparedId->str&&p.metadataOnly;});
     const bool lightweight=tool=="doc_apply"&&!args.find("checks")&&(metadataOnlyApply(document,clean)||metadataPrepared);
@@ -149,7 +150,8 @@ arkjson::Value AgentSession::call(const std::string& tool,const V& args){
         // Validate caller metadata before running geometry or touching usage.
         (void)iterationActor(args);if(auto reason=args.find("motivation");reason&&(reason->t!=V::Str||reason->str.size()>4096))throw std::runtime_error("motivation must be text of at most 4096 bytes");
         std::string target;if(tool=="iteration_restore"){if(auto id=args.find("id");id&&id->t==V::Str)target=id->str;}
-        V response=dispatch(tool,clean);if(auto error=response.find("isError");error&&error->b){rollback();return finish(std::move(response));}
+        
+        V response=dispatchCurrent();if(auto error=response.find("isError");error&&error->b){rollback();return finish(std::move(response));}
         if((tool=="doc_undo"||tool=="doc_redo")&&before.iterationHistory.t==V::Obj)target=iterationUndoTarget(before,tool=="doc_redo");
         // Opening/New are project boundaries. They never copy another project's
         // geometry into the loaded/new document's persistent journal.
@@ -255,6 +257,20 @@ const Document& AgentSession::PreparedTransfer::document() const{
     if(!materialized_)materialized_=std::make_unique<Document>(AgentSession::materializePrepared(*value_));
     return *materialized_;
 }
+V AgentSession::completePreparedApply(const V& args,std::unique_ptr<PreparedTransfer> transfer,const V& rejection){
+    if(callDepth_||!hostPreparedApplyId_.empty()||!hostPreparedApplyRejection_.isNull())throw std::runtime_error("Prepared apply completion must be serialized by the host");
+    struct Clear {AgentSession& session;~Clear(){const auto id=session.hostPreparedApplyId_;session.hostPreparedApplyId_.clear();session.hostPreparedApplyRejection_={};if(!id.empty())session.prepared_.erase(std::remove_if(session.prepared_.begin(),session.prepared_.end(),[&](const Prepared& p){return p.id==id;}),session.prepared_.end());}} clear{*this};
+    auto fail=[&](const std::string& message){V payload=V::makeObj(),response=V::makeObj(),parts=V::makeArr(),part=V::makeObj();payload.set("error",V::makeStr(message));payload.set("error_code",V::makeStr("PREPARED_APPLY_REJECTED"));payload.set("revision",V::makeNum((double)revision));payload.set("document_unchanged",V::makeBool(true));response.set("isError",V::makeBool(true));response.set("structuredContent",payload);part.set("type",V::makeStr("text"));part.set("text",V::makeStr(payload.dump()));parts.arr.push_back(part);response.set("content",parts);hostPreparedApplyRejection_=response;};
+    if(!rejection.isNull())hostPreparedApplyRejection_=rejection;
+    else try{
+        if(!transfer||!transfer->value_)throw std::runtime_error("Missing prepared authoring receipt");
+        checkRevision(args,revision);
+        auto recipe=[](V value){value.obj.erase(std::remove_if(value.obj.begin(),value.obj.end(),[](const auto& p){return p.first=="actor"||p.first=="motivation"||p.first=="detail";}),value.obj.end());std::sort(value.obj.begin(),value.obj.end(),[](const auto& a,const auto& b){return a.first<b.first;});return value.dump();};
+        if(recipe(args)!=recipe(transfer->value_->recipe))throw std::runtime_error("Prepared authoring recipe differs from original request");
+        hostPreparedApplyId_=transfer->id();adoptPreparedCandidate(std::move(*transfer),revision);
+    }catch(const std::exception& error){fail(error.what());}
+    return call("doc_apply",args);
+}
 const std::string& AgentSession::PreparedTransfer::id() const{
     if(!value_)throw std::runtime_error("Prepared transfer already consumed");return value_->id;
 }
@@ -309,7 +325,7 @@ arkjson::Value AgentSession::commitPrepared(const V& args){
     validateDesignContainerTransition(document,*next);
     const bool metadata=found->metadataOnly;const auto committedId=found->id;out.set("geometry_changed",V::makeBool(!out.find("geometry_recomputed")||out.find("geometry_recomputed")->b));remember();
     if(metadata){document.features=next->features;document.materials=next->materials;document.bomDocumentId=next->bomDocumentId;document.imageAssets=next->imageAssets;document.stamps=next->stamps;}
-    else{auto activity=document.agentActivity;auto usage=document.usage;document=std::move(*next);document.agentActivity=std::move(activity);document.usage=std::move(usage);}
+    else{auto activity=document.agentActivity;auto usage=document.usage;auto history=document.iterationHistory;document=std::move(*next);document.agentActivity=std::move(activity);document.usage=std::move(usage);document.iterationHistory=std::move(history);}
     ++revision;prepared_.erase(std::remove_if(prepared_.begin(),prepared_.end(),[&](const Prepared& p){return p.id==committedId;}),prepared_.end());trimPrepared();
     V evaluation=V::makeObj();for(const char* key:{"recompute_ms","features_evaluated","features_reused","parallel_features","peak_parallel_features"})if(const auto* value=out.find(key))evaluation.set(key,*value);out.set("prepared_evaluation",evaluation);
     out.set("features_evaluated",V::makeNum(0));out.set("features_reused",V::makeNum(document.evalBodies.size()));out.set("parallel_features",V::makeNum(0));out.set("peak_parallel_features",V::makeNum(0));

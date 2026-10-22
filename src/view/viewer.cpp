@@ -77,6 +77,7 @@ typedef ptrdiff_t GLsizeiptr;
 #include "ark/io.hpp"
 #include "ark/agent.hpp"
 #include "ark/direct_preview.hpp"
+#include "ark/async_authoring.hpp"
 #include "ark/agent_activity.hpp"
 #include "ark/bom.hpp"
 #include "ark/mesh_analysis.hpp"
@@ -383,7 +384,7 @@ static std::thread g_assistantWorker;static std::shared_ptr<std::atomic_bool> g_
 static std::atomic_bool g_closing{false};static LiveSessionBridge g_liveBridge;static u64 g_documentEpoch=0;static bool g_ownAssistantTool=false;
 static constexpr UINT WM_ARK_TOOL=WM_APP+20,WM_ARK_CHAT=WM_APP+21,WM_ARK_AUTH=WM_APP+22;
 #include "realtime_metrics.inl"
-struct UiToolRequest {RealtimeClock030::time_point posted=RealtimeClock030::now();std::string tool,roleId;arkjson::Value args;LiveSessionBridge::Completion complete;std::stop_token stop;std::shared_ptr<std::atomic_bool> cancel;std::shared_ptr<std::atomic<u64>> revision;std::shared_ptr<AssistantSteering> steering;u64 epoch=0,steeringVersion=0;bool teamOwned=false;};
+struct UiToolRequest {RealtimeClock030::time_point posted=RealtimeClock030::now();std::string tool,roleId;arkjson::Value args;LiveSessionBridge::Completion complete;std::stop_token stop;std::shared_ptr<std::atomic_bool> cancel;std::shared_ptr<std::atomic<u64>> revision;std::shared_ptr<AssistantSteering> steering;u64 epoch=0,steeringVersion=0,objectEpoch=0;bool teamOwned=false,queuedEpoch=false;};
 static bool assistantSteeringToolAllowed(const UiToolRequest& request);
 static arkjson::Value assistantSteeringToolRejection();
 struct UiChatEvent {std::string text;bool final=false,error=false;arkjson::Value history;u64 epoch=0;AssistantUsage usage{};bool hasUsage=false;AssistantPerformance performance{};bool hasPerformance=false;bool status=false,retry=false;};
@@ -408,6 +409,8 @@ static std::optional<UsageReceipt> g_currentUsageReceipt,g_pendingUsageReceipt;
 static unsigned g_deferredUsageCount=0;
 static std::deque<std::unique_ptr<UiToolRequest>> g_toolQueue;
 static bool g_uiReady=false,g_busy=false,g_busyClosePending=false,g_busyTestMode=false;
+static bool g_preparingEdit=false,g_authoringUiTestMode=false;static RECT g_authoringCancelRect{};static std::atomic_uint g_authoringTestDelayMs{0};static std::function<void()> g_authoringPumpTest;static std::function<bool()> g_authoringExternalCancel;static std::unique_ptr<AsyncAuthoringWorker> g_authoringWorker;
+static arkjson::Value prepareAuthoringWithProgress(const arkjson::Value& args);
 static unsigned g_busyTestDelayMs=0,g_busyFrameCount=0,g_busyPumpCount=0;
 static std::string g_busyLabel;
 static std::string g_busyTestShot;
@@ -1444,6 +1447,7 @@ static void clearDatumSelection();
 static bool datumVisible(const std::string& name);
 static void applyAgentDatumSelection(const std::string& name,const std::string& kind);
 static arkjson::Value runTool(const std::string& tool,const arkjson::Value& args){
+    if(g_preparingEdit)throw std::runtime_error("An authoring edit is preparing; queued edits wait for its revision result");
     const bool containerWrite=tool=="design_containers"&&args.find("action")&&args.find("action")->asStr()=="merge"&&!(args.find("preview")&&args.find("preview")->t==arkjson::Value::Bool&&args.find("preview")->b);
     size_t previousVisibleBodies=g_bodyIds.size();
     g_progressTiming030={};
@@ -1452,7 +1456,8 @@ static arkjson::Value runTool(const std::string& tool,const arkjson::Value& args
     bool potentiallySlow=tool=="wood_inspect"||tool=="hud_flex_check"||tool=="sketch_repair"||tool=="plane_authoring"||tool=="import_cad"||tool=="cad_inspect"||tool=="design_containers"||tool.rfind("library_",0)==0||tool=="failure_replay"||tool=="failure_export"||tool=="manufacturing_inspect"||tool=="doc_load"||tool=="iteration_restore"||tool=="history_migrate_derived"||tool=="history_compact"||tool=="doc_apply"||tool=="doc_preview"||tool=="design_solve"||tool=="placement_plan"||tool=="pattern_plan"||tool=="query_batch"||tool=="geometry_query"||tool=="physics_inspect"||tool=="native_inspect"||tool=="step_inspect"||tool=="reference_inspect"||tool=="assembly_info"||tool=="kernel_info"||tool=="doc_undo"||tool=="doc_redo"||tool=="import_step"||tool=="import_sheet_step"||tool=="import_mesh"||tool=="export_step"||tool=="export_iges"||tool=="export_mesh"||tool=="export_flat_dxf"||tool=="bom_export_parts"||tool=="reference_navigate"||tool=="selection_set";
     if(tool=="doc_apply"&&!effectiveArgs.find("checks")&&metadataOnlyApply(g_doc,effectiveArgs))potentiallySlow=false;
     bool viewportSnapshot=tool=="snapshot"&&!effectiveArgs.find("candidate_id")&&effectiveArgs.find("view")&&effectiveArgs.find("view")->asStr()=="viewport";
-    auto result=viewportSnapshot?captureViewportSnapshot(effectiveArgs):potentiallySlow&&g_uiReady&&(!g_headless||g_busyTestMode)?callSessionWithProgress(tool,effectiveArgs):g_session.call(tool,effectiveArgs);g_error=result.find("isError")->b;
+    const bool backgroundAuthoring=tool=="doc_apply"&&!effectiveArgs.find("candidate_id")&&(!metadataOnlyApply(g_doc,effectiveArgs)||effectiveArgs.find("checks"))&&g_uiReady&&(!g_headless||g_authoringUiTestMode);if(backgroundAuthoring&&!effectiveArgs.find("expected_revision"))effectiveArgs.set("expected_revision",arkjson::Value::makeNum((double)g_session.revision));
+    auto result=backgroundAuthoring?prepareAuthoringWithProgress(effectiveArgs):viewportSnapshot?captureViewportSnapshot(effectiveArgs):potentiallySlow&&g_uiReady&&(!g_headless||g_busyTestMode)?callSessionWithProgress(tool,effectiveArgs):g_session.call(tool,effectiveArgs);g_error=result.find("isError")->b;
     if(auto* data=result.find("structuredContent"))if(auto* id=data->find("failure_id");id&&id->t==arkjson::Value::Str)g_lastFailureId=id->str;
     u64 loadedUsageSerial=g_doc.usage.serial;
     if(!g_error&&tool=="selection_set"){
@@ -2872,11 +2877,11 @@ static void showAssistantAccountMenu(){
 static arkjson::Value cancelledTool(){using V=arkjson::Value;V r=V::makeObj(),e=V::makeObj();e.set("error",V::makeStr("Request cancelled before execution"));r.set("isError",V::makeBool(true));r.set("structuredContent",e);return r;}
 #include "exact_jobs_046b.inl"
 static void drainUiTools(){
-    if(g_dialog||g_busy)return;
+    if(g_dialog||g_busy||g_preparingEdit)return;
     const auto sliceStarted030=RealtimeClock030::now();
     while(!g_toolQueue.empty()){auto request=std::move(g_toolQueue.front());g_toolQueue.pop_front();
         if(g_closing||request->stop.stop_requested()||(request->cancel&&*request->cancel)){request->complete(cancelledTool());continue;}
-        if((request->teamOwned&&request->epoch!=g_documentEpoch)||(request->revision&&(request->epoch!=g_documentEpoch||*request->revision!=g_session.revision))){auto result=cancelledTool();arkjson::Value error=arkjson::Value::makeObj();g_status="Document changed during assistant turn. Inspect and resend from the current revision.";error.set("error",arkjson::Value::makeStr(g_status));result.set("structuredContent",error);g_chatLog.push_back({"ARK",g_status});request->complete(result);if(request->cancel)*request->cancel=true;continue;}
+        if((request->queuedEpoch&&request->objectEpoch!=g_objectDocumentEpoch)||(request->teamOwned&&request->epoch!=g_documentEpoch)||(request->revision&&(request->epoch!=g_documentEpoch||*request->revision!=g_session.revision))){auto result=cancelledTool();arkjson::Value error=arkjson::Value::makeObj();g_status="Document changed during assistant turn. Inspect and resend from the current revision.";error.set("error",arkjson::Value::makeStr(g_status));result.set("structuredContent",error);g_chatLog.push_back({"ARK",g_status});request->complete(result);if(request->cancel)*request->cancel=true;continue;}
         if(!assistantSteeringToolAllowed(*request)){request->complete(assistantSteeringToolRejection());continue;}
         if(request->teamOwned||request->revision){using V=arkjson::Value;V actor=V::makeObj();actor.set("kind",V::makeStr("agent"));actor.set("id",V::makeStr(request->roleId.empty()?"assistant":request->roleId));std::string model=g_assistantConfig.model;for(size_t i=0;i<teamCapacity;++i)if(request->roleId==g_teamRoleIds[i])model=g_teamModels[i].empty()?(g_teamConnectors[i]?g_teamConnectors[i]->model:g_assistantConfig.model):g_teamModels[i];if(!model.empty())actor.set("model",V::makeStr(model));if(!request->roleId.empty())actor.set("role",V::makeStr(request->roleId));static const std::set<std::string> writes{"doc_apply","doc_new","doc_load","doc_undo","doc_redo","iteration_restore","import_step","import_sheet_step","import_mesh","import_cad","design_containers","library_insert"};request->args.set("actor",actor);}
         // Live MCP bridge calls declare one client actor on every tool: writes keep
@@ -2890,7 +2895,7 @@ static void drainUiTools(){
         const auto revisionBefore030=g_session.revision;const auto hostStarted030=RealtimeClock030::now();
         // 046B: allow-listed exact reads continue on a session copy at this revision.
         if(routeExactJob046(request)){if(realtimeMs030(sliceStarted030)>=8.)break;continue;}
-        try{const auto presenceActor=request->roleId.empty()?(request->revision?"assistant":"mcp"):request->roleId;observePresence030(presenceActor,request->tool,request->args);g_activeToolRole=request->roleId;g_activeToolName=request->tool;if(request->tool=="doc_apply"&&!metadataOnlyApply(g_doc,request->args)){captureDraftContext();for(auto& entry:g_draftViews)buildDraftLines(entry.second);}g_ownAssistantTool=(bool)request->revision||request->teamOwned;auto result=runTool(request->tool,request->args);finishPresence030(presenceActor,result);g_ownAssistantTool=false;g_activeToolRole.clear();g_activeToolName.clear();if(request->revision)*request->revision=g_session.revision;rememberToolTiming030({request->tool,realtimeMs030(request->posted,hostStarted030),realtimeMs030(hostStarted030),g_progressTiming030});request->complete(result);}catch(...){g_ownAssistantTool=false;g_activeToolRole.clear();g_activeToolName.clear();request->complete(cancelledTool());}
+        try{const auto presenceActor=request->roleId.empty()?(request->revision?"assistant":"mcp"):request->roleId;observePresence030(presenceActor,request->tool,request->args);g_activeToolRole=request->roleId;g_activeToolName=request->tool;if(request->tool=="doc_apply"&&!metadataOnlyApply(g_doc,request->args)){captureDraftContext();for(auto& entry:g_draftViews)buildDraftLines(entry.second);}g_ownAssistantTool=(bool)request->revision||request->teamOwned;g_authoringExternalCancel=[pointer=request.get()]{return pointer->stop.stop_requested()||(pointer->cancel&&pointer->cancel->load());};auto result=runTool(request->tool,request->args);g_authoringExternalCancel={};finishPresence030(presenceActor,result);g_ownAssistantTool=false;g_activeToolRole.clear();g_activeToolName.clear();if(request->revision)*request->revision=g_session.revision;rememberToolTiming030({request->tool,realtimeMs030(request->posted,hostStarted030),realtimeMs030(hostStarted030),g_progressTiming030});request->complete(result);}catch(...){g_authoringExternalCancel={};g_ownAssistantTool=false;g_activeToolRole.clear();g_activeToolName.clear();request->complete(cancelledTool());}
         // Give the viewport a turn after every published revision or 8 ms of
         // dispatch. This is UI scheduling, not an agent turn/token budget.
         if(g_session.revision!=revisionBefore030||realtimeMs030(sliceStarted030)>=8.)break;
@@ -3148,7 +3153,7 @@ static void startLiveBridge(){
     },{},liveCallProgress))g_status="Live MCP unavailable: "+g_liveBridge.lastError();
 }
 static void stopIntegrations(){
-    g_closing=true;*g_pricingCancel=true;*g_teamCancel=true;g_agentTeam.cancel();*g_assistantCancel=true;*g_authCancel=true;g_liveBridge.stop();shutdownExactJobs046();
+    g_closing=true;if(g_authoringWorker)g_authoringWorker->shutdown();*g_pricingCancel=true;*g_teamCancel=true;g_agentTeam.cancel();*g_assistantCancel=true;*g_authCancel=true;g_liveBridge.stop();shutdownExactJobs046();
     MSG msg{};while(PeekMessage(&msg,g_window,WM_ARK_TOOL,WM_ARK_AUTH,PM_REMOVE)){if(msg.message==WM_ARK_TOOL){std::unique_ptr<UiToolRequest> request((UiToolRequest*)msg.lParam);request->complete(cancelledTool());}else if(msg.message==WM_ARK_CHAT)delete (UiChatEvent*)msg.lParam;else if(msg.message==WM_ARK_AUTH)delete (UiAuthEvent*)msg.lParam;}
     while(!g_toolQueue.empty()){g_toolQueue.front()->complete(cancelledTool());g_toolQueue.pop_front();}
     if(g_assistantWorker.joinable())g_assistantWorker.join();
@@ -4786,9 +4791,9 @@ static void drawCanvases(const GLfloat* vpT){
 #include "exploded_view.inl"
 #include "drag_chain.inl"
 static void drawFrame(HDC hdc){
-    processDirectAuthoringPreview();processCableGuide035();
+    if(!g_preparingEdit){processDirectAuthoringPreview();processCableGuide035();}
     static auto previous=std::chrono::steady_clock::now();auto now=std::chrono::steady_clock::now();
-    double elapsed=std::min(.10,std::chrono::duration<double>(now-previous).count());advanceFold(elapsed);advanceSheet(elapsed);advanceSuspension(elapsed);advanceMotion(elapsed);advanceBakedMotion(elapsed);advanceExplodedView(elapsed);previous=now;
+    double elapsed=std::min(.10,std::chrono::duration<double>(now-previous).count());if(!g_preparingEdit){advanceFold(elapsed);advanceSheet(elapsed);advanceSuspension(elapsed);advanceMotion(elapsed);advanceBakedMotion(elapsed);advanceExplodedView(elapsed);}previous=now;
     double cameraEase=1-std::exp(-13.4*elapsed),distanceEase=1-std::exp(-11.9*elapsed);
     yaw+=(tYaw-yaw)*cameraEase;pitch+=(tPitch-pitch)*cameraEase;dist+=(tDist-dist)*distanceEase;target=target+(tTarget-target)*cameraEase;
     layout();sampleStudioResources();updateCostDisplay();
@@ -5713,12 +5718,15 @@ static std::string liveCallProgress(){
     return "Feature "+std::to_string(progress.index+1)+"/"+std::to_string(progress.total)+" #"+std::to_string(progress.id)+(progress.name.empty()?std::string():" "+progress.name)+" "+(progress.completed?"ready":progress.reused?"cached":"evaluating");
 }
 static void drawBusyFrame(HDC hdc){
-    // The worker exclusively owns g_session. This path reads only a captured GL
-    // frame and UI progress state; drawFrame and document access are forbidden.
+    // Live-session work uses only its captured frame. Private authoring work
+    // leaves the committed document on the UI thread, so it can render live.
+    if(g_preparingEdit){const bool swap=g_swap;g_swap=false;drawFrame(hdc);g_swap=swap;}
     glViewport(0,0,winW,winH);glDisable(GL_DEPTH_TEST);glDisable(GL_BLEND);
+    if(!g_preparingEdit){
     glUseProgram(pBusy);glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,g_busySnapshotTex);
     glUniform1i(glGetUniformLocation(pBusy,"frame"),0);glUniform2f(glGetUniformLocation(pBusy,"res"),(float)winW,(float)winH);
     glBindVertexArray(quadVao);glDrawArrays(GL_TRIANGLES,0,3);
+    }
     drawDraftSketches();sampleStudioResources();updateCostDisplay();
     glEnable(GL_BLEND);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);glUseProgram(pUI);
     glUniform2f(uuVp,(float)winW,(float)winH);
@@ -5741,8 +5749,9 @@ static void drawBusyFrame(HDC hdc){
     char duration[128];if(progress.total)std::snprintf(duration,sizeof duration,"Feature %zu/%zu / #%llu / %s / %.1f s",progress.index+1,progress.total,(unsigned long long)progress.id,progress.completed?"ready":progress.reused?"cached":"evaluating",elapsed);
     else std::snprintf(duration,sizeof duration,"Tool processing / %.1f s elapsed",elapsed);
     textOut(duration,x+43,y+53,.66f,.63f,.72f,.82f);
-    textOut(g_activeToolRole.empty()?"Committed scene retained":g_activeToolRole+" / "+g_activeToolName,x+24,y+94,.65f,.77f,.84f,.92f);
-    textOut("Live sketch drafts are uncommitted; the step publishes atomically",x+24,y+119,.56f,.58f,.68f,.79f);
+    textOut(fitText(g_activeToolRole.empty()?"Committed scene retained":g_activeToolRole+" / "+g_activeToolName,.65f,g_preparingEdit?width-160:width-48),x+24,y+94,.65f,.77f,.84f,.92f);
+    textOut(g_preparingEdit?"Orbit / zoom / select while the edit prepares":"Live sketch drafts are uncommitted; the step publishes atomically",x+24,y+119,.56f,.58f,.68f,.79f);
+    if(g_preparingEdit){g_authoringCancelRect={(LONG)(x+width-122),(LONG)(y+82),(LONG)(x+width-20),(LONG)(y+112)};box(x+width-122,y+82,102,30,5,.20f,.29f,.39f,1);textOut("Cancel (Esc)",x+width-112,y+91,.58f,.94f,.95f,1.f);}
     float phase=(float)std::fmod(elapsed*1.6,1.);
     box(x+24,y+153,width-48,4,2,.20f,.28f,.36f,1);
     box(x+24+phase*(width-138),y+153,90,4,2,.42f,.79f,.98f,1);
@@ -5830,6 +5839,8 @@ static arkjson::Value callSessionWithProgress(const std::string& tool,const arkj
     g_progressTiming030.workerMs=workTiming->elapsed;g_progressTiming030.resumeMs=realtimeMs030(workTiming->completed);
     return result;
 }
+
+#include "async_authoring_051a.inl"
 
 enum class ContextTarget{Empty,Body,Sketch,Datum,Feature,SheetEntity};
 struct ContextEntry{int action=0;const char* title="";bool enabled=true;const char* hint="";};
@@ -5925,6 +5936,7 @@ static void showContextMenu(int mx,int my){
 
 // ---------------------------------------------------------------------------
 static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
+    if(g_preparingEdit&&preparingAuthoringInput(hw,m,wp,lp))return 0;
     if(g_busy){
         if(m==WM_CLOSE){g_busyClosePending=true;return 0;}
         if(m==WM_COMMAND||m==WM_MBUTTONDOWN||m==WM_MBUTTONUP||m==WM_MOUSEWHEEL||m==WM_LBUTTONDOWN||m==WM_LBUTTONUP||m==WM_LBUTTONDBLCLK||m==WM_RBUTTONDOWN||m==WM_RBUTTONUP||m==WM_MOUSEMOVE||m==WM_KEYDOWN||m==WM_KEYUP)return 0;
@@ -5935,7 +5947,7 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
         case WM_ARK_PRICE:{std::unique_ptr<PricingCatalog> value((PricingCatalog*)lp);g_pricing=std::move(*value);g_pricingBusy=false;g_pricingReady=!g_pricing.models.empty()||!g_pricing.subscriptionCredits.empty();updateCostDisplay(true);return 0;}
         case WM_MEASUREITEM:{auto* item=(MEASUREITEMSTRUCT*)lp;if(item->CtlType==ODT_MENU&&item->itemData){auto* entry=(ContextEntry*)item->itemData;item->itemWidth=306;item->itemHeight=contextRowHeight(*entry);return TRUE;}break;}
         case WM_DRAWITEM:{auto* item=(DRAWITEMSTRUCT*)lp;if(item->CtlType==ODT_MENU&&item->itemData){drawContextEntry(item->hDC,item->rcItem,*(ContextEntry*)item->itemData,(item->itemState&ODS_SELECTED)!=0);return TRUE;}break;}
-        case WM_ARK_TOOL:g_toolQueue.emplace_back((UiToolRequest*)lp);return 0;
+        case WM_ARK_TOOL:{auto* request=(UiToolRequest*)lp;if(request->tool=="doc_apply"){request->objectEpoch=g_objectDocumentEpoch;request->queuedEpoch=true;if(!request->args.find("expected_revision"))request->args.set("expected_revision",arkjson::Value::makeNum((double)g_session.revision));}g_toolQueue.emplace_back(request);return 0;}
         case WM_ARK_EXACT:return 0; // wake only; deliveries drain from the main loop
         case WM_ARK_CHAT:{std::unique_ptr<UiChatEvent> event((UiChatEvent*)lp);
             if(event->final){g_chatBusy=false;if(event->epoch==g_documentEpoch){g_assistantResponseFinished=true;g_assistantResponseError=event->error||*g_assistantCancel;}if(event->epoch==g_documentEpoch&&event->history.t==arkjson::Value::Arr)g_conversation=event->history;else if(event->epoch!=g_documentEpoch)g_conversation=arkjson::Value::makeArr();}
@@ -6141,7 +6153,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     if(!setDpiContext||!setDpiContext(reinterpret_cast<HANDLE>(-4)))SetProcessDPIAware();
     bool plasticsUiTest=false,electronicsWorkspaceUiTest=false,cableGuideUiTest=false;
     bool nativeProductPerformanceUiTest=false,sceneCacheUiTest=false,authoringAssistanceUiTest=false,featureEditorPickingUiTest=false;
-    bool historyCompactionUiTest=false;bool featureHistoryUiTest=false,recoveryUiTest=false,editorScrollUiTest=false,configurationWorkspaceUiTest=false,interactionPerformanceUiTest=false;bool startupUiTest=false;bool stampsUiTest=false;bool media044bUiTest=false;bool planesSectionsUiTest=false;
+    bool asyncAuthoringUiTest=false;bool historyCompactionUiTest=false;bool featureHistoryUiTest=false,recoveryUiTest=false,editorScrollUiTest=false,configurationWorkspaceUiTest=false,interactionPerformanceUiTest=false;bool startupUiTest=false;bool stampsUiTest=false;bool media044bUiTest=false;bool planesSectionsUiTest=false;
     bool specializedPatternUiTest=false;bool advancedSheetmetalUiTest=false;bool nativeVertexPullUiTest=false;bool cadImportUiTest=false;bool holesOrchestratorUiTest=false;bool designContainerUiTest=false;
     bool directAuthoringUiTest=false,parametricAuthoringUiTest=false,skeletonEditorUiTest=false,imageAttachmentUiTest=false,assistantSteeringUiTest=false;
     bool localModelsUiTest=false;bool viewportDockUiTest=false;bool bakedMotionsUiTest=false;bool parametricHudUiTest=false;bool explodedViewsUiTest=false;bool dragChainUiTest=false;bool bomUiTest=false;bool drawingWorkspaceUiTest=false;bool drawingViewportUiTest=false;bool measurementUiTest=false;bool authoringUiTest=false;
@@ -6155,6 +6167,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         else if(a=="--self-test-plastics-ui"){plasticsUiTest=true;g_headless=true;}
         else if(a=="--self-test-electronics-workspace-ui"){electronicsWorkspaceUiTest=true;g_headless=true;}
         else if(a=="--self-test-startup-ui"){startupUiTest=true;g_headless=true;}
+        else if(a=="--self-test-async-authoring-ui"){asyncAuthoringUiTest=true;g_headless=true;}
         else if(a=="--self-test-history-compaction-ui"){historyCompactionUiTest=true;g_headless=true;}
         else if(a=="--self-test-history-ui"){featureHistoryUiTest=true;g_headless=true;}
         else if(a=="--self-test-recovery-ui"){recoveryUiTest=true;g_headless=true;}
@@ -7062,6 +7075,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
 #include "typed_sketch_selftest.inl"
 #include "history_recovery_selftest.inl"
 #include "history_compaction_selftest.inl"
+#include "async_authoring_selftest.inl"
 #include "editor_scroll_selftest.inl"
 #include "feature_editor_picking_selftest.inl"
 #include "configuration_workspace_selftest.inl"

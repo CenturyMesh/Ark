@@ -36,7 +36,7 @@ add_library(ark STATIC
   src/authoring_023b.cpp src/cad_import.cpp src/holes_orchestrator.cpp src/design_containers.cpp
   src/assembly_patterns.cpp
   src/motion_graph.cpp src/exploded_view.cpp src/visualize.cpp src/derived_bakes_049a.cpp src/drag_chain.cpp
-  src/direct_preview.cpp
+  src/direct_preview.cpp src/async_authoring_051a.cpp
   src/exact_jobs_046b.cpp
   src/parametric_hud.cpp
   src/agent_activity.cpp
@@ -70,6 +70,10 @@ add_library(ark STATIC
 target_include_directories(ark PUBLIC include "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_include_directories(ark SYSTEM PRIVATE third_party)
 
+add_executable(ark-async-authoring-051a-tests tests/async_authoring_051a_tests.cpp)
+target_link_libraries(ark-async-authoring-051a-tests PRIVATE ark)
+add_test(NAME async-authoring-051a COMMAND ark-async-authoring-051a-tests)
+set_tests_properties(async-authoring-051a PROPERTIES TIMEOUT 180)
 add_executable(ark-direct-preview-tests tests/direct_preview_tests.cpp)
 target_link_libraries(ark-direct-preview-tests PRIVATE ark)
 add_test(NAME direct-preview-worker COMMAND ark-direct-preview-tests)
@@ -556,7 +560,7 @@ if(WIN32)
     set_tests_properties(studio-navigation-036a PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
     add_test(NAME studio-datum-authoring-036a COMMAND ark-studio --datum-authoring-ui-test --settings-file "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/datum-authoring-036a.settings.json" --shot "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/datum-authoring-036a.png" --size 1440 900)
     set_tests_properties(studio-datum-authoring-036a PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
-    foreach(check async-exact-ui team-blockers-ui realtime-ui product-tools-ui scene-cache-ui authoring-assistance-ui editor-scroll-ui feature-editor-picking-ui history-ui history-compaction-ui recovery-ui configuration-workspace-ui interaction-performance-ui)
+    foreach(check async-exact-ui async-authoring-ui team-blockers-ui realtime-ui product-tools-ui scene-cache-ui authoring-assistance-ui editor-scroll-ui feature-editor-picking-ui history-ui history-compaction-ui recovery-ui configuration-workspace-ui interaction-performance-ui)
       add_test(NAME studio-${check} COMMAND ark-studio --self-test-${check} --settings-file "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}.settings.json" --shot "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}.png" --size 1280 800)
       set_tests_properties(studio-${check} PROPERTIES TIMEOUT 300 RUN_SERIAL TRUE)
     endforeach()
