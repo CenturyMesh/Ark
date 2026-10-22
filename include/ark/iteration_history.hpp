@@ -28,6 +28,6 @@ void iterationInlineBakePayloads(const arkjson::Value& history,size_t& reference
 arkjson::Value iterationRewrite(const arkjson::Value& history,const std::function<void(arkjson::Value& state)>& transform,std::map<std::string,std::string>& ids);
 // Explicit archive-backed compaction. Retains the current-head ancestor suffix;
 // undo keeps only its contiguous retained targets, redo is cleared. No auto pruning.
-arkjson::Value iterationCompact(const Document& source,size_t keepRecent,const arkjson::Value& receipt);
+arkjson::Value iterationCompact(const Document& source,size_t keepRecent,const arkjson::Value& receipt,const arkjson::Value& retainIds=arkjson::Value::makeArr());
 arkjson::Value historyCompactTool(Document& document,std::uint64_t& revision,const arkjson::Value& args);
 }

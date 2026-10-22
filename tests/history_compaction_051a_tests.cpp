@@ -5,6 +5,7 @@
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
+#include <algorithm>
 namespace {
 using V=arkjson::Value;namespace fs=std::filesystem;
 void check(bool ok,const std::string& message){if(!ok)throw std::runtime_error(message);}
@@ -46,5 +47,16 @@ int main(){try{
     check(branchReceipt.find("compaction")->find("archived_branch_heads")->num==1&&branchReceipt.find("compaction")->find("undo_retained")->num==0,"branch compaction honestly bounds cross-branch undo without skipping target");
     check(ark::loadDocument((directory/"branches.ark").string().c_str(),previous,&error)&&ark::documentToJson(previous)==branchOriginal,"archive retains alternate branch topology");
     result(branches.call("history_compact",compactArgs(branches,directory/"baseline.ark",0)));check(branches.document.iterationHistory.find("nodes")->arr.empty()&&branches.document.getParam("length")==1,"zero-retention keeps full current state as baseline");edit(branches,7);
-    fs::remove_all(directory);std::cout<<"history compaction 051A tests passed: 601 edits, archives, reopen, undo, branches, failures, lineage\n";return 0;
+    // A full archive must also recover an intermediate state on an old branch,
+    // which is not an ancestor of its active head.
+    ark::AgentSession fullBranch;result(fullBranch.call("doc_apply",parse(R"({"expected_revision":0,"commands":[{"op":"feature.add","type":"box","name":"Branch geometry","p":{"dx":"5","dy":"6","dz":"7"}}]})")));
+    const auto branchA=edit(fullBranch,1),branchB=edit(fullBranch,2);edit(fullBranch,3);pick.set("id",*branchA.find("iteration_id"));pick.set("expected_revision",V::makeNum(fullBranch.revision));result(fullBranch.call("iteration_restore",pick));
+    for(int i=4;i<=510;++i)edit(fullBranch,i);check(fullBranch.document.iterationHistory.find("nodes")->arr.size()==512,"branched fixture reaches exact capacity");
+    check(ark::saveDocument(fullBranch.document,(directory/"full-branches.ark").string().c_str()),"full branched archive saves");ark::AgentSession recoveredBranch;load.set("path",V::makeStr((directory/"full-branches.ark").string()));result(recoveredBranch.call("doc_load",load));
+    const auto branchAuthoring=ark::iterationAuthoring(recoveredBranch.document).dump();auto retain=compactArgs(recoveredBranch,directory/"full-branches-copy.ark",0);V selected=V::makeArr();selected.arr.push_back(*branchB.find("iteration_id"));selected.arr.push_back(*branchB.find("iteration_id"));selected.arr.push_back(*recoveredBranch.document.iterationHistory.find("head_id"));retain.set("retain_ids",selected);
+    const auto selectedReceipt=result(recoveredBranch.call("history_compact",retain));check(ark::iterationAuthoring(recoveredBranch.document).dump()==branchAuthoring&&selectedReceipt.find("compaction")->find("selected_extra_nodes")->num==1,"selected old branch retained without changing authoring or duplicating nodes");
+    std::string selectedId;for(const auto& row:selectedReceipt.find("compaction")->find("retained_ids")->arr)if(row.find("original_id")->str==branchB.find("iteration_id")->str)selectedId=row.find("id")->str;check(!selectedId.empty(),"selected branch receipt maps old id");
+    pick.set("id",V::makeStr(selectedId));pick.set("expected_revision",V::makeNum(recoveredBranch.revision));result(recoveredBranch.call("iteration_restore",pick));check(recoveredBranch.document.getParam("length")==2&&recoveredBranch.document.features.size()==1&&recoveredBranch.document.features[0].name=="Branch geometry","full archive arbitrary old branch state restores correct authoring and geometry");
+    auto invalid=compactArgs(recoveredBranch,directory/"invalid-target.ark",0);selected.arr={V::makeStr("missing-iteration")};invalid.set("retain_ids",selected);const auto unchanged=ark::documentToJson(recoveredBranch.document);check(recoveredBranch.call("history_compact",invalid).find("isError")->b&&ark::documentToJson(recoveredBranch.document)==unchanged&&!fs::exists(directory/"invalid-target.ark"),"unknown retained id fails without publication or mutation");
+    fs::remove_all(directory);std::cout<<"history compaction 051A tests passed: 601 edits, full branched archive recovery, reopen, undo, failures, lineage\n";return 0;
 }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

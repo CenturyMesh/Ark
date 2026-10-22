@@ -30,7 +30,7 @@ bool publishNew(const fs::path& from,const fs::path& to){
 }
 V historyCompactTool(Document& document,u64& revision,const V& args){
     require(args.t==V::Obj,"HISTORY_COMPACTION_INVALID: arguments must be an object");
-    for(const auto& field:args.obj)require(field.first=="archive_path"||field.first=="keep_recent"||field.first=="expected_revision"||field.first=="confirm"||field.first=="actor"||field.first=="motivation","HISTORY_COMPACTION_INVALID: unknown field "+field.first);
+    for(const auto& field:args.obj)require(field.first=="archive_path"||field.first=="keep_recent"||field.first=="retain_ids"||field.first=="expected_revision"||field.first=="confirm"||field.first=="actor"||field.first=="motivation","HISTORY_COMPACTION_INVALID: unknown field "+field.first);
     const auto* expected=args.find("expected_revision");require(expected&&expected->t==V::Num&&expected->num==(double)revision,"Revision conflict; read history_info before compacting");
     const auto* confirm=args.find("confirm");require(confirm&&confirm->t==V::Bool&&confirm->b,"HISTORY_COMPACTION_CONFIRM_REQUIRED: archive and compact only on explicit instruction with confirm:true");
     const auto* count=args.find("keep_recent");require(count&&count->t==V::Num&&count->num>=0&&count->num<=256&&count->num==std::floor(count->num),"HISTORY_COMPACTION_INVALID: keep_recent must be an integer 0..256");
@@ -48,7 +48,7 @@ V historyCompactTool(Document& document,u64& revision,const V& args){
     Document reopened;require(loadDocument(utf8(staging).c_str(),reopened,&error)&&documentToJson(reopened)==original,"HISTORY_COMPACTION_ARCHIVE_FAILED: staged archive did not reopen identically: "+error);
     V archiveInfo=V::makeObj();archiveInfo.set("path",V::makeStr(utf8(archive)));archiveInfo.set("bytes",V::makeNum((double)fs::file_size(staging)));archiveInfo.set("verified",V::makeBool(true));archiveInfo.set("document_sha256",V::makeStr(iterationSha256(original)));archiveInfo.set("file_sha256",V::makeStr(iterationSha256(bytes(staging))));
     V record=V::makeObj();record.set("archive",archiveInfo);record.set("actor",actor);record.set("provenance",V::makeStr("caller_declared"));record.set("motivation",V::makeStr(motivation));record.set("revision_before",V::makeNum((double)revision));
-    Document next=document;next.iterationHistory=iterationCompact(document,(size_t)count->num,record);const std::string persisted=documentToJson(next);
+    Document next=document;next.iterationHistory=iterationCompact(document,(size_t)count->num,record,args.find("retain_ids")?*args.find("retain_ids"):V::makeArr());const std::string persisted=documentToJson(next);
     require(persisted.size()<=maxDocumentBytes,"HISTORY_COMPACTION_CAPACITY: retained history still exceeds 4 MiB; request fewer retained nodes");
     require(iterationValidate(next,next.iterationHistory,error)&&documentFromJson(persisted,reopened,&error)&&documentToJson(reopened)==persisted,"HISTORY_COMPACTION_INVALID: compacted document did not reopen identically: "+error);
     require(iterationAuthoring(next).dump()==iterationAuthoring(document).dump(),"HISTORY_COMPACTION_INVALID: compaction changed authoring");

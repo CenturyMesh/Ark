@@ -181,13 +181,14 @@ V iterationRewrite(const V& h,const std::function<void(V&)>& transform,std::map<
     for(const char* key:{"undo_ids","redo_ids"}){V list=V::makeArr();for(const auto& id:need(h,key).arr)list.arr.push_back(V::makeStr(ids.at(id.str)));out.set(key,list);}
     if(const auto* migrations=h.find("migrations"))out.set("migrations",*migrations);if(const auto* receipt=h.find("compaction")){out.set("compaction",*receipt);out.set("compacted",V::makeBool(true));}return out;
 }
-V iterationCompact(const Document& source,size_t keepRecent,const V& receipt){
+V iterationCompact(const Document& source,size_t keepRecent,const V& receipt,const V& retainIds){
     if(keepRecent>256)throw std::runtime_error("HISTORY_COMPACTION_INVALID: keep_recent must be 0..256");
+    if(retainIds.t!=V::Arr||retainIds.arr.size()>256)throw std::runtime_error("HISTORY_COMPACTION_INVALID: retain_ids must be an array of at most 256 iteration ids");
     const V& h=source.iterationHistory;std::string error;
     if(!iterationValidate(source,h,error))throw std::runtime_error("HISTORY_COMPACTION_INVALID: "+error);
     std::vector<const V*> chain;std::string cursor=text(h,"head_id");
     while(cursor!=text(h,"baseline_id")&&chain.size()<keepRecent){const V* n=node(h,cursor);chain.push_back(n);cursor=text(*n,"parent_id");}
-    V state=replay(h,cursor),out=fresh(state);out.set("schema",need(h,"schema"));
+    V state=replay(h,cursor),out=fresh(state);const V baselineState=state;out.set("schema",need(h,"schema"));
     if(const auto* migrations=h.find("migrations"))out.set("migrations",*migrations);
     std::map<std::string,std::string> ids{{cursor,text(out,"baseline_id")}};
     V mapping=V::makeArr();auto mapped=[&](const std::string& old,const std::string& current){V item=V::makeObj();item.set("original_id",V::makeStr(old));item.set("id",V::makeStr(current));mapping.arr.push_back(item);};mapped(cursor,text(out,"baseline_id"));
@@ -196,12 +197,24 @@ V iterationCompact(const Document& source,size_t keepRecent,const V& receipt){
         m.set("parent_id",need(out,"head_id"));m.set("previous_head_id",need(out,"head_id"));m.set("before_sha256",V::makeStr(iterationSha256(state.dump())));m.set("delta",delta);m.set("ordinal",V::makeNum(need(out,"nodes").arr.size()+1));
         const std::string id=nodeId(m);m.set("id",V::makeStr(id));member(out,"nodes").arr.push_back(m);out.set("head_id",V::makeStr(id));ids[text(n,"id")]=id;mapped(text(n,"id"),id);state=std::move(next);
     }
+    // Explicit selected states can be preserved even when they are on another
+    // branch or older than the ancestor suffix. They do not change the head.
+    for(const auto& selected:retainIds.arr){
+        if(selected.t!=V::Str||selected.str.empty())throw std::runtime_error("HISTORY_COMPACTION_INVALID: retain_ids requires iteration ids");
+        if(ids.count(selected.str))continue;
+        if(need(out,"nodes").arr.size()>=256)throw std::runtime_error("HISTORY_COMPACTION_INVALID: combined retained nodes exceed 256");
+        const V selectedState=replay(h,selected.str);V delta=V::makeArr();diff(baselineState,selectedState,V::makeArr(),delta,member(out,"blobs"));
+        const V* original=node(h,selected.str);V m=original?*original:V::makeObj();erase(m,"id");erase(m,"restored_from_id");
+        if(!original){m.set("actor",need(receipt,"actor"));m.set("provenance",V::makeStr("caller_declared"));m.set("tool",V::makeStr("history_compact"));m.set("motivation",V::makeStr("Explicitly retained archived baseline"));m.set("utc",V::makeStr(utc()));m.set("summary",V::makeStr("Explicitly retained archived baseline"));}
+        m.set("original_id",selected);m.set("original_parent_id",original?need(*original,"parent_id"):selected);m.set("original_previous_head_id",original?need(*original,"previous_head_id"):selected);m.set("parent_id",need(out,"baseline_id"));m.set("previous_head_id",need(out,"baseline_id"));m.set("before_sha256",need(out,"baseline_sha256"));m.set("after_sha256",V::makeStr(iterationSha256(selectedState.dump())));m.set("delta",delta);m.set("ordinal",V::makeNum(need(out,"nodes").arr.size()+1));
+        const auto id=nodeId(m);m.set("id",V::makeStr(id));member(out,"nodes").arr.push_back(m);ids[selected.str]=id;mapped(selected.str,id);
+    }
     // Undo means previous active state (including across branches), not parent.
     // Keep only the contiguous suffix; never silently skip an omitted target.
     V undo=V::makeArr();const auto& oldUndo=need(h,"undo_ids").arr;
     for(auto it=oldUndo.rbegin();it!=oldUndo.rend();++it){auto found=ids.find(it->str);if(found==ids.end())break;undo.arr.insert(undo.arr.begin(),V::makeStr(found->second));}
     out.set("undo_ids",undo);V record=receipt;record.set("format",V::makeStr("ark.history_compaction.v1"));record.set("utc",V::makeStr(utc()));record.set("previous_head_id",need(h,"head_id"));record.set("previous_baseline_id",need(h,"baseline_id"));record.set("baseline_id",need(out,"baseline_id"));record.set("head_id",need(out,"head_id"));record.set("retained_ids",mapping);
-    record.set("nodes_before",V::makeNum(need(h,"nodes").arr.size()));record.set("nodes_retained",V::makeNum(chain.size()));record.set("undo_retained",V::makeNum(undo.arr.size()));record.set("redo_cleared",V::makeNum(need(h,"redo_ids").arr.size()));
+    record.set("nodes_before",V::makeNum(need(h,"nodes").arr.size()));record.set("nodes_retained",V::makeNum(need(out,"nodes").arr.size()));record.set("ancestor_nodes_retained",V::makeNum(chain.size()));record.set("selected_extra_nodes",V::makeNum(need(out,"nodes").arr.size()-chain.size()));record.set("undo_retained",V::makeNum(undo.arr.size()));record.set("redo_cleared",V::makeNum(need(h,"redo_ids").arr.size()));
     size_t omittedHeads=0;const V sourceInfo=iterationInfo(source);for(const auto& head:need(sourceInfo,"branch_heads").arr)if(!ids.count(head.str))++omittedHeads;
     record.set("archived_branch_heads",V::makeNum(omittedHeads));record.set("policy",V::makeStr("head_ancestor_suffix_contiguous_undo_clear_redo"));
     V signedRecord=record;canonical(signedRecord);record.set("sha256",V::makeStr(iterationSha256(signedRecord.dump())));out.set("compaction",record);out.set("compacted",V::makeBool(true));return out;
