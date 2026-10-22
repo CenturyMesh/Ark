@@ -221,11 +221,38 @@ the timing of an already validated local cache hit.
 
 Authored content retains its **4 MiB logical limit** and **16 MiB typed-value and
 authored payload limits**. Optional derived data has a separate **64 MiB per-entry
-limit**, **128 MiB total limit** and at most **8192 entries**; the physical file
-limit is **256 MiB**. Derived bytes do not enter the authoring hash or iteration
-history. A malformed optional payload discards the derived section with an
-explicit diagnostic; authoring checksum, schema and structural database failures
-remain hard load failures. Missing geometry can be rebuilt from valid authoring.
+limit**, a **256 MiB decoded total**, a **128 MiB compressed (stored) total** and at
+most **8192 entries**; the physical file limit is **256 MiB**. Derived bytes do not
+enter the authoring hash or iteration history. A malformed optional payload
+discards the derived section with an explicit diagnostic; authoring checksum,
+schema and structural database failures remain hard load failures. Missing
+geometry can be rebuilt from valid authoring.
+
+Since 051A the derived section is stored as one Zstandard frame, the *pack*,
+over every entry in document order. Its rows are named
+`pack1.<manifest>.<index>` and hold consecutive chunks of at most 16 MiB; each
+row keeps its SHA-256 in `hash`. The manifest is the SHA-256 of the entries'
+keys, lengths and digests and is checked again after decoding. Inside the pack,
+canonical base64 JSON string values of at least 1024 characters (the B-rep text)
+are carried as their decoded bytes, and long-distance matching lets the bodies
+of successive features share their common geometry. Decoding reproduces every
+entry byte for byte; B-rep text, its SHA-256 identity and reference names are
+unchanged. Loading accepts both the pack and the per-entry rows written before
+051A; a save rewrites the section as a pack only when its entries changed. The
+frame must carry its content size and checksum, use a window of at most
+128 MiB, and be the only frame in the section; anything else, mixed row kinds,
+a missing chunk or a manifest mismatch discards the derived section.
+
+A runtime before 051A reads the pack rows as invalid derived keys: it discards
+the derived section with a diagnostic, opens the authoring and evaluates the
+geometry from it. The container version stays 2.
+
+When an incremental save leaves at least a quarter of the file (and 1 MiB) as
+free SQLite pages, ARK writes a compact copy with `VACUUM INTO` beside the
+document, reloads and verifies it against the committed authoring and derived
+entries, and then replaces the file atomically. If the copy cannot be verified
+or the file cannot be replaced (for example while another process holds it
+open), the committed incremental save is kept and the receipt says why.
 
 Since 049A the same section also holds the cached frames of current baked-motion
 receipts (`ARK-MOTION-FRAMES1` entries keyed by motion name and receipt digests).
@@ -239,7 +266,15 @@ document order and evaluated from authoring on the next open. The `doc_save`
 receipt reports `saved_geometry` (`status` `saved` or `partial`,
 `entries_saved`, `bytes_saved`, `entries_omitted`, `bytes_omitted`,
 `capacity_bytes`), and Studio states a partial save in its status bar. A failed
-save now returns its reason instead of only "Could not save document".
+save now returns its reason instead of only "Could not save document". Since
+051A `saved_geometry` adds `encoding` (`zstd_pack`), `stored_bytes` (the
+compressed pack, including baked frames) and `stored_capacity_bytes`, and the
+receipt adds `container` with `physical_bytes`, `compacted`,
+`bytes_before_compaction` and, when compaction was skipped,
+`compaction_skipped`. Entries omitted because the compressed pack would exceed
+its stored capacity are counted in the same omission fields. Loading reports
+`container_encoding` (`none`, `entries` or `zstd_pack`), `stored_bytes` and
+`decoded_bytes` in the derived-geometry status.
 
 New authoring-only binary saves remain version 1. Adding saved geometry upgrades
 to version 2. Saving an existing version-2 file without derived entries removes

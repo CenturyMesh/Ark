@@ -1,5 +1,16 @@
 # ARK agent protocol
 
+051A compressed derived section (A.02/A.04/A.05, **Parcial**): `doc_save`
+stores saved geometry and baked frames as one Zstandard pack. Its receipt adds
+`saved_geometry.encoding`, `stored_bytes` (compressed) and
+`stored_capacity_bytes`, and `container{physical_bytes,compacted,
+bytes_before_compaction,compaction_skipped?}`. A save that leaves a quarter of
+the file free compacts it after verifying a copy; a skipped compaction keeps the
+committed save. `derived_geometry` on load reports `container_encoding`,
+`stored_bytes` and `decoded_bytes`. Nothing changes in authoring, B-rep text,
+identities or references; saved geometry remains an optional cache. See
+[formats](FORMATS.md).
+
 049A derived bakes (A.02/C.04, **Parcial**): `motion.bake` now stores a receipt
 (the bake fields plus `frames_sha256`/`coordinates_sha256`), never frames. Frames
 are derived data from memory, the document's derived section or a re-bake that
