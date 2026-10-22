@@ -44,7 +44,7 @@ public:
     arkjson::Value reviewBom(const arkjson::Value& args);
     arkjson::Value bomCompletionCheck(bool onlyIfAuthored=false,bool allowTaskReview=false) const;
     // Host-owned boundary, never resettable through an agent tool.
-    void beginBomTask();
+    void beginBomTask(bool continuation=false);
     arkjson::Value bomTaskScope() const;
     void markBomAuthored(){bomAuthored_=true;}
     void resetBomReview(){bomAuthored_=false;bomReview_={};bomTaskReview_={};bomTaskActive_=false;bomTaskBaseline_.clear();bomTaskError_.clear();bomInspectedHash_.clear();bomInspectedItems_.clear();bomInspectedRevision_=~u64(0);}

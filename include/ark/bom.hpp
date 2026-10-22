@@ -3,6 +3,7 @@
 namespace ark {
 // Caller-declared commercial/engineering data. Geometry never certifies it.
 arkjson::Value validatePartMetadata(const arkjson::Value& value);
+arkjson::Value patchPartMetadata(const arkjson::Value& current,const arkjson::Value& patch);
 arkjson::Value partMetadataSchema();
 std::string newBomDocumentId();
 bool validBomDocumentId(const std::string& value);

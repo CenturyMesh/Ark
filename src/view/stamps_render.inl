@@ -22,7 +22,7 @@ static double emissionLevel030(const Appearance& a,double seconds){
 }
 static void setEmission030(const Appearance& a){
     glUniform3f(glGetUniformLocation(pSolid,"emissionColor"),(float)a.emissionColor.x,(float)a.emissionColor.y,(float)a.emissionColor.z);
-    glUniform1f(glGetUniformLocation(pSolid,"emissionIntensity"),(float)emissionLevel030(a,GetTickCount64()*.001));
+    const auto bound=boundEmissionFactor(g_mediaEmissionFeature);glUniform1f(glGetUniformLocation(pSolid,"emissionIntensity"),(float)(bound?a.emissionIntensity * *bound:emissionLevel030(a,GetTickCount64()*.001)));
     glUniform1f(glGetUniformLocation(pSolid,"emissionBloom"),(float)a.bloom);glUniform1f(glGetUniformLocation(pSolid,"emissionGlow"),(float)a.glow);
 }
 static void setSurfaceAppearance024(const Appearance& a){

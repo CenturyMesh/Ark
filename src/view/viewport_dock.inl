@@ -23,12 +23,12 @@ static bool viewportDockAction(int id){
     }return true;
 }
 template<class Rect,class Glyph>static void drawViewportDock(Rect rect,Glyph glyph,POINT pointer){
-    if(g_drawingViewport.active||g_busy||g_toolsOpen||viewW<440||viewH<190)return;
+    if(g_drawingViewport.active||g_busy||g_toolsOpen||viewW<440||viewH<150)return;
     const float width=414,height=66,x=viewX+(viewW-width)*.5f;
     float y=viewY+viewH-height-18;
     if(g_motionActive)y-=92;
     if(x+width>g_compassBounds.left&&x<g_compassBounds.right&&y+height>g_compassBounds.top)y=(float)g_compassBounds.top-height-10;
-    if(y<viewY+90)return;
+    if(y<viewY+(viewH<190?40:90))return;
     rect(x-5,y+3,width+10,height+10,19,0,0,0,.13f,0,0,0,0,0);
     // 75% transparent panel; icons and labels retain their own readable opacity.
     rect(x,y,width,height,15,.035f,.065f,.085f,.25f,.23f,.40f,.48f,.65f,1);
