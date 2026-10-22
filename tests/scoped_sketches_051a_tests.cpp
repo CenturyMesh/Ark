@@ -5,6 +5,8 @@
 #include <iostream>
 #include <stdexcept>
 #include <cmath>
+#include <filesystem>
+#include <chrono>
 using namespace ark;
 using V=arkjson::Value;
 static int checks=0,failures=0;
@@ -27,7 +29,33 @@ static void nativeProjection(){
     check(failed(apply(s,json(R"([{"op":"sketch.entity.set","owner_feature":1,"name":"Profile","entity":{"kind":"project","name":"Ring","source_sketch":"part:2::Profile","source_entity":"Projected","mode":"normal"}}])")))&&s.revision==revision,"Cross-scope source cycles reject atomically");
     Document loaded;std::string error;check(documentFromJson(baseline,loaded,&error),error);loaded.recompute();check(loaded.sketches.size()==2&&loaded.sketches[1].error.empty()&&loaded.lastResults[1].ok,"Cross-scope projection survives save/reload and exact recomputation");
 }
-int main(int argc,char**){try{
+// Integration mode links against the combined 051A history implementation.
+// Kept separate so the scope-only worktree still runs its own core/native tests.
+static void compactedHistory(){
+    namespace fs=std::filesystem;AgentSession s;std::string error;
+    auto accepted=[](const V& response){if(failed(response))throw std::runtime_error(response.dump());return *response.find("structuredContent");};
+    check(documentFromJson(R"({"version":5,"features":[],"sketches":[{"name":"Profile","entities":[{"kind":"circle","name":"Ring","dof":[0,0,7]}]}]})",s.document,&error),error);
+    accepted(apply(s,json(R"([{"op":"feature.add","type":"extrude","name":"Left","p":{"height":2}},{"op":"feature.add","type":"extrude","name":"Right","p":{"height":3}},{"op":"sketch.set","owner_feature":1,"name":"Profile","sketch":{"entities":[{"kind":"circle","name":"Ring","dof":[0,0,2]}]}},{"op":"sketch.set","owner_feature":2,"name":"Profile","sketch":{"entities":[{"kind":"circle","name":"Ring","dof":[0,0,3]}]}},{"op":"feature.edit","id":1,"p":{"sketch":"part:1::Profile"}},{"op":"feature.edit","id":2,"p":{"sketch":"part:2::Profile"}}])")));
+    const auto a=accepted(apply(s,json(R"([{"op":"sketch.patch","owner_feature":1,"name":"Profile","entity":"Ring","r":4}])")));
+    const auto b=accepted(apply(s,json(R"([{"op":"sketch.patch","owner_feature":2,"name":"Profile","entity":"Ring","r":5}])")));
+    V restore=V::makeObj();restore.set("id",*a.find("iteration_id"));restore.set("expected_revision",V::makeNum((double)s.revision));accepted(s.call("iteration_restore",restore));
+    accepted(apply(s,json(R"([{"op":"sketch.patch","owner_feature":1,"name":"Profile","entity":"Ring","r":6}])")));
+    const auto original=documentToJson(s.document),authored=documentToJson(s.document,false,false);
+    const auto directory=fs::temp_directory_path()/("ark-scoped-history-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));fs::create_directory(directory);
+    const auto archive=directory/"archive.ark",compacted=directory/"compacted.ark";
+    V compact=V::makeObj(),retained=V::makeArr();compact.set("archive_path",V::makeStr(archive.string()));compact.set("confirm",V::makeBool(true));compact.set("expected_revision",V::makeNum((double)s.revision));compact.set("keep_recent",V::makeNum(0));retained.arr.push_back(*b.find("iteration_id"));compact.set("retain_ids",retained);
+    const auto receipt=accepted(s.call("history_compact",compact));check(documentToJson(s.document,false,false)==authored,"Compaction preserves canonical scopes and legacy global authoring byte-for-byte");
+    std::string mapped;for(const auto& row:receipt.find("compaction")->find("retained_ids")->arr)if(row.find("original_id")->str==b.find("iteration_id")->str)mapped=row.find("id")->str;check(!mapped.empty(),"Selected scoped branch has retained lineage mapping");
+    check(saveDocument(s.document,compacted.string().c_str()),"Compacted scoped document saves");AgentSession reopened;check(loadDocument(compacted.string().c_str(),reopened.document,&error),error);
+    restore.set("id",V::makeStr(mapped));restore.set("expected_revision",V::makeNum((double)reopened.revision));accepted(reopened.call("iteration_restore",restore));
+    auto correct=[](const Document& doc){return doc.sketches.size()==3&&doc.sketches[0].ownerFeature==0&&doc.sketches[0].name=="Profile"&&doc.sketches[0].sk.ents[0].dof[2]==7&&doc.sketches[1].ownerFeature==1&&doc.sketches[1].name=="part:1::Profile"&&doc.sketches[1].sk.ents[0].dof[2]==4&&doc.sketches[2].ownerFeature==2&&doc.sketches[2].name=="part:2::Profile"&&doc.sketches[2].sk.ents[0].dof[2]==5&&doc.find(1)->get("sketch")=="part:1::Profile"&&doc.find(2)->get("sketch")=="part:2::Profile";};
+    check(correct(reopened.document),"Compacted retained branch restores both local names/owners and untouched global sketch");
+    AgentSession full;V load=V::makeObj();load.set("path",V::makeStr(archive.string()));accepted(full.call("doc_load",load));check(documentToJson(full.document)==original,"Public archive load restores complete original scoped history byte-for-byte");
+    restore.set("id",*b.find("iteration_id"));restore.set("expected_revision",V::makeNum((double)full.revision));accepted(full.call("iteration_restore",restore));check(correct(full.document),"Full archived branch restores canonical scoped consumers and legacy global");
+    fs::remove(compacted);fs::remove(archive);fs::remove(directory);
+}
+int main(int argc,char** argv){try{
+    if(argc>1&&std::string(argv[1])=="--history"){compactedHistory();std::cout<<checks<<" scoped history checks / "<<failures<<" failures\n";return failures?1:0;}
     if(argc>1){nativeProjection();std::cout<<checks<<" native checks / "<<failures<<" failures\n";return failures?1:0;}
     {ArkDoc* api=ark_doc_create();const auto owner=ark_add_box(api,1,1,1);
     check(ark_sketch_set(api,"part:1::Profile","[]",nullptr)==-3,"C ABI catches reserved-reference rejection");
