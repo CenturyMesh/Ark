@@ -43,6 +43,9 @@ int setNativeThreadBudget(int threads);
 // predicate stops the isolated worker (polled every 50 ms) and throws an error
 // containing NATIVE_CANCELLED; limitMs replaces the default 30000 ms per-request
 // watchdog only inside the scope. A timeout keeps the "worker limit" wording.
+// Evaluation children inherit a copy of this policy. The predicate may run
+// concurrently on those threads: captured state must be thread-safe and live
+// until all requests using the policy have finished.
 class NativeRequestControlScope {
     const std::function<bool()>* previousCancel;unsigned previousLimit;std::function<bool()> cancel;
 public:
