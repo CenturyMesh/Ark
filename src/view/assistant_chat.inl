@@ -61,6 +61,11 @@ static void label(HDC dc,const std::wstring& value,RECT r,HFONT f,COLORREF color
 static int pageHeight(){RECT r{};GetClientRect(viewport,&r);return std::max(1L,r.bottom);}
 static HWND edit(HWND parent,const std::wstring& text,COLORREF bg);
 static int textHeight(HWND control,int lineLimit=0){
+    // RichEdit defers WM_SIZE reflow while the root is minimized. Its line
+    // count/positions can still describe the initial 1px width even though the
+    // client rectangle has changed. Refresh screen wrapping before caching any
+    // height; repainting after Restore cannot repair that stale cached height.
+    SendMessage(control,EM_SETTARGETDEVICE,0,0);
     const int lines=std::max(1,(int)SendMessage(control,EM_GETLINECOUNT,0,0));
     const int lastLine=lineLimit?std::min(lines,lineLimit)-1:lines-1;
     POINT first{},last{};

@@ -1,5 +1,11 @@
 # ARK roadmap A–G
 
+058A is **Verificado no escopo** locally for **A.02/A.04/D.02**: conversation
+reflow after messages arrive while Studio is minimized, and clear navigation in
+expanded chat. Twelve selected checks passed, including the previously failing
+minimize/update/restore lifecycle; captures were inspected. See
+[058A](iterations/058A.md). Broader milestones remain **Parcial**.
+
 057B is **Verificado no escopo** locally for **A.02/A.04/B.01/D.02**: native
 conversation layout, orientation cube and grouped viewport display controls.
 Fourteen final checks and inspected synthetic-fixture captures are recorded in

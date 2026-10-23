@@ -57,6 +57,15 @@ or conversation header. The regression includes a long response's final line,
 updates while reading/selecting, compact and wide layouts, and actual window
 pixels after repeated OpenGL swaps. See [057B evidence](iterations/057B.md).
 
+058A explicitly refreshes native screen-width wrapping before measuring text.
+RichEdit can defer resize layout while Studio is minimized; using those stale
+line positions created enormous blank bubbles after background messages arrived.
+The regression now minimizes Studio during new messages and subsequent updates,
+restores it, compares measured and cached heights, preserves selection and checks
+actual final-line pixels after OpenGL swaps. Expanded conversation also suppresses
+the viewport navigation/appearance controls that overlapped its Single/Team row.
+See [058A evidence](iterations/058A.md).
+
 Bare Resume/Continue in an existing Single conversation retains the displayed
 goal and the host BOM task boundary. The agent receives an explicit instruction
 to continue unfinished work; an explicit request to summarize remains separate.

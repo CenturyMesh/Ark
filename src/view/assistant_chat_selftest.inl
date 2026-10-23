@@ -28,6 +28,34 @@ static int testAssistantChat(const std::string& path){
     if(activity().title!="Waiting for your input")return fail(809,"Explicit input request");
     layout();sync(true);if(!window||bubbles.size()!=g_chatLog.size())return fail(810,"Native controls unavailable");
     for(const auto& b:bubbles)if(b.bodyHeight>250)return fail(828,"Short messages incorrectly measured as tall blank balloons");
+    // Provider progress continues while Studio is minimized. RichEdit can retain
+    // the initial 1px wrapping during WM_SIZE until its layout is explicitly
+    // refreshed; a later paint cannot repair an already cached bubble height.
+    {const auto savedLog=g_chatLog;const bool visible=IsWindowVisible(g_window)!=FALSE;
+     ShowWindow(g_window,SW_SHOWNOACTIVATE);ShowWindow(g_window,SW_MINIMIZE);
+     g_chatBusy=true;g_assistantStatus="Thinking...";std::string progress;
+     for(int i=0;i<30;++i)progress+="Synthetic progress: inspecting an editable assembly and its references. ";
+     g_chatLog.push_back({"ARK",progress+"\nEND OF BACKGROUND RESPONSE"});sync(true);
+     ShowWindow(g_window,SW_RESTORE);layout();sync(true);SendMessage(window,WM_COMMAND,2,0);
+     RedrawWindow(window,nullptr,nullptr,RDW_INVALIDATE|RDW_ALLCHILDREN|RDW_UPDATENOW);
+     const int actual=textHeight(bubbles.back().edit),cachedHeight=bubbles.back().bodyHeight;
+     captureChat(window,path+".background-restore.png");
+     if(std::abs(actual-cachedHeight)>2){std::fprintf(stderr,"Restored response chars=%d lines=%lld cached=%d actual=%d\n",GetWindowTextLengthW(bubbles.back().edit),(long long)SendMessage(bubbles.back().edit,EM_GETLINECOUNT,0,0),cachedHeight,actual);return fail(844,"Background message retained stale wrapping and a blank oversized bubble");}
+     HWND reader=bubbles.back().edit;SendMessage(reader,EM_SETSEL,10,42);
+     for(int cycle=0;cycle<3;++cycle){ShowWindow(g_window,SW_MINIMIZE);
+         g_chatLog.back().second+="\nUpdated progress while minimized.\nEND OF BACKGROUND RESPONSE";sync(true);
+         ShowWindow(g_window,SW_RESTORE);layout();sync(true);CHARRANGE selection{};SendMessage(reader,EM_EXGETSEL,0,(LPARAM)&selection);
+         if(bubbles.back().edit!=reader||selection.cpMin!=10||selection.cpMax!=42||std::abs(textHeight(reader)-bubbles.back().bodyHeight)>2)return fail(845,"Background updates lost selection or retained stale height");}
+     SendMessage(window,WM_COMMAND,2,0);SetWindowPos(g_window,HWND_TOP,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
+     const bool savedSwap=g_swap;g_swap=true;HDC dc=GetDC(g_window);
+     for(int frame=0;frame<4;++frame){drawFrame(dc);MSG message{};while(PeekMessage(&message,nullptr,0,0,PM_REMOVE)){if(message.message!=WM_QUIT){TranslateMessage(&message);DispatchMessage(&message);}}}
+     glFinish();DwmFlush();ReleaseDC(g_window,dc);g_swap=savedSwap;
+     auto live=captureChat(window,path+".background-restore-live.png",true);POINT tail{};
+     SendMessage(reader,EM_POSFROMCHAR,(WPARAM)&tail,SendMessage(reader,EM_LINEINDEX,SendMessage(reader,EM_GETLINECOUNT,0,0)-1,0));MapWindowPoints(reader,window,&tail,1);
+     int glyphs=0;for(int y=std::max(0L,tail.y);y<std::min((LONG)live.h,tail.y+25);++y)for(int x=std::max(0L,tail.x);x<std::min((LONG)live.w,tail.x+280);++x){size_t p=((size_t)y*live.w+x)*3;if(live.px[p]>150&&live.px[p+1]>150&&live.px[p+2]>150)++glyphs;}
+     if(tail.y<g_chatHeaderHeight||tail.y+18>live.h||glyphs<60)return fail(846,"Restored background response has no visible final text after GL swaps");
+     std::fprintf(stdout,"Background response: cached=%d actual=%d; three further minimized updates retain selection; visible final-line glyph pixels=%d\n",cachedHeight,actual,glyphs);
+     g_chatBusy=false;if(!visible)ShowWindow(g_window,SW_HIDE);g_chatLog=savedLog;sync(true);}
     // Native selection verifies Unicode/newlines without replacing the user's clipboard.
     scroll=bubbles[1].box.top;place();HWND text=bubbles[1].edit;SendMessage(text,EM_SETSEL,0,-1);std::vector<wchar_t> selected(10000);SendMessageW(text,EM_GETSELTEXT,0,(LPARAM)selected.data());
     if(std::wstring(selected.data()).find(L"mechanical assembly")==std::wstring::npos)return fail(811,"Selectable message");
@@ -104,6 +132,8 @@ static int testAssistantChat(const std::string& path){
     g_teamSnapshot.goalState=AgentGoalState::Completed;if(activity().title!="Goal reported complete")return fail(823,"Explicit team completion");
     SendMessage(window,WM_COMMAND,3,0);sync(true);if(!g_chatAgentDetails||(GetWindowLongPtr(viewport,GWL_STYLE)&WS_VISIBLE))return fail(824,"Agent controls toggle");
     SendMessage(window,WM_COMMAND,3,0);if(!g_chatExpanded)SendMessage(window,WM_COMMAND,4,0);sync(true);if(!g_chatExpanded||pageHeight()<200||winH-32-assistantDockHeight()<viewY)return fail(825,"Expanded conversation");scroll=0;place();captureChat(window,path+".expanded.png");
+    {HDC dc=GetDC(g_window);drawFrame(dc);ReleaseDC(g_window,dc);
+     if(g_cubeS!=0||std::any_of(g_zones.begin(),g_zones.end(),[](const Zone& z){return z.id==179||z.id==191||(z.id>=560&&z.id<=562);}))return fail(847,"CAD navigation or appearance controls overlap the expanded conversation");}
     g_assistantDockOpen=false;sync(true);if(GetWindowLongPtr(window,GWL_STYLE)&WS_VISIBLE)return fail(826,"Hidden dock still visible");
     g_assistantDockOpen=true;g_chatExpanded=false;g_teamStarted=false;g_teamMode=false;sync(true);g_teamSnapshot={};DestroyWindow(window);testing=false;
     std::puts("Conversation UI: status lifecycle, pinned goal, selection, Unicode, paragraphs, long reply, scroll retention, latest, agents and expansion passed.");return 0;

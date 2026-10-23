@@ -5608,6 +5608,9 @@ static void drawFrame(HDC hdc){
     std::string documentTokens="Document: "+assistantUsageLabel(docTokens);
     label(documentTokens.substr(0,46),viewX+viewW-310,H-51,.51f);
     }
+    // Expanded conversation owns the workspace. Do not paint or register CAD
+    // navigation/appearance targets over its Single/Team row.
+    if(viewH>1){
     if(g_motionActive){float px=(float)viewX+20,py=(float)viewY+viewH-99,width=std::min(760.f,(float)viewW-168.f);rect(px,py,width,79,7,.055,.083,.106,.95,.29,.42,.52,.65,1);
         std::string transmission,outputName="Output",outputUnit="rpm";double outputSpeed=0;u64 outputNode=0;std::set<u64> activeDrivers;
         const auto* relations=g_motionReport.find("relations");if(relations)for(const auto& relation:relations->arr)if(relation.find("active")&&relation.find("active")->b)activeDrivers.insert((u64)relation.find("a")->num);
@@ -5660,6 +5663,7 @@ static void drawFrame(HDC hdc){
         if(g_showViewCube&&gy-5<g_cubeY+g_cubeS+12){gx=(float)g_cubeX+g_cubeS+24;if(!g_compactNavigation)gy=(float)viewY+viewH-34;}
         const float width=textWidth(scale,.65f)+12;const auto bar=viewportBarLayout();const bool overlap=bar.visible&&gx-6<bar.x+bar.width&&gx-6+width>bar.x&&gy-5<bar.y+bar.height&&gy+19>bar.y;
         if(!overlap){g_gridCaptionBounds={(LONG)std::floor(gx-6),(LONG)std::floor(gy-5),(LONG)std::ceil(gx-6+width),(LONG)std::ceil(gy+19)};rect(gx-6,gy-5,width,24,5,.065f,.09f,.115f,.85f,0,0,0,0,0);textOut(scale,gx,gy,.65f,.68f,.81f,.89f);}}
+    }else{g_cubeS=0;g_cubeHover={};g_compassBounds={};g_gridCaptionBounds={};}
     panel(0,H-32,W,32);
     textOut(g_status.substr(0,(size_t)std::max(28,(winW-430)/7)),20,H-23,.70f,g_error?.96f:.62f,g_error?.56f:.73f,g_error?.40f:.81f);
     textOut(g_displayUnits.length,W-164,H-23,.73f,.67f,.76f,.83f);iconButton(22,"Show / hide grid",W-118,H-29,24);iconButton(461,"Navigation controls",W-81,H-29,24);iconButton(460,"Full screen",W-44,H-29,24);
