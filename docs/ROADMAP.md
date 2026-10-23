@@ -1,7 +1,7 @@
 # ARK roadmap A–G
 
-056C addresses **A.02/A.04/A.05/B.01/B.04/C.04/D.02/E.01**, **Em curso** for
-integrated verification: derived GPU rigid-body dynamics, viewport quality and
+056C is **Verificado no escopo** locally for **A.02/A.04/A.05/B.01/B.04/C.04/D.02/E.01**:
+integrated derived GPU rigid-body dynamics, viewport quality and
 mesh reuse, lossless derived storage/compaction, parameterized agent commands
 and supplier-evidence/BOM recovery. See [056C evidence](iterations/056C.md).
 Broader milestones remain **Parcial**; this does not qualify structural FEA,

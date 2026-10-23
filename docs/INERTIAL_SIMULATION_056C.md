@@ -1,6 +1,7 @@
 # 056C inertial dynamics
 
-Milestone **C.04**, **Em curso** pending final integrated verification. This is a
+Milestone **C.04**, **Verificado no escopo** locally; the broader milestone remains
+**Parcial**. This is a
 derived rigid-body study in the ARK design workspace. The study does not replace
 the B-rep, update assembly placements, qualify manufacture or claim superiority
 over another simulation product.
