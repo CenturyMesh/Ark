@@ -103,5 +103,9 @@ engineering qualification was performed.
 These observations establish this public connector path on this machine and
 date. They do not establish every supplier's availability, deployment, hosted
 CI, live-model task completion or a reduction in agent cost. Native BOM/library
-integration was not run in this core build and remains an integrated release check. No user
-drawing was used and no `.ark` document format changed.
+integration was not run in that core build. The subsequent integrated 056C native
+run passed `bom-contract`, `bom-completion`, `component-sources`,
+`component-vendors-035b`, `component-library`, `component-library-tools`,
+`assistant-connector` and `agent-team`; see [056C](iterations/056C.md) for the
+complete result and any unrelated failures. No user drawing was used and no
+`.ark` document format changed.
