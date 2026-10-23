@@ -1,6 +1,7 @@
 // View-only compass: the same retained 26 facets own rendering and ray picking.
-// Broad edge/corner faces make diagonal directions visible, rather than a tiny bevel.
-static constexpr double kNavigationExtent=.94,kNavigationFaceHalf=.60,kNavigationFrustum=1.50;
+// A shallow chamfer keeps the object recognizably cubic while preserving all
+// twelve edge and eight corner targets in the same rendering/picking mesh.
+static constexpr double kNavigationExtent=.94,kNavigationFaceHalf=.79,kNavigationFrustum=1.50;
 struct NavigationFacet {Vec3 normal,center;int face=-1,first=0,count=0,edgeFirst=0,edgeCount=0;};
 static std::vector<NavigationFacet> g_navigationFacets;
 static GLuint g_navigationEdgesVao=0,g_navigationEdgesVbo=0;
@@ -11,7 +12,8 @@ static bool g_navigationTargetReady=false;
 
 static void updateNavigationBounds(){
     float expansion=std::clamp(((float)viewW-622.f)/420.f,0.f,1.f);
-    g_cubeS=std::max(44,std::min((int)std::lround(136.f+24.f*expansion),viewH-26));
+    // Leave room for the display bar when the Assistant makes the viewport short.
+    g_cubeS=std::max(44,std::min((int)std::lround(136.f+24.f*expansion),viewH-102));
     if(g_navigationTestSize)g_cubeS=std::min(g_navigationTestSize,std::min(viewW-28,viewH-26));
     g_cubeX=viewX+14;g_cubeY=viewY+12;
 }
@@ -94,13 +96,13 @@ static void paintViewCube(){
     glUseProgram(pCube);glUniform3f(glGetUniformLocation(pCube,"eye"),(float)eye.x,(float)eye.y,(float)eye.z);glUniformMatrix4fv(glGetUniformLocation(pCube,"vp"),1,GL_FALSE,matrix);glUniformMatrix4fv(glGetUniformLocation(pCube,"model"),1,GL_FALSE,identity);glUniform1f(glGetUniformLocation(pCube,"outline"),0);
     glBindVertexArray(gCubeVao);Vec3 direction=eye.normalized();
     for(size_t i=0;i<g_navigationFacets.size();++i){const auto& f=g_navigationFacets[i];bool hover=g_cubeHover.hit&&g_cubeHover.facet==(int)i,selected=f.normal.dot(direction)>.997;
-        Vec3 color=f.face>=0?Vec3{.83,.89,.96}:i<18?Vec3{.61,.72,.84}:Vec3{.72,.80,.90};
-        if(selected)color={.45,.85,.96};if(hover)color={.98,.77,.39};
+        Vec3 color=f.face>=0?Vec3{.88,.91,.94}:i<18?Vec3{.71,.76,.81}:Vec3{.77,.81,.85};
+        if(selected)color={.67,.81,.94};if(hover)color={.46,.70,.92};
         glUniform3f(glGetUniformLocation(pCube,"color"),(float)color.x,(float)color.y,(float)color.z);glDrawArrays(GL_TRIANGLES,f.first,f.count);}
     glUseProgram(pEdge);glUniformMatrix4fv(euVp,1,GL_FALSE,matrix);glUniformMatrix4fv(euModel,1,GL_FALSE,identity);glBindVertexArray(g_navigationEdgesVao);glLineWidth((float)factor*.70f);
     for(size_t i=0;i<g_navigationFacets.size();++i){const auto& f=g_navigationFacets[i];if(f.normal.dot(direction)<=0)continue;
         bool hover=g_cubeHover.hit&&g_cubeHover.facet==(int)i,selected=f.normal.dot(direction)>.997;
-        Vec3 color=hover?Vec3{.82,.44,.10}:selected?Vec3{.12,.57,.72}:Vec3{.23,.33,.44};glUniform3f(glGetUniformLocation(pEdge,"color"),(float)color.x,(float)color.y,(float)color.z);glDrawArrays(GL_LINES,f.edgeFirst,f.edgeCount);}
+        Vec3 color=hover?Vec3{.20,.43,.66}:selected?Vec3{.32,.52,.71}:Vec3{.43,.49,.56};glUniform3f(glGetUniformLocation(pEdge,"color"),(float)color.x,(float)color.y,(float)color.z);glDrawArrays(GL_LINES,f.edgeFirst,f.edgeCount);}
     glLineWidth(1);glDisable(GL_DEPTH_TEST);glEnable(GL_BLEND);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
     paintNavigationLabels(vp,direction,factor);
     if(supersampled){glBindFramebuffer(GL_FRAMEBUFFER,0);glViewport(0,0,winW,winH);glUseProgram(g_navigationResolve);glUniform2f(glGetUniformLocation(g_navigationResolve,"vp"),(float)winW,(float)winH);glUniform4f(glGetUniformLocation(g_navigationResolve,"rc"),(float)g_cubeX,(float)g_cubeY,(float)g_cubeS,(float)g_cubeS);glUniform2f(glGetUniformLocation(g_navigationResolve,"sourceSize"),(float)size,(float)size);glUniform1i(glGetUniformLocation(g_navigationResolve,"image"),0);glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,g_navigationColor);glBlendFunc(GL_ONE,GL_ONE_MINUS_SRC_ALPHA);glBindVertexArray(quadVao);glDrawArrays(GL_TRIANGLES,0,6);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);}

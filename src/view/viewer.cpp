@@ -742,7 +742,7 @@ void main(){o=texture(frame,gl_FragCoord.xy/res);})";
 #include "studio_shaders.inl"
 static const char* FS_CUBE=R"(#version 330 core
 in vec3 nrm,wpos,lpos,lnrm;out vec4 o;uniform vec3 color,eye;
-void main(){vec3 n=normalize(nrm),v=normalize(eye-wpos),l=normalize(vec3(-.35,.85,.48));float key=max(dot(n,l),0.),fill=max(dot(n,normalize(vec3(.70,.25,-.55))),0.);float gloss=.10*pow(max(dot(n,normalize(l+v)),0.),28.);o=vec4(color*(.72+.24*key+.12*fill)+vec3(gloss),1.);})";
+void main(){vec3 n=normalize(nrm),v=normalize(eye-wpos),l=normalize(vec3(-.35,.85,.48));float key=max(dot(n,l),0.),fill=max(dot(n,normalize(vec3(.70,.25,-.55))),0.);float gloss=.035*pow(max(dot(n,normalize(l+v)),0.),24.);o=vec4(color*(.76+.20*key+.08*fill)+vec3(gloss),1.);})";
 static const char* VS_GEOM=R"(#version 330 core
 layout(location=0) in vec3 P; layout(location=1) in vec3 N;
 uniform mat4 view,proj,model; out vec3 vpos,vn;
@@ -3858,11 +3858,11 @@ static void selectTangentFaces();
 static void collisionCheckDialog();
 static bool viewportDockAction(int);static bool parametricHudAction(int);
 static void uiAction(int id){
-    if(id==0)return; // Visible neutral panels consume input without changing state.
+    if(id==0||id==969)return; // Visible neutral panels consume input without changing state.
     if(inertialAction056(id))return;
     // Authoring and other previews always start from the authored CAD pose.
     // Camera, visibility, selection and graphics controls keep playback live.
-    if(g_inertial056.active&&!(id==20||id==22||id==24||id==56||(id>=170&&id<=186)||(id>=300&&id<=309)||(id>=30000&&id<40000)))stopInertialDisplay056();
+    if(g_inertial056.active&&!(id==20||id==22||id==23||id==24||id==56||id==191||id==455||(id>=170&&id<=186)||(id>=300&&id<=309)||(id>=461&&id<=465)||(id>=960&&id<=964)||(id>=30000&&id<40000)))stopInertialDisplay056();
     if(cableGuideActive035()&&id!=998&&id!=309&&id!=20&&id!=23&&id!=24&&id!=175&&!(id>=170&&id<=186)&&!(id>=30000&&id<40000))cancelCableGuide035();
     if(viewportDockAction(id)||parametricHudAction(id))return;
     if(bakedMotionsAction(id))return;
@@ -3954,7 +3954,7 @@ static void uiAction(int id){
     if(id==455){moduleCommands(3);return;}if(id==456){moduleCommands(0);return;}if(id==457){moduleCommands(1);return;}if(id==458||id==459){moduleCommands(2);return;}
     if(id==461){g_compactNavigation=!g_compactNavigation;return;}
     if(id==460){static bool fullscreen=false;static WINDOWPLACEMENT placement{sizeof placement};static LONG_PTR style=0;if(!fullscreen){GetWindowPlacement(g_window,&placement);style=GetWindowLongPtr(g_window,GWL_STYLE);MONITORINFO monitor{sizeof monitor};GetMonitorInfo(MonitorFromWindow(g_window,MONITOR_DEFAULTTONEAREST),&monitor);SetWindowLongPtr(g_window,GWL_STYLE,style&~WS_OVERLAPPEDWINDOW);SetWindowPos(g_window,HWND_TOP,monitor.rcMonitor.left,monitor.rcMonitor.top,monitor.rcMonitor.right-monitor.rcMonitor.left,monitor.rcMonitor.bottom-monitor.rcMonitor.top,SWP_FRAMECHANGED);}else{SetWindowLongPtr(g_window,GWL_STYLE,style);SetWindowPlacement(g_window,&placement);SetWindowPos(g_window,nullptr,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_FRAMECHANGED);}fullscreen=!fullscreen;return;}
-    if(id==462){wireframe=false;g_showEdges=false;return;}if(id==463){wireframe=false;g_showEdges=true;return;}if(id==464){wireframe=true;return;}if(id==465){g_showViewCube=true;g_status="View cube shown at the upper left of the viewport.";return;}
+    if(id>=462&&id<=464){wireframe=id==464;if(id!=464)g_showEdges=id==463;g_pathTracing=false;saveUiSettings();g_status=wireframe?"Wireframe":g_showEdges?"Shaded with edges":"Shaded";return;}if(id==465){g_showViewCube=true;g_status="View cube shown at the upper left of the viewport.";return;}
     if(id==403){g_parametersOpen=!g_parametersOpen;return;}
     if(id==466){g_manufacturingOpen=!g_manufacturingOpen;return;}
     if(id==468){sheetOpeningDialog(false,true);return;}
@@ -5142,8 +5142,7 @@ static void drawFrame(HDC hdc){
     }
     }
     float captionY=(float)viewY+18,captionX=(float)viewX+(g_showViewCube?g_cubeS+30:20);
-    std::string style=g_pathTracing?(g_trace.active?"Path trace":"Raster"):wireframe?"Wireframe":g_showEdges?"Shaded + edges":"Shaded";float styleX=(float)(viewX+viewW)-158;
-    rect(styleX,(float)viewY+16,140,34,6,.095,.13,.16,.92,.37,.46,.53,.8,1);glyph(1,styleX+9,(float)viewY+23,20,.80f);textOut(style,styleX+36,(float)viewY+24,.78f,.81f,.88f,.93f);glUniform1i(uuGlyph,409);glUniform4f(uuRc,styleX+118,(float)viewY+26,12,12);glUniform4f(uuFill,.67,.76,.84,1);glBindVertexArray(quadVao);glDrawArrays(GL_TRIANGLES,0,6);g_zones.push_back({styleX,(float)viewY+16,140,34,455});
+    const float styleX=(float)(viewX+viewW)-18;
     if(g_pathTracing){std::string caption=g_trace.active?"GPU path tracing / "+std::to_string(g_trace.samples)+" spp / OpenGL BVH":"Path tracing requested / raster: "+g_trace.reason;caption=fitText(caption,.62f,std::max(0.f,styleX-captionX-14));textOut(caption,captionX,captionY+27,.62f,g_lightBackground?.24f:.76f,g_lightBackground?.30f:.83f,g_lightBackground?.37f:.89f);}
     if(g_allSheetsFlat)textOut("Nominal flat reference / display only",captionX,captionY,.70f,.62f,.77f,.85f);
     else if(g_stockMode)textOut("Nominal straight stock / display only",captionX,captionY,.70f,.62f,.77f,.85f);
@@ -5617,14 +5616,13 @@ static void drawFrame(HDC hdc){
         button(g_motionPlaying?"Pause":"Play",px+width-228,py+12,64,453);button(editableTeeth?"Teeth":"Driver",px+width-155,py+12,62,editableTeeth?469:452);button("Reset",px+width-84,py+12,70,454);g_zones.push_back({px+12,py+32,std::max(80.f,width-250),26,452});textOut("Kinematic preview / contact and dynamics unchecked",px+13,py+61,.55f,.50f,.66f,.76f);
     }
     if(g_showViewCube){
-    float navT=std::clamp(((float)viewW-622.f)/420.f,0.f,1.f);
     updateNavigationBounds();
     g_cubeHover=cubeHitAt(mp.x,mp.y);
     paintViewCube();glUseProgram(pUI);glUniform2f(uuVp,W,H);
     float homeX=(float)g_cubeX+g_cubeS-29,homeY=(float)g_cubeY+g_cubeS-28;
     bool homeHover=mp.x>=homeX&&mp.x<homeX+28&&mp.y>=homeY&&mp.y<homeY+28;
-    rect(homeX,homeY,28,28,14,homeHover?.21f:.08f,homeHover?.32f:.11f,homeHover?.43f:.15f,homeHover?.94f:.72f,.41f,.59f,.73f,homeHover?.78f:.42f,1);
-    glyph(29,homeX+5,homeY+5,18,homeHover?.99f:.83f);g_zones.push_back({homeX,homeY,28,28,191});
+    rect(homeX,homeY,28,28,5,homeHover?.22f:.075f,homeHover?.34f:.094f,homeHover?.46f:.117f,.96f,.36f,.48f,.61f,homeHover?.9f:.6f,1);
+    glyph(191,homeX+5,homeY+5,18,homeHover?1.f:.86f);g_zones.push_back({homeX,homeY,28,28,191});
     g_zones.push_back({(float)g_cubeX,(float)g_cubeY,(float)g_cubeS,(float)g_cubeS,179});
     }else g_cubeS=0;
     float compassSize=std::max(88.f,std::min(std::clamp(viewH*.17f,112.f,152.f),viewH-72.f)),compassX=(float)viewX+viewW-compassSize-14,compassY=(float)viewY+viewH-compassSize-14;

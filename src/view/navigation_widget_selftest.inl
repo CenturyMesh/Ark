@@ -27,6 +27,7 @@
                 if(!hit.hit||hit.facet!=(int)index||hit.face!=f.face||hit.normal.dot(f.normal)<.999999)return failure("Visible facet and picking differ at size "+std::to_string(size)+", facet "+std::to_string(index)+", roll "+std::to_string(roll));
                 double expectedYaw=tYaw,expectedPitch=tPitch;click(x,y);
                 if(std::abs(tYaw-expectedYaw)>1e-8||std::abs(tPitch-expectedPitch)>1e-8||!g_cameraOrtho||std::abs(cameraRoll)>1e-12)return failure("Actual facet mouse click changed the world-axis snap mapping.");
+                if(cameraFrame(tYaw,tPitch,0).outward.dot(f.normal)<.998)return failure("Named view does not face the clicked world-axis facet (Top is +Y, Front is +Z).");
                 if(selBody!=savedSelection||g_picked.size()!=savedPicked.size()||g_session.revision!=revision||g_documentEpoch!=epoch)return failure("Navigation selected or edited the CAD model.");
                 ++directionChecks;
                 if(f.face>=0){const auto& bounds=g_navigationLabelBounds[(size_t)f.face];if(bounds.right<=bounds.left){write(".navigation-failed-label",image);return failure("Cardinal word disappeared at physical size "+std::to_string(size)+", face "+std::to_string(f.face)+", roll "+std::to_string(roll));}unsigned ink=0,soft=0;

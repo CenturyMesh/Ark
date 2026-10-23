@@ -64,6 +64,12 @@ static const ActionIcon* actionVectorIcon(int action){
         auto& sketch=result[961];poly(sketch,{{.17f,.78f},{.30f,.25f},{.72f,.35f},{.85f,.76f}});for(auto p:{std::pair{.17f,.78f},std::pair{.30f,.25f},std::pair{.72f,.35f},std::pair{.85f,.76f}})box(sketch,p.first-.055f,p.second-.055f,.11f,.11f);
         auto& grid=result[962];for(float t:{.23f,.5f,.77f}){line(grid,.12f,t,.88f,t);line(grid,t,.12f,t,.88f);}
         auto& edges=result[963];poly(edges,{{.17f,.29f},{.50f,.10f},{.83f,.29f},{.83f,.72f},{.50f,.92f},{.17f,.72f},{.17f,.29f},{.50f,.48f},{.83f,.29f}});line(edges,.50f,.48f,.50f,.92f);
+        result[463]=edges;
+        auto& shaded=result[462];shaded=edges;for(float t:{.27f,.39f,.51f,.63f})line(shaded,.23f,t+.08f,.44f,t+.20f);
+        auto& wire=result[464];wire=edges;poly(wire,{{.50f,.10f},{.50f,.54f},{.17f,.72f}});line(wire,.50f,.54f,.83f,.72f);
+        auto& projection=result[175];box(projection,.12f,.33f,.53f,.53f);poly(projection,{{.12f,.33f},{.35f,.10f},{.88f,.10f},{.88f,.63f},{.65f,.86f}});line(projection,.65f,.33f,.88f,.10f);
+        auto& home=result[191];poly(home,{{.09f,.46f},{.50f,.12f},{.91f,.46f}});poly(home,{{.21f,.40f},{.21f,.85f},{.42f,.85f},{.42f,.59f},{.60f,.59f},{.60f,.85f},{.79f,.85f},{.79f,.40f}});
+        auto& more=result[455];for(float x:{.20f,.50f,.80f})arc(more,x,.50f,.045f,.045f,0,360);
         auto& dockFit=result[964];for(float x:{.14f,.86f})for(float y:{.14f,.86f}){line(dockFit,x,y,x+(x<.5f?.20f:-.20f),y);line(dockFit,x,y,x,y+(y<.5f?.20f:-.20f));}box(dockFit,.36f,.36f,.28f,.28f);
         auto& sheet=result[965];box(sheet,.19f,.08f,.62f,.84f);box(sheet,.30f,.22f,.23f,.25f);arc(sheet,.65f,.34f,.07f,.07f,0,360);line(sheet,.30f,.61f,.70f,.61f);line(sheet,.30f,.74f,.70f,.74f);line(sheet,.55f,.74f,.55f,.90f);
         auto& motions=result[45000];line(motions,.12f,.86f,.90f,.86f);line(motions,.12f,.86f,.12f,.12f);for(int i=0;i<16;++i){auto curve=[](float t){return .74f-.52f*t*t*(3-2*t);};const float a=i/16.f,b=(i+1)/16.f;line(motions,.18f+.64f*a,curve(a),.18f+.64f*b,curve(b));}line(motions,.58f,.16f,.58f,.80f);poly(motions,{{.66f,.18f},{.86f,.30f},{.66f,.42f},{.66f,.18f}});
