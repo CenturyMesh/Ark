@@ -29,26 +29,24 @@ template<class Rect,class Glyph>static void drawViewportDock(Rect rect,Glyph gly
     rect(x,y,width,height,8,.075f,.094f,.117f,.96f,.25f,.30f,.36f,.90f,1);
     rect(x+9,y+1,width-18,1,0,.52f,.61f,.70f,.14f,0,0,0,0,0);
     const bool drawingReady=viewportDrawingSource().t==arkjson::Value::Obj&&!g_directAuthoring.active&&!g_sketchEditing.active&&!g_sketchDrawing.active;
-    std::vector<int> ids={462,963,464,960,961,962,175,964,965,455};
-    std::vector<bool> active={!g_pathTracing&&!wireframe&&!g_showEdges,!g_pathTracing&&!wireframe&&g_showEdges,!g_pathTracing&&wireframe,g_showDatumPlanes,g_showSketches,g_grid,g_cameraOrtho,false,false,false};
-    std::vector<const char*> tips={"Shaded surfaces",active[1]?"Shaded with edges / click to hide edges":"Shaded with edges","Wireframe",g_showDatumPlanes?"Hide all construction planes and datums":"Show all construction planes and datums",g_showSketches?"Hide sketch overlays":"Show sketch overlays",g_grid?"Hide grid":"Show grid",g_cameraOrtho?"Orthographic projection / click for perspective":"Perspective projection / click for orthographic","Fit document",drawingReady?"Open drawings for the selected body or container":"Select a body or container; finish active edits to open its drawing","Display settings and named views"};
+    static constexpr int ids[]={462,963,464,960,961,962,176,177,178,186,175,964,965,455};
+    const bool active[]={!g_pathTracing&&!wireframe&&!g_showEdges,!g_pathTracing&&!wireframe&&g_showEdges,!g_pathTracing&&wireframe,g_showDatumPlanes,g_showSketches,g_grid,g_navMode==0,g_navMode==1,g_navMode==2,g_occlusionMode!=0,g_cameraOrtho,false,false,false};
+    const char* tips[]={"Shaded surfaces",active[1]?"Shaded with edges / click to hide edges":"Shaded with edges","Wireframe",g_showDatumPlanes?"Hide all construction planes and datums":"Show all construction planes and datums",g_showSketches?"Hide sketch overlays":"Show sketch overlays",g_grid?"Hide grid":"Show grid","Orbit / middle drag; Alt + middle spins","Pan / drag; Shift + middle pans","Zoom / drag; wheel always zooms","Cycle occlusion: Off / Contact / Ambient / Horizon",g_cameraOrtho?"Orthographic projection / click for perspective":"Perspective projection / click for orthographic","Fit document",drawingReady?"Open drawings for the selected body or container":"Select a body or container; finish active edits to open its drawing",layout.condensed?"All display, overlay, navigation and drawing controls":"Display settings and named views"};
     const char* style=g_pathTracing?"Path trace":wireframe?"Wireframe":g_showEdges?"Shaded + edges":"Shaded";
-    std::vector<const char*> headings={style,"Overlays","View","2D","More"};std::vector<int> groupSizes={3,3,2,1,1};
-    if(g_compactNavigation){ids.insert(ids.begin()+6,{176,177,178,186});active.insert(active.begin()+6,{g_navMode==0,g_navMode==1,g_navMode==2,g_occlusionMode!=0});tips.insert(tips.begin()+6,{"Orbit / middle drag; Alt + middle spins","Pan / drag; Shift + middle pans","Zoom / drag; wheel always zooms","Cycle occlusion: Off / Contact / Ambient / Horizon"});headings.insert(headings.begin()+2,"Navigate");groupSizes.insert(groupSizes.begin()+2,4);}
-    if(layout.condensed){ids={462,963,464,455};active.resize(3);active.push_back(false);tips.resize(3);tips.push_back("All display, overlay, navigation and drawing controls");headings={style,"More"};groupSizes={3,1};}
-    std::vector<Zone> zones;std::string tip;float bx=x+8,tipCenter=x+width*.5f;int index=0;
-    for(size_t group=0;group<groupSizes.size();++group){const float groupWidth=cell*groupSizes[group];
+    const char* headings[]={style,"Overlays","Navigate","View","2D","More"};static constexpr int offsets[]={0,3,6,10,12,13},groupSizes[]={3,3,4,2,1,1};
+    std::array<Zone,15> zones;size_t zoneCount=0;const char* tip=nullptr;float bx=x+8,tipCenter=x+width*.5f;
+    for(int group=0;group<6;++group){if((group==2&&!g_compactNavigation)||(layout.condensed&&group!=0&&group!=5))continue;const float groupWidth=cell*groupSizes[group];
         const float scale=.64f;textOut(headings[group],bx+(groupWidth-textWidth(headings[group],scale))*.5f,y+7,scale,.66f,.73f,.81f);
-        for(int j=0;j<groupSizes[group];++j,++index,bx+=cell){const float by=y+28,bw=cell-4,bh=32;
+        for(int j=0;j<groupSizes[group];++j,bx+=cell){const int index=offsets[group]+j;const float by=y+28,bw=cell-4,bh=32;
             const bool enabled=ids[index]!=965||drawingReady,hover=pointer.x>=bx&&pointer.x<bx+bw&&pointer.y>=by&&pointer.y<by+bh;
             if(active[index])rect(bx,by,bw,bh,5,.16f,.28f,.40f,1,.33f,.53f,.72f,.85f,1);
             if(hover){rect(bx,by,bw,bh,5,.22f,.34f,.46f,enabled?.90f:.22f,.42f,.61f,.80f,enabled?.8f:.2f,1);tip=tips[index];tipCenter=bx+bw*.5f;}
             glyph(ids[index],bx+(bw-22)*.5f,by+4,22,enabled?(active[index]?1.f:.84f):.32f);
             if(active[index])rect(bx+bw*.5f-5,by+bh-4,10,2,1,.56f,.77f,.96f,1,0,0,0,0,0);
-            zones.push_back({bx,by,bw,bh,enabled?ids[index]:969});
+            zones[zoneCount++]={bx,by,bw,bh,enabled?ids[index]:969};
         }
-        if(group+1<groupSizes.size()){rect(bx+3,y+13,1,height-26,0,.30f,.36f,.43f,.60f,0,0,0,0,0);bx+=12;}
+        if(group<5){rect(bx+3,y+13,1,height-26,0,.30f,.36f,.43f,.60f,0,0,0,0,0);bx+=12;}
     }
-    zones.push_back({x,y,width,height,969});g_zones.insert(g_zones.begin(),zones.begin(),zones.end());
-    if(!tip.empty()){const float tw=std::min((float)viewW-24,textWidth(tip,.68f)+24),tx=std::clamp(tipCenter-tw*.5f,(float)viewX+8,(float)(viewX+viewW)-tw-8);rect(tx,y-37,tw,29,5,.075f,.094f,.117f,.99f,.32f,.41f,.51f,.8f,1);textOut(fitText(tip,.68f,tw-20),tx+10,y-30,.68f,.88f,.93f,.98f);}
+    zones[zoneCount++]={x,y,width,height,969};g_zones.insert(g_zones.begin(),zones.begin(),zones.begin()+zoneCount);
+    if(tip){const float tw=std::min((float)viewW-24,textWidth(tip,.68f)+24),tx=std::clamp(tipCenter-tw*.5f,(float)viewX+8,(float)(viewX+viewW)-tw-8);rect(tx,y-37,tw,29,5,.075f,.094f,.117f,.99f,.32f,.41f,.51f,.8f,1);textOut(fitText(tip,.68f,tw-20),tx+10,y-30,.68f,.88f,.93f,.98f);}
 }
