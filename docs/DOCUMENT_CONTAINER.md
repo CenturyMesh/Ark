@@ -12,10 +12,13 @@ This physical version is independent of the authored document version, including
 the version-27 iteration journal. The existing C++ document parser, authoring
 rules, journal checks and exact geometry authority remain the semantic contract.
 Container version 2 (`user_version` 2) adds an optional `ark_derived` table of
-saved native geometry, with its own 128 MiB capacity and a 256 MiB physical
-file limit; see [formats](FORMATS.md). Since 049A it also carries cached
+saved native geometry, with a 256 MiB decoded capacity, 128 MiB stored capacity
+and a 256 MiB physical file limit; see [formats](FORMATS.md). Since 049A it also carries cached
 baked-motion frames, verified against their receipts on open
-([derived bakes](DERIVED_BAKES_049A.md)); the table schema is unchanged. The 64 MiB physical cap below applies to
+([derived bakes](DERIVED_BAKES_049A.md)). The 056C integration stores these entries
+as one checksummed Zstandard pack, split into ordered `pack1.<manifest>.<index>`
+rows. Legacy per-entry rows remain readable; the table schema and physical
+version are unchanged. The 64 MiB physical cap below applies to
 version 1; the authoring limits apply to both versions.
 
 ## Storage and incremental writes
@@ -56,6 +59,15 @@ process interrupted after dirty pages reach disk leaves a rollback journal;
 the next load permits SQLite's recovery before reading the validated snapshot.
 This recovery requires write access to the file/directory when a hot journal
 exists. An ordinary clean container remains readable with read-only access.
+
+When an incremental save frees at least 1 MiB and a quarter of the file, ARK
+reclaims pages with SQLite's transactional `VACUUM` on the same connection.
+This keeps SQLite's locks and rollback protocol instead of replacing a snapshot
+after releasing the source connection. Existing idle connections continue to
+observe the current file. A failure leaves the preceding committed save intact
+and reports `compaction_skipped`; it does not undo that save or claim compaction.
+This is storage maintenance, not a document merge or permission to overwrite
+another user's authored state.
 
 ## Limits and rejection rules
 

@@ -103,6 +103,22 @@ This dependency's license remains separate from ARK's Apache-2.0 license.
 - [Official pinned license](https://github.com/nothings/stb/blob/013ac3beddff3dbffafd5177e7972067cd2b5083/LICENSE)
 - Provenance and exact hashes: `third_party/stb/README.md`.
 
+## Zstandard 1.5.7
+
+ARK compresses the optional derived section of `.ark` containers (saved native
+geometry and baked frames) with the Zstandard library, built from unmodified
+upstream sources as a static single-threaded target without legacy formats.
+Authoring is not compressed by it.
+
+Zstandard is dual-licensed under BSD or GPLv2; ARK uses the BSD alternative.
+Both unchanged upstream files are retained in `third_party/zstd` and the BSD
+license is packaged as `licenses/zstd-LICENSE.txt`. This dependency's license
+remains separate from ARK's Apache-2.0 license.
+
+- [Official v1.5.7 release](https://github.com/facebook/zstd/releases/tag/v1.5.7)
+- Archive SHA-256: `eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24fc1b7ee09e6fa3`.
+- Provenance and retained files: `third_party/zstd/README.md`.
+
 ## Microsoft Windows and Visual C++ runtime
 
 Windows APIs and system fonts remain subject to their vendor terms. Studio uses

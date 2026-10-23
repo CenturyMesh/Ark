@@ -429,7 +429,8 @@ V assistantActiveTools(const V& tools,const V& conversation,const std::string& o
     // calls, including agent_onboard rows inside query_batch.
     std::vector<std::string> loaded;auto load=[&](const std::string& topic){if(std::find(loaded.begin(),loaded.end(),topic)==loaded.end())loaded.push_back(topic);};
     if(V pack;!onboardingPack.empty()&&arkjson::parse(onboardingPack,pack))if(const auto* guides=pack.find("topics");guides&&guides->t==V::Arr)for(const auto& guide:guides->arr)load(field(guide,"topic"));
-    auto onboarded=[&](const V& args){const auto* topic=args.find("topic");load(topic&&topic->t==V::Str?topic->str:std::string("overview"));};
+    auto onboarded=[&](const V& args){const auto* topic=args.find("topic");const auto topicName=topic&&topic->t==V::Str?topic->str:std::string("overview");if(topicName.rfind("tool:",0)!=0)load(topicName);
+        if(topic&&topic->t==V::Str&&topic->str=="commands")if(const auto* command=args.find("command");command&&command->t==V::Str&&command->str.rfind("tool:",0)==0&&available.count(command->str.substr(5)))load(command->str);};
     if(conversation.t==V::Arr)for(const auto& item:conversation.arr){if(field(item,"type")!="function_call")continue;V args;if(!arkjson::parse(field(item,"arguments"),args)||args.t!=V::Obj)continue;const auto name=field(item,"name");
         if(name=="agent_onboard")onboarded(args);
         else if(name=="query_batch")if(const auto* queries=args.find("queries");queries&&queries->t==V::Arr)for(const auto& query:queries->arr)if(field(query,"tool")=="agent_onboard")if(const auto* values=query.find("args");values&&values->t==V::Obj)onboarded(*values);}
@@ -439,7 +440,10 @@ V assistantActiveTools(const V& tools,const V& conversation,const std::string& o
     for(const auto& tool:tools.arr){const auto name=field(tool,"name");if(specialist.count(name))continue;V advertised=tool;
         if(name=="agent_onboard"&&!index.empty())advertised.set("description",V::makeStr(field(tool,"description")+" Specialist tools are offered after their topic is loaded with agent_onboard (or already preloaded) and stay available for this conversation. "+index+"."));
         out.arr.push_back(std::move(advertised));added.insert(name);}
-    for(const auto& topic:loaded)for(const auto& [name,names]:topics)if(name==topic)for(const auto& toolName:names)if(available.count(toolName)&&added.insert(toolName).second)for(const auto& tool:tools.arr)if(field(tool,"name")==toolName){out.arr.push_back(tool);break;}
+    for(const auto& topic:loaded){
+        if(topic.rfind("tool:",0)==0){const auto name=topic.substr(5);if(added.insert(name).second)for(const auto& tool:tools.arr)if(field(tool,"name")==name){out.arr.push_back(tool);break;}}
+        else for(const auto& [name,names]:topics)if(name==topic)for(const auto& toolName:names)if(available.count(toolName)&&added.insert(toolName).second)for(const auto& tool:tools.arr)if(field(tool,"name")==toolName){out.arr.push_back(tool);break;}
+    }
     return out;
 }
 V assistantDeferredCatalogue(const V& tools,const V& conversation,const std::string& onboardingPack){
@@ -447,7 +451,9 @@ V assistantDeferredCatalogue(const V& tools,const V& conversation,const std::str
     const auto& topics=assistantSpecialistToolTopics();std::map<std::string,std::string> topicOf;for(const auto& [topic,names]:topics)for(const auto& name:names)topicOf.emplace(name,topic);
     std::set<std::string> preloaded;if(V pack;!onboardingPack.empty()&&arkjson::parse(onboardingPack,pack))if(const auto* guides=pack.find("topics");guides&&guides->t==V::Arr)for(const auto& guide:guides->arr)preloaded.insert(field(guide,"topic"));
     // First call that loaded each topic, including agent_onboard rows in query_batch.
-    std::map<std::string,std::string> loadedBy;auto onboarded=[&](const V& args,const std::string& id){const auto* topic=args.find("topic");loadedBy.emplace(topic&&topic->t==V::Str?topic->str:std::string("overview"),id);};
+    std::map<std::string,std::string> selectedBy;auto onboarded=[&](const V& args,const std::string& id){const auto* topic=args.find("topic");const auto name=topic&&topic->t==V::Str?topic->str:std::string("overview");
+        for(const auto& [topicName,names]:topics)if(name==topicName)for(const auto& toolName:names)selectedBy.emplace(toolName,id);
+        if(topic&&topic->t==V::Str&&topic->str=="commands")if(const auto* command=args.find("command");command&&command->t==V::Str&&command->str.rfind("tool:",0)==0)selectedBy.emplace(command->str.substr(5),id);};
     if(conversation.t==V::Arr)for(const auto& item:conversation.arr){if(field(item,"type")!="function_call")continue;V args;if(!arkjson::parse(field(item,"arguments"),args)||args.t!=V::Obj)continue;const auto name=field(item,"name"),id=field(item,"call_id");
         if(name=="agent_onboard")onboarded(args,id);
         else if(name=="query_batch")if(const auto* queries=args.find("queries");queries&&queries->t==V::Arr)for(const auto& query:queries->arr)if(field(query,"tool")=="agent_onboard")if(const auto* values=query.find("args");values&&values->t==V::Obj)onboarded(*values,id);}
@@ -456,7 +462,9 @@ V assistantDeferredCatalogue(const V& tools,const V& conversation,const std::str
     V out=V::makeArr();
     for(const auto& tool:tools.arr){const auto name=field(tool,"name");V advertised=tool;
         if(name=="agent_onboard"&&!index.empty())advertised.set("description",V::makeStr(field(tool,"description")+" Specialist tools become available after their topic is loaded with agent_onboard (or already preloaded) and stay available for this conversation. "+index+"."));
-        if(const auto topic=topicOf.find(name);topic!=topicOf.end()&&!preloaded.count(topic->second)){advertised.set("ark_deferred",V::makeBool(true));if(const auto by=loadedBy.find(topic->second);by!=loadedBy.end())advertised.set("ark_loaded_by",V::makeStr(by->second));}
+        bool alreadyLoaded=false;for(const auto& [topicName,names]:topics)if(preloaded.count(topicName)&&std::find(names.begin(),names.end(),name)!=names.end()){alreadyLoaded=true;break;}
+        if(topicOf.count(name)&&!alreadyLoaded)advertised.set("ark_deferred",V::makeBool(true));
+        if(advertised.find("ark_deferred"))if(const auto by=selectedBy.find(name);by!=selectedBy.end()&&!advertised.find("ark_loaded_by"))advertised.set("ark_loaded_by",V::makeStr(by->second));
         out.arr.push_back(std::move(advertised));}
     return out;
 }

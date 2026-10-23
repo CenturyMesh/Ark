@@ -19,8 +19,8 @@ try {
         [IO.Directory]::CreateDirectory((Split-Path $target -Parent)) | Out-Null
         Copy-Item -LiteralPath (Join-Path $repository $path) -Destination $target
     }
-    foreach ($path in @('LICENSE','NOTICE','docs/UPDATES.md','docs/BOM.md','docs/AGENT_ACTIVITY.md','docs/MEASUREMENT.md','docs/schemas/ark-bom-v1.schema.json','docs/THIRD_PARTY_NOTICES.md','third_party/mapbox/LICENSE','third_party/stb/LICENSE','third_party/stb/README.md','third_party/sqlite/README.md','third_party/sqlite/sqlite3.h','assets/ui/README.md','occt/LICENSE_LGPL_21.txt','occt/OCCT_LGPL_EXCEPTION.txt')) { Write-Fixture (Join-Path $fixture $path) }
-    foreach ($path in @('third_party/mapbox/earcut.hpp','third_party/stb/stb_image.h','third_party/sqlite/sqlite3.c')) { Write-Fixture (Join-Path $fixture $path) 'synthetic source bytes for evidence fixture' }
+    foreach ($path in @('LICENSE','NOTICE','docs/UPDATES.md','docs/BOM.md','docs/AGENT_ACTIVITY.md','docs/MEASUREMENT.md','docs/schemas/ark-bom-v1.schema.json','docs/THIRD_PARTY_NOTICES.md','third_party/mapbox/LICENSE','third_party/stb/LICENSE','third_party/stb/README.md','third_party/sqlite/README.md','third_party/sqlite/sqlite3.h','third_party/zstd/LICENSE','third_party/zstd/README.md','assets/ui/README.md','occt/LICENSE_LGPL_21.txt','occt/OCCT_LGPL_EXCEPTION.txt')) { Write-Fixture (Join-Path $fixture $path) }
+    foreach ($path in @('third_party/mapbox/earcut.hpp','third_party/stb/stb_image.h','third_party/sqlite/sqlite3.c','third_party/zstd/lib/zstd.h')) { Write-Fixture (Join-Path $fixture $path) 'synthetic source bytes for evidence fixture' }
     Write-ArkAtomicJson (Join-Path $fixture 'release.json') @{sequence=14;phase='F';code='014F';version='0.9.15'}
     & git -C $fixture init --quiet
     if ($LASTEXITCODE -ne 0) { throw 'Cannot initialize synthetic source inventory.' }
