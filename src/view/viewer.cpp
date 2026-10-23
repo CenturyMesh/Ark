@@ -546,8 +546,11 @@ static int assistantDockHeight(){const int images=assistantImageComposerHeight()
 static int teamChatRows(){return assistantDockHeight()-assistantImageComposerHeight()>=432+(teamCardRows()-1)*teamCardStride?2:0;}
 static RECT toolGalleryBounds(){return {viewX+12,viewY+10,viewX+12+std::max(300,std::min(1000,viewW-24)),viewY+10+std::max(300,std::min(620,winH-viewY-56))};}
 static void layout(){viewX=std::clamp((int)(winW*.21),280,352);viewW=std::max(winW-viewX-bakedMotionsDockWidth()-explodeDockWidth()-inertialDockWidth056(),1);viewH=std::max(winH-viewY-32-(g_assistantDockOpen?assistantDockHeight():0),1);g_inspectorOpen=g_sidebarTab==2;
-    if(g_chatInput)MoveWindow(g_chatInput,viewX+30,winH-112,std::max(viewW-260,1),44,TRUE);
-    if(g_chatInput)ShowWindow(g_chatInput,g_assistantDockOpen&&!g_toolsOpen?SW_SHOW:SW_HIDE);
+    if(g_chatInput){RECT bounds{};GetWindowRect(g_chatInput,&bounds);MapWindowPoints(nullptr,g_window,(POINT*)&bounds,2);
+        const RECT desired{viewX+30,winH-112,viewX+30+std::max(viewW-260,1),winH-68};
+        if(!EqualRect(&bounds,&desired))MoveWindow(g_chatInput,desired.left,desired.top,desired.right-desired.left,44,TRUE);
+        bool visible=g_assistantDockOpen&&!g_toolsOpen;
+        if(visible!=((GetWindowLongPtr(g_chatInput,GWL_STYLE)&WS_VISIBLE)!=0))ShowWindow(g_chatInput,visible?SW_SHOWNA:SW_HIDE);}
     if(g_toolSearch){auto bounds=toolGalleryBounds();MoveWindow(g_toolSearch,bounds.left+213,bounds.top+45,std::max((int)(bounds.right-bounds.left)-310,1),30,TRUE);ShowWindow(g_toolSearch,g_toolsOpen?SW_SHOW:SW_HIDE);}
     if(g_commandSearch){MoveWindow(g_commandSearch,winW-438,12,200,31,TRUE);ShowWindow(g_commandSearch,g_searchEditing?SW_SHOW:SW_HIDE);}
     layoutAssistantImageDimensions();

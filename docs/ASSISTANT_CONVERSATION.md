@@ -11,7 +11,9 @@ Ctrl+A and Ctrl+C. **Copy chat** copies the goal and the conversation as Unicode
 text with paragraph boundaries. Copying does not submit a provider request.
 
 The goal remains above the scrolling messages. Its height uses native text
-layout; goals longer than three lines have their own scrollbar. **Expand** gives
+layout, up to three lines; in a short split view it reserves room for readable
+messages. Any goal exceeding the available height has its own scrollbar.
+**Expand** gives
 the conversation the workspace, and **Restore** returns to the CAD split.
 **Latest** returns to the newest message. New progress follows the end only when
 the reader was already there; it does not displace someone reading earlier work.
@@ -46,6 +48,14 @@ The UI self-test covers the status lifecycle, native selection, paragraph and
 goal copying, long replies, history beyond 200 entries, bounded native controls,
 scroll retention, pinned goal layout, expanded mode and Team controls. Native
 captures must be inspected as well as checking the test exit code.
+
+057B measures response height from native character positions and font metrics,
+so **Latest** reaches visible text instead of an estimated blank tail. Message
+updates retain existing native controls and selection, and geometry changes
+retain the reader's message anchor. Unchanged frames do not repaint the composer
+or conversation header. The regression includes a long response's final line,
+updates while reading/selecting, compact and wide layouts, and actual window
+pixels after repeated OpenGL swaps. See [057B evidence](iterations/057B.md).
 
 Bare Resume/Continue in an existing Single conversation retains the displayed
 goal and the host BOM task boundary. The agent receives an explicit instruction
