@@ -262,7 +262,7 @@ static GLuint mkProg(const char* vs,const char* fs){
 }
 
 // ---------------------------------------------------------------------------
-struct GPUMesh { GLuint vao=0,vbo=0,ibo=0; int count=0;std::uint64_t serial=0; };
+struct GPUMesh { GLuint vao=0,vbo=0,ibo=0; int count=0;std::uint64_t serial=0;std::string cacheKey; };
 static std::uint64_t g_displayMeshSerial=1;
 struct ScenePartCache {u64 feature=0;std::weak_ptr<const Body> body;std::uint64_t gpuSerial=0;std::string nativeSignature;};
 static std::vector<ScenePartCache> g_scenePartCache;
@@ -362,6 +362,8 @@ static bool g_showEdges=false,g_cameraOrtho=false;
 static bool g_pathTracing=false; // Optional GPU BVH path integrator, off by default.
 static int g_occlusionMode=2; // 0 off, 1 contact, 2 ambient, 3 horizon
 static float g_occlusionStrength=.72f,g_occlusionRadius=1.f;
+static int g_antialiasing=1; // 0 off, 1 FXAA, 2 FXAA high quality; viewport only.
+static float g_contactShadowStrength=.28f;
 static int g_navMode=0,g_pointerX=0,g_pointerY=0,g_cubeX=0,g_cubeY=0,g_cubeS=210;
 static int g_toolModule=0; // Stable IDs: Sheet Metal, Model, Sketch, Inspect, Tools, Manage, Surfaces
 static bool g_cubePress=false;
@@ -750,7 +752,7 @@ void main(){
  o=vec4(normalize(n)*.5+.5, clamp(-vpos.z/depthFar,0.,1.));
 })";
 static const char* FS_AO=R"(#version 330 core
-out vec4 o; uniform sampler2D gbuf; uniform vec2 res; uniform mat4 proj; uniform vec2 focal; uniform float ortho,radius,bias,depthFar;uniform int mode;
+out vec4 o; uniform sampler2D gbuf; uniform vec2 res; uniform mat4 proj; uniform vec2 focal; uniform float ortho,radius,bias,depthFar,contactShadows;uniform int mode;
 const vec3 K[16]=vec3[16](
  vec3(.05,.02,.90),vec3(-.12,.08,.70),vec3(.22,-.05,.55),vec3(-.04,-.18,.80),
  vec3(.30,.16,.40),vec3(-.28,.22,.35),vec3(.10,-.32,.45),vec3(-.20,-.12,.60),
@@ -763,7 +765,7 @@ void main(){
  vec3 pos=ortho>.5?vec3(ndc.x/focal.x,ndc.y/focal.y,-dist):vec3(ndc.x*dist/focal.x,ndc.y*dist/focal.y,-dist);
  vec3 t=normalize(cross(n,abs(n.y)<.85?vec3(0,1,0):vec3(1,0,0))); vec3 b=cross(n,t);
  float ang=fract(sin(dot(gl_FragCoord.xy,vec2(12.9898,78.233)))*43758.5453)*6.2831853; float ca=cos(ang),sa=sin(ang); float occ=0.;
- for(int i=0;i<16;++i){if(mode==1&&i>=8)break;
+ for(int i=0;i<16;++i){if(mode==0||(mode==1&&i>=8))break;
   vec3 k=K[i]; vec3 hem=t*(k.x*ca-k.y*sa)+b*(k.x*sa+k.y*ca)+n*abs(k.z);
   float span=mode==1?.24+.48*float(i)/7.:.16+.84*float(i)/15.;
   vec3 s=pos+normalize(hem)*radius*span;
@@ -781,14 +783,30 @@ void main(){
     horizon=max(horizon,smoothstep(.04,.34,lift)*(1.-smoothstep(0.,radius*1.8,reach)));}
    occ+=horizon*.75;}
  }
- float divisor=mode==1?5.5:mode==3?15.:11.;o=vec4(clamp(1.-occ/divisor,.35,1.));
+ float shadow=0.;
+ // A short camera-space ray towards the studio key light. This is a contact
+ // cue; offscreen geometry and hidden layers cannot cast screen-space shadows.
+ vec3 light=normalize(vec3(-.55,.72,.42));
+ if(contactShadows>0.&&dot(n,light)>.03)for(int j=1;j<=12;++j){
+  float reach=radius*(.10+.13*float(j));vec3 s=pos+light*reach+n*bias;
+  vec4 clip=proj*vec4(s,1.);if(clip.w<=0.)break;vec2 suv=clip.xy/clip.w*.5+.5;
+  if(any(lessThan(suv,vec2(0.)))||any(greaterThan(suv,vec2(1.))))break;
+  float raw=texture(gbuf,suv).a;if(raw>.985)continue;float delta=-raw*depthFar-s.z;
+  float thickness=max(bias*3.,radius*.11);
+  if(delta>bias&&delta<thickness){shadow=(1.-smoothstep(radius*.6,radius*1.7,reach))*smoothstep(0.,bias*2.,delta);break;}
+ }
+ float divisor=mode==1?5.5:mode==3?15.:11.;o=vec4(clamp(1.-occ/divisor,.35,1.),1.-shadow,0.,1.);
 })";
 static const char* FS_COMPOSE=R"(#version 330 core
-out vec4 o; uniform sampler2D ao,gbuf; uniform vec2 res,origin;uniform float strength;
+out vec4 o; uniform sampler2D ao,gbuf; uniform vec2 res,origin;uniform float strength,shadowStrength,depthFar,radius;
 void main(){
- vec2 uv=(gl_FragCoord.xy-origin)/res; float d0=texture(gbuf,uv).a; float sum=0.,wsum=0.; vec2 texel=1.6/res;
- for(int y=-2;y<=2;++y)for(int x=-2;x<=2;++x){vec2 p=uv+vec2(x,y)*texel; float w=1.-smoothstep(0.,.035,abs(texture(gbuf,p).a-d0)); sum+=texture(ao,p).r*w; wsum+=w;}
- float a=mix(1.,sum/max(wsum,.001),strength); o=vec4(a,a,a,1.);
+ vec2 uv=(gl_FragCoord.xy-origin)/res;vec4 center=texture(gbuf,uv);if(center.a>.985){o=vec4(1.);return;}
+ vec3 normal=normalize(center.rgb*2.-1.);vec2 sum=vec2(0.);float wsum=0.;vec2 texel=1./res;
+ for(int y=-2;y<=2;++y)for(int x=-2;x<=2;++x){vec2 p=uv+vec2(x,y)*texel;vec4 g=texture(gbuf,p);if(g.a>.985)continue;
+  float depthWeight=exp(-abs(g.a-center.a)*depthFar/max(radius*.12,.001));
+  float normalWeight=pow(max(dot(normal,normalize(g.rgb*2.-1.)),0.),8.);
+  float w=exp(-float(x*x+y*y)*.25)*depthWeight*normalWeight;sum+=texture(ao,p).rg*w;wsum+=w;}
+ vec2 filtered=sum/max(wsum,.001);float a=mix(1.,filtered.r,strength)*mix(1.,filtered.g,shadowStrength);o=vec4(a,a,a,1.);
 })";
 static const char* VS_EDGE=R"(#version 330 core
 layout(location=0) in vec3 P; uniform mat4 vp,model;
@@ -900,28 +918,7 @@ static const char* FS_IMAGE=R"(#version 330 core
 in vec2 uv;out vec4 o;uniform sampler2D image;void main(){o=texture(image,vec2(uv.x,1.-uv.y));})";
 
 // ---------------------------------------------------------------------------
-static void uploadMesh(GPUMesh& gm,const Mesh& m){
-    ++g_displayMeshSerial;
-    gm.serial=g_displayMeshSerial;
-    if(!gm.vao)glGenVertexArrays(1,&gm.vao);
-    if(!gm.vbo)glGenBuffers(1,&gm.vbo);
-    if(!gm.ibo)glGenBuffers(1,&gm.ibo);
-    glBindVertexArray(gm.vao);
-    glBindBuffer(GL_ARRAY_BUFFER,gm.vbo);
-    std::vector<float> pk; pk.reserve(m.pos.size()+m.nrm.size());
-    for(size_t i=0;i<m.vertCount();++i){
-        pk.push_back(m.pos[i*3]);pk.push_back(m.pos[i*3+1]);pk.push_back(m.pos[i*3+2]);
-        pk.push_back(m.nrm[i*3]);pk.push_back(m.nrm[i*3+1]);pk.push_back(m.nrm[i*3+2]);
-    }
-    glBufferData(GL_ARRAY_BUFFER,(GLsizeiptr)(pk.size()*sizeof(float)),pk.data(),GL_STATIC_DRAW);
-    glEnableVertexAttribArray(0); glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,24,nullptr);
-    glEnableVertexAttribArray(1); glVertexAttribPointer(1,3,GL_FLOAT,GL_FALSE,24,(void*)12);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,gm.ibo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER,(GLsizeiptr)(m.idx.size()*sizeof(u32)),m.idx.data(),GL_STATIC_DRAW);
-    glBindVertexArray(0);
-    gm.count=(int)m.triCount();
-}
-static void releaseMesh(GPUMesh& mesh){if(mesh.vbo)glDeleteBuffers(1,&mesh.vbo);if(mesh.ibo)glDeleteBuffers(1,&mesh.ibo);if(mesh.vao)glDeleteVertexArrays(1,&mesh.vao);mesh={};}
+#include "gpu_mesh_cache_056c.inl"
 struct GPULines { GLuint vao=0,vbo=0; int verts=0; };
 static std::vector<GPULines> g_edgeLines;
 static void uploadEdges(size_t part){
@@ -1054,7 +1051,7 @@ static void rebuildScene(bool evaluate=false){
     }else if(!resolveAssembly(g_doc,placements,error,&g_assemblyDiagnostics)){g_error=true;g_status=error;}
     if(g_selectedMate>=(int)g_doc.mates.size())g_selectedMate=-1;
     auto oldCpu=std::move(g_cpuMeshes);auto oldPicks=std::move(g_partPicks);auto oldReports=std::move(g_reports);auto oldBvhs=std::move(g_bvhs);auto oldGpu=std::move(g_meshes);auto oldEdges=std::move(g_edgeLines);auto oldCache=std::move(g_scenePartCache);
-    struct ReleasePrevious {std::vector<GPUMesh>& meshes;std::vector<GPULines>& edges;~ReleasePrevious(){for(auto& mesh:meshes)releaseMesh(mesh);for(auto& lines:edges){if(lines.vbo)glDeleteBuffers(1,&lines.vbo);if(lines.vao)glDeleteVertexArrays(1,&lines.vao);}}} releasePrevious{oldGpu,oldEdges};
+    struct ReleasePrevious {std::vector<GPUMesh>& meshes;std::vector<GPULines>& edges;~ReleasePrevious(){for(auto& mesh:meshes)releaseMesh(mesh);for(auto& lines:edges){if(lines.vbo)glDeleteBuffers(1,&lines.vbo);if(lines.vao)glDeleteVertexArrays(1,&lines.vao);}if(g_bodyIds.empty())trimDisplayMeshCache056(0);}} releasePrevious{oldGpu,oldEdges};
     g_cpuMeshes.clear();g_partPicks.clear();g_reports.clear();g_bvhs.clear();g_meshes.clear();g_edgeLines.clear();g_scenePartCache.clear();
     g_bodyIds.clear();g_instanceIds.clear();g_instanceCopies.clear();g_instanceNames.clear();g_instanceWorld.clear();g_instancePart.clear();
     g_tubeInfo.clear();g_triangleCount=0;g_sceneBounds=AABB{};
@@ -2469,7 +2466,7 @@ static void readConnectorSettings(const arkjson::Value& v,AssistantConfig& confi
     if(config.protocol==AssistantProtocol::ClaudeCode)config.imageInputSupported=true;}
 static arkjson::Value g_settingsBase; // Settings as this window last loaded or wrote them.
 static arkjson::Value uiSettingsJson(){
-    using V=arkjson::Value;V j=V::makeObj();j.set("endpoint",V::makeStr(g_assistantConfig.endpoint));j.set("model",V::makeStr(g_assistantConfig.model));j.set("reasoning_effort",V::makeStr(g_assistantConfig.reasoningEffort));j.set("api_key_env",V::makeStr(g_assistantConfig.apiKeyEnv));j.set("assistant_auth_mode",V::makeStr(connectorAuthName(g_assistantConfig.authMode)));j.set("grid",V::makeBool(g_grid));j.set("wireframe",V::makeBool(wireframe));j.set("light_background",V::makeBool(g_lightBackground));j.set("satin",V::makeBool(g_satin));j.set("show_datum_planes",V::makeBool(g_showDatumPlanes));j.set("occlusion_mode",V::makeNum(g_occlusionMode));j.set("occlusion_strength",V::makeNum(g_occlusionStrength));j.set("occlusion_radius",V::makeNum(g_occlusionRadius));j.set("path_tracing",V::makeBool(g_pathTracing));j.set("show_edges",V::makeBool(g_showEdges));j.set("orthographic",V::makeBool(g_cameraOrtho));
+    using V=arkjson::Value;V j=V::makeObj();j.set("endpoint",V::makeStr(g_assistantConfig.endpoint));j.set("model",V::makeStr(g_assistantConfig.model));j.set("reasoning_effort",V::makeStr(g_assistantConfig.reasoningEffort));j.set("api_key_env",V::makeStr(g_assistantConfig.apiKeyEnv));j.set("assistant_auth_mode",V::makeStr(connectorAuthName(g_assistantConfig.authMode)));j.set("grid",V::makeBool(g_grid));j.set("wireframe",V::makeBool(wireframe));j.set("light_background",V::makeBool(g_lightBackground));j.set("satin",V::makeBool(g_satin));j.set("show_datum_planes",V::makeBool(g_showDatumPlanes));j.set("occlusion_mode",V::makeNum(g_occlusionMode));j.set("occlusion_strength",V::makeNum(g_occlusionStrength));j.set("occlusion_radius",V::makeNum(g_occlusionRadius));j.set("antialiasing",V::makeNum(g_antialiasing));j.set("contact_shadow_strength",V::makeNum(g_contactShadowStrength));j.set("path_tracing",V::makeBool(g_pathTracing));j.set("show_edges",V::makeBool(g_showEdges));j.set("orthographic",V::makeBool(g_cameraOrtho));
     V team=V::makeArr();for(size_t i=0;i<teamCapacity;++i){V role=V::makeObj();role.set("model",V::makeStr(g_teamModels[i]));role.set("reasoning_effort",V::makeStr(g_teamEfforts[i]));team.arr.push_back(std::move(role));}j.set("team_roles",std::move(team));j.set("team_role_count",V::makeNum(g_teamRoleCount));j.set("team_focused_workflow",V::makeBool(g_teamFocusedWorkflow));j.set("team_mode",V::makeBool(g_teamMode));j.set("library_root",V::makeStr(g_libraryRoot));j.set("library_search",V::makeStr(g_libraryText));
     j.set("agent_presence",arkjson::Value::makeBool(g_showAgentPresence));j.set("assistant_dock_open",V::makeBool(g_assistantDockOpen));j.set("display_units",g_displayUnits.json());j.set("connector",connectorSettings(g_assistantConfig));V connectors=V::makeArr();for(size_t i=0;i<teamCapacity;++i)connectors.arr.push_back(g_teamConnectors[i]?connectorSettings(*g_teamConnectors[i]):V{});j.set("team_connectors",connectors);
     return j;
@@ -2507,6 +2504,8 @@ static void loadUiSettingsFile(){
         if(auto* v=j.find("occlusion_mode");v&&v->t==arkjson::Value::Num)g_occlusionMode=std::clamp((int)v->num,0,3);
         if(auto* v=j.find("occlusion_strength");v&&v->t==arkjson::Value::Num)g_occlusionStrength=(float)clamp(v->num,0.,1.);
         if(auto* v=j.find("occlusion_radius");v&&v->t==arkjson::Value::Num)g_occlusionRadius=(float)clamp(v->num,.25,4.);
+        if(auto* v=j.find("antialiasing");v&&v->t==arkjson::Value::Num&&v->num>=0&&v->num<=2&&std::floor(v->num)==v->num)g_antialiasing=(int)v->num;
+        if(auto* v=j.find("contact_shadow_strength");v&&v->t==arkjson::Value::Num&&std::isfinite(v->num))g_contactShadowStrength=(float)clamp(v->num,0.,1.);
         if(auto* v=j.find("path_tracing");v&&v->t==arkjson::Value::Bool)g_pathTracing=v->b;
         if(auto* v=j.find("show_edges");v&&v->t==arkjson::Value::Bool)g_showEdges=v->b;if(auto* v=j.find("orthographic");v&&v->t==arkjson::Value::Bool)g_cameraOrtho=v->b;
     }catch(...){g_status="ARK settings unavailable; defaults loaded";}
@@ -2518,12 +2517,15 @@ static void unitsDialog(){
     DisplayUnits next;next.length=fields[0].value;next.mass=fields[1].value;next.volume=fields[2].value;next.precision=std::stoi(fields[3].value);next.validate();auto previous=g_displayUnits;g_displayUnits=next;try{if(!g_dialogSmoke)saveUiSettings();}catch(...){g_displayUnits=previous;throw;}g_status="Display units: "+next.length+" / "+next.mass+" / "+next.volume;
 }
 static void graphicsDialog(){
-    std::vector<EditorField> fields{{"Show ground grid",g_grid?"1":"0",true},{"Wireframe",wireframe?"1":"0",true},{"Light background",g_lightBackground?"1":"0",true},{"Visible edges",g_showEdges?"1":"0",true},{"Orthographic camera",g_cameraOrtho?"1":"0",true},{"AO mode / 0-3",std::to_string(g_occlusionMode)},{"AO strength / 0-1",std::to_string(g_occlusionStrength)},{"AO radius / 0.25-4",std::to_string(g_occlusionRadius)},{"GPU path tracing (optional)",g_pathTracing?"1":"0",true}};
-    if(!editFields("System options / Graphics","AO: 0 off, 1 contact, 2 ambient, 3 horizon. Path tracing: progressive GPU OpenGL BVH, 4 bounces; opaque untextured scenes. Applies immediately.",fields))return;
+    static const std::vector<std::string> aaModes={"Off","FXAA","FXAA high quality"};
+    std::vector<EditorField> fields{{"Show ground grid",g_grid?"1":"0",true},{"Wireframe",wireframe?"1":"0",true},{"Light background",g_lightBackground?"1":"0",true},{"Visible edges",g_showEdges?"1":"0",true},{"Orthographic camera",g_cameraOrtho?"1":"0",true},{"AO mode / 0-3",std::to_string(g_occlusionMode)},{"AO strength / 0-1",std::to_string(g_occlusionStrength)},{"AO radius / 0.25-4",std::to_string(g_occlusionRadius)},{"GPU path tracing (optional)",g_pathTracing?"1":"0",true},{"Antialiasing",aaModes[(size_t)g_antialiasing],false,aaModes},{"Contact shadows / 0-1",std::to_string(g_contactShadowStrength)}};
+    if(!editFields("System options / Graphics","AO: 0 off, 1 contact, 2 ambient, 3 horizon. Screen-space contact shadows. Antialiasing preserves UI text.",fields))return;
     bool values[5];for(int i=0;i<5;++i){double n=formNumber(fields[(size_t)i].value);if(n!=0&&n!=1)throw std::runtime_error("Graphics toggles accept 0 or 1");values[i]=n!=0;}
     double mode=formNumber(fields[5].value),strength=formNumber(fields[6].value),radius=formNumber(fields[7].value);
     if(mode<0||mode>3||std::floor(mode)!=mode||strength<0||strength>1||radius<.25||radius>4)throw std::runtime_error("AO mode is 0..3, strength is 0..1, radius is 0.25..4");
-    double tracing=formNumber(fields[8].value);if(tracing!=0&&tracing!=1)throw std::runtime_error("Path tracing accepts 0 or 1");g_pathTracing=tracing!=0;
+    double tracing=formNumber(fields[8].value);if(tracing!=0&&tracing!=1)throw std::runtime_error("Path tracing accepts 0 or 1");
+    auto aa=std::find(aaModes.begin(),aaModes.end(),fields[9].value);double shadow=formNumber(fields[10].value);if(aa==aaModes.end()||shadow<0||shadow>1)throw std::runtime_error("Select a listed antialiasing mode and contact shadow strength 0..1");
+    g_pathTracing=tracing!=0;g_antialiasing=(int)(aa-aaModes.begin());g_contactShadowStrength=(float)shadow;
     g_grid=values[0];wireframe=values[1];g_lightBackground=values[2];g_showEdges=values[3];g_cameraOrtho=values[4];g_occlusionMode=(int)mode;g_occlusionStrength=(float)strength;g_occlusionRadius=(float)radius;if(!g_dialogSmoke)saveUiSettings();
 }
 static void materialDialog(){
@@ -4602,23 +4604,26 @@ static bool ensureOcclusionTargets(int w,int h){
     return gOccReady;
 }
 static void applyOcclusion(const Mat4& view,const Mat4& proj,const GLfloat vpT[16],const Vec3& eye){
-    if((g_occlusionMode==0&&!g_showEdges)||wireframe||viewW<2||viewH<2||!ensureOcclusionTargets(viewW,viewH))return;
+    if((g_occlusionMode==0&&g_contactShadowStrength==0&&!g_showEdges)||wireframe||viewW<2||viewH<2||!ensureOcclusionTargets(viewW,viewH))return;
     glBindFramebuffer(GL_FRAMEBUFFER,gFbo);glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,gGeomTex,0);
     glViewport(0,0,viewW,viewH);glDisable(GL_BLEND);glEnable(GL_DEPTH_TEST);glDepthFunc(GL_LEQUAL);glClearColor(0.f,0.f,1.f,1.f);glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
     drawSurfaces(true,view,proj,vpT,eye);
-    if(g_occlusionMode==0||g_trace.active){glBindFramebuffer(GL_FRAMEBUFFER,0);glViewport(viewX,winH-viewY-viewH,viewW,viewH);glEnable(GL_BLEND);return;}
+    if((g_occlusionMode==0&&g_contactShadowStrength==0)||g_trace.active){glBindFramebuffer(GL_FRAMEBUFFER,0);glViewport(viewX,winH-viewY-viewH,viewW,viewH);glEnable(GL_BLEND);return;}
     glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,gAoTex,0);glDisable(GL_DEPTH_TEST);glUseProgram(pAo);
     glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,gGeomTex);glUniform1i(glGetUniformLocation(pAo,"gbuf"),0);glUniform2f(glGetUniformLocation(pAo,"res"),(float)viewW,(float)viewH);glUniform1f(glGetUniformLocation(pAo,"depthFar"),(float)g_projectionFar);
     GLfloat pm[16];for(int i=0;i<16;++i)pm[i]=(GLfloat)proj.m[i];glUniformMatrix4fv(auProj,1,GL_FALSE,pm);glUniform2f(auFocal,(float)proj.m[0],(float)proj.m[5]);glUniform1f(auOrtho,g_cameraOrtho?1.f:0.f);
     double radius=g_sceneBounds.valid()?clamp(g_sceneBounds.diagonal()*0.045,1.5,24.0):6.0;
     radius*=g_occlusionRadius*(g_occlusionMode==1?.48:g_occlusionMode==3?1.5:1.);
     glUniform1f(auRadius,(float)radius);glUniform1f(auBias,(float)(radius*0.055));glUniform1i(glGetUniformLocation(pAo,"mode"),g_occlusionMode);
+    glUniform1f(glGetUniformLocation(pAo,"contactShadows"),g_contactShadowStrength);
     glBindVertexArray(quadVao);glDrawArrays(GL_TRIANGLES,0,3);
     glBindFramebuffer(GL_FRAMEBUFFER,0);glViewport(viewX,winH-viewY-viewH,viewW,viewH);glEnable(GL_BLEND);glBlendFunc(GL_DST_COLOR,GL_ZERO);glUseProgram(pCompose);
     glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,gAoTex);glActiveTexture(GL_TEXTURE1);glBindTexture(GL_TEXTURE_2D,gGeomTex);
     glUniform1i(glGetUniformLocation(pCompose,"ao"),0);glUniform1i(glGetUniformLocation(pCompose,"gbuf"),1);glUniform1f(glGetUniformLocation(pCompose,"strength"),g_occlusionStrength);glUniform2f(glGetUniformLocation(pCompose,"res"),(float)viewW,(float)viewH);glUniform2f(cuOrigin,(float)viewX,(float)(winH-viewY-viewH));
+    glUniform1f(glGetUniformLocation(pCompose,"shadowStrength"),g_contactShadowStrength);glUniform1f(glGetUniformLocation(pCompose,"depthFar"),(float)g_projectionFar);glUniform1f(glGetUniformLocation(pCompose,"radius"),(float)radius);
     glBindVertexArray(quadVao);glDrawArrays(GL_TRIANGLES,0,3);glActiveTexture(GL_TEXTURE0);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
 }
+#include "viewport_quality_056c.inl"
 #include "emission_render.inl"
 #include "agent_presence_render.inl"
 static void drawFeatureEdges(const GLfloat vpT[16]){
@@ -4892,7 +4897,7 @@ static void drawFrame(HDC hdc){
     glEnable(GL_DEPTH_TEST);glDepthFunc(GL_LEQUAL);glDepthMask(GL_FALSE);glEnable(GL_BLEND);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
     drawSurfaces(false,view,proj,vpT,eye,true);
     drawPlaneStamps024(vpT);
-    drawEmission030(view,proj,vpT,eye);captureVisualizeScene();
+    drawEmission030(view,proj,vpT,eye);applyViewportAntialiasing056();captureVisualizeScene();
     glDepthMask(GL_TRUE);
 
     if((g_showSketches&&!g_sketchLines.empty())||(g_showDatumPlanes&&!g_datumLines.empty())||!g_selectionLines.empty()||!g_selectionFaceFill.empty()){
@@ -6178,6 +6183,7 @@ static void seedDocument(){g_doc=makeDemoDocument();rebuildScene();frameScene();
 #include "assistant_chat_selftest.inl"
 #include "studio_render_selftest.inl"
 #include "interaction_performance.inl"
+#include "viewport_quality_selftest_056c.inl"
 
 int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     if(redirect_to_updated_runtime())return 0;
@@ -6197,7 +6203,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     bool localModelsUiTest=false;bool viewportDockUiTest=false;bool bakedMotionsUiTest=false;bool parametricHudUiTest=false;bool explodedViewsUiTest=false;bool dragChainUiTest=false;bool bomUiTest=false;bool drawingWorkspaceUiTest=false;bool drawingViewportUiTest=false;bool measurementUiTest=false;bool authoringUiTest=false;
     bool selectionPickingUiTest=false;bool interactionUiTest=false,connectorsUiTest=false,actionIconsUiTest=false,treeUiTest=false,arcUiTest=false,completionUiTest=false,sketchDrawingUiTest=false,sketchEditUiTest=false,selectionGlowUiTest=false,datumAuthoringUiTest=false,typedSketchUiTest=false;
     bool teamBlockersUiTest=false;bool realtimeUiTest=false;bool asyncExactUiTest=false;bool productToolsUiTest=false;bool selfTest=false,assemblyTest=false,dialogTest=false,bendTest=false,bendExportTest=false,sourceTest=false,sketchTest=false,assistantTest=false,nativeUiTest=false,renderUiTest=false,engineeringUiTest=false,sheetShowcaseTest=false,contextUiTest=false,suspensionUiTest=false,connectChatGpt=false,motionUiTest=false,motionPlay=false,navigationUiTest=false,projectionUiTest=false,frameToolsUiTest=false;unsigned exitAfterMs=0;std::string endpointFile,requestedSketch;int requestedOpening=-1;double requestedFold=-1,showcaseProgress=-1;std::string shotPath="ark_studio.png",loadPath,scriptPath,importPath,showcaseView,spotlightName,suspensionFeatureName,motionDriverName,motionSpeed;double requestedMotionTime=0;std::vector<std::string> suspensionValues;
-    int requestedPathSamples=1;bool studioRenderTest=false,requestedPathTracing=false;
+    int requestedPathSamples=1;bool studioRenderTest=false,requestedPathTracing=false,viewportQualityTest=false;
     int sw=1600,sh=1000,argc=0;auto argv=CommandLineToArgvW(GetCommandLineW(),&argc);
     auto utf8=[](const wchar_t* w){int n=WideCharToMultiByte(CP_UTF8,0,w,-1,nullptr,0,nullptr,nullptr);std::string s(n,'\0');WideCharToMultiByte(CP_UTF8,0,w,-1,s.data(),n,nullptr,nullptr);s.pop_back();return s;};
     for(int i=1;i<argc;++i){auto a=utf8(argv[i]);if(a=="--shot"&&i+1<argc){g_headless=true;shotPath=utf8(argv[++i]);}
@@ -6252,6 +6258,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         else if(a=="--self-test-native-ui")nativeUiTest=true;
         else if(a=="--self-test-render-ui"){renderUiTest=true;g_headless=true;}
         else if(a=="--self-test-studio-render"){studioRenderTest=true;g_headless=true;}
+        else if(a=="--self-test-viewport-quality-ui"){viewportQualityTest=true;g_headless=true;}
         else if(a=="--path-trace")requestedPathTracing=true;
         else if(a=="--path-samples"&&i+1<argc)requestedPathSamples=std::clamp(_wtoi(argv[++i]),1,4096);
         else if(a=="--self-test-authoring-ui"){authoringUiTest=true;g_headless=true;}
@@ -6347,20 +6354,9 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     GLFUNCS(LOAD)
 #undef LOAD
 
-    // upgrade to 3.3 core + 8xMSAA pixel format ---------------------------------
-    if(wglCreateContextAttribsARB_&&wglChoosePixelFormatARB_){
-        int pfAttr[]={ 0x2001,1, 0x2010,1, 0x2014,1, 0x2022,0x202B,
-                       0x2027,24, 0x2041,1, 0x204A,8, 0 };
-        int cand=0; UINT num=0;
-        if(wglChoosePixelFormatARB_(hdc,pfAttr,nullptr,1,&cand,&num)&&num){
-            DescribePixelFormat(hdc,cand,sizeof pfd,&pfd);
-            if(SetPixelFormat(hdc,cand,&pfd)){
-                wglMakeCurrent(hdc,nullptr);
-                wglDeleteContext(ctx);
-                ctx=wglCreateContext(hdc);
-                wglMakeCurrent(hdc,ctx);
-            }
-        }
+    // SetPixelFormat is immutable for this HWND. Runtime antialiasing uses a
+    // viewport post pass, without pretending a second pixel-format call gives MSAA.
+    if(wglCreateContextAttribsARB_){
         int ca[]={0x2095,3, 0x2096,3, 0x2094,0x0001, 0};
         HGLRC modern=wglCreateContextAttribsARB_(hdc,nullptr,ca);
         if(modern){
@@ -6995,6 +6991,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         selBody=-1;g_toolModule=3;frameScene();g_status="Engineering UI checks passed / exact frame / PCB DRC / cable route / save";
     }
     if(studioRenderTest){int result=studioRenderSelfTest(hdc,shotPath);if(result)return result;}
+    if(viewportQualityTest){int result=viewportQualitySelfTest056(hdc,shotPath);if(result)return result;}
     if(renderUiTest){
         using V=arkjson::Value;
         {HMENU probe=CreatePopupMenu();AppendMenuA(probe,MF_STRING,16,"Save");AppendMenuA(probe,MF_STRING,63,"Spline");decorateMenu(probe);for(int i=0;i<2;++i){MENUITEMINFOW item{sizeof item};item.fMask=MIIM_BITMAP;if(!GetMenuItemInfoW(probe,(UINT)i,TRUE,&item)||!item.hbmpItem){DestroyMenu(probe);return 247;}}DestroyMenu(probe);}
