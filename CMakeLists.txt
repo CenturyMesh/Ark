@@ -66,7 +66,7 @@ add_library(ark STATIC
   src/agent_transactions.cpp
   src/agent_failures.cpp
   src/agent_benchmark.cpp
-  src/physics.cpp
+  src/physics.cpp src/inertial_simulation.cpp
   src/core.cpp src/nurbs.cpp src/brep.cpp src/mesh.cpp src/csg.cpp
   src/model.cpp src/evaluate.cpp src/native_features.cpp src/frame.cpp src/electronics.cpp src/usage.cpp src/stock_preview.cpp src/suspension.cpp src/chatgpt_auth.cpp src/assistant_credentials.cpp src/sheet_commands.cpp src/sheet_preview.cpp src/references.cpp src/datum.cpp src/solver.cpp src/sketch.cpp src/prism_cut.cpp src/onboarding.cpp src/live_session.cpp src/assistant.cpp src/io.cpp src/serialize.cpp
   src/source_tube.cpp src/notch.cpp src/notch_preview.cpp src/step_export.cpp src/tube.cpp src/assembly.cpp src/assembly_io.cpp src/compute.cpp src/api.cpp src/mesh_query.cpp src/mesh_analysis.cpp src/mesh_model.cpp src/agent.cpp src/agent_features.cpp src/result_path.cpp src/kernels_scalar.cpp src/snapshot_032d.cpp)
@@ -103,8 +103,12 @@ if(ARK_WITH_OCCT)
 endif()
 target_link_libraries(ark PUBLIC Threads::Threads PRIVATE ark-sqlite)
 if(WIN32)
-  target_link_libraries(ark PRIVATE bcrypt normaliz gdi32)
+  target_link_libraries(ark PRIVATE bcrypt normaliz gdi32 d3d11 d3dcompiler dxgi)
 endif()
+add_executable(ark-inertial-056c-tests tests/inertial_056c_tests.cpp)
+target_link_libraries(ark-inertial-056c-tests PRIVATE ark)
+add_test(NAME inertial-056c COMMAND ark-inertial-056c-tests)
+set_tests_properties(inertial-056c PROPERTIES TIMEOUT 180)
 add_executable(ark-product-tools-030d-tests tests/product_tools_030d_tests.cpp)
 target_link_libraries(ark-product-tools-030d-tests PRIVATE ark)
 add_test(NAME product-tools-030d COMMAND ark-product-tools-030d-tests)

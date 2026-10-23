@@ -7,6 +7,7 @@
 #include "ark/references.hpp"
 #include "ark/sketch.hpp"
 #include "ark/physics.hpp"
+#include "ark/inertial_simulation.hpp"
 #include "ark/manufacturing.hpp"
 #include "ark/component_library_tools.hpp"
 #include "ark/result_path.hpp"
@@ -429,6 +430,9 @@ void appendAgentFeatureTools(V& tools){
       {"design_solve","Read-only scalar parameter target solve by bounded bisection; requires a continuous bracket, aborts invalid geometry. parameter,lower,upper,target,tolerance; objective:{tool,args,path} selects a finite scalar using dot paths including array indices. max_evaluations 3..64 (default32), max_seconds <=120 (default30, checked between operations). Returns apply only on convergence. mode sensitivity returns a finite-interval secant. No global optimum or topology continuity certification.",R"({"type":"object","properties":{"expected_revision":{"type":"integer"},"parameter":{"type":"string"},"lower":{"type":"number"},"upper":{"type":"number"},"target":{"type":"number"},"tolerance":{"type":"number","exclusiveMinimum":0},"objective":{"type":"object"},"max_evaluations":{"type":"integer","minimum":3,"maximum":64},"max_seconds":{"type":"number"},"mode":{"type":"string","enum":["target","sensitivity"]}},"required":["expected_revision","parameter","lower","upper","objective"]})"}
     };
     for(const auto& d:defs){V tool=V::makeObj(),schema,annotations=V::makeObj(),output=V::makeObj();arkjson::parse(d.schema,schema);if(std::string(d.name)=="doc_preview"||std::string(d.name)=="manufacturing_propose"){V props=*schema.find("properties");props.set("checks",agentPostconditionsSchema());schema.set("properties",props);}
+        if(std::string(d.name)=="physics_inspect"){
+            V props=*schema.find("properties"),revision=V::makeObj();revision.set("type",V::makeStr("integer"));revision.set("minimum",V::makeNum(0));props.set("expected_revision",revision);props.set("simulation",inertialSimulationSchema());schema.set("properties",props);
+        }
         if(std::string(d.name)=="query_batch"){
             V props=*schema.find("properties"),queries=*props.find("queries"),item=*queries.find("items"),fields=*item.find("properties"),name=*fields.find("tool"),names=V::makeArr();for(const auto& allowed:queryTools)names.arr.push_back(V::makeStr(allowed));names.arr.push_back(V::makeStr("agent_onboard"));name.set("enum",names);fields.set("tool",name);item.set("properties",fields);queries.set("items",item);props.set("queries",queries);schema.set("properties",props);
             arkjson::parse(R"({"type":"object","properties":{"results":{"type":"array","items":{"type":"object","properties":{"query_index":{"type":"integer","minimum":0},"tool":{"type":"string"},"args":{"type":"object"},"isError":{"type":"boolean"},"structuredContent":{"type":"object","description":"A result or explicit row error. QUERY_BATCH_FIELD_MISSING includes query_index, tool, requested_fields, missing_fields, available_fields, tool_succeeded:true, observed_result and recovery:{action:reuse_observed_result,tool,args,hint}."},"content":{"type":"array"},"resolved_args":{"type":"object","description":"Arguments actually executed after resolving $ref values."},"elapsed_ms":{"type":"number","minimum":0}},"required":["query_index","tool","args","structuredContent","content","isError","elapsed_ms"]}},"revision":{"type":"integer"},"error_count":{"type":"integer","minimum":0,"maximum":128}},"required":["results","revision","error_count"]})",output);
