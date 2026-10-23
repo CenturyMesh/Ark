@@ -60,7 +60,7 @@ void checkFinite(float3 p) {if(any(isnan(p))||any(isinf(p))){uint ignored;Interl
 [numthreads(64,1,1)] void projectLinks(uint3 tid:SV_DispatchThreadID) {
     if(tid.x>=colorCount)return;
     uint i=colorOffset+tid.x;Link l=links[i];Node a=nodes[l.a],b=nodes[l.b];
-    float wa=a.position.w,wb=b.position.w;if(wa+wb==0)return;
+    float wa=a.position.w,wb=b.position.w;if(wa+wb==0&&l.compliance==0)return;
     float3 d=a.position.xyz-b.position.xyz;float distance=length(d);
     float3 normal=distance>1e-12?d/distance:l.direction.xyz;
     float alpha=l.compliance/(dt*dt),dl=(-(distance-l.rest)-alpha*lambda[i])/(wa+wb+alpha);
@@ -167,7 +167,7 @@ RubberDynamicsResult runGpu(const std::vector<RubberNode>& nodes,const Topology&
     std::vector<GLink> packedLinks;
     for(const auto& link:graph.links) {
         const auto& l=link.value;
-        require(l.compliance==0||(float)l.compliance>0,"link compliance underflows GPU float32; select cpu explicitly");
+        require(l.compliance==0||(float)l.compliance>=std::numeric_limits<float>::min(),"link compliance underflows GPU float32 normal range; select cpu explicitly");
         double exactLength=(nodes[l.a].position-nodes[l.b].position).len();
         double packedLength=(v3(f4(nodes[l.a].position))-v3(f4(nodes[l.b].position))).len();
         require(std::abs(packedLength-exactLength)<=l.restLength*.005,"GPU coordinate precision is insufficient for a link; move analysis near its origin or select cpu");

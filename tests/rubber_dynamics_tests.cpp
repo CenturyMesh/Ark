@@ -30,6 +30,8 @@ void cases(const std::string& backend) {
     o=options(backend);RubberNode anchor=node({.123456789,.234567891,.345678912},true);
     auto fixed=simulateRubber({anchor},{},o);check(fixed.frames.back()[0]==anchor.position,"fixed anchor preserves authored float64 coordinates");
     near(fixed.finalVelocities[0].len(),0,0,"fixed anchor velocity");
+    auto prestress=simulateRubber({node({0,0,0},true),node({1.2,0,0},true)},{{0,1,1,.01}},o);
+    near(prestress.finalLinkForces_N[0],20,precision*10,"two fixed endpoints retain elastic pretension");
 
     // The isolated linear spring has an independently computable implicit Euler
     // solution, so this checks the physical compliance rather than its code path.
@@ -146,6 +148,8 @@ void invalidInputs() {
     auto broken=links;broken[0].b=2;rejects([&]{simulateRubber(nodes,broken,o);},"endpoints");
     broken=links;broken[0].restLength=-1;rejects([&]{simulateRubber(nodes,broken,o);},"restLength");
     broken=links;broken[0].compliance=-1;rejects([&]{simulateRubber(nodes,broken,o);},"compliance");
+    bad=nodes;bad[0].fixed=bad[1].fixed=true;broken=links;broken[0].restLength=.5;broken[0].compliance=0;
+    rejects([&]{simulateRubber(bad,broken,o);},"contradict an inextensible");
     broken=links;broken.push_back({1,0,1,.01});rejects([&]{simulateRubber(nodes,broken,o);},"duplicate");
     bad=nodes;bad[1].position=bad[0].position;rejects([&]{simulateRubber(bad,links,o);},"coincident");
     auto invalid=o;invalid.backend="auto";rejects([&]{simulateRubber(nodes,links,invalid);},"no silent fallback");

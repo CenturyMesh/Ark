@@ -87,6 +87,8 @@ void validate(const std::vector<RubberNode>& nodes,const std::vector<RubberLink>
         require(std::isfinite(l.restLength)&&l.restLength>=1e-6&&l.restLength<=1000,"link restLength must be 1e-6..1000 m");
         require(std::isfinite(l.compliance)&&l.compliance>=0&&l.compliance<=1000,"link compliance must be 0..1000 m/N");
         require((nodes[l.a].position-nodes[l.b].position).len()>=1e-9,"initial link endpoints are coincident");
+        if(nodes[l.a].fixed&&nodes[l.b].fixed&&l.compliance==0)
+            require(std::abs((nodes[l.a].position-nodes[l.b].position).len()-l.restLength)<=1e-12*std::max(1.0,l.restLength),"fixed endpoints contradict an inextensible link restLength");
         require(unique.emplace(std::min(l.a,l.b),std::max(l.a,l.b)).second,"duplicate link endpoints are ambiguous; combine their stiffness explicitly");
     }
     const size_t steps=stepCount(o),frames=(size_t)std::ceil(o.duration*o.outputFps)+1;
@@ -151,7 +153,7 @@ RubberDynamicsResult runCpu(const std::vector<RubberNode>& nodes,const Topology&
             for(unsigned iteration=0;iteration<o.iterations;++iteration) {
                 for(size_t j=0;j<graph.links.size();++j) {
                     const auto& link=graph.links[j];const auto& l=link.value;
-                    double wa=weights[l.a],wb=weights[l.b];if(wa+wb==0)continue;
+                    double wa=weights[l.a],wb=weights[l.b];if(wa+wb==0&&l.compliance==0)continue;
                     Vec3 d=positions[l.a]-positions[l.b];double length=d.len();
                     Vec3 n=length>1e-12?d/length:link.initialDirection;
                     double alpha=l.compliance/(dt*dt),dl=(-(length-l.restLength)-alpha*lambda[j])/(wa+wb+alpha);
