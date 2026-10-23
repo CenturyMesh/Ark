@@ -2,6 +2,7 @@
 #include "ark/occt_solid.hpp"
 #include "ark/occt_frame.hpp"
 #include "ark/occt_modeling.hpp"
+#include "ark/rubber_patterns.hpp"
 #include "common.hpp"
 
 #include <BRepAdaptor_Curve.hxx>
@@ -62,6 +63,9 @@
 #include <Geom_Surface.hxx>
 #include <GProp_GProps.hxx>
 #include <Geom_TrimmedCurve.hxx>
+#include <Geom_Ellipse.hxx>
+#include <GC_MakeArcOfCircle.hxx>
+#include <BRepPrimAPI_MakeRevol.hxx>
 #include <NCollection_Array1.hxx>
 #include <gp_Pnt2d.hxx>
 #include <Standard_Failure.hxx>
@@ -669,6 +673,7 @@ V finishBodies(const TopoDS_Shape& shape,const std::vector<Ref>& refs){
 #include "holes_orchestrator.inl"
 #include "split_line.inl"
 #include "product_patterns.inl"
+#include "rubber_body_059c.inl"
 #include "solids_031b.inl"
 #include "curve_pattern_044b.inl"
 
@@ -717,6 +722,7 @@ V modelSolidNative(const V& request){
     const std::string op=word(request,"op");std::vector<Ref> refs;TopoDS_Shape result;bool many=false,pattern044b=false;V patternReceipt;V extrusionReceipt=V::makeObj(),vertexReceipt=V::makeObj(),splitReceipt=V::makeObj();
     try{
     if(op=="vent"||op=="wood")return productPatternNative(request);
+    if(op=="rubber_body")return rubberBodyNative059(request);
     if(solidRecipe031b(op))return modelingRecipe031b(request);
     if(op=="holes_orchestrator")return holesOrchestratorNative(request);
     if(op=="tube_end_fit")return withNativeVertexInventory(tubeEndFitNative(request));

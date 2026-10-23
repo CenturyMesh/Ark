@@ -1,3 +1,4 @@
+#include "ark/rubber.hpp"
 #include "ark/physics.hpp"
 #include "ark/inertial_simulation.hpp"
 #include "ark/history_authoring.hpp"
@@ -135,6 +136,7 @@ V inspectMaterials(const Document& document){
     V result=V::makeObj(),rows=V::makeArr();for(const auto& material:document.materials){V row=V::makeObj();row.set("name",V::makeStr(material.name));row.set("density_g_cm3",V::makeNum(material.densityGcm3));row.set("density_kg_m3",V::makeNum(material.densityGcm3*1000));row.set("density_assigned",V::makeBool(material.densityGcm3>0));row.set("physical",material.physical);row.set("appearance",appearanceToJson(material.appearance));V features=V::makeArr();for(const auto& f:document.features)if(f.material==material.name)features.arr.push_back(V::makeNum((double)f.id));row.set("features",features);rows.arr.push_back(row);}result.set("materials",rows);result.set("density_authority",V::makeStr("caller_declared_uniform_density_or_frame_profile"));return result;
 }
 V inspectPhysics(AgentSession& session,const V& args){
+    if(args.find("rubber")){if(args.find("simulation"))throw std::runtime_error("Choose one rubber or rigid-body study per call");return inspectRubber(session,args);}
     if(args.find("simulation"))return inspectInertial(session,args);
     const auto& doc=session.document;const Vec3 gravity=args.find("gravity")?vector(*args.find("gravity")):Vec3{0,0,-9.80665};if(gravity.len()>100)throw std::runtime_error("Gravity magnitude exceeds 100 m/s2");
     const Vec3 reference=args.find("reference_point_mm")?vector(*args.find("reference_point_mm")):Vec3{};

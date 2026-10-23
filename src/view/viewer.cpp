@@ -2563,7 +2563,7 @@ static void materialDialog(){
         {"Young modulus / GPa (0 = unknown)",number(existing&&existing->physical.find("young_modulus_Pa")?existing->physical.find("young_modulus_Pa")->num/1e9:0)},
         {"Poisson ratio",number(existing&&existing->physical.find("poisson_ratio")?existing->physical.find("poisson_ratio")->num:.3)},
         {"Yield strength / MPa (0 = unknown)",number(existing&&existing->physical.find("yield_strength_Pa")?existing->physical.find("yield_strength_Pa")->num/1e6:0)},
-        choiceField("Procedural pattern",appearance.pattern.empty()?"none":appearance.pattern,{"none","twill","weave","carbon","leather","brushed","knurl","perforated"}),
+        choiceField("Procedural pattern",appearance.pattern.empty()?"none":appearance.pattern,{"none","twill","weave","carbon","leather","brushed","knurl","perforated","pebble","traction","chevron"}),
         {"Pattern period / mm",number(appearance.patternScaleMm)},{"Pattern angle / degrees",number(appearance.patternAngleDeg)},{"Pattern contrast / 0-1",number(appearance.patternContrast)}};
     if(!editFields("Body material","Presets are nominal. Use the actual grade. A frame assignment updates every profile. Image paths are relative to the document. Procedural patterns are display-only and need no image.",fields))return;
     auto pairValues=[&](const std::string& value,int count){std::string clean=value;std::replace(clean.begin(),clean.end(),',',' ');std::istringstream input(clean);std::vector<double> values;double n;

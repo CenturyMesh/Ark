@@ -84,7 +84,7 @@ add_library(ark STATIC
   src/agent_transactions.cpp
   src/agent_failures.cpp
   src/agent_benchmark.cpp
-  src/physics.cpp src/inertial_simulation.cpp
+  src/physics.cpp src/inertial_simulation.cpp src/rubber.cpp src/rubber_patterns.cpp src/rubber_dynamics.cpp
   src/core.cpp src/nurbs.cpp src/brep.cpp src/mesh.cpp src/csg.cpp
   src/model.cpp src/evaluate.cpp src/native_features.cpp src/frame.cpp src/electronics.cpp src/usage.cpp src/stock_preview.cpp src/suspension.cpp src/chatgpt_auth.cpp src/assistant_credentials.cpp src/sheet_commands.cpp src/sheet_preview.cpp src/references.cpp src/datum.cpp src/solver.cpp src/sketch.cpp src/prism_cut.cpp src/onboarding.cpp src/live_session.cpp src/assistant.cpp src/io.cpp src/serialize.cpp
   src/source_tube.cpp src/notch.cpp src/notch_preview.cpp src/step_export.cpp src/tube.cpp src/assembly.cpp src/assembly_io.cpp src/compute.cpp src/api.cpp src/mesh_query.cpp src/mesh_analysis.cpp src/mesh_model.cpp src/agent.cpp src/agent_features.cpp src/result_path.cpp src/kernels_scalar.cpp src/snapshot_032d.cpp)
@@ -124,6 +124,13 @@ if(WIN32)
   target_link_libraries(ark PRIVATE bcrypt normaliz gdi32 d3d11 d3dcompiler dxgi)
 endif()
 add_executable(ark-inertial-056c-tests tests/inertial_056c_tests.cpp)
+add_executable(ark-rubber-patterns-tests tests/rubber_patterns_tests.cpp)
+target_link_libraries(ark-rubber-patterns-tests PRIVATE ark)
+add_test(NAME rubber-patterns-059c COMMAND ark-rubber-patterns-tests)
+add_executable(ark-rubber-dynamics-tests tests/rubber_dynamics_tests.cpp)
+target_link_libraries(ark-rubber-dynamics-tests PRIVATE ark)
+add_test(NAME rubber-dynamics-059c COMMAND ark-rubber-dynamics-tests)
+set_tests_properties(rubber-dynamics-059c PROPERTIES TIMEOUT 180)
 target_link_libraries(ark-inertial-056c-tests PRIVATE ark)
 add_test(NAME inertial-056c COMMAND ark-inertial-056c-tests)
 set_tests_properties(inertial-056c PROPERTIES TIMEOUT 180)
@@ -497,6 +504,11 @@ if(ARK_WITH_OCCT)
   target_include_directories(ark-occt PUBLIC include PRIVATE src/occt)
   target_include_directories(ark-occt SYSTEM PUBLIC ${OpenCASCADE_INCLUDE_DIR})
   target_link_libraries(ark-occt PUBLIC ${OpenCASCADE_LIBRARIES} PRIVATE ark)
+  add_executable(ark-rubber-059c-tests tests/rubber_059c_tests.cpp)
+  target_link_libraries(ark-rubber-059c-tests PRIVATE ark-occt ark)
+  add_dependencies(ark-rubber-059c-tests ark-occt-worker)
+  add_test(NAME rubber-authoring-059c COMMAND ark-rubber-059c-tests)
+  set_tests_properties(rubber-authoring-059c PROPERTIES TIMEOUT 180)
   add_executable(ark-occt-surface-repair-tests tests/occt_surface_repair_tests.cpp)
   target_link_libraries(ark-occt-surface-repair-tests PRIVATE ark-occt ark)
   add_test(NAME native-surface-repair COMMAND ark-occt-surface-repair-tests)

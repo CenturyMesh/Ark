@@ -407,7 +407,7 @@ const std::vector<std::pair<std::string,std::vector<std::string>>>& assistantSpe
         {"components",{"library_search","library_get","library_insert","library_info","library_sources","library_source_search","library_source_page","library_fetch","library_ingest","library_update","library_vendors"}},
         {"vendors",{"library_vendors","library_sources","library_source_search","library_source_page","library_fetch","library_ingest"}},
         {"manufacturing",{"manufacturing_propose","manufacturing_inspect"}},{"plastics",{"manufacturing_propose","manufacturing_inspect"}},
-        {"physics",{"physics_inspect","materials_inspect","compute_info"}},{"materials",{"materials_inspect"}},{"wood",{"wood_inspect"}},
+        {"rubber",{"rubber_plan","physics_inspect","materials_inspect","compute_info"}},{"physics",{"physics_inspect","rubber_plan","materials_inspect","compute_info"}},{"materials",{"materials_inspect"}},{"wood",{"wood_inspect"}},
         {"motion",{"assembly_motion","suspension_inspect","motion_info","drag_chain_info"}},{"suspension",{"suspension_inspect","assembly_motion"}},
         {"exploded_views",{"explode_info","visualize_render"}},
         {"assembly",{"assembly_authoring_info","placement_plan","pattern_plan","assembly_motion","drag_chain_info"}},{"configurations",{"assembly_authoring_info"}},

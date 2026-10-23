@@ -11,6 +11,9 @@ using V=arkjson::Value;
 V json(const char* text){V out;if(!arkjson::parse(text,out))throw std::runtime_error("Invalid built-in command recipe");return out;}
 struct Recipe {const char* id;const char* summary;const char* topic;const char* schema;const char* call;};
 const Recipe recipes[]={
+    {"rubber_body","Plan an editable belt, track, tire or ball with explicit dimensions in mm.","rubber",
+     R"({"type":"object","required":["expected_revision","kind","name","dimensions"],"properties":{"expected_revision":{"type":"integer","minimum":0},"kind":{"type":"string","maxLength":16},"name":{"type":"string","maxLength":128},"dimensions":{"type":"object","minProperties":2,"maxProperties":4,"additionalProperties":{"type":["number","string"]}}},"additionalProperties":false})",
+     R"({"tool":"rubber_plan","arguments":{"action":"create","expected_revision":"$expected_revision","kind":"$kind","name":"$name","dimensions":"$dimensions"}})"},
     {"parameter_set","Set one named expression through an atomic preview.","automation",
      R"({"type":"object","required":["expected_revision","name","expr"],"properties":{"expected_revision":{"type":"integer","minimum":0},"name":{"type":"string","minLength":1,"maxLength":128},"expr":{"type":"string","minLength":1,"maxLength":4096}},"additionalProperties":false})",
      R"({"tool":"doc_preview","arguments":{"expected_revision":"$expected_revision","detail":"changes","commands":[{"op":"param.set","name":"$name","expr":"$expr"}]}})"},

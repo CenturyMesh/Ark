@@ -1,5 +1,7 @@
 # ARK roadmap A–G
 
+059C is **Em curso** for **A.02/A.04/B.01/B.04/C.04/D.02**: editable rubber bodies, indexed surface patterns, derived CPU/GPU dynamics and exact face cycling. Integrated verification is pending; see [059C](iterations/059C.md).
+
 058A is **Verificado no escopo** locally for **A.02/A.04/D.02**: conversation
 reflow after messages arrive while Studio is minimized, and clear navigation in
 expanded chat. Twelve selected checks passed, including the previously failing

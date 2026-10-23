@@ -960,6 +960,7 @@ V solidFeatureRequest(const Feature& feature, const ExprEnv& env,
         model.obj.erase(std::remove_if(model.obj.begin(), model.obj.end(), [](const auto& item) { return item.first == "regions"; }), model.obj.end());
         if (mode == "distance" && model.find("limit_face")) throw std::runtime_error("Distance extrusion cannot retain an inactive limit face");
     }
+    if(op=="rubber_body"&&!feature.inputs.empty())throw std::runtime_error("Rubber body is an authored profile and accepts no inputs");
     if((op=="wood"&&!feature.inputs.empty())||(op=="vent"&&feature.inputs.size()>1))throw std::runtime_error("Wood needs no input; vent accepts at most one exact local XY stock input");
     if (op == "hole") {
         if (const V* source = model.find("cutter")) {
