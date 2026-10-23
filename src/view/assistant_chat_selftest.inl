@@ -33,6 +33,10 @@ static int testAssistantChat(const std::string& path){
     if(std::wstring(selected.data()).find(L"mechanical assembly")==std::wstring::npos)return fail(811,"Selectable message");
     if(!(GetWindowLongPtr(text,GWL_STYLE)&ES_READONLY))return fail(812,"Transcript must be read-only");
     auto copied=transcript();if(copied.find(L"GOAL\r\n")!=0||copied.find(L"\r\n\r\nKeep the current") == std::wstring::npos)return fail(813,"Copy preserves goal and paragraphs");
+    const std::string international="Portugu\xc3\xaas: a\xc3\xa7\xc3\xa3o, dimens\xc3\xb5" "es / \xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e.";
+    g_chatLog.push_back({"ARK",international});sync(true);SendMessage(window,WM_COMMAND,2,0);HWND unicodeReader=bubbles.back().edit;SendMessage(unicodeReader,EM_SETSEL,0,-1);std::fill(selected.begin(),selected.end(),0);SendMessageW(unicodeReader,EM_GETSELTEXT,0,(LPARAM)selected.data());
+    if(std::wstring(selected.data())!=wide(international)||transcript().find(wide(international))==std::wstring::npos)return fail(843,"Native selection or transcript lost Unicode text");
+    captureChat(window,path+".unicode.png");
     for(auto size:std::vector<std::pair<int,int>>{{1440,900},{3556,1000},{1180,800},{1100,760}}){
         RECT frame{0,0,size.first,size.second};AdjustWindowRect(&frame,WS_OVERLAPPEDWINDOW,FALSE);SetWindowPos(g_window,nullptr,0,0,frame.right-frame.left,frame.bottom-frame.top,SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);winW=size.first;winH=size.second;layout();sync(true);
         if(pageHeight()<70)return fail(814,"Compact conversation must leave room for readable messages");
