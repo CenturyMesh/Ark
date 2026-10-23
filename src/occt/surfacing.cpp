@@ -12,6 +12,8 @@
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepAlgoAPI_Splitter.hxx>
 #include <BRepAlgoAPI_Check.hxx>
+#include <Geom2d_Line.hxx>
+#include <Geom2d_TrimmedCurve.hxx>
 #include <BRepFill.hxx>
 #include <BRepClass_FaceClassifier.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
@@ -1152,7 +1154,7 @@ V surfaceEditResult(const TopoDS_Shape& face,const char* operation);
 #include "advanced_surfaces_031b.inl"
 
 V surfaceFill(const V& request) {
-    if (request.find("constraints")) return constrainedSurfaceFill031B(request);
+    if (request.find("constraints") || request.find("guide_curves")) return constrainedSurfaceFill031B(request);
     if (request.find("validation") || request.find("mode"))
         throw std::runtime_error("Constrained fill/blend options require explicit support constraints");
     Profile profile = profileOf(required(request, "profile"), true);
@@ -1506,6 +1508,7 @@ V surfaceEditResult(const TopoDS_Shape& face,const char* operation){
     reference.set("name",V::makeStr("surface"));reference.set("kind",V::makeStr("face"));reference.set("status",V::makeStr("bound"));indices.arr.push_back(V::makeNum(0));reference.set("indices",indices);references.arr.push_back(reference);topology.set("references",references);result.set("topology",topology);
     return result;
 }
+#include "surface_deform_059c.inl"
 V extractSurfaceFace(const V& request){
     const auto& input=required(request,"input_brep");if(input.t!=V::Str)throw std::runtime_error("Surface extraction needs exact B-rep input");
     // Reuse the digest-bound semantic resolver; never guess an indexed face.
@@ -1755,6 +1758,9 @@ V modelSurfaceNative(const V& request) {
         if (operation.str == "surface_trim_tool") return trimSurfaceTool059(request);
         if (operation.str == "surface_mirror") return mirrorSurface059(request);
         if (operation.str == "surface_ruled") return ruledSurface059(request);
+        if (operation.str == "surface_control_net") return surfaceControlNet059(request);
+        if (operation.str == "surface_glue_candidates") return surfaceGlueCandidates059(request);
+        if (operation.str == "surface_deform_poles") return deformSurfacePoles059(request);
         if (operation.str == "surface_untrim") return untrimExtendSurface031B(request, false);
         if (operation.str == "surface_extend") return untrimExtendSurface031B(request, true);
         if (operation.str == "surface_mutual_trim") return mutualTrimSurfaces031B(request);

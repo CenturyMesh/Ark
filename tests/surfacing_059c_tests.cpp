@@ -8,6 +8,8 @@
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepAdaptor_Curve.hxx>
+#include <BRepExtrema_DistShapeShape.hxx>
+#include <BRepBuilderAPI_MakeVertex.hxx>
 #include <GCPnts_AbscissaPoint.hxx>
 #include <Geom_BezierCurve.hxx>
 #include <Geom_BSplineCurve.hxx>
@@ -119,5 +121,41 @@ void fillWire() {
     check(!field(report,"global_g1_verified").b,"sampled support proof is not a global continuity certificate");
     constraints.arr[0]=fillConstraint(1,lower);request.set("constraints",constraints);rejects([&]{run(request);},"contradictory wire support rejects");
 }
+void guidedFill() {
+    BRepBuilderAPI_MakePolygon boundary;boundary.Add({0,0,0});boundary.Add({10,0,0});boundary.Add({10,10,0});boundary.Add({0,10,0});boundary.Close();
+    auto request=json(R"({"op":"surface_fill","profile":{}})");auto profile=V::makeObj();profile.set("wire_brep",brep(boundary.Wire()));request.set("profile",profile);
+    auto guides=V::makeArr(),guide=V::makeObj();guide.set("wire_brep",brep(line({5,0,0},{5,10,0})));guides.arr.push_back(guide);request.set("guide_curves",guides);
+    auto result=run(request);valid(result);closeTo(field(field(result,"report"),"area_mm2").num,100,1e-5,"interior straight guide preserves planar patch");
+    auto support=ark::occt::completeSelectionReferences(ark::occt::shapeResult(plane(-20,20,-20,20),false));auto constraints=V::makeArr();constraints.arr.push_back(fillConstraint(0,support));request.set("constraints",constraints);
+    result=run(request);valid(result);check(field(field(result,"report"),"guide_samples_checked").num==33,"guide includes its boundary endpoints in independent checkpoints");
+    constraints.arr[0].set("continuity",V::makeNum(2));request.set("constraints",constraints);result=run(request);valid(result);
+    check(field(field(result,"report"),"support_boundary_evidence").arr.front().find("requested_order")->num==2,"guide preserves requested G2 support check");
+
+    const auto curve=ark::occt::profileCurveNative(json(R"({"entities":[{"kind":"bezier","points":[[0,5,0],[2,5,0],[4,5,2],[6,5,2],[8,5,0],[10,5,0]]}]})"));
+    guide.set("wire_brep",field(curve,"brep_base64"));guides.arr[0]=guide;request.set("guide_curves",guides);request.set("constraints",V::makeArr());
+    result=run(request);valid(result);const auto& report=field(result,"report");
+    check(field(report,"guide_max_error_mm").num<=1e-6,"nonplanar guide meets fixed native position bound");
+    check(!field(report,"global_guides_verified").b,"guide checkpoints are not a continuous error certificate");
+    const auto face=ark::occt::readBrep(field(result,"brep_base64").str);BRepExtrema_DistShapeShape atPeak(BRepBuilderAPI_MakeVertex({5,5,1.25}).Vertex(),face);atPeak.Perform();
+    check(atPeak.IsDone()&&atPeak.Value()<=1e-6,"curved guide shapes the interior beyond its flat boundary");
+    constraints=V::makeArr();for(unsigned i=0;i<4;++i)constraints.arr.push_back(fillConstraint(i,support));request.set("constraints",constraints);
+    result=run(request);valid(result);check(field(field(result,"report"),"support_boundary_evidence").arr.size()==4,"curved guide and four G1 boundaries are independently verified");
+    check(field(field(result,"report"),"construction_method").str=="exact_tensor_product_bezier_interior_guide","compatible transverse Bezier gets exact tensor-product interpolation");
+
+    // A degree-six guide with zero endpoint D1/D2 admits a G2 patch; use an
+    // off-centre guide and reversed native direction to test correspondence.
+    auto curvedG2=request;NCollection_Array1<gp_Pnt> controls(1,7);for(int i=0;i<7;++i)controls(i+1)={10.-i*10./6.,3.,i==3?2.:0.};
+    Handle(Geom_BezierCurve) curveG2=new Geom_BezierCurve(controls);auto guideG2=V::makeObj();guideG2.set("wire_brep",brep(BRepBuilderAPI_MakeWire(BRepBuilderAPI_MakeEdge(curveG2).Edge()).Wire()));
+    auto guidesG2=V::makeArr();guidesG2.arr.push_back(guideG2);curvedG2.set("guide_curves",guidesG2);for(auto& c:constraints.arr)c.set("continuity",V::makeNum(2));curvedG2.set("constraints",constraints);
+    result=run(curvedG2);valid(result);for(const auto& row:field(field(result,"report"),"support_boundary_evidence").arr)check(field(row,"max_curvature_tensor_error_per_mm").num<=.0001,"curved off-centre reversed guide preserves four G2 boundaries");
+    check(field(field(result,"report"),"guide_curve_evidence").arr.size()==1,"per-guide source and deviation receipt present");
+    const auto faceG2=ark::occt::readBrep(field(result,"brep_base64").str);BRepExtrema_DistShapeShape peakG2(BRepBuilderAPI_MakeVertex({5,3,.625}).Vertex(),faceG2);peakG2.Perform();check(peakG2.IsDone()&&peakG2.Value()<=1e-6,"G2 patch exactly interpolates off-centre curved guide");
+    auto incompatibleG2=request;incompatibleG2.set("constraints",constraints);rejects([&]{run(incompatibleG2);},"G1-only curve cannot claim G2 continuity at transverse endpoints");
+
+    auto invalid=request;guides.arr.push_back(guide);invalid.set("guide_curves",guides);rejects([&]{run(invalid);},"duplicate interior guides reject");
+    invalid.set("guide_curves",V::makeArr());rejects([&]{run(invalid);},"empty guide list rejects");
+    guides.arr.resize(1);guides.arr[0].set("wire_brep",brep(line({5,-2,0},{5,12,0})));invalid.set("guide_curves",guides);rejects([&]{run(invalid);},"guide leaving finite patch is not silently clipped");
+    guides.arr[0].set("wire_brep",brep(line({0,5,2},{10,5,2})));invalid.set("guide_curves",guides);rejects([&]{run(invalid);},"incompatible boundary and guide reject");
 }
-int main(){try{mirror();trim();ruled();fillWire();std::cout<<checks<<" exact surfacing 059C checks passed\n";return 0;}catch(const std::exception& e){std::cerr<<"FAILED: "<<e.what()<<'\n';return 1;}}
+}
+int main(){try{mirror();trim();ruled();fillWire();guidedFill();std::cout<<checks<<" exact surfacing 059C checks passed\n";return 0;}catch(const std::exception& e){std::cerr<<"FAILED: "<<e.what()<<'\n';return 1;}}

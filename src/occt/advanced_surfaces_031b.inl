@@ -28,7 +28,7 @@ TopoDS_Face supportFace031B(const V& constraint) {
 }
 
 // Attach a parameterization to a private edge copy. This never edits the source.
-TopoDS_Edge edgeOnSupport031B(const TopoDS_Edge& edge, const TopoDS_Face& support, int samples) {
+TopoDS_Edge edgeOnSupport031B(const TopoDS_Edge& edge, const TopoDS_Face& support, int samples, bool alreadyPrivate=false) {
     double first, last;
     const auto curve = BRep_Tool::Curve(edge, first, last);
     if (curve.IsNull() || !std::isfinite(first) || !std::isfinite(last) || last <= first)
@@ -48,8 +48,8 @@ TopoDS_Edge edgeOnSupport031B(const TopoDS_Edge& edge, const TopoDS_Face& suppor
         if (inside.State() != TopAbs_IN && inside.State() != TopAbs_ON)
             throw std::runtime_error("Boundary edge leaves the trimmed support face");
     }
-    BRepBuilderAPI_Copy copy(edge, false, false);
-    auto result = TopoDS::Edge(copy.Shape());
+    TopoDS_Edge result=edge;
+    if(!alreadyPrivate){BRepBuilderAPI_Copy copy(edge,false,false);result=TopoDS::Edge(copy.Shape());}
     BRep_Builder builder;
     builder.UpdateEdge(result, pcurve, support, kTolerance);
     builder.Range(result, support, first, last);
@@ -120,11 +120,64 @@ TopoDS_Shape elementaryPatch031B(const Profile& profile,std::string& method) {
     return {};
 }
 
+// A rectangular patch and one transverse, non-rational Bezier height guide have
+// an exact tensor-product solution. A normalized Bernstein bubble interpolates
+// the authored guide while vanishing, with its first (and for G2 second)
+// derivatives, on the opposite borders. Every boundary/support/guide is still
+// independently checked below. Other geometries use the native plate solver.
+TopoDS_Shape guidedRectanglePatch059(const Profile& profile,const std::vector<Profile>& guides,int order,std::string& method) {
+    if(profile.edges.size()!=4||guides.size()!=1||guides.front().edges.size()!=1)return {};
+    for(const auto& edge:profile.edges)if(BRepAdaptor_Curve(edge.edge).GetType()!=GeomAbs_Line)return {};
+    const auto a=profile.edges[0].first,b=profile.edges[0].last,d=profile.edges[3].first;
+    const gp_Vec x(a,b),y(a,d);const double width=x.Magnitude(),height=y.Magnitude();
+    if(width<=kTolerance||height<=kTolerance||std::abs(x.Dot(y))>1e-12*width*height||b.Translated(y).Distance(profile.edges[1].last)>1e-9)return {};
+    const gp_Vec ux=x/width,uy=y/height,n=ux.Crossed(uy);
+    const BRepAdaptor_Curve curve(guides.front().edges.front().edge);
+    if(curve.GetType()!=GeomAbs_BezierCurve||std::abs(curve.FirstParameter())>1e-12||std::abs(curve.LastParameter()-1)>1e-12)return {};
+    auto source=curve.Bezier();if(source->IsRational())return {};
+    const int count=source->NbPoles();bool reversed=false;
+    if(std::abs(gp_Vec(a,source->StartPoint()).Dot(ux)-width)<=1e-9&&std::abs(gp_Vec(a,source->EndPoint()).Dot(ux))<=1e-9)reversed=true;
+    const auto pole=[&](int i){return source->Pole(reversed?count+1-i:i);};
+    const double row=gp_Vec(a,pole(1)).Dot(uy)/height;if(row<=0||row>=1)return {};
+    std::vector<double> offsets;
+    for(int i=1;i<=count;++i){const gp_Vec delta(a,pole(i));if(std::abs(delta.Dot(ux)-width*(i-1)/(count-1.))>1e-9||std::abs(delta.Dot(uy)-height*row)>1e-9)return {};offsets.push_back(delta.Dot(n));}
+    if(std::abs(offsets.front())>1e-12||std::abs(offsets.back())>1e-12)return {};
+    const int degree=order==2?6:4,middle=degree/2;
+    const double basis=(degree==6?20.:6.)*std::pow(row,middle)*std::pow(1-row,middle);
+    if(!std::isfinite(basis)||basis<=1e-12)return {};
+    NCollection_Array2<gp_Pnt> poles(1,count,1,degree+1);
+    for(int i=1;i<=count;++i)for(int j=0;j<=degree;++j)poles(i,j+1)=a.Translated(x*((i-1)/(count-1.))+y*(j/double(degree))+n*(j==middle?offsets[i-1]/basis:0));
+    Handle(Geom_BezierSurface) surface=new Geom_BezierSurface(poles);BRepBuilderAPI_MakeFace face(surface,kTolerance);
+    if(!face.IsDone()||!BRepCheck_Analyzer(face.Face()).IsValid())throw std::runtime_error("Exact guided rectangle produced invalid topology");
+    method="exact_tensor_product_bezier_interior_guide";return face.Face();
+}
+
 V constrainedSurfaceFill031B(const V& request) {
-    const auto profile = profileOf(required(request, "profile"), true);
-    const auto& constraints = required(request, "constraints");
-    if (constraints.t != V::Arr || constraints.arr.empty() || constraints.arr.size() > profile.edges.size())
+    auto profile = profileOf(required(request, "profile"), true);
+    // Copy the complete boundary together: independent edge copies destroy the
+    // shared vertex identities needed by OCCT's final WireFromList assembly.
+    BRepBuilderAPI_Copy boundaryCopy(profile.wire,false,false);
+    profile.wire=TopoDS::Wire(boundaryCopy.Shape());
+    for(auto& edge:profile.edges)edge.edge=TopoDS::Edge(boundaryCopy.ModifiedShape(edge.edge));
+    V constraints=V::makeArr();
+    if(const auto* authored=request.find("constraints"))constraints=*authored;
+    if (constraints.t != V::Arr || (constraints.arr.empty()&&!request.find("guide_curves")) || constraints.arr.size() > profile.edges.size())
         throw std::runtime_error("Constrained fill requires 1..edge_count support constraints");
+    std::vector<Profile> guides;
+    if(const auto* authored=request.find("guide_curves")) {
+        if(authored->t!=V::Arr||authored->arr.empty()||authored->arr.size()>16)
+            throw std::runtime_error("Guided patch requires 1..16 exact guide profiles");
+        size_t edges=0;std::set<std::string> identities;
+        for(const auto& value:authored->arr) {
+            auto guide=profileOf(value,false);edges+=guide.edges.size();
+            if(edges>128)throw std::runtime_error("Guided patch exceeds 128 guide edges");
+            const auto identity=brepData(guide.wire);
+            if(!identities.insert(identity).second)throw std::runtime_error("Guided patch contains a duplicate guide curve");
+            BRepAlgoAPI_Check check(guide.wire,true,true);
+            if(!check.IsValid())throw std::runtime_error("Patch guide failed native topology/self-interference checks");
+            guides.push_back(std::move(guide));
+        }
+    }
     bool blend = false;
     if (const V* mode = request.find("mode")) {
         if (mode->t != V::Str || mode->str != "blend") throw std::runtime_error("Unknown constrained fill mode");
@@ -146,7 +199,7 @@ V constrainedSurfaceFill031B(const V& request) {
     const double tol = tolerance(request);
     std::map<size_t, std::pair<TopoDS_Face, int>> supports;
     std::set<std::string> distinctSupports;
-    int order = 1;
+    int order = 0;
     for (const auto& constraint : constraints.arr) {
         if (constraint.t != V::Obj) throw std::runtime_error("Fill constraint must be an object");
         for (const auto& field : constraint.obj)
@@ -166,7 +219,7 @@ V constrainedSurfaceFill031B(const V& request) {
     // public acceptance remains the fixed 1e-6 mm and authored angular/curvature
     // limits. No failed constraint is retried at a looser tolerance.
     const double constructionFit = 1e-8;
-    BRepOffsetAPI_MakeFilling maker(order + 2, 33, 3, false, constructionFit, constructionFit,
+    BRepOffsetAPI_MakeFilling maker(std::max(3,order+2),33,3,false,constructionFit,constructionFit,
         tangentLimit * std::acos(-1.) / 180. * 0.1, curvatureLimit * 0.1, 12, 64);
     std::vector<TopoDS_Edge> edges;
     for (size_t i = 0; i < profile.edges.size(); ++i) {
@@ -175,7 +228,7 @@ V constrainedSurfaceFill031B(const V& request) {
             edges.push_back(profile.edges[i].edge);
             maker.Add(edges.back(), GeomAbs_C0, true);
         } else {
-            edges.push_back(edgeOnSupport031B(profile.edges[i].edge, found->second.first, samples));
+            edges.push_back(edgeOnSupport031B(profile.edges[i].edge, found->second.first, samples,true));
             // OCCT 8.0.1 forwards this enum unchanged to GeomPlate's integer
             // order (0/1/2), whose constructor rejects values above 2. In this
             // pinned SDK GeomAbs_G2 has ordinal 3. Pass the actual plate order,
@@ -183,22 +236,43 @@ V constrainedSurfaceFill031B(const V& request) {
             maker.Add(edges.back(), found->second.first, static_cast<GeomAbs_Shape>(found->second.second), true);
         }
     }
+    for(const auto& guide:guides)for(const auto& edge:guide.edges)
+        maker.Add(edge.edge,GeomAbs_C0,false); // interior exact-curve plate constraint
     std::string method;
-    TopoDS_Shape patch=elementaryPatch031B(profile,method);
+    // An elementary boundary patch cannot silently override an interior guide.
+    TopoDS_Shape patch=guides.empty()?elementaryPatch031B(profile,method):guidedRectanglePatch059(profile,guides,order,method);
     const bool elementary=!patch.IsNull();
     if(!elementary){
         maker.Build();
         if (!maker.IsDone()) throw std::runtime_error("OCCT support-constrained surface filling failed");
         if (!std::isfinite(maker.G0Error()) || maker.G0Error() > tol)
             throw std::runtime_error("Constrained fill exceeds fixed boundary position tolerance: "+std::to_string(maker.G0Error())+" mm");
-        patch=maker.Shape();method="native_support_constrained_plate";
+        patch=maker.Shape();method=guides.empty()?"native_support_constrained_plate":"native_guided_support_constrained_plate";
     }
     const auto resultFaces = shapes(patch, TopAbs_FACE);
     if (resultFaces.size() != 1) throw std::runtime_error("Constrained fill must produce one valid patch");
+    if(shapes(patch,TopAbs_EDGE).size()!=profile.edges.size())throw std::runtime_error("Constrained fill lost or added authored boundary edges");
     const auto filledSurface = BRep_Tool::Surface(TopoDS::Face(resultFaces.front()));
     double measuredBoundaryError=0;
-    for(const auto& edge:profile.edges){BRepAdaptor_Curve curve(edge.edge);for(int i=0;i<samples;++i){const auto p=curve.Value(curve.FirstParameter()+(curve.LastParameter()-curve.FirstParameter())*i/(samples-1.));GeomAPI_ProjectPointOnSurf projection(p,filledSurface,kTolerance);if(!projection.IsDone()||projection.NbPoints()<1)throw std::runtime_error("Patch boundary projection failed");measuredBoundaryError=std::max(measuredBoundaryError,projection.LowerDistance());}}
+    for(const auto& edge:profile.edges){BRepAdaptor_Curve curve(edge.edge);for(int i=0;i<samples;++i){const auto p=curve.Value(curve.FirstParameter()+(curve.LastParameter()-curve.FirstParameter())*i/(samples-1.));BRepExtrema_DistShapeShape distance(BRepBuilderAPI_MakeVertex(p).Vertex(),patch);distance.Perform();if(!distance.IsDone()||!std::isfinite(distance.Value()))throw std::runtime_error("Patch boundary distance failed");measuredBoundaryError=std::max(measuredBoundaryError,distance.Value());}}
     if(measuredBoundaryError>tol)throw std::runtime_error("Patch misses an authored boundary at a native checkpoint");
+    V guideEvidence=V::makeArr();double guideError=0;size_t guideSamples=0;
+    for(size_t index=0;index<guides.size();++index) {
+        double error=0;size_t checked=0;
+        for(const auto& edge:guides[index].edges) {
+            BRepAdaptor_Curve curve(edge.edge);
+            for(int sample=0;sample<samples;++sample) {
+                const auto p=curve.Value(curve.FirstParameter()+(curve.LastParameter()-curve.FirstParameter())*sample/(samples-1.));
+                BRepExtrema_DistShapeShape distance(BRepBuilderAPI_MakeVertex(p).Vertex(),patch);distance.Perform();
+                if(!distance.IsDone()||!std::isfinite(distance.Value()))throw std::runtime_error("Guided patch native curve/face distance failed");
+                error=std::max(error,distance.Value());++checked;
+            }
+        }
+        if(error>tol)throw std::runtime_error("Guided patch misses guide "+std::to_string(index)+" or the guide leaves the retained patch: deviation_mm="+std::to_string(error));
+        V row=V::makeObj();row.set("guide",V::makeNum(index));row.set("source_brep_sha256",V::makeStr(sha256(base64Decode(brepData(guides[index].wire)))));
+        row.set("edges",V::makeNum(guides[index].edges.size()));row.set("samples_checked",V::makeNum(checked));row.set("max_curve_to_face_error_mm",V::makeNum(error));
+        row.set("sampled_position_constraint_passed",V::makeBool(true));guideEvidence.arr.push_back(row);guideError=std::max(guideError,error);guideSamples+=checked;
+    }
     V evidence = V::makeArr();
     for (const auto& entry : supports) {
         const auto edgeIndex = entry.first;
@@ -228,7 +302,7 @@ V constrainedSurfaceFill031B(const V& request) {
         row.set("sampled_requested_continuity_passed",V::makeBool(true));evidence.arr.push_back(row);
     }
     V result=surfaceEditResult(patch,blend?"surface_blend":"surface_fill_constrained"),report=required(result,"report");
-    report.set("boundary_continuity_requested",V::makeStr(order==2?"G2":"G1"));
+    report.set("boundary_continuity_requested",V::makeStr(order==2?"G2":order==1?"G1":"G0"));
     report.set("construction_method",V::makeStr(method));
     report.set("boundary_max_error_mm",V::makeNum(std::max(measuredBoundaryError,elementary?0:maker.G0Error())));
     report.set("boundary_samples_checked",V::makeNum(samples*profile.edges.size()));
@@ -238,6 +312,11 @@ V constrainedSurfaceFill031B(const V& request) {
     report.set("tangent_limit_deg",V::makeNum(tangentLimit));report.set("curvature_limit_per_mm",V::makeNum(curvatureLimit));
     report.set("continuity_scope",V::makeStr("Native D2 jets at uniform edge-parameter checkpoints including endpoints; unoriented tangent planes and common-basis second fundamental forms; between-sample extrema and continuous G1/G2 are unverified"));
     report.set("global_g1_verified",V::makeBool(false));report.set("global_g2_verified",V::makeBool(false));
+    if(!guides.empty()) {
+        report.set("guide_curve_evidence",guideEvidence);report.set("guide_samples_checked",V::makeNum(guideSamples));report.set("guide_max_error_mm",V::makeNum(guideError));
+        report.set("guide_position_tolerance_mm",V::makeNum(tol));report.set("global_guides_verified",V::makeBool(false));
+        report.set("guide_scope",V::makeStr("Interior native C0 curve constraints; finite-patch distance at uniform curve-parameter checkpoints including endpoints. No guide tangency, between-sample deviation bound or end-tangent loft claim."));
+    }
     report.set("display_mesh_authoritative",V::makeBool(false));result.set("report",report);return result;
 }
 
