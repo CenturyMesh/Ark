@@ -1,6 +1,7 @@
 #include "ark/agent.hpp"
 #include "ark/assistant.hpp"
 #include <iostream>
+#include <set>
 #include <stdexcept>
 namespace {using namespace ark;using V=arkjson::Value;int checks=0;
 void check(bool ok,const char* label){++checks;if(!ok)throw std::runtime_error(label);}
@@ -26,7 +27,11 @@ void domainGraph(){
     const auto privateGraph=accepted(s.call("context_graph",json(R"({"keys":["feature:2"],"depth":2,"limit":32})")));check(privateGraph.dump().find("DO_NOT_EXPOSE")==std::string::npos&&!relation(privateGraph,"sourced_from"),"Credential-bearing source URLs never enter graph facts");
 }
 void discovery(){
-    AgentSession s;const auto tools=AgentSession::tools();check(tools.arr.size()==109,"New vendor policy tool is discoverable");
+    AgentSession s;const auto tools=AgentSession::tools();std::set<std::string> names;const V* vendorsTool=nullptr;
+    for(const auto& tool:tools.arr){const auto& name=field(tool,"name");check(name.t==V::Str&&!name.str.empty()&&names.insert(name.str).second,"Discovered tools have unique nonempty names");if(name.str=="library_vendors")vendorsTool=&tool;}
+    check(vendorsTool,"Vendor policy tool is discoverable by name");
+    const auto& vendorSchema=field(*vendorsTool,"inputSchema");const auto& properties=field(vendorSchema,"properties");
+    check(field(field(properties,"operation"),"enum").dump()==R"(["list","update"])"&&field(field(properties,"expected_revision"),"type").str=="integer"&&field(field(properties,"expected_revision"),"minimum").num==1&&!field(vendorSchema,"additionalProperties").b,"Vendor discovery preserves operations, policy revision and strict argument schema");
     check(assistantToolReadOnly(tools,"library_vendors",json(R"({"operation":"list"})"))&&!assistantToolReadOnly(tools,"library_vendors",json(R"({"operation":"update"})")),"Role permissions distinguish policy reads from writes");
     auto plastics=accepted(s.call("agent_onboard",json(R"({"topic":"plastics","detail":"guide"})")));check(plastics.dump().find("Hollow walls")!=std::string::npos&&!field(plastics,"document_state_included").b,"Plastics uses natural supported part-design guidance");
     auto vendors=accepted(s.call("agent_onboard",json(R"({"topic":"vendors","detail":"guide"})")));check(vendors.dump().find("partner-required")!=std::string::npos&&vendors.dump().find("policy revision")!=std::string::npos,"Vendor onboarding discloses authentication and revision boundaries");

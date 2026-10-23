@@ -85,9 +85,9 @@ cost or end-to-end latency claims.
 | Same joint pack, one local measured run | Encode 21.59 ms; decode 5.09 ms; no general performance qualification |
 | Synthetic container after deleting optional cache | 18,915,328 to 20,480 physical bytes; authoring reload verified |
 | Highly repetitive synthetic decoded-capacity fixture | 150,994,944 decoded bytes to 4,833 stored bytes; exact round trip; not a realistic CAD compression ratio |
-| Full tool documentation versus BOM search, limit 3 | 183,120 versus 1,667 serialized bytes |
+| Full tool documentation versus BOM search, limit 3 | 183,120 versus 2,026 serialized bytes, including the global drawing authorization rule |
 | Assistant offered tools | Core 99,687 bytes; one selected source-page tool 100,551; vendor topic 104,111 |
-| Command catalog contracts | 458 checks, including native box preview/apply, all registered tool schemas, parameterized execution, stale rejection and role filtering |
+| Command catalog contracts | 574 checks, including native box preview/apply, all registered tool schemas, drawing authorization, parameterized execution, stale rejection and role filtering |
 | Derived pack/container contracts | 142 checks, including corrupt/truncated/oversized frames, legacy migration, wrong manifest, exact order, stored-capacity omission, chunk loss, transactional compaction and existing connection visibility |
 
 The following ten selected CTest suites passed: `agent_contracts-032d`,
@@ -98,6 +98,16 @@ The following ten selected CTest suites passed: `agent_contracts-032d`,
 private-design rejection, hashes and provenance checks. The first selected run
 passed nine suites and failed distribution setup because `cmake` was absent
 from PATH; that suite passed after adding the configured CMake directory.
+Integrated discovery testing then exposed a missing global drawing-authorization
+rule in the new `commands` response and two older assertions of 109 tools where
+the current registry contains 113. The command response now carries the same
+authorization rule as other onboarding topics. The two tests now check unique
+tool names and the actual required module/exchange or vendor-policy schema,
+including policy revision and role permissions. Local reruns of
+`authoring-022b-contracts`, `product-context-035b`, `modeling-workflow` and
+`command-catalog-056c` all passed; the command byte measurement above includes
+this correction. This verifies A.01/D.02 discovery contracts without granting
+drawing writes or weakening the revision boundary.
 No hosted CI, Linux runtime test, installer/OTA publication or live model task
 comparison was performed by this storage/commands workstream.
 

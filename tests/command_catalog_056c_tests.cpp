@@ -18,11 +18,14 @@ V historyCall(const std::string& id,const V& args){V out=V::makeObj();out.set("t
 void discovery(){
     AgentSession s;const auto before=documentToJson(s.document);const auto revision=s.revision;
     const auto found=onboard(s,R"({"topic":"commands","query":"bom","limit":3})");
+    const auto policy=field(onboard(s,R"({"topic":"overview","detail":"guide"})"),"drawing_authorization");
+    check(field(found,"drawing_authorization").dump()==policy.dump(),"Command search preserves the global explicit drawing authorization policy");
     check(!field(found,"executed").b&&!field(found,"document_state_included").b&&field(found,"commands").arr.size()<=3,"Search excludes state and execution and honors its result limit");
     check(field(found,"total_matches").num>=3&&field(found,"partial").b,"Search reports truncation explicitly");
     const auto registry=AgentSession::tools(true);
     for(const auto& tool:registry.arr){const auto name=field(tool,"name").str;V args=json(R"({"topic":"commands"})");args.set("command",V::makeStr("tool:"+name));const auto exact=call(s,"agent_onboard",args);
-        check(field(field(exact,"command"),"input_schema").dump()==field(tool,"inputSchema").dump(),"Exact tool schema comes from the current registry: "+name);}
+        check(field(field(exact,"command"),"input_schema").dump()==field(tool,"inputSchema").dump(),"Exact tool schema comes from the current registry: "+name);
+        check(field(exact,"drawing_authorization").dump()==policy.dump(),"Exact command discovery preserves drawing authorization: "+name);}
     const auto none=onboard(s,R"({"topic":"commands","query":"zznonexistentcommandzz"})");check(field(none,"commands").arr.empty()&&!field(none,"partial").b,"No-match search does not invent a command");
     check(documentToJson(s.document)==before&&s.revision==revision,"Catalog reads preserve all authoring/revisions");
     check(found.dump().size()<registry.dump().size()/8,"Selected discovery is materially smaller than the identical full tool registry");
