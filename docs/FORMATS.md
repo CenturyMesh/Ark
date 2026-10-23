@@ -231,11 +231,34 @@ the timing of an already validated local cache hit.
 
 Authored content retains its **4 MiB logical limit** and **16 MiB typed-value and
 authored payload limits**. Optional derived data has a separate **64 MiB per-entry
-limit**, **128 MiB total limit** and at most **8192 entries**; the physical file
+limit**, **256 MiB decoded total**, **128 MiB stored total** and at most **8192 entries**; the physical file
 limit is **256 MiB**. Derived bytes do not enter the authoring hash or iteration
 history. A malformed optional payload discards the derived section with an
 explicit diagnostic; authoring checksum, schema and structural database failures
 remain hard load failures. Missing geometry can be rebuilt from valid authoring.
+
+The 056C integration stores the optional section as one Zstandard 1.5.7 frame
+over entries in document order. Rows `pack1.<manifest>.<index>` contain ordered
+chunks of at most 16 MiB with individual SHA-256 hashes. The manifest covers
+entry keys, lengths and hashes and is verified again after decoding. Canonical
+base64 strings of at least 1024 characters travel as decoded bytes, permitting
+common geometry to compress across entries. Decoding reconstructs every entry
+byte exactly; B-rep identities and references are unchanged.
+
+The frame must include a checksum and bounded content size, use a window no
+larger than 128 MiB, and contain exactly one complete frame. Missing chunks,
+mixed legacy/pack rows and inconsistent manifests discard only the optional
+section. Legacy per-entry rows still load and migrate when saved. Readers
+without pack support reject its derived keys, load the authored document and
+recompute its geometry. Neither the semantic document version nor container
+version increases for this cache encoding.
+
+An intact pack with an unchanged manifest is retained without recompression.
+If the stored limit is exceeded, a bounded document-order prefix is retained
+and the omitted tail is reported; authoring is saved in full. This prefix need
+not be the maximal possible prefix. After an incremental save frees at least
+1 MiB and a quarter of the file, transactional SQLite `VACUUM` reclaims pages.
+A compaction failure retains the committed save and is reported explicitly.
 
 Since 049A the same section also holds the cached frames of current baked-motion
 receipts (`ARK-MOTION-FRAMES1` entries keyed by motion name and receipt digests).
@@ -250,6 +273,14 @@ receipt reports `saved_geometry` (`status` `saved` or `partial`,
 `entries_saved`, `bytes_saved`, `entries_omitted`, `bytes_omitted`,
 `capacity_bytes`), and Studio states a partial save in its status bar. A failed
 save now returns its reason instead of only "Could not save document".
+
+`saved_geometry` also reports `encoding:zstd_pack`, `stored_bytes` for the
+whole geometry/motion pack, and `stored_capacity_bytes`. The `container`
+receipt reports `physical_bytes`, `compacted`, optional
+`bytes_before_compaction`, and `compaction_skipped` on maintenance failure.
+Stored-capacity omissions are included in the existing geometry/motion
+omission counters. The load receipt adds `container_encoding`, `stored_bytes`
+and `decoded_bytes` to the derived geometry status.
 
 New authoring-only binary saves remain version 1. Adding saved geometry upgrades
 to version 2. Saving an existing version-2 file without derived entries removes

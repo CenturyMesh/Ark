@@ -2,6 +2,8 @@
 #include "ark/bom.hpp"
 #include "ark/assembly.hpp"
 #include "ark/iteration_history.hpp"
+#include "ark/component_sources.hpp"
+#include "ark/component_vendors.hpp"
 #include <algorithm>
 #include <map>
 #include <stdexcept>
@@ -36,15 +38,25 @@ bool coversTask(const V& task,const V& selected){
     return true;
 }
 V recovery(const V& bom,bool inspectionCurrent,const std::set<u64>& inspected){
-    V out=V::makeObj(),unread=V::makeArr(),identities=V::makeArr();size_t unreadCount=0,identityCount=0;
+    V out=V::makeObj(),unread=V::makeArr(),identities=V::makeArr(),unresolved=V::makeArr();size_t unreadCount=0,identityCount=0,unresolvedCount=0;
     for(const auto& row:bom.find("items")->arr){
         const auto id=(u64)row.find("feature")->num;
         if(!inspectionCurrent||!inspected.count(id)){++unreadCount;if(unread.arr.size()<64)unread.arr.push_back(V::makeNum((double)id));}
         V fields=V::makeArr();for(const auto& field:row.find("missing_or_review_required")->arr)if(field.str=="part_number"||field.str=="description")fields.arr.push_back(field);
         if(!fields.arr.empty()){++identityCount;if(identities.arr.size()<32){V entry=V::makeObj();entry.set("feature",*row.find("feature"));entry.set("name",*row.find("name"));entry.set("fields",fields);identities.arr.push_back(entry);}}
+        if(!row.find("metadata_complete")->b){++unresolvedCount;if(unresolved.arr.size()<32){
+            V entry=V::makeObj();entry.set("feature",*row.find("feature"));entry.set("name",*row.find("name"));entry.set("fields",*row.find("missing_or_review_required"));
+            const auto& meta=*row.find("metadata");bool sourceMissing=false;for(const auto& field:row.find("missing_or_review_required")->arr)if(field.str=="source_url"||field.str=="purchased_reference"||field.str=="sourcing_selection"||field.str=="manufacturer"||field.str=="supplier")sourceMissing=true;
+            if(text(meta,"procurement")=="buy"&&sourceMissing){V action=V::makeObj(),args=V::makeObj();bool publicSource=false;const auto url=text(meta,"source_url");if(!url.empty())try{validateComponentHttpsUrl(url);publicSource=true;}catch(const std::exception&){}
+                if(publicSource){action.set("tool",V::makeStr("library_source_page"));args.set("url",V::makeStr(url));args.set("vendor",V::makeStr(componentVendorForUrl(url)));}
+                else{std::string query;for(const char* key:{"manufacturer","manufacturer_part_number","supplier","supplier_part_number"}){auto value=text(meta,key);if(!value.empty()){if(!query.empty())query+=' ';query+=value;}}if(query.empty())query=text(meta,"description");if(query.size()>256){query.resize(256);while(!query.empty()&&((unsigned char)query.back()&0xc0)==0x80)query.pop_back();if(!query.empty()&&(unsigned char)query.back()>=0xc0)query.pop_back();}std::replace(query.begin(),query.end(),'\n',' ');std::replace(query.begin(),query.end(),'\r',' ');if(!query.empty()){action.set("tool",V::makeStr("library_source_search"));args.set("source",V::makeStr("web"));args.set("query",V::makeStr(query));}}
+                if(action.find("tool")){action.set("args",args);action.set("authority",V::makeStr("Research suggestion from declared metadata only; verify exact reference and requirements on an observed public page before part_patch. No price, availability, certification or geometric authority inferred."));entry.set("research_action",action);}
+            }unresolved.arr.push_back(entry);
+        }}
     }
     out.set("expected_revision",*bom.find("revision"));out.set("uninspected_count",V::makeNum((double)unreadCount));out.set("missing_identity_count",V::makeNum((double)identityCount));out.set("missing_identity",identities);out.set("missing_identity_truncated",V::makeBool(identityCount>identities.arr.size()));out.set("unresolved_fields",*summary(bom).find("missing_fields"));
     out.set("document_identity_missing",V::makeBool(text(bom,"document_id").empty()));
+    out.set("unresolved_item_count",V::makeNum((double)unresolvedCount));out.set("unresolved_items",unresolved);out.set("unresolved_items_truncated",V::makeBool(unresolvedCount>unresolved.arr.size()));
     out.set("issues",*bom.find("issues"));out.set("unplaced_annotated_count",V::makeNum(bom.find("unplaced_annotated_definitions")->arr.size()));
     V next=V::makeObj(),args=V::makeObj();
     if(unreadCount){next.set("tool",V::makeStr("bom_inspect"));args.set("ids",unread);args.set("occurrence_limit",V::makeNum(1));next.set("args",args);}
@@ -81,7 +93,7 @@ arkjson::Value AgentSession::reviewBom(const V& args){
     if(completion=="task"&&(!selected||!coversTask(bomTaskScope(),*bom.find("selected_feature_ids"))))throw std::runtime_error("Task BOM review requires an active host task and ids covering every affected definition from bom_inspect.task_scope; removed definitions require project review. Never downgrade a requested project-wide deliverable.");
     bool inspected=bomInspectedRevision_==revision&&bomInspectedHash_==text(bom,"authoring_sha256");for(const auto& row:bom.find("items")->arr)inspected&=bomInspectedItems_.count((u64)row.find("feature")->num)!=0;
     if(!inspected)throw std::runtime_error("BOM inspection is incomplete at this revision. "+recovery(bom,bomInspectedRevision_==revision&&bomInspectedHash_==text(bom,"authoring_sha256"),bomInspectedItems_).dump());auto status=summary(bom);if(status.find("identity_fields_missing")->num||text(bom,"document_id").empty())throw std::runtime_error("BOM identity is incomplete. Patch missing internal part_number/description without replacing other fields. "+recovery(bom,true,bomInspectedItems_).dump());
-    if(scope=="detailed"&&!bom.find("metadata_complete")->b)throw std::runtime_error("Detailed completion blocked: BOM metadata, sources or engineering review remain unresolved. Inspect bom_inspect, resolve with evidence, or report needs_input; do not invent commercial data.");
+    if(scope=="detailed"&&!bom.find("metadata_complete")->b)throw std::runtime_error("Detailed completion blocked: BOM metadata, sources or engineering review remain unresolved. Resolve the listed fields with evidence, or report needs_input; do not invent commercial data. "+recovery(bom,true,bomInspectedItems_).dump());
     const auto fastening=note(args,"fastening_review");std::string pending;if(!bom.find("metadata_complete")->b)pending=note(args,"pending_notes");else if(args.find("pending_notes"))pending=note(args,"pending_notes");
     V receipt=V::makeObj();receipt.set("revision",V::makeNum((double)revision));receipt.set("authoring_sha256",*bom.find("authoring_sha256"));receipt.set("scope",V::makeStr(scope));receipt.set("pending_notes",V::makeStr(pending));receipt.set("fastening_review",V::makeStr(fastening));receipt.set("review_summary",status);receipt.set("manufacturing_qualified",V::makeBool(false));receipt.set("global_review",V::makeBool(!selected));
     if(selected){receipt.set("selected_feature_ids",*bom.find("selected_feature_ids"));receipt.set("completion_authority",V::makeStr("selected definitions only; does not satisfy global BOM completion"));receipt.set("completion",V::makeStr(completion));if(completion=="task"){receipt.set("task_scope",bomTaskScope());bomTaskReview_=receipt;}return receipt;}

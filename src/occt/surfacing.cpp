@@ -11,6 +11,10 @@
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepAlgoAPI_Splitter.hxx>
+#include <BRepAlgoAPI_Check.hxx>
+#include <Geom2d_Line.hxx>
+#include <Geom2d_TrimmedCurve.hxx>
+#include <BRepFill.hxx>
 #include <BRepClass_FaceClassifier.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_Copy.hxx>
@@ -255,8 +259,11 @@ struct Profile {
 Profile profileOf(const V& value, bool requireClosed) {
     if (const V* encoded = value.find("wire_brep")) {
         if (encoded->t != V::Str || encoded->str.empty()) throw std::runtime_error("wire_brep must be a B-rep");
-        const std::vector<TopoDS_Shape> wires = shapes(readBrep(encoded->str), TopAbs_WIRE);
-        if (wires.size() != 1) throw std::runtime_error("wire_brep must contain one wire");
+        if(value.obj.size()!=1)throw std::runtime_error("wire_brep profile cannot mix alternate entities, transforms or point selectors");
+        const auto source=readBrep(encoded->str);
+        const std::vector<TopoDS_Shape> wires = shapes(source, TopAbs_WIRE);
+        if (source.ShapeType()!=TopAbs_WIRE||wires.size() != 1) throw std::runtime_error("wire_brep must be exactly one wire, without discarded faces or loose geometry");
+        if(!BRepCheck_Analyzer(source).IsValid())throw std::runtime_error("wire_brep has invalid native topology");
         Profile result;
         result.wire = TopoDS::Wire(wires[0]);
         for (BRepTools_WireExplorer walk(result.wire); walk.More(); walk.Next()) {
@@ -267,7 +274,9 @@ Profile profileOf(const V& value, bool requireClosed) {
             result.edges.push_back({edge, BRep_Tool::Pnt(first), BRep_Tool::Pnt(last)});
         }
         if (result.edges.empty()) throw std::runtime_error("wire_brep has no edges");
-        result.closed = result.edges.front().first.Distance(result.edges.back().last) <= kTolerance;
+        if(result.edges.size()>128||result.edges.size()!=shapes(source,TopAbs_EDGE).size())
+            throw std::runtime_error("wire_brep needs 1..128 connected ordered edges; no branch or unvisited edge may be discarded");
+        result.closed = BRep_Tool::IsClosed(result.wire)&&result.edges.front().first.Distance(result.edges.back().last) <= kTolerance;
         if (requireClosed && !result.closed) throw std::runtime_error("profile is not explicitly closed");
         for(size_t i=0;i<result.edges.size();++i)result.sourceIndices.push_back(i);
         return result;
@@ -1145,7 +1154,7 @@ V surfaceEditResult(const TopoDS_Shape& face,const char* operation);
 #include "advanced_surfaces_031b.inl"
 
 V surfaceFill(const V& request) {
-    if (request.find("constraints")) return constrainedSurfaceFill031B(request);
+    if (request.find("constraints") || request.find("guide_curves")) return constrainedSurfaceFill031B(request);
     if (request.find("validation") || request.find("mode"))
         throw std::runtime_error("Constrained fill/blend options require explicit support constraints");
     Profile profile = profileOf(required(request, "profile"), true);
@@ -1499,6 +1508,7 @@ V surfaceEditResult(const TopoDS_Shape& face,const char* operation){
     reference.set("name",V::makeStr("surface"));reference.set("kind",V::makeStr("face"));reference.set("status",V::makeStr("bound"));indices.arr.push_back(V::makeNum(0));reference.set("indices",indices);references.arr.push_back(reference);topology.set("references",references);result.set("topology",topology);
     return result;
 }
+#include "surface_deform_059c.inl"
 V extractSurfaceFace(const V& request){
     const auto& input=required(request,"input_brep");if(input.t!=V::Str)throw std::runtime_error("Surface extraction needs exact B-rep input");
     // Reuse the digest-bound semantic resolver; never guess an indexed face.
@@ -1661,6 +1671,8 @@ V sewSurfaces(const V& request) {
     result.set("report",report);return result;
 }
 
+#include "surfacing_059c.inl"
+
 V collisionReport(const V& request){
     tolerance(request);
     for(const auto& field:request.obj)if(field.first!="op"&&field.first!="a_brep"&&field.first!="b_brep"&&field.first!="a_transform"&&field.first!="b_transform"&&field.first!="tolerance")throw std::runtime_error("Unknown collision field: "+field.first);
@@ -1743,6 +1755,12 @@ V modelSurfaceNative(const V& request) {
         if (operation.str == "surface_extract_face") return extractSurfaceFace(request);
         if (operation.str == "surface_trim_plane") return trimSurfacePlane(request);
         if (operation.str == "surface_trim_wire") return trimSurfaceWire(request);
+        if (operation.str == "surface_trim_tool") return trimSurfaceTool059(request);
+        if (operation.str == "surface_mirror") return mirrorSurface059(request);
+        if (operation.str == "surface_ruled") return ruledSurface059(request);
+        if (operation.str == "surface_control_net") return surfaceControlNet059(request);
+        if (operation.str == "surface_glue_candidates") return surfaceGlueCandidates059(request);
+        if (operation.str == "surface_deform_poles") return deformSurfacePoles059(request);
         if (operation.str == "surface_untrim") return untrimExtendSurface031B(request, false);
         if (operation.str == "surface_extend") return untrimExtendSurface031B(request, true);
         if (operation.str == "surface_mutual_trim") return mutualTrimSurfaces031B(request);

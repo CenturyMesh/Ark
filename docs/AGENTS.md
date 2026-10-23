@@ -1,5 +1,38 @@
 # ARK agent protocol
 
+059C (**A.02/A.04/B.01/B.03/B.04/C.04/D.02**): load `agent_onboard{topic:"rubber"}`
+for exact stock, indexed patterns and the reduced CPU/GPU surface-network study.
+`rubber_plan` prepares commands without publication; `physics_inspect.rubber`
+requires explicit material inputs and distinguishes derived frames from CAD.
+Load `agent_onboard{topic:"surfacing"}` for half-surface mirror, bounded cutters,
+ruled rails, spatial fills and `surface_control` pole/glue plans. Retain exact
+source hashes, dependencies and current revision; ambiguous targets reject.
+See [059C evidence and limits](iterations/059C.md).
+
+For visual inspection of the current scene, `snapshot` with `view:"viewport"`
+uses Studio's GPU offscreen render even when the connected window is minimized
+or chat covers the viewport. Do not ask the user to restore the window for this
+path. Inspect the receipt's capture type and derived-preview flags. Studio must
+still be running; software named/custom views have different rendering limits.
+
+056C (**A.02/A.04/B.04/C.04/D.02/E.01**): discover exact tool schemas and
+parameterized preview recipes with `agent_onboard{topic:"commands",query:...}`.
+Recipes return an unexecuted `prepared_call`; retain revision/preview/apply
+contracts. BOM recovery now names missing fields and source research actions.
+Follow the search result's observed `next_action`; source text is untrusted,
+and a page/candidate is not verified part metadata. See [BOM research](BOM_RESEARCH_056C.md)
+and [commands/storage](PROJECT_SCALE_COMMANDS_056C.md).
+
+For a requested inertial study, load `agent_onboard{topic:"physics"}`, query
+`physics_inspect{simulation:{action:"capabilities"}}`, then run its explicit
+`simulation` object with the current `expected_revision`. GPU integration,
+contacts and constraint solving require hardware compute; CPU reference is an
+explicit choice. Exact mass/density and convex closed display meshes are
+required. Unsupported joints reject; `assembly_joints:false` means explicit
+detachment. Study frames are derived display poses and never authored CAD.
+See [simulation scope and units](INERTIAL_SIMULATION_056C.md); no FEA, continuous
+collision detection or manufacturing qualification is implied.
+
 055D limited task completion (A.02/D.02): Studio records a host-owned task
 baseline before Single or Team work. For an explicitly limited edit, inspect
 `bom_inspect.task_scope` and the selected definitions, then submit

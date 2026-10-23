@@ -60,6 +60,23 @@ static void fill(HDC dc,RECT r,COLORREF color){HBRUSH b=CreateSolidBrush(color);
 static void label(HDC dc,const std::wstring& value,RECT r,HFONT f,COLORREF color,UINT flags=DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS){auto old=SelectObject(dc,f);SetBkMode(dc,TRANSPARENT);SetTextColor(dc,color);DrawTextW(dc,value.c_str(),(int)value.size(),&r,flags|DT_NOPREFIX);SelectObject(dc,old);}
 static int pageHeight(){RECT r{};GetClientRect(viewport,&r);return std::max(1L,r.bottom);}
 static HWND edit(HWND parent,const std::wstring& text,COLORREF bg);
+static int textHeight(HWND control,int lineLimit=0){
+    // RichEdit defers WM_SIZE reflow while the root is minimized. Its line
+    // count/positions can still describe the initial 1px width even though the
+    // client rectangle has changed. Refresh screen wrapping before caching any
+    // height; repainting after Restore cannot repair that stale cached height.
+    SendMessage(control,EM_SETTARGETDEVICE,0,0);
+    const int lines=std::max(1,(int)SendMessage(control,EM_GETLINECOUNT,0,0));
+    const int lastLine=lineLimit?std::min(lines,lineLimit)-1:lines-1;
+    POINT first{},last{};
+    SendMessage(control,EM_POSFROMCHAR,(WPARAM)&first,0);
+    SendMessage(control,EM_POSFROMCHAR,(WPARAM)&last,SendMessage(control,EM_LINEINDEX,lastLine,0));
+    HDC dc=GetDC(control);auto old=SelectObject(dc,font);TEXTMETRICW metrics{};
+    GetTextMetricsW(dc,&metrics);SelectObject(dc,old);ReleaseDC(control,dc);
+    // The control owns wrapping, font metrics and paragraph spacing. A fixed
+    // pixels-per-line estimate leaves a large empty tail on long responses.
+    return std::max(28,(int)(last.y-first.y+metrics.tmHeight+8));
+}
 static void place(){
     RECT r{};GetClientRect(viewport,&r);scroll=std::clamp(scroll,0,std::max(0,total-(int)r.bottom));
     SCROLLINFO info{sizeof info,SIF_RANGE|SIF_PAGE|SIF_POS,0,std::max(0,total-1),(UINT)std::max(1L,r.bottom),scroll};SetScrollInfo(viewport,SB_VERT,&info,TRUE);
@@ -68,7 +85,10 @@ static void place(){
         // RichEdit with MoveWindow(..., FALSE) reused those pixels without
         // invalidating the child: parent-only paints left duplicated text.
         SetWindowPos(b.edit,nullptr,b.box.left+14,y+33,b.box.right-b.box.left-28,b.box.bottom-b.box.top-45,
-            SWP_NOZORDER|SWP_NOACTIVATE|SWP_NOCOPYBITS|SWP_NOREDRAW|(visible?SWP_SHOWWINDOW:SWP_HIDEWINDOW));}}
+            SWP_NOZORDER|SWP_NOACTIVATE|SWP_NOCOPYBITS|SWP_NOREDRAW|(visible?SWP_SHOWWINDOW:SWP_HIDEWINDOW));
+        // Message controls contain their entire measured text. Only the outer
+        // conversation scrolls; selection/measurement must not add an inner offset.
+        POINT origin{};SendMessage(b.edit,EM_SETSCROLLPOS,0,(LPARAM)&origin);}}
     // Repaint the complete settled layout, including every visible text child.
     // Mouse-wheel and scrollbar events call place() without a log/layout change.
     RedrawWindow(viewport,nullptr,nullptr,RDW_INVALIDATE|RDW_ERASE|RDW_ALLCHILDREN|RDW_UPDATENOW);
@@ -89,10 +109,9 @@ static HWND edit(HWND parent,const std::wstring& text,COLORREF bg){
 static void measure(){
     RECT r{};GetClientRect(viewport,&r);int available=std::max(100,(int)r.right-24),bubbleWidth=std::min(1000,std::max(100,available-44));total=12;
     for(auto& b:bubbles){int x=b.user?available-bubbleWidth+12:12;
-        if(b.measuredWidth!=bubbleWidth){bool temporary=!b.edit;HWND probe=b.edit?b.edit:edit(viewport,b.text,b.user?userBg:agentBg);MoveWindow(probe,0,0,bubbleWidth-28,120,FALSE);int lines=(int)SendMessage(probe,EM_GETLINECOUNT,0,0);b.bodyHeight=std::max(28,lines*25+8);b.measuredWidth=bubbleWidth;if(temporary)DestroyWindow(probe);}
+        if(b.measuredWidth!=bubbleWidth){bool temporary=!b.edit;HWND probe=b.edit?b.edit:edit(viewport,b.text,b.user?userBg:agentBg);MoveWindow(probe,0,0,bubbleWidth-28,120,FALSE);b.bodyHeight=textHeight(probe);b.measuredWidth=bubbleWidth;if(temporary)DestroyWindow(probe);}
         b.box={x,total,x+bubbleWidth,total+b.bodyHeight+45};total=b.box.bottom+12;
     }
-    place();
 }
 static void paintViewport(HDC dc){RECT r{};GetClientRect(viewport,&r);fill(dc,r,background);
     if(bubbles.empty())label(dc,L"Your conversation will appear here.",RECT{20,18,r.right-20,55},font,muted);
@@ -118,7 +137,7 @@ static LRESULT CALLBACK panelProc(HWND w,UINT m,WPARAM wp,LPARAM lp){
     if(m==WM_PAINT||m==WM_PRINTCLIENT){PAINTSTRUCT ps{};HDC dc=m==WM_PAINT?BeginPaint(w,&ps):(HDC)wp;paintHeader(dc);if(m==WM_PAINT)EndPaint(w,&ps);return 0;}
     if(m==WM_COMMAND){switch(LOWORD(wp)){case 1:if(clipboard(w,transcript()))SetWindowTextW(copyButton,L"Copied");else SetWindowTextW(copyButton,L"Retry copy");return 0;case 2:scroll=total;place();return 0;case 3:if(!g_teamMode){std::string info=activity().title+"\n"+activity().detail+"\n\n"+assistantUsageLabel(g_assistantUsageRun)+"\n"+measuredPerformanceLabel(g_assistantPerformanceRun);editText("Agent run",info,true);return 0;}g_chatAgentDetails=!g_chatAgentDetails;if(g_chatAgentDetails)g_chatExpanded=true;layout();return 0;case 4:g_chatExpanded=!g_chatExpanded;layout();return 0;}}
     if(m==WM_DRAWITEM){auto* item=(DRAWITEMSTRUCT*)lp;if(item->CtlType==ODT_BUTTON){fill(item->hDC,item->rcItem,RGB(35,51,66));wchar_t text[80]{};GetWindowTextW(item->hwndItem,text,80);label(item->hDC,text,item->rcItem,labelFont,ink,DT_CENTER|DT_VCENTER|DT_SINGLELINE);if(item->itemState&ODS_FOCUS)DrawFocusRect(item->hDC,&item->rcItem);return TRUE;}}
-    if(m==WM_NCDESTROY){window=viewport=goalEdit=copyButton=latestButton=detailsButton=expandButton=nullptr;for(auto f:{font,titleFont,labelFont})if(f)DeleteObject(f);font=titleFont=labelFont=nullptr;bubbles.clear();cached.clear();width=height=0;lastGoal.clear();lastActivity.clear();return DefWindowProcW(w,m,wp,lp);}
+    if(m==WM_NCDESTROY){window=viewport=goalEdit=copyButton=latestButton=detailsButton=expandButton=nullptr;for(auto f:{font,titleFont,labelFont})if(f)DeleteObject(f);font=titleFont=labelFont=nullptr;bubbles.clear();cached.clear();width=height=scroll=total=0;lastGoal.clear();lastActivity.clear();return DefWindowProcW(w,m,wp,lp);}
     return DefWindowProcW(w,m,wp,lp);
 }
 static void create(){
@@ -135,6 +154,11 @@ static void sync(bool force=false){
     if(!g_assistantDockOpen||g_toolsOpen||!g_window){if(window)ShowWindow(window,SW_HIDE);return;}
     if(g_headless&&!testing)return;
     create();if(!window)return;
+    // Observe the old page before resizing it, or Restore/Expand can wrongly
+    // treat somebody reading an earlier message as following the newest one.
+    const bool following=scroll>=std::max(0,total-pageHeight()-8);
+    size_t anchor=0;while(anchor+1<bubbles.size()&&bubbles[anchor].box.bottom<=scroll)++anchor;
+    const int anchorOffset=bubbles.empty()?0:scroll-bubbles[anchor].box.top;
     const int y=winH-32-assistantDockHeight()+43,composer=winH-(assistantImageComposerHeight()>40?252:188);
     int w=std::max(180,viewW-24),h=std::max(74,composer-y-8);bool details=g_teamMode&&g_chatAgentDetails;
     bool resized=width!=w||height!=h;width=w;height=h;
@@ -142,13 +166,13 @@ static void sync(bool force=false){
     if(goalChanged){SetWindowTextW(goalEdit,crlf(wide(currentGoal.empty()?"Describe what you want to achieve.":currentGoal)).c_str());lastGoal=currentGoal;}
     if(resized||goalChanged||force){
         MoveWindow(goalEdit,14,30,w-28,120,FALSE);
-        int lines=std::max(1,(int)SendMessage(goalEdit,EM_GETLINECOUNT,0,0));
-        // Use the RichEdit's own line positions: DPI and paragraph spacing are not a fixed pixel estimate.
-        POINT first{},last{};SendMessage(goalEdit,EM_POSFROMCHAR,(WPARAM)&first,0);LRESULT index=SendMessage(goalEdit,EM_LINEINDEX,std::min(lines-1,2),0);SendMessage(goalEdit,EM_POSFROMCHAR,(WPARAM)&last,index);
-        HDC dc=GetDC(goalEdit);auto old=SelectObject(dc,font);TEXTMETRICW tm{};GetTextMetricsW(dc,&tm);SelectObject(dc,old);ReleaseDC(goalEdit,dc);
-        int goalHeight=std::clamp((int)(last.y-first.y+tm.tmHeight+14),34,110);int header=30+goalHeight+6;resized|=header!=g_chatHeaderHeight;g_chatHeaderHeight=header;
+        // Reserve a readable message area in the split view. The complete goal
+        // remains selectable and independently scrollable when space is tight.
+        int goalHeight=std::min(textHeight(goalEdit,3),std::clamp(h-36-80,28,110));
+        ShowScrollBar(goalEdit,SB_VERT,textHeight(goalEdit)>goalHeight);
+        int header=30+goalHeight+6;resized|=header!=g_chatHeaderHeight;g_chatHeaderHeight=header;
         MoveWindow(goalEdit,14,30,w-28,goalHeight,TRUE);
-        ShowScrollBar(goalEdit,SB_VERT,lines>3);
+        if(goalChanged){POINT origin{};SendMessage(goalEdit,EM_SETSCROLLPOS,0,(LPARAM)&origin);}
     }
     RECT current{};GetWindowRect(window,&current);POINT origin{current.left,current.top};ScreenToClient(g_window,&origin);
     int shownHeight=details?g_chatHeaderHeight:h;if(origin.x!=viewX+12||origin.y!=y||current.right-current.left!=w||current.bottom-current.top!=shownHeight)MoveWindow(window,viewX+12,y,w,shownHeight,TRUE);
@@ -157,17 +181,29 @@ static void sync(bool force=false){
     if(resized||force)MoveWindow(viewport,0,g_chatHeaderHeight,w,std::max(1,h-g_chatHeaderHeight),TRUE);ShowWindow(viewport,details?SW_HIDE:SW_SHOWNA);ShowWindow(window,SW_SHOWNA);
     const auto now=GetTickCount64();static ULONGLONG next=0;if(!force&&!resized&&now<next)return;next=now+100;
     static std::wstring buttonDetails,buttonExpand;std::wstring d=!g_teamMode?L"Run info":details?L"Chat":L"Agents",e=g_chatExpanded?L"Restore":L"Expand";if(d!=buttonDetails){SetWindowTextW(detailsButton,d.c_str());buttonDetails=d;}if(e!=buttonExpand){SetWindowTextW(expandButton,e.c_str());buttonExpand=e;}
-    auto a=activity();auto status=a.title+"\n"+a.detail;if(status!=lastActivity){lastActivity=status;InvalidateRect(window,nullptr,FALSE);}
-    bool following=scroll>=std::max(0,total-pageHeight()-8);bool changed=cached!=g_chatLog;
+    auto a=activity();auto status=a.title+"\n"+a.detail;bool statusChanged=status!=lastActivity;if(statusChanged)lastActivity=status;
+    bool changed=cached!=g_chatLog;
     if(changed){size_t prefix=0;while(prefix<cached.size()&&prefix<g_chatLog.size()&&cached[prefix]==g_chatLog[prefix])++prefix;
-        if(prefix<cached.size()){for(auto& b:bubbles)DestroyWindow(b.edit);bubbles.clear();prefix=0;}
-        for(size_t i=prefix;i<g_chatLog.size();++i){const auto& row=g_chatLog[i];Bubble b;b.user=row.first.rfind("You",0)==0;b.role=wide(row.first);b.text=wide(messageText(row));bubbles.push_back(std::move(b));}
+        while(bubbles.size()>g_chatLog.size()){DestroyWindow(bubbles.back().edit);bubbles.pop_back();}
+        for(size_t i=prefix;i<g_chatLog.size();++i){
+            const auto& row=g_chatLog[i];if(i==bubbles.size())bubbles.emplace_back();auto& b=bubbles[i];
+            const bool user=row.first.rfind("You",0)==0;auto role=wide(row.first),text=wide(messageText(row));
+            if(b.role==role&&b.text==text)continue;
+            if(b.edit){CHARRANGE selection{};SendMessage(b.edit,EM_EXGETSEL,0,(LPARAM)&selection);
+                SetWindowTextW(b.edit,crlf(text).c_str());const LONG length=GetWindowTextLengthW(b.edit);
+                selection.cpMin=std::clamp(selection.cpMin,0L,length);selection.cpMax=std::clamp(selection.cpMax,selection.cpMin,length);
+                SendMessage(b.edit,EM_EXSETSEL,0,(LPARAM)&selection);SendMessage(b.edit,EM_SETBKGNDCOLOR,0,user?userBg:agentBg);}
+            b.user=user;b.role=std::move(role);b.text=std::move(text);b.measuredWidth=0;
+        }
         cached=g_chatLog;SetWindowTextW(copyButton,L"Copy chat");
     }
-    if(changed||resized){measure();if(following){scroll=total;place();}}
+    if(changed||resized){measure();if(following)scroll=total;
+        else if(anchor<bubbles.size())scroll=bubbles[anchor].box.top+std::min(anchorOffset,(int)(bubbles[anchor].box.bottom-bubbles[anchor].box.top)-1);
+        place();}
     // The GL parent and hidden-start document loading can validate a 1px native
     // region before the dock is shown. Explicitly repaint the parent header;
     // child invalidation is needed only for layout/content changes.
-    RedrawWindow(window,nullptr,nullptr,RDW_INVALIDATE|RDW_UPDATENOW|((changed||resized||goalChanged||force)?RDW_ALLCHILDREN:RDW_NOCHILDREN));
+    if(changed||resized||goalChanged||force||statusChanged)
+        RedrawWindow(window,nullptr,nullptr,RDW_INVALIDATE|RDW_UPDATENOW|((changed||resized||goalChanged||force)?RDW_ALLCHILDREN:RDW_NOCHILDREN));
 }
 } // namespace assistant_chat

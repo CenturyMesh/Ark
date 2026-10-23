@@ -9,6 +9,19 @@ static void check(bool ok,const char* why){if(!ok)throw std::runtime_error(why);
 static V call(AgentSession& s,const char* name,V args){auto r=s.call(name,args);if(r.find("isError")->b)throw std::runtime_error(r.find("structuredContent")->dump());return *r.find("structuredContent");}
 static V response(const char* name,const char* id,V args){V r=json(R"({"status":"completed","output":[]})"),c=V::makeObj();c.set("type",V::makeStr("function_call"));c.set("name",V::makeStr(name));c.set("call_id",V::makeStr(id));c.set("arguments",V::makeStr(args.dump()));V out=V::makeArr();out.arr.push_back(c);r.set("output",out);return r;}
 static V done(){return json(R"({"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Design complete."}]}]})");}
+static void sourcingRecovery(){
+    AgentSession s;call(s,"doc_apply",json(R"({"expected_revision":0,"commands":[{"op":"material.set","name":"Fixture material","density":1},{"op":"feature.add","type":"box","name":"Synthetic bought bearing","material":"Fixture material","part":{"part_number":"INTERNAL-42","description":"Synthetic bearing fixture","procurement":"buy","manufacturer":"Fixture manufacturer","manufacturer_part_number":"AX42","representation":"exact"}}]})"));
+    const auto gate=s.bomCompletionCheck();const auto& unresolved=*gate.find("recovery")->find("unresolved_items");check(unresolved.arr.size()==1&&unresolved.arr[0].find("feature")->num==1,"recovery binds sourcing blockers to physical definition");
+    const auto& search=*unresolved.arr[0].find("research_action");check(search.find("tool")->str=="library_source_search"&&search.find("args")->find("source")->str=="web"&&search.find("args")->find("query")->str=="Fixture manufacturer AX42","research uses declared manufacturer/reference without invented URL");
+    call(s,"bom_inspect",V::makeObj());auto review=json(R"({"expected_revision":1,"scope":"detailed","fastening_review":"Synthetic fixture with no claimed connection or manufacturing qualification."})");
+    const auto denied=s.call("bom_review",review);check(denied.find("isError")->b&&denied.dump().find("research_action")!=std::string::npos&&denied.dump().find("source_url")!=std::string::npos,"detailed rejection includes actionable per-definition source recovery");
+    call(s,"doc_apply",json(R"({"expected_revision":1,"commands":[{"op":"feature.edit","id":1,"part_patch":{"source_url":"https://supplier.example/AX42","sourcing_status":"candidate"}}]})"));
+    const auto pageRecovery=s.bomCompletionCheck();const auto& page=*pageRecovery.find("recovery")->find("unresolved_items")->arr[0].find("research_action");check(page.find("tool")->str=="library_source_page"&&page.find("args")->find("vendor")->str=="direct_https","known product URL gets actual provider page request");
+    call(s,"bom_inspect",V::makeObj());review.set("expected_revision",V::makeNum(2));check(s.call("bom_review",review).find("isError")->b,"candidate remains incomplete despite source URL and exact reference");
+    call(s,"doc_apply",json(R"({"expected_revision":2,"commands":[{"op":"feature.edit","id":1,"part_patch":{"sourcing_status":"selected"}}]})"));check(s.call("bom_review",review).find("isError")->b,"research metadata edit never rebases an old review");
+    review.set("expected_revision",V::makeNum(3));check(s.call("bom_review",review).find("isError")->b,"selected declaration still needs current inspection");
+    const auto inspected=call(s,"bom_inspect",V::makeObj());const auto& metadata=*inspected.find("items")->arr[0].find("metadata");check(metadata.find("part_number")->str=="INTERNAL-42"&&metadata.find("manufacturer_part_number")->str=="AX42","incremental sourcing preserves internal and purchased identity");call(s,"bom_review",review);check(s.bomCompletionCheck().find("allowed")->b,"reviewed complete fixture metadata passes existing detailed contract");
+}
 static void missingInputIsNotCompletion(){
     AgentSession s;call(s,"doc_apply",json(R"({"expected_revision":0,"commands":[{"op":"feature.add","type":"box","name":"Mount","part":{"part_number":"TEST-MOUNT","description":"Synthetic mount"}}]})"));
     AssistantConfig config;config.model="offline-bom-input";AssistantRetryHooks hooks;hooks.completionCheck=[&]{return s.bomCompletionCheck();};int rounds=0;
@@ -26,7 +39,7 @@ static void recoveryMakesProgress(){
     check(repair&&repair->find("uninspected_count")->num==2&&repair->find("missing_identity_count")->num==1&&repair->find("missing_identity")->arr[0].find("feature")->num==2,"completion rejection identifies current unread and missing identity definitions");
     AssistantConfig config;config.model="offline-bom-recovery";AssistantRetryHooks hooks;hooks.completionCheck=[&]{return s.bomCompletionCheck();};int round=0;std::string visible;
     auto run=runAssistant(config,V::makeStr("Review BOM"),AgentSession::tools(),[&](const std::string& name,const V& args){return s.call(name,args);},[&](const AssistantEvent& e){if(e.kind==AssistantEvent::Text)visible+=e.text;},nullptr,[&](auto&,const V& request,auto*){
-        ++round;if(round==2){bool offered=false;for(const auto& tool:request.find("tools")->arr)if(tool.find("name")&&tool.find("name")->str=="bom_review")offered=true;check(offered&&request.dump().find("missing_identity_count")!=std::string::npos,"recovery offers deferred BOM tools and includes structured blockers");return response("bom_inspect","first-page",json(R"({"ids":[1]})"));}
+        ++round;if(round==2){bool offered=false;for(const auto& tool:request.find("tools")->arr)if(tool.find("name")&&tool.find("name")->str=="bom_review")offered=true;bool sourceOffered=false;for(const auto& tool:request.find("tools")->arr)if(tool.find("name")&&tool.find("name")->str=="library_source_page")sourceOffered=true;check(offered&&sourceOffered&&request.dump().find("missing_identity_count")!=std::string::npos,"recovery offers deferred BOM tools and includes structured blockers");return response("bom_inspect","first-page",json(R"({"ids":[1]})"));}
         if(round==4)return response("bom_inspect","second-page",json(R"({"ids":[2]})"));
         return done();
     },{},{},hooks);
@@ -82,6 +95,7 @@ static void limitedTaskCompletion(){
     call(dependency,"doc_apply",json(R"({"expected_revision":1,"commands":[{"op":"param.set","name":"cable_width","expr":15}]})"));check(dependency.bomTaskScope().find("affected_feature_ids")->dump()=="[1]","parameter changes identify evaluated dependants without inventing unrelated identity work");
 }
 int main(){try{
+    sourcingRecovery();
     missingInputIsNotCompletion();
     recoveryMakesProgress();
     limitedTaskCompletion();

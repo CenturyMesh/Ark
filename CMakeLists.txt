@@ -27,7 +27,25 @@ add_library(ark-sqlite STATIC third_party/sqlite/sqlite3.c)
 target_include_directories(ark-sqlite PUBLIC third_party/sqlite)
 target_compile_definitions(ark-sqlite PRIVATE SQLITE_ENABLE_FTS5=1 SQLITE_THREADSAFE=1 SQLITE_OMIT_LOAD_EXTENSION=1 SQLITE_DQS=0 SQLITE_DEFAULT_FOREIGN_KEYS=1)
 target_link_libraries(ark-sqlite PUBLIC Threads::Threads)
+# 051A: unmodified zstd 1.5.7 library sources for the derived-section pack.
+# Single-threaded, no assembly, no legacy formats and no dictionary builder.
+add_library(ark-zstd STATIC
+  third_party/zstd/lib/common/debug.c third_party/zstd/lib/common/entropy_common.c third_party/zstd/lib/common/error_private.c
+  third_party/zstd/lib/common/fse_decompress.c third_party/zstd/lib/common/pool.c third_party/zstd/lib/common/threading.c
+  third_party/zstd/lib/common/xxhash.c third_party/zstd/lib/common/zstd_common.c
+  third_party/zstd/lib/compress/fse_compress.c third_party/zstd/lib/compress/hist.c third_party/zstd/lib/compress/huf_compress.c
+  third_party/zstd/lib/compress/zstd_compress.c third_party/zstd/lib/compress/zstd_compress_literals.c
+  third_party/zstd/lib/compress/zstd_compress_sequences.c third_party/zstd/lib/compress/zstd_compress_superblock.c
+  third_party/zstd/lib/compress/zstd_double_fast.c third_party/zstd/lib/compress/zstd_fast.c third_party/zstd/lib/compress/zstd_lazy.c
+  third_party/zstd/lib/compress/zstd_ldm.c third_party/zstd/lib/compress/zstd_opt.c third_party/zstd/lib/compress/zstd_preSplit.c
+  third_party/zstd/lib/compress/zstdmt_compress.c
+  third_party/zstd/lib/decompress/huf_decompress.c third_party/zstd/lib/decompress/zstd_ddict.c
+  third_party/zstd/lib/decompress/zstd_decompress.c third_party/zstd/lib/decompress/zstd_decompress_block.c)
+target_include_directories(ark-zstd PUBLIC third_party/zstd/lib)
+target_compile_definitions(ark-zstd PRIVATE ZSTD_DISABLE_ASM=1 ZSTD_LEGACY_SUPPORT=0)
 add_library(ark STATIC
+  src/command_catalog.cpp
+  src/derived_pack_051a.cpp
   src/curve_pattern_044b.cpp src/media_044b.cpp
   src/modeling_031b.cpp
   src/geometry_storage_032d.cpp
@@ -66,7 +84,7 @@ add_library(ark STATIC
   src/agent_transactions.cpp
   src/agent_failures.cpp
   src/agent_benchmark.cpp
-  src/physics.cpp
+  src/physics.cpp src/inertial_simulation.cpp src/rubber.cpp src/rubber_patterns.cpp src/rubber_dynamics.cpp src/surface_edit_059c.cpp
   src/core.cpp src/nurbs.cpp src/brep.cpp src/mesh.cpp src/csg.cpp
   src/model.cpp src/evaluate.cpp src/native_features.cpp src/frame.cpp src/electronics.cpp src/usage.cpp src/stock_preview.cpp src/suspension.cpp src/chatgpt_auth.cpp src/assistant_credentials.cpp src/sheet_commands.cpp src/sheet_preview.cpp src/references.cpp src/datum.cpp src/solver.cpp src/sketch.cpp src/prism_cut.cpp src/onboarding.cpp src/live_session.cpp src/assistant.cpp src/io.cpp src/serialize.cpp
   src/source_tube.cpp src/notch.cpp src/notch_preview.cpp src/step_export.cpp src/tube.cpp src/assembly.cpp src/assembly_io.cpp src/compute.cpp src/api.cpp src/mesh_query.cpp src/mesh_analysis.cpp src/mesh_model.cpp src/agent.cpp src/agent_features.cpp src/result_path.cpp src/kernels_scalar.cpp src/snapshot_032d.cpp)
@@ -101,9 +119,26 @@ if(ARK_WITH_OCCT)
   target_compile_definitions(ark-authoring-022b-contract-tests PRIVATE ARK_022B_NATIVE_TESTS=1)
   add_dependencies(ark-authoring-022b-contract-tests ark-occt-worker)
 endif()
-target_link_libraries(ark PUBLIC Threads::Threads PRIVATE ark-sqlite)
+target_link_libraries(ark PUBLIC Threads::Threads PRIVATE ark-sqlite ark-zstd)
 if(WIN32)
-  target_link_libraries(ark PRIVATE bcrypt normaliz gdi32)
+  target_link_libraries(ark PRIVATE bcrypt normaliz gdi32 d3d11 d3dcompiler dxgi)
+endif()
+add_executable(ark-inertial-056c-tests tests/inertial_056c_tests.cpp)
+add_executable(ark-rubber-patterns-tests tests/rubber_patterns_tests.cpp)
+target_link_libraries(ark-rubber-patterns-tests PRIVATE ark)
+add_test(NAME rubber-patterns-059c COMMAND ark-rubber-patterns-tests)
+add_executable(ark-rubber-dynamics-tests tests/rubber_dynamics_tests.cpp)
+target_link_libraries(ark-rubber-dynamics-tests PRIVATE ark)
+add_test(NAME rubber-dynamics-059c COMMAND ark-rubber-dynamics-tests)
+set_tests_properties(rubber-dynamics-059c PROPERTIES TIMEOUT 180)
+add_executable(ark-rubber-runtime-059c-benchmark EXCLUDE_FROM_ALL benchmarks/rubber_runtime_059c.cpp)
+target_link_libraries(ark-rubber-runtime-059c-benchmark PRIVATE ark)
+target_link_libraries(ark-inertial-056c-tests PRIVATE ark)
+add_test(NAME inertial-056c COMMAND ark-inertial-056c-tests)
+set_tests_properties(inertial-056c PROPERTIES TIMEOUT 180)
+if(ARK_WITH_OCCT)
+  target_compile_definitions(ark-inertial-056c-tests PRIVATE ARK_INERTIAL_NATIVE=1)
+  add_dependencies(ark-inertial-056c-tests ark-occt-worker)
 endif()
 add_executable(ark-product-tools-030d-tests tests/product_tools_030d_tests.cpp)
 target_link_libraries(ark-product-tools-030d-tests PRIVATE ark)
@@ -373,6 +408,19 @@ add_executable(ark-history-compaction-051a-tests tests/history_compaction_051a_t
 target_link_libraries(ark-history-compaction-051a-tests PRIVATE ark)
 add_test(NAME history-compaction-051a COMMAND ark-history-compaction-051a-tests)
 set_tests_properties(history-compaction-051a PROPERTIES TIMEOUT 180)
+# 051A derived pack: exact round trip, hostile frames, legacy rows, capacity tail and compaction.
+add_executable(ark-derived-pack-051a-tests tests/derived_pack_051a_tests.cpp)
+target_link_libraries(ark-derived-pack-051a-tests PRIVATE ark ark-sqlite ark-zstd)
+add_test(NAME derived-pack-051a COMMAND ark-derived-pack-051a-tests)
+set_tests_properties(derived-pack-051a PROPERTIES TIMEOUT 300)
+add_executable(ark-command-catalog-056c-tests tests/command_catalog_056c_tests.cpp)
+target_link_libraries(ark-command-catalog-056c-tests PRIVATE ark)
+add_test(NAME command-catalog-056c COMMAND ark-command-catalog-056c-tests)
+set_tests_properties(command-catalog-056c PROPERTIES TIMEOUT 120)
+if(ARK_WITH_OCCT)
+  target_compile_definitions(ark-command-catalog-056c-tests PRIVATE ARK_COMMAND_NATIVE_TESTS=1)
+  add_dependencies(ark-command-catalog-056c-tests ark-occt-worker)
+endif()
 add_executable(ark-iteration-history-tests tests/iteration_history_tests.cpp)
 target_link_libraries(ark-iteration-history-tests PRIVATE ark)
 add_test(NAME iteration-history COMMAND ark-iteration-history-tests)
@@ -458,6 +506,33 @@ if(ARK_WITH_OCCT)
   target_include_directories(ark-occt PUBLIC include PRIVATE src/occt)
   target_include_directories(ark-occt SYSTEM PUBLIC ${OpenCASCADE_INCLUDE_DIR})
   target_link_libraries(ark-occt PUBLIC ${OpenCASCADE_LIBRARIES} PRIVATE ark)
+  add_executable(ark-rubber-059c-tests tests/rubber_059c_tests.cpp)
+  target_link_libraries(ark-rubber-059c-tests PRIVATE ark-occt ark)
+  add_dependencies(ark-rubber-059c-tests ark-occt-worker)
+  add_test(NAME rubber-authoring-059c COMMAND ark-rubber-059c-tests)
+  set_tests_properties(rubber-authoring-059c PROPERTIES TIMEOUT 180)
+  add_executable(ark-surfacing-059c-tests tests/surfacing_059c_tests.cpp)
+  target_link_libraries(ark-surfacing-059c-tests PRIVATE ark-occt ark)
+  add_test(NAME surfacing-059c COMMAND ark-surfacing-059c-tests)
+  set_tests_properties(surfacing-059c PROPERTIES TIMEOUT 180)
+  add_executable(ark-surfacing-workflow-059c-tests tests/surfacing_workflow_059c_tests.cpp)
+  target_link_libraries(ark-surfacing-workflow-059c-tests PRIVATE ark)
+  add_dependencies(ark-surfacing-workflow-059c-tests ark-occt-worker)
+  add_test(NAME surfacing-workflow-059c COMMAND ark-surfacing-workflow-059c-tests)
+  set_tests_properties(surfacing-workflow-059c PROPERTIES TIMEOUT 180)
+  add_executable(ark-surface-support-visibility-059c-tests tests/surface_support_visibility_059c_tests.cpp)
+  target_link_libraries(ark-surface-support-visibility-059c-tests PRIVATE ark)
+  add_dependencies(ark-surface-support-visibility-059c-tests ark-occt-worker)
+  add_test(NAME surface-support-visibility-059c COMMAND ark-surface-support-visibility-059c-tests "${CMAKE_CURRENT_BINARY_DIR}/surface-support-visibility-059c.png")
+  set_tests_properties(surface-support-visibility-059c PROPERTIES TIMEOUT 180)
+  add_executable(ark-surface-deform-059c-tests tests/surface_deform_059c_tests.cpp)
+  target_link_libraries(ark-surface-deform-059c-tests PRIVATE ark-occt ark)
+  add_test(NAME surface-deform-059c COMMAND ark-surface-deform-059c-tests)
+  add_executable(ark-surface-control-059c-tests tests/surface_control_059c_tests.cpp)
+  target_link_libraries(ark-surface-control-059c-tests PRIVATE ark)
+  add_dependencies(ark-surface-control-059c-tests ark-occt-worker)
+  add_test(NAME surface-control-059c COMMAND ark-surface-control-059c-tests)
+  set_tests_properties(surface-deform-059c surface-control-059c PROPERTIES TIMEOUT 180)
   add_executable(ark-occt-surface-repair-tests tests/occt_surface_repair_tests.cpp)
   target_link_libraries(ark-occt-surface-repair-tests PRIVATE ark-occt ark)
   add_test(NAME native-surface-repair COMMAND ark-occt-surface-repair-tests)
@@ -577,11 +652,11 @@ if(WIN32)
     set_tests_properties(studio-navigation-036a PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
     add_test(NAME studio-datum-authoring-036a COMMAND ark-studio --datum-authoring-ui-test --settings-file "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/datum-authoring-036a.settings.json" --shot "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/datum-authoring-036a.png" --size 1440 900)
     set_tests_properties(studio-datum-authoring-036a PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
-    foreach(check async-exact-ui async-authoring-ui team-blockers-ui realtime-ui product-tools-ui scene-cache-ui authoring-assistance-ui editor-scroll-ui feature-editor-picking-ui history-ui history-compaction-ui recovery-ui configuration-workspace-ui interaction-performance-ui)
+    foreach(check surface-edit-ui surface-workflow-ui viewport-capture-ui rubber-ui rubber-engine-ui async-exact-ui async-authoring-ui team-blockers-ui realtime-ui product-tools-ui scene-cache-ui authoring-assistance-ui editor-scroll-ui feature-editor-picking-ui history-ui history-compaction-ui recovery-ui configuration-workspace-ui interaction-performance-ui)
       add_test(NAME studio-${check} COMMAND ark-studio --self-test-${check} --settings-file "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}.settings.json" --shot "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}.png" --size 1280 800)
       set_tests_properties(studio-${check} PROPERTIES TIMEOUT 300 RUN_SERIAL TRUE)
     endforeach()
-    foreach(check connectors-ui local-models-ui viewport-dock-ui assistant-steering-ui assistant-chat-ui stamps-ui media-044b-ui planes-sections-ui holes-orchestrator-ui design-container-ui parametric-graph-ui design-disciplines-ui cad-import-ui native-vertex-pull-ui advanced-sheetmetal-ui specialized-pattern-ui drawing-viewport-ui direct-authoring-ui parametric-authoring-ui selection-glow-ui selection-picking-ui image-attachment-ui sketch-edit-ui sketch-drawing-ui typed-sketch-ui arc-ui assistant-ui render-ui action-icons-ui interaction-ui baked-motions-ui exploded-views-ui drag-chain-ui)
+    foreach(check inertial-ui viewport-quality-ui connectors-ui local-models-ui viewport-dock-ui context-ui suspension-ui assistant-steering-ui assistant-chat-ui stamps-ui media-044b-ui planes-sections-ui holes-orchestrator-ui design-container-ui parametric-graph-ui design-disciplines-ui cad-import-ui native-vertex-pull-ui advanced-sheetmetal-ui specialized-pattern-ui drawing-viewport-ui direct-authoring-ui parametric-authoring-ui selection-glow-ui selection-picking-ui image-attachment-ui sketch-edit-ui sketch-drawing-ui typed-sketch-ui arc-ui assistant-ui render-ui action-icons-ui interaction-ui baked-motions-ui exploded-views-ui drag-chain-ui)
       add_test(NAME studio-${check} COMMAND ark-studio --self-test-${check} --settings-file "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}.settings.json" --shot "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}.png" --size 1440 900)
       set_tests_properties(studio-${check} PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
     endforeach()

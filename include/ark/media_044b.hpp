@@ -13,7 +13,7 @@ namespace ark {
 
 // Procedural patterns are scalar fields in pattern periods, sampled triplanar
 // in part-local millimetres. Studio's GLSL mirrors these formulas.
-int appearancePatternKind044B(const std::string& name); // 0 none, 1..7 known, -1 unknown
+int appearancePatternKind044B(const std::string& name); // 0 none, 1..10 known, -1 unknown
 double appearancePatternField044B(int kind,double u,double v);
 double appearancePatternTriplanar044B(const Appearance& appearance,const Vec3& localPoint,const Vec3& localNormal);
 Vec3 appearancePatternColor044B(const Appearance& appearance,const Vec3& color,double field);

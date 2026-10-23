@@ -71,6 +71,9 @@ float patternField(float k,vec2 q){
  if(abs(k-5.)<.5)return clamp(.65*patternNoise(q.y*60.)+.35*patternNoise(q.y*170.+3.7),0.,1.);
  if(abs(k-6.)<.5){float a=abs(fract(q.x+q.y)-.5),b=abs(fract(q.x-q.y)-.5);return 1.-2.*min(.5-a,.5-b);}
  if(abs(k-7.)<.5){float x=q.x+.5*mod(floor(q.y),2.);return 1.-smoothstep(.26,.30,length(vec2(fract(x)-.5,fract(q.y)-.5)));}
+ if(abs(k-8.)<.5){float x=q.x+.5*mod(floor(q.y),2.),r=length(vec2(fract(x)-.5,(fract(q.y)-.5)*1.1547))/.43;return 1.-sqrt(max(0.,1.-r*r))*(1.-smoothstep(.85,1.,r));}
+ if(abs(k-9.)<.5){float x=q.x+.5*mod(floor(q.y),2.),d=max(abs(fract(x)-.5)/.39,abs(fract(q.y)-.5)/.30);return smoothstep(.83,1.,d);}
+ if(abs(k-10.)<.5){float d=abs(fract(q.x+abs(fract(q.y)-.5)*1.5)-.5);return smoothstep(.20,.29,d);}
  return 0.;
 }
 float patternTriplanar(){
@@ -86,7 +89,7 @@ void main(){
  if(dot(n,v)<0.)n=-n;vec4 texel=hasTexture>.5?triplanar():vec4(1.);
  if(stampMode>.5){vec3 delta=lpos-stampOrigin;vec2 uv=vec2(dot(delta,stampU),dot(delta,stampV))/stampSize+vec2(.5);if(any(lessThan(uv,vec2(0.)))||any(greaterThan(uv,vec2(1.)))||abs(dot(delta,stampNormal))>stampDepth||(stampFrontOnly>.5&&dot(lnrm,stampNormal)<=0.))discard;texel=texture(surfaceTexture,uv);if(texel.a<.001)discard;}
  vec3 tint=clamp(color*texel.rgb,0.,1.);float m=clamp(metallic,0.,1.),r=clamp(roughness,.055,1.);
- if(patternKind>.5&&stampMode<.5){float pf=patternTriplanar();vec3 second=patternColorSet>.5?patternColor:tint*(patternKind>6.5?.08:.45);tint=mix(tint,second,clamp(pf*patternContrast,0.,1.));
+ if(patternKind>.5&&stampMode<.5){float pf=patternTriplanar();vec3 second=patternColorSet>.5?patternColor:tint*(abs(patternKind-7.)<.5?.08:.45);tint=mix(tint,second,clamp(pf*patternContrast,0.,1.));
   if(abs(patternKind-5.)>.5)r=clamp(r+(abs(patternKind-3.)<.5?-(1.-pf)*.25:patternKind>5.5?pf*.2:(pf-.5)*.35)*patternContrast,.04,1.);n=patternBump(n,(1.-pf)*patternContrast*patternScale*.06);}
  vec3 base=srgbToLinear(tint);
  // Normal variance broadens subpixel highlights instead of letting a sharp

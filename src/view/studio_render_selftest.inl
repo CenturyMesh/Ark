@@ -16,6 +16,9 @@ static int studioRenderSelfTest(HDC dc,const std::string& output){
  {"op":"assembly.add","name":"Block","feature":"Matte block","p":{"tx":10,"ty":12,"tz":29,"rx":-90}}
  ])"));call("doc_apply",args);if(g_error||g_doc.evalBodies.size()!=4)return fail(781,"Exact synthetic primitives rejected");
  g_path.clear();selBody=-1;hoverBody=-1;g_grid=true;g_showSketches=false;g_showDatumPlanes=false;g_lightBackground=true;g_showEdges=false;g_pathTracing=false;wireframe=false;g_cameraOrtho=false;g_occlusionMode=2;g_foldPlaying=false;g_suspSpinPlaying=false;g_motionPlaying=false;
+ // Keep the measured crop inside the model viewport even when the current
+ // assistant dock defaults to an expanded conversation area.
+ g_assistantDockOpen=false;g_showViewCube=false;layout();
  tYaw=yaw=.67;tPitch=pitch=.39;cameraRoll=0;frameScene();target=tTarget;dist=tDist;g_swap=false;
  const u64 baselineRevision=g_session.revision;std::string breps;for(auto& body:g_doc.evalBodies)breps+=body.nativeData.dump();
  auto capture=[&](const char* suffix){

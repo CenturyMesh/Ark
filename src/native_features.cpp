@@ -437,9 +437,22 @@ V surfaceRequest(const Feature& feature, const ExprEnv& env, Document& document,
         if (const V* controls=feature.nativeSpec.find("controls")) request.set("controls",numericNative(*controls,env));
     } else if (feature.type == FeatureType::SurfaceFill) {
         request.set("op", V::makeStr("surface_fill"));
-        if (const V* profile = feature.nativeSpec.find("profile"))
+        if (const V* curve = feature.nativeSpec.find("boundary_curve")) {
+            if(feature.nativeSpec.find("profile")||!feature.get("sketch").empty())throw std::runtime_error("Fill requires one boundary source: boundary_curve, profile or sketch");
+            const auto& body=supportInput(*curve,"Fill boundary curve");
+            const auto* source=document.find(body.id);if(!source||!isCurveFeature(source->type))throw std::runtime_error("Fill boundary_curve must identify a native Curve feature");
+            V profile=V::makeObj();profile.set("wire_brep",brepOf(body,"fill boundary curve"));request.set("profile",profile);
+        } else if (const V* profile = feature.nativeSpec.find("profile"))
             request.set("profile", numericNative(*profile, env));
         else request.set("profile", profileFromSketch(document, feature.get("sketch")));
+        if(const V* guides=feature.nativeSpec.find("guide_curves")){
+            if(guides->t!=V::Arr||guides->arr.empty()||guides->arr.size()>16)throw std::runtime_error("Fill guide_curves needs 1..16 native curve feature ids");
+            V resolved=V::makeArr();std::set<u64> seen;
+            for(const auto& guide:guides->arr){const auto& body=supportInput(guide,"Fill guide curve");const auto* source=document.find(body.id);
+                if(!source||!isCurveFeature(source->type)||!seen.insert(body.id).second)throw std::runtime_error("Fill guide curves must be distinct native Curve features");
+                V profile=V::makeObj();profile.set("wire_brep",brepOf(body,"fill guide curve"));resolved.arr.push_back(profile);}
+            request.set("guide_curves",resolved);
+        }
         if(const V* constraints=feature.nativeSpec.find("constraints")){
             if(constraints->t!=V::Arr||constraints->arr.empty()||constraints->arr.size()>128)throw std::runtime_error("Constrained fill needs 1..128 explicit boundary supports");
             V resolved=V::makeArr();
@@ -525,14 +538,44 @@ V surfaceRequest(const Feature& feature, const ExprEnv& env, Document& document,
         }
     } else if (feature.type == FeatureType::SurfaceEdit) {
         const std::string editOp=required(feature.nativeSpec,"op").asStr();
-        const bool paired=editOp=="trim_wire"||editOp=="mutual_trim";
-        if(feature.inputs.size()!=(paired?2u:1u)||(paired&&feature.inputs[0]==feature.inputs[1]))throw std::runtime_error("surface_edit requires one surface; trim_wire/mutual_trim require one distinct second input");
+        const bool paired=editOp=="trim_wire"||editOp=="mutual_trim"||editOp=="trim_tool"||editOp=="ruled"||(editOp=="deform_poles"&&feature.nativeSpec.find("glue"));
+        if(feature.inputs.size()!=(paired?2u:1u)||(paired&&feature.inputs[0]==feature.inputs[1]))throw std::runtime_error("surface_edit needs one source; trim_wire, mutual_trim, trim_tool and ruled require two distinct inputs");
         const Body* source=precedingBody(preceding,feature.inputs.front());
         if(!source)throw std::runtime_error("surface_edit input missing");
         request.set("input_brep",brepOf(*source,"surface_edit input"));
         const auto& operation=required(feature.nativeSpec,"op");
         if(operation.t!=V::Str)throw std::runtime_error("surface_edit op must be extract_face or trim_plane");
-        if(operation.str=="repair"){
+        if(operation.str=="mirror"){
+            for(const auto& field:feature.nativeSpec.obj)if(field.first!="op"&&field.first!="plane"&&field.first!="origin"&&field.first!="normal"&&field.first!="continuity"&&field.first!="tolerance")throw std::runtime_error("Unknown surface mirror field: "+field.first);
+            request.set("op",V::makeStr("surface_mirror"));request.set("continuity",required(feature.nativeSpec,"continuity"));
+            if(const auto* plane=feature.nativeSpec.find("plane")){
+                if(plane->t!=V::Str||feature.nativeSpec.find("origin")||feature.nativeSpec.find("normal"))throw std::runtime_error("Surface mirror needs one explicit plane selector");
+                const auto frame=resolvePlane(document,plane->str);V origin=V::makeArr(),normal=V::makeArr();for(int i:{12,13,14})origin.arr.push_back(V::makeNum(frame.m[i]));for(int i:{8,9,10})normal.arr.push_back(V::makeNum(frame.m[i]));request.set("origin",origin);request.set("normal",normal);
+            }else{request.set("origin",numericNative(required(feature.nativeSpec,"origin"),env));request.set("normal",numericNative(required(feature.nativeSpec,"normal"),env));}
+            if(const auto* tolerance=feature.nativeSpec.find("tolerance"))request.set("tolerance",numericNative(*tolerance,env));
+        }else if(operation.str=="trim_tool"){
+            for(const auto& field:feature.nativeSpec.obj)if(field.first!="op"&&field.first!="tool_kind"&&field.first!="keep_point"&&field.first!="tolerance")throw std::runtime_error("Unknown surface trim tool field: "+field.first);
+            const auto* tool=precedingBody(preceding,feature.inputs[1]);if(!tool)throw std::runtime_error("Surface trim tool missing");request.set("op",V::makeStr("surface_trim_tool"));request.set("tool_brep",brepOf(*tool,"surface trim tool"));request.set("tool_kind",required(feature.nativeSpec,"tool_kind"));request.set("keep_point",numericNative(required(feature.nativeSpec,"keep_point"),env));if(const auto* tolerance=feature.nativeSpec.find("tolerance"))request.set("tolerance",numericNative(*tolerance,env));
+        }else if(operation.str=="ruled"){
+            for(const auto& field:feature.nativeSpec.obj)if(field.first!="op"&&field.first!="reverse_second"&&field.first!="tolerance")throw std::runtime_error("Unknown ruled surface field: "+field.first);
+            const auto* second=precedingBody(preceding,feature.inputs[1]);if(!second)throw std::runtime_error("Ruled surface second curve missing");request.obj.erase(std::remove_if(request.obj.begin(),request.obj.end(),[](const auto& item){return item.first=="input_brep";}),request.obj.end());request.set("op",V::makeStr("surface_ruled"));request.set("first_brep",brepOf(*source,"first ruled curve"));request.set("second_brep",brepOf(*second,"second ruled curve"));request.set("reverse_second",required(feature.nativeSpec,"reverse_second"));if(const auto* tolerance=feature.nativeSpec.find("tolerance"))request.set("tolerance",numericNative(*tolerance,env));
+        }else if(operation.str=="deform_poles"){
+            for(const auto& field:feature.nativeSpec.obj)if(field.first!="op"&&field.first!="reference"&&field.first!="source_brep_sha256"&&field.first!="max_displacement_mm"&&field.first!="edits"&&field.first!="glue")throw std::runtime_error("Unknown surface pole edit field: "+field.first);
+            request.set("op",V::makeStr("surface_deform_poles"));request.set("topology",required(source->nativeData,"topology"));request.set("source_brep_sha256",required(feature.nativeSpec,"source_brep_sha256"));
+            if(const auto* reference=feature.nativeSpec.find("reference"))request.set("reference",*reference);
+            request.set("max_displacement_mm",numericNative(required(feature.nativeSpec,"max_displacement_mm"),env));
+            if(const auto* edits=feature.nativeSpec.find("edits"))request.set("edits",numericNative(*edits,env));
+            if(const auto* authored=feature.nativeSpec.find("glue")){
+                if(authored->t!=V::Obj)throw std::runtime_error("Surface glue must be an object");V glue=V::makeObj();
+                for(const auto& field:authored->obj){
+                    if(field.first=="target_vertex"||field.first=="target_edge"||field.first=="tangent_axis"||field.first=="target_brep_sha256")glue.set(field.first,field.second);
+                    else if(field.first=="u"||field.first=="v"||field.first=="max_distance_mm"||field.first=="tangent_tolerance_deg")glue.set(field.first,numericNative(field.second,env));
+                    else throw std::runtime_error("Unknown authored surface glue field: "+field.first);
+                }
+                const auto* target=precedingBody(preceding,feature.inputs[1]);if(!target)throw std::runtime_error("Surface glue target missing");
+                glue.set("target_brep",brepOf(*target,"surface glue target"));glue.set("target_topology",required(target->nativeData,"topology"));request.set("glue",glue);
+            }
+        }else if(operation.str=="repair"){
             for(const auto& field:feature.nativeSpec.obj)if(field.first!="op"&&field.first!="mode"&&field.first!="normal")throw std::runtime_error("repair_invalid_request: Unknown repair field: "+field.first);
             request.set("op",V::makeStr("surface_repair"));
             request.set("mode",required(feature.nativeSpec,"mode"));
@@ -566,7 +609,7 @@ V surfaceRequest(const Feature& feature, const ExprEnv& env, Document& document,
             for(const auto& field:feature.nativeSpec.obj)if(field.first!="op"&&field.first!="keep_points")throw std::runtime_error("Unknown mutual trim field: "+field.first);
             const auto* other=precedingBody(preceding,feature.inputs[1]);if(!other)throw std::runtime_error("Mutual trim second surface missing");
             request.set("op",V::makeStr("surface_mutual_trim"));request.set("other_brep",brepOf(*other,"mutual trim second surface"));request.set("keep_points",numericNative(required(feature.nativeSpec,"keep_points"),env));
-        }else throw std::runtime_error("surface_edit op must be extract_face, trim_plane, trim_wire, repair, untrim, extend or mutual_trim");
+        }else throw std::runtime_error("surface_edit op must be extract_face, trim_plane, trim_wire, trim_tool, mirror, ruled, deform_poles, repair, untrim, extend or mutual_trim");
     } else if (feature.type == FeatureType::OffsetSurface) {
         request.set("op", V::makeStr("offset_surface"));
         if (feature.inputs.size() != 1) throw std::runtime_error("offset_surface requires one native surface input");
@@ -960,6 +1003,7 @@ V solidFeatureRequest(const Feature& feature, const ExprEnv& env,
         model.obj.erase(std::remove_if(model.obj.begin(), model.obj.end(), [](const auto& item) { return item.first == "regions"; }), model.obj.end());
         if (mode == "distance" && model.find("limit_face")) throw std::runtime_error("Distance extrusion cannot retain an inactive limit face");
     }
+    if(op=="rubber_body"&&!feature.inputs.empty())throw std::runtime_error("Rubber body is an authored profile and accepts no inputs");
     if((op=="wood"&&!feature.inputs.empty())||(op=="vent"&&feature.inputs.size()>1))throw std::runtime_error("Wood needs no input; vent accepts at most one exact local XY stock input");
     if (op == "hole") {
         if (const V* source = model.find("cutter")) {

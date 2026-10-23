@@ -408,7 +408,8 @@ std::string featureOperation(const Feature& feature);
 // Face extrusion inputs are geometric references for a separate body; their
 // source/limit bodies remain physical outputs until an actual modeling recipe consumes them.
 bool featureConsumesInputBodies(const Feature& feature);
-// Per input: a 044B curve-pattern support (third input) stays a visible reference.
+// Per input: curve-pattern supports and surface cutter/glue/tangent supports
+// stay visible references; constructing a result does not consume these bodies.
 bool featureConsumesInputBody(const Feature& feature,size_t index);
 ManufacturingLineage featureManufacturingLineage(const Document& document,const Feature& feature);
 bool validateManufacturingRoutes(const Document& document,std::string& error);
