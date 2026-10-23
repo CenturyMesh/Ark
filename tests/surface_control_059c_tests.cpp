@@ -1,5 +1,6 @@
 #include "ark/surface_edit_059c.hpp"
 #include "ark/serialize.hpp"
+#include "ark/history_authoring.hpp"
 #include <iostream>
 #include <stdexcept>
 using namespace ark;

@@ -1,6 +1,11 @@
 # ARK roadmap A–G
 
-059C is **Em curso** for **A.02/A.04/B.01/B.04/C.04/D.02**: editable rubber bodies, indexed surface patterns, derived CPU/GPU dynamics and exact face cycling. Integrated verification is pending; see [059C](iterations/059C.md).
+059C is **Verificado no escopo** locally for **A.02/A.04/B.01/B.03/B.04/C.04/D.02**:
+editable rubber bodies, indexed patterns, derived CPU/GPU dynamics, exact face
+cycling, background GPU snapshots and exact surface mirror/trim/ruled/fill with
+guides and pole/glue controls. Native contracts, persistence and integrated UI
+tests passed. Broader B.03/C.04 remain **Parcial**; see [059C evidence and measured
+limits](iterations/059C.md).
 
 058A is **Verificado no escopo** locally for **A.02/A.04/D.02**: conversation
 reflow after messages arrive while Studio is minimized, and clear navigation in

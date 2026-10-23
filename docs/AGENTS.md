@@ -1,6 +1,6 @@
 # ARK agent protocol
 
-059C (**A.02/A.04/B.01/B.04/C.04/D.02**): load `agent_onboard{topic:"rubber"}`
+059C (**A.02/A.04/B.01/B.03/B.04/C.04/D.02**): load `agent_onboard{topic:"rubber"}`
 for exact stock, indexed patterns and the reduced CPU/GPU surface-network study.
 `rubber_plan` prepares commands without publication; `physics_inspect.rubber`
 requires explicit material inputs and distinguishes derived frames from CAD.

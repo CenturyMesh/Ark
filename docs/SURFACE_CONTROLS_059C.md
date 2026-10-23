@@ -38,9 +38,9 @@ current ARK native libraries passed 63 checks. It exercises a nonuniform rationa
 surface, basis equality, individual pole movement, valid exact results, immutable
 source, bounded deterministic candidates, gap/angle/handle proofs, and rejection
 of stale hashes, trim/closed/solid sources, duplicate/out-of-range poles, unknown
-fields, enlarged tolerance and absent targets. Host integration tests are supplied
-separately; integrated tool routing, persistence and UI verification remain
-pending the root build.
+fields, enlarged tolerance and absent targets. The integrated 059C build also
+passed host routing, preview/publication, source/target hash rejection,
+save/reopen/recompute and preservation of the glue target as a separate output.
 
 Studio UI is supplied in `surface_edit_059c.inl`. Surface controls (49500)
 asynchronously inspect the selected exact occurrence. The control cage has
@@ -61,10 +61,13 @@ with the exact derived surface. This does not silently reposition an occurrence.
 UI tests in `surface_edit_059c_selftest.inl` exercise real window pointer/key and
 button events, asynchronous exact inspection and preview, native numeric forms,
 explicit Apply, one Undo, Reset, Escape, body-target picking and stale revision.
-The fixture contains only synthetic geometry. Captures and the
-`.surface-controls.json` receipt must be reviewed in the integrated build before
-claiming UI verification. Local syntax-only compilation passed; execution and
-visual inspection are pending root integration.
+The fixture contains only synthetic geometry. The integrated 059C Studio passed
+79 UI checks, and the control-net, drag, numeric fields, hitpoint glue preview
+and applied-result captures were inspected. The receipt is
+`surface-edit-ui.png.surface-controls.json`. An initial target click was hidden
+by the editor toolbar; Fit now reserves its space and the fixture verifies an
+unobstructed target before clicking. Reference target visibility is checked
+after publication. This is local native UI evidence, not external qualification.
 
 Integration: include `surface_deform_059c.inl` inside `surfacing.cpp` after
 `surfaceEditResult`, with `Geom2d_Line.hxx`, `Geom2d_TrimmedCurve.hxx` and

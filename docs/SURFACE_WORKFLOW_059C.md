@@ -87,11 +87,11 @@ hints were shortened after initial captures exposed clipping, including the
 shared editor's automatically appended picking hint. The semantic face field
 retains horizontal scrolling for full digest-bound names.
 
-The receipt is `surface059.png.surface-workflow.json`; captures use suffixes
+The integrated root Studio and native worker also passed the same 106 checks;
+their receipt is `surface-workflow-ui.png.surface-workflow.json`. Captures use suffixes
 `.mirror-form.png`, `.trim-form.png`, `.ruled-form.png`, `.loft-form.png`,
 `.fill-form.png`, `.support-form.png`, `.guided-patch-form.png` and `.surfaces.png`.
-The root integration must rerun the same selftest against its final Studio and
-worker binaries before treating this as an integrated release result.
+The final native dialogs and GPU scene were visually inspected after integration.
 
 All fixtures are synthetic. Sampled continuity and guide errors are bounded local
 checks, not proofs between samples, global continuity certification or production
