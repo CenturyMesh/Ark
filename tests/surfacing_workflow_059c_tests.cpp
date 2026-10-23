@@ -42,6 +42,10 @@ void run(){
     for(u64 id:{2,4,7,9}){closeTo(area(restored,id),area(s.document,id),"native result survives reopen/recompute");check(canonical(restored.find(id)->nativeSpec).dump()==canonical(s.document.find(id)->nativeSpec).dump(),"source recipe survives reopen");check(restored.find(id)->inputs==s.document.find(id)->inputs,"dependencies survive reopen");}
     apply(s,R"([{"op":"feature.edit","id":1,"native":{"poles":[[[0,0,0],[0,10,0]],[[24,0,0],[24,10,0]]]}}])");
     closeTo(area(s.document,2),480,"mirror regenerates after source edit");closeTo(area(s.document,4),160,"trim regenerates after source edit");
+    V parameters=json(R"({"name":"Command mirror","source":1,"plane":"XZ","continuity":"G1"})");parameters.set("expected_revision",V::makeNum((double)s.revision));
+    V discovery=json(R"({"topic":"commands","command":"surface_mid_mirror"})");discovery.set("parameters",parameters);
+    const auto unchanged=documentToJson(s.document);const auto prepared=field(accepted(s.call("agent_onboard",discovery)),"prepared_call");check(field(prepared,"tool").str=="doc_preview","mirror command prepares ordinary preview");
+    const auto preview=accepted(s.call("doc_preview",field(prepared,"arguments")));check(documentToJson(s.document)==unchanged,"command discovery and preview preserve drawing");V publish=V::makeObj();publish.set("candidate_id",field(preview,"candidate_id"));publish.set("expected_revision",V::makeNum((double)s.revision));accepted(s.call("doc_apply",publish));closeTo(area(s.document,s.document.features.back().id),480,"prepared mirror publishes exact dependent result");
 }
 }
 int main(){try{run();std::cout<<"Surfacing workflow: "<<checks<<" checks passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

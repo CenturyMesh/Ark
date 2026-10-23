@@ -56,5 +56,6 @@ Receipts use `.rubber.json`; captures include `.rubber-create-Belt.png`,
 `.rubber-final.png`, `.rubber-evidence.png`, `.rubber-reset.png` and
 `.rubber-stale.png` for the transport mode.
 
-Compilation, execution and screenshot inspection are pending the integrated 059C
-build. No user drawing is used in this fixture.
+The integrated 059C build passed both native UI tests, including the production
+CPU/GPU study. Creation, study controls and final derived-frame screenshots were
+inspected. No user drawing is used in this fixture.
