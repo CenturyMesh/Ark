@@ -437,9 +437,22 @@ V surfaceRequest(const Feature& feature, const ExprEnv& env, Document& document,
         if (const V* controls=feature.nativeSpec.find("controls")) request.set("controls",numericNative(*controls,env));
     } else if (feature.type == FeatureType::SurfaceFill) {
         request.set("op", V::makeStr("surface_fill"));
-        if (const V* profile = feature.nativeSpec.find("profile"))
+        if (const V* curve = feature.nativeSpec.find("boundary_curve")) {
+            if(feature.nativeSpec.find("profile")||!feature.get("sketch").empty())throw std::runtime_error("Fill requires one boundary source: boundary_curve, profile or sketch");
+            const auto& body=supportInput(*curve,"Fill boundary curve");
+            const auto* source=document.find(body.id);if(!source||!isCurveFeature(source->type))throw std::runtime_error("Fill boundary_curve must identify a native Curve feature");
+            V profile=V::makeObj();profile.set("wire_brep",brepOf(body,"fill boundary curve"));request.set("profile",profile);
+        } else if (const V* profile = feature.nativeSpec.find("profile"))
             request.set("profile", numericNative(*profile, env));
         else request.set("profile", profileFromSketch(document, feature.get("sketch")));
+        if(const V* guides=feature.nativeSpec.find("guide_curves")){
+            if(guides->t!=V::Arr||guides->arr.empty()||guides->arr.size()>16)throw std::runtime_error("Fill guide_curves needs 1..16 native curve feature ids");
+            V resolved=V::makeArr();std::set<u64> seen;
+            for(const auto& guide:guides->arr){const auto& body=supportInput(guide,"Fill guide curve");const auto* source=document.find(body.id);
+                if(!source||!isCurveFeature(source->type)||!seen.insert(body.id).second)throw std::runtime_error("Fill guide curves must be distinct native Curve features");
+                V profile=V::makeObj();profile.set("wire_brep",brepOf(body,"fill guide curve"));resolved.arr.push_back(profile);}
+            request.set("guide_curves",resolved);
+        }
         if(const V* constraints=feature.nativeSpec.find("constraints")){
             if(constraints->t!=V::Arr||constraints->arr.empty()||constraints->arr.size()>128)throw std::runtime_error("Constrained fill needs 1..128 explicit boundary supports");
             V resolved=V::makeArr();

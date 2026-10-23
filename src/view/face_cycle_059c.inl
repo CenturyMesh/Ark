@@ -42,8 +42,8 @@ static bool cycleFaceKey059(HWND window,bool reverse){
     if(cycle.body<0){g_status="Click a body in the viewport, then press Tab to cycle its exact faces.";return true;}
     const size_t body=(size_t)cycle.body;
     if(cycle.revision!=g_session.revision||cycle.epoch!=g_documentEpoch||cycle.displaySerial!=g_displayMeshSerial||cycle.selectionSerial!=g_editorPickSerial||selBody!=cycle.body||body>=g_bodyIds.size()||body>=g_instanceIds.size()||body>=g_instanceCopies.size()||body>=g_instancePart.size()||body>=g_instanceWorld.size()||g_bodyIds[body]!=cycle.feature||g_instanceIds[body]!=cycle.instance||g_instanceCopies[body]!=cycle.copy||g_instancePart[body]!=cycle.part){rejectFaceCycle059("Face cycle expired after a document, display or selection change / click the body again.");return true;}
-    if(!displayInstance(body)){rejectFaceCycle059("The selected occurrence is hidden / show it and click the body again.");return true;}
     if(faceCyclePreview059(body)){rejectFaceCycle059("Exact face cycling needs the authored static / Formed view / exit the preview and click the body again.");return true;}
+    if(!displayInstance(body)){rejectFaceCycle059("The selected occurrence is hidden / show it and click the body again.");return true;}
     for(int i=0;i<16;++i)if(cycle.world.m[i]!=g_instanceWorld[body].m[i]){rejectFaceCycle059("The occurrence display pose changed / click the body again in the authored view.");return true;}
     if(cycle.brepSha256.empty()||cycle.source>=g_doc.evalBodies.size()||g_doc.evalBodies[cycle.source].id!=cycle.feature||g_doc.evalBodies[cycle.source].nativeData.ownerIdentity()!=cycle.payload.ownerIdentity()||cycle.part>=g_partPicks.size()||cycle.part>=g_cpuMeshes.size()){
         rejectFaceCycle059("This body has no current exact face references / sampled mesh faces cannot be cycled as CAD faces.");return true;}
