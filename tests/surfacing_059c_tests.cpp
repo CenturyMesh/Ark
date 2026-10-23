@@ -95,5 +95,29 @@ void ruled() {
     request.set("second_brep",brep(plane()));rejects([&]{run(request);},"surface cannot masquerade as a spline rail");
     BRepBuilderAPI_MakePolygon poly;poly.Add({0,5,0});poly.Add({5,5,0});poly.Add({10,5,1});request.set("second_brep",brep(poly.Wire()));rejects([&]{run(request);},"ambiguous composite rail topology rejects");
 }
+V fillConstraint(unsigned edge,const V& support) {
+    V c=V::makeObj();c.set("edge",V::makeNum(edge));c.set("continuity",V::makeNum(1));c.set("support_brep",field(support,"brep_base64"));c.set("topology",field(support,"topology"));
+    for(const auto& ref:field(field(support,"topology"),"references").arr)if(field(ref,"kind").str=="face"&&field(ref,"status").str=="bound") {c.set("face",field(ref,"name"));return c;}
+    throw std::runtime_error("support has no semantic face");
 }
-int main(){try{mirror();trim();ruled();std::cout<<checks<<" exact surfacing 059C checks passed\n";return 0;}catch(const std::exception& e){std::cerr<<"FAILED: "<<e.what()<<'\n';return 1;}}
+void fillWire() {
+    BRepBuilderAPI_MakePolygon polygon;polygon.Add({0,0,0});polygon.Add({10,0,0});polygon.Add({10,10,2});polygon.Add({0,10,0});polygon.Close();
+    auto request=json(R"({"op":"surface_fill","profile":{}})");auto profile=V::makeObj();profile.set("wire_brep",brep(polygon.Wire()));request.set("profile",profile);
+    auto result=run(request);valid(result);check(field(field(result,"report"),"boundary_max_error_mm").num<=1e-6,"closed nonplanar 3D wire fill meets its G0 bound");
+    auto invalid=request;auto mixed=profile;mixed.set("wire_brep",brep(ark::occt::compound({polygon.Wire(),plane()})));invalid.set("profile",mixed);rejects([&]{run(invalid);},"fill does not silently discard extra geometry");
+    mixed=profile;mixed.set("entities",V::makeArr());invalid.set("profile",mixed);rejects([&]{run(invalid);},"conflicting exact and alternate profiles reject");
+    profile.set("wire_brep",brep(line({0,0,0},{10,0,0})));invalid.set("profile",profile);rejects([&]{run(invalid);},"open wire cannot be a fill boundary");
+
+    const auto loop=json(R"({"entities":[{"kind":"bezier","points":[[0,0,0],[2,0,0],[4,0,0],[6,0,2],[8,0,2],[10,0,2]]},{"kind":"line","points":[[10,0,2],[10,5,2]]},{"kind":"bezier","points":[[10,5,2],[8,5,2],[6,5,2],[4,5,0],[2,5,0],[0,5,0]]},{"kind":"line","points":[[0,5,0],[0,0,0]]}]})");
+    const auto wire=ark::occt::profileCurveNative(loop);profile=V::makeObj();profile.set("wire_brep",field(wire,"brep_base64"));request.set("profile",profile);
+    auto lower=ark::occt::completeSelectionReferences(ark::occt::shapeResult(plane(-20,20,-20,20),false));gp_Trsf transform;transform.SetTranslation({0,0,2});
+    auto upper=ark::occt::completeSelectionReferences(ark::occt::shapeResult(ark::occt::transformed(plane(-20,20,-20,20),transform),false));
+    auto constraints=V::makeArr();constraints.arr.push_back(fillConstraint(1,upper));constraints.arr.push_back(fillConstraint(3,lower));request.set("constraints",constraints);request.set("mode",V::makeStr("blend"));
+    result=run(request);valid(result);const auto& report=field(result,"report");
+    check(field(report,"support_boundary_evidence").arr.size()==2,"3D closed-wire fill has both G1 supports checked");
+    for(const auto& row:field(report,"support_boundary_evidence").arr){check(field(row,"samples_checked").num==33,"G1 support uses independent native checkpoints");check(field(row,"max_tangent_plane_angle_deg").num<=.001,"native 3D wire G1 tangent bound");}
+    check(!field(report,"global_g1_verified").b,"sampled support proof is not a global continuity certificate");
+    constraints.arr[0]=fillConstraint(1,lower);request.set("constraints",constraints);rejects([&]{run(request);},"contradictory wire support rejects");
+}
+}
+int main(){try{mirror();trim();ruled();fillWire();std::cout<<checks<<" exact surfacing 059C checks passed\n";return 0;}catch(const std::exception& e){std::cerr<<"FAILED: "<<e.what()<<'\n';return 1;}}

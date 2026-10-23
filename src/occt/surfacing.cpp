@@ -257,8 +257,11 @@ struct Profile {
 Profile profileOf(const V& value, bool requireClosed) {
     if (const V* encoded = value.find("wire_brep")) {
         if (encoded->t != V::Str || encoded->str.empty()) throw std::runtime_error("wire_brep must be a B-rep");
-        const std::vector<TopoDS_Shape> wires = shapes(readBrep(encoded->str), TopAbs_WIRE);
-        if (wires.size() != 1) throw std::runtime_error("wire_brep must contain one wire");
+        if(value.obj.size()!=1)throw std::runtime_error("wire_brep profile cannot mix alternate entities, transforms or point selectors");
+        const auto source=readBrep(encoded->str);
+        const std::vector<TopoDS_Shape> wires = shapes(source, TopAbs_WIRE);
+        if (source.ShapeType()!=TopAbs_WIRE||wires.size() != 1) throw std::runtime_error("wire_brep must be exactly one wire, without discarded faces or loose geometry");
+        if(!BRepCheck_Analyzer(source).IsValid())throw std::runtime_error("wire_brep has invalid native topology");
         Profile result;
         result.wire = TopoDS::Wire(wires[0]);
         for (BRepTools_WireExplorer walk(result.wire); walk.More(); walk.Next()) {
@@ -269,7 +272,9 @@ Profile profileOf(const V& value, bool requireClosed) {
             result.edges.push_back({edge, BRep_Tool::Pnt(first), BRep_Tool::Pnt(last)});
         }
         if (result.edges.empty()) throw std::runtime_error("wire_brep has no edges");
-        result.closed = result.edges.front().first.Distance(result.edges.back().last) <= kTolerance;
+        if(result.edges.size()>128||result.edges.size()!=shapes(source,TopAbs_EDGE).size())
+            throw std::runtime_error("wire_brep needs 1..128 connected ordered edges; no branch or unvisited edge may be discarded");
+        result.closed = BRep_Tool::IsClosed(result.wire)&&result.edges.front().first.Distance(result.edges.back().last) <= kTolerance;
         if (requireClosed && !result.closed) throw std::runtime_error("profile is not explicitly closed");
         for(size_t i=0;i<result.edges.size();++i)result.sourceIndices.push_back(i);
         return result;
