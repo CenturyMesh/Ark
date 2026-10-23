@@ -9,7 +9,7 @@ struct FaceCycle059 {
 static FaceCycle059 g_faceCycle059;
 static void resetFaceCycle059(){g_faceCycle059={};}
 static bool faceCyclePreview059(size_t body){
-    if(g_allSheetsFlat||g_allSheetsPlaying||g_stockMode||g_motionActive||g_bakedMotions.active||g_inertial056.active||explodedDisplayActive())return true;
+    if(g_allSheetsFlat||g_allSheetsPlaying||g_stockMode||g_motionActive||g_bakedMotions.active||g_inertial056.active||g_rubber059.active||explodedDisplayActive())return true;
     const auto* feature=g_doc.find(g_bodyIds[body]);
     if(!feature)return true;
     // These special displays use separate deformation/segment meshes, whose
