@@ -22,7 +22,7 @@ struct GNode {F4 position,velocity,predicted,force;};
 struct GLink {unsigned a,b;float rest,compliance;F4 direction;};
 struct GPulley {F4 centerRadius,axisSpeed;};
 struct GConfig {
-    unsigned nodeCount=0,linkCount=0,colorOffset=0,colorCount=0;
+    unsigned nodeCount=0,linkCount=0,reserved0=0,reserved1=0;
     unsigned pulleyCount=0,ground=0,contactStride=0,padding=0;
     float dt=0,decay=0,friction=0,groundZ=0;
     F4 gravityRadius;
@@ -33,11 +33,12 @@ struct Node {float4 position,velocity,predicted,force;};
 struct Link {uint a,b;float rest,compliance;float4 direction;};
 struct Pulley {float4 centerRadius,axisSpeed;};
 cbuffer Config:register(b0) {
-    uint nodeCount,linkCount,colorOffset,colorCount;
+    uint nodeCount,linkCount,reserved0,reserved1;
     uint pulleyCount,ground,contactStride,padding;
     float dt,decay,friction,groundZ;
     float4 gravityRadius;
 };
+cbuffer ColorConfig:register(b1) {uint linkOffset,activeLinks,colorPad0,colorPad1;};
 StructuredBuffer<Link> links:register(t0);
 StructuredBuffer<Pulley> pulleys:register(t1);
 RWStructuredBuffer<Node> nodes:register(u0);
@@ -58,8 +59,8 @@ void checkFinite(float3 p) {if(any(isnan(p))||any(isinf(p))){uint ignored;Interl
     n.predicted=n.position;nodes[i]=n;
 }
 [numthreads(64,1,1)] void projectLinks(uint3 tid:SV_DispatchThreadID) {
-    if(tid.x>=colorCount)return;
-    uint i=colorOffset+tid.x;Link l=links[i];Node a=nodes[l.a],b=nodes[l.b];
+    if(tid.x>=activeLinks)return;
+    uint i=linkOffset+tid.x;Link l=links[i];Node a=nodes[l.a],b=nodes[l.b];
     float wa=a.position.w,wb=b.position.w;if(wa+wb==0&&l.compliance==0)return;
     float3 d=a.position.xyz-b.position.xyz;float distance=length(d);
     float3 normal=distance>1e-12?d/distance:l.direction.xyz;
@@ -112,6 +113,8 @@ struct Gpu {
     Com<ID3D11Device> device;Com<ID3D11DeviceContext> context;
     Com<ID3D11ComputeShader> integrateShader,linksShader,contactsShader,finishShader;
     Com<ID3D11Buffer> constants;
+    ID3D11ComputeShader* boundShader=nullptr;
+    std::vector<Com<ID3D11Buffer>> colorConstants;std::vector<unsigned> colorOffsets;
     GBuffer links;std::string linkBytes,linkKey,adapter,reason;bool tried=false;
     void init() {
         if(device.p&&context.p&&integrateShader.p&&linksShader.p&&contactsShader.p&&finishShader.p&&constants.p)return;
@@ -149,13 +152,18 @@ struct Gpu {
     void unbind() {
         ID3D11ShaderResourceView* srvs[2]{};ID3D11UnorderedAccessView* uavs[4]{};
         context->CSSetShaderResources(0,2,srvs);context->CSSetUnorderedAccessViews(0,4,uavs,nullptr);
+        context->CSSetShader(nullptr,nullptr,0);boundShader=nullptr;
+        ID3D11Buffer* none[2]{};context->CSSetConstantBuffers(0,2,none);
     }
-    void dispatch(ID3D11ComputeShader* shader,GBuffer& states,GBuffer& lambda,GBuffer& contacts,GBuffer& pulleys,GBuffer& failure,const GConfig& config,unsigned count) {
-        unbind();context->UpdateSubresource(constants.p,0,nullptr,&config,0,0);
+    void bind(GBuffer& states,GBuffer& lambda,GBuffer& contacts,GBuffer& pulleys,GBuffer& failure) {
         ID3D11ShaderResourceView* srvs[]{links.srv.p,pulleys.srv.p};
         ID3D11UnorderedAccessView* uavs[]{states.uav.p,lambda.uav.p,contacts.uav.p,failure.uav.p};
         context->CSSetShaderResources(0,2,srvs);context->CSSetUnorderedAccessViews(0,4,uavs,nullptr);
-        context->CSSetConstantBuffers(0,1,&constants.p);context->CSSetShader(shader,nullptr,0);context->Dispatch((count+63)/64,1,1);unbind();
+        context->CSSetConstantBuffers(0,1,&constants.p);
+    }
+    void dispatch(ID3D11ComputeShader* shader,unsigned count) {
+        if(boundShader!=shader){context->CSSetShader(shader,nullptr,0);boundShader=shader;}
+        context->Dispatch((count+63)/64,1,1);
     }
 };
 Gpu& gpu() {static Gpu instance;return instance;}
@@ -163,7 +171,8 @@ RubberDynamicsResult runGpu(const std::vector<RubberNode>& nodes,const Topology&
     const auto started=std::chrono::steady_clock::now();auto control=captureNativeRequestControl();auto& g=gpu();
     std::unique_lock lock(g.mutex,std::defer_lock);
     while(!lock.try_lock()){cancel(control);std::this_thread::sleep_for(std::chrono::milliseconds(5));}
-    cancel(control);g.init();
+    cancel(control);const bool deviceHit=g.constants.p!=nullptr;const auto initStarted=std::chrono::steady_clock::now();g.init();
+    const double initializationMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-initStarted).count();
     std::vector<GLink> packedLinks;
     for(const auto& link:graph.links) {
         const auto& l=link.value;
@@ -178,6 +187,16 @@ RubberDynamicsResult runGpu(const std::vector<RubberNode>& nodes,const Topology&
     const std::string key=iterationSha256(bytes);bool hit=g.links.buffer.p&&g.linkBytes==bytes;
     size_t uploaded=hit?0:bytes.size();
     if(!hit){g.links=g.buffer(bytes.size(),sizeof(GLink),bytes.data(),false);g.linkBytes=bytes;g.linkKey=key;}
+    if(g.colorOffsets!=graph.offsets) {
+        std::vector<Com<ID3D11Buffer>> colors;
+        for(size_t i=0;i+1<graph.offsets.size();++i) {
+            const unsigned values[]{graph.offsets[i],graph.offsets[i+1]-graph.offsets[i],0,0};
+            D3D11_BUFFER_DESC desc{};desc.ByteWidth=sizeof(values);desc.Usage=D3D11_USAGE_IMMUTABLE;desc.BindFlags=D3D11_BIND_CONSTANT_BUFFER;
+            D3D11_SUBRESOURCE_DATA data{};data.pSysMem=values;Com<ID3D11Buffer> buffer;
+            checked(g.device->CreateBuffer(&desc,&data,buffer.put()),"immutable color constants");colors.push_back(std::move(buffer));
+        }
+        g.colorConstants=std::move(colors);g.colorOffsets=graph.offsets;
+    }
     std::vector<GNode> packed;for(const auto& n:nodes)packed.push_back({f4(n.position,invMass(n)),f4(n.velocity),f4(n.position),f4(n.force)});
     std::vector<GPulley> packedPulleys;for(const auto& p:o.pulleys)packedPulleys.push_back({f4(p.center,p.radius),f4(p.axis,p.angularVelocity)});
     if(packedPulleys.empty())packedPulleys.emplace_back();
@@ -195,21 +214,30 @@ RubberDynamicsResult runGpu(const std::vector<RubberNode>& nodes,const Topology&
     GConfig config;config.nodeCount=(unsigned)nodes.size();config.linkCount=(unsigned)graph.links.size();config.pulleyCount=(unsigned)o.pulleys.size();
     config.ground=o.ground;config.contactStride=config.pulleyCount+1;config.friction=(float)o.friction;config.groundZ=(float)o.groundZ;config.gravityRadius=f4(o.gravity,o.contactRadius);
     unsigned dispatches=0,steps=0;double time=0,lastDt=0;size_t samples=(size_t)std::ceil(o.duration*o.outputFps);
-    auto dispatch=[&](ID3D11ComputeShader* shader,unsigned count){g.dispatch(shader,states,multipliers,contacts,pulleyBuffer,failure,config,count);++dispatches;};
+    // The immediate context preserves dispatch order with the same bound UAVs.
+    // Keep resources bound across ordered colours; unbind at frame readback or
+    // unwinding so cancellation never retains per-run resources in the cache.
+    struct BindingScope {Gpu& value;~BindingScope(){value.unbind();}} bindingScope{g};
+    auto dispatch=[&](ID3D11ComputeShader* shader,unsigned count){g.dispatch(shader,count);++dispatches;};
     for(size_t sample=1;sample<=samples;++sample) {
         const double target=std::min(o.duration,double(sample)/o.outputFps);
+        g.bind(states,multipliers,contacts,pulleyBuffer,failure);
         while(time<target-1e-12) {
             cancel(control);double dt=std::min(o.step,target-time);config.dt=(float)dt;config.decay=(float)std::exp(-o.damping*dt);
+            // Only dt/decay vary with time. Colour ranges are immutable buffers,
+            // avoiding a GPU-visible constant upload for every projection.
+            g.context->UpdateSubresource(g.constants.p,0,nullptr,&config,0,0);
             dispatch(g.integrateShader.p,std::max(config.nodeCount,config.linkCount));
             for(unsigned iteration=0;iteration<o.iterations;++iteration) {
                 for(size_t color=0;color+1<graph.offsets.size();++color) {
-                    config.colorOffset=graph.offsets[color];config.colorCount=graph.offsets[color+1]-graph.offsets[color];dispatch(g.linksShader.p,config.colorCount);
+                    g.context->CSSetConstantBuffers(1,1,&g.colorConstants[color].p);
+                    dispatch(g.linksShader.p,graph.offsets[color+1]-graph.offsets[color]);
                 }
                 if(o.ground||!o.pulleys.empty())dispatch(g.contactsShader.p,config.nodeCount);
             }
             dispatch(g.finishShader.p,config.nodeCount);time+=dt;lastDt=dt;++steps;
         }
-        cancel(control);g.context->CopyResource(readback.p,states.buffer.p);D3D11_MAPPED_SUBRESOURCE mapped{};
+        cancel(control);g.unbind();g.context->CopyResource(readback.p,states.buffer.p);D3D11_MAPPED_SUBRESOURCE mapped{};
         checked(g.context->Map(readback.p,0,D3D11_MAP_READ,0,&mapped),"synchronized frame readback");
         std::memcpy(packed.data(),mapped.pData,sd.ByteWidth);g.context->Unmap(readback.p,0);
         std::vector<Vec3> frame,velocities;
@@ -229,6 +257,9 @@ RubberDynamicsResult runGpu(const std::vector<RubberNode>& nodes,const Topology&
     g.context->Unmap(lambdaReadback.p,0);
     out.diagnostics=V::makeObj();auto& d=out.diagnostics;
     d.set("backend",V::makeStr("D3D11 hardware compute / float32"));d.set("adapter",V::makeStr(g.adapter));
+    d.set("gpu_device_cache_hit",V::makeBool(deviceHit));d.set("gpu_initialization_ms",V::makeNum(initializationMs));
+    d.set("gpu_resource_binding_batches",V::makeNum(samples));
+    d.set("gpu_step_constant_updates",V::makeNum(steps));d.set("gpu_color_constant_bytes",V::makeNum(g.colorConstants.size()*16));
     d.set("gpu_constraint_cache_hit",V::makeBool(hit));d.set("gpu_constraint_sha256",V::makeStr(key));
     d.set("gpu_constraint_uploaded_bytes",V::makeNum(double(uploaded)));d.set("gpu_constraint_resident_bytes",V::makeNum(double(bytes.size())));
     d.set("gpu_dynamic_buffer_bytes",V::makeNum(double(packed.size()*sizeof(GNode)+packedLinks.size()*sizeof(float)+nodes.size()*(o.pulleys.size()+1)*sizeof(float)+packedPulleys.size()*sizeof(GPulley)+sizeof zero)));
