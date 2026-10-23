@@ -52,7 +52,7 @@ void checkFinite(float3 p) {if(any(isnan(p))||any(isinf(p))){uint ignored;Interl
     for(uint j=0;j<contactStride;++j)contactCorrection[i*contactStride+j]=0;
     Node n=nodes[i];
     if(n.position.w>0) {
-        n.velocity.xyz=(n.velocity.xyz+(gravityRadius.xyz+n.force.xyz*n.position.w)*dt)*decay;
+        n.velocity.xyz=n.velocity.xyz*decay+(gravityRadius.xyz+n.force.xyz*n.position.w)*dt;
         n.position.xyz+=n.velocity.xyz*dt;checkFinite(n.position.xyz);checkFinite(n.velocity.xyz);
     }
     n.predicted=n.position;nodes[i]=n;
@@ -189,10 +189,12 @@ RubberDynamicsResult runGpu(const std::vector<RubberNode>& nodes,const Topology&
     D3D11_BUFFER_DESC sd{};sd.ByteWidth=(UINT)(packed.size()*sizeof(GNode));sd.Usage=D3D11_USAGE_STAGING;sd.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
     Com<ID3D11Buffer> readback;checked(g.device->CreateBuffer(&sd,nullptr,readback.put()),"readback");
     D3D11_BUFFER_DESC fd=sd;fd.ByteWidth=sizeof zero;Com<ID3D11Buffer> failureReadback;checked(g.device->CreateBuffer(&fd,nullptr,failureReadback.put()),"failure readback");
+    D3D11_BUFFER_DESC ld=sd;ld.ByteWidth=(UINT)(packedLinks.size()*sizeof(float));Com<ID3D11Buffer> lambdaReadback;
+    checked(g.device->CreateBuffer(&ld,nullptr,lambdaReadback.put()),"link force readback");
     RubberDynamicsResult out;std::vector<Vec3> initial;for(const auto& n:nodes)initial.push_back(n.position);out.frames.push_back(initial);out.times.push_back(0);
     GConfig config;config.nodeCount=(unsigned)nodes.size();config.linkCount=(unsigned)graph.links.size();config.pulleyCount=(unsigned)o.pulleys.size();
     config.ground=o.ground;config.contactStride=config.pulleyCount+1;config.friction=(float)o.friction;config.groundZ=(float)o.groundZ;config.gravityRadius=f4(o.gravity,o.contactRadius);
-    unsigned dispatches=0,steps=0;double time=0;size_t samples=(size_t)std::ceil(o.duration*o.outputFps);
+    unsigned dispatches=0,steps=0;double time=0,lastDt=0;size_t samples=(size_t)std::ceil(o.duration*o.outputFps);
     auto dispatch=[&](ID3D11ComputeShader* shader,unsigned count){g.dispatch(shader,states,multipliers,contacts,pulleyBuffer,failure,config,count);++dispatches;};
     for(size_t sample=1;sample<=samples;++sample) {
         const double target=std::min(o.duration,double(sample)/o.outputFps);
@@ -205,7 +207,7 @@ RubberDynamicsResult runGpu(const std::vector<RubberNode>& nodes,const Topology&
                 }
                 if(o.ground||!o.pulleys.empty())dispatch(g.contactsShader.p,config.nodeCount);
             }
-            dispatch(g.finishShader.p,config.nodeCount);time+=dt;++steps;
+            dispatch(g.finishShader.p,config.nodeCount);time+=dt;lastDt=dt;++steps;
         }
         cancel(control);g.context->CopyResource(readback.p,states.buffer.p);D3D11_MAPPED_SUBRESOURCE mapped{};
         checked(g.context->Map(readback.p,0,D3D11_MAP_READ,0,&mapped),"synchronized frame readback");
@@ -220,6 +222,11 @@ RubberDynamicsResult runGpu(const std::vector<RubberNode>& nodes,const Topology&
     g.context->CopyResource(failureReadback.p,failure.buffer.p);D3D11_MAPPED_SUBRESOURCE mapped{};
     checked(g.context->Map(failureReadback.p,0,D3D11_MAP_READ,0,&mapped),"failure readback");unsigned failed=*(const unsigned*)mapped.pData;g.context->Unmap(failureReadback.p,0);
     require(failed==0,"GPU solver encountered a nonfinite intermediate; reduce step/check material and loads");
+    g.context->CopyResource(lambdaReadback.p,multipliers.buffer.p);
+    checked(g.context->Map(lambdaReadback.p,0,D3D11_MAP_READ,0,&mapped),"synchronized link force readback");
+    out.finalLinkForces_N.resize(graph.links.size());const float* finalLambda=static_cast<const float*>(mapped.pData);
+    for(size_t j=0;j<graph.links.size();++j)out.finalLinkForces_N[graph.links[j].originalIndex]=-double(finalLambda[j])/(lastDt*lastDt);
+    g.context->Unmap(lambdaReadback.p,0);
     out.diagnostics=V::makeObj();auto& d=out.diagnostics;
     d.set("backend",V::makeStr("D3D11 hardware compute / float32"));d.set("adapter",V::makeStr(g.adapter));
     d.set("gpu_constraint_cache_hit",V::makeBool(hit));d.set("gpu_constraint_sha256",V::makeStr(key));

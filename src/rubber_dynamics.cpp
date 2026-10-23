@@ -32,20 +32,21 @@ double invMass(const RubberNode& n) {return n.fixed?0:1/n.mass;}
 void cancel(const NativeRequestControl& c) {
     if(c.cancelled&&c.cancelled())throw std::runtime_error("NATIVE_CANCELLED: rubber simulation cancelled");
 }
-struct Link {RubberLink value;Vec3 initialDirection;};
+struct Link {RubberLink value;Vec3 initialDirection;size_t originalIndex=0;};
 struct Topology {std::vector<Link> links;std::vector<unsigned> offsets;};
 // Greedy edge colouring is stable in input order. Every writable endpoint occurs
 // at most once per colour, so a GPU dispatch needs no float atomics or reductions.
 Topology topology(const std::vector<RubberNode>& nodes,const std::vector<RubberLink>& links) {
     std::vector<std::array<uint64_t,2>> used(nodes.size());
     std::vector<std::vector<Link>> colors;
-    for(const auto& link:links) {
+    for(size_t i=0;i<links.size();++i) {
+        const auto& link=links[i];
         unsigned c=0;
         while(c<maxColors&&((used[link.a][c/64]|used[link.b][c/64])&(uint64_t(1)<<(c%64))))++c;
         require(c<maxColors,"constraint graph needs more than 128 colours; reduce node degree");
         used[link.a][c/64]|=uint64_t(1)<<(c%64);used[link.b][c/64]|=uint64_t(1)<<(c%64);
         if(c==colors.size())colors.emplace_back();
-        colors[c].push_back({link,(nodes[link.a].position-nodes[link.b].position).normalized()});
+        colors[c].push_back({link,(nodes[link.a].position-nodes[link.b].position).normalized(),i});
     }
     Topology out;out.offsets.push_back(0);
     for(const auto& color:colors) {out.links.insert(out.links.end(),color.begin(),color.end());out.offsets.push_back((unsigned)out.links.size());}
@@ -60,7 +61,7 @@ void validate(const std::vector<RubberNode>& nodes,const std::vector<RubberLink>
     require(!nodes.empty()&&nodes.size()<=maxNodes,"node count must be 1..8192");
     require(links.size()<=maxLinks,"link count exceeds 65536");
     require(o.backend=="cpu"||o.backend=="gpu","backend must be cpu or gpu; there is no silent fallback");
-    require(std::isfinite(o.duration)&&o.duration>0&&o.duration<=60,"duration must be in (0,60] seconds");
+    require(std::isfinite(o.duration)&&o.duration>=1e-5&&o.duration<=60,"duration must be 1e-5..60 seconds");
     require(std::isfinite(o.step)&&o.step>=1e-5&&o.step<=1.0/30,"step must be 1e-5..1/30 seconds");
     require(o.iterations>=1&&o.iterations<=64,"iterations must be 1..64");
     require(o.outputFps>=1&&o.outputFps<=120,"outputFps must be 1..120");
@@ -136,14 +137,14 @@ RubberDynamicsResult runCpu(const std::vector<RubberNode>& nodes,const Topology&
     for(const auto& n:nodes) {positions.push_back(n.position);velocities.push_back(n.velocity);weights.push_back(invMass(n));}
     RubberDynamicsResult out;out.frames.push_back(positions);out.times.push_back(0);
     const size_t stride=o.pulleys.size()+1;std::vector<Contact> contacts(nodes.size()*stride);
-    std::vector<double> lambda(graph.links.size());double time=0;size_t steps=0,samples=(size_t)std::ceil(o.duration*o.outputFps);
+    std::vector<double> lambda(graph.links.size());double time=0,lastDt=0;size_t steps=0,samples=(size_t)std::ceil(o.duration*o.outputFps);
     for(size_t sample=1;sample<=samples;++sample) {
         const double target=std::min(o.duration,double(sample)/o.outputFps);
         while(time<target-1e-12) {
             cancel(control);double dt=std::min(o.step,target-time),decay=std::exp(-o.damping*dt);
             std::fill(lambda.begin(),lambda.end(),0);std::fill(contacts.begin(),contacts.end(),Contact{});
             for(size_t i=0;i<nodes.size();++i)if(!nodes[i].fixed) {
-                velocities[i]=(velocities[i]+(o.gravity+nodes[i].force*weights[i])*dt)*decay;
+                velocities[i]=velocities[i]*decay+(o.gravity+nodes[i].force*weights[i])*dt;
                 positions[i]+=velocities[i]*dt;
             }
             predicted=positions;
@@ -165,11 +166,13 @@ RubberDynamicsResult runCpu(const std::vector<RubberNode>& nodes,const Topology&
                 velocities[i]+=(positions[i]-predicted[i])/dt;finishVelocity(velocities[i],positions[i],o,contacts.data()+i*stride,dt);
                 require(finite(positions[i])&&finite(velocities[i]),"CPU solver became nonfinite; reduce step/check material and loads");
             }
-            time+=dt;++steps;
+            time+=dt;lastDt=dt;++steps;
         }
         out.frames.push_back(positions);out.times.push_back(time);
     }
     out.finalVelocities=std::move(velocities);out.diagnostics=V::makeObj();
+    out.finalLinkForces_N.resize(graph.links.size());
+    for(size_t j=0;j<graph.links.size();++j)out.finalLinkForces_N[graph.links[j].originalIndex]=-lambda[j]/(lastDt*lastDt);
     out.diagnostics.set("backend",V::makeStr("CPU reference / float64"));
     out.diagnostics.set("steps",V::makeNum(double(steps)));
     out.diagnostics.set("transfer_inclusive_ms",V::makeNum(std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count()));
@@ -206,7 +209,10 @@ RubberDynamicsResult simulateRubber(const std::vector<RubberNode>& nodes,const s
         throw std::runtime_error("RUBBER_SIMULATION: GPU unavailable on this platform; select cpu explicitly");
 #endif
     } else out=runCpu(nodes,graph,options);
-    double maxStretch=0,maxGroundPenetration=0,maxPulleyPenetration=0;
+    double maxStretch=0,maxGroundPenetration=0,maxPulleyPenetration=0,maxTension=0,maxCompression=0;
+    for(double force:out.finalLinkForces_N) {
+        require(std::isfinite(force),"nonfinite link force estimate");maxTension=std::max(maxTension,force);maxCompression=std::max(maxCompression,-force);
+    }
     for(const auto& frame:out.frames) {
         for(const auto& l:links)maxStretch=std::max(maxStretch,std::abs((frame[l.a]-frame[l.b]).len()/l.restLength-1));
         for(size_t i=0;i<frame.size();++i)if(!nodes[i].fixed) {
@@ -227,6 +233,8 @@ RubberDynamicsResult simulateRubber(const std::vector<RubberNode>& nodes,const s
     d.set("initial_energy_J",V::makeNum(initialEnergy));d.set("final_energy_J",V::makeNum(finalEnergy));
     d.set("energy_scope",V::makeStr("kinetic + compliant link strain + gravity; excludes work of constant forces and moving pulleys"));
     d.set("max_sampled_relative_link_strain",V::makeNum(maxStretch));
+    d.set("final_max_tensile_link_force_N",V::makeNum(maxTension));d.set("final_max_compressive_link_force_N",V::makeNum(maxCompression));
+    d.set("link_force_model",V::makeStr("last-step XPBD -lambda/dt^2 in input link order; reduced-network forces, not continuum stress"));
     d.set("max_sampled_ground_penetration_m",V::makeNum(maxGroundPenetration));
     d.set("max_sampled_pulley_penetration_m",V::makeNum(maxPulleyPenetration));
     d.set("geometry_modified",V::makeBool(false));d.set("qualified",V::makeBool(false));d.set("volume_preservation",V::makeBool(false));

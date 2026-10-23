@@ -34,6 +34,9 @@ struct RubberDynamicsResult {
     std::vector<std::vector<Vec3>> frames;
     std::vector<double> times;
     std::vector<Vec3> finalVelocities;
+    // Original input link order; positive=tension, negative=compression.
+    // XPBD -lambda/dt^2 estimate, not continuum stress or qualification data.
+    std::vector<double> finalLinkForces_N;
     arkjson::Value diagnostics;
 };
 RubberDynamicsResult simulateRubber(const std::vector<RubberNode>&,

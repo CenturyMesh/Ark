@@ -39,19 +39,34 @@ void cases(const std::string& backend) {
     for(int i=0;i<24;++i){v=(v-o.step*100*x)/(1+o.step*o.step*100);x+=o.step*v;}
     near(elastic.frames.back()[1].x,1+x,precision,"spring displacement matches implicit linear oscillator");
     near(elastic.finalVelocities[1].x,v,precision,"spring velocity matches implicit linear oscillator");
+    near(elastic.finalLinkForces_N[0],100*x,precision*10,"XPBD tension agrees with linear spring constitutive force");
     check(elastic.frames.back()[1].x<1.2,"elastic stretch restores toward rest");
     o.iterations=1;auto single=simulateRubber(spring,links,o);
     near(single.frames.back()[1].x,elastic.frames.back()[1].x,precision,"isolated compliance does not change with solver iterations");
     links[0].compliance=.1;auto soft=simulateRubber(spring,links,o);
     check(soft.frames.back()[1].x>elastic.frames.back()[1].x,"higher compliance means lower stiffness");
+    spring[1].position={.8,0,0};links[0].compliance=.01;
+    auto compressed=simulateRubber(spring,links,o);
+    check(compressed.frames.back()[1].x>.8&&compressed.finalLinkForces_N[0]<0,"compression restores length and reports a negative link force");
 
     o=options(backend);o.duration=2;o.damping=10;spring[1].position={1,0,0};spring[1].force={1,0,0};links[0].compliance=.01;
     auto equilibrium=simulateRubber(spring,links,o);o.step=1./120;auto coarse=simulateRubber(spring,links,o);
-    // The exponential damping is applied to acceleration and velocity. Its
-    // finite-step static bias is bounded here, and is not presented as a claim
-    // of exact timestep invariance for a finite-iteration network.
-    near(equilibrium.frames.back()[1].x,1.01,.0005,"loaded spring approaches force/stiffness extension");
-    near(coarse.frames.back()[1].x,equilibrium.frames.back()[1].x,.0005,"loaded spring remains comparable at half integration rate");
+    near(equilibrium.frames.back()[1].x,1.01,.0001,"loaded spring approaches force/stiffness extension");
+    near(coarse.frames.back()[1].x,equilibrium.frames.back()[1].x,.0001,"loaded spring remains comparable at half integration rate");
+    near(equilibrium.finalLinkForces_N[0],1,.01,"loaded spring reports tension balancing the external force");
+    near(equilibrium.diagnostics.find("final_max_tensile_link_force_N")->num,equilibrium.finalLinkForces_N[0],0,"tension diagnostics use final constraint estimate");
+
+    // Disconnected springs plus a shared anchor reorder during colouring.
+    // Different rest lengths make the original public link order observable.
+    o=options(backend);o.duration=o.step;
+    std::vector<RubberNode> ordered{node({0,0,0},true),node({1.1,0,0}),node({0,1.2,0}),node({0,0,1.3})};
+    std::vector<RubberLink> orderedLinks{{0,1,1,.01},{0,2,1,.02},{1,3,1.5,.03},{0,3,1,.04}};
+    auto forces=simulateRubber(ordered,orderedLinks,o);
+    check(forces.finalLinkForces_N.size()==orderedLinks.size(),"force receipt preserves all input links");
+    for(size_t i=0;i<orderedLinks.size();++i) {
+        const auto& l=orderedLinks[i];double expected=((forces.frames.back()[l.a]-forces.frames.back()[l.b]).len()-l.restLength)/l.compliance;
+        near(forces.finalLinkForces_N[i],expected,.02,"force receipt preserves original order after graph colouring");
+    }
 
     o=options(backend);o.duration=.2;std::vector<RubberNode> pair{node({-.6,0,0}),node({.6,0,0})};pair[1].mass=3;
     pair[0].velocity={.2,.1,0};pair[1].velocity={-.1,.05,0};
@@ -91,6 +106,10 @@ void cases(const std::string& backend) {
         links[0].compliance*=2;auto changed=simulateRubber(spring,links,o);
         check(!changed.diagnostics.find("gpu_constraint_cache_hit")->b,"material change invalidates constraint cache");
         check(changed.diagnostics.find("gpu_constraint_sha256")->str!=first.diagnostics.find("gpu_constraint_sha256")->str,"cache identity includes compliance");
+        auto invalidLinks=links;invalidLinks[0].compliance=1e-100;
+        rejects([&]{simulateRubber(spring,invalidLinks,o);},"underflows GPU");
+        std::vector<RubberNode> tiny{node({999,0,0}),node({999.000001,0,0})};
+        rejects([&]{simulateRubber(tiny,{{0,1,1e-6,.01}},o);},"precision is insufficient");
     }
     std::cout<<backend<<" pulley "<<belt.diagnostics.dump()<<'\n';
 }
@@ -133,6 +152,7 @@ void invalidInputs() {
     invalid=o;invalid.duration=15;invalid.step=15./14400;invalid.outputFps=119;rejects([&]{simulateRubber(nodes,links,invalid);},"sample-aligned");
     invalid=o;invalid.pulleys={{{},{0,0,2},1,0}};rejects([&]{simulateRubber(nodes,links,invalid);},"unit axis");
     invalid=o;invalid.contactRadius=-1;rejects([&]{simulateRubber(nodes,links,invalid);},"contactRadius");
+    invalid=o;invalid.duration=1e-12;rejects([&]{simulateRubber(nodes,links,invalid);},"duration");
     bad.assign(8193,node({}));rejects([&]{simulateRubber(bad,{},o);},"node count");
     bad.clear();broken.clear();bad.push_back(node({}));
     for(unsigned i=1;i<=129;++i){bad.push_back(node({double(i),0,0}));broken.push_back({0,i,double(i),.01});}
