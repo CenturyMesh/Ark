@@ -61,7 +61,7 @@ V rubberBodyNative059(const V& request){
         TopoDS_Shape seed;
         if(motif=="spike")seed=BRepPrimAPI_MakeCone(gp_Ax2(gp_Pnt(0,0,-embed),gp_Dir(0,0,1)),w*.5,0,h+embed).Shape();
         else if(motif=="lug"){const double length=positive(*relief,"length_mm");seed=BRepPrimAPI_MakeBox(gp_Pnt(-length*.5,-w*.5,-embed),length,w,h+embed).Shape();}
-        else if(motif=="pebble"){if(std::abs(h-w*.5)>1e-9)throw std::runtime_error("Spherical pebble height must equal width/2");seed=BRepPrimAPI_MakeSphere(gp_Pnt(0,0,h-embed),w*.5).Shape();}
+        else if(motif=="pebble"){if(std::abs(h-w*.5)>1e-9)throw std::runtime_error("Spherical pebble height must equal width/2");seed=BRepPrimAPI_MakeSphere(gp_Ax2(gp_Pnt(),gp_Dir(0,0,1)),h,std::asin(-embed/h),K_PI*.5).Shape();}
         else throw std::runtime_error("Relief motif must be spike, lug or pebble");
         for(uint32_t i=0;i<plan.count();++i){
             const auto f=plan.frame(i);gp_Trsf tr;

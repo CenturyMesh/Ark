@@ -84,7 +84,7 @@ add_library(ark STATIC
   src/agent_transactions.cpp
   src/agent_failures.cpp
   src/agent_benchmark.cpp
-  src/physics.cpp src/inertial_simulation.cpp src/rubber.cpp src/rubber_patterns.cpp src/rubber_dynamics.cpp
+  src/physics.cpp src/inertial_simulation.cpp src/rubber.cpp src/rubber_patterns.cpp src/rubber_dynamics.cpp src/surface_edit_059c.cpp
   src/core.cpp src/nurbs.cpp src/brep.cpp src/mesh.cpp src/csg.cpp
   src/model.cpp src/evaluate.cpp src/native_features.cpp src/frame.cpp src/electronics.cpp src/usage.cpp src/stock_preview.cpp src/suspension.cpp src/chatgpt_auth.cpp src/assistant_credentials.cpp src/sheet_commands.cpp src/sheet_preview.cpp src/references.cpp src/datum.cpp src/solver.cpp src/sketch.cpp src/prism_cut.cpp src/onboarding.cpp src/live_session.cpp src/assistant.cpp src/io.cpp src/serialize.cpp
   src/source_tube.cpp src/notch.cpp src/notch_preview.cpp src/step_export.cpp src/tube.cpp src/assembly.cpp src/assembly_io.cpp src/compute.cpp src/api.cpp src/mesh_query.cpp src/mesh_analysis.cpp src/mesh_model.cpp src/agent.cpp src/agent_features.cpp src/result_path.cpp src/kernels_scalar.cpp src/snapshot_032d.cpp)
@@ -513,6 +513,19 @@ if(ARK_WITH_OCCT)
   target_link_libraries(ark-surfacing-059c-tests PRIVATE ark-occt ark)
   add_test(NAME surfacing-059c COMMAND ark-surfacing-059c-tests)
   set_tests_properties(surfacing-059c PROPERTIES TIMEOUT 180)
+  add_executable(ark-surfacing-workflow-059c-tests tests/surfacing_workflow_059c_tests.cpp)
+  target_link_libraries(ark-surfacing-workflow-059c-tests PRIVATE ark)
+  add_dependencies(ark-surfacing-workflow-059c-tests ark-occt-worker)
+  add_test(NAME surfacing-workflow-059c COMMAND ark-surfacing-workflow-059c-tests)
+  set_tests_properties(surfacing-workflow-059c PROPERTIES TIMEOUT 180)
+  add_executable(ark-surface-deform-059c-tests tests/surface_deform_059c_tests.cpp)
+  target_link_libraries(ark-surface-deform-059c-tests PRIVATE ark-occt ark)
+  add_test(NAME surface-deform-059c COMMAND ark-surface-deform-059c-tests)
+  add_executable(ark-surface-control-059c-tests tests/surface_control_059c_tests.cpp)
+  target_link_libraries(ark-surface-control-059c-tests PRIVATE ark)
+  add_dependencies(ark-surface-control-059c-tests ark-occt-worker)
+  add_test(NAME surface-control-059c COMMAND ark-surface-control-059c-tests)
+  set_tests_properties(surface-deform-059c surface-control-059c PROPERTIES TIMEOUT 180)
   add_executable(ark-occt-surface-repair-tests tests/occt_surface_repair_tests.cpp)
   target_link_libraries(ark-occt-surface-repair-tests PRIVATE ark-occt ark)
   add_test(NAME native-surface-repair COMMAND ark-occt-surface-repair-tests)

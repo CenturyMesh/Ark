@@ -538,7 +538,7 @@ V surfaceRequest(const Feature& feature, const ExprEnv& env, Document& document,
         }
     } else if (feature.type == FeatureType::SurfaceEdit) {
         const std::string editOp=required(feature.nativeSpec,"op").asStr();
-        const bool paired=editOp=="trim_wire"||editOp=="mutual_trim"||editOp=="trim_tool"||editOp=="ruled";
+        const bool paired=editOp=="trim_wire"||editOp=="mutual_trim"||editOp=="trim_tool"||editOp=="ruled"||(editOp=="deform_poles"&&feature.nativeSpec.find("glue"));
         if(feature.inputs.size()!=(paired?2u:1u)||(paired&&feature.inputs[0]==feature.inputs[1]))throw std::runtime_error("surface_edit needs one source; trim_wire, mutual_trim, trim_tool and ruled require two distinct inputs");
         const Body* source=precedingBody(preceding,feature.inputs.front());
         if(!source)throw std::runtime_error("surface_edit input missing");
@@ -559,6 +559,22 @@ V surfaceRequest(const Feature& feature, const ExprEnv& env, Document& document,
         }else if(operation.str=="ruled"){
             for(const auto& field:feature.nativeSpec.obj)if(field.first!="op"&&field.first!="reverse_second"&&field.first!="tolerance")throw std::runtime_error("Unknown ruled surface field: "+field.first);
             const auto* second=precedingBody(preceding,feature.inputs[1]);if(!second)throw std::runtime_error("Ruled surface second curve missing");request.obj.erase(std::remove_if(request.obj.begin(),request.obj.end(),[](const auto& item){return item.first=="input_brep";}),request.obj.end());request.set("op",V::makeStr("surface_ruled"));request.set("first_brep",brepOf(*source,"first ruled curve"));request.set("second_brep",brepOf(*second,"second ruled curve"));request.set("reverse_second",required(feature.nativeSpec,"reverse_second"));if(const auto* tolerance=feature.nativeSpec.find("tolerance"))request.set("tolerance",numericNative(*tolerance,env));
+        }else if(operation.str=="deform_poles"){
+            for(const auto& field:feature.nativeSpec.obj)if(field.first!="op"&&field.first!="reference"&&field.first!="source_brep_sha256"&&field.first!="max_displacement_mm"&&field.first!="edits"&&field.first!="glue")throw std::runtime_error("Unknown surface pole edit field: "+field.first);
+            request.set("op",V::makeStr("surface_deform_poles"));request.set("topology",required(source->nativeData,"topology"));request.set("source_brep_sha256",required(feature.nativeSpec,"source_brep_sha256"));
+            if(const auto* reference=feature.nativeSpec.find("reference"))request.set("reference",*reference);
+            request.set("max_displacement_mm",numericNative(required(feature.nativeSpec,"max_displacement_mm"),env));
+            if(const auto* edits=feature.nativeSpec.find("edits"))request.set("edits",numericNative(*edits,env));
+            if(const auto* authored=feature.nativeSpec.find("glue")){
+                if(authored->t!=V::Obj)throw std::runtime_error("Surface glue must be an object");V glue=V::makeObj();
+                for(const auto& field:authored->obj){
+                    if(field.first=="target_vertex"||field.first=="target_edge"||field.first=="tangent_axis"||field.first=="target_brep_sha256")glue.set(field.first,field.second);
+                    else if(field.first=="u"||field.first=="v"||field.first=="max_distance_mm"||field.first=="tangent_tolerance_deg")glue.set(field.first,numericNative(field.second,env));
+                    else throw std::runtime_error("Unknown authored surface glue field: "+field.first);
+                }
+                const auto* target=precedingBody(preceding,feature.inputs[1]);if(!target)throw std::runtime_error("Surface glue target missing");
+                glue.set("target_brep",brepOf(*target,"surface glue target"));glue.set("target_topology",required(target->nativeData,"topology"));request.set("glue",glue);
+            }
         }else if(operation.str=="repair"){
             for(const auto& field:feature.nativeSpec.obj)if(field.first!="op"&&field.first!="mode"&&field.first!="normal")throw std::runtime_error("repair_invalid_request: Unknown repair field: "+field.first);
             request.set("op",V::makeStr("surface_repair"));
@@ -593,7 +609,7 @@ V surfaceRequest(const Feature& feature, const ExprEnv& env, Document& document,
             for(const auto& field:feature.nativeSpec.obj)if(field.first!="op"&&field.first!="keep_points")throw std::runtime_error("Unknown mutual trim field: "+field.first);
             const auto* other=precedingBody(preceding,feature.inputs[1]);if(!other)throw std::runtime_error("Mutual trim second surface missing");
             request.set("op",V::makeStr("surface_mutual_trim"));request.set("other_brep",brepOf(*other,"mutual trim second surface"));request.set("keep_points",numericNative(required(feature.nativeSpec,"keep_points"),env));
-        }else throw std::runtime_error("surface_edit op must be extract_face, trim_plane, trim_wire, trim_tool, mirror, ruled, repair, untrim, extend or mutual_trim");
+        }else throw std::runtime_error("surface_edit op must be extract_face, trim_plane, trim_wire, trim_tool, mirror, ruled, deform_poles, repair, untrim, extend or mutual_trim");
     } else if (feature.type == FeatureType::OffsetSurface) {
         request.set("op", V::makeStr("offset_surface"));
         if (feature.inputs.size() != 1) throw std::runtime_error("offset_surface requires one native surface input");

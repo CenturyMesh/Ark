@@ -774,7 +774,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
             if(!(tool=="import_step"||tool=="import_sheet_step")||!replace||replace->t!=V::Bool||!replace->b)
                 throw std::runtime_error("Resume full feature history before appending imported definitions or library components");
         }
-        static const std::set<std::string> custodyTools{"export_step","export_iges","export_mesh","drawing_export","drawing_inspect","bom_export_parts","snapshot","geometry_query","native_inspect","collision_inspect","assembly_info","assembly_motion","motion_info","explode_info","drag_chain_info","visualize_render","mesh_inspect","mesh_raycast","physics_inspect","manufacturing_inspect","reference_inspect","frame_inspect","electronics_inspect","pcb_export"};
+        static const std::set<std::string> custodyTools{"surface_control","export_step","export_iges","export_mesh","drawing_export","drawing_inspect","bom_export_parts","snapshot","geometry_query","native_inspect","collision_inspect","assembly_info","assembly_motion","motion_info","explode_info","drag_chain_info","visualize_render","mesh_inspect","mesh_raycast","physics_inspect","manufacturing_inspect","reference_inspect","frame_inspect","electronics_inspect","pcb_export"};
         if(custodyTools.count(tool))verifyAssemblyExternalReferences(document);
         // Older direct clients may omit this field. When supplied (mandatory
         // for agent teams), every document replacement/history/import path

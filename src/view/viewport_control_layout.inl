@@ -5,8 +5,8 @@ static NavigationTriadLayout navigationTriadLayout(){
     r.bounds={(LONG)r.x-4,(LONG)r.y-4,(LONG)(r.x+r.size)+4,(LONG)(r.y+r.size)+4};return r;
 }
 struct ViewportBarLayout {float x=0,y=0,width=0,height=68,cell=0;bool visible=false,condensed=false;};
-static ViewportBarLayout viewportBarLayout(){
-    ViewportBarLayout r;if(g_drawingViewport.active||g_busy||g_toolsOpen||viewW<440||viewH<150)return r;
+static ViewportBarLayout viewportBarLayout(bool forFit=false){
+    ViewportBarLayout r;if(g_drawingViewport.active||(!forFit&&g_busy)||g_toolsOpen||viewW<440||viewH<150)return r;
     // Playback occupies the row immediately above the display controls. Keep
     // all icons and hit targets; omit group captions in this contextual layout.
     if(g_viewportPlaybackControls)r.height=44;
@@ -22,3 +22,4 @@ static ViewportBarLayout viewportBarLayout(){
     }
     r.visible=r.y>=viewY+10;return r;
 }
+static double viewportFitBottomInset059(){const auto bar=viewportBarLayout(true);return bar.visible?std::max(50.,(double)viewY+viewH-bar.y+12.):50.;}

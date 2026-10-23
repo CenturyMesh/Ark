@@ -25,7 +25,7 @@ using V=arkjson::Value;
 namespace {
 unsigned checks=0;
 void check(bool ok,const std::string& why){++checks;if(!ok)throw std::runtime_error(why);}
-void near(double a,double b,double tol,const char* why){check(std::abs(a-b)<=tol,std::string(why)+": "+std::to_string(a)+" != "+std::to_string(b));}
+void closeTo(double a,double b,double tol,const char* why){check(std::abs(a-b)<=tol,std::string(why)+": "+std::to_string(a)+" != "+std::to_string(b));}
 const V& field(const V& v,const char* key){const auto* p=v.find(key);if(!p)throw std::runtime_error(std::string("Missing ")+key+" in "+v.dump());return *p;}
 V json(const char* text){V v;check(arkjson::parse(text,v),"fixture JSON");return v;}
 V brep(const TopoDS_Shape& s){return V::makeStr(ark::occt::brepData(s));}
@@ -37,19 +37,19 @@ void valid(const V& result){const auto shape=ark::occt::readBrep(field(result,"b
 void mirror() {
     auto request=json(R"({"op":"surface_mirror","origin":[0,0,0],"normal":[1,0,0],"continuity":"G1"})");request.set("input_brep",brep(plane()));
     auto result=run(request);valid(result);const auto& report=field(result,"report");
-    near(field(report,"area_mm2").num,200,1e-6,"mirror doubles planar area");near(field(report,"symmetry_seam_length_mm").num,10,1e-6,"exact symmetry seam length");
-    check(field(report,"symmetry_seams").arr.size()==1,"one plane seam");near(field(report,"observed_max_seam_tangent_angle_deg").num,0,1e-6,"planar G1 measured");
+    closeTo(field(report,"area_mm2").num,200,1e-6,"mirror doubles planar area");closeTo(field(report,"symmetry_seam_length_mm").num,10,1e-6,"exact symmetry seam length");
+    check(field(report,"symmetry_seams").arr.size()==1,"one plane seam");closeTo(field(report,"observed_max_seam_tangent_angle_deg").num,0,1e-6,"planar G1 measured");
     check(!field(report,"global_g1_verified").b&&!field(report,"source_geometry_modified").b,"mirror does not claim global continuity or alter its half");
     const auto first=field(result,"brep_base64").str;check(first!=field(request,"input_brep").str,"mirror produces a new B-rep");
 
     const auto curved=run(json(R"({"op":"surface_nurbs","u_degree":2,"v_degree":1,"poles":[[[0,0,0],[0,10,0]],[[5,0,0],[5,10,0]],[[10,0,1],[10,10,1]]]})"));
     request.set("input_brep",field(curved,"brep_base64"));result=run(request);valid(result);
-    near(field(field(result,"report"),"area_mm2").num,2*field(field(curved,"report"),"area_mm2").num,1e-5,"curved mirror conserves exact support area");
-    near(field(field(result,"report"),"observed_max_seam_tangent_angle_deg").num,0,.001,"parabolic half meets mirrored tangent plane");
+    closeTo(field(field(result,"report"),"area_mm2").num,2*field(field(curved,"report"),"area_mm2").num,1e-5,"curved mirror conserves exact support area");
+    closeTo(field(field(result,"report"),"observed_max_seam_tangent_angle_deg").num,0,.001,"parabolic half meets mirrored tangent plane");
 
     auto ridge=run(json(R"({"op":"surface_nurbs","u_degree":1,"v_degree":1,"poles":[[[0,0,0],[0,10,0]],[[10,0,2],[10,10,2]]]})"));
     request.set("input_brep",field(ridge,"brep_base64"));rejects([&]{run(request);},"G1 rejects a crease without silently smoothing");
-    request.set("continuity",V::makeStr("G0"));result=run(request);near(field(field(result,"report"),"observed_max_seam_tangent_angle_deg").num,2*std::atan(.2)*180/std::acos(-1.),1e-5,"G0 reports measured crease angle");
+    request.set("continuity",V::makeStr("G0"));result=run(request);closeTo(field(field(result,"report"),"observed_max_seam_tangent_angle_deg").num,2*std::atan(.2)*180/std::acos(-1.),1e-5,"G0 reports measured crease angle");
     request.set("input_brep",brep(plane(-2,10)));rejects([&]{run(request);},"crossing half");
     request.set("input_brep",brep(plane(1,10)));rejects([&]{run(request);},"gap does not auto-heal");
     request.set("input_brep",brep(plane()));request.set("normal",json("[0,0,1]"));rejects([&]{run(request);},"coplanar overlapping mirror");
@@ -59,16 +59,16 @@ void trim() {
     auto request=json(R"({"op":"surface_trim_tool","tool_kind":"surface","keep_point":[8,5,0]})");request.set("input_brep",brep(plane()));
     const auto cutter=BRepBuilderAPI_MakeFace(gp_Pln(gp_Ax3(gp_Pnt(4,0,0),gp_Dir(1,0,0),gp_Dir(0,1,0))),-1,11,-1,1).Face();
     request.set("tool_brep",brep(cutter));auto result=run(request);valid(result);
-    near(field(field(result,"report"),"retained_area_mm2").num,60,1e-6,"surface cutter keeps chosen region");
+    closeTo(field(field(result,"report"),"retained_area_mm2").num,60,1e-6,"surface cutter keeps chosen region");
     check(field(field(result,"report"),"area_conservation_checked").b,"every split region is accounted for");
     request.set("keep_point",json("[4,5,0]"));rejects([&]{run(request);},"seed on cutter rejects");
     request.set("keep_point",json("[8,5,1]"));rejects([&]{run(request);},"off-surface seed rejects");
     request.set("keep_point",json("[1,5,0]"));request.set("tool_kind",V::makeStr("solid"));request.set("tool_brep",brep(BRepPrimAPI_MakeBox(gp_Pnt(4,-1,-1),2,12,2).Shape()));
     result=run(request);valid(result);const auto& report=field(result,"report");
-    near(field(report,"retained_area_mm2").num,40,1e-6,"solid cutter keeps the seed region only");near(field(report,"removed_area_mm2").num,60,1e-6,"solid trim reports both removed pieces");
+    closeTo(field(report,"retained_area_mm2").num,40,1e-6,"solid cutter keeps the seed region only");closeTo(field(report,"removed_area_mm2").num,60,1e-6,"solid trim reports both removed pieces");
     check(field(report,"regions").arr.size()==3,"solid cut accounts for all three native pieces");
     request.set("tool_kind",V::makeStr("curve"));request.set("tool_brep",brep(line({4,-1,0},{4,11,0})));
-    result=run(request);valid(result);near(field(field(result,"report"),"retained_area_mm2").num,40,1e-6,"open exact curve trims a plane");
+    result=run(request);valid(result);closeTo(field(field(result,"report"),"retained_area_mm2").num,40,1e-6,"open exact curve trims a plane");
     request.set("tool_brep",brep(line({4,-1,1},{4,11,1})));rejects([&]{run(request);},"off-surface curve is not silently projected");
 
     const auto warped=run(json(R"({"op":"surface_nurbs","u_degree":1,"v_degree":1,"poles":[[[0,0,0],[0,10,0]],[[10,0,0],[10,10,4]]]})"));
@@ -84,12 +84,12 @@ TopoDS_Wire spline(double y) {
 }
 void ruled() {
     auto request=json(R"({"op":"surface_ruled","reverse_second":false})");request.set("first_brep",brep(line({0,0,0},{10,0,0})));request.set("second_brep",brep(line({0,5,0},{10,5,0})));
-    auto result=run(request);valid(result);near(field(field(result,"report"),"area_mm2").num,50,1e-6,"two straight rails make an exact ruled rectangle");
+    auto result=run(request);valid(result);closeTo(field(field(result,"report"),"area_mm2").num,50,1e-6,"two straight rails make an exact ruled rectangle");
     const auto first=spline(0),second=spline(5);request.set("first_brep",brep(first));request.set("second_brep",brep(second));result=run(request);valid(result);
     BRepAdaptor_Curve curve(TopoDS::Edge(ark::occt::shapes(first,TopAbs_EDGE).front()));
-    near(field(field(result,"report"),"area_mm2").num,5*GCPnts_AbscissaPoint::Length(curve,1e-9),1e-5,"parallel 3D spline ruled area matches analytic extrusion integral");
+    closeTo(field(field(result,"report"),"area_mm2").num,5*GCPnts_AbscissaPoint::Length(curve,1e-9),1e-5,"parallel 3D spline ruled area matches analytic extrusion integral");
     check(field(field(result,"report"),"source_preservation_samples").num==66,"both spline rails independently checked");
-    near(field(field(result,"report"),"observed_max_source_error_mm").num,0,1e-6,"exact spline rail preservation");
+    closeTo(field(field(result,"report"),"observed_max_source_error_mm").num,0,1e-6,"exact spline rail preservation");
     request.set("reverse_second",V::makeBool(true));rejects([&]{run(request);},"crossing boundary correspondence does not auto-flip");
     request.set("reverse_second",V::makeBool(false));request.set("second_brep",brep(first));rejects([&]{run(request);},"zero-width ruling rejects");
     request.set("second_brep",brep(plane()));rejects([&]{run(request);},"surface cannot masquerade as a spline rail");

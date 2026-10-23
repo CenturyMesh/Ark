@@ -1301,6 +1301,7 @@ static void updateMotionDisplay(){
 }
 static void advanceMotion(double seconds){if(!g_motionActive)return;if(g_motionPlaying)g_motionTime+=seconds;try{updateMotionDisplay();}catch(const std::exception& error){g_motionPlaying=false;g_motionActive=false;g_instanceWorld=g_formedInstanceWorld;g_error=true;g_status=error.what();}}
 static u64 motionInstanceId(const std::string& name){u64 result=0;for(const auto& node:g_doc.assembly)if(node.name==name||std::to_string(node.id)==name){if(result)throw std::runtime_error("Instance name is ambiguous");result=node.id;}if(!result)throw std::runtime_error("Select an existing assembly instance name or ID");return result;}
+static double viewportFitBottomInset059();
 static void frameScene(bool animation){
     AABB b=g_sceneBounds;
     if(auto* f=selectedNotchedTube()){
@@ -1324,7 +1325,7 @@ static void frameScene(bool animation){
         const bool layoutOverview=g_allSheetsFlat||g_stockMode;
         const double biasPixels=0.;
         const bool suspensionSelection=selBody>=0&&(size_t)selBody<g_bodyIds.size()&&g_doc.find(g_bodyIds[(size_t)selBody])&&g_doc.find(g_bodyIds[(size_t)selBody])->type==FeatureType::Suspension;
-        const double lowerControls=suspensionSelection?162.:(selectedNotchedTube()||selectedSourceTube()||selectedSheet())?112.:50.;
+        const double lowerControls=std::max(viewportFitBottomInset059(),suspensionSelection?162.:(selectedNotchedTube()||selectedSourceTube()||selectedSheet())?112.:50.);
         const double limitY=std::max(45.,.93*(viewH*.5-(layoutOverview?55.:std::max(44.,lowerControls))));
         auto finishFit=[&](double distance){tDist=distance;if(layoutOverview)tTarget=tTarget+up*(biasPixels*distance/focalPixels);};
         // The enclosing box of a winged or sparse assembly has large empty
