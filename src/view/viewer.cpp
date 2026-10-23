@@ -48,6 +48,10 @@ typedef ptrdiff_t GLsizeiptr;
 #define GL_MAX_TEXTURE_BUFFER_SIZE 0x8C2B
 #define GL_DEPTH_COMPONENT24       0x81A6
 #define GL_FRAMEBUFFER             0x8D40
+#define GL_READ_FRAMEBUFFER        0x8CA8
+#define GL_DRAW_FRAMEBUFFER        0x8CA9
+#define GL_READ_FRAMEBUFFER_BINDING 0x8CAA
+#define GL_DRAW_FRAMEBUFFER_BINDING 0x8CA6
 #define GL_COLOR_ATTACHMENT0       0x8CE0
 #define GL_DEPTH_ATTACHMENT        0x8D00
 #define GL_FRAMEBUFFER_COMPLETE    0x8CD5
@@ -4496,6 +4500,11 @@ static CubeHit g_cubeHover;
 static GLuint g_busySnapshotTex=0;static int g_busySnapshotW=0,g_busySnapshotH=0;
 static int gridCount=0,gOccW=0,gOccH=0,gOccTriedW=-1,gOccTriedH=-1;
 static bool g_swap=true,gOccReady=false;   // headless readback disables the buffer swap
+// Every model-rendering pass returns to this target, including AO, bloom and
+// path tracing. Zero is the interactive window; snapshots use an owned FBO.
+static GLuint g_viewportOutputFramebuffer059=0;
+static int g_lastSceneWidth059=1024,g_lastSceneHeight059=640;
+static void bindViewportOutput059(){if(glBindFramebuffer)glBindFramebuffer(GL_FRAMEBUFFER,g_viewportOutputFramebuffer059);}
 struct AdaptiveGrid {double spacing=10,radius=200,centerX=0,centerZ=0;int halfLines=20;};static AdaptiveGrid g_adaptiveGrid;
 static double niceGridSpacing(double required){
     double decade=std::pow(10.,std::floor(std::log10(std::max(required,1e-8))));
@@ -4615,7 +4624,7 @@ static bool ensureOcclusionTargets(int w,int h){
     auto tex=[&](GLuint& id,GLint internal,GLenum format,GLenum type){glGenTextures(1,&id);glBindTexture(GL_TEXTURE_2D,id);glTexImage2D(GL_TEXTURE_2D,0,internal,w,h,0,format,type,nullptr);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);};
     tex(gGeomTex,GL_RGBA16F,GL_RGBA,GL_HALF_FLOAT);tex(gAoTex,GL_RGBA8,GL_RGBA,GL_UNSIGNED_BYTE);tex(gDepthTex,GL_DEPTH_COMPONENT24,GL_DEPTH_COMPONENT,GL_FLOAT);
     glGenFramebuffers(1,&gFbo);glBindFramebuffer(GL_FRAMEBUFFER,gFbo);glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,gGeomTex,0);glFramebufferTexture2D(GL_FRAMEBUFFER,GL_DEPTH_ATTACHMENT,GL_TEXTURE_2D,gDepthTex,0);
-    gOccReady=glCheckFramebufferStatus(GL_FRAMEBUFFER)==GL_FRAMEBUFFER_COMPLETE;glBindFramebuffer(GL_FRAMEBUFFER,0);gOccW=w;gOccH=h;gOccTriedW=w;gOccTriedH=h;
+    gOccReady=glCheckFramebufferStatus(GL_FRAMEBUFFER)==GL_FRAMEBUFFER_COMPLETE;bindViewportOutput059();gOccW=w;gOccH=h;gOccTriedW=w;gOccTriedH=h;
     if(!gOccReady)while(glGetError()!=GL_NO_ERROR){}
     return gOccReady;
 }
@@ -4624,7 +4633,7 @@ static void applyOcclusion(const Mat4& view,const Mat4& proj,const GLfloat vpT[1
     glBindFramebuffer(GL_FRAMEBUFFER,gFbo);glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,gGeomTex,0);
     glViewport(0,0,viewW,viewH);glDisable(GL_BLEND);glEnable(GL_DEPTH_TEST);glDepthFunc(GL_LEQUAL);glClearColor(0.f,0.f,1.f,1.f);glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
     drawSurfaces(true,view,proj,vpT,eye);
-    if((g_occlusionMode==0&&g_contactShadowStrength==0)||g_trace.active){glBindFramebuffer(GL_FRAMEBUFFER,0);glViewport(viewX,winH-viewY-viewH,viewW,viewH);glEnable(GL_BLEND);return;}
+    if((g_occlusionMode==0&&g_contactShadowStrength==0)||g_trace.active){bindViewportOutput059();glViewport(viewX,winH-viewY-viewH,viewW,viewH);glEnable(GL_BLEND);return;}
     glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,gAoTex,0);glDisable(GL_DEPTH_TEST);glUseProgram(pAo);
     glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,gGeomTex);glUniform1i(glGetUniformLocation(pAo,"gbuf"),0);glUniform2f(glGetUniformLocation(pAo,"res"),(float)viewW,(float)viewH);glUniform1f(glGetUniformLocation(pAo,"depthFar"),(float)g_projectionFar);
     GLfloat pm[16];for(int i=0;i<16;++i)pm[i]=(GLfloat)proj.m[i];glUniformMatrix4fv(auProj,1,GL_FALSE,pm);glUniform2f(auFocal,(float)proj.m[0],(float)proj.m[5]);glUniform1f(auOrtho,g_cameraOrtho?1.f:0.f);
@@ -4633,7 +4642,7 @@ static void applyOcclusion(const Mat4& view,const Mat4& proj,const GLfloat vpT[1
     glUniform1f(auRadius,(float)radius);glUniform1f(auBias,(float)(radius*0.055));glUniform1i(glGetUniformLocation(pAo,"mode"),g_occlusionMode);
     glUniform1f(glGetUniformLocation(pAo,"contactShadows"),g_contactShadowStrength);
     glBindVertexArray(quadVao);glDrawArrays(GL_TRIANGLES,0,3);
-    glBindFramebuffer(GL_FRAMEBUFFER,0);glViewport(viewX,winH-viewY-viewH,viewW,viewH);glEnable(GL_BLEND);glBlendFunc(GL_DST_COLOR,GL_ZERO);glUseProgram(pCompose);
+    bindViewportOutput059();glViewport(viewX,winH-viewY-viewH,viewW,viewH);glEnable(GL_BLEND);glBlendFunc(GL_DST_COLOR,GL_ZERO);glUseProgram(pCompose);
     glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,gAoTex);glActiveTexture(GL_TEXTURE1);glBindTexture(GL_TEXTURE_2D,gGeomTex);
     glUniform1i(glGetUniformLocation(pCompose,"ao"),0);glUniform1i(glGetUniformLocation(pCompose,"gbuf"),1);glUniform1f(glGetUniformLocation(pCompose,"strength"),g_occlusionStrength);glUniform2f(glGetUniformLocation(pCompose,"res"),(float)viewW,(float)viewH);glUniform2f(cuOrigin,(float)viewX,(float)(winH-viewY-viewH));
     glUniform1f(glGetUniformLocation(pCompose,"shadowStrength"),g_contactShadowStrength);glUniform1f(glGetUniformLocation(pCompose,"depthFar"),(float)g_projectionFar);glUniform1f(glGetUniformLocation(pCompose,"radius"),(float)radius);
@@ -4857,20 +4866,12 @@ static void drawCanvases(const GLfloat* vpT){
 #include "rubber_panel_059c.inl"
 #include "drag_chain.inl"
 #include "assistant_chat.inl"
-static void drawFrame(HDC hdc){
-    if(!g_preparingEdit){processDirectAuthoringPreview();processCableGuide035();}
-    static auto previous=std::chrono::steady_clock::now();auto now=std::chrono::steady_clock::now();
-    double elapsed=std::min(.10,std::chrono::duration<double>(now-previous).count());if(!g_preparingEdit){advanceFold(elapsed);advanceSheet(elapsed);advanceSuspension(elapsed);advanceMotion(elapsed);advanceBakedMotion(elapsed);advanceExplodedView(elapsed);advanceInertial056(elapsed);advanceRubber059(elapsed);}previous=now;
-    double cameraEase=1-std::exp(-13.4*elapsed),distanceEase=1-std::exp(-11.9*elapsed);
-    yaw+=(tYaw-yaw)*cameraEase;pitch+=(tPitch-pitch)*cameraEase;dist+=(tDist-dist)*distanceEase;target=target+(tTarget-target)*cameraEase;
-    layout();assistant_chat::sync();sampleStudioResources();updateCostDisplay();
-    // Reserve the existing contextual playback row without measuring or
-    // allocating its geometry in each toolbar/cube layout query.
-    const auto* playbackSheet=selectedSheet();const Body* playbackBody=playbackSheet&&playbackSheet->type==FeatureType::SheetMetal?sheetOriginBody(playbackSheet->id):nullptr;
-    g_viewportPlaybackControls=selectedSuspension()||selectedNotchedTube()||selectedSourceTube()||(playbackBody&&playbackBody->nativeData.find("animation"));
-    if(g_physicalVisible){u64 selected=selBody>=0&&(size_t)selBody<g_bodyIds.size()?(g_instanceIds[(size_t)selBody]?g_instanceIds[(size_t)selBody]:g_bodyIds[(size_t)selBody]):0;
-        if(g_physicalRevision!=g_session.revision||selected!=g_physicalSelection)g_physicalVisible=false;}
-
+// Shared CAD display pass: no window operations, layout, chat synchronization,
+// animation advance, camera easing or SwapBuffers. Offscreen uses identical GPU
+// shading, depth, occlusion, bloom, AA and CAD overlays at the captured pose.
+static Mat4 drawViewportScene059(bool interactive){
+    if(interactive&&viewW>1&&viewH>1){g_lastSceneWidth059=viewW;g_lastSceneHeight059=viewH;}
+    bindViewportOutput059();glDisable(GL_SCISSOR_TEST);glDepthMask(GL_TRUE);
     glViewport(0,0,winW,winH);
     glClearColor(.044f,.052f,.058f,1.f);glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
     glViewport(viewX,winH-viewY-viewH,viewW,viewH);
@@ -4919,7 +4920,7 @@ static void drawFrame(HDC hdc){
     glEnable(GL_DEPTH_TEST);glDepthFunc(GL_LEQUAL);glDepthMask(GL_FALSE);glEnable(GL_BLEND);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
     drawSurfaces(false,view,proj,vpT,eye,true);
     drawPlaneStamps024(vpT);
-    drawEmission030(view,proj,vpT,eye);applyViewportAntialiasing056();captureVisualizeScene();
+    drawEmission030(view,proj,vpT,eye);applyViewportAntialiasing056();if(interactive)captureVisualizeScene();
     glDepthMask(GL_TRUE);
 
     if((g_showSketches&&!g_sketchLines.empty())||(g_showDatumPlanes&&!g_datumLines.empty())||!g_selectionLines.empty()||!g_selectionFaceFill.empty()){
@@ -4937,7 +4938,24 @@ static void drawFrame(HDC hdc){
         if(g_showDatumPlanes){glUniform4f(glGetUniformLocation(pSketch,"tint"),.55,.77,.68,.48);glDrawArrays(GL_LINES,(GLint)(g_sketchLines.size()+g_sketchPoints.size()+g_constraintHighlightLines.size())/3,(GLsizei)g_datumLines.size()/3);}
         if(!g_selectionLines.empty()){glLineWidth(2.5f);glUniform4f(glGetUniformLocation(pSketch,"tint"),.97,.62,.28,1.);glDrawArrays(GL_LINES,(GLint)(g_sketchLines.size()+g_sketchPoints.size()+g_constraintHighlightLines.size()+g_datumLines.size())/3,(GLsizei)g_selectionLines.size()/3);glLineWidth(1.f);}
     }
-    updateSelectionHover(g_pointerX,g_pointerY);drawMeshPointerEdges();drawSelectedFaceGlow();drawSelectedReferenceEdges();drawSelectionHover();drawDraftSketches();drawProjectionPreview();drawManualSketchPreview();drawSketchEditPreview();drawDirectAuthoringPreview();drawCableGuide035();
+    if(interactive)updateSelectionHover(g_pointerX,g_pointerY);drawMeshPointerEdges();drawSelectedFaceGlow();drawSelectedReferenceEdges();drawSelectionHover();drawDraftSketches();drawProjectionPreview();drawManualSketchPreview();drawSketchEditPreview();drawDirectAuthoringPreview();drawCableGuide035();
+    return vp;
+}
+static void drawFrame(HDC hdc){
+    if(!g_preparingEdit){processDirectAuthoringPreview();processCableGuide035();}
+    static auto previous=std::chrono::steady_clock::now();auto now=std::chrono::steady_clock::now();
+    double elapsed=std::min(.10,std::chrono::duration<double>(now-previous).count());if(!g_preparingEdit){advanceFold(elapsed);advanceSheet(elapsed);advanceSuspension(elapsed);advanceMotion(elapsed);advanceBakedMotion(elapsed);advanceExplodedView(elapsed);advanceInertial056(elapsed);advanceRubber059(elapsed);}previous=now;
+    double cameraEase=1-std::exp(-13.4*elapsed),distanceEase=1-std::exp(-11.9*elapsed);
+    yaw+=(tYaw-yaw)*cameraEase;pitch+=(tPitch-pitch)*cameraEase;dist+=(tDist-dist)*distanceEase;target=target+(tTarget-target)*cameraEase;
+    layout();assistant_chat::sync();sampleStudioResources();updateCostDisplay();
+    // Reserve the existing contextual playback row without measuring or
+    // allocating its geometry in each toolbar/cube layout query.
+    const auto* playbackSheet=selectedSheet();const Body* playbackBody=playbackSheet&&playbackSheet->type==FeatureType::SheetMetal?sheetOriginBody(playbackSheet->id):nullptr;
+    g_viewportPlaybackControls=selectedSuspension()||selectedNotchedTube()||selectedSourceTube()||(playbackBody&&playbackBody->nativeData.find("animation"));
+    if(g_physicalVisible){u64 selected=selBody>=0&&(size_t)selBody<g_bodyIds.size()?(g_instanceIds[(size_t)selBody]?g_instanceIds[(size_t)selBody]:g_bodyIds[(size_t)selBody]):0;
+        if(g_physicalRevision!=g_session.revision||selected!=g_physicalSelection)g_physicalVisible=false;}
+
+    const Mat4 vp=drawViewportScene059(true);
     // ============================ UI =========================================
     glDisable(GL_DEPTH_TEST);
     glViewport(0,0,winW,winH);
@@ -5747,25 +5765,18 @@ static void drawFrame(HDC hdc){
     if(g_swap)SwapBuffers(hdc);
 }
 
+#include "viewport_capture_059c.inl"
 static arkjson::Value captureViewportSnapshot(const arkjson::Value& args){
     using V=arkjson::Value;
     try{
         if(args.find("camera"))throw std::runtime_error("Live viewport capture uses the current Studio camera; omit camera or choose snapshot view custom");
         if(g_busy||!g_uiReady)throw std::runtime_error("Current Studio viewport is unavailable while a document operation is applying");
-        if(IsIconic(g_window))throw std::runtime_error("Studio is minimized; restore its window before requesting viewport pixels, or explicitly request a software snapshot view");
         const u64 revision=g_session.revision,epoch=g_documentEpoch;if(auto* expected=args.find("expected_revision");expected&&(expected->t!=V::Num||expected->num!=(double)revision))throw std::runtime_error("Viewport snapshot revision conflict; read current doc_info before retrying");
-        if(viewW<=0||viewH<=0||viewX<0||viewY<0||viewX+viewW>winW||viewY+viewH>winH)throw std::runtime_error("Studio viewport bounds are invalid for pixel readback");
-        struct CaptureScope {HDC dc=nullptr;bool swap=true;~CaptureScope(){if(dc)ReleaseDC(g_window,dc);g_swap=swap;}} scope{GetDC(g_window),g_swap};
-        if(!scope.dc)throw std::runtime_error("Studio viewport device context is unavailable");
-        for(int i=0;i<16;++i)if(glGetError()==GL_NO_ERROR)break;
-        g_swap=false;drawFrame(scope.dc);glFinish();
-        if(GLenum renderError=glGetError();renderError!=GL_NO_ERROR)throw std::runtime_error("Studio viewport render failed (OpenGL "+std::to_string((unsigned)renderError)+")");
-        if(!glBindFramebuffer)throw std::runtime_error("Studio viewport readback requires an OpenGL framebuffer binding");glBindFramebuffer(GL_FRAMEBUFFER,0);
-        std::vector<u8> pixels((size_t)viewW*viewH*3);glPixelStorei(GL_PACK_ALIGNMENT,1);glReadBuffer(GL_BACK);glReadPixels(viewX,winH-viewY-viewH,viewW,viewH,GL_RGB,GL_UNSIGNED_BYTE,pixels.data());
-        if(GLenum readError=glGetError();readError!=GL_NO_ERROR)throw std::runtime_error("Studio viewport pixel readback failed (OpenGL "+std::to_string((unsigned)readError)+")");if(revision!=g_session.revision||epoch!=g_documentEpoch)throw std::runtime_error("Document changed during viewport capture; inspect current revision and retry");
-        double scale=std::min({1.,1024./std::max(viewW,1),640./std::max(viewH,1)});Image shot;shot.w=std::max(1,(int)std::floor(viewW*scale));shot.h=std::max(1,(int)std::floor(viewH*scale));shot.px.resize((size_t)shot.w*shot.h*3);
-        for(int y=0;y<shot.h;++y)for(int x=0;x<shot.w;++x){int fromX=std::min(viewW-1,(int)(x/scale)),fromY=std::min(viewH-1,(int)(y/scale));size_t source=((size_t)(viewH-1-fromY)*viewW+fromX)*3,destination=((size_t)y*shot.w+x)*3;std::copy_n(pixels.begin()+source,3,shot.px.begin()+destination);}
+        const bool minimized=IsIconic(g_window)!=0,collapsed=viewW<2||viewH<2;
+        const Image shot=captureGpuScene059();
+        if(revision!=g_session.revision||epoch!=g_documentEpoch)throw std::runtime_error("Document changed during viewport capture; inspect current revision and retry");
         V evidence=V::makeObj(),state=V::makeObj(),camera=V::makeObj(),selected=V::makeObj();evidence.set("revision",V::makeNum((double)revision));evidence.set("current_revision",V::makeNum((double)g_session.revision));evidence.set("view",V::makeStr("viewport"));evidence.set("capture_source",V::makeStr("studio_viewport"));evidence.set("width",V::makeNum(shot.w));evidence.set("height",V::makeNum(shot.h));
+        evidence.set("render_target",V::makeStr("offscreen_gpu_framebuffer"));evidence.set("window_minimized",V::makeBool(minimized));evidence.set("viewport_collapsed",V::makeBool(collapsed));evidence.set("ui_chrome_included",V::makeBool(false));evidence.set("window_state_preserved",V::makeBool(true));
         auto vector=[](Vec3 point){V value=V::makeArr();value.arr={V::makeNum(point.x),V::makeNum(point.y),V::makeNum(point.z)};return value;};camera.set("eye_mm",vector(camEye()));camera.set("target_mm",vector(target));camera.set("yaw_rad",V::makeNum(yaw));camera.set("pitch_rad",V::makeNum(pitch));camera.set("roll_rad",V::makeNum(cameraRoll));camera.set("distance_mm",V::makeNum(dist));camera.set("orthographic",V::makeBool(g_cameraOrtho));state.set("camera",camera);state.set("drafts",V::makeBool(g_sketchDrawing.active||!g_draftViews.empty()));state.set("sketches_visible",V::makeBool(g_showSketches));state.set("active_sketch",V::makeStr(g_activeSketch));state.set("flat_display",V::makeBool(g_allSheetsFlat));state.set("stock_display",V::makeBool(g_stockMode));state.set("rendering",V::makeStr(wireframe?"wireframe":g_showEdges?"shaded_edges":"shaded"));evidence.set("view_state",state);
         if(selBody>=0&&(size_t)selBody<g_bodyIds.size()){selected.set("feature_id",V::makeNum((double)g_bodyIds[(size_t)selBody]));selected.set("occurrence_id",V::makeNum((double)g_instanceIds[(size_t)selBody]));selected.set("copy",V::makeNum(g_instanceCopies[(size_t)selBody]));}else if(g_explorerFeature)selected.set("feature_id",V::makeNum((double)g_explorerFeature));if(!g_picked.empty()){selected.set("reference",V::makeStr(g_picked.back().name));selected.set("reference_owner",V::makeStr(g_picked.back().owner));}evidence.set("selected",selected);
         std::string path;if(auto* output=args.find("path");output&&output->t==V::Str)path=output->str;return snapshotImageResult(shot,evidence,path);
@@ -6212,6 +6223,7 @@ static void seedDocument(){g_doc=makeDemoDocument();rebuildScene();frameScene();
 #include "studio_render_selftest.inl"
 #include "interaction_performance.inl"
 #include "viewport_quality_selftest_056c.inl"
+#include "viewport_capture_selftest_059c.inl"
 #include "inertial_selftest_056c.inl"
 #include "rubber_selftest_059c.inl"
 
@@ -6233,7 +6245,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     bool localModelsUiTest=false;bool viewportDockUiTest=false;bool bakedMotionsUiTest=false;bool parametricHudUiTest=false;bool explodedViewsUiTest=false;bool dragChainUiTest=false;bool bomUiTest=false;bool drawingWorkspaceUiTest=false;bool drawingViewportUiTest=false;bool measurementUiTest=false;bool authoringUiTest=false;
     bool selectionPickingUiTest=false;bool interactionUiTest=false,connectorsUiTest=false,actionIconsUiTest=false,treeUiTest=false,arcUiTest=false,completionUiTest=false,sketchDrawingUiTest=false,sketchEditUiTest=false,selectionGlowUiTest=false,datumAuthoringUiTest=false,typedSketchUiTest=false;
     bool teamBlockersUiTest=false;bool realtimeUiTest=false;bool asyncExactUiTest=false;bool productToolsUiTest=false;bool selfTest=false,assemblyTest=false,dialogTest=false,bendTest=false,bendExportTest=false,sourceTest=false,sketchTest=false,assistantTest=false,nativeUiTest=false,renderUiTest=false,engineeringUiTest=false,sheetShowcaseTest=false,contextUiTest=false,suspensionUiTest=false,connectChatGpt=false,motionUiTest=false,motionPlay=false,navigationUiTest=false,projectionUiTest=false,frameToolsUiTest=false;unsigned exitAfterMs=0;std::string endpointFile,requestedSketch;int requestedOpening=-1;double requestedFold=-1,showcaseProgress=-1;std::string shotPath="ark_studio.png",loadPath,scriptPath,importPath,showcaseView,spotlightName,suspensionFeatureName,motionDriverName,motionSpeed;double requestedMotionTime=0;std::vector<std::string> suspensionValues;
-    int requestedPathSamples=1;bool studioRenderTest=false,requestedPathTracing=false,viewportQualityTest=false,inertialUiTest=false,inertialEngineUiTest=false,rubberUiTest=false,rubberEngineUiTest=false;
+    int requestedPathSamples=1;bool studioRenderTest=false,requestedPathTracing=false,viewportQualityTest=false,viewportCaptureTest=false,inertialUiTest=false,inertialEngineUiTest=false,rubberUiTest=false,rubberEngineUiTest=false;
     int sw=1600,sh=1000,argc=0;auto argv=CommandLineToArgvW(GetCommandLineW(),&argc);
     auto utf8=[](const wchar_t* w){int n=WideCharToMultiByte(CP_UTF8,0,w,-1,nullptr,0,nullptr,nullptr);std::string s(n,'\0');WideCharToMultiByte(CP_UTF8,0,w,-1,s.data(),n,nullptr,nullptr);s.pop_back();return s;};
     for(int i=1;i<argc;++i){auto a=utf8(argv[i]);if(a=="--shot"&&i+1<argc){g_headless=true;shotPath=utf8(argv[++i]);}
@@ -6293,6 +6305,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         else if(a=="--self-test-inertial-ui"){inertialUiTest=true;g_headless=true;}
         else if(a=="--self-test-inertial-engine-ui"){inertialEngineUiTest=true;g_headless=true;}
         else if(a=="--self-test-viewport-quality-ui"){viewportQualityTest=true;g_headless=true;}
+        else if(a=="--self-test-viewport-capture-ui"){viewportCaptureTest=true;g_headless=true;}
         else if(a=="--path-trace")requestedPathTracing=true;
         else if(a=="--path-samples"&&i+1<argc)requestedPathSamples=std::clamp(_wtoi(argv[++i]),1,4096);
         else if(a=="--self-test-authoring-ui"){authoringUiTest=true;g_headless=true;}
@@ -7029,6 +7042,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     if(studioRenderTest){int result=studioRenderSelfTest(hdc,shotPath);if(result)return result;}
     if(viewportQualityTest){int result=viewportQualitySelfTest056(hdc,shotPath);if(result)return result;}
     if(rubberUiTest||rubberEngineUiTest){int result=rubberSelfTest059(hdc,shotPath,rubberEngineUiTest);if(result)return result;}
+    if(viewportCaptureTest)return viewportCaptureSelfTest059(shotPath);
     if(inertialUiTest||inertialEngineUiTest){int result=inertialSelfTest056(hdc,shotPath,inertialEngineUiTest);if(result)return result;}
     if(renderUiTest){
         using V=arkjson::Value;

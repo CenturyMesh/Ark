@@ -176,7 +176,7 @@ static bool drawPathTracing(const Mat4& projection,const Vec3& eye){
  if(cameraKey!=g_trace.cameraKey){g_trace.cameraKey=cameraKey;g_trace.samples=0;}
  if(g_trace.samples<4096){auto start=std::chrono::steady_clock::now();int output=g_trace.samples&1,input=output^1;
   glBindFramebuffer(GL_FRAMEBUFFER,g_trace.fbo);glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,g_trace.accum[output],0);
-  if(glCheckFramebufferStatus(GL_FRAMEBUFFER)!=GL_FRAMEBUFFER_COMPLETE){glBindFramebuffer(GL_FRAMEBUFFER,0);g_trace.reason="Floating-point accumulation framebuffer unavailable";return false;}
+  if(glCheckFramebufferStatus(GL_FRAMEBUFFER)!=GL_FRAMEBUFFER_COMPLETE){bindViewportOutput059();g_trace.reason="Floating-point accumulation framebuffer unavailable";return false;}
   glViewport(0,0,width,height);glDisable(GL_DEPTH_TEST);glDisable(GL_BLEND);glUseProgram(g_trace.program);studioBasis(g_trace.program,frame);
   glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_BUFFER,g_trace.triangleTexture);glUniform1i(glGetUniformLocation(g_trace.program,"triangles"),0);
   glActiveTexture(GL_TEXTURE1);glBindTexture(GL_TEXTURE_BUFFER,g_trace.nodeTexture);glUniform1i(glGetUniformLocation(g_trace.program,"nodes"),1);
@@ -186,9 +186,9 @@ static bool drawPathTracing(const Mat4& projection,const Vec3& eye){
   const double nearPlane=g_cameraOrtho?(projection.m[14]+1.)/projection.m[10]:projection.m[14]/(projection.m[10]-1.);glUniform2f(glGetUniformLocation(g_trace.program,"clipRange"),(float)std::max(0.,nearPlane),(float)g_projectionFar);
   glUniform3f(glGetUniformLocation(g_trace.program,"camera"),(float)relativeEye.x,(float)relativeEye.y,(float)relativeEye.z);glUniform1f(glGetUniformLocation(g_trace.program,"ortho"),g_cameraOrtho?1.f:0.f);
   glUniform1f(glGetUniformLocation(g_trace.program,"rayEpsilon"),(float)std::max(1e-5,g_sceneBounds.diagonal()*2e-6));glBindVertexArray(quadVao);glDrawArrays(GL_TRIANGLES,0,3);
-  if(GLenum error=glGetError()){char detail[96];std::snprintf(detail,sizeof detail,"GPU path sample failed (OpenGL 0x%X)",(unsigned)error);g_trace.reason=detail;glBindFramebuffer(GL_FRAMEBUFFER,0);glViewport(viewX,winH-viewY-viewH,viewW,viewH);glEnable(GL_BLEND);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);glActiveTexture(GL_TEXTURE0);return false;}
+  if(GLenum error=glGetError()){char detail[96];std::snprintf(detail,sizeof detail,"GPU path sample failed (OpenGL 0x%X)",(unsigned)error);g_trace.reason=detail;bindViewportOutput059();glViewport(viewX,winH-viewY-viewH,viewW,viewH);glEnable(GL_BLEND);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);glActiveTexture(GL_TEXTURE0);return false;}
   ++g_trace.samples;
-  g_trace.lastSubmitMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();glBindFramebuffer(GL_FRAMEBUFFER,0);
+  g_trace.lastSubmitMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();bindViewportOutput059();
  }
  glViewport(viewX,winH-viewY-viewH,viewW,viewH);glDisable(GL_DEPTH_TEST);glEnable(GL_BLEND);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);glUseProgram(g_trace.present);glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,g_trace.accum[(g_trace.samples-1)&1]);glUniform1i(glGetUniformLocation(g_trace.present,"image"),0);
  glUniform2f(glGetUniformLocation(g_trace.present,"resolution"),(float)viewW,(float)viewH);glUniform2f(glGetUniformLocation(g_trace.present,"origin"),(float)viewX,(float)(winH-viewY-viewH));glBindVertexArray(quadVao);glDrawArrays(GL_TRIANGLES,0,3);
