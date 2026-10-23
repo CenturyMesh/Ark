@@ -30,11 +30,14 @@ unchanged.
 ## Validation plan and source review
 
 - `git diff --check`: passed at source handoff.
-- `studio-navigation-036a`: retain 416 real face/edge/corner clicks across four
+- `studio-navigation-036a`: retain 208 real face/edge/corner clicks across four
   physical sizes and two rolls, 48 cardinal text pixel checks, antialias coverage,
   Home/orbit/padding and retained allocations. Add independent camera-normal
   agreement for every clicked facet so a self-consistent but wrong named view
-  cannot pass.
+  cannot pass. At 1180x800 and 1600x1000, also exercise actual style clicks with
+  Assistant and navigation controls both open; require a cube at least 96 pixels
+  across and disjoint control rectangles. Toolbar, cube and triad share placement
+  geometry; wide, short viewports retain readable face labels.
 - `studio-viewport-dock-ui` and compact counterpart: actual Win32 clicks for
   all raster styles, projection, overlays and Fit; settings reload; neutral
   padding; bounds and triad separation; selected part/container drawings,

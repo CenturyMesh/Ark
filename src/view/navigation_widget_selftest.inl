@@ -17,6 +17,16 @@
             for(int y=g_compassBounds.top;y<g_compassBounds.bottom;++y)for(int x=g_compassBounds.left;x<g_compassBounds.right;++x){const u8* p=shot.px.data()+((size_t)y*winW+x)*3;for(int axis=0;axis<3;++axis)if(p[axis]>80&&p[axis]>p[(axis+1)%3]*1.2&&p[axis]>p[(axis+2)%3]*1.2)++colors[axis];}
             for(unsigned count:colors)if(count<20)return failure("Cartesian triad lost an RGB axis in actual rendered pixels.");
             if(!write(".navigation-"+std::to_string(size.first)+"x"+std::to_string(size.second),shot))return failure("Could not save navigation window capture.");
+            // Keep all display modes reachable with Assistant + navigation bar
+            // in the actual supported compact window, not a hidden-dock fixture.
+            g_compactNavigation=true;draw();
+            if(g_cubeS<96)return failure("Assistant + navigation controls made the cube unreadable.");
+            for(int id:{462,963,464,455,176,177,178}){auto zone=std::find_if(g_zones.begin(),g_zones.end(),[&](const Zone& z){return z.id==id;});if(zone==g_zones.end())return failure("Assistant + navigation controls hid a display/navigation action.");
+                if(zone->x<g_cubeX+g_cubeS&&zone->x+zone->w>g_cubeX&&zone->y<g_cubeY+g_cubeS&&zone->y+zone->h>g_cubeY)return failure("Display/navigation control overlaps the cube.");
+                if(id==462||id==963||id==464){click((int)(zone->x+zone->w*.5f),(int)(zone->y+zone->h*.5f));if(wireframe!=(id==464)||(id==462&&g_showEdges)||(id==963&&!g_showEdges))return failure("Display style click failed with Assistant + navigation controls.");draw();}}
+            if(!navigationUiFits(detail))return failure(detail);
+            if(!write(".navigation-"+std::to_string(size.first)+"x"+std::to_string(size.second)+"-compact-controls",readPixels(0,0,winW,winH)))return failure("Could not save compact controls capture.");
+            g_compactNavigation=false;uiAction(462);draw();
         }
         unsigned directionChecks=0,labelChecks=0,edgePixels=0;std::ostringstream timings;
         for(int size:{96,136,204,272}){g_navigationTestSize=size;draw();

@@ -5625,8 +5625,7 @@ static void drawFrame(HDC hdc){
     glyph(191,homeX+5,homeY+5,18,homeHover?1.f:.86f);g_zones.push_back({homeX,homeY,28,28,191});
     g_zones.push_back({(float)g_cubeX,(float)g_cubeY,(float)g_cubeS,(float)g_cubeS,179});
     }else g_cubeS=0;
-    float compassSize=std::max(88.f,std::min(std::clamp(viewH*.17f,112.f,152.f),viewH-72.f)),compassX=(float)viewX+viewW-compassSize-14,compassY=(float)viewY+viewH-compassSize-14;
-    g_compassBounds={(LONG)compassX-4,(LONG)compassY-4,(LONG)(compassX+compassSize)+4,(LONG)(compassY+compassSize)+4};
+    const auto triadLayout=navigationTriadLayout();const float compassSize=triadLayout.size,compassX=triadLayout.x,compassY=triadLayout.y;g_compassBounds=triadLayout.bounds;
     paintNavigationTriad((int)compassX,(int)compassY,(int)compassSize);glUseProgram(pUI);glUniform2f(uuVp,W,H);
     {auto directions=compassDirections();static const char* names[]={"X","Y","Z"};static const float colors[][3]={{1.f,.38f,.35f},{.40f,.91f,.60f},{.34f,.67f,1.f}};static const int views[]={182,23,180};
         std::array<int,3> order={0,1,2};std::sort(order.begin(),order.end(),[&](int a,int b){return directions[a].z>directions[b].z;});
@@ -5639,9 +5638,10 @@ static void drawFrame(HDC hdc){
     }
     if(g_compactNavigation){const char* names[]={"Orbit","Pan","Zoom","Fit","Edges","AO","Ortho"};int ids[]={176,177,178,20,174,186,175};
         bool on[]={g_navMode==0,g_navMode==1,g_navMode==2,false,g_showEdges,g_occlusionMode!=0,g_cameraOrtho};
-        float gap=4.f,bw=58.f,ty=(float)viewY+(float)viewH-44.f;
-        rect((float)viewX+10,ty-5,7*bw+6*gap+16,43,9,.07f,.08f,.10f,.76f,.34f,.38f,.44f,.45f,1);
-        for(int i=0;i<7;++i)button(names[i],(float)viewX+18+i*(bw+gap),ty,bw,ids[i],false,on[i]);}
+        float gap=4.f,bw=58.f,ty=(float)viewY+(float)viewH-44.f,nx=(float)viewX+10;
+        if(g_showViewCube&&ty-5<g_cubeY+g_cubeS+8)nx=std::max(nx,(float)g_cubeX+g_cubeS+12);
+        rect(nx,ty-5,7*bw+6*gap+16,43,9,.07f,.08f,.10f,.76f,.34f,.38f,.44f,.45f,1);
+        for(int i=0;i<7;++i)button(names[i],nx+8+i*(bw+gap),ty,bw,ids[i],false,on[i]);}
     if(selBody>=0&&(size_t)selBody<g_bodyIds.size()&&!g_toolsOpen&&!g_cableGuide035.active){
         auto* feature=g_doc.find(g_bodyIds[(size_t)selBody]);bool transparent=feature&&resolvedAppearance(g_doc,*feature).opacity<.999;
         float px=g_showViewCube?(float)g_cubeX+g_cubeS+24:(float)viewX+16,py=(float)viewY+12;rect(px-5,py-5,390,57,7,.055f,.083f,.106f,.92f,.29f,.42f,.52f,.65f,1);

@@ -1,4 +1,5 @@
 // View-only compass: the same retained 26 facets own rendering and ray picking.
+#include "viewport_control_layout.inl"
 // A shallow chamfer keeps the object recognizably cubic while preserving all
 // twelve edge and eight corner targets in the same rendering/picking mesh.
 static constexpr double kNavigationExtent=.94,kNavigationFaceHalf=.79,kNavigationFrustum=1.50;
@@ -12,10 +13,14 @@ static bool g_navigationTargetReady=false;
 
 static void updateNavigationBounds(){
     float expansion=std::clamp(((float)viewW-622.f)/420.f,0.f,1.f);
-    // Leave room for the display bar when the Assistant makes the viewport short.
-    g_cubeS=std::max(44,std::min((int)std::lround(136.f+24.f*expansion),viewH-102));
-    if(g_navigationTestSize)g_cubeS=std::min(g_navigationTestSize,std::min(viewW-28,viewH-26));
     g_cubeX=viewX+14;g_cubeY=viewY+12;
+    g_cubeS=std::max(44,std::min((int)std::lround(136.f+24.f*expansion),viewH-26));
+    const auto bar=viewportBarLayout();
+    // A short viewport does not justify shrinking readable labels when the
+    // toolbar already fits beside the cube. Reserve space only at an overlap.
+    if(bar.visible&&g_cubeX+g_cubeS+8>bar.x&&g_cubeY+g_cubeS+8>bar.y)
+        g_cubeS=std::max(44,std::min(g_cubeS,(int)std::floor(std::max(bar.x-g_cubeX-8,bar.y-g_cubeY-8))));
+    if(g_navigationTestSize)g_cubeS=std::min(g_navigationTestSize,std::min(viewW-28,viewH-26));
 }
 static bool overViewCube(float x,float y,float padding=20.f){return g_showViewCube&&x>=g_cubeX-padding&&x<=g_cubeX+g_cubeS+padding&&y>=g_cubeY-padding&&y<=g_cubeY+g_cubeS+padding;}
 static void cubeCamera(Vec3& eye,Mat4& view,Mat4& proj){

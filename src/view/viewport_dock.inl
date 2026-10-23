@@ -23,17 +23,8 @@ static bool viewportDockAction(int id){
     }return true;
 }
 template<class Rect,class Glyph>static void drawViewportDock(Rect rect,Glyph glyph,POINT pointer){
-    if(g_drawingViewport.active||g_busy||g_toolsOpen||viewW<440||viewH<150)return;
-    const float cell=viewW>=720?44.f:36.f,width=10*cell+64,height=68;
-    float x=viewX+(viewW-width)*.5f;
-    float y=viewY+viewH-height-18;
-    if(g_motionActive)y-=92;
-    if(g_compactNavigation)y-=48;
-    if(x+width>g_compassBounds.left&&x<g_compassBounds.right&&y+height>g_compassBounds.top){
-        const float beside=(float)g_compassBounds.left-width-12;
-        if(beside>=viewX+12)x=beside;else y=(float)g_compassBounds.top-height-10;
-    }
-    if(y<viewY+(viewH<190?40:90))return;
+    const auto layout=viewportBarLayout();if(!layout.visible)return;
+    const float cell=layout.cell,width=layout.width,height=layout.height,x=layout.x,y=layout.y;
     rect(x-2,y+3,width+4,height+4,10,0,0,0,.20f,0,0,0,0,0);
     rect(x,y,width,height,8,.075f,.094f,.117f,.96f,.25f,.30f,.36f,.90f,1);
     rect(x+9,y+1,width-18,1,0,.52f,.61f,.70f,.14f,0,0,0,0,0);
