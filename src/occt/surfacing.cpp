@@ -11,6 +11,8 @@
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepAlgoAPI_Splitter.hxx>
+#include <BRepAlgoAPI_Check.hxx>
+#include <BRepFill.hxx>
 #include <BRepClass_FaceClassifier.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_Copy.hxx>
@@ -1661,6 +1663,8 @@ V sewSurfaces(const V& request) {
     result.set("report",report);return result;
 }
 
+#include "surfacing_059c.inl"
+
 V collisionReport(const V& request){
     tolerance(request);
     for(const auto& field:request.obj)if(field.first!="op"&&field.first!="a_brep"&&field.first!="b_brep"&&field.first!="a_transform"&&field.first!="b_transform"&&field.first!="tolerance")throw std::runtime_error("Unknown collision field: "+field.first);
@@ -1743,6 +1747,9 @@ V modelSurfaceNative(const V& request) {
         if (operation.str == "surface_extract_face") return extractSurfaceFace(request);
         if (operation.str == "surface_trim_plane") return trimSurfacePlane(request);
         if (operation.str == "surface_trim_wire") return trimSurfaceWire(request);
+        if (operation.str == "surface_trim_tool") return trimSurfaceTool059(request);
+        if (operation.str == "surface_mirror") return mirrorSurface059(request);
+        if (operation.str == "surface_ruled") return ruledSurface059(request);
         if (operation.str == "surface_untrim") return untrimExtendSurface031B(request, false);
         if (operation.str == "surface_extend") return untrimExtendSurface031B(request, true);
         if (operation.str == "surface_mutual_trim") return mutualTrimSurfaces031B(request);
