@@ -1,8 +1,9 @@
 # ARK roadmap A–G
 
-057B is **Em curso** for **A.02/A.04/B.01/D.02**: native conversation layout,
-orientation cube and grouped viewport display controls. Local interaction and
-visual evidence is tracked in [057B](iterations/057B.md).
+057B is **Verificado no escopo** locally for **A.02/A.04/B.01/D.02**: native
+conversation layout, orientation cube and grouped viewport display controls.
+Fourteen final checks and inspected synthetic-fixture captures are recorded in
+[057B](iterations/057B.md). Broader milestones remain **Parcial**.
 
 056C is **Verificado no escopo** locally for **A.02/A.04/A.05/B.01/B.04/C.04/D.02/E.01**:
 integrated derived GPU rigid-body dynamics, viewport quality and
