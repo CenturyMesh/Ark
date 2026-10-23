@@ -42,6 +42,30 @@ fields, enlarged tolerance and absent targets. Host integration tests are suppli
 separately; integrated tool routing, persistence and UI verification remain
 pending the root build.
 
+Studio UI is supplied in `surface_edit_059c.inl`. Surface controls (49500)
+asynchronously inspect the selected exact occurrence. The control cage has
+pickable poles; dragging schedules coalesced private exact previews. Releasing
+the pointer retains the preview. Pole / delta (49501) uses native numeric fields;
+Apply (49502) atomically publishes the retained prepared candidate. Reset (49505)
+discards it, and Cancel (49504) or Escape ends the edit. Source revision, document
+epoch, visible occurrence and placed frame invalidate old work. No native query
+runs in a paint or pointer-move handler; cage buffers upload only after changes.
+
+Glue hitpoint (49503) asks for a bounded radius and tangent choice, then accepts
+a click on another visible exact body. Native fields require an explicit vertex
+choice and, if requested, an incident semantic edge. Candidates remain in local
+definition coordinates, so the UI rejects source/target occurrences with
+different frames. The preview displays the chosen corner and handle together
+with the exact derived surface. This does not silently reposition an occurrence.
+
+UI tests in `surface_edit_059c_selftest.inl` exercise real window pointer/key and
+button events, asynchronous exact inspection and preview, native numeric forms,
+explicit Apply, one Undo, Reset, Escape, body-target picking and stale revision.
+The fixture contains only synthetic geometry. Captures and the
+`.surface-controls.json` receipt must be reviewed in the integrated build before
+claiming UI verification. Local syntax-only compilation passed; execution and
+visual inspection are pending root integration.
+
 Integration: include `surface_deform_059c.inl` inside `surfacing.cpp` after
 `surfaceEditResult`, with `Geom2d_Line.hxx`, `Geom2d_TrimmedCurve.hxx` and
 `BRepAlgoAPI_Check.hxx` included at translation-unit scope. Dispatch
@@ -50,3 +74,23 @@ Integration: include `surface_deform_059c.inl` inside `surfacing.cpp` after
 Host exports `surfaceControlSchema059` and `surfaceControl059`. Register native
 test `surface_deform_059c_tests.cpp` against `ark-occt ark`, and host test
 `surface_control_059c_tests.cpp` against `ark` with the native-worker dependency.
+
+UI hooks (root-owned `viewer.cpp`):
+
+- Include after `rubber_panel_059c.inl`; forward-declare `surfaceEditAction059`
+  and `surfaceEditActive059` if required by earlier routing.
+- Route 49500–49519 before the generic action-id ranges. Expose 49500 in the
+  Surface menu. Run `processSurfaceEdit059()` before drawing a frame.
+- Draw `drawSurfaceEdit059()` beside the direct/cable preview passes, and
+  `drawSurfaceControls059(rect,button)` after ordinary viewport controls.
+- While active, give `beginSurfaceDrag059(x,y)` precedence over regular body
+  clicks (except buttons/cube); capture the pointer. During its drag call
+  `moveSurfaceDrag059`; on release consume the gesture and call
+  `finishSurfaceDrag059`. A target click is consumed even if it did not start a
+  drag. Keep ordinary navigation and native text focus handling intact.
+- Give `surfaceEditKey059` precedence over face Tab, after native edit focus and
+  sketch/direct edit precedence. Do not add the editor flag to
+  `faceCyclePreview059`, which the editor uses to inspect underlying scene state.
+- `shutdownSurfaceEdit059()` must run before shared evaluation-pool destruction.
+- Include the selftest after `drawFrame` and expose
+  `surfaceEditSelfTest059(hdc,shotPath)` through a native selftest flag.
