@@ -31,6 +31,7 @@ void run(){
       {"op":"feature.add","type":"surface_fill","name":"Spatial fill","inputs":[8],"native":{"boundary_curve":8}}
     ])");
     closeTo(area(s.document,2),400,"mirror exact area");closeTo(area(s.document,4),120,"trim exact kept area");closeTo(area(s.document,7),20*std::sqrt(109.),"ruled exact area");check(area(s.document,9)>100,"nonplanar closed-wire fill");
+    check(s.document.consumed.count(1)&&!s.document.consumed.count(3),"trim consumes its source while retaining the reference cutter");
     const auto snapshot=documentToJson(s.document);const auto revision=s.revision;
     for(const char* commands:{
         R"([{"op":"feature.add","type":"surface_fill","native":{"boundary_curve":8}}])",

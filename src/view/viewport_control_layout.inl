@@ -22,4 +22,4 @@ static ViewportBarLayout viewportBarLayout(bool forFit=false){
     }
     r.visible=r.y>=viewY+10;return r;
 }
-static double viewportFitBottomInset059(){const auto bar=viewportBarLayout(true);return bar.visible?std::max(50.,(double)viewY+viewH-bar.y+12.):50.;}
+static double viewportFitBottomInset059(){const auto bar=viewportBarLayout(true);const double controls=surfaceEditActive059()?168.:50.;return bar.visible?std::max(controls,(double)viewY+viewH-bar.y+12.):controls;}

@@ -85,6 +85,9 @@ static const ActionIcon* actionVectorIcon(int action){
         auto& eye=result[49101];poly(eye,{{.08f,.5f},{.23f,.31f},{.5f,.19f},{.77f,.31f},{.92f,.5f},{.77f,.69f},{.5f,.81f},{.23f,.69f},{.08f,.5f}});arc(eye,.5f,.5f,.17f,.17f,0,360);
         auto& tag=result[49102];poly(tag,{{.13f,.16f},{.49f,.16f},{.89f,.56f},{.56f,.89f},{.13f,.46f},{.13f,.16f}});arc(tag,.29f,.31f,.065f,.065f,0,360);line(tag,.44f,.45f,.68f,.69f);
         auto& schematic=result[49100];poly(schematic,{{.12f,.3f},{.34f,.3f},{.39f,.2f},{.47f,.4f},{.55f,.2f},{.63f,.4f},{.68f,.3f},{.88f,.3f},{.88f,.76f},{.12f,.76f},{.12f,.3f}});line(schematic,.08f,.51f,.16f,.51f);line(schematic,.04f,.59f,.20f,.59f);arc(schematic,.88f,.76f,.035f,.035f,0,360);
+        auto& rubber=result[49300];arc(rubber,.5f,.5f,.38f,.28f,0,360);arc(rubber,.5f,.5f,.23f,.14f,0,360);for(float x:{.24f,.39f,.54f,.69f})line(rubber,x,.27f,x+.10f,.36f);
+        result[49301]=rubber;
+        auto& applySurface=result[49502];poly(applySurface,{{.16f,.53f},{.40f,.76f},{.85f,.22f}});
         return result;
     }();
     auto found=icons.find(action);return found==icons.end()?nullptr:&found->second;

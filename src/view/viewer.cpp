@@ -590,10 +590,11 @@ static int atlasIcon(int action){switch(action){
     case 127:return 35;case 122:case 123:return 6;case 125:case 126:return 3;case 396:return 36;case 399:return 37;
     case 494:case 495:return 6;case 496:return 7;case 497:return 0;case 498:return 22;case 491:return 42;case 492:return 0;case 493:return 14;case 490:return 40;case 458:return 13;case 451:return 39;case 452:case 453:return 40;case 468:return 38;
     case 60:case 113:return 0;case 61:return 1;case 62:return 32;case 65:case 101:return 2;case 66:case 103:case 124:return 3;
-    case 76:return 4;case 150:case 151:return 5;case 120:return 35;case 121:return 6;case 394:case 395:return 36;case 397:case 398:return 37;case 26:return 7;case 27:return 8;case 94:return 9;case 11:return 54;
+    case 76:case 49403:return 4;case 150:case 151:case 49402:return 5;case 120:return 35;case 121:return 6;case 394:case 395:return 36;case 397:case 398:return 37;case 26:return 7;case 27:return 8;case 94:return 9;case 11:return 54;
     case 187:return 10;case 188:return 11;case 190:return 8;case 16:return 12;case 17:return 13;case 81:return 46;case 18:return 14;case 19:return 47;
     case 610:return 33;case 611:return 14;case 700:return 24;case 70:return 33;case 71:return 34;case 170:return 41;case 171:return 42;case 172:return 43;case 173:return 44;case 67:return 45;
-    case 63:return 16;case 78:return 17;case 77:return 18;case 79:return 19;case 211:return 20;case 212:return 21;case 210:return 22;case 215:case 384:return 23;
+    case 63:return 16;case 78:case 49500:return 17;case 77:case 49404:return 18;case 79:return 19;case 211:return 20;case 212:return 21;case 210:return 22;case 215:case 384:return 23;
+    case 49400:return 25;case 49401:return 3;case 49501:return 33;case 49503:return 56;case 49504:case 49505:return 14;
     case 73:case 89:return 24;case 108:return 25;case 105:return 26;case 104:return 27;case 321:return 28;case 320:return 29;case 322:return 30;case 326:return 31;case 154:return 56;default:return -1;
 }}
 static std::filesystem::path toolAtlasPath(int sheet=0){static const char* paths[]={"assets/ui/ark-tool-atlas-v1.png","assets/ui/ark-domain-atlas-v1.png","assets/ui/ark-detail-atlas-v1.png","assets/ui/ark-authoring-atlas-v1.png"};if(sheet<0||sheet>=4)return {};wchar_t path[32768]{};GetModuleFileNameW(nullptr,path,32768);auto directory=std::filesystem::path(path).parent_path();for(int i=0;i<6&&!directory.empty();++i,directory=directory.parent_path()){auto bundle=directory/"assets/ark-ui.arklib";if(std::filesystem::is_regular_file(bundle))return bundle/std::filesystem::path(paths[sheet]).filename();auto atlas=directory/paths[sheet];if(std::filesystem::is_regular_file(atlas))return atlas;}return {};}
@@ -3200,7 +3201,9 @@ static void startLiveBridge(){
         auto request=std::make_unique<UiToolRequest>();request->tool=tool;request->args=args;request->complete=std::move(complete);request->stop=stop;postTool(std::move(request));
     },{},liveCallProgress))g_status="Live MCP unavailable: "+g_liveBridge.lastError();
 }
+static void shutdownSurfaceEdit059();static void beginSurfaceEdit059();
 static void stopIntegrations(){
+    shutdownSurfaceEdit059();
     g_closing=true;shutdownMotionCables054B();if(g_authoringWorker)g_authoringWorker->shutdown();*g_pricingCancel=true;*g_teamCancel=true;g_agentTeam.cancel();*g_assistantCancel=true;*g_authCancel=true;g_liveBridge.stop();shutdownExactJobs046();
     MSG msg{};while(PeekMessage(&msg,g_window,WM_ARK_TOOL,WM_ARK_AUTH,PM_REMOVE)){if(msg.message==WM_ARK_TOOL){std::unique_ptr<UiToolRequest> request((UiToolRequest*)msg.lParam);request->complete(cancelledTool());}else if(msg.message==WM_ARK_CHAT)delete (UiChatEvent*)msg.lParam;else if(msg.message==WM_ARK_AUTH)delete (UiAuthEvent*)msg.lParam;}
     while(!g_toolQueue.empty()){g_toolQueue.front()->complete(cancelledTool());g_toolQueue.pop_front();}
@@ -3522,6 +3525,7 @@ static void surfaceEditDialog(bool trim,const Feature* editing=nullptr){
     else{face=trimField(fields[1].value);if(face.empty())throw std::runtime_error("Choose an exact semantic face");native.set("face",V::makeStr(face));}
     commitNativeFeature(FeatureType::SurfaceEdit,trim?"Trimmed surface":"Extracted surface",V::makeObj(),std::move(native),{source},editing?editing->id:0,true);
 }
+#include "surface_workflow_059c.inl"
 static void commitMeshFeature(FeatureType type,const std::string& name,arkjson::Value p,std::vector<u64> inputs,u64 editId){
     if(!editId){addMeshFeature(type,name,std::move(p),std::move(inputs));return;}
     using V=arkjson::Value;V command=V::makeObj();command.set("op",V::makeStr("feature.edit"));command.set("id",V::makeNum((double)editId));command.set("p",std::move(p));
@@ -3626,6 +3630,11 @@ static void cancelCableGuide035();
 static bool cableGuideActive035();
 static void editSelectedFeature(){
     auto* feature=selectedPartFeature();if(!feature){g_status="Select a part feature in the explorer.";return;}
+    if(surfaceWorkflowEdit059(feature))return;
+    if(feature->type==FeatureType::SurfaceEdit&&nativeText(feature,"op")=="deform_poles"){
+        if(selBody<0||(size_t)selBody>=g_bodyIds.size()||g_bodyIds[(size_t)selBody]!=feature->id){selBody=-1;for(size_t i=0;i<g_bodyIds.size();++i)if(g_bodyIds[i]==feature->id&&displayInstance(i)){selBody=(int)i;break;}}
+        beginSurfaceEdit059();return;
+    }
     switch(feature->type){
         case FeatureType::Curve:spatialCurveDialog(feature);break;
         case FeatureType::Loft:loftDialog(feature);break;
@@ -3778,7 +3787,7 @@ static const std::vector<StudioCommandGroup>& studioCommandGroups(){
     group("Exact solids",{{100,"Native primitive"},{101,"Extrude saved sketch"},{102,"Union / cut / common"},{103,"Hole / slot / profile pocket"},{104,"Fillet / chamfer"},{106,"Draft faces"},{107,"Linear / circular pattern"},{108,"Mirror solid"},{105,"Rigid transform"},{594,"Offset exact solid"}});
     group("Modify",{{597,"Jump to adjacent face / edge"},{8,"Fuse bodies"},{9,"Carve body"},{10,"Keep overlap"},{108,"Mirror solid"},{25,"Delete selection"},{18,"Undo"},{19,"Redo"}});
     group("Tube & assembly",{{215,"Create double-wishbone suspension"},{384,"Spring unit controls"},{383,"Play / pause suspension"},{26,"Bend-program tube"},{40,"Laser tube"},{27,"Create assembly"},{28,"Duplicate instance"},{29,"Instance placement"},{93,"Ground / unground instance"},{94,"Add assembly mate"},{95,"Edit selected mate"},{96,"Remove selected mate"},{30,"Edit tube program"}});
-    group("Native surfaces",{{161,"Edit selected feature"},{162,"Edit driving sketch"},{76,"Loft sketches"},{77,"Fill closed sketch"},{78,"NURBS surface"},{150,"Sweep sketches"},{151,"Extrude sketch surface"},{152,"Revolve sketch surface"},{153,"Offset selected surface"},{154,"Glue surfaces"},{79,"Thicken selected surface"},{830,"Repair exact surface orientation"},{491,"Extract exact semantic face"},{492,"Trim exact surface by datum plane"},{595,"Project curve onto surface"},{596,"Trim surface by closed curve"}});
+    group("Native surfaces",{{49400,"Mid-surface mirror / join G0 or G1"},{49401,"Trim by surface, solid or 3D curve"},{49402,"Ruled surface / exact 3D rails"},{49403,"Loft / sections and guide curves"},{49404,"Patch fill / G1-G2 supports and guides"},{49500,"Stretch surface control vertices / hitpoint glue"},{161,"Edit selected feature"},{162,"Edit driving sketch"},{76,"Loft sketches"},{77,"Fill closed sketch"},{78,"NURBS surface"},{150,"Sweep sketches"},{151,"Extrude sketch surface"},{152,"Revolve sketch surface"},{153,"Offset selected surface"},{154,"Glue surfaces"},{79,"Thicken selected surface"},{830,"Repair exact surface orientation"},{491,"Extract exact semantic face"},{492,"Trim exact surface by datum plane"},{595,"Project curve onto surface"},{596,"Trim surface by closed curve"}});
     group("Mesh",{{155,"Weld mesh"},{156,"Smooth mesh"},{157,"Decimate mesh"},{158,"Offset mesh"},{159,"Fill planar holes"},{160,"Import STL/OBJ"}});
     group("Sheet metal",{{120,"Create sheet base"},{127,"Edit sheet base"},{494,"Original-blank jog add/edit/remove"},{495,"Linked sketch bend add/edit/remove"},{121,"Add flange"},{122,"Edit flange"},{123,"Remove flange"},{394,"Add return hem"},{395,"Edit return hem"},{396,"Remove return hem"},{397,"Add circular emboss"},{398,"Edit circular emboss"},{399,"Remove circular emboss"},{124,"Add opening or pattern"},{125,"Edit opening"},{126,"Remove opening"},{327,"Export analytic flat DXF"},{128,"Play / pause bend preview"},{80,"Create L bend"},{81,"Import sheet STEP"},{83,"Show formed"},{84,"Show flat"}});
     group("View & agents",{{49100,"Schematic Designer / electrical sheets"},{49101,"Eye mode / family visibility"},{49102,"Families and tags / selected part or assembly"},{860,"Technical drawings / associative sheets"},{590,"BOM / bill of materials"},{585,"Measure 2D / X and Y"},{586,"Measure 3D / distance and XYZ"},{587,"Units / length, mass and volume"},{20,"Fit document"},{71,"Normal to sketch plane"},{180,"Front"},{181,"Back"},{23,"Top"},{184,"Bottom"},{182,"Right"},{183,"Left"},{24,"Isometric"},{175,"Orthographic"},{174,"Visible edges"},{186,"Cycle ambient occlusion"},{187,"Edit selected body material"},{188,"Inspect mass and center of mass"},{176,"Orbit"},{177,"Pan"},{178,"Zoom"},{14,"Wireframe"},{22,"Grid"},{56,"Graphics settings"},{567,"Project tool activity"},{57,"ChatGPT account"},{357,"Connectors / OpenAI, Claude, Grok, Ollama..."},{368,"Local models / Ollama"},{58,"Codex / live MCP"},{21,"Raw agent command"},{31,"Help"},{44015,"ARK updates"}});
@@ -3864,8 +3873,11 @@ static void loftControlDialog();
 static void selectTangentFaces();
 static void collisionCheckDialog();
 static bool viewportDockAction(int);static bool parametricHudAction(int);
+static bool surfaceEditAction059(int);static bool surfaceEditActive059();
 static void uiAction(int id){
     if(id==0||id==969)return; // Visible neutral panels consume input without changing state.
+    if(surfaceEditAction059(id))return;
+    if(surfaceWorkflowAction059(id))return;
     if(rubberAction059(id))return;
     if(inertialAction056(id))return;
     // Authoring and other previews always start from the authored CAD pose.
@@ -4865,6 +4877,7 @@ static void drawCanvases(const GLfloat* vpT){
 #include "exploded_view.inl"
 #include "inertial_panel_056c.inl"
 #include "rubber_panel_059c.inl"
+#include "surface_edit_059c.inl"
 #include "drag_chain.inl"
 #include "assistant_chat.inl"
 // Shared CAD display pass: no window operations, layout, chat synchronization,
@@ -4939,11 +4952,11 @@ static Mat4 drawViewportScene059(bool interactive){
         if(g_showDatumPlanes){glUniform4f(glGetUniformLocation(pSketch,"tint"),.55,.77,.68,.48);glDrawArrays(GL_LINES,(GLint)(g_sketchLines.size()+g_sketchPoints.size()+g_constraintHighlightLines.size())/3,(GLsizei)g_datumLines.size()/3);}
         if(!g_selectionLines.empty()){glLineWidth(2.5f);glUniform4f(glGetUniformLocation(pSketch,"tint"),.97,.62,.28,1.);glDrawArrays(GL_LINES,(GLint)(g_sketchLines.size()+g_sketchPoints.size()+g_constraintHighlightLines.size()+g_datumLines.size())/3,(GLsizei)g_selectionLines.size()/3);glLineWidth(1.f);}
     }
-    if(interactive)updateSelectionHover(g_pointerX,g_pointerY);drawMeshPointerEdges();drawSelectedFaceGlow();drawSelectedReferenceEdges();drawSelectionHover();drawDraftSketches();drawProjectionPreview();drawManualSketchPreview();drawSketchEditPreview();drawDirectAuthoringPreview();drawCableGuide035();
+    if(interactive)updateSelectionHover(g_pointerX,g_pointerY);drawMeshPointerEdges();drawSelectedFaceGlow();drawSelectedReferenceEdges();drawSelectionHover();drawDraftSketches();drawProjectionPreview();drawManualSketchPreview();drawSketchEditPreview();drawDirectAuthoringPreview();drawCableGuide035();drawSurfaceEdit059();
     return vp;
 }
 static void drawFrame(HDC hdc){
-    if(!g_preparingEdit){processDirectAuthoringPreview();processCableGuide035();}
+    if(!g_preparingEdit){processDirectAuthoringPreview();processCableGuide035();processSurfaceEdit059();}
     static auto previous=std::chrono::steady_clock::now();auto now=std::chrono::steady_clock::now();
     double elapsed=std::min(.10,std::chrono::duration<double>(now-previous).count());if(!g_preparingEdit){advanceFold(elapsed);advanceSheet(elapsed);advanceSuspension(elapsed);advanceMotion(elapsed);advanceBakedMotion(elapsed);advanceExplodedView(elapsed);advanceInertial056(elapsed);advanceRubber059(elapsed);}previous=now;
     double cameraEase=1-std::exp(-13.4*elapsed),distanceEase=1-std::exp(-11.9*elapsed);
@@ -5053,7 +5066,8 @@ static void drawFrame(HDC hdc){
     else if(g_toolModule==9)groups={{"Board",{{"Board / pads",211}}},{"Cables",{{"Rounded route",212},{"Smooth 3D",996},{"Flat ribbon",997},{"Guide path",998},{"Edit route",161}}},{"Review",{{"Board / cable",995},{"Collision",755},{"BOM",590}}},{"Sources",{{"Approved Vendors",994},{"Library",484}}}};
     else if(g_toolModule==7)groups={{"Wood stock",{{"Panel",982},{"Timber beam",983}}},{"Joinery",{{"Groove / pocket",986},{"Source dims",659}}},{"Review",{{"Stock cutlist",987},{"Material",187},{"BOM",590}}},{"Appearance",{{"Light up",980}}}};
     else if(g_toolModule==4)groups={{"Engineering",{{"Mesh net",981},{"Vent",984},{"Light up",980},{"Model tools",456},{"Physics",188},{"Loads",216},{"Electronics",211},{"Routing",212},{"Library",484}}},{"Agents",{{"Presence",988},{"Assistant",400},{"Connect",58},{"Providers",357},{"Tools",457}}}};
-    else if(g_toolModule==6)groups={{"Create",{{"Extrude",151},{"Revolve",152},{"Sweep",150},{"Loft",76},{"Fill",77},{"NURBS",78}}},{"Modify",{{"Loft controls",752},{"Repair orientation",830},{"Extract face",491},{"Trim plane",492},{"Offset",153},{"Glue surfaces",154},{"Thicken",79}}}};
+    else if(g_toolModule==6&&surfaceEditActive059())groups={{"Control net",{{"Pole / delta",49501},{"Glue hitpoint",49503},{"Apply",49502},{"Reset",49505},{"Cancel",49504}}},{"Inspect",{{"Normal view",71},{"Fit",20},{"Graphics",56}}}};
+    else if(g_toolModule==6)groups={{"Create",{{"Extrude",151},{"Revolve",152},{"Sweep",150},{"Loft",49403},{"Patch fill",49404},{"Ruled",49402},{"NURBS",78}}},{"Shape",{{"Mid mirror",49400},{"Trim tool",49401},{"Trim plane",492},{"Controls",49500}}},{"Finish",{{"Offset",153},{"Sew",154},{"Thicken",79},{"Repair",830}}}};
     else groups={{"Document",{{"New",55},{"Open",17},{"Save",16},{"Export",213}}},{"History",{{"Undo",18},{"Redo",19},{"Features",756},{"Iterations",493},{"Last failure",580}}},{"Manage",{{"Configurations",44080},{"Skeleton IDE",710},{"BOM",590},{"Drawings",860},{"Parameters",67},{"HUD",48000},{"Import",81},{"Connect",58},{"Account",57},{"More",459}}}};
     groups.push_back({"Discover",{{"All tools",480}}});
     int count=0;for(const auto& group:groups)count+=(int)group.actions.size();float cardW=std::min(105.f,(W-32-(groups.size()-1)*27)/std::max(count,1));float cursor=18;
@@ -5734,6 +5748,7 @@ static void drawFrame(HDC hdc){
     drawBakedMotionsPanel(rect,button,mp,ribbonHint);
     drawInertialPanel056(rect,button,mp,ribbonHint);
     drawRubberPanel059(rect,button,mp,ribbonHint);
+    drawSurfaceControls059(rect,button);
     drawParametricHud(rect,mp,ribbonHint);
     drawExplodedViewsPanel(rect,button,mp,ribbonHint);
     g_lastRibbonHint=ribbonHint;
@@ -5778,7 +5793,7 @@ static arkjson::Value captureViewportSnapshot(const arkjson::Value& args){
         if(revision!=g_session.revision||epoch!=g_documentEpoch)throw std::runtime_error("Document changed during viewport capture; inspect current revision and retry");
         V evidence=V::makeObj(),state=V::makeObj(),camera=V::makeObj(),selected=V::makeObj();evidence.set("revision",V::makeNum((double)revision));evidence.set("current_revision",V::makeNum((double)g_session.revision));evidence.set("view",V::makeStr("viewport"));evidence.set("capture_source",V::makeStr("studio_viewport"));evidence.set("width",V::makeNum(shot.w));evidence.set("height",V::makeNum(shot.h));
         evidence.set("render_target",V::makeStr("offscreen_gpu_framebuffer"));evidence.set("window_minimized",V::makeBool(minimized));evidence.set("viewport_collapsed",V::makeBool(collapsed));evidence.set("ui_chrome_included",V::makeBool(false));evidence.set("window_state_preserved",V::makeBool(true));
-        auto vector=[](Vec3 point){V value=V::makeArr();value.arr={V::makeNum(point.x),V::makeNum(point.y),V::makeNum(point.z)};return value;};camera.set("eye_mm",vector(camEye()));camera.set("target_mm",vector(target));camera.set("yaw_rad",V::makeNum(yaw));camera.set("pitch_rad",V::makeNum(pitch));camera.set("roll_rad",V::makeNum(cameraRoll));camera.set("distance_mm",V::makeNum(dist));camera.set("orthographic",V::makeBool(g_cameraOrtho));state.set("camera",camera);state.set("drafts",V::makeBool(g_sketchDrawing.active||!g_draftViews.empty()));state.set("sketches_visible",V::makeBool(g_showSketches));state.set("active_sketch",V::makeStr(g_activeSketch));state.set("flat_display",V::makeBool(g_allSheetsFlat));state.set("stock_display",V::makeBool(g_stockMode));state.set("rubber_derived_preview",V::makeBool(g_rubber059.active));state.set("rubber_time_s",V::makeNum(g_rubber059.time));state.set("inertial_derived_preview",V::makeBool(g_inertial056.active));state.set("rendering",V::makeStr(wireframe?"wireframe":g_showEdges?"shaded_edges":"shaded"));evidence.set("view_state",state);
+        auto vector=[](Vec3 point){V value=V::makeArr();value.arr={V::makeNum(point.x),V::makeNum(point.y),V::makeNum(point.z)};return value;};camera.set("eye_mm",vector(camEye()));camera.set("target_mm",vector(target));camera.set("yaw_rad",V::makeNum(yaw));camera.set("pitch_rad",V::makeNum(pitch));camera.set("roll_rad",V::makeNum(cameraRoll));camera.set("distance_mm",V::makeNum(dist));camera.set("orthographic",V::makeBool(g_cameraOrtho));state.set("camera",camera);state.set("drafts",V::makeBool(g_sketchDrawing.active||!g_draftViews.empty()));state.set("sketches_visible",V::makeBool(g_showSketches));state.set("active_sketch",V::makeStr(g_activeSketch));state.set("flat_display",V::makeBool(g_allSheetsFlat));state.set("stock_display",V::makeBool(g_stockMode));state.set("surface_edit_derived_preview",V::makeBool(surfaceEditActive059()));state.set("rubber_derived_preview",V::makeBool(g_rubber059.active));state.set("rubber_time_s",V::makeNum(g_rubber059.time));state.set("inertial_derived_preview",V::makeBool(g_inertial056.active));state.set("rendering",V::makeStr(wireframe?"wireframe":g_showEdges?"shaded_edges":"shaded"));evidence.set("view_state",state);
         if(selBody>=0&&(size_t)selBody<g_bodyIds.size()){selected.set("feature_id",V::makeNum((double)g_bodyIds[(size_t)selBody]));selected.set("occurrence_id",V::makeNum((double)g_instanceIds[(size_t)selBody]));selected.set("copy",V::makeNum(g_instanceCopies[(size_t)selBody]));}else if(g_explorerFeature)selected.set("feature_id",V::makeNum((double)g_explorerFeature));if(!g_picked.empty()){selected.set("reference",V::makeStr(g_picked.back().name));selected.set("reference_owner",V::makeStr(g_picked.back().owner));}evidence.set("selected",selected);
         std::string path;if(auto* output=args.find("path");output&&output->t==V::Str)path=output->str;return snapshotImageResult(shot,evidence,path);
     }catch(const std::exception& error){V result=V::makeObj(),content=V::makeArr(),text=V::makeObj(),structured=V::makeObj();text.set("type",V::makeStr("text"));text.set("text",V::makeStr(error.what()));content.arr.push_back(text);structured.set("error",V::makeStr(error.what()));result.set("content",content);result.set("structuredContent",structured);result.set("isError",V::makeBool(true));return result;}
@@ -6101,6 +6116,7 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
                         else if(z.id==53){g_sheetScrubbing=true;g_sheetPlayingId=0;if(auto* sheet=selectedSheet())try{sheetPreviewSet(sheet->id,(double)(p.x-z.x)/z.w);}catch(const std::exception& error){g_error=true;g_status=error.what();}}
                         else if(z.id>=380&&z.id<=382){g_suspScrub=z.id-380;g_suspSpinPlaying=false;try{setSuspensionControl(g_suspScrub,(p.x-z.x)/z.w);}catch(const std::exception& error){g_error=true;g_status=error.what();}}} break; }
             g_dragged=false;if(!g_pressWasButton&&!g_cubePress&&g_cableGuide035.active){if(beginCableGuideDrag035(p.x,p.y)){SetCapture(hw);return 0;}}if(!g_pressWasButton&&!g_cubePress&&g_directAuthoring.active){try{beginDirectAuthoringDrag(p.x,p.y);}catch(const std::exception& error){g_directAuthoring.feature=0;g_directAuthoring.dragging=g_directAuthoring.moved=false;g_directAuthoring.preview={};g_directAuthoring.commands={};g_directAuthoring.error=error.what();g_error=true;g_status=error.what();}SetCapture(hw);return 0;}
+            if(!g_pressWasButton&&!g_cubePress&&surfaceEditActive059()){try{beginSurfaceDrag059(p.x,p.y);}catch(const std::exception& error){g_error=true;g_status=error.what();}SetCapture(hw);return 0;}
             if(!g_pressWasButton&&!g_cubePress&&g_sketchEditing.active){try{beginSketchEditDrag(p.x,p.y);}catch(const std::exception& error){g_error=true;g_status=error.what();}SetCapture(hw);return 0;}
             if(!g_pressWasButton&&!g_cubePress&&g_sketchDrawing.active){SetCapture(hw);return 0;}
             if(!g_pressWasButton&&!g_cubePress&&g_componentMove.armed){try{beginComponentDrag(p.x,p.y);}catch(const std::exception& error){g_error=true;g_status=error.what();g_pressWasButton=true;}}
@@ -6111,13 +6127,14 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
         }
         case WM_MBUTTONDOWN:{g_componentDragIntent={};if(g_componentMove.dragging)cancelComponentMove();POINT p{GET_X_LPARAM(lp),GET_Y_LPARAM(lp)};g_pressWasButton=p.x<viewX||p.x>=viewX+viewW||p.y<viewY||p.y>=viewY+viewH;g_dragged=false;if(!g_pressWasButton)beginCameraDrag(p.x,p.y);SetCapture(hw);return 0;}
         case WM_MBUTTONUP:g_cameraDrag.active=false;ReleaseCapture();return 0;
-        case WM_CAPTURECHANGED:if(g_cableGuide035.dragging)cancelCableGuide035();if(g_directAuthoring.dragging)cancelDirectAuthoring();if(g_sketchEditing.dragging)cancelSketchEditDrag();g_componentDragIntent={};g_treeDragging=g_treePaging=false;g_cameraDrag.active=false;if(g_componentMove.dragging){cancelComponentMove();g_status="Component movement cancelled after pointer capture was lost";}return 0;
+        case WM_CAPTURECHANGED:if(g_surfaceEdit059.dragging)cancelSurfaceEdit059();if(g_cableGuide035.dragging)cancelCableGuide035();if(g_directAuthoring.dragging)cancelDirectAuthoring();if(g_sketchEditing.dragging)cancelSketchEditDrag();g_componentDragIntent={};g_treeDragging=g_treePaging=false;g_cameraDrag.active=false;if(g_componentMove.dragging){cancelComponentMove();g_status="Component movement cancelled after pointer capture was lost";}return 0;
         case WM_MOUSEMOVE:{
             int x=GET_X_LPARAM(lp),y=GET_Y_LPARAM(lp);
             g_pointerX=x;g_pointerY=y;
             bool lbtn=wp&MK_LBUTTON,mbtn=wp&MK_MBUTTON,shift=wp&MK_SHIFT;
             if(g_cableGuide035.dragging&&lbtn){moveCableGuideDrag035(x,y);g_dragged=g_cableGuide035.moved;return 0;}
             if(g_treeDragging&&lbtn){moveTreeThumb(y);return 0;}
+            if(g_surfaceEdit059.dragging&&lbtn){moveSurfaceDrag059(x,y);g_dragged=g_surfaceEdit059.moved;return 0;}
             if(g_directAuthoring.dragging&&lbtn){moveDirectAuthoringDrag(x,y);g_dragged=g_directAuthoring.moved;return 0;}
             if(g_sketchEditing.dragging&&lbtn){moveSketchEditDrag(x,y);g_dragged=g_sketchEditing.moved;return 0;}
             if(g_sketchDrawing.active&&!mbtn&&!g_cameraDrag.active){moveSketchDrawing(x,y);return 0;}
@@ -6151,6 +6168,7 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
         case WM_LBUTTONUP:{
             g_componentDragIntent={};
             if(g_treeDragging||g_treePaging){if(g_treeDragging)moveTreeThumb(GET_Y_LPARAM(lp));g_treeDragging=g_treePaging=false;g_pressWasButton=false;ReleaseCapture();return 0;}
+            if(surfaceEditActive059()&&!g_pressWasButton&&!g_cubePress){finishSurfaceDrag059();g_pressWasButton=false;ReleaseCapture();return 0;}
             if(g_cableGuide035.dragging){finishCableGuideDrag035();g_pressWasButton=false;ReleaseCapture();return 0;}
             if(g_directAuthoring.dragging){g_directAuthoring.dragging=false;try{if(g_directAuthoring.moved)applyDirectAuthoring();}catch(const std::exception& error){g_error=true;g_status=error.what();}g_pressWasButton=false;ReleaseCapture();return 0;}
             if(g_sketchEditing.dragging){try{finishSketchEditDrag();}catch(const std::exception& error){cancelSketchEditDrag();g_error=true;g_status=error.what();}g_pressWasButton=false;ReleaseCapture();return 0;}
@@ -6189,7 +6207,7 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
                 else if(z.id>=60000&&z.id<64096){interactiveAction(z.id);interactiveAction(70);}
                 break;
             }
-            if(!inControl&&!g_pickKind&&drawingInView(p.x,p.y)&&!measurementActive()&&!g_sketchDrawing.active&&!g_sketchEditing.active&&!g_directAuthoring.active){int body=pickBody(p.x,p.y);if(body>=0)exposeSolidDimensions(body);}
+            if(!inControl&&!g_pickKind&&drawingInView(p.x,p.y)&&!measurementActive()&&!g_sketchDrawing.active&&!g_sketchEditing.active&&!g_directAuthoring.active&&!surfaceEditActive059()){int body=pickBody(p.x,p.y);if(body>=0)exposeSolidDimensions(body);}
             return 0;
         }
         case WM_KEYDOWN:
@@ -6198,6 +6216,7 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
             if(g_directAuthoring.active){if(wp==VK_ESCAPE){cancelDirectAuthoring();ReleaseCapture();return 0;}if(wp==VK_TAB){g_directAuthoring.dragging=false;g_dragged=true;ReleaseCapture();interactiveAction(655);return 0;}if(wp==VK_RETURN){interactiveAction(656);return 0;}}
             if(g_sketchEditing.active){if(wp==VK_ESCAPE){if(g_sketchEditing.dragging)cancelSketchEditDrag();else cancelSketchEditing();ReleaseCapture();return 0;}if(wp==VK_TAB){interactiveAction(g_viewSketchDimension.valid?584:70);return 0;}}
             if(g_sketchDrawing.active){if(wp==VK_ESCAPE){cancelSketchDrawing();ReleaseCapture();return 0;}if(wp==VK_TAB){interactiveAction(576);return 0;}if(wp==VK_RETURN){g_sketchDrawing.anchors.clear();rebuildDrawingPreview();g_status="Line chain ended / saved segments retained / click first anchor";return 0;}}
+            if(!g_toolsOpen)try{if(surfaceEditKey059(wp)){ReleaseCapture();return 0;}}catch(const std::exception& error){g_error=true;g_status=error.what();return 0;}
             if(!g_toolsOpen&&rubberKey059(wp))return 0;
             if(!g_toolsOpen&&inertialKey056(wp))return 0;
             if(!g_toolsOpen&&bakedMotionsKey(wp))return 0;
@@ -6227,12 +6246,14 @@ static void seedDocument(){g_doc=makeDemoDocument();rebuildScene();frameScene();
 #include "viewport_capture_selftest_059c.inl"
 #include "inertial_selftest_056c.inl"
 #include "rubber_selftest_059c.inl"
+#include "surface_edit_059c_selftest.inl"
+#include "surface_workflow_selftest_059c.inl"
 
 int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     if(redirect_to_updated_runtime())return 0;
     // Recompute continues at full speed while Studio is in the background.
     ark::disableProcessPowerThrottling();
-    struct JoinDirectPreview {~JoinDirectPreview(){if(g_exactJobs046){g_exactJobs046->shutdown();std::lock_guard lock(g_exactDoneMutex046);g_exactDone046.clear();}g_cablePreviewGate035=false;if(g_cablePreviewInstance035)g_cablePreviewInstance035->shutdown();g_directPreviewTestGate=false;if(g_directPreviewInstance)g_directPreviewInstance->shutdown();}} joinDirectPreview;
+    struct JoinDirectPreview {~JoinDirectPreview(){shutdownSurfaceEdit059();if(g_exactJobs046){g_exactJobs046->shutdown();std::lock_guard lock(g_exactDoneMutex046);g_exactDone046.clear();}g_cablePreviewGate035=false;if(g_cablePreviewInstance035)g_cablePreviewInstance035->shutdown();g_directPreviewTestGate=false;if(g_directPreviewInstance)g_directPreviewInstance->shutdown();}} joinDirectPreview;
     cpu_detect();
 
     auto setDpiContext=reinterpret_cast<BOOL(WINAPI*)(HANDLE)>(GetProcAddress(GetModuleHandleW(L"user32.dll"),"SetProcessDpiAwarenessContext"));
@@ -6246,7 +6267,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     bool localModelsUiTest=false;bool viewportDockUiTest=false;bool bakedMotionsUiTest=false;bool parametricHudUiTest=false;bool explodedViewsUiTest=false;bool dragChainUiTest=false;bool bomUiTest=false;bool drawingWorkspaceUiTest=false;bool drawingViewportUiTest=false;bool measurementUiTest=false;bool authoringUiTest=false;
     bool selectionPickingUiTest=false;bool interactionUiTest=false,connectorsUiTest=false,actionIconsUiTest=false,treeUiTest=false,arcUiTest=false,completionUiTest=false,sketchDrawingUiTest=false,sketchEditUiTest=false,selectionGlowUiTest=false,datumAuthoringUiTest=false,typedSketchUiTest=false;
     bool teamBlockersUiTest=false;bool realtimeUiTest=false;bool asyncExactUiTest=false;bool productToolsUiTest=false;bool selfTest=false,assemblyTest=false,dialogTest=false,bendTest=false,bendExportTest=false,sourceTest=false,sketchTest=false,assistantTest=false,nativeUiTest=false,renderUiTest=false,engineeringUiTest=false,sheetShowcaseTest=false,contextUiTest=false,suspensionUiTest=false,connectChatGpt=false,motionUiTest=false,motionPlay=false,navigationUiTest=false,projectionUiTest=false,frameToolsUiTest=false;unsigned exitAfterMs=0;std::string endpointFile,requestedSketch;int requestedOpening=-1;double requestedFold=-1,showcaseProgress=-1;std::string shotPath="ark_studio.png",loadPath,scriptPath,importPath,showcaseView,spotlightName,suspensionFeatureName,motionDriverName,motionSpeed;double requestedMotionTime=0;std::vector<std::string> suspensionValues;
-    int requestedPathSamples=1;bool studioRenderTest=false,requestedPathTracing=false,viewportQualityTest=false,viewportCaptureTest=false,inertialUiTest=false,inertialEngineUiTest=false,rubberUiTest=false,rubberEngineUiTest=false;
+    int requestedPathSamples=1;bool studioRenderTest=false,requestedPathTracing=false,viewportQualityTest=false,viewportCaptureTest=false,inertialUiTest=false,inertialEngineUiTest=false,rubberUiTest=false,rubberEngineUiTest=false,surfaceEditUiTest=false,surfaceWorkflowUiTest=false;
     int sw=1600,sh=1000,argc=0;auto argv=CommandLineToArgvW(GetCommandLineW(),&argc);
     auto utf8=[](const wchar_t* w){int n=WideCharToMultiByte(CP_UTF8,0,w,-1,nullptr,0,nullptr,nullptr);std::string s(n,'\0');WideCharToMultiByte(CP_UTF8,0,w,-1,s.data(),n,nullptr,nullptr);s.pop_back();return s;};
     for(int i=1;i<argc;++i){auto a=utf8(argv[i]);if(a=="--shot"&&i+1<argc){g_headless=true;shotPath=utf8(argv[++i]);}
@@ -6302,6 +6323,8 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         else if(a=="--self-test-render-ui"){renderUiTest=true;g_headless=true;}
         else if(a=="--self-test-studio-render"){studioRenderTest=true;g_headless=true;}
         else if(a=="--self-test-rubber-ui"){rubberUiTest=true;g_headless=true;}
+        else if(a=="--self-test-surface-edit-ui"){surfaceEditUiTest=true;g_headless=true;}
+        else if(a=="--self-test-surface-workflow-ui"){surfaceWorkflowUiTest=true;g_headless=true;}
         else if(a=="--self-test-rubber-engine-ui"){rubberEngineUiTest=true;g_headless=true;}
         else if(a=="--self-test-inertial-ui"){inertialUiTest=true;g_headless=true;}
         else if(a=="--self-test-inertial-engine-ui"){inertialEngineUiTest=true;g_headless=true;}
@@ -7043,6 +7066,8 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     if(studioRenderTest){int result=studioRenderSelfTest(hdc,shotPath);if(result)return result;}
     if(viewportQualityTest){int result=viewportQualitySelfTest056(hdc,shotPath);if(result)return result;}
     if(rubberUiTest||rubberEngineUiTest){int result=rubberSelfTest059(hdc,shotPath,rubberEngineUiTest);if(result)return result;}
+    if(surfaceEditUiTest){int result=surfaceEditSelfTest059(hdc,shotPath);if(result)return result;}
+    if(surfaceWorkflowUiTest){int result=surfaceWorkflowSelfTest059(hdc,shotPath);if(result)return result;}
     if(viewportCaptureTest)return viewportCaptureSelfTest059(shotPath);
     if(inertialUiTest||inertialEngineUiTest){int result=inertialSelfTest056(hdc,shotPath,inertialEngineUiTest);if(result)return result;}
     if(renderUiTest){
