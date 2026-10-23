@@ -19,6 +19,12 @@ current display style; hover explains each action. The bar uses the existing
 OpenGL vector icon system and moves beside the Cartesian triad when space allows.
 The cube leaves room for it in short viewports. The separate top-right style
 dropdown is removed; More opens its existing settings and named-view menu.
+The navigation toggle expands Orbit, Pan, Zoom and ambient occlusion as an
+optional group in this same bar. Fit, edges and projection are not duplicated.
+At constrained widths, direct styles and More remain; More explicitly includes
+overlays, navigation, named views and selected-source drawing. A reference-mode
+hint banner collapses only where it would cover the display bar; the ribbon's
+selection mode and all selection behavior remain available.
 
 Explicit raster style selection turns off path tracing and saves the style.
 Projection keeps its existing persisted preference. Display/navigation controls
@@ -36,8 +42,11 @@ unchanged.
   agreement for every clicked facet so a self-consistent but wrong named view
   cannot pass. At 1180x800 and 1600x1000, also exercise actual style clicks with
   Assistant and navigation controls both open; require a cube at least 96 pixels
-  across and disjoint control rectangles. Toolbar, cube and triad share placement
-  geometry; wide, short viewports retain readable face labels.
+  across and disjoint control rectangles. A real occurrence of the public startup
+  fixture keeps Appearance, Opacity and Move visible; all three must remain
+  disjoint from the bar. Click Orbit/Pan/Zoom/AO through the same Win32 path.
+  Toolbar, cube and triad share placement geometry; wide, short viewports retain
+  readable face labels.
 - `studio-viewport-dock-ui` and compact counterpart: actual Win32 clicks for
   all raster styles, projection, overlays and Fit; settings reload; neutral
   padding; bounds and triad separation; selected part/container drawings,

@@ -70,6 +70,10 @@ static const ActionIcon* actionVectorIcon(int action){
         auto& projection=result[175];box(projection,.12f,.33f,.53f,.53f);poly(projection,{{.12f,.33f},{.35f,.10f},{.88f,.10f},{.88f,.63f},{.65f,.86f}});line(projection,.65f,.33f,.88f,.10f);
         auto& home=result[191];poly(home,{{.09f,.46f},{.50f,.12f},{.91f,.46f}});poly(home,{{.21f,.40f},{.21f,.85f},{.42f,.85f},{.42f,.59f},{.60f,.59f},{.60f,.85f},{.79f,.85f},{.79f,.40f}});
         auto& more=result[455];for(float x:{.20f,.50f,.80f})arc(more,x,.50f,.045f,.045f,0,360);
+        auto& orbit=result[176];arc(orbit,.5f,.5f,.36f,.36f,25,325);arc(orbit,.5f,.5f,.17f,.36f,0,360);poly(orbit,{{.76f,.13f},{.85f,.29f},{.67f,.30f}});
+        auto& pan=result[177];line(pan,.13f,.5f,.87f,.5f);line(pan,.5f,.13f,.5f,.87f);poly(pan,{{.27f,.36f},{.13f,.5f},{.27f,.64f}});poly(pan,{{.73f,.36f},{.87f,.5f},{.73f,.64f}});poly(pan,{{.36f,.27f},{.5f,.13f},{.64f,.27f}});poly(pan,{{.36f,.73f},{.5f,.87f},{.64f,.73f}});
+        auto& zoom=result[178];arc(zoom,.41f,.40f,.27f,.27f,0,360);line(zoom,.61f,.61f,.88f,.88f);line(zoom,.27f,.40f,.55f,.40f);line(zoom,.41f,.26f,.41f,.54f);
+        auto& ao=result[186];arc(ao,.5f,.43f,.27f,.27f,0,360);arc(ao,.5f,.75f,.40f,.10f,0,360);for(float y:{.38f,.48f,.58f})line(ao,.50f,y,.71f,y-.05f);
         auto& dockFit=result[964];for(float x:{.14f,.86f})for(float y:{.14f,.86f}){line(dockFit,x,y,x+(x<.5f?.20f:-.20f),y);line(dockFit,x,y,x,y+(y<.5f?.20f:-.20f));}box(dockFit,.36f,.36f,.28f,.28f);
         auto& sheet=result[965];box(sheet,.19f,.08f,.62f,.84f);box(sheet,.30f,.22f,.23f,.25f);arc(sheet,.65f,.34f,.07f,.07f,0,360);line(sheet,.30f,.61f,.70f,.61f);line(sheet,.30f,.74f,.70f,.74f);line(sheet,.55f,.74f,.55f,.90f);
         auto& motions=result[45000];line(motions,.12f,.86f,.90f,.86f);line(motions,.12f,.86f,.12f,.12f);for(int i=0;i<16;++i){auto curve=[](float t){return .74f-.52f*t*t*(3-2*t);};const float a=i/16.f,b=(i+1)/16.f;line(motions,.18f+.64f*a,curve(a),.18f+.64f*b,curve(b));}line(motions,.58f,.16f,.58f,.80f);poly(motions,{{.66f,.18f},{.86f,.30f},{.66f,.42f},{.66f,.18f}});

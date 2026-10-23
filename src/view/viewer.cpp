@@ -3820,7 +3820,7 @@ static void moduleCommands(int category){
     if(category==0){group("Solids",{{100,"Primitive"},{101,"Extrude saved sketch"},{102,"Union / cut / common"},{920,"Holes Orchestrator"},{103,"Profile / decorative cut"},{104,"Fillet / chamfer"},{106,"Draft"},{107,"Pattern"},{108,"Mirror"},{105,"Rigid transform"}});group("Surfaces",{{76,"Loft"},{77,"Fill"},{78,"NURBS"},{150,"Sweep"},{151,"Extrude surface"},{152,"Revolve surface"},{153,"Offset"},{154,"Glue surfaces"},{79,"Thicken"}});group("Frames & motion",{{210,"Construction frame"},{26,"Tube"},{215,"Suspension"},{384,"Spring unit controls"},{27,"Assembly"},{94,"Geometric mate"},{451,"Mechanical relation"},{452,"Motion driver"}});group("Electronics",{{211,"PCB"},{212,"Cable route"}});group("Mesh",{{155,"Weld"},{156,"Smooth"},{157,"Decimate"},{158,"Offset"},{159,"Fill planar holes"},{160,"Import STL/OBJ"}});}
     else if(category==1){group("Physics",{{187,"Material and appearance"},{188,"Mass / center of gravity"},{190,"Assembly mass"},{216,"Loads"}});group("View",{{56,"Graphics settings"},{174,"Edges"},{186,"Ambient occlusion"},{175,"Orthographic"},{461,"Navigation controls"}});group("Agents",{{400,"Assistant"},{58,"Live MCP"},{21,"Agent command"},{57,"Account"},{357,"Connectors"},{368,"Local models / Ollama"}});}
     else if(category==2){group("Document",{{55,"New"},{17,"Open"},{16,"Save"},{213,"Export"},{910,"Import STEP / IGES"},{52,"Import tube STEP"},{81,"Import sheet STEP"},{160,"Import mesh"}});group("History",{{756,"Features / dependencies / rollback"},{18,"Undo"},{19,"Redo"}});group("Assembly",{{44080,"Configurations and loading..."}});}
-    else if(category==3){group("Display style",{{462,"Shaded"},{463,"Shaded with edges"},{464,"Wireframe"},{175,"Orthographic"},{56,"Graphics settings"},{465,"Show view cube"}});group("Named views",{{180,"Front"},{181,"Back"},{23,"Top"},{184,"Bottom"},{182,"Right"},{183,"Left"},{24,"Isometric"},{20,"Fit"}});}
+    else if(category==3){group("Display style",{{462,"Shaded"},{463,"Shaded with edges"},{464,"Wireframe"},{175,"Orthographic"},{56,"Graphics settings"},{465,"Show view cube"}});group("Overlays",{{960,"Construction planes and datums"},{961,"Sketches"},{962,"Grid"},{186,"Cycle ambient occlusion"}});group("Navigation",{{176,"Orbit"},{177,"Pan"},{178,"Zoom"},{461,"Show / hide navigation group"}});group("Named views",{{180,"Front"},{181,"Back"},{23,"Top"},{184,"Bottom"},{182,"Right"},{183,"Left"},{24,"Isometric"},{20,"Fit"},{191,"Home"}});group("Drawing",{{965,"Open selected-source drawing"}});}
     decorateMenu(menu);POINT point;GetCursorPos(&point);int action=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,point.x,point.y,0,g_window,nullptr);DestroyMenu(menu);if(action)interactiveAction(action);
 }
 static void focusSourceOpening(int index){
@@ -5149,8 +5149,8 @@ static void drawFrame(HDC hdc){
     else if(g_allSheetsPlaying)textOut("Bend sequence / display only",captionX,captionY,.70f,.62f,.77f,.85f);
     if(g_pickKind){static const char* hints[]={"","FACE / hover previews / click replaces / Ctrl or Shift adds / Esc exits","EDGE / hover previews / click replaces / Ctrl or Shift adds / Esc exits","CURVE / click a sketch curve  |  Esc exits"};
         std::string hint=fitText((g_hoverReferenceHint.empty()?std::string{}:g_hoverReferenceHint+" / ")+hints[std::clamp(g_pickKind,0,3)],.62f,viewX+viewW-captionX-24);float hintY=captionY+50,width=textWidth(hint,.62f)+18;
-        rect(captionX-1,hintY-4,width,27,6,.09f,.14f,.20f,.87f,.35f,.55f,.76f,.62f,1);
-        textOut(hint,captionX+8,hintY,.62f,.79f,.91f,.99f);}
+        const auto bar=viewportBarLayout();const bool overlap=bar.visible&&captionX-1<bar.x+bar.width&&captionX+width>bar.x&&hintY-4<bar.y+bar.height&&hintY+23>bar.y;
+        if(!overlap){rect(captionX-1,hintY-4,width,27,6,.09f,.14f,.20f,.87f,.35f,.55f,.76f,.62f,1);textOut(hint,captionX+8,hintY,.62f,.79f,.91f,.99f);}}
     if(g_projectionPreview.active){float x=captionX,y=(float)viewY+96,width=std::min(540.f,(float)viewW-g_cubeS-200.f);rect(x,y,width,52,8,.025f,.095f,.105f,.94f,.19f,.80f,.73f,.82f,1.2f);std::string title=std::string(g_projectionPreview.spatial?"3D INCLUDE PREVIEW / ":"2D PROJECTION PREVIEW / ")+g_projectionPreview.target;textOut(fitText(title,.70f,width-188),x+12,y+7,.70f,.64f,.98f,.93f);textOut(fitText(g_projectionPreview.source,.58f,width-188),x+12,y+29,.58f,.68f,.86f,.90f);button("Apply",x+width-169,y+10,72,539,true);button("Cancel",x+width-89,y+10,76,540);}
     size_t flatIndex=0;
     if(g_allSheetsFlat)for(size_t i=0;i<g_bodyIds.size();++i)if(isSheetFeature(g_bodyIds[i])){
@@ -5636,12 +5636,6 @@ static void drawFrame(HDC hdc){
         }
         for(auto it=order.rbegin();it!=order.rend();++it)g_zones.push_back(axisZones[*it]);
     }
-    if(g_compactNavigation){const char* names[]={"Orbit","Pan","Zoom","Fit","Edges","AO","Ortho"};int ids[]={176,177,178,20,174,186,175};
-        bool on[]={g_navMode==0,g_navMode==1,g_navMode==2,false,g_showEdges,g_occlusionMode!=0,g_cameraOrtho};
-        float gap=4.f,bw=58.f,ty=(float)viewY+(float)viewH-44.f,nx=(float)viewX+10;
-        if(g_showViewCube&&ty-5<g_cubeY+g_cubeS+8)nx=std::max(nx,(float)g_cubeX+g_cubeS+12);
-        rect(nx,ty-5,7*bw+6*gap+16,43,9,.07f,.08f,.10f,.76f,.34f,.38f,.44f,.45f,1);
-        for(int i=0;i<7;++i)button(names[i],nx+8+i*(bw+gap),ty,bw,ids[i],false,on[i]);}
     if(selBody>=0&&(size_t)selBody<g_bodyIds.size()&&!g_toolsOpen&&!g_cableGuide035.active){
         auto* feature=g_doc.find(g_bodyIds[(size_t)selBody]);bool transparent=feature&&resolvedAppearance(g_doc,*feature).opacity<.999;
         float px=g_showViewCube?(float)g_cubeX+g_cubeS+24:(float)viewX+16,py=(float)viewY+12;rect(px-5,py-5,390,57,7,.055f,.083f,.106f,.92f,.29f,.42f,.52f,.65f,1);
