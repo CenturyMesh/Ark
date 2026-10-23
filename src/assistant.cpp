@@ -402,7 +402,7 @@ static bool preloadedGuideTopic(const std::string& pack,const V& args){
 // listed here stays core, so new tools are never hidden by omission.
 const std::vector<std::pair<std::string,std::vector<std::string>>>& assistantSpecialistToolTopics(){
     static const std::vector<std::pair<std::string,std::vector<std::string>>> topics={
-        {"bom",{"bom_inspect","bom_review","bom_export","bom_export_parts"}},
+        {"bom",{"bom_inspect","bom_review","bom_export","bom_export_parts","library_search","library_get","library_vendors","library_source_search","library_source_page"}},
         {"fasteners",{"fastener_recipe","library_search","library_get","library_insert","library_info"}},
         {"components",{"library_search","library_get","library_insert","library_info","library_sources","library_source_search","library_source_page","library_fetch","library_ingest","library_update","library_vendors"}},
         {"vendors",{"library_vendors","library_sources","library_source_search","library_source_page","library_fetch","library_ingest"}},
@@ -762,7 +762,7 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
     const bool toolAdditions=config.deferSpecialistTools&&assistantMessagesToolAdditions(config);
     auto advertisedTools=[&]{
         auto active=toolAdditions?assistantDeferredCatalogue(tools,result.conversation,config.onboardingPack):config.deferSpecialistTools?assistantActiveTools(tools,result.conversation,config.onboardingPack):tools;
-        if(offerBomRecovery)for(const auto& tool:tools.arr){const auto name=field(tool,"name");if(name!="bom_inspect"&&name!="bom_review")continue;
+        if(offerBomRecovery)for(const auto& tool:tools.arr){const auto name=field(tool,"name");if(name!="bom_inspect"&&name!="bom_review"&&name!="library_search"&&name!="library_get"&&name!="library_vendors"&&name!="library_source_search"&&name!="library_source_page")continue;
             auto found=std::find_if(active.arr.begin(),active.arr.end(),[&](const V& item){return field(item,"name")==name;});
             if(found==active.arr.end())active.arr.push_back(tool);else *found=tool;
         }

@@ -1,5 +1,9 @@
 # Persistent part metadata and BOM — 011E
 
+056C adds [actionable sourcing recovery and bounded public-page reads](BOM_RESEARCH_056C.md).
+BOM onboarding offers research tools directly; web results identify the actual
+supplier and provide a page action. Detailed review retains every existing gate.
+
 In 015B, the BOM workspace adds a dark layout, search, All/Needs review/Buy/Make
 filters, status badges and selected-part details. Sort or filter before editing:
 selection remains bound to the original definition ID. Locate part returns to
