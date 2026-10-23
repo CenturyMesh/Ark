@@ -5,7 +5,7 @@
         uiAction(2000);
         // All following navigation/display interactions must preserve this source.
         u64 revision=g_session.revision,epoch=g_documentEpoch;int savedW=winW,savedH=winH,savedSelection=selBody;auto savedPicked=g_picked;
-        bool savedDock=g_assistantDockOpen,savedMode=g_teamMode,savedCompact=g_compactNavigation;unsigned savedCount=g_teamRoleCount;double savedRoll=cameraRoll;
+        bool savedDock=g_assistantDockOpen,savedMode=g_teamMode,savedCompact=g_compactNavigation,savedGrid=g_grid;unsigned savedCount=g_teamRoleCount;double savedRoll=cameraRoll;g_grid=true;
         g_assistantDockOpen=true;g_teamMode=true;g_teamRoleCount=3;g_compactNavigation=false;g_pickKind=1;g_verifyTeamCardBounds=true;g_swap=false;
         auto failure=[&](const std::string& detail){std::ofstream log(shotPath+".navigation-test.log");log<<detail<<"\n";std::fprintf(stderr,"Navigation UI selftest: %s\n",detail.c_str());return 402;};
         auto resize=[&](int width,int height){RECT bounds{0,0,width,height};AdjustWindowRectEx(&bounds,(DWORD)GetWindowLongPtr(g_window,GWL_STYLE),FALSE,(DWORD)GetWindowLongPtr(g_window,GWL_EXSTYLE));SetWindowPos(g_window,nullptr,0,0,bounds.right-bounds.left,bounds.bottom-bounds.top,SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);winW=width;winH=height;layout();};
@@ -32,6 +32,7 @@
                 if(id>=176&&id<=178){click((int)(zone->x+zone->w*.5f),(int)(zone->y+zone->h*.5f));if(g_navMode!=id-176)return failure("Navigation mode click failed in unified toolbar.");draw();}
                 if(id==186){const int previous=g_occlusionMode;click((int)(zone->x+zone->w*.5f),(int)(zone->y+zone->h*.5f));if(g_occlusionMode!=(previous+1)%4)return failure("Occlusion click failed in unified toolbar.");while(g_occlusionMode!=previous)uiAction(186);draw();}}
             const auto bar=viewportBarLayout();for(int id:{560,561,562}){auto zone=std::find_if(g_zones.begin(),g_zones.end(),[&](const Zone& z){return z.id==id;});if(zone==g_zones.end())return failure("Selected occurrence lost an Appearance/Opacity/Move control.");if(zone->x<bar.x+bar.width&&zone->x+zone->w>bar.x&&zone->y<bar.y+bar.height&&zone->y+zone->h>bar.y)return failure("Unified toolbar overlaps selected-occurrence controls.");}
+            const auto caption=g_gridCaptionBounds;if(caption.right>caption.left&&caption.left<bar.x+bar.width&&caption.right>bar.x&&caption.top<bar.y+bar.height&&caption.bottom>bar.y)return failure("Grid scale caption covers the unified toolbar.");
             if(!navigationUiFits(detail))return failure(detail);
             if(!write(".navigation-"+std::to_string(size.first)+"x"+std::to_string(size.second)+"-compact-controls",readPixels(0,0,winW,winH)))return failure("Could not save compact controls capture.");
             g_compactNavigation=false;uiAction(176);uiAction(462);draw();
@@ -77,5 +78,5 @@
         if(std::abs(tYaw-beforeYaw)+std::abs(tPitch-beforePitch)<.001)return failure("Dragging compass no longer orbits the camera.");
         if(g_session.revision!=revision||g_documentEpoch!=epoch)return failure("Navigation changed document authority.");
         std::ofstream receipt(shotPath+".navigation-test.log");receipt<<"PASS: 26 facets; "<<directionChecks<<" mouse snap/roll/physical-size checks; "<<labelChecks<<" cardinal pixel checks; "<<edgePixels<<" blended outline pixels; geometry/font built once; targets reused while orbiting; padding/Home/orbit; unchanged document.\n"<<timings.str();
-        resize(savedW,savedH);g_assistantDockOpen=savedDock;g_teamMode=savedMode;g_teamRoleCount=savedCount;g_compactNavigation=savedCompact;g_pickKind=0;g_verifyTeamCardBounds=false;cameraRoll=savedRoll;uiAction(24);yaw=tYaw;pitch=tPitch;frameScene();target=tTarget;dist=tDist;
+        resize(savedW,savedH);g_assistantDockOpen=savedDock;g_teamMode=savedMode;g_teamRoleCount=savedCount;g_compactNavigation=savedCompact;g_grid=savedGrid;g_pickKind=0;g_verifyTeamCardBounds=false;cameraRoll=savedRoll;uiAction(24);yaw=tYaw;pitch=tPitch;frameScene();target=tTarget;dist=tDist;
         g_status="Navigation checks passed / 26 facets / antialiased words / retained GPU data / unchanged document";
