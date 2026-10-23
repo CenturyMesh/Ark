@@ -556,7 +556,7 @@ static void layout(){viewX=std::clamp((int)(winW*.21),280,352);viewW=std::max(wi
     layoutAssistantImageDimensions();
 }
 static int selBody=-1,hoverBody=-1;
-static bool wireframe=false, g_pressWasButton=false;
+static bool wireframe=false, g_pressWasButton=false,g_viewportPlaybackControls=false;
 static double g_fps=0;
 static int g_hoverZone=-1;static std::array<Zone,3> g_frameRibbonBounds{};static std::string g_lastRibbonHint;static std::optional<POINT> g_testPointer;
 struct CurveSample { std::string sketch,name; Vec3 a,b; };
@@ -4859,6 +4859,10 @@ static void drawFrame(HDC hdc){
     double cameraEase=1-std::exp(-13.4*elapsed),distanceEase=1-std::exp(-11.9*elapsed);
     yaw+=(tYaw-yaw)*cameraEase;pitch+=(tPitch-pitch)*cameraEase;dist+=(tDist-dist)*distanceEase;target=target+(tTarget-target)*cameraEase;
     layout();assistant_chat::sync();sampleStudioResources();updateCostDisplay();
+    // Reserve the existing contextual playback row without measuring or
+    // allocating its geometry in each toolbar/cube layout query.
+    const auto* playbackSheet=selectedSheet();const Body* playbackBody=playbackSheet&&playbackSheet->type==FeatureType::SheetMetal?sheetOriginBody(playbackSheet->id):nullptr;
+    g_viewportPlaybackControls=selectedSuspension()||selectedNotchedTube()||selectedSourceTube()||(playbackBody&&playbackBody->nativeData.find("animation"));
     if(g_physicalVisible){u64 selected=selBody>=0&&(size_t)selBody<g_bodyIds.size()?(g_instanceIds[(size_t)selBody]?g_instanceIds[(size_t)selBody]:g_bodyIds[(size_t)selBody]):0;
         if(g_physicalRevision!=g_session.revision||selected!=g_physicalSelection)g_physicalVisible=false;}
 
@@ -6522,6 +6526,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         auto slider=std::find_if(g_zones.begin(),g_zones.end(),[](const Zone& zone){return zone.id==380;});
         auto nav=std::find_if(g_zones.begin(),g_zones.end(),[](const Zone& zone){return zone.id==176;});
         if(slider==g_zones.end()||nav==g_zones.end()||slider->y+slider->h>=nav->y)return 276;
+        {const auto bar=viewportBarLayout();if(!bar.visible||bar.y<viewY+viewH-69){std::fprintf(stderr,"Display bar covers suspension playback panel\n");return 276;}}
         interactiveAction(383);double spinBefore=cache.state.wheelSpinDeg;advanceSuspension(.2);interactiveAction(383);
         if(g_error||g_suspSpinPlaying||g_session.revision!=revision||cache.state.wheelSpinDeg<=spinBefore)return 277;
         g_status="Suspension UI checks passed / colored named parts / jounce / steering rack / wheel spin / unchanged revision";
@@ -6567,6 +6572,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         if(playback==g_zones.end()||nav==g_zones.end())return 264;
         auto intersects=[](const Zone& a,const Zone& b){return a.x<b.x+b.w&&b.x<a.x+a.w&&a.y<b.y+b.h&&b.y<a.y+a.h;};
         if(intersects(*playback,*nav))return 265;
+        {const auto bar=viewportBarLayout();if(!bar.visible||bar.y<viewY+viewH-63){std::fprintf(stderr,"Display bar covers sheet playback panel\n");return 265;}}
         for(auto size:std::vector<std::pair<int,int>>{{1180,840},{1600,1000},{2923,1080}}){int vw=size.first-std::clamp((int)(size.first*.21),280,352),vh=size.second-viewY-32;
             float playTop=(float)viewY+vh-106,playBottom=(float)viewY+vh-63,navTop=(float)viewY+vh-49;
             float sliderEnd=(float)viewX+136+244+std::max(80.f,(float)vw-408.f);

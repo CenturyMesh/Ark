@@ -25,6 +25,12 @@ At constrained widths, direct styles and More remain; More explicitly includes
 overlays, navigation, named views and selected-source drawing. A reference-mode
 hint banner collapses only where it would cover the display bar; the ribbon's
 selection mode and all selection behavior remain available.
+Grid scale captions follow the same intersection rule. Contextual sheet/tube
+and suspension playback uses a 44-pixel display bar with the same 32-pixel hit
+targets and tooltips, omitting group captions so the full bar clears playback.
+Descriptors and local hit-zone storage use fixed arrays rather than allocating
+collections on each frame. This does not claim the complete draw path is free
+of allocations or demonstrate a frame-time reduction.
 
 Explicit raster style selection turns off path tracing and saves the style.
 Projection keeps its existing persisted preference. Display/navigation controls
@@ -56,8 +62,16 @@ unchanged.
   introduced.
 - Integrated regressions should include action icons, inertial UI, drawings and
   asynchronous exact-work Cancel priority, because these share viewport layers.
+  Context and suspension self-tests also compare the full display bar with the
+  playback panel, rather than only checking one navigation button.
 
 This change does not claim faster frame time: retained geometry/font/target
 allocation assertions remain, and paint timings are receipts rather than a
 before/after benchmark. Supersampling still uses the existing 3x target and
 fallback; no graphics backend or hardware qualification is added.
+
+A preexisting limitation remains outside this change: at a 160-pixel-high
+suspension viewport, its legacy full-width physical panel can intersect the cube
+and Appearance panel. Source comparison confirmed the intersection on the 056C
+base. The display bar now clears playback, but this is not a claim that every
+legacy contextual panel has been redesigned or qualified at that height.

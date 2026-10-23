@@ -36,8 +36,8 @@ template<class Rect,class Glyph>static void drawViewportDock(Rect rect,Glyph gly
     const char* headings[]={style,"Overlays","Navigate","View","2D","More"};static constexpr int offsets[]={0,3,6,10,12,13},groupSizes[]={3,3,4,2,1,1};
     std::array<Zone,15> zones;size_t zoneCount=0;const char* tip=nullptr;float bx=x+8,tipCenter=x+width*.5f;
     for(int group=0;group<6;++group){if((group==2&&!g_compactNavigation)||(layout.condensed&&group!=0&&group!=5))continue;const float groupWidth=cell*groupSizes[group];
-        const float scale=.64f;textOut(headings[group],bx+(groupWidth-textWidth(headings[group],scale))*.5f,y+7,scale,.66f,.73f,.81f);
-        for(int j=0;j<groupSizes[group];++j,bx+=cell){const int index=offsets[group]+j;const float by=y+28,bw=cell-4,bh=32;
+        const float scale=.64f;if(height>44)textOut(headings[group],bx+(groupWidth-textWidth(headings[group],scale))*.5f,y+7,scale,.66f,.73f,.81f);
+        for(int j=0;j<groupSizes[group];++j,bx+=cell){const int index=offsets[group]+j;const float by=y+(height>44?28:6),bw=cell-4,bh=32;
             const bool enabled=ids[index]!=965||drawingReady,hover=pointer.x>=bx&&pointer.x<bx+bw&&pointer.y>=by&&pointer.y<by+bh;
             if(active[index])rect(bx,by,bw,bh,5,.16f,.28f,.40f,1,.33f,.53f,.72f,.85f,1);
             if(hover){rect(bx,by,bw,bh,5,.22f,.34f,.46f,enabled?.90f:.22f,.42f,.61f,.80f,enabled?.8f:.2f,1);tip=tips[index];tipCenter=bx+bw*.5f;}

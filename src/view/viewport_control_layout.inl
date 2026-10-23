@@ -7,6 +7,9 @@ static NavigationTriadLayout navigationTriadLayout(){
 struct ViewportBarLayout {float x=0,y=0,width=0,height=68,cell=0;bool visible=false,condensed=false;};
 static ViewportBarLayout viewportBarLayout(){
     ViewportBarLayout r;if(g_drawingViewport.active||g_busy||g_toolsOpen||viewW<440||viewH<150)return r;
+    // Playback occupies the row immediately above the display controls. Keep
+    // all icons and hit targets; omit group captions in this contextual layout.
+    if(g_viewportPlaybackControls)r.height=44;
     r.cell=viewW>=(g_compactNavigation?1000:720)?44.f:36.f;r.width=g_compactNavigation?14*r.cell+76:10*r.cell+64;
     const auto compass=navigationTriadLayout().bounds;
     auto place=[&]{r.x=viewX+(viewW-r.width)*.5f;r.y=viewY+viewH-r.height-18;if(g_motionActive)r.y-=92;
