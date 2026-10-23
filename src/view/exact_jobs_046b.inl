@@ -92,7 +92,8 @@ template<class Rect,class Button>static void drawExactJobsOverlay046(Rect rect,B
     if(!g_exactJobs046)return;const auto rows=g_exactJobs046->status();if(rows.empty())return;
     const auto& first=*std::min_element(rows.begin(),rows.end(),[](const auto& a,const auto& b){return a.id<b.id;});
     const bool cancelling=std::all_of(rows.begin(),rows.end(),[](const auto& row){return row.cancelRequested;});
-    // Above the viewport display dock, so neither control covers the other.
+    // Prefer space above the display dock. In a short viewport the fallback
+    // overlaps it; the foreground chip must own input in its visible bounds.
     float w=std::min(520.f,(float)viewW-32),h=74,x=(float)viewX+16,dock=(float)(viewY+viewH)-84-(g_motionActive?92.f:0.f),y=dock-h-10;
     if(y<viewY+90)y=(float)(viewY+viewH)-h-16;
     if(g_showViewCube&&y<g_cubeY+g_cubeS+20){x=(float)(g_cubeX+g_cubeS+20);w=std::min(w,(float)(viewX+viewW)-x-16);}
@@ -101,5 +102,11 @@ template<class Rect,class Button>static void drawExactJobsOverlay046(Rect rect,B
     textOut(fitText(line,.62f,(int)w-118),x+12,y+9,.62f,.65f,.91f,.99f);
     textOut(fitText("Revision "+std::to_string(first.revision)+" snapshot / view and selection stay live / result is labelled",.50f,(int)w-118),x+12,y+33,.50f,.57f,.77f,.86f);
     const float phase=(float)std::fmod(first.elapsedMs/1000.*1.6,1.);rect(x+12,y+58,w-128,4,2,.20f,.28f,.36f,1,0,0,0,0,0);rect(x+12+phase*(w-128-70),y+58,70,4,2,.42f,.79f,.98f,1,0,0,0,0,0);
+    const size_t firstOverlayZone=g_zones.size();
     button(cancelling?"Stopping":"Cancel",x+w-100,y+(h-32)/2,88,exactJobCancelAction046);
+    // The dock deliberately prepends its controls. Match this chip's later
+    // paint order without disturbing either group's internal hit order.
+    const size_t overlayControls=g_zones.size()-firstOverlayZone;
+    std::rotate(g_zones.begin(),g_zones.begin()+firstOverlayZone,g_zones.end());
+    g_zones.insert(g_zones.begin()+overlayControls,Zone{x,y,w,h,0});
 }

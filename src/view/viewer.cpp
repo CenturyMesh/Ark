@@ -3855,6 +3855,7 @@ static void selectTangentFaces();
 static void collisionCheckDialog();
 static bool viewportDockAction(int);static bool parametricHudAction(int);
 static void uiAction(int id){
+    if(id==0)return; // Visible neutral panels consume input without changing state.
     if(inertialAction056(id))return;
     // Authoring and other previews always start from the authored CAD pose.
     // Camera, visibility, selection and graphics controls keep playback live.
@@ -5705,7 +5706,6 @@ static void drawFrame(HDC hdc){
     drawInertialPanel056(rect,button,mp,ribbonHint);
     drawParametricHud(rect,mp,ribbonHint);
     drawExplodedViewsPanel(rect,button,mp,ribbonHint);
-    drawExactJobsOverlay046(rect,button);
     g_lastRibbonHint=ribbonHint;
     if(!ribbonHint.empty()){float width=textWidth(ribbonHint,.60f)+22,x=std::clamp((float)mp.x+12.f,10.f,W-width-10.f),y=(float)mp.y+20;rect(x,y,width,29,6,.035,.055,.075,.98,.27,.51,.65,.95,1);textOut(ribbonHint,x+11,y+7,.60f,.87f,.94f,1.f);}
     if(g_drawingViewport.active){
@@ -5715,6 +5715,9 @@ static void drawFrame(HDC hdc){
         auto drawingLine=[&](float ax,float ay,float bx,float by,float r,float g,float b,float width){float x=std::min(ax,bx)-2,y=std::min(ay,by)-2,w=std::abs(bx-ax)+4,h=std::abs(by-ay)+4;glUniform1i(uuGlyph,500);glUniform4f(uuRc,x,y,w,h);glUniform1f(uuBW,width);glUniform4f(uuFill,r,g,b,1);glUniform4f(glGetUniformLocation(pUI,"lineAB"),ax-x,ay-y,bx-x,by-y);glBindVertexArray(quadVao);glDrawArrays(GL_TRIANGLES,0,6);glUniform1i(uuGlyph,0);};
         renderDrawingViewport(rect,button,drawingLine);
     }
+    // Background exact reads remain visible and cancellable in the drawing
+    // workspace too. Paint last, matching their foreground input priority.
+    drawExactJobsOverlay046(rect,button);
     // flush text
     glUseProgram(pText);
     glUniform2f(glGetUniformLocation(pText,"vp"),W,H);
