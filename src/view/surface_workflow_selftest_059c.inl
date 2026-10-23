@@ -84,9 +84,12 @@ static int surfaceWorkflowSelfTest059(HDC,const std::string& output){
 
         stage="3D boundary and interior guides";form(49404,{{"3D wire patch","curve","7","fill","0","33","0.001","0.0001","8"}},".guided-patch-form.png");const auto guidedId=g_doc.features.back().id;
         check(g_doc.find(guidedId)->inputs==std::vector<u64>({7,8}),"3D patch lost boundary/guide dependencies");check(g_doc.find(guidedId)->nativeSpec.find("guide_curves")->arr[0].num==8,"Patch guide recipe missing");
-        check(report(guidedId).find("guide_curve_evidence")!=nullptr,"Interior guide verification evidence missing");
+        const auto guidedReport=report(guidedId);check(guidedReport.find("guide_curve_evidence")!=nullptr,"Interior guide verification evidence missing");
+        check(guidedReport.find("guide_curve_evidence")->arr.size()==1&&guidedReport.find("guide_samples_checked")&&guidedReport.find("guide_samples_checked")->num>=33&&guidedReport.find("guide_max_error_mm")&&guidedReport.find("guide_max_error_mm")->num<=1e-6,"Interior guide evidence does not satisfy the measured bound");
+        receipt.set("guide_max_error_mm",*guidedReport.find("guide_max_error_mm"));
         form(49404,{{"3D wire patch edited","curve","7","fill","0","33","0.001","0.0001","8"}},nullptr,g_doc.find(guidedId));check(g_doc.find(guidedId)->nativeSpec.find("boundary_curve")->num==7,"Patch edit dropped closed 3D boundary");
         form(49404,{{"Supported guided 3D patch","curve","7","fill","1","33","0.001","0.0001","8"},{"0","1",supportFace,"G1"}},nullptr,g_doc.find(fillId));check(!g_doc.find(fillId)->p.count("sketch")&&g_doc.find(fillId)->inputs==std::vector<u64>({7,8,1}),"Patch boundary conversion retained sketch or lost dependencies");
+        const auto supportedReport=report(fillId);check(supportedReport.find("guide_curve_evidence")&&supportedReport.find("guide_curve_evidence")->arr.size()==1&&supportedReport.find("support_boundary_evidence")&&supportedReport.find("support_boundary_evidence")->arr.size()==1,"Combined guide and G1 support evidence missing");
         rejected([&]{form(49404,{{"Repeated guide","curve","7","fill","0","33","0.001","0.0001","8;8"}},nullptr);},"Repeated patch guide accepted");
 
         stage="revision and epoch guards";const auto count=g_doc.features.size();const auto initialRevision=g_session.revision;

@@ -1,7 +1,8 @@
 # 059C surface authoring forms
 
-Milestones **A.02 / B.01 / B.03 / D.02**. Status: **Em curso** for integrated
-Studio verification. The forms call the exact, atomic document API and capture
+Milestones **A.02 / B.01 / B.03 / D.02**. Status: **Verificado no escopo** in the
+isolated native Studio run; final integrated Studio verification remains pending.
+The forms call the exact, atomic document API and capture
 both document revision and document epoch before the first interaction.
 
 ## Operations and integration
@@ -59,23 +60,38 @@ least two distinct support faces. Cancelling any support form publishes nothing.
 
 ## Verification record
 
-The isolated native Studio compilation succeeded. The first complete run reached
-85 checks before its explicit interior-guide evidence assertion failed against
-the earlier worker, whose output lacked `report.guide_curve_evidence`. This
-failure is retained as evidence, and does **not** validate interior guides.
-Final integrated verification is pending the guide-capable worker.
+The isolated native Studio compilation and full selftest passed **106 checks**
+with the guide-capable native worker on 2026-10-23. The synthetic result contains
+17 native features at document revision 20. The measured interior guide error
+was `4.4408920985006262e-16` mm; the test requires at least 33 checkpoints and
+an observed error no greater than 1e-6 mm.
 
-Observed passing scope in that run: all five main-form cancellations, mirror
-area and source retargeting, invalid/self-source rejection, surface and curve
-trims with analytic areas, ruled area, loft with exact 3D sections and a lateral
-guide, retained section alignment, optional parameter removal, sketch-to-point
-loft, cancellation at the second patch step, native G1/G2 support publication,
-unknown support-face rejection and exact closed-wire boundary publication.
+Verified scope: all five main-form cancellations, mirror area and source
+retargeting, invalid/self-source rejection, surface and curve trims with analytic
+areas, ruled area, loft with exact 3D sections and a lateral guide, retained
+section alignment and checkbox expressions, optional parameter removal,
+sketch-to-point loft, cancellation at the second patch step, native G1/G2
+supports, unknown support-face rejection, exact closed-wire patch, interior
+G0 guides, combined G1 support and guide, sketch-to-curve boundary conversion,
+duplicate guide rejection, actual concurrent-publication and document-epoch
+rejection, GPU scene capture, and serialized document round trip with recompute.
 
-Native dialog screenshots were inspected. Labels and hints were shortened after
-the first captures exposed clipping. Final captures, document round trip,
-concurrent-publication/epoch rejection and combined guided G1 patch are exercised
-by the same selftest and require the pending successful full run.
+An earlier worker lacked `report.guide_curve_evidence`; the UI regression failed
+at check 85 rather than counting its accepted but unverified guide input as a
+success. Development also exposed the fixed native mirror tolerance, rejection
+of a guide through the section centroid, and the need to read the actual
+producer face name. The final fixtures respect those explicit contracts.
+
+Native dialog screenshots and the final GPU scene were inspected. Labels and
+hints were shortened after initial captures exposed clipping, including the
+shared editor's automatically appended picking hint. The semantic face field
+retains horizontal scrolling for full digest-bound names.
+
+The receipt is `surface059.png.surface-workflow.json`; captures use suffixes
+`.mirror-form.png`, `.trim-form.png`, `.ruled-form.png`, `.loft-form.png`,
+`.fill-form.png`, `.support-form.png`, `.guided-patch-form.png` and `.surfaces.png`.
+The root integration must rerun the same selftest against its final Studio and
+worker binaries before treating this as an integrated release result.
 
 All fixtures are synthetic. Sampled continuity and guide errors are bounded local
 checks, not proofs between samples, global continuity certification or production

@@ -42,7 +42,7 @@ static void mirror(const Feature* editing){
     Context c(editing);V native=c.native();std::vector<EditorField> f{{"Result name",c.name("Mirrored surface")},pickField("Source surface",c.input(0),4),
         {"Plane / blank: custom",value(native,"plane",native.find("origin")?"":"XZ")},{"Origin X,Y,Z / mm",xyzText(native.find("origin"),"0, 0, 0")},
         {"Normal X,Y,Z",xyzText(native.find("normal"),"0, 1, 0")},choiceField("Seam continuity",value(native,"continuity","G0"),{"G0","G1"})};
-    if(!editFields(editing?"Edit mirrored surface":"Mirror and join surface","Join a half-surface at its plane seam. XZ means Y=0; blank plane uses origin/normal. G1 is checked, without smoothing.",f))return;c.current();
+    if(!editFields(editing?"Edit mirrored surface":"Mirror and join surface","Join a half-surface at its seam. XZ is Y=0; blank plane uses XYZ. G1 checks without smoothing.",f))return;c.current();
     const auto source=sourceId(c,f[1].value);native.set("op",V::makeStr("mirror"));erase(native,"plane");erase(native,"origin");erase(native,"normal");
     const auto plane=trimField(f[2].value);if(plane.empty()){native.set("origin",xyz(f[3].value));native.set("normal",xyz(f[4].value,true));}else{resolvePlane(g_doc,plane);native.set("plane",V::makeStr(plane));}
     if(f[5].value!="G0"&&f[5].value!="G1")throw std::runtime_error("Mirror continuity must be G0 or G1");native.set("continuity",V::makeStr(f[5].value));publish(c,FeatureType::SurfaceEdit,f[0].value,c.parameters(),native,{source});
@@ -50,7 +50,7 @@ static void mirror(const Feature* editing){
 static void trimTool(const Feature* editing){
     Context c(editing);V native=c.native();std::vector<EditorField> f{{"Result name",c.name("Trimmed surface")},pickField("Source surface",c.input(0),4),pickField("Trimming tool",c.input(1),5),
         choiceField("Tool geometry",value(native,"tool_kind","surface"),{"surface","solid","curve"}),{"Keep X,Y,Z / local mm",xyzText(native.find("keep_point"),"0, 0, 0")}};
-    if(!editFields(editing?"Edit surface trim tool":"Trim surface with exact tool","Keep point selects one region; all others are discarded. Use source-local mm. Curve tools must lie on the surface.",f))return;c.current();
+    if(!editFields(editing?"Edit surface trim tool":"Trim surface with exact tool","Keep one region in local mm; discard the others. Curve tools must lie on the surface.",f))return;c.current();
     const auto source=sourceId(c,f[1].value),tool=sourceId(c,f[2].value,f[3].value=="curve");if(source==tool)throw std::runtime_error("Choose distinct source and tool features");
     if(f[3].value!="surface"&&f[3].value!="solid"&&f[3].value!="curve")throw std::runtime_error("Choose surface, solid or curve tool geometry");
     native.set("op",V::makeStr("trim_tool"));native.set("tool_kind",V::makeStr(f[3].value));native.set("keep_point",xyz(f[4].value));publish(c,FeatureType::SurfaceEdit,f[0].value,c.parameters(),native,{source,tool});
@@ -81,7 +81,7 @@ static void loft(const Feature* editing){
         {"Max degree / optional",value(p,"max_degree")},{"Continuity / 0,1,2",continuity},
         {"Guide checkpoints",value(controls,"guide_samples","17")},{"Guide error / mm",value(controls,"max_guide_deviation_mm","0.05")},
         {"Ordered contacts",controls.find("require_ordered_contacts")&&!controls.find("require_ordered_contacts")->b?"0":"1",true}};
-    if(!editFields(editing?"Edit surface loft and guides":"Loft through sketches, 3D curves or tips","Use ordered sketch, 3D curve or point names; separate with ;. Guides use sketch/curve names. Existing seams are retained.",f))return;c.current();
+    if(!editFields(editing?"Edit surface loft and guides":"Loft through sketches, 3D curves or tips","Ordered sketch/3D-curve/point names, separated by ;. Guides use sketch/curve names; seams are retained.",f))return;c.current();
     std::vector<u64> inputs;auto sections=profiles(c,f[1].value,false,inputs),guides=profiles(c,f[2].value,true,inputs);native.set("sections",sections);
     if(const auto* alignment=controls.find("section_alignment");alignment&&alignment->arr.size()!=sections.arr.size())throw std::runtime_error("Retained section alignment count differs from the new section count; edit alignment explicitly first");
     const char* bits[]={"solid","ruled","smooth","compatible"};for(size_t i=0;i<4;++i){toggle(f[3+i]);if(!p.find(bits[i])||f[3+i].value!=bitValue(p,bits[i]))p.set(bits[i],V::makeStr(f[3+i].value));}
@@ -123,7 +123,7 @@ static void fill(const Feature* editing){
         std::vector<EditorField> fields{{"Edge index / from 0",value(row,"edge",std::to_string(i).c_str())},pickField("Support feature ID",value(row,"support"),4),
             pickField("Exact semantic face",value(row,"face"),1),choiceField("Requested continuity",integer(value(row,"continuity","1"),1,2,"Support continuity")==2?"G2":"G1",{"G1","G2"})};
         std::string title="Boundary support "+std::to_string(i+1)+" of "+std::to_string(count);
-        if(!editFields(title.c_str(),"Bind one boundary edge to a current exact face. G1 checks tangent planes; G2 checks curvature too, at finite checkpoints.",fields))return;c.current();
+        if(!editFields(title.c_str(),"Bind an edge to an exact face. G1 checks tangent planes; G2 also checks curvature at sampled points.",fields))return;c.current();
         const int edge=integer(fields[0].value,0,127,"Boundary edge");if(!edges.insert(edge).second)throw std::runtime_error("A boundary edge may have only one support");const auto id=sourceId(c,fields[1].value);const auto face=trimField(fields[2].value);verifySupport(id,face);supportFaces.emplace(id,face);
         if(fields[3].value!="G1"&&fields[3].value!="G2")throw std::runtime_error("Support continuity must be G1 or G2");const int continuity=fields[3].value=="G2"?2:1;V item=V::makeObj();item.set("edge",V::makeStr(fields[0].value));item.set("support",V::makeNum(id));item.set("face",V::makeStr(face));item.set("continuity",row.find("continuity")&&integer(value(row,"continuity"),1,2,"Support continuity")==continuity?*row.find("continuity"):V::makeNum(continuity));next.arr.push_back(item);if(std::find(inputs.begin(),inputs.end(),id)==inputs.end())inputs.push_back(id);
     }
