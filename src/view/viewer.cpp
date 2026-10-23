@@ -3848,6 +3848,7 @@ static void sketchDrawingDimensionDialog();
 static void sourceParameterDialog();
 static void editViewportSketchDimension();
 static void activateSelectionMode(int mode);
+static void resetFaceCycle059();
 #include "datum_authoring.inl"
 #include "skeleton_editor.inl"
 static bool handleDirectAuthoringAction(int id);
@@ -4451,6 +4452,7 @@ static void applyComponentMove(){
     if(!g_error)g_status="Component movement saved / attached components follow / Undo restores the previous placement";
 }
 #include "selection_picking.inl"
+#include "face_cycle_059c.inl"
 #include "selection_hover.inl"
 
 // ---------------------------------------------------------------------------
@@ -6155,7 +6157,7 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
                 else if(g_editorLivePick>=4){int b=pickBody(p.x,p.y);if(b>=0&&(size_t)b<g_bodyIds.size()){u64 id=g_bodyIds[(size_t)b];if(g_editorLivePick==7){auto found=std::find(g_editorBodies.begin(),g_editorBodies.end(),id);if(found!=g_editorBodies.end())g_editorBodies.erase(found);else if(g_editorBodies.size()<16)g_editorBodies.push_back(id);}else if(g_editorLivePick==4||g_editorBodies.empty()){g_editorBodies.clear();g_editorBodies.push_back(id);}else if(g_editorBodies.size()==1){if(g_editorBodies[0]!=id)g_editorBodies.push_back(id);}else g_editorBodies.back()=id;selBody=b;++g_editorPickSerial;}}
                 else{int b=pickBody(p.x,p.y);
                 g_viewportContainer=0;g_explorerFeature=0;selBody=b;g_picked.clear();refreshSelectionLines();g_selectedNotch=0;g_notchScroll=0;explodedViewPicked(b);
-                if(selBody>=0){g_activeSketch.clear();g_showSketches=false;rebuildSketchOverlay();}}
+                if(selBody>=0){g_activeSketch.clear();g_showSketches=false;rebuildSketchOverlay();}armFaceCycle059(b);SetFocus(hw);}
             }
             g_eatNextClick=false;g_pressWasButton=false;g_cubePress=false;g_foldScrubbing=false;g_sheetScrubbing=false;g_suspScrub=-1;g_bakedMotions.scrubbing=false;g_inertial056.scrubbing=false;g_explode.sliding=false;
             return 0;
@@ -6185,6 +6187,7 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
             if(wp==VK_ESCAPE){if(measurementActive()){endMeasurement();return 0;}if(g_componentDragIntent.pending){g_componentDragIntent={};g_dragged=true;ReleaseCapture();g_status="Component movement cancelled / drawing unchanged";return 0;}if(g_componentMove.armed||g_componentMove.active){cancelComponentMove();ReleaseCapture();g_status="Component movement cancelled / drawing unchanged";return 0;}if(g_toolsOpen){g_toolsOpen=false;layout();return 0;}g_pickKind=0;g_picked.clear();refreshSelectionLines();g_status="Body selection / semantic picks cleared";return 0;}
             if(GetKeyState(VK_CONTROL)&0x8000){if(wp=='S')uiAction(16);else if(wp=='O')uiAction(17);else if(wp=='Z')uiAction(18);else if(wp=='Y')uiAction(19);else if(wp=='K')interactiveAction(59);else if(wp=='N')interactiveAction(55);}
             else if(wp==VK_TAB&&g_viewSketchDimension.valid)interactiveAction(584);
+            else if(wp==VK_TAB)cycleFaceKey059(hw,(GetKeyState(VK_SHIFT)&0x8000)!=0);
             else if(wp=='F')uiAction(20);else if(wp=='W')uiAction(14);else if(wp==VK_DELETE)uiAction(25);else if(wp==VK_F1)uiAction(31);
             else if(wp=='1')uiAction(180);else if(wp=='2')uiAction(181);else if(wp=='3')uiAction(23);else if(wp=='4')uiAction(184);else if(wp=='5')uiAction(182);else if(wp=='6')uiAction(183);else if(wp=='7')uiAction(24);
             return 0;

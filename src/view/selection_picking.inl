@@ -8,6 +8,7 @@ static bool sameReference(const SelectionItem& a,const SelectionItem& b){return 
 static std::string pointerReferenceLabel(const ReferencePointerHit& hit){if(hit.item.kind=="mesh_face")return hit.item.meshTriangles.size()>1?"Mesh coplanar patch / "+std::to_string(hit.item.meshTriangles.size())+" source triangles":"Mesh triangle "+std::to_string(hit.face)+" / sampled geometry";if(hit.item.kind=="mesh_edge")return "Mesh edge / source vertices "+hit.item.name;return hit.item.name.rfind("@ark.",0)==0?hit.item.kind+" "+std::to_string(1+(hit.face>=0?hit.face:hit.edge)):hit.item.kind+" "+hit.item.name;}
 static void clearSelectionHover(){if(g_hoverReference.hit||!g_hoverReferenceFill.empty()||!g_hoverReferenceLines.empty())++g_hoverReferenceGeneration;g_hoverReference={};g_hoverReferenceFill.clear();g_hoverReferenceLines.clear();g_hoverReferenceHint.clear();g_hoverReferenceGeometryKey.clear();g_hoverReferenceQueryKey.clear();}
 static void activateSelectionMode(int mode){
+    resetFaceCycle059();
     cancelDirectAuthoring();cancelSketchEditing();cancelSketchDrawing();cancelComponentMove();if(measurementActive())endMeasurement();g_componentDragIntent={};g_cameraDrag.active=false;ReleaseCapture();
     if(mode!=g_pickKind||mode==0){g_picked.clear();refreshSelectionLines();}clearDatumSelection();clearSelectionHover();g_pickKind=mode;g_navMode=0;g_dragged=false;
     if(mode==2)g_showEdges=true;if(mode==3){g_showSketches=true;rebuildSketchOverlay();}
