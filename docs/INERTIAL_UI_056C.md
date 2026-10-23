@@ -1,9 +1,10 @@
 # 056C Inertial Simulation Studio
 
 Milestones: **C.04 — Parcial**, **A.04 — Verificado no escopo** for the local
-Studio transport/control checks described below. Physics accuracy and the
-integrated GPU runtime require the engine verification record; the synthetic
-UI fixture is explicitly not physics evidence.
+Studio transport/control checks described below. The integrated GPU runtime
+also passed the actual engine path below; physics accuracy is separately
+bounded by the [engine verification record](INERTIAL_SIMULATION_056C.md).
+The synthetic UI transport fixture is explicitly not physics evidence.
 
 ## Delivered controls
 
@@ -78,8 +79,14 @@ using the production private-session scheduler first with CPU reference, then
 with GPU. It has no synthetic transport. Run this on the integrated engine build
 with separate `--settings-file`, `--shot` and `--size 1440 900` arguments. Each
 solver has a 90-second test wait while the UI pumps and renders. The receipt
-retains both actual solver reports. This branch's UI-only runtime cannot prove
-engine integration; the integrated delivery must run this flag before claiming it.
+retains both actual solver reports. The integrated 056C native build ran this
+flag successfully at both 1440x900 and 1180x800 (the latter process exit 0), using
+CPU reference and the RTX 4070 Ti hardware backend. Both receipts report actual
+solver completion, native control/load checks, playback/reset, exact fixed-body
+pose preservation and unchanged authoring/revision. Captures of the final pose,
+loads, evidence and minimum-size dock were inspected. The first cold GPU study
+included device/shader initialization (2,449.96 ms for the two-body fixture);
+it is not a warm solver timing or a performance improvement claim.
 
 Artifacts are under `out/quality-native/ui-checks`; build and test logs are
 `out/inertial-*.log`. These local artifacts are not distribution content.

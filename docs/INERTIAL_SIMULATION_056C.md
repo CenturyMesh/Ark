@@ -121,7 +121,7 @@ the angular-velocity assertion. Worst-case GPU work includes that deduplication.
 Partial selection of a carrier sibling/nested descendant and a pattern copy
 without its seed also reject; selecting fewer endpoints cannot hide constraints.
 
-The integrated native test currently passes 58 assertions on both CPU reference
+The integrated native test passes 60 assertions across CPU reference
 and the NVIDIA GeForce RTX 4070 Ti: analytic free fall, constant force, torque,
 torque-free asymmetric inertia, fixed bodies, restitution/momentum, coincident
 contacts, peripheral support, ground/friction, hinge drift, repeat-run mesh cache,
@@ -130,6 +130,13 @@ rejections. The 0.7 s single-body ground fixture took 3.082 ms on CPU and 12.197
 on GPU in one local run (168 steps, 3,024 dispatches). This small case shows GPU
 overhead, not a speedup. It does not qualify large assemblies or general contact
 accuracy; no superiority or broader performance claim follows from these tests.
+
+Fixed bodies retain their exact prescribed CAD pose in returned frames; they
+are not needlessly converted back from the GPU's float32 working coordinates.
+A non-float32-representable pose regression checks exact preservation.
+The [Studio study](INERTIAL_UI_056C.md) also ran both real solvers through the
+private background scheduler at 1440x900 and 1180x800, with playback/reset and
+unchanged authoring/revision checks. These are synthetic native CAD fixtures.
 
 Implementation references: [Microsoft compute shaders](https://learn.microsoft.com/en-us/windows/win32/direct3d11/direct3d-11-advanced-stages-compute-create)
 and [Baraff/Witkin rigid-body course](https://www.cs.cmu.edu/~baraff/sigcourse/).
