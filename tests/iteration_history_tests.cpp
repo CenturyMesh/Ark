@@ -1,11 +1,13 @@
 #include "ark/agent.hpp"
 #include "ark/iteration_history.hpp"
 #include "ark/usage.hpp"
+#include "ark/agent_activity.hpp"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <chrono>
 #include <future>
+#include <algorithm>
 #include <stdexcept>
 namespace {
 using V=arkjson::Value;
@@ -16,6 +18,7 @@ V payload(const V& response){check(response.find("isError")&&!response.find("isE
 V apply(ark::AgentSession& s,const std::string& expression,const std::string& name="length"){V args=V::makeObj(),commands=V::makeArr(),op=V::makeObj();args.set("expected_revision",V::makeNum((double)s.revision));op.set("op",V::makeStr("param.set"));op.set("name",V::makeStr(name));op.set("expr",V::makeStr(expression));commands.arr.push_back(op);args.set("commands",commands);return args;}
 V restoreArgs(const ark::AgentSession& s,const std::string& id){V args=V::makeObj();args.set("id",V::makeStr(id));args.set("expected_revision",V::makeNum((double)s.revision));return args;}
 std::string bytes(const std::filesystem::path& p){std::ifstream f(p,std::ios::binary);return std::string(std::istreambuf_iterator<char>(f),{});}
+V canonicalValue(V value){if(value.t==V::Obj){for(auto& item:value.obj)item.second=canonicalValue(std::move(item.second));std::sort(value.obj.begin(),value.obj.end(),[](const auto& a,const auto& b){return a.first<b.first;});}else if(value.t==V::Arr)for(auto& item:value.arr)item=canonicalValue(std::move(item));return value;}
 void memoContracts(const ark::Document& source){
     // A fresh thread starts with an empty thread-local memo. No drawing files or
     // native geometry are needed for this comparison of identical inputs.
@@ -42,8 +45,51 @@ void memoContracts(const ark::Document& source){
     check(!std::async(std::launch::async,[&](){std::string coldError;return ark::iterationValidate(doc,distinct,coldError);}).get(),"Cold and warm source-version validation agree");
     std::cout<<"synthetic 101-node history validation cold_ms="<<measured.first<<" warm_ms="<<measured.second<<'\n';
 }
+void longAuditContracts(){
+    ark::AgentSession session;
+    payload(session.call("doc_apply",apply(session,"10")));
+    const auto journal=session.document.iterationHistory.dump();
+    const auto authoring=ark::iterationAuthoring(session.document).dump();
+    V actor=json(R"({"kind":"agent","id":"audit-regression"})"), args=V::makeObj();
+    const std::string note(1288,'n');args.set("fastening_review",V::makeStr(note));
+    V ok=json(R"({"isError":false,"structuredContent":{}})");ok.set("structuredContent",args);
+    ark::recordAgentActivity(session.document,"bom_review",args,actor,ok,session.revision,session.revision,1.);
+    const auto activity=ark::agentActivityJson(session.document.agentActivity).dump();
+    check(activity.find(note)!=std::string::npos,"fixture retains a long BOM review note");
+    const auto serialized=ark::documentToJson(session.document);
+    check(session.document.iterationHistory.dump()==journal&&ark::iterationAuthoring(session.document).dump()==authoring,"audit persistence cannot rewrite CAD history or authoring");
+    payload(session.call("history_info",V::makeObj()));
+    ark::Document reopened;std::string error;
+    check(ark::documentFromJson(serialized,reopened,&error),error.c_str());
+    check(canonicalValue(ark::agentActivityJson(reopened.agentActivity)).dump()==canonicalValue(json(activity)).dump()&&canonicalValue(reopened.iterationHistory).dump()==canonicalValue(json(journal)).dump(),"long audit and complete journal survive JSON roundtrip");
+    // Older writers could reuse a CAD blob for identical audit text. Continue
+    // accepting that representation while new writes keep audit values inline.
+    V legacy=json(serialized);const auto hash=ark::iterationSha256(note);
+    member(member(legacy,"iteration_history"),"blobs").set(hash,V::makeStr(note));
+    V reference=V::makeObj();reference.set("$ark_history_blob",V::makeStr(hash));
+    member(member(member(legacy,"agent_activity"),"entries").arr.back(),"bom_review").set("fastening_review",reference);
+    ark::Document oldRepresentation;check(ark::documentFromJson(legacy.dump(),oldRepresentation,&error),error.c_str());
+    check(canonicalValue(ark::agentActivityJson(oldRepresentation.agentActivity)).dump()==canonicalValue(json(activity)).dump(),"legacy packed audit still decodes without losing text");
+    const auto revision=session.revision;
+    auto preview=payload(session.call("doc_preview",apply(session,"20")));
+    check(preview.find("valid")->b&&session.revision==revision,"long audit does not block preview");
+    payload(session.call("doc_apply",*preview.find("apply")));
+    payload(session.call("doc_undo",V::makeObj()));check(session.document.getParam("length")==10,"undo retains long audit");
+    payload(session.call("doc_redo",V::makeObj()));check(session.document.getParam("length")==20,"redo retains long audit");
+    check(ark::agentActivityJson(session.document.agentActivity).dump()==activity,"preview, commit, undo and redo preserve the exact audit");
+    const auto path=std::filesystem::temp_directory_path()/"ark-long-audit-history-test.ark";
+    check(ark::saveDocument(session.document,path.string().c_str()),"binary save with long audit");
+    ark::AgentSession loaded;V load=V::makeObj();load.set("path",V::makeStr(path.string()));payload(loaded.call("doc_load",load));
+    check(canonicalValue(ark::agentActivityJson(loaded.document.agentActivity)).dump()==canonicalValue(json(activity)).dump()&&canonicalValue(loaded.document.iterationHistory).dump()==canonicalValue(session.document.iterationHistory).dump(),"binary reopen preserves audit and all journal nodes");
+    // Unjournaled CAD payloads must still fail; only audit fields are exempt.
+    ark::PlaneCanvas canvas;canvas.name="unjournaled";canvas.path=std::string(1288,'x');loaded.document.canvases.push_back(canvas);
+    bool rejected=false;try{(void)ark::documentToJson(loaded.document);}catch(const std::exception& e){rejected=std::string(e.what()).find("unjournaled")!=std::string::npos;}
+    check(rejected,"unjournaled large authoring remains rejected");
+    std::error_code ignored;std::filesystem::remove(path,ignored);
+}
 }
 int main(){try{
+    longAuditContracts();
     check(ark::iterationSha256("")=="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","SHA256 empty vector");
     check(ark::iterationSha256("abc")=="ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","SHA256 abc vector");
     ark::AgentSession session;check(payload(session.call("history_info",V::makeObj())).find("node_count")->num==0,"fresh document has no fabricated history");

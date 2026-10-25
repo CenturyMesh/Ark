@@ -2915,6 +2915,13 @@ static void showAssistantAccountMenu(){
     DestroyMenu(menu);PostMessage(g_window,WM_NULL,0,0);if(action)interactiveAction(action);
 }
 static arkjson::Value cancelledTool(){using V=arkjson::Value;V r=V::makeObj(),e=V::makeObj();e.set("error",V::makeStr("Request cancelled before execution"));r.set("isError",V::makeBool(true));r.set("structuredContent",e);return r;}
+static arkjson::Value failedUiTool(const std::string& tool,const std::string& message){
+    using V=arkjson::Value;V response=V::makeObj(),data=V::makeObj(),content=V::makeArr(),part=V::makeObj();
+    data.set("error",V::makeStr(message));data.set("error_code",V::makeStr("STUDIO_TOOL_FAILED"));data.set("tool",V::makeStr(tool));data.set("revision",V::makeNum((double)g_session.revision));
+    data.set("execution_outcome",V::makeStr("Unknown: inspect the current document and revision before retrying; this is an internal error, not a cancellation receipt."));
+    part.set("type",V::makeStr("text"));part.set("text",V::makeStr(data.dump()));content.arr.push_back(std::move(part));response.set("content",std::move(content));response.set("structuredContent",std::move(data));response.set("isError",V::makeBool(true));
+    g_error=true;g_status=tool+": "+message;return response;
+}
 #include "exact_jobs_046b.inl"
 static void drainUiTools(){
     if(g_dialog||g_busy||g_preparingEdit)return;
@@ -2935,7 +2942,7 @@ static void drainUiTools(){
         const auto revisionBefore030=g_session.revision;const auto hostStarted030=RealtimeClock030::now();
         // 046B: allow-listed exact reads continue on a session copy at this revision.
         if(routeExactJob046(request)){if(realtimeMs030(sliceStarted030)>=8.)break;continue;}
-        try{const auto presenceActor=request->roleId.empty()?(request->revision?"assistant":"mcp"):request->roleId;observePresence030(presenceActor,request->tool,request->args);g_activeToolRole=request->roleId;g_activeToolName=request->tool;if(request->tool=="doc_apply"&&!metadataOnlyApply(g_doc,request->args)){captureDraftContext();for(auto& entry:g_draftViews)buildDraftLines(entry.second);}g_ownAssistantTool=(bool)request->revision||request->teamOwned;g_authoringExternalCancel=[pointer=request.get()]{return pointer->stop.stop_requested()||(pointer->cancel&&pointer->cancel->load());};auto result=runTool(request->tool,request->args);g_authoringExternalCancel={};finishPresence030(presenceActor,result);g_ownAssistantTool=false;g_activeToolRole.clear();g_activeToolName.clear();if(request->revision)*request->revision=g_session.revision;rememberToolTiming030({request->tool,realtimeMs030(request->posted,hostStarted030),realtimeMs030(hostStarted030),g_progressTiming030});request->complete(result);}catch(...){g_authoringExternalCancel={};g_ownAssistantTool=false;g_activeToolRole.clear();g_activeToolName.clear();request->complete(cancelledTool());}
+        try{const auto presenceActor=request->roleId.empty()?(request->revision?"assistant":"mcp"):request->roleId;observePresence030(presenceActor,request->tool,request->args);g_activeToolRole=request->roleId;g_activeToolName=request->tool;if(request->tool=="doc_apply"&&!metadataOnlyApply(g_doc,request->args)){captureDraftContext();for(auto& entry:g_draftViews)buildDraftLines(entry.second);}g_ownAssistantTool=(bool)request->revision||request->teamOwned;g_authoringExternalCancel=[pointer=request.get()]{return pointer->stop.stop_requested()||(pointer->cancel&&pointer->cancel->load());};auto result=runTool(request->tool,request->args);g_authoringExternalCancel={};finishPresence030(presenceActor,result);g_ownAssistantTool=false;g_activeToolRole.clear();g_activeToolName.clear();if(request->revision)*request->revision=g_session.revision;rememberToolTiming030({request->tool,realtimeMs030(request->posted,hostStarted030),realtimeMs030(hostStarted030),g_progressTiming030});request->complete(result);}catch(const std::exception& error){g_authoringExternalCancel={};g_ownAssistantTool=false;g_activeToolRole.clear();g_activeToolName.clear();request->complete(failedUiTool(request->tool,error.what()));}catch(...){g_authoringExternalCancel={};g_ownAssistantTool=false;g_activeToolRole.clear();g_activeToolName.clear();request->complete(failedUiTool(request->tool,"Unknown internal Studio exception"));}
         // Give the viewport a turn after every published revision or 8 ms of
         // dispatch. This is UI scheduling, not an agent turn/token budget.
         if(g_session.revision!=revisionBefore030||realtimeMs030(sliceStarted030)>=8.)break;

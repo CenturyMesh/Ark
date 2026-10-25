@@ -153,7 +153,17 @@ V iterationInfo(const Document& document,size_t limit,const std::string& beforeI
 }
 void iterationRestore(const Document& source,const std::string& id,Document& target){if(source.iterationHistory.t!=V::Obj)throw std::runtime_error("No iteration history available");V state=replay(source.iterationHistory,id);std::string error;if(!documentFromJson(state.dump(),target,&error))throw std::runtime_error("Iteration authoring invalid: "+error);target.usage=source.usage;target.agentActivity=source.agentActivity;target.iterationHistory=source.iterationHistory;target.nextFeatureId_=std::max(target.nextFeatureId_,source.nextFeatureId_);target.nextAssemblyId_=std::max(target.nextAssemblyId_,source.nextAssemblyId_);target.nextMateId_=std::max(target.nextMateId_,source.nextMateId_);}
 std::string iterationUndoTarget(const Document& document,bool redo){const V& h=document.iterationHistory;if(h.t!=V::Obj)throw std::runtime_error("No iteration history available");const V& ids=need(h,redo?"redo_ids":"undo_ids");if(ids.t!=V::Arr||ids.arr.empty())throw std::runtime_error("No iteration history available");return ids.arr.back().str;}
-void iterationPersist(V& root,const Document& document){if(document.iterationHistory.t!=V::Obj)return;V blobs=need(document.iterationHistory,"blobs"),packed=pack(root,blobs);if(blobs.dump()!=need(document.iterationHistory,"blobs").dump())throw std::runtime_error("Current document has unjournaled large authoring payload");root=std::move(packed);root.set("version",V::makeNum(std::max(document.iterationHistory.find("compaction")?50.:27.,root.find("version")?root.find("version")->asNum():27.)));root.set("iteration_history",document.iterationHistory);}
+void iterationPersist(V& root,const Document& document){
+    if(document.iterationHistory.t!=V::Obj)return;
+    V blobs=need(document.iterationHistory,"blobs"),packed=root;
+    // These ledgers are persisted with the document, but are deliberately absent
+    // from iterationAuthoring and may grow between CAD commits. Keep their exact
+    // values inline instead of requiring their strings in the CAD blob journal.
+    // Authored geometry still has to use the existing, verified journal blobs.
+    for(auto& item:packed.obj)if(item.first!="usage"&&item.first!="agent_activity")item.second=pack(item.second,blobs);
+    if(blobs.dump()!=need(document.iterationHistory,"blobs").dump())throw std::runtime_error("Current document has unjournaled large authoring payload");
+    root=std::move(packed);root.set("version",V::makeNum(std::max(document.iterationHistory.find("compaction")?50.:27.,root.find("version")?root.find("version")->asNum():27.)));root.set("iteration_history",document.iterationHistory);
+}
 void iterationInlineBakePayloads(const V& h,size_t& references,size_t& bytes){
     references=bytes=0;if(h.t!=V::Obj)return;const V* blobs=h.find("blobs");std::set<std::string> counted;
     auto charge=[&](const V& value){++references;if(value.t==V::Str)bytes+=value.str.size();else if(const auto* ref=value.find("$ark_history_blob");ref&&ref->t==V::Str&&blobs&&counted.insert(ref->str).second)if(const auto* blob=blobs->find(ref->str.c_str());blob&&blob->t==V::Str)bytes+=blob->str.size();};
