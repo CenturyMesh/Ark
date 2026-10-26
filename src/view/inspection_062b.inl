@@ -43,7 +43,7 @@ template<class Rect>static void dimensionGraphic062(Rect rect,Vec3 a,Vec3 b,cons
     stroke(x,y,ax+nx*6,ay+ny*6);stroke(u,v,bx+nx*6,by+ny*6);stroke(ax,ay,bx,by);
     for(int end=0;end<2;++end){float px=end?bx:ax,py=end?by:ay,sign=end?-1.f:1.f;stroke(px,py,px+sign*dx*8+nx*3,py+sign*dy*8+ny*3);stroke(px,py,px+sign*dx*8-nx*3,py+sign*dy*8-ny*3);}
     float width=textWidth(label,.65f)+20,cx=std::clamp((ax+bx)/2,(float)viewX+width/2+5,(float)(viewX+viewW)-width/2-5),cy=std::clamp((ay+by)/2,(float)viewY+18,(float)(viewY+viewH)-18);
-    rect(cx-width/2,cy-13,width,26,6,.064f,.067f,.072f,.98f,1.f,.635f,.298f,.9f,1);textOut(label,cx-width/2+10,cy-8,.65f,.905f,.942f,.974);
+    rect(cx-width/2,cy-13,width,26,6,.064f,.067f,.072f,.98f,1,1,1,.22f,1);textOut(label,cx-width/2+10,cy-8,.65f,.905f,.942f,.974);
 }
 template<class Rect,class Button>static void drawSmart062(Rect rect,Button button){
     using V=arkjson::Value;

@@ -97,7 +97,7 @@ template<class Rect,class Button>static void drawExactJobsOverlay046(Rect rect,B
     float w=std::min(520.f,(float)viewW-32),h=74,x=(float)viewX+16,dock=(float)(viewY+viewH)-84-(g_motionActive?92.f:0.f),y=dock-h-10;
     if(y<viewY+90)y=(float)(viewY+viewH)-h-16;
     if(g_showViewCube&&y<g_cubeY+g_cubeS+20){x=(float)(g_cubeX+g_cubeS+20);w=std::min(w,(float)(viewX+viewW)-x-16);}
-    rect(x+3,y+4,w,h,8,.005f,.012f,.022f,.28f,0,0,0,0,0);rect(x,y,w,h,8,.06f,.062f,.067f,.95f,1.f,.635f,.298f,.75f,1);
+    rect(x+3,y+4,w,h,8,.005f,.012f,.022f,.28f,0,0,0,0,0);rect(x,y,w,h,8,.06f,.062f,.067f,.95f,1,1,1,.22f,1);
     char line[200];std::snprintf(line,sizeof line,"%s / %s / %.1f s%s",cancelling?"CANCELLING EXACT CHECK":first.running?"EXACT CHECK RUNNING":"EXACT CHECK QUEUED",first.label.c_str(),first.elapsedMs/1000.,rows.size()>1?(" / +"+std::to_string(rows.size()-1)+" more").c_str():"");
     textOut(fitText(line,.62f,(int)w-118),x+12,y+9,.62f,.827f,.861f,.889f);
     textOut(fitText("Revision "+std::to_string(first.revision)+" snapshot / view and selection stay live / result is labelled",.50f,(int)w-118),x+12,y+33,.50f,.705f,.734f,.758f);
