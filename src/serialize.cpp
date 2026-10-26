@@ -10,6 +10,8 @@
 #include "ark/iteration_history.hpp"
 #include "ark/document_container.hpp"
 #include "ark/manufacturing.hpp"
+#include "ark/manufacturing_simulation.hpp"
+#include "ark/transmission.hpp"
 #include "ark/native_features.hpp"
 #include "ark/native_backend.hpp"
 #include "ark/skeleton.hpp"
@@ -662,6 +664,8 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
     for(const auto& sketch:doc.sketches)if(sketch.ownerFeature){r.set("version",Value::makeNum(50));break;}
     if(!doc.parametricComponents.isNull()){validateParametricComponents(doc.parametricComponents);r.set("parametric_components",doc.parametricComponents);r.set("version",Value::makeNum(51));}
     if(requiresDesignDisciplines054B(doc)){validateDesignDisciplines(doc);if(!doc.schematics.isNull())r.set("schematics",doc.schematics);r.set("version",Value::makeNum(52));}
+    if(!doc.manufacturingPlans.isNull()){validateManufacturingPlans(doc);r.set("manufacturing_plans",doc.manufacturingPlans);r.set("version",Value::makeNum(53));}
+    if(extendedTransmissionDocument(doc))r.set("version",Value::makeNum(54));
     if(includeAudit&&includeHistory)iterationPersist(r,doc);
     canonicalDocumentKeys(r);
     std::string serialized=r.dump();
@@ -672,7 +676,7 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
 static bool documentFromValue(Value& v,Document& doc,std::string* err){
     auto fail=[&](const std::string& m){ if(err)*err=m; return false; };
     if(v.t!=Value::Obj) return fail("root must be object");
-    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || !std::isfinite(ver->num)||ver->num!=std::floor(ver->num)||ver->num<1||ver->num>52))
+    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || !std::isfinite(ver->num)||ver->num!=std::floor(ver->num)||ver->num<1||ver->num>54))
         return fail("unsupported document version");
     Value history;std::string historyError;if(!iterationExpand(v,history,historyError))return fail(historyError);
     if(const auto* nodes=v.find("assembly");nodes&&nodes->t==Value::Arr)for(const auto& node:nodes->arr)if(const auto* pattern=node.find("pattern");pattern&&pattern->find("carry_frame")){
@@ -934,6 +938,8 @@ static bool documentFromValue(Value& v,Document& doc,std::string* err){
     try{validateAssemblyAuthoring(nd);}catch(const std::exception& error){return fail(error.what());}
     std::string manufacturingError;if(!validateManufacturingRoutes(nd,manufacturingError))return fail(manufacturingError);
     if(const auto* sheets=v.find("schematics"))nd.schematics=*sheets;try{validateDesignDisciplines(nd);if(requiresDesignDisciplines054B(nd)&&(!v.find("version")||v.find("version")->num<52))return fail("Classification and schematics require document version 52");}catch(const std::exception& error){return fail(error.what());}
+    if(const auto* plans=v.find("manufacturing_plans")){const auto* version=v.find("version");if(!version||version->num<53)return fail("Manufacturing plans require document version 53");nd.manufacturingPlans=*plans;try{validateManufacturingPlans(nd);}catch(const std::exception& error){return fail(error.what());}}
+    if(extendedTransmissionDocument(nd)){const auto* version=v.find("version");if(!version||version->num<54)return fail("Extended transmission mates require document version 54");}
     if(history.t!=Value::Null){if(!iterationValidate(nd,history,historyError))return fail(historyError);nd.iterationHistory=std::move(history);}
     if(arcRecipeDocument(nd)){const auto* version=v.find("version");if(!version||version->num<30)return fail("Arc recipes and linked tube end fits require document version 30");}
     if(generation34Document(nd)){const auto* version=v.find("version");if(!version||version->num<34)return fail("Typed sketches, associative datums, spatial constraints and varying sections require document version 34");}

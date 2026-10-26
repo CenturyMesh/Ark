@@ -1,5 +1,9 @@
 # ARK agent protocol
 
+061C: read `agent_onboard{topic:"transmission"}` for mechanical mate engineering. `transmission_inspect` uses actual semantic axes and mate expressions; `transmission_design` analyzes and optimizes tooth/module/form choices and returns parameter-bound preview proposals. Declare efficiency, power branches and material factors; no contact/fatigue qualification is inferred. Extended mates use conditional semantic format 54. See [contracts](TRANSMISSIONS_061C.md).
+
+060C adds source-bound additive/CNC DAGs. Read `agent_onboard{topic:"manufacturing"}` and `manufacturing_plan{action:"capabilities"}`. Author plans/nodes through revision-checked `doc_preview` / `doc_apply`; use `manufacturing_simulate` for derived evidence and `manufacturing_export` for explicit local NC or Obsidian snapshot exports. Bambu CLI slicing is an explicit external bridge. Unknown code, stale sources and incomplete collision scope never qualify manufacture. See [060C contracts](MANUFACTURING_060C.md).
+
 059C (**A.02/A.04/B.01/B.03/B.04/C.04/D.02**): load `agent_onboard{topic:"rubber"}`
 for exact stock, indexed patterns and the reduced CPU/GPU surface-network study.
 `rubber_plan` prepares commands without publication; `physics_inspect.rubber`

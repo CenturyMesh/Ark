@@ -9,7 +9,7 @@ struct ProjectGraph {
     std::set<std::tuple<std::string,std::string,std::string,std::string>> edges;
     void node(const std::string& key,const std::string& kind,const V& authored){
         V row=V::makeObj(),facts=V::makeObj();row.set("key",V::makeStr(key));row.set("kind",V::makeStr(kind));row.set("name",V::makeStr(graphText(authored,"name")));source[key]=authored;
-        for(const char* field:{"type","expr","p","material","suppressed","fixed","visible","pattern","density","density_g_cm3","url","host","authority","binding","ref","net","owner_feature","local_name","component_id","component_kind","revision","sha256"})if(const auto* value=authored.find(field))facts.set(field,contextCompact(*value));
+        for(const char* field:{"type","expr","p","material","suppressed","fixed","visible","pattern","density","density_g_cm3","url","host","authority","binding","ref","net","owner_feature","local_name","component_id","component_kind","revision","sha256","motion","source_sha256","axis","min_mm","size_mm","number","diameter_mm","feed_mm_min","rpm","setup","stock","tool","machine","currency"})if(const auto* value=authored.find(field))facts.set(field,contextCompact(*value));
         if(const auto* part=authored.find("part")){V metadata=V::makeObj();for(const char* field:{"part_number","description","procurement","specification","manufacturer","manufacturer_part_number","supplier","supplier_part_number","sourcing_status"})if(const auto* value=part->find(field);value&&value->t==V::Str)metadata.set(field,V::makeStr(graphClip(value->str)));facts.set("part",metadata);}
         if(const auto* native=authored.find("native"))if(const auto* op=native->find("op"))facts.set("operation",*op);
         if(const auto* native=authored.find("native")){V program=V::makeObj();for(const char* field:{"route_mode","profile","start_tangent","end_tangent","auto_route"})if(const auto* value=native->find(field))program.set(field,contextCompact(*value));for(const char* field:{"waypoints","obstacles","components","pads","traces","vias"})if(const auto* value=native->find(field);value&&value->t==V::Arr)program.set(std::string(field)+"_count",V::makeNum(value->arr.size()));if(!program.obj.empty())facts.set("program",program);}
@@ -54,6 +54,17 @@ V buildProjectGraph(const V& authored,const std::string& scope){
         for(const auto& port:package->find("parameters")->arr)if(const auto* bound=mapping->find("params")->find(port.str.c_str()))graph.edge(key,"exposes","params:"+bound->str,"public_parameter");
         for(const auto& port:package->find("interfaces")->arr)if(const auto* bound=mapping->find("planes")->find(port.str.c_str()))graph.edge(key,"interface","planes:"+bound->str,"public_datum");
     }
+    if(const auto* plans=authored.find("manufacturing_plans"))for(const auto& plan:plans->arr){
+        const std::string prefix="manufacturing:"+graphText(plan,"name")+":";
+        for(const auto& node:plan.find("nodes")->arr){V row=*node.find("data");row.set("name",V::makeStr(graphText(node,"name").empty()?graphText(node,"id"):graphText(node,"name")));graph.node(prefix+graphText(node,"id"),"manufacturing_"+graphText(node,"kind"),row);}
+        for(const auto& node:plan.find("nodes")->arr){const auto key=prefix+graphText(node,"id");const auto& data=*node.find("data");
+            if(const auto* refs=node.find("depends_on"))for(const auto& ref:refs->arr)graph.edge(key,"depends_on",prefix+ref.str);
+            for(const char* field:{"machine","stock","part","setup","tool","post","rates","slicer","fixture"})if(const auto* ref=data.find(field))graph.edge(key,std::string("uses_")+field,prefix+ref->str);
+            if(graphText(node,"kind")=="collision_pair")for(const char* field:{"a","b"})if(const auto* ref=data.find(field))graph.edge(key,"checks_collision",prefix+ref->str);
+            if(const auto* fixtures=data.find("fixtures"))for(const auto& ref:fixtures->arr)graph.edge(key,"uses_fixture",prefix+ref.str);
+            if(const auto* feature=data.find("feature"))graph.edge(key,"manufactures",contextKey((u64)feature->num));
+        }
+    }
     graphDomains035B(graph);
     for(const auto& item:graph.source){const auto& key=item.first;const auto& row=item.second;graph.scan(key,row);
         if(key.rfind("sketches:",0)==0)if(const auto* owner=row.find("owner_feature"))graph.edge(key,"owned_by_definition",contextKey((u64)owner->num)); // Ownership is metadata, not a recompute dependency.
@@ -75,7 +86,7 @@ std::string authoringStamp(const Document& document){
     auto addMap=[&](const std::unordered_map<std::string,std::string>& values){section("map",values.size());std::vector<std::string> keys;keys.reserve(values.size());for(const auto& item:values)keys.push_back(item.first);std::sort(keys.begin(),keys.end());for(const auto& key:keys){add(key);add(values.at(key));}};
     add(document.bomDocumentId);add(std::to_string(document.nextFeatureId_));add(std::to_string(document.nextAssemblyId_));add(std::to_string(document.nextMateId_));add(std::to_string(document.historyTip));
     add(document.skeleton.dump());add(document.designContainerCheckout.dump());add(document.assemblyConfigurations.dump());add(document.assemblyLoadSelection.dump());add(document.assemblyExternalReferences.dump());
-    add(document.parametricComponents.dump());
+    add(document.parametricComponents.dump());add(document.manufacturingPlans.dump());
     section("drawings",document.drawings.size());for(const auto& drawing:document.drawings)add(drawing.dump());
     section("params",document.params.size());for(const auto& parameter:document.params){add(parameter.name);add(parameter.expr);}
     section("image_assets",document.imageAssets.size());for(const auto& asset:document.imageAssets)add(imageAssetToJson(asset,true).dump());

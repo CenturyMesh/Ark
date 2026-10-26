@@ -330,6 +330,7 @@ public:
     arkjson::Value iterationHistory; // immutable authoring journal; no evaluated geometry or usage snapshots
     arkjson::Value designContainerCheckout; // scoped workspace ownership and merge baseline; no derived geometry
     arkjson::Value parametricComponents; // embedded immutable .arkprt/.arktop definitions and explicit instance bindings
+    arkjson::Value manufacturingPlans; // source-bound manufacturing DAGs; simulation remains derived
     arkjson::Value schematics; // independent editable 2D circuit sheets, symbols, pins and explicit wires
     std::vector<std::string> componentBindingsToSeal; // transient, only a component command can request a new evaluated baseline
     arkjson::Value skeleton; // native declarative source, input overrides and stable ownership manifest

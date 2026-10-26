@@ -1,5 +1,9 @@
 # ARK roadmap A–G
 
+061C (**A.02/B.04/C.04/D.02/E.01 ? Verificado no escopo local**): shared mate engineering for gears, chains, belts and shafts; RPM/Nm/power, reference dimensions, double-helical load sharing, torsion and bounded single/compound optimization with parameter-bound preview/apply. Broader B.04/C.04 remain **Parcial**. See [061C evidence](iterations/061C.md) and [transmission contracts](TRANSMISSIONS_061C.md).
+
+060C (**A.02/A.04/C.03/C.04/D.02/E.01 ? Verificado no escopo local**): native additive/CNC manufacturing DAG, revision-bound agent authoring, shared context/Obsidian export, three-axis stock/tool/fixture/carriage screening, external Bambu CLI and declared-rate estimates. Broader manufacturing remains **Parcial**; see [060C](iterations/060C.md) and [contracts](MANUFACTURING_060C.md).
+
 059C is **Verificado no escopo** locally for **A.02/A.04/B.01/B.03/B.04/C.04/D.02**:
 editable rubber bodies, indexed patterns, derived CPU/GPU dynamics, exact face
 cycling, background GPU snapshots and exact surface mirror/trim/ruled/fill with

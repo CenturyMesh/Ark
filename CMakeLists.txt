@@ -55,7 +55,7 @@ add_library(ark STATIC
   src/parametric_components.cpp
   src/design_disciplines.cpp
   src/motion_cables.cpp
-  src/assembly_patterns.cpp
+  src/assembly_patterns.cpp src/transmission_math_061c.cpp src/transmission_tools_061c.cpp src/transmission_design_061c.cpp
   src/motion_graph.cpp src/exploded_view.cpp src/visualize.cpp src/derived_bakes_049a.cpp src/drag_chain.cpp
   src/direct_preview.cpp src/async_authoring_051a.cpp
   src/exact_jobs_046b.cpp
@@ -71,7 +71,7 @@ add_library(ark STATIC
   src/history_authoring.cpp src/assembly_authoring.cpp src/recovery.cpp
   src/pricing.cpp
   src/agent_team.cpp
-  src/manufacturing.cpp
+  src/manufacturing.cpp src/manufacturing_graph_060c.cpp src/manufacturing_simulation_060c.cpp src/manufacturing_slicer_060c.cpp
   src/dfm.cpp src/dfm_proposals.cpp
   src/assistant_connectors.cpp
   src/assistant_acp.cpp
@@ -90,6 +90,16 @@ add_library(ark STATIC
   src/source_tube.cpp src/notch.cpp src/notch_preview.cpp src/step_export.cpp src/tube.cpp src/assembly.cpp src/assembly_io.cpp src/compute.cpp src/api.cpp src/mesh_query.cpp src/mesh_analysis.cpp src/mesh_model.cpp src/agent.cpp src/agent_features.cpp src/result_path.cpp src/kernels_scalar.cpp src/snapshot_032d.cpp)
 target_include_directories(ark PUBLIC include "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_include_directories(ark SYSTEM PRIVATE third_party)
+
+add_executable(ark-transmission-061c-tests tests/transmission_061c_tests.cpp)
+target_link_libraries(ark-transmission-061c-tests PRIVATE ark)
+add_test(NAME transmission-061c COMMAND ark-transmission-061c-tests)
+set_tests_properties(transmission-061c PROPERTIES TIMEOUT 120)
+
+add_executable(ark-manufacturing-060c-tests tests/manufacturing_simulation_060c_tests.cpp)
+target_link_libraries(ark-manufacturing-060c-tests PRIVATE ark)
+add_test(NAME manufacturing-060c COMMAND ark-manufacturing-060c-tests)
+set_tests_properties(manufacturing-060c PROPERTIES TIMEOUT 120)
 
 add_executable(ark-async-authoring-051a-tests tests/async_authoring_051a_tests.cpp)
 target_link_libraries(ark-async-authoring-051a-tests PRIVATE ark)
@@ -652,7 +662,7 @@ if(WIN32)
     set_tests_properties(studio-navigation-036a PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
     add_test(NAME studio-datum-authoring-036a COMMAND ark-studio --datum-authoring-ui-test --settings-file "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/datum-authoring-036a.settings.json" --shot "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/datum-authoring-036a.png" --size 1440 900)
     set_tests_properties(studio-datum-authoring-036a PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
-    foreach(check surface-edit-ui surface-workflow-ui viewport-capture-ui rubber-ui rubber-engine-ui async-exact-ui async-authoring-ui team-blockers-ui realtime-ui product-tools-ui scene-cache-ui authoring-assistance-ui editor-scroll-ui feature-editor-picking-ui history-ui history-compaction-ui recovery-ui configuration-workspace-ui interaction-performance-ui)
+    foreach(check transmission-ui manufacturing-ui surface-edit-ui surface-workflow-ui viewport-capture-ui rubber-ui rubber-engine-ui async-exact-ui async-authoring-ui team-blockers-ui realtime-ui product-tools-ui scene-cache-ui authoring-assistance-ui editor-scroll-ui feature-editor-picking-ui history-ui history-compaction-ui recovery-ui configuration-workspace-ui interaction-performance-ui)
       add_test(NAME studio-${check} COMMAND ark-studio --self-test-${check} --settings-file "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}.settings.json" --shot "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}.png" --size 1280 800)
       set_tests_properties(studio-${check} PROPERTIES TIMEOUT 300 RUN_SERIAL TRUE)
     endforeach()

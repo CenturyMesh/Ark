@@ -93,6 +93,7 @@ struct AssemblyMotionRelation {
     AssemblyMate mate;
     Mat4 localA,localB;
     double ratio=1,lift=0,phaseRad=0,target=0,teethA=0,teethB=0;
+    arkjson::Value transmission; // derived sizing/load inputs from the same authored mate
     bool translational=false;
     bool limited=false;
     double minimum=0,maximum=0;

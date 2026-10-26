@@ -87,6 +87,9 @@ typedef ptrdiff_t GLsizeiptr;
 #include "ark/agent.hpp"
 #include "ark/direct_preview.hpp"
 #include "ark/async_authoring.hpp"
+#include "ark/manufacturing_simulation.hpp"
+#include "ark/transmission.hpp"
+#include <iomanip>
 #include "ark/agent_activity.hpp"
 #include "ark/bom.hpp"
 #include "ark/mesh_analysis.hpp"
@@ -454,6 +457,8 @@ static std::array<AssistantUsage,8> g_teamLiveUsage{};static std::string g_activ
 #include "baked_motions_state.inl"
 #include "inertial_state_056c.inl"
 #include "rubber_state_059c.inl"
+#include "manufacturing_state_060c.inl"
+#include "transmission_state_061c.inl"
 #include "media_playback_state.inl"
 static void restoreMotionCables054B();static void shutdownMotionCables054B();
 #include "exploded_view_state.inl"
@@ -594,6 +599,8 @@ static int atlasIcon(int action){switch(action){
     case 187:return 10;case 188:return 11;case 190:return 8;case 16:return 12;case 17:return 13;case 81:return 46;case 18:return 14;case 19:return 47;
     case 610:return 33;case 611:return 14;case 700:return 24;case 70:return 33;case 71:return 34;case 170:return 41;case 171:return 42;case 172:return 43;case 173:return 44;case 67:return 45;
     case 63:return 16;case 78:case 49500:return 17;case 77:case 49404:return 18;case 79:return 19;case 211:return 20;case 212:return 21;case 210:return 22;case 215:case 384:return 23;
+    case 49700:case 49701:case 49702:return 9;case 49703:case 49704:return 45;case 49705:return 47;case 49706:return 14;
+    case 49600:case 49603:return 8;case 49601:case 49604:return 31;case 49602:return 2;case 49605:case 49618:return 10;case 49606:case 49607:return 45;case 49608:case 49616:return 12;case 49609:case 49610:return 30;case 49611:return 14;case 49615:case 49621:return 13;case 49619:return 22;case 49620:return 16;case 49622:return 47;case 49623:return 34;
     case 49400:return 25;case 49401:return 3;case 49501:return 33;case 49503:return 56;case 49504:case 49505:return 14;
     case 73:case 89:return 24;case 108:return 25;case 105:return 26;case 104:return 27;case 321:return 28;case 320:return 29;case 322:return 30;case 326:return 31;case 154:return 56;default:return -1;
 }}
@@ -3211,7 +3218,7 @@ static void startLiveBridge(){
 static void shutdownSurfaceEdit059();static void beginSurfaceEdit059();
 static void stopIntegrations(){
     shutdownSurfaceEdit059();
-    g_closing=true;shutdownMotionCables054B();if(g_authoringWorker)g_authoringWorker->shutdown();*g_pricingCancel=true;*g_teamCancel=true;g_agentTeam.cancel();*g_assistantCancel=true;*g_authCancel=true;g_liveBridge.stop();shutdownExactJobs046();
+    g_closing=true;stopTransmission061();shutdownManufacturing060();shutdownMotionCables054B();if(g_authoringWorker)g_authoringWorker->shutdown();*g_pricingCancel=true;*g_teamCancel=true;g_agentTeam.cancel();*g_assistantCancel=true;*g_authCancel=true;g_liveBridge.stop();shutdownExactJobs046();
     MSG msg{};while(PeekMessage(&msg,g_window,WM_ARK_TOOL,WM_ARK_AUTH,PM_REMOVE)){if(msg.message==WM_ARK_TOOL){std::unique_ptr<UiToolRequest> request((UiToolRequest*)msg.lParam);request->complete(cancelledTool());}else if(msg.message==WM_ARK_CHAT)delete (UiChatEvent*)msg.lParam;else if(msg.message==WM_ARK_AUTH)delete (UiAuthEvent*)msg.lParam;}
     while(!g_toolQueue.empty()){g_toolQueue.front()->complete(cancelledTool());g_toolQueue.pop_front();}
     if(g_assistantWorker.joinable())g_assistantWorker.join();
@@ -3750,16 +3757,16 @@ static void motionDriverDialog(){
     if(!candidate)for(const auto& mate:g_doc.mates)if(isMechanicalMate(mate.type)){candidate=mate.a;break;}
     bool hasCadence=std::any_of(g_doc.params.begin(),g_doc.params.end(),[](const Parameter& parameter){return parameter.name=="cadence_rpm";});std::string speed=g_motionActive?g_motionRpmExpression:hasCadence?"cadence_rpm":"60";
     std::string initial=candidate?std::to_string(candidate):"";std::vector<EditorField> fields{{"Driver instance name / ID",initial},{"Speed / rpm or parameter",speed},{"Time / seconds",std::to_string(g_motionTime)}};
-    if(!editFields("Mechanical motion","Read-only motion along authored chain, gear, shaft, rack or cam relations. Geometry and the saved document remain unchanged.",fields))return;
+    if(!editFields("Mechanical motion","Read-only motion along authored chain, belt, gear, shaft, rack or cam relations. Geometry and the saved document remain unchanged.",fields))return;
     u64 driver=motionInstanceId(trimField(fields[0].value));double time=formNumber(fields[2].value);g_motionDriver=driver;g_motionRpmExpression=trimField(fields[1].value);g_motionTime=time;g_motionActive=true;g_motionPlaying=false;g_motionRevision=std::numeric_limits<u64>::max();updateMotionDisplay();frameScene();g_status="Mechanical motion / read-only pose / tooth and collision contact unchecked";
 }
 static void mechanicalRelationDialog(){
-    using V=arkjson::Value;std::vector<EditorField> fields{{"Relation: chain / gear / shaft / rack_pinion / cam","chain"},{"Driver instance name / ID","Front crank"},{"Driven instance name / ID","Rear hub"},{"Driver exact axis reference","Z"},{"Driven exact axis reference","Z"}};
-    if(!editFields("Mechanical relation","Use instance IDs and semantic axes. Geometric positioning mates remain separate from motion relations.",fields))return;auto kind=trimField(fields[0].value);V motion=V::makeObj();
-    if(kind=="chain"||kind=="gear"){std::vector<EditorField> dimensions{{"Driver tooth count / expression","front_teeth"},{"Driven tooth count / expression","rear_teeth"}};if(!editFields("Tooth ratio","Counts may reference document parameters; editing them recomputes the motion ratio.",dimensions))return;motion.set("teeth_a",V::makeStr(trimField(dimensions[0].value)));motion.set("teeth_b",V::makeStr(trimField(dimensions[1].value)));}
+    using V=arkjson::Value;std::vector<std::string> moving;for(const auto& n:g_doc.assembly)if(!n.fixed&&n.feature)moving.push_back(n.name);if(moving.size()<2)throw std::runtime_error("Place at least two moving part occurrences before adding a transmission.");std::vector<EditorField> fields{{"Relation","gear",false,{"gear","chain","belt","shaft","rack_pinion","cam"}},{"Driver instance",moving[0],false,moving},{"Driven instance",moving[1],false,moving},{"Driver exact axis reference","Z"},{"Driven exact axis reference","Z"}};
+    if(!editFields("Mechanical relation","Use semantic axes. This creates a relation, not tooth geometry. The Transmission suite adds dimensions, power, forces and optimization.",fields))return;auto kind=trimField(fields[0].value);V motion=V::makeObj();
+    if(kind=="chain"||kind=="gear"||kind=="belt"){std::vector<EditorField> dimensions{{"Driver tooth count / expression",std::any_of(g_doc.params.begin(),g_doc.params.end(),[](const auto& p){return p.name=="front_teeth";})?"front_teeth":"20"},{"Driven tooth count / expression",std::any_of(g_doc.params.begin(),g_doc.params.end(),[](const auto& p){return p.name=="rear_teeth";})?"rear_teeth":"40"}};if(!editFields("Tooth ratio","Counts may reference document parameters; editing them recomputes the motion ratio.",dimensions))return;motion.set("teeth_a",V::makeStr(trimField(dimensions[0].value)));motion.set("teeth_b",V::makeStr(trimField(dimensions[1].value)));if(kind=="belt"){std::vector<EditorField> pitch{{"Timing belt pitch / mm","5"}};if(!editFields("Timing belt","Declare the actual belt pitch; this is not an outside-diameter estimate.",pitch))return;motion.set("pitch_mm",V::makeStr(pitch[0].value));motion.set("synchronous",V::makeNum(1));}}
     else if(kind=="rack_pinion"){std::vector<EditorField> dimensions{{"Pinion pitch radius / mm","20"},{"Direction / +1 or -1","1"}};if(!editFields("Rack and pinion","Prescribed pitch motion; tooth contact is not checked.",dimensions))return;motion.set("pitch_radius",V::makeStr(trimField(dimensions[0].value)));motion.set("direction",V::makeStr(trimField(dimensions[1].value)));}
     else if(kind=="cam"){std::vector<EditorField> dimensions{{"Harmonic lift / mm","10"},{"Phase / degrees","0"}};if(!editFields("Harmonic cam","Prescribed follower lift; contact and dynamics are not checked.",dimensions))return;motion.set("lift",V::makeStr(trimField(dimensions[0].value)));motion.set("phase_deg",V::makeStr(trimField(dimensions[1].value)));}
-    else if(kind!="shaft")throw std::runtime_error("Choose chain, gear, shaft, rack_pinion or cam");V command=V::makeObj();command.set("op",V::makeStr("mate.add"));command.set("type",V::makeStr(kind));command.set("a",V::makeStr(trimField(fields[1].value)));command.set("b",V::makeStr(trimField(fields[2].value)));command.set("reference_a",V::makeStr(trimField(fields[3].value)));command.set("reference_b",V::makeStr(trimField(fields[4].value)));command.set("motion",std::move(motion));applyCommand(command);
+    else if(kind!="shaft")throw std::runtime_error("Choose gear, chain, belt, shaft, rack_pinion or cam");V command=V::makeObj();command.set("op",V::makeStr("mate.add"));command.set("type",V::makeStr(kind));command.set("a",V::makeStr(trimField(fields[1].value)));command.set("b",V::makeStr(trimField(fields[2].value)));command.set("reference_a",V::makeStr(trimField(fields[3].value)));command.set("reference_b",V::makeStr(trimField(fields[4].value)));command.set("motion",std::move(motion));applyCommand(command);
 }
 static void transmissionParametersDialog(){
     using V=arkjson::Value;std::vector<EditorField> fields;for(const char* key:{"front_teeth","rear_teeth","cadence_rpm"}){auto parameter=std::find_if(g_doc.params.begin(),g_doc.params.end(),[&](const Parameter& value){return value.name==key;});if(parameter==g_doc.params.end())throw std::runtime_error("This transmission has no editable front_teeth, rear_teeth and cadence_rpm parameters");fields.push_back({key,parameter->expr});}
@@ -3801,8 +3808,9 @@ static const std::vector<StudioCommandGroup>& studioCommandGroups(){
     group("Frames, electronics & routing",{{210,"Construction frame"},{549,"Exact tube end fit"},{496,"Frame endpoint trim/extend"},{497,"Frame crossing-plane trim"},{498,"Frame weld add/edit/remove"},{211,"PCB and mounting"},{212,"Cable route"}});
     group("Physics & loads",{{755,"Collision check"},{190,"Assembly mass"},{216,"Loads and physical assumptions"},{189,"Close mass inspector"}});
     group("Simulation",{{49300,"Rubber / belts, tracks and tires"},{49301,"Create rubber body"},{49200,"Inertial Simulation / dynamics"},{49201,"Simulation study / GPU or CPU reference"},{49202,"Gravity, contacts and assembly joints"},{49203,"Occurrence forces and initial motion"},{49204,"Run simulation"},{49205,"Cancel simulation"},{49206,"Play / pause simulation"},{49207,"Restore CAD pose"},{49208,"Simulation evidence"}});
-    group("Motion",{{451,"Mechanical relation"},{452,"Motion driver"},{453,"Play / pause motion"},{454,"Reset motion"},{469,"Transmission teeth and cadence"},{45000,"Baked motions panel"},{47000,"Exploded views"},{47001,"Visualize assembly images"}});
+    group("Motion",{{49700,"Transmission suite / gears, chain and belts"},{451,"Mechanical relation"},{452,"Motion driver"},{453,"Play / pause motion"},{454,"Reset motion"},{469,"Transmission teeth and cadence"},{45000,"Baked motions panel"},{47000,"Exploded views"},{47001,"Visualize assembly images"}});
     group("Selection & display",{{170,"Select body"},{171,"Select face"},{172,"Select edge"},{173,"Select curve"},{401,"Feature inspector"},{410,"Model explorer"},{411,"Display layers"},{412,"Properties inspector"},{462,"Shaded"},{463,"Shaded with edges"},{464,"Wireframe style"},{465,"Show view cube"},{461,"Navigation controls"},{460,"Full screen"},{191,"Home view"},{340,"Hide selected body"},{341,"Show selected body"},{342,"Spotlight selected body"},{343,"Exit Spotlight"},{344,"Show all bodies"}});
+    group("Additive and CNC",{{49600,"Manufacturing workspace"},{49601,"New CNC plan"},{49602,"New additive plan"},{49609,"Simulate manufacturing"},{49615,"Export Fanuc-style NC"},{49616,"Bambu Studio slicer"}});
     group("Manufacturing previews",{{320,"Unfold all sheets"},{321,"Refold all sheets"},{322,"Play all sheet bend sequences"},{323,"Pause all sheet bend sequences"},{325,"Edit selected sheet"},{326,"Stock preview"},{468,"Sheet opening pattern"}});
     group("Tube openings & playback",{{41,"Edit laser tube stock"},{42,"Add notch / opening"},{43,"Edit notch / opening"},{44,"Remove notch / opening"},{45,"Straight tube pose"},{46,"Folded tube pose"},{47,"Play / pause tube folding"},{48,"Previous tube pose"},{49,"Next tube pose"}});
     group("Drawing evidence",{{493,"Persistent iterations and branch restore"},{488,"Local resources and drawing cost details"},{489,"Refresh public pricing rates"},{330,"Token usage receipts"},{324,"Show chassis in unfolded layout"}});
@@ -3886,6 +3894,8 @@ static void uiAction(int id){
     if(surfaceEditAction059(id))return;
     if(surfaceWorkflowAction059(id))return;
     if(rubberAction059(id))return;
+    if(manufacturingAction060(id))return;
+    if(transmissionAction061(id))return;
     if(inertialAction056(id))return;
     // Authoring and other previews always start from the authored CAD pose.
     // Camera, visibility, selection and graphics controls keep playback live.
@@ -4051,7 +4061,7 @@ static void uiAction(int id){
         case 365:if(g_authStatus.pendingClientId.empty())throw std::runtime_error("No pending ChatGPT registration to retry");startAuthJob(AuthJob::SignIn,g_authStatus.pendingClientId);break;
         case 366:cancelAuthJob();break;
         case 367:chooseReasoningEffort();break;
-        case 300:case 301:case 302:case 303:case 304:case 305:case 306:case 307:case 308:case 309:g_toolModule=id-300;break;
+        case 300:case 301:case 302:case 303:case 304:case 305:case 306:case 307:case 308:case 309:case 310:g_toolModule=id-300;break;
         case 210:createConstructionFrame();break;case 211:createPcb();break;case 212:createCableRoute();break;case 213:exportModelDialog();break;case 215:createSuspensionDialog();break;
         case 383:if(!selectedSuspension())throw std::runtime_error("Select a suspension to animate");g_suspSpinPlaying=!g_suspSpinPlaying;g_suspTick=0;g_status=g_suspSpinPlaying?"Kinematic corner preview playing / document unchanged":"Kinematic corner preview paused";break;
         case 384:{if(!selectedSuspension()){auto found=std::find_if(g_bodyIds.begin(),g_bodyIds.end(),[&](u64 id){auto* feature=g_doc.find(id);return feature&&feature->type==FeatureType::Suspension;});
@@ -4884,6 +4894,8 @@ static void drawCanvases(const GLfloat* vpT){
 #include "exploded_view.inl"
 #include "inertial_panel_056c.inl"
 #include "rubber_panel_059c.inl"
+#include "manufacturing_panel_060c.inl"
+#include "transmission_panel_061c.inl"
 #include "surface_edit_059c.inl"
 #include "drag_chain.inl"
 #include "assistant_chat.inl"
@@ -4941,7 +4953,7 @@ static Mat4 drawViewportScene059(bool interactive){
     glEnable(GL_DEPTH_TEST);glDepthFunc(GL_LEQUAL);glDepthMask(GL_FALSE);glEnable(GL_BLEND);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
     drawSurfaces(false,view,proj,vpT,eye,true);
     drawPlaneStamps024(vpT);
-    drawEmission030(view,proj,vpT,eye);drawRubberPreview059(vpT,eye);applyViewportAntialiasing056();if(interactive)captureVisualizeScene();
+    drawEmission030(view,proj,vpT,eye);drawRubberPreview059(vpT,eye);drawManufacturingPreview060();applyViewportAntialiasing056();if(interactive)captureVisualizeScene();
     glDepthMask(GL_TRUE);
 
     if((g_showSketches&&!g_sketchLines.empty())||(g_showDatumPlanes&&!g_datumLines.empty())||!g_selectionLines.empty()||!g_selectionFaceFill.empty()){
@@ -4965,7 +4977,7 @@ static Mat4 drawViewportScene059(bool interactive){
 static void drawFrame(HDC hdc){
     if(!g_preparingEdit){processDirectAuthoringPreview();processCableGuide035();processSurfaceEdit059();}
     static auto previous=std::chrono::steady_clock::now();auto now=std::chrono::steady_clock::now();
-    double elapsed=std::min(.10,std::chrono::duration<double>(now-previous).count());if(!g_preparingEdit){advanceFold(elapsed);advanceSheet(elapsed);advanceSuspension(elapsed);advanceMotion(elapsed);advanceBakedMotion(elapsed);advanceExplodedView(elapsed);advanceInertial056(elapsed);advanceRubber059(elapsed);}previous=now;
+    double elapsed=std::min(.10,std::chrono::duration<double>(now-previous).count());if(!g_preparingEdit){advanceFold(elapsed);advanceSheet(elapsed);advanceSuspension(elapsed);advanceMotion(elapsed);advanceBakedMotion(elapsed);advanceExplodedView(elapsed);advanceInertial056(elapsed);advanceRubber059(elapsed);advanceManufacturing060(elapsed);advanceTransmission061();}previous=now;
     double cameraEase=1-std::exp(-13.4*elapsed),distanceEase=1-std::exp(-11.9*elapsed);
     yaw+=(tYaw-yaw)*cameraEase;pitch+=(tPitch-pitch)*cameraEase;dist+=(tDist-dist)*distanceEase;target=target+(tTarget-target)*cameraEase;
     layout();assistant_chat::sync();sampleStudioResources();updateCostDisplay();
@@ -5054,8 +5066,8 @@ static void drawFrame(HDC hdc){
     auto iconButton=[&](int action,const char* title,float x,float y,float size=28.f){bool hover=mp.x>=x&&mp.x<x+size&&mp.y>=y&&mp.y<y+size;if(hover){rect(x-3,y-3,size+6,size+6,5,.15,.22,.28,1,0,0,0,0,0);ribbonHint=title;}glyph(action,x+3,y+3,size-6,.86f);g_zones.push_back({x-3,y-3,size+6,size+6,action});};
     iconButton(458,"Document: new, open, save and export",W-229,13);iconButton(18,"Undo",W-192,13);iconButton(19,"Redo",W-155,13);iconButton(400,"Assistant",W-118,13);iconButton(56,"System options / Graphics",W-81,13);iconButton(57,"Account",W-44,13);
     rect(0,52,W,42,0,.073,.09,.108,1,.23,.29,.35,.5,1);
-    const char* tabNames[]={"Sheet Metal","Model","Sketch","Inspect","Tools","Manage","Surfaces","Wood","Plastics","Electronics"};float tabX=18;const float tabScale=W<1500?.66f:.78f,tabPad=W<1500?16.f:24.f;
-    for(int module:{0,1,6,7,8,9,2,3,4,5}){float width=textWidth(tabNames[module],tabScale)+tabPad;bool active=g_toolModule==module;if(active)rect(tabX,56,width,35,3,.12,.17,.20,1,0,0,0,0,0);textOut(tabNames[module],tabX+tabPad*.5f,66,tabScale,active?.95f:.77f,active?.98f:.84f,active?1.f:.89f);if(active)rect(tabX,90,width,3,0,.13,.77,.91,1,0,0,0,0,0);g_zones.push_back({tabX,54,width,39,300+module});tabX+=width+7;}
+    const char* tabNames[]={"Sheet Metal","Model","Sketch","Inspect","Tools","Manage","Surfaces","Wood","Plastics","Electronics","Manufacturing"};float tabX=18;const float tabScale=W<1500?.66f:.78f,tabPad=W<1500?16.f:24.f;
+    for(int module:{0,1,6,7,8,9,10,2,3,4,5}){float width=textWidth(tabNames[module],tabScale)+tabPad;bool active=g_toolModule==module;if(active)rect(tabX,56,width,35,3,.12,.17,.20,1,0,0,0,0,0);textOut(tabNames[module],tabX+tabPad*.5f,66,tabScale,active?.95f:.77f,active?.98f:.84f,active?1.f:.89f);if(active)rect(tabX,90,width,3,0,.13,.77,.91,1,0,0,0,0,0);g_zones.push_back({tabX,54,width,39,300+module});tabX+=width+7;}
     float taskX=tabX+12,taskWidth=std::max(1.f,W-taskX-316);std::string activity=!g_activeToolName.empty()?g_activeToolRole+" / "+g_activeToolName:g_teamStarted?(g_teamSnapshot.running?(!g_liveStepLabel.empty()?g_liveStepLabel:"Team active / provider requests"):std::string("Goal: ")+agentGoalStateName(g_teamSnapshot.goalState)+(g_teamSnapshot.goalDeclared?" / explicit lead report":" / completion not reported")):g_assistantResponseFinished?(g_assistantResponseError?"Response interrupted / inspect prior changes":"Response finished / review result"):"Ready / scene orbit";if(!g_draftViews.empty())activity+=" / "+std::to_string(g_draftViews.size())+" uncommitted drafts";
     auto fitHeader=[&](std::string text,float scale){while(!text.empty()&&textWidth(text,scale)>taskWidth)text.pop_back();return text;};textOut(fitHeader(activity,.52f),taskX,58,.52f,.50f,.81f,.94f);textOut(fitHeader(std::to_string(g_liveCompletedSteps)+" committed team steps / drafts are uncommitted",.49f),taskX,75,.49f,.67f,.78f,.89f);
     {const char* filters[]={"Body","Face","Edge","Curve"};for(int kind=0;kind<4;++kind)button(filters[kind],W-298+kind*70,56,66,170+kind,false,g_pickKind==kind&&!g_directAuthoring.active&&!g_sketchEditing.active&&!g_sketchDrawing.active&&!g_componentMove.armed);}
@@ -5064,10 +5076,11 @@ static void drawFrame(HDC hdc){
     if(g_toolModule==0)groups={{"Create",{{"Base",120},{"Vent",985},{"Flange",121},{"Hem",394},{"Stamp",397},{"Opening",124}}},{"Modify",{{"Edit",325},{"Jog",494},{"Sketch bend",495},{"Unfold",320},{"Refold",321}}},{"Pattern",{{"Pattern",468},{"Mirror",108}}},{"Output",{{"Export",213}}}};
     else if(g_toolModule==1&&g_directAuthoring.active)groups={{"Direct edit",{{"Push / pull",650},{"Move body",651},{"Mesh patch",652},{"Pull vertex",653},{"Mesh edge",654},{"Value",655},{"Apply",656},{"Cancel",657}}},{"Source",{{"Dimensions",659},{"Sample mesh",754}}},{"Select",{{"Body",170},{"Face",171},{"Tangent patch",658}}},{"Combine",{{"Fuse bodies",8},{"Carve body",9},{"Keep overlap",10}}}};
     else if(g_toolModule==1&&W<1280)groups={{"Create",{{"Primitive",100},{"Extrude",101},{"Drag extrude",687},{"Loft",76},{"Helix",750},{"Tube",26}}},{"Direct",{{"Push / pull",650},{"Move body",651},{"Mesh patch",652},{"Source dims",659}}},{"Combine",{{"Fuse bodies",8},{"Carve body",9},{"Keep overlap",10}}},{"More",{{"Motions",45000},{"Explode",47000},{"HUD",48000},{"Model tools",456}}}};
-    else if(g_toolModule==1)groups={{"Create",{{"Primitive",100},{"Extrude",101},{"Drag extrude",687},{"Loft",76},{"Helix",750},{"Frame",210},{"Tube",26}}},{"Direct",{{"Push / pull",650},{"Move body",651},{"Mesh patch",652},{"Source dims",659}}},{"Combine",{{"Fuse bodies",8},{"Carve body",9},{"Keep overlap",10}}},{"Assembly",{{"Assembly",27},{"Mate",94},{"Motions",45000},{"Explode",47000},{"Library",484}}},{"Frame edits",{{"Trim / extend",496},{"Trim plane",497},{"Weld",498},{"Tube end fit",549}}},{"More",{{"HUD",48000},{"Model tools",456}}}};
+    else if(g_toolModule==1)groups={{"Create",{{"Primitive",100},{"Extrude",101},{"Drag extrude",687},{"Loft",76},{"Helix",750},{"Frame",210},{"Tube",26}}},{"Direct",{{"Push / pull",650},{"Move body",651},{"Mesh patch",652},{"Source dims",659}}},{"Combine",{{"Fuse bodies",8},{"Carve body",9},{"Keep overlap",10}}},{"Assembly",{{"Assembly",27},{"Mate",94},{"Transmission",49700},{"Motions",45000},{"Explode",47000},{"Library",484}}},{"Frame edits",{{"Trim / extend",496},{"Trim plane",497},{"Weld",498},{"Tube end fit",549}}},{"More",{{"HUD",48000},{"Model tools",456}}}};
     else if(g_toolModule==2&&g_sketchEditing.active)groups={{"Edit in view",{{"Exit sketch",611},{"Coordinates",70},{"Dimensions",591},{"Source params",577},{"Constraint",73},{"Normal view",71},{"Grid",579}}},{"Sketch",{{"Draw sketch",570},{"Undo",18},{"Redo",19}}}};
     else if(g_toolModule==2&&g_sketchDrawing.active)groups={{"Draw in view",{{"Line",571},{"Polyline",572},{"Rectangle",573},{"Circle",574},{"Arc 3 pt",575},{"Dimensions",576},{"Grid",579},{"Exit sketch",578}}},{"Coordinate forms",{{"Line form",543},{"Arc form",544},{"Tangent arc",545},{"Rectangle",61},{"Circle",62},{"Spline",63}}},{"Modify",{{"Project 2D",536},{"Include 3D",537},{"Edit curve",70},{"Constraint",73},{"Plane",60},{"Source params",577}}},{"Build",{{"Extrude",65},{"Drag extrude",687},{"Cut",66}}}};
     else if(g_toolModule==2)groups={{"Interactive",{{"Draw sketch",570},{"Edit sketch",610}}},{"Draw 2D",{{"Line",543},{"Arc 3 pt",544},{"Tangent arc",545},{"Rectangle",61},{"Circle",62},{"Spline",63}}},{"Draw 3D",{{"Arc 3D",547},{"Tangent 3D",548},{"3D curve",538}}},{"Modify",{{"Project 2D",536},{"Include 3D",537},{"Edit curve",70},{"Constraint",73},{"Plane",60}}},{"Build",{{"Extrude",65},{"Drag extrude",687},{"Cut",66}}}};
+    else if(g_toolModule==10)groups={{"Manufacture",{{"Workspace",49600},{"CNC plan",49601},{"Additive",49602}}},{"Prepare",{{"Stock",49604},{"Workholding",49618},{"Tool",49605},{"Operation",49606}}},{"Run",{{"Simulate",49609},{"Play / Pause",49610},{"Stop",49611},{"Graph",49000}}},{"Output",{{"Import G-code",49608},{"Bambu slicer",49616},{"Rates",49607},{"Export NC",49615}}}};
     else if(g_toolModule==3)groups={{"Measure",{{"Measure 2D",585},{"Measure 3D",586},{"Units",587}}},{"Selection",{{"Body",170},{"Face",171},{"Tangent faces",658},{"Edge",172},{"Curve",173}}},{"Inspect",{{"Collision",755},{"Simulation",49200},{"Rubber",49300},{"BOM",590},{"Properties",401},{"Mass / CG",188},{"Material",187}}},{"Display",{{"Graph",49000},{"Eye mode",49101},{"Families",49102},{"Schematic",49100},{"Graphics",56},{"Fit",20}}}};
     else if(g_toolModule==8)groups={{"Shape",{{"Start solid",100},{"Hollow walls",999},{"Release angle",106},{"Round edges",104}}},{"Details",{{"Reinforce / fit",990},{"Vent",984},{"Separate",992}}},{"Review",{{"Exact part",991},{"Edit recipe",161},{"Workflow",993}}}};
     else if(g_toolModule==9)groups={{"Board",{{"Board / pads",211}}},{"Cables",{{"Rounded route",212},{"Smooth 3D",996},{"Flat ribbon",997},{"Guide path",998},{"Edit route",161}}},{"Review",{{"Board / cable",995},{"Collision",755},{"BOM",590}}},{"Sources",{{"Approved Vendors",994},{"Library",484}}}};
@@ -6257,6 +6270,7 @@ static void seedDocument(){g_doc=makeDemoDocument();rebuildScene();frameScene();
 #include "surface_workflow_selftest_059c.inl"
 
 int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
+    bool manufacturingUiTest=false,transmissionUiTest=false;
     if(redirect_to_updated_runtime())return 0;
     // Recompute continues at full speed while Studio is in the background.
     ark::disableProcessPowerThrottling();
@@ -6282,6 +6296,8 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         else if(a=="--self-test-plastics-ui"){plasticsUiTest=true;g_headless=true;}
         else if(a=="--self-test-electronics-workspace-ui"){electronicsWorkspaceUiTest=true;g_headless=true;}
         else if(a=="--self-test-startup-ui"){startupUiTest=true;g_headless=true;}
+        else if(a=="--self-test-transmission-ui"){transmissionUiTest=true;g_headless=true;}
+        else if(a=="--self-test-manufacturing-ui"){manufacturingUiTest=true;g_headless=true;}
         else if(a=="--self-test-async-authoring-ui"){asyncAuthoringUiTest=true;g_headless=true;}
         else if(a=="--self-test-history-compaction-ui"){historyCompactionUiTest=true;g_headless=true;}
         else if(a=="--self-test-history-ui"){featureHistoryUiTest=true;g_headless=true;}
@@ -7202,6 +7218,8 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
 #include "history_recovery_selftest.inl"
 #include "history_compaction_selftest.inl"
 #include "async_authoring_selftest.inl"
+#include "manufacturing_selftest_060c.inl"
+#include "transmission_selftest_061c.inl"
 #include "editor_scroll_selftest.inl"
 #include "feature_editor_picking_selftest.inl"
 #include "configuration_workspace_selftest.inl"

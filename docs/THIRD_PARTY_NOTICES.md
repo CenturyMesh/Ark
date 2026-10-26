@@ -94,6 +94,10 @@ decoder; offline contracts also exercise this portable path. The host disables
 file I/O and unrelated image/HDR formats and bounds input dimensions, decoded
 area and decoder allocations.
 
+060C also uses the same unmodified header's raw DEFLATE decoder for bounded
+G-code members in 3MF ZIP containers. Member size and CRC are checked by ARK;
+archive members are read into memory, not extracted as filesystem paths.
+
 The upstream MIT alternative applies to this dependency. The complete unchanged
 upstream dual-license text is retained in `third_party/stb/LICENSE` and packaged
 as `licenses/stb-image-LICENSE.txt`; the header retains its embedded license.

@@ -1,6 +1,7 @@
 #include "ark/model.hpp"
 #include "ark/references.hpp"
 #include "ark/assembly_authoring.hpp"
+#include "ark/transmission.hpp"
 #include "ark/history_authoring.hpp"
 #include <algorithm>
 #include <cmath>
@@ -14,7 +15,7 @@
 
 namespace ark {
 using V=arkjson::Value;
-bool isMechanicalMate(const std::string& type){return type=="chain"||type=="gear"||type=="shaft"||type=="rack_pinion"||type=="cam";}
+bool isMechanicalMate(const std::string& type){return isTransmissionMate(type)||type=="rack_pinion"||type=="cam";}
 namespace {
 constexpr double kAngularWeight=10.0;
 constexpr double kPositionTolerance=1e-5;
@@ -48,13 +49,18 @@ AssemblyMotionRelation prepareMotionRelation(const Document& doc,const AssemblyM
     const Mat4 fa=worldA*relation.localA,fb=worldB*relation.localB;const double dot=axis(fa).dot(axis(fb));
     const ExprEnv env=doc.buildEnv();
     auto number=[&](const char* key,double fallback,bool required=false){const auto found=mate.motion.find(key);if(found==mate.motion.end()){if(required)throw std::runtime_error(std::string("MECHANICAL_FIELD_REQUIRED: ")+key);return fallback;}bool ok=false;const double value=evalExpr(found->second,env,&ok);if(!ok||!std::isfinite(value)||std::fabs(value)>1e6)throw std::runtime_error(std::string("MECHANICAL_INVALID_EXPRESSION: ")+key);return value;};
-    for(const auto& field:mate.motion){const auto& key=field.first;const bool allowed=(mate.type=="chain"||mate.type=="gear")?(key=="teeth_a"||key=="teeth_b"||key=="phase_deg"):mate.type=="rack_pinion"?(key=="pitch_radius"||key=="direction"):mate.type=="cam"?(key=="lift"||key=="phase_deg"):false;if(!allowed)throw std::runtime_error("MECHANICAL_UNSUPPORTED_FIELD: "+key);}
+    for(const auto& field:mate.motion){const auto& key=field.first;const bool allowed=isTransmissionMate(mate.type)?transmissionMotionField(mate.type,key):mate.type=="rack_pinion"?(key=="pitch_radius"||key=="direction"):mate.type=="cam"?(key=="lift"||key=="phase_deg"):false;if(!allowed)throw std::runtime_error("MECHANICAL_UNSUPPORTED_FIELD: "+key);}
     bool valueOk=false;const double legacy=evalExpr(mate.value,env,&valueOk);if(!valueOk||std::fabs(legacy)>1e-12)throw std::runtime_error("Mechanical mates use motion fields; value must be zero");
-    if(mate.type=="chain"||mate.type=="gear"||mate.type=="shaft"){
-        if(std::fabs(std::fabs(dot)-1)>1e-6)throw std::runtime_error("MECHANICAL_AXES_NOT_PARALLEL: chain/gear/shaft require parallel semantic axes");
-        if(mate.type=="shaft"){const auto gap=origin(fb)-origin(fa);if((gap-axis(fa)*gap.dot(axis(fa))).len()>kPositionTolerance)throw std::runtime_error("MECHANICAL_SHAFT_NOT_COAXIAL: shaft references must share an axis");}
-        else{const double teethA=number("teeth_a",0,true),teethB=number("teeth_b",0,true);if(teethA<1||teethB<1||teethA>10000||teethB>10000||std::fabs(teethA-std::round(teethA))>1e-9||std::fabs(teethB-std::round(teethB))>1e-9)throw std::runtime_error("MECHANICAL_INVALID_TEETH: counts must be integers 1..10000");relation.teethA=teethA;relation.teethB=teethB;relation.ratio=teethA/teethB;relation.phaseRad=deg2rad(number("phase_deg",0));}
-        relation.ratio*=dot<0?-1:1;if(mate.type=="gear")relation.ratio*=-1;
+    if(isTransmissionMate(mate.type)){
+        if(std::fabs(std::fabs(dot)-1)>1e-6)throw std::runtime_error("MECHANICAL_AXES_NOT_PARALLEL: transmission requires parallel semantic axes");
+        const auto gap=origin(fb)-origin(fa);const double axial=gap.dot(axis(fa)),center=(gap-axis(fa)*axial).len();
+        if(mate.type=="shaft"&&center>kPositionTolerance)throw std::runtime_error("MECHANICAL_SHAFT_NOT_COAXIAL: shaft references must share an axis");
+        relation.transmission=evaluateTransmissionMate(mate,env,center,axial);
+        relation.ratio=relation.transmission.find("ratio")->asNum();
+        if(const auto* teeth=relation.transmission.find("teeth_a"))relation.teethA=teeth->asNum();
+        if(const auto* teeth=relation.transmission.find("teeth_b"))relation.teethB=teeth->asNum();
+        if(const auto* phase=relation.transmission.find("phase_deg"))relation.phaseRad=deg2rad(phase->asNum());
+        relation.ratio*=dot<0?-1:1;
     }else{
         relation.translational=true;if(std::fabs(dot)>1e-6)throw std::runtime_error("MECHANICAL_AXES_NOT_ORTHOGONAL: radial cam/rack travel must be perpendicular to rotation axis");
         if(mate.type=="cam"){relation.lift=number("lift",0,true);if(relation.lift<0)throw std::runtime_error("MECHANICAL_INVALID_LIFT: lift must be nonnegative");relation.phaseRad=deg2rad(number("phase_deg",0));}
@@ -490,7 +496,7 @@ bool buildAssemblyMotion(const Document& document,AssemblyMotionProgram& program
             if(isMechanicalMate(mate.type)){auto relation=prepareMotionRelation(document,mate,a,b,world.at(mate.a),world.at(mate.b));retainAxis(mate.a,relation.localA);retainAxis(mate.b,relation.localB);program.relations.push_back(std::move(relation));}
             else{AssemblyMotionRelation constraint;constraint.mate=mate;constraint.localA=localReference(document,a,mate.reference_a,mate.fraction_a);constraint.localB=localReference(document,b,mate.reference_b,mate.fraction_b);bool ok=false;const auto env=document.buildEnv();constraint.target=evalExpr(mate.value,env,&ok);if(!ok)throw std::runtime_error("Invalid geometric mate target");if(mate.type=="angle")constraint.target=deg2rad(constraint.target);evaluateLimits(mate,env,constraint.limited,constraint.minimum,constraint.maximum);program.geometricConstraints.push_back(std::move(constraint));}
         }
-        if(program.relations.empty())throw std::runtime_error("MECHANICAL_NO_COUPLINGS: add chain, gear, shaft, rack_pinion or cam mates");
+        if(program.relations.empty())throw std::runtime_error("MECHANICAL_NO_COUPLINGS: add chain, belt, gear, shaft, rack_pinion or cam mates");
         return true;
     }catch(const std::exception& exception){error=exception.what();program={};return false;}
 }
@@ -529,7 +535,7 @@ arkjson::Value inspectAssemblyMotion(const AssemblyMotionProgram& program,u64 dr
     for(const auto& placement:program.baseline){V row=V::makeObj(),matrix=V::makeArr();row.set("node",V::makeNum((double)placement.node));row.set("feature",V::makeNum((double)placement.feature));row.set("name",V::makeStr(placement.name));row.set("copy",V::makeNum(placement.copy));row.set("visible",V::makeBool(placement.visible));const bool rotating=angle.count(placement.node),translating=displacement.count(placement.node);row.set("moving",V::makeBool(rotating||translating));for(double value:(rotating||translating?world.at(placement.node):placement.world).m)matrix.arr.push_back(V::makeNum(value));row.set("world_column_major",matrix);
         if(rotating){row.set("angle_deg",V::makeNum(rad2deg(angle.at(placement.node))));row.set("speed_rpm",V::makeNum(speed.at(placement.node)*60/(2*K_PI)));}if(translating){row.set("displacement_mm",V::makeNum(displacement.at(placement.node)));row.set("velocity_mm_s",V::makeNum(velocity.at(placement.node)));}instances.arr.push_back(row);
     }
-    for(const auto& relation:program.relations){V row=V::makeObj();row.set("id",V::makeNum((double)relation.mate.id));row.set("type",V::makeStr(relation.mate.type));row.set("a",V::makeNum((double)relation.mate.a));row.set("b",V::makeNum((double)relation.mate.b));if(relation.mate.type!="cam")row.set("ratio",V::makeNum(relation.ratio));row.set("ratio_scope",V::makeStr(relation.mate.type=="rack_pinion"?"mm per input radian":relation.mate.type=="cam"?"harmonic lift law":"signed driven angular speed / driver angular speed"));if(relation.teethA){row.set("teeth_a",V::makeNum(relation.teethA));row.set("teeth_b",V::makeNum(relation.teethB));}if(relation.mate.type=="cam")row.set("lift_mm",V::makeNum(relation.lift));row.set("phase_deg",V::makeNum(rad2deg(relation.phaseRad)));const bool active=angle.count(relation.mate.a);row.set("active",V::makeBool(active));if(active){double residualValue=0;if(!relation.translational)residualValue=angle.at(relation.mate.b)-relation.ratio*angle.at(relation.mate.a)-relation.phaseRad;else{const double expected=relation.mate.type=="cam"?relation.lift/2*(std::cos(relation.phaseRad)-std::cos(angle.at(relation.mate.a)+relation.phaseRad)):relation.ratio*angle.at(relation.mate.a);residualValue=displacement.at(relation.mate.b)-expected;}row.set(relation.translational?"residual_mm":"residual_rad",V::makeNum(residualValue));if(std::fabs(residualValue)>1e-7)throw std::runtime_error("MECHANICAL_COUPLING_RESIDUAL: inconsistent relation");}relations.arr.push_back(row);}
+    for(const auto& relation:program.relations){V row=V::makeObj();row.set("id",V::makeNum((double)relation.mate.id));row.set("type",V::makeStr(relation.mate.type));row.set("a",V::makeNum((double)relation.mate.a));row.set("b",V::makeNum((double)relation.mate.b));if(relation.mate.type!="cam")row.set("ratio",V::makeNum(relation.ratio));if(!relation.transmission.isNull())row.set("transmission",relation.transmission);row.set("ratio_scope",V::makeStr(relation.mate.type=="rack_pinion"?"mm per input radian":relation.mate.type=="cam"?"harmonic lift law":"signed driven angular speed / driver angular speed"));if(relation.teethA){row.set("teeth_a",V::makeNum(relation.teethA));row.set("teeth_b",V::makeNum(relation.teethB));}if(relation.mate.type=="cam")row.set("lift_mm",V::makeNum(relation.lift));row.set("phase_deg",V::makeNum(rad2deg(relation.phaseRad)));const bool active=angle.count(relation.mate.a);row.set("active",V::makeBool(active));if(active){double residualValue=0;if(!relation.translational)residualValue=angle.at(relation.mate.b)-relation.ratio*angle.at(relation.mate.a)-relation.phaseRad;else{const double expected=relation.mate.type=="cam"?relation.lift/2*(std::cos(relation.phaseRad)-std::cos(angle.at(relation.mate.a)+relation.phaseRad)):relation.ratio*angle.at(relation.mate.a);residualValue=displacement.at(relation.mate.b)-expected;}row.set(relation.translational?"residual_mm":"residual_rad",V::makeNum(residualValue));if(std::fabs(residualValue)>1e-7)throw std::runtime_error("MECHANICAL_COUPLING_RESIDUAL: inconsistent relation");}relations.arr.push_back(row);}
     result.set("driver",V::makeNum((double)driver));result.set("time_s",V::makeNum(timeSeconds));result.set("speed_rpm",V::makeNum(speedRpm));result.set("instances",instances);result.set("relations",relations);result.set("max_static_position_residual_mm",V::makeNum(maxPosition));result.set("max_static_angle_residual_deg",V::makeNum(maxAngle));result.set("static_constraints_verified",V::makeBool(true));result.set("document_unchanged",V::makeBool(true));result.set("model",V::makeStr("ideal kinematic coupling graph; cam is a harmonic lift law relative to authored phase-zero pose"));result.set("tooth_contact_checked",V::makeBool(false));result.set("chain_collision_checked",V::makeBool(false));result.set("cam_contact_checked",V::makeBool(false));result.set("dynamics_checked",V::makeBool(false));return result;
 }
 

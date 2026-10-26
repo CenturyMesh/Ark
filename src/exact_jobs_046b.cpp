@@ -13,7 +13,7 @@ double elapsedMs(Clock::time_point from,Clock::time_point to){return std::chrono
 // warm only caches of that private copy (centroids, reference frames, lazily
 // promoted native bodies, mesh BVH); none writes files, UI state, candidates,
 // BOM review gates or the context-graph index.
-const std::set<std::string> exactReadTools{"surface_control","native_inspect","geometry_query","reference_inspect","assembly_info","collision_inspect","physics_inspect","mesh_inspect","motion_info","step_inspect"};
+const std::set<std::string> exactReadTools{"transmission_inspect","transmission_design","manufacturing_simulate","surface_control","native_inspect","geometry_query","reference_inspect","assembly_info","collision_inspect","physics_inspect","mesh_inspect","motion_info","step_inspect"};
 V withPayload(V result,const V& payload){
     result.set("structuredContent",payload);
     if(const auto* content=result.find("content");content&&content->t==V::Arr){V parts=*content;for(auto& part:parts.arr)if(part.find("type")&&part.find("type")->asStr()=="text")part.set("text",V::makeStr(payload.dump()));result.set("content",parts);}
