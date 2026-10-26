@@ -362,7 +362,7 @@ public:
     // or proof that staged native geometry has completed kernel validation.
     arkjson::Value derivedGeometryStatus;
     std::shared_ptr<NativeDocumentResultContext> pendingNativeGeometry;
-    struct ReferenceFrameCacheEntry {std::string brep,topology;std::unordered_map<std::string,arkjson::Value> frames;};
+    struct ReferenceFrameCacheEntry {std::weak_ptr<const void> owner;std::unordered_map<std::string,arkjson::Value> frames;};
     mutable std::unordered_map<u64,ReferenceFrameCacheEntry> referenceFrameCache;
     std::unordered_map<u64,std::pair<std::string,arkjson::Value>> centroidCache; // exact B-rep digest -> producer result; never serialized
     u64 evaluationGeneration=0;

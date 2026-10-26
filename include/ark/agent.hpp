@@ -9,6 +9,7 @@
 namespace ark {
 struct Image;
 bool metadataOnlyApply(const Document&,const arkjson::Value& args);
+bool rigidPlacementOnlyApply(const Document&,const arkjson::Value& args);
 arkjson::Value snapshotImageResult(const Image&,const arkjson::Value& visualEvidence,const std::string& path={});
 // A session owns its document. UI and MCP call the same command implementation.
 // Calls are serialized by the host; no process-global document state.

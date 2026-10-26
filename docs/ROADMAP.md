@@ -1,5 +1,27 @@
 # ARK roadmap A–G
 
+064A (**A.02/A.04/B.01/B.04 — Verificado no escopo local**): immutable drag paths
+reuse validated continuation checkpoints, key-light shadows use GPU depth maps,
+and local horizon occlusion replaces noisy screen-space shadow rays. Sixteen
+focused suites passed; see [064A evidence and limits](iterations/064A.md).
+Broader milestones remain **Parcial**.
+
+063A (**A.02/A.04/B.01/B.04 — Verificado no escopo local**): retained rigid-movement geometry,
+interactive raster during ray-traced component dragging, improved shadow depth
+and plane context sections. See [063A scope and evidence](iterations/063A.md).
+Broader milestones remain **Parcial**.
+
+062B (**A.02/A.04/B.01/B.04/C.03/D.02/E.01 — Verificado no escopo local**): exact smart
+measurement with D/Ctrl, non-destructive plane/screen-line section views,
+multi-occurrence Spotlight and retained additive build plates shared with agents.
+Broader milestones remain **Parcial**; see [062B scope and evidence](iterations/062B.md).
+
+061C follow-up (**A.02/A.04/D.02 — Verificado no escopo local**): Single retains
+its task after manual edits, requires fresh inspection and rejects stale writes;
+native window commands remain available during slow operations. Eight focused
+local suites passed. A separate existing full-assistant tool-count abort remains
+open. Broader milestones remain **Parcial**; see [evidence and limits](iterations/061C.md#manual-edits-and-native-window-commands-2026-10-26).
+
 061C (**A.02/B.04/C.04/D.02/E.01 ? Verificado no escopo local**): shared mate engineering for gears, chains, belts and shafts; RPM/Nm/power, reference dimensions, double-helical load sharing, torsion and bounded single/compound optimization with parameter-bound preview/apply. Broader B.04/C.04 remain **Parcial**. See [061C evidence](iterations/061C.md) and [transmission contracts](TRANSMISSIONS_061C.md).
 
 060C (**A.02/A.04/C.03/C.04/D.02/E.01 ? Verificado no escopo local**): native additive/CNC manufacturing DAG, revision-bound agent authoring, shared context/Obsidian export, three-axis stock/tool/fixture/carriage screening, external Bambu CLI and declared-rate estimates. Broader manufacturing remains **Parcial**; see [060C](iterations/060C.md) and [contracts](MANUFACTURING_060C.md).

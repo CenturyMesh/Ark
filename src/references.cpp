@@ -23,20 +23,20 @@ GeometryReference resolveGeometryReference(const Document& document, u64 feature
     const auto* topology = body->nativeData.find("topology");
     if (!brep || brep->t != arkjson::Value::Str || !topology)
         throw std::runtime_error("Reference producer has no exact B-rep topology");
-    const std::string topologyIdentity=topology->dump();
     const std::string sample=name+":"+arkjson::Value::makeNum(fraction).dump();
-    size_t identityBytes=brep->str.size()+topologyIdentity.size();
-    for(const auto& item:document.referenceFrameCache)if(item.first!=feature)identityBytes+=item.second.brep.size()+item.second.topology.size();
-    if(identityBytes>16u*1024u*1024u||(document.referenceFrameCache.size()>=32&&!document.referenceFrameCache.count(feature)))document.referenceFrameCache.clear();
-    const bool cacheable=brep->str.size()+topologyIdentity.size()<=16u*1024u*1024u;
+    // NativePayload is immutable/COW. Custody of that exact owner proves both
+    // B-rep and topology identity without dumping/comparing megabytes for every
+    // mate endpoint. A weak owner neither retains unloaded geometry nor permits
+    // a recycled address to reuse an old reference frame.
+    if(document.referenceFrameCache.size()>=32&&!document.referenceFrameCache.count(feature))document.referenceFrameCache.clear();
     auto& cache=document.referenceFrameCache[feature];
-    if(cache.brep!=brep->str||cache.topology!=topologyIdentity){cache={};if(cacheable){cache.brep=brep->str;cache.topology=topologyIdentity;}}
+    const auto owner=cache.owner.lock();
+    if(!owner||owner.get()!=body->nativeData.ownerIdentity()){cache={};cache.owner=body->nativeData.weakOwner();}
     auto existing=cache.frames.find(sample);
     arkjson::Value response;
     if(existing!=cache.frames.end())response=existing->second;
     else{
-        // Cache validation above still compares the exact current B-rep and
-        // topology. Construct their large transport copies only on a miss.
+        // Construct large native transport copies only on an actual cache miss.
         arkjson::Value request=arkjson::Value::makeObj(),worker=arkjson::Value::makeObj();
         request.set("input_brep",*brep);request.set("topology",*topology);
         request.set("reference",arkjson::Value::makeStr(name));request.set("fraction",arkjson::Value::makeNum(fraction));
@@ -59,7 +59,7 @@ GeometryReference resolveGeometryReference(const Document& document, u64 feature
             throw std::runtime_error("Invalid native reference radius");
         result.radius = radius->num;
     }
-    if(cacheable&&existing==cache.frames.end()){if(cache.frames.size()>=64)cache.frames.clear();cache.frames[sample]=response;}
+    if(existing==cache.frames.end()){if(cache.frames.size()>=64)cache.frames.clear();cache.frames[sample]=response;}
     return result;
 }
 }

@@ -167,6 +167,10 @@ static std::uint64_t traceSceneKey(){
 }
 static bool drawPathTracing(const Mat4& projection,const Vec3& eye){
  g_trace.active=false;if(!g_pathTracing)return false;if(wireframe){g_trace.reason="Wireframe uses raster display";g_trace.sceneKey=0;g_trace.samples=0;return false;}
+ // The raster scene already retains per-part meshes and applies instance
+ // matrices. Do not flatten every triangle and rebuild the ray BVH at pointer
+ // frequency. Resume progressive lighting once the rigid pose is committed.
+ if(g_componentMove.active||g_busy||g_preparingEdit){g_trace.samples=0;return false;}
  if(g_trace.reason=="Wireframe uses raster display")g_trace.reason.clear();if(!initializePathTracer())return false;
  const auto sceneKey=traceSceneKey();if(sceneKey!=g_trace.sceneKey){if(!rebuildTraceScene(sceneKey))return false;}else if(!g_trace.reason.empty())return false;
  int width=std::max(1,viewW),height=std::max(1,viewH);double scale=std::min({1.,1600./width,std::sqrt(1200000./((double)width*height))});width=std::max(1,(int)std::lround(width*scale));height=std::max(1,(int)std::lround(height*scale));

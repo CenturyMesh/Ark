@@ -2,14 +2,14 @@ struct MeasurementState {int mode=0,count=0;u64 revision=0,epoch=0;Mat4 frame;st
 static MeasurementState g_measure;
 static bool measurementPreviewActive(){return g_allSheetsFlat||g_allSheetsPlaying||g_stockMode||g_motionActive||g_foldProgress!=0||g_sheetPlayingId||g_componentMove.active||explodedDisplayActive()||std::any_of(g_sheetProgress.begin(),g_sheetProgress.end(),[](const auto& p){return p.second<1;})||std::any_of(g_sheetFlatViews.begin(),g_sheetFlatViews.end(),[](const auto& p){return p.second;});}
 static bool measurementActive(){return g_measure.mode!=0;}
-static void endMeasurement(){g_measure={};g_status="Measurement closed";}
+static void endMeasurement(){if(g_measure.mode==4)resetSmart062();g_measure={};g_status="Measurement closed";}
 static void beginMeasurement(int mode){
     if(g_busy)throw std::runtime_error("Wait for the current operation before measuring");
     if(measurementPreviewActive())throw std::runtime_error("Return to the formed, stationary model before measuring");
-    cancelSketchDrawing();cancelComponentMove();g_pickKind=0;g_navMode=0;
+    endSection062();if(measurementActive())endMeasurement();cancelDirectAuthoring();cancelSketchEditing();cancelSketchDrawing();cancelComponentMove();g_solidDimensions={};g_pickKind=0;g_navMode=0;
     MeasurementState next;next.mode=mode;next.revision=g_session.revision;next.epoch=g_documentEpoch;
     if(mode==2){next.plane=g_activePlane;if(auto* sk=g_doc.findSketch(g_activeSketch))next.plane=sk->sk.plane;next.frame=resolvePlane(g_doc,next.plane);g_activePlane=next.plane;g_showSketches=true;rebuildSketchOverlay();alignSketchCamera();}
-    else next.frame=Mat4::identity();g_measure=std::move(next);g_status=mode==2?"Measure 2D / click two points on the active plane / Esc closes":"Measure 3D / click two surface points / native vertices snap / Esc closes";
+    else next.frame=Mat4::identity();g_measure=std::move(next);g_status=mode==4?"Smart measure / click an edge or face / Ctrl adds or removes / D or Esc closes":mode==2?"Measure 2D / click two points on the active plane / Esc closes":"Measure 3D / click two surface points / native vertices snap / Esc closes";
 }
 static void acceptMeasurementPoint(Vec3 point,const std::string& source){
     if(!std::isfinite(point.x)||!std::isfinite(point.y)||!std::isfinite(point.z)||!std::isfinite(point.len())||(g_measure.count==1&&!std::isfinite((point-g_measure.a).len())))throw std::runtime_error("Measurement coordinates exceed the numeric range");
@@ -18,8 +18,9 @@ static void acceptMeasurementPoint(Vec3 point,const std::string& source){
     else{g_measure.b=point;g_measure.sourceB=source;g_measure.count=2;}
     g_status=g_measure.count==1?source+" / choose second point":"Measurement ready / click starts another pair / Esc closes";
 }
-static bool clickMeasurement(int x,int y){
+static bool clickMeasurement(int x,int y,bool additive=false){
     if(!measurementActive()||!drawingInView(x,y))return false;
+    if(g_measure.mode==4)return clickSmart062(x,y,additive);
     try{
         Vec3 origin,ray;viewRay(x,y,origin,ray);
         if(g_measure.mode==2){auto inverse=g_measure.frame.inverted();auto local=inverse.transformPoint(origin),direction=inverse.transformDir(ray);if(std::abs(direction.z)<1e-10)throw std::runtime_error("View is parallel to the measurement plane; choose Normal view");double t=-local.z/direction.z;if(t<0)throw std::runtime_error("Measurement plane is behind the camera");Vec3 point=local+direction*t;
@@ -47,6 +48,7 @@ static void measurementCoordinates(){
 }
 template<class Rect,class Button>static void drawMeasurementOverlay(Rect rect,Button button){
     if(!measurementActive())return;if(measurementPreviewActive()){endMeasurement();g_status="Measurement cleared: display preview changed";return;}if(g_measure.revision!=g_session.revision||g_measure.epoch!=g_documentEpoch){endMeasurement();g_status="Measurement cleared: document changed";return;}
+    if(g_measure.mode==4){drawSmart062(rect,button);return;}
     auto world=[&](Vec3 p){return g_measure.mode==2?g_measure.frame.transformPoint(p):p;};
     auto dot=[&](Vec3 p,float r,float g,float b){float x,y;if(projectScreen(world(p),x,y)&&drawingInView((int)x,(int)y))rect(x-3,y-3,6,6,2,r,g,b,1,0,0,0,0,0);};
     auto line=[&](Vec3 a,Vec3 b,float r,float g,float blue){float x,y,u,v;if(!projectScreen(world(a),x,y)||!projectScreen(world(b),u,v))return;int count=std::min(180,std::max(1,(int)(std::hypot(u-x,v-y)/5)));for(int i=0;i<=count;++i){float t=(float)i/count,sx=x+(u-x)*t,sy=y+(v-y)*t;if(drawingInView((int)sx,(int)sy))rect(sx-1,sy-1,2,2,0,r,g,blue,1,0,0,0,0,0);}};

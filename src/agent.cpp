@@ -242,7 +242,7 @@ void validatedMaterials(const Document& d){
         if(feature.appearance.t==V::Obj){Appearance appearance;std::string reason;if(!applyAppearancePatch(appearance,feature.appearance,reason))throw std::runtime_error(reason);}
     }
 }
-void validated(Document& d){
+void validated(Document& d,bool geometry=true){
     validatedMaterials(d);
     for(const auto& node:d.assembly)if(const auto* definition=d.find(node.feature);definition&&definition->suppressed)
         throw std::runtime_error("Assembly occurrence requires a suppressed definition; remove its occurrences before suppressing, or use assembly visibility for display");
@@ -250,7 +250,8 @@ void validated(Document& d){
     verifyAssemblyExternalReferences(d);
     std::string manufacturingError;if(!validateManufacturingRoutes(d,manufacturingError))throw std::runtime_error(manufacturingError);
     if(std::any_of(d.assembly.begin(),d.assembly.end(),[](const AssemblyNode& n){return specializedAssemblyPattern(n.pattern);})){std::string patternError;if(!validateAssemblyPatternAuthoring(d,patternError))throw std::runtime_error(patternError);}
-    d.recompute();
+    if(geometry)d.recompute();
+    else {d.recomputeMs=0;d.recomputeEvaluated=0;d.recomputeReused=d.evalBodies.size();d.parallelFeatures=0;d.peakParallelFeatures=0;}
     if(!d.parameterError.empty())throw std::runtime_error(d.parameterError);
     for(auto& r:d.lastResults)if(!r.ok)throw std::runtime_error("Feature #"+std::to_string(r.id)+": "+r.error);
     for(auto& sk:d.sketches)if(!sk.error.empty()||!std::isfinite(sk.residual)||sk.residual>1e-6)throw std::runtime_error("Sketch '"+sk.name+"': "+sk.error);
@@ -494,6 +495,24 @@ AgentSession::Cache& AgentSession::meshCache(const V& args){
     auto it=cache_.find(key);if(it!=cache_.end())return it->second;
     Cache c;c.mesh=selectedMesh(document,args);c.report=analyzeMesh(c.mesh);c.bvh=std::make_unique<MeshBVH>(c.mesh);
     return cache_.emplace(key,std::move(c)).first->second;
+}
+bool rigidPlacementOnlyApply(const Document& document,const V& args){
+    const auto* commands=args.find("commands");
+    if(args.find("candidate_id")||!commands||commands->t!=V::Arr||commands->arr.size()!=1)return false;
+    const auto* op=commands->arr[0].find("op");if(!op||op->t!=V::Str||op->str!="assembly.drive")return false;
+    if(!document.skeleton.isNull()||document.historyTip||!document.assemblyLoadSelection.isNull()||!document.parameterError.empty()||document.features.empty()||document.evalBodies.size()!=document.features.size()||document.lastResults.size()!=document.features.size())return false;
+    for(const auto& result:document.lastResults)if(!result.ok)return false;
+    for(const auto& plane:document.planes)if(!plane.support.isNull())return false;
+    for(const auto& sketch:document.sketches)for(const auto& entity:sketch.sk.ents)if(entity.kind==SketchEnt::Project)return false;
+    // Audited local-native consumers only. Unknown/future operations, placed
+    // booleans, projected sketches and supported datums keep full evaluation.
+    static const std::set<std::string> local{"box","sphere","cylinder","cone","torus","extrude","union","cut","common","hole","holes_orchestrator","fillet","chamfer","transform","linear_pattern","circular_pattern","mirror","shell","draft","split_plane","hole_pattern","gear"};
+    std::function<bool(const V&)> referencesPose=[&](const V& v){for(const auto& item:v.obj){if(item.first=="instances"||item.first=="node"||item.first=="source_instance"||item.first=="alternate_node"||referencesPose(item.second))return true;}for(const auto& item:v.arr)if(referencesPose(item))return true;return false;};
+    for(const auto& feature:document.features){
+        if(feature.type!=FeatureType::NativeSolid||feature.suppressed||!document.evaluationCache.count(feature.id)||referencesPose(feature.nativeSpec))return false;
+        std::string operation=feature.get("op");if(operation.empty())if(const auto* value=feature.nativeSpec.find("op"))operation=value->asStr();if(!local.count(operation))return false;
+    }
+    return true;
 }
 bool metadataOnlyApply(const Document& document,const V& args){
     const auto* requested=args.find("commands");if(args.find("candidate_id")||!requested||requested->t!=V::Arr||requested->arr.empty()||requested->arr.size()>128)return false;
@@ -1287,8 +1306,10 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
                 if(!command.find("op")||command.find("op")->asStr()!="feature.edit"||command.find("part"))throw std::runtime_error("part_patch requires feature.edit and cannot be combined with part replacement");
             }
             const bool appearanceOnly=metadataOnlyApply(document,args);
+            const bool placementOnly=rigidPlacementOnlyApply(document,args);
             Document next;std::string error;
             if(appearanceOnly)next=document.authoringCopy();
+            else if(placementOnly){next=document.authoringCopy();next.evalBodies=document.evalBodies;next.lastResults=document.lastResults;next.evaluationCache=document.evaluationCache;next.evaluationGeneration=document.evaluationGeneration;next.referenceFrameCache=document.referenceFrameCache;next.centroidCache=document.centroidCache;}
             else {if(!documentFromJson(documentToJson(document,true,false),next,&error))throw std::runtime_error(error);
                 next.evaluationCache=document.evaluationCache;next.evaluationGeneration=document.evaluationGeneration;next.referenceFrameCache=document.referenceFrameCache;next.centroidCache=document.centroidCache;}
 
@@ -1449,8 +1470,13 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
                     AssemblyNode n;n.id=next.nextAssemblyId_++;n.name="Component";editNode(n,c,next);next.assembly.push_back(n);createdNodes.arr.push_back(V::makeNum((double)n.id));
                 }
                 else if(op=="assembly.drive"){
-                    // Earlier commands in this isolated batch may have changed geometry or references.
-                    validated(next);const auto preview=driveAssembly(next,c);
+                    // The first drive can read the already validated published
+                    // baseline. Earlier commands require the isolated candidate
+                    // to be evaluated first. Final validation still runs before
+                    // atomic publication, including pose-dependent geometry.
+                    const bool evaluatedBaseline=commandIndex==0&&!document.evalBodies.empty();
+                    if(!evaluatedBaseline)validated(next);
+                    const auto preview=driveAssembly(evaluatedBaseline?document:next,c);
                     for(const auto& command:preview.commands.arr){const u64 key=nodeRef(next,field(command,"id"));auto it=std::find_if(next.assembly.begin(),next.assembly.end(),[&](const AssemblyNode& node){return node.id==key;});if(it==next.assembly.end())throw std::runtime_error("Assembly drive node not found");editNode(*it,command,next);}
                 }
                 else if(op=="mate.add"){
@@ -1475,7 +1501,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
             V conditionReport;
             if(const V* checks=args.find("checks")){
                 if(appearanceOnly){next.evalBodies=document.evalBodies;next.lastResults=document.lastResults;}
-                else validated(next);
+                else validated(next,!placementOnly);
                 AgentSession checking;checking.document=std::move(next);checking.revision=revision;
                 conditionReport=evaluatePostconditions(checking,*checks);next=std::move(checking.document);
                 if(!conditionReport.find("passed")->b){V failure=V::makeObj();failure.set("error",V::makeStr(failedPostconditionSummary(conditionReport)));failure.set("error_code",V::makeStr("POSTCONDITION_FAILED"));failure.set("stage",V::makeStr("postconditions"));failure.set("revision",V::makeNum((double)revision));failure.set("document_unchanged",V::makeBool(true));failure.set("conditions",conditionReport);return result(failure,true);}
@@ -1486,9 +1512,9 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
                 if(appearance024BNeedsVersion39(next)&&documentToJson(next,true,false).size()>maxDocumentBytes)throw std::runtime_error("Embedded image document exceeds 4 MiB; reduce image dimensions/size");
                 remember();document.assembly=std::move(next.assembly);document.schematics=std::move(next.schematics);document.manufacturingPlans=std::move(next.manufacturingPlans);document.materials=std::move(next.materials);document.bomDocumentId=std::move(next.bomDocumentId);document.imageAssets=std::move(next.imageAssets);document.stamps=std::move(next.stamps);
                 for(size_t i=0;i<document.features.size();++i){document.features[i].material=std::move(next.features[i].material);document.features[i].appearance=std::move(next.features[i].appearance);document.features[i].part=std::move(next.features[i].part);document.features[i].classification=std::move(next.features[i].classification);document.features[i].faceAppearances=std::move(next.features[i].faceAppearances);}
-            }else{if(!args.find("checks")&&!drawingEdits)validated(next);remember();document=std::move(next);}
+            }else{if(!args.find("checks")&&!drawingEdits)validated(next,!placementOnly);remember();document=std::move(next);}
             ++revision;
-            V r=args.find("detail")&&args.find("detail")->str=="changes"?revisionReceipt032D(document,revision):info();r.set("created_ids",created);r.set("created_node_ids",createdNodes);r.set("created_mate_ids",createdMates);r.set("sheet_edits",sheetEdits);r.set("geometry_recomputed",V::makeBool(!appearanceOnly));if(args.find("checks"))r.set("conditions",conditionReport);return result(r);
+            V r=args.find("detail")&&args.find("detail")->str=="changes"?revisionReceipt032D(document,revision):info();r.set("created_ids",created);r.set("created_node_ids",createdNodes);r.set("created_mate_ids",createdMates);r.set("sheet_edits",sheetEdits);r.set("geometry_recomputed",V::makeBool(!appearanceOnly&&!placementOnly));if(placementOnly)r.set("placement_changed",V::makeBool(true));if(args.find("checks"))r.set("conditions",conditionReport);return result(r);
         }
         if(tool=="doc_undo"||tool=="doc_redo"){
             if(document.iterationHistory.t==V::Obj){Document next;iterationRestore(document,iterationUndoTarget(document,tool=="doc_redo"),next);validated(next);document=std::move(next);++revision;prepared_.clear();return result(info());}

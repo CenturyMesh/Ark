@@ -23,6 +23,6 @@ size_t bodyAllocationBytes(const Body& body,std::set<const Surface*>& surfaces,s
 }
 V compactCandidateResult(const V& full){
     V result=V::makeObj();
-    for(const char* name:{"revision","feature_count","recompute_ms","features_reused","features_evaluated","parallel_features","peak_parallel_features","parameter_error","derived_geometry","created_ids","created_id","checks","conditions","created_node_ids","created_mate_ids","sheet_edits","units","history_tip","geometry_recomputed","geometry_changed","valid","error","error_code","document_unchanged"})if(const auto* value=full.find(name))result.set(name,*value);
+    for(const char* name:{"revision","feature_count","recompute_ms","features_reused","features_evaluated","parallel_features","peak_parallel_features","parameter_error","derived_geometry","created_ids","created_id","checks","conditions","created_node_ids","created_mate_ids","sheet_edits","units","history_tip","geometry_recomputed","geometry_changed","placement_changed","valid","error","error_code","document_unchanged"})if(const auto* value=full.find(name))result.set(name,*value);
     result.set("response_scope",V::makeStr("candidate_status"));return result;
 }

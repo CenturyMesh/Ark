@@ -30,4 +30,5 @@ std::vector<std::string> dependencies(const V&);
 std::string sourceDigest(const Document&,const V&);
 std::string operationProgram(const Graph&,const V&);
 V runSlicerBridge(const Document&,u64,const V&);
+Mesh printPlateMesh062(const Document&,const Graph&,const V&);
 }

@@ -371,7 +371,7 @@ static void refreshDrivenSketches(Document& document, bool require){
 // native evaluation, including when their producer appears later in history.
 struct AuthoringSources {
     using V=arkjson::Value;
-    const Document& document;std::set<u64> features;std::set<std::string> visiting,done;bool named=false,sweepProfiles=false;
+    const Document& document;std::set<u64> features;std::set<std::string> visiting,done;bool named=false,sweepProfiles=false,occurrences=false;
     explicit AuthoringSources(const Document& doc):document(doc){}
     void producer(const V& id){
         if(id.t!=V::Num||id.num<1||id.num>9007199254740990.||id.num!=std::floor(id.num))throw std::runtime_error("Associative producer requires a stable numeric feature ID");
@@ -379,6 +379,7 @@ struct AuthoringSources {
         if(source->suppressed)throw std::runtime_error("Associative source feature is suppressed");features.insert(source->id);
     }
     void occurrence(const V& id){
+        occurrences=true;
         if(id.t==V::Obj){const auto* node=id.find("node");if(!node)throw std::runtime_error("Associative occurrence object requires a node");occurrence(*node);return;}
         if(id.t==V::Str){u64 found=0;size_t count=0;for(const auto& node:document.assembly)if(node.name==id.str){found=node.id;++count;}if(count!=1)throw std::runtime_error("Associative occurrence name is missing or ambiguous");occurrence(V::makeNum((double)found));return;}
         if(id.t!=V::Num||id.num<1||id.num>9007199254740990.||id.num!=std::floor(id.num))throw std::runtime_error("Associative occurrence requires a stable numeric node ID");
@@ -539,9 +540,16 @@ const std::vector<FeatureResult>& Document::recompute() {
     std::unordered_map<u64,size_t> indices;for(size_t i=0;i<features.size();++i)indices[features[i].id]=i;
     std::vector<std::vector<size_t>> dependencies(features.size());
     std::vector<std::string> authoringDependencyErrors(features.size());
+    std::vector<bool> placementSensitive(features.size(),true);
     for(size_t i=0;i<features.size();++i){
         if(activeFeatures[i]&&!features[i].suppressed)try{
             AuthoringSources sources(*this);sources.collect(features[i]);if(sources.named)explicitInputs[i]=false;
+            // Native solids read occurrence poses through native.instances or
+            // projected resources. A local saved sketch does not read assembly
+            // placement. Keep the serial/upstream barrier and named-resource
+            // keys, but do not regenerate that solid for a rigid mate movement.
+            // Other feature families and geometric supports remain conservative.
+            if(features[i].type==FeatureType::NativeSolid&&!sources.occurrences&&!instanceProjection&&!geometricSupports)placementSensitive[i]=false;
             for(u64 source:sources.features)if(std::find(features[i].inputs.begin(),features[i].inputs.end(),source)==features[i].inputs.end())explicitInputs[i]=false;
             for(u64 source:sources.features){const auto found=indices.find(source);if(found==indices.end()||found->second>=i)throw std::runtime_error("Forward or cyclic associative feature dependency: "+features[i].name+" -> "+std::to_string(source));}
         }catch(const std::exception& error){authoringDependencyErrors[i]=error.what();explicitInputs[i]=false;}
@@ -567,7 +575,7 @@ const std::vector<FeatureResult>& Document::recompute() {
             while((pos=dependenciesText.find(param.name,pos))!=std::string::npos){auto ident=[](char c){return std::isalnum((unsigned char)c)||c=='_';};if((pos==0||!ident(dependenciesText[pos-1]))&&(pos+param.name.size()==dependenciesText.size()||!ident(dependenciesText[pos+param.name.size()]))){used=true;break;}pos+=param.name.size();}
             if(used)key+=param.name+"="+arkjson::Value::makeNum(param.value).dump();
         }
-        if(!explicitInputs[index]){key+=upstream;for(const char* name:{"assembly","mates"})if(auto value=authored.find(name))key+=value->dump();if(geometricSupports)for(const auto& p:params)key+=p.name+"="+arkjson::Value::makeNum(p.value).dump();}
+        if(!explicitInputs[index]){key+=upstream;if(placementSensitive[index])for(const char* name:{"assembly","mates"})if(auto value=authored.find(name))key+=value->dump();if(geometricSupports)for(const auto& p:params)key+=p.name+"="+arkjson::Value::makeNum(p.value).dump();}
         for(u64 input:f.inputs)key+=keys[input];
         for(double n:{tessOpt.tol,tessOpt.maxEdge,tessOpt.minAngleDeg,(double)tessOpt.maxLevels})key+=':'+arkjson::Value::makeNum(n).dump();return key;
     };

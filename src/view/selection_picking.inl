@@ -8,6 +8,7 @@ static bool sameReference(const SelectionItem& a,const SelectionItem& b){return 
 static std::string pointerReferenceLabel(const ReferencePointerHit& hit){if(hit.item.kind=="mesh_face")return hit.item.meshTriangles.size()>1?"Mesh coplanar patch / "+std::to_string(hit.item.meshTriangles.size())+" source triangles":"Mesh triangle "+std::to_string(hit.face)+" / sampled geometry";if(hit.item.kind=="mesh_edge")return "Mesh edge / source vertices "+hit.item.name;return hit.item.name.rfind("@ark.",0)==0?hit.item.kind+" "+std::to_string(1+(hit.face>=0?hit.face:hit.edge)):hit.item.kind+" "+hit.item.name;}
 static void clearSelectionHover(){if(g_hoverReference.hit||!g_hoverReferenceFill.empty()||!g_hoverReferenceLines.empty())++g_hoverReferenceGeneration;g_hoverReference={};g_hoverReferenceFill.clear();g_hoverReferenceLines.clear();g_hoverReferenceHint.clear();g_hoverReferenceGeometryKey.clear();g_hoverReferenceQueryKey.clear();}
 static void activateSelectionMode(int mode){
+    endSection062();
     resetFaceCycle059();
     cancelDirectAuthoring();cancelSketchEditing();cancelSketchDrawing();cancelComponentMove();if(measurementActive())endMeasurement();g_componentDragIntent={};g_cameraDrag.active=false;ReleaseCapture();
     if(mode!=g_pickKind||mode==0){g_picked.clear();refreshSelectionLines();}clearDatumSelection();clearSelectionHover();g_pickKind=mode;g_navMode=0;g_dragged=false;
@@ -48,6 +49,7 @@ static void projectReferenceEdges(bool curvesOnly){
     }
 }
 static ReferencePointerHit namedEdgeAtPointer(int mx,int my,bool curvesOnly=false){
+    if(sectionActive062())return {};
     struct Candidate {const ProjectedReferenceEdge* edge;float pixels,sx,sy;Vec3 world;};projectReferenceEdges(curvesOnly);std::map<std::pair<size_t,size_t>,Candidate> distinct;
     for(const auto& edge:g_projectedReferenceEdges){if(mx<std::min(edge.ax,edge.bx)-11||mx>std::max(edge.ax,edge.bx)+11||my<std::min(edge.ay,edge.by)-11||my>std::max(edge.ay,edge.by)+11)continue;float dx=edge.bx-edge.ax,dy=edge.by-edge.ay,t=std::clamp(((mx-edge.ax)*dx+(my-edge.ay)*dy)/std::max(1e-6f,dx*dx+dy*dy),0.f,1.f),sx=edge.ax+t*dx,sy=edge.ay+t*dy,pixels=std::hypot(sx-mx,sy-my);if(pixels>11)continue;
         double denominator=(1-t)/edge.aw+t/edge.bw;double worldT=(t/edge.bw)/denominator;Candidate candidate{&edge,pixels,sx,sy,edge.a+(edge.b-edge.a)*worldT};auto k=std::make_pair(edge.body,edge.edge);auto found=distinct.find(k);if(found==distinct.end()||pixels<found->second.pixels)distinct[k]=candidate;
@@ -59,6 +61,7 @@ static ReferencePointerHit namedEdgeAtPointer(int mx,int my,bool curvesOnly=fals
     }return {};
 }
 static ReferencePointerHit referenceAtPointer(int mx,int my){
+    if(sectionActive062())return {};
     if(g_pickKind==2||g_pickKind==3){if(g_pickKind==3){float best=8;const CurveSample* chosen=nullptr;for(const auto& sample:g_curveSamples){float ax,ay,bx,by;if(!projectScreen(sample.a,ax,ay)||!projectScreen(sample.b,bx,by))continue;float dx=bx-ax,dy=by-ay,t=std::clamp(((mx-ax)*dx+(my-ay)*dy)/std::max(1e-6f,dx*dx+dy*dy),0.f,1.f),pixels=std::hypot(ax+t*dx-mx,ay+t*dy-my);if(pixels<best){best=pixels;chosen=&sample;}}if(chosen){ReferencePointerHit result;result.hit=true;result.item.kind="curve";result.item.owner=chosen->sketch;result.item.name=chosen->name;return result;}}
         if(g_allSheetsFlat||g_stockMode)return {};return namedEdgeAtPointer(mx,my,g_pickKind==3);
     }

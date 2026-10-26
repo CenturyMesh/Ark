@@ -734,8 +734,12 @@ double couplingIncrementResidual(const AssemblyMotionRelation& relation,
     }
     throw std::runtime_error("MANIPULATION_CAM_PHASE_UNRESOLVED: cam drag requires a grounded revolute input coordinate");
 }
+struct ManipulationCheckpoints064 {
+    std::vector<std::unordered_map<u64,Mat4>> positive,negative;
+    int rank=-1;
+};
 bool constrainedManipulation(const AssemblyManipulationProgram& program,const AssemblyManipulationJoint& joint,
-        double delta,std::unordered_map<u64,Mat4>& world,AssemblyManipulationPreview& preview,std::string& error){
+        double delta,std::unordered_map<u64,Mat4>& world,AssemblyManipulationPreview& preview,std::string& error,ManipulationCheckpoints064* cache){
     auto fail=[&](const std::string& message){error=message;return false;};
     const auto selected=std::find_if(program.constraints.begin(),program.constraints.end(),[&](const AssemblyMotionRelation& c){return c.mate.id==joint.mate;});
     AssemblyMotionRelation driven=*selected;
@@ -765,10 +769,17 @@ bool constrainedManipulation(const AssemblyManipulationProgram& program,const As
     double scale=1;for(const auto& item:angularScale)scale=std::max(scale,item.second);for(const auto& item:linearScale)scale=std::max(scale,item.second);
     const double required=std::ceil(std::fabs(delta)*scale/2);
     if(required>4096)return fail("MANIPULATION_RESOURCE_LIMIT: requested continuation exceeds 4096 steps");
-    const int steps=std::max(1,(int)required);int baselineRank=-1;
+    const int steps=std::max(1,(int)required);int baselineRank=cache?cache->rank:-1;
+    auto* checkpoints=cache?(delta<0?&cache->negative:&cache->positive):nullptr;
+    // Fixed-size steps give every target the same prefix. Always solve the last
+    // interval again so diagnostics describe the requested endpoint, including
+    // limits, rank, residuals and transmission-axis checks.
+    const int completed=checkpoints?std::min(steps-1,(int)checkpoints->size()):0;
+    if(completed)world=(*checkpoints)[(size_t)completed-1];
     using V=arkjson::Value;preview.couplings=V::makeArr();
-    for(int stepIndex=1;stepIndex<=steps;++stepIndex){
-        const auto previous=world;const double target=start+joint.coordinateSign*delta*stepIndex/steps;
+    for(int stepIndex=completed+1;stepIndex<=steps;++stepIndex){
+        const auto previous=world;const double distance=std::min(std::fabs(delta),stepIndex*2./scale);
+        const double target=start+joint.coordinateSign*std::copysign(distance,delta);
         auto posed=[&](const std::vector<double>& x){auto candidate=previous;
             for(size_t k=0;k<clusters.size();++k){const Vec3 o=origin(previous.at(clusters[k][0]));
                 const Vec3 t{x[6*k],x[6*k+1],x[6*k+2]},r{x[6*k+3],x[6*k+4],x[6*k+5]};const double angle=r.len();
@@ -789,7 +800,7 @@ bool constrainedManipulation(const AssemblyManipulationProgram& program,const As
             for(int c=0;c<columns;++c){const double h=c%6<3?1e-4:1e-6;auto plus=x,minus=x;plus[c]+=h;minus[c]-=h;
                 const auto a=evaluate(plus),b=evaluate(minus);for(int row=0;row<rows;++row)j[(size_t)row*columns+c]=(a[row]-b[row])/(2*h);}return j;};
         std::vector<double> x(columns);double damping=1e-6;
-        if(baselineRank<0){const auto r=evaluate(x);baselineRank=matrixRank(jacobian(x,(int)r.size()),(int)r.size(),columns);}
+        if(baselineRank<0){const auto r=evaluate(x);baselineRank=matrixRank(jacobian(x,(int)r.size()),(int)r.size(),columns);if(cache)cache->rank=baselineRank;}
         for(int iteration=0;iteration<80;++iteration){const auto r=evaluate(x);const double cost=squared(r);
             if(!std::isfinite(cost))return fail("MANIPULATION_NONFINITE_POSE: nonfinite constrained residual");
             if(cost<1e-28)break;
@@ -822,14 +833,18 @@ bool constrainedManipulation(const AssemblyManipulationProgram& program,const As
             if(constraint.mate.type=="shaft"){const Vec3 gap=origin(b)-origin(a);if((gap-axis(a)*gap.dot(axis(a))).len()>kPositionTolerance)return fail("MANIPULATION_COUPLING_AXIS_VIOLATION: shaft axes no longer coaxial");}
             if(stepIndex==steps){V row=V::makeObj();row.set("id",V::makeNum((double)constraint.mate.id));row.set("type",V::makeStr(constraint.mate.type));row.set(constraint.translational?"residual_mm":"residual_rad",V::makeNum(measured));row.set("ratio",V::makeNum(constraint.ratio));preview.couplings.arr.push_back(row);}
         }
+        // Bound retained pose data (including hash-node overhead) per direction.
+        // Exhaustion only stops caching; the exact continuation still runs.
+        const size_t checkpointBytes=world.size()*(sizeof(Mat4)+sizeof(u64)+64);
+        if(checkpoints&&checkpointBytes&&checkpoints->size()<8*1024*1024/checkpointBytes&&stepIndex*2./scale<=std::fabs(delta)&&stepIndex==(int)checkpoints->size()+1)checkpoints->push_back(world);
     }
-    preview.continuationSteps=steps;return true;
+    preview.continuationSteps=steps-completed;return true;
 }
 }
 
-bool previewAssemblyManipulation(const AssemblyManipulationProgram& program,u64 driver,u64 mate,
+static bool previewAssemblyManipulation064(const AssemblyManipulationProgram& program,u64 driver,u64 mate,
                                 const std::string& mode,double delta,
-                                AssemblyManipulationPreview& preview,std::string& error){
+                                AssemblyManipulationPreview& preview,std::string& error,ManipulationCheckpoints064* cache){
     preview={};error.clear();
     auto fail=[&](const std::string& message){error=message;preview={};return false;};
     if(!std::isfinite(delta)||std::fabs(delta)>1e6)return fail("MANIPULATION_INVALID_DELTA: finite displacement within +/-1e6 degrees or millimetres required");
@@ -860,7 +875,7 @@ bool previewAssemblyManipulation(const AssemblyManipulationProgram& program,u64 
         preview.placements=program.baseline;
         preview.diagnostics.rank=program.diagnostics.rank;preview.diagnostics.freeDofs=program.diagnostics.freeDofs;
         preview.diagnostics.unconstrainedNodes=program.diagnostics.unconstrainedNodes;
-        if(joint.constrained&&!constrainedManipulation(program,joint,delta,world,preview,error))return fail(error);
+        if(joint.constrained&&!constrainedManipulation(program,joint,delta,world,preview,error,cache))return fail(error);
         for(auto& placement:preview.placements){
             if(joint.constrained&&std::binary_search(joint.movingNodes.begin(),joint.movingNodes.end(),placement.node))placement.world=world.at(placement.node)*baselineWorld.at(placement.node).inverted()*placement.world;
             else if(std::binary_search(joint.movingNodes.begin(),joint.movingNodes.end(),placement.node))placement.world=change*placement.world;
@@ -917,6 +932,21 @@ bool previewAssemblyManipulation(const AssemblyManipulationProgram& program,u64 
         }
         preview.joint=std::move(joint);preview.delta=delta;return true;
     }catch(const std::exception& e){return fail(e.what());}
+}
+
+bool previewAssemblyManipulation(const AssemblyManipulationProgram& program,u64 driver,u64 mate,const std::string& mode,double delta,AssemblyManipulationPreview& preview,std::string& error){
+    return previewAssemblyManipulation064(program,driver,mate,mode,delta,preview,error,nullptr);
+}
+struct AssemblyManipulationPath::Impl {
+    const AssemblyManipulationProgram program;
+    const u64 driver,mate;
+    const std::string mode;
+    ManipulationCheckpoints064 cache;
+    Impl(const AssemblyManipulationProgram& p,u64 d,u64 m,std::string motion):program(p),driver(d),mate(m),mode(std::move(motion)){}
+};
+AssemblyManipulationPath::AssemblyManipulationPath(const AssemblyManipulationProgram& p,u64 driver,u64 mate,std::string mode):impl_(std::make_shared<Impl>(p,driver,mate,std::move(mode))){}
+bool AssemblyManipulationPath::preview(double delta,AssemblyManipulationPreview& preview,std::string& error){
+    return previewAssemblyManipulation064(impl_->program,impl_->driver,impl_->mate,impl_->mode,delta,preview,error,&impl_->cache);
 }
 
 bool probeAssemblyMate(Document& document,const AssemblyMate& candidate,AssemblyDiagnostics& diagnostics,

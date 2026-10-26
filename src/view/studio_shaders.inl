@@ -55,6 +55,19 @@ static const std::string FS_STUDIO_SOLID_SOURCE=std::string("#version 330 core\n
 in vec3 nrm,wpos,lpos,lnrm;out vec4 o;
 uniform vec3 emissionColor;uniform float emissionIntensity,emissionBloom,emissionGlow,emissionOnly;
 uniform vec3 color,eye;uniform float sel,hardSurface,satin,metallic,roughness,opacity,hasTexture,selectionOverlay,cameraOrtho;
+uniform float sectionCap;
+uniform sampler2DShadow keyShadowMap;uniform mat4 keyShadowMatrix;uniform float keyShadowStrength,keyShadowTexelWorld;
+float keyVisibility(vec3 n,vec3 light){
+ if(keyShadowStrength<=0.)return 1.;
+ // Normal offset scales in world-space texels, independently of camera zoom.
+ float slope=1.-max(dot(n,light),0.);
+ vec4 p=keyShadowMatrix*vec4(wpos+n*keyShadowTexelWorld*(.45+.9*slope),1.);
+ vec3 q=p.xyz/p.w*.5+.5;
+ if(any(lessThan(q,vec3(0.)))||any(greaterThan(q,vec3(1.))))return 1.;
+ vec2 texel=1./vec2(textureSize(keyShadowMap,0));float visibility=0.;
+ for(int y=-2;y<=2;++y)for(int x=-2;x<=2;++x)visibility+=texture(keyShadowMap,vec3(q.xy+vec2(x,y)*texel,q.z-.00008));
+ return mix(1.,visibility/25.,keyShadowStrength);
+}
 uniform vec2 textureScale;uniform sampler2D surfaceTexture;
 uniform float stampMode,stampDepth,stampFrontOnly;uniform vec3 stampOrigin,stampU,stampV,stampNormal;uniform vec2 stampSize;
 vec4 triplanar(){
@@ -89,6 +102,7 @@ void main(){
  if(dot(n,v)<0.)n=-n;vec4 texel=hasTexture>.5?triplanar():vec4(1.);
  if(stampMode>.5){vec3 delta=lpos-stampOrigin;vec2 uv=vec2(dot(delta,stampU),dot(delta,stampV))/stampSize+vec2(.5);if(any(lessThan(uv,vec2(0.)))||any(greaterThan(uv,vec2(1.)))||abs(dot(delta,stampNormal))>stampDepth||(stampFrontOnly>.5&&dot(lnrm,stampNormal)<=0.))discard;texel=texture(surfaceTexture,uv);if(texel.a<.001)discard;}
  vec3 tint=clamp(color*texel.rgb,0.,1.);float m=clamp(metallic,0.,1.),r=clamp(roughness,.055,1.);
+ if(sectionCap>.5){float hatch=smoothstep(.12,.20,abs(fract((gl_FragCoord.x+gl_FragCoord.y)/12.)-.5));tint*=mix(.58,1.,hatch);}
  if(patternKind>.5&&stampMode<.5){float pf=patternTriplanar();vec3 second=patternColorSet>.5?patternColor:tint*(abs(patternKind-7.)<.5?.08:.45);tint=mix(tint,second,clamp(pf*patternContrast,0.,1.));
   if(abs(patternKind-5.)>.5)r=clamp(r+(abs(patternKind-3.)<.5?-(1.-pf)*.25:patternKind>5.5?pf*.2:(pf-.5)*.35)*patternContrast,.04,1.);n=patternBump(n,(1.-pf)*patternContrast*patternScale*.06);}
  vec3 base=srgbToLinear(tint);
@@ -98,7 +112,7 @@ void main(){
  float nv=max(dot(n,v),.001);vec3 f0=mix(vec3(.04),base,m),f=fresnelSchlick(nv,f0);
  vec3 c=base*(1.-m)*(1.-f)*studioEnvironment(n,.85)*.85;
  vec2 ab=environmentBRDF(nv,r);c+=studioEnvironment(reflect(-v,n),r)*(f0*ab.x+ab.y)*mix(.72,1.,satin);
- vec3 l=fromStudio(normalize(vec3(-.55,.72,.42)));c+=evaluateBRDF(n,v,l,base,m,max(r,.24))*vec3(2.4,2.25,2.05)*max(dot(n,l),0.);
+ vec3 l=fromStudio(normalize(vec3(-.55,.72,.42)));c+=evaluateBRDF(n,v,l,base,m,max(r,.24))*vec3(2.4,2.25,2.05)*max(dot(n,l),0.)*keyVisibility(n,l);
  l=fromStudio(normalize(vec3(.78,.30,-.32)));c+=evaluateBRDF(n,v,l,base,m,max(r,.28))*vec3(.55,.66,.85)*max(dot(n,l),0.);
  l=fromStudio(normalize(vec3(-.25,.28,-.93)));c+=evaluateBRDF(n,v,l,base,m,max(r,.20))*vec3(.72,.82,1.)*max(dot(n,l),0.);
  c=studioTonemap(c+srgbToLinear(emissionColor)*emissionIntensity);c=mix(c,min(c+vec3(.105,.061,.012),vec3(1.)),sel);

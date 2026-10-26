@@ -72,7 +72,12 @@ void AgentSession::compactPrepared(Prepared& prepared){
         const auto& source=it->second.body->nativeData;const auto owner=source.ownerIdentity();
         if(owner&&!liveNative.count(owner)){
             auto found=compacted.find(owner);if(found==compacted.end())found=compacted.emplace(owner,source.compacted()).first;
-            if(found->second.ownerIdentity()!=owner){Body packed=*it->second.body;packed.nativeData=found->second;it->second.body=std::make_shared<const Body>(std::move(packed));}
+            if(found->second.ownerIdentity()!=owner){
+                // compacted() verifies byte-identical metadata. Transfer only
+                // frames bound to this exact prior owner to the packed owner.
+                if(auto reference=doc.referenceFrameCache.find(body.id);reference!=doc.referenceFrameCache.end())if(auto observed=reference->second.owner.lock();observed&&observed.get()==owner)reference->second.owner=found->second.weakOwner();
+                Body packed=*it->second.body;packed.nativeData=found->second;it->second.body=std::make_shared<const Body>(std::move(packed));
+            }
         }
         const auto& retained=*it->second.body;
         if(retained.baked&&retained.nativeData.packedMesh()&&!liveMeshes.count(retained.baked.get())){
@@ -95,7 +100,7 @@ void AgentSession::compactPrepared(Prepared& prepared){
     // These maps are private copies, unlike immutable bodies: charge every byte.
     prepared.bytes+=doc.referenceFrameCache.bucket_count()*sizeof(void*);
     for(const auto& entry:doc.referenceFrameCache){
-        const auto& cache=entry.second;prepared.bytes+=sizeof(entry)+32+cache.brep.capacity()+1+cache.topology.capacity()+1+cache.frames.bucket_count()*sizeof(void*);
+        const auto& cache=entry.second;prepared.bytes+=sizeof(entry)+32+cache.frames.bucket_count()*sizeof(void*);
         for(const auto& frame:cache.frames)prepared.bytes+=sizeof(frame)+32+frame.first.capacity()+1+jsonAllocationBytes(frame.second)-sizeof(V);
     }
     prepared.bytes+=doc.centroidCache.bucket_count()*sizeof(void*);
@@ -193,6 +198,7 @@ arkjson::Value AgentSession::preparePreview(const V& supplied){
     prepared_.erase(std::remove_if(prepared_.begin(),prepared_.end(),[&](const Prepared& p){return p.expires<=now;}),prepared_.end());
     const bool metadataOnly=metadataOnlyApply(document,args)&&!args.find("checks");
     AgentSession candidate;candidate.document=document.authoringCopy();
+    if(rigidPlacementOnlyApply(document,args)){candidate.document.evalBodies=document.evalBodies;candidate.document.lastResults=document.lastResults;}
     if(!metadataOnly){candidate.document.evaluationCache=document.evaluationCache;candidate.document.evaluationGeneration=document.evaluationGeneration;candidate.document.referenceFrameCache=document.referenceFrameCache;candidate.document.centroidCache=document.centroidCache;}
     if(!metadataOnly&&previousGeometry){candidate.document.evaluationGeneration=std::max(candidate.document.evaluationGeneration,previousGeometry->evaluationGeneration);for(const auto& feature:previousScope.find("features")->arr){const auto id=(u64)feature.find("id")->num;const auto cached=previousGeometry->evaluationCache.find(id);if(cached!=previousGeometry->evaluationCache.end())candidate.document.evaluationCache[id]=cached->second;}}
     struct BorrowGeometry {

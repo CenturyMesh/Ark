@@ -44,9 +44,21 @@ static int viewportQualitySelfTest056(HDC dc,const std::string& output){
         receipt.set("packed_vs_float32_max_rgb8_error",V::makeNum(maximumColorError));check(maximumColorError<=2,"Packed-normal rendering diverged from float32 reference");
         g_antialiasing=1;const auto aa=capture(".quality-fxaa.png");check(g_viewportAaReady056&&difference(off,aa)>100,"FXAA did not change visible edges");
         g_antialiasing=2;const auto hq=capture(".quality-fxaa-hq.png");check(difference(aa,hq)>10,"FXAA high quality did not change its sampling");
-        g_antialiasing=0;g_contactShadowStrength=.65f;const auto shadow=capture(".quality-shadows.png");check(difference(off,shadow)>100,"Screen-space contact shadows had no visible effect");
+        g_antialiasing=0;g_contactShadowStrength=.65f;const auto shadow=capture(".quality-shadows.png");check(difference(off,shadow)>100,"GPU key-light shadows had no visible effect");
+        check(g_keyShadowReady064,"GPU shadow map unavailable");glBindTexture(GL_TEXTURE_2D,g_keyShadowDepth064);GLint shadowFormat=0,shadowSize=0;
+        glGetTexLevelParameteriv(GL_TEXTURE_2D,0,GL_TEXTURE_INTERNAL_FORMAT,&shadowFormat);glGetTexLevelParameteriv(GL_TEXTURE_2D,0,GL_TEXTURE_WIDTH,&shadowSize);
+        check(shadowFormat==0x8CAC&&shadowSize==kKeyShadowSize064,"Shadow depth precision or resolution changed");
+        // Caster movement must update visibility without rebuilding source mesh.
+        const auto shadowPose=g_instanceWorld[2];const auto shadowUploads=g_displayMeshUploads056;
+        g_instanceWorld[2]=Mat4::translation({-20,0,0})*shadowPose;rebuildDisplayBounds();const auto movedShadow=capture(".quality-shadow-moved.png");
+        check(difference(shadow,movedShadow)>100&&g_displayMeshUploads056==shadowUploads,"Shadow motion lost GPU mesh reuse");
+        g_instanceWorld[2]=shadowPose;rebuildDisplayBounds();const auto restoredShadow=capture(".quality-shadow-restored.png");
+        check(difference(shadow,restoredShadow)==0,"Shadow map retained a stale caster pose");
+        receipt.set("shadow_map_depth_bits",V::makeNum(32));receipt.set("shadow_map_size",V::makeNum(shadowSize));receipt.set("shadow_pose_restore_without_upload",V::makeBool(true));
         g_occlusionMode=3;g_contactShadowStrength=.28f;g_antialiasing=2;const auto final=capture(".quality-combined.png");check(difference(off,final)>100,"Combined quality effects had no visible effect");
         receipt.set("aa_changed_pixels",V::makeNum(difference(off,aa)));receipt.set("aa_hq_changed_pixels",V::makeNum(difference(aa,hq)));receipt.set("contact_shadow_changed_pixels",V::makeNum(difference(off,shadow)));
+        glBindTexture(GL_TEXTURE_2D,gGeomTex);GLint depthStorage=0;glGetTexLevelParameteriv(GL_TEXTURE_2D,0,GL_TEXTURE_INTERNAL_FORMAT,&depthStorage);
+        check(depthStorage==GL_RGBA32F,"Occlusion linear depth lost float32 precision");receipt.set("occlusion_linear_depth_bits",V::makeNum(32));
         // Real native controls: dropdown selection, Apply, Cancel and validation.
         g_dialogSmoke=3;g_dialogOverrides={"0","0","1","1","0","2","0.72","1","0","FXAA high quality","0.4"};g_dialogShot=output+".quality-controls.png";graphicsDialog();g_dialogSmoke=0;
         check(g_antialiasing==2&&std::abs(g_contactShadowStrength-.4f)<1e-6,"Graphics controls failed to apply new quality values");
@@ -54,6 +66,15 @@ static int viewportQualitySelfTest056(HDC dc,const std::string& output){
         bool rejected=false;g_dialogSmoke=3;g_dialogOverrides={"0","0","1","1","0","2","0.72","1","0","Off","2"};try{graphicsDialog();}catch(...){rejected=true;}g_dialogSmoke=0;check(rejected&&g_antialiasing==2,"Invalid graphics values partially changed settings");
         auto settings=g_settingsOverride;g_settingsOverride=output+".quality-settings.json";saveUiSettings();g_antialiasing=0;g_contactShadowStrength=0;loadUiSettings();g_settingsOverride=settings;check(g_antialiasing==2&&std::abs(g_contactShadowStrength-.4f)<1e-6,"Quality settings did not round-trip");
         V timings=V::makeArr();for(int mode=0;mode<=2;++mode){g_antialiasing=mode;drawFrame(dc);glFinish();std::vector<double> ms;for(int sample=0;sample<21;++sample){auto start=Clock::now();drawFrame(dc);glFinish();ms.push_back(std::chrono::duration<double,std::milli>(Clock::now()-start).count());}std::sort(ms.begin(),ms.end());V row=V::makeObj();row.set("aa_mode",V::makeNum(mode));row.set("median_ms",V::makeNum(ms[10]));row.set("p95_ms",V::makeNum(ms[19]));timings.arr.push_back(row);}receipt.set("completed_frame_timings",timings);
+        // Compare the former rebuild-per-pose path and the interactive raster
+        // path with identical meshes, poses, camera and GPU completion timing.
+        V motionTimings=V::makeArr();const auto baselinePose=g_instanceWorld;g_pathTracing=true;drawFrame(dc);glFinish();check(g_trace.active,"Ray tracing fixture unavailable");
+        for(int interactive=0;interactive<2;++interactive){std::vector<double> ms;
+            for(int sample=0;sample<14;++sample){g_instanceWorld[1]=Mat4::translation({(double)sample*.5,0,0})*baselinePose[1];rebuildDisplayBounds();g_componentMove.active=interactive!=0;const auto key=g_trace.sceneKey;auto start=Clock::now();drawFrame(dc);glFinish();if(sample>=2)ms.push_back(std::chrono::duration<double,std::milli>(Clock::now()-start).count());if(interactive)check(!g_trace.active&&g_trace.sceneKey==key,"Drag rebuilt the ray tracing scene");}
+            std::sort(ms.begin(),ms.end());V row=V::makeObj();row.set("mode",V::makeStr(interactive?"interactive_raster":"reference_rebuild_per_pose"));row.set("median_ms",V::makeNum(ms[ms.size()/2]));row.set("p95_ms",V::makeNum(ms.back()));motionTimings.arr.push_back(row);
+        }
+        g_componentMove={};g_instanceWorld=baselinePose;rebuildDisplayBounds();drawFrame(dc);glFinish();check(g_trace.active&&g_trace.samples>0,"Progressive lighting did not resume after movement");g_pathTracing=false;
+        receipt.set("rigid_pose_completed_frame_timings",motionTimings);receipt.set("rigid_drag_rebuilds_ray_scene",V::makeBool(false));
         check(source==documentToJson(g_doc)&&revision==g_session.revision,"Visual settings mutated authored CAD source");
         const auto uploadsBefore=g_displayMeshUploads056;rebuildScene();check(g_sceneReusedParts==3&&g_displayMeshUploads056==uploadsBefore,"Unchanged exact fixture uploaded geometry again");
         receipt.set("source_unchanged",V::makeBool(true));receipt.set("controls_apply_cancel_validation_persistence",V::makeBool(true));receipt.set("timing_scope",V::makeStr("Same synthetic exact assembly, fixed camera/size, 21 frames per AA mode, steady_clock drawFrame plus glFinish; CPU plus completed GPU, no monitor/compositor timing or speedup claim."));receipt.set("passed",V::makeBool(true));persist();return 0;

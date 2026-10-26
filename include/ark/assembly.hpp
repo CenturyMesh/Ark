@@ -2,6 +2,7 @@
 #include "ark/core.hpp"
 #include "ark/json.hpp"
 #include <functional>
+#include <memory>
 #include <unordered_map>
 #include <unordered_set>
 namespace ark {
@@ -147,4 +148,14 @@ bool selectAssemblyManipulationJoint(const AssemblyManipulationProgram&,u64 driv
 bool previewAssemblyManipulation(const AssemblyManipulationProgram&,u64 driver,u64 mate,
                                 const std::string& mode,double delta,
                                 AssemblyManipulationPreview&,std::string& error);
+// One immutable baseline and one explicitly selected motion. Reuses only fully
+// validated continuation checkpoints; never rebases the authored document.
+// UI-thread owned. Discard on revision/epoch change, cancel or release.
+class AssemblyManipulationPath {
+    struct Impl;
+    std::shared_ptr<Impl> impl_;
+public:
+    AssemblyManipulationPath(const AssemblyManipulationProgram&,u64 driver,u64 mate,std::string mode);
+    bool preview(double delta,AssemblyManipulationPreview&,std::string& error);
+};
 }
