@@ -164,6 +164,10 @@ V partWorkspaceTool(const V& tools,bool specialist=false){
 }
 V teamTools(V tools,unsigned maxCommands){
     for(const auto& item:tools.arr)require(field(item,"name").rfind("team_",0)!=0,"ARK tool names collide with team coordination tools.");
+    // Host receipts and machine/history maintenance stay outside shared team turns;
+    // this also keeps the full role catalog within the 128-function provider limit.
+    static const std::set<std::string> hostOnly{"usage_record","compute_benchmark","history_compact","history_migrate_derived"};
+    tools.arr.erase(std::remove_if(tools.arr.begin(),tools.arr.end(),[](const V& item){return hostOnly.count(field(item,"name"))!=0;}),tools.arr.end());
     V commandItems,checksSchema;
     for(const auto& tool:tools.arr)if(field(tool,"name")=="doc_apply"){
         const auto* schema=tool.find("inputSchema");const auto* props=schema?schema->find("properties"):nullptr;

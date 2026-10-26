@@ -233,9 +233,6 @@ void agentSurface(){
         check(section&&section->dump().find("drag_chain.set")!=std::string::npos&&section->dump().find("Never model a drag chain as rigid telescoping segments")!=std::string::npos,std::string("onboarding section in ")+topic);
         check(guide.find("tools")->dump().find("drag_chain_info")!=std::string::npos,std::string("onboarding tools list drag_chain_info in ")+topic);}
 }
-#endif
-}
-
 void flexibleCables054B(){
     AgentSession session;commit(session,kKiosk);commit(session,"{\"commands\":["+chainSet()+"]}");const auto links=linkIds(session);
     auto command=json(R"({"op":"feature.add","type":"cable_route","name":"Flexible chain harness","inputs":[],"native":{"route_mode":"spline","radius":1,"bend_radius":5}})");
@@ -261,6 +258,8 @@ void flexibleCables054B(){
         const auto playback=std::chrono::steady_clock::now();size_t triangles=0;for(const auto& frame:longDisplay.meshes)triangles+=frame->mesh().idx.size()/3;const auto decodeMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-playback).count();
         std::cout<<"long flexible cable 054B: frames=421 fps=30 duration_s=14 native_requests="<<longDisplay.nativeRequests<<" cache_bytes="<<longDisplay.bytes<<" preparation_ms="<<prepareMs<<" decode_total_ms="<<decodeMs<<" decoded_triangles="<<triangles<<" (decode excludes GPU upload and rendering)\n";
     }
+}
+#endif
 }
 
 int main(){

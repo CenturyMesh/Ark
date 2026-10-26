@@ -3,7 +3,9 @@
 064A (**A.02/A.04/B.01/B.04 — Verificado no escopo local**): immutable drag paths
 reuse validated continuation checkpoints, key-light shadows use GPU depth maps,
 and local horizon occlusion replaces noisy screen-space shadow rays. Sixteen
-focused suites passed; see [064A evidence and limits](iterations/064A.md).
+focused suites passed. Before merge, clean Windows trees passed native CTest
+179/179 and portable core 121/121. Team catalogs now stay within the 128-function
+provider limit. See [064A evidence and limits](iterations/064A.md).
 Broader milestones remain **Parcial**.
 
 063A (**A.02/A.04/B.01/B.04 — Verificado no escopo local**): retained rigid-movement geometry,
