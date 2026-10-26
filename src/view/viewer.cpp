@@ -586,6 +586,7 @@ static arkjson::Value g_physicalReport;static std::string g_physicalError;
 static arkjson::Value g_physicalSettings;
 static bool decodeCanvasFile(const std::wstring&,std::vector<unsigned char>&,unsigned&,unsigned&);
 #include "action_icons.inl"
+#include "icon_sheet.inl"
 static int atlasIcon(int action){switch(action){
     case 999:return 35;case 990:return 19;case 991:return 57;case 992:return 3;case 993:return 8;case 994:return 13;case 995:return 20;case 996:return 21;case 997:return 5;case 998:return 16;
     case 650:return 53;case 652:case 687:return 52;case 651:return 26;case 653:case 654:return 33;case 655:return 51;case 656:return 40;case 657:case 733:return 14;case 658:return 42;case 659:return 51;case 710:return 48;case 750:return 55;case 752:return 4;case 754:return 22;case 755:return 57;case 730:case 731:return 49;case 732:return 50;
@@ -5955,6 +5956,13 @@ static void drawFrame(HDC hdc){
     // Background exact reads remain visible and cancellable in the drawing
     // workspace too. Paint last, matching their foreground input priority.
     drawExactJobsOverlay046(rect,button);
+    if(g_iconSheetPage>=0){
+        g_textVerts.clear();g_zones.clear();tone(0,0,W,H,0,th::chrome);
+        const int columns=std::max(1,(int)((W-16)/110)),rows=std::max(1,(int)((H-16)/84)),perPage=columns*rows;
+        for(int k=0;k<perPage;++k){size_t i=(size_t)(g_iconSheetPage*perPage+k);if(i>=kIconSheetActions.size())break;const float x=8+(k%columns)*110.f,y=8+(k/columns)*84.f;
+            overlay(x,y,106,80,th::rowRadius,.035f);glyph(kIconSheetActions[i].first,x+10,y+8,40,.9f);glyph(kIconSheetActions[i].first,x+66,y+17,22,.9f);
+            textTone(fitText(std::to_string(kIconSheetActions[i].first)+" "+kIconSheetActions[i].second,.50f,98),x+5,y+58,.50f,th::text2);}
+    }
     // flush text
     glUseProgram(pText);
     glUniform2f(glGetUniformLocation(pText,"vp"),W,H);
@@ -6478,6 +6486,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     int sw=1600,sh=1000,argc=0;auto argv=CommandLineToArgvW(GetCommandLineW(),&argc);
     auto utf8=[](const wchar_t* w){int n=WideCharToMultiByte(CP_UTF8,0,w,-1,nullptr,0,nullptr,nullptr);std::string s(n,'\0');WideCharToMultiByte(CP_UTF8,0,w,-1,s.data(),n,nullptr,nullptr);s.pop_back();return s;};
     for(int i=1;i<argc;++i){auto a=utf8(argv[i]);if(a=="--shot"&&i+1<argc){g_headless=true;shotPath=utf8(argv[++i]);}
+        else if(a=="--icon-sheet"&&i+1<argc){g_iconSheetPage=std::max(0,std::atoi(utf8(argv[++i]).c_str()));}
         else if(a=="--self-test-cable-guide-ui"){cableGuideUiTest=true;g_headless=true;}
         else if(a=="--self-test-plastics-ui"){plasticsUiTest=true;g_headless=true;}
         else if(a=="--self-test-electronics-workspace-ui"){electronicsWorkspaceUiTest=true;g_headless=true;}
