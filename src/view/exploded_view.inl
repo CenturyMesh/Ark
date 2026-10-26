@@ -237,10 +237,10 @@ template<class Rect,class Button>static void drawExplodedViewsPanel(Rect rect,Bu
     auto muted=[&](const std::string& text,float x,float y,float scale,float width){textOut(fitText(text,scale,width),x,y,scale,.55f,.66f,.74f);};
     auto chip=[&](const std::string& label,float x,float y,float cw,int id,bool on,const char* tip=nullptr){const bool hover=pointer.x>=x&&pointer.x<x+cw&&pointer.y>=y-1&&pointer.y<y+21;
         rect(x,y,cw,20,10,on?.09f:hover?.15f:.10f,on?.30f:hover?.19f:.13f,on?.36f:hover?.23f:.16f,1,on?.22f:.28f,on?.70f:.36f,on?.80f:.42f,hover?1.f:.8f,1);textOut(fitText(label,.52f,cw-8),x+(cw-std::min(cw-8,textWidth(label,.52f)))/2,y+2,.52f,on?.90f:.80f,on?.98f:.88f,1.f);g_zones.push_back({x,y-1,cw,22,id});if(hover&&tip)hint=tip;};
-    rect(x0,y0,w,h,0,.050f,.068f,.084f,1,.20f,.27f,.32f,.9f,1);rect(x0,y0,2,h,0,.86f,.62f,.22f,.55f,0,0,0,0,0);
-    textOut(p.visualize?"VISUALIZE":"EXPLODED VIEWS",left,y0+13,.74f,.82f,.93f,.99f);button("Hide",x0+w-74,y0+7,60,p.visualize?47001:47000);
+    rect(x0,y0,w,h,0,.063f,.065f,.071f,1,.248f,.259f,.28f,.9f,1);rect(x0,y0,2,h,0,.86f,.62f,.22f,.55f,0,0,0,0,0);
+    textOut(p.visualize?"VISUALIZE":"EXPLODED VIEWS",left,y0+13,.74f,.875f,.911f,.941f);button("Hide",x0+w-74,y0+7,60,p.visualize?47001:47000);
     {const float tw=(inner-6)/2;chip("Explode",left,y0+42,tw,47002,!p.visualize,"Exploded view steps, factor slider and Animate");chip("Visualize",left+tw+6,y0+42,tw,47003,p.visualize,"Assembly images: presets, progressive samples, balloons, BOM and PNG export");}
-    rect(left,y0+70,inner,1,0,.20f,.29f,.35f,1,0,0,0,0,0);float y=y0+78;
+    rect(left,y0+70,inner,1,0,.264f,.275f,.298f,1,0,0,0,0,0);float y=y0+78;
     const V* views=g_doc.explodedViews.t==V::Arr?&g_doc.explodedViews:nullptr;const auto* view=p.selected.empty()?nullptr:findExplodedView(g_doc,p.selected);
     if(!p.visualize){
         if(!views){for(const char* line:{"No exploded views yet.","Click components in the viewport, then","New view to create the first step,","or ask the agent for explode.set.","Exploded positions are display only;","the saved design never moves."}){muted(line,left,y,.58f,inner);y+=20;}}
@@ -248,21 +248,21 @@ template<class Rect,class Button>static void drawExplodedViewsPanel(Rect rect,Bu
             for(int i=0;i<visible;++i){const size_t index=(size_t)(p.scroll+i);const auto& row=views->arr[index];const auto name=row.find("name")->str;const bool selected=name==p.selected;const bool hover=pointer.x>=left&&pointer.x<left+inner&&pointer.y>=y&&pointer.y<y+32;
                 rect(left,y,inner,32,5,selected?.10f:hover?.09f:.065f,selected?.22f:hover?.15f:.09f,selected?.27f:hover?.18f:.11f,1,selected?.18f:.16f,selected?.62f:.24f,selected?.72f:.29f,selected?.9f:.6f,1);
                 const auto drivers=motionsDrivingExplodedView(g_doc,name);char detail[96];std::snprintf(detail,sizeof detail,"%zu steps%s",row.find("steps")->arr.size(),drivers.empty()?"":"  /  driven by motion");
-                textOut(fitText(name,.62f,inner*.55f),left+10,y+7,.62f,.88f,.94f,.98f);muted(detail,left+inner*.58f,y+9,.50f,inner*.40f);g_zones.push_back({left,y,inner,32,47100+(int)index});y+=36;}
+                textOut(fitText(name,.62f,inner*.55f),left+10,y+7,.62f,.894f,.93f,.961f);muted(detail,left+inner*.58f,y+9,.50f,inner*.40f);g_zones.push_back({left,y,inner,32,47100+(int)index});y+=36;}
             if(rows>visible){char more[64];std::snprintf(more,sizeof more,"%d-%d of %d",p.scroll+1,p.scroll+visible,rows);muted(more,left,y-2,.46f,inner*.5f);chip("Up",left+inner-96,y-4,44,47010,false);chip("Down",left+inner-46,y-4,46,47011,false);y+=20;}}
         {const float bw=(inner-12)/3;button("New view",left,y,bw,47004,!views);button("Rename",left+bw+6,y,bw,47005);button("Delete",left+2*(bw+6),y,bw,47006);y+=40;}
-        rect(left,y,inner,1,0,.20f,.29f,.35f,1,0,0,0,0,0);y+=8;
-        {char text[96];std::snprintf(text,sizeof text,"Explode factor  %.2f",p.factor);textOut(text,left,y,.60f,.84f,.92f,.97f);if(p.animating)muted("animating",left+inner-70,y+2,.50f,70);y+=22;
-            const float trackX=left+2,trackW=inner-4,trackY=y+8;rect(trackX,trackY,trackW,6,3,.10f,.15f,.18f,1,.22f,.32f,.38f,.8f,1);
+        rect(left,y,inner,1,0,.264f,.275f,.298f,1,0,0,0,0,0);y+=8;
+        {char text[96];std::snprintf(text,sizeof text,"Explode factor  %.2f",p.factor);textOut(text,left,y,.60f,.871f,.907f,.937f);if(p.animating)muted("animating",left+inner-70,y+2,.50f,70);y+=22;
+            const float trackX=left+2,trackW=inner-4,trackY=y+8;rect(trackX,trackY,trackW,6,3,.136f,.142f,.153f,1,.291f,.303f,.328f,.8f,1);
             if(view){ExplodedViewPlan plan;std::string error;if(compileExplodedView(g_doc,*view,plan,error))for(size_t s=1;s<plan.slices;++s){const float tx=trackX+trackW*(float)s/plan.slices;rect(tx-1,trackY-4,2,14,0,.40f,.52f,.58f,.8f,0,0,0,0,0);}}
             rect(trackX,trackY,trackW*(float)p.factor,6,3,.86f,.62f,.22f,1,0,0,0,0,0);rect(trackX+trackW*(float)p.factor-7,trackY-4,14,14,7,1.f,.93f,.80f,1,.86f,.62f,.22f,1,1);
             g_zones.push_back({trackX,trackY-9,trackW,24,47008});if(pointer.x>=trackX&&pointer.x<trackX+trackW&&pointer.y>=trackY-9&&pointer.y<trackY+15)hint="Drag to explode or collapse / ticks mark step slices / revision unchanged";y=trackY+20;
             const float bw=(inner-12)/3;button("Collapse",left,y,bw,47012);button("Animate",left+bw+6,y,bw,47007,true);button("Explode",left+2*(bw+6),y,bw,47013);y+=42;}
-        rect(left,y,inner,1,0,.20f,.29f,.35f,1,0,0,0,0,0);y+=8;textOut("STEPS",left,y,.56f,.62f,.78f,.88f);
+        rect(left,y,inner,1,0,.264f,.275f,.298f,1,0,0,0,0,0);y+=8;textOut("STEPS",left,y,.56f,.724f,.753f,.778f);
         if(view){const auto& steps=view->find("steps")->arr;muted(std::to_string(steps.size())+" / 64",left+inner-60,y,.50f,60);y+=20;const float bottom=y0+h-170;size_t index=0;
             for(const auto& step:steps){if(y>bottom){muted("+"+std::to_string(steps.size()-index)+" more steps",left,y,.48f,inner);y+=16;break;}const bool selected=(int)index==p.step;const bool hover=pointer.x>=left&&pointer.x<left+inner&&pointer.y>=y&&pointer.y<y+24;
                 rect(left,y,inner,24,4,selected?.11f:hover?.085f:.06f,selected?.20f:hover?.13f:.08f,selected?.25f:hover?.16f:.10f,1,selected?.86f:.14f,selected?.62f:.20f,selected?.22f:.24f,selected?.8f:.5f,1);
-                const bool together=step.find("with_previous")&&step.find("with_previous")->b;textOut(std::to_string(index+1),left+8,y+4,.52f,together?.55f:.86f,together?.66f:.62f,together?.74f:.22f);const auto* plan=explodedPlan(p.selected);textOut(fitText(explodedStepSummary(step,plan&&index<plan->steps.size()?&plan->steps[index]:nullptr),.52f,inner-34),left+26,y+4,.52f,.82f,.90f,.95f);
+                const bool together=step.find("with_previous")&&step.find("with_previous")->b;textOut(std::to_string(index+1),left+8,y+4,.52f,together?.55f:.86f,together?.66f:.62f,together?.74f:.22f);const auto* plan=explodedPlan(p.selected);textOut(fitText(explodedStepSummary(step,plan&&index<plan->steps.size()?&plan->steps[index]:nullptr),.52f,inner-34),left+26,y+4,.52f,.852f,.887f,.916f);
                 g_zones.push_back({left,y,inner,24,47200+(int)index});y+=27;++index;}
             const float bw=(inner-18)/4;button("Edit",left,y+2,bw,47015);button("Delete",left+bw+6,y+2,bw,47016);button("Up",left+2*(bw+6),y+2,bw,47017);button("Down",left+3*(bw+6),y+2,bw,47018);y+=42;}
         else y+=24;

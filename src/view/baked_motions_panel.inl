@@ -129,10 +129,10 @@ template<class Rect,class Button>static void drawBakedMotionsPanel(Rect rect,But
     const float x0=(float)(viewX+viewW),y0=(float)viewY,w=(float)bakedMotionsDockWidth(),h=(float)(winH-32-viewY);if(w<200||h<200)return;
     const GLint lineAB=glGetUniformLocation(pUI,"lineAB");const float left=x0+14,inner=w-28;
     auto muted=[&](const std::string& text,float x,float y,float scale,float width){textOut(fitText(text,scale,width),x,y,scale,.55f,.66f,.74f);};
-    rect(x0,y0,w,h,0,.050f,.068f,.084f,1,.20f,.27f,.32f,.9f,1);rect(x0,y0,2,h,0,.13f,.55f,.66f,.55f,0,0,0,0,0);
-    textOut("BAKED MOTIONS",left,y0+13,.74f,.82f,.93f,.99f);const std::string count=std::to_string(p.rows.size())+(p.rows.size()==1?" motion":" motions");
+    rect(x0,y0,w,h,0,.063f,.065f,.071f,1,.248f,.259f,.28f,.9f,1);rect(x0,y0,2,h,0,.45f,.469f,.507f,.55f,0,0,0,0,0);
+    textOut("BAKED MOTIONS",left,y0+13,.74f,.875f,.911f,.941f);const std::string count=std::to_string(p.rows.size())+(p.rows.size()==1?" motion":" motions");
     button("Hide",x0+w-74,y0+7,60,45000);muted(count,left+textWidth("BAKED MOTIONS",.74f)+12,y0+16,.56f,std::max(10.f,w-textWidth("BAKED MOTIONS",.74f)-120));
-    rect(left,y0+46,inner,1,0,.20f,.29f,.35f,1,0,0,0,0,0);
+    rect(left,y0+46,inner,1,0,.264f,.275f,.298f,1,0,0,0,0,0);
     if(p.rows.empty()){
         float y=y0+64;for(const char* line:{"No motions in this document yet.","Ask the agent to author a vector motion","graph on existing joints and bake it:","motion.graph.set, then motion.bake.","Baked motions play here without","changing the saved design."}){muted(line,left,y,.60f,inner);y+=21;}
         g_zones.push_back({x0,y0,w,h,45009});return;
@@ -148,15 +148,15 @@ template<class Rect,class Button>static void drawBakedMotionsPanel(Rect rect,But
         const float badgeScale=.50f,badgeW=textWidth(row.badge,badgeScale)+14;const bool warn=row.stale||row.invalid;
         rect(left+inner-badgeW-8,y+9,badgeW,18,9,row.invalid?.32f:row.stale?.34f:row.baked?.07f:.13f,row.invalid?.10f:row.stale?.22f:row.baked?.25f:.15f,row.invalid?.10f:row.stale?.05f:row.baked?.16f:.18f,1,row.invalid?.92f:row.stale?.98f:row.baked?.40f:.42f,row.invalid?.42f:row.stale?.72f:row.baked?.86f:.50f,row.invalid?.38f:row.stale?.28f:row.baked?.56f:.56f,.9f,1);
         textOut(row.badge,left+inner-badgeW-1,y+11,badgeScale,warn?1.f:.80f,warn?.86f:.94f,warn?.62f:.86f);
-        textOut(fitText(row.name,.64f,inner-badgeW-30),left+10,y+4,.64f,.88f,.94f,.98f);muted(row.detail,left+10,y+21,.50f,inner-20);g_zones.push_back({left,y,inner,rowH-4,45100+(int)index});y+=rowH;}
+        textOut(fitText(row.name,.64f,inner-badgeW-30),left+10,y+4,.64f,.894f,.93f,.961f);muted(row.detail,left+10,y+21,.50f,inner-20);g_zones.push_back({left,y,inner,rowH-4,45100+(int)index});y+=rowH;}
     if((int)p.rows.size()>visible){char more[64];std::snprintf(more,sizeof more,"%d-%d of %zu / scroll",p.scroll+1,std::min((int)p.rows.size(),p.scroll+visible),p.rows.size());muted(more,left+2,y-2,.48f,inner);y+=12;}
-    y+=6;rect(left,y,inner,1,0,.20f,.29f,.35f,1,0,0,0,0,0);y+=8;
+    y+=6;rect(left,y,inner,1,0,.264f,.275f,.298f,1,0,0,0,0,0);y+=8;
     {const std::string check=p.clearanceRunning?"Checking...":"Check clearance";char limit[24];std::snprintf(limit,sizeof limit,"%g mm",p.clearanceThreshold);const float scale=.50f,cw=textWidth(check,scale)+16,lw=textWidth(limit,scale)+14,cx=left+inner-cw-lw-6,lx=left+inner-lw;
         auto chip=[&](const std::string& label,float x,float w,int id,bool accent){const bool hover=pointer.x>=x&&pointer.x<x+w&&pointer.y>=y-1&&pointer.y<y+19;rect(x,y,w,18,9,accent?(hover?.12f:.09f):hover?.15f:.10f,accent?(hover?.30f:.24f):hover?.19f:.13f,accent?(hover?.36f:.29f):hover?.23f:.16f,1,accent?.22f:.28f,accent?.66f:.36f,accent?.76f:.42f,hover?1.f:.8f,1);
             textOut(label,x+(w-textWidth(label,scale))/2,y+2,scale,.86f,.95f,1.f);g_zones.push_back({x,y-1,w,20,id});if(hover)hint=id==45014?"Check exact B-rep clearance at every baked frame and certify between frames / read-only":"Clearance threshold / click cycles 0, 0.5, 1, 2, 5 mm";};
-        textOut(fitText(p.selected,.68f,std::max(40.f,cx-left-8)),left,y,.68f,.86f,.95f,1.f);chip(check,cx,cw,45014,true);chip(limit,lx,lw,45015,false);}
+        textOut(fitText(p.selected,.68f,std::max(40.f,cx-left-8)),left,y,.68f,.898f,.934f,.965f);chip(check,cx,cw,45014,true);chip(limit,lx,lw,45015,false);}
     y+=22;
-    const float gx=left,gy=y,gw=inner,gh=graphH;rect(gx,gy,gw,gh,4,.030f,.043f,.054f,1,.17f,.24f,.29f,.9f,1);
+    const float gx=left,gy=y,gw=inner,gh=graphH;rect(gx,gy,gw,gh,4,.039f,.041f,.044f,1,.219f,.229f,.247f,.9f,1);
     const double duration=p.framesValid?p.frames.duration:p.graphValid?p.graph.duration:0;
     if(p.graphValid&&!p.curves.empty()&&duration>0){
         if(clearanceShown)for(const auto& m:p.clearance.find("markers")->arr){float r,g,b;bool hatched;bakedMotionMarkerColor(m.find("status")->str,r,g,b,hatched);const float ax=gx+6+(gw-12)*(float)std::clamp(m.find("from_s")->num/duration,0.,1.),bx=gx+6+(gw-12)*(float)std::clamp(m.find("to_s")->num/duration,0.,1.);
@@ -169,7 +169,7 @@ template<class Rect,class Button>static void drawBakedMotionsPanel(Rect rect,But
                 for(auto pt:{std::pair{handle.t1,handle.v1},std::pair{handle.t2,handle.v2}})rect(hx(pt.first)-3,py((float)pt.second)-3,6,6,1,.03f,.05f,.06f,1,color[0],color[1],color[2],.9f,1);}
             if(const auto* rows=p.diagnostics.find("channels"))if(c<rows->arr.size())if(const auto* breaks=rows->arr[c].find("breaks"))for(const auto& b:breaks->arr){const float bx=gx+6+(gw-12)*(float)(b.find("time_s")->num/p.graph.duration);const bool jump=b.find("kind")->str=="C0";rect(bx-2,gy+3,4,7,1,jump?.96f:.98f,jump?.40f:.72f,jump?.36f:.27f,.9f,0,0,0,0,0);}
         }
-        if(!p.units.empty()&&!p.units[0].empty()&&p.units[0]!="signal"&&!p.rangeLo.empty()){char top[48],bottom[48];std::snprintf(top,sizeof top,"%.4g %s",p.rangeHi[0],p.units[0].c_str());std::snprintf(bottom,sizeof bottom,"%.4g %s",p.rangeLo[0],p.units[0].c_str());textOut(top,gx+12,gy+4,.46f,.48f,.60f,.68f);textOut(bottom,gx+12,gy+gh-17,.46f,.48f,.60f,.68f);}
+        if(!p.units.empty()&&!p.units[0].empty()&&p.units[0]!="signal"&&!p.rangeLo.empty()){char top[48],bottom[48];std::snprintf(top,sizeof top,"%.4g %s",p.rangeHi[0],p.units[0].c_str());std::snprintf(bottom,sizeof bottom,"%.4g %s",p.rangeLo[0],p.units[0].c_str());textOut(top,gx+12,gy+4,.46f,.558f,.58f,.599f);textOut(bottom,gx+12,gy+gh-17,.46f,.558f,.58f,.599f);}
         const float playX=gx+6+(gw-12)*(float)std::clamp(p.time/duration,0.,1.);bakedMotionLine(lineAB,playX,gy+2,playX,gy+gh-2,.42f,.94f,1.f,p.active?1.f:.55f,2.f);
     }else muted(p.graphError.empty()?"Graph unavailable":p.graphError,gx+8,gy+gh*.5f-8,.52f,gw-16);
     y+=gh+6;
@@ -177,14 +177,14 @@ template<class Rect,class Button>static void drawBakedMotionsPanel(Rect rect,But
     if(p.graphValid){const size_t shown=std::min<size_t>(p.graph.channels.size(),4);std::vector<double> now;try{now=evaluateMotion(p.graph,std::min(p.time,p.graph.duration));}catch(...){now.assign(p.graph.channels.size(),0);}
         for(size_t c=0;c<shown;++c){const auto* color=kBakedMotionColors[c%6];rect(left,y+5,10,4,1,color[0],color[1],color[2],1,0,0,0,0,0);const std::string unit=c<p.units.size()?p.units[c]:std::string();
             double value=now[c];if(p.framesValid)for(size_t b=0;b<p.frames.channels.size();++b)if(p.frames.channels[b]==p.graph.channels[c].name)value=p.frames.coordinates[frame*p.frames.channels.size()+b];std::string continuity;if(const auto* rows=p.diagnostics.find("channels"))if(c<rows->arr.size())continuity=rows->arr[c].find("continuity")->str;
-            char text[200];std::snprintf(text,sizeof text,"%s  %.2f %s",p.graph.channels[c].name.c_str(),value,unit=="signal"?"":unit.c_str());textOut(fitText(text,.54f,inner-70),left+16,y,.54f,.80f,.88f,.93f);
+            char text[200];std::snprintf(text,sizeof text,"%s  %.2f %s",p.graph.channels[c].name.c_str(),value,unit=="signal"?"":unit.c_str());textOut(fitText(text,.54f,inner-70),left+16,y,.54f,.833f,.867f,.895f);
             if(!continuity.empty()){const bool smooth=continuity=="C1";textOut(continuity=="discontinuous"?"jump":continuity,left+inner-textWidth(continuity=="discontinuous"?"jump":continuity,.52f),y,.52f,smooth?.48f:.98f,smooth?.86f:.72f,smooth?.60f:.30f);}y+=18;}
         if(p.graph.channels.size()>shown){muted("+"+std::to_string(p.graph.channels.size()-shown)+" more channels",left+16,y,.50f,inner);y+=16;}}
-    y+=4;const float trackY=y+10,trackX=left+2,trackW=inner-4;rect(trackX,trackY,trackW,6,3,.10f,.15f,.18f,1,.22f,.32f,.38f,.8f,1);
+    y+=4;const float trackY=y+10,trackX=left+2,trackW=inner-4;rect(trackX,trackY,trackW,6,3,.136f,.142f,.153f,1,.291f,.303f,.328f,.8f,1);
     if(clearanceShown&&duration>0){for(const auto& m:p.clearance.find("markers")->arr){float r,g,b;bool hatched;bakedMotionMarkerColor(m.find("status")->str,r,g,b,hatched);const float ax=trackX+trackW*(float)std::clamp(m.find("from_s")->num/duration,0.,1.),bx=trackX+trackW*(float)std::clamp(m.find("to_s")->num/duration,0.,1.);
-            rect(ax,trackY-8,std::max(2.f,bx-ax),5,0,r,g,b,.95f,0,0,0,0,0);if(hatched)for(float hx=ax+1;hx<bx-1;hx+=4)rect(hx,trackY-8,1.5f,5,0,.05f,.07f,.08f,.85f,0,0,0,0,0);}
-        if(const auto* worst=p.clearance.find("worst")){const float wx=trackX+trackW*(float)std::clamp(worst->find("time_s")->num/duration,0.,1.);rect(wx-1,trackY-11,2,22,0,.96f,.97f,1.f,.95f,0,0,0,0,0);}}
-    if(duration>0){const float fraction=(float)std::clamp(p.time/duration,0.,1.);rect(trackX,trackY,trackW*fraction,6,3,.16f,.66f,.78f,1,0,0,0,0,0);rect(trackX+trackW*fraction-7,trackY-4,14,14,7,.86f,.96f,1.f,1,.16f,.66f,.78f,1,1);}
+            rect(ax,trackY-8,std::max(2.f,bx-ax),5,0,r,g,b,.95f,0,0,0,0,0);if(hatched)for(float hx=ax+1;hx<bx-1;hx+=4)rect(hx,trackY-8,1.5f,5,0,.064f,.066f,.072f,.85f,0,0,0,0,0);}
+        if(const auto* worst=p.clearance.find("worst")){const float wx=trackX+trackW*(float)std::clamp(worst->find("time_s")->num/duration,0.,1.);rect(wx-1,trackY-11,2,22,0,.932f,.97f,1.f,.95f,0,0,0,0,0);}}
+    if(duration>0){const float fraction=(float)std::clamp(p.time/duration,0.,1.);rect(trackX,trackY,trackW*fraction,6,3,.16f,.66f,.78f,1,0,0,0,0,0);rect(trackX+trackW*fraction-7,trackY-4,14,14,7,.905f,.942f,.973f,1,1.f,.635f,.298f,1,1);}
     g_zones.push_back({trackX,trackY-9,trackW,24,45008});if(pointer.x>=trackX&&pointer.x<trackX+trackW&&pointer.y>=trackY-9&&pointer.y<trackY+15)hint="Drag to scrub baked frames / Left and Right step frames";
     char timeline[160];if(p.framesValid)std::snprintf(timeline,sizeof timeline,"%.2f / %.2f s   frame %zu / %zu",p.time,duration,frame+1,p.frames.frameCount);else std::snprintf(timeline,sizeof timeline,"%.2f s graph / not baked",duration);muted(timeline,left,trackY+12,.52f,inner);y=trackY+34;
     const float bw=(inner-18)/4;button(p.playing?"Pause":"Play",left,y,bw,45001,true);button("Stop",left+bw+6,y,bw,45002);button("Loop",left+2*(bw+6),y,bw,45003,false,p.loop);char speed[16];std::snprintf(speed,sizeof speed,"%gx",p.speed);button(speed,left+3*(bw+6),y,bw,45004);y+=38;
@@ -203,7 +203,7 @@ template<class Rect,class Button>static void drawBakedMotionsPanel(Rect rect,But
     for(const auto& row:p.rows)if(row.name==p.selected){
         std::string state;if(const auto* motion=findMotion(g_doc,p.selected))if(const auto* bake=motion->find("bake")){const std::string& s=p.framesSource.source;char text[200];std::snprintf(text,sizeof text,"Baked %.0f fps / %zu frames / source rev %.0f / frames %s",bake->find("fps")->num,p.framesValid?p.frames.frameCount:0,bake->find("source_revision")->num,s=="inline"?"inline (legacy)":s=="rebake"?"re-baked":s.empty()?"unavailable":s.c_str());state=text;}
         if(state.empty())state="Not baked / Bake drives the joints through the solver";
-        textOut(fitText(state,.52f,inner),left,y,.52f,.72f,.82f,.88f);y+=17;
+        textOut(fitText(state,.52f,inner),left,y,.52f,.772f,.803f,.83f);y+=17;
         if(!p.framesSource.mismatch.empty()){textOut(fitText(p.framesValid?"Re-baked frames differ from the recorded bake / showing current solve / Bake again":p.framesSource.mismatch,.52f,inner),left,y,.52f,.99f,.74f,.32f);y+=17;}
         if(row.stale||row.invalid){textOut(fitText(row.invalid?"Graph invalid for the current joints / edit graph":"Stale: "+std::string(row.detail.find("graph changed")!=std::string::npos?"graph changed":"assembly changed")+" / Bake again",.52f,inner),left,y,.52f,.99f,.74f,.32f);y+=17;}
         break;}

@@ -142,8 +142,8 @@ template<class Rect>static void drawParametricHud(Rect rect,POINT pointer,std::s
     const float headerH=38;
     if(h.collapsed||bottom-top<headerH+120){
         const float cw=std::min(w,textWidth("HUD",.66f)+textWidth(count,.54f)+120);const float cx=(float)(viewX+viewW)-cw-14;
-        rect(cx+2,top+3,cw,headerH,10,0,0,0,.18f,0,0,0,0,0);rect(cx,top,cw,headerH,10,.030f,.058f,.078f,.72f,.23f,.47f,.56f,.75f,1);
-        textOut("HUD",cx+12,top+10,.66f,.78f,.94f,1.f);textOut(fitText(count,.54f,cw-110),cx+16+textWidth("HUD",.66f),top+13,.54f,h.staged.empty()?.60f:.99f,h.staged.empty()?.72f:.80f,h.staged.empty()?.80f:.42f);
+        rect(cx+2,top+3,cw,headerH,10,0,0,0,.18f,0,0,0,0,0);rect(cx,top,cw,headerH,10,.051f,.053f,.058f,.72f,.408f,.425f,.46f,.75f,1);
+        textOut("HUD",cx+12,top+10,.66f,.875f,.91f,.94f);textOut(fitText(count,.54f,cw-110),cx+16+textWidth("HUD",.66f),top+13,.54f,h.staged.empty()?.60f:.99f,h.staged.empty()?.72f:.80f,h.staged.empty()?.80f:.42f);
         mini("+",cx+cw-62,top+7,24,24,48001,false,false,true,"Expand the Parametric HUD");mini("x",cx+cw-32,top+7,24,24,48000,false,false,true,"Hide the Parametric HUD");
         zones.push_back({cx,top,cw,headerH,48009});g_zones.insert(g_zones.begin(),zones.begin(),zones.end());return;
     }
@@ -154,12 +154,12 @@ template<class Rect>static void drawParametricHud(Rect rect,POINT pointer,std::s
     h.visible=(int)std::max(1.f,std::floor((bodyMax-(overflow?groupH+22:0))/rowH));h.scroll=std::clamp(h.scroll,0,std::max(0,(int)rows.size()-h.visible));
     float bodyH=rows.empty()?66.f:std::min(needed,bodyMax);const float height=headerH+bodyH+footerH+8;
     rect(x+3,top+4,w,height,10,0,0,0,.20f,0,0,0,0,0);
-    rect(x,top,w,height,10,.030f,.058f,.078f,.72f,.23f,.47f,.56f,.75f,1);rect(x+12,top+1,w-24,1,0,.39f,.75f,.86f,.35f,0,0,0,0,0);
-    textOut("PARAMETRIC HUD",x+12,top+10,.62f,.80f,.94f,1.f);textOut(fitText(count,.50f,w-textWidth("PARAMETRIC HUD",.62f)-96),x+20+textWidth("PARAMETRIC HUD",.62f),top+13,.50f,h.staged.empty()?.56f:.99f,h.staged.empty()?.68f:.80f,h.staged.empty()?.76f:.42f);
+    rect(x,top,w,height,10,.051f,.053f,.058f,.72f,.408f,.425f,.46f,.75f,1);rect(x+12,top+1,w-24,1,0,.39f,.75f,.86f,.35f,0,0,0,0,0);
+    textOut("PARAMETRIC HUD",x+12,top+10,.62f,.879f,.915f,.945f);textOut(fitText(count,.50f,w-textWidth("PARAMETRIC HUD",.62f)-96),x+20+textWidth("PARAMETRIC HUD",.62f),top+13,.50f,h.staged.empty()?.56f:.99f,h.staged.empty()?.68f:.80f,h.staged.empty()?.76f:.42f);
     mini("-",x+w-62,top+7,24,24,48001,false,false,true,"Collapse the Parametric HUD");mini("x",x+w-32,top+7,24,24,48000,false,false,true,"Hide the Parametric HUD (staged values are kept)");
     float y=top+headerH;
     if(rows.empty()){
-        textOut(fitText("No parameters are exposed yet.",.56f,w-24),x+12,y+4,.56f,.62f,.72f,.80f);textOut(fitText("Use +HUD on a Parameters row, or:",.56f,w-24),x+12,y+22,.56f,.62f,.72f,.80f);
+        textOut(fitText("No parameters are exposed yet.",.56f,w-24),x+12,y+4,.56f,.677f,.705f,.728f);textOut(fitText("Use +HUD on a Parameters row, or:",.56f,w-24),x+12,y+22,.56f,.677f,.705f,.728f);
         mini("Show a parameter...",x+12,y+40,std::min(170.f,w-24),24,48005,false,false,!g_doc.params.empty(),g_doc.params.empty()?"Create a named parameter first":"Expose an existing parameter to the HUD");y+=66;
     }else{
         const float bodyTop=y,bodyBottom=y+bodyH,listBottom=overflow?bodyBottom-22:bodyBottom;int skipped=0;std::string currentGroup="\x01";
@@ -167,17 +167,17 @@ template<class Rect>static void drawParametricHud(Rect rect,POINT pointer,std::s
             if(item.second<0){currentGroup=item.first;continue;}
             const int r=item.second;if(r<h.scroll){++skipped;continue;}
             const bool firstOfGroup=r==h.scroll||hudSpec(g_doc.params[rows[(size_t)r-1]]).group!=currentGroup;
-            if(firstOfGroup){if(y+groupH+rowH>listBottom+1)break;std::string title=currentGroup.empty()?"PARAMETERS":currentGroup;for(auto& c:title)c=(char)std::toupper((unsigned char)c);textOut(fitText(title,.48f,w-24),x+12,y+4,.48f,.45f,.70f,.80f);rect(x+12,y+groupH-3,w-24,1,0,.20f,.33f,.40f,.6f,0,0,0,0,0);y+=groupH;}
+            if(firstOfGroup){if(y+groupH+rowH>listBottom+1)break;std::string title=currentGroup.empty()?"PARAMETERS":currentGroup;for(auto& c:title)c=(char)std::toupper((unsigned char)c);textOut(fitText(title,.48f,w-24),x+12,y+4,.48f,.628f,.654f,.676f);rect(x+12,y+groupH-3,w-24,1,0,.295f,.307f,.333f,.6f,0,0,0,0,0);y+=groupH;}
             if(y+rowH>listBottom+1)break;
             const size_t index=rows[(size_t)r];const auto& p=g_doc.params[index];const auto s=hudSpec(p);const bool driven=parametricHudDriven(p);const double* staged=parametricHudStagedValue(p.name);const double shown=staged?*staged:p.value;
             const bool outside=(p.hud.find("min")&&p.value<s.min)||(p.hud.find("max")&&p.value>s.max);
             if(staged){rect(x+6,y+1,w-12,rowH-4,6,.30f,.20f,.04f,.55f,.98f,.70f,.26f,.55f,1);rect(x+6,y+5,3,rowH-12,1,.99f,.72f,.27f,1,0,0,0,0,0);}
             const float plusX=x+w-12-26,valueW=std::min(96.f,w*.32f),valueX=plusX-4-valueW,minusX=valueX-4-26,labelW=(driven?x+w-12-valueW:minusX)-(x+14)-6;
-            textOut(fitText(s.label.empty()?p.name:s.label,.62f,labelW),x+14,y+5,.62f,.86f,.92f,.96f);
+            textOut(fitText(s.label.empty()?p.name:s.label,.62f,labelW),x+14,y+5,.62f,.874f,.91f,.94f);
             std::string second=driven?"= "+p.expr+"  /  driven":parametricHudRange(p,s);if(staged)second="was "+hudFormat(p.value,s)+"  /  "+second;if(outside&&!staged)second="outside range  /  "+second;
             textOut(fitText(second,.48f,w-28),x+14,y+25,.48f,staged?.99f:outside?.98f:.53f,staged?.78f:outside?.48f:.65f,staged?.44f:outside?.42f:.73f);
             const std::string value=hudFormat(shown,s);
-            if(driven){const float vx=x+w-12-valueW;textOut(fitText(value,.60f,valueW),vx+valueW-std::min(valueW,textWidth(value,.60f)),y+6,.60f,.66f,.76f,.84f);}
+            if(driven){const float vx=x+w-12-valueW;textOut(fitText(value,.60f,valueW),vx+valueW-std::min(valueW,textWidth(value,.60f)),y+6,.60f,.715f,.745f,.769f);}
             else{
                 const int base=48100+4*r;const bool hover=pointer.x>=valueX&&pointer.x<valueX+valueW&&pointer.y>=y+3&&pointer.y<y+25;
                 mini("-",minusX,y+3,26,22,base,false,false,true,"Decrease "+p.name+" by "+hudFormat(s.step,s));
@@ -189,10 +189,10 @@ template<class Rect>static void drawParametricHud(Rect rect,POINT pointer,std::s
             y+=rowH;
         }
         if(overflow){const int last=std::min((int)rows.size(),h.scroll+h.visible);const std::string more=std::to_string(h.scroll+1)+"-"+std::to_string(last)+" of "+std::to_string(rows.size());
-            mini("^",x+w-62,bodyBottom-20,24,20,48006,false,false,h.scroll>0,"Scroll up");mini("v",x+w-32,bodyBottom-20,24,20,48007,false,false,h.scroll+h.visible<(int)rows.size(),"Scroll down");textOut(more,x+14,bodyBottom-18,.48f,.50f,.62f,.70f);}
+            mini("^",x+w-62,bodyBottom-20,24,20,48006,false,false,h.scroll>0,"Scroll up");mini("v",x+w-32,bodyBottom-20,24,20,48007,false,false,h.scroll+h.visible<(int)rows.size(),"Scroll down");textOut(more,x+14,bodyBottom-18,.48f,.577f,.6f,.62f);}
         (void)bodyTop;(void)skipped;y=bodyBottom;
     }
-    y+=4;rect(x+12,y,w-24,1,0,.20f,.33f,.40f,.7f,0,0,0,0,0);y+=8;
+    y+=4;rect(x+12,y,w-24,1,0,.295f,.307f,.333f,.7f,0,0,0,0,0);y+=8;
     const float bw=(w-24-12)/3;
     mini(h.staged.empty()?"Rebuild":("Rebuild ("+std::to_string(h.staged.size())+")").c_str(),x+12,y,bw,28,48002,!h.staged.empty(),false,!h.staged.empty(),"Apply every staged value in one atomic, revision-checked transaction");
     mini("Auto",x+18+bw,y,bw,28,48003,false,h.autoRebuild,true,h.autoRebuild?"Auto on: each change rebuilds at once":"Auto off: changes are staged until Rebuild");

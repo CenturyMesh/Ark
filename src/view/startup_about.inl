@@ -13,25 +13,52 @@ static void panelText(HDC dc,const wchar_t* text,RECT rect,int size,COLORREF col
     auto old=SelectObject(dc,font);SetTextColor(dc,color);SetBkMode(dc,TRANSPARENT);DrawTextW(dc,text,-1,&rect,flags);SelectObject(dc,old);DeleteObject(font);
 }
 static void panelBrand(HDC dc,int x,int y,int size){HICON icon=(HICON)LoadImageW(GetModuleHandleW(nullptr),MAKEINTRESOURCEW(101),IMAGE_ICON,size,size,LR_SHARED);if(icon)DrawIconEx(dc,x,y,icon,size,size,0,nullptr,DI_NORMAL);}
+// Design space of the startup panel; the MeshSphere artwork is 16:9.
+constexpr int splashDesignW=720,splashDesignH=405;
+// Embedded MeshSphere sphere render (201) and ARK wordmark (202), decoded and scaled
+// once per panel size so animation frames only blit. Missing art keeps a flat panel.
+struct SplashArt{int width=0,height=0,markW=0,markH=0;HBITMAP art=nullptr,mark=nullptr;};
+static std::mutex g_splashArtMutex;static SplashArt g_splashArt;
+static HBITMAP splashBitmap(int resource,int width,int height){
+    HMODULE module=GetModuleHandleW(nullptr);HRSRC found=FindResourceW(module,MAKEINTRESOURCEW(resource),MAKEINTRESOURCEW(10)/*RT_RCDATA*/);HGLOBAL loaded=found?LoadResource(module,found):nullptr;
+    const void* bytes=loaded?LockResource(loaded):nullptr;DWORD size=found?SizeofResource(module,found):0;if(!bytes||!size||width<1||height<1)return nullptr;
+    HRESULT com=CoInitializeEx(nullptr,COINIT_MULTITHREADED);HBITMAP result=nullptr;
+    IWICImagingFactory* factory=nullptr;IWICStream* stream=nullptr;IWICBitmapDecoder* decoder=nullptr;IWICBitmapFrameDecode* frame=nullptr;IWICBitmapScaler* scaler=nullptr;IWICFormatConverter* converter=nullptr;
+    if(SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&factory)))&&SUCCEEDED(factory->CreateStream(&stream))&&SUCCEEDED(stream->InitializeFromMemory((BYTE*)bytes,size))
+        &&SUCCEEDED(factory->CreateDecoderFromStream(stream,nullptr,WICDecodeMetadataCacheOnDemand,&decoder))&&SUCCEEDED(decoder->GetFrame(0,&frame))&&SUCCEEDED(factory->CreateBitmapScaler(&scaler))
+        &&SUCCEEDED(scaler->Initialize(frame,(UINT)width,(UINT)height,WICBitmapInterpolationModeFant))&&SUCCEEDED(factory->CreateFormatConverter(&converter))
+        &&SUCCEEDED(converter->Initialize(scaler,GUID_WICPixelFormat32bppPBGRA,WICBitmapDitherTypeNone,nullptr,0,WICBitmapPaletteTypeCustom))){
+        BITMAPINFO info{};info.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);info.bmiHeader.biWidth=width;info.bmiHeader.biHeight=-height;info.bmiHeader.biPlanes=1;info.bmiHeader.biBitCount=32;void* pixels=nullptr;
+        HBITMAP bitmap=CreateDIBSection(nullptr,&info,DIB_RGB_COLORS,&pixels,nullptr,0);
+        if(bitmap&&SUCCEEDED(converter->CopyPixels(nullptr,(UINT)width*4,(UINT)(width*height*4),(BYTE*)pixels)))result=bitmap;else if(bitmap)DeleteObject(bitmap);
+    }
+    for(IUnknown* item:{(IUnknown*)converter,(IUnknown*)scaler,(IUnknown*)frame,(IUnknown*)decoder,(IUnknown*)stream,(IUnknown*)factory})if(item)item->Release();
+    if(SUCCEEDED(com))CoUninitialize();return result;
+}
+static void releaseSplashArtLocked(){if(g_splashArt.art)DeleteObject(g_splashArt.art);if(g_splashArt.mark)DeleteObject(g_splashArt.mark);g_splashArt={};}
+static void releaseSplashArt(){std::lock_guard lock(g_splashArtMutex);releaseSplashArtLocked();}
+static void prepareSplashArtLocked(int width,int height){
+    if(g_splashArt.width==width&&g_splashArt.height==height)return;releaseSplashArtLocked();g_splashArt.width=width;g_splashArt.height=height;
+    g_splashArt.art=splashBitmap(201,width,height);g_splashArt.markW=MulDiv(width,232,splashDesignW);g_splashArt.markH=g_splashArt.markW/3;g_splashArt.mark=splashBitmap(202,g_splashArt.markW,g_splashArt.markH);
+}
+static void prepareSplashArt(int width,int height){std::lock_guard lock(g_splashArtMutex);prepareSplashArtLocked(width,height);}
 static void paintSplash(HDC dc,int width,int height,double seconds){
-    int saved=SaveDC(dc);SetGraphicsMode(dc,GM_ADVANCED);XFORM scale{(FLOAT)width/620,0,0,(FLOAT)height/340,0,0};SetWorldTransform(dc,&scale);
-    panelFill(dc,{0,0,620,340},RGB(16,24,33));panelFill(dc,{0,0,620,2},RGB(106,209,235));
-    panelFill(dc,{0,278,620,340},RGB(20,30,40));
-    panelBrand(dc,43,39,56);panelText(dc,L"ARK",{119,36,360,108},54,RGB(242,247,252),FW_SEMIBOLD);
-    auto identity=productWide(app_iteration_code());panelText(dc,identity.c_str(),{123,109,340,140},18,RGB(116,214,237),FW_SEMIBOLD);
-    panelText(dc,L"Ideas, shaped precisely.",{45,171,485,212},25,RGB(219,231,241));
-    panelText(dc,L"Native parametric CAD for people and agents",{46,217,554,251},15,RGB(145,165,183));
-    panelText(dc,L"Created by MeshSphere",{45,302,383,326},14,RGB(178,194,208));
-    auto version=L"v"+productWide(app_version());panelText(dc,version.c_str(),{442,302,575,326},13,RGB(133,155,174),FW_NORMAL,DT_RIGHT|DT_SINGLELINE);
-    // A subtle moving highlight communicates activity, never fabricated progress.
-    panelFill(dc,{45,264,575,265},RGB(41,59,75));
-    double phase=std::fmod(std::max(0.,seconds)*.62,1.);int center=45+(int)(530*phase);
-    for(int i=-35;i<=35;++i){int x=center+i;if(x<45||x>=575)continue;double a=(1.-std::abs(i)/36.)*.8;panelFill(dc,{x,264,x+1,266},RGB((int)(41+65*a),(int)(59+150*a),(int)(75+160*a)));}
-    // Retained code geometry: a quiet isometric outline, not a CAD authority claim.
-    HPEN pen=CreatePen(PS_SOLID,1,RGB(55,89,111));auto oldPen=SelectObject(dc,pen);auto oldBrush=SelectObject(dc,GetStockObject(NULL_BRUSH));
-    POINT outline[]={{504,46},{551,72},{551,124},{504,151},{457,124},{457,72},{504,46}};Polyline(dc,outline,7);
-    MoveToEx(dc,457,72,nullptr);LineTo(dc,504,99);LineTo(dc,551,72);MoveToEx(dc,504,99,nullptr);LineTo(dc,504,151);
-    SelectObject(dc,oldBrush);SelectObject(dc,oldPen);DeleteObject(pen);RestoreDC(dc,saved);
+    bool artwork=false;
+    {std::lock_guard lock(g_splashArtMutex);prepareSplashArtLocked(width,height);
+        if(g_splashArt.art){HDC source=CreateCompatibleDC(dc);auto old=SelectObject(source,g_splashArt.art);BitBlt(dc,0,0,width,height,source,0,0,SRCCOPY);
+            // The wordmark takes the place of the render's own wordmark, under the sphere.
+            if(g_splashArt.mark){SelectObject(source,g_splashArt.mark);BLENDFUNCTION blend{AC_SRC_OVER,0,255,AC_SRC_ALPHA};GdiAlphaBlend(dc,(width-g_splashArt.markW)/2,MulDiv(height,254,splashDesignH),g_splashArt.markW,g_splashArt.markH,source,0,0,g_splashArt.markW,g_splashArt.markH,blend);}
+            SelectObject(source,old);DeleteDC(source);artwork=g_splashArt.mark!=nullptr;}}
+    int saved=SaveDC(dc);SetGraphicsMode(dc,GM_ADVANCED);XFORM scale{(FLOAT)width/splashDesignW,0,0,(FLOAT)height/splashDesignH,0,0};SetWorldTransform(dc,&scale);
+    if(!artwork){panelFill(dc,{0,0,splashDesignW,splashDesignH},RGB(17,18,20));panelBrand(dc,328,92,64);panelText(dc,L"ARK",{0,262,splashDesignW,330},58,RGB(242,247,252),FW_SEMIBOLD,DT_CENTER|DT_SINGLELINE);}
+    panelText(dc,L"Ideas, shaped precisely.",{0,334,splashDesignW,358},16,RGB(203,211,229),FW_NORMAL,DT_CENTER|DT_SINGLELINE);
+    panelText(dc,L"Created by MeshSphere",{28,372,360,394},12,RGB(152,159,172),FW_NORMAL,DT_LEFT|DT_SINGLELINE);
+    auto identity=productWide(app_iteration_code())+L"  ·  v"+productWide(app_version());panelText(dc,identity.c_str(),{360,372,692,394},12,RGB(152,159,172),FW_NORMAL,DT_RIGHT|DT_SINGLELINE);
+    // A subtle moving highlight along the lower edge communicates activity, never fabricated progress.
+    panelFill(dc,{0,splashDesignH-2,splashDesignW,splashDesignH},RGB(33,34,37));
+    double phase=std::fmod(std::max(0.,seconds)*.55,1.);int center=-60+(int)((splashDesignW+120)*phase);
+    for(int i=-60;i<=60;++i){int x=center+i;if(x<0||x>=splashDesignW)continue;double a=(1.-std::abs(i)/61.)*.9;panelFill(dc,{x,splashDesignH-2,x+1,splashDesignH},RGB((int)(22+41*a),(int)(36+133*a),(int)(52+193*a)));}
+    RestoreDC(dc,saved);
 }
 class StartupSplash {
     HANDLE stop_=nullptr,done_=nullptr;std::thread thread_;bool skipped_=true;
@@ -50,9 +77,12 @@ public:
         if(!stop_||!done_)return;skipped_=false;
         try{thread_=std::thread([this,visible]{
             HINSTANCE instance=GetModuleHandleW(nullptr);WNDCLASSW cls{};cls.lpfnWndProc=procedure;cls.hInstance=instance;cls.lpszClassName=L"ARK_STARTUP_PANEL";cls.hCursor=LoadCursor(nullptr,IDC_ARROW);RegisterClassW(&cls);
-            RECT work{};SystemParametersInfoW(SPI_GETWORKAREA,0,&work,0);HDC screen=GetDC(nullptr);int dpi=GetDeviceCaps(screen,LOGPIXELSX);ReleaseDC(nullptr,screen);int width=MulDiv(620,dpi,96),height=MulDiv(340,dpi,96);
+            RECT work{};SystemParametersInfoW(SPI_GETWORKAREA,0,&work,0);HDC screen=GetDC(nullptr);int dpi=GetDeviceCaps(screen,LOGPIXELSX);ReleaseDC(nullptr,screen);int width=MulDiv(splashDesignW,dpi,96),height=MulDiv(splashDesignH,dpi,96);
             PaintState state{GetTickCount64()};HWND window=CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE,cls.lpszClassName,productIdentity().c_str(),WS_POPUP,(work.left+work.right-width)/2,(work.top+work.bottom-height)/2,width,height,nullptr,nullptr,instance,&state);
-            if(window)created_=true;
+            if(window){created_=true;DWORD round=2/*DWMWCP_ROUND*/;DwmSetWindowAttribute(window,33/*DWMWA_WINDOW_CORNER_PREFERENCE*/,&round,sizeof round);
+                // Decode before the first paint so the panel never flashes empty; this
+                // runs on the splash thread, beside the main thread's startup work.
+                RECT client{};GetClientRect(window,&client);prepareSplashArt(client.right,client.bottom);}
             if(window&&WaitForSingleObject(stop_,0)!=WAIT_OBJECT_0){
                 state.started=GetTickCount64();if(visible){ShowWindow(window,SW_SHOWNOACTIVATE);UpdateWindow(window);}
                 // 50 ms margin keeps the nominal three-second upper bound even
@@ -64,7 +94,7 @@ public:
                 }
                 ShowWindow(window,SW_HIDE);visibleMs_=GetTickCount64()-state.started;
             }
-            if(window)DestroyWindow(window);SetEvent(done_);
+            if(window)DestroyWindow(window);releaseSplashArt();SetEvent(done_);
         });}catch(...){skipped_=true;SetEvent(done_);}
     }
     ~StartupSplash(){finish();if(stop_)CloseHandle(stop_);if(done_)CloseHandle(done_);}
@@ -87,26 +117,26 @@ static const wchar_t* licenseSummary(){return
     L"Complete retained notices and source references are in the bundled licenses folder. Notice retention alone does not establish completion of the product's commercial distribution audit. Customer designs and third-party component models retain their own rights and are not included by default.";}
 struct AboutPanel{int page=0;HWND text=nullptr;HFONT font=nullptr;HBRUSH background=nullptr;};
 static void paintAbout(HDC dc,int page){
-    panelFill(dc,{0,0,760,670},RGB(19,27,36));panelFill(dc,{0,0,760,152},RGB(24,35,46));panelFill(dc,{0,0,760,2},RGB(107,209,235));
-    panelBrand(dc,34,33,62);panelText(dc,L"ARK",{114,25,470,79},38,RGB(240,246,251),FW_SEMIBOLD);
-    auto identity=productWide(app_iteration_code())+L"  /  Version "+productWide(app_version());panelText(dc,identity.c_str(),{117,82,700,112},16,RGB(115,212,236));
-    panelText(dc,L"Native parametric CAD for people and agents",{116,117,730,143},14,RGB(156,178,195));
+    panelFill(dc,{0,0,760,670},RGB(25,26,28));panelFill(dc,{0,0,760,152},RGB(32,33,36));panelFill(dc,{0,0,760,2},RGB(255,162,76));
+    panelBrand(dc,34,33,62);panelText(dc,L"ARK",{114,25,470,79},38,RGB(234,243,252),FW_SEMIBOLD);
+    auto identity=productWide(app_iteration_code())+L"  /  Version "+productWide(app_version());panelText(dc,identity.c_str(),{117,82,700,112},16,RGB(255,162,76));
+    panelText(dc,L"Native parametric CAD for people and agents",{116,117,730,143},14,RGB(168,175,180));
     if(page==0){
-        panelText(dc,L"Created by MeshSphere",{34,224,720,265},27,RGB(229,239,247),FW_SEMIBOLD);
-        panelText(dc,L"Bruno Santos  /  Project lead",{35,272,710,304},17,RGB(153,190,212));
-        panelFill(dc,{34,327,726,475},RGB(26,38,50));panelText(dc,L"BUILT FOR PRECISE, EDITABLE DESIGN",{54,345,709,370},12,RGB(104,195,220),FW_SEMIBOLD);
-        panelText(dc,L"C++20 CAD and UI  /  Win32  /  OpenGL 3.3 + GLSL\nRaster + optional GPU path tracing (software BVH)\nOCCT 8.0.1 exact B-rep modeling and exchange\nSQLite (C) library  /  PowerShell update tooling",{54,379,704,470},16,RGB(215,229,240));
-        panelText(dc,L"Geometry lives in the model. The viewport displays its tessellation; shading and visual effects are presentation.",{35,489,717,539},16,RGB(164,184,200));
-        panelText(dc,L"Third-party notices and the current licensing status are available in the next tab.",{35,553,716,597},14,RGB(125,152,173));
-    }else if(page==1){panelText(dc,L"Licensing and acknowledgements",{34,217,725,247},21,RGB(229,239,247),FW_SEMIBOLD);}
+        panelText(dc,L"Created by MeshSphere",{34,224,720,265},27,RGB(226,236,243),FW_SEMIBOLD);
+        panelText(dc,L"Bruno Santos  /  Project lead",{35,272,710,304},17,RGB(177,184,190));
+        panelFill(dc,{34,327,726,475},RGB(35,36,39));panelText(dc,L"BUILT FOR PRECISE, EDITABLE DESIGN",{54,345,709,370},12,RGB(255,162,76),FW_SEMIBOLD);
+        panelText(dc,L"C++20 CAD and UI  /  Win32  /  OpenGL 3.3 + GLSL\nRaster + optional GPU path tracing (software BVH)\nOCCT 8.0.1 exact B-rep modeling and exchange\nSQLite (C) library  /  PowerShell update tooling",{54,379,704,470},16,RGB(217,226,233));
+        panelText(dc,L"Geometry lives in the model. The viewport displays its tessellation; shading and visual effects are presentation.",{35,489,717,539},16,RGB(174,181,187));
+        panelText(dc,L"Third-party notices and the current licensing status are available in the next tab.",{35,553,716,597},14,RGB(142,148,153));
+    }else if(page==1){panelText(dc,L"Licensing and acknowledgements",{34,217,725,247},21,RGB(226,236,243),FW_SEMIBOLD);}
     else{
-        panelText(dc,L"A focused workspace",{34,224,720,266},25,RGB(229,239,247),FW_SEMIBOLD);
-        panelText(dc,L"Edit features and sketches from the tree or inspector. Editable parameters, semantic references and exact native solids remain in the document.",{35,280,718,350},17,RGB(181,201,217));
-        panelText(dc,L"NAVIGATE",{35,374,716,399},12,RGB(108,196,221),FW_SEMIBOLD);
-        panelText(dc,L"Middle drag  Orbit       Shift + middle  Pan\nAlt + middle  Roll       Mouse wheel  Zoom\nF  Fit                   W  Wireframe\n1  Front    3  Top    5  Right    7  Isometric",{35,413,718,510},17,RGB(216,231,241));
-        panelText(dc,L"Ctrl+O  Open    Ctrl+S  Save    Ctrl+N  New\nCtrl+Z / Ctrl+Y  Undo / redo    Ctrl+K  Commands",{35,540,718,589},16,RGB(160,184,203));
+        panelText(dc,L"A focused workspace",{34,224,720,266},25,RGB(226,236,243),FW_SEMIBOLD);
+        panelText(dc,L"Edit features and sketches from the tree or inspector. Editable parameters, semantic references and exact native solids remain in the document.",{35,280,718,350},17,RGB(189,197,203));
+        panelText(dc,L"NAVIGATE",{35,374,716,399},12,RGB(255,162,76),FW_SEMIBOLD);
+        panelText(dc,L"Middle drag  Orbit       Shift + middle  Pan\nAlt + middle  Roll       Mouse wheel  Zoom\nF  Fit                   W  Wireframe\n1  Front    3  Top    5  Right    7  Isometric",{35,413,718,510},17,RGB(219,228,235));
+        panelText(dc,L"Ctrl+O  Open    Ctrl+S  Save    Ctrl+N  New\nCtrl+Z / Ctrl+Y  Undo / redo    Ctrl+K  Commands",{35,540,718,589},16,RGB(173,180,186));
     }
-    panelFill(dc,{34,615,726,616},RGB(47,66,83));panelText(dc,L"ARK Studio",{35,636,351,662},13,RGB(126,153,174));
+    panelFill(dc,{34,615,726,616},RGB(61,63,68));panelText(dc,L"ARK Studio",{35,636,351,662},13,RGB(143,149,154));
 }
 static LRESULT CALLBACK aboutProcedure(HWND window,UINT message,WPARAM wp,LPARAM lp){
     if(message==WM_NCCREATE){SetWindowLongPtrW(window,GWLP_USERDATA,(LONG_PTR)((CREATESTRUCTW*)lp)->lpCreateParams);}
@@ -128,8 +158,8 @@ static LRESULT CALLBACK aboutProcedure(HWND window,UINT message,WPARAM wp,LPARAM
         return 0;
     }
     if(message==WM_PAINT||message==WM_PRINTCLIENT){PAINTSTRUCT paint{};HDC dc=message==WM_PAINT?BeginPaint(window,&paint):(HDC)wp;paintAbout(dc,state?state->page:0);if(message==WM_PAINT)EndPaint(window,&paint);return 0;}
-    if(message==WM_CTLCOLORBTN||message==WM_CTLCOLOREDIT||message==WM_CTLCOLORSTATIC){HDC dc=(HDC)wp;SetTextColor(dc,RGB(214,230,241));SetBkColor(dc,RGB(26,38,50));return state?(LRESULT)state->background:0;}
-    if(message==WM_DRAWITEM&&state){auto* item=(DRAWITEMSTRUCT*)lp;bool selected=item->CtlID>=1001&&item->CtlID<=1003&&(int)item->CtlID==1001+state->page;bool pressed=(item->itemState&ODS_SELECTED)!=0;panelFill(item->hDC,item->rcItem,selected||pressed?RGB(43,78,99):RGB(31,46,59));wchar_t label[128]{};GetWindowTextW(item->hwndItem,label,128);RECT text=item->rcItem;panelText(item->hDC,label,text,14,selected?RGB(181,237,250):RGB(192,212,226),FW_NORMAL,DT_CENTER|DT_VCENTER|DT_SINGLELINE);if(selected)panelFill(item->hDC,{text.left,text.bottom-2,text.right,text.bottom},RGB(107,209,235));if(item->itemState&ODS_FOCUS){InflateRect(&text,-4,-4);DrawFocusRect(item->hDC,&text);}return TRUE;}
+    if(message==WM_CTLCOLORBTN||message==WM_CTLCOLOREDIT||message==WM_CTLCOLORSTATIC){HDC dc=(HDC)wp;SetTextColor(dc,RGB(217,226,233));SetBkColor(dc,RGB(35,36,39));return state?(LRESULT)state->background:0;}
+    if(message==WM_DRAWITEM&&state){auto* item=(DRAWITEMSTRUCT*)lp;bool selected=item->CtlID>=1001&&item->CtlID<=1003&&(int)item->CtlID==1001+state->page;bool pressed=(item->itemState&ODS_SELECTED)!=0;panelFill(item->hDC,item->rcItem,selected||pressed?RGB(69,72,78):RGB(42,44,47));wchar_t label[128]{};GetWindowTextW(item->hwndItem,label,128);RECT text=item->rcItem;panelText(item->hDC,label,text,14,selected?RGB(216,225,232):RGB(200,208,215),FW_NORMAL,DT_CENTER|DT_VCENTER|DT_SINGLELINE);if(selected)panelFill(item->hDC,{text.left,text.bottom-2,text.right,text.bottom},RGB(255,162,76));if(item->itemState&ODS_FOCUS){InflateRect(&text,-4,-4);DrawFocusRect(item->hDC,&text);}return TRUE;}
     if(message==WM_COMMAND&&state){int id=LOWORD(wp);if(id>=1001&&id<=1003){state->page=id-1001;ShowWindow(state->text,state->page==1?SW_SHOW:SW_HIDE);InvalidateRect(window,nullptr,FALSE);return 0;}
         if(id==1004){auto path=runtimeDirectory()/L"licenses";if(!std::filesystem::is_directory(path))MessageBoxW(window,L"This development runtime does not contain the packaged licenses folder. Retained texts are in third_party and the pinned OCCT SDK; distributable packages include the complete notices folder.",L"Third-party notices",MB_OK|MB_ICONINFORMATION);else ShellExecuteW(window,L"open",path.c_str(),nullptr,nullptr,SW_SHOWNORMAL);return 0;}
         if(id==IDCANCEL||id==IDOK){DestroyWindow(window);return 0;}}
@@ -139,7 +169,7 @@ static HWND createAbout(HWND owner,AboutPanel& state,bool visible){
     HINSTANCE instance=GetModuleHandleW(nullptr);WNDCLASSW cls{};cls.lpfnWndProc=aboutProcedure;cls.hInstance=instance;cls.lpszClassName=L"ARK_ABOUT_PANEL";cls.hCursor=LoadCursor(nullptr,IDC_ARROW);cls.hIcon=(HICON)LoadImageW(instance,MAKEINTRESOURCEW(101),IMAGE_ICON,32,32,LR_SHARED);RegisterClassW(&cls);
     RECT parent{};if(owner)GetWindowRect(owner,&parent);else SystemParametersInfoW(SPI_GETWORKAREA,0,&parent,0);RECT outer{0,0,760,670};DWORD style=WS_CAPTION|WS_SYSMENU|WS_CLIPCHILDREN;AdjustWindowRectEx(&outer,style,FALSE,WS_EX_DLGMODALFRAME);int width=outer.right-outer.left,height=outer.bottom-outer.top;
     HWND window=CreateWindowExW(WS_EX_DLGMODALFRAME,cls.lpszClassName,(L"About "+productIdentity()).c_str(),style,parent.left+(parent.right-parent.left-width)/2,parent.top+(parent.bottom-parent.top-height)/2,width,height,owner,nullptr,instance,&state);if(!window)return nullptr;
-    BOOL dark=TRUE;DwmSetWindowAttribute(window,20,&dark,sizeof dark);state.font=CreateFontW(-15,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Segoe UI");state.background=CreateSolidBrush(RGB(26,38,50));
+    BOOL dark=TRUE;DwmSetWindowAttribute(window,20,&dark,sizeof dark);state.font=CreateFontW(-15,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Segoe UI");state.background=CreateSolidBrush(RGB(35,36,39));
     auto control=[&](const wchar_t* kind,const wchar_t* label,int x,int y,int w,int h,int id,DWORD extra=0){if(std::wcscmp(kind,L"BUTTON")==0)extra|=BS_OWNERDRAW;HWND child=CreateWindowExW(0,kind,label,WS_CHILD|WS_VISIBLE|WS_TABSTOP|extra,x,y,w,h,window,(HMENU)(INT_PTR)id,instance,nullptr);SendMessageW(child,WM_SETFONT,(WPARAM)state.font,TRUE);return child;};
     control(L"BUTTON",L"Overview",34,170,123,34,1001);control(L"BUTTON",L"Third-party notices",166,170,180,34,1002);control(L"BUTTON",L"Workspace guide",355,170,163,34,1003);
     state.text=control(L"EDIT",licenseSummary(),34,256,692,342,1005,ES_MULTILINE|ES_READONLY|ES_AUTOVSCROLL|WS_VSCROLL);SendMessageW(state.text,EM_SETMARGINS,EC_LEFTMARGIN|EC_RIGHTMARGIN,MAKELPARAM(12,12));ShowWindow(state.text,SW_HIDE);
@@ -163,7 +193,8 @@ static int startupUiSelfTest(const std::string& path){
     StartupSplash skipped(true);if(!skipped.skipped())return 701;
     StartupSplash deadline(false,false);if(!deadline.waitForDeadline(3500)||!deadline.created())return 702;deadline.finish();if(deadline.visibleMilliseconds()>StartupSplash::maximumMs)return 703;
     ULONGLONG begin=GetTickCount64();StartupSplash ready(false,false);ready.finish();ULONGLONG readyMs=GetTickCount64()-begin;if(readyMs>200)return 704;
-    if(!captureProductPanel(path+".splash-start.png",620,340,[](HDC dc){paintSplash(dc,620,340,0);})||!captureProductPanel(path+".splash-animation.png",620,340,[](HDC dc){paintSplash(dc,620,340,.85);}))return 705;
+    bool splashCaptured=captureProductPanel(path+".splash-start.png",splashDesignW,splashDesignH,[](HDC dc){paintSplash(dc,splashDesignW,splashDesignH,0);})&&captureProductPanel(path+".splash-animation.png",splashDesignW,splashDesignH,[](HDC dc){paintSplash(dc,splashDesignW,splashDesignH,.85);});
+    bool splashArtwork=false;{std::lock_guard lock(g_splashArtMutex);splashArtwork=g_splashArt.art&&g_splashArt.mark;}releaseSplashArt();if(!splashCaptured||!splashArtwork)return 705;
     AboutPanel state;HWND about=createAbout(nullptr,state,false);if(!about)return 706;
     RECT client{};GetClientRect(about,&client);bool ok=client.right==760&&client.bottom==670;
     auto clientBounds=[&](int id){RECT rect{};GetWindowRect(GetDlgItem(about,id),&rect);MapWindowPoints(nullptr,about,(POINT*)&rect,2);return rect;};

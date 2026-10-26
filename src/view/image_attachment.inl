@@ -47,7 +47,7 @@ static void layoutAssistantImageDimensions(){
 template<class Rect,class Button,class Glyph>static void drawAssistantImageAttachmentUI(Rect&& rect,Button&& button,Glyph&& glyph){
     layoutAssistantImageDimensions();const float x=(float)viewX+22,y=(float)winH-(g_pendingAssistantImage?252:188),width=(float)viewW-44;
     rect(x,y,width,g_pendingAssistantImage?104.f:40.f,7,.055f,.068f,.082f,1,.20f,.28f,.34f,.8f,1);
-    button("",x+10,y+8,116,730,false,false);glyph(730,x+17,y+12,24);textOut("Attach image",x+43,y+16,.64f,.86f,.88f,.92f);
+    button("",x+10,y+8,116,730,false,false);glyph(730,x+17,y+12,24);textOut("Attach image",x+43,y+16,.64f,.844f,.879f,.908f);
     button("",x+138,y+8,140,731,false,g_assistantImageMode==AssistantImageMode::InspireDesign);glyph(731,x+145,y+12,24);textOut("Inspire design",x+173,y+16,.64f,.86f,.88f,.92f);
     button("",x+282,y+8,134,732,false,g_assistantImageMode==AssistantImageMode::ImageToCAD);glyph(732,x+289,y+12,24);textOut("Image to CAD",x+318,y+16,.64f,.86f,.88f,.92f);
     if(g_pendingAssistantImage){
@@ -55,6 +55,6 @@ template<class Rect,class Button,class Glyph>static void drawAssistantImageAttac
         std::string caption=g_pendingAssistantImage->name+" / "+std::to_string(g_pendingAssistantImage->width)+" x "+std::to_string(g_pendingAssistantImage->height);
         textOut(fitText(caption,.56f,g_assistantImageMode==AssistantImageMode::ImageToCAD?70.f:width-170),x+70,y+48,.56f,.76f,.86f,.94f);button("Remove",x+width-88,y+49,76,733,false,false);
         if(g_assistantImageMode==AssistantImageMode::ImageToCAD){textOut("ROUGH MM",x+70,y+80,.50f,.56f,.72f,.79f);const int fieldWidth=std::clamp((viewW-360)/3,72,122);const char* names[]={"Width","Height","Depth"};for(int i=0;i<3;++i)textOut(names[i],(float)viewX+172+i*(fieldWidth+18),y+48,.53f,.67f,.79f,.88f);}
-        else textOut("Reference stays local until Send / Queue",x+70,y+80,.54f,.56f,.72f,.79f);
+        else textOut("Reference stays local until Send / Queue",x+70,y+80,.54f,.664f,.691f,.714f);
     }
 }

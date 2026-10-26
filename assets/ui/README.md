@@ -17,6 +17,26 @@ resource for the taskbar and Alt+Tab. No opaque tile or background is added.
 The source prompt and final transparency instruction are in
 `docs/design/ark-app-icon.prompt.txt`.
 
+## Startup panel artwork
+
+`ark-splash-meshsphere.jpg` is frame 175 of the "MeshSphere Cinematic v5" Blender
+render by MeshSphere Software (Bruno Santos): a glass wireframe sphere on a dark
+starfield. It is the last frame before the render's own wordmark appears. The
+1920 x 1080 Cycles frame (PNG SHA-256
+`6431f6eb6008d3388e68c2f339b44e4cb3aded5658d54c0bc98b7ca64ed5d06c`) was scaled
+to 1280 x 720 (bicubic) and saved as JPEG quality 86. The result is 44,652 bytes,
+SHA-256 `09d333c3cdd27b5024c233bd84aba33055be81681580fc7a281ab7eeee3b08b3`.
+
+`ark-wordmark-splash.png` is `ark-wordmark.png` scaled to 720 x 240 (bicubic,
+alpha kept). It is 142,130 bytes, SHA-256
+`efd471c158dd7d8048fe1874580f1d9448dda351c7d57354e2bb8a6ece2138ae`.
+
+Studio embeds both files as RCDATA 201 and 202 in `src/view/app_icon.rc`. The
+splash thread decodes them with WIC and scales them once to the panel's pixel size
+before the panel is shown. The main thread's startup work does not wait for this
+decoding. The wordmark replaces the render's MeshSphere wordmark below the sphere.
+The ARK logo is unchanged.
+
 ## Ribbon atlases
 
 The 2026-10-13 authoring atlas adds distinct bitmap symbols for Skeleton, image

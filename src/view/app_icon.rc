@@ -4,6 +4,10 @@
 // First executable icon: Explorer, shortcuts and Task Manager.
 101 ICON "ark-app.ico"
 
+// Startup panel artwork, decoded on the splash thread (see startup_about.inl).
+201 RCDATA "ark-splash-meshsphere.jpg"
+202 RCDATA "ark-wordmark-splash.png"
+
 // Explorer properties and Task Manager use this name independently of the caption.
 1 VERSIONINFO
  FILEVERSION ARK_APP_VERSION_MAJOR,ARK_APP_VERSION_MINOR,ARK_APP_VERSION_PATCH,0

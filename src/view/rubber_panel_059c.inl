@@ -113,8 +113,8 @@ static void drawRubberPreview059(const GLfloat vpT[16],const Vec3& eye){auto& p=
     glBindVertexArray(p.gpu.vao);glDrawElements(GL_TRIANGLES,p.gpu.count*3,GL_UNSIGNED_INT,nullptr);
 }
 template<class Rect,class Button>static void drawRubberPanel059(Rect rect,Button button,POINT pointer,std::string& hint){auto& p=g_rubber059;if(!p.open)return;const float x=(float)(viewX+viewW),y=(float)viewY,w=(float)rubberDockWidth059(),h=(float)(winH-viewY-32),left=x+14,inner=w-28,half=(inner-8)*.5f;
-    rect(x,y,w,h,0,.05f,.068f,.084f,1,.20f,.27f,.32f,.9f,1);auto line=[&](const std::string& s,float top,float scale=.64f){textOut(fitText(s,scale,inner),left,top,scale,.70f,.82f,.88f);};
-    textOut("RUBBER",left,y+15,.9f,.70f,.91f,.97f);button("Hide",x+w-70,y+7,58,49300);line("Exact stock + local network study",y+44);
+    rect(x,y,w,h,0,.063f,.065f,.071f,1,.248f,.259f,.28f,.9f,1);auto line=[&](const std::string& s,float top,float scale=.64f){textOut(fitText(s,scale,inner),left,top,scale,.70f,.82f,.88f);};
+    textOut("RUBBER",left,y+15,.9f,.836f,.87f,.898f);button("Hide",x+w-70,y+7,58,49300);line("Exact stock + local network study",y+44);
     button("Create body",left,y+72,inner,49301);button("Study",left,y+112,half,49302);button("Environment",left+half+8,y+112,half,49303);
     const auto* selected=selBody>=0&&(size_t)selBody<g_bodyIds.size()?g_doc.find(g_bodyIds[(size_t)selBody]):nullptr;line("Selected: "+(selected?selected->name:std::string("none")),y+157);char setting[100];std::snprintf(setting,sizeof setting,"%s / %.3g s / %u x %u nodes",p.backend=="gpu"?"GPU":"CPU reference",p.duration,p.around,p.rows);line(setting,y+179);
     button(p.running?"Running...":"Run study",left,y+207,inner-82,49304,true);button(p.cancelling?"Stopping":"Cancel",left+inner-74,y+207,74,49305);

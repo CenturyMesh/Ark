@@ -42,7 +42,7 @@ static void drawAgentPresence030(bool resolve=true){
         for(int attempt=0;attempt<8;++attempt){bool overlap=false;for(const auto& box:labels)if(lx<box[0]+box[2]&&lx+labelWidth>box[0]&&ly<box[1]+box[3]&&ly+35>box[1])overlap=true;if(!overlap)break;ly=ly+38<viewY+viewH-40?ly+38:std::max((float)viewY+12,ly-76);}
         labels.push_back({lx,ly,labelWidth,35});glViewport(viewX,winH-viewY-viewH,viewW,viewH);std::vector<float> backing;auto vertex=[&](float px,float py){backing.insert(backing.end(),{(px-viewX)*2/viewW-1,1-(py-viewY)*2/viewH,0});};
         const float left=lx-5,right=std::min((float)(viewX+viewW-5),lx+labelWidth),top=ly-4,bottom=ly+33;vertex(left,top);vertex(right,top);vertex(left,bottom);vertex(left,bottom);vertex(right,top);vertex(right,bottom);glUniform4f(glGetUniformLocation(pSketch,"tint"),.035f,.055f,.073f,.88f*alpha);glBufferData(GL_ARRAY_BUFFER,(GLsizeiptr)(backing.size()*sizeof(float)),backing.data(),GL_DYNAMIC_DRAW);glDrawArrays(GL_TRIANGLES,0,6);glViewport(0,0,winW,winH);
-        ::textOut(label,lx,ly,.62f,tint[0],tint[1],tint[2]);::textOut(detail.substr(0,48),lx,ly+18,.53f,.77f,.83f,.88f);glViewport(viewX,winH-viewY-viewH,viewW,viewH);
+        ::textOut(label,lx,ly,.62f,tint[0],tint[1],tint[2]);::textOut(detail.substr(0,48),lx,ly+18,.53f,.789f,.821f,.848f);glViewport(viewX,winH-viewY-viewH,viewW,viewH);
     }
     // Busy-frame controls continue drawing with their caller-owned quad VAO.
     // In particular an unlocated agent must not leave an empty marker VBO bound.
