@@ -1,5 +1,11 @@
 # Benchmark nativo dos agentes — D.01 / D.02
 
+052D acrescenta `PartFocused`: delegação real para um documento privado, revisão
+e integração pelo engenheiro. O exemplo, configuração de modelos por papel e
+limites estão em [Part agents](PART_AGENTS_052D.md). Os contratos
+Single/Focused/Parallel abaixo continuam disponíveis como controlos;
+o antigo `team_send scope` não passa a ser isolamento por esta alteração.
+
 `ark-benchmark` compara Single (`runAssistant`), Focused e Parallel (`AgentTeam`)
 com o executor real `AgentSession`. Cada tentativa começa num documento novo,
 com o mesmo baseline sintético, brief, modelo, esforço e critérios nativos.

@@ -309,6 +309,13 @@ std::string assistantUsageLabel(const AssistantUsage& usage){
         " | in "+std::to_string(usage.inputTokens)+" / out "+std::to_string(usage.outputTokens)+
         (usage.missingResponses?" | partial":"");
 }
+arkjson::Value requestDisplayImage(const arkjson::Value& request,const AssistantTransport& offline,const std::atomic_bool* cancel){
+    AssistantConfig config;config.provider="openai";config.endpoint="https://api.openai.com/v1/images/generations";config.apiKeyEnv="OPENAI_API_KEY";config.authMode=AssistantAuthMode::ApiKey;config.protocol=AssistantProtocol::Responses;config.timeoutSeconds=300;config.maxResponseBytes=16*1024*1024;
+    const auto* model=request.find("model");require(model&&model->t==V::Str&&!model->str.empty(),"Image generation requires an explicit model");config.model=model->str;validateAssistantConfig(config);
+    if(!offline&&!assistantApiKeyStored(config)){const char* key=std::getenv("OPENAI_API_KEY");require(key&&*key,"IMAGE_API_KEY_REQUIRED: configure an OpenAI API key in Studio or OPENAI_API_KEY. ChatGPT plan authentication is not used for the Images API.");}
+    return offline?offline(config,request,cancel):nativeTransport(config,request,cancel);
+}
+
 void validateAssistantConfig(const AssistantConfig& config){
     if(config.protocol==AssistantProtocol::Acp){validateAssistantAcpConfig(config);return;}
     if(config.protocol==AssistantProtocol::ClaudeCode){validateAssistantClaudeCodeConfig(config);return;}
@@ -395,23 +402,24 @@ static bool preloadedGuideTopic(const std::string& pack,const V& args){
 // listed here stays core, so new tools are never hidden by omission.
 const std::vector<std::pair<std::string,std::vector<std::string>>>& assistantSpecialistToolTopics(){
     static const std::vector<std::pair<std::string,std::vector<std::string>>> topics={
-        {"bom",{"bom_inspect","bom_review","bom_export","bom_export_parts"}},
+        {"bom",{"bom_inspect","bom_review","bom_export","bom_export_parts","library_search","library_get","library_vendors","library_source_search","library_source_page"}},
         {"fasteners",{"fastener_recipe","library_search","library_get","library_insert","library_info"}},
         {"components",{"library_search","library_get","library_insert","library_info","library_sources","library_source_search","library_source_page","library_fetch","library_ingest","library_update","library_vendors"}},
         {"vendors",{"library_vendors","library_sources","library_source_search","library_source_page","library_fetch","library_ingest"}},
-        {"manufacturing",{"manufacturing_propose","manufacturing_inspect"}},{"plastics",{"manufacturing_propose","manufacturing_inspect"}},
-        {"physics",{"physics_inspect","materials_inspect","compute_info"}},{"materials",{"materials_inspect"}},{"wood",{"wood_inspect"}},
+        {"transmission",{"transmission_inspect","transmission_design"}},
+        {"manufacturing",{"manufacturing_propose","manufacturing_inspect","manufacturing_plan","manufacturing_simulate","manufacturing_export","manufacturing_slice"}},{"plastics",{"manufacturing_propose","manufacturing_inspect"}},
+        {"surfacing",{"surface_control"}},{"rubber",{"rubber_plan","physics_inspect","materials_inspect","compute_info"}},{"physics",{"physics_inspect","rubber_plan","materials_inspect","compute_info"}},{"materials",{"materials_inspect"}},{"wood",{"wood_inspect"}},
         {"motion",{"assembly_motion","suspension_inspect","motion_info","drag_chain_info"}},{"suspension",{"suspension_inspect","assembly_motion"}},
         {"exploded_views",{"explode_info","visualize_render"}},
         {"assembly",{"assembly_authoring_info","placement_plan","pattern_plan","assembly_motion","drag_chain_info"}},{"configurations",{"assembly_authoring_info"}},
         {"sheet",{"sheet_inspect","sheet_preview","export_flat_dxf","import_sheet_step"}},{"stamps",{"sheet_inspect","sheet_preview"}},
         {"frames",{"frame_inspect","stock_preview"}},{"tube",{"tube_inspect","notch_inspect","notch_plan","source_inspect","stock_preview"}},
         {"electronics",{"electronics_inspect","pcb_export"}},{"routing",{"electronics_inspect","pcb_export"}},
-        {"mesh",{"mesh_inspect","mesh_get","import_mesh","export_mesh"}},{"drawings",{"drawing_inspect","drawing_export"}},
+        {"mesh",{"mesh_inspect","mesh_get","import_mesh","export_mesh"}},{"drawings",{"drawing_inspect","drawing_export","schematic_inspect","schematic_export"}},{"schematics",{"schematic_inspect","schematic_export"}},
         {"skeleton",{"skeleton_inspect","skeleton_compile"}},{"automation",{"skeleton_inspect","skeleton_compile","design_solve"}},
         {"planes",{"plane_authoring"}},{"sketch",{"sketch_repair"}},{"containers",{"design_containers"}},{"hud",{"hud_info","hud_flex_check"}},
         {"cad_import",{"import_step","import_cad","step_inspect","cad_inspect","image_asset","export_step","export_iges","doc_new","doc_load"}},
-        {"history",{"feature_history","history_info","iteration_restore","history_migrate_derived","failure_replay","failure_export","usage_info","usage_record","memory_maintain"}}};
+        {"history",{"feature_history","history_info","iteration_restore","history_migrate_derived","history_compact","failure_replay","failure_export","usage_info","usage_record","memory_maintain"}}};
     return topics;
 }
 V assistantActiveTools(const V& tools,const V& conversation,const std::string& onboardingPack){
@@ -422,7 +430,8 @@ V assistantActiveTools(const V& tools,const V& conversation,const std::string& o
     // calls, including agent_onboard rows inside query_batch.
     std::vector<std::string> loaded;auto load=[&](const std::string& topic){if(std::find(loaded.begin(),loaded.end(),topic)==loaded.end())loaded.push_back(topic);};
     if(V pack;!onboardingPack.empty()&&arkjson::parse(onboardingPack,pack))if(const auto* guides=pack.find("topics");guides&&guides->t==V::Arr)for(const auto& guide:guides->arr)load(field(guide,"topic"));
-    auto onboarded=[&](const V& args){const auto* topic=args.find("topic");load(topic&&topic->t==V::Str?topic->str:std::string("overview"));};
+    auto onboarded=[&](const V& args){const auto* topic=args.find("topic");const auto topicName=topic&&topic->t==V::Str?topic->str:std::string("overview");if(topicName.rfind("tool:",0)!=0)load(topicName);
+        if(topic&&topic->t==V::Str&&topic->str=="commands")if(const auto* command=args.find("command");command&&command->t==V::Str&&command->str.rfind("tool:",0)==0&&available.count(command->str.substr(5)))load(command->str);};
     if(conversation.t==V::Arr)for(const auto& item:conversation.arr){if(field(item,"type")!="function_call")continue;V args;if(!arkjson::parse(field(item,"arguments"),args)||args.t!=V::Obj)continue;const auto name=field(item,"name");
         if(name=="agent_onboard")onboarded(args);
         else if(name=="query_batch")if(const auto* queries=args.find("queries");queries&&queries->t==V::Arr)for(const auto& query:queries->arr)if(field(query,"tool")=="agent_onboard")if(const auto* values=query.find("args");values&&values->t==V::Obj)onboarded(*values);}
@@ -432,7 +441,10 @@ V assistantActiveTools(const V& tools,const V& conversation,const std::string& o
     for(const auto& tool:tools.arr){const auto name=field(tool,"name");if(specialist.count(name))continue;V advertised=tool;
         if(name=="agent_onboard"&&!index.empty())advertised.set("description",V::makeStr(field(tool,"description")+" Specialist tools are offered after their topic is loaded with agent_onboard (or already preloaded) and stay available for this conversation. "+index+"."));
         out.arr.push_back(std::move(advertised));added.insert(name);}
-    for(const auto& topic:loaded)for(const auto& [name,names]:topics)if(name==topic)for(const auto& toolName:names)if(available.count(toolName)&&added.insert(toolName).second)for(const auto& tool:tools.arr)if(field(tool,"name")==toolName){out.arr.push_back(tool);break;}
+    for(const auto& topic:loaded){
+        if(topic.rfind("tool:",0)==0){const auto name=topic.substr(5);if(added.insert(name).second)for(const auto& tool:tools.arr)if(field(tool,"name")==name){out.arr.push_back(tool);break;}}
+        else for(const auto& [name,names]:topics)if(name==topic)for(const auto& toolName:names)if(available.count(toolName)&&added.insert(toolName).second)for(const auto& tool:tools.arr)if(field(tool,"name")==toolName){out.arr.push_back(tool);break;}
+    }
     return out;
 }
 V assistantDeferredCatalogue(const V& tools,const V& conversation,const std::string& onboardingPack){
@@ -440,7 +452,9 @@ V assistantDeferredCatalogue(const V& tools,const V& conversation,const std::str
     const auto& topics=assistantSpecialistToolTopics();std::map<std::string,std::string> topicOf;for(const auto& [topic,names]:topics)for(const auto& name:names)topicOf.emplace(name,topic);
     std::set<std::string> preloaded;if(V pack;!onboardingPack.empty()&&arkjson::parse(onboardingPack,pack))if(const auto* guides=pack.find("topics");guides&&guides->t==V::Arr)for(const auto& guide:guides->arr)preloaded.insert(field(guide,"topic"));
     // First call that loaded each topic, including agent_onboard rows in query_batch.
-    std::map<std::string,std::string> loadedBy;auto onboarded=[&](const V& args,const std::string& id){const auto* topic=args.find("topic");loadedBy.emplace(topic&&topic->t==V::Str?topic->str:std::string("overview"),id);};
+    std::map<std::string,std::string> selectedBy;auto onboarded=[&](const V& args,const std::string& id){const auto* topic=args.find("topic");const auto name=topic&&topic->t==V::Str?topic->str:std::string("overview");
+        for(const auto& [topicName,names]:topics)if(name==topicName)for(const auto& toolName:names)selectedBy.emplace(toolName,id);
+        if(topic&&topic->t==V::Str&&topic->str=="commands")if(const auto* command=args.find("command");command&&command->t==V::Str&&command->str.rfind("tool:",0)==0)selectedBy.emplace(command->str.substr(5),id);};
     if(conversation.t==V::Arr)for(const auto& item:conversation.arr){if(field(item,"type")!="function_call")continue;V args;if(!arkjson::parse(field(item,"arguments"),args)||args.t!=V::Obj)continue;const auto name=field(item,"name"),id=field(item,"call_id");
         if(name=="agent_onboard")onboarded(args,id);
         else if(name=="query_batch")if(const auto* queries=args.find("queries");queries&&queries->t==V::Arr)for(const auto& query:queries->arr)if(field(query,"tool")=="agent_onboard")if(const auto* values=query.find("args");values&&values->t==V::Obj)onboarded(*values,id);}
@@ -449,7 +463,9 @@ V assistantDeferredCatalogue(const V& tools,const V& conversation,const std::str
     V out=V::makeArr();
     for(const auto& tool:tools.arr){const auto name=field(tool,"name");V advertised=tool;
         if(name=="agent_onboard"&&!index.empty())advertised.set("description",V::makeStr(field(tool,"description")+" Specialist tools become available after their topic is loaded with agent_onboard (or already preloaded) and stay available for this conversation. "+index+"."));
-        if(const auto topic=topicOf.find(name);topic!=topicOf.end()&&!preloaded.count(topic->second)){advertised.set("ark_deferred",V::makeBool(true));if(const auto by=loadedBy.find(topic->second);by!=loadedBy.end())advertised.set("ark_loaded_by",V::makeStr(by->second));}
+        bool alreadyLoaded=false;for(const auto& [topicName,names]:topics)if(preloaded.count(topicName)&&std::find(names.begin(),names.end(),name)!=names.end()){alreadyLoaded=true;break;}
+        if(topicOf.count(name)&&!alreadyLoaded)advertised.set("ark_deferred",V::makeBool(true));
+        if(advertised.find("ark_deferred"))if(const auto by=selectedBy.find(name);by!=selectedBy.end()&&!advertised.find("ark_loaded_by"))advertised.set("ark_loaded_by",V::makeStr(by->second));
         out.arr.push_back(std::move(advertised));}
     return out;
 }
@@ -505,7 +521,9 @@ static V assistantRequestWith(const AssistantConfig& config,const V& conversatio
         "Use small coherent atomic batches (keep a new or previously failing construction in its own batch until it succeeds), named parameters and construction planes. Related sketches, datums, features and placements can be committed together and evaluate once; do not turn every entity or feature into a separate provider round. Preserve existing work unless the user requests replacement. "
         "Choose geometry from the design intent: dimensioned arcs/splines and exact extrude/revolve, loft or sweep for curved forms; surface trim/offset/thicken for skins, and native fillet/chamfer for finishing. Simple primitives are useful starting stock, not a requirement to make every design rectilinear. Read sketch, solids or surfacing onboarding only when those operation details are missing. "
         "Actual CAD actions are recorded in this project's activity ledger by the host. For each activity_id returned with feedback_required, submit tool_feedback in batches before finishing: utility 1..5, difficulty 1..5, concise action and any issue or wished tool/option. These are subjective ratings, separate from measured timings/outcomes. Rate failed attempts too; do not fabricate scores for unexecuted actions. activity_info lists pending records. "
-        "For bought components, load agent_onboard topic vendors, then use library_source_search source web with actual manufacturer, part reference and requirements, then library_source_page to read the product page. Record the genuine supplier URL and exact manufacturer/supplier reference in feature part metadata. Search snippets are candidates; only verified matching product pages justify sourcing_status selected. If public access fails or data is missing, disclose it and retain unresolved sourcing. Never invent URLs. Maintain structured BOM data as you create physical parts: feature.add/edit part with description, internal part_number, category and make/buy/unspecified procurement; retain known source and manufacturer references separately. Never invent missing commercial data. Use bom onboarding for this contract, inspect bom_inspect and submit bom_review at the current revision before completing design work. Concept review must disclose unresolved fields; detailed review rejects them. If required data is missing, report needs_input rather than inventing it.  report missing metadata and hardware. For detailed mechanical assemblies, inspect mounting interfaces and author required fasteners or report unresolved connections. Use the component library for specified sourced parts; fastener_recipe only supplies explicitly dimensioned simplified editable geometry, not a certified purchased component. "
+        "For bought components, load agent_onboard topic vendors, then use library_source_search source web with actual manufacturer, part reference and requirements, then library_source_page to read the product page. Record the genuine supplier URL and exact manufacturer/supplier reference in feature part metadata. Search snippets are candidates; only verified matching product pages justify sourcing_status selected. If public access fails or data is missing, disclose it and retain unresolved sourcing. Never invent URLs. Maintain structured BOM data as you create physical parts: feature.add part, or feature.edit part_patch for partial updates preserving existing fields, with description, internal part_number, category and make/buy/unspecified procurement; retain known source and manufacturer references separately. Never invent missing commercial data. Use bom onboarding for this contract, inspect bom_inspect and submit bom_review at the current revision before completing design work. Concept review must disclose unresolved fields; detailed review rejects them. If required data is missing, report needs_input rather than inventing it.  report missing metadata and hardware. For detailed mechanical assemblies, inspect mounting interfaces and author required fasteners or report unresolved connections. Use the component library for specified sourced parts; fastener_recipe only supplies explicitly dimensioned simplified editable geometry, not a certified purchased component. "
+        "When a user asks to resume/continue an unfinished task, continue the retained work and its remaining requirements; do not turn it into a summary-only task. Only summarize when the user explicitly asks for a summary. A deferred BOM does not cancel pending mechanical design work. "
+        "For a user-requested limited edit such as cable routing or refreshing an animation, inspect bom_inspect.task_scope and review the affected definitions with bom_review{completion:task,expected_revision,scope,fastening_review,pending_notes} (omit ids to select the host-observed changed definitions, including an empty set for display-only work). This completes only the limited task; explicitly disclose the pending global BOM. Do not fill unrelated metadata to release this gate, or downgrade a requested full-project/detailed deliverable to a limited task/concept review. Existing selected reviews without completion:task do not release finalization. "
         "Use object_context for an existing-object task: keep the selected feature/occurrence IDs, inspect dependencies and mates, and reuse known_fingerprints to omit unchanged data. A name match is a candidate, not proof of function. Preserve the explicit target when delegating. IDs identify objects; fingerprints only detect changes and never replace expected_revision or semantic references. Use compact inspections; avoid doc_get on source tubes and mesh_get unless necessary. Geometry is in millimetres. "
         "Successful snapshot tools can provide actual image pixels with observed revision, view and selected CAD IDs. Use these images to review proportions, layout and before/after changes; they are display evidence, not B-rep authority or fabrication qualification. Do not claim to have seen a snapshot from its path alone or from metadata whose image pixels have been omitted. Use semantic CAD references and revision-checked tools for edits. "
         "Verify changes with tool evidence and explain geometric/manufacturing limitations honestly. Never claim a tool succeeded if it returned an error. "
@@ -704,16 +722,46 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
         return consumed;
     };
     const auto consumeFinalInbox=[&]{return (!retryHooks.inputPending||retryHooks.inputPending())&&consumeInbox();};
-    bool earlierToolCalls=false;std::string lastCompletionIssue;V previousRequest;
+    bool earlierToolCalls=false,offerBomRecovery=false;std::string lastCompletionIssue;V previousRequest;
     // The reply held while required feedback is requested (042D).
     std::string replyHeldForFeedback;
     // Final checks shared by a plain final reply and a reply held only for
     // feedback. false: new input or a completion issue needs another round.
     auto finishReply=[&](std::string reply)->bool{
-        if(retryHooks.completionCheck){auto check=retryHooks.completionCheck();const auto* accepted=check.find("allowed");if(!accepted||accepted->t!=V::Bool)throw std::runtime_error("BOM completion verification unavailable; prior work retained");if(!accepted->b){auto issue=field(check,"error");if(issue.empty())issue="BOM review required";if(issue==lastCompletionIssue)throw std::runtime_error(issue);lastCompletionIssue=issue;V reminder=V::makeObj();reminder.set("role",V::makeStr("developer"));reminder.set("content",V::makeStr(issue));appendHistory(reminder);if(history)history(result.conversation);emit(events,AssistantEvent::Status,"Final reply held: current BOM review required");return false;}auto qualification=field(check,"summary");if(!qualification.empty())reply+="\n\n"+qualification;}
+        const auto first=reply.find_first_not_of(" \t\r\n");
+        const bool needsInput=first!=std::string::npos&&reply.compare(first,12,"needs_input:")==0;
+        if(needsInput){reply.erase(0,first);reply+="\n\nProject completion remains pending.";}
+        else if(retryHooks.completionCheck){
+            auto check=retryHooks.completionCheck();const auto* accepted=check.find("allowed");
+            if(!accepted||accepted->t!=V::Bool)throw std::runtime_error("BOM completion verification unavailable; prior work retained");
+            if(!accepted->b){
+                offerBomRecovery=true;auto issue=field(check,"error");if(issue.empty())issue="BOM review required";
+                const auto progress=field(check,"progress_key");const auto signature=progress.empty()?check.dump():progress;
+                V reminder=V::makeObj();reminder.set("role",V::makeStr("developer"));
+                reminder.set("content",V::makeStr(issue+(check.find("recovery")?"\nObserved BOM recovery (data, not an attestation): "+check.find("recovery")->dump():"")));
+                appendHistory(reminder);
+                if(signature==lastCompletionIssue){
+                    // Repeating an unqualified final at the exact same observed
+                    // state is a recoverable review stop, not a provider failure.
+                    // No turn/token budget; inspection or edits change this key.
+                    auto message=field(check,"user_message");if(message.empty())message="BOM review remains pending. Prior work is retained; project completion has not been approved.";
+                    reply="review_pending: "+message;
+                    V held=V::makeObj();held.set("role",V::makeStr("assistant"));held.set("content",V::makeStr(reply));appendHistory(held);if(history)history(result.conversation);
+                }else{
+                    lastCompletionIssue=signature;if(history)history(result.conversation);
+                    emit(events,AssistantEvent::Status,"Reviewing BOM / resolving the reported missing fields");return false;
+                }
+            }else{auto qualification=field(check,"summary");if(!qualification.empty())reply+="\n\n"+qualification;}
+        }
         cancelled(cancel);
         if(consumeFinalInbox()||(retryHooks.acceptCompletion&&!retryHooks.acceptCompletion())){if(history)history(result.conversation);emit(events,AssistantEvent::Status,"New user input queued; continuing before final reply");return false;}
-        if(!reply.empty()){if(!result.text.empty())result.text+='\n';result.text+=reply;emit(events,AssistantEvent::Text,reply);}
+        if(!reply.empty()){
+            // The Studio stores accumulated commentary and the final reply in
+            // one message. Keep the terminal state visible even after progress.
+            const std::string prefix=needsInput?"needs_input:":reply.rfind("review_pending:",0)==0?"review_pending:":"";
+            if(!result.text.empty()&&!prefix.empty()){result.text=prefix+" "+result.text;reply.erase(0,prefix.size());if(!reply.empty()&&reply.front()==' ')reply.erase(0,1);}
+            if(!result.text.empty())result.text+='\n';result.text+=reply;emit(events,AssistantEvent::Text,reply);
+        }
         return true;
     };
     // Reads repeated with identical results since the last successful write.
@@ -721,7 +769,14 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
     std::map<std::string,std::pair<unsigned,std::string>> readEvidence;unsigned repeatedReadRounds=0;
     // Execution still checks the full catalogue; only the advertised list is deferred.
     const bool toolAdditions=config.deferSpecialistTools&&assistantMessagesToolAdditions(config);
-    auto advertisedTools=[&]{return toolAdditions?assistantDeferredCatalogue(tools,result.conversation,config.onboardingPack):config.deferSpecialistTools?assistantActiveTools(tools,result.conversation,config.onboardingPack):tools;};
+    auto advertisedTools=[&]{
+        auto active=toolAdditions?assistantDeferredCatalogue(tools,result.conversation,config.onboardingPack):config.deferSpecialistTools?assistantActiveTools(tools,result.conversation,config.onboardingPack):tools;
+        if(offerBomRecovery)for(const auto& tool:tools.arr){const auto name=field(tool,"name");if(name!="bom_inspect"&&name!="bom_review"&&name!="library_search"&&name!="library_get"&&name!="library_vendors"&&name!="library_source_search"&&name!="library_source_page")continue;
+            auto found=std::find_if(active.arr.begin(),active.arr.end(),[&](const V& item){return field(item,"name")==name;});
+            if(found==active.arr.end())active.arr.push_back(tool);else *found=tool;
+        }
+        return active;
+    };
     for(unsigned round=0;(!config.maxRounds||round<config.maxRounds);++round){
         cancelled(cancel);emit(events,AssistantEvent::Status,"Thinking...");consumeInbox();
         if(history)history(result.conversation);

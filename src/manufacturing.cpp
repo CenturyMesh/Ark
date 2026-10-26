@@ -90,7 +90,8 @@ bool checkedSolid(const Body* body,V& geometry){
     return exact&&valid&&valid->t==V::Bool&&valid->b&&solids&&solids->t==V::Num&&solids->num==1&&volume&&volume->t==V::Num&&std::isfinite(volume->num)&&volume->num>0;
 }
 V inspectComponent(const Document& document,const Feature& feature){
-    Report r;const auto& route=feature.manufacturingRoute;const auto& process=feature.manufacturingProcess;
+    Report r;V linked=V::makeArr();for(const auto& plan:document.manufacturingPlans.arr)if(const auto* nodes=plan.find("nodes"))for(const auto& node:nodes->arr){const auto* kind=node.find("kind"),*data=node.find("data");if(kind&&kind->str=="part"&&data&&data->find("feature")&&data->find("feature")->num==(double)feature.id){V link=V::makeObj();link.set("name",*plan.find("name"));link.set("process",*plan.find("process"));link.set("source_sha256",*data->find("source_sha256"));link.set("next_action",V::makeStr("manufacturing_plan inspect at the current revision checks source freshness; manufacturing_simulate supplies bounded evidence."));linked.arr.push_back(link);}}if(!linked.arr.empty())r.row.set("linked_manufacturing_plans",linked);
+    const auto& route=feature.manufacturingRoute;const auto& process=feature.manufacturingProcess;
     r.row.set("id",V::makeNum((double)feature.id));r.row.set("name",V::makeStr(feature.name));r.row.set("declared_route",V::makeStr(route.empty()?"undeclared":route));
     const auto lineage=featureManufacturingLineage(document,feature);r.row.set("geometry_route",V::makeStr(lineage.geometryRoute));r.row.set("process",process.t==V::Obj?process:V::makeObj());
     if(lineage.origin)r.row.set("origin",V::makeNum((double)lineage.origin));

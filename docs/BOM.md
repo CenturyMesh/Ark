@@ -1,5 +1,9 @@
 # Persistent part metadata and BOM — 011E
 
+056C adds [actionable sourcing recovery and bounded public-page reads](BOM_RESEARCH_056C.md).
+BOM onboarding offers research tools directly; web results identify the actual
+supplier and provide a page action. Detailed review retains every existing gate.
+
 In 015B, the BOM workspace adds a dark layout, search, All/Needs review/Buy/Make
 filters, status badges and selected-part details. Sort or filter before editing:
 selection remains bound to the original definition ID. Locate part returns to
@@ -19,8 +23,8 @@ the versioned interchange format; it does not embed B-reps or display meshes.
 
 ## Authoring
 
-Call `agent_onboard {"topic":"bom"}` or `{"topic":"fasteners"}`. The current
-discovery has 73 tools, including `bom_inspect`, `bom_export` and
+Call `agent_onboard {"topic":"bom"}` or `{"topic":"fasteners"}`. Tool
+discovery includes `bom_inspect`, `bom_review`, `bom_export` and
 `fastener_recipe`. The ordinary `assembly_info.bom` contains the same enriched
 items while retaining the earlier `feature`, `name` and `quantity` fields.
 
@@ -55,6 +59,46 @@ Reading an older document does not migrate it or invent metadata.
 HTTPS without credentials. The existing feature `material` field refers to a
 named document material. `manufacturing.route` remains the fabrication intent.
 Metadata-only changes preserve native geometry and are part of undo/redo.
+
+For an incremental edit, prefer `feature.edit` with `part_patch`. For example,
+`{"op":"feature.edit","id":12,"part_patch":{"description":"Motor bracket"}}`
+changes only the description. Omitted fields, including supplier references,
+are preserved. The merged record must satisfy the same validation as `part`;
+selecting sourcing may reuse its existing URL/reference, but clearing a required
+source on a selected record rejects atomically. `part_patch` requires the current
+`expected_revision`, is supported by preview/commit, and cannot be combined with
+`part` or used on another operation. It changes no document format.
+
+## Recoverable agent review — A.02 / D.02
+
+A completion rejection reports current counts, bounded missing-identity rows,
+unresolved field counts, document issues and the next inspection request.
+Progress includes current authoring, revision and the inspected definitions.
+Reading another page at the same revision is progress. This data is diagnostic,
+not a completed inspection or a review attestation. Internal identity fields can
+be assigned from design intent; unknown materials and commercial data remain
+unresolved. Material is a feature field and fabrication intent is
+`manufacturing.route`, not a key inside `part_patch`.
+
+Single offers the BOM inspection/review tools after a completion rejection.
+An explicit leading `needs_input:` request reaches the user without approving
+project completion. Repeating a final answer at the same unresolved review state
+ends with **BOM review pending**, retaining the work and withholding the proposed
+completion text. This is distinct from a provider interruption. Team receives
+the same structured recovery with its rejected `team_finish_goal` call.
+
+For explicitly limited work, `bom_review{completion:"task",...}` may omit `ids`:
+the host selects all affected definitions (up to 64). An empty affected set can
+review display-only or read-only work after a current inspection. Explicit IDs
+still must cover every affected definition. Removed definitions, unavailable
+baseline or a larger set require project review. Concept/detailed requirements
+are unchanged. No task receipt approves the global BOM.
+
+A bare Resume/Continue request in an existing Single conversation preserves its
+goal and BOM baseline. It continues the unfinished work rather than starting a
+summary-only task. An explicitly requested summary remains a separate request.
+The visible completion qualification is short; detailed pending/fastening notes
+remain in the `bom_review` receipt. Receipts are session-local.
 
 `procurement` is `make`, `buy` or `unspecified`. `sourcing_status` is
 `unresolved`, `candidate` or `selected`; selection requires a source URL and an

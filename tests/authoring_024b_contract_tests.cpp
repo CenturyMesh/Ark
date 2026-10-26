@@ -9,7 +9,7 @@ static void check(bool value,const char* message){if(!value)throw std::runtime_e
 static V json(const char* text){V v;if(!arkjson::parse(text,v))throw std::runtime_error("Fixture JSON");return v;}
 static V call(AgentSession& s,const char* tool,V args){auto result=s.call(tool,args);if(result.find("isError")->b)throw std::runtime_error(result.find("structuredContent")->dump());return *result.find("structuredContent");}
 int main(){try{
-    AgentSession session;const auto tools=AgentSession::tools();check(tools.arr.size()==108,"Expected 108 discoverable tools");
+    AgentSession session;const auto tools=AgentSession::tools();check(tools.arr.size()==121,"Expected 121 discoverable tools");
     for(const char* topic:{"stamps","planes"})check(!call(session,"agent_onboard",json((std::string("{\"topic\":\"")+topic+"\"}").c_str())).find("rules")->arr.empty(),"Missing specialized onboarding");
     const auto baseline=documentToJson(session.document);auto preview=call(session,"plane_authoring",json(R"({"action":"create_plane","name":"Elevated","parent":"XY","p":{"oz":"12"},"expected_revision":0,"preview":true})"));check(preview.find("commands")&&!preview.find("applied")->b&&session.revision==0&&documentToJson(session.document)==baseline,"Plane preview must be concrete and immutable");
     call(session,"plane_authoring",json(R"({"action":"create_plane","name":"Elevated","parent":"XY","p":{"oz":"12"},"expected_revision":0})"));check(session.revision==1,"Plane command must atomically commit once");

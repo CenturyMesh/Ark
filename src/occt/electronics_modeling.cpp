@@ -73,10 +73,36 @@ V modelPcb(const V& request){
 V modelCable(const V& request){
     const V& input=sequence(request,"path",34);if(input.arr.size()<2)throw std::runtime_error("Cable needs two endpoints");double radius=number(request,"radius"),bend=number(request,"bend_radius");if(radius<=0||bend<radius)throw std::runtime_error("Invalid cable radius");std::vector<gp_Pnt> path;for(const V& p:input.arr)path.push_back(xyz(p));
     BRepBuilderAPI_MakeWire wire;gp_Pnt cursor=path.front();
-    for(size_t i=1;i+1<path.size();++i){gp_Vec incoming(path[i-1],path[i]),outgoing(path[i],path[i+1]);double a=incoming.Magnitude(),b=outgoing.Magnitude();if(a<1e-5||b<1e-5)throw std::runtime_error("Cable has a zero segment");incoming.Normalize();outgoing.Normalize();double angle=std::acos(std::clamp(incoming.Dot(outgoing),-1.,1.));if(angle<1e-7)continue;if(angle>3.13)throw std::runtime_error("Cable reverses at waypoint");double tangent=bend*std::tan(angle/2);if(tangent>=.49*std::min(a,b))throw std::runtime_error("Cable bend radius cannot fit segment");gp_Pnt enter=path[i].Translated(incoming.Multiplied(-tangent)),leave=path[i].Translated(outgoing.Multiplied(tangent));if(cursor.Distance(enter)>1e-7)wire.Add(BRepBuilderAPI_MakeEdge(cursor,enter));gp_Vec normal=incoming.Crossed(outgoing);if(normal.Magnitude()<1e-10)throw std::runtime_error("Cable bend plane degenerate");normal.Normalize();gp_Vec radial=normal.Crossed(incoming);radial.Normalize();gp_Pnt center=enter.Translated(radial.Multiplied(bend));gp_Vec r0(center,enter),r1(center,leave);gp_Vec mid=r0.Added(r1);if(mid.Magnitude()<1e-10)throw std::runtime_error("Cable bend arc degenerate");mid.Normalize();gp_Pnt middle=center.Translated(mid.Multiplied(bend));Handle(Geom_TrimmedCurve) arc=GC_MakeArcOfCircle(enter,middle,leave);wire.Add(BRepBuilderAPI_MakeEdge(arc));cursor=leave;}
-    if(cursor.Distance(path.back())>1e-7)wire.Add(BRepBuilderAPI_MakeEdge(cursor,path.back()));if(!wire.IsDone())throw std::runtime_error("Cable path wire failed");TopoDS_Wire spine=wire.Wire();gp_Vec initial(path[0],path[1]);if(initial.Magnitude()<1e-5)throw std::runtime_error("Cable start direction invalid");gp_Circ circle(gp_Ax2(path[0],gp_Dir(initial)),radius);TopoDS_Edge sectionEdge=BRepBuilderAPI_MakeEdge(circle).Edge();BRepBuilderAPI_MakeWire section(sectionEdge);BRepBuilderAPI_MakeFace face(section.Wire());BRepOffsetAPI_MakePipe pipe(spine,face.Face());pipe.Build();if(!pipe.IsDone())throw std::runtime_error("Exact cable sweep failed");TopoDS_Shape shape=pipe.Shape();
+    for(size_t i=1;i+1<path.size();++i){
+        gp_Vec incoming(path[i-1],path[i]),outgoing(path[i],path[i+1]);
+        const double a=incoming.Magnitude(),b=outgoing.Magnitude();if(a<1e-5||b<1e-5)throw std::runtime_error("Cable has a zero segment");
+        incoming.Normalize();outgoing.Normalize();gp_Vec normal=incoming.Crossed(outgoing);
+        const double angle=std::atan2(normal.Magnitude(),std::clamp(incoming.Dot(outgoing),-1.,1.));
+        if(angle<1e-7)continue;if(angle>3.13)throw std::runtime_error("Cable reverses at waypoint");
+        const double tangent=bend*std::tan(angle/2);if(tangent>=.49*std::min(a,b))throw std::runtime_error("Cable bend radius cannot fit segment");
+        const gp_Pnt enter=path[i].Translated(incoming.Multiplied(-tangent)),leave=path[i].Translated(outgoing.Multiplied(tangent));
+        if(cursor.Distance(enter)>1e-7)wire.Add(BRepBuilderAPI_MakeEdge(cursor,enter));
+        if(normal.Magnitude()<1e-10)throw std::runtime_error("Cable bend plane degenerate");normal.Normalize();
+        gp_Vec radial=normal.Crossed(incoming);radial.Normalize();const gp_Pnt center=enter.Translated(radial.Multiplied(bend));
+        // The radius, center and tangent plane are already known. Reconstructing
+        // this circle from three nearly collinear points loses a shallow arc's
+        // sagitta and can create an edge without geometry during animation.
+        // Build the same analytic circle directly; keep all validity thresholds.
+        const gp_Circ circle(gp_Ax2(center,gp_Dir(normal),gp_Dir(radial.Reversed())),bend);
+        BRepBuilderAPI_MakeEdge arc(circle,0.,angle);if(!arc.IsDone())throw std::runtime_error("Cable bend arc construction failed");
+        double arcFirst=0,arcLast=0;if(BRep_Tool::Curve(arc.Edge(),arcFirst,arcLast).IsNull())throw std::runtime_error("Cable bend arc has no 3D curve");wire.Add(arc.Edge());cursor=leave;
+    }
+    if(cursor.Distance(path.back())>1e-7)wire.Add(BRepBuilderAPI_MakeEdge(cursor,path.back()));if(!wire.IsDone())throw std::runtime_error("Cable path wire failed");TopoDS_Wire spine=wire.Wire();
+    for(const auto& edge:shapes(spine,TopAbs_EDGE)){double first=0,last=0;if(BRep_Tool::Curve(TopoDS::Edge(edge),first,last).IsNull())throw std::runtime_error("Cable spine lost its 3D curve");}
+    gp_Vec initial(path[0],path[1]);if(initial.Magnitude()<1e-5)throw std::runtime_error("Cable start direction invalid");gp_Circ circle(gp_Ax2(path[0],gp_Dir(initial)),radius);TopoDS_Edge sectionEdge=BRepBuilderAPI_MakeEdge(circle).Edge();BRepBuilderAPI_MakeWire section(sectionEdge);TopoDS_Shape shape;
+    constexpr double sweepTolerance=1e-7;double sweepError=0;
+    // The convenience pipe builder's internal tolerance collapses tiny but
+    // legitimate rounded corners. Use explicit, tighter tolerances and verify
+    // the resulting surface error before ordinary B-rep/solid validation.
+    try{BRepOffsetAPI_MakePipeShell pipe(spine);pipe.SetMode(false);pipe.SetTolerance(sweepTolerance,sweepTolerance,sweepTolerance);pipe.Add(section.Wire(),false,false);pipe.Build();if(!pipe.IsDone()||!pipe.MakeSolid())throw std::runtime_error("Exact cable sweep failed");sweepError=pipe.ErrorOnSurface();if(!std::isfinite(sweepError)||sweepError>sweepTolerance)throw std::runtime_error("Cable sweep surface error exceeds 1e-7 mm");shape=pipe.Shape();}catch(const Standard_Failure& failure){throw std::runtime_error(std::string("Cable sweep build: ")+failure.GetMessageString());}
+    for(const auto& edge:shapes(shape,TopAbs_EDGE)){double first=0,last=0;if(!BRep_Tool::Degenerated(TopoDS::Edge(edge))&&BRep_Tool::Curve(TopoDS::Edge(edge),first,last).IsNull())throw std::runtime_error("Cable sweep produced an edge with only surface curves");}
     double nearest=1e300;for(const V& item:sequence(request,"obstacles",64).arr){gp_Pnt lo=xyz(need(item,"min")),hi=xyz(need(item,"max"));if(hi.X()<=lo.X()||hi.Y()<=lo.Y()||hi.Z()<=lo.Z())throw std::runtime_error("Cable obstacle bounds invalid");TopoDS_Shape block=BRepPrimAPI_MakeBox(lo,hi).Shape();BRepExtrema_DistShapeShape distance(shape,block);distance.Perform();if(!distance.IsDone())throw std::runtime_error("Exact cable obstacle check failed");nearest=std::min(nearest,distance.Value());if(distance.Value()<=1e-6)throw std::runtime_error("Exact cable collides with obstacle "+word(item,"name"));}
-    GProp_GProps properties;BRepGProp::LinearProperties(spine,properties);V result=shapeResult(shape,true),report=need(request,"report");report.set("route_length_mm",V::makeNum(properties.Mass()));report.set("exact_obstacle_checked",V::makeBool(true));if(nearest<1e299)report.set("minimum_obstacle_clearance_mm",V::makeNum(nearest));result.set("electronics",report);result.set("electronics_kind",V::makeStr("cable_route"));return result;
+    GProp_GProps properties;BRepGProp::LinearProperties(spine,properties);V result=shapeResult(shape,true),report=need(request,"report");report.set("route_length_mm",V::makeNum(properties.Mass()));report.set("sweep_tolerance_mm",V::makeNum(sweepTolerance));report.set("sweep_surface_error_mm",V::makeNum(sweepError));report.set("exact_obstacle_checked",V::makeBool(true));if(nearest<1e299)report.set("minimum_obstacle_clearance_mm",V::makeNum(nearest));result.set("electronics",report);result.set("electronics_kind",V::makeStr("cable_route"));return result;
 }
 #include "electronics_cables_035b.inl"
 } // namespace

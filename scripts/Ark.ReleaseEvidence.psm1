@@ -69,7 +69,7 @@ function New-ArkReleaseEvidence([string]$Repository,[string]$PackageDirectory,[s
     $sourceRelease = $release
     if ($UseRuntimeIdentity) { $release = @{version=$metadata.version;code=$metadata.iteration_code;sequence=$metadata.sequence;phase=$metadata.phase} }
     elseif ($metadata.version -ne $release.version -or $metadata.iteration_code -ne $release.code -or $metadata.sequence -ne $release.sequence -or $metadata.phase -ne $release.phase) { throw 'Package identity differs from release.json.' }
-    foreach ($notice in @('LICENSE','NOTICE','licenses/mapbox-earcut-ISC.txt','licenses/stb-image-LICENSE.txt','licenses/sqlite-provenance.txt','licenses/LICENSE_LGPL_21.txt','licenses/OCCT_LGPL_EXCEPTION.txt')) {
+    foreach ($notice in @('LICENSE','NOTICE','licenses/mapbox-earcut-ISC.txt','licenses/stb-image-LICENSE.txt','licenses/sqlite-provenance.txt','licenses/zstd-LICENSE.txt','licenses/LICENSE_LGPL_21.txt','licenses/OCCT_LGPL_EXCEPTION.txt')) {
         if (-not (Test-Path -LiteralPath (Join-Path $PackageDirectory $notice) -PathType Leaf)) { throw "Required package notice missing: $notice" }
     }
     $inventory = Get-ArkPackageInventory $PackageDirectory
@@ -81,6 +81,7 @@ function New-ArkReleaseEvidence([string]$Repository,[string]$PackageDirectory,[s
         @('mapbox-earcut','2.2.4','ISC','third_party/mapbox/earcut.hpp','https://github.com/mapbox/earcut.hpp/tree/v2.2.4'),
         @('stb_image','2.30','MIT','third_party/stb/stb_image.h','https://github.com/nothings/stb/tree/013ac3beddff3dbffafd5177e7972067cd2b5083'),
         @('SQLite','3.54.0','LicenseRef-SQLite-Public-Domain','third_party/sqlite/sqlite3.c','https://www.sqlite.org/2026/sqlite-amalgamation-3540000.zip'),
+        @('zstd','1.5.7','BSD-3-Clause','third_party/zstd/lib/zstd.h','https://github.com/facebook/zstd/tree/v1.5.7'),
         @('Open-CASCADE-Technology','8.0.1','LGPL-2.1-only WITH OCCT-exception-1.0','','https://github.com/Open-Cascade-SAS/OCCT/tree/V8_0_1')
     )
     $components = @(foreach ($definition in $definitions) {

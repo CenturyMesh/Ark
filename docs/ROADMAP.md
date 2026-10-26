@@ -1,5 +1,102 @@
 # ARK roadmap A–G
 
+064A (**A.02/A.04/B.01/B.04 — Verificado no escopo local**): immutable drag paths
+reuse validated continuation checkpoints, key-light shadows use GPU depth maps,
+and local horizon occlusion replaces noisy screen-space shadow rays. Sixteen
+focused suites passed. Before merge, clean Windows trees passed native CTest
+179/179 and portable core 121/121. Team catalogs now stay within the 128-function
+provider limit. See [064A evidence and limits](iterations/064A.md).
+Broader milestones remain **Parcial**.
+
+063A (**A.02/A.04/B.01/B.04 — Verificado no escopo local**): retained rigid-movement geometry,
+interactive raster during ray-traced component dragging, improved shadow depth
+and plane context sections. See [063A scope and evidence](iterations/063A.md).
+Broader milestones remain **Parcial**.
+
+062B (**A.02/A.04/B.01/B.04/C.03/D.02/E.01 — Verificado no escopo local**): exact smart
+measurement with D/Ctrl, non-destructive plane/screen-line section views,
+multi-occurrence Spotlight and retained additive build plates shared with agents.
+Broader milestones remain **Parcial**; see [062B scope and evidence](iterations/062B.md).
+
+061C follow-up (**A.02/A.04/D.02 — Verificado no escopo local**): Single retains
+its task after manual edits, requires fresh inspection and rejects stale writes;
+native window commands remain available during slow operations. Eight focused
+local suites passed. A separate existing full-assistant tool-count abort remains
+open. Broader milestones remain **Parcial**; see [evidence and limits](iterations/061C.md#manual-edits-and-native-window-commands-2026-10-26).
+
+061C (**A.02/B.04/C.04/D.02/E.01 ? Verificado no escopo local**): shared mate engineering for gears, chains, belts and shafts; RPM/Nm/power, reference dimensions, double-helical load sharing, torsion and bounded single/compound optimization with parameter-bound preview/apply. Broader B.04/C.04 remain **Parcial**. See [061C evidence](iterations/061C.md) and [transmission contracts](TRANSMISSIONS_061C.md).
+
+060C (**A.02/A.04/C.03/C.04/D.02/E.01 ? Verificado no escopo local**): native additive/CNC manufacturing DAG, revision-bound agent authoring, shared context/Obsidian export, three-axis stock/tool/fixture/carriage screening, external Bambu CLI and declared-rate estimates. Broader manufacturing remains **Parcial**; see [060C](iterations/060C.md) and [contracts](MANUFACTURING_060C.md).
+
+059C is **Verificado no escopo** locally for **A.02/A.04/B.01/B.03/B.04/C.04/D.02**:
+editable rubber bodies, indexed patterns, derived CPU/GPU dynamics, exact face
+cycling, background GPU snapshots and exact surface mirror/trim/ruled/fill with
+guides and pole/glue controls. Native contracts, persistence and integrated UI
+tests passed. Broader B.03/C.04 remain **Parcial**; see [059C evidence and measured
+limits](iterations/059C.md).
+
+058A is **Verificado no escopo** locally for **A.02/A.04/D.02**: conversation
+reflow after messages arrive while Studio is minimized, and clear navigation in
+expanded chat. Twelve selected checks passed, including the previously failing
+minimize/update/restore lifecycle; captures were inspected. See
+[058A](iterations/058A.md). Broader milestones remain **Parcial**.
+
+057B is **Verificado no escopo** locally for **A.02/A.04/B.01/D.02**: native
+conversation layout, orientation cube and grouped viewport display controls.
+Fourteen final checks and inspected synthetic-fixture captures are recorded in
+[057B](iterations/057B.md). Broader milestones remain **Parcial**.
+
+056C is **Verificado no escopo** locally for **A.02/A.04/A.05/B.01/B.04/C.04/D.02/E.01**:
+integrated derived GPU rigid-body dynamics, viewport quality and
+mesh reuse, lossless derived storage/compaction, parameterized agent commands
+and supplier-evidence/BOM recovery. See [056C evidence](iterations/056C.md).
+Broader milestones remain **Parcial**; this does not qualify structural FEA,
+manufacture, arbitrary project sizes or every supplier integration.
+
+055D is **Verificado no escopo** locally for **A.02/B.04/C.04/D.02**: host-observed limited
+task BOM review permits qualified Single/Team completion without requiring
+unrelated legacy part identities. Global review, current revisions, inspection,
+and detailed metadata requirements remain enforced. Native rounded cable sweeps
+also handle shallow corners with explicit tighter tolerances and measured surface
+error. See [055D evidence](iterations/055D.md).
+Broader milestones remain **Parcial**.
+
+The additional 055D **A.02 / D.02** BOM recovery work is **Verificado no escopo** locally (13 selected suites): incremental
+metadata patches, concrete completion diagnostics, explicit input/review-pending
+states, and retained task scope on Resume. Detailed/global completion requirements
+remain enforced; see [BOM recovery](BOM.md) and [055D evidence](iterations/055D.md).
+
+The 055D local **A.02 / D.02** UI follow-up is **Verificado no escopo** for a
+readable, selectable agent conversation, pinned goal and explicit execution
+states. Ten selected native suites and conversation captures passed local
+verification; see [055D evidence](iterations/055D.md) and the
+[conversation contract](ASSISTANT_CONVERSATION.md). Broader agent milestones
+remain **Parcial**.
+
+The same development iteration adds scoped **A.02 / B.04 / D.02 / E.01** media
+authoring: local PNG/GIF/MP4 composition, a credential-explicit Images API entry,
+and session-local GIF/LED display binding to baked motion. Local composition and
+playback tests are **Verificado no escopo**; live provider access depends on the
+configured API key, and persistent/hardware synchronization is not claimed.
+See [media authoring](MEDIA_AUTHORING.md) and [055D evidence](iterations/055D.md).
+
+054B is **Verificado no escopo** locally for **A.02/B.04/B.05/C.04/D.02**: editable electrical
+schematics, sheet BOM/DXF, part and assembly families with Eye visibility filters,
+and native cable display at baked poses. See the [054B contract](DISCIPLINES_SCHEMATICS_054B.md)
+and [verification](iterations/054B.md). Broader milestones remain **Parcial**.
+
+053B is **Verificado no escopo** locally for **A.02/A.03/B.01/B.04/E.01**: portable parametric
+parts/assemblies, explicit revision replacement and a native local graph.
+See the [component contract](PARAMETRIC_COMPONENTS_053B.md) and
+[053B verification](iterations/053B.md). Broader milestones remain **Parcial**.
+
+052D is **Verificado no escopo** locally for **A.03/B.04/D.01/D.02/D.03** through
+[isolated part delegation](PART_AGENTS_052D.md): private Focused designer
+workspaces, lead-owned checked integration and matched delegation measurements.
+The broader milestones remain **Parcial**. The small live edit showed overhead,
+not savings; larger tasks and general parallel merges remain unproven;
+see [052D evidence](iterations/052D.md).
+
 ARK aims to make an intention into an editable, inspectable design through a
 workspace shared by people and agents. The next features must improve dependable
 CAD authoring before claims of general industrial qualification.
@@ -8,6 +105,14 @@ The public iteration and numeric runtime are defined in
 [release.json](../release.json). An iteration such as `016F` identifies the globally
 increasing sequence and its principal phase. The letter is a roadmap phase, not a
 month; it does not declare the phase complete. The `.ark` format evolves separately.
+
+051A is **Verificado no escopo** locally for **A.02/A.03/A.04/B.02/B.03/B.04/D.01/D.02**:
+explicit archived history compaction, part-scoped sketches, background edit
+preparation, native geometry regression verification and measured agent task
+outcomes. Acceptance and evidence are tracked in [051A](iterations/051A.md).
+The broader milestones remain **Parcial**. Local core/native/UI verification
+does not establish hosted CI, distribution, live-model savings or manufacturing
+qualification.
 
 050B addresses **B.04/C.04/B.02/A.02**, **Parcial**, with native driven drag
 chains, carriage playback and a 256-sketch document limit. Integration
@@ -266,9 +371,9 @@ Goal: work for days without lost work, ambiguous identity or unverifiable regres
 | ID | Milestone | Status | Acceptance still governing the work |
 |---|---|---|---|
 | A.01 | Iteration identity and release records | Verificado no escopo | Validate `release.json`; expose one consistent identity in application, MCP, onboarding and packages. Preserve global sequence and runtime/document separation. [001A evidence](iterations/001A.md) [019B source identity](iterations/019B.md). [022B identity and compatibility](iterations/022B.md). |
-| A.02 | Recovery and work protection | Parcial | Crash during save/modeling/update, disk-full and truncation tests preserve the last intact revision; recoverable autosave cannot replace the original silently. [029B local recovery and injected persistence failures](TRUST_FOUNDATION.md) retain explicit recovery choices; real power-loss qualification remains open. [045A save capacity and journal visibility](iterations/045A.md) keep an over-capacity saved-geometry cache from failing the save. [049A derived bakes](DERIVED_BAKES_049A.md) keep baked motion frames out of authoring and the journal, with an explicit backed-up journal migration. |
-| A.03 | Regression corpus and release chain | Parcial | Authorized reproducible positives/negatives with seeds/hashes; native, UI, persistence and OTA suites; receipts for distributed artifacts; actual hosted CI execution. [019B hosted native/portable checks and relocated Linux package](iterations/019B.md) establish that scope, with broader release qualification still open. [022B native, persistence, consumer and viewport regression](iterations/022B.md) adds local evidence; hosted CI and user acceptance remain separate gates. |
-| A.04 | Observable performance | Parcial | Measure cold/warm open, incremental save, p95 interaction and recompute at three project sizes against the same machine/baseline. [012D scope](iterations/012D.md) [022B source audit and equivalent synthetic measurements](PERFORMANCE_AUDIT_022B.md) distinguish native evaluation, pending gesture handlers, prepared commit and display work; three-size project p95 qualification remains open. 029B adds native viewport reuse and a matched native three-size control benchmark; see [029B performance](PERFORMANCE_029B.md). [043A opening/rebuild](iterations/043A.md) measures one large freeform document before and after. [046B background exact reads](ASYNC_EXACT_046B.md) keep the Studio viewport live during allow-listed exact reads on one synthetic fixture; writes and full recompute still block. |
+| A.02 | Recovery and work protection | Parcial | Crash during save/modeling/update, disk-full and truncation tests preserve the last intact revision; recoverable autosave cannot replace the original silently. [029B local recovery and injected persistence failures](TRUST_FOUNDATION.md) retain explicit recovery choices; real power-loss qualification remains open. [045A save capacity and journal visibility](iterations/045A.md) keep an over-capacity saved-geometry cache from failing the save. [049A derived bakes](DERIVED_BAKES_049A.md) keep baked motion frames out of authoring and the journal, with an explicit backed-up journal migration. [051A archived compaction](HISTORY_COMPACTION_051A.md) preserves a verified complete archive, bounded undo and explicitly retained branch states. |
+| A.03 | Regression corpus and release chain | Parcial | Authorized reproducible positives/negatives with seeds/hashes; native, UI, persistence and OTA suites; receipts for distributed artifacts; actual hosted CI execution. [019B hosted native/portable checks and relocated Linux package](iterations/019B.md) establish that scope, with broader release qualification still open. [022B native, persistence, consumer and viewport regression](iterations/022B.md) adds local evidence; hosted CI and user acceptance remain separate gates. [051A native evidence](NATIVE_GEOMETRY_051A.md) verifies the frozen OCCT patches with a supported LLVM-MinGW build route and unchanged regression oracles. |
+| A.04 | Observable performance | Parcial | Measure cold/warm open, incremental save, p95 interaction and recompute at three project sizes against the same machine/baseline. [012D scope](iterations/012D.md) [022B source audit and equivalent synthetic measurements](PERFORMANCE_AUDIT_022B.md) distinguish native evaluation, pending gesture handlers, prepared commit and display work; three-size project p95 qualification remains open. 029B adds native viewport reuse and a matched native three-size control benchmark; see [029B performance](PERFORMANCE_029B.md). [043A opening/rebuild](iterations/043A.md) measures one large freeform document before and after. [046B background exact reads](ASYNC_EXACT_046B.md) keep the Studio viewport live during allow-listed exact reads on one synthetic fixture; write preparation was outside that scope. [051A background authoring](ASYNC_AUTHORING_051A.md) extends live navigation to ordinary geometry-changing doc_apply through private preparation, cancellation and revision/epoch-bound publication; other write paths and broad p95 qualification remain separate. |
 | A.05 | Security, licensing and dependencies | Parcial | Apache-2.0 source license and dependency notices are adopted; source/publication inventory, software SBOM, binary provenance, signing and vulnerability handling need evidence. Never package credentials or user designs. [019B portable image decoder provenance and notices](iterations/019B.md). |
 
 ## B — Competitive CAD authoring
@@ -277,10 +382,10 @@ Goal: create and revise a complete product with clear, reliable interactions.
 
 | ID | Milestone | Status | Acceptance still governing the work |
 |---|---|---|---|
-| B.01 | Readable navigation and editing | Parcial | Stable cube/axes, free orbit, selection/Spotlight, shortcuts and DPI; no clipped controls at supported resolutions. Measurement and display units have [013B evidence](iterations/013B.md); BOM layout has [015B evidence](iterations/015B.md). [017B scoped evidence](iterations/017B.md). [018B editable authoring and coordination](iterations/018B.md). [019B native/mesh pointer selection, hover and visual authoring](iterations/019B.md). [020B exact extrusion gestures and source dimensions](iterations/020B.md). [021B direct handle and snapshot feedback](iterations/021B.md). [022B existing-solid resize, asynchronous previews, exact vertex tools and integrated sheets](iterations/022B.md). 029B adds accessible native fields, visible focus and dynamic DPI/work-area reflow; [sketch/accessibility evidence](SKETCH_ASSISTANCE_029B.md). [048B](iterations/048B.md) adds the Studio parametric HUD overlay with staged Rebuild/Auto. |
-| B.02 | Everyday sketches and feature history | Parcial | Actionable constraint diagnostics, valid reorder, suppress/rollback and visible dependencies; rejection leaves the document intact. Arcs/snaps/expressions have scoped 005B/008D evidence. [017B scoped evidence](iterations/017B.md). [018B editable authoring and coordination](iterations/018B.md). [019B visual and parametric authoring](iterations/019B.md). [020B exact extrusion gestures and source dimensions](iterations/020B.md). [021B associative extrusion source](iterations/021B.md). [022B source-preserving edits, opaque validated preview handoff and version-37 journal checks](iterations/022B.md). 029B adds equilibrated QR solving and source/revision-bound reviewed conflict alternatives; [sketch assistance](SKETCH_ASSISTANCE_029B.md). [046B profile regions](PROFILE_REGIONS_046B.md) make multi-loop sketches with holes one extrude/revolve profile, with typed loop rejections and an optional region selection. [048B parametric HUD](PARAMETRIC_HUD_048B.md) exposes ranged named parameters and a sampled flex check. |
-| B.03 | Advanced solids and surfaces | Parcial | Difficult loft/sweep/guide/patch/trim/thicken corpus, measured continuity and explicit repair; no mesh fallback concealing exact failures. [017B scoped evidence](iterations/017B.md). [018B editable authoring and coordination](iterations/018B.md). [019B visual and parametric authoring](iterations/019B.md). [020B exact sketch extrusion](iterations/020B.md). [021B bounded face/extrusion geometry](iterations/021B.md). [022B exact polyhedral vertex pull](NATIVE_VERTEX_PULL_022B.md) adds a bounded faceted-solid domain with input/output validity and selfinterference checks. 029B adds bounded exact orientation repair and a difficult geometry corpus; [repair evidence](SURFACE_REPAIR_029B.md). [046B hollow sweep sections](PROFILE_REGIONS_046B.md) sweep inner loops with one shared placement and a volume-conservation check. |
-| B.04 | Large, configurable assemblies | Parcial | Subassemblies, reused instances, configurations, external references and selective loading; editing one definition updates all occurrences. Supported mechanisms are locally scoped. [022B source-linked component patterns](SPECIALIZED_PATTERNS_022B.md) cover inheritance, planar/spatial points, exact curve stations, chain alternation, skips and actual occurrence consumers; large configuration/loading qualification remains open. 029B adds semantic loading, measured derived-buffer/external-I/O reduction and scoped v2 configuration/pin ownership; [assembly evidence](ASSEMBLY_SCALING_029B.md). [048B exploded views](EXPLODED_VISUALIZE_048B.md) are display-only, revision-neutral and drivable by baked motions. |
+| B.01 | Readable navigation and editing | Parcial | Stable cube/axes, free orbit, selection/Spotlight, shortcuts and DPI; no clipped controls at supported resolutions. Measurement and display units have [013B evidence](iterations/013B.md); BOM layout has [015B evidence](iterations/015B.md). [017B scoped evidence](iterations/017B.md). [018B editable authoring and coordination](iterations/018B.md). [019B native/mesh pointer selection, hover and visual authoring](iterations/019B.md). [020B exact extrusion gestures and source dimensions](iterations/020B.md). [021B direct handle and snapshot feedback](iterations/021B.md). [022B existing-solid resize, asynchronous previews, exact vertex tools and integrated sheets](iterations/022B.md). 029B adds accessible native fields, visible focus and dynamic DPI/work-area reflow; [sketch/accessibility evidence](SKETCH_ASSISTANCE_029B.md). [048B](iterations/048B.md) adds the Studio parametric HUD overlay with staged Rebuild/Auto. [053B native graph](PARAMETRIC_COMPONENTS_053B.md) connects authored relationships, geometry selection and local navigation. |
+| B.02 | Everyday sketches and feature history | Parcial | Actionable constraint diagnostics, valid reorder, suppress/rollback and visible dependencies; rejection leaves the document intact. Arcs/snaps/expressions have scoped 005B/008D evidence. [017B scoped evidence](iterations/017B.md). [018B editable authoring and coordination](iterations/018B.md). [019B visual and parametric authoring](iterations/019B.md). [020B exact extrusion gestures and source dimensions](iterations/020B.md). [021B associative extrusion source](iterations/021B.md). [022B source-preserving edits, opaque validated preview handoff and version-37 journal checks](iterations/022B.md). 029B adds equilibrated QR solving and source/revision-bound reviewed conflict alternatives; [sketch assistance](SKETCH_ASSISTANCE_029B.md). [046B profile regions](PROFILE_REGIONS_046B.md) make multi-loop sketches with holes one extrude/revolve profile, with typed loop rejections and an optional region selection. [048B parametric HUD](PARAMETRIC_HUD_048B.md) exposes ranged named parameters and a sampled flex check. [051A scoped sketches](SCOPED_SKETCHES_051A.md) add definition ownership, explicit references and guarded per-scope capacity. |
+| B.03 | Advanced solids and surfaces | Parcial | Difficult loft/sweep/guide/patch/trim/thicken corpus, measured continuity and explicit repair; no mesh fallback concealing exact failures. [017B scoped evidence](iterations/017B.md). [018B editable authoring and coordination](iterations/018B.md). [019B visual and parametric authoring](iterations/019B.md). [020B exact sketch extrusion](iterations/020B.md). [021B bounded face/extrusion geometry](iterations/021B.md). [022B exact polyhedral vertex pull](NATIVE_VERTEX_PULL_022B.md) adds a bounded faceted-solid domain with input/output validity and selfinterference checks. 029B adds bounded exact orientation repair and a difficult geometry corpus; [repair evidence](SURFACE_REPAIR_029B.md). [046B hollow sweep sections](PROFILE_REGIONS_046B.md) sweep inner loops with one shared placement and a volume-conservation check. [051A native regression evidence](NATIVE_GEOMETRY_051A.md) covers shallow C0 offset classification and translated analytic C2 lofts with unchanged tolerances. |
+| B.04 | Large, configurable assemblies | Parcial | Subassemblies, reused instances, configurations, external references and selective loading; editing one definition updates all occurrences. Supported mechanisms are locally scoped. [022B source-linked component patterns](SPECIALIZED_PATTERNS_022B.md) cover inheritance, planar/spatial points, exact curve stations, chain alternation, skips and actual occurrence consumers; large configuration/loading qualification remains open. 029B adds semantic loading, measured derived-buffer/external-I/O reduction and scoped v2 configuration/pin ownership; [assembly evidence](ASSEMBLY_SCALING_029B.md). [048B exploded views](EXPLODED_VISUALIZE_048B.md) are display-only, revision-neutral and drivable by baked motions. [051A definition-owned sketches](SCOPED_SKETCHES_051A.md) are shared across occurrences and remapped with component checkout/merge. [053B reusable recipes](PARAMETRIC_COMPONENTS_053B.md) embed parts/assemblies with public overrides and explicit pinned revision updates. |
 | B.05 | Technical drawings and exchange | Parcial | Local 022B binds part definitions, exact occurrences and root/group assemblies to source-linked views, isometric projections, planar sections/hatches, semantic dimensions and declared tolerances in the same CAD viewport. Agents author drawings only on explicit user request. 029B adds bounded exact DXF export with local readback and source metadata. Drafting standards, GD&T, PDF, independent recipient interoperability and physical qualification remain open. [Drawing contract](DRAWINGS.md) [022B viewport evidence](DRAWING_VIEWPORT_022B.md) [029B evidence](VERIFICATION_029B.md). [048B Visualize](EXPLODED_VISUALIZE_048B.md) renders exploded assembly images with balloons and a BOM table on explicit request. |
 
 ## C — Engineering and manufacturing
@@ -312,8 +417,8 @@ remain **Parcial**; primitive success does not establish general design quality.
 
 | ID | Milestone | Status | Acceptance still governing the work |
 |---|---|---|---|
-| D.01 | Quality/time/cost benchmark | Parcial | At least 30 versioned briefs, three repeats per initial configuration and blind human evaluation; cost per accepted design includes failures and coordination. Harness exists; 008D pilots were 0/9 and 4/9, 009B closed at 1/9. These results prove no savings. |
-| D.02 | Responsible engineer and adaptive team | Parcial | Compare Single/Focused/Parallel; give specialists concrete useful assignments and choose concurrency by measured benefit. No default turn/token budgets. Context, completion, feedback and retained DFM proposal handoffs have scoped evidence; general quality/cost benefit remains unproven. [019B scope](iterations/019B.md) [021B proposal scope](iterations/021B.md). [022B contract/onboarding and independent performance audit](iterations/022B.md) preserve Focused defaults and explicit-request-only drawing work. [045A](iterations/045A.md) records live MCP bridge commits and failures for client feedback. [047D](iterations/047D.md) removes a CLI stdio deadlock and supersedes rejected reads of removed features. [048B](iterations/048B.md) gives agents the HUD protocol and the explicit-request explode/render rule. |
+| D.01 | Quality/time/cost benchmark | Parcial | At least 30 versioned briefs, three repeats per initial configuration and blind human evaluation; cost per accepted design includes failures and coordination. Harness exists; 008D pilots were 0/9 and 4/9, 009B closed at 1/9. These results prove no savings. [051A outcome receipts](AGENT_OUTCOMES_051A.md) separate completion, postconditions and verified persistence, and account for failed attempts with explicit tariff provenance; live-model comparisons remain unmeasured. |
+| D.02 | Responsible engineer and adaptive team | Parcial | Compare Single/Focused/Parallel; give specialists concrete useful assignments and choose concurrency by measured benefit. No default turn/token budgets. Context, completion, feedback and retained DFM proposal handoffs have scoped evidence; general quality/cost benefit remains unproven. [019B scope](iterations/019B.md) [021B proposal scope](iterations/021B.md). [022B contract/onboarding and independent performance audit](iterations/022B.md) preserve Focused defaults and explicit-request-only drawing work. [045A](iterations/045A.md) records live MCP bridge commits and failures for client feedback. [047D](iterations/047D.md) removes a CLI stdio deadlock and supersedes rejected reads of removed features. [048B](iterations/048B.md) gives agents the HUD protocol and the explicit-request explode/render rule. [051A task outcomes](AGENT_OUTCOMES_051A.md) add parametric edits, assembly changes and recovery after atomic rejection to the existing Single/Focused/Parallel harness. |
 | D.03 | Isolated part workspaces | Parcial | [023B design containers](DESIGN_CONTAINERS_023B.md) provide assembly-group checkout, explicit editable/read-only closure and atomic merge bound to parent source/revision and reviewed child digest. Conflicting ownership, unsupported cross-boundary references and stale source reject without silent rebase. Large-project scaling and general distributed collaboration remain unqualified. |
 | D.04 | Multimodal feedback and correction | Parcial | Shared author/reviewer diagnostics, revision-bound previews and intent-preserving correction remain the acceptance scope. 021B adds Z-up/custom snapshot cameras and guarded Studio viewport readback. [032D authored body/face colors and steady emission](SNAPSHOTS_032D.md) and [pattern-copy sampled native clearance](ASSEMBLY_MOTION_032D.md) have local checked scope; textures/stamps, continuous collision and general correction quality remain separate. [020B scope](iterations/020B.md) [021B scope](iterations/021B.md). [022B drawing curve origins, alternate-copy identities and guarded direct previews](iterations/022B.md). [046B Baked Motions clearance markers](MOTION_CLEARANCE_046B.md) show interference, below-threshold and uncertified intervals bound to the measured revision. [047D](iterations/047D.md) sends user images through the Claude Code route. [048B](iterations/048B.md) `visualize_render` returns rendered assembly images to agents. |
 | D.05 | Concept alternatives and reusable knowledge | Parcial | Compare alternatives against requirements, mass, process/cost and human preference using validated examples. A proposal must not be reported as a created part. |
@@ -324,7 +429,7 @@ Goal: preserve design identity and evidence through explicit, versioned exchange
 
 | ID | Milestone | Status | Acceptance still governing the work |
 |---|---|---|---|
-| E.01 | Shared identity and contracts | Parcial | Document/part/occurrence/revision IDs, units, source hash, geometry digest, provenance and idempotency; versioned schemas and compatibility tests. Local `ark.bom.v1` exists; external reconciliation is planned. [017B scoped evidence](iterations/017B.md). [018B editable authoring and coordination](iterations/018B.md). [019B source ownership and exact-identity selection contracts](iterations/019B.md). [022B conditional source format and occurrence/drawing identity](iterations/022B.md) retain observed revisions, atomic writes and explicit stale rejection. |
+| E.01 | Shared identity and contracts | Parcial | Document/part/occurrence/revision IDs, units, source hash, geometry digest, provenance and idempotency; versioned schemas and compatibility tests. Local `ark.bom.v1` exists; external reconciliation is planned. [017B scoped evidence](iterations/017B.md). [018B editable authoring and coordination](iterations/018B.md). [019B source ownership and exact-identity selection contracts](iterations/019B.md). [022B conditional source format and occurrence/drawing identity](iterations/022B.md) retain observed revisions, atomic writes and explicit stale rejection. [053B component identity](PARAMETRIC_COMPONENTS_053B.md) adds portable definitions, digest chains, identity remapping and reviewed replacement. |
 | E.02 | Geometry and analysis interchange | Planeado | Publish/consume by contract; preserve original source, body, options and producer version. Display rejection without substitute geometry. |
 | E.03 | External BOM interchange | Planeado | Explicit authorized adapter; incremental BOM quantities/configurations and stable revision mapping. Local BOM export exists; remote import needs a published contract and end-to-end verification. |
 | E.04 | Manufacturing contour interchange | Planeado | Canonical contours identified by result ID/digest; placements, stock, utilization and package returned with explicit grain/kerf/units. Stock consumption remains a separate action. |

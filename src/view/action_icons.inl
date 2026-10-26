@@ -64,12 +64,30 @@ static const ActionIcon* actionVectorIcon(int action){
         auto& sketch=result[961];poly(sketch,{{.17f,.78f},{.30f,.25f},{.72f,.35f},{.85f,.76f}});for(auto p:{std::pair{.17f,.78f},std::pair{.30f,.25f},std::pair{.72f,.35f},std::pair{.85f,.76f}})box(sketch,p.first-.055f,p.second-.055f,.11f,.11f);
         auto& grid=result[962];for(float t:{.23f,.5f,.77f}){line(grid,.12f,t,.88f,t);line(grid,t,.12f,t,.88f);}
         auto& edges=result[963];poly(edges,{{.17f,.29f},{.50f,.10f},{.83f,.29f},{.83f,.72f},{.50f,.92f},{.17f,.72f},{.17f,.29f},{.50f,.48f},{.83f,.29f}});line(edges,.50f,.48f,.50f,.92f);
+        result[463]=edges;
+        auto& shaded=result[462];shaded=edges;for(float t:{.27f,.39f,.51f,.63f})line(shaded,.23f,t+.08f,.44f,t+.20f);
+        auto& wire=result[464];wire=edges;poly(wire,{{.50f,.10f},{.50f,.54f},{.17f,.72f}});line(wire,.50f,.54f,.83f,.72f);
+        auto& projection=result[175];box(projection,.12f,.33f,.53f,.53f);poly(projection,{{.12f,.33f},{.35f,.10f},{.88f,.10f},{.88f,.63f},{.65f,.86f}});line(projection,.65f,.33f,.88f,.10f);
+        auto& home=result[191];poly(home,{{.09f,.46f},{.50f,.12f},{.91f,.46f}});poly(home,{{.21f,.40f},{.21f,.85f},{.42f,.85f},{.42f,.59f},{.60f,.59f},{.60f,.85f},{.79f,.85f},{.79f,.40f}});
+        auto& more=result[455];for(float x:{.20f,.50f,.80f})arc(more,x,.50f,.045f,.045f,0,360);
+        auto& orbit=result[176];arc(orbit,.5f,.5f,.36f,.36f,25,325);arc(orbit,.5f,.5f,.17f,.36f,0,360);poly(orbit,{{.76f,.13f},{.85f,.29f},{.67f,.30f}});
+        auto& pan=result[177];line(pan,.13f,.5f,.87f,.5f);line(pan,.5f,.13f,.5f,.87f);poly(pan,{{.27f,.36f},{.13f,.5f},{.27f,.64f}});poly(pan,{{.73f,.36f},{.87f,.5f},{.73f,.64f}});poly(pan,{{.36f,.27f},{.5f,.13f},{.64f,.27f}});poly(pan,{{.36f,.73f},{.5f,.87f},{.64f,.73f}});
+        auto& zoom=result[178];arc(zoom,.41f,.40f,.27f,.27f,0,360);line(zoom,.61f,.61f,.88f,.88f);line(zoom,.27f,.40f,.55f,.40f);line(zoom,.41f,.26f,.41f,.54f);
+        auto& ao=result[186];arc(ao,.5f,.43f,.27f,.27f,0,360);arc(ao,.5f,.75f,.40f,.10f,0,360);for(float y:{.38f,.48f,.58f})line(ao,.50f,y,.71f,y-.05f);
         auto& dockFit=result[964];for(float x:{.14f,.86f})for(float y:{.14f,.86f}){line(dockFit,x,y,x+(x<.5f?.20f:-.20f),y);line(dockFit,x,y,x,y+(y<.5f?.20f:-.20f));}box(dockFit,.36f,.36f,.28f,.28f);
         auto& sheet=result[965];box(sheet,.19f,.08f,.62f,.84f);box(sheet,.30f,.22f,.23f,.25f);arc(sheet,.65f,.34f,.07f,.07f,0,360);line(sheet,.30f,.61f,.70f,.61f);line(sheet,.30f,.74f,.70f,.74f);line(sheet,.55f,.74f,.55f,.90f);
         auto& motions=result[45000];line(motions,.12f,.86f,.90f,.86f);line(motions,.12f,.86f,.12f,.12f);for(int i=0;i<16;++i){auto curve=[](float t){return .74f-.52f*t*t*(3-2*t);};const float a=i/16.f,b=(i+1)/16.f;line(motions,.18f+.64f*a,curve(a),.18f+.64f*b,curve(b));}line(motions,.58f,.16f,.58f,.80f);poly(motions,{{.66f,.18f},{.86f,.30f},{.66f,.42f},{.66f,.18f}});
+        auto& inertia=result[49200];poly(inertia,{{.31f,.33f},{.5f,.23f},{.69f,.33f},{.69f,.57f},{.5f,.68f},{.31f,.57f},{.31f,.33f},{.5f,.44f},{.69f,.33f}});line(inertia,.5f,.44f,.5f,.68f);arc(inertia,.5f,.48f,.4f,.39f,30,270);poly(inertia,{{.38f,.05f},{.50f,.09f},{.43f,.21f}});line(inertia,.81f,.63f,.81f,.91f);poly(inertia,{{.73f,.82f},{.81f,.91f},{.89f,.82f}});
         auto& hud=result[48000];for(int i=0;i<3;++i){const float y=.24f+i*.26f,k=i==0?.62f:i==1?.34f:.74f;line(hud,.12f,y,k-.07f,y);line(hud,k+.07f,y,.88f,y);box(hud,k-.07f,y-.09f,.14f,.18f);} // 048B Parametric HUD
         auto& explode=result[47000];box(explode,.36f,.36f,.28f,.28f);for(int k=0;k<4;++k){const float dx=k==0?0:k==1?0:k==2?-1:1,dy=k==0?-1:k==1?1:0;auto at=[&](float along,float side){return std::pair{.5f+dx*along-dy*side,.5f+dy*along+dx*side};};const auto a=at(.22f,0),b=at(.42f,0),c=at(.34f,.08f),d=at(.34f,-.08f);line(explode,a.first,a.second,b.first,b.second);line(explode,c.first,c.second,b.first,b.second);line(explode,d.first,d.second,b.first,b.second);}
         auto& visualize=result[47001];box(visualize,.10f,.20f,.80f,.60f);poly(visualize,{{.18f,.72f},{.36f,.46f},{.50f,.62f},{.60f,.52f},{.82f,.72f}});arc(visualize,.68f,.36f,.08f,.08f,0,360);line(visualize,.62f,.42f,.48f,.56f);
+        auto& graph=result[49000];for(auto p:{std::pair{.2f,.5f},std::pair{.55f,.2f},std::pair{.55f,.8f},std::pair{.86f,.5f}})arc(graph,p.first,p.second,.085f,.085f,0,360);line(graph,.27f,.45f,.48f,.25f);line(graph,.27f,.55f,.48f,.75f);line(graph,.62f,.25f,.80f,.45f);line(graph,.62f,.75f,.80f,.55f);
+        auto& eye=result[49101];poly(eye,{{.08f,.5f},{.23f,.31f},{.5f,.19f},{.77f,.31f},{.92f,.5f},{.77f,.69f},{.5f,.81f},{.23f,.69f},{.08f,.5f}});arc(eye,.5f,.5f,.17f,.17f,0,360);
+        auto& tag=result[49102];poly(tag,{{.13f,.16f},{.49f,.16f},{.89f,.56f},{.56f,.89f},{.13f,.46f},{.13f,.16f}});arc(tag,.29f,.31f,.065f,.065f,0,360);line(tag,.44f,.45f,.68f,.69f);
+        auto& schematic=result[49100];poly(schematic,{{.12f,.3f},{.34f,.3f},{.39f,.2f},{.47f,.4f},{.55f,.2f},{.63f,.4f},{.68f,.3f},{.88f,.3f},{.88f,.76f},{.12f,.76f},{.12f,.3f}});line(schematic,.08f,.51f,.16f,.51f);line(schematic,.04f,.59f,.20f,.59f);arc(schematic,.88f,.76f,.035f,.035f,0,360);
+        auto& rubber=result[49300];arc(rubber,.5f,.5f,.38f,.28f,0,360);arc(rubber,.5f,.5f,.23f,.14f,0,360);for(float x:{.24f,.39f,.54f,.69f})line(rubber,x,.27f,x+.10f,.36f);
+        result[49301]=rubber;
+        auto& applySurface=result[49502];poly(applySurface,{{.16f,.53f},{.40f,.76f},{.85f,.22f}});
         return result;
     }();
     auto found=icons.find(action);return found==icons.end()?nullptr:&found->second;

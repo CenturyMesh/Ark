@@ -72,7 +72,12 @@ void AgentSession::compactPrepared(Prepared& prepared){
         const auto& source=it->second.body->nativeData;const auto owner=source.ownerIdentity();
         if(owner&&!liveNative.count(owner)){
             auto found=compacted.find(owner);if(found==compacted.end())found=compacted.emplace(owner,source.compacted()).first;
-            if(found->second.ownerIdentity()!=owner){Body packed=*it->second.body;packed.nativeData=found->second;it->second.body=std::make_shared<const Body>(std::move(packed));}
+            if(found->second.ownerIdentity()!=owner){
+                // compacted() verifies byte-identical metadata. Transfer only
+                // frames bound to this exact prior owner to the packed owner.
+                if(auto reference=doc.referenceFrameCache.find(body.id);reference!=doc.referenceFrameCache.end())if(auto observed=reference->second.owner.lock();observed&&observed.get()==owner)reference->second.owner=found->second.weakOwner();
+                Body packed=*it->second.body;packed.nativeData=found->second;it->second.body=std::make_shared<const Body>(std::move(packed));
+            }
         }
         const auto& retained=*it->second.body;
         if(retained.baked&&retained.nativeData.packedMesh()&&!liveMeshes.count(retained.baked.get())){
@@ -95,7 +100,7 @@ void AgentSession::compactPrepared(Prepared& prepared){
     // These maps are private copies, unlike immutable bodies: charge every byte.
     prepared.bytes+=doc.referenceFrameCache.bucket_count()*sizeof(void*);
     for(const auto& entry:doc.referenceFrameCache){
-        const auto& cache=entry.second;prepared.bytes+=sizeof(entry)+32+cache.brep.capacity()+1+cache.topology.capacity()+1+cache.frames.bucket_count()*sizeof(void*);
+        const auto& cache=entry.second;prepared.bytes+=sizeof(entry)+32+cache.frames.bucket_count()*sizeof(void*);
         for(const auto& frame:cache.frames)prepared.bytes+=sizeof(frame)+32+frame.first.capacity()+1+jsonAllocationBytes(frame.second)-sizeof(V);
     }
     prepared.bytes+=doc.centroidCache.bucket_count()*sizeof(void*);
@@ -132,24 +137,26 @@ arkjson::Value AgentSession::call(const std::string& tool,const V& args){
     const bool mutating=tool=="doc_apply"||tool=="doc_new"||tool=="doc_load"||tool=="doc_undo"||tool=="doc_redo"||tool=="iteration_restore"||tool=="import_step"||tool=="import_sheet_step"||tool=="import_mesh"||tool=="import_cad"||(tool=="design_containers"&&args.find("action")&&args.find("action")->asStr()=="merge"&&!(args.find("preview")&&args.find("preview")->t==V::Bool&&args.find("preview")->b))||(tool=="image_asset"&&args.find("action")&&args.find("action")->asStr()=="import")||tool=="usage_record"||tool=="library_insert";
     struct Depth {size_t& value;Depth(size_t& n):value(n){++value;}~Depth(){--value;}} depth(callDepth_);
     // 049A explicit journal rewrite: its own atomic path (backup, migrate, then publish); never an iteration node.
-    if(tool=="history_migrate_derived"){V out;bool failed=false;
-        try{out=historyMigrateDerivedTool(document,revision,args);prepared_.clear();cache_.clear();cacheRevision_=~u64(0);motionRevision_=~u64(0);}
+    if(tool=="history_migrate_derived"||tool=="history_compact"){V out;bool failed=false;
+        try{out=tool=="history_compact"?historyCompactTool(document,revision,args):historyMigrateDerivedTool(document,revision,args);undo_.clear();redo_.clear();prepared_.clear();cache_.clear();cacheRevision_=~u64(0);motionRevision_=~u64(0);}
         catch(const std::exception& e){failed=true;const std::string message=e.what();out=V::makeObj();out.set("error",V::makeStr(message));const auto end=message.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ_");
-            out.set("error_code",V::makeStr(message.find("Revision conflict")!=std::string::npos?"REVISION_CONFLICT":message.rfind("HISTORY_MIGRATION_",0)==0?message.substr(0,end):"HISTORY_MIGRATION_FAILED"));out.set("tool",V::makeStr(tool));out.set("revision",V::makeNum((double)revision));out.set("document_unchanged",V::makeBool(true));}
+            out.set("error_code",V::makeStr(message.find("Revision conflict")!=std::string::npos?"REVISION_CONFLICT":(message.rfind("HISTORY_MIGRATION_",0)==0||message.rfind("HISTORY_COMPACTION_",0)==0)?message.substr(0,end):(tool=="history_compact"?"HISTORY_COMPACTION_FAILED":"HISTORY_MIGRATION_FAILED")));out.set("tool",V::makeStr(tool));out.set("revision",V::makeNum((double)revision));out.set("document_unchanged",V::makeBool(true));}
         V response=V::makeObj(),content=V::makeArr(),item=V::makeObj();item.set("type",V::makeStr("text"));item.set("text",V::makeStr(out.dump()));content.arr.push_back(item);response.set("content",content);response.set("structuredContent",out);response.set("isError",V::makeBool(failed));return finish(std::move(response));}
     const bool planeMutation=tool=="plane_authoring"&&!(args.find("preview")&&args.find("preview")->t==V::Bool&&args.find("preview")->b);
-    if((!mutating&&!planeMutation)||callDepth_>1||suppressHistory_)return finish(dispatch(tool,clean));
+    auto dispatchCurrent=[&](){if(tool=="doc_apply"&&callDepth_==1){if(!hostPreparedApplyRejection_.isNull())return hostPreparedApplyRejection_;if(!hostPreparedApplyId_.empty()){V preparedArgs=V::makeObj();preparedArgs.set("candidate_id",V::makeStr(hostPreparedApplyId_));preparedArgs.set("expected_revision",V::makeNum((double)revision));if(const auto* detail=clean.find("detail"))preparedArgs.set("detail",*detail);return dispatch(tool,preparedArgs);}}return dispatch(tool,clean);};
+    if((!mutating&&!planeMutation)||callDepth_>1||suppressHistory_)return finish(dispatchCurrent());
     const auto* preparedId=args.find("candidate_id");
     const bool metadataPrepared=preparedId&&preparedId->t==V::Str&&std::any_of(prepared_.begin(),prepared_.end(),[&](const Prepared& p){return p.id==preparedId->str&&p.metadataOnly;});
     const bool lightweight=tool=="doc_apply"&&!args.find("checks")&&(metadataOnlyApply(document,clean)||metadataPrepared);
     Document before=lightweight?document.authoringCopy():document;const auto oldRevision=revision;const auto oldUndo=undo_,oldRedo=redo_;const auto oldPrepared=prepared_;
-    auto rollback=[&](){if(lightweight){document.features=std::move(before.features);document.materials=std::move(before.materials);document.imageAssets=std::move(before.imageAssets);document.stamps=std::move(before.stamps);document.bomDocumentId=std::move(before.bomDocumentId);document.iterationHistory=std::move(before.iterationHistory);document.usage=std::move(before.usage);}else document=std::move(before);revision=oldRevision;undo_=oldUndo;redo_=oldRedo;prepared_=oldPrepared;cache_.clear();cacheRevision_=~u64(0);motionRevision_=~u64(0);};
+    auto rollback=[&](){if(lightweight){document.assembly=std::move(before.assembly);document.schematics=std::move(before.schematics);document.manufacturingPlans=std::move(before.manufacturingPlans);document.features=std::move(before.features);document.materials=std::move(before.materials);document.imageAssets=std::move(before.imageAssets);document.stamps=std::move(before.stamps);document.bomDocumentId=std::move(before.bomDocumentId);document.iterationHistory=std::move(before.iterationHistory);document.usage=std::move(before.usage);}else document=std::move(before);revision=oldRevision;undo_=oldUndo;redo_=oldRedo;prepared_=oldPrepared;cache_.clear();cacheRevision_=~u64(0);motionRevision_=~u64(0);};
     auto envelope=[](V value,bool error){V response=V::makeObj(),content=V::makeArr(),item=V::makeObj();item.set("type",V::makeStr("text"));item.set("text",V::makeStr(value.dump()));content.arr.push_back(item);response.set("content",content);response.set("structuredContent",value);response.set("isError",V::makeBool(error));return response;};
     try{
         // Validate caller metadata before running geometry or touching usage.
         (void)iterationActor(args);if(auto reason=args.find("motivation");reason&&(reason->t!=V::Str||reason->str.size()>4096))throw std::runtime_error("motivation must be text of at most 4096 bytes");
         std::string target;if(tool=="iteration_restore"){if(auto id=args.find("id");id&&id->t==V::Str)target=id->str;}
-        V response=dispatch(tool,clean);if(auto error=response.find("isError");error&&error->b){rollback();return finish(std::move(response));}
+
+        V response=dispatchCurrent();if(auto error=response.find("isError");error&&error->b){rollback();return finish(std::move(response));}
         if((tool=="doc_undo"||tool=="doc_redo")&&before.iterationHistory.t==V::Obj)target=iterationUndoTarget(before,tool=="doc_redo");
         // Opening/New are project boundaries. They never copy another project's
         // geometry into the loaded/new document's persistent journal.
@@ -163,7 +170,7 @@ arkjson::Value AgentSession::call(const std::string& tool,const V& args){
         return finish(std::move(response));
     }catch(const std::exception& exception){rollback();V error=V::makeObj();error.set("error",V::makeStr(exception.what()));error.set("error_code",V::makeStr(std::string(exception.what()).find("capacity")!=std::string::npos?"HISTORY_CAPACITY_EXCEEDED":"HISTORY_FAILED"));error.set("tool",V::makeStr(tool));error.set("revision",V::makeNum((double)revision));error.set("document_unchanged",V::makeBool(true));
         // 049A: name the reclaimable derived bytes when old inline baked frames fill the journal.
-        if(error.find("error_code")->str=="HISTORY_CAPACITY_EXCEEDED"){size_t references=0,bytes=0;iterationInlineBakePayloads(document.iterationHistory,references,bytes);if(references){V hint=V::makeObj();hint.set("inline_bake_payload_bytes",V::makeNum((double)bytes));hint.set("hint",V::makeStr("The journal holds 044B-048B baked frames, which are derived data. With the user's explicit approval, history_migrate_derived{path,expected_revision,confirm:true} backs up the saved document and removes them; then save."));error.set("derived_bakes",hint);}}
+        if(error.find("error_code")->str=="HISTORY_CAPACITY_EXCEEDED"){error.set("compaction_hint",V::makeStr("With explicit user instruction, history_compact{archive_path,keep_recent,expected_revision,confirm:true} verifies a complete new .ark archive and retains a bounded recent ancestor range. Never auto-prune. Save afterwards."));size_t references=0,bytes=0;iterationInlineBakePayloads(document.iterationHistory,references,bytes);if(references){V hint=V::makeObj();hint.set("inline_bake_payload_bytes",V::makeNum((double)bytes));hint.set("hint",V::makeStr("The journal holds 044B-048B baked frames, which are derived data. With the user's explicit approval, history_migrate_derived{path,expected_revision,confirm:true} backs up the saved document and removes them; then save."));error.set("derived_bakes",hint);}}
         return finish(envelope(error,true));}
 }
 arkjson::Value AgentSession::preparedRecipe(const std::string& id) const{
@@ -191,6 +198,7 @@ arkjson::Value AgentSession::preparePreview(const V& supplied){
     prepared_.erase(std::remove_if(prepared_.begin(),prepared_.end(),[&](const Prepared& p){return p.expires<=now;}),prepared_.end());
     const bool metadataOnly=metadataOnlyApply(document,args)&&!args.find("checks");
     AgentSession candidate;candidate.document=document.authoringCopy();
+    if(rigidPlacementOnlyApply(document,args)){candidate.document.evalBodies=document.evalBodies;candidate.document.lastResults=document.lastResults;}
     if(!metadataOnly){candidate.document.evaluationCache=document.evaluationCache;candidate.document.evaluationGeneration=document.evaluationGeneration;candidate.document.referenceFrameCache=document.referenceFrameCache;candidate.document.centroidCache=document.centroidCache;}
     if(!metadataOnly&&previousGeometry){candidate.document.evaluationGeneration=std::max(candidate.document.evaluationGeneration,previousGeometry->evaluationGeneration);for(const auto& feature:previousScope.find("features")->arr){const auto id=(u64)feature.find("id")->num;const auto cached=previousGeometry->evaluationCache.find(id);if(cached!=previousGeometry->evaluationCache.end())candidate.document.evaluationCache[id]=cached->second;}}
     struct BorrowGeometry {
@@ -255,6 +263,20 @@ const Document& AgentSession::PreparedTransfer::document() const{
     if(!materialized_)materialized_=std::make_unique<Document>(AgentSession::materializePrepared(*value_));
     return *materialized_;
 }
+V AgentSession::completePreparedApply(const V& args,std::unique_ptr<PreparedTransfer> transfer,const V& rejection){
+    if(callDepth_||!hostPreparedApplyId_.empty()||!hostPreparedApplyRejection_.isNull())throw std::runtime_error("Prepared apply completion must be serialized by the host");
+    struct Clear {AgentSession& session;~Clear(){const auto id=session.hostPreparedApplyId_;session.hostPreparedApplyId_.clear();session.hostPreparedApplyRejection_={};if(!id.empty())session.prepared_.erase(std::remove_if(session.prepared_.begin(),session.prepared_.end(),[&](const Prepared& p){return p.id==id;}),session.prepared_.end());}} clear{*this};
+    auto fail=[&](const std::string& message){V payload=V::makeObj(),response=V::makeObj(),parts=V::makeArr(),part=V::makeObj();payload.set("error",V::makeStr(message));payload.set("error_code",V::makeStr("PREPARED_APPLY_REJECTED"));payload.set("revision",V::makeNum((double)revision));payload.set("document_unchanged",V::makeBool(true));response.set("isError",V::makeBool(true));response.set("structuredContent",payload);part.set("type",V::makeStr("text"));part.set("text",V::makeStr(payload.dump()));parts.arr.push_back(part);response.set("content",parts);hostPreparedApplyRejection_=response;};
+    if(!rejection.isNull())hostPreparedApplyRejection_=rejection;
+    else try{
+        if(!transfer||!transfer->value_)throw std::runtime_error("Missing prepared authoring receipt");
+        checkRevision(args,revision);
+        auto recipe=[](V value){value.obj.erase(std::remove_if(value.obj.begin(),value.obj.end(),[](const auto& p){return p.first=="actor"||p.first=="motivation"||p.first=="detail";}),value.obj.end());std::sort(value.obj.begin(),value.obj.end(),[](const auto& a,const auto& b){return a.first<b.first;});return value.dump();};
+        if(recipe(args)!=recipe(transfer->value_->recipe))throw std::runtime_error("Prepared authoring recipe differs from original request");
+        hostPreparedApplyId_=transfer->id();adoptPreparedCandidate(std::move(*transfer),revision);
+    }catch(const std::exception& error){fail(error.what());}
+    return call("doc_apply",args);
+}
 const std::string& AgentSession::PreparedTransfer::id() const{
     if(!value_)throw std::runtime_error("Prepared transfer already consumed");return value_->id;
 }
@@ -308,8 +330,8 @@ arkjson::Value AgentSession::commitPrepared(const V& args){
     auto next=std::make_shared<Document>(materializePrepared(*found));V out=args.find("detail")&&args.find("detail")->asStr()=="changes"?compactCandidateResult(found->result):found->result;if(found->requiresDfmAcceptance){out.set("dfm_comparison",found->dfmComparison);out.set("dfm_accepted",V::makeBool(true));}
     validateDesignContainerTransition(document,*next);
     const bool metadata=found->metadataOnly;const auto committedId=found->id;out.set("geometry_changed",V::makeBool(!out.find("geometry_recomputed")||out.find("geometry_recomputed")->b));remember();
-    if(metadata){document.features=next->features;document.materials=next->materials;document.bomDocumentId=next->bomDocumentId;document.imageAssets=next->imageAssets;document.stamps=next->stamps;}
-    else{auto activity=document.agentActivity;auto usage=document.usage;document=std::move(*next);document.agentActivity=std::move(activity);document.usage=std::move(usage);}
+    if(metadata){document.assembly=next->assembly;document.schematics=next->schematics;document.manufacturingPlans=next->manufacturingPlans;document.features=next->features;document.materials=next->materials;document.bomDocumentId=next->bomDocumentId;document.imageAssets=next->imageAssets;document.stamps=next->stamps;}
+    else{auto activity=document.agentActivity;auto usage=document.usage;auto history=document.iterationHistory;document=std::move(*next);document.agentActivity=std::move(activity);document.usage=std::move(usage);document.iterationHistory=std::move(history);}
     ++revision;prepared_.erase(std::remove_if(prepared_.begin(),prepared_.end(),[&](const Prepared& p){return p.id==committedId;}),prepared_.end());trimPrepared();
     V evaluation=V::makeObj();for(const char* key:{"recompute_ms","features_evaluated","features_reused","parallel_features","peak_parallel_features"})if(const auto* value=out.find(key))evaluation.set(key,*value);out.set("prepared_evaluation",evaluation);
     out.set("features_evaluated",V::makeNum(0));out.set("features_reused",V::makeNum(document.evalBodies.size()));out.set("parallel_features",V::makeNum(0));out.set("peak_parallel_features",V::makeNum(0));

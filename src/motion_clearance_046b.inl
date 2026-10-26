@@ -44,6 +44,7 @@ V inspectMotionClearance(Document& d,u64 revision,const std::string& name,const 
     if(!reasons.empty()){std::string text;for(const auto& r:reasons)text+=(text.empty()?"":", ")+r;throw std::runtime_error("MOTION_BAKE_STALE: motion "+name+" bake is stale ("+text+"); bake it again with doc_apply motion.bake and the current expected_revision before checking clearance; clearance never re-bakes or uses stale frames");}
     // 049A receipts carry no frames: the double-precision re-solve below must reproduce frames_sha256.
     BakedMotionFrames baked;const bool receipt=bakeIsReceipt(*bake);if(receipt)decodeBakeHeader(*bake,baked);else need(decodeBakedMotion(*motion,baked,error),error);
+    const auto flexibleCables=motionCableFeatures(d,baked);
     const auto times=motionFrameTimes(g.compiled.duration,baked.fps);need(times.size()==baked.frameCount,"MOTION_BAKE_MISMATCH: the bake has "+std::to_string(baked.frameCount)+" frames but its graph and fps give "+std::to_string(times.size())+"; bake it again");
     long k0=0,k1=(long)times.size()-1;
     for(const char* key:{"from_frame","to_frame"})if(const auto* f=request.find(key)){need(f->t==V::Num&&f->num>=0&&f->num==std::floor(f->num)&&f->num<(double)times.size(),std::string("MOTION_CLEARANCE_INVALID: ")+key+" must be a baked frame index");(std::string(key)=="from_frame"?k0:k1)=(long)f->num;}
@@ -61,6 +62,7 @@ V inspectMotionClearance(Document& d,u64 revision,const std::string& name,const 
                 need(found<program.baseline.size()&&program.baseline[found].feature,"MOTION_CLEARANCE_INVALID: occurrence #"+std::to_string(node)+" copy "+std::to_string(copy)+" is not a placed solid");ends[side]=addItem(found);}
             need(ends[0]!=ends[1],"MOTION_CLEARANCE_INVALID: a pair needs two distinct occurrences");const auto key=std::minmax(ends[0],ends[1]);need(seen.insert({key.first,key.second}).second,"MOTION_CLEARANCE_INVALID: duplicate pair");explicitPairs.push_back({ends[0],ends[1]});}}
     else for(size_t i=0;i<program.baseline.size();++i)if(program.baseline[i].feature&&program.baseline[i].visible)addItem(i);
+    for(const auto& item:items)need(std::find(flexibleCables.begin(),flexibleCables.end(),item.feature)==flexibleCables.end(),"MOTION_CLEARANCE_FLEXIBLE_UNSUPPORTED: flexible cable clearance is not supported; explicit rigid-only pairs can be checked separately");
     std::map<u64,std::string> breps,brepDigests;std::map<u64,std::array<double,6>> bounds;
     for(const auto& it:items)if(!breps.count(it.feature)){
         try{ensureNativeBody(d,it.feature,d.evalBodies);}catch(const std::exception& e){throw std::runtime_error("MOTION_CLEARANCE_UNSUPPORTED_GEOMETRY: occurrence "+it.name+" (node #"+std::to_string(it.node)+") has no exact native solid: "+e.what());}

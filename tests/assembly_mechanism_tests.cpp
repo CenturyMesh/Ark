@@ -105,6 +105,27 @@ Document transmission(const char* type="chain",bool follower=false){Document d;F
     if(std::string(type)=="cam")coupling.motion={{"lift","10"},{"phase_deg","25"}};
     d.mates.push_back(coupling);if(!follower){const u64 wheel=part(d,"Wheel",0,100);revolute(d,supportB,wheel);AssemblyMate shaft;shaft.id=d.nextMateId_++;shaft.a=output;shaft.b=wheel;shaft.type="shaft";d.mates.push_back(shaft);}
     d.recompute();return d;}
+void testCheckpointDrag064(){
+    for(auto document:{fourbar(),transmission("gear"),transmission("rack_pinion",true),transmission("cam",true)}){
+        const bool linkage=document.assembly.size()>5;const u64 driver=linkage?9:2;auto baseline=program(document);
+        AssemblyManipulationPath path(baseline,driver,1,"rotate");std::string error;AssemblyManipulationPreview cached,reference;
+        const auto source=documentToJson(document);
+        for(double delta:{0.,1.05,2.1,3.15,10.5,20.25,21.3,22.35,19.4,4.2,-1.05,-8.4,-9.45,0.,20.25}){
+            check(path.preview(delta,cached,error),error);check(previewAssemblyManipulation(baseline,driver,1,"rotate",delta,reference,error),error);
+            check(cached.placements.size()==reference.placements.size(),"checkpoint placement count");
+            for(size_t i=0;i<cached.placements.size();++i)equal(cached.placements[i].world,reference.placements[i].world,1e-9,"checkpoint and uncached path agree");
+            verify(cached);
+        }
+        if(linkage){check(!path.preview(100.,cached,error)&&error.find("LIMIT_VIOLATION")!=std::string::npos,"cached path cannot tunnel through a joint limit");check(path.preview(20.25,cached,error),"rejected path did not poison checkpoints");}
+        check(source==documentToJson(document),"checkpoint previews changed authored document");
+    }
+    auto baseline=program(transmission("gear"));AssemblyManipulationPath path(baseline,2,1,"rotate");std::string error;AssemblyManipulationPreview p;
+    for(int i=0;i<=120;++i){check(path.preview(i*.35,p,error),error);check(p.continuationSteps<=2,"steady drag repeats old continuation steps");}
+    for(double delta:{370.,371.,-370.,-371.}){check(path.preview(delta,p,error),error);close(pose(p.placements,4).m[0],std::cos(deg2rad(-3*delta)),1e-8,"cached gear preserves multi-turn phase");}
+    // The path owns its baseline; a changed caller program cannot silently
+    // substitute another assembly or revision beneath retained checkpoints.
+    baseline=program(fourbar());check(path.preview(42.,p,error),error);close(pose(p.placements,4).m[0],std::cos(deg2rad(-126.)),1e-8,"path baseline custody");
+}
 void testTransmissionDrag(){for(const char* type:{"chain","gear"}){auto d=transmission(type);const auto base=program(d);const double sign=std::string(type)=="gear"?-1:1;
         for(double delta:{-70.,-15.,0.,15.,70.,130.}){const auto p=drive(d,2,1,"rotate",delta);verify(p);check(p.couplings.arr.size()==2,"chain/gear and shaft coupling residuals exposed");
             const double expected=deg2rad(sign*3*delta);close(pose(p.placements,4).m[0],std::cos(expected),1e-8,"coupling actual output rotation");close(pose(p.placements,5).m[1],std::sin(expected),1e-8,"shaft actual wheel follows ratio");equal(pose(base.baseline,3),pose(p.placements,3),1e-12,"transmission ground stationary");}
@@ -134,7 +155,7 @@ void testNativeSuspensionExample(){std::ifstream file(std::filesystem::path(ARK_
 #endif
 }
 int main(){try{auto run=[](const char* name,auto test){try{test();}catch(const std::exception& error){throw std::runtime_error(std::string(name)+": "+error.what());}};
-    run("suspension",testSuspension);run("slider-crank",testSliderCrank);run("transmission",testTransmissionDrag);
+    run("suspension",testSuspension);run("slider-crank",testSliderCrank);run("transmission",testTransmissionDrag);run("checkpoint drag",testCheckpointDrag064);
 #ifdef ARK_MECHANISM_NATIVE_TESTS
     run("native suspension example",testNativeSuspensionExample);
 #endif

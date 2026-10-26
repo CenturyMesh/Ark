@@ -29,7 +29,7 @@ static GLuint mediaTexture044B(const ImageAsset& asset,const ProjectedStamp* pla
     const std::string key=asset.name+"|"+(playback?playback->name:std::string("material"));auto& player=g_mediaPlayers044B[key];
     if(player.sha!=asset.sha256){if(player.texture)glDeleteTextures(1,&player.texture);player=MediaPlayer044B{};player.sha=asset.sha256;}
     if(!player.status.empty()&&player.status!="ok"&&player.status!="decoding"&&player.status!="playing")return player.texture;
-    const double elapsed=g_mediaClockOverride044B>=0?g_mediaClockOverride044B:g_mediaClock044B;
+    const auto bound=boundMediaTime(asset);const double elapsed=bound?*bound:g_mediaClockOverride044B>=0?g_mediaClockOverride044B:g_mediaClock044B;
     try{
         if(asset.mimeType=="image/gif"){
             if(!player.gif){if(!player.pending.valid()){const auto bytes=mediaAssetBytes044B(asset);player.pending=std::async(std::launch::async,[bytes]{return decodeGif044B(bytes);});player.status="decoding";}

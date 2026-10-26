@@ -5,9 +5,11 @@
 #include "ark/failure_record.hpp"
 #include <chrono>
 #include <set>
+#include <map>
 namespace ark {
 struct Image;
 bool metadataOnlyApply(const Document&,const arkjson::Value& args);
+bool rigidPlacementOnlyApply(const Document&,const arkjson::Value& args);
 arkjson::Value snapshotImageResult(const Image&,const arkjson::Value& visualEvidence,const std::string& path={});
 // A session owns its document. UI and MCP call the same command implementation.
 // Calls are serialized by the host; no process-global document state.
@@ -41,9 +43,12 @@ public:
     arkjson::Value call(const std::string& tool,const arkjson::Value& args);
     arkjson::Value info() const;
     arkjson::Value reviewBom(const arkjson::Value& args);
-    arkjson::Value bomCompletionCheck(bool onlyIfAuthored=false) const;
+    arkjson::Value bomCompletionCheck(bool onlyIfAuthored=false,bool allowTaskReview=false) const;
+    // Host-owned boundary, never resettable through an agent tool.
+    void beginBomTask(bool continuation=false);
+    arkjson::Value bomTaskScope() const;
     void markBomAuthored(){bomAuthored_=true;}
-    void resetBomReview(){bomAuthored_=false;bomReview_={};bomInspectedHash_.clear();bomInspectedItems_.clear();bomInspectedRevision_=~u64(0);}
+    void resetBomReview(){bomAuthored_=false;bomReview_={};bomTaskReview_={};bomTaskActive_=false;bomTaskBaseline_.clear();bomTaskError_.clear();bomInspectedHash_.clear();bomInspectedItems_.clear();bomInspectedRevision_=~u64(0);}
     void observeBomInspection(const arkjson::Value& bom);
     static arkjson::Value tools(bool detailed=false);
     arkjson::Value preparePreview(const arkjson::Value& args);
@@ -53,6 +58,9 @@ public:
     arkjson::Value snapshotCandidate(const arkjson::Value& args);
     std::unique_ptr<PreparedTransfer> takePreparedCandidate(const std::string& id);
     void adoptPreparedCandidate(PreparedTransfer&&, u64 expectedRevision);
+    // Host-only completion: run the original request through normal transaction,
+    // history and failure guards while dispatch consumes a private worker receipt.
+    arkjson::Value completePreparedApply(const arkjson::Value& originalArgs,std::unique_ptr<PreparedTransfer> transfer,const arkjson::Value& rejection={});
     arkjson::Value failureInfo(const arkjson::Value& args) const;
     arkjson::Value failureExport(const arkjson::Value& args) const;
     arkjson::Value failureReplay(const arkjson::Value& args);
@@ -62,6 +70,10 @@ public:
 private:
     bool bomAuthored_=false;
     arkjson::Value bomReview_;
+    arkjson::Value bomTaskReview_;
+    bool bomTaskActive_=false;
+    std::map<u64,std::string> bomTaskBaseline_;
+    std::string bomTaskError_;
     std::string bomInspectedHash_;
     u64 bomInspectedRevision_=~u64(0);
     std::set<u64> bomInspectedItems_;
@@ -74,6 +86,8 @@ private:
     std::vector<FailureRecord> failures_;
     arkjson::Value captureFailure(const std::string&,const arkjson::Value&,const arkjson::Value&,const std::string&,u64,arkjson::Value);
     size_t callDepth_=0;
+    std::string hostPreparedApplyId_;
+    arkjson::Value hostPreparedApplyRejection_;
     struct Prepared {
         std::string id, baseline;
         u64 revision=0;

@@ -1,4 +1,6 @@
 #include "ark/design_containers.hpp"
+#include "ark/parametric_components.hpp"
+#include "ark/design_disciplines.hpp"
 #include "ark/cad_import.hpp"
 // ARK-Point :: serialize.cpp — document persistence over arkjson.
 #include "ark/serialize.hpp"
@@ -8,6 +10,8 @@
 #include "ark/iteration_history.hpp"
 #include "ark/document_container.hpp"
 #include "ark/manufacturing.hpp"
+#include "ark/manufacturing_simulation.hpp"
+#include "ark/transmission.hpp"
 #include "ark/native_features.hpp"
 #include "ark/native_backend.hpp"
 #include "ark/skeleton.hpp"
@@ -576,6 +580,7 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
     for(auto&ns:doc.sketches){
         Value v;arkjson::parse(sketchToJson(ns.sk),v);
         v.set("name",Value::makeStr(ns.name));
+        if(ns.ownerFeature){v.set("owner_feature",Value::makeNum((double)ns.ownerFeature));v.set("local_name",Value::makeStr(ns.localName()));}
         Value es=Value::makeArr();   for(auto&e:ns.sk.ents) es.arr.push_back(entToJson(e));
         Value cs=Value::makeArr();   for(auto&c:ns.sk.cons) cs.arr.push_back(conToJson(c));
         v.set("entities",std::move(es));
@@ -591,6 +596,7 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
         v.set("type",Value::makeStr(featureTypeName(f.type)));
         v.set("name",Value::makeStr(f.name));
         if(f.part.t==Value::Obj)v.set("part",f.part);
+        if(!f.classification.isNull())v.set("classification",validateClassification(f.classification));
         if(!f.manufacturingRoute.empty()){Value manufacturing=Value::makeObj();manufacturing.set("route",Value::makeStr(f.manufacturingRoute));if(f.manufacturingProcess.t==Value::Obj&&!f.manufacturingProcess.obj.empty())manufacturing.set("process",f.manufacturingProcess);v.set("manufacturing",manufacturing);}
         v.set("op",Value::makeNum(f.opInt));
         if(f.suppressed)v.set("suppressed",Value::makeBool(true));
@@ -621,6 +627,7 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
         for(auto& n:doc.assembly){Value j=Value::makeObj(),p=Value::makeObj();j.set("id",Value::makeNum((double)n.id));j.set("parent",Value::makeNum((double)n.parent));j.set("feature",Value::makeNum((double)n.feature));j.set("name",Value::makeStr(n.name));j.set("visible",Value::makeBool(n.visible));j.set("fixed",Value::makeBool(n.fixed));
             std::vector<std::string> keys;for(auto& kv:n.p)keys.push_back(kv.first);std::sort(keys.begin(),keys.end());for(auto& k:keys)p.set(k,Value::makeStr(n.p.at(k)));j.set("p",p);
             if(n.pattern.active)j.set("pattern",assemblyPatternToJson(n.pattern));
+            if(!n.classification.isNull())j.set("classification",validateClassification(n.classification));
             nodes.arr.push_back(j);}
         r.set("assembly",nodes);
     }
@@ -654,6 +661,11 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
     if(curvePattern044BNeedsVersion47(doc)||media044BNeedsVersion47(doc)||motionsRequireDocumentVersion47(doc))r.set("version",Value::makeNum(47));
     if(profileRegions046BNeedsVersion48(doc))r.set("version",Value::makeNum(48));
     if(motionReceiptsRequireDocumentVersion49(doc))r.set("version",Value::makeNum(49));
+    for(const auto& sketch:doc.sketches)if(sketch.ownerFeature){r.set("version",Value::makeNum(50));break;}
+    if(!doc.parametricComponents.isNull()){validateParametricComponents(doc.parametricComponents);r.set("parametric_components",doc.parametricComponents);r.set("version",Value::makeNum(51));}
+    if(requiresDesignDisciplines054B(doc)){validateDesignDisciplines(doc);if(!doc.schematics.isNull())r.set("schematics",doc.schematics);r.set("version",Value::makeNum(52));}
+    if(!doc.manufacturingPlans.isNull()){validateManufacturingPlans(doc);r.set("manufacturing_plans",doc.manufacturingPlans);r.set("version",Value::makeNum(53));}
+    if(extendedTransmissionDocument(doc))r.set("version",Value::makeNum(54));
     if(includeAudit&&includeHistory)iterationPersist(r,doc);
     canonicalDocumentKeys(r);
     std::string serialized=r.dump();
@@ -664,7 +676,7 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
 static bool documentFromValue(Value& v,Document& doc,std::string* err){
     auto fail=[&](const std::string& m){ if(err)*err=m; return false; };
     if(v.t!=Value::Obj) return fail("root must be object");
-    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || !std::isfinite(ver->num)||ver->num!=std::floor(ver->num)||ver->num<1||ver->num>49))
+    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || !std::isfinite(ver->num)||ver->num!=std::floor(ver->num)||ver->num<1||ver->num>54))
         return fail("unsupported document version");
     Value history;std::string historyError;if(!iterationExpand(v,history,historyError))return fail(historyError);
     if(const auto* nodes=v.find("assembly");nodes&&nodes->t==Value::Arr)for(const auto& node:nodes->arr)if(const auto* pattern=node.find("pattern");pattern&&pattern->find("carry_frame")){
@@ -676,6 +688,7 @@ static bool documentFromValue(Value& v,Document& doc,std::string* err){
     if(!v.find("features"))return fail("missing features array");
     for(auto key:{"params","sketches","features","planes","canvases","materials","image_assets","stamps"})if(auto a=v.find(key);a && a->t!=Value::Arr)return fail(std::string(key)+" must be an array");
     Document nd;   // parse into scratch; commit only on full success
+    if(const auto* components=v.find("parametric_components")){const auto* version=v.find("version");if(!version||version->num<51)return fail("Embedded parametric components require document version 51");try{validateParametricComponents(*components);nd.parametricComponents=*components;}catch(const std::exception& error){return fail(error.what());}}
     try{
         if(const auto* assets=v.find("image_assets")){if(assets->arr.size()>64)return fail("Embedded image asset capacity is 64");for(const auto& asset:assets->arr)nd.imageAssets.push_back(imageAssetFromJson(asset));}
         if(const auto* stamps=v.find("stamps")){if(stamps->arr.size()>128)return fail("Stamp capacity is 128");for(const auto& stamp:stamps->arr)nd.stamps.push_back(stampFromJson(stamp));}
@@ -731,6 +744,13 @@ static bool documentFromValue(Value& v,Document& doc,std::string* err){
         for(auto&s:sks->arr){
             NamedSketch ns;
             ns.name=s.find("name")?s.find("name")->asStr():"";
+            if(const auto* owner=s.find("owner_feature")){
+                const auto* version=v.find("version");
+                if(!version||version->num<50||owner->t!=Value::Num||!std::isfinite(owner->num)||owner->num<1||owner->num>9007199254740991.0||owner->num!=std::floor(owner->num))return fail("Scoped sketches require version 50 and a positive owner_feature ID");
+                ns.ownerFeature=(u64)owner->num;
+                const auto* local=s.find("local_name");if(!local||local->t!=Value::Str||ns.name!=sketchReference(ns.ownerFeature,local->str))return fail("Scoped sketch canonical reference does not match owner_feature/local_name");
+            }
+            else if(s.find("local_name"))return fail("local_name requires owner_feature");
             if(ns.name.empty() || !sketchNames.insert(ns.name).second) return fail("empty or duplicate sketch name");
             if(!sketchFromJson(s.dump(),ns.sk,err))return false;
             nd.sketches.push_back(std::move(ns));
@@ -784,6 +804,7 @@ static bool documentFromValue(Value& v,Document& doc,std::string* err){
             if(!featureTypeFromName(tn,nf.type)) return fail("unknown feature type: "+tn);
             nf.name=fv.find("name")?fv.find("name")->asStr():"";
             if(const auto* part=fv.find("part")){if(nd.bomDocumentId.empty())return fail("Part metadata requires persistent BOM identity and version 32");try{nf.part=validatePartMetadata(*part);}catch(const std::exception& error){return fail(error.what());}}
+            if(const auto* classification=fv.find("classification")){try{nf.classification=validateClassification(*classification);}catch(const std::exception& error){return fail(error.what());}}
             if(auto manufacturing=fv.find("manufacturing")){
                 auto route=manufacturing->find("route"),version=v.find("version");
                 if(manufacturing->t!=Value::Obj||!route||route->t!=Value::Str||!version||version->asNum()<21)return fail("Manufacturing route requires version 21 object");
@@ -846,6 +867,7 @@ static bool documentFromValue(Value& v,Document& doc,std::string* err){
         u64 maximum=0;for(auto& j:nodes->arr){AssemblyNode n;
             if(!integer(j,"id",n.id)||!n.id||!integer(j,"parent",n.parent)||!integer(j,"feature",n.feature))return fail("invalid assembly identifiers");
             n.name=j.find("name")?j.find("name")->asStr():"Component";
+            if(const auto* classification=j.find("classification")){try{n.classification=validateClassification(*classification);}catch(const std::exception& error){return fail(error.what());}}
             if(auto visible=j.find("visible")){if(visible->t!=Value::Bool)return fail("visible must be boolean");n.visible=visible->b;}
             if(auto p=j.find("p")){if(p->t!=Value::Obj)return fail("assembly p must be object");for(auto& kv:p->obj){if(kv.second.t!=Value::Str)return fail("placement fields must be expressions");n.p[kv.first]=kv.second.str;}}
             if(auto fixed=j.find("fixed")){if(fixed->t!=Value::Bool)return fail("fixed must be boolean");n.fixed=fixed->b;}
@@ -882,7 +904,8 @@ static bool documentFromValue(Value& v,Document& doc,std::string* err){
         }
         if(feature.appearance.t==Value::Obj){auto version=v.find("version");if(!version||version->asNum()<15)return fail("Feature appearance requires document version 15");}
     }
-    if(nd.params.size()>256||nd.features.size()>1024||nd.sketches.size()>256||nd.canvases.size()>8||nd.materials.size()>256)return fail("document capacity exceeded");
+    if(nd.params.size()>256||nd.features.size()>1024||nd.canvases.size()>8||nd.materials.size()>256)return fail("document capacity exceeded");
+    {std::string scopeError;if(!nd.validateSketchScopes(scopeError))return fail(scopeError.rfind("Document capacity exceeded",0)==0?"document capacity exceeded":scopeError);}
     nd.refreshParams();
     if(!nd.parameterError.empty())return fail(nd.parameterError);
     for(auto& canvas:nd.canvases){
@@ -914,6 +937,9 @@ static bool documentFromValue(Value& v,Document& doc,std::string* err){
     }
     try{validateAssemblyAuthoring(nd);}catch(const std::exception& error){return fail(error.what());}
     std::string manufacturingError;if(!validateManufacturingRoutes(nd,manufacturingError))return fail(manufacturingError);
+    if(const auto* sheets=v.find("schematics"))nd.schematics=*sheets;try{validateDesignDisciplines(nd);if(requiresDesignDisciplines054B(nd)&&(!v.find("version")||v.find("version")->num<52))return fail("Classification and schematics require document version 52");}catch(const std::exception& error){return fail(error.what());}
+    if(const auto* plans=v.find("manufacturing_plans")){const auto* version=v.find("version");if(!version||version->num<53)return fail("Manufacturing plans require document version 53");nd.manufacturingPlans=*plans;try{validateManufacturingPlans(nd);}catch(const std::exception& error){return fail(error.what());}}
+    if(extendedTransmissionDocument(nd)){const auto* version=v.find("version");if(!version||version->num<54)return fail("Extended transmission mates require document version 54");}
     if(history.t!=Value::Null){if(!iterationValidate(nd,history,historyError))return fail(historyError);nd.iterationHistory=std::move(history);}
     if(arcRecipeDocument(nd)){const auto* version=v.find("version");if(!version||version->num<30)return fail("Arc recipes and linked tube end fits require document version 30");}
     if(generation34Document(nd)){const auto* version=v.find("version");if(!version||version->num<34)return fail("Typed sketches, associative datums, spatial constraints and varying sections require document version 34");}
@@ -1020,8 +1046,19 @@ bool saveDocument(const Document& doc, const char* path, DocumentSaveReport* rep
             MotionDerivedReport motions;appendMotionDerivedPayloads(doc,derived,selected.capacityBytes-std::min(selected.capacityBytes,selected.bytes),selected.capacityEntries-std::min(selected.capacityEntries,derived.size()),&motions);
             if(report){report->derivedGeometry=true;report->derivedEntries=selected.entries;report->derivedBytes=selected.bytes;report->derivedOmittedEntries=selected.omittedEntries;report->derivedOmittedBytes=selected.omittedBytes;report->derivedCapacityBytes=selected.capacityBytes;
                 report->motionFrameEntries=motions.entries;report->motionFrameBytes=motions.bytes;report->motionFrameOmittedEntries=motions.omittedEntries;report->motionFrameOmittedBytes=motions.omittedBytes;report->motionFrameNotCached=motions.notCached;}
-            std::string error;if(saveDocumentContainer(persistedRoot,path,&error,nullptr,&derived))return true;
-            return fail(error.empty()?"ARK container save failed":error);
+            std::string error;DocumentContainerWriteStats written;
+            if(!saveDocumentContainer(persistedRoot,path,&error,&written,&derived))return fail(error.empty()?"ARK container save failed":error);
+            if(report){
+                // 051A: a pack over its stored capacity drops the document-order tail,
+                // where the motion frames follow the geometry entries.
+                const size_t geometry=std::min(selected.entries,derived.size());
+                for(size_t i=written.derivedEntries;i<derived.size();++i){const size_t bytes=derived[i].bytes.size();
+                    if(i<geometry){--report->derivedEntries;report->derivedBytes-=bytes;++report->derivedOmittedEntries;report->derivedOmittedBytes+=bytes;}
+                    else{--report->motionFrameEntries;report->motionFrameBytes-=bytes;++report->motionFrameOmittedEntries;report->motionFrameOmittedBytes+=bytes;}}
+                report->derivedStoredBytes=written.derivedStoredBytes;report->physicalBytes=written.physicalBytes;report->bytesBeforeCompaction=written.bytesBeforeCompaction;
+                report->derivedRewritten=written.derivedRewritten;report->compacted=written.compacted;report->compactionSkipped=written.compactionSkipped;
+            }
+            return true;
         }catch(const std::exception& e){return fail(e.what());}
     }
     temporary+=".tmp";
@@ -1042,8 +1079,8 @@ bool saveDocument(const Document& doc, const char* path, DocumentSaveReport* rep
 bool loadDocument(const char* path, Document& doc, std::string* err){
     if(!path||!*path){ if(err)*err="empty path"; return false; }
     if(documentContainerFile(path)){
-        Value root;DocumentDerivedPayloads derived;std::string discarded;
-        if(!loadDocumentContainer(path,root,err,&derived,&discarded))return false;
+        Value root;DocumentDerivedPayloads derived;std::string discarded;DocumentContainerReadStats read;
+        if(!loadDocumentContainer(path,root,err,&derived,&discarded,&read))return false;
         // The container reader already enforced logical JSON capacity, exact
         // codec limits and checksums. Apply the same authoring validation to
         // its decoded value without constructing and parsing another JSON copy.
@@ -1053,6 +1090,10 @@ bool loadDocument(const char* path, Document& doc, std::string* err){
             DocumentDerivedPayloads native,motions;for(auto& record:derived)(motionDerivedPayload(record)?motions:native).push_back(std::move(record));
             candidate.derivedGeometryStatus=stageNativeDocumentResults(candidate,native);
             if(!motions.empty())candidate.derivedGeometryStatus.set("motion_frames",stageMotionDerivedPayloads(candidate,motions));
+            // 051A: how the optional section was stored, independent of its validation.
+            candidate.derivedGeometryStatus.set("container_encoding",Value::makeStr(read.derivedEncoding));
+            candidate.derivedGeometryStatus.set("stored_bytes",Value::makeNum((double)read.derivedStoredBytes));
+            candidate.derivedGeometryStatus.set("decoded_bytes",Value::makeNum((double)read.derivedDecodedBytes));
             if(!discarded.empty()){
                 candidate.derivedGeometryStatus=Value::makeObj();
                 candidate.derivedGeometryStatus.set("status",Value::makeStr("discarded"));

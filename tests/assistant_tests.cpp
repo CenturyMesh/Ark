@@ -112,6 +112,8 @@ static void deferredToolChecks(){
     auto names=[](const V& tools){std::vector<std::string> out;for(const auto& tool:tools.arr)out.push_back(tool.find("name")->asStr());return out;};
     auto has=[&](const V& tools,const char* name){const auto list=names(tools);return std::find(list.begin(),list.end(),name)!=list.end();};
     const auto core=ark::assistantActiveTools(full,V::makeArr(),"");
+    check(has(core,"classification_info")&&!has(core,"schematic_export"),"part classification is core; sheet export waits for its topic");
+    const auto schematics=ark::assistantActiveTools(full,V::makeArr(),ark::agentOnboardingPack({"schematics"}));check(has(schematics,"schematic_inspect")&&has(schematics,"schematic_export"),"schematic onboarding exposes the editable sheet tools");
     check(!has(core,"bom_inspect")&&!has(core,"library_source_search")&&!has(core,"drawing_export")&&has(core,"doc_apply")&&has(core,"doc_info")&&has(core,"agent_onboard")&&has(core,"collision_inspect"),"core tools stay advertised while specialist tools wait for their topic");
     std::string onboard;for(const auto& tool:core.arr)if(tool.find("name")->asStr()=="agent_onboard")onboard=tool.find("description")->asStr();
     check(onboard.find("bom: bom_inspect")!=std::string::npos&&onboard.find("drawings: drawing_inspect, drawing_export")!=std::string::npos,"agent_onboard lists which topic offers each deferred tool");
@@ -119,7 +121,7 @@ static void deferredToolChecks(){
     check(core.dump().size()*10<full.dump().size()*8,"deferring specialist tools removes at least a fifth of the catalogue bytes");
     V history=V::makeArr();V call=V::makeObj();call.set("type",V::makeStr("function_call"));call.set("call_id",V::makeStr("load_bom"));call.set("name",V::makeStr("agent_onboard"));call.set("arguments",V::makeStr(R"({"topic":"bom"})"));history.arr.push_back(call);
     const auto bom=ark::assistantActiveTools(full,history,"");
-    check(has(bom,"bom_inspect")&&has(bom,"bom_export")&&!has(bom,"drawing_export"),"loading a topic offers exactly its specialist tools");
+    check(has(bom,"bom_inspect")&&has(bom,"bom_export")&&has(bom,"library_source_search")&&has(bom,"library_source_page")&&has(bom,"library_vendors")&&!has(bom,"drawing_export"),"loading a topic offers exactly its specialist tools");
     bool prefix=bom.arr.size()>core.arr.size();for(std::size_t i=0;prefix&&i<core.arr.size();++i)prefix=bom.arr[i].dump()==core.arr[i].dump();
     check(prefix,"a topic load appends to the advertised tools, keeping the earlier list as a cacheable prefix");
     V batch=V::makeObj();batch.set("type",V::makeStr("function_call"));batch.set("call_id",V::makeStr("batch_guides"));batch.set("name",V::makeStr("query_batch"));batch.set("arguments",V::makeStr(R"({"queries":[{"tool":"agent_onboard","args":{"topic":"drawings","detail":"guide"}}]})"));history.arr.push_back(batch);

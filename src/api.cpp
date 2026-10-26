@@ -105,7 +105,8 @@ uint64_t ark_feature_add(ArkDoc* d,const char* typeName){
     return d->doc.addFeature(std::move(f));
 }
 
-int ark_feature_remove(ArkDoc* d,uint64_t id){ return (d&&d->doc.remove(id))?0:-1; }int ark_feature_move(ArkDoc* d,uint64_t id,int delta){ return (d&&d->doc.reorderMove(id,delta))?0:-1; }
+int ark_feature_remove(ArkDoc* d,uint64_t id){if(!d)return -1;try{return d->doc.remove(id)?0:-1;}catch(const std::exception& e){d->lastErr=e.what();return -1;}}
+int ark_feature_move(ArkDoc* d,uint64_t id,int delta){ return (d&&d->doc.reorderMove(id,delta))?0:-1; }
 
 int ark_feature_set_param(ArkDoc* d,uint64_t id,const char* key,const char* expr){
     if(!d||!key||!expr||!*key) return -1;
@@ -126,12 +127,14 @@ static bool sketchJsonsToSketch(const char* entitiesJson,const char* constraints
 }
 
 int ark_sketch_set(ArkDoc* d,const char* name,const char* entitiesJson,const char* constraintsJson){
+    return ark_sketch_set_owned(d,0,name,entitiesJson,constraintsJson);
+}
+int ark_sketch_set_owned(ArkDoc* d,uint64_t ownerFeature,const char* name,const char* entitiesJson,const char* constraintsJson){
     if(!d||!name||!*name) return -1;
     Sketch sk; std::string err;
     if(!sketchJsonsToSketch(entitiesJson,constraintsJson,sk,err)) return -2;
-    d->doc.setSketch(name,std::move(sk));
-    d->doc.recompute();
-    return 0;
+    try{d->doc.setSketch(name,std::move(sk),ownerFeature);d->doc.recompute();return 0;}
+    catch(const std::exception& e){d->lastErr=e.what();return -3;}
 }
 
 char* ark_sketch_json(ArkDoc* d,const char* name){

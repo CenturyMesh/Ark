@@ -19,6 +19,10 @@ third_party/sqlite/sqlite3* -text whitespace=-blank-at-eol
 # Preserve the pinned upstream decoder and license byte for byte.
 third_party/stb/stb_image.h -text whitespace=-blank-at-eol
 third_party/stb/LICENSE -text whitespace=-blank-at-eol
+# Preserve the verified zstd 1.5.7 sources and licenses byte for byte.
+third_party/zstd/lib/** -text whitespace=-blank-at-eol
+third_party/zstd/LICENSE -text whitespace=-blank-at-eol
+third_party/zstd/COPYING -text whitespace=-blank-at-eol
 # Preserve the official ONNX Runtime headers and notices byte for byte.
 third_party/onnxruntime/*.h -text whitespace=cr-at-eol,-blank-at-eol
 third_party/onnxruntime/LICENSE -text whitespace=cr-at-eol,-blank-at-eol

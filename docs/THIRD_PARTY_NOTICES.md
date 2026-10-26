@@ -94,6 +94,10 @@ decoder; offline contracts also exercise this portable path. The host disables
 file I/O and unrelated image/HDR formats and bounds input dimensions, decoded
 area and decoder allocations.
 
+060C also uses the same unmodified header's raw DEFLATE decoder for bounded
+G-code members in 3MF ZIP containers. Member size and CRC are checked by ARK;
+archive members are read into memory, not extracted as filesystem paths.
+
 The upstream MIT alternative applies to this dependency. The complete unchanged
 upstream dual-license text is retained in `third_party/stb/LICENSE` and packaged
 as `licenses/stb-image-LICENSE.txt`; the header retains its embedded license.
@@ -102,6 +106,22 @@ This dependency's license remains separate from ARK's Apache-2.0 license.
 - [Official pinned header](https://github.com/nothings/stb/blob/013ac3beddff3dbffafd5177e7972067cd2b5083/stb_image.h)
 - [Official pinned license](https://github.com/nothings/stb/blob/013ac3beddff3dbffafd5177e7972067cd2b5083/LICENSE)
 - Provenance and exact hashes: `third_party/stb/README.md`.
+
+## Zstandard 1.5.7
+
+ARK compresses the optional derived section of `.ark` containers (saved native
+geometry and baked frames) with the Zstandard library, built from unmodified
+upstream sources as a static single-threaded target without legacy formats.
+Authoring is not compressed by it.
+
+Zstandard is dual-licensed under BSD or GPLv2; ARK uses the BSD alternative.
+Both unchanged upstream files are retained in `third_party/zstd` and the BSD
+license is packaged as `licenses/zstd-LICENSE.txt`. This dependency's license
+remains separate from ARK's Apache-2.0 license.
+
+- [Official v1.5.7 release](https://github.com/facebook/zstd/releases/tag/v1.5.7)
+- Archive SHA-256: `eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24fc1b7ee09e6fa3`.
+- Provenance and retained files: `third_party/zstd/README.md`.
 
 ## Microsoft Windows and Visual C++ runtime
 

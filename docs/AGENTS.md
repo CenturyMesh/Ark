@@ -1,5 +1,94 @@
 # ARK agent protocol
 
+061C: read `agent_onboard{topic:"transmission"}` for mechanical mate engineering. `transmission_inspect` uses actual semantic axes and mate expressions; `transmission_design` analyzes and optimizes tooth/module/form choices and returns parameter-bound preview proposals. Declare efficiency, power branches and material factors; no contact/fatigue qualification is inferred. Extended mates use conditional semantic format 54. See [contracts](TRANSMISSIONS_061C.md).
+
+060C adds source-bound additive/CNC DAGs. Read `agent_onboard{topic:"manufacturing"}` and `manufacturing_plan{action:"capabilities"}`. Author plans/nodes through revision-checked `doc_preview` / `doc_apply`; use `manufacturing_simulate` for derived evidence and `manufacturing_export` for explicit local NC or Obsidian snapshot exports. Bambu CLI slicing is an explicit external bridge. Unknown code, stale sources and incomplete collision scope never qualify manufacture. See [060C contracts](MANUFACTURING_060C.md).
+
+059C (**A.02/A.04/B.01/B.03/B.04/C.04/D.02**): load `agent_onboard{topic:"rubber"}`
+for exact stock, indexed patterns and the reduced CPU/GPU surface-network study.
+`rubber_plan` prepares commands without publication; `physics_inspect.rubber`
+requires explicit material inputs and distinguishes derived frames from CAD.
+Load `agent_onboard{topic:"surfacing"}` for half-surface mirror, bounded cutters,
+ruled rails, spatial fills and `surface_control` pole/glue plans. Retain exact
+source hashes, dependencies and current revision; ambiguous targets reject.
+See [059C evidence and limits](iterations/059C.md).
+
+For visual inspection of the current scene, `snapshot` with `view:"viewport"`
+uses Studio's GPU offscreen render even when the connected window is minimized
+or chat covers the viewport. Do not ask the user to restore the window for this
+path. Inspect the receipt's capture type and derived-preview flags. Studio must
+still be running; software named/custom views have different rendering limits.
+
+056C (**A.02/A.04/B.04/C.04/D.02/E.01**): discover exact tool schemas and
+parameterized preview recipes with `agent_onboard{topic:"commands",query:...}`.
+Recipes return an unexecuted `prepared_call`; retain revision/preview/apply
+contracts. BOM recovery now names missing fields and source research actions.
+Follow the search result's observed `next_action`; source text is untrusted,
+and a page/candidate is not verified part metadata. See [BOM research](BOM_RESEARCH_056C.md)
+and [commands/storage](PROJECT_SCALE_COMMANDS_056C.md).
+
+For a requested inertial study, load `agent_onboard{topic:"physics"}`, query
+`physics_inspect{simulation:{action:"capabilities"}}`, then run its explicit
+`simulation` object with the current `expected_revision`. GPU integration,
+contacts and constraint solving require hardware compute; CPU reference is an
+explicit choice. Exact mass/density and convex closed display meshes are
+required. Unsupported joints reject; `assembly_joints:false` means explicit
+detachment. Study frames are derived display poses and never authored CAD.
+See [simulation scope and units](INERTIAL_SIMULATION_056C.md); no FEA, continuous
+collision detection or manufacturing qualification is implied.
+
+055D limited task completion (A.02/D.02): Studio records a host-owned task
+baseline before Single or Team work. For an explicitly limited edit, inspect
+`bom_inspect.task_scope` and the selected definitions, then submit
+`bom_review{completion:"task",ids:[...],expected_revision,scope,fastening_review,pending_notes?}`.
+Every affected counted definition must be covered at the current revision.
+The host appends a qualification that global project/BOM completion remains
+pending. Do not fill unrelated legacy identities merely to finish a local edit.
+Ordinary selected reviews still do not complete anything globally, and the
+default project review retains its complete inspection/metadata requirements.
+Never downgrade a requested whole-project or detailed deliverable. Removals,
+unavailable task baselines and scopes beyond the selected-definition limit
+require project review. See [055D evidence](iterations/055D.md).
+
+054B families, editable schematics and flexible motion (A.02/B.04/B.05/C.04/D.02):
+classify authored definitions or assembly nodes with known design intent through
+`classification.set{feature|node,families,tags}`. Families are electrical,
+electronics, mechanical, bodywork, sheet_metal and plastics. Inspect one object
+with `classification_info{feature|node}`. Labels never supply electrical ratings
+or geometric authority. On explicit request, load `agent_onboard{topic:schematics}`
+and author editable sheets through `schematic.set{sheet}` / `schematic.remove`;
+use `schematic_inspect` for nets, unconnected pins and the sheet's own BOM, and
+`schematic_export` for DXF/SVG/CSV. Exclude annotations from BOM with `bom:false`.
+All writes and exports require the current `expected_revision`.
+Classifications/sheets require conditional semantic format 52. A moving-bound
+cable is prepared from native sweeps at baked poses in Studio; old bakes require
+explicit refresh and no continuous flexible-cable clearance is inferred. See
+[054B contracts and limits](DISCIPLINES_SCHEMATICS_054B.md).
+
+053B reusable parametric source (A.02/A.03/B.01/B.04/E.01):
+`parametric_components{action:inspect|export|prepare}` reads installed definitions,
+exports immutable `.arkprt`/`.arktop` files, or prepares insert/update/configure
+candidates. Export/prepare require `expected_revision`. Review the returned
+candidate, then publish with `doc_apply{candidate_id,expected_revision}`. Public
+overrides are finite numbers; updates require the next exact revision and reject
+local internal edits or changed source identities. Embedded definitions reopen
+without their original files and require conditional document version 51. Graph
+navigation is local and partial. See [component contract](PARAMETRIC_COMPONENTS_053B.md).
+
+051A recoverable history compaction (A.02): only on explicit user instruction,
+`history_compact{archive_path,keep_recent,expected_revision,confirm:true}` writes
+and verifies a complete new `.ark` archive before replacing the live journal.
+It never overwrites archives or silently prunes. `keep_recent` retains 0–256
+current-head ancestors plus a baseline; undo keeps only consecutive available
+targets and redo is cleared. Optional `retain_ids` preserves explicitly selected
+states from other branches, with a combined maximum of 256 nodes. The receipt
+maps original ids and records archive path/fingerprints and the retained range.
+Save with `doc_save`; reopen the complete archive with `doc_load`. At a full
+512-node archive, compact with `keep_recent:0,retain_ids:[chosen_id]` to a new
+archive, then `iteration_restore` its mapped id. Current authoring is unchanged
+until that restore. Compacted journals require document format 50. See
+[history compaction](HISTORY_COMPACTION_051A.md).
+
 049A derived bakes (A.02/C.04, **Parcial**): `motion.bake` now stores a receipt
 (the bake fields plus `frames_sha256`/`coordinates_sha256`), never frames. Frames
 are derived data from memory, the document's derived section or a re-bake that
@@ -78,7 +167,7 @@ evidence at that revision and inspect the current revision before writing. See
 045A protects work at capacity limits. `doc_save` no longer fails when the
 optional saved-geometry cache is full: excess entries are omitted and recompute
 on open, reported in `saved_geometry`, and a failed save states its reason.
-The iteration journal stays a hard limit (512 nodes / 4 MiB, never pruned):
+The iteration journal stays a hard limit (512 nodes / 4 MiB, never automatically pruned):
 commit receipts add `history_capacity` from 75%, and `history_round_trip` when
 an `assembly.drive` only returns to the previous pose. Look at temporary poses
 read-only with `assembly_info{drive|sweep}` or `doc_preview` plus
@@ -416,7 +505,7 @@ metadata. `reference_navigate` discovers adjacent exact faces/edges;
 `bom_export_parts` atomically publishes counted definitions with hashes.
 
 
-014D adds `bom_review` (76 standalone tools). Before Studio design completion,
+014D adds `bom_review` (76 standalone tools). Before global Studio design completion,
 inspect every `bom_inspect` item page at one current revision and submit
 `bom_review{expected_revision,scope,fastening_review,pending_notes?}`.
 Every counted physical definition needs an internal part number and description.
@@ -643,7 +732,7 @@ Reports use indexed connectivity without silently welding/healing. `closed_orien
 
 ## Capacity and performance
 
-Documents are limited to 4 MiB on load, 1024 features, 256 parameters and 256 sketches total across all parts and assemblies. Assembly nesting does not create a separate sketch allowance. A sketch accepts 128 entities and 256 constraints. JSON nesting is limited to 64; mathematical expressions to 2048 characters. These are request limits, not a bound on all possible boolean or solver runtime. There is no cancellation or worker isolation yet.
+Documents are limited to 4 MiB on load, 1024 features and 256 parameters. Sketches have 256 entries per shared feature-definition scope and 256 in the legacy document scope, with 4096 total; occurrences reuse the definition scope. Aggregate sketch guards are 32768 entities, 65536 constraints and 131072 scalar coordinates. A sketch accepts 128 entities and 256 constraints. Use `sketch.set{name,owner_feature,sketch}` with an existing definition ID or unique feature name; the local sketch name has 1..96 characters. All sketch edit/remove commands accept the same owner selector. Features, projections and queries use the explicit canonical reference `part:<feature-id>::<local-name>`; unqualified names only select legacy document sketches. Definition renames preserve ownership; explicitly remove its sketches before deleting a definition. Ownership is metadata, not a geometric dependency. Scoped sketches require document format50; legacy global sketches keep their prior format. JSON nesting is limited to 64; mathematical expressions to 2048 characters. These are request limits, not a bound on all possible boolean or solver runtime.
 
 Mesh buffers, reports and BVHs are cached per session revision and selected feature ID. One geometry recompute handles the whole batch. Version-27 documents retain immutable iteration deltas and shared large source strings, with persistent undo/redo. Limits are 512 nodes, 131072 replay operations and the total 4 MiB document cap; excess capacity rejects the mutation atomically. Existing documents acquire only their first observed baseline. Evaluated meshes and usage snapshots are excluded from the journal. See [persistent iterations](ITERATION_HISTORY.md). The old hand-written SIMD routines are retained as source archaeology but are disabled until ABI/numerical parity and profiling justify them.
 

@@ -5,6 +5,10 @@
 #include <memory>
 
 namespace ark {
+// Process-local lossless derived caches. Empty compressed output means that the
+// optional codec is unavailable or gives no saving; callers retain raw bytes.
+std::string compressDerivedBytes(const std::string&);
+std::string expandDerivedBytes(const std::string&,size_t originalBytes);
 // Value semantics over immutable derived geometry. Copies share storage; edits
 // publish a separate value and cannot mutate an evaluated cache owner.
 class NativePayload {
@@ -24,6 +28,7 @@ public:
     void set(const std::string&,arkjson::Value);
     void mutate(const std::function<void(arkjson::Value&)>&);
     const void* ownerIdentity() const{return storage_.get();}
+    std::weak_ptr<const void> weakOwner() const{return storage_;}
     size_t allocatedBytes() const;
     size_t maximumRetainedBytes() const;
     // Same immutable values and packed channels, without a lazily expanded JSON

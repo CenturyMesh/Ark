@@ -2,6 +2,7 @@
 #include "ark/core.hpp"
 #include "ark/json.hpp"
 #include <functional>
+#include <memory>
 #include <unordered_map>
 #include <unordered_set>
 namespace ark {
@@ -20,6 +21,7 @@ struct AssemblyNode {
     bool visible=true;
     bool fixed=false; // Grounded instance; its authored placement is retained by the mate solver.
     AssemblyPattern pattern;
+    arkjson::Value classification; // explicit occurrence/group families and tags
 };
 struct AssemblyJointLimits {
     bool enabled=false;
@@ -92,6 +94,7 @@ struct AssemblyMotionRelation {
     AssemblyMate mate;
     Mat4 localA,localB;
     double ratio=1,lift=0,phaseRad=0,target=0,teethA=0,teethB=0;
+    arkjson::Value transmission; // derived sizing/load inputs from the same authored mate
     bool translational=false;
     bool limited=false;
     double minimum=0,maximum=0;
@@ -145,4 +148,14 @@ bool selectAssemblyManipulationJoint(const AssemblyManipulationProgram&,u64 driv
 bool previewAssemblyManipulation(const AssemblyManipulationProgram&,u64 driver,u64 mate,
                                 const std::string& mode,double delta,
                                 AssemblyManipulationPreview&,std::string& error);
+// One immutable baseline and one explicitly selected motion. Reuses only fully
+// validated continuation checkpoints; never rebases the authored document.
+// UI-thread owned. Discard on revision/epoch change, cancel or release.
+class AssemblyManipulationPath {
+    struct Impl;
+    std::shared_ptr<Impl> impl_;
+public:
+    AssemblyManipulationPath(const AssemblyManipulationProgram&,u64 driver,u64 mate,std::string mode);
+    bool preview(double delta,AssemblyManipulationPreview&,std::string& error);
+};
 }

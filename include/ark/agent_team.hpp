@@ -22,6 +22,9 @@ struct AgentTeamConfig {
     unsigned maxWorkers=8, maxTurnsPerRole=0; // Zero means no turn budget.
     bool orchestratedStart=false; // Specialists await explicit assignments.
     bool focusedWorkflow=false; // One conversation at a time; the lead starts and delegates specific tasks.
+    // Focused part designers receive isolated design-container workspaces and
+    // only the lead can review/publish their results into the source document.
+    bool isolatePartDesigners=false;
     bool requireLeadAuthoringCheckpoint=false; // Parallel empty-document startup: defer other writers until the lead commits a sketch/feature.
     // Strict 038D/041D contract: any retained failed read also blocks completion
     // until its exact recovery. Off while agents stabilize: failed reads stay
@@ -66,6 +69,8 @@ struct AgentTeamRoleSnapshot {
     bool canWrite=false;
     unsigned turns=0;
     std::uint64_t stepsApplied=0;
+    std::string partTask,partState;
+    std::uint64_t privateStepsApplied=0; // Private revisions, never source commits.
     bool needsInspection=false;
     unsigned unresolvedToolErrors=0;
     // Opt-in bounded diagnostics; never a CAD/prompt/provider-history payload.

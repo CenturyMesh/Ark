@@ -56,6 +56,12 @@ V validatePartMetadata(const V& value){
     if(text(out,"sourcing_status")=="selected")require(!text(out,"source_url").empty()&&(!text(out,"manufacturer_part_number").empty()||!text(out,"supplier_part_number").empty()),"Selected sourcing requires a source URL and an explicit manufacturer or supplier reference");
     return out;
 }
+V patchPartMetadata(const V& current,const V& patch){
+    require(patch.t==V::Obj&&!patch.obj.empty(),"part_patch must be a nonempty object; use part:null to clear the entire record");
+    V merged=current.t==V::Obj?current:V::makeObj();
+    for(const auto& entry:patch.obj)merged.set(entry.first,entry.second);
+    return validatePartMetadata(merged);
+}
 V partMetadataSchema(){
     V schema=V::makeObj(),props=V::makeObj();schema.set("type",V::makeStr("object"));schema.set("additionalProperties",V::makeBool(false));
     for(const auto* key:fields){V item=V::makeObj();item.set("type",V::makeStr("string"));item.set("maxLength",V::makeNum(2048));item.set("pattern",V::makeStr("^[^\\x00-\\x1F]*$"));props.set(key,item);}
@@ -173,5 +179,12 @@ void appendBomTools(V& tools){
     add("bom_export","Atomically export the current BOM to a new local .json path with observed expected_revision. Requires persisted identity; exports drafts with missing fields explicitly. Never overwrites files or uploads to MeshWorks; contains private design metadata.",R"({"type":"object","properties":{"path":{"type":"string","minLength":1,"maxLength":4096},"expected_revision":{"type":"integer","minimum":0}},"required":["path","expected_revision"],"additionalProperties":false})",false);
     add("fastener_recipe","Read an editable three-command native-solid recipe for an explicitly dimensioned screw, washer or annular nut envelope. No automatic standard/supplier recognition, threads, drives or catalogue insertion. Inspect the local library first for specified purchased parts. Apply returned commands atomically; place/reuse the final definition, not its construction solids.",R"({"type":"object","properties":{"kind":{"type":"string","enum":["screw","nut","washer"]},"name":{"type":"string","minLength":1,"maxLength":100},"diameter_mm":{"type":"number","exclusiveMinimum":0,"maximum":10000},"length_mm":{"type":"number","exclusiveMinimum":0,"maximum":10000},"head_diameter_mm":{"type":"number","exclusiveMinimum":0,"maximum":10000},"head_height_mm":{"type":"number","exclusiveMinimum":0,"maximum":10000},"inner_diameter_mm":{"type":"number","exclusiveMinimum":0,"maximum":10000},"outer_diameter_mm":{"type":"number","exclusiveMinimum":0,"maximum":10000},"thickness_mm":{"type":"number","exclusiveMinimum":0,"maximum":10000},"part":{"type":"object"},"material":{"type":"string"}},"required":["kind","name"],"additionalProperties":false,"oneOf":[{"properties":{"kind":{"enum":["screw"]}},"required":["diameter_mm","length_mm","head_diameter_mm","head_height_mm"]},{"properties":{"kind":{"enum":["nut","washer"]}},"required":["inner_diameter_mm","outer_diameter_mm","thickness_mm"]}]})",true);
     V schema=*tools.arr.back().find("inputSchema"),props=*schema.find("properties");props.set("part",partMetadataSchema());schema.set("properties",props);tools.arr.back().set("inputSchema",schema);
+    for(auto& tool:tools.arr){
+        const auto name=text(tool,"name");
+        if(name=="bom_review"){
+            auto reviewSchema=*tool.find("inputSchema"),reviewProps=*reviewSchema.find("properties");V completion;arkjson::parse(R"({"type":"string","enum":["project","task"],"description":"Default project. Explicit task requires a host task; omitted ids selects every affected definition (0..64). Explicit ids must cover every affected definition; never approves the global BOM."})",completion);reviewProps.set("completion",completion);reviewSchema.set("properties",reviewProps);tool.set("inputSchema",reviewSchema);
+            tool.set("description",V::makeStr(text(tool,"description")+" For an explicitly limited user task, completion:task can satisfy Studio task finalization; omit ids to select the host-observed affected set (0..64, including no changed definitions for display-only work) when the host-observed affected definitions are all covered. Unrelated preexisting incomplete parts remain pending. Removals require project review; never use task completion for a requested whole-project deliverable."));
+        }else if(name=="bom_inspect")tool.set("description",V::makeStr(text(tool,"description")+" task_scope reports host-observed affected/removed definitions since this Studio task began; ids does not narrow that coverage report."));
+    }
 }
 }

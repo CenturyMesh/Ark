@@ -1,6 +1,7 @@
 #include "ark/model.hpp"
 #include "ark/references.hpp"
 #include "ark/assembly_authoring.hpp"
+#include "ark/transmission.hpp"
 #include "ark/history_authoring.hpp"
 #include <algorithm>
 #include <cmath>
@@ -14,7 +15,7 @@
 
 namespace ark {
 using V=arkjson::Value;
-bool isMechanicalMate(const std::string& type){return type=="chain"||type=="gear"||type=="shaft"||type=="rack_pinion"||type=="cam";}
+bool isMechanicalMate(const std::string& type){return isTransmissionMate(type)||type=="rack_pinion"||type=="cam";}
 namespace {
 constexpr double kAngularWeight=10.0;
 constexpr double kPositionTolerance=1e-5;
@@ -48,13 +49,18 @@ AssemblyMotionRelation prepareMotionRelation(const Document& doc,const AssemblyM
     const Mat4 fa=worldA*relation.localA,fb=worldB*relation.localB;const double dot=axis(fa).dot(axis(fb));
     const ExprEnv env=doc.buildEnv();
     auto number=[&](const char* key,double fallback,bool required=false){const auto found=mate.motion.find(key);if(found==mate.motion.end()){if(required)throw std::runtime_error(std::string("MECHANICAL_FIELD_REQUIRED: ")+key);return fallback;}bool ok=false;const double value=evalExpr(found->second,env,&ok);if(!ok||!std::isfinite(value)||std::fabs(value)>1e6)throw std::runtime_error(std::string("MECHANICAL_INVALID_EXPRESSION: ")+key);return value;};
-    for(const auto& field:mate.motion){const auto& key=field.first;const bool allowed=(mate.type=="chain"||mate.type=="gear")?(key=="teeth_a"||key=="teeth_b"||key=="phase_deg"):mate.type=="rack_pinion"?(key=="pitch_radius"||key=="direction"):mate.type=="cam"?(key=="lift"||key=="phase_deg"):false;if(!allowed)throw std::runtime_error("MECHANICAL_UNSUPPORTED_FIELD: "+key);}
+    for(const auto& field:mate.motion){const auto& key=field.first;const bool allowed=isTransmissionMate(mate.type)?transmissionMotionField(mate.type,key):mate.type=="rack_pinion"?(key=="pitch_radius"||key=="direction"):mate.type=="cam"?(key=="lift"||key=="phase_deg"):false;if(!allowed)throw std::runtime_error("MECHANICAL_UNSUPPORTED_FIELD: "+key);}
     bool valueOk=false;const double legacy=evalExpr(mate.value,env,&valueOk);if(!valueOk||std::fabs(legacy)>1e-12)throw std::runtime_error("Mechanical mates use motion fields; value must be zero");
-    if(mate.type=="chain"||mate.type=="gear"||mate.type=="shaft"){
-        if(std::fabs(std::fabs(dot)-1)>1e-6)throw std::runtime_error("MECHANICAL_AXES_NOT_PARALLEL: chain/gear/shaft require parallel semantic axes");
-        if(mate.type=="shaft"){const auto gap=origin(fb)-origin(fa);if((gap-axis(fa)*gap.dot(axis(fa))).len()>kPositionTolerance)throw std::runtime_error("MECHANICAL_SHAFT_NOT_COAXIAL: shaft references must share an axis");}
-        else{const double teethA=number("teeth_a",0,true),teethB=number("teeth_b",0,true);if(teethA<1||teethB<1||teethA>10000||teethB>10000||std::fabs(teethA-std::round(teethA))>1e-9||std::fabs(teethB-std::round(teethB))>1e-9)throw std::runtime_error("MECHANICAL_INVALID_TEETH: counts must be integers 1..10000");relation.teethA=teethA;relation.teethB=teethB;relation.ratio=teethA/teethB;relation.phaseRad=deg2rad(number("phase_deg",0));}
-        relation.ratio*=dot<0?-1:1;if(mate.type=="gear")relation.ratio*=-1;
+    if(isTransmissionMate(mate.type)){
+        if(std::fabs(std::fabs(dot)-1)>1e-6)throw std::runtime_error("MECHANICAL_AXES_NOT_PARALLEL: transmission requires parallel semantic axes");
+        const auto gap=origin(fb)-origin(fa);const double axial=gap.dot(axis(fa)),center=(gap-axis(fa)*axial).len();
+        if(mate.type=="shaft"&&center>kPositionTolerance)throw std::runtime_error("MECHANICAL_SHAFT_NOT_COAXIAL: shaft references must share an axis");
+        relation.transmission=evaluateTransmissionMate(mate,env,center,axial);
+        relation.ratio=relation.transmission.find("ratio")->asNum();
+        if(const auto* teeth=relation.transmission.find("teeth_a"))relation.teethA=teeth->asNum();
+        if(const auto* teeth=relation.transmission.find("teeth_b"))relation.teethB=teeth->asNum();
+        if(const auto* phase=relation.transmission.find("phase_deg"))relation.phaseRad=deg2rad(phase->asNum());
+        relation.ratio*=dot<0?-1:1;
     }else{
         relation.translational=true;if(std::fabs(dot)>1e-6)throw std::runtime_error("MECHANICAL_AXES_NOT_ORTHOGONAL: radial cam/rack travel must be perpendicular to rotation axis");
         if(mate.type=="cam"){relation.lift=number("lift",0,true);if(relation.lift<0)throw std::runtime_error("MECHANICAL_INVALID_LIFT: lift must be nonnegative");relation.phaseRad=deg2rad(number("phase_deg",0));}
@@ -490,7 +496,7 @@ bool buildAssemblyMotion(const Document& document,AssemblyMotionProgram& program
             if(isMechanicalMate(mate.type)){auto relation=prepareMotionRelation(document,mate,a,b,world.at(mate.a),world.at(mate.b));retainAxis(mate.a,relation.localA);retainAxis(mate.b,relation.localB);program.relations.push_back(std::move(relation));}
             else{AssemblyMotionRelation constraint;constraint.mate=mate;constraint.localA=localReference(document,a,mate.reference_a,mate.fraction_a);constraint.localB=localReference(document,b,mate.reference_b,mate.fraction_b);bool ok=false;const auto env=document.buildEnv();constraint.target=evalExpr(mate.value,env,&ok);if(!ok)throw std::runtime_error("Invalid geometric mate target");if(mate.type=="angle")constraint.target=deg2rad(constraint.target);evaluateLimits(mate,env,constraint.limited,constraint.minimum,constraint.maximum);program.geometricConstraints.push_back(std::move(constraint));}
         }
-        if(program.relations.empty())throw std::runtime_error("MECHANICAL_NO_COUPLINGS: add chain, gear, shaft, rack_pinion or cam mates");
+        if(program.relations.empty())throw std::runtime_error("MECHANICAL_NO_COUPLINGS: add chain, belt, gear, shaft, rack_pinion or cam mates");
         return true;
     }catch(const std::exception& exception){error=exception.what();program={};return false;}
 }
@@ -529,7 +535,7 @@ arkjson::Value inspectAssemblyMotion(const AssemblyMotionProgram& program,u64 dr
     for(const auto& placement:program.baseline){V row=V::makeObj(),matrix=V::makeArr();row.set("node",V::makeNum((double)placement.node));row.set("feature",V::makeNum((double)placement.feature));row.set("name",V::makeStr(placement.name));row.set("copy",V::makeNum(placement.copy));row.set("visible",V::makeBool(placement.visible));const bool rotating=angle.count(placement.node),translating=displacement.count(placement.node);row.set("moving",V::makeBool(rotating||translating));for(double value:(rotating||translating?world.at(placement.node):placement.world).m)matrix.arr.push_back(V::makeNum(value));row.set("world_column_major",matrix);
         if(rotating){row.set("angle_deg",V::makeNum(rad2deg(angle.at(placement.node))));row.set("speed_rpm",V::makeNum(speed.at(placement.node)*60/(2*K_PI)));}if(translating){row.set("displacement_mm",V::makeNum(displacement.at(placement.node)));row.set("velocity_mm_s",V::makeNum(velocity.at(placement.node)));}instances.arr.push_back(row);
     }
-    for(const auto& relation:program.relations){V row=V::makeObj();row.set("id",V::makeNum((double)relation.mate.id));row.set("type",V::makeStr(relation.mate.type));row.set("a",V::makeNum((double)relation.mate.a));row.set("b",V::makeNum((double)relation.mate.b));if(relation.mate.type!="cam")row.set("ratio",V::makeNum(relation.ratio));row.set("ratio_scope",V::makeStr(relation.mate.type=="rack_pinion"?"mm per input radian":relation.mate.type=="cam"?"harmonic lift law":"signed driven angular speed / driver angular speed"));if(relation.teethA){row.set("teeth_a",V::makeNum(relation.teethA));row.set("teeth_b",V::makeNum(relation.teethB));}if(relation.mate.type=="cam")row.set("lift_mm",V::makeNum(relation.lift));row.set("phase_deg",V::makeNum(rad2deg(relation.phaseRad)));const bool active=angle.count(relation.mate.a);row.set("active",V::makeBool(active));if(active){double residualValue=0;if(!relation.translational)residualValue=angle.at(relation.mate.b)-relation.ratio*angle.at(relation.mate.a)-relation.phaseRad;else{const double expected=relation.mate.type=="cam"?relation.lift/2*(std::cos(relation.phaseRad)-std::cos(angle.at(relation.mate.a)+relation.phaseRad)):relation.ratio*angle.at(relation.mate.a);residualValue=displacement.at(relation.mate.b)-expected;}row.set(relation.translational?"residual_mm":"residual_rad",V::makeNum(residualValue));if(std::fabs(residualValue)>1e-7)throw std::runtime_error("MECHANICAL_COUPLING_RESIDUAL: inconsistent relation");}relations.arr.push_back(row);}
+    for(const auto& relation:program.relations){V row=V::makeObj();row.set("id",V::makeNum((double)relation.mate.id));row.set("type",V::makeStr(relation.mate.type));row.set("a",V::makeNum((double)relation.mate.a));row.set("b",V::makeNum((double)relation.mate.b));if(relation.mate.type!="cam")row.set("ratio",V::makeNum(relation.ratio));if(!relation.transmission.isNull())row.set("transmission",relation.transmission);row.set("ratio_scope",V::makeStr(relation.mate.type=="rack_pinion"?"mm per input radian":relation.mate.type=="cam"?"harmonic lift law":"signed driven angular speed / driver angular speed"));if(relation.teethA){row.set("teeth_a",V::makeNum(relation.teethA));row.set("teeth_b",V::makeNum(relation.teethB));}if(relation.mate.type=="cam")row.set("lift_mm",V::makeNum(relation.lift));row.set("phase_deg",V::makeNum(rad2deg(relation.phaseRad)));const bool active=angle.count(relation.mate.a);row.set("active",V::makeBool(active));if(active){double residualValue=0;if(!relation.translational)residualValue=angle.at(relation.mate.b)-relation.ratio*angle.at(relation.mate.a)-relation.phaseRad;else{const double expected=relation.mate.type=="cam"?relation.lift/2*(std::cos(relation.phaseRad)-std::cos(angle.at(relation.mate.a)+relation.phaseRad)):relation.ratio*angle.at(relation.mate.a);residualValue=displacement.at(relation.mate.b)-expected;}row.set(relation.translational?"residual_mm":"residual_rad",V::makeNum(residualValue));if(std::fabs(residualValue)>1e-7)throw std::runtime_error("MECHANICAL_COUPLING_RESIDUAL: inconsistent relation");}relations.arr.push_back(row);}
     result.set("driver",V::makeNum((double)driver));result.set("time_s",V::makeNum(timeSeconds));result.set("speed_rpm",V::makeNum(speedRpm));result.set("instances",instances);result.set("relations",relations);result.set("max_static_position_residual_mm",V::makeNum(maxPosition));result.set("max_static_angle_residual_deg",V::makeNum(maxAngle));result.set("static_constraints_verified",V::makeBool(true));result.set("document_unchanged",V::makeBool(true));result.set("model",V::makeStr("ideal kinematic coupling graph; cam is a harmonic lift law relative to authored phase-zero pose"));result.set("tooth_contact_checked",V::makeBool(false));result.set("chain_collision_checked",V::makeBool(false));result.set("cam_contact_checked",V::makeBool(false));result.set("dynamics_checked",V::makeBool(false));return result;
 }
 
@@ -728,8 +734,12 @@ double couplingIncrementResidual(const AssemblyMotionRelation& relation,
     }
     throw std::runtime_error("MANIPULATION_CAM_PHASE_UNRESOLVED: cam drag requires a grounded revolute input coordinate");
 }
+struct ManipulationCheckpoints064 {
+    std::vector<std::unordered_map<u64,Mat4>> positive,negative;
+    int rank=-1;
+};
 bool constrainedManipulation(const AssemblyManipulationProgram& program,const AssemblyManipulationJoint& joint,
-        double delta,std::unordered_map<u64,Mat4>& world,AssemblyManipulationPreview& preview,std::string& error){
+        double delta,std::unordered_map<u64,Mat4>& world,AssemblyManipulationPreview& preview,std::string& error,ManipulationCheckpoints064* cache){
     auto fail=[&](const std::string& message){error=message;return false;};
     const auto selected=std::find_if(program.constraints.begin(),program.constraints.end(),[&](const AssemblyMotionRelation& c){return c.mate.id==joint.mate;});
     AssemblyMotionRelation driven=*selected;
@@ -759,10 +769,17 @@ bool constrainedManipulation(const AssemblyManipulationProgram& program,const As
     double scale=1;for(const auto& item:angularScale)scale=std::max(scale,item.second);for(const auto& item:linearScale)scale=std::max(scale,item.second);
     const double required=std::ceil(std::fabs(delta)*scale/2);
     if(required>4096)return fail("MANIPULATION_RESOURCE_LIMIT: requested continuation exceeds 4096 steps");
-    const int steps=std::max(1,(int)required);int baselineRank=-1;
+    const int steps=std::max(1,(int)required);int baselineRank=cache?cache->rank:-1;
+    auto* checkpoints=cache?(delta<0?&cache->negative:&cache->positive):nullptr;
+    // Fixed-size steps give every target the same prefix. Always solve the last
+    // interval again so diagnostics describe the requested endpoint, including
+    // limits, rank, residuals and transmission-axis checks.
+    const int completed=checkpoints?std::min(steps-1,(int)checkpoints->size()):0;
+    if(completed)world=(*checkpoints)[(size_t)completed-1];
     using V=arkjson::Value;preview.couplings=V::makeArr();
-    for(int stepIndex=1;stepIndex<=steps;++stepIndex){
-        const auto previous=world;const double target=start+joint.coordinateSign*delta*stepIndex/steps;
+    for(int stepIndex=completed+1;stepIndex<=steps;++stepIndex){
+        const auto previous=world;const double distance=std::min(std::fabs(delta),stepIndex*2./scale);
+        const double target=start+joint.coordinateSign*std::copysign(distance,delta);
         auto posed=[&](const std::vector<double>& x){auto candidate=previous;
             for(size_t k=0;k<clusters.size();++k){const Vec3 o=origin(previous.at(clusters[k][0]));
                 const Vec3 t{x[6*k],x[6*k+1],x[6*k+2]},r{x[6*k+3],x[6*k+4],x[6*k+5]};const double angle=r.len();
@@ -783,7 +800,7 @@ bool constrainedManipulation(const AssemblyManipulationProgram& program,const As
             for(int c=0;c<columns;++c){const double h=c%6<3?1e-4:1e-6;auto plus=x,minus=x;plus[c]+=h;minus[c]-=h;
                 const auto a=evaluate(plus),b=evaluate(minus);for(int row=0;row<rows;++row)j[(size_t)row*columns+c]=(a[row]-b[row])/(2*h);}return j;};
         std::vector<double> x(columns);double damping=1e-6;
-        if(baselineRank<0){const auto r=evaluate(x);baselineRank=matrixRank(jacobian(x,(int)r.size()),(int)r.size(),columns);}
+        if(baselineRank<0){const auto r=evaluate(x);baselineRank=matrixRank(jacobian(x,(int)r.size()),(int)r.size(),columns);if(cache)cache->rank=baselineRank;}
         for(int iteration=0;iteration<80;++iteration){const auto r=evaluate(x);const double cost=squared(r);
             if(!std::isfinite(cost))return fail("MANIPULATION_NONFINITE_POSE: nonfinite constrained residual");
             if(cost<1e-28)break;
@@ -816,14 +833,18 @@ bool constrainedManipulation(const AssemblyManipulationProgram& program,const As
             if(constraint.mate.type=="shaft"){const Vec3 gap=origin(b)-origin(a);if((gap-axis(a)*gap.dot(axis(a))).len()>kPositionTolerance)return fail("MANIPULATION_COUPLING_AXIS_VIOLATION: shaft axes no longer coaxial");}
             if(stepIndex==steps){V row=V::makeObj();row.set("id",V::makeNum((double)constraint.mate.id));row.set("type",V::makeStr(constraint.mate.type));row.set(constraint.translational?"residual_mm":"residual_rad",V::makeNum(measured));row.set("ratio",V::makeNum(constraint.ratio));preview.couplings.arr.push_back(row);}
         }
+        // Bound retained pose data (including hash-node overhead) per direction.
+        // Exhaustion only stops caching; the exact continuation still runs.
+        const size_t checkpointBytes=world.size()*(sizeof(Mat4)+sizeof(u64)+64);
+        if(checkpoints&&checkpointBytes&&checkpoints->size()<8*1024*1024/checkpointBytes&&stepIndex*2./scale<=std::fabs(delta)&&stepIndex==(int)checkpoints->size()+1)checkpoints->push_back(world);
     }
-    preview.continuationSteps=steps;return true;
+    preview.continuationSteps=steps-completed;return true;
 }
 }
 
-bool previewAssemblyManipulation(const AssemblyManipulationProgram& program,u64 driver,u64 mate,
+static bool previewAssemblyManipulation064(const AssemblyManipulationProgram& program,u64 driver,u64 mate,
                                 const std::string& mode,double delta,
-                                AssemblyManipulationPreview& preview,std::string& error){
+                                AssemblyManipulationPreview& preview,std::string& error,ManipulationCheckpoints064* cache){
     preview={};error.clear();
     auto fail=[&](const std::string& message){error=message;preview={};return false;};
     if(!std::isfinite(delta)||std::fabs(delta)>1e6)return fail("MANIPULATION_INVALID_DELTA: finite displacement within +/-1e6 degrees or millimetres required");
@@ -854,7 +875,7 @@ bool previewAssemblyManipulation(const AssemblyManipulationProgram& program,u64 
         preview.placements=program.baseline;
         preview.diagnostics.rank=program.diagnostics.rank;preview.diagnostics.freeDofs=program.diagnostics.freeDofs;
         preview.diagnostics.unconstrainedNodes=program.diagnostics.unconstrainedNodes;
-        if(joint.constrained&&!constrainedManipulation(program,joint,delta,world,preview,error))return fail(error);
+        if(joint.constrained&&!constrainedManipulation(program,joint,delta,world,preview,error,cache))return fail(error);
         for(auto& placement:preview.placements){
             if(joint.constrained&&std::binary_search(joint.movingNodes.begin(),joint.movingNodes.end(),placement.node))placement.world=world.at(placement.node)*baselineWorld.at(placement.node).inverted()*placement.world;
             else if(std::binary_search(joint.movingNodes.begin(),joint.movingNodes.end(),placement.node))placement.world=change*placement.world;
@@ -911,6 +932,21 @@ bool previewAssemblyManipulation(const AssemblyManipulationProgram& program,u64 
         }
         preview.joint=std::move(joint);preview.delta=delta;return true;
     }catch(const std::exception& e){return fail(e.what());}
+}
+
+bool previewAssemblyManipulation(const AssemblyManipulationProgram& program,u64 driver,u64 mate,const std::string& mode,double delta,AssemblyManipulationPreview& preview,std::string& error){
+    return previewAssemblyManipulation064(program,driver,mate,mode,delta,preview,error,nullptr);
+}
+struct AssemblyManipulationPath::Impl {
+    const AssemblyManipulationProgram program;
+    const u64 driver,mate;
+    const std::string mode;
+    ManipulationCheckpoints064 cache;
+    Impl(const AssemblyManipulationProgram& p,u64 d,u64 m,std::string motion):program(p),driver(d),mate(m),mode(std::move(motion)){}
+};
+AssemblyManipulationPath::AssemblyManipulationPath(const AssemblyManipulationProgram& p,u64 driver,u64 mate,std::string mode):impl_(std::make_shared<Impl>(p,driver,mate,std::move(mode))){}
+bool AssemblyManipulationPath::preview(double delta,AssemblyManipulationPreview& preview,std::string& error){
+    return previewAssemblyManipulation064(impl_->program,impl_->driver,impl_->mate,impl_->mode,delta,preview,error,&impl_->cache);
 }
 
 bool probeAssemblyMate(Document& document,const AssemblyMate& candidate,AssemblyDiagnostics& diagnostics,

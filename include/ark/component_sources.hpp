@@ -21,10 +21,10 @@ ComponentResource fetchComponentResource(const std::string& url,ComponentResourc
 arkjson::Value componentSources();
 // Public web search and paged KiCad discovery. Search results are candidates;
 // read the actual product page before recording supplier metadata.
-arkjson::Value searchComponentSource(const arkjson::Value& args);
+arkjson::Value searchComponentSource(const arkjson::Value& args,const ComponentHttpTransport& transport={});
 arkjson::Value parseComponentWebSearch(const std::string& html,const std::string& query);
-arkjson::Value componentSourcePage(const arkjson::Value& args);
-arkjson::Value parseComponentSourcePage(const std::string& html,const std::string& requestedUrl,const std::string& finalUrl);
+arkjson::Value componentSourcePage(const arkjson::Value& args,const ComponentHttpTransport& transport={});
+arkjson::Value parseComponentSourcePage(const std::string& html,const std::string& requestedUrl,const std::string& finalUrl,const arkjson::Value& readArgs={});
 std::string componentPageText(const std::string& html);
 // Public HTTPS STEP only, bounded to 64 MiB and 90 seconds per resource. No account
 // credentials, cookies or background crawling. Destination is owned

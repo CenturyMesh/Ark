@@ -35,7 +35,7 @@ if(featureEditorPickingUiTest){
     g_activeSketch="First profile";g_picked.clear();const u64 beforeSketch=g_session.revision;stage=0;
     g_editorSmokeProbe=[&](HWND dialog){
         if(!failure.empty()){SendMessage(dialog,WM_COMMAND,2,0);return;}
-        if(stage==0){check(action(11001),"Browser sketch row is missing");}
+        if(stage==0){check(action(60001),"Browser sketch row is missing");}
         else if(stage==1){check(field(dialog,3)=="Picked profile","Browser click did not fill the open extrusion editor");check(g_session.revision==beforeSketch,"Sketch selection wrote the document");interactiveAction(100);check(g_dialog==dialog&&!g_dialogDone&&g_session.revision==beforeSketch,"Unrelated authoring action was allowed while editor open");g_dialogShot=shotPath+".browser-sketch.png";}
         else SendMessage(dialog,WM_COMMAND,failure.empty()?1:2,0);
         ++stage;
@@ -44,7 +44,7 @@ if(featureEditorPickingUiTest){
     if(!check(failure.empty()&&!g_error&&stage==3&&g_session.revision==beforeSketch+1,"Browser extrusion Apply did not publish once"))return 935;
     if(!check(g_doc.features.back().get("sketch")=="Picked profile","Extrusion did not retain browser-selected sketch"))return 936;
     const auto cancelledRevision=g_session.revision;const std::string cancelledDocument=documentToJson(g_doc);stage=0;g_picked.clear();
-    g_editorSmokeProbe=[&](HWND dialog){if(stage++==0)check(action(11000),"Cancel test browser row missing");else{check(field(dialog,3)=="First profile","Cancel test did not exercise live field update");SendMessage(dialog,WM_COMMAND,2,0);}};
+    g_editorSmokeProbe=[&](HWND dialog){if(stage++==0)check(action(60000),"Cancel test browser row missing");else{check(field(dialog,3)=="First profile","Cancel test did not exercise live field update");SendMessage(dialog,WM_COMMAND,2,0);}};
     g_dialogSmoke=4;nativeExtrudeDialog();g_dialogSmoke=0;g_editorSmokeProbe={};
     if(!check(failure.empty()&&g_session.revision==cancelledRevision&&documentToJson(g_doc)==cancelledDocument,"Cancel changed the authored document"))return 937;
     std::ofstream receipt(shotPath+".feature-editor-picking-test.log");receipt<<"PASS: Boolean base/tool viewport mouse clicks replace wrong initial selection; separate fields and exact cut inputs/volume; browser sketch mouse click fills open extrusion editor; unrelated authoring blocked; atomic Apply; Cancel preserves document.\n";

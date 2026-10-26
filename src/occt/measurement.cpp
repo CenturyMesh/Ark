@@ -7,10 +7,12 @@
 #include <gp_Lin.hxx>
 #include <cmath>
 #include <stdexcept>
+#include "inspection_062b.inl"
 
 namespace ark::occt {
 arkjson::Value measurementPickNative(const arkjson::Value& request){
     using V=arkjson::Value;
+    if(request.find("action"))return inspectNative062(request);
     auto point=[&](const char* key){auto* v=request.find(key);if(!v||v->t!=V::Arr||v->arr.size()!=3)throw std::runtime_error("Measurement requires three coordinates");for(auto& n:v->arr)if(n.t!=V::Num||!std::isfinite(n.num))throw std::runtime_error("Nonfinite measurement coordinate");return gp_Pnt(v->arr[0].num,v->arr[1].num,v->arr[2].num);};
     auto* brep=request.find("brep");if(!brep||brep->t!=V::Str)throw std::runtime_error("Measurement requires exact B-rep");
     auto shape=readBrep(brep->str);auto origin=point("origin"),vector=point("direction");gp_Vec direction(vector.X(),vector.Y(),vector.Z());if(direction.Magnitude()<1e-12)throw std::runtime_error("Measurement ray has no direction");

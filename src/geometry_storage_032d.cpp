@@ -9,7 +9,13 @@
 #ifdef _WIN32
 #define NOMINMAX
 #include <windows.h>
+// Request the optional API declarations locally. The product's minimum Windows
+// target is unchanged: every symbol is still resolved dynamically below.
+#pragma push_macro("NTDDI_VERSION")
+#undef NTDDI_VERSION
+#define NTDDI_VERSION 0x06020000
 #include <compressapi.h>
+#pragma pop_macro("NTDDI_VERSION")
 #endif
 
 namespace ark {
@@ -20,12 +26,16 @@ const V& empty(){static const V v;return v;}
 V* member(V& v,const char* name){for(auto& p:v.obj)if(p.first==name)return &p.second;return nullptr;}
 #ifdef _WIN32
 struct MetadataCodec {
+    // Windows documents both source buffers as const. Some MinGW headers declare
+    // PVOID instead; use the documented ABI for these dynamically loaded symbols
+    // without redeclaring imported functions or casting away source constness.
+    using Transform = BOOL (WINAPI *)(COMPRESSOR_HANDLE,LPCVOID,SIZE_T,PVOID,SIZE_T,PSIZE_T);
     HMODULE module=LoadLibraryExW(L"cabinet.dll",nullptr,LOAD_LIBRARY_SEARCH_SYSTEM32);
     decltype(&CreateCompressor) create=module?reinterpret_cast<decltype(create)>(GetProcAddress(module,"CreateCompressor")):nullptr;
-    decltype(&Compress) compress=module?reinterpret_cast<decltype(compress)>(GetProcAddress(module,"Compress")):nullptr;
+    Transform compress=module?reinterpret_cast<decltype(compress)>(GetProcAddress(module,"Compress")):nullptr;
     decltype(&CloseCompressor) close=module?reinterpret_cast<decltype(close)>(GetProcAddress(module,"CloseCompressor")):nullptr;
     decltype(&CreateDecompressor) createDecoder=module?reinterpret_cast<decltype(createDecoder)>(GetProcAddress(module,"CreateDecompressor")):nullptr;
-    decltype(&Decompress) decompress=module?reinterpret_cast<decltype(decompress)>(GetProcAddress(module,"Decompress")):nullptr;
+    Transform decompress=module?reinterpret_cast<decltype(decompress)>(GetProcAddress(module,"Decompress")):nullptr;
     decltype(&CloseDecompressor) closeDecoder=module?reinterpret_cast<decltype(closeDecoder)>(GetProcAddress(module,"CloseDecompressor")):nullptr;
     ~MetadataCodec(){if(module)FreeLibrary(module);}
     bool available() const{return create&&compress&&close&&createDecoder&&decompress&&closeDecoder;}
@@ -47,6 +57,8 @@ std::string encodeMetadata(const std::string&){return {};}
 std::string decodeMetadata(const std::string&,size_t){throw std::runtime_error("Unsupported retained metadata compression");}
 #endif
 }
+std::string compressDerivedBytes(const std::string& source){return encodeMetadata(source);}
+std::string expandDerivedBytes(const std::string& bytes,size_t originalBytes){return decodeMetadata(bytes,originalBytes);}
 struct NativePayload::Storage {
     V metadata;
     std::string encodedMetadata;

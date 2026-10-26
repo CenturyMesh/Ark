@@ -70,8 +70,19 @@ Both are reported in `exact_job`. Timeouts keep the "worker limit" text, so the
 error code stays `RESOURCE_LIMIT`. Requests outside jobs keep 30 s.
 
 **Indicator.** While a job runs, a chip above the viewport dock shows the tool,
-elapsed time and observed revision, with **Cancel**. It does not capture input;
-orbit, zoom and selection stay live.
+elapsed time and observed revision, with **Cancel**. In short viewports it can
+overlap the dock. The foreground chip owns pointer input only inside its visible
+bounds: Cancel precedes its neutral background, then underlying controls.
+Clicks on its background do nothing; orbit, zoom and selection remain live
+elsewhere. The chip is painted after drawing sheets too, matching this input
+priority.
+
+**056C integration regression (A.04).** With the assistant dock open at 1280x800,
+the existing asynchronous UI test found the visible Cancel button behind the
+viewport dock's `965` and `969` input zones. Foreground hit ordering and neutral
+panel handling now match drawing order. The original fixture and its assertion
+remain unchanged; integrated validation reruns `studio-async-exact-ui`,
+`studio-viewport-dock-ui`, `studio-drawing-viewport-ui` and `studio-inertial-ui`.
 
 **Studio API** (`src/view/exact_jobs_046b.inl`):
 

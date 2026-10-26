@@ -1,4 +1,5 @@
 #include "ark/document_container.hpp"
+#include "ark/derived_pack.hpp"
 #include "ark/iteration_history.hpp"
 #include "sqlite3.h"
 #include <algorithm>
@@ -6,6 +7,7 @@
 #include <bit>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -188,7 +190,39 @@ size_t physicalSize(const std::filesystem::path& path){std::error_code error;aut
 void checkDerived(const DocumentDerivedPayloads* derived){
     if(!derived)return;size_t total=0;std::set<std::string> keys;
     if(derived->size()>maxDocumentDerivedEntries)throw std::runtime_error("ARK derived row capacity exceeded");
-    for(const auto& item:*derived){if(!digest(item.key)||!keys.insert(item.key).second)throw std::runtime_error("Invalid/duplicate ARK derived key");if(item.bytes.empty()||item.bytes.size()>maxDocumentDerivedEntryBytes)throw std::runtime_error("ARK derived entry exceeds capacity");bounded(total,item.bytes.size(),maxDocumentDerivedBytes,"ARK derived section exceeds 128 MiB");total+=item.bytes.size();}
+    for(const auto& item:*derived){if(!digest(item.key)||!keys.insert(item.key).second)throw std::runtime_error("Invalid/duplicate ARK derived key");if(item.bytes.empty()||item.bytes.size()>maxDocumentDerivedEntryBytes)throw std::runtime_error("ARK derived entry exceeds capacity");bounded(total,item.bytes.size(),maxDocumentDerivedBytes,"ARK derived section exceeds its 256 MiB decoded capacity");total+=item.bytes.size();}
+}
+std::string packRowKey(const std::string& manifest,size_t index){char suffix[16];std::snprintf(suffix,sizeof suffix,".%04zu",index);return derivedPackRowPrefix+manifest+suffix;}
+// True when the rows are exactly the chunks of this manifest and each matches its digest.
+bool packRowsIntact(Db& db,const std::vector<std::pair<std::string,std::string>>& rows,const std::string& manifest,size_t& stored){
+    stored=0;if(rows.empty())return false;Statement read(db,"SELECT bytes FROM ark_derived WHERE key=?1");std::string packed;
+    for(size_t i=0;i<rows.size();++i){
+        if(rows[i].first!=packRowKey(manifest,i))return false;read.text(1,rows[i].first);if(!read.row())return false;
+        const auto bytes=read.blob(0,maxDocumentDerivedEntryBytes);read.reset();if(containerDigest(bytes)!=rows[i].second||bytes.size()>maxDocumentDerivedStoredBytes-std::min(stored,maxDocumentDerivedStoredBytes))return false;stored+=bytes.size();packed+=bytes;
+    }
+    // Row hashes alone do not bind the compressed content to the manifest in
+    // its row name. Reject damaged/relabelled frames before claiming cache reuse.
+    try{const auto decoded=decodeDerivedPack(packed);return derivedPackManifest(decoded,decoded.size())==manifest;}catch(const std::exception&){return false;}
+}
+// 051A: one zstd pack replaces per-entry rows; an identical intact pack is kept.
+void writeDerived(Db& db,const DocumentDerivedPayloads* derived,DocumentContainerWriteStats& stats){
+    std::vector<std::pair<std::string,std::string>> rows;
+    {Statement old(db,"SELECT key,hash FROM ark_derived ORDER BY key");while(old.row()){if(rows.size()>=maxRows)throw std::runtime_error("Existing ARK derived row capacity exceeded");rows.emplace_back(old.text(0),old.text(1));}}
+    const bool any=derived&&!derived->empty();const auto manifest=any?derivedPackManifest(*derived,derived->size()):std::string();
+    size_t kept=0;
+    if(any&&packRowsIntact(db,rows,manifest,kept)){
+        stats.derivedEntries=derived->size();for(const auto& item:*derived)stats.derivedDecodedBytes+=item.bytes.size();stats.derivedStoredBytes=kept;return;
+    }
+    // Freed pages are reused by the inserts below in the same transaction.
+    db.exec("DELETE FROM ark_derived");stats.derivedRewritten=!rows.empty()||any;if(!any)return;
+    DerivedPackReport packed;const auto stored=encodeDerivedPack(*derived,maxDocumentDerivedStoredBytes,&packed);
+    stats.derivedEntries=packed.entries;stats.derivedDecodedBytes=packed.decodedBytes;stats.derivedStoredBytes=stored.size();stats.derivedOmittedEntries=packed.omittedEntries;stats.derivedOmittedBytes=packed.omittedBytes;
+    if(stored.empty())return;
+    const auto name=packed.entries==derived->size()?manifest:derivedPackManifest(*derived,packed.entries);
+    Statement put(db,"INSERT INTO ark_derived(key,hash,bytes) VALUES(?1,?2,?3)");
+    for(size_t offset=0,index=0;offset<stored.size();offset+=derivedPackChunkBytes,++index){
+        const auto chunk=stored.substr(offset,derivedPackChunkBytes);put.text(1,packRowKey(name,index));put.text(2,containerDigest(chunk));put.blob(3,chunk);put.done();put.reset();
+    }
 }
 void writePackage(Db& db,const Package& package,DocumentContainerWriteStats& stats,const DocumentDerivedPayloads* derived){
     const bool existingV2=scalar(db,"PRAGMA user_version")==2;
@@ -209,12 +243,7 @@ void writePackage(Db& db,const Package& package,DocumentContainerWriteStats& sta
         Statement all(db,"SELECT hash FROM ark_payload WHERE kind=1");std::vector<std::string> obsolete;while(all.row()){auto hash=all.text(0);if(!package.payloads.count(hash))obsolete.push_back(std::move(hash));}
         Statement removePayload(db,"DELETE FROM ark_payload WHERE hash=?1");for(const auto& hash:obsolete){removePayload.text(1,hash);removePayload.done();removePayload.reset();}
         Statement update(db,"INSERT INTO ark_meta(singleton,logical_bytes,root_hash,generation) VALUES(1,?1,?2,?3) ON CONFLICT(singleton) DO UPDATE SET logical_bytes=excluded.logical_bytes,root_hash=excluded.root_hash,generation=excluded.generation");update.integer(1,(int64_t)package.logicalBytes);update.text(2,package.rootHash);update.integer(3,(int64_t)stats.generation);update.done();
-        if(useDerived){
-            std::set<std::string> stale;Statement oldDerived(db,"SELECT key FROM ark_derived");while(oldDerived.row())stale.insert(oldDerived.text(0));
-            Statement findDerived(db,"SELECT hash,bytes FROM ark_derived WHERE key=?1"),putDerived(db,"INSERT INTO ark_derived(key,hash,bytes) VALUES(?1,?2,?3) ON CONFLICT(key) DO UPDATE SET hash=excluded.hash,bytes=excluded.bytes");
-            if(derived)for(const auto& item:*derived){const auto hash=containerDigest(item.bytes);findDerived.text(1,item.key);bool same=false;if(findDerived.row())same=findDerived.text(0)==hash&&findDerived.blob(1,maxDocumentDerivedEntryBytes)==item.bytes;findDerived.reset();if(!same){putDerived.text(1,item.key);putDerived.text(2,hash);putDerived.blob(3,item.bytes);putDerived.done();putDerived.reset();}stale.erase(item.key);}
-            Statement removeDerived(db,"DELETE FROM ark_derived WHERE key=?1");for(const auto& key:stale){removeDerived.text(1,key);removeDerived.done();removeDerived.reset();}
-        }
+        if(useDerived)writeDerived(db,derived,stats);
         db.exec("COMMIT");
     }catch(...){try{db.exec("ROLLBACK");}catch(...){}throw;}
 }
@@ -226,7 +255,25 @@ bool replace(const std::filesystem::path& staged,const std::filesystem::path& de
 #endif
 }
 void cleanup(const std::filesystem::path& path){std::error_code error;std::filesystem::remove(path,error);auto journal=path;journal+="-journal";std::filesystem::remove(journal,error);}
+std::filesystem::path stagedSibling(const std::filesystem::path& destination){
+    static std::atomic<uint64_t> sequence{0};auto tick=std::chrono::steady_clock::now().time_since_epoch().count();auto staged=destination;staged+=".ark-stage-"+std::to_string(tick)+"-"+std::to_string(++sequence);
+    if(std::filesystem::exists(staged))throw std::runtime_error("Staged container already exists");return staged;
 }
+// Reclaim free pages inside SQLite's transaction/locking protocol. Replacing a
+// VACUUM INTO snapshot after closing the source could lose another writer's save
+// in that gap (or leave other processes attached to an obsolete inode on POSIX).
+// VACUUM itself is atomic; failure retains the preceding committed save.
+void compactCommitted(Db& db,DocumentContainerWriteStats& stats){
+    try{
+        const auto pages=scalar(db,"PRAGMA page_count"),free=scalar(db,"PRAGMA freelist_count"),pageSize=scalar(db,"PRAGMA page_size");
+        if(free*pageSize<1024*1024||free*4<pages)return;
+        stats.bytesBeforeCompaction=(size_t)pages*(size_t)pageSize;
+        db.exec("VACUUM");stats.compacted=true;
+    }catch(const std::exception& failure){stats.compactionSkipped=failure.what();}
+}
+}
+
+std::string documentContainerDigest(const std::string& bytes){return containerDigest(bytes);}
 
 bool documentContainerFile(const char* path){if(!path||!*path)return false;std::ifstream input(filePath(path),std::ios::binary);char header[16]{};input.read(header,16);return input.gcount()==16&&std::memcmp(header,"SQLite format 3\0",16)==0;}
 bool encodeDocumentValue(const V& value,std::string& bytes,std::string* error){try{auto encoded=encode(value);bytes=std::move(encoded);return true;}catch(const std::exception& e){if(error)*error=e.what();return false;}}
@@ -236,12 +283,15 @@ bool saveDocumentContainer(const V& root,const char* path,std::string* error,Doc
     try{
         if(!path||!*path)throw std::runtime_error("Empty document path");
         checkDerived(derived);Package package(root);auto destination=filePath(path);DocumentContainerWriteStats stats;
-        if(documentContainerFile(path)){physicalSize(destination);{Db db(destination,SQLITE_OPEN_READWRITE|SQLITE_OPEN_NOMUTEX);sqlite3_limit(db.db,SQLITE_LIMIT_LENGTH,(int)maxDocumentDerivedEntryBytes+4096);schema(db);writePackage(db,package,stats,derived);}stats.physicalBytes=physicalSize(destination);}
+        if(documentContainerFile(path)){
+            physicalSize(destination);
+            {Db db(destination,SQLITE_OPEN_READWRITE|SQLITE_OPEN_NOMUTEX);sqlite3_limit(db.db,SQLITE_LIMIT_LENGTH,(int)maxDocumentDerivedEntryBytes+4096);schema(db);writePackage(db,package,stats,derived);compactCommitted(db,stats);}
+            stats.physicalBytes=physicalSize(destination);
+        }
         else{
             std::error_code existsError;bool exists=std::filesystem::exists(destination,existsError);if(existsError)throw std::runtime_error("Cannot inspect document destination");
             if(exists){std::ifstream prior(destination,std::ios::binary);char header[16]{};prior.read(header,16);if(prior.gcount()>=6&&std::memcmp(header,"SQLite",6)==0)throw std::runtime_error("Refusing to replace an unrecognized SQLite file");}
-            static std::atomic<uint64_t> sequence{0};auto tick=std::chrono::steady_clock::now().time_since_epoch().count();staged=destination;staged+=".ark-stage-"+std::to_string(tick)+"-"+std::to_string(++sequence);
-            if(std::filesystem::exists(staged))throw std::runtime_error("Staged container already exists");
+            staged=stagedSibling(destination);
             {Db db(staged,SQLITE_OPEN_READWRITE|SQLITE_OPEN_CREATE|SQLITE_OPEN_NOMUTEX);sqlite3_limit(db.db,SQLITE_LIMIT_LENGTH,(int)maxDocumentDerivedEntryBytes+4096);init(db);writePackage(db,package,stats,derived);}stats.physicalBytes=physicalSize(staged);
             if(!replace(staged,destination))throw std::runtime_error("Cannot replace document with staged ARK container");
             staged.clear();stats.stagedReplacement=true;
@@ -250,7 +300,7 @@ bool saveDocumentContainer(const V& root,const char* path,std::string* error,Doc
         return true;
     }catch(const std::exception& e){if(!staged.empty())cleanup(staged);if(error)*error=e.what();return false;}
 }
-bool loadDocumentContainer(const char* path,V& root,std::string* error,DocumentDerivedPayloads* derived,std::string* derivedDiscardedReason){
+bool loadDocumentContainer(const char* path,V& root,std::string* error,DocumentDerivedPayloads* derived,std::string* derivedDiscardedReason,DocumentContainerReadStats* readStats){
     try{
         if(!path||!*path)throw std::runtime_error("Empty document path");
         if(!documentContainerFile(path))throw std::runtime_error("Not an ARK binary container");
@@ -265,12 +315,32 @@ bool loadDocumentContainer(const char* path,V& root,std::string* error,DocumentD
         auto manifestSlot=slots.find("/");if(manifestSlot==slots.end())throw std::runtime_error("Missing ARK document manifest");auto manifestPayload=payloads.find(manifestSlot->second);if(manifestPayload==payloads.end()||manifestPayload->second.kind!=0)throw std::runtime_error("Missing typed ARK manifest");std::set<std::string> usedSlots{"/"},usedPayloads{manifestPayload->first};V manifest=decode(manifestPayload->second.bytes);ReadBudget budget;V candidate=assemble(manifest,slots,payloads,usedSlots,usedPayloads,budget,0);
         if(candidate.t!=V::Obj||usedSlots.size()!=slots.size()||usedPayloads.size()!=payloads.size())throw std::runtime_error("Unreferenced ARK container data");
         if(candidate.dump().size()!=(size_t)logical||containerDigest(encode(candidate))!=rootHash)throw std::runtime_error("ARK document root checksum/size mismatch");
-        DocumentDerivedPayloads restored;std::string discarded;
+        DocumentDerivedPayloads restored;std::string discarded;DocumentContainerReadStats read;
         if(version==2)try{
-            size_t totalDerived=0;Statement rows(db,"SELECT key,hash,bytes FROM ark_derived ORDER BY key");
-            while(rows.row()){if(restored.size()>=maxRows)throw std::runtime_error("ARK derived row capacity exceeded");auto key=rows.text(0),hash=rows.text(1),bytes=rows.blob(2,maxDocumentDerivedEntryBytes);bounded(totalDerived,bytes.size(),maxDocumentDerivedBytes,"ARK derived section exceeds 128 MiB");totalDerived+=bytes.size();if(!digest(key)||!digest(hash)||bytes.empty()||containerDigest(bytes)!=hash)throw std::runtime_error("ARK derived payload checksum/identity mismatch");restored.push_back({std::move(key),std::move(bytes)});}
-        }catch(const std::exception& failure){restored.clear();discarded=failure.what();}
-        db.exec("COMMIT");root=std::move(candidate);if(derived)*derived=std::move(restored);if(derivedDiscardedReason)*derivedDiscardedReason=std::move(discarded);return true;
+            // Rows are either per-entry results (before 051A) or the chunks of one pack.
+            size_t totalDerived=0,packRows=0;std::string pack,manifest;Statement rows(db,"SELECT key,hash,bytes FROM ark_derived ORDER BY key");
+            while(rows.row()){
+                if(restored.size()+packRows>=maxRows)throw std::runtime_error("ARK derived row capacity exceeded");
+                auto key=rows.text(0),hash=rows.text(1),bytes=rows.blob(2,maxDocumentDerivedEntryBytes);
+                if(!digest(hash)||bytes.empty()||containerDigest(bytes)!=hash)throw std::runtime_error("ARK derived payload checksum/identity mismatch");
+                if(key.rfind(derivedPackRowPrefix,0)==0){
+                    const size_t prefix=sizeof derivedPackRowPrefix-1;const auto name=key.substr(prefix,64);
+                    if(packRows==0)manifest=name;
+                    if(key.size()!=prefix+69||!digest(name)||name!=manifest||key!=packRowKey(manifest,packRows))throw std::runtime_error("ARK derived pack rows are inconsistent");
+                    bounded(pack.size(),bytes.size(),maxDocumentDerivedStoredBytes,"ARK derived pack exceeds its 128 MiB stored capacity");pack+=bytes;++packRows;
+                }else{
+                    bounded(totalDerived,bytes.size(),maxDocumentDerivedBytes,"ARK derived section exceeds its 256 MiB decoded capacity");totalDerived+=bytes.size();
+                    if(!digest(key))throw std::runtime_error("ARK derived payload checksum/identity mismatch");restored.push_back({std::move(key),std::move(bytes)});
+                }
+            }
+            if(packRows&&!restored.empty())throw std::runtime_error("ARK derived section mixes pack and entry rows");
+            if(packRows){
+                DerivedPackReport unpacked;restored=decodeDerivedPack(pack,&unpacked);
+                if(derivedPackManifest(restored,restored.size())!=manifest)throw std::runtime_error("ARK derived pack manifest mismatch");
+                read.derivedEncoding="zstd_pack";read.derivedStoredBytes=pack.size();read.derivedDecodedBytes=unpacked.decodedBytes;
+            }else if(!restored.empty()){read.derivedEncoding="entries";read.derivedStoredBytes=read.derivedDecodedBytes=totalDerived;}
+        }catch(const std::exception& failure){restored.clear();discarded=failure.what();read=DocumentContainerReadStats{};}
+        db.exec("COMMIT");root=std::move(candidate);if(derived)*derived=std::move(restored);if(derivedDiscardedReason)*derivedDiscardedReason=std::move(discarded);if(readStats)*readStats=std::move(read);return true;
     }catch(const std::exception& e){if(error)*error=e.what();return false;}
 }
 } // namespace ark

@@ -246,9 +246,14 @@ void testSnapshotAndContract() {
     const Value solids = accepted(session.call("agent_onboard", parse(R"({"topic":"solids"})")));
     check(solids.dump().find("version 10") != std::string::npos, "solids onboarding names version 10");
     check(solids.find("version")->str == ark::app_version(), "onboarding reports the built product version");
-    check(ark::AgentSession::tools().arr.size() == 108, "engineering module and exchange tools are discoverable");
-    for (const auto& tool : ark::AgentSession::tools().arr)
+    std::set<std::string> toolNames;
+    for (const auto& tool : ark::AgentSession::tools().arr) {
+        const auto* name = tool.find("name");
+        check(name && name->t == Value::Str && !name->str.empty() && toolNames.insert(name->str).second, "discovered tools have unique nonempty names");
         check(tool.find("inputSchema") && tool.find("inputSchema")->t == Value::Obj, "every tool schema parses");
+    }
+    for (const char* name : {"stock_preview", "frame_inspect", "electronics_inspect", "pcb_export", "physics_inspect", "manufacturing_inspect", "export_flat_dxf", "export_iges", "export_step", "export_mesh", "import_step", "import_sheet_step", "import_mesh"})
+        check(toolNames.count(name) == 1, "engineering module and exchange tools are discoverable by name");
 }
 
 std::string errorOf(const Value& response) {

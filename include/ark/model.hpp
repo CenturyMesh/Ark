@@ -128,6 +128,7 @@ struct Feature {
     int opInt = 0;                                    // Boolean: 0 union 1 cut 2 intersect
     bool suppressed = false;                          // history and parameters stay; recompute skips the body
     arkjson::Value part;                              // explicit BOM metadata, independent of geometry
+    arkjson::Value classification;                    // explicit families/tags; navigation, never geometry authority
     std::string material;                             // named document material, empty uses default
     std::string manufacturingRoute;                   // explicit intent; empty is undeclared
     arkjson::Value manufacturingProcess;              // bounded caller-declared route-specific process inputs
@@ -267,7 +268,10 @@ struct NamedSketch {
     f64         residual = 0;   // max |residual| after the last solve
     std::string error;
     int freeDofs=0, rank=0;
+    u64 ownerFeature=0; // Stable shared definition ID; zero retains legacy global scope.
+    std::string localName() const;
 };
+std::string sketchReference(u64 ownerFeature,const std::string& localName);
 
 struct DatumPlane {
     std::string name, parent="XY";
@@ -313,8 +317,9 @@ public:
     std::vector<ImageAsset> imageAssets;
     std::vector<ProjectedStamp> stamps;
     NamedSketch* findSketch(const std::string& name);
-    void setSketch(const std::string& name, Sketch sk);   // create or replace
+    void setSketch(const std::string& name, Sketch sk,u64 ownerFeature=0); // local name with explicit owner, otherwise canonical/global reference
     bool removeSketch(const std::string& name);
+    bool validateSketchScopes(std::string& error) const;
 
     // features ----------------------------------------------------------------
     std::vector<Feature> features;
@@ -324,6 +329,10 @@ public:
     std::string bomDocumentId; // assigned on explicit BOM authoring; stable across edits/save
     arkjson::Value iterationHistory; // immutable authoring journal; no evaluated geometry or usage snapshots
     arkjson::Value designContainerCheckout; // scoped workspace ownership and merge baseline; no derived geometry
+    arkjson::Value parametricComponents; // embedded immutable .arkprt/.arktop definitions and explicit instance bindings
+    arkjson::Value manufacturingPlans; // source-bound manufacturing DAGs; simulation remains derived
+    arkjson::Value schematics; // independent editable 2D circuit sheets, symbols, pins and explicit wires
+    std::vector<std::string> componentBindingsToSeal; // transient, only a component command can request a new evaluated baseline
     arkjson::Value skeleton; // native declarative source, input overrides and stable ownership manifest
     std::vector<arkjson::Value> drawings; // authored associative technical drawings; derived curves are never persisted
     u64 historyTip=0; // inclusive feature prefix; zero resumes the full authored history
@@ -353,7 +362,7 @@ public:
     // or proof that staged native geometry has completed kernel validation.
     arkjson::Value derivedGeometryStatus;
     std::shared_ptr<NativeDocumentResultContext> pendingNativeGeometry;
-    struct ReferenceFrameCacheEntry {std::string brep,topology;std::unordered_map<std::string,arkjson::Value> frames;};
+    struct ReferenceFrameCacheEntry {std::weak_ptr<const void> owner;std::unordered_map<std::string,arkjson::Value> frames;};
     mutable std::unordered_map<u64,ReferenceFrameCacheEntry> referenceFrameCache;
     std::unordered_map<u64,std::pair<std::string,arkjson::Value>> centroidCache; // exact B-rep digest -> producer result; never serialized
     u64 evaluationGeneration=0;
@@ -400,7 +409,8 @@ std::string featureOperation(const Feature& feature);
 // Face extrusion inputs are geometric references for a separate body; their
 // source/limit bodies remain physical outputs until an actual modeling recipe consumes them.
 bool featureConsumesInputBodies(const Feature& feature);
-// Per input: a 044B curve-pattern support (third input) stays a visible reference.
+// Per input: curve-pattern supports and surface cutter/glue/tangent supports
+// stay visible references; constructing a result does not consume these bodies.
 bool featureConsumesInputBody(const Feature& feature,size_t index);
 ManufacturingLineage featureManufacturingLineage(const Document& document,const Feature& feature);
 bool validateManufacturingRoutes(const Document& document,std::string& error);

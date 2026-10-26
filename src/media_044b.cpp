@@ -61,7 +61,7 @@ double modp(double x,double y){return x-y*std::floor(x/y);}
 double hash2(double x,double y){return fract(std::sin(x*127.1+y*311.7)*43758.5453);}
 double smooth(double a,double b,double x){const double t=std::clamp((x-a)/(b-a),0.,1.);return t*t*(3-2*t);}
 double valueNoise(double x){const double i=std::floor(x),f=x-i,u=f*f*(3-2*f);return hash2(i,0)*(1-u)+hash2(i+1,0)*u;}
-const char* const patternNames[]={"","twill","weave","carbon","leather","brushed","knurl","perforated"};
+const char* const patternNames[]={"","twill","weave","carbon","leather","brushed","knurl","perforated","pebble","traction","chevron"};
 bool digest(const std::string& value){return value.size()==64&&value.find_first_not_of("0123456789abcdef")==std::string::npos;}
 std::string base64Decode(const std::string& text){
     static const std::string alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";need(text.size()%4==0,"Media base64 length is invalid");std::string out;out.reserve(text.size()/4*3);
@@ -76,7 +76,7 @@ void assetName(const std::string& value){need(!value.empty()&&value.size()<=128&
 void relativeVideoPath(const std::string& path){need(!path.empty()&&path.size()<=1024,"Video path must be 1..1024 characters");const auto p=fs::u8path(path);need(!p.has_root_name()&&!p.has_root_directory(),"Video path must be relative to the document folder; copy the clip beside the .ark");}
 }
 
-int appearancePatternKind044B(const std::string& name){if(name.empty()||name=="none")return 0;for(int i=1;i<8;++i)if(name==patternNames[i])return i;return -1;}
+int appearancePatternKind044B(const std::string& name){if(name.empty()||name=="none")return 0;for(int i=1;i<(int)(sizeof(patternNames)/sizeof(*patternNames));++i)if(name==patternNames[i])return i;return -1;}
 double appearancePatternField044B(int kind,double u,double v){
     constexpr double pi=3.14159265358979323846;
     if(kind==1||kind==2||kind==3){const double t=kind==2?2:4,x=u*t,y=v*t,cx=std::floor(x),cy=std::floor(y);const bool warp=kind==2?modp(cx+cy,2)<1:modp(cx+cy,4)<2;const double profile=warp?std::sin(pi*(y-cy)):std::sin(pi*(x-cx));
@@ -86,6 +86,9 @@ double appearancePatternField044B(int kind,double u,double v){
     if(kind==5)return std::clamp(.65*valueNoise(v*60)+.35*valueNoise(v*170+3.7),0.,1.);
     if(kind==6){const double a=std::abs(fract(u+v)-.5),b=std::abs(fract(u-v)-.5);return 1-2*std::min(.5-a,.5-b);}
     if(kind==7){const double row=std::floor(v),x=u+.5*modp(row,2);return 1-smooth(.26,.30,std::hypot(fract(x)-.5,fract(v)-.5));}
+    if(kind==8){const double x=u+.5*modp(std::floor(v),2),r=std::hypot(fract(x)-.5,(fract(v)-.5)*1.1547)/.43;return 1-std::sqrt(std::max(0.,1-r*r))*(1-smooth(.85,1,r));}
+    if(kind==9){const double x=u+.5*modp(std::floor(v),2),d=std::max(std::abs(fract(x)-.5)/.39,std::abs(fract(v)-.5)/.30);return smooth(.83,1,d);}
+    if(kind==10){const double d=std::abs(fract(u+std::abs(fract(v)-.5)*1.5)-.5);return smooth(.20,.29,d);}
     return 0;
 }
 double appearancePatternTriplanar044B(const Appearance& a,const Vec3& p,const Vec3& n){
@@ -99,7 +102,7 @@ double appearancePatternRoughness044B(const Appearance& a,double field){const in
 bool appearancePatternActive044B(const Appearance& a){return !a.pattern.empty()||a.patternScaleMm!=4||a.patternAngleDeg!=0||a.patternContrast!=.35||a.patternColorSet;}
 bool applyAppearancePattern044B(Appearance& a,const std::string& key,const V& value,std::string& error){
     auto number=[&](double& target,double lo,double hi){if(value.t!=V::Num||!std::isfinite(value.num)||value.num<lo||value.num>hi){error="Invalid appearance "+key;return false;}target=value.num;return true;};
-    if(key=="pattern"){if(value.t!=V::Str||appearancePatternKind044B(value.str)<0){error="pattern must be none, twill, weave, carbon, leather, brushed, knurl or perforated";return false;}a.pattern=value.str=="none"?"":value.str;return true;}
+    if(key=="pattern"){if(value.t!=V::Str||appearancePatternKind044B(value.str)<0){error="pattern must be none, twill, weave, carbon, leather, brushed, knurl, perforated, pebble, traction or chevron";return false;}a.pattern=value.str=="none"?"":value.str;return true;}
     if(key=="pattern_scale_mm")return number(a.patternScaleMm,.05,1000);
     if(key=="pattern_angle_deg")return number(a.patternAngleDeg,-360,360);
     if(key=="pattern_contrast")return number(a.patternContrast,0,1);

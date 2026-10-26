@@ -43,6 +43,24 @@ if(realtimeUiTest){
         bool cancelled=false;auto stopped=std::make_unique<UiToolRequest>();stopped->tool="doc_apply";stopped->args=preview;stopped->cancel=std::make_shared<std::atomic_bool>(true);stopped->complete=[&](V result){cancelled=result.find("isError")->b;};postTool(std::move(stopped));while(PeekMessage(&message,nullptr,0,0,PM_REMOVE)){TranslateMessage(&message);DispatchMessage(&message);}drainUiTools();check(cancelled&&g_session.revision==revision,"Cancelled queue entry edited CAD");
         auto stale=preview;stale.set("expected_revision",V::makeNum((double)revision-1));auto rejection=runTool("doc_apply",stale);check(rejection.find("isError")->b&&g_session.revision==revision,"Stale revision escaped realtime dispatch");
         check(documentToJson(g_doc)==source,"Realtime queue checks changed CAD");
+        // Exercise native window commands inside the slow-operation message pump.
+        // These must run while CAD mutations remain gated by wndProc's busy guard.
+        WINDOWPLACEMENT savedPlacement{sizeof savedPlacement};GetWindowPlacement(hwnd,&savedPlacement);
+        const bool wasVisible=IsWindowVisible(hwnd)!=0;int windowStage=0;
+        struct WindowProbeCleanup {HWND window;WINDOWPLACEMENT placement;bool visible;~WindowProbeCleanup(){g_busyPumpTest={};SetWindowPlacement(window,&placement);if(!visible)ShowWindow(window,SW_HIDE);}} windowCleanup{hwnd,savedPlacement,wasVisible};
+        g_busyTestDelayMs=400;
+        g_busyPumpTest=[&]{
+            switch(windowStage++){
+                case 0:PostMessage(hwnd,WM_SYSCOMMAND,SC_MINIMIZE,0);break;
+                case 1:check(IsIconic(hwnd)!=0,"Busy pump dropped minimize command");PostMessage(hwnd,WM_SYSCOMMAND,SC_RESTORE,0);break;
+                case 2:check(!IsIconic(hwnd),"Busy pump dropped restore command");PostMessage(hwnd,WM_SYSCOMMAND,SC_MAXIMIZE,0);break;
+                case 3:check(IsZoomed(hwnd)!=0,"Busy pump dropped maximize command");PostMessage(hwnd,WM_SYSCOMMAND,SC_RESTORE,0);break;
+                case 4:check(!IsIconic(hwnd)&&!IsZoomed(hwnd),"Busy pump did not restore normal window");break;
+            }
+        };
+        auto windowResult=runTool("doc_preview",preview);g_busyPumpTest={};
+        check(!windowResult.find("isError")->b&&windowStage>=5&&g_session.revision==revision&&documentToJson(g_doc)==source,"Window commands changed CAD or did not complete during the operation");
+        SetWindowPlacement(hwnd,&savedPlacement);if(!wasVisible)ShowWindow(hwnd,SW_HIDE);drawFrame(hdc);
         // Capture the actual busy renderer with a retained spatial role marker.
         g_busyTestDelayMs=60;g_busyTestShot=shotPath+".busy.png";auto result=runTool("doc_preview",preview);check(!result.find("isError")->b,"Realtime busy preview failed");
         g_busyTestMode=false;g_busyTestDelayMs=0;g_busyTestShot.clear();

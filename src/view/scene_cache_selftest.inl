@@ -60,6 +60,13 @@ if(sceneCacheUiTest){
         const auto priorPointer=g_doc.evaluationCache.at(1).body;invoke("native_inspect",parse(R"({"id":1})"));rebuildScene();
         check(g_doc.evaluationCache.at(1).body==priorPointer,"Promotion fixture unexpectedly replaced evaluation identity");
         check(!g_partPicks[partOf(1)].faceNames.empty(),"Read-only native promotion left stale empty semantic picks");equivalentFullRebuild();
+        for(auto& body:g_doc.evalBodies)if(body.id==1)body.nativeData=V{};rebuildScene();check(g_sceneRebuiltParts==1&&g_partPicks[partOf(1)].faceNames.empty(),"Expired native ownership retained stale semantic picks");
+        invoke("doc_new",V::makeObj());apply(parse(R"({"op":"feature.add","name":"Rigid native","type":"native_solid","native":{"op":"box"},"p":{"width":10,"depth":12,"height":14}})"));
+        apply(parse(R"({"op":"assembly.add","name":"Ground","feature":1,"fixed":true})"));apply(parse(R"({"op":"assembly.add","name":"Rotor","feature":1})"));apply(parse(R"({"op":"mate.add","a":"Ground","b":"Rotor","type":"revolute","reference_a":"Z","reference_b":"Z"})"));
+        const auto uploadsBeforeMove=g_displayMeshUploads056,revisionBeforeMove=g_session.revision;const auto poseBeforeMove=g_instanceWorld[1];
+        const bool priorWorkerMode=g_authoringUiTestMode;g_authoringUiTestMode=true;apply(parse(R"({"op":"assembly.drive","driver":"Rotor","delta":30})"));g_authoringUiTestMode=priorWorkerMode;
+        check(g_session.revision==revisionBeforeMove+1&&g_displayMeshUploads056==uploadsBeforeMove&&g_sceneRebuiltParts==0,"Prepared rigid movement rebuilt native display geometry");
+        check(!g_instanceWorld[1].transformDir({1,0,0}).approx(poseBeforeMove.transformDir({1,0,0}),1e-6),"Prepared rigid movement did not update viewport placement");equivalentFullRebuild();
         check(glGetError()==GL_NO_ERROR,"Scene reuse test generated an OpenGL error");
         g_status="Scene cache checks passed / native edit / reorder / placement / undo-redo / normals / GPU invalidation / reload / semantic picks";
     }catch(const std::exception& error){fprintf(stderr,"Scene cache UI: %s\n",error.what());return 947;}
