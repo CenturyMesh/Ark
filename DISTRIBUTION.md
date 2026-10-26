@@ -15,14 +15,14 @@ Build and verify a current package:
 
 release.json determines source identity; packaged binaries retain their generated runtime metadata. Existing archives/releases are not overwritten. No user drawings or private settings are included.
 
-To create an optional installer, install Inno Setup 6.3+ and use the archive matching the current source:
+To create an optional installer, install the .NET 10 SDK and use the archive matching the current source:
 
 ```powershell
 ./scripts/build-installer.ps1 -PackagePath out/releases/ark-windows-x64-VERSION.zip
 ./scripts/test-distribution.ps1 -PackagePath out/releases/ark-windows-x64-VERSION.zip -InstallerPath out/releases/ARK-CODE-windows-x64-setup.exe
 ```
 
-Replace VERSION and CODE with the generated identity, not a reused code. The isolated smoke verifies package geometry, STEP, installation receipts and uninstall. tests/distribution_tests.ps1 covers packaging fixtures; fixture success alone does not qualify a real installer.
+Replace VERSION and CODE with the generated identity, not a reused code. The isolated smoke verifies package geometry, STEP, installation receipts and uninstall; it runs the setup with --test-isolated, so the installed ARK's registration and shortcuts are untouched. See docs/WINDOWS_INSTALLER.md. tests/distribution_tests.ps1 covers packaging fixtures; fixture success alone does not qualify a real installer.
 
 Actions -> Prepare Windows and Linux release packages -> Run workflow builds and tests both platforms. The installer input additionally builds/tests the Windows setup. Publication is explicit, defaults to false and runs only after both platform jobs succeed. It attaches checksums and pinned OCCT source, and refuses an existing version tag. Hosted native results do not establish interactive Studio acceptance on another computer.
 
@@ -32,4 +32,4 @@ For an explicit personal build from existing executables:
 ./scripts/publish-test-build.ps1 -Publish
 ```
 
-This path packages existing executables without rebuilding or running tests. Omit -Publish to prepare locally; add -Installer only when Inno Setup is available. GitHub CLI must already be authenticated. The compiled identity is preserved and an existing personal release is never replaced. Its tag identifies the packaging checkout, not independently attested binary source provenance. Notes label the untested personal scope; this path does not replace verified preview/release qualification or publish an OTA feed.
+This path packages existing executables without rebuilding or running tests. Omit -Publish to prepare locally; add -Installer only when the .NET 10 SDK is available. GitHub CLI must already be authenticated. The compiled identity is preserved and an existing personal release is never replaced. Its tag identifies the packaging checkout, not independently attested binary source provenance. Notes label the untested personal scope; this path does not replace verified preview/release qualification or publish an OTA feed.

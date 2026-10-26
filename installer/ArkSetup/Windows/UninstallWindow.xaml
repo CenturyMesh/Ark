@@ -1,0 +1,51 @@
+<w:ChromeWindow x:Class="ArkSetup.Windows.UninstallWindow"
+                xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                xmlns:w="clr-namespace:ArkSetup.Windows"
+                xmlns:c="clr-namespace:ArkSetup.Controls"
+                Width="668" Height="408">
+
+    <Grid x:Name="Root" Margin="24">
+        <Border x:Name="Shadow" CornerRadius="{StaticResource WindowRadius}" Background="{StaticResource Deep}">
+            <Border.CacheMode>
+                <BitmapCache />
+            </Border.CacheMode>
+            <Border.Effect>
+                <DropShadowEffect BlurRadius="26" ShadowDepth="5" Direction="270" Opacity="0.6" Color="Black" />
+            </Border.Effect>
+        </Border>
+
+        <Grid x:Name="Surface" Background="{StaticResource Deep}">
+            <c:ArtBackdrop FocusX="0.86" FocusY="0.5" ArtHeight="1.2" />
+            <Rectangle IsHitTestVisible="False" Fill="{StaticResource DialogShade}" />
+            <Border Background="Transparent" MouseLeftButtonDown="DragArea_MouseDown" />
+
+            <Button x:Name="CloseButton" Style="{StaticResource CloseButton}" Click="Close_Click" HorizontalAlignment="Right" VerticalAlignment="Top">
+                <Path Data="{StaticResource IconClose}" StrokeThickness="1.1" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+            </Button>
+
+            <Grid x:Name="Body" Margin="44,44,40,36">
+                <StackPanel VerticalAlignment="Top" Margin="0,0,40,0">
+                    <TextBlock x:Name="Kicker" Style="{StaticResource Kicker}" />
+                    <TextBlock x:Name="TitleText" Style="{StaticResource Heading}" FontSize="28" Margin="0,10,0,0" />
+                    <TextBlock x:Name="BodyText" Style="{StaticResource Body}" FontSize="14.5" Foreground="{StaticResource TextSoft}" Margin="0,10,0,0" />
+                    <TextBlock x:Name="KeepsText" Style="{StaticResource Body}" Foreground="{StaticResource TextMuted}" Margin="0,4,0,0" />
+                    <Grid x:Name="BarTrack" Height="4" Margin="0,22,0,0" Visibility="Hidden">
+                        <Border CornerRadius="2" Background="{StaticResource Track}" />
+                        <Border x:Name="BarFill" CornerRadius="2" Background="{StaticResource Primary}" HorizontalAlignment="Left" Width="0" />
+                    </Grid>
+                </StackPanel>
+                <StackPanel x:Name="Buttons" VerticalAlignment="Bottom" HorizontalAlignment="Right" Orientation="Horizontal">
+                    <Button x:Name="CancelButton" Style="{StaticResource GhostButton}" Height="42" Click="Close_Click" IsCancel="True">
+                        <TextBlock x:Name="CancelText" />
+                    </Button>
+                    <Button x:Name="UninstallButton" Style="{StaticResource DangerButton}" Height="42" Padding="26,0" Margin="10,0,0,0" Click="Uninstall_Click">
+                        <TextBlock x:Name="UninstallText" />
+                    </Button>
+                </StackPanel>
+            </Grid>
+
+            <Border x:Name="Hairline" CornerRadius="{StaticResource WindowRadius}" BorderBrush="{StaticResource Hairline}" BorderThickness="1" IsHitTestVisible="False" />
+        </Grid>
+    </Grid>
+</w:ChromeWindow>

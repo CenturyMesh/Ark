@@ -133,11 +133,29 @@ not a blanket license for other Microsoft files.
 
 - [Microsoft redistribution documentation](https://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files?view=msvc-170)
 
+## Microsoft .NET and Windows Desktop runtimes (setup only)
+
+The optional Windows setup (`installer/ArkSetup`) is ARK code under Apache-2.0,
+published as a self-contained single-file .NET 10 application. The setup EXE and
+the `uninstall.exe` it installs therefore contain the Microsoft .NET runtime
+(`Microsoft.NETCore.App`) and the Windows Desktop runtime with WPF
+(`Microsoft.WindowsDesktop.App`), both MIT-licensed. The build embeds the exact
+`LICENSE` and `THIRD-PARTY-NOTICES` files of the runtime packs it bundles, and
+installation writes them beside the uninstaller as `uninstall-notices.txt`.
+The ARK runtime, ZIP package and update packages do not contain .NET. The setup
+uses Segoe UI from Windows and bundles no fonts.
+
+- [.NET runtime license](https://github.com/dotnet/runtime/blob/main/LICENSE.TXT)
+- [.NET runtime third-party notices](https://github.com/dotnet/runtime/blob/main/THIRD-PARTY-NOTICES.TXT)
+- [WPF license](https://github.com/dotnet/wpf/blob/main/LICENSE.TXT)
+
 ## ARK artwork and component content
 
 ARK's application mark, wordmark and icon atlases were generated for ARK using
 ImageGen. Asset provenance and prompts are retained in `assets/ui/README.md`
 and `docs/design`; the package includes that provenance as `ark-ui-assets.txt`.
+The setup's key art (`installer/ArkSetup/Art/keyart.jpg`) is a frame of the
+MeshSphere cinematic rendered in Blender by the project owner.
 The original generated ARK artwork is included under Apache-2.0 to the extent
 the project can grant rights. This does not grant trademark rights or assert
 exclusive copyright in AI-generated output. No third-party rights clearance
