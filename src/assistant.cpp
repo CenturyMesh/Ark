@@ -316,6 +316,26 @@ arkjson::Value requestDisplayImage(const arkjson::Value& request,const Assistant
     return offline?offline(config,request,cancel):nativeTransport(config,request,cancel);
 }
 
+AssistantReasoningText assistantReasoningText(const V& item){
+    AssistantReasoningText out;if(item.t!=V::Obj||field(item,"type")!="reasoning")return out;out.present=true;
+    auto add=[&](const V* value){if(!value||value->t!=V::Str||value->str.empty())return;if(!out.text.empty())out.text+="\n\n";out.text+=value->str;};
+    // Responses summaries (requested) and readable reasoning_text content
+    // parts; encrypted_content stays opaque replay state.
+    for(const char* key:{"summary","content"})if(const auto* parts=item.find(key);parts&&parts->t==V::Arr)for(const auto& part:parts->arr){const auto kind=field(part,"type");if(kind=="summary_text"||kind=="reasoning_text")add(part.find("text"));}
+    add(item.find("ark_chat_reasoning"));
+    // Messages thinking blocks; redacted_thinking carries no readable text.
+    if(const auto* blocks=item.find("ark_messages_content");blocks&&blocks->t==V::Arr)for(const auto& block:blocks->arr)if(field(block,"type")=="thinking")add(block.find("thinking"));
+    return out;
+}
+bool assistantRequestsReasoningSummary(const AssistantConfig& config){
+    // Only the official OpenAI Responses route is known to accept summary
+    // requests. An API-key request asks only when an explicit effort already
+    // identifies a reasoning model; plan models are account-catalogue gated.
+    if(config.protocol!=AssistantProtocol::Responses||config.provider!="openai"||config.endpoint!="https://api.openai.com/v1/responses"||config.reasoningEffort=="none")return false;
+    if(config.authMode==AssistantAuthMode::ChatGptPlan)return true;
+    return config.authMode==AssistantAuthMode::ApiKey&&!config.reasoningEffort.empty();
+}
+
 void validateAssistantConfig(const AssistantConfig& config){
     if(config.protocol==AssistantProtocol::Acp){validateAssistantAcpConfig(config);return;}
     if(config.protocol==AssistantProtocol::ClaudeCode){validateAssistantClaudeCodeConfig(config);return;}
@@ -503,7 +523,10 @@ static V assistantRequestWith(const AssistantConfig& config,const V& conversatio
     if(!config.imageInputSupported)for(const auto& message:conversation.arr)require(!assistant_vision::containsImage(message),"This connector explicitly does not support image input. Choose an image-capable connector; ARK will not silently send only the filename or text.");
     auto build=[&](const V& wireHistory){
     V request=V::makeObj();request.set("model",V::makeStr(config.model));request.set("store",V::makeBool(false));
-    if(!config.reasoningEffort.empty()){V reasoning=V::makeObj();reasoning.set("effort",V::makeStr(config.reasoningEffort));request.set("reasoning",std::move(reasoning));}
+    {V reasoning=V::makeObj();if(!config.reasoningEffort.empty())reasoning.set("effort",V::makeStr(config.reasoningEffort));
+        // Readable summaries only; encrypted_content round-tripping is unchanged.
+        if(assistantRequestsReasoningSummary(config))reasoning.set("summary",V::makeStr("auto"));
+        if(!reasoning.obj.empty())request.set("reasoning",std::move(reasoning));}
     request.set("parallel_tool_calls",V::makeBool(config.parallelToolCalls));request.set("input",wireHistory);
     V functions=assistantFunctionTools(tools);
     if(config.authMode==AssistantAuthMode::ChatGptPlan){V namespaced=V::makeObj(),groups=V::makeArr();namespaced.set("type",V::makeStr("namespace"));namespaced.set("name",V::makeStr("ark"));namespaced.set("description",V::makeStr("ARK-Point CAD document modeling and inspection tools"));namespaced.set("tools",std::move(functions));groups.arr.push_back(std::move(namespaced));request.set("tools",std::move(groups));request.set("stream",V::makeBool(true));}
@@ -861,6 +884,10 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
             }
         }
         require(calls.size()<=32,"Too many assistant tool calls in one response.");
+        // Observational only: readable reasoning the provider returned in this
+        // completed response. Encrypted reasoning emits nothing.
+        {std::string reasoning;for(const auto& item:output->arr){auto readable=assistantReasoningText(item);if(readable.text.empty())continue;if(!reasoning.empty())reasoning+="\n\n";reasoning+=readable.text;}
+            if(!reasoning.empty())emit(events,AssistantEvent::Reasoning,reasoning);}
         bool roundHasText=false;std::string heldFinalText;
         for(auto& item:output->arr){
             appendHistory(item);

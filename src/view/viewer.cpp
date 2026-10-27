@@ -393,7 +393,8 @@ static std::shared_ptr<std::atomic_bool> g_teamCancel=std::make_shared<std::atom
 static u64 g_teamEpoch=0,g_teamEventSequence=0;
 static const char* g_teamRoleIds[]={"engineer","designer","reviewer","designer2","designer3","designer4","designer5","designer6"};
 static const char* g_teamRoleLabels[]={"ENGINEER / ORCHESTRATOR","PART DESIGNER 1","PHYSICS REVIEWER","PART DESIGNER 2","PART DESIGNER 3","PART DESIGNER 4","PART DESIGNER 5","PART DESIGNER 6"};
-static void resetTeamView(){g_teamSnapshot={};g_teamActivity={};g_teamGoal.clear();g_teamReceipts={};}
+static std::array<std::pair<unsigned,size_t>,8> g_teamReasoningAttached{}; // role -> {turn, reasoning bytes shown}
+static void resetTeamView(){g_teamSnapshot={};g_teamActivity={};g_teamGoal.clear();g_teamReceipts={};g_teamReasoningAttached={};}
 static std::vector<std::pair<std::string,std::string>> g_chatLog;static int g_chatScroll=0;
 static std::string g_singleGoal;
 static bool g_chatAgentDetails=false,g_chatExpanded=false;
@@ -406,7 +407,7 @@ static constexpr UINT WM_ARK_TOOL=WM_APP+20,WM_ARK_CHAT=WM_APP+21,WM_ARK_AUTH=WM
 struct UiToolRequest {RealtimeClock030::time_point posted=RealtimeClock030::now();std::string tool,roleId;arkjson::Value args;LiveSessionBridge::Completion complete;std::stop_token stop;std::shared_ptr<std::atomic_bool> cancel;std::shared_ptr<std::atomic<u64>> revision;std::shared_ptr<AssistantSteering> steering;u64 epoch=0,steeringVersion=0,objectEpoch=0;bool teamOwned=false,queuedEpoch=false;};
 static bool assistantSteeringToolAllowed(const UiToolRequest& request);
 static arkjson::Value assistantSteeringToolRejection();
-struct UiChatEvent {std::string text;bool final=false,error=false;arkjson::Value history;u64 epoch=0;AssistantUsage usage{};bool hasUsage=false;AssistantPerformance performance{};bool hasPerformance=false;bool status=false,retry=false;};
+struct UiChatEvent {std::string text;bool final=false,error=false;arkjson::Value history;u64 epoch=0;AssistantUsage usage{};bool hasUsage=false;AssistantPerformance performance{};bool hasPerformance=false;bool status=false,retry=false;bool reasoning=false;};
 enum class AuthJob{SignIn,SignOut,Models};
 struct UiAuthEvent{AuthJob job=AuthJob::Models;ChatGptAuthStatus status;std::vector<ChatGptModel> models;std::string error;};
 static ChatGptAuthStatus g_authStatus;
@@ -547,21 +548,31 @@ static void sampleStudioResources(){
 }
 static std::string resourceSummary(){auto number=[](double value){char text[32];std::snprintf(text,sizeof text,"%.0f",value);return std::string(text);};return "CPU sys "+(g_resources.systemCpuKnown?number(g_resources.systemCpu)+"%":"N/A")+" / ARK "+(g_resources.studioCpuKnown?number(g_resources.studioCpu)+"%":"N/A")+"  RAM sys "+number(g_resources.systemRam/1073741824.)+"/"+number(g_resources.totalRam/1073741824.)+"G / ARK "+(g_resources.ramKnown?number(g_resources.studioRam/1048576.)+"M":"N/A")+"  GPU "+(g_resources.gpuKnown?number(g_resources.gpu)+"%":"N/A")+" / VRAM "+(g_resources.vramKnown?number(g_resources.vram/1048576.)+"M":"N/A");}
 static constexpr int teamCardHeight=176,teamCardStride=184;
-static int teamCardTop(){return 79+g_chatHeaderHeight;}
+#include "assistant_dock_state.inl"
 static bool g_verifyTeamCardBounds=false,g_teamCardContentFits=true;static std::string g_teamCardBoundsFailure;
-static int teamCardColumns(){return std::clamp((viewW-44)/320,2,4);}
-static int teamCardRows(){return winH>=1100&&g_teamRoleCount>(unsigned)teamCardColumns()?2:1;}
+// Team cards fill the dock column below the native conversation header.
+static int teamCardColumns(){return std::clamp((chatDockGeometry().inner+8)/308,1,4);}
+// Resume after error (490) or Review blockers (989); a second control row only when it is shown and does not fit.
+static int teamRecoverAction(){if(!g_teamStarted)return 0;if(std::any_of(g_teamSnapshot.roles.begin(),g_teamSnapshot.roles.end(),[](const auto& role){return role.state==AgentTeamState::AwaitingContinuation||role.state==AgentTeamState::Interrupted||role.state==AgentTeamState::Failed;}))return 490;return !g_teamSnapshot.running||g_teamSnapshot.unresolvedErrors?989:0;}
+static int teamCardControlRows(){return teamRecoverAction()&&chatDockGeometry().inner<470?2:1;}
+static int teamCardTop(){const auto dock=chatDockGeometry();return dock.chatTop+g_chatHeaderHeight+8+teamCardControlRows()*40;}
+// Largest card variant (full 176, summary 148, compact 92) that shows every role
+// on one page; otherwise compact cards, paged, at least one per page.
+struct TeamCardMetrics {int rows=1;float height=teamCardHeight,stride=teamCardStride;};
+static TeamCardMetrics teamCardMetrics(){
+    const int room=chatDockGeometry().chatBottom-teamCardTop(),columns=teamCardColumns(),needed=std::max(1,((int)g_teamRoleCount+columns-1)/columns);
+    for(float height:{(float)teamCardHeight,148.f,92.f})if((room+8)/((int)height+8)>=needed)return {needed,height,height+8};
+    const int rows=std::max(1,(room+8)/100);const float height=rows>1?92.f:std::clamp((float)room,84.f,92.f);return {rows,height,height+8};
+}
+static int teamCardRows(){return teamCardMetrics().rows;}
 static void layoutAssistantImageDimensions();
 static void clearPendingAssistantImage();
-static int assistantImageComposerHeight();
-static int assistantDockHeight(){const int images=assistantImageComposerHeight();if(g_chatExpanded)return std::max(320,winH-viewY-32);return std::max(300,std::min(460+images+(g_teamMode&&g_chatAgentDetails?(teamCardRows()-1)*teamCardStride:0),winH-viewY-32-160));}
-static int teamChatRows(){return assistantDockHeight()-assistantImageComposerHeight()>=432+(teamCardRows()-1)*teamCardStride?2:0;}
 static RECT toolGalleryBounds(){return {viewX+12,viewY+10,viewX+12+std::max(300,std::min(1000,viewW-24)),viewY+10+std::max(300,std::min(620,winH-viewY-56))};}
-static void layout(){viewX=std::clamp((int)(winW*.21),280,352);viewW=std::max(winW-viewX-bakedMotionsDockWidth()-explodeDockWidth()-inertialDockWidth056()-rubberDockWidth059(),1);viewH=std::max(winH-viewY-32-(g_assistantDockOpen?assistantDockHeight():0),1);g_inspectorOpen=g_sidebarTab==2;
+static void layout(){viewX=std::clamp((int)(winW*.21),280,352);viewW=std::max(winW-viewX-bakedMotionsDockWidth()-explodeDockWidth()-inertialDockWidth056()-rubberDockWidth059()-assistantDockWidth(),1);viewH=std::max(winH-viewY-32,1);g_inspectorOpen=g_sidebarTab==2;
     if(g_chatInput){RECT bounds{};GetWindowRect(g_chatInput,&bounds);MapWindowPoints(nullptr,g_window,(POINT*)&bounds,2);
-        const RECT desired{viewX+30,winH-112,viewX+30+std::max(viewW-260,1),winH-68};
+        const auto dock=chatDockGeometry();const RECT desired{dock.x+dock.pad+8,dock.inputY+9,dock.x+dock.pad+std::max(dock.inner-8,9),dock.inputY+53};
         if(!EqualRect(&bounds,&desired))MoveWindow(g_chatInput,desired.left,desired.top,desired.right-desired.left,44,TRUE);
-        bool visible=g_assistantDockOpen&&!g_toolsOpen;
+        bool visible=g_assistantDockOpen&&!g_toolsOpen&&!g_chatDockRail;
         if(visible!=((GetWindowLongPtr(g_chatInput,GWL_STYLE)&WS_VISIBLE)!=0))ShowWindow(g_chatInput,visible?SW_SHOWNA:SW_HIDE);}
     if(g_toolSearch){auto bounds=toolGalleryBounds();MoveWindow(g_toolSearch,bounds.left+213,bounds.top+45,std::max((int)(bounds.right-bounds.left)-310,1),30,TRUE);ShowWindow(g_toolSearch,g_toolsOpen?SW_SHOW:SW_HIDE);}
     if(g_commandSearch){MoveWindow(g_commandSearch,winW-438,12,200,31,TRUE);ShowWindow(g_commandSearch,g_searchEditing?SW_SHOW:SW_HIDE);}
@@ -2544,7 +2555,7 @@ static arkjson::Value g_settingsBase; // Settings as this window last loaded or 
 static arkjson::Value uiSettingsJson(){
     using V=arkjson::Value;V j=V::makeObj();j.set("endpoint",V::makeStr(g_assistantConfig.endpoint));j.set("model",V::makeStr(g_assistantConfig.model));j.set("reasoning_effort",V::makeStr(g_assistantConfig.reasoningEffort));j.set("api_key_env",V::makeStr(g_assistantConfig.apiKeyEnv));j.set("assistant_auth_mode",V::makeStr(connectorAuthName(g_assistantConfig.authMode)));j.set("grid",V::makeBool(g_grid));j.set("wireframe",V::makeBool(wireframe));j.set("light_background",V::makeBool(g_lightBackground));j.set("satin",V::makeBool(g_satin));j.set("show_datum_planes",V::makeBool(g_showDatumPlanes));j.set("occlusion_mode",V::makeNum(g_occlusionMode));j.set("occlusion_strength",V::makeNum(g_occlusionStrength));j.set("occlusion_radius",V::makeNum(g_occlusionRadius));j.set("antialiasing",V::makeNum(g_antialiasing));j.set("contact_shadow_strength",V::makeNum(g_contactShadowStrength));j.set("path_tracing",V::makeBool(g_pathTracing));j.set("show_edges",V::makeBool(g_showEdges));j.set("orthographic",V::makeBool(g_cameraOrtho));
     V team=V::makeArr();for(size_t i=0;i<teamCapacity;++i){V role=V::makeObj();role.set("model",V::makeStr(g_teamModels[i]));role.set("reasoning_effort",V::makeStr(g_teamEfforts[i]));team.arr.push_back(std::move(role));}j.set("team_roles",std::move(team));j.set("team_role_count",V::makeNum(g_teamRoleCount));j.set("team_focused_workflow",V::makeBool(g_teamFocusedWorkflow));j.set("team_mode",V::makeBool(g_teamMode));j.set("library_root",V::makeStr(g_libraryRoot));j.set("library_search",V::makeStr(g_libraryText));
-    j.set("agent_presence",arkjson::Value::makeBool(g_showAgentPresence));j.set("assistant_dock_open",V::makeBool(g_assistantDockOpen));j.set("display_units",g_displayUnits.json());j.set("connector",connectorSettings(g_assistantConfig));V connectors=V::makeArr();for(size_t i=0;i<teamCapacity;++i)connectors.arr.push_back(g_teamConnectors[i]?connectorSettings(*g_teamConnectors[i]):V{});j.set("team_connectors",connectors);
+    j.set("agent_presence",arkjson::Value::makeBool(g_showAgentPresence));j.set("assistant_dock_open",V::makeBool(g_assistantDockOpen));j.set("assistant_dock_mode",V::makeStr(chatDockModeName()));j.set("assistant_dock_width",V::makeNum(g_chatDockUserWidth));j.set("display_units",g_displayUnits.json());j.set("connector",connectorSettings(g_assistantConfig));V connectors=V::makeArr();for(size_t i=0;i<teamCapacity;++i)connectors.arr.push_back(g_teamConnectors[i]?connectorSettings(*g_teamConnectors[i]):V{});j.set("team_connectors",connectors);
     return j;
 }
 // Several Studio windows (and builds) share studio.json. Write only the keys
@@ -2570,6 +2581,9 @@ static void loadUiSettingsFile(){
         if(auto* connectors=j.find("team_connectors");connectors&&connectors->t==arkjson::Value::Arr)for(size_t i=0;i<teamCapacity&&i<connectors->arr.size();++i)if(connectors->arr[i].t==arkjson::Value::Obj){AssistantConfig config;config.authMode=AssistantAuthMode::ApiKey;readConnectorSettings(connectors->arr[i],config);g_teamConnectors[i]=config;}
         if(auto* v=j.find("team_mode");v&&v->t==arkjson::Value::Bool)g_teamMode=v->b;
         if(auto* v=j.find("assistant_dock_open")){if(v->t!=arkjson::Value::Bool)throw std::runtime_error("Invalid saved chat visibility");g_assistantDockOpen=v->b;}
+        // Dock layout is a preference: unknown values keep the defaults instead of failing the load.
+        if(auto* v=j.find("assistant_dock_mode");v&&v->t==arkjson::Value::Str)setChatDockMode(v->str=="rail"?0:v->str=="expanded"?2:1);
+        if(auto* v=j.find("assistant_dock_width");v&&v->t==arkjson::Value::Num&&std::isfinite(v->num))g_chatDockUserWidth=v->num>=200&&v->num<=4096?(int)v->num:0;
         if(auto* v=j.find("library_root");v&&v->t==arkjson::Value::Str)g_libraryRoot=v->str;if(auto* v=j.find("library_search");v&&v->t==arkjson::Value::Str)g_libraryText=v->str;
         if(auto* count=j.find("team_role_count");count&&count->t==arkjson::Value::Num&&count->num>=3&&count->num<=8)g_teamRoleCount=(unsigned)count->num;
         if(auto* focused=j.find("team_focused_workflow");focused&&focused->t==arkjson::Value::Bool)g_teamFocusedWorkflow=focused->b;
@@ -3089,7 +3103,7 @@ static void pollTeam(bool force=false){
         if(index<teamCapacity&&event.kind!=AgentTeamEvent::Usage)g_teamActivity[index]=(event.kind==AgentTeamEvent::ToolStart?"Running ":event.kind==AgentTeamEvent::ToolEnd?(event.toolError?"Failed ":"Completed "):"")+(event.tool.empty()?event.text:event.tool+(event.toolError?" / "+event.text:""));
         if(event.kind==AgentTeamEvent::Usage||(event.kind==AgentTeamEvent::Status&&!event.providerRetry))continue;
         std::string detail=event.kind==AgentTeamEvent::ToolStart?"Tool started: "+event.tool:event.kind==AgentTeamEvent::ToolEnd?(event.toolError?"Tool failed: ":"Tool finished: ")+event.tool+(event.toolError?" / "+event.text:""):event.text;
-        if(!detail.empty()){g_chatLog.push_back({event.roleId.empty()?"Team":event.roleId,detail});g_chatScroll=0;}
+        if(!detail.empty()){g_chatLog.push_back({event.roleId.empty()?"Team":event.roleId,detail});g_chatScroll=0;if(event.kind==AgentTeamEvent::Text)attachTeamReasoning(g_chatLog.size()-1,index);}
     }
     for(size_t i=0;i<g_teamSnapshot.roles.size()&&i<teamCapacity;++i){const auto& role=g_teamSnapshot.roles[i];const auto& usage=role.usage;if(!usage.reportedResponses&&!usage.missingResponses)continue;
         if(g_teamReceipts[i]&&g_teamReceipts[i]->reportedResponses==usage.reportedResponses&&g_teamReceipts[i]->missingResponses==usage.missingResponses&&g_teamReceipts[i]->totalTokens==usage.totalTokens)continue;
@@ -3193,7 +3207,7 @@ static void askAgentAboutBody(int body){
     const Feature* feature=g_doc.find(g_bodyIds[(size_t)body]);if(!feature)throw std::runtime_error("The selected body no longer exists");
     PendingObjectTarget target;target.feature=feature->id;target.node=g_instanceIds[(size_t)body];target.copy=g_instanceCopies[(size_t)body];target.epoch=g_objectDocumentEpoch;
     target.label=target.node?g_instanceNames[(size_t)body]+" / node #"+std::to_string(target.node)+" / copy "+std::to_string(target.copy):feature->name+" / feature #"+std::to_string(target.feature);
-    g_pendingObjectTarget=std::move(target);selBody=body;g_pickKind=0;g_picked.clear();refreshSelectionLines();g_explorerFeature=0;g_toolsOpen=false;g_assistantDockOpen=true;layout();
+    g_pendingObjectTarget=std::move(target);selBody=body;g_pickKind=0;g_picked.clear();refreshSelectionLines();g_explorerFeature=0;g_toolsOpen=false;showAssistantDock();layout();
     if(g_chatInput){if(GetWindowTextLengthW(g_chatInput)==0)SetWindowTextW(g_chatInput,L"What would you like to know about this object?");SetFocus(g_chatInput);SendMessage(g_chatInput,EM_SETSEL,0,-1);}
     g_error=false;g_status="Object attached. Enter a question, then Send or Queue to ask the agent.";
 }
@@ -3236,7 +3250,7 @@ static void sendTeam(const std::string& explicitPrompt={},const std::array<Assis
                 if(!transports[i]&&config.authMode==AssistantAuthMode::ChatGptPlan){if(!g_authStatus.connected||!g_authStatus.planAuthorized)throw std::runtime_error("Connect and authorize ChatGPT from Account first.");if(g_authModels.empty())throw std::runtime_error("Load the account model catalog from Account first.");if(std::none_of(g_authModels.begin(),g_authModels.end(),[&](const auto& model){return model.slug==config.model;}))throw std::runtime_error("The selected model is unavailable in this account's catalog.");}
             }catch(const std::exception& error){throw std::runtime_error(std::string(g_teamRoleLabels[i])+": "+error.what());}
             AgentTeamRole role;role.id=g_teamRoleIds[i];role.label=g_teamRoleLabels[i];role.instructions=instructions[i==2?2:i==0?0:1];if(!transports[i])config.onboardingPack=(i==2?agentOnboardingPack({"overview","physics"}):i==0?agentOnboardingPack({"overview","sketch","solids","assembly"}):agentAuthoringOnboardingPack());config.memoryPrefetch=!transports[i];config.deferSpecialistTools=!transports[i];applyAgentRequestOptions(config);role.assistant=config;role.transport=feedbackFixtureTransport(transports[i]);role.canWrite=i!=2;role.discipline=i==0?AgentTeamDiscipline::Orchestrator:i==2?AgentTeamDiscipline::PhysicsReviewer:AgentTeamDiscipline::PartDesigner;team.roles.push_back(std::move(role));}
-        g_teamCancel=std::make_shared<std::atomic_bool>(false);auto cancel=g_teamCancel;auto epoch=g_documentEpoch;auto runSerial=++g_teamRunSerial;g_teamEpoch=epoch;g_teamEventSequence=0;g_teamReceipts={};g_teamActivity={};g_teamLiveUsage={};g_draftViews.clear();g_liveCompletedSteps=0;g_liveStepLabel.clear();captureDraftContext();g_teamGoal=visiblePrompt;for(auto& id:g_teamReceiptIds)id=newUsageReceiptId();if(!transports[0]&&!transports[1]&&!transports[2]&&std::any_of(team.roles.begin(),team.roles.end(),[](const auto& role){return role.assistant.provider!="ollama"&&role.assistant.authMode!=AssistantAuthMode::CliAccount;}))refreshPricing();
+        g_teamCancel=std::make_shared<std::atomic_bool>(false);auto cancel=g_teamCancel;auto epoch=g_documentEpoch;auto runSerial=++g_teamRunSerial;g_teamEpoch=epoch;g_teamEventSequence=0;g_teamReceipts={};g_teamReasoningAttached={};g_teamActivity={};g_teamLiveUsage={};g_draftViews.clear();g_liveCompletedSteps=0;g_liveStepLabel.clear();captureDraftContext();g_teamGoal=visiblePrompt;for(auto& id:g_teamReceiptIds)id=newUsageReceiptId();if(!transports[0]&&!transports[1]&&!transports[2]&&std::any_of(team.roles.begin(),team.roles.end(),[](const auto& role){return role.assistant.provider!="ollama"&&role.assistant.authMode!=AssistantAuthMode::CliAccount;}))refreshPricing();
         g_assistantReceiptId.clear();g_currentUsageReceipt.reset();g_pendingUsageReceipt.reset();
         auto teamExecutor=[cancel,epoch](const std::string& name,const arkjson::Value& args){
             auto promise=std::make_shared<std::promise<arkjson::Value>>();auto future=promise->get_future();auto request=std::make_unique<UiToolRequest>();request->tool=name;request->roleId=AgentTeam::currentRoleId();request->steeringVersion=g_agentTeam.requestVersion(request->roleId);request->args=args;request->cancel=cancel;request->epoch=epoch;request->teamOwned=true;request->complete=[promise](arkjson::Value result){promise->set_value(std::move(result));};postTool(std::move(request));
@@ -3261,7 +3275,7 @@ static void sendAssistant(const std::string& explicitPrompt="",const AssistantTr
     V input=g_conversation;if(input.t!=V::Arr)input=V::makeArr();input.arr.push_back(user);
     if(continuing){V context=V::makeObj();context.set("role",V::makeStr("developer"));context.set("content",V::makeStr("Continue the retained unfinished task at the current revision. The goal remains: "+g_singleGoal+". Resume means continue work, not summarize it. Preserve unfinished requirements and the current BOM task boundary; inspect current evidence before writing."));input.arr.push_back(context);}
     if(queuedMessage||(explicitPrompt.empty()&&g_pendingAssistantImage)){auto preflight=g_assistantConfig;if(!transport)preflight.onboardingPack=agentAuthoringOnboardingPack();assistantRequest(preflight,input,AgentSession::tools());}
-    if(!queuedMessage){if(!continuing)g_singleGoal=visiblePrompt;g_pendingObjectTarget.reset();}if(!queuedMessage)g_chatLog.push_back({"You",visiblePrompt});g_chatScroll=0;g_chatBusy=true;g_assistantResponseFinished=g_assistantResponseError=false;g_assistantStatus="Working...";g_assistantUsageRun={};g_assistantPerformanceRun={};g_assistantUsageRunCounted=false;g_assistantReceiptId=newUsageReceiptId();g_assistantReceiptModel=g_assistantConfig.model;g_currentUsageReceipt.reset();g_pendingUsageReceipt.reset();g_assistantCancel=std::make_shared<std::atomic_bool>(false);auto cancel=g_assistantCancel;auto config=g_assistantConfig;if(!transport)config.onboardingPack=agentAuthoringOnboardingPack()+"\nWhen your final reply explicitly requests missing user information, begin it with needs_input: followed by the concrete question. This is a request for input, not a completion claim; the question may be delivered while BOM review remains pending. Never claim the project complete in an input request.\n";config.memoryPrefetch=!transport;config.deferSpecialistTools=!transport;applyAgentRequestOptions(config);auto schema=compactAuthoringPreviewTools(AgentSession::tools());if(g_chatInput&&!queuedMessage)SetWindowTextW(g_chatInput,L"");
+    if(!queuedMessage){if(!continuing)g_singleGoal=visiblePrompt;g_pendingObjectTarget.reset();}if(!queuedMessage)g_chatLog.push_back({"You",visiblePrompt});g_chatScroll=0;g_assistantReasoningRun.clear();g_assistantRunStarted=true;++g_chatReasoningSerial;g_chatBusy=true;g_assistantResponseFinished=g_assistantResponseError=false;g_assistantStatus="Working...";g_assistantUsageRun={};g_assistantPerformanceRun={};g_assistantUsageRunCounted=false;g_assistantReceiptId=newUsageReceiptId();g_assistantReceiptModel=g_assistantConfig.model;g_currentUsageReceipt.reset();g_pendingUsageReceipt.reset();g_assistantCancel=std::make_shared<std::atomic_bool>(false);auto cancel=g_assistantCancel;auto config=g_assistantConfig;if(!transport)config.onboardingPack=agentAuthoringOnboardingPack()+"\nWhen your final reply explicitly requests missing user information, begin it with needs_input: followed by the concrete question. This is a request for input, not a completion claim; the question may be delivered while BOM review remains pending. Never claim the project complete in an input request.\n";config.memoryPrefetch=!transport;config.deferSpecialistTools=!transport;applyAgentRequestOptions(config);auto schema=compactAuthoringPreviewTools(AgentSession::tools());if(g_chatInput&&!queuedMessage)SetWindowTextW(g_chatInput,L"");
     auto epoch=g_documentEpoch;auto revision=std::make_shared<std::atomic<u64>>(g_session.revision);
     auto steering=std::make_shared<AssistantSteering>(config,schema,input);g_assistantSteering=steering;g_assistantSteeringEpoch=epoch;g_assistantSteeringTransport=transport;
     g_assistantWorker=std::thread([config,input,schema,cancel,transport,epoch,revision,steering]{
@@ -3270,7 +3284,7 @@ static void sendAssistant(const std::string& explicitPrompt="",const AssistantTr
             while(future.wait_for(std::chrono::milliseconds(20))!=std::future_status::ready)if(*cancel||g_closing)throw std::runtime_error("Assistant cancelled");
             return future.get();
         };AssistantRetryHooks hooks;if(!transport)hooks.completionCheck=[executor]{return executor("__ark_bom_completion",V::makeObj());};hooks.requestCurrent=[steering]{return steering->current(steering->requestVersion());};hooks.acceptCompletion=[steering]{return steering->finish();};
-        try{auto result=runAssistant(config,input,schema,executor,[epoch](const AssistantEvent& event){if(event.kind==AssistantEvent::Status){UiChatEvent progress;progress.text=event.text;progress.epoch=epoch;progress.status=true;progress.retry=event.providerRetry;postChat(std::move(progress));}else if(event.kind==AssistantEvent::ToolStart)postChat({"Tool: "+event.text,false,false,{},epoch});else if(event.kind==AssistantEvent::Usage)postChat({"",false,false,{},epoch,event.usage,true,event.performance,true});else if(event.kind==AssistantEvent::ToolEnd){UiChatEvent progress;progress.text="Thinking...";progress.epoch=epoch;progress.status=true;progress.performance=event.performance;progress.hasPerformance=true;postChat(std::move(progress));}},cancel.get(),feedbackFixtureTransport(transport),[steering]{return steering->inbox();},[&](const V& history){retainedHistory=history;steering->checkpoint(history);},hooks);
+        try{auto result=runAssistant(config,input,schema,executor,[epoch](const AssistantEvent& event){if(event.kind==AssistantEvent::Status){UiChatEvent progress;progress.text=event.text;progress.epoch=epoch;progress.status=true;progress.retry=event.providerRetry;postChat(std::move(progress));}else if(event.kind==AssistantEvent::ToolStart)postChat({"Tool: "+event.text,false,false,{},epoch});else if(event.kind==AssistantEvent::Reasoning){UiChatEvent thought;thought.text=event.text;thought.epoch=epoch;thought.reasoning=true;postChat(std::move(thought));}else if(event.kind==AssistantEvent::Usage)postChat({"",false,false,{},epoch,event.usage,true,event.performance,true});else if(event.kind==AssistantEvent::ToolEnd){UiChatEvent progress;progress.text="Thinking...";progress.epoch=epoch;progress.status=true;progress.performance=event.performance;progress.hasPerformance=true;postChat(std::move(progress));}},cancel.get(),feedbackFixtureTransport(transport),[steering]{return steering->inbox();},[&](const V& history){retainedHistory=history;steering->checkpoint(history);},hooks);
             if(*cancel)throw std::runtime_error("Assistant cancelled");postChat({result.text,true,false,result.conversation,epoch,result.usage,true,result.performance,true});
         }catch(const std::exception& e){steering->cancel();std::set<std::string> answered;for(const auto& row:retainedHistory.arr)if(row.find("type")&&row.find("type")->asStr()=="function_call_output"&&row.find("call_id"))answered.insert(row.find("call_id")->asStr());std::vector<std::string> missing;for(const auto& row:retainedHistory.arr)if(row.find("type")&&row.find("type")->asStr()=="function_call"&&row.find("call_id")&&!answered.count(row.find("call_id")->asStr()))missing.push_back(row.find("call_id")->asStr());for(const auto& id:missing){V reply=V::makeObj(),error=V::makeObj();error.set("isError",V::makeBool(true));error.set("error",V::makeStr("Interrupted before receipt retention; execution may have completed. Inspect current doc_info and revision before further writes; do not replay prior calls."));reply.set("type",V::makeStr("function_call_output"));reply.set("call_id",V::makeStr(id));reply.set("output",V::makeStr(error.dump()));retainedHistory.arr.push_back(reply);}for(const auto& pending:steering->pending().arr)retainedHistory.arr.push_back(pending);postChat({e.what(),true,true,retainedHistory,epoch});}
     });
@@ -4058,6 +4072,10 @@ static void uiAction(int id){
     if(id>=22000&&id<26096){size_t index=(size_t)(id-22000);if(index<g_bodyIds.size()){selBody=(int)index;g_explorerFeature=0;setBodyHidden(!(index<g_hiddenBodies.size()&&g_hiddenBodies[index]));}return;}
     using V=arkjson::Value;
     if(id==400){g_assistantDockOpen=!g_assistantDockOpen;layout();if(!g_dialogSmoke&&!g_headless)saveUiSettings();return;}
+    // Right assistant dock: rail restore / collapse / expand; handle drags are pointer-driven.
+    if(id>=44300&&id<=44302){g_assistantDockOpen=true;setChatDockMode(id==44300?1:id==44301?0:g_chatExpanded?1:2);layout();if(!g_dialogSmoke&&!g_headless)saveUiSettings();return;}
+    if(id==44303)return;
+    if(id>=44310&&id<44318){g_chatReasoningAgent=id-44310;g_chatAgentDetails=false;layout();return;}
     if(id==401){g_sidebarTab=g_sidebarTab==2?0:2;g_physicalVisible=false;layout();return;}
     if(id>=410&&id<=412){g_sidebarTab=id-410;g_physicalVisible=false;layout();return;}
     if(id==450){g_searchEditing=true;layout();if(g_commandSearch){SetFocus(g_commandSearch);SendMessage(g_commandSearch,EM_SETSEL,0,-1);}else commandPalette();return;}
@@ -5187,7 +5205,7 @@ static void drawFrame(HDC hdc){
     }
     panel(0,0,W,52);panel(0,(float)viewY,(float)viewX,H-viewY-32);
     static GLuint wordmark=0;if(!wordmark){auto atlas=toolAtlasPath();if(!atlas.empty()){auto file=atlas.parent_path()/"ark-wordmark.png";auto path=file.u8string();wordmark=canvasTexture(std::string(path.begin(),path.end()));}}
-    if(wordmark&&wordmark!=g_canvasMissing){glUseProgram(pImage);glUniform2f(glGetUniformLocation(pImage,"vp"),W,H);glUniform4f(glGetUniformLocation(pImage,"rc"),16,6,120,40);glUniform1i(glGetUniformLocation(pImage,"image"),0);glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,wordmark);glBindVertexArray(quadVao);glDrawArrays(GL_TRIANGLES,0,6);glUseProgram(pUI);}else textOut("ARK",22,12,1.55f,.784f,.816f,.843f);
+    if(wordmark&&wordmark!=g_canvasMissing){glUseProgram(pImage);glUniform2f(glGetUniformLocation(pImage,"vp"),W,H);glUniform4f(glGetUniformLocation(pImage,"rc"),16,6,120,40);glUniform1i(glGetUniformLocation(pImage,"image"),0);glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,wordmark);glBindVertexArray(quadVao);glDrawArrays(GL_TRIANGLES,0,6);glUseProgram(pUI);}else textOut("ARK",22,12,1.55f,.779f,.811f,.838f);
     overlay(146,12,1,28,0,.12f);
     std::string filename=g_path.substr(g_path.find_last_of("/\\")+1);bool dirty=g_session.revision!=g_savedRevision||g_doc.usage.serial!=g_savedUsageSerial||agentActivitySerial(g_doc)!=g_savedActivitySerial;
     float headerX=164,headerWidth=std::max(1.f,W-460-headerX);auto fitTop=[&](std::string text,float scale,float available){while(!text.empty()&&textWidth(text,scale)>available)text.pop_back();return text;};
@@ -5356,7 +5374,7 @@ static void drawFrame(HDC hdc){
         float iconX=branchX+((folder||children)?8:0);
         glUniform1i(uuGlyph,row.icon);glUniform1f(uuDuo,.22f);glUniform4f(uuRc,iconX,treeY,22,22);glUniform4f(uuFill,tone.r,tone.g,tone.b,fade);glBindVertexArray(quadVao);glDrawArrays(GL_TRIANGLES,0,6);glUniform1f(uuDuo,0);
         bool datumRow=(row.zone>=14000&&row.zone<14128)||(row.zone>=14900&&row.zone<=14903);float titleRight=treeRight-(datumRow?29:hudRow?48:7);
-        if(folder&&row.count>=0){std::string chip=std::to_string(row.count);float cw=textWidth(chip,.62f)+14,cx=treeRight-9-cw;rect(cx,treeY+2,cw,18,9,1,1,1,.12f,0,0,0,0,0);textOut(chip,cx+7,treeY+3,.62f,.778f,.811f,.877f);titleRight=cx-6;}
+        if(folder&&row.count>=0){std::string chip=std::to_string(row.count);float cw=textWidth(chip,.62f)+14,cx=treeRight-9-cw;rect(cx,treeY+2,cw,18,9,1,1,1,.12f,0,0,0,0,0);textOut(chip,cx+7,treeY+3,.62f,.777f,.809f,.836f);titleRight=cx-6;}
         float tx=iconX+28;std::string title=row.name;while(title.size()>1&&textWidth(title,.78f)>titleRight-tx)title.pop_back();if(title!=row.name&&title.size()>3)title=title.substr(0,title.size()-3)+"...";textOut(title,tx,treeY+2,.78f,dim?.60f:.953f,dim?.64f:.961f,dim?.68f:.969f);
         if(hover)ribbonHint=row.name+(row.subtitle.empty()?"":" / "+row.subtitle);if(row.zone>=0)g_zones.push_back({8,treeY-3,treeRight-8,h,row.zone});
         if(row.zone>=2000&&row.zone<9000){auto* f=g_doc.find(g_bodyIds[(size_t)(row.zone-2000)]);if(f&&isSheetFeature(f->id)){int zone=28000+(int)g_treeFoldIds.size();g_treeFoldIds.push_back(f->id);g_zones.insert(g_zones.end()-1,{branchX-12,treeY-3,18,h,zone});}}
@@ -5377,21 +5395,21 @@ static void drawFrame(HDC hdc){
     float captionY=(float)viewY+18,captionX=(float)viewX+(g_showViewCube?g_cubeS+30:20);
     const float styleX=(float)(viewX+viewW)-18;
     if(g_pathTracing){std::string caption=g_trace.active?"GPU path tracing / "+std::to_string(g_trace.samples)+" spp / OpenGL BVH":"Path tracing requested / raster: "+g_trace.reason;caption=fitText(caption,.62f,std::max(0.f,styleX-captionX-14));textOut(caption,captionX,captionY+27,.62f,g_lightBackground?.24f:.76f,g_lightBackground?.30f:.83f,g_lightBackground?.37f:.89f);}
-    if(g_allSheetsFlat)textOut("Nominal flat reference / display only",captionX,captionY,.70f,.714f,.744f,.805f);
-    else if(g_stockMode)textOut("Nominal straight stock / display only",captionX,captionY,.70f,.714f,.744f,.805f);
-    else if(g_allSheetsPlaying)textOut("Bend sequence / display only",captionX,captionY,.70f,.714f,.744f,.805f);
+    if(g_allSheetsFlat)textOut("Nominal flat reference / display only",captionX,captionY,.70f,.713f,.742f,.767f);
+    else if(g_stockMode)textOut("Nominal straight stock / display only",captionX,captionY,.70f,.713f,.742f,.767f);
+    else if(g_allSheetsPlaying)textOut("Bend sequence / display only",captionX,captionY,.70f,.713f,.742f,.767f);
     if(g_pickKind){static const char* hints[]={"","FACE / hover previews / click replaces / Ctrl or Shift adds / Esc exits","EDGE / hover previews / click replaces / Ctrl or Shift adds / Esc exits","CURVE / click a sketch curve  |  Esc exits"};
         std::string hint=fitText((g_hoverReferenceHint.empty()?std::string{}:g_hoverReferenceHint+" / ")+hints[std::clamp(g_pickKind,0,3)],.62f,viewX+viewW-captionX-24);float hintY=captionY+50,width=textWidth(hint,.62f)+18;
         const auto bar=viewportBarLayout();const bool overlap=bar.visible&&captionX-1<bar.x+bar.width&&captionX+width>bar.x&&hintY-4<bar.y+bar.height&&hintY+23>bar.y;
         if(!overlap){tone(captionX-1,hintY-4,width,27,th::controlRadius,th::panel,.90f,th::border);textTone(hint,captionX+8,hintY,.62f,th::text);}}
-    if(g_projectionPreview.active){float x=captionX,y=(float)viewY+96,width=std::min(540.f,(float)viewW-g_cubeS-200.f);rect(x,y,width,52,8,.078f,.081f,.087f,.94f,1,1,1,.22f,1.2f);std::string title=std::string(g_projectionPreview.spatial?"3D INCLUDE PREVIEW / ":"2D PROJECTION PREVIEW / ")+g_projectionPreview.target;textOut(fitText(title,.70f,width-188),x+12,y+7,.70f,.784f,.816f,.843f);textOut(fitText(g_projectionPreview.source,.58f,width-188),x+12,y+29,.58f,.784f,.816f,.843f);button("Apply",x+width-169,y+10,72,539,true);button("Cancel",x+width-89,y+10,76,540);}
+    if(g_projectionPreview.active){float x=captionX,y=(float)viewY+96,width=std::min(540.f,(float)viewW-g_cubeS-200.f);rect(x,y,width,52,8,.078f,.081f,.087f,.94f,1,1,1,.22f,1.2f);std::string title=std::string(g_projectionPreview.spatial?"3D INCLUDE PREVIEW / ":"2D PROJECTION PREVIEW / ")+g_projectionPreview.target;textOut(fitText(title,.70f,width-188),x+12,y+7,.70f,.779f,.811f,.838f);textOut(fitText(g_projectionPreview.source,.58f,width-188),x+12,y+29,.58f,.779f,.811f,.838f);button("Apply",x+width-169,y+10,72,539,true);button("Cancel",x+width-89,y+10,76,540);}
     size_t flatIndex=0;
     if(g_allSheetsFlat)for(size_t i=0;i<g_bodyIds.size();++i)if(isSheetFeature(g_bodyIds[i])){
         const Feature* feature=g_doc.find(g_bodyIds[i]);AABB bounds=g_reports[g_instancePart[i]].bounds.transformed(g_instanceWorld[i]);float sx,sy;
         std::string marker=std::to_string(++flatIndex);if(marker.size()<2)marker="0"+marker;
         if(feature&&bounds.valid()&&projectScreen(bounds.center()+Vec3{0,std::max(8.,bounds.extent().y*2.),0},sx,sy)&&sx>viewX+8&&sx<viewX+viewW-8&&sy>viewY+165&&sy<viewY+viewH-54&&!overViewCube(sx,sy)){
             tone(sx-13,sy-11,26,22,th::rowRadius,th::panel,.90f,.30f);
-            textOut(marker,sx-textWidth(marker,.61f)*.5f,sy-7,.61f,.784f,.816f,.843f);
+            textOut(marker,sx-textWidth(marker,.61f)*.5f,sy-7,.61f,.779f,.811f,.838f);
         }
     }
     if(g_stockMode){const auto* rows=g_stockReport.find("members");
@@ -5402,7 +5420,7 @@ static void drawFrame(HDC hdc){
             std::string marker=std::to_string(++stockIndex);if(marker.size()<2)marker="0"+marker;
             if(projectScreen(g_instanceWorld[i].transformPoint({-length->num*.5,station->num,0}),sx,sy)&&sx>viewX+8&&sx<viewX+viewW-8&&sy>viewY+160&&sy<viewY+viewH-54&&!overViewCube(sx,sy)){
                 tone(sx-13,sy-12,26,22,th::rowRadius,th::panel,.90f,.30f);
-                textOut(marker,sx-textWidth(marker,.61f)*.5f,sy-8,.61f,.784f,.816f,.843f);
+                textOut(marker,sx-textWidth(marker,.61f)*.5f,sy-8,.61f,.779f,.811f,.838f);
             }
         }
     }
@@ -5462,7 +5480,7 @@ static void drawFrame(HDC hdc){
             metric(sheet?"Formed area":"Area",formatted(nativeReport->find("area_mm2"),"mm2"),372);
             metric(sheet?"Formed volume":"Volume",formatted(nativeReport->find("volume_mm3"),"mm3"),405);
             metric(sheet?"Flat volume":"Faces",formatted(nativeReport->find(sheet?"flat_volume_mm3":"faces"),sheet?"mm3":""),438);
-            rect(rx,472,254,1,0,.194,.202,.219,1,0,0,0,0,0);
+            rect(rx,472,254,1,0,.193,.202,.218,1,0,0,0,0,0);
             if(sheet){
                 label(sheet->type==FeatureType::SourceSheet?"SOURCE SHEET / READ ONLY":"DEVELOPED SHEET",rx,492,.66f);
                 auto* holes=nativeBody->nativeData.find("holes");
@@ -5488,15 +5506,15 @@ static void drawFrame(HDC hdc){
             metric("Toe",measure(&report,"toe_deg","deg"),412);metric("Camber",measure(&report,"camber_deg","deg"),444);
             metric("Link closure",measure(&report,"closure_residual_mm_max","mm"),476);
             metric("Spring force",measure(report.find("spring"),"force_n","N"),508);
-            rect(rx,545,254,1,0,.194,.202,.219,1,0,0,0,0,0);
+            rect(rx,545,254,1,0,.193,.202,.218,1,0,0,0,0,0);
             label("Rigid-link closure checked",rx,566,.63f);label("Vehicle dynamics not checked",rx,588,.60f);
         }else{
             metric("Vertices",std::to_string(r.vertices),314);metric("Triangles",std::to_string(r.triangles),343);metric("Components",std::to_string(r.components),372);
             char size[100];auto e=r.bounds.extent();std::snprintf(size,sizeof size,"%.1f / %.1f / %.1f",e.x,e.y,e.z);metric("XYZ mm",size,392);
-            rect(rx,429,254,1,0,.194,.202,.219,1,0,0,0,0,0);label("TOPOLOGY AUDIT",rx,453,.66f);
+            rect(rx,429,254,1,0,.193,.202,.218,1,0,0,0,0,0);label("TOPOLOGY AUDIT",rx,453,.66f);
             metric("Boundary edges",std::to_string(r.boundaryEdges),486);metric("Non-manifold edges",std::to_string(r.nonManifoldEdges),519);
             metric("Degenerate faces",std::to_string(r.degenerateTriangles),552);
-            textOut(r.closedOriented()?"o  Closed, oriented edges":"o  Open or irregular topology",rx,587,.73f,.771,.804,.869);
+            textOut(r.closedOriented()?"o  Closed, oriented edges":"o  Open or irregular topology",rx,587,.73f,.77,.802,.828);
             label("Self-intersections not checked",rx,613,.62f);
         }
     }
@@ -5512,7 +5530,7 @@ static void drawFrame(HDC hdc){
             metric("Remaining DOFs",std::to_string(g_assemblyDiagnostics.freeDofs),438);
             char residual[80];std::snprintf(residual,sizeof residual,"%.4g mm / %.4g deg",g_assemblyDiagnostics.maxPositionMm,g_assemblyDiagnostics.maxAngleDeg);
             metric("Max residual",residual,471);
-            rect(rx,506,254,1,0,.194,.202,.219,1,0,0,0,0,0);
+            rect(rx,506,254,1,0,.193,.202,.218,1,0,0,0,0,0);
             }
             std::string chainTitle;std::vector<std::pair<std::string,std::string>> chainRows; // 050B driven drag chain link
             if(dragChainProperties(selectedNode,chainTitle,chainRows)){label(chainTitle.substr(0,36),rx,314,.62f);float y=350;for(const auto& row:chainRows){metric(row.first.c_str(),row.second,y);y+=29;}label("Motion follows the carriage",rx,566,.64f);}else{
@@ -5539,7 +5557,7 @@ static void drawFrame(HDC hdc){
             }
         }
     }
-    if(H>1000 && kind=="EXPRESSION SURFACE / MESH"){rect(rx,673,254,1,0,.194,.202,.219,1,0,0,0,0,0);label("MATHEMATICAL MODEL",rx,697,.66f);
+    if(H>1000 && kind=="EXPRESSION SURFACE / MESH"){rect(rx,673,254,1,0,.193,.202,.218,1,0,0,0,0,0);label("MATHEMATICAL MODEL",rx,697,.66f);
         textOut("x(u,v)   y(u,v)   z(u,v)",rx,730,.85f,.70,.82,.79);label("Trigonometry + named parameters",rx,761,.67f);label("Periodic seams validated",rx,786,.67f);}
     if(selBody>=0&&g_tubeInfo.count(g_bodyIds[selBody])&&H>940){
         auto& report=g_tubeInfo[g_bodyIds[selBody]];char length[80];std::snprintf(length,sizeof length,"%.2f mm",report.find("centerline_length_mm")->num);
@@ -5619,7 +5637,7 @@ static void drawFrame(HDC hdc){
         label("BEND POINTS / RETAINED WALL",rx,383,.62f);
         int visible=std::max(1,(int)(H-654)/45);g_notchScroll=std::max(0,std::min(g_notchScroll,(int)laser->notches.size()-visible));
         for(int k=g_notchScroll;k<(int)laser->notches.size()&&k<g_notchScroll+visible;++k){auto& n=laser->notches[k];float y=410+(k-g_notchScroll)*45;
-            if(k==g_selectedNotch)rect(rx,y-6,254,41,5,.2,.209,.226,1,.4,.417,.451,.7,1);
+            if(k==g_selectedNotch)rect(rx,y-6,254,41,5,.2,.208,.225,1,.399,.416,.45,.7,1);
             textOut(std::to_string(k+1)+"   "+n.station.substr(0,14)+" mm",rx+10,y,.71f);
             label(n.angle+" deg  /  "+n.face,rx+10,y+20,.62f);g_zones.push_back({rx,y-6,254,41,9000+k});
         }
@@ -5637,10 +5655,10 @@ static void drawFrame(HDC hdc){
         auto* projection=report.find("source_projection_verified");bool verified=projection&&projection->b;
         textOut(verified?"Source projection verified":"Source projection not verified",rx,416,.72f,verified?.75f:.94f,verified?.82f:.68f,verified?.90f:.51f);
         auto* sha=report.find("source_sha256");label("SHA256  "+(sha?sha->asStr().substr(0,18):std::string("unavailable")),rx,442,.58f);
-        rect(rx,475,254,1,0,.229,.239,.258,1,0,0,0,0,0);label("ORIGINAL OPENINGS",rx,494,.62f);
+        rect(rx,475,254,1,0,.229,.238,.258,1,0,0,0,0,0);label("ORIGINAL OPENINGS",rx,494,.62f);
         int visible=std::max(1,(int)(H-738)/43);int countHoles=(int)cache.preview.holes.arr.size();g_sourceScroll=std::max(0,std::min(g_sourceScroll,countHoles-visible));
         for(int k=g_sourceScroll;k<countHoles&&k<g_sourceScroll+visible;++k){auto& opening=cache.preview.holes.arr[k];auto* kind=opening.find("kind");auto* segment=opening.find("segment");auto* center=opening.find("flat_center");float y=525+(k-g_sourceScroll)*43;
-            if(k==g_sourceOpening)rect(rx-5,y-5,260,40,5,.2,.209,.226,1,.4,.417,.451,.7,1);g_zones.push_back({rx-5,y-5,260,40,10000+k});
+            if(k==g_sourceOpening)rect(rx-5,y-5,260,40,5,.2,.208,.225,1,.399,.416,.45,.7,1);g_zones.push_back({rx-5,y-5,260,40,10000+k});
             textOut(std::to_string(k+1)+"  "+(kind?kind->asStr().substr(0,24):std::string("Source opening")),rx,y,.69f);
             char where[100];std::snprintf(where,sizeof where,"Span %d / flat x %.2f mm",segment?(int)segment->num+1:0,center&&center->arr.size()>=3?center->arr[0].num:0.);label(where,rx,y+20,.59f);
         }
@@ -5693,13 +5711,13 @@ static void drawFrame(HDC hdc){
                 double cw=vp.m[3]*point.x+vp.m[7]*point.y+vp.m[11]*point.z+vp.m[15];Vec3 clip=vp.transformPoint(point);
                 if(cw>1e-5){float sx=viewX+(float)((clip.x/cw+1.)*.5*viewW),sy=viewY+(float)((1.-clip.y/cw)*.5*viewH);
                     if(sx>viewX+118&&sx<viewX+viewW-12&&sy>viewY+145&&sy<viewY+viewH-45){
-                        rect(sx-12,sy-12,24,24,12,.087,.091,.098,.94,1,.635,.298,1,2);rect(sx-16,sy-1,32,2,1,1,.635,.298,1,0,0,0,0,0);rect(sx-1,sy-16,2,32,1,1,.635,.298,1,0,0,0,0,0);textOut(g_physicalReport.find("center_of_gravity_mm")&&g_physicalReport.find("center_of_gravity_mm")->t==arkjson::Value::Arr?"CG / COM":"COM",sx+19,sy-9,.65f,.784f,.816f,.843f);
+                        rect(sx-12,sy-12,24,24,12,.087,.091,.098,.94,1,.635,.298,1,2);rect(sx-16,sy-1,32,2,1,1,.635,.298,1,0,0,0,0,0);rect(sx-1,sy-16,2,32,1,1,.635,.298,1,0,0,0,0,0);textOut(g_physicalReport.find("center_of_gravity_mm")&&g_physicalReport.find("center_of_gravity_mm")->t==arkjson::Value::Arr?"CG / COM":"COM",sx+19,sy-9,.65f,.779f,.811f,.838f);
                     }
                 }
             }
             if(const auto* inertia=g_physicalReport.find("inertia_kg_m2");inertia&&inertia->arr.size()==9){
-                rect(px+10,py+203,260,48,6,.069,.072,.078,1,.316,.33,.356,.6,1);label("INERTIA AT COM  /  kg.m2",px+19,py+210,.49f);
-                char principal[120];std::snprintf(principal,sizeof principal,"X %.3g   Y %.3g   Z %.3g",inertia->arr[0].num,inertia->arr[4].num,inertia->arr[8].num);textOut(principal,px+19,py+229,.60f,.784f,.816f,.843f);
+                rect(px+10,py+203,260,48,6,.069,.072,.078,1,.315,.329,.356,.6,1);label("INERTIA AT COM  /  kg.m2",px+19,py+210,.49f);
+                char principal[120];std::snprintf(principal,sizeof principal,"X %.3g   Y %.3g   Z %.3g",inertia->arr[0].num,inertia->arr[4].num,inertia->arr[8].num);textOut(principal,px+19,py+229,.60f,.779f,.811f,.838f);
             }
             if(const auto* energy=g_physicalReport.find("kinetic_energy_J")){label("Kinetic energy",px+12,py+267,.57f);textOut(fmt(energy->num,"J"),px+150,py+267,.62f);}
         }else{
@@ -5713,134 +5731,162 @@ static void drawFrame(HDC hdc){
         const float W=((float)viewX-280)*.5f+292;
         float listY=(float)viewY+180,listH=std::max(120.f,H-listY-42.f);panel(W-292,listY,280,listH,8);
         label(g_allSheetsFlat?"UNFOLDED BLANKS / INDEX":"STRAIGHT STOCK / CENTERLINE",W-278,listY+12,.64f);
-        rect(W-278,listY+37,252,1,0,.363,.379,.41,.65,0,0,0,0,0);
+        rect(W-278,listY+37,252,1,0,.362,.378,.409,.65,0,0,0,0,0);
         int maxRows=std::max(1,(int)((listH-63)/22));int row=0;float y=listY+50;
         auto indexText=[](size_t n){std::string value=std::to_string(n);return value.size()<2?"0"+value:value;};
         if(g_allSheetsFlat){std::vector<u64> order;std::unordered_map<u64,size_t> counts;
             for(u64 id:g_bodyIds)if(isSheetFeature(id)){if(!counts.count(id))order.push_back(id);++counts[id];}
             size_t start=1;for(u64 id:order){size_t quantity=counts[id];if(row++<maxRows){const Feature* feature=g_doc.find(id);
                     std::string range=indexText(start);if(quantity>1)range+="-"+indexText(start+quantity-1);
-                    textOut(range,W-278,y,.63f,.784f,.816f,.843f);
-                    textOut(feature?feature->name.substr(0,21):"Sheet",W-225,y,.62f,.784f,.816f,.843f);
-                    if(quantity>1)textOut("x"+std::to_string(quantity),W-47,y,.59f,.694f,.724f,.783f);
+                    textOut(range,W-278,y,.63f,.779f,.811f,.838f);
+                    textOut(feature?feature->name.substr(0,21):"Sheet",W-225,y,.62f,.779f,.811f,.838f);
+                    if(quantity>1)textOut("x"+std::to_string(quantity),W-47,y,.59f,.694f,.722f,.746f);
                     y+=22;}start+=quantity;}
             if(row>maxRows)label("+ "+std::to_string(row-maxRows)+" more patterns",W-278,listY+listH-25,.57f);
         }else{const auto* members=g_stockReport.find("members");
             if(members&&members->t==arkjson::Value::Arr){size_t index=0;for(const auto& member:members->arr){++index;if((int)index>maxRows)continue;
                     auto* name=member.find("source_name"),*length=member.find("developed_length_mm");
-                    textOut(indexText(index),W-278,y,.62f,.784f,.816f,.843f);
-                    textOut(name?name->asStr().substr(0,20):"Member",W-247,y,.59f,.784f,.816f,.843f);
+                    textOut(indexText(index),W-278,y,.62f,.779f,.811f,.838f);
+                    textOut(name?name->asStr().substr(0,20):"Member",W-247,y,.59f,.779f,.811f,.838f);
                     if(length&&length->t==arkjson::Value::Num){char size[32];std::snprintf(size,sizeof size,"%.0f mm",length->num);
-                        textOut(size,W-26-textWidth(size,.55f),y,.55f,.705f,.735f,.795f);}y+=22;}
+                        textOut(size,W-26-textWidth(size,.55f),y,.55f,.704f,.733f,.757f);}y+=22;}
                 if((int)members->arr.size()>maxRows)label("+ "+std::to_string(members->arr.size()-(size_t)maxRows)+" more stock rows",W-278,listY+listH-25,.57f);
             }}
     }
-    float cy=H-32-assistantDockHeight();
     if(laser||source){float py=(float)viewY+(float)viewH-101.f;rect(viewX+126,py-5,viewW-142,43,7,.105,.109,.118,.96,.258,.269,.291,.8,1);
         float x=viewX+136;button("Straight",x,py,76,45,false,g_foldProgress==0);button("Folded",x+84,py,76,46,false,g_foldProgress==1);button(g_foldPlaying?"Pause":"Play",x+168,py,62,47,true);
-        float length=std::max(80.f,(float)viewW-408);rect(x+244,py+14,length,5,2,.247,.257,.278,1,0,0,0,0,0);rect(x+244,py+14,std::max(3.f,length*(float)g_foldProgress),5,2,.72,.78,.88,1,0,0,0,0,0);g_zones.push_back({x+244,py+2,length,29,50});}
+        float length=std::max(80.f,(float)viewW-408);rect(x+244,py+14,length,5,2,.246,.256,.277,1,0,0,0,0,0);rect(x+244,py+14,std::max(3.f,length*(float)g_foldProgress),5,2,.72,.78,.88,1,0,0,0,0,0);g_zones.push_back({x+244,py+2,length,29,50});}
     else if(sheet&&sheet->type==FeatureType::SheetMetal&&nativeBody&&nativeBody->nativeData.find("animation")){
-        float py=(float)viewY+(float)viewH-101.f;rect(viewX+126,py-5,viewW-142,43,7,.105,.109,.118,.96,.258,.269,.291,.8,1);
+        float py=(float)viewY+(float)viewH-101.f;rect(viewX+126,py-5,viewW-142,43,7,.105,.109,.118,.96,.257,.268,.29,.8,1);
         float x=viewX+136;double progress=sheetDisplayProgress(sheet->id);
         button("Flat",x,py,76,84,false,progress<=0);button("Formed",x+84,py,76,83,false,progress>=1);
         if(sheetHasStamp(*sheet))label("Stamped blank: nominal flat reference",x+170,py+9,.60f);
         else{button(g_sheetPlayingId==sheet->id?"Pause":"Play",x+168,py,62,128,true);
-        float length=std::max(80.f,(float)viewW-408);rect(x+244,py+14,length,5,2,.247,.257,.278,1,0,0,0,0,0);rect(x+244,py+14,std::max(3.f,length*(float)progress),5,2,.72,.78,.88,1,0,0,0,0,0);g_zones.push_back({x+244,py+2,length,29,53});}}
+        float length=std::max(80.f,(float)viewW-408);rect(x+244,py+14,length,5,2,.246,.256,.277,1,0,0,0,0,0);rect(x+244,py+14,std::max(3.f,length*(float)progress),5,2,.72,.78,.88,1,0,0,0,0,0);g_zones.push_back({x+244,py+2,length,29,53});}}
     else if(auto* suspension=selectedSuspension()){
         float py=(float)viewY+(float)viewH-151.f;rect(viewX+12,py,viewW-24,82,10,.078f,.081f,.088f,.92f,.43f,.448f,.485f,.57f,1);
         const auto& state=g_suspViews[suspension->id].state;const double values[]={state.jounceMm,state.rackMm,state.wheelSpinDeg};
         const auto& report=g_suspViews[suspension->id].preview.report;auto* toe=report.find("toe_deg"),*closure=report.find("closure_residual_mm_max");
         auto* spring=report.find("spring");auto* force=spring?spring->find("force_n"):nullptr;
         char telemetry[160];std::snprintf(telemetry,sizeof telemetry,"Toe %.2f deg   /   Spring %.0f N   /   Closure %.3g mm",toe?toe->num:0.,force?force->num:0.,closure?closure->num:0.);
-        textOut(telemetry,viewX+20,py+31,.53f,.784f,.816f,.843f);
+        textOut(telemetry,viewX+20,py+31,.53f,.779f,.811f,.838f);
         const char* titles[]={"JOUNCE","STEERING RACK","WHEEL SPIN"};float cell=(viewW-118.f)/3.f;
         for(int control=0;control<3;++control){float x=viewX+20+control*(cell+8),track=cell-12;auto range=suspensionRange(*suspension,control);
             float fraction=(float)clamp((values[control]-range.first)/(range.second-range.first),0.,1.);
             char value[45];std::snprintf(value,sizeof value,control==2?"%.0f deg":"%.1f mm",values[control]);
-            textOut(titles[control],x,py+9,.55f,.784f,.816f,.843f);textOut(value,x+track-textWidth(value,.57f),py+9,.57f,.784f,.816f,.843f);
-            rect(x,py+53,track,5,2,.28f,.292f,.315f,1,0,0,0,0,0);rect(x,py+53,std::max(2.f,track*fraction),5,2,.42f,.78f,.98f,1,0,0,0,0,0);
+            textOut(titles[control],x,py+9,.55f,.779f,.811f,.838f);textOut(value,x+track-textWidth(value,.57f),py+9,.57f,.779f,.811f,.838f);
+            rect(x,py+53,track,5,2,.279f,.291f,.315f,1,0,0,0,0,0);rect(x,py+53,std::max(2.f,track*fraction),5,2,.42f,.78f,.98f,1,0,0,0,0,0);
             rect(x+track*fraction-6,py+49,12,13,6,1.f,.635f,.298f,1,.501f,.522f,.565f,.75f,1);
             g_zones.push_back({x,py+32,track,38,380+control});
         }
         button(g_suspSpinPlaying?"Pause":"Play",viewX+viewW-75,py+25,58,383,false,g_suspSpinPlaying);
     }
-    if(g_assistantDockOpen){
-    panel(viewX,cy,(float)viewW,(float)assistantDockHeight());
-    button("Single",viewX+22,cy+7,74,470,false,!g_teamMode);button("Team",viewX+104,cy+7,74,471,false,g_teamMode);
+    // Right assistant dock: full height between the ribbon and the status bar,
+    // outermost on the right. Rail, normal (drag handle) or expanded width.
+    const auto chatDock=chatDockGeometry();
+    if(chatDock.open){
+    namespace th=ui_theme;
+    const float dx=(float)chatDock.x,dy=(float)chatDock.y,dw=(float)chatDock.w,dh=(float)chatDock.h,px=dx+(float)chatDock.pad,inner=(float)chatDock.inner;
+    const th::Tone white{1,1,1};
+    auto tone=[&](float x,float y,float w,float h,float radius,th::Tone fill,float alpha,float borderAlpha=0,th::Tone edge=th::Tone{1,1,1}){rect(x,y,w,h,radius,fill.r,fill.g,fill.b,alpha,edge.r,edge.g,edge.b,borderAlpha,borderAlpha>0?1.f:0.f);};
+    auto hovered=[&](float x,float y,float w,float h){return mp.x>=x&&mp.x<x+w&&mp.y>=y&&mp.y<y+h;};
+    auto ink=[&](const std::string& value,float x,float y,float scale,th::Tone color){textOut(value,x,y,scale,color.r,color.g,color.b);};
+    // Compact palette chip: raised graphite, white hover overlay, orange when active.
+    auto chip=[&](const std::string& title,float x,float y,float w,float h,int id,bool active=false){
+        const bool hover=hovered(x,y,w,h);tone(x,y,w,h,th::controlRadius,hover?th::over(th::raised,th::hover):th::raised,1,active?.95f:th::border,active?th::accent:white);
+        const auto fitted=fitText(title,.60f,w-12);ink(fitted,x+(w-textWidth(fitted,.60f))*.5f,y+(h-fa.lineH*.60f)*.5f,.60f,active?th::accent:th::text);g_zones.push_back({x,y,w,h,id});};
+    auto icon=[&](int id,const char* hint,float x,float y,float size){const bool hover=hovered(x,y,size,size);if(hover){tone(x,y,size,size,th::controlRadius,white,th::hover);ribbonHint=hint;}glyph(id,x+5,y+5,size-10,hover?1.f:.82f);g_zones.push_back({x,y,size,size,id});};
+    tone(dx,dy,dw,dh,0,th::chrome,1);tone(dx,dy,1,dh,0,white,th::border);
+    if(chatDock.rail){
+        // Collapsed rail: open control, running pulse and unread count.
+        if(g_chatDockSeenRows>g_chatLog.size())g_chatDockSeenRows=g_chatLog.size();
+        const float top=dy+10,size=dw-12;const bool hover=hovered(dx+6,top,size,96);
+        if(hover){tone(dx+6,top,size,96,th::rowRadius,white,th::hover);ribbonHint="Open the assistant";}
+        glyph(400,dx+(dw-24)*.5f,top+10,24,hover?1.f:.86f);ink("Chat",dx+(dw-textWidth("Chat",.52f))*.5f,top+42,.52f,th::text2);
+        glyph(44300,dx+(dw-18)*.5f,top+68,18,hover?1.f:.72f);g_zones.push_back({dx+6,top,size,96,44300});
+        float statusY=top+112;
+        if(chatDockRunning()){const float pulse=.55f+.45f*(float)std::sin((double)GetTickCount64()*.006);tone(dx+dw*.5f-5,statusY,10,10,5,th::accent,pulse);statusY+=22;}
+        if(const size_t unread=chatDockUnread()){const std::string count=unread>99?"99+":std::to_string(unread);const float w=std::max(22.f,textWidth(count,.52f)+12);tone(dx+(dw-w)*.5f,statusY,w,18,9,th::accent,1);ink(count,dx+(dw-textWidth(count,.52f))*.5f,statusY+(18-fa.lineH*.52f)*.5f,.52f,th::accentInk);}
+    }else{
+    g_chatDockSeenRows=g_chatLog.size();
+    // Left-edge resize handle; the pointer messages own the drag.
+    {const bool hot=g_chatDockResizing||hovered(dx-3,dy,8,dh);if(hot){tone(dx-1,dy,3,dh,0,th::accent,g_chatDockResizing?.95f:.6f);ribbonHint="Drag to resize the assistant";}g_zones.push_back({dx-3,dy,8,dh,44303});}
+    const float rowA=(float)chatDock.rowA,rowB=(float)chatDock.rowB;
+    button("Single",px,rowA,62,470,false,!g_teamMode);button("Team",px+66,rowA,58,471,false,g_teamMode);
+    icon(44302,g_chatExpanded?"Restore the normal assistant width":"Expand the assistant",dx+dw-chatDock.pad-62,rowA+2,28);
+    icon(44301,"Collapse the assistant to a rail",dx+dw-chatDock.pad-30,rowA+2,28);
+    {const std::string models=g_authBusy?"Connecting...":g_assistantConfig.provider=="ollama"?"Models / account":g_authStatus.connected?"ChatGPT account":"Models / connect";
+     const float right=dx+dw-chatDock.pad-70,left=px+132,width=std::min(right-left,textWidth(models,.76f)+28);
+     if(width>=60){const auto fitted=fitText(models,.76f,width-12);button(fitted.c_str(),right-width,rowA,width,57);}}
     std::string connector=!g_teamMode&&g_assistantResponseFinished?(g_assistantResponseError?"Interrupted / inspect prior changes":"Response finished / review result"):g_chatBusy?(g_assistantStatus.empty()?"Working...":g_assistantStatus):g_authBusy?"ChatGPT sign-in in progress":
         g_assistantConfig.authMode==AssistantAuthMode::ChatGptPlan?"ChatGPT plan / "+g_assistantConfig.model:
         g_assistantConfig.provider=="ollama"&&!g_assistantConfig.model.empty()?"Local Ollama / "+g_assistantConfig.model:
         g_assistantConfig.authMode==AssistantAuthMode::CliAccount?(g_assistantConfig.provider=="claude-code"?"Claude Code / ":"Grok Build / ")+(g_assistantConfig.model.empty()?std::string("CLI selected model"):g_assistantConfig.model):
         g_authStatus.connected?(g_authStatus.planAuthorized?"ChatGPT signed in / choose model":"ChatGPT identity connected / plan disabled"):
         g_assistantConfig.model.empty()?"Continue with ChatGPT or Advanced API key":"API key / "+g_assistantConfig.model;
-    label(fitText(connector,.65f,viewW-(g_assistantConfig.authMode==AssistantAuthMode::ChatGptPlan?694:526)),viewX+192,cy+15,.65f);
-    if(g_assistantConfig.authMode==AssistantAuthMode::ChatGptPlan)button("Manage usage",viewX+viewW-484,cy+7,154,44013);
-    std::string effortButton="Effort "+(g_assistantConfig.reasoningEffort.empty()?std::string("Auto"):g_assistantConfig.reasoningEffort);
-    if(g_teamMode)button(g_teamSnapshot.paused?"Resume":"Pause",viewX+viewW-320,cy+7,105,472,false,g_teamSnapshot.paused);
-    else button(effortButton.c_str(),viewX+viewW-320,cy+7,105,367,false,!g_assistantConfig.reasoningEffort.empty());
-    button(g_authBusy?"Connecting...":g_assistantConfig.provider=="ollama"?"Models / account":g_authStatus.connected?"ChatGPT account":"Models / connect",viewX+viewW-206,cy+7,184,57);
-    std::string runTokens=g_teamMode?"Team: "+assistantUsageLabel(g_teamSnapshot.usage):"Run: "+assistantUsageLabel(g_assistantUsageRun);
-    if(!g_teamMode){auto timing=measuredPerformanceLabel(g_assistantPerformanceRun);if(!timing.empty())runTokens+=" / "+timing;}
-
+    {float chipsRight=dx+dw-chatDock.pad;
+     if(g_assistantConfig.authMode==AssistantAuthMode::ChatGptPlan){const float w=std::min(textWidth("Manage usage",.60f)+22,inner*.32f);chip("Manage usage",chipsRight-w,rowB,w,24,44013);chipsRight-=w+6;}
+     const std::string effort=g_teamMode?std::string(g_teamSnapshot.paused?"Resume":"Pause"):"Effort "+(g_assistantConfig.reasoningEffort.empty()?std::string("Auto"):g_assistantConfig.reasoningEffort);
+     const float w=std::min(textWidth(effort,.60f)+22,inner*.36f);chip(effort,chipsRight-w,rowB,w,24,g_teamMode?472:367,g_teamMode?g_teamSnapshot.paused:!g_assistantConfig.reasoningEffort.empty());chipsRight-=w+10;
+     ink(fitText(connector,.58f,std::max(1.f,chipsRight-px)),px,rowB+(24-fa.lineH*.58f)*.5f,.58f,th::text2);}
     if(g_teamMode&&g_chatAgentDetails){
-        const float imageTop=H-(assistantImageComposerHeight()>40?252.f:188.f);
-        const float cardRoom=imageTop-cy-teamCardTop()-teamCardStride*(teamCardRows()-1)-4;
-        const float cardHeight=cardRoom>=teamCardHeight?teamCardHeight:cardRoom>=148?148.f:std::clamp(cardRoom,84.f,92.f);
+        // Team cards share the dock column below the native conversation header.
+        const float controlsY=(float)(chatDock.chatTop+g_chatHeaderHeight+8);const bool oneRow=teamCardControlRows()==1;
+        const int columns=teamCardColumns(),rows=teamCardRows(),pageSize=columns*rows;unsigned pages=(g_teamRoleCount+pageSize-1)/pageSize;g_teamPage=std::min(g_teamPage,pages-1);
+        button(g_teamFocusedWorkflow?"Focused":"Parallel",px,controlsY,104,44014,false,g_teamFocusedWorkflow);
+        button(("Agents: "+std::to_string(g_teamRoleCount)).c_str(),px+110,controlsY,96,44010);
+        if(pages>1){button("<",px+212,controlsY,30,44011);button(">",px+246,controlsY,30,44012);}
+        const float recoverX=oneRow?px+inner-172:px,recoverY=oneRow?controlsY:controlsY+40;
+        if(const int recover=teamRecoverAction())button(recover==490?"Resume after error":"Review blockers",recoverX,recoverY,172,recover);
+        const auto metrics=teamCardMetrics();const float cardsY=(float)teamCardTop(),cardHeight=metrics.height,cardStride=metrics.stride;
         const bool fullCard=cardHeight>=teamCardHeight,summaryCard=cardHeight>=148;
-        const bool showGoal=false;
-        if(g_teamStarted&&std::any_of(g_teamSnapshot.roles.begin(),g_teamSnapshot.roles.end(),[](const auto& role){return role.state==AgentTeamState::AwaitingContinuation||role.state==AgentTeamState::Interrupted||role.state==AgentTeamState::Failed;}))button("Resume after error",viewX+viewW-206,cy+45+g_chatHeaderHeight,184,490);
-        else if(g_teamStarted&&(!g_teamSnapshot.running||g_teamSnapshot.unresolvedErrors))button("Review blockers",viewX+viewW-206,cy+45+g_chatHeaderHeight,184,989);
-        std::string live=g_teamStarted?(g_teamSnapshot.cancelled?"CANCELLED":g_teamSnapshot.paused?"PAUSED / requests and tools gated":g_teamSnapshot.running?"LIVE / provider and tool activity":std::string("Goal: ")+agentGoalStateName(g_teamSnapshot.goalState)+(g_teamSnapshot.goalDeclared?" / lead report":" / completion not reported")):"READY / choose role settings and send a goal";
-        if(g_teamStarted&&!g_teamSnapshot.running&&!g_teamSnapshot.cancelled&&std::any_of(g_teamSnapshot.roles.begin(),g_teamSnapshot.roles.end(),[](const auto& role){return role.state==AgentTeamState::AwaitingContinuation||role.state==AgentTeamState::Interrupted||role.state==AgentTeamState::Failed;}))live="AWAITING CONTINUATION / previous commits and receipts retained";
-        if(g_teamStarted&&!g_teamSnapshot.goalSummary.empty())live+=" / "+g_teamSnapshot.goalSummary;
-        if(!showGoal&&!g_teamGoal.empty())live="Goal: "+g_teamGoal+" / "+live;
-
-        int columns=teamCardColumns(),pageSize=columns*teamCardRows();unsigned pages=(g_teamRoleCount+pageSize-1)/pageSize;g_teamPage=std::min(g_teamPage,pages-1);
-        button(g_teamFocusedWorkflow?"Focused":"Parallel",viewX+viewW-622,cy+45+g_chatHeaderHeight,114,44014,false,g_teamFocusedWorkflow);
-        button(("Agents: "+std::to_string(g_teamRoleCount)).c_str(),viewX+viewW-500,cy+45+g_chatHeaderHeight,100,44010);
-        if(pages>1){button("<",viewX+viewW-394,cy+45+g_chatHeaderHeight,30,44011);button(">",viewX+viewW-358,cy+45+g_chatHeaderHeight,30,44012);}
-        float cardWidth=(viewW-44.f-8.f*(columns-1))/columns;
+        const float cardWidth=(inner-8.f*(columns-1))/columns;
         g_teamCardContentFits=true;g_teamCardBoundsFailure.clear();
-        for(size_t cell=0;cell<(size_t)pageSize;++cell){size_t i=g_teamPage*pageSize+cell;if(i>=g_teamRoleCount)break;float x=viewX+22+(cardWidth+8)*(cell%columns),y=cy+teamCardTop()+teamCardStride*(cell/columns);const AgentTeamRoleSnapshot* role=i<g_teamSnapshot.roles.size()?&g_teamSnapshot.roles[i]:nullptr;
-            bool working=role&&role->state==AgentTeamState::Working,failed=role&&role->state==AgentTeamState::Failed;float accentR=failed?.92f:i==0?.34f:i==1?.71f:.39f,accentG=failed?.40f:i==0?.75f:i==1?.63f:.83f;
-            rect(x,y,cardWidth,cardHeight,8,.076f,.079f,.086f,.97f,accentR,accentG,.91f,working?.96f:.38f,working?2.f:1.f);
+        for(size_t cell=0;cell<(size_t)pageSize;++cell){size_t i=g_teamPage*pageSize+cell;if(i>=g_teamRoleCount)break;float x=px+(cardWidth+8)*(cell%columns),y=cardsY+cardStride*(cell/columns);const AgentTeamRoleSnapshot* role=i<g_teamSnapshot.roles.size()?&g_teamSnapshot.roles[i]:nullptr;
+            const bool working=role&&role->state==AgentTeamState::Working,failed=role&&role->state==AgentTeamState::Failed;
+            tone(x,y,cardWidth,cardHeight,th::rowRadius,th::mix(th::chrome,th::raised,.45f),1,working||failed?.95f:th::border,failed?th::danger:working?th::accent:white);
+            if(working)tone(x,y+10,3,cardHeight-20,1.5f,th::accent,1);
             size_t cardTextStart=g_textVerts.size();
-            auto line=[&](const std::string& value,float offset,float scale=.80f){textOut(fitText(value,scale,cardWidth-24),x+12,y+offset,scale,.83f,.91f,.98f);};
-            line(g_teamRoleLabels[i],8,.85f);std::string state=role?std::string(agentTeamStateName(role->state))+" / turn "+std::to_string(role->turns):"Ready";line(state+(i==0?" / engineering + CAD":i==2?" / read-only review":" / CAD author"),summaryCard?32.f:29.f,summaryCard?.80f:.65f);
-            auto config=teamRoleConfig(i);if(summaryCard)line((config.authMode==AssistantAuthMode::ChatGptPlan?std::string("ChatGPT"):config.authMode==AssistantAuthMode::CliAccount?std::string(config.provider=="claude-code"?"Claude Code":"Grok Build"):config.provider)+" / "+(config.model.empty()?(config.authMode==AssistantAuthMode::CliAccount?"CLI selected model":"Select model"):config.model)+" / "+(config.reasoningEffort.empty()?"Auto":config.reasoningEffort),54);
-            if(summaryCard)line(role&&!role->taskSummary.empty()?"Task "+role->taskState+": "+role->taskSummary:role?role->status:"Describe the goal to start",76);if(fullCard)line(role&&role->unresolvedToolErrors?"Unresolved tool requests: "+std::to_string(role->unresolvedToolErrors)+" / Review blockers":g_teamActivity[i].empty()?(role?role->text:"Tools and messages appear live"):g_teamActivity[i],98);
+            auto line=[&](const std::string& value,float offset,float scale=.80f,float width=0,th::Tone color=th::text2){ink(fitText(value,scale,width>0?width:cardWidth-24),x+12,y+offset,scale,color);};
+            line(g_teamRoleLabels[i],10,.85f,cardWidth-24-88,th::text);chip("Reasoning",x+cardWidth-86,y+9,74,22,44310+(int)i,g_chatReasoningAgent==(int)i);
+            std::string state=role?std::string(agentTeamStateName(role->state))+" / turn "+std::to_string(role->turns):"Ready";line(state+(i==0?" / engineering + CAD":i==2?" / read-only review":" / CAD author"),summaryCard?34.f:31.f,summaryCard?.80f:.65f);
+            auto config=teamRoleConfig(i);if(summaryCard)line((config.authMode==AssistantAuthMode::ChatGptPlan?std::string("ChatGPT"):config.authMode==AssistantAuthMode::CliAccount?std::string(config.provider=="claude-code"?"Claude Code":"Grok Build"):config.provider)+" / "+(config.model.empty()?(config.authMode==AssistantAuthMode::CliAccount?"CLI selected model":"Select model"):config.model)+" / "+(config.reasoningEffort.empty()?"Auto":config.reasoningEffort),56,.80f,0,th::muted);
+            if(summaryCard)line(role&&!role->taskSummary.empty()?"Task "+role->taskState+": "+role->taskSummary:role?role->status:"Describe the goal to start",77);if(fullCard)line(role&&role->unresolvedToolErrors?"Unresolved tool requests: "+std::to_string(role->unresolvedToolErrors)+" / Review blockers":g_teamActivity[i].empty()?(role?role->text:"Tools and messages appear live"):g_teamActivity[i],98,.80f,0,th::muted);
             const float footer=fullCard?125.f:summaryCard?103.f:45.f;
-            if(summaryCard)rect(x+12,y+footer-3,cardWidth-24,1,0,.309f,.322f,.349f,.65f,0,0,0,0,0);
+            if(summaryCard)tone(x+12,y+footer-3,cardWidth-24,1,0,white,th::line);
             std::string tokens=role&&role->usage.reportedResponses?std::string(role->usage.missingResponses?"Tokens >= ":"Tokens ")+std::to_string(role->usage.totalTokens):"Tokens unreported";
-            textOut(fitText(tokens,.76f,cardWidth-192),x+12,y+footer,.76f,.784f,.816f,.843f);button("Connector",x+cardWidth-168,y+footer,74,44020+(int)i);button("Settings",x+cardWidth-86,y+footer,74,44000+(int)i);
+            ink(fitText(tokens,.76f,cardWidth-192),x+12,y+footer,.76f,th::text2);button("Connector",x+cardWidth-168,y+footer,74,44020+(int)i);button("Settings",x+cardWidth-86,y+footer,74,44000+(int)i);
             std::string detail=role&&role->usage.reportedResponses?"In "+std::to_string(role->usage.inputTokens)+" / Out "+std::to_string(role->usage.outputTokens)+" / Reason "+std::to_string(role->usage.reasoningTokens):"Input / output: unreported";
             if(role){auto timing=measuredPerformanceLabel(role->performance);if(!timing.empty())detail=timing;}
-            if(fullCard)textOut(fitText(detail,.72f,cardWidth-192),x+12,y+148,.72f,.784f,.816f,.843f);
+            if(fullCard)ink(fitText(detail,.72f,cardWidth-192),x+12,y+148,.72f,th::muted);
             if(g_verifyTeamCardBounds)for(size_t vertex=cardTextStart;vertex+6<g_textVerts.size();vertex+=7){float tx=g_textVerts[vertex],ty=g_textVerts[vertex+1];if(tx<x+8||tx>x+cardWidth-8||ty<y+8||ty>y+cardHeight-8){g_teamCardContentFits=false;if(g_teamCardBoundsFailure.empty()){std::ostringstream detail;detail<<"Card "<<i<<" ("<<g_teamRoleIds[i]<<") glyph ("<<tx<<","<<ty<<") exceeds ["<<x+8<<","<<y+8<<".."<<x+cardWidth-8<<","<<y+cardHeight-8<<"], atlas line height "<<fa.lineH;g_teamCardBoundsFailure=detail.str();}}}
         }
-        if(showGoal)label(fitText(g_teamStarted&&g_teamSnapshot.goalDeclared?std::string("GOAL ")+agentGoalStateName(g_teamSnapshot.goalState)+" / agent report: "+g_teamSnapshot.goalSummary:"GOAL: "+g_teamGoal,.70f,viewW-44),viewX+22,cy+teamCardTop()+cardHeight+8+teamCardStride*(teamCardRows()-1),.70f);
     }
-    float inputY=H-120;
+    // Composer: optional pending image, message field, actions and receipts.
     drawAssistantImageAttachmentUI(rect,button,glyph);
-    rect(viewX+22,inputY,viewW-244,62,7,.059,.062,.067,1,.331,.345,.373,.8,1);
+    const float inputY=(float)chatDock.inputY,labelY=(float)chatDock.labelY,actionsY=(float)chatDock.actionsY;
+    tone(px,inputY,inner,(float)chatDock.inputH,th::controlRadius,th::field,1,th::border);
     if(g_pendingObjectTarget){
-        std::string chip="Object: "+g_pendingObjectTarget->label;
-        if(!g_pendingObjectTarget->invalidated.empty())chip="Object removed or replaced / select again";
-        else if(g_pendingObjectTarget->epoch!=g_objectDocumentEpoch)chip="Object from previous drawing / select again";
-        textOut(fitText(chip,.62f,viewW-338),viewX+30,inputY-20,.62f,.784f,.816f,.843f);button("Clear",viewX+viewW-302,inputY-25,66,566);
-    }else label(g_teamMode?"GOAL / DECISION  /  Ctrl+Enter to queue":"MESSAGE  /  Ctrl+Enter to send",viewX+30,inputY-16,.55f);
-    button(g_teamMode?(g_teamStarted&&!g_teamSnapshot.cancelled?"Queue":"Start"):(g_chatBusy?"Queue":"Send"),viewX+viewW-206,inputY,84,74,true);button("Cancel",viewX+viewW-112,inputY,90,75);
-    if(g_teamMode){std::string target="To: "+(g_teamTarget.empty()?std::string(g_teamFocusedWorkflow?"Engineer":"entire team"):g_teamTarget=="all"?std::string("entire team"):g_teamTarget);button(target.c_str(),viewX+viewW-206,inputY+40,184,473);}
-    else button("Live MCP",viewX+viewW-206,inputY+40,184,58);
-    AssistantUsage docTokens=g_assistantUsageDocument;
-    textOut(g_status.substr(0,(size_t)std::max((viewW-334)/7,1)),viewX+22,H-51,.58f,g_error?.94f:.58f,g_error?.57f:.65f,g_error?.48f:.74f);
-    std::string documentTokens="Document: "+assistantUsageLabel(docTokens);
-    label(documentTokens.substr(0,46),viewX+viewW-310,H-51,.51f);
+        std::string target="Object: "+g_pendingObjectTarget->label;
+        if(!g_pendingObjectTarget->invalidated.empty())target="Object removed or replaced / select again";
+        else if(g_pendingObjectTarget->epoch!=g_objectDocumentEpoch)target="Object from previous drawing / select again";
+        ink(fitText(target,.60f,inner-76),px+2,labelY+(22-fa.lineH*.60f)*.5f,.60f,th::accent);chip("Clear",px+inner-64,labelY,64,22,566);
+    }else{
+        // Prompt hint left; provider-reported document tokens right (run usage is in Run info / cards).
+        const auto tokens=fitText("Document: "+assistantUsageLabel(g_assistantUsageDocument),.51f,inner*.48f);const float tokensW=textWidth(tokens,.51f);
+        ink(fitText(g_teamMode?"GOAL / DECISION  /  Ctrl+Enter to queue":"MESSAGE  /  Ctrl+Enter to send",.55f,std::max(1.f,inner-tokensW-14)),px+2,labelY+(22-fa.lineH*.55f)*.5f,.55f,th::muted);
+        ink(tokens,px+inner-tokensW,labelY+(22-fa.lineH*.51f)*.5f,.51f,th::faint);}
+    tone(px,actionsY,32,32,th::controlRadius,th::raised,1,th::border);icon(730,"Attach an image reference to the next message",px+1,actionsY+1,30);
+    {const float cancelW=76,sendW=72,cancelX=px+inner-cancelW,sendX=cancelX-6-sendW,targetX=px+36,targetW=std::min(184.f,sendX-6-targetX);
+     button(g_teamMode?(g_teamStarted&&!g_teamSnapshot.cancelled?"Queue":"Start"):(g_chatBusy?"Queue":"Send"),sendX,actionsY,sendW,74,true);button("Cancel",cancelX,actionsY,cancelW,75);
+     if(targetW>=48){if(g_teamMode){std::string target="To: "+(g_teamTarget.empty()?std::string(g_teamFocusedWorkflow?"Engineer":"entire team"):g_teamTarget=="all"?std::string("entire team"):g_teamTarget);button(fitText(target,.76f,targetW-12).c_str(),targetX,actionsY,targetW,473);}
+         else button("Live MCP",targetX,actionsY,targetW,58);}}
     }
-    // Expanded conversation owns the workspace. Do not paint or register CAD
-    // navigation/appearance targets over its Single/Team row.
+    }
+    // Navigation and appearance overlays stay inside the viewport, which the
+    // right dock never overlaps; a collapsed (1 px) viewport draws none.
     if(viewH>1){
-    if(g_motionActive){float px=(float)viewX+20,py=(float)viewY+viewH-99,width=std::min(760.f,(float)viewW-168.f);rect(px,py,width,79,7,.075,.079,.085,.95,.383,.4,.432,.65,1);
+    if(g_motionActive){float px=(float)viewX+20,py=(float)viewY+viewH-99,width=std::min(760.f,(float)viewW-168.f);rect(px,py,width,79,7,.075,.079,.085,.95,.382,.399,.431,.65,1);
         std::string transmission,outputName="Output",outputUnit="rpm";double outputSpeed=0;u64 outputNode=0;std::set<u64> activeDrivers;
         const auto* relations=g_motionReport.find("relations");if(relations)for(const auto& relation:relations->arr)if(relation.find("active")&&relation.find("active")->b)activeDrivers.insert((u64)relation.find("a")->num);
         if(relations)for(const auto& relation:relations->arr)if(relation.find("active")&&relation.find("active")->b){u64 driven=(u64)relation.find("b")->num;if(!outputNode&&driven!=g_motionDriver&&!activeDrivers.count(driven))outputNode=driven;
@@ -5848,8 +5894,8 @@ static void drawFrame(HDC hdc){
         if(!outputNode)for(u64 node:activeDrivers)if(node!=g_motionDriver){outputNode=node;break;}
         if(auto* instances=g_motionReport.find("instances"))for(const auto& row:instances->arr)if((u64)row.find("node")->num==outputNode){outputName=row.find("name")->asStr();if(auto* speed=row.find("speed_rpm"))outputSpeed=speed->num;else if(auto* velocity=row.find("velocity_mm_s")){outputSpeed=velocity->num;outputUnit="mm/s";}}
         bool editableTeeth=false,frontParameter=false,rearParameter=false;for(const auto& parameter:g_doc.params){frontParameter|=parameter.name=="front_teeth";rearParameter|=parameter.name=="rear_teeth";}editableTeeth=frontParameter&&rearParameter;
-        char cadence[180];std::snprintf(cadence,sizeof cadence,"Driver %.3g rpm   |   %s %.3g %s   |   Time %.2f s",g_motionRpm,outputName.substr(0,22).c_str(),outputSpeed,outputUnit.c_str(),g_motionTime);textOut(transmission.empty()?"Mechanical motion":transmission,px+13,py+10,.82f,.784f,.816f,.843f);textOut(cadence,px+13,py+37,.74f,.784f,.816f,.843f);
-        button(g_motionPlaying?"Pause":"Play",px+width-228,py+12,64,453);button(editableTeeth?"Teeth":"Driver",px+width-155,py+12,62,editableTeeth?469:452);button("Reset",px+width-84,py+12,70,454);g_zones.push_back({px+12,py+32,std::max(80.f,width-250),26,452});textOut("Kinematic preview / contact and dynamics unchecked",px+13,py+61,.55f,.607f,.633f,.685f);
+        char cadence[180];std::snprintf(cadence,sizeof cadence,"Driver %.3g rpm   |   %s %.3g %s   |   Time %.2f s",g_motionRpm,outputName.substr(0,22).c_str(),outputSpeed,outputUnit.c_str(),g_motionTime);textOut(transmission.empty()?"Mechanical motion":transmission,px+13,py+10,.82f,.779f,.811f,.838f);textOut(cadence,px+13,py+37,.74f,.779f,.811f,.838f);
+        button(g_motionPlaying?"Pause":"Play",px+width-228,py+12,64,453);button(editableTeeth?"Teeth":"Driver",px+width-155,py+12,62,editableTeeth?469:452);button("Reset",px+width-84,py+12,70,454);g_zones.push_back({px+12,py+32,std::max(80.f,width-250),26,452});textOut("Kinematic preview / contact and dynamics unchecked",px+13,py+61,.55f,.606f,.631f,.652f);
     }
     if(g_showViewCube){
     updateNavigationBounds();
@@ -5857,7 +5903,7 @@ static void drawFrame(HDC hdc){
     paintViewCube();glUseProgram(pUI);glUniform2f(uuVp,W,H);
     float homeX=(float)g_cubeX+g_cubeS-29,homeY=(float)g_cubeY+g_cubeS-28;
     bool homeHover=mp.x>=homeX&&mp.x<homeX+28&&mp.y>=homeY&&mp.y<homeY+28;
-    rect(homeX,homeY,28,28,5,homeHover?.22f:.075f,homeHover?.34f:.094f,homeHover?.46f:.117f,.96f,.445f,.464f,.502f,homeHover?.9f:.6f,1);
+    tone(homeX,homeY,28,28,th::controlRadius,homeHover?th::over(th::panel,.10f):th::panel,.96f,homeHover?.30f:th::border);
     glyph(191,homeX+5,homeY+5,18,homeHover?1.f:.86f);g_zones.push_back({homeX,homeY,28,28,191});
     g_zones.push_back({(float)g_cubeX,(float)g_cubeY,(float)g_cubeS,(float)g_cubeS,179});
     }else g_cubeS=0;
@@ -5874,68 +5920,73 @@ static void drawFrame(HDC hdc){
     }
     if(selBody>=0&&(size_t)selBody<g_bodyIds.size()&&!g_toolsOpen&&!g_cableGuide035.active){
         auto* feature=g_doc.find(g_bodyIds[(size_t)selBody]);bool transparent=feature&&resolvedAppearance(g_doc,*feature).opacity<.999;
-        float px=g_showViewCube?(float)g_cubeX+g_cubeS+24:(float)viewX+16,py=(float)viewY+12;rect(px-5,py-5,390,57,7,.075f,.079f,.085f,.92f,.383f,.4f,.432f,.65f,1);
+        float px=g_showViewCube?(float)g_cubeX+g_cubeS+24:(float)viewX+16,py=(float)viewY+12;
+        // A narrower viewport (right assistant dock) moves the strip below the cube.
+        if(px+385>(float)(viewX+viewW)-12){px=(float)viewX+16;if(g_showViewCube)py=(float)g_cubeY+g_cubeS+16;}
+        // Still too narrow (a tool dock beside the Assistant): Move goes to a second row.
+        const bool stacked=px+385>(float)(viewX+viewW)-12,movable=g_instanceIds[(size_t)selBody]!=0;const float stripW=stacked?std::max(226.f,std::min(390.f,(float)(viewX+viewW)-7-px)):390.f;
+        rect(px-5,py-5,stripW,stacked&&movable?97.f:57.f,7,.075f,.079f,.085f,.92f,.383f,.4f,.432f,.65f,1);
         button(transparent?"Opaque":"Transparent",px,py,112,560,false,transparent);button("Opacity...",px+120,py,96,561);
-        if(g_instanceIds[(size_t)selBody])button(g_componentMove.armed?"Moving":"Move component",px+224,py,151,562,false,g_componentMove.armed);
-        textOut("Appearance: all instances of this part definition",px+3,py+36,.55f,.702f,.732f,.791f);
+        if(movable)button(g_componentMove.armed?"Moving":"Move component",stacked?px:px+224,stacked?py+40:py,151,562,false,g_componentMove.armed);
+        textOut(fitText("Appearance: all instances of this part definition",.55f,stripW-14),px+3,stacked&&movable?py+76:py+36,.55f,.703f,.732f,.756f);
     }
-    if((g_componentMove.armed||g_componentMove.active)&&!g_toolsOpen){float px=g_showViewCube?(float)g_cubeX+g_cubeS+24:(float)viewX+16,py=(float)viewY+77;rect(px-5,py-5,390,58,7,.097f,.102f,.11f,.95f,1,1,1,.22f,1);
+    if((g_componentMove.armed||g_componentMove.active)&&!g_toolsOpen){float px=g_showViewCube?(float)g_cubeX+g_cubeS+24:(float)viewX+16,py=(float)viewY+77;if(px+385>(float)(viewX+viewW)-12){px=(float)viewX+16;if(g_showViewCube)py=(float)g_cubeY+g_cubeS+81;}rect(px-5,py-5,390,58,7,.097f,.102f,.11f,.95f,1,1,1,.22f,1);
         char angle[180];const auto& joint=g_componentMove.joint;
         if(joint.mate){const char* unit=joint.mode=="translate"?"mm":"deg";bool absolute=joint.type=="prismatic"||joint.type=="revolute";double position=absolute?joint.position+joint.coordinateSign*g_componentMove.delta:g_componentMove.delta;
             if(joint.limited)std::snprintf(angle,sizeof angle,"Joint %llu / %.1f %s / [%.1f, %.1f]",(unsigned long long)joint.mate,position,unit,joint.min,joint.max);
             else std::snprintf(angle,sizeof angle,"Joint %llu / %s %.1f %s",(unsigned long long)joint.mate,absolute?"position":"delta",position,unit);
-        }else std::snprintf(angle,sizeof angle,"Ready to drag a joint");textOut(angle,px+4,py+6,.72f,.784f,.816f,.843f);
-        button("Apply",px+224,py,70,563);button("Cancel",px+302,py,73,564);textOut("Drag part / release saves / Esc cancels / middle mouse orbits",px+3,py+37,.52f,.755f,.787f,.851f);
+        }else std::snprintf(angle,sizeof angle,"Ready to drag a joint");textOut(angle,px+4,py+6,.72f,.779f,.811f,.838f);
+        button("Apply",px+224,py,70,563);button("Cancel",px+302,py,73,564);textOut("Drag part / release saves / Esc cancels / middle mouse orbits",px+3,py+37,.52f,.754f,.785f,.811f);
     }
     g_gridCaptionBounds={};
     if(g_grid&&!g_allSheetsFlat&&!g_stockMode){std::string scale="Grid "+g_displayUnits.distance(g_adaptiveGrid.spacing)+" / major "+g_displayUnits.distance(g_adaptiveGrid.spacing*5.);float gx=(float)viewX+17,gy=(float)viewY+viewH-78;
         if(g_showViewCube&&gy-5<g_cubeY+g_cubeS+12){gx=(float)g_cubeX+g_cubeS+24;if(!g_compactNavigation)gy=(float)viewY+viewH-34;}
         const float width=textWidth(scale,.65f)+12;const auto bar=viewportBarLayout();const bool overlap=bar.visible&&gx-6<bar.x+bar.width&&gx-6+width>bar.x&&gy-5<bar.y+bar.height&&gy+19>bar.y;
-        if(!overlap){g_gridCaptionBounds={(LONG)std::floor(gx-6),(LONG)std::floor(gy-5),(LONG)std::ceil(gx-6+width),(LONG)std::ceil(gy+19)};rect(gx-6,gy-5,width,24,5,.083f,.086f,.094f,.85f,0,0,0,0,0);textOut(scale,gx,gy,.65f,.784f,.816f,.843f);}}
+        if(!overlap){g_gridCaptionBounds={(LONG)std::floor(gx-6),(LONG)std::floor(gy-5),(LONG)std::ceil(gx-6+width),(LONG)std::ceil(gy+19)};rect(gx-6,gy-5,width,24,5,.083f,.086f,.094f,.85f,0,0,0,0,0);textOut(scale,gx,gy,.65f,.779f,.811f,.838f);}}
     }else{g_cubeS=0;g_cubeHover={};g_compassBounds={};g_gridCaptionBounds={};}
     panel(0,H-32,W,32);
     textOut(g_status.substr(0,(size_t)std::max(28,(winW-430)/7)),20,H-23,.70f,g_error?.96f:.62f,g_error?.56f:.73f,g_error?.40f:.81f);
-    textOut(g_displayUnits.length,W-164,H-23,.73f,.715f,.746f,.807f);iconButton(22,"Show / hide grid",W-118,H-29,24);iconButton(461,"Navigation controls",W-81,H-29,24);iconButton(460,"Full screen",W-44,H-29,24);
+    textOut(g_displayUnits.length,W-164,H-23,.73f,.715f,.744f,.768f);iconButton(22,"Show / hide grid",W-118,H-29,24);iconButton(461,"Navigation controls",W-81,H-29,24);iconButton(460,"Full screen",W-44,H-29,24);
     if(g_toolsOpen){
         ribbonHint.clear();auto bounds=toolGalleryBounds();float x=(float)bounds.left,y=(float)bounds.top,width=(float)(bounds.right-bounds.left),height=(float)(bounds.bottom-bounds.top);
         std::vector<float> visibleText;visibleText.reserve(g_textVerts.size());
         for(size_t offset=0;offset+41<g_textVerts.size();offset+=42){float minX=1e9f,minY=1e9f,maxX=-1e9f,maxY=-1e9f;for(int v=0;v<6;++v){float px=g_textVerts[offset+(size_t)v*7],py=g_textVerts[offset+(size_t)v*7+1];minX=std::min(minX,px);maxX=std::max(maxX,px);minY=std::min(minY,py);maxY=std::max(maxY,py);}if(maxX<x||minX>x+width||maxY<y||minY>y+height)visibleText.insert(visibleText.end(),g_textVerts.begin()+offset,g_textVerts.begin()+offset+42);}
         g_textVerts.swap(visibleText);
         g_zones.erase(std::remove_if(g_zones.begin(),g_zones.end(),[&](const Zone& zone){return zone.x<x+width&&zone.x+zone.w>x&&zone.y<y+height&&zone.y+zone.h>y;}),g_zones.end());
-        rect(x,y,width,height,10,.058f,.061f,.066f,.99f,.425f,.443f,.479f,.97f,1.5f);textOut("ALL TOOLS",x+17,y+15,.90f,.784f,.816f,.843f);button("Close",x+width-82,y+8,67,480);textOut("Browse categories or search every tool",x+213,y+18,.63f,.784f,.816f,.843f);
-        rect(x+208,y+41,width-225,38,5,.063f,.066f,.072f,1,.448f,.467f,.505f,.70f,1);textOut(g_toolFilter.empty()?"Search tools, operations, evidence...":g_toolFilter,x+220,y+51,.67f,.784f,.816f,.843f);
-        button("Clear",x+width-82,y+45,62,483);textOut("CATEGORIES",x+15,y+56,.58f,.613f,.639f,.691f);
-        auto categoryRow=[&](const std::string& title,int category,float rowY){bool selected=g_toolCategory==category;if(selected)rect(x+9,rowY-2,188,21,3,.233f,.243f,.263f,1,0,0,0,0,0);textOut(title.substr(0,30),x+15,rowY,.58f,selected?.89f:.63f,selected?.98f:.77f,selected?1.f:.85f);g_zones.push_back({x+9,rowY-2,188,21,40001+category});};
+        rect(x,y,width,height,10,.058f,.061f,.066f,.99f,.425f,.443f,.479f,.97f,1.5f);textOut("ALL TOOLS",x+17,y+15,.90f,.779f,.811f,.838f);button("Close",x+width-82,y+8,67,480);textOut("Browse categories or search every tool",x+213,y+18,.63f,.779f,.811f,.838f);
+        rect(x+208,y+41,width-225,38,5,.063f,.066f,.072f,1,.448f,.467f,.505f,.70f,1);textOut(g_toolFilter.empty()?"Search tools, operations, evidence...":g_toolFilter,x+220,y+51,.67f,.779f,.811f,.838f);
+        button("Clear",x+width-82,y+45,62,483);textOut("CATEGORIES",x+15,y+56,.58f,.612f,.637f,.658f);
+        auto categoryRow=[&](const std::string& title,int category,float rowY){bool selected=g_toolCategory==category;if(selected)rect(x+9,rowY-2,188,21,3,.232f,.242f,.262f,1,0,0,0,0,0);textOut(title.substr(0,30),x+15,rowY,.58f,selected?.89f:.63f,selected?.98f:.77f,selected?1.f:.85f);g_zones.push_back({x+9,rowY-2,188,21,40001+category});};
         const auto& categories=studioCommandGroups();int categoryCount=(int)categories.size()+2,categoryPage=std::max(1,(int)(height-132)/22);g_toolCategoryScroll=std::clamp(g_toolCategoryScroll,0,std::max(0,categoryCount-categoryPage));
         for(int row=0;row<categoryPage&&g_toolCategoryScroll+row<categoryCount;++row){int nav=g_toolCategoryScroll+row;categoryRow(nav==0?"All tools":nav==categoryCount-1?"Advanced CAD API":categories[(size_t)nav-1].title,nav-1,y+88+row*22);}
-        textOut(std::to_string(g_toolCategoryScroll+1)+"-"+std::to_string(std::min(categoryCount,g_toolCategoryScroll+categoryPage))+" / "+std::to_string(categoryCount),x+15,y+73,.47f,.634f,.661f,.715f);
+        textOut(std::to_string(g_toolCategoryScroll+1)+"-"+std::to_string(std::min(categoryCount,g_toolCategoryScroll+categoryPage))+" / "+std::to_string(categoryCount),x+15,y+73,.47f,.633f,.659f,.681f);
         auto visible=visibleStudioTools();int page=std::max(1,(int)(height-125)/38);g_toolScroll=std::clamp(g_toolScroll,0,std::max(0,(int)visible.size()-page));
         for(int row=0;row<page&&g_toolScroll+row<(int)visible.size();++row){size_t index=visible[(size_t)(g_toolScroll+row)];const auto& entry=studioToolEntries()[index];float rowY=y+91+row*38;bool hover=mp.x>=x+211&&mp.x<x+width-14&&mp.y>=rowY-3&&mp.y<rowY+32;
-            rect(x+208,rowY-3,width-222,34,4,hover?.13f:.068f,hover?.25f:.108f,hover?.32f:.137f,1,0,0,0,0,0);glyph(entry.action>=41000&&entry.action<42000?457:entry.action,x+217,rowY+1,25,.78f);size_t chars=(size_t)std::max(15.f,(width-280)/6.5f);textOut(entry.title.substr(0,chars),x+252,rowY,.69f,.784f,.816f,.843f);std::string description=entry.description;for(char& ch:description)if(ch=='\r'||ch=='\n')ch=' ';textOut(description.substr(0,(size_t)std::max(15.f,(width-280)/4.7f)),x+252,rowY+17,.49f,.655f,.683f,.739f);g_zones.push_back({x+208,rowY-3,width-222,34,42000+(int)index});
+            tone(x+208,rowY-3,width-222,34,th::controlRadius,hover?th::over(th::raised,.08f):th::field);glyph(entry.action>=41000&&entry.action<42000?457:entry.action,x+217,rowY+1,25,.78f);size_t chars=(size_t)std::max(15.f,(width-280)/6.5f);textOut(entry.title.substr(0,chars),x+252,rowY,.69f,.779f,.811f,.838f);std::string description=entry.description;for(char& ch:description)if(ch=='\r'||ch=='\n')ch=' ';textOut(description.substr(0,(size_t)std::max(15.f,(width-280)/4.7f)),x+252,rowY+17,.49f,.654f,.681f,.704f);g_zones.push_back({x+208,rowY-3,width-222,34,42000+(int)index});
         }
-        std::string footer=std::to_string(visible.size())+" tools / "+std::to_string(g_toolScroll+1)+"-"+std::to_string(std::min((int)visible.size(),g_toolScroll+page))+" / scroll to browse";textOut(visible.empty()?"No matches. Clear search to browse all categories.":footer,x+213,y+height-23,.57f,.784f,.816f,.843f);button("Up",x+width-148,y+height-34,56,481);button("Down",x+width-82,y+height-34,67,482);if(categoryCount>categoryPage){button("Up",x+15,y+height-34,76,486);button("Down",x+99,y+height-34,88,487);}g_zones.push_back({x,y,width,height,0});
+        std::string footer=std::to_string(visible.size())+" tools / "+std::to_string(g_toolScroll+1)+"-"+std::to_string(std::min((int)visible.size(),g_toolScroll+page))+" / scroll to browse";textOut(visible.empty()?"No matches. Clear search to browse all categories.":footer,x+213,y+height-23,.57f,.779f,.811f,.838f);button("Up",x+width-148,y+height-34,56,481);button("Down",x+width-82,y+height-34,67,482);if(categoryCount>categoryPage){button("Up",x+15,y+height-34,76,486);button("Down",x+99,y+height-34,88,487);}g_zones.push_back({x,y,width,height,0});
     }
-    if(g_sketchEditing.active){float sx=(float)viewX+(g_showViewCube?g_cubeS+30:20),sy=(float)viewY+60,sw=std::min(570.f,(float)(viewX+viewW)-sx-18);rect(sx,sy,sw,57,8,.06f,.062f,.067f,.93f,.18f,.8f,.64f,.6f,1);textOut(fitText("EDIT SKETCH / "+g_sketchEditing.name,.64f,sw-24),sx+12,sy+8,.64f,.65f,.97f,.87f);textOut(fitText(!sketchEditCurrent()?"Stale edit / Exit and select current sketch":g_sketchEditing.error.empty()?"Drag anchor or curve / Tab coordinates / Exit sketch or Esc":g_sketchEditing.error,.55f,sw-24),sx+12,sy+34,.55f,.784f,.816f,.843f);}
+    if(g_sketchEditing.active){float sx=(float)viewX+(g_showViewCube?g_cubeS+30:20),sy=(float)viewY+60,sw=std::min(570.f,(float)(viewX+viewW)-sx-18);rect(sx,sy,sw,57,8,.06f,.062f,.067f,.93f,.18f,.8f,.64f,.6f,1);textOut(fitText("EDIT SKETCH / "+g_sketchEditing.name,.64f,sw-24),sx+12,sy+8,.64f,.65f,.97f,.87f);textOut(fitText(!sketchEditCurrent()?"Stale edit / Exit and select current sketch":g_sketchEditing.error.empty()?"Drag anchor or curve / Tab coordinates / Exit sketch or Esc":g_sketchEditing.error,.55f,sw-24),sx+12,sy+34,.55f,.779f,.811f,.838f);}
     else if(g_sketchDrawing.active){
         const auto& drawing=g_sketchDrawing;float sx=(float)viewX+(g_showViewCube?g_cubeS+30:20),sy=(float)viewY+60,sw=std::min(570.f,(float)(viewX+viewW)-sx-18);
         // Viewport readout is deliberately passive. Interactive controls live
         // in the Sketch ribbon, so authored points never select another tool.
         rect(sx+3,sy+4,sw,57,8,.005f,.012f,.022f,.28f,0,0,0,0,0);rect(sx,sy,sw,57,8,.06f,.062f,.067f,.93f,.482f,.502f,.543f,.6f,1);
-        textOut(fitText((drawing.stale?"STALE DRAFT / ":"SKETCH PREVIEW / ")+drawing.name+" / "+sketchDrawingToolName(drawing.tool)+" / "+drawing.plane,.64f,sw-24),sx+12,sy+8,.64f,.784f,.816f,.843f);
+        textOut(fitText((drawing.stale?"STALE DRAFT / ":"SKETCH PREVIEW / ")+drawing.name+" / "+sketchDrawingToolName(drawing.tool)+" / "+drawing.plane,.64f,sw-24),sx+12,sy+8,.64f,.779f,.811f,.838f);
         std::string readout=drawing.stale?"Drawing changed / Esc and restart":drawing.anchors.empty()?"Click first anchor / MMB orbit / wheel zoom":"Click next anchor / Dimensions in ribbon or Tab / Esc cancel";
         if(!drawing.anchors.empty()&&drawing.tool!=4){auto compact=[](double value){char text[40];std::snprintf(text,sizeof text,"%.3f",value);return std::string(text);};readout=drawing.tool==2?"W "+compact(std::abs(drawing.pointer.point.x-drawing.anchors.front().point.x))+" / H "+compact(std::abs(drawing.pointer.point.y-drawing.anchors.front().point.y)):std::string(drawing.tool==3?"R ":"L ")+compact(drawingDistance(drawing.anchors.back().point,drawing.pointer.point));if(!drawing.dimension.empty())readout=std::string(drawing.tool==3?"R ":drawing.tool==2?"W ":"L ")+drawing.dimension+(drawing.secondDimension.empty()?"":" / H "+drawing.secondDimension);readout+=" mm / Tab to edit";}
-        if(!drawing.previewError.empty())readout=drawing.previewError;else if(!drawing.pointer.label.empty())readout+=" / "+drawing.pointer.label;textOut(fitText(readout,.55f,sw-24),sx+12,sy+34,.55f,.784f,.816f,.843f);
+        if(!drawing.previewError.empty())readout=drawing.previewError;else if(!drawing.pointer.label.empty())readout+=" / "+drawing.pointer.label;textOut(fitText(readout,.55f,sw-24),sx+12,sy+34,.55f,.779f,.811f,.838f);
     }else if(!g_draftViews.empty()){
-        float sx=(float)viewX+(g_showViewCube?g_cubeS+30:20),sy=(float)viewY+76;rect(sx,sy,420,50,7,.06f,.062f,.067f,.95f,1,1,1,.22f,1);textOut("AGENT SKETCH DRAFT / uncommitted commands",sx+12,sy+8,.64f,.784f,.816f,.843f);textOut(fitText(g_liveStepLabel,.52f,392),sx+12,sy+30,.52f,.784f,.816f,.843f);
+        float sx=(float)viewX+(g_showViewCube?g_cubeS+30:20),sy=(float)viewY+76,sw=std::min(420.f,(float)(viewX+viewW)-sx-12);rect(sx,sy,sw,50,7,.06f,.062f,.067f,.95f,1,1,1,.22f,1);textOut(fitText("AGENT SKETCH DRAFT / uncommitted commands",.64f,sw-24),sx+12,sy+8,.64f,.827f,.861f,.89f);textOut(fitText(g_liveStepLabel,.52f,sw-28),sx+12,sy+30,.52f,.705f,.734f,.758f);
     }
-    if(g_cableGuide035.active){float x=(float)viewX+20,y=(float)viewY+20,w=std::min(650.f,(float)viewW-40);rect(x,y,w,64,7,.06f,.062f,.067f,.96f,1,1,1,.22f,1);textOut("Guide path / authored anchor cage",x+12,y+9,.66f,.65f,.97f,.90f);textOut(fitText(!g_cableGuide035.error.empty()?g_cableGuide035.error:g_cableGuide035.pending?"Exact sweep pending / release saves latest valid result / Esc cancels":"Drag endpoint or waypoint in view plane / orbit to change plane / release saves",.52f,w-24),x+12,y+36,.52f,.784f,.816f,.843f);}
-    if(g_directAuthoring.active){auto& edit=g_directAuthoring;float sx=(float)viewX+(g_showViewCube?g_cubeS+30:20),sy=(float)viewY+66,sw=std::min(620.f,(float)(viewX+viewW)-sx-18);rect(sx,sy,sw,edit.mode==5?110.f:74.f,8,.06f,.062f,.067f,.96f,1,1,1,.22f,1);textOut(fitText(directModeName(edit.mode),.69f,sw-24),sx+12,sy+8,.69f,.65f,.97f,.90f);std::string value=!directCurrent()?"Stale preview / cancel and select current geometry":!edit.error.empty()?edit.error:(edit.feature||edit.mode==5)?edit.mode==5?(edit.limitPicking?"Click the exact planar limit face":(edit.limitFeature?"Up to "+edit.limitFace+" / ":edit.symmetric?"Symmetric total depth / ":edit.direction<0?"Reverse / ":"")+directDisplayDistance(edit.amount)+" / Tab depth / Apply saves"):directDisplayDistance(edit.amount)+" / Tab expressions / Apply saves / Esc cancels":"Drag a compatible source face or mesh element";textOut(fitText(value,.54f,sw-24),sx+12,sy+32,.54f,.784f,.816f,.843f);if(edit.feature||edit.mode==5){button("Value",sx+12,sy+50,78,655);button("Apply",sx+100,sy+50,78,656,true);button("Cancel",sx+188,sy+50,78,657);if(edit.mode==5){button("Reverse",sx+12,sy+80,88,689,false,edit.direction<0);button("Symmetric",sx+108,sy+80,100,690,false,edit.symmetric);button("Up to face",sx+216,sy+80,100,691,false,edit.limitPicking||edit.limitFeature);button("Distance",sx+324,sy+80,90,692,false,!edit.limitFeature&&!edit.limitPicking);}}}
+    if(g_cableGuide035.active){float x=(float)viewX+20,y=(float)viewY+20,w=std::min(650.f,(float)viewW-40);rect(x,y,w,64,7,.06f,.062f,.067f,.96f,1,1,1,.22f,1);textOut("Guide path / authored anchor cage",x+12,y+9,.66f,.65f,.97f,.90f);textOut(fitText(!g_cableGuide035.error.empty()?g_cableGuide035.error:g_cableGuide035.pending?"Exact sweep pending / release saves latest valid result / Esc cancels":"Drag endpoint or waypoint in view plane / orbit to change plane / release saves",.52f,w-24),x+12,y+36,.52f,.779f,.811f,.838f);}
+    if(g_directAuthoring.active){auto& edit=g_directAuthoring;float sx=(float)viewX+(g_showViewCube?g_cubeS+30:20),sy=(float)viewY+66,sw=std::min(620.f,(float)(viewX+viewW)-sx-18);rect(sx,sy,sw,edit.mode==5?110.f:74.f,8,.06f,.062f,.067f,.96f,1,1,1,.22f,1);textOut(fitText(directModeName(edit.mode),.69f,sw-24),sx+12,sy+8,.69f,.65f,.97f,.90f);std::string value=!directCurrent()?"Stale preview / cancel and select current geometry":!edit.error.empty()?edit.error:(edit.feature||edit.mode==5)?edit.mode==5?(edit.limitPicking?"Click the exact planar limit face":(edit.limitFeature?"Up to "+edit.limitFace+" / ":edit.symmetric?"Symmetric total depth / ":edit.direction<0?"Reverse / ":"")+directDisplayDistance(edit.amount)+" / Tab depth / Apply saves"):directDisplayDistance(edit.amount)+" / Tab expressions / Apply saves / Esc cancels":"Drag a compatible source face or mesh element";textOut(fitText(value,.54f,sw-24),sx+12,sy+32,.54f,.779f,.811f,.838f);if(edit.feature||edit.mode==5){button("Value",sx+12,sy+50,78,655);button("Apply",sx+100,sy+50,78,656,true);button("Cancel",sx+188,sy+50,78,657);if(edit.mode==5){button("Reverse",sx+12,sy+80,88,689,false,edit.direction<0);button("Symmetric",sx+108,sy+80,100,690,false,edit.symmetric);button("Up to face",sx+216,sy+80,100,691,false,edit.limitPicking||edit.limitFeature);button("Distance",sx+324,sy+80,90,692,false,!edit.limitFeature&&!edit.limitPicking);}}}
     drawExtrusionHandle(rect,button);
     if(!measurementActive()&&!g_directAuthoring.active&&!g_sketchEditing.active&&!g_sketchDrawing.active)drawSolidDimensions(rect,button);
     drawMeasurementOverlay(rect,button);
     drawSection062(rect,button);
     drawPrintPlates062(rect,button);
-    g_viewSketchDimension={};if(!measurementActive()&&!g_directAuthoring.active&&!g_sketchDrawing.active&&g_showSketches){g_viewSketchDimension=selectedSketchDimension();if(g_viewSketchDimension.valid){float px,py;if(projectScreen(g_viewSketchDimension.position,px,py)){auto& dimension=g_viewSketchDimension;float width=std::min(360.f,textWidth(dimension.text,.66f)+24),x=std::clamp(px+18,(float)viewX+8,(float)(viewX+viewW)-width-8),y=std::clamp(py-40,(float)viewY+185,(float)(viewY+viewH)-58);avoidExtrusionHandle(x,y,width,52);rect(x+2,y+4,width,52,7,0,0,0,.20f,0,0,0,0,0);rect(x,y,width,52,7,.091f,.094f,.102f,.97f,1,1,1,.22f,1);textOut(dimension.text,x+11,y+8,.66f,.784f,.816f,.843f);textOut(dimension.action==577?"Click to edit linked source parameters":dimension.action==89?"Click to edit this native constraint":dimension.action==591?"Click to edit driving dimension":"Click to edit authored coordinates",x+11,y+31,.49f,.784f,.816f,.843f);g_zones.push_back({x,y,width,52,584});}}}
+    g_viewSketchDimension={};if(!measurementActive()&&!g_directAuthoring.active&&!g_sketchDrawing.active&&g_showSketches){g_viewSketchDimension=selectedSketchDimension();if(g_viewSketchDimension.valid){float px,py;if(projectScreen(g_viewSketchDimension.position,px,py)){auto& dimension=g_viewSketchDimension;float width=std::min(360.f,textWidth(dimension.text,.66f)+24),x=std::clamp(px+18,(float)viewX+8,(float)(viewX+viewW)-width-8),y=std::clamp(py-40,(float)viewY+185,(float)(viewY+viewH)-58);avoidExtrusionHandle(x,y,width,52);rect(x+2,y+4,width,52,7,0,0,0,.20f,0,0,0,0,0);rect(x,y,width,52,7,.091f,.094f,.102f,.97f,1,1,1,.22f,1);textOut(dimension.text,x+11,y+8,.66f,.779f,.811f,.838f);textOut(dimension.action==577?"Click to edit linked source parameters":dimension.action==89?"Click to edit this native constraint":dimension.action==591?"Click to edit driving dimension":"Click to edit authored coordinates",x+11,y+31,.49f,.779f,.811f,.838f);g_zones.push_back({x,y,width,52,584});}}}
     if(g_error&&!g_lastFailureId.empty())button("Inspect failed operation",(float)(viewX+viewW)-210,(float)viewY+66,190,580);
     drawViewportDock(rect,glyph,mp);
     drawBakedMotionsPanel(rect,button,mp,ribbonHint);
@@ -5945,7 +5996,7 @@ static void drawFrame(HDC hdc){
     drawParametricHud(rect,mp,ribbonHint);
     drawExplodedViewsPanel(rect,button,mp,ribbonHint);
     g_lastRibbonHint=ribbonHint;
-    if(!ribbonHint.empty()){float width=textWidth(ribbonHint,.60f)+22,x=std::clamp((float)mp.x+12.f,10.f,W-width-10.f),y=(float)mp.y+20;rect(x,y,width,29,6,.05,.052,.056,.98,.45,.469,.507,.95,1);textOut(ribbonHint,x+11,y+7,.60f,.784f,.816f,.843f);}
+    if(!ribbonHint.empty()){float width=textWidth(ribbonHint,.60f)+22,x=std::clamp((float)mp.x+12.f,10.f,W-width-10.f),y=(float)mp.y+20;rect(x,y,width,29,6,.05,.052,.056,.98,.45,.469,.507,.95,1);textOut(ribbonHint,x+11,y+7,.60f,.779f,.811f,.838f);}
     if(g_drawingViewport.active){
         // Keep the shared explorer/ribbon, replace viewport labels with the sheet.
         std::vector<float> text;for(size_t at=0;at+20<g_textVerts.size();at+=21){float x=(g_textVerts[at]+g_textVerts[at+7]+g_textVerts[at+14])/3,y=(g_textVerts[at+1]+g_textVerts[at+8]+g_textVerts[at+15])/3;if(x<viewX||x>=viewX+viewW||y<viewY||y>=viewY+viewH)text.insert(text.end(),g_textVerts.begin()+at,g_textVerts.begin()+at+21);}g_textVerts.swap(text);
@@ -6037,14 +6088,14 @@ static void drawBusyFrame(HDC hdc){
     auto elapsed=std::chrono::duration<double>(std::chrono::steady_clock::now()-g_busyStarted).count();
     textBegin();drawAgentPresence030(false);
     if(g_teamStarted){static auto nextTeamFrame=std::chrono::steady_clock::time_point{};static AgentTeamSnapshot liveTeam;const auto now=std::chrono::steady_clock::now();if(now>=nextTeamFrame){liveTeam=g_agentTeam.snapshot(false,std::numeric_limits<u64>::max());nextTeamFrame=now+std::chrono::milliseconds(80);}float ty=(float)viewY+16;for(const auto& role:liveTeam.roles){const std::string line=role.id+" / "+agentTeamStateName(role.state)+" / "+role.status;textOut(fitText(line,.64f,std::min(720,viewW-32)),viewX+16,ty,.64f,.65f,.90f,1.f);ty+=19;}}
-    textOut(g_busyLabel,x+43,y+21,.95f,.784f,.816f,.843f);
+    textOut(g_busyLabel,x+43,y+21,.95f,.779f,.811f,.838f);
     BusyFeatureProgress progress;{std::lock_guard lock(g_busyProgressMutex);progress=g_busyFeatureProgress;}
     char duration[128];if(progress.total)std::snprintf(duration,sizeof duration,"Feature %zu/%zu / #%llu / %s / %.1f s",progress.index+1,progress.total,(unsigned long long)progress.id,progress.completed?"ready":progress.reused?"cached":"evaluating",elapsed);
     else std::snprintf(duration,sizeof duration,"Tool processing / %.1f s elapsed",elapsed);
-    textOut(duration,x+43,y+53,.66f,.679f,.708f,.766f);
-    textOut(fitText(g_activeToolRole.empty()?"Committed scene retained":g_activeToolRole+" / "+g_activeToolName,.65f,g_preparingEdit?width-160:width-48),x+24,y+94,.65f,.784f,.816f,.843f);
+    textOut(duration,x+43,y+53,.66f,.678f,.706f,.729f);
+    textOut(fitText(g_activeToolRole.empty()?"Committed scene retained":g_activeToolRole+" / "+g_activeToolName,.65f,g_preparingEdit?width-160:width-48),x+24,y+94,.65f,.779f,.811f,.838f);
     textOut(g_preparingEdit?"Orbit / zoom / select while the edit prepares":"Live sketch drafts are uncommitted; the step publishes atomically",x+24,y+119,.56f,.58f,.68f,.79f);
-    if(g_preparingEdit){g_authoringCancelRect={(LONG)(x+width-122),(LONG)(y+82),(LONG)(x+width-20),(LONG)(y+112)};box(x+width-122,y+82,102,30,5,.20f,.29f,.39f,1);textOut("Cancel (Esc)",x+width-112,y+91,.58f,.784f,.816f,.843f);}
+    if(g_preparingEdit){g_authoringCancelRect={(LONG)(x+width-122),(LONG)(y+82),(LONG)(x+width-20),(LONG)(y+112)};box(x+width-122,y+82,102,30,5,.20f,.29f,.39f,1);textOut("Cancel (Esc)",x+width-112,y+91,.58f,.779f,.811f,.838f);}
     float phase=(float)std::fmod(elapsed*1.6,1.);
     box(x+24,y+153,width-48,4,2,.20f,.28f,.36f,1);
     box(x+24+phase*(width-138),y+153,90,4,2,.42f,.79f,.98f,1);
@@ -6160,7 +6211,7 @@ static void drawContextEntry(HDC dc,RECT bounds,const ContextEntry& entry,bool s
     else if(entry.action==394||entry.action==397){Ellipse(dc,x-7,y-7,x+8,y+8);if(entry.action==394)line(-9,7,9,7);else Ellipse(dc,x-3,y-3,x+4,y+4);}
     else{Rectangle(dc,x-7,y-6,x+7,y+7);line(-7,-6,-2,-10);line(-2,-10,11,-10);line(11,-10,7,-6);line(11,-10,11,3);line(11,3,7,7);}
     SelectObject(dc,oldBrush);SelectObject(dc,oldPen);DeleteObject(pen);
-    HFONT font=CreateFontW(-14,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Segoe UI");auto oldFont=SelectObject(dc,font);SetTextColor(dc,entry.enabled?RGB(226,236,255):RGB(124,130,140));RECT title{left+49,top+4,bounds.right-15,bounds.bottom};DrawTextA(dc,entry.title,-1,&title,DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS);
+    HFONT font=CreateFontW(-14,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Segoe UI");auto oldFont=SelectObject(dc,font);SetTextColor(dc,entry.enabled?RGB(226,235,243):RGB(124,130,140));RECT title{left+49,top+4,bounds.right-15,bounds.bottom};DrawTextA(dc,entry.title,-1,&title,DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS);
     SelectObject(dc,oldFont);DeleteObject(font);
 }
 static HMENU createContextPopup(std::vector<ContextEntry>& entries){
@@ -6251,6 +6302,8 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
         case WM_ARK_TOOL:{auto* request=(UiToolRequest*)lp;if(request->tool=="doc_apply"){request->objectEpoch=g_objectDocumentEpoch;request->queuedEpoch=true;if(!request->args.find("expected_revision"))request->args.set("expected_revision",arkjson::Value::makeNum((double)g_session.revision));}g_toolQueue.emplace_back(request);return 0;}
         case WM_ARK_EXACT:return 0; // wake only; deliveries drain from the main loop
         case WM_ARK_CHAT:{std::unique_ptr<UiChatEvent> event((UiChatEvent*)lp);
+            // Provider-returned readable reasoning: shown with the reply, never logged as a message.
+            if(event->reasoning){if(event->epoch==g_documentEpoch)appendAssistantReasoning(event->text);return 0;}
             if(event->final){g_chatBusy=false;if(event->epoch==g_documentEpoch){g_assistantResponseFinished=true;g_assistantResponseError=event->error||*g_assistantCancel;}if(event->epoch==g_documentEpoch&&event->history.t==arkjson::Value::Arr)g_conversation=event->history;else if(event->epoch!=g_documentEpoch)g_conversation=arkjson::Value::makeArr();}
             if(event->epoch==g_documentEpoch){
                 if(event->status||(!event->final&&!event->text.empty()))g_assistantStatus=event->text;
@@ -6258,7 +6311,8 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
                 if(event->hasPerformance)g_assistantPerformanceRun=event->performance;
                 if(event->hasUsage){g_assistantUsageRun=event->usage;recordAssistantUsageSnapshot(event->usage);}
                 if(event->final)g_assistantUsageRunCounted=true;
-                if(!event->text.empty()&&(!event->status||event->retry)){g_chatLog.push_back({event->error?"Error":event->final?"ARK":"Action",event->text});g_chatScroll=0;}
+                if(!event->text.empty()&&(!event->status||event->retry)){g_chatLog.push_back({event->error?"Error":event->final?"ARK":"Action",event->text});g_chatScroll=0;
+                    if(event->final)attachChatReasoning(g_chatLog.size()-1,g_assistantReasoningRun,chatReasoningHidden);}
             }
             if(event->final&&!g_deferredAssistantSteering.empty()){
                 auto queued=std::move(g_deferredAssistantSteering.front());g_deferredAssistantSteering.pop_front();
@@ -6294,7 +6348,8 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
             return 0;}
         case WM_COMMAND:if(LOWORD(wp)==500){interactiveAction(74);return 0;}if(LOWORD(wp)==497&&HIWORD(wp)==EN_CHANGE){int length=GetWindowTextLengthA(g_toolSearch);std::string filter((size_t)length+1,' ');GetWindowTextA(g_toolSearch,filter.data(),length+1);filter.resize((size_t)length);g_toolFilter=std::move(filter);g_toolScroll=0;return 0;}break;
         case WM_DROPFILES:try{droppedStudioFiles((HDROP)wp);}catch(const std::exception& error){g_error=true;g_status=error.what();}return 0;
-        case WM_CTLCOLOREDIT:if((HWND)lp==g_chatInput||(HWND)lp==g_commandSearch||(HWND)lp==g_toolSearch||isAssistantImageDimensionEdit((HWND)lp)){SetTextColor((HDC)wp,RGB(219,226,238));SetBkColor((HDC)wp,RGB(14,17,20));return (LRESULT)chatBrush;}break;
+        case WM_CTLCOLOREDIT:if((HWND)lp==g_chatInput||isAssistantImageDimensionEdit((HWND)lp)){static HBRUSH composer=CreateSolidBrush(ui_theme::rgb(ui_theme::field));SetTextColor((HDC)wp,ui_theme::rgb(ui_theme::text));SetBkColor((HDC)wp,ui_theme::rgb(ui_theme::field));return (LRESULT)composer;}
+            if((HWND)lp==g_chatInput||(HWND)lp==g_commandSearch||(HWND)lp==g_toolSearch||isAssistantImageDimensionEdit((HWND)lp)){SetTextColor((HDC)wp,RGB(219,226,238));SetBkColor((HDC)wp,RGB(14,17,20));return (LRESULT)chatBrush;}break;
         case WM_ERASEBKGND:return 1; // OpenGL owns the parent surface; erase only the native EDIT child.
         case WM_GETMINMAXINFO:((MINMAXINFO*)lp)->ptMinTrackSize={1180,840};return 0;
         case WM_DPICHANGED:{const RECT* bounds=reinterpret_cast<const RECT*>(lp);if(bounds)SetWindowPos(hw,nullptr,bounds->left,bounds->top,bounds->right-bounds->left,bounds->bottom-bounds->top,SWP_NOZORDER|SWP_NOACTIVATE);layout();return 0;}
@@ -6307,7 +6362,7 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
             {POINT p{GET_X_LPARAM(lp),GET_Y_LPARAM(lp)};ScreenToClient(hw,&p);
             if(bakedMotionsWheel(p,GET_WHEEL_DELTA_WPARAM(wp))||parametricHudWheel(p,GET_WHEEL_DELTA_WPARAM(wp)))return 0;
             if(g_toolsOpen){auto bounds=toolGalleryBounds();if(PtInRect(&bounds,p)){int& scroll=p.x<bounds.left+205?g_toolCategoryScroll:g_toolScroll;scroll=std::max(0,scroll+(GET_WHEEL_DELTA_WPARAM(wp)>0?-3:3));return 0;}}
-            if(g_assistantDockOpen&&p.x>=viewX&&p.x<viewX+viewW&&p.y>=winH-32-assistantDockHeight()){g_chatScroll=std::max(0,g_chatScroll+(GET_WHEEL_DELTA_WPARAM(wp)>0?2:-2));return 0;}
+            if(g_assistantDockOpen&&p.x>=winW-assistantDockWidth()&&p.y>=viewY&&p.y<winH-32)return 0; // never zoom the model from the dock
             if(g_inspectorOpen&&p.x<viewX&&p.y>=viewY+42){g_inspectorScroll=std::max(0,g_inspectorScroll+(GET_WHEEL_DELTA_WPARAM(wp)>0?-48:48));return 0;}
             if(g_sidebarTab==1&&p.x<viewX&&p.y>=viewY+42){g_layersScroll=std::max(0,g_layersScroll+(GET_WHEEL_DELTA_WPARAM(wp)>0?-2:2));return 0;}
             if(g_sidebarTab==0&&PtInRect(&g_treeViewport,p)){g_treeScroll=std::clamp(g_treeScroll+(GET_WHEEL_DELTA_WPARAM(wp)>0?-3:3),0,g_treeMaxScroll);return 0;}}
@@ -6321,7 +6376,7 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
             for(auto&z:g_zones)
                 if((float)p.x>=z.x&&(float)p.x<=z.x+z.w&&(float)p.y>=z.y&&(float)p.y<=z.y+z.h)
                     { if(z.id==688){try{if(!g_directAuthoring.active)beginDirectHandle();g_directAuthoring.handleStart=true;g_pressWasButton=false;}catch(const std::exception& error){g_error=true;g_status=error.what();g_pressWasButton=true;}}else if(z.id==179){g_cubePress=cubeHitAt(p.x,p.y).hit;g_pressWasButton=!g_cubePress;}
-                        else{g_pressWasButton=true;if(z.id==49209){g_inertial056.scrubbing=true;scrubInertial056((double)(p.x-z.x)/z.w);}else if(z.id==45008){g_bakedMotions.scrubbing=true;scrubBakedMotion((double)(p.x-z.x)/z.w);}else if(explodedViewPress(z.id,(double)(p.x-z.x)/z.w)){}else if(z.id==50){g_foldScrubbing=true;g_foldPlaying=false;g_foldProgress=clamp((double)(p.x-z.x)/z.w,0.,1.);}
+                        else{g_pressWasButton=true;if(z.id==44303)g_chatDockResizing=true;else if(z.id==49209){g_inertial056.scrubbing=true;scrubInertial056((double)(p.x-z.x)/z.w);}else if(z.id==45008){g_bakedMotions.scrubbing=true;scrubBakedMotion((double)(p.x-z.x)/z.w);}else if(explodedViewPress(z.id,(double)(p.x-z.x)/z.w)){}else if(z.id==50){g_foldScrubbing=true;g_foldPlaying=false;g_foldProgress=clamp((double)(p.x-z.x)/z.w,0.,1.);}
                         else if(z.id==53){g_sheetScrubbing=true;g_sheetPlayingId=0;if(auto* sheet=selectedSheet())try{sheetPreviewSet(sheet->id,(double)(p.x-z.x)/z.w);}catch(const std::exception& error){g_error=true;g_status=error.what();}}
                         else if(z.id>=380&&z.id<=382){g_suspScrub=z.id-380;g_suspSpinPlaying=false;try{setSuspensionControl(g_suspScrub,(p.x-z.x)/z.w);}catch(const std::exception& error){g_error=true;g_status=error.what();}}} break; }
             g_dragged=false;if(!g_pressWasButton&&!g_cubePress&&g_cableGuide035.active){if(beginCableGuideDrag035(p.x,p.y)){SetCapture(hw);return 0;}}if(!g_pressWasButton&&!g_cubePress&&g_directAuthoring.active){try{beginDirectAuthoringDrag(p.x,p.y);}catch(const std::exception& error){g_directAuthoring.feature=0;g_directAuthoring.dragging=g_directAuthoring.moved=false;g_directAuthoring.preview={};g_directAuthoring.commands={};g_directAuthoring.error=error.what();g_error=true;g_status=error.what();}SetCapture(hw);return 0;}
@@ -6336,11 +6391,13 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
         }
         case WM_MBUTTONDOWN:{g_componentDragIntent={};if(g_componentMove.dragging)cancelComponentMove();POINT p{GET_X_LPARAM(lp),GET_Y_LPARAM(lp)};g_pressWasButton=p.x<viewX||p.x>=viewX+viewW||p.y<viewY||p.y>=viewY+viewH;g_dragged=false;if(!g_pressWasButton)beginCameraDrag(p.x,p.y);SetCapture(hw);return 0;}
         case WM_MBUTTONUP:g_cameraDrag.active=false;ReleaseCapture();return 0;
-        case WM_CAPTURECHANGED:if(g_surfaceEdit059.dragging)cancelSurfaceEdit059();if(g_cableGuide035.dragging)cancelCableGuide035();if(g_directAuthoring.dragging)cancelDirectAuthoring();if(g_sketchEditing.dragging)cancelSketchEditDrag();g_componentDragIntent={};g_treeDragging=g_treePaging=false;g_cameraDrag.active=false;if(g_componentMove.dragging){cancelComponentMove();g_status="Component movement cancelled after pointer capture was lost";}return 0;
+        case WM_SETCURSOR:if(LOWORD(lp)==HTCLIENT){POINT p{};GetCursorPos(&p);ScreenToClient(hw,&p);if(g_chatDockResizing||chatDockHandleAt(p)){SetCursor(LoadCursor(nullptr,IDC_SIZEWE));return TRUE;}}break;
+        case WM_CAPTURECHANGED:if(g_chatDockResizing){g_chatDockResizing=false;assistant_chat::sync(true);}if(g_surfaceEdit059.dragging)cancelSurfaceEdit059();if(g_cableGuide035.dragging)cancelCableGuide035();if(g_directAuthoring.dragging)cancelDirectAuthoring();if(g_sketchEditing.dragging)cancelSketchEditDrag();g_componentDragIntent={};g_treeDragging=g_treePaging=false;g_cameraDrag.active=false;if(g_componentMove.dragging){cancelComponentMove();g_status="Component movement cancelled after pointer capture was lost";}return 0;
         case WM_MOUSEMOVE:{
             int x=GET_X_LPARAM(lp),y=GET_Y_LPARAM(lp);
             g_pointerX=x;g_pointerY=y;
             bool lbtn=wp&MK_LBUTTON,mbtn=wp&MK_MBUTTON,shift=wp&MK_SHIFT;
+            if(g_chatDockResizing){if(lbtn){resizeChatDock(x);layout();}return 0;}
             if(g_cableGuide035.dragging&&lbtn){moveCableGuideDrag035(x,y);g_dragged=g_cableGuide035.moved;return 0;}
             if(g_treeDragging&&lbtn){moveTreeThumb(y);return 0;}
             if(g_surfaceEdit059.dragging&&lbtn){moveSurfaceDrag059(x,y);g_dragged=g_surfaceEdit059.moved;return 0;}
@@ -6376,6 +6433,7 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
         }
         case WM_LBUTTONUP:{
             g_componentDragIntent={};
+            if(g_chatDockResizing){g_chatDockResizing=false;resizeChatDock(GET_X_LPARAM(lp));layout();assistant_chat::sync(true);g_pressWasButton=false;ReleaseCapture();if(!g_dialogSmoke&&!g_headless){try{saveUiSettings();}catch(const std::exception& error){g_error=true;g_status=error.what();}}return 0;}
             if(g_treeDragging||g_treePaging){if(g_treeDragging)moveTreeThumb(GET_Y_LPARAM(lp));g_treeDragging=g_treePaging=false;g_pressWasButton=false;ReleaseCapture();return 0;}
             if(surfaceEditActive059()&&!g_pressWasButton&&!g_cubePress){finishSurfaceDrag059();g_pressWasButton=false;ReleaseCapture();return 0;}
             if(g_cableGuide035.dragging){finishCableGuideDrag035();g_pressWasButton=false;ReleaseCapture();return 0;}
@@ -6452,6 +6510,7 @@ static void seedDocument(){g_doc=makeDemoDocument();rebuildScene();frameScene();
 #include "skeleton_editor_selftest.inl"
 
 #include "assistant_chat_selftest.inl"
+#include "chat_dock_selftest.inl"
 #include "studio_render_selftest.inl"
 #include "interaction_performance.inl"
 #include "viewport_quality_selftest_056c.inl"
@@ -6473,7 +6532,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
 
     auto setDpiContext=reinterpret_cast<BOOL(WINAPI*)(HANDLE)>(GetProcAddress(GetModuleHandleW(L"user32.dll"),"SetProcessDpiAwarenessContext"));
     if(!setDpiContext||!setDpiContext(reinterpret_cast<HANDLE>(-4)))SetProcessDPIAware();
-    bool assistantChatUiTest=false;
+    bool assistantChatUiTest=false,chatDockUiTest=false;
     bool plasticsUiTest=false,electronicsWorkspaceUiTest=false,cableGuideUiTest=false;
     bool nativeProductPerformanceUiTest=false,sceneCacheUiTest=false,authoringAssistanceUiTest=false,featureEditorPickingUiTest=false;
     bool asyncAuthoringUiTest=false;bool historyCompactionUiTest=false;bool featureHistoryUiTest=false,recoveryUiTest=false,editorScrollUiTest=false,configurationWorkspaceUiTest=false,interactionPerformanceUiTest=false;bool startupUiTest=false;bool stampsUiTest=false;bool media044bUiTest=false;bool planesSectionsUiTest=false;
@@ -6529,6 +6588,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         else if(a=="--self-test-media-044b-ui"){media044bUiTest=true;g_headless=true;}
         else if(a=="--self-test-planes-sections-ui"){planesSectionsUiTest=true;g_headless=true;}
         else if(a=="--self-test-assistant-chat-ui"){assistantChatUiTest=true;g_headless=true;}
+        else if(a=="--self-test-chat-dock-ui"){chatDockUiTest=true;g_headless=true;}
         else if(a=="--self-test-assistant-steering-ui"){assistantSteeringUiTest=true;g_headless=true;}
         else if(a=="--self-test-selection-picking-ui"){selectionPickingUiTest=true;g_headless=true;}
         else if(a=="--self-test-selection-glow-ui"){selectionGlowUiTest=true;g_headless=true;}
@@ -6877,7 +6937,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
                 bool wasHidden=!g_hiddenBodies.empty()&&g_hiddenBodies[0];uiAction(22000);if(g_hiddenBodies[0]==wasHidden||g_session.revision!=revision)return 304;uiAction(22000);uiAction(410);
                 uiAction(401);g_inspectorScroll=96;if(!screenshot(".properties-"+std::to_string(size.first)+".png"))return 295;
                 for(const auto& zone:g_zones)if(zone.x<viewX&&zone.y>=viewY+42&&zone.y+zone.h>winH-32)return 296;
-                uiAction(401);uiAction(400);if(viewH!=std::max(1,winH-viewY-32-assistantDockHeight())||!screenshot(".assistant-"+std::to_string(size.first)+".png"))return 297;uiAction(400);
+                uiAction(401);uiAction(400);if(viewH!=std::max(1,winH-viewY-32)||viewW!=std::max(1,winW-viewX-assistantDockWidth())||assistantDockWidth()<chatDockMinWidth()||!screenshot(".assistant-"+std::to_string(size.first)+".png"))return 297;uiAction(400);
                 if(g_session.revision!=revision)return 298;
             }resize(originalWidth,originalHeight);g_inspectorScroll=0;
         }
@@ -7530,6 +7590,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         g_status="Native UI checks passed / sheet / NURBS / exact box / supported datum / sheet graph preview";
     }
     if(assistantChatUiTest){int result=testAssistantChat(shotPath);DestroyWindow(hwnd);return result;}
+    if(chatDockUiTest){int result=testChatDock(shotPath);DestroyWindow(hwnd);return result;}
     if(assistantTest){
         g_chatAgentDetails=true;
         struct AssistantTestCleanup {~AssistantTestCleanup(){*g_assistantCancel=true;*g_teamCancel=true;g_agentTeam.cancel();g_agentTeam.waitIdle();if(g_assistantWorker.joinable())g_assistantWorker.join();}} assistantCleanup;
@@ -7576,7 +7637,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         g_chatInput=CreateWindowExW(0,L"EDIT",L"",WS_CHILD|ES_MULTILINE,0,0,1,1,g_window,(HMENU)499,hi,nullptr);
         if(!g_chatInput)return assistantFailure(128);
         auto chatInputFits=[&]{RECT bounds{};GetWindowRect(g_chatInput,&bounds);POINT topLeft{bounds.left,bounds.top};ScreenToClient(g_window,&topLeft);
-            return topLeft.x==viewX+30&&topLeft.y==winH-112&&bounds.right-bounds.left==std::max(viewW-260,1)&&bounds.bottom-bounds.top==44;};
+            const auto dock=chatDockGeometry();return topLeft.x==dock.x+dock.pad+8&&topLeft.y==dock.inputY+9&&bounds.right-bounds.left==std::max(dock.inner-16,1)&&bounds.bottom-bounds.top==44&&topLeft.x>=viewX+viewW&&bounds.right-bounds.left+topLeft.x<=winW;};
         layout();if(!chatInputFits())return assistantFailure(129);
         const wchar_t* accent=L"Portugu\u00eas: a\u00e7\u00e3o";SetWindowTextW(g_chatInput,accent);wchar_t entered[80]{};GetWindowTextW(g_chatInput,entered,80);
         if(std::wcscmp(entered,accent)!=0)return assistantFailure(130);
@@ -7671,7 +7732,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
          for(unsigned i=0;i<8;++i){AgentTeamRoleSnapshot role;role.status="Readable measured status WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW";role.text="Portugu\xc3\xaas: a\xc3\xa7\xc3\xa3o / long tool message WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW";role.usage.reportedResponses=1;role.usage.totalTokens=123456789;role.usage.inputTokens=123456789;role.usage.outputTokens=123456789;role.usage.reasoningTokens=123456789;g_teamSnapshot.roles.push_back(role);}
          for(auto size:std::vector<std::pair<int,int>>{{1180,800},{1280,800},{1600,1000},{2560,1200},{3840,2160}}){resizeTestWindow(size.first,size.second);g_teamPage=0;std::set<int> visibleRoles;unsigned pageSize=teamCardColumns()*teamCardRows(),pages=(g_teamRoleCount+pageSize-1)/pageSize;
              for(unsigned page=0;page<pages;++page){g_teamPage=page;drawFrame(hdc);std::string navigationDetail;if(!navigationUiFits(navigationDetail)){g_teamCardBoundsFailure=navigationDetail;return assistantFailure(402);}if(!g_teamCardContentFits||viewH<160){g_teamCardBoundsFailure+=" / viewport "+std::to_string(viewW)+"x"+std::to_string(viewH)+" / window "+std::to_string(winW)+"x"+std::to_string(winH)+" / page "+std::to_string(page);return assistantFailure(393);}
-                 for(const auto& z:g_zones)if(z.id>=44000&&z.id<44008){visibleRoles.insert(z.id);if(z.y<viewY+viewH||z.y+z.h>winH-154)return assistantFailure(393);}
+                 for(const auto& z:g_zones)if(z.id>=44000&&z.id<44008){visibleRoles.insert(z.id);if(z.x<viewX+viewW||z.x+z.w>winW||z.y<viewY||z.y+z.h>chatDockGeometry().chatBottom)return assistantFailure(393);}
                  if(pages>1)for(int action:{44011,44012})if(std::none_of(g_zones.begin(),g_zones.end(),[&](const Zone& z){return z.id==action;}))return assistantFailure(393);
                  auto workflow=std::find_if(g_zones.begin(),g_zones.end(),[](const Zone& z){return z.id==44014;});if(workflow==g_zones.end())return assistantFailure(393);
                  for(const auto& z:g_zones)if(z.id!=44014&&z.x<workflow->x+workflow->w&&z.x+z.w>workflow->x&&z.y<workflow->y+workflow->h&&z.y+z.h>workflow->y)return assistantFailure(393);

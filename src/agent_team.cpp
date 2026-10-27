@@ -883,6 +883,8 @@ struct AgentTeam::Impl {
             case AssistantEvent::ToolStart:event.kind=AgentTeamEvent::ToolStart;event.tool=input.text;view.status="Tool: "+input.text;break;
             case AssistantEvent::Usage:event.kind=AgentTeamEvent::Usage;view.usage=baseline;accumulateAssistantUsage(view.usage,input.usage);break;
             case AssistantEvent::ToolEnd:break;
+            // Observational role state only: not shared, logged or replayed.
+            case AssistantEvent::Reasoning:if(view.reasoningTurn!=view.turns){view.reasoning.clear();view.reasoningTurn=view.turns;}boundedAppend(view.reasoning,input.text,config.maxMailboxBytes);return;
             }
         }
         if(input.kind==AssistantEvent::Text&&!config.focusedWorkflow&&(!config.orchestratedStart||roles[index].config.discipline==AgentTeamDiscipline::Orchestrator))share(index,input.text);emit(event);
@@ -1052,7 +1054,7 @@ AgentTeamSnapshot AgentTeam::snapshot(bool includeConversations,std::uint64_t si
     result.started=impl_->started;result.documentRevisionObserved=impl_->documentRevisionKnown;result.documentRevision=impl_->documentRevision;
     if(impl_->started)result.elapsedMs=(std::uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-impl_->began).count();
     for(const auto& role:impl_->roles){const auto& source=role.view;AgentTeamRoleSnapshot view;
-        view.taskState=source.taskState;view.taskSummary=source.taskSummary;view.id=source.id;view.label=source.label;view.model=source.model;view.reasoningEffort=source.reasoningEffort;view.status=source.status;view.text=source.text;view.error=source.error;view.state=source.state;view.canWrite=source.canWrite;view.turns=source.turns;view.usage=source.usage;view.performance=source.performance;view.stepsApplied=source.stepsApplied;view.needsInspection=source.needsInspection;view.discipline=source.discipline;
+        view.taskState=source.taskState;view.taskSummary=source.taskSummary;view.id=source.id;view.label=source.label;view.model=source.model;view.reasoningEffort=source.reasoningEffort;view.status=source.status;view.text=source.text;view.reasoning=source.reasoning;view.reasoningTurn=source.reasoningTurn;view.error=source.error;view.state=source.state;view.canWrite=source.canWrite;view.turns=source.turns;view.usage=source.usage;view.performance=source.performance;view.stepsApplied=source.stepsApplied;view.needsInspection=source.needsInspection;view.discipline=source.discipline;
         view.partTask=source.partTask;view.partState=source.partState;view.privateStepsApplied=source.privateStepsApplied;
         view.unresolvedToolErrors=(unsigned)role.unresolvedToolFailures.size();
         view.currentPhase=source.state==AgentTeamState::Working?(source.currentPhase=="idle"?"working":source.currentPhase):agentTeamStateName(source.state);view.phaseStartedMs=source.phaseStartedMs;view.lastEventMs=source.lastEventMs;

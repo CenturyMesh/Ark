@@ -17,7 +17,8 @@
             }
             g_assistantDockOpen=true;g_toolModule=4;
             if(!capture(".icons-image-actions-"+std::to_string(size.first)+".png"))return failure("Could not capture the image-reference controls.");
-            for(int id:{730,731,732}){auto zone=std::find_if(g_zones.begin(),g_zones.end(),[&](const Zone& item){return item.id==id;});if(zone==g_zones.end()||zone->x<viewX||zone->x+zone->w>viewX+viewW)return failure("An image-reference action is missing or clipped.");}
+            // Attach lives in the right dock's composer; intent toggles appear on the pending-image card.
+            for(int id:{730}){auto zone=std::find_if(g_zones.begin(),g_zones.end(),[&](const Zone& item){return item.id==id;});if(zone==g_zones.end()||zone->x<viewX+viewW||zone->x+zone->w>winW||zone->y+zone->h>winH-32)return failure("An image-reference action is missing or clipped.");}
             g_assistantDockOpen=false;
         }
         g_toolModule=4;startLiveBridge();if(g_liveBridge.endpoint().empty())return failure("Could not start the isolated live-document bridge.");

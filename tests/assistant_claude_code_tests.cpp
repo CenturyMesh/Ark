@@ -46,7 +46,7 @@ public:
         if(type=="control_response"){const auto& inner=*p.find("response");if(field(inner,"subtype")!="success")return;const auto* body=inner.find("response");const auto* m=body?body->find("mcp_response"):nullptr;if(!m)return;const auto* result=m->find("result");if(!result)return;
             if(result->find("serverInfo")){mcp(*s,"notifications/initialized",V{},true);mcp(*s,"tools/list",V{});}
             else if(result->find("tools"))s->catalog=*result->find("tools");
-            else if(result->find("content")){s->toolResults.push_back(*result);if(s->interrupted)return;if(s->toolResults.size()==1){call(*s,"doc_apply",json(R"({"expected_revision":7})"),"toolu_2");}else{auto text=json(R"({"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Done"}]}})");s->incoming.push_back(text);finish(*s,"success",false,"Done");}}
+            else if(result->find("content")){s->toolResults.push_back(*result);if(s->interrupted)return;if(s->toolResults.size()==1){call(*s,"doc_apply",json(R"({"expected_revision":7})"),"toolu_2");}else{auto text=json(s->mode=="thinking"?R"({"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"Readable CLI thinking.","signature":"sig"},{"type":"redacted_thinking","data":"opaque-redacted"},{"type":"text","text":"Done"}]}})":R"({"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Done"}]}})");s->incoming.push_back(text);finish(*s,"success",false,"Done");}}
             return;}
         if(type=="user"){++s->users;auto init=json(R"({"type":"system","subtype":"init","permissionMode":"dontAsk","model":"claude-opus-5-5","mcp_servers":[{"name":"ark","status":"connected","source":"sdk"}]})");auto names=V::makeArr();for(const auto& tool:s->catalog.arr)names.arr.push_back(V::makeStr("mcp__ark__"+field(tool,"name")));if(s->mode=="bash-exposed")names.arr.push_back(V::makeStr("Bash"));init.set("tools",names);s->incoming.push_back(init);
             if(s->users>1){finish(*s,"success",false,"Steered");return;}
@@ -96,6 +96,16 @@ void single(){
     check(run.conversation.dump().find("person@example.com")==std::string::npos,"The account e-mail must never enter the conversation");
     for(const auto& p:state->sent)if(field(p,"type")=="user")check(field(*p.find("message"),"content").find("Retained context and current input")==0,"First prompt carries the retained context");
     check(!retained.arr.empty(),"History checkpoints must be retained");
+}
+// Visible thinking text reaches the host as a Reasoning event; redacted
+// thinking is never decoded and the reply text is unchanged.
+void thinking(){
+    auto state=std::make_shared<State>();state->mode="thinking";std::vector<std::string> reasoning;std::string text;
+    auto run=runAssistant(config(state),V::makeStr("Inspect and edit"),tools(),[&](const auto& name,const V&){return receipt(name=="doc_info"?7:8);},[&](const AssistantEvent& event){if(event.kind==AssistantEvent::Reasoning)reasoning.push_back(event.text);if(event.kind==AssistantEvent::Text)text+=event.text;});
+    check(reasoning.size()==1&&reasoning[0]=="Readable CLI thinking.","Claude Code thinking text must surface exactly as returned");
+    check(run.text=="Done"&&text=="Done"&&run.conversation.dump().find("Readable CLI thinking.")==std::string::npos,"Thinking must not change the reply or enter retained history");
+    auto plain=std::make_shared<State>();std::size_t none=0;runAssistant(config(plain),V::makeStr("Inspect and edit"),tools(),[&](const auto& name,const V&){return receipt(name=="doc_info"?7:8);},[&](const AssistantEvent& event){if(event.kind==AssistantEvent::Reasoning)++none;});
+    check(none==0,"No Reasoning event when the CLI exposes no thinking text");
 }
 void rejections(){
     for(const char* mode:{"bash-exposed","foreign-server","duplicate-control","error-result","login","no-models"}){
@@ -186,7 +196,7 @@ int main(int argc,char** argv){
 #else
     (void)argc;(void)argv;
 #endif
-    try{presetAndValidation();arguments();single();rejections();negotiation();permissionAndSteering();cancellationAndResume();imageInput();
+    try{presetAndValidation();arguments();single();thinking();rejections();negotiation();permissionAndSteering();cancellationAndResume();imageInput();
 #ifdef _WIN32
         nativeProcess();
 #endif

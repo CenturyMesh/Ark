@@ -131,10 +131,16 @@ static int testAssistantChat(const std::string& path){
     sync(true);captureChat(window,path+".team-needs-input.png");
     g_teamSnapshot.goalState=AgentGoalState::Completed;if(activity().title!="Goal reported complete")return fail(823,"Explicit team completion");
     SendMessage(window,WM_COMMAND,3,0);sync(true);if(!g_chatAgentDetails||(GetWindowLongPtr(viewport,GWL_STYLE)&WS_VISIBLE))return fail(824,"Agent controls toggle");
-    SendMessage(window,WM_COMMAND,3,0);if(!g_chatExpanded)SendMessage(window,WM_COMMAND,4,0);sync(true);if(!g_chatExpanded||pageHeight()<200||winH-32-assistantDockHeight()<viewY)return fail(825,"Expanded conversation");scroll=0;place();captureChat(window,path+".expanded.png");
-    {HDC dc=GetDC(g_window);drawFrame(dc);ReleaseDC(g_window,dc);
-     if(g_cubeS!=0||std::any_of(g_zones.begin(),g_zones.end(),[](const Zone& z){return z.id==179||z.id==191||(z.id>=560&&z.id<=562);}))return fail(847,"CAD navigation or appearance controls overlap the expanded conversation");}
+    // Right dock: Expand widens the conversation column; the viewport stays usable beside it.
+    const int normalWidth=chatDockNormalWidth();
+    SendMessage(window,WM_COMMAND,3,0);if(!g_chatExpanded)SendMessage(window,WM_COMMAND,4,0);layout();sync(true);
+    {RECT bounds{};GetWindowRect(window,&bounds);MapWindowPoints(nullptr,g_window,(POINT*)&bounds,2);const auto dock=chatDockGeometry();
+     if(!g_chatExpanded||assistantDockWidth()<normalWidth||pageHeight()<70||viewW<200||viewX+viewW>dock.x||bounds.left<dock.x||bounds.right>winW||bounds.top<viewY||bounds.bottom>winH-32)return fail(825,"Expanded conversation");}
+    scroll=0;place();captureChat(window,path+".expanded.png");
+    {HDC dc=GetDC(g_window);drawFrame(dc);ReleaseDC(g_window,dc);const float dockX=(float)(winW-assistantDockWidth());
+     if(std::any_of(g_zones.begin(),g_zones.end(),[&](const Zone& z){return (z.id==179||z.id==191||(z.id>=560&&z.id<=562))&&z.x+z.w>dockX;}))return fail(847,"CAD navigation or appearance controls overlap the expanded conversation");}
     g_assistantDockOpen=false;sync(true);if(GetWindowLongPtr(window,GWL_STYLE)&WS_VISIBLE)return fail(826,"Hidden dock still visible");
-    g_assistantDockOpen=true;g_chatExpanded=false;g_teamStarted=false;g_teamMode=false;sync(true);g_teamSnapshot={};DestroyWindow(window);testing=false;
+    g_assistantDockOpen=true;setChatDockMode(0);layout();sync(true);if(GetWindowLongPtr(window,GWL_STYLE)&WS_VISIBLE||assistantDockWidth()!=chatDockRailWidth())return fail(848,"Rail must hide the conversation and keep only the thin dock");
+    g_chatExpanded=false;setChatDockMode(1);g_teamStarted=false;g_teamMode=false;layout();sync(true);g_teamSnapshot={};DestroyWindow(window);testing=false;
     std::puts("Conversation UI: status lifecycle, pinned goal, selection, Unicode, paragraphs, long reply, scroll retention, latest, agents and expansion passed.");return 0;
 }

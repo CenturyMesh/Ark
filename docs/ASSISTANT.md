@@ -140,7 +140,23 @@ Requests use `store:false` and retain the complete Responses output and tool
 results as in-memory conversation history. Reasoning output uses
 `reasoning.encrypted_content` so stateless follow-up requests can retain the
 reasoning items. Text, refusals, tool call IDs and actual tool results are carried
-forward. A provider implementing only Chat Completions is not compatible with
+forward.
+
+Readable reasoning is display-only. On the official OpenAI Responses route ARK
+adds `reasoning.summary:"auto"` for ChatGPT plan models (unless the account
+catalogue explicitly reports `supports_reasoning_summaries:false`) and for API-key
+requests that already set an explicit effort other than `none`; other routes and
+provider-default API-key requests are unchanged. `encrypted_content` round-tripping
+is unchanged. After a completed response, `runAssistant()` emits one
+`AssistantEvent::Reasoning` with the text the provider actually returned:
+Responses `summary_text`/`reasoning_text` parts, Chat Completions
+`reasoning_content`, Messages `thinking` text, Claude Code `thinking` blocks and
+ACP `agent_thought_chunk` text. Encrypted or redacted reasoning emits nothing and
+is never decoded or paraphrased; the event never enters retained history, replies
+or tool routing. Team roles keep the latest such text per turn in
+`AgentTeamRoleSnapshot::reasoning` for the Studio view only.
+
+A provider implementing only Chat Completions is not compatible with
 this connector. A Responses-compatible provider must support this request shape;
 ARK does not silently downgrade it or select a different model.
 

@@ -103,7 +103,10 @@ struct AssistantPerformance {
 void accumulateAssistantPerformance(AssistantPerformance& total,const AssistantPerformance& delta);
 arkjson::Value assistantContextMetrics(const AssistantPerformance&);
 struct AssistantEvent {
-    enum Kind { Status, Text, ToolStart, ToolEnd, Usage } kind=Status;
+    // Reasoning: human-readable reasoning text the provider actually returned
+    // for one response (summaries, chat reasoning_content, visible thinking).
+    // Never emitted for encrypted/redacted reasoning; never paraphrased.
+    enum Kind { Status, Text, ToolStart, ToolEnd, Usage, Reasoning } kind=Status;
     std::string text; // Tool events contain only tool name; never credentials.
     AssistantUsage usage; // Usage events: cumulative snapshot for this run.
     AssistantPerformance performance; // Usage/ToolEnd: cumulative measured snapshot for this run.
@@ -192,6 +195,16 @@ struct AssistantRetryHooks {
     std::function<bool()> acceptCompletion; // Atomic host close; false continues pending input.
     std::function<bool()> inputPending; // Final-only gate; passive teammate context need not wake a finished turn.
 };
+
+// Readable reasoning carried by one normalized output item: Responses
+// summary_text/reasoning_text parts, chat reasoning_content (ark_chat_reasoning)
+// and Messages thinking text. Encrypted or redacted reasoning yields
+// present=true with empty text; the opaque payload is never decoded.
+struct AssistantReasoningText {bool present=false;std::string text;};
+AssistantReasoningText assistantReasoningText(const arkjson::Value& outputItem);
+// Whether requests on this connector ask for readable reasoning summaries
+// (official OpenAI Responses: ChatGPT plan, or an explicit API-key effort).
+bool assistantRequestsReasoningSummary(const AssistantConfig& config);
 
 void validateAssistantConfig(const AssistantConfig& config);
 bool assistantKeyAvailable(const AssistantConfig& config);

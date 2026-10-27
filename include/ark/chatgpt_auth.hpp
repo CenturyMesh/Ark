@@ -26,6 +26,7 @@ struct ChatGptModel {
     std::string slug,displayName;
     std::vector<std::string> reasoningEfforts; // empty unless explicit in account catalog
     std::string defaultReasoningEffort;        // empty means service default unknown
+    bool reasoningSummaries=true;              // false only when the catalog explicitly says unsupported
 };
 struct ChatGptIdentity {std::string issuer,clientId,subject,email;std::int64_t expiresAt=0;};
 struct ChatGptAuthAttempt {

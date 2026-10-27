@@ -22,7 +22,7 @@ static void checkPendingAssistantImageContext(){
 static void setPendingAssistantImage(const std::string& path){
     const auto epoch=g_documentEpoch,objectEpoch=g_objectDocumentEpoch;const auto target=assistantImageTargetKey();auto image=loadAssistantImageAttachment(path);
     if(epoch!=g_documentEpoch||objectEpoch!=g_objectDocumentEpoch||target!=assistantImageTargetKey())throw std::runtime_error("The image target changed while opening the file; attach it again.");
-    clearPendingAssistantImage();g_pendingAssistantImage=std::move(image);g_pendingAssistantImageEpoch=epoch;g_pendingAssistantImageObjectEpoch=objectEpoch;g_pendingAssistantImageTarget=target;g_assistantDockOpen=true;g_toolsOpen=false;g_error=false;g_status="Image attached locally. Choose an intent and Send or Queue to share it with the selected agent.";layout();
+    clearPendingAssistantImage();g_pendingAssistantImage=std::move(image);g_pendingAssistantImageEpoch=epoch;g_pendingAssistantImageObjectEpoch=objectEpoch;g_pendingAssistantImageTarget=target;showAssistantDock();g_toolsOpen=false;g_error=false;g_status="Image attached locally. Choose an intent and Send or Queue to share it with the selected agent.";layout();
 }
 static arkjson::Value pendingAssistantImageMessage(const std::string& prompt){
     checkPendingAssistantImageContext();syncAssistantImageDimensions();const auto dimensions=g_pendingAssistantImage&&g_assistantImageMode==AssistantImageMode::ImageToCAD?parseAssistantImageDimensions(g_assistantImageDimensionText):AssistantImageDimensions{};return assistantUserMessage(prompt,g_pendingAssistantImage,g_assistantImageMode,dimensions);
@@ -39,22 +39,26 @@ static bool handleAssistantImageAction(int action){
     else {syncAssistantImageDimensions();g_assistantImageMode=action==732?AssistantImageMode::ImageToCAD:AssistantImageMode::InspireDesign;g_error=false;g_status=action==732?"Image to CAD: optional rough width, height and depth in mm; blank sizes stay up to the model.":"Inspire design: use the image's visual character to create an editable concept.";}
     return true;
 }
+// Rough-dimension fields sit on the pending-image card inside the right dock.
+static void assistantImageDimensionSlot(size_t index,int& x,int& width){const auto dock=chatDockGeometry();width=std::clamp((dock.inner-76)/3-22,48,122);x=dock.x+dock.pad+82+(int)index*(width+22);}
 static void layoutAssistantImageDimensions(){
-    const bool visible=g_assistantDockOpen&&!g_toolsOpen&&g_pendingAssistantImage&&g_assistantImageMode==AssistantImageMode::ImageToCAD;
+    const bool visible=g_assistantDockOpen&&!g_chatDockRail&&!g_toolsOpen&&g_pendingAssistantImage&&g_assistantImageMode==AssistantImageMode::ImageToCAD;
     if(visible)for(size_t i=0;i<3;++i)if(!g_assistantImageDimensionEdits[i]){auto edit=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",L"",WS_CHILD|WS_TABSTOP|WS_BORDER|ES_AUTOHSCROLL,0,0,1,1,g_window,(HMENU)(INT_PTR)(735+i),GetModuleHandleW(nullptr),nullptr);if(!edit)throw std::runtime_error("Could not create rough dimension fields.");g_assistantImageDimensionEdits[i]=edit;SendMessage(edit,WM_SETFONT,(WPARAM)GetStockObject(DEFAULT_GUI_FONT),TRUE);SendMessage(edit,EM_SETLIMITTEXT,24,0);SendMessage(edit,EM_SETMARGINS,EC_LEFTMARGIN|EC_RIGHTMARGIN,MAKELPARAM(6,6));if(!g_assistantImageDimensionText[i].empty())SetWindowTextA(edit,g_assistantImageDimensionText[i].c_str());SendMessageW(edit,0x1501,TRUE,(LPARAM)L"Auto");}
-    const int width=std::clamp((viewW-360)/3,72,122);for(size_t i=0;i<3;++i)if(auto edit=g_assistantImageDimensionEdits[i]){MoveWindow(edit,viewX+172+(int)i*(width+18),winH-182,width,25,TRUE);ShowWindow(edit,visible?SW_SHOW:SW_HIDE);}
+    const auto dock=chatDockGeometry();for(size_t i=0;i<3;++i)if(auto edit=g_assistantImageDimensionEdits[i]){int x=0,width=0;assistantImageDimensionSlot(i,x,width);MoveWindow(edit,x,dock.imageTop+75,width,25,TRUE);ShowWindow(edit,visible?SW_SHOW:SW_HIDE);}
 }
+// Pending-image card above the composer. The attach action lives in the
+// composer's action row; intent toggles appear once an image is attached.
 template<class Rect,class Button,class Glyph>static void drawAssistantImageAttachmentUI(Rect&& rect,Button&& button,Glyph&& glyph){
-    layoutAssistantImageDimensions();const float x=(float)viewX+22,y=(float)winH-(g_pendingAssistantImage?252:188),width=(float)viewW-44;
-    rect(x,y,width,g_pendingAssistantImage?104.f:40.f,7,.055f,.068f,.082f,1,.20f,.28f,.34f,.8f,1);
-    button("",x+10,y+8,116,730,false,false);glyph(730,x+17,y+12,24);textOut("Attach image",x+43,y+16,.64f,.844f,.879f,.908f);
-    button("",x+138,y+8,140,731,false,g_assistantImageMode==AssistantImageMode::InspireDesign);glyph(731,x+145,y+12,24);textOut("Inspire design",x+173,y+16,.64f,.86f,.88f,.92f);
-    button("",x+282,y+8,134,732,false,g_assistantImageMode==AssistantImageMode::ImageToCAD);glyph(732,x+289,y+12,24);textOut("Image to CAD",x+318,y+16,.64f,.86f,.88f,.92f);
-    if(g_pendingAssistantImage){
-        drawAssistantAttachmentThumbnail(*g_pendingAssistantImage,x+10,y+47,48,48);
-        std::string caption=g_pendingAssistantImage->name+" / "+std::to_string(g_pendingAssistantImage->width)+" x "+std::to_string(g_pendingAssistantImage->height);
-        textOut(fitText(caption,.56f,g_assistantImageMode==AssistantImageMode::ImageToCAD?70.f:width-170),x+70,y+48,.56f,.76f,.86f,.94f);button("Remove",x+width-88,y+49,76,733,false,false);
-        if(g_assistantImageMode==AssistantImageMode::ImageToCAD){textOut("ROUGH MM",x+70,y+80,.50f,.56f,.72f,.79f);const int fieldWidth=std::clamp((viewW-360)/3,72,122);const char* names[]={"Width","Height","Depth"};for(int i=0;i<3;++i)textOut(names[i],(float)viewX+172+i*(fieldWidth+18),y+48,.53f,.67f,.79f,.88f);}
-        else textOut("Reference stays local until Send / Queue",x+70,y+80,.54f,.664f,.691f,.714f);
-    }
+    layoutAssistantImageDimensions();const auto dock=chatDockGeometry();if(!g_pendingAssistantImage||!dock.open||dock.rail)return;
+    namespace th=ui_theme;const float x=(float)(dock.x+dock.pad),y=(float)dock.imageTop,width=(float)dock.inner;
+    auto ink=[](const std::string& value,float px,float py,float scale,th::Tone color){textOut(value,px,py,scale,color.r,color.g,color.b);};
+    rect(x,y,width,104.f,th::rowRadius,th::raised.r,th::raised.g,th::raised.b,1,1,1,1,th::border,1);
+    drawAssistantAttachmentThumbnail(*g_pendingAssistantImage,x+10,y+10,48,48);
+    std::string caption=g_pendingAssistantImage->name+" / "+std::to_string(g_pendingAssistantImage->width)+" x "+std::to_string(g_pendingAssistantImage->height);
+    ink(fitText(caption,.56f,std::max(1.f,width-68-92)),x+68,y+12,.56f,th::text2);button("Remove",x+width-84,y+4,76,733,false,false);
+    const bool cad=g_assistantImageMode==AssistantImageMode::ImageToCAD;const float modeW=std::max(60.f,(width-84)*.5f);
+    button("",x+68,y+38,modeW,731,false,!cad);glyph(731,x+74,y+42,24);ink(fitText("Inspire design",.62f,modeW-40),x+102,y+46,.62f,th::text);
+    button("",x+74+modeW,y+38,modeW,732,false,cad);glyph(732,x+80+modeW,y+42,24);ink(fitText("Image to CAD",.62f,modeW-40),x+108+modeW,y+46,.62f,th::text);
+    if(cad){ink("ROUGH MM",x+10,y+80,.50f,th::faint);const char* letters[]={"W","H","D"};for(size_t i=0;i<3;++i){int fx=0,fw=0;assistantImageDimensionSlot(i,fx,fw);ink(letters[i],(float)fx-13,y+80,.52f,th::muted);}}
+    else ink(fitText("Reference stays local until Send / Queue",.54f,width-78),x+68,y+80,.54f,th::muted);
 }

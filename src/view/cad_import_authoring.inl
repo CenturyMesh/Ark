@@ -4,7 +4,7 @@ static std::wstring cadPathWide(const std::string& value){int n=MultiByteToWideC
 static bool cadExchangePath(const std::string& path){auto extension=std::filesystem::u8path(path).extension().string();std::transform(extension.begin(),extension.end(),extension.begin(),[](unsigned char c){return(char)std::tolower(c);});return extension==".step"||extension==".stp"||extension==".iges"||extension==".igs";}
 static void beginArkitfy(const arkjson::Value& receipt){
     const auto* task=receipt.find("agent_prompt");if(!task||task->t!=arkjson::Value::Str)throw std::runtime_error("Imported source has no Arkitfy task");
-    g_assistantDockOpen=true;layout();
+    showAssistantDock();layout();
     const auto wide=cadPathWide(task->str);if(g_chatInput)SetWindowTextW(g_chatInput,wide.c_str());
     if(g_chatBusy||(g_teamStarted&&g_agentTeam.snapshot().running)){g_status="CAD imported. Arkitfy task is ready in Assistant; send it after the current task finishes.";return;}
     try{validateAssistantConfig(g_assistantConfig);}catch(const std::exception&){g_status="CAD imported. Configure an agent, then send the prepared Arkitfy task in Assistant.";return;}
