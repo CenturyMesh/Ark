@@ -228,7 +228,11 @@ struct Session {
         if(type=="control_request"){control(packet);return false;}
         if(type=="control_response"){controlReply(packet);return false;}
         if(type=="system"){systemPacket(packet);return false;}
-        if(type=="assistant"&&active){const auto* body=packet.find("message");const auto* content=body?body->find("content"):nullptr;std::string text;if(content&&content->t==V::Arr)for(const auto& block:content->arr)if(str(block,"type")=="text")text+=str(block,"text");if(!text.empty()){need(text.size()<=config.maxResponseBytes,"Claude Code text exceeded the configured response bound.");promptText=text;}return false;}
+        if(type=="assistant"&&active){const auto* body=packet.find("message");const auto* content=body?body->find("content"):nullptr;std::string text,thinking;if(content&&content->t==V::Arr)for(const auto& block:content->arr){if(str(block,"type")=="text")text+=str(block,"text");
+                // Visible thinking text only when the CLI exposes it; redacted thinking stays opaque.
+                else if(str(block,"type")=="thinking"&&!str(block,"thinking").empty()){if(!thinking.empty())thinking+="\n\n";thinking+=str(block,"thinking");}}
+            if(!thinking.empty()&&thinking.size()<=config.maxResponseBytes)emit(AssistantEvent::Reasoning,thinking);
+            if(!text.empty()){need(text.size()<=config.maxResponseBytes,"Claude Code text exceeded the configured response bound.");promptText=text;}return false;}
         if(type=="result")return finished(packet);
         if(type=="rate_limit_event"){const auto* info=packet.find("rate_limit_info");const auto status=info?clean(str(*info,"status")):"";if(!status.empty()&&status!="allowed")emit(AssistantEvent::Status,"Claude Code rate limit status: "+status);}
         return false;} // User echoes, partial stream events and progress keep the session alive only.

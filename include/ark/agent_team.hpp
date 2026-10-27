@@ -64,6 +64,9 @@ struct AgentTeamEvent {
 };
 struct AgentTeamRoleSnapshot {
     std::string id,label,model,reasoningEffort,status,text,error;
+    // Readable reasoning the provider returned during turn reasoningTurn (the
+    // latest turn that exposed any), bounded. Empty: none exposed yet.
+    std::string reasoning;unsigned reasoningTurn=0;
     AgentTeamState state=AgentTeamState::Idle;
     std::string taskState="unassigned",taskSummary;
     bool canWrite=false;

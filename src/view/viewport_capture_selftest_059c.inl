@@ -42,7 +42,9 @@ static int viewportCaptureSelfTest059(const std::string& output){
         auto minimized=captureGpuScene059();check(minimized.px==image.px&&minimized.w==image.w&&minimized.h==image.h,"Minimized GPU pixels differ from the same hidden render");
         check(IsIconic(g_window)&&unchangedWindow(minimizedWindow,windowState())&&IsWindowVisible(g_window)==minimizedVisible,"Successful capture changed minimized window state");
         check(writePNG((output+".gpu-minimized.png").c_str(),minimized),"Could not save minimized GPU image");
-        g_assistantDockOpen=true;g_chatExpanded=true;layout();check(viewH==1,"Expanded-chat fixture did not collapse viewport");
+        // The right assistant dock keeps a usable viewport at normal sizes; a narrow
+        // minimized client with the expanded dock is the collapsed-viewport fixture.
+        winW=600;g_assistantDockOpen=true;g_chatExpanded=true;layout();check(viewW==1,"Expanded-chat fixture did not collapse viewport");
         const int expandedX=viewX,expandedY=viewY,expandedW=viewW,expandedH=viewH;
         auto expanded=captureGpuScene059();check(expanded.px==image.px,"Expanded chat changed offscreen GPU pixels");
         check(g_assistantDockOpen&&g_chatExpanded&&viewX==expandedX&&viewY==expandedY&&viewW==expandedW&&viewH==expandedH,"Capture changed expanded chat layout");
@@ -55,7 +57,7 @@ static int viewportCaptureSelfTest059(const std::string& output){
         check(evidence->find("window_minimized")->b&&evidence->find("viewport_collapsed")->b&&!evidence->find("ui_chrome_included")->b,"Viewport state evidence is incorrect");
         bool inlinePixels=false;for(const auto& content:result.find("content")->arr)if(content.find("type")&&content.find("type")->str=="image")inlinePixels=true;check(inlinePixels,"Viewport tool omitted inline image pixels");
         args.set("expected_revision",V::makeNum((double)revision+1));const auto rejected=captureViewportSnapshot(args);check(rejected.find("isError")->b,"Stale capture revision accepted");
-        check(IsIconic(g_window)&&unchangedWindow(minimizedWindow,windowState())&&g_chatExpanded&&viewH==1,"Rejected capture altered window/layout state");
+        check(IsIconic(g_window)&&unchangedWindow(minimizedWindow,windowState())&&g_chatExpanded&&viewW==1,"Rejected capture altered window/layout state");
         args.set("expected_revision",V::makeNum((double)revision));args.set("path",V::makeStr(output+".gpu-hidden.png/cannot-write.png"));
         const auto writeRejected=captureViewportSnapshot(args);check(writeRejected.find("isError")->b,"Post-render file-write failure was not reported");
         check(IsIconic(g_window)&&unchangedWindow(minimizedWindow,windowState())&&viewW==expandedW&&viewH==expandedH&&g_chatExpanded,"Post-render failure changed window/layout state");

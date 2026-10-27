@@ -107,6 +107,47 @@ static void visionChecks(){
 }
 // Specialist tools are advertised after their topic is loaded; execution still
 // accepts every tool of the host catalogue.
+// Readable reasoning per provider shape. Only text the provider returned is
+// surfaced; encrypted/redacted state is opaque and never paraphrased.
+static void reasoningChecks(){
+    auto readable=ark::assistantReasoningText(json(R"({"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text","text":"Checked the hinge clearance."},{"type":"summary_text","text":"Chose a 4 mm offset."}],"encrypted_content":"opaque-state"})"));
+    check(readable.present&&readable.text=="Checked the hinge clearance.\n\nChose a 4 mm offset.","Responses summary_text parts are joined verbatim");
+    auto encrypted=ark::assistantReasoningText(json(R"({"type":"reasoning","id":"rs_2","summary":[],"encrypted_content":"opaque-state"})"));
+    check(encrypted.present&&encrypted.text.empty(),"encrypted-only reasoning is present but never decoded");
+    check(ark::assistantReasoningText(json(R"({"type":"reasoning","content":[{"type":"reasoning_text","text":"Raw readable step."}]})")).text=="Raw readable step.","Responses reasoning_text content is readable");
+    check(!ark::assistantReasoningText(finalResponse().find("output")->arr[0]).present,"messages are not reasoning");
+    ark::AssistantConfig chat=ark::assistantProviderPreset("deepseek");chat.model="offline-chat";
+    auto normalized=ark::assistantNormalizeResponse(chat,json(R"({"choices":[{"finish_reason":"stop","message":{"role":"assistant","reasoning_content":"Compared two bracket options.","content":"Done."}}]})"));
+    check(ark::assistantReasoningText(normalized.find("output")->arr[0]).text=="Compared two bracket options.","chat reasoning_content survives normalization as readable reasoning");
+    ark::AssistantConfig messages=ark::assistantProviderPreset("claude");messages.model="offline-messages";
+    normalized=ark::assistantNormalizeResponse(messages,json(R"({"type":"message","role":"assistant","stop_reason":"end_turn","content":[{"type":"thinking","thinking":"Visible thinking summary.","signature":"sig"},{"type":"redacted_thinking","data":"opaque-redacted"},{"type":"text","text":"Done."}]})"));
+    const auto& out=normalized.find("output")->arr;check(out.size()==3,"Messages thinking blocks are retained for replay");
+    check(ark::assistantReasoningText(out[0]).text=="Visible thinking summary."&&ark::assistantReasoningText(out[1]).present&&ark::assistantReasoningText(out[1]).text.empty(),"Messages thinking is readable; redacted thinking is not");
+    // Summaries are requested only where the route is known to accept them.
+    ark::AssistantConfig api;api.model="offline-responses";api.apiKeyEnv="";
+    check(!ark::assistantRequestsReasoningSummary(api),"API-key provider-default effort does not assume a reasoning model");
+    api.reasoningEffort="low";check(ark::assistantRequestsReasoningSummary(api),"explicit API-key effort requests readable summaries");
+    api.reasoningEffort="none";check(!ark::assistantRequestsReasoningSummary(api),"effort none requests no summary");
+    auto plan=api;plan.reasoningEffort.clear();plan.authMode=ark::AssistantAuthMode::ChatGptPlan;check(ark::assistantRequestsReasoningSummary(plan),"ChatGPT plan requests readable summaries");
+    auto grok=ark::assistantProviderPreset("grok");grok.model="offline-grok";grok.reasoningEffort="low";check(!ark::assistantRequestsReasoningSummary(grok),"other Responses providers are not asked for summaries");
+    auto custom=ark::assistantProviderPreset("custom");custom.model="offline-custom";custom.reasoningEffort="low";check(!ark::assistantRequestsReasoningSummary(custom),"custom endpoints are not asked for summaries");
+    V conversation=json(R"([{"role":"user","content":"Inspect"}])");V tools=json(R"([{"name":"doc_info","description":"Document","inputSchema":{"type":"object"}}])");
+    auto planRequest=ark::assistantRequest(plan,conversation,tools);check(planRequest.find("reasoning")->find("summary")->str=="auto"&&!planRequest.find("reasoning")->find("effort"),"plan Auto effort still requests summaries without inventing an effort");
+    check(planRequest.find("include")->arr[0].str=="reasoning.encrypted_content","encrypted reasoning round-tripping is unchanged");
+    api.reasoningEffort="high";auto apiRequest=ark::assistantRequest(api,conversation,tools);check(apiRequest.find("reasoning")->find("effort")->str=="high"&&apiRequest.find("reasoning")->find("summary")->str=="auto","explicit effort keeps its value and adds the summary request");
+    api.reasoningEffort.clear();check(ark::assistantRequest(api,conversation,tools).find("reasoning")==nullptr,"provider-default API request remains unchanged");
+    // Runtime: one Reasoning event per response with readable text, none for encrypted-only.
+    V summarized=toolResponse();member(member(summarized,"output").arr[0],"summary").arr.push_back(json(R"({"type":"summary_text","text":"Need the current revision first."})"));
+    std::vector<std::string> reasoning;int rounds=0;
+    auto run=ark::runAssistant(plan,V::makeStr("Inspect"),tools,[&](auto&,auto&){return json(R"({"revision":1})");},[&](const ark::AssistantEvent& event){if(event.kind==ark::AssistantEvent::Reasoning)reasoning.push_back(event.text);},nullptr,[&](auto&,auto&,auto*){return ++rounds==1?summarized:finalResponse();});
+    check(reasoning.size()==1&&reasoning[0]=="Need the current revision first."&&run.text=="Done.","summary text is emitted once and never mixed into the reply");
+    check(run.conversation.arr[1].find("encrypted_content")->str=="opaque-reasoning","the reasoning item, including encrypted state, is retained for replay");
+    reasoning.clear();rounds=0;ark::runAssistant(plan,V::makeStr("Inspect"),tools,[&](auto&,auto&){return json(R"({"revision":1})");},[&](const ark::AssistantEvent& event){if(event.kind==ark::AssistantEvent::Reasoning)reasoning.push_back(event.text);},nullptr,[&](auto&,auto&,auto*){return ++rounds==1?toolResponse():finalResponse();});
+    check(reasoning.empty(),"encrypted-only reasoning emits no readable event");
+    // Plan catalogue: summaries are dropped only when explicitly unsupported.
+    auto models=ark::parseChatGptModelCatalog(json(R"({"models":[{"slug":"m-a","display_name":"A","visibility":"list","supports_reasoning_summaries":false},{"slug":"m-b","display_name":"B","visibility":"list"}]})"));
+    check(models.size()==2&&!models[0].reasoningSummaries&&models[1].reasoningSummaries,"catalog summary support is explicit-false only");
+}
 static void deferredToolChecks(){
     const auto full=ark::AgentSession::tools();
     auto names=[](const V& tools){std::vector<std::string> out;for(const auto& tool:tools.arr)out.push_back(tool.find("name")->asStr());return out;};
@@ -490,5 +531,5 @@ int main(int argc,char** argv){try{
         [&](const auto& e){if(e.kind==ark::AssistantEvent::Usage)partial=e.usage;},nullptr,
         [&](auto&,auto&,auto*){return incompleteCounted;});},"incomplete response remains rejected");
     check(partial.totalTokens==15,"usage from incomplete response survives via event");
-    deferredToolChecks();repeatedReadChecks();traceAttributionChecks();heldReplyAfterFeedbackChecks();heldResultChecks();stableProjectionChecks();batchedCallsKeepOneWritePerResponse();requestContextChecks();unratedFeedbackProjectionChecks();payloadAndPerformanceChecks();nestedReceiptChecks();transientHttpRetryChecks();visionChecks();userImageAuthoringChecks();assistantSteeringChecks();std::cout<<checks<<" assistant checks passed\n";return 0;
+    reasoningChecks();deferredToolChecks();repeatedReadChecks();traceAttributionChecks();heldReplyAfterFeedbackChecks();heldResultChecks();stableProjectionChecks();batchedCallsKeepOneWritePerResponse();requestContextChecks();unratedFeedbackProjectionChecks();payloadAndPerformanceChecks();nestedReceiptChecks();transientHttpRetryChecks();visionChecks();userImageAuthoringChecks();assistantSteeringChecks();std::cout<<checks<<" assistant checks passed\n";return 0;
 }catch(const std::exception& e){std::cerr<<"assistant test failed: "<<e.what()<<'\n';return 1;}}

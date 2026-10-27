@@ -25,6 +25,10 @@
             // Keep all display modes reachable with Assistant + navigation bar
             // in the actual supported compact window, not a hidden-dock fixture.
             g_compactNavigation=true;draw();
+            // Beside the normal right Assistant dock a too-narrow viewport condenses the
+            // bar behind More; collapsing the dock to its rail must restore every action.
+            const bool condensedBesideDock=viewportBarLayout().condensed;
+            if(condensedBesideDock){if(std::none_of(g_zones.begin(),g_zones.end(),[](const Zone& z){return z.id==455;}))return failure("Condensed toolbar beside the Assistant dock lost More.");setChatDockMode(0);layout();draw();}
             if(g_cubeS<96)return failure("Assistant + navigation controls made the cube unreadable.");
             for(int id:{462,963,464,455,176,177,178,186}){auto zone=std::find_if(g_zones.begin(),g_zones.end(),[&](const Zone& z){return z.id==id;});if(zone==g_zones.end())return failure("Assistant + navigation controls hid a display/navigation action.");
                 if(zone->x<g_cubeX+g_cubeS&&zone->x+zone->w>g_cubeX&&zone->y<g_cubeY+g_cubeS&&zone->y+zone->h>g_cubeY)return failure("Display/navigation control overlaps the cube.");
@@ -35,7 +39,7 @@
             const auto caption=g_gridCaptionBounds;if(caption.right>caption.left&&caption.left<bar.x+bar.width&&caption.right>bar.x&&caption.top<bar.y+bar.height&&caption.bottom>bar.y)return failure("Grid scale caption covers the unified toolbar.");
             if(!navigationUiFits(detail))return failure(detail);
             if(!write(".navigation-"+std::to_string(size.first)+"x"+std::to_string(size.second)+"-compact-controls",readPixels(0,0,winW,winH)))return failure("Could not save compact controls capture.");
-            g_compactNavigation=false;uiAction(176);uiAction(462);draw();
+            g_compactNavigation=false;setChatDockMode(1);layout();uiAction(176);uiAction(462);draw();
         }
         unsigned directionChecks=0,labelChecks=0,edgePixels=0;std::ostringstream timings;
         for(int size:{96,136,204,272}){g_navigationTestSize=size;draw();
