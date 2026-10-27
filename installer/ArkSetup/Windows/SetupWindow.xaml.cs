@@ -132,6 +132,7 @@ public partial class SetupWindow : ChromeWindow
             return;
         Anim.Swap(_page, page);
         _page = page;
+        Art.Lively = page == InstallingPage; // the sphere livens up while ARK installs and calms down after
     }
 
     void Options_Click(object sender, RoutedEventArgs e) => Go(OptionsPage);
@@ -343,6 +344,7 @@ public partial class SetupWindow : ChromeWindow
             p.Visibility = p == page ? Visibility.Visible : Visibility.Collapsed;
         Anim.Show(page);
         _page = page;
+        Art.Pose(null); // at rest: exactly the original frame
         switch (name)
         {
             case "options":

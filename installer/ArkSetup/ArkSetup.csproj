@@ -76,8 +76,11 @@
 
   <ItemGroup>
     <None Remove="Art\**" />
-    <Resource Include="Art\keyart.jpg" />
-    <Resource Include="$(RepoRoot)assets\ui\ark-wordmark.png" Link="Art\ark-wordmark.png" />
+    <!-- MeshSphere key art as two layers (installer/art): the clean plate and the sphere that moves over it. -->
+    <Resource Include="Art\plate.jpg" />
+    <Resource Include="Art\sphere.png" />
+    <!-- 720 px splash copy of the wordmark: enough for the Welcome logo at 2x and keeps Setup small. -->
+    <Resource Include="$(RepoRoot)assets\ui\ark-wordmark-splash.png" Link="Art\ark-wordmark.png" />
     <Resource Include="$(RepoRoot)assets\ui\ark-app.ico" Link="Art\ark-app.ico" />
   </ItemGroup>
 

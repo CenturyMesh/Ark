@@ -154,8 +154,16 @@ uses Segoe UI from Windows and bundles no fonts.
 ARK's application mark, wordmark and icon atlases were generated for ARK using
 ImageGen. Asset provenance and prompts are retained in `assets/ui/README.md`
 and `docs/design`; the package includes that provenance as `ark-ui-assets.txt`.
-The setup's key art (`installer/ArkSetup/Art/keyart.jpg`) is a frame of the
-MeshSphere cinematic rendered in Blender by the project owner.
+The setup's key art is frame 175 of the project owner's "MeshSphere Cinematic v5"
+Blender scene (not in this repository), rendered as two layers by
+`installer/art/render_layers.py` and `installer/art/make_layers.py` from a copy of
+the scene: Blender 5.2.1 LTS, EEVEE, 64 samples, 1920 × 1080, AgX, the scene's own
+depth of field, motion blur and Fog Glow compositor (about 5 s of rendering for all
+passes). `Art/plate.jpg` is the frame without the sphere, with the sphere's soft
+shadow kept (SHA-256 `c3e4b5c4a4915ab99f8158d10118adca1f25092b9940f4d903b9141111c3c1ab`).
+`Art/sphere.png` is the sphere and its glow cut from the same frame by a difference
+matte, 640 px square at (638, 112) (SHA-256
+`426107577a6de2993e97fa80bae39f254dbeb0dc25c0bf3d88e74f1ac1e6d95c`).
 The original generated ARK artwork is included under Apache-2.0 to the extent
 the project can grant rights. This does not grant trademark rights or assert
 exclusive copyright in AI-generated output. No third-party rights clearance

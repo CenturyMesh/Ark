@@ -9,7 +9,7 @@ namespace ArkSetup.Controls;
 /// <summary>The embedded art: key art, ARK wordmark and icon, decoded once.</summary>
 public static class Images
 {
-    static BitmapSource? _art, _wordmark, _icon;
+    static BitmapSource? _plate, _sphere, _wordmark, _icon;
 
     static BitmapSource? Load(string name, int decodeWidth = 0)
     {
@@ -36,7 +36,11 @@ public static class Images
         }
     }
 
-    public static BitmapSource? KeyArt() => _art ??= Load("keyart.jpg");
+    /// <summary>The key art without the sphere (1920 × 1080).</summary>
+    public static BitmapSource? Plate() => _plate ??= Load("plate.jpg");
+
+    /// <summary>The sphere cut from the same frame, with its glow, straight alpha (see ArtBackdrop for its place).</summary>
+    public static BitmapSource? Sphere() => _sphere ??= Load("sphere.png");
 
     /// <summary>The ARK wordmark with its transparent margins trimmed, so it aligns with the text column.</summary>
     public static BitmapSource? Wordmark()

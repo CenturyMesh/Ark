@@ -7,6 +7,7 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using ArkSetup.Controls;
 using ArkSetup.Core;
 
 namespace ArkSetup.Windows;
@@ -20,7 +21,7 @@ public static class Screens
 {
     static readonly string[] SetupPages = { "welcome", "options", "installing", "done", "error" };
 
-    public static async void Run(App app, Payload? payload, string folder, double scale, bool layoutOnly)
+    public static async void Run(App app, Payload? payload, string folder, double scale, bool layoutOnly, IReadOnlyList<double> times)
     {
         int code = ExitCodes.Ok;
         try
@@ -33,6 +34,28 @@ public static class Screens
             OffScreen(setup);
             setup.Show();
             await Settle(setup);
+            if (ArtBackdrop.MotionAllowed)
+            {
+                // the live animation: it moves, livens up and calms down within about a second each way
+                var a = setup.Art.Live.Offset;
+                await Task.Delay(1500);
+                var b = setup.Art.Live.Offset;
+                double moved = Math.Sqrt((b.X - a.X) * (b.X - a.X) + (b.Y - a.Y) * (b.Y - a.Y));
+                double calm = setup.Art.Live.Speed;
+                setup.Art.Lively = true;
+                await Task.Delay(1200);
+                double lively = setup.Art.Live.Speed;
+                setup.Art.Lively = false;
+                await Task.Delay(1200);
+                double back = setup.Art.Live.Speed;
+                bool ok = moved > 0.5 && lively > 0.9 * SphereMotion.LivelySpeed && back < 1.2;
+                report.AppendLine(FormattableString.Invariant(
+                    $"motion-live: moved={moved:0.0} DIP in 1.5 s; speed calm={calm:0.00} lively-after-1.2s={lively:0.00} calm-after-1.2s={back:0.00}; ok={(ok ? 1 : 0)}"));
+                if (!ok)
+                    problems++;
+            }
+            else
+                report.AppendLine("motion-live: Windows animations are off, the sphere stays still");
             foreach (string name in SetupPages)
             {
                 setup.PreviewPage(name);
@@ -43,11 +66,33 @@ public static class Screens
                     Save(setup.Surface, Path.Combine(folder, $"{n:00}-{name}.png"), scale);
                 n++;
             }
+            // the sphere's whole wandering range, at its liveliest, must stay in the right half and below the title bar
+            var range = setup.Art.WanderBounds();
+            double half = setup.Surface.ActualWidth / 2;
+            bool inside = range.Left >= half && range.Top >= 44 && range.Right <= setup.Surface.ActualWidth && range.Bottom <= setup.Surface.ActualHeight;
+            report.AppendLine(FormattableString.Invariant(
+                $"motion: left={range.Left:0.#}; top={range.Top:0.#}; right={range.Right:0.#}; bottom={range.Bottom:0.#}; half={half:0.#}; inside={(inside ? 1 : 0)}"));
+            if (!inside)
+                problems++;
+            // the sphere posed at given phases, calm on Welcome and lively on Installing
+            foreach (double t in times)
+            {
+                string tag = t.ToString("0.##", CultureInfo.InvariantCulture);
+                foreach (var (name, lively) in new[] { ("welcome", false), ("installing", true) })
+                {
+                    setup.PreviewPage(name);
+                    setup.Art.Pose(t, lively);
+                    await Settle(setup);
+                    if (!layoutOnly)
+                        Save(setup.Surface, Path.Combine(folder, $"{name}-t{tag}.png"), scale);
+                }
+            }
             setup.Close();
 
             var uninstall = new UninstallWindow(ArkInfo.DefaultInstallDir, preview: true);
             OffScreen(uninstall);
             uninstall.Show();
+            uninstall.Art.Pose(null);
             await Settle(uninstall);
             problems += Check(report, "uninstall", uninstall.Surface, uninstall.Body);
             if (!layoutOnly)

@@ -118,6 +118,9 @@ try {
         foreach ($page in @('welcome','options','installing','done','error','uninstall')) {
             if ($layout -notmatch "(?m)^${page}: elements=[1-9][0-9]*; outside=0; overlap=0; clipped=0;") { throw "Page $page failed its layout checks: $layout" }
         }
+        # The wandering sphere stays in the right half, and (unless Windows animations are off) moves and eases.
+        if ($layout -notmatch '(?m)^motion: .*; inside=1') { throw "The sphere's wandering range leaves the right half: $layout" }
+        if ($layout -notmatch '(?m)^motion-live: (.*; ok=1|Windows animations are off)') { throw "The sphere animation did not run or ease: $layout" }
         if (-not $LayoutOnly -and @(Get-ChildItem -LiteralPath $captures -Filter '*.png').Count -ne 6) { throw 'Missing page captures.' }
     }
 } finally {

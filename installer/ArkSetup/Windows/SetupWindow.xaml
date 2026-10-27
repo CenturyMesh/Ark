@@ -17,7 +17,7 @@
         </Border>
 
         <Grid x:Name="Surface" Background="{StaticResource Deep}">
-            <c:ArtBackdrop FocusX="0.75" FocusY="0.52" ArtHeight="1.12" />
+            <c:ArtBackdrop x:Name="Art" FocusX="0.75" FocusY="0.52" ArtHeight="1.12" />
             <Rectangle IsHitTestVisible="False" Fill="{StaticResource PanelShade}" />
             <Rectangle IsHitTestVisible="False" VerticalAlignment="Top" Height="96" Fill="{StaticResource TopShade}" />
             <Rectangle IsHitTestVisible="False" VerticalAlignment="Bottom" Height="180" Fill="{StaticResource BottomShade}" />

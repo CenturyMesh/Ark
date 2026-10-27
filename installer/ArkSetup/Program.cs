@@ -54,7 +54,7 @@ public static class Program
 
 #if ARK_SETUP_SELFTEST
         if (args.Screenshot != null)
-            return RunApp(app => Screens.Run(app, payload, args.Screenshot, args.ScreenshotScale, args.LayoutOnly));
+            return RunApp(app => Screens.Run(app, payload, args.Screenshot, args.ScreenshotScale, args.LayoutOnly, args.ScreenshotTimes));
 #endif
 
         using var single = new Mutex(true, ArkInfo.Isolated ? $@"Local\MeshSphere.ArkSetup.Test.{ArkInfo.IsolationId}" : @"Local\MeshSphere.ArkSetup", out bool first);

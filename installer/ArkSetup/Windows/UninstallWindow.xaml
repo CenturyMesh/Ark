@@ -16,7 +16,7 @@
         </Border>
 
         <Grid x:Name="Surface" Background="{StaticResource Deep}">
-            <c:ArtBackdrop FocusX="0.86" FocusY="0.5" ArtHeight="1.2" />
+            <c:ArtBackdrop x:Name="Art" FocusX="0.86" FocusY="0.5" ArtHeight="1.2" MotionScale="0.5" />
             <Rectangle IsHitTestVisible="False" Fill="{StaticResource DialogShade}" />
             <Border Background="Transparent" MouseLeftButtonDown="DragArea_MouseDown" />
 

@@ -9,6 +9,14 @@ upgrading offers the previous folder, including the one an older Inno Setup
 installer recorded. The interface follows the Windows language (English or
 Portuguese); `--lang en|pt` forces one.
 
+The key art has two layers: a still plate and the MeshSphere sphere, which wanders
+slowly over it (sums of incommensurate sines for position, a ±3 % breathing scale and
+a ±4° turn). While ARK installs it moves about 2.6 times faster with 1.3 times the
+range, easing in and out over about a second. It stays in the right half of the
+window, is driven by WPF's animation clock at 30 frames per second, and stays still
+when Windows animations are turned off. At rest the two layers reproduce the
+rendered frame; see [third-party notices](THIRD_PARTY_NOTICES.md) for its provenance.
+
 The setup does not lay out ARK itself. It extracts the packaged runtime to a
 temporary folder and runs that package's own `Install-ARK.ps1` (the same
 `Initialize-ArkInstall` used by the portable ZIP), which creates `versions`,
@@ -54,8 +62,11 @@ directory. Such builds have their own installed-app registration
 (`MeshSphere.ARK.Test.<id>`), a `-test-` filename suffix, and no shortcuts. Any
 setup accepts `--test-isolated <id>` for the same isolation; `test-distribution.ps1`
 uses it to exercise the public setup. Add `-SelfTest` only to a private build to
-include the page renderer (`--screenshot <dir> [--screenshot-scale N] [--layout-only]`),
-which draws every page to PNG and writes a layout report without installing.
+include the page renderer (`--screenshot <dir> [--screenshot-scale N]
+[--screenshot-times T1,T2,…] [--layout-only]`), which draws every page to PNG and
+writes a layout report without installing. The times also capture Welcome (calm) and
+Installing (lively) with the sphere posed at those phases; the report checks the
+sphere's whole wandering range and that the live animation moves and eases.
 Public builds omit that code. Exercise the real payload with:
 
 ```powershell
@@ -72,7 +83,8 @@ Supply a lower-version `-PreviousInstallerPath` built with the same isolated ID
 (this setup or an older Inno one) to exercise upgrade, activation and manual
 rollback. This direct state check does not claim a real startup acknowledgement
 or hosted delivery trial. `-CaptureWizard` needs a `-SelfTest` build; it fails on
-controls outside their page, overlapping blocks or clipped text. Inspect the
+controls outside their page, overlapping blocks, clipped text, or a sphere that could
+reach the text panel. Inspect the
 PNGs before declaring visual acceptance; `-LayoutOnly` skips them.
 
 This addresses **F.03/F.05 — Parcial**. Local installer tests do not establish

@@ -59,7 +59,10 @@ try {
     $properties = @("-p:ArkVersion=$version", "-p:ArkCode=$($release.code)")
     if ($TestIsolationId) { $properties += "-p:ArkTestIsolationId=$TestIsolationId" }
     if ($SelfTest) { $properties += '-p:ArkSetupSelfTest=true' } else { $properties += '-p:ArkSetupSelfTest=false' }
-    & $Dotnet publish (Join-Path $repository 'installer/ArkSetup/ArkSetup.csproj') -c Release -o $publish --nologo @properties
+    # Public and self-test builds share intermediates; clear them so a public build never
+# reuses a compile made with other properties (for example the self-test screenshot mode).
+foreach ($stale in 'obj', 'bin') { $path = Join-Path $publishRoot $stale; if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force } }
+& $Dotnet publish (Join-Path $repository 'installer/ArkSetup/ArkSetup.csproj') -c Release -o $publish --nologo @properties
     if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed ($LASTEXITCODE)." }
     $stub = Join-Path $publish 'ARK-Setup.exe'
     if (-not (Test-Path -LiteralPath $stub -PathType Leaf)) { throw "dotnet publish did not produce $stub." }
