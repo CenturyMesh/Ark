@@ -5,6 +5,7 @@ using ActionIcon=std::vector<ActionIconStroke>;
 #include "action_icon_kit.inl"
 #include "action_icons_set_a.inl"
 #include "action_icons_set_b.inl"
+#include "action_icons_set_c.inl"
 static const ActionIcon* actionVectorIcon(int action){
     static const std::map<int,ActionIcon> icons=[] {
         std::map<int,ActionIcon> result;
@@ -91,7 +92,7 @@ static const ActionIcon* actionVectorIcon(int action){
         auto& rubber=result[49300];arc(rubber,.5f,.5f,.38f,.28f,0,360);arc(rubber,.5f,.5f,.23f,.14f,0,360);for(float x:{.24f,.39f,.54f,.69f})line(rubber,x,.27f,x+.10f,.36f);
         result[49301]=rubber;
         auto& applySurface=result[49502];poly(applySurface,{{.16f,.53f},{.40f,.76f},{.85f,.22f}});
-        addActionIconsSetA(result);addActionIconsSetB(result);
+        addActionIconsSetA(result);addActionIconsSetB(result);addActionIconsSetC(result);
         return result;
     }();
     auto found=icons.find(action);return found==icons.end()?nullptr:&found->second;

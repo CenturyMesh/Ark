@@ -5246,7 +5246,7 @@ static void drawFrame(HDC hdc){
             if(action.id>=496&&action.id<=498){auto* frame=selectedPartFeature();enabled=frame&&frame->type==FeatureType::ConstructionFrame;}
             if(g_toolModule==0&&action.id==108)enabled=false;
             if(hover){overlay(cursor,101,cardW-3,86,th::rowRadius,th::hover);ribbonHint=g_toolModule==0&&action.id==108?"Sheet mirroring is unavailable; Model tools retains exact solid mirroring":enabled?action.title:action.id>=496&&action.id<=498?"Select a Construction Frame or its instance. Model > Frame creates the member program; individual solids and tubes are unsupported.":"Select a compatible part or assembly";}
-            float iconSize=std::min(40.f,cardW-16);glyph(action.id==480?457:action.id,cursor+(cardW-3-iconSize)*.5f,108,iconSize,enabled?.9f:.35f);ribbonLabel(action.title,cursor,cardW-3,enabled?th::text:th::faint);if(enabled)g_zones.push_back({cursor,100,cardW-3,88,action.id});cursor+=cardW;
+            float iconSize=std::min(40.f,cardW-16);glyph(action.id,cursor+(cardW-3-iconSize)*.5f,108,iconSize,enabled?.9f:.35f);ribbonLabel(action.title,cursor,cardW-3,enabled?th::text:th::faint);if(enabled)g_zones.push_back({cursor,100,cardW-3,88,action.id});cursor+=cardW;
         }
         textTone(group.title,start+(cursor-3-start-textWidth(group.title,.62f))*.5f,193,.62f,th::muted);if(groupIndex+1<groups.size())cursor+=groupGap;
     }
