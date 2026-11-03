@@ -30,13 +30,18 @@ document and the selected Assistant account/endpoint. **Focused** is the default
 three roles with one conversation running at a time. The engineer starts and
 authors the design, calling on the designer or reviewer for a specific task.
 **Parallel** enables three to eight roles with one to six part designers for
-independent components. Each role has an independent conversation:
+independent components. **Agents** > **Parametric designer (optional)** adds a
+program author to either workflow; it is off until you choose it. A team has at
+most eight roles, so with this role on Parallel offers one to five part
+designers, and switching it on at eight agents turns Part designer 6 off. Each
+role has an independent conversation:
 
 | Role | Responsibility | Document permission |
 | --- | --- | --- |
 | Engineer / orchestrator | Part geometry, dimensions, fabrication intent, placements, mates and overall design | Part and assembly writes using observed revision |
 | Part designers (up to six) | Actual parts, sketches, dimensions, materials and fabrication intent | Part/sketch writes using observed revision |
 | Physics reviewer | Actual calculations, geometry checks and measured revision proposals | Read and propose corrections |
+| Parametric designer (optional) | Rule-driven configurable families as namespaced [parametric programs](PARAMETRIC_PROGRAMS.md) | Publishes only its own compiled program candidates using observed revision |
 
 On a new empty document in Parallel mode, the engineer first commits editable
 geometry. The app retains other writers' accepted assignments and steering until
@@ -46,7 +51,12 @@ leaves an explicit unfinished checkpoint.
 
 Saved role IDs remain `engineer`, `designer` and `reviewer`, so existing model
 and effort settings retain their owners. Additional parallel designers use
-`designer2` through `designer6`. The runtime enforces each role's scope.
+`designer2` through `designer6`. The optional role uses `parametric`; its model,
+effort and connector follow those eight saved entries, and
+`team_parametric_designer` records the switch, so earlier settings keep their
+owners and leave it off. Turning it off keeps its choices, and Part designer 6
+keeps its own while the role takes that place. The runtime enforces each role's
+scope.
 Specialists await assignments, report created IDs/datums/evidence and return
 to idle. In focused mode, sending a task queues its recipient until the current
 turn finishes; the sender ends the turn instead of polling for the queued work.
@@ -56,6 +66,20 @@ are suppressed; parallel completion and all failures still notify the engineer.
 Cards use up to two rows with paging on smaller displays; all configured
 parallel agents can run concurrently regardless of the visible page. Focused
 mode keeps one conversation active even when several assignments are queued.
+
+The local `studio-parametric-role-ui` check covers this option offline. A
+scripted Focused team runs through Studio's own tool queue: the engineer assigns
+the role, it publishes one program candidate, native inspection measures both
+generated solids at their exact volumes, the reviewer reports and the goal is
+reported complete. Its 117-function catalogue, 43 after deferral with the
+`overview` and `programs` pack, is within the 128-function limit. Legacy settings
+are read back with their owners, and a disabled role leaves a default run of
+three roles. Role cards stay inside the dock at eight window sizes from
+1180x800 to 3840x2160, in normal and expanded docks. Captures up to 2560x1200
+were inspected; the 3840x2160 result is measured bounds only because that
+window exceeded the test display. Scripted transports prove the host path, not
+a provider's behaviour: no real provider run or quality, time or token benefit
+is claimed.
 
 Each card's **Settings** selects a model and reasoning effort for that role.
 In ChatGPT-plan mode these are native drop-down lists populated from the selected

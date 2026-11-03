@@ -380,20 +380,29 @@ static int g_selectedSketchConstraint=-1,g_sketchConstraintPage=0;
 static arkjson::Value g_sketchDiagnosis;
 static AssistantConfig g_assistantConfig;static arkjson::Value g_conversation=arkjson::Value::makeArr();
 static bool g_teamMode=false,g_teamStarted=false,g_teamFocusedWorkflow=true;
-static constexpr size_t teamCapacity=8;static unsigned g_teamRoleCount=3,g_teamPage=0;
+// Saved role settings live on fixed slots: 0-7 are the three core roles and part designers;
+// the optional Parametric designer keeps the last slot at any team size. Cards, snapshots
+// and chips count active positions, and teamRoleSlot maps them back to those settings.
+static constexpr size_t teamCapacity=9,teamParametricSlot=teamCapacity-1;static constexpr unsigned teamMaxRoles=8;static unsigned g_teamRoleCount=3,g_teamPage=0;static bool g_teamParametricRole=false;
+static int g_teamMenuSmoke=0;
+static unsigned teamActiveRoleCount(){return g_teamRoleCount+(g_teamParametricRole?1:0);}
+// AgentTeam accepts eight roles, so the optional role takes the place of a part designer.
+static unsigned teamBaseRoleLimit(){return teamMaxRoles-(g_teamParametricRole?1:0);}
+static size_t teamRoleSlot(size_t position){return position<g_teamRoleCount?position:g_teamParametricRole&&position==g_teamRoleCount?teamParametricSlot:teamCapacity;}
+static size_t teamRolePosition(size_t slot){return slot<g_teamRoleCount?slot:g_teamParametricRole&&slot==teamParametricSlot?g_teamRoleCount:teamCapacity;}
 static AgentTeam g_agentTeam;static AgentTeamSnapshot g_teamSnapshot;
-static std::array<std::string,8> g_teamModels{},g_teamEfforts{};
-static std::array<std::optional<AssistantConfig>,8> g_teamConnectors{};
+static std::array<std::string,teamCapacity> g_teamModels{},g_teamEfforts{};
+static std::array<std::optional<AssistantConfig>,teamCapacity> g_teamConnectors{};
 static AssistantConfig teamRoleConfig(size_t index);
-static std::array<std::string,8> g_teamReceiptIds{};
-static std::array<std::optional<UsageReceipt>,8> g_teamReceipts{};
+static std::array<std::string,teamCapacity> g_teamReceiptIds{};
+static std::array<std::optional<UsageReceipt>,teamCapacity> g_teamReceipts{};
 static std::string g_teamGoal,g_teamTarget;
-static std::array<std::string,8> g_teamActivity{};
+static std::array<std::string,teamCapacity> g_teamActivity{};
 static std::shared_ptr<std::atomic_bool> g_teamCancel=std::make_shared<std::atomic_bool>(false);
 static u64 g_teamEpoch=0,g_teamEventSequence=0;
-static const char* g_teamRoleIds[]={"engineer","designer","reviewer","designer2","designer3","designer4","designer5","designer6"};
-static const char* g_teamRoleLabels[]={"ENGINEER / ORCHESTRATOR","PART DESIGNER 1","PHYSICS REVIEWER","PART DESIGNER 2","PART DESIGNER 3","PART DESIGNER 4","PART DESIGNER 5","PART DESIGNER 6"};
-static std::array<std::pair<unsigned,size_t>,8> g_teamReasoningAttached{}; // role -> {turn, reasoning bytes shown}
+static const char* g_teamRoleIds[]={"engineer","designer","reviewer","designer2","designer3","designer4","designer5","designer6","parametric"};
+static const char* g_teamRoleLabels[]={"ENGINEER / ORCHESTRATOR","PART DESIGNER 1","PHYSICS REVIEWER","PART DESIGNER 2","PART DESIGNER 3","PART DESIGNER 4","PART DESIGNER 5","PART DESIGNER 6","PARAMETRIC DESIGNER"};
+static std::array<std::pair<unsigned,size_t>,teamCapacity> g_teamReasoningAttached{}; // role -> {turn, reasoning bytes shown}
 static void resetTeamView(){g_teamSnapshot={};g_teamActivity={};g_teamGoal.clear();g_teamReceipts={};g_teamReasoningAttached={};}
 static std::vector<std::pair<std::string,std::string>> g_chatLog;static int g_chatScroll=0;
 static std::string g_singleGoal;
@@ -455,7 +464,7 @@ static StudioResources g_resources;
 static void updateCostDisplay(bool force=false);
 static std::thread g_pricingWorker;static PricingCatalog g_pricing;static bool g_pricingReady=false;static CostEstimate g_costEstimate;static bool g_costUsageMissing=false;static UsageLedger g_usageDisplayLedger;
 static constexpr UINT WM_ARK_PRICE=WM_APP+26,WM_ARK_TEAM=WM_APP+27;
-static std::array<AssistantUsage,8> g_teamLiveUsage{};static std::string g_activeToolRole,g_activeToolName,g_liveStepLabel;static u64 g_liveCompletedSteps=0;
+static std::array<AssistantUsage,teamCapacity> g_teamLiveUsage{};static std::string g_activeToolRole,g_activeToolName,g_liveStepLabel;static u64 g_liveCompletedSteps=0;
 #include "agent_presence_state.inl"
 #include "baked_motions_state.inl"
 #include "inertial_state_056c.inl"
@@ -560,7 +569,7 @@ static int teamCardTop(){const auto dock=chatDockGeometry();return dock.chatTop+
 // on one page; otherwise compact cards, paged, at least one per page.
 struct TeamCardMetrics {int rows=1;float height=teamCardHeight,stride=teamCardStride;};
 static TeamCardMetrics teamCardMetrics(){
-    const int room=chatDockGeometry().chatBottom-teamCardTop(),columns=teamCardColumns(),needed=std::max(1,((int)g_teamRoleCount+columns-1)/columns);
+    const int room=chatDockGeometry().chatBottom-teamCardTop(),columns=teamCardColumns(),needed=std::max(1,((int)teamActiveRoleCount()+columns-1)/columns);
     for(float height:{(float)teamCardHeight,148.f,92.f})if((room+8)/((int)height+8)>=needed)return {needed,height,height+8};
     const int rows=std::max(1,(room+8)/100);const float height=rows>1?92.f:std::clamp((float)room,84.f,92.f);return {rows,height,height+8};
 }
@@ -2554,7 +2563,7 @@ static void readConnectorSettings(const arkjson::Value& v,AssistantConfig& confi
 static arkjson::Value g_settingsBase; // Settings as this window last loaded or wrote them.
 static arkjson::Value uiSettingsJson(){
     using V=arkjson::Value;V j=V::makeObj();j.set("endpoint",V::makeStr(g_assistantConfig.endpoint));j.set("model",V::makeStr(g_assistantConfig.model));j.set("reasoning_effort",V::makeStr(g_assistantConfig.reasoningEffort));j.set("api_key_env",V::makeStr(g_assistantConfig.apiKeyEnv));j.set("assistant_auth_mode",V::makeStr(connectorAuthName(g_assistantConfig.authMode)));j.set("grid",V::makeBool(g_grid));j.set("wireframe",V::makeBool(wireframe));j.set("light_background",V::makeBool(g_lightBackground));j.set("satin",V::makeBool(g_satin));j.set("show_datum_planes",V::makeBool(g_showDatumPlanes));j.set("occlusion_mode",V::makeNum(g_occlusionMode));j.set("occlusion_strength",V::makeNum(g_occlusionStrength));j.set("occlusion_radius",V::makeNum(g_occlusionRadius));j.set("antialiasing",V::makeNum(g_antialiasing));j.set("contact_shadow_strength",V::makeNum(g_contactShadowStrength));j.set("path_tracing",V::makeBool(g_pathTracing));j.set("show_edges",V::makeBool(g_showEdges));j.set("orthographic",V::makeBool(g_cameraOrtho));
-    V team=V::makeArr();for(size_t i=0;i<teamCapacity;++i){V role=V::makeObj();role.set("model",V::makeStr(g_teamModels[i]));role.set("reasoning_effort",V::makeStr(g_teamEfforts[i]));team.arr.push_back(std::move(role));}j.set("team_roles",std::move(team));j.set("team_role_count",V::makeNum(g_teamRoleCount));j.set("team_focused_workflow",V::makeBool(g_teamFocusedWorkflow));j.set("team_mode",V::makeBool(g_teamMode));j.set("library_root",V::makeStr(g_libraryRoot));j.set("library_search",V::makeStr(g_libraryText));
+    V team=V::makeArr();for(size_t i=0;i<teamCapacity;++i){V role=V::makeObj();role.set("model",V::makeStr(g_teamModels[i]));role.set("reasoning_effort",V::makeStr(g_teamEfforts[i]));team.arr.push_back(std::move(role));}j.set("team_roles",std::move(team));j.set("team_role_count",V::makeNum(g_teamRoleCount));j.set("team_parametric_designer",V::makeBool(g_teamParametricRole));j.set("team_focused_workflow",V::makeBool(g_teamFocusedWorkflow));j.set("team_mode",V::makeBool(g_teamMode));j.set("library_root",V::makeStr(g_libraryRoot));j.set("library_search",V::makeStr(g_libraryText));
     j.set("agent_presence",arkjson::Value::makeBool(g_showAgentPresence));j.set("assistant_dock_open",V::makeBool(g_assistantDockOpen));j.set("assistant_dock_mode",V::makeStr(chatDockModeName()));j.set("assistant_dock_width",V::makeNum(g_chatDockUserWidth));j.set("display_units",g_displayUnits.json());j.set("connector",connectorSettings(g_assistantConfig));V connectors=V::makeArr();for(size_t i=0;i<teamCapacity;++i)connectors.arr.push_back(g_teamConnectors[i]?connectorSettings(*g_teamConnectors[i]):V{});j.set("team_connectors",connectors);
     return j;
 }
@@ -2588,6 +2597,8 @@ static void loadUiSettingsFile(){
         if(auto* count=j.find("team_role_count");count&&count->t==arkjson::Value::Num&&count->num>=3&&count->num<=8)g_teamRoleCount=(unsigned)count->num;
         if(auto* focused=j.find("team_focused_workflow");focused&&focused->t==arkjson::Value::Bool)g_teamFocusedWorkflow=focused->b;
         if(g_teamFocusedWorkflow)g_teamRoleCount=3;
+        if(auto* parametric=j.find("team_parametric_designer");parametric&&parametric->t==arkjson::Value::Bool)g_teamParametricRole=parametric->b;
+        g_teamRoleCount=std::min(g_teamRoleCount,teamBaseRoleLimit());
         if(auto* roles=j.find("team_roles");roles&&roles->t==arkjson::Value::Arr)for(size_t i=0;i<teamCapacity&&i<roles->arr.size();++i){if(auto* v=roles->arr[i].find("model");v&&v->t==arkjson::Value::Str)g_teamModels[i]=v->str;if(auto* v=roles->arr[i].find("reasoning_effort");v&&v->t==arkjson::Value::Str)g_teamEfforts[i]=v->str;}
         if(auto* v=j.find("grid"))g_grid=v->b;if(auto* v=j.find("wireframe"))wireframe=v->b;if(auto* v=j.find("light_background"))g_lightBackground=v->b;if(auto* v=j.find("satin"))g_satin=v->b;if(auto* v=j.find("show_datum_planes");v&&v->t==arkjson::Value::Bool)g_showDatumPlanes=v->b;
         if(auto* v=j.find("occlusion");v&&v->t==arkjson::Value::Bool)g_occlusionMode=v->b?2:0;
@@ -3050,7 +3061,7 @@ static void refreshPricing(){if(g_pricingBusy||g_headless)return;if(g_pricingWor
 static void updateCostDisplay(bool force){
     static auto next=std::chrono::steady_clock::time_point{};auto now=std::chrono::steady_clock::now();if(!force&&now<next)return;next=now+std::chrono::seconds(1);
     if(!g_busy)g_usageDisplayLedger=g_doc.usage;Document display;display.usage=g_usageDisplayLedger;
-    if(g_teamStarted)for(size_t i=0;i<teamCapacity;++i){const auto& usage=g_teamLiveUsage[i];if(g_teamReceiptIds[i].empty()||(!usage.reportedResponses&&!usage.missingResponses))continue;UsageReceipt receipt;receipt.id=g_teamReceiptIds[i];receipt.source="studio_team_"+std::string(g_teamRoleIds[i]);receipt.provenance="provider_response";receipt.model=i<g_teamSnapshot.roles.size()?g_teamSnapshot.roles[i].model:g_teamModels[i].empty()?g_assistantConfig.model:g_teamModels[i];receipt.inputTokens=usage.inputTokens;receipt.outputTokens=usage.outputTokens;receipt.totalTokens=usage.totalTokens;receipt.cachedInputTokens=usage.cachedInputTokens;receipt.reasoningTokens=usage.reasoningTokens;receipt.reportedResponses=usage.reportedResponses;receipt.missingResponses=usage.missingResponses;updateUsageSnapshot(display,receipt);}
+    if(g_teamStarted)for(size_t i=0;i<teamCapacity;++i){const auto& usage=g_teamLiveUsage[i];if(g_teamReceiptIds[i].empty()||(!usage.reportedResponses&&!usage.missingResponses))continue;UsageReceipt receipt;receipt.id=g_teamReceiptIds[i];receipt.source="studio_team_"+std::string(g_teamRoleIds[i]);receipt.provenance="provider_response";const size_t position=teamRolePosition(i);receipt.model=position<g_teamSnapshot.roles.size()?g_teamSnapshot.roles[position].model:g_teamModels[i].empty()?g_assistantConfig.model:g_teamModels[i];receipt.inputTokens=usage.inputTokens;receipt.outputTokens=usage.outputTokens;receipt.totalTokens=usage.totalTokens;receipt.cachedInputTokens=usage.cachedInputTokens;receipt.reasoningTokens=usage.reasoningTokens;receipt.reportedResponses=usage.reportedResponses;receipt.missingResponses=usage.missingResponses;updateUsageSnapshot(display,receipt);}
     g_costEstimate=estimateDocumentCost(display,g_pricing);g_costUsageMissing=usageTotals(display).missingResponses!=0;
 }
 static std::string costSummary(){auto money=[](double value){char buffer[32];std::snprintf(buffer,sizeof buffer,"%.4g",value);return std::string(buffer);};u64 tokens=g_costEstimate.pricedTokens+g_costEstimate.unpricedTokens;std::string result="Drawing "+std::string(g_costUsageMissing?">=":"")+std::to_string(tokens)+" tokens";if(!g_pricingReady)return result+" / rates "+(g_pricingBusy?"loading":"N/A");result+=" / API eq std ";result+=g_costEstimate.pricedTokens?"$"+money(g_costEstimate.standardShortUsd)+"-"+money(g_costEstimate.standardLongUsd):"N/A";result+=" / credits "+(g_costEstimate.pricedCreditTokens?money(g_costEstimate.standardCredits):"N/A");if(g_costEstimate.partial||g_costEstimate.unpricedTokens||g_costEstimate.unpricedCreditTokens)result+=" (partial)";return result;}
@@ -3103,9 +3114,9 @@ static void pollTeam(bool force=false){
         if(index<teamCapacity&&event.kind!=AgentTeamEvent::Usage)g_teamActivity[index]=(event.kind==AgentTeamEvent::ToolStart?"Running ":event.kind==AgentTeamEvent::ToolEnd?(event.toolError?"Failed ":"Completed "):"")+(event.tool.empty()?event.text:event.tool+(event.toolError?" / "+event.text:""));
         if(event.kind==AgentTeamEvent::Usage||(event.kind==AgentTeamEvent::Status&&!event.providerRetry))continue;
         std::string detail=event.kind==AgentTeamEvent::ToolStart?"Tool started: "+event.tool:event.kind==AgentTeamEvent::ToolEnd?(event.toolError?"Tool failed: ":"Tool finished: ")+event.tool+(event.toolError?" / "+event.text:""):event.text;
-        if(!detail.empty()){g_chatLog.push_back({event.roleId.empty()?"Team":event.roleId,detail});g_chatScroll=0;if(event.kind==AgentTeamEvent::Text)attachTeamReasoning(g_chatLog.size()-1,index);}
+        if(!detail.empty()){g_chatLog.push_back({event.roleId.empty()?"Team":event.roleId,detail});g_chatScroll=0;if(event.kind==AgentTeamEvent::Text)attachTeamReasoning(g_chatLog.size()-1,teamRolePosition(index));}
     }
-    for(size_t i=0;i<g_teamSnapshot.roles.size()&&i<teamCapacity;++i){const auto& role=g_teamSnapshot.roles[i];const auto& usage=role.usage;if(!usage.reportedResponses&&!usage.missingResponses)continue;
+    for(size_t position=0;position<g_teamSnapshot.roles.size();++position){const size_t i=teamRoleSlot(position);if(i>=teamCapacity)break;const auto& role=g_teamSnapshot.roles[position];const auto& usage=role.usage;if(!usage.reportedResponses&&!usage.missingResponses)continue;
         if(g_teamReceipts[i]&&g_teamReceipts[i]->reportedResponses==usage.reportedResponses&&g_teamReceipts[i]->missingResponses==usage.missingResponses&&g_teamReceipts[i]->totalTokens==usage.totalTokens)continue;
         UsageReceipt receipt;receipt.id=g_teamReceiptIds[i];receipt.source="studio_team_"+role.id;receipt.provenance="provider_response";receipt.model=role.model;
         receipt.inputTokens=usage.inputTokens;receipt.outputTokens=usage.outputTokens;receipt.totalTokens=usage.totalTokens;receipt.cachedInputTokens=usage.cachedInputTokens;receipt.reasoningTokens=usage.reasoningTokens;receipt.reportedResponses=usage.reportedResponses;receipt.missingResponses=usage.missingResponses;g_teamReceipts[i]=receipt;applyUsageReceipt(receipt);
@@ -3180,8 +3191,8 @@ static void teamRoleDialog(size_t index){
 }
 static void openPendingRoleSettings(){if(g_pendingRoleSettings<0||!g_roleCatalogReady||g_dialog||g_busy)return;int role=g_pendingRoleSettings;g_pendingRoleSettings=-1;g_roleCatalogReady=false;if(g_pendingRoleAccount==g_authStatus.activeClientId&&g_assistantConfig.authMode==AssistantAuthMode::ChatGptPlan&&!g_authModels.empty())teamRoleDialog((size_t)role);}
 static void chooseTeamTarget(){
-    HMENU menu=CreatePopupMenu();AppendMenuA(menu,MF_STRING|((g_teamFocusedWorkflow?g_teamTarget=="all":g_teamTarget.empty())?MF_CHECKED:0),1,"Entire team");for(unsigned i=0;i<g_teamRoleCount;++i)AppendMenuA(menu,MF_STRING|(g_teamTarget==g_teamRoleIds[i]?MF_CHECKED:0),i+2,g_teamRoleLabels[i]);
-    POINT cursor;GetCursorPos(&cursor);int action=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,cursor.x,cursor.y,0,g_window,nullptr);DestroyMenu(menu);if(action>=1&&action<=(int)g_teamRoleCount+1)g_teamTarget=action==1?(g_teamFocusedWorkflow?"all":""):g_teamRoleIds[action-2];
+    HMENU menu=CreatePopupMenu();AppendMenuA(menu,MF_STRING|((g_teamFocusedWorkflow?g_teamTarget=="all":g_teamTarget.empty())?MF_CHECKED:0),1,"Entire team");for(unsigned i=0;i<teamActiveRoleCount();++i){const size_t slot=teamRoleSlot(i);AppendMenuA(menu,MF_STRING|(g_teamTarget==g_teamRoleIds[slot]?MF_CHECKED:0),i+2,g_teamRoleLabels[slot]);}
+    POINT cursor;GetCursorPos(&cursor);int action=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,cursor.x,cursor.y,0,g_window,nullptr);DestroyMenu(menu);if(action>=1&&action<=(int)teamActiveRoleCount()+1)g_teamTarget=action==1?(g_teamFocusedWorkflow?"all":""):g_teamRoleIds[teamRoleSlot((size_t)action-2)];
 }
 // The pending object is an immutable identity, separate from the live selection.
 static bool attachPendingObjectContext(std::string& prompt){
@@ -3230,7 +3241,9 @@ static bool assistantResumeRequest(std::string prompt){
     for(auto& c:prompt)c=(char)std::tolower((unsigned char)c);
     return prompt=="resume"||prompt=="continue"||prompt=="continua"||prompt=="continuar"||prompt=="retoma"||prompt=="retomar"||prompt=="prossegue";
 }
-static void sendTeam(const std::string& explicitPrompt={},const std::array<AssistantTransport,8>& transports={}){
+// Slot defaults only: fixture transports and isolated specialists start without a pack.
+static std::string teamRoleOnboardingPack(size_t slot){return slot==teamParametricSlot?agentOnboardingPack({"overview","programs"}):slot==2?agentOnboardingPack({"overview","physics"}):slot==0?agentOnboardingPack({"overview","sketch","solids","assembly"}):agentAuthoringOnboardingPack();}
+static void sendTeam(const std::string& explicitPrompt={},const std::array<AssistantTransport,teamCapacity>& transports={}){
     if(g_busy&&!g_teamStarted){g_status="Wait for the current document operation before starting a new team.";return;}
     if(g_chatBusy){g_status="Wait for the single Assistant turn to finish.";return;}std::string prompt=assistantPrompt(explicitPrompt);if(prompt.find_first_not_of(" \r\n\t")==std::string::npos&&(!explicitPrompt.empty()||!g_pendingAssistantImage))return;
     const std::string visiblePrompt=explicitPrompt.empty()?assistantImageVisiblePrompt(prompt):prompt;if(!attachPendingObjectContext(prompt))return;auto userMessage=explicitPrompt.empty()?pendingAssistantImageMessage(prompt):assistantUserMessage(prompt);
@@ -3238,18 +3251,19 @@ static void sendTeam(const std::string& explicitPrompt={},const std::array<Assis
     else{
         if(g_teamStarted&&g_teamSnapshot.running){g_status="Team is still stopping.";return;}
         g_session.beginBomTask();
-        AgentTeamConfig team;team.maxWorkers=g_teamRoleCount;team.focusedWorkflow=g_teamFocusedWorkflow;team.isolatePartDesigners=team.focusedWorkflow;team.orchestratedStart=g_teamFocusedWorkflow||std::none_of(transports.begin(),transports.end(),[](const auto& t){return (bool)t;});
+        AgentTeamConfig team;team.maxWorkers=teamActiveRoleCount();team.focusedWorkflow=g_teamFocusedWorkflow;team.isolatePartDesigners=team.focusedWorkflow;team.orchestratedStart=g_teamFocusedWorkflow||std::none_of(transports.begin(),transports.end(),[](const auto& t){return (bool)t;});
         team.maxCommandsPerStep=128;team.maxFeaturesPerStep=32;team.maxPlacementsPerStep=64;
         team.requireLeadAuthoringCheckpoint=!team.focusedWorkflow&&g_doc.features.empty()&&g_doc.sketches.empty();team.requireReviewerCheckpoint=g_teamRoleCount>2;
         static const char* instructions[]={
             "Own design concept and orchestration, actual part sketches/features/materials/parameters and assembly. Start with the user's intent and a distinctive coherent concept; preserve requested curves, spatial form and proportions. Inspect the current document/revision before edits. Apply coherent atomic batches of related sketches, features and placements using one observed expected_revision, then inspect actual validation results. Delegate concrete tasks and requested checks with team_send kind:assignment; store revision-bound edit proposals with team_propose. team_context reads progress and team_proposal reads an existing proposal. Honor user-specified dimensions, materials and process constraints from the start; undeclared routes remain unspecified during concept work. Detailed fabrication checks belong to a requested production-readiness checkpoint or process claim, not every concept step or rendering/export action. Preserve the existing drawing; load/new/import/save/export operations require task authorization. Report actual tool results and remaining decisions.",
             "Own part design and actual sketches, features, materials and spatial form. Develop the requested concept before detailing fabrication; use curves when they express the design, and do not reduce a concept to boxes just to simplify a workflow. Inspect the current document/revision before edits. Write coherent atomic batches of related sketch entities and part features using one observed expected_revision; preserve the requested geometry. Honor explicit dimensions, materials and process constraints from the start; keep undeclared routes unspecified. The engineer owns assembly placements. Do not replace, load, save or export unrelated drawings. Send assembly decisions to engineer. Never claim an unexecuted proposal is implemented.",
-            "Own independent checks requested by the user or at an explicit design checkpoint. Do not impose a universal manufacturability review before concept development. Use actual math_eval, physics_inspect, materials_inspect, geometry and relevant manufacturing tools for those checks. Submit typed measured revision proposals with team_propose to engineer or designer. You are read-only. Report inspected evidence and unresolved checks; do not invent successful tests."};
-        for(size_t i=0;i<g_teamRoleCount;++i){auto config=teamRoleConfig(i);try{validateAssistantConfig(config);
+            "Own independent checks requested by the user or at an explicit design checkpoint. Do not impose a universal manufacturability review before concept development. Use actual math_eval, physics_inspect, materials_inspect, geometry and relevant manufacturing tools for those checks. Submit typed measured revision proposals with team_propose to engineer or designer. You are read-only. Report inspected evidence and unresolved checks; do not invent successful tests.",
+            "Own the rule-driven configurable families assigned to you as namespaced parametric programs. Honor explicit dimensions, materials and process constraints from the start as program parameters, bounds or assertions; keep undeclared routes unspecified. The engineer owns assembly placements and shared interfaces; send those needs to engineer. Do not replace, load, save or export unrelated drawings. Never claim an unpublished candidate is implemented."};
+        for(size_t position=0;position<teamActiveRoleCount();++position){const size_t i=teamRoleSlot(position);auto config=teamRoleConfig(i);try{validateAssistantConfig(config);
                 if(!transports[i]&&config.authMode==AssistantAuthMode::ApiKey&&!assistantKeyAvailable(config))throw std::runtime_error("The configured credential environment variable is unavailable.");
                 if(!transports[i]&&config.authMode==AssistantAuthMode::ChatGptPlan){if(!g_authStatus.connected||!g_authStatus.planAuthorized)throw std::runtime_error("Connect and authorize ChatGPT from Account first.");if(g_authModels.empty())throw std::runtime_error("Load the account model catalog from Account first.");if(std::none_of(g_authModels.begin(),g_authModels.end(),[&](const auto& model){return model.slug==config.model;}))throw std::runtime_error("The selected model is unavailable in this account's catalog.");}
             }catch(const std::exception& error){throw std::runtime_error(std::string(g_teamRoleLabels[i])+": "+error.what());}
-            AgentTeamRole role;role.id=g_teamRoleIds[i];role.label=g_teamRoleLabels[i];role.instructions=instructions[i==2?2:i==0?0:1];if(!transports[i])config.onboardingPack=(i==2?agentOnboardingPack({"overview","physics"}):i==0?agentOnboardingPack({"overview","sketch","solids","assembly"}):agentAuthoringOnboardingPack());config.memoryPrefetch=!transports[i];config.deferSpecialistTools=!transports[i];applyAgentRequestOptions(config);role.assistant=config;role.transport=feedbackFixtureTransport(transports[i]);role.canWrite=i!=2;role.discipline=i==0?AgentTeamDiscipline::Orchestrator:i==2?AgentTeamDiscipline::PhysicsReviewer:AgentTeamDiscipline::PartDesigner;team.roles.push_back(std::move(role));}
+            AgentTeamRole role;role.id=g_teamRoleIds[i];role.label=g_teamRoleLabels[i];role.instructions=instructions[i==teamParametricSlot?3:i==2?2:i==0?0:1];if(!transports[i])config.onboardingPack=teamRoleOnboardingPack(i);config.memoryPrefetch=!transports[i];config.deferSpecialistTools=!transports[i];applyAgentRequestOptions(config);role.assistant=config;role.transport=feedbackFixtureTransport(transports[i]);role.canWrite=i!=2;role.discipline=i==0?AgentTeamDiscipline::Orchestrator:i==2?AgentTeamDiscipline::PhysicsReviewer:i==teamParametricSlot?AgentTeamDiscipline::ParametricDesigner:AgentTeamDiscipline::PartDesigner;team.roles.push_back(std::move(role));}
         g_teamCancel=std::make_shared<std::atomic_bool>(false);auto cancel=g_teamCancel;auto epoch=g_documentEpoch;auto runSerial=++g_teamRunSerial;g_teamEpoch=epoch;g_teamEventSequence=0;g_teamReceipts={};g_teamReasoningAttached={};g_teamActivity={};g_teamLiveUsage={};g_draftViews.clear();g_liveCompletedSteps=0;g_liveStepLabel.clear();captureDraftContext();g_teamGoal=visiblePrompt;for(auto& id:g_teamReceiptIds)id=newUsageReceiptId();if(!transports[0]&&!transports[1]&&!transports[2]&&std::any_of(team.roles.begin(),team.roles.end(),[](const auto& role){return role.assistant.provider!="ollama"&&role.assistant.authMode!=AssistantAuthMode::CliAccount;}))refreshPricing();
         g_assistantReceiptId.clear();g_currentUsageReceipt.reset();g_pendingUsageReceipt.reset();
         auto teamExecutor=[cancel,epoch](const std::string& name,const arkjson::Value& args){
@@ -3258,7 +3272,7 @@ static void sendTeam(const std::string& explicitPrompt={},const std::array<Assis
         };
         if(std::none_of(transports.begin(),transports.end(),[](const auto& t){return (bool)t;}))team.completionCheck=[teamExecutor]{return teamExecutor("__ark_bom_completion",arkjson::Value::makeObj());};
         team.recordAction=[teamExecutor](const std::string&,const std::string& name,const arkjson::Value& args,const arkjson::Value& result,double elapsed){using V=arkjson::Value;V record=V::makeObj(),summary=V::makeObj(),answer=V::makeObj();record.set("tool",V::makeStr(name));record.set("elapsed_ms",V::makeNum(elapsed));if(const auto* commands=args.find("commands")){V rows=V::makeArr();for(const auto& command:commands->arr){V row=V::makeObj();if(const auto* op=command.find("op"))row.set("op",*op);rows.arr.push_back(row);}summary.set("commands",rows);}record.set("arguments",summary);if(const auto* error=result.find("isError"))answer.set("isError",*error);const auto* payload=result.find("structuredContent");if(!payload)payload=&result;for(const auto* key:{"isError","error","error_code"})if(const auto* value=payload->find(key))answer.set(key,*value);record.set("result",answer);auto receipt=teamExecutor("__ark_activity",record);V returned=result;const auto* data=receipt.find("structuredContent");if(!data)data=&receipt;for(const auto* key:{"activity_id","activity_project_id","activity_boundary","pending_feedback_ids","feedback_required","activity_capture_error"})if(const auto* value=data->find(key))returned.set(key,*value);return returned;};
-        g_agentTeam.start(team,userMessage,AgentSession::tools(),teamExecutor,[epoch,runSerial](const AgentTeamEvent& event){auto* value=new UiTeamEvent{event,epoch,runSerial};if(g_closing||!PostMessage(g_window,WM_ARK_TEAM,0,(LPARAM)value))delete value;});g_teamStarted=true;g_chatLog.push_back({"You -> team",visiblePrompt});g_status="Team started; "+std::to_string(g_teamRoleCount)+" agents, assigned parts and coordinated assembly.";
+        g_agentTeam.start(team,userMessage,AgentSession::tools(),teamExecutor,[epoch,runSerial](const AgentTeamEvent& event){auto* value=new UiTeamEvent{event,epoch,runSerial};if(g_closing||!PostMessage(g_window,WM_ARK_TEAM,0,(LPARAM)value))delete value;});g_teamStarted=true;g_chatLog.push_back({"You -> team",visiblePrompt});g_status="Team started; "+std::to_string(teamActiveRoleCount())+" agents, assigned parts and coordinated assembly.";
     }
     if(explicitPrompt.empty())clearPendingAssistantImage();g_pendingObjectTarget.reset();g_chatScroll=0;if(g_chatInput)SetWindowTextW(g_chatInput,L"");pollTeam(true);
 }
@@ -4056,15 +4070,18 @@ static void uiAction(int id){
         if(!g_headless){auto opened=ShellExecuteW(g_window,L"open",L"https://chatgpt.com/settings/usage",nullptr,nullptr,SW_SHOWNORMAL);if((INT_PTR)opened<=32)throw std::runtime_error("Could not open ChatGPT usage settings. Open https://chatgpt.com/settings/usage in your browser.");}
         g_status="ChatGPT Settings > Usage: enable credits for other apps if desired, save changes, then Resume after error.";return;
     }
-    if(id>=44020&&id<44028){teamConnectorDialog((size_t)(id-44020));return;}
-    if(id>=44000&&id<44008){teamRoleDialog((size_t)(id-44000));return;}
-    if(id==44011||id==44012){unsigned pages=(g_teamRoleCount+teamCardColumns()*teamCardRows()-1)/(teamCardColumns()*teamCardRows());g_teamPage=(g_teamPage+(id==44012?1:pages-1))%pages;return;}
+    if(id>=44020&&id<44020+(int)teamCapacity){teamConnectorDialog((size_t)(id-44020));return;}
+    if(id>=44000&&id<44000+(int)teamCapacity){teamRoleDialog((size_t)(id-44000));return;}
+    if(id==44011||id==44012){unsigned pages=(teamActiveRoleCount()+teamCardColumns()*teamCardRows()-1)/(teamCardColumns()*teamCardRows());g_teamPage=(g_teamPage+(id==44012?1:pages-1))%pages;return;}
     if(id==44010){
-        if(g_teamFocusedWorkflow){g_status="Focused workflow uses Engineer, Designer and Reviewer. Choose Parallel to add part designers.";return;}
         if(g_teamStarted&&g_agentTeam.snapshot().running){g_status="Finish or cancel active agents before changing team size.";return;}
-        HMENU menu=CreatePopupMenu();for(unsigned n=3;n<=8;++n){std::string label=std::to_string(n)+" agents / "+std::to_string(n-2)+" part designers";AppendMenuA(menu,MF_STRING|(n==g_teamRoleCount?MF_CHECKED:0),n,label.c_str());}
-        POINT point;GetCursorPos(&point);int count=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,point.x,point.y,0,g_window,nullptr);DestroyMenu(menu);
-        if(count>=3&&count<=8){if(g_teamStarted){cancelTeam();g_teamStarted=false;resetTeamView();}g_teamRoleCount=count;g_teamPage=0;g_teamTarget.clear();saveUiSettings();layout();}return;
+        constexpr int parametricChoice=100;HMENU menu=CreatePopupMenu();
+        if(g_teamFocusedWorkflow){g_status="Focused workflow uses Engineer, Designer and Reviewer. Choose Parallel to add part designers.";AppendMenuA(menu,MF_STRING|MF_GRAYED|MF_CHECKED,3,"Focused: Engineer, Designer, Reviewer");}
+        else for(unsigned n=3;n<=teamBaseRoleLimit();++n){std::string label=std::to_string(n+(g_teamParametricRole?1:0))+" agents / "+std::to_string(n-2)+" part designers";AppendMenuA(menu,MF_STRING|(n==g_teamRoleCount?MF_CHECKED:0),n,label.c_str());}
+        AppendMenuA(menu,MF_SEPARATOR,0,nullptr);AppendMenuA(menu,MF_STRING|(g_teamParametricRole?MF_CHECKED:0),parametricChoice,"Parametric designer (optional)");
+        POINT point;GetCursorPos(&point);int count=g_teamMenuSmoke?g_teamMenuSmoke:TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,point.x,point.y,0,g_window,nullptr);DestroyMenu(menu);
+        if(count==parametricChoice){if(g_teamStarted){cancelTeam();g_teamStarted=false;resetTeamView();}g_teamParametricRole=!g_teamParametricRole;const bool trimmed=g_teamRoleCount>teamBaseRoleLimit();g_teamRoleCount=std::min(g_teamRoleCount,teamBaseRoleLimit());g_teamPage=0;g_teamTarget.clear();saveUiSettings();layout();g_status=trimmed?"Parametric designer on: the team stays at eight agents, so Part designer 6 is off.":g_teamParametricRole?"Parametric designer on: the engineer can assign rule-driven families as programs.":"Parametric designer off; its model settings stay saved.";return;}
+        if(count>=3&&count<=(int)teamBaseRoleLimit()&&!g_teamFocusedWorkflow){if(g_teamStarted){cancelTeam();g_teamStarted=false;resetTeamView();}g_teamRoleCount=count;g_teamPage=0;g_teamTarget.clear();saveUiSettings();layout();}return;
     }
     if(id>=40000&&id<40100){g_toolCategory=id-40001;g_toolScroll=0;return;}
     if(id>=41000&&id<42000){g_toolsOpen=false;layout();openStudioApiTool((size_t)(id-41000));return;}
@@ -4075,7 +4092,7 @@ static void uiAction(int id){
     // Right assistant dock: rail restore / collapse / expand; handle drags are pointer-driven.
     if(id>=44300&&id<=44302){g_assistantDockOpen=true;setChatDockMode(id==44300?1:id==44301?0:g_chatExpanded?1:2);layout();if(!g_dialogSmoke&&!g_headless)saveUiSettings();return;}
     if(id==44303)return;
-    if(id>=44310&&id<44318){g_chatReasoningAgent=id-44310;g_chatAgentDetails=false;layout();return;}
+    if(id>=44310&&id<44310+(int)teamCapacity){g_chatReasoningAgent=id-44310;g_chatAgentDetails=false;layout();return;}
     if(id==401){g_sidebarTab=g_sidebarTab==2?0:2;g_physicalVisible=false;layout();return;}
     if(id>=410&&id<=412){g_sidebarTab=id-410;g_physicalVisible=false;layout();return;}
     if(id==450){g_searchEditing=true;layout();if(g_commandSearch){SetFocus(g_commandSearch);SendMessage(g_commandSearch,EM_SETSEL,0,-1);}else commandPalette();return;}
@@ -5832,9 +5849,9 @@ static void drawFrame(HDC hdc){
     if(g_teamMode&&g_chatAgentDetails){
         // Team cards share the dock column below the native conversation header.
         const float controlsY=(float)(chatDock.chatTop+g_chatHeaderHeight+8);const bool oneRow=teamCardControlRows()==1;
-        const int columns=teamCardColumns(),rows=teamCardRows(),pageSize=columns*rows;unsigned pages=(g_teamRoleCount+pageSize-1)/pageSize;g_teamPage=std::min(g_teamPage,pages-1);
+        const int columns=teamCardColumns(),rows=teamCardRows(),pageSize=columns*rows;unsigned pages=(teamActiveRoleCount()+pageSize-1)/pageSize;g_teamPage=std::min(g_teamPage,pages-1);
         button(g_teamFocusedWorkflow?"Focused":"Parallel",px,controlsY,104,44014,false,g_teamFocusedWorkflow);
-        button(("Agents: "+std::to_string(g_teamRoleCount)).c_str(),px+110,controlsY,96,44010);
+        button(("Agents: "+std::to_string(teamActiveRoleCount())).c_str(),px+110,controlsY,96,44010);
         if(pages>1){button("<",px+212,controlsY,30,44011);button(">",px+246,controlsY,30,44012);}
         const float recoverX=oneRow?px+inner-172:px,recoverY=oneRow?controlsY:controlsY+40;
         if(const int recover=teamRecoverAction())button(recover==490?"Resume after error":"Review blockers",recoverX,recoverY,172,recover);
@@ -5842,24 +5859,24 @@ static void drawFrame(HDC hdc){
         const bool fullCard=cardHeight>=teamCardHeight,summaryCard=cardHeight>=148;
         const float cardWidth=(inner-8.f*(columns-1))/columns;
         g_teamCardContentFits=true;g_teamCardBoundsFailure.clear();
-        for(size_t cell=0;cell<(size_t)pageSize;++cell){size_t i=g_teamPage*pageSize+cell;if(i>=g_teamRoleCount)break;float x=px+(cardWidth+8)*(cell%columns),y=cardsY+cardStride*(cell/columns);const AgentTeamRoleSnapshot* role=i<g_teamSnapshot.roles.size()?&g_teamSnapshot.roles[i]:nullptr;
+        for(size_t cell=0;cell<(size_t)pageSize;++cell){size_t i=g_teamPage*pageSize+cell;if(i>=teamActiveRoleCount())break;const size_t slot=teamRoleSlot(i);float x=px+(cardWidth+8)*(cell%columns),y=cardsY+cardStride*(cell/columns);const AgentTeamRoleSnapshot* role=i<g_teamSnapshot.roles.size()?&g_teamSnapshot.roles[i]:nullptr;
             const bool working=role&&role->state==AgentTeamState::Working,failed=role&&role->state==AgentTeamState::Failed;
             tone(x,y,cardWidth,cardHeight,th::rowRadius,th::mix(th::chrome,th::raised,.45f),1,working||failed?.95f:th::border,failed?th::danger:working?th::accent:white);
             if(working)tone(x,y+10,3,cardHeight-20,1.5f,th::accent,1);
             size_t cardTextStart=g_textVerts.size();
             auto line=[&](const std::string& value,float offset,float scale=.80f,float width=0,th::Tone color=th::text2){ink(fitText(value,scale,width>0?width:cardWidth-24),x+12,y+offset,scale,color);};
-            line(g_teamRoleLabels[i],10,.85f,cardWidth-24-88,th::text);chip("Reasoning",x+cardWidth-86,y+9,74,22,44310+(int)i,g_chatReasoningAgent==(int)i);
-            std::string state=role?std::string(agentTeamStateName(role->state))+" / turn "+std::to_string(role->turns):"Ready";line(state+(i==0?" / engineering + CAD":i==2?" / read-only review":" / CAD author"),summaryCard?34.f:31.f,summaryCard?.80f:.65f);
-            auto config=teamRoleConfig(i);if(summaryCard)line((config.authMode==AssistantAuthMode::ChatGptPlan?std::string("ChatGPT"):config.authMode==AssistantAuthMode::CliAccount?std::string(config.provider=="claude-code"?"Claude Code":"Grok Build"):config.provider)+" / "+(config.model.empty()?(config.authMode==AssistantAuthMode::CliAccount?"CLI selected model":"Select model"):config.model)+" / "+(config.reasoningEffort.empty()?"Auto":config.reasoningEffort),56,.80f,0,th::muted);
-            if(summaryCard)line(role&&!role->taskSummary.empty()?"Task "+role->taskState+": "+role->taskSummary:role?role->status:"Describe the goal to start",77);if(fullCard)line(role&&role->unresolvedToolErrors?"Unresolved tool requests: "+std::to_string(role->unresolvedToolErrors)+" / Review blockers":g_teamActivity[i].empty()?(role?role->text:"Tools and messages appear live"):g_teamActivity[i],98,.80f,0,th::muted);
+            line(g_teamRoleLabels[slot],10,.85f,cardWidth-24-88,th::text);chip("Reasoning",x+cardWidth-86,y+9,74,22,44310+(int)i,g_chatReasoningAgent==(int)i);
+            std::string state=role?std::string(agentTeamStateName(role->state))+" / turn "+std::to_string(role->turns):"Ready";line(state+(slot==0?" / engineering + CAD":slot==2?" / read-only review":slot==teamParametricSlot?" / program author":" / CAD author"),summaryCard?34.f:31.f,summaryCard?.80f:.65f);
+            auto config=teamRoleConfig(slot);if(summaryCard)line((config.authMode==AssistantAuthMode::ChatGptPlan?std::string("ChatGPT"):config.authMode==AssistantAuthMode::CliAccount?std::string(config.provider=="claude-code"?"Claude Code":"Grok Build"):config.provider)+" / "+(config.model.empty()?(config.authMode==AssistantAuthMode::CliAccount?"CLI selected model":"Select model"):config.model)+" / "+(config.reasoningEffort.empty()?"Auto":config.reasoningEffort),56,.80f,0,th::muted);
+            if(summaryCard)line(role&&!role->taskSummary.empty()?"Task "+role->taskState+": "+role->taskSummary:role?role->status:"Describe the goal to start",77);if(fullCard)line(role&&role->unresolvedToolErrors?"Unresolved tool requests: "+std::to_string(role->unresolvedToolErrors)+" / Review blockers":g_teamActivity[slot].empty()?(role?role->text:"Tools and messages appear live"):g_teamActivity[slot],98,.80f,0,th::muted);
             const float footer=fullCard?125.f:summaryCard?103.f:45.f;
             if(summaryCard)tone(x+12,y+footer-3,cardWidth-24,1,0,white,th::line);
             std::string tokens=role&&role->usage.reportedResponses?std::string(role->usage.missingResponses?"Tokens >= ":"Tokens ")+std::to_string(role->usage.totalTokens):"Tokens unreported";
-            ink(fitText(tokens,.76f,cardWidth-192),x+12,y+footer,.76f,th::text2);button("Connector",x+cardWidth-168,y+footer,74,44020+(int)i);button("Settings",x+cardWidth-86,y+footer,74,44000+(int)i);
+            ink(fitText(tokens,.76f,cardWidth-192),x+12,y+footer,.76f,th::text2);button("Connector",x+cardWidth-168,y+footer,74,44020+(int)slot);button("Settings",x+cardWidth-86,y+footer,74,44000+(int)slot);
             std::string detail=role&&role->usage.reportedResponses?"In "+std::to_string(role->usage.inputTokens)+" / Out "+std::to_string(role->usage.outputTokens)+" / Reason "+std::to_string(role->usage.reasoningTokens):"Input / output: unreported";
             if(role){auto timing=measuredPerformanceLabel(role->performance);if(!timing.empty())detail=timing;}
             if(fullCard)ink(fitText(detail,.72f,cardWidth-192),x+12,y+148,.72f,th::muted);
-            if(g_verifyTeamCardBounds)for(size_t vertex=cardTextStart;vertex+6<g_textVerts.size();vertex+=7){float tx=g_textVerts[vertex],ty=g_textVerts[vertex+1];if(tx<x+8||tx>x+cardWidth-8||ty<y+8||ty>y+cardHeight-8){g_teamCardContentFits=false;if(g_teamCardBoundsFailure.empty()){std::ostringstream detail;detail<<"Card "<<i<<" ("<<g_teamRoleIds[i]<<") glyph ("<<tx<<","<<ty<<") exceeds ["<<x+8<<","<<y+8<<".."<<x+cardWidth-8<<","<<y+cardHeight-8<<"], atlas line height "<<fa.lineH;g_teamCardBoundsFailure=detail.str();}}}
+            if(g_verifyTeamCardBounds)for(size_t vertex=cardTextStart;vertex+6<g_textVerts.size();vertex+=7){float tx=g_textVerts[vertex],ty=g_textVerts[vertex+1];if(tx<x+8||tx>x+cardWidth-8||ty<y+8||ty>y+cardHeight-8){g_teamCardContentFits=false;if(g_teamCardBoundsFailure.empty()){std::ostringstream detail;detail<<"Card "<<i<<" ("<<g_teamRoleIds[slot]<<") glyph ("<<tx<<","<<ty<<") exceeds ["<<x+8<<","<<y+8<<".."<<x+cardWidth-8<<","<<y+cardHeight-8<<"], atlas line height "<<fa.lineH;g_teamCardBoundsFailure=detail.str();}}}
         }
     }
     // Composer: optional pending image, message field, actions and receipts.
@@ -6511,6 +6528,7 @@ static void seedDocument(){g_doc=makeDemoDocument();rebuildScene();frameScene();
 
 #include "assistant_chat_selftest.inl"
 #include "chat_dock_selftest.inl"
+#include "parametric_role_selftest.inl"
 #include "studio_render_selftest.inl"
 #include "interaction_performance.inl"
 #include "viewport_quality_selftest_056c.inl"
@@ -6532,7 +6550,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
 
     auto setDpiContext=reinterpret_cast<BOOL(WINAPI*)(HANDLE)>(GetProcAddress(GetModuleHandleW(L"user32.dll"),"SetProcessDpiAwarenessContext"));
     if(!setDpiContext||!setDpiContext(reinterpret_cast<HANDLE>(-4)))SetProcessDPIAware();
-    bool assistantChatUiTest=false,chatDockUiTest=false;
+    bool assistantChatUiTest=false,chatDockUiTest=false,parametricRoleUiTest=false;
     bool plasticsUiTest=false,electronicsWorkspaceUiTest=false,cableGuideUiTest=false;
     bool nativeProductPerformanceUiTest=false,sceneCacheUiTest=false,authoringAssistanceUiTest=false,featureEditorPickingUiTest=false;
     bool asyncAuthoringUiTest=false;bool historyCompactionUiTest=false;bool featureHistoryUiTest=false,recoveryUiTest=false,editorScrollUiTest=false,configurationWorkspaceUiTest=false,interactionPerformanceUiTest=false;bool startupUiTest=false;bool stampsUiTest=false;bool media044bUiTest=false;bool planesSectionsUiTest=false;
@@ -6589,6 +6607,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         else if(a=="--self-test-planes-sections-ui"){planesSectionsUiTest=true;g_headless=true;}
         else if(a=="--self-test-assistant-chat-ui"){assistantChatUiTest=true;g_headless=true;}
         else if(a=="--self-test-chat-dock-ui"){chatDockUiTest=true;g_headless=true;}
+        else if(a=="--self-test-parametric-role-ui"){parametricRoleUiTest=true;g_headless=true;}
         else if(a=="--self-test-assistant-steering-ui"){assistantSteeringUiTest=true;g_headless=true;}
         else if(a=="--self-test-selection-picking-ui"){selectionPickingUiTest=true;g_headless=true;}
         else if(a=="--self-test-selection-glow-ui"){selectionGlowUiTest=true;g_headless=true;}
@@ -7591,6 +7610,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     }
     if(assistantChatUiTest){int result=testAssistantChat(shotPath);DestroyWindow(hwnd);return result;}
     if(chatDockUiTest){int result=testChatDock(shotPath);DestroyWindow(hwnd);return result;}
+    if(parametricRoleUiTest){int result=1;try{result=testParametricRole(shotPath);}catch(const std::exception& error){std::fprintf(stderr,"Parametric role exception: %s\n",error.what());std::ofstream(shotPath+".parametric-role-test.log")<<"FAIL exception: "<<error.what()<<'\n';}DestroyWindow(hwnd);return result;}
     if(assistantTest){
         g_chatAgentDetails=true;
         struct AssistantTestCleanup {~AssistantTestCleanup(){*g_assistantCancel=true;*g_teamCancel=true;g_agentTeam.cancel();g_agentTeam.waitIdle();if(g_assistantWorker.joinable())g_assistantWorker.join();}} assistantCleanup;
@@ -7645,7 +7665,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         winW=originalWidth;winH=originalHeight;layout();DestroyWindow(g_chatInput);g_chatInput=nullptr;
         auto saveProbeShot=[&](const std::string& path){bool swap=g_swap;g_swap=false;drawFrame(hdc);glFinish();std::vector<u8> pixels((size_t)winW*winH*3);glPixelStorei(GL_PACK_ALIGNMENT,1);glReadBuffer(GL_BACK);glReadPixels(0,0,winW,winH,GL_RGB,GL_UNSIGNED_BYTE,pixels.data());Image image;image.w=winW;image.h=winH;image.px.resize(pixels.size());for(int y=0;y<winH;++y)memcpy(&image.px[(size_t)y*winW*3],&pixels[(size_t)(winH-1-y)*winW*3],(size_t)winW*3);g_swap=swap;return writePNG(path.c_str(),image);};
         bool previousFocusedWorkflow=g_teamFocusedWorkflow;g_teamFocusedWorkflow=false;unsigned previousTeamCount=g_teamRoleCount;g_teamRoleCount=3;bool previousTeamMode=g_teamMode;auto previousModels=g_teamModels,previousEfforts=g_teamEfforts;g_teamMode=true;g_assistantDockOpen=true;layout();g_teamModels={"offline-engineer","offline-designer","offline-reviewer"};g_teamEfforts={"low","medium","high"};
-        auto teamGate=std::make_shared<std::atomic_bool>(false);auto decisionSeen=std::make_shared<std::atomic_bool>(false);auto teamTargetSeen=std::make_shared<std::atomic_bool>(false),steeringTargetSeen=std::make_shared<std::atomic_bool>(false);std::array<std::shared_ptr<std::atomic_int>,3> teamRounds{std::make_shared<std::atomic_int>(0),std::make_shared<std::atomic_int>(0),std::make_shared<std::atomic_int>(0)};std::array<AssistantTransport,8> teamTransports;auto teamRevision=g_session.revision;auto beforeTeamTokens=g_assistantUsageDocument.totalTokens;
+        auto teamGate=std::make_shared<std::atomic_bool>(false);auto decisionSeen=std::make_shared<std::atomic_bool>(false);auto teamTargetSeen=std::make_shared<std::atomic_bool>(false),steeringTargetSeen=std::make_shared<std::atomic_bool>(false);std::array<std::shared_ptr<std::atomic_int>,3> teamRounds{std::make_shared<std::atomic_int>(0),std::make_shared<std::atomic_int>(0),std::make_shared<std::atomic_int>(0)};std::array<AssistantTransport,teamCapacity> teamTransports;auto teamRevision=g_session.revision;auto beforeTeamTokens=g_assistantUsageDocument.totalTokens;
         for(size_t i=0;i<3;++i)teamTransports[i]=[i,teamRounds,teamGate,decisionSeen,teamTargetSeen,steeringTargetSeen,teamRevision](const auto&,const V& request,const auto* cancel){
             while(!*teamGate){if(cancel&&*cancel)throw std::runtime_error("Offline team test cancelled");std::this_thread::sleep_for(std::chrono::milliseconds(1));}int round=++*teamRounds[i];if(request.dump().find("dynamic team decision")!=std::string::npos){*decisionSeen=true;if(request.dump().find("feature:1")!=std::string::npos&&request.dump().find("Selected object_context")!=std::string::npos)*steeringTargetSeen=true;}else if(request.dump().find("feature:1")!=std::string::npos&&request.dump().find("Selected object_context")!=std::string::npos)*teamTargetSeen=true;
             V response=V::makeObj(),outputs=V::makeArr();response.set("status",V::makeStr("completed"));V usage=V::makeObj();usage.set("input_tokens",V::makeNum(11));usage.set("output_tokens",V::makeNum(4));usage.set("total_tokens",V::makeNum(15));response.set("usage",usage);
@@ -7667,7 +7687,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         cancelTeam();g_agentTeam.waitIdle();pollTeam(true);if(!g_teamSnapshot.cancelled)return assistantFailure(312);g_teamStarted=false;g_teamTarget.clear();g_teamModels=previousModels;g_teamEfforts=previousEfforts;g_teamMode=false;g_toolModule=2;layout();if(!saveProbeShot(shotPath+".sketch-icons.png"))return assistantFailure(313);
         // A real role conversation yields between atomic sketch/feature steps.
         // Its previews are rendered before the owning UI executes each request.
-        unsigned savedRounds=g_assistantConfig.maxRounds;g_assistantConfig.maxRounds=1;g_teamMode=true;g_teamModels={"offline-orchestrator","offline-part-designer","offline-physics-reviewer"};g_teamEfforts={"high","xhigh","high"};g_teamTarget.clear();layout();auto constructionRevision=g_session.revision;size_t beforeConstructFeatures=g_doc.features.size();auto designerRound=std::make_shared<std::atomic_int>(0);std::array<AssistantTransport,8> constructionTransports;
+        unsigned savedRounds=g_assistantConfig.maxRounds;g_assistantConfig.maxRounds=1;g_teamMode=true;g_teamModels={"offline-orchestrator","offline-part-designer","offline-physics-reviewer"};g_teamEfforts={"high","xhigh","high"};g_teamTarget.clear();layout();auto constructionRevision=g_session.revision;size_t beforeConstructFeatures=g_doc.features.size();auto designerRound=std::make_shared<std::atomic_int>(0);std::array<AssistantTransport,teamCapacity> constructionTransports;
         for(size_t role=0;role<3;++role)constructionTransports[role]=[role,designerRound,constructionRevision,parse](const auto&,const V&,const auto*){
             V response=V::makeObj(),output=V::makeArr();response.set("status",V::makeStr("completed"));response.set("usage",parse(R"({"input_tokens":8,"output_tokens":2,"total_tokens":10})"));int round=role==1?++*designerRound:4;
             auto call=[&](const std::string& tool,V args,const std::string& suffix){V item=V::makeObj();item.set("type",V::makeStr("function_call"));item.set("call_id",V::makeStr("construction_"+std::to_string(round)+suffix));item.set("name",V::makeStr(tool));item.set("arguments",V::makeStr(args.dump()));output.arr.push_back(item);};
@@ -7782,7 +7802,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         g_dialogSmoke=2;g_dialogShot=shotPath+".project-activity.png";uiAction(567);g_dialogSmoke=0;
         // Team retries remain Working and cancellable by the actual dock button.
         g_chatLog.clear();g_teamMode=true;g_teamFocusedWorkflow=true;g_teamRoleCount=3;g_teamModels[0]="offline-retry-ui";g_teamEfforts[0]="auto";g_teamTarget.clear();layout();
-        auto teamRetryAttempts=std::make_shared<std::atomic_int>(0);std::array<AssistantTransport,8> retryTeamTransports;
+        auto teamRetryAttempts=std::make_shared<std::atomic_int>(0);std::array<AssistantTransport,teamCapacity> retryTeamTransports;
         retryTeamTransports[0]=[teamRetryAttempts,parse](const auto&,const V&,const auto*){if(++*teamRetryAttempts==1)throw AssistantHttpError(503,true,100);return parse(R"({"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Team recovered."}]}]})");};
         retryRevision=g_session.revision;sendTeam("OFFLINE: recover transient HTTP503 without editing.",retryTeamTransports);
         if(!retryPump([&]{return retryLog();})||g_teamSnapshot.roles.empty()||g_teamSnapshot.roles[0].state!=AgentTeamState::Working||g_teamActivity[0].find("HTTP 503 / retry")!=0||thinkingLog())return assistantFailure(413);

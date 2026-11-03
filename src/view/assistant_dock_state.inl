@@ -63,8 +63,8 @@ static bool chatDockRunning(){return g_chatBusy||(g_teamStarted&&g_teamSnapshot.
 static size_t chatDockUnread(){return g_chatLog.size()>g_chatDockSeenRows?g_chatLog.size()-g_chatDockSeenRows:0;}
 // Short role names for reasoning chips; the panel caption shows id and label.
 static std::string chatAgentName(size_t index){
-    if(!g_teamMode)return "ARK";if(index>=teamCapacity)return {};const std::string id=g_teamRoleIds[index];
-    if(id=="engineer")return "Engineer";if(id=="reviewer")return "Reviewer";if(id=="designer")return "Designer 1";
+    if(!g_teamMode)return "ARK";const size_t slot=teamRoleSlot(index);if(slot>=teamCapacity)return {};const std::string id=g_teamRoleIds[slot];
+    if(id=="engineer")return "Engineer";if(id=="reviewer")return "Reviewer";if(id=="parametric")return "Parametric";if(id=="designer")return "Designer 1";
     if(id.rfind("designer",0)==0)return "Designer "+id.substr(8);return id;
 }
 static void attachChatReasoning(size_t row,std::string text,std::string empty){

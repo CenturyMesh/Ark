@@ -195,8 +195,12 @@ also use programs; the physics reviewer can validate and inspect only.
 A program candidate prepared by a team role becomes that role's retained
 candidate. It still passes the role's step scope and the configured
 command/feature/placement limits; Studio allows 32 features per step, so split
-larger families into several namespaces. Studio's default three-role team is
-unchanged and does not yet offer this role in its role cards.
+larger families into several namespaces.
+
+Studio's default team is unchanged. Choose **Agents** > **Parametric designer
+(optional)** to add the role in Focused or Parallel; its card has its own
+Connector, Settings and Reasoning, and it starts with the `overview` and
+`programs` guides. See the [team workflow](MULTI_AGENT_STUDIO.md).
 
 ## Limits
 
@@ -219,7 +223,9 @@ accumulators, templates, `$for` splices and typed rejections), namespacing and
 reference rewriting, install/configure/update/remove/detach candidates, stale
 candidates, local edits and dependants, undo/redo, save/reopen at version 55,
 downgrade and digest rejection, tool discovery and onboarding examples. A
-generated shelf is checked against an independent exact volume.
+generated shelf is checked against an independent exact volume. The local
+`studio-parametric-role-ui` check publishes a two-post program from an offline
+Focused team through Studio's tool queue and measures both solids natively.
 
 Assertions and bounds encode the design rules stated by the author. They are
 not manufacturing, structural or fit qualification. No measured agent quality,

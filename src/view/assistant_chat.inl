@@ -162,7 +162,7 @@ static LRESULT CALLBACK viewportProc(HWND w,UINT m,WPARAM wp,LPARAM lp){
     return DefWindowProcW(w,m,wp,lp);
 }
 // Agents whose latest reasoning can be shown: ARK in single mode, team roles otherwise.
-static int agentCount(){return g_teamMode?(int)std::min<size_t>(g_teamRoleCount,teamCapacity):1;}
+static int agentCount(){return g_teamMode?(int)std::min<size_t>(teamActiveRoleCount(),teamCapacity):1;}
 static COLORREF agentState(int agent){
     if(!g_teamMode)return g_chatBusy?runningInk:g_assistantResponseFinished?(g_assistantResponseError?failedInk:doneInk):faint;
     const AgentTeamRoleSnapshot* role=agent>=0&&(size_t)agent<g_teamSnapshot.roles.size()?&g_teamSnapshot.roles[(size_t)agent]:nullptr;if(!role)return faint;
@@ -175,9 +175,9 @@ static bool agentReasoning(int agent,std::wstring& caption,std::wstring& body){
         body=!g_assistantReasoningRun.empty()?wide(g_assistantReasoningRun):!g_assistantRunStarted?L"No run yet. Readable reasoning appears here when the provider returns it.":g_chatBusy?L"No readable reasoning returned yet in this run.":wide(chatReasoningHidden)+L".";return true;}
     const AgentTeamRoleSnapshot* role=(size_t)agent<g_teamSnapshot.roles.size()?&g_teamSnapshot.roles[(size_t)agent]:nullptr;
     // Short label first so the role id survives a narrow dock; the full label follows.
-    caption=L"Latest reasoning \u00B7 "+wide(chatAgentName((size_t)agent))+L" ("+wide(g_teamRoleIds[agent])+L")";
+    const size_t slot=teamRoleSlot((size_t)agent);caption=L"Latest reasoning \u00B7 "+wide(chatAgentName((size_t)agent))+L" ("+wide(g_teamRoleIds[slot])+L")";
     if(role){if(!role->reasoning.empty())caption+=L" \u00B7 turn "+std::to_wstring(role->reasoningTurn);caption+=L" \u00B7 "+wide(agentTeamStateName(role->state));}
-    caption+=L" \u00B7 "+wide(g_teamRoleLabels[agent]);
+    caption+=L" \u00B7 "+wide(g_teamRoleLabels[slot]);
     body=role&&!role->reasoning.empty()?wide(role->reasoning):!role||role->turns==0?L"Not started. Readable reasoning appears here when the provider returns it.":role->state==AgentTeamState::Working?L"No readable reasoning returned yet in this turn.":wide(chatReasoningHidden)+L".";
     return true;
 }
@@ -198,7 +198,7 @@ static LRESULT CALLBACK panelProc(HWND w,UINT m,WPARAM wp,LPARAM lp){
     if(m==WM_COMMAND){const int id=LOWORD(wp);switch(id){case 1:if(clipboard(w,transcript()))SetWindowTextW(copyButton,L"Copied");else SetWindowTextW(copyButton,L"Retry copy");return 0;case 2:scroll=total;place();return 0;case 3:if(!g_teamMode){std::string info=activity().title+"\n"+activity().detail+"\n\n"+assistantUsageLabel(g_assistantUsageRun)+"\n"+measuredPerformanceLabel(g_assistantPerformanceRun);editText("Agent run",info,true);return 0;}g_chatAgentDetails=!g_chatAgentDetails;layout();return 0;case 4:setChatDockMode(g_chatExpanded?1:2);layout();return 0;
         case 5:g_chatReasoningAll=!g_chatReasoningAll;for(auto& b:bubbles)b.open=g_chatReasoningAll;relayoutBubbles();InvalidateRect(reasoningButton,nullptr,FALSE);return 0;}
         if(id>=10&&id<18){g_chatReasoningAgent=g_chatReasoningAgent==id-10?-1:id-10;layout();return 0;}
-        if(id==18){HMENU menu=CreatePopupMenu();for(int i=0;i<agentCount();++i)AppendMenuW(menu,MF_STRING|(g_chatReasoningAgent==i?MF_CHECKED:0),(UINT_PTR)(i+1),(wide(chatAgentName((size_t)i))+L"  \u00B7  "+wide(g_teamMode?g_teamRoleIds[i]:"ark")).c_str());AppendMenuW(menu,MF_SEPARATOR,0,nullptr);AppendMenuW(menu,MF_STRING,100,L"Hide latest reasoning");
+        if(id==18){HMENU menu=CreatePopupMenu();for(int i=0;i<agentCount();++i)AppendMenuW(menu,MF_STRING|(g_chatReasoningAgent==i?MF_CHECKED:0),(UINT_PTR)(i+1),(wide(chatAgentName((size_t)i))+L"  \u00B7  "+wide(g_teamMode?g_teamRoleIds[teamRoleSlot((size_t)i)]:"ark")).c_str());AppendMenuW(menu,MF_SEPARATOR,0,nullptr);AppendMenuW(menu,MF_STRING,100,L"Hide latest reasoning");
             RECT bounds{};GetWindowRect(moreButton,&bounds);const int chosen=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,bounds.left,bounds.bottom,0,w,nullptr);DestroyMenu(menu);
             if(chosen==100)g_chatReasoningAgent=-1;else if(chosen>0)g_chatReasoningAgent=chosen-1;layout();return 0;}}
     if(m==WM_DRAWITEM){auto* item=(DRAWITEMSTRUCT*)lp;if(item->CtlType==ODT_BUTTON){const int id=(int)item->CtlID;const bool active=(id==5&&g_chatReasoningAll)||(id>=10&&id<18&&g_chatReasoningAgent==id-10)||(id==18&&g_chatReasoningAgent>=0);

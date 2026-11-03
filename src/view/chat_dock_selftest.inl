@@ -53,7 +53,7 @@ static int testChatDock(const std::string& path){
             // Dock controls stay inside the dock and never overlap one another.
             const std::set<int> dockIds{470,471,57,367,472,44013,44300,44301,44302,730,74,75,58,473,566,44010,44014,44011,44012,490,989};std::vector<Zone> owned;
             // Header icons reuse some action ids (Account 57); only below-ribbon zones belong to the dock.
-            for(const auto& z:g_zones)if(z.y+z.h>viewY&&(dockIds.count(z.id)||(z.id>=44310&&z.id<44318)||(z.id>=44000&&z.id<44028))){owned.push_back(z);if(z.x<dock.x||z.x+z.w>winW||z.y<viewY||z.y+z.h>winH-32)return fail(5,"Dock control "+std::to_string(z.id)+" escapes the dock ("+tag+")");}
+            for(const auto& z:g_zones)if(z.y+z.h>viewY&&(dockIds.count(z.id)||(z.id>=44310&&z.id<44310+(int)teamCapacity)||(z.id>=44000&&z.id<44020+(int)teamCapacity))){owned.push_back(z);if(z.x<dock.x||z.x+z.w>winW||z.y<viewY||z.y+z.h>winH-32)return fail(5,"Dock control "+std::to_string(z.id)+" escapes the dock ("+tag+")");}
             for(size_t a=0;a<owned.size();++a)for(size_t b=a+1;b<owned.size();++b){const auto& p=owned[a];const auto& q=owned[b];if(p.x<q.x+q.w&&q.x<p.x+p.w&&p.y<q.y+q.h&&q.y<p.y+p.h)return fail(6,"Dock controls "+std::to_string(p.id)+" and "+std::to_string(q.id)+" overlap ("+tag+")");}
             // Navigation, viewport dock and status bar stay outside the conversation.
             for(const auto& z:g_zones)if((z.id==179||z.id==191||z.id==182||z.id==23||z.id==180||z.id==960||z.id==455||(z.id>=560&&z.id<=562))&&z.y>=viewY&&z.y<winH-32&&z.x+z.w>dock.x)return fail(7,"Viewport control "+std::to_string(z.id)+" overlaps the dock ("+tag+")");

@@ -60,7 +60,8 @@ its namespace and publishes only batches that carry a `program.*` operation,
 never hand-written ordinary edits. A program candidate it prepares becomes its
 own retained candidate, still checked against its step scope and the configured
 command/feature/placement limits. The lead is told to delegate counted, repeated
-or conditional families to it. Studio's default three roles are unchanged.
+or conditional families to it. Studio's default three roles are unchanged; its
+**Agents** menu adds this role as an option within the eight-role team limit.
 
 `team_propose` stores bounded commands/checks, sender, recipient, reason and an
 inspected `expected_revision`; `team_proposal` reads them. The receiving writer
