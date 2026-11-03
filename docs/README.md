@@ -28,6 +28,7 @@ current release claim. [release.json](../release.json) owns application identity
 | [029B surface repair](SURFACE_REPAIR_029B.md) | You need exact bounded orientation repair and difficult geometry evidence |
 | [029B assembly scaling](ASSEMBLY_SCALING_029B.md) | You need selective memory/I/O and configuration/pin ownership in isolated workspaces |
 | [023B test guide](AUTHORING_023B_TESTING.md) | You are testing STEP/IGES import, Arkitfy, functional holes or isolated design containers |
+| [Parametric programs](PARAMETRIC_PROGRAMS.md) | You want a configurable family written as code: counts, conditions, generated sketches and design assertions |
 | [023B Holes Orchestrator](HOLES_ORCHESTRATOR_023B.md) | You need parametric holes, thread preparation, dowels or retaining-ring grooves with published nominal sources |
 | [023B CAD import](CAD_IMPORT_023B.md) | You need portable exact STEP/IGES references and measured reconstruction checks |
 | [023B design containers](DESIGN_CONTAINERS_023B.md) | You need scoped editing in another document or ARK instance and guarded integration |

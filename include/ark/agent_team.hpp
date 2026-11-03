@@ -8,7 +8,9 @@ namespace ark {
 // Single-assistant tool list: doc_preview advertises shallow command hints while
 // doc_apply keeps the canonical nested schema (the same split Team writers use).
 arkjson::Value compactAuthoringPreviewTools(arkjson::Value tools);
-enum class AgentTeamDiscipline { General, Orchestrator, PartDesigner, PhysicsReviewer };
+// ParametricDesigner authors namespaced parametric programs and publishes only
+// batches that carry a program.* operation, never hand-written ordinary edits.
+enum class AgentTeamDiscipline { General, Orchestrator, PartDesigner, PhysicsReviewer, ParametricDesigner };
 const char* agentTeamDisciplineName(AgentTeamDiscipline value) noexcept;
 struct AgentTeamRole {
     std::string id, label, instructions;

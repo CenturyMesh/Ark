@@ -32,6 +32,9 @@ const Recipe recipes[]={
     {"material_density","Declare a named material density in kg/m3 from an explicit source.","materials",
      R"({"type":"object","required":["expected_revision","name","density_kg_m3"],"properties":{"expected_revision":{"type":"integer","minimum":0},"name":{"type":"string","minLength":1,"maxLength":128},"density_kg_m3":{"type":"number","minimum":0,"maximum":100000}},"additionalProperties":false})",
      R"({"tool":"doc_preview","arguments":{"expected_revision":"$expected_revision","detail":"changes","commands":[{"op":"material.set","name":"$name","density_kg_m3":"$density_kg_m3"}]}})"},
+    {"program_configure","Re-run an installed parametric program with new public parameter values through one exact candidate.","programs",
+     R"({"type":"object","required":["expected_revision","namespace","values"],"properties":{"expected_revision":{"type":"integer","minimum":0},"namespace":{"type":"string","minLength":1,"maxLength":32},"values":{"type":"object","minProperties":1,"maxProperties":64,"additionalProperties":{"type":"number"}}},"additionalProperties":false})",
+     R"({"tool":"parametric_program","arguments":{"action":"prepare","mode":"configure","expected_revision":"$expected_revision","namespace":"$namespace","values":"$values"}})"},
     {"revision_status","Read the live revision and status without expanding the design inventory.","overview",
      R"({"type":"object","properties":{},"additionalProperties":false})",
      R"({"tool":"doc_info","arguments":{"detail":"revision"}})"}

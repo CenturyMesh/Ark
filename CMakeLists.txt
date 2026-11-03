@@ -57,7 +57,7 @@ add_library(ark STATIC
   src/wood_tools.cpp
   src/authoring_024b.cpp src/media_authoring.cpp src/appearance_024b.cpp src/plane_sections_024b.cpp
   src/authoring_023b.cpp src/cad_import.cpp src/holes_orchestrator.cpp src/design_containers.cpp
-  src/parametric_components.cpp
+  src/parametric_components.cpp src/parametric_programs.cpp
   src/design_disciplines.cpp
   src/motion_cables.cpp
   src/assembly_patterns.cpp src/transmission_math_061c.cpp src/transmission_tools_061c.cpp src/transmission_design_061c.cpp
@@ -182,6 +182,11 @@ if(ARK_WITH_OCCT)
   add_test(NAME parametric-components-053b COMMAND ark-parametric-components-053b-tests)
   set_tests_properties(parametric-components-053b PROPERTIES TIMEOUT 180)
   add_dependencies(ark-parametric-components-053b-tests ark-occt-worker)
+  add_executable(ark-parametric-programs-tests tests/parametric_programs_tests.cpp)
+  target_link_libraries(ark-parametric-programs-tests PRIVATE ark)
+  add_test(NAME parametric-programs COMMAND ark-parametric-programs-tests)
+  set_tests_properties(parametric-programs PROPERTIES TIMEOUT 180)
+  add_dependencies(ark-parametric-programs-tests ark-occt-worker)
 endif()
 add_executable(ark-project-memory-tests tests/project_memory_tests.cpp)
 target_link_libraries(ark-project-memory-tests PRIVATE ark ark-sqlite)
