@@ -1,5 +1,12 @@
 # ARK roadmap A–G
 
+066D (**B.02/D.02/G.01 — Verificado no escopo local**): parametric programs write
+a design as bounded code that compiles to namespaced native features, with atomic
+re-runs. Agents load the `programs` skill, and Studio offers an optional Parametric
+designer role. Native CTest 180/180; Studio UI 80/83, with the failures recorded
+in 065F. Team evidence is scripted and offline. See
+[066D evidence and limits](iterations/066D.md). Broader milestones remain **Parcial**.
+
 065F (**B.01/D.02/F.05 — Verificado no escopo local**): ARK Setup replaces Inno with
 the MeshSphere art and installs through ARK's own update layout. One feature-tree
 palette, one line-icon family for all 196 commands and a regrouped ribbon cover
