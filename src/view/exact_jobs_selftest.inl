@@ -34,6 +34,10 @@ if(asyncExactUiTest){
         // code calling runTool (earlier dispatch) or submitExactJob046B (background).
         auto measure=[&](const std::string& mode,const std::string& path,const std::string& tool,const V& args){
             selBody=-1;g_picked.clear();frameScene();target=tTarget;dist=tDist;yaw=tYaw;pitch=tPitch;drawFrame(hdc);glFinish();
+            // Earlier passes orbit the camera; pick inside the current silhouette (middle of
+            // the first hit run), not at an edge pixel found before those orbits.
+            {int found=-1,row=-1;for(int y=viewY+viewH/3;y<viewY+2*viewH/3&&found<0;y+=6)for(int x=viewX+viewW/3;x<viewX+2*viewW/3;x+=6)if(pickBody(x,y)>=0){found=x;row=y;break;}
+             check(found>=0,"No selectable hull pixel in the viewport");int end=found;while(end+6<viewX+viewW-12&&pickBody(end+6,row)>=0)end+=6;pickX=(found+end)/2;pickY=row;}
             const double startDist=tDist,startYaw=tYaw,startPitch=tPitch;V reply;bool completed=false;Clock::time_point finished;
             std::atomic_bool running{true},helperDone{false};std::vector<double> beats;std::mutex beatMutex;std::atomic<double> secondDone{-1};Clock::time_point zoomAt,orbitAt,selectAt;
             auto complete=[&](V result){reply=std::move(result);completed=true;finished=Clock::now();};bool issued=false;

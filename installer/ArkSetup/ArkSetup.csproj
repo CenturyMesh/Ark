@@ -1,0 +1,102 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    ArkSetup: ARK's Windows installer and uninstaller.
+    scripts/build-installer.ps1 publishes it self-contained single-file, then appends the portable package
+    (ark-windows-x64-<version>.zip) and a 24-byte footer (see Core/Payload.cs). The installer only installs and
+    uninstalls: ARK updates itself in the app.
+    Identity (code and technical version) comes from release.json, or from -p:ArkVersion / -p:ArkCode.
+  -->
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>ArkSetup</RootNamespace>
+    <AssemblyName>ARK-Setup</AssemblyName>
+    <StartupObject>ArkSetup.Program</StartupObject>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <RepoRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\'))</RepoRoot>
+    <ApplicationIcon>$(RepoRoot)assets\ui\ark-app.ico</ApplicationIcon>
+
+    <!-- single-file, self-contained, compressed: nothing to install on the target machine -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <DebugType>none</DebugType>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+  </PropertyGroup>
+
+  <!-- Release identity: passed by build-installer.ps1, else read from release.json. Never hard-coded. -->
+  <PropertyGroup Condition="'$(ArkVersion)' == '' And Exists('$(RepoRoot)release.json')">
+    <ArkVersion>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(RepoRoot)release.json')), '(?&lt;=&quot;version&quot;\s*:\s*&quot;)[0-9]+\.[0-9]+\.[0-9]+(?=&quot;)').Value)</ArkVersion>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(ArkCode)' == '' And Exists('$(RepoRoot)release.json')">
+    <ArkCode>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(RepoRoot)release.json')), '(?&lt;=&quot;code&quot;\s*:\s*&quot;)[0-9]{3}[A-G](?=&quot;)').Value)</ArkCode>
+  </PropertyGroup>
+  <PropertyGroup>
+    <Version>$(ArkVersion)</Version>
+    <InformationalVersion>ARK $(ArkCode) ($(ArkVersion))</InformationalVersion>
+    <Company>MeshSphere Software</Company>
+    <Product>ARK</Product>
+    <AssemblyTitle>ARK Setup</AssemblyTitle>
+    <Description>ARK Setup</Description>
+    <Copyright>Copyright 2026 Bruno Santos and ARK contributors</Copyright>
+    <!-- -SelfTest builds only: the hidden page renderer (screenshots and layout checks). -->
+    <DefineConstants Condition="'$(ArkSetupSelfTest)' == 'true'">$(DefineConstants);ARK_SETUP_SELFTEST</DefineConstants>
+  </PropertyGroup>
+
+  <Target Name="ArkCheckIdentity" BeforeTargets="BeforeBuild">
+    <Error Condition="'$(ArkVersion)' == '' Or '$(ArkCode)' == ''" Text="ARK release identity is missing: pass -p:ArkVersion and -p:ArkCode or keep release.json at the repository root." />
+    <Error Condition="'$(ArkTestIsolationId)' != '' And !$([System.Text.RegularExpressions.Regex]::IsMatch('$(ArkTestIsolationId)', '^[A-Za-z0-9-]{1,48}$'))" Text="ArkTestIsolationId must match ^[A-Za-z0-9-]{1,48}$." />
+  </Target>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>ArkVersion</_Parameter1>
+      <_Parameter2>$(ArkVersion)</_Parameter2>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>ArkCode</_Parameter1>
+      <_Parameter2>$(ArkCode)</_Parameter2>
+    </AssemblyAttribute>
+    <!-- Private test builds (-TestIsolationId): their own uninstall key, no shortcuts. -->
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute" Condition="'$(ArkTestIsolationId)' != ''">
+      <_Parameter1>ArkTestIsolationId</_Parameter1>
+      <_Parameter2>$(ArkTestIsolationId)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Remove="Art\**" />
+    <!-- MeshSphere key art as two layers (installer/art): the clean plate and the sphere that moves over it. -->
+    <Resource Include="Art\plate.jpg" />
+    <Resource Include="Art\sphere.png" />
+    <!-- 720 px splash copy of the wordmark: enough for the Welcome logo at 2x and keeps Setup small. -->
+    <Resource Include="$(RepoRoot)assets\ui\ark-wordmark-splash.png" Link="Art\ark-wordmark.png" />
+    <Resource Include="$(RepoRoot)assets\ui\ark-app.ico" Link="Art\ark-app.ico" />
+  </ItemGroup>
+
+  <!--
+    The self-contained exe carries the .NET and Windows Desktop runtimes (MIT). Their license and third-party
+    notices travel inside it and are written beside uninstall.exe on install (Core/Notices.cs).
+  -->
+  <Target Name="ArkEmbedRuntimeNotices" AfterTargets="ResolveFrameworkReferences" BeforeTargets="PrepareResources">
+    <ItemGroup>
+      <_ArkNotice Include="@(ResolvedRuntimePack->'%(PackageDirectory)\LICENSE.TXT')" Kind="LICENSE" />
+      <_ArkNotice Include="@(ResolvedRuntimePack->'%(PackageDirectory)\LICENSE')" Kind="LICENSE" />
+      <_ArkNotice Include="@(ResolvedRuntimePack->'%(PackageDirectory)\THIRD-PARTY-NOTICES.TXT')" Kind="THIRD-PARTY-NOTICES" />
+      <_ArkNoticeFound Include="@(_ArkNotice)" Condition="Exists('%(Identity)') And ('%(FrameworkName)' == 'Microsoft.NETCore.App' Or '%(FrameworkName)' == 'Microsoft.WindowsDesktop.App')" />
+      <EmbeddedResource Include="@(_ArkNoticeFound)" LogicalName="notices/%(_ArkNoticeFound.FrameworkName)/%(_ArkNoticeFound.Kind)" />
+    </ItemGroup>
+    <Error Condition="'@(_ArkNoticeFound)' == ''" Text="The .NET runtime pack license notices were not found; the self-contained setup must carry them." />
+  </Target>
+
+</Project>

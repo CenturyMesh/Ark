@@ -379,6 +379,7 @@ std::vector<ChatGptModel> parseChatGptModelCatalog(const V& catalogue){
         if(const V* fallback=item.find("default_reasoning_level");fallback&&effort(*fallback)&&
            std::find(model.reasoningEfforts.begin(),model.reasoningEfforts.end(),fallback->str)!=model.reasoningEfforts.end())
             model.defaultReasoningEffort=fallback->str;
+        if(const V* summaries=item.find("supports_reasoning_summaries");summaries&&summaries->t==V::Bool)model.reasoningSummaries=summaries->b;
         models.push_back(std::move(model));
     }
     return models;
@@ -399,7 +400,10 @@ V chatGptResponses(const V& request,const std::atomic_bool* cancel){
     if(std::none_of(available.begin(),available.end(),[&](const ChatGptModel& item){return item.slug==model;})){available=chatGptListModels(cancel);State& global=state();std::lock_guard lock(global.mutex);require(global.store.activeClientId==access.clientId,"ChatGPT account changed before inference");}
     auto selected=std::find_if(available.begin(),available.end(),[&](const ChatGptModel& item){return item.slug==model;});require(selected!=available.end(),"Select a model from the signed-in ChatGPT account's model list");
     if(const V* reasoning=request.find("reasoning")){require(reasoning->t==V::Obj,"Invalid ChatGPT reasoning settings");if(const V* effort=reasoning->find("effort"))require(effort->t==V::Str&&std::find(selected->reasoningEfforts.begin(),selected->reasoningEfforts.end(),effort->str)!=selected->reasoningEfforts.end(),"Selected reasoning effort is not advertised for this ChatGPT model; choose Auto or a listed level");}
-    SecretString bearer(std::move(access.token));HttpResult response=http("POST",responseEndpoint,request.dump(),bearer.value,"application/json",16*1024*1024,cancel);
+    // Readable summaries are requested only for catalogue models that do not
+    // explicitly decline them; the rest of the request is unchanged.
+    V sent=request;if(!selected->reasoningSummaries)if(const V* reasoning=request.find("reasoning");reasoning&&reasoning->find("summary")){V kept=V::makeObj();for(const auto& [key,value]:reasoning->obj)if(key!="summary")kept.set(key,value);if(kept.obj.empty())sent.obj.erase(std::remove_if(sent.obj.begin(),sent.obj.end(),[](const auto& entry){return entry.first=="reasoning";}),sent.obj.end());else sent.set("reasoning",kept);}
+    SecretString bearer(std::move(access.token));HttpResult response=http("POST",responseEndpoint,sent.dump(),bearer.value,"application/json",16*1024*1024,cancel);
     return parseChatGptResponsesHttp(response.status,response.body,response.retryAfter,response.requestId,unixNow());
 #else
     (void)request;(void)cancel;throw std::runtime_error("Sign in with ChatGPT is currently available on Windows");

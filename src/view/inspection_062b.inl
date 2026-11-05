@@ -43,7 +43,7 @@ template<class Rect>static void dimensionGraphic062(Rect rect,Vec3 a,Vec3 b,cons
     stroke(x,y,ax+nx*6,ay+ny*6);stroke(u,v,bx+nx*6,by+ny*6);stroke(ax,ay,bx,by);
     for(int end=0;end<2;++end){float px=end?bx:ax,py=end?by:ay,sign=end?-1.f:1.f;stroke(px,py,px+sign*dx*8+nx*3,py+sign*dy*8+ny*3);stroke(px,py,px+sign*dx*8-nx*3,py+sign*dy*8-ny*3);}
     float width=textWidth(label,.65f)+20,cx=std::clamp((ax+bx)/2,(float)viewX+width/2+5,(float)(viewX+viewW)-width/2-5),cy=std::clamp((ay+by)/2,(float)viewY+18,(float)(viewY+viewH)-18);
-    rect(cx-width/2,cy-13,width,26,6,.025f,.075f,.105f,.98f,.25f,.65f,.8f,.9f,1);textOut(label,cx-width/2+10,cy-8,.65f,.83f,.97f,1);
+    rect(cx-width/2,cy-13,width,26,6,.064f,.067f,.072f,.98f,1,1,1,.22f,1);textOut(label,cx-width/2+10,cy-8,.65f,.905f,.942f,.974);
 }
 template<class Rect,class Button>static void drawSmart062(Rect rect,Button button){
     using V=arkjson::Value;
@@ -51,15 +51,15 @@ template<class Rect,class Button>static void drawSmart062(Rect rect,Button butto
     else for(size_t i=0;i<g_smart062.size();++i){const auto& d=g_smart062[i].data;auto* diameter=d.find("diameter_mm"),*length=d.find("length_mm");if(d.find("a")&&d.find("b"))dimensionGraphic062(rect,inspectionPoint062(d,"a"),inspectionPoint062(d,"b"),diameter?"DIA "+g_displayUnits.distance(diameter->num):length?g_displayUnits.distance(length->num):"",(int)i%3);}
     float w=std::min(370.f,(float)viewW-30),x=viewX+viewW-w-15,y=viewY+58.f,h=196+std::min<size_t>(g_smart062.size(),4)*43.f;
     g_zones.erase(std::remove_if(g_zones.begin(),g_zones.end(),[&](const Zone& z){return z.x<x+w&&z.x+z.w>x&&z.y<y+h&&z.y+z.h>y;}),g_zones.end());
-    rect(x+3,y+5,w,h,10,0,0,0,.2f,0,0,0,0,0);rect(x,y,w,h,10,.035f,.065f,.09f,.98f,.18f,.38f,.48f,.9f,1);rect(x,y,4,h,2,.23f,.77f,.95f,1,0,0,0,0,0);
-    textOut("SMART MEASURE",x+16,y+13,.78f,.83f,.95f,1);textOut("D",x+w-30,y+14,.7f,.35f,.85f,1);
-    textOut("Click edge or face / Ctrl adds or removes",x+16,y+43,.54f,.64f,.76f,.83f);
+    rect(x+3,y+5,w,h,10,0,0,0,.2f,0,0,0,0,0);rect(x,y,w,h,10,.058f,.06f,.065f,.98f,.331f,.345f,.373f,.9f,1);rect(x,y,4,h,2,.23f,.77f,.95f,1,0,0,0,0,0);
+    textOut("SMART MEASURE",x+16,y+13,.78f,.892f,.928f,.959);textOut("D",x+w-30,y+14,.7f,.725f,.755f,.779);
+    textOut("Click edge or face / Ctrl adds or removes",x+16,y+43,.54f,.711f,.74f,.764f);
     std::string main="Choose an entity",detail="Length / diameter / area / minimum distance";
     if(g_smart062.size()==2&&g_smartPair062.find("distance_mm")){main=g_displayUnits.distance(g_smartPair062.find("distance_mm")->num);detail="Minimum distance";if(auto* a=g_smartPair062.find("angle_deg"))detail+="  /  Angle "+drawingNumber(a->num)+" deg";}
     else if(g_smart062.size()==1){const auto& d=g_smart062[0].data;if(auto* n=d.find("diameter_mm")){main="DIA "+g_displayUnits.distance(n->num);detail="Radius "+g_displayUnits.distance(n->num/2);}else if(auto* n=d.find("length_mm")){main=g_displayUnits.distance(n->num);detail="Exact edge length";}else if(auto* n=d.find("area_mm2")){main=g_displayUnits.area(n->num);detail="Exact surface area";}}
     else if(g_smart062.size()>2){double total=0;for(const auto& e:g_smart062)if(auto* n=e.data.find("length_mm"))total+=n->num;main=g_displayUnits.distance(total);detail="Total selected edge length / "+std::to_string(g_smart062.size())+" entities";}
-    textOut(fitText(main,.99f,w-32),x+16,y+75,.99f,.55f,.9f,1);textOut(fitText(detail,.55f,w-32),x+16,y+110,.55f,.72f,.85f,.91f);
-    float row=y+139;for(size_t i=0;i<std::min<size_t>(g_smart062.size(),4);++i){const auto& d=g_smart062[i].data;std::string label=d.find("type")->str;if(auto* n=d.find("length_mm"))label+="  /  L "+g_displayUnits.distance(n->num);if(auto* n=d.find("area_mm2"))label+="  /  "+g_displayUnits.area(n->num);rect(x+12,row,w-24,35,5,.07f,.12f,.15f,1,0,0,0,0,0);textOut(fitText(label,.58f,w-44),x+22,row+10,.58f,.76f,.88f,.93f);row+=43;}
+    textOut(fitText(main,.99f,w-32),x+16,y+75,.99f,.8f,.833f,.86);textOut(fitText(detail,.55f,w-32),x+16,y+110,.55f,.794f,.827f,.854f);
+    float row=y+139;for(size_t i=0;i<std::min<size_t>(g_smart062.size(),4);++i){const auto& d=g_smart062[i].data;std::string label=d.find("type")->str;if(auto* n=d.find("length_mm"))label+="  /  L "+g_displayUnits.distance(n->num);if(auto* n=d.find("area_mm2"))label+="  /  "+g_displayUnits.area(n->num);rect(x+12,row,w-24,35,5,.107f,.112f,.121f,1,0,0,0,0,0);textOut(fitText(label,.58f,w-44),x+22,row+10,.58f,.824f,.858f,.886f);row+=43;}
     button("Clear",x+12,y+h-43,82,49801);button("Units",x+102,y+h-43,82,587);button("Close",x+w-94,y+h-43,82,589);
     g_zones.push_back({x,y,w,h,969});
 }
@@ -109,7 +109,7 @@ template<class Rect,class Button>static void drawSection062(Rect rect,Button but
     if(g_section062.drawing&&g_section062.first){inspectionStroke062(rect,(float)g_section062.x,(float)g_section062.y,(float)g_pointerX,(float)g_pointerY,.98f,.68f,.3f,2);}
     float w=std::min(370.f,(float)viewW-30),x=viewX+viewW-w-15,y=viewY+58.f;
     g_zones.erase(std::remove_if(g_zones.begin(),g_zones.end(),[&](const Zone& z){return z.x<x+w&&z.x+z.w>x&&z.y<y+164&&z.y+z.h>y;}),g_zones.end());rect(x,y,w,164,10,.065f,.065f,.075f,.98f,.67f,.43f,.22f,.9f,1);
-    textOut("SECTION VIEW",x+15,y+14,.8f,1,.8f,.51f);textOut(g_section062.drawing?"Click two endpoints across the model":g_section062.label+"  /  "+g_displayUnits.area(g_section062.area),x+15,y+48,.62f,.9f,.83f,.7f);textOut("Inspection only / saved model unchanged",x+15,y+79,.53f,.7f,.75f,.8f);
+    textOut("SECTION VIEW",x+15,y+14,.8f,1,.8f,.51f);textOut(g_section062.drawing?"Click two endpoints across the model":g_section062.label+"  /  "+g_displayUnits.area(g_section062.area),x+15,y+48,.62f,.9f,.83f,.7f);textOut("Inspection only / saved model unchanged",x+15,y+79,.53f,.714f,.743f,.768f);
     if(g_section062.active){button("Flip",x+12,y+113,80,49812);button("Offset",x+100,y+113,80,49813);}button("Close",x+w-92,y+113,80,49814);
     g_zones.push_back({x,y,w,164,969});
 }

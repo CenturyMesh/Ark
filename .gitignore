@@ -33,3 +33,6 @@ auth.json
 studio.json
 *.pem
 *.pfx
+
+# Temporary agent worktrees created by Claude Code; never part of the source.
+.claude/worktrees/

@@ -2,6 +2,10 @@
 // OpenGL ribbon/gallery and native Windows menus; no external asset is required.
 struct ActionIconStroke {float ax,ay,bx,by;};
 using ActionIcon=std::vector<ActionIconStroke>;
+#include "action_icon_kit.inl"
+#include "action_icons_set_a.inl"
+#include "action_icons_set_b.inl"
+#include "action_icons_set_c.inl"
 static const ActionIcon* actionVectorIcon(int action){
     static const std::map<int,ActionIcon> icons=[] {
         std::map<int,ActionIcon> result;
@@ -88,6 +92,11 @@ static const ActionIcon* actionVectorIcon(int action){
         auto& rubber=result[49300];arc(rubber,.5f,.5f,.38f,.28f,0,360);arc(rubber,.5f,.5f,.23f,.14f,0,360);for(float x:{.24f,.39f,.54f,.69f})line(rubber,x,.27f,x+.10f,.36f);
         result[49301]=rubber;
         auto& applySurface=result[49502];poly(applySurface,{{.16f,.53f},{.40f,.76f},{.85f,.22f}});
+        // Right assistant dock: open from rail, collapse to rail, expand/restore width.
+        auto& openDock=result[44300];poly(openDock,{{.52f,.18f},{.20f,.5f},{.52f,.82f}});poly(openDock,{{.82f,.18f},{.50f,.5f},{.82f,.82f}});
+        auto& railDock=result[44301];poly(railDock,{{.18f,.18f},{.50f,.5f},{.18f,.82f}});poly(railDock,{{.48f,.18f},{.80f,.5f},{.48f,.82f}});
+        auto& widthDock=result[44302];line(widthDock,.10f,.5f,.90f,.5f);poly(widthDock,{{.28f,.30f},{.10f,.5f},{.28f,.70f}});poly(widthDock,{{.72f,.30f},{.90f,.5f},{.72f,.70f}});line(widthDock,.10f,.12f,.10f,.88f);line(widthDock,.90f,.12f,.90f,.88f);
+        addActionIconsSetA(result);addActionIconsSetB(result);addActionIconsSetC(result);
         return result;
     }();
     auto found=icons.find(action);return found==icons.end()?nullptr:&found->second;

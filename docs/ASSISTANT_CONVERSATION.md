@@ -11,18 +11,67 @@ Ctrl+A and Ctrl+C. **Copy chat** copies the goal and the conversation as Unicode
 text with paragraph boundaries. Copying does not submit a provider request.
 
 The goal remains above the scrolling messages. Its height uses native text
-layout, up to three lines; in a short split view it reserves room for readable
-messages. Any goal exceeding the available height has its own scrollbar.
-**Expand** gives
-the conversation the workspace, and **Restore** returns to the CAD split.
+layout, up to three lines in a wide dock and one or two in a narrow one; any goal
+exceeding the available height has its own scrollbar.
 **Latest** returns to the newest message. New progress follows the end only when
 the reader was already there; it does not displace someone reading earlier work.
 Messages are retained for the open-document session rather than discarded after
 200 entries. Native message controls are created only for the visible portion
 of the history. This is not persistence across an application restart.
 
-**Agents** opens the existing Team role controls in the expanded workspace;
-**Chat** returns to the conversation. Focused remains the default workflow.
+## Right dock, width and reasoning
+
+The Assistant is a dock on the right edge of Studio, spanning the full height
+between the ribbon and the status bar. The 3D viewport ends at the dock; open
+tool docks (baked motions, exploded views, inertial, rubber) sit between the
+viewport and the Assistant. The header Assistant button still opens and closes
+the dock. Within it:
+
+- **Rail** (the `»` control) collapses the dock to a 44 px strip with the
+  Assistant icon, a running pulse and an unread count; clicking it restores the
+  dock. The conversation and composer are hidden on the rail.
+- **Normal** width is 400 px at 96 dpi (scaled with the window DPI). Dragging the
+  dock's left edge sets a user width; the viewport always keeps at least 460 px so
+  its display bar and appearance strip stay usable.
+- **Expand** / **Restore** (also the `⇔` control) switches to about 48% of the
+  window, within the same viewport limit.
+
+Open state, mode (`rail`, `normal`, `expanded`) and the user width are saved in
+the Studio settings. Unknown saved values fall back to the defaults.
+
+Agent replies carry a collapsed **Reasoning** row. It shows only text the
+provider returned in readable form (see [ASSISTANT.md](ASSISTANT.md)); a reply
+whose provider returned none shows the quiet note *Reasoning not exposed by this
+provider*. **Show reasoning** expands every section. The reasoning row also has
+one chip per agent (ARK in Single; each role in Team, with a state dot). A chip
+opens that agent's latest reasoning with its role id, label, turn and state,
+above the messages; extra roles are listed under **+N**. Team cards in **Agents**
+have a **Reasoning** link that returns to the conversation with that role
+selected. Reasoning is never added to the transcript copy, the provider history
+or the document.
+
+Local evidence for this change (milestones **A.02 / D.02**, still **Parcial**):
+`studio-chat-dock-ui` renders rail, normal and expanded docks at 1280×800 and
+1920×1080 with a synthetic conversation (one reply with a reasoning note, one
+without) and a two-role team, and checks that the dock spans ribbon to status bar,
+the viewport ends at the dock, dock controls neither escape nor overlap, the view
+cube, triad and display bar stay in the viewport, the drag handle clamps, and mode
+and width survive a settings round trip. Captures composite the native controls
+and were inspected. Offline unit tests cover readable-reasoning extraction for
+Responses, Chat Completions, Messages, Claude Code and ACP shapes and the summary
+request rule. Real provider reasoning output was not exercised (no network or
+credentials in this verification). With live Studio tests enabled, 78 of 81 UI
+checks passed; `studio-team-blockers-ui` (and its compact variant) and
+`studio-parametric-graph-ui` (stack overflow) also fail on the base revision. Self-tests
+that assumed the bottom dock were updated to the right-dock layout, and the async
+exact test now picks inside the current silhouette instead of an edge pixel found
+before earlier orbits.
+
+## Messages and Team controls
+
+**Agents** opens the Team role cards in the dock column (one or more columns
+by dock width, paged when they do not fit); **Chat** returns to the
+conversation. Focused remains the default workflow.
 **Run info** in Single exposes usage and observed activity without placing token
 counters over the conversation.
 

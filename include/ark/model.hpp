@@ -331,8 +331,10 @@ public:
     arkjson::Value designContainerCheckout; // scoped workspace ownership and merge baseline; no derived geometry
     arkjson::Value parametricComponents; // embedded immutable .arkprt/.arktop definitions and explicit instance bindings
     arkjson::Value manufacturingPlans; // source-bound manufacturing DAGs; simulation remains derived
+    arkjson::Value parametricPrograms; // ark.parametric-program.v1 sources, values and namespace ownership baselines
     arkjson::Value schematics; // independent editable 2D circuit sheets, symbols, pins and explicit wires
     std::vector<std::string> componentBindingsToSeal; // transient, only a component command can request a new evaluated baseline
+    std::vector<std::string> programBindingsToSeal; // transient, only program.bind can request a new evaluated baseline
     arkjson::Value skeleton; // native declarative source, input overrides and stable ownership manifest
     std::vector<arkjson::Value> drawings; // authored associative technical drawings; derived curves are never persisted
     u64 historyTip=0; // inclusive feature prefix; zero resumes the full authored history

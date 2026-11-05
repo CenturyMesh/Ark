@@ -12,7 +12,7 @@ static void drawAgentPresence030(bool resolve=true){
     if(!g_showAgentPresence||g_agentPresence.empty())return;
     GLint priorVao=0,priorBuffer=0,priorViewport[4]{};glGetIntegerv(GL_VERTEX_ARRAY_BINDING,&priorVao);glGetIntegerv(GL_ARRAY_BUFFER_BINDING,&priorBuffer);glGetIntegerv(GL_VIEWPORT,priorViewport);
     static GLuint vao=0,vbo=0;if(!vao){glGenVertexArrays(1,&vao);glGenBuffers(1,&vbo);}
-    const float colors[8][3]={{.22f,.86f,1.f},{.80f,.53f,1.f},{.42f,1.f,.65f},{1.f,.66f,.30f},{1.f,.48f,.66f},{.45f,.67f,1.f},{.91f,.90f,.40f},{.40f,1.f,.91f}};
+    const float colors[teamCapacity][3]={{.22f,.86f,1.f},{.80f,.53f,1.f},{.42f,1.f,.65f},{1.f,.66f,.30f},{1.f,.48f,.66f},{.45f,.67f,1.f},{.91f,.90f,.40f},{.40f,1.f,.91f},{.74f,.93f,.36f}};
     const auto camera=cameraProjection()*cameraView();unsigned slot=0,unlocated=0;std::vector<std::array<float,4>> labels;
     glViewport(viewX,winH-viewY-viewH,viewW,viewH);glDisable(GL_DEPTH_TEST);glEnable(GL_BLEND);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
     for(auto& item:g_agentPresence){auto& presence=item.second;const auto age=GetTickCount64()-presence.updated;if(age>15000)continue;
@@ -42,7 +42,7 @@ static void drawAgentPresence030(bool resolve=true){
         for(int attempt=0;attempt<8;++attempt){bool overlap=false;for(const auto& box:labels)if(lx<box[0]+box[2]&&lx+labelWidth>box[0]&&ly<box[1]+box[3]&&ly+35>box[1])overlap=true;if(!overlap)break;ly=ly+38<viewY+viewH-40?ly+38:std::max((float)viewY+12,ly-76);}
         labels.push_back({lx,ly,labelWidth,35});glViewport(viewX,winH-viewY-viewH,viewW,viewH);std::vector<float> backing;auto vertex=[&](float px,float py){backing.insert(backing.end(),{(px-viewX)*2/viewW-1,1-(py-viewY)*2/viewH,0});};
         const float left=lx-5,right=std::min((float)(viewX+viewW-5),lx+labelWidth),top=ly-4,bottom=ly+33;vertex(left,top);vertex(right,top);vertex(left,bottom);vertex(left,bottom);vertex(right,top);vertex(right,bottom);glUniform4f(glGetUniformLocation(pSketch,"tint"),.035f,.055f,.073f,.88f*alpha);glBufferData(GL_ARRAY_BUFFER,(GLsizeiptr)(backing.size()*sizeof(float)),backing.data(),GL_DYNAMIC_DRAW);glDrawArrays(GL_TRIANGLES,0,6);glViewport(0,0,winW,winH);
-        ::textOut(label,lx,ly,.62f,tint[0],tint[1],tint[2]);::textOut(detail.substr(0,48),lx,ly+18,.53f,.77f,.83f,.88f);glViewport(viewX,winH-viewY-viewH,viewW,viewH);
+        ::textOut(label,lx,ly,.62f,tint[0],tint[1],tint[2]);::textOut(detail.substr(0,48),lx,ly+18,.53f,.789f,.821f,.848f);glViewport(viewX,winH-viewY-viewH,viewW,viewH);
     }
     // Busy-frame controls continue drawing with their caller-owned quad VAO.
     // In particular an unlocated agent must not leave an empty marker VBO bound.

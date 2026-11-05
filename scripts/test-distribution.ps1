@@ -11,6 +11,8 @@ $oldPath = $env:PATH
 $oldWorker = $env:ARK_OCCT_WORKER
 $process = $null
 $started = $false
+$registration = $null
+$oldInputEncoding = $null
 try {
     [IO.Directory]::CreateDirectory($temporary) | Out-Null
     $runtime = Join-Path $temporary 'portable with spaces'
@@ -29,6 +31,9 @@ try {
     $start.CreateNoWindow = $true
     $process = New-Object Diagnostics.Process
     $process.StartInfo = $start
+    # Windows PowerShell writes redirected stdin with the console input encoding,
+    # which adds a UTF-8 BOM on code page 65001 (as in scripts/project-memory.ps1).
+    try { $oldInputEncoding = [Console]::InputEncoding; [Console]::InputEncoding = New-Object Text.UTF8Encoding($false) } catch { $oldInputEncoding = $null }
     if (-not $process.Start()) { throw 'Packaged MCP could not start.' }
     $started = $true
     $output = $process.StandardOutput.ReadToEndAsync()
@@ -50,20 +55,26 @@ try {
     if (-not (Test-Path -LiteralPath (Join-Path $temporary 'package-box.step'))) { throw 'Packaged worker did not produce STEP geometry.' }
 
     $installRoot = Join-Path $temporary 'installed with spaces'
-    $setup = Start-Process -FilePath ([IO.Path]::GetFullPath($InstallerPath)) -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',('/DIR="' + $installRoot + '"')) -PassThru -Wait
-    if ($setup.ExitCode -ne 0) { throw "Installer failed with exit code $($setup.ExitCode)." }
+    # --test-isolated keeps this run off the user's real ARK registration and shortcuts, even with a public setup.
+    $isolation = 'distribution-' + [guid]::NewGuid().ToString('N').Substring(0, 12)
+    $registration = 'HKCU:/Software/Microsoft/Windows/CurrentVersion/Uninstall/MeshSphere.ARK.Test.' + $isolation
+    $setup = Start-Process -FilePath ([IO.Path]::GetFullPath($InstallerPath)) -ArgumentList @('--silent', '--dir', ('"' + $installRoot + '"'), '--test-isolated', $isolation) -PassThru -Wait
+    if ($setup.ExitCode -ne 0) { throw "Installer failed with exit code $($setup.ExitCode); see $env:TEMP\ARK-Setup.log." }
     $state = Get-ArkState $installRoot
     if ($state.current -cne $version) { throw 'Installer did not select the packaged runtime.' }
     Assert-ArkInstalledRuntime $installRoot $version | Out-Null
     if (-not (Test-Path -LiteralPath (Join-Path $installRoot 'ARK.cmd'))) { throw 'Installer did not prepare the launcher.' }
-    $uninstaller = @(Get-ChildItem -LiteralPath $installRoot -Filter 'unins*.exe' -File)
-    if ($uninstaller.Count -ne 1) { throw 'Installer did not register an uninstaller.' }
-    $uninstall = Start-Process -FilePath $uninstaller[0].FullName -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART') -PassThru -Wait
-    if ($uninstall.ExitCode -ne 0 -or (Test-Path -LiteralPath (Join-Path $installRoot 'versions'))) { throw 'Uninstaller did not remove the application runtimes.' }
+    $uninstaller = Join-Path $installRoot 'uninstall.exe'
+    if (-not (Test-Path -LiteralPath $uninstaller -PathType Leaf) -or -not (Test-Path -LiteralPath $registration)) { throw 'Installer did not register an uninstaller.' }
+    $uninstall = Start-Process -FilePath $uninstaller -ArgumentList @('--uninstall', '--quiet', '--test-isolated', $isolation) -PassThru -Wait
+    if ($uninstall.ExitCode -ne 0 -or (Test-Path -LiteralPath (Join-Path $installRoot 'versions')) -or (Test-Path -LiteralPath $registration)) { throw 'Uninstaller did not remove the application runtimes and registration.' }
+    Start-Sleep -Seconds 2 # uninstall.exe removes itself after it exits
     Write-Output 'Distribution smoke passed: isolated native STEP export, per-user install, receipts, launcher and uninstall.'
 } finally {
     if ($process) { if ($started -and -not $process.HasExited) { $process.Kill() }; $process.Dispose() }
     $env:PATH = $oldPath
     $env:ARK_OCCT_WORKER = $oldWorker
+    if ($registration -and (Test-Path -LiteralPath $registration)) { Remove-Item -LiteralPath $registration -Recurse -Force }
+    if ($oldInputEncoding) { try { [Console]::InputEncoding = $oldInputEncoding } catch { } }
     if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath (Assert-ArkChildPath ([IO.Path]::GetTempPath()) $temporary) -Recurse -Force }
 }

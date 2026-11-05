@@ -16,6 +16,7 @@
 #include "ark/authoring_023b.hpp"
 #include "ark/design_containers.hpp"
 #include "ark/parametric_components.hpp"
+#include "ark/parametric_programs.hpp"
 #include "ark/design_disciplines.hpp"
 #include "ark/holes_orchestrator.hpp"
 #include "ark/collision.hpp"
@@ -258,6 +259,7 @@ void validated(Document& d,bool geometry=true){
     validateAppearanceAuthoring024B(d,true);
     std::vector<AssemblyPlacement> placements;std::string error;if(!resolveAssembly(d,placements,error))throw std::runtime_error(error);
     sealParametricComponentBindings(d);
+    sealParametricProgramBindings(d);
 }
 std::set<u64> consumed(const Document& d){return consumedFeatureInputs(d);}
 struct MeshSelection { u64 feature=0; u64 node=0; int copy=-1; std::string nodeName; bool useNode=false; u64 cacheKey=0; };
@@ -807,7 +809,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
                 if(expected->t!=V::Num||expected->num!=(double)revision)
                     throw std::runtime_error("Revision conflict; the current revision is in this result. Inspect only what your edit depends on and retry");
         if(tool=="context_graph")return result(projectContextGraph(document,revision,args,contextGraphCache_,contextGraphSource_,contextGraphStamp_));
-        V extension;if(callTransmissionTool(*this,tool,args,extension))return result(extension);if(callManufacturingTool(*this,tool,args,extension))return result(extension);if(callDesignDisciplineTool(*this,tool,args,extension))return result(extension);if(callParametricComponentTool(*this,tool,args,extension))return result(extension);if(callProjectMemoryTool(*this,tool,args,extension))return result(extension);if(callAuthoring023Tool(*this,tool,args,extension))return result(extension);if(callComponentLibraryTool(*this,tool,args,extension))return result(extension);if(callAgentFeature(*this,tool,args,extension))return result(extension);if(callParametricHudTool(*this,tool,args,extension))return result(extension);
+        V extension;if(callTransmissionTool(*this,tool,args,extension))return result(extension);if(callManufacturingTool(*this,tool,args,extension))return result(extension);if(callDesignDisciplineTool(*this,tool,args,extension))return result(extension);if(callParametricComponentTool(*this,tool,args,extension))return result(extension);if(callParametricProgramTool(*this,tool,args,extension))return result(extension);if(callProjectMemoryTool(*this,tool,args,extension))return result(extension);if(callAuthoring023Tool(*this,tool,args,extension))return result(extension);if(callComponentLibraryTool(*this,tool,args,extension))return result(extension);if(callAgentFeature(*this,tool,args,extension))return result(extension);if(callParametricHudTool(*this,tool,args,extension))return result(extension);
         {V out;if(callAuthoring024Tool(*this,tool,args,out))return result(out);if(callMotionTool(*this,tool,args,out))return result(out);if(callDragChainTool(*this,tool,args,out))return result(out);Image image;if(callExplodedViewTool(*this,tool,args,out,&image))return image.w?snapshotImageResult(image,out,std::string()):result(out);}
         if(tool=="collision_inspect"||tool=="skeleton_inspect"||tool=="skeleton_compile"){
             if(const auto* expected=args.find("expected_revision"))if(expected->t!=V::Num||expected->num!=(double)revision)throw std::runtime_error("Revision conflict; inspect the current document before querying");
@@ -1320,7 +1322,8 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
                 const auto sketchName=op.rfind("sketch.",0)==0&&c.find("name")?sketchReference(c.find("owner_feature")?featureRef(next,*c.find("owner_feature")):0,str(c,"name")):std::string();
                 if(next.historyTip&&(op=="feature.add"||op=="sheet.create"||op=="skeleton.set"))throw std::runtime_error("Resume full feature history before adding features or changing Skeleton source");
                 if(op=="feature.move"&&skeletonOwnsFeature(next,featureRef(next,field(c,"id"))))throw std::runtime_error("Skeleton pattern is source-owned; change its source instead of reordering generated features");
-                if(op.rfind("component.",0)==0){if(!args.find("expected_revision"))throw std::runtime_error("Parametric component commands require expected_revision");if(!applyParametricComponentCommand(next,c))throw std::runtime_error("Unknown component command");validated(next);}
+                if(op.rfind("program.",0)==0){if(!args.find("expected_revision"))throw std::runtime_error("Parametric program commands require expected_revision");if(!applyParametricProgramCommand(next,c))throw std::runtime_error("Unknown program command");}
+                else if(op.rfind("component.",0)==0){if(!args.find("expected_revision"))throw std::runtime_error("Parametric component commands require expected_revision");if(!applyParametricComponentCommand(next,c))throw std::runtime_error("Unknown component command");validated(next);}
                 else if(op.rfind("manufacturing.",0)==0){if(!args.find("expected_revision"))throw std::runtime_error("Manufacturing commands require expected_revision");if(!applyManufacturingCommand(next,c))throw std::runtime_error("Unknown manufacturing command");}
                 else if(op=="classification.set"||op.rfind("schematic.",0)==0){if(!args.find("expected_revision"))throw std::runtime_error("Classification and schematic commands require expected_revision");if(!applyDesignDisciplineCommand(next,c))throw std::runtime_error("Unknown discipline command");}
                 else if(applyFeatureHistoryCommand(next,c)){}
@@ -1804,7 +1807,7 @@ if(std::string(d.name)=="doc_apply"){
     enrichModeling031BSchemas(list);
     {V tool=V::makeObj(),schema,annotations=V::makeObj();tool.set("name",V::makeStr("context_graph"));tool.set("description",V::makeStr("Retrieve a small linked project context by query or exact keys. Includes authored dependencies/backlinks and attributed saved feedback; no geometry evaluation. Use known_scope and known_fingerprints to omit unchanged facts. Read object_context/native evidence before editing; this graph grants no write or manufacturing authority."));arkjson::parse(R"({"type":"object","properties":{"query":{"type":"string","maxLength":256},"keys":{"type":"array","minItems":1,"maxItems":64,"items":{"type":"string","maxLength":256}},"depth":{"type":"integer","minimum":0,"maximum":2},"limit":{"type":"integer","minimum":1,"maximum":64},"history_limit":{"type":"integer","minimum":0,"maximum":8},"expected_revision":{"type":"integer","minimum":0},"known_scope":{"type":"string","maxLength":256},"known_fingerprints":{"type":"object","additionalProperties":{"type":"string","maxLength":64}}},"additionalProperties":false})",schema);tool.set("inputSchema",schema);annotations.set("readOnlyHint",V::makeBool(true));tool.set("annotations",annotations);list.arr.push_back(tool);}
     for(auto& tool:list.arr)if(tool.find("name")->str=="doc_apply"){V schema=*tool.find("inputSchema"),props=*schema.find("properties"),flag=V::makeObj();flag.set("type",V::makeStr("boolean"));props.set("refresh_candidate",flag);schema.set("properties",props);tool.set("inputSchema",schema);}
-    appendProjectMemoryTools(list);appendParametricComponentTools(list);appendDesignDisciplineTools(list);appendManufacturingTools(list);appendTransmissionTools(list);
+    appendProjectMemoryTools(list);appendParametricComponentTools(list);appendParametricProgramTools(list);appendDesignDisciplineTools(list);appendManufacturingTools(list);appendTransmissionTools(list);
     for(auto& tool:list.arr)if(tool.find("name")->str=="doc_apply"||tool.find("name")->str=="doc_preview"){
         V schema=*tool.find("inputSchema"),props=*schema.find("properties"),commands=*props.find("commands"),items=*commands.find("items"),cp=*items.find("properties"),op=*cp.find("op"),en=*op.find("enum");
         for(const auto* name:{"component.insert","component.update","component.configure"})en.arr.push_back(V::makeStr(name));op.set("enum",en);cp.set("op",op);

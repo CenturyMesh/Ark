@@ -7,7 +7,6 @@ param(
     [string]$OcctSdkDirectory = 'out/deps/occt/install-msvc-ark-offset-001',
     [string]$Repository = 'CenturyMesh/Ark',
     [switch]$Installer,
-    [string]$InnoCompiler,
     [switch]$Publish
 )
 $ErrorActionPreference = 'Stop'
@@ -32,7 +31,6 @@ $assets = @($archive)
 if (Test-Path -LiteralPath ($archive + '.provenance.json')) { $assets += $archive + '.provenance.json' }
 if ($Installer) {
     $installerArguments = @{PackagePath=$archive; OutputDirectory=$OutputDirectory; UseRuntimeIdentity=$true}
-    if ($InnoCompiler) { $installerArguments.InnoCompiler = $InnoCompiler }
     & (Join-Path $PSScriptRoot 'build-installer.ps1') @installerArguments
     $assets += Join-Path $OutputDirectory "ARK-$code-windows-x64-setup.exe"
 }

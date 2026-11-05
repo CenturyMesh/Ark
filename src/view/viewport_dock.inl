@@ -26,8 +26,8 @@ template<class Rect,class Glyph>static void drawViewportDock(Rect rect,Glyph gly
     const auto layout=viewportBarLayout();if(!layout.visible)return;
     const float cell=layout.cell,width=layout.width,height=layout.height,x=layout.x,y=layout.y;
     rect(x-2,y+3,width+4,height+4,10,0,0,0,.20f,0,0,0,0,0);
-    rect(x,y,width,height,8,.075f,.094f,.117f,.96f,.25f,.30f,.36f,.90f,1);
-    rect(x+9,y+1,width-18,1,0,.52f,.61f,.70f,.14f,0,0,0,0,0);
+    rect(x,y,width,height,ui_theme::panelRadius-4,ui_theme::panel.r,ui_theme::panel.g,ui_theme::panel.b,.94f,1,1,1,ui_theme::border,1);
+    rect(x+9,y+1,width-18,1,0,1,1,1,.08f,0,0,0,0,0);
     const bool drawingReady=viewportDrawingSource().t==arkjson::Value::Obj&&!g_directAuthoring.active&&!g_sketchEditing.active&&!g_sketchDrawing.active;
     static constexpr int ids[]={462,963,464,960,961,962,176,177,178,186,175,964,965,455};
     const bool active[]={!g_pathTracing&&!wireframe&&!g_showEdges,!g_pathTracing&&!wireframe&&g_showEdges,!g_pathTracing&&wireframe,g_showDatumPlanes,g_showSketches,g_grid,g_navMode==0,g_navMode==1,g_navMode==2,g_occlusionMode!=0,g_cameraOrtho,false,false,false};
@@ -36,17 +36,17 @@ template<class Rect,class Glyph>static void drawViewportDock(Rect rect,Glyph gly
     const char* headings[]={style,"Overlays","Navigate","View","2D","More"};static constexpr int offsets[]={0,3,6,10,12,13},groupSizes[]={3,3,4,2,1,1};
     std::array<Zone,15> zones;size_t zoneCount=0;const char* tip=nullptr;float bx=x+8,tipCenter=x+width*.5f;
     for(int group=0;group<6;++group){if((group==2&&!g_compactNavigation)||(layout.condensed&&group!=0&&group!=5))continue;const float groupWidth=cell*groupSizes[group];
-        const float scale=.64f;if(height>44)textOut(headings[group],bx+(groupWidth-textWidth(headings[group],scale))*.5f,y+7,scale,.66f,.73f,.81f);
+        const float scale=.64f;if(height>44)textOut(headings[group],bx+(groupWidth-textWidth(headings[group],scale))*.5f,y+7,scale,ui_theme::muted.r,ui_theme::muted.g,ui_theme::muted.b);
         for(int j=0;j<groupSizes[group];++j,bx+=cell){const int index=offsets[group]+j;const float by=y+(height>44?28:6),bw=cell-4,bh=32;
             const bool enabled=ids[index]!=965||drawingReady,hover=pointer.x>=bx&&pointer.x<bx+bw&&pointer.y>=by&&pointer.y<by+bh;
-            if(active[index])rect(bx,by,bw,bh,5,.16f,.28f,.40f,1,.33f,.53f,.72f,.85f,1);
-            if(hover){rect(bx,by,bw,bh,5,.22f,.34f,.46f,enabled?.90f:.22f,.42f,.61f,.80f,enabled?.8f:.2f,1);tip=tips[index];tipCenter=bx+bw*.5f;}
+            if(active[index])rect(bx,by,bw,bh,ui_theme::controlRadius,1,1,1,ui_theme::active,0,0,0,0,0);
+            if(hover){rect(bx,by,bw,bh,ui_theme::controlRadius,1,1,1,enabled?ui_theme::hover+.03f:.03f,1,1,1,enabled?ui_theme::border:.05f,1);tip=tips[index];tipCenter=bx+bw*.5f;}
             glyph(ids[index],bx+(bw-22)*.5f,by+4,22,enabled?(active[index]?1.f:.84f):.32f);
-            if(active[index])rect(bx+bw*.5f-5,by+bh-4,10,2,1,.56f,.77f,.96f,1,0,0,0,0,0);
+            if(active[index])rect(bx+bw*.5f-6,by+bh-4,12,2,1,ui_theme::accent.r,ui_theme::accent.g,ui_theme::accent.b,1,0,0,0,0,0);
             zones[zoneCount++]={bx,by,bw,bh,enabled?ids[index]:969};
         }
-        if(group<5){rect(bx+3,y+13,1,height-26,0,.30f,.36f,.43f,.60f,0,0,0,0,0);bx+=12;}
+        if(group<5){rect(bx+3,y+13,1,height-26,0,1,1,1,ui_theme::line,0,0,0,0,0);bx+=12;}
     }
     zones[zoneCount++]={x,y,width,height,969};g_zones.insert(g_zones.begin(),zones.begin(),zones.begin()+zoneCount);
-    if(tip){const float tw=std::min((float)viewW-24,textWidth(tip,.68f)+24),tx=std::clamp(tipCenter-tw*.5f,(float)viewX+8,(float)(viewX+viewW)-tw-8);rect(tx,y-37,tw,29,5,.075f,.094f,.117f,.99f,.32f,.41f,.51f,.8f,1);textOut(fitText(tip,.68f,tw-20),tx+10,y-30,.68f,.88f,.93f,.98f);}
+    if(tip){const float tw=std::min((float)viewW-24,textWidth(tip,.68f)+24),tx=std::clamp(tipCenter-tw*.5f,(float)viewX+8,(float)(viewX+viewW)-tw-8);rect(tx,y-37,tw,29,ui_theme::controlRadius,ui_theme::panel.r,ui_theme::panel.g,ui_theme::panel.b,.97f,1,1,1,ui_theme::border,1);textOut(fitText(tip,.68f,tw-20),tx+10,y-30,.68f,ui_theme::text.r,ui_theme::text.g,ui_theme::text.b);}
 }

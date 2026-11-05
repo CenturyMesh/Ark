@@ -1,0 +1,7 @@
+<Project>
+  <!-- Build output stays under out/ (ignored), never beside the installer sources. -->
+  <PropertyGroup>
+    <UseArtifactsOutput>true</UseArtifactsOutput>
+    <ArtifactsPath>$(MSBuildThisFileDirectory)..\out\installer-build</ArtifactsPath>
+  </PropertyGroup>
+</Project>

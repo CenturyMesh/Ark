@@ -132,7 +132,7 @@ Checkout makeCheckout(const Document& doc,u64 revision,u64 group,bool legacy=fal
     erase(checkout.root,"schematics");erase(checkout.root,"drawings");erase(checkout.root,"canvases");erase(checkout.root,"skeleton");
     // The owning project keeps immutable library definitions. A scoped worker
     // receives only its materialized recipe closure, never unrelated packages.
-    erase(checkout.root,"parametric_components");
+    erase(checkout.root,"parametric_components");erase(checkout.root,"parametric_programs");
     // No audit pointer/usage/history crosses documents. The child session starts
     // its own audit when it is opened and edited.
     V manifest=V::makeObj();manifest.set("format",V::makeStr(legacy?"ark.design-container.v1":"ark.design-container.v2"));if(!legacy)manifest.set("selection_policy",V::makeStr("workspace_local"));manifest.set("container_node",number(group));manifest.set("source_revision",number(revision));manifest.set("source_sha256",V::makeStr(digest(source)));manifest.set("baseline_sha256",V::makeStr(digest(checkout.root)));manifest.set("baseline",checkout.root);manifest.set("editable",keyArray(checkout.editable));manifest.set("readonly",keyArray(checkout.readonly));checkout.manifest=manifest;
@@ -207,7 +207,7 @@ V componentSourceClosure(const Document& doc,const V& args){
     const Graph graph(root,false);const auto retained=graph.closure(seed);
     for(const auto& key:retained)if(!graph.all.count(key))reject("COMPONENT_PORT_MISSING",key);
     for(const auto* collection:collections){V subset=V::makeArr();for(const auto& row:field(root,collection).arr)if(retained.count(rowKey(collection,row)))subset.arr.push_back(row);root.set(collection,subset);}
-    for(const char* key:{"design_container_checkout","parametric_components","schematics","drawings","canvases","skeleton","motions","drag_chains","exploded_views","assembly_configurations","assembly_load_selection","assembly_external_references","bom_document_id"})erase(root,key);
+    for(const char* key:{"design_container_checkout","parametric_components","parametric_programs","schematics","drawings","canvases","skeleton","motions","drag_chains","exploded_views","assembly_configurations","assembly_load_selection","assembly_external_references","bom_document_id"})erase(root,key);
     return root;
 }
 
