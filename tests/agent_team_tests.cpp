@@ -168,7 +168,7 @@ static void incrementalStepsAndScopes(){
 static V lastTeamReceipt(const V& request){const auto& input=request.find("input")->arr;for(auto it=input.rbegin();it!=input.rend();++it)if(it->find("type")&&it->find("type")->asStr()=="function_call_output"){auto receipt=json(it->find("output")->asStr());return receipt.find("structuredContent")?*receipt.find("structuredContent"):receipt;}return V{};}
 static void parametricDesignerRole(){
     ark::AgentTeam team;ark::AgentTeamConfig config;config.roles={role("programmer",true)};config.roles[0].discipline=ark::AgentTeamDiscipline::ParametricDesigner;int rounds=0;std::string candidate,direct,prompt;ark::AgentSession session;
-    const std::string program=R"({"format":"ark.parametric-program.v1","name":"Posts","parameters":{"n":{"default":2,"min":1,"max":4,"integer":true}},"body":[{"for":"i","count":"n","body":[{"emit":{"op":"feature.add","type":"native_solid","name":"Post {i+1}","native":{"op":"box"},"p":{"width":4,"depth":4,"height":"{10+i}"}}}]}]})";
+    const std::string program=R"({"format":"ark.parametric-program.v1","name":"Posts","parameters":{"n":{"default":2,"min":1,"max":4,"integer":true}},"body":[{"for":"i","count":"n","body":[{"emit":{"op":"feature.add","type":"box","name":"Post {i+1}","p":{"dx":4,"dy":4,"dz":"{10+i}"}}}]}]})";
     config.roles[0].transport=[&](auto&,const V& request,auto*){switch(++rounds){
         case 1:for(const auto& item:request.find("input")->arr)if(const auto* content=item.find("content");content&&content->t==V::Str)prompt+=content->str+"\n";return call("read","doc_info","{}");
         case 2:return call("prepare","parametric_program",R"({"action":"prepare","mode":"install","namespace":"posts","expected_revision":0,"program":)"+program+"}");
