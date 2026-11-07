@@ -24,6 +24,7 @@ bool featureConsumesInputBodies(const Feature& feature){return feature.type!=Fea
 bool featureConsumesInputBody(const Feature& feature,size_t index){
     if(!featureConsumesInputBodies(feature))return false;
     if(index==2&&feature.type==FeatureType::NativeSolid&&featureOperation(feature)=="curve_pattern")return false;
+    if(feature.type==FeatureType::SurfaceEdit){const auto* operation=feature.nativeSpec.find("op");if(operation&&(operation->asStr()=="curve_network"||(operation->asStr()=="multi_trim"&&index+1==feature.inputs.size())||(operation->asStr()=="match_boundary"&&index==1)))return false;}
     if(index==1&&feature.type==FeatureType::SurfaceEdit){const auto* op=feature.nativeSpec.find("op");if(op&&(op->asStr()=="trim_tool"||(op->asStr()=="deform_poles"&&feature.nativeSpec.find("glue"))))return false;}
     // A support supplies a boundary derivative; it is not joined into the patch.
     if(feature.type==FeatureType::SurfaceFill&&index<feature.inputs.size())if(const auto* constraints=feature.nativeSpec.find("constraints"))for(const auto& c:constraints->arr)if(const auto* support=c.find("support");support&&support->t==arkjson::Value::Num&&support->num==(double)feature.inputs[index])return false;

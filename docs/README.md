@@ -29,6 +29,10 @@ current release claim. [release.json](../release.json) owns application identity
 | [029B assembly scaling](ASSEMBLY_SCALING_029B.md) | You need selective memory/I/O and configuration/pin ownership in isolated workspaces |
 | [023B test guide](AUTHORING_023B_TESTING.md) | You are testing STEP/IGES import, Arkitfy, functional holes or isolated design containers |
 | [Parametric programs](PARAMETRIC_PROGRAMS.md) | You want a configurable family written as code: counts, conditions, generated sketches and design assertions |
+| [068B surface quality and matching](SURFACE_QUALITY_068B.md) | You need native curvature/seam evidence or an explicitly reviewed boundary match |
+| [068B curve networks and loft correspondence](SURFACE_NETWORK_068B.md) | You need exact compatible curve networks or typed section/seam controls |
+| [068B grouped poles and surface operations](SURFACE_EDITING_068B.md) | You need locked/symmetric pole groups, explicit multi-face trims or hole-preserving extension |
+| [068B offset and thickness checks](SURFACE_OFFSET_068B.md) | You need a checked native trial, curvature risk locations and explicit candidate publication |
 | [067G design variants](DESIGN_VARIANTS_067G.md) | You want saved configurations, visual comparison or bounded exploration of exact parametric alternatives |
 | [067G revision review and repair](DESIGN_REVIEW_067G.md) | You want to compare retained design revisions or preview an explicit failed-feature correction |
 | [067G drawing output and component library](DRAWING_LIBRARY_067G.md) | You want multipage PDF drawings, declared geometric tolerances or a visual reusable-component browser |

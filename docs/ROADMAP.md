@@ -1,5 +1,12 @@
 # ARK roadmap A–G
 
+068B (**A.02/B.01/B.03/D.02 — Verificado no escopo local**): exact surface boundary
+matching, loft correspondence, native curvature/seam analysis, grouped poles,
+multi-face trim, trim-preserving extension/sewing diagnosis, curve networks and
+checked offset/thickness workflows. Native 187/187 and affected Studio 14/14 passed;
+32 boundary-orientation cases and a 32-check composed native/STEP workflow passed.
+Broader milestones remain **Parcial**; see [068B evidence and limits](iterations/068B.md).
+
 067G (**B.02/B.03/B.04/B.05/D.02/D.05/F.03/G.02/G.03 — Verificado no escopo local**):
 persistent program variants and measured grid exploration, retained-revision
 comparison, reviewed repair of rejected edits, multipage vector PDF with declared

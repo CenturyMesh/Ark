@@ -215,7 +215,7 @@ void testSweepExtrudeRevolveOffsetSew() {
     const auto box = ark::occt::bounds(movedShape);
     check(close(ark::occt::properties(movedShape, 'a'), 9.0, 1.0e-4), "offset plane area");
     check(close(box[2], box[5], 1.0e-6) && close(std::abs(box[2]), 2.0, 1.0e-5), "offset plane translation");
-    check(moved.find("report")->find("offset_intersection_checked")->b == false, "offset reports no intersection check");
+    check(moved.find("report")->find("offset_intersection_checked")->b, "offset passes current native self-interference check");
 
     const Value left = ark::occt::modelSurfaceNative(parse(square(0, 1, 0, 1)));
     const Value right = ark::occt::modelSurfaceNative(parse(square(1, 2, 0, 1)));

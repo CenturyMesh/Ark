@@ -85,7 +85,7 @@ static void loft(const Feature* editing){
     std::vector<u64> inputs;auto sections=profiles(c,f[1].value,false,inputs),guides=profiles(c,f[2].value,true,inputs);native.set("sections",sections);
     if(const auto* alignment=controls.find("section_alignment");alignment&&alignment->arr.size()!=sections.arr.size())throw std::runtime_error("Retained section alignment count differs from the new section count; edit alignment explicitly first");
     const char* bits[]={"solid","ruled","smooth","compatible"};for(size_t i=0;i<4;++i){toggle(f[3+i]);if(!p.find(bits[i])||f[3+i].value!=bitValue(p,bits[i]))p.set(bits[i],V::makeStr(f[3+i].value));}
-    if(trimField(f[7].value).empty())erase(p,"max_degree");else{integer(f[7].value,1,25,"Maximum degree");p.set("max_degree",V::makeStr(f[7].value));}
+    if(trimField(f[7].value).empty())erase(p,"max_degree");else{integer(f[7].value,1,8,"Maximum degree");p.set("max_degree",V::makeStr(f[7].value));}
     if(trimField(f[8].value).empty())erase(p,"continuity");else{integer(f[8].value,0,2,"Loft continuity");p.set("continuity",V::makeStr(f[8].value));}
     if(guides.arr.empty()){erase(native,"guides");for(const char* key:{"guide_samples","max_guide_deviation_mm","require_ordered_contacts"})erase(controls,key);}
     else{native.set("guides",guides);integer(f[9].value,2,129,"Guide checkpoints");double error=formNumber(f[10].value);if(error<1e-6||error>.05)throw std::runtime_error("Guide error must be within 1e-6..0.05 mm");controls.set("guide_samples",V::makeStr(f[9].value));controls.set("max_guide_deviation_mm",V::makeStr(f[10].value));controls.set("require_ordered_contacts",V::makeBool(toggle(f[11])));}

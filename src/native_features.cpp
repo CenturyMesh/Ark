@@ -538,14 +538,25 @@ V surfaceRequest(const Feature& feature, const ExprEnv& env, Document& document,
         }
     } else if (feature.type == FeatureType::SurfaceEdit) {
         const std::string editOp=required(feature.nativeSpec,"op").asStr();
-        const bool paired=editOp=="trim_wire"||editOp=="mutual_trim"||editOp=="trim_tool"||editOp=="ruled"||(editOp=="deform_poles"&&feature.nativeSpec.find("glue"));
-        if(feature.inputs.size()!=(paired?2u:1u)||(paired&&feature.inputs[0]==feature.inputs[1]))throw std::runtime_error("surface_edit needs one source; trim_wire, mutual_trim, trim_tool and ruled require two distinct inputs");
+        const bool paired=editOp=="match_boundary"||editOp=="trim_wire"||editOp=="mutual_trim"||editOp=="trim_tool"||editOp=="ruled"||(editOp=="deform_poles"&&feature.nativeSpec.find("glue"));
+        const bool many=editOp=="curve_network"||editOp=="multi_trim";
+        if(many){const size_t low=editOp=="curve_network"?4:2,high=editOp=="curve_network"?18:17;if(feature.inputs.size()<low||feature.inputs.size()>high||std::set<u64>(feature.inputs.begin(),feature.inputs.end()).size()!=feature.inputs.size())throw std::runtime_error("Surface network/trim requires distinct bounded native inputs");}
+        else if(feature.inputs.size()!=(paired?2u:1u)||(paired&&feature.inputs[0]==feature.inputs[1]))throw std::runtime_error("Surface operation input count or identity is invalid");
         const Body* source=precedingBody(preceding,feature.inputs.front());
         if(!source)throw std::runtime_error("surface_edit input missing");
         request.set("input_brep",brepOf(*source,"surface_edit input"));
         const auto& operation=required(feature.nativeSpec,"op");
         if(operation.t!=V::Str)throw std::runtime_error("surface_edit op must be extract_face or trim_plane");
-        if(operation.str=="mirror"){
+        if(operation.str=="curve_network"){
+            for(const auto& field:feature.nativeSpec.obj)if(field.first!="op"&&field.first!="u_count"&&field.first!="u_stations"&&field.first!="v_stations"&&field.first!="u_reverse"&&field.first!="v_reverse")throw std::runtime_error("Unknown curve network field: "+field.first);
+            request.obj.erase(std::remove_if(request.obj.begin(),request.obj.end(),[](const auto& item){return item.first=="input_brep";}),request.obj.end());V encoded=V::makeArr();for(u64 input:feature.inputs){const auto* body=precedingBody(preceding,input);if(!body)throw std::runtime_error("Network curve dependency is missing");encoded.arr.push_back(brepOf(*body,"network curve"));}request.set("op",V::makeStr("surface_network"));request.set("input_breps",encoded);for(const char* key:{"u_count","u_stations","v_stations","u_reverse","v_reverse"})if(const auto* field=feature.nativeSpec.find(key))request.set(key,numericNative(*field,env));
+        }else if(operation.str=="multi_trim"){
+            for(const auto& field:feature.nativeSpec.obj)if(field.first!="op"&&field.first!="source_faces"&&field.first!="keep_points")throw std::runtime_error("Unknown multi-trim field: "+field.first);
+            request.obj.erase(std::remove_if(request.obj.begin(),request.obj.end(),[](const auto& item){return item.first=="input_brep";}),request.obj.end());V breps=V::makeArr(),topologies=V::makeArr();for(size_t i=0;i+1<feature.inputs.size();++i){const auto* body=precedingBody(preceding,feature.inputs[i]);if(!body)throw std::runtime_error("Trim source is missing");breps.arr.push_back(brepOf(*body,"trim source"));topologies.arr.push_back(required(body->nativeData,"topology"));}const auto* tool=precedingBody(preceding,feature.inputs.back());if(!tool)throw std::runtime_error("Trim tool is missing");request.set("op",V::makeStr("surface_multi_trim"));request.set("source_breps",breps);request.set("source_topologies",topologies);request.set("tool_brep",brepOf(*tool,"trim tool"));request.set("source_faces",required(feature.nativeSpec,"source_faces"));request.set("keep_points",numericNative(required(feature.nativeSpec,"keep_points"),env));
+        }else if(operation.str=="match_boundary"){
+            for(const auto& field:feature.nativeSpec.obj)if(field.first!="op"&&field.first!="reference"&&field.first!="target_reference"&&field.first!="source_brep_sha256"&&field.first!="target_brep_sha256"&&field.first!="source_side"&&field.first!="target_side"&&field.first!="reverse"&&field.first!="continuity"&&field.first!="cross_scale"&&field.first!="max_displacement_mm"&&field.first!="samples")throw std::runtime_error("Unknown surface match field: "+field.first);
+            const auto* target=precedingBody(preceding,feature.inputs[1]);if(!target)throw std::runtime_error("Surface match target is missing");request.set("op",V::makeStr("surface_match_068b"));request.set("topology",required(source->nativeData,"topology"));request.set("target_brep",brepOf(*target,"match target"));request.set("target_topology",required(target->nativeData,"topology"));for(const char* key:{"reference","target_reference","source_brep_sha256","target_brep_sha256","source_side","target_side"})if(const auto* field=feature.nativeSpec.find(key))request.set(key,*field);for(const char* key:{"reverse","continuity","cross_scale","max_displacement_mm","samples"})if(const auto* field=feature.nativeSpec.find(key))request.set(key,numericNative(*field,env));
+        }else if(operation.str=="mirror"){
             for(const auto& field:feature.nativeSpec.obj)if(field.first!="op"&&field.first!="plane"&&field.first!="origin"&&field.first!="normal"&&field.first!="continuity"&&field.first!="tolerance")throw std::runtime_error("Unknown surface mirror field: "+field.first);
             request.set("op",V::makeStr("surface_mirror"));request.set("continuity",required(feature.nativeSpec,"continuity"));
             if(const auto* plane=feature.nativeSpec.find("plane")){
@@ -600,9 +611,9 @@ V surfaceRequest(const Feature& feature, const ExprEnv& env, Document& document,
             }
         }else if(operation.str=="trim_wire"){
             const Body* curve=precedingBody(preceding,feature.inputs[1]);if(!curve)throw std::runtime_error("Surface trim curve input missing");request.set("op",V::makeStr("surface_trim_wire"));request.set("wire_brep",brepOf(*curve,"trim curve"));request.set("keep_point",numericNative(required(feature.nativeSpec,"keep_point"),env));
-        }else if(operation.str=="untrim"||operation.str=="extend"){
+        }else if(operation.str=="untrim"||operation.str=="extend"||operation.str=="extend_trimmed"){
             for(const auto& field:feature.nativeSpec.obj)if(field.first!="op"&&field.first!="bounds"&&field.first!="extension")throw std::runtime_error("Unknown surface domain edit field: "+field.first);
-            request.set("op",V::makeStr(operation.str=="extend"?"surface_extend":"surface_untrim"));
+            request.set("op",V::makeStr(operation.str=="extend_trimmed"?"surface_extend_trimmed":operation.str=="extend"?"surface_extend":"surface_untrim"));
             if(const auto* bounds=feature.nativeSpec.find("bounds"))request.set("bounds",numericNative(*bounds,env));
             if(const auto* extension=feature.nativeSpec.find("extension"))request.set("extension",numericNative(*extension,env));
         }else if(operation.str=="mutual_trim"){
@@ -1250,6 +1261,11 @@ V rectTubeSolid(const Feature& feature, const ExprEnv& env) {
     return solidWorker(std::move(model));
 }
 } // namespace
+
+arkjson::Value surfaceRequestForInspection068B(Document& document,const Feature& feature){
+    if(feature.type!=FeatureType::Loft)throw std::runtime_error("Surface inspection request supports Loft only");
+    return surfaceRequest(feature,document.buildEnv(),document,document.evalBodies);
+}
 
 bool isNativeFeature(FeatureType type) {
     return isNativeSurfaceFeature(type) || isCurveFeature(type) || type == FeatureType::SheetMetal ||

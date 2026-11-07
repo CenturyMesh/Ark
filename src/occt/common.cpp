@@ -5,6 +5,7 @@
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
+#include <BRepAlgoAPI_Check.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepBndLib.hxx>
 #include <BRepCheck_Analyzer.hxx>

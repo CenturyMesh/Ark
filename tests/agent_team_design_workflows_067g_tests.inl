@@ -3,7 +3,8 @@
 static void designWorkflowCandidateCustody067g(){
     for(const auto& request:std::vector<std::pair<std::string,std::string>>{
         {"design_variants","prepare"},{"design_variants","save"},
-        {"design_variants","remove"},{"design_review","prepare_repair"}}){
+        {"design_variants","remove"},{"design_review","prepare_repair"},
+        {"surface_control","match_plan"},{"surface_control","network_plan"},{"surface_control","offset_plan"}}){
         ark::AgentSession session;ark::AgentTeam team;ark::AgentTeamConfig config;
         config.roles={role("engineer",true)};int rounds=0;std::string candidate;
         config.roles[0].transport=[&](const auto&,const V& input,const auto*){

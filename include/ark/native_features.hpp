@@ -5,6 +5,8 @@
 namespace ark {
 
 bool isNativeFeature(FeatureType type);
+// Private inspection callers use the same authoritative loft profile resolver.
+arkjson::Value surfaceRequestForInspection068B(Document&,const Feature&);
 Body evaluateNativeFeature(const Feature& feature, const ExprEnv& env,
                            Document& document, std::vector<Body>& preceding);
 // Materialize exact geometry from a prior feature's analytic parameters only

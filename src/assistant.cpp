@@ -1,3 +1,4 @@
+#include "ark/surface_edit_059c.hpp"
 #include "ark/assistant.hpp"
 #include "ark/project_memory_tools.hpp"
 #include "ark/assistant_claude_code.hpp"

@@ -58,6 +58,10 @@
 #include <Law_Linear.hxx>
 #include <GCPnts_AbscissaPoint.hxx>
 #include <Geom_BSplineSurface.hxx>
+#include <Geom_BSplineCurve.hxx>
+#include <GeomConvert.hxx>
+#include <BRepLProp_SLProps.hxx>
+#include <BOPAlgo_CheckResult.hxx>
 #include <Geom_BezierCurve.hxx>
 #include <Geom_BezierSurface.hxx>
 #include <gp_Ax2.hxx>
@@ -103,6 +107,8 @@ namespace ark::occt {
 namespace {
 using V = arkjson::Value;
 constexpr double kTolerance = 1.0e-6;
+TopoDS_Shape rawSurfaceOffset068(const TopoDS_Shape&,double,bool);
+void validateSurfaceOffset068(const TopoDS_Shape&);
 
 const V& required(const V& object, const char* key) {
     if (object.t != V::Obj) throw std::runtime_error("Expected object");
@@ -1571,11 +1577,10 @@ V offsetSurface(const V& request) {
     if (!shapes(source, TopAbs_SOLID).empty())
         throw std::runtime_error("offset_surface requires a face or shell, not a solid");
     if (shapes(source, TopAbs_FACE).empty()) throw std::runtime_error("offset_surface input has no faces");
-    BRepOffsetAPI_MakeOffsetShape maker;
-    maker.PerformBySimple(source, distance);
-    if (!maker.IsDone()) throw std::runtime_error("OCCT surface offset failed");
-    return tag(shapeResult(maker.Shape(), false), "offset_surface",
-               "offset_intersection_checked", V::makeBool(false));
+    const auto offset=rawSurfaceOffset068(source,distance,false);
+    validateSurfaceOffset068(offset);
+    return tag(shapeResult(offset, false), "offset_surface",
+               "offset_intersection_checked", V::makeBool(true));
 }
 
 V sewSurfaces(const V& request) {
@@ -1719,10 +1724,7 @@ V thicken(const V& request) {
             open = faces(i).Extent() == 1 && !BRep_Tool::Degenerated(TopoDS::Edge(faces.FindKey(i)));
         if (!open) throw std::runtime_error("thicken requires an open face or shell, but this shell is closed (no free boundary edges); thicken an open skin (an open profile with solid:0), or build the solid with solid:1 and hollow it with native_solid shell");
     }
-    BRepOffsetAPI_MakeThickSolid maker;
-    maker.MakeThickSolidBySimple(source, thickness);
-    if (!maker.IsDone()) throw std::runtime_error("OCCT thickening failed");
-    TopoDS_Shape solid = maker.Shape();
+    TopoDS_Shape solid=rawSurfaceOffset068(source,thickness,true);
     if (shapes(solid, TopAbs_SOLID).size() != 1)
         throw std::runtime_error("OCCT thickening did not return one solid: type=" +
                                  std::to_string(solid.ShapeType()) +
@@ -1732,8 +1734,13 @@ V thicken(const V& request) {
     // Reversal negates the same integral, so the measured volume is reused.
     const double signedVolume = properties(solid);
     if (signedVolume < 0) solid.Reverse();
-    return solidShapeResult(solid, std::abs(signedVolume));
+    validateSurfaceOffset068(solid);
+    V result=solidShapeResult(solid,std::abs(signedVolume)),report=*result.find("report");report.set("self_interference_checked",V::makeBool(true));result.set("report",report);return result;
 }
+#include "surface_match_068b.inl"
+#include "surface_network_068b.inl"
+#include "surface_operations_068b.inl"
+#include "surface_offset_068b.inl"
 } // namespace
 
 V profileCurveNative(const V& profile){
@@ -1747,6 +1754,16 @@ V modelSurfaceNative(const V& request) {
         if (operation.str == "loft") return loft(request);
         if (operation.str == "surface_fill") return surfaceFill(request);
         if (operation.str == "surface_nurbs") return surfaceNurbs(request);
+        if (operation.str == "surface_quality_068b") return surfaceQuality068B(request);
+        if (operation.str == "surface_seam_068b") return surfaceSeam068B(request);
+        if (operation.str == "surface_match_068b") return surfaceMatch068B(request);
+        if (operation.str == "surface_network") return surfaceNetwork068(request);
+        if (operation.str == "loft_diagnostics") return loftDiagnostics068(request);
+        if (operation.str == "surface_domain_inspect") return surfaceDomainInspect068B(request);
+        if (operation.str == "surface_multi_trim") return surfaceMultiTrim068B(request);
+        if (operation.str == "surface_extend_trimmed") return surfaceExtendTrimmed068B(request);
+        if (operation.str == "surface_sew_inspect") return surfaceSewInspect068B(request);
+        if (operation.str == "surface_offset_diagnostics") return surfaceOffsetDiagnostics068B(request);
         if (operation.str == "thicken") return thicken(request);
         if (operation.str == "extrude_surface") return extrudeSurface(request);
         if (operation.str == "revolve_surface") return revolveSurface(request);

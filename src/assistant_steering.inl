@@ -1,5 +1,6 @@
 bool assistantToolReadOnly(const V& tools,const std::string& name,const V& args){
     if(name=="tool_feedback")return true;
+    if(name=="surface_control"&&surfaceControlRetainsCandidate068B(args))return false;
     if(name=="snapshot"&&args.t==V::Obj&&!args.find("path"))return true;
     if(name=="image_asset"&&field(args,"action")=="inspect")return true;
     if(name=="parametric_program"&&(field(args,"action")=="validate"||field(args,"action")=="examples"||field(args,"action")=="inspect"))return true;
