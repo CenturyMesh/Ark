@@ -29,6 +29,9 @@ current release claim. [release.json](../release.json) owns application identity
 | [029B assembly scaling](ASSEMBLY_SCALING_029B.md) | You need selective memory/I/O and configuration/pin ownership in isolated workspaces |
 | [023B test guide](AUTHORING_023B_TESTING.md) | You are testing STEP/IGES import, Arkitfy, functional holes or isolated design containers |
 | [Parametric programs](PARAMETRIC_PROGRAMS.md) | You want a configurable family written as code: counts, conditions, generated sketches and design assertions |
+| [067G design variants](DESIGN_VARIANTS_067G.md) | You want saved configurations, visual comparison or bounded exploration of exact parametric alternatives |
+| [067G revision review and repair](DESIGN_REVIEW_067G.md) | You want to compare retained design revisions or preview an explicit failed-feature correction |
+| [067G drawing output and component library](DRAWING_LIBRARY_067G.md) | You want multipage PDF drawings, declared geometric tolerances or a visual reusable-component browser |
 | [023B Holes Orchestrator](HOLES_ORCHESTRATOR_023B.md) | You need parametric holes, thread preparation, dowels or retaining-ring grooves with published nominal sources |
 | [023B CAD import](CAD_IMPORT_023B.md) | You need portable exact STEP/IGES references and measured reconstruction checks |
 | [023B design containers](DESIGN_CONTAINERS_023B.md) | You need scoped editing in another document or ARK instance and guarded integration |

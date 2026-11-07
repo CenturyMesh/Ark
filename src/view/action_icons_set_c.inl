@@ -22,6 +22,13 @@ static void addActionIconsSetC(std::map<int,ActionIcon>& r){
     {auto& more=r[459];for(float x:{.24f,.5f,.76f})circle(more,x,.5f,.06f);}
     {auto& library=r[484];rect(library,.14f,.2f,.14f,.64f);rect(library,.32f,.2f,.14f,.64f);closed(library,{{.52f,.26f},{.65f,.22f},{.82f,.8f},{.69f,.84f}});line(library,.1f,.88f,.9f,.88f);}
     {auto& grid=r[579];for(float v:{.3f,.5f,.7f}){line(grid,v,.14f,v,.86f);line(grid,.14f,v,.86f,v);}}
+    {auto& library=r[49960];for(float x:{.16f,.56f})for(float y:{.16f,.56f})rect(library,x,y,.28f,.28f);}
+    {auto& config=r[49920];for(float y:{.25f,.5f,.75f})line(config,.14f,y,.86f,y);for(auto p:{std::pair<float,float>{.34f,.25f},{.66f,.5f},{.46f,.75f}})rect(config,p.first-.06f,p.second-.08f,.12f,.16f);}
+    {auto& compare=r[49921];cube(compare,.28f,.5f,.38f);cube(compare,.72f,.5f,.38f);}
+    {auto& explore=r[49922];line(explore,.16f,.84f,.16f,.16f);line(explore,.16f,.84f,.86f,.84f);poly(explore,{{.25f,.68f},{.43f,.49f},{.61f,.58f},{.81f,.23f}});for(auto p:{std::pair<float,float>{.25f,.68f},{.43f,.49f},{.61f,.58f},{.81f,.23f}})circle(explore,p.first,p.second,.04f);}
+    {auto& compare=r[49940];rect(compare,.14f,.16f,.44f,.54f);rect(compare,.42f,.3f,.44f,.54f);}
+    {auto& repair=r[49941];cube(repair,.4f,.4f,.5f);pencil(repair,.5f,.5f,.35f);}
+    {auto& hide=r[49942];rect(hide,.18f,.22f,.64f,.56f);line(hide,.15f,.85f,.85f,.15f);}
     // Configurations: one part shown as three stacked variants with a selected front.
     {auto& configs=r[44080];rect(configs,.34f,.14f,.52f,.4f);poly(configs,{{.24f,.62f},{.24f,.24f},{.34f,.24f}});poly(configs,{{.14f,.72f},{.14f,.34f},{.24f,.34f}});
         poly(configs,{{.14f,.72f},{.14f,.86f},{.66f,.86f},{.66f,.54f}});check(configs,.6f,.34f,.22f);}

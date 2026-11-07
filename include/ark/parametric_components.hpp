@@ -15,4 +15,7 @@ bool callParametricComponentTool(AgentSession&, const std::string&, const arkjso
 void appendParametricComponentTools(arkjson::Value&);
 // Same authored relation index as context_graph, without its agent response cap.
 arkjson::Value parametricGraphSnapshot(const Document&, u64 revision);
+// Explicit local-folder catalog; no network, installation or source rewriting.
+arkjson::Value parametricComponentLibrary(const arkjson::Value& args);
+arkjson::Value parametricComponentThumbnail(const std::string& path);
 }

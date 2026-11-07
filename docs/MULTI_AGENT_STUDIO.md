@@ -71,8 +71,12 @@ The local `studio-parametric-role-ui` check covers this option offline. A
 scripted Focused team runs through Studio's own tool queue: the engineer assigns
 the role, it publishes one program candidate, native inspection measures both
 generated solids at their exact volumes, the reviewer reports and the goal is
-reported complete. Its 117-function catalogue, 43 after deferral with the
-`overview` and `programs` pack, is within the 128-function limit. Legacy settings
+reported complete. In 067G its 117-function catalogue, 44 after deferral with the
+`overview` and `programs` pack, is within the 128-function limit. Host receipt and
+maintenance operations (`usage_record`, `compute_benchmark`, `history_compact`,
+`history_migrate_derived`, `memory_maintain`, `failure_export`) remain available
+outside shared Team turns. Variant and repair previews retain role ownership and
+undergo ordinary command-scope checks before a Team can apply them. Legacy settings
 are read back with their owners, and a disabled role leaves a default run of
 three roles. Role cards stay inside the dock at eight window sizes from
 1180x800 to 3840x2160, in normal and expanded docks. Captures up to 2560x1200

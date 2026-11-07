@@ -3,16 +3,16 @@ static arkjson::Value prepareAuthoringWithProgress(const arkjson::Value& args){
     const auto captured=std::chrono::steady_clock::now();const auto epoch=g_objectDocumentEpoch;
     g_authoringWorker->start(g_doc,g_session.revision,epoch,args);g_progressTiming030.captureMs=realtimeMs030(captured);
     HDC hdc=GetDC(g_window);if(!hdc){g_authoringWorker->cancel();auto result=g_authoringWorker->take();if(result)return AsyncAuthoringWorker::publish(std::move(*result),g_session,g_objectDocumentEpoch);return g_session.completePreparedApply(args,nullptr);}
-    struct Finish {HDC dc;~Finish(){g_preparingEdit=false;g_cameraDrag.active=false;ReleaseCapture();ReleaseDC(g_window,dc);if(g_busyClosePending){g_busyClosePending=false;PostMessage(g_window,WM_CLOSE,0,0);}}} finish{hdc};
+    struct Finish {HDC dc;~Finish(){g_preparingEdit=false;g_cameraDrag.active=false;ReleaseCapture();ReleaseDC(g_window,dc);invalidateStudioWindowsAfterWork();if(g_busyClosePending){g_busyClosePending=false;PostMessage(g_window,WM_CLOSE,0,0);}}} finish{hdc};
     g_preparingEdit=true;g_busyStarted=std::chrono::steady_clock::now();g_busyLabel="Preparing edit / drawing remains interactive";g_componentDragIntent={};
     {std::lock_guard lock(g_busyProgressMutex);g_busyFeatureProgress={};}
     std::optional<AsyncAuthoringWorker::Result> completed;
     for(;;){
         if(g_closing||(g_authoringExternalCancel&&g_authoringExternalCancel()))g_authoringWorker->cancel();
-        MSG message{};while(PeekMessageA(&message,nullptr,0,0,PM_REMOVE)){
+        MSG message{};for(unsigned pumped=0;pumped<256&&PeekMessageA(&message,nullptr,0,0,PM_REMOVE);++pumped){
             if(message.message==WM_QUIT){g_busyClosePending=true;g_authoringWorker->cancel();continue;}
             if(message.hwnd==g_window){TranslateMessage(&message);DispatchMessageA(&message);++g_busyPumpCount;}
-            else if(message.message==WM_PAINT&&message.hwnd)ValidateRect(message.hwnd,nullptr);
+            else if(message.message==WM_PAINT&&message.hwnd)RedrawWindow(message.hwnd,nullptr,nullptr,RDW_VALIDATE|RDW_NOINTERNALPAINT|RDW_NOERASE);
         }
         if((completed=g_authoringWorker->take()))break;
         const auto progress=g_authoringWorker->progress();{std::lock_guard lock(g_busyProgressMutex);g_busyFeatureProgress={progress.feature,progress.name,progress.index,progress.total,progress.completed,progress.reused};}

@@ -58,6 +58,7 @@ add_library(ark STATIC
   src/authoring_024b.cpp src/media_authoring.cpp src/appearance_024b.cpp src/plane_sections_024b.cpp
   src/authoring_023b.cpp src/cad_import.cpp src/holes_orchestrator.cpp src/design_containers.cpp
   src/parametric_components.cpp src/parametric_programs.cpp
+  src/design_variants.cpp src/design_review.cpp
   src/design_disciplines.cpp
   src/motion_cables.cpp
   src/assembly_patterns.cpp src/transmission_math_061c.cpp src/transmission_tools_061c.cpp src/transmission_design_061c.cpp
@@ -182,6 +183,13 @@ if(ARK_WITH_OCCT)
   add_test(NAME parametric-components-053b COMMAND ark-parametric-components-053b-tests)
   set_tests_properties(parametric-components-053b PROPERTIES TIMEOUT 180)
   add_dependencies(ark-parametric-components-053b-tests ark-occt-worker)
+  foreach(feature design_variants design_review)
+    add_executable(ark-${feature}-tests tests/${feature}_tests.cpp)
+    target_link_libraries(ark-${feature}-tests PRIVATE ark)
+    add_test(NAME ${feature} COMMAND ark-${feature}-tests)
+    set_tests_properties(${feature} PROPERTIES TIMEOUT 240)
+    add_dependencies(ark-${feature}-tests ark-occt-worker)
+  endforeach()
   add_executable(ark-parametric-programs-tests tests/parametric_programs_tests.cpp)
   target_link_libraries(ark-parametric-programs-tests PRIVATE ark)
   add_test(NAME parametric-programs COMMAND ark-parametric-programs-tests)
@@ -682,7 +690,7 @@ if(WIN32)
       add_test(NAME studio-${check} COMMAND ark-studio --self-test-${check} --settings-file "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}.settings.json" --shot "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}.png" --size 1280 800)
       set_tests_properties(studio-${check} PROPERTIES TIMEOUT 300 RUN_SERIAL TRUE)
     endforeach()
-    foreach(check inertial-ui viewport-quality-ui connectors-ui local-models-ui viewport-dock-ui context-ui suspension-ui assistant-steering-ui assistant-chat-ui chat-dock-ui parametric-role-ui stamps-ui media-044b-ui planes-sections-ui holes-orchestrator-ui design-container-ui parametric-graph-ui design-disciplines-ui cad-import-ui native-vertex-pull-ui advanced-sheetmetal-ui specialized-pattern-ui drawing-viewport-ui direct-authoring-ui parametric-authoring-ui selection-glow-ui selection-picking-ui image-attachment-ui sketch-edit-ui sketch-drawing-ui typed-sketch-ui arc-ui assistant-ui render-ui action-icons-ui interaction-ui baked-motions-ui exploded-views-ui drag-chain-ui)
+    foreach(check design-variants-ui component-library-ui design-review-ui inertial-ui viewport-quality-ui connectors-ui local-models-ui viewport-dock-ui context-ui suspension-ui assistant-steering-ui assistant-chat-ui chat-dock-ui parametric-role-ui stamps-ui media-044b-ui planes-sections-ui holes-orchestrator-ui design-container-ui parametric-graph-ui design-disciplines-ui cad-import-ui native-vertex-pull-ui advanced-sheetmetal-ui specialized-pattern-ui drawing-viewport-ui direct-authoring-ui parametric-authoring-ui selection-glow-ui selection-picking-ui image-attachment-ui sketch-edit-ui sketch-drawing-ui typed-sketch-ui arc-ui assistant-ui render-ui action-icons-ui interaction-ui baked-motions-ui exploded-views-ui drag-chain-ui)
       add_test(NAME studio-${check} COMMAND ark-studio --self-test-${check} --settings-file "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}.settings.json" --shot "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}.png" --size 1440 900)
       set_tests_properties(studio-${check} PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
     endforeach()

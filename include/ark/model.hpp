@@ -332,6 +332,7 @@ public:
     arkjson::Value parametricComponents; // embedded immutable .arkprt/.arktop definitions and explicit instance bindings
     arkjson::Value manufacturingPlans; // source-bound manufacturing DAGs; simulation remains derived
     arkjson::Value parametricPrograms; // ark.parametric-program.v1 sources, values and namespace ownership baselines
+    arkjson::Value designVariants; // named parameter configurations bound to a parametric program digest
     arkjson::Value schematics; // independent editable 2D circuit sheets, symbols, pins and explicit wires
     std::vector<std::string> componentBindingsToSeal; // transient, only a component command can request a new evaluated baseline
     std::vector<std::string> programBindingsToSeal; // transient, only program.bind can request a new evaluated baseline

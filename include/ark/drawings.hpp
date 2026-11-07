@@ -14,6 +14,9 @@ void applyDrawingCommand(Document&, const arkjson::Value& command);
 void refreshDrawing(Document&, const std::string& name, u64 observedRevision);
 arkjson::Value inspectDrawing(Document&, const arkjson::Value& args, u64 revision);
 arkjson::Value exportDrawing(Document&, const arkjson::Value& args, u64 revision);
+// Vector presentation of current derived sheets. Curves use the retained display
+// samples, not a new exact geometry authority. The caller owns file publication.
+std::string drawingPdfPresentation(const std::vector<arkjson::Value>& reports);
 }
 
 namespace ark::occt {

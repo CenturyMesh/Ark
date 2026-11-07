@@ -269,7 +269,10 @@ void requireNoDependants(const Document& d,const V& root,const V& owned){
     };
     // Skeleton source is text; a quoted program-owned name in it is a dependency.
     if(const auto* skeleton=root.find("skeleton")){const auto source=skeleton->dump();for(const auto& n:names)if(source.find(n)!=std::string::npos)fail("DEPENDANTS","Skeleton source references program-owned "+n+"; edit the Skeleton first, or detach the program");}
-    for(const auto& kv:root.obj){if(kv.first=="parametric_programs"||kv.first=="skeleton")continue;
+    // Saved configurations contain labels and numeric inputs, never references
+    // to generated feature identities. A label matching a feature is not a user
+    // of that feature and must not block an atomic program re-run.
+    for(const auto& kv:root.obj){if(kv.first=="parametric_programs"||kv.first=="design_variants"||kv.first=="skeleton")continue;
         const bool rows=std::any_of(std::begin(kOwned),std::end(kOwned),[&](const char* c){return kv.first==c;});
         if(rows&&kv.second.t==V::Arr){for(const auto& row:kv.second.arr)if(!names.count(get(row,"name").asStr()))scan(row,"",kv.first+":"+get(row,"name").asStr());}
         else scan(kv.second,kv.first,kv.first);}
