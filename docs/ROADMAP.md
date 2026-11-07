@@ -1,5 +1,11 @@
 # ARK roadmap A–G
 
+071D (**A.02/A.04/B.01/D.02/F.03 — Verificado no escopo local**): actionable Claude Code terminal
+diagnostics, official CLI reconnection controls and fresh-inspection guards after
+context compaction. RAM and worker ceilings adapt to hardware, available memory
+and independent work. See [071D evidence](iterations/071D.md),
+[Claude recovery](CLAUDE_RECOVERY_071D.md) and [resource policy](RESOURCE_POLICY_071D.md).
+
 070A (**A.02/A.04/B.01/B.02/D.02/F.05 — Verificado no escopo local**): dirty dependency scheduling,
 AVX2 packed-position transforms, authenticated parsed-result RAM reuse, adaptive
 idle display residency and closed-Studio MCP lifecycle handling. Geometry,

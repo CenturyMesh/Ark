@@ -4,9 +4,10 @@ static Image captureChat(HWND window,const std::string& path,bool live=false){
     RECT r{};GetClientRect(window,&r);int w=r.right,h=r.bottom;HDC screen=GetDC(window),dc=CreateCompatibleDC(screen);BITMAPINFO info{};info.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);info.bmiHeader.biWidth=w;info.bmiHeader.biHeight=-h;info.bmiHeader.biPlanes=1;info.bmiHeader.biBitCount=32;void* pixels=nullptr;HBITMAP bitmap=CreateDIBSection(screen,&info,DIB_RGB_COLORS,&pixels,nullptr,0);auto old=SelectObject(dc,bitmap);
     std::function<void(HWND)> render=[&](HWND control){RECT bounds{};GetClientRect(control,&bounds);int saved=SaveDC(dc);IntersectClipRect(dc,0,0,bounds.right,bounds.bottom);SendMessageW(control,WM_PRINTCLIENT,(WPARAM)dc,PRF_CLIENT|PRF_ERASEBKGND);for(HWND child=GetWindow(control,GW_CHILD);child;child=GetWindow(child,GW_HWNDNEXT)){if(!(GetWindowLongPtr(child,GWL_STYLE)&WS_VISIBLE))continue;POINT offset{};MapWindowPoints(child,control,&offset,1);int childState=SaveDC(dc);OffsetViewportOrgEx(dc,offset.x,offset.y,nullptr);render(child);RestoreDC(dc,childState);}RestoreDC(dc,saved);};
     if(live)BitBlt(dc,0,0,w,h,screen,0,0,SRCCOPY);else render(window);
-    Image image;image.w=w;image.h=h;image.px.resize((size_t)w*h*3);for(size_t i=0;i<(size_t)w*h;++i){auto* p=(unsigned char*)pixels+i*4;image.px[i*3]=p[2];image.px[i*3+1]=p[1];image.px[i*3+2]=p[0];}writePNG(path.c_str(),image);SelectObject(dc,old);DeleteObject(bitmap);DeleteDC(dc);ReleaseDC(window,screen);return image;
+    Image image;image.w=w;image.h=h;image.px.resize((size_t)w*h*3);for(size_t i=0;i<(size_t)w*h;++i){auto* p=(unsigned char*)pixels+i*4;image.px[i*3]=p[2];image.px[i*3+1]=p[1];image.px[i*3+2]=p[0];}if(!path.empty())writePNG(path.c_str(),image);SelectObject(dc,old);DeleteObject(bitmap);DeleteDC(dc);ReleaseDC(window,screen);return image;
 }
 static LRESULT CALLBACK chatScrollPaintProbe(HWND w,UINT m,WPARAM wp,LPARAM lp,UINT_PTR,DWORD_PTR data){if(m==WM_PAINT)++*(int*)data;return DefSubclassProc(w,m,wp,lp);}
+#include "claude_reconnect_selftest_071d.inl"
 static int testAssistantChat(const std::string& path){
     using namespace assistant_chat;
     auto fail=[&](int code,const char* text){std::fprintf(stderr,"Conversation check %d: %s\n",code,text);return code;};
@@ -15,6 +16,14 @@ static int testAssistantChat(const std::string& path){
     g_singleGoal="Improve the equipment display while preserving its mechanical assembly and existing connections.";
     g_chatLog={{"You","Make the display easier to read.\n\nKeep the current mechanical assembly."},{"ARK","I will inspect the display and its connections first.\n\nThe mechanical assembly will stay editable."},{"Action","Inspecting the selected display and its authored references."},{"ARK","The display layout is ready.\n\nPlease confirm the screen dimensions before I continue.\nPortugu\xc3\xaas: a\xc3\xa7\xc3\xa3o, dimens\xc3\xb5" "es / \xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e."}};
     if(activity().title!="Ready")return fail(801,"Initial state");
+    {const auto savedConfig=g_assistantConfig;const bool connected=g_authStatus.connected,busy=g_authBusy;
+     g_assistantConfig=assistantProviderPreset("claude-code");g_authStatus.connected=true;g_authBusy=true;
+     if(assistantAccountLabel071()!="Claude Code")return fail(849,"A connected ChatGPT account masked the selected Claude Code route");
+     g_authBusy=false;const auto savedLog=g_chatLog;g_assistantResponseError=true;g_assistantResponseFinished=true;
+     g_chatLog={{"Error","Claude Code / context_limit / terminal_reason=prompt_too_long. Claude Code rejected the request because its context is too large. Start a fresh ARK chat for the remaining task and inspect the current design; the drawing and committed edits are retained."}};
+     layout();sync(true);captureChat(window,path+".claude-context-error.png");
+     g_chatLog=savedLog;g_assistantResponseError=false;g_assistantResponseFinished=false;g_assistantConfig=savedConfig;g_authStatus.connected=connected;g_authBusy=busy;}
+    if(const int result=testClaudeReconnect071(path))return result;
     g_chatBusy=true;g_assistantStatus="Thinking...";if(activity().title!="Thinking")return fail(802,"Provider phase");
     g_activeToolName="object_context";if(activity().title!="Working")return fail(803,"Tool phase");g_activeToolName.clear();
     g_assistantStatus="HTTP 503 / retry 1";if(activity().title!="Waiting for the connection")return fail(804,"Retry phase");

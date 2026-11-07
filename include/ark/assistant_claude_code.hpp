@@ -20,7 +20,7 @@ std::vector<std::string> assistantClaudeCodeArguments(const AssistantConfig&,con
 bool assistantClaudeCodeInheritsEnvironment(const std::string& name);
 // initialize control request only: no user message or inference. Returns the
 // CLI's model catalog and auth route, never the account e-mail.
-arkjson::Value assistantClaudeCodeProbe(const AssistantConfig&);
+arkjson::Value assistantClaudeCodeProbe(const AssistantConfig&,const std::atomic_bool* cancel=nullptr);
 std::vector<std::string> assistantClaudeCodeModels(const AssistantConfig&);
 AssistantResult runAssistantClaudeCode(const AssistantConfig&,const arkjson::Value& input,
     const arkjson::Value& tools,const AssistantTool&,const AssistantEvents& events={},

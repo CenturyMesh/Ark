@@ -69,7 +69,6 @@ static bool explicitDependencies(const Feature& f){
     std::string op=f.get("op");if(op.empty())if(auto value=f.nativeSpec.find("op"))op=value->str;
     static const std::set<std::string> pure{"box","sphere","cylinder","cone","torus","union","cut","common","hole","fillet","chamfer","transform","linear_pattern","circular_pattern","mirror","shell","draft","split_plane","curve_pattern","hole_pattern","vertex_pull","rib","gusset","mount_pad","boss","screw_support","nut_seat","lid_lip","lid_groove","split_surface","split_tool"};return pure.count(op)!=0;
 }
-static unsigned threadSetting(const char* name,unsigned fallback,unsigned maximum){if(const char* value=std::getenv(name)){char* end=nullptr;long requested=std::strtol(value,&end,10);if(!end||*end||requested<1||(unsigned long)requested>maximum)throw std::runtime_error(std::string(name)+" has an invalid thread budget");return (unsigned)requested;}return fallback;}
 struct NativeBudgetScope {int previous;explicit NativeBudgetScope(unsigned budget):previous(setNativeThreadBudget((int)budget)){}~NativeBudgetScope(){setNativeThreadBudget(previous);}};
 struct OuterParallelScope {bool previous;explicit OuterParallelScope(bool value):previous(setOuterParallelRegion(value)){}~OuterParallelScope(){setOuterParallelRegion(previous);}};
 static size_t valueMemory(const arkjson::Value& value){size_t bytes=sizeof(value)+value.str.size()+64;for(const auto& child:value.arr)bytes+=valueMemory(child);for(const auto& pair:value.obj)bytes+=sizeof(pair.first)+pair.first.size()+valueMemory(pair.second);return bytes;}
@@ -575,9 +574,7 @@ const std::vector<FeatureResult>& Document::recompute() {
     // sources remain waiting until their producer crosses the publication boundary.
     DrivenSketchRefresh drivenSketches(*this);drivenSketches.refresh(false);
     std::vector<bool> explicitInputs;for(const auto& f:features)explicitInputs.push_back(explicitDependencies(f));
-    const unsigned cores=std::max(1u,std::thread::hardware_concurrency());
-    const unsigned cpuBudget=std::min(cores,threadSetting("ARK_CPU_THREADS",std::min(cores,32u),64));
-    const unsigned requestedWorkers=threadSetting("ARK_FEATURE_THREADS",std::min(cpuBudget,4u),16);
+    const auto hardware=probeResourceHardware071D();const auto resourceOverrides=resourceOverrides071D();
 
     parallelFeatures=0;peakParallelFeatures=0;dependencyEdges=0;parallelContextFeaturesCopied=0;
     std::unordered_map<u64,size_t> indices;for(size_t i=0;i<features.size();++i)indices[features[i].id]=i;
@@ -600,12 +597,6 @@ const std::vector<FeatureResult>& Document::recompute() {
         if(!explicitInputs[i]){dependencies[i].clear();for(size_t j=0;j<i;++j)dependencies[i].push_back(j);}
         dependencyEdges+=dependencies[i].size();
     }
-    // Semantic source discovery can turn otherwise independent operations into
-    // ordered barriers. Budget only the final audited set, after that discovery.
-    const size_t eligible=(size_t)std::count(explicitInputs.begin(),explicitInputs.end(),true);
-    featureWorkers=eligible>=4?std::min(cpuBudget,requestedWorkers):1;
-    nativeThreadsPerWorker=std::min(threadSetting("ARK_NATIVE_THREADS",8,64),std::max(1u,cpuBudget/featureWorkers));
-    NativeBudgetScope ownerBudget(nativeThreadsPerWorker);
     auto keyFor=[&](size_t index){
         const auto& f=features[index];auto source=authored.find("features")->arr[index];
         source.obj.erase(std::remove_if(source.obj.begin(),source.obj.end(),[](const auto& v){return v.first=="appearance"||v.first=="part";}),source.obj.end());
@@ -624,13 +615,34 @@ const std::vector<FeatureResult>& Document::recompute() {
     };
     std::vector<std::string> plannedKeys(features.size());std::vector<u64> plannedGenerations(features.size());
     for(size_t i=0;i<features.size();++i){if(!activeFeatures[i])continue;plannedKeys[i]=keyFor(i);auto old=evaluationCache.find(features[i].id);plannedGenerations[i]=old!=evaluationCache.end()&&old->second.key==plannedKeys[i]?old->second.generation:++evaluationGeneration;if(!features[i].suppressed){keys[features[i].id]=std::to_string(features[i].id)+":"+std::to_string(plannedGenerations[i])+";";upstream+=keys[features[i].id];}}
+    // Size the active worker allowance from real dirty audited work, not the
+    // number of cached or inactive rows retained in document history.
+    size_t eligible=0,parallelWidth=0;std::vector<bool> dirtyGeometry(features.size(),false);std::vector<size_t> dirtyLevel(features.size(),0),levelWidths;
+    if(parameterError.empty())for(size_t i=0;i<features.size();++i){
+        const auto previous=evaluationCache.find(features[i].id);
+        if(!activeFeatures[i]||features[i].suppressed||(previous!=evaluationCache.end()&&previous->second.key==plannedKeys[i]))continue;
+        if(!authoringDependencyErrors[i].empty()||!featureParameterError(features[i],env).empty())continue;
+        dirtyGeometry[i]=true;if(explicitInputs[i])++eligible;
+        for(size_t dependency:dependencies[i])if(dirtyGeometry[dependency])dirtyLevel[i]=std::max(dirtyLevel[i],dirtyLevel[dependency]+1);
+        if(levelWidths.size()<=dirtyLevel[i])levelWidths.resize(dirtyLevel[i]+1);
+        parallelWidth=std::max(parallelWidth,++levelWidths[dirtyLevel[i]]);
+    }
+    // A linear-time conservative layer-width estimate preserves native CPU
+    // allowance for a few deep chains, while allowing later fan-outs to use
+    // more workers. It is not an optimal maximum-antichain calculation.
+    const auto resourcePolicy=selectResourcePolicy071D(hardware,resourceOverrides,eligible,0,parallelWidth);
+    schedulerDiagnostics070A.resourcePolicy=resourcePolicy;schedulerDiagnostics070A.minimumPayloadLimitBytes=resourcePolicy.payloadLimitBytes;
+    featureWorkers=resourcePolicy.featureWorkers;nativeThreadsPerWorker=resourcePolicy.nativeThreadsPerWorker;
+    NativeBudgetScope ownerBudget(nativeThreadsPerWorker);
     upstream.clear();
     struct Evaluation {Body body;FeatureResult result;};
     struct Activity {std::atomic<unsigned> active{0},peak{0};void enter(){unsigned n=++active,old=peak.load();while(n>old&&!peak.compare_exchange_weak(old,n)){};}void leave(){--active;}};
     auto activity=std::make_shared<Activity>();
     std::vector<std::future<Evaluation>> jobs(features.size());std::vector<bool> published(features.size(),false);size_t outstanding=0,outstandingBytes=0;std::vector<size_t> jobBytes(features.size(),0);
+    auto ownerNativeAllowance=[&](){const unsigned allowance=outstanding==0?resourcePolicy.ownerNativeThreads:nativeThreadsPerWorker;schedulerDiagnostics070A.peakOwnerNativeThreads=std::max(schedulerDiagnostics070A.peakOwnerNativeThreads,allowance);return allowance;};
     std::vector<std::unique_ptr<Evaluation>> completed(features.size());
-    const size_t contextBytes=valueMemory(authored)+features.size()*sizeof(Feature),payloadBudget=128u*1024u*1024u;
+    const size_t contextBytes=valueMemory(authored)+features.size()*sizeof(Feature);
+    const size_t payloadBudget=static_cast<size_t>(std::min<std::uint64_t>(resourcePolicy.payloadLimitBytes,std::numeric_limits<size_t>::max()));
     struct Drain {std::vector<std::future<Evaluation>>& jobs;~Drain(){for(auto& job:jobs)if(job.valid())job.wait();}} drain{jobs};
     // Only dirty audited operations enter the frontier. Ready cache entries are
     // inputs immediately, as before; a newly evaluated input releases its actual
@@ -698,7 +710,14 @@ const std::vector<FeatureResult>& Document::recompute() {
         const auto& key=plannedKeys[i];auto cached=evaluationCache.find(features[i].id);if(cached!=evaluationCache.end()&&cached->second.key==key)return false;
         bytes=contextBytes;for(u64 id:features[i].inputs){const auto* body=inputBody(id);bytes+=sizeof(Body)+body->faces.size()*sizeof(Face)+valueMemory(body->nativeData);if(body->baked)bytes+=(body->baked->pos.size()+body->baked->nrm.size()+body->baked->idx.size())*sizeof(float);}
         if(bytes>payloadBudget)return false;
-        retry=outstandingBytes>payloadBudget-bytes;return !retry;
+        // A running operation is not cancelled to reclaim memory. Tighten new
+        // snapshot admission when live available RAM falls; the per-pass worker
+        // allowance stays fixed until the next recompute boundary.
+        const auto livePolicy=selectResourcePolicy071D(probeResourceHardware071D(),resourceOverrides,eligible,0,parallelWidth);
+        const auto liveLimit=static_cast<size_t>(std::min<std::uint64_t>(payloadBudget,livePolicy.payloadLimitBytes));
+        schedulerDiagnostics070A.minimumPayloadLimitBytes=std::min<std::uint64_t>(schedulerDiagnostics070A.minimumPayloadLimitBytes,liveLimit);
+        if(bytes>liveLimit){retry=true;return false;}
+        retry=outstandingBytes>liveLimit-bytes;return !retry;
     };
     auto dispatch=[&](size_t i,size_t bytes){
         {
@@ -768,7 +787,7 @@ const std::vector<FeatureResult>& Document::recompute() {
         if(fr.ok&&!cachedFeature&&featureWorkers>=2&&parameterError.empty()&&!completed[index]&&!jobs[index].valid()&&outstanding<featureWorkers&&(!runningJobs.empty()||readyWorkers.upper_bound(index)!=readyWorkers.end())){size_t bytes=0;bool retry=false;if(workerReady(index,bytes,retry))dispatch(index,bytes);}
         while(fr.ok&&!completed[index]&&jobs[index].valid()&&jobs[index].wait_for(std::chrono::milliseconds(2))!=std::future_status::ready)schedule(index,true);
         Body b;bool measuredByWorker=false;
-        try{if(fr.ok){auto cached=evaluationCache.find(f.id);if(cached!=evaluationCache.end()&&cached->second.key==cacheKey){b=*cached->second.body;fr.tris=cached->second.tris;++recomputeReused;}else if(completed[index]){b=std::move(completed[index]->body);fr=std::move(completed[index]->result);measuredByWorker=true;completed[index].reset();--outstanding;outstandingBytes-=jobBytes[index];++recomputeEvaluated;}else if(jobs[index].valid()){auto value=jobs[index].get();runningJobs.erase(index);--outstanding;outstandingBytes-=jobBytes[index];b=std::move(value.body);fr=std::move(value.result);measuredByWorker=true;++recomputeEvaluated;}else{OuterParallelScope nested(outstanding>0);NativeBudgetScope budget(!explicitInputs[index]&&outstanding==0?std::min(threadSetting("ARK_NATIVE_THREADS",8,64),cpuBudget):nativeThreadsPerWorker);activity->enter();try{b=evalFeatureBody(f,env,*this,work,fr,tessOpt);}catch(...){activity->leave();throw;}activity->leave();++recomputeEvaluated;}}}
+        try{if(fr.ok){auto cached=evaluationCache.find(f.id);if(cached!=evaluationCache.end()&&cached->second.key==cacheKey){b=*cached->second.body;fr.tris=cached->second.tris;++recomputeReused;}else if(completed[index]){b=std::move(completed[index]->body);fr=std::move(completed[index]->result);measuredByWorker=true;completed[index].reset();--outstanding;outstandingBytes-=jobBytes[index];++recomputeEvaluated;}else if(jobs[index].valid()){auto value=jobs[index].get();runningJobs.erase(index);--outstanding;outstandingBytes-=jobBytes[index];b=std::move(value.body);fr=std::move(value.result);measuredByWorker=true;++recomputeEvaluated;}else{OuterParallelScope nested(outstanding>0);NativeBudgetScope budget(ownerNativeAllowance());activity->enter();try{b=evalFeatureBody(f,env,*this,work,fr,tessOpt);}catch(...){activity->leave();throw;}activity->leave();++recomputeEvaluated;}}}
         catch(const std::exception& e){fr.ok=false;fr.error=e.what();}
         // A completed worker retains its actual evaluation duration; publication
         // wait time alone can be near zero even for an expensive operation.

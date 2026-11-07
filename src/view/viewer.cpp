@@ -113,6 +113,7 @@ typedef ptrdiff_t GLsizeiptr;
 #include "ark/history_authoring.hpp"
 #include "ark/iteration_history.hpp"
 #include "ark/assistant.hpp"
+#include "ark/assistant_claude_auth_071d.hpp"
 #include "ark/resource_library.hpp"
 #include "ark/assistant_connectors.hpp"
 #include "ark/assistant_credentials.hpp"
@@ -423,7 +424,7 @@ static constexpr UINT WM_ARK_TOOL=WM_APP+20,WM_ARK_CHAT=WM_APP+21,WM_ARK_AUTH=WM
 struct UiToolRequest {RealtimeClock030::time_point posted=RealtimeClock030::now();std::string tool,roleId;arkjson::Value args;LiveSessionBridge::Completion complete;std::stop_token stop;std::shared_ptr<std::atomic_bool> cancel;std::shared_ptr<std::atomic<u64>> revision;std::shared_ptr<AssistantSteering> steering;u64 epoch=0,steeringVersion=0,objectEpoch=0;bool teamOwned=false,queuedEpoch=false;};
 static bool assistantSteeringToolAllowed(const UiToolRequest& request);
 static arkjson::Value assistantSteeringToolRejection();
-struct UiChatEvent {std::string text;bool final=false,error=false;arkjson::Value history;u64 epoch=0;AssistantUsage usage{};bool hasUsage=false;AssistantPerformance performance{};bool hasPerformance=false;bool status=false,retry=false;bool reasoning=false;};
+struct UiChatEvent {std::string text;bool final=false,error=false;arkjson::Value history;u64 epoch=0;AssistantUsage usage{};bool hasUsage=false;AssistantPerformance performance{};bool hasPerformance=false;bool status=false,retry=false;bool reasoning=false;std::optional<AssistantConfig> route;};
 enum class AuthJob{SignIn,SignOut,Models};
 struct UiAuthEvent{AuthJob job=AuthJob::Models;ChatGptAuthStatus status;std::vector<ChatGptModel> models;std::string error;};
 static ChatGptAuthStatus g_authStatus;
@@ -2990,8 +2991,18 @@ static void imageGenerationSettingsDialog(){
     if(fields[1].value=="1")removeAssistantApiKey(imageConfig);if(!pasted.empty())storeAssistantApiKey(imageConfig,pasted);
     g_status=assistantApiKeyStored(imageConfig)?"Image API key saved / the provider validates model access on generation":"Image generation uses OPENAI_API_KEY when set; local composition remains available";
 }
+#include "claude_reconnect_071d.inl"
+static std::string assistantAccountLabel071(){
+    if(g_assistantConfig.authMode==AssistantAuthMode::CliAccount)return g_assistantConfig.provider=="claude-code"?claudeReconnect071::label():"Grok Build";
+    if(g_assistantConfig.provider=="ollama")return "Local models";
+    if(g_assistantConfig.authMode==AssistantAuthMode::ChatGptPlan)return g_authBusy?"Connecting...":g_authStatus.connected?"ChatGPT account":"Connect ChatGPT";
+    return "Models / API";
+}
 static void showAssistantAccountMenu(){
     HMENU menu=CreatePopupMenu();if(!menu)return;
+    const bool claudeMenu=claudeReconnect071::appendMenu(menu);
+    if(!claudeReconnect071::isClaude(g_assistantConfig)){
+    if(claudeMenu)AppendMenuA(menu,MF_SEPARATOR,0,nullptr);
     if(g_authBusy){AppendMenuA(menu,MF_STRING|MF_GRAYED,0,"ChatGPT account operation in progress...");
         AppendMenuA(menu,MF_STRING|(g_authCancelRequested?MF_GRAYED:0),366,g_authCancelRequested?"Stopping account operation...":"Cancel account operation");}
     else if(!g_authStatus.connected){AppendMenuA(menu,MF_STRING,360,"Continue with ChatGPT");
@@ -3004,6 +3015,7 @@ static void showAssistantAccountMenu(){
     if(!g_authStatus.accounts.empty()){HMENU accounts=CreatePopupMenu();for(size_t i=0;i<g_authStatus.accounts.size()&&i<32;++i){const auto& saved=g_authStatus.accounts[i];
             std::string name=saved.email.empty()?saved.clientId:saved.email;AppendMenuA(accounts,MF_STRING|(saved.selected?MF_CHECKED:0),(UINT_PTR)(500+i),name.c_str());}
         AppendMenuA(menu,MF_POPUP,(UINT_PTR)accounts,g_authStatus.connected?"Switch account":"Reconnect saved account");}
+    }
     AppendMenuA(menu,MF_SEPARATOR,0,nullptr);
     std::string effortLabel="Reasoning effort: "+(g_assistantConfig.reasoningEffort.empty()?std::string("Auto"):g_assistantConfig.reasoningEffort);
     AppendMenuA(menu,MF_STRING|(g_assistantConfig.model.empty()?MF_GRAYED:0),367,effortLabel.c_str());
@@ -3121,7 +3133,9 @@ static void pollTeam(bool force=false){
     static auto next=std::chrono::steady_clock::time_point{};auto now=std::chrono::steady_clock::now();if(g_busy||!g_teamStarted||(!force&&now<next))return;next=now+std::chrono::milliseconds(40);
     g_teamSnapshot=g_agentTeam.snapshot(false,g_teamEventSequence);
     if(g_teamEpoch!=g_documentEpoch){cancelTeam();g_teamStarted=false;resetTeamView();return;}
+    for(const auto& role:g_teamSnapshot.roles)claudeReconnect071::observeTeamError(role);
     for(const auto& event:g_teamSnapshot.events){if(event.sequence<=g_teamEventSequence)continue;g_teamEventSequence=event.sequence;
+        claudeReconnect071::observeTeamEvent(event);
         size_t index=teamCapacity;for(size_t i=0;i<teamCapacity;++i)if(event.roleId==g_teamRoleIds[i])index=i;
         if(index<teamCapacity&&event.kind!=AgentTeamEvent::Usage)g_teamActivity[index]=(event.kind==AgentTeamEvent::ToolStart?"Running ":event.kind==AgentTeamEvent::ToolEnd?(event.toolError?"Failed ":"Completed "):"")+(event.tool.empty()?event.text:event.tool+(event.toolError?" / "+event.text:""));
         if(event.kind==AgentTeamEvent::Usage||(event.kind==AgentTeamEvent::Status&&!event.providerRetry))continue;
@@ -3256,6 +3270,7 @@ static bool assistantResumeRequest(std::string prompt){
 // Slot defaults only: fixture transports and isolated specialists start without a pack.
 static std::string teamRoleOnboardingPack(size_t slot){return slot==teamParametricSlot?agentOnboardingPack({"overview","programs"}):slot==2?agentOnboardingPack({"overview","physics"}):slot==0?agentOnboardingPack({"overview","sketch","solids","assembly"}):agentAuthoringOnboardingPack();}
 static void sendTeam(const std::string& explicitPrompt={},const std::array<AssistantTransport,teamCapacity>& transports={}){
+    if(claudeReconnect071::busy()){g_status="Finish or cancel the Claude Code account operation before starting or resuming a task.";return;}
     if(g_busy&&!g_teamStarted){g_status="Wait for the current document operation before starting a new team.";return;}
     if(g_chatBusy){g_status="Wait for the single Assistant turn to finish.";return;}std::string prompt=assistantPrompt(explicitPrompt);if(prompt.find_first_not_of(" \r\n\t")==std::string::npos&&(!explicitPrompt.empty()||!g_pendingAssistantImage))return;
     const std::string visiblePrompt=explicitPrompt.empty()?assistantImageVisiblePrompt(prompt):prompt;if(!attachPendingObjectContext(prompt))return;auto userMessage=explicitPrompt.empty()?pendingAssistantImageMessage(prompt):assistantUserMessage(prompt);
@@ -3284,11 +3299,12 @@ static void sendTeam(const std::string& explicitPrompt={},const std::array<Assis
         };
         if(std::none_of(transports.begin(),transports.end(),[](const auto& t){return (bool)t;}))team.completionCheck=[teamExecutor]{return teamExecutor("__ark_bom_completion",arkjson::Value::makeObj());};
         team.recordAction=[teamExecutor](const std::string&,const std::string& name,const arkjson::Value& args,const arkjson::Value& result,double elapsed){using V=arkjson::Value;V record=V::makeObj(),summary=V::makeObj(),answer=V::makeObj();record.set("tool",V::makeStr(name));record.set("elapsed_ms",V::makeNum(elapsed));if(const auto* commands=args.find("commands")){V rows=V::makeArr();for(const auto& command:commands->arr){V row=V::makeObj();if(const auto* op=command.find("op"))row.set("op",*op);rows.arr.push_back(row);}summary.set("commands",rows);}record.set("arguments",summary);if(const auto* error=result.find("isError"))answer.set("isError",*error);const auto* payload=result.find("structuredContent");if(!payload)payload=&result;for(const auto* key:{"isError","error","error_code"})if(const auto* value=payload->find(key))answer.set(key,*value);record.set("result",answer);auto receipt=teamExecutor("__ark_activity",record);V returned=result;const auto* data=receipt.find("structuredContent");if(!data)data=&receipt;for(const auto* key:{"activity_id","activity_project_id","activity_boundary","pending_feedback_ids","feedback_required","activity_capture_error"})if(const auto* value=data->find(key))returned.set(key,*value);return returned;};
-        g_agentTeam.start(team,userMessage,AgentSession::tools(),teamExecutor,[epoch,runSerial](const AgentTeamEvent& event){auto* value=new UiTeamEvent{event,epoch,runSerial};if(g_closing||!PostMessage(g_window,WM_ARK_TEAM,0,(LPARAM)value))delete value;});g_teamStarted=true;g_chatLog.push_back({"You -> team",visiblePrompt});g_status="Team started; "+std::to_string(teamActiveRoleCount())+" agents, assigned parts and coordinated assembly.";
+        claudeReconnect071::rememberTeam(team);g_agentTeam.start(team,userMessage,AgentSession::tools(),teamExecutor,[epoch,runSerial](const AgentTeamEvent& event){auto* value=new UiTeamEvent{event,epoch,runSerial};if(g_closing||!PostMessage(g_window,WM_ARK_TEAM,0,(LPARAM)value))delete value;});g_teamStarted=true;g_chatLog.push_back({"You -> team",visiblePrompt});g_status="Team started; "+std::to_string(teamActiveRoleCount())+" agents, assigned parts and coordinated assembly.";
     }
     if(explicitPrompt.empty())clearPendingAssistantImage();g_pendingObjectTarget.reset();g_chatScroll=0;if(g_chatInput)SetWindowTextW(g_chatInput,L"");pollTeam(true);
 }
 static void sendAssistant(const std::string& explicitPrompt="",const AssistantTransport& transport={},const arkjson::Value* queuedMessage=nullptr,const std::string& queuedVisible={}){
+    if(claudeReconnect071::busy()){g_status="Finish or cancel the Claude Code account operation before starting or resuming a task.";return;}
     if(g_teamStarted&&g_agentTeam.snapshot().running){g_status="Wait for the team to finish or cancel it before starting Assistant.";return;}
     std::string prompt=explicitPrompt;
     if(prompt.empty()&&g_chatInput){int n=GetWindowTextLengthW(g_chatInput);std::vector<wchar_t> buffer(n+1);GetWindowTextW(g_chatInput,buffer.data(),n+1);int size=WideCharToMultiByte(CP_UTF8,0,buffer.data(),n,nullptr,0,nullptr,nullptr);prompt.resize(size);WideCharToMultiByte(CP_UTF8,0,buffer.data(),n,prompt.data(),size,nullptr,nullptr);}
@@ -3311,8 +3327,8 @@ static void sendAssistant(const std::string& explicitPrompt="",const AssistantTr
             return future.get();
         };AssistantRetryHooks hooks;if(!transport)hooks.completionCheck=[executor]{return executor("__ark_bom_completion",V::makeObj());};hooks.requestCurrent=[steering]{return steering->current(steering->requestVersion());};hooks.acceptCompletion=[steering]{return steering->finish();};
         try{auto result=runAssistant(config,input,schema,executor,[epoch](const AssistantEvent& event){if(event.kind==AssistantEvent::Status){UiChatEvent progress;progress.text=event.text;progress.epoch=epoch;progress.status=true;progress.retry=event.providerRetry;postChat(std::move(progress));}else if(event.kind==AssistantEvent::ToolStart)postChat({"Tool: "+event.text,false,false,{},epoch});else if(event.kind==AssistantEvent::Reasoning){UiChatEvent thought;thought.text=event.text;thought.epoch=epoch;thought.reasoning=true;postChat(std::move(thought));}else if(event.kind==AssistantEvent::Usage)postChat({"",false,false,{},epoch,event.usage,true,event.performance,true});else if(event.kind==AssistantEvent::ToolEnd){UiChatEvent progress;progress.text="Thinking...";progress.epoch=epoch;progress.status=true;progress.performance=event.performance;progress.hasPerformance=true;postChat(std::move(progress));}},cancel.get(),feedbackFixtureTransport(transport),[steering]{return steering->inbox();},[&](const V& history){retainedHistory=history;steering->checkpoint(history);},hooks);
-            if(*cancel)throw std::runtime_error("Assistant cancelled");postChat({result.text,true,false,result.conversation,epoch,result.usage,true,result.performance,true});
-        }catch(const std::exception& e){steering->cancel();std::set<std::string> answered;for(const auto& row:retainedHistory.arr)if(row.find("type")&&row.find("type")->asStr()=="function_call_output"&&row.find("call_id"))answered.insert(row.find("call_id")->asStr());std::vector<std::string> missing;for(const auto& row:retainedHistory.arr)if(row.find("type")&&row.find("type")->asStr()=="function_call"&&row.find("call_id")&&!answered.count(row.find("call_id")->asStr()))missing.push_back(row.find("call_id")->asStr());for(const auto& id:missing){V reply=V::makeObj(),error=V::makeObj();error.set("isError",V::makeBool(true));error.set("error",V::makeStr("Interrupted before receipt retention; execution may have completed. Inspect current doc_info and revision before further writes; do not replay prior calls."));reply.set("type",V::makeStr("function_call_output"));reply.set("call_id",V::makeStr(id));reply.set("output",V::makeStr(error.dump()));retainedHistory.arr.push_back(reply);}for(const auto& pending:steering->pending().arr)retainedHistory.arr.push_back(pending);postChat({e.what(),true,true,retainedHistory,epoch});}
+            if(*cancel)throw std::runtime_error("Assistant cancelled");{UiChatEvent completed{result.text,true,false,result.conversation,epoch,result.usage,true,result.performance,true};completed.route=config;postChat(std::move(completed));}
+        }catch(const std::exception& e){steering->cancel();std::set<std::string> answered;for(const auto& row:retainedHistory.arr)if(row.find("type")&&row.find("type")->asStr()=="function_call_output"&&row.find("call_id"))answered.insert(row.find("call_id")->asStr());std::vector<std::string> missing;for(const auto& row:retainedHistory.arr)if(row.find("type")&&row.find("type")->asStr()=="function_call"&&row.find("call_id")&&!answered.count(row.find("call_id")->asStr()))missing.push_back(row.find("call_id")->asStr());for(const auto& id:missing){V reply=V::makeObj(),error=V::makeObj();error.set("isError",V::makeBool(true));error.set("error",V::makeStr("Interrupted before receipt retention; execution may have completed. Inspect current doc_info and revision before further writes; do not replay prior calls."));reply.set("type",V::makeStr("function_call_output"));reply.set("call_id",V::makeStr(id));reply.set("output",V::makeStr(error.dump()));retainedHistory.arr.push_back(reply);}for(const auto& pending:steering->pending().arr)retainedHistory.arr.push_back(pending);{UiChatEvent failed{e.what(),true,true,retainedHistory,epoch};failed.route=config;postChat(std::move(failed));}}
     });
     if(explicitPrompt.empty()&&!queuedMessage)clearPendingAssistantImage();
 }
@@ -3328,6 +3344,7 @@ static void startLiveBridge(){
 }
 static void shutdownSurfaceEdit059();static void beginSurfaceEdit059();
 static void stopIntegrations(){
+    claudeReconnect071::shutdown();
     shutdownSurfaceEdit059();
     g_closing=true;stopTransmission061();shutdownManufacturing060();shutdownMotionCables054B();if(g_authoringWorker)g_authoringWorker->shutdown();*g_pricingCancel=true;*g_teamCancel=true;g_agentTeam.cancel();*g_assistantCancel=true;*g_authCancel=true;g_liveBridge.stop();shutdownExactJobs046();
     MSG msg{};while(PeekMessage(&msg,g_window,WM_ARK_TOOL,WM_ARK_AUTH,PM_REMOVE)){if(msg.message==WM_ARK_TOOL){std::unique_ptr<UiToolRequest> request((UiToolRequest*)msg.lParam);request->complete(cancelledTool());}else if(msg.message==WM_ARK_CHAT)delete (UiChatEvent*)msg.lParam;else if(msg.message==WM_ARK_AUTH)delete (UiAuthEvent*)msg.lParam;}
@@ -3922,7 +3939,7 @@ static const std::vector<StudioCommandGroup>& studioCommandGroups(){
     group("Mesh",{{155,"Weld mesh"},{156,"Smooth mesh"},{157,"Decimate mesh"},{158,"Offset mesh"},{159,"Fill planar holes"},{160,"Import STL/OBJ"}});
     group("Sheet metal",{{120,"Create sheet base"},{127,"Edit sheet base"},{494,"Original-blank jog add/edit/remove"},{495,"Linked sketch bend add/edit/remove"},{121,"Add flange"},{122,"Edit flange"},{123,"Remove flange"},{394,"Add return hem"},{395,"Edit return hem"},{396,"Remove return hem"},{397,"Add circular emboss"},{398,"Edit circular emboss"},{399,"Remove circular emboss"},{124,"Add opening or pattern"},{125,"Edit opening"},{126,"Remove opening"},{327,"Export analytic flat DXF"},{128,"Play / pause bend preview"},{80,"Create L bend"},{81,"Import sheet STEP"},{83,"Show formed"},{84,"Show flat"}});
     group("Inspection",{{49800,"Smart measure / D"},{49810,"Section view / plane"},{49811,"Section view / draw line"},{49814,"Close section view"}});
-    group("View & agents",{{49100,"Schematic Designer / electrical sheets"},{49101,"Eye mode / family visibility"},{49102,"Families and tags / selected part or assembly"},{860,"Technical drawings / associative sheets"},{590,"BOM / bill of materials"},{585,"Measure 2D / X and Y"},{586,"Measure 3D / distance and XYZ"},{587,"Units / length, mass and volume"},{20,"Fit document"},{71,"Normal to sketch plane"},{180,"Front"},{181,"Back"},{23,"Top"},{184,"Bottom"},{182,"Right"},{183,"Left"},{24,"Isometric"},{175,"Orthographic"},{174,"Visible edges"},{186,"Cycle ambient occlusion"},{187,"Edit selected body material"},{188,"Inspect mass and center of mass"},{176,"Orbit"},{177,"Pan"},{178,"Zoom"},{14,"Wireframe"},{22,"Grid"},{56,"Graphics settings"},{567,"Project tool activity"},{57,"ChatGPT account"},{357,"Connectors / OpenAI, Claude, Grok, Ollama..."},{368,"Local models / Ollama"},{58,"Codex / live MCP"},{21,"Raw agent command"},{31,"Help"},{44015,"ARK updates"}});
+    group("View & agents",{{49100,"Schematic Designer / electrical sheets"},{49101,"Eye mode / family visibility"},{49102,"Families and tags / selected part or assembly"},{860,"Technical drawings / associative sheets"},{590,"BOM / bill of materials"},{585,"Measure 2D / X and Y"},{586,"Measure 3D / distance and XYZ"},{587,"Units / length, mass and volume"},{20,"Fit document"},{71,"Normal to sketch plane"},{180,"Front"},{181,"Back"},{23,"Top"},{184,"Bottom"},{182,"Right"},{183,"Left"},{24,"Isometric"},{175,"Orthographic"},{174,"Visible edges"},{186,"Cycle ambient occlusion"},{187,"Edit selected body material"},{188,"Inspect mass and center of mass"},{176,"Orbit"},{177,"Pan"},{178,"Zoom"},{14,"Wireframe"},{22,"Grid"},{56,"Graphics settings"},{567,"Project tool activity"},{57,"Assistant account / reconnect"},{357,"Connectors / OpenAI, Claude, Grok, Ollama..."},{368,"Local models / Ollama"},{58,"Codex / live MCP"},{21,"Raw agent command"},{31,"Help"},{44015,"ARK updates"}});
     group("Frames, electronics & routing",{{210,"Construction frame"},{549,"Exact tube end fit"},{496,"Frame endpoint trim/extend"},{497,"Frame crossing-plane trim"},{498,"Frame weld add/edit/remove"},{211,"PCB and mounting"},{212,"Cable route"}});
     group("Physics & loads",{{755,"Collision check"},{190,"Assembly mass"},{216,"Loads and physical assumptions"},{189,"Close mass inspector"}});
     group("Simulation",{{49300,"Rubber / belts, tracks and tires"},{49301,"Create rubber body"},{49200,"Inertial Simulation / dynamics"},{49201,"Simulation study / GPU or CPU reference"},{49202,"Gravity, contacts and assembly joints"},{49203,"Occurrence forces and initial motion"},{49204,"Run simulation"},{49205,"Cancel simulation"},{49206,"Play / pause simulation"},{49207,"Restore CAD pose"},{49208,"Simulation evidence"}});
@@ -4011,6 +4028,8 @@ static bool surfaceQualityAction068B(int);
 static bool surfaceOffsetAction068B(int);
 static bool designReviewAction067(int);
 static void uiAction(int id){
+    if(id==472&&claudeReconnect071::busy()){g_status="Finish or cancel the Claude account operation before resuming the team.";return;}
+    if(id==50100){claudeReconnect071::start(true);return;}if(id==50101){claudeReconnect071::start(false);return;}if(id==50102){claudeReconnect071::cancel();return;}
     if(surfaceNetworkAction068B(id)||surfaceOperationsAction068B(id)||surfaceQualityAction068B(id)||surfaceOffsetAction068B(id))return;
     if(id==49920||id==49921||id==49922){openDesignVariantsWindow();return;}
     if(designReviewAction067(id)||componentLibraryAction067G(id))return;
@@ -5860,7 +5879,7 @@ static void drawFrame(HDC hdc){
     button("Single",px,rowA,62,470,false,!g_teamMode);button("Team",px+66,rowA,58,471,false,g_teamMode);
     icon(44302,g_chatExpanded?"Restore the normal assistant width":"Expand the assistant",dx+dw-chatDock.pad-62,rowA+2,28);
     icon(44301,"Collapse the assistant to a rail",dx+dw-chatDock.pad-30,rowA+2,28);
-    {const std::string models=g_authBusy?"Connecting...":g_assistantConfig.provider=="ollama"?"Models / account":g_authStatus.connected?"ChatGPT account":"Models / connect";
+    {const std::string models=assistantAccountLabel071();
      const float right=dx+dw-chatDock.pad-70,left=px+132,width=std::min(right-left,textWidth(models,.76f)+28);
      if(width>=60){const auto fitted=fitText(models,.76f,width-12);button(fitted.c_str(),right-width,rowA,width,57);}}
     std::string connector=!g_teamMode&&g_assistantResponseFinished?(g_assistantResponseError?"Interrupted / inspect prior changes":"Response finished / review result"):g_chatBusy?(g_assistantStatus.empty()?"Working...":g_assistantStatus):g_authBusy?"ChatGPT sign-in in progress":
@@ -6357,6 +6376,8 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
         case WM_ARK_TOOL:{auto* request=(UiToolRequest*)lp;if(request->tool=="doc_apply"){request->objectEpoch=g_objectDocumentEpoch;request->queuedEpoch=true;if(!request->args.find("expected_revision"))request->args.set("expected_revision",arkjson::Value::makeNum((double)g_session.revision));}g_toolQueue.emplace_back(request);return 0;}
         case WM_ARK_EXACT:return 0; // wake only; deliveries drain from the main loop
         case WM_ARK_CHAT:{std::unique_ptr<UiChatEvent> event((UiChatEvent*)lp);
+            if(event->final&&event->error&&event->epoch==g_documentEpoch&&event->route)claudeReconnect071::observeError(event->text,*event->route);
+            if(event->final&&!event->error&&event->epoch==g_documentEpoch&&event->route&&event->hasUsage)claudeReconnect071::observeSuccess(*event->route,event->usage);
             // Provider-returned readable reasoning: shown with the reply, never logged as a message.
             if(event->reasoning){if(event->epoch==g_documentEpoch)appendAssistantReasoning(event->text);return 0;}
             if(event->final){g_chatBusy=false;if(event->epoch==g_documentEpoch){g_assistantResponseFinished=true;g_assistantResponseError=event->error||*g_assistantCancel;}if(event->epoch==g_documentEpoch&&event->history.t==arkjson::Value::Arr)g_conversation=event->history;else if(event->epoch!=g_documentEpoch)g_conversation=arkjson::Value::makeArr();}
@@ -8000,7 +8021,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
             // messages keep their order and are consumed on the next frame.
             if(std::chrono::steady_clock::now()-inputStart064>std::chrono::milliseconds(4))break;
         }
-        drainUiTools();drainExactJobs046();pollTeam();openPendingRoleSettings();checkDocumentRecovery();captureDocumentRecovery();
+        drainUiTools();drainExactJobs046();pollTeam();claudeReconnect071::poll();openPendingRoleSettings();checkDocumentRecovery();captureDocumentRecovery();
         if(exitAfterMs&&std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-lifeStart).count()>=exitAfterMs){stopIntegrations();DestroyWindow(hwnd);return 0;}
         drawFrame(hdc);
         ++frames;

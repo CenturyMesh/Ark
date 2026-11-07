@@ -49,7 +49,7 @@ void cachedFrontier(){
     for(const auto& item:before)check(doc.evaluationCache.at(item.first).body==item.second.body,"Cached chain lost immutable body custody");
     doc.setParam("leaf_delta","0.007");healthy(doc);const auto edited=evaluationSchedulerDiagnostics070A();
     check(doc.recomputeEvaluated==1&&doc.recomputeReused==767,"Leaf change regenerated unrelated ancestors");
-    check(edited.dirtyCandidates==1&&edited.readinessChecks==1&&edited.inputLookups<=8,"Leaf scheduling work must scale with dirty inputs, not all history rows");
+    check(edited.resourcePolicy.eligibleTasks==1&&doc.featureWorkers==1&&edited.dirtyCandidates==0&&edited.readinessChecks==0&&edited.inputLookups==0,"A single dirty leaf should select owner execution without scheduler overhead");
     check(edited.peakRunningJobs<=doc.featureWorkers&&doc.peakParallelFeatures<=doc.featureWorkers,"Leaf task exceeded configured worker count");
     check(doc.parallelContextFeaturesCopied==0,"Pure mesh worker copied unrelated ancestor recipes");
     check(std::abs(doc.evalBodies.back().baked->pos[2]-(766*.001+.007))<1e-5,"Leaf expression change did not reach actual mesh coordinates");
@@ -100,7 +100,7 @@ void nativeParallelAndAtomicity(){
     auto edit=json(R"([{"op":"param.set","name":"BranchWidth","expr":"11"}])");workers.set("1");apply(serial,edit);workers.set("4");apply(parallel,edit);parity(serial.document,parallel.document);
     check(parallel.document.recomputeEvaluated==3&&parallel.document.recomputeReused==15,"Single native branch edit lost incremental cache behavior");
     check(parallel.document.parallelFeatures==0,"A single dirty exact branch should avoid serial worker handoffs");
-    check(evaluationSchedulerDiagnostics070A().dirtyCandidates==3,"Native frontier includes unrelated cached branches");
+    check(evaluationSchedulerDiagnostics070A().resourcePolicy.eligibleTasks==3&&parallel.document.featureWorkers==1&&evaluationSchedulerDiagnostics070A().dirtyCandidates==0,"Small native branch should select owner execution and exclude cached branches");
     for(u64 id=4;id<=18;++id)check(retained.at(id).body==parallel.document.evaluationCache.at(id).body,"Unchanged exact branch lost cache custody");
     for(AgentSession* session:{&serial,&parallel}){
         workers.set(session==&serial?"1":"4");const auto before=documentToJson(session->document);const auto revision=session->revision;

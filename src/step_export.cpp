@@ -1,5 +1,6 @@
 #include "ark/step_export.hpp"
 #include "ark/native_backend.hpp"
+#include "ark/resource_policy_071d.hpp"
 #include "ark/iteration_history.hpp"
 #include "ark/model.hpp"
 #include "ark/notch.hpp"
@@ -294,7 +295,7 @@ unsigned nativeRequestLimitMs(){return nativeLimitMs;}
 int setNativeThreadBudget(int threads){if(threads<0||threads>64)throw std::runtime_error("Native thread budget must be 0..64");int old=nativeThreadOverride;nativeThreadOverride=threads;return old;}
 V nativeModelRequest(const V& model){V request=V::makeObj();request.set("operation",V::makeStr("model"));request.set("request",model);return nativeWorkerRequest(request);}
 V nativeKernelInfo(){V request=V::makeObj();request.set("operation",V::makeStr("kernel_info"));V result=nativeWorkerRequest(request);result.set("worker_requests",V::makeNum((double)nativeRequests));result.set("worker_process_starts",V::makeNum((double)nativeStarts));result.set("total_worker_requests",V::makeNum((double)totalNativeRequests.load()));result.set("total_worker_process_starts",V::makeNum((double)totalNativeStarts.load()));result.set("native_result_cache_hits",V::makeNum((double)totalNativeCacheHits.load()));result.set("native_result_cache_misses",V::makeNum((double)totalNativeCacheMisses.load()));
-result.set("native_memory_cache",NativeDecodedCache070::info());
+{const auto memory=NativeDecodedCache070::info();result.set("native_memory_cache",memory);result.set("resource_policy",*memory.find("resource_policy"));}
 result.set("native_document_restores",V::makeNum((double)totalNativeDocumentRestores.load()));result.set("native_document_rejections",V::makeNum((double)totalNativeDocumentRejections.load()));
 {std::lock_guard<std::mutex> lock(nativeDocumentRejectionMutex);if(!nativeDocumentLastRejection.empty())result.set("native_document_last_rejection",V::makeStr(nativeDocumentLastRejection));V reasons=V::makeArr();for(const auto& [reason,count]:nativeDocumentRejectionReasons){V item=V::makeObj();item.set("reason",V::makeStr(reason));item.set("count",V::makeNum((double)count));reasons.arr.push_back(std::move(item));}result.set("native_document_rejection_reasons",std::move(reasons));}
 #ifdef _WIN32

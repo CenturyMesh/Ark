@@ -29,11 +29,11 @@ template<class Fn>std::string rejected(Fn action,const char* message){try{action
 const char* kInit=R"({"commands":[],"models":[{"value":"default","resolvedModel":"claude-opus-5-5","supportedEffortLevels":["low","medium","high","xhigh","max"]},{"value":"sonnet","resolvedModel":"claude-sonnet-5-5","supportedEffortLevels":["low","high"]}],"account":{"email":"person@example.com","subscriptionType":"Claude Max","apiProvider":"firstParty"},"claude_code_version":"2.1.301"})";
 const char* kUsage=R"({"input_tokens":4,"cache_creation_input_tokens":1154,"cache_read_input_tokens":1076,"output_tokens":37,"output_tokens_details":{"thinking_tokens":5}})";
 // Speaks the Claude Code side of the stream-json control protocol.
-struct State {std::deque<V> incoming;std::vector<V> sent,toolResults;std::string mode="write";V catalog=V::makeArr();int users=0,mcpId=0,control=0;bool interrupted=false;};
+struct State {std::deque<V> incoming;std::vector<V> sent,toolResults;std::string mode="write";V catalog=V::makeArr(),terminalOverride;int users=0,mcpId=0,control=0;bool interrupted=false;};
 V controlRequest(State& s,V request){auto packet=V::makeObj();packet.set("type",V::makeStr("control_request"));packet.set("request_id",V::makeStr(s.mode=="duplicate-control"&&s.control==2?"c2":"c"+std::to_string(++s.control)));packet.set("request",request);return packet;}
 void mcp(State& s,const char* method,V params,bool notification=false,const char* server="ark"){auto m=V::makeObj();m.set("jsonrpc",V::makeStr("2.0"));m.set("method",V::makeStr(method));if(!notification)m.set("id",V::makeNum(s.mcpId++));if(!params.isNull())m.set("params",params);auto r=V::makeObj();r.set("subtype",V::makeStr("mcp_message"));r.set("server_name",V::makeStr(server));r.set("message",m);s.incoming.push_back(controlRequest(s,r));}
 void call(State& s,const char* name,V args,const char* useId){auto p=V::makeObj(),meta=V::makeObj();p.set("name",V::makeStr(name));p.set("arguments",args);meta.set("claudecode/toolUseId",V::makeStr(useId));p.set("_meta",meta);mcp(s,"tools/call",p,false,s.mode=="foreign-server"?"other":"ark");}
-void finish(State& s,const char* subtype,bool error,const char* text){auto r=V::makeObj();r.set("type",V::makeStr("result"));r.set("subtype",V::makeStr(subtype));r.set("is_error",V::makeBool(error));r.set("result",V::makeStr(text));r.set("usage",json(kUsage));s.incoming.push_back(r);}
+void finish(State& s,const char* subtype,bool error,const char* text){auto r=V::makeObj();r.set("type",V::makeStr("result"));r.set("subtype",V::makeStr(subtype));r.set("is_error",V::makeBool(error));r.set("result",V::makeStr(text));r.set("usage",json(kUsage));if(s.terminalOverride.t==V::Obj)for(const auto& item:s.terminalOverride.obj)r.set(item.first,item.second);s.incoming.push_back(r);}
 class Script final:public AssistantAcpChannel {
     std::shared_ptr<State> s;
 public:
@@ -190,13 +190,26 @@ void nativeProcess(){
 }
 #endif
 }
+#include "claude_compaction_071d_tests.inl"
+#include "claude_result_071d_tests.inl"
 int main(int argc,char** argv){
 #ifdef _WIN32
     for(int i=1;i<argc;++i)if(std::string(argv[i])=="--input-format")return fakeCli(argc,argv);
 #else
     (void)argc;(void)argv;
 #endif
-    try{presetAndValidation();arguments();single();thinking();rejections();negotiation();permissionAndSteering();cancellationAndResume();imageInput();
+    if(argc==2&&std::string(argv[1])=="--probe-installed-cli"){try{std::cout<<assistantClaudeCodeProbe(assistantProviderPreset("claude-code")).dump()<<'\n';return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+    // Explicit diagnostic mode only; never part of CTest. No real document or
+    // write tool is supplied, and no provider response body is recorded.
+    if(argc==4&&std::string(argv[1])=="--live-readonly-cli"){
+        auto c=assistantProviderPreset("claude-code");c.model=argv[2];c.reasoningEffort=argv[3];V report=V::makeObj();unsigned calls=0;
+        auto readTools=tools();readTools.arr.erase(readTools.arr.begin()+1,readTools.arr.end());
+        try{auto r=runAssistant(c,V::makeStr("Isolated ARK connection check. There is no user drawing in this session. Reply exactly ARK_CONNECTION_OK. Do not perform design work or call tools."),readTools,[&](const auto& name,const V&){check(name=="doc_info","Only synthetic inspection is permitted");++calls;return receipt(0);},[&](const AssistantEvent& e){if(!e.providerOutcome.isNull())report.set("outcome",e.providerOutcome);});
+            report.set("completed",V::makeBool(true));report.set("expected_reply",V::makeBool(r.text=="ARK_CONNECTION_OK"));report.set("input_tokens",V::makeNum((double)r.usage.inputTokens));report.set("output_tokens",V::makeNum((double)r.usage.outputTokens));
+        }catch(const std::exception&){report.set("completed",V::makeBool(false));}
+        report.set("synthetic_reads",V::makeNum(calls));report.set("real_document_access",V::makeBool(false));report.set("provider_text_retained",V::makeBool(false));std::cout<<report.dump()<<'\n';return 0;
+    }
+    try{claude_result_071d::checks();claude_compaction_071d::checks();presetAndValidation();arguments();single();thinking();rejections();negotiation();permissionAndSteering();cancellationAndResume();imageInput();
 #ifdef _WIN32
         nativeProcess();
 #endif
