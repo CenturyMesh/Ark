@@ -66,6 +66,20 @@ foreach($name in @('NoLinks','TransientPublicationError','PublishCombinedPointer
     if(@($function).Count -ne 1){throw 'Cannot select the production pointer publisher.'}
     Invoke-Expression $function.Extent.Text
 }
+# A directory junction needs no symbolic-link privilege. Check the actual
+# production walk at the link itself, a child and a deeper descendant; regular
+# existing inputs still pass, and missing inputs still reject.
+$plainDirectory=Join-Path $root 'plain-ancestor';$nestedDirectory=Join-Path $plainDirectory 'nested'
+[IO.Directory]::CreateDirectory($nestedDirectory)|Out-Null
+$plainFile=Join-Path $nestedDirectory 'ordinary.txt';WriteText $plainFile 'ordinary owned fixture'
+NoLinks $plainFile;NoLinks $plainDirectory
+Reject {NoLinks (Join-Path $nestedDirectory 'missing.txt')} 'Missing vault input must reject.'
+$junction=Join-Path $root 'reparse-ancestor'
+New-Item -ItemType Junction -Path $junction -Target $plainDirectory | Out-Null
+if(-not ([IO.File]::GetAttributes($junction) -band [IO.FileAttributes]::ReparsePoint)){throw 'The reparse fixture is not an actual junction.'}
+Reject {NoLinks $junction} 'The input junction itself must reject.'
+Reject {NoLinks (Join-Path $junction 'nested')} 'A linked parent directory must reject.'
+Reject {NoLinks (Join-Path $junction 'nested/ordinary.txt')} 'A reparse ancestor of a regular leaf must reject.'
 Add-Type -TypeDefinition @'
 using System;
 using System.IO;
@@ -129,6 +143,8 @@ $canvasIds=@{};foreach($node in $canvas.nodes){$canvasIds[$node.id]=$true;if(-no
 foreach($edge in $canvas.edges){if(-not $canvasIds.ContainsKey($edge.fromNode) -or -not $canvasIds.ContainsKey($edge.toNode)){throw 'Memory canvas relation is dangling.'}}
 if($canvas.edges[0].color -cne '4' -or $canvas.edges[1].color -cne '2'){throw 'Memory canvas must distinguish matching and stale source declarations.'}
 if(-not (Test-Path -LiteralPath (Join-Path $first.directory 'ARK Memory/Recall index.md'))){throw 'Human recall index is missing.'}
+$recallText=[IO.File]::ReadAllText((Join-Path $first.directory 'ARK Memory/Recall index.md'))
+if(-not $recallText.Contains('- [['+$id+']] - Memory record')){throw 'Recall index separator must survive Windows PowerShell UTF-8 script decoding.'}
 $receipt=Get-Content -LiteralPath (Join-Path $first.directory '.ark-memory-vault.json') -Raw|ConvertFrom-Json
 if($first.links_added -ne 2 -or $receipt.anchors.Count -ne 3 -or $receipt.anchors[0].status -cne 'current_source_hash_matches_anchor' -or $receipt.anchors[1].status -cne 'stale_source_hash_changed' -or $receipt.anchors[2].status -cne 'unavailable_not_indexed_code'){throw 'Anchor hash freshness, explicit scope or link count failed.'}
 if(Test-Path -LiteralPath (Join-Path $first.directory '.ark-code-vault.json')){throw 'Copied code receipt must not falsely attest the combined vault.'}
@@ -149,5 +165,5 @@ Remove-Item -LiteralPath (Join-Path $vault 'unattested.md')
 $manifestPath=Join-Path $memory 'manifest.json';$manifest=Get-Content -Raw -LiteralPath $manifestPath|ConvertFrom-Json;$manifest.records[0].fingerprint='1'*64;WriteJson $manifestPath $manifest
 Reject {Export} 'Memory note and manifest identity mismatch must reject.'
 if((Hash $pointer) -cne $pointerHash){throw 'A rejected memory snapshot changed the current pointer.'}
-WriteText (Join-Path $root 'result.txt') 'PASS: real held-reader atomic publication/retry/exhaustion; explicit snapshot; verified code copy; fresh vault and pointer; current/stale/unsafe anchors; all generated hashes; original/edited exports preserved; source tamper, extra files and memory identity rejection.'
+WriteText (Join-Path $root 'result.txt') 'PASS: real held-reader atomic publication/retry/exhaustion; direct and ancestor reparse rejection; missing path rejection; ASCII recall separator; explicit snapshot; verified code copy; fresh vault and pointer; current/stale/unsafe anchors; all generated hashes; original/edited exports preserved; source tamper, extra files and memory identity rejection.'
 Write-Output "Combined memory vault tests passed: $root"

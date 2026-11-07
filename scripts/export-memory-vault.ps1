@@ -18,12 +18,14 @@ function Child([string]$Root,[string]$Relative){
     return $path
 }
 function NoLinks([string]$Path){
-    $item=Get-Item -Force -LiteralPath $Path
-    while($item){
-        if($item.Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Linked vault inputs or outputs are not accepted.'}
-        $parent=Split-Path $item.FullName -Parent
-        if(-not $parent -or $parent -eq $item.FullName){break}
-        $item=Get-Item -Force -LiteralPath $parent
+    # Read every path and ancestor afresh. Avoid PowerShell provider objects in
+    # this per-card hot path without caching or weakening the reparse checks.
+    $current=[IO.Path]::GetFullPath($Path)
+    while($current){
+        if([IO.File]::GetAttributes($current) -band [IO.FileAttributes]::ReparsePoint){throw 'Linked vault inputs or outputs are not accepted.'}
+        $parent=[IO.Directory]::GetParent($current)
+        if(-not $parent){break}
+        $current=$parent.FullName
     }
 }
 function Files([string]$Directory,[int]$Depth=0){
@@ -188,7 +190,7 @@ for($i=0;$i -lt $orderedNotes.Count;$i++){
     $memoryCanvasNodes+=,[ordered]@{id=$nodeId;type='file';file=$relative;x=0;y=($i*220);width=440;height=180}
     $titleProperty=$note.row.PSObject.Properties['title'];$title=if($titleProperty){[string]$titleProperty.Value}else{'Memory record'}
     $title=[regex]::Replace($title,'[\r\n\x00-\x1f]',' ');$title=[regex]::Replace($title,'([\\`*_{}\[\]()<>#!|])','\$1')
-    $recallLines+='- [['+([IO.Path]::GetFileNameWithoutExtension($note.name))+']] — '+$title
+    $recallLines+='- [['+([IO.Path]::GetFileNameWithoutExtension($note.name))+']] - '+$title
 }
 foreach($link in $links){
     if(-not $codeNodeIds.ContainsKey($link.to)){

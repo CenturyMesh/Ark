@@ -101,6 +101,14 @@ Obsidian vaults are unchanged. The file format follows the official
 `context_graph` remains the revision-bound CAD navigation path; the repository
 graph and long-term memory do not replace native geometric authority.
 
+The Windows exporter checks file and ancestor attributes through direct .NET
+calls, preserving every reparse-point/existence rejection without an ancestor
+cache. The same 512 code-card paths measured a median **1,092 → 73 ms** for
+this validation step across three comparisons. This is not an end-to-end export
+timing claim. Real junction, parent/deep-ancestor, missing-path, source-tamper and
+atomic-publication tests passed. The recall index uses an ASCII separator so
+Windows PowerShell 5 does not corrupt a UTF-8 script literal.
+
 ## Source compilation
 
 Keep one configured development directory and compile only the affected runtime
