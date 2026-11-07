@@ -370,6 +370,7 @@ public:
     std::unordered_map<u64,std::pair<std::string,arkjson::Value>> centroidCache; // exact B-rep digest -> producer result; never serialized
     u64 evaluationGeneration=0;
     size_t recomputeReused=0, recomputeEvaluated=0;
+    size_t recomputeProjectionBuilds=0, recomputeProjectionReused=0; // pass-local sketch projection attempts/reuses, never serialized
     size_t parallelFeatures=0, peakParallelFeatures=0, dependencyEdges=0;
     size_t parallelContextFeaturesCopied=0; // audited per-job feature closure, never serialized
     unsigned featureWorkers=1, nativeThreadsPerWorker=1;

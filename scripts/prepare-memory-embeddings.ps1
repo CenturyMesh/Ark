@@ -2,6 +2,7 @@ param([string]$OutputDirectory)
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $repoRoot = Split-Path $PSScriptRoot -Parent
+Import-Module (Join-Path $PSScriptRoot 'Ark.DevBuild.psm1') -Force
 if (-not $OutputDirectory) { $OutputDirectory = Join-Path $repoRoot 'out/deps/memory' }
 $assetRoot = [IO.Path]::GetFullPath($OutputDirectory)
 New-Item -ItemType Directory -Force -Path $assetRoot | Out-Null
@@ -39,14 +40,19 @@ try {
     }.GetEnumerator()) {
         $entry = $zip.GetEntry("onnxruntime-win-x64-$runtimeVersion/$($mapping.Key)")
         if (-not $entry) { throw "Missing pinned archive entry: $($mapping.Key)" }
-        [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, (Join-Path $assetRoot $mapping.Value), $true)
+        $stream = $entry.Open()
+        $buffer = [IO.MemoryStream]::new()
+        try {
+            $stream.CopyTo($buffer)
+            Write-ArkBytesIfDifferent -Path (Join-Path $assetRoot $mapping.Value) -Bytes $buffer.ToArray()
+        } finally { $buffer.Dispose(); $stream.Dispose() }
     }
 } finally { $zip.Dispose() }
 Assert-Digest (Join-Path $assetRoot 'onnxruntime.dll') 'dec964ab1ee36cc9b0ae247d13b376627992fc57dec0454354017ab8fd84f1ea'
 Assert-Digest (Join-Path $assetRoot 'onnxruntime_providers_shared.dll') 'a2b3a50956aa75a9879c8472bc7df4f7a8072bcd2db19a1b7d988e7688f293ef'
 # The pinned original model card declares Apache-2.0. Preserve both model cards
 # alongside the standard Apache-2.0 license text and explicit attribution.
-Copy-Item -LiteralPath (Join-Path $repoRoot 'LICENSE') -Destination (Join-Path $assetRoot 'MODEL-LICENSE.txt') -Force
+Write-ArkBytesIfDifferent -Path (Join-Path $assetRoot 'MODEL-LICENSE.txt') -Bytes ([IO.File]::ReadAllBytes((Join-Path $repoRoot 'LICENSE')))
 $notice = @'
 ARK local semantic memory model
 Model: Xenova/distiluse-base-multilingual-cased-v2
@@ -66,10 +72,10 @@ Source: https://github.com/microsoft/onnxruntime/tree/v1.23.2
 License: MIT; bundled third-party notices preserved separately.
 Runtime makes no network calls and requires no account, API key or paid model.
 '@
-[IO.File]::WriteAllText((Join-Path $assetRoot 'MODEL-NOTICE.txt'), $notice.Replace("`r`n","`n")+"`n", [Text.UTF8Encoding]::new($false))
+Write-ArkBytesIfDifferent -Path (Join-Path $assetRoot 'MODEL-NOTICE.txt') -Bytes ([Text.UTF8Encoding]::new($false).GetBytes($notice.Replace("`r`n","`n")+"`n"))
 $names = @('model_quantized.onnx','vocab.txt','dense.safetensors','onnxruntime.dll','onnxruntime_providers_shared.dll','MODEL-LICENSE.txt','MODEL-README.md','MODEL-ORIGINAL-README.md','MODEL-NOTICE.txt','ONNXRUNTIME-LICENSE.txt','ONNXRUNTIME-ThirdPartyNotices.txt')
 $files = foreach ($name in $names) { $file=Get-Item -LiteralPath (Join-Path $assetRoot $name); [ordered]@{path=$name;bytes=$file.Length;sha256=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()} }
 $manifest = [ordered]@{schema=1;model='Xenova/distiluse-base-multilingual-cased-v2';revision=$modelPin;projection_revision=$projectionPin;license='Apache-2.0';runtime='onnxruntime-cpu-1.23.2-windows-x64';dimensions=512;window_tokens=128;window_overlap=16;long_text='all tokens; novel-token-weighted window average and L2';files=@($files)}
-[IO.File]::WriteAllText((Join-Path $assetRoot 'manifest.json'), ($manifest | ConvertTo-Json -Depth 8)+"`n", [Text.UTF8Encoding]::new($false))
+Write-ArkBytesIfDifferent -Path (Join-Path $assetRoot 'manifest.json') -Bytes ([Text.UTF8Encoding]::new($false).GetBytes(($manifest | ConvertTo-Json -Depth 8)+"`n"))
 Write-Output "Prepared pinned offline semantic memory assets: $assetRoot"
 Write-Output (Get-Content -LiteralPath (Join-Path $assetRoot 'manifest.json') -Raw)

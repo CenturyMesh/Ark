@@ -528,7 +528,10 @@ static V assistantRequestWith(const AssistantConfig& config,const V& conversatio
         // Readable summaries only; encrypted_content round-tripping is unchanged.
         if(assistantRequestsReasoningSummary(config))reasoning.set("summary",V::makeStr("auto"));
         if(!reasoning.obj.empty())request.set("reasoning",std::move(reasoning));}
-    request.set("parallel_tool_calls",V::makeBool(config.parallelToolCalls));request.set("input",wireHistory);
+    // Exact duplicate receipts can be referenced only after the final history
+    // selection. Complete source outputs remain in this request; this lossless
+    // transport step needs no fresh-inspection guard or extra provider round.
+    request.set("parallel_tool_calls",V::makeBool(config.parallelToolCalls));request.set("input",assistant_context::internReadReceipts(wireHistory));
     V functions=assistantFunctionTools(tools);
     if(config.authMode==AssistantAuthMode::ChatGptPlan){V namespaced=V::makeObj(),groups=V::makeArr();namespaced.set("type",V::makeStr("namespace"));namespaced.set("name",V::makeStr("ark"));namespaced.set("description",V::makeStr("ARK-Point CAD document modeling and inspection tools"));namespaced.set("tools",std::move(functions));groups.arr.push_back(std::move(namespaced));request.set("tools",std::move(groups));request.set("stream",V::makeBool(true));}
     else request.set("tools",std::move(functions));

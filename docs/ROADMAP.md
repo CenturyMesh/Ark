@@ -1,5 +1,13 @@
 # ARK roadmap A–G
 
+069D (**A.02/A.03/A.04/B.02/D.02/D.05 — Verificado no escopo local**): pass-local exact projection
+reuse, explicit surface dependencies, reversible read/context sharing, staged
+persistent-memory recall and verified Obsidian memory/code canvas. Targeted
+development builds retain their configured compiler cache and select relevant
+test executables. See [contracts](PERFORMANCE_MEMORY_069D.md) and
+[verification](iterations/069D.md); provider cost and task-quality gains remain
+unmeasured.
+
 068B (**A.02/B.01/B.03/D.02 — Verificado no escopo local**): exact surface boundary
 matching, loft correspondence, native curvature/seam analysis, grouped poles,
 multi-face trim, trim-preserving extension/sewing diagnosis, curve networks and

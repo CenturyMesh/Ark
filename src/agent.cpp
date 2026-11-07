@@ -254,7 +254,7 @@ void validated(Document& d,bool geometry=true){
     std::string manufacturingError;if(!validateManufacturingRoutes(d,manufacturingError))throw std::runtime_error(manufacturingError);
     if(std::any_of(d.assembly.begin(),d.assembly.end(),[](const AssemblyNode& n){return specializedAssemblyPattern(n.pattern);})){std::string patternError;if(!validateAssemblyPatternAuthoring(d,patternError))throw std::runtime_error(patternError);}
     if(geometry)d.recompute();
-    else {d.recomputeMs=0;d.recomputeEvaluated=0;d.recomputeReused=d.evalBodies.size();d.parallelFeatures=0;d.peakParallelFeatures=0;}
+    else {d.recomputeMs=0;d.recomputeEvaluated=0;d.recomputeReused=d.evalBodies.size();d.recomputeProjectionBuilds=0;d.recomputeProjectionReused=0;d.parallelFeatures=0;d.peakParallelFeatures=0;}
     if(!d.parameterError.empty())throw std::runtime_error(d.parameterError);
     for(auto& r:d.lastResults)if(!r.ok)throw std::runtime_error("Feature #"+std::to_string(r.id)+": "+r.error);
     for(auto& sk:d.sketches)if(!sk.error.empty()||!std::isfinite(sk.residual)||sk.residual>1e-6)throw std::runtime_error("Sketch '"+sk.name+"': "+sk.error);
@@ -766,6 +766,7 @@ V AgentSession::info() const {
     V r=V::makeObj();r.set("revision",V::makeNum((double)revision));r.set("units",V::makeStr("mm"));
     r.set("feature_count",V::makeNum(document.features.size()));r.set("recompute_ms",V::makeNum(document.recomputeMs));
     r.set("features_reused",V::makeNum(document.recomputeReused));r.set("features_evaluated",V::makeNum(document.recomputeEvaluated));
+    r.set("projection_builds",V::makeNum(document.recomputeProjectionBuilds));r.set("projection_reused",V::makeNum(document.recomputeProjectionReused));
     if(!document.derivedGeometryStatus.isNull())r.set("derived_geometry",document.derivedGeometryStatus);
     r.set("feature_workers",V::makeNum(document.featureWorkers));r.set("native_threads_per_worker",V::makeNum(document.nativeThreadsPerWorker));r.set("parallel_features",V::makeNum(document.parallelFeatures));r.set("peak_parallel_features",V::makeNum(document.peakParallelFeatures));r.set("dependency_edges",V::makeNum(document.dependencyEdges));
     r.set("parameter_error",V::makeStr(document.parameterError));

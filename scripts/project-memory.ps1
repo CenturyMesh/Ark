@@ -1,5 +1,5 @@
 param(
- [ValidateSet('wakeup','search','get','store','forget','stats','export','promote','feedback','consolidate','reindex','compress')][string]$Action='wakeup',
+ [ValidateSet('wakeup','search','get','store','forget','stats','export','promote','feedback','consolidate','reindex','compress','distill')][string]$Action='wakeup',
  [string]$Query,
  [string]$Project,
  [switch]$Shared,

@@ -41,6 +41,11 @@ public:
     // max_bytes?. Reads accept current_revision?, current_sources? (source to
     // SHA-256), known_scope?, known_fingerprints? (id to receipt fingerprint).
     // Unchanged records omit repeated text but still return current freshness.
+    // detail:index returns discovery metadata without prose/facts/steps; its
+    // representation-specific fingerprint cannot suppress a later full read.
+    // distill: explicit keys/expected_revisions returns deduplicated exact
+    // content/facts/steps with per-record provenance, outcomes, freshness and
+    // contradictory declarations. Read-only and reversible, not a summary.
     // include_scratch? opts into unpromoted entries. Configured ready embeddings
     // add exact cosine retrieval and reciprocal-rank fusion with lexical FTS.
     // No synthetic vector substitutes for an unavailable model.

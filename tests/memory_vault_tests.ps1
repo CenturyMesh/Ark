@@ -123,6 +123,12 @@ WriteText (Join-Path $memory 'index.md') ('# ARK project memory'+"`n`n- [["+$id+
 WriteJson (Join-Path $memory 'manifest.json') @{format='ark-project-memory-v1';scope=('f'*64);records=@(@{id=$id;fingerprint=$fingerprint})}
 $originalCode=Hash $card;$originalNote=Hash $note
 $first=Export
+$canvas=Get-Content -LiteralPath (Join-Path $first.directory 'memory-graph.canvas') -Raw | ConvertFrom-Json
+if(@($canvas.nodes).Count -ne 2 -or @($canvas.edges).Count -ne 2){throw 'Memory canvas must contain the memory record, unique verified code card and both explicit anchors.'}
+$canvasIds=@{};foreach($node in $canvas.nodes){$canvasIds[$node.id]=$true;if(-not (Test-Path -LiteralPath (Join-Path $first.directory $node.file) -PathType Leaf)){throw 'Memory canvas file card is dangling.'}}
+foreach($edge in $canvas.edges){if(-not $canvasIds.ContainsKey($edge.fromNode) -or -not $canvasIds.ContainsKey($edge.toNode)){throw 'Memory canvas relation is dangling.'}}
+if($canvas.edges[0].color -cne '4' -or $canvas.edges[1].color -cne '2'){throw 'Memory canvas must distinguish matching and stale source declarations.'}
+if(-not (Test-Path -LiteralPath (Join-Path $first.directory 'ARK Memory/Recall index.md'))){throw 'Human recall index is missing.'}
 $receipt=Get-Content -LiteralPath (Join-Path $first.directory '.ark-memory-vault.json') -Raw|ConvertFrom-Json
 if($first.links_added -ne 2 -or $receipt.anchors.Count -ne 3 -or $receipt.anchors[0].status -cne 'current_source_hash_matches_anchor' -or $receipt.anchors[1].status -cne 'stale_source_hash_changed' -or $receipt.anchors[2].status -cne 'unavailable_not_indexed_code'){throw 'Anchor hash freshness, explicit scope or link count failed.'}
 if(Test-Path -LiteralPath (Join-Path $first.directory '.ark-code-vault.json')){throw 'Copied code receipt must not falsely attest the combined vault.'}

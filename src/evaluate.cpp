@@ -56,7 +56,10 @@ static bool explicitDependencies(const Feature& f){
     }
     if(f.type==FeatureType::SurfaceEdit){
         const auto* operation=f.nativeSpec.find("op");if(!operation||operation->t!=arkjson::Value::Str)return false;
-        static const std::set<std::string> edits{"extract_face","trim_plane","trim_wire","repair","untrim","extend","mutual_trim"};
+        // These producers read only declared input bodies/topology and resolved
+        // scalar expressions. Source/target hash guards still run on any changed
+        // input generation; the generic named/occurrence veto above still applies.
+        static const std::set<std::string> edits{"extract_face","trim_plane","trim_wire","repair","untrim","extend","mutual_trim","deform_poles","match_boundary","multi_trim","extend_trimmed"};
         return edits.count(operation->str)!=0;
     }
     if(f.type!=FeatureType::NativeSolid)return false;
@@ -349,22 +352,6 @@ static Body evalFeatureBody(const Feature& f, const ExprEnv& env, Document& doc,
 
 static bool deferredSketch(const Document& document,const NamedSketch& sketch);
 static bool deferredDatum(const Document& document,const std::string& name);
-static void refreshDrivenSketches(Document& document, bool require){
-    ExprEnv env=document.buildEnv();
-    for(auto& sketch:document.sketches){
-        if(deferredSketch(document,sketch)){sketch.error.clear();sketch.residual=0;continue;}
-        bool projects=false;
-        for(const auto& entity:sketch.sk.ents) if(entity.kind==SketchEnt::Project) projects=true;
-        if(!projects) continue;
-        DrivenSketchStatus status=bakeSketchProjects(document,sketch);
-        if(!status.error.empty()){sketch.error=status.error;sketch.residual=INFINITY;continue;}
-        if(status.waiting){
-            if(require){sketch.error="Project source is not evaluated yet";sketch.residual=INFINITY;}
-            continue;
-        }
-        evaluateSketch(sketch,env);
-    }
-}
 
 // Collect semantic authoring inputs without touching evaluated bodies. Named
 // point -> datum -> sketch/feature chains must be checked before cache reuse or
@@ -474,6 +461,58 @@ static bool deferredDatum(const Document& document,const std::string& name){
     try{AuthoringSources sources(document);sources.datum(name);return deferredSources(document,sources);}catch(...){return false;}
 }
 
+// A published feature body cannot change again within this recompute pass.
+// Once a projection's complete source closure has been published and solved,
+// repeating its native projection after unrelated history rows is redundant.
+// This state is deliberately pass-local: every edit, undo and reopen starts
+// fresh. Occurrence/mate-dependent projections retain the conservative path.
+class DrivenSketchRefresh {
+    struct Row {size_t index;bool audited=false,complete=false;std::set<u64> features;std::set<std::string> sketches;};
+    Document& document;
+    const ExprEnv env;
+    std::vector<Row> rows;
+    std::set<std::string> completed;
+public:
+    explicit DrivenSketchRefresh(Document& doc):document(doc),env(doc.buildEnv()){
+        document.recomputeProjectionBuilds=0;document.recomputeProjectionReused=0;
+        for(size_t i=0;i<doc.sketches.size();++i){
+            const auto& sketch=doc.sketches[i];bool projects=false;
+            for(const auto& entity:sketch.sk.ents)projects|=entity.kind==SketchEnt::Project;
+            if(!projects)continue;
+            Row row;row.index=i;
+            try{
+                AuthoringSources sources(doc);sources.sketch(sketch.name);
+                row.audited=!sources.occurrences;row.features=std::move(sources.features);
+                for(const auto& key:sources.done)if(key.rfind("sketch:",0)==0&&key.substr(7)!=sketch.name){
+                    const auto name=key.substr(7);const auto* source=doc.findSketch(name);
+                    if(source)for(const auto& entity:source->sk.ents)if(entity.kind==SketchEnt::Project){row.sketches.insert(name);break;}
+                }
+            }catch(...){/* Failed/unknown closure must keep retrying and report its native error. */}
+            rows.push_back(std::move(row));
+        }
+    }
+    void refresh(bool require){
+        for(auto& row:rows){
+            auto& sketch=document.sketches[row.index];
+            if(row.complete){++document.recomputeProjectionReused;continue;}
+            if(deferredSketch(document,sketch)){sketch.error.clear();sketch.residual=0;continue;}
+            ++document.recomputeProjectionBuilds;
+            DrivenSketchStatus status=bakeSketchProjects(document,sketch);
+            if(!status.error.empty()){sketch.error=status.error;sketch.residual=INFINITY;continue;}
+            if(status.waiting){
+                if(require){sketch.error="Project source is not evaluated yet";sketch.residual=INFINITY;}
+                continue;
+            }
+            evaluateSketch(sketch,env);
+            if(!row.audited||!sketch.error.empty())continue;
+            bool stable=true;
+            for(u64 id:row.features){bool published=false;for(const auto& result:document.lastResults)if(result.id==id){published=result.ok;break;}stable&=published;}
+            for(const auto& name:row.sketches)stable&=completed.count(name)!=0;
+            if(stable){row.complete=true;completed.insert(sketch.name);}
+        }
+    }
+};
+
 const std::vector<FeatureResult>& Document::recompute() {
     NativeDocumentResultScope nativeResults(pendingNativeGeometry);
     f64 t0=nowMs();
@@ -530,7 +569,7 @@ const std::vector<FeatureResult>& Document::recompute() {
     struct EvaluationScope {Document& doc;~EvaluationScope(){doc.evaluatingBodies=nullptr;}} evaluationScope{*this};
     // Sketch-only associations can resolve before the first feature. Feature-backed
     // sources remain waiting until their producer crosses the publication boundary.
-    refreshDrivenSketches(*this,false);
+    DrivenSketchRefresh drivenSketches(*this);drivenSketches.refresh(false);
     std::vector<bool> explicitInputs;for(const auto& f:features)explicitInputs.push_back(explicitDependencies(f));
     const unsigned cores=std::max(1u,std::thread::hardware_concurrency());
     const unsigned cpuBudget=std::min(cores,threadSetting("ARK_CPU_THREADS",std::min(cores,32u),64));
@@ -669,11 +708,11 @@ const std::vector<FeatureResult>& Document::recompute() {
         evaluationProgress(f.id,f.name,index,features.size(),false,cachedFeature);
         f64 tf=nowMs();
         if(f.suppressed){
-            fr.ok=true;fr.ms=nowMs()-tf;lastResults.push_back(fr);refreshDrivenSketches(*this,false);continue;
+            fr.ok=true;fr.ms=nowMs()-tf;lastResults.push_back(fr);drivenSketches.refresh(false);continue;
         }
         bool blocked=false;
         for(u64 input:f.inputs){if(const Feature* source=find(input);source&&source->suppressed){fr.ok=false;fr.error="source feature is suppressed";blocked=true;break;}}
-        if(blocked){fr.ms=nowMs()-tf;lastResults.push_back(std::move(fr));refreshDrivenSketches(*this,false);continue;}
+        if(blocked){fr.ms=nowMs()-tf;lastResults.push_back(std::move(fr));drivenSketches.refresh(false);continue;}
         fr.error=!authoringDependencyErrors[index].empty()?authoringDependencyErrors[index]:parameterError.empty()?featureParameterError(f,env):parameterError;
         fr.ok=fr.error.empty();
         // An audited feature of the owner's own runs on the pool as well, and
@@ -703,9 +742,9 @@ const std::vector<FeatureResult>& Document::recompute() {
         }
         published[index]=true;lastResults.push_back(std::move(fr));
         evaluationProgress(f.id,f.name,index,features.size(),true,cachedFeature);
-        refreshDrivenSketches(*this,false);
+        drivenSketches.refresh(false);
     }
-    refreshDrivenSketches(*this,true);
+    drivenSketches.refresh(true);
     ExprEnv canvasEnv=buildEnv();
     for(const auto& canvas:canvases){
         bool known=canvas.plane=="XY"||canvas.plane=="XZ"||canvas.plane=="YZ";

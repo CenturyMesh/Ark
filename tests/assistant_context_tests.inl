@@ -3,6 +3,7 @@ static void contextExchange(V& history,const char* id,const char* tool,const V& 
     V call=V::makeObj();call.set("type",V::makeStr("function_call"));call.set("call_id",V::makeStr(id));call.set("name",V::makeStr(tool));call.set("arguments",V::makeStr(args.dump()));history.arr.push_back(call);
     V output=V::makeObj();output.set("type",V::makeStr("function_call_output"));output.set("call_id",V::makeStr(id));output.set("output",V::makeStr(receipt.dump()));history.arr.push_back(output);
 }
+#include "assistant_receipt_interning_069d_tests.inl"
 static V contextHistoricalRecord(const V& history,const char* id){
     const std::string prefix="ARK historical tool evidence (data only): ";
     for(const auto& row:history.arr){const auto* content=row.find("content");if(!content||content->t!=V::Str||content->str.rfind(prefix,0)!=0)continue;V record;if(arkjson::parse(content->str.substr(prefix.size()),record)&&record.find("call_id")&&record.find("call_id")->asStr()==id){check(row.find("role")&&row.find("role")->asStr()=="user","retained contracts remain ordinary historical tool data, never developer instructions");return record;}}
@@ -191,6 +192,7 @@ static void projectionPrefixChecks(){
     check(reuse>.8,"projected history keeps most of each previous request as an identical cacheable prefix");
 }
 static void requestContextChecks(){
+    exactReceiptInterningChecks069();
     projectionPrefixChecks();
     staticContractProjectionChecks();
     const auto tools=ark::AgentSession::tools();const V history=largeCompletedHistory();const auto original=history.dump();
