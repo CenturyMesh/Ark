@@ -1,5 +1,6 @@
 ﻿// ARK-Point :: evaluate.cpp â€” feature-history recompute pipeline.
 #include "ark/model.hpp"
+#include "ark/evaluation_scheduler_070a.hpp"
 #include "ark/history_authoring.hpp"
 #include "ark/assembly_authoring.hpp"
 #include "ark/serialize.hpp"
@@ -21,6 +22,8 @@
 
 namespace ark {
 namespace {thread_local EvaluationObserver evaluationObserver;}
+namespace {thread_local EvaluationSchedulerDiagnostics070A schedulerDiagnostics070A;}
+EvaluationSchedulerDiagnostics070A evaluationSchedulerDiagnostics070A(){return schedulerDiagnostics070A;}
 EvaluationObserver setEvaluationObserver(EvaluationObserver observer){auto previous=std::move(evaluationObserver);evaluationObserver=std::move(observer);return previous;}
 static void evaluationProgress(u64 id,const std::string& name,size_t index,size_t total,bool completed,bool reused){if(evaluationObserver)try{evaluationObserver(id,name,index,total,completed,reused);}catch(...){/* An observer cannot alter geometric acceptance. */}}
 
@@ -514,6 +517,7 @@ public:
 };
 
 const std::vector<FeatureResult>& Document::recompute() {
+    schedulerDiagnostics070A={};
     NativeDocumentResultScope nativeResults(pendingNativeGeometry);
     f64 t0=nowMs();
     refreshSkeleton(*this);
@@ -628,26 +632,56 @@ const std::vector<FeatureResult>& Document::recompute() {
     std::vector<std::unique_ptr<Evaluation>> completed(features.size());
     const size_t contextBytes=valueMemory(authored)+features.size()*sizeof(Feature),payloadBudget=128u*1024u*1024u;
     struct Drain {std::vector<std::future<Evaluation>>& jobs;~Drain(){for(auto& job:jobs)if(job.valid())job.wait();}} drain{jobs};
-    auto harvest=[&](size_t current){
-        for(size_t i=current;i<jobs.size();++i)if(jobs[i].valid()&&jobs[i].wait_for(std::chrono::milliseconds(0))==std::future_status::ready){
+    // Only dirty audited operations enter the frontier. Ready cache entries are
+    // inputs immediately, as before; a newly evaluated input releases its actual
+    // consumers once, on completion or ordered publication. Cached history rows
+    // no longer scan every later feature looking for hypothetical work.
+    std::set<size_t> readyWorkers,runningJobs;
+    std::vector<bool> availableInputs(features.size(),false);
+    std::vector<size_t> missingInputs(features.size(),0),workIndices(features.size(),features.size());
+    std::vector<std::vector<size_t>> waitingConsumers(features.size());
+    for(size_t i=0;i<features.size();++i){
+        const auto cached=evaluationCache.find(features[i].id);
+        availableInputs[i]=activeFeatures[i]&&!features[i].suppressed&&authoringDependencyErrors[i].empty()&&cached!=evaluationCache.end()&&cached->second.key==plannedKeys[i];
+    }
+    if(featureWorkers>=2&&parameterError.empty())for(size_t i=0;i<features.size();++i){
+        if(!activeFeatures[i]||features[i].suppressed||!explicitInputs[i]||availableInputs[i]||!authoringDependencyErrors[i].empty()||!featureParameterError(features[i],env).empty())continue;
+        ++schedulerDiagnostics070A.dirtyCandidates;
+        for(size_t dependency:dependencies[i])if(!availableInputs[dependency]){++missingInputs[i];waitingConsumers[dependency].push_back(i);}
+        if(!missingInputs[i])readyWorkers.insert(i);
+    }
+    auto releaseInput=[&](size_t index){
+        if(availableInputs[index])return;availableInputs[index]=true;
+        for(size_t consumer:waitingConsumers[index]){
+            ++schedulerDiagnostics070A.dependencyWakeups;
+            if(--missingInputs[consumer]==0&&!published[consumer])readyWorkers.insert(consumer);
+        }
+    };
+    auto harvest=[&](){
+        for(auto it=runningJobs.begin();it!=runningJobs.end();){const size_t i=*it;++schedulerDiagnostics070A.harvestChecks;
+            if(jobs[i].wait_for(std::chrono::milliseconds(0))!=std::future_status::ready){++it;continue;}
             completed[i]=std::make_unique<Evaluation>(jobs[i].get());
             const auto& body=completed[i]->body;size_t retained=sizeof(Evaluation)+body.faces.size()*sizeof(Face)+valueMemory(body.nativeData);
             if(body.baked)retained+=sizeof(Mesh)+(body.baked->pos.capacity()+body.baked->nrm.capacity())*sizeof(f32)+body.baked->idx.capacity()*sizeof(u32);
             const size_t charge=std::max(jobBytes[i],retained);outstandingBytes+=charge-jobBytes[i];jobBytes[i]=charge;
+            it=runningJobs.erase(it);
+            if(completed[i]->result.ok&&(!body.faces.empty()||body.baked))releaseInput(i);
             // Finished outputs keep their slot and charge until publication.
             // Otherwise looking beyond owner-only rows could accumulate a
             // document-sized queue of completed, unpublished geometry.
         }
     };
     auto inputBody=[&](u64 id)->const Body*{
-        for(const auto& b:work)if(b.id==id)return &b;
+        ++schedulerDiagnostics070A.inputLookups;
         auto found=indices.find(id);if(found==indices.end()||!activeFeatures[found->second]||features[found->second].suppressed)return nullptr;size_t index=found->second;
+        if(workIndices[index]!=features.size())return &work[workIndices[index]];
         if(completed[index])return completed[index]->result.ok?&completed[index]->body:nullptr;
         auto cached=evaluationCache.find(id);if(cached!=evaluationCache.end()&&cached->second.key==plannedKeys[index])return cached->second.body.get();return nullptr;
     };
     // An unpublished feature whose audited explicit inputs are all evaluated
     // may run on the pool. bytes receives its input charge for the budget.
-    auto workerReady=[&](size_t i,size_t& bytes){
+    auto workerReady=[&](size_t i,size_t& bytes,bool& retry){
+        ++schedulerDiagnostics070A.readinessChecks;retry=false;
         if(!activeFeatures[i])return false;
         // Only owned, audited explicit-input jobs cross owner-only rows.
         // Named sketch/datum/occurrence consumers stay on the owner thread.
@@ -663,7 +697,8 @@ const std::vector<FeatureResult>& Document::recompute() {
         if(!ready)return false;
         const auto& key=plannedKeys[i];auto cached=evaluationCache.find(features[i].id);if(cached!=evaluationCache.end()&&cached->second.key==key)return false;
         bytes=contextBytes;for(u64 id:features[i].inputs){const auto* body=inputBody(id);bytes+=sizeof(Body)+body->faces.size()*sizeof(Face)+valueMemory(body->nativeData);if(body->baked)bytes+=(body->baked->pos.size()+body->baked->nrm.size()+body->baked->idx.size())*sizeof(float);}
-        return bytes<=payloadBudget&&outstandingBytes<=payloadBudget-bytes;
+        if(bytes>payloadBudget)return false;
+        retry=outstandingBytes>payloadBudget-bytes;return !retry;
     };
     auto dispatch=[&](size_t i,size_t bytes){
         {
@@ -674,12 +709,18 @@ const std::vector<FeatureResult>& Document::recompute() {
             // Retain the complete explicit ancestor recipes (native promotion
             // may inspect them), rather than copying every unrelated feature
             // once for each scheduled task. Preserve original history order.
-            std::set<size_t> contextFeatures;
-            std::function<void(size_t)> includeSource=[&](size_t index){if(!contextFeatures.insert(index).second)return;for(u64 id:features[index].inputs){auto source=indices.find(id);if(source!=indices.end())includeSource(source->second);}};
-            includeSource(i);snapshot.features.reserve(contextFeatures.size());
-            for(size_t index:contextFeatures)snapshot.features.push_back(features[index]);
+            if(!isMeshModelFeature(features[i].type)){
+                std::set<size_t> contextFeatures;
+                std::function<void(size_t)> includeSource=[&](size_t index){if(!contextFeatures.insert(index).second)return;for(u64 id:features[index].inputs){auto source=indices.find(id);if(source!=indices.end())includeSource(source->second);}};
+                includeSource(i);snapshot.features.reserve(contextFeatures.size());
+                for(size_t index:contextFeatures)snapshot.features.push_back(features[index]);
+                snapshot.params=params;snapshot.materials=materials;
+            }
+            // Mesh evaluation has no Document access: its exact authored mesh,
+            // input payloads and captured expression environment are sufficient.
+            // Do not clone a long ancestor recipe chain merely to move vertices.
             parallelContextFeaturesCopied+=snapshot.features.size();
-            snapshot.params=params;snapshot.materials=materials;snapshot.tessOpt=tessOpt;
+            snapshot.tessOpt=tessOpt;
             std::vector<Body> inputs;for(u64 id:features[i].inputs)inputs.push_back(*inputBody(id));
             const Feature feature=features[i];const unsigned nativeBudget=nativeThreadsPerWorker;
             auto task=std::make_shared<std::packaged_task<Evaluation()>>([snapshot=std::move(snapshot),inputs=std::move(inputs),feature,env,nativeBudget,activity,pending=pendingNativeGeometry,requestControl=captureNativeRequestControl()]()mutable{
@@ -690,14 +731,19 @@ const std::vector<FeatureResult>& Document::recompute() {
                 activity->leave();value.result.ms=nowMs()-started;return value;
             });
             jobs[i]=task->get_future();ThreadPool::get().submit([task]{(*task)();});++outstanding;++parallelFeatures;jobBytes[i]=bytes;outstandingBytes+=bytes;
+            readyWorkers.erase(i);runningJobs.insert(i);schedulerDiagnostics070A.peakRunningJobs=std::max(schedulerDiagnostics070A.peakRunningJobs,runningJobs.size());
         }
     };
     // While the owner waits for a pool job it evaluates nothing itself, so
     // every feature worker may be busy; otherwise one slot stays the owner's.
     auto schedule=[&](size_t current,bool ownerWaiting){
         if(featureWorkers<2||!parameterError.empty())return;
-        harvest(current);
-        for(size_t i=current+1;i<features.size()&&outstanding<(ownerWaiting?featureWorkers:featureWorkers-1);++i){size_t bytes=0;if(workerReady(i,bytes))dispatch(i,bytes);}
+        harvest();
+        for(auto it=readyWorkers.upper_bound(current);it!=readyWorkers.end()&&outstanding<(ownerWaiting?featureWorkers:featureWorkers-1);){
+            const size_t i=*it++;size_t bytes=0;bool retry=false;
+            if(workerReady(i,bytes,retry))dispatch(i,bytes);
+            else if(!retry)readyWorkers.erase(i); // owner-only input or oversized snapshot, never silently dropped
+        }
     };
     for(auto&f:features){
         const size_t index=featureIndex++;
@@ -719,10 +765,10 @@ const std::vector<FeatureResult>& Document::recompute() {
         // the owner keeps dispatching later ready features whenever a job
         // finishes instead of blocking all scheduling while it evaluates.
         // Publication below still follows document order.
-        if(fr.ok&&!cachedFeature&&featureWorkers>=2&&parameterError.empty()&&!completed[index]&&!jobs[index].valid()&&outstanding<featureWorkers){size_t bytes=0;if(workerReady(index,bytes))dispatch(index,bytes);}
+        if(fr.ok&&!cachedFeature&&featureWorkers>=2&&parameterError.empty()&&!completed[index]&&!jobs[index].valid()&&outstanding<featureWorkers&&(!runningJobs.empty()||readyWorkers.upper_bound(index)!=readyWorkers.end())){size_t bytes=0;bool retry=false;if(workerReady(index,bytes,retry))dispatch(index,bytes);}
         while(fr.ok&&!completed[index]&&jobs[index].valid()&&jobs[index].wait_for(std::chrono::milliseconds(2))!=std::future_status::ready)schedule(index,true);
         Body b;bool measuredByWorker=false;
-        try{if(fr.ok){auto cached=evaluationCache.find(f.id);if(cached!=evaluationCache.end()&&cached->second.key==cacheKey){b=*cached->second.body;fr.tris=cached->second.tris;++recomputeReused;}else if(completed[index]){b=std::move(completed[index]->body);fr=std::move(completed[index]->result);measuredByWorker=true;completed[index].reset();--outstanding;outstandingBytes-=jobBytes[index];++recomputeEvaluated;}else if(jobs[index].valid()){auto value=jobs[index].get();--outstanding;outstandingBytes-=jobBytes[index];b=std::move(value.body);fr=std::move(value.result);measuredByWorker=true;++recomputeEvaluated;}else{OuterParallelScope nested(outstanding>0);NativeBudgetScope budget(!explicitInputs[index]&&outstanding==0?std::min(threadSetting("ARK_NATIVE_THREADS",8,64),cpuBudget):nativeThreadsPerWorker);activity->enter();try{b=evalFeatureBody(f,env,*this,work,fr,tessOpt);}catch(...){activity->leave();throw;}activity->leave();++recomputeEvaluated;}}}
+        try{if(fr.ok){auto cached=evaluationCache.find(f.id);if(cached!=evaluationCache.end()&&cached->second.key==cacheKey){b=*cached->second.body;fr.tris=cached->second.tris;++recomputeReused;}else if(completed[index]){b=std::move(completed[index]->body);fr=std::move(completed[index]->result);measuredByWorker=true;completed[index].reset();--outstanding;outstandingBytes-=jobBytes[index];++recomputeEvaluated;}else if(jobs[index].valid()){auto value=jobs[index].get();runningJobs.erase(index);--outstanding;outstandingBytes-=jobBytes[index];b=std::move(value.body);fr=std::move(value.result);measuredByWorker=true;++recomputeEvaluated;}else{OuterParallelScope nested(outstanding>0);NativeBudgetScope budget(!explicitInputs[index]&&outstanding==0?std::min(threadSetting("ARK_NATIVE_THREADS",8,64),cpuBudget):nativeThreadsPerWorker);activity->enter();try{b=evalFeatureBody(f,env,*this,work,fr,tessOpt);}catch(...){activity->leave();throw;}activity->leave();++recomputeEvaluated;}}}
         catch(const std::exception& e){fr.ok=false;fr.error=e.what();}
         // A completed worker retains its actual evaluation duration; publication
         // wait time alone can be near zero even for an expensive operation.
@@ -736,11 +782,11 @@ const std::vector<FeatureResult>& Document::recompute() {
             if(cachedFeature)nextCache[f.id]=previousCache->second;
             else nextCache[f.id]={std::move(cacheKey),std::make_shared<const Body>(b),generation,fr.tris};
             keys[f.id]=std::to_string(f.id)+":"+std::to_string(generation)+";";upstream+=keys[f.id];
-            work.push_back(std::move(b));
+            workIndices[index]=work.size();work.push_back(std::move(b));releaseInput(index);
         } else {
             b=Body{};
         }
-        published[index]=true;lastResults.push_back(std::move(fr));
+        published[index]=true;readyWorkers.erase(index);lastResults.push_back(std::move(fr));
         evaluationProgress(f.id,f.name,index,features.size(),true,cachedFeature);
         drivenSketches.refresh(false);
     }

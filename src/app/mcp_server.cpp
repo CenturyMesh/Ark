@@ -4,6 +4,7 @@
 #include "ark/live_session.hpp"
 #include "ark/assistant.hpp"
 #include "ark/native_backend.hpp"
+#include "mcp_input_070a.hpp"
 #include <iostream>
 #include <algorithm>
 #include <functional>
@@ -26,8 +27,8 @@ int main(int argc,char** argv){
     // in-app agents do; any catalogue tool is still executed when called.
     V onboarded=V::makeArr();unsigned onboardingCalls=0;
     auto listedTools=[&]{return coreTools?ark::assistantActiveTools(availableTools,onboarded,""):availableTools;};
-    std::string line;bool listChanged=false;
-    while(std::getline(std::cin,line)){
+    std::string line;bool listChanged=false;McpInput070A input(endpoint);
+    while(input.next(line)){
         V req,response=V::makeObj();response.set("jsonrpc",V::makeStr("2.0"));
         auto error=[&](int code,const char* message){V e=V::makeObj();e.set("code",V::makeNum(code));e.set("message",V::makeStr(message));response.set("error",e);};
         if(line.size()>4*1024*1024||!arkjson::parse(line,req)){response.set("id",V{});error(-32700,"Parse error or request exceeds 4 MiB");}

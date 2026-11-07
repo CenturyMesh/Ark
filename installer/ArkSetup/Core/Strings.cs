@@ -75,6 +75,18 @@ public static class S
     public static string TryAgain => T("Try again", "Tentar de novo");
     public static string ArkRunning => T("ARK is open. Close it and try again.",
                                          "O ARK está aberto. Feche-o e tente de novo.");
+    public static string ArkRunningProcess(ArkRunningProcess process)
+    {
+        string identity = $"{process.Name} (PID {process.Pid})";
+        if (process.Background && process.Name.Equals("ark-mcp.exe", StringComparison.OrdinalIgnoreCase))
+            return T($"An ARK MCP session is still running in the background: {identity}.\nSave its work and disconnect the ARK session in the client application, then try again.",
+                     $"Uma sessão MCP do ARK continua em segundo plano: {identity}.\nGuarde o trabalho e desligue a sessão ARK na aplicação cliente; depois tente de novo.");
+        if (process.Background)
+            return T($"An ARK background task is still running: {identity}.\nLet it finish or close it from its client application, then try again.",
+                     $"Uma tarefa do ARK continua em segundo plano: {identity}.\nAguarde que termine ou feche-a pela aplicação cliente; depois tente de novo.");
+        return T($"ARK is still running: {identity}.\nSave your drawings, close that instance and try again.",
+                 $"O ARK continua em execução: {identity}.\nGuarde os desenhos, feche essa instância e tente de novo.");
+    }
     public static string NoPayload => T("This setup file is incomplete. Download it again.",
                                         "Este ficheiro de instalação está incompleto. Volte a descarregá-lo.");
     public static string BadPayload(string detail) => T($"The setup data is damaged ({detail}). Download it again.",

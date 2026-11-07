@@ -21,6 +21,7 @@ static std::string nativeCacheDigest(const std::string& bytes){
 #endif
     return iterationSha256(bytes);
 }
+#include "native_memory_cache_070a.inl"
 struct NativeResultCache {
     fs::path directory,entry;
     std::string key,producerIdentity,resolvedRequestIdentity;
@@ -149,18 +150,25 @@ struct NativeResultCache {
             key=nativeCacheDigest(producerIdentity+"\n"+canonical.dump());entry=directory/(key+".arknative");
         }catch(...){entry.clear();}
     }
-    static bool decode(const std::string& expectedKey,const std::string& bytes,V& value){
+    static bool checkedPayload(const std::string& expectedKey,const std::string& bytes,std::string& payload,std::string& payloadDigest){
         try{
             constexpr char magic[]="ARK-NATIVE-CACHE1\n";constexpr size_t start=sizeof(magic)-1,prefix=start+130;
             if(expectedKey.size()!=64||bytes.size()>maxEntry||bytes.size()<prefix||bytes.compare(0,start,magic)||bytes.compare(start,64,expectedKey)||bytes[start+64]!='\n'||bytes[prefix-1]!='\n')return false;
-            const std::string payload=bytes.substr(prefix);
-            if(nativeCacheDigest(payload)!=bytes.substr(start+65,64))return false;
+            payload=bytes.substr(prefix);payloadDigest=bytes.substr(start+65,64);
+            return nativeCacheDigest(payload)==payloadDigest;
+        }catch(...){return false;}
+    }
+    static bool decodePayload(const std::string& payload,V& value){
+        try{
             V result;if(!arkjson::parse(payload,result)||result.t!=V::Obj||result.find("error"))return false;
             const auto* local=result.find("native_cache_producer_local");if(!local||local->t!=V::Bool||!local->b)return false;
             const auto* report=result.find("report"),*brep=result.find("brep_base64"),*topology=result.find("topology");
             if(!report||!report->find("brep_valid")||!report->find("brep_valid")->b||!brep||brep->t!=V::Str||!topology||!topology->find("brep_sha256"))return false;
             value=std::move(result);return true;
         }catch(...){return false;}
+    }
+    static bool decode(const std::string& expectedKey,const std::string& bytes,V& value){
+        std::string payload,digest;return checkedPayload(expectedKey,bytes,payload,digest)&&decodePayload(payload,value);
     }
     // Total bytes kept on disk. One metre-scale freeform document can need
     // hundreds of MiB, so the default retains several of them; 64 MiB..64 GiB.
@@ -172,7 +180,14 @@ struct NativeResultCache {
     bool lookup(V& value)const{
         if(entry.empty())return false;
         try{
-            if(!fs::is_regular_file(entry)||fs::file_size(entry)>maxEntry||!decode(key,read(entry),value))return false;
+            if(!fs::is_regular_file(entry)||fs::file_size(entry)>maxEntry)return false;
+            std::string payload,payloadDigest;if(!checkedPayload(key,read(entry),payload,payloadDigest))return false;
+            if(!NativeDecodedCache070::lookup(entry,payloadDigest,value)){
+                if(!decodePayload(payload,value))return false;
+                // Retention is optional. Memory pressure must not turn an
+                // already authenticated disk hit into another kernel rebuild.
+                try{NativeDecodedCache070::retain(entry,payloadDigest,value);}catch(...){}
+            }
             // Eviction removes the least recently used entries, not merely the
             // oldest written: a hit refreshes the entry's time.
             std::error_code ignored;fs::last_write_time(entry,fs::file_time_type::clock::now(),ignored);return true;

@@ -1,5 +1,11 @@
 # ARK roadmap A–G
 
+070A (**A.02/A.04/B.01/B.02/D.02/F.05 — Verificado no escopo local**): dirty dependency scheduling,
+AVX2 packed-position transforms, authenticated parsed-result RAM reuse, adaptive
+idle display residency and closed-Studio MCP lifecycle handling. Geometry,
+revision and active-process protections remain authoritative. See
+[compute contracts](COMPUTE_PERFORMANCE_070A.md) and [evidence](iterations/070A.md).
+
 069D (**A.02/A.03/A.04/B.02/D.02/D.05 — Verificado no escopo local**): pass-local exact projection
 reuse, explicit surface dependencies, reversible read/context sharing, staged
 persistent-memory recall and verified Obsidian memory/code canvas. Targeted

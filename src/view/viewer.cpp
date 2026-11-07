@@ -5157,6 +5157,7 @@ static Mat4 drawViewportScene059(bool interactive){
 }
 static double g_frameProfile064[3]{};
 static void drawFrame(HDC hdc){
+    if(g_displayMeshIdleBytes056)trimDisplayMeshCache056();
     const auto profileStart064=std::chrono::steady_clock::now();
     if(!g_preparingEdit){processDirectAuthoringPreview();processCableGuide035();processSurfaceEdit059();}
     static auto previous=std::chrono::steady_clock::now();auto now=std::chrono::steady_clock::now();

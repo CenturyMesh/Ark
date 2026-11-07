@@ -1,4 +1,5 @@
 #include "ark/compute.hpp"
+#include "compute_transform_070a.hpp"
 #include <chrono>
 #include <cstdlib>
 #include <mutex>
@@ -17,16 +18,14 @@ namespace {
 using Clock=std::chrono::steady_clock;
 double ms(Clock::time_point begin){return std::chrono::duration<double,std::milli>(Clock::now()-begin).count();}
 void cpu(const std::vector<f32>& in,std::vector<f32>& out,const Mat4& m){
-    out.resize(in.size());for(size_t i=0;i<in.size();i+=3){
-        double x=in[i],y=in[i+1],z=in[i+2];
-        for(int r=0;r<3;++r)out[i+r]=(f32)(m.m[r]*x+m.m[4+r]*y+m.m[8+r]*z+m.m[12+r]);
-    }
+    out.resize(in.size());packedTransformCpu070(in.data(),out.data(),in.size()/3,m);
 }
 struct Compute {
-    std::mutex mutex;bool attempted=false,available=false;std::string device,reason="Not initialized",last="CPU";
+    std::mutex mutex,statsMutex;bool attempted=false,available=false;std::string device,reason="Not initialized",last="CPU";
     double initMs=0,lastMs=0;size_t threshold=1048576;
     bool calibrated[3]={false,false,false},preferGpu[3]={false,false,false};
     double autoCpuMs[3]={0,0,0},autoGpuMs[3]={0,0,0};
+    void record(const char* backend,double elapsed){std::lock_guard<std::mutex> lock(statsMutex);last=backend;lastMs=elapsed;}
 #ifdef ARK_CUDA_RUNTIME
     HMODULE driver=nullptr,rtc=nullptr;CUcontext context=nullptr;CUmodule module=nullptr;CUfunction kernel=nullptr;
     CUdeviceptr input=0,output=0,matrix=0;size_t capacity=0;
@@ -83,7 +82,9 @@ struct Compute {
             if(input)cuMemFree_(input);
             if(output)cuMemFree_(output);
             input=output=0;capacity=0;
-            if(cuMemAlloc_(&input,bytes)||cuMemAlloc_(&output,bytes))return false;
+            if(cuMemAlloc_(&input,bytes)||cuMemAlloc_(&output,bytes)){
+                if(input)cuMemFree_(input);if(output)cuMemFree_(output);input=output=0;return false;
+            }
             capacity=bytes;
         }
         out.resize(in.size());unsigned long long count=in.size()/3;
@@ -110,7 +111,12 @@ Compute& state(){static Compute c;return c;}
 bool transformPacked(const std::vector<f32>& source,std::vector<f32>& output,const Mat4& m,ComputeMode mode){
     if(source.size()%3)return false;
     if(&source==&output){auto copy=source;return transformPacked(copy,output,m,mode);}
-    auto& c=state();std::lock_guard<std::mutex> lock(c.mutex);
+    auto& c=state();
+    if(mode==ComputeMode::CPU||(mode==ComputeMode::Auto&&source.size()/3<c.threshold)){
+        auto start=Clock::now();cpu(source,output,m);const auto elapsed=ms(start);
+        c.record("CPU",elapsed);return true;
+    }
+    std::unique_lock<std::mutex> lock(c.mutex);
     if(mode!=ComputeMode::CPU&&(mode==ComputeMode::GPU||source.size()/3>=c.threshold))c.init();
     auto begin=Clock::now();bool used=false;
 #ifdef ARK_CUDA_RUNTIME
@@ -133,20 +139,26 @@ bool transformPacked(const std::vector<f32>& source,std::vector<f32>& output,con
         }
         c.calibrated[bucket]=true;c.preferGpu[bucket]=gpuOkay&&c.autoGpuMs[bucket]<c.autoCpuMs[bucket]*.95;
         used=c.preferGpu[bucket];output=used?std::move(trial):std::move(reference);
-        c.last=used?"CUDA":"CPU";c.lastMs=ms(begin);return true;
+        c.record(used?"CUDA":"CPU",ms(begin));return true;
     }
     if(c.available&&mode!=ComputeMode::CPU&&!source.empty()&&(mode==ComputeMode::GPU||(vertices>=c.threshold&&c.preferGpu[bucket]))){
         used=c.gpu(source,output,m);if(!used){c.available=false;c.reason="CUDA operation failed; CPU fallback enabled";}
     }
 #endif
     if(mode==ComputeMode::GPU&&!used)return false;
-    if(!used)cpu(source,output,m);
-    c.last=used?"CUDA":"CPU";c.lastMs=ms(begin);return true;
+    if(!used){lock.unlock();cpu(source,output,m);c.record("CPU",ms(begin));return true;}
+    c.record("CUDA",ms(begin));return true;
 }
 arkjson::Value computeInfo(){
     auto& c=state();std::lock_guard<std::mutex> lock(c.mutex);c.init();using V=arkjson::Value;V r=V::makeObj();
     r.set("available",V::makeBool(c.available));r.set("device",V::makeStr(c.device));r.set("reason",V::makeStr(c.reason));
-    r.set("last_backend",V::makeStr(c.last));r.set("last_ms",V::makeNum(c.lastMs));r.set("initialization_ms",V::makeNum(c.initMs));
+    {std::lock_guard<std::mutex> stats(c.statsMutex);r.set("last_backend",V::makeStr(c.last));r.set("last_ms",V::makeNum(c.lastMs));}r.set("initialization_ms",V::makeNum(c.initMs));
+    r.set("cpu_backend",V::makeStr(packedTransformCpuBackend070()));r.set("avx2_available",V::makeBool(packedTransformAvx2Available070()));
+    r.set("ordinary_cpu_work_holds_gpu_mutex",V::makeBool(false));
+    r.set("calibration_serialized",V::makeBool(true));
+#ifdef ARK_CUDA_RUNTIME
+    r.set("gpu_transform_buffer_bytes",V::makeNum((double)(2*c.capacity+(c.matrix?sizeof(double)*16:0))));
+#endif
     r.set("auto_threshold_vertices",V::makeNum(c.threshold));r.set("operation",V::makeStr("packed mesh positions / f64 matrix arithmetic / f32 output"));
     r.set("auto_policy",V::makeStr("Calibrate complete CPU/GPU transfers per size bucket; GPU needs exact parity and at least 5 percent measured benefit"));
     V profiles=V::makeArr();for(int i=0;i<3;++i){V row=V::makeObj();row.set("bucket",V::makeNum(i));row.set("calibrated",V::makeBool(c.calibrated[i]));if(c.calibrated[i]){row.set("selected",V::makeStr(c.preferGpu[i]?"CUDA":"CPU"));row.set("cpu_median_ms",V::makeNum(c.autoCpuMs[i]));row.set("gpu_median_ms",V::makeNum(c.autoGpuMs[i]));}profiles.arr.push_back(std::move(row));}r.set("auto_profiles",std::move(profiles));return r;

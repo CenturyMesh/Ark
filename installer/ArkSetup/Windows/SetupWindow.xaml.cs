@@ -364,7 +364,7 @@ public partial class SetupWindow : ChromeWindow
                 break;
             case "error":
                 ErrorTitle.Text = S.FailedTitle;
-                ErrorText.Text = S.PrepareFailed(1) + "\nAnother ARK update or launch is in progress. Try again after it completes.";
+                ErrorText.Text = S.ArkRunningProcess(new ArkRunningProcess("ark-mcp.exe", 12345, "synthetic", true));
                 break;
         }
         return Surface;

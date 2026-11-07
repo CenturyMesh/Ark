@@ -64,8 +64,8 @@ public static class InstallEngine
         string dir = Paths.Normalize(opt.Dir);
         if (Paths.Problem(dir) is string why)
             throw new SetupException(S.FolderRefused(why), ExitCodes.BadArguments);
-        if (ArkProcesses.RunningFrom(dir))
-            throw new SetupException(S.ArkRunning, ExitCodes.ArkRunning);
+        if (ArkProcesses.FindRunningFrom(dir) is { } running)
+            throw new SetupException(S.ArkRunningProcess(running), ExitCodes.ArkRunning);
         Log.Info($"installing {ArkInfo.Title} ({ArkInfo.Version}) into {dir}");
 
         string temp = Path.Combine(Path.GetTempPath(), "ark-setup-" + Guid.NewGuid().ToString("N"));
@@ -380,32 +380,5 @@ public static class InstallEngine
         };
         Log.Info($"opening ARK: {psi.FileName} {psi.Arguments}");
         Process.Start(psi)?.Dispose();
-    }
-}
-
-/// <summary>ARK processes started from an install's versions folder.</summary>
-public static class ArkProcesses
-{
-    public static bool RunningFrom(string dir)
-    {
-        string versions = Path.Combine(Paths.Normalize(dir), "versions") + Path.DirectorySeparatorChar;
-        foreach (string name in ArkInfo.RuntimeProcesses)
-        {
-            foreach (var p in Process.GetProcessesByName(name))
-            {
-                try
-                {
-                    string? path = p.MainModule?.FileName;
-                    if (path != null && Path.GetFullPath(path).StartsWith(versions, StringComparison.OrdinalIgnoreCase))
-                    {
-                        Log.Info($"{name} (pid {p.Id}) is running from {path}");
-                        return true;
-                    }
-                }
-                catch (Exception) { }
-                finally { p.Dispose(); }
-            }
-        }
-        return false;
     }
 }
