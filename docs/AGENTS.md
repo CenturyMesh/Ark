@@ -148,7 +148,7 @@ authority. Load `agent_onboard{topic:"exploded_views"}` and see
 046B profile regions: a sketch with several non-touching closed loops extrudes
 (`native_solid` extrude, all end conditions; legacy extrude), revolves
 (`revolve_surface` solid:1) and sweeps (section, solid:1) as faces with holes by
-even-odd containment. Each feature publishes one solid; choose one of several
+even-odd containment. Default loops/single mode publishes one solid; choose one of several
 regions with `native.regions:[{entity}|{point}]` (format 48). Crossing,
 touching, branched, zero-area or self-intersecting loops and open chains
 without a selection reject naming the entities. See
@@ -762,6 +762,11 @@ Document/history storage grows subject to actual resource availability; the old 
 Mesh buffers, reports and BVHs are cached per session revision and selected feature ID. One geometry recompute handles the whole batch. Version-27 documents retain immutable iteration deltas and shared large source strings, with persistent undo/redo. 072A removes the old fixed node/replay/total-document quotas. Actual allocation, invalid data or storage failures still reject atomically. Existing documents acquire only their first observed baseline. Evaluated meshes and usage snapshots are excluded from the journal. See [persistent iterations](ITERATION_HISTORY.md). The old hand-written SIMD routines are retained as source archaeology but are disabled until ABI/numerical parity and profiling justify them.
 
 ## 0.3 additions
+
+The versioned sections below retain historical additions. Their tool counts,
+product versions and original default domains are historical, not the current
+capability ceiling. Current `agent_onboard`, tool schemas and the explicit
+074B/source59 contracts above govern new work.
 
 `assembly_info`, `tube_inspect`, `compute_info` and `compute_benchmark` bring the tool count to 17. `doc_apply` accepts `assembly.add`, `assembly.edit`, `assembly.remove`, and tube features with a top-level `bends` array. Mesh tools accept `node` for world-space instances or `id` for local part definitions, never both. Full contracts and examples are in [MECHANICAL.md](MECHANICAL.md). Version-2 `.ark` documents preserve the assembly hierarchy and bend programs. The compute backend is optional, with explicit capability reporting and CPU fallback.
 

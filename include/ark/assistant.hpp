@@ -43,7 +43,7 @@ struct AssistantConfig {
     std::string apiKeyEnv="OPENAI_API_KEY"; // Empty only for unauthenticated local servers.
     unsigned maxOutputTokens=8192; // Required per-response max_tokens for Messages; not a run budget.
     unsigned maxRounds=0; // Zero: continue until completion/cancel; optional bounded test/host mode.
-    std::string onboardingPack; // Static source-owned guide, inserted once per conversation.
+    std::string onboardingPack; // Static source-owned guide, refreshed when its build/content changes.
     std::string traceRole; // ARK_ASSISTANT_TRACE label, such as a team role id; never sent to providers.
     // Advertise specialist tools only after their onboarding topic is loaded
     // (agent_onboard or the preloaded guide); core tools are always offered.

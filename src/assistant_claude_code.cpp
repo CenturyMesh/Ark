@@ -1,3 +1,4 @@
+#include "ark/assistant_onboarding.hpp"
 #include "ark/assistant_claude_code.hpp"
 #include "ark/assistant_acp.hpp"
 #include "ark/assistant_connectors.hpp"
@@ -151,7 +152,7 @@ struct Session {
     void begin(const V& input){
         if(input.t==V::Str){need(!input.str.empty(),"Enter a Claude Code message first.");result.conversation.arr.push_back(message("user",input.str));}else{need(input.t==V::Arr&&!input.arr.empty(),"Claude Code requires a nonempty prompt/history.");result.conversation=input;}
         for(const auto& row:result.conversation.arr)if(str(row,"role")=="user")validateAssistantUserMessage(row);
-        if(!config.onboardingPack.empty()){bool loaded=false;for(const auto& row:result.conversation.arr)if(str(row,"role")=="developer"&&str(row,"content").rfind("ARK_PREBAKED_GUIDE_V1\n",0)==0)loaded=true;if(!loaded)result.conversation.arr.insert(result.conversation.arr.begin(),message("developer","ARK_PREBAKED_GUIDE_V1\n"+config.onboardingPack));}
+        refreshAssistantOnboarding075D(result.conversation,config.onboardingPack);
         for(const auto& function:assistantFunctionTools(tools).arr){auto entry=obj();const auto name=str(function,"name");need(allowed.insert(name).second,"Duplicate ARK tool in the Claude Code role catalog.");entry.set("name",V::makeStr(name));if(function.find("description"))entry.set("description",*function.find("description"));entry.set("inputSchema",*function.find("parameters"));for(const auto& source:tools.arr)if(str(source,"name")==name&&source.find("annotations"))entry.set("annotations",*source.find("annotations"));catalog.arr.push_back(entry);}
         for(const auto& row:result.conversation.arr){const auto content=str(row,"content");if(content.rfind("ARK_ACP_INSPECT_REQUIRED",0)==0)inspectionRequired=true;else if(content.rfind("ARK_ACP_INSPECTION_CONFIRMED",0)==0)inspectionRequired=false;if(str(row,"type")=="function_call_output"){V receipt;if(arkjson::parse(str(row,"output"),receipt))track(receipt);}}
     }

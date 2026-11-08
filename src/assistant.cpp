@@ -1,3 +1,4 @@
+#include "ark/assistant_onboarding.hpp"
 #include "ark/surface_edit_059c.hpp"
 #include "ark/assistant.hpp"
 #include "ark/project_memory_tools.hpp"
@@ -717,11 +718,7 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
     auto measuredEvent=[&](AssistantEvent::Kind kind,const std::string& text,V outcome=V{}){if(events){AssistantEvent event;event.kind=kind;event.text=text;event.usage=result.usage;event.performance=result.performance;event.providerOutcome=std::move(outcome);events(event);}};
     if(recalled.t==V::Str){require(!recalled.str.empty(),"Enter an assistant message first.");V message=V::makeObj();message.set("role",V::makeStr("user"));message.set("content",recalled);result.conversation.arr.push_back(std::move(message));}
     else {require(recalled.t==V::Arr&&!recalled.arr.empty(),"Assistant input must be a prompt or nonempty history array.");result.conversation=recalled;}
-    if(!config.onboardingPack.empty()){
-        const std::string marker="ARK_PREBAKED_GUIDE_V1\n";
-        bool loaded=false;for(const auto& item:result.conversation.arr)if(field(item,"role")=="developer"&&field(item,"content").rfind(marker,0)==0)loaded=true;
-        if(!loaded){V guide=V::makeObj();guide.set("role",V::makeStr("developer"));guide.set("content",V::makeStr(marker+config.onboardingPack));result.conversation.arr.insert(result.conversation.arr.begin(),std::move(guide));}
-    }
+    refreshAssistantOnboarding075D(result.conversation,config.onboardingPack);
     for(const auto& item:result.conversation.arr)if(field(item,"role")=="user")validateAssistantUserMessage(item);
     assistant_vision::prune(result.conversation,config.maxConversationBytes);
     // Retained evidence and the outgoing request are separate. Projecting a
