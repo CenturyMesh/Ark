@@ -1275,19 +1275,25 @@ V extrudeSurface(const V& request) {
     const V& profileValue = required(request, "profile");
     const auto frame = frameOf(profileValue);
     V regionReceipt;
-    const TopoDS_Shape regionBasis = regionBasis046B(request, profileValue, regionReceipt);
+    TopoDS_Shape regionBasis;
+    const bool walls=flag(request,"region_walls",false),solid=flag(request,"solid",false);
+    if(walls&&solid)throw std::runtime_error("Region wall extrusion must be non-solid");
+    if(walls&&profileValue.find("regions")){const auto faces=profileRegionFaces046B(profileValue,regionReceipt);std::vector<TopoDS_Shape> boundaries;for(const auto& face:faces)for(const auto& wire:shapes(face,TopAbs_WIRE))boundaries.push_back(wire);if(boundaries.empty())throw std::runtime_error("Selected profile region has no boundaries");regionBasis=boundaries.size()==1?boundaries.front():compound(boundaries);}
+    else regionBasis=regionBasis046B(request,profileValue,regionReceipt);
     const Profile profile = regionBasis.IsNull() ? profileOf(profileValue, false) : Profile{};
     const double distance = number(required(request, "distance"), "distance");
     if (std::abs(distance) <= kTolerance) throw std::runtime_error("extrude distance must exceed tolerance");
-    const bool solid = flag(request, "solid", false);
     const gp_Vec direction(frame[8] * distance, frame[9] * distance, frame[10] * distance);
-    BRepPrimAPI_MakePrism prism(regionBasis.IsNull() ? basisOf(profile, solid) : regionBasis, direction, true, true);
+    const double authoredOffset=request.find("start_offset")?number(required(request,"start_offset"),"start_offset"):0;
+    const bool symmetric=flag(request,"symmetric",false);const double offset=authoredOffset*(distance>0?1.:-1.)-(symmetric?distance*.5:0);
+    TopoDS_Shape basis=regionBasis.IsNull()?basisOf(profile,solid):regionBasis;if(offset!=0){gp_Trsf shift;shift.SetTranslation(gp_Vec(frame[8]*offset,frame[9]*offset,frame[10]*offset));basis=transformed(basis,shift);}
+    BRepPrimAPI_MakePrism prism(basis, direction, true, true);
     prism.Build();
     if (!prism.IsDone()) throw std::runtime_error("OCCT surface extrusion failed");
     TopoDS_Shape shape = prism.Shape();
     if (solid && properties(shape) < 0) shape.Reverse();
-    if (!regionBasis.IsNull()) return tag(shapeResult(shape, solid), "extrude_surface", "profile_regions", regionReceipt);
-    return tag(shapeResult(shape, solid), "extrude_surface");
+    auto output=!regionBasis.IsNull()?tag(shapeResult(shape,solid),"extrude_surface","profile_regions",regionReceipt):tag(shapeResult(shape,solid),"extrude_surface");
+    if(request.find("start_offset")||request.find("symmetric")||walls){V report=*output.find("report"),extrusion=V::makeObj();extrusion.set("start_offset_mm",V::makeNum(offset));extrusion.set("authored_start_offset_mm",V::makeNum(authoredOffset));extrusion.set("distance_mm",V::makeNum(distance));extrusion.set("symmetric",V::makeBool(symmetric));extrusion.set("region_walls",V::makeBool(walls));report.set("extrusion",std::move(extrusion));output.set("report",std::move(report));}return output;
 }
 
 V revolveSurface(const V& request) {

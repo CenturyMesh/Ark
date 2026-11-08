@@ -435,6 +435,37 @@ struct AuthoringSources {
     }
 };
 
+// Occurrence ancestry alone does not cover its solved pose: geometric mates
+// also read both endpoint bodies. Ordinary unpatterned assemblies have no other
+// geometry-reading pose machinery. Keep patterns and drag-chain followers on
+// the conservative path until their full producer closure is separately audited.
+static bool addSimpleAssemblyPoseSources073B(const Document& document,AuthoringSources& sources){
+    if(!document.dragChains.isNull()&&(document.dragChains.t!=arkjson::Value::Arr||!document.dragChains.arr.empty()))return false;
+    for(const auto& node:document.assembly)if(node.pattern.active)return false;
+    for(const auto& mate:document.mates)for(u64 endpoint:{mate.a,mate.b}){
+        const AssemblyNode* node=nullptr;for(const auto& candidate:document.assembly)if(candidate.id==endpoint){node=&candidate;break;}
+        if(!node)throw std::runtime_error("Assembly pose dependency endpoint not found");
+        if(node->feature)sources.producer(arkjson::Value::makeNum(double(node->feature)));
+    }
+    return true;
+}
+
+// These producers consume their authored profile/region recipe, the complete
+// named sketch/datum closure and declared source/limit bodies. They do not read
+// unrelated history rows. Keep their execution on the owner when named sources
+// are involved; this audit narrows invalidation, not worker snapshot authority.
+static bool scopedExtrusionDependencies073B(const Feature& feature){
+    if(feature.type==FeatureType::ExtrudeSurface||feature.type==FeatureType::RevolveSurface)return true;
+    if(feature.type!=FeatureType::NativeSolid)return false;
+    auto operation=feature.get("op");if(operation.empty())if(const auto* op=feature.nativeSpec.find("op"))operation=op->asStr();
+    return operation=="extrude";
+}
+struct ScopedExtrusionSources073B {
+    bool audited=false,occurrences=false;
+    std::set<u64> features;
+    std::set<std::string> named;
+};
+
 std::unordered_set<u64> assemblyFeatureDependencies(const Document& document,const Feature& feature){
     AuthoringSources sources(document);sources.collect(feature);return {sources.features.begin(),sources.features.end()};
 }
@@ -467,7 +498,8 @@ static bool deferredDatum(const Document& document,const std::string& name){
 // Once a projection's complete source closure has been published and solved,
 // repeating its native projection after unrelated history rows is redundant.
 // This state is deliberately pass-local: every edit, undo and reopen starts
-// fresh. Occurrence/mate-dependent projections retain the conservative path.
+// fresh. Simple occurrence projections also require every mate endpoint body;
+// patterns and drag-chain followers retain the conservative path.
 class DrivenSketchRefresh {
     struct Row {size_t index;bool audited=false,complete=false;std::set<u64> features;std::set<std::string> sketches;};
     Document& document;
@@ -484,7 +516,7 @@ public:
             Row row;row.index=i;
             try{
                 AuthoringSources sources(doc);sources.sketch(sketch.name);
-                row.audited=!sources.occurrences;row.features=std::move(sources.features);
+                row.audited=!sources.occurrences||addSimpleAssemblyPoseSources073B(doc,sources);row.features=std::move(sources.features);
                 for(const auto& key:sources.done)if(key.rfind("sketch:",0)==0&&key.substr(7)!=sketch.name){
                     const auto name=key.substr(7);const auto* source=doc.findSketch(name);
                     if(source)for(const auto& entity:source->sk.ents)if(entity.kind==SketchEnt::Project){row.sketches.insert(name);break;}
@@ -581,6 +613,7 @@ const std::vector<FeatureResult>& Document::recompute() {
     std::vector<std::vector<size_t>> dependencies(features.size());
     std::vector<std::string> authoringDependencyErrors(features.size());
     std::vector<bool> placementSensitive(features.size(),true);
+    std::vector<ScopedExtrusionSources073B> scopedSources(features.size());
     for(size_t i=0;i<features.size();++i){
         if(activeFeatures[i]&&!features[i].suppressed)try{
             AuthoringSources sources(*this);sources.collect(features[i]);if(sources.named)explicitInputs[i]=false;
@@ -592,6 +625,14 @@ const std::vector<FeatureResult>& Document::recompute() {
             if(features[i].type==FeatureType::NativeSolid&&!sources.occurrences&&!instanceProjection&&!geometricSupports)placementSensitive[i]=false;
             for(u64 source:sources.features)if(std::find(features[i].inputs.begin(),features[i].inputs.end(),source)==features[i].inputs.end())explicitInputs[i]=false;
             for(u64 source:sources.features){const auto found=indices.find(source);if(found==indices.end()||found->second>=i)throw std::runtime_error("Forward or cyclic associative feature dependency: "+features[i].name+" -> "+std::to_string(source));}
+            if(scopedExtrusionDependencies073B(features[i])){
+                bool audited=!sources.occurrences||addSimpleAssemblyPoseSources073B(*this,sources);
+                // A future endpoint with an origin-only mate can be legitimate;
+                // it cannot enter this earlier feature's generation key yet.
+                // Fall back instead of introducing a new authoring rejection.
+                if(audited)for(u64 source:sources.features){const auto found=indices.find(source);if(found==indices.end()||found->second>=i){audited=false;break;}}
+                if(audited){auto& scope=scopedSources[i];scope.audited=true;scope.occurrences=sources.occurrences;scope.features=std::move(sources.features);scope.named=std::move(sources.done);}
+            }
         }catch(const std::exception& error){authoringDependencyErrors[i]=error.what();explicitInputs[i]=false;}
         for(u64 input:features[i].inputs){auto found=indices.find(input);if(found==indices.end()||found->second>=i){explicitInputs[i]=false;continue;}dependencies[i].push_back(found->second);}
         if(!explicitInputs[i]){dependencies[i].clear();for(size_t j=0;j<i;++j)dependencies[i].push_back(j);}
@@ -603,14 +644,22 @@ const std::vector<FeatureResult>& Document::recompute() {
         // A feature that survived semantic source discovery cannot read named
         // sketches/datums/occurrences. Unrelated global projected geometry must
         // not add those resources to this feature's otherwise explicit key.
-        std::string own=source.dump(),context=explicitInputs[index]?std::string{}:scopedContext(f,own),dependenciesText=own+context,key=dependenciesText;
+        const auto& scope=scopedSources[index];std::string own=source.dump(),context;
+        if(scope.audited){
+            for(const auto& kind:std::initializer_list<std::pair<const char*,const char*>>{{"sketches","sketch:"},{"planes","datum:"}})if(const auto* rows=authored.find(kind.first))for(const auto& row:rows->arr){const auto* name=row.find("name");if(name&&scope.named.count(std::string(kind.second)+name->str))context+=row.dump();}
+            // World-projected profiles retain all authored assembly/mate context.
+            // A projection elsewhere in the drawing cannot contaminate a local
+            // profile's key. Unknown producer families retain the old fallback.
+            if(scope.occurrences)for(const char* kind:{"assembly","mates"})if(const auto* value=authored.find(kind))context+=value->dump();
+        }else if(!explicitInputs[index])context=scopedContext(f,own);
+        std::string dependenciesText=own+context,key=(scope.audited?"scoped-extrusion-073b:":"")+dependenciesText;
         for(const auto& param:params){
             if(param.name.empty())continue;size_t pos=0;bool used=false;
             while((pos=dependenciesText.find(param.name,pos))!=std::string::npos){auto ident=[](char c){return std::isalnum((unsigned char)c)||c=='_';};if((pos==0||!ident(dependenciesText[pos-1]))&&(pos+param.name.size()==dependenciesText.size()||!ident(dependenciesText[pos+param.name.size()]))){used=true;break;}pos+=param.name.size();}
             if(used)key+=param.name+"="+arkjson::Value::makeNum(param.value).dump();
         }
-        if(!explicitInputs[index]){key+=upstream;if(placementSensitive[index])for(const char* name:{"assembly","mates"})if(auto value=authored.find(name))key+=value->dump();if(geometricSupports)for(const auto& p:params)key+=p.name+"="+arkjson::Value::makeNum(p.value).dump();}
-        for(u64 input:f.inputs)key+=keys[input];
+        if(scope.audited){for(u64 input:scope.features)key+=keys[input];}
+        else {if(!explicitInputs[index]){key+=upstream;if(placementSensitive[index])for(const char* name:{"assembly","mates"})if(auto value=authored.find(name))key+=value->dump();if(geometricSupports)for(const auto& p:params)key+=p.name+"="+arkjson::Value::makeNum(p.value).dump();}for(u64 input:f.inputs)key+=keys[input];}
         for(double n:{tessOpt.tol,tessOpt.maxEdge,tessOpt.minAngleDeg,(double)tessOpt.maxLevels})key+=':'+arkjson::Value::makeNum(n).dump();return key;
     };
     std::vector<std::string> plannedKeys(features.size());std::vector<u64> plannedGenerations(features.size());

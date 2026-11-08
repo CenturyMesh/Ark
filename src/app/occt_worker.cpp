@@ -66,6 +66,7 @@ int runWorker(const fs::path& requestPath,const fs::path& resultPath){
         else if(op=="model_boolean_sequence"){result=booleanSequenceNative(field("request"));completedByProducer=true;}
         else if(op=="model_sheet")result=modelSheetNative(field("request"));
         else if(op=="model_solid"){const auto& model=field("request");result=model.find("op")&&model.find("op")->asStr()=="imported_cad"?modelImportedCadNative(model):modelSolidNative(model);completedByProducer=modelOperation!="tube_end_fit";}
+        else if(op=="profile_regions")result=inspectProfileRegionsNative073(field("profile"));
         else if(op=="inspect_imported_cad")result=inspectImportedCadNative(request);
         else if(op=="inspect_cad")result=inspectCadNative(request);
         else if(op=="import_cad")result=importCadNative(request);

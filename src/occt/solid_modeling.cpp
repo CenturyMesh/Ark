@@ -22,6 +22,7 @@
 #include <ShapeAnalysis_FreeBounds.hxx>
 #include <TopTools_HSequenceOfShape.hxx>
 #include <BRepAlgoAPI_Common.hxx>
+#include <BRepAlgoAPI_Check.hxx>
 #include <BRepGProp.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
@@ -276,13 +277,15 @@ std::pair<TopoDS_Face,std::vector<std::pair<std::string,TopoDS_Edge>>> profileFa
     } catch(const Standard_Failure& failure) {throw std::runtime_error(std::string("OCCT failed during ")+stage+": "+(failure.GetMessageString()?failure.GetMessageString():""));}
 }
 #include "profile_regions_046b.inl"
+#include "extrusion_073b.inl"
 TopoDS_Face extrusionFace(const V& request,const char* brepKey,const char* topologyKey,const char* referenceKey){
     const auto source=readBrep(word(request,brepKey));const auto names=inputRefs(request,brepKey,topologyKey,source);const auto name=word(request,referenceKey);
     for(const auto& ref:names)if(ref.name==name){if(ref.kind!="face"||!selectable(ref.status)||ref.shape.IsNull())throw std::runtime_error("Extrusion face is missing, split, deleted or ambiguous: "+name);return TopoDS::Face(ref.shape);}
     throw std::runtime_error("Unknown exact extrusion face: "+name);
 }
 TopoDS_Shape makeExtrusion(const V& request,std::vector<Ref>& refs,V* receipt=nullptr){
-    TopoDS_Face face;std::vector<std::pair<std::string,TopoDS_Edge>> edges;gp_Vec normal;V regionReceipt;
+    TopoDS_Face face;TopoDS_Wire openThin;std::vector<std::pair<std::string,TopoDS_Edge>> edges;gp_Vec normal;V regionReceipt,thinReceipt;
+    const bool thin=request.find("thickness")||request.find("thin_side");if(thin&&(!request.find("thickness")||!request.find("thin_side")))throw std::runtime_error("Thin extrusion requires explicit thickness and thin_side");
     const bool fromFace=request.find("source_face")!=nullptr;
     if(fromFace){
         face=extrusionFace(request,"input_brep","input_topology","source_face");BRepAdaptor_Surface surface(face);
@@ -292,11 +295,16 @@ TopoDS_Shape makeExtrusion(const V& request,std::vector<Ref>& refs,V* receipt=nu
         for(const auto& edge:shapes(face,TopAbs_EDGE))for(const auto& ref:names)if(ref.kind=="edge"&&selectable(ref.status)&&ref.name.find("@ark.")==std::string::npos&&ref.shape.IsSame(edge)){edges.push_back({ref.name,TopoDS::Edge(edge)});break;}
     }else{const auto& profile=need(request,"profile");
         if(profile.find("regions")){auto regions=profileRegions046B(profile);requireOneRegion046B(regions,"native extrude");face=regions.faces.front();edges=std::move(regions.edges);regionReceipt=std::move(regions.receipt);}
+        else if(thin){const auto curve=profileCurveNative(profile);const auto source=readBrep(word(curve,"brep_base64"));if(source.ShapeType()!=TopAbs_WIRE)throw std::runtime_error("Thin profile needs one exact wire");if(BRep_Tool::IsClosed(source)){auto base=profileFace(profile);face=base.first;edges=std::move(base.second);}else openThin=TopoDS::Wire(source);}
         else{auto source=profileFace(profile);face=source.first;edges=std::move(source.second);}
         auto m=frame(profile);normal=gp_Vec(m[8],m[9],m[10]);}
+    if(thin){TopoDS_Wire wire=openThin;if(wire.IsNull()){if(shapes(face,TopAbs_WIRE).size()!=1)throw std::runtime_error("Thin extrusion needs one boundary without holes; no loop is discarded");wire=BRepTools::OuterWire(face);}auto wall=thinProfile073(wire,normal,positive(request,"thickness"),word(request,"thin_side"),edges);face=wall.face;edges=std::move(wall.edges);thinReceipt=std::move(wall.report);}
     const double direction=optional(request,"direction",1),symmetric=optional(request,"symmetric",0);
     if(direction!=1&&direction!=-1)throw std::runtime_error("Extrusion direction must be +1 or -1");
     if(symmetric!=0&&symmetric!=1)throw std::runtime_error("Extrusion symmetric must be 0 or 1");
+    const double authoredOffset=optional(request,"start_offset",0);
+    auto shiftProfile=[&](double offset){if(offset==0)return;gp_Trsf shift;shift.SetTranslation(normal*offset);BRepBuilderAPI_Transform move(face,shift,true);if(!move.IsDone())throw std::runtime_error("Extrusion start translation failed");face=TopoDS::Face(move.Shape());for(auto& item:edges){auto changed=move.ModifiedShape(item.second);if(changed.IsNull())throw std::runtime_error("Extrusion start translation lost a boundary");item.second=TopoDS::Edge(changed);}};
+    shiftProfile(authoredOffset*direction);
     const std::string mode=request.find("mode")?word(request,"mode"):"distance";double depth=0;bool coverage=false;
     if(mode=="distance")depth=positive(request,"depth");
     else if(mode=="up_to_face"){
@@ -311,15 +319,15 @@ TopoDS_Shape makeExtrusion(const V& request,std::vector<Ref>& refs,V* receipt=nu
         BRepAlgoAPI_Cut uncovered(end,target);if(!uncovered.IsDone()||!shapes(uncovered.Shape(),TopAbs_FACE).empty())throw std::runtime_error("Limit face does not cover the complete extrusion cap");
         coverage=true;
     }else throw std::runtime_error("Extrusion mode must be distance or up_to_face");
-    const gp_Vec travel=normal*(depth*direction);const double offset=symmetric?-depth*direction*.5:0;
-    if(symmetric){gp_Trsf shift;shift.SetTranslation(normal*offset);BRepBuilderAPI_Transform move(face,shift,true);if(!move.IsDone())throw std::runtime_error("Symmetric source translation failed");face=TopoDS::Face(move.Shape());for(auto& item:edges){auto changed=move.ModifiedShape(item.second);if(changed.IsNull())throw std::runtime_error("Symmetric extrusion lost a source boundary");item.second=TopoDS::Edge(changed);}}
+    const gp_Vec travel=normal*(depth*direction);const double symmetricOffset=symmetric?-depth*direction*.5:0,offset=authoredOffset*direction+symmetricOffset;
+    shiftProfile(symmetricOffset);
     BRepPrimAPI_MakePrism op(face,travel);op.Build();if(!op.IsDone())throw std::runtime_error("Native prism failed");
     add(refs,"cap.start","face",op.FirstShape());add(refs,"cap.end","face",op.LastShape());
     for(auto& [name,edge]:edges){auto list=op.Generated(edge);int count=0;TopoDS_Shape generated;for(TopTools_ListIteratorOfListOfShape it(list);it.More();it.Next()){generated=it.Value();++count;}
         if(count==1)add(refs,"side."+name,"face",generated);else refs.push_back({"side."+name,"face",count?"split":"deleted",{}});
         add(refs,"edge.start."+name,"edge",op.FirstShape(edge));
         add(refs,"edge.end."+name,"edge",op.LastShape(edge));
-    }if(receipt){receipt->set("mode",V::makeStr(mode));receipt->set("depth_mm",V::makeNum(depth));receipt->set("direction",V::makeNum(direction));receipt->set("symmetric",V::makeBool(symmetric!=0));receipt->set("start_offset_mm",V::makeNum(offset));receipt->set("limit_cap_coverage_checked",V::makeBool(coverage));receipt->set("source",V::makeStr(fromFace?"exact_planar_face":"saved_sketch"));if(regionReceipt.t==V::Obj)receipt->set("profile_regions",regionReceipt);}
+    }if(receipt){if(thin)receipt->set("thin",thinReceipt);if(request.find("start_offset"))receipt->set("authored_start_offset_mm",V::makeNum(authoredOffset));receipt->set("mode",V::makeStr(mode));receipt->set("depth_mm",V::makeNum(depth));receipt->set("direction",V::makeNum(direction));receipt->set("symmetric",V::makeBool(symmetric!=0));receipt->set("start_offset_mm",V::makeNum(offset));receipt->set("limit_cap_coverage_checked",V::makeBool(coverage));receipt->set("source",V::makeStr(fromFace?"exact_planar_face":"saved_sketch"));if(regionReceipt.t==V::Obj)receipt->set("profile_regions",regionReceipt);}
     return op.Shape();
 }
 TopoDS_Shape cutter(const V& spec){
@@ -716,6 +724,12 @@ void requireValidIntermediate(const TopoDS_Shape& shape){
     if(shape.IsNull()||!BRepCheck_Analyzer(shape).IsValid())throw std::runtime_error("Native result failed B-rep validation");requireOnePositiveSolid(shape);
 }
 #include "drag_chain_link_050b.inl"
+}
+
+V inspectProfileRegionsNative073(const V& profile){
+    V out=V::makeObj();out.set("schema",V::makeStr("ark.extrusion-regions.073b"));out.set("authority",V::makeStr("exact_occt_planar_faces"));out.set("regions",V::makeArr());out.set("profile_closed",V::makeBool(false));out.set("needs_selection",V::makeBool(false));
+    try{auto found=profileRegions046B(profile,true);out.set("status",V::makeStr("closed"));out.set("profile_closed",V::makeBool(true));out.set("regions",*found.receipt.find("regions"));out.set("loops",*found.receipt.find("loops"));out.set("open_chains_ignored",*found.receipt.find("open_chains_ignored"));out.set("needs_selection",V::makeBool(found.faces.size()>1||!found.receipt.find("open_chains_ignored")->arr.empty()));return out;}
+    catch(const std::exception& error){const std::string reason=error.what();try{V plain=profile;plain.obj.erase(std::remove_if(plain.obj.begin(),plain.obj.end(),[](const auto& item){return item.first=="regions";}),plain.obj.end());const auto curve=profileCurveNative(plain);const auto wire=readBrep(word(curve,"brep_base64"));if(wire.ShapeType()==TopAbs_WIRE&&!BRep_Tool::IsClosed(wire)){out.set("status",V::makeStr("open"));out.set("open_chains_ignored",V::makeArr());return out;}}catch(...){}out.set("status",V::makeStr("invalid"));out.set("error",V::makeStr(reason));return out;}
 }
 
 V modelSolidNative(const V& request){

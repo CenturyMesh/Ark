@@ -4,6 +4,7 @@
 namespace ark::occt {
 // Exact solid operations. Inputs are encoded OCCT B-reps, never display meshes.
 arkjson::Value modelSolidNative(const arkjson::Value& request);
+arkjson::Value inspectProfileRegionsNative073(const arkjson::Value& profile);
 // A whole 2..16-input union/cut/common in one request; same result contract
 // as the final pairwise native_solid step.
 arkjson::Value booleanSequenceNative(const arkjson::Value& sequence);

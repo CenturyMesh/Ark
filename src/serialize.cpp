@@ -504,6 +504,19 @@ bool arcRecipeDocument(const Document& doc){
 }
 
 bool surfaceFeaturesRequire57(const Document& document){for(const auto& f:document.features)if(f.type==FeatureType::SurfaceEdit){const auto* op=f.nativeSpec.find("op");if(op&&(op->asStr()=="match_boundary"||op->asStr()=="curve_network"||op->asStr()=="multi_trim"||op->asStr()=="extend_trimmed"))return true;}return false;}
+bool extrusionFeaturesRequire58(const Document& document){
+    for(const auto& f:document.features){
+        if(f.type==FeatureType::NativeSolid&&featureOperation(f)=="extrude"){
+            if(f.p.count("start_offset")||f.nativeSpec.find("start_offset")||f.p.count("thickness")||f.nativeSpec.find("thickness")||f.nativeSpec.find("thin_side"))return true;
+        }
+        if(f.type==FeatureType::ExtrudeSurface){
+            const auto* walls=f.nativeSpec.find("region_walls");
+            if(f.p.count("start_offset")||f.p.count("symmetric")||(walls&&walls->t==Value::Bool&&walls->b))return true;
+        }
+    }
+    return false;
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -674,6 +687,7 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
     if(!doc.designVariants.isNull()){validateDesignVariants(doc.designVariants);r.set("design_variants",doc.designVariants);r.set("version",Value::makeNum(56));}
     for(const auto& drawing:doc.drawings)if(drawing.find("geometric_tolerances")){r.set("version",Value::makeNum(56));break;}
     if(surfaceFeaturesRequire57(doc))r.set("version",Value::makeNum(57));
+    if(extrusionFeaturesRequire58(doc))r.set("version",Value::makeNum(58));
     if(includeAudit&&includeHistory)iterationPersist(r,doc);
     canonicalDocumentKeys(r);
     std::string serialized=r.dump();
@@ -683,7 +697,7 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
 static bool documentFromValue(Value& v,Document& doc,std::string* err){
     auto fail=[&](const std::string& m){ if(err)*err=m; return false; };
     if(v.t!=Value::Obj) return fail("root must be object");
-    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || !std::isfinite(ver->num)||ver->num!=std::floor(ver->num)||ver->num<1||ver->num>57))
+    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || !std::isfinite(ver->num)||ver->num!=std::floor(ver->num)||ver->num<1||ver->num>58))
         return fail("unsupported document version");
     Value history;std::string historyError;if(!iterationExpand(v,history,historyError))return fail(historyError);
     if(const auto* nodes=v.find("assembly");nodes&&nodes->t==Value::Arr)for(const auto& node:nodes->arr)if(const auto* pattern=node.find("pattern");pattern&&pattern->find("carry_frame")){
@@ -967,6 +981,7 @@ static bool documentFromValue(Value& v,Document& doc,std::string* err){
     if(media044BNeedsVersion47(nd)){const auto* version=v.find("version");if(!version||version->num<47)return fail("044B procedural appearance patterns, animated GIF/video assets and stamp playback require document version 47");}
     if(surfaceFeaturesRequire57(nd)){const auto* version=v.find("version");if(!version||version->num<57)return fail("068B surface match/network/multi-trim/trim-preserving extension require document version 57");}
     if(profileRegions046BNeedsVersion48(nd)){const auto* version=v.find("version");if(!version||version->num<48)return fail("046B profile region selections (native.regions) require document version 48");}
+    if(extrusionFeaturesRequire58(nd)){const auto* version=v.find("version");if(!version||version->num<58)return fail("073B extrusion start offset, thin walls and region surfaces require document version 58");}
     if(motionReceiptsRequireDocumentVersion49(nd)){const auto* version=v.find("version");if(!version||version->num<49)return fail("049A baked motion receipts (frames_sha256, frames as derived data) require document version 49");}
     try{validateAppearanceAuthoring024B(nd,false);}catch(const std::exception& error){return fail(error.what());}
     try{validateDesignContainerWorkspace(nd);validateSkeletonAuthoring(nd);}catch(const std::exception& error){return fail(error.what());}

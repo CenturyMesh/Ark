@@ -84,13 +84,15 @@ void occurrencesStayConservative(){
       {"op":"sketch.set","name":"Indirect projection","sketch":{"plane":"XY","entities":[{"kind":"project","name":"edge","source_sketch":"Placed projection","source_entity":"edge","mode":"normal"}]}}
     ])");
     for(int i=0;i<4;++i)box(commands,i);apply(session,std::move(commands));
-    check(session.document.recomputeProjectionReused==0,"Occurrence dependencies must not enter pass-local completion reuse");
+    check(session.document.recomputeProjectionBuilds==4&&session.document.recomputeProjectionReused>0,"Simple occurrence closure should complete once per pass after all source bodies publish");
     apply(session,json(R"([{"op":"assembly.edit","id":1,"p":{"tx":8}}])"));
     for(const char* name:{"Placed projection","Indirect projection"}){
         const auto& points=session.document.findSketch(name)->sk.ents[0].projectionSamples;
         near(std::min(points.front().x,points.back().x),8,1e-7,"Occurrence pose edit must reach direct and indirect projections");
     }
-    check(session.document.recomputeProjectionReused==0,"Indirect occurrence path lost conservative refresh after edit");
+    check(session.document.recomputeProjectionBuilds==4&&session.document.recomputeProjectionReused>0,"Direct and indirect occurrence projections must refresh once after pose edit");
+    apply(session,json(R"([{"op":"assembly.edit","id":1,"pattern":{"type":"linear","count":2,"dx":20}}])"));
+    check(session.document.recomputeProjectionReused==0,"Patterned occurrence machinery must retain conservative repeated validation");
 }
 
 V surface(AgentSession& session,V args){args.set("expected_revision",V::makeNum(session.revision));return accepted(session.call("surface_control",args));}

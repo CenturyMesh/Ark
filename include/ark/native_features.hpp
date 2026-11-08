@@ -13,6 +13,8 @@ Body evaluateNativeFeature(const Feature& feature, const ExprEnv& env,
 // when a native operation or semantic reference needs it.
 void ensureNativeBody(Document& document, u64 feature, std::vector<Body>& bodies);
 arkjson::Value sketchEntityNativeProfile(Document& document,const std::string& sketch,const std::string& entity);
+// Read-only native planar region census for human extrusion selection.
+arkjson::Value sketchNativeRegions073B(Document& document,const std::string& sketch);
 Body evaluateExactLegacyOperation(const Feature& feature, const ExprEnv& env,
                                   Document& document, std::vector<Body>& preceding);
 bool validateImportedComponentDefinition(const Feature& feature,std::string& error);

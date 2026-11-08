@@ -154,6 +154,17 @@ touching, branched, zero-area or self-intersecting loops and open chains
 without a selection reject naming the entities. See
 [profile regions](PROFILE_REGIONS_046B.md).
 
+073B extrusion adds exact region discovery through
+`sketch_inspect{name,native_regions:true}`, directed `p.start_offset`, and thin
+walls through `p.thickness` with `native.thin_side`. Closed simple boundaries
+use `inside|outside|symmetric`; supported open paths use `left|right|symmetric`.
+The initial thin domain is straight polylines or a single arc/circle without
+holes; unsupported or invalid offsets reject explicitly. Multiple selected
+regions remain separate editable features in one atomic batch. Explicit union
+features can join them to selected targets; do not silently drop solids or
+retarget assembly occurrences. New semantics require document format 58.
+See [073B scope and verification](iterations/073B.md).
+
 046B motion clearance: `motion_info{name,clearance:{pairs|scope,threshold_mm,max_subdivisions}}`
 measures exact clearance over a fresh bake, read-only. A stale bake rejects
 with `MOTION_BAKE_STALE`; re-bake with `motion.bake` first. `continuous_certified`

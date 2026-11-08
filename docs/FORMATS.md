@@ -1,4 +1,19 @@
-# Current source semantics — conditional format 51
+# Current source semantics — conditional format 58
+
+073B selects source58 for extrusion start offsets, thin-wall extrusion and
+selected-region surface walls. Native solid extrusion uses `p.start_offset`
+(or its native numeric input), `p.thickness` and `native.thin_side`. Surface
+extrusion uses `p.start_offset`, `p.symmetric` and `native.region_walls:true`.
+These fields retain authored expressions and exact producer semantics. A source
+relabelled below 58 rejects instead of silently ignoring them, including history
+snapshots. Applications predating 073B reject source58.
+
+Recipes without these new fields retain their earlier required source version.
+Region selection and explicit unions reuse existing recipes; their human UI
+does not itself require source58. The physical container version is independent
+and retains the 072A conditional v1/v2/v3 rules. See [073B](iterations/073B.md).
+
+## Parametric component source semantics — conditional format 51
 
 053B selects source51 only when a project retains `parametric_components`:
 embedded immutable authored definitions, namespace/identity maps, configured

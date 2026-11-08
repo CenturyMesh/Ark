@@ -35,6 +35,7 @@ if(featureEditorPickingUiTest){
     g_activeSketch="First profile";g_picked.clear();const u64 beforeSketch=g_session.revision;stage=0;
     g_editorSmokeProbe=[&](HWND dialog){
         if(!failure.empty()){SendMessage(dialog,WM_COMMAND,2,0);return;}
+        char title[128]{};GetWindowTextA(dialog,title,128);if(std::string(title)=="Extrude / exact preview"){check(g_session.revision==beforeSketch,"Extrusion preview published before Apply");SendMessage(dialog,WM_COMMAND,failure.empty()?1:2,0);return;}
         if(stage==0){check(action(60001),"Browser sketch row is missing");}
         else if(stage==1){check(field(dialog,3)=="Picked profile","Browser click did not fill the open extrusion editor");check(g_session.revision==beforeSketch,"Sketch selection wrote the document");interactiveAction(100);check(g_dialog==dialog&&!g_dialogDone&&g_session.revision==beforeSketch,"Unrelated authoring action was allowed while editor open");g_dialogShot=shotPath+".browser-sketch.png";}
         else SendMessage(dialog,WM_COMMAND,failure.empty()?1:2,0);

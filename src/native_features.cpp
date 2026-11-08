@@ -10,6 +10,8 @@
 #include "ark/spatial_sketch.hpp"
 #include "ark/modeling_031b.hpp"
 #include "ark/curve_pattern_044b.hpp"
+#include "ark/serialize.hpp"
+#include "ark/iteration_history.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -223,7 +225,7 @@ V numericNative(const V& value, const ExprEnv& env, const std::string& key = {})
         return value;
     }
     if (value.t == V::Str) {
-        if (key == "grain_axis" || key == "source_vertex" || key == "source_topology" || key == "kind" || key == "join" || key == "sketch" || key == "name" || key == "op" || key == "reference" || key == "second_reference" || key == "mode" || key == "end" || key == "edges" || key == "faces" || key == "face" || key == "source_face" || key == "limit_face" || key == "plane" || key == "keep" || key == "selection" || key == "direction" || key == "axis" || key == "neutral" || key == "reference_face" || key == "tool_face" || key == "equivalence" || key == "interpolation" || key == "references" || key == "pitch_mode" || key == "orientation" || key == "support_faces" || key == "reference_scheme" || key == "entity") return value;
+        if (key == "thin_side" || key == "grain_axis" || key == "source_vertex" || key == "source_topology" || key == "kind" || key == "join" || key == "sketch" || key == "name" || key == "op" || key == "reference" || key == "second_reference" || key == "mode" || key == "end" || key == "edges" || key == "faces" || key == "face" || key == "source_face" || key == "limit_face" || key == "plane" || key == "keep" || key == "selection" || key == "direction" || key == "axis" || key == "neutral" || key == "reference_face" || key == "tool_face" || key == "equivalence" || key == "interpolation" || key == "references" || key == "pitch_mode" || key == "orientation" || key == "support_faces" || key == "reference_scheme" || key == "entity") return value;
         return V::makeNum(expressionValue(value.str, env));
     }
     if (value.t == V::Arr) {
@@ -246,11 +248,11 @@ V profileArgument(const Feature& feature, const ExprEnv& env, Document& document
 // the unchanged legacy payload (byte-identical requests). Several closed loops
 // or an authored selection add the region contract; the OCCT worker resolves
 // loops, containment depth and seeds from exact edges.
-V regionProfileFromSketch(Document& document, const std::string& name, const V* regions, const ExprEnv& env) {
+V regionProfileFromSketch(Document& document, const std::string& name, const V* regions, const ExprEnv& env,bool forceRegions=false) {
     std::vector<size_t> origins;
     V profile = profileFromSketch(document, name, nullptr, &origins);
     const NamedSketch* named = document.findSketch(name);
-    if (!regions) {
+    if (!regions&&!forceRegions) {
         size_t components = 1;
         try { components = sketchProfileComponents(named->sk); } catch (const std::exception&) {}
         if (components < 2) return profile;
@@ -520,6 +522,7 @@ V surfaceRequest(const Feature& feature, const ExprEnv& env, Document& document,
             request.set("profile", numericNative(*profile, env));
         } else request.set("profile", regionProfileFromSketch(document, feature.get("sketch"), regions, env));
         request.set("solid", V::makeBool(bitParam(feature, env, "solid", 0)));
+        if(const auto* walls=feature.nativeSpec.find("region_walls")){if(walls->t!=V::Bool||walls->b&&(revolve||bitParam(feature,env,"solid",0)))throw std::runtime_error("region_walls applies only to non-solid extrude_surface");if(walls->b)request.set("region_walls",*walls);}
         if (revolve) {
             const double angle = param(feature, env, "angle");
             if (!(angle > 0.0 && angle <= 360.0)) throw std::runtime_error("revolve angle must be in (0, 360] degrees");
@@ -535,6 +538,8 @@ V surfaceRequest(const Feature& feature, const ExprEnv& env, Document& document,
             const double distance = param(feature, env, "distance");
             if (std::abs(distance) <= 1.0e-6) throw std::runtime_error("extrude distance must exceed 1e-6 mm");
             request.set("distance", V::makeNum(distance));
+            if(feature.p.count("start_offset"))request.set("start_offset",V::makeNum(param(feature,env,"start_offset")));
+            if(feature.p.count("symmetric"))request.set("symmetric",V::makeBool(bitParam(feature,env,"symmetric",0)));
         }
     } else if (feature.type == FeatureType::SurfaceEdit) {
         const std::string editOp=required(feature.nativeSpec,"op").asStr();
@@ -1261,6 +1266,12 @@ V rectTubeSolid(const Feature& feature, const ExprEnv& env) {
     return solidWorker(std::move(model));
 }
 } // namespace
+
+arkjson::Value sketchNativeRegions073B(Document& document,const std::string& name){
+    const auto* sketch=document.findSketch(name);if(!sketch)throw std::runtime_error("Sketch not found");auto profile=regionProfileFromSketch(document,name,nullptr,document.buildEnv(),true);V request=V::makeObj();request.set("operation",V::makeStr("profile_regions"));request.set("profile",std::move(profile));auto report=nativeWorkerRequest(request);
+    if(auto* rows=report.find("regions"))for(auto& row:const_cast<V*>(rows)->arr){const auto* index=row.find("seed_source_index");V seed=V::makeObj();bool named=false;if(index&&index->t==V::Num&&index->num>=0&&index->num<sketch->sk.ents.size()){const auto& entity=sketch->sk.ents[(size_t)index->num];if(!entity.name.empty()&&std::count_if(sketch->sk.ents.begin(),sketch->sk.ents.end(),[&](const auto& item){return item.name==entity.name;})==1){seed.set("entity",V::makeStr(entity.name));named=true;}}if(!named)if(const auto* point=row.find("seed_point");point&&point->t==V::Arr)seed.set("point",*point);row.set("selectable",V::makeBool(!seed.obj.empty()));row.set("seed",std::move(seed));row.set("seed_tracks_entity",V::makeBool(named));}
+    report.set("source_sketch_sha256",V::makeStr(iterationSha256(sketchToJson(sketch->sk))));return report;
+}
 
 arkjson::Value surfaceRequestForInspection068B(Document& document,const Feature& feature){
     if(feature.type!=FeatureType::Loft)throw std::runtime_error("Surface inspection request supports Loft only");

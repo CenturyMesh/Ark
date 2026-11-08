@@ -20,7 +20,7 @@ void requireOneRegion046B(const ProfileRegions046B& regions,const std::string& c
     throw std::runtime_error("Profile selects "+std::to_string(regions.faces.size())+" separate regions (outer loops: "+outers+"); "+consumer+" publishes one solid. Select one region with native.regions:[{entity:name}|{point:[x,y]}] or author each region as its own feature");
 }
 
-ProfileRegions046B profileRegions046B(const V& profile){
+ProfileRegions046B profileRegions046B(const V& profile,bool inspection073=false){
     const char* stage="profile regions setup";
     try{
     const auto m=frame(profile);const V& entities=need(profile,"entities");
@@ -109,7 +109,7 @@ ProfileRegions046B profileRegions046B(const V& profile){
     stage="profile regions selection";
     const V* select=spec.find("select");std::vector<int> chosen(outers.size(),-1);
     if(!select){
-        if(!openChains.empty())throw std::runtime_error("Profile mixes closed loops with open chains ("+regionEntities046B(edges,openChains.front())+"); close them, mark them construction, or select regions with native.regions");
+        if(!inspection073&&!openChains.empty())throw std::runtime_error("Profile mixes closed loops with open chains ("+regionEntities046B(edges,openChains.front())+"); close them, mark them construction, or select regions with native.regions");
         for(size_t r=0;r<outers.size();++r)chosen[r]=-2;
     }else{
         if(select->t!=V::Arr||select->arr.empty()||select->arr.size()>64)throw std::runtime_error("Profile region selection needs 1..64 seeds");
@@ -154,6 +154,15 @@ ProfileRegions046B profileRegions046B(const V& profile){
             face=adder.Face();
             if(!BRepCheck_Analyzer(face).IsValid())throw std::runtime_error("Profile region "+outer.entities+" with its holes failed exact face validation");
             const double area=std::abs(properties(face,'a'));if(std::abs(area-expected)>std::max(1e-9,outer.area*1e-9))throw std::runtime_error("Profile region "+outer.entities+" area "+regionNumber046B(area)+" mm2 disagrees with outer minus holes "+regionNumber046B(expected)+" mm2");
+        }
+        if(inspection073){
+            auto& view=regionRows.arr.back();view.set("label",V::makeStr(outer.entities));view.set("hole_count",V::makeNum(holes.size()));
+            for(const auto& step:outer.walk){const int source=edges[step.first].source;if(source<0)continue;bool unique=true;for(size_t other=0;other<loops.size();++other)if(other!=outers[r])for(const auto& edge:loops[other].walk)if(edges[edge.first].source==source)unique=false;if(unique){view.set("seed_source_index",V::makeNum(source));break;}}
+            std::vector<TopoDS_Shape> boundaries;for(const auto& edge:shapes(face,TopAbs_EDGE))boundaries.push_back(edge);const auto boundary=compound(boundaries);
+            auto inside=[&](const gp_Pnt& point){BRepClass_FaceClassifier where(face,point,1e-7);if(where.State()!=TopAbs_IN)return false;BRepExtrema_DistShapeShape distance(BRepBuilderAPI_MakeVertex(point).Vertex(),boundary);return distance.IsDone()&&distance.Value()>std::max(1e-6,outer.tolerance);};
+            GProp_GProps property;BRepGProp::SurfaceProperties(face,property);gp_Pnt seed=property.CentreOfMass();bool found=inside(seed);double x0,y0,z0,x1,y1,z1;outer.box.Get(x0,y0,z0,x1,y1,z1);
+            for(int grid:{17,65}){for(int y=1;y<grid&&!found;++y)for(int x=1;x<grid&&!found;++x){gp_Pnt candidate(x0+(x1-x0)*x/grid,y0+(y1-y0)*y/grid,0);if(inside(candidate)){seed=candidate;found=true;}}if(found)break;}
+            if(found){V point=V::makeArr();point.arr={V::makeNum(seed.X()),V::makeNum(seed.Y())};view.set("seed_point",std::move(point));}
         }
         stage="profile regions frame transform";
         BRepBuilderAPI_Transform move(face,transform(m),true);if(!move.IsDone())throw std::runtime_error("Profile region frame transform failed");

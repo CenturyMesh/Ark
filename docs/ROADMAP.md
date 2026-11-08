@@ -1,6 +1,13 @@
 # ARK roadmap A–G
 
-072A (**A.02/A.03/A.04/B.01/B.02/D.02 — Parcial**): removes fixed per-edit,
+073B (**A.04/B.01/B.02/B.03/B.04/D.02 — Verificado no escopo local**): granular
+mate/sketch invalidation and an exact extrusion workflow with region selection,
+start offset, thin walls and explicit union targets. Matched pose/sketch edits
+evaluate 1 instead of 13 features and take about 11 ms instead of 123–124 ms.
+All 200 native/script suites and ten affected Studio flows passed. F.03 packaging
+remains in progress. See [073B evidence and limits](iterations/073B.md).
+
+072A (**A.02/A.03/A.04/B.01/B.02/D.02/F.03 — Verificado no escopo local**): removes fixed per-edit,
 logical-document and history-growth quotas while retaining revisions, atomic
 publication, complete authored history and exact validation. Prepared-candidate
 retention uses an adaptive soft target; external reads account for actual-memory
