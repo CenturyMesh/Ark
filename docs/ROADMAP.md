@@ -5,7 +5,8 @@ logical-document and history-growth quotas while retaining revisions, atomic
 publication, complete authored history and exact validation. Prepared-candidate
 retention uses an adaptive soft target; external reads account for actual-memory
 headroom and expansion before allocation. Conditional physical container v3
-supports larger source/history without changing the semantic model format. All 198 native/script contracts and four affected Studio suites passed; see
+supports larger source/history without changing the semantic model format. All 198 native/script contracts, four affected Studio suites and isolated
+071D-to-072A installer upgrade/rollback checks passed; see
 [growing-edit contracts](GROWABLE_EDITING_072A.md).
 
 071D (**A.02/A.04/B.01/D.02/F.03 — Verificado no escopo local**): actionable Claude Code terminal
