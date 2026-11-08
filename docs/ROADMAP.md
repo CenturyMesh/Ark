@@ -1,5 +1,11 @@
 # ARK roadmap A–G
 
+075D (**A.03/D.02/F.03 — Verificado no escopo local**): current structured agent
+guides, qualified legacy defaults, refreshed static guides in existing chats
+across HTTP/Claude Code/ACP, and valid Single-agent preload JSON. Eleven focused
+suites and isolated074B-to-075D upgrade/rollback passed. The preexisting Team
+review-button UI failure is recorded separately in [075D evidence](iterations/075D.md).
+
 074B (**A.02/A.03/A.04/B.01/B.02/B.03/B.04/D.02/F.03 — Verificado no escopo local**):
 incremental feature families, independent mate groups, typed transactions,
 coalesced previews, validated body reuse and batched Booleans; exact intersecting
