@@ -1,6 +1,6 @@
 # 072A: retain a validated edit without a fixed memory ceiling
 
-**A.04 / B.01 / D.02 — Em curso.**
+**A.04 / B.01 / D.02 — Verificado no escopo local.**
 
 The former 128 MiB limit could reject or discard an already validated preview,
 its background transfer, or a manufacturing comparison. 072A removes that
@@ -69,3 +69,8 @@ The allocation exception is injected at the async preparation hook, not caused
 by exhausting the machine's physical RAM. This does not qualify arbitrary
 geometry construction or promise unlimited available memory. The test uses no
 user drawing and does not mutate an installed Studio session.
+
+The focused native run passed **65 checks** in `candidate-retention-072a` and
+**38 checks** in `candidate_storage-032d`. The receipt is
+`out/release-068B/dev-tests-20261108T111113763Z.xml`. The wider release verification
+and the separate large-history UI checks belong to the 072A iteration evidence.
