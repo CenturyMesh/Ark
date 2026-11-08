@@ -359,8 +359,10 @@ public:
     std::vector<Body>* evaluatingBodies=nullptr; // transient earlier history during recompute
     std::vector<FeatureResult> lastResults;
     f64 recomputeMs = 0;
-    struct EvaluationCacheEntry { std::string key; std::shared_ptr<const Body> body; u64 generation=0; size_t tris=0; };
+    struct EvaluationFingerprints {std::string definition,context,parameters,dependencies,tessellation;};
+    struct EvaluationCacheEntry { std::string key; std::shared_ptr<const Body> body; u64 generation=0; size_t tris=0; EvaluationFingerprints fingerprints; };
     std::unordered_map<u64,EvaluationCacheEntry> evaluationCache;
+    arkjson::Value evaluationDiagnostics; // derived last-action reasons/counters, never serialized as authoring
     // Runtime receipt for optional .ark derived results. Never authoring/history
     // or proof that staged native geometry has completed kernel validation.
     arkjson::Value derivedGeometryStatus;

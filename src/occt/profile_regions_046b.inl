@@ -20,7 +20,9 @@ void requireOneRegion046B(const ProfileRegions046B& regions,const std::string& c
     throw std::runtime_error("Profile selects "+std::to_string(regions.faces.size())+" separate regions (outer loops: "+outers+"); "+consumer+" publishes one solid. Select one region with native.regions:[{entity:name}|{point:[x,y]}] or author each region as its own feature");
 }
 
+#include "profile_arrangement_074b.inl"
 ProfileRegions046B profileRegions046B(const V& profile,bool inspection073=false){
+    if(const auto* spec=profile.find("regions"))if(const auto* mode=spec->find("mode")){if(mode->t!=V::Str||mode->str!="arrangement")throw std::runtime_error("Unknown exact profile region mode");return profileArrangement074(profile,inspection073);}
     const char* stage="profile regions setup";
     try{
     const auto m=frame(profile);const V& entities=need(profile,"entities");

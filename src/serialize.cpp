@@ -1,4 +1,5 @@
 #include "ark/document_resources_072a.hpp"
+#include <limits>
 #include "ark/design_containers.hpp"
 #include "ark/parametric_components.hpp"
 #include "ark/parametric_programs.hpp"
@@ -517,10 +518,20 @@ bool extrusionFeaturesRequire58(const Document& document){
     return false;
 }
 
+bool geometryFeaturesRequire59(const Document& document){
+    for(const auto& feature:document.features){const auto& native=feature.nativeSpec;
+        if(feature.type==FeatureType::NativeSolid&&(featureOperation(feature)=="reference_anchor"||featureOperation(feature)=="body_select"))return true;
+        for(const char* key:{"region_mode","result_mode","boolean_mode","thin_method","thin_join","basis_mode","u_closed","v_closed","radius_domain"})if(native.find(key))return true;
+        if((feature.type==FeatureType::OffsetSurface||feature.type==FeatureType::Thicken)&&native.find("method"))return true;
+        if(feature.type==FeatureType::Loft)if(const auto* controls=native.find("controls"))if(const auto* alignment=controls->find("section_alignment"))for(const auto& row:alignment->arr)if(row.find("seam_parameter"))return true;
+    }
+    return false;
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
-std::string documentToJson(const Document& doc,bool includeAudit,bool includeHistory){
+static Value buildDocumentValue(const Document& doc,bool includeAudit,bool includeHistory){
     std::string usageError;if(!validateUsageLedger(doc.usage,usageError))throw std::runtime_error(usageError);
     validateAppearanceAuthoring024B(doc,false);
     Value r=Value::makeObj();
@@ -688,16 +699,37 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
     for(const auto& drawing:doc.drawings)if(drawing.find("geometric_tolerances")){r.set("version",Value::makeNum(56));break;}
     if(surfaceFeaturesRequire57(doc))r.set("version",Value::makeNum(57));
     if(extrusionFeaturesRequire58(doc))r.set("version",Value::makeNum(58));
+    if(geometryFeaturesRequire59(doc))r.set("version",Value::makeNum(59));
     if(includeAudit&&includeHistory)iterationPersist(r,doc);
     canonicalDocumentKeys(r);
-    std::string serialized=r.dump();
-    return serialized;
+    return r;
 }
+
+std::string documentToJson(const Document& doc,bool includeAudit,bool includeHistory){return buildDocumentValue(doc,includeAudit,includeHistory).dump();}
+
+namespace {
+size_t checkedValueBytes074(Value& value,unsigned depth=0){
+    if(depth>=64)throw std::runtime_error("Document nesting exceeds the JSON depth limit of 64");
+    size_t total=0;auto add=[&](size_t n){if(n>std::numeric_limits<size_t>::max()-total)throw std::runtime_error("Document byte count overflow");total+=n;};
+    auto quoted=[&](const std::string& text){add(2);for(unsigned char c:text)add(c=='"'||c=='\\'||c=='\n'||c=='\r'||c=='\t'?2:c<32?6:1);};
+    switch(value.t){
+    case Value::Null:return 4;
+    case Value::Bool:return value.b?4:5;
+    case Value::Num:if(!std::isfinite(value.num)){value=Value{};return 4;}if(value.num==0)value.num=0;return value.dump().size();
+    case Value::Str:quoted(value.str);return total;
+    case Value::Arr:add(2);if(!value.arr.empty())add(value.arr.size()-1);for(auto& item:value.arr)add(checkedValueBytes074(item,depth+1));return total;
+    case Value::Obj:add(2);if(!value.obj.empty())add(value.obj.size()-1);for(size_t i=0;i<value.obj.size();++i){auto& item=value.obj[i];if(i&&value.obj[i-1].first==item.first)throw std::runtime_error("Duplicate document object key");quoted(item.first);add(1);add(checkedValueBytes074(item.second,depth+1));}return total;
+    default:throw std::runtime_error("Invalid document value type");
+    }
+}
+}
+Value documentValue(const Document& doc,bool includeAudit,bool includeHistory,size_t* encodedBytes){auto value=buildDocumentValue(doc,includeAudit,includeHistory);const auto bytes=checkedValueBytes074(value);if(encodedBytes)*encodedBytes=bytes;return value;}
+size_t documentPersistenceSize(const Document& doc){auto value=buildDocumentValue(doc,true,true);return checkedValueBytes074(value);}
 
 static bool documentFromValue(Value& v,Document& doc,std::string* err){
     auto fail=[&](const std::string& m){ if(err)*err=m; return false; };
     if(v.t!=Value::Obj) return fail("root must be object");
-    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || !std::isfinite(ver->num)||ver->num!=std::floor(ver->num)||ver->num<1||ver->num>58))
+    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || !std::isfinite(ver->num)||ver->num!=std::floor(ver->num)||ver->num<1||ver->num>59))
         return fail("unsupported document version");
     Value history;std::string historyError;if(!iterationExpand(v,history,historyError))return fail(historyError);
     if(const auto* nodes=v.find("assembly");nodes&&nodes->t==Value::Arr)for(const auto& node:nodes->arr)if(const auto* pattern=node.find("pattern");pattern&&pattern->find("carry_frame")){
@@ -981,6 +1013,7 @@ static bool documentFromValue(Value& v,Document& doc,std::string* err){
     if(media044BNeedsVersion47(nd)){const auto* version=v.find("version");if(!version||version->num<47)return fail("044B procedural appearance patterns, animated GIF/video assets and stamp playback require document version 47");}
     if(surfaceFeaturesRequire57(nd)){const auto* version=v.find("version");if(!version||version->num<57)return fail("068B surface match/network/multi-trim/trim-preserving extension require document version 57");}
     if(profileRegions046BNeedsVersion48(nd)){const auto* version=v.find("version");if(!version||version->num<48)return fail("046B profile region selections (native.regions) require document version 48");}
+    if(geometryFeaturesRequire59(nd)){const auto* version=v.find("version");if(!version||version->num<59)return fail("074B region, multibody, advanced surface and fillet recipes require document version 59");}
     if(extrusionFeaturesRequire58(nd)){const auto* version=v.find("version");if(!version||version->num<58)return fail("073B extrusion start offset, thin walls and region surfaces require document version 58");}
     if(motionReceiptsRequireDocumentVersion49(nd)){const auto* version=v.find("version");if(!version||version->num<49)return fail("049A baked motion receipts (frames_sha256, frames as derived data) require document version 49");}
     try{validateAppearanceAuthoring024B(nd,false);}catch(const std::exception& error){return fail(error.what());}
@@ -988,6 +1021,8 @@ static bool documentFromValue(Value& v,Document& doc,std::string* err){
     doc=std::move(nd);
     return true;
 }
+
+bool cloneDocumentAuthoring(const Document& source,Document& target,std::string* err){try{auto value=documentValue(source,true,false);return documentFromValue(value,target,err);}catch(const std::exception& e){if(err)*err=e.what();return false;}}
 
 bool documentFromJson(const std::string& json,Document& doc,std::string* err){
     try{checkDocumentJsonRead072(json);

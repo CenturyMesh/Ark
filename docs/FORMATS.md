@@ -1,4 +1,15 @@
-# Current source semantics — conditional format 58
+# Current source semantics — conditional format 59
+
+074B selects source59 for explicit region arrangements, multibody retention,
+all-argument Boolean operations, native thin offsets/joins, contour radius laws,
+point-anchored references and body selection. Surface compatibility/closed-network
+flags, explicit offset methods and parametric loft seam alignment also require
+source59. Their individual contracts are linked from [074B](iterations/074B.md).
+Older runtimes reject those semantics rather than ignoring the new fields.
+Existing recipes retain their earlier behavior and required source format.
+Physical container v1/v2/v3 remains independent.
+
+## Extrusion source semantics — conditional format 58
 
 073B selects source58 for extrusion start offsets, thin-wall extrusion and
 selected-region surface walls. Native solid extrusion uses `p.start_offset`

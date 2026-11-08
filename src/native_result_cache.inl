@@ -191,7 +191,7 @@ struct NativeResultCache {
             }
             // Eviction removes the least recently used entries, not merely the
             // oldest written: a hit refreshes the entry's time.
-            std::error_code ignored;fs::last_write_time(entry,fs::file_time_type::clock::now(),ignored);return true;
+            std::error_code ignored;fs::last_write_time(entry,fs::file_time_type::clock::now(),ignored);identifyNativeResult074(key,payloadDigest,producerIdentity);return true;
         }catch(...){return false;}
     }
     V identified(V result)const{
@@ -206,10 +206,10 @@ struct NativeResultCache {
         if(entry.empty()||!local||local->t!=V::Bool||!local->b||result.find("error")||!result.find("brep_base64"))return;
         fs::path temporary;
         try{
-            const auto payload=result.dump();if(payload.size()+148>maxEntry)return;
+            const auto payload=result.dump();if(payload.size()+148>maxEntry)return;const auto payloadDigest=nativeCacheDigest(payload);identifyNativeResult074(key,payloadDigest,producerIdentity);
             fs::create_directories(directory);
             static std::atomic<unsigned long long> sequence{0};temporary=entry;temporary+="."+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+"-"+std::to_string(sequence++)+".tmp";
-            {std::ofstream file(temporary,std::ios::binary|std::ios::trunc);file<<"ARK-NATIVE-CACHE1\n"<<key<<'\n'<<nativeCacheDigest(payload)<<'\n';file.write(payload.data(),(std::streamsize)payload.size());if(!file)throw std::runtime_error("Native cache write failed");}
+            {std::ofstream file(temporary,std::ios::binary|std::ios::trunc);file<<"ARK-NATIVE-CACHE1\n"<<key<<'\n'<<payloadDigest<<'\n';file.write(payload.data(),(std::streamsize)payload.size());if(!file)throw std::runtime_error("Native cache write failed");}
 #ifdef _WIN32
             if(!MoveFileExW(temporary.c_str(),entry.c_str(),MOVEFILE_REPLACE_EXISTING))throw std::runtime_error("Native cache publication failed");
 #else

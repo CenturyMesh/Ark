@@ -15,6 +15,12 @@ namespace ark {
 // Full-document JSON (params + sketches + features; no evaluation state).
 std::string documentToJson(const Document& doc,bool includeAudit=true,bool includeHistory=true);
 
+// Canonical, strictly checked equivalent of parsing documentToJson, without
+// materializing/reparsing the intermediate text. No evaluated geometry included.
+arkjson::Value documentValue(const Document& doc,bool includeAudit=true,bool includeHistory=true,std::size_t* encodedBytes=nullptr);
+bool cloneDocumentAuthoring(const Document& source,Document& target,std::string* err=nullptr);
+std::size_t documentPersistenceSize(const Document& doc);
+
 // Replace doc contents from JSON. Returns false + err on malformed input.
 bool documentFromJson(const std::string& json, Document& doc, std::string* err=nullptr);
 

@@ -1,6 +1,9 @@
 ﻿// ARK-Point :: evaluate.cpp â€” feature-history recompute pipeline.
 #include "ark/model.hpp"
 #include "ark/evaluation_scheduler_070a.hpp"
+#include "ark/evaluation_diagnostics_074b.hpp"
+#include "ark/iteration_history.hpp"
+#include "ark/native_body_cache_074b.hpp"
 #include "ark/history_authoring.hpp"
 #include "ark/assembly_authoring.hpp"
 #include "ark/serialize.hpp"
@@ -24,6 +27,10 @@ namespace ark {
 namespace {thread_local EvaluationObserver evaluationObserver;}
 namespace {thread_local EvaluationSchedulerDiagnostics070A schedulerDiagnostics070A;}
 EvaluationSchedulerDiagnostics070A evaluationSchedulerDiagnostics070A(){return schedulerDiagnostics070A;}
+void resetEvaluationDiagnostics074B(Document& document,const char* mode){
+    using V=arkjson::Value;V value=V::makeObj();value.set("schema",V::makeStr("ark.evaluation-diagnostics.074b.v1"));value.set("mode",V::makeStr(mode));
+    value.set("evaluated",V::makeNum(0));value.set("reused",V::makeNum(document.evalBodies.size()));value.set("inactive",V::makeNum(0));value.set("suppressed",V::makeNum(0));value.set("failed",V::makeNum(0));value.set("projection_builds",V::makeNum(0));value.set("projection_reused",V::makeNum(0));value.set("features",V::makeArr());document.evaluationDiagnostics=std::move(value);
+}
 EvaluationObserver setEvaluationObserver(EvaluationObserver observer){auto previous=std::move(evaluationObserver);evaluationObserver=std::move(observer);return previous;}
 static void evaluationProgress(u64 id,const std::string& name,size_t index,size_t total,bool completed,bool reused){if(evaluationObserver)try{evaluationObserver(id,name,index,total,completed,reused);}catch(...){/* An observer cannot alter geometric acceptance. */}}
 
@@ -454,11 +461,12 @@ static bool addSimpleAssemblyPoseSources073B(const Document& document,AuthoringS
 // named sketch/datum closure and declared source/limit bodies. They do not read
 // unrelated history rows. Keep their execution on the owner when named sources
 // are involved; this audit narrows invalidation, not worker snapshot authority.
-static bool scopedExtrusionDependencies073B(const Feature& feature){
-    if(feature.type==FeatureType::ExtrudeSurface||feature.type==FeatureType::RevolveSurface)return true;
+static bool scopedProducerDependencies074B(const Feature& feature){
+    if(feature.type==FeatureType::ExtrudeSurface||feature.type==FeatureType::RevolveSurface||feature.type==FeatureType::Loft||feature.type==FeatureType::Sweep||feature.type==FeatureType::SurfaceFill||feature.type==FeatureType::SheetMetal)return true;
+    if(feature.type==FeatureType::SurfaceEdit){const auto* op=feature.nativeSpec.find("op");if(!op||op->t!=arkjson::Value::Str)return false;static const std::set<std::string> operations{"extract_face","trim_plane","trim_wire","trim_tool","mirror","ruled","deform_poles","repair","untrim","extend","mutual_trim","match_boundary","curve_network","multi_trim","extend_trimmed"};return operations.count(op->str)!=0;}
     if(feature.type!=FeatureType::NativeSolid)return false;
     auto operation=feature.get("op");if(operation.empty())if(const auto* op=feature.nativeSpec.find("op"))operation=op->asStr();
-    return operation=="extrude";
+    return operation=="extrude"||operation=="fillet"||operation=="chamfer"||operation=="hole"||operation=="mirror"||operation=="split_plane";
 }
 struct ScopedExtrusionSources073B {
     bool audited=false,occurrences=false;
@@ -549,6 +557,8 @@ public:
 
 const std::vector<FeatureResult>& Document::recompute() {
     schedulerDiagnostics070A={};
+    resetEvaluationDiagnostics074B(*this,"recompute_started");
+    if(historyTip||!assemblyLoadSelection.isNull())clearNativeBodyCache074B();
     NativeDocumentResultScope nativeResults(pendingNativeGeometry);
     f64 t0=nowMs();
     refreshSkeleton(*this);
@@ -625,7 +635,7 @@ const std::vector<FeatureResult>& Document::recompute() {
             if(features[i].type==FeatureType::NativeSolid&&!sources.occurrences&&!instanceProjection&&!geometricSupports)placementSensitive[i]=false;
             for(u64 source:sources.features)if(std::find(features[i].inputs.begin(),features[i].inputs.end(),source)==features[i].inputs.end())explicitInputs[i]=false;
             for(u64 source:sources.features){const auto found=indices.find(source);if(found==indices.end()||found->second>=i)throw std::runtime_error("Forward or cyclic associative feature dependency: "+features[i].name+" -> "+std::to_string(source));}
-            if(scopedExtrusionDependencies073B(features[i])){
+            if(scopedProducerDependencies074B(features[i])){
                 bool audited=!sources.occurrences||addSimpleAssemblyPoseSources073B(*this,sources);
                 // A future endpoint with an origin-only mate can be legitimate;
                 // it cannot enter this earlier feature's generation key yet.
@@ -638,6 +648,8 @@ const std::vector<FeatureResult>& Document::recompute() {
         if(!explicitInputs[i]){dependencies[i].clear();for(size_t j=0;j<i;++j)dependencies[i].push_back(j);}
         dependencyEdges+=dependencies[i].size();
     }
+    std::vector<EvaluationFingerprints> plannedFingerprints(features.size());
+    std::vector<std::vector<std::string>> plannedReasons(features.size());
     auto keyFor=[&](size_t index){
         const auto& f=features[index];auto source=authored.find("features")->arr[index];
         source.obj.erase(std::remove_if(source.obj.begin(),source.obj.end(),[](const auto& v){return v.first=="appearance"||v.first=="part";}),source.obj.end());
@@ -652,15 +664,25 @@ const std::vector<FeatureResult>& Document::recompute() {
             // profile's key. Unknown producer families retain the old fallback.
             if(scope.occurrences)for(const char* kind:{"assembly","mates"})if(const auto* value=authored.find(kind))context+=value->dump();
         }else if(!explicitInputs[index])context=scopedContext(f,own);
-        std::string dependenciesText=own+context,key=(scope.audited?"scoped-extrusion-073b:":"")+dependenciesText;
+        std::string dependenciesText=own+context,key=(scope.audited?"scoped-producer-074b:":"")+dependenciesText,parameterTokens,dependencyTokens,tessellationTokens,extraContext;
         for(const auto& param:params){
             if(param.name.empty())continue;size_t pos=0;bool used=false;
             while((pos=dependenciesText.find(param.name,pos))!=std::string::npos){auto ident=[](char c){return std::isalnum((unsigned char)c)||c=='_';};if((pos==0||!ident(dependenciesText[pos-1]))&&(pos+param.name.size()==dependenciesText.size()||!ident(dependenciesText[pos+param.name.size()]))){used=true;break;}pos+=param.name.size();}
-            if(used)key+=param.name+"="+arkjson::Value::makeNum(param.value).dump();
+            // Authored sheet programs receive the complete environment in their
+            // producer request/report. Keep that contract conservative while
+            // removing unrelated geometry and sketch dependencies.
+            if(used||(f.type==FeatureType::SheetMetal&&f.nativeSpec.find("base"))){const auto token=param.name+"="+arkjson::Value::makeNum(param.value).dump();key+=token;parameterTokens+=token;}
         }
-        if(scope.audited){for(u64 input:scope.features)key+=keys[input];}
-        else {if(!explicitInputs[index]){key+=upstream;if(placementSensitive[index])for(const char* name:{"assembly","mates"})if(auto value=authored.find(name))key+=value->dump();if(geometricSupports)for(const auto& p:params)key+=p.name+"="+arkjson::Value::makeNum(p.value).dump();}for(u64 input:f.inputs)key+=keys[input];}
-        for(double n:{tessOpt.tol,tessOpt.maxEdge,tessOpt.minAngleDeg,(double)tessOpt.maxLevels})key+=':'+arkjson::Value::makeNum(n).dump();return key;
+        if(scope.audited){for(u64 input:scope.features){key+=keys[input];dependencyTokens+=keys[input];}}
+        else {if(!explicitInputs[index]){key+=upstream;dependencyTokens+=upstream;if(placementSensitive[index])for(const char* name:{"assembly","mates"})if(auto value=authored.find(name)){const auto token=value->dump();key+=token;extraContext+=token;}if(geometricSupports)for(const auto& p:params){const auto token=p.name+"="+arkjson::Value::makeNum(p.value).dump();key+=token;parameterTokens+=token;}}for(u64 input:f.inputs){key+=keys[input];dependencyTokens+=keys[input];}}
+        for(double n:{tessOpt.tol,tessOpt.maxEdge,tessOpt.minAngleDeg,(double)tessOpt.maxLevels})tessellationTokens+=':'+arkjson::Value::makeNum(n).dump();key+=tessellationTokens;
+        const auto previous=evaluationCache.find(f.id);auto& reasons=plannedReasons[index];
+        if(previous!=evaluationCache.end()&&previous->second.key==key){reasons.push_back("cache_reused");return key;}
+        auto& parts=plannedFingerprints[index];parts.definition=iterationSha256(own);parts.context=iterationSha256(context+extraContext);parts.parameters=iterationSha256(parameterTokens);parts.dependencies=iterationSha256(dependencyTokens);parts.tessellation=iterationSha256(tessellationTokens);
+        if(previous==evaluationCache.end())reasons.push_back("first_evaluation");
+        else{const auto& old=previous->second.fingerprints;if(old.definition.empty())reasons.push_back("cache_key_changed");else{
+            if(parts.definition!=old.definition)reasons.push_back("definition_changed");if(parts.context!=old.context)reasons.push_back("named_context_changed");if(parts.parameters!=old.parameters)reasons.push_back("parameter_changed");if(parts.dependencies!=old.dependencies)reasons.push_back("dependency_changed");if(parts.tessellation!=old.tessellation)reasons.push_back("tessellation_changed");if(reasons.empty())reasons.push_back("cache_key_changed");}}
+        return key;
     };
     std::vector<std::string> plannedKeys(features.size());std::vector<u64> plannedGenerations(features.size());
     for(size_t i=0;i<features.size();++i){if(!activeFeatures[i])continue;plannedKeys[i]=keyFor(i);auto old=evaluationCache.find(features[i].id);plannedGenerations[i]=old!=evaluationCache.end()&&old->second.key==plannedKeys[i]?old->second.generation:++evaluationGeneration;if(!features[i].suppressed){keys[features[i].id]=std::to_string(features[i].id)+":"+std::to_string(plannedGenerations[i])+";";upstream+=keys[features[i].id];}}
@@ -848,7 +870,7 @@ const std::vector<FeatureResult>& Document::recompute() {
             b.id=f.id;
             const u64 generation=plannedGenerations[index];
             if(cachedFeature)nextCache[f.id]=previousCache->second;
-            else nextCache[f.id]={std::move(cacheKey),std::make_shared<const Body>(b),generation,fr.tris};
+            else nextCache[f.id]={std::move(cacheKey),std::make_shared<const Body>(b),generation,fr.tris,std::move(plannedFingerprints[index])};
             keys[f.id]=std::to_string(f.id)+":"+std::to_string(generation)+";";upstream+=keys[f.id];
             workIndices[index]=work.size();work.push_back(std::move(b));releaseInput(index);
         } else {
@@ -877,6 +899,12 @@ const std::vector<FeatureResult>& Document::recompute() {
     evalBodies=std::move(work);
     for(auto& job:jobs)if(job.valid())job.wait();
     peakParallelFeatures=activity->peak.load();
+    {using V=arkjson::Value;V rows=V::makeArr();size_t inactive=0,suppressed=0,failed=0;
+        for(size_t i=0;i<features.size();++i){const auto& feature=features[i];const auto& scope=scopedSources[i];V row=V::makeObj(),reasons=V::makeArr(),inputs=V::makeArr(),names=V::makeArr();const auto old=evaluationCache.find(feature.id);const bool reused=old!=evaluationCache.end()&&old->second.key==plannedKeys[i];
+            const char* status=!activeFeatures[i]?"inactive":feature.suppressed?"suppressed":!lastResults[i].ok?"failed":reused?"reused":"evaluated";inactive+=!activeFeatures[i];suppressed+=activeFeatures[i]&&feature.suppressed;failed+=activeFeatures[i]&&!feature.suppressed&&!lastResults[i].ok;
+            row.set("id",V::makeNum(double(feature.id)));row.set("name",V::makeStr(feature.name));row.set("operation",V::makeStr(featureOperation(feature)));row.set("status",V::makeStr(status));for(const auto& reason:plannedReasons[i])reasons.arr.push_back(V::makeStr(reason));if(std::string(status)=="failed")reasons.arr.push_back(V::makeStr("validation_failed"));row.set("reasons",reasons);
+            row.set("dependency_scope",V::makeStr(scope.audited?"semantic":explicitInputs[i]?"explicit":"conservative_history"));if(scope.audited){for(u64 input:scope.features)inputs.arr.push_back(V::makeNum(double(input)));for(const auto& name:scope.named)names.arr.push_back(V::makeStr(name));}else{for(u64 input:feature.inputs)inputs.arr.push_back(V::makeNum(double(input)));if(!explicitInputs[i])row.set("conservative_predecessors",V::makeNum(i));}row.set("dependency_ids",inputs);row.set("named_sources",names);rows.arr.push_back(std::move(row));}
+        evaluationDiagnostics.set("mode",V::makeStr("recompute"));evaluationDiagnostics.set("features",std::move(rows));evaluationDiagnostics.set("evaluated",V::makeNum(recomputeEvaluated));evaluationDiagnostics.set("reused",V::makeNum(recomputeReused));evaluationDiagnostics.set("inactive",V::makeNum(inactive));evaluationDiagnostics.set("suppressed",V::makeNum(suppressed));evaluationDiagnostics.set("failed",V::makeNum(failed));evaluationDiagnostics.set("projection_builds",V::makeNum(recomputeProjectionBuilds));evaluationDiagnostics.set("projection_reused",V::makeNum(recomputeProjectionReused));}
     evaluationCache=std::move(nextCache);
     // Unloaded definitions retain authored recipes, never derived native
     // buffers. These two auxiliary caches otherwise outlive evalBodies.

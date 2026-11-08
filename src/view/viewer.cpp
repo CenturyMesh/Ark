@@ -2251,8 +2251,10 @@ static std::string joinedNativeNames(const Feature* feature,const char* key){
     std::string text;if(!feature)return text;auto* list=feature->nativeSpec.find(key);if(!list||list->t!=arkjson::Value::Arr)return text;
     for(auto& item:list->arr){if(item.t!=arkjson::Value::Str||item.str.empty())continue;if(!text.empty())text+="; ";text+=item.str;}return text;
 }
+static void variableFilletWorkflow074(const Feature*,u64,u64,u64,const std::string&,int,bool);
 static void nativeEdgeBlendDialog(const Feature* editing=nullptr){
     using V=arkjson::Value;
+    const u64 revision=g_session.revision,epoch=g_documentEpoch;std::optional<Feature> captured;if(editing){captured=*editing;editing=&*captured;}
     std::string op=editing?editing->get("op","fillet"):"fillet";
     std::string listed=editing?nativeText(editing,"selection"):"";
     if(listed.empty())listed=editing?joinedNativeNames(editing,"edges"):pickedNames("edge");
@@ -2261,10 +2263,13 @@ static void nativeEdgeBlendDialog(const Feature* editing=nullptr){
     fields.push_back(pickField("Edges",listed,2));
     fields.push_back({"Radius or distance / mm",editing?editing->get(op=="chamfer"?"distance":"radius","2"):"2"});
     fields.push_back({"Minimum dihedral / deg",editing?editing->get("min_angle","15"):"15"});
-    auto hint=nativeReferenceHint("edge");if(!editFields(editing?"Edit fillet / chamfer":"Fillet or chamfer",("Click the edges to round. "+hint+" sharp, convex, concave or all still select by shape.").c_str(),fields))return;
+    const auto* oldLaw=editing?editing->nativeSpec.find("radius_law"):nullptr;const bool legacyLaw=oldLaw&&nativeText(editing,"radius_domain").empty();std::vector<std::string> modes{"Constant","Variable contour"};if(legacyLaw)modes.push_back("Variable straight edge");const size_t modeIndex=fields.size();fields.push_back(choiceField("Radius mode",oldLaw?(legacyLaw?"Variable straight edge":"Variable contour"):"Constant",modes));const size_t countIndex=fields.size();fields.push_back({"Stations / 2 to 16",oldLaw&&oldLaw->t==V::Arr?std::to_string(oldLaw->arr.size()):"3"});
+    if(!editFields(editing?"Edit fillet / chamfer":"Fillet or chamfer","Choose exact edges. Variable mode needs all edges of one tangent contour.",fields,false,"Apply",nullptr,false,[&](const std::vector<HWND>& controls){auto value=[](HWND window){char text[128]{};GetWindowTextA(window,text,128);return std::string(text);};const bool fillet=value(controls[0])=="fillet";if(!fillet)SendMessage(controls[modeIndex],CB_SETCURSEL,0,0);const bool variable=fillet&&value(controls[modeIndex])!="Constant";EnableWindow(controls[modeIndex],fillet);EnableWindow(controls[countIndex],variable);EnableWindow(controls[editing?2:3],!variable);EnableWindow(controls[editing?3:4],!variable);SetWindowTextA(GetDlgItem(GetAncestor(controls[0],GA_ROOT),1),variable?"Next":"Apply");}))return;
+    if(g_session.revision!=revision||g_documentEpoch!=epoch)throw std::runtime_error("Drawing changed while choosing fillet edges; reopen the current source");
     if(trimField(fields[editing?1:2].value).empty())throw std::runtime_error("Click edges on the model, or choose sharp, convex, concave or all");
     op=trimField(fields[0].value);if(op!="fillet"&&op!="chamfer")throw std::runtime_error("Choose fillet or chamfer");
     auto choice=trimField(fields[editing?1:2].value);
+    if(op=="fillet"&&fields[modeIndex].value!="Constant"){const auto stations=formNumber(fields[countIndex].value);if(stations<2||stations>16||stations!=std::floor(stations))throw std::runtime_error("Choose an integer station count from 2 to 16");if(editing&&editing->inputs.size()!=1)throw std::runtime_error("A variable fillet requires exactly one source solid");variableFilletWorkflow074(editing,revision,epoch,editing?editing->inputs.front():featureIdField(fields[1].value),choice,(int)stations,fields[modeIndex].value=="Variable contour");return;}
     V native=V::makeObj(),p=V::makeObj();p.set("op",V::makeStr(op));p.set(op=="fillet"?"radius":"distance",V::makeStr(trimField(fields[editing?2:3].value)));
     if(choice=="sharp"||choice=="convex"||choice=="concave"||choice=="all"){native.set("selection",V::makeStr(choice));p.set("min_angle",V::makeStr(trimField(fields[editing?3:4].value)));}
     else{V edges=V::makeArr();std::istringstream names(choice);std::string name;while(std::getline(names,name,';'))if(!(name=trimField(name)).empty())edges.arr.push_back(V::makeStr(name));if(edges.arr.empty())throw std::runtime_error("Enter edge names or a selection");native.set("edges",std::move(edges));}
@@ -3672,6 +3677,7 @@ static void surfaceEditDialog(bool trim,const Feature* editing=nullptr){
 #include "surface_network_068b.inl"
 #include "surface_operations_068b.inl"
 #include "extrusion_workflow_073b.inl"
+#include "fillet_workflow_074b.inl"
 static void commitMeshFeature(FeatureType type,const std::string& name,arkjson::Value p,std::vector<u64> inputs,u64 editId){
     if(!editId){addMeshFeature(type,name,std::move(p),std::move(inputs));return;}
     using V=arkjson::Value;V command=V::makeObj();command.set("op",V::makeStr("feature.edit"));command.set("id",V::makeNum((double)editId));command.set("p",std::move(p));
@@ -3869,6 +3875,8 @@ static void selectHistoryNode(HistoryEditor& editor){
     std::ostringstream detail;detail<<"Iteration: "<<editor.selected<<(editor.selected==editor.head?"  (active head)":"")<<"\r\nParent: "<<text(node,"parent_id")<<"\r\nUTC: "<<text(node,"utc")<<"\r\nTool: "<<text(node,"tool")<<"\r\nOperation: "<<text(node,"summary")<<"\r\n";if(auto* actor=node.find("actor"))detail<<"Actor: "<<text(*actor,"kind")<<" / "<<text(*actor,"id")<<" / "<<text(*actor,"role")<<" / "<<text(*actor,"model")<<" (caller declared)\r\n";detail<<"Motivation: "<<text(node,"motivation")<<"\r\nRestored from: "<<text(node,"restored_from_id")<<"\r\n\r\nBefore SHA-256: "<<text(node,"before_sha256")<<"\r\nAfter SHA-256: "<<text(node,"after_sha256")<<"\r\n\r\nRestore re-evaluates this document state and creates a new branch. Current token receipts remain in the drawing. Revision increases.";if(!editor.archive.empty())detail<<"\r\n\r\nFull archived history: "<<editor.archive<<"\r\nOpen this .ark using File > Open to recover earlier states and branches.";SetWindowTextA(editor.details,detail.str().c_str());EnableWindow(GetDlgItem(g_dialog,1),!editor.selected.empty());
 }
 static LRESULT CALLBACK historyEditorProc(HWND hwnd,UINT message,WPARAM wp,LPARAM lp){auto* editor=(HistoryEditor*)GetWindowLongPtr(hwnd,GWLP_USERDATA);if(editor&&message==WM_COMMAND&&LOWORD(wp)==101&&HIWORD(wp)==LBN_SELCHANGE){selectHistoryNode(*editor);return 0;}if(editor&&message==WM_COMMAND&&LOWORD(wp)==4){editor->compact=true;g_dialogAccept=false;g_dialogDone=true;return 0;}if(editor&&message==WM_COMMAND&&LOWORD(wp)==3){editor->migrate=true;g_dialogAccept=false;g_dialogDone=true;return 0;}if(editor&&message==WM_TIMER&&wp==901){SendMessage(editor->list,LB_SETCURSEL,(WPARAM)g_historySmokeIndex,0);selectHistoryNode(*editor);if(g_dialogSmoke){g_historySmokeObservedRows=(int)SendMessage(editor->list,LB_GETCOUNT,0,0);g_historySmokeObservedSelection=(int)SendMessage(editor->list,LB_GETCURSEL,0,0);}if(g_historySmokeMigrate&&IsWindowEnabled(GetDlgItem(hwnd,3)))editor->migrate=true;if(g_historySmokeCompact)editor->compact=true;}if(editor&&message==WM_COMMAND&&LOWORD(wp)==1&&editor->selected.empty())return 0;return editorProc(hwnd,message,wp,lp);}
+#include "rebuild_diagnostics_074b.inl"
+#include "body_authoring_074b.inl"
 static void iterationHistoryDialog(){
     using V=arkjson::Value;if(g_chatBusy||(g_teamStarted&&g_agentTeam.snapshot().running)){g_status="Finish or cancel active assistant work before restoring an iteration.";return;}V args=V::makeObj();args.set("limit",V::makeNum(64));auto response=runTool("history_info",args);if(g_error)return;auto* info=response.find("structuredContent"),*nodes=info?info->find("nodes"):nullptr;if(!nodes||nodes->t!=V::Arr||!info->find("baseline_id")||info->find("baseline_id")->asStr().empty()){g_status="No persistent iterations have been recorded for this drawing.";return;}u64 observedRevision=g_session.revision;
     V allNodes=*nodes;const V* pageInfo=info;std::set<std::string> cursors;V page;
@@ -3935,7 +3943,7 @@ static const std::vector<StudioCommandGroup>& studioCommandGroups(){
     group("Image references",{{730,"Attach image to Assistant"},{731,"Inspire design"},{732,"Image to CAD"},{733,"Remove pending image"}});
     group("Sketch & planes",{{610,"Edit sketch in viewport"},{611,"Exit sketch edit"},{60,"Create / edit plane"},{113,"Attach plane to feature"},{69,"Select plane"},{72,"Toggle datum frames"},{61,"Rectangle"},{62,"Circle / opening"},{543,"Sketch line"},{544,"Arc through three points"},{545,"Arc from start tangent"},{546,"Arc from centre and angles"},{547,"3D arc through three points"},{548,"3D tangent arc"},{63,"Interpolating spline"},{70,"Edit entity coordinates"},{73,"Add constraint"},{89,"Edit selected constraint"},{90,"Remove selected constraint"},{542,"Rename sketch entity"},{536,"Project geometry to 2D sketch"},{537,"Include linked geometry in 3D"},{538,"Create exact spatial curve"},{700,"3D sketch constraints"},{591,"Parametric curve dimension"},{592,"XYZ equation curve"},{593,"Offset saved sketch curve"},{64,"Edit raw sketch JSON"},{65,"Extrude sketch"},{66,"Cut from sketch"},{67,"Named parameter"},{68,"Toggle sketch overlay"}});
     group("Solids",{{1,"Box"},{2,"Cylinder"},{3,"Sphere"},{4,"Cone"},{5,"Torus"},{6,"Polygon extrusion"},{7,"Revolve"},{11,"Linear pattern"}});
-    group("Exact solids",{{100,"Native primitive"},{101,"Extrude saved sketch"},{102,"Union / cut / common"},{103,"Hole / slot / profile pocket"},{104,"Fillet / chamfer"},{106,"Draft faces"},{107,"Linear / circular pattern"},{108,"Mirror solid"},{105,"Rigid transform"},{594,"Offset exact solid"}});
+    group("Exact solids",{{100,"Native primitive"},{101,"Extrude saved sketch"},{102,"Union / cut / common"},{103,"Hole / slot / profile pocket"},{104,"Fillet / chamfer"},{106,"Draft faces"},{107,"Linear / circular pattern"},{108,"Mirror solid"},{105,"Rigid transform"},{594,"Offset exact solid"},{49991,"Anchor a face reference"},{49992,"Select solid bodies"}});
     group("Modify",{{597,"Jump to adjacent face / edge"},{8,"Fuse bodies"},{9,"Carve body"},{10,"Keep overlap"},{108,"Mirror solid"},{25,"Delete selection"},{18,"Undo"},{19,"Redo"}});
     group("Tube & assembly",{{215,"Create double-wishbone suspension"},{384,"Spring unit controls"},{383,"Play / pause suspension"},{26,"Bend-program tube"},{40,"Laser tube"},{27,"Create assembly"},{28,"Duplicate instance"},{29,"Instance placement"},{93,"Ground / unground instance"},{94,"Add assembly mate"},{95,"Edit selected mate"},{96,"Remove selected mate"},{30,"Edit tube program"}});
     group("Native surfaces",{{49400,"Mid-surface mirror / join G0 or G1"},{49401,"Trim by surface, solid or 3D curve"},{49402,"Ruled surface / exact 3D rails"},{49403,"Loft / sections and guide curves"},{49404,"Patch fill / G1-G2 supports and guides"},{49500,"Stretch surface control vertices / hitpoint glue"},{161,"Edit selected feature"},{162,"Edit driving sketch"},{76,"Loft sketches"},{77,"Fill closed sketch"},{78,"NURBS surface"},{150,"Sweep sketches"},{151,"Extrude sketch surface"},{152,"Revolve sketch surface"},{153,"Offset selected surface"},{154,"Glue surfaces"},{79,"Thicken selected surface"},{830,"Repair exact surface orientation"},{491,"Extract exact semantic face"},{492,"Trim exact surface by datum plane"},{595,"Project curve onto surface"},{596,"Trim surface by closed curve"}});
@@ -3951,7 +3959,7 @@ static const std::vector<StudioCommandGroup>& studioCommandGroups(){
     group("Additive and CNC",{{49820,"Prepare project 3D print job"},{49821,"View print plates"},{49600,"Manufacturing workspace"},{49601,"New CNC plan"},{49602,"New additive plan"},{49609,"Simulate manufacturing"},{49615,"Export Fanuc-style NC"},{49616,"Bambu Studio slicer"}});
     group("Manufacturing previews",{{320,"Unfold all sheets"},{321,"Refold all sheets"},{322,"Play all sheet bend sequences"},{323,"Pause all sheet bend sequences"},{325,"Edit selected sheet"},{326,"Stock preview"},{468,"Sheet opening pattern"}});
     group("Tube openings & playback",{{41,"Edit laser tube stock"},{42,"Add notch / opening"},{43,"Edit notch / opening"},{44,"Remove notch / opening"},{45,"Straight tube pose"},{46,"Folded tube pose"},{47,"Play / pause tube folding"},{48,"Previous tube pose"},{49,"Next tube pose"}});
-    group("Drawing evidence",{{493,"Persistent iterations and branch restore"},{488,"Local resources and drawing cost details"},{489,"Refresh public pricing rates"},{330,"Token usage receipts"},{324,"Show chassis in unfolded layout"}});
+    group("Drawing evidence",{{49990,"Why was it rebuilt? / evaluation details"},{493,"Persistent iterations and branch restore"},{488,"Local resources and drawing cost details"},{489,"Refresh public pricing rates"},{330,"Token usage receipts"},{324,"Show chassis in unfolded layout"}});
     group("Components & library",{{49000,"Neural Parametric View"},{49001,"Export parametric part (.arkprt)"},{49002,"Export parametric assembly (.arktop)"},{49003,"Insert parametric component"},{49004,"Update component revision"},{49005,"Configure public component parameters"},{484,"Search reusable components"},{485,"Import STEP into component library"}});
     group("Assistant & team",{{541,"Measured agent activity"},{400,"Open Assistant"},{471,"Team mode"},{470,"Single Assistant mode"},{472,"Pause / resume team"},{473,"Choose decision recipient"},{490,"Continue yielded / interrupted team window"},{44014,"Focused / parallel team workflow"},{474,"Engineer / orchestrator model and reasoning"},{475,"Part designer model and reasoning"},{476,"Physics reviewer model and reasoning"},{367,"Assistant reasoning effort"},{75,"Cancel active Assistant or team"},{360,"Continue with ChatGPT"},{361,"Choose ChatGPT plan model"},{362,"Sign out of ChatGPT"},{364,"Enable ChatGPT plan usage"},{365,"Retry ChatGPT connection"},{366,"Cancel account operation"},{358,"Switch to API key mode"}});
         return result;}();return groups;
@@ -4031,6 +4039,7 @@ static bool surfaceQualityAction068B(int);
 static bool surfaceOffsetAction068B(int);
 static bool designReviewAction067(int);
 static void uiAction(int id){
+    if(bodyAuthoringAction074B(id))return;
     if(id==472&&claudeReconnect071::busy()){g_status="Finish or cancel the Claude account operation before resuming the team.";return;}
     if(id==50100){claudeReconnect071::start(true);return;}if(id==50101){claudeReconnect071::start(false);return;}if(id==50102){claudeReconnect071::cancel();return;}
     if(surfaceNetworkAction068B(id)||surfaceOperationsAction068B(id)||surfaceQualityAction068B(id)||surfaceOffsetAction068B(id))return;
@@ -4097,6 +4106,7 @@ static void uiAction(int id){
     }
     if(id==496||id==497){frameEndpointDialog(id==497);return;}if(id==498){frameWeldDialog();return;}
     if(id==494||id==495){sheetInternalBendDialog(id==495);return;}
+    if(id==49990){rebuildDiagnosticsDialog074B();return;}
     if(id==493){iterationHistoryDialog();return;}
     if(id==756){featureHistoryDialog();return;}
     if(id==44080){showConfigurationWorkspace();return;}
@@ -5300,7 +5310,7 @@ static void drawFrame(HDC hdc){
     else if(g_toolModule==2&&g_sketchDrawing.active)groups={{"Draw",{{"Line",571},{"Polyline",572},{"Rectangle",573},{"Circle",574},{"Arc 3 pt",575}}},{"Precise",{{"Line form",543},{"Arc form",544},{"Tangent arc",545},{"Rectangle",61},{"Circle",62},{"Spline",63}}},{"Constrain",{{"Dimensions",576},{"Constraint",73},{"Source params",577}}},{"References",{{"Plane",60},{"Project 2D",536},{"Include 3D",537},{"Edit curve",70}}},{"Build",{{"Extrude",65},{"Drag extrude",687},{"Cut",66}}},{"Finish",{{"Grid",579},{"Exit sketch",578}}}};
     else if(g_toolModule==2)groups={{"Sketch",{{"Plane",60},{"Draw sketch",570},{"Edit sketch",610}}},{"Draw 2D",{{"Line",543},{"Arc 3 pt",544},{"Tangent arc",545},{"Rectangle",61},{"Circle",62},{"Spline",63}}},{"Draw 3D",{{"Arc 3D",547},{"Tangent 3D",548},{"3D curve",538}}},{"Modify",{{"Edit curve",70},{"Constraint",73},{"Project 2D",536},{"Include 3D",537}}},{"Build",{{"Extrude",65},{"Drag extrude",687},{"Cut",66}}}};
     else if(g_toolModule==10)groups={{"Setup",{{"Workspace",49600},{"Stock",49604},{"Workholding",49618},{"Rates",49607}}},{"Machining",{{"CNC plan",49601},{"Tool",49605},{"Operation",49606}}},{"Additive",{{"Additive",49602},{"Print job",49820},{"Plates",49821},{"Bambu slicer",49616}}},{"Simulate",{{"Simulate",49609},{"Play / Pause",49610},{"Stop",49611},{"Graph",49000}}},{"Output",{{"Export NC",49615},{"Import G-code",49608}}}};
-    else if(g_toolModule==3)groups={{"Select",{{"Body",170},{"Face",171},{"Tangent faces",658},{"Edge",172},{"Curve",173}}},{"Measure",{{"Smart / D",49800},{"Measure 2D",585},{"Measure 3D",586},{"Units",587}}},{"Section",{{"Plane",49810},{"Draw line",49811}}},{"Analyze",{{"Properties",401},{"Mass / CG",188},{"Material",187},{"Collision",755}}},{"Simulate",{{"Simulation",49200},{"Rubber",49300}}},{"Review",{{"BOM",590},{"Graph",49000},{"Schematic",49100}}},{"Display",{{"Eye mode",49101},{"Families",49102},{"Graphics",56},{"Fit",20}}}};
+    else if(g_toolModule==3)groups={{"Select",{{"Body",170},{"Face",171},{"Tangent faces",658},{"Edge",172},{"Curve",173}}},{"Measure",{{"Smart / D",49800},{"Measure 2D",585},{"Measure 3D",586},{"Units",587}}},{"Section",{{"Plane",49810},{"Draw line",49811}}},{"Analyze",{{"Rebuild",49990},{"Properties",401},{"Mass / CG",188},{"Material",187},{"Collision",755}}},{"Simulate",{{"Simulation",49200},{"Rubber",49300}}},{"Review",{{"BOM",590},{"Graph",49000},{"Schematic",49100}}},{"Display",{{"Eye mode",49101},{"Families",49102},{"Graphics",56},{"Fit",20}}}};
     else if(g_toolModule==8)groups={{"Shape",{{"Start solid",100},{"Hollow walls",999},{"Release angle",106},{"Round edges",104}}},{"Details",{{"Reinforce / fit",990},{"Vent",984},{"Separate",992}}},{"Review",{{"Workflow",993},{"Exact part",991},{"Edit recipe",161}}}};
     else if(g_toolModule==9)groups={{"Board",{{"Board / pads",211}}},{"Cables",{{"Rounded route",212},{"Smooth 3D",996},{"Flat ribbon",997},{"Guide path",998},{"Edit route",161}}},{"Sources",{{"Approved Vendors",994},{"Library",484}}},{"Review",{{"Board / cable",995},{"Collision",755},{"BOM",590}}}};
     else if(g_toolModule==7)groups={{"Stock",{{"Panel",982},{"Timber beam",983}}},{"Joinery",{{"Groove / pocket",986},{"Source dims",659}}},{"Appearance",{{"Material",187},{"Light up",980}}},{"Review",{{"Stock cutlist",987},{"BOM",590}}}};
@@ -6594,9 +6604,14 @@ static void seedDocument(){g_doc=makeDemoDocument();rebuildScene();frameScene();
 #include "design_variants_selftest.inl"
 #include "surface_quality_selftest_068b.inl"
 #include "surface_network_selftest_068b.inl"
+#include "surface_advanced_selftest_074b.inl"
 #include "surface_operations_selftest_068b.inl"
 #include "surface_offset_selftest_068b.inl"
 #include "extrusion_workflow_selftest_073b.inl"
+#include "extrusion_advanced_selftest_074b.inl"
+#include "fillet_workflow_selftest_074b.inl"
+#include "rebuild_diagnostics_074b_selftest.inl"
+#include "body_authoring_074b_selftest.inl"
 #include "studio_render_selftest.inl"
 #include "interaction_performance.inl"
 #include "viewport_quality_selftest_056c.inl"
@@ -6608,6 +6623,7 @@ static void seedDocument(){g_doc=makeDemoDocument();rebuildScene();frameScene();
 #include "surface_workflow_selftest_059c.inl"
 
 int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
+    bool rebuildDiagnosticsUiTest074=false,bodyAuthoringUiTest074=false;
     std::string viewportProfile064;
     bool manufacturingUiTest=false,transmissionUiTest=false;
     if(redirect_to_updated_runtime())return 0;
@@ -6618,7 +6634,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
 
     auto setDpiContext=reinterpret_cast<BOOL(WINAPI*)(HANDLE)>(GetProcAddress(GetModuleHandleW(L"user32.dll"),"SetProcessDpiAwarenessContext"));
     if(!setDpiContext||!setDpiContext(reinterpret_cast<HANDLE>(-4)))SetProcessDPIAware();
-    bool surfaceQualityUiTest068=false,surfaceNetworkUiTest068=false,surfaceOperationsUiTest068=false,surfaceOffsetUiTest068=false,extrusionWorkflowUiTest073=false;
+    bool filletWorkflowUiTest074=false;bool extrusionAdvancedUiTest074=false;bool surfaceAdvancedUiTest074=false;bool surfaceQualityUiTest068=false,surfaceNetworkUiTest068=false,surfaceOperationsUiTest068=false,surfaceOffsetUiTest068=false,extrusionWorkflowUiTest073=false;
     bool assistantChatUiTest=false,chatDockUiTest=false,parametricRoleUiTest=false,designVariantsUiTest=false;
     bool plasticsUiTest=false,electronicsWorkspaceUiTest=false,cableGuideUiTest=false;
     bool nativeProductPerformanceUiTest=false,sceneCacheUiTest=false,authoringAssistanceUiTest=false,featureEditorPickingUiTest=false;
@@ -6632,7 +6648,12 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     int sw=1600,sh=1000,argc=0;auto argv=CommandLineToArgvW(GetCommandLineW(),&argc);
     auto utf8=[](const wchar_t* w){int n=WideCharToMultiByte(CP_UTF8,0,w,-1,nullptr,0,nullptr,nullptr);std::string s(n,'\0');WideCharToMultiByte(CP_UTF8,0,w,-1,s.data(),n,nullptr,nullptr);s.pop_back();return s;};
     for(int i=1;i<argc;++i){auto a=utf8(argv[i]);
+        if(a=="--self-test-rebuild-diagnostics-ui"){rebuildDiagnosticsUiTest074=true;g_headless=true;continue;}
+        if(a=="--self-test-body-authoring-ui"){bodyAuthoringUiTest074=true;g_headless=true;continue;}
         if(a=="--self-test-surface-quality-ui"){surfaceQualityUiTest068=true;g_headless=true;continue;}
+        if(a=="--self-test-fillet-workflow-ui"){filletWorkflowUiTest074=true;g_headless=true;continue;}
+        if(a=="--self-test-extrusion-advanced-ui"){extrusionAdvancedUiTest074=true;g_headless=true;continue;}
+        if(a=="--self-test-surface-advanced-ui"){surfaceAdvancedUiTest074=true;g_headless=true;continue;}
         if(a=="--self-test-surface-network-ui"){surfaceNetworkUiTest068=true;g_headless=true;continue;}
         if(a=="--self-test-surface-operations-ui"){surfaceOperationsUiTest068=true;g_headless=true;continue;}
         if(a=="--self-test-surface-offset-ui"){surfaceOffsetUiTest068=true;g_headless=true;continue;}
@@ -7698,8 +7719,13 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     if(assistantChatUiTest){int result=testAssistantChat(shotPath);DestroyWindow(hwnd);return result;}
     if(chatDockUiTest){int result=testChatDock(shotPath);DestroyWindow(hwnd);return result;}
     if(surfaceQualityUiTest068){int result=testSurfaceQuality068B(hdc,shotPath);DestroyWindow(hwnd);return result;}
+    if(filletWorkflowUiTest074){int result=testFilletWorkflow074B(shotPath);DestroyWindow(hwnd);return result;}
+    if(extrusionAdvancedUiTest074){int result=testExtrusionAdvanced074B(shotPath);DestroyWindow(hwnd);return result;}
+    if(surfaceAdvancedUiTest074){int result=testSurfaceAdvanced074B(shotPath);DestroyWindow(hwnd);return result;}
     if(surfaceNetworkUiTest068){int result=testSurfaceNetwork068B(shotPath);DestroyWindow(hwnd);return result;}
     if(extrusionWorkflowUiTest073){int result=testExtrusionWorkflow073B(shotPath);DestroyWindow(hwnd);return result;}
+    if(rebuildDiagnosticsUiTest074){int result=testRebuildDiagnostics074B(shotPath);DestroyWindow(hwnd);return result;}
+    if(bodyAuthoringUiTest074){int result=testBodyAuthoring074B(shotPath);DestroyWindow(hwnd);return result;}
     if(surfaceOperationsUiTest068){int result=surfaceOperationsSelfTest068B(hdc,shotPath);DestroyWindow(hwnd);return result;}
     if(surfaceOffsetUiTest068){int result=testSurfaceOffset068B(hdc,shotPath);DestroyWindow(hwnd);return result;}
     if(designVariantsUiTest){int result=testDesignVariantsUi(shotPath);DestroyWindow(hwnd);return result;}

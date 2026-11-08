@@ -165,6 +165,18 @@ features can join them to selected targets; do not silently drop solids or
 retarget assembly occurrences. New semantics require document format 58.
 See [073B scope and verification](iterations/073B.md).
 
+074B explicitly extends these defaults. Use `native.region_mode:"arrangement"`
+and point selectors for exact cells from crossing curves, `result_mode:"bodies"`
+to retain multiple solids, and `boolean_mode:"all"` for one Boolean over all
+explicit inputs. Native thin offsets use `thin_method:"offset"` and
+`thin_join:"arc"|"intersection"`. Contour fillets use `radius_domain:"contour"`
+with complete explicit tangent-edge selection and radius stations. Point-anchored
+references and body selection are editable derived definitions; ambiguous,
+boundary and stale-digest selections reject. Surface compatibility, closed
+networks and parametric seam alignment are opt-in. These new semantics require
+source59; consult [074B contracts and limits](iterations/074B.md).
+`doc_info{detail:"evaluation"}` explains the last evaluation without changing it.
+
 046B motion clearance: `motion_info{name,clearance:{pairs|scope,threshold_mm,max_subdivisions}}`
 measures exact clearance over a fresh bake, read-only. A stale bake rejects
 with `MOTION_BAKE_STALE`; re-bake with `motion.bake` first. `continuous_certified`

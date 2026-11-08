@@ -10,7 +10,7 @@ static int testExtrusionWorkflow073B(const std::string& shotPath){
     auto body=[&](u64 id)->const Body&{for(const auto& value:g_doc.evalBodies)if(value.id==id)return value;throw std::runtime_error("Result body missing");};
     auto volume=[&](u64 id,double expected){const auto* report=body(id).nativeData.find("report");check(report&&get(*report,"brep_valid").b&&get(*report,"volume_mm3").t==V::Num&&std::abs(get(*report,"volume_mm3").num-expected)<std::max(1e-7,expected*1e-8),"Exact extrusion volume differs from the analytic fixture");};
     auto form=[&](std::vector<std::string> fields,std::vector<std::string> regions={},const std::string& suffix="",int action=101){
-        g_dialogSmoke=3;g_dialogOverrideQueue={std::move(fields)};if(!regions.empty())g_dialogOverrideQueue.push_back(std::move(regions));
+        g_dialogSmoke=3;g_dialogOverrideQueue={std::move(fields)};if(!regions.empty()&&action!=161)g_dialogOverrideQueue.push_back(std::move(regions));
         g_editorSmokeProbe=[&](HWND dialog){char title[128]{};GetWindowTextA(dialog,title,128);const std::string name=title;
             if(name=="Extrude sketch"||name=="Edit extrusion"){std::vector<HWND> controls;for(int i=0;i<=ResultName;++i)controls.push_back(editorFieldControl(dialog,3+i));updateControls(controls);if(!suffix.empty())g_dialogShot=shotPath+suffix+".form.png";}
             else if(name=="Extrude / sketch regions"){check(editorFieldControl(dialog,3)&&editorFieldControl(dialog,4),"Region checkboxes missing");if(!suffix.empty())g_dialogShot=shotPath+suffix+".regions.png";}

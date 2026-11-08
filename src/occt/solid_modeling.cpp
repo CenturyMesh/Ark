@@ -23,6 +23,15 @@
 #include <TopTools_HSequenceOfShape.hxx>
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepAlgoAPI_Check.hxx>
+#include <BRepAlgoAPI_BooleanOperation.hxx>
+#include <BOPAlgo_CellsBuilder.hxx>
+#include <BOPAlgo_BuilderFace.hxx>
+#include <BOPAlgo_Builder.hxx>
+#include <BRepLib.hxx>
+#include <BRepLib_FindSurface.hxx>
+#include <Geom_Plane.hxx>
+#include <BRepOffsetAPI_MakeOffset.hxx>
+#include <BRepTopAdaptor_FClass2d.hxx>
 #include <BRepGProp.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
@@ -92,6 +101,7 @@
 
 #include <algorithm>
 #include <array>
+#include <tuple>
 #include <cmath>
 #include <map>
 #include <set>
@@ -106,7 +116,7 @@
 namespace ark::occt {
 namespace {
 using V = arkjson::Value;
-struct Ref { std::string name,kind,status; TopoDS_Shape shape; V seed; V meta=V::makeObj(); };
+struct Ref { std::string name,kind,status; TopoDS_Shape shape; V seed; V meta=V::makeObj(); std::vector<TopoDS_Shape> descendants; };
 V withNativeVertexInventory(V result);
 bool selectable(const std::string& status){return status=="bound"||status=="merged";}
 const V& need(const V& v,const char* key){auto p=v.find(key);if(!p)throw std::runtime_error(std::string("Missing solid field: ")+key);return *p;}
@@ -155,6 +165,7 @@ V descriptor(const Ref& ref,double fraction=.5){
     d.set("surface_type",V::makeStr("non_analytic"));return d;
 }
 std::string digest(const std::string& encoded){return sha256(base64Decode(encoded));}
+#include "lineage_074b.inl"
 std::vector<Ref> inputRefs(const V& request,const char* brepKey,const char* topologyKey,const TopoDS_Shape& shape){
     const V* topology=request.find(topologyKey);if(!topology)return {};
     const auto& encoded=need(request,brepKey);if(encoded.t!=V::Str)throw std::runtime_error("Input B-rep is not text");
@@ -169,10 +180,10 @@ std::vector<Ref> inputRefs(const V& request,const char* brepKey,const char* topo
             if(start==std::string::npos||ref.name.substr(marker+5,start-marker-5)!=ref.kind||ref.name.substr(start+1,64)!=identity||suffix.empty()||suffix.size()>7||suffix.find_first_not_of("0123456789")!=std::string::npos||ref.name[start+65]!='.'||!indices||indices->t!=V::Arr||indices->arr.size()!=1||indices->arr[0].t!=V::Num||indices->arr[0].num!=std::stoul(suffix))throw std::runtime_error("Current-B-rep reference provenance mismatch; select the current geometry");
         }
         if(selectable(ref.status)){auto& indices=need(row,"indices");if(indices.t!=V::Arr||indices.arr.size()!=1||indices.arr[0].t!=V::Num||std::floor(indices.arr[0].num)!=indices.arr[0].num||indices.arr[0].num<0||indices.arr[0].num>1000000)throw std::runtime_error("Ambiguous topology binding");ref.shape=atIndex(shape,refType(ref.kind),static_cast<int>(indices.arr[0].num));if(const V* seed=row.find("descriptor"))ref.seed=*seed;}
-        V meta=V::makeObj();for(const char* key:{"merged_from","surviving","split_into","reason"})if(const V* value=row.find(key))meta.set(key,*value);if(!meta.obj.empty())ref.meta=std::move(meta);
+        V meta=V::makeObj();for(const char* key:{"merged_from","surviving","split_into","reason","lineage_authority"})if(const V* value=row.find(key))meta.set(key,*value);if(!meta.obj.empty())ref.meta=std::move(meta);
         if(ref.name.find("@ark.")!=std::string::npos)ref.seed=V{}; // Current handles derive frames from the bound B-rep, never supplied descriptors.
         out.push_back(ref);
-    }return out;
+    }bindDescendantReferences074(out);return out;
 }
 V topologyOf(const TopoDS_Shape& shape,const std::string& encoded,const std::vector<Ref>& refs){
     const std::string identity=digest(encoded);V out=V::makeObj(),rows=V::makeArr();out.set("brep_sha256",V::makeStr(identity));
@@ -182,16 +193,20 @@ V topologyOf(const TopoDS_Shape& shape,const std::string& encoded,const std::vec
         const auto marker=ref.name.find("@ark.");const bool generic=marker!=std::string::npos;
         if(generic){const auto start=ref.name.find('.',marker+5);if(start==std::string::npos||ref.name.substr(start+1,64)!=identity)status="obsolete";}
         if(selectable(status)){int i=indexOf(shape,ref.shape,refType(ref.kind));if(i<0)status="deleted";else indices.arr.push_back(V::makeNum(i));}
-        row.set("status",V::makeStr(status));row.set("indices",indices);if(selectable(status)){Ref bound=ref;bound.shape=(ref.kind=="edge"?resultEdges:resultFaces).at((size_t)indices.arr.front().num);V data=generic?ref.seed:descriptor(bound);row.set("frame_available",V::makeBool(data.find("normal")||data.find("axis")||data.find("tangent")));row.set("descriptor",data);}for(const char* key:{"merged_from","surviving","split_into","reason"})if(const V* value=ref.meta.find(key))row.set(key,*value);rows.arr.push_back(row);
+        row.set("status",V::makeStr(status));row.set("indices",indices);if(selectable(status)){Ref bound=ref;bound.shape=(ref.kind=="edge"?resultEdges:resultFaces).at((size_t)indices.arr.front().num);V data=generic?ref.seed:descriptor(bound);row.set("frame_available",V::makeBool(data.find("normal")||data.find("axis")||data.find("tangent")));row.set("descriptor",data);}for(const char* key:{"merged_from","surviving","split_into","reason","lineage_authority"})if(const V* value=ref.meta.find(key))row.set(key,*value);if(!generic&&!ref.descendants.empty()&&!historicalReferenceGroup074(ref))row.set("split_into",descendantHandles074(ref,shape,identity));rows.arr.push_back(row);
     }out.set("references",rows);return out;
 }
 template<class Operation>std::vector<Ref> propagated(const std::vector<Ref>& refs,const TopoDS_Shape& result,Operation& op){
     std::vector<Ref> out;out.reserve(refs.size());
-    for(auto ref:refs){if(!selectable(ref.status)){out.push_back(ref);continue;}std::vector<TopoDS_Shape> matches;
+    for(auto ref:refs){
+        // A legacy stem such as side.skin names a historical group, not one
+        // face later split by this operation. Its named members propagate in
+        // their own rows; preserve the unbound group's original explanation.
+        if(historicalReferenceGroup074(ref)){out.push_back(ref);continue;}
+        const bool splitSource=ref.status=="split"&&!ref.descendants.empty()&&ref.name.find("@ark.")==std::string::npos;if(!selectable(ref.status)&&!splitSource){out.push_back(ref);continue;}std::vector<TopoDS_Shape> matches;
         auto collect=[&](const TopTools_ListOfShape& list){for(TopTools_ListIteratorOfListOfShape it(list);it.More();it.Next()){auto s=it.Value();if(indexOf(result,s,refType(ref.kind))>=0){bool found=false;for(const auto& old:matches)if(old.IsSame(s))found=true;if(!found)matches.push_back(s);}}};
-        collect(op.Modified(ref.shape));collect(op.Generated(ref.shape));
-        if(matches.empty()&&indexOf(result,ref.shape,refType(ref.kind))>=0)matches.push_back(ref.shape);
-        if(matches.size()==1)ref.shape=matches.front();else{ref.shape.Nullify();ref.status=matches.empty()?"deleted":"split";}
+        const auto ancestors=splitSource?ref.descendants:std::vector<TopoDS_Shape>{ref.shape};for(const auto& ancestor:ancestors){const auto before=matches.size();collect(op.Modified(ancestor));collect(op.Generated(ancestor));if(matches.size()==before&&indexOf(result,ancestor,refType(ref.kind))>=0){bool duplicate=false;for(const auto& old:matches)duplicate|=old.IsSame(ancestor);if(!duplicate)matches.push_back(ancestor);}}
+        ref.descendants.clear();if(matches.size()==1&&!splitSource)ref.shape=matches.front();else{ref.shape.Nullify();ref.status=matches.empty()?"deleted":"split";ref.descendants=matches;if(!matches.empty())ref.meta.set("lineage_authority",V::makeStr("occt_modified_generated_or_unchanged"));}
         out.push_back(ref);
     }return out;
 }
@@ -278,26 +293,19 @@ std::pair<TopoDS_Face,std::vector<std::pair<std::string,TopoDS_Edge>>> profileFa
 }
 #include "profile_regions_046b.inl"
 #include "extrusion_073b.inl"
+#include "thin_offset_074b.inl"
 TopoDS_Face extrusionFace(const V& request,const char* brepKey,const char* topologyKey,const char* referenceKey){
     const auto source=readBrep(word(request,brepKey));const auto names=inputRefs(request,brepKey,topologyKey,source);const auto name=word(request,referenceKey);
     for(const auto& ref:names)if(ref.name==name){if(ref.kind!="face"||!selectable(ref.status)||ref.shape.IsNull())throw std::runtime_error("Extrusion face is missing, split, deleted or ambiguous: "+name);return TopoDS::Face(ref.shape);}
     throw std::runtime_error("Unknown exact extrusion face: "+name);
 }
-TopoDS_Shape makeExtrusion(const V& request,std::vector<Ref>& refs,V* receipt=nullptr){
-    TopoDS_Face face;TopoDS_Wire openThin;std::vector<std::pair<std::string,TopoDS_Edge>> edges;gp_Vec normal;V regionReceipt,thinReceipt;
-    const bool thin=request.find("thickness")||request.find("thin_side");if(thin&&(!request.find("thickness")||!request.find("thin_side")))throw std::runtime_error("Thin extrusion requires explicit thickness and thin_side");
-    const bool fromFace=request.find("source_face")!=nullptr;
-    if(fromFace){
-        face=extrusionFace(request,"input_brep","input_topology","source_face");BRepAdaptor_Surface surface(face);
-        if(surface.GetType()!=GeomAbs_Plane)throw std::runtime_error("Extrusion source must be an exact planar face");
-        normal=gp_Vec(surface.Plane().Axis().Direction());if(face.Orientation()==TopAbs_REVERSED)normal.Reverse();
-        const auto source=readBrep(word(request,"input_brep"));const auto names=inputRefs(request,"input_brep","input_topology",source);
-        for(const auto& edge:shapes(face,TopAbs_EDGE))for(const auto& ref:names)if(ref.kind=="edge"&&selectable(ref.status)&&ref.name.find("@ark.")==std::string::npos&&ref.shape.IsSame(edge)){edges.push_back({ref.name,TopoDS::Edge(edge)});break;}
-    }else{const auto& profile=need(request,"profile");
-        if(profile.find("regions")){auto regions=profileRegions046B(profile);requireOneRegion046B(regions,"native extrude");face=regions.faces.front();edges=std::move(regions.edges);regionReceipt=std::move(regions.receipt);}
-        else if(thin){const auto curve=profileCurveNative(profile);const auto source=readBrep(word(curve,"brep_base64"));if(source.ShapeType()!=TopAbs_WIRE)throw std::runtime_error("Thin profile needs one exact wire");if(BRep_Tool::IsClosed(source)){auto base=profileFace(profile);face=base.first;edges=std::move(base.second);}else openThin=TopoDS::Wire(source);}
-        else{auto source=profileFace(profile);face=source.first;edges=std::move(source.second);}
-        auto m=frame(profile);normal=gp_Vec(m[8],m[9],m[10]);}
+TopoDS_Shape makeExtrusionResolved074(const V& request,TopoDS_Face face,TopoDS_Wire openThin,std::vector<std::pair<std::string,TopoDS_Edge>> edges,gp_Vec normal,bool fromFace,bool thin,const V& regionReceipt,std::vector<Ref>& refs,V* receipt){
+    V thinReceipt;
+    if(thin&&request.find("thin_method")){
+        const auto method=word(request,"thin_method");if(method!="analytic"&&method!="offset")throw std::runtime_error("Thin method must be analytic or offset");
+        if(method=="offset"){auto wall=thinOffset074(face,openThin,normal,request);std::vector<TopoDS_Shape> solids;V records=V::makeArr();for(size_t i=0;i<wall.parts.size();++i){auto& part=wall.parts[i];std::vector<Ref> partRefs;V record=V::makeObj();auto solid=makeExtrusionResolved074(request,part.face,{},part.edges,normal,fromFace,false,regionReceipt,partRefs,&record);requireOnePositiveSolid(solid);solids.push_back(std::move(solid));for(auto& ref:partRefs){if(wall.parts.size()>1)ref.name="wall."+std::to_string(i)+"."+ref.name;refs.push_back(std::move(ref));}records.arr.push_back(std::move(record));}if(receipt){if(records.arr.size()==1)*receipt=records.arr.front();else receipt->set("per_wall_extrusion",records);receipt->set("thin",wall.report);}return solids.size()==1?solids.front():compound(solids);}
+    }
+    if(thin&&request.find("thin_join"))throw std::runtime_error("thin_join requires thin_method offset");
     if(thin){TopoDS_Wire wire=openThin;if(wire.IsNull()){if(shapes(face,TopAbs_WIRE).size()!=1)throw std::runtime_error("Thin extrusion needs one boundary without holes; no loop is discarded");wire=BRepTools::OuterWire(face);}auto wall=thinProfile073(wire,normal,positive(request,"thickness"),word(request,"thin_side"),edges);face=wall.face;edges=std::move(wall.edges);thinReceipt=std::move(wall.report);}
     const double direction=optional(request,"direction",1),symmetric=optional(request,"symmetric",0);
     if(direction!=1&&direction!=-1)throw std::runtime_error("Extrusion direction must be +1 or -1");
@@ -329,6 +337,32 @@ TopoDS_Shape makeExtrusion(const V& request,std::vector<Ref>& refs,V* receipt=nu
         add(refs,"edge.end."+name,"edge",op.LastShape(edge));
     }if(receipt){if(thin)receipt->set("thin",thinReceipt);if(request.find("start_offset"))receipt->set("authored_start_offset_mm",V::makeNum(authoredOffset));receipt->set("mode",V::makeStr(mode));receipt->set("depth_mm",V::makeNum(depth));receipt->set("direction",V::makeNum(direction));receipt->set("symmetric",V::makeBool(symmetric!=0));receipt->set("start_offset_mm",V::makeNum(offset));receipt->set("limit_cap_coverage_checked",V::makeBool(coverage));receipt->set("source",V::makeStr(fromFace?"exact_planar_face":"saved_sketch"));if(regionReceipt.t==V::Obj)receipt->set("profile_regions",regionReceipt);}
     return op.Shape();
+}
+TopoDS_Shape makeExtrusion(const V& request,std::vector<Ref>& refs,V* receipt=nullptr){
+    TopoDS_Face face;TopoDS_Wire openThin;std::vector<std::pair<std::string,TopoDS_Edge>> edges;gp_Vec normal;V regionReceipt;
+    const bool thin=request.find("thickness")||request.find("thin_side");if(thin&&(!request.find("thickness")||!request.find("thin_side")))throw std::runtime_error("Thin extrusion requires explicit thickness and thin_side");
+    if(!thin&&(request.find("thin_method")||request.find("thin_join")))throw std::runtime_error("Thin method/join requires explicit thickness and thin_side");
+    if(request.find("result_mode")&&word(request,"result_mode")!="single"&&word(request,"result_mode")!="bodies")throw std::runtime_error("Extrusion result_mode must be single or bodies");
+    const bool fromFace=request.find("source_face")!=nullptr;
+    if(fromFace){
+        face=extrusionFace(request,"input_brep","input_topology","source_face");BRepAdaptor_Surface surface(face);
+        if(surface.GetType()!=GeomAbs_Plane)throw std::runtime_error("Extrusion source must be an exact planar face");
+        normal=gp_Vec(surface.Plane().Axis().Direction());if(face.Orientation()==TopAbs_REVERSED)normal.Reverse();
+        const auto source=readBrep(word(request,"input_brep"));const auto names=inputRefs(request,"input_brep","input_topology",source);
+        for(const auto& edge:shapes(face,TopAbs_EDGE))for(const auto& ref:names)if(ref.kind=="edge"&&selectable(ref.status)&&ref.name.find("@ark.")==std::string::npos&&ref.shape.IsSame(edge)){edges.push_back({ref.name,TopoDS::Edge(edge)});break;}
+    }else{const auto& profile=need(request,"profile");
+        if(profile.find("regions")){auto regions=profileRegions046B(profile);
+            if(regions.faces.size()>1&&request.find("result_mode")&&word(request,"result_mode")=="bodies"){
+                if(regions.faces.size()>64)throw std::runtime_error("Multibody extrusion selects at most64 exact cells; no cells discarded");std::vector<TopoDS_Shape> solids;V records=V::makeArr();auto m=frame(profile);const gp_Vec n(m[8],m[9],m[10]);
+                for(size_t i=0;i<regions.faces.size();++i){std::vector<std::pair<std::string,TopoDS_Edge>> names;const auto faceEdges=shapes(regions.faces[i],TopAbs_EDGE);for(const auto& edge:regions.edges)if(std::any_of(faceEdges.begin(),faceEdges.end(),[&](const auto& candidate){return candidate.IsSame(edge.second);}))names.push_back(edge);std::vector<Ref> partRefs;V record=V::makeObj();auto solid=makeExtrusionResolved074(request,regions.faces[i],{},std::move(names),n,false,thin,regions.receipt,partRefs,&record);const auto parts=shapes(solid,TopAbs_SOLID);if(parts.empty())throw std::runtime_error("Extrusion returned no wall solid");for(const auto& part:parts){requireOnePositiveSolid(part);solids.push_back(part);}for(auto& ref:partRefs){ref.name="body."+std::to_string(i)+"."+ref.name;refs.push_back(std::move(ref));}records.arr.push_back(std::move(record));}
+                if(receipt){receipt->set("result_mode",V::makeStr("bodies"));receipt->set("profile_regions",regions.receipt);receipt->set("per_body_extrusion",std::move(records));receipt->set("discarded_solids",V::makeNum(0));}return compound(solids);
+            }
+            requireOneRegion046B(regions,"native extrude");face=regions.faces.front();edges=std::move(regions.edges);regionReceipt=std::move(regions.receipt);}
+
+        else if(thin){const auto curve=profileCurveNative(profile);const auto source=readBrep(word(curve,"brep_base64"));if(source.ShapeType()!=TopAbs_WIRE)throw std::runtime_error("Thin profile needs one exact wire");if(BRep_Tool::IsClosed(source)){auto base=profileFace(profile);face=base.first;edges=std::move(base.second);}else openThin=TopoDS::Wire(source);}
+        else{auto source=profileFace(profile);face=source.first;edges=std::move(source.second);}
+        auto m=frame(profile);normal=gp_Vec(m[8],m[9],m[10]);}
+    return makeExtrusionResolved074(request,std::move(face),std::move(openThin),std::move(edges),normal,fromFace,thin,regionReceipt,refs,receipt);
 }
 TopoDS_Shape cutter(const V& spec){
     std::string kind=word(spec,"kind");auto m=frame(spec);gp_Trsf t=transform(m);double depth=positive(spec,"depth");
@@ -723,18 +757,21 @@ void rebindIntermediate(std::vector<Ref>& refs,const TopoDS_Shape& shape){
 void requireValidIntermediate(const TopoDS_Shape& shape){
     if(shape.IsNull()||!BRepCheck_Analyzer(shape).IsValid())throw std::runtime_error("Native result failed B-rep validation");requireOnePositiveSolid(shape);
 }
+#include "boolean_batch_074b.inl"
+#include "authoring_selection_074b.inl"
 #include "drag_chain_link_050b.inl"
 }
 
 V inspectProfileRegionsNative073(const V& profile){
     V out=V::makeObj();out.set("schema",V::makeStr("ark.extrusion-regions.073b"));out.set("authority",V::makeStr("exact_occt_planar_faces"));out.set("regions",V::makeArr());out.set("profile_closed",V::makeBool(false));out.set("needs_selection",V::makeBool(false));
-    try{auto found=profileRegions046B(profile,true);out.set("status",V::makeStr("closed"));out.set("profile_closed",V::makeBool(true));out.set("regions",*found.receipt.find("regions"));out.set("loops",*found.receipt.find("loops"));out.set("open_chains_ignored",*found.receipt.find("open_chains_ignored"));out.set("needs_selection",V::makeBool(found.faces.size()>1||!found.receipt.find("open_chains_ignored")->arr.empty()));return out;}
+    try{auto found=profileRegions046B(profile,true);out.set("status",V::makeStr("closed"));out.set("profile_closed",V::makeBool(true));out.set("regions",*found.receipt.find("regions"));if(const auto* lineage=found.receipt.find("boundary_lineage"))out.set("boundary_lineage",*lineage);out.set("loops",*found.receipt.find("loops"));out.set("open_chains_ignored",*found.receipt.find("open_chains_ignored"));out.set("needs_selection",V::makeBool(found.faces.size()>1||!found.receipt.find("open_chains_ignored")->arr.empty()));return out;}
     catch(const std::exception& error){const std::string reason=error.what();try{V plain=profile;plain.obj.erase(std::remove_if(plain.obj.begin(),plain.obj.end(),[](const auto& item){return item.first=="regions";}),plain.obj.end());const auto curve=profileCurveNative(plain);const auto wire=readBrep(word(curve,"brep_base64"));if(wire.ShapeType()==TopAbs_WIRE&&!BRep_Tool::IsClosed(wire)){out.set("status",V::makeStr("open"));out.set("open_chains_ignored",V::makeArr());return out;}}catch(...){}out.set("status",V::makeStr("invalid"));out.set("error",V::makeStr(reason));return out;}
 }
 
 V modelSolidNative(const V& request){
-    const std::string op=word(request,"op");std::vector<Ref> refs;TopoDS_Shape result;bool many=false,pattern044b=false;V patternReceipt;V extrusionReceipt=V::makeObj(),vertexReceipt=V::makeObj(),splitReceipt=V::makeObj();
+    const std::string op=word(request,"op");std::vector<Ref> refs;TopoDS_Shape result;bool many=request.find("result_mode")&&word(request,"result_mode")=="bodies",pattern044b=false;V patternReceipt;V extrusionReceipt=V::makeObj(),vertexReceipt=V::makeObj(),splitReceipt=V::makeObj();
     try{
+    if(op=="reference_anchor"||op=="body_select")return withNativeVertexInventory(authoringSelection074(request));
     if(op=="vent"||op=="wood")return productPatternNative(request);
     if(op=="rubber_body")return rubberBodyNative059(request);
     if(solidRecipe031b(op))return modelingRecipe031b(request);
@@ -859,7 +896,7 @@ V modelSolidNative(const V& request){
             result=rigidlyPlaced(input,request,refs);
         }else throw std::runtime_error("Unknown native solid operation");
     }
-    V output=pattern044b?finishCurvePattern044b(result,refs,patternReceipt):many?finishBodies(result,refs):finish(result,refs);if(op=="extrude"){V report=need(output,"report");report.set("extrusion",extrusionReceipt);output.set("report",report);}if(op=="vertex_pull"){V report=need(output,"report");report.set("vertex_pull",vertexReceipt);report.set("self_intersections_checked",V::makeBool(true));output.set("report",report);}if(op=="split_line"){V report=need(output,"report");report.set("split_line",splitReceipt);report.set("area_mm2",need(splitReceipt,"result_area_mm2"));output.set("report",report);}if(op=="split_plane"||op=="split_surface"||op=="split_tool"||op=="fillet"||op=="chamfer"){V report=need(output,"report");report.set(op=="fillet"||op=="chamfer"?"edge_finish":"split",splitReceipt);output.set("report",report);}return output;
+    V output=pattern044b?finishCurvePattern044b(result,refs,patternReceipt):many?finishBodies(result,refs):finish(result,refs);if(request.find("result_mode"))output=bodyInventory074(std::move(output),result);if(op=="extrude"){V report=need(output,"report");report.set("extrusion",extrusionReceipt);output.set("report",report);}if(op=="vertex_pull"){V report=need(output,"report");report.set("vertex_pull",vertexReceipt);report.set("self_intersections_checked",V::makeBool(true));output.set("report",report);}if(op=="split_line"){V report=need(output,"report");report.set("split_line",splitReceipt);report.set("area_mm2",need(splitReceipt,"result_area_mm2"));output.set("report",report);}if(op=="split_plane"||op=="split_surface"||op=="split_tool"||op=="fillet"||op=="chamfer"){V report=need(output,"report");report.set(op=="fillet"||op=="chamfer"?"edge_finish":"split",splitReceipt);output.set("report",report);}return output;
     }
     catch(const std::exception& error){
         std::string context="Native "+op;
@@ -875,6 +912,7 @@ V modelSolidNative(const V& request){
 
 std::vector<TopoDS_Shape> profileRegionFaces046B(const V& profile,V& receipt){auto regions=profileRegions046B(profile);receipt=std::move(regions.receipt);std::vector<TopoDS_Shape> faces(regions.faces.begin(),regions.faces.end());if(faces.size()!=1){ProfileRegions046B labels;labels.faces=std::move(regions.faces);labels.labels=std::move(regions.labels);requireOneRegion046B(labels,"this exact feature");}return faces;}
 V booleanSequenceNative(const V& sequence){
+    if(const auto* mode=sequence.find("boolean_mode")){if(mode->t!=V::Str||mode->str!="all")throw std::runtime_error("boolean_mode must be all");return booleanBatch074(sequence);}
     // One worker request runs every pairwise step of a 2..16-input exact
     // boolean with the same OCCT operation and reference propagation as the
     // native_solid request. Intermediates stay in memory: they are validated
@@ -898,6 +936,7 @@ V booleanSequenceNative(const V& sequence){
     std::vector<Ref> refs;TopoDS_Shape current;
     try{auto loaded=load(pieces.arr.front(),refs);current=loaded.first;if(!loaded.second)requireOnePositiveSolid(current);}
     catch(const std::exception& error){throw std::runtime_error("Native "+op+" base input"+pieceName(0)+": "+error.what());}
+    const bool bodyResult=sequence.find("result_mode")&&word(sequence,"result_mode")=="bodies";if(sequence.find("result_mode")&&!bodyResult&&word(sequence,"result_mode")!="single")throw std::runtime_error("result_mode must be single or bodies");
     const size_t steps=pieces.arr.size()-1;
     for(size_t index=1;index<=steps;++index){
         NativeProfileScope step("booleanSequence.step");std::vector<Ref> toolRefs;TopoDS_Shape tool;const size_t inputSolids=shapes(current,TopAbs_SOLID).size();
@@ -905,14 +944,14 @@ V booleanSequenceNative(const V& sequence){
             auto loaded=load(pieces.arr[index],toolRefs);tool=loaded.first;
             if(!loaded.second&&(shapes(tool,TopAbs_SOLID).empty()||!(properties(tool)>0)))throw std::runtime_error("Boolean tool needs one or more positive-volume solids");
             current=booleanStep(op,current,refs,tool,toolRefs,pieces.arr[index].find("namespace"));
-            if(index<steps){requireValidIntermediate(current);rebindIntermediate(refs,current);}
+            if(index<steps){if(bodyResult)checkedSolids074(current);else requireValidIntermediate(current);rebindIntermediate(refs,current);}
         }catch(const std::exception& error){
             std::string context="Native "+op+" step "+std::to_string(index)+" of "+std::to_string(steps)+pieceName(index)+" input contains "+std::to_string(inputSolids)+" solids";
             if(!tool.IsNull())context+=" tool contains "+std::to_string(shapes(tool,TopAbs_SOLID).size())+" solids";
             throw std::runtime_error(context+": "+error.what());
         }
     }
-    return finish(current,refs);
+    if(bodyResult)return bodyInventory074(finishBodies(current,refs),current);return finish(current,refs);
 }
 
 V componentCustodyNative(const V& package){

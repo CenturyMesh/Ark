@@ -1,0 +1,26 @@
+// Explicit alternative producers. There is no fallback, tolerance relaxation,
+// automatic self-intersection removal, or sampled surface conversion.
+std::string surfaceOffsetMethod074(const V& request){const auto* value=request.find("method");if(!value)return "simple";if(value->t!=V::Str||(value->str!="simple"&&value->str!="joined"&&value->str!="planar"))throw std::runtime_error("SURFACE_OFFSET: method must be simple, joined or planar");return value->str;}
+TopoDS_Shape rawSurfaceOffset074(const TopoDS_Shape& source,double amount,bool solid,const std::string& method){
+    if(method=="simple")return rawSurfaceOffset068(source,amount,solid);
+    if(source.ShapeType()!=TopAbs_FACE&&source.ShapeType()!=TopAbs_SHELL)throw std::runtime_error("SURFACE_OFFSET: alternative methods require one exact face or connected open shell");
+    if(!BRepCheck_Analyzer(source).IsValid()||!BRepAlgoAPI_Check(source,false,true).IsValid())throw std::runtime_error("SURFACE_OFFSET: source failed native validity/self-interference checks");
+    if(solid&&source.ShapeType()==TopAbs_SHELL){TopTools_IndexedDataMapOfShapeListOfShape owners;TopExp::MapShapesAndAncestors(source,TopAbs_EDGE,TopAbs_FACE,owners);bool open=false;for(int i=1;i<=owners.Extent();++i)open|=owners(i).Extent()==1&&!BRep_Tool::Degenerated(TopoDS::Edge(owners.FindKey(i)));if(!open)throw std::runtime_error("SURFACE_OFFSET: thickness source has no free boundary; an open skin is required");}
+    if(method=="planar"){
+        if(source.ShapeType()!=TopAbs_FACE)throw std::runtime_error("SURFACE_OFFSET: planar method requires one exact planar face, including its holes");const auto face=TopoDS::Face(source);BRepAdaptor_Surface support(face,true);if(support.GetType()!=GeomAbs_Plane)throw std::runtime_error("SURFACE_OFFSET: planar method requires a native plane support; no sampled planar fit is used");gp_Vec normal(support.Plane().Axis().Direction());if(face.Orientation()==TopAbs_REVERSED)normal.Reverse();
+        if(solid){BRepPrimAPI_MakePrism prism(face,normal*amount,false,true);if(!prism.IsDone())throw std::runtime_error("SURFACE_OFFSET: exact planar prism failed");return prism.Shape();}
+        gp_Trsf transform;transform.SetTranslation(normal*amount);BRepBuilderAPI_Transform moved(source,transform,true);if(!moved.IsDone())throw std::runtime_error("SURFACE_OFFSET: exact plane offset failed");return moved.Shape();
+    }
+    if(method!="joined")throw std::runtime_error("SURFACE_OFFSET: unsupported explicit construction method");
+    for(const auto& entity:shapes(source,TopAbs_FACE)){BRepAdaptor_Surface support(TopoDS::Face(entity),true);if(support.UContinuity()==GeomAbs_C0||support.VContinuity()==GeomAbs_C0)throw std::runtime_error("SURFACE_OFFSET: joined construction needs C1 native supports; split an explicitly authored C0 support into smooth faces rather than fitting it");}
+    BRepOffset_MakeOffset builder;builder.Initialize(source,amount,kTolerance,BRepOffset_Skin,false,false,GeomAbs_Intersection,solid,false);builder.AllowLinearization(false);builder.MakeOffsetShape();
+    if(!builder.IsDone()){std::string message="SURFACE_OFFSET: joined native construction failed (status "+std::to_string((int)builder.Error())+")";const auto& bad=builder.GetBadShape();if(!bad.IsNull()){const auto box=bounds(bad);message+="; source fault bounds [";for(size_t i=0;i<box.size();++i)message+=(i?",":"")+std::to_string(box[i]);message+="] mm";}throw std::runtime_error(message);}
+    return builder.Shape();
+}
+V surfaceOffsetNormalEvidence074(const TopoDS_Shape& source,const TopoDS_Shape& candidate,double amount){
+    V out=V::makeObj();size_t checked=0,onResult=0,unavailable=0;double maximum=0;
+    for(const auto& entity:shapes(source,TopAbs_FACE)){const auto face=TopoDS::Face(entity);double u0,u1,v0,v1;BRepTools::UVBounds(face,u0,u1,v0,v1);BRepAdaptor_Surface support(face,true);for(double u:{.25,.5,.75})for(double v:{.25,.5,.75}){
+        const double pu=u0+(u1-u0)*u,pv=v0+(v1-v0)*v;BRepClass_FaceClassifier inside(face,gp_Pnt2d(pu,pv),kTolerance);if(inside.State()!=TopAbs_IN)continue;
+        try{gp_Pnt point;gp_Vec du,dv;support.D1(pu,pv,point,du,dv);gp_Vec normal=du.Crossed(dv);if(normal.Magnitude()<=1e-12){++unavailable;continue;}normal.Normalize();if(face.Orientation()==TopAbs_REVERSED)normal.Reverse();const auto expected=point.Translated(normal*amount);const auto vertex=BRepBuilderAPI_MakeVertex(expected).Vertex();BRepExtrema_DistShapeShape distance(vertex,candidate);if(!distance.IsDone()||!std::isfinite(distance.Value())){++unavailable;continue;}++checked;maximum=std::max(maximum,distance.Value());if(distance.Value()<=kTolerance)++onResult;}catch(const Standard_Failure&){++unavailable;}
+    }}out.set("checked_points",V::makeNum(checked));out.set("expected_offset_points_on_result",V::makeNum(onResult));out.set("unavailable_points",V::makeNum(unavailable));out.set("max_point_to_result_distance_mm",V::makeNum(maximum));out.set("scope",V::makeStr("Native source normals and exact point-to-candidate distance at interior checkpoints. Joined trimming can legitimately remove expected points near intersections; this is diagnostic evidence, not a global distance or manufacturing certificate."));return out;
+}

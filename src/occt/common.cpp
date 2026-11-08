@@ -191,7 +191,19 @@ void integrateVolume(const TopoDS_Shape& shape,GProp_GProps& props,bool centroid
 void volumeProperties(const TopoDS_Shape& shape,GProp_GProps& props,bool moments){integrateVolume(shape,props,moments,moments);}
 void volumeCentroidProperties(const TopoDS_Shape& shape,GProp_GProps& props){integrateVolume(shape,props,true,false);}
 
-double properties(const TopoDS_Shape& shape,char kind){NativeProfileScope profile(kind=='a'?"areaProperties":kind=='l'?"lengthProperties":"volumeScalar");GProp_GProps props;if(shape.IsNull())return 0;if(kind=='a')BRepGProp::SurfaceProperties(shape,props);else if(kind=='l')BRepGProp::LinearProperties(shape,props);else volumeProperties(shape,props,false);return props.Mass();}
+double properties(const TopoDS_Shape& shape,char kind){
+    NativeProfileScope profile(kind=='a'?"areaProperties":kind=='l'?"lengthProperties":"volumeScalar");GProp_GProps props;if(shape.IsNull())return 0;
+    if(kind=='a'){
+        bool adaptive=false;for(TopExp_Explorer face(shape,TopAbs_FACE);face.More();face.Next()){
+            const auto type=BRepAdaptor_Surface(TopoDS::Face(face.Current())).GetType();
+            if(type!=GeomAbs_Plane&&type!=GeomAbs_Cylinder&&type!=GeomAbs_Cone&&type!=GeomAbs_Sphere&&type!=GeomAbs_Torus){adaptive=true;break;}
+        }
+        // Fixed quadrature measurably under-integrates rational parametrizations
+        // (including an exact rational cylinder). Keep the elementary fast path.
+        if(adaptive){const double error=BRepGProp::SurfaceProperties(shape,props,1e-14,false);if(!std::isfinite(error)||error<0||error>1e-10)throw std::runtime_error("Exact surface area integration did not meet its relative precision");}
+        else BRepGProp::SurfaceProperties(shape,props);
+    }else if(kind=='l')BRepGProp::LinearProperties(shape,props);else volumeProperties(shape,props,false);return props.Mass();
+}
 std::vector<TopoDS_Shape> shapes(const TopoDS_Shape& shape,TopAbs_ShapeEnum kind){std::vector<TopoDS_Shape> out;for(TopExp_Explorer ex(shape,kind);ex.More();ex.Next())out.push_back(ex.Current());return out;}
 std::array<double,6> bounds(const TopoDS_Shape& shape){NativeProfileScope profile("bounds");Bnd_Box box;BRepBndLib::AddOptimal(shape,box,false,false);if(box.IsVoid())throw std::runtime_error("Empty native shape bounds");std::array<double,6> b;box.Get(b[0],b[1],b[2],b[3],b[4],b[5]);return b;}
 template<class Op>TopoDS_Shape booleanOp(const TopoDS_Shape& a,const TopoDS_Shape& b){NativeProfileScope profile("boolean.single_build");Op op(a,b);if(!op.IsDone()||op.HasErrors())throw std::runtime_error("Native Boolean operation failed");return op.Shape();}

@@ -109,7 +109,7 @@ private:
       static size_t retainedValueBytes(const arkjson::Value&);
       size_t retainedCandidateBytes(const Prepared* extra=nullptr,bool includeExisting=true) const;
       void trimPrepared();
-    std::vector<std::string> undo_,redo_;
+    std::vector<std::shared_ptr<const std::string>> undo_,redo_;
     void remember(bool projectBoundary=false);
     struct Cache { Mesh mesh; MeshReport report; std::unique_ptr<MeshBVH> bvh; };
     std::unordered_map<u64,Cache> cache_;

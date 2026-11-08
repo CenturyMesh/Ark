@@ -1,5 +1,13 @@
 # ARK roadmap A–G
 
+074B (**A.02/A.03/A.04/B.01/B.02/B.03/B.04/D.02 — Verificado no escopo local**):
+incremental feature families, independent mate groups, typed transactions,
+coalesced previews, validated body reuse and batched Booleans; exact intersecting
+regions, broader rational surfaces/lofts, thin offsets, contour fillets and
+explicit reference/body selection with human controls. Native/script206/206 and
+affected Studio29/29 passed. F.03 distribution remains a separate gate; see
+[074B evidence, measurements and supported domains](iterations/074B.md).
+
 073B (**A.04/B.01/B.02/B.03/B.04/D.02/F.03 — Verificado no escopo local**): granular
 mate/sketch invalidation and an exact extrusion workflow with region selection,
 start offset, thin walls and explicit union targets. Matched pose/sketch edits
