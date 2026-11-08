@@ -160,6 +160,7 @@ struct NativeResultCache {
     }
     static bool decodePayload(const std::string& payload,V& value){
         try{
+            checkDocumentJsonRead072(payload); // optional stored cache; resource rejection is a cache miss
             V result;if(!arkjson::parse(payload,result)||result.t!=V::Obj||result.find("error"))return false;
             const auto* local=result.find("native_cache_producer_local");if(!local||local->t!=V::Bool||!local->b)return false;
             const auto* report=result.find("report"),*brep=result.find("brep_base64"),*topology=result.find("topology");

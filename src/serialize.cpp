@@ -1,3 +1,4 @@
+#include "ark/document_resources_072a.hpp"
 #include "ark/design_containers.hpp"
 #include "ark/parametric_components.hpp"
 #include "ark/parametric_programs.hpp"
@@ -676,7 +677,6 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
     if(includeAudit&&includeHistory)iterationPersist(r,doc);
     canonicalDocumentKeys(r);
     std::string serialized=r.dump();
-    if(serialized.size()>maxDocumentBytes)throw std::runtime_error("Document exceeds 4 MiB logical capacity, including embedded images and retained history");
     return serialized;
 }
 
@@ -975,9 +975,10 @@ static bool documentFromValue(Value& v,Document& doc,std::string* err){
 }
 
 bool documentFromJson(const std::string& json,Document& doc,std::string* err){
-    if(json.size()>maxDocumentBytes){if(err)*err="document exceeds 4 MiB";return false;}
-    Value root;if(!arkjson::parse(json,root)){if(err)*err="malformed JSON";return false;}
-    return documentFromValue(root,doc,err);
+    try{checkDocumentJsonRead072(json);
+        Value root;if(!arkjson::parse(json,root)){if(err)*err="malformed JSON";return false;}
+        return documentFromValue(root,doc,err);
+    }catch(const std::exception& e){if(err)*err=e.what();return false;}
 }
 
 // ---------------------------------------------------------------------------
@@ -1041,15 +1042,16 @@ bool saveDocument(const Document& doc, const char* path, DocumentSaveReport* rep
     if(report)*report={};
     auto fail=[&](std::string reason){if(report)report->error=std::move(reason);return false;};
     if(!path||!*path) return fail("Empty document path");
-    if(doc.iterationHistory.t==Value::Obj){std::string historyError;if(!iterationValidate(doc,doc.iterationHistory,historyError))return fail("Iteration history invalid: "+historyError);}
-    // Preserve this bool API's failure contract before opening any staging file.
-    // Authoring validation and logical-capacity errors are serialization failures.
-    std::string j;try{j=documentToJson(doc);}catch(const std::exception& e){return fail(e.what());}
-    if(j.size()>maxDocumentBytes)return fail("Document exceeds the total 4 MiB logical capacity");
-    Value persistedRoot;if(!arkjson::parse(j,persistedRoot))return fail("Document JSON exceeds the parser nesting limit");
-    auto destination=std::filesystem::path(reinterpret_cast<const char8_t*>(path)),temporary=destination;
-    auto extension=destination.extension().string();
-    std::transform(extension.begin(),extension.end(),extension.begin(),[](unsigned char c){return static_cast<char>(std::tolower(c));});
+    std::string j,extension;Value persistedRoot;std::filesystem::path destination,temporary;
+    try{
+        if(doc.iterationHistory.t==Value::Obj){std::string historyError;if(!iterationValidate(doc,doc.iterationHistory,historyError))return fail("Iteration history invalid: "+historyError);}
+        // Complete validation/allocation before opening any output. Preserve the
+        // bool API even when resident source or parser allocations fail.
+        j=documentToJson(doc);
+        if(!arkjson::parse(j,persistedRoot))return fail("Document JSON exceeds the parser nesting limit");
+        destination=std::filesystem::path(reinterpret_cast<const char8_t*>(path));temporary=destination;extension=destination.extension().string();
+        std::transform(extension.begin(),extension.end(),extension.begin(),[](unsigned char c){return static_cast<char>(std::tolower(c));});
+    }catch(const std::exception& e){return fail(e.what());}
     if(extension!=".arkjson"&&extension!=".json"){
         try{
             NativeDocumentResultsReport selected;auto derived=nativeDocumentResults(doc,&selected);
@@ -1067,11 +1069,13 @@ bool saveDocument(const Document& doc, const char* path, DocumentSaveReport* rep
                     if(i<geometry){--report->derivedEntries;report->derivedBytes-=bytes;++report->derivedOmittedEntries;report->derivedOmittedBytes+=bytes;}
                     else{--report->motionFrameEntries;report->motionFrameBytes-=bytes;++report->motionFrameOmittedEntries;report->motionFrameOmittedBytes+=bytes;}}
                 report->derivedStoredBytes=written.derivedStoredBytes;report->physicalBytes=written.physicalBytes;report->bytesBeforeCompaction=written.bytesBeforeCompaction;
+                report->containerVersion=written.storageVersion;report->capacitySchemaUpgraded=written.capacitySchemaUpgraded;
                 report->derivedRewritten=written.derivedRewritten;report->compacted=written.compacted;report->compactionSkipped=written.compactionSkipped;
             }
             return true;
         }catch(const std::exception& e){return fail(e.what());}
     }
+    try{
     temporary+=".tmp";
     std::ofstream f(temporary,std::ios::binary|std::ios::trunc);
     if(!f) return fail("Cannot create the staged JSON export");
@@ -1085,15 +1089,17 @@ bool saveDocument(const Document& doc, const char* path, DocumentSaveReport* rep
 #endif
     if(!committed){std::error_code cleanup;std::filesystem::remove(temporary,cleanup);return fail("Cannot replace the JSON export target");}
     return true;
+    }catch(const std::exception& e){return fail(e.what());}
 }
 
 bool loadDocument(const char* path, Document& doc, std::string* err){
+    try{
     if(!path||!*path){ if(err)*err="empty path"; return false; }
     if(documentContainerFile(path)){
         Value root;DocumentDerivedPayloads derived;std::string discarded;DocumentContainerReadStats read;
         if(!loadDocumentContainer(path,root,err,&derived,&discarded,&read))return false;
-        // The container reader already enforced logical JSON capacity, exact
-        // codec limits and checksums. Apply the same authoring validation to
+        // The container reader already enforced allocation headroom, strict
+        // codec validation and checksums. Apply the same authoring validation to
         // its decoded value without constructing and parsing another JSON copy.
         Document candidate;if(!documentFromValue(root,candidate,err))return false;
         try{
@@ -1120,9 +1126,11 @@ bool loadDocument(const char* path, Document& doc, std::string* err){
     std::ifstream f(std::filesystem::path(reinterpret_cast<const char8_t*>(path)),std::ios::binary);
     if(!f){ if(err)*err=std::string("cannot open ")+path; return false; }
     f.seekg(0,std::ios::end);auto length=f.tellg();
-    if(length<0||length>4*1024*1024){if(err)*err="document exceeds 4 MiB";return false;}f.seekg(0);
+    if(length<0){if(err)*err="Cannot inspect document length";return false;}
+    try{DocumentReadBudget072 budget;budget.charge((size_t)length);}catch(const std::exception& e){if(err)*err=e.what();return false;}f.seekg(0);
     std::string j((std::istreambuf_iterator<char>(f)),std::istreambuf_iterator<char>());
     return documentFromJson(j,doc,err);
+    }catch(const std::exception& failure){if(err)*err=failure.what();return false;}
 }
 
 } // namespace ark

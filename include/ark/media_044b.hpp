@@ -24,7 +24,7 @@ void appearancePatternToJson044B(const Appearance& appearance,arkjson::Value& ou
 
 // Media assets share Document::imageAssets: image/gif embeds every frame;
 // video/mp4 stores a relative path beside the document plus its SHA-256 and
-// optional embedded bytes (at most 2 MiB, within the 4 MiB document cap).
+// optional embedded bytes (at most 2 MiB per media asset).
 bool mediaMime044B(const std::string& mime);
 bool animatedAsset044B(const ImageAsset& asset);
 std::string mediaAssetBytes044B(const ImageAsset& asset);

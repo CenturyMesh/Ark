@@ -22,6 +22,8 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err=n
 // optional saved geometry was written or omitted over the derived capacity.
 struct DocumentSaveReport {
     std::string error;
+    int containerVersion=0; // 0=text, 1/2=legacy container, 3=scalable authoring storage
+    bool capacitySchemaUpgraded=false;
     bool derivedGeometry=false;
     size_t derivedEntries=0,derivedBytes=0,derivedOmittedEntries=0,derivedOmittedBytes=0,derivedCapacityBytes=0;
     // 049A cached baked frames of current receipts; not cached or omitted frames re-bake on demand.

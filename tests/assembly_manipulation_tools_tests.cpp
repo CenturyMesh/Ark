@@ -59,9 +59,9 @@ int main(){try{
     check(!apply(door,open).find("history_round_trip"),"a pose kept after the authored placement is not a round trip");apply(door,close);
     const auto reopened=apply(door,open);const auto* trip=reopened.find("history_round_trip");
     check(trip&&trip->find("nodes_used")->num==2&&trip->find("hint")->str.find("snapshot{candidate_id")!=std::string::npos,"drive round trip names the read-only preview path");
-    check(!reopened.find("history_capacity"),"capacity warning stays quiet far below the journal limit");
+    check(!reopened.find("history_capacity"),"growable history does not emit a fixed-capacity warning");
     check(!apply(door,R"({"commands":[{"op":"assembly.drive","driver":"Door","delta":15}]})").find("history_round_trip"),"a new pose is not a round trip");
-    check(accepted(door.call("history_info",V::makeObj())).find("max_nodes")->num==512,"history_info reports the node capacity");
+    check(accepted(door.call("history_info",V::makeObj())).find("max_nodes")->isNull(),"history_info does not advertise an artificial node ceiling");
     check(accepted(session.call("agent_onboard",json(R"({"topic":"assembly"})"))).dump().find("snapshot{candidate_id")!=std::string::npos,"assembly onboarding keeps temporary poses read-only");
     const auto tools=AgentSession::tools();size_t applyTools=0,assemblyTools=0;for(const auto& tool:tools.arr){applyTools+=tool.find("name")->str=="doc_apply";assemblyTools+=tool.find("name")->str=="assembly_info";}check(applyTools==1&&assemblyTools==1&&tools.dump().find("assembly.drive")!=std::string::npos&&tools.dump().find("\"drive\"")!=std::string::npos,"schema advertises one command and preview endpoint");
     std::cout<<"assembly manipulation tool contracts passed\n";return 0;

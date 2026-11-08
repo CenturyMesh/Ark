@@ -1022,7 +1022,6 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
             auto package=importSourceTubeStep(str(args,"path"));buildSourceTubePreview(package);
             Document next;std::string error;if(!replace&&!documentFromJson(documentToJson(document,true,false),next,&error))throw std::runtime_error(error);
             Feature f;f.type=FeatureType::SourceTube;f.name="Source tube";if(auto p=package.find("source_name"))f.name=p->asStr();f.sourceData=std::move(package);auto id=next.addFeature(std::move(f));validated(next);
-            if(documentToJson(next).size()>4*1024*1024)throw std::runtime_error("Imported document exceeds current 4 MiB persistence limit; use replace:true for a standalone source document");
             if(replace)prepared_.clear();remember();document=std::move(next);++revision;V r=info();r.set("created_id",V::makeNum((double)id));r.set("report",*document.find(id)->sourceData.find("report"));return result(r);
         }
         if(tool=="import_sheet_step"){
@@ -1036,7 +1035,6 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
             (void)nativeResultMesh(package);
             Document next;std::string error;if(!replace&&!documentFromJson(documentToJson(document,true,false),next,&error))throw std::runtime_error(error);
             Feature feature;feature.type=FeatureType::SourceSheet;feature.name="Source sheet";if(auto name=package.find("source_name"))feature.name=name->asStr();feature.sourceData=std::move(package);u64 created=next.addFeature(std::move(feature));validated(next);
-            if(documentToJson(next).size()>4*1024*1024)throw std::runtime_error("Imported sheet exceeds current 4 MiB document limit");
             if(replace)prepared_.clear();remember();document=std::move(next);++revision;V answer=info();answer.set("created_id",V::makeNum((double)created));if(auto report=document.find(created)->sourceData.find("report"))answer.set("report",*report);return result(answer);
         }
         if(tool=="import_mesh"){
@@ -1047,7 +1045,6 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
             Document next;std::string error;if(!documentFromJson(documentToJson(document,true,false),next,&error))throw std::runtime_error(error);
             Feature feature;feature.type=FeatureType::MeshBody;feature.name=args.find("name")?str(args,"name"):"Imported mesh";feature.sourceData=meshToPayload(imported);
             const u64 created=next.addFeature(std::move(feature));validated(next);
-            if(documentToJson(next).size()>4*1024*1024)throw std::runtime_error("Imported mesh exceeds the 4 MiB document limit");
             remember();document=std::move(next);++revision;V answer=info();answer.set("created_id",V::makeNum((double)created));
             answer.set("input_vertices",V::makeNum(rawVertices));answer.set("input_triangles",V::makeNum(rawTriangles));
             answer.set("vertices",V::makeNum((double)imported.vertCount()));answer.set("triangles",V::makeNum((double)imported.triCount()));
@@ -1516,7 +1513,6 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
             if(appearanceOnly){
                 next.evalBodies=document.evalBodies;next.lastResults=document.lastResults;
                 validatedMaterials(next);validateAppearanceAuthoring024B(next,true);
-                if(appearance024BNeedsVersion39(next)&&documentToJson(next,true,false).size()>maxDocumentBytes)throw std::runtime_error("Embedded image document exceeds 4 MiB; reduce image dimensions/size");
                 remember();document.assembly=std::move(next.assembly);document.schematics=std::move(next.schematics);document.manufacturingPlans=std::move(next.manufacturingPlans);document.materials=std::move(next.materials);document.bomDocumentId=std::move(next.bomDocumentId);document.imageAssets=std::move(next.imageAssets);document.stamps=std::move(next.stamps);
                 for(size_t i=0;i<document.features.size();++i){document.features[i].material=std::move(next.features[i].material);document.features[i].appearance=std::move(next.features[i].appearance);document.features[i].part=std::move(next.features[i].part);document.features[i].classification=std::move(next.features[i].classification);document.features[i].faceAppearances=std::move(next.features[i].faceAppearances);}
             }else{if(!args.find("checks")&&!drawingEdits)validated(next,!placementOnly);remember();document=std::move(next);}
@@ -1532,7 +1528,6 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
             validated(next);destination.push_back(documentToJson(document));source.pop_back();document=std::move(next);++revision;prepared_.clear();return result(info());
         }
         if(tool=="doc_save"){
-            if(documentToJson(document).size()>maxDocumentBytes)throw std::runtime_error("Document capacity exceeds the total 4 MiB limit; save rejected and target preserved");
             auto path=str(args,"path");DocumentSaveReport saved;if(!saveDocument(document,path.c_str(),&saved))throw std::runtime_error("Could not save document"+(saved.error.empty()?std::string():": "+saved.error));
             V r=info();r.set("path",V::makeStr(path));
             if(saved.derivedGeometry){
@@ -1543,6 +1538,8 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
                 if(saved.derivedOmittedEntries)geometry.set("omitted_reason",V::makeStr("Saved geometry is an optional cache with a 256 MiB decoded and 128 MiB compressed capacity. Authoring was saved in full; omitted bodies are evaluated from authoring on the next open."));
                 r.set("saved_geometry",geometry);
                 V file=V::makeObj();file.set("physical_bytes",V::makeNum((double)saved.physicalBytes));file.set("compacted",V::makeBool(saved.compacted));
+                file.set("storage_version",V::makeNum(saved.containerVersion));file.set("capacity_schema_upgraded",V::makeBool(saved.capacitySchemaUpgraded));
+                if(saved.containerVersion>=3)file.set("compatibility_note",V::makeStr("Scalable authoring container: requires ARK 072A or later. Document geometry and history semantics are unchanged."));
                 if(saved.compacted)file.set("bytes_before_compaction",V::makeNum((double)saved.bytesBeforeCompaction));
                 if(!saved.compactionSkipped.empty())file.set("compaction_skipped",V::makeStr(saved.compactionSkipped));
                 r.set("container",file);
@@ -1666,7 +1663,7 @@ V AgentSession::tools(bool detailed){
     struct Def{const char* name;const char* desc;const char* schema;bool read;};
     const Def defs[]={
         {"history_info","Inspect persistent immutable iteration metadata and branch heads. limit 1..64, newest first. before_id excludes that anchor and pages older nodes; has_more/next_before_id indicate continuation. Baseline represents only the first observed authoring state. Actor identity is caller-declared. No geometry or token ledger snapshots are returned.",R"({"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":64},"before_id":{"type":"string"}}})",true},
-        {"iteration_restore","Restore saved authoring as a new branch iteration, preserving all prior nodes, current usage receipts and monotonic revision. Exact geometry is re-evaluated; any failure or total 4 MiB capacity violation rejects atomically. Actor is declared provenance.",R"({"type":"object","properties":{"id":{"type":"string"},"expected_revision":{"type":"integer","minimum":0},"motivation":{"type":"string","maxLength":4096},"actor":{"type":"object","properties":{"kind":{"type":"string"},"id":{"type":"string"},"role":{"type":"string"}},"required":["kind","id"]}},"required":["id","expected_revision"]})",false},
+        {"iteration_restore","Restore saved authoring as a new branch iteration, preserving all prior nodes, current usage receipts and monotonic revision. Exact geometry is re-evaluated; any validation or resource failure rejects atomically. Actor is declared provenance.",R"({"type":"object","properties":{"id":{"type":"string"},"expected_revision":{"type":"integer","minimum":0},"motivation":{"type":"string","maxLength":4096},"actor":{"type":"object","properties":{"kind":{"type":"string"},"id":{"type":"string"},"role":{"type":"string"}},"required":["kind","id"]}},"required":["id","expected_revision"]})",false},
         {"history_compact","Explicit recoverable history compaction, only on user instruction. Writes the complete current document to a NEW archive_path .ark and verifies reopening before publication. Retains at most keep_recent current-head ancestors and a baseline; optional retain_ids explicitly preserves other selected states (combined nodes at most 256), rewrites their ids, retains only contiguous available undo targets and clears redo. Other branches and older history remain in the archive, recoverable using doc_load. No authoring, geometry or usage is removed. Never overwrites archives; stale revision or archive failure leaves current document unchanged. Save the compacted document afterwards with doc_save.",R"({"type":"object","additionalProperties":false,"properties":{"archive_path":{"type":"string"},"keep_recent":{"type":"integer","minimum":0,"maximum":256},"retain_ids":{"type":"array","maxItems":256,"items":{"type":"string"}},"expected_revision":{"type":"integer","minimum":0},"confirm":{"type":"boolean","const":true},"motivation":{"type":"string","maxLength":4096},"actor":{"type":"object"}},"required":["archive_path","keep_recent","expected_revision","confirm"]})",false},
         {"history_migrate_derived","049A explicit journal rewrite; only on the user's explicit instruction. Removes 044B-048B inline baked-motion frames (derived data) from the current authoring, the journal baseline, deltas and blobs, keeping receipts with frames_sha256. First writes the complete document beside path as <name>.pre-049A.ark (never overwriting) and verifies it reopens; then rebuilds the journal (schema 2, new node ids and digests, same actors, tools, times and branches), records the migration in history_info migrations and advances revision. Rejects without confirm:true, a saved .ark path or inline payloads. Save afterwards with doc_save.",R"({"type":"object","properties":{"path":{"type":"string","description":"Saved .ark document; the backup is written beside it."},"expected_revision":{"type":"integer","minimum":0},"confirm":{"type":"boolean","const":true},"motivation":{"type":"string","maxLength":4096},"actor":{"type":"object","properties":{"kind":{"type":"string"},"id":{"type":"string"},"role":{"type":"string"},"model":{"type":"string"}},"required":["kind","id"]}},"required":["path","expected_revision","confirm"]})",false},
         {"suspension_inspect","Solve a double-wishbone suspension preview at jounce_mm, rack_mm and wheel_spin_deg, returning hardpoints, link closure residuals, toe/camber, spring stroke and declared-rate force. Read-only kinematics, not dynamic/inertia/contact simulation or native B-rep authority.",R"({"type":"object","properties":{"id":{"type":["integer","string"]},"jounce_mm":{"type":"number"},"rack_mm":{"type":"number"},"wheel_spin_deg":{"type":"number"}},"required":["id"]})",true},

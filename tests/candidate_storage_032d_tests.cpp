@@ -35,9 +35,12 @@ void sharedLargeBase(){
     check(field(session.document.evalBodies[0].nativeData,"synthetic_retention_payload").str.size()==129u*1024u*1024u,"materialization preserves full derived payload");
     const auto retained=preview(session,R"([{"op":"feature.edit","id":2,"p":{"dy":6.01}}])");
     accepted(session.call("doc_apply",batch(session,R"([{"op":"feature.edit","id":1,"p":{"dx":9}}])")));
-    // The old base is no longer live-owned. It alone exceeds the receipt budget,
-    // even though this test still holds an external shared_ptr to it.
-    bool evicted=false;try{session.preparedRecipe(field(retained,"candidate_id").str);}catch(const std::exception&){evicted=true;}check(evicted,"former live owners are recharged and over-budget stale candidates evicted");
+    // The old base is no longer live-owned, so it is charged to the retained
+    // receipt. Size alone cannot erase the newest validated candidate. Its old
+    // source/revision still prevents publication without an explicit refresh.
+    check(session.preparedRecipe(field(retained,"candidate_id").str).t==V::Obj,"newest receipt survives recharging former live geometry");
+    const auto current=documentToJson(session.document);const auto currentRevision=session.revision;
+    check(field(session.call("doc_apply",field(retained,"apply")),"isError").b&&documentToJson(session.document)==current&&session.revision==currentRevision,"retained stale geometry cannot bypass source/revision checks");
 }
 void transferAndRollback(){
     AgentSession session;setup(session);

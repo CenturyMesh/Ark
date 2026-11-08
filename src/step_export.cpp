@@ -1,6 +1,7 @@
 #include "ark/step_export.hpp"
 #include "ark/native_backend.hpp"
 #include "ark/resource_policy_071d.hpp"
+#include "ark/document_resources_072a.hpp"
 #include "ark/iteration_history.hpp"
 #include "ark/model.hpp"
 #include "ark/notch.hpp"

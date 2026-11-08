@@ -39,7 +39,7 @@ void DirectPreviewWorker::run(){
             V args=V::makeObj();args.set("commands",request.commands);args.set("expected_revision",V::makeNum((double)request.revision));args.set("detail",V::makeStr("changes"));
             const V preview=probe.preparePreview(args);
             if(!preview.find("valid")||!preview.find("valid")->b){const auto* data=preview.find("candidate_result"),*error=data?data->find("error"):nullptr;throw std::runtime_error(error?error->asStr():"Direct geometry candidate rejected");}
-            if(!preview.find("candidate_cached")||!preview.find("candidate_cached")->b)throw std::runtime_error("Direct preview exceeds the retained candidate capacity; reduce the edited part");
+            if(!preview.find("candidate_cached")||!preview.find("candidate_cached")->b)throw std::runtime_error("Validated preview custody is unavailable; retry the preview at the current revision. The design is retained");
             result.receipt=probe.takePreparedCandidate(preview.find("candidate_id")->str);
             const auto& doc=result.receipt->document();result.feature=request.feature?request.feature:doc.features.back().id;
             for(const auto& body:doc.evalBodies)if(body.id==result.feature){result.mesh=body.tessellate(doc.tessOpt);if(const auto* report=body.nativeData.find("report"))result.report=*report;break;}

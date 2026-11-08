@@ -10,8 +10,12 @@ The evaluator has no live-session, window or graphics context access. Its copy
 has no shared activity ledger or pending saved-native-geometry custody. Original
 commands and checks execute on the private candidate, with progress from the
 normal evaluation observer. A successful result must supply an existing
-`PreparedTransfer` within the existing 128 MiB candidate allocation limit. There
-is no fallback that recomputes against a newer drawing or reports an uncached
+`PreparedTransfer` with complete validated geometry. Since 072A, candidate-cache
+memory uses an adaptive soft retention target: an already allocated validated
+transfer is not rejected for exceeding a fixed edit-size quota, and the newest
+candidate survives cache maintenance even above that target. Real allocation
+failures remain explicit, atomic failures. There is no fallback that recomputes
+against a newer drawing or reports an uncached
 candidate as committed.
 
 Studio retains synchronous editor completion semantics while pumping a live
@@ -33,12 +37,12 @@ host API omitted one). They cannot silently apply against the preceding
 request's newer state.
 
 The host-only completion helper feeds the original request through normal
-`AgentSession::call` transaction, actor/motivation, journal-capacity, failure
+`AgentSession::call` transaction, actor/motivation, journal-validation, failure
 capture and usage-preservation rules. Dispatch consumes the prepared candidate;
 the journal still describes the original commands and the checks already ran on
 that candidate. Publication preserves usage and activity received after capture.
 Failure to append history rolls the prepared geometry back. A stale, cancelled,
-invalid or over-capacity result remains a failed result.
+invalid or allocation-failed result remains a failed result.
 
 Cancellation uses the existing native RPC cancellation scope with its existing
 request limit. Evaluation-pool tasks capture that scope when scheduled, so their
@@ -55,8 +59,9 @@ Local verification:
   recipe mismatch, same-revision replacement epoch, concurrent edits, immediate
   cancel (including a ready result cancelled at publication), rejection with
   history suppression, malformed arguments, no-op preservation of ordinary and
-  compacted journals/undo/redo, journal-capacity failure after successful
-  preparation, parameter-driven evaluated geometry, and shutdown.
+  compacted journals/undo/redo, history growth beyond the former fixed node quota,
+  journal-validation failure after successful preparation, parameter-driven
+  evaluated geometry, and shutdown.
 - `studio-async-authoring-ui` drives actual queued window messages during a HUD
   rebuild, checks orbit/zoom/selection and unchanged live authoring before
   publication, captures the live scene, and checks successful geometry, a stale

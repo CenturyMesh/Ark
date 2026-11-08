@@ -15,6 +15,13 @@ if(featureHistoryUiTest||recoveryUiTest){
         action(0,203,".history-unsuppress.png");if(g_error||g_doc.find(2)->suppressed)return fail(877,"Unsuppress failed");
         before=g_session.revision;const auto enabled=documentToJson(g_doc);action(1,203,".history-suppress-dependent.png");if(!g_error||g_session.revision!=before||documentToJson(g_doc)!=enabled)return fail(878,"Suppressing a required source changed the drawing");g_error=false;
         invoke("doc_undo",V::makeObj());if(g_error||!g_doc.find(2)->suppressed)return fail(879,"Undo did not restore suppression");
+        // Grow real persisted journal nodes without rendering every edit. The
+        // history dialog must page all rows and permit selection past old512.
+        for(int n=0;n<520;++n){V request=parse(R"({"commands":[{"op":"param.set","name":"history_ui_growth","expr":"0"}]})");auto commands=*request.find("commands");commands.arr.front().set("expr",V::makeStr(std::to_string(n+1)));request.set("commands",commands);request.set("expected_revision",V::makeNum((double)g_session.revision));const auto reply=g_session.call("doc_apply",request);if(!reply.find("isError")||reply.find("isError")->b)return fail(893,"History growth rejected before the UI paging check");}
+        const auto* grownNodes=g_doc.iterationHistory.find("nodes");if(!grownNodes||grownNodes->arr.size()<=512)return fail(894,"History fixture did not exceed former512-node quota");
+        g_historySmokeObservedRows=g_historySmokeObservedSelection=-1;
+        const auto growthRevision=g_session.revision;const size_t expectedRows=grownNodes->arr.size();g_historySmokeIndex=(int)expectedRows-1;const int expectedSelection=g_historySmokeIndex;g_dialogSmoke=2;g_dialogShot=shotPath+".history-grown.png";uiAction(493);g_dialogSmoke=0;g_historySmokeIndex=0;
+        if(g_error||g_session.revision!=growthRevision||g_historySmokeObservedRows<(int)expectedRows||g_historySmokeObservedSelection!=expectedSelection||g_historySmokeObservedSelection<=512){fprintf(stderr,"History grown UI rows=%d selection=%d expected_rows=%zu expected_selection=%d error=%d revision=%llu/%llu\n",g_historySmokeObservedRows,g_historySmokeObservedSelection,expectedRows,expectedSelection,(int)g_error,(unsigned long long)g_session.revision,(unsigned long long)growthRevision);return fail(896,"History pagination omitted or could not select a node beyond512");}
         g_featureHistorySmokeAction=0;g_featureHistorySmokeIndex=0;g_status="Feature history checks passed / valid reorder / dependency rejection / rollback / resume / suppression / Undo";
     }
     if(recoveryUiTest){
