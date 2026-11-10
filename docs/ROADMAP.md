@@ -1,5 +1,10 @@
 # ARK roadmap A–G
 
+Source follow-up (**A.03/D.02 — Em curso**): shared guidance for developing
+concepts to the requested result and preserving design intent after rejected
+operations. Historical quality regression and matched live comparisons remain
+unresolved; see [design quality investigation](DESIGN_QUALITY_INVESTIGATION.md).
+
 075D (**A.03/D.02/F.03 — Verificado no escopo local**): current structured agent
 guides, qualified legacy defaults, refreshed static guides in existing chats
 across HTTP/Claude Code/ACP, and valid Single-agent preload JSON. Eleven focused
