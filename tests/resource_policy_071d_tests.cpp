@@ -95,9 +95,15 @@ void overridesAndProbe(){
     ram.set("wrong");o=resourceOverrides071D();check(!o.decodedCacheBytes&&!o.warnings.empty(),"Invalid legacy decoded cap must retain fallback behavior and expose warning");
     ram.set("65536");o=resourceOverrides071D();check(o.decodedCacheBytes==64*GiB,"Explicit decoded cap can exceed old1GiB ceiling");
     cache.set("0");check(!resourceOverrides071D().nativeCacheEnabled,"Global cache disable");
+    // Linux budgets use MemAvailable: page cache left by a build stays usable for new work.
+    const auto parsed=memAvailableBytes071D("MemTotal:       16374668 kB\nMemFree:          412300 kB\nMemAvailable:   13120044 kB\nBuffers:          120000 kB\n");
+    check(parsed&&*parsed==13120044ull*1024,"MemAvailable must count reclaimable page cache, not only free pages");
+    check(!memAvailableBytes071D("MemTotal: 1 kB\nMemFree: 1 kB\n")&&!memAvailableBytes071D("MemAvailable: lots kB\n")&&!memAvailableBytes071D("MemAvailable: 12 MB\n"),"Missing or malformed MemAvailable must keep the sysconf fallback");
     const auto h=probeResourceHardware071D();check(h.logicalThreads>=1,"Live hardware probe must identify available CPU threads");
 #ifdef _WIN32
     check(h.physicalCores>=1&&h.physicalCores<=h.logicalThreads&&h.totalRamBytes>0&&h.availableRamBytes<=h.totalRamBytes,"Windows physical topology and live memory probe");
+#elif defined(__linux__)
+    check(h.totalRamBytes>0&&h.availableRamBytes>0&&h.availableRamBytes<=h.totalRamBytes,"Linux live memory probe");
 #endif
 }
 

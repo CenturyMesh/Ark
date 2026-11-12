@@ -2,7 +2,10 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstdlib>
+#include <fstream>
+#include <iterator>
 #include <stdexcept>
+#include <string>
 #include <thread>
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -42,8 +45,25 @@ ResourceHardware071D probeResourceHardware071D(){
     MEMORYSTATUSEX memory{};memory.dwLength=sizeof(memory);if(GlobalMemoryStatusEx(&memory)){result.totalRamBytes=memory.ullTotalPhys;result.availableRamBytes=memory.ullAvailPhys;}
 #elif defined(_SC_PHYS_PAGES) && defined(_SC_AVPHYS_PAGES)
     const long page=sysconf(_SC_PAGESIZE),total=sysconf(_SC_PHYS_PAGES),available=sysconf(_SC_AVPHYS_PAGES);if(page>0&&total>0&&available>=0){result.totalRamBytes=std::uint64_t(page)*std::uint64_t(total);result.availableRamBytes=std::uint64_t(page)*std::uint64_t(available);}
+#ifdef __linux__
+    // _SC_AVPHYS_PAGES counts free pages only, which a build or file copy can leave near zero
+    // while the page cache stays reclaimable. MemAvailable counts that memory, as Windows
+    // ullAvailPhys does, so worker and cache budgets mean the same on both systems.
+    if(result.totalRamBytes){std::ifstream meminfo("/proc/meminfo");const std::string text((std::istreambuf_iterator<char>(meminfo)),std::istreambuf_iterator<char>());if(const auto bytes=memAvailableBytes071D(text))result.availableRamBytes=std::min(*bytes,result.totalRamBytes);}
+#endif
 #endif
     return result;
+}
+std::optional<std::uint64_t> memAvailableBytes071D(const std::string& meminfo){
+    for(std::size_t start=0;start<meminfo.size();){
+        const auto end=meminfo.find('\n',start);const auto line=meminfo.substr(start,end==std::string::npos?std::string::npos:end-start);start=end==std::string::npos?meminfo.size():end+1;
+        if(line.rfind("MemAvailable:",0)!=0)continue;
+        const char* digits=line.c_str()+13;char* tail=nullptr;errno=0;const auto kib=std::strtoull(digits,&tail,10);
+        while(tail&&*tail==' ')++tail;
+        if(errno||tail==digits||!tail||std::string(tail)!="kB"||kib>std::numeric_limits<std::uint64_t>::max()/1024)return {};
+        return std::uint64_t(kib)*1024;
+    }
+    return {};
 }
 ResourceOverrides071D resourceOverrides071D(){
     ResourceOverrides071D result;

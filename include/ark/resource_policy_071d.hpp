@@ -31,6 +31,8 @@ struct ResourcePolicy071D {
     std::vector<std::string> reasons,warnings;
 };
 ResourceHardware071D probeResourceHardware071D();
+// MemAvailable from Linux /proc/meminfo text in bytes; empty when absent or malformed.
+std::optional<std::uint64_t> memAvailableBytes071D(const std::string& meminfo);
 ResourceOverrides071D resourceOverrides071D();
 ResourcePolicy071D selectResourcePolicy071D(const ResourceHardware071D&,const ResourceOverrides071D&,
     std::size_t eligibleTasks=std::numeric_limits<std::size_t>::max(),std::uint64_t retainedDecodedBytes=0,
