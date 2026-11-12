@@ -434,6 +434,13 @@ if(WIN32)
     # MSVC Release builds can exceed the standard COFF section count.
     target_compile_options(ark-studio PRIVATE /bigobj)
   endif()
+  # WinMain's frame takes about half of the default 1 MiB main stack, and the UI
+  # thread also runs document tools. Reserve 8 MiB; pages are committed on demand.
+  if(MSVC)
+    target_link_options(ark-studio PRIVATE /STACK:8388608)
+  elseif(MINGW)
+    target_link_options(ark-studio PRIVATE -Wl,--stack,8388608)
+  endif()
   target_include_directories(ark-studio PRIVATE assets/ui)
   find_program(ARK_POWERSHELL NAMES powershell pwsh REQUIRED)
   set(ark_ui_resources)
