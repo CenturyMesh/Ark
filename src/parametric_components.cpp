@@ -5,6 +5,8 @@
 #include "ark/history_authoring.hpp"
 #include <algorithm>
 #include <atomic>
+#include <array>
+#include "ark/assembly.hpp"
 #include <chrono>
 #include <filesystem>
 #include <map>
@@ -22,7 +24,7 @@ void canonical(V& v){if(v.t==V::Obj){for(auto& p:v.obj)canonical(p.second);std::
 std::string hash(V v){canonical(v);return iterationSha256(v.dump());}
 bool digest(const V& v){return v.t==V::Str&&v.str.size()==64&&v.str.find_first_not_of("0123456789abcdef")==std::string::npos;}
 u64 id(const V& v){if(v.t!=V::Num||!std::isfinite(v.num)||v.num<1||v.num>9007199254740991.||v.num!=std::floor(v.num))fail("ID","Expected a positive exact integer");return (u64)v.num;}
-std::string text(const V& v,const char* key){const auto& p=get(v,key);const size_t limit=std::string(key)=="path"?32768:128;if(p.t!=V::Str||p.str.empty()||p.str.size()>limit)fail("TEXT",std::string(key)+" needs nonempty bounded text");return p.str;}
+std::string text(const V& v,const char* key){const auto& p=get(v,key);const size_t limit=(std::string(key)=="path"||std::string(key)=="directory")?32768:128;if(p.t!=V::Str||p.str.empty()||p.str.size()>limit)fail("TEXT",std::string(key)+" needs nonempty bounded text");return p.str;}
 bool numeric(const std::string& c){return c=="features"||c=="assembly"||c=="mates";}
 std::string rowKey(const std::string& c,const V& row){return numeric(c)?std::to_string(id(get(row,"id"))):text(row,"name");}
 V authored(const Document& d){V out;if(!arkjson::parse(documentToJson(d,false,false),out))fail("SOURCE","Cannot serialize authored source");return out;}
@@ -153,15 +155,19 @@ bool applyParametricComponentCommand(Document& d,const V& command){
     validateParametricComponents(entries);next.parametricComponents=entries;next.componentBindingsToSeal=d.componentBindingsToSeal;next.componentBindingsToSeal.push_back(ns);d=std::move(next);return true;
 }
 void sealParametricComponentBindings(Document& d){if(d.componentBindingsToSeal.empty())return;const auto root=authored(d);for(auto& e:d.parametricComponents.arr)if(std::find(d.componentBindingsToSeal.begin(),d.componentBindingsToSeal.end(),get(e,"namespace").asStr())!=d.componentBindingsToSeal.end())e.set("baseline",fingerprints(root,get(e,"mapping"),get(e,"package")));d.componentBindingsToSeal.clear();}
+#include "parametric_component_library.inl"
+
 bool callParametricComponentTool(AgentSession& s,const std::string& tool,const V& args,V& out){
     if(tool!="parametric_components")return false;const auto action=text(args,"action");
+    if(action=="library"){out=parametricComponentLibrary(args);return true;}
+    if(action=="thumbnail"){out=parametricComponentThumbnail(text(args,"path"));return true;}
     if(action=="inspect"){out=V::makeObj();out.set("revision",V::makeNum((double)s.revision));if(args.find("path"))out.set("package",brief(loadParametricComponent(text(args,"path"))));else{V entries=V::makeArr();for(const auto& e:s.document.parametricComponents.arr){V row=brief(get(e,"package"));row.set("namespace",get(e,"namespace"));row.set("overrides",get(e,"overrides"));row.set("mapping",get(e,"mapping"));entries.arr.push_back(row);}out.set("components",entries);}return true;}
     expected(s,args);
     if(action=="export"){const auto p=makeParametricComponent(s.document,args);const auto path=text(args,"path");saveParametricComponent(p,path);out=brief(p);out.set("path",V::makeStr(path));return true;}
     if(action!="prepare")fail("ACTION","Use inspect, export or prepare");
     const auto mode=text(args,"mode");if(mode!="insert"&&mode!="update"&&mode!="configure")fail("ACTION","Prepare insert, update or configure");
     V command=V::makeObj();command.set("op",V::makeStr("component."+mode));command.set("namespace",V::makeStr(text(args,"namespace")));
-    V package;if(mode!="configure"){package=loadParametricComponent(text(args,"path"));command.set("package",package);command.set("package_sha256",V::makeStr(hash(package)));}
+    V package;if(mode!="configure"){package=loadParametricComponent(text(args,"path"));if(args.find("expected_source_sha256")&&get(args,"expected_source_sha256").asStr()!=hash(package))fail("STALE_SOURCE","Component file changed since catalog inspection");command.set("package",package);command.set("package_sha256",V::makeStr(hash(package)));}
     if(mode!="insert"){bool found=false;for(const auto& e:s.document.parametricComponents.arr)if(get(e,"namespace").asStr()==get(command,"namespace").str){command.set("expected_package_sha256",get(e,"package_sha256"));found=true;}if(!found)fail("NAMESPACE","Installed component not found");}
     if(args.find("overrides"))command.set("overrides",get(args,"overrides"));
     V commands=V::makeArr();commands.arr.push_back(command);V apply=V::makeObj();apply.set("commands",commands);apply.set("expected_revision",V::makeNum((double)s.revision));
@@ -169,5 +175,5 @@ bool callParametricComponentTool(AgentSession& s,const std::string& tool,const V
     // including exact geometry. The returned candidate_id freezes what was reviewed.
     const auto preview=s.call("doc_preview",apply);const auto& evaluated=get(preview,"structuredContent");if(get(preview,"isError").b||!get(evaluated,"valid").b||!evaluated.find("candidate_id"))fail("PREVIEW",evaluated.dump());out=evaluated;erase(out,"apply");if(!package.isNull())out.set("package",brief(package));out.set("namespace",get(command,"namespace"));out.set("mode",V::makeStr(mode));out.set("publication",V::makeStr("doc_apply candidate_id + expected_revision"));return true;
 }
-void appendParametricComponentTools(V& list){V tool=V::makeObj(),schema,annotations=V::makeObj();tool.set("name",V::makeStr("parametric_components"));tool.set("description",V::makeStr("Portable parametric .arkprt parts / .arktop assemblies embedded in .ark projects. inspect reads installed revisions or a file; export writes an immutable new file (previous_path creates the next revision); prepare insert/update/configure evaluates an isolated candidate for explicit doc_apply. Numeric overrides only target public parameters. Updates reject local edits and structural identity changes. No network or automatic source updates."));arkjson::parse(R"({"type":"object","properties":{"action":{"type":"string","enum":["inspect","export","prepare"]},"mode":{"type":"string","enum":["insert","update","configure"]},"kind":{"type":"string","enum":["part","assembly"]},"feature":{"type":"integer","minimum":1},"node":{"type":["integer","string"]},"name":{"type":"string"},"namespace":{"type":"string"},"path":{"type":"string"},"previous_path":{"type":"string"},"parameters":{"type":"array","items":{"type":"string"}},"interfaces":{"type":"array","items":{"type":"string"}},"overrides":{"type":"object","additionalProperties":{"type":"number"}},"expected_revision":{"type":"integer","minimum":0}},"required":["action"],"additionalProperties":false})",schema);tool.set("inputSchema",schema);annotations.set("readOnlyHint",V::makeBool(false));tool.set("annotations",annotations);list.arr.push_back(tool);}
+void appendParametricComponentTools(V& list){V tool=V::makeObj(),schema,annotations=V::makeObj();tool.set("name",V::makeStr("parametric_components"));tool.set("description",V::makeStr("Portable parametric .arkprt parts / .arktop assemblies embedded in .ark projects. inspect reads installed revisions or a file; export writes an immutable new file (previous_path creates the next revision); prepare insert/update/configure evaluates an isolated candidate for explicit doc_apply. Numeric overrides only target public parameters. Updates reject local edits and structural identity changes. library scans an explicit local directory with query/category/kind filters; thumbnail derives a display-only geometry preview. No network or automatic source updates."));arkjson::parse(R"({"type":"object","properties":{"action":{"type":"string","enum":["inspect","export","prepare","library","thumbnail"]},"mode":{"type":"string","enum":["insert","update","configure"]},"kind":{"type":"string","enum":["part","assembly"]},"feature":{"type":"integer","minimum":1},"node":{"type":["integer","string"]},"name":{"type":"string"},"namespace":{"type":"string"},"path":{"type":"string"},"directory":{"type":"string"},"query":{"type":"string"},"category":{"type":"string"},"expected_source_sha256":{"type":"string","pattern":"^[0-9a-f]{64}$"},"previous_path":{"type":"string"},"parameters":{"type":"array","items":{"type":"string"}},"interfaces":{"type":"array","items":{"type":"string"}},"overrides":{"type":"object","additionalProperties":{"type":"number"}},"expected_revision":{"type":"integer","minimum":0}},"required":["action"],"additionalProperties":false})",schema);tool.set("inputSchema",schema);annotations.set("readOnlyHint",V::makeBool(false));tool.set("annotations",annotations);list.arr.push_back(tool);}
 }

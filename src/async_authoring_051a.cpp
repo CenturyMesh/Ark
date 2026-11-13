@@ -40,7 +40,7 @@ void AsyncAuthoringWorker::run(){
                 if(const auto* detail=args.find("detail");detail&&(detail->t!=V::Str||(detail->str!="full"&&detail->str!="changes"&&detail->str!="design")))throw std::runtime_error("Apply detail must be full, design or changes");
                 args.set("detail",V::makeStr("design"));const auto preview=probe.preparePreview(args);
                 if(!preview.find("valid")||!preview.find("valid")->b){V data=preview.find("candidate_result")?*preview.find("candidate_result"):V::makeObj();result.rejection=reject(request.revision,"PREPARATION_FAILED",data.find("error")?data.find("error")->asStr():"Invalid authoring candidate");result.rejection.set("structuredContent",data);V content=*result.rejection.find("content");content.arr.front().set("text",V::makeStr(data.dump()));result.rejection.set("content",content);}
-                else if(!preview.find("candidate_cached")||!preview.find("candidate_cached")->b)result.rejection=reject(request.revision,"CANDIDATE_CAPACITY_EXCEEDED","Background authoring candidate exceeds the 128 MiB retained allocation capacity; no edit was published");
+                else if(!preview.find("candidate_cached")||!preview.find("candidate_cached")->b)result.rejection=reject(request.revision,"PREPARED_CUSTODY_MISSING","Validated background authoring did not retain a transferable receipt; no edit was published");
                 else result.transfer=probe.takePreparedCandidate(preview.find("candidate_id")->asStr());
             }
         }catch(const std::exception& error){result.rejection=reject(request.revision,"PREPARATION_FAILED",error.what());}

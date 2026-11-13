@@ -33,6 +33,7 @@
 #include <TopLoc_Location.hxx>
 #include <BRepOffsetAPI_MakeFilling.hxx>
 #include <BRepOffsetAPI_MakeOffsetShape.hxx>
+#include <BRepOffset_MakeOffset.hxx>
 #include <BRepOffsetAPI_MakePipeShell.hxx>
 #include <BRepOffsetAPI_MakeThickSolid.hxx>
 #include <BRepOffsetAPI_ThruSections.hxx>
@@ -58,6 +59,10 @@
 #include <Law_Linear.hxx>
 #include <GCPnts_AbscissaPoint.hxx>
 #include <Geom_BSplineSurface.hxx>
+#include <Geom_BSplineCurve.hxx>
+#include <GeomConvert.hxx>
+#include <BRepLProp_SLProps.hxx>
+#include <BOPAlgo_CheckResult.hxx>
 #include <Geom_BezierCurve.hxx>
 #include <Geom_BezierSurface.hxx>
 #include <gp_Ax2.hxx>
@@ -103,6 +108,11 @@ namespace ark::occt {
 namespace {
 using V = arkjson::Value;
 constexpr double kTolerance = 1.0e-6;
+TopoDS_Shape rawSurfaceOffset068(const TopoDS_Shape&,double,bool);
+void validateSurfaceOffset068(const TopoDS_Shape&);
+std::string surfaceOffsetMethod074(const V&);
+TopoDS_Shape rawSurfaceOffset074(const TopoDS_Shape&,double,bool,const std::string&);
+V surfaceOffsetNormalEvidence074(const TopoDS_Shape&,const TopoDS_Shape&,double);
 
 const V& required(const V& object, const char* key) {
     if (object.t != V::Obj) throw std::runtime_error("Expected object");
@@ -254,6 +264,7 @@ struct Profile {
     std::array<double, 16> frame{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
     bool closed = false;
     std::vector<size_t> sourceIndices;
+    std::vector<size_t> splitSegments;
 };
 
 Profile profileOf(const V& value, bool requireClosed) {
@@ -324,11 +335,12 @@ Profile profileOf(const V& value, bool requireClosed) {
     return result;
 }
 
+#include "loft_correspondence_074b.inl"
 void validateLoftControls(const V& request){
     const V* controls=request.find("controls");if(!controls)return;
     if(controls->t!=V::Obj)throw std::runtime_error("Loft controls must be an object");
     for(const auto& field:controls->obj)if(field.first!="section_alignment"&&field.first!="guide_samples"&&field.first!="max_guide_deviation_mm"&&field.first!="require_ordered_contacts")throw std::runtime_error("Unknown loft control: "+field.first);
-    if(const V* align=controls->find("section_alignment")){const V& profiles=required(request,"profiles");if(align->t!=V::Arr||align->arr.size()!=profiles.arr.size())throw std::runtime_error("Loft section_alignment must match section count");for(const V& item:align->arr){if(item.t!=V::Obj)throw std::runtime_error("Loft section alignment must be an object");for(const auto& field:item.obj)if(field.first!="reverse"&&field.first!="seam_edge"&&field.first!="seam_angle")throw std::runtime_error("Unknown loft section alignment field: "+field.first);if(const V* reverse=item.find("reverse");reverse&&reverse->t!=V::Bool)throw std::runtime_error("Loft reverse must be boolean");if(const V* seam=item.find("seam_edge"))integer(*seam,"seam_edge",0,127);if(const V* angle=item.find("seam_angle"))number(*angle,"seam_angle");}}
+    if(const V* align=controls->find("section_alignment")){const V& profiles=required(request,"profiles");if(align->t!=V::Arr||align->arr.size()!=profiles.arr.size())throw std::runtime_error("Loft section_alignment must match section count");for(const V& item:align->arr){if(item.t!=V::Obj)throw std::runtime_error("Loft section alignment must be an object");for(const auto& field:item.obj)if(field.first!="reverse"&&field.first!="seam_edge"&&field.first!="seam_angle"&&field.first!="seam_parameter")throw std::runtime_error("Unknown loft section alignment field: "+field.first);if(const V* reverse=item.find("reverse");reverse&&reverse->t!=V::Bool)throw std::runtime_error("Loft reverse must be boolean");if(const V* seam=item.find("seam_edge"))integer(*seam,"seam_edge",0,127);if(const V* angle=item.find("seam_angle"))number(*angle,"seam_angle");(void)loftSeamParameter074(item);}}
     if(const V* samples=controls->find("guide_samples"))integer(*samples,"guide_samples",2,129);
     if(const V* error=controls->find("max_guide_deviation_mm")){double value=number(*error,"max_guide_deviation_mm");if(value<kTolerance||value>.05)throw std::runtime_error("Loft guide deviation limit is restricted to 1e-6..0.05 mm");}
     if(const V* ordered=controls->find("require_ordered_contacts");ordered&&ordered->t!=V::Bool)throw std::runtime_error("Loft require_ordered_contacts must be boolean");
@@ -339,6 +351,7 @@ Profile alignedSection(const V& request,size_t index,bool closed){
     const V& value=required(request,"profiles").arr[index];Profile result=profileOf(value,closed);
     const V* controls=request.find("controls"),*alignment=controls?controls->find("section_alignment"):nullptr;
     if(!alignment)return result;
+    if(parametricSeams074(request))return alignedParametricSection074(request,index,std::move(result));
     const V& item=alignment->arr[index];
     const size_t seam=item.find("seam_edge")?(size_t)integer(*item.find("seam_edge"),"seam_edge",0,127):0;
     const double angle=item.find("seam_angle")?number(*item.find("seam_angle"),"seam_angle"):0;
@@ -357,7 +370,7 @@ Profile alignedSection(const V& request,size_t index,bool closed){
 
 bool flag(const V& request,const char* key);
 void configureLoftMaker(BRepOffsetAPI_ThruSections& maker,const V& request,bool guided){
-    const bool compatible=request.find("compatible")?flag(request,"compatible"):guided;
+    const bool compatible=loftCompatibility074(request,guided);
     maker.CheckCompatibility(compatible);
     if(const V* degree=request.find("max_degree"))maker.SetMaxDegree(integer(*degree,"max_degree",1,8));
     if(flag(request,"smooth")){maker.SetSmoothing(true);int continuity=request.find("continuity")?integer(*request.find("continuity"),"continuity",0,2):1;maker.SetContinuity(continuity==0?GeomAbs_C0:continuity==2?GeomAbs_C2:GeomAbs_C1);}
@@ -547,6 +560,7 @@ V loftEvidence(V result,const V& request){
     report.set("section_alignment",sectionRows);
     report.set("section_alignment_applied",V::makeBool(request.find("controls")&&request.find("controls")->find("section_alignment")));
     report.set("self_intersections_checked",V::makeBool(false));
+    if(parametricSeams074(request)){const auto exact=readBrep(required(result,"brep_base64").asStr());if(!BRepAlgoAPI_Check(exact,false,true).IsValid())throw std::runtime_error("Explicit-seam loft failed native self-interference checks");report.set("self_intersections_checked",V::makeBool(true));report.set("correspondence_policy",V::makeStr("exact shared cyclic parameter segmentation; no OCCT rematching"));}
     const V* values=request.find("guides");if(!values||values->arr.empty()){result.set("report",report);return result;}
     const V* controls=request.find("controls");
     const int samples=controls&&controls->find("guide_samples")?integer(*controls->find("guide_samples"),"guide_samples",2,129):17;
@@ -965,7 +979,7 @@ V loft(const V& request) {
     const bool solid = solidValue && solidValue->b;
     const bool ruled = ruledValue && ruledValue->b;
     const bool smooth = flag(request, "smooth");
-    const bool compatible = flag(request, "compatible");
+    const bool compatible = loftCompatibility074(request,false);
     int degree = 8;
     if (const V* maxDegree = request.find("max_degree"))
         degree = integer(*maxDegree, "max_degree", 1, 8);
@@ -994,6 +1008,7 @@ V loft(const V& request) {
             const V* supplied = sourceEntities&&sourceEntities->t==V::Arr&&source<sourceEntities->arr.size()?sourceEntities->arr[source].find("name"):nullptr;
             std::string name = supplied && supplied->t == V::Str && !supplied->str.empty()
                 ? supplied->str : "entity." + std::to_string(source);
+            if(!profile.splitSegments.empty())name+=".segment."+std::to_string(profile.splitSegments[i]);
             if (!names.insert(name).second) throw std::runtime_error("Duplicate loft section entity name");
             named.push_back({name, profile.edges[i]});
         }
@@ -1004,7 +1019,7 @@ V loft(const V& request) {
         if (pointProfile(value)) {
             if(const V* controls=request.find("controls"))if(const V* alignment=controls->find("section_alignment")){
                 const V& item=alignment->arr[profileIndex];
-                if((item.find("reverse")&&item.find("reverse")->b)||(item.find("seam_edge")&&number(*item.find("seam_edge"),"seam_edge")!=0)||(item.find("seam_angle")&&number(*item.find("seam_angle"),"seam_angle")!=0))throw std::runtime_error("Point loft sections do not support wire reversal or seam controls");
+                if((item.find("reverse")&&item.find("reverse")->b)||(item.find("seam_edge")&&number(*item.find("seam_edge"),"seam_edge")!=0)||(item.find("seam_angle")&&number(*item.find("seam_angle"),"seam_angle")!=0)||loftSeamParameter074(item)!=0)throw std::runtime_error("Point loft sections do not support wire reversal or seam controls");
             }
             if (profileIndex != 0 && profileIndex + 1 != profiles.arr.size())
                 throw std::runtime_error("a point section can only start or end a loft");
@@ -1071,13 +1086,15 @@ V loft(const V& request) {
         bind("side." + name, "face", maker.GeneratedFace(edge.edge));
     const bool tipFirst = pointProfile(profiles.arr.front());
     const bool tipLast = pointProfile(profiles.arr.back());
+    // Complementary cyclic segments share endpoint pairs. Their exact native
+    // identities distinguish them; endpoint matching would silently alias them.
     if (!tipFirst) {
         for (const auto& [name, edge] : firstSectionEdges)
-            bind("edge.start." + name, "edge", edgeByEnds(maker.FirstShape().IsNull() ? maker.Shape() : maker.FirstShape(), edge.first, edge.last));
+            bind("edge.start." + name, "edge", parametricSeams074(request)?edge.edge:edgeByEnds(maker.FirstShape().IsNull() ? maker.Shape() : maker.FirstShape(), edge.first, edge.last));
     }
     if (!tipLast) {
         for (const auto& [name, edge] : lastSectionEdges)
-            bind("edge.end." + name, "edge", edgeByEnds(maker.LastShape().IsNull() ? maker.Shape() : maker.LastShape(), edge.first, edge.last));
+            bind("edge.end." + name, "edge", parametricSeams074(request)?edge.edge:edgeByEnds(maker.LastShape().IsNull() ? maker.Shape() : maker.LastShape(), edge.first, edge.last));
     }
     if (!firstWire.IsNull()) {
         int ordinal = 0;
@@ -1269,19 +1286,25 @@ V extrudeSurface(const V& request) {
     const V& profileValue = required(request, "profile");
     const auto frame = frameOf(profileValue);
     V regionReceipt;
-    const TopoDS_Shape regionBasis = regionBasis046B(request, profileValue, regionReceipt);
+    TopoDS_Shape regionBasis;
+    const bool walls=flag(request,"region_walls",false),solid=flag(request,"solid",false);
+    if(walls&&solid)throw std::runtime_error("Region wall extrusion must be non-solid");
+    if(walls&&profileValue.find("regions")){const auto faces=profileRegionFaces046B(profileValue,regionReceipt);std::vector<TopoDS_Shape> boundaries;for(const auto& face:faces)for(const auto& wire:shapes(face,TopAbs_WIRE))boundaries.push_back(wire);if(boundaries.empty())throw std::runtime_error("Selected profile region has no boundaries");regionBasis=boundaries.size()==1?boundaries.front():compound(boundaries);}
+    else regionBasis=regionBasis046B(request,profileValue,regionReceipt);
     const Profile profile = regionBasis.IsNull() ? profileOf(profileValue, false) : Profile{};
     const double distance = number(required(request, "distance"), "distance");
     if (std::abs(distance) <= kTolerance) throw std::runtime_error("extrude distance must exceed tolerance");
-    const bool solid = flag(request, "solid", false);
     const gp_Vec direction(frame[8] * distance, frame[9] * distance, frame[10] * distance);
-    BRepPrimAPI_MakePrism prism(regionBasis.IsNull() ? basisOf(profile, solid) : regionBasis, direction, true, true);
+    const double authoredOffset=request.find("start_offset")?number(required(request,"start_offset"),"start_offset"):0;
+    const bool symmetric=flag(request,"symmetric",false);const double offset=authoredOffset*(distance>0?1.:-1.)-(symmetric?distance*.5:0);
+    TopoDS_Shape basis=regionBasis.IsNull()?basisOf(profile,solid):regionBasis;if(offset!=0){gp_Trsf shift;shift.SetTranslation(gp_Vec(frame[8]*offset,frame[9]*offset,frame[10]*offset));basis=transformed(basis,shift);}
+    BRepPrimAPI_MakePrism prism(basis, direction, true, true);
     prism.Build();
     if (!prism.IsDone()) throw std::runtime_error("OCCT surface extrusion failed");
     TopoDS_Shape shape = prism.Shape();
     if (solid && properties(shape) < 0) shape.Reverse();
-    if (!regionBasis.IsNull()) return tag(shapeResult(shape, solid), "extrude_surface", "profile_regions", regionReceipt);
-    return tag(shapeResult(shape, solid), "extrude_surface");
+    auto output=!regionBasis.IsNull()?tag(shapeResult(shape,solid),"extrude_surface","profile_regions",regionReceipt):tag(shapeResult(shape,solid),"extrude_surface");
+    if(request.find("start_offset")||request.find("symmetric")||walls){V report=*output.find("report"),extrusion=V::makeObj();extrusion.set("start_offset_mm",V::makeNum(offset));extrusion.set("authored_start_offset_mm",V::makeNum(authoredOffset));extrusion.set("distance_mm",V::makeNum(distance));extrusion.set("symmetric",V::makeBool(symmetric));extrusion.set("region_walls",V::makeBool(walls));report.set("extrusion",std::move(extrusion));output.set("report",std::move(report));}return output;
 }
 
 V revolveSurface(const V& request) {
@@ -1571,11 +1594,9 @@ V offsetSurface(const V& request) {
     if (!shapes(source, TopAbs_SOLID).empty())
         throw std::runtime_error("offset_surface requires a face or shell, not a solid");
     if (shapes(source, TopAbs_FACE).empty()) throw std::runtime_error("offset_surface input has no faces");
-    BRepOffsetAPI_MakeOffsetShape maker;
-    maker.PerformBySimple(source, distance);
-    if (!maker.IsDone()) throw std::runtime_error("OCCT surface offset failed");
-    return tag(shapeResult(maker.Shape(), false), "offset_surface",
-               "offset_intersection_checked", V::makeBool(false));
+    const auto method=surfaceOffsetMethod074(request);if(method!="simple")tolerance(request);const auto offset=rawSurfaceOffset074(source,distance,false,method);
+    validateSurfaceOffset068(offset);
+    auto result=tag(shapeResult(offset, false), "offset_surface","offset_intersection_checked",V::makeBool(true));if(request.find("method")){auto report=required(result,"report");report.set("construction_method",V::makeStr(surfaceOffsetMethod074(request)));result.set("report",report);}return result;
 }
 
 V sewSurfaces(const V& request) {
@@ -1719,10 +1740,7 @@ V thicken(const V& request) {
             open = faces(i).Extent() == 1 && !BRep_Tool::Degenerated(TopoDS::Edge(faces.FindKey(i)));
         if (!open) throw std::runtime_error("thicken requires an open face or shell, but this shell is closed (no free boundary edges); thicken an open skin (an open profile with solid:0), or build the solid with solid:1 and hollow it with native_solid shell");
     }
-    BRepOffsetAPI_MakeThickSolid maker;
-    maker.MakeThickSolidBySimple(source, thickness);
-    if (!maker.IsDone()) throw std::runtime_error("OCCT thickening failed");
-    TopoDS_Shape solid = maker.Shape();
+    TopoDS_Shape solid=rawSurfaceOffset074(source,thickness,true,surfaceOffsetMethod074(request));
     if (shapes(solid, TopAbs_SOLID).size() != 1)
         throw std::runtime_error("OCCT thickening did not return one solid: type=" +
                                  std::to_string(solid.ShapeType()) +
@@ -1732,8 +1750,17 @@ V thicken(const V& request) {
     // Reversal negates the same integral, so the measured volume is reused.
     const double signedVolume = properties(solid);
     if (signedVolume < 0) solid.Reverse();
-    return solidShapeResult(solid, std::abs(signedVolume));
+    validateSurfaceOffset068(solid);
+    V result=solidShapeResult(solid,std::abs(signedVolume)),report=*result.find("report");report.set("self_interference_checked",V::makeBool(true));if(request.find("method"))report.set("construction_method",V::makeStr(surfaceOffsetMethod074(request)));result.set("report",report);return result;
 }
+#include "surface_match_068b.inl"
+#include "surface_compatibility_074b.inl"
+#include "surface_network_068b.inl"
+#include "surface_network_074b.inl"
+#include "loft_diagnostics_074b.inl"
+#include "surface_operations_068b.inl"
+#include "surface_offset_068b.inl"
+#include "surface_offset_074b.inl"
 } // namespace
 
 V profileCurveNative(const V& profile){
@@ -1747,6 +1774,16 @@ V modelSurfaceNative(const V& request) {
         if (operation.str == "loft") return loft(request);
         if (operation.str == "surface_fill") return surfaceFill(request);
         if (operation.str == "surface_nurbs") return surfaceNurbs(request);
+        if (operation.str == "surface_quality_068b") return surfaceQuality068B(request);
+        if (operation.str == "surface_seam_068b") return surfaceSeam068B(request);
+        if (operation.str == "surface_match_068b") {if(exactCompatible074(request))return surfaceMatch074B(request);V legacy=request;legacy.obj.erase(std::remove_if(legacy.obj.begin(),legacy.obj.end(),[](const auto& field){return field.first=="basis_mode";}),legacy.obj.end());return surfaceMatch068B(legacy);}
+        if (operation.str == "surface_network") {if(exactCompatible074(request))return surfaceNetwork074(request);V legacy=request;legacy.obj.erase(std::remove_if(legacy.obj.begin(),legacy.obj.end(),[](const auto& field){return field.first=="basis_mode";}),legacy.obj.end());return surfaceNetwork068(legacy);}
+        if (operation.str == "loft_diagnostics") return loftDiagnostics074(request);
+        if (operation.str == "surface_domain_inspect") return surfaceDomainInspect068B(request);
+        if (operation.str == "surface_multi_trim") return surfaceMultiTrim068B(request);
+        if (operation.str == "surface_extend_trimmed") return surfaceExtendTrimmed068B(request);
+        if (operation.str == "surface_sew_inspect") return surfaceSewInspect068B(request);
+        if (operation.str == "surface_offset_diagnostics") return surfaceOffsetDiagnostics068B(request);
         if (operation.str == "thicken") return thicken(request);
         if (operation.str == "extrude_surface") return extrudeSurface(request);
         if (operation.str == "revolve_surface") return revolveSurface(request);

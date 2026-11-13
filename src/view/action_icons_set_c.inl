@@ -22,6 +22,29 @@ static void addActionIconsSetC(std::map<int,ActionIcon>& r){
     {auto& more=r[459];for(float x:{.24f,.5f,.76f})circle(more,x,.5f,.06f);}
     {auto& library=r[484];rect(library,.14f,.2f,.14f,.64f);rect(library,.32f,.2f,.14f,.64f);closed(library,{{.52f,.26f},{.65f,.22f},{.82f,.8f},{.69f,.84f}});line(library,.1f,.88f,.9f,.88f);}
     {auto& grid=r[579];for(float v:{.3f,.5f,.7f}){line(grid,v,.14f,v,.86f);line(grid,.14f,v,.86f,v);}}
+    {auto& library=r[49960];for(float x:{.16f,.56f})for(float y:{.16f,.56f})rect(library,x,y,.28f,.28f);}
+    {auto& config=r[49920];for(float y:{.25f,.5f,.75f})line(config,.14f,y,.86f,y);for(auto p:{std::pair<float,float>{.34f,.25f},{.66f,.5f},{.46f,.75f}})rect(config,p.first-.06f,p.second-.08f,.12f,.16f);}
+    {auto& compare=r[49921];cube(compare,.28f,.5f,.38f);cube(compare,.72f,.5f,.38f);}
+    {auto& explore=r[49922];line(explore,.16f,.84f,.16f,.16f);line(explore,.16f,.84f,.86f,.84f);poly(explore,{{.25f,.68f},{.43f,.49f},{.61f,.58f},{.81f,.23f}});for(auto p:{std::pair<float,float>{.25f,.68f},{.43f,.49f},{.61f,.58f},{.81f,.23f}})circle(explore,p.first,p.second,.04f);}
+    {auto& compare=r[49940];rect(compare,.14f,.16f,.44f,.54f);rect(compare,.42f,.3f,.44f,.54f);}
+    {auto& repair=r[49941];cube(repair,.4f,.4f,.5f);pencil(repair,.5f,.5f,.35f);}
+    {auto& hide=r[49942];rect(hide,.18f,.22f,.64f,.56f);line(hide,.15f,.85f,.85f,.15f);}
+    {auto& i=r[49980];for(float v:{.2f,.4f,.6f,.8f}){poly(i,{{.12f,v},{.5f,v-.08f},{.88f,v}});poly(i,{{v,.12f},{v+.06f,.5f},{v,.88f}});}}
+    {auto& i=r[49981];poly(i,{{.18f,.18f},{.36f,.48f},{.18f,.82f}});poly(i,{{.72f,.18f},{.56f,.48f},{.82f,.82f}});for(float y:{.23f,.5f,.77f})line(i,.38f,y,.55f,y);}
+    {auto& i=r[50000];plane(i,.5f,.5f,.7f,.52f);for(float v:{.32f,.46f,.6f})poly(i,{{.2f,v+.12f},{.47f,v-.06f},{.8f,v+.05f}});}
+    {auto& i=r[50001];line(i,.32f,.15f,.32f,.85f);line(i,.68f,.15f,.68f,.85f);arrow(i,.48f,.5f,.33f,.5f,.09f);arrow(i,.52f,.5f,.67f,.5f,.09f);}
+    {auto& i=r[50002];poly(i,{{.16f,.2f},{.4f,.4f},{.5f,.8f}});poly(i,{{.84f,.2f},{.6f,.4f},{.5f,.8f}});arrow(i,.22f,.64f,.42f,.64f,.09f);arrow(i,.78f,.64f,.58f,.64f,.09f);}
+    {auto& i=r[50003];line(i,.2f,.2f,.8f,.8f);line(i,.8f,.2f,.2f,.8f);}
+    {auto& i=r[50004];check(i,.18f,.24f,.64f);}
+    {auto& i=r[49506];for(float v:{.22f,.5f,.78f}){line(i,v,.18f,v,.82f);line(i,.18f,v,.82f,v);}for(auto p:{std::pair<float,float>{.22f,.22f},{.5f,.22f},{.22f,.5f},{.5f,.5f}})circle(i,p.first,p.second,.055f);}
+    {auto& i=r[50020];plane(i,.5f,.5f,.7f,.55f);line(i,.15f,.85f,.85f,.15f);}
+    {auto& i=r[50021];rect(i,.14f,.22f,.45f,.58f);circle(i,.35f,.5f,.10f);arrow(i,.64f,.5f,.9f,.5f,.1f);}
+    {auto& i=r[50022];line(i,.4f,.14f,.4f,.86f);line(i,.6f,.14f,.6f,.86f);for(float y:{.22f,.42f,.62f,.82f})line(i,.32f,y,.68f,y-.07f);}
+    r[50023]=r[50022];
+    {auto& i=r[50040];plane(i,.42f,.36f,.6f,.35f);plane(i,.57f,.66f,.6f,.35f);line(i,.18f,.5f,.18f,.78f);}
+    {auto& i=r[50041];plane(i,.4f,.35f,.6f,.35f);check(i,.43f,.54f,.42f);}
+    {auto& i=r[50042];rect(i,.2f,.12f,.6f,.76f);for(float y:{.3f,.5f,.7f})line(i,.3f,y,.7f,y);}
+    r[50043]=r[50003];
     // Configurations: one part shown as three stacked variants with a selected front.
     {auto& configs=r[44080];rect(configs,.34f,.14f,.52f,.4f);poly(configs,{{.24f,.62f},{.24f,.24f},{.34f,.24f}});poly(configs,{{.14f,.72f},{.14f,.34f},{.24f,.34f}});
         poly(configs,{{.14f,.72f},{.14f,.86f},{.66f,.86f},{.66f,.54f}});check(configs,.6f,.34f,.22f);}

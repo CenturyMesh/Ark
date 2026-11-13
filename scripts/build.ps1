@@ -2,13 +2,22 @@ param(
     [switch]$Test,
     [switch]$CoreOnly,
     [string]$BuildDirectory,
+    [ValidateSet('All','Studio','MCP','CLI','Both','Tests')][string]$Target = 'All',
+    [string]$TestRegex,
     [ValidateRange(1, 16)][int]$Jobs = 4,
+    [ValidateRange(1, 16)][int]$CompilerJobs = 4,
     [switch]$AllowCandidatePatchset
 )
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 if (-not $BuildDirectory) { $BuildDirectory = if ($CoreOnly) { 'out/core' } else { 'out/native-release' } }
+if ($Target -ne 'All' -or $TestRegex) {
+    if ($CoreOnly) { throw 'Targeted native development builds do not accept -CoreOnly; use the existing portable full build.' }
+    if ($Target -eq 'All') { $Target = 'Both' }
+    & (Join-Path $PSScriptRoot 'dev-build.ps1') -Target $Target -BuildDirectory $BuildDirectory -Jobs $Jobs -CompilerJobs $CompilerJobs -Verify:$Test -TestRegex $TestRegex -AllowCandidatePatchset:$AllowCandidatePatchset
+    return
+}
 if (-not [System.IO.Path]::IsPathRooted($BuildDirectory)) {
     $BuildDirectory = Join-Path $root $BuildDirectory
 }

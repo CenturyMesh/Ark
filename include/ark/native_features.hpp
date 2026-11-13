@@ -5,12 +5,16 @@
 namespace ark {
 
 bool isNativeFeature(FeatureType type);
+// Private inspection callers use the same authoritative loft profile resolver.
+arkjson::Value surfaceRequestForInspection068B(Document&,const Feature&);
 Body evaluateNativeFeature(const Feature& feature, const ExprEnv& env,
                            Document& document, std::vector<Body>& preceding);
 // Materialize exact geometry from a prior feature's analytic parameters only
 // when a native operation or semantic reference needs it.
 void ensureNativeBody(Document& document, u64 feature, std::vector<Body>& bodies);
 arkjson::Value sketchEntityNativeProfile(Document& document,const std::string& sketch,const std::string& entity);
+// Read-only native planar region census for human extrusion selection.
+arkjson::Value sketchNativeRegions073B(Document& document,const std::string& sketch,const std::string& mode="loops");
 Body evaluateExactLegacyOperation(const Feature& feature, const ExprEnv& env,
                                   Document& document, std::vector<Body>& preceding);
 bool validateImportedComponentDefinition(const Feature& feature,std::string& error);

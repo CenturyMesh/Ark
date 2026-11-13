@@ -20,8 +20,8 @@ public:
         std::vector<float> fill,lines;
         std::unique_ptr<AgentSession::PreparedTransfer> receipt;
     };
-    struct Statistics {u64 submitted=0,evaluated=0,coalesced=0,discarded=0;};
-    explicit DirectPreviewWorker(std::function<void()> beforeEvaluation={});
+    struct Statistics {u64 submitted=0,evaluated=0,coalesced=0,discarded=0,skippedBeforeEvaluation=0,skippedDisplay=0;};
+    explicit DirectPreviewWorker(std::function<void()> beforeEvaluation={},std::function<void()> afterEvaluation={});
     ~DirectPreviewWorker();
     DirectPreviewWorker(const DirectPreviewWorker&)=delete;
     DirectPreviewWorker& operator=(const DirectPreviewWorker&)=delete;
@@ -47,7 +47,7 @@ private:
     std::optional<Request> pending_;
     std::optional<Result> completed_;
     Statistics statistics_;
-    std::function<void()> beforeEvaluation_;
+    std::function<void()> beforeEvaluation_,afterEvaluation_;
     std::thread thread_;
     void run();
 };

@@ -1,3 +1,4 @@
+#include "ark/assistant_onboarding.hpp"
 #include "ark/assistant_acp.hpp"
 #include "ark/assistant_connectors.hpp"
 #include <algorithm>
@@ -138,7 +139,7 @@ std::vector<std::string> assistantAcpModels(const AssistantConfig& config){const
 static AssistantResult runAssistantAcpImpl(const AssistantConfig& config,const V& input,const V& tools,const AssistantTool& callTool,const AssistantEvents& events,const std::atomic_bool* cancel,const AssistantInbox& inbox,const AssistantHistory& history,const AssistantRetryHooks& hooks,V* sessionProbe){
     validateAssistantAcpConfig(config);stopped(cancel);AssistantResult result;if(input.t==V::Str){need(!input.str.empty(),"Enter a Grok Build message first.");result.conversation.arr.push_back(message("user",input.str));}else{need(input.t==V::Arr&&!input.arr.empty(),"ACP requires a nonempty prompt/history.");result.conversation=input;}
     for(const auto& row:result.conversation.arr)if(str(row,"role")=="user")validateAssistantUserMessage(row);
-    if(!config.onboardingPack.empty()){bool loaded=false;for(const auto& row:result.conversation.arr)if(str(row,"role")=="developer"&&str(row,"content").rfind("ARK_PREBAKED_GUIDE_V1\n",0)==0)loaded=true;if(!loaded)result.conversation.arr.insert(result.conversation.arr.begin(),message("developer","ARK_PREBAKED_GUIDE_V1\n"+config.onboardingPack));}
+        refreshAssistantOnboarding075D(result.conversation,config.onboardingPack);
     need(!imageIn(result.conversation),"Grok Build ACP image input has not been qualified for this route. Pixels were not dropped or converted to text.");
     const auto functions=assistantFunctionTools(tools);auto catalog=array();std::set<std::string> allowed;
     for(const auto& function:functions.arr){auto entry=obj();const auto name=str(function,"name");need(allowed.insert(name).second,"Duplicate ARK tool in ACP role catalog.");entry.set("name",V::makeStr(name));if(function.find("description"))entry.set("description",*function.find("description"));entry.set("inputSchema",*function.find("parameters"));for(const auto& source:tools.arr)if(str(source,"name")==name&&source.find("annotations"))entry.set("annotations",*source.find("annotations"));catalog.arr.push_back(entry);}

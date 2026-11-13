@@ -148,11 +148,34 @@ authority. Load `agent_onboard{topic:"exploded_views"}` and see
 046B profile regions: a sketch with several non-touching closed loops extrudes
 (`native_solid` extrude, all end conditions; legacy extrude), revolves
 (`revolve_surface` solid:1) and sweeps (section, solid:1) as faces with holes by
-even-odd containment. Each feature publishes one solid; choose one of several
+even-odd containment. Default loops/single mode publishes one solid; choose one of several
 regions with `native.regions:[{entity}|{point}]` (format 48). Crossing,
 touching, branched, zero-area or self-intersecting loops and open chains
 without a selection reject naming the entities. See
 [profile regions](PROFILE_REGIONS_046B.md).
+
+073B extrusion adds exact region discovery through
+`sketch_inspect{name,native_regions:true}`, directed `p.start_offset`, and thin
+walls through `p.thickness` with `native.thin_side`. Closed simple boundaries
+use `inside|outside|symmetric`; supported open paths use `left|right|symmetric`.
+The initial thin domain is straight polylines or a single arc/circle without
+holes; unsupported or invalid offsets reject explicitly. Multiple selected
+regions remain separate editable features in one atomic batch. Explicit union
+features can join them to selected targets; do not silently drop solids or
+retarget assembly occurrences. New semantics require document format 58.
+See [073B scope and verification](iterations/073B.md).
+
+074B explicitly extends these defaults. Use `native.region_mode:"arrangement"`
+and point selectors for exact cells from crossing curves, `result_mode:"bodies"`
+to retain multiple solids, and `boolean_mode:"all"` for one Boolean over all
+explicit inputs. Native thin offsets use `thin_method:"offset"` and
+`thin_join:"arc"|"intersection"`. Contour fillets use `radius_domain:"contour"`
+with complete explicit tangent-edge selection and radius stations. Point-anchored
+references and body selection are editable derived definitions; ambiguous,
+boundary and stale-digest selections reject. Surface compatibility, closed
+networks and parametric seam alignment are opt-in. These new semantics require
+source59; consult [074B contracts and limits](iterations/074B.md).
+`doc_info{detail:"evaluation"}` explains the last evaluation without changing it.
 
 046B motion clearance: `motion_info{name,clearance:{pairs|scope,threshold_mm,max_subdivisions}}`
 measures exact clearance over a fresh bake, read-only. A stale bake rejects
@@ -169,8 +192,8 @@ evidence at that revision and inspect the current revision before writing. See
 045A protects work at capacity limits. `doc_save` no longer fails when the
 optional saved-geometry cache is full: excess entries are omitted and recompute
 on open, reported in `saved_geometry`, and a failed save states its reason.
-The iteration journal stays a hard limit (512 nodes / 4 MiB, never automatically pruned):
-commit receipts add `history_capacity` from 75%, and `history_round_trip` when
+072A removes the old 512-node/4 MiB editing walls without pruning history.
+Commit receipts report actual `history_storage` and `history_round_trip` when
 an `assembly.drive` only returns to the previous pose. Look at temporary poses
 read-only with `assembly_info{drive|sweep}` or `doc_preview` plus
 `snapshot{candidate_id,expected_revision}`; commit a drive only for a pose the
@@ -734,11 +757,16 @@ Reports use indexed connectivity without silently welding/healing. `closed_orien
 
 ## Capacity and performance
 
-Documents are limited to 4 MiB on load, 1024 features and 256 parameters. Sketches have 256 entries per shared feature-definition scope and 256 in the legacy document scope, with 4096 total; occurrences reuse the definition scope. Aggregate sketch guards are 32768 entities, 65536 constraints and 131072 scalar coordinates. A sketch accepts 128 entities and 256 constraints. Use `sketch.set{name,owner_feature,sketch}` with an existing definition ID or unique feature name; the local sketch name has 1..96 characters. All sketch edit/remove commands accept the same owner selector. Features, projections and queries use the explicit canonical reference `part:<feature-id>::<local-name>`; unqualified names only select legacy document sketches. Definition renames preserve ownership; explicitly remove its sketches before deleting a definition. Ownership is metadata, not a geometric dependency. Scoped sketches require document format50; legacy global sketches keep their prior format. JSON nesting is limited to 64; mathematical expressions to 2048 characters. These are request limits, not a bound on all possible boolean or solver runtime.
+Document/history storage grows subject to actual resource availability; the old 4 MiB logical quota is removed in 072A. Feature and parameter authoring currently support 1024 features and 256 parameters. Sketches have 256 entries per shared feature-definition scope and 256 in the legacy document scope, with 4096 total; occurrences reuse the definition scope. Aggregate sketch guards are 32768 entities, 65536 constraints and 131072 scalar coordinates. A sketch accepts 128 entities and 256 constraints. Use `sketch.set{name,owner_feature,sketch}` with an existing definition ID or unique feature name; the local sketch name has 1..96 characters. All sketch edit/remove commands accept the same owner selector. Features, projections and queries use the explicit canonical reference `part:<feature-id>::<local-name>`; unqualified names only select legacy document sketches. Definition renames preserve ownership; explicitly remove its sketches before deleting a definition. Ownership is metadata, not a geometric dependency. Scoped sketches require document format50; legacy global sketches keep their prior format. JSON nesting is limited to 64; mathematical expressions to 2048 characters. These are request limits, not a bound on all possible boolean or solver runtime.
 
-Mesh buffers, reports and BVHs are cached per session revision and selected feature ID. One geometry recompute handles the whole batch. Version-27 documents retain immutable iteration deltas and shared large source strings, with persistent undo/redo. Limits are 512 nodes, 131072 replay operations and the total 4 MiB document cap; excess capacity rejects the mutation atomically. Existing documents acquire only their first observed baseline. Evaluated meshes and usage snapshots are excluded from the journal. See [persistent iterations](ITERATION_HISTORY.md). The old hand-written SIMD routines are retained as source archaeology but are disabled until ABI/numerical parity and profiling justify them.
+Mesh buffers, reports and BVHs are cached per session revision and selected feature ID. One geometry recompute handles the whole batch. Version-27 documents retain immutable iteration deltas and shared large source strings, with persistent undo/redo. 072A removes the old fixed node/replay/total-document quotas. Actual allocation, invalid data or storage failures still reject atomically. Existing documents acquire only their first observed baseline. Evaluated meshes and usage snapshots are excluded from the journal. See [persistent iterations](ITERATION_HISTORY.md). The old hand-written SIMD routines are retained as source archaeology but are disabled until ABI/numerical parity and profiling justify them.
 
 ## 0.3 additions
+
+The versioned sections below retain historical additions. Their tool counts,
+product versions and original default domains are historical, not the current
+capability ceiling. Current `agent_onboard`, tool schemas and the explicit
+074B/source59 contracts above govern new work.
 
 `assembly_info`, `tube_inspect`, `compute_info` and `compute_benchmark` bring the tool count to 17. `doc_apply` accepts `assembly.add`, `assembly.edit`, `assembly.remove`, and tube features with a top-level `bends` array. Mesh tools accept `node` for world-space instances or `id` for local part definitions, never both. Full contracts and examples are in [MECHANICAL.md](MECHANICAL.md). Version-2 `.ark` documents preserve the assembly hierarchy and bend programs. The compute backend is optional, with explicit capability reporting and CPU fallback.
 
@@ -849,8 +877,7 @@ document, and session edits still require the current revision for safe batches.
 `import_mesh{path,name?,weld_mm?,expected_revision?}` is the 34th tool. It
 reads `.stl` or `.obj` once and stores a `mesh_body`. `weld_mm` is optional and
 must lie in `(0, 1]`. The file is not linked. Caps are 12288 vertices, 4096
-triangles, coordinates within 1e6 mm, a 32 MiB source file, and the existing
-4 MiB document limit. OBJ faces with more than three corners are fanned from
+triangles, coordinates within 1e6 mm and a 32 MiB source file. OBJ faces with more than three corners are fanned from
 the first vertex and are limited to 64 corners. Binary STL is recognized when
 the file length is `84 + 50 * count`; otherwise the text form is read.
 

@@ -1,3 +1,7 @@
+#include "ark/image_validation_074b.hpp"
+#include "ark/sha256_074b.hpp"
+#include <map>
+#include <mutex>
 #include "ark/appearance_024b.hpp"
 #include "ark/assistant.hpp"
 #include "ark/iteration_history.hpp"
@@ -35,10 +39,31 @@ std::string expression(const V& object,const char* key,const std::string& fallba
 void axes(Vec3 u,Vec3 v){need(std::abs(u.len()-1)<1e-8&&std::abs(v.len()-1)<1e-8&&std::abs(u.dot(v))<1e-8,"Stamp U/V axes must be orthogonal unit vectors");}
 std::vector<unsigned char> bytes(const ImageAsset& asset){assistant_vision::imageData(asset.mimeType,asset.base64);const std::string alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";std::vector<unsigned char> out;out.reserve(asset.base64.size()/4*3);
     for(size_t i=0;i<asset.base64.size();i+=4){unsigned n=0;for(unsigned j=0;j<4;++j)n=(n<<6)|(asset.base64[i+j]=='='?0:(unsigned)alphabet.find(asset.base64[i+j]));out.push_back((unsigned char)(n>>16));if(asset.base64[i+2]!='=')out.push_back((unsigned char)(n>>8));if(asset.base64[i+3]!='=')out.push_back((unsigned char)n);}return out;}
-void validateAsset(const ImageAsset& asset,bool decode){if(mediaMime044B(asset.mimeType)){validateMediaAsset044B(asset,decode);return;}name(asset.name);const auto source=bytes(asset);need(!source.empty()&&source.size()<=4u*1024u*1024u,"Embedded image must be a PNG/JPEG of at most 4 MiB");
-    need(digest(asset.sha256)&&iterationSha256(std::string(source.begin(),source.end()))==asset.sha256,"Embedded image SHA-256 does not match its exact source bytes");
+
+struct PortableImageMetadata074 {unsigned width=0,height=0;std::string mimeType,sourceSha256;};
+struct ImageValidationMemo074 {
+    std::mutex mutex;std::map<std::string,std::pair<PortableImageMetadata074,uint64_t>> entries;
+    uint64_t clock=0,hits=0,misses=0,decodes=0;
+};
+ImageValidationMemo074& imageValidationMemo074(){static ImageValidationMemo074 memo;return memo;}
+std::string imageSourceHash074(const std::vector<unsigned char>& bytes){std::string hash;if(platformSha256074B(std::string_view(reinterpret_cast<const char*>(bytes.data()),bytes.size()),hash))return hash;return iterationSha256(std::string(bytes.begin(),bytes.end()));}
+PortableImageMetadata074 validatedImageMetadata074(const ImageAsset& asset){
+    need((asset.mimeType=="image/png"||asset.mimeType=="image/jpeg")&&!asset.base64.empty()&&asset.base64.size()<=(assistant_vision::maxImageBytes+2)/3*4&&asset.base64.size()%4==0,"Visual evidence requires a bounded base64 PNG or JPEG");
+    std::string observedHash;if(!platformSha256074B(asset.base64,observedHash))observedHash=iterationSha256(asset.base64);
+    auto& memo=imageValidationMemo074();
+    {std::lock_guard<std::mutex> guard(memo.mutex);const auto entry=memo.entries.find(observedHash);if(entry!=memo.entries.end()){++memo.hits;entry->second.second=++memo.clock;return entry->second.first;}++memo.misses;++memo.decodes;}
+    const auto source=bytes(asset);const auto sourceSha=imageSourceHash074(source);
+    const auto decoded=assistantImageAttachment(source,"asset.png",AssistantImageDecoder::Portable);
+    PortableImageMetadata074 result{decoded.width,decoded.height,decoded.mimeType,sourceSha};
+    try{std::lock_guard<std::mutex> guard(memo.mutex);memo.entries[observedHash]={result,++memo.clock};while(memo.entries.size()>256){auto oldest=std::min_element(memo.entries.begin(),memo.entries.end(),[](const auto& a,const auto& b){return a.second.second<b.second.second;});memo.entries.erase(oldest);}}catch(...){/* Retention cannot reject a validated source. */}
+    return result;
+}
+void validateAsset(const ImageAsset& asset,bool decode){if(mediaMime044B(asset.mimeType)){validateMediaAsset044B(asset,decode);return;}name(asset.name);const auto metadata=validatedImageMetadata074(asset);
+    need(digest(asset.sha256)&&metadata.sourceSha256==asset.sha256,"Embedded image SHA-256 does not match its exact source bytes");
+    need(metadata.mimeType==asset.mimeType,"Embedded image MIME does not match its decoded bytes");
     need(asset.width&&asset.height&&asset.width<=8192&&asset.height<=8192&&(uint64_t)asset.width*asset.height<=16u*1024u*1024u,"Embedded image must fit 8192 pixels per side and 16 megapixels");
-    if(decode){const auto image=assistantImageAttachment(source,"asset.png",AssistantImageDecoder::Portable);need(image.mimeType==asset.mimeType&&image.width==asset.width&&image.height==asset.height,"Embedded image metadata differs from decoded PNG/JPEG");}}
+    if(decode)need(metadata.width==asset.width&&metadata.height==asset.height,"Embedded image metadata differs from decoded PNG/JPEG");}
+
 u64 featureId(const Document& document,const V& value){if(value.t==V::Num){need(value.num>0&&value.num<=9007199254740991.&&value.num==std::floor(value.num)&&document.find((u64)value.num),"Appearance feature was not found");return (u64)value.num;}
     need(value.t==V::Str,"Appearance feature must be an id or unique name");u64 id=0;for(const auto& feature:document.features)if(feature.name==value.str){need(!id,"Appearance feature name is ambiguous");id=feature.id;}need(id!=0,"Appearance feature was not found");return id;}
 V without(const V& input,std::initializer_list<const char*> fields){V out=input;out.obj.erase(std::remove_if(out.obj.begin(),out.obj.end(),[&](const auto& item){return std::any_of(fields.begin(),fields.end(),[&](const char* key){return item.first==key;});}),out.obj.end());return out;}
@@ -54,8 +79,11 @@ void checkStamp(const ProjectedStamp& value){name(value.name);name(value.asset);
 }
 
 const ImageAsset* findImageAsset(const Document& document,const std::string& name){for(const auto& asset:document.imageAssets)if(asset.name==name)return &asset;return nullptr;}
-ImageAsset imageAssetFromPath(const std::string& assetName,const std::string& path){if(mediaAssetPathRequest044B(path))return mediaAssetFromPath044B(assetName,path,false);name(assetName);const auto decoded=loadAssistantImageAttachment(path);ImageAsset asset;asset.name=assetName;asset.mimeType=decoded.mimeType;asset.base64=decoded.base64;asset.width=decoded.width;asset.height=decoded.height;const auto source=bytes(asset);const auto portable=assistantImageAttachment(source,decoded.name,AssistantImageDecoder::Portable);need(portable.width==asset.width&&portable.height==asset.height&&portable.mimeType==asset.mimeType,"Embedded image is not portable across the supported PNG/JPEG decoders");asset.sha256=iterationSha256(std::string(source.begin(),source.end()));return asset;}
-ImageAsset imageAssetFromJson(const V& value){if(const auto* mime=value.find("mime_type");mime&&mime->t==V::Str&&mediaMime044B(mime->str))return mediaAssetFromJson044B(value);keys(value,{"name","mime_type","data_base64","sha256","width","height"});ImageAsset asset;asset.name=text(value,"name");asset.mimeType=text(value,"mime_type");asset.base64=text(value,"data_base64");name(asset.name);const auto source=bytes(asset);const auto image=assistantImageAttachment(source,"asset.png",AssistantImageDecoder::Portable);need(image.mimeType==asset.mimeType,"Embedded image MIME does not match its decoded bytes");asset.sha256=iterationSha256(std::string(source.begin(),source.end()));asset.width=image.width;asset.height=image.height;
+
+V imageValidationCacheInfo074B(){auto& memo=imageValidationMemo074();std::lock_guard<std::mutex> guard(memo.mutex);V result=V::makeObj();result.set("schema",V::makeStr("ark.image-validation-cache.074b.v1"));result.set("entries",V::makeNum(memo.entries.size()));result.set("hits",V::makeNum(memo.hits));result.set("misses",V::makeNum(memo.misses));result.set("decode_attempts",V::makeNum(memo.decodes));result.set("encoded_source_bytes_checked_on_lookup",V::makeBool(true));result.set("decoded_source_hash_retained",V::makeBool(true));return result;}
+void clearImageValidationCache074B(){auto& memo=imageValidationMemo074();std::lock_guard<std::mutex> guard(memo.mutex);memo.entries.clear();memo.clock=memo.hits=memo.misses=memo.decodes=0;}
+ImageAsset imageAssetFromPath(const std::string& assetName,const std::string& path){if(mediaAssetPathRequest044B(path))return mediaAssetFromPath044B(assetName,path,false);name(assetName);const auto decoded=loadAssistantImageAttachment(path);ImageAsset asset;asset.name=assetName;asset.mimeType=decoded.mimeType;asset.base64=decoded.base64;asset.width=decoded.width;asset.height=decoded.height;const auto source=bytes(asset);const auto portable=assistantImageAttachment(source,decoded.name,AssistantImageDecoder::Portable);need(portable.width==asset.width&&portable.height==asset.height&&portable.mimeType==asset.mimeType,"Embedded image is not portable across the supported PNG/JPEG decoders");asset.sha256=imageSourceHash074(source);return asset;}
+ImageAsset imageAssetFromJson(const V& value){if(const auto* mime=value.find("mime_type");mime&&mime->t==V::Str&&mediaMime044B(mime->str))return mediaAssetFromJson044B(value);keys(value,{"name","mime_type","data_base64","sha256","width","height"});ImageAsset asset;asset.name=text(value,"name");asset.mimeType=text(value,"mime_type");asset.base64=text(value,"data_base64");name(asset.name);const auto image=validatedImageMetadata074(asset);asset.sha256=image.sourceSha256;need(image.mimeType==asset.mimeType,"Embedded image MIME does not match its decoded bytes");asset.width=image.width;asset.height=image.height;
     if(const auto* hash=value.find("sha256"))need(hash->t==V::Str&&hash->str==asset.sha256,"Embedded image SHA-256 does not match source");
     for(const auto& field:std::initializer_list<std::pair<const char*,unsigned>>{{"width",asset.width},{"height",asset.height}})if(const auto* expected=value.find(field.first))need(expected->t==V::Num&&expected->num==field.second,"Embedded image dimensions do not match decoded source");return asset;}
 V imageAssetToJson(const ImageAsset& asset,bool includePixels){V out=V::makeObj();out.set("name",V::makeStr(asset.name));out.set("mime_type",V::makeStr(asset.mimeType));out.set("sha256",V::makeStr(asset.sha256));out.set("width",V::makeNum(asset.width));out.set("height",V::makeNum(asset.height));if(includePixels)out.set("data_base64",V::makeStr(asset.base64));if(mediaMime044B(asset.mimeType))mediaAssetToJson044B(asset,includePixels,out);return out;}

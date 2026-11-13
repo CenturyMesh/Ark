@@ -1,6 +1,9 @@
+#include "ark/document_resources_072a.hpp"
+#include <limits>
 #include "ark/design_containers.hpp"
 #include "ark/parametric_components.hpp"
 #include "ark/parametric_programs.hpp"
+#include "ark/design_variants.hpp"
 #include "ark/design_disciplines.hpp"
 #include "ark/cad_import.hpp"
 // ARK-Point :: serialize.cpp — document persistence over arkjson.
@@ -501,10 +504,34 @@ bool arcRecipeDocument(const Document& doc){
     return false;
 }
 
+bool surfaceFeaturesRequire57(const Document& document){for(const auto& f:document.features)if(f.type==FeatureType::SurfaceEdit){const auto* op=f.nativeSpec.find("op");if(op&&(op->asStr()=="match_boundary"||op->asStr()=="curve_network"||op->asStr()=="multi_trim"||op->asStr()=="extend_trimmed"))return true;}return false;}
+bool extrusionFeaturesRequire58(const Document& document){
+    for(const auto& f:document.features){
+        if(f.type==FeatureType::NativeSolid&&featureOperation(f)=="extrude"){
+            if(f.p.count("start_offset")||f.nativeSpec.find("start_offset")||f.p.count("thickness")||f.nativeSpec.find("thickness")||f.nativeSpec.find("thin_side"))return true;
+        }
+        if(f.type==FeatureType::ExtrudeSurface){
+            const auto* walls=f.nativeSpec.find("region_walls");
+            if(f.p.count("start_offset")||f.p.count("symmetric")||(walls&&walls->t==Value::Bool&&walls->b))return true;
+        }
+    }
+    return false;
+}
+
+bool geometryFeaturesRequire59(const Document& document){
+    for(const auto& feature:document.features){const auto& native=feature.nativeSpec;
+        if(feature.type==FeatureType::NativeSolid&&(featureOperation(feature)=="reference_anchor"||featureOperation(feature)=="body_select"))return true;
+        for(const char* key:{"region_mode","result_mode","boolean_mode","thin_method","thin_join","basis_mode","u_closed","v_closed","radius_domain"})if(native.find(key))return true;
+        if((feature.type==FeatureType::OffsetSurface||feature.type==FeatureType::Thicken)&&native.find("method"))return true;
+        if(feature.type==FeatureType::Loft)if(const auto* controls=native.find("controls"))if(const auto* alignment=controls->find("section_alignment"))for(const auto& row:alignment->arr)if(row.find("seam_parameter"))return true;
+    }
+    return false;
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
-std::string documentToJson(const Document& doc,bool includeAudit,bool includeHistory){
+static Value buildDocumentValue(const Document& doc,bool includeAudit,bool includeHistory){
     std::string usageError;if(!validateUsageLedger(doc.usage,usageError))throw std::runtime_error(usageError);
     validateAppearanceAuthoring024B(doc,false);
     Value r=Value::makeObj();
@@ -668,17 +695,41 @@ std::string documentToJson(const Document& doc,bool includeAudit,bool includeHis
     if(!doc.manufacturingPlans.isNull()){validateManufacturingPlans(doc);r.set("manufacturing_plans",doc.manufacturingPlans);r.set("version",Value::makeNum(53));}
     if(extendedTransmissionDocument(doc))r.set("version",Value::makeNum(54));
     if(!doc.parametricPrograms.isNull()){validateParametricPrograms(doc.parametricPrograms);r.set("parametric_programs",doc.parametricPrograms);r.set("version",Value::makeNum(55));}
+    if(!doc.designVariants.isNull()){validateDesignVariants(doc.designVariants);r.set("design_variants",doc.designVariants);r.set("version",Value::makeNum(56));}
+    for(const auto& drawing:doc.drawings)if(drawing.find("geometric_tolerances")){r.set("version",Value::makeNum(56));break;}
+    if(surfaceFeaturesRequire57(doc))r.set("version",Value::makeNum(57));
+    if(extrusionFeaturesRequire58(doc))r.set("version",Value::makeNum(58));
+    if(geometryFeaturesRequire59(doc))r.set("version",Value::makeNum(59));
     if(includeAudit&&includeHistory)iterationPersist(r,doc);
     canonicalDocumentKeys(r);
-    std::string serialized=r.dump();
-    if(serialized.size()>maxDocumentBytes)throw std::runtime_error("Document exceeds 4 MiB logical capacity, including embedded images and retained history");
-    return serialized;
+    return r;
 }
+
+std::string documentToJson(const Document& doc,bool includeAudit,bool includeHistory){return buildDocumentValue(doc,includeAudit,includeHistory).dump();}
+
+namespace {
+size_t checkedValueBytes074(Value& value,unsigned depth=0){
+    if(depth>=64)throw std::runtime_error("Document nesting exceeds the JSON depth limit of 64");
+    size_t total=0;auto add=[&](size_t n){if(n>std::numeric_limits<size_t>::max()-total)throw std::runtime_error("Document byte count overflow");total+=n;};
+    auto quoted=[&](const std::string& text){add(2);for(unsigned char c:text)add(c=='"'||c=='\\'||c=='\n'||c=='\r'||c=='\t'?2:c<32?6:1);};
+    switch(value.t){
+    case Value::Null:return 4;
+    case Value::Bool:return value.b?4:5;
+    case Value::Num:if(!std::isfinite(value.num)){value=Value{};return 4;}if(value.num==0)value.num=0;return value.dump().size();
+    case Value::Str:quoted(value.str);return total;
+    case Value::Arr:add(2);if(!value.arr.empty())add(value.arr.size()-1);for(auto& item:value.arr)add(checkedValueBytes074(item,depth+1));return total;
+    case Value::Obj:add(2);if(!value.obj.empty())add(value.obj.size()-1);for(size_t i=0;i<value.obj.size();++i){auto& item=value.obj[i];if(i&&value.obj[i-1].first==item.first)throw std::runtime_error("Duplicate document object key");quoted(item.first);add(1);add(checkedValueBytes074(item.second,depth+1));}return total;
+    default:throw std::runtime_error("Invalid document value type");
+    }
+}
+}
+Value documentValue(const Document& doc,bool includeAudit,bool includeHistory,size_t* encodedBytes){auto value=buildDocumentValue(doc,includeAudit,includeHistory);const auto bytes=checkedValueBytes074(value);if(encodedBytes)*encodedBytes=bytes;return value;}
+size_t documentPersistenceSize(const Document& doc){auto value=buildDocumentValue(doc,true,true);return checkedValueBytes074(value);}
 
 static bool documentFromValue(Value& v,Document& doc,std::string* err){
     auto fail=[&](const std::string& m){ if(err)*err=m; return false; };
     if(v.t!=Value::Obj) return fail("root must be object");
-    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || !std::isfinite(ver->num)||ver->num!=std::floor(ver->num)||ver->num<1||ver->num>55))
+    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || !std::isfinite(ver->num)||ver->num!=std::floor(ver->num)||ver->num<1||ver->num>59))
         return fail("unsupported document version");
     Value history;std::string historyError;if(!iterationExpand(v,history,historyError))return fail(historyError);
     if(const auto* nodes=v.find("assembly");nodes&&nodes->t==Value::Arr)for(const auto& node:nodes->arr)if(const auto* pattern=node.find("pattern");pattern&&pattern->find("carry_frame")){
@@ -941,6 +992,8 @@ static bool documentFromValue(Value& v,Document& doc,std::string* err){
     std::string manufacturingError;if(!validateManufacturingRoutes(nd,manufacturingError))return fail(manufacturingError);
     if(const auto* sheets=v.find("schematics"))nd.schematics=*sheets;try{validateDesignDisciplines(nd);if(requiresDesignDisciplines054B(nd)&&(!v.find("version")||v.find("version")->num<52))return fail("Classification and schematics require document version 52");}catch(const std::exception& error){return fail(error.what());}
     if(const auto* programs=v.find("parametric_programs")){const auto* version=v.find("version");if(!version||version->num<55)return fail("Embedded parametric programs require document version 55");try{validateParametricPrograms(*programs);nd.parametricPrograms=*programs;}catch(const std::exception& error){return fail(error.what());}}
+    if(const auto* variants=v.find("design_variants")){const auto* version=v.find("version");if(!version||version->num<56)return fail("Saved design variants require document version 56");try{validateDesignVariants(*variants);nd.designVariants=*variants;}catch(const std::exception& error){return fail(error.what());}}
+    for(const auto& drawing:nd.drawings)if(drawing.find("geometric_tolerances")){const auto* version=v.find("version");if(!version||version->num<56)return fail("Geometric tolerances require document version 56");}
     if(const auto* plans=v.find("manufacturing_plans")){const auto* version=v.find("version");if(!version||version->num<53)return fail("Manufacturing plans require document version 53");nd.manufacturingPlans=*plans;try{validateManufacturingPlans(nd);}catch(const std::exception& error){return fail(error.what());}}
     if(extendedTransmissionDocument(nd)){const auto* version=v.find("version");if(!version||version->num<54)return fail("Extended transmission mates require document version 54");}
     if(history.t!=Value::Null){if(!iterationValidate(nd,history,historyError))return fail(historyError);nd.iterationHistory=std::move(history);}
@@ -958,7 +1011,10 @@ static bool documentFromValue(Value& v,Document& doc,std::string* err){
     for(const auto& node:nd.assembly)if(assemblyPatternHasCarry(node.pattern)){const auto* version=v.find("version");if(!version||version->num<44)return fail("Pattern carry frames require document version 44");}
     if(curvePattern044BNeedsVersion47(nd)){const auto* version=v.find("version");if(!version||version->num<47)return fail("044B curve pattern paths, pitch spacing, frames and support inputs require document version 47");}
     if(media044BNeedsVersion47(nd)){const auto* version=v.find("version");if(!version||version->num<47)return fail("044B procedural appearance patterns, animated GIF/video assets and stamp playback require document version 47");}
+    if(surfaceFeaturesRequire57(nd)){const auto* version=v.find("version");if(!version||version->num<57)return fail("068B surface match/network/multi-trim/trim-preserving extension require document version 57");}
     if(profileRegions046BNeedsVersion48(nd)){const auto* version=v.find("version");if(!version||version->num<48)return fail("046B profile region selections (native.regions) require document version 48");}
+    if(geometryFeaturesRequire59(nd)){const auto* version=v.find("version");if(!version||version->num<59)return fail("074B region, multibody, advanced surface and fillet recipes require document version 59");}
+    if(extrusionFeaturesRequire58(nd)){const auto* version=v.find("version");if(!version||version->num<58)return fail("073B extrusion start offset, thin walls and region surfaces require document version 58");}
     if(motionReceiptsRequireDocumentVersion49(nd)){const auto* version=v.find("version");if(!version||version->num<49)return fail("049A baked motion receipts (frames_sha256, frames as derived data) require document version 49");}
     try{validateAppearanceAuthoring024B(nd,false);}catch(const std::exception& error){return fail(error.what());}
     try{validateDesignContainerWorkspace(nd);validateSkeletonAuthoring(nd);}catch(const std::exception& error){return fail(error.what());}
@@ -966,10 +1022,13 @@ static bool documentFromValue(Value& v,Document& doc,std::string* err){
     return true;
 }
 
+bool cloneDocumentAuthoring(const Document& source,Document& target,std::string* err){try{auto value=documentValue(source,true,false);return documentFromValue(value,target,err);}catch(const std::exception& e){if(err)*err=e.what();return false;}}
+
 bool documentFromJson(const std::string& json,Document& doc,std::string* err){
-    if(json.size()>maxDocumentBytes){if(err)*err="document exceeds 4 MiB";return false;}
-    Value root;if(!arkjson::parse(json,root)){if(err)*err="malformed JSON";return false;}
-    return documentFromValue(root,doc,err);
+    try{checkDocumentJsonRead072(json);
+        Value root;if(!arkjson::parse(json,root)){if(err)*err="malformed JSON";return false;}
+        return documentFromValue(root,doc,err);
+    }catch(const std::exception& e){if(err)*err=e.what();return false;}
 }
 
 // ---------------------------------------------------------------------------
@@ -1033,15 +1092,16 @@ bool saveDocument(const Document& doc, const char* path, DocumentSaveReport* rep
     if(report)*report={};
     auto fail=[&](std::string reason){if(report)report->error=std::move(reason);return false;};
     if(!path||!*path) return fail("Empty document path");
-    if(doc.iterationHistory.t==Value::Obj){std::string historyError;if(!iterationValidate(doc,doc.iterationHistory,historyError))return fail("Iteration history invalid: "+historyError);}
-    // Preserve this bool API's failure contract before opening any staging file.
-    // Authoring validation and logical-capacity errors are serialization failures.
-    std::string j;try{j=documentToJson(doc);}catch(const std::exception& e){return fail(e.what());}
-    if(j.size()>maxDocumentBytes)return fail("Document exceeds the total 4 MiB logical capacity");
-    Value persistedRoot;if(!arkjson::parse(j,persistedRoot))return fail("Document JSON exceeds the parser nesting limit");
-    auto destination=std::filesystem::path(reinterpret_cast<const char8_t*>(path)),temporary=destination;
-    auto extension=destination.extension().string();
-    std::transform(extension.begin(),extension.end(),extension.begin(),[](unsigned char c){return static_cast<char>(std::tolower(c));});
+    std::string j,extension;Value persistedRoot;std::filesystem::path destination,temporary;
+    try{
+        if(doc.iterationHistory.t==Value::Obj){std::string historyError;if(!iterationValidate(doc,doc.iterationHistory,historyError))return fail("Iteration history invalid: "+historyError);}
+        // Complete validation/allocation before opening any output. Preserve the
+        // bool API even when resident source or parser allocations fail.
+        j=documentToJson(doc);
+        if(!arkjson::parse(j,persistedRoot))return fail("Document JSON exceeds the parser nesting limit");
+        destination=std::filesystem::path(reinterpret_cast<const char8_t*>(path));temporary=destination;extension=destination.extension().string();
+        std::transform(extension.begin(),extension.end(),extension.begin(),[](unsigned char c){return static_cast<char>(std::tolower(c));});
+    }catch(const std::exception& e){return fail(e.what());}
     if(extension!=".arkjson"&&extension!=".json"){
         try{
             NativeDocumentResultsReport selected;auto derived=nativeDocumentResults(doc,&selected);
@@ -1059,11 +1119,13 @@ bool saveDocument(const Document& doc, const char* path, DocumentSaveReport* rep
                     if(i<geometry){--report->derivedEntries;report->derivedBytes-=bytes;++report->derivedOmittedEntries;report->derivedOmittedBytes+=bytes;}
                     else{--report->motionFrameEntries;report->motionFrameBytes-=bytes;++report->motionFrameOmittedEntries;report->motionFrameOmittedBytes+=bytes;}}
                 report->derivedStoredBytes=written.derivedStoredBytes;report->physicalBytes=written.physicalBytes;report->bytesBeforeCompaction=written.bytesBeforeCompaction;
+                report->containerVersion=written.storageVersion;report->capacitySchemaUpgraded=written.capacitySchemaUpgraded;
                 report->derivedRewritten=written.derivedRewritten;report->compacted=written.compacted;report->compactionSkipped=written.compactionSkipped;
             }
             return true;
         }catch(const std::exception& e){return fail(e.what());}
     }
+    try{
     temporary+=".tmp";
     std::ofstream f(temporary,std::ios::binary|std::ios::trunc);
     if(!f) return fail("Cannot create the staged JSON export");
@@ -1077,15 +1139,17 @@ bool saveDocument(const Document& doc, const char* path, DocumentSaveReport* rep
 #endif
     if(!committed){std::error_code cleanup;std::filesystem::remove(temporary,cleanup);return fail("Cannot replace the JSON export target");}
     return true;
+    }catch(const std::exception& e){return fail(e.what());}
 }
 
 bool loadDocument(const char* path, Document& doc, std::string* err){
+    try{
     if(!path||!*path){ if(err)*err="empty path"; return false; }
     if(documentContainerFile(path)){
         Value root;DocumentDerivedPayloads derived;std::string discarded;DocumentContainerReadStats read;
         if(!loadDocumentContainer(path,root,err,&derived,&discarded,&read))return false;
-        // The container reader already enforced logical JSON capacity, exact
-        // codec limits and checksums. Apply the same authoring validation to
+        // The container reader already enforced allocation headroom, strict
+        // codec validation and checksums. Apply the same authoring validation to
         // its decoded value without constructing and parsing another JSON copy.
         Document candidate;if(!documentFromValue(root,candidate,err))return false;
         try{
@@ -1112,9 +1176,11 @@ bool loadDocument(const char* path, Document& doc, std::string* err){
     std::ifstream f(std::filesystem::path(reinterpret_cast<const char8_t*>(path)),std::ios::binary);
     if(!f){ if(err)*err=std::string("cannot open ")+path; return false; }
     f.seekg(0,std::ios::end);auto length=f.tellg();
-    if(length<0||length>4*1024*1024){if(err)*err="document exceeds 4 MiB";return false;}f.seekg(0);
+    if(length<0){if(err)*err="Cannot inspect document length";return false;}
+    try{DocumentReadBudget072 budget;budget.charge((size_t)length);}catch(const std::exception& e){if(err)*err=e.what();return false;}f.seekg(0);
     std::string j((std::istreambuf_iterator<char>(f)),std::istreambuf_iterator<char>());
     return documentFromJson(j,doc,err);
+    }catch(const std::exception& failure){if(err)*err=failure.what();return false;}
 }
 
 } // namespace ark

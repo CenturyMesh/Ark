@@ -63,7 +63,7 @@ Document migrateDerivedBakes(const Document& source,const V& actor,const std::st
     for(int i=0;i<6;++i){const size_t journal=out.iterationHistory.dump().size(),document=documentToJson(out).size();V& last=member(out.iterationHistory,"migrations")->arr.back();
         if(last.find("journal_bytes_after")&&last.find("journal_bytes_after")->num==(double)journal&&last.find("document_bytes_after")->num==(double)document){r.journalBytesAfter=journal;r.documentBytesAfter=document;break;}
         last.set("journal_bytes_after",V::makeNum((double)journal));last.set("document_bytes_after",V::makeNum((double)document));}
-    need(r.journalBytesAfter&&r.documentBytesAfter<=maxDocumentBytes,"HISTORY_MIGRATION_FAILED: the migrated document size did not settle within the 4 MiB capacity");
+    need(r.journalBytesAfter&&r.documentBytesAfter,"HISTORY_MIGRATION_FAILED: the migrated document size accounting did not settle");
     std::string error;need(iterationValidate(out,out.iterationHistory,error),"HISTORY_MIGRATION_FAILED: the rewritten journal does not validate: "+error);
     Document reopened;need(documentFromJson(documentToJson(out),reopened,&error),"HISTORY_MIGRATION_FAILED: the migrated document does not reopen: "+error);
     return out;
@@ -92,7 +92,7 @@ V historyMigrateDerivedTool(Document& document,u64& revision,const V& args){
     V out=V::makeObj();out.set("migrated",V::makeBool(true));out.set("revision",V::makeNum((double)revision));out.set("backup",backupInfo);out.set("schema",V::makeNum(2));
     out.set("nodes",V::makeNum((double)report.nodes));out.set("states_rewritten",V::makeNum((double)report.states));out.set("bake_payload_references",V::makeNum((double)report.payloadReferences));out.set("bake_payload_bytes",V::makeNum((double)report.payloadBytes));
     out.set("blobs_before",V::makeNum((double)report.blobsBefore));out.set("blobs_after",V::makeNum((double)report.blobsAfter));out.set("journal_bytes_before",V::makeNum((double)report.journalBytesBefore));out.set("journal_bytes_after",V::makeNum((double)report.journalBytesAfter));
-    out.set("document_bytes_before",V::makeNum((double)report.documentBytesBefore));out.set("document_bytes_after",V::makeNum((double)report.documentBytesAfter));out.set("max_document_bytes",V::makeNum((double)maxDocumentBytes));
+    out.set("document_bytes_before",V::makeNum((double)report.documentBytesBefore));out.set("document_bytes_after",V::makeNum((double)report.documentBytesAfter));out.set("max_document_bytes",V{});
     out.set("head_id_before",V::makeStr(report.headBefore));out.set("head_id",V::makeStr(report.headAfter));out.set("frames_cached",V::makeNum((double)report.framesCached));out.set("saved",V::makeBool(false));
     out.set("next_step",V::makeStr("doc_save{path} writes the migrated document; the cached frames go to its derived section. Node ids changed: re-read history_info before iteration_restore."));return out;
 }

@@ -23,7 +23,7 @@ int main(){try{
     require(documentToJson(live.document)==original&&live.revision==revision,"pointer submissions mutated live document");
     {std::lock_guard lock(mutex);released=true;}condition.notify_one();
     auto result=waitResult(worker);require(result.error.empty()&&result.receipt&&result.gesture==gesture&&result.generation==latest&&result.epoch==12,"latest receipt or identity lost");
-    auto stats=worker.statistics();require(stats.submitted==130&&stats.evaluated==2&&stats.coalesced==128&&stats.discarded==1,"obsolete pointer requests were evaluated/published");
+    auto stats=worker.statistics();require(stats.submitted==130&&stats.evaluated==1&&stats.coalesced==128&&stats.discarded==1&&stats.skippedBeforeEvaluation==1&&stats.skippedDisplay==0,"obsolete pointer requests were evaluated/published");
     require(std::abs(result.mesh.computeBBox().mx.z-150)<1e-7&&!result.fill.empty(),"preview is not latest geometry");
     const auto id=result.receipt->id();bool rejected=false;try{live.adoptPreparedCandidate(std::move(*result.receipt),revision+1);}catch(const std::exception&){rejected=true;}require(rejected,"wrong revision adopted");
     live.adoptPreparedCandidate(std::move(*result.receipt),revision);
@@ -45,5 +45,14 @@ int main(){try{
     auto captured=DirectPreviewWorker::capture(live.document);require(!captured->agentActivity,"captured snapshot shares mutable activity ledger");
     worker.begin(captured,live.revision,17);worker.request(editHeight(70),1,Mat4::identity());call(live,"doc_info",audit);const auto actions=ledger->entries.size();result=waitResult(worker);require(result.receipt&&!result.receipt->document().agentActivity,"candidate copied live audit state");
     const auto retainedId=result.receipt->id();live.adoptPreparedCandidate(std::move(*result.receipt),live.revision);apply=V::makeObj();apply.set("candidate_id",V::makeStr(retainedId));call(live,"doc_apply",apply);require(live.document.agentActivity==ledger&&ledger->entries.size()==actions,"commit lost newer live activity");
+    // Supersede a completed native evaluation before receipt/tessellation/display
+    // work. The old candidate may never become observable or publishable.
+    bool evaluated=false,releaseDisplay=false;unsigned afterCalls=0;DirectPreviewWorker displayWorker({},[&]{std::unique_lock lock(mutex);if(++afterCalls==1){evaluated=true;condition.notify_one();condition.wait(lock,[&]{return releaseDisplay;});}});
+    displayWorker.begin(DirectPreviewWorker::capture(live.document),live.revision,18);displayWorker.request(editHeight(71),1,Mat4::identity());
+    {std::unique_lock lock(mutex);require(condition.wait_for(lock,std::chrono::seconds(5),[&]{return evaluated;}),"post-evaluation hook was not reached");}
+    const auto current=displayWorker.request(editHeight(72),1,Mat4::identity());require(!displayWorker.take(),"obsolete native result escaped before latest generation");
+    {std::lock_guard lock(mutex);releaseDisplay=true;}condition.notify_one();result=waitResult(displayWorker);const auto displayStats=displayWorker.statistics();require(result.receipt&&result.generation==current&&result.epoch==18&&result.mesh.computeBBox().mx.z==72,"latest display receipt/geometry lost");require(displayStats.evaluated==2&&displayStats.skippedDisplay==1&&displayStats.discarded==1,"obsolete native evaluation performed display work or surfaced");
+    require(live.document.find(1)->get("dz")=="70","post-evaluation coalescing changed live CAD");
+    std::cout<<"DIRECT_PREVIEW_074B {\"submitted\":130,\"previous_evaluations\":2,\"current_evaluations\":1,\"coalesced\":128,\"skipped_before_evaluation\":1,\"post_evaluation_display_skips\":1,\"final_height\":150,\"apply_features_evaluated\":0,\"undo_restored_height\":20}\n";
     std::cout<<"Direct preview: coalescing, source/revision/epoch, invalidity, receipt reuse, history and cancellation passed\n";return 0;
 }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

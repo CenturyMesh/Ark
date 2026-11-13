@@ -1,3 +1,6 @@
+#include "ark/assistant_onboarding.hpp"
+#include "ark/onboarding.hpp"
+#include "ark/surface_edit_059c.hpp"
 #include "ark/assistant.hpp"
 #include "ark/project_memory_tools.hpp"
 #include "ark/assistant_claude_code.hpp"
@@ -436,7 +439,7 @@ const std::vector<std::pair<std::string,std::vector<std::string>>>& assistantSpe
         {"frames",{"frame_inspect","stock_preview"}},{"tube",{"tube_inspect","notch_inspect","notch_plan","source_inspect","stock_preview"}},
         {"electronics",{"electronics_inspect","pcb_export"}},{"routing",{"electronics_inspect","pcb_export"}},
         {"mesh",{"mesh_inspect","mesh_get","import_mesh","export_mesh"}},{"drawings",{"drawing_inspect","drawing_export","schematic_inspect","schematic_export"}},{"schematics",{"schematic_inspect","schematic_export"}},
-        {"skeleton",{"skeleton_inspect","skeleton_compile"}},{"automation",{"skeleton_inspect","skeleton_compile","design_solve"}},{"programs",{"parametric_program"}},
+        {"skeleton",{"skeleton_inspect","skeleton_compile"}},{"automation",{"skeleton_inspect","skeleton_compile","design_solve"}},{"programs",{"parametric_program","design_variants"}},{"variants",{"parametric_program","design_variants"}},{"design_review",{"design_review"}},
         {"planes",{"plane_authoring"}},{"sketch",{"sketch_repair"}},{"containers",{"design_containers"}},{"hud",{"hud_info","hud_flex_check"}},
         {"cad_import",{"import_step","import_cad","step_inspect","cad_inspect","image_asset","export_step","export_iges","doc_new","doc_load"}},
         {"history",{"feature_history","history_info","iteration_restore","history_migrate_derived","history_compact","failure_replay","failure_export","usage_info","usage_record","memory_maintain"}}};
@@ -527,16 +530,19 @@ static V assistantRequestWith(const AssistantConfig& config,const V& conversatio
         // Readable summaries only; encrypted_content round-tripping is unchanged.
         if(assistantRequestsReasoningSummary(config))reasoning.set("summary",V::makeStr("auto"));
         if(!reasoning.obj.empty())request.set("reasoning",std::move(reasoning));}
-    request.set("parallel_tool_calls",V::makeBool(config.parallelToolCalls));request.set("input",wireHistory);
+    // Exact duplicate receipts can be referenced only after the final history
+    // selection. Complete source outputs remain in this request; this lossless
+    // transport step needs no fresh-inspection guard or extra provider round.
+    request.set("parallel_tool_calls",V::makeBool(config.parallelToolCalls));request.set("input",assistant_context::internReadReceipts(wireHistory));
     V functions=assistantFunctionTools(tools);
     if(config.authMode==AssistantAuthMode::ChatGptPlan){V namespaced=V::makeObj(),groups=V::makeArr();namespaced.set("type",V::makeStr("namespace"));namespaced.set("name",V::makeStr("ark"));namespaced.set("description",V::makeStr("ARK-Point CAD document modeling and inspection tools"));namespaced.set("tools",std::move(functions));groups.arr.push_back(std::move(namespaced));request.set("tools",std::move(groups));request.set("stream",V::makeBool(true));}
     else request.set("tools",std::move(functions));
     V include=V::makeArr();include.arr.push_back(V::makeStr("reasoning.encrypted_content"));request.set("include",include);
-    request.set("instructions",V::makeStr(
+    request.set("instructions",V::makeStr(std::string(
         "You are the modeling assistant inside ARK CAD. Use the provided ARK tools within your assigned role's permissions. Read-only roles inspect the existing design and propose changes rather than authoring it. "
         "Use the compact preloaded capability guide when present. Request agent_onboard with detail:guide for a relevant topic when its operation contract is needed, and reuse the result across parts. Static guides contain no live document state. Obtain doc_info with detail:revision before initial writes when only a static guide is available, and object_context for the selected objects when their live geometry or dependencies are needed. Use expected_revision and do not repeat unchanged inventories merely to start another feature. For orientation in an existing design, doc_info detail:digest is the compact per-revision inventory; send its fingerprints back as known_fingerprints to receive only what changed.Prefer doc_preview/doc_apply detail:changes, native_inspect detail:properties, and assembly_info detail:result for a selected measurement or motion query. "
         "Each response is a full provider round over the whole conversation: request independent reads, checks, tool_feedback and team coordination calls together in one response. ARK executes them in order and runs at most one document write per response; author the next write after reading its result. Put a write's verification in its checks (postconditions) instead of a separate read round when they can express it. "
-        "For an open-ended design brief, start with a coherent editable concept: build the overall form, proportions, interfaces and main components with the CAD tools, then refine details. User-specified dimensions, materials, process and functional constraints apply from the beginning. Unknown fabrication choices may remain explicitly unspecified; label the design as a concept and state assumptions rather than treating it as production-qualified. "
+        )+agentDesignBriefPolicy()+
         "Functional fastener holes, tapped holes, dowels and retaining-ring grooves use Holes Orchestrator (holes_catalog and native_solid op holes_orchestrator) as persistent parametric features; sketch-only holes are for nonfunctional contours. Onboard holes for the exact recipe and sheet-lineage limits. Arkitfy preserves imported exact references and validates reconstruction with cad_inspect comparison (agent_onboard topic cad_import); containers isolate editable work only after checkout into a separate session. "
         "Create or update 2D/manufacturing drawings only when the user explicitly requests drawings for the task. They are optional and must not be generated automatically during design, assembly, BOM completion or manufacturing review. Read-only drawing source discovery does not authorize drawing.set/refresh/remove or exports. "
         "Manufacturing and component-library checks are conditional on the task. When the user asks for fabrication readiness, specifies a production process, or you make a fabricability claim, consult the relevant manufacturing guide, author the correct lineage and verify its actual evidence. When accurate standard or purchased components are required, search the library by the known specification and preserve source/license provenance. For an illustrative concept, clearly declared envelopes may suffice; do not force catalogue searches, load calculations or production-route decisions before creating the concept. Never invent standards, material properties or electrical ratings. "
@@ -713,11 +719,7 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
     auto measuredEvent=[&](AssistantEvent::Kind kind,const std::string& text,V outcome=V{}){if(events){AssistantEvent event;event.kind=kind;event.text=text;event.usage=result.usage;event.performance=result.performance;event.providerOutcome=std::move(outcome);events(event);}};
     if(recalled.t==V::Str){require(!recalled.str.empty(),"Enter an assistant message first.");V message=V::makeObj();message.set("role",V::makeStr("user"));message.set("content",recalled);result.conversation.arr.push_back(std::move(message));}
     else {require(recalled.t==V::Arr&&!recalled.arr.empty(),"Assistant input must be a prompt or nonempty history array.");result.conversation=recalled;}
-    if(!config.onboardingPack.empty()){
-        const std::string marker="ARK_PREBAKED_GUIDE_V1\n";
-        bool loaded=false;for(const auto& item:result.conversation.arr)if(field(item,"role")=="developer"&&field(item,"content").rfind(marker,0)==0)loaded=true;
-        if(!loaded){V guide=V::makeObj();guide.set("role",V::makeStr("developer"));guide.set("content",V::makeStr(marker+config.onboardingPack));result.conversation.arr.insert(result.conversation.arr.begin(),std::move(guide));}
-    }
+    refreshAssistantOnboarding075D(result.conversation,config.onboardingPack);
     for(const auto& item:result.conversation.arr)if(field(item,"role")=="user")validateAssistantUserMessage(item);
     assistant_vision::prune(result.conversation,config.maxConversationBytes);
     // Retained evidence and the outgoing request are separate. Projecting a

@@ -44,6 +44,12 @@ int main(){try{
     for(const char* tool:{"native_inspect","geometry_query","reference_inspect","assembly_info","collision_inspect","physics_inspect","mesh_inspect","motion_info","step_inspect"})require(exactJobAllowed046B(tool,V::makeObj()),std::string("allowed read rejected: ")+tool);
     for(const char* tool:{"doc_apply","doc_preview","doc_new","doc_load","doc_save","doc_undo","doc_redo","iteration_restore","import_step","export_step","export_mesh","snapshot","selection_set","context_graph","bom_inspect","bom_review","memory_record","tool_feedback","design_containers","library_insert","sketch_repair","placement_plan","manufacturing_propose","failure_replay","doc_info","object_context","agent_onboard","usage_record","plane_authoring","drawing_export"})require(!exactJobAllowed046B(tool,V::makeObj()),std::string("write or session-state tool allowed: ")+tool);
     require(!exactJobAllowed046B("native_inspect",V::makeArr()),"non-object arguments allowed");
+    for(const char* action:{"match_plan","network_plan","multi_trim_plan","extend_trimmed_plan","sew_plan","offset_plan"}){
+        V args=V::makeObj();args.set("action",V::makeStr(action));require(!exactJobAllowed046B("surface_control",args),"Surface candidate must remain in its owning session");
+    }
+    require(exactJobAllowed046B("surface_control",parse(R"({"action":"quality"})")),"Native surface analysis remains eligible for background exact reads");
+    require(!exactJobAllowed046B("query_batch",parse(R"({"queries":[{"tool":"surface_control","args":{"action":"match_plan"}}]})")),"Batched surface plans cannot create abandoned candidates");
+
     require(exactJobAllowed046B("query_batch",parse(R"({"queries":[{"tool":"native_inspect","args":{"id":1}},{"tool":"assembly_info","args":{"detail":"result","clearance":{"a":1,"b":2}}}]})")),"exact query batch rejected");
     require(!exactJobAllowed046B("query_batch",parse(R"({"queries":[{"tool":"native_inspect","args":{"id":1}},{"tool":"doc_info","args":{}}]})")),"batch with a non-exact row allowed");
     require(!exactJobAllowed046B("query_batch",parse(R"({"queries":[{"tool":"query_batch","args":{"queries":[]}}]})")),"nested batch allowed");

@@ -18,12 +18,14 @@ function Child([string]$Root,[string]$Relative){
     return $path
 }
 function NoLinks([string]$Path){
-    $item=Get-Item -Force -LiteralPath $Path
-    while($item){
-        if($item.Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Linked vault inputs or outputs are not accepted.'}
-        $parent=Split-Path $item.FullName -Parent
-        if(-not $parent -or $parent -eq $item.FullName){break}
-        $item=Get-Item -Force -LiteralPath $parent
+    # Read every path and ancestor afresh. Avoid PowerShell provider objects in
+    # this per-card hot path without caching or weakening the reparse checks.
+    $current=[IO.Path]::GetFullPath($Path)
+    while($current){
+        if([IO.File]::GetAttributes($current) -band [IO.FileAttributes]::ReparsePoint){throw 'Linked vault inputs or outputs are not accepted.'}
+        $parent=[IO.Directory]::GetParent($current)
+        if(-not $parent){break}
+        $current=$parent.FullName
     }
 }
 function Files([string]$Directory,[int]$Depth=0){
@@ -178,6 +180,30 @@ foreach($note in $notes){
     }
     [IO.File]::AppendAllText((Child $memoryRoot $note.name),($lines -join "`n")+"`n",$utf8)
 }
+# A navigable derived view, using only already verified explicit anchors.
+# It does not infer graph edges from semantic similarity or import any vault.
+$memoryCanvasNodes=@();$memoryCanvasEdges=@();$memoryNodeIds=@{};$codeNodeIds=@{}
+$recallLines=@('# ARK memory recall index','','Historical records only. Open a record for its complete text, source hash and memory revision. This index does not assert current correctness.','')
+$orderedNotes=@($notes|Sort-Object {$_.row.id})
+for($i=0;$i -lt $orderedNotes.Count;$i++){
+    $note=$orderedNotes[$i];$nodeId='memory-'+$note.row.id;$relative='ARK Memory/'+$note.name;$memoryNodeIds[$relative]=$nodeId
+    $memoryCanvasNodes+=,[ordered]@{id=$nodeId;type='file';file=$relative;x=0;y=($i*220);width=440;height=180}
+    $titleProperty=$note.row.PSObject.Properties['title'];$title=if($titleProperty){[string]$titleProperty.Value}else{'Memory record'}
+    $title=[regex]::Replace($title,'[\r\n\x00-\x1f]',' ');$title=[regex]::Replace($title,'([\\`*_{}\[\]()<>#!|])','\$1')
+    $recallLines+='- [['+([IO.Path]::GetFileNameWithoutExtension($note.name))+']] - '+$title
+}
+foreach($link in $links){
+    if(-not $codeNodeIds.ContainsKey($link.to)){
+        $nodeId='code-'+$codeNodeIds.Count;$codeNodeIds[$link.to]=$nodeId
+        $memoryCanvasNodes+=,[ordered]@{id=$nodeId;type='file';file=$link.to;x=700;y=(($codeNodeIds.Count-1)*220);width=440;height=180}
+    }
+    $memoryCanvasEdges+=,[ordered]@{id=('anchor-'+$memoryCanvasEdges.Count);fromNode=$memoryNodeIds[$link.from];fromSide='right';toNode=$codeNodeIds[$link.to];toSide='left';label=$link.status;color=$(if($link.status -ceq 'current_source_hash_matches_anchor'){'4'}else{'2'})}
+}
+foreach($node in $memoryCanvasNodes){if(-not (Test-Path -LiteralPath (Child $vault $node.file) -PathType Leaf)){throw 'Memory canvas file card does not resolve.'}}
+$canvasIds=@{};foreach($node in $memoryCanvasNodes){if($canvasIds.ContainsKey($node.id)){throw 'Duplicate memory canvas node.'};$canvasIds[$node.id]=$true}
+foreach($edge in $memoryCanvasEdges){if(-not $canvasIds.ContainsKey($edge.fromNode) -or -not $canvasIds.ContainsKey($edge.toNode)){throw 'Memory canvas contains a dangling anchor.'}}
+WriteJson (Child $vault 'memory-graph.canvas') ([ordered]@{nodes=@($memoryCanvasNodes);edges=@($memoryCanvasEdges)})
+[IO.File]::WriteAllText((Child $memoryRoot 'Recall index.md'),($recallLines -join "`n")+"`n",$utf8)
 # Recheck inputs after copying; an interrupted or concurrent source edit never
 # publishes a current pointer to a partly verified combined view.
 if((Hash $pointerPath) -cne $pointerHash -or (Hash $originPath) -cne $originHash -or (Hash $manifestPath) -cne $memoryHash){throw 'An input receipt changed during combined export.'}
@@ -187,6 +213,7 @@ foreach($anchor in $anchors){if($anchor.current_sha256){$source=Child $repositor
 $inventory=@()
 foreach($file in @(Files $vault|Sort-Object FullName)){$inventory+=,[ordered]@{path=(Relative $vault $file.FullName);sha256=(Hash $file.FullName)}}
 $receipt=[ordered]@{schema='ark.combined-memory-vault.v1';graph_sha256=$origin.graph_sha256;code_source_sha256=$origin.source_sha256;code_receipt_sha256=$originHash;memory_manifest_sha256=$memoryHash;memory_scope=$manifest.scope;authority='untrusted_historical_context_only';code_origin_receipt='code-origin-receipt.json';files=$inventory;links_added=$links;anchors=$anchors;source_vault_modified=$false;personal_vault_modified=$false}
+$receipt.memory_graph=[ordered]@{path='memory-graph.canvas';nodes=$memoryCanvasNodes.Count;edges=$memoryCanvasEdges.Count;relations='explicit_verified_anchor_destinations_only';recall_index='ARK Memory/Recall index.md'}
 $complete=Child $vault '.ark-memory-vault.json';WriteJson $complete $receipt
 $receiptHash=Hash $complete
 $combinedPointer=Child $OutputDirectory 'current.json';$temporary=Child $OutputDirectory ('current-'+[guid]::NewGuid().ToString('N')+'.tmp')

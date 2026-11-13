@@ -32,7 +32,8 @@ void packedRetention(){
     auto stale=s.call("doc_apply",field(candidate,"apply"));check(field(stale,"isError").b,"retention does not authorize stale publication");
     // Expanding shared geometry later is charged at the next tool boundary.
     (void)body.nativeData.value();accepted(s.call("doc_info",json(R"({"detail":"revision"})")));
-    bool evicted=false;try{s.preparedRecipe(field(candidate,"candidate_id").str);}catch(...){evicted=true;}check(evicted,"later lazy expansion is recharged and evicts over-budget receipt");
+    check(s.preparedRecipe(field(candidate,"candidate_id").str).t==V::Obj,"later lazy expansion retains the newest validated receipt above the soft target");
+    const auto before=documentToJson(s.document);const auto revision=s.revision;check(field(s.call("doc_apply",field(candidate,"apply")),"isError").b&&documentToJson(s.document)==before&&s.revision==revision,"retaining expanded geometry never authorizes stale publication");
 }
 void refreshAndCommit(){
     AgentSession s;s.suppressFailureCapture();apply(s,R"([{"op":"feature.add","type":"box","name":"Target","p":{"dx":2,"dy":3,"dz":4}},{"op":"feature.add","type":"box","name":"Peer","p":{"dx":4,"dy":5,"dz":6}}])");

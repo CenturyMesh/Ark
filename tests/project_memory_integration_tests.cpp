@@ -96,6 +96,10 @@ void hostIdentityAndCas(){
     data(lead.call("memory_record",record("large-verbatim",longFact)));
     const auto exactLarge=lead.call("memory_context",json(R"({"operation":"get","key":"large-verbatim"})"));
     check(field(field(data(exactLarge),"records").arr.at(0),"content").str==longFact,"exact host get returns a stored 24 KiB fact completely and verbatim");
+    const auto index=lead.call("memory_context",json(R"({"operation":"get","key":"large-verbatim","detail":"index"})"));
+    check(!field(data(index),"records").arr.front().find("content")&&data(index).dump().size()<4096,"host index avoids transporting an entire long memory");
+    const auto distilled=lead.call("memory_context",json(R"({"operation":"distill","keys":["concept","large-verbatim"],"expected_revisions":{"concept":2,"large-verbatim":1}})"));
+    check(field(data(distilled),"selected_records").num==2&&field(data(distilled),"extracts").dump().find(longFact)!=std::string::npos,"host read-only distillation retains exact full text and selected memory revisions");
     for(const auto& request:{json(R"({"operation":"wakeup"})"),json(R"({"operation":"search","text":"Synthetic retained decision"})")}){
         const auto compact=lead.call("memory_context",request);const auto& recalled=data(compact);
         check(recalled.dump().size()<=16384&&field(recalled,"partial").b,"default startup/search remains bounded and explicitly partial when a full fact exceeds its context window");

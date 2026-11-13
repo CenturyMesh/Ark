@@ -30,7 +30,8 @@ a signature and cannot authenticate a maliciously rewritten entire journal.
 
 `history_info{limit?:1..64,before_id?:string}` returns newest metadata first, `head_id`,
 `baseline_id`, `nodes`, `node_count`, `branch_heads`, `storage_bytes`,
-`document_bytes` and `max_document_bytes:4194304`. It returns no large geometry
+`document_bytes`, `max_nodes:null`, `max_document_bytes:null` and
+`growth_policy:"resource_limited_no_automatic_pruning"`. It returns no large geometry
 payload. `has_more` and `next_before_id` expose bounded older pages; pass the
 cursor as `before_id` to exclude that anchor. Cursors stay stable under new
 commits, and unknown cursors reject. Empty legacy documents return empty identifiers and lists. The
@@ -54,23 +55,29 @@ preserved. `doc_undo` and `doc_redo` use persistent target stacks after reopen,
 also writing new immutable nodes. Successful mutation receipts include
 `iteration_id` and `head_id`; refresh `history_info` after receiving one.
 
-The full persisted file, including current authoring, journal and usage, is
-limited to 4 MiB. There are at most 512 nodes, and validation/replay is bounded
-to 131072 delta operations. An individual reconstructed authoring state is
-also bounded to 4 MiB before repeated blob references can expand memory.
+From 072A, ordinary editing has no fixed 512-node, 4 MiB logical-document or
+131072-operation lifetime quota. Journal entries grow with the actual retained
+history; existing IDs, branches, receipts and undo/redo targets are preserved.
+Replay indexes actual node identities and detects cycles through visited IDs.
+Persistent stacks must refer to actual nodes and cannot outnumber retained commits.
+Before expanding shared blobs, a complete allocation preflight counts each
+reference against the current document-read memory allowance. It runs before
+expanded strings are copied and is separate from ordinary editing: freed
+sequential replay states do not consume an accumulated lifetime budget.
 Missing references, duplicate/cyclic nodes, changed node hashes, changed
 payload hashes or a mismatched current head reject loading atomically.
 Authoring commits verify that the same journal can reopen before acceptance.
-Capacity failure restores document, revision, undo/redo and prepared candidate
-custody; it never silently deletes old nodes. An oversized save leaves the
+Allocation or validation failure restores document, revision, undo/redo and prepared candidate
+custody; it never silently deletes old nodes. A rejected save leaves the
 existing target file intact. External exports are outside drawing history.
 
-## Capacity visibility — 045A
+## History visibility — 072A
 
-`history_info` also returns `max_nodes:512`. Because reaching either limit
-rejects every further edit, commit receipts add `history_capacity`
-(`node_count`, `max_nodes`, `document_bytes`, `max_document_bytes`, `warning`)
-once the journal reaches 75% of the node limit or the document 75% of 4 MiB.
+`history_info` reports actual node and byte counts. It no longer presents a
+percentage of the removed 512-node or 4 MiB editing limits. No node is
+automatically compacted, migrated or deleted when the history grows. Existing
+journal schemas and node hashing remain unchanged; older applications that
+enforce the legacy limits can still reject a larger journal.
 
 Undo and redo also write nodes, so a temporary state committed and then
 reverted costs two nodes. When a `doc_apply` made only of `assembly.drive`
@@ -100,8 +107,8 @@ delta erases the payload keys and adds no frame bytes. Older nodes keep theirs.
 `history_info` reports `schema`, `migrations` and `inline_bake_payloads`
 (`references`, unique `bytes`, and a hint while any remain). A commit rejected
 for capacity adds `derived_bakes.inline_bake_payload_bytes` when old frames are
-present, and the 75% `history_capacity` warning adds
-`inline_bake_payload_bytes`.
+present. The explicit payload report remains available independently of journal
+growth.
 
 ### Explicit migration
 

@@ -1,7 +1,7 @@
         const u64 revision=g_session.revision,epoch=g_documentEpoch;
         const int originalW=winW,originalH=winH,originalModule=g_toolModule;const bool originalDock=g_assistantDockOpen;
         auto failure=[&](const std::string& detail){std::ofstream(shotPath+".action-icons-test.log")<<"FAIL: "<<detail<<'\n';std::fprintf(stderr,"Action icons UI: %s\n",detail.c_str());return 521;};
-        const std::vector<int> actions{58,357,585,586,587,590,549,152,153,154,650,659,687,710,730,731,732,750,755};
+        const std::vector<int> actions{58,357,585,586,587,590,549,152,153,154,650,659,687,710,730,731,732,750,755,49960,49920,49921,49922,49940,49941,49942,49980,49981,50000,50001,50002,50003,50004,49506,50020,50021,50022,50023,50040,50041,50042,50043};
         HMENU menu=CreatePopupMenu();for(int action:actions)AppendMenuA(menu,MF_STRING,(UINT_PTR)action,"Action icon");decorateMenu(menu);
         for(size_t i=0;i<actions.size();++i){MENUITEMINFOW item{sizeof item};item.fMask=MIIM_BITMAP;BITMAP bitmap{};
             if(!GetMenuItemInfoW(menu,(UINT)i,TRUE,&item)||!item.hbmpItem||!GetObject(item.hbmpItem,sizeof bitmap,&bitmap)||bitmap.bmWidth!=22||bitmap.bmHeight!=22){DestroyMenu(menu);return failure("A native menu action has no 22px bitmap.");}

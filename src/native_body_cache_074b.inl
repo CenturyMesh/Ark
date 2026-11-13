@@ -1,0 +1,28 @@
+// Included inside namespace ark after native_features' private producer helpers.
+// This memo is deliberately AFTER current-request authentication/restore. It
+// cannot substitute a remembered body for missing, changed or corrupt cache bytes.
+namespace {
+struct NativeBodyMemo074B {
+    struct Entry {Body body;size_t bytes=0;std::uint64_t used=0;};
+    std::mutex mutex;std::map<std::string,Entry> entries;size_t bytes=0,lastLimit=0,maintenance=0;
+    std::uint64_t clock=0,hits=0,misses=0,materialized=0,evicted=0,oversized=0,clears=0;
+    static NativeBodyMemo074B& get(){static NativeBodyMemo074B value;return value;}
+    static size_t target()noexcept{try{for(const char* name:{"ARK_NATIVE_RESULT_CACHE","ARK_NATIVE_BODY_CACHE"})if(const char* value=std::getenv(name);value&&std::string(value)=="0")return 0;return size_t(std::min<std::uint64_t>(currentResourcePolicy071D().payloadLimitBytes,std::numeric_limits<size_t>::max()));}catch(...){return 0;}}
+    static size_t size(const std::string& key,const Body& body){size_t count=sizeof(Entry)+key.capacity()+128+body.nativeData.allocatedBytes();if(body.baked)count+=sizeof(Mesh)+(body.baked->pos.capacity()+body.baked->nrm.capacity())*sizeof(f32)+body.baked->idx.capacity()*sizeof(u32);return count;}
+    void trim(size_t limit,bool inspect=false){if(inspect||limit<lastLimit||++maintenance%64==0){bytes=0;for(auto& [key,entry]:entries){entry.bytes=size(key,entry.body);bytes+=entry.bytes;}}lastLimit=limit;while(!entries.empty()&&(bytes>limit||entries.size()>4096)){auto oldest=std::min_element(entries.begin(),entries.end(),[](const auto& a,const auto& b){return a.second.used<b.second.used;});bytes-=oldest->second.bytes;entries.erase(oldest);++evicted;}}
+    static bool lookup(const std::string& key,Body& result)noexcept{try{auto& memo=get();std::lock_guard lock(memo.mutex);const auto limit=target();memo.trim(limit);if(key.empty())return false;const auto found=memo.entries.find(key);if(found==memo.entries.end()){++memo.misses;return false;}result=found->second.body;const auto actual=size(found->first,found->second.body);memo.bytes=memo.bytes-found->second.bytes+actual;found->second.bytes=actual;found->second.used=++memo.clock;++memo.hits;memo.trim(limit);return true;}catch(...){return false;}}
+    static void store(const std::string& key,const Body& body)noexcept{try{auto& memo=get();std::lock_guard lock(memo.mutex);++memo.materialized;const auto limit=target();memo.trim(limit);if(key.empty()||!limit)return;const auto amount=size(key,body);if(amount>limit){++memo.oversized;return;}Entry entry{body,amount,++memo.clock};if(auto old=memo.entries.find(key);old!=memo.entries.end()){memo.bytes-=old->second.bytes;memo.entries.erase(old);}memo.entries.emplace(key,std::move(entry));memo.bytes+=amount;memo.trim(limit);}catch(...){/* Optional retention never rejects an already materialized valid body. */}}
+};
+std::string nativeBodyMemoKey074B(const VerifiedNativeResultIdentity074B& identity,const arkjson::Value& result,const Feature& feature,const Document& document){
+    if(!identity||document.historyTip||!document.assemblyLoadSelection.isNull())return {};
+    switch(feature.type){case FeatureType::NativeSolid:case FeatureType::SheetMetal:case FeatureType::Loft:case FeatureType::Sweep:case FeatureType::BSplineSurface:case FeatureType::SurfaceFill:case FeatureType::ExtrudeSurface:case FeatureType::RevolveSurface:case FeatureType::SurfaceEdit:case FeatureType::Thicken:case FeatureType::OffsetSurface:case FeatureType::Sew:break;default:return {};}
+    const auto* key=result.find("native_cache_key");if(!key||key->t!=arkjson::Value::Str||key->str!=identity.key)return {};
+    std::string value=identity.key+":"+identity.payloadSha256+":"+identity.producerSha256;
+    // Host-side NativeSolid discovery adds feature/lineage-specific evidence.
+    // Include it exactly; the native transport identity alone does not bind it.
+    if(feature.type==FeatureType::NativeSolid){const auto* report=result.find("report");const auto* added=report?report->find("tube_end_fit_options"):nullptr;if(!added)return {};value+=':';value+=added->dump();}
+    return value;
+}
+}
+void clearNativeBodyCache074B() noexcept {try{auto& memo=NativeBodyMemo074B::get();std::lock_guard lock(memo.mutex);memo.entries.clear();memo.bytes=0;++memo.clears;}catch(...){}}
+arkjson::Value nativeBodyCacheInfo074B(){using V=arkjson::Value;auto& memo=NativeBodyMemo074B::get();std::lock_guard lock(memo.mutex);const auto target=NativeBodyMemo074B::target();memo.trim(target,true);V out=V::makeObj();out.set("schema",V::makeStr("ark.native-body-memo.074b.v1"));out.set("target_bytes",V::makeNum(double(target)));out.set("retained_bytes",V::makeNum(double(memo.bytes)));out.set("entries",V::makeNum(double(memo.entries.size())));out.set("hits",V::makeNum(double(memo.hits)));out.set("misses",V::makeNum(double(memo.misses)));out.set("materializations",V::makeNum(double(memo.materialized)));out.set("evictions",V::makeNum(double(memo.evicted)));out.set("oversized_skipped",V::makeNum(double(memo.oversized)));out.set("clears",V::makeNum(double(memo.clears)));out.set("authority",V::makeStr("Immutable CPU body conversion reused only after current native result authentication/restore; whole payload digest, producer identity and exact host postprocessing are bound."));out.set("scope",V::makeStr("Process-local, full-load documents; selective load/history rollback clears retention. No bypass of disk SHA, saved-result validation or current geometry requests."));out.set("accounting",V::makeStr("Native payload plus mesh capacities, refreshed on use, pressure, every64 maintenance calls and inspection; shared live owners may also retain these buffers."));return out;}

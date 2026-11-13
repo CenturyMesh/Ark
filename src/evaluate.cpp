@@ -1,5 +1,9 @@
 ﻿// ARK-Point :: evaluate.cpp â€” feature-history recompute pipeline.
 #include "ark/model.hpp"
+#include "ark/evaluation_scheduler_070a.hpp"
+#include "ark/evaluation_diagnostics_074b.hpp"
+#include "ark/iteration_history.hpp"
+#include "ark/native_body_cache_074b.hpp"
 #include "ark/history_authoring.hpp"
 #include "ark/assembly_authoring.hpp"
 #include "ark/serialize.hpp"
@@ -21,6 +25,12 @@
 
 namespace ark {
 namespace {thread_local EvaluationObserver evaluationObserver;}
+namespace {thread_local EvaluationSchedulerDiagnostics070A schedulerDiagnostics070A;}
+EvaluationSchedulerDiagnostics070A evaluationSchedulerDiagnostics070A(){return schedulerDiagnostics070A;}
+void resetEvaluationDiagnostics074B(Document& document,const char* mode){
+    using V=arkjson::Value;V value=V::makeObj();value.set("schema",V::makeStr("ark.evaluation-diagnostics.074b.v1"));value.set("mode",V::makeStr(mode));
+    value.set("evaluated",V::makeNum(0));value.set("reused",V::makeNum(document.evalBodies.size()));value.set("inactive",V::makeNum(0));value.set("suppressed",V::makeNum(0));value.set("failed",V::makeNum(0));value.set("projection_builds",V::makeNum(0));value.set("projection_reused",V::makeNum(0));value.set("features",V::makeArr());document.evaluationDiagnostics=std::move(value);
+}
 EvaluationObserver setEvaluationObserver(EvaluationObserver observer){auto previous=std::move(evaluationObserver);evaluationObserver=std::move(observer);return previous;}
 static void evaluationProgress(u64 id,const std::string& name,size_t index,size_t total,bool completed,bool reused){if(evaluationObserver)try{evaluationObserver(id,name,index,total,completed,reused);}catch(...){/* An observer cannot alter geometric acceptance. */}}
 
@@ -56,14 +66,16 @@ static bool explicitDependencies(const Feature& f){
     }
     if(f.type==FeatureType::SurfaceEdit){
         const auto* operation=f.nativeSpec.find("op");if(!operation||operation->t!=arkjson::Value::Str)return false;
-        static const std::set<std::string> edits{"extract_face","trim_plane","trim_wire","repair","untrim","extend","mutual_trim"};
+        // These producers read only declared input bodies/topology and resolved
+        // scalar expressions. Source/target hash guards still run on any changed
+        // input generation; the generic named/occurrence veto above still applies.
+        static const std::set<std::string> edits{"extract_face","trim_plane","trim_wire","repair","untrim","extend","mutual_trim","deform_poles","match_boundary","multi_trim","extend_trimmed"};
         return edits.count(operation->str)!=0;
     }
     if(f.type!=FeatureType::NativeSolid)return false;
     std::string op=f.get("op");if(op.empty())if(auto value=f.nativeSpec.find("op"))op=value->str;
     static const std::set<std::string> pure{"box","sphere","cylinder","cone","torus","union","cut","common","hole","fillet","chamfer","transform","linear_pattern","circular_pattern","mirror","shell","draft","split_plane","curve_pattern","hole_pattern","vertex_pull","rib","gusset","mount_pad","boss","screw_support","nut_seat","lid_lip","lid_groove","split_surface","split_tool"};return pure.count(op)!=0;
 }
-static unsigned threadSetting(const char* name,unsigned fallback,unsigned maximum){if(const char* value=std::getenv(name)){char* end=nullptr;long requested=std::strtol(value,&end,10);if(!end||*end||requested<1||(unsigned long)requested>maximum)throw std::runtime_error(std::string(name)+" has an invalid thread budget");return (unsigned)requested;}return fallback;}
 struct NativeBudgetScope {int previous;explicit NativeBudgetScope(unsigned budget):previous(setNativeThreadBudget((int)budget)){}~NativeBudgetScope(){setNativeThreadBudget(previous);}};
 struct OuterParallelScope {bool previous;explicit OuterParallelScope(bool value):previous(setOuterParallelRegion(value)){}~OuterParallelScope(){setOuterParallelRegion(previous);}};
 static size_t valueMemory(const arkjson::Value& value){size_t bytes=sizeof(value)+value.str.size()+64;for(const auto& child:value.arr)bytes+=valueMemory(child);for(const auto& pair:value.obj)bytes+=sizeof(pair.first)+pair.first.size()+valueMemory(pair.second);return bytes;}
@@ -349,22 +361,6 @@ static Body evalFeatureBody(const Feature& f, const ExprEnv& env, Document& doc,
 
 static bool deferredSketch(const Document& document,const NamedSketch& sketch);
 static bool deferredDatum(const Document& document,const std::string& name);
-static void refreshDrivenSketches(Document& document, bool require){
-    ExprEnv env=document.buildEnv();
-    for(auto& sketch:document.sketches){
-        if(deferredSketch(document,sketch)){sketch.error.clear();sketch.residual=0;continue;}
-        bool projects=false;
-        for(const auto& entity:sketch.sk.ents) if(entity.kind==SketchEnt::Project) projects=true;
-        if(!projects) continue;
-        DrivenSketchStatus status=bakeSketchProjects(document,sketch);
-        if(!status.error.empty()){sketch.error=status.error;sketch.residual=INFINITY;continue;}
-        if(status.waiting){
-            if(require){sketch.error="Project source is not evaluated yet";sketch.residual=INFINITY;}
-            continue;
-        }
-        evaluateSketch(sketch,env);
-    }
-}
 
 // Collect semantic authoring inputs without touching evaluated bodies. Named
 // point -> datum -> sketch/feature chains must be checked before cache reuse or
@@ -446,6 +442,38 @@ struct AuthoringSources {
     }
 };
 
+// Occurrence ancestry alone does not cover its solved pose: geometric mates
+// also read both endpoint bodies. Ordinary unpatterned assemblies have no other
+// geometry-reading pose machinery. Keep patterns and drag-chain followers on
+// the conservative path until their full producer closure is separately audited.
+static bool addSimpleAssemblyPoseSources073B(const Document& document,AuthoringSources& sources){
+    if(!document.dragChains.isNull()&&(document.dragChains.t!=arkjson::Value::Arr||!document.dragChains.arr.empty()))return false;
+    for(const auto& node:document.assembly)if(node.pattern.active)return false;
+    for(const auto& mate:document.mates)for(u64 endpoint:{mate.a,mate.b}){
+        const AssemblyNode* node=nullptr;for(const auto& candidate:document.assembly)if(candidate.id==endpoint){node=&candidate;break;}
+        if(!node)throw std::runtime_error("Assembly pose dependency endpoint not found");
+        if(node->feature)sources.producer(arkjson::Value::makeNum(double(node->feature)));
+    }
+    return true;
+}
+
+// These producers consume their authored profile/region recipe, the complete
+// named sketch/datum closure and declared source/limit bodies. They do not read
+// unrelated history rows. Keep their execution on the owner when named sources
+// are involved; this audit narrows invalidation, not worker snapshot authority.
+static bool scopedProducerDependencies074B(const Feature& feature){
+    if(feature.type==FeatureType::ExtrudeSurface||feature.type==FeatureType::RevolveSurface||feature.type==FeatureType::Loft||feature.type==FeatureType::Sweep||feature.type==FeatureType::SurfaceFill||feature.type==FeatureType::SheetMetal)return true;
+    if(feature.type==FeatureType::SurfaceEdit){const auto* op=feature.nativeSpec.find("op");if(!op||op->t!=arkjson::Value::Str)return false;static const std::set<std::string> operations{"extract_face","trim_plane","trim_wire","trim_tool","mirror","ruled","deform_poles","repair","untrim","extend","mutual_trim","match_boundary","curve_network","multi_trim","extend_trimmed"};return operations.count(op->str)!=0;}
+    if(feature.type!=FeatureType::NativeSolid)return false;
+    auto operation=feature.get("op");if(operation.empty())if(const auto* op=feature.nativeSpec.find("op"))operation=op->asStr();
+    return operation=="extrude"||operation=="fillet"||operation=="chamfer"||operation=="hole"||operation=="mirror"||operation=="split_plane";
+}
+struct ScopedExtrusionSources073B {
+    bool audited=false,occurrences=false;
+    std::set<u64> features;
+    std::set<std::string> named;
+};
+
 std::unordered_set<u64> assemblyFeatureDependencies(const Document& document,const Feature& feature){
     AuthoringSources sources(document);sources.collect(feature);return {sources.features.begin(),sources.features.end()};
 }
@@ -474,7 +502,63 @@ static bool deferredDatum(const Document& document,const std::string& name){
     try{AuthoringSources sources(document);sources.datum(name);return deferredSources(document,sources);}catch(...){return false;}
 }
 
+// A published feature body cannot change again within this recompute pass.
+// Once a projection's complete source closure has been published and solved,
+// repeating its native projection after unrelated history rows is redundant.
+// This state is deliberately pass-local: every edit, undo and reopen starts
+// fresh. Simple occurrence projections also require every mate endpoint body;
+// patterns and drag-chain followers retain the conservative path.
+class DrivenSketchRefresh {
+    struct Row {size_t index;bool audited=false,complete=false;std::set<u64> features;std::set<std::string> sketches;};
+    Document& document;
+    const ExprEnv env;
+    std::vector<Row> rows;
+    std::set<std::string> completed;
+public:
+    explicit DrivenSketchRefresh(Document& doc):document(doc),env(doc.buildEnv()){
+        document.recomputeProjectionBuilds=0;document.recomputeProjectionReused=0;
+        for(size_t i=0;i<doc.sketches.size();++i){
+            const auto& sketch=doc.sketches[i];bool projects=false;
+            for(const auto& entity:sketch.sk.ents)projects|=entity.kind==SketchEnt::Project;
+            if(!projects)continue;
+            Row row;row.index=i;
+            try{
+                AuthoringSources sources(doc);sources.sketch(sketch.name);
+                row.audited=!sources.occurrences||addSimpleAssemblyPoseSources073B(doc,sources);row.features=std::move(sources.features);
+                for(const auto& key:sources.done)if(key.rfind("sketch:",0)==0&&key.substr(7)!=sketch.name){
+                    const auto name=key.substr(7);const auto* source=doc.findSketch(name);
+                    if(source)for(const auto& entity:source->sk.ents)if(entity.kind==SketchEnt::Project){row.sketches.insert(name);break;}
+                }
+            }catch(...){/* Failed/unknown closure must keep retrying and report its native error. */}
+            rows.push_back(std::move(row));
+        }
+    }
+    void refresh(bool require){
+        for(auto& row:rows){
+            auto& sketch=document.sketches[row.index];
+            if(row.complete){++document.recomputeProjectionReused;continue;}
+            if(deferredSketch(document,sketch)){sketch.error.clear();sketch.residual=0;continue;}
+            ++document.recomputeProjectionBuilds;
+            DrivenSketchStatus status=bakeSketchProjects(document,sketch);
+            if(!status.error.empty()){sketch.error=status.error;sketch.residual=INFINITY;continue;}
+            if(status.waiting){
+                if(require){sketch.error="Project source is not evaluated yet";sketch.residual=INFINITY;}
+                continue;
+            }
+            evaluateSketch(sketch,env);
+            if(!row.audited||!sketch.error.empty())continue;
+            bool stable=true;
+            for(u64 id:row.features){bool published=false;for(const auto& result:document.lastResults)if(result.id==id){published=result.ok;break;}stable&=published;}
+            for(const auto& name:row.sketches)stable&=completed.count(name)!=0;
+            if(stable){row.complete=true;completed.insert(sketch.name);}
+        }
+    }
+};
+
 const std::vector<FeatureResult>& Document::recompute() {
+    schedulerDiagnostics070A={};
+    resetEvaluationDiagnostics074B(*this,"recompute_started");
+    if(historyTip||!assemblyLoadSelection.isNull())clearNativeBodyCache074B();
     NativeDocumentResultScope nativeResults(pendingNativeGeometry);
     f64 t0=nowMs();
     refreshSkeleton(*this);
@@ -530,17 +614,16 @@ const std::vector<FeatureResult>& Document::recompute() {
     struct EvaluationScope {Document& doc;~EvaluationScope(){doc.evaluatingBodies=nullptr;}} evaluationScope{*this};
     // Sketch-only associations can resolve before the first feature. Feature-backed
     // sources remain waiting until their producer crosses the publication boundary.
-    refreshDrivenSketches(*this,false);
+    DrivenSketchRefresh drivenSketches(*this);drivenSketches.refresh(false);
     std::vector<bool> explicitInputs;for(const auto& f:features)explicitInputs.push_back(explicitDependencies(f));
-    const unsigned cores=std::max(1u,std::thread::hardware_concurrency());
-    const unsigned cpuBudget=std::min(cores,threadSetting("ARK_CPU_THREADS",std::min(cores,32u),64));
-    const unsigned requestedWorkers=threadSetting("ARK_FEATURE_THREADS",std::min(cpuBudget,4u),16);
+    const auto hardware=probeResourceHardware071D();const auto resourceOverrides=resourceOverrides071D();
 
     parallelFeatures=0;peakParallelFeatures=0;dependencyEdges=0;parallelContextFeaturesCopied=0;
     std::unordered_map<u64,size_t> indices;for(size_t i=0;i<features.size();++i)indices[features[i].id]=i;
     std::vector<std::vector<size_t>> dependencies(features.size());
     std::vector<std::string> authoringDependencyErrors(features.size());
     std::vector<bool> placementSensitive(features.size(),true);
+    std::vector<ScopedExtrusionSources073B> scopedSources(features.size());
     for(size_t i=0;i<features.size();++i){
         if(activeFeatures[i]&&!features[i].suppressed)try{
             AuthoringSources sources(*this);sources.collect(features[i]);if(sources.named)explicitInputs[i]=false;
@@ -552,63 +635,136 @@ const std::vector<FeatureResult>& Document::recompute() {
             if(features[i].type==FeatureType::NativeSolid&&!sources.occurrences&&!instanceProjection&&!geometricSupports)placementSensitive[i]=false;
             for(u64 source:sources.features)if(std::find(features[i].inputs.begin(),features[i].inputs.end(),source)==features[i].inputs.end())explicitInputs[i]=false;
             for(u64 source:sources.features){const auto found=indices.find(source);if(found==indices.end()||found->second>=i)throw std::runtime_error("Forward or cyclic associative feature dependency: "+features[i].name+" -> "+std::to_string(source));}
+            if(scopedProducerDependencies074B(features[i])){
+                bool audited=!sources.occurrences||addSimpleAssemblyPoseSources073B(*this,sources);
+                // A future endpoint with an origin-only mate can be legitimate;
+                // it cannot enter this earlier feature's generation key yet.
+                // Fall back instead of introducing a new authoring rejection.
+                if(audited)for(u64 source:sources.features){const auto found=indices.find(source);if(found==indices.end()||found->second>=i){audited=false;break;}}
+                if(audited){auto& scope=scopedSources[i];scope.audited=true;scope.occurrences=sources.occurrences;scope.features=std::move(sources.features);scope.named=std::move(sources.done);}
+            }
         }catch(const std::exception& error){authoringDependencyErrors[i]=error.what();explicitInputs[i]=false;}
         for(u64 input:features[i].inputs){auto found=indices.find(input);if(found==indices.end()||found->second>=i){explicitInputs[i]=false;continue;}dependencies[i].push_back(found->second);}
         if(!explicitInputs[i]){dependencies[i].clear();for(size_t j=0;j<i;++j)dependencies[i].push_back(j);}
         dependencyEdges+=dependencies[i].size();
     }
-    // Semantic source discovery can turn otherwise independent operations into
-    // ordered barriers. Budget only the final audited set, after that discovery.
-    const size_t eligible=(size_t)std::count(explicitInputs.begin(),explicitInputs.end(),true);
-    featureWorkers=eligible>=4?std::min(cpuBudget,requestedWorkers):1;
-    nativeThreadsPerWorker=std::min(threadSetting("ARK_NATIVE_THREADS",8,64),std::max(1u,cpuBudget/featureWorkers));
-    NativeBudgetScope ownerBudget(nativeThreadsPerWorker);
+    std::vector<EvaluationFingerprints> plannedFingerprints(features.size());
+    std::vector<std::vector<std::string>> plannedReasons(features.size());
     auto keyFor=[&](size_t index){
         const auto& f=features[index];auto source=authored.find("features")->arr[index];
         source.obj.erase(std::remove_if(source.obj.begin(),source.obj.end(),[](const auto& v){return v.first=="appearance"||v.first=="part";}),source.obj.end());
         // A feature that survived semantic source discovery cannot read named
         // sketches/datums/occurrences. Unrelated global projected geometry must
         // not add those resources to this feature's otherwise explicit key.
-        std::string own=source.dump(),context=explicitInputs[index]?std::string{}:scopedContext(f,own),dependenciesText=own+context,key=dependenciesText;
+        const auto& scope=scopedSources[index];std::string own=source.dump(),context;
+        if(scope.audited){
+            for(const auto& kind:std::initializer_list<std::pair<const char*,const char*>>{{"sketches","sketch:"},{"planes","datum:"}})if(const auto* rows=authored.find(kind.first))for(const auto& row:rows->arr){const auto* name=row.find("name");if(name&&scope.named.count(std::string(kind.second)+name->str))context+=row.dump();}
+            // World-projected profiles retain all authored assembly/mate context.
+            // A projection elsewhere in the drawing cannot contaminate a local
+            // profile's key. Unknown producer families retain the old fallback.
+            if(scope.occurrences)for(const char* kind:{"assembly","mates"})if(const auto* value=authored.find(kind))context+=value->dump();
+        }else if(!explicitInputs[index])context=scopedContext(f,own);
+        std::string dependenciesText=own+context,key=(scope.audited?"scoped-producer-074b:":"")+dependenciesText,parameterTokens,dependencyTokens,tessellationTokens,extraContext;
         for(const auto& param:params){
             if(param.name.empty())continue;size_t pos=0;bool used=false;
             while((pos=dependenciesText.find(param.name,pos))!=std::string::npos){auto ident=[](char c){return std::isalnum((unsigned char)c)||c=='_';};if((pos==0||!ident(dependenciesText[pos-1]))&&(pos+param.name.size()==dependenciesText.size()||!ident(dependenciesText[pos+param.name.size()]))){used=true;break;}pos+=param.name.size();}
-            if(used)key+=param.name+"="+arkjson::Value::makeNum(param.value).dump();
+            // Authored sheet programs receive the complete environment in their
+            // producer request/report. Keep that contract conservative while
+            // removing unrelated geometry and sketch dependencies.
+            if(used||(f.type==FeatureType::SheetMetal&&f.nativeSpec.find("base"))){const auto token=param.name+"="+arkjson::Value::makeNum(param.value).dump();key+=token;parameterTokens+=token;}
         }
-        if(!explicitInputs[index]){key+=upstream;if(placementSensitive[index])for(const char* name:{"assembly","mates"})if(auto value=authored.find(name))key+=value->dump();if(geometricSupports)for(const auto& p:params)key+=p.name+"="+arkjson::Value::makeNum(p.value).dump();}
-        for(u64 input:f.inputs)key+=keys[input];
-        for(double n:{tessOpt.tol,tessOpt.maxEdge,tessOpt.minAngleDeg,(double)tessOpt.maxLevels})key+=':'+arkjson::Value::makeNum(n).dump();return key;
+        if(scope.audited){for(u64 input:scope.features){key+=keys[input];dependencyTokens+=keys[input];}}
+        else {if(!explicitInputs[index]){key+=upstream;dependencyTokens+=upstream;if(placementSensitive[index])for(const char* name:{"assembly","mates"})if(auto value=authored.find(name)){const auto token=value->dump();key+=token;extraContext+=token;}if(geometricSupports)for(const auto& p:params){const auto token=p.name+"="+arkjson::Value::makeNum(p.value).dump();key+=token;parameterTokens+=token;}}for(u64 input:f.inputs){key+=keys[input];dependencyTokens+=keys[input];}}
+        for(double n:{tessOpt.tol,tessOpt.maxEdge,tessOpt.minAngleDeg,(double)tessOpt.maxLevels})tessellationTokens+=':'+arkjson::Value::makeNum(n).dump();key+=tessellationTokens;
+        const auto previous=evaluationCache.find(f.id);auto& reasons=plannedReasons[index];
+        if(previous!=evaluationCache.end()&&previous->second.key==key){reasons.push_back("cache_reused");return key;}
+        auto& parts=plannedFingerprints[index];parts.definition=iterationSha256(own);parts.context=iterationSha256(context+extraContext);parts.parameters=iterationSha256(parameterTokens);parts.dependencies=iterationSha256(dependencyTokens);parts.tessellation=iterationSha256(tessellationTokens);
+        if(previous==evaluationCache.end())reasons.push_back("first_evaluation");
+        else{const auto& old=previous->second.fingerprints;if(old.definition.empty())reasons.push_back("cache_key_changed");else{
+            if(parts.definition!=old.definition)reasons.push_back("definition_changed");if(parts.context!=old.context)reasons.push_back("named_context_changed");if(parts.parameters!=old.parameters)reasons.push_back("parameter_changed");if(parts.dependencies!=old.dependencies)reasons.push_back("dependency_changed");if(parts.tessellation!=old.tessellation)reasons.push_back("tessellation_changed");if(reasons.empty())reasons.push_back("cache_key_changed");}}
+        return key;
     };
     std::vector<std::string> plannedKeys(features.size());std::vector<u64> plannedGenerations(features.size());
     for(size_t i=0;i<features.size();++i){if(!activeFeatures[i])continue;plannedKeys[i]=keyFor(i);auto old=evaluationCache.find(features[i].id);plannedGenerations[i]=old!=evaluationCache.end()&&old->second.key==plannedKeys[i]?old->second.generation:++evaluationGeneration;if(!features[i].suppressed){keys[features[i].id]=std::to_string(features[i].id)+":"+std::to_string(plannedGenerations[i])+";";upstream+=keys[features[i].id];}}
+    // Size the active worker allowance from real dirty audited work, not the
+    // number of cached or inactive rows retained in document history.
+    size_t eligible=0,parallelWidth=0;std::vector<bool> dirtyGeometry(features.size(),false);std::vector<size_t> dirtyLevel(features.size(),0),levelWidths;
+    if(parameterError.empty())for(size_t i=0;i<features.size();++i){
+        const auto previous=evaluationCache.find(features[i].id);
+        if(!activeFeatures[i]||features[i].suppressed||(previous!=evaluationCache.end()&&previous->second.key==plannedKeys[i]))continue;
+        if(!authoringDependencyErrors[i].empty()||!featureParameterError(features[i],env).empty())continue;
+        dirtyGeometry[i]=true;if(explicitInputs[i])++eligible;
+        for(size_t dependency:dependencies[i])if(dirtyGeometry[dependency])dirtyLevel[i]=std::max(dirtyLevel[i],dirtyLevel[dependency]+1);
+        if(levelWidths.size()<=dirtyLevel[i])levelWidths.resize(dirtyLevel[i]+1);
+        parallelWidth=std::max(parallelWidth,++levelWidths[dirtyLevel[i]]);
+    }
+    // A linear-time conservative layer-width estimate preserves native CPU
+    // allowance for a few deep chains, while allowing later fan-outs to use
+    // more workers. It is not an optimal maximum-antichain calculation.
+    const auto resourcePolicy=selectResourcePolicy071D(hardware,resourceOverrides,eligible,0,parallelWidth);
+    schedulerDiagnostics070A.resourcePolicy=resourcePolicy;schedulerDiagnostics070A.minimumPayloadLimitBytes=resourcePolicy.payloadLimitBytes;
+    featureWorkers=resourcePolicy.featureWorkers;nativeThreadsPerWorker=resourcePolicy.nativeThreadsPerWorker;
+    NativeBudgetScope ownerBudget(nativeThreadsPerWorker);
     upstream.clear();
     struct Evaluation {Body body;FeatureResult result;};
     struct Activity {std::atomic<unsigned> active{0},peak{0};void enter(){unsigned n=++active,old=peak.load();while(n>old&&!peak.compare_exchange_weak(old,n)){};}void leave(){--active;}};
     auto activity=std::make_shared<Activity>();
     std::vector<std::future<Evaluation>> jobs(features.size());std::vector<bool> published(features.size(),false);size_t outstanding=0,outstandingBytes=0;std::vector<size_t> jobBytes(features.size(),0);
+    auto ownerNativeAllowance=[&](){const unsigned allowance=outstanding==0?resourcePolicy.ownerNativeThreads:nativeThreadsPerWorker;schedulerDiagnostics070A.peakOwnerNativeThreads=std::max(schedulerDiagnostics070A.peakOwnerNativeThreads,allowance);return allowance;};
     std::vector<std::unique_ptr<Evaluation>> completed(features.size());
-    const size_t contextBytes=valueMemory(authored)+features.size()*sizeof(Feature),payloadBudget=128u*1024u*1024u;
+    const size_t contextBytes=valueMemory(authored)+features.size()*sizeof(Feature);
+    const size_t payloadBudget=static_cast<size_t>(std::min<std::uint64_t>(resourcePolicy.payloadLimitBytes,std::numeric_limits<size_t>::max()));
     struct Drain {std::vector<std::future<Evaluation>>& jobs;~Drain(){for(auto& job:jobs)if(job.valid())job.wait();}} drain{jobs};
-    auto harvest=[&](size_t current){
-        for(size_t i=current;i<jobs.size();++i)if(jobs[i].valid()&&jobs[i].wait_for(std::chrono::milliseconds(0))==std::future_status::ready){
+    // Only dirty audited operations enter the frontier. Ready cache entries are
+    // inputs immediately, as before; a newly evaluated input releases its actual
+    // consumers once, on completion or ordered publication. Cached history rows
+    // no longer scan every later feature looking for hypothetical work.
+    std::set<size_t> readyWorkers,runningJobs;
+    std::vector<bool> availableInputs(features.size(),false);
+    std::vector<size_t> missingInputs(features.size(),0),workIndices(features.size(),features.size());
+    std::vector<std::vector<size_t>> waitingConsumers(features.size());
+    for(size_t i=0;i<features.size();++i){
+        const auto cached=evaluationCache.find(features[i].id);
+        availableInputs[i]=activeFeatures[i]&&!features[i].suppressed&&authoringDependencyErrors[i].empty()&&cached!=evaluationCache.end()&&cached->second.key==plannedKeys[i];
+    }
+    if(featureWorkers>=2&&parameterError.empty())for(size_t i=0;i<features.size();++i){
+        if(!activeFeatures[i]||features[i].suppressed||!explicitInputs[i]||availableInputs[i]||!authoringDependencyErrors[i].empty()||!featureParameterError(features[i],env).empty())continue;
+        ++schedulerDiagnostics070A.dirtyCandidates;
+        for(size_t dependency:dependencies[i])if(!availableInputs[dependency]){++missingInputs[i];waitingConsumers[dependency].push_back(i);}
+        if(!missingInputs[i])readyWorkers.insert(i);
+    }
+    auto releaseInput=[&](size_t index){
+        if(availableInputs[index])return;availableInputs[index]=true;
+        for(size_t consumer:waitingConsumers[index]){
+            ++schedulerDiagnostics070A.dependencyWakeups;
+            if(--missingInputs[consumer]==0&&!published[consumer])readyWorkers.insert(consumer);
+        }
+    };
+    auto harvest=[&](){
+        for(auto it=runningJobs.begin();it!=runningJobs.end();){const size_t i=*it;++schedulerDiagnostics070A.harvestChecks;
+            if(jobs[i].wait_for(std::chrono::milliseconds(0))!=std::future_status::ready){++it;continue;}
             completed[i]=std::make_unique<Evaluation>(jobs[i].get());
             const auto& body=completed[i]->body;size_t retained=sizeof(Evaluation)+body.faces.size()*sizeof(Face)+valueMemory(body.nativeData);
             if(body.baked)retained+=sizeof(Mesh)+(body.baked->pos.capacity()+body.baked->nrm.capacity())*sizeof(f32)+body.baked->idx.capacity()*sizeof(u32);
             const size_t charge=std::max(jobBytes[i],retained);outstandingBytes+=charge-jobBytes[i];jobBytes[i]=charge;
+            it=runningJobs.erase(it);
+            if(completed[i]->result.ok&&(!body.faces.empty()||body.baked))releaseInput(i);
             // Finished outputs keep their slot and charge until publication.
             // Otherwise looking beyond owner-only rows could accumulate a
             // document-sized queue of completed, unpublished geometry.
         }
     };
     auto inputBody=[&](u64 id)->const Body*{
-        for(const auto& b:work)if(b.id==id)return &b;
+        ++schedulerDiagnostics070A.inputLookups;
         auto found=indices.find(id);if(found==indices.end()||!activeFeatures[found->second]||features[found->second].suppressed)return nullptr;size_t index=found->second;
+        if(workIndices[index]!=features.size())return &work[workIndices[index]];
         if(completed[index])return completed[index]->result.ok?&completed[index]->body:nullptr;
         auto cached=evaluationCache.find(id);if(cached!=evaluationCache.end()&&cached->second.key==plannedKeys[index])return cached->second.body.get();return nullptr;
     };
     // An unpublished feature whose audited explicit inputs are all evaluated
     // may run on the pool. bytes receives its input charge for the budget.
-    auto workerReady=[&](size_t i,size_t& bytes){
+    auto workerReady=[&](size_t i,size_t& bytes,bool& retry){
+        ++schedulerDiagnostics070A.readinessChecks;retry=false;
         if(!activeFeatures[i])return false;
         // Only owned, audited explicit-input jobs cross owner-only rows.
         // Named sketch/datum/occurrence consumers stay on the owner thread.
@@ -624,7 +780,15 @@ const std::vector<FeatureResult>& Document::recompute() {
         if(!ready)return false;
         const auto& key=plannedKeys[i];auto cached=evaluationCache.find(features[i].id);if(cached!=evaluationCache.end()&&cached->second.key==key)return false;
         bytes=contextBytes;for(u64 id:features[i].inputs){const auto* body=inputBody(id);bytes+=sizeof(Body)+body->faces.size()*sizeof(Face)+valueMemory(body->nativeData);if(body->baked)bytes+=(body->baked->pos.size()+body->baked->nrm.size()+body->baked->idx.size())*sizeof(float);}
-        return bytes<=payloadBudget&&outstandingBytes<=payloadBudget-bytes;
+        if(bytes>payloadBudget)return false;
+        // A running operation is not cancelled to reclaim memory. Tighten new
+        // snapshot admission when live available RAM falls; the per-pass worker
+        // allowance stays fixed until the next recompute boundary.
+        const auto livePolicy=selectResourcePolicy071D(probeResourceHardware071D(),resourceOverrides,eligible,0,parallelWidth);
+        const auto liveLimit=static_cast<size_t>(std::min<std::uint64_t>(payloadBudget,livePolicy.payloadLimitBytes));
+        schedulerDiagnostics070A.minimumPayloadLimitBytes=std::min<std::uint64_t>(schedulerDiagnostics070A.minimumPayloadLimitBytes,liveLimit);
+        if(bytes>liveLimit){retry=true;return false;}
+        retry=outstandingBytes>liveLimit-bytes;return !retry;
     };
     auto dispatch=[&](size_t i,size_t bytes){
         {
@@ -635,12 +799,18 @@ const std::vector<FeatureResult>& Document::recompute() {
             // Retain the complete explicit ancestor recipes (native promotion
             // may inspect them), rather than copying every unrelated feature
             // once for each scheduled task. Preserve original history order.
-            std::set<size_t> contextFeatures;
-            std::function<void(size_t)> includeSource=[&](size_t index){if(!contextFeatures.insert(index).second)return;for(u64 id:features[index].inputs){auto source=indices.find(id);if(source!=indices.end())includeSource(source->second);}};
-            includeSource(i);snapshot.features.reserve(contextFeatures.size());
-            for(size_t index:contextFeatures)snapshot.features.push_back(features[index]);
+            if(!isMeshModelFeature(features[i].type)){
+                std::set<size_t> contextFeatures;
+                std::function<void(size_t)> includeSource=[&](size_t index){if(!contextFeatures.insert(index).second)return;for(u64 id:features[index].inputs){auto source=indices.find(id);if(source!=indices.end())includeSource(source->second);}};
+                includeSource(i);snapshot.features.reserve(contextFeatures.size());
+                for(size_t index:contextFeatures)snapshot.features.push_back(features[index]);
+                snapshot.params=params;snapshot.materials=materials;
+            }
+            // Mesh evaluation has no Document access: its exact authored mesh,
+            // input payloads and captured expression environment are sufficient.
+            // Do not clone a long ancestor recipe chain merely to move vertices.
             parallelContextFeaturesCopied+=snapshot.features.size();
-            snapshot.params=params;snapshot.materials=materials;snapshot.tessOpt=tessOpt;
+            snapshot.tessOpt=tessOpt;
             std::vector<Body> inputs;for(u64 id:features[i].inputs)inputs.push_back(*inputBody(id));
             const Feature feature=features[i];const unsigned nativeBudget=nativeThreadsPerWorker;
             auto task=std::make_shared<std::packaged_task<Evaluation()>>([snapshot=std::move(snapshot),inputs=std::move(inputs),feature,env,nativeBudget,activity,pending=pendingNativeGeometry,requestControl=captureNativeRequestControl()]()mutable{
@@ -651,14 +821,19 @@ const std::vector<FeatureResult>& Document::recompute() {
                 activity->leave();value.result.ms=nowMs()-started;return value;
             });
             jobs[i]=task->get_future();ThreadPool::get().submit([task]{(*task)();});++outstanding;++parallelFeatures;jobBytes[i]=bytes;outstandingBytes+=bytes;
+            readyWorkers.erase(i);runningJobs.insert(i);schedulerDiagnostics070A.peakRunningJobs=std::max(schedulerDiagnostics070A.peakRunningJobs,runningJobs.size());
         }
     };
     // While the owner waits for a pool job it evaluates nothing itself, so
     // every feature worker may be busy; otherwise one slot stays the owner's.
     auto schedule=[&](size_t current,bool ownerWaiting){
         if(featureWorkers<2||!parameterError.empty())return;
-        harvest(current);
-        for(size_t i=current+1;i<features.size()&&outstanding<(ownerWaiting?featureWorkers:featureWorkers-1);++i){size_t bytes=0;if(workerReady(i,bytes))dispatch(i,bytes);}
+        harvest();
+        for(auto it=readyWorkers.upper_bound(current);it!=readyWorkers.end()&&outstanding<(ownerWaiting?featureWorkers:featureWorkers-1);){
+            const size_t i=*it++;size_t bytes=0;bool retry=false;
+            if(workerReady(i,bytes,retry))dispatch(i,bytes);
+            else if(!retry)readyWorkers.erase(i); // owner-only input or oversized snapshot, never silently dropped
+        }
     };
     for(auto&f:features){
         const size_t index=featureIndex++;
@@ -669,21 +844,21 @@ const std::vector<FeatureResult>& Document::recompute() {
         evaluationProgress(f.id,f.name,index,features.size(),false,cachedFeature);
         f64 tf=nowMs();
         if(f.suppressed){
-            fr.ok=true;fr.ms=nowMs()-tf;lastResults.push_back(fr);refreshDrivenSketches(*this,false);continue;
+            fr.ok=true;fr.ms=nowMs()-tf;lastResults.push_back(fr);drivenSketches.refresh(false);continue;
         }
         bool blocked=false;
         for(u64 input:f.inputs){if(const Feature* source=find(input);source&&source->suppressed){fr.ok=false;fr.error="source feature is suppressed";blocked=true;break;}}
-        if(blocked){fr.ms=nowMs()-tf;lastResults.push_back(std::move(fr));refreshDrivenSketches(*this,false);continue;}
+        if(blocked){fr.ms=nowMs()-tf;lastResults.push_back(std::move(fr));drivenSketches.refresh(false);continue;}
         fr.error=!authoringDependencyErrors[index].empty()?authoringDependencyErrors[index]:parameterError.empty()?featureParameterError(f,env):parameterError;
         fr.ok=fr.error.empty();
         // An audited feature of the owner's own runs on the pool as well, and
         // the owner keeps dispatching later ready features whenever a job
         // finishes instead of blocking all scheduling while it evaluates.
         // Publication below still follows document order.
-        if(fr.ok&&!cachedFeature&&featureWorkers>=2&&parameterError.empty()&&!completed[index]&&!jobs[index].valid()&&outstanding<featureWorkers){size_t bytes=0;if(workerReady(index,bytes))dispatch(index,bytes);}
+        if(fr.ok&&!cachedFeature&&featureWorkers>=2&&parameterError.empty()&&!completed[index]&&!jobs[index].valid()&&outstanding<featureWorkers&&(!runningJobs.empty()||readyWorkers.upper_bound(index)!=readyWorkers.end())){size_t bytes=0;bool retry=false;if(workerReady(index,bytes,retry))dispatch(index,bytes);}
         while(fr.ok&&!completed[index]&&jobs[index].valid()&&jobs[index].wait_for(std::chrono::milliseconds(2))!=std::future_status::ready)schedule(index,true);
         Body b;bool measuredByWorker=false;
-        try{if(fr.ok){auto cached=evaluationCache.find(f.id);if(cached!=evaluationCache.end()&&cached->second.key==cacheKey){b=*cached->second.body;fr.tris=cached->second.tris;++recomputeReused;}else if(completed[index]){b=std::move(completed[index]->body);fr=std::move(completed[index]->result);measuredByWorker=true;completed[index].reset();--outstanding;outstandingBytes-=jobBytes[index];++recomputeEvaluated;}else if(jobs[index].valid()){auto value=jobs[index].get();--outstanding;outstandingBytes-=jobBytes[index];b=std::move(value.body);fr=std::move(value.result);measuredByWorker=true;++recomputeEvaluated;}else{OuterParallelScope nested(outstanding>0);NativeBudgetScope budget(!explicitInputs[index]&&outstanding==0?std::min(threadSetting("ARK_NATIVE_THREADS",8,64),cpuBudget):nativeThreadsPerWorker);activity->enter();try{b=evalFeatureBody(f,env,*this,work,fr,tessOpt);}catch(...){activity->leave();throw;}activity->leave();++recomputeEvaluated;}}}
+        try{if(fr.ok){auto cached=evaluationCache.find(f.id);if(cached!=evaluationCache.end()&&cached->second.key==cacheKey){b=*cached->second.body;fr.tris=cached->second.tris;++recomputeReused;}else if(completed[index]){b=std::move(completed[index]->body);fr=std::move(completed[index]->result);measuredByWorker=true;completed[index].reset();--outstanding;outstandingBytes-=jobBytes[index];++recomputeEvaluated;}else if(jobs[index].valid()){auto value=jobs[index].get();runningJobs.erase(index);--outstanding;outstandingBytes-=jobBytes[index];b=std::move(value.body);fr=std::move(value.result);measuredByWorker=true;++recomputeEvaluated;}else{OuterParallelScope nested(outstanding>0);NativeBudgetScope budget(ownerNativeAllowance());activity->enter();try{b=evalFeatureBody(f,env,*this,work,fr,tessOpt);}catch(...){activity->leave();throw;}activity->leave();++recomputeEvaluated;}}}
         catch(const std::exception& e){fr.ok=false;fr.error=e.what();}
         // A completed worker retains its actual evaluation duration; publication
         // wait time alone can be near zero even for an expensive operation.
@@ -695,17 +870,17 @@ const std::vector<FeatureResult>& Document::recompute() {
             b.id=f.id;
             const u64 generation=plannedGenerations[index];
             if(cachedFeature)nextCache[f.id]=previousCache->second;
-            else nextCache[f.id]={std::move(cacheKey),std::make_shared<const Body>(b),generation,fr.tris};
+            else nextCache[f.id]={std::move(cacheKey),std::make_shared<const Body>(b),generation,fr.tris,std::move(plannedFingerprints[index])};
             keys[f.id]=std::to_string(f.id)+":"+std::to_string(generation)+";";upstream+=keys[f.id];
-            work.push_back(std::move(b));
+            workIndices[index]=work.size();work.push_back(std::move(b));releaseInput(index);
         } else {
             b=Body{};
         }
-        published[index]=true;lastResults.push_back(std::move(fr));
+        published[index]=true;readyWorkers.erase(index);lastResults.push_back(std::move(fr));
         evaluationProgress(f.id,f.name,index,features.size(),true,cachedFeature);
-        refreshDrivenSketches(*this,false);
+        drivenSketches.refresh(false);
     }
-    refreshDrivenSketches(*this,true);
+    drivenSketches.refresh(true);
     ExprEnv canvasEnv=buildEnv();
     for(const auto& canvas:canvases){
         bool known=canvas.plane=="XY"||canvas.plane=="XZ"||canvas.plane=="YZ";
@@ -724,6 +899,12 @@ const std::vector<FeatureResult>& Document::recompute() {
     evalBodies=std::move(work);
     for(auto& job:jobs)if(job.valid())job.wait();
     peakParallelFeatures=activity->peak.load();
+    {using V=arkjson::Value;V rows=V::makeArr();size_t inactive=0,suppressed=0,failed=0;
+        for(size_t i=0;i<features.size();++i){const auto& feature=features[i];const auto& scope=scopedSources[i];V row=V::makeObj(),reasons=V::makeArr(),inputs=V::makeArr(),names=V::makeArr();const auto old=evaluationCache.find(feature.id);const bool reused=old!=evaluationCache.end()&&old->second.key==plannedKeys[i];
+            const char* status=!activeFeatures[i]?"inactive":feature.suppressed?"suppressed":!lastResults[i].ok?"failed":reused?"reused":"evaluated";inactive+=!activeFeatures[i];suppressed+=activeFeatures[i]&&feature.suppressed;failed+=activeFeatures[i]&&!feature.suppressed&&!lastResults[i].ok;
+            row.set("id",V::makeNum(double(feature.id)));row.set("name",V::makeStr(feature.name));row.set("operation",V::makeStr(featureOperation(feature)));row.set("status",V::makeStr(status));for(const auto& reason:plannedReasons[i])reasons.arr.push_back(V::makeStr(reason));if(std::string(status)=="failed")reasons.arr.push_back(V::makeStr("validation_failed"));row.set("reasons",reasons);
+            row.set("dependency_scope",V::makeStr(scope.audited?"semantic":explicitInputs[i]?"explicit":"conservative_history"));if(scope.audited){for(u64 input:scope.features)inputs.arr.push_back(V::makeNum(double(input)));for(const auto& name:scope.named)names.arr.push_back(V::makeStr(name));}else{for(u64 input:feature.inputs)inputs.arr.push_back(V::makeNum(double(input)));if(!explicitInputs[i])row.set("conservative_predecessors",V::makeNum(i));}row.set("dependency_ids",inputs);row.set("named_sources",names);rows.arr.push_back(std::move(row));}
+        evaluationDiagnostics.set("mode",V::makeStr("recompute"));evaluationDiagnostics.set("features",std::move(rows));evaluationDiagnostics.set("evaluated",V::makeNum(recomputeEvaluated));evaluationDiagnostics.set("reused",V::makeNum(recomputeReused));evaluationDiagnostics.set("inactive",V::makeNum(inactive));evaluationDiagnostics.set("suppressed",V::makeNum(suppressed));evaluationDiagnostics.set("failed",V::makeNum(failed));evaluationDiagnostics.set("projection_builds",V::makeNum(recomputeProjectionBuilds));evaluationDiagnostics.set("projection_reused",V::makeNum(recomputeProjectionReused));}
     evaluationCache=std::move(nextCache);
     // Unloaded definitions retain authored recipes, never derived native
     // buffers. These two auxiliary caches otherwise outlive evalBodies.

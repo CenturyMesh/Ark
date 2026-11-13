@@ -1,0 +1,18 @@
+#include "ark/agent.hpp"
+#include "ark/serialize.hpp"
+#include <iostream>
+#include <stdexcept>
+using namespace ark;using V=arkjson::Value;
+static int checks=0;static void check(bool ok,const std::string& why){++checks;if(!ok)throw std::runtime_error(why);}
+static V json(const char* s){V v;check(arkjson::parse(s,v),"Fixture JSON");return v;}
+static const V& get(const V& v,const char* key){const auto* p=v.find(key);if(!p)throw std::runtime_error(std::string("Missing ")+key);return *p;}
+static V call(AgentSession& s,const char* tool,V args){if(!args.find("expected_revision"))args.set("expected_revision",V::makeNum((double)s.revision));const auto r=s.call(tool,args);check(!get(r,"isError").b,r.dump());return get(r,"structuredContent");}
+int main(){try{AgentSession s;s.suppressFailureCapture();
+    call(s,"doc_apply",json(R"({"commands":[{"op":"feature.add","type":"curve","name":"U0","native":{"start":[0,0,0],"segments":[{"kind":"line","to":[20,0,0]}]}},{"op":"feature.add","type":"curve","name":"U1","native":{"start":[0,10,0],"segments":[{"kind":"line","to":[20,10,5]}]}},{"op":"feature.add","type":"curve","name":"V0","native":{"start":[0,0,0],"segments":[{"kind":"line","to":[0,10,0]}]}},{"op":"feature.add","type":"curve","name":"V1","native":{"start":[20,0,0],"segments":[{"kind":"line","to":[20,10,5]}]}}]})"));
+    const auto original=documentToJson(s.document);const auto revision=s.revision;auto request=json(R"({"action":"network_plan","name":"Network skin","u_curves":["U0","U1"],"v_curves":["V0","V1"]})");const auto preview=call(s,"surface_control",request);check(s.revision==revision&&documentToJson(s.document)==original,"Network plan changed source");check(get(preview,"valid").b&&get(preview,"candidate_cached").b,"Network lacks retained candidate");
+    V stale=request;stale.set("expected_revision",V::makeNum(0));check(get(s.call("surface_control",stale),"isError").b,"Stale network plan accepted");V invalid=request;invalid.set("v_curves",json("[\"V0\",\"U0\"]"));invalid.set("expected_revision",V::makeNum((double)revision));check(get(s.call("surface_control",invalid),"isError").b,"Duplicate network source accepted");
+    V apply=V::makeObj();apply.set("candidate_id",get(preview,"candidate_id"));call(s,"doc_apply",apply);check(s.revision==revision+1&&s.document.features.size()==5,"Candidate did not publish once");check(s.document.features.back().nativeSpec.find("op")->str=="curve_network","Editable network recipe lost");const auto net=call(s,"surface_control",json(R"({"action":"inspect","id":5})"));check(get(net,"poles").arr.size()==16,"Network result must support exact control editing");const auto saved=documentToJson(s.document);Document reopened;std::string error;check(documentFromJson(saved,reopened,&error),error);reopened.recompute();for(const auto& result:reopened.lastResults)check(result.ok,result.error);check(reopened.features.back().inputs.size()==4,"Reopen lost native curve dependencies");
+    auto diagnose=json(R"({"action":"loft_diagnose","sections":["U0","U1"]})");const auto before=documentToJson(s.document);const auto report=call(s,"surface_control",diagnose);check(get(report,"sections").arr.size()==2&&documentToJson(s.document)==before,"Read-only loft diagnostics changed document");
+    call(s,"doc_apply",json(R"({"commands":[{"op":"param.set","name":"later","expr":1}]})"));apply.set("expected_revision",V::makeNum((double)revision));check(get(s.call("doc_apply",apply),"isError").b,"Expired network candidate published");
+    std::cout<<checks<<" surface-network host checks passed\n";return 0;
+}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

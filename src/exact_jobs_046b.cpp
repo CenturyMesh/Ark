@@ -1,4 +1,5 @@
 #include "ark/exact_jobs_046b.hpp"
+#include "ark/surface_edit_059c.hpp"
 #include "ark/native_backend.hpp"
 #include <algorithm>
 #include <set>
@@ -22,11 +23,13 @@ V withPayload(V result,const V& payload){
 }
 std::string exactJobRejection046B(const std::string& tool,const V& args){
     if(args.t!=V::Obj)return "arguments must be an object";
+    if(tool=="surface_control"&&surfaceControlRetainsCandidate068B(args))return "A surface candidate must be retained by its owning session";
     if(tool=="query_batch"){
         const auto* rows=args.find("queries");if(!rows||rows->t!=V::Arr||rows->arr.empty())return "query_batch needs queries";
         for(const auto& row:rows->arr){const auto* name=row.find("tool");const auto* values=row.find("args");
             if(!name||name->t!=V::Str||!values||values->t!=V::Obj)return "query_batch row is malformed";
-            if(!exactReadTools.count(name->str))return "query_batch row "+name->str+" is not on the 046B background exact-read allow-list";}
+            if(!exactReadTools.count(name->str))return "query_batch row "+name->str+" is not on the 046B background exact-read allow-list";
+            if(!exactJobRejection046B(name->str,*values).empty())return "query_batch cannot retain private candidates";}
         return {};
     }
     if(!exactReadTools.count(tool))return tool+" is not on the 046B background exact-read allow-list";

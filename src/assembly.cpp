@@ -3,6 +3,8 @@
 #include "ark/assembly_authoring.hpp"
 #include "ark/transmission.hpp"
 #include "ark/history_authoring.hpp"
+#include "ark/assembly_solver_074b.hpp"
+#include "ark/resource_policy_071d.hpp"
 #include <algorithm>
 #include <cmath>
 #include <functional>
@@ -12,6 +14,9 @@
 #include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
+#include <optional>
+#include <mutex>
+#include <cstdlib>
 
 namespace ark {
 using V=arkjson::Value;
@@ -161,11 +166,11 @@ bool solveLinear(std::vector<double> a,std::vector<double> b,std::vector<double>
     for(int i=n-1;i>=0;--i){double v=b[i];for(int j=i+1;j<n;++j)v-=a[i*n+j]*x[j];x[i]=v/a[i*n+i];}
     return true;
 }
-int matrixRank(const std::vector<double>& j,int rows,int cols){
+int matrixRank(const std::vector<double>& j,int rows,int cols,double scaleThreshold=-1){
     if(!rows||!cols)return 0;
     std::vector<double> q=j;double largest=0;
     for(int c=0;c<cols;++c){double norm=0;for(int r=0;r<rows;++r)norm+=q[r*cols+c]*q[r*cols+c];largest=std::max(largest,std::sqrt(norm));}
-    const double threshold=std::max(1e-9,largest*1e-6);int rank=0;
+    const double threshold=scaleThreshold>=0?scaleThreshold:std::max(1e-9,largest*1e-6);int rank=0;
     for(int step=0;step<std::min(rows,cols);++step){
         int pivot=-1;double best=0;
         for(int c=step;c<cols;++c){double v=0;for(int r=0;r<rows;++r)v+=q[r*cols+c]*q[r*cols+c];
@@ -220,10 +225,15 @@ Vec3 rotationVector(const Mat4& r){
     else{const double s=2*std::sqrt(1+r.m[10]-r.m[0]-r.m[5]);w=(r.m[1]-r.m[4])/s;x=(r.m[8]+r.m[2])/s;y=(r.m[9]+r.m[6])/s;z=s/4;}
     if(w<0){w=-w;x=-x;y=-y;z=-z;}const Vec3 v{x,y,z};const double n=v.len();return n<1e-14?Vec3{}:v*(2*std::atan2(n,w)/n);
 }
+#include "assembly_solver_074b.inl"
 }
+
+AssemblySolveMode074B setAssemblySolveMode074B(AssemblySolveMode074B mode) noexcept {const auto old=assemblySolveMode074B;assemblySolveMode074B=mode;return old;}
+void clearAssemblySolveCache074B() noexcept {try{auto& cache=AssemblySolveCache074B::get();std::lock_guard lock(cache.mutex);cache.entries.clear();cache.bytes=0;}catch(...){}}
 
 bool resolveAssembly(const Document& d,std::vector<AssemblyPlacement>& placements,
                      std::string& error,AssemblyDiagnostics* diagnostics,bool reportUnsatisfied){
+    AssemblySolveWork074B solveWork;int groupedRank=0;
     placements.clear();error.clear();if(diagnostics)*diagnostics={};
     auto fail=[&](const std::string& e){error=e;placements.clear();if(diagnostics)*diagnostics={};return false;};
     if(d.assembly.size()>4096)return fail("Assembly capacity exceeds 4096 nodes");
@@ -383,10 +393,10 @@ bool resolveAssembly(const Document& d,std::vector<AssemblyPlacement>& placement
         for(size_t k=0;k<moving.size();++k)if(moving[k].group){Mat4 delta=rigidDelta(authored.at(moving[k].id),x,k);
             for(u64 part:partDescendants(moving[k].id))placed[part]=delta*placed[part];}
         return placed;};
-    auto evaluate=[&](const std::vector<double>& x){auto posedWorld=posed(x);std::vector<double> r;
+    auto evaluate=[&](const std::vector<double>& x){++solveWork.residualCalls;auto posedWorld=posed(x);std::vector<double> r;
         for(const auto& mate:mates)residual(mate,posedWorld,r);return r;};
     auto jacobian=[&](const std::vector<double>& x,int rows){std::vector<double> j((size_t)rows*columns,0);
-        for(int c=0;c<columns;++c){double h=c%6<3?1e-4:1e-6;auto plus=x,minus=x;
+        for(int c=0;c<columns;++c){++solveWork.jacobianColumns;double h=c%6<3?1e-4:1e-6;auto plus=x,minus=x;
             plus[c]+=h;minus[c]-=h;auto rp=evaluate(plus),rm=evaluate(minus);
             for(int row=0;row<rows;++row)j[(size_t)row*columns+c]=(rp[row]-rm[row])/(2*h);}
         return j;};
@@ -433,10 +443,15 @@ bool resolveAssembly(const Document& d,std::vector<AssemblyPlacement>& placement
             trial[offset+3]=rv.x;trial[offset+4]=rv.y;trial[offset+5]=rv.z;
             if(squared(evaluate(trial))<squared(evaluate(x)))x=std::move(trial);
         }
-        for(int phase=0;phase<2;++phase){
+        bool simpleGroups=assemblySolveMode074B==AssemblySolveMode074B::Incremental&&crossGroups.empty();
+        for(const auto& node:d.assembly)if(node.pattern.active)simpleGroups=false;
+        for(const auto& mate:d.mates)if(isMechanicalMate(mate.type))simpleGroups=false;
+        if(!d.dragChains.isNull()&&(d.dragChains.t!=V::Arr||!d.dragChains.arr.empty()))simpleGroups=false;
+        if(simpleGroups){if(!solveGroups074B(mates,moving,byId,representative,anchoredClusters,authored,relativeFrame,posed,x,solveWork,groupedRank,error))return fail(error);}
+        else {solveWork.components=1;solveWork.solved=1;for(int phase=0;phase<2;++phase){
         const bool lockRotation=phase==0;
         double damping=1e-3;
-        for(int iteration=0;iteration<100;++iteration){
+        for(int iteration=0;iteration<100;++iteration){++solveWork.iterations;
             const auto r=evaluate(x);const double cost=squared(r);
             if(!std::isfinite(cost))return fail("Non-finite assembly mate residual");
             if(cost<1e-16)break;
@@ -459,10 +474,11 @@ bool resolveAssembly(const Document& d,std::vector<AssemblyPlacement>& placement
             if(!improved)break;
         }
         }
+        }
         world=posed(x);
     }
     AssemblyDiagnostics result;
-    if(columns){const auto r=evaluate(x);result.rank=matrixRank(jacobian(x,(int)r.size()),(int)r.size(),columns);}
+    if(columns){if(solveWork.grouped)result.rank=groupedRank;else{const auto r=evaluate(x);result.rank=matrixRank(jacobian(x,(int)r.size()),(int)r.size(),columns);}}
     result.freeDofs=columns-result.rank;
     result.rank+=6*eliminatedRigidBodies;result.eliminatedRigidBodies=eliminatedRigidBodies;result.solverMovingBodies=(int)moving.size();result.rigidClusters=rigidReports;
     auto carried=[&](u64 id){u64 parent=byId.at(id)->parent;while(parent){
@@ -481,6 +497,7 @@ bool resolveAssembly(const Document& d,std::vector<AssemblyPlacement>& placement
     }
     try{validateMechanicalGraph(d);for(const auto& mate:d.mates)if(isMechanicalMate(mate.type))prepareMotionRelation(d,mate,*byId.at(mate.a),*byId.at(mate.b),world.at(mate.a),world.at(mate.b));if(followers.pose)followers.pose(world);}catch(const std::exception& e){return fail(e.what());}
     if(!expandAssemblyPatterns(d,parentFrame,rigid,world,visibility,placements,error,&result.patternReports))return fail(error);
+    result.solverEvidence=solveWork.receipt();
     for(auto& placement:placements)placement.visible=placement.visible&&isAssemblyNodeLoaded(d,placement.node)&&featureWithinHistory(d,placement.feature);
     if(diagnostics)*diagnostics=std::move(result);
     return true;

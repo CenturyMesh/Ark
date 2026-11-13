@@ -5,6 +5,7 @@
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
+#include <BRepAlgoAPI_Check.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepBndLib.hxx>
 #include <BRepCheck_Analyzer.hxx>
@@ -59,7 +60,7 @@ thread_local NativeRequestTiming* activeNativeProfile=nullptr;
 thread_local NativeProfileScope* activeNativeScope=nullptr;
 std::uint64_t nativeProfileClock() noexcept{return (std::uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();}
 std::string profileOperation(const std::string& value){
-    static const std::set<std::string> known{"model","model_solid","model_boolean_sequence","model_sheet","model_frame","model_electronics","reference_frame","geometry_query","point_distance","solid_centroid","measurement_pick","clearance","kernel_info","import_tube","export_tube","export_notch","import_cad","inspect_cad","inspect_imported_cad","cad_custody","import_component","component_custody","project_reference","drawing_view","drawing_dxf","import_sheet","export_sheet","export_sheet_flat_dxf","step_inspect","export_iges","export_brep","box","cylinder","sphere","cone","torus","round_tube","rect_tube","extrude","union","cut","common","hole","holes_orchestrator","fillet","chamfer","draft","linear_pattern","circular_pattern","mirror","shell","transform","split_plane","split_line","split_surface","split_tool","offset","vertex_pull","tube_end_fit","imported_brep","imported_cad","vent","wood","rib","gusset","boss","mount_pad","screw_support","nut_seat","lid_lip","lid_groove","curve_pattern","hole_pattern","loft","sweep","surface_fill","bspline_surface","thicken","sew","surface_edit","trim","untrim","extend"};
+    static const std::set<std::string> known{"model","model_solid","profile_regions","model_boolean_sequence","model_sheet","model_frame","model_electronics","reference_frame","geometry_query","point_distance","solid_centroid","measurement_pick","clearance","kernel_info","import_tube","export_tube","export_notch","import_cad","inspect_cad","inspect_imported_cad","cad_custody","import_component","component_custody","project_reference","drawing_view","drawing_dxf","import_sheet","export_sheet","export_sheet_flat_dxf","step_inspect","export_iges","export_brep","box","cylinder","sphere","cone","torus","round_tube","rect_tube","extrude","union","cut","common","hole","holes_orchestrator","fillet","chamfer","draft","linear_pattern","circular_pattern","mirror","shell","transform","split_plane","split_line","split_surface","split_tool","offset","vertex_pull","tube_end_fit","imported_brep","imported_cad","vent","wood","rib","gusset","boss","mount_pad","screw_support","nut_seat","lid_lip","lid_groove","curve_pattern","hole_pattern","loft","sweep","surface_fill","bspline_surface","thicken","sew","surface_edit","trim","untrim","extend"};
     return value=="restore_native_result"?value:known.count(value)?value:"other";
 }
 }
@@ -190,7 +191,19 @@ void integrateVolume(const TopoDS_Shape& shape,GProp_GProps& props,bool centroid
 void volumeProperties(const TopoDS_Shape& shape,GProp_GProps& props,bool moments){integrateVolume(shape,props,moments,moments);}
 void volumeCentroidProperties(const TopoDS_Shape& shape,GProp_GProps& props){integrateVolume(shape,props,true,false);}
 
-double properties(const TopoDS_Shape& shape,char kind){NativeProfileScope profile(kind=='a'?"areaProperties":kind=='l'?"lengthProperties":"volumeScalar");GProp_GProps props;if(shape.IsNull())return 0;if(kind=='a')BRepGProp::SurfaceProperties(shape,props);else if(kind=='l')BRepGProp::LinearProperties(shape,props);else volumeProperties(shape,props,false);return props.Mass();}
+double properties(const TopoDS_Shape& shape,char kind){
+    NativeProfileScope profile(kind=='a'?"areaProperties":kind=='l'?"lengthProperties":"volumeScalar");GProp_GProps props;if(shape.IsNull())return 0;
+    if(kind=='a'){
+        bool adaptive=false;for(TopExp_Explorer face(shape,TopAbs_FACE);face.More();face.Next()){
+            const auto type=BRepAdaptor_Surface(TopoDS::Face(face.Current())).GetType();
+            if(type!=GeomAbs_Plane&&type!=GeomAbs_Cylinder&&type!=GeomAbs_Cone&&type!=GeomAbs_Sphere&&type!=GeomAbs_Torus){adaptive=true;break;}
+        }
+        // Fixed quadrature measurably under-integrates rational parametrizations
+        // (including an exact rational cylinder). Keep the elementary fast path.
+        if(adaptive){const double error=BRepGProp::SurfaceProperties(shape,props,1e-14,false);if(!std::isfinite(error)||error<0||error>1e-10)throw std::runtime_error("Exact surface area integration did not meet its relative precision");}
+        else BRepGProp::SurfaceProperties(shape,props);
+    }else if(kind=='l')BRepGProp::LinearProperties(shape,props);else volumeProperties(shape,props,false);return props.Mass();
+}
 std::vector<TopoDS_Shape> shapes(const TopoDS_Shape& shape,TopAbs_ShapeEnum kind){std::vector<TopoDS_Shape> out;for(TopExp_Explorer ex(shape,kind);ex.More();ex.Next())out.push_back(ex.Current());return out;}
 std::array<double,6> bounds(const TopoDS_Shape& shape){NativeProfileScope profile("bounds");Bnd_Box box;BRepBndLib::AddOptimal(shape,box,false,false);if(box.IsVoid())throw std::runtime_error("Empty native shape bounds");std::array<double,6> b;box.Get(b[0],b[1],b[2],b[3],b[4],b[5]);return b;}
 template<class Op>TopoDS_Shape booleanOp(const TopoDS_Shape& a,const TopoDS_Shape& b){NativeProfileScope profile("boolean.single_build");Op op(a,b);if(!op.IsDone()||op.HasErrors())throw std::runtime_error("Native Boolean operation failed");return op.Shape();}

@@ -1,5 +1,7 @@
+#include "ark/evaluation_diagnostics_074b.hpp"
 #include "ark/design_containers.hpp"
 #include "ark/agent.hpp"
+#include "ark/candidate_retention_072a.hpp"
 #include "ark/assembly_authoring.hpp"
 #include "ark/agent_activity.hpp"
 #include "ark/iteration_history.hpp"
@@ -28,9 +30,8 @@ void checkRevision(const V& args,u64 revision){const auto* expected=args.find("e
 #include "candidate_storage_032d.inl"
 std::string candidateId(){static std::atomic<unsigned long long> next{0};static const auto salt=[](){std::random_device random;return ((unsigned long long)random()<<32)^random();}();std::ostringstream out;out<<std::hex<<salt<<'-'<<++next;return out.str();}
 #include "candidate_scope_031b.inl"
-// 045A: journal capacity is a hard wall (512 nodes / 4 MiB); nodes are never
-// silently pruned. Commit receipts report a drive round trip and capacity use
-// so callers can keep temporary poses read-only before reaching it.
+// History grows with retained edits. Report storage facts, not a percentage of
+// a fixed editing quota; no history node is silently pruned.
 void iterationReceipt045A(V& receipt,const V& history,const std::string& tool,const V& args,size_t documentBytes){
     const auto* nodes=history.find("nodes");if(!nodes||nodes->t!=V::Arr||nodes->arr.empty())return;
     const auto* commands=args.find("commands");
@@ -42,12 +43,10 @@ void iterationReceipt045A(V& receipt,const V& history,const std::string& tool,co
         trip.set("hint",V::makeStr("This assembly.drive returned the assembly to its pose before the previous iteration; both drives stay in the journal. Check temporary poses read-only with assembly_info{drive|sweep}, or doc_preview with assembly.drive and snapshot{candidate_id,expected_revision}. Commit assembly.drive only for a pose the design keeps."));
         receipt.set("history_round_trip",trip);
     }
-    if(nodes->arr.size()*4>=maxIterationNodes*3||documentBytes*4>=maxDocumentBytes*3){
-        V capacity=V::makeObj();capacity.set("node_count",V::makeNum((double)nodes->arr.size()));capacity.set("max_nodes",V::makeNum((double)maxIterationNodes));capacity.set("document_bytes",V::makeNum((double)documentBytes));capacity.set("max_document_bytes",V::makeNum((double)maxDocumentBytes));
-        capacity.set("warning",V::makeStr("Iteration history is above 75% of its capacity. At 512 nodes or 4 MiB further edits reject atomically and old nodes are never deleted; avoid committing temporary states."));
-        size_t references=0,bytes=0;iterationInlineBakePayloads(history,references,bytes);if(references)capacity.set("inline_bake_payload_bytes",V::makeNum((double)bytes));
-        receipt.set("history_capacity",capacity);
-    }
+    V storage=V::makeObj();storage.set("node_count",V::makeNum((double)nodes->arr.size()));storage.set("document_bytes",V::makeNum((double)documentBytes));
+    storage.set("max_nodes",V{});storage.set("max_document_bytes",V{});storage.set("growth_policy",V::makeStr("resource_limited_no_automatic_pruning"));
+    size_t references=0,bytes=0;iterationInlineBakePayloads(history,references,bytes);if(references)storage.set("inline_bake_payload_bytes",V::makeNum((double)bytes));
+    receipt.set("history_storage",storage);
 }
 }
 Document AgentSession::materializePrepared(const Prepared& prepared){
@@ -88,12 +87,13 @@ void AgentSession::compactPrepared(Prepared& prepared){
         prepared.bodyOrder.push_back(body.id);
     }
     std::vector<Body>().swap(doc.evalBodies);doc.pendingNativeGeometry.reset();
-    V authored;if(!arkjson::parse(documentToJson(doc),authored))throw std::runtime_error("Prepared authoring unavailable");
+    size_t encodedBytes=0;V authored=documentValue(doc,true,true,&encodedBytes);
     // Authoring has different in-memory structures; conservatively charge the
     // parsed tree plus serialized bytes twice, independently of shared geometry.
-    prepared.bytes=sizeof(Prepared)+sizeof(Document)+2*(jsonAllocationBytes(authored)+documentToJson(doc).size())+prepared.baseline.capacity()+jsonAllocationBytes(prepared.recipe)+jsonAllocationBytes(prepared.readScope)+jsonAllocationBytes(prepared.result)+prepared.refreshUnsupported.capacity()+prepared.bodyOrder.capacity()*sizeof(u64)+prepared.deferredMeshes.capacity()*sizeof(u64);
+    prepared.bytes=sizeof(Prepared)+sizeof(Document)+2*(jsonAllocationBytes(authored)+encodedBytes)+prepared.baseline.capacity()+jsonAllocationBytes(prepared.recipe)+jsonAllocationBytes(prepared.readScope)+jsonAllocationBytes(prepared.result)+prepared.refreshUnsupported.capacity()+prepared.bodyOrder.capacity()*sizeof(u64)+prepared.deferredMeshes.capacity()*sizeof(u64);
     prepared.bytes+=doc.lastResults.capacity()*sizeof(FeatureResult);for(const auto& result:doc.lastResults)prepared.bytes+=result.error.capacity();
-    prepared.bytes+=doc.evaluationCache.bucket_count()*sizeof(void*);for(const auto& entry:doc.evaluationCache)prepared.bytes+=sizeof(entry)+32+entry.second.key.capacity();
+    prepared.bytes+=doc.evaluationCache.bucket_count()*sizeof(void*);for(const auto& entry:doc.evaluationCache){const auto& fp=entry.second.fingerprints;prepared.bytes+=sizeof(entry)+32+entry.second.key.capacity()+fp.definition.capacity()+fp.context.capacity()+fp.parameters.capacity()+fp.dependencies.capacity()+fp.tessellation.capacity();}
+    prepared.bytes+=jsonAllocationBytes(doc.evaluationDiagnostics);
     // The validated candidate may already have resolved native frames/properties
     // for its checks and mates. Keep that evidence-bound acceleration through
     // publication so cached apply does not repeat producer requests afterwards.
@@ -117,7 +117,15 @@ size_t AgentSession::retainedCandidateBytes(const Prepared* extra,bool includeEx
 }
 void AgentSession::trimPrepared(){
     const auto now=std::chrono::steady_clock::now();prepared_.erase(std::remove_if(prepared_.begin(),prepared_.end(),[&](const Prepared& p){return p.expires<=now;}),prepared_.end());
-    while(!prepared_.empty()&&(prepared_.size()>4||retainedCandidateBytes()>128u*1024u*1024u))prepared_.erase(prepared_.begin());
+    const auto policy=candidateRetentionPolicy072A();
+    // This is cache retention, not geometric acceptance. Keep the newest
+    // validated receipt even if it alone exceeds the soft resource target.
+    // In particular, serialized read/apply boundaries must not erase it.
+    while(prepared_.size()>1){
+        bool evict=prepared_.size()>4||policy.softTargetBytes==0;
+        if(!evict)try{evict=retainedCandidateBytes()>policy.softTargetBytes;}catch(const std::bad_alloc&){evict=true;}
+        if(!evict)break;prepared_.erase(prepared_.begin());
+    }
 }
 arkjson::Value AgentSession::call(const std::string& tool,const V& args){
     if(callDepth_==0)trimPrepared();
@@ -148,8 +156,8 @@ arkjson::Value AgentSession::call(const std::string& tool,const V& args){
     const auto* preparedId=args.find("candidate_id");
     const bool metadataPrepared=preparedId&&preparedId->t==V::Str&&std::any_of(prepared_.begin(),prepared_.end(),[&](const Prepared& p){return p.id==preparedId->str&&p.metadataOnly;});
     const bool lightweight=tool=="doc_apply"&&!args.find("checks")&&(metadataOnlyApply(document,clean)||metadataPrepared);
-    Document before=lightweight?document.authoringCopy():document;const auto oldRevision=revision;const auto oldUndo=undo_,oldRedo=redo_;const auto oldPrepared=prepared_;
-    auto rollback=[&](){if(lightweight){document.assembly=std::move(before.assembly);document.schematics=std::move(before.schematics);document.manufacturingPlans=std::move(before.manufacturingPlans);document.features=std::move(before.features);document.materials=std::move(before.materials);document.imageAssets=std::move(before.imageAssets);document.stamps=std::move(before.stamps);document.bomDocumentId=std::move(before.bomDocumentId);document.iterationHistory=std::move(before.iterationHistory);document.usage=std::move(before.usage);}else document=std::move(before);revision=oldRevision;undo_=oldUndo;redo_=oldRedo;prepared_=oldPrepared;cache_.clear();cacheRevision_=~u64(0);motionRevision_=~u64(0);};
+    Document before=lightweight?document.authoringCopy():document;const auto oldRevision=revision;auto oldUndo=undo_,oldRedo=redo_;auto oldPrepared=prepared_;bool rolledBack=false;
+    auto rollback=[&](){if(rolledBack)return;rolledBack=true;if(lightweight){document.assembly=std::move(before.assembly);document.schematics=std::move(before.schematics);document.manufacturingPlans=std::move(before.manufacturingPlans);document.features=std::move(before.features);document.materials=std::move(before.materials);document.imageAssets=std::move(before.imageAssets);document.stamps=std::move(before.stamps);document.bomDocumentId=std::move(before.bomDocumentId);document.iterationHistory=std::move(before.iterationHistory);document.usage=std::move(before.usage);}else document=std::move(before);revision=oldRevision;undo_=std::move(oldUndo);redo_=std::move(oldRedo);prepared_=std::move(oldPrepared);cache_.clear();cacheRevision_=~u64(0);motionRevision_=~u64(0);};
     auto envelope=[](V value,bool error){V response=V::makeObj(),content=V::makeArr(),item=V::makeObj();item.set("type",V::makeStr("text"));item.set("text",V::makeStr(value.dump()));content.arr.push_back(item);response.set("content",content);response.set("structuredContent",value);response.set("isError",V::makeBool(error));return response;};
     try{
         // Validate caller metadata before running geometry or touching usage.
@@ -164,13 +172,10 @@ arkjson::Value AgentSession::call(const std::string& tool,const V& args){
         const bool changed=iterationAuthoring(before).dump()!=iterationAuthoring(document).dump();
         if(!boundary&&(changed||!target.empty()))iterationAppend(document,before,tool,args,target);
         if(!boundary&&(changed||!target.empty())&&document.iterationHistory.t==V::Obj){std::string error;if(!iterationValidate(document,document.iterationHistory,error))throw std::runtime_error(error);}
-        const std::string persisted=documentToJson(document);if(persisted.size()>maxDocumentBytes)throw std::runtime_error("Iteration history capacity exceeds the total 4 MiB document limit; edit rejected atomically");
-        V persistedRoot;if(!arkjson::parse(persisted,persistedRoot))throw std::runtime_error("Iteration history nesting capacity exceeds the JSON depth limit of 64; edit rejected atomically");
-        if(document.iterationHistory.t==V::Obj&&!boundary&&(changed||!target.empty())){V receipt=*response.find("structuredContent");receipt.set("iteration_id",*document.iterationHistory.find("head_id"));receipt.set("head_id",*document.iterationHistory.find("head_id"));iterationReceipt045A(receipt,document.iterationHistory,tool,clean,persisted.size());response=envelope(receipt,false);}
+        const size_t persistedBytes=documentPersistenceSize(document);
+        if(document.iterationHistory.t==V::Obj&&!boundary&&(changed||!target.empty())){V receipt=*response.find("structuredContent");receipt.set("iteration_id",*document.iterationHistory.find("head_id"));receipt.set("head_id",*document.iterationHistory.find("head_id"));iterationReceipt045A(receipt,document.iterationHistory,tool,clean,persistedBytes);response=envelope(receipt,false);}
         return finish(std::move(response));
-    }catch(const std::exception& exception){rollback();V error=V::makeObj();error.set("error",V::makeStr(exception.what()));error.set("error_code",V::makeStr(std::string(exception.what()).find("capacity")!=std::string::npos?"HISTORY_CAPACITY_EXCEEDED":"HISTORY_FAILED"));error.set("tool",V::makeStr(tool));error.set("revision",V::makeNum((double)revision));error.set("document_unchanged",V::makeBool(true));
-        // 049A: name the reclaimable derived bytes when old inline baked frames fill the journal.
-        if(error.find("error_code")->str=="HISTORY_CAPACITY_EXCEEDED"){error.set("compaction_hint",V::makeStr("With explicit user instruction, history_compact{archive_path,keep_recent,expected_revision,confirm:true} verifies a complete new .ark archive and retains a bounded recent ancestor range. Never auto-prune. Save afterwards."));size_t references=0,bytes=0;iterationInlineBakePayloads(document.iterationHistory,references,bytes);if(references){V hint=V::makeObj();hint.set("inline_bake_payload_bytes",V::makeNum((double)bytes));hint.set("hint",V::makeStr("The journal holds 044B-048B baked frames, which are derived data. With the user's explicit approval, history_migrate_derived{path,expected_revision,confirm:true} backs up the saved document and removes them; then save."));error.set("derived_bakes",hint);}}
+    }catch(const std::exception& exception){rollback();V error=V::makeObj();error.set("error",V::makeStr(exception.what()));error.set("error_code",V::makeStr(std::string(exception.what()).find("DOCUMENT_READ_RESOURCE_PRESSURE")!=std::string::npos?"DOCUMENT_READ_RESOURCE_PRESSURE":"HISTORY_FAILED"));error.set("tool",V::makeStr(tool));error.set("revision",V::makeNum((double)revision));error.set("document_unchanged",V::makeBool(true));
         return finish(envelope(error,true));}
 }
 arkjson::Value AgentSession::preparedRecipe(const std::string& id) const{
@@ -226,25 +231,22 @@ arkjson::Value AgentSession::preparePreview(const V& supplied){
     borrowed.restore();
     V readScope;std::string refreshUnsupported;try{readScope=candidateReadScope(document,args);}catch(const std::exception& error){refreshUnsupported=error.what();}
     const auto baseline=fingerprint(document);
-    const size_t budget=128u*1024u*1024u;
-    Prepared prepared;prepared.metadataOnly=metadataOnly;prepared.id=candidateId();prepared.baseline=baseline;prepared.revision=revision;prepared.document=std::make_shared<Document>(std::move(candidate.document));prepared.result=*out.find("candidate_result");prepared.expires=std::chrono::steady_clock::now()+std::chrono::minutes(5);
+    Prepared prepared;prepared.metadataOnly=metadataOnly;prepared.id=candidateId();prepared.baseline=baseline;prepared.revision=revision;prepared.document=std::make_shared<Document>(std::move(candidate.document));prepared.result=*out.find("candidate_result");
     prepared.recipe=args;prepared.readScope=std::move(readScope);prepared.refreshUnsupported=std::move(refreshUnsupported);
     compactPrepared(prepared);
-    const auto additional=retainedCandidateBytes(&prepared,false);out.set("candidate_budget_bytes",V::makeNum((double)budget));out.set("candidate_additional_bytes",V::makeNum((double)additional));out.set("candidate_metadata_bytes",V::makeNum((double)prepared.bytes));out.set("candidate_geometry_bytes",V::makeNum((double)(additional-prepared.bytes)));out.set("candidate_deferred_meshes",V::makeNum(prepared.deferredMeshes.size()));out.set("allocation_scope",V::makeStr("actual retained allocations; shared live geometry excluded; rechecked at serialized tool boundaries"));
-    if(additional>budget){
+    const auto policy=candidateRetentionPolicy072A();const auto additional=retainedCandidateBytes(&prepared,false);out.set("candidate_metadata_bytes",V::makeNum((double)prepared.bytes));out.set("candidate_geometry_bytes",V::makeNum((double)(additional-prepared.bytes)));out.set("candidate_deferred_meshes",V::makeNum(prepared.deferredMeshes.size()));
+    if(additional>policy.softTargetBytes){
         std::set<const Body*> seen;std::set<const Surface*> surfaces;std::set<const void*> natives;std::set<const Mesh*> meshes;
         auto live=[&](const Body& body){natives.insert(body.nativeData.ownerIdentity());if(body.baked)meshes.insert(body.baked.get());for(const auto& face:body.faces)if(face.surf)surfaces.insert(face.surf.get());};
         for(const auto& body:document.evalBodies)live(body);for(const auto& entry:document.evaluationCache)if(entry.second.body){seen.insert(entry.second.body.get());live(*entry.second.body);}
         V allocations=V::makeArr();for(const auto& entry:prepared.document->evaluationCache)if(entry.second.body&&seen.insert(entry.second.body.get()).second){const auto& body=*entry.second.body;V row=V::makeObj();row.set("feature",V::makeNum((double)entry.first));row.set("native_bytes",V::makeNum((double)(natives.count(body.nativeData.ownerIdentity())?0:body.nativeData.allocatedBytes())));row.set("mesh_bytes",V::makeNum((double)(body.baked&&!meshes.count(body.baked.get())?(body.baked->pos.capacity()+body.baked->nrm.capacity())*sizeof(f32)+body.baked->idx.capacity()*sizeof(u32):0)));row.set("packed_native_mesh",V::makeBool(body.nativeData.packedMesh()));row.set("bytes",V::makeNum((double)bodyAllocationBytes(body,surfaces,natives,meshes)));allocations.arr.push_back(row);}
         std::sort(allocations.arr.begin(),allocations.arr.end(),[](const V& a,const V& b){return a.find("bytes")->num>b.find("bytes")->num;});if(allocations.arr.size()>8)allocations.arr.resize(8);out.set("largest_additional_geometry",allocations);
     }
-    if(retainedCandidateBytes(&prepared,false)>budget){out.set("candidate_cached",V::makeBool(false));out.set("cache_reason",V::makeStr("Candidate exceeds 128 MiB additional retained allocation budget; apply commands recomputes"));return out;}
-    while(!prepared_.empty()&&(prepared_.size()>=4||retainedCandidateBytes(&prepared)>budget))prepared_.erase(prepared_.begin());
-    if(retainedCandidateBytes(&prepared)>budget){out.set("candidate_cached",V::makeBool(false));out.set("cache_reason",V::makeStr("Candidate exceeds 128 MiB additional retained allocation budget; apply commands recomputes"));return out;}
     out.set("refresh_supported",V::makeBool(prepared.refreshUnsupported.empty()));if(!prepared.refreshUnsupported.empty())out.set("refresh_reason",V::makeStr(prepared.refreshUnsupported));
     V apply=V::makeObj();apply.set("expected_revision",V::makeNum((double)revision));apply.set("candidate_id",V::makeStr(prepared.id));out.set("apply",apply);out.set("candidate_id",V::makeStr(prepared.id));out.set("candidate_cached",V::makeBool(true));out.set("expires_in_seconds",V::makeNum(300));
     // The expanded recipe remains inspectable and can be submitted explicitly.
-    out.set("recipe",args);prepared_.push_back(std::move(prepared));return out;
+    out.set("recipe",args);prepared.expires=std::chrono::steady_clock::now()+std::chrono::minutes(5);prepared_.push_back(std::move(prepared));trimPrepared();
+    describeCandidateRetention072A(out,candidateRetentionPolicy072A(),additional,retainedCandidateBytes(),prepared_.size());return out;
 }
 arkjson::Value AgentSession::snapshotCandidate(const V& args){
     checkRevision(args,revision);const auto* key=args.find("candidate_id");if(!key||key->t!=V::Str)throw std::runtime_error("candidate_id must be text");
@@ -296,13 +298,9 @@ void AgentSession::adoptPreparedCandidate(PreparedTransfer&& transfer,u64 expect
     if(!transfer.value_)throw std::runtime_error("Prepared transfer already consumed");
     const auto& receipt=*transfer.value_;
     if(receipt.expires<=std::chrono::steady_clock::now()||receipt.revision!=revision||receipt.baseline!=fingerprint(document))throw std::runtime_error("Prepared transfer expired or source changed; preview again");
-    constexpr size_t budget=128u*1024u*1024u;
-    if(!receipt.document||receipt.bytes>budget||receipt.metadataOnly)throw std::runtime_error("Prepared transfer has no complete geometry within the candidate budget");
+    if(!receipt.document||receipt.metadataOnly)throw std::runtime_error("Prepared transfer has no complete geometry candidate");
     if(std::any_of(prepared_.begin(),prepared_.end(),[&](const Prepared& p){return p.id==receipt.id;}))throw std::runtime_error("Prepared transfer already adopted");
-    if(retainedCandidateBytes(&receipt,false)>budget)throw std::runtime_error("Prepared transfer exceeds additional retained allocation budget");
-    while(!prepared_.empty()&&(prepared_.size()>=4||retainedCandidateBytes(&receipt)>budget))prepared_.erase(prepared_.begin());
-    if(retainedCandidateBytes(&receipt)>budget)throw std::runtime_error("Prepared transfer exceeds additional retained allocation budget");
-    prepared_.push_back(std::move(*transfer.value_));transfer.value_.reset();transfer.materialized_.reset();
+    prepared_.push_back(std::move(*transfer.value_));transfer.value_.reset();transfer.materialized_.reset();trimPrepared();
 }
 arkjson::Value AgentSession::commitPrepared(const V& args){
     checkRevision(args,revision);for(const auto& field:args.obj)if(field.first!="expected_revision"&&field.first!="candidate_id"&&field.first!="accept_dfm"&&field.first!="refresh_candidate"&&field.first!="detail")throw std::runtime_error("Prepared apply accepts candidate_id, expected_revision, detail, explicit refresh_candidate and accept_dfm for DFM proposals");
@@ -329,12 +327,18 @@ arkjson::Value AgentSession::commitPrepared(const V& args){
     verifyAssemblyExternalReferences(*found->document);
     auto next=std::make_shared<Document>(materializePrepared(*found));V out=args.find("detail")&&args.find("detail")->asStr()=="changes"?compactCandidateResult(found->result):found->result;if(found->requiresDfmAcceptance){out.set("dfm_comparison",found->dfmComparison);out.set("dfm_accepted",V::makeBool(true));}
     validateDesignContainerTransition(document,*next);
-    const bool metadata=found->metadataOnly;const auto committedId=found->id;out.set("geometry_changed",V::makeBool(!out.find("geometry_recomputed")||out.find("geometry_recomputed")->b));remember();
-    if(metadata){document.assembly=next->assembly;document.schematics=next->schematics;document.manufacturingPlans=next->manufacturingPlans;document.features=next->features;document.materials=next->materials;document.bomDocumentId=next->bomDocumentId;document.imageAssets=next->imageAssets;document.stamps=next->stamps;}
-    else{auto activity=document.agentActivity;auto usage=document.usage;auto history=document.iterationHistory;document=std::move(*next);document.agentActivity=std::move(activity);document.usage=std::move(usage);document.iterationHistory=std::move(history);}
-    ++revision;prepared_.erase(std::remove_if(prepared_.begin(),prepared_.end(),[&](const Prepared& p){return p.id==committedId;}),prepared_.end());trimPrepared();
+    const bool metadata=found->metadataOnly;const auto committedId=found->id;V preparation=std::move(next->evaluationDiagnostics);if(preparation.t==V::Obj)preparation.set("recompute_ms",V::makeNum(next->recomputeMs));out.set("geometry_changed",V::makeBool(!out.find("geometry_recomputed")||out.find("geometry_recomputed")->b));
+    // Assemble the response before publication so allocation failures here leave
+    // the live document untouched. Metadata-only candidates already own their
+    // validated authoring arrays; publishing them need not duplicate them again.
     V evaluation=V::makeObj();for(const char* key:{"recompute_ms","features_evaluated","features_reused","parallel_features","peak_parallel_features"})if(const auto* value=out.find(key))evaluation.set(key,*value);out.set("prepared_evaluation",evaluation);
-    out.set("features_evaluated",V::makeNum(0));out.set("features_reused",V::makeNum(document.evalBodies.size()));out.set("parallel_features",V::makeNum(0));out.set("peak_parallel_features",V::makeNum(0));
-    out.set("revision",V::makeNum((double)revision));out.set("geometry_recomputed",V::makeBool(false));out.set("applied_prepared",V::makeBool(true));out.set("recompute_ms",V::makeNum(0));return out;
+    out.set("features_evaluated",V::makeNum(0));out.set("features_reused",V::makeNum(metadata?document.evalBodies.size():next->evalBodies.size()));out.set("parallel_features",V::makeNum(0));out.set("peak_parallel_features",V::makeNum(0));
+    out.set("revision",V::makeNum((double)(revision+1)));out.set("geometry_recomputed",V::makeBool(false));out.set("applied_prepared",V::makeBool(true));out.set("recompute_ms",V::makeNum(0));remember();
+    if(metadata){document.assembly=std::move(next->assembly);document.schematics=std::move(next->schematics);document.manufacturingPlans=std::move(next->manufacturingPlans);document.features=std::move(next->features);document.materials=std::move(next->materials);document.bomDocumentId=std::move(next->bomDocumentId);document.imageAssets=std::move(next->imageAssets);document.stamps=std::move(next->stamps);}
+    else{auto activity=document.agentActivity;auto usage=document.usage;auto history=std::move(document.iterationHistory);document=std::move(*next);document.agentActivity=std::move(activity);document.usage=std::move(usage);document.iterationHistory=std::move(history);}
+    resetEvaluationDiagnostics074B(document,"prepared_publish");if(preparation.t==V::Obj)document.evaluationDiagnostics.set("preparation",std::move(preparation));
+    document.recomputeMs=0;document.recomputeEvaluated=0;document.recomputeReused=document.evalBodies.size();document.recomputeProjectionBuilds=0;document.recomputeProjectionReused=0;document.parallelFeatures=0;document.peakParallelFeatures=0;
+    ++revision;prepared_.erase(std::remove_if(prepared_.begin(),prepared_.end(),[&](const Prepared& p){return p.id==committedId;}),prepared_.end());trimPrepared();
+    return out;
 }
 }

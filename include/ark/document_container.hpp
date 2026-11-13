@@ -1,5 +1,6 @@
 #pragma once
 #include "ark/json.hpp"
+#include "ark/document_resources_072a.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -8,10 +9,8 @@
 namespace ark {
 
 // Physical storage version is independent of the authored document version.
-inline constexpr int documentContainerVersion=2;
+inline constexpr int documentContainerVersion=3;
 inline constexpr int documentContainerApplicationId=0x41524b31; // ARK1
-inline constexpr size_t maxDocumentContainerBytes=256*1024*1024;
-inline constexpr size_t maxDocumentValueBytes=16*1024*1024;
 inline constexpr size_t maxDocumentDerivedEntryBytes=64*1024*1024;
 // 051A: decoded entry bytes (memory) and compressed pack bytes (file) are bounded separately.
 inline constexpr size_t maxDocumentDerivedBytes=256*1024*1024;
@@ -21,6 +20,8 @@ struct DocumentDerivedPayload {std::string key,bytes;};
 using DocumentDerivedPayloads=std::vector<DocumentDerivedPayload>;
 
 struct DocumentContainerWriteStats {
+    int storageVersion=1;
+    bool capacitySchemaUpgraded=false;
     uint64_t generation=0;
     size_t payloadsInserted=0;
     size_t payloadBytesInserted=0;
@@ -40,6 +41,8 @@ struct DocumentContainerWriteStats {
 };
 
 struct DocumentContainerReadStats {
+    int storageVersion=1;
+    size_t estimatedReadBytes=0,readMemoryBudgetBytes=0;
     std::string derivedEncoding="none"; // none, entries (container v2 before 051A) or zstd_pack
     size_t derivedStoredBytes=0,derivedDecodedBytes=0;
 };
@@ -56,11 +59,13 @@ bool saveDocumentContainer(const arkjson::Value& root,const char* path,
 // derived section is discarded independently of strictly checked authoring.
 bool loadDocumentContainer(const char* path,arkjson::Value& root,std::string* error=nullptr,
                            DocumentDerivedPayloads* derived=nullptr,std::string* derivedDiscardedReason=nullptr,
-                           DocumentContainerReadStats* readStats=nullptr);
+                           DocumentContainerReadStats* readStats=nullptr,
+                           size_t readMemoryBudget=documentReadMemoryBudget072());
 
 // Deterministic typed codec, useful to other owned persistence components.
 // Object keys are sorted, numbers retain their exact finite double value.
 bool encodeDocumentValue(const arkjson::Value& value,std::string& bytes,std::string* error=nullptr);
-bool decodeDocumentValue(const std::string& bytes,arkjson::Value& value,std::string* error=nullptr);
+bool decodeDocumentValue(const std::string& bytes,arkjson::Value& value,std::string* error=nullptr,
+                         size_t readMemoryBudget=documentReadMemoryBudget072());
 
 } // namespace ark

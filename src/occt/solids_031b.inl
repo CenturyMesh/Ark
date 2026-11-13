@@ -68,11 +68,13 @@ V modelingRecipe031b(const V& request){
     V output=finish(result,refs),receipt=V::makeObj(),report=need(output,"report");receipt.set("operation",V::makeStr(op));receipt.set("reference_namespace",V::makeStr(nameSpace));receipt.set("geometry_authority",V::makeStr("exact_brep"));receipt.set("source_face",need(request,"source_face"));receipt.set("support_frame",matrix(placement));receipt.set("source_volume_mm3",V::makeNum(before));receipt.set("tool_volume_mm3",V::makeNum(toolVolume));receipt.set("result_volume_mm3",V::makeNum(after));receipt.set("material_change_mm3",V::makeNum(change));receipt.set("subtractive",V::makeBool(subtract));receipt.set("complete_cut_tool_contained",V::makeBool(subtract));receipt.set("boolean_tolerance_changed",V::makeBool(false));receipt.set("manufacturing_qualified",V::makeBool(false));report.set("solid_recipe",receipt);output.set("report",report);return output;
 }
 
+#include "fillet_contour_074b.inl"
 TopoDS_Shape finishEdges031b(const TopoDS_Shape& input,const V& request,std::vector<Ref>& refs,V& receipt){
     requireOneSolid(input,"Fillet/chamfer");const auto op=word(request,"op");const auto edges=chosenEdges(input,request,refs);TopoDS_Shape result;receipt=V::makeObj();receipt.set("geometry_authority",V::makeStr("exact_brep"));receipt.set("edge_count",V::makeNum(edges.size()));receipt.set("boolean_tolerance_changed",V::makeBool(false));
     if(op=="fillet"){
         BRepFilletAPI_MakeFillet algorithm(input);
-        if(const auto* law=request.find("radius_law")){
+        if(request.find("radius_domain")){variableContour074(algorithm,request,edges,refs,receipt);}
+        else if(const auto* law=request.find("radius_law")){
             if(request.find("radius"))throw std::runtime_error("Variable fillet requires radius_law only, without inactive radius");
             if(edges.size()!=1||!request.find("edges")||BRepAdaptor_Curve(edges[0]).GetType()!=GeomAbs_Line)throw std::runtime_error("Variable fillet supports one explicitly named straight edge");
             if(law->t!=V::Arr||law->arr.size()<2||law->arr.size()>16)throw std::runtime_error("Variable fillet radius_law needs 2..16 fraction/radius stations");NCollection_Array1<gp_Pnt2d> stations(1,(int)law->arr.size());double previous=-1;
@@ -84,7 +86,7 @@ TopoDS_Shape finishEdges031b(const TopoDS_Shape& input,const V& request,std::vec
             BRepAdaptor_Curve curve(edges[0]);gp_Pnt p;gp_Vec tangent;curve.D1(curve.FirstParameter(),p,tangent);const auto& selected=need(request,"edges").arr[0].str;for(const auto& ref:refs)if(ref.name==selected){const auto d=descriptor(ref);const auto v=point(need(d,"tangent"),"semantic tangent");if(tangent.Dot(gp_Vec(v.X(),v.Y(),v.Z()))<0){NCollection_Array1<gp_Pnt2d> reversed(1,stations.Size());for(int i=1;i<=stations.Size();++i){const auto q=stations.Value(stations.Size()+1-i);reversed.SetValue(i,gp_Pnt2d(1-q.X(),q.Y()));}stations=reversed;}break;}
             algorithm.Add(stations,edges[0]);if(algorithm.NbContours()!=1||algorithm.NbEdges(1)!=1)throw std::runtime_error("Variable fillet straight edge must form one isolated contour; tangent chains are outside current domain");receipt.set("mode",V::makeStr("variable_radius"));receipt.set("radius_law",*law);receipt.set("fraction_parameter",V::makeStr("semantic_straight_edge_direction"));
         }else{const double radius=positive(request,"radius");for(const auto& edge:edges)algorithm.Add(radius,edge);receipt.set("mode",V::makeStr("constant_radius"));}
-        algorithm.Build();if(!algorithm.IsDone())throw std::runtime_error("Native fillet failed within requested radii; no radius/tolerance fallback");result=algorithm.Shape();refs=propagated(refs,result,algorithm);
+        algorithm.Build();if(!algorithm.IsDone())throw std::runtime_error(filletFailure074(algorithm));result=algorithm.Shape();refs=propagated(refs,result,algorithm);
     }else{
         const double distance=positive(request,"distance");const bool legacyEqual=request.find("distance2")&&!request.find("reference_face")&&std::abs(positive(request,"distance2")-distance)<=1e-12;const std::string mode=request.find("mode")?word(request,"mode"):(request.find("angle")?"distance_angle":request.find("distance2")&&!legacyEqual?"distance_distance":"symmetric");if(mode!="symmetric"&&mode!="distance_distance"&&mode!="distance_angle")throw std::runtime_error("Chamfer mode must be symmetric, distance_distance or distance_angle");
         if(mode=="distance_angle"&&request.find("distance2"))throw std::runtime_error("Angle chamfer cannot retain distance2");if(mode!="distance_angle"&&request.find("angle"))throw std::runtime_error("Chamfer angle requires distance_angle mode");

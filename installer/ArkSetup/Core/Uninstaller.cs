@@ -32,8 +32,8 @@ public static class Uninstaller
             throw new SetupException(S.NotInstalledHere, ExitCodes.NotInstalled);
         if (Paths.Problem(dir) is string why)
             throw new SetupException($"Refusing to uninstall from {dir}: {why}.", ExitCodes.BadArguments);
-        if (ArkProcesses.RunningFrom(dir))
-            throw new SetupException(S.ArkRunning, ExitCodes.ArkRunning);
+        if (ArkProcesses.FindRunningFrom(dir) is { } running)
+            throw new SetupException(S.ArkRunningProcess(running), ExitCodes.ArkRunning);
 
         var manifest = SetupManifest.Read(dir);
         string keyName = manifest?.UninstallKey ?? ArkInfo.UninstallKeyName;

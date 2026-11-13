@@ -149,7 +149,9 @@ void testLegacyLoad(){
 void testMigration(){
     V rejection;auto session=legacyKiosk(64,&rejection);
     const auto before=history(session);const double nodes=before.find("node_count")->num;const double documentBefore=before.find("document_bytes")->num,journalBefore=before.find("storage_bytes")->num;
-    check(rejection.t==V::Obj&&rejection.find("error_code")->str=="HISTORY_CAPACITY_EXCEEDED"&&rejection.find("derived_bakes")&&rejection.find("derived_bakes")->find("inline_bake_payload_bytes")->num>0,"a full legacy journal rejects the next edit and names the reclaimable derived bytes: "+rejection.dump().substr(0,400));
+    constexpr size_t rebakes=sizeof(kRebakes)/sizeof(kRebakes[0]);
+    check(rejection.isNull()&&nodes==(double)(2+rebakes+rebakes/3)&&documentBefore>4u*1024u*1024u,"every legacy re-bake edit crosses the former4MiB wall with all original history nodes retained: "+rejection.dump().substr(0,400));
+    check(before.find("schema")->num==1&&!session.document.iterationHistory.find("migrations")&&!session.document.iterationHistory.find("compaction"),"growth never migrates or compacts legacy history implicitly");
     check(before.find("inline_bake_payloads")->find("references")->num>0&&before.find("inline_bake_payloads")->find("hint"),"history_info reports inline payloads and the migration hint");
     const auto refsBefore=before.find("inline_bake_payloads")->find("references")->num,payloadBytes=before.find("inline_bake_payloads")->find("bytes")->num;
     const auto path=scratch("full kiosk.ark");V save=V::makeObj();save.set("path",V::makeStr(utf8(path)));accepted(session.call("doc_save",save));const auto fileBefore=fs::file_size(path);
@@ -177,7 +179,7 @@ void testMigration(){
     const auto& oldNodes=before.find("nodes")->arr;const auto& newNodes=after.find("nodes")->arr;for(size_t i=0;i<std::min(oldNodes.size(),newNodes.size());++i)check(oldNodes[i].find("summary")->str==newNodes[i].find("summary")->str&&oldNodes[i].find("utc")->str==newNodes[i].find("utc")->str&&oldNodes[i].find("actor")->dump()==newNodes[i].find("actor")->dump()&&oldNodes[i].find("tool")->str==newNodes[i].find("tool")->str,"node metadata kept");
     check(oldNodes.front().find("id")->str!=newNodes.front().find("id")->str&&oldNodes.back().find("id")->str==newNodes.back().find("id")->str,"ids are recomputed: states with frames get new ids, the frame-free first iteration keeps its id");
     BakedMotionFramesSource source;check(samePoses(frames(session.document,"Screen tilt",&source),legacyFrames)&&source.source=="memory","migrated motions play the same frames from the cache");
-    // The previously rejected edit now fits; replay, restore and undo work on the rewritten journal.
+    // Further edits, replay, restore and undo work after this explicitly requested migration.
     commit(session,bakeAll(120));const auto oldest=after.find("nodes")->arr.back().find("id")->str;
     V restore=V::makeObj();restore.set("id",V::makeStr(oldest));restore.set("expected_revision",V::makeNum((double)session.revision));accepted(session.call("iteration_restore",restore));check(findMotion(session.document,"Door swing")==nullptr,"restore to the first iteration (fixture without motions) works");
     accepted(session.call("doc_undo",V::makeObj()));check(bakeIsReceipt(bakeOf(session.document,"Door swing")),"undo returns to the receipt state");

@@ -15,6 +15,12 @@ namespace ark {
 // Full-document JSON (params + sketches + features; no evaluation state).
 std::string documentToJson(const Document& doc,bool includeAudit=true,bool includeHistory=true);
 
+// Canonical, strictly checked equivalent of parsing documentToJson, without
+// materializing/reparsing the intermediate text. No evaluated geometry included.
+arkjson::Value documentValue(const Document& doc,bool includeAudit=true,bool includeHistory=true,std::size_t* encodedBytes=nullptr);
+bool cloneDocumentAuthoring(const Document& source,Document& target,std::string* err=nullptr);
+std::size_t documentPersistenceSize(const Document& doc);
+
 // Replace doc contents from JSON. Returns false + err on malformed input.
 bool documentFromJson(const std::string& json, Document& doc, std::string* err=nullptr);
 
@@ -22,6 +28,8 @@ bool documentFromJson(const std::string& json, Document& doc, std::string* err=n
 // optional saved geometry was written or omitted over the derived capacity.
 struct DocumentSaveReport {
     std::string error;
+    int containerVersion=0; // 0=text, 1/2=legacy container, 3=scalable authoring storage
+    bool capacitySchemaUpgraded=false;
     bool derivedGeometry=false;
     size_t derivedEntries=0,derivedBytes=0,derivedOmittedEntries=0,derivedOmittedBytes=0,derivedCapacityBytes=0;
     // 049A cached baked frames of current receipts; not cached or omitted frames re-bake on demand.

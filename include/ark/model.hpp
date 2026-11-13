@@ -332,6 +332,7 @@ public:
     arkjson::Value parametricComponents; // embedded immutable .arkprt/.arktop definitions and explicit instance bindings
     arkjson::Value manufacturingPlans; // source-bound manufacturing DAGs; simulation remains derived
     arkjson::Value parametricPrograms; // ark.parametric-program.v1 sources, values and namespace ownership baselines
+    arkjson::Value designVariants; // named parameter configurations bound to a parametric program digest
     arkjson::Value schematics; // independent editable 2D circuit sheets, symbols, pins and explicit wires
     std::vector<std::string> componentBindingsToSeal; // transient, only a component command can request a new evaluated baseline
     std::vector<std::string> programBindingsToSeal; // transient, only program.bind can request a new evaluated baseline
@@ -358,8 +359,10 @@ public:
     std::vector<Body>* evaluatingBodies=nullptr; // transient earlier history during recompute
     std::vector<FeatureResult> lastResults;
     f64 recomputeMs = 0;
-    struct EvaluationCacheEntry { std::string key; std::shared_ptr<const Body> body; u64 generation=0; size_t tris=0; };
+    struct EvaluationFingerprints {std::string definition,context,parameters,dependencies,tessellation;};
+    struct EvaluationCacheEntry { std::string key; std::shared_ptr<const Body> body; u64 generation=0; size_t tris=0; EvaluationFingerprints fingerprints; };
     std::unordered_map<u64,EvaluationCacheEntry> evaluationCache;
+    arkjson::Value evaluationDiagnostics; // derived last-action reasons/counters, never serialized as authoring
     // Runtime receipt for optional .ark derived results. Never authoring/history
     // or proof that staged native geometry has completed kernel validation.
     arkjson::Value derivedGeometryStatus;
@@ -369,6 +372,7 @@ public:
     std::unordered_map<u64,std::pair<std::string,arkjson::Value>> centroidCache; // exact B-rep digest -> producer result; never serialized
     u64 evaluationGeneration=0;
     size_t recomputeReused=0, recomputeEvaluated=0;
+    size_t recomputeProjectionBuilds=0, recomputeProjectionReused=0; // pass-local sketch projection attempts/reuses, never serialized
     size_t parallelFeatures=0, peakParallelFeatures=0, dependencyEdges=0;
     size_t parallelContextFeaturesCopied=0; // audited per-job feature closure, never serialized
     unsigned featureWorkers=1, nativeThreadsPerWorker=1;

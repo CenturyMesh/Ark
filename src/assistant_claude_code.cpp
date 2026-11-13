@@ -1,3 +1,4 @@
+#include "ark/assistant_onboarding.hpp"
 #include "ark/assistant_claude_code.hpp"
 #include "ark/assistant_acp.hpp"
 #include "ark/assistant_connectors.hpp"
@@ -139,24 +140,32 @@ std::unique_ptr<AssistantAcpChannel> channel(const AssistantConfig& config,const
     (void)tools;(void)systemPrompt;(void)cancel;throw AssistantTransportError("The native Claude Code transport is currently available on Windows only.");
 #endif
 }
+#include "claude_result_071d.inl"
 struct Session {
     const AssistantConfig& config;const V& tools;const AssistantTool& callTool;const AssistantEvents& events;const std::atomic_bool* cancel;const AssistantInbox& inbox;const AssistantHistory& history;const AssistantRetryHooks& hooks;
-    AssistantResult result;V catalog=array(),initResponse,pendingMessages=array();std::set<std::string> allowed,controlIds,mcpIds,pendingFeedback;std::unique_ptr<AssistantAcpChannel> io;
+    AssistantResult result;V catalog=array(),initResponse,pendingMessages=array(),lastOutcome;std::set<std::string> allowed,controlIds,mcpIds,pendingFeedback;std::unique_ptr<AssistantAcpChannel> io;
     bool initDone=false,serverInitialized=false,listed=false,verified=false,active=false,restart=false,inspectionRequired=false,feedbackReminded=false;
     std::string promptText,feedbackProject,lastCompletionIssue,negotiatedModel;unsigned interrupts=0,calls=0;Clock::time_point lastPacket=Clock::now(),promptBegan=Clock::now();
     void checkpoint(){if(history)history(result.conversation);}
-    void emit(AssistantEvent::Kind kind,const std::string& text,bool retry=false){if(events){AssistantEvent event;event.kind=kind;event.text=text;event.usage=result.usage;event.performance=result.performance;event.providerRetry=retry;events(event);}}
+    void emit(AssistantEvent::Kind kind,const std::string& text,bool retry=false){if(events){AssistantEvent event;event.kind=kind;event.text=text;event.usage=result.usage;event.performance=result.performance;event.providerRetry=retry;if(kind==AssistantEvent::Usage)event.providerOutcome=lastOutcome;events(event);}}
     void track(const V& receipt){const auto* data=receipt.find("structuredContent");if(!data)data=&receipt;if(const auto* p=data->find("activity_project_id");p&&p->t==V::Str&&p->str!=feedbackProject){feedbackProject=p->str;pendingFeedback.clear();}const auto* required=data->find("feedback_required");if(const auto* p=data->find("activity_id");p&&p->t==V::Str&&required&&required->t==V::Bool&&required->b)pendingFeedback.insert(p->str);if(const auto* p=data->find("rated_ids");p&&p->t==V::Arr)for(const auto& id:p->arr)pendingFeedback.erase(id.asStr());if(const auto* p=data->find("pending_feedback_ids");p&&p->t==V::Arr)for(const auto& id:p->arr)pendingFeedback.insert(id.asStr());}
     void begin(const V& input){
         if(input.t==V::Str){need(!input.str.empty(),"Enter a Claude Code message first.");result.conversation.arr.push_back(message("user",input.str));}else{need(input.t==V::Arr&&!input.arr.empty(),"Claude Code requires a nonempty prompt/history.");result.conversation=input;}
         for(const auto& row:result.conversation.arr)if(str(row,"role")=="user")validateAssistantUserMessage(row);
-        if(!config.onboardingPack.empty()){bool loaded=false;for(const auto& row:result.conversation.arr)if(str(row,"role")=="developer"&&str(row,"content").rfind("ARK_PREBAKED_GUIDE_V1\n",0)==0)loaded=true;if(!loaded)result.conversation.arr.insert(result.conversation.arr.begin(),message("developer","ARK_PREBAKED_GUIDE_V1\n"+config.onboardingPack));}
+        refreshAssistantOnboarding075D(result.conversation,config.onboardingPack);
         for(const auto& function:assistantFunctionTools(tools).arr){auto entry=obj();const auto name=str(function,"name");need(allowed.insert(name).second,"Duplicate ARK tool in the Claude Code role catalog.");entry.set("name",V::makeStr(name));if(function.find("description"))entry.set("description",*function.find("description"));entry.set("inputSchema",*function.find("parameters"));for(const auto& source:tools.arr)if(str(source,"name")==name&&source.find("annotations"))entry.set("annotations",*source.find("annotations"));catalog.arr.push_back(entry);}
         for(const auto& row:result.conversation.arr){const auto content=str(row,"content");if(content.rfind("ARK_ACP_INSPECT_REQUIRED",0)==0)inspectionRequired=true;else if(content.rfind("ARK_ACP_INSPECTION_CONFIRMED",0)==0)inspectionRequired=false;if(str(row,"type")=="function_call_output"){V receipt;if(arkjson::parse(str(row,"output"),receipt))track(receipt);}}
     }
     bool consume(){if(!inbox)return false;auto batch=inbox();need(batch.isNull()||batch.t==V::Arr,"Invalid Claude Code steering mailbox.");bool changed=false;if(batch.t==V::Arr)for(auto& row:batch.arr){const auto role=str(row,"role");need(role=="user"||role=="developer","Invalid Claude Code steering role.");result.conversation.arr.push_back(row);pendingMessages.arr.push_back(row);changed=true;}if(changed)checkpoint();return changed;}
+    V requireContextInspection(const std::string& reason){
+        inspectionRequired=true;
+        auto note=message("developer","ARK_ACP_INSPECT_REQUIRED: "+reason+" Read current doc_info successfully before further writes; retained receipts are historical and must not be replayed.");
+        result.conversation.arr.push_back(note);checkpoint();return note;
+    }
     void prompt(bool first){stopped(cancel);if(hooks.checkpoint)hooks.checkpoint();consume();std::string text;V images=array();
-        if(first){const auto request=assistantRequest(config,result.conversation,tools);text="Retained context and current input:\n"+detachImages(*request.find("input"),images).dump();}
+        if(first){bool projected=false;const auto request=assistantRequest(config,result.conversation,tools,&projected);auto input=*request.find("input");
+            if(projected){input.arr.push_back(requireContextInspection("ARK projected older tool history for this CLI request."));emit(AssistantEvent::Status,"Claude Code context projected; current document inspection is required before writing.");}
+            text="Retained context and current input:\n"+detachImages(std::move(input),images).dump();}
         else{need(!pendingMessages.arr.empty(),"Claude Code continuation has no new host input.");text="New ARK host input since your last reply:\n"+detachImages(pendingMessages,images).dump();}
         if(!images.arr.empty())text+="\n"+std::to_string(images.arr.size())+" image(s) follow this text in order; input_image attached_image N is the Nth.";
         pendingMessages=array();need(text.size()<=config.maxConversationBytes,"Claude Code prompt exceeded the configured conversation bound.");
@@ -172,7 +181,7 @@ struct Session {
         const auto callId="claude_"+useId+"_"+std::to_string(++calls);auto call=obj();call.set("type",V::makeStr("function_call"));call.set("call_id",V::makeStr(callId));call.set("name",V::makeStr(name));call.set("arguments",V::makeStr(arguments->dump()));result.conversation.arr.push_back(call);checkpoint();
         V receipt;
         if(restart||(hooks.requestCurrent&&!hooks.requestCurrent()))receipt=toolError("New user steering invalidated this old Claude Code tool request; inspect current state before another write.");
-        else if(inspectionRequired&&!assistantToolReadOnly(tools,name,*arguments))receipt=toolError("A previous CLI turn was interrupted. Read current doc_info successfully before any further write; never replay retained edits.");
+        else if(inspectionRequired&&!assistantToolReadOnly(tools,name,*arguments))receipt=toolError("CLI context was compacted, projected or interrupted. Read current doc_info successfully before any further write; never replay retained edits.");
         else{emit(AssistantEvent::ToolStart,name);const auto began=Clock::now();try{need((bool)callTool,"Missing host ARK tool executor.");receipt=callTool(name,*arguments);}catch(const std::exception&){receipt=toolError("Host tool execution was interrupted; it may have completed. Inspect the current revision before retrying.");inspectionRequired=true;}
             ++result.performance.toolCalls;result.performance.lastToolMilliseconds=std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now()-began).count();result.performance.toolMilliseconds+=result.performance.lastToolMilliseconds;emit(AssistantEvent::ToolEnd,name);}
         bool confirmed=false;if(name=="doc_info"&&inspectionRequired){const auto* data=receipt.find("structuredContent");if(!data)data=&receipt;const auto* revision=data->find("revision");const auto* failed=receipt.find("isError");if(failed&&failed->t==V::Bool&&!failed->b&&revision&&revision->t==V::Num&&std::isfinite(revision->num)&&revision->num>=0&&std::floor(revision->num)==revision->num){inspectionRequired=false;confirmed=true;}}
@@ -197,6 +206,15 @@ struct Session {
             for(const auto& tool:list->arr){const auto name=tool.asStr();need(name.rfind("mcp__ark__",0)==0&&allowed.count(name.substr(10)),"Claude Code exposed a tool outside the ARK role ("+clean(name)+"); the session was stopped before any CAD call.");}
             const auto* servers=packet.find("mcp_servers");need(servers&&servers->t==V::Arr&&servers->arr.size()==1&&str(servers->arr[0],"name")=="ark"&&str(servers->arr[0],"status")=="connected","Claude Code did not report exactly the connected ARK role server.");
             need(str(packet,"permissionMode")=="dontAsk","Claude Code did not apply the dontAsk permission mode.");if(!str(packet,"model").empty())negotiatedModel=clean(str(packet,"model"));verified=true;return;}
+        if(subtype=="compact_boundary"){
+            // A CLI-owned summary is not fresh document evidence. Record only
+            // bounded protocol metadata, never the summary or provider prompt.
+            if(!active)return;
+            const auto* metadata=packet.find("compact_metadata");const auto trigger=metadata?str(*metadata,"trigger"):"";const auto preTokens=count(metadata,"pre_tokens");
+            const auto observedTrigger=trigger=="auto"||trigger=="manual"?trigger:std::string("unknown");
+            const auto reason="Claude Code compacted its active context ("+observedTrigger+(preTokens?", pre_tokens "+std::to_string(*preTokens):std::string())+").";
+            requireContextInspection(reason);emit(AssistantEvent::Status,"Claude Code context compacted; current document inspection is required before writing.");return;
+        }
         if(subtype=="api_retry")emit(AssistantEvent::Status,"Claude Code is retrying a provider request",true);}
     void control(const V& packet){const auto id=str(packet,"request_id");need(validId(id),"Invalid Claude Code control request ID.");need(controlIds.insert(id).second,"Repeated Claude Code control request ID; no operation was replayed.");
         const auto* request=packet.find("request");need(request&&request->t==V::Obj,"Incomplete Claude Code control request.");const auto subtype=str(*request,"subtype");
@@ -209,13 +227,20 @@ struct Session {
         throw AssistantTransportError("Unexpected Claude Code control response; no foreign response was accepted.");}
     bool finished(const V& packet){
         need(active,"Claude Code returned a result outside an active turn.");active=false;
+        auto classifiedPacket=packet;
+        if(str(packet,"result").empty()&&promptText.rfind("API Error:",0)==0)classifiedPacket.set("result",V::makeStr(promptText));
+        const auto outcome=classifyClaudeResult071(classifiedPacket);lastOutcome=outcome.evidence;
         const auto* usage=packet.find("usage");const auto input=count(usage,"input_tokens"),output=count(usage,"output_tokens");
         if(input&&output){AssistantUsage delta;const auto cacheRead=count(usage,"cache_read_input_tokens").value_or(0);delta.inputTokens=*input+count(usage,"cache_creation_input_tokens").value_or(0)+cacheRead;delta.outputTokens=*output;delta.cachedInputTokens=cacheRead;if(const auto* details=usage->find("output_tokens_details"))delta.reasoningTokens=std::min<std::uint64_t>(*output,count(details,"thinking_tokens").value_or(0));delta.totalTokens=delta.inputTokens+delta.outputTokens;delta.reportedResponses=1;accumulateAssistantUsage(result.usage,delta);}else result.usage.missingResponses++;
         result.performance.lastProviderMilliseconds=std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now()-promptBegan).count();result.performance.providerMilliseconds+=result.performance.lastProviderMilliseconds;emit(AssistantEvent::Usage,assistantUsageLabel(result.usage));
-        const auto subtype=str(packet,"subtype");const auto* isError=packet.find("is_error");const bool failed=subtype!="success"||(isError&&isError->t==V::Bool&&isError->b);auto text=str(packet,"result");
-        if(failed&&!restart){const bool known=subtype=="success"||subtype=="error_max_turns"||subtype=="error_during_execution"||subtype=="error_max_budget_usd"||subtype=="error_max_structured_output_retries";const auto status=count(&packet,"api_error_status");
-            if(text.find("/login")!=std::string::npos||text.find("Not logged in")!=std::string::npos||(status&&*status==401))throw AssistantTransportError("Claude Code is not signed in. Run claude in a terminal and complete /login; no API fallback was used. Prior receipts remain.");
-            throw AssistantTransportError("Claude Code did not complete its turn (result "+(known?subtype:std::string("unsupported"))+(status?", provider status "+std::to_string(*status):std::string())+"). Prior receipts remain; goal completion was not declared.");}
+        auto text=str(packet,"result");
+        if(outcome.failed&&!restart){
+            result.conversation.arr.push_back(message("developer","ARK_CLI_FAILURE_V1: host-observed provider status only; committed receipts remain authoritative. "+outcome.evidence.dump()));checkpoint();
+            std::string reason="Claude Code / "+outcome.category;
+            if(!outcome.terminal.empty())reason+=" / terminal_reason="+outcome.terminal;
+            if(outcome.status)reason+=" / HTTP "+std::to_string(*outcome.status);
+            throw AssistantTransportError(reason+". "+outcome.advice+" Prior receipts remain; inspect current doc_info before further writes. Goal completion was not declared.");
+        }
         if((!hooks.inputPending||hooks.inputPending())&&consume())restart=true;
         need(restart||!hooks.requestCurrent||hooks.requestCurrent(),"Host steering/ownership changed; the old Claude Code final reply was not accepted. Inspect current context before continuing.");
         if(!restart){if(text.empty())text=promptText;need(!text.empty(),"Claude Code ended without a visible final response; inspect prior tool receipts.");promptText=text;need(promptText.size()<=config.maxResponseBytes,"Claude Code text exceeded the configured response bound.");result.conversation.arr.push_back(message("assistant",promptText));checkpoint();
@@ -297,9 +322,9 @@ std::vector<std::string> assistantClaudeCodeArguments(const AssistantConfig& con
     if(!config.reasoningEffort.empty()){args.push_back("--effort");args.push_back(config.reasoningEffort);}
     return args;
 }
-V assistantClaudeCodeProbe(const AssistantConfig& config){
+V assistantClaudeCodeProbe(const AssistantConfig& config,const std::atomic_bool* cancel){
     validateAssistantClaudeCodeConfig(config);const auto tools=probeTools();const AssistantTool none;const AssistantEvents quiet;const AssistantInbox empty;const AssistantHistory ignored;const AssistantRetryHooks hooks;
-    Session session{config,tools,none,quiet,nullptr,empty,ignored,hooks};session.begin(V::makeStr("probe"));session.io=channel(config,tools,kRolePreamble,nullptr);need((bool)session.io,"Missing Claude Code channel.");session.handshake();
+    Session session{config,tools,none,quiet,cancel,empty,ignored,hooks};session.begin(V::makeStr("probe"));session.io=channel(config,tools,kRolePreamble,cancel);need((bool)session.io,"Missing Claude Code channel.");session.handshake();
     auto out=obj(),models=array();if(const auto* list=session.initResponse.find("models");list&&list->t==V::Arr)for(const auto& model:list->arr){auto row=obj();row.set("value",V::makeStr(clean(str(model,"value"))));row.set("resolved_model",V::makeStr(clean(str(model,"resolvedModel"))));auto levels=array();if(const auto* p=model.find("supportedEffortLevels");p&&p->t==V::Arr)for(const auto& level:p->arr)levels.arr.push_back(V::makeStr(clean(level.asStr())));row.set("effort_levels",levels);models.arr.push_back(row);}
     const auto* account=session.initResponse.find("account");out.set("cli_version",V::makeStr(clean(str(session.initResponse,"claude_code_version"))));out.set("api_provider",V::makeStr(account?clean(str(*account,"apiProvider")):""));out.set("subscription_type",V::makeStr(account?clean(str(*account,"subscriptionType")):""));
     out.set("models",models);out.set("sdk_mcp_listed",V::makeBool(session.listed));out.set("prompt_sent",V::makeBool(false));return out;

@@ -49,7 +49,6 @@ V historyCompactTool(Document& document,u64& revision,const V& args){
     V archiveInfo=V::makeObj();archiveInfo.set("path",V::makeStr(utf8(archive)));archiveInfo.set("bytes",V::makeNum((double)fs::file_size(staging)));archiveInfo.set("verified",V::makeBool(true));archiveInfo.set("document_sha256",V::makeStr(iterationSha256(original)));archiveInfo.set("file_sha256",V::makeStr(iterationSha256(bytes(staging))));
     V record=V::makeObj();record.set("archive",archiveInfo);record.set("actor",actor);record.set("provenance",V::makeStr("caller_declared"));record.set("motivation",V::makeStr(motivation));record.set("revision_before",V::makeNum((double)revision));
     Document next=document;next.iterationHistory=iterationCompact(document,(size_t)count->num,record,args.find("retain_ids")?*args.find("retain_ids"):V::makeArr());const std::string persisted=documentToJson(next);
-    require(persisted.size()<=maxDocumentBytes,"HISTORY_COMPACTION_CAPACITY: retained history still exceeds 4 MiB; request fewer retained nodes");
     require(iterationValidate(next,next.iterationHistory,error)&&documentFromJson(persisted,reopened,&error)&&documentToJson(reopened)==persisted,"HISTORY_COMPACTION_INVALID: compacted document did not reopen identically: "+error);
     require(iterationAuthoring(next).dump()==iterationAuthoring(document).dump(),"HISTORY_COMPACTION_INVALID: compaction changed authoring");
     // Prepare all receipts before publication. Only archive publication may fail after this.

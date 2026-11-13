@@ -10,15 +10,35 @@ static int viewportQualitySelfTest056(HDC dc,const std::string& output){
         const auto original=mesh;auto packed=packDisplayMesh056(mesh);double normalError=0;
         for(size_t i=0;i<packed.size();++i){check(std::memcmp(packed[i].p,mesh.pos.data()+3*i,12)==0,"GPU packing changed a display position");Vec3 n{mesh.nrm[3*i],mesh.nrm[3*i+1],mesh.nrm[3*i+2]};n=n/n.len();normalError=std::max(normalError,(n-Vec3{packed[i].n[0]/32767.,packed[i].n[1]/32767.,packed[i].n[2]/32767.}).len());}
         check(normalError<.000027,"SNORM16 error exceeded the three-component quantization bound");
-        GPUMesh first,second;const auto uploads=g_displayMeshUploads056;uploadMesh(first,mesh);uploadMesh(second,mesh);
+        GPUMesh first,second;const auto uploads=g_displayMeshUploads056,packsBefore=g_displayMeshPacks070;uploadMesh(first,mesh);uploadMesh(second,mesh);
         check(first.vao==second.vao&&first.ibo==second.ibo&&g_displayMeshUploads056==uploads+1,"Identical content allocated duplicate GPU meshes");
+        check(g_displayMeshPacks070==packsBefore+1,"A GPU cache hit repacked unchanged vertices");
         auto parameters=(void(APIENTRY*)(GLenum,GLenum,GLint*))(void*)wglGetProcAddress("glGetBufferParameteriv");check(parameters!=nullptr,"Buffer-size query unavailable");GLint bufferBytes=0;glBindBuffer(GL_ARRAY_BUFFER,first.vbo);parameters(GL_ARRAY_BUFFER,0x8764,&bufferBytes);
         check(bufferBytes==(GLint)(mesh.vertCount()*20),"Driver vertex allocation did not use the packed format");
         const GLuint shared=second.vao;releaseMesh(first);trimDisplayMeshCache056(0);check(g_displayMeshCache056.count(second.cacheKey)==1,"Eviction released an active shared GPU mesh");
         releaseMesh(second);uploadMesh(first,mesh);check(first.vao==shared&&g_displayMeshUploads056==uploads+1,"Idle cache did not reuse released mesh content");
+        auto normalChanged=mesh;normalChanged.nrm[0]+=.000001f;GPUMesh changedNormals;uploadMesh(changedNormals,normalChanged);
+        check(changedNormals.vao!=first.vao,"Source normal change was hidden by quantization");releaseMesh(changedNormals);
         auto changed=mesh;changed.pos[0]+=.125f;uploadMesh(second,changed);check(first.vao!=second.vao,"Changed positions aliased a stale GPU mesh");
         releaseMesh(first);releaseMesh(second);trimDisplayMeshCache056(0);check(g_displayMeshIdleBytes056==0,"Idle cache clear retained unused resources");
         check(mesh.pos==original.pos&&mesh.nrm==original.nrm&&mesh.idx==original.idx,"GPU caching mutated CPU geometry");
+        receipt.set("source_cache_hit_skips_repacking",V::makeBool(true));
+        receipt.set("idle_limit_bytes",V::makeNum((double)displayMeshBudget070()));
+        receipt.set("vram_telemetry_supported",V::makeBool(g_displayMemorySupported070));
+        receipt.set("dedicated_vram_kib",V::makeNum((double)g_displayMemoryDedicatedKB070));
+        receipt.set("available_vram_kib_approximate",V::makeNum((double)g_displayMemoryFreeKB070));
+        bool largeIdleReuse=false;
+        if(displayMeshBudget070()>=64*1024*1024){
+            Mesh large;large.pos.resize(1800000*3);large.nrm.resize(large.pos.size());large.idx={0,1,2};
+            for(size_t i=0;i<large.vertCount();++i){large.pos[3*i]=(float)(i%4096);large.pos[3*i+1]=(float)(i/4096);large.nrm[3*i+2]=1;}
+            GPUMesh resident;uploadMesh(resident,large);const auto retainedKey=resident.cacheKey;const auto vao=resident.vao;
+            const auto retainedUploads=g_displayMeshUploads056,retainedPacks=g_displayMeshPacks070;
+            releaseMesh(resident);check(g_displayMeshCache056.count(retainedKey)==1,"Available VRAM policy evicted a36MB idle display buffer");
+            uploadMesh(resident,large);check(resident.vao==vao&&g_displayMeshUploads056==retainedUploads&&g_displayMeshPacks070==retainedPacks,"Idle36MB display mesh was repacked/reuploaded");
+            trimDisplayMeshCache056(0);check(g_displayMeshCache056.count(retainedKey)==1,"Memory pressure evicted an actively referenced mesh");
+            releaseMesh(resident);trimDisplayMeshCache056(32*1024*1024);check(!g_displayMeshCache056.count(retainedKey),"Shrinking idle allowance did not evict the36MB buffer");largeIdleReuse=true;
+        }
+        receipt.set("large_idle_reuse_exercised",V::makeBool(largeIdleReuse));
         receipt.set("vertex_bytes_before",V::makeNum(mesh.vertCount()*24));receipt.set("vertex_bytes_after_driver_query",V::makeNum(bufferBytes));receipt.set("unchanged_index_bytes",V::makeNum(mesh.idx.size()*4));receipt.set("max_normal_component_vector_error",V::makeNum(normalError));receipt.set("cache_sharing_idle_reuse_invalidation_eviction",V::makeBool(true));
         auto parse=[&](const char* text){V v;check(arkjson::parse(text,v),"Invalid synthetic quality fixture");return v;};
         V args=V::makeObj();args.set("expected_revision",V::makeNum((double)g_session.revision));runTool("doc_new",args);check(!g_error,"Synthetic document reset failed");

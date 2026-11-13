@@ -1,5 +1,9 @@
+#include "ark/native_body_cache_074b.hpp"
+#include "ark/native_result_identity_074b.hpp"
 #include "ark/step_export.hpp"
 #include "ark/native_backend.hpp"
+#include "ark/resource_policy_071d.hpp"
+#include "ark/document_resources_072a.hpp"
 #include "ark/iteration_history.hpp"
 #include "ark/model.hpp"
 #include "ark/notch.hpp"
@@ -44,6 +48,8 @@ struct NativeDocumentResultContext {
     }
 };
 namespace {
+thread_local VerifiedNativeResultIdentity074B verifiedNativeResult074;
+void identifyNativeResult074(const std::string& key,const std::string& payload,const std::string& producer) noexcept {try{verifiedNativeResult074={key,payload,producer};}catch(...){verifiedNativeResult074={};}}
 thread_local std::shared_ptr<NativeDocumentResultContext> activeNativeDocumentResults;
 thread_local unsigned long long nativeRequests=0,nativeStarts=0;
 std::atomic<unsigned long long> totalNativeRequests{0},totalNativeStarts{0};
@@ -257,6 +263,7 @@ V stageNativeDocumentResults(Document& document,const DocumentDerivedPayloads& r
     auto context=std::make_shared<NativeDocumentResultContext>();context->entries=std::move(staged);context->requests=std::move(requests);document.pendingNativeGeometry=std::move(context);return status;
 }
 static V cachedNativeRequest(const V& request){
+    verifiedNativeResult074={};
     if(nativeCancelled())throw std::runtime_error(nativeCancelText);
     ++nativeRequests;++totalNativeRequests;
     V bounded=request;bounded.set("native_threads",V::makeNum(effectiveNativeBudget()));
@@ -275,10 +282,12 @@ static V cachedNativeRequest(const V& request){
     }
     auto result=cache.identified(executeNativeRequest(bounded,worker,cache.producerIdentity));cache.store(result);return result;
 }
-V nativeWorkerRequest(const V& request){return cachedNativeRequest(request);}
+const VerifiedNativeResultIdentity074B& lastVerifiedNativeResultIdentity074B() noexcept {return verifiedNativeResult074;}
+V nativeWorkerRequest(const V& request){try{return cachedNativeRequest(request);}catch(...){verifiedNativeResult074={};throw;}}
 V nativeBooleanSequenceRequest(const V& request){
+    verifiedNativeResult074={};
     if(!NativeResultCache::booleanSequence(request))throw std::runtime_error("Invalid resolved native boolean sequence");
-    return cachedNativeRequest(request);
+    try{return cachedNativeRequest(request);}catch(...){verifiedNativeResult074={};throw;}
 }
 void disableProcessPowerThrottling(){
 #ifdef _WIN32
@@ -292,8 +301,10 @@ NativeRequestControlScope::~NativeRequestControlScope(){nativeCancel=previousCan
 NativeRequestControl captureNativeRequestControl(){return {nativeCancel?*nativeCancel:std::function<bool()>{},nativeLimitMs};}
 unsigned nativeRequestLimitMs(){return nativeLimitMs;}
 int setNativeThreadBudget(int threads){if(threads<0||threads>64)throw std::runtime_error("Native thread budget must be 0..64");int old=nativeThreadOverride;nativeThreadOverride=threads;return old;}
-V nativeModelRequest(const V& model){V request=V::makeObj();request.set("operation",V::makeStr("model"));request.set("request",model);return nativeWorkerRequest(request);}
+V nativeModelRequest(const V& model){verifiedNativeResult074={};V request=V::makeObj();request.set("operation",V::makeStr("model"));request.set("request",model);return nativeWorkerRequest(request);}
 V nativeKernelInfo(){V request=V::makeObj();request.set("operation",V::makeStr("kernel_info"));V result=nativeWorkerRequest(request);result.set("worker_requests",V::makeNum((double)nativeRequests));result.set("worker_process_starts",V::makeNum((double)nativeStarts));result.set("total_worker_requests",V::makeNum((double)totalNativeRequests.load()));result.set("total_worker_process_starts",V::makeNum((double)totalNativeStarts.load()));result.set("native_result_cache_hits",V::makeNum((double)totalNativeCacheHits.load()));result.set("native_result_cache_misses",V::makeNum((double)totalNativeCacheMisses.load()));
+{const auto memory=NativeDecodedCache070::info();result.set("native_memory_cache",memory);result.set("resource_policy",*memory.find("resource_policy"));}
+result.set("native_body_cache",nativeBodyCacheInfo074B());
 result.set("native_document_restores",V::makeNum((double)totalNativeDocumentRestores.load()));result.set("native_document_rejections",V::makeNum((double)totalNativeDocumentRejections.load()));
 {std::lock_guard<std::mutex> lock(nativeDocumentRejectionMutex);if(!nativeDocumentLastRejection.empty())result.set("native_document_last_rejection",V::makeStr(nativeDocumentLastRejection));V reasons=V::makeArr();for(const auto& [reason,count]:nativeDocumentRejectionReasons){V item=V::makeObj();item.set("reason",V::makeStr(reason));item.set("count",V::makeNum((double)count));reasons.arr.push_back(std::move(item));}result.set("native_document_rejection_reasons",std::move(reasons));}
 #ifdef _WIN32

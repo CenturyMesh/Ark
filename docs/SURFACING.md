@@ -129,7 +129,11 @@ origin. A full turn is the closed revolution, not a 360-degree seam.
 
 `offset_surface` takes one preceding face or shell. Solids are rejected; use
 `thicken` for a solid. `p.distance` is signed and must exceed 1e-6 mm in
-magnitude. The report sets `offset_intersection_checked` to false.
+magnitude. From 068B the producer and restored offset/thickness geometry also
+pass the native self-interference check; offset reports
+`offset_intersection_checked:true`. Use `surface_control` action `offset_check`
+for explicit trials, located candidate faults and sampled curvature risk.
+This native check is not a global mathematical or manufacturing certificate.
 `sew` takes 2 to 16 face or shell inputs at the 1e-6 mm tolerance. `p.solid`
 defaults to `0` and is accepted only when the result is one shell with no free
 edges. The report includes `free_edges`.

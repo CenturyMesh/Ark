@@ -56,6 +56,7 @@ struct AssemblyDiagnostics {
     arkjson::Value patternReports; // Exact source/placement evidence and explicitly unchecked domains.
     arkjson::Value rigidClusters; // Analytically condensed same-carrier full-frame attachments.
     int solverMovingBodies=0,eliminatedRigidBodies=0;
+    arkjson::Value solverEvidence; // runtime component/cache evidence, not authored constraints
 };
 struct AssemblyPlacement {u64 node=0,feature=0;std::string name;Mat4 world;bool visible=true;int copy=0;};
 class Document;

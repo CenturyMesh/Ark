@@ -47,6 +47,7 @@ V assemblyDiagnosticsJson(const AssemblyDiagnostics& d) {
     if(d.patternReports.t==V::Arr)j.set("patterns",d.patternReports);
     if(d.rigidClusters.t==V::Arr)j.set("rigid_clusters",d.rigidClusters);
     j.set("solver_moving_bodies",V::makeNum(d.solverMovingBodies));j.set("eliminated_rigid_bodies",V::makeNum(d.eliminatedRigidBodies));
+    if(d.solverEvidence.t==V::Obj)j.set("solver",d.solverEvidence);
     for(auto id:d.unconstrainedNodes)unconstrained.arr.push_back(V::makeNum((double)id));j.set("mates",rows);j.set("unconstrained_nodes",unconstrained);j.set("rank_scope",V::makeStr("analytic full-frame rigid rank plus local numerical geometric equality constraint Jacobian; joint stop inequalities excluded"));return j;
 }
 }

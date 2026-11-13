@@ -2,17 +2,38 @@
 // picking, B-reps and simulation inputs continue to use their original sources.
 // GPUMesh is an explicit handle: existing vector moves transfer ownership, and
 // releaseMesh must be called once for each acquired handle.
+#include "gpu_cache_policy_070a.hpp"
 struct PackedDisplayVertex056 {float p[3];std::int16_t n[4];};
 static_assert(sizeof(PackedDisplayVertex056)==20);
 struct CachedDisplayMesh056 {GPUMesh mesh;size_t references=0,bytes=0;std::uint64_t used=0;};
 static std::unordered_map<std::string,CachedDisplayMesh056> g_displayMeshCache056;
 static size_t g_displayMeshIdleBytes056=0;
-static constexpr size_t displayMeshIdleLimit056=32*1024*1024;
+static size_t displayMeshIdleLimit056=32*1024*1024;
+static std::uint64_t g_displayMeshPacks070=0,g_displayMeshEvictions070=0;
+static bool g_displayMemoryQueried070=false,g_displayMemorySupported070=false;
+static std::uint64_t g_displayMemoryDedicatedKB070=0,g_displayMemoryFreeKB070=0;
+static size_t displayMeshBudget070(){
+    static ULONGLONG last=0;const auto tick=GetTickCount64();
+    if(g_displayMemoryQueried070&&tick-last<2000)return displayMeshIdleLimit056;
+    last=tick;
+    if(!g_displayMemoryQueried070){
+        g_displayMemoryQueried070=true;
+        if(auto getStringAt=reinterpret_cast<studio_shader_cache::StringAt>(studio_shader_cache::address("glGetStringi"))){
+            GLint count=0;glGetIntegerv(0x821D,&count);for(GLint i=0;i<count;++i){const auto* extension=getStringAt(GL_EXTENSIONS,i);
+                if(extension&&std::strcmp((const char*)extension,"GL_NVX_gpu_memory_info")==0){g_displayMemorySupported070=true;break;}}
+        }
+    }
+    size_t requested=256;if(const char* value=std::getenv("ARK_GPU_MESH_IDLE_MB");value&&*value){char* end=nullptr;const auto n=std::strtoul(value,&end,10);if(end!=value&&!*end&&n<=1024)requested=(size_t)n;}
+    if(g_displayMemorySupported070){GLint dedicated=0,free=0;glGetIntegerv(0x9047,&dedicated);glGetIntegerv(0x9049,&free);
+        g_displayMemoryDedicatedKB070=dedicated>0?(std::uint64_t)dedicated:0;g_displayMemoryFreeKB070=free>0?(std::uint64_t)free:0;}
+    displayMeshIdleLimit056=displayIdleBudget070(g_displayMemoryDedicatedKB070,g_displayMemoryFreeKB070,requested);return displayMeshIdleLimit056;
+}
 static std::uint64_t g_displayMeshClock056=0,g_displayMeshHits056=0,g_displayMeshUploads056=0,g_displayMeshUploadedBytes056=0;
 static void deleteDisplayMesh056(const GPUMesh& mesh){if(mesh.vbo)glDeleteBuffers(1,&mesh.vbo);if(mesh.ibo)glDeleteBuffers(1,&mesh.ibo);if(mesh.vao)glDeleteVertexArrays(1,&mesh.vao);}
-static void trimDisplayMeshCache056(size_t limit=displayMeshIdleLimit056){
+static void trimDisplayMeshCache056(size_t limit=std::numeric_limits<size_t>::max()){
+    if(limit==std::numeric_limits<size_t>::max())limit=displayMeshBudget070();
     while(g_displayMeshIdleBytes056>limit){auto oldest=g_displayMeshCache056.end();for(auto it=g_displayMeshCache056.begin();it!=g_displayMeshCache056.end();++it)if(!it->second.references&&(oldest==g_displayMeshCache056.end()||it->second.used<oldest->second.used))oldest=it;
-        if(oldest==g_displayMeshCache056.end())break;g_displayMeshIdleBytes056-=oldest->second.bytes;deleteDisplayMesh056(oldest->second.mesh);g_displayMeshCache056.erase(oldest);}
+        if(oldest==g_displayMeshCache056.end())break;g_displayMeshIdleBytes056-=oldest->second.bytes;deleteDisplayMesh056(oldest->second.mesh);g_displayMeshCache056.erase(oldest);++g_displayMeshEvictions070;}
 }
 static void releaseMesh(GPUMesh& mesh){
     if(!mesh.vao){mesh={};return;}
@@ -22,6 +43,7 @@ static void releaseMesh(GPUMesh& mesh){
     mesh={};trimDisplayMeshCache056();
 }
 static std::vector<PackedDisplayVertex056> packDisplayMesh056(const Mesh& mesh){
+    ++g_displayMeshPacks070;
     std::vector<PackedDisplayVertex056> packed(mesh.vertCount());
     for(size_t i=0;i<packed.size();++i){auto& v=packed[i];std::memcpy(v.p,mesh.pos.data()+3*i,sizeof v.p);
         Vec3 n{0,0,1};if(mesh.nrm.size()>=3*i+3)n={mesh.nrm[3*i],mesh.nrm[3*i+1],mesh.nrm[3*i+2]};double length=n.len();if(std::isfinite(length)&&length>1e-20)n=n/length;else n={0,0,1};
@@ -29,10 +51,10 @@ static std::vector<PackedDisplayVertex056> packDisplayMesh056(const Mesh& mesh){
     return packed;
 }
 static void uploadMesh(GPUMesh& gm,const Mesh& mesh){
-    auto packed=packDisplayMesh056(mesh);
-    const size_t vertexBytes=packed.size()*sizeof(PackedDisplayVertex056),indexBytes=mesh.idx.size()*sizeof(u32);
-    std::string identity=std::to_string(packed.size())+":"+std::to_string(mesh.idx.size())+":";
-    if(vertexBytes)identity.append(reinterpret_cast<const char*>(packed.data()),vertexBytes);
+    const size_t vertexBytes=mesh.vertCount()*sizeof(PackedDisplayVertex056),indexBytes=mesh.idx.size()*sizeof(u32);
+    std::string identity="ark-display-source-070a:"+std::to_string(mesh.pos.size())+":"+std::to_string(mesh.nrm.size())+":"+std::to_string(mesh.idx.size())+":";
+    identity.reserve(identity.size()+mesh.pos.size()*sizeof(float)+indexBytes+mesh.nrm.size()*sizeof(float));
+    if(!mesh.pos.empty())identity.append(reinterpret_cast<const char*>(mesh.pos.data()),mesh.pos.size()*sizeof(float));
     if(indexBytes)identity.append(reinterpret_cast<const char*>(mesh.idx.data()),indexBytes);
     // Keep source-normal changes visible to scene invalidation even when two
     // values round to the same display normal after normalization/quantization.
@@ -47,6 +69,7 @@ static void uploadMesh(GPUMesh& gm,const Mesh& mesh){
         ++found->second.references;found->second.used=++g_displayMeshClock056;
         GPUMesh acquired=found->second.mesh;acquired.serial=++g_displayMeshSerial;releaseMesh(gm);gm=std::move(acquired);++g_displayMeshHits056;return;
     }
+    auto packed=packDisplayMesh056(mesh);
     GPUMesh next;next.cacheKey=key;next.serial=++g_displayMeshSerial;next.count=(int)mesh.triCount();
     glGenVertexArrays(1,&next.vao);glGenBuffers(1,&next.vbo);glGenBuffers(1,&next.ibo);
     glBindVertexArray(next.vao);glBindBuffer(GL_ARRAY_BUFFER,next.vbo);
