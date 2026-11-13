@@ -8,6 +8,7 @@ struct ParametricHudState {
     int scroll=0,visible=0;std::vector<size_t> rowParams;
 };
 static ParametricHudState g_parametricHud;
+#include "program_hud.inl"
 static std::vector<size_t> parametricHudRows(){
     std::vector<size_t> rows;for(size_t i=0;i<g_doc.params.size();++i)if(hudExposed(g_doc.params[i]))rows.push_back(i);
     std::stable_sort(rows.begin(),rows.end(),[](size_t a,size_t b){const auto x=hudSpec(g_doc.params[a]),y=hudSpec(g_doc.params[b]);return std::tie(x.group,x.order,g_doc.params[a].name)<std::tie(y.group,y.order,g_doc.params[b].name);});
@@ -95,13 +96,14 @@ static void parametricHudExposeDialog(int index){
     applyCommand(c);if(!g_error){g_parametricHud.open=true;g_parametricHud.collapsed=false;g_status=show?name+" shown in the Parametric HUD / revision "+std::to_string(g_session.revision):name+" removed from the HUD / parameter kept";}
 }
 static bool parametricHudWheel(POINT point,int delta){
-    auto& h=g_parametricHud;if(!h.open||h.collapsed||h.rowParams.empty())return false;
-    for(const auto& zone:g_zones)if(zone.id==48009&&point.x>=zone.x&&point.x<=zone.x+zone.w&&point.y>=zone.y&&point.y<=zone.y+zone.h){h.scroll=std::clamp(h.scroll+(delta>0?-1:1),0,std::max(0,(int)h.rowParams.size()-std::max(1,h.visible)));return true;}
+    auto& h=g_parametricHud;if(!h.open||h.collapsed||(!g_programHud.view&&h.rowParams.empty()))return false;
+    for(const auto& zone:g_zones)if(zone.id==48009&&point.x>=zone.x&&point.x<=zone.x+zone.w&&point.y>=zone.y&&point.y<=zone.y+zone.h){if(g_programHud.view)return programHudWheel(delta);h.scroll=std::clamp(h.scroll+(delta>0?-1:1),0,std::max(0,(int)h.rowParams.size()-std::max(1,h.visible)));return true;}
     return false;
 }
 static bool parametricHudAction(int id){
     if(id<48000||id>=49000)return false;auto& h=g_parametricHud;parametricHudSync();
-    if(id==48000){h.open=!h.open;if(h.open)h.collapsed=false;g_status=h.open?"Parametric HUD / change exposed parameters, then Rebuild":"Parametric HUD hidden / staged values kept until Reset";return true;}
+    if(id==48000){h.open=!h.open;if(h.open){h.collapsed=false;if(!g_doc.parametricPrograms.arr.empty()&&parametricHudRows().empty())g_programHud.view=true;if(g_programHud.view)programHudPoll();}g_status=h.open?(g_programHud.view?"Parametric HUD / programs: change values, then Apply":"Parametric HUD / change exposed parameters, then Rebuild"):"Parametric HUD hidden / staged values kept until Reset";return true;}
+    if(programHudAction(id))return true;
     if(id==48001){h.collapsed=!h.collapsed;return true;}
     if(id==48002){parametricHudRebuild();return true;}
     if(id==48003){h.autoRebuild=!h.autoRebuild;h.result=h.autoRebuild?(h.staged.empty()?"Auto: each change rebuilds at once":"Auto on / Rebuild publishes the staged values first"):"Auto off: changes are staged until Rebuild";h.resultError=false;return true;}
@@ -138,26 +140,30 @@ template<class Rect>static void drawParametricHud(Rect rect,POINT pointer,std::s
         if(active)rect(bx+8,by+bh-3,bw-16,2,1,.30f,.91f,.95f,1,0,0,0,0,0);
         const float scale=std::min(.58f,(bw-8)/std::max(1.f,textWidth(text,1.f)));textOut(text,bx+(bw-textWidth(text,scale))*.5f,by+(bh-16*scale/.58f)*.5f,scale,enabled?.90f:.45f,enabled?.95f:.50f,enabled?.98f:.54f);
         if(hover&&!tip.empty())hint=tip;zones.push_back({bx,by,bw,bh,enabled?id:48008});};
-    const std::string count=std::to_string(rows.size())+(rows.size()==1?" parameter":" parameters")+(h.staged.empty()?"":" / "+std::to_string(h.staged.size())+" staged");
-    const float headerH=38;
-    if(h.collapsed||bottom-top<headerH+120){
+    // Installed parametric programs add a Parameters / Programs switch below the header.
+    const bool programTabs=!g_doc.parametricPrograms.arr.empty()||g_programHud.view,programs=programTabs&&g_programHud.view;const float tabsH=programTabs?28.f:0.f;
+    const std::string count=programs?programHudCount():std::to_string(rows.size())+(rows.size()==1?" parameter":" parameters")+(h.staged.empty()?"":" / "+std::to_string(h.staged.size())+" staged");
+    const bool quiet=programs?g_programHud.staged.empty():h.staged.empty();const float headerH=38;const ProgramHudLayout programLayout=programs?programHudLayout(bottom-top-headerH-tabsH-8):ProgramHudLayout{};
+    if(h.collapsed||bottom-top<headerH+tabsH+120||!programLayout.fits){
         const float cw=std::min(w,textWidth("HUD",.66f)+textWidth(count,.54f)+120);const float cx=(float)(viewX+viewW)-cw-14;
         rect(cx+2,top+3,cw,headerH,10,0,0,0,.18f,0,0,0,0,0);rect(cx,top,cw,headerH,10,.051f,.053f,.058f,.72f,.408f,.425f,.46f,.75f,1);
-        textOut("HUD",cx+12,top+10,.66f,.875f,.91f,.94f);textOut(fitText(count,.54f,cw-110),cx+16+textWidth("HUD",.66f),top+13,.54f,h.staged.empty()?.60f:.99f,h.staged.empty()?.72f:.80f,h.staged.empty()?.80f:.42f);
+        textOut("HUD",cx+12,top+10,.66f,.875f,.91f,.94f);textOut(fitText(count,.54f,cw-110),cx+16+textWidth("HUD",.66f),top+13,.54f,quiet?.60f:.99f,quiet?.72f:.80f,quiet?.80f:.42f);
         mini("+",cx+cw-62,top+7,24,24,48001,false,false,true,"Expand the Parametric HUD");mini("x",cx+cw-32,top+7,24,24,48000,false,false,true,"Hide the Parametric HUD");
         zones.push_back({cx,top,cw,headerH,48009});g_zones.insert(g_zones.begin(),zones.begin(),zones.end());return;
     }
     const float groupH=22,rowH=44,footerH=h.result.empty()?50.f:88.f;std::vector<std::pair<std::string,int>> items; // group headers (-1) and rows
     {std::string group="\x01";for(size_t r=0;r<rows.size();++r){const auto s=hudSpec(g_doc.params[rows[r]]);if(s.group!=group){group=s.group;items.push_back({group,-1});}items.push_back({"",(int)r});}}
     float needed=0;for(const auto& item:items)needed+=item.second<0?groupH:rowH;
-    const float bodyMax=std::max(rowH,bottom-top-headerH-footerH-8);const bool overflow=needed>bodyMax;
+    const float bodyMax=std::max(rowH,bottom-top-headerH-tabsH-footerH-8);const bool overflow=needed>bodyMax;
     h.visible=(int)std::max(1.f,std::floor((bodyMax-(overflow?groupH+22:0))/rowH));h.scroll=std::clamp(h.scroll,0,std::max(0,(int)rows.size()-h.visible));
-    float bodyH=rows.empty()?66.f:std::min(needed,bodyMax);const float height=headerH+bodyH+footerH+8;
+    float bodyH=rows.empty()?66.f:std::min(needed,bodyMax);const float height=programs?headerH+tabsH+programLayout.height+8:headerH+tabsH+bodyH+footerH+8;
     rect(x+3,top+4,w,height,10,0,0,0,.20f,0,0,0,0,0);
     rect(x,top,w,height,10,.051f,.053f,.058f,.72f,.408f,.425f,.46f,.75f,1);rect(x+12,top+1,w-24,1,0,.39f,.75f,.86f,.35f,0,0,0,0,0);
-    textOut("PARAMETRIC HUD",x+12,top+10,.62f,.879f,.915f,.945f);textOut(fitText(count,.50f,w-textWidth("PARAMETRIC HUD",.62f)-96),x+20+textWidth("PARAMETRIC HUD",.62f),top+13,.50f,h.staged.empty()?.56f:.99f,h.staged.empty()?.68f:.80f,h.staged.empty()?.76f:.42f);
+    textOut("PARAMETRIC HUD",x+12,top+10,.62f,.879f,.915f,.945f);textOut(fitText(count,.50f,w-textWidth("PARAMETRIC HUD",.62f)-96),x+20+textWidth("PARAMETRIC HUD",.62f),top+13,.50f,quiet?.56f:.99f,quiet?.68f:.80f,quiet?.76f:.42f);
     mini("-",x+w-62,top+7,24,24,48001,false,false,true,"Collapse the Parametric HUD");mini("x",x+w-32,top+7,24,24,48000,false,false,true,"Hide the Parametric HUD (staged values are kept)");
     float y=top+headerH;
+    if(programTabs){drawProgramHudTabs(mini,x,y,w,rows.size());y+=tabsH;}
+    if(programs){drawProgramHud(rect,mini,programLayout,x,y,w,pointer,hint,zones);zones.push_back({x,top,w,height,48009});g_zones.insert(g_zones.begin(),zones.begin(),zones.end());return;}
     if(rows.empty()){
         textOut(fitText("No parameters are exposed yet.",.56f,w-24),x+12,y+4,.56f,.677f,.705f,.728f);textOut(fitText("Use +HUD on a Parameters row, or:",.56f,w-24),x+12,y+22,.56f,.677f,.705f,.728f);
         mini("Show a parameter...",x+12,y+40,std::min(170.f,w-24),24,48005,false,false,!g_doc.params.empty(),g_doc.params.empty()?"Create a named parameter first":"Expose an existing parameter to the HUD");y+=66;

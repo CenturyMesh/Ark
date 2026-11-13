@@ -150,6 +150,8 @@ add_test(NAME rubber-dynamics-059c COMMAND ark-rubber-dynamics-tests)
 set_tests_properties(rubber-dynamics-059c PROPERTIES TIMEOUT 180)
 add_executable(ark-rubber-runtime-059c-benchmark EXCLUDE_FROM_ALL benchmarks/rubber_runtime_059c.cpp)
 target_link_libraries(ark-rubber-runtime-059c-benchmark PRIVATE ark)
+add_executable(ark-program-binding-cost-benchmark EXCLUDE_FROM_ALL benchmarks/program_binding_cost.cpp)
+target_link_libraries(ark-program-binding-cost-benchmark PRIVATE ark)
 target_link_libraries(ark-inertial-056c-tests PRIVATE ark)
 add_test(NAME inertial-056c COMMAND ark-inertial-056c-tests)
 set_tests_properties(inertial-056c PROPERTIES TIMEOUT 180)
@@ -434,12 +436,19 @@ if(WIN32)
     # MSVC Release builds can exceed the standard COFF section count.
     target_compile_options(ark-studio PRIVATE /bigobj)
   endif()
-  # WinMain's frame takes about half of the default 1 MiB main stack, and the UI
-  # thread also runs document tools. Reserve 8 MiB; pages are committed on demand.
+  # Explicit 8 MiB stack reserve (address space; pages commit on use). WinMain's
+  # frame takes about half of a 1 MiB main stack and the UI thread also runs
+  # document tools (b63e93d). The MSVC
+  # and llvm-mingw defaults are 1 MiB. Headless self-tests run slow tools on the
+  # main thread beneath WinMain, and a component configure nests three session
+  # dispatch frames. Threads created without a size (std::thread) inherit this;
+  # the session executor requests the same reserve explicitly.
+  set(ARK_STUDIO_STACK_RESERVE 8388608)
+  target_compile_definitions(ark-studio PRIVATE ARK_STUDIO_STACK_RESERVE=${ARK_STUDIO_STACK_RESERVE})
   if(MSVC)
-    target_link_options(ark-studio PRIVATE /STACK:8388608)
+    target_link_options(ark-studio PRIVATE /STACK:${ARK_STUDIO_STACK_RESERVE})
   elseif(MINGW)
-    target_link_options(ark-studio PRIVATE -Wl,--stack,8388608)
+    target_link_options(ark-studio PRIVATE -Wl,--stack,${ARK_STUDIO_STACK_RESERVE})
   endif()
   target_include_directories(ark-studio PRIVATE assets/ui)
   find_program(ARK_POWERSHELL NAMES powershell pwsh REQUIRED)
@@ -850,6 +859,11 @@ if(WIN32)
     # 048B Parametric HUD overlay; the selftest also checks a 1100x700 layout.
     add_test(NAME studio-parametric-hud-ui COMMAND ark-studio --self-test-parametric-hud-ui --settings-file "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/parametric-hud-ui.settings.json" --shot "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/parametric-hud-ui.png" --size 1280 800)
     set_tests_properties(studio-parametric-hud-ui PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
+    # Program controls in the Parametric HUD (native bookshelf/flange extrusions need OCCT).
+    if(ARK_WITH_OCCT)
+      add_test(NAME studio-program-hud-ui COMMAND ark-studio --self-test-program-hud-ui --settings-file "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/program-hud-ui.settings.json" --shot "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/program-hud-ui.png" --size 1280 800)
+      set_tests_properties(studio-program-hud-ui PROPERTIES TIMEOUT 300 RUN_SERIAL TRUE)
+    endif()
     add_test(NAME studio-skeleton-editor COMMAND ark-studio --skeleton-editor-test --settings-file "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/skeleton-editor.settings.json" --shot "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/skeleton-editor.png" --size 1440 900)
     set_tests_properties(studio-skeleton-editor PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
     foreach(width 1180 1440)
@@ -902,6 +916,10 @@ add_executable(ark-sketch-tests tests/sketch_tests.cpp)
 target_link_libraries(ark-sketch-tests PRIVATE ark)
 add_test(NAME parametric-sketch COMMAND ark-sketch-tests)
 set_tests_properties(parametric-sketch PROPERTIES TIMEOUT 60)
+if(ARK_WITH_OCCT)
+  target_compile_definitions(ark-sketch-tests PRIVATE ARK_SKETCH_NATIVE_TESTS=1)
+  add_dependencies(ark-sketch-tests ark-occt-worker)
+endif()
 
 add_executable(ark-live-tests tests/live_session_tests.cpp)
 target_link_libraries(ark-live-tests PRIVATE ark)
@@ -945,6 +963,10 @@ endif()
 add_test(NAME part-agents-052d COMMAND ark-part-agents-tests)
 set_tests_properties(part-agents-052d PROPERTIES TIMEOUT 60)
 set_tests_properties(agent-team PROPERTIES TIMEOUT 45)
+add_executable(ark-agent-team-reasoning-tests tests/agent_team_reasoning_tests.cpp)
+target_link_libraries(ark-agent-team-reasoning-tests PRIVATE ark)
+add_test(NAME agent-team-reasoning COMMAND ark-agent-team-reasoning-tests)
+set_tests_properties(agent-team-reasoning PROPERTIES TIMEOUT 30)
 
 add_executable(ark-agent-tool-layer-042d-tests tests/agent_tool_layer_042d_tests.cpp)
 target_link_libraries(ark-agent-tool-layer-042d-tests PRIVATE ark)

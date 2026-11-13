@@ -1,5 +1,6 @@
 #include "ark/agent.hpp"
 #include "ark/sketch.hpp"
+#include <cctype>
 #include <iostream>
 #include <stdexcept>
 using namespace ark;using V=arkjson::Value;
@@ -7,6 +8,11 @@ namespace {
 int checks=0;
 void check(bool ok,const char* message){++checks;if(!ok)throw std::runtime_error(message);}
 V json(const char* s){V v;check(arkjson::parse(s,v),"test JSON parses");return v;}
+// Guide text writes objects relaxed: {key:value} with bare words and 'quoted' strings.
+std::string relaxedJson(const std::string& text){std::string out;for(size_t i=0;i<text.size();){const char c=text[i];
+    if(c=='\''){const size_t end=text.find('\'',i+1);check(end!=std::string::npos,"Guide text closes its quote");out+='"'+text.substr(i+1,end-i-1)+'"';i=end+1;}
+    else if(std::isalpha((unsigned char)c)||c=='_'){size_t end=i;while(end<text.size()&&(std::isalnum((unsigned char)text[end])||text[end]=='_'))++end;out+='"'+text.substr(i,end-i)+'"';i=end;}
+    else{out+=c;++i;}}return out;}
 V call(AgentSession& s,const char* name,const char* args){auto v=s.call(name,json(args));if(v.find("isError")->b)throw std::runtime_error(v.dump());return *v.find("structuredContent");}
 void rejected(AgentSession& s,const char* args){auto before=documentToJson(s.document);auto rev=s.revision;check(s.call("doc_apply",json(args)).find("isError")->b,"invalid operation rejected");check(s.revision==rev&&documentToJson(s.document)==before,"failed operation rolls back all state");}
 double distance(Vec2 p,const std::vector<Vec2>& poly){double d=1e100;for(size_t i=1;i<poly.size();++i){auto ab=poly[i]-poly[i-1];auto t=clamp((p-poly[i-1]).dot(ab)/ab.lensq(),0.,1.);d=std::min(d,(p-poly[i-1]-ab*t).len());}return d;}
@@ -86,7 +92,33 @@ int main(){try{
     auto shifted=spline;for(size_t i=0;i<shifted.dof.size();i+=2){shifted.dof[i]+=123;shifted.dof[i+1]-=87;}auto translated=sampleSketchEntity(shifted,.015);check(poly.size()==translated.size(),"Translation does not change subdivision");for(size_t i=0;i<poly.size();++i)check((poly[i]+Vec2{123,-87}).approx(translated[i],1e-10),"Spline translation equivariance");
 
     AgentSession freeform;
-    auto onboarding=call(freeform,"agent_onboard",R"({"topic":"sketch"})");auto example=*onboarding.find("example_doc_apply");check(!freeform.call("doc_apply",example).find("isError")->b,"Onboarding example executes in a fresh document");
+    auto onboarding=call(freeform,"agent_onboard",R"({"topic":"sketch"})");auto example=*onboarding.find("example_doc_apply");
+    // The guide's freeform example builds an exact native extrusion and names
+    // what the sampled legacy types build. Portable builds without the native
+    // kernel exercise the same sketch through the legacy extrude instead.
+    {const auto& last=example.find("commands")->arr.back();check(last.find("type")->str=="native_solid"&&last.find("native")->find("op")->str=="extrude"&&example.dump().find("\"type\":\"extrude\"")==std::string::npos,"Sketch guide example authors an exact native extrusion");
+        const auto rules=onboarding.find("rules")->dump();check(rules.find("Legacy types extrude, revolve and sketch_cut build sampled mesh solids")!=std::string::npos&&rules.find("revolve_surface p:{sketch,angle:360,solid:1}")!=std::string::npos&&rules.find("Recipe equation2d is an authored adaptive polyline")!=std::string::npos,"Sketch guide names sampled legacy solids and exact curved alternatives");
+        const auto solids=call(freeform,"agent_onboard",R"({"topic":"solids"})").find("rules")->dump();check(solids.find("Exact curved forms, when the design calls for them: fillet/chamfer above; feature.add types revolve_surface p:{sketch,angle,solid:1} with native.axis X|Y|Z, loft native:{sections:[sketch names]} p:{solid:1} and sweep native:{section,path} p:{solid:1}.")!=std::string::npos,"Solids guide offers exact curved operations without requiring them");}
+    // The executed follow-up hole is parsed from the guide's own next_step text.
+    V holeNative;{const auto next=onboarding.find("next_step")->str;const size_t at=next.find("native:{op:hole,cutter:{");check(next.find("add native_solid inputs:[returned extrusion ID], native:{")!=std::string::npos&&at!=std::string::npos,"Sketch guide next step names a native hole");
+        size_t end=at+7;for(int depth=0;end<next.size();++end){depth+=next[end]=='{';depth-=next[end]=='}';if(!depth)break;}check(end<next.size(),"Guide hole object is closed");
+        holeNative=json(relaxedJson(next.substr(at+7,end-at-6)).c_str());const auto* cutter=holeNative.find("cutter");check(cutter&&cutter->t==V::Obj,"Guide hole names its cutter");
+        auto field=[&](const char* key){const V* value=cutter->find(key);check(value!=nullptr,"Guide hole names every cutter field it needs");return *value;};
+        const double plate=std::stod(example.find("commands")->arr.back().find("p")->find("depth")->str);
+        check(field("kind").str=="circle"&&field("plane").str=="design"&&field("cx").num==0&&field("cy").num==0&&field("radius").num>0&&field("offset").num<0&&field("offset").num+field("depth").num>plate,"Guide hole states a circle cutter on the example plane that spans the plate");}
+#ifndef ARK_SKETCH_NATIVE_TESTS
+    {V commands=*example.find("commands");commands.arr.back()=json(R"({"op":"feature.add","type":"extrude","name":"Freeform plate","p":{"sketch":"outline","height":"6"}})");example.set("commands",commands);}
+#endif
+    check(!freeform.call("doc_apply",example).find("isError")->b,"Onboarding example executes in a fresh document");
+#ifdef ARK_SKETCH_NATIVE_TESTS
+    {// Six closed-spline spans stay six exact side faces; the guide's follow-up hole stays exact too.
+        AgentSession exact;check(!exact.call("doc_apply",example).find("isError")->b,"Exact onboarding example executes");const auto id=std::to_string(exact.document.features.back().id);
+        auto plate=*call(exact,"native_inspect",("{\"id\":"+id+"}").c_str()).find("report");check(plate.find("brep_valid")->b&&plate.find("faces")->num==8,"Freeform plate keeps exact spline side faces");
+        V add=json(R"({"op":"feature.add","type":"native_solid","name":"Hole"})"),inputs=V::makeArr(),commands=V::makeArr(),hole=V::makeObj();inputs.arr.push_back(V::makeNum((double)exact.document.features.back().id));add.set("inputs",inputs);add.set("native",holeNative);commands.arr.push_back(add);hole.set("expected_revision",V::makeNum((double)exact.revision));hole.set("commands",commands);
+        check(!exact.call("doc_apply",hole).find("isError")->b,"Guide follow-up hole executes on the exact plate");
+        auto bored=*call(exact,"native_inspect",("{\"id\":"+std::to_string(exact.document.features.back().id)+"}").c_str()).find("report");const double radius=holeNative.find("cutter")->find("radius")->num,thickness=std::stod(example.find("commands")->arr.back().find("p")->find("depth")->str);
+        check(bored.find("brep_valid")->b&&bored.find("faces")->num==9&&std::abs(plate.find("volume_mm3")->num-bored.find("volume_mm3")->num-K_PI*radius*radius*thickness)<1e-3,"Guide hole is an exact through-cut");}
+#endif
     auto report=call(freeform,"sketch_inspect",R"({"name":"outline","samples":true})");check(report.find("profile_ready")->b&&report.find("remaining_dofs")->num==0,"Closed spline profile ready and driven");
     auto before=freeform.document.evalBodies[0].tessellate({}).computeBBox();
     call(freeform,"doc_apply",R"({"commands":[{"op":"param.set","name":"width","expr":"160"}]})");auto after=freeform.document.evalBodies[0].tessellate({}).computeBBox();check(after.extent().x>before.extent().x*1.5,"Freeform shape changes with width parameter");

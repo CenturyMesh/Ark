@@ -43,7 +43,7 @@ bool hasRetainedAuthoringGeometry(const V& design){
 V revisionVerification032D(const V& result){
     // Keep the measured revision and activity/feedback custody, never a second
     // document inventory. The executor may be an older/custom implementation.
-    V receipt=V::makeObj();for(const auto& field:payload(result).obj)if(field.first=="revision"||field.first=="units"||field.first=="feature_count"||field.first=="parameter_error"||field.first=="derived_geometry"||field.first=="history_tip"||field.first.rfind("activity_",0)==0||field.first=="feedback_required"||field.first=="pending_feedback_ids")receipt.set(field.first,field.second);
+    V receipt=V::makeObj();for(const auto& field:payload(result).obj)if(field.first=="revision"||field.first=="units"||field.first=="feature_count"||field.first=="parameter_error"||field.first=="derived_geometry"||field.first=="history_tip"||field.first.rfind("activity_",0)==0||field.first=="feedback_required"||field.first=="pending_feedback_ids"||field.first=="pending_feedback_count")receipt.set(field.first,field.second);
     receipt.set("response_scope",V::makeStr("revision_verification"));
     if(!result.find("structuredContent"))return receipt;
     V compact=result;compact.set("structuredContent",receipt);V content=V::makeArr(),text=V::makeObj();text.set("type",V::makeStr("text"));text.set("text",V::makeStr(receipt.dump()));content.arr.push_back(text);compact.set("content",content);return compact;
@@ -56,7 +56,15 @@ std::string leadRoleId(const std::vector<AgentTeamRole>& roles){for(const auto& 
 std::string commandsError(const V& args,unsigned limit,AgentTeamDiscipline discipline,unsigned maxFeatures=1,unsigned maxPlacements=1){auto commands=args.find("commands");if(!commands){if(discipline!=AgentTeamDiscipline::General)return "Scoped team writes need explicit bounded commands; a cached candidate cannot conceal its operations.";return {};}
     if(commands->t!=V::Arr||commands->arr.empty()||commands->arr.size()>limit)return "Construction step must contain 1.."+std::to_string(limit)+" commands. Keep dependent changes atomic; propose smaller independently valid steps rather than splitting them blindly.";
     unsigned features=0,placements=0;for(const auto& command:commands->arr){if(command.t!=V::Obj||field(command,"op").empty())return "Construction commands must be objects with an operation.";auto op=field(command,"op");if(op=="feature.add"||op=="sheet.create")++features;if(op=="assembly.add")++placements;if(!scopedCommand(discipline,op))return "Operation "+op+" belongs to a different team discipline. Send a revision-bound proposal to its owner.";}
-    if(discipline==AgentTeamDiscipline::ParametricDesigner&&std::none_of(commands->arr.begin(),commands->arr.end(),[](const V& command){return field(command,"op").rfind("program.",0)==0||field(command,"op").rfind("variant.",0)==0;}))return "A parametric designer publishes compiled program candidates only. Prepare one with parametric_program; send other edits to their owner.";
+    if(discipline==AgentTeamDiscipline::ParametricDesigner){
+        if(std::none_of(commands->arr.begin(),commands->arr.end(),[](const V& command){return field(command,"op").rfind("program.",0)==0||field(command,"op").rfind("variant.",0)==0;}))return "A parametric designer publishes compiled program candidates only. Prepare one with parametric_program; send other edits to their owner.";
+        // Creation ops are upserts; they belong to this role only as the compiled
+        // output of a program.bind in the same step, whose exact provenance
+        // doc_apply verifies. A clear, detach or variant op authorizes nothing else.
+        std::set<std::string> bound;for(const auto& command:commands->arr)if(field(command,"op")=="program.bind")bound.insert(field(command,"namespace"));
+        for(const auto& command:commands->arr){const auto op=field(command,"op");if(op.rfind("program.",0)==0||op.rfind("variant.",0)==0)continue;const auto name=field(command,"name");
+            if(std::none_of(bound.begin(),bound.end(),[&](const std::string& ns){return !ns.empty()&&name.rfind(op=="feature.add"?ns+" / ":ns+"__",0)==0;}))return "A parametric designer publishes "+op+" only as compiled output of a program.bind in the same step; "+(name.empty()?std::string("an unnamed object"):name)+" is outside every namespace bound by this step. Prepare a program candidate or send the edit to its owner.";}
+    }
     if(features>maxFeatures||placements>maxPlacements)return "Construction step exceeds the configured feature/placement limit. Keep related changes atomic and choose a smaller complete batch; no partial geometry was committed.";return {};
 }
 void closeInterruptedCalls(V& conversation){
@@ -223,12 +231,16 @@ struct AgentTeam::Impl {
         V tools=V::makeArr();
         AgentTeamRoleSnapshot view;
         V lastToolFailure;
+        // Unrated activity IDs this role created in this team run (076A): never
+        // the backlog that pending_feedback_ids reports from earlier conversations.
         std::set<std::string> pendingFeedback;
         std::map<std::string,V> unresolvedToolFailures;
         std::map<std::string,ReadFailureStamp> readFailureStamps;
         std::deque<SuccessfulRead> successfulReads;
         std::uint64_t readSequence=0;
         std::string turnText;
+        // Reasoning since this role's previous Text event; turn it belongs to.
+        std::string replyReasoning;unsigned replyReasoningTurn=0;bool replyReasoningShown=false;
         std::deque<V> pending;
         std::deque<std::string> context;
         std::size_t pendingBytes=0,contextBytes=0;
@@ -301,7 +313,7 @@ struct AgentTeam::Impl {
         }
         wake.notify_all();idle.notify_all();
     }
-    std::size_t eventSize(const AgentTeamEvent& event) const{std::size_t size=sizeof(AgentTeamEvent)+event.text.size()+event.roleId.size()+event.tool.size()+event.stepId.size()+event.proposalId.size()+event.createdIds.size()*sizeof(std::uint64_t)+event.draftSketchCommands.dump().size()+event.providerOutcome.dump().size();for(const auto& group:{event.operations,event.sketchNames,event.featureNames})for(auto& value:group)size+=value.size();return size;}
+    std::size_t eventSize(const AgentTeamEvent& event) const{std::size_t size=sizeof(AgentTeamEvent)+event.text.size()+event.reasoning.size()+event.roleId.size()+event.tool.size()+event.stepId.size()+event.proposalId.size()+event.createdIds.size()*sizeof(std::uint64_t)+event.draftSketchCommands.dump().size()+event.providerOutcome.dump().size();for(const auto& group:{event.operations,event.sketchNames,event.featureNames})for(auto& value:group)size+=value.size();return size;}
     void emit(AgentTeamEvent event){
         AgentTeamEvents callback;
         {std::lock_guard lock(mutex);event.text=clipped(event.text,config.maxEventTextBytes);event.sequence=++sequence;
@@ -579,7 +591,7 @@ struct AgentTeam::Impl {
             verification=revisionVerification032D(proof);
             // Retain feedback immediately, including a later rejection or
             // cancellation after this internal read already created activity.
-            {std::lock_guard lock(mutex);const auto& receipt=payload(verification);if(const auto* id=receipt.find("activity_id");id&&receipt.find("feedback_required")&&receipt.find("feedback_required")->b)roles[index].pendingFeedback.insert(id->asStr());if(const auto* pending=receipt.find("pending_feedback_ids");pending&&pending->t==V::Arr)for(const auto& id:pending->arr)roles[index].pendingFeedback.insert(id.asStr());}
+            {std::lock_guard lock(mutex);const auto& receipt=payload(verification);if(const auto* id=receipt.find("activity_id");id&&receipt.find("feedback_required")&&receipt.find("feedback_required")->b)roles[index].pendingFeedback.insert(id->asStr());}
             std::uint64_t current=0;if(isError(proof)||!receiptRevision(payload(proof),current))return reject("Read supersession verification did not return a successful measured revision; no failure was cleared.");
             {std::lock_guard lock(mutex);const auto project=field(payload(proof),"activity_project_id");if(explicitProjectBoundary("doc_info",V::makeObj(),proof)||(!project.empty()&&!preparedProjectId.empty()&&project!=preparedProjectId))clearPreparedLocked();if(!project.empty())preparedProjectId=project;}
             if(current!=expected){auto result=reject("The current document revision differs from expected_revision; no read failure was cleared and no automatic rebase occurred.");result.set("revision",V::makeNum((double)current));result.set("expected_revision",V::makeNum((double)expected));return result;}
@@ -603,13 +615,21 @@ struct AgentTeam::Impl {
             if(goal&&role.view.id!=leadRoleId(config.roles))return errorResult("Only the lead can report the entire user goal. Report your task to the lead.");
             if(state=="completed"){
                 if(goal&&awaitingLeadCheckpoint())return errorResult("The initial lead authoring checkpoint remains unfinished. The lead must successfully commit a coherent editable sketch/feature before completing the goal; deferred writer assignments have not run.");
-                V remaining=V::makeArr();for(const auto& id:role.pendingFeedback)if(!rated.count(id)&&remaining.arr.size()<64)remaining.arr.push_back(V::makeStr(id));
-                if(!remaining.arr.empty()){auto result=errorResult("Record tool_feedback for your actual pending activity IDs before declaring completion: add them to this report's ratings (the same items as tool_feedback) or call tool_feedback.");result.set("unrated_activity_ids",remaining);return result;}
+                V remaining=V::makeArr();std::size_t unrated=0;for(const auto& id:role.pendingFeedback)if(!rated.count(id)&&++unrated&&remaining.arr.size()<64)remaining.arr.push_back(V::makeStr(id));
+                if(!remaining.arr.empty()){auto result=errorResult("Record tool_feedback for your actual pending activity IDs before declaring completion: add them to this report's ratings (the same items as tool_feedback) or call tool_feedback.");result.set("unrated_activity_ids",remaining);result.set("unrated_activity_count",V::makeNum((double)unrated));return result;}
                 for(std::size_t i=0;i<roles.size();++i){const auto& peer=roles[i];
                     if((goal||i==index)&&(blockingFailures(peer)||!peer.view.error.empty()||peer.view.needsInspection))return errorResult("Unresolved tool or worker errors remain. Inspect and resolve the failed operation before declaring completion.");
                     if((goal||i==index)&&(!peer.pending.empty()||peer.queued||(i!=index&&peer.active)))return errorResult("Pending messages or active/queued teammate work remain. Finish integration before declaring completion.");
                     if(goal&&i!=index&&(peer.view.taskState=="in_progress"||peer.view.taskState=="needs_input"))return errorResult("A teammate assignment has not been explicitly reported completed.");
                 }
+                // 076A: a teammate's turn that ends with its own actions of this
+                // team run unrated is not an error, so those actions themselves
+                // block the goal (previously the turn failed). Older backlog never
+                // enters pendingFeedback; only the owning role can rate its actions.
+                if(goal)for(std::size_t i=0;i<roles.size();++i){const auto& peer=roles[i];if(i==index||peer.pendingFeedback.empty())continue;
+                    V ids=V::makeArr();for(const auto& id:peer.pendingFeedback)if(ids.arr.size()<64)ids.arr.push_back(V::makeStr(id));
+                    auto result=errorResult("Teammate "+peer.view.id+" has "+std::to_string(peer.pendingFeedback.size())+" unrated action"+(peer.pendingFeedback.size()==1?"":"s")+" of this team run: "+ids.dump()+". Only that role can rate its own actions: ask it with team_send to submit tool_feedback (or report ratings) before completing the goal. ARK never rates them for it.");
+                    V teammate=V::makeObj();teammate.set("role",V::makeStr(peer.view.id));teammate.set("unrated_activity_ids",ids);teammate.set("unrated_activity_count",V::makeNum((double)peer.pendingFeedback.size()));result.set("teammate_unrated_feedback",teammate);return result;}
                 if(goal&&config.requireReviewerCheckpoint&&!reviewerReminderSent)for(const auto& peer:roles)if(peer.config.discipline==AgentTeamDiscipline::PhysicsReviewer&&!peer.config.canWrite&&peer.view.id!=role.view.id&&peer.view.taskState=="unassigned"){
                     reviewerReminderSent=true;
                     return errorResult("Reviewer "+peer.view.id+" has not checked this design. Before completing the goal, assign it one concrete checkpoint of the integrated design with team_send kind:assignment (layout, proportions, interfaces, clearances or checks the user asked for) and integrate its findings. If the user declined a review, call team_finish_goal again and state that the review was skipped.");
@@ -627,13 +647,13 @@ struct AgentTeam::Impl {
             try{ratingReceipt=executor("tool_feedback",request);}catch(...){return reject("The ratings could not be recorded, so the report was not recorded. Read activity_info before retrying.");}
             if(isError(ratingReceipt)){
                 const auto& detail=payload(ratingReceipt);auto result=reject("The ratings were rejected, so the report was not recorded: "+field(detail,"error"));if(const auto* code=detail.find("error_code"))result.set("error_code",*code);
-                V remaining=V::makeArr();{std::lock_guard lock(mutex);for(const auto& id:roles[index].pendingFeedback)if(remaining.arr.size()<64)remaining.arr.push_back(V::makeStr(id));}result.set("unrated_activity_ids",remaining);return result;
+                V remaining=V::makeArr();std::size_t unrated=0;{std::lock_guard lock(mutex);if(const auto* known=detail.find("already_rated_ids");known&&known->t==V::Arr)for(const auto& id:known->arr)roles[index].pendingFeedback.erase(id.asStr());unrated=roles[index].pendingFeedback.size();for(const auto& id:roles[index].pendingFeedback)if(remaining.arr.size()<64)remaining.arr.push_back(V::makeStr(id));}result.set("unrated_activity_ids",remaining);result.set("unrated_activity_count",V::makeNum((double)unrated));return result;
             }
             std::lock_guard lock(mutex);if(const auto* rated=payload(ratingReceipt).find("rated_ids");rated&&rated->t==V::Arr)for(const auto& id:rated->arr)roles[index].pendingFeedback.erase(id.asStr());
         }
         // Receipts carry what the executor actually rated, so the role and the
         // assistant loop clear the same IDs without another round.
-        auto withRatings=[&](V result){if(ratingReceipt.isNull())return result;const auto& receipt=payload(ratingReceipt);for(const char* key:{"rated_ids","pending_feedback_ids"})if(const auto* value=receipt.find(key))result.set(key,*value);return result;};
+        auto withRatings=[&](V result){if(ratingReceipt.isNull())return result;const auto& receipt=payload(ratingReceipt);for(const char* key:{"rated_ids","pending_feedback_ids","pending_feedback_count"})if(const auto* value=receipt.find(key))result.set(key,*value);return result;};
         std::string eventText;
         {std::lock_guard lock(mutex);auto& role=roles[index];
             // Rechecked: a peer may have changed state while the ratings were recorded.
@@ -875,8 +895,8 @@ struct AgentTeam::Impl {
             try{result=config.recordAction(roles[index].config.id,name,args,result,std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-actionStarted).count());}
             catch(...){result.set("activity_capture_error",V::makeStr("Action finished but its coordination audit could not be attached; do not replay the action."));}
         }
-        {std::lock_guard lock(mutex);const auto& data=payload(result);if(const auto* project=data.find("activity_project_id")){if(project->asStr()!=activityProjectId||(data.find("activity_boundary")&&data.find("activity_boundary")->b))for(auto& role:roles)role.pendingFeedback.clear();activityProjectId=project->asStr();}if(const auto* id=data.find("activity_id");id&&data.find("feedback_required")&&data.find("feedback_required")->b)roles[index].pendingFeedback.insert(id->asStr());if(const auto* rated=data.find("rated_ids");rated&&rated->t==V::Arr)for(const auto& id:rated->arr)roles[index].pendingFeedback.erase(id.asStr());if(const auto* pending=data.find("pending_feedback_ids");pending&&pending->t==V::Arr)for(const auto& id:pending->arr)roles[index].pendingFeedback.insert(id.asStr());if(name=="team_reserve_write"||name=="team_report_task")if(const auto* verification=data.find("revision_verification")){const auto& receipt=payload(*verification);if(const auto* id=receipt.find("activity_id");id&&receipt.find("feedback_required")&&receipt.find("feedback_required")->b)roles[index].pendingFeedback.insert(id->asStr());if(const auto* pending=receipt.find("pending_feedback_ids");pending&&pending->t==V::Arr)for(const auto& id:pending->arr)roles[index].pendingFeedback.insert(id.asStr());}}
-        if(const auto* verification=result.find("initial_checkpoint_verification"))if(const auto* inspection=verification->find("inspection")){std::lock_guard lock(mutex);const auto& data=payload(*inspection);if(const auto* id=data.find("activity_id");id&&data.find("feedback_required")&&data.find("feedback_required")->b)roles[index].pendingFeedback.insert(id->asStr());if(const auto* pending=data.find("pending_feedback_ids");pending&&pending->t==V::Arr)for(const auto& id:pending->arr)roles[index].pendingFeedback.insert(id.asStr());}
+        {std::lock_guard lock(mutex);const auto& data=payload(result);if(const auto* project=data.find("activity_project_id")){if(project->asStr()!=activityProjectId||(data.find("activity_boundary")&&data.find("activity_boundary")->b))for(auto& role:roles)role.pendingFeedback.clear();activityProjectId=project->asStr();}if(const auto* id=data.find("activity_id");id&&data.find("feedback_required")&&data.find("feedback_required")->b)roles[index].pendingFeedback.insert(id->asStr());for(const char* key:{"rated_ids","already_rated_ids"})if(const auto* rated=data.find(key);rated&&rated->t==V::Arr)for(const auto& id:rated->arr)roles[index].pendingFeedback.erase(id.asStr());if(name=="team_reserve_write"||name=="team_report_task")if(const auto* verification=data.find("revision_verification")){const auto& receipt=payload(*verification);if(const auto* id=receipt.find("activity_id");id&&receipt.find("feedback_required")&&receipt.find("feedback_required")->b)roles[index].pendingFeedback.insert(id->asStr());}}
+        if(const auto* verification=result.find("initial_checkpoint_verification"))if(const auto* inspection=verification->find("inspection")){std::lock_guard lock(mutex);const auto& data=payload(*inspection);if(const auto* id=data.find("activity_id");id&&data.find("feedback_required")&&data.find("feedback_required")->b)roles[index].pendingFeedback.insert(id->asStr());}
         emit(event);
         return result;
     }
@@ -884,15 +904,18 @@ struct AgentTeam::Impl {
         if(input.kind==AssistantEvent::Usage||input.kind==AssistantEvent::ToolEnd){std::lock_guard lock(mutex);roles[index].view.performance=performanceBaseline;accumulateAssistantPerformance(roles[index].view.performance,input.performance);}
         if(input.kind==AssistantEvent::ToolEnd)return; // Actual result is recorded by call().
         AgentTeamEvent event;event.roleId=roles[index].config.id;event.text=input.text;event.providerRetry=input.providerRetry;event.providerOutcome=input.providerOutcome;
-        {std::lock_guard lock(mutex);auto& view=roles[index].view;
+        {std::lock_guard lock(mutex);auto& view=roles[index].view;auto& role=roles[index];
+            // Reasoning travels on the reply it preceded; a new turn starts empty.
+            if(role.replyReasoningTurn!=view.turns){role.replyReasoning.clear();role.replyReasoningShown=false;role.replyReasoningTurn=view.turns;}
             switch(input.kind){
             case AssistantEvent::Status:event.kind=AgentTeamEvent::Status;view.status=input.text;break;
-            case AssistantEvent::Text:event.kind=AgentTeamEvent::Text;boundedAppend(view.text,input.text,config.maxMailboxBytes);boundedAppend(roles[index].turnText,input.text,config.maxMailboxBytes);break;
+            case AssistantEvent::Text:event.kind=AgentTeamEvent::Text;boundedAppend(view.text,input.text,config.maxMailboxBytes);boundedAppend(roles[index].turnText,input.text,config.maxMailboxBytes);
+                event.reasoning=std::move(role.replyReasoning);role.replyReasoning.clear();event.reasoningEarlier=role.replyReasoningShown;if(!event.reasoning.empty())role.replyReasoningShown=true;break;
             case AssistantEvent::ToolStart:event.kind=AgentTeamEvent::ToolStart;event.tool=input.text;view.status="Tool: "+input.text;break;
             case AssistantEvent::Usage:event.kind=AgentTeamEvent::Usage;view.usage=baseline;accumulateAssistantUsage(view.usage,input.usage);break;
             case AssistantEvent::ToolEnd:break;
             // Observational role state only: not shared, logged or replayed.
-            case AssistantEvent::Reasoning:if(view.reasoningTurn!=view.turns){view.reasoning.clear();view.reasoningTurn=view.turns;}boundedAppend(view.reasoning,input.text,config.maxMailboxBytes);return;
+            case AssistantEvent::Reasoning:if(view.reasoningTurn!=view.turns){view.reasoning.clear();view.reasoningTurn=view.turns;}boundedAppend(view.reasoning,input.text,config.maxMailboxBytes);boundedAppend(role.replyReasoning,input.text,config.maxMailboxBytes);return;
             }
         }
         if(input.kind==AssistantEvent::Text&&!config.focusedWorkflow&&(!config.orchestratedStart||roles[index].config.discipline==AgentTeamDiscipline::Orchestrator))share(index,input.text);emit(event);
@@ -903,7 +926,7 @@ struct AgentTeam::Impl {
             {std::unique_lock lock(mutex);wake.wait(lock,[&]{return cancelled.load()||(!paused&&!jobs.empty());});if(cancelled)return;
                 index=jobs.front();jobs.pop_front();auto& role=roles[index];role.queued=false;
                 if(config.maxTurnsPerRole&&role.turnsInWindow>=config.maxTurnsPerRole){role.view.state=AgentTeamState::AwaitingContinuation;role.view.status="Turn window exhausted; explicit resume renews a bounded window";role.view.needsInspection=true;idle.notify_all();continue;}
-                role.active=true;role.reportedToCoordinator=false;role.focusedHandoff=false;role.turnText.clear();++active;++role.view.turns;++role.turnsInWindow;role.view.state=AgentTeamState::Working;role.view.error.clear();input=role.view.conversation;baseline=role.view.usage;performanceBaseline=role.view.performance;
+                role.active=true;role.reportedToCoordinator=false;role.focusedHandoff=false;role.turnText.clear();++active;++role.view.turns;++role.turnsInWindow;role.view.state=AgentTeamState::Working;role.view.error.clear();role.view.feedback=V{};input=role.view.conversation;baseline=role.view.usage;performanceBaseline=role.view.performance;
             }
             workerRoleId=roles[index].config.id;
             try{
@@ -913,11 +936,13 @@ struct AgentTeam::Impl {
                 auto result=runAssistant(assistantConfig,input,roles[index].tools,[&](const auto& name,const auto& args){return call(index,name,args);},
                     [&](const auto& event){assistantEvent(index,baseline,performanceBaseline,event);},&cancelled,roleConfig.transport,[&]{return inbox(index);},
                     [&](const V& history){std::lock_guard lock(mutex);roles[index].view.conversation=history;},retryHooks);
-                {std::lock_guard lock(mutex);roles[index].view.conversation=std::move(result.conversation);roles[index].view.usage=baseline;accumulateAssistantUsage(roles[index].view.usage,result.usage);roles[index].view.performance=performanceBaseline;accumulateAssistantPerformance(roles[index].view.performance,result.performance);roles[index].view.state=cancelled?AgentTeamState::Cancelled:AgentTeamState::Idle;}
-                std::string reportedState;{std::lock_guard lock(mutex);reportedState=roles[index].view.taskState;}
-                status(index,cancelled?"Cancelled":reportedState=="needs_input"?"Waiting for input / explicit task report":reportedState=="completed"?"Turn finished / explicit task report completed":reportedState=="in_progress"?"Turn finished / task remains in progress":"Turn finished / task status not reported");
+                {std::lock_guard lock(mutex);roles[index].view.conversation=std::move(result.conversation);roles[index].view.usage=baseline;accumulateAssistantUsage(roles[index].view.usage,result.usage);roles[index].view.performance=performanceBaseline;accumulateAssistantPerformance(roles[index].view.performance,result.performance);roles[index].view.state=cancelled?AgentTeamState::Cancelled:AgentTeamState::Idle;roles[index].view.feedback=result.feedback;}
+                std::string reportedState;std::size_t unrated=0;{std::lock_guard lock(mutex);reportedState=roles[index].view.taskState;unrated=roles[index].pendingFeedback.size();}
+                // 076A: unrated actions of this team run stay visible after the turn and block task/goal completion.
+                const std::string feedbackState=cancelled||!unrated?std::string():" / tool feedback pending for "+std::to_string(unrated)+(unrated==1?" action":" actions")+" of this team run; task and goal completion blocked until rated";
+                status(index,(cancelled?"Cancelled":reportedState=="needs_input"?"Waiting for input / explicit task report":reportedState=="completed"?"Turn finished / explicit task report completed":reportedState=="in_progress"?"Turn finished / task remains in progress":"Turn finished / task status not reported")+feedbackState);
                 bool missingCheckpoint=false;{std::lock_guard lock(mutex);missingCheckpoint=!cancelled&&awaitingLeadCheckpoint()&&roles[index].view.id==leadRoleId(config.roles);if(missingCheckpoint&&!goalDeclared){goalState=AgentGoalState::NeedsInput;goalSummary="Lead turn ended before the initial lead authoring checkpoint. Deferred writer assignments remain unfinished; no automatic continuation was scheduled.";}}
-                if(missingCheckpoint)status(index,"Turn finished / initial lead authoring checkpoint unfinished; writer assignments remain deferred");
+                if(missingCheckpoint)status(index,"Turn finished / initial lead authoring checkpoint unfinished; writer assignments remain deferred"+feedbackState);
             }catch(const AssistantRoundLimit&){
                 {std::lock_guard lock(mutex);auto& view=roles[index].view;view.state=AgentTeamState::AwaitingContinuation;view.error.clear();view.status="Step request budget reached; committed work retained";view.needsInspection=true;closeInterruptedCalls(view.conversation);view.conversation.arr.push_back(message("developer","This bounded turn reached its provider-round budget after retaining real tool receipts. Continue the existing task from this history; do not replay committed writes. First inspect current doc_info detail design, then choose the next small valid step. Completion has not been claimed."));}
                 AgentTeamEvent event;event.kind=AgentTeamEvent::Yield;event.roleId=roles[index].config.id;event.text="Provider-round budget reached; resume from retained receipts and current geometry";emit(event);
@@ -940,7 +965,7 @@ struct AgentTeam::Impl {
                     // 042D: the notice carries the role's explicit report and measured
                     // counts, so the lead need not spend a team_context round per handoff.
                     const std::string report=role.view.taskState.empty()||role.view.taskState=="unassigned"?" No explicit task report.":" Explicit task report: "+role.view.taskState+(role.view.taskSummary.empty()?std::string():" / "+clipped(role.view.taskSummary,1024))+".";
-                    const std::string measured=" Committed steps by this role: "+std::to_string(role.view.stepsApplied)+"; unresolved tool errors: "+std::to_string(role.unresolvedToolFailures.size())+(documentRevisionKnown?"; last observed document revision: "+std::to_string(documentRevision):std::string())+".";
+                    const std::string measured=" Committed steps by this role: "+std::to_string(role.view.stepsApplied)+"; unresolved tool errors: "+std::to_string(role.unresolvedToolFailures.size())+(role.pendingFeedback.empty()?std::string():"; unrated actions of this team run: "+std::to_string(role.pendingFeedback.size())+" (only this role can rate them; they block goal completion)")+(documentRevisionKnown?"; last observed document revision: "+std::to_string(documentRevision):std::string())+".";
                     from=role.view.id;notification="Assignment turn "+std::to_string(role.view.turns)+" finished: "+role.view.label+" is "+agentTeamStateName(role.view.state)+". "+clipped(role.view.error.empty()?role.turnText:role.view.error,2048)+report+measured+" This notice already carries that role's report, so team_context adds nothing unless another role matters. Inspect only what you will integrate at the current revision (object_context for the reported IDs, or doc_info detail:digest with your known_fingerprints); integrate accepted parts or resolve blockers. Do not assume unverified work succeeded.";
                  }
                 }
@@ -1050,7 +1075,9 @@ bool AgentTeam::waitIdleFor(std::chrono::milliseconds timeout){std::unique_lock 
 AgentTeamSnapshot AgentTeam::snapshot(bool includeConversations,std::uint64_t sinceEvent,bool includeDiagnostics) const{
     std::lock_guard lock(impl_->mutex);AgentTeamSnapshot result;result.running=impl_->active!=0||!impl_->jobs.empty();result.paused=impl_->paused;result.cancelled=impl_->cancelled;result.droppedEvents=impl_->dropped;result.goalState=impl_->goalState;result.goalSummary=impl_->goalSummary;result.goalDeclared=impl_->goalDeclared;
     unsigned blocking=0;
-    for(const auto& role:impl_->roles){if(role.view.taskState=="in_progress"||role.view.taskState=="needs_input")++result.outstandingTasks;result.unresolvedErrors+=(unsigned)role.unresolvedToolFailures.size();blocking+=impl_->blockingFailures(role);if(!role.view.error.empty()||role.view.needsInspection){++result.unresolvedErrors;++blocking;}}
+    for(const auto& role:impl_->roles){if(role.view.taskState=="in_progress"||role.view.taskState=="needs_input")++result.outstandingTasks;result.unresolvedErrors+=(unsigned)role.unresolvedToolFailures.size();blocking+=impl_->blockingFailures(role);if(!role.view.error.empty()||role.view.needsInspection){++result.unresolvedErrors;++blocking;}
+        // 076A: a finished turn's unrated actions of this team run block a completed goal.
+        if(!role.active&&!role.pendingFeedback.empty()){result.pendingFeedback+=(unsigned)role.pendingFeedback.size();++blocking;}}
     const bool interrupted=std::any_of(impl_->roles.begin(),impl_->roles.end(),[](const auto& role){return role.view.state==AgentTeamState::Failed||role.view.state==AgentTeamState::Interrupted||role.view.state==AgentTeamState::AwaitingContinuation;});
     // A completed provider turn can explicitly request input because a tool was
     // rejected. Retain that report and its blockers; rejection is not transport
@@ -1066,7 +1093,7 @@ AgentTeamSnapshot AgentTeam::snapshot(bool includeConversations,std::uint64_t si
     for(const auto& role:impl_->roles){const auto& source=role.view;AgentTeamRoleSnapshot view;
         view.taskState=source.taskState;view.taskSummary=source.taskSummary;view.id=source.id;view.label=source.label;view.model=source.model;view.reasoningEffort=source.reasoningEffort;view.status=source.status;view.text=source.text;view.reasoning=source.reasoning;view.reasoningTurn=source.reasoningTurn;view.error=source.error;view.state=source.state;view.canWrite=source.canWrite;view.turns=source.turns;view.usage=source.usage;view.performance=source.performance;view.stepsApplied=source.stepsApplied;view.needsInspection=source.needsInspection;view.discipline=source.discipline;
         view.partTask=source.partTask;view.partState=source.partState;view.privateStepsApplied=source.privateStepsApplied;
-        view.unresolvedToolErrors=(unsigned)role.unresolvedToolFailures.size();
+        view.unresolvedToolErrors=(unsigned)role.unresolvedToolFailures.size();view.feedback=source.feedback;view.pendingFeedback=(unsigned)role.pendingFeedback.size();
         view.currentPhase=source.state==AgentTeamState::Working?(source.currentPhase=="idle"?"working":source.currentPhase):agentTeamStateName(source.state);view.phaseStartedMs=source.phaseStartedMs;view.lastEventMs=source.lastEventMs;
         if(source.state==AgentTeamState::Working){view.activeTool=source.activeTool;view.activeToolStartedMs=source.activeToolStartedMs;}
         if(includeDiagnostics)for(const auto& entry:role.unresolvedToolFailures){if(view.toolFailures.size()==8)break;view.toolFailures.push_back(entry.second);}

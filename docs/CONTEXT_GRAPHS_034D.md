@@ -19,7 +19,11 @@ retain geometric authority.
 `context_graph{query:"suspension",depth:1,limit:12,history_limit:3}` returns
 matching nodes and a bounded neighborhood. Use exact `keys:["feature:42"]` after
 discovery, instead of `query`, to retain the intended target. Nodes cover features,
-parameters, sketches, planes, materials, assembly nodes and mates. Directed links
+parameters, sketches, planes, materials, assembly nodes and mates. Installed
+[parametric program](PARAMETRIC_PROGRAMS.md) bindings are `program:<namespace>`
+nodes with the program name, `namespace`, `program_sha256` and resolved `values`,
+and `owns` links to their uniquely named owned features, sketches, datums and
+materials; their values are not scanned as document parameter names. Directed links
 come from explicit selectors or expression identifiers; both dependencies and
 backlinks can be traversed. This is not complete evaluator dependency analysis.
 A repeated read in the same session reuses the index when an authoring stamp
@@ -34,6 +38,8 @@ counter; independent sessions keep their own cache, while a host must still
 serialize calls to the same session. The stamp scans saved fields and serializes
 some subobjects, so avoiding the full JSON is not constant-time or a measured
 provider-token saving. Future persistent fields must join the stamp contract.
+Program bindings and saved design variants are part of the stamp, so a detach,
+which changes only the binding, or a variant edit rebuilds the index.
 
 The response includes project `scope`, observed `revision`, saved-authoring
 `source_sha256`, node fingerprints and explicit `partial` status. Depth is 0..2,

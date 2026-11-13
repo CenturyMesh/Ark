@@ -9,6 +9,9 @@ public static class Log
     static readonly object Gate = new();
     public static string FilePath { get; } = Path.Combine(Path.GetTempPath(), "ARK-Setup.log");
 
+    /// <summary>A second file that receives the same lines (/LOG=FILE, as Inno Setup's switch).</summary>
+    public static string? MirrorPath { get; set; }
+
     public static void Start(string[] args)
     {
         try
@@ -38,9 +41,14 @@ public static class Log
             : $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] {level} {message}";
         lock (Gate)
         {
-            try { File.AppendAllText(FilePath, line + Environment.NewLine, Encoding.UTF8); }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
+            foreach (string? path in new[] { FilePath, MirrorPath })
+            {
+                if (path == null)
+                    continue;
+                try { File.AppendAllText(path, line + Environment.NewLine, Encoding.UTF8); }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
         }
     }
 }

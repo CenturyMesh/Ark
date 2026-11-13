@@ -7,11 +7,14 @@ param(
     [string]$OcctSdkDirectory = 'out/deps/occt/install-msvc-ark-offset-001',
     [string]$Repository = 'CenturyMesh/Ark',
     [switch]$Installer,
-    [switch]$Publish
+    [switch]$Publish,
+    # Local tests only: package although the source tree has uncommitted changes. Never combined with -Publish.
+    [switch]$AllowDirtyTree
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $root = Split-Path $PSScriptRoot -Parent
+if ($Publish -and $AllowDirtyTree) { throw '-AllowDirtyTree is for local tests; a published build needs a committed source tree.' }
 if (-not [IO.Path]::IsPathRooted($RuntimeDirectory)) { $RuntimeDirectory = Join-Path $root $RuntimeDirectory }
 Import-Module (Join-Path $root 'updates/Ark.Update.psm1') -Force
 $version = Get-ArkRuntimeVersion $RuntimeDirectory
@@ -25,12 +28,13 @@ elseif (-not [IO.Path]::IsPathRooted($OutputDirectory)) { $OutputDirectory = Joi
 $packageArguments = @{RuntimeDirectory=$RuntimeDirectory; OutputDirectory=$OutputDirectory; OcctSourceDirectory=$OcctSourceDirectory; OcctSdkDirectory=$OcctSdkDirectory; SkipUpdateManifest=$true}
 if ($MsvcRuntimeDirectory) { $packageArguments.MsvcRuntimeDirectory = $MsvcRuntimeDirectory }
 if ($CompilerDirectory) { $packageArguments.CompilerDirectory = $CompilerDirectory }
+if ($AllowDirtyTree) { $packageArguments.AllowDirtyTree = $true }
 & (Join-Path $PSScriptRoot 'package-release.ps1') @packageArguments
 $archive = Join-Path $OutputDirectory "ark-windows-x64-$version.zip"
 $assets = @($archive)
 if (Test-Path -LiteralPath ($archive + '.provenance.json')) { $assets += $archive + '.provenance.json' }
 if ($Installer) {
-    $installerArguments = @{PackagePath=$archive; OutputDirectory=$OutputDirectory; UseRuntimeIdentity=$true}
+    $installerArguments = @{PackagePath=$archive; OutputDirectory=$OutputDirectory; UseRuntimeIdentity=$true; AllowDirtyTree=[bool]$AllowDirtyTree}
     & (Join-Path $PSScriptRoot 'build-installer.ps1') @installerArguments
     $assets += Join-Path $OutputDirectory "ARK-$code-windows-x64-setup.exe"
 }

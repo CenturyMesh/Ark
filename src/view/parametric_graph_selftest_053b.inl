@@ -32,7 +32,24 @@ if(parametricGraphUiTest){
         // Cancelling the native form must preserve the exact source/revision.
         const auto cancelRevision=g_session.revision;g_dialogSmoke=2;interactiveAction(49005);g_dialogSmoke=0;verify(g_session.revision==cancelRevision,"Cancelled configure changed source");
         g_dialogSmoke=3;g_dialogOverrideQueue={{"bearing",nextTop.string(),"{}"}};interactiveAction(49004);g_dialogSmoke=0;verify(!g_error&&g_doc.features[0].p.at("depth")=="32"&&g_doc.getParam("bearing__span")==62,g_status);refresh();capture(".updated.png");
+        // Program ownership is navigation metadata: selecting an owned output never marks its binding as an impacted dependant.
+        V install=json(R"({"action":"prepare","mode":"install","namespace":"pg","program":{"format":"ark.parametric-program.v1","name":"Graph probe","parameters":{"w":{"default":12,"min":1}},"functions":{},"body":[{"emit":{"op":"feature.add","type":"box","name":"Body","p":{"dx":"{w}","dy":4,"dz":4}}}]}})");install.set("expected_revision",V::makeNum((double)g_session.revision));const auto installed=runTool("parametric_program",install);verify(!field(installed,"isError").b,installed.dump());
+        V publish=V::makeObj();publish.set("candidate_id",field(field(installed,"structuredContent"),"candidate_id"));publish.set("expected_revision",V::makeNum((double)g_session.revision));runTool("doc_apply",publish);verify(!g_error,g_status);refresh();
+        size_t binding=state.nodes.size(),output=state.nodes.size();for(size_t i=0;i<state.nodes.size();++i){if(state.nodes[i].key=="program:pg")binding=i;if(state.nodes[i].kind=="feature"&&state.nodes[i].name=="pg / Body")output=i;}
+        verify(binding<state.nodes.size()&&output<state.nodes.size(),"Program binding or its owned output is missing from the graph");bool owns=false;for(const auto& e:state.edges)owns=owns||(e.from==binding&&e.to==output&&e.relation=="owns");verify(owns,"Program ownership edge missing");
+        select(output);verify(state.impact.count(output)&&!state.impact.count(binding),"Owned output marked its program binding as impacted");select(binding);verify(state.impact.size()==1,"Program selection invented impacted dependants");
         SetWindowPos(state.window,nullptr,0,0,1080,680,SWP_NOMOVE|SWP_NOZORDER);fit();capture(".compact.png");
-        verify(saveDocument(g_doc,saved.string().c_str()),"Final portable example save failed");DestroyWindow(state.window);fprintf(stdout,"Parametric graph 053B UI: export, insert, configure, selection, folding, search, zoom, focus, refresh and cancel passed\n");return 0;
+        verify(saveDocument(g_doc,saved.string().c_str()),"Final portable example save failed");DestroyWindow(state.window);
+        // This headless test runs nested component dispatch on the main thread;
+        // interactive Studio runs it on the session executor. Both must carry
+        // the explicit reserve (ARK_STUDIO_STACK_RESERVE), not a toolchain default.
+        const auto mainStack=studioStackUsage();StudioStackUsage executorStack;g_busyTestMode=true;callSessionWithProgress("stack_reserve_probe",V::makeObj(),[&]{executorStack=studioStackUsage();return V::makeObj();});g_busyTestMode=false;
+        fprintf(stdout,"Stack: main thread high-water %zu KiB of %zu KiB reserved; session executor reserves %zu KiB\n",mainStack.committed/1024,mainStack.reserved/1024,executorStack.reserved/1024);
+        verify(mainStack.reserved>=studioThreadStackReserve&&executorStack.reserved>=studioThreadStackReserve,"Stack reserve below "+std::to_string(studioThreadStackReserve)+" bytes (main "+std::to_string(mainStack.reserved)+", executor "+std::to_string(executorStack.reserved)+")");
+        // Frame sizes differ by compiler (MSVC was not measured): a build whose
+        // chain needs more than half the reserve fails here with its measured
+        // high-water mark instead of passing close to an overflow.
+        verify(mainStack.committed>0&&mainStack.committed<=mainStack.reserved/2,"Main-thread stack high-water "+std::to_string(mainStack.committed/1024)+" KiB exceeds half of the "+std::to_string(mainStack.reserved/1024)+" KiB reserve");
+        fprintf(stdout,"Parametric graph 053B UI: export, insert, configure, selection, folding, search, zoom, focus, refresh, program ownership and cancel passed\n");return 0;
     }catch(const std::exception& e){g_dialogSmoke=0;g_dialogOverrideQueue.clear();if(state.window)DestroyWindow(state.window);fprintf(stderr,"Parametric graph 053B UI: %s / %s\n",e.what(),g_status.c_str());return 1553;}
 }

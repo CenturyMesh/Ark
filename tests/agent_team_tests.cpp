@@ -1,5 +1,6 @@
 #include "ark/agent_team.hpp"
 #include "ark/agent.hpp"
+#include "ark/parametric_programs.hpp"
 #include "ark/agent_activity.hpp"
 #include "ark/onboarding.hpp"
 #include "ark/chatgpt_auth.hpp"
@@ -182,6 +183,41 @@ static void parametricDesignerRole(){
     check(direct.find("compiled program candidates only")!=std::string::npos,"parametric designer cannot hand-write ordinary source");
     check(prompt.find("parametric programs assigned to you")!=std::string::npos,"role instructions describe the program workflow");
     check(std::string(ark::agentTeamDisciplineName(ark::AgentTeamDiscipline::ParametricDesigner))=="Parametric designer","discipline has a readable name");
+}
+static void parametricDesignerScope(){
+    // Creation upserts belong to the role only as compiled output of a bind in
+    // the same step; clear/detach/variant ops cannot carry outside edits.
+    ark::AgentTeam team;ark::AgentTeamConfig config;config.roles={role("programmer",true)};config.roles[0].discipline=ark::AgentTeamDiscipline::ParametricDesigner;int rounds=0;ark::AgentSession session;std::vector<std::string> receipts;std::string candidate;
+    check(!session.call("doc_apply",json(R"({"expected_revision":0,"commands":[{"op":"material.set","name":"Steel","density":7.85}]})")).find("isError")->b,"seed another role's material");
+    const auto program=json(R"({"format":"ark.parametric-program.v1","name":"Posts","parameters":{"n":{"default":2,"min":1,"max":4,"integer":true}},"body":[{"for":"i","count":"n","body":[{"emit":{"op":"feature.add","type":"box","name":"Post {i+1}","p":{"dx":4,"dy":4,"dz":"{10+i}"}}}]}]})");
+    const auto digest=ark::parametricProgramHash(program);
+    auto compiled=[&](int n,bool clear,double tamper){V values=V::makeObj();values.set("n",V::makeNum(n));V commands=V::makeArr();if(clear){V c=json(R"({"op":"program.clear","namespace":"posts"})");c.set("expected_program_sha256",V::makeStr(digest));commands.arr.push_back(c);}
+        const auto output=ark::compileParametricProgram(program,values,"posts");for(auto c:output.find("commands")->arr){if(tamper>0&&commands.arr.size()==(clear?1u:0u)){V p=*c.find("p");p.set("dz",V::makeNum(tamper));c.set("p",p);}commands.arr.push_back(c);}
+        V bind=json(R"({"op":"program.bind","namespace":"posts"})");bind.set("program",program);bind.set("program_sha256",V::makeStr(digest));bind.set("values",values);commands.arr.push_back(bind);return commands;};
+    auto step=[&](const std::string& id,std::uint64_t revision,const V& commands){V args=V::makeObj();args.set("expected_revision",V::makeNum((double)revision));args.set("commands",commands);return call(id,"team_apply_step",args.dump());};
+    config.roles[0].transport=[&](auto&,const V& request,auto*){if(rounds>1)receipts.push_back(lastTeamReceipt(request).dump());switch(++rounds){
+        case 1:return call("read","doc_info","{}");
+        case 2:return step("exact",1,compiled(2,false,0));
+        case 3:return step("variant_material",2,json(R"([{"op":"variant.remove","namespace":"posts","name":"Old"},{"op":"material.set","name":"Steel","density":1}])"));
+        case 4:return step("detach_sketch",2,json(R"([{"op":"program.detach","namespace":"posts","expected_program_sha256":")"+digest+R"("},{"op":"sketch.set","name":"Outside","sketch":{"entities":[]}}])"));
+        case 5:return step("tampered",2,compiled(3,true,99));
+        case 6:return call("prepare","parametric_program",R"({"action":"prepare","mode":"configure","namespace":"posts","values":{"n":3},"expected_revision":2})");
+        case 7:{const auto receipt=lastTeamReceipt(request);candidate=receipt.find("candidate_id")?receipt.find("candidate_id")->asStr():"";}return call("publish","team_apply_step",R"({"expected_revision":2,"candidate_id":")"+candidate+"\"}");
+        case 8:return step("variant",3,json(R"([{"op":"variant.set","namespace":"posts","name":"Tall","values":{"n":4},"program_sha256":")"+digest+R"("}])"));
+        case 9:return step("detach_only",4,json(R"([{"op":"program.detach","namespace":"posts","expected_program_sha256":")"+digest+R"("}])"));
+        default:return done("Scope checked");}};
+    team.start(config,"Generate posts as a parametric program",ark::AgentSession::tools(),[&](const auto& name,const V& args){return session.call(name,args);});complete(team);
+    auto committed=[&](size_t i,int revision){return receipts[i].find("\"error\"")==std::string::npos&&receipts[i].find("\"revision\":"+std::to_string(revision))!=std::string::npos;};
+    check(receipts.size()>=8,"every scoped step returned a receipt");
+    check(committed(0,2),"exact hand-written compiled program step is accepted");
+    check(receipts[1].find("outside every namespace bound")!=std::string::npos,"a variant op cannot carry an outside material overwrite");
+    check(receipts[2].find("outside every namespace bound")!=std::string::npos,"a detach cannot carry an outside sketch upsert");
+    check(receipts[3].find("PROGRAM_PROVENANCE")!=std::string::npos,"namespaced but tampered compiled output is rejected by doc_apply provenance");
+    check(!candidate.empty()&&committed(5,3),"the role's own prepared configure candidate publishes");
+    check(committed(6,4),"a variant-only step stays allowed");
+    check(committed(7,5),"a detach-only step stays allowed");
+    double density=0;for(const auto& m:session.document.materials)if(m.name=="Steel")density=m.densityGcm3;
+    check(density==7.85&&session.revision==5&&session.document.features.size()==3&&session.document.parametricPrograms.isNull()&&!session.document.findSketch("Outside"),"only the compiled program, its variant and the detach were published");
 }
 static void proposalsAndPhysicsRole(){
     ark::AgentTeam team;ark::AgentTeamConfig config;config.roles={role("designer",true),role("reviewer")};config.roles[0].discipline=ark::AgentTeamDiscipline::PartDesigner;config.roles[1].discipline=ark::AgentTeamDiscipline::PhysicsReviewer;Gate ready;int designRounds=0,reviewRounds=0;std::atomic_bool sawMeasuredMath=false;ark::AgentSession session;
@@ -546,4 +582,4 @@ static void explicitInputWithRetainedToolFailure(){
 #include "agent_team_read_progress_041d_tests.inl"
 #include "agent_team_report_feedback_042d_tests.inl"
 #include "agent_team_design_workflows_067g_tests.inl"
-int main(){try{designWorkflowCandidateCustody067g();parametricDesignerRole();reportRatingsReplaceFeedbackRound042d();rejectedReportRatingsRecordNothing042d();progressReportCarriesRatings042d();handoffNoticeCarriesReport042d();teamRequestSizes();readFailureDoesNotBlockCompletion();removedSubjectSupersedesRejectedRead047d();reviewerCheckpointReminder();singleAssistantPreviewSchema();inspectionProgressProjection041d();inspectionActionPriorities041d();nativeReadThenGeometry041d();observedReadProgress041d();unsupportedCandidateRecovery040d();projectedBatchReadRecovery038d();exactReferenceReadRecovery038d();staleReadRevisionRecovery038d();correctedPreviewRecovery038d();batchReceiptAssociationRecovery038d();initialCheckpointNeedsSketchGeometry037d();initialLeadAuthoringCheckpoint037d();initialCheckpointLifecycle037d();coherentConstructionBounds037d();semanticProgress036a();semanticHandoff036a();sharedGraph034d();workflow033d();cooperativeReceiptContracts032d();expiredReceiptOwnership032d();independentTeamCandidateRefresh031b();teamCandidateDependencyConflict031b();teamCandidateProjectBoundary031b();teamCandidateRefreshReceipt031b();explicitInputWithRetainedToolFailure();staleLeadCannotAssignDownstream();inFlightImageTeamSteering();snapshotsDuringPeerWriteWindow();userImageTeamChecks();cooperativeWriteWindows();cooperativeWriteWindowLifecycle();cooperativeWriteWindowPermissionsAndAudit();oversizedHistoryResume();sharedAuthoringSchemas();drawingTeamScope();explicitGoalCompletion();ownedPreparedCandidates();restoredDocumentAndCanvasTools();coherentBatchBenchmark();focusedSequentialAssignments();leadEngineerAuthorsPartsAndAssembly();parallelProgressStillReportsCompletion();sharedFailureEvidence();parallelAutomaticCompletionBoundaries();unlimitedEightRoleAssignments();configChecks();concurrencyAndRevision();steeringAndPause();collaboration();cancellationAndFailures();interruptedBatchHistory();limitsAndMutationSchemas();conversationMemoryBound();incrementalStepsAndScopes();frameDisciplineScope();proposalsAndPhysicsRole();concurrentQueuedDrafts();yieldedAndInterruptedContinuation();std::cout<<"Agent team checks passed: "<<checks<<"\n";return 0;}catch(const std::exception& error){std::cerr<<"Agent team checks failed: "<<error.what()<<"\n";return 1;}}
+int main(){try{designWorkflowCandidateCustody067g();parametricDesignerRole();parametricDesignerScope();reportRatingsReplaceFeedbackRound042d();historicRowsDoNotBlockReport076a();specialistFeedbackBlocksGoal076a();rejectedReportRatingsRecordNothing042d();progressReportCarriesRatings042d();handoffNoticeCarriesReport042d();teamRequestSizes();readFailureDoesNotBlockCompletion();removedSubjectSupersedesRejectedRead047d();reviewerCheckpointReminder();singleAssistantPreviewSchema();inspectionProgressProjection041d();inspectionActionPriorities041d();nativeReadThenGeometry041d();observedReadProgress041d();unsupportedCandidateRecovery040d();projectedBatchReadRecovery038d();exactReferenceReadRecovery038d();staleReadRevisionRecovery038d();correctedPreviewRecovery038d();batchReceiptAssociationRecovery038d();initialCheckpointNeedsSketchGeometry037d();initialLeadAuthoringCheckpoint037d();initialCheckpointLifecycle037d();coherentConstructionBounds037d();semanticProgress036a();semanticHandoff036a();sharedGraph034d();workflow033d();cooperativeReceiptContracts032d();expiredReceiptOwnership032d();independentTeamCandidateRefresh031b();teamCandidateDependencyConflict031b();teamCandidateProjectBoundary031b();teamCandidateRefreshReceipt031b();explicitInputWithRetainedToolFailure();staleLeadCannotAssignDownstream();inFlightImageTeamSteering();snapshotsDuringPeerWriteWindow();userImageTeamChecks();cooperativeWriteWindows();cooperativeWriteWindowLifecycle();cooperativeWriteWindowPermissionsAndAudit();oversizedHistoryResume();sharedAuthoringSchemas();drawingTeamScope();explicitGoalCompletion();ownedPreparedCandidates();restoredDocumentAndCanvasTools();coherentBatchBenchmark();focusedSequentialAssignments();leadEngineerAuthorsPartsAndAssembly();parallelProgressStillReportsCompletion();sharedFailureEvidence();parallelAutomaticCompletionBoundaries();unlimitedEightRoleAssignments();configChecks();concurrencyAndRevision();steeringAndPause();collaboration();cancellationAndFailures();interruptedBatchHistory();limitsAndMutationSchemas();conversationMemoryBound();incrementalStepsAndScopes();frameDisciplineScope();proposalsAndPhysicsRole();concurrentQueuedDrafts();yieldedAndInterruptedContinuation();std::cout<<"Agent team checks passed: "<<checks<<"\n";return 0;}catch(const std::exception& error){std::cerr<<"Agent team checks failed: "<<error.what()<<"\n";return 1;}}

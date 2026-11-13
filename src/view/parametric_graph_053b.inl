@@ -27,7 +27,7 @@ static void visibility(){
     std::set<size_t> matched;const auto query=lower(state.query);for(size_t i=0;i<state.nodes.size();++i)if(!query.empty()&&lower(state.nodes[i].name+" "+state.nodes[i].key).find(query)!=std::string::npos)matched.insert(i);
     if(!query.empty()){auto seed=matched;for(const auto& e:state.edges){if(seed.count(e.from))matched.insert(e.to);if(seed.count(e.to))matched.insert(e.from);}}
     state.impact.clear();for(size_t i=0;i<state.nodes.size();++i)if(state.nodes[i].key==state.selected)state.impact.insert(i);
-    bool changed=true;while(changed){changed=false;for(const auto& e:state.edges)if(e.relation!="reuses"&&e.relation!="in_group"&&e.relation!="owned_by_definition"&&e.relation!="exposes"&&e.relation!="interface"&&state.impact.count(e.to)&&state.impact.insert(e.from).second)changed=true;}
+    bool changed=true;while(changed){changed=false;for(const auto& e:state.edges)if(e.relation!="reuses"&&e.relation!="in_group"&&e.relation!="owned_by_definition"&&e.relation!="exposes"&&e.relation!="interface"&&e.relation!="owns"&&state.impact.count(e.to)&&state.impact.insert(e.from).second)changed=true;}
     std::set<size_t> neighborhood=state.impact;for(const auto& e:state.edges)if(state.nodes[e.from].key==state.selected||state.nodes[e.to].key==state.selected){neighborhood.insert(e.from);neighborhood.insert(e.to);}
     for(size_t i=0;i<state.nodes.size();++i)state.nodes[i].visible=!hidden.count(state.nodes[i].key)&&(query.empty()||matched.count(i))&&(!state.focus||state.selected.empty()||neighborhood.count(i));
 }

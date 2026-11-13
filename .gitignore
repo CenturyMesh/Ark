@@ -36,3 +36,9 @@ studio.json
 
 # Temporary agent worktrees created by Claude Code; never part of the source.
 .claude/worktrees/
+
+# .NET build output of ARK Setup and its test harness
+installer/**/bin/
+installer/**/obj/
+tests/installer_process_070a/bin/
+tests/installer_process_070a/obj/

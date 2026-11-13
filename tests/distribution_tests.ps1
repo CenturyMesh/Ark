@@ -47,8 +47,12 @@ try {
     foreach($name in @('TKernel.dll','TKBRep.dll','TKDESTEP.dll')){Write-Fixture (Join-Path $sdk ('bin/'+$name))}
     & cmake -DARK_OCCT_MODE=RECORD_BUILD -DARK_OCCT_BUILD_KIND=local-sdk-overlay "-DARK_OCCT_INSTALL=$sdk" -P (Join-Path $fixture 'scripts/ApplyOcctPatch.cmake')
     if($LASTEXITCODE -ne 0){throw 'Cannot record synthetic SDK distribution inventory'}
+    # The fixture's runtime, SDK and outputs are untracked files: a distributable package is refused without the local-test switch.
+    $dirtyOutput = Join-Path $fixture 'dirty tree output'; $rejected = $false
+    try { & (Join-Path $fixture 'scripts/package-release.ps1') -RuntimeDirectory $runtime -OutputDirectory $dirtyOutput -MsvcRuntimeDirectory $msvc -OcctSourceDirectory (Join-Path $fixture 'occt') -SkipUpdateManifest } catch { $rejected = $_.Exception.Message -match 'uncommitted change' }
+    Assert-True ($rejected -and -not (Test-Path -LiteralPath (Join-Path $dirtyOutput 'ark-windows-x64-0.9.15.zip'))) 'A dirty source tree is refused for a distributable package unless -AllowDirtyTree is explicit.'
     $output = Join-Path $fixture 'output'
-    & (Join-Path $fixture 'scripts/package-release.ps1') -RuntimeDirectory $runtime -OutputDirectory $output -MsvcRuntimeDirectory $msvc -OcctSourceDirectory (Join-Path $fixture 'occt') -SkipUpdateManifest
+    & (Join-Path $fixture 'scripts/package-release.ps1') -RuntimeDirectory $runtime -OutputDirectory $output -MsvcRuntimeDirectory $msvc -OcctSourceDirectory (Join-Path $fixture 'occt') -SkipUpdateManifest -AllowDirtyTree
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $output 'ark-update.json'))) 'Private downloads must not advertise the placeholder update feed.'
     $expanded = Join-Path $fixture 'expanded'
     Expand-ArkPackage (Join-Path $output 'ark-windows-x64-0.9.15.zip') $expanded
@@ -61,12 +65,12 @@ try {
     Assert-True (Test-Path -LiteralPath (Join-Path $expanded 'licenses/OCCT-ARK-patches.txt')) 'Portable package preserves the exact modified-source notice and SDK declaration.'
     Write-Fixture (Join-Path $runtime 'TKBRep.dll') 'different runtime bytes'
     $rejectedOutput=Join-Path $fixture 'rejected runtime output';$rejected=$false
-    try { & (Join-Path $fixture 'scripts/package-release.ps1') -RuntimeDirectory $runtime -OutputDirectory $rejectedOutput -MsvcRuntimeDirectory $msvc -OcctSourceDirectory (Join-Path $fixture 'occt') -SkipUpdateManifest } catch { $rejected=$true }
+    try { & (Join-Path $fixture 'scripts/package-release.ps1') -RuntimeDirectory $runtime -OutputDirectory $rejectedOutput -MsvcRuntimeDirectory $msvc -OcctSourceDirectory (Join-Path $fixture 'occt') -SkipUpdateManifest -AllowDirtyTree } catch { $rejected=$true }
     Assert-True ($rejected -and -not (Test-Path -LiteralPath (Join-Path $rejectedOutput 'ark-windows-x64-0.9.15.zip'))) 'Mismatched runtime DLL rejects before an archive is published.'
     Write-Fixture (Join-Path $runtime 'TKBRep.dll')
     Move-Item -LiteralPath $patchManifest -Destination ($patchManifest+'.saved')
     $missingOutput=Join-Path $fixture 'missing manifest output';$rejected=$false
-    try { & (Join-Path $fixture 'scripts/package-release.ps1') -RuntimeDirectory $runtime -OutputDirectory $missingOutput -MsvcRuntimeDirectory $msvc -OcctSourceDirectory (Join-Path $fixture 'occt') -SkipUpdateManifest } catch { $rejected=$true }
+    try { & (Join-Path $fixture 'scripts/package-release.ps1') -RuntimeDirectory $runtime -OutputDirectory $missingOutput -MsvcRuntimeDirectory $msvc -OcctSourceDirectory (Join-Path $fixture 'occt') -SkipUpdateManifest -AllowDirtyTree } catch { $rejected=$true }
     Assert-True ($rejected -and -not (Test-Path -LiteralPath (Join-Path $missingOutput 'ark-windows-x64-0.9.15.zip'))) 'A missing source manifest rejects rather than bypassing the SDK gate.'
     Move-Item -LiteralPath ($patchManifest+'.saved') -Destination $patchManifest
     $installRoot = Join-Path $fixture 'installation with spaces'
@@ -83,7 +87,7 @@ try {
     # A personal package may retain binaries built before the packaging checkout.
     Write-ArkAtomicJson (Join-Path $fixture 'release.json') @{sequence=29;phase='B';code='029B';version='0.9.30'}
     $testOutput = Join-Path $fixture 'personal test output'
-    & (Join-Path $fixture 'scripts/publish-test-build.ps1') -RuntimeDirectory $runtime -OutputDirectory $testOutput -MsvcRuntimeDirectory $msvc -OcctSourceDirectory (Join-Path $fixture 'occt')
+    & (Join-Path $fixture 'scripts/publish-test-build.ps1') -RuntimeDirectory $runtime -OutputDirectory $testOutput -MsvcRuntimeDirectory $msvc -OcctSourceDirectory (Join-Path $fixture 'occt') -AllowDirtyTree
     Assert-True (Test-Path -LiteralPath (Join-Path $testOutput 'ark-windows-x64-0.9.15.zip')) 'Personal test packaging must reuse the existing runtime.'
     Assert-True (Test-Path -LiteralPath (Join-Path $testOutput 'SHA256SUMS.txt')) 'Personal test package must have checksums.'
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $testOutput 'ark-update.json'))) 'Personal test packaging must not publish an Internet update feed.'
@@ -100,7 +104,7 @@ try {
     Write-Fixture (Join-Path $compiler 'LICENSE.TXT') 'synthetic matching compiler notice'
     Write-Fixture (Join-Path $compiler 'x86_64-w64-mingw32/share/mingw32/COPYING.MinGW-w64-runtime') 'synthetic matching runtime notice'
     $llvmOutput = Join-Path $fixture 'llvm output'
-    & (Join-Path $fixture 'scripts/publish-test-build.ps1') -RuntimeDirectory $llvm -OutputDirectory $llvmOutput -CompilerDirectory $compiler -OcctSourceDirectory (Join-Path $fixture 'occt') -OcctSdkDirectory $llvmSdk
+    & (Join-Path $fixture 'scripts/publish-test-build.ps1') -RuntimeDirectory $llvm -OutputDirectory $llvmOutput -CompilerDirectory $compiler -OcctSourceDirectory (Join-Path $fixture 'occt') -OcctSdkDirectory $llvmSdk -AllowDirtyTree
     $llvmExpanded = Join-Path $fixture 'llvm expanded'
     Expand-ArkPackage (Join-Path $llvmOutput 'ark-windows-x64-0.9.15.zip') $llvmExpanded
     foreach ($name in @('libTKernel.dll','libTKBRep.dll','libTKDESTEP.dll','libc++.dll','libunwind.dll','licenses/LLVM-Apache-exception.txt','licenses/COPYING.MinGW-w64-runtime.txt')) { Assert-True (Test-Path -LiteralPath (Join-Path $llvmExpanded $name)) "Missing LLVM payload/notice: $name" }

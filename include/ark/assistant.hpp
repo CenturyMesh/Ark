@@ -121,6 +121,9 @@ struct AssistantResult {
     unsigned rounds=0;
     AssistantUsage usage;
     AssistantPerformance performance;
+    // Host-observed tool_feedback outcome for actions this run created (076A):
+    // state complete/pending/no_actions, run counts, pending IDs and backlog.
+    arkjson::Value feedback;
 };
 // A bounded turn yielded after real tool receipts. Hosts may continue the
 // retained, protocol-complete history; this is not a request to replay writes.

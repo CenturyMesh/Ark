@@ -125,6 +125,17 @@ a native dialog with Label, Minimum, Maximum, Step, Unit, Group, Order and a
 offers *Show a parameter...*, which uses the same dialog with a parameter
 choice.
 
+**Programs.** When the document has installed
+[parametric programs](PARAMETRIC_PROGRAMS.md#studio), a **Parameters /
+Programs** switch appears under the header. The HUD opens on Programs when no
+parameter is exposed. The Programs view uses the same rows, staging and
+clamping for each program parameter. **Apply** publishes a revision-checked
+`parametric_program` configure candidate instead of `param.set`. **Detach** and
+**Remove** ask for confirmation first. A value typed, or a Detach or Remove
+confirmed, while another writer changed the model is not used; the HUD reads
+the bindings again and asks for review. The Programs view has no Auto mode;
+each **Apply** prepares and publishes one candidate.
+
 The overlay uses the existing OpenGL panel primitives at physical pixels, like
 the viewport dock and the Baked Motions panel. Widths derive from the viewport
 (270..340 px) and labels are fitted with the renderer's glyph advances, so

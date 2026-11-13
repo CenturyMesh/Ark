@@ -15,28 +15,23 @@ Set-StrictMode -Version Latest
 $repository = Split-Path $PSScriptRoot -Parent
 if ($LayoutOnly -and -not $CaptureWizard) { throw '-LayoutOnly requires -CaptureWizard for the private page renderer.' }
 Import-Module (Join-Path $repository 'updates/Ark.Update.psm1') -Force
+Import-Module (Join-Path $repository 'scripts/Ark.SetupPayload.psm1') -Force
 $InstallerPath = [IO.Path]::GetFullPath($InstallerPath)
 $match = [regex]::Match([IO.Path]::GetFileName($InstallerPath), '-test-([a-zA-Z0-9-]{1,48})\.exe$')
 if (-not $match.Success) { throw 'Smoke tests require an installer built with -TestIsolationId.' }
 $testId = $match.Groups[1].Value
 if ($PreviousInstallerPath -and [IO.Path]::GetFileName($PreviousInstallerPath) -notmatch ('-test-' + [regex]::Escape($testId) + '\.exe$')) { throw 'Both installers must use the same isolated test identity.' }
 
-function Test-ArkSetupPayload([string]$Path) {
-    # ARK's WPF setup ends with the "ARKPAYLD" footer; older Inno Setup builds do not.
-    $stream = [IO.File]::OpenRead($Path)
-    try {
-        $tail = New-Object byte[] 24
-        [void]$stream.Seek(-24, [IO.SeekOrigin]::End)
-        return ($stream.Read($tail, 0, 24) -eq 24 -and [Text.Encoding]::ASCII.GetString($tail, 0, 8) -ceq 'ARKPAYLD')
-    } finally { $stream.Dispose() }
-}
-if (-not (Test-ArkSetupPayload $InstallerPath)) { throw 'The installer under test is not an ARK setup with a payload.' }
+# The setup under test carries the current payload footer (scripts/Ark.SetupPayload.psm1).
+if (-not (Find-ArkSetupPayload $InstallerPath)) { throw 'The installer under test is not an ARK setup with a payload.' }
 
 $fixture = [IO.Path]::GetFullPath((Join-Path $OutputDirectory ('smoke-' + [guid]::NewGuid().ToString('N'))))
 $installRoot = Join-Path $fixture 'Chosen folder with spaces'
 [IO.Directory]::CreateDirectory($installRoot) | Out-Null
 $drawing = Join-Path $installRoot 'my-drawing.ark'
 $settings = Join-Path $fixture 'user-settings.json'
+# Setup refuses a non-empty folder that is not an ARK install: a previous WPF setup gets the folder empty, and the
+# sentinel drawing is restored after it (its bytes, and so its hash, are the same).
 [IO.File]::WriteAllText($drawing, 'Synthetic drawing preservation sentinel - never a user document')
 [IO.File]::WriteAllText($settings, '{"synthetic":"preserve"}')
 $sentinels = @($drawing, $settings)
@@ -70,7 +65,10 @@ try {
     $oldState = $null
     if ($PreviousInstallerPath) {
         $PreviousInstallerPath = [IO.Path]::GetFullPath($PreviousInstallerPath)
-        if (Test-ArkSetupPayload $PreviousInstallerPath) { Invoke-PrivateSetup $PreviousInstallerPath @('--silent', '--dir', $quotedRoot) }
+        if (Test-ArkSetupFile $PreviousInstallerPath) {
+            $saved = [IO.File]::ReadAllBytes($drawing); Remove-Item -LiteralPath $drawing
+            try { Invoke-PrivateSetup $PreviousInstallerPath @('--silent', '--dir', $quotedRoot) } finally { [IO.File]::WriteAllBytes($drawing, $saved) }
+        }
         else { Invoke-PrivateSetup $PreviousInstallerPath @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', ('/DIR="' + $installRoot + '"'), ('/LOG="' + $fixture + '/previous.log"')) }
         $oldState = Get-ArkState $installRoot
     } else {
@@ -131,7 +129,9 @@ try {
     }
     if (Test-Path -LiteralPath $legacy) { Remove-Item -LiteralPath $legacy -Recurse -Force }
 }
-Start-Sleep -Seconds 2 # uninstall.exe removes itself after it exits
+# uninstall.exe removes itself from a helper that runs after it exits: wait for that, not for a fixed time
+$watch = [Diagnostics.Stopwatch]::StartNew()
+while ((Test-Path -LiteralPath (Join-Path $installRoot 'uninstall.exe')) -and $watch.Elapsed.TotalSeconds -lt 60) { Start-Sleep -Milliseconds 250 }
 foreach ($path in @($sentinels) + @($protected)) {
     if (-not (Test-Path -LiteralPath $path) -or (Get-FileHash -LiteralPath $path).Hash -cne $before[$path]) { throw "Preservation check failed: $path" }
 }

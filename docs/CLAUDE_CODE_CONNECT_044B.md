@@ -106,6 +106,14 @@ ARK starts the CLI with these arguments:
 - **Continuation.** Within one run, later host input such as tool-feedback
   reminders, completion-check issues or steering is sent as new turns of the
   same CLI session.
+- **Tool feedback (076A).** Reminders list only the still-unrated actions of
+  the current run, never rows that earlier conversations left under the
+  `assistant` actor id. A further reminder follows only when the run's count of
+  unrated actions fell since the previous one. A reminder turn that does not
+  lower it ends the run with the final reply, the reply that triggered the
+  first reminder and a pending-feedback note, not with an Interrupted error;
+  the rows stay pending. See
+  [AGENT_ACTIVITY.md](AGENT_ACTIVITY.md).
 - **Steering.** User steering sends an `interrupt` and then a new turn. A tool
   call that belongs to the interrupted turn is refused by the host.
 - **Cancellation.** Cancellation terminates the process. Completed commits

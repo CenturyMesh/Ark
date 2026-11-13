@@ -82,3 +82,66 @@ static void handoffNoticeCarriesReport042d(){
     check(carried&&leadRound>=3,"the lead's handoff notice carries the designer's explicit report and measured counts");
     check(noPolling,"the handoff notice no longer asks for a team_context round");
 }
+// 076A: a role is gated only on the actions of its own team run. A receipt's
+// pending_feedback_ids also lists unrated rows that an earlier conversation left
+// under the same role id; they stay pending and never block this report.
+static void historicRowsDoNotBlockReport076a(){
+    ark::AgentTeam team;ark::AgentTeamConfig config;config.roles={role("owner",true)};int round=0;bool reported=false,listedOld=false;std::set<std::string> ledger;
+    config.roles[0].transport=[&](auto&,const V& request,auto*){
+        switch(++round){
+        case 1:return call("read","doc_info","{}");
+        case 2:return call("finish","team_report_task",R"({"state":"completed","summary":"Inspected revision 0.","ratings":[{"activity_id":"a1","utility":4,"difficulty":1,"action":"Read the current revision"}]})");
+        default:{const auto out=writeWindowOutput(request);reported=reported||(out.find("reported")&&out.find("reported")->b);if(const auto* pending=out.find("unrated_activity_ids"))for(const auto& id:pending->arr)listedOld=listedOld||id.asStr()=="old-conversation";return done();}}};
+    team.start(config,"Report after rating this run",ark::AgentSession::tools(),[&](const auto& name,const V& args){
+        if(name=="doc_info")return json(R"({"isError":false,"structuredContent":{"revision":0,"activity_id":"a1","feedback_required":true,"pending_feedback_ids":["a1","old-conversation"],"pending_feedback_count":2}})");
+        if(name=="tool_feedback")return ratingResult042d(ledger,{"a1","old-conversation"},args);
+        return V::makeObj();});
+    complete(team);
+    check(reported&&!listedOld&&ledger.count("a1")&&!ledger.count("old-conversation"),"an earlier conversation's unrated row neither blocks nor is demanded by this role's report");
+    check(team.snapshot().roles[0].taskState=="completed","the role completes after rating its own actions");
+}
+// 076A review: a specialist that reported completion, then made a verification
+// read and ignored the feedback reminder, used to fail its turn (blocking the
+// goal). Its turn now ends without an error, so the unrated action itself must
+// block team_finish_goal until that role rates it; the outcome stays visible.
+static void specialistFeedbackBlocksGoal076a(){
+    ark::AgentTeam team;ark::AgentTeamConfig config;config.focusedWorkflow=true;config.roles={role("lead",true),role("designer",true)};config.roles[0].discipline=ark::AgentTeamDiscipline::Orchestrator;config.roles[1].discipline=ark::AgentTeamDiscipline::PartDesigner;
+    std::mutex mutex;std::set<std::string> issued,ledger;std::map<std::string,std::string> owner;int serial=0,leadRound=0,designerRound=0;
+    bool reported=false,noticeCounted=false,viewPending=false,statusPending=false,notePending=false;V blocked,accepted;
+    config.roles[0].transport=[&](auto&,const V& request,auto*){
+        switch(++leadRound){
+        case 1:return call("assign","team_send",R"({"to":"designer","kind":"assignment","message":"Design the bracket."})");
+        case 2:return done("Assigned the bracket.");
+        case 3:{noticeCounted=request.find("input")->dump().find("unrated actions of this team run: 1")!=std::string::npos;
+            const auto snapshot=team.snapshot();const auto& designer=snapshot.roles[1];
+            viewPending=designer.pendingFeedback==1&&designer.feedback.t==V::Obj&&designer.feedback.find("state")&&designer.feedback.find("state")->asStr()=="pending"&&snapshot.pendingFeedback==1;
+            statusPending=designer.status.find("tool feedback pending for 1 action")!=std::string::npos;notePending=designer.text.find("cannot be completed until they are rated")!=std::string::npos;
+            return call("finish","team_finish_goal",R"({"state":"completed","summary":"Bracket integrated."})");}
+        case 4:blocked=writeWindowOutput(request);return call("ask","team_send",R"({"to":"designer","kind":"assignment","message":"Rate your verification read in your completed report."})");
+        case 5:return done("Asked the designer to rate its read.");
+        case 6:return call("finish_again","team_finish_goal",R"({"state":"completed","summary":"Bracket integrated and rated."})");
+        case 7:accepted=writeWindowOutput(request);return done("Goal completed.");
+        default:return done("Unexpected lead round.");}};
+    config.roles[1].transport=[&](auto&,const V& request,auto*){
+        switch(++designerRound){
+        case 1:return call("inspect","doc_info",R"({"detail":"revision"})");
+        case 2:return call("report","team_report_task",R"({"state":"completed","summary":"Bracket ready at revision 0.","ratings":[{"activity_id":"act-1","utility":4,"difficulty":1,"action":"Read the current revision"}]})");
+        case 3:{const auto out=writeWindowOutput(request);reported=out.find("reported")&&out.find("reported")->b;return call("verify","doc_info",R"({"detail":"revision"})");}
+        case 4:return done("Bracket verified.");
+        case 5:return done("Bracket verified; nothing to add.");
+        case 6:return call("rate","team_report_task",R"({"state":"completed","summary":"Bracket ready; verification read rated.","ratings":[{"activity_id":"act-2","utility":4,"difficulty":1,"action":"Verified the bracket revision"}]})");
+        case 7:return done("Rated the verification read.");
+        default:return done("Unexpected designer round.");}};
+    team.start(config,"Design a bracket",ark::AgentSession::tools(),[&](const auto& name,const V& args)->V{std::lock_guard lock(mutex);
+        if(name=="doc_info"){const auto id="act-"+std::to_string(++serial);issued.insert(id);owner[id]=ark::AgentTeam::currentRoleId();V out=json(R"({"isError":false,"structuredContent":{"revision":0,"feedback_required":true}})");V data=*out.find("structuredContent");data.set("activity_id",V::makeStr(id));out.set("structuredContent",data);return out;}
+        if(name=="tool_feedback")return ratingResult042d(ledger,issued,args);
+        return V::makeObj();});
+    complete(team);
+    check(reported&&owner["act-1"]=="designer"&&owner["act-2"]=="designer","the designer reported completion and then made its own verification read");
+    const auto blockedText=blocked.find("error")?blocked.find("error")->asStr():std::string();
+    check(blocked.find("isError")&&blocked.find("isError")->b&&blockedText.find("designer")!=std::string::npos&&blockedText.find("act-2")!=std::string::npos,"team_finish_goal rejects completion while a teammate's action of this team run is unrated");
+    check(viewPending&&statusPending&&notePending,"the designer's snapshot, status and reply state the unrated action of this team run");
+    check(noticeCounted,"the lead's handoff notice counts the designer's unrated actions");
+    check(accepted.find("reported")&&accepted.find("reported")->b&&ledger.count("act-2"),"after the designer rates its own read, the goal can be completed");
+    const auto snapshot=team.snapshot();check(snapshot.goalDeclared&&snapshot.goalState==ark::AgentGoalState::Completed&&snapshot.pendingFeedback==0&&snapshot.roles[1].pendingFeedback==0,"the completed goal carries no unrated action of this team run");
+}

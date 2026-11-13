@@ -102,9 +102,10 @@ the GIF/video frame through the same playback position. `visual_evidence`
 reports `textures_and_stamps:true`, `media_time_s`, `appearance_scope` and
 `appearance_surfaces` (`textured_surfaces`, `patterned_surfaces`,
 `stamps_drawn`, `media` rows with status, frame/position or error,
-`missing_textures`, `stamps_skipped`). Lighting stays the flat diffuse model of
-[032D](SNAPSHOTS_032D.md); output is deterministic for a given document and
-time.
+`missing_textures`, `stamps_skipped`). Lighting is the simple diffuse model of
+[032D](SNAPSHOTS_032D.md), with the per-body vertex-normal shading reported in
+`visual_evidence.shading`; `appearance_scope` does not describe lighting.
+Output is deterministic for a given document and time.
 
 ## Local evidence (044B branch, Windows 11, MSVC 14.44)
 

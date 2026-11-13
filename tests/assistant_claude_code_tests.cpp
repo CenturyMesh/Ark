@@ -1,6 +1,8 @@
 #include "ark/assistant_claude_code.hpp"
 #include "ark/assistant_acp.hpp"
 #include "ark/assistant_connectors.hpp"
+#include "ark/agent.hpp"
+#include "ark/agent_activity.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
@@ -192,6 +194,7 @@ void nativeProcess(){
 }
 #include "claude_compaction_071d_tests.inl"
 #include "claude_result_071d_tests.inl"
+#include "claude_feedback_scope_076a_tests.inl"
 int main(int argc,char** argv){
 #ifdef _WIN32
     for(int i=1;i<argc;++i)if(std::string(argv[i])=="--input-format")return fakeCli(argc,argv);
@@ -209,7 +212,7 @@ int main(int argc,char** argv){
         }catch(const std::exception&){report.set("completed",V::makeBool(false));}
         report.set("synthetic_reads",V::makeNum(calls));report.set("real_document_access",V::makeBool(false));report.set("provider_text_retained",V::makeBool(false));std::cout<<report.dump()<<'\n';return 0;
     }
-    try{claude_result_071d::checks();claude_compaction_071d::checks();presetAndValidation();arguments();single();thinking();rejections();negotiation();permissionAndSteering();cancellationAndResume();imageInput();
+    try{claude_result_071d::checks();claude_compaction_071d::checks();claude_feedback_076a::checks();presetAndValidation();arguments();single();thinking();rejections();negotiation();permissionAndSteering();cancellationAndResume();imageInput();
 #ifdef _WIN32
         nativeProcess();
 #endif

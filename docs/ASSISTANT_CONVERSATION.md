@@ -30,14 +30,32 @@ the dock. Within it:
 - **Rail** (the `»` control) collapses the dock to a 44 px strip with the
   Assistant icon, a running pulse and an unread count; clicking it restores the
   dock. The conversation and composer are hidden on the rail.
-- **Normal** width is 400 px at 96 dpi (scaled with the window DPI). Dragging the
-  dock's left edge sets a user width; the viewport always keeps at least 460 px so
-  its display bar and appearance strip stay usable.
+- **Normal** width is 400 px at 96 dpi. Dragging the dock's left edge sets a
+  user width.
 - **Expand** / **Restore** (also the `⇔` control) switches to about 48% of the
   window, within the same viewport limit.
 
+The rail, minimum (340 px) and normal widths are preferences scaled with the
+window DPI. The limits that protect the viewport are in physical pixels,
+because the sidebar, viewport controls and native header buttons are not
+DPI-scaled:
+
+- When the window has room, the viewport keeps at least 460 px beside the
+  sidebar and any open tool docks. Its display bar needs 440 px and the
+  appearance strip 405 px.
+- If that reserve would leave less than the scaled minimum, the minimum gives
+  way first, but the dock never becomes narrower than 340 px.
+- A narrow window with open tool docks can therefore leave the viewport below
+  460 px. The viewport does not always keep 460 px.
+
+When Expand would not widen the dock, both Expand controls are visible but
+disabled. For example, a 1280 px window at 144 or 192 dpi, or an 1100 px
+window at any DPI, leaves no extra room.
+
 Open state, mode (`rail`, `normal`, `expanded`) and the user width are saved in
-the Studio settings. Unknown saved values fall back to the defaults.
+the Studio settings. The width is stored in 96-dpi units with its fraction, so
+a dragged width restores to the same pixel width at any DPI. Unknown saved
+values fall back to the defaults.
 
 Agent replies carry a collapsed **Reasoning** row. It shows only text the
 provider returned in readable form (see [ASSISTANT.md](ASSISTANT.md)); a reply
@@ -48,7 +66,58 @@ opens that agent's latest reasoning with its role id, label, turn and state,
 above the messages; extra roles are listed under **+N**. Team cards in **Agents**
 have a **Reasoning** link that returns to the conversation with that role
 selected. Reasoning is never added to the transcript copy, the provider history
-or the document.
+or the document. In an **Error** row the host error text comes first; the
+run's reasoning row follows it, so provider reasoning is not read as part of
+the error.
+
+In Team, each reply's reasoning travels with that reply's event. It is the
+reasoning the role's provider returned since that role's previous reply in the
+same turn. The UI therefore attaches it to the correct reply even when it reads
+several replies in one poll. A later reply in the same turn that has none shows
+*No new reasoning since the previous message*. A turn that exposed none shows
+the not-exposed note. Team reasoning is limited to the mailbox size, 64 KiB by
+default, and the conversation view to 256 KiB. Both keep the newest text and
+cut it at a UTF-8 character boundary, never inside a multi-byte character.
+
+When the user or an external client replaces the document (new, load,
+iteration restore), Studio clears the reasoning notes and the Single run's
+latest reasoning along with the conversation. Source STEP and sheet STEP
+imports share one reset: they keep the visible messages, but **Latest
+reasoning** no longer shows the cancelled run.
+
+When the agent cards are collapsed, a Team that is blocked, interrupted or idle
+without a completed goal has a **Review blockers** (or **Resume after error**)
+chip next to Pause. A goal reported complete with no unresolved tool errors
+shows no chip there. The cards keep their own control row unchanged.
+
+Local verification of this behaviour:
+
+- `studio-chat-dock-ui` repeats every dock layout check at 96, 144 and 192 dpi,
+  using a self-test DPI override. Expected widths come from the rule above.
+  The test also checks the disabled Expand state and that a dragged width
+  restores exactly after a settings round trip.
+- The same test runs a real offline Team whose role replies twice in one turn.
+  It reads both replies in a single late poll and checks that each reply keeps
+  its own reasoning.
+- It also checks UTF-8-safe truncation and the reset on a new document. It
+  then creates a sheet, exports it to STEP and imports it back. The sheet
+  STEP import must clear the run's reasoning and keep the visible messages.
+  The source STEP import uses the same reset but is not run by a test: no
+  test fixture is accepted by its tube importer.
+- `agent-team-reasoning` covers emission order, the no-new-reasoning flag, a new
+  turn and bounded UTF-8 reasoning.
+- `studio-team-blockers-ui` and its compact variant click Review blockers with
+  the cards collapsed. They also check that the chip disappears for a completed
+  goal.
+- `studio-assistant-chat-ui` checks that the disabled Expand, at its 1100 px
+  layout, is still painted and is disabled only when the dock cannot widen.
+
+The local display ran at 144 dpi. 192 dpi was exercised only through the
+override, not on a physical display. Real providers were not used. The
+blocker tests and `studio-parametric-graph-ui`, listed as failing in the older
+evidence below, pass on the local llvm-mingw build with this change. The
+parametric graph overflow was recorded on MSVC builds, which were not run here
+(see [COMPUTE_ARCHITECTURE.md](COMPUTE_ARCHITECTURE.md)).
 
 Local evidence for this change (milestones **A.02 / D.02**, still **Parcial**):
 `studio-chat-dock-ui` renders rail, normal and expanded docks at 1280×800 and
@@ -92,6 +161,15 @@ Status labels distinguish:
 - **Reply ready**: Single has returned a reply, without asserting that the goal
   or the project is complete. Team completion is labelled **Goal reported
   complete** only when it has been explicitly declared.
+- **Feedback pending** (amber): Single has returned a reply, but required tool
+  feedback is still missing because a reminder round did not lower the run's
+  count of unrated actions. The detail reads *Reply ready* with the pending
+  count, the reply ends with an ARK note giving the same count, and the status
+  line reads *Response finished / feedback pending for N actions*. The work
+  and activity records are retained and the state is not **Interrupted** (see
+  [AGENT_ACTIVITY.md](AGENT_ACTIVITY.md)). In a team, **Stopped / feedback
+  pending** means an idle role still holds unrated actions of this team run;
+  goal completion stays blocked until that role rates them.
 
 The UI self-test covers the status lifecycle, native selection, paragraph and
 goal copying, long replies, history beyond 200 entries, bounded native controls,

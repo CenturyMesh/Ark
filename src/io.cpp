@@ -385,6 +385,12 @@ static Image renderSnapshotImpl(const Mesh& m,int W,int H,const SnapCam& cam,con
         Vec3 faceC=(wa+wb+wc)*(1.0/3.0);
         Vec3 eyeDir=faceC-eye;                       // away from eye
         if(wn.dot(eyeDir)>0) continue;               // backface
+        // Smooth display shading interpolates the producer's vertex normals;
+        // culling stays geometric. A normal averaged across a sharp welded
+        // edge falls back to the facet normal per corner (as in visualize).
+        // Planar triangles keep the exact flat-shaded pixels.
+        bool smooth=material&&material->smoothShading&&m.nrm.size()==m.pos.size();Vec3 cornerNormal[3];
+        if(smooth){const Vec3 facet=wn.normalized();const u32 corners[3]={ia,ib,ic};bool curved=false;for(int k=0;k<3;++k){Vec3 n{m.nrm[corners[k]*3],m.nrm[corners[k]*3+1],m.nrm[corners[k]*3+2]};if(!(n.lensq()>.25)||std::fabs(n.normalized().dot(facet))<.866)n=facet;else{n=n.normalized();if(n.dot(facet)<0)n=-n;curved|=n.dot(facet)<1-1e-10;}cornerNormal[k]=n;}smooth=curved;}
 
         auto toScreen=[&](Vec3 p)->Vec3{
             return { (p.x*0.5+0.5)*W, (1-(p.y*0.5+0.5))*H, p.z };
@@ -411,7 +417,8 @@ static Image renderSnapshotImpl(const Mesh& m,int W,int H,const SnapCam& cam,con
                     if(materials)displayDepth[(size_t)y*W+x]=std::min(displayDepth[(size_t)y*W+x],(f32)z);
                     Vec3 wp=wa*l0+wb*l1+wc*l2;
                     Vec3 nrm=wn.normalized();
-                    if(nrm.dot(eyeDir)>0) nrm=-nrm;
+                    if(smooth){const Vec3 blended=cornerNormal[0]*l0+cornerNormal[1]*l1+cornerNormal[2]*l2;if(blended.lensq()>1e-12)nrm=blended.normalized();}
+                    else if(nrm.dot(eyeDir)>0) nrm=-nrm;
                     Vec3 vd=(eye-wp).normalized();
                     Vec3 c=shadePixelNormal(nrm,vd);
                     Vec3 emissive{};

@@ -95,6 +95,23 @@ qualificação de fabrico. D.01 permanece parcial até completar as repetições
 avaliação humana cega. Uma execução pequena pode revelar falhas e overhead;
 não demonstra redução de custo nem melhoria de design.
 
+Mudança de semântica em 076A: até 075D, uma tentativa Single cujo agente não
+avaliava as próprias ações (`tool_feedback`) depois do lembrete terminava com
+erro e nunca era aceite. Desde 076A essa execução termina com a resposta e uma
+nota de feedback pendente; pode ser aceite se cumprir os restantes critérios.
+Para não alterar silenciosamente as taxas, cada tentativa regista
+`tool_feedback_pending` (Single: `tool_feedback.state` igual a `pending`;
+equipa: alguma função com ações desta equipa por avaliar, com
+`tool_feedback` e `pending_feedback` por função e `team_pending_feedback`).
+O resumo e cada linha de `strategy_totals` acrescentam `feedback_pending_count`
+e `accepted_with_feedback_pending_count`. Para comparar com iterações
+anteriores, use `accepted_count - accepted_with_feedback_pending_count`.
+Numa equipa, as ações por avaliar continuam a bloquear `team_finish_goal`, pelo
+que essa tentativa não fica concluída. Recibos anteriores sem o campo contam
+como não pendentes. O executor deste benchmark não declara `actor`; por isso,
+as tentativas atuais não criam registos de atividade e `tool_feedback.state` é
+`no_actions`, salvo quando um transporte declara o ator nos argumentos.
+
 D.02 usa as APIs existentes de contexto por objeto/deltas. O lead recebe
 instruções para resolver um design coerente, agrupar operações relacionadas e
 delegar apenas missões concretas com IDs, revisão e critérios mensuráveis.

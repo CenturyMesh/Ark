@@ -33,7 +33,7 @@ const Recipe recipes[]={
      R"({"type":"object","required":["expected_revision","name","density_kg_m3"],"properties":{"expected_revision":{"type":"integer","minimum":0},"name":{"type":"string","minLength":1,"maxLength":128},"density_kg_m3":{"type":"number","minimum":0,"maximum":100000}},"additionalProperties":false})",
      R"({"tool":"doc_preview","arguments":{"expected_revision":"$expected_revision","detail":"changes","commands":[{"op":"material.set","name":"$name","density_kg_m3":"$density_kg_m3"}]}})"},
     {"program_configure","Re-run an installed parametric program with new public parameter values through one exact candidate.","programs",
-     R"({"type":"object","required":["expected_revision","namespace","values"],"properties":{"expected_revision":{"type":"integer","minimum":0},"namespace":{"type":"string","minLength":1,"maxLength":32},"values":{"type":"object","minProperties":1,"maxProperties":64,"additionalProperties":{"type":"number"}}},"additionalProperties":false})",
+     R"({"type":"object","required":["expected_revision","namespace","values"],"properties":{"expected_revision":{"type":"integer","minimum":0},"namespace":{"type":"string","minLength":1,"maxLength":32},"values":{"type":"object","minProperties":1,"maxProperties":64,"additionalProperties":{"type":["number","boolean","string"],"maxLength":64}}},"additionalProperties":false})",
      R"({"tool":"parametric_program","arguments":{"action":"prepare","mode":"configure","expected_revision":"$expected_revision","namespace":"$namespace","values":"$values"}})"},
     {"revision_status","Read the live revision and status without expanding the design inventory.","overview",
      R"({"type":"object","properties":{},"additionalProperties":false})",
@@ -54,6 +54,7 @@ bool typeMatches(const V& value,const std::string& type){
     if(type=="integer")return value.t==V::Num&&std::isfinite(value.num)&&std::floor(value.num)==value.num;
     if(type=="number")return value.t==V::Num&&std::isfinite(value.num);
     if(type=="string")return value.t==V::Str;
+    if(type=="boolean")return value.t==V::Bool;
     if(type=="object")return value.t==V::Obj;
     return false;
 }

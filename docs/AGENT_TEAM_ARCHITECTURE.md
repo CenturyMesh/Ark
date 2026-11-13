@@ -7,7 +7,9 @@ assignment or user goal is complete. `team_report_task{state,summary}` records
 the role's explicit report (`completed`, `needs_input`, `in_progress`). The lead
 uses `team_finish_goal{state,summary}` for the entire goal after integration and
 checks. Completing rejects pending jobs/mail, active peers, unreported assignments
-and unresolved tool/worker failures. Summaries are agent declarations; actual
+and unresolved tool/worker failures. Since 076A it also rejects while an idle
+teammate holds unrated actions of this team run, which previously failed that
+teammate's turn; see [AGENT_ACTIVITY.md](AGENT_ACTIVITY.md). Summaries are agent declarations; actual
 tool receipts remain authoritative and no manufacturing certification is implied.
 
 `team_send.kind` distinguishes `assignment`, `message` and `report`. For older

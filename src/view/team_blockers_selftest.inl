@@ -18,11 +18,22 @@ if(teamBlockersUiTest){
         g_teamMode=true;g_teamRoleCount=1;g_teamStarted=true;g_teamEpoch=g_documentEpoch;g_teamGoal="Inspect a synthetic concept and report missing inputs";g_teamEventSequence=0;g_assistantDockOpen=true;g_teamReceipts={};g_teamReceiptIds[0]=newUsageReceiptId();
         g_agentTeam.start(config,g_teamGoal,AgentSession::tools(),[](auto&,auto&){V result=V::makeObj(),detail=V::makeObj();detail.set("error_code",V::makeStr("REVIEW_BLOCKED"));detail.set("error",V::makeStr("A required material source remains unresolved."));result.set("isError",V::makeBool(true));result.set("structuredContent",detail);return result;});check(g_agentTeam.waitIdleFor(std::chrono::seconds(5)),"Blocker fixture did not finish");pollTeam(true);layout();
         check(g_teamSnapshot.goalDeclared&&g_teamSnapshot.goalState==AgentGoalState::NeedsInput&&g_teamSnapshot.unresolvedErrors==1,"Reported input request was mislabeled as interruption");
-        g_swap=false;drawFrame(hdc);glFinish();check(std::any_of(g_zones.begin(),g_zones.end(),[](const Zone& zone){return zone.id==989;}),"Review blockers control missing");check(std::none_of(g_zones.begin(),g_zones.end(),[](const Zone& zone){return zone.id==490;}),"Idle input request incorrectly offers transport resume");
+        // Agent cards start collapsed: the blocked team must still offer the control in the dock.
+        auto review=[&]{g_swap=false;drawFrame(hdc);glFinish();auto found=std::find_if(g_zones.begin(),g_zones.end(),[](const Zone& zone){return zone.id==989;});return found==g_zones.end()?std::optional<Zone>{}:std::optional<Zone>{*found};};
+        check(!g_chatAgentDetails,"Blocker fixture must start with agent cards collapsed");
+        {const auto control=review();check(control.has_value(),"Review blockers control missing");check(std::none_of(g_zones.begin(),g_zones.end(),[](const Zone& zone){return zone.id==490;}),"Idle input request incorrectly offers transport resume");
+         const auto dock=chatDockGeometry();check(control->x>=dock.x&&control->x+control->w<=winW&&control->y>=viewY&&control->y+control->h<=winH-32,"Review blockers control escapes the dock");
+         const std::set<int> dockIds{470,471,57,367,472,44013,44300,44301,44302,730,74,75,58,473,566,44010,44014,44011,44012,490};
+         for(const auto& zone:g_zones)if(dockIds.count(zone.id)&&zone.y+zone.h>viewY&&zone.x<control->x+control->w&&control->x<zone.x+zone.w&&zone.y<control->y+control->h&&control->y<zone.y+zone.h)check(false,"Review blockers control overlaps another dock control");
+         g_chatAgentDetails=true;layout();check(review().has_value(),"Review blockers control missing from the agent cards");g_chatAgentDetails=false;layout();
+         // A goal reported complete without unresolved errors has no blocker chip in the header.
+         {const auto saved=g_teamSnapshot;g_teamSnapshot.goalState=AgentGoalState::Completed;g_teamSnapshot.unresolvedErrors=0;const bool shown=review().has_value();g_teamSnapshot=saved;check(!shown,"Completed team still offers Review blockers in the dock header");}}
         // Provider-response bookkeeping is settled by pollTeam above. Only the
         // following diagnostic actions must leave that settled document intact.
         const auto source=documentToJson(g_doc);
-        uiAction(989);check(g_teamDiagnosticsWindow030&&IsWindowEnabled(g_window)&&!g_dialog,"Blocker inspector blocked the owning Studio queue");
+        {const auto control=review();check(control.has_value(),"Review blockers control missing after cards closed");const int x=(int)(control->x+control->w*.5f),y=(int)(control->y+control->h*.5f);
+         SendMessage(g_window,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(x,y));SendMessage(g_window,WM_LBUTTONUP,0,MAKELPARAM(x,y));}
+        check(g_teamDiagnosticsWindow030&&IsWindowEnabled(g_window)&&!g_dialog,"Blocker inspector blocked the owning Studio queue");
         check(GetWindowTextLengthW(g_teamDiagnosticsWindow030)>0,"Blocker window lost its title");
         auto* state=(TeamDiagnosticsWindow030*)GetWindowLongPtr(g_teamDiagnosticsWindow030,GWLP_USERDATA);check(state&&(GetWindowLongPtr(state->text,GWL_STYLE)&ES_READONLY)&&(GetWindowLongPtr(state->text,GWL_STYLE)&WS_VSCROLL),"Blocker report is not read-only and scrollable");
         const int length=GetWindowTextLengthW(state->text);std::wstring report((size_t)length+1,L'\0');GetWindowTextW(state->text,report.data(),length+1);check(report.find(L"Needs input / explicit lead report")!=std::wstring::npos&&report.find(L"bom_review [REVIEW_BLOCKED]")!=std::wstring::npos,"Inspector lost reported outcome or actual tool reason");

@@ -48,7 +48,13 @@ public static class S
     public static string SpaceRequired => T("Space required", "Espaço necessário");
     public static string SpaceAvailable => T("Available", "Disponível");
     public static string NotEnoughSpace => T("Not enough free space on this drive.", "Não há espaço livre suficiente neste disco.");
+    public static string NotEnoughSpaceOn(string drive, string size) => T($"Not enough free space on {drive} ({size} needed).",
+                                                                          $"Não há espaço livre suficiente em {drive} (são precisos {size}).");
+    public static string NotEnoughTempSpace(string drive, string size) => T($"Not enough free space on {drive} for the temporary files ({size} needed).",
+                                                                            $"Não há espaço livre suficiente em {drive} para os ficheiros temporários (são precisos {size}).");
     public static string InvalidFolder => T("Choose a valid folder.", "Escolha uma pasta válida.");
+    public static string FolderNotEmpty => T("This folder holds other files and is not an ARK install. Choose an empty folder or ARK's own folder.",
+                                             "Esta pasta contém outros ficheiros e não é uma instalação do ARK. Escolha uma pasta vazia ou a pasta do ARK.");
     public static string DataNote => T("Your drawings and settings are kept outside this folder.",
                                        "Os seus desenhos e definições ficam fora desta pasta.");
     public static string Back => T("Back", "Voltar");
@@ -102,6 +108,13 @@ public static class S
     public static string PrepareIncomplete => T("ARK was prepared, but the installed files are incomplete.",
                                                 "O ARK foi preparado, mas os ficheiros instalados estão incompletos.");
     public static string FileLocked(string f) => T($"Could not write {f}.", $"Não foi possível escrever {f}.");
+    public static string Downgrade(string installed, string ours) =>
+        T($"ARK {installed} is already installed in this folder; this setup carries the older {ours}.\nKeep the newer version, or run this setup with --allow-downgrade to go back to {ours}.",
+          $"O ARK {installed} já está instalado nesta pasta; esta instalação traz a versão anterior {ours}.\nMantenha a versão mais recente, ou execute esta instalação com --allow-downgrade para voltar à {ours}.");
+    public static string ActivationPending => T("An ARK update was interrupted while it started. Open ARK once, close it and run Setup again.",
+                                                "Uma atualização do ARK foi interrompida durante o arranque. Abra o ARK uma vez, feche-o e volte a executar a instalação.");
+    public static string UpdateInProgress => T("ARK is starting or updating from this folder. Wait until it finishes and try again.",
+                                               "O ARK está a arrancar ou a atualizar-se a partir desta pasta. Aguarde que termine e tente de novo.");
     public static string LaunchFailed => T("ARK could not be opened.", "Não foi possível abrir o ARK.");
 
     // uninstall

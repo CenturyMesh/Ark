@@ -12,5 +12,6 @@
     <Compile Include="../../installer/ArkSetup/Core/Paths.cs" Link="Paths.cs" />
     <Compile Include="../../installer/ArkSetup/Core/Strings.cs" Link="Strings.cs" />
     <Compile Include="../../installer/ArkSetup/Core/Log.cs" Link="Log.cs" />
+    <Compile Include="../../installer/ArkSetup/Core/Payload.cs" Link="Payload.cs" />
   </ItemGroup>
 </Project>

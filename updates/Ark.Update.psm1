@@ -293,6 +293,25 @@ function Get-ArkState([string]$Root) {
     return $state
 }
 
+function Sync-ArkInstalledAppVersion([string]$Root) {
+    # ARK Setup's Installed apps entry (named in ark-setup.json, for this folder only) shows the version the launcher
+    # selects, also after an in-app activation, a failed activation or a rollback. Best effort: never fails the caller.
+    try {
+        if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { return }
+        $manifest = Join-Path $Root 'ark-setup.json'
+        if (-not (Test-Path -LiteralPath $manifest -PathType Leaf)) { return }
+        $key = [string](Read-ArkJson $manifest 64KB).uninstall_key
+        if ($key -cnotmatch '^MeshSphere\.ARK(\.Test\.[A-Za-z0-9-]{1,48})?$') { return }
+        $entry = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\' + $key
+        if (-not (Test-Path -LiteralPath $entry)) { return }
+        $values = Get-ItemProperty -LiteralPath $entry
+        if ([IO.Path]::GetFullPath([string]$values.InstallLocation).TrimEnd('\', '/') -ine [IO.Path]::GetFullPath($Root).TrimEnd('\', '/')) { return }
+        $state = Get-ArkState $Root
+        $version = if ($state.pending) { $state.pending } else { $state.current }
+        if ([string]$values.DisplayVersion -cne $version) { Set-ItemProperty -LiteralPath $entry -Name DisplayVersion -Value $version }
+    } catch { Write-Verbose ('The Installed apps version was not updated: ' + $_.Exception.Message) }
+}
+
 function Copy-ArkLocalRuntime([string]$RuntimeDirectory, [string]$Root) {
     $runtime = [IO.Path]::GetFullPath($RuntimeDirectory).TrimEnd('\', '/')
     $version = Get-ArkRuntimeVersion $runtime
@@ -444,6 +463,7 @@ function Start-ArkActivation([string]$Root) {
             $state.pending = ''
             Write-ArkAtomicJson (Join-Path $Root 'current.json') $state
             Write-Warning ('The prepared ARK update failed integrity verification; keeping the current version. ' + $_.Exception.Message)
+            Sync-ArkInstalledAppVersion $Root
             return $state
         }
         $state.previous = $state.current
@@ -452,6 +472,7 @@ function Start-ArkActivation([string]$Root) {
         $state.pending = ''
         Write-ArkAtomicJson (Join-Path $Root 'current.json') $state
     }
+    Sync-ArkInstalledAppVersion $Root
     return Get-ArkState $Root
 }
 
@@ -465,6 +486,7 @@ function Complete-ArkActivation([string]$Root, [bool]$Healthy) {
     }
     $state.activating = ''; $state.pending = ''
     Write-ArkAtomicJson (Join-Path $Root 'current.json') $state
+    Sync-ArkInstalledAppVersion $Root
     return $state
 }
 
@@ -476,6 +498,7 @@ function Undo-ArkUpdate([string]$Root) {
         Assert-ArkInstalledRuntime $Root $state.previous | Out-Null
         $old = $state.current; $state.current = $state.previous; $state.previous = $old; $state.pending = ''; $state.activating = ''
         Write-ArkAtomicJson (Join-Path $Root 'current.json') $state
+        Sync-ArkInstalledAppVersion $Root
         return $state.current
     } finally { $lock.Dispose() }
 }

@@ -8,6 +8,16 @@ namespace ArkSetup.Core;
 /// <summary>An ARK install found on this machine.</summary>
 public sealed record ExistingInstall(string Dir, string? Version, bool FromInno);
 
+/// <summary>The launcher state in current.json (see Get-ArkState in updates\Ark.Update.psm1).</summary>
+public sealed record InstalledState(string Current, string? Pending, string? Activating)
+{
+    /// <summary>The version the launcher starts next: "pending" if set, else "current".</summary>
+    public string Selected => Pending ?? Current;
+
+    /// <summary>The newest runtime the state refers to.</summary>
+    public string Newest => Pending != null && Version.Parse(Pending) > Version.Parse(Current) ? Pending : Current;
+}
+
 /// <summary>
 /// The "Installed apps" entry: HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\MeshSphere.ARK (per user,
 /// no administrator rights). It replaces the Inno Setup entry MeshSphere.ARK_is1 for the same folder, so Windows
@@ -30,7 +40,8 @@ public static class UninstallEntry
         key.SetValue("DisplayVersion", version);
         key.SetValue("Publisher", ArkInfo.Publisher);
         key.SetValue("InstallLocation", dir);
-        key.SetValue("DisplayIcon", $"{Path.Combine(dir, "versions", version, ArkInfo.StudioExe)},0");
+        // uninstall.exe carries the ARK icon and, unlike versions\<version>, outlives in-app updates
+        key.SetValue("DisplayIcon", $"{uninstaller},0");
         key.SetValue("UninstallString", $"\"{uninstaller}\" --uninstall{isolation}");
         key.SetValue("QuietUninstallString", $"\"{uninstaller}\" --uninstall --quiet{isolation}");
         key.SetValue("InstallDate", DateTime.Now.ToString("yyyyMMdd"));
@@ -75,7 +86,10 @@ public static class UninstallEntry
     }
 
     /// <summary>The version the launcher will start: current.json "pending" if set, else "current".</summary>
-    public static string? InstalledVersion(string dir)
+    public static string? InstalledVersion(string dir) => ReadState(dir)?.Selected;
+
+    /// <summary>current.json of the install in <paramref name="dir"/>; null when absent or unreadable.</summary>
+    public static InstalledState? ReadState(string dir)
     {
         try
         {
@@ -83,15 +97,32 @@ public static class UninstallEntry
             if (!File.Exists(path) || new FileInfo(path).Length > 4096)
                 return null;
             var node = JsonNode.Parse(File.ReadAllText(path)) as JsonObject;
-            string? pending = node?["pending"]?.GetValue<string>();
-            string? current = node?["current"]?.GetValue<string>();
-            string? v = string.IsNullOrEmpty(pending) ? current : pending;
-            return v != null && Regex.IsMatch(v, @"^[0-9]+\.[0-9]+\.[0-9]+$") ? v : null;
+            string? Field(string name) => node?[name]?.GetValue<string>() is { Length: > 0 } v ? v : null;
+            string? current = Field("current"), pending = Field("pending"), activating = Field("activating");
+            foreach (string? v in new[] { current, pending, activating })
+                if (v != null && !Regex.IsMatch(v, @"^(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})$"))
+                    throw new InvalidDataException($"invalid version \"{v}\"");
+            return current == null ? null : new InstalledState(current, pending, activating);
         }
         catch (Exception e)
         {
             Log.Warn($"could not read current.json in {dir}: {e.Message}");
             return null;
+        }
+    }
+
+    /// <summary>True when the Inno Setup ARK entry is registered for <paramref name="dir"/> and its uninstaller is there.</summary>
+    public static bool InnoOwns(string dir)
+    {
+        try
+        {
+            string? location = Location(ArkInfo.LegacyKeyName);
+            return location != null && Paths.Same(location, dir) && Directory.EnumerateFiles(dir, "unins???.*").Any();
+        }
+        catch (Exception e)
+        {
+            Log.Warn($"could not read the Inno Setup entry: {e.Message}");
+            return false;
         }
     }
 
