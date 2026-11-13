@@ -104,6 +104,34 @@ void projectGraph(){
     check(selected.dump().size()<inventory.dump().size(),"bounded navigation response is smaller for the matched 96-part fixture");
     std::cout<<"GRAPH_RETRIEVAL design_bytes="<<inventory.dump().size()<<" selected_graph_bytes="<<selected.dump().size()<<" parts=96\n";
 }
+V publish(AgentSession& s,V args){args.set("expected_revision",V::makeNum(s.revision));const auto preview=accepted(s.call("parametric_program",args));V a=V::makeObj();a.set("candidate_id",field(preview,"candidate_id"));a.set("expected_revision",V::makeNum(s.revision));return accepted(s.call("doc_apply",a));}
+std::string featureKey(const AgentSession& s,const std::string& name){for(const auto& f:s.document.features)if(f.name==name)return "feature:"+std::to_string(f.id);throw std::runtime_error("missing feature "+name);}
+void programGraph(){
+    AgentSession s;s.suppressFailureCapture();s.suppressIterationHistory();
+    apply(s,R"([{"op":"bom.initialize"},{"op":"param.set","name":"pg","expr":3},{"op":"param.set","name":"only","expr":1},{"op":"material.set","name":"Oak","density":0.7},{"op":"material.set","name":"Pine","density":0.5}])");
+    publish(s,json(R"({"action":"prepare","mode":"install","namespace":"pg","program":{"format":"ark.parametric-program.v1","name":"Graph probe","parameters":{"w":{"default":10,"min":1},"finish":{"choices":["Oak","Pine"],"default":"Oak"}},"body":[
+        {"emit":{"op":"plane.set","name":"top","parent":"XY","p":{"oz":"{w}"}}},{"emit":{"op":"sketch.set","name":"profile","sketch":{"plane":"top","entities":[{"kind":"circle","name":"c","dof":["0","0","{w}"]}]}}},{"emit":{"op":"material.set","name":"skin","density":1.2}},
+        {"emit":{"op":"feature.add","type":"box","name":"Body","material":"skin","p":{"dx":"{w}","dy":4,"dz":2}}},{"emit":{"op":"feature.add","type":"box","name":"Trim {@finish}","material":"{@finish}","p":{"dx":2,"dy":2,"dz":2}}}]}})"));
+    const auto digest=field(s.document.parametricPrograms.arr[0],"program_sha256").str;const auto body=featureKey(s,"pg / Body"),trim=featureKey(s,"pg / Trim Oak");
+    const auto graph=accepted(s.call("context_graph",json(R"({"keys":["program:pg"],"depth":1,"limit":16})")));const auto* program=node(graph,"program:pg");
+    check(program&&field(*program,"kind").str=="program"&&field(*program,"name").str=="Graph probe","an installed program binding is a graph node");
+    const auto& facts=field(*program,"facts");check(field(facts,"namespace").str=="pg"&&field(facts,"program_sha256").str==digest&&field(field(facts,"values"),"w").num==10&&field(field(facts,"values"),"finish").str=="Oak","binding facts carry namespace, source digest and resolved values");
+    check(edge(graph,"program:pg",body.c_str(),"owns")&&edge(graph,"program:pg",trim.c_str(),"owns")&&edge(graph,"program:pg","sketches:pg__profile","owns")&&edge(graph,"program:pg","planes:pg__top","owns")&&edge(graph,"program:pg","materials:pg__skin","owns"),"ownership edges reach owned features, sketches, planes and materials");
+    check(!edge(graph,"program:pg","params:pg","uses_parameter")&&!edge(graph,"program:pg","params:only","uses_parameter")&&!edge(graph,"program:pg","materials:Oak","uses_material"),"namespace, values and authority text are not document references");
+    check(node(accepted(s.call("context_graph",json(R"({"query":"Graph probe","depth":0})"))),"program:pg"),"query discovers the binding by program name");
+    const auto backlinks=accepted(s.call("context_graph",json(("{\"keys\":[\""+body+"\"],\"depth\":1}").c_str())));check(node(backlinks,"program:pg"),"an owned feature leads back to its program");
+    V known=json(R"({"keys":["program:pg"],"depth":0})");known.set("known_scope",field(graph,"scope"));known.set("known_fingerprints",field(graph,"fingerprints"));
+    check(!field(*node(accepted(s.call("context_graph",known)),"program:pg"),"changed").b,"an unchanged binding keeps its fingerprint");
+    publish(s,json(R"({"action":"prepare","mode":"configure","namespace":"pg","values":{"w":12,"finish":"Pine"}})"));const auto configured=accepted(s.call("context_graph",known));const auto* row=node(configured,"program:pg");
+    check(row&&field(*row,"changed").b&&field(field(field(*row,"facts"),"values"),"w").num==12&&field(field(field(*row,"facts"),"values"),"finish").str=="Pine","configured values change the binding fingerprint and facts");
+    check(edge(accepted(s.call("context_graph",json(R"({"keys":["program:pg"],"depth":1,"limit":16})"))),"program:pg",featureKey(s,"pg / Trim Pine").c_str(),"owns"),"ownership follows the regenerated objects");
+    // A detach changes only the binding; the authoring stamp must still invalidate the index.
+    publish(s,json(R"({"action":"prepare","mode":"detach","namespace":"pg"})"));const auto detached=accepted(s.call("context_graph",json(R"({"query":"Body","depth":0})")));
+    check(!field(detached,"index_reused").b&&field(detached,"source_sha256").str==iterationSha256(documentToJson(s.document,false,false))&&!node(detached,"program:pg"),"binding-only change rebuilds the graph");
+    check(field(s.call("context_graph",json(R"({"keys":["program:pg"]})")),"isError").b,"a detached binding is no longer a graph key");
+    s.document.designVariants=json(R"([{"name":"A","namespace":"pg","program_sha256":"0000000000000000000000000000000000000000000000000000000000000000","values":{"w":10}}])");
+    const auto variants=accepted(s.call("context_graph",json(R"({"query":"Body","depth":0})")));check(!field(variants,"index_reused").b&&field(variants,"source_sha256").str==iterationSha256(documentToJson(s.document,false,false)),"saved variants join the authoring stamp");
+}
 void addExchange(V& history,const char* id,const char* name,const V& receipt){V call=json(R"({"type":"function_call","arguments":"{}"})"),output=json(R"({"type":"function_call_output"})");call.set("call_id",V::makeStr(id));call.set("name",V::makeStr(name));output.set("call_id",V::makeStr(id));output.set("output",V::makeStr(receipt.dump()));history.arr.push_back(call);history.arr.push_back(output);}
 void graphRequests(){
     V history=json(R"([{"role":"developer","content":"Read-only reviewer. Preserve exact face references."},{"role":"user","content":"Inspect suspension; keep wheelbase 240 mm."}])");
@@ -131,4 +159,4 @@ void graphRequests(){
     std::cout<<"GRAPH_DEDUP original_history_bytes="<<original.size()<<" projected_history_bytes="<<projected.dump().size()<<" provider_request_bytes="<<request.dump().size()<<" calls=7 paid_model_calls=0\n";
 }
 }
-int main(){try{preciseStamp();parallelStamps();bisectorGraph();projectGraph();graphRequests();std::cout<<checks<<" context graph checks passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(){try{preciseStamp();parallelStamps();bisectorGraph();projectGraph();programGraph();graphRequests();std::cout<<checks<<" context graph checks passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

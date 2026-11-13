@@ -33,6 +33,8 @@
                     <Grid x:Name="BarTrack" Height="4" Margin="0,22,0,0" Visibility="Hidden">
                         <Border CornerRadius="2" Background="{StaticResource Track}" />
                         <Border x:Name="BarFill" CornerRadius="2" Background="{StaticResource Primary}" HorizontalAlignment="Left" Width="0" />
+                        <!-- the same value for screen readers (RangeValue); drawn by the borders above -->
+                        <ProgressBar x:Name="RemoveProgressValue" Minimum="0" Maximum="100" Opacity="0" IsHitTestVisible="False" Focusable="False" />
                     </Grid>
                 </StackPanel>
                 <StackPanel x:Name="Buttons" VerticalAlignment="Bottom" HorizontalAlignment="Right" Orientation="Horizontal">

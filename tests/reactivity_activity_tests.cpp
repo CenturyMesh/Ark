@@ -141,6 +141,52 @@ void clientActivityChecks045a(){
 V response(const V& output){V value=V::makeObj();value.set("status",V::makeStr("completed"));value.set("output",output);return value;}
 V toolResponse(const char* id,const char* name,V args){V item=V::makeObj(),out=V::makeArr();item.set("type",V::makeStr("function_call"));item.set("call_id",V::makeStr(id));item.set("name",V::makeStr(name));item.set("arguments",V::makeStr(args.dump()));out.arr.push_back(item);return response(out);}
 V done(){return json(R"({"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Completed fixture"}]}]})");}
+// 076A: receipts list the newest unrated rows first with the actor's total, and
+// a tool_feedback rejection names every offending activity_id and its reason.
+void feedbackLedgerChecks076a(){
+    AgentSession s;std::vector<std::string> ids;
+    for(int i=0;i<70;++i){V args=V::makeObj();args.set("actor",actor());const auto receipt=call(s,"doc_info",args);ids.push_back(receipt.find("activity_id")->str);
+        if(i==2){const auto& pending=receipt.find("pending_feedback_ids")->arr;check(pending.size()==3&&pending[0].str==ids[2]&&pending[2].str==ids[0]&&receipt.find("pending_feedback_count")&&receipt.find("pending_feedback_count")->num==3,"pending IDs list the newest action first with the total count");}}
+    V other=V::makeObj();other.set("actor",actor("reviewer"));const auto foreign=call(s,"doc_info",other).find("activity_id")->str;
+    V last=V::makeObj();last.set("actor",actor());const auto receipt=call(s,"doc_info",last);ids.push_back(receipt.find("activity_id")->str);
+    const auto& pending=receipt.find("pending_feedback_ids")->arr;check(pending.size()==64&&pending[0].str==ids.back()&&pending[63].str==ids[7]&&receipt.find("pending_feedback_count")->num==71,"a long backlog lists the newest 64 IDs and reports its untruncated total");
+    check(std::none_of(pending.begin(),pending.end(),[&](const V& id){return id.str==foreign;}),"pending IDs stay confined to the actor");
+    auto item=[](const std::string& id,int utility=4){V rating=json(R"({"difficulty":2,"action":"Read the fixture revision"})");rating.set("activity_id",V::makeStr(id));rating.set("utility",V::makeNum(utility));return rating;};
+    auto batch=[&](std::vector<V> items){V args=V::makeObj(),ratings=V::makeArr();for(auto& rating:items)ratings.arr.push_back(rating);args.set("ratings",ratings);args.set("actor",actor());return s.call("tool_feedback",args);};
+    const auto rejected=batch({item(ids[0]),item("missing-activity"),item(foreign),item(ids[1],9),item(ids[0])});const auto& detail=*rejected.find("structuredContent");const auto error=detail.find("error")->str;
+    check(rejected.find("isError")->b&&detail.find("error_code")->str=="ACTIVITY_VALIDATION_FAILED","an invalid feedback batch is rejected explicitly");
+    for(const auto& named:{std::string("missing-activity"),foreign,ids[1],ids[0]})check(error.find(named)!=std::string::npos,"every rejected rating names its activity_id");
+    check(error.find("not found")!=std::string::npos&&error.find("another actor")!=std::string::npos&&error.find("1..5")!=std::string::npos&&error.find("repeated")!=std::string::npos,"every rejected rating states its reason");
+    const auto* items=detail.find("rejected_ratings");check(items&&items->arr.size()==4&&items->arr[0].find("index")->num==1&&items->arr[0].find("activity_id")->str=="missing-activity"&&items->arr[3].find("index")->num==4,"structured rejections list each offending item with its index");
+    check(std::none_of(s.document.agentActivity->entries.begin(),s.document.agentActivity->entries.end(),[](const V& row){return row.find("feedback")!=nullptr;})&&detail.find("recorded")&&!detail.find("recorded")->b,"a rejected batch records nothing, including its valid item");
+    check(!batch({item(ids[0])}).find("isError")->b,"the corrected batch is accepted");
+    const auto again=batch({item(ids[0])});const auto& immutable=*again.find("structuredContent");check(again.find("isError")->b&&immutable.find("error")->str.find(ids[0])!=std::string::npos&&immutable.find("already_rated_ids")&&immutable.find("already_rated_ids")->arr[0].str==ids[0],"an immutable-rating rejection names the activity_id that is already rated");
+}
+// 076A review: the Single assistant uses one actor id for every conversation, so
+// a matching model alone cannot show that a rating describes the same run.
+// Studio declares actor.run; a rating of another run's row is labelled as such.
+// Ledgers without the field load and rate exactly as before.
+void runProvenanceChecks076a(){
+    AgentSession s;V first=actor("assistant"),second=actor("assistant");first.set("run",V::makeStr("run-1"));second.set("run",V::makeStr("run-2"));
+    V args=V::makeObj();args.set("actor",first);const auto earlier=call(s,"doc_info",args).find("activity_id")->str;
+    args.set("actor",second);const auto current=call(s,"doc_info",args).find("activity_id")->str;
+    V legacyActor=actor("assistant");args.set("actor",legacyActor);const auto legacy=call(s,"doc_info",args).find("activity_id")->str;
+    auto row=[&](const std::string& id)->const V&{for(const auto& entry:s.document.agentActivity->entries)if(entry.find("id")->str==id)return entry;throw std::runtime_error("activity row missing");};
+    const auto* recordedRun=row(earlier).find("actor")->find("run");check(recordedRun&&recordedRun->str=="run-1"&&!row(legacy).find("actor")->find("run"),"the recorded actor keeps a declared run and nothing is invented for an undeclared one");
+    auto rate=[&](const V& rater,const std::string& id){V rating=json(R"({"utility":3,"difficulty":2,"action":"Read the fixture revision"})");rating.set("activity_id",V::makeStr(id));V ratings=V::makeArr();ratings.arr.push_back(rating);V request=V::makeObj();request.set("ratings",ratings);request.set("actor",rater);return call(s,"tool_feedback",request);};
+    auto provenance=[&](const std::string& id){return row(id).find("feedback")->find("provenance")->str;};
+    rate(second,current);rate(second,earlier);
+    check(provenance(current)=="agent_self_report","a rating within the same declared run stays a self-report");
+    check(provenance(earlier)=="same_actor_other_run","a rating of another run's row under the same actor id is labelled distinctly");
+    rate(legacyActor,legacy);check(provenance(legacy)=="agent_self_report","actors without a declared run keep the existing provenance");
+    // Writes declaring a run commit normally; the run stays in the activity ledger, never the history journal.
+    V write=json(R"({"commands":[{"op":"param.set","name":"run_probe","expr":"1"}]})");write.set("expected_revision",V::makeNum((double)s.revision));write.set("actor",second);const auto written=call(s,"doc_apply",write);
+    const auto* writtenRun=row(written.find("activity_id")->str).find("actor")->find("run");const auto journal=call(s,"history_info").dump();
+    check(writtenRun&&writtenRun->str=="run-2"&&journal.find("\"assistant\"")!=std::string::npos&&journal.find("run-2")==std::string::npos,"a write declaring actor.run commits; the journal keeps only the declared kind, id, role and model");
+    // A stored ledger without the field loads unchanged and its rows remain ratable.
+    const auto stored=json(R"({"schema":1,"id":"ark-00000000000000000000000000000001","serial":1,"unrecorded_actions":0,"entries":[{"utc":"2026-11-01T00:00:00Z","id":"ark-00000000000000000000000000000001/action/legacy","tool":"doc_info","actor":{"kind":"agent","id":"assistant","model":"offline-fixture"},"is_error":false,"elapsed_ms":1,"feedback_required":true}]})");
+    const auto loaded=readAgentActivity(stored);check(loaded&&agentActivityJson(loaded).dump()==stored.dump(),"a ledger recorded before actor.run loads and serializes unchanged");
+}
 void requiredFeedbackChecks(){
     AgentSession session;AssistantConfig config;config.model="offline-feedback";int rounds=0;std::string activity;
     auto run=runAssistant(config,V::makeStr("Inspect and report"),AgentSession::tools(),[&](const std::string& name,V args){args.set("actor",actor());auto result=session.call(name,args);if(const auto* id=result.find("structuredContent")->find("activity_id"))activity=id->str;return result;},{},nullptr,[&](auto&,const V& request,auto*){
@@ -161,4 +207,4 @@ void pngChecks(){
     std::cout<<"PNG_LOSSLESS raw_rgb_bytes="<<image.px.size()<<" png_bytes="<<png.size()<<"\n";
 }
 }
-int main(){try{cacheChecks();schedulerAccountingChecks();activityChecks();batchActivityChecks038d();rejectedPreviewActivityChecks();clientActivityChecks045a();projectionSuggestionChecks();requiredFeedbackChecks();pngChecks();std::cout<<checks<<" reactivity/activity checks passed\n";return 0;}catch(const std::exception& error){std::cerr<<"Reactivity/activity failed: "<<error.what()<<'\n';return 1;}}
+int main(){try{cacheChecks();schedulerAccountingChecks();activityChecks();batchActivityChecks038d();rejectedPreviewActivityChecks();clientActivityChecks045a();projectionSuggestionChecks();requiredFeedbackChecks();feedbackLedgerChecks076a();runProvenanceChecks076a();pngChecks();std::cout<<checks<<" reactivity/activity checks passed\n";return 0;}catch(const std::exception& error){std::cerr<<"Reactivity/activity failed: "<<error.what()<<'\n';return 1;}}

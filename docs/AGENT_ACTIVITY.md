@@ -26,16 +26,23 @@ of the action, and optional `issue`, `wished_tool` and `wished_options` text.
 Utility 1 means unhelpful and 5 effective; difficulty 1 means easy and 5 very
 difficult. These are subjective self-reports, separate from measured results.
 The host never supplies scores for production agents. A cancelled/interrupted
-agent leaves visible pending records; it does not fabricate feedback.
+agent, or a run that ends with feedback still missing, leaves visible pending
+records; it does not fabricate feedback.
 
 Ratings are immutable, confined to the owning role, and may be submitted in
-batches of 64. A changed model within the same role is identified as a
-same-role review. Audit tools themselves are excluded to avoid recursive
-feedback. No turn or token budget is introduced. The ledger retains up to
-4096 actions, then reports an explicit capture gap and increments
-`unrecorded_actions`; existing document size limits also apply. These are
-storage limits, not agent execution quotas. Scores alone do not qualify
-geometry, manufacturing, tool quality or model performance.
+batches of 64. A batch is atomic: every item is validated and nothing is
+recorded unless all pass. Since 076A a rejection names each offending item by
+index and `activity_id` with its reason (not found, another actor, already
+rated, repeated in the batch, invalid score or text) and returns
+`rejected_ratings`, `already_rated_ids` and the current pending IDs, so the
+agent can correct the batch in one retry. Atomic batches are kept because a
+team report's ratings must record nothing when any item fails (042D). A changed
+model within the same role is identified as a same-role review. Audit tools
+themselves are excluded to avoid recursive feedback. No turn or token budget is
+introduced. The ledger retains up to 4096 actions, then reports an explicit
+capture gap and increments `unrecorded_actions`; existing document size limits
+also apply. These are storage limits, not agent execution quotas. Scores alone
+do not qualify geometry, manufacturing, tool quality or model performance.
 
 Since 042D a team role can put the same rating items in the optional `ratings`
 field of `team_report_task` or `team_finish_goal` instead of calling
@@ -48,6 +55,64 @@ returns `rated_ids`. If a teammate changes the team state while the ratings are
 being recorded, the report can still be rejected afterwards; that rejection
 states that the ratings were recorded. `tool_feedback` remains the route for
 the single assistant, ACP and external MCP clients.
+
+### Run-scoped completion gate (076A)
+
+Receipts carry `pending_feedback_ids`, newest first and at most 64, plus the
+untruncated `pending_feedback_count` for the calling actor. The Single
+assistant uses one actor id (`assistant`) for every conversation and provider,
+so this list can include rows that earlier conversations, other providers or
+interrupted runs left unrated. Those rows are backlog: they stay pending in the
+ledger, can be inspected with `activity_info` and `pending_only`, and may be
+rated only by an agent that can describe the actual action.
+
+The HTTP, ACP and Claude Code connectors gate the end of a run on the activity
+IDs that this run's receipts created. Retained history is not replayed into the
+gate. The reminder lists exactly the still-unrated actions of this run,
+including reads made after an earlier reminder, and states the backlog count.
+Verification reads that team tools perform for a role (`revision_verification`,
+`initial_checkpoint_verification`) count as actions of its run.
+Another reminder follows only when the run's count of unrated actions is lower
+than at the previous reminder. Ratings of rows outside the run never lower it
+and every new action raises it, so a model that rates the listed IDs and makes
+one new read in every round receives a bounded number of reminders; this is a
+progress rule, not a turn or token budget. A reminder round that does not lower
+the count ends the run without an error: the final reply is accepted and
+shown (after the reply that triggered the first reminder, when they differ),
+followed by the note *ARK: tool feedback is still pending for N actions of this
+run*. A non-error status reports the same count during the run, and Studio's
+final Single status reads **Feedback pending** with that count instead of
+**Reply ready**. The rows remain pending and nothing is rated by the host.
+`AssistantResult::feedback` records the run's action, rated and pending counts,
+the pending IDs, the backlog and the number of reminders. A project boundary
+(`doc_new`, `doc_load` or a changed project id) removes the earlier IDs from the
+gate; they are counted in `run_boundary_dropped` (with up to 64
+`run_boundary_dropped_ids`) and the state is `boundary_dropped`, never
+`complete`, so `run_actions` = `run_rated` + `run_pending` +
+`run_boundary_dropped`. An `ARK_FEEDBACK_PENDING_V1` developer record keeps
+that summary in the conversation; later Single runs treat those rows as backlog.
+
+A team role is gated only on actions it performed in its own team run.
+`team_report_task` and `team_finish_goal` with state `completed` still require
+those ratings, as described above; backlog from earlier conversations neither
+blocks nor is listed in `unrated_activity_ids`, which now comes with an
+untruncated `unrated_activity_count`. A team role's turn that ends with its own
+actions unrated is no longer a failed turn. Instead those actions keep blocking:
+the role's status and reply say so, its snapshot carries `feedback` (the turn's
+outcome) and `pendingFeedback`, the lead's handoff notice counts them, and
+`team_finish_goal` with state `completed` is rejected with
+`teammate_unrated_feedback` while any idle teammate holds unrated actions of
+this team run. A completed goal declared earlier is shown as needing input
+while such actions remain. Only the owning role can rate them, through
+`tool_feedback` or its report's ratings. The gate adds no turn or token budget.
+
+Since 076A Studio also declares `actor.run`, a per-run identifier, on the
+Single assistant's and each team run's actions. A rating whose rater declares a
+run is recorded with provenance `same_actor_other_run` when the rated row comes
+from another run or predates the field; ledgers and actors without `run` load
+and rate exactly as before (`agent_self_report` or
+`same_role_review_with_changed_model`). Such ratings never count as progress of
+the current run.
 
 045A extends the ledger to declared clients (`actor.kind:"client"`), which is
 how Studio's live MCP bridge identifies every call (`id:"live_mcp"`). For a

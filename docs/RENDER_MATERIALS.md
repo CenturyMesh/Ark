@@ -59,7 +59,8 @@ and `assembly_info` accept `gravity_m_s2` (default 9.80665) and return `mass_g`,
 This is a viewport improvement, not a ray-traced renderer or a claim of Fusion
 rendering parity. Screen-space occlusion cannot see off-screen geometry, and
 sorted transparency does not model refraction or arbitrary intersecting glass.
-The MCP `snapshot` tool is a flat-lit software preview: since 044B it draws
+The MCP `snapshot` tool is a simply lit software preview (display-mesh vertex
+normals; see [032D](SNAPSHOTS_032D.md)): since 044B it draws
 triplanar textures, pattern colors and surface stamps, but not PBR response or
 bump relief; use Studio captures to review materials. Exact STEP geometry is independent of appearance.
 Material density does not establish structural strength or simulate dynamics.

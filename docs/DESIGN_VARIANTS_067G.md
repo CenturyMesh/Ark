@@ -56,6 +56,16 @@ Save/remove/prepare return a `doc_preview` candidate; the caller explicitly send
  "constraints":{"height_mm":{"max":1900}},"objective":"volume_mm3"}
 ```
 
+Values and axes follow the program's [parameter kinds](PARAMETRIC_PROGRAMS.md#parameter-kinds):
+numbers, `true`/`false` or `0`/`1` for a boolean, and only a listed choice,
+including choice text, for example
+`"axes":{"finish":["Oak","Pine"],"rail":[false,true]}`. An unlisted value is a
+retained failed trial. Results and saved variants store resolved values: `1`/`0`
+for a boolean and the listed text for a text choice. A saved text value requires
+semantic version 60; numeric-only variants keep version 56. Studio's
+**Edit value** and **Explore values** stage numbers only, so text choices are
+compared and saved through the tool.
+
 `ranked_indices` indexes `results` in objective order and includes only feasible
 rows with the requested metric available. `mass_kg` is absent and cannot be ranked
 when density is missing. `valid` means compilation and exact terminal-solid

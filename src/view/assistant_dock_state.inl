@@ -5,7 +5,8 @@
 // user width (drag handle), Expanded = about half the window.
 #include "ui_theme.inl"
 static bool g_chatDockRail=false;          // collapsed to the rail (persisted)
-static int g_chatDockUserWidth=0;          // normal width at 96 dpi; 0 = default (persisted)
+static double g_chatDockUserWidth=0;       // normal width in 96-dpi units, fractional so a dragged width restores exactly; 0 = default (persisted)
+static int g_chatDockDpiOverride=0;        // self-test only: lays the dock out as if at this DPI
 static bool g_chatDockResizing=false;
 static size_t g_chatDockSeenRows=0;        // conversation rows already shown in an open dock
 static bool g_chatReasoningAll=false;      // expand every reasoning section
@@ -21,18 +22,28 @@ static constexpr size_t chatReasoningLimit=256*1024;
 static constexpr const char* chatReasoningHidden="Reasoning not exposed by this provider";
 
 static int chatDockDpi(){
+    if(g_chatDockDpiOverride)return g_chatDockDpiOverride;
     using DpiForWindow=UINT(WINAPI*)(HWND);static const auto query=reinterpret_cast<DpiForWindow>(GetProcAddress(GetModuleHandleW(L"user32.dll"),"GetDpiForWindow"));
     const UINT dpi=query&&g_window?query(g_window):96;return (int)std::clamp<UINT>(dpi?dpi:96,96,288);
 }
 static int chatDockPx(int px){return MulDiv(px,chatDockDpi(),96);}
 static int chatDockRailWidth(){return chatDockPx(44);}
 static int chatDockToolDocks(){return bakedMotionsDockWidth()+explodeDockWidth()+inertialDockWidth056()+rubberDockWidth059();}
-static int chatDockMinWidth(){return chatDockPx(340);}
-// Keep at least 460 px of viewport beside the sidebar and any open tool dock:
-// the viewport display bar needs 440 px and the appearance strip 405 px.
-static int chatDockMaxWidth(){const int sidebar=std::clamp((int)(winW*.21),280,352);return std::max(chatDockMinWidth(),winW-sidebar-chatDockToolDocks()-460);}
-static int chatDockNormalWidth(){return std::clamp(chatDockPx(g_chatDockUserWidth>0?g_chatDockUserWidth:400),chatDockMinWidth(),chatDockMaxWidth());}
+// Preferred widths (rail 44, minimum 340, normal 400 at 96 dpi) scale with the
+// DPI. The hard limits are physical pixels, like the things they protect: the
+// OpenGL sidebar and viewport controls are not DPI-scaled, and neither are the
+// native header buttons. The viewport keeps a 460 px reserve (its display bar
+// needs 440, the appearance strip 405) beside the sidebar and open tool docks.
+static constexpr int chatDockViewportReserve=460,chatDockFloor=340;
+static int chatDockRoom(){const int sidebar=std::clamp((int)(winW*.21),280,352);return winW-sidebar-chatDockToolDocks()-chatDockViewportReserve;}
+// The scaled minimum yields to that reserve, but never below the 340 px floor
+// the dock's own fixed-size header controls need.
+static int chatDockMinWidth(){return std::clamp(chatDockPx(chatDockFloor),chatDockFloor,std::max(chatDockFloor,chatDockRoom()));}
+static int chatDockMaxWidth(){return std::max(chatDockMinWidth(),chatDockRoom());}
+static int chatDockNormalWidth(){return std::clamp(g_chatDockUserWidth>0?(int)std::lround(g_chatDockUserWidth*chatDockDpi()/96.):chatDockPx(400),chatDockMinWidth(),chatDockMaxWidth());}
 static int chatDockExpandedWidth(){return std::clamp((int)(winW*.48),chatDockNormalWidth(),chatDockMaxWidth());}
+// Expand is offered only when it would actually widen the dock.
+static bool chatDockCanExpand(){return chatDockExpandedWidth()>chatDockNormalWidth();}
 static int assistantDockWidth(){if(!g_assistantDockOpen)return 0;if(g_chatDockRail)return chatDockRailWidth();return g_chatExpanded?chatDockExpandedWidth():chatDockNormalWidth();}
 // Full dock height between the ribbon and the status bar (0 when closed).
 static int assistantDockHeight(){return g_assistantDockOpen?std::max(1,winH-viewY-32):0;}
@@ -44,7 +55,7 @@ static int chatDockMode(){return g_chatDockRail?0:g_chatExpanded?2:1;}
 static void showAssistantDock(){g_assistantDockOpen=true;g_chatDockRail=false;}
 static const char* chatDockModeName(){return g_chatDockRail?"rail":g_chatExpanded?"expanded":"normal";}
 // Drag handle on the dock's left edge sets the normal width from the pointer.
-static void resizeChatDock(int pointerX){const int width=std::clamp(winW-pointerX,chatDockMinWidth(),chatDockMaxWidth());g_chatDockUserWidth=std::max(1,MulDiv(width,96,chatDockDpi()));setChatDockMode(1);}
+static void resizeChatDock(int pointerX){const int width=std::clamp(winW-pointerX,chatDockMinWidth(),chatDockMaxWidth());g_chatDockUserWidth=width*96./chatDockDpi();setChatDockMode(1);}
 static int assistantImageComposerHeight();
 struct ChatDockGeometry {
     bool open=false,rail=false;int x=0,y=0,w=0,h=0,pad=12,inner=1;
@@ -67,10 +78,19 @@ static std::string chatAgentName(size_t index){
     if(id=="engineer")return "Engineer";if(id=="reviewer")return "Reviewer";if(id=="parametric")return "Parametric";if(id=="designer")return "Designer 1";
     if(id.rfind("designer",0)==0)return "Designer "+id.substr(8);return id;
 }
+// Keeps the newest chatReasoningLimit bytes, starting on a UTF-8 code-point
+// boundary so a multi-byte character is never split.
+static std::string chatReasoningTail(std::string text){
+    if(text.size()<=chatReasoningLimit)return text;size_t start=text.size()-chatReasoningLimit;
+    while(start<text.size()&&((unsigned char)text[start]&0xC0)==0x80)++start;return "[earlier reasoning truncated] "+text.substr(start);
+}
 static void attachChatReasoning(size_t row,std::string text,std::string empty){
-    if(row>=g_chatLog.size())return;if(text.size()>chatReasoningLimit)text="[earlier reasoning truncated] "+text.substr(text.size()-chatReasoningLimit);
+    if(row>=g_chatLog.size())return;text=chatReasoningTail(std::move(text));
     g_chatReasoningNotes[row]={g_chatLog[row].first,g_chatLog[row].second,std::move(text),std::move(empty)};++g_chatReasoningSerial;
 }
+// A replaced document starts without the previous conversation's reasoning;
+// `rows` also drops the notes of rows the caller has just cleared.
+static void clearChatReasoning(bool rows){if(rows)g_chatReasoningNotes.clear();g_assistantReasoningRun.clear();g_assistantRunStarted=false;++g_chatReasoningSerial;}
 // A note belongs to the exact row it was attached to; cleared or rewritten
 // conversations never inherit a stale note by index.
 static const ChatReasoningNote* chatReasoningNote(size_t row){
@@ -79,16 +99,12 @@ static const ChatReasoningNote* chatReasoningNote(size_t row){
 }
 static void appendAssistantReasoning(const std::string& text){
     if(text.empty())return;if(!g_assistantReasoningRun.empty())g_assistantReasoningRun+="\n\n";g_assistantReasoningRun+=text;
-    if(g_assistantReasoningRun.size()>chatReasoningLimit)g_assistantReasoningRun="[earlier reasoning truncated] "+g_assistantReasoningRun.substr(g_assistantReasoningRun.size()-chatReasoningLimit);
+    g_assistantReasoningRun=chatReasoningTail(std::move(g_assistantReasoningRun));
     ++g_chatReasoningSerial;
 }
-// Attach the role's reasoning returned since its previous message in this turn.
-static void attachTeamReasoning(size_t row,size_t role){
-    if(role>=teamCapacity)return;const AgentTeamRoleSnapshot* view=role<g_teamSnapshot.roles.size()?&g_teamSnapshot.roles[role]:nullptr;
-    const bool current=view&&!view->reasoning.empty()&&view->reasoningTurn==view->turns;auto& shown=g_teamReasoningAttached[role];
-    if(!current){attachChatReasoning(row,{},chatReasoningHidden);return;}
-    if(shown.first!=view->reasoningTurn||shown.second>view->reasoning.size())shown={view->reasoningTurn,0};
-    std::string delta=view->reasoning.substr(shown.second);while(!delta.empty()&&(delta.front()=='\n'||delta.front()==' '))delta.erase(delta.begin());
-    const bool earlier=shown.second>0;shown.second=view->reasoning.size();
-    attachChatReasoning(row,std::move(delta),earlier?"No new reasoning since the previous message":chatReasoningHidden);
+// A role's Text event carries the reasoning its provider returned since that
+// role's previous reply in the turn, captured when the reply was emitted. A
+// poll that reads several replies at once cannot move it to an earlier row.
+static void attachTeamReasoning(size_t row,const AgentTeamEvent& event){
+    attachChatReasoning(row,event.reasoning,event.reasoningEarlier?"No new reasoning since the previous message":chatReasoningHidden);
 }

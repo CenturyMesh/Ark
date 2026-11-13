@@ -78,6 +78,58 @@ jobs:
           if-no-files-found: warn
       # Live Studio UI checks are opt-in; hosted OpenGL 3.3 availability is not assumed.
 
+  windows-installer:
+    # ARK Setup (installer/ArkSetup) with a synthetic payload: no native build, no real registration or shortcuts.
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Build ARK Setup in the public and self-test configurations
+        shell: pwsh
+        run: |
+          dotnet publish installer/ArkSetup/ArkSetup.csproj -c Release -p:ArkSetupSelfTest=false -o out/installer-ci/public --nologo
+          if ($LASTEXITCODE -ne 0) { throw 'The public configuration did not build.' }
+          dotnet publish installer/ArkSetup/ArkSetup.csproj -c Release -p:ArkSetupSelfTest=true -p:ArkTestIsolationId=hosted-ci -o out/installer-ci/self-test --nologo
+          if ($LASTEXITCODE -ne 0) { throw 'The self-test configuration did not build.' }
+      - name: Render the setup pages (self-test build, layout only)
+        shell: pwsh
+        run: |
+          $captures = Join-Path $PWD 'out/installer-ci/pages'
+          $page = Start-Process -FilePath out/installer-ci/self-test/ARK-Setup.exe -ArgumentList @('--screenshot', ('"' + $captures + '"'), '--layout-only') -PassThru
+          $null = $page.Handle
+          if (-not $page.WaitForExit(120000)) { $page.Kill(); throw 'The page renderer timed out.' }
+          $layout = Get-Content -LiteralPath (Join-Path $captures 'layout.txt') -Raw
+          Write-Output $layout
+          if ($page.ExitCode -ne 0) { throw "The page renderer returned $($page.ExitCode)." }
+          foreach ($name in @('welcome','options','installing','done','error','uninstall')) {
+            if ($layout -notmatch "(?m)^${name}: elements=[1-9][0-9]*; outside=0; overlap=0; clipped=0;") { throw "Page $name failed its layout checks." }
+          }
+      - name: Test installer process detection, payload reading and the disk plan
+        shell: pwsh
+        run: |
+          dotnet run --project tests/installer_process_070a -c Release --artifacts-path out/installer-ci/process
+          if ($LASTEXITCODE -ne 0) { throw 'The installer process, payload or disk plan checks failed.' }
+      - name: Test the installer engine with a synthetic payload, including a temporary test signature
+        shell: powershell
+        run: ./tests/installer_engine_tests.ps1 -OutputDirectory out/installer-ci/engine -Signing
+      - name: Collect the setup log
+        if: failure()
+        shell: pwsh
+        run: |
+          $log = Join-Path ([IO.Path]::GetTempPath()) 'ARK-Setup.log'
+          if (Test-Path -LiteralPath $log) { Copy-Item -LiteralPath $log -Destination out/installer-ci/ARK-Setup.log }
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: windows-installer-logs
+          path: |
+            out/installer-ci/ARK-Setup.log
+            out/installer-ci/pages/layout.txt
+          if-no-files-found: ignore
+
   linux-native-occt:
     runs-on: ubuntu-24.04
     timeout-minutes: 90

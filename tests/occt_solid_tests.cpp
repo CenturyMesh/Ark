@@ -3,6 +3,10 @@
 #include "../src/occt/common.hpp"
 #include <BRep_Tool.hxx>
 #include <BRepAdaptor_Curve.hxx>
+#include <BRepAdaptor_Surface.hxx>
+#include <BRepFilletAPI_MakeFillet.hxx>
+#include <BRepPrimAPI_MakeBox.hxx>
+#include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
@@ -287,6 +291,44 @@ void nativeDisplayEdges(){
     check(smooth>0,"fillet test exercises stored native tangent continuity");
 }
 
+void displayAngularDeflection(){
+    // Drawn outlines and shaded faces of small rounds on large bodies. The 043A
+    // size-relative surface tessellation is retained (its 0.25 rad still gives
+    // straight r=6 rounds 6.9-degree facets); outlines, which followed chord
+    // deviation only, additionally honour its angular deflection.
+    const double pi=std::acos(-1.);
+    auto plate=[](double width,double depth){BRepPrimAPI_MakeBox box(width,depth,20.);BRepFilletAPI_MakeFillet fillet(box.Shape());for(const auto& edge:occt::shapes(box.Shape(),TopAbs_EDGE))fillet.Add(6.,TopoDS::Edge(edge));fillet.Build();check(fillet.IsDone(),"all-edge fillet fixture builds");return fillet.Shape();};
+    auto maxTurn=[](const Value& mesh){double worst=0;for(const auto& edge:mesh.find("edges")->arr){const auto& p=edge.arr;for(size_t i=6;i+2<p.size();i+=3){const gp_Vec a(p[i-6].num,p[i-5].num,p[i-4].num),b(p[i-3].num,p[i-2].num,p[i-1].num),c(p[i].num,p[i+1].num,p[i+2].num);const gp_Vec u=b-a,v=c-b;if(u.Magnitude()>1e-12&&v.Magnitude()>1e-12)worst=std::max(worst,u.Angle(v));}}return worst;};
+    // Facet width: the widest angle any triangle spans around a straight r=6 round's axis.
+    auto maxFacet=[&](const TopoDS_Shape& shape){double worst=0;size_t faces=0;for(const auto& item:occt::shapes(shape,TopAbs_FACE)){const auto face=TopoDS::Face(item);BRepAdaptor_Surface surface(face);if(surface.GetType()!=GeomAbs_Cylinder||std::abs(surface.Cylinder().Radius()-6)>1e-9)continue;TopLoc_Location location;const auto mesh=BRep_Tool::Triangulation(face,location);check(!mesh.IsNull(),"fillet face is triangulated");++faces;
+        const gp_Ax3 axis=surface.Cylinder().Position();auto angle=[&](int node){const gp_Vec offset(axis.Location(),mesh->Node(node).Transformed(location.Transformation()));return std::atan2(offset.Dot(gp_Vec(axis.YDirection())),offset.Dot(gp_Vec(axis.XDirection())));};
+        for(int i=1;i<=mesh->NbTriangles();++i){int a,b,c;mesh->Triangle(i).Get(a,b,c);double q[3]={angle(a),angle(b),angle(c)};for(int k=1;k<3;++k)q[k]=q[0]+std::remainder(q[k]-q[0],2*pi);worst=std::max(worst,std::max({q[0],q[1],q[2]})-std::min({q[0],q[1],q[2]}));}}check(faces>=4,"fixture exposes straight r=6 fillet faces");return worst;};
+    struct Case{double width,depth,angle;};
+    for(const auto& item:{Case{200,100,.12},Case{1200,400,.25}}){
+        const auto shape=plate(item.width,item.depth);const auto tessellation=occt::displayTessellation(shape);
+        check(tessellation.angle==item.angle,"size-relative 043A surface angular deflection is unchanged");
+        const auto mesh=occt::displayMeshData(shape);
+        check(maxTurn(mesh)<=tessellation.angle+1e-9,"drawn curved outlines turn no more than the surface angular deflection per chord");
+        check(maxFacet(shape)<=pi/2/12+1e-9,"shaded quarter-round fillets keep at least twelve facets on small and large bodies");
+    }
+    // A 5 m plate reaches the 0.5 mm chord cap: chord deviation alone drew its
+    // r=6 hole outline as an octagon over a 0.25 rad shaded bore.
+    const auto bored=occt::cut(BRepPrimAPI_MakeBox(5000.,400.,20.).Shape(),BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(2500,200,-1),gp_Dir(0,0,1)),6.,22.).Shape());
+    const auto large=occt::displayTessellation(bored);check(large.deflection==.5&&large.angle==.25,"5 m fixture uses the capped 043A tessellation");
+    const auto boredMesh=occt::displayMeshData(bored);const auto boredEdges=occt::shapes(bored,TopAbs_EDGE);size_t rims=0;
+    for(size_t i=0;i<boredEdges.size();++i){BRepAdaptor_Curve curve(TopoDS::Edge(boredEdges[i]));if(curve.GetType()!=GeomAbs_Circle)continue;++rims;const size_t chords=boredMesh.find("edges")->arr.at(i).arr.size()/3-1;
+        check(chords>=(curve.LastParameter()-curve.FirstParameter())/large.angle-1e-9,"large-body circular hole outline is not a coarse polygon");}
+    check(rims>=2&&maxTurn(boredMesh)<=large.angle+1e-9,"large-body hole outlines honour the angular deflection");
+    // A C0 cusp inside one edge cannot satisfy any angular bound; refinement
+    // stops at short chords instead of rejecting the display mesh.
+    NCollection_Array1<gp_Pnt> poles(1,3);poles(1)=gp_Pnt(0,0,0);poles(2)=gp_Pnt(10,0,0);poles(3)=gp_Pnt(10,10,0);
+    NCollection_Array1<double> knots(1,3);knots(1)=0;knots(2)=.5;knots(3)=1;NCollection_Array1<int> mults(1,3);mults(1)=mults(3)=2;mults(2)=1;
+    const auto kinked=BRepBuilderAPI_MakeEdge(occ::handle<Geom_BSplineCurve>(new Geom_BSplineCurve(poles,knots,mults,1))).Edge();
+    const auto kinkMesh=occt::meshData(kinked);const auto& kinkPoints=kinkMesh.find("edges")->arr.at(0).arr;
+    check(kinkPoints.size()>=9&&kinkPoints.size()<=3*64,"C0 edge outline stays bounded and is not rejected");
+    check(std::abs(kinkPoints[kinkPoints.size()-3].num-10)<1e-9&&std::abs(kinkPoints.back().num)<1e-9&&std::abs(kinkPoints[kinkPoints.size()-2].num-10)<1e-9,"C0 edge outline keeps its exact end point");
+}
+
 void disconnectedDiagnostic(){
     auto base=result(parse(R"({"op":"box","width":10,"depth":10,"height":10})"));
     auto move=on("transform",base);move.set("frame",parse("[1,0,0,0,0,1,0,0,0,0,1,0,50,0,0,1]"));auto distant=result(move);
@@ -513,4 +555,4 @@ void planeSplitAndMirrorCopy(){
     mirror.set("fuse",Value::makeNum(1));rejected(mirror);
 }
 }
-int main(){try{offsetEdgeRegularity();volumeAcrossPlanarSplineSpans();extendedTangentShellConservation();primitivesAndNames();nativeDisplayEdges();disconnectedDiagnostic();operations();genuineMergedFaceAliases();rejection();finishingFeatures();repeatedUnionNamespaces();planeSplitAndMirrorCopy();std::cout<<"native solid tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(){try{offsetEdgeRegularity();volumeAcrossPlanarSplineSpans();extendedTangentShellConservation();primitivesAndNames();nativeDisplayEdges();displayAngularDeflection();disconnectedDiagnostic();operations();genuineMergedFaceAliases();rejection();finishingFeatures();repeatedUnionNamespaces();planeSplitAndMirrorCopy();std::cout<<"native solid tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

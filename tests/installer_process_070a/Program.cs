@@ -1,5 +1,8 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.IO.Compression;
+using System.Security.Cryptography;
+using System.Text;
 using ArkSetup.Core;
 
 if (args.Contains("--owned-fixture"))
@@ -67,6 +70,51 @@ try
         Check(!outside.HasExited, "Detection affected a process outside this install");
     }
     finally { StopOwned(outside); }
+    // the payload is read through one handle: renaming the setup and putting another file at its path changes nothing
+    byte[] stub = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "ark-mcp.exe"));
+    PeLayout layout;
+    using (var head = new MemoryStream(stub)) layout = PeLayout.Read(head) ?? throw new Exception("The fixture exe is not a PE file");
+    if (layout.CertSize != 0) throw new Exception("The fixture exe is signed; the synthetic setup needs an unsigned stub");
+    byte[] Package(string text)
+    {
+        using var buffer = new MemoryStream();
+        using (var zip = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))
+        using (var writer = new StreamWriter(zip.CreateEntry("app-version.json").Open()))
+            writer.Write(text);
+        return buffer.ToArray();
+    }
+    void WriteSetup(string path, byte[] package)
+    {
+        var footer = new byte[Payload.FooterSize];
+        Encoding.ASCII.GetBytes(Payload.Magic).CopyTo(footer, 0);
+        BitConverter.TryWriteBytes(footer.AsSpan(8), (long)stub.Length);
+        BitConverter.TryWriteBytes(footer.AsSpan(16), (long)package.Length);
+        BitConverter.TryWriteBytes(footer.AsSpan(24), layout.Checksum);
+        File.WriteAllBytes(path, stub.Concat(package).Concat(footer).ToArray());
+    }
+    string setupFile = Path.Combine(fixture, "payload setup.exe");
+    byte[] original = Package("original");
+    WriteSetup(setupFile, original);
+    var payload = Payload.TryOpen(setupFile) ?? throw new Exception("Synthetic payload footer not found");
+    string digest = Convert.ToHexString(SHA256.HashData(original)).ToLowerInvariant();
+    Check(payload.Offset == stub.Length && payload.Length == original.Length && payload.Sha256(null, CancellationToken.None) == digest, "Synthetic payload located or hashed wrongly");
+    bool writable;
+    try { using var writer = new FileStream(setupFile, FileMode.Open, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete); writable = true; }
+    catch (IOException) { writable = false; }
+    Check(!writable, "Another handle could write to the setup while its payload was open");
+    File.Move(setupFile, setupFile + ".moved");
+    WriteSetup(setupFile, Package("substituted"));
+    Check(payload.Sha256(null, CancellationToken.None) == digest, "The payload digest read a file put at the setup's path");
+    using (var archive = payload.OpenArchive())
+    using (var reader = new StreamReader(archive.GetEntry("app-version.json")!.Open()))
+        Check(reader.ReadToEnd() == "original", "The payload extraction read a file put at the setup's path");
+    string uninstaller = Path.Combine(fixture, "uninstall.exe");
+    payload.WriteStub(uninstaller);
+    Check(File.ReadAllBytes(uninstaller).SequenceEqual(stub), "uninstall.exe was not the stub of the opened setup");
+    // a Reinstall that finds this version damaged copies it again beside the damaged copy: the folder still needs room
+    Directory.CreateDirectory(Path.Combine(install, "versions", ArkInfo.Version));
+    var plan = SpacePlan.For(install, 1000, 10);
+    Check(plan.TargetNeed == 1010 && plan.TempNeed == 1000, $"Disk space plan for an existing version folder needs {plan.TargetNeed}, not 1010");
     Console.WriteLine($"Installer process 070A: {checks} checks passed; {fixture}");
     return 0;
 }

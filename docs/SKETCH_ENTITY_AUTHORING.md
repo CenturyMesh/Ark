@@ -153,7 +153,12 @@ error is not a mathematical global bound or manufacturing qualification.
 `equation2d` uses the same source evaluator to create an explicit native polyline
 with observed chord-deviation evidence at seven stations per interval. This
 source approximation is independent of viewport tessellation. Its inspection
-authority is `authored_adaptive_polyline`.
+authority is `authored_adaptive_polyline`. In a solid, every segment becomes
+its own flat face and edges, so a native extrusion of a dense one exceeds the
+512-name semantic topology registry and rejects atomically. The rejection names
+the exact alternatives (`ellipse`, `conic`, `parabola`, `style_spline`,
+splines, arcs). Fewer samples would only make a coarser faceted prism; the
+limit is not raised.
 
 For supported exact cases, select a typed `analytic` source instead of generic
 `x`/`y`/`z` expression fields:

@@ -5,7 +5,7 @@ static V internOutput069(const V& history,const std::string& id){
 }
 static bool internReferenced069(const V& history,const std::string& id){return internOutput069(history,id).find("structuredContent")->find("ark_receipt_reference")!=nullptr;}
 static void internRoundTrip069(const V& original,const V& wire){
-    const std::set<std::string> metadata={"activity_id","activity_updated","feedback_required","pending_feedback_ids","ark_repeat_notice"};std::map<std::string,V> complete;
+    const std::set<std::string> metadata={"activity_id","activity_updated","feedback_required","pending_feedback_ids","pending_feedback_count","ark_repeat_notice"};std::map<std::string,V> complete;
     for(const auto& item:wire.arr)if(ark::assistant_context::text(item,"type")=="function_call_output"){
         const auto id=ark::assistant_context::text(item,"call_id");V receipt;check(arkjson::parse(ark::assistant_context::text(item,"output"),receipt),"every compressed receipt parses");const auto* data=receipt.find("structuredContent");
         if(!data)continue;const auto* reference=data->find("ark_receipt_reference");
@@ -21,7 +21,7 @@ static void exactReceiptInterningChecks069(){
     const V args=json(R"({"ids":[7],"detail":"design"})");V receipt=json(R"({"isError":false,"structuredContent":{"revision":9,"activity_project_id":"synthetic-project","activity_updated":true,"feedback_required":true,"units":"mm","objects":[{"id":7,"fingerprint":"measured-native-source","valid":true}]}})");
     member(member(receipt,"structuredContent"),"objects").arr[0].set("source",V::makeStr(std::string(12000,'x')));
     V history=json(R"([{"role":"developer","content":"Preserve exact references and atomic revision checks."},{"role":"user","content":"Keep the wheelbase 240 mm; do not replace the design."}])");
-    for(int i=0;i<24;++i){V observed=receipt;member(observed,"structuredContent").set("activity_id",V::makeStr("activity-"+std::to_string(i)));member(observed,"structuredContent").set("pending_feedback_ids",json(("[\"activity-"+std::to_string(i)+"\"]").c_str()));if(i)member(observed,"structuredContent").set("ark_repeat_notice",V::makeStr("The independent read returned unchanged evidence."));contextExchange(history,("exact_"+std::to_string(i)).c_str(),"object_context",args,observed);}
+    for(int i=0;i<24;++i){V observed=receipt;member(observed,"structuredContent").set("activity_id",V::makeStr("activity-"+std::to_string(i)));member(observed,"structuredContent").set("pending_feedback_ids",json(("[\"activity-"+std::to_string(i)+"\"]").c_str()));member(observed,"structuredContent").set("pending_feedback_count",V::makeNum(i+1));if(i)member(observed,"structuredContent").set("ark_repeat_notice",V::makeStr("The independent read returned unchanged evidence."));contextExchange(history,("exact_"+std::to_string(i)).c_str(),"object_context",args,observed);}
     const auto original=history.dump();const auto wire=ark::assistant_context::internReadReceipts(history);const auto bytes=wire.dump().size();
     check(!internReferenced069(wire,"exact_0")&&internReferenced069(wire,"exact_1")&&internReferenced069(wire,"exact_23"),"first exact receipt stays full and repeated receipts share it");
     check(history.dump()==original&&wire.arr.size()==history.arr.size(),"interning preserves original history and every call/output pair");

@@ -95,6 +95,22 @@ public static class Paths
         return u == 0 ? $"{bytes} B" : $"{v:0.#} {units[u]}";
     }
 
+    /// <summary>Free bytes on the drive holding <paramref name="path"/>; -1 when unknown.</summary>
+    public static long FreeSpace(string path, out string drive)
+    {
+        drive = "";
+        try
+        {
+            var info = new DriveInfo(Path.GetPathRoot(Normalize(path))!);
+            drive = info.Name.TrimEnd('\\');
+            return info.IsReady ? info.AvailableFreeSpace : -1;
+        }
+        catch (Exception e) when (e is IOException or ArgumentException or UnauthorizedAccessException)
+        {
+            return -1;
+        }
+    }
+
     /// <summary>Total size of the files below <paramref name="dir"/> (links are not followed).</summary>
     public static long SizeOf(string dir)
     {
@@ -118,4 +134,39 @@ public static class Paths
         }
         return total;
     }
+}
+
+/// <summary>
+/// The disk space an install needs: the package expands into %TEMP% first, then its runtime is copied into the folder
+/// and Setup adds uninstall.exe. The runtime is counted even when that version is already there: a Reinstall that finds
+/// it damaged keeps the damaged copy aside until the new copy is verified. When %TEMP% is on the same drive as the
+/// folder, that drive must hold both at once.
+/// </summary>
+public sealed record SpacePlan(string TargetDrive, long TargetNeed, long TargetFree, string TempDrive, long TempNeed, long TempFree)
+{
+    public const long Margin = 64L * 1024 * 1024;
+
+    public bool SameDrive => TargetDrive.Equals(TempDrive, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>What the folder's drive must hold, including the temporary files when they share it.</summary>
+    public long TargetTotal => SameDrive ? TargetNeed + TempNeed : TargetNeed;
+
+    public bool TargetShort => TargetFree >= 0 && TargetFree < TargetTotal + Margin;
+    public bool TempShort => !SameDrive && TempFree >= 0 && TempFree < TempNeed + Margin;
+
+    public static SpacePlan For(string dir, long expanded, long uninstaller)
+    {
+        long targetFree = Paths.FreeSpace(dir, out string target);
+        long tempFree = Paths.FreeSpace(Path.GetTempPath(), out string temp);
+        return new SpacePlan(target, expanded + uninstaller, targetFree, temp, expanded, tempFree);
+    }
+
+    /// <summary>The message for the first shortage, or null.</summary>
+    public string? Problem() =>
+        TempShort ? S.NotEnoughTempSpace(TempDrive, Paths.FormatSize(TempNeed + Margin))
+        : TargetShort ? S.NotEnoughSpaceOn(TargetDrive, Paths.FormatSize(TargetTotal + Margin))
+        : null;
+
+    public override string ToString() =>
+        $"space: {TargetDrive} needs {Paths.FormatSize(TargetTotal)} of {Paths.FormatSize(TargetFree)} free; temporary files on {TempDrive} need {Paths.FormatSize(TempNeed)}";
 }

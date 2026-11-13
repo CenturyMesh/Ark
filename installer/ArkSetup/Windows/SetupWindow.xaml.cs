@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
@@ -15,6 +16,7 @@ namespace ArkSetup.Windows;
 public partial class SetupWindow : ChromeWindow
 {
     readonly Payload? _payload;
+    readonly SetupArgs? _args;
     readonly CancellationTokenSource _cancel = new();
     readonly SmoothProgress _bar = new() { MinSeconds = 4.0 };
     InstallProgress? _latest;
@@ -23,14 +25,25 @@ public partial class SetupWindow : ChromeWindow
     string _installedDir = "";
 
     /// <param name="payload">The package inside this exe; null only when previewing pages.</param>
-    public SetupWindow(Payload? payload)
+    /// <param name="args">The command line: --dir, --no-desktop, --no-startmenu and --allow-downgrade preset the options.</param>
+    public SetupWindow(Payload? payload, SetupArgs? args = null)
     {
         _payload = payload;
+        _args = args;
         InitializeComponent();
         _page = WelcomePage;
         FillText();
         PickDefaultFolder();
         _bar.Changed += OnProgress;
+        // Esc cancels, like the close button (refused while ARK installs)
+        PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key == System.Windows.Input.Key.Escape && CanClose)
+            {
+                e.Handled = true;
+                Close();
+            }
+        };
         // the end of the path ("…\ARK\app") is the part that matters: keep it in view
         DirBox.IsVisibleChanged += (_, e) =>
         {
@@ -64,6 +77,11 @@ public partial class SetupWindow : ChromeWindow
         SetupLabel.Text = S.SetupLabel;
         MinButton.ToolTip = S.Minimize;
         CloseButton.ToolTip = S.Close;
+        // names for screen readers: the window buttons show only an icon, the folder box has its label above it
+        AutomationProperties.SetName(MinButton, S.Minimize);
+        AutomationProperties.SetName(CloseButton, S.Close);
+        AutomationProperties.SetName(DirBox, S.Folder);
+        AutomationProperties.SetName(InstallProgressValue, S.Installing);
 
         PublisherKicker.Text = Spaced(ArkInfo.Publisher);
         WelcomeLogo.Source = Images.Wordmark();
@@ -85,6 +103,10 @@ public partial class SetupWindow : ChromeWindow
         DataNote.Text = S.DataNote;
         BackText.Text = S.Back;
         OptionsInstallText.Text = S.Install;
+        if (_args?.NoDesktop == true)
+            DesktopCheck.IsChecked = false;
+        if (_args?.NoStartMenu == true)
+            StartMenuCheck.IsChecked = false;
         if (ArkInfo.Isolated)
         {
             DesktopCheck.IsChecked = StartMenuCheck.IsChecked = false;
@@ -107,12 +129,17 @@ public partial class SetupWindow : ChromeWindow
         ErrorCloseText.Text = S.Close;
     }
 
-    /// <summary>Default folder: the existing install (ours or Inno's) if there is one, else %LOCALAPPDATA%\ARK\app.</summary>
+    /// <summary>Default folder: --dir, else the existing install (ours or Inno's) if there is one, else %LOCALAPPDATA%\ARK\app.</summary>
     void PickDefaultFolder()
     {
         var existing = UninstallEntry.Find();
         string dir = existing?.Dir ?? ArkInfo.DefaultInstallDir;
         string? installed = existing?.Version;
+        if (_args?.Dir is string chosen)
+        {
+            dir = Paths.Normalize(chosen);
+            installed = UninstallEntry.InstalledVersion(dir);
+        }
         DirBox.Text = dir;
 
         string action = S.Install;
@@ -187,13 +214,21 @@ public partial class SetupWindow : ChromeWindow
         try
         {
             dir = Paths.Normalize(text);
-            if (text.Length == 0 || Paths.Problem(dir) != null)
+            if (text.Length == 0 || !Path.IsPathFullyQualified(text.Trim('"')) || Paths.Problem(dir) != null)
                 problem = S.InvalidFolder;
             else
             {
-                var drive = new DriveInfo(Path.GetPathRoot(dir)!);
-                free = drive.IsReady ? drive.AvailableFreeSpace : -1;
-                SpaceAvailableLabel.Text = $"{S.SpaceAvailable} ({drive.Name.TrimEnd('\\')})";
+                // a typed folder is used as is: refuse one that holds other things (uninstall would empty it)
+                problem = InstallEngine.TargetProblem(dir);
+                // the package expands into %TEMP% first: on the same drive both need room at once
+                var plan = SpacePlan.For(dir, Math.Max(0, _required), _payload?.Offset ?? 0);
+                free = plan.TargetFree;
+                SpaceAvailableLabel.Text = $"{S.SpaceAvailable} ({plan.TargetDrive})";
+                if (_required > 0)
+                {
+                    SpaceRequiredValue.Text = Paths.FormatSize(plan.TargetTotal);
+                    problem ??= plan.Problem();
+                }
             }
         }
         catch (Exception)
@@ -201,8 +236,6 @@ public partial class SetupWindow : ChromeWindow
             problem = S.InvalidFolder;
         }
         SpaceAvailableValue.Text = free >= 0 ? Paths.FormatSize(free) : "—";
-        if (problem == null && free >= 0 && _required > 0 && free < _required + 64L * 1024 * 1024)
-            problem = S.NotEnoughSpace;
         DirError.Text = problem ?? "";
         DirError.Visibility = problem == null ? Visibility.Collapsed : Visibility.Visible;
         OptionsInstallButton.IsEnabled = problem == null;
@@ -224,6 +257,7 @@ public partial class SetupWindow : ChromeWindow
             Dir = dir,
             DesktopShortcut = DesktopCheck.IsChecked == true,
             StartMenuShortcut = StartMenuCheck.IsChecked == true,
+            AllowDowngrade = _args?.AllowDowngrade == true,
         };
         Go(InstallingPage);
         CanClose = false;
@@ -266,6 +300,7 @@ public partial class SetupWindow : ChromeWindow
     {
         PercentText.Text = $"{(int)Math.Floor(fraction * 100)}%";
         BarFill.Width = BarTrack.ActualWidth * Math.Clamp(fraction, 0, 1);
+        InstallProgressValue.Value = Math.Floor(Math.Clamp(fraction, 0, 1) * 100);
         var p = _latest;
         if (p == null)
             return;
@@ -288,6 +323,8 @@ public partial class SetupWindow : ChromeWindow
             _ => S.NoShortcuts,
         };
         Go(DonePage);
+        if (!Anim.Allowed)
+            return;
         // the badge settles in after the page
         var scale = new ScaleTransform(0.7, 0.7);
         DoneBadge.RenderTransform = scale;

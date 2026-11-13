@@ -1,4 +1,18 @@
-# Current source semantics — conditional format 59
+# Current source semantics — conditional format 60
+
+Source60 is selected only when an embedded parametric program binding declares
+a boolean (`"boolean":true`) or `choices` parameter, or a saved design variant
+stores a text value. Bindings store a boolean as `1`/`0` and a choice as the
+listed number or text; text choices are inserted into emitted templates with
+`{@name}`. Numeric-only bindings keep source55 and numeric-only variants
+source56. A document relabelled below 60 rejects on load, and earlier runtimes
+reject source60 as a future format rather than ignoring the new fields. History
+snapshots are read with the same rules. See
+[parametric programs](PARAMETRIC_PROGRAMS.md#parameter-kinds). The `.arkprog`
+program file (`ark.parametric-program-file.v1`) is a separate exchange file and
+does not change the `.ark` format. Physical container v1/v2/v3 remains independent.
+
+## Geometry source semantics — conditional format 59
 
 074B selects source59 for explicit region arrangements, multibody retention,
 all-argument Boolean operations, native thin offsets/joins, contour radius laws,

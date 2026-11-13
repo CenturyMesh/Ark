@@ -20,6 +20,8 @@ static Activity activity(){
         if(s.goalDeclared&&s.goalState==AgentGoalState::NeedsInput)return {"Waiting for your input",s.goalSummary,amber};
         if(s.goalDeclared&&s.goalState==AgentGoalState::Completed)return {"Goal reported complete",s.goalSummary,doneInk};
         if(s.goalState==AgentGoalState::Interrupted||std::any_of(s.roles.begin(),s.roles.end(),[](const auto& r){return r.state==AgentTeamState::Failed||r.state==AgentTeamState::Interrupted;}))return {"Interrupted","Review the conversation and blockers before resuming.",red};
+        // 076A: unrated actions of this team run block the goal until their own role rates them.
+        if(s.pendingFeedback)return {"Stopped / feedback pending",std::to_string(s.pendingFeedback)+(s.pendingFeedback==1?" team action still needs tool feedback from the role that made it":" team actions still need tool feedback from the roles that made them")+"; goal completion stays blocked until rated.",amber};
         return {"Stopped / awaiting continuation","The team is idle. Goal completion has not been reported.",amber};
     }
     if(!g_teamMode){
@@ -39,6 +41,8 @@ static Activity activity(){
                 if(i->second.rfind("needs_input:",0)==0)return {"Waiting for your input",i->second.substr(12),amber};
                 break;
             }
+            // 076A: a reply is accepted with unrated actions; the final status keeps that visible.
+            if(g_assistantFeedbackPending)return {"Feedback pending","Reply ready. "+assistantFeedbackPendingText(g_assistantFeedbackPending)+"; CAD work and activity records are retained.",amber};
             return {"Reply ready","The agent has stopped. Read its result and qualifications below.",doneInk};
         }
     }
@@ -58,7 +62,7 @@ static std::wstring transcript(){std::wstring out=L"GOAL\r\n"+crlf(wide(goal()))
 static constexpr COLORREF background=th::rgb(th::chrome),agentBg=th::rgb(th::raised),userBg=th::rgb(th::mix(th::raised,th::accent,.10f)),thoughtBg=th::rgb(th::mix(th::raised,th::field,.55f)),
     ink=th::rgb(th::text),muted=th::rgb(th::text2),faint=th::rgb(th::faint),accent=th::rgb(th::accent),lineInk=th::rgb(th::over(th::chrome,th::line)),
     buttonBg=th::rgb(th::raised),buttonEdge=th::rgb(th::over(th::raised,th::border)),agentEdge=th::rgb(th::over(th::raised,th::line)),userEdge=th::rgb(th::mix(th::raised,th::accent,.32f));
-struct Bubble {HWND edit=nullptr,thought=nullptr;RECT box{};std::wstring role,text,reasoning,reasoningEmpty;bool user=false,hasNote=false,open=false;int measuredWidth=0,bodyHeight=0,thoughtWidth=0,thoughtHeight=0;};
+struct Bubble {HWND edit=nullptr,thought=nullptr;RECT box{};std::wstring role,text,reasoning,reasoningEmpty;bool user=false,hasNote=false,open=false,noteAfter=false;int measuredWidth=0,bodyHeight=0,thoughtWidth=0,thoughtHeight=0;};
 static HWND window=nullptr,viewport=nullptr,goalEdit=nullptr,copyButton=nullptr,latestButton=nullptr,detailsButton=nullptr,expandButton=nullptr,reasoningButton=nullptr,moreButton=nullptr,thoughtPanel=nullptr;
 static std::array<HWND,8> chips{};
 static HFONT font=nullptr,titleFont=nullptr,labelFont=nullptr,thoughtFont=nullptr;static HMODULE richEdit=nullptr;
@@ -91,7 +95,9 @@ static int textHeight(HWND control,int lineLimit=0){
 }
 // Reasoning disclosure row and expanded reasoning well inside an agent bubble.
 static int noteExtra(const Bubble& b){return b.hasNote?24+(b.open&&!b.reasoning.empty()?b.thoughtHeight+10:0):0;}
-static RECT toggleRect(const Bubble& b){return {b.box.left+10,b.box.top+30,b.box.right-10,b.box.top+54};}
+// An Error row shows the host error text first; the run's provider reasoning follows it.
+static int noteShift(const Bubble& b){return b.noteAfter?b.bodyHeight+3:0;}
+static RECT toggleRect(const Bubble& b){const int top=b.box.top+30+noteShift(b);return {b.box.left+10,top,b.box.right-10,top+24};}
 static void place(){
     RECT r{};GetClientRect(viewport,&r);scroll=std::clamp(scroll,0,std::max(0,total-(int)r.bottom));
     SCROLLINFO info{sizeof info,SIF_RANGE|SIF_PAGE|SIF_POS,0,std::max(0,total-1),(UINT)std::max(1L,r.bottom),scroll};SetScrollInfo(viewport,SB_VERT,&info,TRUE);
@@ -100,12 +106,12 @@ static void place(){
         const bool thoughtOpen=b.hasNote&&b.open&&!b.reasoning.empty();
         if(visible&&thoughtOpen&&!b.thought)b.thought=edit(viewport,b.reasoning,thoughtBg,muted,thoughtFont);
         if(b.thought&&(!thoughtOpen||(!visible&&GetFocus()!=b.thought))){DestroyWindow(b.thought);b.thought=nullptr;}
-        if(b.thought){SetWindowPos(b.thought,nullptr,b.box.left+20,y+59,b.box.right-b.box.left-40,std::max(1,b.thoughtHeight-8),SWP_NOZORDER|SWP_NOACTIVATE|SWP_NOCOPYBITS|SWP_NOREDRAW|SWP_SHOWWINDOW);POINT origin{};SendMessage(b.thought,EM_SETSCROLLPOS,0,(LPARAM)&origin);}
+        if(b.thought){SetWindowPos(b.thought,nullptr,b.box.left+20,y+59+noteShift(b),b.box.right-b.box.left-40,std::max(1,b.thoughtHeight-8),SWP_NOZORDER|SWP_NOACTIVATE|SWP_NOCOPYBITS|SWP_NOREDRAW|SWP_SHOWWINDOW);POINT origin{};SendMessage(b.thought,EM_SETSCROLLPOS,0,(LPARAM)&origin);}
         if(b.edit){if(!visible&&GetFocus()!=b.edit){DestroyWindow(b.edit);b.edit=nullptr;continue;}
         // Saved window pixels belong to the previous scroll position. Moving
         // RichEdit with MoveWindow(..., FALSE) reused those pixels without
         // invalidating the child: parent-only paints left duplicated text.
-        SetWindowPos(b.edit,nullptr,b.box.left+14,y+33+extra,b.box.right-b.box.left-28,b.box.bottom-b.box.top-45-extra,
+        SetWindowPos(b.edit,nullptr,b.box.left+14,y+33+(b.noteAfter?0:extra),b.box.right-b.box.left-28,b.box.bottom-b.box.top-45-extra,
             SWP_NOZORDER|SWP_NOACTIVATE|SWP_NOCOPYBITS|SWP_NOREDRAW|(visible?SWP_SHOWWINDOW:SWP_HIDEWINDOW));
         // Message controls contain their entire measured text. Only the outer
         // conversation scrolls; selection/measurement must not add an inner offset.
@@ -147,7 +153,7 @@ static void paintViewport(HDC dc){RECT r{};GetClientRect(viewport,&r);fill(dc,r,
         RECT row=toggleRect(b);OffsetRect(&row,0,-scroll);row.left+=4;
         if(b.reasoning.empty())label(dc,b.reasoningEmpty.empty()?wide(chatReasoningHidden):b.reasoningEmpty,row,labelFont,faint);
         else{label(dc,b.open?L"\u25BC  Reasoning":L"\u25BA  Reasoning  \u00B7  as returned by the provider",row,labelFont,accent);
-            if(b.open){RECT well{box.left+14,box.top+55,box.right-14,box.top+55+b.thoughtHeight};roundBox(dc,well,thoughtBg,thoughtBg,10);}}
+            if(b.open){const int top=box.top+55+noteShift(b);RECT well{box.left+14,top,box.right-14,top+b.thoughtHeight};roundBox(dc,well,thoughtBg,thoughtBg,10);}}
     }
 }
 static int bubbleAt(POINT p){const int y=p.y+scroll;for(size_t i=0;i<bubbles.size();++i){const auto& b=bubbles[i];if(!b.hasNote||b.reasoning.empty())continue;RECT row=toggleRect(b);if(p.x>=row.left&&p.x<row.right&&y>=row.top&&y<row.bottom)return (int)i;}return -1;}
@@ -195,7 +201,7 @@ static void layoutHeader();
 static LRESULT CALLBACK panelProc(HWND w,UINT m,WPARAM wp,LPARAM lp){
     if(m==WM_ERASEBKGND)return 1;
     if(m==WM_PAINT||m==WM_PRINTCLIENT){PAINTSTRUCT ps{};HDC dc=m==WM_PAINT?BeginPaint(w,&ps):(HDC)wp;paintHeader(dc);if(m==WM_PAINT)EndPaint(w,&ps);return 0;}
-    if(m==WM_COMMAND){const int id=LOWORD(wp);switch(id){case 1:if(clipboard(w,transcript()))SetWindowTextW(copyButton,L"Copied");else SetWindowTextW(copyButton,L"Retry copy");return 0;case 2:scroll=total;place();return 0;case 3:if(!g_teamMode){std::string info=activity().title+"\n"+activity().detail+"\n\n"+assistantUsageLabel(g_assistantUsageRun)+"\n"+measuredPerformanceLabel(g_assistantPerformanceRun);editText("Agent run",info,true);return 0;}g_chatAgentDetails=!g_chatAgentDetails;layout();return 0;case 4:setChatDockMode(g_chatExpanded?1:2);layout();return 0;
+    if(m==WM_COMMAND){const int id=LOWORD(wp);switch(id){case 1:if(clipboard(w,transcript()))SetWindowTextW(copyButton,L"Copied");else SetWindowTextW(copyButton,L"Retry copy");return 0;case 2:scroll=total;place();return 0;case 3:if(!g_teamMode){std::string info=activity().title+"\n"+activity().detail+"\n\n"+assistantUsageLabel(g_assistantUsageRun)+"\n"+measuredPerformanceLabel(g_assistantPerformanceRun);editText("Agent run",info,true);return 0;}g_chatAgentDetails=!g_chatAgentDetails;layout();return 0;case 4:if(g_chatExpanded||chatDockCanExpand()){setChatDockMode(g_chatExpanded?1:2);layout();}return 0;
         case 5:g_chatReasoningAll=!g_chatReasoningAll;for(auto& b:bubbles)b.open=g_chatReasoningAll;relayoutBubbles();InvalidateRect(reasoningButton,nullptr,FALSE);return 0;}
         if(id>=10&&id<18){g_chatReasoningAgent=g_chatReasoningAgent==id-10?-1:id-10;layout();return 0;}
         if(id==18){HMENU menu=CreatePopupMenu();for(int i=0;i<agentCount();++i)AppendMenuW(menu,MF_STRING|(g_chatReasoningAgent==i?MF_CHECKED:0),(UINT_PTR)(i+1),(wide(chatAgentName((size_t)i))+L"  \u00B7  "+wide(g_teamMode?g_teamRoleIds[teamRoleSlot((size_t)i)]:"ark")).c_str());AppendMenuW(menu,MF_SEPARATOR,0,nullptr);AppendMenuW(menu,MF_STRING,100,L"Hide latest reasoning");
@@ -205,7 +211,7 @@ static LRESULT CALLBACK panelProc(HWND w,UINT m,WPARAM wp,LPARAM lp){
         fill(item->hDC,item->rcItem,background);roundBox(item->hDC,item->rcItem,active?th::rgb(th::over(th::raised,th::active)):buttonBg,active?accent:buttonEdge,10);
         wchar_t text[80]{};GetWindowTextW(item->hwndItem,text,80);RECT r=item->rcItem;
         if(id>=10&&id<18){HBRUSH dot=CreateSolidBrush(agentState(id-10));HPEN pen=CreatePen(PS_SOLID,1,agentState(id-10));auto ob=SelectObject(item->hDC,dot),op=SelectObject(item->hDC,pen);const int cy=(r.top+r.bottom)/2;Ellipse(item->hDC,r.left+8,cy-3,r.left+15,cy+4);SelectObject(item->hDC,op);SelectObject(item->hDC,ob);DeleteObject(pen);DeleteObject(dot);r.left+=12;}
-        label(item->hDC,text,r,labelFont,active?accent:ink,DT_CENTER|DT_VCENTER|DT_SINGLELINE);if(item->itemState&ODS_FOCUS)DrawFocusRect(item->hDC,&item->rcItem);return TRUE;}}
+        label(item->hDC,text,r,labelFont,(item->itemState&ODS_DISABLED)?faint:active?accent:ink,DT_CENTER|DT_VCENTER|DT_SINGLELINE);if(item->itemState&ODS_FOCUS)DrawFocusRect(item->hDC,&item->rcItem);return TRUE;}}
     if(m==WM_NCDESTROY){window=viewport=goalEdit=copyButton=latestButton=detailsButton=expandButton=reasoningButton=moreButton=thoughtPanel=nullptr;chips={};for(auto f:{font,titleFont,labelFont,thoughtFont})if(f)DeleteObject(f);font=titleFont=labelFont=thoughtFont=nullptr;bubbles.clear();cached.clear();width=height=scroll=total=0;lastGoal.clear();lastActivity.clear();panelCaption.clear();panelText.clear();seenSerial=0;seenAgent=-2;return DefWindowProcW(w,m,wp,lp);}
     return DefWindowProcW(w,m,wp,lp);
 }
@@ -292,6 +298,8 @@ static void sync(bool force=false){
     RECT current{};GetWindowRect(window,&current);POINT origin{current.left,current.top};ScreenToClient(g_window,&origin);
     int shownHeight=details?g_chatHeaderHeight:h;if(origin.x!=x||origin.y!=y||current.right-current.left!=w||current.bottom-current.top!=shownHeight)MoveWindow(window,x,y,w,shownHeight,TRUE);
     ShowWindow(detailsButton,SW_SHOWNA);
+    // Expand is disabled (not hidden) when it would not widen the dock.
+    {const bool expandable=g_chatExpanded||chatDockCanExpand();if((IsWindowEnabled(expandButton)!=FALSE)!=expandable){EnableWindow(expandButton,expandable);InvalidateRect(expandButton,nullptr,FALSE);}}
     if(resized||force)MoveWindow(viewport,0,g_chatHeaderHeight,w,std::max(1,h-g_chatHeaderHeight),TRUE);ShowWindow(viewport,details?SW_HIDE:SW_SHOWNA);ShowWindow(window,SW_SHOWNA);
     const auto now=GetTickCount64();static ULONGLONG next=0;if(!force&&!resized&&!reasoningChanged&&now<next)return;next=now+100;
     static std::wstring buttonDetails,buttonExpand;std::wstring d=!g_teamMode?L"Run info":details?L"Chat":L"Agents",e=g_chatExpanded?L"Restore":L"Expand";if(d!=buttonDetails){SetWindowTextW(detailsButton,d.c_str());buttonDetails=d;}if(e!=buttonExpand){SetWindowTextW(expandButton,e.c_str());buttonExpand=e;}
@@ -307,6 +315,7 @@ static void sync(bool force=false){
             const auto* note=user?nullptr:chatReasoningNote(i);const bool hasNote=note!=nullptr;std::wstring reasoning=note?wide(note->text):std::wstring(),reasoningEmpty=note?wide(note->empty):std::wstring();
             if(b.hasNote!=hasNote||b.reasoning!=reasoning||b.reasoningEmpty!=reasoningEmpty){b.hasNote=hasNote;b.reasoningEmpty=std::move(reasoningEmpty);b.thoughtWidth=0;
                 if(b.reasoning!=reasoning){b.reasoning=std::move(reasoning);if(b.thought){DestroyWindow(b.thought);b.thought=nullptr;}}}
+            b.noteAfter=row.first=="Error";
             if(b.role==role&&b.text==text)continue;
             if(b.edit){CHARRANGE selection{};SendMessage(b.edit,EM_EXGETSEL,0,(LPARAM)&selection);
                 SetWindowTextW(b.edit,crlf(text).c_str());const LONG length=GetWindowTextLengthW(b.edit);

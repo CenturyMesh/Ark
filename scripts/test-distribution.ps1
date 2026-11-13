@@ -58,6 +58,12 @@ try {
     # --test-isolated keeps this run off the user's real ARK registration and shortcuts, even with a public setup.
     $isolation = 'distribution-' + [guid]::NewGuid().ToString('N').Substring(0, 12)
     $registration = 'HKCU:/Software/Microsoft/Windows/CurrentVersion/Uninstall/MeshSphere.ARK.Test.' + $isolation
+    # A public setup has no self-test page renderer: the switch is an unknown argument (exit 2), and --silent keeps
+    # the refusal out of a message box.
+    $captures = Join-Path $temporary 'captures'
+    $renderer = Start-Process -FilePath ([IO.Path]::GetFullPath($InstallerPath)) -ArgumentList @('--silent', '--screenshot', ('"' + $captures + '"'), '--test-isolated', $isolation) -PassThru
+    if (-not $renderer.WaitForExit(120000)) { $renderer.Kill(); throw 'The setup waited on --screenshot (a dialog?).' }
+    if ($renderer.ExitCode -ne 2 -or (Test-Path -LiteralPath $captures)) { throw "The public setup accepted the self-test page renderer (exit code $($renderer.ExitCode))." }
     $setup = Start-Process -FilePath ([IO.Path]::GetFullPath($InstallerPath)) -ArgumentList @('--silent', '--dir', ('"' + $installRoot + '"'), '--test-isolated', $isolation) -PassThru -Wait
     if ($setup.ExitCode -ne 0) { throw "Installer failed with exit code $($setup.ExitCode); see $env:TEMP\ARK-Setup.log." }
     $state = Get-ArkState $installRoot
@@ -68,8 +74,11 @@ try {
     if (-not (Test-Path -LiteralPath $uninstaller -PathType Leaf) -or -not (Test-Path -LiteralPath $registration)) { throw 'Installer did not register an uninstaller.' }
     $uninstall = Start-Process -FilePath $uninstaller -ArgumentList @('--uninstall', '--quiet', '--test-isolated', $isolation) -PassThru -Wait
     if ($uninstall.ExitCode -ne 0 -or (Test-Path -LiteralPath (Join-Path $installRoot 'versions')) -or (Test-Path -LiteralPath $registration)) { throw 'Uninstaller did not remove the application runtimes and registration.' }
-    Start-Sleep -Seconds 2 # uninstall.exe removes itself after it exits
-    Write-Output 'Distribution smoke passed: isolated native STEP export, per-user install, receipts, launcher and uninstall.'
+    # uninstall.exe removes itself (and then the empty folder) from a helper that runs after it exits
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    while ((Test-Path -LiteralPath $uninstaller) -and $watch.Elapsed.TotalSeconds -lt 60) { Start-Sleep -Milliseconds 250 }
+    if (Test-Path -LiteralPath $uninstaller) { throw 'uninstall.exe did not remove itself within 60 seconds.' }
+    Write-Output 'Distribution smoke passed: isolated native STEP export, public setup without the page renderer, per-user install, receipts, launcher and uninstall.'
 } finally {
     if ($process) { if ($started -and -not $process.HasExited) { $process.Kill() }; $process.Dispose() }
     $env:PATH = $oldPath

@@ -62,6 +62,13 @@ jobs:
             out/native-release/native-authoring-corpus-v1.receipt.json
             out/native-release/drawing-dxf-v1.receipt.json
           if-no-files-found: warn
+      - name: Require a clean source tree for distributable artifacts
+        shell: pwsh
+        run: |
+          # package-release.ps1 and build-installer.ps1 refuse a dirty tree as well; this step names the files.
+          $changes = @(git status --porcelain --untracked-files=normal)
+          if ($LASTEXITCODE -ne 0) { throw 'git status failed.' }
+          if ($changes.Count) { $changes | Write-Output; throw 'The build or the tests changed the source tree; release artifacts need a clean tree.' }
       - name: Prepare portable package and update manifest
         shell: pwsh
         run: ./scripts/package-release.ps1

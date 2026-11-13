@@ -31,6 +31,10 @@ public static class ArkInfo
     /// <summary>"ARK 064A".</summary>
     public static string Title => $"{Product} {Code}";
 
+    /// <summary>SHA-256 of the appended package (lower-case hex), stamped by build-installer.ps1; null in a bare build.</summary>
+    public static string? PayloadSha256 { get; } =
+        Metadata("ArkPayloadSha256") is string h && Regex.IsMatch(h, "^[0-9a-f]{64}$") ? h : null;
+
     /// <summary>
     /// Private test isolation: its own uninstall key (MeshSphere.ARK.Test.&lt;id&gt;) and no shortcuts, so a test never
     /// touches the user's real ARK registration. Stamped by build-installer.ps1 -TestIsolationId, or --test-isolated.

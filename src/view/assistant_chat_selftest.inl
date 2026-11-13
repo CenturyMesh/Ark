@@ -22,6 +22,11 @@ static int testAssistantChat(const std::string& path){
      g_authBusy=false;const auto savedLog=g_chatLog;g_assistantResponseError=true;g_assistantResponseFinished=true;
      g_chatLog={{"Error","Claude Code / context_limit / terminal_reason=prompt_too_long. Claude Code rejected the request because its context is too large. Start a fresh ARK chat for the remaining task and inspect the current design; the drawing and committed edits are retained."}};
      layout();sync(true);captureChat(window,path+".claude-context-error.png");
+     // 076A: the host error text precedes the run's provider reasoning in an Error row.
+     attachChatReasoning(0,"Provider reasoning returned before the host stopped the run.",chatReasoningHidden);layout();sync(true);
+     {const auto& b=bubbles.front();RECT text{};if(!b.noteAfter||!b.edit||!GetWindowRect(b.edit,&text))return fail(870,"Error row lost its text control or reasoning placement");MapWindowPoints(nullptr,viewport,(POINT*)&text,2);RECT row=toggleRect(b);OffsetRect(&row,0,-scroll);
+      if(row.top<text.bottom-4)return fail(871,"Provider reasoning is drawn between the Error header and the host error text");}
+     captureChat(window,path+".error-reasoning-order.png");g_chatReasoningNotes.clear();
      g_chatLog=savedLog;g_assistantResponseError=false;g_assistantResponseFinished=false;g_assistantConfig=savedConfig;g_authStatus.connected=connected;g_authBusy=busy;}
     if(const int result=testClaudeReconnect071(path))return result;
     g_chatBusy=true;g_assistantStatus="Thinking...";if(activity().title!="Thinking")return fail(802,"Provider phase");
@@ -30,6 +35,9 @@ static int testAssistantChat(const std::string& path){
     *g_assistantCancel=true;if(activity().title!="Stopping")return fail(805,"Cancellation in flight");g_chatBusy=false;g_assistantResponseFinished=true;if(activity().title!="Stopped")return fail(806,"Cancellation complete");
     *g_assistantCancel=false;g_assistantResponseError=true;if(activity().title!="Interrupted")return fail(807,"Failure phase");g_assistantResponseError=false;
     if(activity().title!="Reply ready")return fail(808,"A reply is not proof of goal completion");
+    // 076A: a finished run that left actions unrated says so in its final status.
+    g_assistantFeedbackPending=2;{const auto state=activity();if(state.title!="Feedback pending"||state.detail.rfind("Reply ready.",0)!=0||state.detail.find("Tool feedback is still pending for 2 actions of this run")==std::string::npos||state.color!=attentionInk)return fail(872,"A finished run with pending tool feedback must show it in its final status");}
+    layout();sync(true);captureChat(window,path+".feedback-pending.png");g_assistantFeedbackPending=0;
     g_chatLog.back().second="review_pending: BOM review pending. Two definitions lack internal identity; previous CAD work is retained.";
     if(activity().title!="BOM review pending"||messageText(g_chatLog.back()).rfind("review_pending:",0)==0)return fail(834,"Recoverable BOM stop must not appear as Interrupted or completed");
     layout();sync(true);captureChat(window,path+".bom-review-pending.png");
@@ -127,7 +135,10 @@ static int testAssistantChat(const std::string& path){
      int glyphs=0;for(int y=std::max(0L,line.y);y<std::min((LONG)live.h,line.y+25);++y)for(int x=std::max(0L,line.x);x<std::min((LONG)live.w,line.x+240);++x){size_t p=((size_t)y*live.w+x)*3;if(live.px[p]>150&&live.px[p+1]>150&&live.px[p+2]>150)++glyphs;}
      if(line.y<g_chatHeaderHeight||line.y+18>live.h||glyphs<60)return fail(840,"Latest text disappeared after live GL frames");
      for(HWND control:{copyButton,latestButton,detailsButton,expandButton}){RECT button{};GetWindowRect(control,&button);MapWindowPoints(nullptr,window,(POINT*)&button,2);int textPixels=0,darkPixels=0;
-         for(int y=button.top;y<button.bottom;++y)for(int x=button.left;x<button.right;++x){if(x<0||y<0||x>=live.w||y>=live.h)continue;size_t p=((size_t)y*live.w+x)*3;if(live.px[p]>150&&live.px[p+1]>150&&live.px[p+2]>150)++textPixels;if(live.px[p]<90&&live.px[p+1]<90&&live.px[p+2]<90)++darkPixels;}
+         // Expand is disabled only while it cannot widen the dock (the 1100 px
+         // layout above); its label is then painted in the faint disabled ink.
+         const bool inert=control==expandButton&&!IsWindowEnabled(control);if(inert&&(g_chatExpanded||chatDockCanExpand()))return fail(850,"Expand disabled although the dock can widen");const int lit=inert?100:150;
+         for(int y=button.top;y<button.bottom;++y)for(int x=button.left;x<button.right;++x){if(x<0||y<0||x>=live.w||y>=live.h)continue;size_t p=((size_t)y*live.w+x)*3;if(live.px[p]>lit&&live.px[p+1]>lit&&live.px[p+2]>lit)++textPixels;if(live.px[p]<90&&live.px[p+1]<90&&live.px[p+2]<90)++darkPixels;}
          if(textPixels<20||darkPixels<500)return fail(842,"Conversation action disappeared or painted as a blank native button");}
      if(!wasVisible)ShowWindow(g_window,SW_HIDE);g_chatLog=std::move(savedLog);sync(true);}
     for(int i=0;i<220;++i)g_chatLog.push_back({"Action","Progress message "+std::to_string(i)});sync(true);if(bubbles.size()!=g_chatLog.size()||std::count_if(bubbles.begin(),bubbles.end(),[](const auto& b){return b.edit!=nullptr;})>8)return fail(827,"Long history was truncated or native controls were not virtualized");
@@ -141,10 +152,16 @@ static int testAssistantChat(const std::string& path){
     g_teamSnapshot.goalState=AgentGoalState::Completed;if(activity().title!="Goal reported complete")return fail(823,"Explicit team completion");
     SendMessage(window,WM_COMMAND,3,0);sync(true);if(!g_chatAgentDetails||(GetWindowLongPtr(viewport,GWL_STYLE)&WS_VISIBLE))return fail(824,"Agent controls toggle");
     // Right dock: Expand widens the conversation column; the viewport stays usable beside it.
+    // At the 1100 px layout Expand cannot widen the dock: it must stay inert, and
+    // expansion is checked at the first fixture width where the dock can widen.
+    SendMessage(window,WM_COMMAND,3,0);
+    for(auto size:std::vector<std::pair<int,int>>{{1440,900},{3556,1000}}){if(g_chatExpanded||chatDockCanExpand())break;
+        const int before=assistantDockWidth();SendMessage(window,WM_COMMAND,4,0);layout();sync(true);if(g_chatExpanded||assistantDockWidth()!=before)return fail(870,"Inert Expand changed the dock");
+        RECT frame{0,0,size.first,size.second};AdjustWindowRect(&frame,WS_OVERLAPPEDWINDOW,FALSE);SetWindowPos(g_window,nullptr,0,0,frame.right-frame.left,frame.bottom-frame.top,SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);winW=size.first;winH=size.second;layout();sync(true);}
     const int normalWidth=chatDockNormalWidth();
-    SendMessage(window,WM_COMMAND,3,0);if(!g_chatExpanded)SendMessage(window,WM_COMMAND,4,0);layout();sync(true);
+    if(!g_chatExpanded)SendMessage(window,WM_COMMAND,4,0);layout();sync(true);
     {RECT bounds{};GetWindowRect(window,&bounds);MapWindowPoints(nullptr,g_window,(POINT*)&bounds,2);const auto dock=chatDockGeometry();
-     if(!g_chatExpanded||assistantDockWidth()<normalWidth||pageHeight()<70||viewW<200||viewX+viewW>dock.x||bounds.left<dock.x||bounds.right>winW||bounds.top<viewY||bounds.bottom>winH-32)return fail(825,"Expanded conversation");}
+     if(!g_chatExpanded||assistantDockWidth()<=normalWidth||pageHeight()<70||viewW<200||viewX+viewW>dock.x||bounds.left<dock.x||bounds.right>winW||bounds.top<viewY||bounds.bottom>winH-32)return fail(825,"Expanded conversation");}
     scroll=0;place();captureChat(window,path+".expanded.png");
     {HDC dc=GetDC(g_window);drawFrame(dc);ReleaseDC(g_window,dc);const float dockX=(float)(winW-assistantDockWidth());
      if(std::any_of(g_zones.begin(),g_zones.end(),[&](const Zone& z){return (z.id==179||z.id==191||(z.id>=560&&z.id<=562))&&z.x+z.w>dockX;}))return fail(847,"CAD navigation or appearance controls overlap the expanded conversation");}

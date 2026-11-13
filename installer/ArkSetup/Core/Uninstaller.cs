@@ -32,8 +32,6 @@ public static class Uninstaller
             throw new SetupException(S.NotInstalledHere, ExitCodes.NotInstalled);
         if (Paths.Problem(dir) is string why)
             throw new SetupException($"Refusing to uninstall from {dir}: {why}.", ExitCodes.BadArguments);
-        if (ArkProcesses.FindRunningFrom(dir) is { } running)
-            throw new SetupException(S.ArkRunningProcess(running), ExitCodes.ArkRunning);
 
         var manifest = SetupManifest.Read(dir);
         string keyName = manifest?.UninstallKey ?? ArkInfo.UninstallKeyName;
@@ -41,37 +39,43 @@ public static class Uninstaller
         string self = Environment.ProcessPath ?? "";
         bool selfInside = self.Length > 0 && Paths.IsInside(self, dir);
 
-        progress?.Report(0.04);
-
-        // 1. the runtime layout (all or nothing: on failure the entry stays so the uninstall can be retried)
-        var files = new List<string>();
-        var folders = new List<string>();
-        foreach (string name in RuntimeFolders)
-            Collect(Path.Combine(dir, name), files, folders);
-        foreach (string entry in Directory.EnumerateFileSystemEntries(dir))
-            if (UpdaterLeftover.IsMatch(Path.GetFileName(entry)))
+        // 1. the runtime layout (all or nothing: on failure the entry stays so the uninstall can be retried), under
+        // update.lock, taken before anything is checked or removed: a launch or update in progress fails the uninstall
+        // at once, and none can start or stage a version while it goes
+        using (UpdateLock.Enter(dir))
+        {
+            if (ArkProcesses.FindRunningFrom(dir) is { } running)
+                throw new SetupException(S.ArkRunningProcess(running), ExitCodes.ArkRunning);
+            progress?.Report(0.04);
+            var files = new List<string>();
+            var folders = new List<string>();
+            foreach (string name in RuntimeFolders)
+                Collect(Path.Combine(dir, name), files, folders);
+            foreach (string entry in Directory.EnumerateFileSystemEntries(dir))
+                if (UpdaterLeftover.IsMatch(Path.GetFileName(entry)))
+                {
+                    if (Directory.Exists(entry))
+                        Collect(entry, files, folders);
+                    else
+                        files.Add(entry);
+                }
+            foreach (string name in RuntimeFiles)
+                files.Add(Path.Combine(dir, name));
+            int failed = 0;
+            for (int i = 0; i < files.Count; i++)
             {
-                if (Directory.Exists(entry))
-                    Collect(entry, files, folders);
-                else
-                    files.Add(entry);
+                if (!DeleteFile(files[i], dir))
+                    failed++;
+                if (i % 8 == 0)
+                    progress?.Report(0.04 + 0.86 * (i + 1) / files.Count);
             }
-        foreach (string name in RuntimeFiles)
-            files.Add(Path.Combine(dir, name));
-        int failed = 0;
-        for (int i = 0; i < files.Count; i++)
-        {
-            if (!DeleteFile(files[i], dir))
-                failed++;
-            if (i % 8 == 0)
-                progress?.Report(0.04 + 0.86 * (i + 1) / files.Count);
-        }
-        foreach (string folder in folders.OrderByDescending(f => f.Length))
-            RemoveDir(folder, dir);
-        if (failed > 0 || RuntimeFolders.Any(f => Directory.Exists(Path.Combine(dir, f))))
-        {
-            Log.Error($"{failed} files could not be removed");
-            throw new SetupException(S.FilesInUse, ExitCodes.Failed);
+            foreach (string folder in folders.OrderByDescending(f => f.Length))
+                RemoveDir(folder, dir);
+            if (failed > 0 || RuntimeFolders.Any(f => Directory.Exists(Path.Combine(dir, f))))
+            {
+                Log.Error($"{failed} files could not be removed");
+                throw new SetupException(S.FilesInUse, ExitCodes.Failed);
+            }
         }
 
         // 2. what Setup added
@@ -94,6 +98,24 @@ public static class Uninstaller
         bool gone = RemoveDir(dir, dir);
         Log.Info(gone ? "uninstall finished, folder removed" : "uninstall finished, other files left in the folder");
         return gone;
+    }
+
+    /// <summary>
+    /// Deletes the folder <paramref name="root"/> inside <paramref name="dir"/> with everything below it, removing
+    /// links without following them. Returns true when it is gone.
+    /// </summary>
+    public static bool RemoveTree(string root, string dir)
+    {
+        if (!Paths.IsInside(root, dir) || Paths.Same(root, dir))
+            return false;
+        var files = new List<string>();
+        var folders = new List<string>();
+        Collect(root, files, folders);
+        foreach (string f in files)
+            DeleteFile(f, dir);
+        foreach (string folder in folders.OrderByDescending(f => f.Length))
+            RemoveDir(folder, dir);
+        return !Directory.Exists(root);
     }
 
     /// <summary>Lists files and folders below <paramref name="root"/>; links are listed, never followed.</summary>
@@ -172,20 +194,35 @@ public static class Uninstaller
 
     /// <summary>
     /// uninstall.exe cannot delete itself while it runs: a hidden cmd waits for this process to exit, deletes
-    /// the exe and then removes the folder if (and only if) it is empty ("rd" without /s).
+    /// the exe and then removes the folder if (and only if) it is empty ("rd" without /s). It also removes the native
+    /// library cache the .NET host extracted for this uninstall.exe, renamed first so a cache still in use stays; only
+    /// after the exe is gone, which Windows allows only once this process has fully exited (it still loads
+    /// vcruntime140_cor3.dll from the cache while it unloads).
+    /// The paths travel in environment variables, never in the command line, so "%", "^", "&amp;" or "!" in a folder
+    /// name are not interpreted by cmd (it expands a variable once and does not rescan the value; /v:off keeps
+    /// delayed expansion off).
     /// </summary>
     static void ScheduleSelfDelete(string exe, string dir)
     {
-        string script = $"/d /c \"for /l %i in (1,1,20) do (ping -n 2 127.0.0.1 >nul & del /f /q \"{exe}\" >nul 2>&1 & if not exist \"{exe}\" (rd \"{dir}\" >nul 2>&1 & exit))\"";
+        const string script = "/v:off /d /c \"for /l %i in (1,1,20) do (ping -n 2 127.0.0.1 >nul & del /f /q \"%ARK_UNINSTALL_EXE%\" >nul 2>&1 & if not exist \"%ARK_UNINSTALL_EXE%\" ("
+                              + "rd \"%ARK_UNINSTALL_DIR%\" >nul 2>&1 & if defined ARK_UNINSTALL_CACHE (move \"%ARK_UNINSTALL_CACHE%\" \"%ARK_UNINSTALL_CACHE%.stale\" >nul 2>&1 && rd /s /q \"%ARK_UNINSTALL_CACHE%.stale\" >nul 2>&1) & exit))\"";
         try
         {
-            Process.Start(new ProcessStartInfo("cmd.exe", script)
+            var psi = new ProcessStartInfo("cmd.exe", script)
             {
                 CreateNoWindow = true,
                 UseShellExecute = false,
                 WindowStyle = ProcessWindowStyle.Hidden,
                 WorkingDirectory = Path.GetTempPath(),
-            })?.Dispose();
+            };
+            psi.Environment["ARK_UNINSTALL_EXE"] = exe;
+            psi.Environment["ARK_UNINSTALL_DIR"] = dir;
+            psi.Environment.Remove("ARK_UNINSTALL_CACHE");
+            // %TEMP%\.net\uninstall\<bundle hash>: named after this exe, so only this build's own folder
+            if (SetupTemp.ExtractionDir() is string cache && Path.GetFileName(Path.GetDirectoryName(cache) ?? "")
+                    .Equals(Path.GetFileNameWithoutExtension(exe), StringComparison.OrdinalIgnoreCase))
+                psi.Environment["ARK_UNINSTALL_CACHE"] = cache;
+            Process.Start(psi)?.Dispose();
             Log.Info($"scheduled the removal of {ArkInfo.UninstallerName}");
         }
         catch (Exception e)

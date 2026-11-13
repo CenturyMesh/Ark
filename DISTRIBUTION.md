@@ -13,7 +13,7 @@ Build and verify a current package:
 ./scripts/package-release.ps1
 ```
 
-release.json determines source identity; packaged binaries retain their generated runtime metadata. Existing archives/releases are not overwritten. No user drawings or private settings are included.
+release.json determines source identity; packaged binaries retain their generated runtime metadata. Existing archives/releases are not overwritten. No user drawings or private settings are included. A distributable package and a public setup need a committed source tree: package-release.ps1 and build-installer.ps1 refuse uncommitted or untracked, non-ignored files (and build-installer.ps1 a package whose release evidence records dirty=true), and the release workflow stops before packaging if the build or tests changed the tree. -AllowDirtyTree (also on publish-test-build.ps1, never with -Publish) builds a local test artifact anyway; its evidence then records dirty=true and it must not be distributed.
 
 To create an optional installer, install the .NET 10 SDK and use the archive matching the current source:
 
@@ -22,7 +22,7 @@ To create an optional installer, install the .NET 10 SDK and use the archive mat
 ./scripts/test-distribution.ps1 -PackagePath out/releases/ark-windows-x64-VERSION.zip -InstallerPath out/releases/ARK-CODE-windows-x64-setup.exe
 ```
 
-Replace VERSION and CODE with the generated identity, not a reused code. The isolated smoke verifies package geometry, STEP, installation receipts and uninstall; it runs the setup with --test-isolated, so the installed ARK's registration and shortcuts are untouched. See docs/WINDOWS_INSTALLER.md. tests/distribution_tests.ps1 covers packaging fixtures; fixture success alone does not qualify a real installer.
+Replace VERSION and CODE with the generated identity, not a reused code. The isolated smoke verifies package geometry, STEP, that the public setup has no self-test page renderer, installation receipts and uninstall; it runs the setup with --test-isolated, so the installed ARK's registration and shortcuts are untouched. To sign, pass -SignScript to build-installer.ps1; the signing order (uninstaller stub first, the whole setup after the package is appended) is in docs/WINDOWS_INSTALLER.md. See docs/WINDOWS_INSTALLER.md. tests/distribution_tests.ps1 covers packaging fixtures; fixture success alone does not qualify a real installer.
 
 Actions -> Prepare Windows and Linux release packages -> Run workflow builds and tests both platforms. The installer input additionally builds/tests the Windows setup. Publication is explicit, defaults to false and runs only after both platform jobs succeed. It attaches checksums and pinned OCCT source, and refuses an existing version tag. Hosted native results do not establish interactive Studio acceptance on another computer.
 

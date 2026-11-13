@@ -3,6 +3,7 @@
 #include "ark/assistant_acp.hpp"
 #include "ark/assistant_connectors.hpp"
 #include "assistant_vision.hpp"
+#include "assistant_feedback.hpp"
 #include <algorithm>
 #include <cctype>
 #include <chrono>
@@ -143,18 +144,19 @@ std::unique_ptr<AssistantAcpChannel> channel(const AssistantConfig& config,const
 #include "claude_result_071d.inl"
 struct Session {
     const AssistantConfig& config;const V& tools;const AssistantTool& callTool;const AssistantEvents& events;const std::atomic_bool* cancel;const AssistantInbox& inbox;const AssistantHistory& history;const AssistantRetryHooks& hooks;
-    AssistantResult result;V catalog=array(),initResponse,pendingMessages=array(),lastOutcome;std::set<std::string> allowed,controlIds,mcpIds,pendingFeedback;std::unique_ptr<AssistantAcpChannel> io;
-    bool initDone=false,serverInitialized=false,listed=false,verified=false,active=false,restart=false,inspectionRequired=false,feedbackReminded=false;
-    std::string promptText,feedbackProject,lastCompletionIssue,negotiatedModel;unsigned interrupts=0,calls=0;Clock::time_point lastPacket=Clock::now(),promptBegan=Clock::now();
+    AssistantResult result;V catalog=array(),initResponse,pendingMessages=array(),lastOutcome;std::set<std::string> allowed,controlIds,mcpIds;std::unique_ptr<AssistantAcpChannel> io;assistant_feedback::RunGate feedback;
+    bool initDone=false,serverInitialized=false,listed=false,verified=false,active=false,restart=false,inspectionRequired=false;
+    std::string promptText,heldReply,lastCompletionIssue,negotiatedModel;unsigned interrupts=0,calls=0;Clock::time_point lastPacket=Clock::now(),promptBegan=Clock::now();
     void checkpoint(){if(history)history(result.conversation);}
     void emit(AssistantEvent::Kind kind,const std::string& text,bool retry=false){if(events){AssistantEvent event;event.kind=kind;event.text=text;event.usage=result.usage;event.performance=result.performance;event.providerRetry=retry;if(kind==AssistantEvent::Usage)event.providerOutcome=lastOutcome;events(event);}}
-    void track(const V& receipt){const auto* data=receipt.find("structuredContent");if(!data)data=&receipt;if(const auto* p=data->find("activity_project_id");p&&p->t==V::Str&&p->str!=feedbackProject){feedbackProject=p->str;pendingFeedback.clear();}const auto* required=data->find("feedback_required");if(const auto* p=data->find("activity_id");p&&p->t==V::Str&&required&&required->t==V::Bool&&required->b)pendingFeedback.insert(p->str);if(const auto* p=data->find("rated_ids");p&&p->t==V::Arr)for(const auto& id:p->arr)pendingFeedback.erase(id.asStr());if(const auto* p=data->find("pending_feedback_ids");p&&p->t==V::Arr)for(const auto& id:p->arr)pendingFeedback.insert(id.asStr());}
+    void track(const V& receipt){feedback.observe(receipt);}
     void begin(const V& input){
         if(input.t==V::Str){need(!input.str.empty(),"Enter a Claude Code message first.");result.conversation.arr.push_back(message("user",input.str));}else{need(input.t==V::Arr&&!input.arr.empty(),"Claude Code requires a nonempty prompt/history.");result.conversation=input;}
         for(const auto& row:result.conversation.arr)if(str(row,"role")=="user")validateAssistantUserMessage(row);
         refreshAssistantOnboarding075D(result.conversation,config.onboardingPack);
         for(const auto& function:assistantFunctionTools(tools).arr){auto entry=obj();const auto name=str(function,"name");need(allowed.insert(name).second,"Duplicate ARK tool in the Claude Code role catalog.");entry.set("name",V::makeStr(name));if(function.find("description"))entry.set("description",*function.find("description"));entry.set("inputSchema",*function.find("parameters"));for(const auto& source:tools.arr)if(str(source,"name")==name&&source.find("annotations"))entry.set("annotations",*source.find("annotations"));catalog.arr.push_back(entry);}
-        for(const auto& row:result.conversation.arr){const auto content=str(row,"content");if(content.rfind("ARK_ACP_INSPECT_REQUIRED",0)==0)inspectionRequired=true;else if(content.rfind("ARK_ACP_INSPECTION_CONFIRMED",0)==0)inspectionRequired=false;if(str(row,"type")=="function_call_output"){V receipt;if(arkjson::parse(str(row,"output"),receipt))track(receipt);}}
+        // Retained receipts belong to earlier runs: their unrated rows are backlog, not this run's gate.
+        for(const auto& row:result.conversation.arr){const auto content=str(row,"content");if(content.rfind("ARK_ACP_INSPECT_REQUIRED",0)==0)inspectionRequired=true;else if(content.rfind("ARK_ACP_INSPECTION_CONFIRMED",0)==0)inspectionRequired=false;}
     }
     bool consume(){if(!inbox)return false;auto batch=inbox();need(batch.isNull()||batch.t==V::Arr,"Invalid Claude Code steering mailbox.");bool changed=false;if(batch.t==V::Arr)for(auto& row:batch.arr){const auto role=str(row,"role");need(role=="user"||role=="developer","Invalid Claude Code steering role.");result.conversation.arr.push_back(row);pendingMessages.arr.push_back(row);changed=true;}if(changed)checkpoint();return changed;}
     V requireContextInspection(const std::string& reason){
@@ -243,12 +245,19 @@ struct Session {
         }
         if((!hooks.inputPending||hooks.inputPending())&&consume())restart=true;
         need(restart||!hooks.requestCurrent||hooks.requestCurrent(),"Host steering/ownership changed; the old Claude Code final reply was not accepted. Inspect current context before continuing.");
+        bool feedbackUnresolved=false;
         if(!restart){if(text.empty())text=promptText;need(!text.empty(),"Claude Code ended without a visible final response; inspect prior tool receipts.");promptText=text;need(promptText.size()<=config.maxResponseBytes,"Claude Code text exceeded the configured response bound.");result.conversation.arr.push_back(message("assistant",promptText));checkpoint();
-            if(!pendingFeedback.empty()&&allowed.count("tool_feedback")){need(!feedbackReminded,"Claude Code omitted required tool feedback after its reminder; prior work retained.");feedbackReminded=true;auto ids=array();for(const auto& key:pendingFeedback)ids.arr.push_back(V::makeStr(key));auto reminder=message("developer","Submit tool_feedback for the actual pending activity IDs: "+ids.dump());result.conversation.arr.push_back(reminder);pendingMessages.arr.push_back(reminder);restart=true;}
+            // 076A: re-remind while ratings are accepted; a round without one is not an interruption.
+            feedback.team=allowed.count("team_report_task")!=0;switch(feedback.step(allowed.count("tool_feedback")!=0)){
+            case assistant_feedback::RunGate::Step::Remind:{if(heldReply.empty())heldReply=promptText;auto reminder=message("developer",feedback.reminder(allowed.count("team_report_task")!=0));result.conversation.arr.push_back(reminder);pendingMessages.arr.push_back(reminder);restart=true;emit(AssistantEvent::Status,"Recording required tool feedback before completion");break;}
+            case assistant_feedback::RunGate::Step::Unresolved:feedbackUnresolved=true;break;
+            default:break;}
             if(!restart&&hooks.completionCheck){auto check=hooks.completionCheck();const auto* accepted=check.find("allowed");need(accepted&&accepted->t==V::Bool,"ARK completion check unavailable; prior work retained.");if(!accepted->b){auto issue=str(check,"error");need(!issue.empty()&&issue!=lastCompletionIssue,"ARK finalization remains blocked; inspect the retained evidence.");lastCompletionIssue=issue;auto reminder=message("developer",issue);result.conversation.arr.push_back(reminder);pendingMessages.arr.push_back(reminder);restart=true;}else if(!str(check,"summary").empty())promptText+="\n\n"+str(check,"summary");}
             if(!restart&&hooks.acceptCompletion&&!hooks.acceptCompletion())restart=true;}
         if(restart){checkpoint();if(config.maxRounds&&result.rounds>=config.maxRounds)throw AssistantRoundLimit(config.maxRounds);prompt(false);return false;}
-        result.text=promptText;emit(AssistantEvent::Text,result.text);return true;}
+        result.text=assistant_feedback::withHeldReply(heldReply,promptText);
+        if(feedbackUnresolved){result.text+="\n\n"+feedback.note();result.conversation.arr.push_back(feedback.record());checkpoint();emit(AssistantEvent::Status,feedback.status());}
+        result.feedback=feedback.summary();emit(AssistantEvent::Text,result.text);return true;}
     bool handle(const V& packet){const auto type=str(packet,"type");
         if(type=="control_request"){control(packet);return false;}
         if(type=="control_response"){controlReply(packet);return false;}

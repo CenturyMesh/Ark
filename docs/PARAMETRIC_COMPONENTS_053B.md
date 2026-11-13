@@ -58,6 +58,8 @@ The graph uses the same local authored relation index as `context_graph`:
 
 - Select a part or occurrence to select its geometry in Studio. Selecting a
   parameter highlights known dependants; the inspector shows authored facts.
+  Ownership links (`owned_by_definition`, program `owns`) are metadata, not
+  dependants.
 - Double-click a part or group to fold/unfold its detail. Search includes direct
   neighbours; Focus limits the map around the selected object.
 - Drag nodes to arrange the view, drag the background to pan, use the wheel to

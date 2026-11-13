@@ -105,11 +105,12 @@ public class ChromeWindow : Window
 
     /// <summary>
     /// On small or heavily scaled screens (1080p at 150 %) the window would not fit the work area: scale the whole
-    /// layout down instead of letting it run off the screen.
+    /// layout down instead of letting it run off the screen. The work area is that of the monitor the window opens on
+    /// (WPF centres a window without owner on the monitor under the mouse), not always the primary one.
     /// </summary>
     void FitToScreen()
     {
-        var area = SystemParameters.WorkArea;
+        var area = MonitorWorkArea() ?? SystemParameters.WorkArea;
         double k = Math.Min(1, Math.Min(area.Width / Width, area.Height / Height));
         if (k >= 1 || Part("Root") is not FrameworkElement root)
             return;
@@ -122,6 +123,55 @@ public class ChromeWindow : Window
         Log.Info($"window scaled to {k:0.00} to fit the screen");
     }
 
+    /// <summary>The work area of the monitor under the mouse, in this window's device-independent units.</summary>
+    Rect? MonitorWorkArea()
+    {
+        try
+        {
+            if (!GetCursorPos(out var cursor))
+                return null;
+            IntPtr monitor = MonitorFromPoint(cursor, 2); // MONITOR_DEFAULTTONEAREST
+            var info = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
+            if (monitor == IntPtr.Zero || !GetMonitorInfo(monitor, ref info))
+                return null;
+            double dpi = GetDpiForMonitor(monitor, 0, out uint dpiX, out _) == 0 && dpiX > 0 ? dpiX : 96; // MDT_EFFECTIVE_DPI
+            double s = 96.0 / dpi;
+            var w = info.Work;
+            return new Rect(w.Left * s, w.Top * s, (w.Right - w.Left) * s, (w.Bottom - w.Top) * s);
+        }
+        catch (Exception e) when (e is DllNotFoundException or EntryPointNotFoundException)
+        {
+            return null;
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct NativePoint { public int X, Y; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct NativeRect { public int Left, Top, Right, Bottom; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct MonitorInfo
+    {
+        public int Size;
+        public NativeRect Monitor;
+        public NativeRect Work;
+        public uint Flags;
+    }
+
+    [DllImport("user32.dll")]
+    static extern bool GetCursorPos(out NativePoint point);
+
+    [DllImport("user32.dll")]
+    static extern IntPtr MonitorFromPoint(NativePoint point, uint flags);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo info);
+
+    [DllImport("shcore.dll")]
+    static extern int GetDpiForMonitor(IntPtr monitor, int type, out uint dpiX, out uint dpiY);
+
     void Appear()
     {
         if (Part("Surface") is Grid clip && !UseDwm)
@@ -132,8 +182,8 @@ public class ChromeWindow : Window
             Round();
         }
         if (UseDwm)
-            return; // DWM animates the window in
-        if (Preview)
+            return; // DWM animates the window in (and follows the Windows animation setting)
+        if (Preview || !Controls.Anim.Allowed)
         {
             Opacity = 1;
             return;
@@ -186,7 +236,7 @@ public class ChromeWindow : Window
             _closeNow = true;
             Dispatcher.BeginInvoke(Close);
         }
-        if (UseDwm || Preview)
+        if (UseDwm || Preview || !Controls.Anim.Allowed)
         {
             Dispatcher.BeginInvoke(Hide); // not inside the Closing call itself
             Finish();

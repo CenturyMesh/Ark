@@ -171,7 +171,7 @@ V projectMemoryAssistantWireInput(const V& input){
     return wire;
 }
 static void stripVolatilePrefetchFields(V& value){
-    static const std::set<std::string> volatileKeys={"capture_queue","current_revision","activity_id","activity_updated","activity_project_id","activity_boundary","pending_feedback_ids","feedback_required"};
+    static const std::set<std::string> volatileKeys={"capture_queue","current_revision","activity_id","activity_updated","activity_project_id","activity_boundary","pending_feedback_ids","pending_feedback_count","feedback_required"};
     if(value.t==V::Obj){value.obj.erase(std::remove_if(value.obj.begin(),value.obj.end(),[](const auto& field){return volatileKeys.count(field.first)!=0;}),value.obj.end());for(auto& field:value.obj)stripVolatilePrefetchFields(field.second);}
     else if(value.t==V::Arr)for(auto& item:value.arr)stripVolatilePrefetchFields(item);
 }

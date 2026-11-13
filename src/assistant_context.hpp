@@ -16,7 +16,7 @@ inline bool successful(const V& receipt){const auto* error=receipt.find("isError
 inline V excerpt(const V& value){
     if(value.dump().size()<=512)return value;
     V out=V::makeObj();out.set("partial",V::makeBool(true));out.set("original_bytes",V::makeNum((double)value.dump().size()));
-    for(const char* key:{"activity_id","activity_project_id","activity_boundary","feedback_required","isError","error","error_code","document_unchanged","revision","expected_revision","created_ids","id","ids","name","op","type","state","task_state","summary","candidate_id","proposal_id","valid","applied","applied_prepared","partial","scope","total_counts","recovery","conditions","checks","created_node_ids","created_mate_ids","geometry_recomputed","geometry_changed","pending_feedback_ids"})
+    for(const char* key:{"activity_id","activity_project_id","activity_boundary","feedback_required","isError","error","error_code","document_unchanged","revision","expected_revision","created_ids","id","ids","name","op","type","state","task_state","summary","candidate_id","proposal_id","valid","applied","applied_prepared","partial","scope","total_counts","recovery","conditions","checks","created_node_ids","created_mate_ids","geometry_recomputed","geometry_changed","pending_feedback_ids","pending_feedback_count"})
         if(const auto* item=value.find(key);item&&item->dump().size()<=512)out.set(key,*item);
     out.set("partial",V::makeBool(true));out.set("excerpt_only",V::makeBool(true));return out;
 }
@@ -93,7 +93,7 @@ inline V internReadReceipts(const V& history){
     // These fields are per-call bookkeeping, not geometry. Keep them verbatim
     // in each output. In particular project identity, revisions, fingerprints,
     // elapsed measurements and unknown fields REMAIN in the equality check.
-    static const std::set<std::string> metadata={"activity_id","activity_updated","feedback_required","pending_feedback_ids","ark_repeat_notice"};
+    static const std::set<std::string> metadata={"activity_id","activity_updated","feedback_required","pending_feedback_ids","pending_feedback_count","ark_repeat_notice"};
     std::map<std::string,std::size_t> calls,outputs;
     for(std::size_t i=0;i<history.arr.size();++i){const auto& item=history.arr[i];const auto type=text(item,"type"),id=text(item,"call_id");
         if(type=="function_call"){if(id.empty()||!calls.emplace(id,i).second)return history;}
@@ -207,7 +207,7 @@ inline bool staticGuide(const V& args,const V& receipt){
         text(guide,"product")=="ARK"&&text(guide,"topic")==requested&&!text(guide,"version").empty()&&!text(guide,"iteration_code").empty();
 }
 inline V guideSummary(const V& guide){
-    V out=V::makeObj();for(const char* key:{"product","version","iteration_code","topic","detail","document_state_included","activity_id","activity_project_id","feedback_required","pending_feedback_ids"})if(const auto* value=guide.find(key))out.set(key,*value);
+    V out=V::makeObj();for(const char* key:{"product","version","iteration_code","topic","detail","document_state_included","activity_id","activity_project_id","feedback_required","pending_feedback_ids","pending_feedback_count"})if(const auto* value=guide.find(key))out.set(key,*value);
     out.set("partial",V::makeBool(true));out.set("excerpt_only",V::makeBool(true));return out;
 }
 inline bool staticGuideFragment(const V& query,const V& receipt){

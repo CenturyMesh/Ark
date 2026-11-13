@@ -39,6 +39,11 @@ applies to application initialization; loading a large user document happens aft
 the acknowledgement and does not cause a rollback.
 An interrupted activation also restores the previous pointer on the next launch.
 Use **Previous version** for a manual rollback after a confirmed update.
+In a folder installed by ARK Setup, activation, a failed activation and a rollback
+also set the version shown in Installed apps (the entry named in `ark-setup.json`,
+only when its `InstallLocation` is that folder) to the version the launcher selects.
+This is best effort and never fails a launch; a launcher module retained from an
+older ARK does this only after a newer local package refreshes it.
 
 New unsaved drawings start in **Documents\ARK**, outside immutable version folders.
 Settings remain in the existing `%LOCALAPPDATA%\ARK` location. Updates never copy

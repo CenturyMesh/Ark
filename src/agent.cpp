@@ -249,6 +249,7 @@ void validatedMaterials(const Document& d){
     }
 }
 void validated(Document& d,bool geometry=true){
+    verifyParametricProgramSeal(d);
     validatedMaterials(d);
     for(const auto& node:d.assembly)if(const auto* definition=d.find(node.feature);definition&&definition->suppressed)
         throw std::runtime_error("Assembly occurrence requires a suppressed definition; remove its occurrences before suppressing, or use assembly visibility for display");
@@ -291,7 +292,14 @@ Mesh selectedMesh(Document& d,const V& args,std::vector<AssemblyPlacement>* capt
     Mesh m;
     std::unordered_map<u64,std::vector<SnapshotMaterial>> bodyStyles;
     auto append=[&](const Body& body,const Mesh& part,const Mat4& world=Mat4::identity()){
-        if(styles){auto found=bodyStyles.find(body.id);if(found==bodyStyles.end())found=bodyStyles.emplace(body.id,snapshotBodyMaterials(d,body,part,appearance)).first;const size_t first=styles->size();styles->insert(styles->end(),found->second.begin(),found->second.end());if(appearance)placeSnapshotMaterials044B(*styles,first,world);}
+        if(styles){auto found=bodyStyles.find(body.id);if(found==bodyStyles.end())found=bodyStyles.emplace(body.id,snapshotBodyMaterials(d,body,part,appearance)).first;const size_t first=styles->size();styles->insert(styles->end(),found->second.begin(),found->second.end());if(appearance)placeSnapshotMaterials044B(*styles,first,world);
+            // Snapshot shading follows Studio's shaded draw: smooth vertex normals,
+            // except the bodies viewer.cpp draws as hard surfaces. Legacy
+            // extrude/sketch_cut walls are sampled facets; notched_tube is a
+            // welded planar mesh whose averaged normals would bend flat faces.
+            const Feature* feature=d.find(body.id);const bool smooth=!(feature&&(feature->type==FeatureType::Extrude||feature->type==FeatureType::SketchCut||feature->type==FeatureType::NotchedTube));for(size_t i=first;i<styles->size();++i)(*styles)[i].smoothShading=smooth;
+            Mesh computed;const Mesh* normals=&part;if(part.nrm.size()!=part.pos.size()){computed=part;computed.computeNormals();normals=&computed;}
+            if(m.nrm.size()==m.pos.size())for(size_t i=0;i+2<normals->nrm.size();i+=3){const Vec3 n=world.transformDir({normals->nrm[i],normals->nrm[i+1],normals->nrm[i+2]});m.nrm.insert(m.nrm.end(),{(f32)n.x,(f32)n.y,(f32)n.z});}}
         m.append(part,world);
     };
     if(!d.assembly.empty()&&!sel.feature){
@@ -1311,6 +1319,8 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
             for(const auto& command:commands.arr)if(command.find("part_patch")){
                 if(!command.find("op")||command.find("op")->asStr()!="feature.edit"||command.find("part"))throw std::runtime_error("part_patch requires feature.edit and cannot be combined with part replacement");
             }
+            // A program binding must publish exactly its compiled source.
+            try{verifyParametricProgramBatch(document,commands,commandIndex);}catch(...){applying=true;if(commandIndex<commands.arr.size())if(const auto* op=commands.arr[commandIndex].find("op"))commandOp=op->asStr();throw;}
             const bool appearanceOnly=metadataOnlyApply(document,args);
             const bool placementOnly=rigidPlacementOnlyApply(document,args);
             Document next;std::string error;
@@ -1519,7 +1529,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
                 validatedMaterials(next);validateAppearanceAuthoring024B(next,true);
                 remember();document.assembly=std::move(next.assembly);document.schematics=std::move(next.schematics);document.manufacturingPlans=std::move(next.manufacturingPlans);document.materials=std::move(next.materials);document.bomDocumentId=std::move(next.bomDocumentId);document.imageAssets=std::move(next.imageAssets);document.stamps=std::move(next.stamps);
                 for(size_t i=0;i<document.features.size();++i){document.features[i].material=std::move(next.features[i].material);document.features[i].appearance=std::move(next.features[i].appearance);document.features[i].part=std::move(next.features[i].part);document.features[i].classification=std::move(next.features[i].classification);document.features[i].faceAppearances=std::move(next.features[i].faceAppearances);}
-            }else{if(!args.find("checks")&&!drawingEdits)validated(next,!placementOnly);remember();document=std::move(next);}
+            }else{if(!args.find("checks")&&!drawingEdits)validated(next,!placementOnly);next.programBindingsToSeal.clear();remember();document=std::move(next);}
             ++revision;
             if(appearanceOnly||placementOnly){document.recomputeMs=0;document.recomputeEvaluated=0;document.recomputeReused=document.evalBodies.size();document.recomputeProjectionBuilds=0;document.recomputeProjectionReused=0;document.parallelFeatures=0;document.peakParallelFeatures=0;resetEvaluationDiagnostics074B(document,appearanceOnly?"metadata_only":"placement_only");}
             V r=args.find("detail")&&args.find("detail")->str=="changes"?revisionReceipt032D(document,revision):info();r.set("created_ids",created);r.set("created_node_ids",createdNodes);r.set("created_mate_ids",createdMates);r.set("sheet_edits",sheetEdits);r.set("geometry_recomputed",V::makeBool(!appearanceOnly&&!placementOnly));if(placementOnly)r.set("placement_changed",V::makeBool(true));if(args.find("checks"))r.set("conditions",conditionReport);return result(r);
@@ -1608,7 +1618,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
             if(sel.copy>=0)r.set("copy",V::makeNum(sel.copy));
             V evidence=V::makeObj();evidence.set("revision",V::makeNum((double)revision));evidence.set("current_revision",V::makeNum((double)revision));evidence.set("view",V::makeStr(view));evidence.set("width",V::makeNum(width));evidence.set("height",V::makeNum(height));evidence.set("authority",V::makeStr("display_mesh"));evidence.set("capture_source",V::makeStr("software_snapshot"));
             V viewState=V::makeObj();viewState.set("target_mm",snapshotVectorValue(camera.target));viewState.set("direction_target_to_eye",snapshotVectorValue(camera.direction));viewState.set("up",snapshotVectorValue(camera.up));viewState.set("distance_mm",V::makeNum(camera.dist));viewState.set("fov_deg",V::makeNum(camera.fovDeg));evidence.set("view_state",viewState);
-            evidence.set("appearance",V::makeStr("authored_body_and_face_color_opacity_emission"));evidence.set("emission_sample",V::makeStr("steady"));evidence.set("transparency",V::makeStr("sorted_triangles"));evidence.set("textures_and_stamps",V::makeBool(true));evidence.set("media_time_s",V::makeNum(appearance.mediaTimeS));evidence.set("appearance_surfaces",appearanceEvidence);evidence.set("appearance_scope",V::makeStr("triplanar_textures_procedural_patterns_surface_stamps_flat_lit_no_bump_no_plane_stamps"));
+            evidence.set("appearance",V::makeStr("authored_body_and_face_color_opacity_emission"));evidence.set("emission_sample",V::makeStr("steady"));evidence.set("transparency",V::makeStr("sorted_triangles"));evidence.set("textures_and_stamps",V::makeBool(true));evidence.set("media_time_s",V::makeNum(appearance.mediaTimeS));evidence.set("appearance_surfaces",appearanceEvidence);evidence.set("appearance_scope",V::makeStr("triplanar_textures_procedural_patterns_surface_stamps_no_bump_no_plane_stamps"));evidence.set("shading",V::makeStr("smooth_vertex_normals_except_legacy_extrude_sketch_cut_notched_tube"));
             if(sel.feature)evidence.set("feature_id",V::makeNum((double)sel.feature));if(sel.useNode){evidence.set("occurrence_id",V::makeNum((double)sel.node));if(!sel.nodeName.empty())evidence.set("name",V::makeStr(sel.nodeName));if(sel.copy>=0)evidence.set("copy",V::makeNum(sel.copy));std::set<u64> definitions;for(const auto& occurrence:captured)definitions.insert(occurrence.feature);if(definitions.size()==1)evidence.set("feature_id",V::makeNum((double)*definitions.begin()));else{V ids=V::makeArr();for(u64 feature:definitions)ids.arr.push_back(V::makeNum((double)feature));evidence.set("feature_ids",ids);}}
             for(const char* key:{"label","reference","stage"})if(const auto* value=args.find(key)){if(value->t!=V::Str||value->str.size()>128)throw std::runtime_error("Snapshot label/reference/stage must be a bounded string");evidence.set(key,*value);}
             evidence.set("committed",V::makeBool(true));r.set("revision",V::makeNum((double)revision));r.set("visual_evidence",evidence);V output=result(r);
@@ -1621,7 +1631,7 @@ V AgentSession::dispatch(const std::string& tool,const V& args){
         r.set("error",V::makeStr(message));r.set("revision",V::makeNum((double)revision));r.set("tool",V::makeStr(tool));
         const bool resource=message.find("budget")!=std::string::npos||message.find("worker limit")!=std::string::npos||message.find("capacity")!=std::string::npos;
         r.set("error_code",V::makeStr(message.find("Revision conflict")!=std::string::npos?"REVISION_CONFLICT":message.find("Ambiguous")!=std::string::npos?"AMBIGUOUS_REFERENCE":message.find("Prepared candidate")!=std::string::npos?"CANDIDATE_INVALID":resource?"RESOURCE_LIMIT":applying?"INVALID_COMMAND":"EVALUATION_FAILED"));
-        if(tool=="tool_feedback"||tool=="activity_info"){r.set("error_code",V::makeStr("ACTIVITY_VALIDATION_FAILED"));}
+        if(tool=="tool_feedback"||tool=="activity_info"){r.set("error_code",V::makeStr("ACTIVITY_VALIDATION_FAILED"));if(const auto* rejected=dynamic_cast<const AgentActivityFeedbackError*>(&e))for(const auto& [key,value]:rejected->detail.obj)r.set(key,value);}
         if(tool=="object_context"&&(message.find("OBJECT_CONTEXT_REFERENCE_MISSING")!=std::string::npos||message.find("name not found")!=std::string::npos))r.set("error_code",V::makeStr("REFERENCE_MISSING"));
         for(const char* prefix:{"MECHANICAL_","ASSEMBLY_","MANIPULATION_"})if(const auto start=message.find(prefix);start!=std::string::npos){const auto end=message.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ_",start);r.set("error_code",V::makeStr(message.substr(start,end==std::string::npos?end:end-start)));break;}
         if(message.rfind("DFM_ACCEPTANCE_",0)==0||message.rfind("HUD_",0)==0){const auto end=message.find(':');r.set("error_code",V::makeStr(message.substr(0,end)));}

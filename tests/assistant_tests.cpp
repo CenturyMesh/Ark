@@ -2,6 +2,8 @@
 #include "ark/assistant_connectors.hpp"
 #include "ark/io.hpp"
 #include "ark/agent.hpp"
+#include "ark/agent_activity.hpp"
+#include "../src/assistant_feedback.hpp"
 #include "ark/onboarding.hpp"
 #include "ark/chatgpt_auth.hpp"
 #include <algorithm>
@@ -11,6 +13,8 @@
 #include <stdexcept>
 #include <thread>
 #include <vector>
+#include <functional>
+#include <set>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -262,6 +266,95 @@ static void heldReplyAfterFeedbackChecks(){
             default:return finalResponse();}});
     check(rounds==3,"no provider round follows a feedback-only round that releases the held reply");
     check(result.text.find("Bracket inspected at revision 2.")!=std::string::npos&&result.text.find("Done.")==std::string::npos,"the held reply is the final reply");
+}
+// 076A: the feedback gate covers this run's actions. Unrated rows that earlier
+// conversations left under the same actor id are non-blocking backlog. Another
+// reminder follows only while this run's unrated count falls; otherwise the run
+// ends with its reply and an explicit note, keeping the rows pending.
+static void runScopedFeedbackChecks076a(){
+    // Every scenario runs, so one report names each failed contract.
+    std::string failures;auto scenario=[&](const std::function<void()>& body){try{body();}catch(const std::exception& error){failures+=std::string(failures.empty()?"":" | ")+error.what();}};
+    scenario([&]{using ark::assistant_feedback::withHeldReply;using Step=ark::assistant_feedback::RunGate::Step;
+        check(withHeldReply("Summary.","Done.")=="Summary.\n\nDone."&&withHeldReply("Same.","Same.")=="Same."&&withHeldReply("","Done.")=="Done.","the reply held for feedback precedes a different final reply");
+        check(withHeldReply("Summary.","needs_input: Which material?")=="needs_input: Summary.\n\nWhich material?","a final needs_input state stays first");
+        ark::assistant_feedback::RunGate gate;check(gate.step(true)==Step::Finish,"a run without recorded actions needs no feedback");
+        gate.observe(json(R"({"structuredContent":{"activity_project_id":"p","activity_id":"a1","feedback_required":true,"pending_feedback_ids":["a1","older"],"pending_feedback_count":3}})"));
+        check(gate.pending.size()==1&&gate.backlog()==2&&gate.step(false)==Step::Finish,"backlog IDs never enter the run gate, which needs tool_feedback to be offered");
+        check(gate.step(true)==Step::Remind&&gate.step(true)==Step::Unresolved,"a reminder round without an accepted rating is unresolved");
+        gate.observe(json(R"({"structuredContent":{"rated_ids":["older"],"pending_feedback_count":2}})"));check(gate.step(true)==Step::Unresolved&&gate.pending.size()==1,"a rating of a row outside this run is not progress");
+        gate.observe(json(R"({"isError":true,"structuredContent":{"already_rated_ids":["a1"]}})"));check(gate.step(true)==Step::Finish&&gate.summary().find("state")->asStr()=="complete"&&gate.summary().find("run_rated")->num==1,"an action reported as already rated is resolved");
+        // IDs dropped at a project boundary are recorded, never reported as rated.
+        ark::assistant_feedback::RunGate moved;for(const char* id:{"a1","a2"}){V receipt=json(R"({"structuredContent":{"activity_project_id":"p","feedback_required":true}})");V data=*receipt.find("structuredContent");data.set("activity_id",V::makeStr(id));receipt.set("structuredContent",data);moved.observe(receipt);}
+        check(moved.step(true)==Step::Remind,"two actions of this run are reminded");
+        moved.observe(json(R"({"structuredContent":{"activity_project_id":"q","activity_boundary":true,"activity_id":"b1","feedback_required":true}})"));
+        check(moved.pending==std::vector<std::string>{"b1"}&&moved.summary().find("run_boundary_dropped")&&moved.summary().find("run_boundary_dropped")->num==2&&moved.summary().find("state")->asStr()=="pending","a project boundary drops the earlier IDs from the gate and counts them");
+        check(moved.step(true)==Step::Remind,"one action of the new project is fewer than the two at the previous reminder");
+        moved.observe(json(R"({"structuredContent":{"rated_ids":["b1"]}})"));const auto dropped=moved.summary();
+        check(moved.step(true)==Step::Finish&&dropped.find("state")->asStr()=="boundary_dropped"&&dropped.find("run_actions")->num==3&&dropped.find("run_rated")->num==1&&dropped.find("run_boundary_dropped_ids")&&dropped.find("run_boundary_dropped_ids")->arr.size()==2,"a run whose IDs were dropped at a boundary is not reported complete");
+        // Verification reads nested in team receipts belong to the run like top-level actions.
+        ark::assistant_feedback::RunGate nested;nested.observe(json(R"({"structuredContent":{"reported":true,"revision_verification":{"structuredContent":{"activity_project_id":"p","activity_id":"v1","feedback_required":true}}}})"));
+        nested.observe(json(R"({"structuredContent":{"applied":true},"initial_checkpoint_verification":{"inspection":{"structuredContent":{"activity_id":"v2","feedback_required":true}}}})"));
+        check(nested.pending==std::vector<std::string>{"v1","v2"},"nested verification reads enter the run gate");
+        nested.team=true;check(nested.note().find("cannot be completed until they are rated")!=std::string::npos&&nested.summary().find("blocks_completion")&&nested.summary().find("blocks_completion")->b,"in a team the pending note and summary state that completion stays blocked");});
+    const V actor=json(R"({"kind":"agent","id":"assistant","model":"offline-feedback"})");V tools=V::makeArr();
+    for(const auto& tool:ark::AgentSession::tools().arr){const auto name=tool.find("name")->asStr();if(name=="doc_info"||name=="tool_feedback"||name=="activity_info")tools.arr.push_back(tool);}
+    auto text=[](const std::string& value){V response=finalResponse();auto output=*response.find("output");auto item=output.arr[0];auto content=*item.find("content");content.arr[0].set("text",V::makeStr(value));item.set("content",content);output.arr[0]=item;response.set("output",output);return response;};
+    auto rate=[](const std::vector<std::string>& own,std::set<std::string>& rated){V ratings=V::makeArr();for(const auto& id:own)if(rated.insert(id).second){V item=json(R"({"utility":4,"difficulty":1,"action":"Read the scratch document revision"})");item.set("activity_id",V::makeStr(id));ratings.arr.push_back(item);}V args=V::makeObj();args.set("ratings",ratings);return args.dump();};
+    struct Run {ark::AgentSession session;std::vector<std::string> backlog,own;std::set<std::string> rated;std::vector<std::string> statuses;int rounds=0;ark::AssistantResult result;};
+    auto execute=[&](Run& run,const std::function<V(Run&,const V&)>& script){
+        for(int i=0;i<2;++i){V args=V::makeObj();args.set("actor",actor);run.backlog.push_back(run.session.call("doc_info",args).find("structuredContent")->find("activity_id")->asStr());}
+        ark::AssistantConfig config;config.model="offline-feedback";
+        try{run.result=ark::runAssistant(config,V::makeStr("Inspect the scratch document"),tools,[&](const std::string& name,const V& args){V scoped=args;scoped.set("actor",actor);auto receipt=run.session.call(name,scoped);if(const auto* id=receipt.find("structuredContent")->find("activity_id"))run.own.push_back(id->asStr());return receipt;},
+            [&](const ark::AssistantEvent& event){if(event.kind==ark::AssistantEvent::Status)run.statuses.push_back(event.text);},nullptr,[&](auto&,const V& request,auto*){++run.rounds;return script(run,request);});}
+        catch(const std::exception& error){throw std::runtime_error(std::string("run-scoped HTTP feedback gate failed: ")+error.what());}
+    };
+    auto rated=[](const Run& run,const std::string& id){for(const auto& row:run.session.document.agentActivity->entries)if(row.find("id")->asStr()==id)return row.find("feedback")!=nullptr;return false;};
+    auto reminders=[](const Run& run){std::vector<std::string> out;for(const auto& row:run.result.conversation.arr)if(row.find("role")&&row.find("role")->asStr()=="developer"&&row.find("content")&&row.find("content")->asStr().rfind("Before finishing, submit tool_feedback",0)==0)out.push_back(row.find("content")->asStr());return out;};
+    auto mentions=[](const std::string& value,const std::vector<std::string>& ids){for(const auto& id:ids)if(value.find(id)!=std::string::npos)return true;return false;};
+    // Own actions rated before the final reply: earlier rows demand no reminder.
+    scenario([&]{Run run;execute(run,[&](Run& r,const V&){switch(r.rounds){case 1:return toolResponse("own_read","doc_info","{}");case 2:return toolResponse("own_rating","tool_feedback",rate(r.own,r.rated).c_str());case 3:return text("Inspected and rated.");default:return text("Unexpected reminder round.");}});
+        check(run.rounds==3&&run.result.text=="Inspected and rated."&&reminders(run).empty(),"earlier unrated rows of the same actor id do not trigger a reminder");
+        check(rated(run,run.own[0])&&!rated(run,run.backlog[0])&&!rated(run,run.backlog[1]),"only this run's action is rated");});
+    // Appends a doc_info call to a scripted response, so one round rates and reads.
+    auto withRead=[](V response,const std::string& id){auto output=*response.find("output");auto read=output.arr.back();read.set("call_id",V::makeStr(id));read.set("name",V::makeStr("doc_info"));read.set("arguments",V::makeStr(R"({"detail":"revision"})"));output.arr.push_back(read);response.set("output",output);return response;};
+    // Ratings plus a verification read after the reminder: the unrated count fell
+    // from two to one, so one more reminder lists exactly that read.
+    scenario([&]{Run run;execute(run,[&](Run& r,const V&){switch(r.rounds){
+            case 1:return withRead(toolResponse("first_read","doc_info","{}"),"second_read");case 2:return text("Summary: the scratch document is empty.");
+            case 3:return withRead(toolResponse("first_rating","tool_feedback",rate(r.own,r.rated).c_str()),"verify_read");
+            case 4:return text("Feedback recorded.");case 5:return toolResponse("second_rating","tool_feedback",rate(r.own,r.rated).c_str());default:return text("Unexpected extra round.");}});
+        const auto sent=reminders(run);check(run.rounds==5&&sent.size()==2,"a reminder follows once more because this run's unrated count fell");
+        check(sent[0].find(run.own[0])!=std::string::npos&&sent[0].find(run.own[1])!=std::string::npos&&!mentions(sent[0],run.backlog)&&sent[0].find("2 older unrated")!=std::string::npos,"the first reminder lists this run's actions and only counts the backlog");
+        check(sent[1].find(run.own[2])!=std::string::npos&&sent[1].find(run.own[0])==std::string::npos&&!mentions(sent[1],run.backlog),"the next reminder lists exactly the still-pending read of this run");
+        check(run.result.text.find("Summary: the scratch document is empty.")!=std::string::npos&&run.result.text.find("Feedback recorded.")!=std::string::npos,"the reply held for feedback remains visible");
+        check(rated(run,run.own[0])&&rated(run,run.own[1])&&rated(run,run.own[2])&&!rated(run,run.backlog[0]),"ratings stay confined to this run's actions");});
+    // Review finding: a model that rates the listed IDs and makes one new read in
+    // every reminder round kept the run reminding forever (Studio has no turn
+    // budget). A reminder continues only while the count falls, so this ends.
+    scenario([&]{Run run;execute(run,[&](Run& r,const V&){
+            if(r.rounds>40)return text("Gave up after repeated reminders.");
+            if(r.rounds==1)return withRead(toolResponse("loop_read_1","doc_info","{}"),"loop_read_2");
+            if(r.rounds%2==0)return text(r.rounds==2?"Summary: inspected revision 0.":"Rated and verified.");
+            const auto suffix=std::to_string(r.rounds);return withRead(toolResponse(("loop_rating_"+suffix).c_str(),"tool_feedback",rate(r.own,r.rated).c_str()),"loop_verify_"+suffix);});
+        const auto sent=reminders(run);
+        check(sent.size()==2&&run.rounds==6,"rating plus one new read in every round ends once the unrated count stops falling");
+        check(run.result.text.find("Gave up")==std::string::npos&&run.result.text.find("tool feedback is still pending for 1 action of this run")!=std::string::npos,"the run ends with its reply and the explicit pending note");
+        const auto& outcome=run.result.feedback;check(outcome.t==V::Obj&&outcome.find("state")->asStr()=="pending"&&outcome.find("reminders")->num==2&&outcome.find("run_actions")->num==4&&outcome.find("run_rated")->num==3&&outcome.find("run_pending")->num==1,"the run receipt records the bounded reminders and the read left unrated");
+        check(std::any_of(run.statuses.begin(),run.statuses.end(),[](const std::string& s){return s.find("Feedback pending for 1 action of this run")!=std::string::npos;}),"a non-error status reports the pending read");});
+    // A reminder answered without any rating: reply shown, rows kept pending.
+    scenario([&]{Run run;execute(run,[&](Run& r,const V&){switch(r.rounds){case 1:return toolResponse("silent_read","doc_info","{}");case 2:return text("Summary: inspected revision 0.");default:return text("I did not rate the read.");}});
+        check(run.rounds==3&&reminders(run).size()==1,"without an accepted rating the reminder is not repeated");
+        check(run.result.text.find("Summary: inspected revision 0.")!=std::string::npos&&run.result.text.find("I did not rate the read.")!=std::string::npos&&run.result.text.find("tool feedback is still pending for 1 action of this run")!=std::string::npos,"the final reply is accepted with an explicit pending-feedback note");
+        check(std::any_of(run.statuses.begin(),run.statuses.end(),[](const std::string& s){return s.find("Feedback pending for 1 action of this run")!=std::string::npos;}),"a non-error status reports the pending feedback");
+        check(!rated(run,run.own[0])&&run.session.document.agentActivity->entries.size()==3,"pending rows are retained without fabricated ratings");
+        check(run.result.feedback.t==V::Obj&&run.result.feedback.find("state")->asStr()=="pending"&&run.result.feedback.find("run_pending")->num==1,"the run receipt records the missing feedback");
+    });
+    // A retained unrated receipt from an earlier run of the conversation is backlog, never this run's gate.
+    scenario([&]{V history=json(R"([{"role":"user","content":"Inspect"},{"type":"function_call","call_id":"earlier","name":"doc_info","arguments":"{}"},{"type":"function_call_output","call_id":"earlier","output":"{\"isError\":false,\"structuredContent\":{\"revision\":0,\"activity_id\":\"earlier-run\",\"activity_project_id\":\"p\",\"feedback_required\":true,\"pending_feedback_ids\":[\"earlier-run\"]}}"},{"role":"user","content":"Thanks"}])");
+        ark::AssistantConfig config;config.model="offline-feedback";int rounds=0;
+        const auto result=ark::runAssistant(config,history,tools,[](const std::string&,const V&){return json(R"({"isError":false,"structuredContent":{}})");},{},nullptr,[&](auto&,const V&,auto*){++rounds;return text("You are welcome.");});
+        check(rounds==1&&result.text=="You are welcome."&&result.feedback.find("state")->asStr()=="no_actions","an earlier run's retained unrated receipt does not gate a later run");});
+    if(!failures.empty())throw std::runtime_error(failures);
 }
 // 042D A/B option: once projected, the request prefix stays byte-identical.
 static void stableProjectionChecks(){
@@ -531,5 +624,5 @@ int main(int argc,char** argv){try{
         [&](const auto& e){if(e.kind==ark::AssistantEvent::Usage)partial=e.usage;},nullptr,
         [&](auto&,auto&,auto*){return incompleteCounted;});},"incomplete response remains rejected");
     check(partial.totalTokens==15,"usage from incomplete response survives via event");
-    reasoningChecks();deferredToolChecks();repeatedReadChecks();traceAttributionChecks();heldReplyAfterFeedbackChecks();heldResultChecks();stableProjectionChecks();batchedCallsKeepOneWritePerResponse();requestContextChecks();unratedFeedbackProjectionChecks();payloadAndPerformanceChecks();nestedReceiptChecks();transientHttpRetryChecks();visionChecks();userImageAuthoringChecks();assistantSteeringChecks();std::cout<<checks<<" assistant checks passed\n";return 0;
+    reasoningChecks();deferredToolChecks();repeatedReadChecks();traceAttributionChecks();heldReplyAfterFeedbackChecks();runScopedFeedbackChecks076a();heldResultChecks();stableProjectionChecks();batchedCallsKeepOneWritePerResponse();requestContextChecks();unratedFeedbackProjectionChecks();payloadAndPerformanceChecks();nestedReceiptChecks();transientHttpRetryChecks();visionChecks();userImageAuthoringChecks();assistantSteeringChecks();std::cout<<checks<<" assistant checks passed\n";return 0;
 }catch(const std::exception& e){std::cerr<<"assistant test failed: "<<e.what()<<'\n';return 1;}}

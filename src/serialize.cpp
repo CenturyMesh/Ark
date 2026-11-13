@@ -694,12 +694,15 @@ static Value buildDocumentValue(const Document& doc,bool includeAudit,bool inclu
     if(requiresDesignDisciplines054B(doc)){validateDesignDisciplines(doc);if(!doc.schematics.isNull())r.set("schematics",doc.schematics);r.set("version",Value::makeNum(52));}
     if(!doc.manufacturingPlans.isNull()){validateManufacturingPlans(doc);r.set("manufacturing_plans",doc.manufacturingPlans);r.set("version",Value::makeNum(53));}
     if(extendedTransmissionDocument(doc))r.set("version",Value::makeNum(54));
-    if(!doc.parametricPrograms.isNull()){validateParametricPrograms(doc.parametricPrograms);r.set("parametric_programs",doc.parametricPrograms);r.set("version",Value::makeNum(55));}
+    // Bindings are validated where they enter a document (load, program.bind)
+    // and before a file is written, not on every in-memory snapshot or clone.
+    if(!doc.parametricPrograms.isNull()){r.set("parametric_programs",doc.parametricPrograms);r.set("version",Value::makeNum(55));}
     if(!doc.designVariants.isNull()){validateDesignVariants(doc.designVariants);r.set("design_variants",doc.designVariants);r.set("version",Value::makeNum(56));}
     for(const auto& drawing:doc.drawings)if(drawing.find("geometric_tolerances")){r.set("version",Value::makeNum(56));break;}
     if(surfaceFeaturesRequire57(doc))r.set("version",Value::makeNum(57));
     if(extrusionFeaturesRequire58(doc))r.set("version",Value::makeNum(58));
     if(geometryFeaturesRequire59(doc))r.set("version",Value::makeNum(59));
+    if(parametricProgramsRequire60(doc))r.set("version",Value::makeNum(60));
     if(includeAudit&&includeHistory)iterationPersist(r,doc);
     canonicalDocumentKeys(r);
     return r;
@@ -726,10 +729,12 @@ size_t checkedValueBytes074(Value& value,unsigned depth=0){
 Value documentValue(const Document& doc,bool includeAudit,bool includeHistory,size_t* encodedBytes){auto value=buildDocumentValue(doc,includeAudit,includeHistory);const auto bytes=checkedValueBytes074(value);if(encodedBytes)*encodedBytes=bytes;return value;}
 size_t documentPersistenceSize(const Document& doc){auto value=buildDocumentValue(doc,true,true);return checkedValueBytes074(value);}
 
-static bool documentFromValue(Value& v,Document& doc,std::string* err){
+// trustedBindings: the value was just built from an in-memory Document whose
+// parametric program bindings were validated when they entered it.
+static bool documentFromValue(Value& v,Document& doc,std::string* err,bool trustedBindings=false){
     auto fail=[&](const std::string& m){ if(err)*err=m; return false; };
     if(v.t!=Value::Obj) return fail("root must be object");
-    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || !std::isfinite(ver->num)||ver->num!=std::floor(ver->num)||ver->num<1||ver->num>59))
+    if(auto ver=v.find("version"); ver && (ver->t!=Value::Num || !std::isfinite(ver->num)||ver->num!=std::floor(ver->num)||ver->num<1||ver->num>60))
         return fail("unsupported document version");
     Value history;std::string historyError;if(!iterationExpand(v,history,historyError))return fail(historyError);
     if(const auto* nodes=v.find("assembly");nodes&&nodes->t==Value::Arr)for(const auto& node:nodes->arr)if(const auto* pattern=node.find("pattern");pattern&&pattern->find("carry_frame")){
@@ -991,7 +996,7 @@ static bool documentFromValue(Value& v,Document& doc,std::string* err){
     try{validateAssemblyAuthoring(nd);}catch(const std::exception& error){return fail(error.what());}
     std::string manufacturingError;if(!validateManufacturingRoutes(nd,manufacturingError))return fail(manufacturingError);
     if(const auto* sheets=v.find("schematics"))nd.schematics=*sheets;try{validateDesignDisciplines(nd);if(requiresDesignDisciplines054B(nd)&&(!v.find("version")||v.find("version")->num<52))return fail("Classification and schematics require document version 52");}catch(const std::exception& error){return fail(error.what());}
-    if(const auto* programs=v.find("parametric_programs")){const auto* version=v.find("version");if(!version||version->num<55)return fail("Embedded parametric programs require document version 55");try{validateParametricPrograms(*programs);nd.parametricPrograms=*programs;}catch(const std::exception& error){return fail(error.what());}}
+    if(const auto* programs=v.find("parametric_programs")){const auto* version=v.find("version");if(!version||version->num<55)return fail("Embedded parametric programs require document version 55");try{if(!trustedBindings)validateParametricPrograms(*programs);nd.parametricPrograms=*programs;}catch(const std::exception& error){return fail(error.what());}}
     if(const auto* variants=v.find("design_variants")){const auto* version=v.find("version");if(!version||version->num<56)return fail("Saved design variants require document version 56");try{validateDesignVariants(*variants);nd.designVariants=*variants;}catch(const std::exception& error){return fail(error.what());}}
     for(const auto& drawing:nd.drawings)if(drawing.find("geometric_tolerances")){const auto* version=v.find("version");if(!version||version->num<56)return fail("Geometric tolerances require document version 56");}
     if(const auto* plans=v.find("manufacturing_plans")){const auto* version=v.find("version");if(!version||version->num<53)return fail("Manufacturing plans require document version 53");nd.manufacturingPlans=*plans;try{validateManufacturingPlans(nd);}catch(const std::exception& error){return fail(error.what());}}
@@ -1014,6 +1019,7 @@ static bool documentFromValue(Value& v,Document& doc,std::string* err){
     if(surfaceFeaturesRequire57(nd)){const auto* version=v.find("version");if(!version||version->num<57)return fail("068B surface match/network/multi-trim/trim-preserving extension require document version 57");}
     if(profileRegions046BNeedsVersion48(nd)){const auto* version=v.find("version");if(!version||version->num<48)return fail("046B profile region selections (native.regions) require document version 48");}
     if(geometryFeaturesRequire59(nd)){const auto* version=v.find("version");if(!version||version->num<59)return fail("074B region, multibody, advanced surface and fillet recipes require document version 59");}
+    if(parametricProgramsRequire60(nd)){const auto* version=v.find("version");if(!version||version->num<60)return fail("Boolean, choice and text-choice program parameters and text variant values require document version 60");}
     if(extrusionFeaturesRequire58(nd)){const auto* version=v.find("version");if(!version||version->num<58)return fail("073B extrusion start offset, thin walls and region surfaces require document version 58");}
     if(motionReceiptsRequireDocumentVersion49(nd)){const auto* version=v.find("version");if(!version||version->num<49)return fail("049A baked motion receipts (frames_sha256, frames as derived data) require document version 49");}
     try{validateAppearanceAuthoring024B(nd,false);}catch(const std::exception& error){return fail(error.what());}
@@ -1022,7 +1028,7 @@ static bool documentFromValue(Value& v,Document& doc,std::string* err){
     return true;
 }
 
-bool cloneDocumentAuthoring(const Document& source,Document& target,std::string* err){try{auto value=documentValue(source,true,false);return documentFromValue(value,target,err);}catch(const std::exception& e){if(err)*err=e.what();return false;}}
+bool cloneDocumentAuthoring(const Document& source,Document& target,std::string* err){try{auto value=documentValue(source,true,false);return documentFromValue(value,target,err,true);}catch(const std::exception& e){if(err)*err=e.what();return false;}}
 
 bool documentFromJson(const std::string& json,Document& doc,std::string* err){
     try{checkDocumentJsonRead072(json);
@@ -1095,6 +1101,7 @@ bool saveDocument(const Document& doc, const char* path, DocumentSaveReport* rep
     std::string j,extension;Value persistedRoot;std::filesystem::path destination,temporary;
     try{
         if(doc.iterationHistory.t==Value::Obj){std::string historyError;if(!iterationValidate(doc,doc.iterationHistory,historyError))return fail("Iteration history invalid: "+historyError);}
+        if(!doc.parametricPrograms.isNull())validateParametricPrograms(doc.parametricPrograms);
         // Complete validation/allocation before opening any output. Preserve the
         // bool API even when resident source or parser allocations fail.
         j=documentToJson(doc);

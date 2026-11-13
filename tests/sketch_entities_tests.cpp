@@ -25,6 +25,15 @@ static void solids(){
     const std::pair<const char*,double> shapes[]={{"corner_rectangle",60*40*10},{"center_rectangle",60*40*10},{"three_point_rectangle",60*40*10},{"three_point_center_rectangle",60*40*10},{"parallelogram",60*40*10},{"straight_slot",(50*20+K_PI*100)*10},{"center_slot",(50*20+K_PI*100)*10},{"arc_slot",(40*deg2rad(120)*12+K_PI*36)*10},{"perimeter_circle",K_PI*900*10},{"ellipse",K_PI*40*20*10}};
     for(auto& fixture:shapes){AgentSession session;session.suppressIterationHistory();V commands=V::makeArr();commands.arr.push_back(commandSketch("Section",sketchRecipeDefaults(fixture.first)));commands.arr.push_back(parse(R"({"op":"feature.add","type":"native_solid","name":"Extrusion","native":{"op":"extrude"},"p":{"sketch":"Section","depth":10}})"));apply(session,commands);V evidence=report(session,1);check(std::abs(evidence.find("volume_mm3")->num-fixture.second)<.002,std::string(fixture.first)+": exact native volume");}
 }
+// The default equation2d recipe is a dense authored polyline: one flat face per
+// segment exceeds the native registry. The rejection stays atomic and points to
+// exact curves rather than fewer samples.
+static void equationPolyline(){
+    AgentSession session;session.suppressIterationHistory();V commands=V::makeArr();commands.arr.push_back(commandSketch("Section",sketchRecipeDefaults("equation2d")));commands.arr.push_back(parse(R"({"op":"feature.add","type":"native_solid","name":"Extrusion","native":{"op":"extrude"},"p":{"sketch":"Section","depth":10}})"));
+    V args=V::makeObj();args.set("commands",commands);args.set("expected_revision",V::makeNum(session.revision));const auto before=documentToJson(session.document,false,false);const auto result=session.call("doc_apply",args);const auto text=result.dump();
+    check(result.find("isError")->b&&session.revision==0&&documentToJson(session.document,false,false)==before,"Dense equation2d extrusion rejects atomically");
+    check(text.find("exceeds512 entries")!=std::string::npos&&text.find("equation2d")!=std::string::npos&&text.find("style_spline")!=std::string::npos&&text.find("coarser faceted prism")!=std::string::npos,"Registry rejection explains polyline faces and names exact curves: "+text);
+}
 static void slotSweep(){
     AgentSession session;session.suppressIterationHistory();V commands=V::makeArr();
     const V recipe=sketchRecipeDefaults("straight_slot");commands.arr.push_back(commandSketch("Slot section",recipe));
@@ -53,6 +62,6 @@ static void spatial(){
 #endif
 int main(){try{recipes();
 #ifdef ARK_SKETCH_ENTITIES_NATIVE_TESTS
-solids();slotSweep();spatial();
+solids();equationPolyline();slotSweep();spatial();
 #endif
 std::cout<<"Sketch entity recipes passed\n";return 0;}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

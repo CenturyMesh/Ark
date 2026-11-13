@@ -5,7 +5,9 @@ param(
     [string]$CompilerDirectory,
     [string]$OcctSourceDirectory = 'out/deps/occt/install-msvc-ark-offset-001/licenses',
     [string]$OcctSdkDirectory = 'out/deps/occt/install-msvc-ark-offset-001',
-    [switch]$SkipUpdateManifest
+    [switch]$SkipUpdateManifest,
+    # Local tests only: package although the source tree has uncommitted changes (the evidence records dirty=true).
+    [switch]$AllowDirtyTree
 )
 $ErrorActionPreference = 'Stop'
 $repository = Split-Path $PSScriptRoot -Parent
@@ -13,6 +15,11 @@ foreach ($variable in @('RuntimeDirectory', 'OutputDirectory', 'OcctSourceDirect
     $value = Get-Variable -Name $variable -ValueOnly
     if (-not [IO.Path]::IsPathRooted($value)) { Set-Variable -Name $variable -Value (Join-Path $repository $value) }
 }
+# A distributable package comes from a committed tree; its release evidence would otherwise say dirty=true.
+$changes = @(& git -C $repository status --porcelain --untracked-files=normal)
+if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect the source tree (git status failed); packaging needs a Git checkout.' }
+if ($changes.Count -and -not $AllowDirtyTree) { throw "The source tree has $($changes.Count) uncommitted change(s), for example $($changes[0].Trim()). Commit them before packaging a distributable archive, or pass -AllowDirtyTree for a local test package that will not be distributed." }
+if ($changes.Count) { Write-Warning "Local test package only: the source tree has $($changes.Count) uncommitted change(s) and the release evidence records dirty=true." }
 Import-Module (Join-Path $repository 'updates/Ark.Update.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'Ark.ReleaseEvidence.psm1') -Force
 $version = Get-ArkRuntimeVersion $RuntimeDirectory

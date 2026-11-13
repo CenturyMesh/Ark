@@ -50,6 +50,13 @@ struct AgentTeamEvent {
         ConstructionStart, ConstructionEnd, Proposal, Yield, ConstructionQueued } kind=Status;
     std::uint64_t sequence=0, elapsedMs=0;
     std::string roleId, text, tool;
+    // Text only: readable reasoning the provider returned since this role's
+    // previous Text event of the same turn, captured when the text is emitted
+    // (bounded by maxMailboxBytes, newest kept, on a UTF-8 boundary).
+    // reasoningEarlier: an earlier Text event of this turn carried reasoning.
+    // Observational only: never shared with teammates, logged or replayed.
+    std::string reasoning;
+    bool reasoningEarlier=false;
     AssistantUsage usage; // Role lifetime snapshot, never a model estimate.
     AssistantPerformance performance;
     bool providerRetry=false;
@@ -90,6 +97,11 @@ struct AgentTeamRoleSnapshot {
     AssistantUsage usage;
     AssistantPerformance performance;
     arkjson::Value conversation=arkjson::Value::makeArr();
+    // 076A: the last finished turn's host-observed tool_feedback outcome
+    // (AssistantResult::feedback, null while working or after a failed turn)
+    // and this role's unrated actions of this team run, never older backlog.
+    arkjson::Value feedback;
+    unsigned pendingFeedback=0;
 };
 struct AgentTeamProposalSnapshot {
     std::string id,fromId,toId,reason,state;
@@ -103,6 +115,9 @@ struct AgentTeamSnapshot {
     std::string goalSummary;
     bool goalDeclared=false;
     unsigned outstandingTasks=0, unresolvedErrors=0;
+    // 076A: unrated actions of this team run held by roles whose turn ended;
+    // they block goal completion until the owning role rates them.
+    unsigned pendingFeedback=0;
     bool running=false, paused=false, cancelled=false;
     bool started=false,documentRevisionObserved=false;
     std::uint64_t documentRevision=0;

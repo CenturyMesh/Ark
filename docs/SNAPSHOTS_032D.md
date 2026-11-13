@@ -22,6 +22,18 @@ remains `display_mesh` evidence; snapshot pixels never certify exact geometry or
 manufacturing suitability. Existing unstyled rendering callers retain their
 neutral display API.
 
+Lighting interpolates the display mesh's vertex normals, as Studio does for exact
+bodies. Previously every triangle was lit with its own normal, so curved display
+meshes showed facet bands that are not in the B-rep. A corner normal more than
+30 degrees from its triangle keeps the triangle normal, planar triangles keep
+their flat pixels and back-face culling stays geometric. Bodies that Studio
+draws as hard surfaces stay faceted: legacy `extrude` and `sketch_cut`, whose
+sampled curve walls are mesh facets, and `notched_tube`, a welded planar mesh
+whose averaged normals would bend its flat faces. The receipt states this as
+`shading:"smooth_vertex_normals_except_legacy_extrude_sketch_cut_notched_tube"`;
+`appearance_scope` lists only textures, patterns and stamps and no longer
+describes lighting. Shading is display only; it changes no geometry or authority.
+
 Synthetic verification covers authored material inheritance and feature
 overrides, colored pixels, emission, transparency and material/triangle mismatch.
 Integrated/native face checks passed, and front/isometric captures were visually

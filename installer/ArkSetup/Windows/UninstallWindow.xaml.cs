@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Automation;
 using ArkSetup.Controls;
 using ArkSetup.Core;
 
@@ -23,6 +24,8 @@ public partial class UninstallWindow : ChromeWindow
         CancelText.Text = S.Cancel;
         UninstallText.Text = S.UninstallButton;
         CloseButton.ToolTip = S.Close;
+        AutomationProperties.SetName(CloseButton, S.Close);
+        AutomationProperties.SetName(RemoveProgressValue, S.Removing);
         Program.ExitCode = ExitCodes.Cancelled;
         if (!preview && !Uninstaller.LooksInstalled(_dir))
         {
@@ -51,7 +54,11 @@ public partial class UninstallWindow : ChromeWindow
         TitleText.Text = S.Removing;
         BarTrack.Visibility = Visibility.Visible;
         Anim.Enter(BarTrack, 0, 0, 260);
-        var progress = new Progress<double>(f => Anim.Width(BarFill, BarTrack.ActualWidth * f, 200));
+        var progress = new Progress<double>(f =>
+        {
+            Anim.Width(BarFill, BarTrack.ActualWidth * f, 200);
+            RemoveProgressValue.Value = Math.Floor(Math.Clamp(f, 0, 1) * 100);
+        });
         try
         {
             bool gone = await Task.Run(() => Uninstaller.Run(_dir, progress));

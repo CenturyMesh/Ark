@@ -275,7 +275,8 @@ V meshData(const TopoDS_Shape& s,double deflection,double angle){
         if(curve.GetType()==GeomAbs_Line||a==b){append(curve.Value(a));append(curve.Value(b));}
         else{
             // Display/picking follows curved B-rep edges at the same deflection
-            // as the surface mesh, rather than a coarse fixed twelve chords.
+            // and angular deflection as the surface mesh, rather than a coarse
+            // fixed twelve chords.
             GCPnts_QuasiUniformDeflection sampler(curve,deflection,a,b,GeomAbs_C0);
             if(!sampler.IsDone()||sampler.NbPoints()<2||sampler.NbPoints()>16384)throw std::runtime_error("Native edge preview tessellation failed or exceeds its bound");
             // An inflected spline can put both endpoints AND its midpoint on
@@ -286,7 +287,7 @@ V meshData(const TopoDS_Shape& s,double deflection,double angle){
                 const double t=length2>1e-24?std::clamp(offset.Dot(chord)/length2,0.0,1.0):0.0;
                 return p.Distance(start.Translated(chord*t));
             };
-            size_t points=1;append(curve.Value(sampler.Parameter(1)));
+            size_t points=1;std::vector<double> parameters{sampler.Parameter(1)};
             auto refine=[&](auto&& self,double u,double v,const gp_Pnt& start,const gp_Pnt& end,int depth)->void{
                 const double mid=u+(v-u)*0.5;const auto center=curve.Value(mid);
                 double error=chordDistance(center,start,end);
@@ -295,9 +296,25 @@ V meshData(const TopoDS_Shape& s,double deflection,double angle){
                 if(error>deflection){
                     if(depth>=24||mid==u||mid==v)throw std::runtime_error("Native edge preview refinement exceeds its bound");
                     self(self,u,mid,start,center,depth+1);self(self,mid,v,center,end,depth+1);
-                }else{if(++points>16384)throw std::runtime_error("Native edge preview exceeds its point bound");append(end);}
+                }else{if(++points>16384)throw std::runtime_error("Native edge preview exceeds its point bound");parameters.push_back(v);}
             };
             for(int i=2;i<=sampler.NbPoints();++i){const double u=sampler.Parameter(i-1),v=sampler.Parameter(i);refine(refine,u,v,curve.Value(u),curve.Value(v),0);}
+            // Drawn outlines also respect the surface mesher's angular deflection.
+            // Chord deviation alone drew small radii on large bodies with a few
+            // long chords over finer shaded faces: 22.5 degrees for r=6 at 1.2 m,
+            // an octagonal r=6 hole at the 0.5 mm cap. Splitting is best effort
+            // within the unchanged point bound and never rejects: short chords
+            // (cusps of C0 curves) stop refining at a quarter deflection.
+            auto turning=[&](double u,double v){gp_Pnt p;gp_Vec start,middle,end;curve.D1(u,p,start);curve.D1(u+(v-u)*0.5,p,middle);curve.D1(v,p,end);
+                if(start.Magnitude()<1e-12||middle.Magnitude()<1e-12||end.Magnitude()<1e-12)return 0.0;return start.Angle(middle)+middle.Angle(end);};
+            size_t budget=16384-parameters.size();std::vector<double> refined{parameters.front()};
+            auto split=[&](auto&& self,double u,double v,int depth)->void{
+                const double mid=u+(v-u)*0.5;
+                if(budget&&depth<24&&mid!=u&&mid!=v&&curve.Value(u).Distance(curve.Value(v))>deflection*0.25&&turning(u,v)>angle){--budget;self(self,u,mid,depth+1);self(self,mid,v,depth+1);}
+                else refined.push_back(v);
+            };
+            for(size_t i=1;i<parameters.size();++i)split(split,parameters[i-1],parameters[i],0);
+            for(double u:refined)append(curve.Value(u));
         }
         edges.arr.push_back(std::move(poly));
     }
@@ -406,7 +423,7 @@ V completeSelectionReferencesOnShape(V result,const TopoDS_Shape& shape,const st
             }
             row.set("reference_scope",V::makeStr("current_brep"));row.set("persistent",V::makeBool(false));row.set("brep_sha256",V::makeStr(originalDigest));
             if(originalDigest!=identity){row.set("status",V::makeStr("obsolete"));row.set("indices",V::makeArr());row.set("reason",V::makeStr("B-rep identity changed; select the current geometry"));}
-        }else if(++semanticCount>512)throw std::runtime_error("Semantic topology registry exceeds512 entries");
+        }else if(++semanticCount>512)throw std::runtime_error("Semantic topology registry exceeds512 entries. Every exact face and edge is named: a sampled polyline profile such as a sketch equation2d recipe adds a flat side face and edges per segment. Use exact sketch curves (ellipse, conic, parabola or style_spline recipes, splines, arcs); fewer samples only make a coarser faceted prism");
     }
     V* mesh=mutableGeneratedField(result,"mesh");
     for(const auto kind:{TopAbs_FACE,TopAbs_EDGE}){

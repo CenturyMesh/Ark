@@ -19,6 +19,47 @@ loading overlay. Other tools wait in the queue; edits resume after completion.
 Closing is deferred until the worker joins. The overlay does not invent a
 percentage or claim that an uninterruptible kernel call has been cancelled.
 
+Studio's main thread and session worker have an explicit 8 MiB stack reserve
+(`ARK_STUDIO_STACK_RESERVE` in CMake). This is address space; pages are
+committed only when used. The linker default is 1 MiB with MSVC, and the
+local llvm-mingw executable header showed the same value. The main thread gets
+the reserve from the link flag, and threads created without a size (such as
+`std::thread`) inherit it. The session worker requests the same reserve
+explicitly, because `std::thread` cannot choose one.
+
+The reserve is needed because session tools nest. For example, configuring
+a component through the parametric graph calls `AgentSession::dispatch` three
+times: the component tool, its feature preview, then the component command
+that serializes the document. Headless self-tests run that chain on the main
+thread beneath `WinMain`. Interactive Studio runs it on the session worker,
+which previously had the same 1 MiB default.
+
+The `studio-parametric-graph-ui` stack overflow was recorded on MSVC 14.44
+builds; no MSVC toolchain was available for this change, so MSVC frame sizes
+were not measured. On a local llvm-mingw Release build:
+
+- The unmodified 1 MiB build passes the test.
+- With the executable's reserve patched to 320 KiB, the test overflowed
+  (`0xC00000FD`). With 384 KiB it completed its UI checks.
+- The debugger trace at the overflow contained no recursion, only the fixed
+  dispatch chain above.
+- The largest frames were `WinMain` (about 81 KiB, because many self-tests are
+  inlined into it) and `AgentSession::dispatch` (about 50 KiB each, three
+  times).
+
+The test now reports the main thread's committed high-water mark. It fails if
+either thread has less than the configured reserve, or if the high-water mark
+exceeds half of the reserve. A build with larger frames therefore reports its
+measured depth instead of passing close to an overflow. With the 8 MiB
+reserve, the same build reported a 368 KiB high-water mark. Whether an MSVC
+build stays within that limit has not been verified.
+
+`WinMain` still contains most Studio self-tests inline. Its frame therefore
+sits under every chain that a headless test runs on the main thread, and under
+the tools that interactive Studio runs on the main thread. In the llvm-mingw
+build that frame is about 23% of the measured 368 KiB, and the three dispatch
+frames are about 41%.
+
 Native tessellation now uses OCCT's parallel mesher with a bounded thread pool.
 The default is up to eight logical threads; `ARK_NATIVE_THREADS=1` selects the
 serial control and values through 64 can explicitly set a budget.

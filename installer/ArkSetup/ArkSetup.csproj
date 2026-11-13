@@ -3,9 +3,10 @@
   <!--
     ArkSetup: ARK's Windows installer and uninstaller.
     scripts/build-installer.ps1 publishes it self-contained single-file, then appends the portable package
-    (ark-windows-x64-<version>.zip) and a 24-byte footer (see Core/Payload.cs). The installer only installs and
+    (ark-windows-x64-<version>.zip) and a 40-byte footer (see Core/Payload.cs). The installer only installs and
     uninstalls: ARK updates itself in the app.
-    Identity (code and technical version) comes from release.json, or from -p:ArkVersion / -p:ArkCode.
+    Identity (code and technical version) comes from release.json, or from -p:ArkVersion / -p:ArkCode; the package
+    digest from -p:ArkPayloadSha256.
   -->
 
   <PropertyGroup>
@@ -56,6 +57,7 @@
   <Target Name="ArkCheckIdentity" BeforeTargets="BeforeBuild">
     <Error Condition="'$(ArkVersion)' == '' Or '$(ArkCode)' == ''" Text="ARK release identity is missing: pass -p:ArkVersion and -p:ArkCode or keep release.json at the repository root." />
     <Error Condition="'$(ArkTestIsolationId)' != '' And !$([System.Text.RegularExpressions.Regex]::IsMatch('$(ArkTestIsolationId)', '^[A-Za-z0-9-]{1,48}$'))" Text="ArkTestIsolationId must match ^[A-Za-z0-9-]{1,48}$." />
+    <Error Condition="'$(ArkPayloadSha256)' != '' And !$([System.Text.RegularExpressions.Regex]::IsMatch('$(ArkPayloadSha256)', '^[0-9a-f]{64}$'))" Text="ArkPayloadSha256 must be the lower-case hex SHA-256 of the package." />
   </Target>
 
   <ItemGroup>
@@ -66,6 +68,11 @@
     <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
       <_Parameter1>ArkCode</_Parameter1>
       <_Parameter2>$(ArkCode)</_Parameter2>
+    </AssemblyAttribute>
+    <!-- The package appended by build-installer.ps1: Setup refuses to install bytes with another digest. -->
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute" Condition="'$(ArkPayloadSha256)' != ''">
+      <_Parameter1>ArkPayloadSha256</_Parameter1>
+      <_Parameter2>$(ArkPayloadSha256)</_Parameter2>
     </AssemblyAttribute>
     <!-- Private test builds (-TestIsolationId): their own uninstall key, no shortcuts. -->
     <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute" Condition="'$(ArkTestIsolationId)' != ''">

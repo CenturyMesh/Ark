@@ -8,6 +8,7 @@
 #include "ark/assistant_connectors.hpp"
 #include "assistant_vision.hpp"
 #include "assistant_context.hpp"
+#include "assistant_feedback.hpp"
 #include "ark/chatgpt_auth.hpp"
 #include "ark/assistant_credentials.hpp"
 #include "ark/iteration_history.hpp"
@@ -731,9 +732,8 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
     for(const char* name:{"doc_apply","team_apply_step","doc_new","doc_load","doc_undo","doc_redo","iteration_restore","import_step","import_sheet_step","import_mesh","import_cad","design_containers"})writeTools.insert(name);
     std::set<std::string> callIds;
     for(auto& item:result.conversation.arr)if(field(item,"type")=="function_call")callIds.insert(field(item,"call_id"));
-    std::set<std::string> pendingFeedback;std::string feedbackProject;bool feedbackReminderSent=false;
-    auto trackFeedback=[&](const V& value){const auto* data=value.find("structuredContent");if(!data)data=&value;if(const auto* project=data->find("activity_project_id");project&&project->t==V::Str){if(project->str!=feedbackProject||(data->find("activity_boundary")&&data->find("activity_boundary")->b)){pendingFeedback.clear();feedbackReminderSent=false;}feedbackProject=project->str;}if(const auto* id=data->find("activity_id");id&&id->t==V::Str&&data->find("feedback_required")&&data->find("feedback_required")->b)pendingFeedback.insert(id->str);if(const auto* rated=data->find("rated_ids");rated&&rated->t==V::Arr)for(const auto& id:rated->arr){pendingFeedback.erase(id.asStr());feedbackReminderSent=false;}if(const auto* pending=data->find("pending_feedback_ids");pending&&pending->t==V::Arr)for(const auto& id:pending->arr)pendingFeedback.insert(id.asStr());};
-    for(const auto& entry:result.conversation.arr)if(field(entry,"type")=="function_call_output"){V data;if(arkjson::parse(field(entry,"output"),data))trackFeedback(data);}
+    // 076A: required feedback covers this run's actions; older rows are backlog.
+    assistant_feedback::RunGate feedback;
     auto consumeInbox=[&]{bool consumed=false;
         if(inbox){V messages=inbox();require(messages.isNull()||messages.t==V::Arr,"Assistant inbox must return an input array.");
             if(messages.t==V::Arr)for(auto& message:messages.arr){
@@ -748,8 +748,9 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
     };
     const auto consumeFinalInbox=[&]{return (!retryHooks.inputPending||retryHooks.inputPending())&&consumeInbox();};
     bool earlierToolCalls=false,offerBomRecovery=false;std::string lastCompletionIssue;V previousRequest;
-    // The reply held while required feedback is requested (042D).
-    std::string replyHeldForFeedback;
+    // The reply held while required feedback is requested (042D), and the reply
+    // that triggered the first reminder, which stays visible at the end (076A).
+    std::string replyHeldForFeedback,firstHeldReply;
     // Final checks shared by a plain final reply and a reply held only for
     // feedback. false: new input or a completion issue needs another round.
     auto finishReply=[&](std::string reply)->bool{
@@ -787,7 +788,7 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
             if(!result.text.empty()&&!prefix.empty()){result.text=prefix+" "+result.text;reply.erase(0,prefix.size());if(!reply.empty()&&reply.front()==' ')reply.erase(0,1);}
             if(!result.text.empty())result.text+='\n';result.text+=reply;emit(events,AssistantEvent::Text,reply);
         }
-        return true;
+        result.feedback=feedback.summary();return true;
     };
     // Reads repeated with identical results since the last successful write.
     // This is a notice to the model, never a turn or token budget.
@@ -907,11 +908,20 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
             if(!roundHasText)throw std::runtime_error(earlierToolCalls?
                 "Assistant completed without a final visible reply. Earlier ARK tool calls may have changed the document; inspect it before retrying.":
                 "Assistant completed without a visible reply or ARK tool call. It did not request a model change; try again or select another available model.");
-            if(!pendingFeedback.empty()&&allowed.count("tool_feedback")){
-                if(feedbackReminderSent)throw std::runtime_error("Required tool feedback was not supplied after the explicit reminder. CAD work and pending project records are retained; resume to provide the missing ratings.");feedbackReminderSent=true;replyHeldForFeedback=heldFinalText;
-                V pending=V::makeArr();for(const auto& id:pendingFeedback)if(pending.arr.size()<64)pending.arr.push_back(V::makeStr(id));V reminder=V::makeObj();reminder.set("role",V::makeStr("developer"));reminder.set("content",V::makeStr("Before finishing, submit tool_feedback for your actual unscored actions: "+pending.dump()+". Rate utility and difficulty 1..5, describe the action, and note issues or wished tools/options. Do not invent successful outcomes. Feedback can be batched with other tool calls."+std::string(allowed.count("team_report_task")?" In a team, the same ratings can go in team_report_task or team_finish_goal ratings.":"")));appendHistory(reminder);if(history)history(result.conversation);emit(events,AssistantEvent::Status,"Recording required tool feedback before completion");continue;
+            std::string reply=heldFinalText;
+            feedback.team=allowed.count("team_report_task")!=0;switch(feedback.step(allowed.count("tool_feedback")!=0)){
+            case assistant_feedback::RunGate::Step::Remind:{
+                if(firstHeldReply.empty())firstHeldReply=heldFinalText;replyHeldForFeedback=heldFinalText;
+                V reminder=V::makeObj();reminder.set("role",V::makeStr("developer"));reminder.set("content",V::makeStr(feedback.reminder(allowed.count("team_report_task")!=0)));appendHistory(reminder);if(history)history(result.conversation);emit(events,AssistantEvent::Status,"Recording required tool feedback before completion");continue;}
+            // A reminder round recorded no rating: accept the reply, keep the rows
+            // pending and say so; this is not a provider or tool failure.
+            case assistant_feedback::RunGate::Step::Unresolved:
+                reply=assistant_feedback::withHeldReply(firstHeldReply,heldFinalText)+"\n\n"+feedback.note();replyHeldForFeedback.clear();
+                if(!feedback.reported){feedback.reported=true;appendHistory(feedback.record());if(history)history(result.conversation);emit(events,AssistantEvent::Status,feedback.status());}
+                break;
+            default:reply=assistant_feedback::withHeldReply(firstHeldReply,heldFinalText);break;
             }
-            if(finishReply(heldFinalText))return result;
+            if(finishReply(reply))return result;
             continue;
         }
         earlierToolCalls=true;
@@ -932,7 +942,7 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
             else if(!callTool)toolResult=errorResult("The host did not provide an ARK tool executor.");
             else {try{toolResult=callTool(name,args);}catch(const std::exception&){toolResult=errorResult("ARK tool execution failed; inspect the document before retrying.");}}
             if(args.t==V::Obj&&writeTools.count(name)&&!assistantToolReadOnly(tools,name,args))responseWrote=true;
-            trackFeedback(toolResult);
+            feedback.observe(toolResult);
             if(name=="doc_info"&&needsProjectedInspection){const auto* error=toolResult.find("isError");const auto* data=toolResult.find("structuredContent");if(!data)data=&toolResult;const auto* observed=data->find("revision");if(error&&error->t==V::Bool&&!error->b&&observed&&observed->t==V::Num&&std::isfinite(observed->num)&&observed->num>=0&&observed->num==std::floor(observed->num))needsProjectedInspection=false;}
             ++performance.toolCalls;performance.lastToolMilliseconds=millisecondsSince(toolBegan);performance.toolMilliseconds+=performance.lastToolMilliseconds;measuredEvent(AssistantEvent::ToolEnd,name);
             {const auto* failed=toolResult.find("isError");const bool succeeded=!(failed&&failed->t==V::Bool&&failed->b);const bool readOnly=args.t==V::Obj&&assistantToolReadOnly(tools,name,args);bool repeated=false;
@@ -981,7 +991,7 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
         if(!replyHeldForFeedback.empty()){
             const bool onlyFeedback=!roundHasText&&std::all_of(calls.begin(),calls.end(),[](const V& call){const auto name=field(call,"name");return name=="tool_feedback"||name=="activity_info";});
             if(!onlyFeedback)replyHeldForFeedback.clear();
-            else if(pendingFeedback.empty()){const auto reply=std::move(replyHeldForFeedback);replyHeldForFeedback.clear();if(finishReply(reply))return result;}
+            else if(feedback.pending.empty()){const auto reply=assistant_feedback::withHeldReply(firstHeldReply,replyHeldForFeedback);replyHeldForFeedback.clear();if(finishReply(reply))return result;}
         }
     }
     throw AssistantRoundLimit(config.maxRounds);
