@@ -140,7 +140,13 @@ void cachePolicyIntegration(){
     const auto& selected=field(starting,"resource_policy");check(field(starting,"capacity_bytes").num==field(selected,"decoded_limit_bytes").num&&field(selected,"decoded_target_bytes").num==double(GiB),"Native RAM cache must use shared selected policy");
     for(int i=0;i<140;++i){const auto command=request("box",10+i);const auto cold=nativeWorkerRequest(command),hot=nativeWorkerRequest(command);check(cold.dump()==hot.dump(),"Adaptive cache changed exact native result");}
     auto usage=memory();check(field(usage,"accounted_retained_bytes").num<=field(usage,"capacity_bytes").num,"Adaptive cache exceeds actual allowance");
+#ifdef _WIN32
     if(field(starting,"capacity_bytes").num>=512*MiB)check(field(usage,"entries").num==140&&field(usage,"entry_limit").num>128,"Larger cache must retain more than old128 small entries");
+#else
+    // Persistent native reuse is Windows-only until the ELF dependency closure has custody,
+    // and the decoded RAM tier is filled only from verified disk hits.
+    check(field(usage,"entries").num==0&&field(usage,"accounted_retained_bytes").num==0,"Without persistent native reuse no decoded entries are retained");
+#endif
     ram.set("1");usage=memory();check(field(usage,"accounted_retained_bytes").num<=MiB,"Lower selected ceiling must trim retained entries promptly");
     ram.set("0");usage=memory();check(field(usage,"entries").num==0&&field(usage,"accounted_retained_bytes").num==0,"Disabled cache must release retained allocations");
     ram.set("");usage=memory();check(!field(field(usage,"resource_policy"),"decoded_override").b&&field(usage,"accounted_retained_bytes").num==0,"Returning toAuto must select hardware policy without allocating");
