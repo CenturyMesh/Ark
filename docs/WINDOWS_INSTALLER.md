@@ -219,8 +219,9 @@ also signs a setup and its uninstaller with a temporary self-signed certificate 
 `CurrentUser\My` (no trust store is changed; it is removed afterwards) and checks
 both signatures. The pull-request workflow has a `windows-installer` job that
 builds the public and self-test configurations, renders the pages (layout only)
-and runs these checks on a hosted Windows runner. That job has not yet been
-observed on a hosted runner; only local runs of the same commands are verified.
+and runs these checks on a hosted Windows runner. It passed on a hosted
+`windows-2022` runner for PR #45, including the temporary test signature; a
+trusted code-signing certificate is still untested.
 `scripts/test-distribution.ps1` also checks that the public setup refuses
 `--screenshot`. `dotnet run --project tests/installer_process_070a` checks, besides
 running-process detection, that an opened payload keeps reading the same file
