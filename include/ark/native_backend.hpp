@@ -26,7 +26,7 @@ struct NativeDocumentResultsReport {
 };
 DocumentDerivedPayloads nativeDocumentResults(const Document& document,NativeDocumentResultsReport* report=nullptr,
                                               size_t capacityBytes=maxDocumentDerivedBytes,size_t capacityEntries=maxDocumentDerivedEntries);
-arkjson::Value stageNativeDocumentResults(Document& document,const DocumentDerivedPayloads& records);
+arkjson::Value stageNativeDocumentResults(Document& document,DocumentDerivedPayloads records);
 arkjson::Value nativeWorkerRequest(const arkjson::Value& request);
 // Aggregate identity for a fully resolved host boolean sequence. On a miss one
 // worker request runs every pairwise step; portable hits validate the saved

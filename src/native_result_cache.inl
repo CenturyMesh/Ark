@@ -32,12 +32,6 @@ struct NativeResultCache {
             for(size_t i=0;i<value.obj.size();++i){if(i&&value.obj[i-1].first==value.obj[i].first)throw std::runtime_error("Duplicate native request field");canonicalRequest(value.obj[i].second);}
         }else if(value.t==V::Arr)for(auto& item:value.arr)canonicalRequest(item);
     }
-    static std::string resolvedRequestDigest(V request){
-        // Scheduling is not geometry. Preserve every nested/native parameter,
-        // including tessellation controls; exclude only this host-added field.
-        request.obj.erase(std::remove_if(request.obj.begin(),request.obj.end(),[](const auto& field){return field.first=="native_threads";}),request.obj.end());
-        canonicalRequest(request);return nativeCacheDigest("ark-resolved-native-request-v1\n"+request.dump());
-    }
     static bool digest(const V* value){return value&&value->t==V::Str&&value->str.size()==64&&value->str.find_first_not_of("0123456789abcdef")==std::string::npos;}
     static bool portableIdentity(const V& result,std::string& request,std::string& producer){
         const auto* receipt=result.find("native_cache_provenance");if(!receipt||receipt->t!=V::Obj||receipt->obj.size()!=3)return false;
@@ -89,7 +83,7 @@ struct NativeResultCache {
         if(operation->str=="model_solid"){
             if(!op||op->t!=V::Str)return false;
             static const std::set<std::string> allowed{"box","sphere","cylinder","cone","torus","extrude","union","cut","common","hole","fillet","chamfer","transform","linear_pattern","circular_pattern","mirror","shell","draft","split_plane","curve_pattern","hole_pattern","holes_orchestrator","vertex_pull","split_line","rib","gusset","mount_pad","boss","screw_support","nut_seat","lid_lip","lid_groove","split_surface","split_tool"};
-            return allowed.count(op->str)!=0;
+            return op->str=="offset"||allowed.count(op->str)!=0;
         }
         if(operation->str=="model"){
             if(!op||op->t!=V::Str)return false;
@@ -145,9 +139,15 @@ struct NativeResultCache {
             else if(const char* home=std::getenv("HOME");home&&*home)directory=fs::u8path(home)/".cache"/"ark"/"native-v1";
 #endif
             if(directory.empty())return;
-            V canonical=request;canonicalRequest(canonical);
-            resolvedRequestIdentity=resolvedRequestDigest(canonical);
-            key=nativeCacheDigest(producerIdentity+"\n"+canonical.dump());entry=directory/(key+".arknative");
+            V canonical=request;
+            // CPU scheduling changes as the dependency frontier narrows. Bind
+            // persistent geometry to the resolved inputs, not that transient
+            // allowance, just as portable snapshot identity already does.
+            canonical.obj.erase(std::remove_if(canonical.obj.begin(),canonical.obj.end(),[](const auto& field){return field.first=="native_threads";}),canonical.obj.end());
+            canonicalRequest(canonical);
+            const auto encoded=canonical.dump();
+            resolvedRequestIdentity=nativeCacheDigest("ark-resolved-native-request-v1\n"+encoded);
+            key=nativeCacheDigest(producerIdentity+"\n"+encoded);entry=directory/(key+".arknative");
         }catch(...){entry.clear();}
     }
     static bool checkedPayload(const std::string& expectedKey,const std::string& bytes,std::string& payload,std::string& payloadDigest){

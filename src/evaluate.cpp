@@ -47,6 +47,10 @@ static bool explicitDependencies(const Feature& f){
     std::function<bool(const arkjson::Value&)> local=[](const arkjson::Value&){return true;};
     local=[&](const arkjson::Value& value){for(const auto& pair:value.obj){if(pair.first=="sketch"||pair.first=="source_sketch"||pair.first=="instances"||pair.first=="node"||pair.first=="source_instance"||pair.first=="alternate_node")return false;if(pair.first=="plane"&&(pair.second.t!=arkjson::Value::Str||(pair.second.str!="XY"&&pair.second.str!="XZ"&&pair.second.str!="YZ")))return false;if(!local(pair.second))return false;}for(const auto& item:value.arr)if(!local(item))return false;return true;};
     if(!local(f.nativeSpec))return false;
+    // These normalized producers read only their explicit program and scalar
+    // environment. Occurrence-bound endpoints/obstacles were vetoed above;
+    // keep those on the owner with the current assembly frontier.
+    if(f.type==FeatureType::PCB||f.type==FeatureType::CableRoute)return f.inputs.empty();
     // Mesh evaluation consumes only the authored payload, expression environment,
     // tessellation options and explicit input bodies; it has no Document access.
     if(isMeshModelFeature(f.type))return f.type==FeatureType::MeshNet?f.inputs.empty():f.inputs.size()==1;

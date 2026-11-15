@@ -2,7 +2,7 @@
 // A hit is attempted ONLY after the entire current file passes its SHA-256
 // check. No path/mtime shortcut or cached success masks corruption/removal.
 struct NativeDecodedCache070 {
-    struct Entry {V value;std::string payloadDigest;size_t bytes=0;unsigned long long used=0;};
+    struct Entry {NativePayload value;std::string payloadDigest;size_t bytes=0;unsigned long long used=0;};
     std::mutex mutex;std::map<std::string,Entry> entries;
     size_t bytes=0;unsigned long long clock=0,hits=0,misses=0,evictions=0,oversized=0;
     static NativeDecodedCache070& instance(){static NativeDecodedCache070 cache;return cache;}
@@ -24,22 +24,24 @@ struct NativeDecodedCache070 {
         }
     }
     static bool lookup(const fs::path& path,const std::string& digest,V& result){
-        auto& cache=instance();std::lock_guard<std::mutex> lock(cache.mutex);const auto selected=policy(cache.bytes);const auto limit=capacity(selected);cache.trim(limit,selected.decodedEntryLimit);
+        auto& cache=instance();std::unique_lock<std::mutex> lock(cache.mutex);const auto selected=policy(cache.bytes);const auto limit=capacity(selected);cache.trim(limit,selected.decodedEntryLimit);
         if(!limit)return false;const auto key=utf8(path);const auto found=cache.entries.find(key);
         if(found==cache.entries.end()){++cache.misses;return false;}
         if(found->second.payloadDigest!=digest){cache.bytes-=found->second.bytes;cache.entries.erase(found);++cache.evictions;++cache.misses;return false;}
         // Copies preserve independent callers: edits to a returned result never
         // change the immutable cached evidence seen by another native request.
-        result=found->second.value;found->second.used=++cache.clock;++cache.hits;return true;
+        const auto retained=found->second.value;found->second.used=++cache.clock;++cache.hits;
+        // Only immutable ownership crosses the lock. Expanding a caller's
+        // independent JSON must not serialize unrelated geometry workers.
+        lock.unlock();result=retained.copyValue();return true;
     }
     static void retain(const fs::path& path,const std::string& digest,const V& result){
         auto& cache=instance();size_t limit=0;
         {std::lock_guard<std::mutex> lock(cache.mutex);const auto selected=policy(cache.bytes);limit=capacity(selected);cache.trim(limit,selected.decodedEntryLimit);}
         if(!limit)return;
-        const auto key=utf8(path);size_t estimate=allocated(result)+key.size()+digest.size()+sizeof(Entry)+256;
-        if(estimate>limit){std::lock_guard<std::mutex> lock(cache.mutex);++cache.oversized;return;}
+        const auto key=utf8(path);
         Entry entry;entry.value=result;entry.payloadDigest=digest;
-        entry.bytes=allocated(entry.value)+key.capacity()+entry.payloadDigest.capacity()+sizeof(Entry)+256;
+        entry.bytes=entry.value.allocatedBytes()+key.capacity()+entry.payloadDigest.capacity()+sizeof(Entry)+256;
         std::lock_guard<std::mutex> lock(cache.mutex);const auto currentPolicy=policy(cache.bytes);const auto currentLimit=capacity(currentPolicy);cache.trim(currentLimit,currentPolicy.decodedEntryLimit);
         if(!currentLimit||entry.bytes>currentLimit){++cache.oversized;return;}
         if(const auto old=cache.entries.find(key);old!=cache.entries.end()){cache.bytes-=old->second.bytes;cache.entries.erase(old);}

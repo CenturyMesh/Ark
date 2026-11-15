@@ -247,14 +247,15 @@ DocumentDerivedPayloads nativeDocumentResults(const Document& document,NativeDoc
         total+=bytes.size();records.push_back({identity->str,std::move(bytes)});
     }publish();return records;
 }
-V stageNativeDocumentResults(Document& document,const DocumentDerivedPayloads& records){
+V stageNativeDocumentResults(Document& document,DocumentDerivedPayloads records){
     std::map<std::string,std::string> staged,requests;std::set<std::string> ambiguous;size_t total=0,rejected=0,legacy=0;
-    for(const auto& record:records){
+    for(auto& record:records){
         if(record.key.size()!=64||record.key.find_first_not_of("0123456789abcdef")!=std::string::npos||record.bytes.size()>NativeResultCache::maxEntry||record.bytes.size()>maxDocumentDerivedBytes-total){++rejected;continue;}
         V checked;if(!NativeResultCache::decode(record.key,record.bytes,checked)){++rejected;continue;}
         std::string request,producer;const bool portable=NativeResultCache::portableIdentity(checked,request,producer);
         if(checked.find("native_cache_provenance")&&!portable){++rejected;continue;}
-        if(!staged.emplace(record.key,record.bytes).second){++rejected;continue;}total+=record.bytes.size();
+        const auto bytes=record.bytes.size();
+        if(!staged.emplace(record.key,std::move(record.bytes)).second){++rejected;continue;}total+=bytes;
         if(portable){if(!requests.emplace(request,record.key).second)ambiguous.insert(request);}else ++legacy;
     }
     for(const auto& request:ambiguous)requests.erase(request);

@@ -3,6 +3,7 @@
 #include "ark/iteration_history.hpp"
 #include "ark/serialize.hpp"
 #include "ark/version.hpp"
+#include "ark/native_backend.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -21,8 +22,23 @@ ark::Document fixture(int count){ark::Document document;document.setParam("drive
 V opened(const fs::path& p){ark::Document document;std::string error;double ms=timed([&]{check(ark::loadDocument(utf8(p).c_str(),document,&error),error);recompute(document);});V out=V::makeObj();out.set("load_recompute_ms",V::makeNum(ms));out.set("feature_count",V::makeNum(document.features.size()));out.set("authoring_sha256",V::makeStr(ark::iterationSha256(ark::documentToJson(document))));return out;}
 }
 int main(int argc,char** argv){try{
+    if(argc==3&&std::string(argv[1])=="--profile-open"){
+        ark::disableProcessPowerThrottling();
+        auto start=std::chrono::steady_clock::now();
+        auto stamp=[&]{return std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();};
+        ark::Document document;std::string error;
+        check(ark::loadDocument(argv[2],document,&error),error);
+        const auto loadMs=stamp();
+        std::cerr<<"loaded ms="<<stamp()<<" features="<<document.features.size()<<" derived="<<document.derivedGeometryStatus.dump()<<std::endl;
+        ark::setEvaluationObserver([&](ark::u64 id,const std::string&,size_t index,size_t total,bool done,bool reused){std::cerr<<"feature "<<index+1<<"/"<<total<<" id="<<id<<" done="<<done<<" reused="<<reused<<" ms="<<stamp()<<std::endl;});
+        auto results=document.recompute();ark::setEvaluationObserver({});
+        const auto totalMs=stamp();V rows=V::makeArr(),geometry=V::makeArr();bool ok=true;
+        for(const auto& r:results){V row=V::makeObj();row.set("id",V::makeNum(r.id));row.set("ok",V::makeBool(r.ok));row.set("ms",V::makeNum(r.ms));if(!r.ok){ok=false;row.set("error",V::makeStr(r.error));}rows.arr.push_back(std::move(row));}
+        for(const auto& b:document.evalBodies){V row=V::makeObj();row.set("id",V::makeNum(b.id));if(auto* topology=b.nativeData.find("topology"))row.set("topology_sha256",V::makeStr(ark::iterationSha256(topology->dump())));if(auto* brep=b.nativeData.find("brep_base64"))row.set("brep_sha256",V::makeStr(ark::iterationSha256(brep->str)));geometry.arr.push_back(std::move(row));}
+        V report=V::makeObj();report.set("schema",V::makeStr("ark.open-profile.077a.v1"));report.set("ok",V::makeBool(ok));report.set("load_ms",V::makeNum(loadMs));report.set("recompute_ms",V::makeNum(totalMs-loadMs));report.set("total_ms",V::makeNum(totalMs));report.set("results",std::move(rows));report.set("geometry",std::move(geometry));report.set("authoring_sha256",V::makeStr(ark::iterationSha256(ark::documentToJson(document))));report.set("kernel",ark::nativeKernelInfo());std::cout<<report.dump()<<std::endl;return ok?0:1;
+    }
     if(argc==3&&std::string(argv[1])=="--open-once"){std::cout<<opened(path(argv[2])).dump()<<'\n';return 0;}
-    if(argc!=3&&argc!=5)throw std::runtime_error("Usage: ark-performance-regression --out-dir DIRECTORY [--samples 21]; or --open-once FILE");
+    if(argc!=3&&argc!=5)throw std::runtime_error("Usage: ark-performance-regression --out-dir DIRECTORY [--samples 21]; or --open-once FILE; or --profile-open FILE (read-only, with per-feature timing)");
     check(std::string(argv[1])=="--out-dir","Expected --out-dir");int samples=21;if(argc==5){check(std::string(argv[3])=="--samples","Expected --samples");samples=std::stoi(argv[4]);check(samples>=3&&samples<=101,"Samples must be 3..101");}
     fs::path directory=path(argv[2]);fs::create_directories(directory);V rows=V::makeArr();
     for(int size:{16,128,512}){

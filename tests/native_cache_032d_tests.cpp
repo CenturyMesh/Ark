@@ -36,6 +36,13 @@ struct Budget {int old=ark::setNativeThreadBudget(1);~Budget(){ark::setNativeThr
 void run(){
     Workspace workspace;Environment directory(L"ARK_NATIVE_CACHE_DIRECTORY",workspace.path.wstring()),enabled(L"ARK_NATIVE_RESULT_CACHE",L"1");Budget budget;
     const auto first=ark::nativeWorkerRequest(box(3));volume(first,60);
+    {
+        V request=V::makeObj(),model=V::makeObj();model.set("op",V::makeStr("offset"));model.set("input_brep",field(first,"brep_base64"));model.set("input_topology",field(first,"topology"));model.set("distance",V::makeNum(1));request.set("operation",V::makeStr("model_solid"));request.set("request",model);
+        const auto expanded=ark::nativeWorkerRequest(request);volume(expanded,210);const auto hits=counter("native_result_cache_hits");volume(ark::nativeWorkerRequest(request),210);check(counter("native_result_cache_hits")==hits+1,"Solid offsets must not regenerate and cascade downstream cache misses on reopening");
+        ark::Document offsetDocument;ark::Body offsetBody;offsetBody.nativeData=expanded;offsetDocument.evalBodies.push_back(std::move(offsetBody));const auto offsetRecords=ark::nativeDocumentResults(offsetDocument);check(offsetRecords.size()==1,"Offset result has portable request custody");
+        workspace.fresh(directory);ark::Document pending;ark::stageNativeDocumentResults(pending,offsetRecords);ark::NativeDocumentResultScope scope(pending.pendingNativeGeometry);const auto restoredBefore=counter("native_document_restores");volume(ark::nativeWorkerRequest(request),210);check(counter("native_document_restores")==restoredBefore+1,"Offset snapshot passes current exact B-rep and reference validation");
+        model.set("distance",V::makeNum(2));request.set("request",model);volume(ark::nativeWorkerRequest(request),504);check(counter("native_document_restores")==restoredBefore+1,"Changed offset must not reuse a different distance");
+    }
     ark::Document source;ark::Body body;body.nativeData=first;source.evalBodies.push_back(std::move(body));
     const auto records=ark::nativeDocumentResults(source);check(records.size()==1,"one portable saved result");
     const auto saved=decoded(records.front());const auto provenance=field(saved,"native_cache_provenance");
@@ -45,6 +52,9 @@ void run(){
     const auto threaded=restore(records.front(),3);volume(threaded,60);check(counter("native_document_restores")==before+1,"changed scheduling budget restores through validation");
     check(field(field(threaded,"report"),"snapshot_validation").str=="current_exact_brep_measurements_and_references","portable match runs current kernel validation");
     check(field(field(threaded,"native_cache_provenance"),"resolved_request_sha256").str==field(provenance,"resolved_request_sha256").str,"scheduling excluded from resolved request identity");
+    ark::setNativeThreadBudget(1);const auto hitsBefore=counter("native_result_cache_hits");const auto sameGeometry=ark::nativeWorkerRequest(box(3));
+    check(counter("native_result_cache_hits")==hitsBefore+1&&field(sameGeometry,"native_cache_key").str==field(threaded,"native_cache_key").str,"Owner/parallel budget changes reuse authenticated geometry instead of rebuilding it");volume(sameGeometry,60);
+    ark::setNativeThreadBudget(2);
     workspace.fresh(directory);V foreign=saved;V origin=provenance;origin.set("producer_sha256",V::makeStr(std::string(64,'a')));foreign.set("native_cache_provenance",origin);before=counter("native_document_restores");
     const auto imported=restore(encoded(std::string(64,'b'),foreign),3);volume(imported,60);check(counter("native_document_restores")==before+1,"different producer restores only through fresh native validation");check(field(imported,"native_snapshot_source_producer_sha256").str==std::string(64,'a'),"source producer provenance retained separately");check(field(field(imported,"native_cache_provenance"),"producer_sha256").str==field(provenance,"producer_sha256").str,"current producer owns regenerated evidence");
     workspace.fresh(directory);before=counter("native_document_restores");volume(restore(records.front(),7),140);check(counter("native_document_restores")==before,"changed geometric request cannot restore old geometry");
