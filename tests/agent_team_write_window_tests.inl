@@ -2,14 +2,17 @@ static V writeWindowOutput(const V& request){
     const auto& input=request.find("input")->arr;for(auto it=input.rbegin();it!=input.rend();++it)if(it->find("type")&&it->find("type")->asStr()=="function_call_output")return json(it->find("output")->asStr());return V{};
 }
 static bool writeWindowError(const V& result,const char* code){auto* error=result.find("isError");auto* actual=result.find("error_code");return error&&error->b&&actual&&actual->asStr()==code;}
-static void cooperativeWriteWindows(){
+static void cooperativeWriteWindows(bool consolidatedAliases=false){
     ark::AgentTeam team;ark::AgentTeamConfig config;config.maxWorkers=2;config.roles={role("owner",true),role("peer",true)};Gate held;std::string token,proposal;int ownerRound=0,peerRound=0;unsigned blocked=0;bool deniedRelease=false,busyReserve=false,readAllowed=false,contextOwner=false,staleGrant=false;std::atomic_int writeCalls=0,libraryCalls=0;ark::AgentSession session;
+    if(consolidatedAliases)for(auto& role:config.roles)role.assistant.resultHandleBytes=1024*1024;
+    auto release=[&](const char* id){return call(id,consolidatedAliases?"team_reserve_write":"team_release_write",std::string("{")+(consolidatedAliases?"\"release\":true,":"")+"\"reservation_id\":\""+token+"\"}");};
     config.roles[0].transport=[&](auto&,const V& request,auto*){
+        if(consolidatedAliases){check(request.find("tools")->arr.size()==128,"Helper-aware parallel catalogue exceeded128 functions");bool alias=false,legacy=false;for(const auto& tool:request.find("tools")->arr){if(tool.find("name")->str=="team_reserve_write")alias=tool.find("parameters")->find("properties")->find("release");if(tool.find("name")->str=="team_release_write")legacy=true;}check(alias&&!legacy,"Release capability was not explicitly consolidated for the crowded catalogue");}
         switch(++ownerRound){
         case 1:return call("owner_read","doc_info","{}");
         case 2:return call("owner_proposal","team_propose",R"({"to":"peer","expected_revision":0,"commands":[{"op":"param.set","name":"proposal_width","expr":"12"}],"reason":"Measured coherent edit"})");
         case 3:proposal=writeWindowOutput(request).find("proposal_id")->asStr();return call("owner_reserve","team_reserve_write",R"({"expected_revision":0,"lease_ms":30000,"reason":"Preview and commit one coherent change"})");
-        case 4:token=writeWindowOutput(request).find("reservation_id")->asStr();held.enter();return call("owner_release","team_release_write",std::string("{\"reservation_id\":\"")+token+"\"}");
+        case 4:token=writeWindowOutput(request).find("reservation_id")->asStr();held.enter();return release("owner_release");
         case 5:return call("owner_write","doc_apply",R"({"expected_revision":0,"commands":[{"op":"param.set","name":"owner_width","expr":"20"}]})");
         case 6:return call("owner_old_reserve","team_reserve_write",R"({"expected_revision":0})");
         case 7:staleGrant=writeWindowError(writeWindowOutput(request),"team_write_revision_conflict");return call("owner_read_again","doc_info","{}");
@@ -20,7 +23,7 @@ static void cooperativeWriteWindows(){
         switch(++peerRound){
         case 1:return call("peer_read","doc_info","{}");
         case 2:held.await(1);return call("peer_reserve","team_reserve_write",R"({"expected_revision":0})");
-        case 3:busyReserve=writeWindowError(writeWindowOutput(request),"team_write_busy");return call("peer_stolen_release","team_release_write",std::string("{\"reservation_id\":\"")+token+"\"}");
+        case 3:busyReserve=writeWindowError(writeWindowOutput(request),"team_write_busy");return release("peer_stolen_release");
         case 4:deniedRelease=writeWindowOutput(request).find("isError")&&writeWindowOutput(request).find("isError")->b;return call("peer_direct","doc_apply",R"({"expected_revision":0,"commands":[{"op":"param.set","name":"peer_width","expr":"30"}]})");
         case 5:blocked+=writeWindowError(writeWindowOutput(request),"team_write_busy");return call("peer_library","library_insert",R"({"expected_revision":0,"id":"blocked-catalogue-item"})");
         case 6:blocked+=writeWindowError(writeWindowOutput(request),"team_write_busy");return call("peer_step","team_apply_step",R"({"expected_revision":0,"commands":[{"op":"param.set","name":"peer_step","expr":"30"}]})");
@@ -33,7 +36,7 @@ static void cooperativeWriteWindows(){
         case 13:return call("peer_fresh_write","doc_apply",R"({"expected_revision":1,"commands":[{"op":"param.set","name":"peer_width","expr":"30"}]})");
         default:return done("Explicit corrected edit after owner exit.");}
     };
-    const auto standalone=ark::AgentSession::tools();bool added=false;for(const auto& item:standalone.arr)if(item.find("name")->asStr()=="team_reserve_write")added=true;check(!added,"write reservation tools do not change standalone discovery");
+    auto standalone=ark::AgentSession::tools();bool added=false;for(const auto& item:standalone.arr)if(item.find("name")->asStr()=="team_reserve_write")added=true;check(!added,"write reservation tools do not change standalone discovery");if(consolidatedAliases){V extra=json(R"({"name":"synthetic_extra_read","description":"Synthetic future catalogue capacity fixture; never invoked","inputSchema":{"type":"object","properties":{}},"annotations":{"readOnlyHint":true}})");standalone.arr.push_back(extra);}
     team.start(config,"Cooperative parallel authoring",standalone,[&](const auto& name,const V& args){if(name=="doc_apply")++writeCalls;if(name=="library_insert")++libraryCalls;return session.call(name,args);});complete(team);
     check(busyReserve&&deniedRelease&&blocked==4,"owner token rejects peer reservation/release and all direct/library/step/proposal write paths");check(readAllowed&&contextOwner&&writeCalls==1&&libraryCalls==0&&session.revision==1,"reads remain available while busy calls never enter executor");check(staleGrant,"grant rechecks real revision without rebasing earlier doc_info");check(team.snapshot().unresolvedErrors>=3,"reserve/release/inspection do not clear unrelated busy write errors");
     check(team.steer("Inspect after the previous owner turn ended","peer"),"peer can continue after owner exit");complete(team);check(contextOwner&&writeCalls==2&&session.revision==2,"owner turn exit releases lease and a fresh explicit peer write succeeds");

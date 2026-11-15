@@ -716,7 +716,21 @@ const std::vector<FeatureResult>& Document::recompute() {
     std::vector<std::future<Evaluation>> jobs(features.size());std::vector<bool> published(features.size(),false);size_t outstanding=0,outstandingBytes=0;std::vector<size_t> jobBytes(features.size(),0);
     auto ownerNativeAllowance=[&](){const unsigned allowance=outstanding==0?resourcePolicy.ownerNativeThreads:nativeThreadsPerWorker;schedulerDiagnostics070A.peakOwnerNativeThreads=std::max(schedulerDiagnostics070A.peakOwnerNativeThreads,allowance);return allowance;};
     std::vector<std::unique_ptr<Evaluation>> completed(features.size());
-    const size_t contextBytes=valueMemory(authored)+features.size()*sizeof(Feature);
+    // Charge copied ownership and bounded request working copies, not every
+    // unrelated feature/image in the document for every scheduled operation.
+    const auto authoredBytes=[&](const char* name){const auto* value=authored.find(name);return value?valueMemory(*value):size_t(0);};
+    const size_t environmentBytes=2*authoredBytes("params");
+    const size_t materialBytes=2*authoredBytes("materials");
+    std::vector<size_t> snapshotBytes(features.size(),0);
+    auto snapshotCharge=[&](size_t i){
+        if(snapshotBytes[i])return snapshotBytes[i];
+        size_t bytes=sizeof(Document)+sizeof(Evaluation)+environmentBytes+sizeof(Feature)+2*valueMemory(authored.find("features")->arr[i]);
+        if(!isMeshModelFeature(features[i].type)){
+            std::set<size_t> ancestors;std::function<void(size_t)> include=[&](size_t index){if(!ancestors.insert(index).second)return;for(u64 id:features[index].inputs){const auto source=indices.find(id);if(source!=indices.end())include(source->second);}};include(i);
+            bytes+=materialBytes;for(size_t index:ancestors)bytes+=sizeof(Feature)+2*valueMemory(authored.find("features")->arr[index]);
+        }
+        snapshotBytes[i]=bytes;return bytes;
+    };
     const size_t payloadBudget=static_cast<size_t>(std::min<std::uint64_t>(resourcePolicy.payloadLimitBytes,std::numeric_limits<size_t>::max()));
     struct Drain {std::vector<std::future<Evaluation>>& jobs;~Drain(){for(auto& job:jobs)if(job.valid())job.wait();}} drain{jobs};
     // Only dirty audited operations enter the frontier. Ready cache entries are
@@ -751,6 +765,7 @@ const std::vector<FeatureResult>& Document::recompute() {
             const auto& body=completed[i]->body;size_t retained=sizeof(Evaluation)+body.faces.size()*sizeof(Face)+valueMemory(body.nativeData);
             if(body.baked)retained+=sizeof(Mesh)+(body.baked->pos.capacity()+body.baked->nrm.capacity())*sizeof(f32)+body.baked->idx.capacity()*sizeof(u32);
             const size_t charge=std::max(jobBytes[i],retained);outstandingBytes+=charge-jobBytes[i];jobBytes[i]=charge;
+            schedulerDiagnostics070A.peakAdmittedPayloadBytes=std::max<std::uint64_t>(schedulerDiagnostics070A.peakAdmittedPayloadBytes,outstandingBytes);
             it=runningJobs.erase(it);
             if(completed[i]->result.ok&&(!body.faces.empty()||body.baked))releaseInput(i);
             // Finished outputs keep their slot and charge until publication.
@@ -783,7 +798,13 @@ const std::vector<FeatureResult>& Document::recompute() {
         }
         if(!ready)return false;
         const auto& key=plannedKeys[i];auto cached=evaluationCache.find(features[i].id);if(cached!=evaluationCache.end()&&cached->second.key==key)return false;
-        bytes=contextBytes;for(u64 id:features[i].inputs){const auto* body=inputBody(id);bytes+=sizeof(Body)+body->faces.size()*sizeof(Face)+valueMemory(body->nativeData);if(body->baked)bytes+=(body->baked->pos.size()+body->baked->nrm.size()+body->baked->idx.size())*sizeof(float);}
+        bytes=snapshotCharge(i);for(u64 id:features[i].inputs){const auto* body=inputBody(id);bytes+=sizeof(Body)+body->faces.size()*sizeof(Face)+body->profile.segs.size()*sizeof(ProfileSeg);for(const auto& face:body->faces){bytes+=face.role.size()+face.loops.size()*sizeof(TrimLoop);for(const auto& loop:face.loops)bytes+=loop.uv.size()*sizeof(Vec2);}for(const auto& hole:body->prismHoles)bytes+=sizeof(hole)+hole.size()*sizeof(Vec2);
+            // NativePayload/MeshSnapshot copies share immutable storage. Native
+            // requests still materialize B-rep/topology strings/trees, and mesh
+            // operators allocate output channels; retain working-copy charges.
+            if(isMeshModelFeature(features[i].type)){if(body->baked)bytes+=2*((body->baked->pos.size()+body->baked->nrm.size())*sizeof(float)+body->baked->idx.size()*sizeof(u32));}
+            else for(const char* key:{"brep_base64","topology"})if(const auto* value=body->nativeData.find(key))bytes+=3*valueMemory(*value);
+        }
         if(bytes>payloadBudget)return false;
         // A running operation is not cancelled to reclaim memory. Tighten new
         // snapshot admission when live available RAM falls; the per-pass worker
@@ -825,6 +846,9 @@ const std::vector<FeatureResult>& Document::recompute() {
                 activity->leave();value.result.ms=nowMs()-started;return value;
             });
             jobs[i]=task->get_future();ThreadPool::get().submit([task]{(*task)();});++outstanding;++parallelFeatures;jobBytes[i]=bytes;outstandingBytes+=bytes;
+            schedulerDiagnostics070A.largestJobSnapshotBytes=std::max<std::uint64_t>(schedulerDiagnostics070A.largestJobSnapshotBytes,snapshotBytes[i]);
+            schedulerDiagnostics070A.peakAdmittedPayloadBytes=std::max<std::uint64_t>(schedulerDiagnostics070A.peakAdmittedPayloadBytes,outstandingBytes);
+            for(u64 id:features[i].inputs){const auto* body=inputBody(id);schedulerDiagnostics070A.sharedInputBytesReferenced+=body->nativeData.allocatedBytes();if(body->baked)schedulerDiagnostics070A.sharedInputBytesReferenced+=(body->baked->pos.capacity()+body->baked->nrm.capacity())*sizeof(float)+body->baked->idx.capacity()*sizeof(u32);}
             readyWorkers.erase(i);runningJobs.insert(i);schedulerDiagnostics070A.peakRunningJobs=std::max(schedulerDiagnostics070A.peakRunningJobs,runningJobs.size());
         }
     };
@@ -910,6 +934,7 @@ const std::vector<FeatureResult>& Document::recompute() {
             row.set("dependency_scope",V::makeStr(scope.audited?"semantic":explicitInputs[i]?"explicit":"conservative_history"));if(scope.audited){for(u64 input:scope.features)inputs.arr.push_back(V::makeNum(double(input)));for(const auto& name:scope.named)names.arr.push_back(V::makeStr(name));}else{for(u64 input:feature.inputs)inputs.arr.push_back(V::makeNum(double(input)));if(!explicitInputs[i])row.set("conservative_predecessors",V::makeNum(i));}row.set("dependency_ids",inputs);row.set("named_sources",names);rows.arr.push_back(std::move(row));}
         evaluationDiagnostics.set("mode",V::makeStr("recompute"));evaluationDiagnostics.set("features",std::move(rows));evaluationDiagnostics.set("evaluated",V::makeNum(recomputeEvaluated));evaluationDiagnostics.set("reused",V::makeNum(recomputeReused));evaluationDiagnostics.set("inactive",V::makeNum(inactive));evaluationDiagnostics.set("suppressed",V::makeNum(suppressed));evaluationDiagnostics.set("failed",V::makeNum(failed));evaluationDiagnostics.set("projection_builds",V::makeNum(recomputeProjectionBuilds));evaluationDiagnostics.set("projection_reused",V::makeNum(recomputeProjectionReused));}
     evaluationCache=std::move(nextCache);
+    {using V=arkjson::Value;V payload=V::makeObj();payload.set("largest_snapshot_bytes",V::makeNum(double(schedulerDiagnostics070A.largestJobSnapshotBytes)));payload.set("peak_admitted_bytes",V::makeNum(double(schedulerDiagnostics070A.peakAdmittedPayloadBytes)));payload.set("shared_input_bytes_referenced",V::makeNum(double(schedulerDiagnostics070A.sharedInputBytesReferenced)));payload.set("scope",V::makeStr("Copied ancestor/source/environment ownership plus estimated request/output working copies; shared geometry remains shared; not a process RSS cap"));evaluationDiagnostics.set("payload_admission",std::move(payload));}
     // Unloaded definitions retain authored recipes, never derived native
     // buffers. These two auxiliary caches otherwise outlive evalBodies.
     for(auto it=referenceFrameCache.begin();it!=referenceFrameCache.end();)if(!evaluationCache.count(it->first))it=referenceFrameCache.erase(it);else ++it;

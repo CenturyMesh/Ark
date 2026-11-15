@@ -76,6 +76,7 @@ typedef ptrdiff_t GLsizeiptr;
 #include "ark/holes_orchestrator.hpp"
 #include "ark/design_containers.hpp"
 #include "ark/parametric_components.hpp"
+#include "ark/geometry_nodes_078b.hpp"
 #include "ark/parametric_programs.hpp"
 #include "ark/surface_quality_068b.hpp"
 #include "ark/surface_network_068b.hpp"
@@ -1128,6 +1129,7 @@ static void includeCanvasBounds(){
     }
 }
 static void rebuildScene(bool evaluate=false){
+    g_displayMeshAllocationError078.clear();
     restoreMotionCables054B();
     const auto sceneStarted=std::chrono::steady_clock::now();g_sceneRebuiltParts=0;g_sceneReusedParts=0;
     ++g_displayMeshSerial;
@@ -1211,8 +1213,10 @@ static void rebuildScene(bool evaluate=false){
             // placement order changes.
             if(i>=g_meshes.size()){if(prior<oldGpu.size()){g_meshes.push_back(oldGpu[prior]);oldGpu[prior]={};}else g_meshes.emplace_back();}
             if(prior<oldEdges.size()){if(i>=g_edgeLines.size())g_edgeLines.resize(i+1);g_edgeLines[i]=oldEdges[prior];oldEdges[prior]={};}
-            uploadMesh(g_meshes[i],g_cpuMeshes.back());uploadEdges(i);part=parts.emplace(placement.feature,i).first;
-            g_scenePartCache.push_back({body->id,stable&&evaluated!=g_doc.evaluationCache.end()?evaluated->second.body:std::shared_ptr<const Body>{},g_meshes[i].serial,nativeOwner,body->nativeData.ownerIdentity()!=nullptr});
+            const bool uploaded=uploadMesh(g_meshes[i],g_cpuMeshes.back());uploadEdges(i);part=parts.emplace(placement.feature,i).first;
+            // A retained old handle after allocation failure is not a display
+            // of this new body. Do not admit it into unchanged-scene reuse.
+            g_scenePartCache.push_back({body->id,uploaded&&stable&&evaluated!=g_doc.evaluationCache.end()?evaluated->second.body:std::shared_ptr<const Body>{},g_meshes[i].serial,nativeOwner,body->nativeData.ownerIdentity()!=nullptr});
             }
         }
         auto i=part->second;g_bodyIds.push_back(placement.feature);g_instanceIds.push_back(placement.node);g_instanceCopies.push_back(placement.copy);g_instanceNames.push_back(placement.name);g_instanceWorld.push_back(placement.world);g_instancePart.push_back(i);
@@ -1576,7 +1580,7 @@ static arkjson::Value runTool(const std::string& tool,const arkjson::Value& args
     g_progressTiming030={};
     flushPendingUsage();
     auto effectiveArgs=args;static const std::set<std::string> mutations{"doc_apply","doc_new","doc_load","doc_undo","doc_redo","iteration_restore","history_migrate_derived","history_compact","import_step","import_sheet_step","import_mesh","import_cad","design_containers","image_asset","plane_authoring","library_insert"};const bool documentWrite=mutations.count(tool)&&(tool!="design_containers"||containerWrite)&&(tool!="image_asset"||!args.find("action")||args.find("action")->asStr()!="inspect");if(documentWrite&&!effectiveArgs.find("actor")){using V=arkjson::Value;V actor=V::makeObj();actor.set("kind",V::makeStr("human"));actor.set("id",V::makeStr("studio"));effectiveArgs.set("actor",actor);}
-    bool potentiallySlow=(tool=="image_asset"&&args.find("action")&&(args.find("action")->asStr()=="generate"||args.find("action")->asStr()=="compose"))||tool=="parametric_components"||tool=="surface_control"||tool=="parametric_program"||tool=="design_variants"||tool=="design_review"||tool=="drawing_export"||tool=="wood_inspect"||tool=="hud_flex_check"||tool=="sketch_repair"||tool=="plane_authoring"||tool=="import_cad"||tool=="cad_inspect"||tool=="design_containers"||tool.rfind("library_",0)==0||tool=="failure_replay"||tool=="failure_export"||tool=="manufacturing_inspect"||tool=="doc_load"||tool=="iteration_restore"||tool=="history_migrate_derived"||tool=="history_compact"||tool=="doc_apply"||tool=="doc_preview"||tool=="design_solve"||tool=="placement_plan"||tool=="pattern_plan"||tool=="query_batch"||tool=="geometry_query"||tool=="physics_inspect"||tool=="native_inspect"||tool=="step_inspect"||tool=="reference_inspect"||tool=="assembly_info"||tool=="kernel_info"||tool=="doc_undo"||tool=="doc_redo"||tool=="import_step"||tool=="import_sheet_step"||tool=="import_mesh"||tool=="export_step"||tool=="export_iges"||tool=="export_mesh"||tool=="export_flat_dxf"||tool=="bom_export_parts"||tool=="reference_navigate"||tool=="selection_set";
+    bool potentiallySlow=tool=="snapshot"||(tool=="image_asset"&&args.find("action")&&(args.find("action")->asStr()=="generate"||args.find("action")->asStr()=="compose"))||tool=="geometry_graph"||tool=="parametric_components"||tool=="surface_control"||tool=="parametric_program"||tool=="design_variants"||tool=="design_review"||tool=="drawing_export"||tool=="wood_inspect"||tool=="hud_flex_check"||tool=="sketch_repair"||tool=="plane_authoring"||tool=="import_cad"||tool=="cad_inspect"||tool=="design_containers"||tool.rfind("library_",0)==0||tool=="failure_replay"||tool=="failure_export"||tool=="manufacturing_inspect"||tool=="doc_load"||tool=="iteration_restore"||tool=="history_migrate_derived"||tool=="history_compact"||tool=="doc_apply"||tool=="doc_preview"||tool=="design_solve"||tool=="placement_plan"||tool=="pattern_plan"||tool=="query_batch"||tool=="geometry_query"||tool=="physics_inspect"||tool=="native_inspect"||tool=="step_inspect"||tool=="reference_inspect"||tool=="assembly_info"||tool=="kernel_info"||tool=="doc_undo"||tool=="doc_redo"||tool=="import_step"||tool=="import_sheet_step"||tool=="import_mesh"||tool=="export_step"||tool=="export_iges"||tool=="export_mesh"||tool=="export_flat_dxf"||tool=="bom_export_parts"||tool=="reference_navigate"||tool=="selection_set";
     if(tool=="doc_apply"&&!effectiveArgs.find("checks")&&metadataOnlyApply(g_doc,effectiveArgs))potentiallySlow=false;
     bool viewportSnapshot=tool=="snapshot"&&!effectiveArgs.find("candidate_id")&&effectiveArgs.find("view")&&effectiveArgs.find("view")->asStr()=="viewport";
     const bool backgroundAuthoring=tool=="doc_apply"&&!effectiveArgs.find("candidate_id")&&(!metadataOnlyApply(g_doc,effectiveArgs)||effectiveArgs.find("checks"))&&g_uiReady&&(!g_headless||g_authoringUiTestMode);if(backgroundAuthoring&&!effectiveArgs.find("expected_revision"))effectiveArgs.set("expected_revision",arkjson::Value::makeNum((double)g_session.revision));
@@ -3127,7 +3131,9 @@ static void measuredActivityDetails(){
 }
 #include "team_diagnostics.inl"
 static void pricingDetails(){
+    if(!g_displayMeshAllocationError078.empty()&&!g_dialogSmoke){if(MessageBoxA(g_window,g_displayMeshAllocationError078.c_str(),"Display memory / retry rendering",MB_RETRYCANCEL|MB_ICONWARNING)==IDRETRY){g_error=false;rebuildScene();if(g_displayMeshAllocationError078.empty()&&!g_error)g_status="Display rebuilt / revision "+std::to_string(g_session.revision);}return;}
     updateCostDisplay(true);std::ostringstream text;text<<costSummary()<<"\r\n\r\nCurrent-rate standard API-equivalent USD scenarios, not a bill.\r\nPurchased standard credit equivalent is not plan allowance or actual account spending.\r\nHistorical receipts are revalued at the currently fetched published rates.\r\nCache-write charges, request context, service tier and region are unknown. Output includes reasoning once.\r\nUnpriced API tokens: "<<g_costEstimate.unpricedTokens<<" / Unpriced credit tokens: "<<g_costEstimate.unpricedCreditTokens<<"\r\nFetched UTC: "<<(g_pricing.fetchedAtUtc.empty()?"Unavailable":g_pricing.fetchedAtUtc)<<"\r\nAPI source: "<<g_pricing.sourceUrl<<"\r\nPlan/credit source: "<<g_pricing.subscriptionSourceUrl<<"\r\n\r\n"<<g_pricing.subscriptionSummary;
+    text<<"\r\n\r\nDisplay mesh buffers: "<<(g_displayMeshResidentBytes078-g_displayMeshIdleBytes056)/1048576.<<" MiB active / "<<g_displayMeshIdleBytes056/1048576.<<" MiB idle / "<<g_displayMeshPeakResidentBytes078/1048576.<<" MiB peak. Upload staging peak: "<<g_displayMeshPeakStagingBytes078/1048576.<<" MiB. These cover shared mesh buffers, not textures, framebuffers or all driver memory.\r\n";
     std::set<std::string> selected{g_assistantConfig.model};for(size_t i=0;i<teamCapacity;++i)selected.insert(g_teamModels[i].empty()?g_assistantConfig.model:g_teamModels[i]);text<<"\r\n\r\nSelected models / standard USD per million tokens:\r\n";for(const auto& model:selected){if(model.empty())continue;auto rate=std::find_if(g_pricing.models.begin(),g_pricing.models.end(),[&](const auto& price){return price.model==model;});text<<model<<": ";if(rate==g_pricing.models.end())text<<"Unavailable";else text<<"input "<<rate->inputPerMillion<<" / cached input "<<rate->cachedInputPerMillion<<" / output "<<rate->outputPerMillion<<" (negative means unavailable)";text<<"\r\n";}
     text<<"\r\nCPU sys and RAM sys include all applications and kernel workers. ARK CPU/RAM are this process only; RAM "<<(g_resources.privateRam?"private working set":"working set including shared pages")<<". GPU is this process's busiest engine; VRAM is dedicated bytes across matching adapters. Missing counters are N/A. Sampling is once per second.\r\n";if(!g_pricing.error.empty())text<<"\r\nPricing fetch: "<<g_pricing.error;if(!g_dialogSmoke)MessageBoxA(g_window,text.str().c_str(),"Resources and drawing cost / scope and sources",MB_OK|MB_ICONINFORMATION);
 }
@@ -3971,7 +3977,7 @@ static const std::vector<StudioCommandGroup>& studioCommandGroups(){
     group("Manufacturing previews",{{320,"Unfold all sheets"},{321,"Refold all sheets"},{322,"Play all sheet bend sequences"},{323,"Pause all sheet bend sequences"},{325,"Edit selected sheet"},{326,"Stock preview"},{468,"Sheet opening pattern"}});
     group("Tube openings & playback",{{41,"Edit laser tube stock"},{42,"Add notch / opening"},{43,"Edit notch / opening"},{44,"Remove notch / opening"},{45,"Straight tube pose"},{46,"Folded tube pose"},{47,"Play / pause tube folding"},{48,"Previous tube pose"},{49,"Next tube pose"}});
     group("Drawing evidence",{{49990,"Why was it rebuilt? / evaluation details"},{493,"Persistent iterations and branch restore"},{488,"Local resources and drawing cost details"},{489,"Refresh public pricing rates"},{330,"Token usage receipts"},{324,"Show chassis in unfolded layout"}});
-    group("Components & library",{{49000,"Neural Parametric View"},{49001,"Export parametric part (.arkprt)"},{49002,"Export parametric assembly (.arktop)"},{49003,"Insert parametric component"},{49004,"Update component revision"},{49005,"Configure public component parameters"},{484,"Search reusable components"},{485,"Import STEP into component library"}});
+    group("Components & library",{{49000,"Neural Parametric View"},{49006,"Geometry Nodes"},{49001,"Export parametric part (.arkprt)"},{49002,"Export parametric assembly (.arktop)"},{49003,"Insert parametric component"},{49004,"Update component revision"},{49005,"Configure public component parameters"},{484,"Search reusable components"},{485,"Import STEP into component library"}});
     group("Assistant & team",{{541,"Measured agent activity"},{400,"Open Assistant"},{471,"Team mode"},{470,"Single Assistant mode"},{472,"Pause / resume team"},{473,"Choose decision recipient"},{490,"Continue yielded / interrupted team window"},{44014,"Focused / parallel team workflow"},{474,"Engineer / orchestrator model and reasoning"},{475,"Part designer model and reasoning"},{476,"Physics reviewer model and reasoning"},{367,"Assistant reasoning effort"},{75,"Cancel active Assistant or team"},{360,"Continue with ChatGPT"},{361,"Choose ChatGPT plan model"},{362,"Sign out of ChatGPT"},{364,"Enable ChatGPT plan usage"},{365,"Retry ChatGPT connection"},{366,"Cancel account operation"},{358,"Switch to API key mode"}});
         return result;}();return groups;
 }
@@ -5201,6 +5207,7 @@ static Mat4 drawViewportScene059(bool interactive){
 }
 static double g_frameProfile064[3]{};
 static void drawFrame(HDC hdc){
+    if(!g_displayMeshAllocationError078.empty()){g_error=true;g_status=g_displayMeshAllocationError078;}
     if(g_displayMeshIdleBytes056)trimDisplayMeshCache056();
     const auto profileStart064=std::chrono::steady_clock::now();
     if(!g_preparingEdit){processDirectAuthoringPreview();processCableGuide035();processSurfaceEdit059();}
@@ -6137,11 +6144,13 @@ static void drawFrame(HDC hdc){
 static arkjson::Value captureViewportSnapshot(const arkjson::Value& args){
     using V=arkjson::Value;
     try{
+        if(!g_displayMeshAllocationError078.empty())throw std::runtime_error("DISPLAY_INCOMPLETE: "+g_displayMeshAllocationError078);
         if(args.find("camera"))throw std::runtime_error("Live viewport capture uses the current Studio camera; omit camera or choose snapshot view custom");
         if(g_busy||!g_uiReady)throw std::runtime_error("Current Studio viewport is unavailable while a document operation is applying");
         const u64 revision=g_session.revision,epoch=g_documentEpoch;if(auto* expected=args.find("expected_revision");expected&&(expected->t!=V::Num||expected->num!=(double)revision))throw std::runtime_error("Viewport snapshot revision conflict; read current doc_info before retrying");
         const bool minimized=IsIconic(g_window)!=0,collapsed=viewW<2||viewH<2;
         const Image shot=captureGpuScene059();
+        if(!g_displayMeshAllocationError078.empty())throw std::runtime_error("DISPLAY_INCOMPLETE: "+g_displayMeshAllocationError078);
         if(revision!=g_session.revision||epoch!=g_documentEpoch)throw std::runtime_error("Document changed during viewport capture; inspect current revision and retry");
         V evidence=V::makeObj(),state=V::makeObj(),camera=V::makeObj(),selected=V::makeObj();evidence.set("revision",V::makeNum((double)revision));evidence.set("current_revision",V::makeNum((double)g_session.revision));evidence.set("view",V::makeStr("viewport"));evidence.set("capture_source",V::makeStr("studio_viewport"));evidence.set("width",V::makeNum(shot.w));evidence.set("height",V::makeNum(shot.h));
         evidence.set("render_target",V::makeStr("offscreen_gpu_framebuffer"));evidence.set("window_minimized",V::makeBool(minimized));evidence.set("viewport_collapsed",V::makeBool(collapsed));evidence.set("ui_chrome_included",V::makeBool(false));evidence.set("window_state_preserved",V::makeBool(true));
@@ -6682,7 +6691,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
     bool plasticsUiTest=false,electronicsWorkspaceUiTest=false,cableGuideUiTest=false;
     bool nativeProductPerformanceUiTest=false,sceneCacheUiTest=false,authoringAssistanceUiTest=false,featureEditorPickingUiTest=false;
     bool asyncAuthoringUiTest=false;bool historyCompactionUiTest=false;bool featureHistoryUiTest=false,recoveryUiTest=false,editorScrollUiTest=false,configurationWorkspaceUiTest=false,interactionPerformanceUiTest=false;bool startupUiTest=false;bool stampsUiTest=false;bool media044bUiTest=false;bool planesSectionsUiTest=false;
-    bool specializedPatternUiTest=false;bool advancedSheetmetalUiTest=false;bool nativeVertexPullUiTest=false;bool cadImportUiTest=false;bool holesOrchestratorUiTest=false;bool designContainerUiTest=false;bool parametricGraphUiTest=false;bool designDisciplinesUiTest=false;
+    bool specializedPatternUiTest=false;bool advancedSheetmetalUiTest=false;bool nativeVertexPullUiTest=false;bool cadImportUiTest=false;bool holesOrchestratorUiTest=false;bool designContainerUiTest=false;bool parametricGraphUiTest=false;bool geometryNodesUiTest=false;bool designDisciplinesUiTest=false;
     bool directAuthoringUiTest=false,parametricAuthoringUiTest=false,skeletonEditorUiTest=false,imageAttachmentUiTest=false,assistantSteeringUiTest=false;
     bool inspectionUiTest062=false;bool localModelsUiTest=false;bool viewportDockUiTest=false;bool bakedMotionsUiTest=false;bool parametricHudUiTest=false;bool designReviewUiTest=false;bool componentLibraryUiTest067G=false;bool explodedViewsUiTest=false;bool dragChainUiTest=false;bool bomUiTest=false;bool drawingWorkspaceUiTest=false;bool drawingViewportUiTest=false;bool measurementUiTest=false;bool authoringUiTest=false;
     bool selectionPickingUiTest=false;bool interactionUiTest=false,connectorsUiTest=false,actionIconsUiTest=false,treeUiTest=false,arcUiTest=false,completionUiTest=false,sketchDrawingUiTest=false,sketchEditUiTest=false,selectionGlowUiTest=false,datumAuthoringUiTest=false,typedSketchUiTest=false;
@@ -6734,6 +6743,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         else if(a=="--self-test-holes-orchestrator-ui"){holesOrchestratorUiTest=true;g_headless=true;}
         else if(a=="--self-test-design-disciplines-ui"){designDisciplinesUiTest=true;g_headless=true;}
         else if(a=="--self-test-parametric-graph-ui"){parametricGraphUiTest=true;g_headless=true;}
+        else if(a=="--self-test-geometry-nodes-ui"){geometryNodesUiTest=true;g_headless=true;}
         else if(a=="--self-test-design-container-ui"){designContainerUiTest=true;g_headless=true;}
         else if(a=="--self-test-cad-import-ui"){cadImportUiTest=true;g_headless=true;}
         else if(a=="--self-test-native-vertex-pull-ui"){nativeVertexPullUiTest=true;g_headless=true;}
@@ -7636,6 +7646,7 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
 #include "holes_orchestrator_selftest.inl"
 #include "design_container_selftest.inl"
 #include "parametric_graph_selftest_053b.inl"
+#include "geometry_nodes_selftest_078b.inl"
 #include "design_disciplines_selftest_054b.inl"
 #include "selection_glow_selftest.inl"
 #include "selection_picking_selftest.inl"

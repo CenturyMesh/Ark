@@ -56,6 +56,7 @@ static int viewportCaptureSelfTest059(const std::string& output){
         check(evidence&&evidence->find("render_target")&&evidence->find("render_target")->str=="offscreen_gpu_framebuffer","GPU provenance missing");
         check(evidence->find("window_minimized")->b&&evidence->find("viewport_collapsed")->b&&!evidence->find("ui_chrome_included")->b,"Viewport state evidence is incorrect");
         bool inlinePixels=false;for(const auto& content:result.find("content")->arr)if(content.find("type")&&content.find("type")->str=="image")inlinePixels=true;check(inlinePixels,"Viewport tool omitted inline image pixels");
+        g_displayMeshAllocationError078="Synthetic failed upload";const auto incomplete=captureViewportSnapshot(args);check(incomplete.find("isError")->b&&incomplete.dump().find("DISPLAY_INCOMPLETE")!=std::string::npos,"Incomplete GPU display was published as successful visual evidence");g_displayMeshAllocationError078.clear();
         args.set("expected_revision",V::makeNum((double)revision+1));const auto rejected=captureViewportSnapshot(args);check(rejected.find("isError")->b,"Stale capture revision accepted");
         check(IsIconic(g_window)&&unchangedWindow(minimizedWindow,windowState())&&g_chatExpanded&&viewW==1,"Rejected capture altered window/layout state");
         args.set("expected_revision",V::makeNum((double)revision));args.set("path",V::makeStr(output+".gpu-hidden.png/cannot-write.png"));

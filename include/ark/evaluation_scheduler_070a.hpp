@@ -15,6 +15,7 @@ struct EvaluationSchedulerDiagnostics070A {
     ResourcePolicy071D resourcePolicy;
     std::uint64_t minimumPayloadLimitBytes=0;
     unsigned peakOwnerNativeThreads=0;
+    std::uint64_t peakAdmittedPayloadBytes=0,largestJobSnapshotBytes=0,sharedInputBytesReferenced=0;
 };
 EvaluationSchedulerDiagnostics070A evaluationSchedulerDiagnostics070A();
 }

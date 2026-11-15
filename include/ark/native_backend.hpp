@@ -59,6 +59,9 @@ public:
 struct NativeRequestControl {std::function<bool()> cancelled;unsigned limitMs=30000;};
 NativeRequestControl captureNativeRequestControl();
 unsigned nativeRequestLimitMs(); // effective per-request limit on this thread
+// Read-only calling-thread phase: an isolated process has been resumed or its
+// resident request event signalled. False during cache lookup/shared admission.
+bool nativeRequestExecuting();
 arkjson::Value exportNativeBrep(const std::string& brep,const std::string& path);
 Mesh nativeResultMesh(const arkjson::Value& result);
 inline Mesh nativeResultMesh(const NativePayload& result){return result.displayMesh();}

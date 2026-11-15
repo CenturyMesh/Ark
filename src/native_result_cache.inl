@@ -1,27 +1,18 @@
 // Derived local results are reusable only for identical explicit native inputs
 // and identical producer executable/DLL bytes. External I/O operations bypass.
 static std::string nativeCacheDigest(const std::string& bytes){
-#ifdef _WIN32
-    // CNG uses the platform SHA-256 implementation, including CPU acceleration.
-    // The portable digest remains the reference and fallback, with identical bytes.
-    struct Provider {
-        BCRYPT_ALG_HANDLE handle=nullptr;
-        Provider(){if(BCryptOpenAlgorithmProvider(&handle,BCRYPT_SHA256_ALGORITHM,nullptr,0)<0)handle=nullptr;}
-        ~Provider(){if(handle)BCryptCloseAlgorithmProvider(handle,0);}
-    };
-    static Provider provider;
-    struct Hash {BCRYPT_HASH_HANDLE handle=nullptr;~Hash(){if(handle)BCryptDestroyHash(handle);}} hash;
-    unsigned char digest[32]{};
-    if(provider.handle&&bytes.size()<=ULONG_MAX&&BCryptCreateHash(provider.handle,&hash.handle,nullptr,0,nullptr,0,0)>=0&&
-        BCryptHashData(hash.handle,reinterpret_cast<PUCHAR>(const_cast<char*>(bytes.data())),(ULONG)bytes.size(),0)>=0&&
-        BCryptFinishHash(hash.handle,digest,sizeof digest,0)>=0){
-        constexpr char hex[]="0123456789abcdef";std::string out;out.reserve(64);
-        for(auto byte:digest){out+=hex[byte>>4];out+=hex[byte&15];}return out;
-    }
-#endif
+    // The shared platform helper keeps its algorithm handle for process
+    // lifetime. First use while a ThreadPool drains must not register another
+    // static destructor against the CRT exit lock. Hash objects remain RAII.
+    std::string digest;if(platformSha256074B(bytes,digest))return digest;
     return iterationSha256(bytes);
 }
 #include "native_memory_cache_070a.inl"
+struct NativeProducerFile078B {fs::file_time_type time;uintmax_t bytes;std::string digest,identity;std::shared_ptr<void> pin;};
+struct NativeProducerState078B {std::mutex mutex;std::map<fs::path,NativeProducerFile078B> known;};
+// Establish empty ownership before main, so producer pins outlive the lazy
+// core pool. Pins still close deterministically after that pool drains.
+static NativeProducerState078B nativeProducerState078;
 struct NativeResultCache {
     fs::path directory,entry;
     std::string key,producerIdentity,resolvedRequestIdentity;
@@ -82,20 +73,20 @@ struct NativeResultCache {
         }
         if(operation->str=="model_solid"){
             if(!op||op->t!=V::Str)return false;
-            static const std::set<std::string> allowed{"box","sphere","cylinder","cone","torus","extrude","union","cut","common","hole","fillet","chamfer","transform","linear_pattern","circular_pattern","mirror","shell","draft","split_plane","curve_pattern","hole_pattern","holes_orchestrator","vertex_pull","split_line","rib","gusset","mount_pad","boss","screw_support","nut_seat","lid_lip","lid_groove","split_surface","split_tool"};
-            return op->str=="offset"||allowed.count(op->str)!=0;
+            static constexpr const char* allowed[]{"box","sphere","cylinder","cone","torus","extrude","union","cut","common","hole","fillet","chamfer","transform","linear_pattern","circular_pattern","mirror","shell","draft","split_plane","curve_pattern","hole_pattern","holes_orchestrator","vertex_pull","split_line","rib","gusset","mount_pad","boss","screw_support","nut_seat","lid_lip","lid_groove","split_surface","split_tool"};
+            for(const char* name:allowed)if(op->str==name)return true;return op->str=="offset";
         }
         if(operation->str=="model"){
             if(!op||op->t!=V::Str)return false;
-            static const std::set<std::string> allowed{"surface_nurbs","surface_fill","extrude_surface","revolve_surface","sweep","loft","thicken","offset_surface","sew","surface_extract_face","surface_trim_plane","surface_trim_wire","surface_untrim","surface_extend","surface_mutual_trim","surface_repair","helix","curve","curve_interpolate","curve_analytic","surface_spline","curve_project_surface","intersection_curve","bridge"};
-            return allowed.count(op->str)!=0;
+            static constexpr const char* allowed[]{"surface_nurbs","surface_fill","extrude_surface","revolve_surface","sweep","loft","thicken","offset_surface","sew","surface_extract_face","surface_trim_plane","surface_trim_wire","surface_untrim","surface_extend","surface_mutual_trim","surface_repair","helix","curve","curve_interpolate","curve_analytic","surface_spline","curve_project_surface","intersection_curve","bridge"};
+            for(const char* name:allowed)if(op->str==name)return true;return false;
         }
         return false;
     }
     static std::string producer(const fs::path& worker){
-        struct File {fs::file_time_type time;uintmax_t bytes;std::string digest,identity;std::shared_ptr<void> pin;};
-        static std::mutex mutex;static std::map<fs::path,File> known;
-        std::lock_guard<std::mutex> lock(mutex);
+        using File=NativeProducerFile078B;
+        auto& state=nativeProducerState078;auto& known=state.known;
+        std::lock_guard<std::mutex> lock(state.mutex);
         std::vector<fs::path> files{worker};
 #ifdef _WIN32
         for(const auto& candidate:fs::directory_iterator(worker.parent_path()))if(candidate.is_regular_file()){

@@ -1,4 +1,6 @@
 #include "ark/compute.hpp"
+#include "ark/sha256_074b.hpp"
+#include "ark/iteration_history.hpp"
 #include "../src/compute_transform_070a.hpp"
 #include "../src/view/gpu_cache_policy_070a.hpp"
 #include <chrono>
@@ -17,6 +19,15 @@ int main(){try{
     check(displayIdleBudget070(16*1024*1024,128*1024)==0,"Pressure releases all idle display storage");
     check(displayIdleBudget070(16*1024*1024,12*1024*1024,0)==0,"Explicit disable leaves no idle allowance");
     check(displayIdleBudget070(512*1024,384*1024)<=16*MiB,"Small adapters retain a small allowance");
+    check(displayUploadIdleBudget078(16*1024*1024,1024*1024,900*MiB,256*MiB,256*MiB)==124*MiB,"Incoming allocation must reclaim idle buffers before exceeding available headroom");
+    check(displayUploadIdleBudget078(16*1024*1024,128*1024,64*MiB,64*MiB,256*MiB)==0,"Severe VRAM pressure releases every idle buffer before allocation");
+    check(displayUploadIdleBudget078(0,0,8*MiB,32*MiB,32*MiB)==24*MiB,"Unknown adapter retains conservative incoming-allocation headroom");
+    check(displayUploadIdleBudget078(0,0,64*MiB,32*MiB,32*MiB)==0,"Large unknown-adapter upload first releases idle retention");
+    {const std::string bytes("source\0mesh\xffnormals",19);for(size_t cut=0;cut<=bytes.size();++cut){std::string result;const bool available=platformSha256Segments078B({std::string_view(bytes).substr(0,cut),{},std::string_view(bytes).substr(cut)},result);
+#ifdef _WIN32
+        check(available,"Windows segmented hashing is required for bounded display identity staging");
+#endif
+        if(available)check(result==iterationSha256(bytes),"Segment boundaries/empty chunks changed SHA-256 identity");}}
     std::mt19937 generator(42);std::uniform_real_distribution<float> values(-100000,100000);
     for(size_t n:{0u,1u,2u,3u,4u,5u,7u,16u,31u,255u,4097u})for(int trial=0;trial<8;++trial){
         std::vector<float> input(n*3+2),reference(n*3+2,12345),actual=reference;for(auto& v:input)v=values(generator);

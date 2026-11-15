@@ -1,5 +1,12 @@
 # ARK roadmap A–G
 
+078B (**A.02/A.03/A.04/B.01/B.02/B.03/D.02/D.05 — Verificado no escopo local;
+F.05 — Em curso**): visual geometry
+nodes, shared native-worker/RAM admission, bounded display-memory staging and
+actionable graph/Obsidian context. Native/script 210/210 and focused Studio 6/6
+passed, including real reviewed candidate Apply/Cancel and shared-camera
+Before/After comparison. See [078B implementation and verification](iterations/078B.md).
+
 077A (**A.02/A.03/A.04/B.02/F.05 — Verificado no escopo local**): document opening, exact area
 integration, scheduling-independent native reuse and bounded compact memory
 retention. Native/script 208/208 and final focused 11/11 passed, with private

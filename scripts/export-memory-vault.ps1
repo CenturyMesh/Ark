@@ -135,12 +135,13 @@ $indexPath=Child $MemorySnapshotDirectory 'index.md';NoLinks $indexPath;$memoryF
 foreach($file in @(Files $MemorySnapshotDirectory)){if(-not $memoryFiles.ContainsKey((Relative $MemorySnapshotDirectory $file.FullName))){throw 'Memory snapshot contains an undeclared file; preserve it and create a fresh native export.'}}
 $sourcePaths=@{}
 $sourceManifest=Child $CodeIndexDirectory 'source-manifest.json'
-if(Test-Path -LiteralPath $sourceManifest){
-    NoLinks $sourceManifest
-    foreach($source in (Get-Content -Raw -Encoding UTF8 -LiteralPath $sourceManifest|ConvertFrom-Json).files){
+if(-not (Test-Path -LiteralPath $sourceManifest -PathType Leaf)){throw 'Code source inventory is missing; refresh code-context.ps1 -Obsidian before combining memory.'}
+NoLinks $sourceManifest;$sourceManifestHash=Hash $sourceManifest
+$sourceInventory=Get-Content -Raw -Encoding UTF8 -LiteralPath $sourceManifest|ConvertFrom-Json
+if($sourceInventory.schema -cne 'ark.code-context.v1' -or $sourceInventory.source_sha256 -cne $origin.source_sha256 -or $sourceInventory.graph_sha256 -cne $origin.graph_sha256){throw 'Code index and selected Obsidian snapshot differ; refresh code-context.ps1 -Obsidian. The previous combined pointer is preserved.'}
+foreach($source in $sourceInventory.files){
         $private=$source.path -match '(?i)(^|/)[.]?(out|private|credentials?|secrets?|sessions?)(/|$)' -or [IO.Path]::GetFileNameWithoutExtension($source.path) -match '(?i)^[.]?(private|credentials?|secrets?|api[-_]?keys?)([._-].*)?$'
         if(-not $private -and ($source.path -match '^(src|include|tests|scripts|cmake)/[^\x00-\x1f]+\.(cpp|hpp|h|inl|c|ps1|cmake)$' -or $source.path -in @('CMakeLists.txt','CMakePresets.json','.graphifyrc'))){$sourcePaths[$source.path]=$true}
-    }
 }
 $existingParent=$OutputDirectory
 while(-not (Test-Path -LiteralPath $existingParent)){$existingParent=Split-Path $existingParent -Parent}
@@ -206,13 +207,13 @@ WriteJson (Child $vault 'memory-graph.canvas') ([ordered]@{nodes=@($memoryCanvas
 [IO.File]::WriteAllText((Child $memoryRoot 'Recall index.md'),($recallLines -join "`n")+"`n",$utf8)
 # Recheck inputs after copying; an interrupted or concurrent source edit never
 # publishes a current pointer to a partly verified combined view.
-if((Hash $pointerPath) -cne $pointerHash -or (Hash $originPath) -cne $originHash -or (Hash $manifestPath) -cne $memoryHash){throw 'An input receipt changed during combined export.'}
+if((Hash $pointerPath) -cne $pointerHash -or (Hash $originPath) -cne $originHash -or (Hash $manifestPath) -cne $memoryHash -or (Hash $sourceManifest) -cne $sourceManifestHash){throw 'An input receipt changed during combined export.'}
 $null=VerifyCode $codeRoot $origin
 foreach($name in $memoryFiles.Keys){if((Hash (Child $MemorySnapshotDirectory $name)) -cne $memoryFiles[$name]){throw 'Memory snapshot changed during combined export.'}}
 foreach($anchor in $anchors){if($anchor.current_sha256){$source=Child $repository $anchor.path;NoLinks $source;if((Hash $source) -cne $anchor.current_sha256){throw 'An observed code anchor changed during combined export.'}}}
 $inventory=@()
 foreach($file in @(Files $vault|Sort-Object FullName)){$inventory+=,[ordered]@{path=(Relative $vault $file.FullName);sha256=(Hash $file.FullName)}}
-$receipt=[ordered]@{schema='ark.combined-memory-vault.v1';graph_sha256=$origin.graph_sha256;code_source_sha256=$origin.source_sha256;code_receipt_sha256=$originHash;memory_manifest_sha256=$memoryHash;memory_scope=$manifest.scope;authority='untrusted_historical_context_only';code_origin_receipt='code-origin-receipt.json';files=$inventory;links_added=$links;anchors=$anchors;source_vault_modified=$false;personal_vault_modified=$false}
+$receipt=[ordered]@{schema='ark.combined-memory-vault.v1';graph_sha256=$origin.graph_sha256;code_source_sha256=$origin.source_sha256;code_receipt_sha256=$originHash;code_source_manifest_sha256=$sourceManifestHash;code_index_matches_vault=$true;memory_manifest_sha256=$memoryHash;memory_scope=$manifest.scope;authority='untrusted_historical_context_only';code_origin_receipt='code-origin-receipt.json';files=$inventory;links_added=$links;anchors=$anchors;source_vault_modified=$false;personal_vault_modified=$false}
 $receipt.memory_graph=[ordered]@{path='memory-graph.canvas';nodes=$memoryCanvasNodes.Count;edges=$memoryCanvasEdges.Count;relations='explicit_verified_anchor_destinations_only';recall_index='ARK Memory/Recall index.md'}
 $complete=Child $vault '.ark-memory-vault.json';WriteJson $complete $receipt
 $receiptHash=Hash $complete

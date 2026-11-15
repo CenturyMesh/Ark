@@ -5,7 +5,7 @@ struct NativeDecodedCache070 {
     struct Entry {NativePayload value;std::string payloadDigest;size_t bytes=0;unsigned long long used=0;};
     std::mutex mutex;std::map<std::string,Entry> entries;
     size_t bytes=0;unsigned long long clock=0,hits=0,misses=0,evictions=0,oversized=0;
-    static NativeDecodedCache070& instance(){static NativeDecodedCache070 cache;return cache;}
+    static NativeDecodedCache070& instance();
     static ResourcePolicy071D policy(size_t retained){return currentResourcePolicy071D(std::numeric_limits<size_t>::max(),retained);}
     static size_t capacity(const ResourcePolicy071D& policy){return static_cast<size_t>(std::min<std::uint64_t>(policy.decodedLimitBytes,std::numeric_limits<size_t>::max()));}
     // Conservative owned allocation accounting: includes inline values plus
@@ -55,3 +55,7 @@ struct NativeDecodedCache070 {
         out.set("authority",V::makeStr("parsed exact local disk-cache results; complete disk SHA256 verified on every hit"));out.set("accounting",V::makeStr("retained JSON values, vector/string capacities and conservative entry allowance; excludes allocator overhead, transient parse and caller-owned working results"));return out;
     }
 };
+// Empty cache ownership precedes main and therefore the lazily created core
+// ThreadPool; late first use never registers a destructor during its drain.
+static NativeDecodedCache070 nativeDecodedCacheStorage078;
+NativeDecodedCache070& NativeDecodedCache070::instance(){return nativeDecodedCacheStorage078;}

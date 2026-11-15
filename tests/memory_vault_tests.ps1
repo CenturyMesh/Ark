@@ -128,7 +128,7 @@ try{
 }finally{$sha.Dispose()}
 WriteJson (Join-Path $vault '.ark-code-vault.json') $codeReceipt
 WriteJson (Join-Path $code 'obsidian-current.json') @{directory='vault';graph_sha256=('a'*64);source_sha256=('b'*64);content_sha256=$codeReceipt.content_sha256}
-WriteJson (Join-Path $code 'source-manifest.json') @{files=@(@{path=$anchor;sha256=$sourceHash})}
+WriteJson (Join-Path $code 'source-manifest.json') @{schema='ark.code-context.v1';source_sha256=('b'*64);graph_sha256=('a'*64);files=@(@{path=$anchor;sha256=$sourceHash})}
 $id='d'*64;$fingerprint='e'*64
 $row=[ordered]@{id=$id;fingerprint=$fingerprint;content='Synthetic historical declaration.';anchors=@(@{path=$anchor;sha256=$sourceHash},@{path=$anchor;sha256=('0'*64)},@{path='../outside-private.txt';sha256=('0'*64)})}
 $note=Join-Path $memory ($id+'.md')
@@ -155,6 +155,10 @@ $second=Export
 if($first.directory -ceq $second.directory -or (Hash $edited) -cne $editedHash){throw 'A fresh combined snapshot changed the earlier edited export.'}
 if((Hash $card) -cne $originalCode -or (Hash $note) -cne $originalNote){throw 'Input code vault or native memory snapshot changed.'}
 $pointer=Join-Path $output 'current.json';$pointerHash=Hash $pointer
+$sourceManifestPath=Join-Path $code 'source-manifest.json';$sourceManifestText=Get-Content -Raw -LiteralPath $sourceManifestPath;$changedIndex=$sourceManifestText|ConvertFrom-Json;$changedIndex.source_sha256='d'*64;WriteJson $sourceManifestPath $changedIndex
+Reject {Export} 'A fresh code index must not be silently combined with a stale Obsidian snapshot.'
+if((Hash $pointer) -cne $pointerHash){throw 'A stale code index changed the current combined pointer.'}
+WriteText $sourceManifestPath $sourceManifestText
 [IO.File]::AppendAllText($card,'tampered source vault',$encoding)
 Reject {Export} 'Altered code-vault input must reject.'
 if((Hash $pointer) -cne $pointerHash){throw 'A failed verification changed the current pointer.'}
