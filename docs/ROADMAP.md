@@ -1,5 +1,20 @@
 # ARK roadmap A–G
 
+078B (**A.02/A.03/A.04/B.01/B.02/B.03/D.02/D.05/F.05 — Verificado no escopo local**): visual geometry
+nodes, shared native-worker/RAM admission, bounded display-memory staging and
+actionable graph/Obsidian context. Native/script 210/210 and focused Studio 6/6
+passed, including real reviewed candidate Apply/Cancel and shared-camera
+Before/After comparison. See [078B implementation and verification](iterations/078B.md).
+The local unsigned installer passed isolated distribution smoke and packaged
+Studio acceptance. Cold-cache opening remains a separate performance limitation.
+
+077A (**A.02/A.03/A.04/B.02/F.05 — Verificado no escopo local**): document opening, exact area
+integration, scheduling-independent native reuse and bounded compact memory
+retention. Native/script 208/208 and final focused 11/11 passed, with private
+Studio opening verified. Cold-cache replay remains slower than warm opening;
+see [077A verification and limits](iterations/077A.md). The local unsigned
+installer passed isolated distribution smoke; no remote publication is claimed.
+
 076A (**A.02/A.03/B.02/D.02/F.05 — Verificado no escopo local**): parametric programs
 reject deep or non-finite expressions and unbound names, bind only their exact
 compiled output, gain typed parameters, `.arkprog` exchange and a Studio HUD view.

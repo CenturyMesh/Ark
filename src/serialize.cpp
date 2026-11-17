@@ -1162,7 +1162,7 @@ bool loadDocument(const char* path, Document& doc, std::string* err){
         try{
             // 049A baked-frame entries share the optional section; they never reach native staging.
             DocumentDerivedPayloads native,motions;for(auto& record:derived)(motionDerivedPayload(record)?motions:native).push_back(std::move(record));
-            candidate.derivedGeometryStatus=stageNativeDocumentResults(candidate,native);
+            candidate.derivedGeometryStatus=stageNativeDocumentResults(candidate,std::move(native));
             if(!motions.empty())candidate.derivedGeometryStatus.set("motion_frames",stageMotionDerivedPayloads(candidate,motions));
             // 051A: how the optional section was stored, independent of its validation.
             candidate.derivedGeometryStatus.set("container_encoding",Value::makeStr(read.derivedEncoding));

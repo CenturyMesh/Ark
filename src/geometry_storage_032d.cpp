@@ -105,6 +105,7 @@ NativePayload::NativePayload(V value):storage_(std::make_shared<const Storage>(s
 NativePayload& NativePayload::operator=(V value){storage_=std::make_shared<const Storage>(std::move(value));return *this;}
 const V& NativePayload::metadata() const{return storage_?storage_->meta():empty();}
 const V& NativePayload::value() const{return storage_?storage_->full():empty();}
+V NativePayload::copyValue() const{return storage_?storage_->expand():V{};}
 const V* NativePayload::meshMetadata() const{return metadata().find("mesh");}
 const V* NativePayload::find(const char* name) const{return std::strcmp(name,"mesh")==0?value().find(name):metadata().find(name);}
 void NativePayload::set(const std::string& name,V value){V next=storage_?storage_->expand():V{};next.set(name,std::move(value));*this=std::move(next);}

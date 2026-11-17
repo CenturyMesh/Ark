@@ -62,6 +62,11 @@ Check ($selectedVault.knowledge_notes -eq 2 -and (Test-Path -LiteralPath (Join-P
 Check ($first.code -eq 0 -and (Get-Content -Raw -LiteralPath (Join-Path $vault 'ARK Knowledge/Electronics.md')).Contains('[[nodiscard]]')) 'Code fences/inline code/escaped brackets stay literal while file paths, aliases and anchors resolve.'
 Check (-not (Test-Path -LiteralPath (Join-Path $vault 'ARK Knowledge/Credentials.md'))) 'Credential notes cannot enter the derived knowledge export.'
 Check (Test-Path -LiteralPath (Join-Path $vault 'graph.canvas')) 'Obsidian canvas must be exported.'
+$navigation=Get-Content -Raw -LiteralPath (Join-Path $vault '.ark-context-navigation.json')|ConvertFrom-Json
+Check ($navigation.schema -ceq 'ark.context-navigation.078b.v1' -and $navigation.source_sha256 -ceq $firstManifest.source_sha256 -and $navigation.graph_sha256 -ceq $firstManifest.graph_sha256 -and -not $navigation.complete_dependency_analysis) 'Navigation receipt must bind the same source/graph without claiming complete extraction.'
+Check (Test-Path -LiteralPath (Join-Path $vault 'ARK Context.md')) 'The exported vault needs a verified context navigator.'
+$navigationText=Get-Content -Raw -LiteralPath (Join-Path $vault 'ARK Context.md')
+Check ($navigationText.Contains('next_call') -and $navigationText.Contains('geometry_graph') -and $navigationText.Contains('[[graph.canvas|Code graph canvas]]')) 'Navigator must connect code, live graph paging and typed geometry discovery.'
 $notes = @(Get-ChildItem -LiteralPath $vault -Filter '*.md' -Recurse)
 Check ($notes.Count -gt 0 -and (($notes | ForEach-Object { Get-Content -Raw -LiteralPath $_.FullName }) -join "`n").Contains('[[')) 'Obsidian notes must contain local links.'
 $canvas = Get-Content -Raw -LiteralPath (Join-Path $vault 'graph.canvas') | ConvertFrom-Json

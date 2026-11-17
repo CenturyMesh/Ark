@@ -58,6 +58,9 @@ inline V graphProject(const V& history){
     }
     auto covered=[](const V& old,const V& newer){
         if(text(old,"scope")!=text(newer,"scope")||text(old,"source_sha256")!=text(newer,"source_sha256"))return false;
+        // A page's navigation boundary and continuation are evidence too. A
+        // later overlapping page cannot replace the route to an omitted branch.
+        for(const char* field:{"page","frontier","boundary_edges","next_call","expand_call"})if(const auto* value=old.find(field)){const auto* replacement=newer.find(field);if(!replacement||value->dump()!=replacement->dump())return false;}
         for(const auto& node:old.find("nodes")->arr){bool match=false;for(const auto& next:newer.find("nodes")->arr)if(text(node,"key")==text(next,"key")&&text(node,"fingerprint")==text(next,"fingerprint")&&node.find("facts")->dump()==next.find("facts")->dump())match=true;if(!match)return false;}
         for(const char* field:{"edges","history"})for(const auto& value:old.find(field)->arr){bool match=false;for(const auto& next:newer.find(field)->arr)if(value.dump()==next.dump())match=true;if(!match)return false;}
         return true;

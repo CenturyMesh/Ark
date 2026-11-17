@@ -1,5 +1,6 @@
 #include "ark/agent.hpp"
 #include "ark/native_backend.hpp"
+#include "ark/serialize.hpp"
 #include <chrono>
 #include <map>
 #include <mutex>
@@ -34,28 +35,43 @@ void healthy(const Document& d){check(d.evalBodies.size()==d.features.size(),"Ev
 void nativePoolCancellation(){
     Setting cpu("ARK_CPU_THREADS","2"),workers("ARK_FEATURE_THREADS","2"),native("ARK_NATIVE_THREADS","1"),cache("ARK_NATIVE_RESULT_CACHE","0");
     Document document;for(int i=0;i<4;++i){Feature feature;feature.type=FeatureType::NativeSolid;feature.name="Cancellation probe "+std::to_string(i);feature.nativeSpec=arkjson::Value::makeObj();feature.nativeSpec.set("op",arkjson::Value::makeStr("box"));feature.p={{"width",std::to_string(11+i)},{"depth","17"},{"height","23"}};document.addFeature(feature);}
-    const auto owner=std::this_thread::get_id();std::mutex mutex;std::map<std::thread::id,unsigned> polls;bool wrongLimit=false;
+    // Named resources require the owner context regardless of completion timing
+    // in the independent box frontier. Exercise both legitimate dispatch paths.
+    NamedSketch sketch;sketch.name="Cancellation owner profile";std::string sketchError;check(sketchFromJson(R"({"plane":"XY","entities":[{"kind":"circle","name":"rim","dof":[0,0,4]}]})",sketch.sk,&sketchError),sketchError.c_str());document.sketches.push_back(std::move(sketch));
+    Feature extrusion;extrusion.type=FeatureType::NativeSolid;extrusion.name="Cancellation owner extrusion";extrusion.nativeSpec=arkjson::Value::makeObj();extrusion.nativeSpec.set("op",arkjson::Value::makeStr("extrude"));extrusion.p={{"sketch","Cancellation owner profile"},{"depth","5"}};document.addFeature(extrusion);
+    const auto owner=std::this_thread::get_id();std::mutex mutex;std::map<std::thread::id,unsigned> polls;std::map<std::thread::id,std::pair<unsigned,unsigned>> phases;bool wrongLimit=false;unsigned dispatchedCancellations=0,ownerCancellations=0,workerCancellations=0;
+    const auto original=documentToJson(document);check(!nativeRequestExecuting(),"native execution phase leaked into the owner before dispatch");
     const auto before=nativeKernelInfo().find("total_worker_process_starts")->num;const auto started=std::chrono::steady_clock::now();
     {
         NativeRequestControlScope control([&]{
             std::lock_guard lock(mutex);const auto thread=std::this_thread::get_id();
-            if(thread==owner)return false;
+            auto& phase=phases[thread];if(nativeRequestExecuting())++phase.second;else ++phase.first;
             wrongLimit|=nativeRequestLimitMs()!=120000;
-            // The first poll is before native dispatch; the second is inside
-            // the real process/event wait after the isolated worker was started.
-            return ++polls[thread]>=2;
+            ++polls[thread];
+            // Shared admission adds a variable number of pre-dispatch polls.
+            // Cancel only after a real resident event/process dispatch, never
+            // infer execution from poll counts or newly-created processes.
+            if(nativeRequestExecuting()){++dispatchedCancellations;if(thread==owner)++ownerCancellations;else ++workerCancellations;return true;}return false;
         },120000);
         document.recompute();
     }
     const auto elapsed=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();
     const auto after=nativeKernelInfo().find("total_worker_process_starts")->num;
-    check(document.parallelFeatures>0&&!polls.empty()&&!wrongLimit,"native pool tasks inherit request cancellation and allowance");
-    check(after>before,"cancellation exercised real isolated native worker processes");
+    std::cerr<<"cancellation diagnostic: dispatched_cancellations="<<dispatchedCancellations<<" owner_cancellations="<<ownerCancellations<<" worker_cancellations="<<workerCancellations<<" features="<<document.features.size()<<" parallel_features="<<document.parallelFeatures<<" process_starts_delta="<<after-before<<" wrong_limit="<<wrongLimit<<'\n';
+    for(const auto& [thread,phase]:phases)std::cerr<<"  thread="<<thread<<" owner="<<(thread==owner)<<" queued_or_cache_polls="<<phase.first<<" executing_polls="<<phase.second<<'\n';
+    for(const auto& result:document.lastResults)std::cerr<<"  feature="<<result.id<<" ok="<<result.ok<<" error="<<result.error<<'\n';
+    check(document.parallelFeatures>0&&workerCancellations>0&&ownerCancellations>0&&!wrongLimit,"native owner and pool tasks inherit executing cancellation and allowance");
+    check(dispatchedCancellations==document.features.size(),"cancellation must reach every real isolated native dispatch, including reused processes");
+    check(documentToJson(document)==original&&!nativeRequestExecuting(),"cancelled evaluation changed authored source or leaked its execution phase");
     check(elapsed<5000,"pooled native cancellation must not wait for its 120-second watchdog");
     for(const auto& result:document.lastResults)check(!result.ok&&result.error.find("NATIVE_CANCELLED")!=std::string::npos,"each cancelled native job remains an explicit failure");
     check(nativeRequestLimitMs()==30000,"owner request allowance restored after scope");
     const auto savedPolls=polls;document.recompute();healthy(document);
     check(polls==savedPolls&&document.parallelFeatures>0,"retry on reused pool threads has no stale cancellation policy");
+    AgentSession session;session.document=document.authoringCopy();session.document.recompute();healthy(session.document);const auto source=documentToJson(session.document);const auto revision=session.revision;
+    arkjson::Value args=arkjson::Value::makeObj(),commands=arkjson::Value::makeArr();for(int i=0;i<4;++i){auto edit=arkjson::Value::makeObj(),parameters=arkjson::Value::makeObj();edit.set("op",arkjson::Value::makeStr("feature.edit"));edit.set("id",arkjson::Value::makeNum(i+1));parameters.set("width",arkjson::Value::makeNum(101+i));edit.set("p",std::move(parameters));commands.arr.push_back(std::move(edit));}args.set("commands",std::move(commands));args.set("expected_revision",arkjson::Value::makeNum(revision));
+    {NativeRequestControlScope control([]{return nativeRequestExecuting();},120000);const auto rejected=session.call("doc_apply",args);check(rejected.find("isError")->b&&documentToJson(session.document)==source&&session.revision==revision,"Cancellation after native dispatch must reject publication atomically");}
+    check(nativeRequestLimitMs()==30000&&!nativeRequestExecuting(),"atomic cancellation did not restore owner request control");
     std::cout<<"real pooled native cancellation "<<elapsed<<" ms; processes started="<<after-before<<"; retry passed\n";
 }
 #endif

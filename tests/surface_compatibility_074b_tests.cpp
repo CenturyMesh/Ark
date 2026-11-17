@@ -5,6 +5,9 @@
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
 #include <BRepBuilderAPI_Sewing.hxx>
+#include <BRepBuilderAPI_NurbsConvert.hxx>
+#include <BRepPrimAPI_MakeBox.hxx>
+#include <GProp_GProps.hxx>
 #include <BRep_Tool.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepAdaptor_Surface.hxx>
@@ -82,4 +85,11 @@ static void loftSeams(){
     V invalid=request;invalid.set("compatible",V::makeBool(true));rejects([&]{ark::occt::modelSurfaceNative(invalid);},"Heuristic compatibility may not overwrite authored parameter seams");V controls=json(R"({"section_alignment":[{"seam_parameter":0.25,"seam_angle":10},{"seam_parameter":0.25}]})");invalid=request;invalid.set("controls",controls);rejects([&]{ark::occt::modelSurfaceNative(invalid);},"Mixed seam contracts accepted");invalid=request;invalid.set("controls",json(R"({"section_alignment":[{"seam_parameter":1},{"seam_parameter":0.25}]})"));rejects([&]{ark::occt::modelSurfaceNative(invalid);},"Seam fraction outside[0,1) accepted");
     V circleProfiles=V::makeArr();for(int i=0;i<2;++i){V p=V::makeObj();p.set("wire_brep",curve(new Geom_Circle(gp_Ax2(gp_Pnt(0,0,20.*i),gp_Dir(0,0,1),i?gp_Dir(0,-1,0):gp_Dir(1,0,0)),10)));circleProfiles.arr.push_back(p);}V diagnostic=json(R"({"op":"loft_diagnostics"})");diagnostic.set("profiles",circleProfiles);const auto prior=diagnostic.dump();const auto inspected=ark::occt::modelSurfaceNative(diagnostic);check(diagnostic.dump()==prior&&!at(inspected,"automatic_changes").b,"Correspondence inspection mutated source");const auto& proposal=at(at(inspected,"pairs").arr.front(),"alignment_proposal");check(at(proposal,"changes_current").b&&at(proposal,"requires_compatible_false").b,"Native closed-seam correction was not proposed with its exact correspondence contract");expectNear(at(at(proposal,"alignment"),"seam_parameter").num,.25,1e-8,"Measured circle seam fraction");expectNear(at(proposal,"proposed_rms_mm").num,20,1e-7,"Correspondence proposal native RMS");expectNear(at(proposal,"source_perimeter_mm").num,20*std::acos(-1.),1e-7,"Source section perimeter");expectNear(at(proposal,"aligned_perimeter_mm").num,20*std::acos(-1.),1e-7,"Aligned section perimeter");
 }
-int main(){try{matching();networks();offsets();loftSeams();std::cout<<checks<<" exact compatible surface checks passed\n";return 0;}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}
+static void exactPropertyReuse(){
+    const auto analytic=BRepPrimAPI_MakeBox(20,30,40).Shape();const auto rational=BRepBuilderAPI_NurbsConvert(analytic,true).Shape();
+    for(int i=0;i<3;++i){expectNear(ark::occt::properties(rational),24000,1e-7,"Rational property reuse lost exact box volume");expectNear(ark::occt::properties(rational,'a'),5200,1e-7,"Rational surface area changed");}
+    const auto mixed=ark::occt::compound({analytic,rational});expectNear(ark::occt::properties(mixed,'a'),10400,1e-7,"Mixed elementary/freeform area failed summed precision");
+    gp_Trsf shift;shift.SetTranslation(gp_Vec(100,200,300));const auto moved=ark::occt::transformed(rational,shift);GProp_GProps moments;ark::occt::volumeProperties(moved,moments,true);expectNear(moments.Mass(),24000,1e-7,"Placed property memo changed volume");expectNear(moments.CentreOfMass().X(),110,1e-7,"Placed property memo reused stale centroid");
+    gp_Trsf scale;scale.SetScale(gp_Pnt(0,0,0),2);expectNear(ark::occt::properties(ark::occt::transformed(rational,scale)),192000,1e-6,"Changed exact geometry reused stale numeric integration");
+}
+int main(){try{matching();networks();offsets();loftSeams();exactPropertyReuse();std::cout<<checks<<" exact compatible surface checks passed\n";return 0;}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

@@ -2,6 +2,7 @@
 #include "ark/agent_activity.hpp"
 #include "ark/assistant.hpp"
 #include "ark/iteration_history.hpp"
+#include "ark/usage.hpp"
 #include "../src/assistant_context.hpp"
 #include <future>
 #include <iostream>
@@ -132,11 +133,65 @@ void programGraph(){
     s.document.designVariants=json(R"([{"name":"A","namespace":"pg","program_sha256":"0000000000000000000000000000000000000000000000000000000000000000","values":{"w":10}}])");
     const auto variants=accepted(s.call("context_graph",json(R"({"query":"Body","depth":0})")));check(!field(variants,"index_reused").b&&field(variants,"source_sha256").str==iterationSha256(documentToJson(s.document,false,false)),"saved variants join the authoring stamp");
 }
+void pagedGraph078B(){
+    AgentSession s;s.suppressFailureCapture();s.suppressIterationHistory();
+    for(int i=0;i<9;++i){Feature f;f.type=i?FeatureType::Transform:FeatureType::Box;f.name="Paged fixture "+std::to_string(i);if(i)f.inputs={(u64)i};s.document.addFeature(f);}
+    const auto authoring=documentToJson(s.document);size_t evaluated=0;auto observer=setEvaluationObserver([&](u64,const std::string&,size_t,size_t,bool,bool){++evaluated;});
+    auto args=json(R"({"query":"Paged","depth":0,"limit":2,"history_limit":0})");auto first=accepted(s.call("context_graph",args));check(field(first,"partial").b&&field(field(first,"page"),"neighborhood_nodes").num==9,"Page census includes omitted query roots");
+    std::set<std::string> seen;auto page=first;int pages=0;for(;;){++pages;for(const auto& n:field(page,"nodes").arr)check(seen.insert(field(n,"key").str).second,"Continuation repeated a node");if(field(page,"next_call").isNull())break;page=accepted(s.call("context_graph",field(page,"next_call")));check(pages<10,"Graph continuation failed to terminate");}
+    check(pages==5&&seen.size()==9&&!field(page,"partial").b,"Continuation omitted query roots or kept a false has_more");
+    const auto boundary=accepted(s.call("context_graph",json(R"({"keys":["feature:5"],"depth":0,"limit":1})")));check(field(boundary,"boundary_edges").arr.size()==2&&field(boundary,"frontier").arr.size()==2&&field(field(boundary,"page"),"depth_boundary_nodes").num==2&&!field(boundary,"expand_call").isNull(),"Depth boundary and executable expansion are not visible");
+    auto delta=json(R"({"keys":["feature:5"],"depth":0,"limit":1})");delta.set("known_scope",field(boundary,"scope"));delta.set("known_fingerprints",field(boundary,"fingerprints"));const auto quiet=accepted(s.call("context_graph",delta));check(!node(quiet,"feature:5")->find("facts")&&field(quiet,"boundary_edges").dump()==field(boundary,"boundary_edges").dump(),"Delta facts erased continuation edges");check(node(quiet,"feature:5")->find("geometry_domain"),"Delta graph omitted geometry classification");
+    const auto outgoing=accepted(s.call("context_graph",json(R"({"keys":["feature:5"],"depth":2,"direction":"outgoing"})")));check(node(outgoing,"feature:3")&&node(outgoing,"feature:4")&&!node(outgoing,"feature:6"),"Outgoing traversal followed backlinks");
+    const auto incoming=accepted(s.call("context_graph",json(R"({"keys":["feature:5"],"depth":2,"direction":"incoming"})")));check(node(incoming,"feature:7")&&!node(incoming,"feature:4"),"Incoming traversal followed forward links");
+    auto altered=field(first,"next_call");altered.set("direction",V::makeStr("incoming"));check(field(s.call("context_graph",altered),"isError").b,"Changed selection accepted a cursor");
+    altered=field(first,"next_call");V cursor=field(altered,"cursor");cursor.set("offset",V::makeNum(1000));altered.set("cursor",cursor);check(field(s.call("context_graph",altered),"isError").b,"Out-of-range cursor offset accepted");
+    s.document.features[0].name="Changed in place";check(field(s.call("context_graph",field(first,"next_call")),"isError").b,"Source edit at same revision accepted a stale cursor");s.document.features[0].name="Paged fixture 0";
+    auto revisionArgs=field(first,"next_call");revisionArgs.obj.erase(std::remove_if(revisionArgs.obj.begin(),revisionArgs.obj.end(),[](const auto& e){return e.first=="expected_revision";}),revisionArgs.obj.end());++s.revision;check(field(s.call("context_graph",revisionArgs),"isError").b,"Cursor itself failed to bind observed revision");--s.revision;
+    setEvaluationObserver(observer);check(!evaluated&&authoring==documentToJson(s.document),"Graph paging evaluated or changed authoring");
+    AgentSession wide;for(int i=0;i<90;++i){Feature f;f.type=i?FeatureType::Transform:FeatureType::Box;f.name="Wide";if(i)f.inputs={1};wide.document.addFeature(f);}const auto clipped=accepted(wide.call("context_graph",json(R"({"keys":["feature:1"],"depth":0,"limit":1})")));check(field(field(clipped,"page"),"frontier_truncated").b&&field(clipped,"frontier").arr.size()==64,"Wide boundary must be explicitly bounded");
+    auto expansion=accepted(wide.call("context_graph",field(clipped,"expand_call")));std::set<std::string> expanded;for(;;){for(const auto& n:field(expansion,"nodes").arr)expanded.insert(field(n,"key").str);if(field(expansion,"next_call").isNull())break;expansion=accepted(wide.call("context_graph",field(expansion,"next_call")));}check(expanded.size()==90,"Truncated frontier lost its unlisted neighbors from executable expansion");
+}
+void directedEdgePages078B(){
+    auto edgeIdentity=[](const V& edge){return field(edge,"from").str+"\n"+field(edge,"relation").str+"\n"+field(edge,"to").str+"\n"+field(edge,"basis").str;};
+    auto collect=[&](AgentSession& session,V args,size_t nodeCount,const std::set<std::string>& expected){
+        std::set<std::string> nodes,edges;size_t chunks=0,edgeOnly=0;auto receipt=accepted(session.call("context_graph",args));const auto first=receipt;
+        for(;;){++chunks;check(chunks<1000,"Edge continuation failed to terminate");const auto& page=field(receipt,"page");check(field(receipt,"edges").arr.size()+field(receipt,"boundary_edges").arr.size()<=128,"Combined edge response exceeded its bound");
+            if(field(page,"edge_offset").num>0){++edgeOnly;check(field(receipt,"nodes").arr.empty()&&field(page,"returned").num==0,"Edge continuation duplicated node facts");}
+            for(const auto& row:field(receipt,"nodes").arr)check(nodes.insert(field(row,"key").str).second,"Continuation repeated a node across edge pages");for(const char* section:{"edges","boundary_edges"})for(const auto& edge:field(receipt,section).arr)edges.insert(edgeIdentity(edge));
+            check(field(page,"has_more").b==!field(receipt,"next_call").isNull(),"Page completion disagrees with executable continuation");if(field(receipt,"next_call").isNull())break;receipt=accepted(session.call("context_graph",field(receipt,"next_call")));}
+        check(nodes.size()==nodeCount&&edges==expected&&edgeOnly>0,"Directed/dense paging lost authored nodes or incident edge identities");
+        auto bad=field(first,"next_call");V cursor=field(bad,"cursor");cursor.set("edge_offset",V::makeNum(1000000));bad.set("cursor",cursor);check(field(session.call("context_graph",bad),"isError").b,"Invalid edge continuation offset accepted");
+        if(!session.document.features.empty()){const auto name=session.document.features[0].name;session.document.features[0].name+=" changed";check(field(session.call("context_graph",field(first,"next_call")),"isError").b,"Source edit accepted a stale edge continuation");session.document.features[0].name=name;}
+    };
+    AgentSession incoming;incoming.suppressFailureCapture();incoming.document.setParam("driver","3");std::set<std::string> incomingEdges;
+    for(int i=1;i<=205;++i){Feature f;f.type=FeatureType::Box;f.name="Incoming leaf "+std::to_string(i);f.p["dx"]="driver";incoming.document.addFeature(f);incomingEdges.insert("feature:"+std::to_string(i)+"\nuses_parameter\nparams:driver\nexpression_identifier");}
+    collect(incoming,json(R"({"keys":["params:driver"],"direction":"incoming","depth":1,"limit":7,"history_limit":0})"),206,incomingEdges);
+    AgentSession outgoing;outgoing.suppressFailureCapture();std::set<std::string> outgoingEdges;std::string expression;
+    for(int i=0;i<205;++i){const auto name="p"+std::to_string(i);outgoing.document.setParam(name,"1");if(!expression.empty())expression+='+';expression+=name;outgoingEdges.insert("feature:1\nuses_parameter\nparams:"+name+"\nexpression_identifier");}Feature source;source.type=FeatureType::Box;source.name="Outgoing root";source.p["dx"]=expression;outgoing.document.addFeature(source);
+    collect(outgoing,json(R"({"keys":["feature:1"],"direction":"outgoing","depth":1,"limit":7,"history_limit":0})"),206,outgoingEdges);
+    AgentSession dense;dense.suppressFailureCapture();std::set<std::string> denseEdges;
+    for(int i=1;i<=32;++i){Feature f;f.type=i<=16?FeatureType::Box:FeatureType::NativeSolid;f.name="Dense "+std::to_string(i);if(i>16){f.nativeSpec=json(R"({"op":"union"})");for(int j=1;j<=16;++j){f.inputs.push_back(j);denseEdges.insert("feature:"+std::to_string(i)+"\ndepends_on\nfeature:"+std::to_string(j)+"\nauthored_selector");}}dense.document.addFeature(f);}
+    collect(dense,json(R"({"query":"Dense","depth":0,"limit":32,"history_limit":0})"),32,denseEdges);
+}
+void auditedPaging078B(){
+    const auto actor=json(R"({"kind":"agent","id":"context-page-reader","role":"reviewer"})");
+    auto populate=[](AgentSession& s){s.suppressFailureCapture();s.suppressIterationHistory();for(int i=0;i<10;++i){Feature f;f.type=FeatureType::Box;f.name="Audit node "+std::to_string(i);s.document.addFeature(f);}};
+    AgentSession s;populate(s);const auto source=documentToJson(s.document,false,false);const auto revision=s.revision;
+    auto args=json(R"({"query":"Audit","depth":0,"limit":2,"history_limit":3})");args.set("actor",actor);auto page=accepted(s.call("context_graph",args));const auto scope=field(page,"scope").str,hash=field(page,"source_sha256").str;
+    check(s.document.agentActivity&&scope==s.document.agentActivity->id&&s.document.bomDocumentId.empty(),"First audited graph receipt did not bind the identity used to record that read");
+    UsageReceipt usage;usage.id="context-page-usage";usage.source="offline-test";usage.provenance="synthetic";usage.missingResponses=1;std::string error;check(addUsageReceipt(s.document,usage,&error)==UsageRecordResult::Added,error.c_str());
+    auto feedback=json(R"({"ratings":[{"activity_id":"","utility":5,"difficulty":1,"action":"Audit graph inspection","issue":"Audit page history now has feedback"}]})");feedback.obj.front().second.arr.front().set("activity_id",field(page,"activity_id"));feedback.set("actor",actor);accepted(s.call("tool_feedback",feedback));
+    std::set<std::string> nodes;bool historySeen=false;size_t reads=0;for(;;){++reads;for(const auto& row:field(page,"nodes").arr)check(nodes.insert(field(row,"key").str).second,"Audited pagination repeated a node");historySeen|=!field(page,"history").arr.empty();if(field(page,"next_call").isNull())break;auto next=field(page,"next_call");next.set("actor",actor);page=accepted(s.call("context_graph",next));check(field(page,"scope").str==scope&&field(page,"source_sha256").str==hash&&field(page,"revision").num==revision,"Audit/usage bookkeeping invalidated a graph continuation");}
+    check(nodes.size()==10&&reads==5&&historySeen&&agentActivitySerial(s.document)>=reads&&s.document.agentActivity->entries.size()==reads&&s.revision==revision&&documentToJson(s.document,false,false)==source,"Agent-attributed graph reads changed authoring or duplicated/lost their audit actions");
+    AgentSession batched;populate(batched);const auto batchSource=documentToJson(batched.document,false,false);V query=V::makeObj();query.set("tool",V::makeStr("context_graph"));query.set("args",json(R"({"query":"Audit","depth":0,"limit":2})"));V queries=V::makeArr();queries.arr.push_back(query);V batch=V::makeObj();batch.set("queries",queries);batch.set("actor",actor);const auto receipt=accepted(batched.call("query_batch",batch));const auto graph=accepted(field(receipt,"results").arr.front());check(batched.document.agentActivity&&batched.document.agentActivity->entries.size()==1,"Audited batch recorded duplicate inner read actions");auto next=field(graph,"next_call");next.set("actor",actor);const auto continued=accepted(batched.call("context_graph",next));check(field(continued,"scope").str==field(graph,"scope").str&&field(continued,"source_sha256").str==field(graph,"source_sha256").str&&batched.document.agentActivity->entries.size()==2&&documentToJson(batched.document,false,false)==batchSource,"First audited batch invalidated its nested graph continuation or changed source");
+}
 void addExchange(V& history,const char* id,const char* name,const V& receipt){V call=json(R"({"type":"function_call","arguments":"{}"})"),output=json(R"({"type":"function_call_output"})");call.set("call_id",V::makeStr(id));call.set("name",V::makeStr(name));output.set("call_id",V::makeStr(id));output.set("output",V::makeStr(receipt.dump()));history.arr.push_back(call);history.arr.push_back(output);}
 void graphRequests(){
     V history=json(R"([{"role":"developer","content":"Read-only reviewer. Preserve exact face references."},{"role":"user","content":"Inspect suspension; keep wheelbase 240 mm."}])");
     V graph=json(R"({"schema":"ark.context-graph.v1","scope":"public-project","revision":7,"source_sha256":"abc","nodes":[{"key":"feature:1","fingerprint":"fp1","facts":{}}],"edges":[],"history":[],"feedback_required":true,"activity_id":"rated-read"})");
     V rows=field(graph,"nodes"),facts=V::makeObj();facts.set("description",V::makeStr("Suspension dimensions "+std::string(1200,'x')));rows.arr[0].set("facts",facts);graph.set("nodes",rows);
+    {V first=graph;first.set("feedback_required",V::makeBool(false));first.set("next_call",json(R"({"cursor":{"offset":12}})"));V second=first;second.set("next_call",V{});V navigation=V::makeArr();addExchange(navigation,"navigation-before","context_graph",first);addExchange(navigation,"navigation-after","context_graph",second);check(assistant_context::graphProject(navigation).dump()==navigation.dump(),"Overlapping graph facts erased a distinct continuation");}
     for(int i=0;i<6;++i){const auto id="graph-"+std::to_string(i);addExchange(history,id.c_str(),"context_graph",graph);}
     V delta=graph;rows=field(delta,"nodes");rows.arr[0].obj.erase(std::remove_if(rows.arr[0].obj.begin(),rows.arr[0].obj.end(),[](auto& row){return row.first=="facts";}),rows.arr[0].obj.end());delta.set("nodes",rows);addExchange(history,"graph-delta","context_graph",delta);
     const auto unrated=assistant_context::graphProject(history);check(unrated.dump()==history.dump(),"unrated graph reads preserve exact evidence");
@@ -159,4 +214,4 @@ void graphRequests(){
     std::cout<<"GRAPH_DEDUP original_history_bytes="<<original.size()<<" projected_history_bytes="<<projected.dump().size()<<" provider_request_bytes="<<request.dump().size()<<" calls=7 paid_model_calls=0\n";
 }
 }
-int main(){try{preciseStamp();parallelStamps();bisectorGraph();projectGraph();programGraph();graphRequests();std::cout<<checks<<" context graph checks passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(){try{preciseStamp();parallelStamps();bisectorGraph();projectGraph();programGraph();pagedGraph078B();directedEdgePages078B();auditedPaging078B();graphRequests();std::cout<<checks<<" context graph checks passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

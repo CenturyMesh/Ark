@@ -26,7 +26,7 @@ struct NativeDocumentResultsReport {
 };
 DocumentDerivedPayloads nativeDocumentResults(const Document& document,NativeDocumentResultsReport* report=nullptr,
                                               size_t capacityBytes=maxDocumentDerivedBytes,size_t capacityEntries=maxDocumentDerivedEntries);
-arkjson::Value stageNativeDocumentResults(Document& document,const DocumentDerivedPayloads& records);
+arkjson::Value stageNativeDocumentResults(Document& document,DocumentDerivedPayloads records);
 arkjson::Value nativeWorkerRequest(const arkjson::Value& request);
 // Aggregate identity for a fully resolved host boolean sequence. On a miss one
 // worker request runs every pairwise step; portable hits validate the saved
@@ -59,6 +59,9 @@ public:
 struct NativeRequestControl {std::function<bool()> cancelled;unsigned limitMs=30000;};
 NativeRequestControl captureNativeRequestControl();
 unsigned nativeRequestLimitMs(); // effective per-request limit on this thread
+// Read-only calling-thread phase: an isolated process has been resumed or its
+// resident request event signalled. False during cache lookup/shared admission.
+bool nativeRequestExecuting();
 arkjson::Value exportNativeBrep(const std::string& brep,const std::string& path);
 Mesh nativeResultMesh(const arkjson::Value& result);
 inline Mesh nativeResultMesh(const NativePayload& result){return result.displayMesh();}

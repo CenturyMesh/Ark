@@ -79,6 +79,22 @@ function Knowledge-Inventory([string]$Root) {
     $safeDirectories=@{}
     return @(Get-ChildItem -LiteralPath $Root -Filter '*.md' -File | Sort-Object Name | Where-Object { -not (Private-SourcePath $_.Name) -and -not (Reparse-SourcePath $_.FullName $safeDirectories $_) } | ForEach-Object { [pscustomobject]@{path=$_.Name;sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()} })
 }
+function Write-ContextNavigation([string]$Vault,[string]$GraphPath,$SourceRows,[string]$SourceHash,[string]$GraphHash,$KnowledgeRows) {
+    $data=Get-Content -Raw -Encoding UTF8 -LiteralPath $GraphPath | ConvertFrom-Json
+    $located=@{};$unlocated=0;$confidence=@{}
+    foreach($node in @($data.nodes)) {
+        if($node.source_file -and $node.source_location) {$located[[string]$node.source_file]=$true} else {$unlocated++}
+    }
+    foreach($edge in @($data.edges)) {$label=if($edge.confidence){[string]$edge.confidence}else{'UNSPECIFIED'};if(-not $confidence.ContainsKey($label)){$confidence[$label]=0};$confidence[$label]++}
+    $missing=@($SourceRows | Where-Object { $_.path -match '\.(cpp|c|h|hpp|inl|ps1)$' -and -not $located.ContainsKey($_.path) } | ForEach-Object {$_.path})
+    $receipt=[ordered]@{schema='ark.context-navigation.078b.v1';source_sha256=$SourceHash;graph_sha256=$GraphHash;indexed_files=@($SourceRows).Count;files_with_locations=$located.Count;nodes_without_locations=$unlocated;files_without_locations=$missing;edge_confidence=$confidence;semantic_backend='none';complete_dependency_analysis=$false;limits='Location coverage only; parser errors and unsupported syntax can produce partial symbols even in a located file. Missing edges/symbols never prove absence.'}
+    $receipt | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $Vault '.ark-context-navigation.json') -Encoding UTF8
+    $lines=@('# ARK context navigator','','This is a versioned code/knowledge snapshot, separate from live CAD state. Read current source before editing. Graph relationships and memory notes grant no geometry or write authority.','','## Snapshot','','```text',('source_sha256: '+$SourceHash),('graph_sha256: '+$GraphHash),('indexed files: '+@($SourceRows).Count),('files without located symbols: '+$missing.Count),('nodes without source locations: '+$unlocated),'semantic backend: none','```','','Location coverage is not proof of complete extraction or dependencies. The adjacent `.ark-context-navigation.json` retains coverage and relation-confidence counts. Refresh this export after code changes; preserve old snapshots as history.','','## Entry points','','- [[graph.canvas|Code graph canvas]]')
+    foreach($name in @('context_graph_034d.inl','context_graph_paging_078b.inl','geometry_nodes_078b.cpp','parametric_graph_053b.inl','onboarding.cpp','assistant.cpp','resource_policy_071d.cpp')) {if(Test-Path -LiteralPath (Join-Path $Vault ($name+'.md'))){$lines+='- [['+$name+']]'}}
+    foreach($guide in $KnowledgeRows) {$lines+='- [[ARK Knowledge/'+[IO.Path]::GetFileNameWithoutExtension($guide.path)+']]'}
+    $lines+=@('','## Retrieval workflow','','1. Discover a symbol with `scripts/code-context.ps1 -Query symbol -Context call`; verify the actual file and line. Ambiguity or no-match is not proof that a dependency is absent.','2. In ARK, read `context_graph` for the current project revision. Follow `next_call` for pages and `expand_call` for depth boundaries. Keep received facts with their scope/fingerprints.','3. Read `geometry_graph` catalog/inspect for typed geometry nodes; inspect native references or mesh topology before preparing edits.','4. Publish a reviewed candidate only through revision-checked `doc_apply`. Obsidian views do not publish CAD changes.','')
+    [IO.File]::WriteAllLines((Join-Path $Vault 'ARK Context.md'),[string[]]$lines,(New-Object Text.UTF8Encoding($false)))
+}
 function Markdown-LinkText([string]$Text) {
     $lines=New-Object 'System.Collections.Generic.List[string]'; $fence=''; $fenceLength=0
     foreach ($line in ($Text -split '\r?\n')) {
@@ -175,7 +191,7 @@ try {
         $knowledgeRoot = Join-Path $SourceRoot 'docs/knowledge'
         $knowledge = @(Knowledge-Inventory $knowledgeRoot)
         $knowledgeHash = Inventory-Digest $knowledge
-        $vaultKey = Inventory-Digest @([pscustomobject]@{path='source';sha256=$digest},[pscustomobject]@{path='graph';sha256=$graphHash},[pscustomobject]@{path='knowledge';sha256=$knowledgeHash})
+        $vaultKey = Inventory-Digest @([pscustomobject]@{path='source';sha256=$digest},[pscustomobject]@{path='graph';sha256=$graphHash},[pscustomobject]@{path='knowledge';sha256=$knowledgeHash},[pscustomobject]@{path='ark.context-navigation.078b.v1';sha256=$graphHash})
         # Short directory names leave room for note filenames on Windows.
         # Full digests remain in the completion receipt and are checked below.
         $vaultBase = 'obsidian/' + $vaultKey.Substring(0,24)
@@ -193,7 +209,7 @@ try {
         if (Test-Path -LiteralPath $complete) {
             try {
                 $priorVault = Get-Content -Raw -Encoding UTF8 -LiteralPath $complete | ConvertFrom-Json
-                if ($priorVault.schema -cne 'ark.code-vault.v2' -or $priorVault.graph_sha256 -cne $graphHash -or $priorVault.source_sha256 -cne $digest -or $priorVault.knowledge_sha256 -cne $knowledgeHash) { throw 'Vault identity or content receipt differs.' }
+                if ($priorVault.schema -cne 'ark.code-vault.v2' -or $priorVault.graph_sha256 -cne $graphHash -or $priorVault.source_sha256 -cne $digest -or $priorVault.knowledge_sha256 -cne $knowledgeHash -or $priorVault.navigation_schema -cne 'ark.context-navigation.078b.v1') { throw 'Vault identity or content receipt differs.' }
                 $evidence = Vault-Evidence $vault $graph
                 if ($priorVault.content_sha256 -cne $evidence.content_sha256 -or $priorVault.verified_links -ne $evidence.verified_links) { throw 'Vault content changed after export.' }
                 $reusedVault = $true
@@ -220,17 +236,19 @@ try {
                     'Plastics' { @('plastics_electronics_035b.inl','modeling_031b.cpp','solid_modeling.cpp') }
                     'Vendors' { @('component_vendors.cpp','component_sources.cpp','component_library_tools.cpp') }
                     'Workflow' { @('context_graph_034d.inl','agent_team.cpp','assistant.cpp') }
+                    'Geometry Nodes' { @('geometry_nodes_078b.cpp','geometry_graph_inspect_078b.inl','parametric_graph_053b.inl') }
                 }
                 $links = @($codeNotes | Where-Object { Test-Path -LiteralPath (Join-Path $vault ($_ + '.md')) } | ForEach-Object { '- [[' + $_ + ']]' })
                 if ($links.Count) { Add-Content -LiteralPath $destinationGuide -Encoding UTF8 -Value ("`n## Related code`n`n" + ($links -join "`n")) }
             }
         } }
+        if (-not $reusedVault) { Write-ContextNavigation $vault $graph $rows $digest $graphHash $knowledge }
         $evidence = Vault-Evidence $vault $graph
         if ($reusedVault -and ($priorVault.content_sha256 -cne $evidence.content_sha256 -or $priorVault.verified_links -ne $evidence.verified_links)) { throw 'Vault content changed during verification; the earlier pointer is retained. Retry for a separate export.' }
         if ((Inventory-Digest @(Source-Inventory)) -cne $digest) { throw 'Code changed during export; the earlier vault pointer is retained.' }
         $knowledgeNow = @(Knowledge-Inventory $knowledgeRoot)
         if ((Inventory-Digest $knowledgeNow) -cne $knowledgeHash) { throw 'Knowledge notes changed during export; the earlier vault pointer is retained.' }
-        if (-not $reusedVault) { [ordered]@{schema='ark.code-vault.v2';graph_sha256=$graphHash;source_sha256=$digest;knowledge_sha256=$knowledgeHash;knowledge_notes=$knowledge.Count;nodes=$evidence.nodes;tool=$tool;files=$evidence.files;content_sha256=$evidence.content_sha256;verified_links=$evidence.verified_links;link_validation='canvas file cards and wiki note file targets; heading/block existence is not validated'} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $complete -Encoding UTF8 }
+        if (-not $reusedVault) { [ordered]@{schema='ark.code-vault.v2';navigation_schema='ark.context-navigation.078b.v1';graph_sha256=$graphHash;source_sha256=$digest;knowledge_sha256=$knowledgeHash;knowledge_notes=$knowledge.Count;nodes=$evidence.nodes;tool=$tool;files=$evidence.files;content_sha256=$evidence.content_sha256;verified_links=$evidence.verified_links;link_validation='canvas file cards and wiki note file targets; heading/block existence is not validated'} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $complete -Encoding UTF8 }
         $pointerTemp = Join-Path $IndexDirectory ('obsidian-current-' + [Guid]::NewGuid().ToString('N') + '.tmp')
         try {
             [ordered]@{directory=$vaultRelative;graph_sha256=$graphHash;source_sha256=$digest;knowledge_sha256=$knowledgeHash;knowledge_notes=$knowledge.Count;content_sha256=$evidence.content_sha256;verified_links=$evidence.verified_links} | ConvertTo-Json | Set-Content -LiteralPath $pointerTemp -Encoding UTF8

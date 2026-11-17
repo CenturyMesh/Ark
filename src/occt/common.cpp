@@ -158,10 +158,28 @@ const char* volumeIntegrationMethod(const TopoDS_Shape& shape){
     switch(volumeMethod(shape)){case VolumeMethod::AnalyticGauss:return "analytic_gauss";case VolumeMethod::PolynomialTrimGauss:return "adaptive_gauss_polynomial_trim";default:return "gauss_kronrod_rational_or_freeform";}
 }
 namespace {
+// Exact numeric integration is pure in the serialized B-rep. OCCT algorithms
+// may share/mutate TShapes, so pointer identity is deliberately insufficient.
+// Keep only small successful results; every lookup hashes the current complete
+// geometry (without disposable triangulation), including placements/tolerances.
+struct IntegratedPropertyCache077 {
+    struct Entry {GProp_GProps properties;uint64_t used;};
+    std::map<std::string,Entry> entries;uint64_t clock=0;
+    static IntegratedPropertyCache077& get(){static thread_local IntegratedPropertyCache077 cache;return cache;}
+    static std::string key(const TopoDS_Shape& shape,bool centroid,bool inertia) noexcept {try{
+        if(const char* disabled=std::getenv("ARK_NATIVE_PROPERTY_CACHE");disabled&&std::string(disabled)=="0")return {};
+        NativeProfileScope timing("volume.memo_identity");std::ostringstream bytes;BRepTools::Write(shape,bytes,false,false,TopTools_FormatVersion_CURRENT);
+        return std::string(centroid?"c":"v")+(inertia?"i":"n")+sha256(bytes.str());
+    }catch(...){return {};}}
+    static bool lookup(const std::string& key,GProp_GProps& props){if(key.empty())return false;auto& cache=get();const auto found=cache.entries.find(key);if(found==cache.entries.end())return false;props=found->second.properties;found->second.used=++cache.clock;NativeProfileScope reused("volume.memo_reuse");return true;}
+    static void store(const std::string& key,const GProp_GProps& props) noexcept {try{if(key.empty()||!std::isfinite(props.Mass()))return;auto& cache=get();if(cache.entries.size()>=128){auto oldest=std::min_element(cache.entries.begin(),cache.entries.end(),[](const auto& a,const auto& b){return a.second.used<b.second.used;});cache.entries.erase(oldest);}cache.entries.insert_or_assign(key,Entry{props,++cache.clock});}catch(...){/* Optional retention cannot reject valid integration. */}}
+};
 void integrateVolume(const TopoDS_Shape& shape,GProp_GProps& props,bool centroid,bool inertia){
     NativeProfileScope profile("volumeProperties");
     double error=0;
     VolumeMethod method;{NativeProfileScope classify("volume.classify");method=volumeMethod(shape);}
+    const auto memoKey=method==VolumeMethod::AnalyticGauss?std::string():IntegratedPropertyCache077::key(shape,centroid,inertia);
+    if(IntegratedPropertyCache077::lookup(memoKey,props))return;
     NativeProfileScope integrate("volume.integrate");switch(method){
         // Exact analytic surfaces and trims retain the original bounded Gauss rule.
         // GK moment refinement around their zero terms can take seconds per tube.
@@ -179,13 +197,14 @@ void integrateVolume(const TopoDS_Shape& shape,GProp_GProps& props,bool centroid
                 GProp_GProps reference;const double referenceError=BRepGProp::VolumePropertiesGK(shape,reference,1e-10,false,true,false,false,false);
                 if(referenceError>=0&&std::isfinite(referenceError)&&reference.Mass()>0){
                     GProp_GProps bounded;BRepGProp::VolumeProperties(shape,bounded,false,false,false);
-                    if(std::isfinite(bounded.Mass())&&std::abs(bounded.Mass()-reference.Mass())<=1e-9*reference.Mass()){props=bounded;return;}
+                    if(std::isfinite(bounded.Mass())&&std::abs(bounded.Mass()-reference.Mass())<=1e-9*reference.Mass()){props=bounded;IntegratedPropertyCache077::store(memoKey,props);return;}
                 }
             }
             error=BRepGProp::VolumePropertiesGK(shape,props,1e-10,false,true,centroid||inertia,inertia,false);break;
         }
     }
     if(error<0||!std::isfinite(error))throw std::runtime_error("Exact volume integration failed");
+    IntegratedPropertyCache077::store(memoKey,props);
 }
 }
 void volumeProperties(const TopoDS_Shape& shape,GProp_GProps& props,bool moments){integrateVolume(shape,props,moments,moments);}
@@ -194,14 +213,21 @@ void volumeCentroidProperties(const TopoDS_Shape& shape,GProp_GProps& props){int
 double properties(const TopoDS_Shape& shape,char kind){
     NativeProfileScope profile(kind=='a'?"areaProperties":kind=='l'?"lengthProperties":"volumeScalar");GProp_GProps props;if(shape.IsNull())return 0;
     if(kind=='a'){
-        bool adaptive=false;for(TopExp_Explorer face(shape,TopAbs_FACE);face.More();face.Next()){
+        // Select quadrature per face. One spline face must not send every
+        // elementary face through adaptive integration (including planar trims
+        // whose near-zero moment terms can exhaust that integrator).
+        double absoluteError=0;
+        for(TopExp_Explorer face(shape,TopAbs_FACE);face.More();face.Next()){
             const auto type=BRepAdaptor_Surface(TopoDS::Face(face.Current())).GetType();
-            if(type!=GeomAbs_Plane&&type!=GeomAbs_Cylinder&&type!=GeomAbs_Cone&&type!=GeomAbs_Sphere&&type!=GeomAbs_Torus){adaptive=true;break;}
+            GProp_GProps part;
+            if(type==GeomAbs_Plane||type==GeomAbs_Cylinder||type==GeomAbs_Cone||type==GeomAbs_Sphere||type==GeomAbs_Torus)BRepGProp::SurfaceProperties(face.Current(),part);
+            else {const double error=BRepGProp::SurfaceProperties(face.Current(),part,1e-14,false);if(!std::isfinite(error)||error<0||!std::isfinite(part.Mass()))throw std::runtime_error("Exact surface area integration failed");absoluteError+=error*std::abs(part.Mass());}
+            props.Add(part);
         }
-        // Fixed quadrature measurably under-integrates rational parametrizations
-        // (including an exact rational cylinder). Keep the elementary fast path.
-        if(adaptive){const double error=BRepGProp::SurfaceProperties(shape,props,1e-14,false);if(!std::isfinite(error)||error<0||error>1e-10)throw std::runtime_error("Exact surface area integration did not meet its relative precision");}
-        else BRepGProp::SurfaceProperties(shape,props);
+        // OCCT returns the maximum FACE-relative estimate, not the relative
+        // error of the summed area. Accumulate absolute errors before applying
+        // the unchanged 1e-10 precision requirement to this shape's area.
+        if(!std::isfinite(absoluteError)||absoluteError>1e-10*std::abs(props.Mass()))throw std::runtime_error("Exact surface area integration did not meet its relative precision");
     }else if(kind=='l')BRepGProp::LinearProperties(shape,props);else volumeProperties(shape,props,false);return props.Mass();
 }
 std::vector<TopoDS_Shape> shapes(const TopoDS_Shape& shape,TopAbs_ShapeEnum kind){std::vector<TopoDS_Shape> out;for(TopExp_Explorer ex(shape,kind);ex.More();ex.Next())out.push_back(ex.Current());return out;}

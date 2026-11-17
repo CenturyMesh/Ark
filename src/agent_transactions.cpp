@@ -4,6 +4,7 @@
 #include "ark/candidate_retention_072a.hpp"
 #include "ark/assembly_authoring.hpp"
 #include "ark/agent_activity.hpp"
+#include "ark/bom.hpp"
 #include "ark/iteration_history.hpp"
 #include "ark/derived_bakes.hpp"
 #include "ark/project_memory_tools.hpp"
@@ -135,6 +136,12 @@ arkjson::Value AgentSession::call(const std::string& tool,const V& args){
     const std::string actorKind=actor&&actor->t==V::Obj&&actor->find("kind")?actor->find("kind")->asStr():std::string();
     const bool auditable=callDepth_==0&&tool!="tool_feedback"&&tool!="activity_info"&&tool!="usage_record"&&tool!="memory_context"&&tool!="memory_record"&&tool!="memory_maintain";
     const bool audit=auditable&&actorKind=="agent";
+    // These reads can return a continuation scoped to the activity identity.
+    // Reserve that identity before dispatch; recording the single actual action
+    // still happens in finish(). Otherwise the first audited read would create
+    // its identity only after returning an immediately stale unassigned cursor.
+    // Project-replacing actions keep their existing boundary/recording path.
+    if(audit&&(tool=="context_graph"||tool=="query_batch")&&!document.agentActivity){auto ledger=std::make_shared<AgentActivityLedger>();ledger->id=newBomDocumentId();document.agentActivity=std::move(ledger);}
     // Declared clients (Studio's live MCP bridge) keep a failure trail: committed
     // authoring and failed calls are recorded and can be rated with tool_feedback.
     const bool clientAudit=auditable&&actorKind=="client";
@@ -182,6 +189,12 @@ arkjson::Value AgentSession::preparedRecipe(const std::string& id) const{
     const auto found=std::find_if(prepared_.begin(),prepared_.end(),[&](const Prepared& p){return p.id==id;});
     if(found==prepared_.end()||found->expires<=std::chrono::steady_clock::now())throw std::runtime_error("Prepared candidate missing, expired, evicted or already applied");
     return found->recipe;
+}
+bool AgentSession::discardPreparedCandidate(const std::string& id){
+    if(id.empty()||id==hostPreparedApplyId_)return false;
+    const auto found=std::find_if(prepared_.begin(),prepared_.end(),[&](const Prepared& p){return p.id==id;});
+    if(found==prepared_.end())return false;
+    prepared_.erase(found);return true;
 }
 arkjson::Value AgentSession::preparePreview(const V& supplied){
     checkRevision(supplied,revision);V args=supplied,refresh;std::shared_ptr<Document> previousGeometry;V previousScope;

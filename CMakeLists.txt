@@ -58,6 +58,7 @@ add_library(ark STATIC
   src/authoring_024b.cpp src/media_authoring.cpp src/appearance_024b.cpp src/plane_sections_024b.cpp
   src/authoring_023b.cpp src/cad_import.cpp src/holes_orchestrator.cpp src/design_containers.cpp
   src/parametric_components.cpp src/parametric_programs.cpp
+  src/geometry_nodes_078b.cpp
   src/design_variants.cpp src/design_review.cpp
   src/surface_quality_068b.cpp src/surface_network_068b.cpp src/surface_operations_068b.cpp src/surface_offset_068b.cpp
   src/design_disciplines.cpp
@@ -279,6 +280,21 @@ endif()
 add_executable(ark-evaluation-scheduler-070a-tests tests/evaluation_scheduler_070a_tests.cpp)
 target_link_libraries(ark-evaluation-scheduler-070a-tests PRIVATE ark)
 add_test(NAME evaluation-scheduler-070a COMMAND ark-evaluation-scheduler-070a-tests)
+add_executable(ark-geometry-nodes-078b-tests tests/geometry_nodes_078b_tests.cpp)
+target_link_libraries(ark-geometry-nodes-078b-tests PRIVATE ark)
+add_test(NAME geometry-nodes-078b COMMAND ark-geometry-nodes-078b-tests)
+add_executable(ark-resource-scheduling-078b-tests tests/resource_scheduling_078b_tests.cpp)
+target_link_libraries(ark-resource-scheduling-078b-tests PRIVATE ark)
+if(ARK_WITH_OCCT)
+  target_compile_definitions(ark-geometry-nodes-078b-tests PRIVATE ARK_GEOMETRY_NODES_NATIVE_TESTS=1)
+  add_dependencies(ark-geometry-nodes-078b-tests ark-occt-worker)
+  target_compile_definitions(ark-resource-scheduling-078b-tests PRIVATE ARK_RESOURCE_SCHEDULING_NATIVE_TESTS=1)
+  add_dependencies(ark-resource-scheduling-078b-tests ark-occt-worker)
+  add_test(NAME resource-scheduling-078b COMMAND ark-resource-scheduling-078b-tests $<TARGET_FILE:ark-occt-worker>)
+else()
+  add_test(NAME resource-scheduling-078b COMMAND ark-resource-scheduling-078b-tests)
+endif()
+set_tests_properties(resource-scheduling-078b PROPERTIES TIMEOUT 60)
 if(ARK_WITH_OCCT)
   target_compile_definitions(ark-evaluation-scheduler-070a-tests PRIVATE ARK_SCHEDULER_NATIVE_TESTS=1)
   add_dependencies(ark-evaluation-scheduler-070a-tests ark-occt-worker)
@@ -847,7 +863,7 @@ if(WIN32)
       add_test(NAME studio-${check} COMMAND ark-studio --self-test-${check} --settings-file "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}.settings.json" --shot "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}.png" --size 1280 800)
       set_tests_properties(studio-${check} PROPERTIES TIMEOUT 300 RUN_SERIAL TRUE)
     endforeach()
-    foreach(check surface-quality-ui surface-network-ui surface-operations-ui surface-offset-ui design-variants-ui component-library-ui design-review-ui inertial-ui viewport-quality-ui connectors-ui local-models-ui viewport-dock-ui context-ui suspension-ui assistant-steering-ui assistant-chat-ui chat-dock-ui parametric-role-ui stamps-ui media-044b-ui planes-sections-ui holes-orchestrator-ui design-container-ui parametric-graph-ui design-disciplines-ui cad-import-ui native-vertex-pull-ui advanced-sheetmetal-ui specialized-pattern-ui drawing-viewport-ui direct-authoring-ui parametric-authoring-ui selection-glow-ui selection-picking-ui image-attachment-ui sketch-edit-ui sketch-drawing-ui typed-sketch-ui arc-ui assistant-ui render-ui action-icons-ui interaction-ui baked-motions-ui exploded-views-ui drag-chain-ui)
+    foreach(check surface-quality-ui surface-network-ui surface-operations-ui surface-offset-ui design-variants-ui component-library-ui design-review-ui inertial-ui viewport-quality-ui connectors-ui local-models-ui viewport-dock-ui context-ui suspension-ui assistant-steering-ui assistant-chat-ui chat-dock-ui parametric-role-ui stamps-ui media-044b-ui planes-sections-ui holes-orchestrator-ui design-container-ui parametric-graph-ui geometry-nodes-ui design-disciplines-ui cad-import-ui native-vertex-pull-ui advanced-sheetmetal-ui specialized-pattern-ui drawing-viewport-ui direct-authoring-ui parametric-authoring-ui selection-glow-ui selection-picking-ui image-attachment-ui sketch-edit-ui sketch-drawing-ui typed-sketch-ui arc-ui assistant-ui render-ui action-icons-ui interaction-ui baked-motions-ui exploded-views-ui drag-chain-ui)
       add_test(NAME studio-${check} COMMAND ark-studio --self-test-${check} --settings-file "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}.settings.json" --shot "${ARK_STUDIO_TEST_ARTIFACT_ROOT}/${check}.png" --size 1440 900)
       set_tests_properties(studio-${check} PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
     endforeach()
