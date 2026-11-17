@@ -26,19 +26,52 @@ Fetch-Pinned "$projectionUrl/README.md" 'MODEL-ORIGINAL-README.md' 'e5d0a1b73964
 $runtimeVersion = '1.23.2'
 $cacheRoot = Join-Path (Split-Path $assetRoot -Parent) 'memory-downloads'
 New-Item -ItemType Directory -Force -Path $cacheRoot | Out-Null
-$archive = Join-Path $cacheRoot "onnxruntime-win-x64-$runtimeVersion.zip"
-if (-not (Test-Path -LiteralPath $archive)) { Invoke-WebRequest -UseBasicParsing "https://github.com/microsoft/onnxruntime/releases/download/v$runtimeVersion/onnxruntime-win-x64-$runtimeVersion.zip" -OutFile $archive }
-Assert-Digest $archive '0b38df9af21834e41e73d602d90db5cb06dbd1ca618948b8f1d66d607ac9f3cd'
+# Two official Microsoft packages carry byte-identical copies of the four files
+# used here. Each package is pinned and the extracted files are pinned again
+# below, so the result does not depend on which package was reachable.
+$runtimePackages = @(
+    @{ Name="onnxruntime-win-x64-$runtimeVersion.zip"
+       Url="https://github.com/microsoft/onnxruntime/releases/download/v$runtimeVersion/onnxruntime-win-x64-$runtimeVersion.zip"
+       Digest='0b38df9af21834e41e73d602d90db5cb06dbd1ca618948b8f1d66d607ac9f3cd'
+       Root="onnxruntime-win-x64-$runtimeVersion/"; Libraries='lib/' },
+    @{ Name="microsoft.ml.onnxruntime.$runtimeVersion.nupkg"
+       Url="https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/$runtimeVersion/microsoft.ml.onnxruntime.$runtimeVersion.nupkg"
+       Digest='25fe172f7fcdf34f2b5b02c8b997f6b88abc282956849d4af4335af23d0c4e4a'
+       Root=''; Libraries='runtimes/win-x64/native/' }
+)
+$runtimePackage = $null
+$unreachable = @()
+foreach ($candidate in $runtimePackages) {
+    $archive = Join-Path $cacheRoot $candidate.Name
+    if (-not (Test-Path -LiteralPath $archive)) {
+        # Download beside the cache name so an interrupted transfer is never
+        # mistaken for the pinned package on the next run.
+        $partial = "$archive.partial"
+        try {
+            Invoke-WebRequest -UseBasicParsing $candidate.Url -OutFile $partial
+            Move-Item -LiteralPath $partial -Destination $archive -Force
+        } catch {
+            Remove-Item -LiteralPath $partial -Force -ErrorAction SilentlyContinue
+            $unreachable += "$($candidate.Url): $($_.Exception.Message)"
+            continue
+        }
+    }
+    Assert-Digest $archive $candidate.Digest
+    $runtimePackage = $candidate
+    break
+}
+if (-not $runtimePackage) { throw "No pinned ONNX Runtime $runtimeVersion package could be downloaded. $($unreachable -join ' | ')" }
+foreach ($failure in $unreachable) { Write-Warning "ONNX Runtime source unavailable; using $($runtimePackage.Name). $failure" }
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $zip = [IO.Compression.ZipFile]::OpenRead($archive)
 try {
     foreach ($mapping in @{
-        'lib/onnxruntime.dll'='onnxruntime.dll';
-        'lib/onnxruntime_providers_shared.dll'='onnxruntime_providers_shared.dll';
+        "$($runtimePackage.Libraries)onnxruntime.dll"='onnxruntime.dll';
+        "$($runtimePackage.Libraries)onnxruntime_providers_shared.dll"='onnxruntime_providers_shared.dll';
         'LICENSE'='ONNXRUNTIME-LICENSE.txt';
         'ThirdPartyNotices.txt'='ONNXRUNTIME-ThirdPartyNotices.txt'
     }.GetEnumerator()) {
-        $entry = $zip.GetEntry("onnxruntime-win-x64-$runtimeVersion/$($mapping.Key)")
+        $entry = $zip.GetEntry("$($runtimePackage.Root)$($mapping.Key)")
         if (-not $entry) { throw "Missing pinned archive entry: $($mapping.Key)" }
         $stream = $entry.Open()
         $buffer = [IO.MemoryStream]::new()
@@ -50,6 +83,8 @@ try {
 } finally { $zip.Dispose() }
 Assert-Digest (Join-Path $assetRoot 'onnxruntime.dll') 'dec964ab1ee36cc9b0ae247d13b376627992fc57dec0454354017ab8fd84f1ea'
 Assert-Digest (Join-Path $assetRoot 'onnxruntime_providers_shared.dll') 'a2b3a50956aa75a9879c8472bc7df4f7a8072bcd2db19a1b7d988e7688f293ef'
+Assert-Digest (Join-Path $assetRoot 'ONNXRUNTIME-LICENSE.txt') 'c250d6278f0b47a6439fb7592b08b58a55eb9f535aa49a1db63211c3f982b674'
+Assert-Digest (Join-Path $assetRoot 'ONNXRUNTIME-ThirdPartyNotices.txt') 'e00f828e0a33de591a355ae6606d2625f5758da7d2c844db7821c9dd3e3647b6'
 # The pinned original model card declares Apache-2.0. Preserve both model cards
 # alongside the standard Apache-2.0 license text and explicit attribution.
 Write-ArkBytesIfDifferent -Path (Join-Path $assetRoot 'MODEL-LICENSE.txt') -Bytes ([IO.File]::ReadAllBytes((Join-Path $repoRoot 'LICENSE')))

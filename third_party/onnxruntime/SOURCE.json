@@ -5,6 +5,9 @@
   "source": "https://github.com/microsoft/onnxruntime/tree/v1.23.2",
   "archive": "https://github.com/microsoft/onnxruntime/releases/download/v1.23.2/onnxruntime-win-x64-1.23.2.zip",
   "archive_sha256": "0b38df9af21834e41e73d602d90db5cb06dbd1ca618948b8f1d66d607ac9f3cd",
+  "alternate_archive": "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/1.23.2/microsoft.ml.onnxruntime.1.23.2.nupkg",
+  "alternate_archive_sha256": "25fe172f7fcdf34f2b5b02c8b997f6b88abc282956849d4af4335af23d0c4e4a",
+  "alternate_archive_scope": "Official NuGet package, used by the prepare script only when the release archive is unreachable. Its win-x64 runtime libraries, LICENSE and ThirdPartyNotices.txt are byte-identical to the release archive; the script pins all four files individually.",
   "headers": "Unmodified public C/C++ headers from the official release archive",
   "runtime": "Loaded from explicit application assets only; no global installation or downloads at runtime"
 }
