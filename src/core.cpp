@@ -124,8 +124,8 @@ ThreadPool::ThreadPool() {
                     std::unique_lock<std::mutex> lk(mu_);
                     cv_work_.wait(lk, [&]{ return stop_ || !queue_.empty(); });
                     if (stop_ && queue_.empty()) return;
-                    job = std::move(queue_.back());
-                    queue_.pop_back();
+                    job = std::move(queue_.front());
+                    queue_.pop_front();
                 }
                 job();
                 if (--pending_ == 0) { std::lock_guard<std::mutex> lk(mu_); cv_idle_.notify_all(); }

@@ -16,6 +16,7 @@ V fixture(){
 void run(){
     const auto source=fixture();const auto raw=allocation(source);NativePayload payload(source);const auto packed=payload.allocatedBytes();check(payload.packedMesh()&&packed*4<raw,"Lossless typed channels substantially compact the identical JSON mesh fixture");
     const auto a=nativeResultMesh(source),b=nativeResultMesh(payload);check(a.pos==b.pos&&a.idx==b.idx&&a.nrm==b.nrm,"Packed native display conversion preserves the existing float32 mesh exactly");check(payload.allocatedBytes()==packed,"Typed display conversion does not materialize JSON numeric arrays");
+    for(int i=0;i<3;++i){auto copy=payload.copyValue();check(copy.dump()==source.dump(),"Independent cache reads preserve every original numeric value and metadata field");copy.set("report",V{});check(payload.allocatedBytes()==packed&&payload.find("report")->find("synthetic_metric")->num==10,"Independent reads neither retain expanded arrays nor mutate cached evidence");}
     Body first;first.nativeData=payload;first.baked=std::make_unique<Mesh>(b);Body second=first;
     check(first.nativeData.ownerIdentity()==second.nativeData.ownerIdentity()&&first.baked.get()==second.baked.get(),"Body copies share immutable native and mesh owners");
     second.nativeData.mutate([](V& value){V report=*value.find("report");report.set("synthetic_metric",V::makeNum(20));value.set("report",report);});

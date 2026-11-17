@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstring>
 #include <vector>
+#include <deque>
 #include <string>
 #include <functional>
 #include <mutex>
@@ -283,7 +284,7 @@ private:
     ThreadPool();
     ~ThreadPool();
     std::vector<std::thread> workers_;
-    std::vector<std::function<void()>> queue_;
+    std::deque<std::function<void()>> queue_;
     std::mutex mu_;
     std::condition_variable cv_work_, cv_idle_;
     std::atomic<i64> pending_{0};

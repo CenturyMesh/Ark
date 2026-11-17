@@ -431,6 +431,7 @@ const std::vector<std::pair<std::string,std::vector<std::string>>>& assistantSpe
         {"components",{"library_search","library_get","library_insert","library_info","library_sources","library_source_search","library_source_page","library_fetch","library_ingest","library_update","library_vendors"}},
         {"vendors",{"library_vendors","library_sources","library_source_search","library_source_page","library_fetch","library_ingest"}},
         {"transmission",{"transmission_inspect","transmission_design"}},
+        {"geometry_nodes",{"geometry_graph"}},
         {"manufacturing",{"manufacturing_propose","manufacturing_inspect","manufacturing_plan","manufacturing_simulate","manufacturing_export","manufacturing_slice"}},{"plastics",{"manufacturing_propose","manufacturing_inspect"}},
         {"surfacing",{"surface_control"}},{"rubber",{"rubber_plan","physics_inspect","materials_inspect","compute_info"}},{"physics",{"physics_inspect","rubber_plan","materials_inspect","compute_info"}},{"materials",{"materials_inspect"}},{"wood",{"wood_inspect"}},
         {"motion",{"assembly_motion","suspension_inspect","motion_info","drag_chain_info"}},{"suspension",{"suspension_inspect","assembly_motion"}},

@@ -48,6 +48,40 @@ there are no other relevant nodes. Query words match names, kinds and compact
 facts; exact selectors reject missing or repeated keys. Geometry buffers stay
 local. Use `object_context` and native inspection for actual selected geometry.
 
+078B adds deterministic continuation without increasing response limits.
+`direction:both|outgoing|incoming` filters traversal by the stored edge direction;
+it does not reinterpret every relationship as a geometric dependency. `page`
+reports matching roots, the requested neighborhood size and `has_more`.
+Call `context_graph` with the returned `next_call` arguments for the next page.
+Its cursor binds project scope, saved-authoring SHA-256, revision and exact
+query/keys/depth/direction/limit/history selection. Any mismatch rejects and
+requires fresh discovery, including an in-place source edit at the same revision.
+Usage, audit and journal bookkeeping are excluded from that source projection.
+An agent-attributed first read or read batch establishes its activity identity
+before returning scoped continuation, then records the normal single action.
+Its own audit/feedback updates do not immediately invalidate the returned cursor.
+
+`frontier` and `boundary_edges` retain omitted incident neighbors even when known
+fingerprints omit unchanged node facts. The frontier excerpt is bounded to64
+nodes; internal `edges` and `boundary_edges` share a128-edge page, with exact
+counts and offsets. Edge reporting includes **all incident edges** of the node
+slice, independent of the direction used to traverse nodes. This prevents a
+root-to-leaf edge from disappearing when only its leaf is on a later page.
+
+`next_call` drains remaining edges before advancing to the next node slice.
+Its optional cursor `edge_offset` is bound to that slice and the same source,
+revision and selector. Edge-only continuations have empty `nodes` and preserve
+the earlier node facts; edge identities can overlap across endpoint slices.
+Aggregate both edge arrays and deduplicate identities. `page.has_more` and
+`partial` include pending node **or edge** chunks; `nodes_have_more` and
+`edges_have_more` distinguish them. No page claims unbounded edge transport.
+`expand_call` expands from
+the whole current page, so its own continuation can reach neighbors beyond that
+excerpt. `page.depth_boundary_nodes` separately describes an unexpanded radius.
+Neither `partial:false` nor a completed page proves full dependency closure.
+Feature rows expose observed/conservative `geometry_domain` even in delta reads;
+the domain is not geometric or manufacturing certification.
+
 Supply the received `known_scope` and `known_fingerprints` to omit unchanged
 node facts. Fingerprints cover that node's authored data and incident links;
 they do not certify its evaluated geometry or an unchanged transitive dependency.
@@ -83,6 +117,8 @@ and source hash. Delta facts can be restored only from exact prior
 scope/key/fingerprint matches. An unrated action stays exact until a successful
 `tool_feedback` receipt contains its ID. Different sources/scopes, incomplete
 call/output pairs, errors, writes and candidate receipts are not deduplicated.
+078B also retains distinct page, frontier, boundary-edge and continuation
+receipts. Identical node facts alone cannot erase a route to omitted context.
 
 Only the outbound request changes, and only when its actual serialized size is
 smaller. Full host history and exact user/role messages remain. The continuation
@@ -107,6 +143,15 @@ The wrapper restores the caller's environment. Query logging is disabled.
 Only allowlisted source extensions under `src`, `include`, `tests`, `scripts`
 and `cmake` enter an owned snapshot. User CAD files, sessions and environment
 files are excluded. The optional tool is not bundled into the ARK runtime.
+
+New exports include `ARK Context.md` and `.ark-context-navigation.json`, bound
+to the same code/graph fingerprints as the vault. They link the actual canvas,
+available code cards and curated guides, and report files/nodes without source
+locations and relation-confidence counts. This is location coverage, not a claim
+of complete parsing or dependency analysis. Old edited exports remain untouched.
+The combined memory exporter now rejects a selected code vault whose source/graph
+differs from the current code-index manifest, and guards that manifest during
+publication. Refresh with `code-context.ps1 -Obsidian` before combining memory.
 
 The source manifest hashes each input and the generated graph. Changed/deleted
 inputs or a changed graph invalidate reuse. The wrapper conservatively performs

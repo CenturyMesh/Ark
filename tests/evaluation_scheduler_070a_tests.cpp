@@ -69,6 +69,7 @@ void meshDependencyAndFailures(){
     check(parallel.parallelFeatures>0&&parallel.peakParallelFeatures<=4,"Ready branches must retain bounded worker evaluation");
     check(parallel.parallelContextFeaturesCopied==0,"Mesh branches cloned Document feature context");
     auto stats=evaluationSchedulerDiagnostics070A();check(stats.readinessChecks<=parallel.features.size()+2&&stats.dependencyWakeups<=parallel.features.size()*2,"Dependency release unexpectedly rescans the whole DAG");
+    check(stats.largestJobSnapshotBytes>0&&stats.peakAdmittedPayloadBytes>0&&stats.sharedInputBytesReferenced>0,"Snapshot and shared-owner admission evidence missing");
     for(Document* doc:{&serial,&parallel})doc->setParam("offset","0.25");workers.set("1");healthy(serial);workers.set("4");healthy(parallel);parity(serial,parallel);
     // Invalid exact input order remains an owner rejection, never work that can
     // be speculatively published by the dirty frontier.
@@ -114,8 +115,24 @@ void nativeParallelAndAtomicity(){
 }
 #endif
 }
-int main(){try{Environment cpu("ARK_CPU_THREADS","4"),native("ARK_NATIVE_THREADS","1");cachedFrontier();meshDependencyAndFailures();
+// Independent, explicitly positioned routes must retain serial geometry and
+// become invalid on the same parameter edit when evaluated on the worker pool.
+#ifdef ARK_SCHEDULER_NATIVE_TESTS
+static void independentCables(){
+    Environment workers("ARK_FEATURE_THREADS","1");Document source;source.setParam("R","1");
+    for(int i=0;i<6;++i){Feature f;f.type=FeatureType::CableRoute;f.name="Synthetic independent route";f.nativeSpec=json(R"({"start":[0,0,0],"end":[20,0,0],"radius":"R","bend_radius":4})");f.nativeSpec.set("end",json(("["+std::to_string(20+i)+",0,0]").c_str()));source.addFeature(f);}
+    auto serial=source.authoringCopy(),parallel=source.authoringCopy();healthy(serial);workers.set("4");healthy(parallel);parity(serial,parallel);check(parallel.parallelFeatures>0,"Independent routes stayed on owner instead of audited worker pool");
+    serial.setParam("R","1.2");parallel.setParam("R","1.2");workers.set("1");healthy(serial);workers.set("4");healthy(parallel);parity(serial,parallel);check(parallel.recomputeEvaluated==6,"Route parameter edit failed to invalidate each dependent cable");
+}
+#endif
+static void sparseSnapshots078(){
+    auto source=branching();for(int i=0;i<512;++i){Feature unused;unused.type=FeatureType::Box;unused.suppressed=true;unused.name=std::string(500,'q')+std::to_string(i);source.addFeature(unused);}
+    auto serial=source.authoringCopy(),parallel=source.authoringCopy();Environment workers("ARK_FEATURE_THREADS","1"),payload("ARK_FEATURE_PAYLOAD_MAX_MB","1");healthy(serial);workers.set("4");healthy(parallel);parity(serial,parallel);
+    const auto stats=evaluationSchedulerDiagnostics070A();check(parallel.parallelFeatures>0,"Unrelated retained history incorrectly exhausted every small worker snapshot allowance");check(stats.largestJobSnapshotBytes<256*1024,"A mesh worker copied unrelated authored feature history");
+}
+int main(){try{Environment cpu("ARK_CPU_THREADS","4"),native("ARK_NATIVE_THREADS","1");cachedFrontier();meshDependencyAndFailures();sparseSnapshots078();
 #ifdef ARK_SCHEDULER_NATIVE_TESTS
 nativeParallelAndAtomicity();
+independentCables();
 #endif
 std::cout<<"070A evaluation scheduler: "<<checks<<" frontier-work, serial/parallel geometry, failure, cache-custody and CPU-limit checks passed\n";return 0;}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

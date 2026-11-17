@@ -11,6 +11,17 @@ revision and selected exact geometry before writing. Parallel roles share the
 host index; model conversations still pay input costs for the facts they read.
 Keep Focused as the default, record failed attempts and never silently rebase.
 
+078B graph responses distinguish another node page from a depth boundary.
+Follow `next_call` for the current neighborhood and `expand_call` for adjacent
+context. Cursors bind the observed revision/source and selection. A stale cursor
+requires fresh discovery; changing its offset or hash is not a recovery method.
+Frontier excerpts may be truncated, while the expansion's pages still expose all
+neighbors. `next_call` also continues bounded edge chunks before advancing nodes;
+edge-only chunks omit duplicate node facts. Retain prior facts and deduplicate
+edge identities across node slices. Incident edges are reported in both
+directions even when node traversal is directed. See
+[[ARK Knowledge/Geometry Nodes]] for typed node authoring.
+
 Team progress is useful when a document, assignment, message or result changes.
 037D retains successful static onboarding contracts when old tool receipts are
 compacted for provider input. Complete guides and explicitly selected field
@@ -53,6 +64,9 @@ not imported user drawings, private sessions or an automatic cross-project brain
 Vault verification covers generated file hashes and file-link destinations.
 An edited prior vault is preserved and exported separately before publishing a
 new current pointer. Heading/block anchor existence is outside that check.
+The `ARK Context.md` navigator records source/graph hashes and location coverage.
+Coverage is not complete parsing. Combining memory requires the code index and
+selected vault to match; refresh the code export if their snapshots differ.
 
 Start with [[ARK Knowledge/Electronics]], [[ARK Knowledge/Plastics]] or
 [[ARK Knowledge/Vendors]] and retrieve only what the task needs.

@@ -340,7 +340,7 @@ int main(){
         auto inspect=dense.call("native_inspect",json(R"({"id":1})"));
         CHECK(failed(inspect)&&inspect.find("structuredContent")->find("error")->str.find("Density must be a positive finite number of grams per cubic centimetre")!=std::string::npos);
     }
-    CHECK(AgentSession::tools().arr.size()==124);
-    for(const char* name:{"manufacturing_plan","manufacturing_simulate","manufacturing_export","manufacturing_slice"}){auto tools=AgentSession::tools();CHECK(std::count_if(tools.arr.begin(),tools.arr.end(),[&](const V& tool){return tool.find("name")->str==name;})==1);}
+    CHECK(AgentSession::tools().arr.size()==125);
+    for(const char* name:{"manufacturing_plan","manufacturing_simulate","manufacturing_export","manufacturing_slice","geometry_graph"}){auto tools=AgentSession::tools();CHECK(std::count_if(tools.arr.begin(),tools.arr.end(),[&](const V& tool){return tool.find("name")->str==name;})==1);}
     std::cout<<checks<<" checks / "<<failures<<" failures\n";return failures?1:0;
 }

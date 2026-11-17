@@ -19,6 +19,8 @@ public:
     NativePayload(arkjson::Value value);
     NativePayload& operator=(arkjson::Value value);
     const arkjson::Value& value() const;
+    // Independent lossless JSON without retaining an expanded numeric tree.
+    arkjson::Value copyValue() const;
     operator const arkjson::Value&() const{return value();}
     const arkjson::Value& metadata() const;
     const arkjson::Value* meshMetadata() const;

@@ -53,6 +53,9 @@ public:
     static arkjson::Value tools(bool detailed=false);
     arkjson::Value preparePreview(const arkjson::Value& args);
     arkjson::Value preparedRecipe(const std::string& id) const;
+    // Host-only lifecycle cleanup; no authoring/revision change. Unknown or
+    // already-consumed IDs are harmless. Hosts serialize access to the session.
+    bool discardPreparedCandidate(const std::string& id);
     arkjson::Value proposeManufacturing(const arkjson::Value& args);
     arkjson::Value commitPrepared(const arkjson::Value& args);
     arkjson::Value snapshotCandidate(const arkjson::Value& args);

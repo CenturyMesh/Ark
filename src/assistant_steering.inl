@@ -4,6 +4,7 @@ bool assistantToolReadOnly(const V& tools,const std::string& name,const V& args)
     if(name=="snapshot"&&args.t==V::Obj&&!args.find("path"))return true;
     if(name=="image_asset"&&field(args,"action")=="inspect")return true;
     if(name=="parametric_program"&&(field(args,"action")=="validate"||field(args,"action")=="examples"||field(args,"action")=="inspect"))return true;
+    if(name=="geometry_graph")return args.t==V::Obj&&(field(args,"action")=="inspect"||field(args,"action")=="catalog");
     if(name=="design_variants"&&(field(args,"action")=="inspect"||field(args,"action")=="evaluate"||field(args,"action")=="explore"))return true;
     if(name=="design_review"&&(field(args,"action")=="compare"||field(args,"action")=="diagnose"))return true;
     if(name=="library_vendors"&&args.t==V::Obj&&(!args.find("operation")||field(args,"operation")=="list"))return true;
