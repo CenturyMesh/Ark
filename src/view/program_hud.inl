@@ -1,13 +1,15 @@
 // Program controls in the Parametric HUD. Installed parametric programs are read
 // with parametric_program{action:"inspect"} (namespace, name, values, local_edits).
-// Public values are staged like HUD rows and publish as one human transaction:
+// Public values (numbers, booleans and listed choices) are staged like HUD rows and
+// publish as one human transaction:
 // prepare{mode:"configure"} evaluates an isolated exact candidate, then
 // doc_apply{candidate_id,expected_revision} commits it. Both calls use runTool's CAD
 // worker path, so the viewport keeps painting. A rejection keeps the document, the
 // revision and the staged values. Detach and Remove ask for confirmation first.
 struct ProgramHudState {
     bool view=false;arkjson::Value rows=arkjson::Value::makeArr();u64 revision=~u64(0),epoch=~u64(0),objectEpoch=~u64(0);double inspectMs=0;std::string inspectError,inspectScope,selected;
-    std::vector<std::pair<std::string,double>> staged;std::string stagedNamespace,stagedSha;u64 stagedRevision=~u64(0);
+    // Staged values as configure sends them: a number (1/0 for a boolean) or the text of a text choice.
+    std::vector<std::pair<std::string,arkjson::Value>> staged;std::string stagedNamespace,stagedSha;u64 stagedRevision=~u64(0);
     std::string result,code,codeNote;bool resultError=false;double prepareMs=0,applyMs=0;int scroll=0,visible=0,focus=-1;std::vector<std::string> rowNames;
 };
 static ProgramHudState g_programHud;
@@ -25,11 +27,19 @@ static Spec spec(const V& s){Spec r;const auto& lo=field(s,"min");const auto& hi
 static std::string number(double x){if(x==0)x=0;char b[40];if(x==std::floor(x)&&std::fabs(x)<1e15){std::snprintf(b,sizeof b,"%lld",(long long)x);return b;}for(int p=1;p<=17;++p){std::snprintf(b,sizeof b,"%.*g",p,x);if(std::strtod(b,nullptr)==x)break;}return b;}
 static std::string format(double x,const Spec& s){return number(x)+(s.unit.empty()?"":" "+s.unit);}
 static std::string range(const Spec& s){std::string t=s.lo&&s.hi?number(s.min)+" .. "+format(s.max,s):s.lo?">= "+format(s.min,s):s.hi?"<= "+format(s.max,s):std::string("no limits");return t+(s.integer?"  /  integer":"  /  step "+number(s.step));}
+// Parameter kinds come from inspect's parameter_kinds. A boolean stores 1/0 and switches Off/On;
+// a choice stores one listed number or text and moves through the declared list.
+enum class Kind {Number,Boolean,Choice,Text};
+static Kind kindOf(const V& r,const std::string& name){const std::string kind=field(field(r,"parameter_kinds"),name.c_str()).asStr();return kind=="boolean"?Kind::Boolean:kind=="choice"?Kind::Choice:kind=="text_choice"?Kind::Text:Kind::Number;}
+static bool same(const V& a,const V& b){return a.t==b.t&&(a.t==V::Str?a.str==b.str:a.t==V::Num&&a.num==b.num);}
+static std::vector<V> options(Kind kind,const V& sp){if(kind==Kind::Boolean)return {V::makeNum(0),V::makeNum(1)};const auto& listed=field(sp,"choices");return kind==Kind::Number||listed.t!=V::Arr?std::vector<V>{}:listed.arr;}
+static int optionIndex(const std::vector<V>& list,const V& value){for(size_t i=0;i<list.size();++i)if(same(list[i],value))return (int)i;return -1;}
+static std::string show(Kind kind,const V& value,const Spec& s){return kind==Kind::Boolean?std::string(value.num!=0?"On":"Off"):value.t==V::Str?value.str:format(value.num,s);}
 static bool stale(){const auto& p=g_programHud;return p.revision!=g_session.revision||p.epoch!=g_documentEpoch||p.objectEpoch!=g_objectDocumentEpoch;}
 static const V* row(const std::string& ns){for(const auto& r:g_programHud.rows.arr)if(field(r,"namespace").asStr()==ns)return &r;return nullptr;}
 static const V* selected(){return row(g_programHud.selected);}
 static void clearStaged(){auto& p=g_programHud;p.staged.clear();p.stagedNamespace.clear();p.stagedSha.clear();p.stagedRevision=~u64(0);}
-static double* stagedValue(const std::string& name){auto& p=g_programHud;if(p.stagedNamespace!=p.selected)return nullptr;for(auto& e:p.staged)if(e.first==name)return &e.second;return nullptr;}
+static V* stagedValue(const std::string& name){auto& p=g_programHud;if(p.stagedNamespace!=p.selected)return nullptr;for(auto& e:p.staged)if(e.first==name)return &e.second;return nullptr;}
 static std::string ownedSummary(const V& r,size_t* total=nullptr){std::string text;size_t all=0;const char* names[][2]={{"features","feature"},{"sketches","sketch"},{"planes","datum"},{"materials","material"}};
     for(const auto& n:names){const size_t k=field(field(r,"owned"),n[0]).arr.size();if(!k)continue;all+=k;text+=(text.empty()?"":", ")+std::to_string(k)+" "+(k==1?n[1]:std::string(n[1])=="sketch"?"sketches":std::string(n[1])=="datum"?"datums":std::string(n[1])+"s");}
     if(total)*total=all;return text.empty()?std::string("no owned objects"):text;}
@@ -58,8 +68,8 @@ static void refresh(){
     p.inspectMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();p.revision=g_session.revision;p.epoch=g_documentEpoch;p.objectEpoch=g_objectDocumentEpoch;
     if(field(r,"isError").b){p.inspectError=field(field(r,"structuredContent"),"error").asStr();p.rows=V::makeArr();}else{p.inspectError.clear();p.rows=field(field(r,"structuredContent"),"programs");if(p.rows.t!=V::Arr)p.rows=V::makeArr();}
     if(!selected()){p.selected=p.rows.arr.empty()?std::string():field(p.rows.arr.front(),"namespace").asStr();p.scroll=0;p.focus=-1;}
-    // Staged values of a removed program or of a parameter it no longer declares cannot be applied.
-    if(!p.staged.empty()){const V* owner=row(p.stagedNamespace);if(!owner)clearStaged();else{const auto& values=field(*owner,"values");p.staged.erase(std::remove_if(p.staged.begin(),p.staged.end(),[&](const auto& e){return field(values,e.first.c_str()).t!=V::Num;}),p.staged.end());if(p.staged.empty())clearStaged();}}
+    // Staged values of a removed program, or of a parameter it no longer declares with that value type, cannot be applied.
+    if(!p.staged.empty()){const V* owner=row(p.stagedNamespace);if(!owner)clearStaged();else{const auto& values=field(*owner,"values");p.staged.erase(std::remove_if(p.staged.begin(),p.staged.end(),[&](const auto& e){const auto& stored=field(values,e.first.c_str());return stored.t!=e.second.t||(stored.t!=V::Num&&stored.t!=V::Str);}),p.staged.end());if(p.staged.empty())clearStaged();}}
 }
 static void poll(){if(!g_parametricHud.open||g_parametricHud.collapsed||!g_programHud.view||g_dialog||g_busy||g_preparingEdit)return;if(stale())refresh();}
 static void note(const std::string& text,bool error){auto& p=g_programHud;p.result=text;p.code.clear();p.resultError=error;g_status=text;}
@@ -87,40 +97,75 @@ static bool publish(V args,u64 observed,const char* stage){
     if(g_error){reject(applied,stage,observed);return false;}
     return true;
 }
-// The UI clamps to the declared range and rounds integers, and says so; agents are rejected instead.
+static bool blocked(){auto& p=g_programHud;if(p.staged.empty()||p.stagedNamespace==p.selected)return false;note("Apply or Reset the staged values of "+p.stagedNamespace+" first",true);return true;}
 // Staged values belong to the revision the shown rows were read at, not to a newer one.
+// Returning to the committed value removes the row from the staged set.
+static void stage(const std::string& name,const V& value,const std::string& shown,const char* how,const std::string& clamp={}){
+    auto& p=g_programHud;const V* r=selected();if(!r)return;const auto& committed=field(field(*r,"values"),name.c_str());
+    if(auto* staged=stagedValue(name)){if(same(value,committed))p.staged.erase(std::remove_if(p.staged.begin(),p.staged.end(),[&](const auto& e){return e.first==name;}),p.staged.end());else *staged=value;}
+    else if(!same(value,committed)){if(p.staged.empty()){p.stagedRevision=p.revision;p.stagedNamespace=p.selected;p.stagedSha=field(*r,"program_sha256").asStr();}p.staged.push_back({name,value});}
+    if(p.staged.empty())clearStaged();p.focus=(int)(std::find(p.rowNames.begin(),p.rowNames.end(),name)-p.rowNames.begin());
+    note(clamp.empty()?std::to_string(p.staged.size())+" staged / "+how+" "+name+" = "+shown+" / Apply prepares and publishes":clamp+" / "+std::to_string(p.staged.size())+" staged",false);
+}
+// The UI clamps a number to the declared range and rounds integers, and says so; agents are rejected instead.
 static void set(const std::string& name,double value,const char* how){
-    auto& p=g_programHud;const V* r=selected();if(!r)return;const auto& committed=field(field(*r,"values"),name.c_str());if(committed.t!=V::Num)return;
-    if(!p.staged.empty()&&p.stagedNamespace!=p.selected){note("Apply or Reset the staged values of "+p.stagedNamespace+" first",true);return;}
+    const V* r=selected();if(!r||kindOf(*r,name)!=Kind::Number||field(field(*r,"values"),name.c_str()).t!=V::Num||blocked())return;
     const Spec s=spec(field(field(*r,"parameters"),name.c_str()));std::string clamp;
     if(s.integer&&value!=std::round(value)){value=std::round(value);clamp="Rounded to the integer "+number(value);}
     if(s.lo&&value<s.min){value=s.integer?std::ceil(s.min):s.min;clamp="Clamped to the program minimum "+format(value,s);}
     if(s.hi&&value>s.max){value=s.integer?std::floor(s.max):s.max;clamp="Clamped to the program maximum "+format(value,s);}
     if(std::fabs(value)<1e-12)value=0;
-    if(auto* staged=stagedValue(name)){if(value==committed.num)p.staged.erase(std::remove_if(p.staged.begin(),p.staged.end(),[&](const auto& e){return e.first==name;}),p.staged.end());else *staged=value;}
-    else if(value!=committed.num){if(p.staged.empty()){p.stagedRevision=p.revision;p.stagedNamespace=p.selected;p.stagedSha=field(*r,"program_sha256").asStr();}p.staged.push_back({name,value});}
-    if(p.staged.empty())clearStaged();p.focus=(int)(std::find(p.rowNames.begin(),p.rowNames.end(),name)-p.rowNames.begin());
-    note(clamp.empty()?std::to_string(p.staged.size())+" staged / "+how+" "+name+" = "+format(value,s)+" / Apply prepares and publishes":clamp+" / "+std::to_string(p.staged.size())+" staged",false);
+    stage(name,V::makeNum(value),format(value,s),how,clamp);
 }
-static double current(const std::string& name){if(const auto* staged=stagedValue(name))return *staged;const V* r=selected();return r?field(field(*r,"values"),name.c_str()).num:0;}
+// A boolean or a choice takes only its listed values, so nothing is clamped or rounded.
+static void choose(const std::string& name,const V& value,const char* how){
+    const V* r=selected();if(!r||blocked())return;const Kind kind=kindOf(*r,name);const auto& sp=field(field(*r,"parameters"),name.c_str());
+    if(optionIndex(options(kind,sp),value)<0)return;stage(name,value,show(kind,value,spec(sp)),how);
+}
+static V currentValue(const std::string& name){if(const auto* staged=stagedValue(name))return *staged;const V* r=selected();return r?field(field(*r,"values"),name.c_str()):V{};}
+static double current(const std::string& name){return currentValue(name).num;}
 static void step(const std::string& name,int direction){
-    const V* r=selected();if(!r)return;const Spec s=spec(field(field(*r,"parameters"),name.c_str()));const double now=current(name);
+    const V* r=selected();if(!r)return;const auto& sp=field(field(*r,"parameters"),name.c_str());const Spec s=spec(sp);const Kind kind=kindOf(*r,name);
+    if(kind!=Kind::Number){
+        // Declared order without wrapping; a staged value the source no longer lists restarts at an end.
+        const auto list=options(kind,sp);if(list.empty())return;const int at=optionIndex(list,currentValue(name)),next=at<0?(direction>0?0:(int)list.size()-1):at+direction;
+        if(next<0||next>=(int)list.size()){const std::string value=show(kind,list[(size_t)at],s);note(kind==Kind::Boolean?name+" is already "+value:std::string("Already at the ")+(direction>0?"last":"first")+" choice "+value,false);return;}
+        choose(name,list[(size_t)next],direction>0?"+":"-");return;
+    }
+    const double now=current(name);
     const bool atMax=s.hi&&direction>0&&now>=s.max-1e-12,atMin=s.lo&&direction<0&&now<=s.min+1e-12;
     if(atMax||atMin){note(std::string("Already at the program ")+(atMax?"maximum ":"minimum ")+format(atMax?s.max:s.min,s),false);return;}
     // Next point of the step grid anchored at min (or zero), even from an off-grid value.
     const double origin=s.lo?s.min:0,k=(now-origin)/s.step;set(name,origin+(direction>0?std::floor(k+1e-9)+1:std::ceil(k-1e-9)-1)*s.step,direction>0?"+":"-");
 }
+// The editor leaves other Studio windows (Design variants) usable: a value entered over
+// an older model is not staged against the newer one; the rows are re-read for review.
+static bool editedOverNewerModel(const std::string& ns,const std::string& name,u64 observed,u64 epoch,u64 objectEpoch,const char* again){
+    auto& p=g_programHud;
+    if(g_session.revision!=observed||p.revision!=observed||g_documentEpoch!=epoch||g_objectDocumentEpoch!=objectEpoch){refresh();note("Model changed while editing "+name+" (revision "+std::to_string(observed)+" -> "+std::to_string(g_session.revision)+") / value not staged; review "+ns+" and "+again+" it again",true);return true;}
+    if(p.selected!=ns||!selected()){note("Program selection changed while editing / value not staged",true);return true;}
+    return false;
+}
 static void type(const std::string& name){
     auto& p=g_programHud;const V* r=selected();if(!r)return;const std::string ns=p.selected;const auto& sp=field(field(*r,"parameters"),name.c_str());const Spec s=spec(sp);
     const std::string description=field(sp,"description").asStr();std::string text=number(current(name));const u64 observed=p.revision,epoch=g_documentEpoch,objectEpoch=g_objectDocumentEpoch;
     if(!editText(("Program value: "+ns+" / "+name+" ("+range(s)+")"+(description.empty()?"":" / "+description)).c_str(),text))return;
-    // The editor leaves other Studio windows (Design variants) usable: a value typed over
-    // an older model is not staged against the newer one; the rows are re-read for review.
-    if(g_session.revision!=observed||p.revision!=observed||g_documentEpoch!=epoch||g_objectDocumentEpoch!=objectEpoch){refresh();note("Model changed while editing "+name+" (revision "+std::to_string(observed)+" -> "+std::to_string(g_session.revision)+") / value not staged; review "+ns+" and type it again",true);return;}
-    if(p.selected!=ns||!selected()){note("Program selection changed while editing / value not staged",true);return;}
+    if(editedOverNewerModel(ns,name,observed,epoch,objectEpoch,"type"))return;
     bool ok=false;const double value=evalExpr(trimField(text),g_doc.buildEnv(),&ok);
     if(!ok||!std::isfinite(value)){note("Enter a finite number (or an expression of document parameters) for "+name,true);return;}
     set(name,value,"typed");
+}
+// The value box: a number is typed, a boolean switches and a choice opens its declared list.
+static void pick(const std::string& name){
+    auto& p=g_programHud;const V* r=selected();if(!r)return;const Kind kind=kindOf(*r,name);if(kind==Kind::Number){type(name);return;}
+    const std::string ns=p.selected;const auto& sp=field(field(*r,"parameters"),name.c_str());const Spec s=spec(sp);const auto list=options(kind,sp);if(list.empty())return;const V now=currentValue(name);
+    if(kind==Kind::Boolean){choose(name,V::makeNum(now.num!=0?0:1),"switched");return;}
+    const std::string description=field(sp,"description").asStr();std::vector<std::string> labels;for(const auto& option:list)labels.push_back(show(kind,option,s));
+    std::vector<EditorField> fields{choiceField(name.c_str(),show(kind,now,s),labels)};const u64 observed=p.revision,epoch=g_documentEpoch,objectEpoch=g_objectDocumentEpoch;
+    if(!editFields(("Program choice: "+ns+" / "+name).c_str(),(std::to_string(list.size())+" declared choices"+(description.empty()?"":" / "+description)+". The choice is staged; Apply publishes it.").c_str(),fields,false,"Stage"))return;
+    if(editedOverNewerModel(ns,name,observed,epoch,objectEpoch,"choose"))return;
+    const auto found=std::find(labels.begin(),labels.end(),fields.front().value);if(found==labels.end()){note("Choose one of the declared values of "+name,true);return;}
+    choose(name,list[(size_t)(found-labels.begin())],"chose");
 }
 static void apply(){
     auto& p=g_programHud;if(p.staged.empty()){note("Nothing staged / change a value first",false);return;}
@@ -130,7 +175,7 @@ static void apply(){
         note(std::string(source?"Program source of "+p.stagedNamespace+" changed":"Model changed")+" since these values were staged (revision "+std::to_string(p.stagedRevision)+" -> "+std::to_string(g_session.revision)+"). Review them: Apply again prepares them on the current model, Reset discards them.",true);
         p.stagedRevision=g_session.revision;p.stagedSha=field(*r,"program_sha256").asStr();return;}
     const u64 observed=p.stagedRevision;const std::string ns=p.stagedNamespace;const size_t count=p.staged.size();
-    V a=V::makeObj(),values=V::makeObj();for(const auto& e:p.staged)values.set(e.first,V::makeNum(e.second));a.set("mode",V::makeStr("configure"));a.set("namespace",V::makeStr(ns));a.set("values",values);
+    V a=V::makeObj(),values=V::makeObj();for(const auto& e:p.staged)values.set(e.first,e.second);a.set("mode",V::makeStr("configure"));a.set("namespace",V::makeStr(ns));a.set("values",values);
     if(!publish(a,observed,"Apply"))return;
     clearStaged();refresh();char text[240];std::snprintf(text,sizeof text,"Applied %zu value%s to %s / revision %llu / exact candidate %.0f ms, publish %.0f ms",count,count==1?"":"s",ns.c_str(),(unsigned long long)g_session.revision,p.prepareMs,p.applyMs);note(text,false);
 }
@@ -202,23 +247,30 @@ template<class Rect,class Mini>static void drawProgramHud(Rect rect,Mini& mini,c
         const auto& parameters=field(*r,"parameters");const auto& values=field(*r,"values");for(const auto& kv:parameters.obj)p.rowNames.push_back(kv.first);std::sort(p.rowNames.begin(),p.rowNames.end()); // stored key order is not stable
         float ry=y+l.headerH;const float listBottom=ry+l.rowsH-(l.overflow?22.f:0.f);
         for(int i=p.scroll;i<(int)p.rowNames.size()&&i<maxRows;++i){
-            if(ry+rowH>listBottom+1)break;const auto& name=p.rowNames[(size_t)i];const auto& sp=field(parameters,name.c_str());const auto& committed=field(values,name.c_str());const Spec s=spec(sp);const double* staged=stagedValue(name);
-            // Updated program source can narrow a range under a staged value; Apply then rejects with PROGRAM_VALUES.
-            const bool numeric=committed.t==V::Num;const double shownValue=staged?*staged:committed.num;const bool outside=numeric&&((s.lo&&shownValue<s.min)||(s.hi&&shownValue>s.max));
+            if(ry+rowH>listBottom+1)break;const auto& name=p.rowNames[(size_t)i];const auto& sp=field(parameters,name.c_str());const auto& committed=field(values,name.c_str());const Spec s=spec(sp);const V* staged=stagedValue(name);
+            // A row is editable when its stored value has the type its kind stores. Updated program source can
+            // narrow a range or drop a choice under a staged value; Apply then rejects with PROGRAM_VALUES.
+            const Kind kind=kindOf(*r,name);const auto list=options(kind,sp);const bool editable=committed.t==(kind==Kind::Text?V::Str:V::Num)&&(kind==Kind::Number||!list.empty());
+            const V& shownValue=staged?*staged:committed;const int at=optionIndex(list,shownValue);const bool outside=editable&&(kind==Kind::Number?(s.lo&&shownValue.num<s.min)||(s.hi&&shownValue.num>s.max):at<0);
             if(staged){rect(x+6,ry+1,w-12,rowH-4,6,.30f,.20f,.04f,.55f,.98f,.70f,.26f,.55f,1);rect(x+6,ry+5,3,rowH-12,1,.99f,.72f,.27f,1,0,0,0,0,0);}
-            const float plusX=x+w-12-26,valueW=std::min(96.f,w*.32f),valueX=plusX-4-valueW,minusX=valueX-4-26,labelW=(numeric?minusX:x+w-12-valueW)-(x+14)-6;
+            const float plusX=x+w-12-26,valueW=std::min(96.f,w*.32f),valueX=plusX-4-valueW,minusX=valueX-4-26,labelW=(editable?minusX:x+w-12-valueW)-(x+14)-6;
             textOut(fitText(name,.62f,labelW),x+14,ry+5,.62f,.874f,.91f,.94f);
-            std::string second=numeric?range(s):"Not a number / configure it with an agent";if(staged)second="was "+format(committed.num,s)+"  /  "+second;if(outside)second="outside range  /  "+second;
+            std::string choices;for(const auto& option:list)choices+=(choices.empty()?"":", ")+show(kind,option,s);
+            std::string second=!editable?"Unsupported value / configure it with the tool":kind==Kind::Number?range(s):kind==Kind::Boolean?"Off or On":(at<0?std::to_string(list.size())+" choices":std::to_string(at+1)+" of "+std::to_string(list.size()))+"  /  "+choices;
+            if(staged)second="was "+show(kind,committed,s)+"  /  "+second;if(outside)second=std::string(kind==Kind::Number?"outside range":"not a declared choice")+"  /  "+second;
             textOut(fitText(second,.48f,w-28),x+14,ry+25,.48f,outside?.98f:staged?.99f:.53f,outside?.48f:staged?.78f:.65f,outside?.42f:staged?.44f:.73f);
-            const std::string shown=numeric?format(shownValue,s):committed.dump();
-            if(!numeric){const float vx=x+w-12-valueW;textOut(fitText(shown,.60f,valueW),vx+valueW-std::min(valueW,textWidth(shown,.60f)),ry+6,.60f,.715f,.745f,.769f);}
+            const std::string shown=editable?show(kind,shownValue,s):committed.dump();
+            if(!editable){const float vx=x+w-12-valueW;textOut(fitText(shown,.60f,valueW),vx+valueW-std::min(valueW,textWidth(shown,.60f)),ry+6,.60f,.715f,.745f,.769f);}
             else{
-                const int base=rowBase+4*i;const bool enabled=!otherStaged;const bool hover=enabled&&pointer.x>=valueX&&pointer.x<valueX+valueW&&pointer.y>=ry+3&&pointer.y<ry+25;const std::string description=field(sp,"description").asStr();
-                mini("-",minusX,ry+3,26,22,base,false,false,enabled,"Decrease "+name+(s.integer?" by 1":" by "+format(s.step,s)));
+                const int base=rowBase+4*i;const bool enabled=!otherStaged;const bool hover=enabled&&pointer.x>=valueX&&pointer.x<valueX+valueW&&pointer.y>=ry+3&&pointer.y<ry+25;const std::string description=field(sp,"description").asStr(),about=description.empty()?"":" / "+description;
+                mini("-",minusX,ry+3,26,22,base,false,false,enabled,kind==Kind::Number?"Decrease "+name+(s.integer?" by 1":" by "+format(s.step,s)):kind==Kind::Boolean?"Switch "+name+" off":"Previous choice of "+name);
                 rect(valueX,ry+3,valueW,22,5,staged?.20f:.05f,staged?.14f:.09f,staged?.03f:.12f,hover?.98f:.85f,staged?.99f:.28f,staged?.72f:.45f,staged?.27f:.53f,hover?.95f:.6f,1);
-                const float scale=std::min(.60f,(valueW-8)/std::max(1.f,textWidth(shown,1.f)));textOut(shown,valueX+(valueW-textWidth(shown,scale))*.5f,ry+6,scale,staged?.99f:.90f,staged?.84f:.96f,staged?.52f:.99f);
-                zones.push_back({valueX,ry+3,valueW,22,enabled?base+1:48008});if(hover)hint="Type a value for "+name+" ("+range(s)+")"+(description.empty()?"":" / "+description);
-                mini("+",plusX,ry+3,26,22,base+2,false,false,enabled,"Increase "+name+(s.integer?" by 1":" by "+format(s.step,s)));
+                // Long choice text keeps a readable size and ends in an ellipsis; the hint shows it whole.
+                float scale=std::min(.60f,(valueW-8)/std::max(1.f,textWidth(shown,1.f)));std::string label=shown;if(scale<.44f){scale=.44f;label=fitText(shown,scale,valueW-8);}
+                textOut(label,valueX+(valueW-textWidth(label,scale))*.5f,ry+6,scale,staged?.99f:.90f,staged?.84f:.96f,staged?.52f:.99f);
+                zones.push_back({valueX,ry+3,valueW,22,enabled?base+1:48008});
+                if(hover)hint=kind==Kind::Number?"Type a value for "+name+" ("+range(s)+")"+about:kind==Kind::Boolean?"Switch "+name+" (now "+shown+")"+about:"Choose "+name+" (now "+shown+"; "+choices+")"+about;
+                mini("+",plusX,ry+3,26,22,base+2,false,false,enabled,kind==Kind::Number?"Increase "+name+(s.integer?" by 1":" by "+format(s.step,s)):kind==Kind::Boolean?"Switch "+name+" on":"Next choice of "+name);
             }
             ry+=rowH;
         }
@@ -250,5 +302,5 @@ static bool programHudAction(int id){
     if(id==48017||id==48018){lifecycle(id==48018);return true;}
     if(id==48019||id==48020){p.focus=-1;p.scroll=std::clamp(p.scroll+(id==48019?-1:1),0,std::max(0,(int)p.rowNames.size()-std::max(1,p.visible)));return true;}
     const int index=(id-rowBase)/4,part=(id-rowBase)%4;if(index>=(int)p.rowNames.size())return true;const std::string name=p.rowNames[(size_t)index];
-    if(part==0)step(name,-1);else if(part==2)step(name,1);else if(part==1)type(name);return true;
+    if(part==0)step(name,-1);else if(part==2)step(name,1);else if(part==1)pick(name);return true;
 }

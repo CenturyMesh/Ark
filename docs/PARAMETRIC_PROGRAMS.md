@@ -332,13 +332,19 @@ it on the same namespace.
   object, so the rows and `local_edits` are the same as the live inspect. The
   rest of the drawing, such as imported meshes, is not serialized on the UI
   thread. If that session cannot answer, the live session does.
-- **Values.** Each declared parameter has a row with its value and `unit`, the
-  range, **-**/**+** and a value box for typed entry. Typed entry accepts a
-  number or an expression of document parameters, evaluated once. Integer
-  parameters step by 1 and are rounded. Other bounded parameters step by a power
-  of ten near a twentieth of the range. The HUD clamps to `min`/`max` and names
-  the limit; agents are rejected instead. Units are labels only. A value that is
-  not a number is shown read-only.
+- **Values.** Each declared parameter has a row with its value and `unit`,
+  **-**/**+** and a value box. A number shows its range, and its value box
+  takes typed entry: a number or an expression of document parameters,
+  evaluated once. Integer parameters step by 1 and are rounded. Other bounded
+  parameters step by a power of ten near a twentieth of the range. The HUD
+  clamps to `min`/`max` and names the limit; agents are rejected instead. Units
+  are labels only.
+- **Booleans and choices.** A boolean shows **On** or **Off**: the value box
+  switches it, **-** turns it off and **+** turns it on. A numeric or text
+  choice shows its position and the declared list. **-**/**+** move to the
+  previous or next declared value without wrapping, and the value box opens
+  the list. These rows take only declared values, so nothing is clamped. Text
+  wider than the value box ends in an ellipsis; the hint shows it whole.
 - **Apply.** Changes are staged in amber with `was <value>`. **Apply (n)** sends
   `prepare{mode:"configure",namespace,values,expected_revision}`, then
   `doc_apply{candidate_id,expected_revision}` with
@@ -346,9 +352,9 @@ it on the same namespace.
   path, so the viewport keeps painting. The result line shows the new revision
   and the measured prepare and publish times.
 - **Stale values.** Values belong to the revision of the rows they were staged
-  from. A value typed while another writer changed the model (for example from
-  the Design variants window) is not staged: the rows are read again and the
-  HUD asks for the value again. Values staged at an older revision are not
+  from. A value typed, or a choice picked from its list, while another writer
+  changed the model (for example from the Design variants window) is not
+  staged: the rows are read again and the HUD asks for the value again. Values staged at an older revision are not
   published. The first **Apply** reports the revision change, and whether the
   program source changed. A second **Apply** prepares them on the current
   model; **Reset** discards them.
@@ -357,7 +363,8 @@ it on the same namespace.
   `PROGRAM_DEPENDANTS`, `PROGRAM_STALE_PROGRAM`, `PROGRAM_ASSERT` with the
   author's message, `PROGRAM_VALUES`, or the evaluator error of a failed
   candidate. A staged value outside a range that updated source narrowed is
-  marked `outside range`.
+  marked `outside range`, and a staged choice it no longer lists is marked
+  `not a declared choice`.
 - **Detach and Remove.** Both first show a confirmation with the binding, its
   owned objects and its local edits. **Cancel** changes nothing. If the model
   changes while the confirmation is open, nothing is sent. Otherwise the HUD
@@ -505,11 +512,21 @@ the tool path and opens the HUD on Programs. It covers:
 - Detach cancelled and confirmed, Remove withheld after a commit during its
   confirmation, Remove and Undo, the Variants link, and viewport bounds;
 - the HUD's binding rows byte-identical to the live inspect after install,
-  after a local edit, and with four imported meshes in the drawing.
+  after a local edit, and with four imported meshes in the drawing;
+- a second program with a text choice, a numeric choice and a boolean: **+**
+  and the choice list stage text, the boolean switches, and one **Apply**
+  publishes all three as one revision, with the generated objects and the
+  plate's native volume matching the chosen values;
+- stepping past the last choice refused, the committed value unstaging its
+  row, a choice picked during a concurrent configure not staged, and a staged
+  choice dropped by an agent update rejected as `PROGRAM_VALUES` with the
+  document and revision unchanged.
 
 Captures are written next to `--shot` (`.program-hud-open.png`, `-staged`,
 `-applied`, `-rejected`, `-typed-race`, `-values`, `-local-edits`,
-`-detach-dialog`, `-detached`, `-dependants`, `-remove-dialog` and `-narrow`).
+`-detach-dialog`, `-detached`, `-dependants`, `-remove-dialog`, `-narrow`,
+`-choices-staged`, `-choice-dialog`, `-choices-applied`, `-choice-dropped` and
+`-choices-narrow`).
 In one local run with the four meshes (1.57 MB of authored source), the HUD's
 inspect took 2.6 ms and the live inspect 135 ms. This is a single
 measurement, not a benchmark.
@@ -517,6 +534,7 @@ measurement, not a benchmark.
 Assertions and bounds encode the design rules stated by the author. They are
 not manufacturing, structural or fit qualification. No measured agent quality,
 time or token benefit is claimed. Editing program source in Studio is not
-implemented. Studio's Design variants window stages numeric values only and the
-Parametric HUD shows text values read-only, so text choices are configured
-through the tools. Program assembly output is not implemented (see above).
+implemented. Studio's Design variants window stages numeric values only, so a
+text choice is compared and saved as a variant through the tool; the
+Parametric HUD configures it on the installed program. Program assembly output
+is not implemented (see above).
