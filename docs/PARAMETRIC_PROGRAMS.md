@@ -321,8 +321,8 @@ the HUD shows a **Parameters / Programs** switch under its header. It opens on
 **Programs** when no document parameter is exposed. The
 [Design variants](DESIGN_VARIANTS_067G.md) window (**Manage > Variants** or
 **All tools > Parametric configurator**) remains the place for named
-configurations, comparison and exploration; the HUD's **Variants** button opens
-it on the same namespace.
+configurations, comparison and exploration of every parameter kind; the HUD's
+**Variants** button opens it on the same namespace.
 
 - **Bindings.** After each revision the view reads
   `parametric_program{action:"inspect"}`: namespace and name, owned objects and
@@ -534,7 +534,4 @@ measurement, not a benchmark.
 Assertions and bounds encode the design rules stated by the author. They are
 not manufacturing, structural or fit qualification. No measured agent quality,
 time or token benefit is claimed. Editing program source in Studio is not
-implemented. Studio's Design variants window stages numeric values only, so a
-text choice is compared and saved as a variant through the tool; the
-Parametric HUD configures it on the installed program. Program assembly output
-is not implemented (see above).
+implemented. Program assembly output is not implemented (see above).

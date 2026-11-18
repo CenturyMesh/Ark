@@ -28,4 +28,7 @@ bool parametricProgramsRequire60(const Document&);
 bool callParametricProgramTool(AgentSession&,const std::string&,const arkjson::Value&,arkjson::Value&);
 void appendParametricProgramTools(arkjson::Value&);
 arkjson::Value parametricProgramExamples();
+// Kind of each declared parameter by name: "number", "boolean", "choice" or
+// "text_choice", exactly as validate and inspect report parameter_kinds.
+arkjson::Value parametricProgramParameterKinds(const arkjson::Value& program);
 }

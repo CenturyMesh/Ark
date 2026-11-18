@@ -579,6 +579,7 @@ void appendParametricProgramTools(V& list){
     tool.set("inputSchema",schema);annotations.set("readOnlyHint",V::makeBool(false));tool.set("annotations",annotations);list.arr.push_back(tool);
 }
 
+V parametricProgramParameterKinds(const V& program){return parameterKinds(program);}
 V parametricProgramExamples(){
     V out=V::makeArr();
     auto add=[&](const char* id,const char* summary,const char* source){V row=V::makeObj(),program;if(!arkjson::parse(source,program))fail("EXAMPLE",id);validateProgram(program);row.set("id",V::makeStr(id));row.set("summary",V::makeStr(summary));row.set("program",program);out.arr.push_back(row);};

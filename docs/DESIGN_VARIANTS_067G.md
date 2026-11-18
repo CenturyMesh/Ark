@@ -4,8 +4,10 @@ Scope: **B.02/B.04/D.05/G.03 — Verificado no escopo local**. See the [iteratio
 
 The Studio **Design variants** window configures an installed parametric program.
 **New family** installs one of the existing editable examples. The parameter list
-shows authored values, units and declared bounds; **Edit value** stages a numeric
-value. **Preview** evaluates the staged configuration without publishing it;
+shows authored values, units and declared bounds, or the declared values of a
+boolean or choice. **Edit value** stages a number, switches a boolean between
+**Off** and **On**, or opens the declared list of a numeric or text choice.
+**Preview** evaluates the staged configuration without publishing it;
 **Apply** prepares and publishes one revision-bound exact candidate. Undo restores
 the previous editable source.
 
@@ -23,7 +25,14 @@ Save or Apply. Triangles are display evidence only and never select the producti
 geometry or measured dimensions.
 
 **Explore values** evaluates explicitly entered values for one parameter in the
-native UI. Optional width/depth/height/mass limits filter feasibility. Explicit
+native UI. It opens on the selected parameter with trial values to edit: minimum,
+current and maximum for a number, every declared value for a boolean or choice.
+Choosing another parameter offers that parameter's values. Trial values are
+numbers or expressions, **On**/**Off** for a boolean, or listed texts separated
+by commas; a listed text that itself holds a comma is matched whole. Leaving
+them empty tries every declared value of a boolean or choice. Each result row
+names the value it tried. Optional width/depth/height/mass limits filter
+feasibility. Explicit
 feature pairs and a minimum gap use native B-rep distance/common-volume inspection
 for each trial. Overlap, missing features or unavailable measurements cannot rank
 as feasible. The Studio form accepts one pair; the tool accepts up to sixteen
@@ -63,10 +72,9 @@ including choice text, for example
 retained failed trial. Results and saved variants store resolved values: `1`/`0`
 for a boolean and the listed text for a text choice. A saved text value requires
 semantic version 60; numeric-only variants keep version 56. Studio's
-**Edit value** and **Explore values** stage numbers only, so text choices are
-compared and saved through the tool. The
-[Parametric HUD](PARAMETRIC_PROGRAMS.md#studio) configures a text choice on the
-installed program.
+**Edit value** and **Explore values** take the same kinds, so a boolean or a
+numeric or text choice is staged, saved, compared and explored in the window as
+well as through the tool.
 
 `ranked_indices` indexes `results` in objective order and includes only feasible
 rows with the requested metric available. `mass_kg` is absent and cannot be ranked
@@ -83,3 +91,19 @@ Pair clearance is static at the evaluated definition positions, not a
 continuous-motion certificate.
 AI authors can propose the value sets through this same tool; real-provider design
 quality and savings require separate evidence.
+
+## Typed values in the window
+
+Booleans and choices in **Edit value** and **Explore values** were added after
+067G and are not yet part of an identified iteration. The local
+`studio-design-variants-ui` check installs a second program with a boolean, a
+numeric choice and a text choice, stages each from the window's controls and
+checks the previewed exact volume and height, one applied revision, two saved
+named variants, their comparison, exploration and reopening. Its captures
+(`.typed.png`, `.typed-choice-dialog.png`, `.typed-explore.png` and
+`.typed-explore-dialog.png`) were inspected. Hosted CI runs no Studio UI checks.
+
+The field dialog exchanges text in the system code page. A choice text outside
+that code page is still picked from its list by position, and explored when the
+offered trial values are left unchanged or emptied, but it cannot be typed as a
+trial value.
