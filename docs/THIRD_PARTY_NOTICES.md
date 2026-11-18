@@ -16,6 +16,10 @@ projection. Original model cards, attribution, runtime license and runtime
 third-party notices accompany the payload under `assets/memory` and `licenses`.
 `scripts/prepare-memory-embeddings.ps1` pins download bytes and source revisions;
 the asset manifest and package SBOM identify model/runtime files separately.
+The runtime comes from the pinned official release archive or, when that is
+unreachable, from the pinned official NuGet package. Both carry the same bytes
+for the two runtime libraries, the license and the third-party notices, and
+the script checks each of those four files against its own SHA-256.
 The runtime performs local inference without an external embedding service.
 These dependencies do not change the geometric authority of OCCT/B-rep.
 

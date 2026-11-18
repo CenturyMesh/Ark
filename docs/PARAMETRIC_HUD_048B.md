@@ -129,10 +129,12 @@ choice.
 [parametric programs](PARAMETRIC_PROGRAMS.md#studio), a **Parameters /
 Programs** switch appears under the header. The HUD opens on Programs when no
 parameter is exposed. The Programs view uses the same rows, staging and
-clamping for each program parameter. **Apply** publishes a revision-checked
+clamping for each numeric program parameter; a boolean switches and a choice
+moves through its declared list. **Apply** publishes a revision-checked
 `parametric_program` configure candidate instead of `param.set`. **Detach** and
-**Remove** ask for confirmation first. A value typed, or a Detach or Remove
-confirmed, while another writer changed the model is not used; the HUD reads
+**Remove** ask for confirmation first. A value typed, a choice picked, or a
+Detach or Remove confirmed, while another writer changed the model is not
+used; the HUD reads
 the bindings again and asks for review. The Programs view has no Auto mode;
 each **Apply** prepares and publishes one candidate.
 
