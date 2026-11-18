@@ -307,6 +307,8 @@ void kinds(const std::filesystem::path& dir){
     const auto& panel=at(compiled,"commands").arr[0];check(at(panel,"material").str=="Oak"&&at(at(panel,"p"),"dz").num==2&&at(at(panel,"p"),"dy").num==8,"Chosen text names an existing project material unchanged: "+panel.dump());
     check(at(compiled,"values").dump()==R"({"finish":"Oak","rail":0,"size":8,"w":20})","Resolved values store text, 1/0 and the listed number: "+at(compiled,"values").dump());
     check(at(compiled,"parameter_kinds").dump()==R"({"w":"number","rail":"boolean","size":"choice","finish":"text_choice"})","Kinds are reported: "+at(compiled,"parameter_kinds").dump());
+    // Studio reads the same kinds without compiling, to choose a number, boolean or choice editor.
+    check(parametricProgramParameterKinds(source).dump()==at(compiled,"parameter_kinds").dump()&&parametricProgramParameterKinds(V{}).obj.empty(),"Kinds read from program source differ from the compilation report: "+parametricProgramParameterKinds(source).dump());
     compiled=compileParametricProgram(source,json(R"({"finish":"Walnut","rail":true,"size":10})"),"t");
     check(names(compiled)=="t / Panel Walnut 10 #2|t / Rail|t / Tag 3 Walnut|"&&at(at(at(compiled,"commands").arr[0],"p"),"dz").num==3&&at(at(compiled,"values"),"rail").num==1,"true selects the rail, text and index follow the choice: "+names(compiled));
     check(at(at(compileParametricProgram(source,json(R"({"rail":1})"),"t"),"values"),"rail").num==1&&at(at(compileParametricProgram(source,json(R"({"rail":0})"),"t"),"values"),"rail").num==0,"Booleans accept 0 and 1");
