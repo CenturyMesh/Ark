@@ -315,6 +315,8 @@ static AssemblyDiagnostics g_assemblyDiagnostics;
 static AssemblyMotionProgram g_motionProgram;static u64 g_motionRevision=std::numeric_limits<u64>::max(),g_motionDriver=0;
 struct ComponentMove {bool armed=false,dragging=false,active=false;u64 revision=0,epoch=0,driver=0;int x=0,y=0;double delta=0,pointerCoordinate=0,pointerAngle=0;Vec3 radial,dragPlaneNormal,pointerWorld;AssemblyManipulationProgram program;std::shared_ptr<AssemblyManipulationPath> path;AssemblyManipulationJoint joint;std::vector<Mat4> baseline;};
 static ComponentMove g_componentMove;
+static bool g_componentCablePreview=false;
+static void displayComponentCables(const std::map<u64,Mesh>&);
 struct ComponentDragIntent {bool pending=false;int x=0,y=0;u64 revision=0,epoch=0;};
 static ComponentDragIntent g_componentDragIntent;
 static void armComponentMove();static void cancelComponentMove(bool restore=true);static void applyComponentMove();
@@ -4552,6 +4554,7 @@ static GLuint pBg,pBusy,pSolid,pCube,pGrid,pShadow,pUI,pText,pSketch,pGeom,pAo,p
 #include "measurement.inl"
 static void cancelComponentMove(bool restore){
     g_componentDragIntent={};
+    if(g_componentCablePreview){restoreMotionCables054B();g_componentCablePreview=false;}
     bool armed=g_componentMove.armed;
     if(restore&&g_componentMove.active){if(g_componentMove.revision==g_session.revision&&g_componentMove.epoch==g_documentEpoch&&g_componentMove.baseline.size()==g_instanceWorld.size()){g_instanceWorld=g_componentMove.baseline;rebuildDisplayBounds();refreshSelectionLines();}else rebuildScene();}
     g_componentMove={};if(!restore)g_componentMove.armed=armed;
@@ -4663,18 +4666,64 @@ static void moveComponentDrag(int x,int y){
         while(delta-move.pointerAngle>180)delta-=360;while(delta-move.pointerAngle<-180)delta+=360;move.pointerAngle=delta;
     }
     delta=boundedComponentDelta(move.joint,delta);
+    if(delta==move.delta){g_dragged=std::abs(x-move.x)+std::abs(y-move.y)>2;return;}
     AssemblyManipulationPreview preview;std::string error;if(!(move.path?move.path->preview(delta,preview,error):previewAssemblyManipulation(move.program,move.driver,move.joint.mate,move.joint.mode,delta,preview,error)))throw std::runtime_error(error);
     std::map<std::pair<u64,int>,const Mat4*> poses;for(const auto& placement:preview.placements)poses.emplace(std::make_pair(placement.node,placement.copy),&placement.world);
     std::vector<Mat4> worlds=move.baseline;for(size_t i=0;i<g_instanceIds.size();++i){auto found=poses.find({g_instanceIds[i],g_instanceCopies[i]});if(found==poses.end())throw std::runtime_error("Joint preview did not return the selected assembly placement");worlds[i]=*found->second;}
+    std::set<u64> movedNodes;
+    for(const auto& base:move.program.baseline){
+        const auto pose=poses.find({base.node,base.copy});
+        if(pose!=poses.end()&&!std::equal(std::begin(base.world.m),std::end(base.world.m),pose->second->m))
+            movedNodes.insert(base.node);
+    }
+    // Publish the rigid pose and all its native cable sweeps together.
+    const auto cables=previewMovedCables(g_doc,preview.placements,movedNodes);
+    if(!cables.empty()||g_componentCablePreview)displayComponentCables(cables);
+    g_componentCablePreview=!cables.empty();
     g_instanceWorld=std::move(worlds);move.delta=delta;g_dragged=std::abs(x-move.x)+std::abs(y-move.y)>2;rebuildDisplayBounds();refreshSelectionLines();char text[240];
     bool absolute=move.joint.type=="prismatic"||move.joint.type=="revolute";
     std::snprintf(text,sizeof text,"Joint %llu / %s %.2f %s / %zu attached components / release saves / Esc cancels",(unsigned long long)move.joint.mate,absolute?"position":"displacement",absolute?move.joint.position+move.joint.coordinateSign*delta:delta,move.joint.mode=="translate"?"mm":"deg",move.joint.movingNodes.size());g_status=text;g_error=false;
 }
+static void appendDrivenCableBakes(const ComponentMove& move,arkjson::Value& commands){
+    using V=arkjson::Value;
+    std::string digest;
+    for(const auto& motion:g_doc.motions.arr){
+        const auto* bake=motion.find("bake");
+        if(!bake)continue;
+        const auto* channels=bake->find("channels");
+        if(!channels||std::none_of(channels->arr.begin(),channels->arr.end(),[&](const V& channel){
+            const auto* mate=channel.find("mate");
+            return mate&&mate->num==static_cast<double>(move.joint.mate);
+        }))continue;
+        const auto* source=bake->find("source_digest");
+        const auto* graph=bake->find("graph_digest");
+        const auto* fps=bake->find("fps");
+        if(!source||!graph||!fps)continue;
+        if(digest.empty())digest=motionSourceDigest(g_doc,move.program.baseline);
+        if(source->str!=digest||graph->str!=motionGraphDigest(*motion.find("graph")))continue;
+        V refresh=V::makeObj();
+        refresh.set("op",V::makeStr("motion.bake"));
+        refresh.set("name",*motion.find("name"));
+        refresh.set("fps",*fps);
+        commands.arr.push_back(std::move(refresh));
+    }
+}
 static void applyComponentMove(){
     if(!g_componentMove.active)return;auto move=std::move(g_componentMove);g_componentMove={};g_componentMove.armed=move.armed;
+    const bool movedCables=g_componentCablePreview;
+    if(movedCables){restoreMotionCables054B();g_componentCablePreview=false;}
     if(move.revision!=g_session.revision||move.epoch!=g_documentEpoch){rebuildScene();throw std::runtime_error("The drawing changed during movement; no placement was saved");}
     if(std::abs(move.delta)<1e-8){g_instanceWorld=move.baseline;rebuildDisplayBounds();refreshSelectionLines();g_status="Move component: drag a part / Esc exits";return;}
-    using V=arkjson::Value;V command=V::makeObj(),commands=V::makeArr(),args=V::makeObj();command.set("op",V::makeStr("assembly.drive"));command.set("driver",V::makeNum((double)move.driver));command.set("mate",V::makeNum((double)move.joint.mate));command.set("mode",V::makeStr(move.joint.mode));command.set("delta",V::makeNum(move.delta));commands.arr.push_back(command);args.set("commands",commands);args.set("expected_revision",V::makeNum((double)move.revision));args.set("detail",V::makeStr("changes"));runTool("doc_apply",args);
+    using V=arkjson::Value;V command=V::makeObj(),commands=V::makeArr(),args=V::makeObj();command.set("op",V::makeStr("assembly.drive"));command.set("driver",V::makeNum((double)move.driver));command.set("mate",V::makeNum((double)move.joint.mate));command.set("mode",V::makeStr(move.joint.mode));command.set("delta",V::makeNum(move.delta));commands.arr.push_back(command);
+    if(movedCables)appendDrivenCableBakes(move,commands);
+    args.set("commands",commands);args.set("expected_revision",V::makeNum((double)move.revision));args.set("detail",V::makeStr("changes"));runTool("doc_apply",args);
+    if(g_error&&commands.arr.size()>1&&move.revision==g_session.revision&&move.epoch==g_documentEpoch){
+        // The combined transaction was rejected. A graph that cannot be rebaked
+        // from this pose must not prevent an independently valid manual drive.
+        const auto refreshError=g_status;
+        commands.arr.resize(1);args.set("commands",commands);runTool("doc_apply",args);
+        if(!g_error){g_status="Component movement saved / motion needs Bake: "+refreshError;return;}
+    }
     if(g_error){g_instanceWorld=move.baseline;rebuildDisplayBounds();refreshSelectionLines();}
     if(!g_error)g_status="Component movement saved / attached components follow / Undo restores the previous placement";
 }

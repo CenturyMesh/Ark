@@ -16,6 +16,23 @@ static void upload(size_t part,const Mesh& mesh,const PartPick& pick){
 }
 }
 static void restoreMotionCables054B(){using namespace motion_cables_view_054b;for(const auto& [part,original]:state.originals){bool belongs=false;for(size_t i=0;i<g_instancePart.size();++i)if(g_instancePart[i]==part&&g_bodyIds[i]==original.feature){belongs=true;break;}if(belongs)upload(part,original.mesh,original.pick);}state.originals.clear();state.shown=~size_t(0);}
+static void displayComponentCables(const std::map<u64,Mesh>& meshes){
+    using namespace motion_cables_view_054b;
+    // Component movement stops baked playback and exclusively owns the preview.
+    for(auto it=state.originals.begin();it!=state.originals.end();){
+        if(meshes.count(it->second.feature)){++it;continue;}
+        upload(it->first,it->second.mesh,it->second.pick);
+        it=state.originals.erase(it);
+    }
+    std::set<size_t> replaced;
+    for(size_t i=0;i<g_bodyIds.size();++i){
+        const auto found=meshes.find(g_bodyIds[i]);
+        const size_t part=g_instancePart[i];
+        if(found==meshes.end()||!replaced.insert(part).second)continue;
+        if(!state.originals.count(part))state.originals.emplace(part,Original{found->first,g_cpuMeshes[part],g_partPicks[part]});
+        upload(part,found->second,PartPick{});
+    }
+}
 static void cancelMotionCables054B(){using namespace motion_cables_view_054b;state.autoPlay=false;if(state.worker.valid()&&state.cancel)state.cancel->store(true);restoreMotionCables054B();}
 static void shutdownMotionCables054B(){using namespace motion_cables_view_054b;state.autoPlay=false;if(state.cancel)state.cancel->store(true);if(state.worker.valid())try{state.worker.get();}catch(...){}state.display={};state.originals.clear();}
 static void pollMotionCables054B(){using namespace motion_cables_view_054b;

@@ -173,6 +173,13 @@ playback. The panel exposes the shared link definition's section through
 `Edit link geometry` and its driving expressions through `Source parameters`.
 Individual link placement, grounding and deletion controls are omitted because
 the chain owns those occurrences.
+
+Since 079C, dragging the carriage also evaluates each affected cable's native
+sweep at the displayed pose. Escape restores the original cable and picking
+geometry. Releasing the drag saves the joint position and refreshes current
+bakes that drive that joint at their recorded frame rates. If a motion cannot
+be baked from the new pose, Studio reports the cause and saves the drive alone
+when the pose is valid. See [079C verification](iterations/079C.md).
 No new action IDs are used.
 
 ## Persistence
