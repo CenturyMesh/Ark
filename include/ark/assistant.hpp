@@ -6,6 +6,7 @@
 #include <string>
 #include <stdexcept>
 #include <optional>
+#include <span>
 #include <vector>
 #include <array>
 #include <memory>
@@ -28,6 +29,9 @@ AssistantImageDimensions parseAssistantImageDimensions(const std::array<std::str
 AssistantImageAttachment assistantImageAttachment(const std::vector<unsigned char>& bytes,const std::string& name,
     AssistantImageDecoder decoder=AssistantImageDecoder::Platform);
 AssistantImageAttachment loadAssistantImageAttachment(const std::string& path);
+inline constexpr std::size_t assistantReferenceLimit=32;
+arkjson::Value assistantUserMessageWithImages(const std::string& text,std::span<const AssistantImageAttachment> images,
+    AssistantImageMode mode=AssistantImageMode::InspireDesign,const AssistantImageDimensions& dimensions={});
 arkjson::Value assistantUserMessage(const std::string& text,
     const std::optional<AssistantImageAttachment>& image={},AssistantImageMode mode=AssistantImageMode::InspireDesign,
     const AssistantImageDimensions& dimensions={});

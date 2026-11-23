@@ -29,5 +29,8 @@ static void arkitfySelectedCad(){
 static void droppedStudioFiles(HDROP drop){
     std::vector<std::string> paths;const auto count=DragQueryFileW(drop,0xffffffff,nullptr,0);if(count>32){DragFinish(drop);throw std::runtime_error("Drop at most 32 files at once");}
     for(UINT i=0;i<count;++i){const UINT length=DragQueryFileW(drop,i,nullptr,0);std::vector<wchar_t> file((size_t)length+1);DragQueryFileW(drop,i,file.data(),length+1);paths.push_back(cadPathUtf8(file.data()));}DragFinish(drop);
-    for(const auto& path:paths){if(cadExchangePath(path))importCadDialog(path);else{if(paths.size()!=1)throw std::runtime_error("Drop image references individually; CAD files support multiple selection");setPendingAssistantImage(path);}if(g_error)break;}
+    const auto cadFiles=std::count_if(paths.begin(),paths.end(),cadExchangePath);
+    if(!cadFiles){addPendingAssistantImages(paths);return;}
+    if((size_t)cadFiles!=paths.size())throw std::runtime_error("Drop image references and CAD imports separately.");
+    for(const auto& path:paths){importCadDialog(path);if(g_error)break;}
 }

@@ -1,5 +1,9 @@
 # ARK roadmap A–G
 
+080D (**B.01/D.02 — Verificado no escopo local**) lets Inspire design and Image
+to CAD use several selected or dropped references in one brief. The Studio
+composer previews and removes individual references. [Verification](iterations/080D.md)
+
 079C (**B.04/C.04 — Verificado no escopo local**) updates occurrence-bound
 cable sweeps during manual joint dragging. Escape restores the initial pose.
 Releasing the drag refreshes current bakes that drive the same joint.
