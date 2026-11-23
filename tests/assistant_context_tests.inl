@@ -66,6 +66,31 @@ static void batchFailureProjectionChecks(){
 }
 static void staticContractProjectionChecks(){
     batchFailureProjectionChecks();
+    {
+        ark::AgentSession session;const auto args=json(R"({"queries":[{"tool":"doc_info","args":{"detail":"revision"}},{"tool":"doc_info","args":{},"max_bytes":256}]})");
+        auto receipt=session.call("query_batch",args);
+        check(ark::assistant_context::inspectedDocumentRevision("query_batch",args,receipt),"a measured revision in a partial batch satisfies the projection inspection");
+        auto damaged=receipt;member(member(damaged,"structuredContent"),"results").arr[0].set("isError",V::makeBool(true));
+        check(!ark::assistant_context::inspectedDocumentRevision("query_batch",args,damaged),"a rejected or truncated doc_info row cannot unlock writes");
+        damaged=receipt;member(damaged,"structuredContent").set("revision",V::makeNum(9999));
+        check(!ark::assistant_context::inspectedDocumentRevision("query_batch",args,damaged),"batch and inspected revision must agree");
+
+        V history=V::makeArr();V old=V::makeObj();old.set("inventory",V::makeStr(std::string(20000,'t')));
+        contextExchange(history,"older","doc_info",V::makeObj(),old);
+        contextExchange(history,"measured","query_batch",args,receipt);
+        ark::Image image;image.w=240;image.h=160;image.px.resize(240*160*3);unsigned seed=7;
+        for(auto& c:image.px){seed^=seed<<13;seed^=seed>>17;seed^=seed<<5;c=(unsigned char)seed;}
+        auto ref=ark::assistantImageAttachment(ark::encodePNG(image),"reference.png");
+        history.arr.push_back(ark::assistantUserMessage("Use the selected detail",ref));
+        contextExchange(history,"latest","doc_info",V::makeObj(),json(R"({"revision":1})"));
+        // Size the window for the two actual recent exchanges, with room for
+        // JSON framing. The intervening inline image is always transmitted.
+        const auto window=history.arr[2].dump().size()+history.arr[3].dump().size()+history.arr[5].dump().size()+history.arr[6].dump().size()+256;
+        const auto original=history.dump();const auto wire=ark::assistant_context::project(history,1024*1024,window);
+        bool retained=false;for(const auto& item:wire.arr)if(item.dump()==history.arr[3].dump())retained=true;
+        check(retained&&ref.base64.size()>window&&wire.dump().find(ref.base64)!=std::string::npos&&history.dump()==original,
+            "large inline pixels and exact recent batch measurements coexist after older exchanges are projected");
+    }
     ark::AgentSession session;
     const V solidArgs=json(R"({"topic":"solids","detail":"guide"})"),sketchArgs=json(R"({"topic":"sketch","detail":"guide"})"),surfaceArgs=json(R"({"topic":"surfacing","detail":"guide"})");
     V solid=session.call("agent_onboard",solidArgs),sketch=session.call("agent_onboard",sketchArgs),surface=session.call("agent_onboard",surfaceArgs);

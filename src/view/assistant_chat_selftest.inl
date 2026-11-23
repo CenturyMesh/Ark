@@ -12,6 +12,24 @@ static int testAssistantChat(const std::string& path){
     using namespace assistant_chat;
     auto fail=[&](int code,const char* text){std::fprintf(stderr,"Conversation check %d: %s\n",code,text);return code;};
     testing=true;g_assistantDockOpen=true;g_toolsOpen=false;g_teamMode=false;g_chatBusy=false;g_assistantResponseFinished=false;g_assistantResponseError=false;*g_assistantCancel=false;g_activeToolName.clear();
+    {
+        arkjson::Value batch,applied;
+        arkjson::parse(R"({"isError":false,"structuredContent":{"revision":12,"results":[{"isError":false},{"tool":"object_context","isError":true,"structuredContent":{"error_code":"QUERY_BATCH_ROW_TOO_LARGE"}}]}})",batch);
+        arkjson::parse(R"({"isError":false,"structuredContent":{"revision":12}})",applied);
+        g_chatLog.clear();
+        for(const auto& tool:std::vector<std::pair<std::string,arkjson::Value>>{{"doc_apply",applied},{"query_batch",batch}}){
+            g_chatLog.push_back({"Action","Tool: "+tool.first});
+            auto update=std::make_unique<UiChatEvent>();update->epoch=g_documentEpoch;update->completedTool=tool.first;
+            update->text=assistantToolOutcome(tool.first,tool.second);
+            SendMessageW(g_window,WM_ARK_CHAT,0,(LPARAM)update.release());
+        }
+        if(g_chatLog.size()!=2||g_chatLog[0].second!="Tool: doc_apply / succeeded / revision 12"||
+            g_chatLog[1].second.find("1/2 reads succeeded / revision 12 / object_context exceeded the requested size")==std::string::npos)
+            return fail(883,"Chat must show the committed revision and the partial verification on their actual action rows");
+        g_chatBusy=true;g_assistantStatus="Round 3 / waiting for model";layout();sync(true);
+        captureChat(window,path+".tool-outcomes.png");
+        g_chatBusy=false;g_assistantStatus.clear();
+    }
     if(!assistantResumeRequest(" Resume! ")||!assistantResumeRequest("continua")||assistantResumeRequest("resume o estado do projeto")||assistantResumeRequest("summarize"))return fail(835,"Explicit continuation must differ from a summary request");
     g_singleGoal="Improve the equipment display while preserving its mechanical assembly and existing connections.";
     g_chatLog={{"You","Make the display easier to read.\n\nKeep the current mechanical assembly."},{"ARK","I will inspect the display and its connections first.\n\nThe mechanical assembly will stay editable."},{"Action","Inspecting the selected display and its authored references."},{"ARK","The display layout is ready.\n\nPlease confirm the screen dimensions before I continue.\nPortugu\xc3\xaas: a\xc3\xa7\xc3\xa3o, dimens\xc3\xb5" "es / \xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e."}};

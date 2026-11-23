@@ -1,5 +1,9 @@
 # ARK roadmap A–G
 
+081D (**A.03/D.02 — Verificado no escopo local**) keeps recent tool results
+available during visual edits and shows the outcome of edits and batched reads
+in the Single Assistant chat. [Context regression and verification](iterations/081D.md)
+
 080D (**B.01/D.02 — Verificado no escopo local**) lets Inspire design and Image
 to CAD use several selected or dropped references in one brief. The Studio
 composer previews and removes individual references. [Verification](iterations/080D.md)

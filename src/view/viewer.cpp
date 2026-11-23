@@ -435,6 +435,7 @@ struct UiToolRequest {RealtimeClock030::time_point posted=RealtimeClock030::now(
 static bool assistantSteeringToolAllowed(const UiToolRequest& request);
 static arkjson::Value assistantSteeringToolRejection();
 struct UiChatEvent {std::string text;bool final=false,error=false;arkjson::Value history;u64 epoch=0;AssistantUsage usage{};bool hasUsage=false;AssistantPerformance performance{};bool hasPerformance=false;bool status=false,retry=false;bool reasoning=false;std::optional<AssistantConfig> route;arkjson::Value feedback; // 076A: AssistantResult::feedback of a final reply
+    std::string completedTool;
 };
 enum class AuthJob{SignIn,SignOut,Models};
 struct UiAuthEvent{AuthJob job=AuthJob::Models;ChatGptAuthStatus status;std::vector<ChatGptModel> models;std::string error;};
@@ -3331,6 +3332,30 @@ static void sendTeam(const std::string& explicitPrompt={},const std::array<Assis
     }
     if(explicitPrompt.empty())clearPendingAssistantImage();g_pendingObjectTarget.reset();g_chatScroll=0;if(g_chatInput)SetWindowTextW(g_chatInput,L"");pollTeam(true);
 }
+static std::string assistantToolOutcome(const std::string& name,const arkjson::Value& receipt){
+    using V=arkjson::Value;
+    if(name!="doc_apply"&&name!="query_batch")return {};
+    const auto* failed=receipt.find("isError"),*data=receipt.find("structuredContent");
+    if(!failed||failed->t!=V::Bool)return {};
+    if(failed->b)return "Tool: "+name+" / failed";
+    if(!data)return {};
+    const auto* rev=data->find("revision");
+    const std::string revision=rev&&rev->t==V::Num?" / revision "+rev->dump():"";
+    if(name=="doc_apply")return "Tool: doc_apply / succeeded"+revision;
+    const auto* rows=data->find("results");if(!rows||rows->t!=V::Arr||rows->arr.empty())return {};
+    size_t successes=0;std::string issue;
+    for(const auto& row:rows->arr){
+        const auto* error=row.find("isError");if(!error||error->t!=V::Bool)return {};
+        if(!error->b){++successes;continue;}
+        const auto* detail=row.find("structuredContent");const auto* code=detail?detail->find("error_code"):nullptr;
+        if(issue.empty()&&code&&code->t==V::Str){
+            const auto* tool=row.find("tool");
+            issue=code->str=="QUERY_BATCH_ROW_TOO_LARGE"&&tool&&tool->t==V::Str?
+                " / "+tool->str.substr(0,64)+" exceeded the requested size":" / "+code->str.substr(0,80);
+        }
+    }
+    return "Tool: query_batch / "+std::to_string(successes)+"/"+std::to_string(rows->arr.size())+" reads succeeded"+revision+issue;
+}
 static void sendAssistant(const std::string& explicitPrompt="",const AssistantTransport& transport={},const arkjson::Value* queuedMessage=nullptr,const std::string& queuedVisible={}){
     if(claudeReconnect071::busy()){g_status="Finish or cancel the Claude Code account operation before starting or resuming a task.";return;}
     if(g_teamStarted&&g_agentTeam.snapshot().running){g_status="Wait for the team to finish or cancel it before starting Assistant.";return;}
@@ -3352,7 +3377,10 @@ static void sendAssistant(const std::string& explicitPrompt="",const AssistantTr
         V retainedHistory=input;auto executor=[cancel,epoch,revision,steering,runId](const std::string& name,const V& args){
             auto promise=std::make_shared<std::promise<V>>();auto future=promise->get_future();auto request=std::make_unique<UiToolRequest>();request->tool=name;request->args=args;request->cancel=cancel;request->epoch=epoch;request->revision=revision;request->runId=runId;request->steering=steering;request->steeringVersion=steering->requestVersion();request->complete=[promise](V result){promise->set_value(std::move(result));};postTool(std::move(request));
             while(future.wait_for(std::chrono::milliseconds(20))!=std::future_status::ready)if(*cancel||g_closing)throw std::runtime_error("Assistant cancelled");
-            return future.get();
+            auto receipt=future.get();
+            auto outcome=assistantToolOutcome(name,receipt);
+            if(!outcome.empty()){UiChatEvent update;update.text=std::move(outcome);update.completedTool=name;update.epoch=epoch;postChat(std::move(update));}
+            return receipt;
         };AssistantRetryHooks hooks;if(!transport)hooks.completionCheck=[executor]{return executor("__ark_bom_completion",V::makeObj());};hooks.requestCurrent=[steering]{return steering->current(steering->requestVersion());};hooks.acceptCompletion=[steering]{return steering->finish();};
         try{auto result=runAssistant(config,input,schema,executor,[epoch](const AssistantEvent& event){if(event.kind==AssistantEvent::Status){UiChatEvent progress;progress.text=event.text;progress.epoch=epoch;progress.status=true;progress.retry=event.providerRetry;postChat(std::move(progress));}else if(event.kind==AssistantEvent::ToolStart)postChat({"Tool: "+event.text,false,false,{},epoch});else if(event.kind==AssistantEvent::Reasoning){UiChatEvent thought;thought.text=event.text;thought.epoch=epoch;thought.reasoning=true;postChat(std::move(thought));}else if(event.kind==AssistantEvent::Usage)postChat({"",false,false,{},epoch,event.usage,true,event.performance,true});else if(event.kind==AssistantEvent::ToolEnd){UiChatEvent progress;progress.text="Thinking...";progress.epoch=epoch;progress.status=true;progress.performance=event.performance;progress.hasPerformance=true;postChat(std::move(progress));}},cancel.get(),feedbackFixtureTransport(transport),[steering]{return steering->inbox();},[&](const V& history){retainedHistory=history;steering->checkpoint(history);},hooks);
             if(*cancel)throw std::runtime_error("Assistant cancelled");{UiChatEvent completed{result.text,true,false,result.conversation,epoch,result.usage,true,result.performance,true};completed.route=config;completed.feedback=result.feedback;postChat(std::move(completed));}
@@ -6488,6 +6516,14 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
         case WM_ARK_TOOL:{auto* request=(UiToolRequest*)lp;if(request->tool=="doc_apply"){request->objectEpoch=g_objectDocumentEpoch;request->queuedEpoch=true;if(!request->args.find("expected_revision"))request->args.set("expected_revision",arkjson::Value::makeNum((double)g_session.revision));}g_toolQueue.emplace_back(request);return 0;}
         case WM_ARK_EXACT:return 0; // wake only; deliveries drain from the main loop
         case WM_ARK_CHAT:{std::unique_ptr<UiChatEvent> event((UiChatEvent*)lp);
+            if(!event->completedTool.empty()){
+                if(event->epoch==g_documentEpoch){
+                    const std::string started="Tool: "+event->completedTool;
+                    auto row=std::find_if(g_chatLog.rbegin(),g_chatLog.rend(),[&](const auto& row){return row.first=="Action"&&row.second==started;});
+                    if(row!=g_chatLog.rend())row->second=event->text;
+                }
+                return 0;
+            }
             if(event->final&&event->error&&event->epoch==g_documentEpoch&&event->route)claudeReconnect071::observeError(event->text,*event->route);
             if(event->final&&!event->error&&event->epoch==g_documentEpoch&&event->route&&event->hasUsage)claudeReconnect071::observeSuccess(*event->route,event->usage);
             // Provider-returned readable reasoning: shown with the reply, never logged as a message.

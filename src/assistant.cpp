@@ -805,11 +805,12 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
         return active;
     };
     for(unsigned round=0;(!config.maxRounds||round<config.maxRounds);++round){
-        cancelled(cancel);emit(events,AssistantEvent::Status,"Thinking...");consumeInbox();
+        cancelled(cancel);consumeInbox();
         if(history)history(result.conversation);
         bool projected=false;V request=assistantRequestWith(config,result.conversation,advertisedTools(),&projected,stableProjection);
         if(projected&&!projectionAnnounced){projectionAnnounced=true;needsProjectedInspection=true;measuredEvent(AssistantEvent::Status,"Request history compacted for transport; original receipts retained. Inspect current doc_info before writing.");}
         auto& performance=result.performance;
+        emit(events,AssistantEvent::Status,"Round "+std::to_string(round+1)+" / waiting for model");
         V response;
         constexpr unsigned maxRetries=3;constexpr std::uint64_t maxDelay=30000;
         auto retryStatus=[&](const std::string& text){if(events){AssistantEvent event;event.kind=AssistantEvent::Status;event.text=text;event.usage=result.usage;event.performance=performance;event.providerRetry=true;events(event);}};
@@ -929,7 +930,7 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
         // Independent reads, feedback and coordination may share a response;
         // document writes stay serial so each one is authored after the
         // previous write's observed result and revision.
-        std::vector<V> observations;bool onlyRepeatedReads=!calls.empty(),responseWrote=false;
+        std::vector<V> observations;bool onlyRepeatedReads=true,hasNonFeedbackCall=false,responseWrote=false;
         for(auto& call:calls){
             cancelled(cancel);auto name=field(call,"name");emit(events,AssistantEvent::ToolStart,name);
             const auto toolBegan=std::chrono::steady_clock::now();
@@ -944,14 +945,16 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
             else {try{toolResult=callTool(name,args);}catch(const std::exception&){toolResult=errorResult("ARK tool execution failed; inspect the document before retrying.");}}
             if(args.t==V::Obj&&writeTools.count(name)&&!assistantToolReadOnly(tools,name,args))responseWrote=true;
             feedback.observe(toolResult);
-            if(name=="doc_info"&&needsProjectedInspection){const auto* error=toolResult.find("isError");const auto* data=toolResult.find("structuredContent");if(!data)data=&toolResult;const auto* observed=data->find("revision");if(error&&error->t==V::Bool&&!error->b&&observed&&observed->t==V::Num&&std::isfinite(observed->num)&&observed->num>=0&&observed->num==std::floor(observed->num))needsProjectedInspection=false;}
+            if(needsProjectedInspection&&assistant_context::inspectedDocumentRevision(name,args,toolResult))needsProjectedInspection=false;
             ++performance.toolCalls;performance.lastToolMilliseconds=millisecondsSince(toolBegan);performance.toolMilliseconds+=performance.lastToolMilliseconds;measuredEvent(AssistantEvent::ToolEnd,name);
-            {const auto* failed=toolResult.find("isError");const bool succeeded=!(failed&&failed->t==V::Bool&&failed->b);const bool readOnly=args.t==V::Obj&&assistantToolReadOnly(tools,name,args);bool repeated=false;
+            // Rating a tool updates the activity ledger, not the inspected CAD
+            // state. It can be interleaved with reads in the same response.
+            if(name!="tool_feedback"){hasNonFeedbackCall=true;const auto* failed=toolResult.find("isError");const bool succeeded=!(failed&&failed->t==V::Bool&&failed->b);const bool readOnly=args.t==V::Obj&&assistantToolReadOnly(tools,name,args);bool repeated=false;
                 if(succeeded&&!readOnly){readEvidence.clear();repeatedReadRounds=0;}
                 else if(succeeded&&readOnly){const auto key=name+'\n'+stableReadEvidence(args).dump();const auto* data=toolResult.find("structuredContent");const auto evidence=stableReadEvidence(data?*data:toolResult).dump();
                     const auto found=readEvidence.find(key);
                     if(found!=readEvidence.end()&&found->second.second==evidence){repeated=true;
-                        const std::string notice="This exact read already returned identical evidence earlier in this turn (round "+std::to_string(found->second.first+1)+") and nothing has been written since. Re-reading adds no information: use that evidence; if history compaction removed details you need, request those specific ids without known_fingerprints; otherwise make your edit or report what blocks it.";
+                        const std::string notice="This exact read already returned identical evidence earlier in this turn (round "+std::to_string(found->second.first+1)+") and no design write has occurred since. Re-reading adds no information: use that evidence; if history compaction removed details you need, request those specific ids without known_fingerprints; otherwise make your edit or report what blocks it.";
                         V* target=&toolResult;if(data)for(auto& entry:toolResult.obj)if(entry.first=="structuredContent"){target=&entry.second;break;}if(target->t==V::Obj)target->set("ark_repeat_notice",V::makeStr(notice));}
                     else readEvidence.insert_or_assign(key,std::make_pair(round,evidence));}
                 onlyRepeatedReads=onlyRepeatedReads&&repeated;}
@@ -976,8 +979,8 @@ AssistantResult runAssistant(const AssistantConfig& config,const V& input,const 
         }
         // Three consecutive rounds of nothing but repeated identical reads: say
         // so once more plainly, after the complete tool batch.
-        repeatedReadRounds=onlyRepeatedReads?repeatedReadRounds+1:0;
-        if(repeatedReadRounds==3){V note=V::makeObj();note.set("role",V::makeStr("developer"));note.set("content",V::makeStr("ARK observed three consecutive rounds whose reads all repeated identical earlier results, with no write in between. Stop re-reading the same objects. Act on the evidence already returned, request specific missing details once, or finish and report the blocker to the user."));appendHistory(std::move(note));}
+        if(hasNonFeedbackCall)repeatedReadRounds=onlyRepeatedReads?repeatedReadRounds+1:0;
+        if(hasNonFeedbackCall&&repeatedReadRounds==3){V note=V::makeObj();note.set("role",V::makeStr("developer"));note.set("content",V::makeStr("ARK observed three consecutive rounds of repeated reads with identical evidence and no intervening design write. Use the returned evidence for the edit, request specific missing details, or report the blocker to the user."));appendHistory(std::move(note));}
         // Complete every call receipt before introducing a user image message;
         // Chat/Messages require a protocol-complete tool batch at this boundary.
         for(auto& observation:observations){

@@ -163,7 +163,7 @@ void projectBatchPaths(V& row,const V& query,size_t index){
     batchContent(row,compact);
 }
 // max_bytes bounds what the row may return; above it the row reports its shape instead of its data.
-void capBatchRow(V& row,const V& query,size_t index){
+void capBatchRow(V& row,const V& query,const V& executed,size_t index){
     const auto* cap=query.find("max_bytes");if(!cap||required(row,"isError").b)return;
     const V& data=required(row,"structuredContent");const auto bytes=data.dump().size();if(bytes<=(size_t)cap->num)return;
     V keys=V::makeObj();for(const auto& field:data.obj){V shape=V::makeObj();const auto& value=field.second;shape.set("type",V::makeStr(value.t==V::Obj?"object":value.t==V::Arr?"array":value.t==V::Str?"string":value.t==V::Num?"number":value.t==V::Bool?"boolean":"null"));if(value.t==V::Arr)shape.set("count",V::makeNum((double)value.arr.size()));shape.set("bytes",V::makeNum((double)value.dump().size()));
@@ -172,7 +172,15 @@ void capBatchRow(V& row,const V& query,size_t index){
         keys.set(field.first,shape);}
     V error=V::makeObj();error.set("error_code",V::makeStr("QUERY_BATCH_ROW_TOO_LARGE"));error.set("error",V::makeStr("Result is "+std::to_string(bytes)+" bytes, above max_bytes "+std::to_string((size_t)cap->num)+"; select the needed values with paths."));error.set("query_index",V::makeNum((double)index));error.set("tool",required(query,"tool"));error.set("tool_succeeded",V::makeBool(true));error.set("bytes",V::makeNum((double)bytes));error.set("max_bytes",*cap);error.set("result_keys",keys);
     if(const auto* revision=data.find("revision"))error.set("revision",*revision);
-    error.set("recovery",batchRecovery(query,"The tool already ran. Request only the values you need with paths, or raise max_bytes."));
+    V recovery=batchRecovery(query,"Other successful rows remain usable. Retry only this row if its values are needed. Narrow the selected paths or use the observed size.");
+    recovery.set("args",executed);
+    if(bytes<=262144){
+        V retry=V::makeObj();retry.set("tool",required(query,"tool"));retry.set("args",executed);
+        for(const char* field:{"paths","fields"})if(const auto* selected=query.find(field))retry.set(field,*selected);
+        retry.set("max_bytes",V::makeNum((double)bytes));
+        recovery.set("retry_query",std::move(retry));
+    }
+    error.set("recovery",std::move(recovery));
     row.set("isError",V::makeBool(true));batchContent(row,error);
 }
 V queryValue(AgentSession& s,const V& spec){
@@ -339,7 +347,7 @@ bool callAgentFeature(AgentSession& s,const std::string& tool,const V& args,V& o
             else row=s.call(text(query,"tool"),executed);
             // References read the full result, before this row's own projection.
             if(const auto* id=query.find("id")){if(required(row,"isError").b)unavailable.insert(id->str);else outputs[id->str]=required(row,"structuredContent");}
-            projectBatchRow(row,query,i);projectBatchPaths(row,query,i);capBatchRow(row,query,i);
+            projectBatchRow(row,query,i);projectBatchPaths(row,query,i);capBatchRow(row,query,executed,i);
             row.set("query_index",V::makeNum((double)i));row.set("tool",required(query,"tool"));row.set("args",submitted);if(!references.empty()&&blocked.empty()&&failure.empty())row.set("resolved_args",executed);
             row.set("elapsed_ms",V::makeNum(std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count()));if(required(row,"isError").b)++errors;rows.arr.push_back(row);}
         out=V::makeObj();out.set("results",rows);out.set("revision",V::makeNum((double)s.revision));out.set("error_count",V::makeNum((double)errors));
