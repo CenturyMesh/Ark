@@ -20,6 +20,31 @@ static void clearPendingAssistantImage(){
 static void checkPendingAssistantImageContext(){
     if(!g_pendingAssistantImages.empty()&&(g_pendingAssistantImageEpoch!=g_documentEpoch||g_pendingAssistantImageObjectEpoch!=g_objectDocumentEpoch||g_pendingAssistantImageTarget!=assistantImageTargetKey())){clearPendingAssistantImage();throw std::runtime_error("Drawing, connector or object target changed. Attach the references again before sending.");}
 }
+static bool hasImportedAssistantImage(){
+    return std::any_of(g_pendingAssistantImages.begin(),g_pendingAssistantImages.end(),[](const auto& image){return !image.viewportRevision;});
+}
+static void appendAssistantImages(std::vector<AssistantImageAttachment>& batch){
+    const auto first=g_pendingAssistantImages.size();
+    g_pendingAssistantImages.reserve(first+batch.size());
+    for(auto& image:batch)g_pendingAssistantImages.push_back(std::move(image));
+    g_assistantImageIndex=first;
+    g_pendingAssistantImageEpoch=g_documentEpoch;g_pendingAssistantImageObjectEpoch=g_objectDocumentEpoch;g_pendingAssistantImageTarget=assistantImageTargetKey();
+    showAssistantDock();g_toolsOpen=false;g_error=false;layout();
+}
+static void attachViewportToAssistant(){
+    checkPendingAssistantImageContext();
+    if(g_pendingAssistantImages.size()>=assistantReferenceLimit)
+        throw std::runtime_error("Remove a reference before adding another snapshot.");
+    const u64 revision=g_session.revision;
+    const Image pixels=captureCurrentStudioView(revision,g_documentEpoch);
+    auto image=assistantImageAttachment(encodePNG(pixels),"Viewport (rev "+std::to_string(revision)+")");
+    image.viewportRevision=revision;
+    std::vector<AssistantImageAttachment> batch;
+    batch.push_back(std::move(image));
+    appendAssistantImages(batch);
+    if(g_chatInput)SetFocus(g_chatInput);
+    g_status="Snapshot attached. Describe what you want to change or ask about this view.";
+}
 static void addPendingAssistantImages(const std::vector<std::string>& paths){
     if(paths.empty())return;
     checkPendingAssistantImageContext();
@@ -33,22 +58,18 @@ static void addPendingAssistantImages(const std::vector<std::string>& paths){
             throw std::runtime_error(std::string(name.begin(),name.end())+": "+error.what());
         }
     }
-    const auto first=g_pendingAssistantImages.size();
-    g_pendingAssistantImages.reserve(first+batch.size());
-    for(auto& image:batch)g_pendingAssistantImages.push_back(std::move(image));
-    g_assistantImageIndex=first;
-    g_pendingAssistantImageEpoch=g_documentEpoch;g_pendingAssistantImageObjectEpoch=g_objectDocumentEpoch;g_pendingAssistantImageTarget=assistantImageTargetKey();
-    showAssistantDock();g_toolsOpen=false;g_error=false;g_status="References attached locally. Choose an intent, then Send or Queue.";layout();
+    appendAssistantImages(batch);
+    g_status="References attached locally. Choose an intent, then Send or Queue.";
 }
 static arkjson::Value pendingAssistantImageMessage(const std::string& prompt){
-    checkPendingAssistantImageContext();syncAssistantImageDimensions();const auto dimensions=!g_pendingAssistantImages.empty()&&g_assistantImageMode==AssistantImageMode::ImageToCAD?parseAssistantImageDimensions(g_assistantImageDimensionText):AssistantImageDimensions{};return assistantUserMessageWithImages(prompt,g_pendingAssistantImages,g_assistantImageMode,dimensions);
+    checkPendingAssistantImageContext();syncAssistantImageDimensions();const auto dimensions=hasImportedAssistantImage()&&g_assistantImageMode==AssistantImageMode::ImageToCAD?parseAssistantImageDimensions(g_assistantImageDimensionText):AssistantImageDimensions{};return assistantUserMessageWithImages(prompt,g_pendingAssistantImages,g_assistantImageMode,dimensions);
 }
 static std::string assistantImageVisiblePrompt(const std::string& prompt){
     if(g_pendingAssistantImages.empty())return prompt;
-    std::string label="["+std::string(assistantImageModeName(g_assistantImageMode))+": ";
+    std::string label="["+std::string(hasImportedAssistantImage()?assistantImageModeName(g_assistantImageMode):"Snapshot")+": ";
     for(size_t i=0;i<g_pendingAssistantImages.size();++i){if(i)label+=", ";label+=g_pendingAssistantImages[i].name;}
     label+="]";
-    if(g_assistantImageMode==AssistantImageMode::ImageToCAD){syncAssistantImageDimensions();const auto sizes=parseAssistantImageDimensions(g_assistantImageDimensionText);for(const auto& item:std::initializer_list<std::pair<const char*,std::optional<double>>>{{"width",sizes.width},{"height",sizes.height},{"depth",sizes.depth}})if(item.second){std::ostringstream number;number.imbue(std::locale::classic());number<<*item.second;label+=" "+std::string(item.first)+" ~"+number.str()+" mm";}}
+    if(hasImportedAssistantImage()&&g_assistantImageMode==AssistantImageMode::ImageToCAD){syncAssistantImageDimensions();const auto sizes=parseAssistantImageDimensions(g_assistantImageDimensionText);for(const auto& item:std::initializer_list<std::pair<const char*,std::optional<double>>>{{"width",sizes.width},{"height",sizes.height},{"depth",sizes.depth}})if(item.second){std::ostringstream number;number.imbue(std::locale::classic());number<<*item.second;label+=" "+std::string(item.first)+" ~"+number.str()+" mm";}}
     return label+(prompt.empty()?"":"\n"+prompt);
 }
 // OFN_EXPLORER returns either a full path or a directory followed by basenames.
@@ -94,7 +115,7 @@ static bool handleAssistantImageAction(int action){
 // Rough-dimension fields sit on the pending-image card inside the right dock.
 static void assistantImageDimensionSlot(size_t index,int& x,int& width){const auto dock=chatDockGeometry();width=std::clamp((dock.inner-76)/3-22,48,122);x=dock.x+dock.pad+82+(int)index*(width+22);}
 static void layoutAssistantImageDimensions(){
-    const bool visible=g_assistantDockOpen&&!g_chatDockRail&&!g_toolsOpen&&!g_pendingAssistantImages.empty()&&g_assistantImageMode==AssistantImageMode::ImageToCAD;
+    const bool visible=g_assistantDockOpen&&!g_chatDockRail&&!g_toolsOpen&&!g_pendingAssistantImages.empty()&&!g_pendingAssistantImages[g_assistantImageIndex].viewportRevision&&g_assistantImageMode==AssistantImageMode::ImageToCAD;
     if(visible)for(size_t i=0;i<3;++i)if(!g_assistantImageDimensionEdits[i]){auto edit=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",L"",WS_CHILD|WS_TABSTOP|WS_BORDER|ES_AUTOHSCROLL,0,0,1,1,g_window,(HMENU)(INT_PTR)(735+i),GetModuleHandleW(nullptr),nullptr);if(!edit)throw std::runtime_error("Could not create rough dimension fields.");g_assistantImageDimensionEdits[i]=edit;SendMessage(edit,WM_SETFONT,(WPARAM)GetStockObject(DEFAULT_GUI_FONT),TRUE);SendMessage(edit,EM_SETLIMITTEXT,24,0);SendMessage(edit,EM_SETMARGINS,EC_LEFTMARGIN|EC_RIGHTMARGIN,MAKELPARAM(6,6));if(!g_assistantImageDimensionText[i].empty())SetWindowTextA(edit,g_assistantImageDimensionText[i].c_str());SendMessageW(edit,0x1501,TRUE,(LPARAM)L"Auto");}
     const auto dock=chatDockGeometry();for(size_t i=0;i<3;++i)if(auto edit=g_assistantImageDimensionEdits[i]){int x=0,width=0;assistantImageDimensionSlot(i,x,width);MoveWindow(edit,x,dock.imageTop+75,width,25,TRUE);ShowWindow(edit,visible?SW_SHOW:SW_HIDE);}
 }
@@ -106,13 +127,20 @@ template<class Rect,class Button,class Glyph>static void drawAssistantImageAttac
     auto ink=[](const std::string& value,float px,float py,float scale,th::Tone color){textOut(value,px,py,scale,color.r,color.g,color.b);};
     rect(x,y,width,104.f,th::rowRadius,th::raised.r,th::raised.g,th::raised.b,1,1,1,1,th::border,1);
     const auto& image=g_pendingAssistantImages[g_assistantImageIndex];
-    drawAssistantAttachmentThumbnail(image,x+10,y+10,48,48);
+    const float preview=image.viewportRevision?88.f:48.f;
+    drawAssistantAttachmentThumbnail(image,x+10,y+8,preview,preview);
     const bool multiple=g_pendingAssistantImages.size()>1;
     std::string caption=multiple?std::to_string(g_assistantImageIndex+1)+"/"+std::to_string(g_pendingAssistantImages.size())+"  ":"";
     caption+=image.name+" / "+std::to_string(image.width)+" x "+std::to_string(image.height);
-    ink(fitText(caption,.56f,std::max(1.f,width-68-(multiple?154:90))),x+68,y+12,.56f,th::text2);
+    const float textX=preview+20;
+    ink(fitText(caption,.56f,std::max(1.f,width-textX-(multiple?154:90))),x+textX,y+12,.56f,th::text2);
     if(multiple){button("<",x+width-148,y+4,28,738,false,false);button(">",x+width-116,y+4,28,739,false,false);}
     button("Remove",x+width-84,y+4,76,733,false,false);
+    if(image.viewportRevision){
+        ink("Viewport snapshot",x+textX,y+42,.68f,th::text);
+        ink(fitText("Describe what you want to change or ask below.",.55f,width-textX-8),x+textX,y+76,.55f,th::muted);
+        return;
+    }
     const bool cad=g_assistantImageMode==AssistantImageMode::ImageToCAD;const float modeW=std::max(60.f,(width-84)*.5f);
     button("",x+68,y+38,modeW,731,false,!cad);glyph(731,x+74,y+42,24);ink(fitText("Inspire design",.62f,modeW-40),x+102,y+46,.62f,th::text);
     button("",x+74+modeW,y+38,modeW,732,false,cad);glyph(732,x+80+modeW,y+42,24);ink(fitText("Image to CAD",.62f,modeW-40),x+108+modeW,y+46,.62f,th::text);

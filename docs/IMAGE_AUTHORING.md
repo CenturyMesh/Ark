@@ -9,7 +9,7 @@ In the Assistant composer, use the paperclip to select one or more PNG or JPEG
 files. Ctrl-click selects individual files and Shift-click selects a range.
 You can also drop several images together, or use the paperclip again to add
 more. The counter and arrows let you review each thumbnail. **Remove** removes
-the displayed reference. One mode and one brief apply to the whole set.
+the displayed reference. One mode applies to all imported images in the brief.
 
 - **Inspire design** asks the agent to translate the references' shape language,
   curves and proportions into a coherent editable concept using ARK tools.
@@ -35,6 +35,13 @@ values. Adding or removing individual references preserves the shared estimates.
 Removing the last reference clears them. Invalid, zero, negative, non-finite
 or oversized numbers reject before sending; no zero/default dimensions are
 silently inserted.
+
+Use **Snapshot** under the chat input or right-click the model and choose
+**Snapshot for agent**. Frame the detail before capturing. The thumbnail shows
+the captured view and its document revision. Rotate the model and capture again
+to discuss several angles in one message. Type a question or describe the edit,
+then use **Send**, or **Queue** while the agent is working. You can include
+imported references and a viewport snapshot in the same message.
 
 All references remain local until **Send**, **Start** or **Queue** is used. Attaching,
 previewing, switching intent and cancelling a file picker do not contact a model.

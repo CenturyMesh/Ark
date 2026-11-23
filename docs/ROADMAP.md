@@ -1,5 +1,9 @@
 # ARK roadmap A–G
 
+082D (**B.01/D.02 — Verificado no escopo local**) lets users attach the current
+Studio view to a question or steer an active CAD turn with several views.
+[Viewport snapshots in chat](iterations/082D.md)
+
 081D (**A.03/D.02 — Verificado no escopo local**) keeps recent tool results
 available during visual edits and shows the outcome of edits and batched reads
 in the Single Assistant chat. [Context regression and verification](iterations/081D.md)
