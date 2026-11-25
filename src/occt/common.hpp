@@ -46,6 +46,10 @@ std::string base64Decode(const std::string& text);
 TopoDS_Shape readStep(const fs::path& path);
 void writeStep(const TopoDS_Shape& shape,const fs::path& path);
 double properties(const TopoDS_Shape& shape,char kind='v');
+// Area by error-controlled piecewise quadrature of every face to a relative
+// 1e-10, or an explicit rejection. properties(shape,'a') uses it when its OCCT
+// estimate misses that same precision.
+double piecewiseArea(const TopoDS_Shape& shape);
 void volumeProperties(const TopoDS_Shape& shape,GProp_GProps& properties,bool moments=true);
 // Volume and centre of mass only; the inertia tensor is not guaranteed.
 void volumeCentroidProperties(const TopoDS_Shape& shape,GProp_GProps& properties);

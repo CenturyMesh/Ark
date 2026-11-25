@@ -93,6 +93,24 @@ fixture revealed that OCCT's reported integration error can be optimistic;
 independent analytic area and native radius assertions remain the acceptance
 oracles.
 
+When the accumulated estimate exceeds a relative `1e-10` of the shape's area,
+every face of that shape is integrated again by piecewise adaptive Gauss-Kronrod
+quadrature. Knots of the support and of the p-curves, and the p-curve crossings
+of support knot lines, are interval boundaries; the error estimate of the inner
+integral is carried into the outer one. The `1e-10` requirement is unchanged: an
+area that the piecewise rule cannot resolve within its evaluation limit is
+rejected with the same message. This covers offsets of C1 supports trimmed by
+straight p-curves, such as a shelled loft, whose area density jumps where OCCT
+does not split its interval.
+
+A shape whose OCCT estimate passes keeps the area it had, so existing reports do
+not change. That estimate is not an error bound: OCCT omits its inner integral,
+and elementary faces use fixed Gauss without an estimate. A passing area can
+therefore be less accurate than `1e-10`, for example on a spline-trimmed plane or
+on an offset face. `native-area-integration` compares closed-form offsets,
+analytic solids, a spline plate and a trimmed doubly curved offset with
+independent references and checks that passing areas are unchanged bit for bit.
+
 ## Obsolete drag work
 
 `DirectPreviewWorker` retains one pending request and one private evaluation
