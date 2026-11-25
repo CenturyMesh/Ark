@@ -1,7 +1,9 @@
 #pragma once
 #include "ark/motion_graph.hpp"
 #include <atomic>
+#include <map>
 #include <memory>
+#include <set>
 namespace ark {
 // Derived display meshes from native cable sweeps at the recorded rigid frame
 // poses. These are not authored geometry, continuous collision or fatigue evidence.
@@ -18,6 +20,9 @@ struct MotionCableDisplay {
     size_t frameCount=0,bytes=0,nativeRequests=0;
 };
 std::vector<u64> motionCableFeatures(const Document&,const BakedMotionFrames&);
+// Evaluate only routes bound to changed occurrences, using the solved drag pose.
+std::map<u64,Mesh> previewMovedCables(const Document&,const std::vector<AssemblyPlacement>&,
+                                    const std::set<u64>& movedNodes);
 MotionCableDisplay prepareMotionCableDisplay(Document&,const BakedMotionFrames&,
     const std::atomic_bool& cancelled,const std::function<void(size_t,size_t)>& progress={});
 }

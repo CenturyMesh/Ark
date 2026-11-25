@@ -250,6 +250,24 @@ inline const V* observedTeamReadProgress(const std::string& name,const V& receip
     if(text(*progress,"role").empty()||!revision||revision->t!=V::Num||!action||action->t!=V::Obj)return nullptr;
     return progress;
 }
+// A direct doc_info and a successful doc_info row in a one-revision batch are
+// the same live inspection. A sibling projection failure does not undo it.
+inline bool inspectedDocumentRevision(const std::string& tool,const V& args,const V& receipt){
+    if(!successful(receipt))return false;
+    const auto* revision=payload(receipt).find("revision");
+    if(!revision||revision->t!=V::Num||!std::isfinite(revision->num)||revision->num<0||std::floor(revision->num)!=revision->num)return false;
+    if(tool=="doc_info")return true;
+    if(tool!="query_batch")return false;
+    const auto* queries=args.find("queries"),*rows=payload(receipt).find("results");
+    if(!queries||queries->t!=V::Arr||!rows||rows->t!=V::Arr||queries->arr.size()!=rows->arr.size())return false;
+    for(std::size_t i=0;i<rows->arr.size();++i){
+        const auto& row=rows->arr[i];const auto& query=queries->arr[i];
+        const auto* index=row.find("query_index"),*actual=payload(row).find("revision");
+        if(text(query,"tool")=="doc_info"&&text(row,"tool")=="doc_info"&&index&&row.find("args")&&batchRowMatchesQuery(query,row,i)&&
+           successful(row)&&actual&&actual->t==V::Num&&actual->num==revision->num)return true;
+    }
+    return false;
+}
 // A request-only projection: never replace the host's original conversation.
 // Preserve user/role/task messages exactly, and collapse only fully paired old
 // tool exchanges. Retain reusable static contracts separately from inventories,
@@ -275,7 +293,14 @@ inline V project(const V& history,std::size_t byteLimit,std::size_t recencyBytes
     for(std::size_t i=0;i+1<history.arr.size();++i)if(isProjectMemoryAssistantPair(history.arr[i],history.arr[i+1])){memoryRows.insert(i);memoryRows.insert(i+1);}
     auto keepFrom=latest;
     while(keepFrom){const auto& previous=history.arr[keepFrom-1];const auto type=text(previous,"type");if(type=="reasoning"||type=="function_call"||(type=="message"&&text(previous,"role")=="assistant"))--keepFrom;else break;}
-    std::size_t tailBytes=0;for(std::size_t i=keepFrom;i<history.arr.size();++i)tailBytes+=history.arr[i].dump().size()+1;
+    // The recency window buys verbatim tool exchanges. User messages (including
+    // snapshots and image attachments) travel in full on either side of the
+    // cut. Charging them here can evict the very inspection behind a snapshot.
+    const auto exchangeBytes=[](const V& item)->std::size_t{
+        const auto type=text(item,"type");
+        return type=="function_call"||type=="function_call_output"||type=="reasoning"?item.dump().size()+1:0;
+    };
+    std::size_t tailBytes=0;for(std::size_t i=keepFrom;i<history.arr.size();++i)tailBytes+=exchangeBytes(history.arr[i]);
     if(tailBytes>byteLimit/2)keepFrom=history.arr.size();
     // Keep the most recent complete exchanges verbatim within recencyBytes. An
     // agent that can see only its latest receipt re-reads what it read a round
@@ -283,7 +308,7 @@ inline V project(const V& history,std::size_t byteLimit,std::size_t recencyBytes
     if(recencyBytes&&keepFrom<history.arr.size()){
         std::vector<std::size_t> outputsBefore(history.arr.size()+1,0),suffix(history.arr.size()+1,0);
         for(std::size_t i=0;i<history.arr.size();++i)outputsBefore[i+1]=std::max(outputsBefore[i],text(history.arr[i],"type")=="function_call"?outputs.at(text(history.arr[i],"call_id"))+1:0);
-        for(std::size_t i=history.arr.size();i-->0;)suffix[i]=suffix[i+1]+history.arr[i].dump().size()+1;
+        for(std::size_t i=history.arr.size();i-->0;)suffix[i]=suffix[i+1]+exchangeBytes(history.arr[i]);
         for(std::size_t cut=1;cut<keepFrom;++cut)if(outputsBefore[cut]<=cut&&text(history.arr[cut-1],"type")!="reasoning"&&suffix[cut]<=recencyBytes){keepFrom=cut;break;}
     }
     struct Guide {std::size_t call;int query;V args,receipt;};

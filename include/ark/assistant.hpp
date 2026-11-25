@@ -6,6 +6,7 @@
 #include <string>
 #include <stdexcept>
 #include <optional>
+#include <span>
 #include <vector>
 #include <array>
 #include <memory>
@@ -22,12 +23,16 @@ struct AssistantImageAttachment {
     std::string name,mimeType,base64;
     unsigned width=0,height=0,thumbnailWidth=0,thumbnailHeight=0;
     std::vector<unsigned char> thumbnailRGBA;
+    std::optional<std::uint64_t> viewportRevision;
 };
 struct AssistantImageDimensions {std::optional<double> width,height,depth;};
 AssistantImageDimensions parseAssistantImageDimensions(const std::array<std::string,3>& fields);
 AssistantImageAttachment assistantImageAttachment(const std::vector<unsigned char>& bytes,const std::string& name,
     AssistantImageDecoder decoder=AssistantImageDecoder::Platform);
 AssistantImageAttachment loadAssistantImageAttachment(const std::string& path);
+inline constexpr std::size_t assistantReferenceLimit=32;
+arkjson::Value assistantUserMessageWithImages(const std::string& text,std::span<const AssistantImageAttachment> images,
+    AssistantImageMode mode=AssistantImageMode::InspireDesign,const AssistantImageDimensions& dimensions={});
 arkjson::Value assistantUserMessage(const std::string& text,
     const std::optional<AssistantImageAttachment>& image={},AssistantImageMode mode=AssistantImageMode::InspireDesign,
     const AssistantImageDimensions& dimensions={});

@@ -19,7 +19,16 @@ static void userImageAuthoringChecks(){
     const auto filled=ark::parseAssistantImageDimensions({"120","80","34.5"});check(filled.width==120&&filled.height==80&&filled.depth==34.5,"all three rough dimensions parse independently");
     for(const std::string invalid:{"0","-1","NaN","inf","12x","1000001","1,5"})fails([&]{ark::parseAssistantImageDimensions({invalid,"",""});},"invalid or non-positive rough size rejects before provider send");
     for(const auto mode:{ark::AssistantImageMode::InspireDesign,ark::AssistantImageMode::ImageToCAD}){
-        const auto user=ark::assistantUserMessage("Create an editable curved shell",image,mode,partial);
+        const auto detail=ark::assistantImageAttachment(jpegBytes,"detail.jpg");
+        const std::array references{image,detail};
+        const auto user=ark::assistantUserMessageWithImages("Create an editable curved shell",references,mode,partial);
+        ark::validateAssistantUserMessage(user);
+        const auto& content=user.find("content")->arr;
+        check(content.size()==3&&content[1].find("image_url")->str=="data:image/png;base64,"+image.base64&&
+              content[2].find("image_url")->str=="data:image/jpeg;base64,"+detail.base64,"one brief carries both ordered references in their original formats");
+        auto broken=user;auto brokenContent=*broken.find("content");
+        brokenContent.arr[2].set("image_url",V::makeStr("data:image/png;base64,AA=="));broken.set("content",std::move(brokenContent));
+        fails([&]{ark::validateAssistantUserMessage(broken);},"malformed second reference rejects the complete user message");
         const auto& prompt=user.find("content")->arr[0].find("text")->str;
         check(prompt.find(ark::assistantImageModeName(mode))!=std::string::npos&&prompt.find("editable")!=std::string::npos,"user-image history records explicit authoring intent and editability");
         if(mode==ark::AssistantImageMode::ImageToCAD){check(prompt.find("width=120 mm")!=std::string::npos&&prompt.find("depth=34.5 mm")!=std::string::npos&&prompt.find("height=")==std::string::npos,"only supplied rough estimates reach CAD authoring prompt");check(prompt.find("single photo")!=std::string::npos&&prompt.find("snapshots/silhouettes")!=std::string::npos&&prompt.find("expected_revision")!=std::string::npos,"replica prompt requires evidence, view comparison and revision-checked modeling without promising unique reconstruction");check(prompt.find("2D sketch")!=std::string::npos&&prompt.find("parametric skeleton")!=std::string::npos&&prompt.find("shadows/background")!=std::string::npos,"replica intent stages editable contours, scaled skeleton and 3D shapes with explicit photograph limits");}
@@ -27,9 +36,9 @@ static void userImageAuthoringChecks(){
         for(const char* provider:{"openai","grok","ollama","claude","claude-chat","custom","opencode"}){
             auto config=ark::assistantProviderPreset(provider);config.model="offline-user-image";V history=V::makeArr();history.arr.push_back(user);int requests=0;
             auto run=ark::runAssistant(config,history,V::makeArr(),{}, {},nullptr,[&](const auto&,const V& request,auto*){
-                ++requests;const auto serialized=request.dump();check(serialized.find(image.base64)!=std::string::npos&&serialized.find(ark::assistantImageModeName(mode))!=std::string::npos,"actual provider request carries original image bytes and selected intent");check(serialized.find("C:/")==std::string::npos&&serialized.find("C:\\\\")==std::string::npos,"provider request has no local attachment path");
+                ++requests;const auto serialized=request.dump();check(serialized.find(image.base64)!=std::string::npos&&serialized.find(detail.base64)!=std::string::npos&&serialized.find(ark::assistantImageModeName(mode))!=std::string::npos,"actual provider request carries original image bytes and selected intent");check(serialized.find("C:/")==std::string::npos&&serialized.find("C:\\\\")==std::string::npos,"provider request has no local attachment path");
                 if(config.protocol==ark::AssistantProtocol::Responses)return finalResponse();if(config.protocol==ark::AssistantProtocol::ChatCompletions)return json(R"({"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"Done."}}]})");return json(R"({"type":"message","role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"Done."}]})");
-            });check(requests==1&&run.conversation.dump().find(image.base64)!=std::string::npos,"image survives retained conversation checkpoint");
+            });check(requests==1&&run.conversation.dump().find(image.base64)!=std::string::npos&&run.conversation.dump().find(detail.base64)!=std::string::npos,"image survives retained conversation checkpoint");
         }
     }
     const auto blankMessage=ark::assistantUserMessage("",image,ark::AssistantImageMode::ImageToCAD);check(blankMessage.dump().find("All rough dimensions are blank")!=std::string::npos,"attachment alone has explicit CAD intent with disclosed provisional scale");

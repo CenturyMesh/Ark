@@ -193,7 +193,12 @@ static void repeatedReadChecks(){
             V out=json(R"({"isError":false,"structuredContent":{"revision":4,"units":"mm"}})");member(out,"structuredContent").set("activity_id",V::makeStr("act-"+std::to_string(++serial)));member(out,"structuredContent").set("recompute_ms",V::makeNum(serial*1.5));
             if(name=="doc_apply")member(out,"structuredContent").set("revision",V::makeNum(5));return out;},{},nullptr,
         [&](auto&,const V& request,auto*){requests.push_back(request);++rounds;
-            if(rounds<=4)return toolResponse(("read_"+std::to_string(rounds)).c_str(),"doc_info",R"({"detail":"revision"})");
+            if(rounds<=4){
+                auto response=toolResponse(("read_"+std::to_string(rounds)).c_str(),"doc_info",R"({"detail":"revision"})");
+                auto rating=toolResponse(("rate_"+std::to_string(rounds)).c_str(),"tool_feedback",R"({"ratings":[{"activity_id":"fixture-read","utility":4,"difficulty":1,"action":"Inspect the current revision"}]})");
+                member(response,"output").arr.push_back(member(rating,"output").arr.front());
+                return response;
+            }
             if(rounds==5)return toolResponse("write","doc_apply",R"({"expected_revision":4,"commands":[{"op":"param.set","name":"w","expr":"2"}]})");
             if(rounds==6)return toolResponse("read_after_write","doc_info",R"({"detail":"revision"})");
             return finalResponse();});

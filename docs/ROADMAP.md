@@ -1,5 +1,22 @@
 # ARK roadmap A–G
 
+082D (**B.01/D.02 — Verificado no escopo local**) lets users attach the current
+Studio view to a question or steer an active CAD turn with several views.
+[Viewport snapshots in chat](iterations/082D.md)
+
+081D (**A.03/D.02 — Verificado no escopo local**) keeps recent tool results
+available during visual edits and shows the outcome of edits and batched reads
+in the Single Assistant chat. [Context regression and verification](iterations/081D.md)
+
+080D (**B.01/D.02 — Verificado no escopo local**) lets Inspire design and Image
+to CAD use several selected or dropped references in one brief. The Studio
+composer previews and removes individual references. [Verification](iterations/080D.md)
+
+079C (**B.04/C.04 — Verificado no escopo local**) updates occurrence-bound
+cable sweeps during manual joint dragging. Escape restores the initial pose.
+Releasing the drag refreshes current bakes that drive the same joint.
+[Manual drag and playback verification](iterations/079C.md)
+
 078B (**A.02/A.03/A.04/B.01/B.02/B.03/D.02/D.05/F.05 — Verificado no escopo local**): visual geometry
 nodes, shared native-worker/RAM admission, bounded display-memory staging and
 actionable graph/Obsidian context. Native/script 210/210 and focused Studio 6/6

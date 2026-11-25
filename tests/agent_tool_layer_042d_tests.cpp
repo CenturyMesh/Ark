@@ -58,6 +58,9 @@ void batchExplicitFailures(){
     const auto& large=field(row(batch,0),"structuredContent");
     check(field(large,"error_code").str=="QUERY_BATCH_ROW_TOO_LARGE"&&field(large,"bytes").num>256&&field(field(large,"result_keys"),"features").find("count"),"a row above max_bytes returns its shape, not its data");
     check(!field(row(batch,1),"isError").b,"a projected row within max_bytes passes");
+    V retry=V::makeObj(),queries=V::makeArr();queries.arr.push_back(field(field(large,"recovery"),"retry_query"));retry.set("queries",queries);
+    const auto retried=accepted(s.call("query_batch",retry));
+    check(!field(row(retried,0),"isError").b&&field(row(retried,0),"structuredContent").find("features"),"the suggested query recovers the oversized row without replaying the batch");
     batch=call(s,"query_batch",R"({"queries":[{"tool":"agent_onboard","args":{"detail":"guide"},"max_bytes":256}]})");
     const auto& shaped=field(field(row(batch,0),"structuredContent"),"result_keys");const auto* nested=shaped.find("modeling_031B");
     check(nested&&field(*nested,"type").str=="object"&&field(*nested,"keys").t==V::Arr&&!field(*nested,"keys").arr.empty(),"047D: an oversized row names one level of child keys for object fields");

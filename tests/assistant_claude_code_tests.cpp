@@ -3,6 +3,7 @@
 #include "ark/assistant_connectors.hpp"
 #include "ark/agent.hpp"
 #include "ark/agent_activity.hpp"
+#include "ark/io.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
@@ -149,13 +150,19 @@ void cancellationAndResume(){
 void imageInput(){
     const std::string png="iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
     auto state=std::make_shared<State>();auto input=json((R"([{"role":"user","content":[{"type":"input_text","text":"[ARK user image | mode: inspire_design] kiosk reference"},{"type":"input_image","image_url":"data:image/png;base64,)"+png+R"("}]}])").c_str());
+    Image detail;detail.w=2;detail.h=1;detail.px={10,20,30,40,50,60};
+    const auto second=assistantImageAttachment(encodePNG(detail),"detail.png");
+    auto parts=*input.arr.front().find("content");auto block=parts.arr.back();
+    block.set("image_url",V::makeStr("data:image/png;base64,"+second.base64));parts.arr.push_back(std::move(block));input.arr.front().set("content",std::move(parts));
     auto run=runAssistant(config(state),input,tools(),[](const auto&,const V&){return receipt(7);});
     const V* user=nullptr;for(const auto& packet:state->sent)if(field(packet,"type")=="user"){user=&packet;break;}
     check(user&&user->find("message"),"The prompt must reach the CLI");const auto* content=user->find("message")->find("content");
-    check(content&&content->t==V::Arr&&content->arr.size()==2&&field(content->arr[0],"type")=="text"&&field(content->arr[1],"type")=="image","An image prompt is one text block plus one image block");
+    check(content&&content->t==V::Arr&&content->arr.size()==3&&field(content->arr[0],"type")=="text"&&field(content->arr[1],"type")=="image"&&field(content->arr[2],"type")=="image","Both images follow their shared brief in one CLI turn");
     const auto& text=field(content->arr[0],"text");const auto* source=content->arr[1].find("source");
     check(text.find("attached_image")!=std::string::npos&&text.find(png)==std::string::npos&&text.find("kiosk reference")!=std::string::npos,"The text keeps the message and a placeholder, never the base64 payload");
     check(source&&field(*source,"type")=="base64"&&field(*source,"media_type")=="image/png"&&field(*source,"data")==png,"The image block carries the exact validated PNG bytes");
+    const auto* secondSource=content->arr[2].find("source");
+    check(secondSource&&field(*secondSource,"data")==second.base64,"The second CLI image block carries the second reference");
     check(!run.text.empty(),"The image turn completes");
 }
 #ifdef _WIN32

@@ -5,10 +5,13 @@ attachment reaches the ARK authoring assistant and the Studio team, with an
 explicit design intent and editable-model instructions. It is not a certified
 photogrammetry or automatic exact reconstruction engine.
 
-In the Assistant composer, choose **Attach image**, select a PNG or JPEG, and
-review its thumbnail. Select one of the two modes:
+In the Assistant composer, use the paperclip to select one or more PNG or JPEG
+files. Ctrl-click selects individual files and Shift-click selects a range.
+You can also drop several images together, or use the paperclip again to add
+more. The counter and arrows let you review each thumbnail. **Remove** removes
+the displayed reference. One mode applies to all imported images in the brief.
 
-- **Inspire design** asks the agent to translate the image's shape language,
+- **Inspire design** asks the agent to translate the references' shape language,
   curves and proportions into a coherent editable concept using ARK tools.
 - **Image to CAD** asks the agent to recreate the visible form with editable
   sketches, parameters, features or an explicitly authored mesh body. It directs
@@ -28,20 +31,28 @@ an automatic pixel-vectorization tool.
 overall dimension. Each blank field is left to the model's judgment; leaving all
 three blank also works. Values are estimates, not measurements extracted from
 image pixels. Switching to Inspire design hides the fields and preserves their
-values; switching back restores them. Attaching another image or removing the
-pending attachment clears those estimates. Invalid, zero, negative, non-finite
+values. Adding or removing individual references preserves the shared estimates.
+Removing the last reference clears them. Invalid, zero, negative, non-finite
 or oversized numbers reject before sending; no zero/default dimensions are
 silently inserted.
 
-The image remains local until **Send**, **Start** or **Queue** is used. Attaching,
+Use **Snapshot** under the chat input or right-click the model and choose
+**Snapshot for agent**. Frame the detail before capturing. The thumbnail shows
+the captured view and its document revision. Rotate the model and capture again
+to discuss several angles in one message. Type a question or describe the edit,
+then use **Send**, or **Queue** while the agent is working. You can include
+imported references and a viewport snapshot in the same message.
+
+All references remain local until **Send**, **Start** or **Queue** is used. Attaching,
 previewing, switching intent and cancelling a file picker do not contact a model.
-Remove discards the pending attachment. A changed document, connector/account or
+A changed document, connector/account or
 explicit object target invalidates the pending attachment and requires attaching
 it again. Filename, mode and supplied estimates appear in the visible chat;
 private directory paths and image bytes do not appear in that log.
 
 The actual PNG/JPEG bytes are validated and fully decoded in memory before they
-enter a user message. The limits are **4 MiB** encoded file size, **8192 pixels**
+enter a user message. A message accepts up to **32 references**, subject to the
+connector's request limits. Each image is limited to **4 MiB** encoded file size, **8192 pixels**
 per side and **16 megapixels** decoded area. The thumbnail uses those decoded
 pixels. Responses, compatible Chat Completions and native Anthropic Messages
 requests retain the actual inline image payload; the ChatGPT plan request uses
@@ -64,7 +75,8 @@ is limited to 4 MiB; a file below the file-size limit can still require resizing
 to fit that route. This is an explicit request rejection, with reference pixels
 preserved rather than silently omitted.
 
-The lead's first team turn receives the original user image, intent and estimates.
+The lead's first team turn receives all reference images in the submitted order,
+with the shared intent and estimates.
 Shared team context retains them for a specialist's later assigned work; this
 does not assign every agent to reproduce the whole design. Multimodal steering
 is consumed before the next provider request and uses the same revision/write

@@ -315,6 +315,8 @@ static AssemblyDiagnostics g_assemblyDiagnostics;
 static AssemblyMotionProgram g_motionProgram;static u64 g_motionRevision=std::numeric_limits<u64>::max(),g_motionDriver=0;
 struct ComponentMove {bool armed=false,dragging=false,active=false;u64 revision=0,epoch=0,driver=0;int x=0,y=0;double delta=0,pointerCoordinate=0,pointerAngle=0;Vec3 radial,dragPlaneNormal,pointerWorld;AssemblyManipulationProgram program;std::shared_ptr<AssemblyManipulationPath> path;AssemblyManipulationJoint joint;std::vector<Mat4> baseline;};
 static ComponentMove g_componentMove;
+static bool g_componentCablePreview=false;
+static void displayComponentCables(const std::map<u64,Mesh>&);
 struct ComponentDragIntent {bool pending=false;int x=0,y=0;u64 revision=0,epoch=0;};
 static ComponentDragIntent g_componentDragIntent;
 static void armComponentMove();static void cancelComponentMove(bool restore=true);static void applyComponentMove();
@@ -433,6 +435,7 @@ struct UiToolRequest {RealtimeClock030::time_point posted=RealtimeClock030::now(
 static bool assistantSteeringToolAllowed(const UiToolRequest& request);
 static arkjson::Value assistantSteeringToolRejection();
 struct UiChatEvent {std::string text;bool final=false,error=false;arkjson::Value history;u64 epoch=0;AssistantUsage usage{};bool hasUsage=false;AssistantPerformance performance{};bool hasPerformance=false;bool status=false,retry=false;bool reasoning=false;std::optional<AssistantConfig> route;arkjson::Value feedback; // 076A: AssistantResult::feedback of a final reply
+    std::string completedTool;
 };
 enum class AuthJob{SignIn,SignOut,Models};
 struct UiAuthEvent{AuthJob job=AuthJob::Models;ChatGptAuthStatus status;std::vector<ChatGptModel> models;std::string error;};
@@ -1013,7 +1016,7 @@ static const char* FS_ICON=R"(#version 330 core
 in vec2 uv;out vec4 o;uniform sampler2D atlas;uniform vec2 tile;uniform float opacity;uniform vec4 box;
 void main(){vec4 b=box.z>box.x?box:vec4(0.,0.,1.,1.);vec2 q=(tile+clamp(mix(b.xy,b.zw,clamp(uv,0.,1.)),vec2(.002),vec2(.998)))*.25;q.y=1.-q.y;vec4 p=texture(atlas,q);o=vec4(p.rgb,p.a*opacity);})";
 static const char* FS_IMAGE=R"(#version 330 core
-in vec2 uv;out vec4 o;uniform sampler2D image;void main(){o=texture(image,vec2(uv.x,1.-uv.y));})";
+in vec2 uv;out vec4 o;uniform sampler2D image;uniform bool topDown;void main(){o=texture(image,topDown?uv:vec2(uv.x,1.-uv.y));})";
 
 // ---------------------------------------------------------------------------
 #include "gpu_mesh_cache_056c.inl"
@@ -1564,6 +1567,7 @@ static void invalidateRemovedObjectTarget(){
     if(!resolveAssembly(g_doc,placements,error)||std::none_of(placements.begin(),placements.end(),[&](const AssemblyPlacement& p){return p.node==target.node&&p.copy==target.copy&&p.feature==target.feature;}))target.invalidated="The selected pattern copy was removed or replaced. Select it again before sending.";
 }
 static std::string g_lastFailureId;
+static Image captureCurrentStudioView(u64 revision,u64 epoch);
 static arkjson::Value captureViewportSnapshot(const arkjson::Value& args);
 static void resetDatumViewState();
 static void sanitizeDatumViewState();
@@ -3298,7 +3302,7 @@ static std::string teamRoleOnboardingPack(size_t slot){return slot==teamParametr
 static void sendTeam(const std::string& explicitPrompt={},const std::array<AssistantTransport,teamCapacity>& transports={}){
     if(claudeReconnect071::busy()){g_status="Finish or cancel the Claude Code account operation before starting or resuming a task.";return;}
     if(g_busy&&!g_teamStarted){g_status="Wait for the current document operation before starting a new team.";return;}
-    if(g_chatBusy){g_status="Wait for the single Assistant turn to finish.";return;}std::string prompt=assistantPrompt(explicitPrompt);if(prompt.find_first_not_of(" \r\n\t")==std::string::npos&&(!explicitPrompt.empty()||!g_pendingAssistantImage))return;
+    if(g_chatBusy){g_status="Wait for the single Assistant turn to finish.";return;}std::string prompt=assistantPrompt(explicitPrompt);if(prompt.find_first_not_of(" \r\n\t")==std::string::npos&&(!explicitPrompt.empty()||g_pendingAssistantImages.empty()))return;
     const std::string visiblePrompt=explicitPrompt.empty()?assistantImageVisiblePrompt(prompt):prompt;if(!attachPendingObjectContext(prompt))return;auto userMessage=explicitPrompt.empty()?pendingAssistantImageMessage(prompt):assistantUserMessage(prompt);
     pollTeam(true);if(g_teamStarted&&!g_teamSnapshot.cancelled){if(!g_agentTeam.steer(userMessage,g_teamTarget)){g_status="Decision could not be queued; check team state and turn limits.";return;}g_chatLog.push_back({"You -> "+(g_teamTarget.empty()?std::string("team"):g_teamTarget),visiblePrompt});g_status="Decision queued for the next provider request.";}
     else{
@@ -3329,12 +3333,36 @@ static void sendTeam(const std::string& explicitPrompt={},const std::array<Assis
     }
     if(explicitPrompt.empty())clearPendingAssistantImage();g_pendingObjectTarget.reset();g_chatScroll=0;if(g_chatInput)SetWindowTextW(g_chatInput,L"");pollTeam(true);
 }
+static std::string assistantToolOutcome(const std::string& name,const arkjson::Value& receipt){
+    using V=arkjson::Value;
+    if(name!="doc_apply"&&name!="query_batch")return {};
+    const auto* failed=receipt.find("isError"),*data=receipt.find("structuredContent");
+    if(!failed||failed->t!=V::Bool)return {};
+    if(failed->b)return "Tool: "+name+" / failed";
+    if(!data)return {};
+    const auto* rev=data->find("revision");
+    const std::string revision=rev&&rev->t==V::Num?" / revision "+rev->dump():"";
+    if(name=="doc_apply")return "Tool: doc_apply / succeeded"+revision;
+    const auto* rows=data->find("results");if(!rows||rows->t!=V::Arr||rows->arr.empty())return {};
+    size_t successes=0;std::string issue;
+    for(const auto& row:rows->arr){
+        const auto* error=row.find("isError");if(!error||error->t!=V::Bool)return {};
+        if(!error->b){++successes;continue;}
+        const auto* detail=row.find("structuredContent");const auto* code=detail?detail->find("error_code"):nullptr;
+        if(issue.empty()&&code&&code->t==V::Str){
+            const auto* tool=row.find("tool");
+            issue=code->str=="QUERY_BATCH_ROW_TOO_LARGE"&&tool&&tool->t==V::Str?
+                " / "+tool->str.substr(0,64)+" exceeded the requested size":" / "+code->str.substr(0,80);
+        }
+    }
+    return "Tool: query_batch / "+std::to_string(successes)+"/"+std::to_string(rows->arr.size())+" reads succeeded"+revision+issue;
+}
 static void sendAssistant(const std::string& explicitPrompt="",const AssistantTransport& transport={},const arkjson::Value* queuedMessage=nullptr,const std::string& queuedVisible={}){
     if(claudeReconnect071::busy()){g_status="Finish or cancel the Claude Code account operation before starting or resuming a task.";return;}
     if(g_teamStarted&&g_agentTeam.snapshot().running){g_status="Wait for the team to finish or cancel it before starting Assistant.";return;}
     std::string prompt=explicitPrompt;
     if(prompt.empty()&&g_chatInput){int n=GetWindowTextLengthW(g_chatInput);std::vector<wchar_t> buffer(n+1);GetWindowTextW(g_chatInput,buffer.data(),n+1);int size=WideCharToMultiByte(CP_UTF8,0,buffer.data(),n,nullptr,0,nullptr,nullptr);prompt.resize(size);WideCharToMultiByte(CP_UTF8,0,buffer.data(),n,prompt.data(),size,nullptr,nullptr);}
-    if(!queuedMessage&&prompt.find_first_not_of(" \r\n\t")==std::string::npos&&(!explicitPrompt.empty()||!g_pendingAssistantImage))return;const std::string visiblePrompt=queuedMessage?queuedVisible:explicitPrompt.empty()?assistantImageVisiblePrompt(prompt):prompt;if(!queuedMessage&&!attachPendingObjectContext(prompt))return;using V=arkjson::Value;V user=queuedMessage?*queuedMessage:explicitPrompt.empty()?pendingAssistantImageMessage(prompt):assistantUserMessage(prompt);
+    if(!queuedMessage&&prompt.find_first_not_of(" \r\n\t")==std::string::npos&&(!explicitPrompt.empty()||g_pendingAssistantImages.empty()))return;const std::string visiblePrompt=queuedMessage?queuedVisible:explicitPrompt.empty()?assistantImageVisiblePrompt(prompt):prompt;if(!queuedMessage&&!attachPendingObjectContext(prompt))return;using V=arkjson::Value;V user=queuedMessage?*queuedMessage:explicitPrompt.empty()?pendingAssistantImageMessage(prompt):assistantUserMessage(prompt);
     if(g_chatBusy){queueActiveAssistantSteering(user,visiblePrompt,explicitPrompt.empty()&&!queuedMessage);return;}validateAssistantConfig(g_assistantConfig);
     if(g_conversation.arr.empty()&&!transport&&g_assistantConfig.provider!="ollama"&&g_assistantConfig.authMode!=AssistantAuthMode::CliAccount)refreshPricing();
     if(g_assistantWorker.joinable())g_assistantWorker.join();
@@ -3342,7 +3370,7 @@ static void sendAssistant(const std::string& explicitPrompt="",const AssistantTr
     g_session.beginBomTask(continuing);
     V input=g_conversation;if(input.t!=V::Arr)input=V::makeArr();input.arr.push_back(user);
     if(continuing){V context=V::makeObj();context.set("role",V::makeStr("developer"));context.set("content",V::makeStr("Continue the retained unfinished task at the current revision. The goal remains: "+g_singleGoal+". Resume means continue work, not summarize it. Preserve unfinished requirements and the current BOM task boundary; inspect current evidence before writing."));input.arr.push_back(context);}
-    if(queuedMessage||(explicitPrompt.empty()&&g_pendingAssistantImage)){auto preflight=g_assistantConfig;if(!transport)preflight.onboardingPack=agentAuthoringOnboardingPack();assistantRequest(preflight,input,AgentSession::tools());}
+    if(queuedMessage||(explicitPrompt.empty()&&!g_pendingAssistantImages.empty())){auto preflight=g_assistantConfig;if(!transport)preflight.onboardingPack=agentAuthoringOnboardingPack();assistantRequest(preflight,input,AgentSession::tools());}
     if(!queuedMessage){if(!continuing)g_singleGoal=visiblePrompt;g_pendingObjectTarget.reset();}if(!queuedMessage)g_chatLog.push_back({"You",visiblePrompt});g_chatScroll=0;g_assistantReasoningRun.clear();g_assistantRunStarted=true;++g_chatReasoningSerial;g_chatBusy=true;g_assistantResponseFinished=g_assistantResponseError=false;g_assistantFeedbackPending=0;g_assistantStatus="Working...";g_assistantUsageRun={};g_assistantPerformanceRun={};g_assistantUsageRunCounted=false;g_assistantReceiptId=newUsageReceiptId();g_assistantReceiptModel=g_assistantConfig.model;g_currentUsageReceipt.reset();g_pendingUsageReceipt.reset();g_assistantCancel=std::make_shared<std::atomic_bool>(false);auto cancel=g_assistantCancel;auto config=g_assistantConfig;if(!transport)config.onboardingPack=agentInteractiveOnboardingPack();config.memoryPrefetch=!transport;config.deferSpecialistTools=!transport;applyAgentRequestOptions(config);auto schema=compactAuthoringPreviewTools(AgentSession::tools());if(g_chatInput&&!queuedMessage)SetWindowTextW(g_chatInput,L"");
     auto epoch=g_documentEpoch;auto revision=std::make_shared<std::atomic<u64>>(g_session.revision);
     auto steering=std::make_shared<AssistantSteering>(config,schema,input);g_assistantSteering=steering;g_assistantSteeringEpoch=epoch;g_assistantSteeringTransport=transport;
@@ -3350,7 +3378,10 @@ static void sendAssistant(const std::string& explicitPrompt="",const AssistantTr
         V retainedHistory=input;auto executor=[cancel,epoch,revision,steering,runId](const std::string& name,const V& args){
             auto promise=std::make_shared<std::promise<V>>();auto future=promise->get_future();auto request=std::make_unique<UiToolRequest>();request->tool=name;request->args=args;request->cancel=cancel;request->epoch=epoch;request->revision=revision;request->runId=runId;request->steering=steering;request->steeringVersion=steering->requestVersion();request->complete=[promise](V result){promise->set_value(std::move(result));};postTool(std::move(request));
             while(future.wait_for(std::chrono::milliseconds(20))!=std::future_status::ready)if(*cancel||g_closing)throw std::runtime_error("Assistant cancelled");
-            return future.get();
+            auto receipt=future.get();
+            auto outcome=assistantToolOutcome(name,receipt);
+            if(!outcome.empty()){UiChatEvent update;update.text=std::move(outcome);update.completedTool=name;update.epoch=epoch;postChat(std::move(update));}
+            return receipt;
         };AssistantRetryHooks hooks;if(!transport)hooks.completionCheck=[executor]{return executor("__ark_bom_completion",V::makeObj());};hooks.requestCurrent=[steering]{return steering->current(steering->requestVersion());};hooks.acceptCompletion=[steering]{return steering->finish();};
         try{auto result=runAssistant(config,input,schema,executor,[epoch](const AssistantEvent& event){if(event.kind==AssistantEvent::Status){UiChatEvent progress;progress.text=event.text;progress.epoch=epoch;progress.status=true;progress.retry=event.providerRetry;postChat(std::move(progress));}else if(event.kind==AssistantEvent::ToolStart)postChat({"Tool: "+event.text,false,false,{},epoch});else if(event.kind==AssistantEvent::Reasoning){UiChatEvent thought;thought.text=event.text;thought.epoch=epoch;thought.reasoning=true;postChat(std::move(thought));}else if(event.kind==AssistantEvent::Usage)postChat({"",false,false,{},epoch,event.usage,true,event.performance,true});else if(event.kind==AssistantEvent::ToolEnd){UiChatEvent progress;progress.text="Thinking...";progress.epoch=epoch;progress.status=true;progress.performance=event.performance;progress.hasPerformance=true;postChat(std::move(progress));}},cancel.get(),feedbackFixtureTransport(transport),[steering]{return steering->inbox();},[&](const V& history){retainedHistory=history;steering->checkpoint(history);},hooks);
             if(*cancel)throw std::runtime_error("Assistant cancelled");{UiChatEvent completed{result.text,true,false,result.conversation,epoch,result.usage,true,result.performance,true};completed.route=config;completed.feedback=result.feedback;postChat(std::move(completed));}
@@ -3957,7 +3988,7 @@ static const std::vector<StudioCommandGroup>& studioCommandGroups(){
     group("Component patterns",{{770,"Linear component pattern"},{771,"Circular component pattern"},{772,"Pattern driven component pattern"},{773,"Sketch driven component pattern"},{774,"Curve driven component pattern"},{775,"Chain component pattern"},{776,"Edit selected component pattern"},{777,"Remove pattern / keep seed"},{778,"Inspect pattern evidence"},{779,"Rebind pattern source"}});
     group("Advanced sheet metal",{{800,"Miter flange"},{801,"Edit miter flange"},{802,"Remove miter flange"},{803,"Contour flange / straight-edge sweep"},{804,"Edit contour flange"},{805,"Remove contour flange"},{806,"Corner relief / trim / break / closure"},{807,"Edit corner operation"},{808,"Remove corner operation"},{809,"Edge rip / bend notch"},{810,"Edit edge rip"},{811,"Remove edge rip"},{812,"Paired tab and slot"},{813,"Edit tab and slot"},{814,"Remove tab and slot"},{815,"Declared bend allowance table"},{816,"Remove bend table"}});
     group("Manufacturing drawings",{{860,"Drawings in viewport"},{840,"Return to 3D design"},{841,"Part drawings"},{842,"Assembly drawings"},{843,"Create source sheet"},{844,"Sheet template"},{845,"Add drawing view"},{846,"Add dimension / tolerance"},{847,"Add section view"},{848,"Refresh current drawing"},{849,"Export drawing"},{850,"Previous sheet"},{851,"Next sheet"},{852,"Fit sheet"},{855,"Create all source sheets"},{856,"Select origin in 3D"},{857,"Edit dimension"},{858,"Edit view"},{859,"Remove sheet"}});
-    group("Image references",{{730,"Attach image to Assistant"},{731,"Inspire design"},{732,"Image to CAD"},{733,"Remove pending image"}});
+    group("Image references",{{730,"Attach images to Assistant"},{734,"Snapshot for agent"},{731,"Inspire design"},{732,"Image to CAD"},{733,"Remove pending image"}});
     group("Sketch & planes",{{610,"Edit sketch in viewport"},{611,"Exit sketch edit"},{60,"Create / edit plane"},{113,"Attach plane to feature"},{69,"Select plane"},{72,"Toggle datum frames"},{61,"Rectangle"},{62,"Circle / opening"},{543,"Sketch line"},{544,"Arc through three points"},{545,"Arc from start tangent"},{546,"Arc from centre and angles"},{547,"3D arc through three points"},{548,"3D tangent arc"},{63,"Interpolating spline"},{70,"Edit entity coordinates"},{73,"Add constraint"},{89,"Edit selected constraint"},{90,"Remove selected constraint"},{542,"Rename sketch entity"},{536,"Project geometry to 2D sketch"},{537,"Include linked geometry in 3D"},{538,"Create exact spatial curve"},{700,"3D sketch constraints"},{591,"Parametric curve dimension"},{592,"XYZ equation curve"},{593,"Offset saved sketch curve"},{64,"Edit raw sketch JSON"},{65,"Extrude sketch"},{66,"Cut from sketch"},{67,"Named parameter"},{68,"Toggle sketch overlay"}});
     group("Solids",{{1,"Box"},{2,"Cylinder"},{3,"Sphere"},{4,"Cone"},{5,"Torus"},{6,"Polygon extrusion"},{7,"Revolve"},{11,"Linear pattern"}});
     group("Exact solids",{{100,"Native primitive"},{101,"Extrude saved sketch"},{102,"Union / cut / common"},{103,"Hole / slot / profile pocket"},{104,"Fillet / chamfer"},{106,"Draft faces"},{107,"Linear / circular pattern"},{108,"Mirror solid"},{105,"Rigid transform"},{594,"Offset exact solid"},{49991,"Anchor a face reference"},{49992,"Select solid bodies"}});
@@ -4056,6 +4087,8 @@ static bool surfaceQualityAction068B(int);
 static bool surfaceOffsetAction068B(int);
 static bool designReviewAction067(int);
 static void uiAction(int id){
+    // Capture the displayed pose before authoring actions can exit a preview.
+    if(id==734){attachViewportToAssistant();return;}
     if(bodyAuthoringAction074B(id))return;
     if(id==472&&claudeReconnect071::busy()){g_status="Finish or cancel the Claude account operation before resuming the team.";return;}
     if(id==50100){claudeReconnect071::start(true);return;}if(id==50101){claudeReconnect071::start(false);return;}if(id==50102){claudeReconnect071::cancel();return;}
@@ -4552,6 +4585,7 @@ static GLuint pBg,pBusy,pSolid,pCube,pGrid,pShadow,pUI,pText,pSketch,pGeom,pAo,p
 #include "measurement.inl"
 static void cancelComponentMove(bool restore){
     g_componentDragIntent={};
+    if(g_componentCablePreview){restoreMotionCables054B();g_componentCablePreview=false;}
     bool armed=g_componentMove.armed;
     if(restore&&g_componentMove.active){if(g_componentMove.revision==g_session.revision&&g_componentMove.epoch==g_documentEpoch&&g_componentMove.baseline.size()==g_instanceWorld.size()){g_instanceWorld=g_componentMove.baseline;rebuildDisplayBounds();refreshSelectionLines();}else rebuildScene();}
     g_componentMove={};if(!restore)g_componentMove.armed=armed;
@@ -4663,18 +4697,64 @@ static void moveComponentDrag(int x,int y){
         while(delta-move.pointerAngle>180)delta-=360;while(delta-move.pointerAngle<-180)delta+=360;move.pointerAngle=delta;
     }
     delta=boundedComponentDelta(move.joint,delta);
+    if(delta==move.delta){g_dragged=std::abs(x-move.x)+std::abs(y-move.y)>2;return;}
     AssemblyManipulationPreview preview;std::string error;if(!(move.path?move.path->preview(delta,preview,error):previewAssemblyManipulation(move.program,move.driver,move.joint.mate,move.joint.mode,delta,preview,error)))throw std::runtime_error(error);
     std::map<std::pair<u64,int>,const Mat4*> poses;for(const auto& placement:preview.placements)poses.emplace(std::make_pair(placement.node,placement.copy),&placement.world);
     std::vector<Mat4> worlds=move.baseline;for(size_t i=0;i<g_instanceIds.size();++i){auto found=poses.find({g_instanceIds[i],g_instanceCopies[i]});if(found==poses.end())throw std::runtime_error("Joint preview did not return the selected assembly placement");worlds[i]=*found->second;}
+    std::set<u64> movedNodes;
+    for(const auto& base:move.program.baseline){
+        const auto pose=poses.find({base.node,base.copy});
+        if(pose!=poses.end()&&!std::equal(std::begin(base.world.m),std::end(base.world.m),pose->second->m))
+            movedNodes.insert(base.node);
+    }
+    // Publish the rigid pose and all its native cable sweeps together.
+    const auto cables=previewMovedCables(g_doc,preview.placements,movedNodes);
+    if(!cables.empty()||g_componentCablePreview)displayComponentCables(cables);
+    g_componentCablePreview=!cables.empty();
     g_instanceWorld=std::move(worlds);move.delta=delta;g_dragged=std::abs(x-move.x)+std::abs(y-move.y)>2;rebuildDisplayBounds();refreshSelectionLines();char text[240];
     bool absolute=move.joint.type=="prismatic"||move.joint.type=="revolute";
     std::snprintf(text,sizeof text,"Joint %llu / %s %.2f %s / %zu attached components / release saves / Esc cancels",(unsigned long long)move.joint.mate,absolute?"position":"displacement",absolute?move.joint.position+move.joint.coordinateSign*delta:delta,move.joint.mode=="translate"?"mm":"deg",move.joint.movingNodes.size());g_status=text;g_error=false;
 }
+static void appendDrivenCableBakes(const ComponentMove& move,arkjson::Value& commands){
+    using V=arkjson::Value;
+    std::string digest;
+    for(const auto& motion:g_doc.motions.arr){
+        const auto* bake=motion.find("bake");
+        if(!bake)continue;
+        const auto* channels=bake->find("channels");
+        if(!channels||std::none_of(channels->arr.begin(),channels->arr.end(),[&](const V& channel){
+            const auto* mate=channel.find("mate");
+            return mate&&mate->num==static_cast<double>(move.joint.mate);
+        }))continue;
+        const auto* source=bake->find("source_digest");
+        const auto* graph=bake->find("graph_digest");
+        const auto* fps=bake->find("fps");
+        if(!source||!graph||!fps)continue;
+        if(digest.empty())digest=motionSourceDigest(g_doc,move.program.baseline);
+        if(source->str!=digest||graph->str!=motionGraphDigest(*motion.find("graph")))continue;
+        V refresh=V::makeObj();
+        refresh.set("op",V::makeStr("motion.bake"));
+        refresh.set("name",*motion.find("name"));
+        refresh.set("fps",*fps);
+        commands.arr.push_back(std::move(refresh));
+    }
+}
 static void applyComponentMove(){
     if(!g_componentMove.active)return;auto move=std::move(g_componentMove);g_componentMove={};g_componentMove.armed=move.armed;
+    const bool movedCables=g_componentCablePreview;
+    if(movedCables){restoreMotionCables054B();g_componentCablePreview=false;}
     if(move.revision!=g_session.revision||move.epoch!=g_documentEpoch){rebuildScene();throw std::runtime_error("The drawing changed during movement; no placement was saved");}
     if(std::abs(move.delta)<1e-8){g_instanceWorld=move.baseline;rebuildDisplayBounds();refreshSelectionLines();g_status="Move component: drag a part / Esc exits";return;}
-    using V=arkjson::Value;V command=V::makeObj(),commands=V::makeArr(),args=V::makeObj();command.set("op",V::makeStr("assembly.drive"));command.set("driver",V::makeNum((double)move.driver));command.set("mate",V::makeNum((double)move.joint.mate));command.set("mode",V::makeStr(move.joint.mode));command.set("delta",V::makeNum(move.delta));commands.arr.push_back(command);args.set("commands",commands);args.set("expected_revision",V::makeNum((double)move.revision));args.set("detail",V::makeStr("changes"));runTool("doc_apply",args);
+    using V=arkjson::Value;V command=V::makeObj(),commands=V::makeArr(),args=V::makeObj();command.set("op",V::makeStr("assembly.drive"));command.set("driver",V::makeNum((double)move.driver));command.set("mate",V::makeNum((double)move.joint.mate));command.set("mode",V::makeStr(move.joint.mode));command.set("delta",V::makeNum(move.delta));commands.arr.push_back(command);
+    if(movedCables)appendDrivenCableBakes(move,commands);
+    args.set("commands",commands);args.set("expected_revision",V::makeNum((double)move.revision));args.set("detail",V::makeStr("changes"));runTool("doc_apply",args);
+    if(g_error&&commands.arr.size()>1&&move.revision==g_session.revision&&move.epoch==g_documentEpoch){
+        // The combined transaction was rejected. A graph that cannot be rebaked
+        // from this pose must not prevent an independently valid manual drive.
+        const auto refreshError=g_status;
+        commands.arr.resize(1);args.set("commands",commands);runTool("doc_apply",args);
+        if(!g_error){g_status="Component movement saved / motion needs Bake: "+refreshError;return;}
+    }
     if(g_error){g_instanceWorld=move.baseline;rebuildDisplayBounds();refreshSelectionLines();}
     if(!g_error)g_status="Component movement saved / attached components follow / Undo restores the previous placement";
 }
@@ -4713,7 +4793,7 @@ static GLint guView,guProj,guModel,guHard,auProj,auFocal,auOrtho,auRadius,auBias
 static GLint uuVp,uuRc,uuRad,uuFill,uuBorder,uuBW,uuGlyph,uuDuo;
 static GLuint quadVao,gridVao,gridVbo,textVao,textVbo,gFbo=0,gGeomTex=0,gAoTex=0,gDepthTex=0,gCubeVao=0,gCubeVbo=0,gCompassVao=0,gCompassVbo=0;
 static void drawAssistantAttachmentThumbnail(const AssistantImageAttachment& attachment,float x,float y,float w,float h){
-    if(attachment.thumbnailRGBA.empty()||!attachment.thumbnailWidth||!attachment.thumbnailHeight)return;static GLuint texture=0;static std::vector<unsigned char> uploaded;static unsigned uploadedW=0,uploadedH=0;if(!texture)glGenTextures(1,&texture);glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,texture);if(uploaded!=attachment.thumbnailRGBA||uploadedW!=attachment.thumbnailWidth||uploadedH!=attachment.thumbnailHeight){glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,(GLsizei)attachment.thumbnailWidth,(GLsizei)attachment.thumbnailHeight,0,GL_RGBA,GL_UNSIGNED_BYTE,attachment.thumbnailRGBA.data());glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);uploaded=attachment.thumbnailRGBA;uploadedW=attachment.thumbnailWidth;uploadedH=attachment.thumbnailHeight;}float scale=std::min(w/attachment.thumbnailWidth,h/attachment.thumbnailHeight),width=attachment.thumbnailWidth*scale,height=attachment.thumbnailHeight*scale;glUseProgram(pImage);glUniform2f(glGetUniformLocation(pImage,"vp"),(float)winW,(float)winH);glUniform4f(glGetUniformLocation(pImage,"rc"),x+(w-width)*.5f,y+(h-height)*.5f,width,height);glUniform1i(glGetUniformLocation(pImage,"image"),0);glBindVertexArray(quadVao);glDrawArrays(GL_TRIANGLES,0,6);glUseProgram(pUI);
+    if(attachment.thumbnailRGBA.empty()||!attachment.thumbnailWidth||!attachment.thumbnailHeight)return;static GLuint texture=0;static std::vector<unsigned char> uploaded;static unsigned uploadedW=0,uploadedH=0;if(!texture)glGenTextures(1,&texture);glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,texture);if(uploaded!=attachment.thumbnailRGBA||uploadedW!=attachment.thumbnailWidth||uploadedH!=attachment.thumbnailHeight){glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,(GLsizei)attachment.thumbnailWidth,(GLsizei)attachment.thumbnailHeight,0,GL_RGBA,GL_UNSIGNED_BYTE,attachment.thumbnailRGBA.data());glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);uploaded=attachment.thumbnailRGBA;uploadedW=attachment.thumbnailWidth;uploadedH=attachment.thumbnailHeight;}float scale=std::min(w/attachment.thumbnailWidth,h/attachment.thumbnailHeight),width=attachment.thumbnailWidth*scale,height=attachment.thumbnailHeight*scale;glUseProgram(pImage);glUniform1i(glGetUniformLocation(pImage,"topDown"),1);glUniform2f(glGetUniformLocation(pImage,"vp"),(float)winW,(float)winH);glUniform4f(glGetUniformLocation(pImage,"rc"),x+(w-width)*.5f,y+(h-height)*.5f,width,height);glUniform1i(glGetUniformLocation(pImage,"image"),0);glBindVertexArray(quadVao);glDrawArrays(GL_TRIANGLES,0,6);glUseProgram(pUI);
 }
 struct CubeTriangle{Vec3 a,b,c,normal;int face=-1,facet=-1;};
 struct CubeHit{bool hit=false;int face=-1;Vec3 normal{};int facet=-1;};
@@ -5301,7 +5381,7 @@ static void drawFrame(HDC hdc){
     }
     panel(0,0,W,52);panel(0,(float)viewY,(float)viewX,H-viewY-32);
     static GLuint wordmark=0;if(!wordmark){auto atlas=toolAtlasPath();if(!atlas.empty()){auto file=atlas.parent_path()/"ark-wordmark.png";auto path=file.u8string();wordmark=canvasTexture(std::string(path.begin(),path.end()));}}
-    if(wordmark&&wordmark!=g_canvasMissing){glUseProgram(pImage);glUniform2f(glGetUniformLocation(pImage,"vp"),W,H);glUniform4f(glGetUniformLocation(pImage,"rc"),16,6,120,40);glUniform1i(glGetUniformLocation(pImage,"image"),0);glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,wordmark);glBindVertexArray(quadVao);glDrawArrays(GL_TRIANGLES,0,6);glUseProgram(pUI);}else textOut("ARK",22,12,1.55f,.779f,.811f,.838f);
+    if(wordmark&&wordmark!=g_canvasMissing){glUseProgram(pImage);glUniform1i(glGetUniformLocation(pImage,"topDown"),0);glUniform2f(glGetUniformLocation(pImage,"vp"),W,H);glUniform4f(glGetUniformLocation(pImage,"rc"),16,6,120,40);glUniform1i(glGetUniformLocation(pImage,"image"),0);glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,wordmark);glBindVertexArray(quadVao);glDrawArrays(GL_TRIANGLES,0,6);glUseProgram(pUI);}else textOut("ARK",22,12,1.55f,.779f,.811f,.838f);
     overlay(146,12,1,28,0,.12f);
     std::string filename=g_path.substr(g_path.find_last_of("/\\")+1);bool dirty=g_session.revision!=g_savedRevision||g_doc.usage.serial!=g_savedUsageSerial||agentActivitySerial(g_doc)!=g_savedActivitySerial;
     float headerX=164,headerWidth=std::max(1.f,W-460-headerX);auto fitTop=[&](std::string text,float scale,float available){while(!text.empty()&&textWidth(text,scale)>available)text.pop_back();return text;};
@@ -5978,8 +6058,9 @@ static void drawFrame(HDC hdc){
         const auto tokens=fitText("Document: "+assistantUsageLabel(g_assistantUsageDocument),.51f,inner*.48f);const float tokensW=textWidth(tokens,.51f);
         ink(fitText(g_teamMode?"GOAL / DECISION  /  Ctrl+Enter to queue":"MESSAGE  /  Ctrl+Enter to send",.55f,std::max(1.f,inner-tokensW-14)),px+2,labelY+(22-fa.lineH*.55f)*.5f,.55f,th::muted);
         ink(tokens,px+inner-tokensW,labelY+(22-fa.lineH*.51f)*.5f,.51f,th::faint);}
-    tone(px,actionsY,32,32,th::controlRadius,th::raised,1,th::border);icon(730,"Attach an image reference to the next message",px+1,actionsY+1,30);
-    {const float cancelW=76,sendW=72,cancelX=px+inner-cancelW,sendX=cancelX-6-sendW,targetX=px+36,targetW=std::min(184.f,sendX-6-targetX);
+    tone(px,actionsY,32,32,th::controlRadius,th::raised,1,th::border);icon(730,"Attach reference images to the next message",px+1,actionsY+1,30);
+    button("Snapshot",px+36,actionsY,76,734);
+    {const float cancelW=inner<350?60.f:76.f,sendW=inner<350?58.f:72.f,cancelX=px+inner-cancelW,sendX=cancelX-6-sendW,targetX=px+118,targetW=std::min(184.f,sendX-6-targetX);
      button(g_teamMode?(g_teamStarted&&!g_teamSnapshot.cancelled?"Queue":"Start"):(g_chatBusy?"Queue":"Send"),sendX,actionsY,sendW,74,true);button("Cancel",cancelX,actionsY,cancelW,75);
      if(targetW>=48){if(g_teamMode){std::string target="To: "+(g_teamTarget.empty()?std::string(g_teamFocusedWorkflow?"Engineer":"entire team"):g_teamTarget=="all"?std::string("entire team"):g_teamTarget);button(fitText(target,.76f,targetW-12).c_str(),targetX,actionsY,targetW,473);}
          else button("Live MCP",targetX,actionsY,targetW,58);}}
@@ -6141,17 +6222,24 @@ static void drawFrame(HDC hdc){
 }
 
 #include "viewport_capture_059c.inl"
+static Image captureCurrentStudioView(u64 revision,u64 epoch){
+    if(g_busy||!g_uiReady)throw std::runtime_error("Current Studio viewport is unavailable while a document operation is applying");
+    auto checkDisplay=[]{
+        if(!g_displayMeshAllocationError078.empty())throw std::runtime_error("DISPLAY_INCOMPLETE: "+g_displayMeshAllocationError078);
+    };
+    checkDisplay();
+    Image pixels=captureGpuScene059();
+    checkDisplay();
+    if(revision!=g_session.revision||epoch!=g_documentEpoch)throw std::runtime_error("Document changed during viewport capture; inspect current revision and retry");
+    return pixels;
+}
 static arkjson::Value captureViewportSnapshot(const arkjson::Value& args){
     using V=arkjson::Value;
     try{
-        if(!g_displayMeshAllocationError078.empty())throw std::runtime_error("DISPLAY_INCOMPLETE: "+g_displayMeshAllocationError078);
         if(args.find("camera"))throw std::runtime_error("Live viewport capture uses the current Studio camera; omit camera or choose snapshot view custom");
-        if(g_busy||!g_uiReady)throw std::runtime_error("Current Studio viewport is unavailable while a document operation is applying");
         const u64 revision=g_session.revision,epoch=g_documentEpoch;if(auto* expected=args.find("expected_revision");expected&&(expected->t!=V::Num||expected->num!=(double)revision))throw std::runtime_error("Viewport snapshot revision conflict; read current doc_info before retrying");
         const bool minimized=IsIconic(g_window)!=0,collapsed=viewW<2||viewH<2;
-        const Image shot=captureGpuScene059();
-        if(!g_displayMeshAllocationError078.empty())throw std::runtime_error("DISPLAY_INCOMPLETE: "+g_displayMeshAllocationError078);
-        if(revision!=g_session.revision||epoch!=g_documentEpoch)throw std::runtime_error("Document changed during viewport capture; inspect current revision and retry");
+        const Image shot=captureCurrentStudioView(revision,epoch);
         V evidence=V::makeObj(),state=V::makeObj(),camera=V::makeObj(),selected=V::makeObj();evidence.set("revision",V::makeNum((double)revision));evidence.set("current_revision",V::makeNum((double)g_session.revision));evidence.set("view",V::makeStr("viewport"));evidence.set("capture_source",V::makeStr("studio_viewport"));evidence.set("width",V::makeNum(shot.w));evidence.set("height",V::makeNum(shot.h));
         evidence.set("render_target",V::makeStr("offscreen_gpu_framebuffer"));evidence.set("window_minimized",V::makeBool(minimized));evidence.set("viewport_collapsed",V::makeBool(collapsed));evidence.set("ui_chrome_included",V::makeBool(false));evidence.set("window_state_preserved",V::makeBool(true));
         auto vector=[](Vec3 point){V value=V::makeArr();value.arr={V::makeNum(point.x),V::makeNum(point.y),V::makeNum(point.z)};return value;};camera.set("eye_mm",vector(camEye()));camera.set("target_mm",vector(target));camera.set("yaw_rad",V::makeNum(yaw));camera.set("pitch_rad",V::makeNum(pitch));camera.set("roll_rad",V::makeNum(cameraRoll));camera.set("distance_mm",V::makeNum(dist));camera.set("orthographic",V::makeBool(g_cameraOrtho));state.set("camera",camera);state.set("drafts",V::makeBool(g_sketchDrawing.active||!g_draftViews.empty()));state.set("sketches_visible",V::makeBool(g_showSketches));state.set("active_sketch",V::makeStr(g_activeSketch));state.set("flat_display",V::makeBool(g_allSheetsFlat));state.set("stock_display",V::makeBool(g_stockMode));state.set("surface_edit_derived_preview",V::makeBool(surfaceEditActive059()));state.set("rubber_derived_preview",V::makeBool(g_rubber059.active));state.set("rubber_time_s",V::makeNum(g_rubber059.time));state.set("inertial_derived_preview",V::makeBool(g_inertial056.active));state.set("rendering",V::makeStr(wireframe?"wireframe":g_showEdges?"shaded_edges":"shaded"));evidence.set("view_state",state);
@@ -6341,6 +6429,7 @@ static void drawContextEntry(HDC dc,RECT bounds,const ContextEntry& entry,bool s
     auto line=[&](int ax,int ay,int bx,int by){MoveToEx(dc,x+ax,y+ay,nullptr);LineTo(dc,x+bx,y+by);};
     if(entry.action==161||entry.action==162||entry.action==64){line(-7,6,5,-6);line(-7,6,-8,9);line(-8,9,-4,8);line(3,-7,7,-3);}
     else if(entry.action==340||entry.action==341||entry.action==68||entry.action==72||entry.action==344){Ellipse(dc,x-9,y-5,x+10,y+6);Ellipse(dc,x-3,y-3,x+4,y+4);if(entry.action==340||entry.action==68||entry.action==72)line(-9,-8,9,8);}
+    else if(entry.action==734){Rectangle(dc,x-10,y-6,x+11,y+8);Ellipse(dc,x-4,y-4,x+5,y+5);line(-6,-7,-3,-10);line(-3,-10,3,-10);line(3,-10,6,-7);}
     else if(entry.action==342||entry.action==343||entry.action==20){Rectangle(dc,x-7,y-7,x+8,y+8);line(-10,0,10,0);line(0,-10,0,10);}
     else if(entry.action==187){Ellipse(dc,x-9,y-8,x+2,y+3);Ellipse(dc,x-1,y-3,x+10,y+8);}
     else if(entry.action==29){line(-9,0,9,0);line(0,-9,0,9);line(6,-3,9,0);line(9,0,6,3);line(-3,-6,0,-9);line(0,-9,3,-6);}
@@ -6367,6 +6456,7 @@ static bool captureContextMenu(const std::vector<ContextEntry>& entries,const st
 }
 static std::vector<ContextEntry> contextEntries(ContextTarget target,int body=-1){
     std::vector<ContextEntry> menu;
+    const ContextEntry snapshot{734,"Snapshot for agent",true,"Attach the current viewport to your next message"};
     if(target==ContextTarget::Body&&body>=0&&(size_t)body<g_bodyIds.size()){
         const Feature* feature=g_doc.find(g_bodyIds[(size_t)body]);bool hidden=(size_t)body<g_hiddenBodies.size()&&g_hiddenBodies[(size_t)body];
         bool editable=feature&&feature->type!=FeatureType::SourceTube&&feature->type!=FeatureType::SourceSheet&&feature->type!=FeatureType::MeshBody;
@@ -6378,6 +6468,7 @@ static std::vector<ContextEntry> contextEntries(ContextTarget target,int body=-1
         if(feature&&featureManufacturingLineage(g_doc,*feature).editableSheet){menu.push_back({394,"Add return hem",true,"Open round 180 degree edge return"});menu.push_back({397,"Add circular emboss",true,"Exact constant-thickness form"});}
         if(feature&&feature->type==FeatureType::Suspension)menu.push_back({384,"Spring unit controls",true,"Suspension travel, steering and wheel spin"});
         menu.push_back({0,"Agent"});menu.push_back({565,"Ask Agent about this object",feature!=nullptr,"Attach this occurrence to your next explicit message"});
+        menu.push_back(snapshot);
         menu.push_back({0,"Inspect"});menu.push_back({401,"Properties"});menu.push_back({188,"Mass / center of gravity"});menu.push_back({171,"Select named faces",true,"Persistent native surface names"});menu.push_back({172,"Select named edges",true,"Persistent native edge names"});
         menu.push_back({0,"View"});menu.push_back({hidden?341:340,hidden?"Show":"Hide",true,"Display only"});
         menu.push_back({342,"Spotlight",true,"Isolate selected instances / Ctrl-click adds parts"});menu.push_back({343,"Exit Spotlight",g_spotlightActive,"Restore the previous display set"});
@@ -6393,6 +6484,7 @@ static std::vector<ContextEntry> contextEntries(ContextTarget target,int body=-1
     }else{
         menu={{343,"Restore Spotlight",g_spotlightActive},{344,"Show all bodies"},{0,""},{20,"Fit document"},{24,"Isometric view"},{23,"Top view"},{56,"Graphics settings"}};
     }
+    if(target!=ContextTarget::Body){menu.push_back({0,"Agent"});menu.push_back(snapshot);}
     return menu;
 }
 static ContextTarget contextTargetAt(int mx,int my,int& body){
@@ -6439,6 +6531,14 @@ static LRESULT CALLBACK wndProc(HWND hw,UINT m,WPARAM wp,LPARAM lp){
         case WM_ARK_TOOL:{auto* request=(UiToolRequest*)lp;if(request->tool=="doc_apply"){request->objectEpoch=g_objectDocumentEpoch;request->queuedEpoch=true;if(!request->args.find("expected_revision"))request->args.set("expected_revision",arkjson::Value::makeNum((double)g_session.revision));}g_toolQueue.emplace_back(request);return 0;}
         case WM_ARK_EXACT:return 0; // wake only; deliveries drain from the main loop
         case WM_ARK_CHAT:{std::unique_ptr<UiChatEvent> event((UiChatEvent*)lp);
+            if(!event->completedTool.empty()){
+                if(event->epoch==g_documentEpoch){
+                    const std::string started="Tool: "+event->completedTool;
+                    auto row=std::find_if(g_chatLog.rbegin(),g_chatLog.rend(),[&](const auto& row){return row.first=="Action"&&row.second==started;});
+                    if(row!=g_chatLog.rend())row->second=event->text;
+                }
+                return 0;
+            }
             if(event->final&&event->error&&event->epoch==g_documentEpoch&&event->route)claudeReconnect071::observeError(event->text,*event->route);
             if(event->final&&!event->error&&event->epoch==g_documentEpoch&&event->route&&event->hasUsage)claudeReconnect071::observeSuccess(*event->route,event->usage);
             // Provider-returned readable reasoning: shown with the reply, never logged as a message.
@@ -7037,6 +7137,8 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR cmdLine,int){
         g_status="Suspension UI checks passed / colored named parts / jounce / steering rack / wheel spin / unchanged revision";
     }
     if(contextUiTest){
+        // The playback checks below exercise the full-width navigation controls.
+        g_assistantDockOpen=false;layout();
         using V=arkjson::Value;V fresh=V::makeObj();fresh.set("expected_revision",V::makeNum((double)g_session.revision));runTool("doc_new",fresh);if(g_error)return 251;
         V batch;if(!arkjson::parse(R"({"commands":[{"op":"feature.add","type":"native_solid","name":"Front block","p":{"op":"box","width":"40","depth":"30","height":"20"}},{"op":"feature.add","type":"native_solid","name":"Rear block","p":{"op":"box","width":"24","depth":"24","height":"18"}}]})",batch))return 252;
         runTool("doc_apply",batch);if(g_error||g_bodyIds.size()!=2)return 253;u64 revision=g_session.revision;

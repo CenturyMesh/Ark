@@ -65,6 +65,31 @@
         g_bakedMotions.time=1;g_bakedMotions.shownFrame=~size_t(0);applyBakedMotionFrame();const auto lowMesh=g_cpuMeshes[part].pos;frameScene();capture(".cable-low.png");
         g_bakedMotions.time=3;g_bakedMotions.shownFrame=~size_t(0);applyBakedMotionFrame();check(g_cpuMeshes[part].pos!=lowMesh,"Cable display remained frozen");frameScene();capture(".cable-high.png");
         press(45002);check(g_cpuMeshes[part].pos==originalMesh,"Stop did not restore cable mesh");check(documentToJson(g_doc)==cableSource&&g_session.revision==cableRevision,"Flexible display edited source geometry");
+        const size_t carriage=display((u64)findDragChain(g_doc,"Camera cable chain")->find("moving")->find("occurrence")->num);
+        for(size_t i=0;i<g_hiddenBodies.size();++i)g_hiddenBodies[i]=i!=carriage&&g_instanceIds[i]!=cableNode;
+        rebuildDisplayBounds();setOrbitView(.6,-.45,true,nullptr);frameScene();draw();
+        auto dragCarriage=[&]{
+            const auto centre=g_reports[g_instancePart[carriage]].bounds.transformed(g_instanceWorld[carriage]).center();
+            float x,y,dx,dy;
+            check(projectScreen(centre,x,y),"Carriage is outside the view");
+            beginComponentDrag((int)std::lround(x),(int)std::lround(y),true);
+            check(g_componentMove.driver==g_instanceIds[carriage],"Direct drag picked the wrong component");
+            check(projectScreen(g_componentMove.pointerWorld+g_componentMove.joint.axis*80,dx,dy),"Carriage drag target is outside the view");
+            moveComponentDrag((int)std::lround(dx),(int)std::lround(dy));
+            check(g_componentCablePreview&&g_cpuMeshes[part].pos!=originalMesh,"Cable stayed frozen during the pointer preview");
+        };
+        dragCarriage();
+        check(g_session.revision==cableRevision,"Preview changed the document");
+        SendMessage(hwnd,WM_KEYDOWN,VK_ESCAPE,0);
+        check(!g_componentCablePreview&&g_cpuMeshes[part].pos==originalMesh&&g_session.revision==cableRevision,"Escape failed to restore the original cable");
+        dragCarriage();capture(".cable-manual-drag.png");
+        SendMessage(hwnd,WM_LBUTTONUP,0,0);
+        check(!g_error&&!g_componentCablePreview&&g_session.revision==cableRevision+1,"Releasing the carriage failed to commit one move");
+        refreshBakedMotions();
+        const auto row=std::find_if(g_bakedMotions.rows.begin(),g_bakedMotions.rows.end(),[](const auto& r){return r.name=="Lift cycle";});
+        check(row!=g_bakedMotions.rows.end()&&!row->stale&&g_bakedMotions.frames.fps==1,"Manual drag left the lift animation stale or changed its frame rate");
+        press(45001);waitCables();check(g_bakedMotions.playing&&motion_cables_view_054b::state.ready,"Play after manual drag did not deform the cable");
+        press(45002);
         std::fprintf(stderr,"Drag chain UI passed: 25 driven link occurrences, baked carriage playback at q=120/345/570 with a static fixed run, rigid carriage end and half-speed loop, link properties\n");
     }catch(const std::exception& error){g_dialogSmoke=0;std::fprintf(stderr,"Drag chain UI failed: %s\n",error.what());return 5001;}
 }
