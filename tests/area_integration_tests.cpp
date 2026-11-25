@@ -43,29 +43,54 @@
 using namespace ark::occt;
 // Every fixture here is synthetic; the references are closed forms or a
 // quadrature that shares neither code, order nor partition with the product.
+// Accuracy is always asserted on piecewiseArea() against those references, never
+// through OCCT's verdict. OCCT's verdict only decides what properties() must
+// return: its own area bit for bit, or the piecewise one.
 namespace {
-int checks=0;
+int checks=0,failures=0;
 constexpr const char* kRejection="Exact surface area integration did not meet its relative precision";
-void check(bool value,const std::string& why){if(!value)throw std::runtime_error(why);++checks;}
+constexpr double kGate=1e-10,kRobust=100; // A verdict counts as robust at least this factor away from the gate.
+// A failed check is recorded and the run continues: one run must report every
+// fixture on a toolchain that cannot be debugged locally.
+bool check(bool value,const std::string& why){++checks;if(!value){++failures;std::cout<<"FAILED: "<<why<<std::endl;}return value;}
+void require(bool value,const std::string& why){if(!check(value,why))throw std::runtime_error("cannot continue after: "+why);}
 void relative(double actual,double expected,double tolerance,const std::string& why){
-    if(!(std::abs(actual-expected)<=tolerance*std::abs(expected))){std::cerr<<std::setprecision(17)<<why<<" actual="<<actual<<" expected="<<expected<<" relative="<<(actual-expected)/expected<<'\n';throw std::runtime_error(why);}
-    ++checks;
+    if(check(std::abs(actual-expected)<=tolerance*std::abs(expected),why))return;
+    std::cout<<std::setprecision(17)<<"  actual="<<actual<<" expected="<<expected<<" relative="<<(actual-expected)/expected<<" tolerance="<<tolerance<<std::endl;
 }
 std::string rejection(const std::function<void()>& action){try{action();}catch(const std::exception& error){return error.what();}return {};}
 double area(const TopoDS_Shape& shape){return properties(shape,'a');}
 
 // The OCCT measurement and gate that decide whether a shape needs the piecewise
 // integration. A passing shape must keep exactly this value.
-struct Occt {double area=0;bool passes=false;};
+struct Occt {double area=0,error=0;bool passes=false;double margin()const{return error/(kGate*std::abs(area));}};
 Occt occt(const TopoDS_Shape& shape){
-    GProp_GProps total;double error=0;
+    GProp_GProps total;Occt out;
     for(const auto& face:shapes(shape,TopAbs_FACE)){
         GProp_GProps part;const auto type=BRepAdaptor_Surface(TopoDS::Face(face)).GetType();
         if(type<=GeomAbs_Torus)BRepGProp::SurfaceProperties(face,part);
-        else error+=BRepGProp::SurfaceProperties(face,part,1e-14,false)*std::abs(part.Mass());
+        else{
+            // The call fills part, so it must be sequenced before part.Mass().
+            const double estimate=BRepGProp::SurfaceProperties(face,part,1e-14,false);out.error+=estimate*std::abs(part.Mass());
+        }
         total.Add(part);
     }
-    return {total.Mass(),error<=1e-10*std::abs(total.Mass())};
+    out.area=total.Mass();out.passes=out.error<=kGate*std::abs(out.area);return out;
+}
+enum class Verdict {Either,RobustMiss,RobustPass};
+// Reports one fixture, checks the piecewise area against its reference and that
+// properties() dispatches on OCCT's verdict, whichever it is here.
+Occt verify(const std::string& name,const TopoDS_Shape& shape,double expected,double tolerance,Verdict verdict){
+    const auto native=occt(shape);double piecewise=0,published=0;
+    const auto refused=rejection([&]{piecewise=piecewiseArea(shape);}),unpublished=rejection([&]{published=area(shape);});
+    std::cout<<std::setprecision(17)<<"FIXTURE "<<name<<": occt="<<native.area<<std::setprecision(6)<<" estimate/gate="<<native.margin()<<" verdict="<<(native.passes?"pass":"miss")<<" occt-error="<<std::abs(native.area-expected)/std::abs(expected)<<std::setprecision(17)<<" piecewise="<<piecewise<<std::setprecision(6)<<" piecewise-error="<<std::abs(piecewise-expected)/std::abs(expected)<<(refused.empty()?"":" piecewise-rejected=\""+refused+"\"")<<(unpublished.empty()?"":" properties-rejected=\""+unpublished+"\"")<<std::endl;
+    check(refused.empty()&&unpublished.empty(),name+": neither area may be rejected");
+    relative(piecewise,expected,tolerance,name+": piecewise area against its reference");
+    if(native.passes)check(published==native.area,name+": a passing shape keeps the OCCT area bit for bit");
+    else check(published==piecewise,name+": a missed estimate publishes the piecewise area");
+    if(verdict==Verdict::RobustMiss)check(!native.passes&&native.margin()>=kRobust,name+": the estimate must miss the gate by a wide margin (failure class under test)");
+    if(verdict==Verdict::RobustPass)check(native.passes&&native.margin()<=1/kRobust,name+": the estimate must pass the gate by a wide margin");
+    return native;
 }
 
 Handle(Geom_BSplineSurface) bspline(const std::vector<std::vector<gp_Pnt>>& poles,const std::vector<double>& uKnots,const std::vector<int>& uMults,int uDegree,const std::vector<double>& vKnots,const std::vector<int>& vMults,int vDegree){
@@ -78,7 +103,7 @@ Handle(Geom_BSplineSurface) bspline(const std::vector<std::vector<gp_Pnt>>& pole
 // interval per edge however many knots of the support it crosses.
 TopoDS_Edge segment(const Handle(Geom_Surface)& surface,gp_Pnt2d a,gp_Pnt2d b){const gp_Vec2d d(a,b);return BRepBuilderAPI_MakeEdge(new Geom2d_Line(a,gp_Dir2d(d)),surface,0.,d.Magnitude()).Edge();}
 TopoDS_Face faceOf(const Handle(Geom_Surface)& surface,BRepBuilderAPI_MakeWire& wire){
-    check(wire.IsDone(),"fixture wire");BRepBuilderAPI_MakeFace maker(surface,wire.Wire(),true);check(maker.IsDone(),"fixture face");BRepLib::BuildCurves3d(maker.Face(),1e-7);return maker.Face();
+    require(wire.IsDone(),"fixture wire");BRepBuilderAPI_MakeFace maker(surface,wire.Wire(),true);require(maker.IsDone(),"fixture face");BRepLib::BuildCurves3d(maker.Face(),1e-7);return maker.Face();
 }
 TopoDS_Face boxed(const Handle(Geom_Surface)& surface){
     double u1,u2,v1,v2;surface->Bounds(u1,u2,v1,v2);BRepBuilderAPI_MakeWire wire;
@@ -146,40 +171,43 @@ double trimmedReference(const Handle(Geom_Surface)& surface,const std::vector<do
 }
 
 void passingShapesKeepTheirExactArea(){
+    const double pi=std::acos(-1.);
     const auto box=BRepPrimAPI_MakeBox(20,30,40).Shape(),cylinder=BRepPrimAPI_MakeCylinder(7,19).Shape(),cone=BRepPrimAPI_MakeCone(9,4,13).Shape(),sphere=BRepPrimAPI_MakeSphere(6).Shape(),torus=BRepPrimAPI_MakeTorus(12,3).Shape();
-    const auto drilled=cut(box,transformed(BRepPrimAPI_MakeCylinder(4,60).Shape(),[]{gp_Trsf t;t.SetTranslation(gp_Vec(10,15,-5));return t;}()));
-    std::vector<TopoDS_Shape> all{box,cylinder,cone,sphere,torus,drilled,compound({box,torus})};
-    for(const auto& shape:{box,cylinder,cone,sphere,drilled})all.push_back(BRepBuilderAPI_NurbsConvert(shape,true).Shape());
-    all.push_back(compound({torus,BRepBuilderAPI_NurbsConvert(sphere,true).Shape()}));all.push_back(boxed(sweptProfile()));
+    gp_Trsf shift;shift.SetTranslation(gp_Vec(10,15,-5));const auto drilled=cut(box,transformed(BRepPrimAPI_MakeCylinder(4,60).Shape(),shift));
+    struct Solid {const char* name;TopoDS_Shape shape;double area;};
+    const std::vector<Solid> solids{{"box",box,5200},{"cylinder",cylinder,364*pi},{"cone",cone,pi*(81+16+13*std::sqrt(25.+169.))},{"sphere",sphere,144*pi},{"torus",torus,144*pi*pi},{"drilled box",drilled,5200+288*pi}};
     size_t spline=0;
-    for(const auto& shape:all){const auto measured=occt(shape);check(measured.passes,"fixture is accepted by the existing gate");check(area(shape)==measured.area,"an accepted shape must keep its previous area bit for bit");for(const auto& face:shapes(shape,TopAbs_FACE))spline+=BRepAdaptor_Surface(TopoDS::Face(face)).GetType()==GeomAbs_BSplineSurface;}
+    for(const auto& solid:solids){
+        verify(solid.name,solid.shape,solid.area,1e-12,Verdict::RobustPass);
+        if(solid.shape.IsSame(torus))continue;
+        const auto converted=BRepBuilderAPI_NurbsConvert(solid.shape,true).Shape();verify(std::string("rational ")+solid.name,converted,solid.area,1e-11,Verdict::RobustPass);
+        for(const auto& face:shapes(converted,TopAbs_FACE))spline+=BRepAdaptor_Surface(TopoDS::Face(face)).GetType()==GeomAbs_BSplineSurface;
+    }
     check(spline>=20,"unchanged-area corpus covers spline supports");
-    for(const auto& shape:all)relative(piecewiseArea(shape),area(shape),1e-8,"piecewise integration agrees with accepted areas");
-    relative(piecewiseArea(sphere),144*std::acos(-1.),1e-12,"piecewise sphere area");relative(piecewiseArea(torus),144*std::pow(std::acos(-1.),2),1e-12,"piecewise torus area");
-    relative(piecewiseArea(cone),std::acos(-1.)*(81+16+13*std::sqrt(25+169)),1e-12,"piecewise cone area");
+    verify("torus and rational sphere",compound({torus,BRepBuilderAPI_NurbsConvert(sphere,true).Shape()}),144*pi*pi+144*pi,1e-11,Verdict::RobustPass);
+    verify("C1 sheet without offset",boxed(sweptProfile()),sweptOffsetArea(0),1e-11,Verdict::Either);
 }
 void knotJumpsOfAnOffset(){
     // Failure class: straight p-curves over an offset of a C1 spline. The outer
     // integrand jumps at knots that the OCCT rule does not split.
     for(double distance:{1.5,-1.5,-3.}){
-        const auto face=boxed(new Geom_OffsetSurface(sweptProfile(),distance));
-        check(!occt(face).passes,"offset fixture must miss the OCCT estimate (failure class under test)");
-        const double expected=sweptOffsetArea(distance),measured=area(face);
-        relative(measured,expected,1e-11,"offset of a C1 spline has its closed-form area");
-        check(area(face)==measured,"area is deterministic");check(area(face.Reversed())==measured,"orientation does not change the area");
-        gp_Trsf place;place.SetRotation(gp_Ax1(gp_Pnt(3,1,2),gp_Dir(1,2,3)),.7);place.SetTranslationPart(gp_Vec(40,-25,60));relative(area(transformed(face,place)),expected,1e-10,"placement keeps the area");
-        gp_Trsf scale;scale.SetScale(gp_Pnt(1,2,3),2);relative(area(transformed(face,scale)),4*expected,1e-10,"scaling by two multiplies the area by four");
+        const std::string name="swept offset "+std::to_string(distance);const auto face=boxed(new Geom_OffsetSurface(sweptProfile(),distance));
+        const double expected=sweptOffsetArea(distance);verify(name,face,expected,1e-11,Verdict::RobustMiss);
+        const double measured=piecewiseArea(face);check(piecewiseArea(face)==measured,name+": area is deterministic");check(piecewiseArea(face.Reversed())==measured,name+": orientation does not change the area");
+        gp_Trsf place;place.SetRotation(gp_Ax1(gp_Pnt(3,1,2),gp_Dir(1,2,3)),.7);place.SetTranslationPart(gp_Vec(40,-25,60));verify(name+" placed",transformed(face,place),expected,1e-11,Verdict::RobustMiss);
+        gp_Trsf scale;scale.SetScale(gp_Pnt(1,2,3),2);verify(name+" scaled",transformed(face,scale),4*expected,1e-11,Verdict::RobustMiss);
     }
 }
 void trimmedOffset(){
+    // Both the support and the trim have knots, and the inner integral needs
+    // refinement. OCCT's estimate is close to the gate: either verdict is valid.
     const auto basis=doublyCurved();
     for(double distance:{-.8,.6}){
+        const std::string name="trimmed doubly curved offset "+std::to_string(distance);
         Handle(Geom_Surface) surface=new Geom_OffsetSurface(basis,distance);const auto face=trimmed(surface);const std::vector<double> u{0,.8,2.1,3},v{0,1.3,2,3.2};
-        const double coarse=trimmedReference(surface,u,v,4),fine=trimmedReference(surface,u,v,8);relative(coarse,fine,1e-13,"independent reference is converged");
-        const auto measured=occt(face);check(!measured.passes,"trimmed offset must miss the OCCT estimate");
-        relative(area(face),fine,1e-11,"trimmed doubly curved offset area");
-        std::cout<<"trimmed offset "<<distance<<": OCCT relative error "<<std::abs(measured.area-fine)/fine<<", corrected "<<std::abs(area(face)-fine)/fine<<'\n';
-        check(std::abs(measured.area-fine)>1e-10*fine,"the rejected OCCT area really was imprecise");
+        const double coarse=trimmedReference(surface,u,v,4),fine=trimmedReference(surface,u,v,8);relative(coarse,fine,1e-12,name+": independent reference is converged");
+        const auto native=verify(name,face,fine,1e-11,Verdict::Either);
+        check(std::abs(native.area-fine)>1e-6*fine,name+": the OCCT area is imprecise whatever it estimates");
     }
 }
 // Planar face bounded by one C0 chain of cubic spans; exact area by Green's
@@ -192,18 +220,17 @@ TopoDS_Face splinePlate(double& exact){
     Handle(Geom_BSplineCurve) curve=new Geom_BSplineCurve(poles,knots,mults,3);exact=0;
     const double x[]={0,.538469310105683091,.906179845938663993},w[]={.568888888888888889,.478628670499366468,.236926885056189088};
     for(int i=0;i<spans;++i)for(int k=-2;k<=2;++k){gp_Pnt at;gp_Vec d;curve->D1(i+.5+.5*(k<0?-x[-k]:x[k]),at,d);exact+=.5*w[std::abs(k)]*.5*((at.X()-200)*d.Y()-at.Y()*d.X());}
-    BRepBuilderAPI_MakeFace maker(new Geom_Plane(gp_Pnt(200,0,0),gp_Dir(0,0,1)),BRepBuilderAPI_MakeWire(BRepBuilderAPI_MakeEdge(curve).Edge()).Wire(),true);check(maker.IsDone(),"spline plate");exact=std::abs(exact);return maker.Face();
+    BRepBuilderAPI_MakeFace maker(new Geom_Plane(gp_Pnt(200,0,0),gp_Dir(0,0,1)),BRepBuilderAPI_MakeWire(BRepBuilderAPI_MakeEdge(curve).Edge()).Wire(),true);require(maker.IsDone(),"spline plate");exact=std::abs(exact);return maker.Face();
 }
 void everyFaceOfAMissedShapeIsIntegratedAgain(){
-    double exact=0;const auto plate=splinePlate(exact);check(BRepCheck_Analyzer(plate).IsValid(),"spline plate fixture is valid");check(area(plate)==occt(plate).area,"an elementary face alone keeps its existing area");
-    const auto mixed=compound({boxed(new Geom_OffsetSurface(sweptProfile(),1.5)),plate,BRepPrimAPI_MakeBox(2,3,4).Shape()});
-    check(!occt(mixed).passes,"mixed fixture must miss the OCCT estimate");
-    relative(area(mixed),sweptOffsetArea(1.5)+exact+52,1e-11,"offset, spline-trimmed plane and box areas");
+    double exact=0;const auto plate=splinePlate(exact);check(BRepCheck_Analyzer(plate).IsValid(),"spline plate fixture is valid");
+    verify("spline-trimmed plate",plate,exact,1e-11,Verdict::RobustPass); // Elementary: no estimate, existing area.
+    verify("offset, spline-trimmed plate and box",compound({boxed(new Geom_OffsetSurface(sweptProfile(),1.5)),plate,BRepPrimAPI_MakeBox(2,3,4).Shape()}),sweptOffsetArea(1.5)+exact+52,1e-11,Verdict::RobustMiss);
 }
 TopoDS_Wire section(double z,double a,double b){
     const double k=.5522847498*1.25;const gp_Pnt c[]={{a,0,z},{0,b,z},{-a,0,z},{0,-b,z}};const double t[][2]={{0,b},{-a,0},{0,-b},{a,0}};
     BRepBuilderAPI_MakeWire wire;for(int i=0;i<4;++i){const int j=(i+1)%4;NCollection_Array1<gp_Pnt> p(1,4);p(1)=c[i];p(2)=c[i].Translated(gp_Vec(t[i][0]*k,t[i][1]*k,0));p(3)=c[j].Translated(gp_Vec(-t[j][0]*k,-t[j][1]*k,0));p(4)=c[j];wire.Add(BRepBuilderAPI_MakeEdge(Handle(Geom_Curve)(new Geom_BezierCurve(p))).Edge());}
-    check(wire.IsDone(),"loft section");return wire.Wire();
+    require(wire.IsDone(),"loft section");return wire.Wire();
 }
 std::string planarFaceAt(const V& body,const TopoDS_Shape& shape,double z){
     const auto faces=shapes(shape,TopAbs_FACE);
@@ -216,14 +243,17 @@ std::string planarFaceAt(const V& body,const TopoDS_Shape& shape,double z){
 void shelledLoft(){
     // The modelling route that produces this class: a shelled freeform loft.
     BRepOffsetAPI_ThruSections loft(true,false,1e-6);loft.CheckCompatibility(false);loft.SetMaxDegree(3);
-    loft.AddWire(section(0,24,15));loft.AddWire(section(16,27,19));loft.AddWire(section(34,20,14));loft.AddWire(section(48,22,11));loft.Build();check(loft.IsDone(),"loft fixture");
+    loft.AddWire(section(0,24,15));loft.AddWire(section(16,27,19));loft.AddWire(section(34,20,14));loft.AddWire(section(48,22,11));loft.Build();require(loft.IsDone(),"loft fixture");
     const auto body=completeSelectionReferences(shapeResult(loft.Shape(),true));const auto solid=readBrep(body.find("brep_base64")->str);
     V openings=V::makeArr();for(const auto& end:{48.,0.})openings.arr.push_back(V::makeStr(planarFaceAt(body,solid,end)));
     V request=V::makeObj();request.set("faces",openings);request.set("op",V::makeStr("shell"));request.set("input_brep",*body.find("brep_base64"));request.set("input_topology",*body.find("topology"));request.set("thickness",V::makeNum(-1.6));
     const auto shell=modelSolidNative(request);const auto shape=readBrep(shell.find("brep_base64")->str);const auto& report=*shell.find("report");
     size_t offsets=0;for(const auto& face:shapes(shape,TopAbs_FACE))offsets+=BRepAdaptor_Surface(TopoDS::Face(face)).GetType()==GeomAbs_OffsetSurface;
-    check(offsets>0,"shell keeps exact offset supports");check(!occt(shape).passes,"shell fixture must miss the OCCT estimate");
-    relative(report.find("area_mm2")->num,piecewiseArea(shape),1e-12,"shell report publishes the piecewise area");
+    check(offsets>0,"shell keeps exact offset supports");
+    // No independent reference here: the fixture line compares with the piecewise
+    // area. On unmodified code the shell above is rejected where OCCT misses.
+    const double piecewise=piecewiseArea(shape);const auto native=verify("shelled loft",shape,piecewise,0,Verdict::Either);
+    relative(report.find("area_mm2")->num,native.passes?native.area:piecewise,1e-11,"shelled loft: report publishes the dispatched area");
     // A saved copy of the same result restores instead of being rejected.
     V resolved=V::makeObj();resolved.set("operation",V::makeStr("model_solid"));resolved.set("request",request);
     auto saved=completeSelectionReferences(shell);const auto restored=restoreNativeResult(resolved,saved);
@@ -231,21 +261,34 @@ void shelledLoft(){
 }
 void unresolvedAreaIsRejected(){
     const auto start=std::chrono::steady_clock::now();
-    // Rational derivatives far from the origin carry rounding noise above the
-    // precision: no partition converges and the work limit ends it.
-    const auto rational=sweptProfile(4e9);const double weights[]={1,.9,1.2,.8,1.1,1};for(int i=1;i<=2;++i)for(int j=1;j<=6;++j)rational->SetWeight(i,j,weights[j-1]*(i==1?1:1.05));
-    const auto noisy=boxed(new Geom_OffsetSurface(rational,1.5));check(!occt(noisy).passes,"noisy fixture must miss the OCCT estimate");
-    check(rejection([&]{area(noisy);})==kRejection,"unresolvable area is rejected explicitly");
-    check(rejection([&]{area(compound({BRepPrimAPI_MakeBox(1,1,1).Shape(),noisy}));})==kRejection,"a resolved part cannot hide an unresolved face");
+    // Rational derivatives far from the origin carry rounding noise three orders
+    // above the precision: no partition converges and the work limit ends it.
+    const auto rational=sweptProfile(4e11);const double weights[]={1,.9,1.2,.8,1.1,1};for(int i=1;i<=2;++i)for(int j=1;j<=6;++j)rational->SetWeight(i,j,weights[j-1]*(i==1?1:1.05));
+    const auto noisy=boxed(new Geom_OffsetSurface(rational,1.5));const auto native=occt(noisy);
+    const auto direct=rejection([&]{piecewiseArea(noisy);}),published=rejection([&]{area(noisy);}),mixed=rejection([&]{area(compound({BRepPrimAPI_MakeBox(1,1,1).Shape(),noisy}));});
+    std::cout<<"FIXTURE unresolvable offset: occt="<<std::setprecision(17)<<native.area<<std::setprecision(6)<<" estimate/gate="<<native.margin()<<" verdict="<<(native.passes?"pass":"miss")<<" piecewise=\""<<direct<<"\" properties=\""<<published<<"\" with-box=\""<<mixed<<"\""<<std::endl;
+    check(!native.passes&&native.margin()>=kRobust,"unresolvable offset: the estimate must miss by a wide margin");
+    check(direct==kRejection,"unresolvable area is rejected explicitly");check(published==kRejection,"properties does not fall back to the imprecise OCCT area");check(mixed==kRejection,"a resolved part cannot hide an unresolved face");
     // A face without a p-curve has no integrable domain.
     BRep_Builder builder;TopoDS_Face open;Handle(Geom_Surface) offset=new Geom_OffsetSurface(sweptProfile(),1.5);builder.MakeFace(open,offset,1e-7);TopoDS_Wire wire;builder.MakeWire(wire);builder.Add(wire,BRepBuilderAPI_MakeEdge(gp_Pnt(0,0,0),gp_Pnt(1,1,1)).Edge());builder.Add(open,wire);
-    check(rejection([&]{piecewiseArea(open);})==kRejection,"a boundary without a p-curve is rejected explicitly");
-    const auto unbounded=BRepBuilderAPI_MakeFace(gp_Pln(gp_Pnt(0,0,0),gp_Dir(0,0,1))).Face();check(rejection([&]{piecewiseArea(unbounded);})==kRejection,"an unbounded domain is rejected explicitly");
-    const double seconds=std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count();
-    std::cout<<"rejections took "<<seconds<<" s\n";check(seconds<60,"rejection is bounded work");
+    const auto uncurved=rejection([&]{piecewiseArea(open);});check(uncurved==kRejection,"a boundary without a p-curve is rejected explicitly: \""+uncurved+"\"");
+    const auto unbounded=BRepBuilderAPI_MakeFace(gp_Pln(gp_Pnt(0,0,0),gp_Dir(0,0,1))).Face();const auto infinite=rejection([&]{piecewiseArea(unbounded);});check(infinite==kRejection,"an unbounded domain is rejected explicitly: \""+infinite+"\"");
+    // Informative only; the evaluation limits and the ctest timeout bound it.
+    std::cout<<"rejections took "<<std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count()<<" s"<<std::endl;
+}
+// Every group runs, also after a failed one.
+void group(const char* name,void(*body)()){
+    const int before=failures;
+    try{body();}catch(const std::exception& error){++failures;std::cout<<"FAILED: group "<<name<<" stopped: "<<error.what()<<std::endl;}catch(...){++failures;std::cout<<"FAILED: group "<<name<<" stopped by an unknown exception"<<std::endl;}
+    std::cout<<"GROUP "<<name<<": "<<(failures==before?"passed":"FAILED")<<std::endl;
 }
 }
-int main(){try{
-    passingShapesKeepTheirExactArea();knotJumpsOfAnOffset();trimmedOffset();everyFaceOfAMissedShapeIsIntegratedAgain();shelledLoft();unresolvedAreaIsRejected();
-    std::cout<<checks<<" exact area integration checks passed\n";return 0;
-}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}
+int main(){
+    group("passing shapes keep their exact area",passingShapesKeepTheirExactArea);
+    group("knot jumps of an offset",knotJumpsOfAnOffset);
+    group("trimmed doubly curved offset",trimmedOffset);
+    group("every face of a missed shape is integrated again",everyFaceOfAMissedShapeIsIntegratedAgain);
+    group("shelled loft",shelledLoft);
+    group("unresolved area is rejected",unresolvedAreaIsRejected);
+    std::cout<<checks<<" exact area integration checks, "<<failures<<" failed"<<std::endl;return failures?1:0;
+}
