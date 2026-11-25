@@ -36,11 +36,20 @@
 #include <BRepAdaptor_Curve2d.hxx>
 #include <GCPnts_QuasiUniformDeflection.hxx>
 #include <GeomAbs_CurveType.hxx>
+#include <NCollection_Array1.hxx>
+#include <Precision.hxx>
+#include <TopoDS_Edge.hxx>
+#include <TopoDS_Face.hxx>
+#include <gp_Pnt2d.hxx>
+#include <gp_Vec2d.hxx>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
+#include <vector>
 #include <cstdint>
 #include <algorithm>
+#include <limits>
+#include <memory>
 #include <set>
 #include <map>
 #include <chrono>
@@ -210,6 +219,31 @@ void integrateVolume(const TopoDS_Shape& shape,GProp_GProps& props,bool centroid
 void volumeProperties(const TopoDS_Shape& shape,GProp_GProps& props,bool moments){integrateVolume(shape,props,moments,moments);}
 void volumeCentroidProperties(const TopoDS_Shape& shape,GProp_GProps& props){integrateVolume(shape,props,true,false);}
 
+namespace {
+#include "face_area_quadrature.inl"
+constexpr double kAreaRelativePrecision=1e-10;
+}
+// A missed BRepGProp estimate says nothing about the other faces either: it
+// omits the inner integral everywhere, and fixed Gauss on elementary faces has
+// none. Every face is integrated again and the unchanged requirement is checked
+// against the summed error estimates of these integrals.
+double piecewiseArea(const TopoDS_Shape& shape){
+    NativeProfileScope profile("area.piecewise");
+    constexpr long long faceEvaluations=8000000,shapeEvaluations=32000000,perFace=250000; // Deterministic work limits.
+    std::vector<double> scales;double scale=0,total=0,error=0;
+    for(TopExp_Explorer face(shape,TopAbs_FACE);face.More();face.Next()){GProp_GProps rough;BRepGProp::SurfaceProperties(face.Current(),rough);scales.push_back(std::abs(rough.Mass()));scale+=scales.back();}
+    long long available=shapeEvaluations+perFace*(long long)scales.size();size_t index=0;
+    for(TopExp_Explorer face(shape,TopAbs_FACE);face.More()&&available>0&&std::isfinite(error);face.Next(),++index){
+        // Aim well inside the requirement so that its outcome does not depend
+        // on the compiler's rounding.
+        const double target=.1*kAreaRelativePrecision*(scales[index]+.1*scale/scales.size());
+        long long remaining=std::min(available,faceEvaluations);const long long granted=remaining;
+        const auto area=facearea::Integrator(TopoDS::Face(face.Current()),remaining).area(target);
+        available-=granted-remaining;total+=area.value;error+=area.error;
+    }
+    if(index!=scales.size()||!std::isfinite(total)||!std::isfinite(error)||error>kAreaRelativePrecision*std::abs(total))throw std::runtime_error("Exact surface area integration did not meet its relative precision");
+    return total;
+}
 double properties(const TopoDS_Shape& shape,char kind){
     NativeProfileScope profile(kind=='a'?"areaProperties":kind=='l'?"lengthProperties":"volumeScalar");GProp_GProps props;if(shape.IsNull())return 0;
     if(kind=='a'){
@@ -227,7 +261,7 @@ double properties(const TopoDS_Shape& shape,char kind){
         // OCCT returns the maximum FACE-relative estimate, not the relative
         // error of the summed area. Accumulate absolute errors before applying
         // the unchanged 1e-10 precision requirement to this shape's area.
-        if(!std::isfinite(absoluteError)||absoluteError>1e-10*std::abs(props.Mass()))throw std::runtime_error("Exact surface area integration did not meet its relative precision");
+        if(!std::isfinite(absoluteError)||absoluteError>kAreaRelativePrecision*std::abs(props.Mass()))return piecewiseArea(shape);
     }else if(kind=='l')BRepGProp::LinearProperties(shape,props);else volumeProperties(shape,props,false);return props.Mass();
 }
 std::vector<TopoDS_Shape> shapes(const TopoDS_Shape& shape,TopAbs_ShapeEnum kind){std::vector<TopoDS_Shape> out;for(TopExp_Explorer ex(shape,kind);ex.More();ex.Next())out.push_back(ex.Current());return out;}
