@@ -446,6 +446,8 @@ public static class InstallEngine
             StandardOutputEncoding = ConsoleEncoding(),
             StandardErrorEncoding = ConsoleEncoding(),
         };
+        // Windows PowerShell must resolve its own modules even when Setup was started from PowerShell 7.
+        psi.Environment.Remove("PSModulePath");
         foreach (string a in new[] { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", scriptPath }.Concat(scriptArgs))
             psi.ArgumentList.Add(a);
         output ??= new List<string>();
@@ -577,6 +579,7 @@ public static class InstallEngine
             CreateNoWindow = true,
             Arguments = Shortcuts.LauncherArguments(Paths.Normalize(dir)),
         };
+        psi.Environment.Remove("PSModulePath");
         Log.Info($"opening ARK: {psi.FileName} {psi.Arguments}");
         Process.Start(psi)?.Dispose();
     }
